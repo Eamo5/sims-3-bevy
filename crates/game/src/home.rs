@@ -629,6 +629,10 @@ pub fn move_in(
     });
     let exit = to_world(0.0, -(lot.depth as f32) * 0.5 - 2.0);
     commands.insert_resource(LotExit(Vec2::new(exit.x, exit.z)));
+    // The sidewalk along the street in front of the lot.
+    let walk_center = to_world(0.0, -(lot.depth as f32) * 0.5 - 2.5);
+    let along = (rot * Vec3::X).xz().normalize_or(Vec2::X);
+    commands.insert_resource(crate::town::Sidewalk { center: walk_center.xz(), along, half_length: lot.width as f32 * 0.5 + 25.0 });
     commands.insert_resource(NavGrid::new(
         Vec2::new(center.x, center.z),
         lot.width.max(lot.depth) as f32 * 0.5 + 14.0,
@@ -636,6 +640,7 @@ pub fn move_in(
 
     let mut rng = rand::rng();
     let mut first = None;
+    let townies = prepared.as_mut().map(|p| std::mem::take(&mut p.townies)).unwrap_or_default();
     let (members, neighbors) = match prepared.as_mut() {
         Some(p) if !p.members.is_empty() => (std::mem::take(&mut p.members), std::mem::take(&mut p.neighbors)),
         _ => {
@@ -688,6 +693,15 @@ pub fn move_in(
             DespawnOnExit(AppState::InGame),
         ));
         notes.push(format!("{name} from next door came over to welcome the {} family.", pending.last_name));
+    }
+    // Townies, hidden until they stroll by.
+    for (k, (s, model)) in townies.into_iter().enumerate() {
+        let e = spawn_sim_full(&mut commands, &mut sctx, s, exit, model);
+        commands.entity(e).insert((
+            Visibility::Hidden,
+            crate::town::Townie { next_walk: 8.0 * 60.0 + 5.0 + k as f64 * 37.0, walking: false },
+            DespawnOnExit(AppState::InGame),
+        ));
     }
     if let Ok(mut c) = cam.single_mut() {
         c.look_at(dc);

@@ -674,7 +674,15 @@ fn building_visibility(
     mut trees: Query<(&GlobalTransform, &mut Visibility), (With<crate::world::Tree>, Without<BuildingPiece>, Without<LotImposter>)>,
     mut sims: Query<
         (&Floor, &mut Visibility),
-        (With<crate::sim::Sim>, Without<crate::interact::AtWork>, Without<BuildingPiece>, Without<LotImposter>, Without<crate::world::Tree>, Without<WallFace>),
+        (
+            With<crate::sim::Sim>,
+            Without<crate::interact::AtWork>,
+            Without<crate::town::Townie>,
+            Without<BuildingPiece>,
+            Without<LotImposter>,
+            Without<crate::world::Tree>,
+            Without<WallFace>,
+        ),
     >,
 ) {
     let Some(mut b) = building else { return };

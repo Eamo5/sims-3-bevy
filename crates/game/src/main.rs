@@ -18,6 +18,7 @@ mod roads;
 mod sim;
 mod simbody;
 mod terrain;
+mod town;
 mod world;
 
 use bevy::prelude::*;
@@ -77,6 +78,7 @@ fn main() {
             roads::RoadPlugin,
             building::BuildingPlugin,
             music::MusicPlugin,
+            town::TownPlugin,
         ))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)

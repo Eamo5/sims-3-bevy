@@ -339,6 +339,8 @@ pub fn spawn_sim_model(commands: &mut Commands, parent: Entity, model: SimModelC
 pub struct PreparedSims {
     pub members: Vec<(Sim, Option<SimModelCpu>)>,
     pub neighbors: Vec<(Sim, Option<SimModelCpu>)>,
+    /// Townies who stroll past the lot.
+    pub townies: Vec<(Sim, Option<SimModelCpu>)>,
 }
 
 /// Maps the stand-in skin colour presets onto the game's skin-tone ramp.
@@ -355,10 +357,16 @@ pub fn prepare_sims(baked: &BakedData, cas: &CasData, members: &[Sim]) -> Prepar
         let last = crate::sim::random_last_name(&mut rng);
         neighbors.push(crate::sim::random_sim(&mut rng, &last, None, if k == 0 { Age::Adult } else { Age::YoungAdult }));
     }
+    const TOWNIES: usize = 4;
+    for k in 0..TOWNIES {
+        let last = crate::sim::random_last_name(&mut rng);
+        neighbors.push(crate::sim::random_sim(&mut rng, &last, None, if k % 2 == 0 { Age::YoungAdult } else { Age::Adult }));
+    }
     let outfits: Vec<(Sim, Outfit)> =
         members.iter().chain(neighbors.iter()).map(|s| (s.clone(), pick_outfit(cas, s, &mut rng))).collect();
     let mut built: Vec<(Sim, Option<SimModelCpu>)> =
         crate::world::par_map(&outfits, |(s, o)| (s.clone(), build_sim_model(baked, cas, s, o, tone_of(s))));
-    let neighbors = built.split_off(members.len());
-    PreparedSims { members: built, neighbors }
+    let mut neighbors = built.split_off(members.len());
+    let townies = neighbors.split_off(neighbors.len() - TOWNIES);
+    PreparedSims { members: built, neighbors, townies }
 }
