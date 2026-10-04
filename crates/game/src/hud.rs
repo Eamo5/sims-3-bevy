@@ -20,6 +20,7 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PieMenu>()
             .add_systems(OnEnter(PlayMode::Live), spawn_hud)
+            .add_systems(Update, floor_controls.run_if(in_state(PlayMode::Live)))
             .add_systems(
                 Update,
                 (
@@ -69,6 +70,17 @@ struct ClockText;
 struct FundsText;
 #[derive(Component)]
 struct SpeedButton(usize);
+
+/// Up / down a floor of the house (+1 / -1).
+#[derive(Component)]
+struct FloorButton(i8);
+
+#[derive(Component)]
+struct FloorText;
+
+/// The floor controls, shown only in a house with more than one floor.
+#[derive(Component)]
+struct FloorControls;
 #[derive(Component)]
 struct QueuePanel;
 #[derive(Component)]
@@ -194,6 +206,29 @@ fn spawn_hud(mut commands: Commands) {
                     });
                 }
                 p.spawn((text("", 20.0, PLUMBOB_GREEN), FundsText, Node { margin: UiRect::left(Val::Px(12.0)), ..default() }));
+                p.spawn((Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, margin: UiRect::left(Val::Px(12.0)), display: Display::None, ..default() }, FloorControls))
+                    .with_children(|f| {
+                        f.spawn((text("", 16.0, Color::WHITE), FloorText, Node { width: Val::Px(62.0), ..default() }));
+                        for (step, label) in [(1i8, "Up"), (-1, "Down")] {
+                            f.spawn((
+                                Button,
+                                HudButton,
+                                FloorButton(step),
+                                Node {
+                                    border_radius: BorderRadius::all(Val::Px(8.0)),
+                                    width: Val::Px(58.0),
+                                    height: Val::Px(34.0),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    ..default()
+                                },
+                                BackgroundColor(BTN_NORMAL),
+                            ))
+                            .with_children(|b| {
+                                b.spawn(text(label, 16.0, Color::WHITE));
+                            });
+                        }
+                    });
             });
         });
 
@@ -251,7 +286,7 @@ fn spawn_hud(mut commands: Commands) {
     commands.spawn((
         DespawnOnExit(AppState::InGame),
         text(
-            "Click objects / sims for actions · Click ground to walk · WASD/arrows pan · Q/E rotate · wheel zoom · Space pause · 1/2/3 speed · Tab next sim · C centre camera · B buy mode",
+            "Click objects / sims for actions · Click ground to walk · WASD/arrows pan · Q/E rotate · wheel zoom · Space pause · 1/2/3 speed · Tab next sim · C centre camera · PgUp/PgDn floors · B buy mode",
             13.0,
             Color::srgba(1.0, 1.0, 1.0, 0.75),
         ),
@@ -522,6 +557,38 @@ fn hud_buttons(
             {
                 c.look_at(tf.translation);
             }
+        }
+    }
+}
+
+/// Floor buttons step the viewed floor; the label shows which floor is in view.
+fn floor_controls(
+    building: Option<ResMut<crate::building::ActiveBuilding>>,
+    buttons: Query<(&Interaction, &FloorButton), Changed<Interaction>>,
+    mut label: Query<&mut Text, With<FloorText>>,
+    mut controls: Query<&mut Node, With<FloorControls>>,
+) {
+    let Some(mut b) = building else {
+        for mut n in &mut controls {
+            n.display = Display::None;
+        }
+        return;
+    };
+    for (i, f) in &buttons {
+        if *i == Interaction::Pressed {
+            b.view_level = (b.view_level as i8 + f.0).clamp(1, b.top_level as i8) as u8;
+        }
+    }
+    for mut n in &mut controls {
+        let want = if b.top_level > 1 { Display::Flex } else { Display::None };
+        if n.display != want {
+            n.display = want;
+        }
+    }
+    let s = format!("Floor {}", b.view_level);
+    for mut t in &mut label {
+        if t.0 != s {
+            t.0 = s.clone();
         }
     }
 }
