@@ -42,6 +42,41 @@ pub struct Wish {
 }
 
 impl Wish {
+    /// The game's icon for the wish.
+    pub fn icon(&self, data: &s3bake::GameDataBaked) -> String {
+        let s = |n: &str| n.to_string();
+        match &self.kind {
+            WishKind::Skill { skill, .. } => data.skill(skill).map(|k| k.wish_icon.clone()).unwrap_or_default(),
+            WishKind::Activity(a) => s(match *a {
+                "Watch TV" => "w_tv",
+                "Read a Book" => "w_book",
+                "Play Chess" => "w_chess",
+                "Dance" => "w_stereo",
+                "Cook Dinner" => "w_stove",
+                "Take Bath" => "w_bathtub",
+                "Work Out" => "w_workout_bench",
+                "Paint" => "w_painting",
+                "Play Guitar" => "w_guitar",
+                "Play Computer Games" => "W_computer",
+                _ => "",
+            }),
+            WishKind::Social(n) => s(match *n {
+                "Tell Joke" => "w_joke_around",
+                "Flirt" => "w_first_kiss",
+                "Try for Baby" => "moodlet_theBabyIsComing",
+                _ => "w_friend",
+            }),
+            WishKind::MakeFriend => s("w_friend"),
+            WishKind::FirstKiss => s("w_first_kiss"),
+            WishKind::GoSteady => s("moodlet_myLove"),
+            WishKind::GetEngaged => s("moodlet_newlyEngaged"),
+            WishKind::GetMarried => s("w_wedding_arch"),
+            WishKind::JoinCareer => s("w_career_cityhall"),
+            WishKind::Promotion => s("w_simoleon"),
+            WishKind::BuySomething { .. } => s("w_simoleon_32"),
+        }
+    }
+
     pub fn text(&self) -> String {
         match &self.kind {
             WishKind::Skill { skill, level } => format!("Reach level {level} {skill}"),

@@ -540,8 +540,20 @@ fn panel_node(left: Option<f32>, right: Option<f32>, width: f32) -> Node {
     }
 }
 
-fn rebuild_ui(mut commands: Commands, scene: Option<ResMut<CasScene>>, pending: Res<PendingHousehold>) {
+fn rebuild_ui(
+    mut commands: Commands,
+    scene: Option<ResMut<CasScene>>,
+    pending: Res<PendingHousehold>,
+    mut ui: Option<ResMut<crate::icons::GameUi>>,
+    mut images: ResMut<Assets<Image>>,
+    mut had_icons: Local<bool>,
+) {
     let Some(mut scene) = scene else { return };
+    // (Redrawn once more when the game's icons become available.)
+    if ui.is_some() && !*had_icons {
+        *had_icons = true;
+        scene.dirty_ui = true;
+    }
     if !scene.dirty_ui {
         return;
     }
@@ -672,14 +684,21 @@ fn rebuild_ui(mut commands: Commands, scene: Option<ResMut<CasScene>>, pending: 
                         for (i, t) in crate::life::Trait::ALL.iter().enumerate() {
                             let chosen = sim.traits.contains(t);
                             let ok = chosen || (sim.traits.len() < slots && t.compatible(&sim.traits));
+                            // The game's icon and description, when converted.
+                            let info = ui.as_deref().and_then(|u| u.trait_info(*t));
+                            let icon = match (ui.as_deref_mut(), &info) {
+                                (Some(u), Some(i)) => u.icon(&mut images, &i.icon),
+                                _ => None,
+                            };
                             let mut e = grid.spawn((
                                 Button,
                                 CasAction::Trait(i),
                                 Node {
                                     width: Val::Px(132.0),
-                                    min_height: Val::Px(26.0),
+                                    min_height: Val::Px(30.0),
                                     padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
-                                    justify_content: JustifyContent::Center,
+                                    column_gap: Val::Px(4.0),
+                                    justify_content: if icon.is_some() { JustifyContent::FlexStart } else { JustifyContent::Center },
                                     align_items: AlignItems::Center,
                                     border_radius: BorderRadius::all(Val::Px(6.0)),
                                     ..default()
@@ -691,8 +710,19 @@ fn rebuild_ui(mut commands: Commands, scene: Option<ResMut<CasScene>>, pending: 
                             } else if !ok {
                                 e.insert(Dimmed);
                             }
+                            if let Some(i) = info.as_ref().filter(|i| !i.desc.is_empty()) {
+                                e.insert(crate::icons::Tooltip(format!("{}\n{}", i.name, i.desc)));
+                            }
                             e.with_children(|b| {
-                                b.spawn(text(t.name(), 12.0, if ok { Color::WHITE } else { Color::srgba(1.0, 1.0, 1.0, 0.4) }));
+                                if let Some(h) = icon {
+                                    let color = if ok { Color::WHITE } else { Color::srgba(1.0, 1.0, 1.0, 0.35) };
+                                    b.spawn((
+                                        ImageNode { color, ..ImageNode::new(h) },
+                                        Node { width: Val::Px(26.0), height: Val::Px(26.0), ..default() },
+                                        Pickable::IGNORE,
+                                    ));
+                                }
+                                b.spawn((text(t.name(), 12.0, if ok { Color::WHITE } else { Color::srgba(1.0, 1.0, 1.0, 0.4) }), Pickable::IGNORE));
                             });
                         }
                     });

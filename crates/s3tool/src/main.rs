@@ -304,6 +304,75 @@ fn main() {
         }
         return;
     }
+    if args[1] == "xmlfind" {
+        // xmlfind <root> <text> [outdir]: XML resources (0x0333406C) containing the text, with
+        // their names; with an outdir, writes them there. EXTRA=<package> adds a package.
+        let mut set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        if let Ok(x) = std::env::var("EXTRA") {
+            set.add(Package::open(&x).unwrap());
+        }
+        let mut names = std::collections::HashMap::new();
+        for k in set.keys_of_type(0x0166038C).copied().collect::<Vec<_>>() {
+            if let Some(d) = set.read(&k) {
+                for (i, n) in s3formats::audio::parse_name_map(&d) {
+                    names.insert(i, n);
+                }
+            }
+        }
+        let want = args[3].as_bytes();
+        let out = args.get(4).map(std::path::PathBuf::from);
+        if let Some(o) = &out {
+            std::fs::create_dir_all(o).unwrap();
+        }
+        for k in set.keys_of_type(0x0333406C).copied().collect::<Vec<_>>() {
+            let Some(d) = set.read(&k) else { continue };
+            if d.windows(want.len()).any(|w| w == want) {
+                let nm = names.get(&k.i).cloned().unwrap_or_else(|| format!("{:016X}", k.i));
+                println!("{k} {nm} {} bytes", d.len());
+                if let Some(o) = &out {
+                    std::fs::write(o.join(format!("{nm}.xml")), &d).unwrap();
+                }
+            }
+        }
+        return;
+    }
+    if args[1] == "imgnames" {
+        // imgnames <root> [filter] [outdir]: named UI images (PNG 0x2F7D0004) from the install's
+        // name maps; with an outdir, writes the matching ones there.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let mut names = std::collections::HashMap::new();
+        for k in set.keys_of_type(0x0166038C).copied().collect::<Vec<_>>() {
+            if let Some(d) = set.read(&k) {
+                for (i, n) in s3formats::audio::parse_name_map(&d) {
+                    names.insert(i, n);
+                }
+            }
+        }
+        let filter = args.get(3).map(|s| s.to_ascii_lowercase()).unwrap_or_default();
+        let out = args.get(4).map(std::path::PathBuf::from);
+        if let Some(o) = &out {
+            std::fs::create_dir_all(o).unwrap();
+        }
+        let mut n = 0;
+        let mut rows: Vec<(String, s3pkg::ResourceKey)> = set
+            .keys_of_type(0x2F7D0004)
+            .filter_map(|k| Some((names.get(&k.i)?.clone(), *k)))
+            .filter(|(nm, _)| nm.to_ascii_lowercase().contains(&filter))
+            .collect();
+        rows.sort();
+        for (nm, k) in rows {
+            n += 1;
+            if let Some(o) = &out {
+                if let Some(d) = set.read(&k) {
+                    std::fs::write(o.join(format!("{nm}.png")), d).unwrap();
+                }
+            } else {
+                println!("{nm} {k}");
+            }
+        }
+        eprintln!("{n} images ({} names)", names.len());
+        return;
+    }
     if args[1] == "impuv" {
         // impuv <root> <world> <modl key> <texture key>: average texture colour under the
         // model's triangles, grouped by how upward-facing and how high they are.

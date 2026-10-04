@@ -94,6 +94,20 @@ pub enum Trait {
 }
 
 impl Trait {
+    /// The trait's id in the game's tables.
+    pub fn game_id(self) -> String {
+        match self {
+            Trait::Absentminded => "AbsentMinded".into(),
+            Trait::Bookworm => "BookWorm".into(),
+            Trait::HatesTheOutdoors => "HatesOutdoors".into(),
+            Trait::Technophobe => "AntiTV".into(),
+            Trait::NightOwl => "NightOwlTrait".into(),
+            // (Only the pets' version is in the table; its icon is the same.)
+            Trait::Lazy => "LazyPet".into(),
+            t => format!("{t:?}"),
+        }
+    }
+
     pub const ALL: [Trait; 65] = [
         Trait::Absentminded,
         Trait::Ambitious,
@@ -552,6 +566,53 @@ impl MoodletKind {
 
     fn from_needs(self) -> bool {
         self.def().hours == 0.0
+    }
+
+    /// The game's buff for this moodlet (its icon), and whether it is the same moodlet (so
+    /// its name and description apply) rather than a near match.
+    pub fn buff(self) -> (&'static str, bool) {
+        use MoodletKind::*;
+        match self {
+            Hungry => ("Hungry", true),
+            Starving => ("Starving", true),
+            StrainedBladder => ("HasToPee", true),
+            Tired => ("Tired", true),
+            Exhausted => ("Exhausted", true),
+            Lonely => ("Lonely", true),
+            Smelly => ("Smelly", true),
+            Bored => ("Bored", true),
+            WellRested => ("WellRested", true),
+            Comfy => ("Comfy", true),
+            SqueakyClean => ("SqueakyClean", true),
+            GoodMeal => ("Meal", false),
+            AmazingMeal => ("DivineMeal", true),
+            HavingFun => ("Excited", false),
+            GoodConversation => ("BrightenedDay", true),
+            EnjoyingMusic => ("EnjoyingMusic", true),
+            EnjoyingAGoodBook => ("ReadAMasterpiece", false),
+            Pumped => ("Pumped", true),
+            Fatigued => ("Fatigued", true),
+            Inspired => ("Inspired", true),
+            Embarrassed => ("Embarrassed", true),
+            PassedOut => ("KnockedOut", false),
+            Uncomfortable => ("Backache", true),
+            Promoted => ("Victory", false),
+            Demoted => ("Disappointed", false),
+            Fired => ("Fired", true),
+            NewJob => ("FreshStart", false),
+            Annoyed => ("Upset", false),
+            Flirty => ("Flattered", false),
+            FirstKiss => ("FirstKiss", true),
+            InLove => ("MyLove", false),
+            Heartbroken => ("HeartBroken", true),
+            JustMarried => ("JustMarried", true),
+            NewHome => ("NewHouse", true),
+            Birthday => ("CelebratedBirthday", true),
+            WishFulfilled => ("Fulfilled", false),
+            Nauseous => ("Nauseous", true),
+            Pregnant => ("Pregnant", true),
+            NewBaby => ("ItsABoy", false),
+        }
     }
 }
 

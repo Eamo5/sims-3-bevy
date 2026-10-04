@@ -36,6 +36,7 @@ impl Plugin for HudPlugin {
                     keyboard_shortcuts,
                     hud_button_visuals,
                     update_fps,
+                    update_trait_icons,
                 )
                     .chain()
                     .run_if(in_state(PlayMode::Live)),
@@ -80,6 +81,9 @@ struct NeedsName;
 struct MoodletsPanel;
 #[derive(Component)]
 struct TraitsText;
+/// Row of the selected Sim's trait icons.
+#[derive(Component)]
+struct TraitIcons;
 #[derive(Component)]
 struct WishesPanel;
 /// An offered wish button (index into `Wishes::offered`).
@@ -151,15 +155,28 @@ fn panel(node: Node) -> impl Bundle {
 
 fn spawn_hud(mut commands: Commands) {
     commands.insert_resource(PointerOverUi::default());
-    // Needs panel (bottom-left)
-    commands
+    // Bottom-left column: the Sim's panel, with wishes and moodlets stacked above it.
+    let left_column = commands
         .spawn((
             DespawnOnExit(AppState::InGame),
-            panel(Node {
+            Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(12.0),
                 bottom: Val::Px(12.0),
                 width: Val::Px(390.0),
+                flex_direction: FlexDirection::ColumnReverse,
+                row_gap: Val::Px(8.0),
+                ..default()
+            },
+            Pickable::IGNORE,
+        ))
+        .id();
+    // Needs panel
+    commands
+        .spawn((
+            ChildOf(left_column),
+            panel(Node {
+                width: Val::Percent(100.0),
                 padding: UiRect::all(Val::Px(12.0)),
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(6.0),
@@ -169,7 +186,8 @@ fn spawn_hud(mut commands: Commands) {
         .with_children(|p| {
             p.spawn((text("", 22.0, Color::WHITE), NeedsName));
             p.spawn((text("", 14.0, Color::srgb(0.75, 0.85, 1.0)), NeedsDetail));
-            p.spawn((text("", 13.0, Color::srgb(0.95, 0.85, 0.55)), TraitsText));
+            p.spawn((text("", 13.0, Color::srgb(0.95, 0.85, 0.55)), TraitsText, Node::default()));
+            p.spawn((TraitIcons, Node { flex_direction: FlexDirection::Row, column_gap: Val::Px(4.0), ..default() }));
             p.spawn(Node {
                 flex_direction: FlexDirection::Row,
                 flex_wrap: FlexWrap::Wrap,
@@ -201,12 +219,9 @@ fn spawn_hud(mut commands: Commands) {
     // Wishes and moodlets (above the needs panel)
     commands
         .spawn((
-            DespawnOnExit(AppState::InGame),
+            ChildOf(left_column),
             Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(12.0),
-                bottom: Val::Px(250.0),
-                width: Val::Px(390.0),
+                width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(8.0),
                 ..default()
@@ -1002,34 +1017,118 @@ fn keyboard_shortcuts(
 }
 
 /// The selected Sim's moodlets as coloured chips (positive green, negative red).
+#[allow(clippy::too_many_arguments)]
 fn update_moodlets_panel(
     mut commands: Commands,
     panel: Query<Entity, With<MoodletsPanel>>,
     sel: Query<&crate::life::Moodlets, With<Selected>>,
-    mut last: Local<Vec<String>>,
+    clock: Res<crate::clock::GameClock>,
+    mut ui: Option<ResMut<crate::icons::GameUi>>,
+    mut images: ResMut<Assets<Image>>,
+    mut last: Local<(Vec<String>, bool, u32)>,
 ) {
     let Ok(p) = panel.single() else { return };
-    let mut list: Vec<(String, i32)> = sel
-        .single()
-        .map(|m| m.0.iter().map(|x| (crate::life::moodlet_label(x), x.value)).collect())
-        .unwrap_or_default();
-    list.sort_by_key(|x| -x.1.abs());
-    let labels: Vec<String> = list.iter().map(|x| x.0.clone()).collect();
-    if *last == labels {
+    let mut list: Vec<crate::life::Moodlet> = sel.single().map(|m| m.0.clone()).unwrap_or_default();
+    list.sort_by_key(|x| -x.value.abs());
+    let labels: Vec<String> = list.iter().map(crate::life::moodlet_label).collect();
+    // (Time left in the tooltips is refreshed every game hour.)
+    let hour = (clock.minutes / 60.0) as u32;
+    if last.0 == labels && last.1 == ui.is_some() && last.2 == hour {
         return;
     }
-    *last = labels;
+    *last = (labels, ui.is_some(), hour);
     commands.entity(p).despawn_children();
     commands.entity(p).with_children(|c| {
-        for (label, v) in list {
-            let bg = if v >= 0 { Color::srgba(0.12, 0.45, 0.15, 0.92) } else { Color::srgba(0.55, 0.12, 0.10, 0.92) };
-            c.spawn((
-                Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)), border_radius: BorderRadius::all(Val::Px(8.0)), ..default() },
-                BackgroundColor(bg),
-            ))
-            .with_children(|b| {
-                b.spawn(text(label, 13.0, Color::WHITE));
-            });
+        for m in list {
+            let v = m.value;
+            let (name, desc, icon) = match ui.as_deref() {
+                Some(ui) => ui.moodlet_info(m.kind),
+                None => (m.kind.def().name.to_string(), m.kind.def().desc.to_string(), String::new()),
+            };
+            let icon = ui.as_deref_mut().and_then(|ui| ui.icon(&mut images, &icon));
+            let left = if m.until.is_finite() {
+                let h = ((m.until - clock.minutes) / 60.0).max(0.0);
+                if h >= 1.0 { format!("\n{h:.0} hours left") } else { format!("\n{:.0} minutes left", h * 60.0) }
+            } else {
+                String::new()
+            };
+            let tip = format!("{name} ({}{v})\n{desc}{left}", if v >= 0 { "+" } else { "" });
+            let frame = if v > 0 {
+                Color::srgb(0.30, 0.78, 0.25)
+            } else if v < 0 {
+                Color::srgb(0.85, 0.22, 0.18)
+            } else {
+                Color::srgb(0.9, 0.75, 0.2)
+            };
+            match icon {
+                Some(h) => {
+                    c.spawn((
+                        Node {
+                            width: Val::Px(44.0),
+                            height: Val::Px(44.0),
+                            border: UiRect::all(Val::Px(3.0)),
+                            border_radius: BorderRadius::all(Val::Px(8.0)),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BorderColor::all(frame),
+                        BackgroundColor(Color::srgba(0.95, 0.97, 1.0, 0.95)),
+                        Interaction::default(),
+                        BlocksWorld,
+                        crate::icons::Tooltip(tip),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((crate::icons::icon_bundle(h, 32.0), Pickable::IGNORE));
+                    });
+                }
+                None => {
+                    let bg = if v >= 0 { Color::srgba(0.12, 0.45, 0.15, 0.92) } else { Color::srgba(0.55, 0.12, 0.10, 0.92) };
+                    c.spawn((
+                        Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)), border_radius: BorderRadius::all(Val::Px(8.0)), ..default() },
+                        BackgroundColor(bg),
+                        Interaction::default(),
+                        crate::icons::Tooltip(tip),
+                    ))
+                    .with_children(|b| {
+                        b.spawn(text(format!("{name} {}{v}", if v >= 0 { "+" } else { "" }), 13.0, Color::WHITE));
+                    });
+                }
+            }
+        }
+    });
+}
+
+/// The selected Sim's traits as the game's icons, named on hover.
+fn update_trait_icons(
+    mut commands: Commands,
+    row: Query<Entity, With<TraitIcons>>,
+    sel: Query<&Sim, With<Selected>>,
+    mut ui: Option<ResMut<crate::icons::GameUi>>,
+    mut images: ResMut<Assets<Image>>,
+    mut last: Local<(Vec<crate::life::Trait>, bool)>,
+    mut names: Query<&mut Node, With<TraitsText>>,
+) {
+    let (Ok(r), Ok(sim)) = (row.single(), sel.single()) else { return };
+    if last.0 == sim.traits && last.1 == ui.is_some() {
+        return;
+    }
+    *last = (sim.traits.clone(), ui.is_some());
+    commands.entity(r).despawn_children();
+    let Some(ui) = ui.as_deref_mut() else { return };
+    // The icons replace the list of names.
+    for mut n in &mut names {
+        n.display = Display::None;
+    }
+    commands.entity(r).with_children(|c| {
+        for t in &sim.traits {
+            let info = ui.trait_info(*t);
+            let Some(h) = info.as_ref().and_then(|i| ui.icon(&mut images, &i.icon)) else { continue };
+            let tip = match &info {
+                Some(i) if !i.desc.is_empty() => format!("{}\n{}", i.name, i.desc),
+                _ => t.name().to_string(),
+            };
+            c.spawn((crate::icons::icon_bundle(h, 30.0), Interaction::default(), BlocksWorld, crate::icons::Tooltip(tip)));
         }
     });
 }
@@ -1084,6 +1183,8 @@ fn update_wishes_panel(
     mut commands: Commands,
     panel: Query<Entity, With<WishesPanel>>,
     sel: Query<&crate::wishes::Wishes, With<Selected>>,
+    mut ui: Option<ResMut<crate::icons::GameUi>>,
+    mut images: ResMut<Assets<Image>>,
     mut last: Local<Vec<String>>,
 ) {
     let Ok(p) = panel.single() else { return };
@@ -1091,10 +1192,34 @@ fn update_wishes_panel(
     let mut sig: Vec<String> = w.promised.iter().map(|x| format!("P{}", x.text())).collect();
     sig.extend(w.offered.iter().map(|x| format!("O{}", x.text())));
     sig.push(w.points.to_string());
+    sig.push(ui.is_some().to_string());
     if *last == sig {
         return;
     }
     *last = sig;
+    // A wish as the game's icon in a frame (gold when promised), named on hover.
+    let mut icon = |x: &crate::wishes::Wish| -> Option<Handle<Image>> {
+        let ui = ui.as_deref_mut()?;
+        let name = x.icon(&ui.data.clone());
+        ui.icon(&mut images, &name)
+    };
+    let tile = |promised: bool| {
+        (
+            Node {
+                width: Val::Px(48.0),
+                height: Val::Px(48.0),
+                border: UiRect::all(Val::Px(3.0)),
+                border_radius: BorderRadius::all(Val::Px(24.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BorderColor::all(if promised { Color::srgb(1.0, 0.8, 0.2) } else { Color::srgb(0.55, 0.75, 1.0) }),
+            BackgroundColor(Color::srgba(0.95, 0.97, 1.0, 0.95)),
+        )
+    };
+    let promised_icons: Vec<Option<Handle<Image>>> = w.promised.iter().map(&mut icon).collect();
+    let offered_icons: Vec<Option<Handle<Image>>> = w.offered.iter().map(&mut icon).collect();
     commands.entity(p).despawn_children();
     commands.entity(p).with_children(|c| {
         c.spawn((
@@ -1107,26 +1232,46 @@ fn update_wishes_panel(
         .with_children(|b| {
             b.spawn(text(format!("Lifetime Happiness: {}", w.points), 13.0, Color::srgb(1.0, 0.85, 0.3)));
         });
-        for x in &w.promised {
-            c.spawn((
-                Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)), border_radius: BorderRadius::all(Val::Px(8.0)), ..default() },
-                BackgroundColor(Color::srgba(0.55, 0.42, 0.08, 0.95)),
-            ))
-            .with_children(|b| {
-                b.spawn(text(format!("Promised: {} +{}", x.text(), x.points), 13.0, Color::WHITE));
-            });
+        for (x, h) in w.promised.iter().zip(promised_icons) {
+            let tip = crate::icons::Tooltip(format!("Promised: {} (+{})", x.text(), x.points));
+            match h {
+                Some(h) => {
+                    c.spawn((tile(true), Interaction::default(), BlocksWorld, tip)).with_children(|b| {
+                        b.spawn((crate::icons::icon_bundle(h, 34.0), Pickable::IGNORE));
+                    });
+                }
+                None => {
+                    c.spawn((
+                        Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)), border_radius: BorderRadius::all(Val::Px(8.0)), ..default() },
+                        BackgroundColor(Color::srgba(0.55, 0.42, 0.08, 0.95)),
+                    ))
+                    .with_children(|b| {
+                        b.spawn(text(format!("Promised: {} +{}", x.text(), x.points), 13.0, Color::WHITE));
+                    });
+                }
+            }
         }
-        for (i, x) in w.offered.iter().enumerate() {
-            c.spawn((
-                Button,
-                HudButton,
-                WishButton(i),
-                Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)), border_radius: BorderRadius::all(Val::Px(8.0)), ..default() },
-                BackgroundColor(BTN_NORMAL),
-            ))
-            .with_children(|b| {
-                b.spawn(text(format!("{} +{}", x.text(), x.points), 13.0, Color::srgb(0.85, 0.9, 1.0)));
-            });
+        for (i, (x, h)) in w.offered.iter().zip(offered_icons).enumerate() {
+            let tip = crate::icons::Tooltip(format!("{} (+{})\nClick to promise this wish.", x.text(), x.points));
+            match h {
+                Some(h) => {
+                    c.spawn((Button, WishButton(i), tile(false), tip)).with_children(|b| {
+                        b.spawn((crate::icons::icon_bundle(h, 34.0), Pickable::IGNORE));
+                    });
+                }
+                None => {
+                    c.spawn((
+                        Button,
+                        HudButton,
+                        WishButton(i),
+                        Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)), border_radius: BorderRadius::all(Val::Px(8.0)), ..default() },
+                        BackgroundColor(BTN_NORMAL),
+                    ))
+                    .with_children(|b| {
+                        b.spawn(text(format!("{} +{}", x.text(), x.points), 13.0, Color::srgb(0.85, 0.9, 1.0)));
+                    });
+                }
+            }
         }
     });
 }

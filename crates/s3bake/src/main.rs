@@ -172,6 +172,21 @@ fn main() {
         println!("skin textures: {tones:?}");
         return;
     }
+    if args.iter().any(|a| a == "--gamedata") {
+        // The baked moodlets, traits and skills.
+        let g = s3bake::load_gamedata(&s3bake::default_root()).expect("no gameplay data");
+        println!("{} buffs, {} traits, {} skills", g.buffs.len(), g.traits.len(), g.skills.len());
+        for b in &g.buffs {
+            println!("buff {} = {:?} [{}] {} {} {}m: {}", b.hex, b.name, b.icon, b.axis, b.value, b.timeout, b.desc);
+        }
+        for t in &g.traits {
+            println!("trait {} = {:?} [{} / {}] {}: {}", t.hex, t.name, t.icon, t.icon_small, t.category, t.desc);
+        }
+        for s in &g.skills {
+            println!("skill {} = {:?} [{} / {} / {}] max {}: {}", s.hex, s.name, s.icon, s.wish_icon, s.object_icon, s.max_level, s.desc);
+        }
+        return;
+    }
     if args.iter().any(|a| a == "--clip-sounds") {
         // Survey the sound cues of the baked animation clips and whether they resolve.
         let pkgs = s3pkg::install::open_install(&data, |_| true);
@@ -223,6 +238,12 @@ fn main() {
         match s3bake::bake_clips(&root, &pkgs, &progress) {
             Ok(n) => println!("animations: {n}"),
             Err(e) => eprintln!("animations failed: {e}"),
+        }
+    }
+    if force || !s3bake::gamedata_ready(&root) {
+        match s3bake::bake_gamedata(&root, &pkgs, std::path::Path::new(&data), &progress) {
+            Ok(n) => println!("gameplay data: {n} icons"),
+            Err(e) => eprintln!("gameplay data failed: {e}"),
         }
     }
     if force || !s3bake::sounds_ready(&root) {

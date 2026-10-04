@@ -53,6 +53,9 @@ installation is unreachable.
   shoe, interface clicks, stings for promotions, weddings and other moments, birds by day
   and insects at night, music for the menus, Create-a-Sim and buy mode, and the radio
   stations on stereos.
+- **Interface**: the game's own icons and words — moodlets (name, description, time left),
+  traits (Create-a-Sim and the Sim's panel) and wishes — read from the game's tuning tables
+  (`GameplayData.package`) and string tables, with tooltips on hover.
 - **Options**: Escape pauses with a game menu (resume, options, save, main menu, quit); the
   options set master, music, effects, voice and ambient levels, aging and life span (short
   to epic), free will, shadows and the frame-rate counter, kept in `settings.json`.
