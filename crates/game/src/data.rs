@@ -95,6 +95,9 @@ fn pretty_world_name(stem: &str) -> String {
     match stem {
         "AppaloosaPlains" => "Appaloosa Plains".into(),
         "IslaParadiso" => "Isla Paradiso".into(),
+        "China" => "Shang Simla".into(),
+        "Egypt" => "Al Simhara".into(),
+        "France" => "Champs Les Sims".into(),
         other => other.into(),
     }
 }

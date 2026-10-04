@@ -216,6 +216,9 @@ fn main() {
             let Ok(p) = Package::open(&path.path) else { continue };
             for e in p.of_type(0x0166038C) {
                 let Ok(d) = p.read(e) else { continue };
+                if d.len() < 8 {
+                    continue;
+                }
                 let mut r = 8usize;
                 let n = u32::from_le_bytes(d[4..8].try_into().unwrap()) as usize;
                 for _ in 0..n {
