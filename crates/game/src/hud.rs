@@ -290,7 +290,7 @@ fn spawn_hud(mut commands: Commands) {
             13.0,
             Color::srgba(1.0, 1.0, 1.0, 0.75),
         ),
-        Node { position_type: PositionType::Absolute, left: Val::Px(420.0), bottom: Val::Px(70.0), ..default() },
+        Node { position_type: PositionType::Absolute, left: Val::Px(420.0), right: Val::Px(240.0), bottom: Val::Px(70.0), ..default() },
     ));
 }
 
