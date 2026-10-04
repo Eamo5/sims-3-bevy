@@ -11,7 +11,7 @@ use bevy::render::render_resource::{
     TextureViewDimension,
 };
 use bevy::shader::ShaderRef;
-use s3bake::{Heightmap, WorldBaked};
+use s3bake::{Heightmap, WorldBaked, WorldMap};
 
 use crate::AppState;
 
@@ -32,6 +32,17 @@ pub struct TerrainExt {
     #[texture(103, dimension = "2d_array")]
     #[sampler(104)]
     pub weights: Handle<Image>,
+    /// The game's own pre-composited terrain colour, used in the distance.
+    #[texture(105)]
+    #[sampler(106)]
+    pub overview: Option<Handle<Image>>,
+    /// a: baked tree shadows.
+    #[texture(107)]
+    #[sampler(108)]
+    pub lightmap: Option<Handle<Image>>,
+    /// Average linear colour of each paint layer (rgb).
+    #[uniform(109)]
+    pub layer_avg: [Vec4; 16],
 }
 
 impl MaterialExtension for TerrainExt {
@@ -65,6 +76,35 @@ pub struct TerrainBuild {
     pub layer_count: u32,
     pub world_size: f32,
     pub sea_level: f32,
+    pub overview: Option<Image>,
+    pub lightmap: Option<Image>,
+    pub layer_avg: [Vec4; 16],
+}
+
+/// A stitched world map (block-compressed mip chain) as a GPU image.
+fn world_map_image(m: &WorldMap, srgb: bool) -> Image {
+    let mut img = Image::default();
+    img.data = Some(m.data.clone());
+    img.texture_descriptor.size = Extent3d { width: m.size, height: m.size, depth_or_array_layers: 1 };
+    img.texture_descriptor.mip_level_count = m.mips;
+    img.texture_descriptor.format = match (m.bc3, srgb) {
+        (true, true) => TextureFormat::Bc3RgbaUnormSrgb,
+        (true, false) => TextureFormat::Bc3RgbaUnorm,
+        (false, true) => TextureFormat::Bc1RgbaUnormSrgb,
+        (false, false) => TextureFormat::Bc1RgbaUnorm,
+    };
+    img.texture_descriptor.dimension = TextureDimension::D2;
+    img.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::ClampToEdge,
+        address_mode_v: ImageAddressMode::ClampToEdge,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        anisotropy_clamp: 8,
+        ..default()
+    });
+    img.asset_usage = RenderAssetUsages::RENDER_WORLD;
+    img
 }
 
 const LODS: [(usize, f32, f32); 3] = [(1, 0.0, 260.0), (4, 260.0, 900.0), (16, 900.0, 1e6)];
@@ -126,7 +166,17 @@ pub fn build_terrain(world: &WorldBaked) -> TerrainBuild {
     });
     weights.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::D2Array), ..default() });
 
-    TerrainBuild { chunks, layers, weights, layer_count: lc, world_size: cells as f32, sea_level: world.sea_level }
+    TerrainBuild {
+        chunks,
+        layers,
+        weights,
+        layer_count: lc,
+        world_size: cells as f32,
+        sea_level: world.sea_level,
+        overview: world.overview.as_ref().filter(|m| m.size as usize == cells).map(|m| world_map_image(m, true)),
+        lightmap: world.lightmap.as_ref().filter(|m| m.size as usize == cells).map(|m| world_map_image(m, false)),
+        layer_avg: std::array::from_fn(|i| world.layer_avg.get(i).map_or(Vec4::splat(0.2), |c| Vec3::from(*c).extend(1.0))),
+    }
 }
 
 fn chunk_mesh(hm: &Heightmap, x0: usize, z0: usize, step: usize) -> (Mesh, Vec3) {
@@ -210,6 +260,9 @@ fn spawn_terrain(
         img
     }));
     let weights = images.add(std::mem::take(&mut build.weights));
+    let flags = build.overview.is_some() as u32 | (build.lightmap.is_some() as u32) << 1;
+    let overview = build.overview.take().map(|i| images.add(i));
+    let lightmap = build.lightmap.take().map(|i| images.add(i));
     let material = terrain_mats.add(TerrainMaterial {
         base: StandardMaterial {
             base_color: Color::WHITE,
@@ -218,9 +271,12 @@ fn spawn_terrain(
             ..default()
         },
         extension: TerrainExt {
-            params: Vec4::new(build.world_size, 1.0 / LAYER_TILE_METRES, build.layer_count as f32, 0.0),
+            params: Vec4::new(build.world_size, 1.0 / LAYER_TILE_METRES, build.layer_count as f32, flags as f32),
             layers,
             weights,
+            overview,
+            lightmap,
+            layer_avg: build.layer_avg,
         },
     });
     for c in build.chunks.drain(..) {

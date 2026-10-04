@@ -241,6 +241,8 @@ pub struct MeshData {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
+    /// Second texture coordinate set: the zw half of a float4 texcoord0, else texcoord1 (empty when absent).
+    pub uvs1: Vec<[f32; 2]>,
     pub indices: Vec<u32>,
     pub material: Material,
     pub bounds_min: [f32; 3],
@@ -319,6 +321,8 @@ pub fn decode_mlod(rcol: &Rcol, mlod: &[u8]) -> R<Vec<MeshData>> {
             let mut pos = [0.0f32; 3];
             let mut nrm = [0.0, 1.0, 0.0];
             let mut uv = [0.0f32; 2];
+            let mut uv1 = None;
+            let mut uv0_zw = None;
             for e in &vrtf.elems {
                 let o = e.offset as usize;
                 let b = &vert[o.min(vert.len())..];
@@ -347,20 +351,29 @@ pub fn decode_mlod(rcol: &Rcol, mlod: &[u8]) -> R<Vec<MeshData>> {
                         nrm = [f32_at(0), f32_at(1), f32_at(2)];
                         has_normal = true;
                     }
-                    2 if e.usage_index == 0 => {
+                    2 if e.usage_index <= 1 => {
                         let scale = uv_scales
                             .get(e.usage_index as usize)
                             .copied()
                             .filter(|s| *s != 0.0)
                             .or_else(|| uv_scales.first().copied())
                             .unwrap_or(1.0 / 32767.0);
-                        uv = match e.format {
+                        if e.format == 3 && e.usage_index == 0 && b.len() >= 16 {
+                            // Float4 texcoord: a second, differently-scaled UV pair (road overlays).
+                            uv0_zw = Some([f32_at(2), f32_at(3)]);
+                        }
+                        let t = match e.format {
                             1 | 3 if b.len() >= 8 => [f32_at(0), f32_at(1)],
                             6 if b.len() >= 4 => [i16_at(0) as f32 * scale, i16_at(1) as f32 * scale],
                             7 if b.len() >= 4 => [i16_at(0) as f32 / 32767.0, i16_at(1) as f32 / 32767.0],
-                            _ => uv,
+                            _ => [0.0; 2],
                         };
-                        has_uv = true;
+                        if e.usage_index == 0 {
+                            uv = t;
+                            has_uv = true;
+                        } else {
+                            uv1 = Some(t);
+                        }
                     }
                     _ => {}
                 }
@@ -372,6 +385,9 @@ pub fn decode_mlod(rcol: &Rcol, mlod: &[u8]) -> R<Vec<MeshData>> {
             m.positions.push(pos);
             m.normals.push(nrm);
             m.uvs.push(uv);
+            if let Some(t) = uv0_zw.or(uv1) {
+                m.uvs1.push(t);
+            }
         }
         let _ = (has_normal, has_uv);
         let end = start_index + prim_count * 3;

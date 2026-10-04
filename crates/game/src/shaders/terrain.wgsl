@@ -1,6 +1,7 @@
 #import bevy_pbr::{
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::alpha_discard,
+    mesh_view_bindings::view,
 }
 
 #ifdef PREPASS_PIPELINE
@@ -15,12 +16,17 @@
 }
 #endif
 
-// x: world size (m), y: 1 / layer tile size, z: layer count
+// x: world size (m), y: 1 / layer tile size, z: layer count, w: flags (1 overview, 2 lightmap)
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> terrain_params: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var layer_tex: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var layer_samp: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(103) var weight_tex: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var weight_samp: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(105) var overview_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(106) var overview_samp: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(107) var light_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(108) var light_samp: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(109) var<uniform> layer_avg: array<vec4<f32>, 16>;
 
 @fragment
 fn fragment(
@@ -37,8 +43,10 @@ fn fragment(
     let n = i32(terrain_params.z);
 
     var col = vec3<f32>(0.35, 0.45, 0.25);
+    var avg = col;
     if (n > 0) {
         col = textureSampleGrad(layer_tex, layer_samp, tuv, 0, ddx_t, ddy_t).rgb;
+        avg = layer_avg[0].rgb;
     }
     // Paint layers are composited in order over the base layer.
     for (var g = 0; g < 4; g = g + 1) {
@@ -52,8 +60,21 @@ fn fragment(
             if (w > 0.003) {
                 let s = textureSampleGrad(layer_tex, layer_samp, tuv, li, ddx_t, ddy_t).rgb;
                 col = mix(col, s, w);
+                avg = mix(avg, layer_avg[li].rgb, w);
             }
         }
+    }
+    let flags = u32(terrain_params.w);
+    if ((flags & 1u) != 0u) {
+        // Colour comes from the game's own pre-composited terrain map (paint, lot ground, tree
+        // shadows); the paint layers only add their texture detail on top of it.
+        let ov = textureSample(overview_tex, overview_samp, wuv).rgb;
+        let detail = clamp(col / max(avg, vec3<f32>(0.01)), vec3<f32>(0.0), vec3<f32>(2.5));
+        let dist = distance(view.world_position.xyz, in.world_position.xyz);
+        col = ov * mix(detail, vec3<f32>(1.0), smoothstep(150.0, 450.0, dist));
+    } else if ((flags & 2u) != 0u) {
+        let shade = textureSample(light_tex, light_samp, wuv).a;
+        col = col * mix(0.55, 1.0, shade);
     }
     pbr_input.material.base_color = vec4<f32>(col, 1.0);
 

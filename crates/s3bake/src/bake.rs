@@ -72,7 +72,7 @@ impl BakeRoot {
     pub fn world_ready(&self, world: &str) -> bool {
         let p = self.world_dir(world).join("world.bin");
         std::fs::read(&p).ok().is_some_and(|d| {
-            postcard::take_from_bytes::<u32>(&d).is_ok_and(|(v, _)| v == BAKE_VERSION)
+            postcard::take_from_bytes::<u32>(&d).is_ok_and(|(v, _)| v == WORLD_VERSION)
         }) && self.world_dir(world).join("models.pack").exists()
     }
 }
@@ -449,15 +449,16 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
     let pkg = Package::open(world_path).map_err(|e| e.to_string())?;
     let world = WorldData::load(&pkg)?;
 
-    let (layer_dims, layer_data) = world
+    let layer_dds: Vec<Option<Vec<u8>>> = world
         .paint
         .as_ref()
-        .and_then(|p| {
-            let dds: Vec<Option<Vec<u8>>> =
-                p.layers.iter().map(|l| pkgs.read(&l.texture).or_else(|| pkgs.read_ti(l.texture.t, l.texture.i))).collect();
-            layer_array(&dds)
-        })
-        .unwrap_or(((0, 0, 0, 0), Vec::new()));
+        .map(|p| p.layers.iter().map(|l| pkgs.read(&l.texture).or_else(|| pkgs.read_ti(l.texture.t, l.texture.i))).collect())
+        .unwrap_or_default();
+    let (layer_dims, layer_data) = layer_array(&layer_dds).unwrap_or(((0, 0, 0, 0), Vec::new()));
+    let layer_avg: Vec<[f32; 3]> = layer_dds
+        .iter()
+        .map(|d| d.as_deref().and_then(|d| s3formats::dds::decode(d, 16)).map(|img| average_linear(&img)).unwrap_or([0.2, 0.25, 0.12]))
+        .collect();
 
     let size = (world.heightmap.width - 1) as u32;
     let px = (size * size) as usize;
@@ -551,21 +552,130 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
     let (_, tex) = write_models(&wdir.join("models.pack"), pkgs, &model_keys, &format!("Converting {name}"), progress)?;
     bake_textures(root, pkgs, &tex, OBJECT_TEX_MAX, &format!("Converting {name}"), progress);
 
+    progress(&format!("Converting {name}: roads…"));
+    let sectors = (world.heightmap.width.saturating_sub(1) / SECTOR) as u64;
+    let half_range = world.heightmap.scale * 32768.0;
+    let mut roads = Vec::new();
+    let mut road_tex = HashSet::new();
+    for e in pkg.of_type(types::MODL).filter(|e| e.key.g == 2) {
+        let (sx, sz) = (e.key.i % sectors.max(1), e.key.i / sectors.max(1));
+        let origin = [(sx as usize * SECTOR + SECTOR / 2) as f32, half_range, (sz as usize * SECTOR + SECTOR / 2) as f32];
+        for m in model::load_model(pkgs, &e.key).unwrap_or_default() {
+            let tex = |p: u32| m.material.texture(p).filter(|k| pkgs.get_entry(k).is_some() || pkgs.find_ti(k.t, k.i).is_some()).map(|k| key_of(&k));
+            let part = RoadPart {
+                positions: m.positions.iter().map(|p| [p[0] + origin[0], p[1] + origin[1], p[2] + origin[2]]).collect(),
+                normals: m.normals.clone(),
+                uvs1: if m.uvs1.len() == m.uvs.len() { m.uvs1.clone() } else { m.uvs.clone() },
+                uvs: m.uvs,
+                indices: m.indices,
+                base: tex(P_ROAD_BASE),
+                overlay: tex(P_ROAD_OVERLAY),
+                opacity: tex(P_ROAD_OPACITY),
+            };
+            road_tex.extend([part.base, part.overlay, part.opacity].into_iter().flatten().map(|k| (k, false)));
+            roads.push(part);
+        }
+    }
+    let road_tex: Vec<(Key, bool)> = road_tex.into_iter().collect();
+    bake_textures(root, pkgs, &road_tex, OBJECT_TEX_MAX, &format!("Converting {name}"), progress);
+    let overview = stitch_sectors(&pkg, sectors, 2);
+    let lightmap = stitch_sectors(&pkg, sectors, 7);
+
     let baked = WorldBaked {
-        version: BAKE_VERSION,
+        version: WORLD_VERSION,
         name: name.to_string(),
         heightmap: world.heightmap.clone(),
         sea_level,
         layer_dims,
         layer_data,
+        layer_avg,
         weights_size: size,
         weights_lz4,
         lots,
         instances,
         trees,
+        roads,
+        overview,
+        lightmap,
     };
     write_value(&wdir.join("world.bin"), &baked).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+fn average_linear(img: &s3formats::dds::Rgba) -> [f32; 3] {
+    let lin = |c: u8| {
+        let c = c as f32 / 255.0;
+        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    };
+    let mut sum = [0.0f64; 3];
+    let n = (img.data.len() / 4).max(1) as f64;
+    for p in img.data.chunks_exact(4) {
+        for k in 0..3 {
+            sum[k] += lin(p[k]) as f64;
+        }
+    }
+    sum.map(|v| (v / n) as f32)
+}
+
+const SECTOR: usize = 256;
+const P_ROAD_BASE: u32 = 0x53521204;
+const P_ROAD_OVERLAY: u32 = 0x28392DC6;
+const P_ROAD_OPACITY: u32 = 0x6BDFD546;
+
+/// Stitches the world's per-sector DXT maps of one `kind` (2: terrain colour, 7: lights/shadows)
+/// into a single world-sized block-compressed texture without re-encoding.
+fn stitch_sectors(pkg: &Package, n: u64, kind: u64) -> Option<WorldMap> {
+    if n == 0 {
+        return None;
+    }
+    let mut tiles = Vec::new();
+    for sz in 0..n {
+        for sx in 0..n {
+            let key = ResourceKey::new(types::DDS, 1, (kind << 48) | (sz << 24) | (sx << 8));
+            tiles.push(pkg.read(pkg.find(&key)?).ok()?);
+        }
+    }
+    let head = |d: &[u8]| -> Option<(u32, u32, bool)> {
+        let u = |o: usize| u32::from_le_bytes(d[o..o + 4].try_into().unwrap());
+        (d.len() > 128 && &d[0..4] == b"DDS ").then_some(())?;
+        let bc3 = match &d[84..88] {
+            b"DXT1" => false,
+            b"DXT5" => true,
+            _ => return None,
+        };
+        (u(12) == u(16)).then_some((u(16), u(28).max(1), bc3))
+    };
+    let (s0, _, bc3) = head(&tiles[0])?;
+    let mut mips = u32::MAX;
+    for t in &tiles {
+        let (s, m, b) = head(t)?;
+        if s != s0 || b != bc3 {
+            return None;
+        }
+        mips = mips.min(m);
+    }
+    // Keep levels whose sector tiles are still whole blocks.
+    let mips = mips.min((s0 / 4).ilog2() + 1);
+    let bb = if bc3 { 16 } else { 8 };
+    let n = n as usize;
+    let mut data = Vec::new();
+    let mut offs = vec![128usize; tiles.len()];
+    for level in 0..mips {
+        let b = ((s0 >> level) / 4) as usize;
+        let row = n * b * bb;
+        let start = data.len();
+        data.resize(start + row * n * b, 0);
+        for (ti, t) in tiles.iter().enumerate() {
+            let (sx, sz) = (ti % n, ti / n);
+            for by in 0..b {
+                let src = offs[ti] + by * b * bb;
+                let dst = start + (sz * b + by) * row + sx * b * bb;
+                data[dst..dst + b * bb].copy_from_slice(t.get(src..src + b * bb)?);
+            }
+            offs[ti] += b * b * bb;
+        }
+    }
+    Some(WorldMap { size: s0 * n as u32, mips, bc3, data })
 }
 
 fn mat3_to_quat(m: [[f32; 3]; 3]) -> [f32; 4] {

@@ -166,7 +166,16 @@ impl TerrainPaint {
             let name = r.utf16_u32()?;
             layers.push(TerrainLayer { texture: ResourceKey::new(t, g, i), name });
         }
+        // Tile records vary between game versions; they're optional for rendering.
+        let tiles = Self::parse_tiles(&mut r).unwrap_or_default();
+        Ok(Self { width, height, layers, tiles })
+    }
+
+    fn parse_tiles(r: &mut Reader) -> R<Vec<PaintTile>> {
         let nt = r.u32()? as usize;
+        if nt > 4096 {
+            return Err(crate::util::Eof);
+        }
         let mut tiles = Vec::with_capacity(nt);
         for _ in 0..nt {
             let size = r.u32()? as usize;
@@ -178,11 +187,11 @@ impl TerrainPaint {
             let _cx = r.f32()?;
             let _cz = r.f32()?;
             let nl = r.u32()? as usize;
-            let tl = r.bytes(nl)?.to_vec();
+            let tl = r.bytes(nl.min(64))?.to_vec();
             tiles.push(PaintTile { x0, z0, w, h, layers: tl });
             r.pos = start + size;
         }
-        Ok(Self { width, height, layers, tiles })
+        Ok(tiles)
     }
 }
 

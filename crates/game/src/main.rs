@@ -12,6 +12,7 @@ mod loading;
 mod menu;
 mod nav;
 mod objects;
+mod roads;
 mod sim;
 mod simbody;
 mod terrain;
@@ -71,6 +72,7 @@ fn main() {
             world::WorldPlugin,
             anim::AnimPlugin,
             simbody::SimBodyPlugin,
+            roads::RoadPlugin,
         ))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)

@@ -146,135 +146,190 @@ pub fn parse_objn(d: &[u8], refs: &HashMap<u16, ResourceKey>) -> R<Vec<PlacedObj
     r.i32()?;
     let _len = r.u32()?;
     let count = r.u32()? as usize;
-    let resolve = |i: u16| refs.get(&i).copied().filter(|k| k.t != 0 || k.i != 0);
     let mut out = Vec::with_capacity(count);
-    for _ in 0..count {
-        let mut o = PlacedObject { rotation: [0.0, 0.0, 0.0, 1.0], ..Default::default() };
-        o.guid = r.u64()?;
-        r.u32()?;
-        let nc = r.u32()? as usize;
-        let mut comps = Vec::with_capacity(nc);
-        for _ in 0..nc {
-            comps.push(r.u32()?);
-        }
-        let has = |c: u32| comps.contains(&c);
-        o.catalog = resolve(r.u16()?);
-        r.u16()?;
-        o.vpxy = resolve(r.u16()?);
-        if has(C_LOCATION) {
-            o.position = Some(r.vec3()?);
-        }
-        if has(C_TRANSFORM) {
-            o.rotation = [r.f32()?, r.f32()?, r.f32()?, r.f32()?];
-            o.parent = r.u64()?;
-            if o.parent != 0 {
-                r.u32()?;
-                r.u16()?;
-            }
-        }
-        if has(C_MODEL) {
-            o.model = resolve(r.u16()?);
-            r.u16()?;
-            r.u16()?;
-            let c4 = r.u32()?;
-            for _ in 0..c4 {
-                r.u16()?;
-                r.u32()?;
-                let ln = r.u32()? as usize;
-                r.skip(ln + 1)?;
-            }
-            let cpl = r.u16()?;
-            if resolve(cpl).is_some() {
-                r.u32()?;
-                r.u32()?;
-                let off = r.u32()? as usize;
-                if off != 0 {
-                    r.skip(off)?;
-                    let c6 = r.u8()? as usize;
-                    r.skip(c6 * 2)?;
+    for i in 0..count {
+        let start = r.pos;
+        match parse_object(&mut r, refs) {
+            Ok(o) => {
+                out.push(o);
+                // Later packs append fields some objects don't have: resynchronise on the next header.
+                if i + 1 < count
+                    && !header_ok(d, r.pos)
+                    && let Some(p) = scan_header(d, r.pos.saturating_sub(8), 256)
+                {
+                    r.pos = p;
                 }
             }
-            if has(C_VISUALSTATE) {
-                r.skip(9 + 24 + 3)?;
-            }
+            Err(_) => match scan_header(d, start + 16, 1 << 16) {
+                Some(p) => r.pos = p,
+                None => break,
+            },
         }
-        if has(C_ANIMATION) {
-            r.u16()?;
-            if r.u8()? != 0 {
-                skip_anim(&mut r)?;
-            }
-        }
-        if has(C_SCRIPT) {
-            r.u32()?;
-            let ln = r.u32()? as usize;
-            o.script = Some(String::from_utf8_lossy(r.bytes(ln)?).into_owned());
-            r.u8()?;
-            r.u32()?;
-            r.u32()?;
-        }
-        if has(C_PHYSICS) {
-            r.u8()?;
-        }
-        if has(C_TREE) {
-            o.speedtree = resolve(r.u16()?);
-            r.u32()?;
-            let c = r.u32()? as usize;
-            for _ in 0..c {
-                let mut m = [0f32; 16];
-                for v in &mut m {
-                    *v = r.f32()?;
-                }
-                let scale = r.f32()?;
-                o.trees.push(TreeInstance { matrix: m, scale });
-            }
-        }
-        if has(C_EFFECT) {
-            r.u16()?;
-            r.u16()?;
-            r.u8()?;
-            let ln = r.u8()? as usize;
-            r.skip(ln)?;
-        }
-        if has(C_SIM) {
-            r.skip(4)?;
-        }
-        if has(C_STEERING) {
-            r.skip(5)?;
-        }
-        if has(C_SACS) {
-            r.u16()?;
-            r.u8()?;
-            let c = r.u8()? as usize;
-            r.skip(c * 4)?;
-        }
-        if has(C_SLOT) {
-            r.u16()?;
-        }
-        if has(C_LIGHTING) {
-            r.u16()?;
-            r.skip(16)?;
-        }
-        if has(C_VISUALSTATE) {
-            r.skip(6)?;
-            r.i32()?;
-        }
-        if has(C_FOOTPRINT) {
-            r.u8()?;
-            r.u16()?;
-            let c = r.u32()? as usize;
-            r.skip(c * 4)?;
-            r.u16()?;
-            let c = r.u32()? as usize;
-            r.skip(c * 4)?;
-            r.u8()?;
-            r.f32()?;
-        }
-        if has(C_AUDIO) {
-            r.skip(20)?;
-        }
-        out.push(o);
     }
     Ok(out)
+}
+
+const KNOWN: [u32; 16] = [
+    C_LOCATION, C_TRANSFORM, C_MODEL, C_ANIMATION, C_SCRIPT, C_PHYSICS, C_TREE, C_EFFECT, C_SIM, C_STEERING, C_SACS,
+    C_SLOT, C_LIGHTING, C_VISUALSTATE, C_FOOTPRINT, C_AUDIO,
+];
+
+/// Whether an object record plausibly starts at `p` (guid, small version, known components).
+fn header_ok(d: &[u8], p: usize) -> bool {
+    let u = |o: usize| d.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
+    let (Some(ver), Some(n)) = (u(p + 8), u(p + 12)) else { return false };
+    if !(8..=16).contains(&ver) || !(1..=24).contains(&n) {
+        return false;
+    }
+    (0..n as usize).all(|k| u(p + 16 + k * 4).is_some_and(|h| KNOWN.contains(&h)))
+}
+
+fn scan_header(d: &[u8], from: usize, window: usize) -> Option<usize> {
+    (from..(from + window).min(d.len().saturating_sub(16))).find(|&p| header_ok(d, p))
+}
+
+fn parse_object(r: &mut Reader, refs: &HashMap<u16, ResourceKey>) -> R<PlacedObject> {
+    let resolve = |i: u16| refs.get(&i).copied().filter(|k| k.t != 0 || k.i != 0);
+    let mut o = PlacedObject { rotation: [0.0, 0.0, 0.0, 1.0], ..Default::default() };
+    o.guid = r.u64()?;
+    r.u32()?;
+    let nc = r.u32()? as usize;
+    if nc > 32 {
+        return Err(Eof);
+    }
+    let mut comps = Vec::with_capacity(nc);
+    for _ in 0..nc {
+        let c = r.u32()?;
+        if !KNOWN.contains(&c) {
+            return Err(Eof);
+        }
+        comps.push(c);
+    }
+    let has = |c: u32| comps.contains(&c);
+    o.catalog = resolve(r.u16()?);
+    r.u16()?;
+    o.vpxy = resolve(r.u16()?);
+    if has(C_LOCATION) {
+        o.position = Some(r.vec3()?);
+    }
+    if has(C_TRANSFORM) {
+        o.rotation = [r.f32()?, r.f32()?, r.f32()?, r.f32()?];
+        o.parent = r.u64()?;
+        if o.parent != 0 {
+            r.u32()?;
+            r.u16()?;
+        }
+    }
+    if has(C_MODEL) {
+        o.model = resolve(r.u16()?);
+        r.u16()?;
+        r.u16()?;
+        let c4 = r.u32()?;
+        if c4 > 64 {
+            return Err(Eof);
+        }
+        for _ in 0..c4 {
+            r.u16()?;
+            r.u32()?;
+            let ln = r.u32()? as usize;
+            r.skip(ln + 1)?;
+        }
+        let cpl = r.u16()?;
+        if resolve(cpl).is_some() {
+            r.u32()?;
+            r.u32()?;
+            let off = r.u32()? as usize;
+            if off != 0 {
+                r.skip(off)?;
+                let c6 = r.u8()? as usize;
+                r.skip(c6 * 2)?;
+            }
+        }
+        if has(C_VISUALSTATE) {
+            r.skip(9 + 24 + 3)?;
+        }
+    }
+    if has(C_ANIMATION) {
+        r.u16()?;
+        if r.u8()? != 0 {
+            skip_anim(r)?;
+        }
+    }
+    if has(C_SCRIPT) {
+        r.u32()?;
+        let ln = r.u32()? as usize;
+        if ln > 512 {
+            return Err(Eof);
+        }
+        o.script = Some(String::from_utf8_lossy(r.bytes(ln)?).into_owned());
+        r.u8()?;
+        r.u32()?;
+        r.u32()?;
+    }
+    if has(C_PHYSICS) {
+        r.u8()?;
+    }
+    if has(C_TREE) {
+        o.speedtree = resolve(r.u16()?);
+        r.u32()?;
+        let c = r.u32()? as usize;
+        if c > 100_000 {
+            return Err(Eof);
+        }
+        for _ in 0..c {
+            let mut m = [0f32; 16];
+            for v in &mut m {
+                *v = r.f32()?;
+            }
+            let scale = r.f32()?;
+            o.trees.push(TreeInstance { matrix: m, scale });
+        }
+    }
+    if has(C_EFFECT) {
+        r.u16()?;
+        r.u16()?;
+        r.u8()?;
+        let ln = r.u8()? as usize;
+        r.skip(ln)?;
+    }
+    if has(C_SIM) {
+        r.skip(4)?;
+    }
+    if has(C_STEERING) {
+        r.skip(5)?;
+    }
+    if has(C_SACS) {
+        r.u16()?;
+        r.u8()?;
+        let c = r.u8()? as usize;
+        r.skip(c * 4)?;
+    }
+    if has(C_SLOT) {
+        r.u16()?;
+    }
+    if has(C_LIGHTING) {
+        r.u16()?;
+        r.skip(16)?;
+    }
+    if has(C_VISUALSTATE) {
+        r.skip(6)?;
+        r.i32()?;
+    }
+    if has(C_FOOTPRINT) {
+        r.u8()?;
+        r.u16()?;
+        let c = r.u32()? as usize;
+        r.skip(c * 4)?;
+        r.u16()?;
+        let c = r.u32()? as usize;
+        r.skip(c * 4)?;
+        r.u8()?;
+        r.f32()?;
+    }
+    if has(C_AUDIO) {
+        r.skip(20)?;
+    }
+    Ok(o)
 }
 
 /// Every placed object in a world package, keyed by the OBJN instance (lot id or layer id).

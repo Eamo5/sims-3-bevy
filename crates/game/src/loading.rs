@@ -29,6 +29,7 @@ pub struct LoadResult {
     pub terrain: TerrainBuild,
     pub catalog: Catalog,
     pub world_build: crate::world::WorldBuild,
+    pub roads: crate::roads::RoadBuild,
     pub cas: crate::simbody::CasData,
     pub sims: crate::simbody::PreparedSims,
 }
@@ -162,6 +163,7 @@ fn start_loading(
         let terrain = terrain::build_terrain(&world);
         set_status("Placing the town…");
         let world_build = crate::world::build_world(&baked, &world);
+        let roads = crate::roads::build_roads(&baked, &world);
         let catalog = Catalog::from_baked(&baked);
         set_status("Dressing your Sims…");
         let cas = crate::simbody::CasData::from_baked(&baked);
@@ -173,7 +175,7 @@ fn start_loading(
             sea_level: world.sea_level,
         };
         set_status("Done");
-        Ok(LoadResult { baked, world: Arc::new(info), terrain, catalog, world_build, cas, sims })
+        Ok(LoadResult { baked, world: Arc::new(info), terrain, catalog, world_build, roads, cas, sims })
     });
     commands.insert_resource(LoadTask { task, progress });
 }
@@ -201,6 +203,7 @@ fn poll_loading(
             commands.insert_resource(r.terrain);
             commands.insert_resource(r.catalog);
             commands.insert_resource(r.world_build);
+            commands.insert_resource(r.roads);
             commands.insert_resource(r.cas);
             commands.insert_resource(r.sims);
             next.set(AppState::InGame);

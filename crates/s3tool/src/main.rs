@@ -147,6 +147,56 @@ fn main() {
         }
         return;
     }
+    if args[1] == "modlgroup" {
+        // modlgroup <root> <world> <group>: every MODL of a group with bounds, shaders and textures.
+        let root = std::path::Path::new(&args[2]);
+        let mut set = s3pkg::install::open_install(root, |_| true);
+        set.add(Package::open(&args[3]).unwrap());
+        let w = Package::open(&args[3]).unwrap();
+        let g = parse_hex(&args[4]) as u32;
+        for e in w.of_type(types::MODL).filter(|e| e.key.g == g) {
+            for m in s3formats::model::load_model(&set, &e.key).unwrap_or_default() {
+                let mut mn = [f32::MAX; 3];
+                let mut mx = [f32::MIN; 3];
+                for p in &m.positions { for a in 0..3 { mn[a] = mn[a].min(p[a]); mx[a] = mx[a].max(p[a]); } }
+                let tex: Vec<String> = m.material.params.iter().filter_map(|(p, v)| match v {
+                    s3formats::model::ParamValue::Texture(k) => Some(format!("{p:08X}={:016X}{}", k.i, if set.read(k).or_else(|| set.read_ti(k.t, k.i)).is_some() { "" } else { "(missing)" })),
+                    _ => None,
+                }).collect();
+                let rng = |u: &[[f32; 2]]| u.iter().fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |a, t| [a[0].min(t[0]), a[1].min(t[1]), a[2].max(t[0]), a[3].max(t[1])]);
+                println!("{} shader={:08X} verts={} tris={} uv0={:?} uv1={:?} {:?}..{:?} {:?}", e.key, m.material.shader, m.positions.len(), m.indices.len() / 3, rng(&m.uvs), rng(&m.uvs1), mn.map(|v| v.round()), mx.map(|v| v.round()), tex);
+                if args.get(5).is_some() { for (p, v) in &m.material.params { if !matches!(v, s3formats::model::ParamValue::Texture(_)) { println!("    {p:08X} {v:?}"); } } }
+            }
+        }
+        return;
+    }
+    if args[1] == "hm" {
+        // hm <world> x z [x z ...]: terrain height samples.
+        let w = Package::open(&args[2]).unwrap();
+        let d = w.read(w.of_type(0x2AD195F2).next().unwrap()).unwrap();
+        let hm = s3formats::world::Heightmap::parse(&d).unwrap();
+        for c in args[3..].chunks(2) {
+            let (x, z): (f32, f32) = (c[0].parse().unwrap(), c[1].parse().unwrap());
+            println!("({x}, {z}) -> {}", hm.sample(x, z));
+        }
+        return;
+    }
+    if args[1] == "modlverts" {
+        // modlverts <root> <world> <modl key> <mesh index> [n]
+        let root = std::path::Path::new(&args[2]);
+        let mut set = s3pkg::install::open_install(root, |_| true);
+        set.add(Package::open(&args[3]).unwrap());
+        let parts: Vec<&str> = args[4].split(':').collect();
+        let k = s3pkg::ResourceKey::new(parse_hex(parts[0]) as u32, parse_hex(parts[1]) as u32, parse_hex(parts[2]));
+        let meshes = s3formats::model::load_model(&set, &k).unwrap_or_default();
+        let m = &meshes[args[5].parse::<usize>().unwrap()];
+        let n: usize = args.get(6).map(|s| s.parse().unwrap()).unwrap_or(40);
+        for i in 0..m.positions.len().min(n) {
+            println!("{i:4} pos {:?} uv0 {:?} uv1 {:?} n {:?}", m.positions[i], m.uvs[i], m.uvs1.get(i), m.normals[i]);
+        }
+        println!("tris: {:?}", &m.indices[..m.indices.len().min(30)]);
+        return;
+    }
     if args[1] == "matparams" {
         // matparams <root> <world> <modl key>
         let root = std::path::Path::new(&args[2]);
@@ -423,6 +473,23 @@ fn main() {
                 let name = format!("{}/{:08X}_{:08X}_{:016X}.bin", dir, e.key.t, e.key.g, e.key.i);
                 std::fs::write(name, data).unwrap();
             }
+        }
+        "find" => {
+            // find <package> <hex u64|u32>: resources containing the little-endian value.
+            let v = parse_hex(&args[3]);
+            let pat = if args[3].len() > 8 { v.to_le_bytes().to_vec() } else { (v as u32).to_le_bytes().to_vec() };
+            let mut hits = std::collections::BTreeMap::<u32, usize>::new();
+            for e in pkg.entries.iter().filter(|e| !e.is_deleted()) {
+                let Ok(data) = pkg.read(e) else { continue };
+                if let Some(off) = data.windows(pat.len()).position(|w| w == pat.as_slice()) {
+                    let n = hits.entry(e.key.t).or_default();
+                    if *n < 3 {
+                        println!("{:08X}:{:08X}:{:016X} @ {off}", e.key.t, e.key.g, e.key.i);
+                    }
+                    *n += 1;
+                }
+            }
+            println!("{hits:X?}");
         }
         _ => eprintln!("unknown command"),
     }

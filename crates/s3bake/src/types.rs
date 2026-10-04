@@ -7,6 +7,8 @@ pub use s3formats::world::{Heightmap, LotInfo};
 
 /// Bump whenever any baked format changes; stale caches are rebuilt.
 pub const BAKE_VERSION: u32 = 3;
+/// Version of `world.bin` alone, so world-only changes don't force a global rebake.
+pub const WORLD_VERSION: u32 = 5;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -136,6 +138,33 @@ pub struct TreeBaked {
     pub kind: u64,
 }
 
+/// One road / sidewalk / intersection mesh, already in world space.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct RoadPart {
+    pub positions: Vec<[f32; 3]>,
+    pub normals: Vec<[f32; 3]>,
+    /// Base texture coordinates.
+    pub uvs: Vec<[f32; 2]>,
+    /// Overlay / opacity texture coordinates.
+    pub uvs1: Vec<[f32; 2]>,
+    pub indices: Vec<u32>,
+    pub base: Option<Key>,
+    /// Tire tracks, crosswalks, curb corners: blended over the base by their alpha.
+    pub overlay: Option<Key>,
+    /// Edge fade (red channel) for sidewalks and dirt roads.
+    pub opacity: Option<Key>,
+}
+
+/// A world-sized texture stitched from the per-sector maps: block-compressed mip chain.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct WorldMap {
+    pub size: u32,
+    pub mips: u32,
+    /// true: BC3 (16-byte blocks), false: BC1.
+    pub bc3: bool,
+    pub data: Vec<u8>,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct WorldBaked {
     pub version: u32,
@@ -145,10 +174,17 @@ pub struct WorldBaked {
     /// BC3 texture array: width, height, mip count, layer count, data (layer-major).
     pub layer_dims: (u32, u32, u32, u32),
     pub layer_data: Vec<u8>,
+    /// Average linear colour of each paint layer.
+    pub layer_avg: Vec<[f32; 3]>,
     /// LZ4-compressed RGBA8 blend weights: 4 array layers of `weights_size`² texels.
     pub weights_size: u32,
     pub weights_lz4: Vec<u8>,
     pub lots: Vec<LotBaked>,
     pub instances: Vec<InstanceBaked>,
     pub trees: Vec<TreeBaked>,
+    pub roads: Vec<RoadPart>,
+    /// The game's pre-composited terrain colour (roads, lots and shadows painted in), 1 texel per metre.
+    pub overview: Option<WorldMap>,
+    /// rgb: night-light glow, a: tree shadows; 1 texel per metre.
+    pub lightmap: Option<WorldMap>,
 }

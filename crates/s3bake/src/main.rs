@@ -27,6 +27,27 @@ fn main() {
         i += 1;
     }
     let root = s3bake::default_root();
+    if let Some(i) = args.iter().position(|a| a == "--info") {
+        let name = &args[i + 1];
+        let w: s3bake::WorldBaked = s3bake::read_value(&root.world_dir(name).join("world.bin")).expect("world");
+        let weights = lz4_flex::decompress_size_prepended(&w.weights_lz4).unwrap_or_default();
+        let px = (w.weights_size * w.weights_size) as usize;
+        let mut sums = vec![0u64; 16];
+        for g in 0..4 {
+            for i in 0..px {
+                for c in 0..4 {
+                    sums[g * 4 + c] += weights.get(g * px * 4 + i * 4 + c).copied().unwrap_or(0) as u64;
+                }
+            }
+        }
+        println!("{name}: layers {:?} data {} bytes, weights size {}, lots {}, instances {}, trees {}, sea {}", w.layer_dims, w.layer_data.len(), w.weights_size, w.lots.len(), w.instances.len(), w.trees.len(), w.sea_level);
+        println!("layer coverage %: {:?}", sums.iter().map(|s| (*s as f64 / px as f64 / 2.55).round()).collect::<Vec<_>>());
+        let tris: usize = w.roads.iter().map(|r| r.indices.len() / 3).sum();
+        println!("roads: {} parts, {tris} triangles, {} without base texture", w.roads.len(), w.roads.iter().filter(|r| r.base.is_none()).count());
+        let map = |m: &Option<s3bake::WorldMap>| m.as_ref().map(|m| format!("{}px {} mips {} {} bytes", m.size, m.mips, if m.bc3 { "BC3" } else { "BC1" }, m.data.len()));
+        println!("overview: {:?}, lightmap: {:?}", map(&w.overview), map(&w.lightmap));
+        return;
+    }
     let t0 = Instant::now();
     let progress = |s: &str| println!("[{:7.1}s] {s}", t0.elapsed().as_secs_f32());
     println!("Opening {}", data.display());
