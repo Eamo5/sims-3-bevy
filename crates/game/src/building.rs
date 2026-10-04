@@ -316,6 +316,7 @@ pub fn spawn_building(
 
     // Furniture, doors and windows.
     let mut holes: Vec<Hole> = Vec::new();
+    let mut missing: Vec<String> = Vec::new();
     let mut stairs: Vec<(LotObjectBaked, Quat)> = Vec::new();
     for o in &b.objects {
         let q = Quat::from_xyzw(o.rotation[0], o.rotation[1], o.rotation[2], o.rotation[3]);
@@ -335,6 +336,7 @@ pub fn spawn_building(
             e
         } else {
             let Some(spawned) = crate::home::spawn_game_object_rot(commands, assets, ctx, catalog, o.objd, Vec3::from(o.position), q) else {
+                missing.push(o.script.rsplit('.').next().unwrap_or("").to_string());
                 continue;
             };
             commands.entity(spawned.entity).insert((BuildingPiece { level: o.level }, Floor(o.level.max(1))));
@@ -606,6 +608,9 @@ pub fn spawn_building(
     if !mids.is_empty() {
         let c = mids.iter().copied().sum::<Vec2>() / mids.len() as f32;
         active.center = active.world(c.x, c.y, corner.y);
+    }
+    if neighbor.is_none() {
+        info!("house: {} floors, {} objects ({} without a model)", top_level, b.objects.len(), missing.len());
     }
     active.view_level = 1;
     active

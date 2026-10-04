@@ -48,7 +48,7 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
         .values()
         .chain(data.rooms.vertices.values())
         .map(|v| v.level)
-        .filter(|&l| l < 16)
+        .filter(|&l| l < 64)
         .max()
         .unwrap_or(1)
         .max(1);
@@ -179,21 +179,53 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
         }
     };
     let mut walls = Vec::new();
-    for (a, b, level, _) in data.walls.segments() {
+    // The wall graph names the room on each side (0 = outdoors). Which side is "left" is
+    // settled per lot by agreement with where the floors are.
+    let normal_of = |a: [f32; 2], b: [f32; 2]| {
+        let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
+        let len = (dx * dx + dz * dz).sqrt().max(1e-6);
+        [-dz / len, dx / len]
+    };
+    let mut agree = 0i32;
+    for (a, b, level, e) in data.walls.segments() {
+        if (e.left == 0) == (e.right == 0) {
+            continue;
+        }
+        let n = normal_of(a, b);
+        let mid = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
+        let plus = has_floor(level, [mid[0] + n[0] * 0.3, mid[1] + n[1] * 0.3]);
+        let minus = has_floor(level, [mid[0] - n[0] * 0.3, mid[1] - n[1] * 0.3]);
+        if plus != minus {
+            // Convention "left = +normal": the outdoor room is on the side without floor.
+            agree += if (e.left == 0) == !plus { 1 } else { -1 };
+        }
+    }
+    let left_is_plus = agree >= 0;
+    for (a, b, level, e) in data.walls.segments() {
         let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
         let len = (dx * dx + dz * dz).sqrt();
         if len < 1e-3 {
             continue;
         }
-        let n = [-dz / len, dx / len];
+        let n = normal_of(a, b);
         let mid = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
         let side = |sign: f32| [mid[0] + n[0] * 0.3 * sign, mid[1] + n[1] * 0.3 * sign];
         // Upper-storey "walls" with no floor on either side are beams over open structures.
         if level > 1 && !has_floor(level, side(1.0)) && !has_floor(level, side(-1.0)) {
             continue;
         }
-        let probe = |sign: f32| side_kind(level, side(sign));
-        walls.push(WallBaked { a, b, level: level as u8, left: probe(1.0), right: probe(-1.0) });
+        let (room_plus, room_minus) = if left_is_plus { (e.left, e.right) } else { (e.right, e.left) };
+        let kind = |sign: f32, room: u32| {
+            if room == 0 {
+                ROOM_OUTSIDE
+            } else {
+                match side_kind(level, side(sign)) {
+                    ROOM_OUTSIDE | ROOM_PORCH => ROOM_LIVING,
+                    k => k,
+                }
+            }
+        };
+        walls.push(WallBaked { a, b, level: level as u8, left: kind(1.0, room_plus), right: kind(-1.0, room_minus) });
     }
     let foundation: Vec<([f32; 2], [f32; 2])> = data.rooms.segments().filter(|s| s.2 == 0).map(|s| (s.0, s.1)).collect();
 

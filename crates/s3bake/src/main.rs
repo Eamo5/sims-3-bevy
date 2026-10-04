@@ -49,6 +49,14 @@ fn main() {
         let walls: usize = w.buildings.iter().map(|b| b.walls.len()).sum();
         let objs: usize = w.buildings.iter().map(|b| b.objects.len()).sum();
         println!("houses: {} with {walls} wall segments, {objs} objects", w.buildings.len());
+        let furnished: Vec<String> = w.buildings.iter().filter(|b| b.is_furnished()).map(|b| w.lots[b.lot as usize].display_name.clone()).collect();
+        println!("furnished: {} {:?}", furnished.len(), &furnished[..furnished.len().min(6)]);
+        if let Some(b) = w.buildings.iter().find(|b| b.is_house() && !b.is_furnished()) {
+            let mut scripts: Vec<&str> = b.objects.iter().map(|o| o.script.rsplit('.').next().unwrap_or("")).collect();
+            scripts.sort();
+            scripts.dedup();
+            println!("unfurnished example {}: {:?}", w.lots[b.lot as usize].display_name, &scripts[..scripts.len().min(30)]);
+        }
         let kinds: std::collections::HashSet<u64> = w.trees.iter().map(|t| t.kind).collect();
         println!("trees: {} of {} kinds, {} kinds with billboards", w.trees.len(), kinds.len(), w.tree_kinds.len());
         for k in w.tree_kinds.iter().take(5) {

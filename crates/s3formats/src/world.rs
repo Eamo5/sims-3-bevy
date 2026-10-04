@@ -53,8 +53,12 @@ impl LotInfo {
     }
 
     pub fn is_residential(&self) -> bool {
+        let name = self.internal_name.to_ascii_lowercase();
         self.string_keys.iter().any(|k| k.contains("HouseName"))
-            || self.internal_name.to_ascii_lowercase().contains("empty")
+            || name.contains("empty")
+            || name.starts_with("res_")
+            || name.starts_with("res ")
+            || name.contains("residential")
     }
 
     pub fn name_key(&self) -> Option<&str> {

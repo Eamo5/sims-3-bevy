@@ -263,7 +263,10 @@ fn spawn_lot_chooser(
         .map(|(i, l)| (i, world.data.lot_names.get(i).cloned().unwrap_or_else(|| l.internal_name.clone()), l))
         .collect();
     // Furnished houses first, then empty lots.
-    lots.sort_by_key(|l| (!world.data.buildings.get(&l.0).is_some_and(|b| b.is_house()), l.1.clone()));
+    lots.sort_by_key(|l| {
+        let b = world.data.buildings.get(&l.0);
+        (!b.is_some_and(|b| b.is_furnished()), !b.is_some_and(|b| b.is_house()), l.1.clone())
+    });
     commands
         .spawn((
             DespawnOnExit(PlayMode::ChooseLot),
@@ -307,7 +310,8 @@ fn spawn_lot_chooser(
                 let kind = match world.data.buildings.get(&i).filter(|b| b.is_house()) {
                     Some(b) => {
                         let floors = b.floors.iter().map(|f| f.level).collect::<std::collections::BTreeSet<_>>().len().max(1);
-                        format!("Furnished house · {floors} floor{}", if floors > 1 { "s" } else { "" })
+                        let what = if b.is_furnished() { "Furnished house" } else { "Unfurnished house" };
+                        format!("{what} · {floors} floor{}", if floors > 1 { "s" } else { "" })
                     }
                     None => "Empty lot".to_string(),
                 };
@@ -383,7 +387,7 @@ fn auto_move_in(
     let want = args.lot.clone().unwrap_or_else(|| "empty".into()).to_ascii_lowercase();
     let idx = if want == "house" {
         // The first residential lot with a pre-built house.
-        world.data.lots.iter().enumerate().position(|(i, l)| l.is_residential() && world.data.buildings.get(&i).is_some_and(|b| b.is_house()))
+        world.data.lots.iter().enumerate().position(|(i, l)| l.is_residential() && world.data.buildings.get(&i).is_some_and(|b| b.is_furnished()))
     } else {
         world
             .data

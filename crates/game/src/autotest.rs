@@ -312,7 +312,7 @@ fn ui_flow(
         (5, AppState::InGame, Some(crate::PlayMode::ChooseLot)) if since > 3.0 => {
             shot(&mut commands, "4_choose_lot");
             // The first furnished house, as a player would pick from the top of the list.
-            let house = world.as_ref().and_then(|w| lots.iter().map(|(_, b)| b.0).filter(|i| w.data.buildings.get(i).is_some_and(|b| b.is_house())).min());
+            let house = world.as_ref().and_then(|w| lots.iter().map(|(_, b)| b.0).filter(|i| w.data.buildings.get(i).is_some_and(|b| b.is_furnished())).min());
             if let Some((mut i, _)) = lots.iter_mut().find(|(_, b)| house.is_none_or(|h| b.0 == h)) {
                 *i = Interaction::Pressed;
             }

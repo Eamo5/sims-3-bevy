@@ -8,7 +8,7 @@ pub use s3formats::world::{Heightmap, LotInfo};
 /// Bump whenever any baked format changes; stale caches are rebuilt.
 pub const BAKE_VERSION: u32 = 4;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 13;
+pub const WORLD_VERSION: u32 = 15;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -290,6 +290,13 @@ impl LotBuildingBaked {
     /// Whether there's an actual house (walls), not just furniture on an open lot.
     pub fn is_house(&self) -> bool {
         !self.walls.is_empty()
+    }
+
+    /// A house that comes with furniture (beds, fridge...), not an empty shell for sale.
+    pub fn is_furnished(&self) -> bool {
+        // Within reach by stairs (penthouses need elevators).
+        let has = |k: &str| self.objects.iter().any(|o| o.level <= 4 && o.script.to_ascii_lowercase().contains(k));
+        self.is_house() && has(".beds.") && (has("fridge") || has("toilet"))
     }
 }
 
