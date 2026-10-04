@@ -191,6 +191,11 @@ fn main() {
         for s in &g.skills {
             println!("skill {} = {:?} [{} / {} / {}] max {}: {}", s.hex, s.name, s.icon, s.wish_icon, s.object_icon, s.max_level, s.desc);
         }
+        let (walls, floors) = g.patterns.iter().partition::<Vec<_>, _>(|p| !p.floor);
+        println!("{} wallpapers, {} floors", walls.len(), floors.len());
+        for p in walls.iter().take(5).chain(floors.iter().take(5)) {
+            println!("pattern {:?} §{} floor {} tex {:?}", p.name, p.price, p.floor, p.texture);
+        }
         for c in &g.careers {
             println!("career {} = {:?} [{}] part-time {}: {}", c.hex, c.name, c.icon, c.part_time, c.desc);
             for l in &c.levels {

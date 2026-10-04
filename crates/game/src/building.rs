@@ -53,6 +53,8 @@ pub struct ActiveBuilding {
     /// Room kind (`ROOM_*`) of each floor tile.
     floor_kinds: HashMap<(u8, i32, i32), u8>,
     far: Option<bool>,
+    /// The house as built (with any repainting), for redrawing parts of it.
+    pub data: LotBuildingBaked,
 }
 
 impl ActiveBuilding {
@@ -134,6 +136,9 @@ pub struct WallObject {
 /// One face of a wall segment with its full-height and cut-away meshes.
 #[derive(Component)]
 pub struct WallFace {
+    /// Which wall (index into the building's walls) and side (0 = left, 1 = right; caps 255).
+    pub wall: u32,
+    pub side: u8,
     full: Handle<Mesh>,
     /// None when nothing of the face remains below the cut height (door openings).
     cut: Option<Handle<Mesh>>,
@@ -272,6 +277,127 @@ fn place(commands: &mut Commands, e: Entity, root: Option<Entity>, level: u8) {
     }
 }
 
+/// A floor mesh of the active house (redrawn when the floors are repainted).
+#[derive(Component)]
+pub struct FloorMesh;
+
+/// A covering's material: its texture on a matte surface.
+pub fn surface_material(assets: &mut ObjectAssets, ctx: &mut AssetCtx, key: Key) -> Handle<StandardMaterial> {
+    let tex = assets.texture(ctx, key);
+    ctx.materials.add(StandardMaterial {
+        base_color: if tex.is_some() { Color::WHITE } else { Color::srgb(0.8, 0.78, 0.72) },
+        base_color_texture: tex,
+        perceptual_roughness: 0.85,
+        reflectance: 0.2,
+        ..default()
+    })
+}
+
+/// The house's floors: one mesh per level and covering.
+pub fn spawn_floors(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetCtx, b: &LotBuildingBaked, active: &ActiveBuilding, neighbor: Option<Entity>) {
+    let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);
+    let cover_key = |i: u16| (i != s3bake::types::NO_COVER).then(|| b.covers.get(i as usize).copied()).flatten();
+    let mut floor_bufs: HashMap<(u8, Key), MeshBuf> = HashMap::new();
+    for f in &b.floors {
+        // (Ground-level paving sits just above the terrain.)
+        let y = level_y(f.level) + if f.level == 0 { 0.03 } else { 0.012 };
+        let (x, z) = (f.x as f32, f.z as f32);
+        let c = Vec2::new(x + 0.5, z + 0.5);
+        let corners = [Vec2::new(x, z), Vec2::new(x + 1.0, z), Vec2::new(x + 1.0, z + 1.0), Vec2::new(x, z + 1.0)];
+        for t in 0..4 {
+            if f.mask & (1 << t) == 0 {
+                continue;
+            }
+            let buf = floor_bufs.entry((f.level, cover_key(f.cover[t]).unwrap_or_else(|| floor_style(f.kind)))).or_default();
+            let (p1, p2) = (corners[t], corners[(t + 1) % 4]);
+            let pts = [c, p1, p2];
+            buf.tri(pts.map(|p| active.world(p.x, p.y, y)), pts.map(|p| [p.x, p.y]), Vec3::Y);
+        }
+    }
+    for ((level, style), buf) in floor_bufs {
+        let mat = surface_material(assets, ctx, style);
+        let e = commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(mat))).id();
+        if neighbor.is_none() {
+            commands.entity(e).insert(FloorMesh);
+        }
+        place(commands, e, neighbor, level);
+    }
+}
+
+/// One repainting of the active house: a wall side, or a floor tile, given a covering texture.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum PaintOp {
+    Wall { wall: u32, side: u8, texture: Key },
+    Floor { level: u8, x: u16, z: u16, texture: Key },
+}
+
+/// The active house's repaintings since it was built (kept in saves).
+#[derive(Resource, Default, Clone)]
+pub struct LotPaint(pub Vec<PaintOp>);
+
+/// Repaints the active house: applies the operations to its data and redraws the walls painted
+/// and, if any floor changed, the floors.
+pub fn repaint(
+    commands: &mut Commands,
+    b: &mut ActiveBuilding,
+    assets: &mut ObjectAssets,
+    ctx: &mut AssetCtx,
+    ops: &[PaintOp],
+    faces: &mut Query<(&WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
+    floors: &Query<Entity, With<FloorMesh>>,
+) {
+    let mut mats: HashMap<Key, Handle<StandardMaterial>> = HashMap::new();
+    let mut floors_changed = false;
+    for op in ops {
+        apply_paint(&mut b.data, op);
+        match *op {
+            PaintOp::Wall { wall, side, texture } => {
+                let m = mats.entry(texture).or_insert_with(|| surface_material(assets, ctx, texture)).clone();
+                for (f, mut mat) in faces.iter_mut() {
+                    if f.wall == wall && f.side == side {
+                        mat.0 = m.clone();
+                    }
+                }
+            }
+            PaintOp::Floor { .. } => floors_changed = true,
+        }
+    }
+    if floors_changed {
+        for e in floors {
+            commands.entity(e).despawn();
+        }
+        let data = b.data.clone();
+        spawn_floors(commands, assets, ctx, &data, b, None);
+    }
+}
+
+/// Applies a repainting to a building's data.
+pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
+    let index = |b: &mut LotBuildingBaked, k: Key| -> u16 {
+        match b.covers.iter().position(|c| *c == k) {
+            Some(i) => i as u16,
+            None => {
+                b.covers.push(k);
+                (b.covers.len() - 1) as u16
+            }
+        }
+    };
+    match *op {
+        PaintOp::Wall { wall, side, texture } => {
+            let i = index(b, texture);
+            if let Some(w) = b.walls.get_mut(wall as usize) {
+                w.cover[(side as usize).min(1)] = i;
+            }
+        }
+        PaintOp::Floor { level, x, z, texture } => {
+            let i = index(b, texture);
+            if let Some(f) = b.floors.iter_mut().find(|f| f.level == level && f.x == x && f.z == z) {
+                f.cover = [i; 4];
+            }
+        }
+    }
+}
+
 /// Spawns the detailed house of `lot` with all its furniture and returns its state. With a
 /// `neighbor` root, it's built for show only (merged meshes, furniture without gameplay).
 #[allow(clippy::too_many_arguments)]
@@ -302,6 +428,7 @@ pub fn spawn_building(
         floor_cells,
         floor_kinds,
         far: None,
+        data: b.clone(),
     };
     let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);
     let exterior = STYLE_EXTERIOR[(lot.id % STYLE_EXTERIOR.len() as u64) as usize];
@@ -478,7 +605,7 @@ pub fn spawn_building(
     // (neighbours: everything merged into a few meshes).
     let mut merged: HashMap<Key, MeshBuf> = HashMap::new();
     let mut merged_caps = MeshBuf::default();
-    for w in &b.walls {
+    for (wall_index, w) in b.walls.iter().enumerate() {
         let level = w.level.max(1);
         let y0 = level_y(level);
         let (a, bb) = (Vec2::from(w.a), Vec2::from(w.b));
@@ -530,7 +657,7 @@ pub fn spawn_building(
         let parent = commands
             .spawn((Transform::IDENTITY, Visibility::default(), BuildingPiece { level }, DespawnOnExit(AppState::InGame)))
             .id();
-        for (side, kind, cover) in [(1.0f32, w.left, w.cover[0]), (-1.0, w.right, w.cover[1])] {
+        for (side_index, (side, kind, cover)) in [(1.0f32, w.left, w.cover[0]), (-1.0, w.right, w.cover[1])].into_iter().enumerate() {
             let mut meshes = [MeshBuf::default(), MeshBuf::default()];
             for (mi, top) in [(0usize, WALL_H), (1, CUT_H)] {
                 for (s0, s1) in wall_spans(&seg_holes, top) {
@@ -549,7 +676,11 @@ pub fn spawn_building(
             let full = ctx.meshes.add(full.mesh());
             let cut = (!cut.is_empty()).then(|| ctx.meshes.add(cut.mesh()));
             let face = commands
-                .spawn((Mesh3d(full.clone()), MeshMaterial3d(mat), WallFace { full, cut, mid, level, is_cut: false }))
+                .spawn((
+                    Mesh3d(full.clone()),
+                    MeshMaterial3d(mat),
+                    WallFace { wall: wall_index as u32, side: side_index as u8, full, cut, mid, level, is_cut: false },
+                ))
                 .id();
             commands.entity(parent).add_child(face);
         }
@@ -566,7 +697,11 @@ pub fn spawn_building(
             let full = ctx.meshes.add(full.mesh());
             let cut = (!cut.is_empty()).then(|| ctx.meshes.add(cut.mesh()));
             let cap = commands
-                .spawn((Mesh3d(full.clone()), MeshMaterial3d(cap_mat.clone()), WallFace { full, cut, mid, level, is_cut: false }))
+                .spawn((
+                    Mesh3d(full.clone()),
+                    MeshMaterial3d(cap_mat.clone()),
+                    WallFace { wall: wall_index as u32, side: 255, full, cut, mid, level, is_cut: false },
+                ))
                 .id();
             commands.entity(parent).add_child(cap);
         }
@@ -592,29 +727,8 @@ pub fn spawn_building(
         place(commands, e, neighbor, 1);
     }
 
-    // Floors, one mesh per level and style.
-    let mut floor_bufs: HashMap<(u8, Key), MeshBuf> = HashMap::new();
-    for f in &b.floors {
-        // (Ground-level paving sits just above the terrain.)
-        let y = level_y(f.level) + if f.level == 0 { 0.03 } else { 0.012 };
-        let (x, z) = (f.x as f32, f.z as f32);
-        let c = Vec2::new(x + 0.5, z + 0.5);
-        let corners = [Vec2::new(x, z), Vec2::new(x + 1.0, z), Vec2::new(x + 1.0, z + 1.0), Vec2::new(x, z + 1.0)];
-        for t in 0..4 {
-            if f.mask & (1 << t) == 0 {
-                continue;
-            }
-            let buf = floor_bufs.entry((f.level, cover_key(f.cover[t]).unwrap_or_else(|| floor_style(f.kind)))).or_default();
-            let (p1, p2) = (corners[t], corners[(t + 1) % 4]);
-            let pts = [c, p1, p2];
-            buf.tri(pts.map(|p| active.world(p.x, p.y, y)), pts.map(|p| [p.x, p.y]), Vec3::Y);
-        }
-    }
-    for ((level, style), buf) in floor_bufs {
-        let mat = material(assets, ctx, style);
-        let e = commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(mat))).id();
-        place(commands, e, neighbor, level);
-    }
+    // Floors, one mesh per level and covering.
+    spawn_floors(commands, assets, ctx, b, &active, neighbor);
 
     // Foundation sides from slightly below the ground up to the ground floor.
     if !b.foundation.is_empty() {

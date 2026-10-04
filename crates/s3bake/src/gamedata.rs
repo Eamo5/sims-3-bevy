@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 4;
+pub const GAMEDATA_VERSION: u32 = 5;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -83,6 +83,16 @@ pub struct CareerInfo {
     pub levels: Vec<CareerLevelInfo>,
 }
 
+/// A wallpaper or floor covering from the build catalogue.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct PatternInfo {
+    pub name: String,
+    pub price: i32,
+    pub floor: bool,
+    /// Its rendered texture in the texture store.
+    pub texture: crate::types::Key,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct GameDataBaked {
     pub version: u32,
@@ -90,6 +100,7 @@ pub struct GameDataBaked {
     pub traits: Vec<TraitInfo>,
     pub skills: Vec<SkillInfo>,
     pub careers: Vec<CareerInfo>,
+    pub patterns: Vec<PatternInfo>,
 }
 
 impl GameDataBaked {
@@ -316,6 +327,44 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 levels,
             });
         }
+    }
+
+    // The build catalogue's wallpapers and floors, each rendered in its first swatch (under the
+    // key lot coverings use for catalogue patterns).
+    progress("Converting: wallpapers and floors…");
+    {
+        let mut keys: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(s3formats::catalog::T_CWAL).copied().collect();
+        keys.sort();
+        keys.dedup_by_key(|k| k.i);
+        let done = std::sync::atomic::AtomicUsize::new(0);
+        let found: Vec<PatternInfo> = crate::bake::par_map(&keys, |k| {
+            let p = s3formats::catalog::WallFloorPattern::parse(&pkgs.read(k)?).ok()?;
+            done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let floor = match p.pattern_type {
+                s3formats::catalog::PATTERN_FLOOR => true,
+                s3formats::catalog::PATTERN_WALL => false,
+                _ => return None,
+            };
+            let name = strings.get(&p.name_guid).cloned().unwrap_or_default();
+            if !p.in_catalog || p.price <= 0.0 || name.is_empty() {
+                return None;
+            }
+            let texture = (crate::types::T_COVER, if floor { 4 } else { 3 }, k.i);
+            let path = root.tex_path(texture);
+            if !path.exists() {
+                let m = p.materials.first()?;
+                let (w, h) = if floor { (256, 256) } else { (256, 512) };
+                let img = s3formats::complate::render(pkgs, &m.complate, &m.keys, w, h)?;
+                std::fs::write(&path, crate::ddsw::encode_dds(&img)).ok()?;
+            }
+            Some(PatternInfo { name, price: p.price.round() as i32, floor, texture })
+        })
+        .into_iter()
+        .flatten()
+        .collect();
+        out.patterns = found;
+        out.patterns.sort_by(|a, b| a.floor.cmp(&b.floor).then(a.price.cmp(&b.price)).then(a.name.cmp(&b.name)));
+        out.patterns.dedup_by(|a, b| a.floor == b.floor && a.name == b.name);
     }
 
     // Icons: everything these tables name, plus interface pieces used directly.

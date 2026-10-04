@@ -115,6 +115,9 @@ pub struct SaveGame {
     pub bought: Vec<SavedObject>,
     /// The lot's own furniture that was sold or moved.
     pub removed: Vec<SavedObject>,
+    /// Walls and floors repainted in build mode.
+    #[serde(default)]
+    pub paint: Vec<crate::building::PaintOp>,
 }
 
 impl SaveGame {
@@ -246,7 +249,7 @@ fn save_game(
     clock: Res<GameClock>,
     world: Res<CurrentWorld>,
     household: Option<Res<Household>>,
-    removed: Res<RemovedLotObjects>,
+    (removed, paint): (Res<RemovedLotObjects>, Option<Res<crate::building::LotPaint>>),
     sims: Query<
         (
             Entity,
@@ -326,6 +329,7 @@ fn save_game(
         sims: saved,
         bought: bought.iter().map(|(o, tf)| saved_object(o, tf)).collect(),
         removed: removed.0.clone(),
+        paint: paint.map(|p| p.0.clone()).unwrap_or_default(),
     };
     let dir = saves_dir();
     let _ = std::fs::create_dir_all(&dir);
@@ -370,6 +374,11 @@ fn apply_loaded_game(
     objects: Query<(Entity, &GameObject, &Transform), (Without<Bought>, Without<Sim>)>,
     (data, catalog, mut assets): (Res<crate::baked::Baked>, Res<Catalog>, ResMut<crate::objects::ObjectAssets>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    (mut building, mut faces, floor_meshes): (
+        Option<ResMut<crate::building::ActiveBuilding>>,
+        Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
+        Query<Entity, With<crate::building::FloorMesh>>,
+    ),
     mut grid: Option<ResMut<crate::nav::NavGrid>>,
     mut notes: ResMut<Notifications>,
 ) {
@@ -459,6 +468,11 @@ fn apply_loaded_game(
     }
     removed.0 = game.removed.clone();
     let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+    // The walls and floors as the household left them.
+    if let Some(b) = building.as_deref_mut() {
+        crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &game.paint, &mut faces, &floor_meshes);
+    }
+    commands.insert_resource(crate::building::LotPaint(game.paint.clone()));
     for b in &game.bought {
         let rot = Quat::from_array(b.rotation);
         if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, b.objd, Vec3::from(b.position), rot) {

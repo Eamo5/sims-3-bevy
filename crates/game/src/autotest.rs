@@ -30,6 +30,8 @@ pub struct AutoArgs {
     pub action: Option<String>,
     /// `--place <script class part>`: put that catalog object beside the selected Sim.
     pub place: Option<String>,
+    /// `--paint`: repaper the house's indoor walls and recover its ground floor.
+    pub paint: bool,
     /// `--family <name>`: play this town family.
     pub family: Option<String>,
     /// `--select <first name>`: select this household member.
@@ -81,6 +83,11 @@ impl AutoArgs {
                     i += 1;
                     continue;
                 }
+                "--paint" => {
+                    a.paint = true;
+                    i += 1;
+                    continue;
+                }
                 "--exit-after-shot" => {
                     a.exit_after = true;
                     i += 1;
@@ -112,6 +119,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_place.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, auto_paint.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_view_level.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_speed.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_save.run_if(in_state(crate::PlayMode::Live)))
@@ -293,6 +301,49 @@ fn portrait_cam(
         c.pitch = std::env::var("PORTRAIT_PITCH").ok().and_then(|v| v.parse().ok()).unwrap_or(0.12);
         c.yaw = fwd.x.atan2(fwd.z) + std::env::var("PORTRAIT_YAW").ok().and_then(|v| v.parse().ok()).unwrap_or(0.35);
     }
+}
+
+/// `--paint`: once the house is in, every indoor wall side gets the dearest wallpaper and the
+/// ground floor the dearest flooring, through the same repainting the build tool uses.
+#[allow(clippy::too_many_arguments)]
+fn auto_paint(
+    args: Res<AutoArgs>,
+    mut done: Local<bool>,
+    time: Res<Time>,
+    mut since: Local<Option<f32>>,
+    mut commands: Commands,
+    ui: Option<Res<crate::icons::GameUi>>,
+    mut building: Option<ResMut<crate::building::ActiveBuilding>>,
+    (data, mut assets): (Res<crate::baked::Baked>, ResMut<crate::objects::ObjectAssets>),
+    (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    (mut faces, floors): (Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>, Query<Entity, With<crate::building::FloorMesh>>),
+) {
+    if !args.paint || *done {
+        return;
+    }
+    let t0 = *since.get_or_insert(time.elapsed_secs());
+    if time.elapsed_secs() - t0 < 3.0 {
+        return;
+    }
+    let (Some(ui), Some(b)) = (ui, building.as_deref_mut()) else { return };
+    *done = true;
+    let pick = |floor: bool| ui.data.patterns.iter().filter(|p| p.floor == floor).max_by_key(|p| p.price).map(|p| p.texture);
+    let (Some(wall_tex), Some(floor_tex)) = (pick(false), pick(true)) else { return };
+    let mut ops = Vec::new();
+    for (i, w) in b.data.walls.iter().enumerate() {
+        for (side, kind) in [(0u8, w.left), (1, w.right)] {
+            if kind != s3bake::ROOM_OUTSIDE {
+                ops.push(crate::building::PaintOp::Wall { wall: i as u32, side, texture: wall_tex });
+            }
+        }
+    }
+    for f in b.data.floors.iter().filter(|f| f.level == 1) {
+        ops.push(crate::building::PaintOp::Floor { level: 1, x: f.x, z: f.z, texture: floor_tex });
+    }
+    info!("paint test: {} repaintings", ops.len());
+    let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+    crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces, &floors);
+    commands.insert_resource(crate::building::LotPaint(ops));
 }
 
 /// `--place <kind>`: the cheapest catalog object of that kind (`Telescope`, `HotTub`…), set down
@@ -483,6 +534,7 @@ fn ui_flow(
         ResMut<crate::options::GameMenu>,
         Option<ResMut<crate::clock::GameClock>>,
     ),
+    mut buy: ResMut<crate::buy::BuyMode>,
 ) {
     let Some(dir) = &args.ui_flow else { return };
     let now = time.elapsed_secs();
@@ -598,8 +650,21 @@ fn ui_flow(
             advance(&mut stage);
         }
         (8, AppState::InGame, _) if since > 1.0 => {
+            buy.show(crate::buy::WALLPAPER_TAB);
+            *stage = (60, now);
+        }
+        (60, AppState::InGame, _) if since > 1.5 => {
+            shot(&mut commands, "6b_wallpaper");
+            *stage = (61, now);
+        }
+        (61, AppState::InGame, _) if since > 0.5 => {
+            buy.show(0);
+            buy.active = false;
+            *stage = (62, now);
+        }
+        (62, AppState::InGame, _) if since > 1.0 => {
             crate::options::toggle_game_menu(&mut commands, &mut game_menu, clock.as_deref_mut());
-            advance(&mut stage);
+            *stage = (9, now);
         }
         (9, AppState::InGame, _) if since > 1.0 => {
             shot(&mut commands, "7_game_menu");

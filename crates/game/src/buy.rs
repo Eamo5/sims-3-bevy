@@ -24,13 +24,15 @@ impl Plugin for BuyPlugin {
             .add_systems(OnEnter(PlayMode::Live), |mut b: ResMut<BuyMode>| *b = BuyMode::default())
             .add_systems(
                 Update,
-                (toggle_buy, buy_panel, buy_buttons, buy_visuals, buy_pick, placement).chain().run_if(in_state(PlayMode::Live)),
+                (toggle_buy, buy_panel, buy_buttons, buy_visuals, buy_pick, placement, paint).chain().run_if(in_state(PlayMode::Live)),
             );
     }
 }
 
 pub const CATEGORIES: [&str; 10] =
     ["Appliances", "Plumbing", "Beds", "Seating", "Surfaces", "Electronics", "Hobbies", "Kids", "Lighting", "Decor"];
+/// Build-mode tabs after the buy categories: wallpaper and floors.
+const PAINT_TABS: [&str; 2] = ["Wallpaper", "Floors"];
 const PAGE: usize = 24;
 
 pub struct Placing {
@@ -48,6 +50,8 @@ pub struct BuyMode {
     pub placing: Option<Placing>,
     pub yaw: f32,
     dirty: bool,
+    /// The wallpaper or floor being painted with (index into the game data's patterns).
+    pub painting: Option<usize>,
 }
 
 #[derive(Component)]
@@ -97,9 +101,23 @@ enum BuyButton {
     Toggle,
     Category(usize),
     Item(Key),
+    Pattern(usize),
     Prev,
     Next,
 }
+
+impl BuyMode {
+    /// Opens buy/build mode on a category (the paint tabs follow the buy categories).
+    pub fn show(&mut self, category: usize) {
+        self.active = true;
+        self.category = category;
+        self.page = 0;
+        self.dirty = true;
+    }
+}
+
+/// Index of the wallpaper tab.
+pub const WALLPAPER_TAB: usize = CATEGORIES.len();
 
 fn toggle_buy(keys: Res<ButtonInput<KeyCode>>, mut buy: ResMut<BuyMode>, mut commands: Commands, mut clock: ResMut<crate::clock::GameClock>) {
     if keys.just_pressed(KeyCode::KeyB) || keys.just_pressed(KeyCode::F2) {
@@ -111,6 +129,7 @@ fn toggle_buy(keys: Res<ButtonInput<KeyCode>>, mut buy: ResMut<BuyMode>, mut com
 fn set_active(buy: &mut BuyMode, on: bool, commands: &mut Commands, clock: &mut crate::clock::GameClock) {
     buy.active = on;
     buy.dirty = true;
+    buy.painting = None;
     if let Some(p) = buy.placing.take() {
         commands.entity(p.ghost).despawn();
     }
@@ -144,12 +163,16 @@ fn button(p: &mut ChildSpawnerCommands, label: String, b: BuyButton, w: Val, h: 
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn buy_panel(
     mut commands: Commands,
     mut buy: ResMut<BuyMode>,
     catalog: Res<Catalog>,
     panel: Query<Entity, With<BuyPanel>>,
     mut spawned_toggle: Local<bool>,
+    ui: Option<Res<crate::icons::GameUi>>,
+    (data, mut assets): (Res<Baked>, ResMut<ObjectAssets>),
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
 ) {
     if !*spawned_toggle {
         *spawned_toggle = true;
@@ -188,9 +211,65 @@ fn buy_panel(
                 for (i, c) in CATEGORIES.iter().enumerate() {
                     button(row, c.to_string(), BuyButton::Category(i), Val::Auto, 32.0, i == buy.category);
                 }
+                if ui.is_some() {
+                    for (i, c) in PAINT_TABS.iter().enumerate() {
+                        let k = CATEGORIES.len() + i;
+                        button(row, c.to_string(), BuyButton::Category(k), Val::Auto, 32.0, k == buy.category);
+                    }
+                }
             }
         });
         if !buy.active {
+            return;
+        }
+        // Wallpaper and floors: swatches of the catalogue's patterns.
+        if buy.category >= CATEGORIES.len() {
+            let floor = buy.category == CATEGORIES.len() + 1;
+            let Some(ui) = ui.as_deref() else { return };
+            let items: Vec<(usize, &s3bake::gamedata::PatternInfo)> = ui.data.patterns.iter().enumerate().filter(|(_, p)| p.floor == floor).collect();
+            let pages = items.len().div_ceil(PAGE).max(1);
+            let page = buy.page.min(pages - 1);
+            let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+            p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|grid| {
+                for (i, pat) in items.iter().skip(page * PAGE).take(PAGE) {
+                    let tex = assets.texture(&mut ctx, pat.texture);
+                    let chosen = buy.painting == Some(*i);
+                    grid.spawn((
+                        Button,
+                        BuyButton::Pattern(*i),
+                        Node {
+                            width: Val::Px(176.0),
+                            height: Val::Px(42.0),
+                            column_gap: Val::Px(6.0),
+                            align_items: AlignItems::Center,
+                            padding: UiRect::horizontal(Val::Px(4.0)),
+                            border: UiRect::all(Val::Px(if chosen { 2.0 } else { 0.0 })),
+                            border_radius: BorderRadius::all(Val::Px(8.0)),
+                            ..default()
+                        },
+                        BorderColor::all(PLUMBOB_GREEN),
+                        BackgroundColor(BTN_NORMAL),
+                        crate::icons::Tooltip(format!("{} — §{} per {}", pat.name, pat.price, if floor { "tile" } else { "wall" })),
+                    ))
+                    .with_children(|b| {
+                        if let Some(t) = tex {
+                            let h = if floor { 34.0 } else { 36.0 };
+                            b.spawn((ImageNode::new(t), Node { width: Val::Px(if floor { 34.0 } else { 18.0 }), height: Val::Px(h), ..default() }, Pickable::IGNORE));
+                        }
+                        let mut name = pat.name.clone();
+                        if name.chars().count() > 22 {
+                            name = name.chars().take(20).collect::<String>() + "…";
+                        }
+                        b.spawn((text(format!("{name}\n§{}", pat.price), 12.0, Color::WHITE), Pickable::IGNORE));
+                    });
+                }
+            });
+            p.spawn(Node { column_gap: Val::Px(8.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
+                button(row, "< Prev".into(), BuyButton::Prev, Val::Px(80.0), 28.0, false);
+                let how = if floor { "click a floor to cover the room" } else { "click a wall to paper that side" };
+                row.spawn(text(format!("Page {} / {} · {} patterns · {how} · right-click to stop", page + 1, pages, items.len()), 13.0, Color::WHITE));
+                button(row, "Next >".into(), BuyButton::Next, Val::Px(80.0), 28.0, false);
+            });
             return;
         }
         let items = catalog.in_category(CATEGORIES[buy.category]);
@@ -237,6 +316,7 @@ fn buy_buttons(
             BuyButton::Category(c) => {
                 buy.category = *c;
                 buy.page = 0;
+                buy.painting = None;
                 buy.dirty = true;
             }
             BuyButton::Prev => {
@@ -247,7 +327,15 @@ fn buy_buttons(
                 buy.page += 1;
                 buy.dirty = true;
             }
+            BuyButton::Pattern(i) => {
+                if let Some(p) = buy.placing.take() {
+                    commands.entity(p.ghost).despawn();
+                }
+                buy.painting = Some(*i);
+                buy.dirty = true;
+            }
             BuyButton::Item(key) => {
+                buy.painting = None;
                 if let Some(p) = buy.placing.take() {
                     commands.entity(p.ghost).despawn();
                 }
@@ -262,6 +350,119 @@ fn buy_buttons(
             }
         }
     }
+}
+
+/// Painting: a click on a wall papers that side; a click on a floor covers its room.
+#[allow(clippy::too_many_arguments)]
+fn paint(
+    mut commands: Commands,
+    mut buy: ResMut<BuyMode>,
+    (keys, mouse, over_ui): (Res<ButtonInput<KeyCode>>, Res<ButtonInput<MouseButton>>, Res<PointerOverUi>),
+    (windows, cams): (Query<&Window, With<PrimaryWindow>>, Query<(&Camera, &GlobalTransform), With<SimsCamera>>),
+    (world, data, ui): (Res<CurrentWorld>, Res<Baked>, Option<Res<crate::icons::GameUi>>),
+    mut building: Option<ResMut<crate::building::ActiveBuilding>>,
+    mut assets: ResMut<ObjectAssets>,
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    (mut faces, floor_meshes): (
+        Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
+        Query<Entity, With<crate::building::FloorMesh>>,
+    ),
+    (mut household, mut notes, mut log, mut play): (
+        Option<ResMut<Household>>,
+        ResMut<Notifications>,
+        Option<ResMut<crate::building::LotPaint>>,
+        MessageWriter<crate::sound::PlaySound>,
+    ),
+) {
+    let Some(i) = buy.painting.filter(|_| buy.active) else { return };
+    if mouse.just_pressed(MouseButton::Right) || keys.just_pressed(KeyCode::Escape) {
+        buy.painting = None;
+        buy.dirty = true;
+        return;
+    }
+    if !mouse.just_pressed(MouseButton::Left) || over_ui.0 {
+        return;
+    }
+    let (Some(ui), Some(b)) = (ui, building.as_deref_mut()) else { return };
+    let Some(pat) = ui.data.patterns.get(i).cloned() else { return };
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    let Ok((camera, cam_tf)) = cams.single() else { return };
+    let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else { return };
+    let mut ops = Vec::new();
+    if pat.floor {
+        // The room under the pointer (a single tile outdoors).
+        let Some((p, level)) = crate::hud::floor_hit(ray, &world, Some(b)) else { return };
+        let l = b.local(p);
+        let (x, z) = (l.x.floor(), l.y.floor());
+        if x < 0.0 || z < 0.0 {
+            return;
+        }
+        let Some(tile) = b.data.floors.iter().find(|f| f.level == level && f.x == x as u16 && f.z == z as u16).copied() else { return };
+        for f in b.data.floors.iter().filter(|f| f.level == tile.level && if tile.region == 0 { f.x == tile.x && f.z == tile.z } else { f.region == tile.region }) {
+            ops.push(crate::building::PaintOp::Floor { level: f.level, x: f.x, z: f.z, texture: pat.texture });
+        }
+    } else {
+        let Some((wall, side)) = pick_wall(ray, b) else { return };
+        ops.push(crate::building::PaintOp::Wall { wall, side, texture: pat.texture });
+    }
+    if ops.is_empty() {
+        return;
+    }
+    let cost = pat.price as i64 * ops.len() as i64;
+    if household.as_ref().is_some_and(|h| h.funds < cost) {
+        notes.push("You can't afford that.");
+        return;
+    }
+    if let Some(h) = household.as_mut() {
+        h.funds -= cost;
+    }
+    let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+    crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces, &floor_meshes);
+    match log.as_mut() {
+        Some(l) => l.0.extend(ops),
+        None => commands.insert_resource(crate::building::LotPaint(ops)),
+    }
+    play.write(crate::sound::PlaySound::ui(if pat.floor { "ui_build_flooring_plop" } else { "ui_build_wallcovering_plop" }));
+}
+
+/// The nearest wall the ray meets on the floors in view, and which side faces the ray (0 = the
+/// wall's left / +normal side).
+fn pick_wall(ray: Ray3d, b: &crate::building::ActiveBuilding) -> Option<(u32, u8)> {
+    let mut best: Option<(f32, u32, u8)> = None;
+    for (i, w) in b.data.walls.iter().enumerate() {
+        let level = w.level.max(1);
+        if level > b.view_level {
+            continue;
+        }
+        let y0 = b.levels.get(level as usize).copied().unwrap_or(0.0);
+        let (la, lb) = (Vec2::from(w.a), Vec2::from(w.b));
+        let len = (lb - la).length();
+        if len < 1e-3 {
+            continue;
+        }
+        let along = (lb - la) / len;
+        let n = b.rot * Vec3::new(-along.y, 0.0, along.x);
+        let a = b.world(la.x, la.y, y0);
+        let c = b.world(lb.x, lb.y, y0);
+        let denom = ray.direction.dot(n);
+        if denom.abs() < 1e-4 {
+            continue;
+        }
+        let t = (a - ray.origin).dot(n) / denom;
+        if t <= 0.0 || best.is_some_and(|b| t >= b.0) {
+            continue;
+        }
+        let p = ray.origin + *ray.direction * t;
+        let dir = (c - a).with_y(0.0);
+        let s = (p - a).with_y(0.0).dot(dir) / dir.length_squared();
+        if !(0.0..=1.0).contains(&s) || p.y < y0 || p.y > y0 + 3.0 {
+            continue;
+        }
+        let side = if (ray.origin - a).dot(n) > 0.0 { 0 } else { 1 };
+        best = Some((t, i as u32, side));
+    }
+    best.map(|(_, w, s)| (w, s))
 }
 
 fn buy_visuals(mut q: Query<(&Interaction, &mut BackgroundColor), With<BuyButton>>) {

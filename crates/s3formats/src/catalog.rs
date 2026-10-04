@@ -97,6 +97,10 @@ pub struct WallFloorPattern {
     /// `PATTERN_FLOOR` or `PATTERN_WALL`.
     pub pattern_type: u32,
     pub keys: Vec<ResourceKey>,
+    /// String-table key of the display name, the price, and whether the catalogue shows it.
+    pub name_guid: u64,
+    pub price: f32,
+    pub in_catalog: bool,
 }
 
 fn cstring(r: &mut Reader) -> R<String> {
@@ -193,7 +197,7 @@ impl WallFloorPattern {
         }
         // Catalogue common block.
         let _cver = r.u32()?;
-        r.u64()?;
+        let name_guid = r.u64()?;
         r.u64()?;
         let utf16be = |r: &mut Reader| -> R<String> {
             let raw = r.string_bytes_7bit()?;
@@ -201,8 +205,9 @@ impl WallFloorPattern {
         };
         let name = utf16be(&mut r).unwrap_or_default();
         let _desc = utf16be(&mut r).unwrap_or_default();
-        r.skip(12)?; // price, niceness, crap score
-        r.u8()?; // product status
+        let price = r.f32()?;
+        r.skip(8)?; // niceness, crap score
+        let status = r.u8()?;
         r.u64()?; // png instance
         r.u8()?;
         r.f32()?; // environment score
@@ -213,6 +218,6 @@ impl WallFloorPattern {
         let pattern_type = r.u32().unwrap_or(0);
         r.pos = tgi_pos;
         let keys = tgi_list(&mut r).unwrap_or_default();
-        Ok(Self { materials, name, pattern_type, keys })
+        Ok(Self { materials, name, pattern_type, keys, name_guid, price, in_catalog: status & 1 != 0 })
     }
 }

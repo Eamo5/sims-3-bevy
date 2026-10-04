@@ -50,6 +50,10 @@ installation is unreachable.
   of them, or meet them around town.
 - **Play**: choose a furnished house (with the game's lot pictures) or an empty lot, buy
   mode, multi-storey navigation by stairs, day/night with lamps and street lights.
+- **Build mode painting**: the catalogue's wallpapers and floor coverings (every base-game
+  pattern with its name and price, swatched from its texture recipe) on Wallpaper and Floors
+  tabs; click a wall to paper that side, or a floor to cover the whole room. Repainting is
+  charged, sounds like the game's build tools, and is kept in saves.
 - **Sound**: the game's own audio, converted once (EALayer3 rewrapped as MP3, EA-XAS decoded to
   WAV): object sounds and Simlish voices cued by the animations, footsteps by floor and
   shoe, interface clicks, stings for promotions, weddings and other moments, birds by day
