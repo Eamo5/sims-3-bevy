@@ -3,6 +3,7 @@
 //! so the game never parses packages or composites textures at runtime.
 
 pub mod bake;
+pub mod building;
 pub mod ddsw;
 pub mod pack;
 pub mod types;

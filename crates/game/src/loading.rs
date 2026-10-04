@@ -85,6 +85,8 @@ pub struct WorldInfo {
     pub lots: Vec<LotInfo>,
     pub lot_names: Vec<String>,
     pub sea_level: f32,
+    /// Pre-built houses by lot index.
+    pub buildings: std::collections::HashMap<usize, s3bake::LotBuildingBaked>,
 }
 
 /// The world currently being played.
@@ -173,6 +175,7 @@ fn start_loading(
             lots: world.lots.iter().map(|l| l.info.clone()).collect(),
             heightmap: world.heightmap,
             sea_level: world.sea_level,
+            buildings: world.buildings.into_iter().map(|b| (b.lot as usize, b)).collect(),
         };
         set_status("Done");
         Ok(LoadResult { baked, world: Arc::new(info), terrain, catalog, world_build, roads, cas, sims })

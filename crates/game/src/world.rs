@@ -28,6 +28,10 @@ pub struct WorldBuild {
     pub trees: Vec<TreeBaked>,
 }
 
+/// A world tree (stand-in for a SpeedTree).
+#[derive(Component)]
+pub struct Tree;
+
 /// Marks the pre-built shell of a lot, hidden when the household moves onto it.
 #[derive(Component)]
 pub struct LotImposter(pub usize);
@@ -107,7 +111,7 @@ fn spawn_world_content(
             .with_rotation(quat(t.rotation))
             .with_scale(Vec3::splat(t.scale));
         commands
-            .spawn((tf, Visibility::default(), DespawnOnExit(AppState::InGame), VisibilityRange::abrupt(0.0, 900.0)))
+            .spawn((tf, Visibility::default(), Tree, DespawnOnExit(AppState::InGame), VisibilityRange::abrupt(0.0, 900.0)))
             .with_children(|c| {
                 c.spawn((Mesh3d(trunk.clone()), MeshMaterial3d(bark.clone()), Transform::from_xyz(0.0, 2.0, 0.0)));
                 if conifer {

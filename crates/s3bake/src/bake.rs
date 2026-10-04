@@ -443,7 +443,11 @@ fn layer_array(dds: &[Option<Vec<u8>>]) -> Option<((u32, u32, u32, u32), Vec<u8>
 }
 
 pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &str, progress: Progress) -> Result<(), String> {
-    let wdir = root.world_dir(name);
+    // Build into a scratch folder and swap it in at the end, so a failed bake never
+    // destroys a working cache.
+    let final_dir = root.world_dir(name);
+    let wdir = final_dir.with_extension("baking");
+    let _ = std::fs::remove_dir_all(&wdir);
     std::fs::create_dir_all(&wdir).map_err(|e| e.to_string())?;
     progress(&format!("Converting {name}: terrain…"));
     let pkg = Package::open(world_path).map_err(|e| e.to_string())?;
@@ -578,6 +582,15 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
     }
     let road_tex: Vec<(Key, bool)> = road_tex.into_iter().collect();
     bake_textures(root, pkgs, &road_tex, OBJECT_TEX_MAX, &format!("Converting {name}"), progress);
+    progress(&format!("Converting {name}: houses…"));
+    let buildings: Vec<LotBuildingBaked> = world
+        .lots
+        .iter()
+        .enumerate()
+        .filter_map(|(i, l)| crate::building::bake_building(&pkg, i, l, placed.get(&l.id).map(|v| v.as_slice()).unwrap_or(&[])))
+        .collect();
+    let styles: Vec<(Key, bool)> = BUILD_STYLES.iter().map(|k| (*k, false)).collect();
+    bake_textures(root, pkgs, &styles, 256, &format!("Converting {name}"), progress);
     let overview = stitch_sectors(&pkg, sectors, 2);
     let lightmap = stitch_sectors(&pkg, sectors, 7);
 
@@ -597,8 +610,11 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         roads,
         overview,
         lightmap,
+        buildings,
     };
     write_value(&wdir.join("world.bin"), &baked).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_dir_all(&final_dir);
+    std::fs::rename(&wdir, &final_dir).map_err(|e| e.to_string())?;
     Ok(())
 }
 

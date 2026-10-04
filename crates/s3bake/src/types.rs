@@ -8,7 +8,7 @@ pub use s3formats::world::{Heightmap, LotInfo};
 /// Bump whenever any baked format changes; stale caches are rebuilt.
 pub const BAKE_VERSION: u32 = 3;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 5;
+pub const WORLD_VERSION: u32 = 7;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -165,6 +165,101 @@ pub struct WorldMap {
     pub data: Vec<u8>,
 }
 
+pub const ROOM_OUTSIDE: u8 = 0;
+pub const ROOM_BATH: u8 = 1;
+pub const ROOM_KITCHEN: u8 = 2;
+pub const ROOM_BED: u8 = 3;
+pub const ROOM_LIVING: u8 = 4;
+pub const ROOM_PORCH: u8 = 5;
+
+const fn txtc(g: u32, i: u64) -> Key {
+    (0x033A1435, g, i)
+}
+
+/// Exterior wall styles (one is picked per lot).
+pub const STYLE_EXTERIOR: [Key; 5] = [
+    txtc(0x00D74299, 0x71B67700DCD90437), // Wall_Full_Siding
+    txtc(0x00F0974C, 0xA9FC84C2F785667C), // Wall_Full_ShinglesShaker
+    txtc(0x00F36FB7, 0x9B84A916F214B399), // Wall_Brick_Stretcher
+    txtc(0x005DDCDB, 0x85E8AC046BB5C0F9), // Wall_Full_Stackstone
+    txtc(0x00D268FC, 0xD4A569451BC53D37), // Wall_Structured_TimberPlanks
+];
+pub const STYLE_WALL_DADO: Key = txtc(0x0074783D, 0x711337AE3EE8A911);
+pub const STYLE_WALL_MOULDING: Key = txtc(0x00C916CA, 0x0241D1C5E6BB47FC);
+pub const STYLE_FOUNDATION: Key = txtc(0x0034D846, 0xD553F349EB51DA9C);
+pub const STYLE_FLOOR_WOOD: Key = txtc(0x00D10E21, 0xE4D9401C5E2E03C1);
+pub const STYLE_FLOOR_PARQUET: Key = txtc(0x0084FCE7, 0x2134A0DC5CF6E85A);
+pub const STYLE_FLOOR_TERRACOTTA: Key = txtc(0x003274D4, 0xA4238A6F01598F18);
+pub const STYLE_FLOOR_BATH: Key = txtc(0x00ED60C7, 0x75F11D379B9BE092);
+pub const STYLE_FLOOR_CARPET: Key = txtc(0x0035D0BA, 0xEE7E52B9B0B42003);
+pub const STYLE_FLOOR_DECK: Key = txtc(0x0049B5A2, 0xBBBB05A3610A7C7C);
+
+pub const BUILD_STYLES: [Key; 14] = [
+    STYLE_EXTERIOR[0],
+    STYLE_EXTERIOR[1],
+    STYLE_EXTERIOR[2],
+    STYLE_EXTERIOR[3],
+    STYLE_EXTERIOR[4],
+    STYLE_WALL_DADO,
+    STYLE_WALL_MOULDING,
+    STYLE_FOUNDATION,
+    STYLE_FLOOR_WOOD,
+    STYLE_FLOOR_PARQUET,
+    STYLE_FLOOR_TERRACOTTA,
+    STYLE_FLOOR_BATH,
+    STYLE_FLOOR_CARPET,
+    STYLE_FLOOR_DECK,
+];
+
+/// A wall segment in lot-local tile coordinates, with the kind of room on each side
+/// (left = the +normal side, normal = (-dz, dx) of a->b).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct WallBaked {
+    pub a: [f32; 2],
+    pub b: [f32; 2],
+    pub level: u8,
+    pub left: u8,
+    pub right: u8,
+}
+
+/// Floor triangles of one tile (bit 0 = -Z, 1 = +X, 2 = +Z, 3 = -X triangle).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct FloorBaked {
+    pub level: u8,
+    pub x: u16,
+    pub z: u16,
+    pub mask: u8,
+    pub kind: u8,
+    pub region: u16,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct LotObjectBaked {
+    pub objd: Key,
+    pub position: [f32; 3],
+    pub rotation: [f32; 4],
+    pub script: String,
+    pub level: u8,
+    /// Position in lot-local tile coordinates.
+    pub local: [f32; 2],
+}
+
+/// A pre-built house: walls, floors and furniture of one lot.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct LotBuildingBaked {
+    /// Index into `WorldBaked::lots`.
+    pub lot: u32,
+    pub width: u32,
+    pub depth: u32,
+    /// Floor height of each level (0 = ground under the foundation).
+    pub levels: Vec<f32>,
+    pub walls: Vec<WallBaked>,
+    pub floors: Vec<FloorBaked>,
+    /// Foundation outline edges (lot-local).
+    pub foundation: Vec<([f32; 2], [f32; 2])>,
+    pub objects: Vec<LotObjectBaked>,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct WorldBaked {
     pub version: u32,
@@ -187,4 +282,5 @@ pub struct WorldBaked {
     pub overview: Option<WorldMap>,
     /// rgb: night-light glow, a: tree shadows; 1 texel per metre.
     pub lightmap: Option<WorldMap>,
+    pub buildings: Vec<LotBuildingBaked>,
 }

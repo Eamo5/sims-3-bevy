@@ -495,10 +495,11 @@ fn run_actions(
         (Without<GameObject>, Without<AtWork>),
     >,
     mut objects: Query<(&GameObject, &Transform, &mut UsedBy), Without<Sim>>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
 ) {
     let Some(grid) = grid else { return };
     let dt = delta.0;
-    let hm = &world.data.heightmap;
+    let ground = |x: f32, z: f32| crate::building::walk_height(&world.data, building.as_deref(), Vec3::new(x, 0.0, z));
     // Social effects to apply to partners after the main pass: (target, actor, social, fun, rel, pose talk)
     let mut social_fx: Vec<(Entity, Entity, f32, f32, f32)> = Vec::new();
     let positions: HashMap<Entity, Vec3> = sims.iter().map(|s| (s.0, s.3.translation)).collect();
@@ -589,7 +590,7 @@ fn run_actions(
                                     let face = otf.rotation * Quat::from_rotation_y(std::f32::consts::PI);
                                     if d.on_object {
                                         let c = obj.world_center(otf);
-                                        tf.translation = Vec3::new(c.x, hm.sample(c.x, c.z), c.z);
+                                        tf.translation = Vec3::new(c.x, otf.translation.y, c.z);
                                         tf.rotation = otf.rotation;
                                         anim.seat_height = obj.seat_height();
                                     } else {
@@ -711,7 +712,7 @@ fn run_actions(
             anim.seat_height = 0.0;
             commands.entity(me).remove::<PathFollow>();
             if let Some(p) = stand_up_at {
-                tf.translation = Vec3::new(p.x, hm.sample(p.x, p.y), p.y);
+                tf.translation = Vec3::new(p.x, ground(p.x, p.y), p.y);
             }
         }
     }

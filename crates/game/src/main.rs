@@ -1,6 +1,7 @@
 mod anim;
 mod autotest;
 mod baked;
+mod building;
 mod buy;
 mod camera;
 mod clock;
@@ -73,6 +74,7 @@ fn main() {
             anim::AnimPlugin,
             simbody::SimBodyPlugin,
             roads::RoadPlugin,
+            building::BuildingPlugin,
         ))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)

@@ -73,6 +73,19 @@ fn list_worlds(root: &std::path::Path) -> Vec<WorldEntry> {
             Some(WorldEntry { name: pretty_world_name(&name), path })
         })
         .collect();
+    // Worlds already converted into the local cache stay playable without the installation.
+    let cached = s3bake::default_root().dir.join("worlds");
+    for e in std::fs::read_dir(cached).into_iter().flatten().flatten() {
+        let stem = e.file_name().to_string_lossy().into_owned();
+        let lower = stem.to_ascii_lowercase();
+        if !e.path().join("world.bin").is_file() || lower.contains("test") || lower.starts_with("gpe") || lower.ends_with(".baking") {
+            continue;
+        }
+        let name = pretty_world_name(&stem);
+        if !worlds.iter().any(|w| w.name == name) {
+            worlds.push(WorldEntry { name, path: PathBuf::from(format!("{stem}.world")) });
+        }
+    }
     // Sunset Valley first: it's the base game's home town.
     worlds.sort_by_key(|w| (!w.name.contains("Sunset"), w.name.clone()));
     worlds

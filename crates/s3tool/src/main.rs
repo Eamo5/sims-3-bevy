@@ -170,6 +170,69 @@ fn main() {
         }
         return;
     }
+    if args[1] == "lotbuild" {
+        // lotbuild <world> <lot id hex> <out.txt>: walls, roofs and floor cells per level.
+        let w = Package::open(&args[2]).unwrap();
+        let id = parse_hex(&args[3]);
+        let b = s3formats::lot::LotBuildData::load(&w, id).expect("no build data");
+        let mut out = String::new();
+        for (a, bb, l, e) in b.walls.segments() {
+            out += &format!("W {} {} {} {} {l} {} {}
+", a[0], a[1], bb[0], bb[1], e.left, e.right);
+        }
+        for r in &b.roofs {
+            out += &format!("R {} {} {} {} {} {} {}
+", r.a[0], r.a[1], r.b[0], r.b[1], r.level, r.slope, r.style);
+        }
+        let levels: std::collections::BTreeSet<u32> = b.rooms.vertices.values().map(|v| v.level).collect();
+        for &lv in &levels {
+            let edges: Vec<([f32; 2], [f32; 2])> = b.rooms.segments().filter(|s| s.2 == lv || (lv == 1 && s.2 == 0)).map(|s| (s.0, s.1)).collect();
+            for c in s3formats::lot::enclosed_floor(&edges, b.rooms.width - 1, b.rooms.depth - 1) {
+                out += &format!("F {lv} {} {} {} {}
+", c.x, c.z, c.mask, c.region);
+            }
+        }
+        std::fs::write(&args[4], out).unwrap();
+        println!("walls {} roofs {} levels {:?}", b.walls.edges.len(), b.roofs.len(), levels);
+        return;
+    }
+    if args[1] == "names" {
+        // names <root> <substring>: search every package name map (NMAP) for matching names.
+        let root = std::path::Path::new(&args[2]);
+        let pat = args[3].to_lowercase();
+        for path in s3pkg::install::discover_packages(root) {
+            let Ok(p) = Package::open(&path.path) else { continue };
+            for e in p.of_type(0x0166038C) {
+                let Ok(d) = p.read(e) else { continue };
+                let mut r = 8usize;
+                let n = u32::from_le_bytes(d[4..8].try_into().unwrap()) as usize;
+                for _ in 0..n {
+                    if r + 12 > d.len() { break; }
+                    let inst = u64::from_le_bytes(d[r..r + 8].try_into().unwrap());
+                    let l = u32::from_le_bytes(d[r + 8..r + 12].try_into().unwrap()) as usize;
+                    let name = String::from_utf8_lossy(&d[r + 12..(r + 12 + l).min(d.len())]).into_owned();
+                    r += 12 + l;
+                    if name.to_lowercase().contains(&pat) {
+                        let types: Vec<String> = p.entries.iter().filter(|x| x.key.i == inst).map(|x| format!("{:08X}:{:08X}", x.key.t, x.key.g)).collect();
+                        println!("{:016X} {name} {:?} [{}]", inst, types, path.path.file_name().unwrap().to_string_lossy());
+                    }
+                }
+            }
+        }
+        return;
+    }
+    if args[1] == "lotobjs" {
+        // lotobjs <world> <lot id hex>: the lot's placed objects with scripts and positions.
+        let w = Package::open(&args[2]).unwrap();
+        let id = parse_hex(&args[3]);
+        let all = s3formats::objn::load_world_objects(&w);
+        let lot = w.of_type(0xD063545B).find(|e| e.key.i == id).and_then(|e| s3formats::world::LotInfo::parse(id, &w.read(e).ok()?).ok());
+        if let Some(l) = &lot { println!("lot corner {:?} rot {} size {}x{}", l.corner, l.rotation, l.width, l.depth); }
+        for o in all.get(&id).map(|v| v.as_slice()).unwrap_or(&[]) {
+            println!("{:?} pos {:?} rot {:?} script {:?} model {:?}", o.catalog.map(|c| c.to_string()), o.position.map(|p| p.map(|v| (v * 100.0).round() / 100.0)), o.rotation.map(|v| (v * 1000.0).round() / 1000.0), o.script, o.model.map(|m| m.to_string()));
+        }
+        return;
+    }
     if args[1] == "hm" {
         // hm <world> x z [x z ...]: terrain height samples.
         let w = Package::open(&args[2]).unwrap();
@@ -336,6 +399,23 @@ fn main() {
                 }
             }
         }
+        return;
+    }
+    if args[1] == "txtcraw" {
+        // txtcraw <root> <txtc key> <out.rgba>: composite a TXTC to raw RGBA (w, h as u32 header).
+        let root = std::path::Path::new(&args[2]);
+        let set = s3pkg::install::open_install(root, |_| true);
+        let parts: Vec<&str> = args[3].split(':').collect();
+        let tk = s3pkg::ResourceKey::new(parse_hex(parts[0]) as u32, parse_hex(parts[1]) as u32, parse_hex(parts[2]));
+        let t = s3formats::txtc::Txtc::parse(&set.read(&tk).unwrap()).unwrap();
+        let mut c = s3formats::compositor::Compositor::new(&set);
+        let (w, h) = c.output_size(&t);
+        let img = c.run(&t, w, h);
+        let mut out = Vec::new();
+        out.extend_from_slice(&(img.width as u32).to_le_bytes());
+        out.extend_from_slice(&(img.height as u32).to_le_bytes());
+        out.extend_from_slice(&img.data);
+        std::fs::write(&args[4], out).unwrap();
         return;
     }
     if args[1] == "txtckey" {

@@ -281,6 +281,7 @@ fn follow_paths(
     time: Res<Time>,
     clock: Res<GameClock>,
     world: Res<CurrentWorld>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
     mut q: Query<(&mut Transform, &mut PathFollow, &mut SimAnim)>,
 ) {
     let rate = SPEED_RATES[clock.speed];
@@ -316,7 +317,7 @@ fn follow_paths(
                 tf.rotation = tf.rotation.slerp(target_rot, (dt * 8.0).min(1.0));
             }
         }
-        tf.translation.y = world.data.heightmap.sample(tf.translation.x, tf.translation.z);
+        tf.translation.y = crate::building::walk_height(&world.data, building.as_deref(), tf.translation);
         anim.pose = if pf.done { Pose::Stand } else { Pose::Walk };
     }
 }

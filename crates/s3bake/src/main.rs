@@ -46,6 +46,9 @@ fn main() {
         println!("roads: {} parts, {tris} triangles, {} without base texture", w.roads.len(), w.roads.iter().filter(|r| r.base.is_none()).count());
         let map = |m: &Option<s3bake::WorldMap>| m.as_ref().map(|m| format!("{}px {} mips {} {} bytes", m.size, m.mips, if m.bc3 { "BC3" } else { "BC1" }, m.data.len()));
         println!("overview: {:?}, lightmap: {:?}", map(&w.overview), map(&w.lightmap));
+        let walls: usize = w.buildings.iter().map(|b| b.walls.len()).sum();
+        let objs: usize = w.buildings.iter().map(|b| b.objects.len()).sum();
+        println!("houses: {} with {walls} wall segments, {objs} objects", w.buildings.len());
         return;
     }
     let t0 = Instant::now();
@@ -53,6 +56,10 @@ fn main() {
     println!("Opening {}", data.display());
     let mut pkgs = s3pkg::install::open_install(&data, |_| true);
     println!("{} resources", pkgs.len());
+    if pkgs.len() == 0 {
+        eprintln!("no game packages found under {} (is the installation reachable?)", data.display());
+        std::process::exit(1);
+    }
     if force || root.global_manifest().is_none() {
         match s3bake::bake_global(&root, &pkgs, &data.to_string_lossy(), &progress) {
             Ok(m) => println!("global: {m:?}"),

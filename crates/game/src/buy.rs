@@ -281,7 +281,7 @@ fn placement(
     (keys, mouse): (Res<ButtonInput<KeyCode>>, Res<ButtonInput<MouseButton>>),
     over_ui: Res<PointerOverUi>,
     (windows, cams): (Query<&Window, With<PrimaryWindow>>, Query<(&Camera, &GlobalTransform), With<SimsCamera>>),
-    (world, data, catalog): (Res<CurrentWorld>, Res<Baked>, Res<Catalog>),
+    (world, data, catalog, building): (Res<CurrentWorld>, Res<Baked>, Res<Catalog>, Option<Res<crate::building::ActiveBuilding>>),
     mut assets: ResMut<ObjectAssets>,
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut household: Option<ResMut<Household>>,
@@ -332,7 +332,7 @@ fn placement(
     if let (Some(p), Ok(mut tf)) = (ground, tfs.get_mut(ghost)) {
         let snap = |v: f32| (v * 4.0).round() / 4.0;
         let (x, z) = (snap(p.x), snap(p.z));
-        tf.translation = Vec3::new(x, world.data.heightmap.sample(x, z), z);
+        tf.translation = Vec3::new(x, crate::building::walk_height(&world.data, building.as_deref(), Vec3::new(x, 0.0, z)), z);
         tf.rotation = Quat::from_rotation_y(buy.yaw);
     }
     let price = catalog.by_key(&objd).map(|e| e.price).unwrap_or(0) as i64;

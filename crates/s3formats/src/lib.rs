@@ -1,5 +1,6 @@
 pub mod compositor;
 pub mod dds;
+pub mod lot;
 pub mod model;
 pub mod object;
 pub mod objn;

@@ -363,12 +363,17 @@ fn auto_move_in(
     }
     *done = true;
     let want = args.lot.clone().unwrap_or_else(|| "empty".into()).to_ascii_lowercase();
-    let idx = world
-        .data
-        .lots
-        .iter()
-        .position(|l| l.internal_name.to_ascii_lowercase().contains(&want))
-        .or_else(|| world.data.lots.iter().position(|l| l.is_residential()));
+    let idx = if want == "house" {
+        // The first residential lot with a pre-built house.
+        world.data.lots.iter().enumerate().position(|(i, l)| l.is_residential() && world.data.buildings.contains_key(&i))
+    } else {
+        world
+            .data
+            .lots
+            .iter()
+            .position(|l| l.internal_name.to_ascii_lowercase().contains(&want) || format!("{:016x}", l.id).contains(&want))
+    }
+    .or_else(|| world.data.lots.iter().position(|l| l.is_residential()));
     if let Some(i) = idx {
         commands.insert_resource(MoveInRequest(i));
         next.set(PlayMode::Live);
@@ -468,13 +473,27 @@ pub fn spawn_game_object(
     pos: Vec3,
     yaw: f32,
 ) -> Option<SpawnedObject> {
+    spawn_game_object_rot(commands, assets, ctx, catalog, objd, pos, Quat::from_rotation_y(yaw))
+}
+
+/// [`spawn_game_object`] with a full rotation.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_game_object_rot(
+    commands: &mut Commands,
+    assets: &mut ObjectAssets,
+    ctx: &mut AssetCtx,
+    catalog: &Catalog,
+    objd: Key,
+    pos: Vec3,
+    rotation: Quat,
+) -> Option<SpawnedObject> {
     let parts = assets.object(ctx, objd);
     let (mn, mx) = parts_bounds(&parts)?;
     let entry = catalog.by_key(&objd);
     let (name, price, kind) = entry
         .map(|e| (e.name.clone(), e.price, e.kind))
         .unwrap_or_else(|| ("Object".into(), 0, ObjectKind::Other));
-    let tf = Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw));
+    let tf = Transform::from_translation(pos).with_rotation(rotation);
     let e = spawn_parts(commands, &parts, tf);
     let center = Vec2::new((mn.x + mx.x) * 0.5, (mn.z + mx.z) * 0.5);
     let half = Vec2::new((mx.x - mn.x) * 0.5, (mx.z - mn.z) * 0.5);
@@ -515,53 +534,65 @@ pub fn move_in(
 ) {
     let Some(req) = request else { return };
     let lot_index = req.0;
-    for (e, imp) in &imposters {
-        if imp.0 == lot_index {
-            commands.entity(e).despawn();
+    let house = world.data.buildings.get(&lot_index);
+    // A pre-built house keeps its imposter for the distant view; an empty lot loses it.
+    if house.is_none() {
+        for (e, imp) in &imposters {
+            if imp.0 == lot_index {
+                commands.entity(e).despawn();
+            }
         }
     }
     commands.remove_resource::<MoveInRequest>();
     let lot = world.data.lots[lot_index].clone();
-    let hm = &world.data.heightmap;
     let rot = Quat::from_rotation_y(lot.rotation);
     let center = lot_center(&lot);
-    let to_world = |x: f32, z: f32| {
-        let p = center + rot * Vec3::new(x, 0.0, z);
-        Vec3::new(p.x, hm.sample(p.x, p.z), p.z)
-    };
 
     let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
     let mut furniture_value = 0;
-    let mut desk_top = 0.0;
-    for (inst, x, z, yaw) in STARTER {
-        let key: Key = (s3pkg::types::OBJD, 0, inst);
-        let mut pos = to_world(x, z);
-        if inst == 0x369 {
-            pos.y += desk_top;
-        }
-        if let Some(o) = spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, key, pos, lot.rotation + yaw.to_radians()) {
-            let _ = o;
-            if let Some(e) = catalog.by_key(&key) {
-                furniture_value += e.price;
-            }
-            if inst == 0x5C2 {
-                desk_top = assets.object(&mut ctx, key).iter().map(|p| p.bounds.1.y).fold(0.0, f32::max);
+    let building = house.map(|b| crate::building::spawn_building(&mut commands, &mut assets, &mut ctx, &catalog, b, &lot));
+    let to_world = |x: f32, z: f32| {
+        let p = center + rot * Vec3::new(x, 0.0, z);
+        Vec3::new(p.x, crate::building::walk_height(&world.data, building.as_ref(), p), p.z)
+    };
+    if let Some(b) = house {
+        for o in &b.objects {
+            if let Some(e) = catalog.by_key(&o.objd) {
+                furniture_value += e.price.max(0);
             }
         }
+    } else {
+        let mut desk_top = 0.0;
+        for (inst, x, z, yaw) in STARTER {
+            let key: Key = (s3pkg::types::OBJD, 0, inst);
+            let mut pos = to_world(x, z);
+            if inst == 0x369 {
+                pos.y += desk_top;
+            }
+            if spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, key, pos, lot.rotation + yaw.to_radians()).is_some() {
+                if let Some(e) = catalog.by_key(&key) {
+                    furniture_value += e.price;
+                }
+                if inst == 0x5C2 {
+                    desk_top = assets.object(&mut ctx, key).iter().map(|p| p.bounds.1.y).fold(0.0, f32::max);
+                }
+            }
+        }
+        // A wooden deck under the open-plan home.
+        let deck = meshes.add(Cuboid::new(17.0, 0.12, 14.0));
+        let deck_mat = mats.add(StandardMaterial { base_color: Color::srgb(0.55, 0.40, 0.26), perceptual_roughness: 0.8, ..default() });
+        commands.spawn((
+            Mesh3d(deck),
+            MeshMaterial3d(deck_mat),
+            Transform::from_translation(to_world(0.0, 0.0) - Vec3::Y * 0.055).with_rotation(rot),
+            DespawnOnExit(AppState::InGame),
+        ));
     }
-    // A wooden deck under the open-plan home.
-    let deck = meshes.add(Cuboid::new(17.0, 0.12, 14.0));
-    let deck_mat = mats.add(StandardMaterial { base_color: Color::srgb(0.55, 0.40, 0.26), perceptual_roughness: 0.8, ..default() });
-    let dc = to_world(0.0, 0.0);
-    commands.spawn((
-        Mesh3d(deck),
-        MeshMaterial3d(deck_mat),
-        Transform::from_translation(dc - Vec3::Y * 0.055).with_rotation(rot),
-        DespawnOnExit(AppState::InGame),
-    ));
-
+    let dc = building.as_ref().map(|b| Vec3::new(b.center.x, b.levels[1], b.center.z)).unwrap_or_else(|| to_world(0.0, 0.0));
+    // Sims arrive at the front of the lot (by the road) when there's a house in the way.
+    let arrive_z = if building.is_some() { -(lot.depth as f32) * 0.5 + 2.0 } else { 0.9 };
     let pending = pending.map(|p| p.clone()).unwrap_or_else(PendingHousehold::random);
-    let starting_funds = 20000 - furniture_value as i64 / 2;
+    let starting_funds = if house.is_some() { 20000 - furniture_value as i64 / 4 } else { 20000 - furniture_value as i64 / 2 };
     commands.insert_resource(Household {
         name: pending.last_name.clone(),
         funds: starting_funds.max(5000),
@@ -603,7 +634,7 @@ pub fn move_in(
     };
     let n = members.len();
     for (i, (s, model)) in members.into_iter().enumerate() {
-        let p = to_world(-1.0 + (i as f32 - n as f32 * 0.5) * 0.9, 0.9);
+        let p = to_world(-1.0 + (i as f32 - n as f32 * 0.5) * 0.9, arrive_z);
         let e = spawn_sim_full(&mut commands, &mut sctx, s, p, model);
         commands.entity(e).insert((
             HouseholdMember,
@@ -637,4 +668,8 @@ pub fn move_in(
         c.yaw = lot.rotation + 0.6;
     }
     notes.push(format!("Welcome home, {} family! You have §{} to spend.", pending.last_name, starting_funds.max(5000)));
+    match building {
+        Some(b) => commands.insert_resource(b),
+        None => commands.remove_resource::<crate::building::ActiveBuilding>(),
+    }
 }
