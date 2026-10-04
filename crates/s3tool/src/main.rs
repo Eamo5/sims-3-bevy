@@ -573,8 +573,12 @@ fn main() {
         return;
     }
     if args[1] == "texpng" {
-        // texpng <root> <type:group:instance> <out.png>: a DDS texture or TXTC composite as PNG.
-        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        // texpng <root> <type:group:instance> <out.png>: a DDS texture or TXTC composite as PNG
+        // (WORLD=<world file> also searches that world).
+        let mut set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        if let Ok(w) = std::env::var("WORLD") {
+            set.add(Package::open(&w).unwrap());
+        }
         let parts: Vec<&str> = args[3].split(':').collect();
         let k = s3pkg::ResourceKey::new(parse_hex(parts[0]) as u32, parse_hex(parts[1]) as u32, parse_hex(parts[2]));
         let d = set.read(&k).or_else(|| set.read_ti(k.t, k.i)).expect("not found");
@@ -1019,6 +1023,12 @@ fn main() {
         let e = w.of_type(s3formats::objs::T_OBJS).next().expect("no OBJS");
         let d = w.read(e).unwrap();
         let objs = s3formats::objs::ObjStream::parse(&d).expect("OBJS");
+        if let Ok(ks) = std::env::var("KEYS") {
+            for i in ks.split(',').filter_map(|x| x.parse::<usize>().ok()) {
+                let k = objs.keys.get(i);
+                println!("key {i}: {k:?} in world: {:?}", k.map(|k| w.find(k).is_some()));
+            }
+        }
         let n: usize = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(3);
         for id in objs.objects_of(&args[3]).into_iter().take(n) {
             println!("#{id} {}", objs.class_name(id).unwrap_or("?"));

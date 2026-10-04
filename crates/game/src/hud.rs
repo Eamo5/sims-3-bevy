@@ -127,7 +127,7 @@ struct NotesPanel;
 #[derive(Component)]
 struct HudButton;
 #[derive(Component)]
-struct FpsText;
+pub struct FpsText;
 
 fn update_fps(time: Res<Time>, mut avg: Local<f32>, mut q: Query<&mut Text, With<FpsText>>) {
     let dt = time.delta_secs().max(1e-4);
@@ -138,7 +138,7 @@ fn update_fps(time: Res<Time>, mut avg: Local<f32>, mut q: Query<&mut Text, With
 }
 /// UI regions that should swallow world clicks.
 #[derive(Component)]
-struct BlocksWorld;
+pub struct BlocksWorld;
 
 fn panel(node: Node) -> impl Bundle {
     (

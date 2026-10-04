@@ -444,6 +444,12 @@ fn ui_flow(
     mut move_in: Query<&mut Interaction, With<crate::home::MoveInButton>>,
     mut exit: MessageWriter<AppExit>,
     world: Option<Res<crate::loading::CurrentWorld>>,
+    (mut panel, settings, mut game_menu, mut clock): (
+        ResMut<crate::options::OptionsPanel>,
+        Res<crate::options::Settings>,
+        ResMut<crate::options::GameMenu>,
+        Option<ResMut<crate::clock::GameClock>>,
+    ),
 ) {
     let Some(dir) = &args.ui_flow else { return };
     let now = time.elapsed_secs();
@@ -460,7 +466,15 @@ fn ui_flow(
     match (stage.0, state.get(), play.as_ref().map(|p| *p.get())) {
         (0, AppState::MainMenu, _) if since > 1.5 => {
             shot(&mut commands, "1_menu");
-            advance(&mut stage);
+            if let Some((mut i, _)) = menu.iter_mut().find(|(_, a)| matches!(a, crate::menu::MenuAction::Options)) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (30, now);
+        }
+        (30, AppState::MainMenu, _) if since > 1.0 => {
+            shot(&mut commands, "1a_options");
+            crate::options::close_options(&mut commands, &mut panel, &settings);
+            *stage = (1, now);
         }
         (1, AppState::MainMenu, _) if since > 0.5 => {
             if let Some((mut i, _)) = menu.iter_mut().find(|(_, a)| matches!(a, crate::menu::MenuAction::PlayWorld(0))) {
@@ -529,7 +543,25 @@ fn ui_flow(
             shot(&mut commands, "6_live");
             advance(&mut stage);
         }
-        (8, _, _) if since > 2.0 => {
+        (8, AppState::InGame, _) if since > 1.0 => {
+            crate::options::toggle_game_menu(&mut commands, &mut game_menu, clock.as_deref_mut());
+            advance(&mut stage);
+        }
+        (9, AppState::InGame, _) if since > 1.0 => {
+            shot(&mut commands, "7_game_menu");
+            advance(&mut stage);
+        }
+        (10, AppState::InGame, _) if since > 1.0 => {
+            crate::options::open_options(&mut commands, &mut panel, &settings);
+            advance(&mut stage);
+        }
+        (11, AppState::InGame, _) if since > 1.0 => {
+            shot(&mut commands, "8_options_in_game");
+            crate::options::close_options(&mut commands, &mut panel, &settings);
+            crate::options::toggle_game_menu(&mut commands, &mut game_menu, clock.as_deref_mut());
+            advance(&mut stage);
+        }
+        (12, _, _) if since > 2.0 => {
             exit.write(AppExit::Success);
         }
         _ => {}

@@ -52,8 +52,10 @@ fn stereo_music(
     sounds: Option<Res<crate::sound::Sounds>>,
     mut cache: ResMut<crate::sound::SampleCache>,
     mut sources: ResMut<Assets<AudioSource>>,
+    settings: Res<crate::options::Settings>,
 ) {
     let cam = cams.single().ok();
+    let level = settings.gain(crate::options::Channel::Music);
     // Stop music for stereos nobody is using any more.
     for (e, m) in &playing {
         if !stereos.get(m.0).is_ok_and(|(_, _, used, _)| used.0.is_some()) {
@@ -84,7 +86,7 @@ fn stereo_music(
         let Some(track) = track else { continue };
         commands.spawn((
             AudioPlayer::new(track),
-            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume)),
+            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume * level)),
             StereoMusic(stereo),
             DespawnOnExit(AppState::InGame),
         ));
@@ -96,12 +98,14 @@ pub fn stereo_volume(
     mut sinks: Query<(&StereoMusic, &mut AudioSink)>,
     stereos: Query<&GlobalTransform>,
     cams: Query<&SimsCamera>,
+    settings: Res<crate::options::Settings>,
 ) {
     let Ok(cam) = cams.single() else { return };
+    let level = settings.gain(crate::options::Channel::Music);
     for (m, mut sink) in &mut sinks {
         if let Ok(tf) = stereos.get(m.0) {
             let d = cam.focus.distance(tf.translation()) + cam.distance * 0.35;
-            sink.set_volume(Volume::Linear((1.2 / (1.0 + d / 12.0)).min(0.9)));
+            sink.set_volume(Volume::Linear((1.2 / (1.0 + d / 12.0)).min(0.9) * level));
         }
     }
 }

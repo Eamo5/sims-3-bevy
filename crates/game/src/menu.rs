@@ -18,6 +18,7 @@ impl Plugin for MenuPlugin {
 pub enum MenuAction {
     PlayWorld(usize),
     LoadSave(usize),
+    Options,
     Quit,
 }
 
@@ -88,6 +89,7 @@ fn spawn_menu(mut commands: Commands, worlds: Res<WorldList>, install: Res<Insta
             }
         }
         p.spawn(Node { height: Val::Px(16.0), ..default() });
+        spawn_button(p, "Options", MenuAction::Options, 200.0);
         spawn_button(p, "Quit", MenuAction::Quit, 200.0);
     });
 }
@@ -117,6 +119,7 @@ fn menu_actions(
     mut commands: Commands,
     mut next: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
+    (mut panel, settings): (ResMut<crate::options::OptionsPanel>, Res<crate::options::Settings>),
 ) {
     for (i, action) in &q {
         if *i != Interaction::Pressed {
@@ -134,6 +137,7 @@ fn menu_actions(
                     next.set(AppState::Loading);
                 }
             }
+            MenuAction::Options => crate::options::open_options(&mut commands, &mut panel, &settings),
             MenuAction::Quit => {
                 exit.write(AppExit::Success);
             }

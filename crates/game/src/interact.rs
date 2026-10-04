@@ -1094,6 +1094,7 @@ pub fn hour_label(h: f32) -> String {
 fn autonomy(
     delta: Res<SimDelta>,
     clock: Res<GameClock>,
+    (settings, household): (Res<crate::options::Settings>, Query<(), With<HouseholdMember>>),
     mut sims: Query<
         (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim, Has<SocialPartner>),
         (Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>),
@@ -1111,7 +1112,14 @@ fn autonomy(
         if timer.0 > 0.0 || !queue.0.is_empty() || sim.age == Age::Baby || partner {
             continue;
         }
-        timer.0 = rng.random_range(4.0..10.0);
+        let free_will = if household.contains(me) { settings.free_will } else { crate::options::FreeWill::Normal };
+        timer.0 = match free_will {
+            crate::options::FreeWill::High => rng.random_range(2.0..5.0),
+            _ => rng.random_range(4.0..10.0),
+        };
+        if free_will == crate::options::FreeWill::Off {
+            continue;
+        }
         // Don't start long activities right before work.
         if let Some(j) = job {
             let h = clock.hour_f();

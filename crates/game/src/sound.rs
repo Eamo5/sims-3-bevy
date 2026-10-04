@@ -291,6 +291,7 @@ fn clip_cues(
 
 fn play_sounds(
     mut commands: Commands,
+    settings: Res<crate::options::Settings>,
     mut reqs: MessageReader<PlaySound>,
     sounds: Res<Sounds>,
     mut cache: ResMut<SampleCache>,
@@ -300,7 +301,7 @@ fn play_sounds(
     let cam = cams.single().ok();
     for r in reqs.read() {
         let Some(def) = sounds.def(&r.name) else { continue };
-        let gain = def.gain * r.volume * r.at.map_or(1.0, |p| spatial_gain(def, p, cam));
+        let gain = def.gain * r.volume * r.at.map_or(1.0, |p| spatial_gain(def, p, cam)) * settings.gain(crate::options::Channel::of(&r.name));
         if gain < 0.01 {
             continue;
         }
@@ -316,6 +317,7 @@ fn play_sounds(
 /// Loops follow their Sim and the camera; they stop when the Sim is gone.
 fn loop_volumes(
     mut commands: Commands,
+    settings: Res<crate::options::Settings>,
     mut loops: Query<(Entity, &CueLoop, Option<&mut AudioSink>)>,
     owners: Query<&GlobalTransform>,
     cams: Query<&SimsCamera>,
@@ -327,7 +329,8 @@ fn loop_volumes(
             continue;
         };
         if let Some(mut sink) = sink {
-            sink.set_volume(Volume::Linear(l.def.gain * SFX_VOLUME * spatial_gain(&l.def, tf.translation(), cam)));
+            let level = settings.gain(crate::options::Channel::of(&l.name));
+            sink.set_volume(Volume::Linear(l.def.gain * SFX_VOLUME * spatial_gain(&l.def, tf.translation(), cam) * level));
         }
     }
 }
@@ -447,8 +450,14 @@ fn mode_music(
     state: Res<State<AppState>>,
     mode: Option<Res<State<PlayMode>>>,
     buy: Option<Res<BuyMode>>,
-    tracks: Query<(), With<ModeTrack>>,
+    (tracks, mut sinks, settings): (Query<(), With<ModeTrack>>, Query<&mut AudioSink, With<ModeTrack>>, Res<crate::options::Settings>),
 ) {
+    // The music level follows the options.
+    if settings.is_changed() {
+        for mut s in &mut sinks {
+            s.set_volume(Volume::Linear(MUSIC_VOLUME * settings.gain(crate::options::Channel::Music)));
+        }
+    }
     let wanted = match state.get() {
         AppState::MainMenu => Some("music_theme"),
         AppState::CreateHousehold => Some("music_mode_cas"),
@@ -475,7 +484,11 @@ fn mode_music(
             info!("music: {list} ({id:016X})");
         }
         let e = commands
-            .spawn((AudioPlayer::new(h), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(MUSIC_VOLUME * def.gain.max(0.5))), ModeTrack))
+            .spawn((
+                AudioPlayer::new(h),
+                PlaybackSettings::DESPAWN.with_volume(Volume::Linear(MUSIC_VOLUME * def.gain.max(0.5) * settings.gain(crate::options::Channel::Music))),
+                ModeTrack,
+            ))
             .id();
         music.playing = Some(e);
     }

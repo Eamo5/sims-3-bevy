@@ -17,20 +17,7 @@ pub struct AgingPlugin;
 
 impl Plugin for AgingPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<AgingSettings>()
-            .add_systems(Update, (daily_aging, rebuild_bodies).chain().run_if(in_state(PlayMode::Live)));
-    }
-}
-
-/// Whether Sims age (the game's option).
-#[derive(Resource)]
-pub struct AgingSettings {
-    pub enabled: bool,
-}
-
-impl Default for AgingSettings {
-    fn default() -> Self {
-        Self { enabled: std::env::var_os("SIMS3_NO_AGING").is_none() }
+        app.add_systems(Update, (daily_aging, rebuild_bodies).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -106,7 +93,7 @@ pub struct NeedsNewBody;
 fn daily_aging(
     mut commands: Commands,
     clock: Res<GameClock>,
-    settings: Res<AgingSettings>,
+    settings: Res<crate::options::Settings>,
     mut last_day: Local<Option<u32>>,
     mut sims: Query<(Entity, &mut Sim, Option<&mut Aging>, &mut Moodlets, Has<Selected>), With<HouseholdMember>>,
     mut life: MessageWriter<LifeEvent>,
@@ -134,9 +121,11 @@ fn daily_aging(
         }
         return;
     }
-    if !settings.enabled {
+    if !settings.aging {
         return;
     }
+    // Longer life spans stretch every stage.
+    let per_day = 1.0 / settings.lifespan.factor();
     let mut rng = rand::rng();
     let mut died: Vec<(Entity, String, bool)> = Vec::new();
     let mut survivors: Vec<Entity> = Vec::new();
@@ -145,7 +134,7 @@ fn daily_aging(
             commands.entity(e).insert(Aging::default());
             continue;
         };
-        aging.days += 1.0;
+        aging.days += per_day;
         if sim.age == Age::Elder {
             if aging.days >= aging.elder_span {
                 died.push((e, sim.full_name(), selected));
@@ -156,7 +145,7 @@ fn daily_aging(
         }
         survivors.push(e);
         if aging.days < stage_days(sim.age) {
-            if aging.days + 1.0 >= stage_days(sim.age) {
+            if aging.days + per_day >= stage_days(sim.age) {
                 notes.push(format!("{} will be {} tomorrow!", sim.first, age_word(next_age(sim.age).unwrap_or(sim.age))));
             }
             continue;
