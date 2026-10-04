@@ -331,6 +331,26 @@ fn ancestor_with<F: Fn(Entity) -> bool>(mut e: Entity, parents: &Query<&ChildOf>
 }
 
 /// Ray-marches the heightmap to find where a ray meets the ground.
+/// Where a click lands: on a house floor (the viewed one first, then those below) or the ground.
+pub fn floor_hit(ray: Ray3d, world: &CurrentWorld, building: Option<&crate::building::ActiveBuilding>) -> Option<(Vec3, u8)> {
+    if let Some(b) = building {
+        for level in (1..=b.view_level).rev() {
+            let y = b.levels[level as usize];
+            if ray.direction.y.abs() < 1e-4 {
+                break;
+            }
+            let t = (y - ray.origin.y) / ray.direction.y;
+            if t > 0.0 {
+                let p = ray.origin + *ray.direction * t;
+                if b.floor_y(level, p).is_some() {
+                    return Some((p, level));
+                }
+            }
+        }
+    }
+    ground_hit(ray, world).map(|p| (p, 1))
+}
+
 pub fn ground_hit(ray: Ray3d, world: &CurrentWorld) -> Option<Vec3> {
     let hm = &world.data.heightmap;
     let mut t: f32 = 0.0;
@@ -373,6 +393,7 @@ fn world_click(
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
     buy: Option<Res<crate::buy::BuyMode>>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
 ) {
     if buy.is_some_and(|b| b.active) {
         return;
@@ -403,7 +424,7 @@ fn world_click(
             }
             let mut options = Vec::new();
             if member {
-                options.push((format!("Select {}", sim.first), ActionKind::GoHere(Vec2::NAN)));
+                options.push((format!("Select {}", sim.first), ActionKind::GoHere(Vec2::NAN, 1)));
             }
             let rel = rels.get(t);
             for (i, s) in SOCIALS.iter().enumerate() {
@@ -426,8 +447,8 @@ fn world_click(
                 .collect();
             open_pie(&mut commands, &mut pie, cursor, &obj.name, actor, options);
         }
-    } else if let Some(p) = ground_hit(ray, &world) {
-        open_pie(&mut commands, &mut pie, cursor, "", actor, vec![("Go Here".into(), ActionKind::GoHere(Vec2::new(p.x, p.z)))]);
+    } else if let Some((p, level)) = floor_hit(ray, &world, building.as_deref()) {
+        open_pie(&mut commands, &mut pie, cursor, "", actor, vec![("Go Here".into(), ActionKind::GoHere(Vec2::new(p.x, p.z), level))]);
     }
 }
 

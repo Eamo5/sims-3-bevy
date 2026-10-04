@@ -10,7 +10,7 @@ use s3bake::Key;
 use crate::PlayMode;
 use crate::clock::{GameClock, SimDelta};
 use crate::loading::CurrentWorld;
-use crate::nav::{NavGrid, PathFollow};
+use crate::nav::{Floor, NavGrid, PathFollow, UpperFloors, plan_route};
 use crate::sim::*;
 
 pub struct InteractPlugin;
@@ -358,7 +358,7 @@ pub static SOCIALS: [SocialDef; 7] = [
 pub enum ActionKind {
     Object { target: Entity, def: usize },
     Social { target: Entity, social: usize },
-    GoHere(Vec2),
+    GoHere(Vec2, u8),
     GoToWork,
 }
 
@@ -491,20 +491,21 @@ fn run_actions(
             &mut Relationships,
             Option<&mut PathFollow>,
             Option<&Job>,
+            &Floor,
         ),
         (Without<GameObject>, Without<AtWork>),
     >,
-    mut objects: Query<(&GameObject, &Transform, &mut UsedBy), Without<Sim>>,
-    building: Option<Res<crate::building::ActiveBuilding>>,
+    mut objects: Query<(&GameObject, &Transform, &mut UsedBy, Option<&Floor>), Without<Sim>>,
+    (building, upper): (Option<Res<crate::building::ActiveBuilding>>, Option<Res<UpperFloors>>),
 ) {
     let Some(grid) = grid else { return };
     let dt = delta.0;
-    let ground = |x: f32, z: f32| crate::building::walk_height(&world.data, building.as_deref(), Vec3::new(x, 0.0, z));
+    let ground = |level: u8, x: f32, z: f32| crate::nav::floor_height(&world.data, building.as_deref(), level, Vec3::new(x, 0.0, z));
     // Social effects to apply to partners after the main pass: (target, actor, social, fun, rel, pose talk)
     let mut social_fx: Vec<(Entity, Entity, f32, f32, f32)> = Vec::new();
-    let positions: HashMap<Entity, Vec3> = sims.iter().map(|s| (s.0, s.3.translation)).collect();
+    let positions: HashMap<Entity, (Vec3, u8)> = sims.iter().map(|s| (s.0, (s.3.translation, s.11.0))).collect();
 
-    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, job) in &mut sims {
+    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, job, floor) in &mut sims {
         let Some(action) = queue.0.front_mut() else {
             if anim.pose != Pose::Walk && anim.pose != Pose::Stand && path.is_none() {
                 anim.pose = Pose::Stand;
@@ -517,7 +518,7 @@ fn run_actions(
         // Cancellation
         if action.cancel {
             if let ActionKind::Object { target, .. } = action.kind
-                && let Ok((obj, otf, mut used)) = objects.get_mut(target)
+                && let Ok((obj, otf, mut used, _)) = objects.get_mut(target)
             {
                 if used.0 == Some(me) {
                     used.0 = None;
@@ -532,9 +533,9 @@ fn run_actions(
         if !finished {
             match action.phase {
                 Phase::Start => {
-                    let dest: Option<Vec2> = match &action.kind {
+                    let dest: Option<(Vec2, u8)> = match &action.kind {
                         ActionKind::Object { target, def } => match objects.get(*target) {
-                            Ok((obj, otf, used)) => {
+                            Ok((obj, otf, used, of)) => {
                                 if used.0.is_some_and(|u| u != me) {
                                     if !action.autonomous {
                                         notes.push(format!("{} can't use the {}: it's in use.", sim.first, obj.name));
@@ -542,25 +543,26 @@ fn run_actions(
                                     None
                                 } else {
                                     let _ = def;
-                                    Some(obj.use_point(otf))
+                                    Some((obj.use_point(otf), of.map_or(1, |f| f.0)))
                                 }
                             }
                             Err(_) => None,
                         },
-                        ActionKind::Social { target, .. } => positions.get(target).map(|p| {
+                        ActionKind::Social { target, .. } => positions.get(target).map(|(p, l)| {
                             let mine = Vec2::new(tf.translation.x, tf.translation.z);
                             let theirs = Vec2::new(p.x, p.z);
-                            theirs + (mine - theirs).normalize_or(Vec2::X) * 0.9
+                            (theirs + (mine - theirs).normalize_or(Vec2::X) * 0.9, *l)
                         }),
-                        ActionKind::GoHere(p) => Some(*p),
-                        ActionKind::GoToWork => exit.as_ref().map(|e| e.0),
+                        ActionKind::GoHere(p, l) => Some((*p, *l)),
+                        ActionKind::GoToWork => exit.as_ref().map(|e| (e.0, 1)),
                     };
-                    match dest.and_then(|d| grid.find_path(Vec2::new(tf.translation.x, tf.translation.z), d)) {
+                    let from = Vec2::new(tf.translation.x, tf.translation.z);
+                    match dest.and_then(|(d, l)| plan_route(&grid, upper.as_deref(), from, floor.0, d, l)) {
                         Some(wp) => {
                             commands.entity(me).insert(PathFollow::new(wp));
                             action.phase = Phase::Routing;
                             if let ActionKind::Object { target, .. } = action.kind
-                                && let Ok((_, _, mut used)) = objects.get_mut(target)
+                                && let Ok((_, _, mut used, _)) = objects.get_mut(target)
                             {
                                 used.0 = Some(me);
                             }
@@ -580,7 +582,7 @@ fn run_actions(
                         action.phase = Phase::Running(0.0);
                         match &action.kind {
                             ActionKind::Object { target, def } => {
-                                if let Ok((obj, otf, _)) = objects.get(*target) {
+                                if let Ok((obj, otf, _, _)) = objects.get(*target) {
                                     let d = &interactions_for(obj.kind)[*def];
                                     anim.pose = d.pose;
                                     *decay = DecayScale(d.decay);
@@ -601,12 +603,12 @@ fn run_actions(
                             }
                             ActionKind::Social { target, .. } => {
                                 if let Some(p) = positions.get(target) {
-                                    let to = Vec2::new(p.x - tf.translation.x, p.z - tf.translation.z);
+                                    let to = Vec2::new(p.0.x - tf.translation.x, p.0.z - tf.translation.z);
                                     tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
                                 }
                                 anim.pose = Pose::Talk;
                             }
-                            ActionKind::GoHere(_) => finished = true,
+                            ActionKind::GoHere(..) => finished = true,
                             ActionKind::GoToWork => {
                                 if let Some(j) = job {
                                     let day_start = (clock.minutes / 1440.0).floor() * 1440.0;
@@ -626,7 +628,7 @@ fn run_actions(
                     action.phase = Phase::Running(elapsed);
                     match &action.kind {
                         ActionKind::Object { target, def } => {
-                            if let Ok((obj, otf, mut used)) = objects.get_mut(*target) {
+                            if let Ok((obj, otf, mut used, _)) = objects.get_mut(*target) {
                                 let d = &interactions_for(obj.kind)[*def];
                                 for i in 0..6 {
                                     motives.add(i, d.per_hour[i] * dt / 60.0);
@@ -683,7 +685,7 @@ fn run_actions(
                         }
                         ActionKind::Social { target, social } => {
                             let s = &SOCIALS[*social];
-                            let close = positions.get(target).is_some_and(|p| p.distance(tf.translation) < 2.5);
+                            let close = positions.get(target).is_some_and(|p| p.0.distance(tf.translation) < 2.5);
                             if !close {
                                 action.phase = Phase::Start;
                             } else {
@@ -712,20 +714,20 @@ fn run_actions(
             anim.seat_height = 0.0;
             commands.entity(me).remove::<PathFollow>();
             if let Some(p) = stand_up_at {
-                tf.translation = Vec3::new(p.x, ground(p.x, p.y), p.y);
+                tf.translation = Vec3::new(p.x, ground(floor.0, p.x, p.y), p.y);
             }
         }
     }
 
     for (target, actor, social, fun, rel) in social_fx {
-        if let Ok((_, _, queue, mut tf, mut motives, _, mut anim, _, mut rels, path, _)) = sims.get_mut(target) {
+        if let Ok((_, _, queue, mut tf, mut motives, _, mut anim, _, mut rels, path, _, _)) = sims.get_mut(target) {
             motives.add(SOCIAL, social);
             motives.add(FUN, fun);
             rels.add(actor, rel);
             if queue.0.is_empty() && path.is_none() {
                 anim.pose = Pose::Talk;
                 if let Some(p) = positions.get(&actor) {
-                    let to = Vec2::new(p.x - tf.translation.x, p.z - tf.translation.z);
+                    let to = Vec2::new(p.0.x - tf.translation.x, p.0.z - tf.translation.z);
                     tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
                 }
             }

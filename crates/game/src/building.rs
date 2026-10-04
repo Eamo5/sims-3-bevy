@@ -12,7 +12,7 @@ use s3formats::world::LotInfo;
 
 use crate::camera::SimsCamera;
 use crate::loading::{Catalog, WorldInfo};
-use crate::nav::Obstacle;
+use crate::nav::{Floor, Obstacle, StairLink};
 use crate::objects::{AssetCtx, ObjectAssets, parts_bounds};
 use crate::world::LotImposter;
 use crate::{AppState, PlayMode};
@@ -21,7 +21,7 @@ pub struct BuildingPlugin;
 
 impl Plugin for BuildingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (restyle_stairs, view_level_keys, building_visibility).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (follow_selected_floor, view_level_keys, building_visibility).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -43,6 +43,9 @@ pub struct ActiveBuilding {
     /// Floors above this one are hidden; walls on it are cut away.
     pub view_level: u8,
     pub center: Vec3,
+    /// Half the size of the area the house covers (for the upper-floor walk grids).
+    pub extent: f32,
+    pub stairs: Vec<StairLink>,
     floor_cells: HashMap<(u8, i32, i32), u8>,
     far: Option<bool>,
 }
@@ -60,6 +63,12 @@ impl ActiveBuilding {
 
     fn dir(&self, x: f32, z: f32) -> Vec3 {
         self.rot * Vec3::new(x, 0.0, z)
+    }
+
+    /// Whether there's floor at lot-local `p` on `level`.
+    fn floor_cells_has(&self, level: u8, p: Vec2) -> bool {
+        let w = self.world(p.x, p.y, 0.0);
+        self.floor_y(level, w).is_some()
     }
 
     /// Floor height at `p` on `level`, if the house has floor there.
@@ -246,6 +255,8 @@ pub fn spawn_building(
         top_level,
         view_level: 1,
         center: corner + rot * Vec3::new(b.width as f32 * 0.5, 0.0, b.depth as f32 * 0.5),
+        extent: b.width.max(b.depth) as f32 * 0.5,
+        stairs: Vec::new(),
         floor_cells,
         far: None,
     };
@@ -273,21 +284,21 @@ pub fn spawn_building(
 
     // Furniture, doors and windows.
     let mut holes: Vec<Hole> = Vec::new();
-    let mut stairs = Vec::new();
+    let mut stairs: Vec<(LotObjectBaked, Quat)> = Vec::new();
     for o in &b.objects {
         let q = Quat::from_xyzw(o.rotation[0], o.rotation[1], o.rotation[2], o.rotation[3]);
         let q = if q.length_squared() < 1e-6 { Quat::IDENTITY } else { q.normalize() };
+        if o.script.contains("Stairs") {
+            stairs.push((o.clone(), q));
+            continue;
+        }
         let Some(spawned) = crate::home::spawn_game_object_rot(commands, assets, ctx, catalog, o.objd, Vec3::from(o.position), q) else {
             continue;
         };
-        commands.entity(spawned.entity).insert(BuildingPiece { level: o.level });
+        commands.entity(spawned.entity).insert((BuildingPiece { level: o.level }, Floor(o.level.max(1))));
         let opening = is_opening(&o.script);
         if opening.is_some() || o.script.contains("Stairs") || o.script.contains("Column") {
             commands.entity(spawned.entity).remove::<Obstacle>();
-        }
-        if o.script.contains("Stairs") {
-            // Modular stairs take their look from a style the bake doesn't carry: use wood.
-            stairs.push(spawned.entity);
         }
         if let (Some(door), Some((mn, mx))) = (opening, parts_bounds(&assets.object(ctx, o.objd))) {
             let to_local = |v: Vec3| {
@@ -311,9 +322,65 @@ pub fn spawn_building(
         }
     }
 
-    if !stairs.is_empty() {
-        let wood = material(assets, ctx, STYLE_FLOOR_DECK);
-        commands.insert_resource(RestyleStairs(stairs, wood));
+    // Stairs: the game generates their steps, so build them here and link the floors.
+    let stair_mat = material(assets, ctx, STYLE_FLOOR_DECK);
+    for (o, q) in &stairs {
+        let fl = {
+            let v = rot.inverse() * (*q * Vec3::Z);
+            Vec2::new(v.x, v.z).normalize_or_zero()
+        };
+        let rl = Vec2::new(-fl.y, fl.x);
+        let p = Vec2::from(o.local);
+        let has = |level: u8, at: Vec2| active.floor_cells_has(level, at);
+        let storey = o.level >= 1 && (o.level as usize + 1) < b.levels.len();
+        let (run, lower, upper_level) = if storey { (4.0f32, o.level, o.level + 1) } else { (1.0f32, 0u8, 1u8) };
+        let dirs = [fl, -fl, rl, -rl];
+        let pick = dirs.iter().copied().find(|&d| {
+            let bottom = p - d * 0.5;
+            let top = bottom + d * run;
+            if storey {
+                has(upper_level, top + d * 0.5) && has(lower, bottom - d * 0.5)
+            } else {
+                has(1, top + d * 0.4) && !has(1, bottom - d * 0.4)
+            }
+        });
+        let Some(d) = pick else { continue };
+        let (y0, y1) = (level_y(lower), level_y(upper_level));
+        let bottom = p - d * 0.5;
+        let top = bottom + d * run;
+        let side = Vec2::new(-d.y, d.x) * 0.5;
+        let steps = ((y1 - y0) / 0.25).round().max(1.0) as usize;
+        let mut buf = MeshBuf::default();
+        for i in 0..steps {
+            let (t0, t1) = (i as f32 / steps as f32, (i + 1) as f32 / steps as f32);
+            let a = bottom + d * (run * t0);
+            let c = bottom + d * (run * t1);
+            let h = y0 + (y1 - y0) * t1;
+            let w = |q: Vec2, y: f32| active.world(q.x, q.y, y);
+            let up3 = Vec3::Y;
+            // Tread.
+            buf.quad([w(a - side, h), w(a + side, h), w(c + side, h), w(c - side, h)], [[0.0, t0 * run], [1.0, t0 * run], [1.0, t1 * run], [0.0, t1 * run]], up3);
+            // Riser.
+            let back = active.dir(-d.x, -d.y);
+            let hb = y0 + (y1 - y0) * t0;
+            buf.quad([w(a - side, hb), w(a + side, hb), w(a + side, h), w(a - side, h)], [[0.0, 0.0], [1.0, 0.0], [1.0, 0.25], [0.0, 0.25]], back);
+            // Sides down to the floor.
+            for sgn in [-1.0f32, 1.0] {
+                let n = active.dir(side.x * sgn * 2.0, side.y * sgn * 2.0);
+                let e = side * sgn;
+                buf.quad([w(a + e, y0), w(c + e, y0), w(c + e, h), w(a + e, h)], [[t0 * run, 1.0], [t1 * run, 1.0], [t1 * run, 0.0], [t0 * run, 0.0]], n);
+            }
+        }
+        commands.spawn((
+            Mesh3d(ctx.meshes.add(buf.mesh())),
+            MeshMaterial3d(stair_mat.clone()),
+            BuildingPiece { level: if storey { lower } else { 0 } },
+            DespawnOnExit(AppState::InGame),
+        ));
+        if storey {
+            let bw = |q: Vec2| active.world(q.x, q.y, 0.0).xz();
+            active.stairs.push(StairLink { level: lower, bottom: bw(bottom - d * 0.45), top: bw(top + d * 0.45), y0, y1 });
+        }
     }
 
     // Walls: one entity per segment with a face per side, full and cut-away versions.
@@ -392,12 +459,13 @@ pub fn spawn_building(
                 .id();
             commands.entity(parent).add_child(cap);
         }
-        // Ground-floor walls block walking, except where a door is.
-        if level == 1 && !has_door {
+        // Walls block walking on their floor, except where a door is.
+        if !has_door {
             let dir = active.dir(along.x, along.y);
             commands.spawn((
                 Transform::from_translation(mid).with_rotation(Quat::from_rotation_y((-dir.z).atan2(dir.x))),
                 Obstacle { half: Vec2::new(len * 0.5 + 0.02, 0.08), center_offset: Vec2::ZERO },
+                Floor(level),
                 DespawnOnExit(AppState::InGame),
             ));
         }
@@ -461,20 +529,18 @@ pub fn spawn_building(
     active
 }
 
-/// Stairs whose parts get the wood material once they exist.
-#[derive(Resource)]
-struct RestyleStairs(Vec<Entity>, Handle<StandardMaterial>);
-
-fn restyle_stairs(mut commands: Commands, req: Option<Res<RestyleStairs>>, children: Query<&Children>, mut mats: Query<&mut MeshMaterial3d<StandardMaterial>>) {
-    let Some(req) = req else { return };
-    for &e in &req.0 {
-        for c in children.iter_descendants(e) {
-            if let Ok(mut m) = mats.get_mut(c) {
-                m.0 = req.1.clone();
-            }
+/// When the selected Sim changes floor, the view follows.
+fn follow_selected_floor(
+    building: Option<ResMut<ActiveBuilding>>,
+    sims: Query<&Floor, (With<crate::sim::Selected>, Or<(Changed<Floor>, Added<crate::sim::Selected>)>)>,
+) {
+    let Some(mut b) = building else { return };
+    if let Some(f) = sims.iter().next() {
+        let l = f.0.clamp(1, b.top_level);
+        if b.view_level != l {
+            b.view_level = l;
         }
     }
-    commands.remove_resource::<RestyleStairs>();
 }
 
 /// PageUp / PageDown move the floor being viewed.
@@ -498,6 +564,10 @@ fn building_visibility(
     mut imposters: Query<(&LotImposter, &mut Visibility), (Without<BuildingPiece>, Without<crate::world::Tree>)>,
     mut faces: Query<(&mut WallFace, &mut Mesh3d, &mut Visibility), (Without<BuildingPiece>, Without<LotImposter>, Without<crate::world::Tree>)>,
     mut trees: Query<(&GlobalTransform, &mut Visibility), (With<crate::world::Tree>, Without<BuildingPiece>, Without<LotImposter>)>,
+    mut sims: Query<
+        (&Floor, &mut Visibility),
+        (With<crate::sim::Sim>, Without<crate::interact::AtWork>, Without<BuildingPiece>, Without<LotImposter>, Without<crate::world::Tree>, Without<WallFace>),
+    >,
 ) {
     let Some(mut b) = building else { return };
     let Ok((cam, cam_tf)) = cams.single() else { return };
@@ -521,6 +591,9 @@ fn building_visibility(
     let view = cam_tf.forward().as_vec3();
     let view = Vec3::new(view.x, 0.0, view.z).normalize_or_zero();
     let is_cut = |mid: Vec3, level: u8| level == b.view_level && (mid - b.center).dot(view) < 0.3;
+    for (floor, mut vis) in &mut sims {
+        vis.set_if_neq(if floor.0 <= b.view_level { Visibility::Inherited } else { Visibility::Hidden });
+    }
     for (piece, wall_obj, mut vis) in &mut pieces {
         let show = !far && piece.level <= b.view_level && !wall_obj.is_some_and(|w| is_cut(w.mid, piece.level));
         vis.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });

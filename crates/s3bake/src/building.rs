@@ -103,7 +103,11 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
                 rotation = parent.rotation;
             }
         }
-        let level = if p[1] < base - 0.3 { 0 } else { (((p[1] - base) / LEVEL_HEIGHT).round() as i32 + 1).max(1) as u8 };
+        let mut level = if p[1] < base - 0.3 { 0 } else { (((p[1] - base) / LEVEL_HEIGHT).round() as i32 + 1).max(1) as u8 };
+        // Ceiling lights hang from the floor above but light (and belong to) the room below.
+        if level > 1 && o.script.as_deref().unwrap_or("").contains("LightingCeiling") {
+            level -= 1;
+        }
         objs.push(LotObjectBaked {
             objd: key_of(&cat),
             position: p,
@@ -152,6 +156,9 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
 
     // Walls with the kind of room on each side (outdoors when no indoor floor is there).
     let floor_at: HashMap<(u8, u16, u16), (u8, u8)> = floors.iter().map(|f| ((f.level, f.x, f.z), (f.mask, f.kind))).collect();
+    let has_floor = |level: u32, p: [f32; 2]| -> bool {
+        p[0] >= 0.0 && p[1] >= 0.0 && floor_at.contains_key(&(level as u8, p[0].floor() as u16, p[1].floor() as u16))
+    };
     let side_kind = |level: u32, p: [f32; 2]| -> u8 {
         let (x, z) = (p[0].floor(), p[1].floor());
         if x < 0.0 || z < 0.0 {
@@ -176,7 +183,12 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
         }
         let n = [-dz / len, dx / len];
         let mid = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
-        let probe = |sign: f32| side_kind(level, [mid[0] + n[0] * 0.3 * sign, mid[1] + n[1] * 0.3 * sign]);
+        let side = |sign: f32| [mid[0] + n[0] * 0.3 * sign, mid[1] + n[1] * 0.3 * sign];
+        // Upper-storey "walls" with no floor on either side are beams over open structures.
+        if level > 1 && !has_floor(level, side(1.0)) && !has_floor(level, side(-1.0)) {
+            continue;
+        }
+        let probe = |sign: f32| side_kind(level, side(sign));
         walls.push(WallBaked { a, b, level: level as u8, left: probe(1.0), right: probe(-1.0) });
     }
     let foundation: Vec<([f32; 2], [f32; 2])> = data.rooms.segments().filter(|s| s.2 == 0).map(|s| (s.0, s.1)).collect();

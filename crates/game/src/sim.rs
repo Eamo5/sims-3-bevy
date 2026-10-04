@@ -41,6 +41,7 @@ pub enum Age {
 }
 
 #[derive(Component, Clone)]
+#[require(crate::nav::Floor)]
 pub struct Sim {
     pub first: String,
     pub last: String,

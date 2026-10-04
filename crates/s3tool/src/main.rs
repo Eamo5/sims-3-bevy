@@ -170,6 +170,18 @@ fn main() {
         }
         return;
     }
+    if args[1] == "objbounds" {
+        // objbounds <root> <objd instance hex>: model bounds of an object's meshes.
+        let root = std::path::Path::new(&args[2]);
+        let set = s3pkg::install::open_install(root, |_| true);
+        let k = s3pkg::ResourceKey::new(types::OBJD, 0, parse_hex(&args[3]));
+        for mk in s3formats::object::object_models(&set, &k) {
+            for m in s3formats::model::load_model(&set, &mk).unwrap_or_default() {
+                println!("{mk} mesh {:08X} verts {} bounds {:?}..{:?}", m.name_hash, m.positions.len(), m.bounds_min, m.bounds_max);
+            }
+        }
+        return;
+    }
     if args[1] == "lotbuild" {
         // lotbuild <world> <lot id hex> <out.txt>: walls, roofs and floor cells per level.
         let w = Package::open(&args[2]).unwrap();

@@ -1,7 +1,7 @@
 //! Grid-based pathfinding around the active lot.
 
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap};
 
 use bevy::prelude::*;
 
@@ -14,7 +14,7 @@ pub struct NavPlugin;
 
 impl Plugin for NavPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (rebuild_grid, follow_paths).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (rebuild_upper_floors, rebuild_grid, follow_paths).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -25,6 +25,89 @@ pub const CELL: f32 = 0.5;
 pub struct Obstacle {
     pub half: Vec2,
     pub center_offset: Vec2,
+}
+
+/// Which floor of the house something is on: 1 = the ground floor and the yard.
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Floor(pub u8);
+
+impl Default for Floor {
+    fn default() -> Self {
+        Self(1)
+    }
+}
+
+/// A staircase joining `level` to the floor above: walk to `bottom`, climb to `top`.
+#[derive(Clone, Copy, Debug)]
+pub struct StairLink {
+    pub level: u8,
+    pub bottom: Vec2,
+    pub top: Vec2,
+    pub y0: f32,
+    pub y1: f32,
+}
+
+/// Walk grids of the house's upper floors (the ground floor uses [`NavGrid`]).
+#[derive(Resource, Default)]
+pub struct UpperFloors {
+    pub grids: HashMap<u8, NavGrid>,
+    pub stairs: Vec<StairLink>,
+}
+
+/// A point along a route, on a floor; `climb` = reached by stairs from height y0 to y1.
+#[derive(Clone, Copy, Debug)]
+pub struct Waypoint {
+    pub p: Vec2,
+    pub level: u8,
+    pub climb: Option<(f32, f32)>,
+}
+
+/// Plans a walk from one floor to another, using stairs to change floors.
+pub fn plan_route(ground: &NavGrid, upper: Option<&UpperFloors>, from: Vec2, from_level: u8, to: Vec2, to_level: u8) -> Option<Vec<Waypoint>> {
+    plan_route_depth(ground, upper, from, from_level.max(1), to, to_level.max(1), 0)
+}
+
+fn plan_route_depth(
+    ground: &NavGrid,
+    upper: Option<&UpperFloors>,
+    from: Vec2,
+    from_level: u8,
+    to: Vec2,
+    to_level: u8,
+    depth: usize,
+) -> Option<Vec<Waypoint>> {
+    let grid_of = |l: u8| if l <= 1 { Some(ground) } else { upper.and_then(|u| u.grids.get(&l)) };
+    if from_level == to_level {
+        let pts = grid_of(from_level)?.find_path(from, to)?;
+        return Some(pts.into_iter().map(|p| Waypoint { p, level: from_level, climb: None }).collect());
+    }
+    if depth > 6 {
+        return None;
+    }
+    let up = to_level > from_level;
+    let mut links: Vec<StairLink> = upper?
+        .stairs
+        .iter()
+        .copied()
+        .filter(|s| if up { s.level == from_level } else { s.level + 1 == from_level })
+        .collect();
+    let entry = |s: &StairLink| if up { s.bottom } else { s.top };
+    links.sort_by(|a, b| entry(a).distance(from).total_cmp(&entry(b).distance(from)));
+    for s in links {
+        let Some(mut first) = grid_of(from_level)?
+            .find_path(from, entry(&s))
+            .map(|v| v.into_iter().map(|p| Waypoint { p, level: from_level, climb: None }).collect::<Vec<_>>())
+        else {
+            continue;
+        };
+        let (exit, next_level, ys) = if up { (s.top, from_level + 1, (s.y0, s.y1)) } else { (s.bottom, from_level - 1, (s.y1, s.y0)) };
+        first.push(Waypoint { p: exit, level: next_level, climb: Some(ys) });
+        if let Some(rest) = plan_route_depth(ground, upper, exit, next_level, to, to_level, depth + 1) {
+            first.extend(rest);
+            return Some(first);
+        }
+    }
+    None
 }
 
 #[derive(Resource)]
@@ -216,13 +299,18 @@ impl PartialOrd for Node {
 fn rebuild_grid(
     grid: Option<ResMut<NavGrid>>,
     world: Res<CurrentWorld>,
-    obstacles: Query<(&GlobalTransform, &Obstacle)>,
+    obstacles: Query<(&GlobalTransform, &Obstacle, Option<&Floor>)>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+    mut upper: Option<ResMut<UpperFloors>>,
 ) {
     let Some(mut grid) = grid else { return };
     if !grid.dirty {
         return;
     }
     grid.dirty = false;
+    if let (Some(b), Some(u)) = (building.as_deref(), upper.as_deref_mut()) {
+        rebuild_upper(b, u, &obstacles);
+    }
     let hm = &world.data.heightmap;
     let (w, h) = (grid.w, grid.h);
     for z in 0..h {
@@ -235,7 +323,18 @@ fn rebuild_grid(
             grid.blocked[z * w + x] = y < world.data.sea_level + 0.2 || slope > 0.9;
         }
     }
-    for (gt, ob) in &obstacles {
+    for (gt, ob, floor) in &obstacles {
+        if floor.is_some_and(|f| f.0 > 1) {
+            continue;
+        }
+        mark_obstacle(&mut grid, gt, ob);
+    }
+}
+
+/// Marks the cells under an obstacle's footprint as blocked.
+fn mark_obstacle(grid: &mut NavGrid, gt: &GlobalTransform, ob: &Obstacle) {
+    let (w, h) = (grid.w, grid.h);
+    {
         let tf = gt.compute_transform();
         let fwd = tf.rotation * Vec3::X;
         let ax = Vec2::new(fwd.x, fwd.z).normalize_or(Vec2::X);
@@ -249,7 +348,7 @@ fn rebuild_grid(
             grid.cell_of((center - Vec2::splat(r)).max(grid.origin)),
             grid.cell_of((center + Vec2::splat(r)).min(grid.origin + Vec2::new(w as f32, h as f32) * CELL - 0.01)),
         ) else {
-            continue;
+            return;
         };
         for z in z0..=z1 {
             for x in x0..=x1 {
@@ -263,17 +362,67 @@ fn rebuild_grid(
     }
 }
 
+/// Builds the walk grids of the upper floors: cells with floor, minus walls and furniture there.
+fn rebuild_upper(b: &crate::building::ActiveBuilding, upper: &mut UpperFloors, obstacles: &Query<(&GlobalTransform, &Obstacle, Option<&Floor>)>) {
+    upper.grids.clear();
+    upper.stairs = b.stairs.clone();
+    for level in 2..=b.top_level {
+        let mut g = NavGrid::new(b.center.xz(), b.extent + 2.0);
+        g.dirty = false;
+        for z in 0..g.h {
+            for x in 0..g.w {
+                let c = g.center_of(x, z);
+                g.blocked[z * g.w + x] = b.floor_y(level, Vec3::new(c.x, 0.0, c.y)).is_none();
+            }
+        }
+        for (gt, ob, floor) in obstacles {
+            if floor.is_some_and(|f| f.0 == level) {
+                mark_obstacle(&mut g, gt, ob);
+            }
+        }
+        upper.grids.insert(level, g);
+    }
+}
+
+/// Creates the upper-floor grids when a house becomes active (and drops them when it goes).
+fn rebuild_upper_floors(
+    mut commands: Commands,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+    upper: Option<Res<UpperFloors>>,
+    grid: Option<ResMut<NavGrid>>,
+) {
+    match (building, upper) {
+        (Some(_), None) => {
+            commands.insert_resource(UpperFloors::default());
+            if let Some(mut g) = grid {
+                g.dirty = true;
+            }
+        }
+        (None, Some(_)) => commands.remove_resource::<UpperFloors>(),
+        _ => {}
+    }
+}
+
 /// Walking along a computed path.
 #[derive(Component, Default)]
 pub struct PathFollow {
-    pub waypoints: Vec<Vec2>,
+    pub waypoints: Vec<Waypoint>,
     pub speed: f32,
     pub done: bool,
+    seg_start: Option<Vec2>,
 }
 
 impl PathFollow {
-    pub fn new(waypoints: Vec<Vec2>) -> Self {
-        Self { waypoints, speed: 1.45, done: false }
+    pub fn new(waypoints: Vec<Waypoint>) -> Self {
+        Self { waypoints, speed: 1.45, done: false, seg_start: None }
+    }
+}
+
+/// Standing height on a floor at a point: the house floor or the terrain.
+pub fn floor_height(world: &crate::loading::WorldInfo, building: Option<&crate::building::ActiveBuilding>, level: u8, p: Vec3) -> f32 {
+    match building {
+        Some(b) if level > 1 => b.floor_y(level, p).unwrap_or_else(|| b.levels.get(level as usize).copied().unwrap_or(p.y)),
+        _ => crate::building::walk_height(world, building, p),
     }
 }
 
@@ -282,11 +431,11 @@ fn follow_paths(
     clock: Res<GameClock>,
     world: Res<CurrentWorld>,
     building: Option<Res<crate::building::ActiveBuilding>>,
-    mut q: Query<(&mut Transform, &mut PathFollow, &mut SimAnim)>,
+    mut q: Query<(&mut Transform, &mut PathFollow, &mut SimAnim, &mut Floor)>,
 ) {
     let rate = SPEED_RATES[clock.speed];
     let dt = time.delta_secs().min(0.1) * rate;
-    for (mut tf, mut pf, mut anim) in &mut q {
+    for (mut tf, mut pf, mut anim, mut floor) in &mut q {
         if pf.done {
             continue;
         }
@@ -294,30 +443,41 @@ fn follow_paths(
             continue;
         }
         let mut budget = pf.speed * dt;
+        let mut climbing = None;
         while budget > 0.0 {
             let Some(&target) = pf.waypoints.first() else {
                 pf.done = true;
                 break;
             };
             let pos = Vec2::new(tf.translation.x, tf.translation.z);
-            let to = target - pos;
+            let start = *pf.seg_start.get_or_insert(pos);
+            let to = target.p - pos;
             let d = to.length();
-            if d <= budget {
-                tf.translation.x = target.x;
-                tf.translation.z = target.y;
-                budget -= d;
+            // Stairs are climbed at a slower pace.
+            let pace = if target.climb.is_some() { 0.6 } else { 1.0 };
+            if d <= budget * pace {
+                tf.translation.x = target.p.x;
+                tf.translation.z = target.p.y;
+                budget -= d / pace;
+                floor.0 = target.level;
                 pf.waypoints.remove(0);
+                pf.seg_start = Some(target.p);
             } else {
-                let step = to / d * budget;
+                let step = to / d * (budget * pace);
                 tf.translation.x += step.x;
                 tf.translation.z += step.y;
                 budget = 0.0;
                 let yaw = to.x.atan2(to.y);
                 let target_rot = Quat::from_rotation_y(yaw);
                 tf.rotation = tf.rotation.slerp(target_rot, (dt * 8.0).min(1.0));
+                if let Some((y0, y1)) = target.climb {
+                    let total = (target.p - start).length().max(1e-3);
+                    let done = 1.0 - (target.p - Vec2::new(tf.translation.x, tf.translation.z)).length() / total;
+                    climbing = Some(y0 + (y1 - y0) * done.clamp(0.0, 1.0));
+                }
             }
         }
-        tf.translation.y = crate::building::walk_height(&world.data, building.as_deref(), tf.translation);
+        tf.translation.y = climbing.unwrap_or_else(|| floor_height(&world.data, building.as_deref(), floor.0, tf.translation));
         anim.pose = if pf.done { Pose::Stand } else { Pose::Walk };
     }
 }

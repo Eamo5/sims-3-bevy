@@ -4,6 +4,7 @@
 //!   --shot-delay <secs>     seconds in-game before the screenshot (default 8)
 //!   --cam x,z,dist,yaw,pitch  initial camera placement
 //!   --exit-after-shot       quit once the screenshot is written
+//!   --view-level <n>        floor of the house to view (PageUp / PageDown in play)
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
@@ -24,6 +25,7 @@ pub struct AutoArgs {
     pub portrait: bool,
     pub action: Option<String>,
     pub ui_flow: Option<String>,
+    pub view_level: Option<u8>,
 }
 
 impl AutoArgs {
@@ -46,6 +48,7 @@ impl AutoArgs {
                 "--lot" => a.lot = next,
                 "--do" => a.action = next,
                 "--ui-flow" => a.ui_flow = next,
+                "--view-level" => a.view_level = next.and_then(|s| s.parse().ok()),
                 "--showroom" => {
                     a.showroom = next.and_then(|s| {
                         let mut it = s.split(',').filter_map(|x| x.parse().ok());
@@ -87,6 +90,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, auto_view_level.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, ui_flow.after(bevy::ui::UiSystems::Focus))
             .add_systems(OnEnter(AppState::InGame), showroom);
     }
@@ -318,5 +322,12 @@ fn ui_flow(
             exit.write(AppExit::Success);
         }
         _ => {}
+    }
+}
+
+fn auto_view_level(args: Res<AutoArgs>, building: Option<ResMut<crate::building::ActiveBuilding>>, mut done: Local<bool>) {
+    if let (Some(l), Some(mut b), false) = (args.view_level, building, *done) {
+        b.view_level = l.clamp(1, b.top_level);
+        *done = true;
     }
 }
