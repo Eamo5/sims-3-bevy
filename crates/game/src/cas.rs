@@ -363,16 +363,14 @@ fn cas_actions(
                     }
                 }
             }
-            CasAction::Trait(slot) => {
+            CasAction::Trait(i) => {
+                // Toggle trait i: remove it, or add it if there's a free slot and it fits.
                 let s = &mut pending.members[k];
-                let current = s.traits.get(slot).copied();
-                let others: Vec<crate::life::Trait> = s.traits.iter().enumerate().filter(|(i, _)| *i != slot).map(|(_, t)| *t).collect();
-                if let Some(t) = crate::life::next_trait(current, &others) {
-                    if slot < s.traits.len() {
-                        s.traits[slot] = t;
-                    } else {
-                        s.traits.push(t);
-                    }
+                let t = crate::life::Trait::ALL[i];
+                if let Some(pos) = s.traits.iter().position(|x| *x == t) {
+                    s.traits.remove(pos);
+                } else if s.traits.len() < crate::life::trait_slots(s.age) && t.compatible(&s.traits) {
+                    s.traits.push(t);
                 }
                 model = false;
             }
@@ -475,16 +473,23 @@ fn turn_model(
     }
 }
 
-fn cas_button_visuals(mut q: Query<(&Interaction, &mut BackgroundColor, &CasAction, Option<&Selectedness>), Changed<Interaction>>) {
-    for (i, mut bg, _, sel) in &mut q {
+fn cas_button_visuals(mut q: Query<(&Interaction, &mut BackgroundColor, &CasAction, Option<&Selectedness>, Has<Dimmed>), Changed<Interaction>>) {
+    for (i, mut bg, _, sel, dimmed) in &mut q {
         bg.0 = match i {
             Interaction::Pressed => BTN_PRESS,
             Interaction::Hovered => BTN_HOVER,
             Interaction::None if sel.is_some() => Color::srgb(0.22, 0.55, 0.22),
+            Interaction::None if dimmed => DIMMED,
             Interaction::None => BTN_NORMAL,
         };
     }
 }
+
+/// A choice that isn't available right now.
+#[derive(Component)]
+struct Dimmed;
+
+const DIMMED: Color = Color::srgba(0.1, 0.18, 0.28, 0.6);
 
 /// A button showing the current choice.
 #[derive(Component)]
@@ -655,12 +660,37 @@ fn rebuild_ui(mut commands: Commands, scene: Option<ResMut<CasScene>>, pending: 
                     });
                 }
                 CasTab::Traits => {
-                    p.spawn(text("Traits", 20.0, Color::WHITE));
-                    p.spawn(text("Click a trait to change it.", 13.0, Color::srgb(0.75, 0.85, 1.0)));
-                    for slot in 0..crate::life::trait_slots(sim.age) {
-                        let label = sim.traits.get(slot).map_or("Choose a Trait", |t| t.name());
-                        button(p, label, CasAction::Trait(slot), Val::Percent(100.0), false, 16.0);
-                    }
+                    let slots = crate::life::trait_slots(sim.age);
+                    p.spawn(text(format!("Traits · {} of {slots}", sim.traits.len()), 20.0, Color::WHITE));
+                    p.spawn(text("Click to add or remove. Traits that clash with chosen ones are dimmed.", 13.0, Color::srgb(0.75, 0.85, 1.0)));
+                    p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(4.0), row_gap: Val::Px(4.0), ..default() }).with_children(|grid| {
+                        for (i, t) in crate::life::Trait::ALL.iter().enumerate() {
+                            let chosen = sim.traits.contains(t);
+                            let ok = chosen || (sim.traits.len() < slots && t.compatible(&sim.traits));
+                            let mut e = grid.spawn((
+                                Button,
+                                CasAction::Trait(i),
+                                Node {
+                                    width: Val::Px(132.0),
+                                    min_height: Val::Px(26.0),
+                                    padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    border_radius: BorderRadius::all(Val::Px(6.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(if chosen { Color::srgb(0.22, 0.55, 0.22) } else if ok { BTN_NORMAL } else { DIMMED }),
+                            ));
+                            if chosen {
+                                e.insert(Selectedness);
+                            } else if !ok {
+                                e.insert(Dimmed);
+                            }
+                            e.with_children(|b| {
+                                b.spawn(text(t.name(), 12.0, if ok { Color::WHITE } else { Color::srgba(1.0, 1.0, 1.0, 0.4) }));
+                            });
+                        }
+                    });
                 }
                 tab => {
                     let t = tab.clothing_type().unwrap();

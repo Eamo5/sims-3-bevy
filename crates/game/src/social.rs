@@ -225,6 +225,9 @@ pub fn acceptance(def: &SocialDef, rel: &Relationship, target: &Sim, target_mood
         if has(Trait::Unflirty) {
             p -= 0.3;
         }
+        if has(Trait::CommitmentIssues) && matches!(def.effect, SocialEffect::GoSteady | SocialEffect::Propose | SocialEffect::Marry) {
+            p -= 0.35;
+        }
         if has_other_partner {
             p -= 0.5;
         }
@@ -236,6 +239,16 @@ pub fn acceptance(def: &SocialDef, rel: &Relationship, target: &Sim, target_mood
         if has(Trait::Grumpy) {
             p -= 0.35;
         }
+        if has(Trait::NoSenseOfHumor) {
+            p -= 0.5;
+        }
+    }
+    if has(Trait::EasilyImpressed) {
+        p += 0.1;
+    }
+    // The evil and the mean-spirited take an insult in their stride.
+    if def.cat == SocialCat::Mean && (has(Trait::Evil) || has(Trait::MeanSpirited)) {
+        p = p.max(0.9);
     }
     if def.cat == SocialCat::Friendly && has(Trait::Loner) {
         p -= 0.15;
