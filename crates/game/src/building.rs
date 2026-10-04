@@ -23,7 +23,7 @@ impl Plugin for BuildingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NearbyLots>().add_systems(
             Update,
-            (follow_selected_floor, view_level_keys, building_visibility, stream_nearby_lots).chain().run_if(in_state(PlayMode::Live)),
+            (follow_selected_floor, view_level_keys, building_visibility, stream_nearby_lots, lamps_at_night).chain().run_if(in_state(PlayMode::Live)),
         );
     }
 }
@@ -100,6 +100,20 @@ pub fn walk_height(world: &WorldInfo, building: Option<&ActiveBuilding>, p: Vec3
 #[derive(Component)]
 pub struct BuildingPiece {
     pub level: u8,
+}
+
+/// A lamp of the active house; its light comes on after dark.
+#[derive(Component)]
+pub struct LotLamp;
+
+fn lamps_at_night(night: Res<crate::clock::Night>, mut lamps: Query<(&mut PointLight, &mut Visibility), With<LotLamp>>) {
+    if !night.is_changed() {
+        return;
+    }
+    for (mut light, mut vis) in &mut lamps {
+        light.intensity = 90_000.0 * night.0;
+        vis.set_if_neq(if night.0 > 0.02 { Visibility::Inherited } else { Visibility::Hidden });
+    }
 }
 
 /// A door or window: hidden along with the wall it sits in when that wall is cut away.
@@ -324,6 +338,20 @@ pub fn spawn_building(
                 continue;
             };
             commands.entity(spawned.entity).insert((BuildingPiece { level: o.level }, Floor(o.level.max(1))));
+            let lower = o.script.to_ascii_lowercase();
+            if lower.contains(".lighting.") || lower.contains("lightfloorlamp") || lower.contains("lightwalllamp") || lower.contains("lighttablelamp") {
+                // Ceiling lights shine from just under the ceiling; lamps from their shade.
+                let h = parts_bounds(&assets.object(ctx, o.objd)).map_or(1.5, |(mn, mx)| if lower.contains("ceiling") { mn.y.max(-1.2) } else { mx.y * 0.8 });
+                let lamp = commands
+                    .spawn((
+                        LotLamp,
+                        PointLight { intensity: 0.0, range: 9.0, radius: 0.1, color: Color::srgb(1.0, 0.85, 0.62), shadow_maps_enabled: false, ..default() },
+                        Transform::from_xyz(0.0, h, 0.0),
+                        Visibility::Hidden,
+                    ))
+                    .id();
+                commands.entity(spawned.entity).add_child(lamp);
+            }
             if opening.is_some() || o.script.contains("Stairs") || o.script.contains("Column") {
                 commands.entity(spawned.entity).remove::<Obstacle>();
             }

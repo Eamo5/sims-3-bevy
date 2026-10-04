@@ -8,7 +8,7 @@ pub struct ClockPlugin;
 
 impl Plugin for ClockPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(GameClock::default())
+        app.init_resource::<Night>().insert_resource(GameClock::default())
             .insert_resource(SimDelta::default())
             .add_systems(
                 Update,
@@ -107,8 +107,13 @@ fn advance_clock(time: Res<Time>, mut clock: ResMut<GameClock>, mut delta: ResMu
     delta.0 = dt;
 }
 
+/// How dark it is: 0 in daylight, 1 at night (smooth through dusk and dawn).
+#[derive(Resource, Default, Clone, Copy)]
+pub struct Night(pub f32);
+
 fn day_night(
     clock: Res<GameClock>,
+    mut night: ResMut<Night>,
     mut sun: Query<(&mut Transform, &mut DirectionalLight)>,
     mut ambient: Query<&mut AmbientLight>,
     mut clear: ResMut<ClearColor>,
@@ -118,6 +123,10 @@ fn day_night(
     let t = (h - 6.0) / 12.0;
     let elev = (t * std::f32::consts::PI).sin();
     let day = elev.clamp(0.0, 1.0);
+    let dark = (1.0 - (elev + 0.08) / 0.3).clamp(0.0, 1.0);
+    if (night.0 - dark).abs() > 0.002 {
+        night.0 = dark;
+    }
     let twilight = (1.0 - (elev.abs() * 4.0).min(1.0)).max(0.0);
     let azimuth = t * std::f32::consts::PI + 0.6;
     for (mut tf, mut light) in &mut sun {

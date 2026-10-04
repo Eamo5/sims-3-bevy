@@ -5,6 +5,8 @@
 //!   --cam x,z,dist,yaw,pitch  initial camera placement
 //!   --exit-after-shot       quit once the screenshot is written
 //!   --view-level <n>        floor of the house to view (PageUp / PageDown in play)
+//!   --speed <0-3>           game speed once playing
+//!   --hour <h>              start the day at this hour
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
@@ -26,6 +28,8 @@ pub struct AutoArgs {
     pub action: Option<String>,
     pub ui_flow: Option<String>,
     pub view_level: Option<u8>,
+    pub speed: Option<usize>,
+    pub hour: Option<f64>,
 }
 
 impl AutoArgs {
@@ -49,6 +53,8 @@ impl AutoArgs {
                 "--do" => a.action = next,
                 "--ui-flow" => a.ui_flow = next,
                 "--view-level" => a.view_level = next.and_then(|s| s.parse().ok()),
+                "--speed" => a.speed = next.and_then(|s| s.parse().ok()),
+                "--hour" => a.hour = next.and_then(|s| s.parse().ok()),
                 "--showroom" => {
                     a.showroom = next.and_then(|s| {
                         let mut it = s.split(',').filter_map(|x| x.parse().ok());
@@ -91,6 +97,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_view_level.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, auto_speed.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, ui_flow.after(bevy::ui::UiSystems::Focus))
             .add_systems(OnEnter(AppState::InGame), showroom);
     }
@@ -327,6 +334,19 @@ fn ui_flow(
         }
         _ => {}
     }
+}
+
+fn auto_speed(args: Res<AutoArgs>, mut clock: ResMut<crate::clock::GameClock>, mut done: Local<bool>) {
+    if *done {
+        return;
+    }
+    if let Some(s) = args.speed {
+        clock.speed = s.min(3);
+    }
+    if let Some(h) = args.hour {
+        clock.minutes = h * 60.0;
+    }
+    *done = true;
 }
 
 fn auto_view_level(args: Res<AutoArgs>, building: Option<ResMut<crate::building::ActiveBuilding>>, mut done: Local<bool>) {

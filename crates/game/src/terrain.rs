@@ -43,6 +43,23 @@ pub struct TerrainExt {
     /// Average linear colour of each paint layer (rgb).
     #[uniform(109)]
     pub layer_avg: [Vec4; 16],
+    /// x: darkness (0 day .. 1 night) for the street-light glow.
+    #[uniform(110)]
+    pub night: Vec4,
+}
+
+/// The terrain material, for per-frame lighting updates.
+#[derive(Resource)]
+pub struct TerrainMaterialHandle(pub Handle<TerrainMaterial>);
+
+fn terrain_night(night: Res<crate::clock::Night>, handle: Option<Res<TerrainMaterialHandle>>, mut mats: ResMut<Assets<TerrainMaterial>>) {
+    let Some(h) = handle else { return };
+    if !night.is_changed() {
+        return;
+    }
+    if let Some(mut m) = mats.get_mut(&h.0) {
+        m.extension.night = Vec4::new(night.0, 0.0, 0.0, 0.0);
+    }
 }
 
 impl MaterialExtension for TerrainExt {
@@ -57,7 +74,8 @@ impl Plugin for TerrainPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "shaders/terrain.wgsl");
         app.add_plugins(MaterialPlugin::<TerrainMaterial>::default())
-            .add_systems(OnEnter(AppState::InGame), spawn_terrain);
+            .add_systems(OnEnter(AppState::InGame), spawn_terrain)
+            .add_systems(Update, terrain_night.run_if(in_state(AppState::InGame)));
     }
 }
 
@@ -277,8 +295,10 @@ fn spawn_terrain(
             overview,
             lightmap,
             layer_avg: build.layer_avg,
+            night: Vec4::ZERO,
         },
     });
+    commands.insert_resource(TerrainMaterialHandle(material.clone()));
     for c in build.chunks.drain(..) {
         let (_, start, end) = LODS[c.lod];
         let margin = 30.0;

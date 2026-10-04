@@ -27,6 +27,7 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(107) var light_tex: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(108) var light_samp: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(109) var<uniform> layer_avg: array<vec4<f32>, 16>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(110) var<uniform> terrain_night: vec4<f32>;
 
 @fragment
 fn fragment(
@@ -77,6 +78,11 @@ fn fragment(
         col = col * mix(0.55, 1.0, shade);
     }
     pbr_input.material.base_color = vec4<f32>(col, 1.0);
+    if ((flags & 2u) != 0u && terrain_night.x > 0.01) {
+        // Pools of street light baked into the world's light map.
+        let glow = textureSample(light_tex, light_samp, wuv).rgb;
+        pbr_input.material.emissive = vec4<f32>(glow * glow * terrain_night.x * 2.5, 1.0);
+    }
 
 #ifdef PREPASS_PIPELINE
     let out = deferred_output(in, pbr_input);
