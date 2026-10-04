@@ -199,6 +199,7 @@ impl Trait {
 pub fn trait_slots(age: Age) -> usize {
     match age {
         Age::Child => 3,
+        Age::Teen => 4,
         _ => 5,
     }
 }

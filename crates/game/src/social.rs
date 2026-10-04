@@ -177,8 +177,14 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
     if rel.friendship < def.min_friendship || rel.romance < def.min_romance {
         return false;
     }
-    let adults = actor.age != Age::Child && target.age != Age::Child;
-    if def.cat == SocialCat::Romantic && !adults {
+    let grown = |a: Age| !matches!(a, Age::Child | Age::Teen);
+    let adults = grown(actor.age) && grown(target.age);
+    // Teens may court other teens, but marriage and woohoo are for adults.
+    let teens = actor.age == Age::Teen && target.age == Age::Teen;
+    if def.cat == SocialCat::Romantic && !adults && !teens {
+        return false;
+    }
+    if !adults && matches!(def.effect, SocialEffect::Propose | SocialEffect::Marry | SocialEffect::WooHoo) {
         return false;
     }
     match def.effect {

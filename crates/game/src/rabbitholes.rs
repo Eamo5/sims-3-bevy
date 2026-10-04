@@ -243,7 +243,7 @@ fn school_bus(
     let h = clock.hour_f();
     let day = clock.day();
     for (e, sim, mut queue, grades, away) in &mut kids {
-        if sim.age != Age::Child {
+        if !matches!(sim.age, Age::Child | Age::Teen) {
             continue;
         }
         if grades.is_none() {

@@ -1244,3 +1244,31 @@ MTS threads used for names/skin facts:
 - Face mesh instances (`amFace_lod0_1..3` = `0xAF383E50/53/52`): https://modthesims.info/t/442374
 - afBodyNude / afTopNude / afBottomNude: https://modthesims.info/t/519909 , https://modthesims.info/t/482467
 - Movie-maker idle names: https://narisims.tumblr.com/post/104047381651/movie-maker-cheats-guide-specific-looping-idles
+
+## Premade households (world `OBJS`, 0x06B981ED)
+
+A world file carries the scripts' saved object graph: every household, Sim description,
+relationship and career of the town, as serialized by the game's `ScriptCore`. Decoded in
+`crates/s3formats/src/objs.rs`; the households in `premade.rs`.
+
+* Header: `u16 version, u16 0, "OBJS", u32 classes, u32 objects, u32 class-table offset,
+  u32 object-offset table, u32 key table`.
+* Class table: per class a type descriptor (`flags` byte; `0x20` generic = nested descriptor of
+  the generic definition followed by its arguments; `0x40` array and `0x02` wrapper nest one
+  descriptor; otherwise a length-prefixed name), then the field count (`0x7F` = none) and
+  fields (name, type code). Lengths and counts are one byte, or two when the high bit is set
+  (`(b & 0x7F) << 7 | next`).
+* Objects: `0x10, u32 class` then field values; arrays `0x11, u32 count, 0x10 u32 element
+  class, u32 refs`. References are 1-based object indices. `List<T>` holds one reference to
+  its backing array; `Dictionary<K,V>` is `count` then key/value pairs.
+* Field type codes: `01` reference, `02` bool, `03/04` byte, `06–08` 16-bit, `09` i32,
+  `0E` u32, `0C` f32, `05/0A/0B/0D/0F` 64-bit, `10` struct (`u32 class` + fields), `17` enum
+  (class, value type code, value), `19` resource key (index into the key table).
+* Names are localization keys (`Gameplay/Excel/PV/Sims:Gunther`): FNV-64 of the key is the
+  string-table id. Traits and skills are the game's enum values (`TraitNames`, `SkillNames`,
+  tabled in `crates/s3formats/src/enums.rs`). Age and gender are `CASAgeGenderFlags`
+  (`0x1` baby … `0x40` elder, `0x1000` male, `0x2000` female).
+* Household portraits: PNG resources `0x6B6D837E` keyed by household id.
+* The Sims' outfits (`SIMO` keys) aren't shipped in the game's packages, so clothes are
+  picked from the CAS catalogue; natural hair colour (`GeneticColor`), skin shade and body
+  shape come from the description.

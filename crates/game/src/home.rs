@@ -22,7 +22,7 @@ impl Plugin for HomePlugin {
         app.add_systems(OnEnter(PlayMode::ChooseLot), spawn_lot_chooser)
             .add_systems(
                 Update,
-                (button_visuals, lot_buttons, draw_lots, auto_move_in).run_if(in_state(PlayMode::ChooseLot)),
+                (button_visuals, lot_buttons, draw_lots, auto_move_in, premade_move_in).run_if(in_state(PlayMode::ChooseLot)),
             )
             .add_systems(Update, draw_home_lot.run_if(in_state(PlayMode::Live)));
     }
@@ -33,6 +33,8 @@ impl Plugin for HomePlugin {
 pub struct PendingHousehold {
     pub last_name: String,
     pub members: Vec<Sim>,
+    /// A town family being played (they move straight into their own home).
+    pub premade: Option<s3bake::HouseholdBaked>,
 }
 
 impl PendingHousehold {
@@ -41,7 +43,7 @@ impl PendingHousehold {
         let last = random_last_name(&mut rng);
         let a = random_sim(&mut rng, &last, Some(true), Age::YoungAdult);
         let b = random_sim(&mut rng, &last, Some(false), Age::YoungAdult);
-        Self { last_name: last, members: vec![a, b] }
+        Self { last_name: last, members: vec![a, b], premade: None }
     }
 }
 
@@ -203,11 +205,12 @@ fn lot_buttons(
 fn auto_move_in(
     args: Res<crate::autotest::AutoArgs>,
     world: Res<CurrentWorld>,
+    pending: Option<Res<PendingHousehold>>,
     mut commands: Commands,
     mut next: ResMut<NextState<PlayMode>>,
     mut done: Local<bool>,
 ) {
-    if *done || args.world.is_none() {
+    if *done || args.world.is_none() || pending.is_some_and(|p| p.premade.is_some()) {
         return;
     }
     *done = true;
@@ -224,6 +227,25 @@ fn auto_move_in(
     }
     .or_else(|| world.data.lots.iter().position(|l| l.is_residential()));
     if let Some(i) = idx {
+        commands.insert_resource(MoveInRequest(i));
+        next.set(PlayMode::Live);
+    }
+}
+
+/// A town family moves straight into their own home.
+fn premade_move_in(
+    pending: Option<Res<PendingHousehold>>,
+    world: Res<CurrentWorld>,
+    loading_save: Option<Res<crate::save::PendingLoad>>,
+    mut commands: Commands,
+    mut next: ResMut<NextState<PlayMode>>,
+) {
+    let Some(h) = pending.as_ref().and_then(|p| p.premade.as_ref()) else { return };
+    if loading_save.is_some() {
+        return;
+    }
+    if let Some(i) = world.data.lots.iter().position(|l| l.id == h.lot_id) {
+        commands.insert_resource(crate::premade::PremadeChoice(h.clone()));
         commands.insert_resource(MoveInRequest(i));
         next.set(PlayMode::Live);
     }
@@ -444,9 +466,10 @@ pub fn move_in(
     let arrive_z = if building.is_some() { -(lot.depth as f32) * 0.5 + 2.0 } else { 0.9 };
     let pending = pending.map(|p| p.clone()).unwrap_or_else(PendingHousehold::random);
     let starting_funds = if house.is_some() { 20000 - furniture_value as i64 / 4 } else { 20000 - furniture_value as i64 / 2 };
+    let starting_funds = pending.premade.as_ref().map_or(starting_funds.max(5000), |h| h.funds.max(0));
     commands.insert_resource(Household {
         name: pending.last_name.clone(),
-        funds: starting_funds.max(5000),
+        funds: starting_funds,
         lot_index,
         last_bill_day: 0,
     });
@@ -538,7 +561,7 @@ pub fn move_in(
         c.pitch = 0.75;
         c.yaw = lot.rotation + 0.6;
     }
-    notes.push(format!("Welcome home, {} family! You have §{} to spend.", pending.last_name, starting_funds.max(5000)));
+    notes.push(format!("Welcome home, {} family! You have §{starting_funds} to spend.", pending.last_name));
     match building {
         Some(b) => commands.insert_resource(b),
         None => commands.remove_resource::<crate::building::ActiveBuilding>(),

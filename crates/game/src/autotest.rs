@@ -28,6 +28,8 @@ pub struct AutoArgs {
     pub lot: Option<String>,
     pub portrait: bool,
     pub action: Option<String>,
+    /// `--family <name>`: play this town family.
+    pub family: Option<String>,
     pub ui_flow: Option<String>,
     pub view_level: Option<u8>,
     pub speed: Option<usize>,
@@ -55,6 +57,7 @@ impl AutoArgs {
                 }
                 "--lot" => a.lot = next,
                 "--do" => a.action = next,
+                "--family" => a.family = next,
                 "--ui-flow" => a.ui_flow = next,
                 "--view-level" => a.view_level = next.and_then(|s| s.parse().ok()),
                 "--speed" => a.speed = next.and_then(|s| s.parse().ok()),
@@ -126,7 +129,22 @@ fn auto_pick_world(
     let lname = name.to_ascii_lowercase();
     if let Some(w) = worlds.0.iter().find(|w| w.name.to_ascii_lowercase().contains(&lname)) {
         commands.insert_resource(SelectedWorld(w.clone()));
-        commands.insert_resource(crate::home::PendingHousehold::random());
+        let mut pending = crate::home::PendingHousehold::random();
+        if let Some(fam) = &args.family {
+            let root = s3bake::default_root();
+            let stem = w.path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let _ = s3bake::ensure_premades(&root, &w.path, &stem);
+            let want = fam.to_ascii_lowercase();
+            match s3bake::load_premades(&root, &stem).and_then(|p| p.playable().find(|h| h.name.to_ascii_lowercase().contains(&want)).cloned()) {
+                Some(h) => {
+                    pending.members = h.members.iter().map(crate::premade::to_sim).collect();
+                    pending.last_name = h.name.clone();
+                    pending.premade = Some(h);
+                }
+                None => warn!("--family {fam}: no such family in {}", w.name),
+            }
+        }
+        commands.insert_resource(pending);
         next.set(AppState::Loading);
     } else {
         warn!("--world {name}: no such world");
@@ -359,11 +377,33 @@ fn ui_flow(
             advance(&mut stage);
         }
         (3, AppState::CreateHousehold, _) if since > 0.5 => {
-            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::Done)) {
+            // With --family, browse the town's families first.
+            let want = if args.family.is_some() { crate::home::CasAction::Families } else { crate::home::CasAction::Done };
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == want) {
+                *i = Interaction::Pressed;
+            }
+            if args.family.is_some() {
+                *stage = (20, now);
+            } else {
+                advance(&mut stage);
+            }
+        }
+        (20, AppState::CreateHousehold, _) if since > 1.0 => {
+            shot(&mut commands, "2b_families");
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::Family(0))) {
                 *i = Interaction::Pressed;
             }
             advance(&mut stage);
         }
+        (21, AppState::CreateHousehold, _) if since > 2.0 => {
+            shot(&mut commands, "2c_family");
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::Done)) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (4, now);
+        }
+        // A town family moves straight into their home.
+        (5, AppState::InGame, Some(crate::PlayMode::Live)) => *stage = (7, now),
         (4, AppState::Loading, _) if since > 1.0 => {
             shot(&mut commands, "3_loading");
             advance(&mut stage);

@@ -17,6 +17,7 @@ mod menu;
 mod music;
 mod nav;
 mod objects;
+mod premade;
 mod rabbitholes;
 mod roads;
 mod save;
@@ -88,7 +89,7 @@ fn main() {
             music::MusicPlugin,
             town::TownPlugin,
         ))
-        .add_plugins((life::LifePlugin, careers::CareersPlugin, save::SavePlugin, wishes::WishesPlugin, rabbitholes::RabbitHolePlugin, cas::CasPlugin, sound::SoundPlugin))
+        .add_plugins((life::LifePlugin, careers::CareersPlugin, save::SavePlugin, wishes::WishesPlugin, rabbitholes::RabbitHolePlugin, cas::CasPlugin, sound::SoundPlugin, premade::PremadePlugin))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)
         .run();

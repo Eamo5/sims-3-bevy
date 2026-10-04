@@ -80,6 +80,10 @@ pub enum CasAction {
     Pick(usize),
     Page(i32),
     Trait(usize),
+    /// Open or close the town's families.
+    Families,
+    /// Play town family `i` (of the playable ones).
+    Family(usize),
     Done,
 }
 
@@ -97,6 +101,10 @@ struct CasScene {
     dirty_model: bool,
     dirty_ui: bool,
     yaw: f32,
+    /// The world's premade households, and whether they're being browsed.
+    families: Option<Arc<s3bake::PremadesBaked>>,
+    browsing: bool,
+    portrait: Option<Handle<Image>>,
 }
 
 #[derive(Component)]
@@ -105,6 +113,7 @@ struct CasModel;
 fn setup_cas(
     mut commands: Commands,
     pending: Option<Res<PendingHousehold>>,
+    selected_world: Option<Res<crate::data::SelectedWorld>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -120,6 +129,15 @@ fn setup_cas(
     };
     let cas = CasData::from_baked(&baked);
     commands.insert_resource(Baked(baked.clone()));
+    // The town's families (read from the world file the first time).
+    let families = selected_world.and_then(|w| {
+        let root = s3bake::default_root();
+        let stem = w.0.path.file_stem()?.to_string_lossy().into_owned();
+        if let Err(e) = s3bake::ensure_premades(&root, &w.0.path, &stem) {
+            warn!("town families: {e}");
+        }
+        s3bake::load_premades(&root, &stem).filter(|p| p.playable().next().is_some()).map(Arc::new)
+    });
     commands.insert_resource(CasScene {
         baked,
         cas,
@@ -131,6 +149,9 @@ fn setup_cas(
         dirty_model: true,
         dirty_ui: true,
         yaw: 0.3,
+        families,
+        browsing: false,
+        portrait: None,
     });
     // The stage: camera, lights, pedestal.
     commands.spawn((
@@ -164,6 +185,7 @@ fn setup_cas(
 fn age_name(a: Age) -> &'static str {
     match a {
         Age::Child => "Child",
+        Age::Teen => "Teen",
         Age::YoungAdult => "Young Adult",
         Age::Adult => "Adult",
         Age::Elder => "Elder",
@@ -174,6 +196,7 @@ fn age_bits(a: Age) -> u32 {
     use s3formats::sim::*;
     match a {
         Age::Child => AGE_CHILD,
+        Age::Teen => AGE_TEEN,
         Age::YoungAdult => AGE_YOUNG_ADULT,
         Age::Adult => AGE_ADULT,
         Age::Elder => AGE_ELDER,
@@ -232,6 +255,7 @@ fn cas_actions(
     scene: Option<ResMut<CasScene>>,
     mut pending: ResMut<PendingHousehold>,
     mut next: ResMut<NextState<AppState>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     let Some(mut scene) = scene else { return };
     let mut rng = rand::rng();
@@ -260,6 +284,7 @@ fn cas_actions(
                 }
             }
             CasAction::NewFamily => {
+                scene.portrait = None;
                 *pending = PendingHousehold::random();
                 scene.selected = 0;
             }
@@ -284,7 +309,8 @@ fn cas_actions(
             CasAction::Age => {
                 let s = &mut pending.members[k];
                 s.age = match s.age {
-                    Age::Child => Age::YoungAdult,
+                    Age::Child => Age::Teen,
+                    Age::Teen => Age::YoungAdult,
                     Age::YoungAdult => Age::Adult,
                     Age::Adult => Age::Elder,
                     Age::Elder => Age::Child,
@@ -349,6 +375,21 @@ fn cas_actions(
                     }
                 }
                 model = false;
+            }
+            CasAction::Families => {
+                scene.browsing = !scene.browsing;
+                model = false;
+            }
+            CasAction::Family(i) => {
+                let Some(h) = scene.families.as_ref().and_then(|f| f.playable().nth(i)).cloned() else { continue };
+                pending.members = h.members.iter().map(crate::premade::to_sim).collect();
+                pending.last_name = h.name.clone();
+                scene.portrait = h.portrait.and_then(|k| {
+                    let bytes = std::fs::read(s3bake::default_root().tex_path(k)).ok()?;
+                    crate::objects::dds_image(&bytes, true).map(|img| images.add(img))
+                });
+                pending.premade = Some(h);
+                scene.selected = 0;
             }
             CasAction::Done => {
                 next.set(AppState::Loading);
@@ -517,8 +558,12 @@ fn rebuild_ui(mut commands: Commands, scene: Option<ResMut<CasScene>>, pending: 
                 button(row, "Remove", CasAction::Remove, Val::Px(128.0), false, 15.0);
             });
             button(p, "New Family", CasAction::NewFamily, Val::Percent(100.0), false, 15.0);
+            if scene.families.is_some() {
+                button(p, if scene.browsing { "Back to Create a Sim" } else { "Play a Town Family" }, CasAction::Families, Val::Percent(100.0), scene.browsing, 15.0);
+            }
             p.spawn(Node { flex_grow: 1.0, ..default() });
-            button(p, "Done", CasAction::Done, Val::Percent(100.0), false, 22.0);
+            let done = if pending.premade.is_some() { format!("Play the {}s", pending.last_name) } else { "Done".to_string() };
+            button(p, done, CasAction::Done, Val::Percent(100.0), false, 22.0);
         });
         // Name plate (bottom centre)
         r.spawn((
@@ -543,6 +588,37 @@ fn rebuild_ui(mut commands: Commands, scene: Option<ResMut<CasScene>>, pending: 
             ));
             n.spawn(text("Drag or use Q / E to turn", 12.0, Color::srgba(1.0, 1.0, 1.0, 0.6)));
         });
+        // The town's families (right, while browsing)
+        if scene.browsing && let Some(fam) = scene.families.clone() {
+            r.spawn((panel_node(None, Some(16.0), 440.0), panel_bg)).with_children(|p| {
+                p.spawn(text("Town Families", 26.0, Color::WHITE));
+                p.spawn(text("The families who already live here. Pick one to play.", 13.0, Color::srgb(0.75, 0.85, 1.0)));
+                if let Some(h) = &pending.premade {
+                    if let Some(img) = &scene.portrait {
+                        p.spawn((ImageNode::new(img.clone()), Node { width: Val::Px(200.0), height: Val::Px(200.0), align_self: AlignSelf::Center, ..default() }));
+                    }
+                    p.spawn(text(format!("The {} Household", h.name), 20.0, PLUMBOB_GREEN));
+                    if !h.bio.is_empty() {
+                        p.spawn(text(h.bio.clone(), 14.0, Color::WHITE));
+                    }
+                    for m in &h.members {
+                        let s = crate::premade::to_sim(m);
+                        let traits: Vec<&str> = s.traits.iter().map(|t| t.name()).collect();
+                        p.spawn(text(format!("{} {} — {}", s.first, s.last, age_name(s.age)), 15.0, Color::srgb(0.95, 0.85, 0.55)));
+                        if !traits.is_empty() {
+                            p.spawn(text(traits.join(", "), 12.0, Color::srgb(0.8, 0.85, 0.95)));
+                        }
+                    }
+                }
+                p.spawn((text("All families", 18.0, Color::WHITE), Node { margin: UiRect::top(Val::Px(10.0)), ..default() }));
+                let current = pending.premade.as_ref().map(|h| h.id);
+                for (i, h) in fam.playable().enumerate() {
+                    let label = format!("{} · {} Sim{} · §{}", h.name, h.members.len(), if h.members.len() == 1 { "" } else { "s" }, h.funds);
+                    button(p, label, CasAction::Family(i), Val::Percent(100.0), current == Some(h.id), 15.0);
+                }
+            });
+            return;
+        }
         // Editing panel (right)
         r.spawn((panel_node(None, Some(16.0), 440.0), panel_bg)).with_children(|p| {
             p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|tabs| {

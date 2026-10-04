@@ -32,6 +32,7 @@ pub struct LoadResult {
     pub roads: crate::roads::RoadBuild,
     pub cas: crate::simbody::CasData,
     pub sims: crate::simbody::PreparedSims,
+    pub premades: Option<Arc<s3bake::PremadesBaked>>,
 }
 
 #[derive(Clone, Debug)]
@@ -112,7 +113,8 @@ fn start_loading(
     pending: Option<Res<crate::home::PendingHousehold>>,
     save: Option<Res<crate::save::PendingLoad>>,
 ) {
-    let members: Vec<crate::sim::Sim> = pending.map(|p| p.members.clone()).unwrap_or_default();
+    let members: Vec<crate::sim::Sim> = pending.as_ref().map(|p| p.members.clone()).unwrap_or_default();
+    let playing: Option<u64> = pending.as_ref().and_then(|p| p.premade.as_ref()).map(|h| h.id);
     let known: Option<Vec<crate::sim::Sim>> = save.map(|s| s.0.known_sims());
     commands.spawn((Camera2d, DespawnOnExit(AppState::Loading)));
     commands
@@ -168,9 +170,13 @@ fn start_loading(
                 s3bake::bake_world(&root, &pkgs, &world_path, &world_name, &set_status)?;
             }
         }
+        if let Err(e) = s3bake::ensure_premades(&root, &world_path, &world_name) {
+            warn!("premade households: {e}");
+        }
         set_status("Loading converted assets…");
         let world: WorldBaked =
             s3bake::read_value(&root.world_dir(&world_name).join("world.bin")).map_err(|e| format!("world cache: {e}"))?;
+        let premades = s3bake::load_premades(&root, &world_name).map(Arc::new);
         let baked = Arc::new(BakedData::open(root, Some(&world_name))?);
         set_status("Building terrain…");
         let terrain = terrain::build_terrain(&world);
@@ -180,7 +186,12 @@ fn start_loading(
         let catalog = Catalog::from_baked(&baked);
         set_status("Dressing your Sims…");
         let cas = crate::simbody::CasData::from_baked(&baked);
-        let sims = crate::simbody::prepare_sims(&baked, &cas, &members, known.as_deref());
+        // The town's own Sims stroll past and come to visit.
+        let town: Vec<crate::sim::Sim> = premades
+            .as_ref()
+            .map(|p| crate::premade::TownPremades(p.clone()).others(playing).into_iter().map(crate::premade::to_sim).collect())
+            .unwrap_or_default();
+        let sims = crate::simbody::prepare_sims(&baked, &cas, &members, known.as_deref(), &town);
         let info = WorldInfo {
             lot_names: world.lots.iter().map(|l| l.display_name.clone()).collect(),
             lots: world.lots.iter().map(|l| l.info.clone()).collect(),
@@ -189,7 +200,7 @@ fn start_loading(
             buildings: world.buildings.into_iter().map(|b| (b.lot as usize, b)).collect(),
         };
         set_status("Done");
-        Ok(LoadResult { baked, world: Arc::new(info), terrain, catalog, world_build, roads, cas, sims })
+        Ok(LoadResult { baked, world: Arc::new(info), terrain, catalog, world_build, roads, cas, sims, premades })
     });
     commands.insert_resource(LoadTask { task, progress });
 }
@@ -220,6 +231,10 @@ fn poll_loading(
             commands.insert_resource(r.roads);
             commands.insert_resource(r.cas);
             commands.insert_resource(r.sims);
+            match r.premades {
+                Some(p) => commands.insert_resource(crate::premade::TownPremades(p)),
+                None => commands.remove_resource::<crate::premade::TownPremades>(),
+            }
             next.set(AppState::InGame);
         }
         Err(e) => {

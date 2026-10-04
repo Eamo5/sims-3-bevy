@@ -515,6 +515,72 @@ fn main() {
         let _ = d;
         return;
     }
+    if args[1] == "objsdump" {
+        // objsdump <world file> <class name> [count]: decoded fields of objects of a class.
+        let w = Package::open(&args[2]).unwrap();
+        let e = w.of_type(s3formats::objs::T_OBJS).next().expect("no OBJS");
+        let d = w.read(e).unwrap();
+        let objs = s3formats::objs::ObjStream::parse(&d).expect("OBJS");
+        let n: usize = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(3);
+        for id in objs.objects_of(&args[3]).into_iter().take(n) {
+            println!("#{id} {}", objs.class_name(id).unwrap_or("?"));
+            if objs.fields(id).is_none() {
+                let c = &objs.classes[objs.class(id).unwrap()];
+                println!("   (undecodable) fields {:?}", c.fields.iter().map(|(n, t)| format!("{n}:{t:x}")).collect::<Vec<_>>());
+                println!("   {:02x?}", objs.raw(id));
+            }
+            for (name, v) in objs.fields(id).unwrap_or_default() {
+                let extra = match &v {
+                    s3formats::objs::Value::Ref(r) if *r != 0 => {
+                        format!(" -> {} {:?}", objs.class_name(*r).unwrap_or("array/?"), objs.string(*r).or_else(|| objs.fields(*r).map(|f| format!("{:?}", &f[..f.len().min(4)]))))
+                    }
+                    _ => String::new(),
+                };
+                println!("   {name} = {v:?}{extra}");
+            }
+        }
+        return;
+    }
+    if args[1] == "premades" {
+        // premades <root> <world file>: the world's premade households.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let strings = s3formats::stbl::load_english(&set);
+        let tr = |k: &str| strings.get(&s3pkg::fnv64(k)).cloned().unwrap_or_else(|| k.to_string());
+        let w = Package::open(&args[3]).unwrap();
+        let e = w.of_type(s3formats::objs::T_OBJS).next().expect("no OBJS");
+        let d = w.read(e).unwrap();
+        let objs = s3formats::objs::ObjStream::parse(&d).expect("OBJS");
+        println!("{} classes, {} objects, {} keys", objs.classes.len(), objs.len(), objs.keys.len());
+        let p = s3formats::premade::read(&objs);
+        for h in &p.households {
+            println!("{} ({}) lot {:016X} funds {}", tr(&h.name), h.members.len(), h.lot_id, h.funds);
+            for s in &h.members {
+                println!(
+                    "   {} {} age {:x} {} traits {:?} skin {:?}/{:.2} hair {:08X?} body f{:.2} t{:.2} fit{:.2} partner {:?} spouse {:?} parents {:?} career {:?} skills {:?}",
+                    tr(&s.first_name), tr(&s.last_name), s.age, if s.female { "F" } else { "M" }, s.traits, s.skin_tone.map(|k| k.2), s.skin_shade, s.hair_color, s.fat, s.thin, s.fit, s.partner, s.spouse, s.parents, s.career, s.skills
+                );
+            }
+        }
+        let mut states = BTreeMap::<String, usize>::new();
+        for r in &p.relationships {
+            *states.entry(r.state.clone()).or_default() += 1;
+        }
+        println!("{} relationships: {states:?}", p.relationships.len());
+        return;
+    }
+    if args[1] == "strfind" {
+        // strfind <root> <text>...: string-table keys whose text equals one of the texts.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let strings = s3formats::stbl::load_english(&set);
+        for t in &args[3..] {
+            for (k, v) in &strings {
+                if v == t {
+                    println!("{t}: {k:016X}");
+                }
+            }
+        }
+        return;
+    }
     if args[1] == "sounds" {
         // sounds <root> [name filter]: sound property records with their samples.
         use s3formats::audio;

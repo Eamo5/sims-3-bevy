@@ -122,6 +122,7 @@ impl CasData {
 fn age_bits(a: Age) -> u32 {
     match a {
         Age::Child => AGE_CHILD,
+        Age::Teen => AGE_TEEN,
         Age::YoungAdult => AGE_YOUNG_ADULT,
         Age::Adult => AGE_ADULT,
         Age::Elder => AGE_ELDER,
@@ -174,8 +175,9 @@ pub fn pick_outfit(cas: &CasData, sim: &Sim, rng: &mut impl Rng) -> Outfit {
 pub enum SimMat {
     /// Tinted skin texture with clothing layers on top.
     Skin { base: Option<Key>, tint: Vec3, layers: Vec<Key> },
-    /// A plain texture (hair, eyes, lashes), alpha-tested when `mask`.
-    Plain { tex: Option<Key>, mask: bool },
+    /// A plain texture (hair, eyes, lashes), alpha-tested when `mask`, optionally tinted
+    /// (hair: the texture is greyscale, coloured by the Sim's hair colour).
+    Plain { tex: Option<Key>, mask: bool, tint: Option<Color> },
 }
 
 /// A sim body decoded on the loading thread.
@@ -224,8 +226,8 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
         tex_keys.extend(face.layer);
         for m in baked.cas_meshes(&face.key).map(|m| m.meshes).unwrap_or_default() {
             let mat = match m.shader {
-                SHADER_SIM_EYES => SimMat::Plain { tex: m.texture, mask: false },
-                SHADER_SIM_EYELASHES => SimMat::Plain { tex: m.texture, mask: true },
+                SHADER_SIM_EYES => SimMat::Plain { tex: m.texture, mask: false, tint: None },
+                SHADER_SIM_EYELASHES => SimMat::Plain { tex: m.texture, mask: true, tint: None },
                 _ => SimMat::Skin { base: face_base, tint, layers: face.layer.into_iter().collect() },
             };
             if let SimMat::Plain { tex: Some(t), .. } = &mat {
@@ -234,20 +236,75 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
             parts.push((skin_mesh(m), mat));
         }
     }
-    for p in [&outfit.scalp, &outfit.hair].into_iter().flatten() {
-        tex_keys.extend(p.layer);
+    // Hair is drawn from a greyscale copy of its texture tinted with the Sim's hair colour.
+    let mut hair_keys: Vec<(Key, Key)> = Vec::new();
+    for (i, p) in [&outfit.scalp, &outfit.hair].into_iter().enumerate() {
+        let Some(p) = p else { continue };
         for m in baked.cas_meshes(&p.key).map(|m| m.meshes).unwrap_or_default() {
-            let tex = p.layer.or(m.texture);
-            parts.push((skin_mesh(m), SimMat::Plain { tex, mask: true }));
+            let Some(src) = p.layer.or(m.texture) else { continue };
+            if i == 1 {
+                let grey = hair_grey_key(src);
+                hair_keys.push((src, grey));
+                parts.push((skin_mesh(m), SimMat::Plain { tex: Some(grey), mask: true, tint: Some(sim.hair) }));
+            } else {
+                tex_keys.push(src);
+                parts.push((skin_mesh(m), SimMat::Plain { tex: Some(src), mask: true, tint: None }));
+            }
         }
     }
     tex_keys.sort();
     tex_keys.dedup();
-    let textures = tex_keys
+    hair_keys.sort();
+    hair_keys.dedup();
+    let mut textures: Vec<(Key, Image)> = tex_keys
         .into_iter()
         .filter_map(|k| Some((k, crate::objects::dds_image(&baked.texture_bytes(&k)?, true)?)))
         .collect();
+    for (src, grey) in hair_keys {
+        if let Some(img) = baked.texture_bytes(&src).and_then(|b| greyscale_hair(&b)) {
+            textures.push((grey, img));
+        }
+    }
     Some(SimModelCpu { rig, parts, textures })
+}
+
+/// Texture-store key of a hair texture's greyscale copy.
+fn hair_grey_key(k: Key) -> Key {
+    (k.0 ^ 0x4000_0000, k.1, k.2)
+}
+
+/// A hair texture (DDS bytes) as a greyscale RGBA image, brightened so its average is a light
+/// grey: the material's tint colour then sets the hair colour.
+fn greyscale_hair(dds: &[u8]) -> Option<Image> {
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    let mut img = s3formats::dds::decode(dds, 512)?;
+    let (mut sum, mut n) = (0.0f64, 0u64);
+    for px in img.data.chunks_exact(4) {
+        if px[3] > 100 {
+            sum += (0.3 * px[0] as f64 + 0.59 * px[1] as f64 + 0.11 * px[2] as f64) / 255.0;
+            n += 1;
+        }
+    }
+    let mean = if n > 0 { (sum / n as f64).max(0.05) } else { 0.5 };
+    let gain = (0.75 / mean).min(4.0);
+    for px in img.data.chunks_exact_mut(4) {
+        let l = (0.3 * px[0] as f64 + 0.59 * px[1] as f64 + 0.11 * px[2] as f64) / 255.0;
+        let v = ((l * gain).min(1.0) * 255.0) as u8;
+        px[0] = v;
+        px[1] = v;
+        px[2] = v;
+    }
+    let (mips, levels) = s3formats::dds::build_mips(&img);
+    let mut out = Image::new(
+        Extent3d { width: img.width as u32, height: img.height as u32, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        mips,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    out.texture_descriptor.mip_level_count = levels;
+    out.sampler = crate::objects::sampler();
+    Some(out)
 }
 
 /// The skeleton of a spawned sim: one entity per rig bone.
@@ -324,8 +381,9 @@ pub fn spawn_sim_model(commands: &mut Commands, parent: Entity, model: SimModelC
                 });
                 commands.spawn((mesh, MeshMaterial3d(m), skinned, Transform::default())).id()
             }
-            SimMat::Plain { tex: t, mask } => {
+            SimMat::Plain { tex: t, mask, tint } => {
                 let m = ctx.mats.add(StandardMaterial {
+                    base_color: tint.unwrap_or(Color::WHITE),
                     base_color_texture: tex(t, ctx.textures),
                     perceptual_roughness: 0.6,
                     reflectance: 0.25,
@@ -360,23 +418,28 @@ pub fn tone_of(sim: &Sim) -> f32 {
 }
 
 /// Builds bodies for the household, the visiting neighbours (`known`, from a save, or two new
-/// ones) and a few townies.
-pub fn prepare_sims(baked: &BakedData, cas: &CasData, members: &[Sim], known: Option<&[Sim]>) -> PreparedSims {
+/// ones) and a few townies. `town` are the world's own Sims, used before random ones.
+pub fn prepare_sims(baked: &BakedData, cas: &CasData, members: &[Sim], known: Option<&[Sim]>, town: &[Sim]) -> PreparedSims {
     let mut rng = rand::rng();
+    let mut town = town.iter().filter(|s| !members.iter().any(|m| m.id == s.id) && !known.is_some_and(|k| k.iter().any(|m| m.id == s.id)));
+    let mut next_townie = |rng: &mut rand::rngs::ThreadRng, age: Age| {
+        town.next().cloned().unwrap_or_else(|| {
+            let last = crate::sim::random_last_name(rng);
+            crate::sim::random_sim(rng, &last, None, age)
+        })
+    };
     let mut neighbors = Vec::new();
     match known {
         Some(k) => neighbors.extend(k.iter().cloned()),
         None => {
             for k in 0..2 {
-                let last = crate::sim::random_last_name(&mut rng);
-                neighbors.push(crate::sim::random_sim(&mut rng, &last, None, if k == 0 { Age::Adult } else { Age::YoungAdult }));
+                neighbors.push(next_townie(&mut rng, if k == 0 { Age::Adult } else { Age::YoungAdult }));
             }
         }
     }
-    const TOWNIES: usize = 4;
+    const TOWNIES: usize = 6;
     for k in 0..TOWNIES {
-        let last = crate::sim::random_last_name(&mut rng);
-        neighbors.push(crate::sim::random_sim(&mut rng, &last, None, if k % 2 == 0 { Age::YoungAdult } else { Age::Adult }));
+        neighbors.push(next_townie(&mut rng, if k % 2 == 0 { Age::YoungAdult } else { Age::Adult }));
     }
     let outfits: Vec<(Sim, Outfit)> =
         members.iter().chain(neighbors.iter()).map(|s| (s.clone(), pick_outfit(cas, s, &mut rand::rngs::StdRng::seed_from_u64(s.look)))).collect();

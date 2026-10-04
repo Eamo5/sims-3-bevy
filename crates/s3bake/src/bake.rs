@@ -715,7 +715,7 @@ const SECTOR: usize = 256;
 const T_LOT_THUMB: u32 = 0xD84E7FC6;
 
 /// Decodes a PNG into RGBA8.
-fn decode_png(d: &[u8]) -> Option<s3formats::dds::Rgba> {
+pub(crate) fn decode_png(d: &[u8]) -> Option<s3formats::dds::Rgba> {
     let mut dec = png::Decoder::new(std::io::Cursor::new(d));
     dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = dec.read_info().ok()?;

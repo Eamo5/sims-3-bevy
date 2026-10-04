@@ -160,6 +160,10 @@ fn main() {
         if !all && !worlds.iter().any(|w| name.to_lowercase().contains(&w.to_lowercase())) {
             continue;
         }
+        match s3bake::ensure_premades(&root, &path, &name) {
+            Ok(()) => {}
+            Err(e) => eprintln!("{name}: premade households failed: {e}"),
+        }
         if !force && root.world_ready(&name) {
             println!("{name}: already baked");
             continue;

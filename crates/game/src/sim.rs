@@ -34,6 +34,7 @@ const DECAY_PER_HOUR: [f32; 6] = [-7.5, -11.0, -5.5, -6.0, -4.5, -6.5];
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Age {
     Child,
+    Teen,
     YoungAdult,
     Adult,
     Elder,
@@ -324,6 +325,7 @@ pub fn spawn_sim(
 ) -> Entity {
     let scale = match sim.age {
         Age::Child => 0.65,
+        Age::Teen => 0.95,
         Age::Elder => 0.96,
         _ => 1.0,
     };

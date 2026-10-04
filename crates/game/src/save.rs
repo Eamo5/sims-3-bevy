@@ -121,6 +121,7 @@ impl SaveGame {
             female: s.female,
             age: match s.age.as_str() {
                 "Child" => Age::Child,
+                "Teen" => Age::Teen,
                 "Adult" => Age::Adult,
                 "Elder" => Age::Elder,
                 _ => Age::YoungAdult,
@@ -191,6 +192,7 @@ fn rgb(c: Color) -> [f32; 3] {
 fn age_name(a: Age) -> &'static str {
     match a {
         Age::Child => "Child",
+        Age::Teen => "Teen",
         Age::YoungAdult => "YoungAdult",
         Age::Adult => "Adult",
         Age::Elder => "Elder",
@@ -217,7 +219,7 @@ fn status_from(s: &str) -> RelStatus {
     }
 }
 
-const SKILLS: [&str; 7] = ["Athletic", "Charisma", "Cooking", "Guitar", "Logic", "Painting", "Writing"];
+pub const SKILLS: [&str; 7] = ["Athletic", "Charisma", "Cooking", "Guitar", "Logic", "Painting", "Writing"];
 
 fn saved_object(o: &GameObject, tf: &Transform) -> SavedObject {
     SavedObject { objd: o.objd, position: tf.translation.to_array(), rotation: tf.rotation.to_array() }
@@ -451,7 +453,7 @@ pub fn begin_load(commands: &mut Commands, worlds: &crate::data::WorldList, game
         return false;
     };
     commands.insert_resource(crate::data::SelectedWorld(w.clone()));
-    commands.insert_resource(crate::home::PendingHousehold { last_name: game.household.clone(), members: game.members() });
+    commands.insert_resource(crate::home::PendingHousehold { last_name: game.household.clone(), members: game.members(), premade: None });
     commands.insert_resource(PendingLoad(game));
     true
 }
