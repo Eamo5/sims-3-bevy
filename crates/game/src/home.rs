@@ -57,6 +57,8 @@ pub enum CasAction {
     Gender(usize),
     Age(usize),
     Remove(usize),
+    /// Cycle the trait in slot `.1` of Sim `.0`.
+    Trait(usize, usize),
     Add,
     Done,
 }
@@ -89,6 +91,24 @@ fn rebuild_cas(commands: &mut Commands, h: &PendingHousehold) {
         children![],
     ));
     let _ = h;
+}
+
+fn trait_btn(p: &mut ChildSpawnerCommands, label: &str, action: CasAction) {
+    p.spawn((
+        Button,
+        action,
+        Node {
+            border_radius: BorderRadius::all(Val::Px(6.0)),
+            padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+            min_width: Val::Px(110.0),
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        BackgroundColor(BTN_NORMAL),
+    ))
+    .with_children(|b| {
+        b.spawn(text(label, 13.0, Color::srgb(0.95, 0.85, 0.55)));
+    });
 }
 
 fn btn(p: &mut ChildSpawnerCommands, label: &str, action: CasAction, w: f32) {
@@ -152,6 +172,13 @@ fn fill_cas(commands: &mut Commands, root: Entity, h: &PendingHousehold) {
                 btn(row, "Age", CasAction::Age(i), 70.0);
                 btn(row, "Remove", CasAction::Remove(i), 90.0);
             });
+            p.spawn(Node { column_gap: Val::Px(6.0), margin: UiRect::bottom(Val::Px(4.0)), ..default() }).with_children(|row| {
+                row.spawn((text("Traits:", 13.0, Color::srgb(0.75, 0.85, 1.0)), Node { margin: UiRect::right(Val::Px(4.0)), align_self: AlignSelf::Center, ..default() }));
+                for slot in 0..crate::life::trait_slots(s.age) {
+                    let label = s.traits.get(slot).map_or("+ Trait", |t| t.name());
+                    trait_btn(row, label, CasAction::Trait(i, slot));
+                }
+            });
         }
         p.spawn(Node { column_gap: Val::Px(12.0), margin: UiRect::top(Val::Px(12.0)), ..default() }).with_children(|row| {
             btn(row, "Add Sim", CasAction::Add, 140.0);
@@ -203,6 +230,26 @@ fn cas_buttons(
                     Age::Elder => Age::Child,
                     Age::Child => Age::YoungAdult,
                 };
+                let slots = crate::life::trait_slots(s.age);
+                s.traits.truncate(slots);
+                while s.traits.len() < slots {
+                    match crate::life::next_trait(None, &s.traits) {
+                        Some(t) => s.traits.push(t),
+                        None => break,
+                    }
+                }
+            }
+            CasAction::Trait(k, slot) => {
+                let s = &mut pending.members[*k];
+                let current = s.traits.get(*slot).copied();
+                let others: Vec<crate::life::Trait> = s.traits.iter().enumerate().filter(|(i, _)| i != slot).map(|(_, t)| *t).collect();
+                if let Some(t) = crate::life::next_trait(current, &others) {
+                    if *slot < s.traits.len() {
+                        s.traits[*slot] = t;
+                    } else {
+                        s.traits.push(t);
+                    }
+                }
             }
             CasAction::Remove(k) => {
                 if pending.members.len() > 1 {
@@ -559,6 +606,7 @@ pub fn move_in(
         ResMut<Assets<crate::simbody::SimSkinMaterial>>,
         ResMut<crate::simbody::SimTextures>,
     ),
+    mut life: MessageWriter<crate::life::LifeEvent>,
 ) {
     let Some(req) = request else { return };
     let lot_index = req.0;
@@ -680,6 +728,7 @@ pub fn move_in(
             first = Some(e);
             commands.entity(e).insert(Selected);
         }
+        life.write(crate::life::LifeEvent::new(e, crate::life::LifeEventKind::MovedIn));
     }
     // A couple of neighbours drop by to say hello.
     for (k, (s, model)) in neighbors.into_iter().enumerate() {

@@ -41,12 +41,13 @@ pub enum Age {
 }
 
 #[derive(Component, Clone)]
-#[require(crate::nav::Floor)]
+#[require(crate::nav::Floor, crate::life::Moodlets, crate::life::Mood)]
 pub struct Sim {
     pub first: String,
     pub last: String,
     pub female: bool,
     pub age: Age,
+    pub traits: Vec<crate::life::Trait>,
     pub skin: Color,
     pub hair: Color,
     pub top: Color,
@@ -258,6 +259,7 @@ pub fn random_sim(rng: &mut impl Rng, last: &str, female: Option<bool>, age: Age
         last: last.to_string(),
         female,
         age,
+        traits: crate::life::random_traits(rng, age),
         skin: Color::srgb(sr, sg, sb),
         hair: Color::srgb(hr, hg, hb),
         top: Color::hsl(hue, 0.55, 0.5),
@@ -399,14 +401,14 @@ pub fn spawn_sim(
     entity
 }
 
-fn decay_motives(delta: Res<SimDelta>, mut q: Query<(&mut Motives, &DecayScale)>) {
+fn decay_motives(delta: Res<SimDelta>, mut q: Query<(&mut Motives, &DecayScale, &Sim)>) {
     let hours = delta.0 / 60.0;
     if hours <= 0.0 {
         return;
     }
-    for (mut m, scale) in &mut q {
+    for (mut m, scale, sim) in &mut q {
         for i in 0..6 {
-            let d = DECAY_PER_HOUR[i] * scale.0[i] * hours;
+            let d = DECAY_PER_HOUR[i] * scale.0[i] * crate::life::decay_rate(&sim.traits, i) * hours;
             m.add(i, d);
         }
     }
@@ -504,17 +506,17 @@ pub fn mood_color(mood: f32) -> Color {
 
 fn update_plumbobs(
     time: Res<Time>,
-    sims: Query<(&PlumbobRef, &Motives, Has<Selected>)>,
+    sims: Query<(&PlumbobRef, &crate::life::Mood, Has<Selected>)>,
     mut q: Query<(&mut Transform, &mut Visibility, &MeshMaterial3d<StandardMaterial>)>,
     mut mats: ResMut<Assets<StandardMaterial>>,
 ) {
-    for (plumbob, motives, selected) in &sims {
+    for (plumbob, mood, selected) in &sims {
         if let Ok((mut tf, mut vis, mat)) = q.get_mut(plumbob.0) {
             *vis = if selected { Visibility::Inherited } else { Visibility::Hidden };
             tf.rotation = Quat::from_rotation_y(time.elapsed_secs() * 1.5);
             tf.translation.y = 2.15 + (time.elapsed_secs() * 2.0).sin() * 0.03;
             if selected && let Some(mut m) = mats.get_mut(&mat.0) {
-                let c = mood_color(motives.mood());
+                let c = mood_color(mood.level());
                 m.base_color = c;
                 m.emissive = c.to_linear() * 0.8;
             }

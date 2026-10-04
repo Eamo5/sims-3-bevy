@@ -20,7 +20,7 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PieMenu>()
             .add_systems(OnEnter(PlayMode::Live), spawn_hud)
-            .add_systems(Update, floor_controls.run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, (floor_controls, update_moodlets_panel).run_if(in_state(PlayMode::Live)))
             .add_systems(
                 Update,
                 (
@@ -60,6 +60,11 @@ struct PieOption(usize);
 
 #[derive(Component)]
 struct NeedsName;
+/// The selected Sim's moodlets (above the needs panel).
+#[derive(Component)]
+struct MoodletsPanel;
+#[derive(Component)]
+struct TraitsText;
 #[derive(Component)]
 struct NeedsDetail;
 #[derive(Component)]
@@ -136,6 +141,7 @@ fn spawn_hud(mut commands: Commands) {
         .with_children(|p| {
             p.spawn((text("", 22.0, Color::WHITE), NeedsName));
             p.spawn((text("", 14.0, Color::srgb(0.75, 0.85, 1.0)), NeedsDetail));
+            p.spawn((text("", 13.0, Color::srgb(0.95, 0.85, 0.55)), TraitsText));
             p.spawn(Node {
                 flex_direction: FlexDirection::Row,
                 flex_wrap: FlexWrap::Wrap,
@@ -163,6 +169,24 @@ fn spawn_hud(mut commands: Commands) {
                 }
             });
         });
+
+    // Moodlets (above the needs panel)
+    commands.spawn((
+        DespawnOnExit(AppState::InGame),
+        MoodletsPanel,
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(12.0),
+            bottom: Val::Px(250.0),
+            width: Val::Px(390.0),
+            flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(6.0),
+            row_gap: Val::Px(6.0),
+            ..default()
+        },
+        Pickable::IGNORE,
+    ));
 
     // Clock and speed (bottom-centre)
     commands
@@ -616,22 +640,21 @@ fn motive_color(v: f32) -> Color {
 
 #[allow(clippy::type_complexity)]
 fn update_needs_panel(
-    sel: Query<(&Sim, &Motives, &Skills, Option<&Job>, Option<&AtWork>, &ActionQueue), With<Selected>>,
-    mut name: Query<&mut Text, (With<NeedsName>, Without<NeedsDetail>)>,
-    mut detail: Query<&mut Text, (With<NeedsDetail>, Without<NeedsName>)>,
+    sel: Query<(&Sim, &Motives, &Skills, Option<&Job>, Option<&AtWork>, &ActionQueue, &crate::life::Mood), With<Selected>>,
+    mut name: Query<&mut Text, (With<NeedsName>, Without<NeedsDetail>, Without<TraitsText>)>,
+    mut detail: Query<&mut Text, (With<NeedsDetail>, Without<NeedsName>, Without<TraitsText>)>,
+    mut traits: Query<&mut Text, (With<TraitsText>, Without<NeedsName>, Without<NeedsDetail>)>,
     mut bars: Query<(&MotiveBar, &mut Node, &mut BackgroundColor)>,
 ) {
-    let Ok((sim, motives, skills, job, at_work, _)) = sel.single() else { return };
+    let Ok((sim, motives, skills, job, at_work, _, mood)) = sel.single() else { return };
+    if let Ok(mut t) = traits.single_mut() {
+        let s = sim.traits.iter().map(|t| t.name()).collect::<Vec<_>>().join(" · ");
+        if t.0 != s {
+            t.0 = s;
+        }
+    }
     if let Ok(mut t) = name.single_mut() {
-        let mood = motives.mood();
-        let mood_txt = match mood {
-            m if m > 50.0 => "Very Happy",
-            m if m > 20.0 => "Happy",
-            m if m > -20.0 => "Fine",
-            m if m > -50.0 => "Uncomfortable",
-            _ => "Miserable",
-        };
-        let s = format!("{} — {}", sim.full_name(), mood_txt);
+        let s = format!("{} — {}", sim.full_name(), mood.label());
         if t.0 != s {
             t.0 = s;
         }
@@ -714,11 +737,11 @@ fn update_queue_panel(
 fn update_members_panel(
     mut commands: Commands,
     panel: Query<Entity, With<MembersPanel>>,
-    members: Query<(Entity, &Sim, &Motives, Has<Selected>), With<HouseholdMember>>,
+    members: Query<(Entity, &Sim, &crate::life::Mood, Has<Selected>), With<HouseholdMember>>,
     mut last: Local<Vec<(Entity, bool, u8)>>,
 ) {
     let Ok(p) = panel.single() else { return };
-    let mut list: Vec<(Entity, String, bool, f32)> = members.iter().map(|(e, s, m, sel)| (e, s.first.clone(), sel, m.mood())).collect();
+    let mut list: Vec<(Entity, String, bool, f32)> = members.iter().map(|(e, s, m, sel)| (e, s.first.clone(), sel, m.level())).collect();
     list.sort_by_key(|x| x.0);
     let sig: Vec<(Entity, bool, u8)> = list.iter().map(|x| (x.0, x.2, ((x.3 + 100.0) / 50.0) as u8)).collect();
     if *last == sig {
@@ -821,4 +844,37 @@ fn keyboard_shortcuts(
     {
         c.look_at(tf.translation);
     }
+}
+
+/// The selected Sim's moodlets as coloured chips (positive green, negative red).
+fn update_moodlets_panel(
+    mut commands: Commands,
+    panel: Query<Entity, With<MoodletsPanel>>,
+    sel: Query<&crate::life::Moodlets, With<Selected>>,
+    mut last: Local<Vec<String>>,
+) {
+    let Ok(p) = panel.single() else { return };
+    let mut list: Vec<(String, i32)> = sel
+        .single()
+        .map(|m| m.0.iter().map(|x| (crate::life::moodlet_label(x), x.value)).collect())
+        .unwrap_or_default();
+    list.sort_by_key(|x| -x.1.abs());
+    let labels: Vec<String> = list.iter().map(|x| x.0.clone()).collect();
+    if *last == labels {
+        return;
+    }
+    *last = labels;
+    commands.entity(p).despawn_children();
+    commands.entity(p).with_children(|c| {
+        for (label, v) in list {
+            let bg = if v >= 0 { Color::srgba(0.12, 0.45, 0.15, 0.92) } else { Color::srgba(0.55, 0.12, 0.10, 0.92) };
+            c.spawn((
+                Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)), border_radius: BorderRadius::all(Val::Px(8.0)), ..default() },
+                BackgroundColor(bg),
+            ))
+            .with_children(|b| {
+                b.spawn(text(label, 13.0, Color::WHITE));
+            });
+        }
+    });
 }

@@ -9,6 +9,7 @@ mod data;
 mod home;
 mod hud;
 mod interact;
+mod life;
 mod loading;
 mod menu;
 mod music;
@@ -79,6 +80,7 @@ fn main() {
             building::BuildingPlugin,
             music::MusicPlugin,
             town::TownPlugin,
+            life::LifePlugin,
         ))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)

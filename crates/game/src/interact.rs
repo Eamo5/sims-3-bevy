@@ -11,6 +11,7 @@ use crate::PlayMode;
 use crate::clock::{GameClock, SimDelta};
 use crate::loading::CurrentWorld;
 use crate::nav::{Floor, NavGrid, PathFollow, UpperFloors, plan_route};
+use crate::life::{LifeEvent, LifeEventKind};
 use crate::sim::*;
 
 pub struct InteractPlugin;
@@ -497,6 +498,7 @@ fn run_actions(
     >,
     mut objects: Query<(&GameObject, &Transform, &mut UsedBy, Option<&Floor>), Without<Sim>>,
     (building, upper): (Option<Res<crate::building::ActiveBuilding>>, Option<Res<UpperFloors>>),
+    mut life: MessageWriter<LifeEvent>,
 ) {
     let Some(grid) = grid else { return };
     let dt = delta.0;
@@ -630,20 +632,33 @@ fn run_actions(
                         ActionKind::Object { target, def } => {
                             if let Ok((obj, otf, mut used, _)) = objects.get_mut(*target) {
                                 let d = &interactions_for(obj.kind)[*def];
+                                let affinity = crate::life::activity_affinity(&sim.traits, d.name);
                                 for i in 0..6 {
-                                    motives.add(i, d.per_hour[i] * dt / 60.0);
+                                    let mut gain = d.per_hour[i];
+                                    if i == FUN && gain > 0.0 {
+                                        gain *= affinity;
+                                    } else if i == FUN && affinity < 0.5 {
+                                        gain -= 20.0;
+                                    }
+                                    if i == ENERGY && d.until_full == Some(ENERGY) {
+                                        gain *= crate::life::sleep_rate(&sim.traits);
+                                    }
+                                    motives.add(i, gain * dt / 60.0);
                                 }
                                 if let Some(sk) = d.skill {
+                                    let rate = crate::life::skill_rate(&sim.traits, sk);
                                     let e = skills.0.entry(sk).or_insert(0.0);
                                     let before = *e as u32;
-                                    *e = (*e + dt / 60.0 * 0.6 / (1.0 + *e * 0.25)).min(10.0);
+                                    *e = (*e + dt / 60.0 * 0.6 * rate / (1.0 + *e * 0.25)).min(10.0);
                                     if *e as u32 > before {
                                         notes.push(format!("{} reached level {} in {}!", sim.first, *e as u32, sk));
+                                        life.write(LifeEvent::new(me, LifeEventKind::SkillUp { skill: sk, level: *e as u32 }));
                                     }
                                 }
                                 let full = d.until_full.is_some_and(|m| motives.0[m] >= 98.0);
                                 if elapsed >= d.minutes || full {
                                     finished = true;
+                                    life.write(LifeEvent::new(me, LifeEventKind::Finished { activity: d.name, completed: true }));
                                     used.0 = None;
                                     if d.on_object {
                                         stand_up_at = Some(obj.use_point(otf));
@@ -651,6 +666,7 @@ fn run_actions(
                                     match d.special {
                                         Special::FindJob => {
                                             let c = CAREERS[rand::rng().random_range(0..CAREERS.len())].clone();
+                                            life.write(LifeEvent::new(me, LifeEventKind::NewJob));
                                             notes.push(format!(
                                                 "{} joined the {} career as a {} (§{}/hr, {}–{}).",
                                                 sim.first,
@@ -691,12 +707,14 @@ fn run_actions(
                             } else {
                                 motives.add(SOCIAL, s.social_per_hour * dt / 60.0);
                                 motives.add(FUN, s.fun_per_hour * dt / 60.0);
-                                let rel = s.relationship * dt / s.minutes;
+                                let rel = s.relationship * dt / s.minutes * crate::life::social_affinity(&sim.traits, s.name);
                                 rels.add(*target, rel);
                                 social_fx.push((*target, me, s.social_per_hour * dt / 60.0, s.fun_per_hour * dt / 60.0, rel));
                                 anim.pose = if s.name.contains("Dance") { Pose::Dance } else { Pose::Talk };
                                 if elapsed >= s.minutes {
                                     finished = true;
+                                    life.write(LifeEvent::new(me, LifeEventKind::Socialized { other: *target, social: s.name }));
+                                    life.write(LifeEvent::new(*target, LifeEventKind::Socialized { other: me, social: s.name }));
                                 }
                             }
                         }
@@ -751,7 +769,7 @@ fn autonomy(
     delta: Res<SimDelta>,
     clock: Res<GameClock>,
     mut sims: Query<
-        (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>),
+        (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim),
         Without<AtWork>,
     >,
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy)>,
@@ -761,7 +779,7 @@ fn autonomy(
     }
     let others: Vec<(Entity, Vec3)> = sims.iter().map(|s| (s.0, s.1.translation)).collect();
     let mut rng = rand::rng();
-    for (me, tf, motives, mut queue, mut timer, rels, job) in &mut sims {
+    for (me, tf, motives, mut queue, mut timer, rels, job, sim) in &mut sims {
         timer.0 -= delta.0;
         if timer.0 > 0.0 || !queue.0.is_empty() {
             continue;
@@ -799,6 +817,7 @@ fn autonomy(
                 if d.until_full == Some(ENERGY) && motives.0[ENERGY] > -10.0 {
                     score *= 0.1;
                 }
+                score *= crate::life::activity_affinity(&sim.traits, d.name).sqrt();
                 score /= 1.0 + dist / 25.0;
                 score *= rng.random_range(0.85..1.15);
                 if best.as_ref().is_none_or(|b| score > b.0) {
@@ -806,7 +825,9 @@ fn autonomy(
                 }
             }
         }
-        if motives.0[SOCIAL] < 30.0 {
+        let social_need = if sim.traits.contains(&crate::life::Trait::Loner) { 0.0 } else { 30.0 };
+        let social_need = if sim.traits.contains(&crate::life::Trait::PartyAnimal) || sim.traits.contains(&crate::life::Trait::Friendly) { 50.0 } else { social_need };
+        if motives.0[SOCIAL] < social_need {
             for &(other, _) in &others {
                 if other == me {
                     continue;
