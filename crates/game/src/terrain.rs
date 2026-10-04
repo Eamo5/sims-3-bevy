@@ -16,8 +16,8 @@ use s3pkg::PackageSet;
 
 use crate::AppState;
 
-/// Height of the ocean surface in metres (estimated from where wet sand meets dry sand).
-pub const SEA_LEVEL: f32 = 26.0;
+/// Height of the ocean surface in metres (Sunset Valley's water data stores 28.07 m).
+pub const SEA_LEVEL: f32 = 28.07;
 const CHUNK: usize = 128;
 /// Metres covered by one repeat of a terrain layer texture.
 const LAYER_TILE_METRES: f32 = 5.0;

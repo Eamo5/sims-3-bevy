@@ -53,6 +53,21 @@ pub fn dds_image(bytes: &[u8], srgb: bool) -> Option<Image> {
     .ok()
 }
 
+/// Uploads a CPU-composited RGBA image with a generated mip chain.
+pub fn rgba_image(img: s3formats::dds::Rgba) -> Image {
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    let (data, levels) = s3formats::dds::build_mips(&img);
+    let mut out = Image::default();
+    out.data = Some(data);
+    out.texture_descriptor.size = Extent3d { width: img.width as u32, height: img.height as u32, depth_or_array_layers: 1 };
+    out.texture_descriptor.mip_level_count = levels;
+    out.texture_descriptor.format = TextureFormat::Rgba8UnormSrgb;
+    out.texture_descriptor.dimension = TextureDimension::D2;
+    out.sampler = sampler();
+    out.asset_usage = RenderAssetUsages::RENDER_WORLD;
+    out
+}
+
 /// Picks a representative DDS from a texture compositor (TXTC) resource.
 fn txtc_fallback(d: &[u8]) -> Option<ResourceKey> {
     if d.len() < 8 {
@@ -77,16 +92,21 @@ impl ObjectAssets {
         if let Some(h) = self.textures.get(&key) {
             return h.clone();
         }
-        let mut resolved = key;
-        let mut data = ctx.pkgs.read(&key).or_else(|| ctx.pkgs.read_ti(key.t, key.i));
-        if key.t == types::TXTC {
-            resolved = data.as_deref().and_then(txtc_fallback).unwrap_or(key);
-            data = ctx.pkgs.read(&resolved).or_else(|| ctx.pkgs.read_ti(resolved.t, resolved.i));
-        }
-        let handle = data
-            .filter(|_| resolved.t == types::DDS)
-            .and_then(|d| dds_image(&d, true))
-            .map(|img| ctx.images.add(img));
+        let data = ctx.pkgs.read(&key).or_else(|| ctx.pkgs.read_ti(key.t, key.i));
+        let image = match key.t {
+            types::TXTC => data
+                .as_deref()
+                .and_then(|d| s3formats::compositor::composite(ctx.pkgs, d, 512))
+                .map(rgba_image)
+                .or_else(|| {
+                    // Fall back to a representative DDS if compositing fails.
+                    let k = data.as_deref().and_then(txtc_fallback)?;
+                    dds_image(&ctx.pkgs.read(&k)?, true)
+                }),
+            types::DDS => data.and_then(|d| dds_image(&d, true)),
+            _ => None,
+        };
+        let handle = image.map(|img| ctx.images.add(img));
         self.textures.insert(key, handle.clone());
         handle
     }

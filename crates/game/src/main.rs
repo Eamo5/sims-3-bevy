@@ -66,5 +66,16 @@ fn main() {
             buy::BuyPlugin,
         ))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
+        .add_systems(Startup, load_ui_font)
         .run();
+}
+
+/// Uses a system UI font with full Unicode punctuation (§, —, ·) when available.
+fn load_ui_font(mut fonts: ResMut<Assets<Font>>) {
+    for path in ["C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/arial.ttf"] {
+        if let Ok(bytes) = std::fs::read(path) {
+            let _ = fonts.insert(&Handle::<Font>::default(), Font::from_bytes(bytes));
+            break;
+        }
+    }
 }

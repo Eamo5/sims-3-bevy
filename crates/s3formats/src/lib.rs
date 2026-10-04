@@ -1,6 +1,9 @@
+pub mod compositor;
+pub mod dds;
 pub mod model;
 pub mod object;
 pub mod rcol;
 pub mod stbl;
+pub mod txtc;
 pub mod util;
 pub mod world;

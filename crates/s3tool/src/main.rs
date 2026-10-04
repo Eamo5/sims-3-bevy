@@ -122,6 +122,61 @@ fn main() {
         }
         return;
     }
+    if args[1] == "composite" {
+        // composite <root> <objd hex> <outdir>: write each mesh's composited diffuse as raw RGBA.
+        let root = std::path::Path::new(&args[2]);
+        let set = s3pkg::install::open_install(root, |_| true);
+        let k = s3pkg::ResourceKey::new(types::OBJD, 0, parse_hex(&args[3]));
+        std::fs::create_dir_all(&args[4]).unwrap();
+        for mk in s3formats::object::object_models(&set, &k) {
+            for m in s3formats::model::load_model(&set, &mk).unwrap_or_default() {
+                let Some(tk) = m.material.texture(s3formats::model::P_DIFFUSE_MAP) else { continue };
+                let td = set.read(&tk).or_else(|| set.read_ti(tk.t, tk.i)).unwrap();
+                let t0 = std::time::Instant::now();
+                let img = if tk.t == types::TXTC {
+                    s3formats::compositor::composite(&set, &td, 512)
+                } else {
+                    s3formats::dds::decode(&td, 512)
+                };
+                if let Some(img) = img {
+                    let path = format!("{}/{:08X}_{}x{}.rgba", args[4], m.name_hash, img.width, img.height);
+                    std::fs::write(&path, &img.data).unwrap();
+                    println!("{path} in {:?}", t0.elapsed());
+                }
+            }
+        }
+        return;
+    }
+    if args[1] == "txtc" {
+        // txtc <root> <objd instance hex>: dump the diffuse TXTC of an object's meshes.
+        let root = std::path::Path::new(&args[2]);
+        let set = s3pkg::install::open_install(root, |_| true);
+        let inst = parse_hex(&args[3]);
+        let k = s3pkg::ResourceKey::new(types::OBJD, 0, inst);
+        let d = set.read(&k).unwrap();
+        // material presets
+        for mk in s3formats::object::object_models(&set, &k) {
+            for m in s3formats::model::load_model(&set, &mk).unwrap_or_default() {
+                let Some(tk) = m.material.texture(s3formats::model::P_DIFFUSE_MAP) else { continue };
+                println!("mesh {:08X} diffuse {tk}", m.name_hash);
+                if tk.t != types::TXTC { continue; }
+                let td = set.read(&tk).or_else(|| set.read_ti(tk.t, tk.i)).unwrap();
+                let t = s3formats::txtc::Txtc::parse(&td).unwrap();
+                fn dump(t: &s3formats::txtc::Txtc, ind: &str) {
+                    println!("{ind}version {} keys:", t.version);
+                    for (i, k) in t.keys.iter().enumerate() { println!("{ind}  [{i}] {k}"); }
+                    for (idx, f) in &t.fabrics { println!("{ind}fabric tgi[{idx}]:"); dump(f, &format!("{ind}    ")); }
+                    for s in &t.steps {
+                        let props: Vec<String> = s.props.iter().map(|(p, v)| format!("{}={:?}", s3formats::txtc::Txtc::prop_name(*p), v)).collect();
+                        println!("{ind}  {} {}", s3formats::txtc::Txtc::step_name(s.kind()), props.join(" "));
+                    }
+                }
+                dump(&t, "  ");
+            }
+        }
+        let _ = d;
+        return;
+    }
     if args[1] == "install" {
         let root = std::path::Path::new(&args[2]);
         for r in s3pkg::install::discover_packages(root) {
