@@ -53,6 +53,9 @@ installation is unreachable.
   shoe, interface clicks, stings for promotions, weddings and other moments, birds by day
   and insects at night, music for the menus, Create-a-Sim and buy mode, and the radio
   stations on stereos.
+- **Options**: Escape pauses with a game menu (resume, options, save, main menu, quit); the
+  options set master, music, effects, voice and ambient levels, aging and life span (short
+  to epic), free will, shadows and the frame-rate counter, kept in `settings.json`.
 
 ## Controls
 
@@ -69,6 +72,7 @@ installation is unreachable.
 | Space | Pause |
 | 1 / 2 / 3 | Game speed |
 | B or F2 | Buy mode (, and . rotate, Delete sells, Esc leaves) |
+| Esc | Game menu: pause, options, save, quit |
 
 ## Layout
 
