@@ -27,6 +27,67 @@ pub struct LoadResult {
     pub world_pkg: Arc<Package>,
     pub world: Arc<WorldData>,
     pub terrain: TerrainBuild,
+    pub strings: Strings,
+    pub catalog: Catalog,
+}
+
+/// English localised strings keyed by FNV64.
+#[derive(Resource, Default)]
+pub struct Strings(pub std::collections::HashMap<u64, String>);
+
+#[derive(Clone, Debug)]
+pub struct CatalogEntry {
+    pub key: s3pkg::ResourceKey,
+    pub name: String,
+    pub price: i32,
+    pub kind: crate::interact::ObjectKind,
+}
+
+/// Every buyable object in the installed game.
+#[derive(Resource, Default)]
+pub struct Catalog {
+    pub entries: Vec<CatalogEntry>,
+    index: std::collections::HashMap<s3pkg::ResourceKey, usize>,
+}
+
+impl Catalog {
+    pub fn build(pkgs: &PackageSet, strings: &Strings) -> Self {
+        use s3formats::object::{objd_objk, parse_objd};
+        let mut keys: Vec<_> = pkgs.keys_of_type(s3pkg::types::OBJD).copied().collect();
+        keys.sort();
+        let mut entries = Vec::new();
+        for k in keys {
+            let Some(d) = pkgs.read(&k) else { continue };
+            let Ok(info) = parse_objd(&d) else { continue };
+            let script = objd_objk(pkgs, &d).and_then(|o| o.script_class).unwrap_or_default();
+            let kind = crate::interact::ObjectKind::from_script(&script, &info.name);
+            let name = strings.0.get(&info.name_guid).cloned().unwrap_or_else(|| info.instance_name.clone());
+            entries.push(CatalogEntry {
+                key: k,
+                name,
+                price: if info.show_in_catalog { info.price as i32 } else { -1 },
+                kind,
+            });
+        }
+        let index = entries.iter().enumerate().map(|(i, e)| (e.key, i)).collect();
+        Self { entries, index }
+    }
+
+    pub fn by_key(&self, k: &s3pkg::ResourceKey) -> Option<&CatalogEntry> {
+        self.index.get(k).map(|&i| &self.entries[i])
+    }
+
+    /// Buyable entries in a buy-mode category, cheapest first.
+    pub fn in_category(&self, cat: &str) -> Vec<&CatalogEntry> {
+        let mut v: Vec<&CatalogEntry> = self
+            .entries
+            .iter()
+            .filter(|e| e.price > 0 && e.kind.category() == cat && !e.name.is_empty())
+            .collect();
+        v.sort_by(|a, b| a.price.cmp(&b.price).then(a.name.cmp(&b.name)));
+        v.dedup_by(|a, b| a.name == b.name);
+        v
+    }
 }
 
 #[derive(Resource)]
@@ -84,8 +145,12 @@ fn start_loading(mut commands: Commands, install: Res<InstallPath>, selected: Re
         let world = Arc::new(WorldData::load(&world_pkg)?);
         set_status("Building terrain meshes and textures…");
         let terrain = terrain::build_terrain(&world, &packages);
+        set_status("Reading string tables…");
+        let strings = Strings(s3formats::stbl::load_english(&packages));
+        set_status("Building the buy catalog…");
+        let catalog = Catalog::build(&packages, &strings);
         set_status("Done");
-        Ok(LoadResult { packages, world_pkg, world, terrain })
+        Ok(LoadResult { packages, world_pkg, world, terrain, strings, catalog })
     });
     commands.insert_resource(LoadTask { task, progress });
 }
@@ -115,6 +180,8 @@ fn poll_loading(
                 data: r.world,
             });
             commands.insert_resource(r.terrain);
+            commands.insert_resource(r.strings);
+            commands.insert_resource(r.catalog);
             next.set(AppState::InGame);
         }
         Err(e) => {

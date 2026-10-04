@@ -11,6 +11,117 @@ fn main() {
         eprintln!("usage: s3tool <types|list|dump|hex|dumpall> <package> [...]");
         return;
     }
+    if args[1] == "objects" {
+        // objects <root> [max]: decode the models of many OBJDs and validate their bounds.
+        let root = std::path::Path::new(&args[2]);
+        let max: usize = args.get(3).map(|s| s.parse().unwrap()).unwrap_or(50);
+        let set = s3pkg::install::open_install(root, |_| true);
+        let mut keys: Vec<_> = set.keys_of_type(types::OBJD).copied().collect();
+        keys.sort();
+        let (mut ok, mut bad, mut nomodel) = (0, 0, 0);
+        for k in keys.iter().take(max) {
+            let models = s3formats::object::object_models(&set, k);
+            if models.is_empty() {
+                nomodel += 1;
+                continue;
+            }
+            for mk in &models {
+                match s3formats::model::load_model(&set, mk) {
+                    Some(meshes) => {
+                        for m in &meshes {
+                            let mut mn = [f32::MAX; 3];
+                            let mut mx = [f32::MIN; 3];
+                            for p in &m.positions {
+                                for a in 0..3 {
+                                    mn[a] = mn[a].min(p[a]);
+                                    mx[a] = mx[a].max(p[a]);
+                                }
+                            }
+                            let err = (0..3)
+                                .map(|a| (mn[a] - m.bounds_min[a]).abs().max((mx[a] - m.bounds_max[a]).abs()))
+                                .fold(0.0f32, f32::max);
+                            let tex = m.material.texture(s3formats::model::P_DIFFUSE_MAP);
+                            if err > 0.01 {
+                                bad += 1;
+                                println!(
+                                    "BOUNDS {k} {mk} mesh {:08X} verts={} tris={} err={err:.4} decoded={mn:?}..{mx:?} stored={:?}..{:?}",
+                                    m.name_hash,
+                                    m.positions.len(),
+                                    m.indices.len() / 3,
+                                    m.bounds_min,
+                                    m.bounds_max
+                                );
+                            } else {
+                                ok += 1;
+                            }
+                            if args.get(4).is_some() {
+                                println!(
+                                    "{k} {mk} mesh {:08X} shader={:08X} verts={} tris={} diffuse={:?}",
+                                    m.name_hash,
+                                    m.material.shader,
+                                    m.positions.len(),
+                                    m.indices.len() / 3,
+                                    tex
+                                );
+                            }
+                        }
+                    }
+                    None => {
+                        println!("FAILED to load {mk} for {k}");
+                        bad += 1;
+                    }
+                }
+            }
+        }
+        println!("ok meshes={ok} bad={bad} objects without model={nomodel}");
+        return;
+    }
+    if args[1] == "winding" {
+        let root = std::path::Path::new(&args[2]);
+        let set = s3pkg::install::open_install(root, |_| true);
+        let mut keys: Vec<_> = set.keys_of_type(types::OBJD).copied().collect();
+        keys.sort();
+        let (mut pos, mut neg) = (0usize, 0usize);
+        for k in keys.iter().take(400) {
+            for mk in s3formats::object::object_models(&set, k) {
+                for m in s3formats::model::load_model(&set, &mk).unwrap_or_default() {
+                    for t in m.indices.chunks_exact(3) {
+                        let p = |i: u32| m.positions[i as usize];
+                        let (a, b, c) = (p(t[0]), p(t[1]), p(t[2]));
+                        let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                        let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                        let cr = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+                        let n = m.normals[t[0] as usize];
+                        let d = cr[0] * n[0] + cr[1] * n[1] + cr[2] * n[2];
+                        if d > 0.0 { pos += 1 } else if d < 0.0 { neg += 1 }
+                    }
+                }
+            }
+        }
+        println!("winding: dot>0 {pos}  dot<0 {neg}");
+        return;
+    }
+    if args[1] == "catalog" {
+        let root = std::path::Path::new(&args[2]);
+        let set = s3pkg::install::open_install(root, |_| true);
+        let strings = s3formats::stbl::load_english(&set);
+        eprintln!("{} strings", strings.len());
+        let mut keys: Vec<_> = set.keys_of_type(types::OBJD).copied().collect();
+        keys.sort();
+        for k in keys {
+            let Some(d) = set.read(&k) else { continue };
+            match s3formats::object::parse_objd(&d) {
+                Ok(info) => {
+                    let objk = s3formats::object::objd_objk(&set, &d);
+                    let script = objk.as_ref().and_then(|o| o.script_class.clone()).unwrap_or_default();
+                    let disp = strings.get(&info.name_guid).cloned().unwrap_or_default();
+                    println!("{k}	{}	{:.0}	{}	{}	{}	{}", info.show_in_catalog as u8, info.price, info.name, disp, script, info.instance_name);
+                }
+                Err(_) => println!("{k}	PARSE_ERROR"),
+            }
+        }
+        return;
+    }
     if args[1] == "install" {
         let root = std::path::Path::new(&args[2]);
         for r in s3pkg::install::discover_packages(root) {

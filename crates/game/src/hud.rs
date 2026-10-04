@@ -1,0 +1,717 @@
+//! Live-mode user interface: needs panel, clock and speed, action queue, household portraits,
+//! notifications, and the pie menu for interacting with the world.
+
+use bevy::input::mouse::MouseButton;
+use bevy::picking::mesh_picking::ray_cast::{MeshRayCast, MeshRayCastSettings};
+use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
+
+use crate::camera::SimsCamera;
+use crate::clock::GameClock;
+use crate::interact::*;
+use crate::loading::CurrentWorld;
+use crate::menu::{BTN_HOVER, BTN_NORMAL, BTN_PRESS, PLUMBOB_GREEN, text};
+use crate::sim::*;
+use crate::{AppState, PlayMode};
+
+pub struct HudPlugin;
+
+impl Plugin for HudPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<PieMenu>()
+            .add_systems(OnEnter(PlayMode::Live), spawn_hud)
+            .add_systems(
+                Update,
+                (
+                    pointer_over_ui,
+                    world_click,
+                    pie_buttons,
+                    hud_buttons,
+                    update_needs_panel,
+                    update_clock_panel,
+                    update_queue_panel,
+                    update_members_panel,
+                    update_notifications,
+                    keyboard_shortcuts,
+                    hud_button_visuals,
+                )
+                    .chain()
+                    .run_if(in_state(PlayMode::Live)),
+            );
+    }
+}
+
+const PANEL_BG: Color = Color::srgba(0.05, 0.15, 0.30, 0.88);
+
+#[derive(Resource, Default)]
+pub struct PointerOverUi(pub bool);
+
+#[derive(Resource, Default)]
+pub struct PieMenu {
+    pub root: Option<Entity>,
+    pub actor: Option<Entity>,
+    pub options: Vec<(String, ActionKind)>,
+}
+
+#[derive(Component)]
+struct PieOption(usize);
+
+#[derive(Component)]
+struct NeedsName;
+#[derive(Component)]
+struct NeedsDetail;
+#[derive(Component)]
+struct MotiveBar(usize);
+#[derive(Component)]
+struct ClockText;
+#[derive(Component)]
+struct FundsText;
+#[derive(Component)]
+struct SpeedButton(usize);
+#[derive(Component)]
+struct QueuePanel;
+#[derive(Component)]
+struct QueueButton(usize);
+#[derive(Component)]
+struct MembersPanel;
+#[derive(Component)]
+struct MemberButton(Entity);
+#[derive(Component)]
+struct NotesPanel;
+#[derive(Component)]
+struct HudButton;
+/// UI regions that should swallow world clicks.
+#[derive(Component)]
+struct BlocksWorld;
+
+fn panel(node: Node) -> impl Bundle {
+    (
+        Node { border_radius: BorderRadius::all(Val::Px(12.0)), ..node },
+        BackgroundColor(PANEL_BG),
+        Interaction::default(),
+        BlocksWorld,
+    )
+}
+
+fn spawn_hud(mut commands: Commands) {
+    commands.insert_resource(PointerOverUi::default());
+    // Needs panel (bottom-left)
+    commands
+        .spawn((
+            DespawnOnExit(AppState::InGame),
+            panel(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(12.0),
+                bottom: Val::Px(12.0),
+                width: Val::Px(390.0),
+                padding: UiRect::all(Val::Px(12.0)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.0),
+                ..default()
+            }),
+        ))
+        .with_children(|p| {
+            p.spawn((text("", 22.0, Color::WHITE), NeedsName));
+            p.spawn((text("", 14.0, Color::srgb(0.75, 0.85, 1.0)), NeedsDetail));
+            p.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                flex_wrap: FlexWrap::Wrap,
+                column_gap: Val::Px(10.0),
+                row_gap: Val::Px(6.0),
+                ..default()
+            })
+            .with_children(|g| {
+                for (i, name) in MOTIVE_NAMES.iter().enumerate() {
+                    g.spawn(Node { width: Val::Px(173.0), flex_direction: FlexDirection::Column, ..default() })
+                        .with_children(|c| {
+                            c.spawn(text(*name, 14.0, Color::WHITE));
+                            c.spawn((
+                                Node { width: Val::Percent(100.0), height: Val::Px(12.0), border_radius: BorderRadius::all(Val::Px(4.0)), ..default() },
+                                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+                            ))
+                            .with_children(|b| {
+                                b.spawn((
+                                    Node { width: Val::Percent(50.0), height: Val::Percent(100.0), border_radius: BorderRadius::all(Val::Px(4.0)), ..default() },
+                                    BackgroundColor(Color::srgb(0.3, 0.9, 0.3)),
+                                    MotiveBar(i),
+                                ));
+                            });
+                        });
+                }
+            });
+        });
+
+    // Clock and speed (bottom-centre)
+    commands
+        .spawn((
+            DespawnOnExit(AppState::InGame),
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(12.0),
+                width: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            Pickable::IGNORE,
+        ))
+        .with_children(|row| {
+            row.spawn(panel(Node {
+                padding: UiRect::axes(Val::Px(14.0), Val::Px(8.0)),
+                column_gap: Val::Px(8.0),
+                align_items: AlignItems::Center,
+                ..default()
+            }))
+            .with_children(|p| {
+                p.spawn((text("", 20.0, Color::WHITE), ClockText, Node { width: Val::Px(210.0), ..default() }));
+                for (i, label) in ["II", ">", ">>", ">>>"].iter().enumerate() {
+                    p.spawn((
+                        Button,
+                        HudButton,
+                        SpeedButton(i),
+                        Node {
+                            border_radius: BorderRadius::all(Val::Px(8.0)),
+                            width: Val::Px(46.0),
+                            height: Val::Px(34.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(BTN_NORMAL),
+                    ))
+                    .with_children(|b| {
+                        b.spawn(text(*label, 18.0, Color::WHITE));
+                    });
+                }
+                p.spawn((text("", 20.0, PLUMBOB_GREEN), FundsText, Node { margin: UiRect::left(Val::Px(12.0)), ..default() }));
+            });
+        });
+
+    // Action queue (top-left)
+    commands.spawn((
+        DespawnOnExit(AppState::InGame),
+        QueuePanel,
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(12.0),
+            top: Val::Px(12.0),
+            column_gap: Val::Px(6.0),
+            ..default()
+        },
+    ));
+
+    // Household members (right)
+    commands.spawn((
+        DespawnOnExit(AppState::InGame),
+        MembersPanel,
+        Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(12.0),
+            bottom: Val::Px(12.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(6.0),
+            ..default()
+        },
+    ));
+
+    // Notifications (top-right)
+    commands.spawn((
+        DespawnOnExit(AppState::InGame),
+        NotesPanel,
+        Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(12.0),
+            top: Val::Px(12.0),
+            width: Val::Px(360.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(6.0),
+            ..default()
+        },
+    ));
+
+    // Help line
+    commands.spawn((
+        DespawnOnExit(AppState::InGame),
+        text(
+            "Click objects / sims for actions · Click ground to walk · WASD/arrows pan · Q/E rotate · wheel zoom · Space pause · 1/2/3 speed · Tab next sim · C centre camera · B buy mode",
+            13.0,
+            Color::srgba(1.0, 1.0, 1.0, 0.75),
+        ),
+        Node { position_type: PositionType::Absolute, left: Val::Px(420.0), bottom: Val::Px(70.0), ..default() },
+    ));
+}
+
+fn pointer_over_ui(mut over: ResMut<PointerOverUi>, q: Query<&Interaction, Or<(With<BlocksWorld>, With<Button>)>>) {
+    over.0 = q.iter().any(|i| *i != Interaction::None);
+}
+
+fn close_pie(commands: &mut Commands, pie: &mut PieMenu) {
+    if let Some(r) = pie.root.take() {
+        commands.entity(r).despawn();
+    }
+    pie.options.clear();
+}
+
+fn open_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, actor: Entity, options: Vec<(String, ActionKind)>) {
+    close_pie(commands, pie);
+    if options.is_empty() {
+        return;
+    }
+    let n = options.len();
+    let radius = 70.0 + n as f32 * 9.0;
+    let root = commands
+        .spawn((
+            DespawnOnExit(AppState::InGame),
+            Node { position_type: PositionType::Absolute, left: Val::Px(at.x), top: Val::Px(at.y), ..default() },
+            GlobalZIndex(10),
+        ))
+        .with_children(|p| {
+            p.spawn((
+                text(title, 16.0, Color::WHITE),
+                Node { position_type: PositionType::Absolute, left: Val::Px(-60.0), top: Val::Px(-10.0), width: Val::Px(120.0), ..default() },
+                TextShadow::default(),
+            ));
+            for (i, (label, _)) in options.iter().enumerate() {
+                let a = -std::f32::consts::FRAC_PI_2 + i as f32 / n as f32 * std::f32::consts::TAU;
+                let (x, y) = (a.cos() * radius, a.sin() * radius * 0.8);
+                p.spawn((
+                    Button,
+                    HudButton,
+                    PieOption(i),
+                    Node {
+                        border_radius: BorderRadius::all(Val::Px(17.0)),
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(x - 85.0),
+                        top: Val::Px(y - 17.0),
+                        width: Val::Px(170.0),
+                        height: Val::Px(34.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(BTN_NORMAL),
+                ))
+                .with_children(|b| {
+                    b.spawn(text(label.clone(), 15.0, Color::WHITE));
+                });
+            }
+        })
+        .id();
+    pie.root = Some(root);
+    pie.actor = Some(actor);
+    pie.options = options;
+}
+
+fn ancestor_with<F: Fn(Entity) -> bool>(mut e: Entity, parents: &Query<&ChildOf>, pred: F) -> Option<Entity> {
+    for _ in 0..8 {
+        if pred(e) {
+            return Some(e);
+        }
+        e = parents.get(e).ok()?.parent();
+    }
+    None
+}
+
+/// Ray-marches the heightmap to find where a ray meets the ground.
+pub fn ground_hit(ray: Ray3d, world: &CurrentWorld) -> Option<Vec3> {
+    let hm = &world.data.heightmap;
+    let mut t: f32 = 0.0;
+    let mut prev = ray.origin;
+    while t < 3000.0 {
+        let step = (t * 0.01).max(0.25);
+        t += step;
+        let p = ray.origin + *ray.direction * t;
+        let g = hm.sample(p.x, p.z);
+        if p.y <= g {
+            // Refine by bisection.
+            let (mut a, mut b) = (prev, p);
+            for _ in 0..12 {
+                let m = (a + b) * 0.5;
+                if m.y <= hm.sample(m.x, m.z) {
+                    b = m;
+                } else {
+                    a = m;
+                }
+            }
+            return Some(b);
+        }
+        prev = p;
+    }
+    None
+}
+
+#[allow(clippy::too_many_arguments)]
+fn world_click(
+    mut commands: Commands,
+    mouse: Res<ButtonInput<MouseButton>>,
+    over_ui: Res<PointerOverUi>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    cams: Query<(&Camera, &GlobalTransform), With<SimsCamera>>,
+    mut ray_cast: MeshRayCast,
+    parents: Query<&ChildOf>,
+    sims: Query<(&Sim, Has<HouseholdMember>, Has<Selected>)>,
+    objects: Query<&GameObject>,
+    selected: Query<(Entity, &Relationships), With<Selected>>,
+    world: Res<CurrentWorld>,
+    mut pie: ResMut<PieMenu>,
+    buy: Option<Res<crate::buy::BuyMode>>,
+) {
+    if buy.is_some_and(|b| b.active) {
+        return;
+    }
+    if mouse.just_pressed(MouseButton::Right) {
+        close_pie(&mut commands, &mut pie);
+        return;
+    }
+    if !mouse.just_pressed(MouseButton::Left) || over_ui.0 {
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    let Ok((camera, cam_tf)) = cams.single() else { return };
+    let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else { return };
+    close_pie(&mut commands, &mut pie);
+    let Ok((actor, rels)) = selected.single() else { return };
+
+    let is_target = |e: Entity| sims.contains(e) || objects.contains(e);
+    let filter = |e: Entity| ancestor_with(e, &parents, is_target).is_some();
+    let hits = ray_cast.cast_ray(ray, &MeshRayCastSettings::default().with_filter(&filter));
+    let target = hits.first().and_then(|(e, _)| ancestor_with(*e, &parents, is_target));
+
+    if let Some(t) = target {
+        if let Ok((sim, member, is_sel)) = sims.get(t) {
+            if is_sel {
+                return;
+            }
+            let mut options = Vec::new();
+            if member {
+                options.push((format!("Select {}", sim.first), ActionKind::GoHere(Vec2::NAN)));
+            }
+            let rel = rels.get(t);
+            for (i, s) in SOCIALS.iter().enumerate() {
+                if rel >= s.min_rel {
+                    options.push((s.name.to_string(), ActionKind::Social { target: t, social: i }));
+                }
+            }
+            open_pie(&mut commands, &mut pie, cursor, &format!("{} ({})", sim.full_name(), relationship_label(rel)), actor, options);
+            // Remember which sim "Select" refers to.
+            pie.options.iter_mut().for_each(|(l, k)| {
+                if l.starts_with("Select") {
+                    *k = ActionKind::Social { target: t, social: usize::MAX };
+                }
+            });
+        } else if let Ok(obj) = objects.get(t) {
+            let options: Vec<(String, ActionKind)> = interactions_for(obj.kind)
+                .iter()
+                .enumerate()
+                .map(|(i, d)| (d.name.to_string(), ActionKind::Object { target: t, def: i }))
+                .collect();
+            open_pie(&mut commands, &mut pie, cursor, &obj.name, actor, options);
+        }
+    } else if let Some(p) = ground_hit(ray, &world) {
+        open_pie(&mut commands, &mut pie, cursor, "", actor, vec![("Go Here".into(), ActionKind::GoHere(Vec2::new(p.x, p.z)))]);
+    }
+}
+
+fn pie_buttons(
+    mut commands: Commands,
+    q: Query<(&Interaction, &PieOption), Changed<Interaction>>,
+    mut pie: ResMut<PieMenu>,
+    mut queues: Query<&mut ActionQueue>,
+    selected: Query<Entity, With<Selected>>,
+) {
+    let mut chosen = None;
+    for (i, opt) in &q {
+        if *i == Interaction::Pressed {
+            chosen = Some(opt.0);
+        }
+    }
+    let Some(idx) = chosen else { return };
+    let Some((label, kind)) = pie.options.get(idx).cloned() else { return };
+    let actor = pie.actor;
+    close_pie(&mut commands, &mut pie);
+    if let ActionKind::Social { target, social } = kind
+        && social == usize::MAX
+    {
+        for s in &selected {
+            commands.entity(s).remove::<Selected>();
+        }
+        commands.entity(target).insert(Selected);
+        return;
+    }
+    if let Some(a) = actor
+        && let Ok(mut queue) = queues.get_mut(a)
+    {
+        queue.push_player(Action::new(label, kind, false));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn hud_buttons(
+    mut commands: Commands,
+    speed: Query<(&Interaction, &SpeedButton), Changed<Interaction>>,
+    queue_btns: Query<(&Interaction, &QueueButton), Changed<Interaction>>,
+    member_btns: Query<(&Interaction, &MemberButton), Changed<Interaction>>,
+    mut clock: ResMut<GameClock>,
+    mut queues: Query<&mut ActionQueue, With<Selected>>,
+    selected: Query<Entity, With<Selected>>,
+    positions: Query<&Transform, With<Sim>>,
+    mut cam: Query<&mut SimsCamera>,
+) {
+    for (i, s) in &speed {
+        if *i == Interaction::Pressed {
+            clock.set_speed(s.0);
+        }
+    }
+    for (i, b) in &queue_btns {
+        if *i == Interaction::Pressed
+            && let Ok(mut q) = queues.single_mut()
+            && let Some(a) = q.0.get_mut(b.0)
+        {
+            a.cancel = true;
+        }
+    }
+    for (i, b) in &member_btns {
+        if *i == Interaction::Pressed {
+            let already = selected.contains(b.0);
+            for s in &selected {
+                commands.entity(s).remove::<Selected>();
+            }
+            commands.entity(b.0).insert(Selected);
+            if already
+                && let (Ok(tf), Ok(mut c)) = (positions.get(b.0), cam.single_mut())
+            {
+                c.look_at(tf.translation);
+            }
+        }
+    }
+}
+
+fn hud_button_visuals(mut q: Query<(&Interaction, &mut BackgroundColor, Option<&SpeedButton>), With<HudButton>>, clock: Res<GameClock>) {
+    for (i, mut bg, speed) in &mut q {
+        let active = speed.is_some_and(|s| s.0 == clock.speed);
+        bg.0 = match i {
+            Interaction::Pressed => BTN_PRESS,
+            Interaction::Hovered => BTN_HOVER,
+            Interaction::None if active => Color::srgb(0.25, 0.6, 0.2),
+            Interaction::None => BTN_NORMAL,
+        };
+    }
+}
+
+fn motive_color(v: f32) -> Color {
+    let t = ((v + 100.0) / 200.0).clamp(0.0, 1.0);
+    if t > 0.5 {
+        Color::srgb(0.95 - (t - 0.5) * 1.3, 0.85, 0.2)
+    } else {
+        Color::srgb(0.9, 0.2 + t * 1.3, 0.15)
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn update_needs_panel(
+    sel: Query<(&Sim, &Motives, &Skills, Option<&Job>, Option<&AtWork>, &ActionQueue), With<Selected>>,
+    mut name: Query<&mut Text, (With<NeedsName>, Without<NeedsDetail>)>,
+    mut detail: Query<&mut Text, (With<NeedsDetail>, Without<NeedsName>)>,
+    mut bars: Query<(&MotiveBar, &mut Node, &mut BackgroundColor)>,
+) {
+    let Ok((sim, motives, skills, job, at_work, _)) = sel.single() else { return };
+    if let Ok(mut t) = name.single_mut() {
+        let mood = motives.mood();
+        let mood_txt = match mood {
+            m if m > 50.0 => "Very Happy",
+            m if m > 20.0 => "Happy",
+            m if m > -20.0 => "Fine",
+            m if m > -50.0 => "Uncomfortable",
+            _ => "Miserable",
+        };
+        let s = format!("{} — {}", sim.full_name(), mood_txt);
+        if t.0 != s {
+            t.0 = s;
+        }
+    }
+    if let Ok(mut t) = detail.single_mut() {
+        let job_s = match (job, at_work) {
+            (Some(j), Some(_)) => format!("At work ({} {})", j.0.track, j.0.title),
+            (Some(j), None) => format!("{} — {} ({}–{})", j.0.track, j.0.title, hour_label(j.0.start), hour_label(j.0.end)),
+            _ => "Unemployed".into(),
+        };
+        let mut sk: Vec<String> = skills.0.iter().filter(|(_, v)| **v >= 1.0).map(|(k, v)| format!("{k} {}", *v as u32)).collect();
+        sk.sort();
+        let s = if sk.is_empty() { job_s } else { format!("{job_s} · Skills: {}", sk.join(", ")) };
+        if t.0 != s {
+            t.0 = s;
+        }
+    }
+    for (bar, mut node, mut bg) in &mut bars {
+        let v = motives.0[bar.0];
+        node.width = Val::Percent(((v + 100.0) / 2.0).clamp(2.0, 100.0));
+        bg.0 = motive_color(v);
+    }
+}
+
+fn update_clock_panel(
+    clock: Res<GameClock>,
+    household: Option<Res<Household>>,
+    mut t: Query<&mut Text, (With<ClockText>, Without<FundsText>)>,
+    mut f: Query<&mut Text, (With<FundsText>, Without<ClockText>)>,
+) {
+    if let Ok(mut t) = t.single_mut() {
+        let s = format!("{} {}", clock.weekday_name(), clock.time_string());
+        if t.0 != s {
+            t.0 = s;
+        }
+    }
+    if let (Ok(mut f), Some(h)) = (f.single_mut(), household) {
+        let s = format!("§{}", h.funds);
+        if f.0 != s {
+            f.0 = s;
+        }
+    }
+}
+
+fn update_queue_panel(
+    mut commands: Commands,
+    panel: Query<Entity, With<QueuePanel>>,
+    sel: Query<&ActionQueue, With<Selected>>,
+    mut last: Local<Vec<String>>,
+) {
+    let Ok(p) = panel.single() else { return };
+    let labels: Vec<String> = sel.single().map(|q| q.0.iter().filter(|a| !a.cancel).map(|a| a.label.clone()).collect()).unwrap_or_default();
+    if *last == labels {
+        return;
+    }
+    *last = labels.clone();
+    commands.entity(p).despawn_children();
+    commands.entity(p).with_children(|c| {
+        for (i, l) in labels.iter().enumerate() {
+            c.spawn((
+                Button,
+                HudButton,
+                QueueButton(i),
+                Node {
+                    border_radius: BorderRadius::all(Val::Px(10.0)),
+                    padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+                    border: UiRect::all(Val::Px(2.0)),
+                    ..default()
+                },
+                BorderColor::all(if i == 0 { PLUMBOB_GREEN } else { Color::WHITE }),
+                BackgroundColor(BTN_NORMAL),
+            ))
+            .with_children(|b| {
+                b.spawn(text(l.clone(), 15.0, Color::WHITE));
+            });
+        }
+    });
+}
+
+fn update_members_panel(
+    mut commands: Commands,
+    panel: Query<Entity, With<MembersPanel>>,
+    members: Query<(Entity, &Sim, &Motives, Has<Selected>), With<HouseholdMember>>,
+    mut last: Local<Vec<(Entity, bool, u8)>>,
+) {
+    let Ok(p) = panel.single() else { return };
+    let mut list: Vec<(Entity, String, bool, f32)> = members.iter().map(|(e, s, m, sel)| (e, s.first.clone(), sel, m.mood())).collect();
+    list.sort_by_key(|x| x.0);
+    let sig: Vec<(Entity, bool, u8)> = list.iter().map(|x| (x.0, x.2, ((x.3 + 100.0) / 50.0) as u8)).collect();
+    if *last == sig {
+        return;
+    }
+    *last = sig;
+    commands.entity(p).despawn_children();
+    commands.entity(p).with_children(|c| {
+        for (e, name, sel, mood) in list {
+            c.spawn((
+                Button,
+                HudButton,
+                MemberButton(e),
+                Node {
+                    border_radius: BorderRadius::all(Val::Px(10.0)),
+                    width: Val::Px(150.0),
+                    padding: UiRect::axes(Val::Px(10.0), Val::Px(8.0)),
+                    border: UiRect::all(Val::Px(if sel { 3.0 } else { 1.0 })),
+                    column_gap: Val::Px(8.0),
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BorderColor::all(if sel { PLUMBOB_GREEN } else { Color::srgba(1.0, 1.0, 1.0, 0.4) }),
+                BackgroundColor(BTN_NORMAL),
+            ))
+            .with_children(|b| {
+                b.spawn((
+                    Node { width: Val::Px(14.0), height: Val::Px(14.0), border_radius: BorderRadius::all(Val::Px(7.0)), ..default() },
+                    BackgroundColor(mood_color(mood)),
+                ));
+                b.spawn(text(name, 17.0, Color::WHITE));
+            });
+        }
+    });
+}
+
+fn update_notifications(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut notes: ResMut<Notifications>,
+    panel: Query<Entity, With<NotesPanel>>,
+    mut last: Local<usize>,
+) {
+    for n in notes.0.iter_mut() {
+        n.1 -= time.delta_secs();
+    }
+    let before = notes.0.len();
+    notes.0.retain(|n| n.1 > 0.0);
+    let Ok(p) = panel.single() else { return };
+    let sig = notes.0.iter().map(|n| n.0.len()).sum::<usize>() + notes.0.len() * 1000;
+    if sig == *last && before == notes.0.len() {
+        return;
+    }
+    *last = sig;
+    commands.entity(p).despawn_children();
+    commands.entity(p).with_children(|c| {
+        for (msg, _) in notes.0.iter() {
+            c.spawn((
+                Node { padding: UiRect::all(Val::Px(10.0)), border_radius: BorderRadius::all(Val::Px(8.0)), ..default() },
+                BackgroundColor(Color::srgba(0.08, 0.22, 0.40, 0.92)),
+            ))
+            .with_children(|b| {
+                b.spawn(text(msg.clone(), 15.0, Color::WHITE));
+            });
+        }
+    });
+}
+
+fn keyboard_shortcuts(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    members: Query<Entity, With<HouseholdMember>>,
+    selected: Query<Entity, With<Selected>>,
+    positions: Query<&Transform, With<Sim>>,
+    mut cam: Query<&mut SimsCamera>,
+    mut pie: ResMut<PieMenu>,
+) {
+    if keys.just_pressed(KeyCode::Escape) {
+        close_pie(&mut commands, &mut pie);
+    }
+    if keys.just_pressed(KeyCode::Tab) {
+        let mut all: Vec<Entity> = members.iter().collect();
+        all.sort();
+        if all.is_empty() {
+            return;
+        }
+        let cur = selected.single().ok();
+        let idx = cur.and_then(|c| all.iter().position(|e| *e == c)).map(|i| (i + 1) % all.len()).unwrap_or(0);
+        for s in &selected {
+            commands.entity(s).remove::<Selected>();
+        }
+        commands.entity(all[idx]).insert(Selected);
+        if let (Ok(tf), Ok(mut c)) = (positions.get(all[idx]), cam.single_mut()) {
+            c.look_at(tf.translation);
+        }
+    }
+    if keys.just_pressed(KeyCode::KeyC)
+        && let Ok(s) = selected.single()
+        && let (Ok(tf), Ok(mut c)) = (positions.get(s), cam.single_mut())
+    {
+        c.look_at(tf.translation);
+    }
+}

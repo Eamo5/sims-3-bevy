@@ -1,0 +1,170 @@
+//! Catalog objects: OBJD (definition) -> OBJK (components) -> VPXY -> MODL.
+
+use crate::model::tgi_table_at;
+use crate::util::{R, Reader};
+use s3pkg::{PackageSet, ResourceKey, types};
+
+/// The parts of an OBJK we use.
+#[derive(Clone, Debug, Default)]
+pub struct ObjKey {
+    pub components: Vec<u32>,
+    pub model_key: Option<ResourceKey>,
+    pub footprint_key: Option<ResourceKey>,
+    pub script_class: Option<String>,
+}
+
+pub fn parse_objk(d: &[u8]) -> R<ObjKey> {
+    let keys = tgi_table_at(d, 4)?;
+    let mut r = Reader::at(d, 12);
+    let nc = r.u8()? as usize;
+    let mut components = Vec::with_capacity(nc);
+    for _ in 0..nc {
+        components.push(r.u32()?);
+    }
+    let nd = r.u8()? as usize;
+    let mut out = ObjKey { components, ..Default::default() };
+    for _ in 0..nd {
+        let kl = r.i32()?.max(0) as usize;
+        let key = String::from_utf8_lossy(r.bytes(kl)?).into_owned();
+        let code = r.u8()?;
+        match code {
+            0 | 3 => {
+                let l = r.i32()?.max(0) as usize;
+                let s = String::from_utf8_lossy(r.bytes(l)?).into_owned();
+                if key == "scriptClass" {
+                    out.script_class = Some(s);
+                }
+            }
+            1 | 2 => {
+                let idx = r.i32()?;
+                let k = keys.get(idx.max(0) as usize).copied();
+                match key.as_str() {
+                    "modelKey" => out.model_key = k,
+                    "footprintKey" => out.footprint_key = k,
+                    _ => {}
+                }
+            }
+            4 => {
+                r.u32()?;
+            }
+            _ => break,
+        }
+    }
+    Ok(out)
+}
+
+/// The key table of an OBJD (catalog object definition).
+pub fn objd_keys(d: &[u8]) -> R<Vec<ResourceKey>> {
+    tgi_table_at(d, 4)
+}
+
+/// Resolves the OBJK of an object definition.
+pub fn objd_objk(pkgs: &PackageSet, objd: &[u8]) -> Option<ObjKey> {
+    let keys = objd_keys(objd).ok()?;
+    let k = keys.iter().find(|k| k.t == types::OBJK)?;
+    let data = pkgs.read(k).or_else(|| pkgs.read_ti(k.t, k.i))?;
+    parse_objk(&data).ok()
+}
+
+/// Finds the MODL resources making up an object, given its OBJD key.
+pub fn object_models(pkgs: &PackageSet, objd_key: &ResourceKey) -> Vec<ResourceKey> {
+    let Some(objd) = pkgs.read(objd_key) else { return Vec::new() };
+    let Some(objk) = objd_objk(pkgs, &objd) else { return Vec::new() };
+    let Some(mk) = objk.model_key else { return Vec::new() };
+    match mk.t {
+        types::VPXY => pkgs
+            .read(&mk)
+            .or_else(|| pkgs.read_ti(mk.t, mk.i))
+            .map(|d| crate::model::vpxy_models(&d))
+            .unwrap_or_default(),
+        types::MODL => vec![mk],
+        _ => Vec::new(),
+    }
+}
+
+/// Reads a .NET-style 7-bit length prefixed UTF-16BE string (STR7).
+fn str7(r: &mut Reader) -> R<String> {
+    let mut n = 0usize;
+    let mut shift = 0;
+    loop {
+        let b = r.u8()?;
+        n |= ((b & 0x7F) as usize) << shift;
+        if b & 0x80 == 0 {
+            break;
+        }
+        shift += 7;
+    }
+    let b = r.bytes(n)?;
+    Ok(String::from_utf16_lossy(&b.chunks(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect::<Vec<_>>()))
+}
+
+/// Catalog information from an OBJD.
+#[derive(Clone, Debug, Default)]
+pub struct ObjdInfo {
+    pub version: u32,
+    pub instance_name: String,
+    pub name: String,
+    pub desc: String,
+    pub name_guid: u64,
+    pub desc_guid: u64,
+    pub price: f32,
+    pub show_in_catalog: bool,
+    pub objk_index: u32,
+    pub keys: Vec<ResourceKey>,
+}
+
+pub fn parse_objd(d: &[u8]) -> R<ObjdInfo> {
+    let keys = tgi_table_at(d, 4)?;
+    let mut r = Reader::new(d);
+    let version = r.u32()?;
+    r.skip(8)?;
+    let mat_count = r.i32()?.max(0) as usize;
+    for _ in 0..mat_count {
+        let mtype = r.u8()?;
+        if mtype != 1 {
+            r.u32()?;
+        }
+        let end = r.u32()? as usize;
+        r.pos += end;
+        r.u32()?;
+    }
+    let instance_name = if version >= 0x16 { str7(&mut r)? } else { String::new() };
+    let common_version = r.u32()?;
+    let name_guid = r.u64()?;
+    let desc_guid = r.u64()?;
+    let name = str7(&mut r)?;
+    let desc = str7(&mut r)?;
+    let price = r.f32()?;
+    let _niceness = r.f32()?;
+    let _crap = r.f32()?;
+    let status = r.u8()?;
+    let _png = r.u64()?;
+    let _u7 = r.u8()?;
+    let _env = r.f32()?;
+    let _fire = r.u32()?;
+    let _steal = r.u8()?;
+    let _repo = r.u8()?;
+    let _sort = r.u32()?;
+    if common_version >= 0x0D {
+        r.u8()?;
+        if common_version >= 0x0E {
+            r.u8()?;
+            if common_version >= 0x0F {
+                r.u32()?;
+            }
+        }
+    }
+    let objk_index = r.u32()?;
+    Ok(ObjdInfo {
+        version,
+        instance_name,
+        name,
+        desc,
+        name_guid,
+        desc_guid,
+        price,
+        show_in_catalog: status & 1 != 0,
+        objk_index,
+        keys,
+    })
+}

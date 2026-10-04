@@ -6,6 +6,68 @@ use s3pkg::{Package, ResourceKey};
 pub const T_HEIGHTMAP: u32 = 0x2AD195F2;
 pub const T_TERRAIN_PAINT: u32 = 0x9063660D;
 pub const T_TERRAIN_BLEND: u32 = 0x3D8632D0;
+pub const T_LOT_INFO: u32 = 0xD063545B;
+pub const T_LOT_THUMB: u32 = 0xD84E7FC6;
+
+/// A lot placed in the world. `corner` is the lot origin; the lot extends `width` metres along
+/// its local +X and `depth` metres along local +Z after rotating by `rotation` radians about +Y.
+#[derive(Clone, Debug)]
+pub struct LotInfo {
+    pub id: u64,
+    pub internal_name: String,
+    pub corner: [f32; 3],
+    pub rotation: f32,
+    pub width: u32,
+    pub depth: u32,
+    /// STBL key strings found in the record, e.g. "World/SV/HouseName:Goth".
+    pub string_keys: Vec<String>,
+}
+
+impl LotInfo {
+    pub fn parse(id: u64, d: &[u8]) -> R<Self> {
+        let mut r = Reader::new(d);
+        let _ver = r.u16()?;
+        r.skip(24)?;
+        let internal_name = r.utf16_u32()?;
+        r.skip(8)?;
+        let corner = r.vec3()?;
+        let rotation = r.f32()?;
+        let width = r.u32()?;
+        let depth = r.u32()?;
+        // Scan the remainder for length-prefixed UTF-16 "World/..." keys.
+        let mut string_keys = Vec::new();
+        let mut p = r.pos;
+        while p + 8 < d.len() {
+            let n = u32::from_le_bytes(d[p..p + 4].try_into().unwrap()) as usize;
+            if (6..200).contains(&n) && p + 4 + n * 2 <= d.len() && &d[p + 4..p + 14] == "World".encode_utf16().flat_map(|c| c.to_le_bytes()).collect::<Vec<u8>>().as_slice() {
+                let mut q = Reader::at(d, p);
+                if let Ok(s) = q.utf16_u32() {
+                    string_keys.push(s);
+                    p = q.pos;
+                    continue;
+                }
+            }
+            p += 1;
+        }
+        Ok(Self { id, internal_name, corner, rotation, width, depth, string_keys })
+    }
+
+    pub fn is_residential(&self) -> bool {
+        self.string_keys.iter().any(|k| k.contains("HouseName"))
+            || self.internal_name.to_ascii_lowercase().contains("empty")
+    }
+
+    pub fn name_key(&self) -> Option<&str> {
+        self.string_keys
+            .iter()
+            .find(|k| k.contains("HouseName") || k.contains("LotName"))
+            .map(|s| s.as_str())
+    }
+
+    pub fn address_key(&self) -> Option<&str> {
+        self.string_keys.iter().find(|k| k.contains("LotAddress")).map(|s| s.as_str())
+    }
+}
 
 #[derive(Clone)]
 pub struct Heightmap {
@@ -204,6 +266,7 @@ pub struct WorldData {
     pub heightmap: Heightmap,
     pub paint: Option<TerrainPaint>,
     pub blend: Option<MaskLayers>,
+    pub lots: Vec<LotInfo>,
 }
 
 impl WorldData {
@@ -216,6 +279,11 @@ impl WorldData {
         let heightmap = Heightmap::parse(&hm).map_err(|e| e.to_string())?;
         let paint = read(T_TERRAIN_PAINT).and_then(|d| TerrainPaint::parse(&d).ok());
         let blend = read(T_TERRAIN_BLEND).and_then(|d| MaskLayers::parse(&d).ok());
-        Ok(Self { heightmap, paint, blend })
+        let mut lots: Vec<LotInfo> = pkg
+            .of_type(T_LOT_INFO)
+            .filter_map(|e| LotInfo::parse(e.key.i, &pkg.read(e).ok()?).ok())
+            .collect();
+        lots.sort_by(|a, b| a.internal_name.cmp(&b.internal_name));
+        Ok(Self { heightmap, paint, blend, lots })
     }
 }

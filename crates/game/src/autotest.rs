@@ -19,6 +19,8 @@ pub struct AutoArgs {
     pub shot_delay: f32,
     pub cam: Option<[f32; 5]>,
     pub exit_after: bool,
+    pub showroom: Option<(usize, usize)>,
+    pub lot: Option<String>,
 }
 
 impl AutoArgs {
@@ -36,6 +38,13 @@ impl AutoArgs {
                     a.cam = next.and_then(|s| {
                         let v: Vec<f32> = s.split(',').filter_map(|x| x.parse().ok()).collect();
                         (v.len() == 5).then(|| [v[0], v[1], v[2], v[3], v[4]])
+                    })
+                }
+                "--lot" => a.lot = next,
+                "--showroom" => {
+                    a.showroom = next.and_then(|s| {
+                        let mut it = s.split(',').filter_map(|x| x.parse().ok());
+                        Some((it.next()?, it.next().unwrap_or(0)))
                     })
                 }
                 "--exit-after-shot" => {
@@ -65,7 +74,8 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
             .add_systems(Update, apply_cam.run_if(in_state(AppState::InGame)))
-            .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)));
+            .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
+            .add_systems(OnEnter(AppState::InGame), showroom);
     }
 }
 
@@ -84,6 +94,7 @@ fn auto_pick_world(
     let lname = name.to_ascii_lowercase();
     if let Some(w) = worlds.0.iter().find(|w| w.name.to_ascii_lowercase().contains(&lname)) {
         commands.insert_resource(SelectedWorld(w.clone()));
+        commands.insert_resource(crate::home::PendingHousehold::random());
         next.set(AppState::Loading);
     } else {
         warn!("--world {name}: no such world");
@@ -122,4 +133,47 @@ fn auto_screenshot(
         }
         _ => {}
     }
+}
+
+/// Lays out catalog objects in a grid near the camera start, for visual checks.
+fn showroom(
+    args: Res<AutoArgs>,
+    data: Res<crate::data::GameData>,
+    world: Res<crate::loading::CurrentWorld>,
+    start: Option<Res<CameraStart>>,
+    mut assets: ResMut<crate::objects::ObjectAssets>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut commands: Commands,
+) {
+    let Some((count, skip)) = args.showroom else { return };
+    let origin = start.map(|s| s.0).unwrap_or(Vec3::new(1024.0, 0.0, 1024.0));
+    let mut keys: Vec<_> = data.0.keys_of_type(s3pkg::types::OBJD).copied().collect();
+    keys.sort();
+    let mut ctx = crate::objects::AssetCtx {
+        pkgs: &data.0,
+        meshes: &mut meshes,
+        images: &mut images,
+        materials: &mut materials,
+    };
+    let cols = (count as f32).sqrt().ceil() as usize;
+    let mut placed = 0;
+    for k in keys.into_iter().skip(skip) {
+        if placed >= count {
+            break;
+        }
+        let parts = assets.object(&mut ctx, k);
+        let Some((mn, mx)) = crate::objects::parts_bounds(&parts) else { continue };
+        if (mx - mn).max_element() > 6.0 {
+            continue;
+        }
+        let (gx, gz) = ((placed % cols) as f32, (placed / cols) as f32);
+        let x = origin.x + gx * 3.0;
+        let z = origin.z + gz * 3.0;
+        let y = world.data.heightmap.sample(x, z);
+        crate::objects::spawn_parts(&mut commands, &parts, Transform::from_xyz(x, y, z));
+        placed += 1;
+    }
+    info!("showroom: placed {placed} objects");
 }

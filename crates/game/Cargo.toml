@@ -10,5 +10,5 @@ path = "src/main.rs"
 [dependencies]
 s3pkg = { path = "../s3pkg" }
 s3formats = { path = "../s3formats" }
-bevy = { version = "0.19.1", features = ["dds"] }
+bevy = { version = "0.19.1", features = ["dds", "debug"] }
 rand = "0.9"

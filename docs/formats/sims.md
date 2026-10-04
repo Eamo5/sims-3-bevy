@@ -1,11 +1,12 @@
 # Sims (CAS) rendering & animation — format notes
 
 Research notes for rendering and animating Sims from the user's installed TS3 data.
-Status: **work in progress** (written incrementally). Each claim is tagged:
+Status: complete first pass (2026-10-04). Each claim is tagged:
 
 - **[src]** — transcribed from reader source code that is known to work (s3pi, s3py, nwn2mdk, LSLib, ...)
 - **[wiki]** — from the Mod The Sims (MTS) wiki / SimsWiki; usually right, sometimes stale
 - **[guess]** — my inference; verify against real data before relying on it
+- **[verified]** — I checked it myself against real game-derived files (rig files shipped with blender-sims3-geom) or by recomputing hashes against ids quoted online
 
 All integers are little-endian unless stated. "TGI" = (type u32, group u32, instance u64).
 
@@ -49,10 +50,11 @@ reader (1.2) and avoids Oodle1/GR2 entirely. DBPF priority: delta packages overr
 with the same TGI. **[guess: not verified on user data]** Keep the GR2 path (1.4–1.7) as the fallback.
 
 Rig instance ids are FNV-64 of the rig name **[guess, consistent with every other named TS3 resource]**.
-Candidate names (s3py `CASPart.get_rig()` builds `"%s%sRig" % (age_char, species_char)` with age
-`a/b/c/e/t/p` and species `u` human, `c` cat, `d` dog/little dog, `h` horse/deer, `r` raccoon). Real
-data, I believe, only has `auRig` (teen..elder share it), `cuRig`, `puRig` (toddler), `buRig` (baby) for
-humans **[guess]**:
+Names: s3py `CASPart.get_rig()` builds `"%s%sRig" % (age_char, species_char)` with age `a/b/c/e/t/p`
+and species `u` human, `c` cat, `d` dog/little dog, `h` horse/deer, `r` raccoon. The skeleton-name
+field of real rig files confirms `auRig`, `cuRig`, `puRig` (+ pet rigs) **[verified, §3]**; blender-sims3-geom
+offers exactly au (adult) / cu (child) / pu (toddler) for humans, so teen..elder presumably share
+`auRig`; `buRig` (baby) is unconfirmed:
 
 | name | FNV-64 (lower-cased) | FNV-32 |
 |---|---|---|
@@ -64,12 +66,14 @@ humans **[guess]**:
 (Check these against the RIG instance list in FullBuild; if they don't match, list RIG instances and
 look for a name table — `0x0166038C` NMAP — in the same package.)
 
-**Object rigs vs sim rigs:** both use type 0x8EAF13DE. Object rigs (referenced from an object's VPXY /
-MODL via the RCOL chain, typically group != 0, names like `<object>_rig`) are small (a few bones,
-`b__ROOT__`, slots, `_IK_` helpers); sim rigs are the `?uRig` skeletons with ~100+ joints including
-slider/compress/twist helper bones. Same container format, same reader. The S3 RIG Maker / RIGfix tools
-mentioned on MTS deal with object rigs after patch 1.26 broke old-format object rigs
-([tutorial](https://modthesims.info/wiki.php?title=Tutorial:Fixing_Object_RIGs_for_Patch_1.26)).
+**Object rigs vs sim rigs:** both use type 0x8EAF13DE and the same three container variants, so one
+reader serves both. Sim rigs are the named skeletons `auRig`/`cuRig`/`puRig` (+ pets `acRig`, `adRig`,
+`alRig`, `ahRig`, `ccRig`, `cdRig`, `chRig`) with 257 bones for humans (§3). Object rigs are small
+per-object skeletons (`b__ROOT__`, a few joints, `*_slot` attachment points, IK helpers) referenced
+from the object's model/RCOL chain **[guess on how they are referenced]**. Patch 1.26 changed object
+rig handling enough that MTS has a "Fixing Object RIGs for Patch 1.26" tutorial and RIG maker/fix
+tools ([tutorial](https://modthesims.info/wiki.php?title=Tutorial:Fixing_Object_RIGs_for_Patch_1.26)),
+i.e. the game expects object rigs in the new format too post-patch.
 
 ### 1.2 New (non-Granny) RIG format **[wiki]+[src: s3py `SkeletonRig.read`]**
 
@@ -85,10 +89,10 @@ repeat bone_count:
     i32 opposite_bone      // mirror partner index (== own index if unpaired; -1 possible)
     i32 parent_index       // -1 for root
     u32 name_hash          // FNV-32(lower-case name); s3py warns if mismatched
-    u32 flags              // usually 0x23; 0x3F seen on mirrored bones [wiki]
-i32 skel_name_len ; char skel_name[...]   // wiki: always present (v3 => length 0);
-                                          // s3py reads it only if major >= 4 -- verify
-if major >= 4:                            // wiki; s3py reads chains unconditionally
+    u32 flags              // wiki: usually 0x23, 0x3F on mirrored bones; auRig has 0x20..0x5A -- ignore
+i32 skel_name_len ; char skel_name[...]   // wiki + s3pi: always present (v3 => length 0);
+                                          // (s3py reads it only if major >= 4)
+if major >= 4:                            // wiki + s3pi; s3py reads chains unconditionally
     i32 chain_count
     repeat chain_count:
         i32 n ; i32 bones[n]               // bone indices
@@ -570,6 +574,10 @@ Morph track keys are `FNV64(name) & 0xFFFFFFFF` of a 0x0A037DDA (pet face morph 
 "Original core decoded by Karybdis." The 0x0705 entry settles the scalar conflict above in favour of
 s3py (one u16, /65535) for TS3.
 
+Constant channel types (0x09–0x11) come with `frame_count == 0`, so there are no key records at all.
+Whether "null translation" means *local translation = (0,0,0)* or *track not animated* is not
+documented; start by treating them as "keep the bind-pose value" and compare visually **[guess]**.
+
 Keyframe record (repeated `frame_count` times, starting at `frame_data_offset`):
 
 ```
@@ -652,7 +660,8 @@ fn parse_clip(res: &[u8]) -> Clip {
                 0x12 => { let w = u32(blob, p); p += 4; (0..3).map(|c| deq((w >> (10 * c)) & 0x3FF, 10, c)).collect() }
                 0x14 => { let v = (0..4).map(|c| deq(u16(blob, p + 2 * c) as u32 & 0xFFF, 12, c)).collect(); p += 8; v }
                 0x03 => { let v = (0..3).map(|c| { let mut x = palette[u16(blob, p + 2 * c) as usize]; if sgn(c) { x = -x }; x * scale + offset }).collect(); p += 6 /* or 8, see note */; v }
-                0x09..=0x11 => constant_for(chan),
+                0x05 => { let v = vec![deq(u16(blob, p) as u32, 16, 0)]; p += 2 /* maybe +2 pad: check stride */; v }
+                0x09..=0x11 => break,   // frame_count is 0 for these anyway
                 other => { warn!("channel type {other:#x}"); break }
             };
             push_key(&mut tracks, key, sub, tick, vals);   // sub 1 => Vec3 translation, 2 => Quat(x,y,z,w).normalize(), 3 => scale
@@ -701,4 +710,537 @@ finds age variants. Example: `fnv64("a_walk") = 11A06AB91BCA6BDE` → `a_walk` i
 Practical tip: the S3CLIP blob contains its own clip name (`anim_name_offset`), so you can build a
 name → TGI table by scanning all CLIP resources once (cache it) instead of guessing names.
 
-(Walk/idle clip names: see §2.6, to be filled in.)
+### 2.6 Which clips to use for idle / walk
+
+What is documented **[wiki/MTS]**:
+
+- Clip names are `<actor-prefix>_<category>_<name>_<actor-letter>`: e.g. `a_idle_neutral_stretchArms_x`
+  (quoted on MTS as an argument to `Sim.PlaySoloAnimation`), `a_dance_med_posAHipsShake_x`, `a2o_test_x`.
+  `_x` / `_y` = which jazz actor the clip is for ("if an animation ends with `_x` or `_y` it is probably
+  the one to use"); the outer CLIP's `actor_name` field holds that actor name.
+- Fallback rule: a requested `t2c_foo` falls back to `a2a_foo` / `a2o_foo` / `a_foo` — so always try
+  the adult `a_` clip if the age-specific one is missing (§2.5 hashing makes the low 48 bits identical).
+- The Movie-Maker "standing idles" are named `neutral_loop, scratchArm, scratchNose, twistBody,
+  scratchHead, stretchArms, rollShoulders, shiftWeight, rubNeck, lookRight, rightLeft, upAndOver, down`
+  and mood idles `Sad, Depressed, Tense, Stressed, Uncomfortable, Miserable, Angry, Furious, Happy,
+  Elated, VeryHappy` — strongly suggesting clips `a_idle_neutral_<name>_x` and
+  `a_idle_<mood>_..._x` **[guess for the exact names]**.
+- Walking is played by the engine's routing/locomotion system per *walkstyle* (Walk, FastWalk, Run,
+  sneak, etc.), from jazz state machines (JAZZ 0x02D5DF13) — the walk-cycle clip names are **not
+  documented online** that I could find. Walk-style mods edit "CLIP resources pertaining to the walk
+  cycles" in FullBuild0 but don't publish names.
+
+Computed instance ids (via §2.5) for names to try first:
+
+| clip name | instance (group 0) | status |
+|---|---|---|
+| `a_idle_neutral_stretchArms_x` | `47D462559B7E2301` | name documented on MTS |
+| `c_idle_neutral_stretchArms_x` | `C4D462559B7E2301` | child variant (same low 48 bits) |
+| `a_idle_neutral_loop_x` | `3D7F317DED70332D` | guessed name |
+
+**Recommended practical approach** (robust, no guessing): scan every CLIP (type 0x6B20C4F3) in
+`FullBuild0.package` (+ EP packages / DeltaBuild), read only the S3CLIP header + `anim_name` string
+(cheap: ~0x30 bytes + string), and build `name → TGI` (cache to disk). Then grep the names:
+`*walk*` / `*run*` / `*_loop*` / `a_idle_*`. Prefer clips whose root/`b__ROOT__` translation track
+advances linearly (a locomotion cycle) for walking, and play them looping while moving the entity
+along the route at the speed implied by the root translation per cycle (or zero out the root
+translation and drive movement yourself). The `src_name` (Maya file name) is also useful for grouping
+start/loop/stop variants.
+
+(If you only need *something* moving quickly: any `a_idle_*` clip demonstrates the whole pipeline;
+for walking, a hand-made procedural swing of the thigh/calf/upper-arm bones is a viable placeholder.)
+
+---
+
+## 3. Verified data: the human rigs (new format) **[verified on real files]**
+
+The [blender-sims3-geom](https://github.com/SmugTomato/blender-sims3-geom) add-on ships the game's rigs
+as `io_simgeom/data/rigs/{auRig,cuRig,puRig,acRig,adRig,alRig,ahRig,ccRig,cdRig,chRig}.grannyrig`
+(despite the extension they are the **new-format** RIG resources, extracted from game data). I parsed
+`auRig` with the §1.2 layout and it consumed the file **exactly to the last byte**:
+
+- `major=4, minor=2`, **257 bones** (cuRig and puRig: also 257, same names, different proportions;
+  pet rigs 215 bones), skeleton name `"auRig"`, then 5 IK chains (L/R arm UpperArm→Forearm→Hand with
+  pole `L_armExportPole`, L/R leg Thigh→Calf→Foot, and one for `b__ROOT_bind__`).
+- Every bone's stored hash == FNV-32 of its name (lower-cased) → GEOM/CLIP hash lookups will work.
+- All scales are 1. Flags values seen: 0x20–0x5A (meaning unknown; ignore).
+- Composing `W = W_parent * T(pos) * R(xyzw)` gives sensible world positions: `b__ROOT_bind__`
+  (0, 1.012, 0); `b__Head__` (0, 1.674, −0.003); `b__L_Foot__` (0.099, 0.111, −0.01);
+  `b__L_Toe__` (0.102, 0.0, 0.106); `b__L_Hand__` (0.59, 1.094, −0.02).
+  ⇒ **metres, +Y up, sim faces +Z, sim's left = +X**, bind pose is an A-pose. Same handedness/up axis as
+  Bevy, so no conversion is needed.
+- Rig names confirmed by the skeleton-name field: `auRig`, `cuRig`, `puRig`. That teen/YA/adult/elder
+  all share `auRig` (with body differences coming from meshes/BOND/blend data) is my inference from
+  there being no `tuRig`/`euRig` in the set **[guess]**; there is no baby rig in that set either.
+- s3pi `RigResource.Parse` uses exactly this detection: `dw0 == 0x8EAF13DE && dw1 == 0` → wrapped
+  Granny; `dw0 ∈ {3,4} && dw1 ∈ {1,2}` → new format; otherwise raw Granny. s3pi reads the skeleton name
+  unconditionally and the IK chains only if `major >= 4` (matches the wiki, not s3py).
+
+Bone hierarchy (index: name → parent index). Deform skeleton core:
+
+```
+0 b__ROOT__ (-1)            1 b__ROOT_bind__ (0)      2 b__Pelvis__ (1)
+3 b__R_Thigh__ (2)  4 b__R_Calf__ (3)  5 b__R_Foot__ (4)  6 b__R_Toe__ (5)
+26 b__L_Thigh__ (2) 27 b__L_Calf__ (26) 28 b__L_Foot__ (27) 29 b__L_Toe__ (28)
+55 b__Spine0__ (1)  56 b__Spine1__ (55) 57 b__Spine2__ (56) 58 b__Neck__ (57) 59 b__Head__ (58) 60 b__HeadNew__ (59)
+115 b__R_Clavicle__ (57) 116 b__R_UpperArm__ (115) 119 b__R_Forearm__ (116) 123 b__R_Hand__ (119)
+149 b__L_Clavicle__ (57) 150 b__L_UpperArm__ (149) 153 b__L_Forearm__ (150) 157 b__L_Hand__ (153)
+fingers: b__{L,R}_{Index,Mid,Ring,Pinky,Thumb}{0,1,2}__ under the hand
+face (children of b__HeadNew__): b__Jaw__, b__JawComp__, b__Chin__, b__{Left,Right}Eye__ (+_mod, UpLid, LoLid),
+  brows, lips, b__Tongue1/2__, b__NoseArea__..., b__{Left,Right}Ear__, b__HeadDome__
+helpers: *_Compress__, *Twist__/*Untwist__/*Twisted__, b__{L,R}_Bicep__, b__{L,R}_Wrist__, b__{L,R}_breast__,
+  b__belly__, b__upper_skirt__/b__lower_skirt__, many *_slot / *Target_slot bones (attachment points),
+  b__carryGroup*_noBind__, and an IK/export subtree under b__ROOT_export__ (216): L/R_slotOffset,
+  L/R_footOffset, world_offset, rootWorld, L/R_footWorld, L/R_slotInfo + L/R_Info1..10, L/R_footInfo*,
+  Root_info, rootOffset, {L,R}_{arm,leg}ExportPole
+```
+Slots/IK/export bones carry no skin weights; keep them anyway (cheap) so bone indices match the rig.
+
+---
+
+## 4. Body meshes — `GEOM` 0x015A1849 **[src: s3pi MeshChunks/GEOM.cs, s3py BodyGeometry, SmugTomato geom_load.py; wiki]**
+
+### 4.1 RCOL container (wrapper around GEOM, VPXY, MATD, MODL, MLOD, ...)
+
+```
+u32 version
+u32 public_chunk_count
+u32 unused
+u32 external_count
+u32 internal_count
+ITG internal[internal_count]     // u64 instance, u32 type, u32 group  (ITG order!)
+ITG external[external_count]
+{u32 offset /*absolute*/, u32 size} chunk_info[internal_count]
+<chunks at those offsets>
+```
+RCOL chunk references inside chunks are 1-based with flags in the top nibble (0x0… public internal,
+0x1… private internal (+public count), 0x3… external). GEOM is the exception: it uses its own TGI list.
+
+### 4.2 GEOM chunk (version 5 in TS3)
+
+```
+char[4] "GEOM"
+u32 version                 // 5 (s3pi rejects anything else)
+u32 tgi_offset              // relative to the position right after this field
+u32 tgi_size
+u32 embedded_shader         // 0, or FNV32 shader name: SimSkin = 0x548394B9, SimEyes = 0xCF8A70B4 (wiki)
+if embedded_shader != 0:
+    u32 mtnf_size
+    MTNF block               // "MTNF", u32 0, u32 data_size, u32 param_count,
+                             // param_count × {u32 name_hash, u32 type(1 float,2 int,4 texture), u32 count, u32 offset},
+                             // then data. Texture params index the GEOM TGI list.
+u32 merge_group
+u32 sort_order
+i32 vertex_count
+i32 element_count
+element_count × { u32 usage; u32 data_type; u8 byte_size }      // 9 bytes each
+vertex_count × (elements in declared order, interleaved)
+u32 face_point_size_count   // always 1
+u8  face_point_size         // always 2 (u16 indices)
+u32 index_count             // number of u16 indices (triangles = index_count / 3)
+u16 indices[index_count]
+i32 skin_controller_index   // legacy
+u32 bone_count
+u32 bone_hash[bone_count]   // FNV-32(lower(bone name)) -- these are the skin palette
+TGI list (at tgi_offset): u32 count; count × {u32 type, u32 group, u64 instance}
+```
+
+Vertex element usages (all TS3 human meshes use float formats):
+
+| usage | meaning | layout |
+|---|---|---|
+| 1 | position | 3 × f32 (model space, metres, Y-up, bind pose) |
+| 2 | normal | 3 × f32 |
+| 3 | UV | 2 × f32 — may repeat (pets have >1 UV set). **Flip V** for Bevy/Blender: `v' = 1 − v` (SmugTomato does `-v + 1`) |
+| 4 | bone assignment | 4 × u8 — **indices into this GEOM's `bone_hash` array** (not rig indices) |
+| 5 | weights | 4 × f32 (s3pi/s3py/SmugTomato all read floats) |
+| 6 | tangent | 3 × f32 |
+| 7 | colour / "TagVal" | 4 × u8 |
+| 10 (0x0A) | vertex id | u32 — stable ids used by morphs (BGEO) and face sliders |
+
+Skinning setup:
+
+```
+palette[k] = rig.index_of(fnv32 == geom.bone_hash[k])          // build once per GEOM
+for each vertex: joints = [palette[a0], palette[a1], palette[a2], palette[a3]], weights = [w0..w3]
+// unused influences have weight 0 (index may be garbage -- SmugTomato skips out-of-range ones)
+skin_matrix[j] = bone_world_current[j] * inverse(bone_world_bind[j])   // positions are already in bind pose
+```
+
+Positions are in the same space as the rig's bind pose (the face mesh sits at ~1.6 m), so the inverse
+bind matrices come straight from the rig (§1.2/§3). Normalise weights if they don't sum to 1.
+
+Naming / ids: **GEOM instance = FNV-32 of the lower-cased mesh name, zero-extended to 64 bits**
+(verified: `amFace_lod0_1/2/3` → `AF383E50/AF383E53/AF383E52`, `ymface_lod0_2` → `90BF60AB`, which are
+the instances quoted on MTS; groups seen: `0x00117A4F`, `0x0020033C`). The face CASP has three GEOMs
+per LOD — face, eyelashes, eyes (`*Face_lod0_1/_2/_3`; MTS doesn't say which is which; the eyes one
+should have the `SimEyes` embedded shader). The female nude body mesh family is called `afBodyNude_*`,
+and clothing creators clone `afTopNude` / `afBottomNude` (MTS threads). Exact suffixes are unverified —
+use the package's NMAP (0x0166038C) to get names, or just follow CASP → VPXY → GEOM.
+
+Morphs: CAS fat/fit/thin/special and face sliders are BGEO (0x067CAA11) vertex-delta resources
+referenced from BBLN/FACE blend data (§7). Skip for a first pass (the base GEOM is the "average" body).
+
+---
+
+## 5. CAS parts — `CASP` 0x034AEECB **[src: s3pi CASPartResource.Parse (version 0x12), s3py CASPart; wiki]**
+
+```
+u32  version                        // 0x12 (18) in current data
+u32  tgi_offset                     // TGI table at (offset of this field + 4) + value  (s3pi: value + 8)
+u32  preset_count
+preset_count × { i32 char_count; utf16le xml[char_count]; u32 unknown }    // CAS preset XML (see §6.3)
+7bitstr name                        // part name, UTF-16 **BIG-endian**; length prefix = 7-bit-encoded BYTE count
+f32  sort_priority                  // CAS sorts descending
+u8   has_unique_texture_space       // (s3pi "unknown2"; s3py's name)
+u32  clothing_type                  // body slot, table below  (s3py "body_type")
+u32  data_type_flags                // Hair 1, Scalp 2, FaceOverlay 4, Body 8, Accessory 0x10
+u32  age_gender_species_handedness  // see flags below
+u32  clothing_category              // Naked 1, Everyday 2, Formal 4, Sleep 8, Swim 0x10, Athletic 0x20,
+                                    // Singed 0x40, MartialArts 0x80, Career 0x100, FireFighting 0x200,
+                                    // Makeover 0x400, SkinnyDippingTowel 0x800, Racing 0x1000, Jumping 0x2000,
+                                    // Bridle 0x4000, Outerwear 0x40000, Plumbotwear 0x80000,
+                                    // ValidForMaternity 0x100000, ValidForRandom 0x200000, IsHat 0x400000,
+                                    // IsRevealing 0x800000, IsHiddenInCAS 0x1000000, pet region bits 25..28
+u8   naked_casp_index               // TGI idx of the CASP shown when this part is removed (e.g. top -> afTopNude)
+u8   parent_casp_index              // "base" part
+u8   blend_fat_index, blend_fit_index, blend_thin_index, blend_special_index   // BBLN 0x062C8204
+u32  overlay_priority               // draw/compositing layer (s3py "draw_layer")
+u8 n; u8 vpxy_index[n]              // → VPXY (0x736884F1) = the mesh list (§5.2)
+u8 n; LODInfo[n]:  { u8 level; u32 dest_texture; u8 m; m × { u32 sorting; u32 spec_level; u32 cast_shadow } }
+u8 n; u8 diffuse_txtc_index[n]      // → TXTC 0x033A1435 (texture compositor) — primary
+u8 n; u8 specular_txtc_index[n]
+u8 n; u8 diffuse2_txtc_index[n]     // secondary set
+u8 n; u8 specular2_txtc_index[n]
+u8 n; u8 bond_index[n]              // → BOND 0x0355E0A6 (slot/bone adjust, §7.3)
+7bitstr shoe_material               // UTF-16BE, e.g. "bare", "heel", "leath", "rub", "sand", "slip"
+u8   tgi_count                      // <- tgi_offset points here
+tgi_count × { u64 instance; u32 group; u32 type }    // **IGT** order
+```
+
+7-bit string: `len = 0; shift = 0; loop { b = u8; len |= (b & 0x7F) << shift; shift += 7; if b & 0x80 == 0 break }`
+then `len` **bytes** of UTF-16BE (len/2 chars). (s3py's variant adds 7-bit groups without shifting —
+identical for lengths < 128.)
+
+`age_gender_species_handedness` (u32) **[src: s3pi AgeGenderFlags]**:
+
+```
+bits 0..6   age:     Baby 0x01, Toddler 0x02, Child 0x04, Teen 0x08, YoungAdult 0x10, Adult 0x20, Elder 0x40
+bits 8..11  species: (dword >> 8) & 0xF  -- 0 or 1 = Human, 2 Horse, 3 Cat, 4 Dog, 5 LittleDog, 6 Deer, 7 Raccoon
+                     (s3pi uses mask 0xCF00 to also cover boats/sim-walking-pets etc.; s3py treats 0 as human)
+bits 12..13 gender:  Male 0x1000, Female 0x2000
+bits 20..21 handedness: Left 0x100000, Right 0x200000
+```
+
+`clothing_type` (u32) **[wiki]**: 0 None, 1 Hair, 2 Scalp, 3 Face, 4 Body (full body), 5 Top, 6 Bottom,
+7 Shoes, 8 FirstAccessory, 9 Necklace, 0x0A NoseRing, 0x0B Earrings, 0x0C Glasses, 0x0D Bracelets,
+0x0E RingL, 0x0F RingR, 0x10 Beard, 0x11 Lipstick, 0x12 Eyeshadow, 0x13 Eyeliner, 0x14 Blush,
+0x15 Makeup, 0x16 Eyebrow, 0x17 EyeColor, 0x18 Glove, 0x19 Socks, 0x1A Mascara, 0x1B Moles,
+0x1C Freckles, 0x1D Weathering, 0x1E EarringL, 0x1F EarringR, 0x20 ArmBand, 0x21 Tattoo,
+0x22 TattooTemplate, 0x23 Dental, 0x24/0x25 Garter L/R, 0x26 BirthMark, 0x27–0x2E body hair,
+0x2F PetBody … 0x3B PetBeard, 0x3C Last.
+
+CAS geom flags (LODInfo asset flags) **[wiki]**: 0x1 Mergeable, 0x2 IncludeMorphs, 0x4 IncludeTweaks,
+0x8 IncludeTangents, 0x10 FourBoneSkinning, 0x20 TwoBoneSkinning, 0x40 TwoQuatSkinning,
+0x80 OneQuatSkinning, 0x100–0x2000 SpecLevel0..5, 0x4000 Sorted, 0x8000 ShadowCaster.
+
+### 5.1 Finding the default (nude) body, head, scalp
+
+A naked sim consists of (one per slot, filtered by age/gender bits): **Top + Bottom + Shoes** nude
+parts *or* a **Body** (full-body) part, plus **Face** (head mesh incl. eyes & lashes), **Scalp** (under
+hair), and optionally Hair/Eyebrows. Recipe:
+
+1. Index every CASP once (they're in `FullBuild0.package` and EP/SP packages); for each record
+   `(name, clothing_type, age_gender, clothing_category, vpxy, txtc...)`.
+2. Nude parts = `clothing_category & 0x1 (Naked)`, matching age/gender bits, `clothing_type ∈ {4,5,6,7}`.
+   Names follow `<age><gender><Slot>Nude`: `afTopNude`, `afBottomNude`, `afShoesNude`, `amTopNude`, …
+   (`a`=adult — YA/teen/elder mostly reuse adult parts; `f`/`m`/`u` = female/male/unisex; `c`/`p` child/toddler).
+   Every clothing CASP's `naked_casp_index` also points at the matching nude part — an easy cross-check.
+3. Face: `clothing_type == 3` for the age/gender (meshes `afFace_lod0_{1,2,3}`, `amFace_lod0_*`,
+   `cuFace_*`, `puFace_*`, `ef/em/tf/tm/yf/ymFace_*`). Scalp: `clothing_type == 2` (`afScalp`, …).
+4. CASP instance ids appear to be FNV-64 of the part name (s3oc/TSRW clone convention) **[guess]**:
+   `afTopNude` → `78CE86CE40987A8F`, `afBottomNude` → `C1E55AEF1301DA97`, `afShoesNude` → `E9952DBC65F47892`,
+   `amTopNude` → `C17093510E4B1F52`, `amBottomNude` → `1A76E24B5B8B9818`, `amShoesNude` → `73D9C6F643AB11A3`,
+   `afBodyNude` → `94F17A5995AC8BDE`, `amBodyNude` → `B8514408AB8A82FD`. If these miss, fall back to
+   scanning CASPs and filtering by fields (step 2) — that is robust regardless of naming.
+
+### 5.2 CASP → meshes: VPXY 0x736884F1 **[wiki]**
+
+RCOL with one `VPXY` chunk:
+
+```
+char[4] "VPXY"; u32 version (4); u32 tgi_offset; u32 tgi_size
+u8 entry_count
+entry_count × { u8 kind;
+    kind 0: u8 lod; u8 n; u32 tgi_index[n]     // GEOMs for this LOD (face lod 0 → face, lashes, eyes)
+    kind 1: u32 tgi_index }
+u8 0x02; f32 bbox[6]; u8[4] unused; u8 modular; if modular == 1 { u32 ftpt_index }
+TGI list: u32 count; {u32 type, u32 group, u64 instance}
+```
+Use the `kind 0, lod 0` entry for full quality.
+
+---
+
+## 6. Skin and clothing textures
+
+### 6.1 What the game does (compositor) **[wiki: Sims_3:Texture_Layering, TXTC page; MTS skin tutorials]**
+
+The game *composites* one texture per "texture space" per sim at runtime (cached in
+`Documents/Electronic Arts/The Sims 3/simCompositorCache.package`). Body parts share one body UV space
+(top/bottom/shoes/body meshes all map into the same atlas); the face/head has its own. Inputs:
+
+1. **Skin** from the sim's skin-tone resource (TONE 0x0354796A): per age/gender/part (body, face, scalp)
+   "detail" textures + a **tone ramp** coloured by the sim's skin-tone slider.
+2. Each worn CASP's **preset**: a "complate" (compositing template — an XML resource 0x0333406C, e.g.
+   `CasRgbaMask`, instance = `FNV64("CasRgbaMask")` = `E37696463F6B2D6E`) plus parameter values (texture
+   keys and colours) from the CASP preset XML. Some parts use binary TXTC (0x033A1435) instead of XML.
+3. Makeup/face overlays (CASPs with clothing types 0x11–0x15 etc.) composited onto the face texture.
+
+Render targets are 1024×1024 (wiki).
+
+### 6.2 Skin tone — TONE 0x0354796A **[wiki v4/v6; src: s3py SkinTone]**
+
+```
+u32 version              // 4, or 6 after patch 1.17 (muscle/cleavage normals)
+u32 tgi_offset; u32 tgi_size     // key table (u32 count; {type, group, u64 instance})
+u32 n_shader_keys
+n × { u32 age_gender; u32 edge_color_argb; u32 specular_color_argb; f32 specular_power; u8 is_genetic }
+u32 tone_ramp_index          // → DDS (0x00B2D882 in FullBuild2) with the same instance as a PNG 0x2F7D0004 in FullBuild0
+u32 sub_skin_ramp_index      // → DDS (wiki and s3py disagree on which of these two comes first — check data)
+u32 n_texture_keys
+n × { u32 age_gender; u32 type_flags;              // type_flags presumably DataTypeFlags (Scalp 2 / Face 4 / Body 8) [guess]
+      u32 specular_idx, detail_dark_idx, detail_light_idx, normal_idx, overlay_idx;
+      if version >= 6 { u32 muscle_normal_idx, cleavage_normal_idx } }
+u8 is_dominant
+```
+
+Facts from MTS tutorials: `FullBuild0` has **7 TONE resources** — 6 default skin tones + an unused
+"mannequin"; hair tone is a separate type 0x03555BA8. The **tone ramp** is "what the game looks at when
+you move the slider": a small gradient image (tutorials use 64×64), **lightest at the left, darkest at
+the right**; the ramp DDS (FullBuild2) and PNG (FullBuild0) share an instance (e.g. `AlienSkinToneRamp`).
+The detail ("multiplier") textures are DXT3/DXT5 DDS, separate **face** and **body** textures per
+age/gender, each with a **light and a dark** version (= TONE `detail_light` / `detail_dark`);
+"EF, EM, YAM, YAF, TF, and TM all share the AF/AM body multiplier textures" and "TF and TM share the
+YAM/YAF face textures". "The game 'overlays' another colour on top of your multiplier layer."
+
+**Simplest viable skin** (my recommendation; the blend math is a guess):
+
+```
+t = skin_tone_slider (0..1, e.g. 0.5)
+detail = lerp(sample(detail_light), sample(detail_dark), t)   // or just detail_light to start
+tint   = sample(tone_ramp, u = t, v = 0.5)
+albedo = overlay(detail, tint)   // Photoshop overlay: d<0.5 ? 2*d*c : 1-2*(1-d)*(1-c);  try multiply-2x as alt
+```
+Pick the TONE texture key whose `age_gender` matches (adult bits for teen..elder) and whose
+`type_flags` selects body vs face vs scalp; use the body texture on body GEOMs and the face texture on
+the face GEOM. Even `detail_light` alone as albedo should already look like skin.
+
+### 6.3 Clothing — CASP preset XML + complate **[wiki: Texture_Layering]**
+
+Preset XML (UTF-16, inside the CASP):
+
+```xml
+<preset>
+ <complate name="CasRgbaMask" reskey="key:0333406C:00000000:E37696463F6B2D6E">
+  <value key="Overlay"    value="key:00B2D882:00000000:F9F07373B76D4042" />
+  <value key="Mask"       value="key:00B2D882:00000000:6A27D9DFE5206BCB" />
+  <value key="Multiplier" value="key:00B2D882:00000000:F9F07373B76D4040" />
+  <value key="Skin Specular" value="key:00B2D882:00000000:4DB46D1662895FDD" />   <!-- = FNV64("amBody_s") -->
+  <value key="Skin Ambient"  value="key:00B2D882:00000000:4DB46D1662895FCF" />   <!-- = FNV64("amBody_a") -->
+  <value key="Part Mask"     value="key:00B2D882:00000000:B6E46F5107C8FC74" />   <!-- = FNV64("amTopMask") -->
+  <pattern name="solidColor_1" reskey="key:0333406C:00000000:71D5EFB6C391BC17" variable="Pattern A">  <!-- FNV64("solidColor_1") -->
+    <value key="Color" value="0.4455,0.1011,0.1011,1.0000" />
+  </pattern>  ... Pattern B/C/D, Logo, Stencil A..F, tiling/rotation ...
+ </complate>
+</preset>
+```
+Texture instance ids are **FNV-64 of the texture's base file name** (verified on the keys above:
+`amBody_s`, `amBody_a`, `amTopMask`; and Multiplier/Overlay/Specular of one part differ only in the
+last byte because FNV-1 XORs the last char: `_m`, `_o`, `_s`). Group 0, type DDS 0x00B2D882.
+
+`CasRgbaMask` diffuse recipe (wiki steps, condensed):
+
+```
+B = white
+for p in A..D: alpha(B) = Mask.channel(p); B.rgb = lerp(B.rgb, Pattern_p (tiled, default 4x4), alpha(B))
+B.rgb = lerp(B.rgb, Overlay.rgb, Overlay.a)
+B.a   = Multiplier.a ; B.a += Overlay.a
+B.rgb = 2 * B.rgb * Multiplier.rgb          // srcBlend=DestColor, dstBlend=SrcColor  => "modulate 2x"
+(stencils A..F alpha-blended on top)
+A (the sim's texture, already containing skin) = lerp(A, B, B.a)
+```
+So a clothing part is drawn *over the skin* using the multiplier's alpha as coverage. Simplest viable
+version: `albedo = skin`, then `albedo = lerp(albedo, 2 * pattern_A_colour * Multiplier.rgb, Multiplier.a)`.
+Specular target: R = ambient occlusion (skin/clothing), B = specular, A = clothing specular.
+
+TXTC 0x033A1435 (binary compositor, used by some parts and referenced from CASP `diffuse*_txtc`):
+version, offset, embedded TXTCs (v≥7), pattern size, part type, entries of `{u32 property_id (FNV32 of
+name); u8 0; u8 data_type; data}` terminated by property 0 — same step semantics as the XML complate
+(property ids e.g. 0x687720A6 "ID"/step type, 0x8A7006DB image source, 0xA2C91332 render target,
+0x048F7567 destination blend, 0xB01748DA colour, 0xB67C2EF8 HSV shift). Only needed if a part has
+no usable preset XML.
+
+---
+
+## 7. Sim outfits (SIMO 0x025ED6F4), blend data (FACE/BBLN), BOND
+
+### 7.1 SIMO — sim outfit **[src: s3pi SimOutfitResource.Parse; wiki]**
+
+A saved/premade sim's outfit: which CASPs + texture compositors + sliders + skin tone. Layout for
+version ≥ 0x08 (current data uses up to 0x15):
+
+```
+u32 version
+u32 tgi_offset                         // from after this field
+if v >= 0x10: u32 n; n × { u8 ?; i32 chars; utf16le xml[chars] }   // presets
+elif v >= 0x09: u32 n; u32[n]
+if v >= 0x0E: u32 ?, u32 ?
+f32 heavy_weight_slider, strength_slider, slim_weight_slider
+if v >= 0x09: u32 ?
+u32 age; u32 gender; u32 species       // each an AgeGenderFlags dword
+if v >= 0x09: u32 handedness
+skin_tone_index: v >= 0x15 ? i16 : u8  // → TONE in TGI table
+if v == 0x08: u8 hair_tone_index
+f32 skin_tone_slider                   // ← the ramp coordinate for §6.2
+if v >= 0x09:
+    if v >= 0x0E:
+        if v >= 0x11: f32 muscle; if v >= 0x12: f32 breast
+        u32 hair_base_argb, hair_halo_high_argb, hair_halo_low_argb
+        if v >= 0x13: f32 num_curls, curl_pixel_radius; if v >= 0x14: TGI fur_map
+    else: u8 ?
+else: u32 ?
+u8 casp_count
+casp_count × { (v >= 0x15 ? i16 : u8) casp_index; if v >= 0x0E: u32 clothing_type;
+               u8 n; n × { idx txtc1, idx txtc2 } }   // idx = i16 if v >= 0x15 else u8
+u8 0
+u8 face_count; face_count × { idx face_part (→ FACE 0x0358B08A); f32 amount }
+if v < 0x0A: u32 ?
+tgi table: (v >= 0x15 ? i16 : u8) count; count × { u64 instance; u32 group; u32 type }   // IGT
+```
+You don't need SIMO to render a default sim (pick CASPs directly), but it is how household/premade
+sims specify outfits (and the face-slider amounts).
+
+### 7.2 FACE 0x0358B08A / BBLN 0x062C8204 — blend (slider) definitions **[wiki; src: s3py BlendData]**
+
+```
+u32 version                  // 7 (8 for breast slider; 10 Medieval)
+u32 tgi_offset; u32 tgi_size // v8: size has a +8 quirk
+7bitstr part_name            // UTF-16BE
+if version == 8: TGI bgeo_key   // → BGEO 0x067CAA11
+u32 entry_count
+entry_count × { u32 facial_region_flags;        // Eyes 1, Nose 2, Mouth 4, TranslateMouth 8, Ears 0x10,
+                                               // TranslateEyes 0x20, Face 0x40, Head 0x80, Brow 0x100,
+                                               // Jaw 0x200, Body 0x400, Eyelashes 0x800
+                u32 n_geom; n × { u32 age_gender; f32 amount; u32 tgi_index }   // → VPXY of morph GEOMs
+                u32 n_bone; n × { u32 age_gender; f32 amount; u32 tgi_index } } // → bone morphs
+TGI list
+```
+A slider = a set of morph meshes (vertex deltas keyed by GEOM vertex id) and bone deltas, applied
+with `amount * slider_value`. BGEO (0x067CAA11) stores deltas compactly: per vertex a u16 with
+bits 0/1 = has position/normal delta and bits 2..15 = offset into a list of 3×u16 deltas
+(value = float × 2000 rounded, stored with the sign bit flipped) **[wiki, cmar]**.
+**Low priority**: skip for a first pass.
+
+### 7.3 BOND 0x0355E0A6 — bone/slot adjust **[wiki; src: s3py BoneDelta]**
+
+RCOL chunk **without** a 4-byte tag:
+
+```
+u32 version        // 3 seen
+u32 count
+count × { u32 bone_hash (FNV32 name);
+          f32 offset[3]; f32 scale[3]; f32 quat[4] /*x,y,z,w*/ }
+```
+Per-outfit (CASP `bond_index`) or per-slider tweaks of bone/slot local transforms. s3py applies them
+additively in Blender pose space: `loc += offset; scale += scale_delta; rot += quat` (approximate).
+Use only for accessory slot alignment / body-shape sliders; ignore initially.
+
+---
+
+## 8. Minimal implementation path (recommended order)
+
+1. **Hashing utils**: FNV-1 32/64 with TS3 lower-casing; `clip_instance(name)` (§2.5).
+2. **RIG**: implement the new format (§1.2) first — ~40 lines. Look the rig up by FNV-64 name in
+   DeltaBuild/EP packages; test against the expectations in §3 (257 bones, `b__Head__` ≈ (0, 1.674, 0)).
+   Only if the user's install has no new-format copy, implement GR2: container (§1.4) → Oodle1 (§1.5)
+   → type-tree walker (§1.6) → `Skeletons[0].Bones` (§1.7). Unit-test Oodle1 by checking that the
+   decompressed section's relocations/type tree make sense (member names are readable ASCII such as
+   `"ArtToolInfo"`, `"Skeletons"`, `"Bones"`, `"ParentIndex"`).
+3. **CASP index**: parse CASPs (§5), keep `(name, clothing_type, age_gender, category, vpxy, presets)`;
+   pick `afTopNude/afBottomNude/afShoesNude` (or Body) + `afFace` + `afScalp` style parts (§5.1).
+4. **Meshes**: CASP → VPXY (lod 0) → GEOMs (§4, §5.2). Build Bevy `Mesh` with `ATTRIBUTE_JOINT_INDEX`
+   remapped through `bone_hash` → rig index and `ATTRIBUTE_JOINT_WEIGHT`; flip V. Inverse bind = inverse
+   of rig world bind matrices; `SkinnedMesh` joints = one entity per rig bone (keep the hierarchy).
+5. **Textures**: TONE → `detail_light` body/face DDS as albedo (§6.2); later add the ramp tint, then the
+   clothing multiplier composite (§6.3).
+6. **CLIP**: parse outer + S3CLIP (§2.1–2.4); convert to per-bone keyframe tracks (ticks × 1/30 s);
+   apply as local transforms on the bone entities with lerp/slerp. Start with any `a_idle_*` clip; find
+   walk clips by scanning names (§2.6).
+
+---
+
+## 9. Unknowns / things to verify on the user's data
+
+- **Does `DeltaBuild0.package` contain new-format copies of `auRig`/`cuRig`/`puRig`?** (wiki says yes;
+  the rigs shipped with blender-sims3-geom prove the game has new-format human rigs somewhere.) Also
+  confirm the rig instance = FNV-64(name) and its group.
+- Oodle1 literal-context detail: nwn2mdk uses the absolute output pointer `% 4`; I assume the section
+  buffer is 4-aligned so this equals `pos % 4`. Irrelevant for 1-section files if the Rust buffer is
+  aligned/you use `pos % 4`.
+- GR2 v6 `granny_bone` member set for TS3's Granny version (tag `0x8000001C`): with/without
+  `LODError`, `LightInfo`, `CameraInfo` — the type tree answers it; and whether `InverseWorldTransform`
+  loads directly as a column-major `Mat4`.
+- S3CLIP: exact per-key payload padding for indexed `0x03` channels (6 vs 8 bytes; use the next curve's
+  offset to tell); meaning of key-flag bits 4..15; outer-header `unknown1/unknown2`; whether
+  `b__ROOT__` carries root motion in walk clips; frame rate is assumed 30 fps (`frame_duration`).
+- Walk/run clip names — not documented online; get them by scanning CLIP names.
+- TONE: order of the two ramp indices (wiki: tone ramp then sub-skin ramp; s3py: sub-skin then tone),
+  meaning of `type_flags`, and the exact blend the game uses for ramp × detail (I suggest an overlay /
+  2× multiply; tune visually).
+- CASP instance = FNV-64(part name) is a convention, not verified for EA parts — filter by fields instead.
+- Which of `*Face_lod0_1/_2/_3` is face vs lashes vs eyes (check embedded shader / vertex counts).
+- BGEO morph decoding and BOND application are only sketched (low priority).
+
+---
+
+## 10. Links
+
+Reader source code:
+- s3pi wrappers (CLIP, FNV, CLIP hashing): https://github.com/mattparizeau/s3pi-wrappers
+  (`s3piwrappers.AnimationResources/ClipResource.cs`, `s3piwrappers.Helpers/Cryptography/FNVCLIP.cs`, `FNVHash.cs`)
+- s3pi core library source (CASP, SIMO, GEOM, RIG detection): https://github.com/marcos4503/sims3-package-interface
+  (`S3PI-Library-DLLs-Source/s3pi Wrappers/CASPartResource/*.cs`, `MeshChunks/GEOM.cs`, `RigResource/RigResource.cs`);
+  original: https://sourceforge.net/projects/s3pi/
+- s3py (Sims 3 CLIP Tool backend): https://github.com/garthand/s3py (`s3py/animation/__init__.py`, `animation/rig.py`,
+  `animation/blender.py`, `cas/catalog.py`, `cas/geometry.py`); tool site: https://sims3cliptool.wordpress.com/
+- Sims4Tools S3CLIP (EA channel/sub-target enum names): https://github.com/s4ptacle/Sims4Tools/blob/master/s4pi%20Wrappers/AnimationResources/S3CLIP.cs
+- blender-sims3-geom (GEOM import, new-format rig files): https://github.com/SmugTomato/blender-sims3-geom
+- nwn2mdk (Oodle1 + GR2 v6): https://github.com/Arbos/nwn2mdk/blob/master/nwn2mdk-lib/gr2_decompress.cpp ,
+  `gr2_file.cpp`, `gr2.h`
+- opengr2: https://github.com/arves100/opengr2 (`libopengrn/oodle1.c`), format notes: https://github.com/arves100/opengr2/wiki/File-Format-documentation
+- xoreos-tools granny decoder (origin of the Oodle1 port): https://github.com/berenm/xoreos-tools/blob/wip/granny-decoder/src/decompress.cpp
+- LSLib GR2 reader: https://github.com/Norbyte/lslib/tree/master/LSLib/Granny/GR2
+
+MTS / SimsWiki pages:
+- RIG https://modthesims.info/wiki.php?title=Sims_3:0x8EAF13DE
+- CLIP https://modthesims.info/wiki.php?title=Sims_3:0x6B20C4F3
+- CASP https://modthesims.info/wiki.php?title=Sims_3:0x034AEECB
+- SIMO https://modthesims.info/wiki.php?title=Sims_3:0x025ED6F4
+- FACE (also BBLN 0x062C8204) https://modthesims.info/wiki.php?title=Sims_3:0x0358B08A
+- BOND https://modthesims.info/wiki.php?title=Sims_3:0x0355E0A6
+- GEOM https://modthesims.info/wiki.php?title=Sims_3:0x015A1849
+- TONE https://modthesims.info/wiki.php?title=Sims_3:0x0354796A
+- VPXY https://modthesims.info/wiki.php?title=Sims_3:0x736884F1
+- TXTC https://modthesims.info/wiki.php?title=Sims_3:0x033A1435
+- BGEO https://modthesims.info/wiki.php?title=Sims_3:0x067CAA11
+- RCOL https://modthesims.info/wiki.php?title=Sims_3:RCOL , MATD/MTNF https://modthesims.info/wiki.php?title=Sims_3:0x01D0E75D
+- Texture layering (preset/complate) http://simswiki.info/wiki.php?title=Sims_3:Texture_Layering
+- Object rigs after 1.26 https://modthesims.info/wiki.php?title=Tutorial:Fixing_Object_RIGs_for_Patch_1.26
+
+MTS threads used for names/skin facts:
+- Template body/face/scalp meshes + skin multipliers (naming): https://modthesims.info/showthread.php?t=411795
+- Default replacement skintones (shared multipliers, DXT3): https://modthesims.info/showthread.php?t=351328
+- TONE files / tone ramps (7 TONEs in FullBuild0, ramp DDS+PNG share instance): https://modthesims.info/d/showthread.php?t=383795
+- Face mesh instances (`amFace_lod0_1..3` = `0xAF383E50/53/52`): https://modthesims.info/t/442374
+- afBodyNude / afTopNude / afBottomNude: https://modthesims.info/t/519909 , https://modthesims.info/t/482467
+- Movie-maker idle names: https://narisims.tumblr.com/post/104047381651/movie-maker-cheats-guide-specific-looping-idles

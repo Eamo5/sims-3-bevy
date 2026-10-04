@@ -171,7 +171,7 @@ Mesh meshes[meshCount]:
     u32 skinController    // ChunkReference -> SKIN (0 = unskinned)
     i32 jointCount
     u32 jointNameHashes[jointCount]   // bone names used by this mesh (blend indices index into this/the SKIN)
-    u32 scaleOffset       // ChunkReference -> special MATD holding UVScale/UVOffset/PosScale/PosOffset (see 4.5)
+    u32 scaleOffset       // ChunkReference -> special MATD holding UVScale/UVOffset/PosScale/PosOffset (see 4.6)
     i32 geometryStateCount
     GeometryState states[geometryStateCount]:
         u32 nameHash      // FNV32 of state name, e.g. 0x4A9A1FD1 "guitarOnly"
@@ -201,7 +201,7 @@ Both s3pi and s3py implement it as:
 ```
 stride   = vrtf.stride
 vertices = for v in 0..vertexCount: decode(vbuf.data[streamOffset + v*stride ..][..stride])
-indices  = ibuf.indices[startIndex .. startIndex + primitiveCount*3]   // already un-delta'd (section 4.4)
+indices  = ibuf.indices[startIndex .. startIndex + primitiveCount*3]   // already un-delta'd (section 4.5)
 triangle k = (indices[3k], indices[3k+1], indices[3k+2])              // indices are relative to streamOffset
 ```
 
@@ -225,7 +225,7 @@ f32 inverseBindPose[boneCount][3][4]   // 3 rows x 4 columns, row-major; column 
 ```
 
 s3pi maps the 12 floats `m00 m01 m02 m03 m10 ... m23` to Right=(m00,m10,m20), Up=(m01,m11,m21),
-Back=(m02,m12,m22), Translate=(m03,m13,m23). Only animated/skinned objects (doors, cars, some furniture) have SKIN.
+Back=(m02,m12,m22), Translate=(m03,m13,m23). SKIN chunks occur only on skinned/animated objects (doors, cars, some furniture) [inferred].
 
 ---
 

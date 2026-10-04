@@ -116,7 +116,7 @@ fn menu_actions(
         match action {
             MenuAction::PlayWorld(idx) => {
                 commands.insert_resource(SelectedWorld(worlds.0[*idx].clone()));
-                next.set(AppState::Loading);
+                next.set(AppState::CreateHousehold);
             }
             MenuAction::Quit => {
                 exit.write(AppExit::Success);
