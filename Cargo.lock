@@ -4746,6 +4746,7 @@ name = "s3tool"
 version = "0.1.0"
 dependencies = [
  "lz4_flex",
+ "png 0.17.16",
  "postcard",
  "s3formats",
  "s3pkg",
