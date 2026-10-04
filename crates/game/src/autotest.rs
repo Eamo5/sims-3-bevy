@@ -291,10 +291,11 @@ fn ui_flow(
             }
             advance(&mut stage);
         }
-        (4, AppState::Loading, _) if since > 3.0 => {
+        (4, AppState::Loading, _) if since > 1.0 => {
             shot(&mut commands, "3_loading");
             advance(&mut stage);
         }
+        (4, AppState::InGame, _) => advance(&mut stage),
         (5, AppState::InGame, Some(crate::PlayMode::ChooseLot)) if since > 3.0 => {
             shot(&mut commands, "4_choose_lot");
             if let Some((mut i, _)) = lots.iter_mut().next() {
