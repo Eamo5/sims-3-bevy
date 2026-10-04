@@ -123,11 +123,18 @@ impl ObjectAssets {
             return h.clone();
         }
         let tex = tex_key.and_then(|k| self.texture(ctx, k));
+        // Untextured blended parts are the game's glass (windows, doors, vitrines): a faint,
+        // glossy tint that lets the room show through.
+        let glass = tex.is_none() && mode == 2;
         let handle = ctx.materials.add(StandardMaterial {
-            base_color: if tex.is_some() { Color::WHITE } else { Color::srgb(0.75, 0.75, 0.72) },
+            base_color: match (tex.is_some(), glass) {
+                (true, _) => Color::WHITE,
+                (false, true) => Color::srgba(0.72, 0.8, 0.86, 0.18),
+                (false, false) => Color::srgb(0.75, 0.75, 0.72),
+            },
             base_color_texture: tex,
-            perceptual_roughness: 0.7,
-            reflectance: 0.3,
+            perceptual_roughness: if glass { 0.08 } else { 0.7 },
+            reflectance: if glass { 0.6 } else { 0.3 },
             unlit,
             alpha_mode: match mode {
                 2 => AlphaMode::Blend,
