@@ -515,6 +515,58 @@ fn main() {
         let _ = d;
         return;
     }
+    if args[1] == "refs" {
+        // refs <world file> <type:group:instance>: a REFS table's entries.
+        let w = Package::open(&args[2]).unwrap();
+        let parts: Vec<&str> = args[3].split(':').collect();
+        let key = s3pkg::ResourceKey::new(parse_hex(parts[0]) as u32, parse_hex(parts[1]) as u32, parse_hex(parts[2]));
+        let e = w.find(&key).expect("not found");
+        let d = w.read(e).unwrap();
+        let refs = s3formats::objn::parse_refs(&d).unwrap_or_default();
+        let mut v: Vec<_> = refs.into_iter().collect();
+        v.sort_by_key(|x| x.0);
+        let mut by_type = BTreeMap::<u32, usize>::new();
+        for (i, k) in &v {
+            *by_type.entry(k.t).or_default() += 1;
+            let show = std::env::var("REFS_RANGE").ok().and_then(|r| {
+                let (a, b) = r.split_once('-')?;
+                Some((a.parse::<u16>().ok()?, b.parse::<u16>().ok()?))
+            });
+            if show.is_some_and(|(a, b)| (a..=b).contains(i)) || (show.is_none() && (k.t == 0x515CA4CD || k.t == 0x9151E6BC)) {
+                println!("{i:5} {k}");
+            }
+        }
+        println!("{} refs by type {by_type:08X?}", v.len());
+        return;
+    }
+    if args[1] == "lotrefs" {
+        // lotrefs <root> <world file> <lot id hex>: which of the lot's resources mention wall,
+        // floor and pattern catalogue entries.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let mut catalog: std::collections::HashMap<u64, &str> = std::collections::HashMap::new();
+        for (t, name) in [(0x515CA4CDu32, "CWAL"), (0xB4DD716B, "CFLR?"), (0xD4D9FBE5, "PTRN"), (0x316C78F2, "CFND"), (0x9151E6BC, "CWST")] {
+            for k in set.keys_of_type(t) {
+                catalog.insert(k.i, name);
+            }
+        }
+        println!("{} catalogue entries", catalog.len());
+        let w = Package::open(&args[3]).unwrap();
+        let lot = parse_hex(&args[4]);
+        for e in w.entries.iter().filter(|e| e.key.i == lot) {
+            let Ok(d) = w.read(e) else { continue };
+            let mut hits = BTreeMap::<&str, usize>::new();
+            for o in 0..d.len().saturating_sub(8) {
+                let v = u64::from_le_bytes(d[o..o + 8].try_into().unwrap());
+                if let Some(n) = catalog.get(&v) {
+                    *hits.entry(n).or_default() += 1;
+                }
+            }
+            if !hits.is_empty() {
+                println!("{} len {} -> {hits:?}", e.key, d.len());
+            }
+        }
+        return;
+    }
     if args[1] == "objsdump" {
         // objsdump <world file> <class name> [count]: decoded fields of objects of a class.
         let w = Package::open(&args[2]).unwrap();

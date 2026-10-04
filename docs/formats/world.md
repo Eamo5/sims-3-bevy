@@ -786,3 +786,26 @@ camera; missing block = not allowed.
 - CAW sea level is per world: [CAW walkthrough](https://www.thesims3.com/content/global/downloads/caw/CaW_WalkThrough.pdf),
   [MTS: water levels Twinbrook/Bridgeport](https://modthesims.info/t/425205).
 - LDES background: [pepoluan "puzzling over LDES"](https://simoluan.tumblr.com/post/110264369020/puzzling-over-ldes).
+
+## Lot wall coverings (partly decoded)
+
+Per lot (instance = lot id) in the world file:
+
+* `0x312E7545` graphs: group `0x2E7B1A` walls, `0x2E7B1C` room boundaries, `0x2E7B1D`, and
+  `0x2E7B1E` — the graph whose edges carry wall coverings (975 edges on Goth Manor).
+* `0xB1422971` group `0x002FDACF`: `u32 version (4), u32 count`, then per edge of graph
+  `0x2E7B1E`: `u32 edge id, u16 wall style (REFS index of a CWST), u16 side A, u16 side B`
+  (palette ids; `0xFFFF` = none).
+* `0xF12E5E12` group `0x002E7DF7`: the palette — `u32 version (2), 16 bytes, u32 count`, then
+  `u16 REFS index (a CWAL 0x515CA4CD), u32 palette id, u32 painted area`.
+* The lot's REFS table `0x05ED1226` group 0 resolves the indices (CWAL, CWST, TXTC, …);
+  group `0x00F0B54D` is the object table (OBJN).
+* The other `0xB1422971` / `0xF12E5E12` pairs (groups `0x0082079A`/`0x008207AA`,
+  `0x004BFAAB`/`0x004BE299`, `0x00DD33E4`/`0x00DD3460`) use the same layout with palettes
+  pointing at TXTC entries (likely floors and custom designs).
+* `0x913381F2`: fences — `u32 version, u32 count`, then `u32 level, f32 x, f32 z, u16 REFS
+  index (CFEN 0x0418FE2A)`.
+* `0x0563919E`: Create-a-Style data of the lot's objects (compact "complate" presets).
+* A CWAL holds its materials as complate presets (pattern names like
+  `Materials\Wood\grainStraight01VerMed_12`, colours) plus a TGI list (TXTC, …); rendering a
+  covering needs the preset applied to its TXTC.
