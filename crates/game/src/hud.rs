@@ -603,7 +603,26 @@ fn world_click(
             open_pie(&mut commands, &mut pie, cursor, &obj.name, actor, options);
         }
     } else if let Some((p, level)) = floor_hit(ray, &world, building.as_deref()) {
-        open_pie(&mut commands, &mut pie, cursor, "", actor, vec![("Go Here".into(), ActionKind::GoHere(Vec2::new(p.x, p.z), level))]);
+        let mut options = vec![("Go Here".to_string(), ActionKind::GoHere(Vec2::new(p.x, p.z), level))];
+        let mut title = String::new();
+        // A community lot: its rabbit hole's activities.
+        if let Some(lot) = crate::rabbitholes::lot_at(&world.data.lots, p) {
+            let l = &world.data.lots[lot];
+            let acts = crate::rabbitholes::activities(l);
+            if !acts.is_empty() {
+                title = crate::rabbitholes::lot_title(l, world.data.lot_names.get(lot).map_or("", |s| s.as_str()));
+                options.clear();
+                for (i, a) in acts.iter().enumerate() {
+                    let cost = match a.cost {
+                        c if c > 0 => format!(" (§{c})"),
+                        c if c < 0 => format!(" (earn §{})", -c),
+                        _ => String::new(),
+                    };
+                    options.push((format!("{}{cost}", a.name), ActionKind::Visit { lot, activity: i }));
+                }
+            }
+        }
+        open_pie(&mut commands, &mut pie, cursor, &title, actor, options);
     }
 }
 
@@ -756,12 +775,14 @@ fn motive_color(v: f32) -> Color {
 #[allow(clippy::type_complexity)]
 fn update_needs_panel(
     sel: Query<(&Sim, &Motives, &Skills, Option<&Job>, Option<&AtWork>, &ActionQueue, &crate::life::Mood), With<Selected>>,
+    away_q: Query<(Option<&crate::rabbitholes::AtRabbitHole>, Option<&crate::rabbitholes::SchoolGrades>), With<Selected>>,
     mut name: Query<&mut Text, (With<NeedsName>, Without<NeedsDetail>, Without<TraitsText>)>,
     mut detail: Query<&mut Text, (With<NeedsDetail>, Without<NeedsName>, Without<TraitsText>)>,
     mut traits: Query<&mut Text, (With<TraitsText>, Without<NeedsName>, Without<NeedsDetail>)>,
     mut bars: Query<(&MotiveBar, &mut Node, &mut BackgroundColor)>,
 ) {
     let Ok((sim, motives, skills, job, at_work, _, mood)) = sel.single() else { return };
+    let (away, grades) = away_q.single().unwrap_or((None, None));
     if let Ok(mut t) = traits.single_mut() {
         let s = sim.traits.iter().map(|t| t.name()).collect::<Vec<_>>().join(" · ");
         if t.0 != s {
@@ -784,7 +805,12 @@ fn update_needs_panel(
                 hour_label(j.info().end),
                 j.performance
             ),
+            _ if grades.is_some() => format!("School grade: {}", grades.map_or("C", |g| g.letter())),
             _ => "Unemployed".into(),
+        };
+        let job_s = match away {
+            Some(a) => format!("Away: {} ({})", a.place, a.activity.name),
+            None => job_s,
         };
         let mut sk: Vec<String> = skills.0.iter().filter(|(_, v)| **v >= 1.0).map(|(k, v)| format!("{k} {}", *v as u32)).collect();
         sk.sort();

@@ -350,6 +350,8 @@ pub enum ActionKind {
     Invite { target: Entity },
     /// Spend lifetime happiness on a reward (instant, from the rewards menu).
     BuyReward(usize),
+    /// Drive to a community lot's rabbit hole for an activity.
+    Visit { lot: usize, activity: usize },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -529,7 +531,7 @@ fn run_actions(
             &Floor,
             Option<&crate::wishes::Wishes>,
         ),
-        (Without<GameObject>, Without<AtWork>),
+        (Without<GameObject>, Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>),
     >,
     mut objects: Query<(&GameObject, &Transform, &mut UsedBy, Option<&Floor>), Without<Sim>>,
     (building, upper): (Option<Res<crate::building::ActiveBuilding>>, Option<Res<UpperFloors>>),
@@ -599,7 +601,7 @@ fn run_actions(
                             (theirs + (mine - theirs).normalize_or(Vec2::X) * 0.9, *l)
                         }),
                         ActionKind::GoHere(p, l) => Some((*p, *l)),
-                        ActionKind::GoToWork => exit.as_ref().map(|e| (e.0, 1)),
+                        ActionKind::GoToWork | ActionKind::Visit { .. } => exit.as_ref().map(|e| (e.0, 1)),
                         ActionKind::JoinCareer { target, .. } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
                         ActionKind::Invite { .. } => {
                             action.phase = Phase::Running(0.0);
@@ -665,7 +667,9 @@ fn run_actions(
                                     let other_partner = *tpartner && rel.status == RelStatus::None;
                                     let p = crate::social::acceptance(s, &rel, tsim, tmood, other_partner);
                                     if !rand::rng().random_bool(p as f64) {
-                                        notes.push(format!("{} rejected {}'s attempt to {}.", tsim.first, sim.first, s.name.to_lowercase()));
+                                        if !action.autonomous {
+                                            notes.push(format!("{} rejected {}'s attempt to {}.", tsim.first, sim.first, s.name.to_lowercase()));
+                                        }
                                         let (f, r) = if s.cat == crate::social::SocialCat::Romantic { (-4.0, -8.0) } else { (-5.0, 0.0) };
                                         rels.add(*target, f, r);
                                         social_fx.push((*target, me, 0.0, 0.0, f, r));
@@ -676,6 +680,16 @@ fn run_actions(
                             }
                             ActionKind::GoHere(..) => finished = true,
                             ActionKind::Invite { .. } | ActionKind::BuyReward(_) => {}
+                            ActionKind::Visit { lot, activity } => {
+                                if let (Some(l), Some(name)) = (world.data.lots.get(*lot), world.data.lot_names.get(*lot)) {
+                                    let acts = crate::rabbitholes::activities(l);
+                                    if let Some(a) = acts.get(*activity) {
+                                        let place = crate::rabbitholes::lot_title(l, name);
+                                        crate::rabbitholes::head_out(&mut commands, &clock, me, sim, *lot, a, place, household.as_deref_mut(), &mut notes);
+                                    }
+                                }
+                                finished = true;
+                            }
                             ActionKind::GoToWork => {
                                 if let Some(j) = job.as_deref_mut() {
                                     crate::careers::leave_for_work(&mut commands, &clock, me, sim, j, &mut notes);
@@ -914,7 +928,7 @@ fn autonomy(
     clock: Res<GameClock>,
     mut sims: Query<
         (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim),
-        Without<AtWork>,
+        (Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>),
     >,
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy)>,
 ) {

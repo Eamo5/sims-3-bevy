@@ -263,7 +263,10 @@ fn work_schedule(
     mut household: Option<ResMut<Household>>,
     mut notes: ResMut<Notifications>,
     mut life: MessageWriter<LifeEvent>,
-    mut workers: Query<(Entity, &Sim, &mut Job, &mut ActionQueue, Option<&AtWork>, &mut Transform, &mut Motives, &Mood, &Skills)>,
+    mut workers: Query<
+        (Entity, &Sim, &mut Job, &mut ActionQueue, Option<&AtWork>, &mut Transform, &mut Motives, &Mood, &Skills),
+        Without<crate::rabbitholes::AtRabbitHole>,
+    >,
 ) {
     let h = clock.hour_f();
     let day = clock.day();

@@ -27,6 +27,15 @@ fn main() {
         i += 1;
     }
     let root = s3bake::default_root();
+    if let Some(i) = args.iter().position(|a| a == "--lots") {
+        let w: s3bake::WorldBaked = s3bake::read_value(&root.world_dir(&args[i + 1]).join("world.bin")).expect("world");
+        for (k, l) in w.lots.iter().enumerate() {
+            if !l.info.is_residential() {
+                println!("{k:3} {:40} {}", l.info.internal_name, l.display_name);
+            }
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--info") {
         let name = &args[i + 1];
         let w: s3bake::WorldBaked = s3bake::read_value(&root.world_dir(name).join("world.bin")).expect("world");

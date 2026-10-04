@@ -249,6 +249,7 @@ fn auto_action(
     visitors: Query<Entity, With<crate::interact::Visitor>>,
     sel_e: Query<Entity, With<crate::sim::Selected>>,
     mut rels_q: Query<&mut crate::sim::Relationships>,
+    world: Res<crate::loading::CurrentWorld>,
 ) {
     let Some(name) = &args.action else { return };
     if *done {
@@ -275,6 +276,19 @@ fn auto_action(
         for social in ["Kiss", "Propose Marriage", "Get Married"] {
             let si = crate::social::social_index(social).unwrap();
             q.push_player(crate::interact::Action::new(social, crate::interact::ActionKind::Social { target, social: si }, false));
+        }
+        *done = true;
+        return;
+    }
+    // "Visit <place>": drive to that community lot's first activity.
+    if let Some(place) = name.strip_prefix("Visit ") {
+        let place = place.to_ascii_lowercase();
+        let lot = world.data.lots.iter().position(|l| {
+            l.internal_name.to_ascii_lowercase().contains(&place) && !crate::rabbitholes::activities(l).is_empty()
+        });
+        if let Some(lot) = lot {
+            q.0.clear();
+            q.push_player(crate::interact::Action::new(name.clone(), crate::interact::ActionKind::Visit { lot, activity: 0 }, false));
         }
         *done = true;
         return;
