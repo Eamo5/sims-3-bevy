@@ -20,7 +20,7 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PieMenu>()
             .add_systems(OnEnter(PlayMode::Live), spawn_hud)
-            .add_systems(Update, (floor_controls, update_moodlets_panel).run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, (floor_controls, update_moodlets_panel, phone_button).run_if(in_state(PlayMode::Live)))
             .add_systems(
                 Update,
                 (
@@ -53,6 +53,21 @@ pub struct PieMenu {
     pub root: Option<Entity>,
     pub actor: Option<Entity>,
     pub options: Vec<(String, ActionKind)>,
+    /// Second-level menus (social categories), opened by `PIE_SUBMENU` options.
+    pub submenus: Vec<(String, Vec<(String, ActionKind)>)>,
+    pub at: Vec2,
+}
+
+/// Marks a pie option that opens `submenus[i]` (`ActionKind::GoHere(NaN, i)`).
+fn submenu_kind(i: usize) -> ActionKind {
+    ActionKind::GoHere(Vec2::new(f32::NAN, f32::INFINITY), i as u8)
+}
+
+fn as_submenu(k: &ActionKind) -> Option<usize> {
+    match k {
+        ActionKind::GoHere(p, i) if p.x.is_nan() && p.y.is_infinite() => Some(*i as usize),
+        _ => None,
+    }
 }
 
 #[derive(Component)]
@@ -82,6 +97,9 @@ struct FloorButton(i8);
 
 #[derive(Component)]
 struct FloorText;
+
+#[derive(Component)]
+struct PhoneButton;
 
 /// The floor controls, shown only in a house with more than one floor.
 #[derive(Component)]
@@ -209,6 +227,24 @@ fn spawn_hud(mut commands: Commands) {
                 ..default()
             }))
             .with_children(|p| {
+                p.spawn((
+                    Button,
+                    HudButton,
+                    PhoneButton,
+                    Node {
+                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                        width: Val::Px(66.0),
+                        height: Val::Px(34.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        margin: UiRect::right(Val::Px(8.0)),
+                        ..default()
+                    },
+                    BackgroundColor(BTN_NORMAL),
+                ))
+                .with_children(|b| {
+                    b.spawn(text("Phone", 16.0, Color::WHITE));
+                });
                 p.spawn((text("", 20.0, Color::WHITE), ClockText, Node { width: Val::Px(210.0), ..default() }));
                 for (i, label) in ["II", ">", ">>", ">>>"].iter().enumerate() {
                     p.spawn((
@@ -448,7 +484,8 @@ fn world_click(
     parents: Query<&ChildOf>,
     sims: Query<(&Sim, Has<HouseholdMember>, Has<Selected>)>,
     objects: Query<&GameObject>,
-    selected: Query<(Entity, &Relationships), With<Selected>>,
+    selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
+    members_q: Query<(), With<HouseholdMember>>,
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
     buy: Option<Res<crate::buy::BuyMode>>,
@@ -469,7 +506,7 @@ fn world_click(
     let Ok((camera, cam_tf)) = cams.single() else { return };
     let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else { return };
     close_pie(&mut commands, &mut pie);
-    let Ok((actor, rels)) = selected.single() else { return };
+    let Ok((actor, rels, actor_sim)) = selected.single() else { return };
 
     let is_target = |e: Entity| sims.contains(e) || objects.contains(e);
     let filter = |e: Entity| ancestor_with(e, &parents, is_target).is_some();
@@ -486,12 +523,23 @@ fn world_click(
                 options.push((format!("Select {}", sim.first), ActionKind::GoHere(Vec2::NAN, 1)));
             }
             let rel = rels.get(t);
-            for (i, s) in SOCIALS.iter().enumerate() {
-                if rel >= s.min_rel {
-                    options.push((s.name.to_string(), ActionKind::Social { target: t, social: i }));
+            let target_member = members_q.contains(t);
+            pie.submenus.clear();
+            for cat in crate::social::SocialCat::ALL {
+                let list: Vec<(String, ActionKind)> = SOCIALS
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, s)| s.cat == cat && crate::social::available(s, &rel, actor_sim, sim, target_member))
+                    .map(|(i, s)| (s.name.to_string(), ActionKind::Social { target: t, social: i }))
+                    .collect();
+                if !list.is_empty() {
+                    options.push((format!("{} ›", cat.name()), submenu_kind(pie.submenus.len())));
+                    pie.submenus.push((cat.name().to_string(), list));
                 }
             }
-            open_pie(&mut commands, &mut pie, cursor, &format!("{} ({})", sim.full_name(), relationship_label(rel)), actor, options);
+            let title = format!("{} ({})", sim.full_name(), rel.label());
+            pie.at = cursor;
+            open_pie(&mut commands, &mut pie, cursor, &title, actor, options);
             // Remember which sim "Select" refers to.
             pie.options.iter_mut().for_each(|(l, k)| {
                 if l.starts_with("Select") {
@@ -538,6 +586,13 @@ fn pie_buttons(
     let Some((label, kind)) = pie.options.get(idx).cloned() else { return };
     let actor = pie.actor;
     close_pie(&mut commands, &mut pie);
+    if let Some(i) = as_submenu(&kind)
+        && let (Some((title, list)), Some(a)) = (pie.submenus.get(i).cloned(), actor)
+    {
+        let at = pie.at;
+        open_pie(&mut commands, &mut pie, at, &title, a, list);
+        return;
+    }
     if let ActionKind::Social { target, social } = kind
         && social == usize::MAX
     {
@@ -893,4 +948,36 @@ fn update_moodlets_panel(
             });
         }
     });
+}
+
+/// The phone: call people the selected Sim knows and invite them over.
+#[allow(clippy::type_complexity)]
+fn phone_button(
+    mut commands: Commands,
+    buttons: Query<&Interaction, (Changed<Interaction>, With<PhoneButton>)>,
+    selected: Query<(Entity, &Relationships), With<Selected>>,
+    away: Query<(Entity, &Sim), (With<crate::interact::OffLot>, Without<crate::interact::Invited>)>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut pie: ResMut<PieMenu>,
+    mut notes: ResMut<Notifications>,
+) {
+    if !buttons.iter().any(|i| *i == Interaction::Pressed) {
+        return;
+    }
+    let Ok((actor, rels)) = selected.single() else { return };
+    let mut known: Vec<(f32, String, ActionKind)> = away
+        .iter()
+        .filter(|(e, _)| rels.0.contains_key(e))
+        .map(|(e, s)| (rels.friendship(e), format!("Invite {} Over", s.full_name()), ActionKind::Invite { target: e }))
+        .collect();
+    if known.is_empty() {
+        notes.push("There's nobody to call yet — meet some Sims first!");
+        return;
+    }
+    known.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let options: Vec<(String, ActionKind)> = known.into_iter().take(10).map(|(_, l, k)| (l, k)).collect();
+    let at = windows.single().ok().map_or(Vec2::new(600.0, 600.0), |w| Vec2::new(w.width() * 0.4, w.height() - 260.0));
+    close_pie(&mut commands, &mut pie);
+    pie.at = at;
+    open_pie(&mut commands, &mut pie, at, "Phone", actor, options);
 }

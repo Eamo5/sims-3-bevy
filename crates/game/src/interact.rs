@@ -20,7 +20,7 @@ impl Plugin for InteractPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Notifications>().add_systems(
             Update,
-            (autonomy, run_actions, motive_warnings, pay_bills)
+            (comings_and_goings, autonomy, run_actions, motive_warnings, pay_bills)
                 .chain()
                 .run_if(in_state(PlayMode::Live)),
         );
@@ -332,25 +332,8 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
 // ---------------------------------------------------------------------------------------------
 // Socials
 
-pub struct SocialDef {
-    pub name: &'static str,
-    pub minutes: f32,
-    pub social_per_hour: f32,
-    pub fun_per_hour: f32,
-    pub relationship: f32,
-    pub min_rel: f32,
-    pub autonomous: bool,
-}
-
-pub static SOCIALS: [SocialDef; 7] = [
-    SocialDef { name: "Chat", minutes: 25.0, social_per_hour: 110.0, fun_per_hour: 10.0, relationship: 8.0, min_rel: -100.0, autonomous: true },
-    SocialDef { name: "Tell Joke", minutes: 12.0, social_per_hour: 90.0, fun_per_hour: 80.0, relationship: 6.0, min_rel: -30.0, autonomous: true },
-    SocialDef { name: "Compliment", minutes: 8.0, social_per_hour: 80.0, fun_per_hour: 0.0, relationship: 7.0, min_rel: -100.0, autonomous: false },
-    SocialDef { name: "Hug", minutes: 6.0, social_per_hour: 140.0, fun_per_hour: 20.0, relationship: 8.0, min_rel: 30.0, autonomous: false },
-    SocialDef { name: "Dance Together", minutes: 30.0, social_per_hour: 80.0, fun_per_hour: 80.0, relationship: 10.0, min_rel: 20.0, autonomous: false },
-    SocialDef { name: "Kiss", minutes: 6.0, social_per_hour: 160.0, fun_per_hour: 40.0, relationship: 12.0, min_rel: 60.0, autonomous: false },
-    SocialDef { name: "Argue", minutes: 15.0, social_per_hour: 60.0, fun_per_hour: -60.0, relationship: -15.0, min_rel: -100.0, autonomous: false },
-];
+pub use crate::social::{SOCIALS, SocialEffect};
+use crate::social::RelStatus;
 
 // ---------------------------------------------------------------------------------------------
 // Actions
@@ -363,6 +346,8 @@ pub enum ActionKind {
     GoToWork,
     /// Apply for a career at the computer.
     JoinCareer { target: Entity, track: usize },
+    /// Phone someone and invite them over.
+    Invite { target: Entity },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -440,6 +425,75 @@ impl Notifications {
     }
 }
 
+/// A Sim joining the household (moving in or marrying in).
+#[derive(Component)]
+pub struct JoinHousehold {
+    pub last_name: Option<String>,
+}
+
+/// A visitor walking off the lot to go home.
+#[derive(Component)]
+pub struct GoingHome;
+
+/// Off the lot (at home elsewhere in town); can be phoned and invited over.
+#[derive(Component)]
+pub struct OffLot;
+
+/// Invited over: arrives at the lot exit at this time.
+#[derive(Component)]
+pub struct Invited {
+    pub arrive_at: f64,
+}
+
+/// A visitor: leaves in the evening.
+#[derive(Component)]
+pub struct Visitor {
+    pub leave_at: f64,
+}
+
+/// Moving in, going home and arriving for visits.
+#[allow(clippy::type_complexity)]
+fn comings_and_goings(
+    mut commands: Commands,
+    clock: Res<GameClock>,
+    exit: Option<Res<LotExit>>,
+    world: Res<CurrentWorld>,
+    mut joining: Query<(Entity, &mut Sim, &JoinHousehold)>,
+    mut leaving: Query<(Entity, &mut ActionQueue, &Transform), (With<GoingHome>, Without<OffLot>)>,
+    mut visitors: Query<(Entity, &Visitor), (Without<GoingHome>, Without<OffLot>, Without<HouseholdMember>)>,
+    mut arriving: Query<(Entity, &Invited, &mut Transform), Without<GoingHome>>,
+) {
+    for (e, mut sim, j) in &mut joining {
+        if let Some(l) = &j.last_name {
+            sim.last = l.clone();
+        }
+        commands.entity(e).remove::<(JoinHousehold, Visitor, GoingHome, OffLot)>().insert(HouseholdMember);
+    }
+    let Some(exit) = exit else { return };
+    for (e, v) in &mut visitors {
+        if clock.minutes >= v.leave_at {
+            commands.entity(e).insert(GoingHome);
+        }
+    }
+    for (e, mut queue, tf) in &mut leaving {
+        let at_exit = Vec2::new(tf.translation.x, tf.translation.z).distance(exit.0) < 1.5;
+        if at_exit {
+            queue.0.clear();
+            commands.entity(e).remove::<(GoingHome, Visitor, crate::nav::PathFollow)>().insert((OffLot, Visibility::Hidden));
+        } else if queue.0.is_empty() {
+            queue.0.push_back(Action::new("Go Home", ActionKind::GoHere(exit.0, 1), true));
+        }
+    }
+    for (e, inv, mut tf) in &mut arriving {
+        if clock.minutes >= inv.arrive_at {
+            tf.translation = Vec3::new(exit.0.x, world.data.heightmap.sample(exit.0.x, exit.0.y), exit.0.y);
+            let day_end = (clock.minutes / 1440.0).floor() * 1440.0 + 22.0 * 60.0;
+            let leave_at = day_end.max(clock.minutes + 240.0);
+            commands.entity(e).remove::<(Invited, OffLot)>().insert((Visibility::Inherited, Visitor { leave_at }));
+        }
+    }
+}
+
 /// The home lot's walk-off point where sims leave for work and carpools arrive.
 #[derive(Resource, Clone, Copy)]
 pub struct LotExit(pub Vec2);
@@ -477,13 +531,21 @@ fn run_actions(
     mut objects: Query<(&GameObject, &Transform, &mut UsedBy, Option<&Floor>), Without<Sim>>,
     (building, upper): (Option<Res<crate::building::ActiveBuilding>>, Option<Res<UpperFloors>>),
     mut life: MessageWriter<LifeEvent>,
+    people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
 ) {
     let Some(grid) = grid else { return };
     let dt = delta.0;
     let ground = |level: u8, x: f32, z: f32| crate::nav::floor_height(&world.data, building.as_deref(), level, Vec3::new(x, 0.0, z));
     // Social effects to apply to partners after the main pass: (target, actor, social, fun, rel, pose talk)
-    let mut social_fx: Vec<(Entity, Entity, f32, f32, f32)> = Vec::new();
+    let mut social_fx: Vec<(Entity, Entity, f32, f32, f32, f32)> = Vec::new();
     let positions: HashMap<Entity, (Vec3, u8)> = sims.iter().map(|s| (s.0, (s.3.translation, s.11.0))).collect();
+    let partnered: HashMap<Entity, bool> = sims.iter().map(|q| (q.0, q.8.partner().is_some())).collect();
+    let who: HashMap<Entity, (Sim, crate::life::Mood, bool, bool)> = people
+        .iter()
+        .map(|(e, s, m, member)| (e, (s.clone(), *m, member, partnered.get(&e).copied().unwrap_or(false))))
+        .collect();
+    // Relationship changes to apply to both Sims: (a, b, status, kissed)
+    let mut status_fx: Vec<(Entity, Entity, Option<RelStatus>, bool)> = Vec::new();
 
     for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, mut job, floor) in &mut sims {
         let Some(action) = queue.0.front_mut() else {
@@ -536,6 +598,11 @@ fn run_actions(
                         ActionKind::GoHere(p, l) => Some((*p, *l)),
                         ActionKind::GoToWork => exit.as_ref().map(|e| (e.0, 1)),
                         ActionKind::JoinCareer { target, .. } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
+                        ActionKind::Invite { .. } => {
+                            action.phase = Phase::Running(0.0);
+                            anim.pose = Pose::Talk;
+                            continue;
+                        }
                     };
                     let from = Vec2::new(tf.translation.x, tf.translation.z);
                     match dest.and_then(|(d, l)| plan_route(&grid, upper.as_deref(), from, floor.0, d, l)) {
@@ -582,14 +649,29 @@ fn run_actions(
                                     }
                                 }
                             }
-                            ActionKind::Social { target, .. } => {
+                            ActionKind::Social { target, social } => {
                                 if let Some(p) = positions.get(target) {
                                     let to = Vec2::new(p.0.x - tf.translation.x, p.0.z - tf.translation.z);
                                     tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
                                 }
                                 anim.pose = Pose::Talk;
+                                let s = &SOCIALS[*social];
+                                if let Some((tsim, tmood, _, tpartner)) = who.get(target) {
+                                    let rel = rels.get(*target);
+                                    let other_partner = *tpartner && rel.status == RelStatus::None;
+                                    let p = crate::social::acceptance(s, &rel, tsim, tmood, other_partner);
+                                    if !rand::rng().random_bool(p as f64) {
+                                        notes.push(format!("{} rejected {}'s attempt to {}.", tsim.first, sim.first, s.name.to_lowercase()));
+                                        let (f, r) = if s.cat == crate::social::SocialCat::Romantic { (-4.0, -8.0) } else { (-5.0, 0.0) };
+                                        rels.add(*target, f, r);
+                                        social_fx.push((*target, me, 0.0, 0.0, f, r));
+                                        life.write(LifeEvent::new(me, LifeEventKind::Socialized { other: *target, social: "Argue" }));
+                                        finished = true;
+                                    }
+                                }
                             }
                             ActionKind::GoHere(..) => finished = true,
+                            ActionKind::Invite { .. } => {}
                             ActionKind::GoToWork => {
                                 if let Some(j) = job.as_deref_mut() {
                                     crate::careers::leave_for_work(&mut commands, &clock, me, sim, j, &mut notes);
@@ -677,15 +759,71 @@ fn run_actions(
                             } else {
                                 motives.add(SOCIAL, s.social_per_hour * dt / 60.0);
                                 motives.add(FUN, s.fun_per_hour * dt / 60.0);
-                                let rel = s.relationship * dt / s.minutes * crate::life::social_affinity(&sim.traits, s.name);
-                                rels.add(*target, rel);
-                                social_fx.push((*target, me, s.social_per_hour * dt / 60.0, s.fun_per_hour * dt / 60.0, rel));
+                                let k = dt / s.minutes * crate::life::social_affinity(&sim.traits, s.name);
+                                let (f, r) = (s.friendship * k, s.romance * k);
+                                rels.add(*target, f, r);
+                                social_fx.push((*target, me, s.social_per_hour * dt / 60.0, s.fun_per_hour * dt / 60.0, f, r));
                                 anim.pose = if s.name.contains("Dance") { Pose::Dance } else { Pose::Talk };
                                 if elapsed >= s.minutes {
                                     finished = true;
                                     life.write(LifeEvent::new(me, LifeEventKind::Socialized { other: *target, social: s.name }));
                                     life.write(LifeEvent::new(*target, LifeEventKind::Socialized { other: me, social: s.name }));
+                                    let rel = rels.get(*target);
+                                    let tname = who.get(target).map(|w| w.0.first.clone()).unwrap_or_default();
+                                    let t_member = who.get(target).is_some_and(|w| w.2);
+                                    match s.effect {
+                                        SocialEffect::Kiss if !rel.kissed => {
+                                            status_fx.push((me, *target, None, true));
+                                            life.write(LifeEvent::new(me, LifeEventKind::FirstKiss));
+                                            life.write(LifeEvent::new(*target, LifeEventKind::FirstKiss));
+                                            notes.push(format!("{} and {} shared their first kiss!", sim.first, tname));
+                                        }
+                                        SocialEffect::GoSteady => {
+                                            status_fx.push((me, *target, Some(RelStatus::Partner), false));
+                                            life.write(LifeEvent::new(me, LifeEventKind::StartedDating));
+                                            life.write(LifeEvent::new(*target, LifeEventKind::StartedDating));
+                                            notes.push(format!("{} and {} are now going steady!", sim.first, tname));
+                                        }
+                                        SocialEffect::Propose => {
+                                            status_fx.push((me, *target, Some(RelStatus::Engaged), false));
+                                            life.write(LifeEvent::new(me, LifeEventKind::Engaged));
+                                            life.write(LifeEvent::new(*target, LifeEventKind::Engaged));
+                                            notes.push(format!("{} proposed to {}, who said yes!", sim.first, tname));
+                                        }
+                                        SocialEffect::Marry => {
+                                            status_fx.push((me, *target, Some(RelStatus::Married), false));
+                                            life.write(LifeEvent::new(me, LifeEventKind::Married));
+                                            life.write(LifeEvent::new(*target, LifeEventKind::Married));
+                                            notes.push(format!("{} and {} got married!", sim.first, tname));
+                                            if !t_member {
+                                                commands.entity(*target).insert(JoinHousehold { last_name: Some(sim.last.clone()) });
+                                            }
+                                        }
+                                        SocialEffect::BreakUp => {
+                                            status_fx.push((me, *target, Some(RelStatus::Ex), false));
+                                            life.write(LifeEvent::new(me, LifeEventKind::BrokeUp));
+                                            life.write(LifeEvent::new(*target, LifeEventKind::BrokeUp));
+                                            notes.push(format!("{} broke up with {}.", sim.first, tname));
+                                        }
+                                        SocialEffect::MoveIn => {
+                                            commands.entity(*target).insert(JoinHousehold { last_name: None });
+                                            notes.push(format!("{} moved in with the household!", tname));
+                                        }
+                                        SocialEffect::AskToLeave => {
+                                            commands.entity(*target).insert(GoingHome);
+                                            notes.push(format!("{} said goodbye and is heading home.", tname));
+                                        }
+                                        _ => {}
+                                    }
                                 }
+                            }
+                        }
+                        ActionKind::Invite { target } => {
+                            if elapsed >= 8.0 {
+                                finished = true;
+                                let tname = who.get(target).map(|w| w.0.first.clone()).unwrap_or_default();
+                                commands.entity(*target).insert(Invited { arrive_at: clock.minutes + 45.0 });
+                                notes.push(format!("{} invited {} over. They'll be here soon.", sim.first, tname));
                             }
                         }
                         ActionKind::JoinCareer { track, .. } => {
@@ -725,11 +863,25 @@ fn run_actions(
         }
     }
 
-    for (target, actor, social, fun, rel) in social_fx {
+    for (a, b, status, kissed) in status_fx {
+        for (x, y) in [(a, b), (b, a)] {
+            if let Ok(mut q) = sims.get_mut(x) {
+                let r = q.8.entry(y);
+                if let Some(s) = status {
+                    r.status = s;
+                    if s == RelStatus::Ex {
+                        r.romance = (r.romance - 60.0).max(-100.0);
+                    }
+                }
+                r.kissed |= kissed;
+            }
+        }
+    }
+    for (target, actor, social, fun, friendship, romance) in social_fx {
         if let Ok((_, _, queue, mut tf, mut motives, _, mut anim, _, mut rels, path, _, _)) = sims.get_mut(target) {
             motives.add(SOCIAL, social);
             motives.add(FUN, fun);
-            rels.add(actor, rel);
+            rels.add(actor, friendship, romance);
             if queue.0.is_empty() && path.is_none() {
                 anim.pose = Pose::Talk;
                 if let Some(p) = positions.get(&actor) {
@@ -821,8 +973,14 @@ fn autonomy(
                 if other == me {
                     continue;
                 }
-                let rel = rels.get(other);
-                let si = if rel > 10.0 && rng.random_bool(0.4) { 1 } else { 0 };
+                let rel = rels.friendship(other);
+                let name = match () {
+                    _ if rel < 5.0 => "Get to Know",
+                    _ if rel > 10.0 && rng.random_bool(0.35) => "Tell Joke",
+                    _ if rel > 20.0 && rng.random_bool(0.3) => "Talk About Hobbies",
+                    _ => "Chat",
+                };
+                let si = crate::social::social_index(name).unwrap_or(0);
                 let s = &SOCIALS[si];
                 let score = (s.social_per_hour * s.minutes / 60.0) * urgency(SOCIAL) * rng.random_range(0.8..1.2);
                 if best.as_ref().is_none_or(|b| score > b.0) {

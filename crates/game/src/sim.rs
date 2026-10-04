@@ -117,29 +117,7 @@ pub struct HouseholdMember;
 #[derive(Component)]
 pub struct Selected;
 
-#[derive(Component, Default)]
-pub struct Relationships(pub HashMap<Entity, f32>);
-
-impl Relationships {
-    pub fn get(&self, e: Entity) -> f32 {
-        self.0.get(&e).copied().unwrap_or(0.0)
-    }
-    pub fn add(&mut self, e: Entity, v: f32) {
-        let r = self.0.entry(e).or_insert(0.0);
-        *r = (*r + v).clamp(-100.0, 100.0);
-    }
-}
-
-pub fn relationship_label(v: f32) -> &'static str {
-    match v {
-        v if v < -60.0 => "Enemy",
-        v if v < -20.0 => "Disliked",
-        v if v < 15.0 => "Acquaintance",
-        v if v < 40.0 => "Friend",
-        v if v < 75.0 => "Good Friend",
-        _ => "Best Friend",
-    }
-}
+pub use crate::social::Relationships;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Pose {

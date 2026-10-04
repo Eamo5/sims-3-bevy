@@ -19,6 +19,7 @@ mod objects;
 mod roads;
 mod sim;
 mod simbody;
+mod social;
 mod terrain;
 mod town;
 mod world;

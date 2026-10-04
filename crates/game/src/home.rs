@@ -739,6 +739,7 @@ pub fn move_in(
             ActionQueue::default(),
             AutonomyTimer(rng.random_range(1.0..4.0)),
             Skills::default(),
+            Visitor { leave_at: 18.0 * 60.0 + k as f64 * 40.0 },
             DespawnOnExit(AppState::InGame),
         ));
         notes.push(format!("{name} from next door came over to welcome the {} family.", pending.last_name));

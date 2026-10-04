@@ -238,12 +238,39 @@ fn auto_action(
     mut done: Local<bool>,
     mut sel: Query<&mut crate::interact::ActionQueue, With<crate::sim::Selected>>,
     objects: Query<(Entity, &crate::interact::GameObject)>,
+    visitors: Query<Entity, With<crate::interact::Visitor>>,
+    sel_e: Query<Entity, With<crate::sim::Selected>>,
+    mut rels_q: Query<&mut crate::sim::Relationships>,
 ) {
     let Some(name) = &args.action else { return };
     if *done {
         return;
     }
     let Ok(mut q) = sel.single_mut() else { return };
+    // "Romance": the selected Sim courts a visitor through to marriage.
+    if name == "Romance" {
+        let Some(target) = visitors.iter().next() else { return };
+        if let Ok(mut rels) = rels_q.get_mut(sel_e.single().unwrap()) {
+            let r = rels.entry(target);
+            r.friendship = 60.0;
+            r.romance = 80.0;
+            r.status = crate::social::RelStatus::Partner;
+        }
+        if let Ok(mut rels) = rels_q.get_mut(target) {
+            let me = sel_e.single().unwrap();
+            let r = rels.entry(me);
+            r.friendship = 60.0;
+            r.romance = 80.0;
+            r.status = crate::social::RelStatus::Partner;
+        }
+        q.0.clear();
+        for social in ["Kiss", "Propose Marriage", "Get Married"] {
+            let si = crate::social::social_index(social).unwrap();
+            q.push_player(crate::interact::Action::new(social, crate::interact::ActionKind::Social { target, social: si }, false));
+        }
+        *done = true;
+        return;
+    }
     // "Join <career>": apply at the computer.
     if let Some(career) = name.strip_prefix("Join ") {
         let track = crate::careers::CAREERS.iter().position(|c| c.name.eq_ignore_ascii_case(career));
