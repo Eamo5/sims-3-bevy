@@ -31,11 +31,14 @@ fn room_kind_of(script: &str) -> Option<u8> {
 }
 
 pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[PlacedObject]) -> Option<LotBuildingBaked> {
-    let data = LotBuildData::load(pkg, lot.id)?;
-    if data.walls.edges.is_empty() {
+    let data = LotBuildData::load(pkg, lot.id).unwrap_or_default();
+    if data.walls.edges.is_empty() && objects.is_empty() {
         return None;
     }
-    let (w, d) = (data.rooms.width.max(data.walls.width).saturating_sub(1), data.rooms.depth.max(data.walls.depth).saturating_sub(1));
+    let (w, d) = (
+        data.rooms.width.max(data.walls.width).max(lot.width + 1).saturating_sub(1),
+        data.rooms.depth.max(data.walls.depth).max(lot.depth + 1).saturating_sub(1),
+    );
     let has_foundation = data.rooms.segments().any(|s| s.2 == 0);
     let ground = lot.corner[1];
     let base = ground + if has_foundation { FOUNDATION_HEIGHT } else { 0.0 };
@@ -68,7 +71,8 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     let mut objs = Vec::new();
     for o in objects {
         let (Some(cat), Some(mut p)) = (o.catalog, o.position) else { continue };
-        if cat.t != OBJD {
+        // Trees on the lot are drawn with the world's trees.
+        if cat.t != OBJD || !o.trees.is_empty() || o.speedtree.is_some() {
             continue;
         }
         let mut rotation = o.rotation;

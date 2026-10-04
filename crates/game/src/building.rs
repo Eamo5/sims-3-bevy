@@ -13,7 +13,7 @@ use s3formats::world::LotInfo;
 use crate::camera::SimsCamera;
 use crate::loading::{Catalog, WorldInfo};
 use crate::nav::{Floor, Obstacle, StairLink};
-use crate::objects::{AssetCtx, ObjectAssets, parts_bounds};
+use crate::objects::{AssetCtx, ImposterLayer, ObjectAssets, parts_bounds, spawn_parts};
 use crate::world::LotImposter;
 use crate::{AppState, PlayMode};
 
@@ -21,7 +21,10 @@ pub struct BuildingPlugin;
 
 impl Plugin for BuildingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (follow_selected_floor, view_level_keys, building_visibility).chain().run_if(in_state(PlayMode::Live)));
+        app.init_resource::<NearbyLots>().add_systems(
+            Update,
+            (follow_selected_floor, view_level_keys, building_visibility, stream_nearby_lots).chain().run_if(in_state(PlayMode::Live)),
+        );
     }
 }
 
@@ -233,7 +236,21 @@ fn is_opening(script: &str) -> Option<bool> {
     }
 }
 
-/// Spawns the detailed house of `lot` with all its furniture and returns its state.
+/// Puts a spawned piece either into the active house (per-floor visibility) or under a
+/// neighbouring lot's root entity.
+fn place(commands: &mut Commands, e: Entity, root: Option<Entity>, level: u8) {
+    match root {
+        Some(r) => {
+            commands.entity(e).insert(ChildOf(r));
+        }
+        None => {
+            commands.entity(e).insert((BuildingPiece { level }, DespawnOnExit(AppState::InGame)));
+        }
+    }
+}
+
+/// Spawns the detailed house of `lot` with all its furniture and returns its state. With a
+/// `neighbor` root, it's built for show only (merged meshes, furniture without gameplay).
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_building(
     commands: &mut Commands,
@@ -242,6 +259,7 @@ pub fn spawn_building(
     catalog: &Catalog,
     b: &LotBuildingBaked,
     lot: &LotInfo,
+    neighbor: Option<Entity>,
 ) -> ActiveBuilding {
     let corner = Vec3::from(lot.corner);
     let rot = Quat::from_rotation_y(lot.rotation);
@@ -292,14 +310,25 @@ pub fn spawn_building(
             stairs.push((o.clone(), q));
             continue;
         }
-        let Some(spawned) = crate::home::spawn_game_object_rot(commands, assets, ctx, catalog, o.objd, Vec3::from(o.position), q) else {
-            continue;
-        };
-        commands.entity(spawned.entity).insert((BuildingPiece { level: o.level }, Floor(o.level.max(1))));
         let opening = is_opening(&o.script);
-        if opening.is_some() || o.script.contains("Stairs") || o.script.contains("Column") {
-            commands.entity(spawned.entity).remove::<Obstacle>();
-        }
+        let entity = if let Some(root) = neighbor {
+            let parts = assets.object(ctx, o.objd);
+            if parts.is_empty() {
+                continue;
+            }
+            let e = spawn_parts(commands, &parts, Transform::from_translation(Vec3::from(o.position)).with_rotation(q));
+            commands.entity(e).insert(ChildOf(root));
+            e
+        } else {
+            let Some(spawned) = crate::home::spawn_game_object_rot(commands, assets, ctx, catalog, o.objd, Vec3::from(o.position), q) else {
+                continue;
+            };
+            commands.entity(spawned.entity).insert((BuildingPiece { level: o.level }, Floor(o.level.max(1))));
+            if opening.is_some() || o.script.contains("Stairs") || o.script.contains("Column") {
+                commands.entity(spawned.entity).remove::<Obstacle>();
+            }
+            spawned.entity
+        };
         if let (Some(door), Some((mn, mx))) = (opening, parts_bounds(&assets.object(ctx, o.objd))) {
             let to_local = |v: Vec3| {
                 let l = rot.inverse() * v;
@@ -307,7 +336,9 @@ pub fn spawn_building(
             };
             let fwd = to_local(q * Vec3::Z);
             let wp = Vec2::from(o.local) - fwd * 0.5;
-            commands.entity(spawned.entity).insert(WallObject { mid: active.world(wp.x, wp.y, o.position[1]) });
+            if neighbor.is_none() {
+                commands.entity(entity).insert(WallObject { mid: active.world(wp.x, wp.y, o.position[1]) });
+            }
             holes.push(Hole {
                 level: o.level,
                 wall_point: Vec2::from(o.local) - fwd * 0.5,
@@ -371,19 +402,18 @@ pub fn spawn_building(
                 buf.quad([w(a + e, y0), w(c + e, y0), w(c + e, h), w(a + e, h)], [[t0 * run, 1.0], [t1 * run, 1.0], [t1 * run, 0.0], [t0 * run, 0.0]], n);
             }
         }
-        commands.spawn((
-            Mesh3d(ctx.meshes.add(buf.mesh())),
-            MeshMaterial3d(stair_mat.clone()),
-            BuildingPiece { level: if storey { lower } else { 0 } },
-            DespawnOnExit(AppState::InGame),
-        ));
-        if storey {
+        let e = commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(stair_mat.clone()))).id();
+        place(commands, e, neighbor, if storey { lower } else { 0 });
+        if storey && neighbor.is_none() {
             let bw = |q: Vec2| active.world(q.x, q.y, 0.0).xz();
             active.stairs.push(StairLink { level: lower, bottom: bw(bottom - d * 0.45), top: bw(top + d * 0.45), y0, y1 });
         }
     }
 
-    // Walls: one entity per segment with a face per side, full and cut-away versions.
+    // Walls: one entity per segment with a face per side, full and cut-away versions
+    // (neighbours: everything merged into a few meshes).
+    let mut merged: HashMap<Key, MeshBuf> = HashMap::new();
+    let mut merged_caps = MeshBuf::default();
     for w in &b.walls {
         let level = w.level.max(1);
         let y0 = level_y(level);
@@ -416,6 +446,23 @@ pub fn spawn_building(
         let half = n3 * (WALL_T * 0.5);
         let ulen = len + WALL_T;
         let mid = to3(mid_local, 0.0);
+        if neighbor.is_some() {
+            for (side, kind) in [(1.0f32, w.left), (-1.0, w.right)] {
+                let buf = merged.entry(wall_style(kind, exterior)).or_default();
+                for (s0, s1) in wall_spans(&seg_holes, WALL_H) {
+                    let off = half * side;
+                    let p = [to3(pa, s0) + off, to3(pb, s0) + off, to3(pb, s1) + off, to3(pa, s1) + off];
+                    let (v0, v1) = (1.0 - s0 / WALL_H, 1.0 - s1 / WALL_H);
+                    let (u0, u1) = if side > 0.0 { (0.0, ulen) } else { (ulen, 0.0) };
+                    buf.quad(p, [[u0, v0], [u1, v0], [u1, v1], [u0, v1]], n3 * side);
+                }
+            }
+            for (_, s1) in wall_spans(&seg_holes, WALL_H) {
+                let p = [to3(pa, s1) + half, to3(pb, s1) + half, to3(pb, s1) - half, to3(pa, s1) - half];
+                merged_caps.quad(p, [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], Vec3::Y);
+            }
+            continue;
+        }
         let parent = commands
             .spawn((Transform::IDENTITY, Visibility::default(), BuildingPiece { level }, DespawnOnExit(AppState::InGame)))
             .id();
@@ -471,6 +518,16 @@ pub fn spawn_building(
         }
     }
 
+    for (style, buf) in merged {
+        let mat = material(assets, ctx, style);
+        let e = commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(mat))).id();
+        place(commands, e, neighbor, 1);
+    }
+    if !merged_caps.is_empty() {
+        let e = commands.spawn((Mesh3d(ctx.meshes.add(merged_caps.mesh())), MeshMaterial3d(cap_mat.clone()))).id();
+        place(commands, e, neighbor, 1);
+    }
+
     // Floors, one mesh per level and style.
     let mut floor_bufs: HashMap<(u8, Key), MeshBuf> = HashMap::new();
     for f in &b.floors {
@@ -490,12 +547,8 @@ pub fn spawn_building(
     }
     for ((level, style), buf) in floor_bufs {
         let mat = material(assets, ctx, style);
-        commands.spawn((
-            Mesh3d(ctx.meshes.add(buf.mesh())),
-            MeshMaterial3d(mat),
-            BuildingPiece { level },
-            DespawnOnExit(AppState::InGame),
-        ));
+        let e = commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(mat))).id();
+        place(commands, e, neighbor, level);
     }
 
     // Foundation sides from slightly below the ground up to the ground floor.
@@ -516,7 +569,8 @@ pub fn spawn_building(
         }
         if !buf.is_empty() {
             let mat = material(assets, ctx, STYLE_FOUNDATION);
-            commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(mat), BuildingPiece { level: 0 }, DespawnOnExit(AppState::InGame)));
+            let e = commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(mat))).id();
+            place(commands, e, neighbor, 0);
         }
     }
     // Cutaway and imposter swaps work around the middle of the walls, not of the lot.
@@ -574,11 +628,7 @@ fn building_visibility(
     let far = cam.distance > IMPOSTER_DISTANCE || cam.focus.distance(b.center) > IMPOSTER_DISTANCE * 1.4;
     if b.far != Some(far) {
         b.far = Some(far);
-        for (imp, mut vis) in &mut imposters {
-            if imp.0 == b.lot {
-                *vis = if far { Visibility::Inherited } else { Visibility::Hidden };
-            }
-        }
+        let _ = &mut imposters;
         // World trees right around the house would hide it in close-up.
         for (tf, mut vis) in &mut trees {
             let near = tf.translation().xz().distance(b.center.xz()) < 22.0;
@@ -590,12 +640,15 @@ fn building_visibility(
     // Cutaway: walls of the viewed floor in the half of the house nearer the camera are cut down.
     let view = cam_tf.forward().as_vec3();
     let view = Vec3::new(view.x, 0.0, view.z).normalize_or_zero();
-    let is_cut = |mid: Vec3, level: u8| level == b.view_level && (mid - b.center).dot(view) < 0.3;
+    // Zoomed out, the house is seen from outside: every floor, walls up, roof on.
+    let exterior = cam.distance > ROOF_DISTANCE;
+    let view_level = if exterior { b.top_level } else { b.view_level };
+    let is_cut = |mid: Vec3, level: u8| !exterior && level == view_level && (mid - b.center).dot(view) < 0.3;
     for (floor, mut vis) in &mut sims {
-        vis.set_if_neq(if floor.0 <= b.view_level { Visibility::Inherited } else { Visibility::Hidden });
+        vis.set_if_neq(if floor.0 <= view_level { Visibility::Inherited } else { Visibility::Hidden });
     }
     for (piece, wall_obj, mut vis) in &mut pieces {
-        let show = !far && piece.level <= b.view_level && !wall_obj.is_some_and(|w| is_cut(w.mid, piece.level));
+        let show = !far && piece.level <= view_level && !wall_obj.is_some_and(|w| is_cut(w.mid, piece.level));
         vis.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });
     }
     if far {
@@ -614,5 +667,79 @@ fn building_visibility(
                 }
             }
         }
+    }
+}
+
+/// Lots near the camera shown with their real walls and furniture (the imposter keeps only its
+/// painted ground and its roofs), as the game does around the camera.
+#[derive(Resource, Default)]
+pub struct NearbyLots {
+    spawned: HashMap<usize, Entity>,
+}
+
+const NEARBY_IN: f32 = 70.0;
+const NEARBY_OUT: f32 = 95.0;
+/// Below this camera distance the active house's roof is taken off.
+const ROOF_DISTANCE: f32 = 42.0;
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn stream_nearby_lots(
+    mut commands: Commands,
+    mut nearby: ResMut<NearbyLots>,
+    world: Res<crate::loading::CurrentWorld>,
+    data: Res<crate::baked::Baked>,
+    catalog: Res<Catalog>,
+    mut assets: ResMut<ObjectAssets>,
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    cams: Query<&SimsCamera>,
+    active: Option<Res<ActiveBuilding>>,
+    imposters: Query<(Entity, &LotImposter)>,
+    mut layers: Query<(&ImposterLayer, &ChildOf, &mut Visibility)>,
+) {
+    let Ok(cam) = cams.single() else { return };
+    let active_lot = active.as_ref().map(|a| a.lot);
+    let zoomed_in = cam.distance < 110.0;
+    let lot_center = |i: usize| crate::home::lot_center(&world.data.lots[i]);
+    // Drop lots that went out of range.
+    let gone: Vec<usize> = nearby
+        .spawned
+        .keys()
+        .copied()
+        .filter(|&i| !zoomed_in || Some(i) == active_lot || lot_center(i).xz().distance(cam.focus.xz()) > NEARBY_OUT)
+        .collect();
+    for i in gone {
+        if let Some(e) = nearby.spawned.remove(&i) {
+            commands.entity(e).despawn();
+        }
+    }
+    // Bring in the nearest lot not yet shown (one per frame).
+    if zoomed_in {
+        let next = world
+            .data
+            .buildings
+            .keys()
+            .copied()
+            .filter(|i| Some(*i) != active_lot && !nearby.spawned.contains_key(i))
+            .map(|i| (i, lot_center(i).xz().distance(cam.focus.xz())))
+            .filter(|(_, d)| *d < NEARBY_IN)
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        if let Some((i, _)) = next {
+            let root = commands.spawn((Transform::IDENTITY, Visibility::default(), DespawnOnExit(AppState::InGame))).id();
+            let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+            spawn_building(&mut commands, &mut assets, &mut ctx, &catalog, &world.data.buildings[&i], &world.data.lots[i], Some(root));
+            nearby.spawned.insert(i, root);
+        }
+    }
+    // Imposter layers: detailed lots keep their ground and roofs; the active house loses its
+    // roof when the camera comes in close.
+    let lot_of: HashMap<Entity, usize> = imposters.iter().map(|(e, l)| (e, l.0)).collect();
+    let active_far = active.as_ref().is_none_or(|a| a.far != Some(false));
+    for (layer, parent, mut vis) in &mut layers {
+        let Some(&lot) = lot_of.get(&parent.parent()) else { continue };
+        let detailed = nearby.spawned.contains_key(&lot) || (Some(lot) == active_lot && !active_far);
+        let show = !detailed
+            || layer.0 == LAYER_GROUND
+            || (layer.0 == LAYER_ROOF && (Some(lot) != active_lot || cam.distance > ROOF_DISTANCE));
+        vis.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });
     }
 }

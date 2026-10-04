@@ -16,7 +16,13 @@ pub struct ModelPart {
     pub mesh: Handle<Mesh>,
     pub material: Handle<StandardMaterial>,
     pub bounds: (Vec3, Vec3),
+    /// Lot imposter layer (`s3bake::LAYER_*`), 0 for ordinary models.
+    pub layer: u8,
 }
+
+/// A part of a lot imposter: its ground, roofs or the rest.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub struct ImposterLayer(pub u8);
 
 #[derive(Resource, Default)]
 pub struct ObjectAssets {
@@ -67,6 +73,7 @@ pub struct CpuPart {
     pub mode: u8,
     pub unlit: bool,
     pub bounds: (Vec3, Vec3),
+    pub layer: u8,
 }
 
 pub fn cpu_model(model: BakedModel) -> Vec<CpuPart> {
@@ -79,7 +86,7 @@ pub fn cpu_model(model: BakedModel) -> Vec<CpuPart> {
             mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, p.normals);
             mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, p.uvs);
             mesh.insert_indices(Indices::U32(p.indices));
-            CpuPart { mesh, tex: p.texture, mode: p.mode, unlit: p.unlit, bounds: (Vec3::from(p.bmin), Vec3::from(p.bmax)) }
+            CpuPart { mesh, tex: p.texture, mode: p.mode, unlit: p.unlit, bounds: (Vec3::from(p.bmin), Vec3::from(p.bmax)), layer: p.layer }
         })
         .collect()
 }
@@ -105,7 +112,7 @@ impl ObjectAssets {
         let mut parts = Vec::new();
         for p in cpu {
             let material = self.material_for_key(ctx, p.tex, p.mode, p.unlit);
-            parts.push(ModelPart { mesh: ctx.meshes.add(p.mesh), material, bounds: p.bounds });
+            parts.push(ModelPart { mesh: ctx.meshes.add(p.mesh), material, bounds: p.bounds, layer: p.layer });
         }
         self.models.insert(key, parts.clone());
         parts
@@ -164,7 +171,10 @@ pub fn spawn_parts(commands: &mut Commands, parts: &[ModelPart], transform: Tran
         .spawn((transform, Visibility::default()))
         .with_children(|c| {
             for p in parts {
-                c.spawn((Mesh3d(p.mesh.clone()), MeshMaterial3d(p.material.clone())));
+                let mut e = c.spawn((Mesh3d(p.mesh.clone()), MeshMaterial3d(p.material.clone())));
+                if p.layer != 0 {
+                    e.insert(ImposterLayer(p.layer));
+                }
             }
         })
         .id()

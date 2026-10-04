@@ -5,7 +5,9 @@ use std::collections::{HashMap, HashSet};
 
 use bevy::camera::visibility::VisibilityRange;
 use bevy::prelude::*;
-use s3bake::{InstanceBaked, Key, TreeBaked, WorldBaked};
+use bevy::asset::RenderAssetUsages;
+use bevy::mesh::{Indices, PrimitiveTopology};
+use s3bake::{InstanceBaked, Key, TreeBaked, TreeKindBaked, WorldBaked};
 
 use crate::AppState;
 use crate::baked::{Baked, BakedData};
@@ -26,6 +28,7 @@ pub struct WorldBuild {
     pub textures: Vec<(Key, Option<Image>)>,
     pub instances: Vec<InstanceBaked>,
     pub trees: Vec<TreeBaked>,
+    pub tree_kinds: Vec<TreeKindBaked>,
 }
 
 /// A world tree (stand-in for a SpeedTree).
@@ -45,10 +48,50 @@ pub fn build_world(baked: &BakedData, world: &WorldBaked) -> WorldBuild {
     let keys: Vec<Key> = world.instances.iter().map(|i| i.model).collect::<HashSet<_>>().into_iter().collect();
     let models: Vec<(Key, Vec<CpuPart>)> =
         par_map(&keys, |k| (*k, baked.model(k).map(cpu_model).unwrap_or_default()));
-    let tex_keys: Vec<Key> =
-        models.iter().flat_map(|(_, p)| p.iter().filter_map(|x| x.tex)).collect::<HashSet<_>>().into_iter().collect();
+    let tex_keys: Vec<Key> = models
+        .iter()
+        .flat_map(|(_, p)| p.iter().filter_map(|x| x.tex))
+        .chain(world.tree_kinds.iter().map(|k| k.billboard))
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
     let textures = par_map(&tex_keys, |k| (*k, cpu_texture(baked, *k)));
-    WorldBuild { models, textures, instances: world.instances.clone(), trees: world.trees.clone() }
+    WorldBuild {
+        models,
+        textures,
+        instances: world.instances.clone(),
+        trees: world.trees.clone(),
+        tree_kinds: world.tree_kinds.clone(),
+    }
+}
+
+/// Crossed billboards of a SpeedTree species: two of its pictures at right angles (three for
+/// wide crowns), standing on the ground, sized from the tree's own dimensions.
+fn tree_mesh(k: &TreeKindBaked) -> Mesh {
+    let (mut pos, mut nrm, mut uv, mut idx) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let quads = if k.views.len() >= 3 { 3 } else { 2 };
+    for q in 0..quads {
+        let v = k.views[q % k.views.len()];
+        let aspect = (v[2] - v[0]) * k.atlas_aspect / (v[3] - v[1]).max(1e-3);
+        let (h, w) = (k.height.max(0.3), k.height.max(0.3) * aspect);
+        let angle = q as f32 * std::f32::consts::PI / quads as f32;
+        let (s, c) = angle.sin_cos();
+        let right = Vec3::new(c, 0.0, -s) * (w * 0.5);
+        let base = pos.len() as u32;
+        for (p, t) in [(-right, [v[0], v[3]]), (right, [v[2], v[3]]), (right + Vec3::Y * h, [v[2], v[1]]), (-right + Vec3::Y * h, [v[0], v[1]])] {
+            pos.push(p.to_array());
+            // Lit as a whole crown from above, so every side looks alike.
+            nrm.push([0.0, 1.0, 0.0]);
+            uv.push(t);
+        }
+        idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+    let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+    m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
+    m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, nrm);
+    m.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv);
+    m.insert_indices(Indices::U32(idx));
+    m
 }
 
 fn quat(q: [f32; 4]) -> Quat {
@@ -93,7 +136,24 @@ fn spawn_world_content(
         spawned += 1;
     }
 
-    // Trees: stand-ins for SpeedTree models (trunk + crown), varied per species.
+    // Trees: each species from its billboard pictures; stand-ins when a species has none.
+    let mut kinds: HashMap<u64, (Handle<Mesh>, Handle<StandardMaterial>)> = HashMap::new();
+    for k in build.tree_kinds.drain(..) {
+        let Some(tex) = assets.texture(&mut AssetCtx { baked: &baked.0, meshes: &mut meshes, images: &mut images, materials: &mut mats }, k.billboard)
+        else {
+            continue;
+        };
+        let mat = mats.add(StandardMaterial {
+            base_color_texture: Some(tex),
+            alpha_mode: AlphaMode::Mask(0.45),
+            double_sided: true,
+            cull_mode: None,
+            perceptual_roughness: 0.95,
+            reflectance: 0.1,
+            ..default()
+        });
+        kinds.insert(k.kind, (meshes.add(tree_mesh(&k)), mat));
+    }
     let trunk = meshes.add(Cylinder::new(0.22, 4.0));
     let round = meshes.add(Sphere::new(2.6).mesh().ico(2).unwrap());
     let cone = meshes.add(Cone { radius: 2.3, height: 7.0 });
@@ -105,6 +165,20 @@ fn spawn_world_content(
     ];
     let n_trees = build.trees.len();
     for t in build.trees.drain(..) {
+        if let Some((mesh, mat)) = kinds.get(&t.kind) {
+            let tf = Transform::from_translation(Vec3::from(t.position))
+                .with_rotation(quat(t.rotation))
+                .with_scale(Vec3::splat(t.scale));
+            commands.spawn((
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(mat.clone()),
+                tf,
+                Tree,
+                DespawnOnExit(AppState::InGame),
+                VisibilityRange::abrupt(0.0, 900.0),
+            ));
+            continue;
+        }
         let conifer = t.kind % 3 == 0;
         let leaf = leaves[(t.kind as usize / 3) % 3].clone();
         let tf = Transform::from_translation(Vec3::from(t.position))

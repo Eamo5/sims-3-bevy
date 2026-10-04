@@ -49,6 +49,11 @@ fn main() {
         let walls: usize = w.buildings.iter().map(|b| b.walls.len()).sum();
         let objs: usize = w.buildings.iter().map(|b| b.objects.len()).sum();
         println!("houses: {} with {walls} wall segments, {objs} objects", w.buildings.len());
+        let kinds: std::collections::HashSet<u64> = w.trees.iter().map(|t| t.kind).collect();
+        println!("trees: {} of {} kinds, {} kinds with billboards", w.trees.len(), kinds.len(), w.tree_kinds.len());
+        for k in w.tree_kinds.iter().take(5) {
+            println!("  {:016X} h {:.1} r {:.1} views {:?}", k.kind, k.height, k.radius, k.views.iter().map(|v| v.map(|x| (x * 100.0).round() / 100.0)).collect::<Vec<_>>());
+        }
         return;
     }
     let t0 = Instant::now();

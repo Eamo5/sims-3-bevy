@@ -4,6 +4,7 @@
 
 pub mod bake;
 pub mod building;
+pub mod trees;
 pub mod ddsw;
 pub mod pack;
 pub mod types;

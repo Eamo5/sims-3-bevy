@@ -233,6 +233,20 @@ fn main() {
         }
         return;
     }
+    if args[1] == "lots" {
+        // lots <world> [x z radius]: lots with id, name, corner and size.
+        let w = Package::open(&args[2]).unwrap();
+        let near: Option<(f32, f32, f32)> = (args.len() >= 6).then(|| (args[3].parse().unwrap(), args[4].parse().unwrap(), args[5].parse().unwrap()));
+        for e in w.of_type(0xD063545B) {
+            let Ok(l) = s3formats::world::LotInfo::parse(e.key.i, &w.read(e).unwrap()) else { continue };
+            if let Some((x, z, r)) = near {
+                let (dx, dz) = (l.corner[0] - x, l.corner[2] - z);
+                if (dx * dx + dz * dz).sqrt() > r { continue; }
+            }
+            println!("{:016X} {} corner {:?} rot {:.2} {}x{}", l.id, l.internal_name, l.corner.map(|v| v.round()), l.rotation, l.width, l.depth);
+        }
+        return;
+    }
     if args[1] == "lotobjs" {
         // lotobjs <world> <lot id hex>: the lot's placed objects with scripts and positions.
         let w = Package::open(&args[2]).unwrap();

@@ -263,7 +263,7 @@ fn spawn_lot_chooser(
         .map(|(i, l)| (i, world.data.lot_names.get(i).cloned().unwrap_or_else(|| l.internal_name.clone()), l))
         .collect();
     // Furnished houses first, then empty lots.
-    lots.sort_by_key(|l| (!world.data.buildings.contains_key(&l.0), l.1.clone()));
+    lots.sort_by_key(|l| (!world.data.buildings.get(&l.0).is_some_and(|b| b.is_house()), l.1.clone()));
     commands
         .spawn((
             DespawnOnExit(PlayMode::ChooseLot),
@@ -304,7 +304,7 @@ fn spawn_lot_chooser(
             });
             for (i, name, lot) in lots {
                 let picture = crate::objects::cpu_texture(&data.0, s3bake::lot_thumbnail_key(lot.id)).map(|img| images.add(img));
-                let kind = match world.data.buildings.get(&i) {
+                let kind = match world.data.buildings.get(&i).filter(|b| b.is_house()) {
                     Some(b) => {
                         let floors = b.floors.iter().map(|f| f.level).collect::<std::collections::BTreeSet<_>>().len().max(1);
                         format!("Furnished house · {floors} floor{}", if floors > 1 { "s" } else { "" })
@@ -383,7 +383,7 @@ fn auto_move_in(
     let want = args.lot.clone().unwrap_or_else(|| "empty".into()).to_ascii_lowercase();
     let idx = if want == "house" {
         // The first residential lot with a pre-built house.
-        world.data.lots.iter().enumerate().position(|(i, l)| l.is_residential() && world.data.buildings.contains_key(&i))
+        world.data.lots.iter().enumerate().position(|(i, l)| l.is_residential() && world.data.buildings.get(&i).is_some_and(|b| b.is_house()))
     } else {
         world
             .data
@@ -552,7 +552,7 @@ pub fn move_in(
 ) {
     let Some(req) = request else { return };
     let lot_index = req.0;
-    let house = world.data.buildings.get(&lot_index);
+    let house = world.data.buildings.get(&lot_index).filter(|b| b.is_house());
     // A pre-built house keeps its imposter for the distant view; an empty lot loses it.
     if house.is_none() {
         for (e, imp) in &imposters {
@@ -568,7 +568,7 @@ pub fn move_in(
 
     let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
     let mut furniture_value = 0;
-    let building = house.map(|b| crate::building::spawn_building(&mut commands, &mut assets, &mut ctx, &catalog, b, &lot));
+    let building = house.map(|b| crate::building::spawn_building(&mut commands, &mut assets, &mut ctx, &catalog, b, &lot, None));
     let to_world = |x: f32, z: f32| {
         let p = center + rot * Vec3::new(x, 0.0, z);
         Vec3::new(p.x, crate::building::walk_height(&world.data, building.as_ref(), p), p.z)

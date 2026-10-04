@@ -6,9 +6,9 @@ pub use s3formats::sim::{Clip, Rig};
 pub use s3formats::world::{Heightmap, LotInfo};
 
 /// Bump whenever any baked format changes; stale caches are rebuilt.
-pub const BAKE_VERSION: u32 = 3;
+pub const BAKE_VERSION: u32 = 4;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 9;
+pub const WORLD_VERSION: u32 = 13;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -34,6 +34,8 @@ pub struct BakedPart {
     pub mode: u8,
     /// Pre-rendered (lot imposters): draw unlit.
     pub unlit: bool,
+    /// Which part of a lot imposter this is (see `LAYER_*`); 0 for ordinary models.
+    pub layer: u8,
     pub bmin: [f32; 3],
     pub bmax: [f32; 3],
 }
@@ -138,6 +140,20 @@ pub struct TreeBaked {
     pub kind: u64,
 }
 
+/// A SpeedTree species drawn from its billboard pictures.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct TreeKindBaked {
+    /// SpeedTree resource instance (matches [`TreeBaked::kind`]).
+    pub kind: u64,
+    pub billboard: Key,
+    /// Side views in the billboard atlas: uv rectangles [u0, v0, u1, v1].
+    pub views: Vec<[f32; 4]>,
+    /// Width / height of the atlas texture.
+    pub atlas_aspect: f32,
+    pub height: f32,
+    pub radius: f32,
+}
+
 /// One road / sidewalk / intersection mesh, already in world space.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct RoadPart {
@@ -164,6 +180,11 @@ pub struct WorldMap {
     pub bc3: bool,
     pub data: Vec<u8>,
 }
+
+/// Lot imposter layers: the painted ground, the roofs, and everything else (walls, objects).
+pub const LAYER_GROUND: u8 = 1;
+pub const LAYER_ROOF: u8 = 2;
+pub const LAYER_REST: u8 = 3;
 
 /// Texture-store key of a lot's picture.
 pub fn lot_thumbnail_key(lot_id: u64) -> Key {
@@ -265,6 +286,13 @@ pub struct LotBuildingBaked {
     pub objects: Vec<LotObjectBaked>,
 }
 
+impl LotBuildingBaked {
+    /// Whether there's an actual house (walls), not just furniture on an open lot.
+    pub fn is_house(&self) -> bool {
+        !self.walls.is_empty()
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct WorldBaked {
     pub version: u32,
@@ -288,4 +316,5 @@ pub struct WorldBaked {
     /// rgb: night-light glow, a: tree shadows; 1 texel per metre.
     pub lightmap: Option<WorldMap>,
     pub buildings: Vec<LotBuildingBaked>,
+    pub tree_kinds: Vec<TreeKindBaked>,
 }

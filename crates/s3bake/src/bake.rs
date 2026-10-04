@@ -101,6 +101,35 @@ fn bounds_ok(m: &MeshData) -> bool {
 
 const P_IMPOSTER_TEXTURE: u32 = 0xBDCF71C5;
 
+/// Splits a lot imposter into its painted ground, its roofs and the rest, so the ground and
+/// roofs can stay when the lot's real walls and furniture are shown up close.
+fn split_imposter(p: &BakedPart) -> Vec<BakedPart> {
+    let mut tris: [Vec<u32>; 3] = Default::default();
+    for t in p.indices.chunks_exact(3) {
+        let v = |i: u32| p.positions[i as usize];
+        let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
+        let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        let n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+        let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-9);
+        let ny = n[1].abs() / len;
+        let (lo, hi) = (a[1].min(b[1]).min(c[1]), a[1].max(b[1]).max(c[1]));
+        let layer = if hi < 0.4 && ny > 0.6 {
+            0
+        } else if lo > 2.4 && ny > 0.25 {
+            1
+        } else {
+            2
+        };
+        tris[layer].extend_from_slice(t);
+    }
+    tris.into_iter()
+        .enumerate()
+        .filter(|(_, idx)| !idx.is_empty())
+        .map(|(i, idx)| BakedPart { indices: idx, layer: i as u8 + LAYER_GROUND, ..p.clone() })
+        .collect()
+}
+
 /// Decodes a MODL into ready-to-upload parts.
 pub fn bake_model(pkgs: &PackageSet, modl: &ResourceKey) -> BakedModel {
     let meshes = model::load_model(pkgs, modl).unwrap_or_default();
@@ -123,7 +152,7 @@ pub fn bake_model(pkgs: &PackageSet, modl: &ResourceKey) -> BakedModel {
         } else {
             0
         };
-        parts.push(BakedPart {
+        let part = BakedPart {
             positions: m.positions.clone(),
             normals: m.normals.clone(),
             uvs: m.uvs.clone(),
@@ -131,9 +160,15 @@ pub fn bake_model(pkgs: &PackageSet, modl: &ResourceKey) -> BakedModel {
             texture: tex.map(|k| key_of(&k)),
             mode,
             unlit: imposter,
+            layer: 0,
             bmin: m.bounds_min,
             bmax: m.bounds_max,
-        });
+        };
+        if imposter {
+            parts.extend(split_imposter(&part));
+        } else {
+            parts.push(part);
+        }
     }
     BakedModel { parts }
 }
@@ -600,6 +635,11 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         .collect();
     let styles: Vec<(Key, bool)> = BUILD_STYLES.iter().map(|k| (*k, false)).collect();
     bake_textures(root, pkgs, &styles, 256, &format!("Converting {name}"), progress);
+    progress(&format!("Converting {name}: trees…"));
+    let mut kinds: Vec<u64> = trees.iter().map(|t| t.kind).collect::<HashSet<_>>().into_iter().collect();
+    kinds.sort();
+    let (tree_kinds, tree_tex) = crate::trees::bake_tree_kinds(pkgs, &kinds);
+    bake_textures(root, pkgs, &tree_tex, 512, &format!("Converting {name}"), progress);
     let overview = stitch_sectors(&pkg, sectors, 2);
     let lightmap = stitch_sectors(&pkg, sectors, 7);
 
@@ -620,6 +660,7 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         overview,
         lightmap,
         buildings,
+        tree_kinds,
     };
     write_value(&wdir.join("world.bin"), &baked).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_dir_all(&final_dir);
