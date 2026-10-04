@@ -1,3 +1,4 @@
+mod anim;
 mod autotest;
 mod buy;
 mod camera;
@@ -11,6 +12,7 @@ mod menu;
 mod nav;
 mod objects;
 mod sim;
+mod simbody;
 mod terrain;
 mod world;
 
@@ -66,6 +68,7 @@ fn main() {
             home::HomePlugin,
             buy::BuyPlugin,
             world::WorldPlugin,
+            anim::AnimPlugin,
         ))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)

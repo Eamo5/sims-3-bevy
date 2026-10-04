@@ -66,7 +66,7 @@ fn models_of(pkgs: &PackageSet, o: &PlacedObject) -> Vec<ResourceKey> {
 }
 
 /// Runs `f` over `items` on all CPU cores.
-fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+pub fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(16);
     let chunk = items.len().div_ceil(threads).max(1);
     std::thread::scope(|s| {

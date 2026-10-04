@@ -160,6 +160,65 @@ fn main() {
         }
         return;
     }
+    if args[1] == "cas" {
+        // cas <root>: summarize CAS parts and rig
+        let root = std::path::Path::new(&args[2]);
+        let set = s3pkg::install::open_install(root, |_| true);
+        let rig = s3formats::sim::Rig::parse(&set.read_ti(types::RIG, s3pkg::fnv64("auRig")).unwrap()).unwrap();
+        println!("rig {} bones={}", rig.name, rig.bones.len());
+        let mut keys: Vec<_> = set.keys_of_type(types::CASP).copied().collect();
+        keys.sort();
+        let (mut ok, mut bad) = (0, 0);
+        let filter = args.get(3).cloned().unwrap_or_default().to_lowercase();
+        for k in keys {
+            let d = set.read(&k).unwrap();
+            match s3formats::sim::CasPart::parse(&d) {
+                Ok(c) => {
+                    ok += 1;
+                    if !filter.is_empty() && c.name.to_lowercase().contains(&filter) {
+                        let geoms = c.lod0_geoms(&set);
+                        println!("{k} {} type={} dt={:X} ag={:08X} cat={:08X} vpxy={} diffuse={:?} geoms={:?} presets={}", c.name, c.clothing_type, c.data_type, c.age_gender, c.category, c.vpxy.len(), c.diffuse, geoms, c.presets.len());
+                        for g in geoms.iter().take(3) {
+                            match s3formats::sim::Geom::parse(&set.read(g).or_else(|| set.read_ti(g.t, g.i)).unwrap_or_default()) {
+                                Ok(geo) => println!("    geom {g}: verts={} tris={} bones={} shader={:08X} params={}", geo.positions.len(), geo.indices.len()/3, geo.bone_hashes.len(), geo.shader, geo.params.len()),
+                                Err(e) => println!("    geom {g}: ERR {e}"),
+                            }
+                        }
+                    }
+                }
+                Err(_) => bad += 1,
+            }
+        }
+        println!("casp ok={ok} bad={bad}");
+        return;
+    }
+    if args[1] == "tones" {
+        let root = std::path::Path::new(&args[2]);
+        let set = s3pkg::install::open_install(root, |_| true);
+        for k in set.keys_of_type(s3formats::sim::T_TONE).copied().collect::<Vec<_>>() {
+            let t = s3formats::sim::SkinTone::parse(&set.read(&k).unwrap()).unwrap();
+            println!("{k} ramp={:?}", t.ramp);
+            for x in &t.textures { if x.age_gender & 0x30 != 0 { println!("   ag={:08X} type={} light={:?} dark={:?}", x.age_gender, x.type_flags, x.detail_light, x.detail_dark); } }
+        }
+        return;
+    }
+    if args[1] == "clips" {
+        let root = std::path::Path::new(&args[2]);
+        let set = s3pkg::install::open_install(root, |_| true);
+        let filter = args.get(3).cloned().unwrap_or_default().to_lowercase();
+        let mut n = 0;
+        for k in set.keys_of_type(types::CLIP).copied().collect::<Vec<_>>() {
+            let Some(d) = set.read(&k) else { continue };
+            if let Some(name) = s3formats::sim::clip_name(&d) {
+                n += 1;
+                if name.to_lowercase().contains(&filter) {
+                    println!("{k} {name}");
+                }
+            }
+        }
+        eprintln!("{n} clips");
+        return;
+    }
     if args[1] == "objn" {
         let w = Package::open(&args[2]).unwrap();
         let all = s3formats::objn::load_world_objects(&w);
@@ -227,6 +286,25 @@ fn main() {
                 }
             }
         }
+        return;
+    }
+    if args[1] == "txtckey" {
+        let root = std::path::Path::new(&args[2]);
+        let set = s3pkg::install::open_install(root, |_| true);
+        let parts: Vec<&str> = args[3].split(':').collect();
+        let tk = s3pkg::ResourceKey::new(parse_hex(parts[0]) as u32, parse_hex(parts[1]) as u32, parse_hex(parts[2]));
+        let td = set.read(&tk).unwrap();
+        let t = s3formats::txtc::Txtc::parse(&td).unwrap();
+        fn dump(t: &s3formats::txtc::Txtc, ind: &str) {
+            println!("{ind}version {} keys:", t.version);
+            for (i, k) in t.keys.iter().enumerate() { println!("{ind}  [{i}] {k}"); }
+            for (idx, f) in &t.fabrics { println!("{ind}fabric tgi[{idx}]:"); dump(f, &format!("{ind}    ")); }
+            for s in &t.steps {
+                let props: Vec<String> = s.props.iter().filter(|(p, _)| ![0xD92A4C8B, 0x2EDF5F53, 0x06A775CE, 0xAE5FE82A, 0x331178DF, 0x6B7119C1].contains(p)).map(|(p, v)| format!("{}={:?}", s3formats::txtc::Txtc::prop_name(*p), v)).collect();
+                println!("{ind}  {} {}", s3formats::txtc::Txtc::step_name(s.kind()), props.join(" "));
+            }
+        }
+        dump(&t, "");
         return;
     }
     if args[1] == "txtc" {

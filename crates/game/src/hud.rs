@@ -34,6 +34,7 @@ impl Plugin for HudPlugin {
                     update_notifications,
                     keyboard_shortcuts,
                     hud_button_visuals,
+                    update_fps,
                 )
                     .chain()
                     .run_if(in_state(PlayMode::Live)),
@@ -80,6 +81,16 @@ struct MemberButton(Entity);
 struct NotesPanel;
 #[derive(Component)]
 struct HudButton;
+#[derive(Component)]
+struct FpsText;
+
+fn update_fps(time: Res<Time>, mut avg: Local<f32>, mut q: Query<&mut Text, With<FpsText>>) {
+    let dt = time.delta_secs().max(1e-4);
+    *avg = if *avg == 0.0 { dt } else { *avg * 0.95 + dt * 0.05 };
+    if let Ok(mut t) = q.single_mut() {
+        t.0 = format!("{:.0} fps", 1.0 / *avg);
+    }
+}
 /// UI regions that should swallow world clicks.
 #[derive(Component)]
 struct BlocksWorld;
@@ -226,6 +237,14 @@ fn spawn_hud(mut commands: Commands) {
             row_gap: Val::Px(6.0),
             ..default()
         },
+    ));
+
+    // Frame rate (top centre)
+    commands.spawn((
+        DespawnOnExit(AppState::InGame),
+        FpsText,
+        text("", 13.0, Color::srgba(1.0, 1.0, 1.0, 0.6)),
+        Node { position_type: PositionType::Absolute, top: Val::Px(6.0), left: Val::Percent(48.0), ..default() },
     ));
 
     // Help line

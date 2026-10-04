@@ -161,7 +161,7 @@ pub struct SimAnim {
     pub seat_height: f32,
 }
 
-/// Handles to the sim's animated body parts.
+/// Handles to the stand-in body parts (used when no CAS body could be built).
 #[derive(Component)]
 pub struct SimBody {
     pub root: Entity,
@@ -169,8 +169,11 @@ pub struct SimBody {
     pub head: Entity,
     pub legs: [Entity; 2],
     pub arms: [Entity; 2],
-    pub plumbob: Entity,
 }
+
+/// The plumbob floating above the sim.
+#[derive(Component)]
+pub struct PlumbobRef(pub Entity);
 
 #[derive(Resource, Default)]
 pub struct SimAssets {
@@ -265,6 +268,56 @@ pub fn random_last_name(rng: &mut impl Rng) -> String {
     LAST[rng.random_range(0..LAST.len())].to_string()
 }
 
+/// Asset stores needed to spawn a sim body.
+pub struct SimSpawnCtx<'a> {
+    pub assets: &'a SimAssets,
+    pub meshes: &'a mut Assets<Mesh>,
+    pub images: &'a mut Assets<Image>,
+    pub mats: &'a mut Assets<StandardMaterial>,
+    pub bindposes: &'a mut Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>,
+}
+
+/// Spawns a sim: a real CAS body when `model` is given, otherwise the stand-in body.
+pub fn spawn_sim_full(
+    commands: &mut Commands,
+    ctx: &mut SimSpawnCtx,
+    sim: Sim,
+    pos: Vec3,
+    model: Option<crate::simbody::SimModelCpu>,
+) -> Entity {
+    let Some(model) = model else {
+        return spawn_sim(commands, ctx.assets, ctx.mats, sim, pos);
+    };
+    let scale = if sim.age == Age::Child { 1.0 } else { 1.0 };
+    let entity = commands
+        .spawn((
+            Transform::from_translation(pos).with_scale(Vec3::splat(scale)),
+            Visibility::default(),
+            sim,
+            Motives::default(),
+            DecayScale::default(),
+            Relationships::default(),
+            SimAnim::default(),
+            crate::anim::ClipPlayer::default(),
+        ))
+        .id();
+    crate::simbody::spawn_sim_model(commands, entity, model, ctx.meshes, ctx.images, ctx.mats, ctx.bindposes);
+    let plumbob = commands
+        .spawn((
+            Mesh3d(ctx.assets.plumbob.clone()),
+            MeshMaterial3d(ctx.mats.add(StandardMaterial {
+                base_color: Color::srgb(0.2, 0.95, 0.2),
+                emissive: LinearRgba::rgb(0.1, 0.9, 0.1),
+                ..default()
+            })),
+            Transform::from_xyz(0.0, 2.15, 0.0).with_scale(Vec3::splat(0.22)),
+            Visibility::Hidden,
+        ))
+        .id();
+    commands.entity(entity).add_child(plumbob).insert(PlumbobRef(plumbob));
+    entity
+}
+
 /// Spawns a sim with a simple articulated body at `pos`.
 pub fn spawn_sim(
     commands: &mut Commands,
@@ -344,7 +397,7 @@ pub fn spawn_sim(
         .id();
     commands.entity(root).add_children(&[torso, head, legs[0], legs[1], arms[0], arms[1]]);
     commands.entity(entity).add_children(&[root, plumbob]);
-    commands.entity(entity).insert(SimBody { root, torso, head, legs, arms, plumbob });
+    commands.entity(entity).insert((SimBody { root, torso, head, legs, arms }, PlumbobRef(plumbob)));
     entity
 }
 
@@ -453,12 +506,12 @@ pub fn mood_color(mood: f32) -> Color {
 
 fn update_plumbobs(
     time: Res<Time>,
-    sims: Query<(&SimBody, &Motives, Has<Selected>)>,
+    sims: Query<(&PlumbobRef, &Motives, Has<Selected>)>,
     mut q: Query<(&mut Transform, &mut Visibility, &MeshMaterial3d<StandardMaterial>)>,
     mut mats: ResMut<Assets<StandardMaterial>>,
 ) {
-    for (body, motives, selected) in &sims {
-        if let Ok((mut tf, mut vis, mat)) = q.get_mut(body.plumbob) {
+    for (plumbob, motives, selected) in &sims {
+        if let Ok((mut tf, mut vis, mat)) = q.get_mut(plumbob.0) {
             *vis = if selected { Visibility::Inherited } else { Visibility::Hidden };
             tf.rotation = Quat::from_rotation_y(time.elapsed_secs() * 1.5);
             tf.translation.y = 2.15 + (time.elapsed_secs() * 2.0).sin() * 0.03;

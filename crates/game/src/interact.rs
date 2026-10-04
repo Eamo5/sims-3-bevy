@@ -280,6 +280,29 @@ static TREADMILL: [InteractionDef; 1] = [InteractionDef {
 static CHESS: [InteractionDef; 1] =
     [InteractionDef { skill: Some("Logic"), ..def("Play Chess", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 40.0], Pose::Use) }];
 
+/// The animation clip played while performing an interaction.
+pub fn interaction_clip(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "Have Quick Meal" | "Grab a Snack" | "Microwave Dinner" => "a2o_fridge_openDoor_x",
+        "Cook Dinner" => "a2o_stove_clean_loop_x",
+        "Use Toilet" | "Sit" => "a2o_sitTemplate_sit_loopBreathe",
+        "Take Shower" => "a2o_shower_takeShower_loop1_x",
+        "Wash Hands" => "a2o_sink_brushTeeth_Loop1_x",
+        "Watch TV" | "Watch Cooking Channel" => "a_idle_neutral_loop_3",
+        "Play Computer Games" => "a2o_computer_game_loop1_counter_x",
+        "Write Novel" | "Find a Job" | "Quit Job" => "a2o_computer_chess_type_loop_counter_x",
+        "Dance" => "a_dance_beg_posAHeadBob_x",
+        "Read a Book" => "a2o_book_readBook_standing_loopRead_x",
+        "Practice Speech" => "a2o_mirror_full_checkSelfOut_loop1_x",
+        "Paint" => "a2o_holographicEasel_loopMed_1_x",
+        "Play Guitar" => "a2o_guitar_play_high_loop1_x",
+        "Work Out" => "a2o_treadmill_jog_loop_x",
+        "Play Chess" => "a2o_chessTable_loop1_x",
+        "Sleep" | "Nap" | "Relax" | "Take Bath" => "a2o_bed_sleep_back_loop_x",
+        _ => return None,
+    })
+}
+
 pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
     match kind {
         ObjectKind::Fridge => &FRIDGE,
@@ -560,6 +583,9 @@ fn run_actions(
                                     let d = &interactions_for(obj.kind)[*def];
                                     anim.pose = d.pose;
                                     *decay = DecayScale(d.decay);
+                                    if let Some(c) = interaction_clip(d.name) {
+                                        commands.entity(me).insert(crate::anim::ActionClip(c));
+                                    }
                                     let face = otf.rotation * Quat::from_rotation_y(std::f32::consts::PI);
                                     if d.on_object {
                                         let c = obj.world_center(otf);
@@ -678,6 +704,7 @@ fn run_actions(
         }
 
         if finished {
+            commands.entity(me).remove::<crate::anim::ActionClip>();
             queue.0.pop_front();
             *decay = DecayScale::default();
             anim.pose = Pose::Stand;

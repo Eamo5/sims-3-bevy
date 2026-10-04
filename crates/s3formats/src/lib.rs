@@ -4,6 +4,7 @@ pub mod model;
 pub mod object;
 pub mod objn;
 pub mod rcol;
+pub mod sim;
 pub mod stbl;
 pub mod txtc;
 pub mod util;

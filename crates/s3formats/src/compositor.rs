@@ -87,11 +87,12 @@ pub struct Compositor<'a> {
     pkgs: &'a PackageSet,
     images: HashMap<ResourceKey, Option<Rgba>>,
     pub max_size: usize,
+    base: Option<Buf>,
 }
 
 impl<'a> Compositor<'a> {
     pub fn new(pkgs: &'a PackageSet) -> Self {
-        Self { pkgs, images: HashMap::new(), max_size: 512 }
+        Self { pkgs, images: HashMap::new(), max_size: 512, base: None }
     }
 
     fn image(&mut self, key: ResourceKey) -> Option<Rgba> {
@@ -172,9 +173,24 @@ impl<'a> Compositor<'a> {
         self.run_limited(t, w, h, usize::MAX)
     }
 
+    /// Runs a program with render target A pre-filled from `base` (e.g. skin under clothing).
+    pub fn run_with_base(&mut self, t: &Txtc, w: usize, h: usize, base: Option<Rgba>) -> Rgba {
+        self.base = base.map(|b| {
+            let mut buf = vec![[0.0; 4]; w * h];
+            for y in 0..h {
+                for x in 0..w {
+                    buf[y * w + x] = b.sample((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+                }
+            }
+            buf
+        });
+        self.run_limited(t, w, h, usize::MAX)
+    }
+
     pub fn run_limited(&mut self, t: &Txtc, w: usize, h: usize, limit: usize) -> Rgba {
         let mut targets: HashMap<u32, Buf> = HashMap::new();
-        targets.insert(RT_A, vec![[0.0; 4]; w * h]);
+        let base = self.base.take().filter(|b| b.len() == w * h);
+        targets.insert(RT_A, base.unwrap_or_else(|| vec![[0.0; 4]; w * h]));
         targets.insert(RT_B, vec![[0.0; 4]; w * h]);
         let mut current = RT_A;
         let mut fabrics: HashMap<u8, Rgba> = HashMap::new();

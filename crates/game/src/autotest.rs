@@ -133,6 +133,7 @@ fn auto_screenshot(
     let s = *start.get_or_insert(t);
     match *state {
         0 if t - s > args.shot_delay => {
+            info!("autotest: {:.1} fps (frame {:.2} ms)", 1.0 / time.delta_secs().max(1e-4), time.delta_secs() * 1000.0);
             commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path.clone()));
             *state = 1;
         }

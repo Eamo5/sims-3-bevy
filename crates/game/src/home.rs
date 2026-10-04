@@ -522,6 +522,10 @@ pub fn move_in(
     mut cam: Query<&mut SimsCamera>,
     mut notes: ResMut<Notifications>,
     imposters: Query<(Entity, &crate::world::LotImposter)>,
+    (mut bindposes, mut prepared): (
+        ResMut<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>,
+        Option<ResMut<crate::simbody::PreparedSims>>,
+    ),
 ) {
     let Some(req) = request else { return };
     let lot_index = req.0;
@@ -587,10 +591,30 @@ pub fn move_in(
 
     let mut rng = rand::rng();
     let mut first = None;
-    let n = pending.members.len();
-    for (i, s) in pending.members.iter().enumerate() {
+    let (members, neighbors) = match prepared.as_mut() {
+        Some(p) if !p.members.is_empty() => (std::mem::take(&mut p.members), std::mem::take(&mut p.neighbors)),
+        _ => {
+            let n: Vec<(Sim, Option<crate::simbody::SimModelCpu>)> = pending.members.iter().map(|s| (s.clone(), None)).collect();
+            let nb = (0..2)
+                .map(|k| {
+                    let last = random_last_name(&mut rng);
+                    (random_sim(&mut rng, &last, None, if k == 0 { Age::Adult } else { Age::YoungAdult }), None)
+                })
+                .collect();
+            (n, nb)
+        }
+    };
+    let mut sctx = SimSpawnCtx {
+        assets: &sim_assets,
+        meshes: &mut meshes,
+        images: &mut images,
+        mats: &mut mats,
+        bindposes: &mut bindposes,
+    };
+    let n = members.len();
+    for (i, (s, model)) in members.into_iter().enumerate() {
         let p = to_world(-1.0 + (i as f32 - n as f32 * 0.5) * 0.9, 0.9);
-        let e = spawn_sim(&mut commands, &sim_assets, &mut mats, s.clone(), p);
+        let e = spawn_sim_full(&mut commands, &mut sctx, s, p, model);
         commands.entity(e).insert((
             HouseholdMember,
             ActionQueue::default(),
@@ -604,18 +628,17 @@ pub fn move_in(
         }
     }
     // A couple of neighbours drop by to say hello.
-    for k in 0..2 {
-        let last = random_last_name(&mut rng);
-        let s = random_sim(&mut rng, &last, None, if k == 0 { Age::Adult } else { Age::YoungAdult });
+    for (k, (s, model)) in neighbors.into_iter().enumerate() {
         let p = to_world(-3.0 + k as f32 * 6.0, -(lot.depth as f32) * 0.5 + 1.0);
-        let e = spawn_sim(&mut commands, &sim_assets, &mut mats, s.clone(), p);
+        let name = s.full_name();
+        let e = spawn_sim_full(&mut commands, &mut sctx, s, p, model);
         commands.entity(e).insert((
             ActionQueue::default(),
             AutonomyTimer(rng.random_range(1.0..4.0)),
             Skills::default(),
             DespawnOnExit(AppState::InGame),
         ));
-        notes.push(format!("{} from next door came over to welcome the {}s.", s.full_name(), pending.last_name));
+        notes.push(format!("{name} from next door came over to welcome the {} family.", pending.last_name));
     }
     if let Ok(mut c) = cam.single_mut() {
         c.look_at(dc);

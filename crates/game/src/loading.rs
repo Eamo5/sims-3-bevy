@@ -30,6 +30,8 @@ pub struct LoadResult {
     pub strings: Strings,
     pub catalog: Catalog,
     pub world_build: crate::world::WorldBuild,
+    pub cas: crate::simbody::CasData,
+    pub sims: crate::simbody::PreparedSims,
 }
 
 /// English localised strings keyed by FNV64.
@@ -108,7 +110,13 @@ pub struct CurrentWorld {
     pub data: Arc<WorldData>,
 }
 
-fn start_loading(mut commands: Commands, install: Res<InstallPath>, selected: Res<SelectedWorld>) {
+fn start_loading(
+    mut commands: Commands,
+    install: Res<InstallPath>,
+    selected: Res<SelectedWorld>,
+    pending: Option<Res<crate::home::PendingHousehold>>,
+) {
+    let members: Vec<crate::sim::Sim> = pending.map(|p| p.members.clone()).unwrap_or_default();
     commands.spawn((Camera2d, DespawnOnExit(AppState::Loading)));
     commands
         .spawn((
@@ -154,8 +162,11 @@ fn start_loading(mut commands: Commands, install: Res<InstallPath>, selected: Re
         set_status("Building the buy catalog…");
         let catalog = Catalog::build(&packages, &strings);
         let world_build = crate::world::build_world(&packages, &world_pkg, &world, &set_status);
+        set_status("Dressing your Sims…");
+        let cas = crate::simbody::build_cas(&packages);
+        let sims = crate::simbody::prepare_sims(&packages, &cas, &members);
         set_status("Done");
-        Ok(LoadResult { packages, world_pkg, world, terrain, strings, catalog, world_build })
+        Ok(LoadResult { packages, world_pkg, world, terrain, strings, catalog, world_build, cas, sims })
     });
     commands.insert_resource(LoadTask { task, progress });
 }
@@ -188,6 +199,8 @@ fn poll_loading(
             commands.insert_resource(r.strings);
             commands.insert_resource(r.catalog);
             commands.insert_resource(r.world_build);
+            commands.insert_resource(r.cas);
+            commands.insert_resource(r.sims);
             next.set(AppState::InGame);
         }
         Err(e) => {
