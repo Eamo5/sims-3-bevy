@@ -71,6 +71,9 @@ pub struct Sim {
     pub hair: Color,
     pub top: Color,
     pub bottom: Color,
+    /// Body shape: weight from thin (-1) to heavy (1), and fitness (0..1).
+    pub weight: f32,
+    pub fitness: f32,
 }
 
 /// CAS parts chosen for a Sim (baked part keys).
@@ -274,6 +277,9 @@ pub fn random_sim(rng: &mut impl Rng, last: &str, female: Option<bool>, age: Age
         hair: Color::srgb(hr, hg, hb),
         top: Color::hsl(hue, 0.55, 0.5),
         bottom: Color::hsl((hue + 180.0) % 360.0, 0.3, 0.3),
+        // Most Sims are of middling build; a few are thin, heavy or very fit.
+        weight: if age.is_little() { 0.0 } else { ((rng.random_range(-1.0f32..1.0) + rng.random_range(-1.0f32..1.0)) * 0.45).clamp(-1.0, 1.0) },
+        fitness: if age.is_little() { 0.0 } else { (rng.random_range(0.0f32..1.0) * rng.random_range(0.0f32..1.0)).min(1.0) },
     }
 }
 

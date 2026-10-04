@@ -1161,10 +1161,30 @@ entry_count × { u32 facial_region_flags;        // Eyes 1, Nose 2, Mouth 4, Tra
 TGI list
 ```
 A slider = a set of morph meshes (vertex deltas keyed by GEOM vertex id) and bone deltas, applied
-with `amount * slider_value`. BGEO (0x067CAA11) stores deltas compactly: per vertex a u16 with
-bits 0/1 = has position/normal delta and bits 2..15 = offset into a list of 3×u16 deltas
-(value = float × 2000 rounded, stored with the sign bit flipped) **[wiki, cmar]**.
-**Low priority**: skip for a first pass.
+with `amount * slider_value`.
+
+**Body shape [verified, implemented]:** a CASP names four BBLNs right after its naked/parent
+indices (u8 key indices: fat, fit, thin, special). Body BBLNs are **version 8**: after the part
+name come `u32 (2)` and the TGI (type, group, u64 instance) of a BGEO; the entry (region 0x400
+Body, one geom ref) points at a null key — the deltas are in the BGEO.
+
+BGEO 0x067CAA11 **[verified]**:
+```
+char[4] "BGEO"; u32 version (0x300); u32 blends; u32 lods (4)
+u32 total_vertices; u32 total_vectors
+u32 blend_header_size (8); u32 lod_entry_size (12)
+u32 blends_offset; u32 vertices_offset; u32 vectors_offset     // from the file start
+blends × { u32 age_gender; u32 region;
+           lods × { u32 first_vertex_id; u32 vertex_count; u32 vector_count } }
+total_vertices × u16      // per vertex id (first_vertex_id + k), LOD after LOD
+total_vectors × 3×u16     // (u ^ 0x8000) as i16 / 2000
+```
+Each vertex u16: bit 0 = has a position delta, bit 1 = has a normal delta, bits 2..15 = a
+signed step added to a running index (not reset between LODs) into that LOD's vectors; the
+position delta is at the index, the normal delta right after it. Vectors are shared between
+vertices. Vertex ids are GEOM vertex element usage 10 (u32); LOD 0 meshes use ids from the
+BGEO's second LOD block (the first is empty), so match by id range, not LOD number. Deltas run
+up to ~12 cm (heavy) and ~3 cm (fit, thin).
 
 ### 7.3 BOND 0x0355E0A6 — bone/slot adjust **[wiki; src: s3py BoneDelta]**
 

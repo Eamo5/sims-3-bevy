@@ -852,6 +852,11 @@ fn run_actions(
                                     }
                                     motives.add(i, gain * dt / 60.0);
                                 }
+                                // Working out builds fitness and burns off weight.
+                                if d.pose == Pose::Exercise {
+                                    let h = dt / 60.0;
+                                    commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| crate::aging::reshape(&mut e, -0.03 * h, 0.05 * h));
+                                }
                                 if let Some(sk) = d.skill {
                                     let rate = crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes);
                                     let e = skills.0.entry(sk).or_insert(0.0);

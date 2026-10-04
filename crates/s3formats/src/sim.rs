@@ -74,6 +74,8 @@ pub struct Geom {
     pub indices: Vec<u32>,
     pub bone_hashes: Vec<u32>,
     pub keys: Vec<ResourceKey>,
+    /// Vertex ids (shared by a mesh and its morphs), when the mesh has them.
+    pub ids: Vec<u32>,
 }
 
 impl Geom {
@@ -140,6 +142,7 @@ impl Geom {
                         uv_seen = true;
                     }
                     4 => bi = r.bytes(4)?.try_into().unwrap(),
+                    10 if size == 4 => g.ids.push(r.u32()?),
                     5 => {
                         if size == 16 {
                             bw = [r.f32()?, r.f32()?, r.f32()?, r.f32()?];
@@ -219,6 +222,8 @@ pub struct CasPart {
     pub diffuse: Vec<ResourceKey>,
     pub presets: Vec<String>,
     pub keys: Vec<ResourceKey>,
+    /// Body-shape blends (BBLN): fat, fit, thin, special.
+    pub blends: [Option<ResourceKey>; 4],
 }
 
 fn str7_be(r: &mut Reader) -> R<String> {
@@ -271,7 +276,11 @@ impl CasPart {
         let category = r.u32()?;
         let _naked = r.u8()?;
         let _parent = r.u8()?;
-        r.skip(4)?;
+        // Body-shape blends: fat, fit, thin, special.
+        let mut blends = [None; 4];
+        for b in blends.iter_mut() {
+            *b = keys.get(r.u8()? as usize).copied().filter(|k: &ResourceKey| k.t == T_BLEND);
+        }
         let _overlay = r.u32()?;
         let nv = r.u8()? as usize;
         let mut vpxy = Vec::new();
@@ -296,7 +305,7 @@ impl CasPart {
                 diffuse.push(*k);
             }
         }
-        Ok(Self { name, clothing_type, data_type, age_gender, category, vpxy, diffuse, presets, keys })
+        Ok(Self { name, clothing_type, data_type, age_gender, category, vpxy, diffuse, presets, keys, blends })
     }
 
     /// GEOM keys for LOD 0 from the part's first VPXY.
@@ -646,4 +655,156 @@ impl SkinTone {
             .iter()
             .find(|t| t.age_gender & age != 0 && t.age_gender & gender != 0 && t.type_flags & kind != 0)
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// BBLN 0x062C8204 (body blends) / FACE 0x0358B08A (face sliders)
+
+pub const T_BLEND: u32 = 0x062C8204;
+
+/// One region of a blend: morph meshes per age/gender (age_gender, amount, key index) and bone
+/// morphs.
+#[derive(Clone, Debug, Default)]
+pub struct BlendEntry {
+    pub region: u32,
+    pub geoms: Vec<(u32, f32, u32)>,
+    pub bones: Vec<(u32, f32, u32)>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct BlendInfo {
+    pub name: String,
+    pub entries: Vec<BlendEntry>,
+    pub keys: Vec<ResourceKey>,
+    /// Version 8: the BGEO holding the vertex deltas.
+    pub bgeo: Option<ResourceKey>,
+}
+
+impl BlendInfo {
+    pub fn parse(d: &[u8]) -> R<Self> {
+        let mut r = Reader::new(d);
+        let version = r.u32()?;
+        let tgi_rel = r.u32()? as usize;
+        let tgi_pos = 8 + tgi_rel;
+        let _tgi_size = r.u32()?;
+        let name = str7_be(&mut r)?;
+        let mut bgeo = None;
+        if version >= 8 {
+            let _n = r.u32()?;
+            let (t, g, i) = (r.u32()?, r.u32()?, r.u64()?);
+            bgeo = Some(ResourceKey::new(t, g, i));
+        }
+        let n = r.u32()? as usize;
+        if n > 256 {
+            return Err(Eof);
+        }
+        let mut entries = Vec::with_capacity(n);
+        for _ in 0..n {
+            let region = r.u32()?;
+            let mut list = || -> R<Vec<(u32, f32, u32)>> {
+                let m = r.u32()? as usize;
+                if m > 256 {
+                    return Err(Eof);
+                }
+                (0..m).map(|_| Ok((r.u32()?, r.f32()?, r.u32()?))).collect()
+            };
+            let geoms = list()?;
+            let bones = list()?;
+            entries.push(BlendEntry { region, geoms, bones });
+        }
+        let mut t = Reader::at(d, tgi_pos);
+        let nk = t.u32()? as usize;
+        let mut keys = Vec::new();
+        for _ in 0..nk.min(512) {
+            let ty = t.u32()?;
+            let g = t.u32()?;
+            let i = t.u64()?;
+            keys.push(ResourceKey::new(ty, g, i));
+        }
+        Ok(Self { name, entries, keys, bgeo })
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// BGEO 0x067CAA11: blend geometry (vertex deltas of a body or face morph)
+
+pub const T_BGEO: u32 = 0x067CAA11;
+
+/// The deltas of one blend: per vertex id, a position and a normal delta.
+#[derive(Clone, Debug, Default)]
+pub struct BgeoBlend {
+    pub age_gender: u32,
+    pub region: u32,
+    pub deltas: HashMap<u32, ([f32; 3], [f32; 3])>,
+}
+
+/// Layout: "BGEO", version 0x300, blend count, LOD count, total vertices, total vectors, blend
+/// header size (8), LOD entry size (12), then offsets of the blends, the per-vertex u16s and the
+/// vectors. Each blend: age/gender, region, then per LOD (first vertex id, vertex count, vector
+/// count). Each vertex's u16: bit 0 = has a position delta, bit 1 = has a normal delta, bits
+/// 2..15 = a signed step of a running index (never reset) into the LOD's vectors (shared). A
+/// vector is 3 × u16, each a signed value with its sign bit flipped, / 2000.
+pub fn parse_bgeo(d: &[u8]) -> R<Vec<BgeoBlend>> {
+    let mut r = Reader::new(d);
+    if r.fourcc()? != *b"BGEO" {
+        return Err(Eof);
+    }
+    let _version = r.u32()?;
+    let nblend = r.u32()? as usize;
+    let nlod = r.u32()? as usize;
+    let _total_verts = r.u32()?;
+    let _total_vecs = r.u32()?;
+    let bsize = r.u32()? as usize;
+    let lsize = r.u32()? as usize;
+    let boff = r.u32()? as usize;
+    let voff = r.u32()? as usize;
+    let vecoff = r.u32()? as usize;
+    if nblend > 64 || nlod > 16 || lsize < 12 {
+        return Err(Eof);
+    }
+    let u16_at = |o: usize| -> R<u16> { d.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]])).ok_or(Eof) };
+    let comp = |u: u16| ((u ^ 0x8000) as i16) as f32 / 2000.0;
+    let vec_at = |i: usize| -> R<[f32; 3]> {
+        let o = vecoff + i * 6;
+        Ok([comp(u16_at(o)?), comp(u16_at(o + 2)?), comp(u16_at(o + 4)?)])
+    };
+    let mut out = Vec::with_capacity(nblend);
+    // Vertex and vector runs follow each other blend by blend, LOD by LOD.
+    let (mut vbase, mut vecbase) = (0usize, 0usize);
+    for b in 0..nblend {
+        let mut h = Reader::at(d, boff + b * (bsize + nlod * lsize));
+        let age_gender = h.u32()?;
+        let region = h.u32()?;
+        h.pos = boff + b * (bsize + nlod * lsize) + bsize;
+        let mut deltas = HashMap::new();
+        // (The running index carries on from one LOD to the next.)
+        let mut idx: i32 = 0;
+        for _ in 0..nlod {
+            let start = h.u32()?;
+            let nverts = h.u32()? as usize;
+            let nvecs = h.u32()? as usize;
+            h.skip(lsize - 12)?;
+            for k in 0..nverts {
+                let v = u16_at(voff + (vbase + k) * 2)?;
+                let step = ((v as i16) >> 2) as i32;
+                idx += step;
+                let flags = v & 3;
+                let at = |o: i32| -> R<[f32; 3]> {
+                    if o < 0 || o as usize >= nvecs {
+                        return Err(Eof);
+                    }
+                    vec_at(vecbase + o as usize)
+                };
+                let pos = if flags & 1 != 0 { at(idx)? } else { [0.0; 3] };
+                let nrm = if flags & 2 != 0 { at(idx + (flags & 1) as i32)? } else { [0.0; 3] };
+                if flags != 0 {
+                    deltas.insert(start + k as u32, (pos, nrm));
+                }
+            }
+            vbase += nverts;
+            vecbase += nvecs;
+        }
+        out.push(BgeoBlend { age_gender, region, deltas });
+    }
+    Ok(out)
 }

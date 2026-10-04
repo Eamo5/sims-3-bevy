@@ -84,9 +84,31 @@ fn birthday_sting(age: Age) -> &'static str {
     }
 }
 
-/// A Sim whose body must be rebuilt (after a birthday).
+/// A Sim whose body must be rebuilt (after a birthday, or when their shape has changed).
 #[derive(Component)]
 pub struct NeedsNewBody;
+
+/// Shape change since the body was last built.
+#[derive(Component, Default)]
+struct ShapeDrift(f32);
+
+/// Changes a Sim's weight and fitness, rebuilding their body once the change shows.
+pub fn reshape(e: &mut EntityWorldMut, weight: f32, fitness: f32) {
+    let Some(mut sim) = e.get_mut::<Sim>() else { return };
+    if sim.age.is_little() {
+        return;
+    }
+    let (w0, f0) = (sim.weight, sim.fitness);
+    sim.weight = (sim.weight + weight).clamp(-1.0, 1.0);
+    sim.fitness = (sim.fitness + fitness).clamp(0.0, 1.0);
+    let moved = (sim.weight - w0).abs() + (sim.fitness - f0).abs();
+    let mut drift = e.get::<ShapeDrift>().map_or(0.0, |d| d.0) + moved;
+    if drift >= 0.1 {
+        drift = 0.0;
+        e.insert(NeedsNewBody);
+    }
+    e.insert(ShapeDrift(drift));
+}
 
 /// Ages the household once a day, at midnight.
 #[allow(clippy::too_many_arguments)]

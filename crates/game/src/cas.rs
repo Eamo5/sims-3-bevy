@@ -80,6 +80,9 @@ pub enum CasAction {
     Pick(usize),
     Page(i32),
     Trait(usize),
+    /// Body shape: weight and fitness down (-1) or up (1).
+    Weight(i8),
+    Fitness(i8),
     /// Open or close the town's families.
     Families,
     /// Play town family `i` (of the playable ones).
@@ -379,6 +382,14 @@ fn cas_actions(
                 }
                 model = false;
             }
+            CasAction::Weight(d) => {
+                let s = &mut pending.members[k];
+                s.weight = (s.weight + d as f32 * 0.2).clamp(-1.0, 1.0);
+            }
+            CasAction::Fitness(d) => {
+                let s = &mut pending.members[k];
+                s.fitness = (s.fitness + d as f32 * 0.1).clamp(0.0, 1.0);
+            }
             CasAction::Families => {
                 scene.browsing = !scene.browsing;
                 model = false;
@@ -655,6 +666,25 @@ fn rebuild_ui(
                     button(p, format!("Age: {}", age_name(sim.age)), CasAction::Age, Val::Percent(100.0), false, 16.0);
                     button(p, "New Name", CasAction::RandomName, Val::Percent(100.0), false, 16.0);
                     button(p, "Randomize Everything", CasAction::Randomize, Val::Percent(100.0), false, 16.0);
+                    if !sim.age.is_little() {
+                        let bar = |v: f32| {
+                            let n = (v * 5.0).round() as i32;
+                            (0..11).map(|i| if i == n + 5 { '●' } else { '·' }).collect::<String>()
+                        };
+                        for (label, value, down, up, lo, hi) in [
+                            ("Weight", bar(sim.weight), CasAction::Weight(-1), CasAction::Weight(1), "Thin", "Heavy"),
+                            ("Fitness", bar(sim.fitness * 2.0 - 1.0), CasAction::Fitness(-1), CasAction::Fitness(1), "Soft", "Fit"),
+                        ] {
+                            p.spawn(text(label, 16.0, Color::WHITE));
+                            p.spawn(Node { column_gap: Val::Px(8.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
+                                button(row, "<", down, Val::Px(36.0), false, 16.0);
+                                row.spawn(text(lo, 13.0, Color::srgb(0.75, 0.85, 1.0)));
+                                row.spawn(text(value, 16.0, Color::srgb(1.0, 0.95, 0.7)));
+                                row.spawn(text(hi, 13.0, Color::srgb(0.75, 0.85, 1.0)));
+                                button(row, ">", up, Val::Px(36.0), false, 16.0);
+                            });
+                        }
+                    }
                     p.spawn(text("Skin Tone", 16.0, Color::WHITE));
                     p.spawn(Node { column_gap: Val::Px(8.0), ..default() }).with_children(|row| {
                         let cur = sim.skin.to_srgba();

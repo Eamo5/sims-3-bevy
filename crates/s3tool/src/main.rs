@@ -722,6 +722,70 @@ fn main() {
         println!("{}x{}", img.width, img.height);
         return;
     }
+    if args[1] == "morphs" {
+        // morphs <root> <casp name>: the part's fat/fit/thin/special blends and their morph meshes.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let want = args[3].to_ascii_lowercase();
+        for k in set.keys_of_type(types::CASP).copied().collect::<Vec<_>>() {
+            let Some(d) = set.read(&k) else { continue };
+            let Ok(c) = s3formats::sim::CasPart::parse(&d) else { continue };
+            if c.name.to_ascii_lowercase() != want {
+                continue;
+            }
+            println!("{} ag {:08X}", c.name, c.age_gender);
+            for (slot, bk) in ["fat", "fit", "thin", "special"].iter().zip(c.blends.iter()) {
+                let Some(bk) = bk else { println!("  {slot}: -"); continue };
+                let Some(bd) = set.read(bk).or_else(|| set.read_ti(bk.t, bk.i)) else { println!("  {slot}: {bk} missing"); continue };
+                println!("  {slot}: {bk} {} bytes: {:02x?}", bd.len(), &bd[..bd.len().min(48)]);
+                match s3formats::sim::BlendInfo::parse(&bd) {
+                    Ok(b) => {
+                        println!("    part {:?}, {} entries, {} keys, bgeo {:?}", b.name, b.entries.len(), b.keys.len(), b.bgeo);
+                        if let Some(gk) = b.bgeo {
+                            match set.read(&gk).or_else(|| set.read_ti(gk.t, gk.i)).map(|d| s3formats::sim::parse_bgeo(&d)) {
+                                Some(Ok(bl)) => {
+                                    for x in &bl {
+                                        println!("    bgeo blend ag {:08X} region {:#x}: {} vertex deltas", x.age_gender, x.region, x.deltas.len());
+                                    }
+                                }
+                                Some(Err(e)) => println!("    bgeo unparsed: {e}"),
+                                None => println!("    bgeo missing"),
+                            }
+                        }
+                        for e in &b.entries {
+                            println!("    region {:#x}: {} geoms, {} bones", e.region, e.geoms.len(), e.bones.len());
+                            for g in &e.geoms {
+                                let tk = b.keys.get(g.2 as usize);
+                                print!("      ag {:08X} amount {} -> {:?}", g.0, g.1, tk);
+                                if let Some(vk) = tk
+                                    && let Some(vd) = set.read(vk).or_else(|| set.read_ti(vk.t, vk.i))
+                                {
+                                    let geoms = s3formats::sim::vpxy_lod_geoms(&vd, 0);
+                                    print!(" lod0 geoms {}", geoms.len());
+                                    for gk in geoms.iter().take(2) {
+                                        if let Some(gd) = set.read(gk).or_else(|| set.read_ti(gk.t, gk.i))
+                                            && let Ok(m) = s3formats::sim::Geom::parse(&gd)
+                                        {
+                                            print!(" [{gk}: {} verts, ids {:?}.. pos {:?}]", m.positions.len(), &m.ids[..m.ids.len().min(3)], &m.positions[..m.positions.len().min(2)]);
+                                        }
+                                    }
+                                }
+                                println!();
+                            }
+                        }
+                    }
+                    Err(e) => println!("    unparsed: {e}"),
+                }
+            }
+            for g in c.lod0_geoms(&set) {
+                if let Some(gd) = set.read(&g).or_else(|| set.read_ti(g.t, g.i))
+                    && let Ok(m) = s3formats::sim::Geom::parse(&gd)
+                {
+                    println!("  base {g}: {} verts ids {:?}..", m.positions.len(), &m.ids[..m.ids.len().min(3)]);
+                }
+            }
+        }
+        return;
+    }
     if args[1] == "partlods" {
         // partlods <root> <casp name>...: every VPXY entry of the parts, per LOD, with GEOM sizes.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);

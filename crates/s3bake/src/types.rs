@@ -7,6 +7,8 @@ pub use s3formats::world::{Heightmap, LotInfo};
 
 /// Bump whenever any baked format changes; stale caches are rebuilt.
 pub const BAKE_VERSION: u32 = 4;
+/// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
+pub const CAS_VERSION: u32 = 3;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
 pub const WORLD_VERSION: u32 = 18;
 
@@ -69,6 +71,9 @@ pub struct SkinMesh {
     pub shader: u32,
     /// The mesh's own texture (eyes, lashes), if any.
     pub texture: Option<Key>,
+    /// Body-shape morphs: position deltas per vertex for heavy, fit and thin (empty when the
+    /// part has none).
+    pub morphs: [Vec<[f32; 3]>; 3],
 }
 
 /// Index entry for a CAS part; meshes live in the CAS pack.
@@ -118,6 +123,8 @@ pub struct GlobalManifest {
     pub textures: usize,
     pub cas_parts: usize,
     pub clips: usize,
+    #[serde(default)]
+    pub cas_version: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

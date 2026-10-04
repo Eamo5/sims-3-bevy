@@ -72,6 +72,9 @@ pub struct SavedSim {
     /// Pregnant since (game minutes), with the other parent's id and the stage shown so far.
     #[serde(default)]
     pub pregnancy: Option<(f64, Option<u64>, u8)>,
+    /// Body shape: weight and fitness.
+    #[serde(default)]
+    pub shape: Option<(f32, f32)>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -135,6 +138,8 @@ impl SaveGame {
                 _ => Age::YoungAdult,
             },
             traits: s.traits.iter().filter_map(|t| Trait::from_name(t)).collect(),
+            weight: s.shape.map_or(0.0, |x| x.0),
+            fitness: s.shape.map_or(0.0, |x| x.1),
             skin: c(s.skin),
             hair: c(s.hair),
             top: c(s.top),
@@ -306,6 +311,7 @@ fn save_game(
             rewards: wishes.map(|w| w.rewards.iter().map(|r| r.name().to_string()).collect()).unwrap_or_default(),
             aging: aging.map(|a| (a.days, a.elder_span)),
             pregnancy: pregnancy.map(|p| (p.since, p.other_parent.and_then(|o| ids.get(&o).copied()), p.stage)),
+            shape: Some((sim.weight, sim.fitness)),
         });
     }
     let game = SaveGame {

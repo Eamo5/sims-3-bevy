@@ -484,10 +484,31 @@ fn ui_flow(
         }
         (2, AppState::CreateHousehold, _) if since > 1.5 => {
             shot(&mut commands, "2_household");
-            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::Tab(crate::cas::CasTab::Traits))) {
+            *stage = (40, now);
+        }
+        // Body shape: five steps heavier, a picture, ten steps thinner, another.
+        (40..=44, AppState::CreateHousehold, _) if since > 0.3 => {
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == crate::home::CasAction::Weight(1)) {
                 *i = Interaction::Pressed;
             }
             advance(&mut stage);
+        }
+        (45, AppState::CreateHousehold, _) if since > 1.5 => {
+            shot(&mut commands, "2w_heavy");
+            advance(&mut stage);
+        }
+        (46..=55, AppState::CreateHousehold, _) if since > 0.3 => {
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == crate::home::CasAction::Weight(-1)) {
+                *i = Interaction::Pressed;
+            }
+            advance(&mut stage);
+        }
+        (56, AppState::CreateHousehold, _) if since > 1.5 => {
+            shot(&mut commands, "2w_thin");
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::Tab(crate::cas::CasTab::Traits))) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (3, now);
         }
         (3, AppState::CreateHousehold, _) if since > 1.0 => {
             shot(&mut commands, "2a_traits");

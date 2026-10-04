@@ -104,6 +104,12 @@ fn main() {
             println!("{} {:?} type {} ages {:x} cat {:x} baked {} layer {:?}", p.name, p.key, p.clothing_type, p.age_gender, p.category, p.baked, p.layer);
             let m: Option<s3bake::CasPartMeshes> = pack.get(&p.key);
             for (k, mesh) in m.map(|m| m.meshes).unwrap_or_default().iter().enumerate() {
+                let mags: Vec<String> = mesh
+                    .morphs
+                    .iter()
+                    .map(|d| if d.is_empty() { "-".into() } else { format!("{:.3}", d.iter().map(|v| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()).fold(0.0f32, f32::max)) })
+                    .collect();
+                println!("  mesh {k} morphs (heavy/fit/thin max delta) {mags:?}");
                 let mut mn = [f32::MAX; 3];
                 let mut mx = [f32::MIN; 3];
                 for v in &mesh.positions {

@@ -36,7 +36,9 @@ installation is unreachable.
   recipes (complates) re-rendered from each lot's designs — plus foundations, stairs and the
   house's own furniture; nearby lots are shown in full detail with
   the game's roofs, distant ones as the game's pre-rendered imposters.
-- **Sims**: Create-a-Sim from real CAS parts, skin tones and animation clips; needs, moods,
+- **Sims**: Create-a-Sim from real CAS parts, skin tones and animation clips, with the game's
+  body-shape morphs (weight and fitness sliders; town Sims keep their builds, working out
+  firms Sims up); needs, moods,
   skills, careers, relationships, autonomy, social interactions; children, teens, adults and
   elders who grow up and grow old (birthdays, new traits, passing away).
 - **Families grow**: couples can try for a baby; pregnancy brings morning sickness, then a

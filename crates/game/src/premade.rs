@@ -93,6 +93,8 @@ pub fn to_sim(p: &PremadeSim) -> Sim {
         hair: p.hair_color.map(argb).unwrap_or(Color::srgb(0.3, 0.2, 0.1)),
         top: Color::hsl(hue, 0.5, 0.5),
         bottom: Color::hsl((hue + 180.0) % 360.0, 0.3, 0.3),
+        weight: (p.fat - p.thin).clamp(-1.0, 1.0),
+        fitness: p.fit.clamp(0.0, 1.0),
     }
 }
 

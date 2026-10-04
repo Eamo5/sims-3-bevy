@@ -41,7 +41,7 @@ impl BakeRoot {
     }
     pub fn global_manifest(&self) -> Option<GlobalManifest> {
         let m: GlobalManifest = serde_json::from_slice(&std::fs::read(self.global_dir().join("manifest.json")).ok()?).ok()?;
-        (m.version == BAKE_VERSION).then_some(m)
+        (m.version == BAKE_VERSION && m.cas_version == CAS_VERSION).then_some(m)
     }
     pub fn world_ready(&self, world: &str) -> bool {
         let p = self.world_dir(world).join("world.bin");
@@ -302,6 +302,33 @@ fn skin_mesh(g: &Geom, rig: &Rig) -> SkinMesh {
         weights,
         shader: g.shader,
         texture,
+        morphs: Default::default(),
+    }
+}
+
+/// The part's body-shape morphs (heavy, fit, thin) as deltas on each of its meshes' vertices.
+fn shape_morphs(pkgs: &PackageSet, c: &CasPart, geoms: &[Geom], meshes: &mut [SkinMesh]) {
+    for (slot, bk) in c.blends.iter().take(3).enumerate() {
+        let Some(bk) = bk else { continue };
+        let Some(info) = pkgs.read(bk).or_else(|| pkgs.read_ti(bk.t, bk.i)).and_then(|d| s3formats::sim::BlendInfo::parse(&d).ok()) else {
+            continue;
+        };
+        let Some(gk) = info.bgeo else { continue };
+        let Some(blends) = pkgs.read(&gk).or_else(|| pkgs.read_ti(gk.t, gk.i)).and_then(|d| s3formats::sim::parse_bgeo(&d).ok()) else {
+            continue;
+        };
+        // The blend for this part's ages (bodies share one across ages and genders).
+        let ages = c.age_gender & 0x7F;
+        let Some(b) = blends.iter().find(|b| b.age_gender & ages != 0).or(blends.first()) else { continue };
+        for (g, m) in geoms.iter().zip(meshes.iter_mut()) {
+            if g.ids.len() != g.positions.len() {
+                continue;
+            }
+            let d: Vec<[f32; 3]> = g.ids.iter().map(|id| b.deltas.get(id).map_or([0.0; 3], |x| x.0)).collect();
+            if d.iter().any(|v| v.iter().any(|c| *c != 0.0)) {
+                m.morphs[slot] = d;
+            }
+        }
     }
 }
 
@@ -422,12 +449,13 @@ pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progr
         // Babies are skinned to their own skeleton; every other age shares bone names.
         let baby = c.age_gender & AGE_BABY != 0 && c.age_gender & 0x7E == 0;
         let part_rig = if baby { baby_rig.as_ref().unwrap_or(&rig) } else { &rig };
-        let geoms: Vec<SkinMesh> = c
+        let parsed: Vec<Geom> = c
             .lod0_geoms(pkgs)
             .iter()
             .filter_map(|g| Geom::parse(&pkgs.read(g).or_else(|| pkgs.read_ti(g.t, g.i))?).ok())
-            .map(|g| skin_mesh(&g, part_rig))
             .collect();
+        let mut geoms: Vec<SkinMesh> = parsed.iter().map(|g| skin_mesh(g, part_rig)).collect();
+        shape_morphs(pkgs, c, &parsed, &mut geoms);
         (key_of(k), CasPartMeshes { meshes: geoms })
     })
     .into_iter()
@@ -499,6 +527,7 @@ pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progr
         textures: n_tex + n_cas_tex,
         cas_parts: meshes.len(),
         clips: n_clips,
+        cas_version: CAS_VERSION,
     };
     std::fs::write(gdir.join("manifest.json"), serde_json::to_vec_pretty(&manifest).unwrap()).map_err(|e| e.to_string())?;
     Ok(manifest)

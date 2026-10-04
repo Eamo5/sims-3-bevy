@@ -206,6 +206,22 @@ pub struct SimModelCpu {
     pub textures: Vec<(Key, Image)>,
 }
 
+/// The mesh with the Sim's body shape applied (the part's heavy, fit and thin morphs).
+fn shaped(mut m: SkinMesh, sim: &Sim) -> SkinMesh {
+    let w = [sim.weight.max(0.0), sim.fitness.clamp(0.0, 1.0), (-sim.weight).max(0.0)];
+    for (morph, amount) in m.morphs.iter().zip(w) {
+        if amount <= 0.0 || morph.len() != m.positions.len() {
+            continue;
+        }
+        for (p, d) in m.positions.iter_mut().zip(morph) {
+            for k in 0..3 {
+                p[k] += d[k] * amount;
+            }
+        }
+    }
+    m
+}
+
 fn skin_mesh(m: SkinMesh) -> Mesh {
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, m.positions);
@@ -241,7 +257,7 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
     tex_keys.extend(&layers);
     for p in &outfit.body {
         for m in baked.cas_meshes(&p.key).map(|m| m.meshes).unwrap_or_default() {
-            parts.push((skin_mesh(m), SimMat::Skin { base: body_base, tint, layers: layers.clone() }));
+            parts.push((skin_mesh(shaped(m, sim)), SimMat::Skin { base: body_base, tint, layers: layers.clone() }));
         }
     }
     if let Some(face) = &outfit.face {
