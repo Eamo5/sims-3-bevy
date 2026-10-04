@@ -37,6 +37,7 @@ impl Plugin for HudPlugin {
                     hud_button_visuals,
                     update_fps,
                     update_trait_icons,
+                    update_skill_icons,
                 )
                     .chain()
                     .run_if(in_state(PlayMode::Live)),
@@ -84,6 +85,9 @@ struct TraitsText;
 /// Row of the selected Sim's trait icons.
 #[derive(Component)]
 struct TraitIcons;
+/// Row of the selected Sim's skills (icon and level).
+#[derive(Component)]
+struct SkillIcons;
 #[derive(Component)]
 struct WishesPanel;
 /// An offered wish button (index into `Wishes::offered`).
@@ -188,6 +192,7 @@ fn spawn_hud(mut commands: Commands) {
             p.spawn((text("", 14.0, Color::srgb(0.75, 0.85, 1.0)), NeedsDetail));
             p.spawn((text("", 13.0, Color::srgb(0.95, 0.85, 0.55)), TraitsText, Node::default()));
             p.spawn((TraitIcons, Node { flex_direction: FlexDirection::Row, column_gap: Val::Px(4.0), ..default() }));
+            p.spawn((SkillIcons, Node { flex_direction: FlexDirection::Row, flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(8.0), ..default() }));
             p.spawn(Node {
                 flex_direction: FlexDirection::Row,
                 flex_wrap: FlexWrap::Wrap,
@@ -800,6 +805,7 @@ fn update_needs_panel(
     mut detail: Query<&mut Text, (With<NeedsDetail>, Without<NeedsName>, Without<TraitsText>)>,
     mut traits: Query<&mut Text, (With<TraitsText>, Without<NeedsName>, Without<NeedsDetail>)>,
     mut bars: Query<(&MotiveBar, &mut Node, &mut BackgroundColor)>,
+    ui: Option<Res<crate::icons::GameUi>>,
 ) {
     let Ok((sim, motives, skills, job, at_work, _, mood)) = sel.single() else { return };
     let (away, grades) = away_q.single().unwrap_or((None, None));
@@ -839,7 +845,7 @@ fn update_needs_panel(
         };
         let mut sk: Vec<String> = skills.0.iter().filter(|(_, v)| **v >= 1.0).map(|(k, v)| format!("{k} {}", *v as u32)).collect();
         sk.sort();
-        let s = if sk.is_empty() { job_s } else { format!("{job_s} · Skills: {}", sk.join(", ")) };
+        let s = if sk.is_empty() || ui.is_some() { job_s } else { format!("{job_s} · Skills: {}", sk.join(", ")) };
         if t.0 != s {
             t.0 = s;
         }
@@ -1097,6 +1103,46 @@ fn update_moodlets_panel(
                     });
                 }
             }
+        }
+    });
+}
+
+/// The selected Sim's skills as the game's skill icons with their levels; the skill's
+/// description on hover.
+fn update_skill_icons(
+    mut commands: Commands,
+    row: Query<Entity, With<SkillIcons>>,
+    sel: Query<(&Sim, &Skills), With<Selected>>,
+    mut ui: Option<ResMut<crate::icons::GameUi>>,
+    mut images: ResMut<Assets<Image>>,
+    mut last: Local<(Vec<(&'static str, u32)>, bool)>,
+) {
+    let (Ok(r), Ok((sim, skills))) = (row.single(), sel.single()) else { return };
+    let mut list: Vec<(&'static str, u32)> = skills.0.iter().filter(|(_, v)| **v >= 1.0).map(|(k, v)| (*k, *v as u32)).collect();
+    list.sort();
+    if last.0 == list && last.1 == ui.is_some() {
+        return;
+    }
+    *last = (list.clone(), ui.is_some());
+    commands.entity(r).despawn_children();
+    let Some(ui) = ui.as_deref_mut() else { return };
+    commands.entity(r).with_children(|c| {
+        for (name, level) in list {
+            let info = ui.data.skill(name).cloned();
+            let Some(h) = info.as_ref().and_then(|i| ui.icon(&mut images, &i.icon)) else { continue };
+            let max = info.as_ref().map_or(10, |i| i.max_level.max(1));
+            let desc = info.as_ref().map(|i| i.desc.replace("{0.SimFirstName}", &sim.first)).unwrap_or_default();
+            let tip = format!("{} — level {level} of {max}\n{desc}", info.as_ref().map_or(name, |i| i.name.as_str()));
+            c.spawn((
+                Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: Val::Px(2.0), ..default() },
+                Interaction::default(),
+                BlocksWorld,
+                crate::icons::Tooltip(tip),
+            ))
+            .with_children(|b| {
+                b.spawn((crate::icons::icon_bundle(h, 24.0), Pickable::IGNORE));
+                b.spawn((text(level.to_string(), 14.0, Color::srgb(1.0, 0.9, 0.5)), Pickable::IGNORE));
+            });
         }
     });
 }
