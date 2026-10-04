@@ -17,7 +17,7 @@ pub struct AnimPlugin;
 impl Plugin for AnimPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ClipLibrary>()
-            .add_systems(Update, drive_skeletons.run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, drive_skeletons.run_if(in_state(PlayMode::Live).or_else(in_state(crate::AppState::CreateHousehold))));
     }
 }
 

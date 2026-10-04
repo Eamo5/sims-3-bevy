@@ -5,6 +5,7 @@ mod building;
 mod buy;
 mod camera;
 mod careers;
+mod cas;
 mod clock;
 mod data;
 mod home;
@@ -86,7 +87,7 @@ fn main() {
             music::MusicPlugin,
             town::TownPlugin,
         ))
-        .add_plugins((life::LifePlugin, careers::CareersPlugin, save::SavePlugin, wishes::WishesPlugin, rabbitholes::RabbitHolePlugin))
+        .add_plugins((life::LifePlugin, careers::CareersPlugin, save::SavePlugin, wishes::WishesPlugin, rabbitholes::RabbitHolePlugin, cas::CasPlugin))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)
         .run();

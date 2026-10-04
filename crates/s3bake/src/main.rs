@@ -5,7 +5,7 @@ use std::time::Instant;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let mut data = PathBuf::from(std::env::var("SIMS3_DATA").unwrap_or_else(|_| String::from("//RYZEN-PC/Users/Laura/Documents/The Sims 3")));
+    let mut data = PathBuf::from(std::env::var("SIMS3_DATA").unwrap_or_else(|_| String::from("S:/Games/Sims 3/The Sims 3")));
     let mut worlds = Vec::new();
     let mut all = false;
     let mut force = false;

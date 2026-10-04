@@ -142,22 +142,31 @@ pub fn pick_outfit(cas: &CasData, sim: &Sim, rng: &mut impl Rng) -> Outfit {
     let gender = if sim.female { GENDER_FEMALE } else { GENDER_MALE };
     let fits = |e: &&CasPartInfo| e.baked && e.age_gender & age != 0 && e.age_gender & gender != 0;
     let of_type = |t: u32| cas.parts.iter().filter(|e| e.clothing_type == t).filter(fits).collect::<Vec<_>>();
+    let chosen = |k: Option<Key>, t: u32| k.and_then(|k| cas.parts.iter().find(|p| p.key == k && p.clothing_type == t).filter(|p| fits(p)).cloned());
     let face = of_type(CT_FACE).into_iter().min_by_key(|e| e.name.len()).cloned();
     let scalp = of_type(CT_SCALP).into_iter().min_by_key(|e| e.name.len()).cloned();
-    let hair = of_type(CT_HAIR).choose(rng).map(|e| (*e).clone());
+    let random_hair = of_type(CT_HAIR).choose(rng).map(|e| (*e).clone());
+    let hair = chosen(sim.outfit.hair, CT_HAIR).or(random_hair);
     let mut body = Vec::new();
     let (tops, bottoms, fulls) = (of_type(CT_TOP), of_type(CT_BOTTOM), of_type(CT_BODY));
-    if (!fulls.is_empty() && rng.random_bool(0.25)) || tops.is_empty() || bottoms.is_empty() {
-        if let Some(f) = fulls.choose(rng) {
-            body.push((*f).clone());
-        }
+    let use_full = rng.random_bool(0.25);
+    let random_full = fulls.choose(rng).map(|f| (*f).clone());
+    let random_top = tops.choose(rng).map(|f| (*f).clone());
+    let random_bottom = bottoms.choose(rng).map(|f| (*f).clone());
+    let random_shoes = of_type(CT_SHOES).choose(rng).map(|f| (*f).clone());
+    let (ct, cb, cf) = (chosen(sim.outfit.top, CT_TOP), chosen(sim.outfit.bottom, CT_BOTTOM), chosen(sim.outfit.full, CT_BODY));
+    if let Some(f) = cf {
+        body.push(f);
+    } else if ct.is_some() || cb.is_some() {
+        body.extend(cb.or(random_bottom));
+        body.extend(ct.or(random_top));
+    } else if (random_full.is_some() && use_full) || random_top.is_none() || random_bottom.is_none() {
+        body.extend(random_full);
     } else {
-        body.push((*bottoms.choose(rng).unwrap()).clone());
-        body.push((*tops.choose(rng).unwrap()).clone());
+        body.extend(random_bottom);
+        body.extend(random_top);
     }
-    if let Some(s) = of_type(CT_SHOES).choose(rng) {
-        body.push((*s).clone());
-    }
+    body.extend(chosen(sim.outfit.shoes, CT_SHOES).or(random_shoes));
     Outfit { face, scalp, hair, body }
 }
 

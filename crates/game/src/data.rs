@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use bevy::prelude::*;
 
-const DEFAULT_INSTALL: &str = r"\\RYZEN-PC\Users\Laura\Documents\The Sims 3";
+const DEFAULT_INSTALL: &str = r"S:\Games\Sims 3\The Sims 3";
 
 /// Root folder of the installed game (the one containing `GameData`, `EP1`, ...).
 #[derive(Resource, Clone)]

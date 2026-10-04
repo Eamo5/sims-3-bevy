@@ -12,7 +12,7 @@ loads a town in well under a second and never touches the original packages whil
 ```sh
 # 1. Convert the installation (≈1 minute the first time; later runs only redo what changed)
 cargo run --release -p s3bake -- --all-worlds
-#    the install defaults to \\RYZEN-PC\Users\Laura\Documents\The Sims 3;
+#    the install defaults to S:\Games\Sims 3\The Sims 3;
 #    use --data <path> or SIMS3_DATA=<path> for another location
 
 # 2. Play

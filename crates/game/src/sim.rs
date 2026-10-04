@@ -1,6 +1,5 @@
 //! Sims: identity, motives (needs), mood, and their bodies.
 
-use std::collections::HashMap;
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -45,6 +44,8 @@ pub enum Age {
 pub struct Sim {
     /// Stable identity (saves, relationships).
     pub id: u64,
+    /// Clothes and hair picked in Create-a-Sim (empty: chosen from `look`).
+    pub outfit: OutfitChoice,
     /// Seed for the CAS outfit, so a Sim always looks the same.
     pub look: u64,
     pub first: String,
@@ -56,6 +57,16 @@ pub struct Sim {
     pub hair: Color,
     pub top: Color,
     pub bottom: Color,
+}
+
+/// CAS parts chosen for a Sim (baked part keys).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct OutfitChoice {
+    pub hair: Option<s3bake::Key>,
+    pub top: Option<s3bake::Key>,
+    pub bottom: Option<s3bake::Key>,
+    pub full: Option<s3bake::Key>,
+    pub shoes: Option<s3bake::Key>,
 }
 
 impl Sim {
@@ -227,7 +238,7 @@ const FIRST_M: [&str; 16] = [
 const LAST: [&str; 12] = [
     "Goth", "Landgraab", "Alto", "Bunch", "Keaton", "Frio", "Hart", "Wolff", "Steel", "Andrews", "Clavell", "Kennedy",
 ];
-const SKINS: [(f32, f32, f32); 5] = [(0.96, 0.80, 0.69), (0.87, 0.68, 0.53), (0.72, 0.53, 0.38), (0.55, 0.38, 0.26), (0.38, 0.26, 0.18)];
+pub const SKINS: [(f32, f32, f32); 5] = [(0.96, 0.80, 0.69), (0.87, 0.68, 0.53), (0.72, 0.53, 0.38), (0.55, 0.38, 0.26), (0.38, 0.26, 0.18)];
 const HAIRS: [(f32, f32, f32); 6] = [(0.08, 0.06, 0.05), (0.30, 0.18, 0.08), (0.55, 0.35, 0.15), (0.85, 0.70, 0.40), (0.60, 0.20, 0.10), (0.55, 0.55, 0.55)];
 
 pub fn random_sim(rng: &mut impl Rng, last: &str, female: Option<bool>, age: Age) -> Sim {
@@ -238,6 +249,7 @@ pub fn random_sim(rng: &mut impl Rng, last: &str, female: Option<bool>, age: Age
     let hue = rng.random_range(0.0..360.0);
     Sim {
         id: rng.random(),
+        outfit: OutfitChoice::default(),
         look: rng.random(),
         first: first.to_string(),
         last: last.to_string(),

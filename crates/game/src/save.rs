@@ -61,6 +61,9 @@ pub struct SavedSim {
     pub relationships: Vec<SavedRel>,
     #[serde(default)]
     pub lifetime_happiness: u32,
+    /// Chosen hair, top, bottom, outfit and shoes.
+    #[serde(default)]
+    pub outfit: Vec<Option<(u32, u32, u64)>>,
     #[serde(default)]
     pub rewards: Vec<String>,
 }
@@ -108,9 +111,11 @@ pub struct SaveGame {
 impl SaveGame {
     fn sim(s: &SavedSim) -> Sim {
         let c = |v: [f32; 3]| Color::srgb(v[0], v[1], v[2]);
+        let o = |i: usize| s.outfit.get(i).copied().flatten();
         Sim {
             id: s.id,
             look: s.look,
+            outfit: OutfitChoice { hair: o(0), top: o(1), bottom: o(2), full: o(3), shoes: o(4) },
             first: s.first.clone(),
             last: s.last.clone(),
             female: s.female,
@@ -284,6 +289,7 @@ fn save_game(
                 })
                 .collect(),
             lifetime_happiness: wishes.map_or(0, |w| w.points),
+            outfit: vec![sim.outfit.hair, sim.outfit.top, sim.outfit.bottom, sim.outfit.full, sim.outfit.shoes],
             rewards: wishes.map(|w| w.rewards.iter().map(|r| r.name().to_string()).collect()).unwrap_or_default(),
         });
     }
