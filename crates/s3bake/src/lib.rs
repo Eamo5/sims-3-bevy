@@ -9,7 +9,7 @@ pub mod ddsw;
 pub mod pack;
 pub mod types;
 
-pub use bake::{BakeRoot, CLIP_NAMES, bake_global, bake_world};
+pub use bake::{BakeRoot, CLIP_NAMES, bake_global, bake_music, bake_world};
 pub use pack::{PackReader, read_value};
 pub use types::*;
 

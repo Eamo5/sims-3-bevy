@@ -297,6 +297,26 @@ fn skin_mesh(g: &Geom, rig: &Rig) -> SkinMesh {
     }
 }
 
+/// The game's custom-music radio tracks (plain MP3s) go into the cache as they are.
+pub fn bake_music(root: &BakeRoot, install_root: &Path) -> usize {
+    let dir = root.dir.join("music");
+    let src = install_root.join("GameData").join("Shared").join("NonPackaged").join("CustomMusic");
+    let Ok(entries) = std::fs::read_dir(&src) else { return 0 };
+    let _ = std::fs::create_dir_all(&dir);
+    let mut n = 0;
+    for e in entries.flatten() {
+        let p = e.path();
+        if !p.extension().is_some_and(|x| x.eq_ignore_ascii_case("mp3")) {
+            continue;
+        }
+        let dst = dir.join(e.file_name());
+        if dst.exists() || std::fs::copy(&p, &dst).is_ok() {
+            n += 1;
+        }
+    }
+    n
+}
+
 pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progress: Progress) -> Result<GlobalManifest, String> {
     let gdir = root.global_dir();
     std::fs::create_dir_all(&gdir).map_err(|e| e.to_string())?;

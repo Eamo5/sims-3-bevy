@@ -82,6 +82,7 @@ fn main() {
             }
         }
     }
+    println!("music tracks: {}", s3bake::bake_music(&root, &data));
     let available = s3pkg::install::discover_worlds(&data);
     for path in available {
         let name = path.file_stem().unwrap().to_string_lossy().into_owned();

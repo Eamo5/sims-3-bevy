@@ -11,6 +11,7 @@ mod hud;
 mod interact;
 mod loading;
 mod menu;
+mod music;
 mod nav;
 mod objects;
 mod roads;
@@ -75,6 +76,7 @@ fn main() {
             simbody::SimBodyPlugin,
             roads::RoadPlugin,
             building::BuildingPlugin,
+            music::MusicPlugin,
         ))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)

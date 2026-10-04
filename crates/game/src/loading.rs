@@ -151,6 +151,7 @@ fn start_loading(
             }
             if need_global {
                 s3bake::bake_global(&root, &pkgs, &root_path.to_string_lossy(), &set_status)?;
+                s3bake::bake_music(&root, &root_path);
             }
             if need_world {
                 pkgs.add(s3pkg::Package::open(&world_path).map_err(|e| e.to_string())?);
