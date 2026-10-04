@@ -21,6 +21,7 @@ mod rabbitholes;
 mod roads;
 mod save;
 mod sim;
+mod sound;
 mod simbody;
 mod social;
 mod terrain;
@@ -87,7 +88,7 @@ fn main() {
             music::MusicPlugin,
             town::TownPlugin,
         ))
-        .add_plugins((life::LifePlugin, careers::CareersPlugin, save::SavePlugin, wishes::WishesPlugin, rabbitholes::RabbitHolePlugin, cas::CasPlugin))
+        .add_plugins((life::LifePlugin, careers::CareersPlugin, save::SavePlugin, wishes::WishesPlugin, rabbitholes::RabbitHolePlugin, cas::CasPlugin, sound::SoundPlugin))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)
         .run();

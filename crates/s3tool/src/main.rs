@@ -515,6 +515,81 @@ fn main() {
         let _ = d;
         return;
     }
+    if args[1] == "sounds" {
+        // sounds <root> [name filter]: sound property records with their samples.
+        use s3formats::audio;
+        let root = std::path::Path::new(&args[2]);
+        let set = s3pkg::install::open_install(root, |_| true);
+        let mut names = std::collections::HashMap::new();
+        for k in set.keys_of_type(types::NMAP).copied().collect::<Vec<_>>() {
+            for (id, n) in audio::parse_name_map(&set.read(&k).unwrap_or_default()) {
+                names.insert(id, n);
+            }
+        }
+        let filter = args.get(3).cloned().unwrap_or_default();
+        let mut keys: Vec<_> = set.keys_of_type(audio::T_SOUND_PROPS).copied().collect();
+        keys.sort_by_key(|k| names.get(&k.i).cloned().unwrap_or_default());
+        let mut kinds = BTreeMap::<u32, usize>::new();
+        let (mut shown, mut total) = (0, 0);
+        for k in &keys {
+            total += 1;
+            let name = names.get(&k.i).cloned().unwrap_or_else(|| format!("{:016X}", k.i));
+            let d = set.read(k).unwrap_or_default();
+            let p = audio::SoundProps::parse(&d);
+            for (h, _) in &p.props {
+                *kinds.entry(*h).or_default() += 1;
+            }
+            if !name.contains(&filter) || shown >= 200000 {
+                continue;
+            }
+            shown += 1;
+            let samples: Vec<String> = p.samples().iter().map(|s| names.get(s).cloned().unwrap_or_else(|| format!("{s:016X}"))).collect();
+            let parent = p.parent().map(|s| names.get(&s).cloned().unwrap_or_else(|| format!("{s:016X}")));
+            let other: Vec<String> = p.props.iter().filter(|(h, _)| *h != audio::P_SAMPLES && *h != audio::P_PARENT).map(|(h, v)| format!("{h:08X}={v:?}")).collect();
+            println!("{name} [{}] parent={parent:?} samples={samples:?} {}", d.len(), other.join(" "));
+        }
+        println!("{total} records; property usage: {kinds:X?}");
+        let snr: Vec<_> = set.keys_of_type(audio::T_SNR).copied().collect();
+        let sns: Vec<_> = set.keys_of_type(audio::T_SNS).copied().collect();
+        println!("{} SNR, {} SNS", snr.len(), sns.len());
+        if filter == "@streams" {
+            for k in &sns {
+                let h = set.read(&k).map(|d| d[..16.min(d.len())].to_vec()).unwrap_or_default();
+                let partner = snr.iter().find(|s| s.i == k.i).map(|s| set.read(s).map(|d| audio::Snr::parse(&d))).flatten().flatten();
+                println!("SNS {k} {} {:02X?} snr={partner:?}", names.get(&k.i).cloned().unwrap_or_default(), h);
+            }
+        }
+        return;
+    }
+    if args[1] == "snr" {
+        // snr <out dir> <files...>: convert dumped SNR samples to .mp3 / .wav.
+        use s3formats::audio;
+        let out = std::path::Path::new(&args[2]);
+        std::fs::create_dir_all(out).unwrap();
+        for f in &args[3..] {
+            let d = std::fs::read(f).unwrap();
+            let Some(snr) = audio::Snr::parse(&d) else { continue };
+            let blocks = audio::blocks(&d[snr.header_len..]);
+            let stem = std::path::Path::new(f).file_stem().unwrap().to_string_lossy().into_owned();
+            match snr.codec {
+                audio::CODEC_EALAYER3_V1 => match audio::ealayer3_to_mp3(&snr, &blocks) {
+                    Ok(m) => {
+                        println!("{stem}: {} Hz {} ch {} samples -> {} granules ({}), mp3 {} frames {} bytes, pcm prefix {} skip {} ({} pcm granules, {} pcm samples)", snr.sample_rate, snr.channels, snr.samples, m.granules, m.granules * 576, m.frames, m.data.len(), m.pcm_prefix.len(), m.pcm_skip, m.pcm_blocks, m.pcm_total);
+                        std::fs::write(out.join(format!("{stem}.mp3")), &m.data).unwrap();
+                    }
+                    Err(e) => println!("{stem}: {e}"),
+                },
+                audio::CODEC_XAS1 => {
+                    let pcm = audio::decode_xas(&snr, &blocks);
+                    let peak = pcm.iter().map(|s| s.unsigned_abs()).max().unwrap_or(0);
+                    println!("{stem}: {snr:?} -> {} samples, peak {peak}", pcm.len());
+                    std::fs::write(out.join(format!("{stem}.wav")), audio::wav(&pcm, snr.channels as u16, snr.sample_rate)).unwrap();
+                }
+                c => println!("{stem}: codec {c} unsupported"),
+            }
+        }
+        return;
+    }
     if args[1] == "install" {
         let root = std::path::Path::new(&args[2]);
         for r in s3pkg::install::discover_packages(root) {

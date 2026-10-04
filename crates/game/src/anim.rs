@@ -46,6 +46,11 @@ impl ClipLibrary {
     pub fn variants(&mut self, data: &Baked, prefix: &'static str, side: Option<char>, child: bool) -> &[String] {
         self.variants.entry((prefix, side, child)).or_insert_with(|| {
             let matches = |p: &str| -> Vec<String> {
+                // A prefix naming a clip exactly means just that clip (`a_male_walk`, not
+                // `a_male_walk_stop_trip`).
+                if let Some(exact) = data.0.clip_names.iter().find(|n| n.eq_ignore_ascii_case(p)) {
+                    return vec![exact.clone()];
+                }
                 data.0
                     .clip_names
                     .iter()
@@ -175,11 +180,12 @@ fn drive_skeletons(
     clock: Res<GameClock>,
     data: Res<Baked>,
     mut lib: ResMut<ClipLibrary>,
-    mut sims: Query<(&Sim, &SimAnim, &Skeleton, Option<&ActionClip>, &mut ClipPlayer)>,
+    mut sims: Query<(Entity, &Sim, &SimAnim, &Skeleton, Option<&ActionClip>, &mut ClipPlayer)>,
     mut joints: Query<&mut Transform, Without<Sim>>,
+    mut cues: MessageWriter<crate::sound::ClipCue>,
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed];
-    for (sim, anim, skel, action, mut player) in &mut sims {
+    for (entity, sim, anim, skel, action, mut player) in &mut sims {
         let child = sim.age == crate::sim::Age::Child;
         let script = match action {
             Some(a) if anim.pose != Pose::Walk => a.clone(),
@@ -189,9 +195,12 @@ fn drive_skeletons(
         let changed = player.script.as_ref() != Some(&script);
         // Walks keep looping one clip; everything else moves on to a new variant when a clip ends.
         let cycles = !matches!(anim.pose, Pose::Walk);
+        let mut from_time = player.time;
         if changed || (ended && cycles) {
             if changed {
                 player.started = false;
+                // Sounds the old animation left looping stop with it.
+                cues.write(crate::sound::ClipCue { sim: entity, name: String::new(), action: s3formats::sim::SoundAction::StopLoop });
             }
             // The start clip plays once; after that, loop variants.
             let play_start = !player.started && script.start.is_some();
@@ -205,12 +214,26 @@ fn drive_skeletons(
                 player.clip = lib.get(&data, &name);
                 player.name = name;
                 player.time = 0.0;
+                from_time = -1e-3;
             }
             player.script = Some(script);
         }
         player.time += dt;
         player.blend = (player.blend - dt / 0.25).max(0.0);
         let Some(clip) = player.clip.clone() else { continue };
+        // Sound cues passed this frame (walk clips loop, so count whole cycles).
+        if dt > 0.0 && clip.duration > 0.0 && !clip.sounds.is_empty() {
+            let d = clip.duration;
+            let (k0, k1) = ((from_time / d).floor() as i32, (player.time / d).floor() as i32);
+            for k in k0..=k1.min(k0 + 2) {
+                for s in &clip.sounds {
+                    let at = s.time + k as f32 * d;
+                    if at > from_time && at <= player.time {
+                        cues.write(crate::sound::ClipCue { sim: entity, name: s.name.clone(), action: s.action });
+                    }
+                }
+            }
+        }
         let t = if clip.duration > 0.0 { player.time % clip.duration } else { 0.0 };
         for (i, bone) in skel.rig.bones.iter().enumerate() {
             let Ok(mut tf) = joints.get_mut(skel.joints[i]) else { continue };

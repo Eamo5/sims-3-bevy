@@ -37,8 +37,12 @@ installation is unreachable.
 - **Sims**: Create-a-Sim from real CAS parts, skin tones and animation clips; needs, moods,
   skills, careers, relationships, autonomy, social interactions.
 - **Play**: choose a furnished house (with the game's lot pictures) or an empty lot, buy
-  mode, multi-storey navigation by stairs, day/night with lamps and street lights, stereo
-  music.
+  mode, multi-storey navigation by stairs, day/night with lamps and street lights.
+- **Sound**: the game's own audio, converted once (EALayer3 rewrapped as MP3, EA-XAS decoded to
+  WAV): object sounds and Simlish voices cued by the animations, footsteps by floor and
+  shoe, interface clicks, stings for promotions, weddings and other moments, birds by day
+  and insects at night, music for the menus, Create-a-Sim and buy mode, and the radio
+  stations on stereos.
 
 ## Controls
 
@@ -62,7 +66,7 @@ installation is unreachable.
 |---|---|
 | `s3pkg` | DBPF packages, RefPack, Resource.cfg install discovery |
 | `s3formats` | Decoders: models, textures and the TXTC compositor, CAS, rigs and clips, worlds, lots |
-| `s3bake` | The converter and the cache format (`s3bake --info <world>` describes a baked world) |
+| `s3bake` | The converter and the cache format (`s3bake --info <world>` describes a baked world, `--dump-sound <name> <dir>` extracts a baked sound) |
 | `s3tool` | Inspection tools used while reverse-engineering formats |
 | `game` | The game (`sims3`) |
 

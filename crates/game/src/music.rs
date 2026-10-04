@@ -1,8 +1,9 @@
-//! Music from the game's custom-music radio station (MP3s copied into the cache): a stereo in
-//! use plays a track, louder the closer the camera is.
+//! Stereos: a stereo in use plays a song from one of the game's radio stations (or the
+//! player's custom-music folder), louder the closer the camera is.
 
 use bevy::audio::{AudioSink, AudioSinkPlayback, Volume};
 use bevy::prelude::*;
+use rand::Rng;
 use rand::seq::IndexedRandom;
 
 use crate::camera::SimsCamera;
@@ -41,16 +42,17 @@ fn load_music(mut lib: ResMut<MusicLibrary>, mut sources: ResMut<Assets<AudioSou
 #[derive(Component)]
 struct StereoMusic(Entity);
 
+#[allow(clippy::too_many_arguments)]
 fn stereo_music(
     mut commands: Commands,
     lib: Res<MusicLibrary>,
     stereos: Query<(Entity, &GameObject, &UsedBy, &GlobalTransform)>,
     playing: Query<(Entity, &StereoMusic)>,
     cams: Query<&SimsCamera>,
+    sounds: Option<Res<crate::sound::Sounds>>,
+    mut cache: ResMut<crate::sound::SampleCache>,
+    mut sources: ResMut<Assets<AudioSource>>,
 ) {
-    if lib.0.is_empty() {
-        return;
-    }
     let cam = cams.single().ok();
     // Stop music for stereos nobody is using any more.
     for (e, m) in &playing {
@@ -66,8 +68,20 @@ fn stereo_music(
             let d = c.focus.distance(tf.translation()) + c.distance * 0.35;
             (1.2 / (1.0 + d / 12.0)).min(0.9)
         });
-        let track = lib.0.choose(&mut rand::rng()).unwrap().clone();
-        info!("music: the stereo starts playing (volume {volume:.2})");
+        // A song from a random radio station; the custom-music folder counts as one more.
+        let mut rng = rand::rng();
+        let stations: Vec<&str> = sounds.as_ref().map_or(vec![], |s| s3bake::sounds::STATIONS.iter().copied().filter(|n| s.def(n).is_some()).collect());
+        let custom = !lib.0.is_empty() && rng.random_range(0..=stations.len()) == 0;
+        let track = match (custom, stations.choose(&mut rng), sounds.as_ref()) {
+            (false, Some(station), Some(s)) => {
+                let def = s.def(station).unwrap();
+                let id = *def.samples.choose(&mut rng).unwrap();
+                info!("music: the stereo plays {station}");
+                s.sample(id, &mut cache, &mut sources)
+            }
+            _ => lib.0.choose(&mut rng).cloned(),
+        };
+        let Some(track) = track else { continue };
         commands.spawn((
             AudioPlayer::new(track),
             PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume)),

@@ -8,10 +8,12 @@ pub mod clips;
 pub mod trees;
 pub mod ddsw;
 pub mod pack;
+pub mod sounds;
 pub mod types;
 
 pub use bake::{BakeRoot, bake_clips, bake_global, bake_music, bake_world, clips_ready};
 pub use pack::{PackReader, read_value};
+pub use sounds::{SoundBank, SoundDef, bake_sounds, sounds_ready};
 pub use types::*;
 
 /// Default location of the cache: `SIMS3_CACHE`, or `baked/` in the working directory.

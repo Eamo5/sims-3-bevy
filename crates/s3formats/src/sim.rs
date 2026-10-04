@@ -350,6 +350,89 @@ pub struct Clip {
     pub name: String,
     pub duration: f32,
     pub tracks: HashMap<u32, Track>,
+    /// Sound cues from the clip's event table, in time order.
+    pub sounds: Vec<ClipSound>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SoundAction {
+    #[default]
+    Play,
+    StartLoop,
+    StopLoop,
+}
+
+/// A sound the clip asks for at a point in time. `name` is the game's sound name, e.g.
+/// `fridge_door_open_norm`, or a footstep stem (`foot_step`) completed by surface and shoe.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ClipSound {
+    pub time: f32,
+    pub name: String,
+    pub action: SoundAction,
+}
+
+/// Splits a script event like `play_sound_a_chp__cheap___a_norm__normal___a_exp__expensive`
+/// into the action and the sound for the normal-quality object.
+pub fn script_sound(script: &str) -> Option<(SoundAction, String)> {
+    let lower = script.to_ascii_lowercase();
+    let (action, rest) = if let Some(r) = lower.strip_prefix("play_sound_") {
+        (SoundAction::Play, r)
+    } else if let Some(r) = lower.strip_prefix("start_looping_sound_") {
+        (SoundAction::StartLoop, r)
+    } else if let Some(r) = lower.strip_prefix("stop_looping_sound_") {
+        (SoundAction::StopLoop, r)
+    } else {
+        return None;
+    };
+    let tiers: Vec<&str> = rest.split("___").collect();
+    let pick = tiers.iter().find(|t| t.ends_with("__normal")).or(tiers.first())?;
+    let name = pick.split("__").next()?.trim_matches('_');
+    (!name.is_empty()).then(|| (action, name.to_string()))
+}
+
+/// The sound cues of a CLIP resource's event table ("=CE="). Events are found by their
+/// header pattern (time followed by two -1.0 floats), so unknown event kinds are skipped.
+pub fn clip_sounds(res: &[u8]) -> Vec<ClipSound> {
+    let mut out = Vec::new();
+    let Ok(rel) = u32_at(res, 0x18) else { return out };
+    let start = 0x18 + rel as usize;
+    if res.get(start..start + 4) != Some(b"=CE=") {
+        return out;
+    }
+    let count = u32_at(res, start + 8).unwrap_or(0) as usize;
+    let end = (start + 20 + u32_at(res, start + 12).unwrap_or(0) as usize + 64).min(res.len());
+    let mut o = start + 20;
+    let mut found = 0;
+    while o + 28 <= end && found < count {
+        let kind = u16_at(res, o).unwrap_or(0);
+        let a = u32_at(res, o + 12).unwrap_or(0);
+        let b = u32_at(res, o + 16).unwrap_or(0);
+        if !(1..=40).contains(&kind) || a != 0xBF80_0000 || b != 0xBF80_0000 {
+            o += 4;
+            continue;
+        }
+        found += 1;
+        let time = f32_at(res, o + 8).unwrap_or(0.0);
+        let len = u32_at(res, o + 24).unwrap_or(0) as usize;
+        let name = cstr(res, o + 28);
+        let payload = o + 28 + ((len + 1 + 3) & !3);
+        match kind {
+            3 => {
+                let sound = cstr(res, payload);
+                let sound = if sound.is_empty() { name } else { sound };
+                out.push(ClipSound { time, name: sound.to_ascii_lowercase(), action: SoundAction::Play });
+            }
+            4 => {
+                if let Some((action, sound)) = script_sound(&name) {
+                    out.push(ClipSound { time, name: sound, action });
+                }
+            }
+            _ => {}
+        }
+        o = payload;
+    }
+    out.sort_by(|a, b| a.time.total_cmp(&b.time));
+    out
 }
 
 fn u16_at(b: &[u8], o: usize) -> R<u16> {
@@ -494,7 +577,7 @@ impl Clip {
                 }
             }
         }
-        Ok(Self { name, duration: ticks as f32 * dt, tracks })
+        Ok(Self { name, duration: ticks as f32 * dt, tracks, sounds: clip_sounds(res) })
     }
 }
 

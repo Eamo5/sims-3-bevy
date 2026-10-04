@@ -318,12 +318,19 @@ pub fn bake_clips(root: &BakeRoot, pkgs: &PackageSet, progress: Progress) -> Res
     w.finish().map_err(|e| e.to_string())?;
     let names: Vec<String> = clips.into_iter().map(|c| c.0).collect();
     write_value(&gdir.join("clip_names.bin"), &names).map_err(|e| e.to_string())?;
+    std::fs::write(gdir.join("clips.version"), CLIPS_VERSION.to_string()).map_err(|e| e.to_string())?;
     progress(&format!("Converting: {} animations", names.len()));
     Ok(names.len())
 }
 
+/// Bumped when the baked clip layout changes.
+pub const CLIPS_VERSION: u32 = 2;
+
 pub fn clips_ready(root: &BakeRoot) -> bool {
-    root.global_dir().join("clips.pack").exists() && root.global_dir().join("clip_names.bin").exists()
+    let g = root.global_dir();
+    g.join("clips.pack").exists()
+        && g.join("clip_names.bin").exists()
+        && std::fs::read_to_string(g.join("clips.version")).is_ok_and(|v| v.trim() == CLIPS_VERSION.to_string())
 }
 
 pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progress: Progress) -> Result<GlobalManifest, String> {

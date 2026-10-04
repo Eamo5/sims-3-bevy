@@ -78,6 +78,51 @@ fn main() {
         }
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--dump-sound") {
+        // --dump-sound <name> <dir>: write a baked sound's samples as files.
+        let bank: s3bake::SoundBank = s3bake::read_value(&root.global_dir().join("sounds.bin")).expect("sounds.bin");
+        let pack = s3bake::PackReader::open(&root.global_dir().join("sounds.pack")).expect("sounds.pack");
+        let dir = std::path::Path::new(&args[i + 2]);
+        std::fs::create_dir_all(dir).unwrap();
+        let def = bank.get(&args[i + 1]).expect("no such sound");
+        println!("{def:?}");
+        for s in &def.samples {
+            let info = &bank.samples[s];
+            let bytes: Vec<u8> = pack.get(&(s3formats::audio::T_SNR, 0, *s)).unwrap();
+            let ext = if info.format == s3bake::sounds::FORMAT_MP3 { "mp3" } else { "wav" };
+            std::fs::write(dir.join(format!("{s:016X}.{ext}")), bytes).unwrap();
+            println!("{s:016X} {info:?}");
+        }
+        return;
+    }
+    if args.iter().any(|a| a == "--clip-sounds") {
+        // Survey the sound cues of the baked animation clips and whether they resolve.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let props: std::collections::HashSet<u64> = pkgs.keys_of_type(s3formats::audio::T_SOUND_PROPS).map(|k| k.i).collect();
+        let mut cues = std::collections::BTreeMap::<String, (usize, String)>::new();
+        for k in pkgs.keys_of_type(s3pkg::types::CLIP) {
+            let Some(d) = pkgs.read(k) else { continue };
+            let Some(name) = s3formats::sim::clip_name(&d) else { continue };
+            if !s3bake::clips::wanted(&name) {
+                continue;
+            }
+            for s in s3formats::sim::clip_sounds(&d) {
+                let e = cues.entry(format!("{:?} {}", s.action, s.name)).or_insert((0, name.clone()));
+                e.0 += 1;
+            }
+        }
+        let mut resolved = 0;
+        for (cue, (n, clip)) in &cues {
+            let name = cue.split(' ').nth(1).unwrap();
+            let ok = props.contains(&s3pkg::fnv64(name));
+            resolved += ok as usize;
+            let suffixes = ["_fa", "_fb", "_ma", "_ca", "_ea", "_ta", "_pa", "_cloth", "_wood", "_cment", "_leath", "_grass_rub", "_wood_rub", "_cpet_rub", "_lino_rub", "_wood_bare", "_wood_heel"];
+            let alt: Vec<&str> = if ok { vec![] } else { suffixes.iter().copied().filter(|s| props.contains(&s3pkg::fnv64(&format!("{name}{s}")))).collect() };
+            println!("{} {cue:60} x{n:<4} {clip} {alt:?}", if ok { "  " } else { "??" });
+        }
+        println!("{} cues, {resolved} resolve directly", cues.len());
+        return;
+    }
     let t0 = Instant::now();
     let progress = |s: &str| println!("[{:7.1}s] {s}", t0.elapsed().as_secs_f32());
     println!("Opening {}", data.display());
@@ -101,6 +146,12 @@ fn main() {
         match s3bake::bake_clips(&root, &pkgs, &progress) {
             Ok(n) => println!("animations: {n}"),
             Err(e) => eprintln!("animations failed: {e}"),
+        }
+    }
+    if force || !s3bake::sounds_ready(&root) {
+        match s3bake::bake_sounds(&root, &pkgs, &progress) {
+            Ok(n) => println!("sounds: {n}"),
+            Err(e) => eprintln!("sounds failed: {e}"),
         }
     }
     let available = s3pkg::install::discover_worlds(&data);

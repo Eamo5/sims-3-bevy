@@ -50,6 +50,8 @@ pub struct ActiveBuilding {
     pub extent: f32,
     pub stairs: Vec<StairLink>,
     floor_cells: HashMap<(u8, i32, i32), u8>,
+    /// Room kind (`ROOM_*`) of each floor tile.
+    floor_kinds: HashMap<(u8, i32, i32), u8>,
     far: Option<bool>,
 }
 
@@ -88,6 +90,13 @@ impl ActiveBuilding {
             3
         };
         (mask & (1 << t) != 0).then(|| self.levels[level as usize])
+    }
+
+    /// Room kind (`ROOM_*`) of the floor at `p` on `level`, if the house has floor there.
+    pub fn room_at(&self, level: u8, p: Vec3) -> Option<u8> {
+        self.floor_y(level, p)?;
+        let l = self.local(p);
+        self.floor_kinds.get(&(level, l.x.floor() as i32, l.y.floor() as i32)).copied()
     }
 }
 
@@ -279,6 +288,7 @@ pub fn spawn_building(
     let rot = Quat::from_rotation_y(lot.rotation);
     let top_level = b.levels.len().saturating_sub(2).max(1) as u8;
     let floor_cells = b.floors.iter().map(|f| ((f.level, f.x as i32, f.z as i32), f.mask)).collect();
+    let floor_kinds = b.floors.iter().map(|f| ((f.level, f.x as i32, f.z as i32), f.kind)).collect();
     let mut active = ActiveBuilding {
         lot: b.lot as usize,
         corner,
@@ -290,6 +300,7 @@ pub fn spawn_building(
         extent: b.width.max(b.depth) as f32 * 0.5,
         stairs: Vec::new(),
         floor_cells,
+        floor_kinds,
         far: None,
     };
     let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);

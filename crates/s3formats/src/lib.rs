@@ -1,3 +1,4 @@
+pub mod audio;
 pub mod compositor;
 pub mod dds;
 pub mod lot;
