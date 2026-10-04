@@ -262,11 +262,13 @@ fn ui_flow(
     mut lots: Query<(&mut Interaction, &crate::home::LotButton), Without<crate::home::MoveInButton>>,
     mut move_in: Query<&mut Interaction, With<crate::home::MoveInButton>>,
     mut exit: MessageWriter<AppExit>,
+    world: Option<Res<crate::loading::CurrentWorld>>,
 ) {
     let Some(dir) = &args.ui_flow else { return };
     let now = time.elapsed_secs();
     let since = now - stage.1;
     let shot = |commands: &mut Commands, name: &str| {
+        let _ = std::fs::create_dir_all(dir);
         let path = format!("{dir}/{name}.png");
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
     };
@@ -302,7 +304,9 @@ fn ui_flow(
         (4, AppState::InGame, _) => advance(&mut stage),
         (5, AppState::InGame, Some(crate::PlayMode::ChooseLot)) if since > 3.0 => {
             shot(&mut commands, "4_choose_lot");
-            if let Some((mut i, _)) = lots.iter_mut().next() {
+            // The first furnished house, as a player would pick from the top of the list.
+            let house = world.as_ref().and_then(|w| lots.iter().map(|(_, b)| b.0).filter(|i| w.data.buildings.contains_key(i)).min());
+            if let Some((mut i, _)) = lots.iter_mut().find(|(_, b)| house.is_none_or(|h| b.0 == h)) {
                 *i = Interaction::Pressed;
             }
             advance(&mut stage);

@@ -582,6 +582,15 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
     }
     let road_tex: Vec<(Key, bool)> = road_tex.into_iter().collect();
     bake_textures(root, pkgs, &road_tex, OBJECT_TEX_MAX, &format!("Converting {name}"), progress);
+    progress(&format!("Converting {name}: lot pictures…"));
+    let thumbs: Vec<&s3formats::world::LotInfo> = world.lots.iter().filter(|l| !root.tex_path(lot_thumbnail_key(l.id)).exists()).collect();
+    par_map(&thumbs, |l| {
+        let key = ResourceKey::new(T_LOT_THUMB, 0, l.id);
+        let img = pkg.find(&key).and_then(|e| pkg.read(e).ok()).and_then(|d| decode_png(&d));
+        if let Some(img) = img {
+            let _ = std::fs::write(root.tex_path(lot_thumbnail_key(l.id)), encode_dds(&img));
+        }
+    });
     progress(&format!("Converting {name}: houses…"));
     let buildings: Vec<LotBuildingBaked> = world
         .lots
@@ -634,6 +643,27 @@ fn average_linear(img: &s3formats::dds::Rgba) -> [f32; 3] {
 }
 
 const SECTOR: usize = 256;
+/// The game's 256 px picture of each lot (PNG).
+const T_LOT_THUMB: u32 = 0xD84E7FC6;
+
+/// Decodes a PNG into RGBA8.
+fn decode_png(d: &[u8]) -> Option<s3formats::dds::Rgba> {
+    let mut dec = png::Decoder::new(std::io::Cursor::new(d));
+    dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = dec.read_info().ok()?;
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).ok()?;
+    let (w, h) = (info.width as usize, info.height as usize);
+    let px = &buf[..info.buffer_size()];
+    let data: Vec<u8> = match info.color_type {
+        png::ColorType::Rgba => px.to_vec(),
+        png::ColorType::Rgb => px.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect(),
+        png::ColorType::GrayscaleAlpha => px.chunks_exact(2).flat_map(|c| [c[0], c[0], c[0], c[1]]).collect(),
+        png::ColorType::Grayscale => px.iter().flat_map(|&g| [g, g, g, 255]).collect(),
+        _ => return None,
+    };
+    Some(s3formats::dds::Rgba { width: w, height: h, data })
+}
 const P_ROAD_BASE: u32 = 0x53521204;
 const P_ROAD_OVERLAY: u32 = 0x28392DC6;
 const P_ROAD_OPACITY: u32 = 0x6BDFD546;

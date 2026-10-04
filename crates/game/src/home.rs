@@ -242,7 +242,13 @@ pub struct MoveInButton;
 #[derive(Resource, Default)]
 struct ChosenLot(Option<usize>);
 
-fn spawn_lot_chooser(mut commands: Commands, world: Res<CurrentWorld>, mut cam: Query<&mut SimsCamera>) {
+fn spawn_lot_chooser(
+    mut commands: Commands,
+    world: Res<CurrentWorld>,
+    mut cam: Query<&mut SimsCamera>,
+    data: Res<Baked>,
+    mut images: ResMut<Assets<Image>>,
+) {
     commands.insert_resource(ChosenLot(None));
     if let Ok(mut c) = cam.single_mut() {
         c.distance = 420.0;
@@ -256,7 +262,8 @@ fn spawn_lot_chooser(mut commands: Commands, world: Res<CurrentWorld>, mut cam: 
         .filter(|(_, l)| l.is_residential())
         .map(|(i, l)| (i, world.data.lot_names.get(i).cloned().unwrap_or_else(|| l.internal_name.clone()), l))
         .collect();
-    lots.sort_by_key(|l| (!l.2.internal_name.to_ascii_lowercase().contains("empty"), l.1.clone()));
+    // Furnished houses first, then empty lots.
+    lots.sort_by_key(|l| (!world.data.buildings.contains_key(&l.0), l.1.clone()));
     commands
         .spawn((
             DespawnOnExit(PlayMode::ChooseLot),
@@ -296,25 +303,36 @@ fn spawn_lot_chooser(mut commands: Commands, world: Res<CurrentWorld>, mut cam: 
                 b.spawn(text("Move In", 22.0, PLUMBOB_GREEN));
             });
             for (i, name, lot) in lots {
+                let picture = crate::objects::cpu_texture(&data.0, s3bake::lot_thumbnail_key(lot.id)).map(|img| images.add(img));
+                let kind = match world.data.buildings.get(&i) {
+                    Some(b) => {
+                        let floors = b.floors.iter().map(|f| f.level).collect::<std::collections::BTreeSet<_>>().len().max(1);
+                        format!("Furnished house · {floors} floor{}", if floors > 1 { "s" } else { "" })
+                    }
+                    None => "Empty lot".to_string(),
+                };
                 p.spawn((
                     Button,
                     LotButton(i),
                     Node {
                         border_radius: BorderRadius::all(Val::Px(8.0)),
-                        padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
-                        flex_direction: FlexDirection::Column,
+                        padding: UiRect::axes(Val::Px(8.0), Val::Px(6.0)),
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(10.0),
                         flex_shrink: 0.0,
                         ..default()
                     },
                     BackgroundColor(BTN_NORMAL),
                 ))
                 .with_children(|b| {
-                    b.spawn(text(name, 16.0, Color::WHITE));
-                    b.spawn(text(
-                        format!("{}x{} lot · {}", lot.width, lot.depth, if lot.internal_name.to_ascii_lowercase().contains("empty") { "Empty lot" } else { "Residential" }),
-                        12.0,
-                        Color::srgb(0.7, 0.8, 0.9),
-                    ));
+                    if let Some(img) = picture {
+                        b.spawn((ImageNode::new(img), Node { width: Val::Px(72.0), height: Val::Px(72.0), flex_shrink: 0.0, ..default() }));
+                    }
+                    b.spawn(Node { flex_direction: FlexDirection::Column, ..default() }).with_children(|t| {
+                        t.spawn(text(name, 16.0, Color::WHITE));
+                        t.spawn(text(format!("{}x{} lot · {kind}", lot.width, lot.depth), 12.0, Color::srgb(0.7, 0.8, 0.9)));
+                    });
                 });
             }
         });

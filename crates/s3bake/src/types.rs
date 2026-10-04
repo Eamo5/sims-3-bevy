@@ -8,7 +8,7 @@ pub use s3formats::world::{Heightmap, LotInfo};
 /// Bump whenever any baked format changes; stale caches are rebuilt.
 pub const BAKE_VERSION: u32 = 3;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 8;
+pub const WORLD_VERSION: u32 = 9;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -163,6 +163,11 @@ pub struct WorldMap {
     /// true: BC3 (16-byte blocks), false: BC1.
     pub bc3: bool,
     pub data: Vec<u8>,
+}
+
+/// Texture-store key of a lot's picture.
+pub fn lot_thumbnail_key(lot_id: u64) -> Key {
+    (0xD84E7FC6, 0, lot_id)
 }
 
 pub const ROOM_OUTSIDE: u8 = 0;
