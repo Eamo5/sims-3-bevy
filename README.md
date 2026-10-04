@@ -31,8 +31,10 @@ installation is unreachable.
   terrain paint, the game's own terrain colour and shadow maps,
   roads with markings, water, placed objects and SpeedTree trees drawn from their own
   billboard pictures.
-- **Houses**: every lot's real walls (with door and window openings), floors styled by room,
-  foundations, stairs and the house's own furniture; nearby lots are shown in full detail with
+- **Houses**: every lot's real walls (with door and window openings) and floors in the very
+  wallpapers, sidings, tiles, carpets and paving the builders chose — the game's texture
+  recipes (complates) re-rendered from each lot's designs — plus foundations, stairs and the
+  house's own furniture; nearby lots are shown in full detail with
   the game's roofs, distant ones as the game's pre-rendered imposters.
 - **Sims**: Create-a-Sim from real CAS parts, skin tones and animation clips; needs, moods,
   skills, careers, relationships, autonomy, social interactions; children, teens, adults and

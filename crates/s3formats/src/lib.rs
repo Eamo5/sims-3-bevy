@@ -1,8 +1,11 @@
 pub mod audio;
+pub mod catalog;
+pub mod complate;
 pub mod compositor;
 pub mod dds;
 pub mod enums;
 pub mod lot;
+pub mod lotdesign;
 pub mod model;
 pub mod object;
 pub mod objn;

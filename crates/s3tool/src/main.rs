@@ -656,6 +656,320 @@ fn main() {
         println!("{} refs by type {by_type:08X?}", v.len());
         return;
     }
+    if args[1] == "cwal" {
+        // cwal <root> <instance hex> [material] [out.png] [w] [h]: a wall/floor pattern's
+        // materials, optionally rendered.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let inst = parse_hex(&args[3]);
+        let d = set.read_ti(s3formats::catalog::T_CWAL, inst).expect("no such CWAL");
+        let p = s3formats::catalog::WallFloorPattern::parse(&d).expect("parse");
+        println!("{:?}: type {} ({} materials, {} keys)", p.name, p.pattern_type, p.materials.len(), p.keys.len());
+        for (i, m) in p.materials.iter().enumerate() {
+            let c = &m.complate;
+            println!(
+                "  [{i}] {} xml {:?} dae {:?} patterns {:?}",
+                c.name,
+                m.keys.get(c.xml as usize),
+                c.get("daeFileName").map(|v| v.text()),
+                c.blocks.iter().map(|b| format!("{}={} {:?}", b.pattern, b.name, b.get("Color"))).collect::<Vec<_>>()
+            );
+        }
+        if let Some(out) = args.get(5) {
+            let mi: usize = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let w: usize = args.get(6).and_then(|s| s.parse().ok()).unwrap_or(256);
+            let h: usize = args.get(7).and_then(|s| s.parse().ok()).unwrap_or(256);
+            let m = &p.materials[mi];
+            let img = s3formats::complate::render(&set, &m.complate, &m.keys, w, h).expect("render");
+            let f = std::fs::File::create(out).unwrap();
+            let mut enc = png::Encoder::new(std::io::BufWriter::new(f), img.width as u32, img.height as u32);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            enc.write_header().unwrap().write_image_data(&img.data).unwrap();
+            println!("wrote {out}");
+        }
+        return;
+    }
+    if args[1] == "lotfloors" {
+        // lotfloors <root> <world file> <lot id hex>: the floor grids' values and the palettes'
+        // pattern kinds.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let w = Package::open(&args[3]).unwrap();
+        let lot = parse_hex(&args[4]);
+        let rd = |t: u32, g: u32| w.find(&s3pkg::ResourceKey::new(t, g, lot)).and_then(|e| w.read(e).ok());
+        let refs = s3formats::objn::parse_refs(&rd(0x05ED1226, 0).unwrap()).unwrap_or_default();
+        for pg in [0x002E7DF7u32, 0x004BE299, 0x008207AA, 0x00DD3460] {
+            let Some(d) = rd(0xF12E5E12, pg) else { continue };
+            let n = u32::from_le_bytes(d[20..24].try_into().unwrap()) as usize;
+            println!("palette {pg:08X}: {n}");
+            for i in 0..n.min(40) {
+                let o = 24 + i * 10;
+                let idx = u16::from_le_bytes([d[o], d[o + 1]]);
+                let id = u32::from_le_bytes(d[o + 2..o + 6].try_into().unwrap());
+                let area = u32::from_le_bytes(d[o + 6..o + 10].try_into().unwrap());
+                let k = refs.get(&idx);
+                let desc = k.and_then(|k| {
+                    if k.t != s3formats::catalog::T_CWAL {
+                        return Some(format!("{k}"));
+                    }
+                    let p = s3formats::catalog::WallFloorPattern::parse(&set.read(k)?).ok()?;
+                    let dae = p.materials.first().and_then(|m| m.complate.get("daeFileName")).map(|v| v.text()).unwrap_or_default();
+                    Some(format!("CWAL type {} {dae} ({} mats)", p.pattern_type, p.materials.len()))
+                });
+                println!("  id {id} r{idx} area {area}: {}", desc.unwrap_or("-".into()));
+            }
+        }
+        let mut cw: Vec<_> = refs.iter().filter(|(_, k)| k.t == s3formats::catalog::T_CWAL).collect();
+        cw.sort_by_key(|x| *x.0);
+        for (i, k) in cw {
+            let p = set.read(k).and_then(|d| s3formats::catalog::WallFloorPattern::parse(&d).ok());
+            println!(
+                "  REFS r{i} CWAL {:016X}: {:?}",
+                k.i,
+                p.map(|p| (p.pattern_type, p.materials.first().and_then(|m| m.complate.get("daeFileName")).map(|v| v.text()), p.materials.len()))
+            );
+        }
+        for g in [0x002E7B0Eu32, 0x002E7CF0, 0x002E7CF1] {
+            let Some(d) = rd(0xB125533A, g) else { continue };
+            let (wd, ht, lv) = (
+                u32::from_le_bytes(d[4..8].try_into().unwrap()),
+                u32::from_le_bytes(d[8..12].try_into().unwrap()),
+                u32::from_le_bytes(d[12..16].try_into().unwrap()),
+            );
+            let cells = &d[16..];
+            let mut hist = BTreeMap::<u16, usize>::new();
+            for c in cells.chunks_exact(2) {
+                *hist.entry(u16::from_le_bytes([c[0], c[1]])).or_default() += 1;
+            }
+            println!("grid {g:08X}: {wd}x{ht}x{lv}, {} bytes, values {:?}", cells.len(), hist.iter().take(30).collect::<Vec<_>>());
+        }
+        return;
+    }
+    if args[1] == "lotcovers" {
+        // lotcovers <root> <world file> <lot id hex> <outdir>: render the lot's floor designs.
+        use s3formats::lotdesign as ld;
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let w = Package::open(&args[3]).unwrap();
+        let lot = parse_hex(&args[4]);
+        let out = std::path::Path::new(&args[5]);
+        std::fs::create_dir_all(out).unwrap();
+        let rd = |t: u32, g: u32| w.find(&s3pkg::ResourceKey::new(t, g, lot)).and_then(|e| w.read(e).ok());
+        let refs = s3formats::objn::parse_refs(&rd(0x05ED1226, 0).unwrap()).unwrap_or_default();
+        let designs = ld::parse_designs(&rd(ld::T_DESIGNS, 0).unwrap_or_default());
+        let fpal = rd(ld::T_FLOOR_PALETTE, ld::G_FLOOR_PALETTE).and_then(|d| ld::parse_floor_palette(&d).ok()).unwrap_or_default();
+        println!("{} designs, {} floor palette entries", designs.len(), fpal.len());
+        let save = |name: &str, img: &s3formats::dds::Rgba| {
+            let f = std::fs::File::create(out.join(name)).unwrap();
+            let mut enc = png::Encoder::new(std::io::BufWriter::new(f), img.width as u32, img.height as u32);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            enc.write_header().unwrap().write_image_data(&img.data).unwrap();
+        };
+        let mut ids: Vec<_> = fpal.iter().collect();
+        ids.sort();
+        for (id, (cwal, comp)) in ids {
+            let d = designs.get(comp);
+            let keys: Vec<s3pkg::ResourceKey> = d.map(|d| d.refs.iter().map(|r| refs.get(r).copied().unwrap_or(s3pkg::ResourceKey::new(0, 0, 0))).collect()).unwrap_or_default();
+            let desc = d.map(|d| {
+                format!(
+                    "{} dae {:?} xml {:?} patterns {:?}",
+                    d.complate.name,
+                    d.complate.get("daeFileName").map(|v| v.text()),
+                    keys.get(d.complate.xml as usize),
+                    d.complate.blocks.iter().map(|b| format!("{}={} xml {:?}", b.pattern, b.name, keys.get(b.xml as usize).map(|k| k.t))).collect::<Vec<_>>()
+                )
+            });
+            let img = d.and_then(|d| s3formats::complate::render(&set, &d.complate, &keys, 256, 256));
+            let stats = img.as_ref().map(|i| {
+                let n = (i.data.len() / 4) as f32;
+                let mean = |c: usize| i.data.chunks(4).map(|p| p[c] as f32).sum::<f32>() / n;
+                format!("mean rgba {:.0} {:.0} {:.0} {:.0}", mean(0), mean(1), mean(2), mean(3))
+            });
+            println!("floor id {id}: cwal r{cwal} comp r{comp} -> {desc:?} render {stats:?}");
+            if let Some(img) = img {
+                save(&format!("floor_{id}.png"), &img);
+            }
+        }
+        return;
+    }
+    if args[1] == "wallsides" {
+        // wallsides <root> <world file> <lot id hex>: on outside walls, which covering side
+        // (A or B) faces the outdoor room — by the pattern names landing there.
+        use s3formats::lotdesign as ld;
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let w = Package::open(&args[3]).unwrap();
+        let lot = parse_hex(&args[4]);
+        let rd = |t: u32, g: u32| w.find(&s3pkg::ResourceKey::new(t, g, lot)).and_then(|e| w.read(e).ok());
+        let refs = s3formats::objn::parse_refs(&rd(0x05ED1226, 0).unwrap()).unwrap_or_default();
+        let graph = s3formats::lot::WallGraph::parse(&rd(0x312E7545, 0x2E7B1E).unwrap()).unwrap();
+        let sides = ld::parse_wall_sides(&rd(ld::T_WALL_SIDES, ld::G_WALL_PATTERNS).unwrap()).unwrap();
+        let pal = ld::parse_palette(&rd(ld::T_PALETTE, ld::G_WALL_PATTERN_PALETTE).unwrap()).unwrap();
+        let designs = ld::parse_designs(&rd(ld::T_DESIGNS, 0).unwrap_or_default());
+        println!("{} designs parsed", designs.len());
+        let name = |id: Option<u32>| -> String {
+            let Some(k) = id.and_then(|i| pal.get(&i)).and_then(|r| refs.get(r)) else { return "-".into() };
+            set.read(k)
+                .and_then(|d| s3formats::catalog::WallFloorPattern::parse(&d).ok())
+                .and_then(|p| p.materials.first().and_then(|m| m.complate.get("daeFileName")).map(|v| v.text()))
+                .unwrap_or_else(|| format!("{k}"))
+        };
+        let by_edge: std::collections::HashMap<u32, &ld::WallSides> = sides.iter().map(|s| (s.edge, s)).collect();
+        let mut tally = BTreeMap::<String, usize>::new();
+        let mut rooms = BTreeMap::<(u32, u32), usize>::new();
+        for e in &graph.edges {
+            *rooms.entry((e.left.min(99), e.right.min(99))).or_default() += 1;
+        }
+        println!("1E left/right rooms: {:?}", rooms.iter().take(30).collect::<Vec<_>>());
+        let walls = s3formats::lot::WallGraph::parse(&rd(0x312E7545, 0x2E7B1A).unwrap()).unwrap();
+        let mut wrooms = BTreeMap::<(u32, u32), usize>::new();
+        for e in &walls.edges {
+            *wrooms.entry((e.left.min(99), e.right.min(99))).or_default() += 1;
+        }
+        println!("1A left/right rooms: {:?}", wrooms.iter().take(30).collect::<Vec<_>>());
+        let segs: Vec<_> = walls.segments().collect();
+        for (a, b, level, e) in graph.segments() {
+            let Some(s) = by_edge.get(&e.id) else { continue };
+            // The wall this edge lies on.
+            let on = |p: [f32; 2], q: [f32; 2], r: [f32; 2]| {
+                let (dx, dz) = (r[0] - q[0], r[1] - q[1]);
+                let len2 = dx * dx + dz * dz;
+                if len2 < 1e-6 {
+                    return false;
+                }
+                let t = ((p[0] - q[0]) * dx + (p[1] - q[1]) * dz) / len2;
+                let (cx, cz) = (q[0] + dx * t - p[0], q[1] + dz * t - p[1]);
+                (-0.01..=1.01).contains(&t) && cx * cx + cz * cz < 1e-4
+            };
+            let Some(&(wa, wb, _, we)) = segs.iter().find(|w| w.2 == level && on(a, w.0, w.1) && on(b, w.0, w.1)) else { continue };
+            if (we.left == 0) == (we.right == 0) {
+                continue;
+            }
+            let same = (b[0] - a[0]) * (wb[0] - wa[0]) + (b[1] - a[1]) * (wb[1] - wa[1]) > 0.0;
+            let (left, _right) = if same { (we.left, we.right) } else { (we.right, we.left) };
+            let (outdoor, indoor) = if left == 0 { (s.a, s.b) } else { (s.b, s.a) };
+            *tally.entry(format!("A-is-left: outdoor={} indoor={}", name(outdoor), name(indoor))).or_default() += 1;
+        }
+        for (k, v) in tally {
+            println!("{v:4} {k}");
+        }
+        return;
+    }
+    if args[1] == "lotwalls" {
+        // lotwalls <root> <world file> <lot id hex>: each wall-side channel resolved through its
+        // palette and the lot's REFS table.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let w = Package::open(&args[3]).unwrap();
+        let lot = parse_hex(&args[4]);
+        let rd = |t: u32, g: u32| w.find(&s3pkg::ResourceKey::new(t, g, lot)).and_then(|e| w.read(e).ok());
+        let refs = rd(0x05ED1226, 0).and_then(|d| s3formats::objn::parse_refs(&d).ok()).unwrap_or_default();
+        println!("{} REFS entries", refs.len());
+        let tname = |t: u32| match t {
+            0x515CA4CD => "CWAL",
+            0x9151E6BC => "CWST",
+            0x033A1435 => "TXTC",
+            0x0341ACC9 => "TXTF",
+            0x044AE110 => "COMP",
+            0x00B2D882 => "DDS",
+            0x0333406C => "_XML",
+            0x0418FE2A => "CFEN",
+            _ => "?",
+        };
+        let found = |k: &s3pkg::ResourceKey| {
+            if w.find(k).is_some() {
+                "world"
+            } else if set.read(k).is_some() {
+                "install"
+            } else if w.entries.iter().any(|e| e.key.t == k.t && e.key.i == k.i) {
+                "world(other group)"
+            } else if set.find_ti(k.t, k.i).is_some() {
+                "install(other group)"
+            } else {
+                "MISSING"
+            }
+        };
+        // Palette: u32 version, 16 bytes, u32 count, then (u16 REFS index, u32 palette id, u32 area).
+        let palette = |g: u32| -> std::collections::HashMap<u32, u16> {
+            let mut out = std::collections::HashMap::new();
+            let Some(d) = rd(0xF12E5E12, g) else { return out };
+            let n = u32::from_le_bytes(d[20..24].try_into().unwrap()) as usize;
+            for i in 0..n {
+                let o = 24 + i * 10;
+                if o + 10 > d.len() {
+                    break;
+                }
+                let idx = u16::from_le_bytes([d[o], d[o + 1]]);
+                let id = u32::from_le_bytes(d[o + 2..o + 6].try_into().unwrap());
+                out.insert(id, idx);
+            }
+            out
+        };
+        for e in w.entries.iter().filter(|e| e.key.i == lot && (e.key.t == 0xB1422971 || e.key.t == 0xF12E5E12)) {
+            println!("{} len {}", e.key, w.read(e).map(|d| d.len()).unwrap_or(0));
+        }
+        let pairs: Vec<(u32, u32)> = std::env::var("PAIRS")
+            .ok()
+            .map(|v| {
+                v.split(',')
+                    .filter_map(|p| {
+                        let (a, b) = p.split_once('/')?;
+                        Some((parse_hex(a) as u32, parse_hex(b) as u32))
+                    })
+                    .collect()
+            })
+            .unwrap_or(vec![(0x002FDACF, 0x002E7DF7), (0x0082079A, 0x008207AA), (0x004BFAAB, 0x004BE299), (0x00DD33E4, 0x00DD3460)]);
+        let graphs: Vec<(u32, s3formats::lot::WallGraph)> = [0x2E7B1A, 0x2E7B1C, 0x2E7B1D, 0x2E7B1E, 0x2E7B1F]
+            .into_iter()
+            .filter_map(|g| Some((g, rd(0x312E7545, g).and_then(|d| s3formats::lot::WallGraph::parse(&d).ok())?)))
+            .collect();
+        for (g, gr) in &graphs {
+            println!("graph {g:08X}: {} vertices, {} edges, edge ids {:?}..", gr.vertices.len(), gr.edges.len(), gr.edges.iter().take(5).map(|e| e.id).collect::<Vec<_>>());
+        }
+        for (g, pg) in pairs {
+            let Some(d) = rd(0xB1422971, g) else { println!("no B1422971:{g:08X}"); continue };
+            {
+                let n = u32::from_le_bytes(d[4..8].try_into().unwrap()) as usize;
+                let ids: std::collections::HashSet<u32> = (0..n).filter_map(|i| d.get(8 + i * 10..12 + i * 10)).map(|b| u32::from_le_bytes(b.try_into().unwrap())).collect();
+                for (gg, gr) in &graphs {
+                    let hit = gr.edges.iter().filter(|e| ids.contains(&e.id)).count();
+                    println!("  {g:08X} ids in graph {gg:08X}: {hit}/{}", ids.len());
+                }
+            }
+            let pal = palette(pg);
+            let n = u32::from_le_bytes(d[4..8].try_into().unwrap()) as usize;
+            println!("== channel {g:08X} / palette {pg:08X}: {n} edges, {} palette entries", pal.len());
+            let mut kinds = BTreeMap::<String, usize>::new();
+            for i in 0..n {
+                let o = 8 + i * 10;
+                if o + 10 > d.len() {
+                    break;
+                }
+                let edge = u32::from_le_bytes(d[o..o + 4].try_into().unwrap());
+                let style = u16::from_le_bytes([d[o + 4], d[o + 5]]);
+                let a = u16::from_le_bytes([d[o + 6], d[o + 7]]);
+                let b = u16::from_le_bytes([d[o + 8], d[o + 9]]);
+                let res = |id: u16| -> String {
+                    if id == 0xFFFF {
+                        return "-".into();
+                    }
+                    match pal.get(&(id as u32)).and_then(|ri| refs.get(ri).map(|k| (ri, k))) {
+                        Some((ri, k)) => format!("{id}->r{ri} {} {k} [{}]", tname(k.t), found(k)),
+                        None => format!("{id}->?"),
+                    }
+                };
+                let sk = refs.get(&style).map(|k| format!("{} {}", tname(k.t), found(k))).unwrap_or("-".into());
+                for x in [a, b] {
+                    if x != 0xFFFF {
+                        let k = pal.get(&(x as u32)).and_then(|ri| refs.get(ri)).map(|k| format!("{} {}", tname(k.t), found(k))).unwrap_or("unresolved".into());
+                        *kinds.entry(k).or_default() += 1;
+                    }
+                }
+                if i < 6 {
+                    println!("  edge {edge} style r{style} ({sk}) A {} | B {}", res(a), res(b));
+                }
+            }
+            println!("  side kinds: {kinds:?}");
+        }
+        return;
+    }
     if args[1] == "lotrefs" {
         // lotrefs <root> <world file> <lot id hex>: which of the lot's resources mention wall,
         // floor and pattern catalogue entries.

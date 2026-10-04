@@ -323,6 +323,8 @@ pub fn spawn_building(
             })
             .clone()
     };
+    // A wall side's or floor triangle's covering texture, when the lot has one there.
+    let cover_key = |i: u16| (i != s3bake::types::NO_COVER).then(|| b.covers.get(i as usize).copied()).flatten();
     let cap_mat = ctx.materials.add(StandardMaterial { base_color: Color::srgb(0.93, 0.91, 0.86), perceptual_roughness: 0.9, ..default() });
 
     // Furniture, doors and windows.
@@ -509,8 +511,8 @@ pub fn spawn_building(
         let ulen = len + WALL_T;
         let mid = to3(mid_local, 0.0);
         if neighbor.is_some() {
-            for (side, kind) in [(1.0f32, w.left), (-1.0, w.right)] {
-                let buf = merged.entry(wall_style(kind, exterior)).or_default();
+            for (side, kind, cover) in [(1.0f32, w.left, w.cover[0]), (-1.0, w.right, w.cover[1])] {
+                let buf = merged.entry(cover_key(cover).unwrap_or_else(|| wall_style(kind, exterior))).or_default();
                 for (s0, s1) in wall_spans(&seg_holes, WALL_H) {
                     let off = half * side;
                     let p = [to3(pa, s0) + off, to3(pb, s0) + off, to3(pb, s1) + off, to3(pa, s1) + off];
@@ -528,7 +530,7 @@ pub fn spawn_building(
         let parent = commands
             .spawn((Transform::IDENTITY, Visibility::default(), BuildingPiece { level }, DespawnOnExit(AppState::InGame)))
             .id();
-        for (side, kind) in [(1.0f32, w.left), (-1.0, w.right)] {
+        for (side, kind, cover) in [(1.0f32, w.left, w.cover[0]), (-1.0, w.right, w.cover[1])] {
             let mut meshes = [MeshBuf::default(), MeshBuf::default()];
             for (mi, top) in [(0usize, WALL_H), (1, CUT_H)] {
                 for (s0, s1) in wall_spans(&seg_holes, top) {
@@ -543,7 +545,7 @@ pub fn spawn_building(
             if full.is_empty() {
                 continue;
             }
-            let mat = material(assets, ctx, wall_style(kind, exterior));
+            let mat = material(assets, ctx, cover_key(cover).unwrap_or_else(|| wall_style(kind, exterior)));
             let full = ctx.meshes.add(full.mesh());
             let cut = (!cut.is_empty()).then(|| ctx.meshes.add(cut.mesh()));
             let face = commands
@@ -593,15 +595,16 @@ pub fn spawn_building(
     // Floors, one mesh per level and style.
     let mut floor_bufs: HashMap<(u8, Key), MeshBuf> = HashMap::new();
     for f in &b.floors {
-        let y = level_y(f.level) + 0.012;
+        // (Ground-level paving sits just above the terrain.)
+        let y = level_y(f.level) + if f.level == 0 { 0.03 } else { 0.012 };
         let (x, z) = (f.x as f32, f.z as f32);
         let c = Vec2::new(x + 0.5, z + 0.5);
         let corners = [Vec2::new(x, z), Vec2::new(x + 1.0, z), Vec2::new(x + 1.0, z + 1.0), Vec2::new(x, z + 1.0)];
-        let buf = floor_bufs.entry((f.level, floor_style(f.kind))).or_default();
         for t in 0..4 {
             if f.mask & (1 << t) == 0 {
                 continue;
             }
+            let buf = floor_bufs.entry((f.level, cover_key(f.cover[t]).unwrap_or_else(|| floor_style(f.kind)))).or_default();
             let (p1, p2) = (corners[t], corners[(t + 1) % 4]);
             let pts = [c, p1, p2];
             buf.tri(pts.map(|p| active.world(p.x, p.y, y)), pts.map(|p| [p.x, p.y]), Vec3::Y);

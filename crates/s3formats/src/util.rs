@@ -72,6 +72,20 @@ impl<'a> Reader<'a> {
             &b.chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect::<Vec<_>>(),
         ))
     }
+    /// The bytes of a 7-bit-length-prefixed string.
+    pub fn string_bytes_7bit(&mut self) -> R<&'a [u8]> {
+        let mut n = 0usize;
+        let mut shift = 0;
+        loop {
+            let b = self.u8()?;
+            n |= ((b & 0x7F) as usize) << shift;
+            if b & 0x80 == 0 {
+                break;
+            }
+            shift += 7;
+        }
+        self.bytes(n)
+    }
     /// 7-bit-encoded length prefix (.NET BinaryWriter style) followed by bytes.
     pub fn string_7bit(&mut self) -> R<String> {
         let mut n = 0usize;

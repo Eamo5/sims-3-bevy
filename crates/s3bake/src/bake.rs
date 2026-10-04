@@ -167,6 +167,34 @@ pub fn bake_texture(pkgs: &PackageSet, key: Key, max: u32, layer_mode: bool) -> 
     }
 }
 
+/// Renders the lots' wall and floor coverings into the texture store.
+fn bake_covers(root: &BakeRoot, pkgs: &PackageSet, jobs: Vec<crate::building::CoverJob>, label: &str, progress: Progress) {
+    use crate::building::CoverSource;
+    std::fs::create_dir_all(root.textures_dir()).ok();
+    let mut seen = HashSet::new();
+    let todo: Vec<_> = jobs.into_iter().filter(|j| seen.insert(j.key) && !root.tex_path(j.key).exists()).collect();
+    let done = std::sync::atomic::AtomicUsize::new(0);
+    let total = todo.len();
+    par_map(&todo, |j| {
+        let (w, h) = if j.floor { (256, 256) } else { (256, 512) };
+        let img = match &j.source {
+            CoverSource::Design { complate, keys } => s3formats::complate::render(pkgs, complate, keys, w, h),
+            CoverSource::Pattern(k) => pkgs
+                .read(k)
+                .and_then(|d| s3formats::catalog::WallFloorPattern::parse(&d).ok())
+                .and_then(|p| p.materials.into_iter().next())
+                .and_then(|m| s3formats::complate::render(pkgs, &m.complate, &m.keys, w, h)),
+        };
+        if let Some(img) = img {
+            let _ = std::fs::write(root.tex_path(j.key), encode_dds(&img));
+        }
+        let n = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        if n % 50 == 0 || n == total {
+            progress(&format!("{label} {n}/{total}"));
+        }
+    });
+}
+
 fn bake_textures(root: &BakeRoot, pkgs: &PackageSet, keys: &[(Key, bool)], max: u32, label: &str, progress: Progress) -> usize {
     std::fs::create_dir_all(root.textures_dir()).ok();
     let todo: Vec<(Key, bool)> = keys.iter().copied().filter(|(k, _)| !root.tex_path(*k).exists()).collect();
@@ -668,12 +696,13 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         }
     });
     progress(&format!("Converting {name}: houses…"));
-    let buildings: Vec<LotBuildingBaked> = world
+    let (buildings, cover_jobs): (Vec<LotBuildingBaked>, Vec<Vec<crate::building::CoverJob>>) = world
         .lots
         .iter()
         .enumerate()
         .filter_map(|(i, l)| crate::building::bake_building(&pkg, i, l, placed.get(&l.id).map(|v| v.as_slice()).unwrap_or(&[])))
-        .collect();
+        .unzip();
+    bake_covers(root, pkgs, cover_jobs.into_iter().flatten().collect(), &format!("Converting {name}: walls and floors"), progress);
     let styles: Vec<(Key, bool)> = BUILD_STYLES.iter().map(|k| (*k, false)).collect();
     bake_textures(root, pkgs, &styles, 256, &format!("Converting {name}"), progress);
     progress(&format!("Converting {name}: trees…"));

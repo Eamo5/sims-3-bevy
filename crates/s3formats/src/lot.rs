@@ -23,6 +23,7 @@ pub struct GraphVertex {
 
 #[derive(Clone, Copy, Debug)]
 pub struct GraphEdge {
+    pub id: u32,
     pub a: u32,
     pub b: u32,
     /// Room ids on either side (0 = outdoors).
@@ -72,12 +73,12 @@ impl WallGraph {
         }
         let mut edges = Vec::with_capacity(ne);
         for _ in 0..ne {
-            let _id = r.u32()?;
+            let id = r.u32()?;
             let a = r.u32()?;
             let left = r.u32()?;
             let b = r.u32()?;
             let right = r.u32()?;
-            edges.push(GraphEdge { a, b, left, right });
+            edges.push(GraphEdge { id, a, b, left, right });
         }
         Ok(Self { width, depth, vertices, rooms, edges })
     }

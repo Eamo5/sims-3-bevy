@@ -8,7 +8,7 @@ pub use s3formats::world::{Heightmap, LotInfo};
 /// Bump whenever any baked format changes; stale caches are rebuilt.
 pub const BAKE_VERSION: u32 = 4;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 15;
+pub const WORLD_VERSION: u32 = 17;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -249,7 +249,15 @@ pub struct WallBaked {
     pub level: u8,
     pub left: u8,
     pub right: u8,
+    /// The covering of the left and right side: an index into `LotBuildingBaked::covers`
+    /// (`NO_COVER` = none, styled by room kind).
+    pub cover: [u16; 2],
 }
+
+pub const NO_COVER: u16 = u16::MAX;
+
+/// Texture type of the lot's wall and floor coverings rendered at bake time.
+pub const T_COVER: u32 = 0x7C0FE000;
 
 /// Floor triangles of one tile (bit 0 = -Z, 1 = +X, 2 = +Z, 3 = -X triangle).
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
@@ -260,6 +268,8 @@ pub struct FloorBaked {
     pub mask: u8,
     pub kind: u8,
     pub region: u16,
+    /// Covering of each triangle (index into `LotBuildingBaked::covers`).
+    pub cover: [u16; 4],
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -287,6 +297,8 @@ pub struct LotBuildingBaked {
     /// Foundation outline edges (lot-local).
     pub foundation: Vec<([f32; 2], [f32; 2])>,
     pub objects: Vec<LotObjectBaked>,
+    /// Texture keys of the lot's wall and floor coverings.
+    pub covers: Vec<Key>,
 }
 
 impl LotBuildingBaked {

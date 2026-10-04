@@ -787,25 +787,72 @@ camera; missing block = not allowed.
   [MTS: water levels Twinbrook/Bridgeport](https://modthesims.info/t/425205).
 - LDES background: [pepoluan "puzzling over LDES"](https://simoluan.tumblr.com/post/110264369020/puzzling-over-ldes).
 
-## Lot wall coverings (partly decoded)
+## Lot wall and floor coverings **[verified: rendered and compared in game]**
 
-Per lot (instance = lot id) in the world file:
+Implemented in `s3formats::{lotdesign, catalog, complate}` and `s3bake::building`.
 
-* `0x312E7545` graphs: group `0x2E7B1A` walls, `0x2E7B1C` room boundaries, `0x2E7B1D`, and
-  `0x2E7B1E` — the graph whose edges carry wall coverings (975 edges on Goth Manor).
-* `0xB1422971` group `0x002FDACF`: `u32 version (4), u32 count`, then per edge of graph
-  `0x2E7B1E`: `u32 edge id, u16 wall style (REFS index of a CWST), u16 side A, u16 side B`
-  (palette ids; `0xFFFF` = none).
-* `0xF12E5E12` group `0x002E7DF7`: the palette — `u32 version (2), 16 bytes, u32 count`, then
-  `u16 REFS index (a CWAL 0x515CA4CD), u32 palette id, u32 painted area`.
-* The lot's REFS table `0x05ED1226` group 0 resolves the indices (CWAL, CWST, TXTC, …);
-  group `0x00F0B54D` is the object table (OBJN).
-* The other `0xB1422971` / `0xF12E5E12` pairs (groups `0x0082079A`/`0x008207AA`,
-  `0x004BFAAB`/`0x004BE299`, `0x00DD33E4`/`0x00DD3460`) use the same layout with palettes
-  pointing at TXTC entries (likely floors and custom designs).
-* `0x913381F2`: fences — `u32 version, u32 count`, then `u32 level, f32 x, f32 z, u16 REFS
+### Where each wall side and floor tile gets its look
+
+Per lot (instance = lot id) in the world file, with REFS = `0x05ED1226:0:lot`:
+
+* **Wall sides.** `0xB1422971` channels hold `u32 version (4), u32 count`, then per edge of
+  graph `0x312E7545:0x2E7B1E` (the wall graph cut into per-tile edges; its edges carry no room
+  ids): `u32 edge id, u16 wall style (REFS → CWST), u16 side A, u16 side B` (palette ids,
+  `0xFFFF` = bare). Side A is the edge's **left** — taking the rooms from the `0x2E7B1A` wall
+  that contains the edge, in the edge's direction (checked: outdoor sides always land on
+  siding).
+  * channel `0x002FDACF` + palette `0x002E7DF7` → catalogue patterns (CWAL `0x515CA4CD`);
+  * channel `0x00DD33E4` + palette `0x00DD3460` → the lot's own designs (COMP `0x044AE110`);
+  * channels `0x004BFAAB` / `0x0082079A` (palettes `0x004BE299` / `0x008207AA`) → TXTC entries
+    that are **not shipped** — the game rebuilds them from the designs.
+* **Palettes** `0xF12E5E12`: `u32 version (2), 16 zero bytes, u32 count`, then
+  `u16 REFS index, u32 palette id, u32 painted area`.
+* **Floors.** Grid `0xB125533A:0x0093DEB7`: `u32 1, u32 w, u32 d, u32 levels` then
+  `levels × d × w` cells of four `u16` palette ids (one per tile triangle); `w × d` is the lot
+  plus one row and column; grid level 1 is the ground floor, level 0 paving on the ground. The
+  value counts equal the palette's areas exactly. The floor palette is
+  `0x0553EAD4:0x0093D9D1`: `u32 4, 16 zero bytes, u32 count`, then
+  `u16 CWAL, u16 TXTC, u16 TXTC, u16 COMP (REFS indices), u32 id, u32 area`.
+  (The `0x002E7B0E` / `0x002E7CF0` / `0x002E7CF1` grids are something else.)
+* **Fences** `0x913381F2`: `u32 version, u32 count`, then `u32 level, f32 x, f32 z, u16 REFS
   index (CFEN 0x0418FE2A)`.
-* `0x0563919E`: Create-a-Style data of the lot's objects (compact "complate" presets).
-* A CWAL holds its materials as complate presets (pattern names like
-  `Materials\Wood\grainStraight01VerMed_12`, colours) plus a TGI list (TXTC, …); rendering a
-  covering needs the preset applied to its TXTC.
+
+### The lot's designs (`0x0563919E`)
+
+`u32 version (5), u32 offset of the last section, u32 count`, then three sections:
+
+1. `count` compact records (`u16 id, u32 type (8), u32 len, …`) — object designs, not needed.
+2. `u32 n` COMP records, **keyed by the REFS index of the COMP entry** they stand for:
+   `u16 id, u32 version (2), u32 flags (2 or 0x40), u32 len` — `len 0` = empty record —
+   then a material exactly as in a CWAL (below, minus the leading type byte), then
+   `u8 n, u16 REFS index × n`: the resource list the material's `Tgi` indices go through
+   (its own TGI list is empty). Found reliably as the section whose records parse cleanly
+   up to the third section's offset.
+3. Hashed property records (`u32 2, u32 size, u32 count`, …) — not needed.
+
+### Catalogue patterns: CWAL `0x515CA4CD`
+
+`u32 version (0x0D), u32 TGI-list offset (from offset 8), u32 TGI-list size, u32 materials`;
+per material `u8 type, u32 len (from after the field), u16 0x0042, u32 TGI offset (relative,
+after the field), u32 TGI size, complate…, TGI list (u32 count, then type/group/instance)`,
+then 16 trailing bytes. After the materials the catalogue common block (`u32 0x0C, u64 name
+GUID, u64 desc GUID`, name and description as 7-bit-length big-endian UTF-16, price, …), then
+`u32 pattern type` (1 floor, 2 wall), VPXY index, sort flags, ….
+
+**Compact complate encoding** (s3pi `MaterialBlock`): `u8 xml (TGI index of the recipe),
+string name, string pattern slot ("Pattern A"…), u32 n, n × (string param, u8 type, value),
+u32 sub-blocks, sub-blocks…`. Strings: `0x80 | len` inline bytes; `0x40 k` = table entry
+`0x40 + k`; other bytes = table entry (s3pi's 112-entry `ComplateString.stringTable`, in
+`catalog.rs`). Value types: 1 string, 2 ARGB u32, 3 TGI index u8, 4 f32, 5 2×f32, 6 3×f32,
+7 bool.
+
+### Complates `_XML` 0x0333406C
+
+Plain XML: `<complate name>` with `<param type name default>` variables and `<destination>`
+lists of `<step type=…>` — the same steps as a compiled TXTC (ColorFill, SetTarget,
+ChannelSelect, DrawFabric, DrawImage, HSVShift), with `($Param)` references. Recipe instance
+= `fnv64(lowercase name)`; textures named by path resolve to DDS `fnv64(lowercase file
+stem)`. Wall recipes (`ObjectRgbaMask`, `ObjectRgbMask`) select patterns A–D through the mask
+channels, then multiply by `Multiplier` and lay `Overlay` and stencils on top; each pattern is
+itself a complate (a fabric: background image shifted in HSV, masked by `rgbmask`). Natural
+sizes: wall masks 256×512 (one tile wide, one storey high), floors 256×256 per tile.
