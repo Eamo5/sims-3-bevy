@@ -1,0 +1,126 @@
+//! Main menu: pick a world to play.
+
+use bevy::prelude::*;
+
+use crate::AppState;
+use crate::data::{InstallPath, SelectedWorld, WorldList};
+
+pub struct MenuPlugin;
+
+impl Plugin for MenuPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(OnEnter(AppState::MainMenu), spawn_menu)
+            .add_systems(Update, (button_visuals, menu_actions).run_if(in_state(AppState::MainMenu)));
+    }
+}
+
+#[derive(Component)]
+enum MenuAction {
+    PlayWorld(usize),
+    Quit,
+}
+
+pub const BTN_NORMAL: Color = Color::srgba(0.10, 0.32, 0.55, 0.92);
+pub const BTN_HOVER: Color = Color::srgba(0.16, 0.45, 0.75, 0.95);
+pub const BTN_PRESS: Color = Color::srgba(0.30, 0.65, 0.20, 1.0);
+pub const PLUMBOB_GREEN: Color = Color::srgb(0.35, 0.85, 0.25);
+
+pub fn button_visuals(
+    mut q: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<Button>)>,
+) {
+    for (i, mut bg) in &mut q {
+        bg.0 = match i {
+            Interaction::Pressed => BTN_PRESS,
+            Interaction::Hovered => BTN_HOVER,
+            Interaction::None => BTN_NORMAL,
+        };
+    }
+}
+
+pub fn text(s: impl Into<String>, size: f32, color: Color) -> impl Bundle {
+    (Text::new(s), TextFont::from_font_size(size), TextColor(color))
+}
+
+fn spawn_menu(mut commands: Commands, worlds: Res<WorldList>, install: Res<InstallPath>) {
+    commands.spawn((Camera2d, DespawnOnExit(AppState::MainMenu)));
+
+    let root = commands
+        .spawn((
+            DespawnOnExit(AppState::MainMenu),
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: Val::Px(14.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.05, 0.16, 0.30)),
+        ))
+        .id();
+
+    commands.entity(root).with_children(|p| {
+        p.spawn(text("The Sims 3", 72.0, Color::WHITE));
+        p.spawn(text("Bevy Edition", 28.0, PLUMBOB_GREEN));
+        p.spawn((
+            text(format!("Game data: {}", install.0.display()), 14.0, Color::srgb(0.7, 0.8, 0.9)),
+            Node { margin: UiRect::bottom(Val::Px(24.0)), ..default() },
+        ));
+        p.spawn(text("Choose a town to play", 26.0, Color::WHITE));
+        if worlds.0.is_empty() {
+            p.spawn(text(
+                "No worlds found. Start with --data <path to The Sims 3>.",
+                20.0,
+                Color::srgb(1.0, 0.5, 0.5),
+            ));
+        }
+        for (i, w) in worlds.0.iter().enumerate() {
+            spawn_button(p, &w.name, MenuAction::PlayWorld(i), 360.0);
+        }
+        p.spawn(Node { height: Val::Px(16.0), ..default() });
+        spawn_button(p, "Quit", MenuAction::Quit, 200.0);
+    });
+}
+
+fn spawn_button(p: &mut ChildSpawnerCommands, label: &str, action: MenuAction, width: f32) {
+    p.spawn((
+        Button,
+        action,
+        Node {
+            width: Val::Px(width),
+            height: Val::Px(44.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border_radius: BorderRadius::all(Val::Px(10.0)),
+            ..default()
+        },
+        BackgroundColor(BTN_NORMAL),
+    ))
+    .with_children(|b| {
+        b.spawn(text(label, 22.0, Color::WHITE));
+    });
+}
+
+fn menu_actions(
+    q: Query<(&Interaction, &MenuAction), Changed<Interaction>>,
+    worlds: Res<WorldList>,
+    mut commands: Commands,
+    mut next: ResMut<NextState<AppState>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    for (i, action) in &q {
+        if *i != Interaction::Pressed {
+            continue;
+        }
+        match action {
+            MenuAction::PlayWorld(idx) => {
+                commands.insert_resource(SelectedWorld(worlds.0[*idx].clone()));
+                next.set(AppState::Loading);
+            }
+            MenuAction::Quit => {
+                exit.write(AppExit::Success);
+            }
+        }
+    }
+}

@@ -1,0 +1,127 @@
+//! Loading screen: opens the game's packages and the chosen world on a worker thread.
+
+use std::sync::{Arc, Mutex};
+
+use bevy::prelude::*;
+use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
+use s3formats::world::WorldData;
+use s3pkg::{Package, PackageSet};
+
+use crate::AppState;
+use crate::data::{GameData, InstallPath, SelectedWorld};
+use crate::menu::{PLUMBOB_GREEN, text};
+use crate::terrain::{self, TerrainBuild};
+
+pub struct LoadingPlugin;
+
+impl Plugin for LoadingPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(OnEnter(AppState::Loading), start_loading)
+            .add_systems(Update, poll_loading.run_if(in_state(AppState::Loading)));
+    }
+}
+
+/// Everything produced by the loader thread.
+pub struct LoadResult {
+    pub packages: Arc<PackageSet>,
+    pub world_pkg: Arc<Package>,
+    pub world: Arc<WorldData>,
+    pub terrain: TerrainBuild,
+}
+
+#[derive(Resource)]
+struct LoadTask {
+    task: Task<Result<LoadResult, String>>,
+    progress: Arc<Mutex<String>>,
+}
+
+#[derive(Component)]
+struct ProgressText;
+
+/// The world currently being played.
+#[derive(Resource, Clone)]
+pub struct CurrentWorld {
+    pub name: String,
+    pub world_pkg: Arc<Package>,
+    pub data: Arc<WorldData>,
+}
+
+fn start_loading(mut commands: Commands, install: Res<InstallPath>, selected: Res<SelectedWorld>) {
+    commands.spawn((Camera2d, DespawnOnExit(AppState::Loading)));
+    commands
+        .spawn((
+            DespawnOnExit(AppState::Loading),
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: Val::Px(20.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.05, 0.16, 0.30)),
+        ))
+        .with_children(|p| {
+            p.spawn(text(format!("Loading {}…", selected.0.name), 48.0, Color::WHITE));
+            p.spawn((text("Starting", 22.0, PLUMBOB_GREEN), ProgressText));
+        });
+
+    let progress = Arc::new(Mutex::new(String::from("Starting")));
+    let root = install.0.clone();
+    let world_path = selected.0.path.clone();
+    let prog = progress.clone();
+    let task = AsyncComputeTaskPool::get().spawn(async move {
+        let set_status = |s: &str| *prog.lock().unwrap() = s.to_string();
+        set_status("Reading game packages (base game + expansions)…");
+        let packages = Arc::new(s3pkg::install::open_install(&root, |_| true));
+        if packages.is_empty() {
+            return Err(format!("No game packages found under {}", root.display()));
+        }
+        set_status("Opening world file…");
+        let world_pkg = Arc::new(Package::open(&world_path).map_err(|e| e.to_string())?);
+        set_status("Reading terrain…");
+        let world = Arc::new(WorldData::load(&world_pkg)?);
+        set_status("Building terrain meshes and textures…");
+        let terrain = terrain::build_terrain(&world, &packages);
+        set_status("Done");
+        Ok(LoadResult { packages, world_pkg, world, terrain })
+    });
+    commands.insert_resource(LoadTask { task, progress });
+}
+
+fn poll_loading(
+    mut commands: Commands,
+    task: Option<ResMut<LoadTask>>,
+    selected: Res<SelectedWorld>,
+    mut text_q: Query<&mut Text, With<ProgressText>>,
+    mut next: ResMut<NextState<AppState>>,
+) {
+    let Some(mut task) = task else { return };
+    if let Ok(mut t) = text_q.single_mut() {
+        let s = task.progress.lock().unwrap().clone();
+        if t.0 != s {
+            t.0 = s;
+        }
+    }
+    let Some(result) = block_on(poll_once(&mut task.task)) else { return };
+    commands.remove_resource::<LoadTask>();
+    match result {
+        Ok(r) => {
+            commands.insert_resource(GameData(r.packages));
+            commands.insert_resource(CurrentWorld {
+                name: selected.0.name.clone(),
+                world_pkg: r.world_pkg,
+                data: r.world,
+            });
+            commands.insert_resource(r.terrain);
+            next.set(AppState::InGame);
+        }
+        Err(e) => {
+            error!("Loading failed: {e}");
+            if let Ok(mut t) = text_q.single_mut() {
+                t.0 = format!("Loading failed: {e}");
+            }
+        }
+    }
+}
