@@ -100,7 +100,9 @@ fn split_imposter(p: &BakedPart) -> Vec<BakedPart> {
     tris.into_iter()
         .enumerate()
         .filter(|(_, idx)| !idx.is_empty())
-        .map(|(i, idx)| BakedPart { indices: idx, layer: i as u8 + LAYER_GROUND, ..p.clone() })
+        // Roofs are lit by the sun (the atlas holds their albedo); the ground and walls keep
+        // the imposter's own shading.
+        .map(|(i, idx)| BakedPart { indices: idx, layer: i as u8 + LAYER_GROUND, unlit: i as u8 + LAYER_GROUND != LAYER_ROOF, ..p.clone() })
         .collect()
 }
 

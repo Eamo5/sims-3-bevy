@@ -132,7 +132,7 @@ fn spawn_lot_chooser(
                 let picture = crate::objects::cpu_texture(&data.0, s3bake::lot_thumbnail_key(lot.id)).map(|img| images.add(img));
                 let kind = match world.data.buildings.get(&i).filter(|b| b.is_house()) {
                     Some(b) => {
-                        let floors = b.floors.iter().map(|f| f.level).collect::<std::collections::BTreeSet<_>>().len().max(1);
+                        let floors = b.floors.iter().filter(|f| f.level > 0).map(|f| f.level).collect::<std::collections::BTreeSet<_>>().len().max(1);
                         let what = if b.is_penthouse() {
                             "Penthouse (not yet playable)"
                         } else if b.is_furnished() {

@@ -8,7 +8,7 @@ pub use s3formats::world::{Heightmap, LotInfo};
 /// Bump whenever any baked format changes; stale caches are rebuilt.
 pub const BAKE_VERSION: u32 = 4;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 17;
+pub const WORLD_VERSION: u32 = 18;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);

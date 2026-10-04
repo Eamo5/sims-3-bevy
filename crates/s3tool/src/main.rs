@@ -304,6 +304,68 @@ fn main() {
         }
         return;
     }
+    if args[1] == "impuv" {
+        // impuv <root> <world> <modl key> <texture key>: average texture colour under the
+        // model's triangles, grouped by how upward-facing and how high they are.
+        let root = std::path::Path::new(&args[2]);
+        let mut set = s3pkg::install::open_install(root, |_| true);
+        set.add(Package::open(&args[3]).unwrap());
+        let key = |s: &str| {
+            let p: Vec<&str> = s.split(':').collect();
+            s3pkg::ResourceKey::new(parse_hex(p[0]) as u32, parse_hex(p[1]) as u32, parse_hex(p[2]))
+        };
+        let tex = s3formats::dds::decode(&set.read(&key(&args[5])).unwrap(), 1024).unwrap();
+        for m in s3formats::model::load_model(&set, &key(&args[4])).unwrap_or_default() {
+            println!("uv sets: {} {}; tex {}x{}", m.uvs.len(), m.uvs1.len(), tex.width, tex.height);
+            let mut groups = BTreeMap::<String, (usize, [f32; 3], [f32; 4])>::new();
+            let mut areas = BTreeMap::<String, f32>::new();
+            for t in m.indices.chunks_exact(3) {
+                let v = |i: u32| m.positions[i as usize];
+                let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
+                let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                let w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                let n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+                let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-9);
+                let ny = n[1] / len;
+                let lo = a[1].min(b[1]).min(c[1]);
+                let class = if lo < 0.4 && ny.abs() > 0.6 { "ground" } else if lo > 2.4 && ny.abs() > 0.25 { "roof" } else { "walls" };
+                let uv = |i: u32| m.uvs[i as usize];
+                let (ua, ub, uc) = (uv(t[0]), uv(t[1]), uv(t[2]));
+                let cu = (ua[0] + ub[0] + uc[0]) / 3.0;
+                let cv = (ua[1] + ub[1] + uc[1]) / 3.0;
+                // Area-weighted: sample a grid of points over the triangle, weight by 3D area.
+                let area = len * 0.5;
+                let mut px = [0.0f32; 3];
+                let mut k = 0.0;
+                for i in 0..=4 {
+                    for j in 0..=(4 - i) {
+                        let (wa, wb) = (i as f32 / 4.0, j as f32 / 4.0);
+                        let wc = 1.0 - wa - wb;
+                        let p = tex.sample(ua[0] * wa + ub[0] * wb + uc[0] * wc, ua[1] * wa + ub[1] * wb + uc[1] * wc);
+                        for c in 0..3 {
+                            px[c] += p[c];
+                        }
+                        k += 1.0;
+                    }
+                }
+                if std::env::var_os("UVDUMP").is_some() {
+                    println!("TRI {class}{} {} {} {} {} {} {} {:.2}", if ny > 0.0 { "+" } else { "-" }, ua[0], ua[1], ub[0], ub[1], uc[0], uc[1], a[1].max(b[1]).max(c[1]));
+                }
+                let e = groups.entry(format!("{class} ny{}", if ny > 0.0 { "+" } else { "-" })).or_insert((0, [0.0; 3], [f32::MAX, f32::MAX, f32::MIN, f32::MIN]));
+                e.0 += 1;
+                for c in 0..3 {
+                    e.1[c] += px[c] / k * area;
+                }
+                *areas.entry(format!("{class} ny{}", if ny > 0.0 { "+" } else { "-" })).or_insert(0.0) += area;
+                e.2 = [e.2[0].min(cu), e.2[1].min(cv), e.2[2].max(cu), e.2[3].max(cv)];
+            }
+            for (k, (n, c, r)) in groups {
+                let a = areas[&k].max(1e-6);
+                println!("  {k}: {n} tris ({a:.0} m2), mean rgb {:.0} {:.0} {:.0}, uv range {:.3},{:.3}..{:.3},{:.3}", c[0] * 255.0 / a, c[1] * 255.0 / a, c[2] * 255.0 / a, r[0], r[1], r[2], r[3]);
+            }
+        }
+        return;
+    }
     if args[1] == "matparams" {
         // matparams <root> <world> <modl key>
         let root = std::path::Path::new(&args[2]);
