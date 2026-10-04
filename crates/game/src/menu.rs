@@ -15,7 +15,7 @@ impl Plugin for MenuPlugin {
 }
 
 #[derive(Component)]
-enum MenuAction {
+pub enum MenuAction {
     PlayWorld(usize),
     Quit,
 }

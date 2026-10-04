@@ -88,11 +88,14 @@ pub struct Compositor<'a> {
     images: HashMap<ResourceKey, Option<Rgba>>,
     pub max_size: usize,
     base: Option<Buf>,
+    /// Return render target B (the part layer with coverage alpha) when the program used it,
+    /// instead of the final composite onto A. Used to pre-bake CAS clothing layers.
+    pub layer_mode: bool,
 }
 
 impl<'a> Compositor<'a> {
     pub fn new(pkgs: &'a PackageSet) -> Self {
-        Self { pkgs, images: HashMap::new(), max_size: 512, base: None }
+        Self { pkgs, images: HashMap::new(), max_size: 512, base: None, layer_mode: false }
     }
 
     fn image(&mut self, key: ResourceKey) -> Option<Rgba> {
@@ -193,6 +196,8 @@ impl<'a> Compositor<'a> {
         targets.insert(RT_A, base.unwrap_or_else(|| vec![[0.0; 4]; w * h]));
         targets.insert(RT_B, vec![[0.0; 4]; w * h]);
         let mut current = RT_A;
+        let mut used_b = false;
+        let layer_mode = std::mem::take(&mut self.layer_mode);
         let mut fabrics: HashMap<u8, Rgba> = HashMap::new();
 
         for step in t.steps.iter().take(limit) {
@@ -201,6 +206,7 @@ impl<'a> Compositor<'a> {
                     && targets.contains_key(&rt)
                 {
                     current = rt;
+                    used_b |= rt == RT_B;
                 }
                 continue;
             }
@@ -262,7 +268,8 @@ impl<'a> Compositor<'a> {
                 }
             }
         }
-        let buf = &targets[&current];
+        let out_rt = if layer_mode && used_b { RT_B } else { current };
+        let buf = &targets[&out_rt];
         let mut data = Vec::with_capacity(w * h * 4);
         for p in buf {
             for c in p {

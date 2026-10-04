@@ -1,14 +1,15 @@
-//! Loading screen: opens the game's packages and the chosen world on a worker thread.
+//! Loading screen. On first run (or when the cache is stale) it converts the installed game's
+//! assets into the baked cache; afterwards everything loads straight from the cache.
 
 use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
-use s3formats::world::WorldData;
-use s3pkg::{Package, PackageSet};
+use s3bake::{Heightmap, Key, LotInfo, WorldBaked};
 
 use crate::AppState;
-use crate::data::{GameData, InstallPath, SelectedWorld};
+use crate::baked::{Baked, BakedData};
+use crate::data::{InstallPath, SelectedWorld};
 use crate::menu::{PLUMBOB_GREEN, text};
 use crate::terrain::{self, TerrainBuild};
 
@@ -23,74 +24,73 @@ impl Plugin for LoadingPlugin {
 
 /// Everything produced by the loader thread.
 pub struct LoadResult {
-    pub packages: Arc<PackageSet>,
-    pub world_pkg: Arc<Package>,
-    pub world: Arc<WorldData>,
+    pub baked: Arc<BakedData>,
+    pub world: Arc<WorldInfo>,
     pub terrain: TerrainBuild,
-    pub strings: Strings,
     pub catalog: Catalog,
     pub world_build: crate::world::WorldBuild,
     pub cas: crate::simbody::CasData,
     pub sims: crate::simbody::PreparedSims,
 }
 
-/// English localised strings keyed by FNV64.
-#[derive(Resource, Default)]
-pub struct Strings(pub std::collections::HashMap<u64, String>);
-
 #[derive(Clone, Debug)]
 pub struct CatalogEntry {
-    pub key: s3pkg::ResourceKey,
+    pub key: Key,
     pub name: String,
     pub price: i32,
     pub kind: crate::interact::ObjectKind,
 }
 
-/// Every buyable object in the installed game.
+/// Every object in the installed game, with buy-mode prices.
 #[derive(Resource, Default)]
 pub struct Catalog {
     pub entries: Vec<CatalogEntry>,
-    index: std::collections::HashMap<s3pkg::ResourceKey, usize>,
+    index: std::collections::HashMap<Key, usize>,
 }
 
 impl Catalog {
-    pub fn build(pkgs: &PackageSet, strings: &Strings) -> Self {
-        use s3formats::object::{objd_objk, parse_objd};
-        let mut keys: Vec<_> = pkgs.keys_of_type(s3pkg::types::OBJD).copied().collect();
-        keys.sort();
-        let mut entries = Vec::new();
-        for k in keys {
-            let Some(d) = pkgs.read(&k) else { continue };
-            let Ok(info) = parse_objd(&d) else { continue };
-            let script = objd_objk(pkgs, &d).and_then(|o| o.script_class).unwrap_or_default();
-            let kind = crate::interact::ObjectKind::from_script(&script, &info.name);
-            let name = strings.0.get(&info.name_guid).cloned().unwrap_or_else(|| info.instance_name.clone());
-            entries.push(CatalogEntry {
-                key: k,
-                name,
-                price: if info.show_in_catalog { info.price as i32 } else { -1 },
-                kind,
-            });
-        }
+    pub fn from_baked(b: &BakedData) -> Self {
+        let entries: Vec<CatalogEntry> = b
+            .catalog
+            .iter()
+            .map(|c| CatalogEntry {
+                key: c.objd,
+                name: if c.name.is_empty() { c.instance_name.clone() } else { c.name.clone() },
+                price: c.price,
+                kind: crate::interact::ObjectKind::from_script(&c.script, &c.instance_name),
+            })
+            .collect();
         let index = entries.iter().enumerate().map(|(i, e)| (e.key, i)).collect();
         Self { entries, index }
     }
 
-    pub fn by_key(&self, k: &s3pkg::ResourceKey) -> Option<&CatalogEntry> {
+    pub fn by_key(&self, k: &Key) -> Option<&CatalogEntry> {
         self.index.get(k).map(|&i| &self.entries[i])
     }
 
     /// Buyable entries in a buy-mode category, cheapest first.
     pub fn in_category(&self, cat: &str) -> Vec<&CatalogEntry> {
-        let mut v: Vec<&CatalogEntry> = self
-            .entries
-            .iter()
-            .filter(|e| e.price > 0 && e.kind.category() == cat && !e.name.is_empty())
-            .collect();
+        let mut v: Vec<&CatalogEntry> =
+            self.entries.iter().filter(|e| e.price > 0 && e.kind.category() == cat && !e.name.is_empty()).collect();
         v.sort_by(|a, b| a.price.cmp(&b.price).then(a.name.cmp(&b.name)));
         v.dedup_by(|a, b| a.name == b.name);
         v
     }
+}
+
+/// Terrain heights, lots and water of the world being played.
+pub struct WorldInfo {
+    pub heightmap: Heightmap,
+    pub lots: Vec<LotInfo>,
+    pub lot_names: Vec<String>,
+    pub sea_level: f32,
+}
+
+/// The world currently being played.
+#[derive(Resource, Clone)]
+pub struct CurrentWorld {
+    pub name: String,
+    pub data: Arc<WorldInfo>,
 }
 
 #[derive(Resource)]
@@ -101,14 +101,6 @@ struct LoadTask {
 
 #[derive(Component)]
 struct ProgressText;
-
-/// The world currently being played.
-#[derive(Resource, Clone)]
-pub struct CurrentWorld {
-    pub name: String,
-    pub world_pkg: Arc<Package>,
-    pub data: Arc<WorldData>,
-}
 
 fn start_loading(
     mut commands: Commands,
@@ -138,35 +130,50 @@ fn start_loading(
         });
 
     let progress = Arc::new(Mutex::new(String::from("Starting")));
-    let root = install.0.clone();
+    let root_path = install.0.clone();
     let world_path = selected.0.path.clone();
+    let world_name = world_path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let prog = progress.clone();
     let task = AsyncComputeTaskPool::get().spawn(async move {
         let set_status = |s: &str| *prog.lock().unwrap() = s.to_string();
-        set_status("Reading game packages (base game + expansions)…");
-        let mut set = s3pkg::install::open_install(&root, |_| true);
-        if set.is_empty() {
-            return Err(format!("No game packages found under {}", root.display()));
+        let root = s3bake::default_root();
+        let need_global = root.global_manifest().is_none();
+        let need_world = !root.world_ready(&world_name);
+        if need_global || need_world {
+            // One-time conversion of the installed game into GPU-ready assets.
+            set_status("First run: reading the installed game (this conversion happens once)…");
+            let mut pkgs = s3pkg::install::open_install(&root_path, |_| true);
+            if pkgs.is_empty() {
+                return Err(format!("No game packages found under {}", root_path.display()));
+            }
+            if need_global {
+                s3bake::bake_global(&root, &pkgs, &root_path.to_string_lossy(), &set_status)?;
+            }
+            if need_world {
+                pkgs.add(s3pkg::Package::open(&world_path).map_err(|e| e.to_string())?);
+                s3bake::bake_world(&root, &pkgs, &world_path, &world_name, &set_status)?;
+            }
         }
-        set_status("Opening world file…");
-        // The world's own resources (lot imposters, their textures) join the package stack.
-        set.add(Package::open(&world_path).map_err(|e| e.to_string())?);
-        let packages = Arc::new(set);
-        let world_pkg = Arc::new(Package::open(&world_path).map_err(|e| e.to_string())?);
-        set_status("Reading terrain…");
-        let world = Arc::new(WorldData::load(&world_pkg)?);
-        set_status("Building terrain meshes and textures…");
-        let terrain = terrain::build_terrain(&world, &packages);
-        set_status("Reading string tables…");
-        let strings = Strings(s3formats::stbl::load_english(&packages));
-        set_status("Building the buy catalog…");
-        let catalog = Catalog::build(&packages, &strings);
-        let world_build = crate::world::build_world(&packages, &world_pkg, &world, &set_status);
+        set_status("Loading converted assets…");
+        let world: WorldBaked =
+            s3bake::read_value(&root.world_dir(&world_name).join("world.bin")).map_err(|e| format!("world cache: {e}"))?;
+        let baked = Arc::new(BakedData::open(root, Some(&world_name))?);
+        set_status("Building terrain…");
+        let terrain = terrain::build_terrain(&world);
+        set_status("Placing the town…");
+        let world_build = crate::world::build_world(&baked, &world);
+        let catalog = Catalog::from_baked(&baked);
         set_status("Dressing your Sims…");
-        let cas = crate::simbody::build_cas(&packages);
-        let sims = crate::simbody::prepare_sims(&packages, &cas, &members);
+        let cas = crate::simbody::CasData::from_baked(&baked);
+        let sims = crate::simbody::prepare_sims(&baked, &cas, &members);
+        let info = WorldInfo {
+            lot_names: world.lots.iter().map(|l| l.display_name.clone()).collect(),
+            lots: world.lots.iter().map(|l| l.info.clone()).collect(),
+            heightmap: world.heightmap,
+            sea_level: world.sea_level,
+        };
         set_status("Done");
-        Ok(LoadResult { packages, world_pkg, world, terrain, strings, catalog, world_build, cas, sims })
+        Ok(LoadResult { baked, world: Arc::new(info), terrain, catalog, world_build, cas, sims })
     });
     commands.insert_resource(LoadTask { task, progress });
 }
@@ -189,14 +196,9 @@ fn poll_loading(
     commands.remove_resource::<LoadTask>();
     match result {
         Ok(r) => {
-            commands.insert_resource(GameData(r.packages));
-            commands.insert_resource(CurrentWorld {
-                name: selected.0.name.clone(),
-                world_pkg: r.world_pkg,
-                data: r.world,
-            });
+            commands.insert_resource(Baked(r.baked));
+            commands.insert_resource(CurrentWorld { name: selected.0.name.clone(), data: r.world });
             commands.insert_resource(r.terrain);
-            commands.insert_resource(r.strings);
             commands.insert_resource(r.catalog);
             commands.insert_resource(r.world_build);
             commands.insert_resource(r.cas);

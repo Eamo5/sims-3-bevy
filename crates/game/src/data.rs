@@ -1,10 +1,7 @@
 //! Locating the user's Sims 3 installation and holding the opened game data.
 
 use std::path::PathBuf;
-use std::sync::Arc;
-
 use bevy::prelude::*;
-use s3pkg::PackageSet;
 
 const DEFAULT_INSTALL: &str = r"\\RYZEN-PC\Users\Laura\Documents\The Sims 3";
 
@@ -25,9 +22,6 @@ pub struct WorldList(pub Vec<WorldEntry>);
 #[derive(Resource, Clone)]
 pub struct SelectedWorld(pub WorldEntry);
 
-/// Every package of the installation, indexed with override priority.
-#[derive(Resource, Clone)]
-pub struct GameData(pub Arc<PackageSet>);
 
 pub struct DataPlugin;
 

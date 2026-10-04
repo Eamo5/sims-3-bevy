@@ -5,3 +5,4 @@ version.workspace = true
 
 [dependencies]
 s3pkg = { path = "../s3pkg" }
+serde = { version = "1", features = ["derive"] }

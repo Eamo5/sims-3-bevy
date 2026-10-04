@@ -271,10 +271,7 @@ pub fn random_last_name(rng: &mut impl Rng) -> String {
 /// Asset stores needed to spawn a sim body.
 pub struct SimSpawnCtx<'a> {
     pub assets: &'a SimAssets,
-    pub meshes: &'a mut Assets<Mesh>,
-    pub images: &'a mut Assets<Image>,
-    pub mats: &'a mut Assets<StandardMaterial>,
-    pub bindposes: &'a mut Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>,
+    pub render: crate::simbody::SimRenderCtx<'a>,
 }
 
 /// Spawns a sim: a real CAS body when `model` is given, otherwise the stand-in body.
@@ -286,7 +283,7 @@ pub fn spawn_sim_full(
     model: Option<crate::simbody::SimModelCpu>,
 ) -> Entity {
     let Some(model) = model else {
-        return spawn_sim(commands, ctx.assets, ctx.mats, sim, pos);
+        return spawn_sim(commands, ctx.assets, ctx.render.mats, sim, pos);
     };
     let scale = if sim.age == Age::Child { 1.0 } else { 1.0 };
     let entity = commands
@@ -301,11 +298,11 @@ pub fn spawn_sim_full(
             crate::anim::ClipPlayer::default(),
         ))
         .id();
-    crate::simbody::spawn_sim_model(commands, entity, model, ctx.meshes, ctx.images, ctx.mats, ctx.bindposes);
+    crate::simbody::spawn_sim_model(commands, entity, model, &mut ctx.render);
     let plumbob = commands
         .spawn((
             Mesh3d(ctx.assets.plumbob.clone()),
-            MeshMaterial3d(ctx.mats.add(StandardMaterial {
+            MeshMaterial3d(ctx.render.mats.add(StandardMaterial {
                 base_color: Color::srgb(0.2, 0.95, 0.2),
                 emissive: LinearRgba::rgb(0.1, 0.9, 0.1),
                 ..default()

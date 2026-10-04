@@ -9,7 +9,7 @@ use s3pkg::ResourceKey;
 // ---------------------------------------------------------------------------------------------
 // RIG 0x8EAF13DE (new format, major 3/4)
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Bone {
     pub name: String,
     pub hash: u32,
@@ -19,7 +19,7 @@ pub struct Bone {
     pub scale: [f32; 3],
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Rig {
     pub name: String,
     pub bones: Vec<Bone>,
@@ -339,13 +339,13 @@ pub fn vpxy_lod_geoms(d: &[u8], want_lod: u8) -> Vec<ResourceKey> {
 // ---------------------------------------------------------------------------------------------
 // CLIP 0x6B20C4F3
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Track {
     pub translation: Vec<(f32, [f32; 3])>,
     pub rotation: Vec<(f32, [f32; 4])>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Clip {
     pub name: String,
     pub duration: f32,

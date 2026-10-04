@@ -21,3 +21,6 @@ opt-level = 3
 
 [profile.dev.package.s3pkg]
 opt-level = 3
+
+[profile.dev.package.s3bake]
+opt-level = 3

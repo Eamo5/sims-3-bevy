@@ -5,11 +5,10 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 use s3formats::sim::Clip;
-use s3pkg::types;
 
 use crate::PlayMode;
 use crate::clock::{GameClock, SPEED_RATES};
-use crate::data::GameData;
+use crate::baked::Baked;
 use crate::sim::{Pose, Sim, SimAnim};
 use crate::simbody::Skeleton;
 
@@ -22,26 +21,17 @@ impl Plugin for AnimPlugin {
     }
 }
 
-/// Instance id of an adult / object clip (the low 63 bits of FNV-64 of its name).
-fn clip_instance(name: &str) -> u64 {
-    s3pkg::fnv64(name) & 0x7FFF_FFFF_FFFF_FFFF
-}
-
 #[derive(Resource, Default)]
 pub struct ClipLibrary {
     cache: HashMap<String, Option<Arc<Clip>>>,
 }
 
 impl ClipLibrary {
-    pub fn get(&mut self, data: &GameData, name: &str) -> Option<Arc<Clip>> {
+    pub fn get(&mut self, data: &Baked, name: &str) -> Option<Arc<Clip>> {
         if let Some(c) = self.cache.get(name) {
             return c.clone();
         }
-        let clip = data
-            .0
-            .read_ti(types::CLIP, clip_instance(name))
-            .and_then(|d| Clip::parse(&d).ok())
-            .map(Arc::new);
+        let clip = data.0.clips.get(name).cloned();
         if clip.is_none() {
             warn!("animation clip {name} not found");
         }
@@ -117,7 +107,7 @@ fn pose_clip(pose: Pose, female: bool) -> &'static str {
 fn drive_skeletons(
     time: Res<Time>,
     clock: Res<GameClock>,
-    data: Res<GameData>,
+    data: Res<Baked>,
     mut lib: ResMut<ClipLibrary>,
     mut sims: Query<(&Sim, &SimAnim, &Skeleton, Option<&ActionClip>, &mut ClipPlayer)>,
     mut joints: Query<&mut Transform, Without<Sim>>,

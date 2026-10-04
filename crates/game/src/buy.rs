@@ -3,10 +3,10 @@
 use bevy::picking::mesh_picking::ray_cast::{MeshRayCast, MeshRayCastSettings};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use s3pkg::ResourceKey;
+use s3bake::Key;
 
 use crate::camera::SimsCamera;
-use crate::data::GameData;
+use crate::baked::Baked;
 use crate::home::spawn_game_object;
 use crate::hud::{PointerOverUi, ground_hit};
 use crate::interact::{GameObject, Household, Notifications, ObjectKind};
@@ -34,7 +34,7 @@ pub const CATEGORIES: [&str; 9] =
 const PAGE: usize = 24;
 
 pub struct Placing {
-    pub objd: ResourceKey,
+    pub objd: Key,
     pub ghost: Entity,
     /// Moving an object already owned (no charge).
     pub owned: bool,
@@ -96,7 +96,7 @@ fn buy_pick(
 enum BuyButton {
     Toggle,
     Category(usize),
-    Item(ResourceKey),
+    Item(Key),
     Prev,
     Next,
 }
@@ -219,7 +219,7 @@ fn buy_buttons(
     q: Query<(&Interaction, &BuyButton), Changed<Interaction>>,
     mut buy: ResMut<BuyMode>,
     mut clock: ResMut<crate::clock::GameClock>,
-    data: Res<GameData>,
+    data: Res<Baked>,
     mut assets: ResMut<ObjectAssets>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
@@ -251,7 +251,7 @@ fn buy_buttons(
                 if let Some(p) = buy.placing.take() {
                     commands.entity(p.ghost).despawn();
                 }
-                let mut ctx = AssetCtx { pkgs: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+                let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
                 let parts = assets.object(&mut ctx, *key);
                 if parts.is_empty() {
                     continue;
@@ -281,7 +281,7 @@ fn placement(
     (keys, mouse): (Res<ButtonInput<KeyCode>>, Res<ButtonInput<MouseButton>>),
     over_ui: Res<PointerOverUi>,
     (windows, cams): (Query<&Window, With<PrimaryWindow>>, Query<(&Camera, &GlobalTransform), With<SimsCamera>>),
-    (world, data, catalog): (Res<CurrentWorld>, Res<GameData>, Res<Catalog>),
+    (world, data, catalog): (Res<CurrentWorld>, Res<Baked>, Res<Catalog>),
     mut assets: ResMut<ObjectAssets>,
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut household: Option<ResMut<Household>>,
@@ -309,7 +309,7 @@ fn placement(
         if let Some(req) = pickup {
             commands.remove_resource::<PickupRequest>();
             if let Ok((obj, tf)) = objects.get(req.0) {
-                let mut ctx = AssetCtx { pkgs: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+                let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
                 let parts = assets.object(&mut ctx, obj.objd);
                 let ghost = spawn_parts(&mut commands, &parts, *tf);
                 commands.entity(ghost).insert(DespawnOnExit(AppState::InGame));
@@ -350,7 +350,7 @@ fn placement(
             // Put it back where the ghost is.
             if let Ok(tf) = tfs.get(ghost) {
                 let (pos, yaw) = (tf.translation, buy.yaw);
-                let mut ctx = AssetCtx { pkgs: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+                let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
                 spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, yaw);
             }
         }
@@ -369,7 +369,7 @@ fn placement(
         }
         let Ok(tf) = tfs.get(ghost) else { return };
         let (pos, yaw) = (tf.translation, buy.yaw);
-        let mut ctx = AssetCtx { pkgs: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+        let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
         if spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, yaw).is_some() {
             if !owned && let Some(h) = household.as_mut() {
                 h.funds -= price;

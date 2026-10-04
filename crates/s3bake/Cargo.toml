@@ -1,0 +1,20 @@
+[package]
+name = "s3bake"
+edition.workspace = true
+version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "s3bake"
+path = "src/main.rs"
+
+[dependencies]
+s3pkg = { path = "../s3pkg" }
+s3formats = { path = "../s3formats" }
+serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", features = ["use-std"] }
+serde_json = "1"
+texpresso = "2"
+lz4_flex = "0.11"

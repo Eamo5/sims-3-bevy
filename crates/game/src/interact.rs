@@ -5,7 +5,7 @@ use std::collections::{HashMap, VecDeque};
 
 use bevy::prelude::*;
 use rand::Rng;
-use s3pkg::ResourceKey;
+use s3bake::Key;
 
 use crate::PlayMode;
 use crate::clock::{GameClock, SimDelta};
@@ -137,7 +137,7 @@ impl ObjectKind {
 pub struct GameObject {
     pub kind: ObjectKind,
     pub name: String,
-    pub objd: ResourceKey,
+    pub objd: Key,
     pub price: i32,
     /// Local XZ bounds centre and half extents.
     pub center: Vec2,

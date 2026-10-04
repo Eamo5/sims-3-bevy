@@ -1,4 +1,5 @@
-//! Building Bevy meshes and materials from Sims 3 object models, with caching.
+//! Bevy meshes and materials for objects, built from the baked cache (pre-decoded meshes and
+//! GPU-compressed DDS textures), with caching.
 
 use std::collections::HashMap;
 
@@ -6,8 +7,9 @@ use bevy::asset::RenderAssetUsages;
 use bevy::image::{CompressedImageFormats, ImageAddressMode, ImageFormat, ImageSampler, ImageSamplerDescriptor, ImageType};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
-use s3formats::model::{self, MeshData, P_DIFFUSE_MAP};
-use s3pkg::{PackageSet, ResourceKey, types};
+use s3bake::{BakedModel, Key};
+
+use crate::baked::BakedData;
 
 #[derive(Clone)]
 pub struct ModelPart {
@@ -18,20 +20,20 @@ pub struct ModelPart {
 
 #[derive(Resource, Default)]
 pub struct ObjectAssets {
-    models: HashMap<ResourceKey, Vec<ModelPart>>,
-    objects: HashMap<ResourceKey, Vec<ModelPart>>,
-    textures: HashMap<ResourceKey, Option<Handle<Image>>>,
-    materials: HashMap<(Option<ResourceKey>, u8), Handle<StandardMaterial>>,
+    models: HashMap<Key, Vec<ModelPart>>,
+    objects: HashMap<Key, Vec<ModelPart>>,
+    textures: HashMap<Key, Option<Handle<Image>>>,
+    materials: HashMap<(Option<Key>, u8, bool), Handle<StandardMaterial>>,
 }
 
 pub struct AssetCtx<'a> {
-    pub pkgs: &'a PackageSet,
+    pub baked: &'a BakedData,
     pub meshes: &'a mut Assets<Mesh>,
     pub images: &'a mut Assets<Image>,
     pub materials: &'a mut Assets<StandardMaterial>,
 }
 
-fn sampler() -> ImageSampler {
+pub fn sampler() -> ImageSampler {
     ImageSampler::Descriptor(ImageSamplerDescriptor {
         address_mode_u: ImageAddressMode::Repeat,
         address_mode_v: ImageAddressMode::Repeat,
@@ -40,7 +42,7 @@ fn sampler() -> ImageSampler {
     })
 }
 
-/// Decodes a DDS resource into a GPU image.
+/// Loads a baked DDS (BC-compressed, with mips) straight into a GPU image.
 pub fn dds_image(bytes: &[u8], srgb: bool) -> Option<Image> {
     Image::from_buffer(
         bytes,
@@ -53,140 +55,64 @@ pub fn dds_image(bytes: &[u8], srgb: bool) -> Option<Image> {
     .ok()
 }
 
-/// Uploads a CPU-composited RGBA image with a generated mip chain.
-pub fn rgba_image(img: s3formats::dds::Rgba) -> Image {
-    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-    let (data, levels) = s3formats::dds::build_mips(&img);
-    let mut out = Image::default();
-    out.data = Some(data);
-    out.texture_descriptor.size = Extent3d { width: img.width as u32, height: img.height as u32, depth_or_array_layers: 1 };
-    out.texture_descriptor.mip_level_count = levels;
-    out.texture_descriptor.format = TextureFormat::Rgba8UnormSrgb;
-    out.texture_descriptor.dimension = TextureDimension::D2;
-    out.sampler = sampler();
-    out.asset_usage = RenderAssetUsages::RENDER_WORLD;
-    out
+/// A baked texture as a GPU image (any thread).
+pub fn cpu_texture(baked: &BakedData, key: Key) -> Option<Image> {
+    dds_image(&baked.texture_bytes(&key)?, true)
 }
 
-/// Picks a representative DDS from a texture compositor (TXTC) resource.
-fn txtc_fallback(d: &[u8]) -> Option<ResourceKey> {
-    if d.len() < 8 {
-        return None;
-    }
-    let off = u32::from_le_bytes(d[4..8].try_into().ok()?) as usize;
-    let p = 8 + off;
-    let n = *d.get(p)? as usize;
-    let mut keys = Vec::new();
-    for k in 0..n {
-        let b = d.get(p + 1 + k * 16..p + 17 + k * 16)?;
-        let i = u64::from_le_bytes(b[0..8].try_into().ok()?);
-        let g = u32::from_le_bytes(b[8..12].try_into().ok()?);
-        let t = u32::from_le_bytes(b[12..16].try_into().ok()?);
-        keys.push(ResourceKey::new(t, g, i));
-    }
-    keys.into_iter().find(|k| k.t == types::DDS)
-}
-
-/// Builds a texture (DDS or composited TXTC) without touching Bevy's asset storage.
-pub fn build_texture_cpu(pkgs: &PackageSet, key: ResourceKey, max_size: usize) -> Option<Image> {
-    let data = pkgs.read(&key).or_else(|| pkgs.read_ti(key.t, key.i));
-    match key.t {
-        types::TXTC => data
-            .as_deref()
-            .and_then(|d| s3formats::compositor::composite(pkgs, d, max_size))
-            .map(rgba_image)
-            .or_else(|| {
-                // Fall back to a representative DDS if compositing fails.
-                let k = data.as_deref().and_then(txtc_fallback)?;
-                dds_image(&pkgs.read(&k)?, true)
-            }),
-        types::DDS => data.and_then(|d| dds_image(&d, true)),
-        _ => None,
-    }
-}
-
-/// A mesh part decoded on any thread.
+/// A mesh part ready to upload (any thread).
 pub struct CpuPart {
     pub mesh: Mesh,
-    pub tex: Option<ResourceKey>,
+    pub tex: Option<Key>,
     pub mode: u8,
+    pub unlit: bool,
     pub bounds: (Vec3, Vec3),
 }
 
-pub const P_IMPOSTER_TEXTURE: u32 = 0xBDCF71C5;
-
-fn diffuse_key(m: &MeshData) -> Option<ResourceKey> {
-    if m.material.shader == model::SHADER_LOT_IMPOSTER {
-        m.material.texture(P_IMPOSTER_TEXTURE).or_else(|| m.material.texture(P_DIFFUSE_MAP))
-    } else {
-        m.material.texture(P_DIFFUSE_MAP)
-    }
-}
-
-/// Decodes a MODL's meshes into Bevy meshes (any thread).
-pub fn build_model_cpu(pkgs: &PackageSet, modl: ResourceKey) -> Vec<CpuPart> {
-    let meshes = model::load_model(pkgs, &modl).unwrap_or_default();
-    let mut parts = Vec::new();
-    for m in &meshes {
-        if m.indices.is_empty() || !bounds_ok(m) {
-            continue;
-        }
-        let mat = &m.material;
-        let mode: u8 = if mat.is_alpha_blended() {
-            2
-        } else if mat.is_alpha_tested() {
-            1
-        } else {
-            0
-        };
-        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, m.positions.clone());
-        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, m.normals.clone());
-        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, m.uvs.clone());
-        mesh.insert_indices(Indices::U32(m.indices.clone()));
-        parts.push(CpuPart {
-            mesh,
-            tex: diffuse_key(m),
-            mode,
-            bounds: (Vec3::from(m.bounds_min), Vec3::from(m.bounds_max)),
-        });
-    }
-    parts
+pub fn cpu_model(model: BakedModel) -> Vec<CpuPart> {
+    model
+        .parts
+        .into_iter()
+        .map(|p| {
+            let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, p.positions);
+            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, p.normals);
+            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, p.uvs);
+            mesh.insert_indices(Indices::U32(p.indices));
+            CpuPart { mesh, tex: p.texture, mode: p.mode, unlit: p.unlit, bounds: (Vec3::from(p.bmin), Vec3::from(p.bmax)) }
+        })
+        .collect()
 }
 
 impl ObjectAssets {
-    pub fn texture(&mut self, ctx: &mut AssetCtx, key: ResourceKey) -> Option<Handle<Image>> {
+    pub fn texture(&mut self, ctx: &mut AssetCtx, key: Key) -> Option<Handle<Image>> {
         if let Some(h) = self.textures.get(&key) {
             return h.clone();
         }
-        let handle = build_texture_cpu(ctx.pkgs, key, 512).map(|img| ctx.images.add(img));
+        let handle = cpu_texture(ctx.baked, key).map(|img| ctx.images.add(img));
         self.textures.insert(key, handle.clone());
         handle
     }
 
-    pub fn ingest_texture(&mut self, images: &mut Assets<Image>, key: ResourceKey, img: Option<Image>) {
+    pub fn ingest_texture(&mut self, images: &mut Assets<Image>, key: Key, img: Option<Image>) {
         if !self.textures.contains_key(&key) {
             let h = img.map(|i| images.add(i));
             self.textures.insert(key, h);
         }
     }
 
-    pub fn ingest_model(&mut self, ctx: &mut AssetCtx, modl: ResourceKey, cpu: Vec<CpuPart>) -> Vec<ModelPart> {
+    pub fn ingest_model(&mut self, ctx: &mut AssetCtx, key: Key, cpu: Vec<CpuPart>) -> Vec<ModelPart> {
         let mut parts = Vec::new();
         for p in cpu {
-            let material = self.material_for_key(ctx, p.tex, p.mode);
+            let material = self.material_for_key(ctx, p.tex, p.mode, p.unlit);
             parts.push(ModelPart { mesh: ctx.meshes.add(p.mesh), material, bounds: p.bounds });
         }
-        self.models.insert(modl, parts.clone());
+        self.models.insert(key, parts.clone());
         parts
     }
 
-    pub fn has_model(&self, modl: &ResourceKey) -> bool {
-        self.models.contains_key(modl)
-    }
-
-    fn material_for_key(&mut self, ctx: &mut AssetCtx, tex_key: Option<ResourceKey>, mode: u8) -> Handle<StandardMaterial> {
-        if let Some(h) = self.materials.get(&(tex_key, mode)) {
+    fn material_for_key(&mut self, ctx: &mut AssetCtx, tex_key: Option<Key>, mode: u8, unlit: bool) -> Handle<StandardMaterial> {
+        if let Some(h) = self.materials.get(&(tex_key, mode, unlit)) {
             return h.clone();
         }
         let tex = tex_key.and_then(|k| self.texture(ctx, k));
@@ -195,6 +121,7 @@ impl ObjectAssets {
             base_color_texture: tex,
             perceptual_roughness: 0.7,
             reflectance: 0.3,
+            unlit,
             alpha_mode: match mode {
                 2 => AlphaMode::Blend,
                 1 => AlphaMode::Mask(0.5),
@@ -204,43 +131,31 @@ impl ObjectAssets {
             cull_mode: if mode != 0 { None } else { Some(bevy::render::render_resource::Face::Back) },
             ..default()
         });
-        self.materials.insert((tex_key, mode), handle.clone());
+        self.materials.insert((tex_key, mode, unlit), handle.clone());
         handle
     }
 
-    pub fn model(&mut self, ctx: &mut AssetCtx, modl: ResourceKey) -> Vec<ModelPart> {
-        if let Some(p) = self.models.get(&modl) {
+    pub fn model(&mut self, ctx: &mut AssetCtx, key: Key) -> Vec<ModelPart> {
+        if let Some(p) = self.models.get(&key) {
             return p.clone();
         }
-        let cpu = build_model_cpu(ctx.pkgs, modl);
-        self.ingest_model(ctx, modl, cpu)
+        let cpu = ctx.baked.model(&key).map(cpu_model).unwrap_or_default();
+        self.ingest_model(ctx, key, cpu)
     }
 
     /// All model parts of a catalog object (OBJD key).
-    pub fn object(&mut self, ctx: &mut AssetCtx, objd: ResourceKey) -> Vec<ModelPart> {
+    pub fn object(&mut self, ctx: &mut AssetCtx, objd: Key) -> Vec<ModelPart> {
         if let Some(p) = self.objects.get(&objd) {
             return p.clone();
         }
+        let models = ctx.baked.catalog_entry(&objd).map(|e| e.models.clone()).unwrap_or_default();
         let mut parts = Vec::new();
-        for modl in s3formats::object::object_models(ctx.pkgs, &objd) {
-            parts.extend(self.model(ctx, modl));
+        for m in models {
+            parts.extend(self.model(ctx, m));
         }
         self.objects.insert(objd, parts.clone());
         parts
     }
-}
-
-/// Rejects meshes whose decoded positions don't match their stored bounds (unsupported encodings).
-fn bounds_ok(m: &MeshData) -> bool {
-    let mut mn = [f32::MAX; 3];
-    let mut mx = [f32::MIN; 3];
-    for p in &m.positions {
-        for a in 0..3 {
-            mn[a] = mn[a].min(p[a]);
-            mx[a] = mx[a].max(p[a]);
-        }
-    }
-    (0..3).all(|a| (mn[a] - m.bounds_min[a]).abs() < 0.05 && (mx[a] - m.bounds_max[a]).abs() < 0.05)
 }
 
 /// Spawns an object's meshes as children of a new entity.

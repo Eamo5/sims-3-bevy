@@ -9,7 +9,6 @@ use crate::PlayMode;
 use crate::clock::{GameClock, SPEED_RATES};
 use crate::loading::CurrentWorld;
 use crate::sim::{Pose, SimAnim};
-use crate::terrain::SEA_LEVEL;
 
 pub struct NavPlugin;
 
@@ -233,7 +232,7 @@ fn rebuild_grid(
             let slope = (hm.sample(c.x + 0.5, c.y) - hm.sample(c.x - 0.5, c.y))
                 .abs()
                 .max((hm.sample(c.x, c.y + 0.5) - hm.sample(c.x, c.y - 0.5)).abs());
-            grid.blocked[z * w + x] = y < SEA_LEVEL + 0.2 || slope > 0.9;
+            grid.blocked[z * w + x] = y < world.data.sea_level + 0.2 || slope > 0.9;
         }
     }
     for (gt, ob) in &obstacles {

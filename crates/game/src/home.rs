@@ -3,12 +3,12 @@
 use bevy::prelude::*;
 use rand::Rng;
 use s3formats::world::LotInfo;
-use s3pkg::{ResourceKey, types};
+use s3bake::Key;
 
 use crate::camera::SimsCamera;
-use crate::data::GameData;
+use crate::baked::Baked;
 use crate::interact::*;
-use crate::loading::{Catalog, CurrentWorld, Strings};
+use crate::loading::{Catalog, CurrentWorld};
 use crate::menu::{BTN_NORMAL, PLUMBOB_GREEN, button_visuals, text};
 use crate::nav::{NavGrid, Obstacle};
 use crate::objects::{AssetCtx, ObjectAssets, parts_bounds, spawn_parts};
@@ -51,7 +51,7 @@ impl PendingHousehold {
 // Create-a-household
 
 #[derive(Component)]
-enum CasAction {
+pub enum CasAction {
     RandomizeAll,
     Randomize(usize),
     Gender(usize),
@@ -229,17 +229,6 @@ fn cas_buttons(
 // ---------------------------------------------------------------------------------------------
 // Choosing a lot
 
-pub fn lot_display_name(lot: &LotInfo, strings: &Strings) -> String {
-    let lookup = |k: &str| strings.0.get(&s3pkg::fnv64(k)).cloned();
-    let name = lot.name_key().and_then(lookup);
-    let addr = lot.address_key().and_then(lookup);
-    match (name, addr) {
-        (Some(n), Some(a)) if n != a => format!("{n} — {a}"),
-        (Some(n), _) => n,
-        (None, Some(a)) => a,
-        _ => lot.internal_name.clone(),
-    }
-}
 
 pub fn lot_center(lot: &LotInfo) -> Vec3 {
     let rot = Quat::from_rotation_y(lot.rotation);
@@ -247,18 +236,13 @@ pub fn lot_center(lot: &LotInfo) -> Vec3 {
 }
 
 #[derive(Component)]
-struct LotButton(usize);
+pub struct LotButton(pub usize);
 #[derive(Component)]
-struct MoveInButton;
+pub struct MoveInButton;
 #[derive(Resource, Default)]
 struct ChosenLot(Option<usize>);
 
-fn spawn_lot_chooser(
-    mut commands: Commands,
-    world: Res<CurrentWorld>,
-    strings: Res<Strings>,
-    mut cam: Query<&mut SimsCamera>,
-) {
+fn spawn_lot_chooser(mut commands: Commands, world: Res<CurrentWorld>, mut cam: Query<&mut SimsCamera>) {
     commands.insert_resource(ChosenLot(None));
     if let Ok(mut c) = cam.single_mut() {
         c.distance = 420.0;
@@ -270,7 +254,7 @@ fn spawn_lot_chooser(
         .iter()
         .enumerate()
         .filter(|(_, l)| l.is_residential())
-        .map(|(i, l)| (i, lot_display_name(l, &strings), l))
+        .map(|(i, l)| (i, world.data.lot_names.get(i).cloned().unwrap_or_else(|| l.internal_name.clone()), l))
         .collect();
     lots.sort_by_key(|l| (!l.2.internal_name.to_ascii_lowercase().contains("empty"), l.1.clone()));
     commands
@@ -480,7 +464,7 @@ pub fn spawn_game_object(
     assets: &mut ObjectAssets,
     ctx: &mut AssetCtx,
     catalog: &Catalog,
-    objd: ResourceKey,
+    objd: Key,
     pos: Vec3,
     yaw: f32,
 ) -> Option<SpawnedObject> {
@@ -512,7 +496,7 @@ pub fn move_in(
     request: Option<Res<MoveInRequest>>,
     pending: Option<Res<PendingHousehold>>,
     world: Res<CurrentWorld>,
-    data: Res<GameData>,
+    data: Res<Baked>,
     catalog: Res<Catalog>,
     mut assets: ResMut<ObjectAssets>,
     sim_assets: Res<SimAssets>,
@@ -522,9 +506,11 @@ pub fn move_in(
     mut cam: Query<&mut SimsCamera>,
     mut notes: ResMut<Notifications>,
     imposters: Query<(Entity, &crate::world::LotImposter)>,
-    (mut bindposes, mut prepared): (
+    (mut bindposes, mut prepared, mut skin_mats, mut sim_tex): (
         ResMut<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>,
         Option<ResMut<crate::simbody::PreparedSims>>,
+        ResMut<Assets<crate::simbody::SimSkinMaterial>>,
+        ResMut<crate::simbody::SimTextures>,
     ),
 ) {
     let Some(req) = request else { return };
@@ -544,11 +530,11 @@ pub fn move_in(
         Vec3::new(p.x, hm.sample(p.x, p.z), p.z)
     };
 
-    let mut ctx = AssetCtx { pkgs: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+    let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
     let mut furniture_value = 0;
     let mut desk_top = 0.0;
     for (inst, x, z, yaw) in STARTER {
-        let key = ResourceKey::new(types::OBJD, 0, inst);
+        let key: Key = (s3pkg::types::OBJD, 0, inst);
         let mut pos = to_world(x, z);
         if inst == 0x369 {
             pos.y += desk_top;
@@ -606,10 +592,14 @@ pub fn move_in(
     };
     let mut sctx = SimSpawnCtx {
         assets: &sim_assets,
-        meshes: &mut meshes,
-        images: &mut images,
-        mats: &mut mats,
-        bindposes: &mut bindposes,
+        render: crate::simbody::SimRenderCtx {
+            meshes: &mut meshes,
+            images: &mut images,
+            mats: &mut mats,
+            skin_mats: &mut skin_mats,
+            bindposes: &mut bindposes,
+            textures: &mut sim_tex,
+        },
     };
     let n = members.len();
     for (i, (s, model)) in members.into_iter().enumerate() {

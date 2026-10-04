@@ -1,5 +1,6 @@
 mod anim;
 mod autotest;
+mod baked;
 mod buy;
 mod camera;
 mod clock;
@@ -69,6 +70,7 @@ fn main() {
             buy::BuyPlugin,
             world::WorldPlugin,
             anim::AnimPlugin,
+            simbody::SimBodyPlugin,
         ))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)

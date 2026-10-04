@@ -11,13 +11,10 @@ use bevy::render::render_resource::{
     TextureViewDimension,
 };
 use bevy::shader::ShaderRef;
-use s3formats::world::WorldData;
-use s3pkg::PackageSet;
+use s3bake::{Heightmap, WorldBaked};
 
 use crate::AppState;
 
-/// Height of the ocean surface in metres (Sunset Valley's water data stores 28.07 m).
-pub const SEA_LEVEL: f32 = 28.07;
 const CHUNK: usize = 128;
 /// Metres covered by one repeat of a terrain layer texture.
 const LAYER_TILE_METRES: f32 = 5.0;
@@ -67,65 +64,52 @@ pub struct TerrainBuild {
     pub weights: Image,
     pub layer_count: u32,
     pub world_size: f32,
+    pub sea_level: f32,
 }
 
 const LODS: [(usize, f32, f32); 3] = [(1, 0.0, 260.0), (4, 260.0, 900.0), (16, 900.0, 1e6)];
 
-pub fn build_terrain(world: &WorldData, packages: &PackageSet) -> TerrainBuild {
+pub fn build_terrain(world: &WorldBaked) -> TerrainBuild {
     let hm = &world.heightmap;
     let cells = hm.width - 1;
     let n = cells / CHUNK;
-    let mut chunks = Vec::new();
-    for cz in 0..n {
-        for cx in 0..n {
-            for (lod, &(step, _, _)) in LODS.iter().enumerate() {
-                let (mesh, center) = chunk_mesh(world, cx * CHUNK, cz * CHUNK, step);
-                chunks.push(ChunkMesh { mesh, center, lod });
-            }
-        }
-    }
+    let tiles: Vec<(usize, usize, usize)> =
+        (0..n).flat_map(|cz| (0..n).flat_map(move |cx| (0..LODS.len()).map(move |lod| (cx, cz, lod)))).collect();
+    let chunks = crate::world::par_map(&tiles, |&(cx, cz, lod)| {
+        let (mesh, center) = chunk_mesh(hm, cx * CHUNK, cz * CHUNK, LODS[lod].0);
+        ChunkMesh { mesh, center, lod }
+    });
 
-    let (layers, layer_count) = match &world.paint {
-        Some(paint) => {
-            let dds: Vec<Option<Vec<u8>>> = paint
-                .layers
-                .iter()
-                .map(|l| packages.read(&l.texture).or_else(|| packages.read_ti(l.texture.t, l.texture.i)))
-                .collect();
-            for (l, d) in paint.layers.iter().zip(&dds) {
-                let info = d.as_ref().and_then(|d| dds_info(d));
-                info!(
-                    "terrain layer {} {:?}: {}",
-                    l.name,
-                    l.texture,
-                    match info {
-                        Some(i) => format!("{}x{} {} mips {}", i.width, i.height, String::from_utf8_lossy(&i.fourcc), i.mips),
-                        None => format!("missing ({} bytes)", d.as_ref().map_or(0, |d| d.len())),
-                    }
-                );
-            }
-            let img = layer_array(&dds);
-            let count = paint.layers.len() as u32;
-            (img, count)
-        }
-        None => (None, 0),
-    };
+    // Paint layers: a pre-baked BC3 texture array.
+    let (lw, lh, lm, lc) = world.layer_dims;
+    let layers = (lc > 0 && !world.layer_data.is_empty()).then(|| {
+        let mut img = Image::default();
+        img.data = Some(world.layer_data.clone());
+        img.data_order = TextureDataOrder::LayerMajor;
+        img.texture_descriptor.size = Extent3d { width: lw, height: lh, depth_or_array_layers: lc };
+        img.texture_descriptor.mip_level_count = lm;
+        img.texture_descriptor.format = TextureFormat::Bc3RgbaUnormSrgb;
+        img.texture_descriptor.dimension = TextureDimension::D2;
+        img.texture_descriptor.label = Some("terrain_layers");
+        img.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+            address_mode_u: ImageAddressMode::Repeat,
+            address_mode_v: ImageAddressMode::Repeat,
+            mag_filter: ImageFilterMode::Linear,
+            min_filter: ImageFilterMode::Linear,
+            mipmap_filter: ImageFilterMode::Linear,
+            anisotropy_clamp: 16,
+            ..default()
+        });
+        img.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::D2Array), ..default() });
+        img.asset_usage = RenderAssetUsages::RENDER_WORLD;
+        img
+    });
 
-    let size = cells as u32;
-    let mut wdata = vec![0u8; (size * size * 4 * 4) as usize];
-    if let Some(blend) = &world.blend {
-        let px = (size * size) as usize;
-        for (li, m) in blend.layers.iter().enumerate().take(16) {
-            let (g, c) = (li / 4, li % 4);
-            let base = g * px * 4;
-            if blend.width as u32 != size {
-                continue;
-            }
-            for (i, v) in m.iter().enumerate() {
-                wdata[base + i * 4 + c] = *v;
-            }
-        }
-    }
+    let size = world.weights_size;
+    let wdata = lz4_flex::decompress_size_prepended(&world.weights_lz4)
+        .ok()
+        .filter(|d| d.len() == (size * size * 16) as usize)
+        .unwrap_or_else(|| vec![0u8; (size * size * 16) as usize]);
     let mut weights = Image::new(
         Extent3d { width: size, height: size, depth_or_array_layers: 4 },
         TextureDimension::D2,
@@ -140,119 +124,12 @@ pub fn build_terrain(world: &WorldData, packages: &PackageSet) -> TerrainBuild {
         min_filter: ImageFilterMode::Linear,
         ..default()
     });
-    weights.texture_view_descriptor = Some(TextureViewDescriptor {
-        dimension: Some(TextureViewDimension::D2Array),
-        ..default()
-    });
+    weights.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::D2Array), ..default() });
 
-    TerrainBuild { chunks, layers, weights, layer_count, world_size: cells as f32 }
+    TerrainBuild { chunks, layers, weights, layer_count: lc, world_size: cells as f32, sea_level: world.sea_level }
 }
 
-struct DdsInfo {
-    width: u32,
-    height: u32,
-    mips: u32,
-    fourcc: [u8; 4],
-    data_offset: usize,
-}
-
-fn dds_info(d: &[u8]) -> Option<DdsInfo> {
-    if d.len() < 128 || &d[0..4] != b"DDS " {
-        return None;
-    }
-    let u = |o: usize| u32::from_le_bytes(d[o..o + 4].try_into().unwrap());
-    let fourcc: [u8; 4] = d[84..88].try_into().unwrap();
-    let data_offset = if &fourcc == b"DX10" { 148 } else { 128 };
-    Some(DdsInfo { height: u(12), width: u(16), mips: u(28).max(1), fourcc, data_offset })
-}
-
-/// Re-encodes BC1 blocks as BC3 blocks with an opaque alpha block.
-fn dxt1_to_dxt5(d: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(d.len() * 2);
-    for block in d.chunks_exact(8) {
-        out.extend_from_slice(&[0xFF, 0xFF, 0, 0, 0, 0, 0, 0]);
-        out.extend_from_slice(block);
-    }
-    out
-}
-
-/// Builds a BC-compressed texture array from same-sized DDS layers.
-fn layer_array(dds: &[Option<Vec<u8>>]) -> Option<Image> {
-    // Mixed BC1/BC3 layers: promote everything to BC3 so they fit one array.
-    let any_dxt5 = dds.iter().flatten().any(|d| dds_info(d).is_some_and(|i| &i.fourcc == b"DXT5"));
-    let promoted: Vec<Option<Vec<u8>>>;
-    let dds = if any_dxt5 {
-        promoted = dds
-            .iter()
-            .map(|d| {
-                let d = d.as_ref()?;
-                let i = dds_info(d)?;
-                if &i.fourcc == b"DXT1" {
-                    let mut v = d[..128].to_vec();
-                    v[84..88].copy_from_slice(b"DXT5");
-                    v.extend(dxt1_to_dxt5(&d[i.data_offset..]));
-                    Some(v)
-                } else {
-                    Some(d.clone())
-                }
-            })
-            .collect();
-        &promoted[..]
-    } else {
-        dds
-    };
-    let first = dds.iter().flatten().find_map(|d| dds_info(d).map(|i| (i, d)))?;
-    let (fi, first_data) = first;
-    let format = match &fi.fourcc {
-        b"DXT5" => TextureFormat::Bc3RgbaUnormSrgb,
-        b"DXT1" => TextureFormat::Bc1RgbaUnormSrgb,
-        _ => return None,
-    };
-    let layer_bytes = first_data.len() - fi.data_offset;
-    let mut data = Vec::with_capacity(layer_bytes * dds.len());
-    for d in dds {
-        let ok = d.as_ref().and_then(|d| {
-            let i = dds_info(d)?;
-            (i.width == fi.width
-                && i.height == fi.height
-                && i.mips == fi.mips
-                && i.fourcc == fi.fourcc
-                && d.len() - i.data_offset == layer_bytes)
-                .then(|| &d[i.data_offset..])
-        });
-        data.extend_from_slice(ok.unwrap_or(&first_data[fi.data_offset..]));
-    }
-    let mut img = Image::default();
-    img.data = Some(data);
-    img.data_order = TextureDataOrder::LayerMajor;
-    img.texture_descriptor.size = Extent3d {
-        width: fi.width,
-        height: fi.height,
-        depth_or_array_layers: dds.len() as u32,
-    };
-    img.texture_descriptor.mip_level_count = fi.mips;
-    img.texture_descriptor.format = format;
-    img.texture_descriptor.dimension = TextureDimension::D2;
-    img.texture_descriptor.label = Some("terrain_layers");
-    img.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        mag_filter: ImageFilterMode::Linear,
-        min_filter: ImageFilterMode::Linear,
-        mipmap_filter: ImageFilterMode::Linear,
-        anisotropy_clamp: 16,
-        ..default()
-    });
-    img.texture_view_descriptor = Some(TextureViewDescriptor {
-        dimension: Some(TextureViewDimension::D2Array),
-        ..default()
-    });
-    img.asset_usage = RenderAssetUsages::RENDER_WORLD;
-    Some(img)
-}
-
-fn chunk_mesh(world: &WorldData, x0: usize, z0: usize, step: usize) -> (Mesh, Vec3) {
-    let hm = &world.heightmap;
+fn chunk_mesh(hm: &Heightmap, x0: usize, z0: usize, step: usize) -> (Mesh, Vec3) {
     let side = CHUNK / step + 1;
     let center = Vec3::new((x0 + CHUNK / 2) as f32, 0.0, (z0 + CHUNK / 2) as f32);
     let wsize = (hm.width - 1) as f32;
@@ -374,7 +251,7 @@ fn spawn_terrain(
             alpha_mode: AlphaMode::Blend,
             ..default()
         })),
-        Transform::from_xyz(world * 0.5, SEA_LEVEL, world * 0.5),
+        Transform::from_xyz(world * 0.5, build.sea_level, world * 0.5),
         DespawnOnExit(AppState::InGame),
     ));
 }

@@ -23,6 +23,7 @@ pub struct AutoArgs {
     pub lot: Option<String>,
     pub portrait: bool,
     pub action: Option<String>,
+    pub ui_flow: Option<String>,
 }
 
 impl AutoArgs {
@@ -44,6 +45,7 @@ impl AutoArgs {
                 }
                 "--lot" => a.lot = next,
                 "--do" => a.action = next,
+                "--ui-flow" => a.ui_flow = next,
                 "--showroom" => {
                     a.showroom = next.and_then(|s| {
                         let mut it = s.split(',').filter_map(|x| x.parse().ok());
@@ -85,6 +87,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(PreUpdate, ui_flow.after(bevy::ui::UiSystems::Focus))
             .add_systems(OnEnter(AppState::InGame), showroom);
     }
 }
@@ -160,7 +163,7 @@ fn auto_screenshot(
 /// Lays out catalog objects in a grid near the camera start, for visual checks.
 fn showroom(
     args: Res<AutoArgs>,
-    data: Res<crate::data::GameData>,
+    data: Res<crate::baked::Baked>,
     world: Res<crate::loading::CurrentWorld>,
     start: Option<Res<CameraStart>>,
     mut assets: ResMut<crate::objects::ObjectAssets>,
@@ -171,10 +174,9 @@ fn showroom(
 ) {
     let Some((count, skip)) = args.showroom else { return };
     let origin = start.map(|s| s.0).unwrap_or(Vec3::new(1024.0, 0.0, 1024.0));
-    let mut keys: Vec<_> = data.0.keys_of_type(s3pkg::types::OBJD).copied().collect();
-    keys.sort();
+    let keys: Vec<s3bake::Key> = data.0.catalog.iter().map(|c| c.objd).collect();
     let mut ctx = crate::objects::AssetCtx {
-        pkgs: &data.0,
+        baked: &data.0,
         meshes: &mut meshes,
         images: &mut images,
         materials: &mut materials,
@@ -238,5 +240,82 @@ fn auto_action(
             *done = true;
             return;
         }
+    }
+}
+
+/// `--ui-flow <dir>`: clicks through the real menus (world → household → lot → move in),
+/// saving a screenshot of each screen, then exits after a while in live mode.
+#[allow(clippy::too_many_arguments)]
+fn ui_flow(
+    args: Res<AutoArgs>,
+    time: Res<Time>,
+    state: Res<State<AppState>>,
+    play: Option<Res<State<crate::PlayMode>>>,
+    mut commands: Commands,
+    mut stage: Local<(u8, f32)>,
+    mut menu: Query<(&mut Interaction, &crate::menu::MenuAction), (Without<crate::home::CasAction>, Without<crate::home::LotButton>, Without<crate::home::MoveInButton>)>,
+    mut cas: Query<(&mut Interaction, &crate::home::CasAction), (Without<crate::home::LotButton>, Without<crate::home::MoveInButton>)>,
+    mut lots: Query<(&mut Interaction, &crate::home::LotButton), Without<crate::home::MoveInButton>>,
+    mut move_in: Query<&mut Interaction, With<crate::home::MoveInButton>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let Some(dir) = &args.ui_flow else { return };
+    let now = time.elapsed_secs();
+    let since = now - stage.1;
+    let shot = |commands: &mut Commands, name: &str| {
+        let path = format!("{dir}/{name}.png");
+        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+    };
+    let advance = |stage: &mut (u8, f32)| {
+        stage.0 += 1;
+        stage.1 = now;
+    };
+    match (stage.0, state.get(), play.as_ref().map(|p| *p.get())) {
+        (0, AppState::MainMenu, _) if since > 1.5 => {
+            shot(&mut commands, "1_menu");
+            advance(&mut stage);
+        }
+        (1, AppState::MainMenu, _) if since > 0.5 => {
+            if let Some((mut i, _)) = menu.iter_mut().find(|(_, a)| matches!(a, crate::menu::MenuAction::PlayWorld(0))) {
+                *i = Interaction::Pressed;
+            }
+            advance(&mut stage);
+        }
+        (2, AppState::CreateHousehold, _) if since > 1.5 => {
+            shot(&mut commands, "2_household");
+            advance(&mut stage);
+        }
+        (3, AppState::CreateHousehold, _) if since > 0.5 => {
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::Done)) {
+                *i = Interaction::Pressed;
+            }
+            advance(&mut stage);
+        }
+        (4, AppState::Loading, _) if since > 3.0 => {
+            shot(&mut commands, "3_loading");
+            advance(&mut stage);
+        }
+        (5, AppState::InGame, Some(crate::PlayMode::ChooseLot)) if since > 3.0 => {
+            shot(&mut commands, "4_choose_lot");
+            if let Some((mut i, _)) = lots.iter_mut().next() {
+                *i = Interaction::Pressed;
+            }
+            advance(&mut stage);
+        }
+        (6, AppState::InGame, Some(crate::PlayMode::ChooseLot)) if since > 2.0 => {
+            shot(&mut commands, "5_lot_selected");
+            if let Ok(mut i) = move_in.single_mut() {
+                *i = Interaction::Pressed;
+            }
+            advance(&mut stage);
+        }
+        (7, AppState::InGame, Some(crate::PlayMode::Live)) if since > 10.0 => {
+            shot(&mut commands, "6_live");
+            advance(&mut stage);
+        }
+        (8, _, _) if since > 2.0 => {
+            exit.write(AppExit::Success);
+        }
+        _ => {}
     }
 }

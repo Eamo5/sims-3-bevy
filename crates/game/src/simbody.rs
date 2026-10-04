@@ -1,57 +1,122 @@
-//! Real Sim bodies built from the game's CAS data: skeleton (rig), skinned GEOM meshes for
-//! face, hair, top, bottom and shoes, and composited skin + clothing textures.
+//! Sim bodies from the baked CAS data: skeleton (rig), skinned meshes for face, hair, top,
+//! bottom and shoes, and a GPU skin material that layers pre-baked clothing over tinted skin.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bevy::asset::RenderAssetUsages;
+use bevy::asset::{RenderAssetUsages, embedded_asset};
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
+use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
+use bevy::render::render_resource::AsBindGroup;
+use bevy::shader::ShaderRef;
 use rand::Rng;
 use rand::seq::IndexedRandom;
-use s3formats::dds::Rgba;
+use s3bake::{CasPartInfo, Key, Rig, SkinMesh};
 use s3formats::sim::*;
-use s3pkg::{PackageSet, ResourceKey, types};
 
+use crate::baked::BakedData;
 use crate::sim::{Age, Sim};
 
-/// Lightweight index entry for one CAS part.
-#[derive(Clone, Debug)]
-pub struct CasEntry {
-    pub key: ResourceKey,
-    pub name: String,
-    pub clothing_type: u32,
-    pub age_gender: u32,
-    pub category: u32,
+pub type SimSkinMaterial = ExtendedMaterial<StandardMaterial, SimSkinExt>;
+
+/// Skin tint and up to four clothing layers blended over the skin texture.
+#[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
+pub struct SimSkinExt {
+    /// rgb: skin-tone tint, w: number of layers in use.
+    #[uniform(100)]
+    pub params: Vec4,
+    #[texture(101)]
+    #[sampler(102)]
+    pub layer0: Handle<Image>,
+    #[texture(103)]
+    #[sampler(104)]
+    pub layer1: Handle<Image>,
+    #[texture(105)]
+    #[sampler(106)]
+    pub layer2: Handle<Image>,
+    #[texture(107)]
+    #[sampler(108)]
+    pub layer3: Handle<Image>,
 }
 
-/// CAS data needed to dress sims, built on the loading thread.
+impl MaterialExtension for SimSkinExt {
+    fn fragment_shader() -> ShaderRef {
+        "embedded://sims3/shaders/sim_skin.wgsl".into()
+    }
+}
+
+pub struct SimBodyPlugin;
+
+impl Plugin for SimBodyPlugin {
+    fn build(&self, app: &mut App) {
+        embedded_asset!(app, "shaders/sim_skin.wgsl");
+        app.add_plugins(MaterialPlugin::<SimSkinMaterial>::default())
+            .init_resource::<SimTextures>()
+            .add_systems(Startup, init_blank);
+    }
+}
+
+/// GPU textures shared between sims, keyed by baked texture id.
+#[derive(Resource, Default)]
+pub struct SimTextures {
+    pub map: HashMap<Key, Handle<Image>>,
+    pub blank: Handle<Image>,
+}
+
+fn init_blank(mut tex: ResMut<SimTextures>, mut images: ResMut<Assets<Image>>) {
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    tex.blank = images.add(Image::new(
+        Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        vec![0, 0, 0, 0],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    ));
+}
+
+/// CAS data needed to dress sims.
 #[derive(Resource, Clone)]
 pub struct CasData {
-    pub parts: Arc<Vec<CasEntry>>,
+    pub parts: Arc<Vec<CasPartInfo>>,
     pub adult_rig: Option<Arc<Rig>>,
     pub child_rig: Option<Arc<Rig>>,
-    pub tone: Option<Arc<SkinTone>>,
+    pub tone_textures: Arc<Vec<(u32, u32, Key)>>,
+    pub ramp: Arc<Vec<[f32; 3]>>,
 }
 
-pub fn build_cas(pkgs: &PackageSet) -> CasData {
-    let keys: Vec<ResourceKey> = pkgs.keys_of_type(types::CASP).copied().collect();
-    let parts: Vec<CasEntry> = crate::world::par_map(&keys, |k| {
-        let d = pkgs.read(k)?;
-        let c = CasPart::parse(&d).ok()?;
-        Some(CasEntry { key: *k, name: c.name, clothing_type: c.clothing_type, age_gender: c.age_gender, category: c.category })
-    })
-    .into_iter()
-    .flatten()
-    .collect();
-    let rig = |name: &str| {
-        pkgs.read_ti(types::RIG, s3pkg::fnv64(name)).and_then(|d| Rig::parse(&d).ok()).map(Arc::new)
-    };
-    let mut tones: Vec<ResourceKey> = pkgs.keys_of_type(T_TONE).copied().collect();
-    tones.sort();
-    let tone = tones.iter().find_map(|k| SkinTone::parse(&pkgs.read(k)?).ok()).map(Arc::new);
-    CasData { parts: Arc::new(parts), adult_rig: rig("auRig"), child_rig: rig("cuRig"), tone }
+impl CasData {
+    pub fn from_baked(b: &BakedData) -> Self {
+        Self {
+            parts: Arc::new(b.cas.parts.clone()),
+            adult_rig: b.cas.adult_rig.clone().map(Arc::new),
+            child_rig: b.cas.child_rig.clone().map(Arc::new),
+            tone_textures: Arc::new(b.cas.tone.textures.clone()),
+            ramp: Arc::new(b.cas.tone.ramp.clone()),
+        }
+    }
+
+    fn skin_texture(&self, age: u32, gender: u32, kind: u32) -> Option<Key> {
+        self.tone_textures.iter().find(|(ag, t, _)| ag & age != 0 && ag & gender != 0 && t & kind != 0).map(|x| x.2)
+    }
+
+    /// Skin tint for a position on the tone ramp (mostly darkening, little hue shift).
+    fn tint(&self, t: f32) -> Vec3 {
+        if self.ramp.len() < 2 {
+            return Vec3::ONE;
+        }
+        let at = |t: f32| {
+            let f = t.clamp(0.0, 1.0) * (self.ramp.len() - 1) as f32;
+            let i = f.floor() as usize;
+            let j = (i + 1).min(self.ramp.len() - 1);
+            Vec3::from(self.ramp[i]).lerp(Vec3::from(self.ramp[j]), f - i as f32)
+        };
+        let base = at(0.0).max(Vec3::splat(0.01));
+        let f = at(t) / base;
+        let avg = (f.x + f.y + f.z) / 3.0;
+        Vec3::splat(avg) + (f - Vec3::splat(avg)) * 0.3
+    }
 }
 
 fn age_bits(a: Age) -> u32 {
@@ -66,193 +131,114 @@ fn age_bits(a: Age) -> u32 {
 /// The CAS parts a sim is wearing.
 #[derive(Clone, Debug, Default)]
 pub struct Outfit {
-    pub face: Option<ResourceKey>,
-    pub scalp: Option<ResourceKey>,
-    pub hair: Option<ResourceKey>,
-    pub body: Vec<ResourceKey>,
+    pub face: Option<CasPartInfo>,
+    pub scalp: Option<CasPartInfo>,
+    pub hair: Option<CasPartInfo>,
+    pub body: Vec<CasPartInfo>,
 }
 
 pub fn pick_outfit(cas: &CasData, sim: &Sim, rng: &mut impl Rng) -> Outfit {
     let age = age_bits(sim.age);
     let gender = if sim.female { GENDER_FEMALE } else { GENDER_MALE };
-    let fits = |e: &&CasEntry| e.age_gender & age != 0 && e.age_gender & gender != 0 && e.category & CAT_HIDDEN == 0;
+    let fits = |e: &&CasPartInfo| e.baked && e.age_gender & age != 0 && e.age_gender & gender != 0;
     let of_type = |t: u32| cas.parts.iter().filter(|e| e.clothing_type == t).filter(fits).collect::<Vec<_>>();
-    let face = of_type(CT_FACE).into_iter().filter(|e| e.name.ends_with("Face")).min_by_key(|e| e.name.len()).map(|e| e.key);
-    let scalp = of_type(CT_SCALP).into_iter().filter(|e| e.name.ends_with("Scalp")).min_by_key(|e| e.name.len()).map(|e| e.key);
-    let everyday = |t: u32| {
-        of_type(t)
-            .into_iter()
-            .filter(|e| e.category & CAT_EVERYDAY != 0 && e.category & CAT_VALID_RANDOM != 0 && e.category & 0x400000 == 0)
-            .filter(|e| !e.name.contains("Nude") && !e.name.to_ascii_lowercase().contains("hat"))
-            .collect::<Vec<_>>()
-    };
-    let hair = everyday(CT_HAIR).choose(rng).map(|e| e.key);
+    let face = of_type(CT_FACE).into_iter().min_by_key(|e| e.name.len()).cloned();
+    let scalp = of_type(CT_SCALP).into_iter().min_by_key(|e| e.name.len()).cloned();
+    let hair = of_type(CT_HAIR).choose(rng).map(|e| (*e).clone());
     let mut body = Vec::new();
-    let tops = everyday(CT_TOP);
-    let bottoms = everyday(CT_BOTTOM);
-    let fulls = everyday(CT_BODY);
+    let (tops, bottoms, fulls) = (of_type(CT_TOP), of_type(CT_BOTTOM), of_type(CT_BODY));
     if (!fulls.is_empty() && rng.random_bool(0.25)) || tops.is_empty() || bottoms.is_empty() {
         if let Some(f) = fulls.choose(rng) {
-            body.push(f.key);
+            body.push((*f).clone());
         }
     } else {
-        body.push(bottoms.choose(rng).unwrap().key);
-        body.push(tops.choose(rng).unwrap().key);
+        body.push((*bottoms.choose(rng).unwrap()).clone());
+        body.push((*tops.choose(rng).unwrap()).clone());
     }
-    if let Some(s) = everyday(CT_SHOES).choose(rng) {
-        body.push(s.key);
+    if let Some(s) = of_type(CT_SHOES).choose(rng) {
+        body.push((*s).clone());
     }
     Outfit { face, scalp, hair, body }
+}
+
+/// How a sim mesh is shaded.
+pub enum SimMat {
+    /// Tinted skin texture with clothing layers on top.
+    Skin { base: Option<Key>, tint: Vec3, layers: Vec<Key> },
+    /// A plain texture (hair, eyes, lashes), alpha-tested when `mask`.
+    Plain { tex: Option<Key>, mask: bool },
 }
 
 /// A sim body decoded on the loading thread.
 pub struct SimModelCpu {
     pub rig: Arc<Rig>,
-    pub parts: Vec<(Mesh, Image, u8)>,
+    pub parts: Vec<(Mesh, SimMat)>,
+    pub textures: Vec<(Key, Image)>,
 }
 
-fn skin_base(pkgs: &PackageSet, cas: &CasData, age: u32, gender: u32, kind: u32, tone_t: f32) -> Option<Rgba> {
-    let tone = cas.tone.as_ref()?;
-    let t = tone.find(age, gender, kind)?;
-    let mut img = s3formats::dds::decode(&pkgs.read(&t.detail_light?)?, 512)?;
-    // Darken along the skin-tone ramp (light at the top, dark at the bottom).
-    if let Some(ramp) = tone.ramp.and_then(|k| s3formats::dds::decode(&pkgs.read(&k)?, 64)) {
-        let base = ramp.sample(0.5, 0.06);
-        let target = ramp.sample(0.5, 0.06 + tone_t * 0.88);
-        let f = [target[0] / base[0].max(0.01), target[1] / base[1].max(0.01), target[2] / base[2].max(0.01)];
-        // Mostly darken; keep only a little of the ramp's hue shift.
-        let avg = (f[0] + f[1] + f[2]) / 3.0;
-        let f = [avg + (f[0] - avg) * 0.3, avg + (f[1] - avg) * 0.3, avg + (f[2] - avg) * 0.3];
-        for px in img.data.chunks_exact_mut(4) {
-            for c in 0..3 {
-                px[c] = (px[c] as f32 * f[c]).clamp(0.0, 255.0) as u8;
-            }
-        }
-    }
-    Some(img)
+fn skin_mesh(m: SkinMesh) -> Mesh {
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, m.positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, m.normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, m.uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_JOINT_INDEX, VertexAttributeValues::Uint16x4(m.joints));
+    mesh.insert_attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT, m.weights);
+    mesh.insert_indices(Indices::U32(m.indices));
+    mesh
 }
 
-fn composite_over(pkgs: &PackageSet, txtc: &ResourceKey, base: Option<Rgba>, size: (usize, usize)) -> Option<Rgba> {
-    let d = pkgs.read(txtc).or_else(|| pkgs.read_ti(txtc.t, txtc.i))?;
-    let t = s3formats::txtc::Txtc::parse(&d).ok()?;
-    let mut c = s3formats::compositor::Compositor::new(pkgs);
-    c.max_size = 512;
-    Some(c.run_with_base(&t, size.0, size.1, base))
-}
-
-fn geom_mesh(g: &Geom, rig: &Rig) -> Mesh {
-    let palette: Vec<u16> = g.bone_hashes.iter().map(|h| rig.index_of(*h).unwrap_or(0) as u16).collect();
-    let mut joints = Vec::with_capacity(g.positions.len());
-    let mut weights = Vec::with_capacity(g.positions.len());
-    for (bi, bw) in g.bone_indices.iter().zip(&g.weights) {
-        let mut j = [0u16; 4];
-        let mut w = *bw;
-        for k in 0..4 {
-            j[k] = palette.get(bi[k] as usize).copied().unwrap_or(0);
-            if bi[k] as usize >= palette.len() {
-                w[k] = 0.0;
-            }
-        }
-        let s: f32 = w.iter().sum();
-        if s > 1e-4 {
-            for x in &mut w {
-                *x /= s;
-            }
-        } else {
-            w = [1.0, 0.0, 0.0, 0.0];
-            j = [1, 0, 0, 0];
-        }
-        joints.push(j);
-        weights.push(w);
-    }
-    let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
-    m.insert_attribute(Mesh::ATTRIBUTE_POSITION, g.positions.clone());
-    m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, g.normals.clone());
-    m.insert_attribute(Mesh::ATTRIBUTE_UV_0, g.uvs.clone());
-    m.insert_attribute(Mesh::ATTRIBUTE_JOINT_INDEX, VertexAttributeValues::Uint16x4(joints));
-    m.insert_attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT, weights);
-    m.insert_indices(Indices::U32(g.indices.clone()));
-    m
-}
-
-const SHADER_SIM_SKIN: u32 = 0x548394B9;
 const SHADER_SIM_EYES: u32 = 0xCF8A70B4;
 const SHADER_SIM_EYELASHES: u32 = 0x9D9DA161;
-const P_DIFFUSE: u32 = 0x6CC0FD85;
 
-/// Builds a sim's meshes and textures (any thread).
-pub fn build_sim_model(pkgs: &PackageSet, cas: &CasData, sim: &Sim, outfit: &Outfit, tone_t: f32) -> Option<SimModelCpu> {
-    let child = sim.age == Age::Child;
-    let rig = if child { cas.child_rig.clone() } else { cas.adult_rig.clone() }?;
+/// Assembles a sim's meshes and materials from the cache (any thread).
+pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Outfit, tone_t: f32) -> Option<SimModelCpu> {
+    let rig = if sim.age == Age::Child { cas.child_rig.clone() } else { cas.adult_rig.clone() }?;
     let age = age_bits(sim.age);
     let gender = if sim.female { GENDER_FEMALE } else { GENDER_MALE };
-    let load_part = |k: &ResourceKey| -> Option<(CasPart, Vec<Geom>)> {
-        let c = CasPart::parse(&pkgs.read(k)?).ok()?;
-        let geoms = c
-            .lod0_geoms(pkgs)
-            .iter()
-            .filter_map(|g| Geom::parse(&pkgs.read(g).or_else(|| pkgs.read_ti(g.t, g.i))?).ok())
-            .collect();
-        Some((c, geoms))
-    };
+    let tint = cas.tint(tone_t);
     let mut parts = Vec::new();
-    let image = |rgba: Rgba| crate::objects::rgba_image(rgba);
-    let geom_texture = |g: &Geom| -> Option<Image> {
-        match g.params.get(&P_DIFFUSE) {
-            Some(s3formats::model::ParamValue::Texture(k)) => crate::objects::build_texture_cpu(pkgs, *k, 512),
-            _ => None,
-        }
-    };
+    let mut tex_keys: Vec<Key> = Vec::new();
 
-    // Body: skin + each clothing layer composited into one shared texture.
-    let mut body_tex = skin_base(pkgs, cas, age, gender, 8, tone_t);
-    let size = body_tex.as_ref().map(|i| (i.width, i.height)).unwrap_or((512, 512));
-    let mut body_geoms = Vec::new();
-    for k in &outfit.body {
-        if let Some((c, geoms)) = load_part(k) {
-            if let Some(tx) = c.diffuse.first() {
-                body_tex = composite_over(pkgs, tx, body_tex.take(), size).or(body_tex);
+    // Body: shared skin texture + one clothing layer per worn part.
+    let body_base = cas.skin_texture(age, gender, 8);
+    let layers: Vec<Key> = outfit.body.iter().filter_map(|p| p.layer).take(4).collect();
+    tex_keys.extend(body_base);
+    tex_keys.extend(&layers);
+    for p in &outfit.body {
+        for m in baked.cas_meshes(&p.key).map(|m| m.meshes).unwrap_or_default() {
+            parts.push((skin_mesh(m), SimMat::Skin { base: body_base, tint, layers: layers.clone() }));
+        }
+    }
+    if let Some(face) = &outfit.face {
+        let face_base = cas.skin_texture(age, gender, 4);
+        tex_keys.extend(face_base);
+        tex_keys.extend(face.layer);
+        for m in baked.cas_meshes(&face.key).map(|m| m.meshes).unwrap_or_default() {
+            let mat = match m.shader {
+                SHADER_SIM_EYES => SimMat::Plain { tex: m.texture, mask: false },
+                SHADER_SIM_EYELASHES => SimMat::Plain { tex: m.texture, mask: true },
+                _ => SimMat::Skin { base: face_base, tint, layers: face.layer.into_iter().collect() },
+            };
+            if let SimMat::Plain { tex: Some(t), .. } = &mat {
+                tex_keys.push(*t);
             }
-            body_geoms.extend(geoms);
+            parts.push((skin_mesh(m), mat));
         }
     }
-    let body_img = body_tex.map(image).unwrap_or_default();
-    for g in &body_geoms {
-        parts.push((geom_mesh(g, &rig), body_img.clone(), 0u8));
-    }
-
-    // Face: face skin + face CAS layer; eyes and lashes use their own textures.
-    if let Some((c, geoms)) = outfit.face.as_ref().and_then(load_part) {
-        let mut face_tex = skin_base(pkgs, cas, age, gender, 4, tone_t);
-        let fsize = face_tex.as_ref().map(|i| (i.width, i.height)).unwrap_or((512, 512));
-        if let Some(tx) = c.diffuse.first() {
-            face_tex = composite_over(pkgs, tx, face_tex.take(), fsize).or(face_tex);
-        }
-        let face_img = face_tex.map(image).unwrap_or_default();
-        for g in &geoms {
-            match g.shader {
-                SHADER_SIM_EYES => parts.push((geom_mesh(g, &rig), geom_texture(g).unwrap_or_default(), 0)),
-                SHADER_SIM_EYELASHES => {
-                    if let Some(t) = geom_texture(g) {
-                        parts.push((geom_mesh(g, &rig), t, 1));
-                    }
-                }
-                _ => parts.push((geom_mesh(g, &rig), face_img.clone(), 0)),
-            }
+    for p in [&outfit.scalp, &outfit.hair].into_iter().flatten() {
+        tex_keys.extend(p.layer);
+        for m in baked.cas_meshes(&p.key).map(|m| m.meshes).unwrap_or_default() {
+            let tex = p.layer.or(m.texture);
+            parts.push((skin_mesh(m), SimMat::Plain { tex, mask: true }));
         }
     }
-
-    // Scalp and hair.
-    for (k, alpha) in [(outfit.scalp, 1u8), (outfit.hair, 1u8)] {
-        let Some((c, geoms)) = k.as_ref().and_then(load_part) else { continue };
-        let tex = c.diffuse.first().and_then(|tx| composite_over(pkgs, tx, None, (512, 512))).map(image);
-        for g in &geoms {
-            let t = tex.clone().or_else(|| geom_texture(g)).unwrap_or_default();
-            parts.push((geom_mesh(g, &rig), t, if g.shader == SHADER_SIM_SKIN { alpha } else { 1 }));
-        }
-    }
-    let _ = SHADER_SIM_SKIN;
-    Some(SimModelCpu { rig, parts })
+    tex_keys.sort();
+    tex_keys.dedup();
+    let textures = tex_keys
+        .into_iter()
+        .filter_map(|k| Some((k, crate::objects::dds_image(&baked.texture_bytes(&k)?, true)?)))
+        .collect();
+    Some(SimModelCpu { rig, parts, textures })
 }
 
 /// The skeleton of a spawned sim: one entity per rig bone.
@@ -263,16 +249,23 @@ pub struct Skeleton {
     pub bind: Vec<Transform>,
 }
 
+pub struct SimRenderCtx<'a> {
+    pub meshes: &'a mut Assets<Mesh>,
+    pub images: &'a mut Assets<Image>,
+    pub mats: &'a mut Assets<StandardMaterial>,
+    pub skin_mats: &'a mut Assets<SimSkinMaterial>,
+    pub bindposes: &'a mut Assets<SkinnedMeshInverseBindposes>,
+    pub textures: &'a mut SimTextures,
+}
+
 /// Spawns skeleton + skinned meshes under `parent`.
-pub fn spawn_sim_model(
-    commands: &mut Commands,
-    parent: Entity,
-    model: SimModelCpu,
-    meshes: &mut Assets<Mesh>,
-    images: &mut Assets<Image>,
-    mats: &mut Assets<StandardMaterial>,
-    bindposes: &mut Assets<SkinnedMeshInverseBindposes>,
-) -> Entity {
+pub fn spawn_sim_model(commands: &mut Commands, parent: Entity, model: SimModelCpu, ctx: &mut SimRenderCtx) -> Entity {
+    for (k, img) in model.textures {
+        if !ctx.textures.map.contains_key(&k) {
+            let h = ctx.images.add(img);
+            ctx.textures.map.insert(k, h);
+        }
+    }
     let rig = model.rig.clone();
     let mut joints = Vec::with_capacity(rig.bones.len());
     let mut bind = Vec::with_capacity(rig.bones.len());
@@ -290,40 +283,53 @@ pub fn spawn_sim_model(
         };
         world.push(w);
         bind.push(local);
-        let e = commands.spawn((local, Visibility::default())).id();
-        joints.push(e);
+        joints.push(commands.spawn((local, Visibility::default())).id());
     }
     for (i, b) in rig.bones.iter().enumerate() {
         let p = if b.parent >= 0 && (b.parent as usize) < joints.len() { joints[b.parent as usize] } else { parent };
         commands.entity(p).add_child(joints[i]);
     }
     let inverse: Vec<Mat4> = world.iter().map(|m| m.inverse()).collect();
-    let ibp = bindposes.add(SkinnedMeshInverseBindposes::from(inverse));
-    let mut cache: HashMap<usize, Handle<StandardMaterial>> = HashMap::new();
-    for (i, (mesh, img, mode)) in model.parts.into_iter().enumerate() {
-        let tex = images.add(img);
-        let mat = cache.entry(i).or_insert_with(|| {
-            mats.add(StandardMaterial {
-                base_color_texture: Some(tex),
-                perceptual_roughness: 0.65,
-                reflectance: 0.25,
-                alpha_mode: if mode == 1 { AlphaMode::Mask(0.4) } else { AlphaMode::Opaque },
-                double_sided: mode == 1,
-                cull_mode: if mode == 1 { None } else { Some(bevy::render::render_resource::Face::Back) },
-                ..default()
-            })
-        });
-        let m = commands
-            .spawn((
-                Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(mat.clone()),
-                SkinnedMesh { inverse_bindposes: ibp.clone(), joints: joints.clone() },
-                Transform::default(),
-            ))
-            .id();
-        commands.entity(parent).add_child(m);
+    let ibp = ctx.bindposes.add(SkinnedMeshInverseBindposes::from(inverse));
+    for (mesh, mat) in model.parts {
+        let skinned = SkinnedMesh { inverse_bindposes: ibp.clone(), joints: joints.clone() };
+        let mesh = Mesh3d(ctx.meshes.add(mesh));
+        let tex = |k: Option<Key>, t: &SimTextures| k.and_then(|k| t.map.get(&k).cloned());
+        let e = match mat {
+            SimMat::Skin { base, tint, layers } => {
+                let layer = |i: usize| tex(layers.get(i).copied(), ctx.textures).unwrap_or(ctx.textures.blank.clone());
+                let m = ctx.skin_mats.add(SimSkinMaterial {
+                    base: StandardMaterial {
+                        base_color_texture: tex(base, ctx.textures),
+                        perceptual_roughness: 0.65,
+                        reflectance: 0.25,
+                        ..default()
+                    },
+                    extension: SimSkinExt {
+                        params: tint.extend(layers.len().min(4) as f32),
+                        layer0: layer(0),
+                        layer1: layer(1),
+                        layer2: layer(2),
+                        layer3: layer(3),
+                    },
+                });
+                commands.spawn((mesh, MeshMaterial3d(m), skinned, Transform::default())).id()
+            }
+            SimMat::Plain { tex: t, mask } => {
+                let m = ctx.mats.add(StandardMaterial {
+                    base_color_texture: tex(t, ctx.textures),
+                    perceptual_roughness: 0.6,
+                    reflectance: 0.25,
+                    alpha_mode: if mask { AlphaMode::Mask(0.4) } else { AlphaMode::Opaque },
+                    double_sided: mask,
+                    cull_mode: if mask { None } else { Some(bevy::render::render_resource::Face::Back) },
+                    ..default()
+                });
+                commands.spawn((mesh, MeshMaterial3d(m), skinned, Transform::default())).id()
+            }
+        };
+        commands.entity(parent).add_child(e);
     }
-    let _ = types::DDS;
     commands.entity(parent).insert(Skeleton { rig, joints, bind });
     parent
 }
@@ -342,7 +348,7 @@ pub fn tone_of(sim: &Sim) -> f32 {
     ((0.85 - lum) / 0.55).clamp(0.0, 1.0)
 }
 
-pub fn prepare_sims(pkgs: &PackageSet, cas: &CasData, members: &[Sim]) -> PreparedSims {
+pub fn prepare_sims(baked: &BakedData, cas: &CasData, members: &[Sim]) -> PreparedSims {
     let mut rng = rand::rng();
     let mut neighbors = Vec::new();
     for k in 0..2 {
@@ -352,7 +358,7 @@ pub fn prepare_sims(pkgs: &PackageSet, cas: &CasData, members: &[Sim]) -> Prepar
     let outfits: Vec<(Sim, Outfit)> =
         members.iter().chain(neighbors.iter()).map(|s| (s.clone(), pick_outfit(cas, s, &mut rng))).collect();
     let mut built: Vec<(Sim, Option<SimModelCpu>)> =
-        crate::world::par_map(&outfits, |(s, o)| (s.clone(), build_sim_model(pkgs, cas, s, o, tone_of(s))));
+        crate::world::par_map(&outfits, |(s, o)| (s.clone(), build_sim_model(baked, cas, s, o, tone_of(s))));
     let neighbors = built.split_off(members.len());
     PreparedSims { members: built, neighbors }
 }

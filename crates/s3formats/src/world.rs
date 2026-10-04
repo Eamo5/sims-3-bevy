@@ -11,7 +11,7 @@ pub const T_LOT_THUMB: u32 = 0xD84E7FC6;
 
 /// A lot placed in the world. `corner` is the lot origin; the lot extends `width` metres along
 /// its local +X and `depth` metres along local +Z after rotating by `rotation` radians about +Y.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct LotInfo {
     pub id: u64,
     pub internal_name: String,
@@ -69,7 +69,7 @@ impl LotInfo {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Heightmap {
     pub width: usize,
     pub height: usize,

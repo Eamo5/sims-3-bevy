@@ -166,7 +166,7 @@ fn camera_control(
     let size = (hm.width - 1) as f32;
     cam.focus.x = cam.focus.x.clamp(0.0, size);
     cam.focus.z = cam.focus.z.clamp(0.0, size);
-    let ground = hm.sample(cam.focus.x, cam.focus.z).max(crate::terrain::SEA_LEVEL);
+    let ground = hm.sample(cam.focus.x, cam.focus.z).max(world.data.sea_level);
     cam.focus.y = ground + cam.height_offset;
 
     let k = 1.0 - (-dt * 10.0).exp();
