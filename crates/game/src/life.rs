@@ -284,6 +284,7 @@ impl Trait {
 /// How many traits a Sim of an age has.
 pub fn trait_slots(age: Age) -> usize {
     match age {
+        Age::Baby | Age::Toddler => 2,
         Age::Child => 3,
         Age::Teen => 4,
         _ => 5,
@@ -470,16 +471,19 @@ pub enum MoodletKind {
     NewHome,
     Birthday,
     WishFulfilled,
+    Nauseous,
+    Pregnant,
+    NewBaby,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 36] = {
+    pub const ALL: [MoodletKind; 39] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
             GoodMeal, AmazingMeal, HavingFun, GoodConversation, EnjoyingMusic, EnjoyingAGoodBook, Pumped, Fatigued,
             Inspired, Embarrassed, PassedOut, Uncomfortable, Promoted, Demoted, Fired, NewJob, Annoyed, Flirty, FirstKiss,
-            InLove, Heartbroken, JustMarried, NewHome, Birthday, WishFulfilled,
+            InLove, Heartbroken, JustMarried, NewHome, Birthday, WishFulfilled, Nauseous, Pregnant, NewBaby,
         ]
     };
 
@@ -539,6 +543,9 @@ impl MoodletKind {
             JustMarried => md("Just Married", "Happily ever after!", 50, 72.0),
             NewHome => md("Settling In", "A new place to call home.", 15, 24.0),
             Birthday => md("It's My Birthday!", "Another year older!", 20, 24.0),
+            Nauseous => md("Nauseous", "Something doesn't agree with this Sim this morning.", -15, 6.0),
+            Pregnant => md("Pregnant", "A little one is on the way!", 20, 48.0),
+            NewBaby => md("It's a Baby!", "A new addition to the family!", 40, 24.0),
             WishFulfilled => md("Wish Fulfilled", "Dreams come true!", 10, 4.0),
         }
     }

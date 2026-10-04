@@ -13,6 +13,7 @@ mod home;
 mod hud;
 mod interact;
 mod life;
+mod little;
 mod loading;
 mod menu;
 mod music;
@@ -90,7 +91,7 @@ fn main() {
             music::MusicPlugin,
             town::TownPlugin,
         ))
-        .add_plugins((life::LifePlugin, careers::CareersPlugin, save::SavePlugin, wishes::WishesPlugin, rabbitholes::RabbitHolePlugin, cas::CasPlugin, sound::SoundPlugin, premade::PremadePlugin, aging::AgingPlugin))
+        .add_plugins((life::LifePlugin, careers::CareersPlugin, save::SavePlugin, wishes::WishesPlugin, rabbitholes::RabbitHolePlugin, cas::CasPlugin, sound::SoundPlugin, premade::PremadePlugin, aging::AgingPlugin, little::LittlePlugin))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)
         .run();

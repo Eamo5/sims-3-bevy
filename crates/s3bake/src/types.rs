@@ -104,6 +104,9 @@ pub struct CasBaked {
     pub tone: ToneBaked,
     pub adult_rig: Option<Rig>,
     pub child_rig: Option<Rig>,
+    pub toddler_rig: Option<Rig>,
+    /// Babies have a skeleton of their own (the rig named after the baby body).
+    pub baby_rig: Option<Rig>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

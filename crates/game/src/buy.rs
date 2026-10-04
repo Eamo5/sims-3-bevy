@@ -29,8 +29,8 @@ impl Plugin for BuyPlugin {
     }
 }
 
-pub const CATEGORIES: [&str; 9] =
-    ["Appliances", "Plumbing", "Beds", "Seating", "Surfaces", "Electronics", "Hobbies", "Lighting", "Decor"];
+pub const CATEGORIES: [&str; 10] =
+    ["Appliances", "Plumbing", "Beds", "Seating", "Surfaces", "Electronics", "Hobbies", "Kids", "Lighting", "Decor"];
 const PAGE: usize = 24;
 
 pub struct Placing {

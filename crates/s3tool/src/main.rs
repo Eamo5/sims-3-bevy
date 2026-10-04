@@ -340,7 +340,7 @@ fn main() {
         for k in set.keys_of_type(s3formats::sim::T_TONE).copied().collect::<Vec<_>>() {
             let t = s3formats::sim::SkinTone::parse(&set.read(&k).unwrap()).unwrap();
             println!("{k} ramp={:?}", t.ramp);
-            for x in &t.textures { if x.age_gender & 0x30 != 0 { println!("   ag={:08X} type={} light={:?} dark={:?}", x.age_gender, x.type_flags, x.detail_light, x.detail_dark); } }
+            for x in &t.textures { if x.age_gender & std::env::var("TONE_AGES").ok().and_then(|v| u32::from_str_radix(&v, 16).ok()).unwrap_or(0x30) != 0 { println!("   ag={:08X} type={} light={:?} dark={:?}", x.age_gender, x.type_flags, x.detail_light, x.detail_dark); } }
         }
         return;
     }
@@ -359,6 +359,48 @@ fn main() {
             }
         }
         eprintln!("{n} clips");
+        return;
+    }
+    if args[1] == "rigbones" {
+        // rigbones <root> <rig name> [filter]: bone names with their parents.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let rig = s3formats::sim::Rig::parse(&set.read_ti(0x8EAF13DE, s3pkg::fnv64(&args[3])).expect("rig")).expect("rig parse");
+        let f = args.get(4).map(|s| s.to_ascii_lowercase()).unwrap_or_default();
+        for (i, b) in rig.bones.iter().enumerate() {
+            if b.name.to_ascii_lowercase().contains(&f) {
+                let parent = rig.bones.get(b.parent as usize).map_or("-", |p| p.name.as_str());
+                println!("[{i}] {} <- {parent} pos {:?} rot {:?}", b.name, b.position, b.rotation);
+            }
+        }
+        return;
+    }
+    if args[1] == "cliproot" {
+        // cliproot <root> <rig name> <clip name>...: the first and last root-ish bone keys.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let rig = s3formats::sim::Rig::parse(&set.read_ti(0x8EAF13DE, s3pkg::fnv64(&args[3])).expect("rig")).expect("rig parse");
+        let mut by_name = std::collections::HashMap::new();
+        for k in set.keys_of_type(types::CLIP).copied().collect::<Vec<_>>() {
+            if let Some(n) = set.read(&k).and_then(|d| s3formats::sim::clip_name(&d)) {
+                by_name.insert(n.to_ascii_lowercase(), k);
+            }
+        }
+        for name in &args[4..] {
+            let Some(d) = by_name.get(&name.to_ascii_lowercase()).and_then(|k| set.read(k)) else { println!("{name}: missing"); continue };
+            let Ok(c) = s3formats::sim::Clip::parse(&d) else { println!("{name}: unparsed"); continue };
+            println!("{name}: {:.2}s, {} tracks", c.duration, c.tracks.len());
+            let only = std::env::var("BONES").ok();
+            for (i, b) in rig.bones.iter().enumerate().filter(|(i, b)| match &only { Some(f) => f.split(',').any(|x| b.name.contains(x)), None => *i < 6 }) {
+                let Some(t) = c.tracks.get(&b.hash) else { println!("  [{i}] {} -", b.name); continue };
+                println!(
+                    "  [{i}] {} bind {:?} t0 {:?} t1 {:?} r0 {:?}",
+                    b.name,
+                    b.position,
+                    t.translation.first().map(|x| x.1),
+                    t.translation.last().map(|x| x.1),
+                    t.rotation.first().map(|x| x.1)
+                );
+            }
+        }
         return;
     }
     if args[1] == "clipsizes" {
@@ -513,6 +555,81 @@ fn main() {
             }
         }
         let _ = d;
+        return;
+    }
+    if args[1] == "texpng" {
+        // texpng <root> <type:group:instance> <out.png>: a DDS texture or TXTC composite as PNG.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let parts: Vec<&str> = args[3].split(':').collect();
+        let k = s3pkg::ResourceKey::new(parse_hex(parts[0]) as u32, parse_hex(parts[1]) as u32, parse_hex(parts[2]));
+        let d = set.read(&k).or_else(|| set.read_ti(k.t, k.i)).expect("not found");
+        let img = if k.t == types::TXTC { s3formats::compositor::composite(&set, &d, 1024) } else { s3formats::dds::decode(&d, 1024) }.expect("decode");
+        let f = std::fs::File::create(&args[4]).unwrap();
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(f), img.width as u32, img.height as u32);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().unwrap().write_image_data(&img.data).unwrap();
+        println!("{}x{}", img.width, img.height);
+        return;
+    }
+    if args[1] == "partlods" {
+        // partlods <root> <casp name>...: every VPXY entry of the parts, per LOD, with GEOM sizes.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let want: Vec<String> = args[3..].iter().map(|s| s.to_ascii_lowercase()).collect();
+        for k in set.keys_of_type(types::CASP).copied().collect::<Vec<_>>() {
+            let Some(d) = set.read(&k) else { continue };
+            let Ok(c) = s3formats::sim::CasPart::parse(&d) else { continue };
+            if !want.contains(&c.name.to_ascii_lowercase()) {
+                continue;
+            }
+            println!("{} {k}: {} vpxy, keys {:?}", c.name, c.vpxy.len(), c.keys);
+            for vk in &c.vpxy {
+                let Some(vd) = set.read(vk).or_else(|| set.read_ti(vk.t, vk.i)) else { continue };
+                if let Ok(rcol) = s3formats::rcol::Rcol::parse(&vd)
+                    && let Some(ci) = rcol.find_tag(b"VPXY")
+                    && let Some(c) = rcol.chunk_data(ci)
+                {
+                    println!("  raw VPXY: {:02x?}", &c[..c.len().min(96)]);
+                    for (i, k) in s3formats::model::tgi_table_at(c, 8).unwrap_or_default().iter().enumerate() {
+                        let n = set.read(k).or_else(|| set.read_ti(k.t, k.i)).and_then(|d| s3formats::sim::Geom::parse(&d).ok()).map(|g| g.positions.len());
+                        println!("    [{i}] {k} geom verts {n:?}");
+                    }
+                }
+                for lod in 0..4u8 {
+                    for g in s3formats::sim::vpxy_lod_geoms(&vd, lod) {
+                        let Some(gd) = set.read(&g).or_else(|| set.read_ti(g.t, g.i)) else { continue };
+                        let Ok(geom) = s3formats::sim::Geom::parse(&gd) else { println!("  lod {lod} {g}: unparsed"); continue };
+                        println!("  vpxy {vk} lod {lod} geom {g}: {} verts {} bones", geom.positions.len(), geom.bone_hashes.len());
+                    }
+                }
+            }
+        }
+        return;
+    }
+    if args[1] == "partrig" {
+        // partrig <root> <casp name>...: how many of each part's GEOM bones each rig has.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let rigs: Vec<(String, s3formats::sim::Rig)> = ["auRig", "cuRig", "puRig"]
+            .iter()
+            .filter_map(|n| Some((n.to_string(), s3formats::sim::Rig::parse(&set.read_ti(0x8EAF13DE, s3pkg::fnv64(n))?).ok()?)))
+            .collect();
+        for (n, r) in &rigs {
+            println!("{n}: {} bones", r.bones.len());
+        }
+        let want: Vec<String> = args[3..].iter().map(|s| s.to_ascii_lowercase()).collect();
+        for k in set.keys_of_type(types::CASP).copied().collect::<Vec<_>>() {
+            let Some(d) = set.read(&k) else { continue };
+            let Ok(c) = s3formats::sim::CasPart::parse(&d) else { continue };
+            if !want.contains(&c.name.to_ascii_lowercase()) {
+                continue;
+            }
+            for g in c.lod0_geoms(&set) {
+                let Some(gd) = set.read(&g).or_else(|| set.read_ti(g.t, g.i)) else { continue };
+                let Ok(geom) = s3formats::sim::Geom::parse(&gd) else { continue };
+                let found: Vec<String> = rigs.iter().map(|(n, r)| format!("{n} {}/{}", geom.bone_hashes.iter().filter(|h| r.index_of(**h).is_some()).count(), geom.bone_hashes.len())).collect();
+                println!("{} geom {g}: {} verts, bones found {found:?}", c.name, geom.positions.len());
+            }
+        }
         return;
     }
     if args[1] == "refs" {

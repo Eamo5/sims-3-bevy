@@ -177,6 +177,13 @@ fn candidates(sim: &Sim, skills: &Skills, has_job: bool, romance: Option<crate::
             Some(crate::social::RelStatus::Engaged) => out.push((WishKind::GetMarried, 2500, 3.0)),
             Some(crate::social::RelStatus::Married) => {}
         }
+        if matches!(romance, Some(crate::social::RelStatus::Partner | crate::social::RelStatus::Engaged | crate::social::RelStatus::Married))
+            && sim.age != Age::Teen
+            && sim.age != Age::Elder
+        {
+            let w = if has(Trait::FamilyOriented) { 2.5 } else if has(Trait::DislikesChildren) { 0.0 } else { 0.4 };
+            out.push((WishKind::Social("Try for Baby"), 1000, w));
+        }
         if has_job {
             out.push((WishKind::Promotion, 1000, if has(Trait::Ambitious) || has(Trait::Workaholic) { 3.0 } else { 0.8 }));
         } else {
@@ -199,7 +206,8 @@ fn offer_wishes(
             commands.entity(e).insert(Wishes { next_offer: clock.minutes, ..default() });
             continue;
         };
-        if clock.minutes < w.next_offer {
+        // Babies and toddlers don't have wishes yet.
+        if clock.minutes < w.next_offer || sim.age.is_little() {
             continue;
         }
         w.next_offer = clock.minutes + rng.random_range(120.0..300.0);

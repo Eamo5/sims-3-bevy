@@ -82,6 +82,8 @@ pub struct CasData {
     pub parts: Arc<Vec<CasPartInfo>>,
     pub adult_rig: Option<Arc<Rig>>,
     pub child_rig: Option<Arc<Rig>>,
+    pub toddler_rig: Option<Arc<Rig>>,
+    pub baby_rig: Option<Arc<Rig>>,
     pub tone_textures: Arc<Vec<(u32, u32, Key)>>,
     pub ramp: Arc<Vec<[f32; 3]>>,
 }
@@ -92,6 +94,8 @@ impl CasData {
             parts: Arc::new(b.cas.parts.clone()),
             adult_rig: b.cas.adult_rig.clone().map(Arc::new),
             child_rig: b.cas.child_rig.clone().map(Arc::new),
+            toddler_rig: b.cas.toddler_rig.clone().map(Arc::new),
+            baby_rig: b.cas.baby_rig.clone().map(Arc::new),
             tone_textures: Arc::new(b.cas.tone.textures.clone()),
             ramp: Arc::new(b.cas.tone.ramp.clone()),
         }
@@ -121,6 +125,8 @@ impl CasData {
 
 fn age_bits(a: Age) -> u32 {
     match a {
+        Age::Baby => AGE_BABY,
+        Age::Toddler => AGE_TODDLER,
         Age::Child => AGE_CHILD,
         Age::Teen => AGE_TEEN,
         Age::YoungAdult => AGE_YOUNG_ADULT,
@@ -145,6 +151,11 @@ pub fn pick_outfit(cas: &CasData, sim: &Sim, rng: &mut impl Rng) -> Outfit {
     let fits = |e: &&CasPartInfo| e.baked && e.age_gender & age != 0 && e.age_gender & gender != 0;
     let of_type = |t: u32| cas.parts.iter().filter(|e| e.clothing_type == t).filter(fits).collect::<Vec<_>>();
     let chosen = |k: Option<Key>, t: u32| k.and_then(|k| cas.parts.iter().find(|p| p.key == k && p.clothing_type == t).filter(|p| fits(p)).cloned());
+    // A baby is a single body with its own head.
+    if sim.age == Age::Baby {
+        let body = of_type(CT_BODY).into_iter().next().cloned();
+        return Outfit { face: None, scalp: None, hair: None, brows: None, body: body.into_iter().collect() };
+    }
     let face = of_type(CT_FACE).into_iter().min_by_key(|e| e.name.len()).cloned();
     let scalp = of_type(CT_SCALP).into_iter().min_by_key(|e| e.name.len()).cloned();
     let random_hair = of_type(CT_HAIR).choose(rng).map(|e| (*e).clone());
@@ -211,7 +222,12 @@ const SHADER_SIM_EYELASHES: u32 = 0x9D9DA161;
 
 /// Assembles a sim's meshes and materials from the cache (any thread).
 pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Outfit, tone_t: f32) -> Option<SimModelCpu> {
-    let rig = if sim.age == Age::Child { cas.child_rig.clone() } else { cas.adult_rig.clone() }?;
+    let rig = match sim.age {
+        Age::Baby => cas.baby_rig.clone(),
+        Age::Toddler => cas.toddler_rig.clone(),
+        Age::Child => cas.child_rig.clone(),
+        _ => cas.adult_rig.clone(),
+    }?;
     let age = age_bits(sim.age);
     let gender = if sim.female { GENDER_FEMALE } else { GENDER_MALE };
     let tint = cas.tint(tone_t);

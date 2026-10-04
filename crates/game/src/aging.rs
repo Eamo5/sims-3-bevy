@@ -50,6 +50,8 @@ impl Default for Aging {
 /// Days in each life stage (the game's normal lifespan).
 pub fn stage_days(age: Age) -> f32 {
     match age {
+        Age::Baby => 2.0,
+        Age::Toddler => 7.0,
         Age::Child => 7.0,
         Age::Teen => 14.0,
         Age::YoungAdult => 21.0,
@@ -60,6 +62,8 @@ pub fn stage_days(age: Age) -> f32 {
 
 fn next_age(age: Age) -> Option<Age> {
     match age {
+        Age::Baby => Some(Age::Toddler),
+        Age::Toddler => Some(Age::Child),
         Age::Child => Some(Age::Teen),
         Age::Teen => Some(Age::YoungAdult),
         Age::YoungAdult => Some(Age::Adult),
@@ -70,6 +74,8 @@ fn next_age(age: Age) -> Option<Age> {
 
 fn age_word(age: Age) -> &'static str {
     match age {
+        Age::Baby => "a baby",
+        Age::Toddler => "a toddler",
         Age::Child => "a child",
         Age::Teen => "a teen",
         Age::YoungAdult => "a young adult",
@@ -81,6 +87,8 @@ fn age_word(age: Age) -> &'static str {
 /// The game's sting for growing into `age`.
 fn birthday_sting(age: Age) -> &'static str {
     match age {
+        Age::Baby => "sting_baby_conception",
+        Age::Toddler => "sting_agetrans_b_p",
         Age::Child => "sting_agetrans_p_c",
         Age::Teen => "sting_agetrans_c_t",
         Age::YoungAdult => "sting_agetrans_t_h",

@@ -104,6 +104,40 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "c2o_fridge_openDoor",
     "c2o_tv_watch_",
     "c2o_computer_game_loop",
+    // Toddlers.
+    "p_walk",
+    "p_idle_neutral_loop",
+    "p_idle_friendly_loop",
+    "p_idle_breathe_x",
+    "p_crawl_x",
+    "p2o_crib_",
+    "p2o_toyXylophone_play_",
+    "p2o_toyPegBox_play_",
+    "p2o_toybox_playIn_",
+    "p2o_highChair_",
+    // Babies.
+    "b_idle_breathe",
+    "b_sleep_beingHeld_y",
+    "b_motDistress_cry_carry",
+    "b2o_crib_",
+    // Grown-ups looking after them.
+    "a2b_crib_putIn",
+    "a2b_crib_pullOut",
+    "a2b_babyBottle_feed",
+    "a2b_changeDiaper",
+    "a2b_carryPose",
+    "a2b_idle_carry_",
+    "a2b_pickUp",
+    "a2p_idle_carry_",
+    "a2p_carryPose",
+    "a2p_crib_putIn",
+    "a2p_crib_pullOut",
+    "a2p_carry_chat_",
+    "a2p_pickUp",
+    "a2p_changeDiaper",
+    "a2p_highChair_",
+    "a2p_book_readWith_",
+    "a2p_babyBottle_giveTake",
 ];
 
 /// Whether a clip should be baked.
@@ -113,7 +147,7 @@ pub fn wanted(name: &str) -> bool {
         if !name.starts_with(p) {
             return false;
         }
-        let object_or_social = name.starts_with("a2o_") || name.starts_with("a2a_") || name.starts_with("c2o_");
+        let object_or_social = ["a2o_", "a2a_", "c2o_", "p2o_", "b2o_", "a2b_", "a2p_"].iter().any(|p| name.starts_with(p));
         !object_or_social || actor_side(name)
     })
 }

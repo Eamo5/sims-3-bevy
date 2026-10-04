@@ -130,10 +130,31 @@ fn main() {
         }
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--list-clips") {
+        // --list-clips <prefix>: every clip in the install starting with the prefix.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let want = args[i + 1].to_ascii_lowercase();
+        let mut names: Vec<String> = pkgs
+            .keys_of_type(s3pkg::types::CLIP)
+            .filter_map(|k| s3formats::sim::clip_name(&pkgs.read(k)?))
+            .filter(|n| n.to_ascii_lowercase().starts_with(&want))
+            .collect();
+        names.sort();
+        names.dedup();
+        for n in &names {
+            println!("{n}");
+        }
+        eprintln!("{} clips", names.len());
+        return;
+    }
     if args.iter().any(|a| a == "--cas-stats") {
         // Baked CAS parts per age, gender and clothing type.
         let cas: s3bake::CasBaked = s3bake::read_value(&root.global_dir().join("cas.bin")).expect("cas.bin");
-        let ages = [(0x4, "child"), (0x8, "teen"), (0x10, "YA"), (0x20, "adult"), (0x40, "elder")];
+        let ages = [(0x1, "baby"), (0x2, "toddler"), (0x4, "child"), (0x8, "teen"), (0x10, "YA"), (0x20, "adult"), (0x40, "elder")];
+        for (ab, an) in [(0x1, "baby"), (0x2, "toddler")] {
+            let names: Vec<&str> = cas.parts.iter().filter(|p| p.age_gender & ab != 0 && p.age_gender & 0x7C == 0).map(|p| p.name.as_str()).take(30).collect();
+            println!("{an} parts (any bake state): {names:?}");
+        }
         let types = [(1, "hair"), (2, "scalp"), (3, "face"), (5, "body"), (6, "top"), (7, "bottom"), (8, "shoes")];
         for (ab, an) in ages {
             for (g, gn) in [(0x1000, "M"), (0x2000, "F")] {

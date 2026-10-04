@@ -8,3 +8,4 @@ s3pkg = { path = "../s3pkg" }
 s3formats = { path = "../s3formats" }
 postcard = { version = "1", features = ["use-std"] }
 lz4_flex = "0.11"
+png = "0.17"

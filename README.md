@@ -37,6 +37,10 @@ installation is unreachable.
 - **Sims**: Create-a-Sim from real CAS parts, skin tones and animation clips; needs, moods,
   skills, careers, relationships, autonomy, social interactions; children, teens, adults and
   elders who grow up and grow old (birthdays, new traits, passing away).
+- **Families grow**: couples can try for a baby; pregnancy brings morning sickness, then a
+  baby in a crib (the game's swaddled baby model). Grown-ups feed, change, cuddle and settle
+  babies (cradled in their arms) and pick up, read to and put toddlers to bed; toddlers toddle
+  about, play with toy boxes, xylophones and peg boxes, nap in cribs and cry when neglected.
 - **Town families**: every world's premade households (the Goths, Landgraabs, Altos, …) with
   their names, bios, family portraits, traits, careers, skills, marriages and homes — play one
   of them, or meet them around town.

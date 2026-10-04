@@ -586,7 +586,8 @@ fn world_click(
             });
         } else if let Ok(obj) = objects.get(t) {
             let mut options: Vec<(String, ActionKind)> = Vec::new();
-            for (i, d) in interactions_for(obj.kind).iter().enumerate() {
+            let usable = if obj.kind.usable_by(actor_sim.age) { interactions_for(obj.kind) } else { &[] };
+            for (i, d) in usable.iter().enumerate() {
                 if d.special == Special::FindJob {
                     // Job listings: every career's entry-level position.
                     for (k, c) in crate::careers::CAREERS.iter().enumerate() {
@@ -602,6 +603,8 @@ fn world_click(
             }
             open_pie(&mut commands, &mut pie, cursor, &obj.name, actor, options);
         }
+    } else if actor_sim.age == crate::sim::Age::Baby {
+        // Babies stay put.
     } else if let Some((p, level)) = floor_hit(ray, &world, building.as_deref()) {
         let mut options = vec![("Go Here".to_string(), ActionKind::GoHere(Vec2::new(p.x, p.z), level))];
         let mut title = String::new();
@@ -806,7 +809,12 @@ fn update_needs_panel(
                 j.performance
             ),
             _ if grades.is_some() => format!("School grade: {}", grades.map_or("C", |g| g.letter())),
-            _ => "Unemployed".into(),
+            _ => match sim.age {
+                crate::sim::Age::Baby => "Baby".into(),
+                crate::sim::Age::Toddler => "Toddler".into(),
+                crate::sim::Age::Elder => "Retired".into(),
+                _ => "Unemployed".into(),
+            },
         };
         let job_s = match away {
             Some(a) => format!("Away: {} ({})", a.place, a.activity.name),

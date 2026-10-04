@@ -33,11 +33,24 @@ const DECAY_PER_HOUR: [f32; 6] = [-7.5, -11.0, -5.5, -6.0, -4.5, -6.5];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Age {
+    Baby,
+    Toddler,
     Child,
     Teen,
     YoungAdult,
     Adult,
     Elder,
+}
+
+impl Age {
+    /// Babies and toddlers, who can't look after themselves.
+    pub fn is_little(self) -> bool {
+        matches!(self, Age::Baby | Age::Toddler)
+    }
+    /// Young adults, adults and elders.
+    pub fn is_grown(self) -> bool {
+        matches!(self, Age::YoungAdult | Age::Adult | Age::Elder)
+    }
 }
 
 #[derive(Component, Clone)]
@@ -324,6 +337,8 @@ pub fn spawn_sim(
     pos: Vec3,
 ) -> Entity {
     let scale = match sim.age {
+        Age::Baby => 0.3,
+        Age::Toddler => 0.45,
         Age::Child => 0.65,
         Age::Teen => 0.95,
         Age::Elder => 0.96,

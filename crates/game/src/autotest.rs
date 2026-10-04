@@ -265,14 +265,18 @@ fn portrait_cam(
     mut cam: Query<&mut SimsCamera>,
 ) {
     if let Some(want) = &args.select
-        && let Some((e, _, false)) = members.iter().find(|(_, s, _)| s.first.eq_ignore_ascii_case(want))
+        && let Some((e, _, is_sel)) = members
+            .iter()
+            .find(|(_, s, _)| s.first.eq_ignore_ascii_case(want) || (want == "@baby" && s.age == crate::sim::Age::Baby))
     {
         for (o, _, selected) in &members {
-            if selected {
+            if selected && o != e {
                 commands.entity(o).remove::<crate::sim::Selected>();
             }
         }
-        commands.entity(e).insert(crate::sim::Selected);
+        if !is_sel {
+            commands.entity(e).insert(crate::sim::Selected);
+        }
     }
     if !args.portrait {
         return;
@@ -282,27 +286,90 @@ fn portrait_cam(
         c.look_at(t.translation);
         c.height_offset = std::env::var("PORTRAIT_HEIGHT").ok().and_then(|v| v.parse().ok()).unwrap_or(1.25);
         c.distance = std::env::var("PORTRAIT_DIST").ok().and_then(|v| v.parse().ok()).unwrap_or(2.6);
-        c.pitch = 0.12;
-        c.yaw = fwd.x.atan2(fwd.z) + 0.35;
+        c.pitch = std::env::var("PORTRAIT_PITCH").ok().and_then(|v| v.parse().ok()).unwrap_or(0.12);
+        c.yaw = fwd.x.atan2(fwd.z) + std::env::var("PORTRAIT_YAW").ok().and_then(|v| v.parse().ok()).unwrap_or(0.35);
     }
 }
 
 /// `--do <interaction>`: the selected sim performs this interaction on the first object offering it.
 fn auto_action(
     args: Res<AutoArgs>,
-    mut done: Local<bool>,
+    (mut done, mut expecting): (Local<bool>, Local<bool>),
     mut sel: Query<&mut crate::interact::ActionQueue, With<crate::sim::Selected>>,
     objects: Query<(Entity, &crate::interact::GameObject)>,
     visitors: Query<Entity, With<crate::interact::Visitor>>,
     sel_e: Query<Entity, With<crate::sim::Selected>>,
     mut rels_q: Query<&mut crate::sim::Relationships>,
     world: Res<crate::loading::CurrentWorld>,
+    (mut commands, clock, members): (Commands, Res<crate::clock::GameClock>, Query<(Entity, &crate::sim::Sim), With<crate::sim::HouseholdMember>>),
 ) {
     let Some(name) = &args.action else { return };
     if *done {
         return;
     }
+    // "Care:<social>": the selected Sim looks after the household's baby (or toddler with
+    // "CareT:"), bringing a baby into the world first if there isn't one.
+    if let Some((want, social)) = name.strip_prefix("Care:").map(|s| (crate::sim::Age::Baby, s)).or_else(|| name.strip_prefix("CareT:").map(|s| (crate::sim::Age::Toddler, s))) {
+        let little = members.iter().find(|(_, s)| s.age == want).map(|(e, _)| e);
+        match little {
+            Some(target) => {
+                let Ok(mut q) = sel.single_mut() else { return };
+                let si = crate::social::social_index(social).unwrap();
+                q.0.clear();
+                q.push_player(crate::interact::Action::new(social, crate::interact::ActionKind::Social { target, social: si }, false));
+                *done = true;
+            }
+            None if want == crate::sim::Age::Baby => {
+                let mum = members.iter().find(|(_, s)| s.female && s.age.is_grown() && s.age != crate::sim::Age::Child).map(|(e, _)| e);
+                if let Some(e) = mum
+                    && !*expecting
+                {
+                    commands.entity(e).insert(crate::little::Pregnancy { since: clock.minutes - 3.0 * 1440.0 + 5.0, other_parent: None, stage: 2 });
+                    *expecting = true;
+                }
+            }
+            None => {}
+        }
+        return;
+    }
+    // "Baby": a grown woman of the household is about to give birth.
+    if name == "Baby" {
+        if let Some((e, _)) = members.iter().find(|(_, s)| s.female && s.age.is_grown() && s.age != crate::sim::Age::Child) {
+            let since = clock.minutes - 3.0 * 1440.0 + 20.0;
+            commands.entity(e).insert(crate::little::Pregnancy { since, other_parent: None, stage: 2 });
+        }
+        *done = true;
+        return;
+    }
     let Ok(mut q) = sel.single_mut() else { return };
+    // "Try for Baby": with a household member (or visitor) of the other sex.
+    if name == "Try for Baby" {
+        let me = sel_e.single().unwrap();
+        let Ok((_, me_sim)) = members.get(me) else { return };
+        let target = members
+            .iter()
+            .find(|(e, s)| *e != me && s.female != me_sim.female && s.age.is_grown() && s.age != crate::sim::Age::Child)
+            .map(|(e, _)| e)
+            .or_else(|| visitors.iter().next());
+        let Some(target) = target else { return };
+        for (a, b) in [(me, target), (target, me)] {
+            if let Ok(mut rels) = rels_q.get_mut(a) {
+                let r = rels.entry(b);
+                r.friendship = r.friendship.max(60.0);
+                r.romance = r.romance.max(80.0);
+                if !matches!(r.status, crate::social::RelStatus::Married | crate::social::RelStatus::Engaged) {
+                    r.status = crate::social::RelStatus::Partner;
+                }
+            }
+        }
+        q.0.clear();
+        let si = crate::social::social_index("Try for Baby").unwrap();
+        for _ in 0..3 {
+            q.push_player(crate::interact::Action::new(name.clone(), crate::interact::ActionKind::Social { target, social: si }, false));
+        }
+        *done = true;
+        return;
+    }
     // "Romance": the selected Sim courts a visitor through to marriage.
     if name == "Romance" {
         let Some(target) = visitors.iter().next() else { return };

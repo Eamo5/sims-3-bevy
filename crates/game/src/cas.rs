@@ -184,6 +184,8 @@ fn setup_cas(
 
 fn age_name(a: Age) -> &'static str {
     match a {
+        Age::Baby => "Baby",
+        Age::Toddler => "Toddler",
         Age::Child => "Child",
         Age::Teen => "Teen",
         Age::YoungAdult => "Young Adult",
@@ -195,6 +197,8 @@ fn age_name(a: Age) -> &'static str {
 fn age_bits(a: Age) -> u32 {
     use s3formats::sim::*;
     match a {
+        Age::Baby => AGE_BABY,
+        Age::Toddler => AGE_TODDLER,
         Age::Child => AGE_CHILD,
         Age::Teen => AGE_TEEN,
         Age::YoungAdult => AGE_YOUNG_ADULT,
@@ -309,11 +313,12 @@ fn cas_actions(
             CasAction::Age => {
                 let s = &mut pending.members[k];
                 s.age = match s.age {
+                    Age::Baby | Age::Toddler => Age::Child,
                     Age::Child => Age::Teen,
                     Age::Teen => Age::YoungAdult,
                     Age::YoungAdult => Age::Adult,
                     Age::Adult => Age::Elder,
-                    Age::Elder => Age::Child,
+                    Age::Elder => Age::Toddler,
                 };
                 s.outfit = OutfitChoice::default();
                 let slots = crate::life::trait_slots(s.age);

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::{BakeRoot, Progress, par_map};
 use crate::pack::{PackReader, PackWriter, write_value};
 
-pub const SOUNDS_VERSION: u32 = 1;
+pub const SOUNDS_VERSION: u32 = 2;
 
 /// Sample file formats in `sounds.pack`.
 pub const FORMAT_MP3: u8 = 0;

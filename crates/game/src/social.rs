@@ -81,10 +81,12 @@ pub enum SocialCat {
     Romantic,
     Mean,
     Special,
+    /// Looking after a baby or toddler.
+    Care,
 }
 
 impl SocialCat {
-    pub const ALL: [SocialCat; 5] = [SocialCat::Friendly, SocialCat::Funny, SocialCat::Romantic, SocialCat::Mean, SocialCat::Special];
+    pub const ALL: [SocialCat; 6] = [SocialCat::Care, SocialCat::Friendly, SocialCat::Funny, SocialCat::Romantic, SocialCat::Mean, SocialCat::Special];
     pub fn name(self) -> &'static str {
         match self {
             SocialCat::Friendly => "Friendly",
@@ -92,6 +94,7 @@ impl SocialCat {
             SocialCat::Romantic => "Romantic",
             SocialCat::Mean => "Mean",
             SocialCat::Special => "Special",
+            SocialCat::Care => "Care",
         }
     }
 }
@@ -107,6 +110,8 @@ pub enum SocialEffect {
     MoveIn,
     AskToLeave,
     WooHoo,
+    TryForBaby,
+    PutToBed,
 }
 
 pub struct SocialDef {
@@ -121,6 +126,8 @@ pub struct SocialDef {
     pub min_romance: f32,
     pub autonomous: bool,
     pub effect: SocialEffect,
+    /// What a care social does for the little one's needs, per hour.
+    pub care: [f32; 6],
 }
 
 const fn sd(name: &'static str, cat: SocialCat, minutes: f32, social: f32, fun: f32, friendship: f32, romance: f32) -> SocialDef {
@@ -136,11 +143,12 @@ const fn sd(name: &'static str, cat: SocialCat, minutes: f32, social: f32, fun: 
         min_romance: -100.0,
         autonomous: false,
         effect: SocialEffect::None,
+        care: [0.0; 6],
     }
 }
 
 use SocialCat::*;
-pub static SOCIALS: [SocialDef; 25] = [
+pub static SOCIALS: [SocialDef; 31] = [
     SocialDef { autonomous: true, ..sd("Chat", Friendly, 25.0, 110.0, 10.0, 8.0, 0.0) },
     SocialDef { autonomous: true, ..sd("Get to Know", Friendly, 15.0, 100.0, 5.0, 9.0, 0.0) },
     sd("Compliment", Friendly, 8.0, 80.0, 0.0, 7.0, 0.0),
@@ -166,6 +174,13 @@ pub static SOCIALS: [SocialDef; 25] = [
     SocialDef { effect: SocialEffect::BreakUp, ..sd("Break Up", Mean, 10.0, 40.0, -60.0, -30.0, -60.0) },
     SocialDef { min_friendship: 40.0, effect: SocialEffect::MoveIn, ..sd("Ask to Move In", Special, 10.0, 100.0, 10.0, 5.0, 0.0) },
     SocialDef { effect: SocialEffect::AskToLeave, ..sd("Say Goodbye", Special, 4.0, 40.0, 0.0, 1.0, 0.0) },
+    SocialDef { min_romance: 60.0, effect: SocialEffect::TryForBaby, ..sd("Try for Baby", Romantic, 30.0, 200.0, 120.0, 6.0, 15.0) },
+    // Hunger, bladder, hygiene, energy, social, fun.
+    SocialDef { autonomous: true, care: [500.0, 0.0, 0.0, 0.0, 60.0, 0.0], ..sd("Feed", Care, 15.0, 40.0, 10.0, 5.0, 0.0) },
+    SocialDef { autonomous: true, care: [0.0, 700.0, 400.0, 0.0, 30.0, 0.0], ..sd("Change Diaper", Care, 10.0, 30.0, -10.0, 4.0, 0.0) },
+    SocialDef { autonomous: true, care: [0.0, 0.0, 0.0, 0.0, 300.0, 200.0], ..sd("Play With", Care, 20.0, 120.0, 120.0, 8.0, 0.0) },
+    SocialDef { care: [0.0, 0.0, 0.0, 0.0, 250.0, 120.0], ..sd("Read to", Care, 30.0, 80.0, 60.0, 8.0, 0.0) },
+    SocialDef { effect: SocialEffect::PutToBed, care: [0.0, 0.0, 0.0, 0.0, 60.0, 0.0], ..sd("Put to Bed", Care, 6.0, 40.0, 0.0, 3.0, 0.0) },
 ];
 
 pub fn social_index(name: &str) -> Option<usize> {
@@ -175,6 +190,21 @@ pub fn social_index(name: &str) -> Option<usize> {
 /// Whether `actor` can start this social with `target` (shown in the pie menu).
 pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim, target_in_household: bool) -> bool {
     if rel.friendship < def.min_friendship || rel.romance < def.min_romance {
+        return false;
+    }
+    // Babies and toddlers are looked after rather than chatted with.
+    if actor.age.is_little() {
+        return false;
+    }
+    if target.age.is_little() {
+        return def.cat == SocialCat::Care && !matches!(actor.age, Age::Child) && (def.name != "Read to" || target.age == Age::Toddler);
+    }
+    if def.cat == SocialCat::Care {
+        return false;
+    }
+    if def.effect == SocialEffect::TryForBaby
+        && (actor.female == target.female || !matches!(rel.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married))
+    {
         return false;
     }
     let grown = |a: Age| !matches!(a, Age::Child | Age::Teen);
@@ -208,11 +238,12 @@ pub fn acceptance(def: &SocialDef, rel: &Relationship, target: &Sim, target_mood
         SocialCat::Friendly | SocialCat::Funny => 0.97 + rel.friendship.min(0.0) / 150.0 + mood.min(0.0) * 0.2,
         SocialCat::Mean => 1.0,
         SocialCat::Special => 0.6 + rel.friendship / 200.0,
+        SocialCat::Care => 1.0,
         SocialCat::Romantic => {
             let base = match def.effect {
                 SocialEffect::GoSteady => 0.2 + rel.romance / 120.0,
                 SocialEffect::Propose => 0.1 + rel.romance / 110.0,
-                SocialEffect::Marry | SocialEffect::WooHoo => 0.5 + rel.romance / 200.0,
+                SocialEffect::Marry | SocialEffect::WooHoo | SocialEffect::TryForBaby => 0.5 + rel.romance / 200.0,
                 _ => 0.35 + rel.romance / 100.0 + rel.friendship / 300.0,
             };
             base + mood * 0.15

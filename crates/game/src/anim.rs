@@ -137,6 +137,19 @@ fn sample_track_quat(keys: &[(f32, [f32; 4])], t: f32) -> Option<Quat> {
     Some(q(keys.last()?.1))
 }
 
+/// Default animation for a baby or toddler.
+fn little_script(pose: Pose, age: crate::sim::Age) -> ActionClip {
+    use crate::sim::Age;
+    match (age, pose) {
+        (Age::Baby, Pose::Lie) => ActionClip::new(Some("b2o_crib_sleep_start_y"), &["b2o_crib_sleep_loop_y"]),
+        (Age::Baby, _) => ActionClip::new(None, &["b2o_crib_idle_breathe"]),
+        (_, Pose::Walk) => ActionClip::new(None, &["p_walk"]),
+        (_, Pose::Lie) => ActionClip::new(Some("p2o_crib_sleep_start_y"), &["p2o_crib_sleep_loop_y"]),
+        (_, Pose::Talk) => ActionClip::new(None, &["p_idle_friendly_loop"]),
+        _ => ActionClip::new(None, &["p_idle_neutral_loop"]),
+    }
+}
+
 /// Default animation for a pose when the interaction doesn't name one.
 fn pose_script(pose: Pose, female: bool, child: bool) -> ActionClip {
     const STAND: &[&str] = &["a_idle_neutral_loop_"];
@@ -180,15 +193,16 @@ fn drive_skeletons(
     clock: Res<GameClock>,
     data: Res<Baked>,
     mut lib: ResMut<ClipLibrary>,
-    mut sims: Query<(Entity, &Sim, &SimAnim, &Skeleton, Option<&ActionClip>, &mut ClipPlayer)>,
+    mut sims: Query<(Entity, &Sim, &SimAnim, &Skeleton, Option<&ActionClip>, &mut ClipPlayer, Has<crate::little::Carried>)>,
     mut joints: Query<&mut Transform, Without<Sim>>,
     mut cues: MessageWriter<crate::sound::ClipCue>,
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed];
-    for (entity, sim, anim, skel, action, mut player) in &mut sims {
+    for (entity, sim, anim, skel, action, mut player, carried) in &mut sims {
         let child = sim.age == crate::sim::Age::Child;
         let script = match action {
             Some(a) if anim.pose != Pose::Walk => a.clone(),
+            _ if sim.age.is_little() => little_script(anim.pose, sim.age),
             _ => pose_script(anim.pose, sim.female, child),
         };
         let ended = player.clip.as_ref().is_some_and(|c| player.time >= c.duration.max(0.1));
@@ -239,7 +253,8 @@ fn drive_skeletons(
             let Ok(mut tf) = joints.get_mut(skel.joints[i]) else { continue };
             let bind = skel.bind[i];
             let mut target = bind;
-            if let Some(track) = clip.tracks.get(&bone.hash) {
+            let placed = carried && bone.name == "transformBone";
+            if let Some(track) = clip.tracks.get(&bone.hash).filter(|_| !placed) {
                 // The root's translation is root motion; movement is driven by the pathfinder.
                 if i != 0
                     && let Some(p) = sample_track_vec(&track.translation, t)

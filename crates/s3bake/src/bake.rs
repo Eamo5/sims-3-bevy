@@ -213,8 +213,12 @@ fn human(age_gender: u32) -> bool {
 
 /// Whether a CAS part is part of the random everyday wardrobe (or is a face/scalp).
 pub fn cas_bake_wanted(name: &str, ct: u32, age_gender: u32, category: u32) -> bool {
-    if !human(age_gender) || category & CAT_HIDDEN != 0 || age_gender & (AGE_CHILD | AGE_TEEN | AGE_YOUNG_ADULT | AGE_ADULT | AGE_ELDER) == 0 {
+    if !human(age_gender) || category & CAT_HIDDEN != 0 || age_gender & (AGE_BABY | AGE_TODDLER | AGE_CHILD | AGE_TEEN | AGE_YOUNG_ADULT | AGE_ADULT | AGE_ELDER) == 0 {
         return false;
+    }
+    // A baby is one body part.
+    if age_gender & AGE_BABY != 0 && age_gender & !(AGE_BABY | 0xFF00) & 0x7F == 0 {
+        return name.ends_with("Body");
     }
     match ct {
         CT_FACE => name.ends_with("Face"),
@@ -324,7 +328,7 @@ pub fn bake_clips(root: &BakeRoot, pkgs: &PackageSet, progress: Progress) -> Res
 }
 
 /// Bumped when the baked clip layout changes.
-pub const CLIPS_VERSION: u32 = 2;
+pub const CLIPS_VERSION: u32 = 4;
 
 pub fn clips_ready(root: &BakeRoot) -> bool {
     let g = root.global_dir();
@@ -373,6 +377,8 @@ pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progr
     let rig_of = |name: &str| pkgs.read_ti(types::RIG, s3pkg::fnv64(name)).and_then(|d| Rig::parse(&d).ok());
     let adult_rig = rig_of("auRig");
     let child_rig = rig_of("cuRig");
+    let toddler_rig = rig_of("puRig");
+    let baby_rig = rig_of("buBody");
     let casp_keys: Vec<ResourceKey> = pkgs.keys_of_type(types::CASP).copied().collect();
     let parsed: Vec<(ResourceKey, CasPart)> =
         par_map(&casp_keys, |k| Some((*k, CasPart::parse(&pkgs.read(k)?).ok()?))).into_iter().flatten().collect();
@@ -383,11 +389,14 @@ pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progr
         parsed.iter().filter(|(_, c)| cas_bake_wanted(&c.name, c.clothing_type, c.age_gender, c.category)).collect();
     let rig = adult_rig.clone().ok_or("adult rig (auRig) not found")?;
     let meshes: HashMap<Key, CasPartMeshes> = par_map(&wanted, |(k, c)| {
+        // Babies are skinned to their own skeleton; every other age shares bone names.
+        let baby = c.age_gender & AGE_BABY != 0 && c.age_gender & 0x7E == 0;
+        let part_rig = if baby { baby_rig.as_ref().unwrap_or(&rig) } else { &rig };
         let geoms: Vec<SkinMesh> = c
             .lod0_geoms(pkgs)
             .iter()
             .filter_map(|g| Geom::parse(&pkgs.read(g).or_else(|| pkgs.read_ti(g.t, g.i))?).ok())
-            .map(|g| skin_mesh(&g, &rig))
+            .map(|g| skin_mesh(&g, part_rig))
             .collect();
         (key_of(k), CasPartMeshes { meshes: geoms })
     })
@@ -447,7 +456,7 @@ pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progr
     cas_tex.sort();
     cas_tex.dedup();
     let n_cas_tex = bake_textures(root, pkgs, &cas_tex, 512, "Converting Sims", progress);
-    let cas = CasBaked { parts: infos, tone, adult_rig, child_rig };
+    let cas = CasBaked { parts: infos, tone, adult_rig, child_rig, toddler_rig, baby_rig };
     write_value(&gdir.join("cas.bin"), &cas).map_err(|e| e.to_string())?;
 
     let n_clips = bake_clips(root, pkgs, progress)?;

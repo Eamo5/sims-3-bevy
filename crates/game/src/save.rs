@@ -69,6 +69,9 @@ pub struct SavedSim {
     /// Days into the current life stage, and how long old age lasts.
     #[serde(default)]
     pub aging: Option<(f32, f32)>,
+    /// Pregnant since (game minutes), with the other parent's id and the stage shown so far.
+    #[serde(default)]
+    pub pregnancy: Option<(f64, Option<u64>, u8)>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -123,6 +126,8 @@ impl SaveGame {
             last: s.last.clone(),
             female: s.female,
             age: match s.age.as_str() {
+                "Baby" => Age::Baby,
+                "Toddler" => Age::Toddler,
                 "Child" => Age::Child,
                 "Teen" => Age::Teen,
                 "Adult" => Age::Adult,
@@ -194,6 +199,8 @@ fn rgb(c: Color) -> [f32; 3] {
 
 fn age_name(a: Age) -> &'static str {
     match a {
+        Age::Baby => "Baby",
+        Age::Toddler => "Toddler",
         Age::Child => "Child",
         Age::Teen => "Teen",
         Age::YoungAdult => "YoungAdult",
@@ -251,7 +258,7 @@ fn save_game(
             Has<OffLot>,
             Has<Visitor>,
             Option<&crate::wishes::Wishes>,
-            Option<&crate::aging::Aging>,
+            (Option<&crate::aging::Aging>, Option<&crate::little::Pregnancy>),
         ),
         Without<crate::town::Townie>,
     >,
@@ -264,7 +271,7 @@ fn save_game(
     let Some(hh) = household else { return };
     let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).collect();
     let mut saved = Vec::new();
-    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, aging) in &sims {
+    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy)) in &sims {
         saved.push(SavedSim {
             id: sim.id,
             look: sim.look,
@@ -298,6 +305,7 @@ fn save_game(
             outfit: vec![sim.outfit.hair, sim.outfit.top, sim.outfit.bottom, sim.outfit.full, sim.outfit.shoes],
             rewards: wishes.map(|w| w.rewards.iter().map(|r| r.name().to_string()).collect()).unwrap_or_default(),
             aging: aging.map(|a| (a.days, a.elder_span)),
+            pregnancy: pregnancy.map(|p| (p.since, p.other_parent.and_then(|o| ids.get(&o).copied()), p.stage)),
         });
     }
     let game = SaveGame {
@@ -398,6 +406,10 @@ fn apply_loaded_game(
         let mut ec = commands.entity(e);
         if let Some((days, elder_span)) = s.aging {
             ec.insert(crate::aging::Aging { days, elder_span });
+        }
+        if let Some((since, other, stage)) = s.pregnancy {
+            let other_parent = other.and_then(|o| by_id.get(&o).copied());
+            ec.insert(crate::little::Pregnancy { since, other_parent, stage });
         }
         match &s.job {
             Some(j) => {

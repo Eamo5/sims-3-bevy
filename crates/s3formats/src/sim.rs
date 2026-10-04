@@ -183,6 +183,7 @@ impl Geom {
 // ---------------------------------------------------------------------------------------------
 // CASP 0x034AEECB
 
+pub const AGE_BABY: u32 = 0x01;
 pub const AGE_TODDLER: u32 = 0x02;
 pub const AGE_CHILD: u32 = 0x04;
 pub const AGE_TEEN: u32 = 0x08;
@@ -314,8 +315,9 @@ pub fn vpxy_lod_geoms(d: &[u8], want_lod: u8) -> Vec<ResourceKey> {
     let keys = crate::model::tgi_table_at(c, 8).unwrap_or_default();
     let mut r = Reader::at(c, 16);
     let Ok(n) = r.u8() else { return Vec::new() };
-    let mut out = Vec::new();
-    let mut fallback = Vec::new();
+    // Meshes per LOD; parts without the wanted LOD (baby bodies start at 1) use the most
+    // detailed one they have.
+    let mut lods: std::collections::BTreeMap<u8, Vec<ResourceKey>> = Default::default();
     for _ in 0..n {
         let Ok(kind) = r.u8() else { break };
         if kind == 0 {
@@ -323,18 +325,17 @@ pub fn vpxy_lod_geoms(d: &[u8], want_lod: u8) -> Vec<ResourceKey> {
             for _ in 0..m {
                 let Ok(i) = r.u32() else { break };
                 if let Some(k) = keys.get(i as usize) {
-                    if lod == want_lod {
-                        out.push(*k);
-                    } else if fallback.is_empty() || lod < want_lod {
-                        fallback.push(*k);
-                    }
+                    lods.entry(lod).or_default().push(*k);
                 }
             }
         } else if r.u32().is_err() {
             break;
         }
     }
-    if out.is_empty() { fallback } else { out }
+    match lods.remove(&want_lod) {
+        Some(v) => v,
+        None => lods.into_values().next().unwrap_or_default(),
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

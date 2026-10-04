@@ -52,6 +52,12 @@ pub enum ObjectKind {
     Guitar,
     Treadmill,
     Chess,
+    Crib,
+    HighChair,
+    ToyBox,
+    Xylophone,
+    PegBox,
+    PottyChair,
     Table,
     Light,
     Plant,
@@ -64,7 +70,19 @@ impl ObjectKind {
         let s = script.to_ascii_lowercase();
         let n = name.to_ascii_lowercase();
         let has = |k: &str| s.contains(k);
-        if has("fridge") {
+        if has("crib") {
+            Self::Crib
+        } else if has("highchair") {
+            Self::HighChair
+        } else if has("toys.toybox") || has("toys.mimics.toybox") {
+            Self::ToyBox
+        } else if has("toys.xylophone") {
+            Self::Xylophone
+        } else if has("toypegbox") {
+            Self::PegBox
+        } else if has("pottychair") {
+            Self::PottyChair
+        } else if has("fridge") {
             Self::Fridge
         } else if has("microwave") {
             Self::Microwave
@@ -128,6 +146,7 @@ impl ObjectKind {
             Self::Table => "Surfaces",
             Self::Light => "Lighting",
             Self::Plant | Self::Decoration => "Decor",
+            Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
             Self::Other => "Misc",
         }
     }
@@ -258,6 +277,16 @@ static COMPUTER: [InteractionDef; 4] = [
     InteractionDef { autonomous: false, special: Special::FindJob, ..def("Find a Job", 20.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::QuitJob, ..def("Quit Job", 5.0, N, Pose::Use) },
 ];
+static CRIB: [InteractionDef; 1] = [InteractionDef {
+    until_full: Some(ENERGY),
+    decay: SLEEP_DECAY,
+    on_object: true,
+    ..def("Nap in Crib", 180.0, [0.0, 0.0, 0.0, 140.0, 0.0, 0.0], Pose::Lie)
+}];
+static TOYBOX: [InteractionDef; 1] = [def("Play with Toys", 40.0, [0.0, 0.0, 0.0, -4.0, 30.0, 140.0], Pose::Use)];
+static XYLOPHONE: [InteractionDef; 1] = [def("Play Xylophone", 40.0, [0.0, 0.0, 0.0, -4.0, 20.0, 130.0], Pose::Use)];
+static PEGBOX: [InteractionDef; 1] = [def("Play with Peg Box", 40.0, [0.0, 0.0, 0.0, -4.0, 10.0, 120.0], Pose::Use)];
+static POTTY: [InteractionDef; 1] = [InteractionDef { until_full: Some(BLADDER), ..def("Use Potty", 10.0, [0.0, 600.0, -20.0, 0.0, 0.0, 0.0], Pose::Sit) }];
 static STEREO: [InteractionDef; 1] = [def("Dance", 45.0, [0.0, 0.0, -6.0, 0.0, -6.0, 70.0], Pose::Dance)];
 static BOOKSHELF: [InteractionDef; 1] =
     [InteractionDef { skill: Some("Logic"), ..def("Read a Book", 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Stand) }];
@@ -309,13 +338,37 @@ pub fn interaction_clip(name: &str) -> Option<crate::anim::ActionClip> {
         "Play Guitar" => A::new(None, &["a2o_guitar_play_med_loop", "a2o_guitar_play_high_loop", "a2o_guitar_play_low_loop"]),
         "Work Out" => A::new(Some("a2o_treadmill_jog_start_x"), &["a2o_treadmill_jog_loop"]),
         "Play Chess" => A::new(None, &["a2o_chessTable_loop", "a2o_chessTable_move"]),
+        "Nap in Crib" => A::new(Some("p2o_crib_sleep_start_y"), &["p2o_crib_sleep_loop_y"]),
+        "Play with Toys" => A::new(Some("p2o_toybox_playIn_start"), &["p2o_toybox_playIn_breathe", "p2o_toybox_playIn_playWithToy", "p2o_toybox_playIn_peekOut"]),
+        "Play Xylophone" => A::new(Some("p2o_toyXylophone_play_start"), &["p2o_toyXylophone_play_loop"]),
+        "Play with Peg Box" => A::new(Some("p2o_toyPegBox_play_start"), &["p2o_toyPegBox_play_loopBreathe", "p2o_toyPegBox_play_loopLook", "p2o_toyPegBox_play_insertPeg"]),
         _ => return None,
     })
 }
 
 /// Both sides of a social's animation.
-pub fn social_clips(name: &str) -> &'static [&'static str] {
+/// The clip a care social opens with (picking a toddler up, opening the book).
+pub fn social_start(name: &str, little: Option<Age>) -> Option<&'static str> {
+    match (name, little) {
+        ("Play With" | "Cuddle" | "Change Diaper" | "Put to Bed", Some(Age::Toddler)) => Some("a2p_pickUp"),
+        ("Read to", Some(Age::Toddler)) => Some("a2p_book_readWith_start"),
+        _ => None,
+    }
+}
+
+pub fn social_clips(name: &str, little: Option<Age>) -> &'static [&'static str] {
+    let baby = little == Some(Age::Baby);
     match name {
+        // Babies are cradled while they're fed, changed and cuddled. (The game's own feeding
+        // and changing clips IK-solve the arms around the baby and a bottle.)
+        "Feed" | "Change Diaper" | "Cuddle" | "Play With" if baby => &["a2b_idle_carry_"],
+        "Feed" => &["a2p_babyBottle_giveTake", "a2p_highChair_giveToddlerFood"],
+        "Change Diaper" => &["a2p_changeDiaper"],
+        "Cuddle" | "Play With" => &["a2p_carry_chat_loop", "a2p_idle_carry_breathe_y", "a2p_idle_carry_idle"],
+        "Read to" => &["a2p_book_readWith_loop"],
+        "Put to Bed" if baby => &["a2b_crib_putIn"],
+        "Put to Bed" => &["a2p_crib_putIn"],
+        "Try for Baby" => &["a2a_soc_amorous_kissMakeOut_accept_loop"],
         "Tell Joke" | "Do Funny Impression" => &["a2a_soc_neutral_tellJoke_accept"],
         "Compliment" => &["a2a_soc_Neutral_Compliment_Friendly"],
         "Compliment Appearance" => &["a2a_soc_Neutral_Compliment_Amorous"],
@@ -333,6 +386,20 @@ pub fn social_clips(name: &str) -> &'static [&'static str] {
         "Break Up" => &["a2a_soc_Neutral_BreakUp_Neutral_Neutral"],
         "Dance Together" => &["a2a_danceClub_dance_medSkill_loop1"],
         _ => &["a2a_soc_Neutral_Gossip_Friendly_Neutral", "a2a_soc_Neutral_RambleAimlessly_talk"],
+    }
+}
+
+impl ObjectKind {
+    /// Whether a Sim of this age can use the object themselves: babies use nothing, toddlers
+    /// only their own things, and grown-ups leave the toddler toys alone.
+    pub fn usable_by(self, age: Age) -> bool {
+        use ObjectKind as K;
+        match age {
+            Age::Baby => false,
+            Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair),
+            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair),
+            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair),
+        }
     }
 }
 
@@ -357,6 +424,11 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Guitar => &GUITAR,
         ObjectKind::Treadmill => &TREADMILL,
         ObjectKind::Chess => &CHESS,
+        ObjectKind::Crib => &CRIB,
+        ObjectKind::ToyBox => &TOYBOX,
+        ObjectKind::Xylophone => &XYLOPHONE,
+        ObjectKind::PegBox => &PEGBOX,
+        ObjectKind::PottyChair => &POTTY,
         _ => &[],
     }
 }
@@ -573,14 +645,19 @@ fn run_actions(
     (building, upper): (Option<Res<crate::building::ActiveBuilding>>, Option<Res<UpperFloors>>),
     mut life: MessageWriter<LifeEvent>,
     people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
+    mut conceive: MessageWriter<crate::little::Conceive>,
 ) {
     let Some(grid) = grid else { return };
     let dt = delta.0;
     let ground = |level: u8, x: f32, z: f32| crate::nav::floor_height(&world.data, building.as_deref(), level, Vec3::new(x, 0.0, z));
     // Social effects to apply to partners after the main pass: (target, actor, social, fun, rel, pose talk)
     let mut social_fx: Vec<(Entity, Entity, f32, f32, f32, f32)> = Vec::new();
+    // Needs a care social fills for the little one: (target, per-need gain).
+    let mut care_fx: Vec<(Entity, [f32; 6])> = Vec::new();
     // Social partners whose animation should end: (target, actor).
     let mut partners_done: Vec<(Entity, Entity)> = Vec::new();
+    // Little ones a care social picks up: (little one, grown-up, age, grown-up's transform).
+    let mut carry_fx: Vec<(Entity, Entity, Age, Transform, bool)> = Vec::new();
     let positions: HashMap<Entity, (Vec3, u8)> = sims.iter().map(|s| (s.0, (s.3.translation, s.11.0))).collect();
     let partnered: HashMap<Entity, bool> = sims.iter().map(|q| (q.0, q.8.partner().is_some())).collect();
     let who: HashMap<Entity, (Sim, crate::life::Mood, bool, bool)> = people
@@ -700,9 +777,15 @@ fn run_actions(
                                 }
                                 anim.pose = Pose::Talk;
                                 let s = &SOCIALS[*social];
-                                let clips = social_clips(s.name);
-                                commands.entity(me).insert(crate::anim::ActionClip::social(clips, 'x'));
-                                commands.entity(*target).insert((crate::anim::ActionClip::social(clips, 'y'), SocialPartner(me)));
+                                let little = who.get(target).map(|w| w.0.age).filter(|a| a.is_little());
+                                let clips = social_clips(s.name, little);
+                                let start = social_start(s.name, little);
+                                let clip = |side| crate::anim::ActionClip { start, ..crate::anim::ActionClip::social(clips, side) };
+                                commands.entity(me).insert(clip('x'));
+                                commands.entity(*target).insert((clip('y'), SocialPartner(me)));
+                                if let Some(age) = little {
+                                    carry_fx.push((*target, me, age, *tf, s.effect != SocialEffect::PutToBed));
+                                }
                                 if let Some((tsim, tmood, _, tpartner)) = who.get(target) {
                                     let rel = rels.get(*target);
                                     let other_partner = *tpartner && rel.status == RelStatus::None;
@@ -821,6 +904,9 @@ fn run_actions(
                                 let k = dt / s.minutes * crate::life::social_affinity(&sim.traits, s.name);
                                 let (f, r) = (s.friendship * k, s.romance * k);
                                 rels.add(*target, f, r);
+                                if s.cat == crate::social::SocialCat::Care {
+                                    care_fx.push((*target, s.care.map(|v| v * dt / 60.0)));
+                                }
                                 social_fx.push((*target, me, s.social_per_hour * dt / 60.0, s.fun_per_hour * dt / 60.0, f, r));
                                 anim.pose = if s.name.contains("Dance") { Pose::Dance } else { Pose::Talk };
                                 if elapsed >= s.minutes {
@@ -867,6 +953,12 @@ fn run_actions(
                                         SocialEffect::MoveIn => {
                                             commands.entity(*target).insert(JoinHousehold { last_name: None });
                                             notes.push(format!("{} moved in with the household!", tname));
+                                        }
+                                        SocialEffect::TryForBaby => {
+                                            conceive.write(crate::little::Conceive { a: me, b: *target });
+                                        }
+                                        SocialEffect::PutToBed => {
+                                            commands.entity(*target).insert(crate::little::Bedtime);
                                         }
                                         SocialEffect::AskToLeave => {
                                             commands.entity(*target).insert(GoingHome);
@@ -946,12 +1038,37 @@ fn run_actions(
             }
         }
     }
+    for (target, care) in care_fx {
+        if let Ok(mut q) = sims.get_mut(target) {
+            for (i, v) in care.into_iter().enumerate() {
+                q.4.add(i, v);
+            }
+        }
+    }
+    // Babies go into the grown-up's arms; toddlers stand facing the grown-up, whose clips
+    // then lift them.
+    for (little, by, age, at, carried_social) in carry_fx {
+        debug!("care: {by} looks after {little} ({age:?})");
+        if age == Age::Baby {
+            if carried_social {
+                commands.entity(little).insert(crate::little::Carried { by });
+            }
+        } else if let Ok(mut q) = sims.get_mut(little) {
+            // The toddler stops what they were doing and stays with the grown-up.
+            q.2.0.clear();
+            commands.entity(little).remove::<PathFollow>();
+            let fwd = at.rotation * Vec3::Z;
+            q.3.translation = at.translation + fwd * 0.6;
+            q.3.rotation = at.rotation * Quat::from_rotation_y(std::f32::consts::PI);
+        }
+    }
     for (target, actor, social, fun, friendship, romance) in social_fx {
-        if let Ok((_, _, queue, mut tf, mut motives, _, mut anim, _, mut rels, path, _, _, _)) = sims.get_mut(target) {
+        if let Ok((_, tsim, queue, mut tf, mut motives, _, mut anim, _, mut rels, path, _, _, _)) = sims.get_mut(target) {
             motives.add(SOCIAL, social);
             motives.add(FUN, fun);
             rels.add(actor, friendship, romance);
-            if queue.0.is_empty() && path.is_none() {
+            // (A baby in someone's arms is placed by the carry slot.)
+            if queue.0.is_empty() && path.is_none() && tsim.age != Age::Baby {
                 anim.pose = Pose::Talk;
                 if let Some(p) = positions.get(&actor) {
                     let to = Vec2::new(p.0.x - tf.translation.x, p.0.z - tf.translation.z);
@@ -978,7 +1095,7 @@ fn autonomy(
     delta: Res<SimDelta>,
     clock: Res<GameClock>,
     mut sims: Query<
-        (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim),
+        (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim, Has<SocialPartner>),
         (Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>),
     >,
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy)>,
@@ -986,11 +1103,12 @@ fn autonomy(
     if delta.0 <= 0.0 {
         return;
     }
-    let others: Vec<(Entity, Vec3)> = sims.iter().map(|s| (s.0, s.1.translation)).collect();
+    let others: Vec<(Entity, Vec3, Age, [f32; 6])> = sims.iter().map(|s| (s.0, s.1.translation, s.7.age, s.2.0)).collect();
     let mut rng = rand::rng();
-    for (me, tf, motives, mut queue, mut timer, rels, job, sim) in &mut sims {
+    for (me, tf, motives, mut queue, mut timer, rels, job, sim, partner) in &mut sims {
         timer.0 -= delta.0;
-        if timer.0 > 0.0 || !queue.0.is_empty() {
+        // (Someone else's social partner waits for them to finish.)
+        if timer.0 > 0.0 || !queue.0.is_empty() || sim.age == Age::Baby || partner {
             continue;
         }
         timer.0 = rng.random_range(4.0..10.0);
@@ -1010,6 +1128,9 @@ fn autonomy(
         let mut best: Option<(f32, Action)> = None;
         for (oe, obj, otf, used) in &objects {
             if used.0.is_some_and(|u| u != me) {
+                continue;
+            }
+            if !obj.kind.usable_by(sim.age) {
                 continue;
             }
             let dist = obj.world_center(otf).distance(tf.translation);
@@ -1037,9 +1158,31 @@ fn autonomy(
         }
         let social_need = if sim.traits.contains(&crate::life::Trait::Loner) { 0.0 } else { 30.0 };
         let social_need = if sim.traits.contains(&crate::life::Trait::PartyAnimal) || sim.traits.contains(&crate::life::Trait::Friendly) { 50.0 } else { social_need };
-        if motives.0[SOCIAL] < social_need {
-            for &(other, _) in &others {
-                if other == me {
+        // A little one in need comes first for the grown-ups.
+        if sim.age.is_grown() && sim.age != Age::Child {
+            for &(other, pos, age, needs) in &others {
+                if !age.is_little() {
+                    continue;
+                }
+                let want = [("Feed", needs[HUNGER]), ("Change Diaper", needs[BLADDER]), ("Play With", needs[SOCIAL].min(needs[FUN]))]
+                    .into_iter()
+                    .filter(|(_, v)| *v < 0.0)
+                    .min_by(|a, b| a.1.total_cmp(&b.1));
+                if let Some((name, v)) = want {
+                    let si = crate::social::social_index(name).unwrap_or(0);
+                    let mut score = (-v / 10.0).powi(2) / (1.0 + pos.distance(tf.translation) / 25.0);
+                    if sim.traits.contains(&crate::life::Trait::FamilyOriented) {
+                        score *= 1.5;
+                    }
+                    if best.as_ref().is_none_or(|b| score > b.0) {
+                        best = Some((score, Action::new(SOCIALS[si].name, ActionKind::Social { target: other, social: si }, true)));
+                    }
+                }
+            }
+        }
+        if motives.0[SOCIAL] < social_need && !sim.age.is_little() {
+            for &(other, _, age, _) in &others {
+                if other == me || age.is_little() {
                     continue;
                 }
                 let rel = rels.friendship(other);

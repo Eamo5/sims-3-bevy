@@ -40,8 +40,9 @@ pub fn age_of(flags: u32) -> Age {
         f if f & pm::AGE_ADULT != 0 => Age::Adult,
         f if f & pm::AGE_YOUNG_ADULT != 0 => Age::YoungAdult,
         f if f & pm::AGE_TEEN != 0 => Age::Teen,
-        // Toddlers and babies are shown as children.
-        _ => Age::Child,
+        f if f & pm::AGE_CHILD != 0 => Age::Child,
+        f if f & pm::AGE_TODDLER != 0 => Age::Toddler,
+        _ => Age::Baby,
     }
 }
 

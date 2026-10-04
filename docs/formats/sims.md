@@ -977,7 +977,32 @@ entry_count × { u8 kind;
 u8 0x02; f32 bbox[6]; u8[4] unused; u8 modular; if modular == 1 { u32 ftpt_index }
 TGI list: u32 count; {u32 type, u32 group, u64 instance}
 ```
-Use the `kind 0, lod 0` entry for full quality.
+Use the `kind 0, lod 0` entry for full quality. **[verified]** Not every part has one: the
+baby bodies (`buBody`, `bfBody`) start at **lod 1**, whose entry lists two GEOMs: the
+swaddling blanket (309 vertices) and the baby itself (886 vertices, head and hands included).
+Fall back to *all* meshes of the lowest LOD present, not just its first. The `kind 1`
+entries point at BOND (0x00AE6C67) bone deltas and the part's own rig (0x8EAF13DE).
+
+Babies have no face, scalp or hair parts: the face is painted on the baby skin-tone texture
+(TONE entry for age 0x01, types 4 and 8 share one 256×256 texture with eyes and mouth).
+
+### 5.3 Carrying babies and toddlers **[verified on clips]**
+
+- Adult rigs have `b__carryGroupOffset_noBind__` → `b__carryGroup_noBind__` →
+  `b__L_carry_slot` / `b__R_carry_slot` under `b__Spine1__`, all at zero offset; carry clips
+  (`a2b_*_x`) animate only the two group bones' rotations (about ±11°, cancelling Spine1's
+  bend), so the slot sits upright at the upper chest.
+- The baby clip of a pair (`a2b_*_y`, rig `buBody`: `b__ROOT__` → `offsetBone` →
+  `transformBone` → `b__waist__` …) keeps the root still and puts a small offset and a large
+  rotation on `transformBone`, relative to the slot. Applied to the upright slot as-is, the
+  baby hangs head-down: the game also IK-solves the arms (the adult clips carry
+  `L_slotOffset` / `R_slotOffset` hand targets under `b__ROOT_export__`), and the arm tracks of
+  feeding / changing clips only make sense with that IK. The idle carry clips
+  (`a2b_idle_carry_*_x`) hold one forearm out palm-up, which makes a usable cradle.
+- Toddler pair clips (`a2p_*_y`, rig `puRig`) are in the toddler's own frame instead: the
+  grown-up stands about 0.6 m in front, facing the toddler; `b__ROOT_bind__` goes from the
+  floor (y 0.033 — toddlers sit on the floor when idle, `p_idle_breathe_x`) up to
+  (0.17, 1.22, 0.60) when held (`a2p_pickUp_y`, `a2p_carry_chat_loop*_y`).
 
 ---
 
