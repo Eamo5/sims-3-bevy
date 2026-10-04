@@ -292,11 +292,17 @@ impl LotBuildingBaked {
         !self.walls.is_empty()
     }
 
+    /// A penthouse on top of a tower shell: its floors sit far above the lot's own wall levels.
+    pub fn is_penthouse(&self) -> bool {
+        let top = self.levels.len() as u8;
+        self.objects.iter().filter(|o| o.level > top + 1).count() > 5
+    }
+
     /// A house that comes with furniture (beds, fridge...), not an empty shell for sale.
     pub fn is_furnished(&self) -> bool {
         // Within reach by stairs (penthouses need elevators).
         let has = |k: &str| self.objects.iter().any(|o| o.level <= 4 && o.script.to_ascii_lowercase().contains(k));
-        self.is_house() && has(".beds.") && (has("fridge") || has("toilet"))
+        self.is_house() && !self.is_penthouse() && has(".beds.") && (has("fridge") || has("toilet"))
     }
 }
 

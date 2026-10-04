@@ -49,6 +49,11 @@ fn main() {
         let walls: usize = w.buildings.iter().map(|b| b.walls.len()).sum();
         let objs: usize = w.buildings.iter().map(|b| b.objects.len()).sum();
         println!("houses: {} with {walls} wall segments, {objs} objects", w.buildings.len());
+        for b in w.buildings.iter().filter(|b| b.objects.iter().any(|o| o.level > 4)) {
+            let lifts = b.objects.iter().filter(|o| o.script.to_ascii_lowercase().contains("elevator")).count();
+            let top = b.objects.iter().map(|o| o.level).max().unwrap_or(0);
+            println!("tall lot {:016X} {}: top level {top}, {lifts} elevator objects", w.lots[b.lot as usize].info.id, w.lots[b.lot as usize].display_name);
+        }
         let furnished: Vec<String> = w.buildings.iter().filter(|b| b.is_furnished()).map(|b| w.lots[b.lot as usize].display_name.clone()).collect();
         println!("furnished: {} {:?}", furnished.len(), &furnished[..furnished.len().min(6)]);
         if let Some(b) = w.buildings.iter().find(|b| b.is_house() && !b.is_furnished()) {

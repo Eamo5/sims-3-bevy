@@ -436,7 +436,28 @@ pub fn spawn_building(
         place(commands, e, neighbor, if storey { lower } else { 0 });
         if storey && neighbor.is_none() {
             let bw = |q: Vec2| active.world(q.x, q.y, 0.0).xz();
-            active.stairs.push(StairLink { level: lower, bottom: bw(bottom - d * 0.45), top: bw(top + d * 0.45), y0, y1 });
+            active.stairs.push(StairLink { level: lower, upper: upper_level, bottom: bw(bottom - d * 0.45), top: bw(top + d * 0.45), y0, y1 });
+        }
+    }
+
+    // Elevators: one per floor, stacked; Sims ride between the floors they stop at.
+    if neighbor.is_none() {
+        let mut shafts: HashMap<(i32, i32), Vec<(u8, Vec2)>> = HashMap::new();
+        for o in b.objects.iter().filter(|o| o.script.to_ascii_lowercase().contains("elevator")) {
+            let q = Quat::from_xyzw(o.rotation[0], o.rotation[1], o.rotation[2], o.rotation[3]).normalize();
+            let f = rot.inverse() * (q * Vec3::Z);
+            let door = Vec2::from(o.local) + Vec2::new(f.x, f.z).normalize_or_zero() * 0.9;
+            let key = ((o.local[0] * 2.0).round() as i32, (o.local[1] * 2.0).round() as i32);
+            shafts.entry(key).or_default().push((o.level.max(1), door));
+        }
+        for mut stops in shafts.into_values() {
+            stops.sort_by_key(|s| s.0);
+            stops.dedup_by_key(|s| s.0);
+            for w in stops.windows(2) {
+                let ((l0, p0), (l1, p1)) = (w[0], w[1]);
+                let bw = |q: Vec2| active.world(q.x, q.y, 0.0).xz();
+                active.stairs.push(StairLink { level: l0, upper: l1, bottom: bw(p0), top: bw(p1), y0: level_y(l0), y1: level_y(l1) });
+            }
         }
     }
 

@@ -37,10 +37,11 @@ impl Default for Floor {
     }
 }
 
-/// A staircase joining `level` to the floor above: walk to `bottom`, climb to `top`.
+/// Stairs or an elevator joining `level` to `upper`: walk to `bottom`, climb (or ride) to `top`.
 #[derive(Clone, Copy, Debug)]
 pub struct StairLink {
     pub level: u8,
+    pub upper: u8,
     pub bottom: Vec2,
     pub top: Vec2,
     pub y0: f32,
@@ -85,11 +86,12 @@ fn plan_route_depth(
         return None;
     }
     let up = to_level > from_level;
+    // Links leaving this floor in the right direction, preferring those that don't overshoot.
     let mut links: Vec<StairLink> = upper?
         .stairs
         .iter()
         .copied()
-        .filter(|s| if up { s.level == from_level } else { s.level + 1 == from_level })
+        .filter(|s| if up { s.level == from_level && s.upper <= to_level } else { s.upper == from_level && s.level >= to_level })
         .collect();
     let entry = |s: &StairLink| if up { s.bottom } else { s.top };
     links.sort_by(|a, b| entry(a).distance(from).total_cmp(&entry(b).distance(from)));
@@ -100,7 +102,7 @@ fn plan_route_depth(
         else {
             continue;
         };
-        let (exit, next_level, ys) = if up { (s.top, from_level + 1, (s.y0, s.y1)) } else { (s.bottom, from_level - 1, (s.y1, s.y0)) };
+        let (exit, next_level, ys) = if up { (s.top, s.upper, (s.y0, s.y1)) } else { (s.bottom, s.level, (s.y1, s.y0)) };
         first.push(Waypoint { p: exit, level: next_level, climb: Some(ys) });
         if let Some(rest) = plan_route_depth(ground, upper, exit, next_level, to, to_level, depth + 1) {
             first.extend(rest);
