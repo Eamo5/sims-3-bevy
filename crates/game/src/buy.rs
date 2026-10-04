@@ -286,6 +286,7 @@ fn placement(
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut household: Option<ResMut<Household>>,
     mut notes: ResMut<Notifications>,
+    (selected, mut life): (Query<Entity, With<crate::sim::Selected>>, MessageWriter<crate::life::LifeEvent>),
     mut grid: Option<ResMut<NavGrid>>,
     pickup: Option<Res<PickupRequest>>,
     objects: Query<(&GameObject, &Transform)>,
@@ -380,6 +381,9 @@ fn placement(
             commands.entity(o.entity).insert(crate::save::Bought);
             if !owned && let Some(h) = household.as_mut() {
                 h.funds -= price;
+                if let Ok(s) = selected.single() {
+                    life.write(crate::life::LifeEvent::new(s, crate::life::LifeEventKind::Bought { price: price as i32 }));
+                }
             }
             if let Some(g) = grid.as_mut() {
                 g.dirty = true;

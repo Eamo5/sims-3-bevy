@@ -59,6 +59,10 @@ pub struct SavedSim {
     pub moodlets: Vec<(String, f64)>,
     pub job: Option<SavedJob>,
     pub relationships: Vec<SavedRel>,
+    #[serde(default)]
+    pub lifetime_happiness: u32,
+    #[serde(default)]
+    pub rewards: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -236,6 +240,7 @@ fn save_game(
             Has<Selected>,
             Has<OffLot>,
             Has<Visitor>,
+            Option<&crate::wishes::Wishes>,
         ),
         Without<crate::town::Townie>,
     >,
@@ -248,7 +253,7 @@ fn save_game(
     let Some(hh) = household else { return };
     let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).collect();
     let mut saved = Vec::new();
-    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting) in &sims {
+    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes) in &sims {
         saved.push(SavedSim {
             id: sim.id,
             look: sim.look,
@@ -278,6 +283,8 @@ fn save_game(
                     Some(SavedRel { with: *ids.get(e)?, friendship: r.friendship, romance: r.romance, status: status_name(r.status).into(), kissed: r.kissed })
                 })
                 .collect(),
+            lifetime_happiness: wishes.map_or(0, |w| w.points),
+            rewards: wishes.map(|w| w.rewards.iter().map(|r| r.name().to_string()).collect()).unwrap_or_default(),
         });
     }
     let game = SaveGame {
@@ -391,6 +398,11 @@ fn apply_loaded_game(
         }
         if s.member {
             ec.insert(HouseholdMember).remove::<(Visitor, OffLot)>();
+            ec.insert(crate::wishes::Wishes::restored(
+                s.lifetime_happiness,
+                s.rewards.iter().filter_map(|r| crate::wishes::Reward::from_name(r)).collect(),
+                game.minutes,
+            ));
         } else if s.whereabouts == "visiting" {
             ec.insert(Visitor { leave_at: game.minutes + 180.0 });
         } else {

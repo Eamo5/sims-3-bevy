@@ -20,7 +20,7 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PieMenu>()
             .add_systems(OnEnter(PlayMode::Live), spawn_hud)
-            .add_systems(Update, (floor_controls, update_moodlets_panel, phone_button, save_button).run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, (floor_controls, update_moodlets_panel, phone_button, save_button, update_wishes_panel, wish_buttons).run_if(in_state(PlayMode::Live)))
             .add_systems(
                 Update,
                 (
@@ -80,6 +80,13 @@ struct NeedsName;
 struct MoodletsPanel;
 #[derive(Component)]
 struct TraitsText;
+#[derive(Component)]
+struct WishesPanel;
+/// An offered wish button (index into `Wishes::offered`).
+#[derive(Component)]
+struct WishButton(usize);
+#[derive(Component)]
+struct RewardsButton;
 #[derive(Component)]
 struct NeedsDetail;
 #[derive(Component)]
@@ -191,23 +198,32 @@ fn spawn_hud(mut commands: Commands) {
             });
         });
 
-    // Moodlets (above the needs panel)
-    commands.spawn((
-        DespawnOnExit(AppState::InGame),
-        MoodletsPanel,
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(12.0),
-            bottom: Val::Px(250.0),
-            width: Val::Px(390.0),
-            flex_direction: FlexDirection::Row,
-            flex_wrap: FlexWrap::Wrap,
-            column_gap: Val::Px(6.0),
-            row_gap: Val::Px(6.0),
-            ..default()
-        },
-        Pickable::IGNORE,
-    ));
+    // Wishes and moodlets (above the needs panel)
+    commands
+        .spawn((
+            DespawnOnExit(AppState::InGame),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(12.0),
+                bottom: Val::Px(250.0),
+                width: Val::Px(390.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(8.0),
+                ..default()
+            },
+            Pickable::IGNORE,
+        ))
+        .with_children(|c| {
+            c.spawn((
+                WishesPanel,
+                Node { flex_direction: FlexDirection::Row, flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() },
+            ));
+            c.spawn((
+                MoodletsPanel,
+                Node { flex_direction: FlexDirection::Row, flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() },
+                Pickable::IGNORE,
+            ));
+        });
 
     // Clock and speed (bottom-centre)
     commands
@@ -597,6 +613,7 @@ fn pie_buttons(
     mut pie: ResMut<PieMenu>,
     mut queues: Query<&mut ActionQueue>,
     selected: Query<Entity, With<Selected>>,
+    (mut wishes, mut notes): (Query<(&Sim, &mut crate::wishes::Wishes), With<Selected>>, ResMut<Notifications>),
 ) {
     let mut chosen = None;
     for (i, opt) in &q {
@@ -608,6 +625,17 @@ fn pie_buttons(
     let Some((label, kind)) = pie.options.get(idx).cloned() else { return };
     let actor = pie.actor;
     close_pie(&mut commands, &mut pie);
+    if let ActionKind::BuyReward(i) = kind {
+        if let Ok((sim, mut w)) = wishes.single_mut() {
+            let r = crate::wishes::Reward::ALL[i];
+            if w.points >= r.cost() && !w.has_reward(r) {
+                w.points -= r.cost();
+                w.rewards.push(r);
+                notes.push(format!("{} gained the {} lifetime reward!", sim.first, r.name()));
+            }
+        }
+        return;
+    }
     if let Some(i) = as_submenu(&kind)
         && let (Some((title, list)), Some(a)) = (pie.submenus.get(i).cloned(), actor)
     {
@@ -1013,5 +1041,93 @@ fn save_button(
     let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     if buttons.iter().any(|i| *i == Interaction::Pressed) || (ctrl && keys.just_pressed(KeyCode::KeyS)) {
         crate::save::request_save(&mut save);
+    }
+}
+
+/// The selected Sim's wishes: promised ones in gold, offered ones to click and promise, and
+/// their lifetime happiness with the rewards button.
+fn update_wishes_panel(
+    mut commands: Commands,
+    panel: Query<Entity, With<WishesPanel>>,
+    sel: Query<&crate::wishes::Wishes, With<Selected>>,
+    mut last: Local<Vec<String>>,
+) {
+    let Ok(p) = panel.single() else { return };
+    let Ok(w) = sel.single() else { return };
+    let mut sig: Vec<String> = w.promised.iter().map(|x| format!("P{}", x.text())).collect();
+    sig.extend(w.offered.iter().map(|x| format!("O{}", x.text())));
+    sig.push(w.points.to_string());
+    if *last == sig {
+        return;
+    }
+    *last = sig;
+    commands.entity(p).despawn_children();
+    commands.entity(p).with_children(|c| {
+        c.spawn((
+            Button,
+            HudButton,
+            RewardsButton,
+            Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)), border_radius: BorderRadius::all(Val::Px(8.0)), ..default() },
+            BackgroundColor(BTN_NORMAL),
+        ))
+        .with_children(|b| {
+            b.spawn(text(format!("Lifetime Happiness: {}", w.points), 13.0, Color::srgb(1.0, 0.85, 0.3)));
+        });
+        for x in &w.promised {
+            c.spawn((
+                Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)), border_radius: BorderRadius::all(Val::Px(8.0)), ..default() },
+                BackgroundColor(Color::srgba(0.55, 0.42, 0.08, 0.95)),
+            ))
+            .with_children(|b| {
+                b.spawn(text(format!("Promised: {} +{}", x.text(), x.points), 13.0, Color::WHITE));
+            });
+        }
+        for (i, x) in w.offered.iter().enumerate() {
+            c.spawn((
+                Button,
+                HudButton,
+                WishButton(i),
+                Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)), border_radius: BorderRadius::all(Val::Px(8.0)), ..default() },
+                BackgroundColor(BTN_NORMAL),
+            ))
+            .with_children(|b| {
+                b.spawn(text(format!("{} +{}", x.text(), x.points), 13.0, Color::srgb(0.85, 0.9, 1.0)));
+            });
+        }
+    });
+}
+
+/// Clicking an offered wish promises it; the LTH button opens the lifetime rewards.
+fn wish_buttons(
+    mut commands: Commands,
+    wishes_btn: Query<(&Interaction, &WishButton), Changed<Interaction>>,
+    rewards_btn: Query<&Interaction, (Changed<Interaction>, With<RewardsButton>)>,
+    mut sel: Query<(Entity, &mut crate::wishes::Wishes), With<Selected>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut pie: ResMut<PieMenu>,
+) {
+    let Ok((actor, mut w)) = sel.single_mut() else { return };
+    for (i, b) in &wishes_btn {
+        if *i == Interaction::Pressed {
+            w.promise(b.0);
+        }
+    }
+    if rewards_btn.iter().any(|i| *i == Interaction::Pressed) {
+        let options: Vec<(String, ActionKind)> = crate::wishes::Reward::ALL
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| !w.has_reward(**r))
+            .map(|(i, r)| {
+                let afford = if w.points >= r.cost() { "" } else { " (need more)" };
+                (format!("{} — {} LTH{afford}", r.name(), r.cost()), ActionKind::BuyReward(i))
+            })
+            .collect();
+        if options.is_empty() {
+            return;
+        }
+        let at = windows.single().ok().map_or(Vec2::new(400.0, 500.0), |w| Vec2::new(420.0, w.height() - 420.0));
+        close_pie(&mut commands, &mut pie);
+        pie.at = at;
+        open_pie(&mut commands, &mut pie, at, "Lifetime Rewards", actor, options);
     }
 }

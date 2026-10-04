@@ -385,14 +385,14 @@ pub fn spawn_sim(
     entity
 }
 
-fn decay_motives(delta: Res<SimDelta>, mut q: Query<(&mut Motives, &DecayScale, &Sim)>) {
+fn decay_motives(delta: Res<SimDelta>, mut q: Query<(&mut Motives, &DecayScale, &Sim, Option<&crate::wishes::Wishes>)>) {
     let hours = delta.0 / 60.0;
     if hours <= 0.0 {
         return;
     }
-    for (mut m, scale, sim) in &mut q {
+    for (mut m, scale, sim, wishes) in &mut q {
         for i in 0..6 {
-            let d = DECAY_PER_HOUR[i] * scale.0[i] * crate::life::decay_rate(&sim.traits, i) * hours;
+            let d = DECAY_PER_HOUR[i] * scale.0[i] * crate::life::decay_rate(&sim.traits, i) * crate::wishes::reward_decay(wishes, i) * hours;
             m.add(i, d);
         }
     }

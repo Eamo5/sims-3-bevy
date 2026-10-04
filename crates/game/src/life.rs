@@ -658,16 +658,17 @@ fn life_events(
     }
 }
 
-fn expire_and_sum(clock: Res<GameClock>, delta: Res<SimDelta>, mut q: Query<(&mut Moodlets, &mut Mood)>) {
+fn expire_and_sum(clock: Res<GameClock>, delta: Res<SimDelta>, mut q: Query<(&mut Moodlets, &mut Mood, Option<&crate::wishes::Wishes>)>) {
     let _ = delta;
-    for (mut ml, mut mood) in &mut q {
+    for (mut ml, mut mood, wishes) in &mut q {
         let now = clock.minutes;
         if ml.0.iter().any(|m| m.until <= now) {
             ml.0.retain(|m| m.until > now);
         }
         let sum: i32 = ml.0.iter().map(|m| m.value).sum();
         // A content Sim with nothing on their mind is fine; moodlets push it up or down.
-        let v = sum as f32 + 10.0;
+        let manager = if wishes.is_some_and(|w| w.has_reward(crate::wishes::Reward::MoodManager)) { 20.0 } else { 0.0 };
+        let v = sum as f32 + 10.0 + manager;
         if (mood.0 - v).abs() > 0.01 {
             mood.0 = v;
         }

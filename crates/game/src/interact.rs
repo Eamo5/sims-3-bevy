@@ -348,6 +348,8 @@ pub enum ActionKind {
     JoinCareer { target: Entity, track: usize },
     /// Phone someone and invite them over.
     Invite { target: Entity },
+    /// Spend lifetime happiness on a reward (instant, from the rewards menu).
+    BuyReward(usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -525,6 +527,7 @@ fn run_actions(
             Option<&mut PathFollow>,
             Option<&mut Job>,
             &Floor,
+            Option<&crate::wishes::Wishes>,
         ),
         (Without<GameObject>, Without<AtWork>),
     >,
@@ -547,7 +550,7 @@ fn run_actions(
     // Relationship changes to apply to both Sims: (a, b, status, kissed)
     let mut status_fx: Vec<(Entity, Entity, Option<RelStatus>, bool)> = Vec::new();
 
-    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, mut job, floor) in &mut sims {
+    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, mut job, floor, wishes) in &mut sims {
         let Some(action) = queue.0.front_mut() else {
             if anim.pose != Pose::Walk && anim.pose != Pose::Stand && path.is_none() {
                 anim.pose = Pose::Stand;
@@ -603,6 +606,7 @@ fn run_actions(
                             anim.pose = Pose::Talk;
                             continue;
                         }
+                        ActionKind::BuyReward(_) => None,
                     };
                     let from = Vec2::new(tf.translation.x, tf.translation.z);
                     match dest.and_then(|(d, l)| plan_route(&grid, upper.as_deref(), from, floor.0, d, l)) {
@@ -671,7 +675,7 @@ fn run_actions(
                                 }
                             }
                             ActionKind::GoHere(..) => finished = true,
-                            ActionKind::Invite { .. } => {}
+                            ActionKind::Invite { .. } | ActionKind::BuyReward(_) => {}
                             ActionKind::GoToWork => {
                                 if let Some(j) = job.as_deref_mut() {
                                     crate::careers::leave_for_work(&mut commands, &clock, me, sim, j, &mut notes);
@@ -711,7 +715,7 @@ fn run_actions(
                                     motives.add(i, gain * dt / 60.0);
                                 }
                                 if let Some(sk) = d.skill {
-                                    let rate = crate::life::skill_rate(&sim.traits, sk);
+                                    let rate = crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes);
                                     let e = skills.0.entry(sk).or_insert(0.0);
                                     let before = *e as u32;
                                     *e = (*e + dt / 60.0 * 0.6 * rate / (1.0 + *e * 0.25)).min(10.0);
@@ -878,7 +882,7 @@ fn run_actions(
         }
     }
     for (target, actor, social, fun, friendship, romance) in social_fx {
-        if let Ok((_, _, queue, mut tf, mut motives, _, mut anim, _, mut rels, path, _, _)) = sims.get_mut(target) {
+        if let Ok((_, _, queue, mut tf, mut motives, _, mut anim, _, mut rels, path, _, _, _)) = sims.get_mut(target) {
             motives.add(SOCIAL, social);
             motives.add(FUN, fun);
             rels.add(actor, friendship, romance);
