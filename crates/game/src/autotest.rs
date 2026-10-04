@@ -21,6 +21,8 @@ pub struct AutoArgs {
     pub exit_after: bool,
     pub showroom: Option<(usize, usize)>,
     pub lot: Option<String>,
+    pub portrait: bool,
+    pub action: Option<String>,
 }
 
 impl AutoArgs {
@@ -41,11 +43,17 @@ impl AutoArgs {
                     })
                 }
                 "--lot" => a.lot = next,
+                "--do" => a.action = next,
                 "--showroom" => {
                     a.showroom = next.and_then(|s| {
                         let mut it = s.split(',').filter_map(|x| x.parse().ok());
                         Some((it.next()?, it.next().unwrap_or(0)))
                     })
+                }
+                "--portrait" => {
+                    a.portrait = true;
+                    i += 1;
+                    continue;
                 }
                 "--exit-after-shot" => {
                     a.exit_after = true;
@@ -75,6 +83,8 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
             .add_systems(Update, apply_cam.run_if(in_state(AppState::InGame)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
+            .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(OnEnter(AppState::InGame), showroom);
     }
 }
@@ -188,4 +198,45 @@ fn showroom(
         placed += 1;
     }
     info!("showroom: placed {placed} objects");
+}
+
+/// `--portrait`: keep the camera on the selected sim at head height.
+fn portrait_cam(
+    args: Res<AutoArgs>,
+    sel: Query<&Transform, With<crate::sim::Selected>>,
+    mut cam: Query<&mut SimsCamera>,
+) {
+    if !args.portrait {
+        return;
+    }
+    if let (Ok(t), Ok(mut c)) = (sel.single(), cam.single_mut()) {
+        let fwd = t.rotation * Vec3::Z;
+        c.look_at(t.translation);
+        c.height_offset = 1.25;
+        c.distance = 2.6;
+        c.pitch = 0.12;
+        c.yaw = fwd.x.atan2(fwd.z) + 0.35;
+    }
+}
+
+/// `--do <interaction>`: the selected sim performs this interaction on the first object offering it.
+fn auto_action(
+    args: Res<AutoArgs>,
+    mut done: Local<bool>,
+    mut sel: Query<&mut crate::interact::ActionQueue, With<crate::sim::Selected>>,
+    objects: Query<(Entity, &crate::interact::GameObject)>,
+) {
+    let Some(name) = &args.action else { return };
+    if *done {
+        return;
+    }
+    let Ok(mut q) = sel.single_mut() else { return };
+    for (e, o) in &objects {
+        if let Some(i) = crate::interact::interactions_for(o.kind).iter().position(|d| d.name.eq_ignore_ascii_case(name)) {
+            q.0.clear();
+            q.push_player(crate::interact::Action::new(name.clone(), crate::interact::ActionKind::Object { target: e, def: i }, false));
+            *done = true;
+            return;
+        }
+    }
 }

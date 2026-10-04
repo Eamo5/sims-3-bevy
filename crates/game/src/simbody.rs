@@ -120,6 +120,9 @@ fn skin_base(pkgs: &PackageSet, cas: &CasData, age: u32, gender: u32, kind: u32,
         let base = ramp.sample(0.5, 0.06);
         let target = ramp.sample(0.5, 0.06 + tone_t * 0.88);
         let f = [target[0] / base[0].max(0.01), target[1] / base[1].max(0.01), target[2] / base[2].max(0.01)];
+        // Mostly darken; keep only a little of the ramp's hue shift.
+        let avg = (f[0] + f[1] + f[2]) / 3.0;
+        let f = [avg + (f[0] - avg) * 0.3, avg + (f[1] - avg) * 0.3, avg + (f[2] - avg) * 0.3];
         for px in img.data.chunks_exact_mut(4) {
             for c in 0..3 {
                 px[c] = (px[c] as f32 * f[c]).clamp(0.0, 255.0) as u8;

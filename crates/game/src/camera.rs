@@ -24,6 +24,8 @@ pub struct SimsCamera {
     pub yaw: f32,
     pub pitch: f32,
     pub distance: f32,
+    /// Height above the ground the camera orbits around.
+    pub height_offset: f32,
     /// Smoothed values actually used for the transform.
     smooth_focus: Vec3,
     smooth_distance: f32,
@@ -36,6 +38,7 @@ impl SimsCamera {
             yaw: 0.7,
             pitch: 0.75,
             distance: 30.0,
+            height_offset: 0.0,
             smooth_focus: focus,
             smooth_distance: 30.0,
         }
@@ -164,7 +167,7 @@ fn camera_control(
     cam.focus.x = cam.focus.x.clamp(0.0, size);
     cam.focus.z = cam.focus.z.clamp(0.0, size);
     let ground = hm.sample(cam.focus.x, cam.focus.z).max(crate::terrain::SEA_LEVEL);
-    cam.focus.y = ground;
+    cam.focus.y = ground + cam.height_offset;
 
     let k = 1.0 - (-dt * 10.0).exp();
     let target_focus = cam.focus;
