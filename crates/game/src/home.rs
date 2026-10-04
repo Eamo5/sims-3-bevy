@@ -606,9 +606,10 @@ pub fn move_in(
         ResMut<Assets<crate::simbody::SimSkinMaterial>>,
         ResMut<crate::simbody::SimTextures>,
     ),
-    mut life: MessageWriter<crate::life::LifeEvent>,
+    (mut life, loading_save): (MessageWriter<crate::life::LifeEvent>, Option<Res<crate::save::PendingLoad>>),
 ) {
     let Some(req) = request else { return };
+    let fresh = loading_save.is_none();
     let lot_index = req.0;
     let house = world.data.buildings.get(&lot_index).filter(|b| b.is_house());
     // A pre-built house keeps its imposter for the distant view; an empty lot loses it.
@@ -728,7 +729,9 @@ pub fn move_in(
             first = Some(e);
             commands.entity(e).insert(Selected);
         }
-        life.write(crate::life::LifeEvent::new(e, crate::life::LifeEventKind::MovedIn));
+        if fresh {
+            life.write(crate::life::LifeEvent::new(e, crate::life::LifeEventKind::MovedIn));
+        }
     }
     // A couple of neighbours drop by to say hello.
     for (k, (s, model)) in neighbors.into_iter().enumerate() {
@@ -742,7 +745,9 @@ pub fn move_in(
             Visitor { leave_at: 18.0 * 60.0 + k as f64 * 40.0 },
             DespawnOnExit(AppState::InGame),
         ));
-        notes.push(format!("{name} from next door came over to welcome the {} family.", pending.last_name));
+        if fresh {
+            notes.push(format!("{name} from next door came over to welcome the {} family.", pending.last_name));
+        }
     }
     // Townies, hidden until they stroll by.
     for (k, (s, model)) in townies.into_iter().enumerate() {

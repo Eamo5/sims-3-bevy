@@ -20,7 +20,7 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PieMenu>()
             .add_systems(OnEnter(PlayMode::Live), spawn_hud)
-            .add_systems(Update, (floor_controls, update_moodlets_panel, phone_button).run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, (floor_controls, update_moodlets_panel, phone_button, save_button).run_if(in_state(PlayMode::Live)))
             .add_systems(
                 Update,
                 (
@@ -100,6 +100,9 @@ struct FloorText;
 
 #[derive(Component)]
 struct PhoneButton;
+
+#[derive(Component)]
+struct SaveButton;
 
 /// The floor controls, shown only in a house with more than one floor.
 #[derive(Component)]
@@ -213,7 +216,8 @@ fn spawn_hud(mut commands: Commands) {
             Node {
                 position_type: PositionType::Absolute,
                 bottom: Val::Px(12.0),
-                width: Val::Percent(100.0),
+                left: Val::Px(412.0),
+                right: Val::Px(214.0),
                 justify_content: JustifyContent::Center,
                 ..default()
             },
@@ -244,6 +248,24 @@ fn spawn_hud(mut commands: Commands) {
                 ))
                 .with_children(|b| {
                     b.spawn(text("Phone", 16.0, Color::WHITE));
+                });
+                p.spawn((
+                    Button,
+                    HudButton,
+                    SaveButton,
+                    Node {
+                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                        width: Val::Px(58.0),
+                        height: Val::Px(34.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        margin: UiRect::right(Val::Px(8.0)),
+                        ..default()
+                    },
+                    BackgroundColor(BTN_NORMAL),
+                ))
+                .with_children(|b| {
+                    b.spawn(text("Save", 16.0, Color::WHITE));
                 });
                 p.spawn((text("", 20.0, Color::WHITE), ClockText, Node { width: Val::Px(210.0), ..default() }));
                 for (i, label) in ["II", ">", ">>", ">>>"].iter().enumerate() {
@@ -980,4 +1002,16 @@ fn phone_button(
     close_pie(&mut commands, &mut pie);
     pie.at = at;
     open_pie(&mut commands, &mut pie, at, "Phone", actor, options);
+}
+
+/// The Save button (and Ctrl+S).
+fn save_button(
+    buttons: Query<&Interaction, (Changed<Interaction>, With<SaveButton>)>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut save: MessageWriter<crate::save::SaveRequest>,
+) {
+    let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    if buttons.iter().any(|i| *i == Interaction::Pressed) || (ctrl && keys.just_pressed(KeyCode::KeyS)) {
+        crate::save::request_save(&mut save);
+    }
 }

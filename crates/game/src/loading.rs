@@ -110,8 +110,10 @@ fn start_loading(
     install: Res<InstallPath>,
     selected: Res<SelectedWorld>,
     pending: Option<Res<crate::home::PendingHousehold>>,
+    save: Option<Res<crate::save::PendingLoad>>,
 ) {
     let members: Vec<crate::sim::Sim> = pending.map(|p| p.members.clone()).unwrap_or_default();
+    let known: Option<Vec<crate::sim::Sim>> = save.map(|s| s.0.known_sims());
     commands.spawn((Camera2d, DespawnOnExit(AppState::Loading)));
     commands
         .spawn((
@@ -170,7 +172,7 @@ fn start_loading(
         let catalog = Catalog::from_baked(&baked);
         set_status("Dressing your Sims…");
         let cas = crate::simbody::CasData::from_baked(&baked);
-        let sims = crate::simbody::prepare_sims(&baked, &cas, &members);
+        let sims = crate::simbody::prepare_sims(&baked, &cas, &members, known.as_deref());
         let info = WorldInfo {
             lot_names: world.lots.iter().map(|l| l.display_name.clone()).collect(),
             lots: world.lots.iter().map(|l| l.info.clone()).collect(),

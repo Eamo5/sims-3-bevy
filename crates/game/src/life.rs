@@ -376,6 +376,22 @@ pub enum MoodletKind {
     WishFulfilled,
 }
 
+impl MoodletKind {
+    pub const ALL: [MoodletKind; 36] = {
+        use MoodletKind::*;
+        [
+            Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
+            GoodMeal, AmazingMeal, HavingFun, GoodConversation, EnjoyingMusic, EnjoyingAGoodBook, Pumped, Fatigued,
+            Inspired, Embarrassed, PassedOut, Uncomfortable, Promoted, Demoted, Fired, NewJob, Annoyed, Flirty, FirstKiss,
+            InLove, Heartbroken, JustMarried, NewHome, Birthday, WishFulfilled,
+        ]
+    };
+
+    pub fn from_name(n: &str) -> Option<MoodletKind> {
+        MoodletKind::ALL.into_iter().find(|k| k.def().name == n)
+    }
+}
+
 pub struct MoodletDef {
     pub name: &'static str,
     pub desc: &'static str,

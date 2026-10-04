@@ -17,6 +17,7 @@ impl Plugin for MenuPlugin {
 #[derive(Component)]
 pub enum MenuAction {
     PlayWorld(usize),
+    LoadSave(usize),
     Quit,
 }
 
@@ -78,6 +79,14 @@ fn spawn_menu(mut commands: Commands, worlds: Res<WorldList>, install: Res<Insta
         for (i, w) in worlds.0.iter().enumerate() {
             spawn_button(p, &w.name, MenuAction::PlayWorld(i), 360.0);
         }
+        let saves = crate::save::list_saves();
+        if !saves.is_empty() {
+            p.spawn((text("Continue a saved game", 26.0, Color::WHITE), Node { margin: UiRect::top(Val::Px(18.0)), ..default() }));
+            for (i, (_, g)) in saves.iter().enumerate().take(5) {
+                let label = format!("The {} household — {} (day {})", g.household, g.world, (g.minutes / 1440.0) as u32 + 1);
+                spawn_button(p, &label, MenuAction::LoadSave(i), 560.0);
+            }
+        }
         p.spawn(Node { height: Val::Px(16.0), ..default() });
         spawn_button(p, "Quit", MenuAction::Quit, 200.0);
     });
@@ -117,6 +126,13 @@ fn menu_actions(
             MenuAction::PlayWorld(idx) => {
                 commands.insert_resource(SelectedWorld(worlds.0[*idx].clone()));
                 next.set(AppState::CreateHousehold);
+            }
+            MenuAction::LoadSave(k) => {
+                if let Some((_, g)) = crate::save::list_saves().into_iter().nth(*k)
+                    && crate::save::begin_load(&mut commands, &worlds, g)
+                {
+                    next.set(AppState::Loading);
+                }
             }
             MenuAction::Quit => {
                 exit.write(AppExit::Success);

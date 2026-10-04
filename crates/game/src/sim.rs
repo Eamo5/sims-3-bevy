@@ -43,6 +43,10 @@ pub enum Age {
 #[derive(Component, Clone)]
 #[require(crate::nav::Floor, crate::life::Moodlets, crate::life::Mood)]
 pub struct Sim {
+    /// Stable identity (saves, relationships).
+    pub id: u64,
+    /// Seed for the CAS outfit, so a Sim always looks the same.
+    pub look: u64,
     pub first: String,
     pub last: String,
     pub female: bool,
@@ -233,6 +237,8 @@ pub fn random_sim(rng: &mut impl Rng, last: &str, female: Option<bool>, age: Age
     let (hr, hg, hb) = HAIRS[rng.random_range(0..HAIRS.len())];
     let hue = rng.random_range(0.0..360.0);
     Sim {
+        id: rng.random(),
+        look: rng.random(),
         first: first.to_string(),
         last: last.to_string(),
         female,

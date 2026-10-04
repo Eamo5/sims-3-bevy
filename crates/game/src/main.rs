@@ -17,6 +17,7 @@ mod music;
 mod nav;
 mod objects;
 mod roads;
+mod save;
 mod sim;
 mod simbody;
 mod social;
@@ -83,7 +84,7 @@ fn main() {
             music::MusicPlugin,
             town::TownPlugin,
         ))
-        .add_plugins((life::LifePlugin, careers::CareersPlugin))
+        .add_plugins((life::LifePlugin, careers::CareersPlugin, save::SavePlugin))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)
         .run();

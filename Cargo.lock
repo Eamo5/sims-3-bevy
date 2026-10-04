@@ -4878,6 +4878,8 @@ dependencies = [
  "s3bake",
  "s3formats",
  "s3pkg",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

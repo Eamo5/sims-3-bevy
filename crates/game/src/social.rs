@@ -198,7 +198,8 @@ pub fn acceptance(def: &SocialDef, rel: &Relationship, target: &Sim, target_mood
     let has = |t: Trait| target.traits.contains(&t);
     let mood = target_mood.level() / 100.0;
     let mut p = match def.cat {
-        SocialCat::Friendly | SocialCat::Funny => 0.93 + rel.friendship / 300.0 + mood * 0.08,
+        // Friendly chat is almost always welcome unless the Sim is in a foul mood or dislikes you.
+        SocialCat::Friendly | SocialCat::Funny => 0.97 + rel.friendship.min(0.0) / 150.0 + mood.min(0.0) * 0.2,
         SocialCat::Mean => 1.0,
         SocialCat::Special => 0.6 + rel.friendship / 200.0,
         SocialCat::Romantic => {

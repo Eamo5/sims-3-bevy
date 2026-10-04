@@ -289,6 +289,7 @@ fn placement(
     mut grid: Option<ResMut<NavGrid>>,
     pickup: Option<Res<PickupRequest>>,
     objects: Query<(&GameObject, &Transform)>,
+    (bought_q, mut removed): (Query<(), With<crate::save::Bought>>, ResMut<crate::save::RemovedLotObjects>),
     mut tfs: Query<&mut Transform, Without<GameObject>>,
 ) {
     if !buy.active {
@@ -309,6 +310,9 @@ fn placement(
         if let Some(req) = pickup {
             commands.remove_resource::<PickupRequest>();
             if let Ok((obj, tf)) = objects.get(req.0) {
+                if !bought_q.contains(req.0) {
+                    crate::save::note_removed(&mut removed, obj, tf);
+                }
                 let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
                 let parts = assets.object(&mut ctx, obj.objd);
                 let ghost = spawn_parts(&mut commands, &parts, *tf);
@@ -351,7 +355,9 @@ fn placement(
             if let Ok(tf) = tfs.get(ghost) {
                 let (pos, yaw) = (tf.translation, buy.yaw);
                 let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-                spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, yaw);
+                if let Some(o) = spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, yaw) {
+                    commands.entity(o.entity).insert(crate::save::Bought);
+                }
             }
         }
         commands.entity(ghost).despawn();
@@ -370,7 +376,8 @@ fn placement(
         let Ok(tf) = tfs.get(ghost) else { return };
         let (pos, yaw) = (tf.translation, buy.yaw);
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-        if spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, yaw).is_some() {
+        if let Some(o) = spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, yaw) {
+            commands.entity(o.entity).insert(crate::save::Bought);
             if !owned && let Some(h) = household.as_mut() {
                 h.funds -= price;
             }

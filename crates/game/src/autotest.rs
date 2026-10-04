@@ -7,6 +7,8 @@
 //!   --view-level <n>        floor of the house to view (PageUp / PageDown in play)
 //!   --speed <0-3>           game speed once playing
 //!   --hour <h>              start the day at this hour
+//!   --save-at <secs>        save the game after this long in play
+//!   --load <n>              load the n-th most recent save from the main menu
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
@@ -30,6 +32,8 @@ pub struct AutoArgs {
     pub view_level: Option<u8>,
     pub speed: Option<usize>,
     pub hour: Option<f64>,
+    pub save_at: Option<f32>,
+    pub load: Option<usize>,
 }
 
 impl AutoArgs {
@@ -55,6 +59,8 @@ impl AutoArgs {
                 "--view-level" => a.view_level = next.and_then(|s| s.parse().ok()),
                 "--speed" => a.speed = next.and_then(|s| s.parse().ok()),
                 "--hour" => a.hour = next.and_then(|s| s.parse().ok()),
+                "--save-at" => a.save_at = next.and_then(|s| s.parse().ok()),
+                "--load" => a.load = next.and_then(|s| s.parse().ok()),
                 "--showroom" => {
                     a.showroom = next.and_then(|s| {
                         let mut it = s.split(',').filter_map(|x| x.parse().ok());
@@ -98,6 +104,8 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_view_level.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_speed.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, auto_save.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, auto_load.run_if(in_state(AppState::MainMenu)))
             .add_systems(PreUpdate, ui_flow.after(bevy::ui::UiSystems::Focus))
             .add_systems(OnEnter(AppState::InGame), showroom);
     }
@@ -391,5 +399,27 @@ fn auto_view_level(args: Res<AutoArgs>, building: Option<ResMut<crate::building:
     if let (Some(l), Some(mut b), false) = (args.view_level, building, *done) {
         b.view_level = l.clamp(1, b.top_level);
         *done = true;
+    }
+}
+
+fn auto_save(args: Res<AutoArgs>, time: Res<Time>, mut since: Local<Option<f32>>, mut done: Local<bool>, mut w: MessageWriter<crate::save::SaveRequest>) {
+    let Some(at) = args.save_at else { return };
+    let start = *since.get_or_insert(time.elapsed_secs());
+    if !*done && time.elapsed_secs() - start >= at {
+        *done = true;
+        crate::save::request_save(&mut w);
+    }
+}
+
+fn auto_load(args: Res<AutoArgs>, worlds: Res<WorldList>, mut commands: Commands, mut next: ResMut<NextState<AppState>>, mut done: Local<bool>) {
+    let Some(n) = args.load else { return };
+    if *done {
+        return;
+    }
+    *done = true;
+    if let Some((_, g)) = crate::save::list_saves().into_iter().nth(n)
+        && crate::save::begin_load(&mut commands, &worlds, g)
+    {
+        next.set(AppState::Loading);
     }
 }

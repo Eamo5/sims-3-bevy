@@ -11,7 +11,7 @@ use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
-use rand::Rng;
+use rand::{Rng, SeedableRng};
 use rand::seq::IndexedRandom;
 use s3bake::{CasPartInfo, Key, Rig, SkinMesh};
 use s3formats::sim::*;
@@ -350,12 +350,19 @@ pub fn tone_of(sim: &Sim) -> f32 {
     ((0.85 - lum) / 0.55).clamp(0.0, 1.0)
 }
 
-pub fn prepare_sims(baked: &BakedData, cas: &CasData, members: &[Sim]) -> PreparedSims {
+/// Builds bodies for the household, the visiting neighbours (`known`, from a save, or two new
+/// ones) and a few townies.
+pub fn prepare_sims(baked: &BakedData, cas: &CasData, members: &[Sim], known: Option<&[Sim]>) -> PreparedSims {
     let mut rng = rand::rng();
     let mut neighbors = Vec::new();
-    for k in 0..2 {
-        let last = crate::sim::random_last_name(&mut rng);
-        neighbors.push(crate::sim::random_sim(&mut rng, &last, None, if k == 0 { Age::Adult } else { Age::YoungAdult }));
+    match known {
+        Some(k) => neighbors.extend(k.iter().cloned()),
+        None => {
+            for k in 0..2 {
+                let last = crate::sim::random_last_name(&mut rng);
+                neighbors.push(crate::sim::random_sim(&mut rng, &last, None, if k == 0 { Age::Adult } else { Age::YoungAdult }));
+            }
+        }
     }
     const TOWNIES: usize = 4;
     for k in 0..TOWNIES {
@@ -363,7 +370,7 @@ pub fn prepare_sims(baked: &BakedData, cas: &CasData, members: &[Sim]) -> Prepar
         neighbors.push(crate::sim::random_sim(&mut rng, &last, None, if k % 2 == 0 { Age::YoungAdult } else { Age::Adult }));
     }
     let outfits: Vec<(Sim, Outfit)> =
-        members.iter().chain(neighbors.iter()).map(|s| (s.clone(), pick_outfit(cas, s, &mut rng))).collect();
+        members.iter().chain(neighbors.iter()).map(|s| (s.clone(), pick_outfit(cas, s, &mut rand::rngs::StdRng::seed_from_u64(s.look)))).collect();
     let mut built: Vec<(Sim, Option<SimModelCpu>)> =
         crate::world::par_map(&outfits, |(s, o)| (s.clone(), build_sim_model(baked, cas, s, o, tone_of(s))));
     let mut neighbors = built.split_off(members.len());
