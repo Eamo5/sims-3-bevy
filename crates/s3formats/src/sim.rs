@@ -134,8 +134,9 @@ impl Geom {
                 match usage {
                     1 => pos = r.vec3()?,
                     2 => nrm = r.vec3()?,
+                    // As stored (top-left origin, like the textures).
                     3 if !uv_seen => {
-                        uv = [r.f32()?, 1.0 - r.f32()?];
+                        uv = [r.f32()?, r.f32()?];
                         uv_seen = true;
                     }
                     4 => bi = r.bytes(4)?.try_into().unwrap(),

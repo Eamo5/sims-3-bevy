@@ -395,8 +395,13 @@ pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progr
     .collect();
     for (k, c) in &parsed {
         let key = key_of(k);
-        let baked = meshes.get(&key).is_some_and(|m| !m.meshes.is_empty());
+        // Eyebrows are texture-only: a layer drawn onto the face.
+        let brows = c.clothing_type == CT_EYEBROW && human(c.age_gender) && c.category & CAT_HIDDEN == 0 && !c.diffuse.is_empty();
+        let baked = brows || meshes.get(&key).is_some_and(|m| !m.meshes.is_empty());
         let layer = if baked { c.diffuse.first().map(key_of) } else { None };
+        if brows && let Some(l) = layer {
+            cas_tex.push((l, true));
+        }
         if let Some(m) = meshes.get(&key).filter(|_| baked) {
             cpack.add(key, m).map_err(|e| e.to_string())?;
             for sm in &m.meshes {

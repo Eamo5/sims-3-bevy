@@ -135,6 +135,7 @@ pub struct Outfit {
     pub face: Option<CasPartInfo>,
     pub scalp: Option<CasPartInfo>,
     pub hair: Option<CasPartInfo>,
+    pub brows: Option<CasPartInfo>,
     pub body: Vec<CasPartInfo>,
 }
 
@@ -148,6 +149,13 @@ pub fn pick_outfit(cas: &CasData, sim: &Sim, rng: &mut impl Rng) -> Outfit {
     let scalp = of_type(CT_SCALP).into_iter().min_by_key(|e| e.name.len()).cloned();
     let random_hair = of_type(CT_HAIR).choose(rng).map(|e| (*e).clone());
     let hair = chosen(sim.outfit.hair, CT_HAIR).or(random_hair);
+    // Natural eyebrows (not the novelty ones).
+    let brows = of_type(CT_EYEBROW)
+        .into_iter()
+        .filter(|e| !["Hairless", "Monobrow", "Extreme"].iter().any(|n| e.name.contains(n)))
+        .collect::<Vec<_>>()
+        .choose(rng)
+        .map(|e| (*e).clone());
     let mut body = Vec::new();
     let (tops, bottoms, fulls) = (of_type(CT_TOP), of_type(CT_BOTTOM), of_type(CT_BODY));
     let use_full = rng.random_bool(0.25);
@@ -168,7 +176,7 @@ pub fn pick_outfit(cas: &CasData, sim: &Sim, rng: &mut impl Rng) -> Outfit {
         body.extend(random_top);
     }
     body.extend(chosen(sim.outfit.shoes, CT_SHOES).or(random_shoes));
-    Outfit { face, scalp, hair, body }
+    Outfit { face, scalp, hair, brows, body }
 }
 
 /// How a sim mesh is shaded.
@@ -222,13 +230,14 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
     }
     if let Some(face) = &outfit.face {
         let face_base = cas.skin_texture(age, gender, 4);
+        let face_layers: Vec<Key> = face.layer.into_iter().chain(outfit.brows.as_ref().and_then(|b| b.layer)).collect();
         tex_keys.extend(face_base);
-        tex_keys.extend(face.layer);
+        tex_keys.extend(&face_layers);
         for m in baked.cas_meshes(&face.key).map(|m| m.meshes).unwrap_or_default() {
             let mat = match m.shader {
                 SHADER_SIM_EYES => SimMat::Plain { tex: m.texture, mask: false, tint: None },
                 SHADER_SIM_EYELASHES => SimMat::Plain { tex: m.texture, mask: true, tint: None },
-                _ => SimMat::Skin { base: face_base, tint, layers: face.layer.into_iter().collect() },
+                _ => SimMat::Skin { base: face_base, tint, layers: face_layers.clone() },
             };
             if let SimMat::Plain { tex: Some(t), .. } = &mat {
                 tex_keys.push(*t);
@@ -443,6 +452,9 @@ pub fn prepare_sims(baked: &BakedData, cas: &CasData, members: &[Sim], known: Op
     }
     let outfits: Vec<(Sim, Outfit)> =
         members.iter().chain(neighbors.iter()).map(|s| (s.clone(), pick_outfit(cas, s, &mut rand::rngs::StdRng::seed_from_u64(s.look)))).collect();
+    for (s, o) in &outfits {
+        debug!("outfit {} ({:?}): body {:?} hair {:?}", s.full_name(), s.age, o.body.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), o.hair.as_ref().map(|h| &h.name));
+    }
     let mut built: Vec<(Sim, Option<SimModelCpu>)> =
         crate::world::par_map(&outfits, |(s, o)| (s.clone(), build_sim_model(baked, cas, s, o, tone_of(s))));
     let mut neighbors = built.split_off(members.len());

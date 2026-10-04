@@ -30,6 +30,8 @@ pub struct AutoArgs {
     pub action: Option<String>,
     /// `--family <name>`: play this town family.
     pub family: Option<String>,
+    /// `--select <first name>`: select this household member.
+    pub select: Option<String>,
     pub ui_flow: Option<String>,
     pub view_level: Option<u8>,
     pub speed: Option<usize>,
@@ -58,6 +60,7 @@ impl AutoArgs {
                 "--lot" => a.lot = next,
                 "--do" => a.action = next,
                 "--family" => a.family = next,
+                "--select" => a.select = next,
                 "--ui-flow" => a.ui_flow = next,
                 "--view-level" => a.view_level = next.and_then(|s| s.parse().ok()),
                 "--speed" => a.speed = next.and_then(|s| s.parse().ok()),
@@ -170,6 +173,7 @@ fn apply_cam(args: Res<AutoArgs>, time: Res<Time>, mut since: Local<Option<f32>>
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn auto_screenshot(
     args: Res<AutoArgs>,
     time: Res<Time>,
@@ -177,6 +181,9 @@ fn auto_screenshot(
     mut state: Local<u8>,
     mut commands: Commands,
     mut exit: MessageWriter<AppExit>,
+    sims: Query<(Entity, &crate::sim::Sim, &Visibility, &GlobalTransform)>,
+    children: Query<&Children>,
+    vis: Query<(&InheritedVisibility, Option<&Name>, Has<Mesh3d>)>,
 ) {
     let Some(path) = &args.screenshot else { return };
     let t = time.elapsed_secs();
@@ -184,6 +191,16 @@ fn auto_screenshot(
     match *state {
         0 if t - s > args.shot_delay => {
             info!("autotest: {:.1} fps (frame {:.2} ms)", 1.0 / time.delta_secs().max(1e-4), time.delta_secs() * 1000.0);
+            // Hidden Sims must not leave visible parts behind.
+            for (e, sim, v, tf) in &sims {
+                if *v != Visibility::Hidden {
+                    continue;
+                }
+                let leaked = children.iter_descendants(e).filter(|c| vis.get(*c).is_ok_and(|(iv, _, mesh)| mesh && iv.get())).count();
+                if leaked > 0 {
+                    warn!("autotest: hidden {} at {:?} still shows {leaked} meshes", sim.full_name(), tf.translation());
+                }
+            }
             commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path.clone()));
             *state = 1;
         }
@@ -241,18 +258,30 @@ fn showroom(
 
 /// `--portrait`: keep the camera on the selected sim at head height.
 fn portrait_cam(
+    mut commands: Commands,
     args: Res<AutoArgs>,
     sel: Query<&Transform, With<crate::sim::Selected>>,
+    members: Query<(Entity, &crate::sim::Sim, Has<crate::sim::Selected>), With<crate::sim::HouseholdMember>>,
     mut cam: Query<&mut SimsCamera>,
 ) {
+    if let Some(want) = &args.select
+        && let Some((e, _, false)) = members.iter().find(|(_, s, _)| s.first.eq_ignore_ascii_case(want))
+    {
+        for (o, _, selected) in &members {
+            if selected {
+                commands.entity(o).remove::<crate::sim::Selected>();
+            }
+        }
+        commands.entity(e).insert(crate::sim::Selected);
+    }
     if !args.portrait {
         return;
     }
     if let (Ok(t), Ok(mut c)) = (sel.single(), cam.single_mut()) {
         let fwd = t.rotation * Vec3::Z;
         c.look_at(t.translation);
-        c.height_offset = 1.25;
-        c.distance = 2.6;
+        c.height_offset = std::env::var("PORTRAIT_HEIGHT").ok().and_then(|v| v.parse().ok()).unwrap_or(1.25);
+        c.distance = std::env::var("PORTRAIT_DIST").ok().and_then(|v| v.parse().ok()).unwrap_or(2.6);
         c.pitch = 0.12;
         c.yaw = fwd.x.atan2(fwd.z) + 0.35;
     }

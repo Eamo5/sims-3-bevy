@@ -95,6 +95,62 @@ fn main() {
         }
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--cas-part") {
+        // --cas-part <name>: a baked CAS part's meshes.
+        let cas: s3bake::CasBaked = s3bake::read_value(&root.global_dir().join("cas.bin")).expect("cas.bin");
+        let pack = s3bake::PackReader::open(&root.global_dir().join("cas.pack")).expect("cas.pack");
+        let want = args[i + 1].to_ascii_lowercase();
+        for p in cas.parts.iter().filter(|p| p.name.to_ascii_lowercase().contains(&want)).take(12) {
+            println!("{} {:?} type {} ages {:x} cat {:x} baked {} layer {:?}", p.name, p.key, p.clothing_type, p.age_gender, p.category, p.baked, p.layer);
+            let m: Option<s3bake::CasPartMeshes> = pack.get(&p.key);
+            for (k, mesh) in m.map(|m| m.meshes).unwrap_or_default().iter().enumerate() {
+                let mut mn = [f32::MAX; 3];
+                let mut mx = [f32::MIN; 3];
+                for v in &mesh.positions {
+                    for a in 0..3 {
+                        mn[a] = mn[a].min(v[a]);
+                        mx[a] = mx[a].max(v[a]);
+                    }
+                }
+                let (mut u0, mut u1) = ([f32::MAX; 2], [f32::MIN; 2]);
+                for uv in &mesh.uvs {
+                    for a in 0..2 {
+                        u0[a] = u0[a].min(uv[a]);
+                        u1[a] = u1[a].max(uv[a]);
+                    }
+                }
+                // Correlation of height with v: negative means higher vertices sample nearer the
+                // texture's top.
+                let n = mesh.positions.len().max(1) as f32;
+                let my = mesh.positions.iter().map(|p| p[1]).sum::<f32>() / n;
+                let mv = mesh.uvs.iter().map(|u| u[1]).sum::<f32>() / n;
+                let cov: f32 = mesh.positions.iter().zip(&mesh.uvs).map(|(p, u)| (p[1] - my) * (u[1] - mv)).sum::<f32>() / n;
+                println!("  mesh {k}: shader {:08X} tex {:?} verts {} tris {} bounds {mn:?}..{mx:?} uv {u0:?}..{u1:?} cov(y,v) {cov:.5}", mesh.shader, mesh.texture, mesh.positions.len(), mesh.indices.len() / 3);
+            }
+        }
+        return;
+    }
+    if args.iter().any(|a| a == "--cas-stats") {
+        // Baked CAS parts per age, gender and clothing type.
+        let cas: s3bake::CasBaked = s3bake::read_value(&root.global_dir().join("cas.bin")).expect("cas.bin");
+        let ages = [(0x4, "child"), (0x8, "teen"), (0x10, "YA"), (0x20, "adult"), (0x40, "elder")];
+        let types = [(1, "hair"), (2, "scalp"), (3, "face"), (5, "body"), (6, "top"), (7, "bottom"), (8, "shoes")];
+        for (ab, an) in ages {
+            for (g, gn) in [(0x1000, "M"), (0x2000, "F")] {
+                let counts: Vec<String> = types
+                    .iter()
+                    .map(|(t, tn)| {
+                        let n = cas.parts.iter().filter(|p| p.baked && p.clothing_type == *t && p.age_gender & ab != 0 && p.age_gender & g != 0).count();
+                        format!("{tn} {n}")
+                    })
+                    .collect();
+                println!("{an:5} {gn}: {}", counts.join(", "));
+            }
+        }
+        let tones: Vec<String> = cas.tone.textures.iter().map(|(ag, t, _)| format!("{ag:x}/{t:x}")).collect();
+        println!("skin textures: {tones:?}");
+        return;
+    }
     if args.iter().any(|a| a == "--clip-sounds") {
         // Survey the sound cues of the baked animation clips and whether they resolve.
         let pkgs = s3pkg::install::open_install(&data, |_| true);
