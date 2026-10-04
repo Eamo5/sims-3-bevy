@@ -499,11 +499,21 @@ fn world_click(
                 }
             });
         } else if let Ok(obj) = objects.get(t) {
-            let options: Vec<(String, ActionKind)> = interactions_for(obj.kind)
-                .iter()
-                .enumerate()
-                .map(|(i, d)| (d.name.to_string(), ActionKind::Object { target: t, def: i }))
-                .collect();
+            let mut options: Vec<(String, ActionKind)> = Vec::new();
+            for (i, d) in interactions_for(obj.kind).iter().enumerate() {
+                if d.special == Special::FindJob {
+                    // Job listings: every career's entry-level position.
+                    for (k, c) in crate::careers::CAREERS.iter().enumerate() {
+                        let l = &c.levels[0];
+                        options.push((
+                            format!("Join {}: {} §{}/hr", c.name, l.title, l.hourly),
+                            ActionKind::JoinCareer { target: t, track: k },
+                        ));
+                    }
+                } else {
+                    options.push((d.name.to_string(), ActionKind::Object { target: t, def: i }));
+                }
+            }
             open_pie(&mut commands, &mut pie, cursor, &obj.name, actor, options);
         }
     } else if let Some((p, level)) = floor_hit(ray, &world, building.as_deref()) {
@@ -661,8 +671,14 @@ fn update_needs_panel(
     }
     if let Ok(mut t) = detail.single_mut() {
         let job_s = match (job, at_work) {
-            (Some(j), Some(_)) => format!("At work ({} {})", j.0.track, j.0.title),
-            (Some(j), None) => format!("{} — {} ({}–{})", j.0.track, j.0.title, hour_label(j.0.start), hour_label(j.0.end)),
+            (Some(j), Some(_)) => format!("At work: {}", j.describe()),
+            (Some(j), None) => format!(
+                "{} · {}–{} · performance {:+.0}",
+                j.describe(),
+                hour_label(j.info().start),
+                hour_label(j.info().end),
+                j.performance
+            ),
             _ => "Unemployed".into(),
         };
         let mut sk: Vec<String> = skills.0.iter().filter(|(_, v)| **v >= 1.0).map(|(k, v)| format!("{k} {}", *v as u32)).collect();

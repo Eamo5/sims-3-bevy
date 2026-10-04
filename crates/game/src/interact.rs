@@ -20,7 +20,7 @@ impl Plugin for InteractPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Notifications>().add_systems(
             Update,
-            (work_schedule, autonomy, run_actions, motive_warnings, pay_bills)
+            (autonomy, run_actions, motive_warnings, pay_bills)
                 .chain()
                 .run_if(in_state(PlayMode::Live)),
         );
@@ -361,6 +361,8 @@ pub enum ActionKind {
     Social { target: Entity, social: usize },
     GoHere(Vec2, u8),
     GoToWork,
+    /// Apply for a career at the computer.
+    JoinCareer { target: Entity, track: usize },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -414,31 +416,7 @@ impl Skills {
     }
 }
 
-#[derive(Clone)]
-pub struct Career {
-    pub track: &'static str,
-    pub title: &'static str,
-    pub hourly: i64,
-    pub start: f32,
-    pub end: f32,
-}
-
-const CAREERS: [Career; 6] = [
-    Career { track: "Culinary", title: "Dishwasher", hourly: 18, start: 15.0, end: 21.0 },
-    Career { track: "Business", title: "Office Assistant", hourly: 23, start: 9.0, end: 16.0 },
-    Career { track: "Law Enforcement", title: "Desk Jockey", hourly: 21, start: 9.0, end: 15.0 },
-    Career { track: "Science", title: "Test Subject", hourly: 22, start: 9.0, end: 15.0 },
-    Career { track: "Medical", title: "Orderly", hourly: 24, start: 8.0, end: 15.0 },
-    Career { track: "Music", title: "Roadie", hourly: 20, start: 11.0, end: 18.0 },
-];
-
-#[derive(Component, Clone)]
-pub struct Job(pub Career);
-
-#[derive(Component)]
-pub struct AtWork {
-    pub until: f64,
-}
+pub use crate::careers::{AtWork, Job};
 
 #[derive(Resource)]
 pub struct Household {
@@ -491,7 +469,7 @@ fn run_actions(
             &mut Skills,
             &mut Relationships,
             Option<&mut PathFollow>,
-            Option<&Job>,
+            Option<&mut Job>,
             &Floor,
         ),
         (Without<GameObject>, Without<AtWork>),
@@ -507,7 +485,7 @@ fn run_actions(
     let mut social_fx: Vec<(Entity, Entity, f32, f32, f32)> = Vec::new();
     let positions: HashMap<Entity, (Vec3, u8)> = sims.iter().map(|s| (s.0, (s.3.translation, s.11.0))).collect();
 
-    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, job, floor) in &mut sims {
+    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, mut job, floor) in &mut sims {
         let Some(action) = queue.0.front_mut() else {
             if anim.pose != Pose::Walk && anim.pose != Pose::Stand && path.is_none() {
                 anim.pose = Pose::Stand;
@@ -557,6 +535,7 @@ fn run_actions(
                         }),
                         ActionKind::GoHere(p, l) => Some((*p, *l)),
                         ActionKind::GoToWork => exit.as_ref().map(|e| (e.0, 1)),
+                        ActionKind::JoinCareer { target, .. } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
                     };
                     let from = Vec2::new(tf.translation.x, tf.translation.z);
                     match dest.and_then(|(d, l)| plan_route(&grid, upper.as_deref(), from, floor.0, d, l)) {
@@ -612,13 +591,17 @@ fn run_actions(
                             }
                             ActionKind::GoHere(..) => finished = true,
                             ActionKind::GoToWork => {
-                                if let Some(j) = job {
-                                    let day_start = (clock.minutes / 1440.0).floor() * 1440.0;
-                                    let until = day_start + j.0.end as f64 * 60.0;
-                                    commands.entity(me).insert((AtWork { until }, Visibility::Hidden));
-                                    notes.push(format!("{} left for work as a {}.", sim.first, j.0.title));
+                                if let Some(j) = job.as_deref_mut() {
+                                    crate::careers::leave_for_work(&mut commands, &clock, me, sim, j, &mut notes);
                                 }
                                 finished = true;
+                            }
+                            ActionKind::JoinCareer { target, .. } => {
+                                if let Ok((_, otf, _, _)) = objects.get(*target) {
+                                    tf.rotation = otf.rotation * Quat::from_rotation_y(std::f32::consts::PI);
+                                }
+                                anim.pose = Pose::Use;
+                                commands.entity(me).insert(crate::anim::ActionClip("a2o_computer_chess_type_loop_counter_x"));
                             }
                         }
                     } else if path.is_none() {
@@ -664,20 +647,7 @@ fn run_actions(
                                         stand_up_at = Some(obj.use_point(otf));
                                     }
                                     match d.special {
-                                        Special::FindJob => {
-                                            let c = CAREERS[rand::rng().random_range(0..CAREERS.len())].clone();
-                                            life.write(LifeEvent::new(me, LifeEventKind::NewJob));
-                                            notes.push(format!(
-                                                "{} joined the {} career as a {} (§{}/hr, {}–{}).",
-                                                sim.first,
-                                                c.track,
-                                                c.title,
-                                                c.hourly,
-                                                hour_label(c.start),
-                                                hour_label(c.end)
-                                            ));
-                                            commands.entity(me).insert(Job(c));
-                                        }
+                                        Special::FindJob => {}
                                         Special::QuitJob => {
                                             if job.is_some() {
                                                 commands.entity(me).remove::<Job>();
@@ -716,6 +686,24 @@ fn run_actions(
                                     life.write(LifeEvent::new(me, LifeEventKind::Socialized { other: *target, social: s.name }));
                                     life.write(LifeEvent::new(*target, LifeEventKind::Socialized { other: me, social: s.name }));
                                 }
+                            }
+                        }
+                        ActionKind::JoinCareer { track, .. } => {
+                            if elapsed >= 15.0 {
+                                finished = true;
+                                let j = Job::new(*track);
+                                let info = j.info();
+                                notes.push(format!(
+                                    "{} joined the {} career as a {} (§{}/hr, {}–{}).",
+                                    sim.first,
+                                    j.career().name,
+                                    info.title,
+                                    info.hourly,
+                                    hour_label(info.start),
+                                    hour_label(info.end)
+                                ));
+                                commands.entity(me).insert(j);
+                                life.write(LifeEvent::new(me, LifeEventKind::NewJob));
                             }
                         }
                         _ => finished = true,
@@ -788,7 +776,8 @@ fn autonomy(
         // Don't start long activities right before work.
         if let Some(j) = job {
             let h = clock.hour_f();
-            if clock.is_workday() && h > j.0.start - 1.2 && h < j.0.start {
+            let start = j.info().start;
+            if j.works_on(clock.weekday()) && h > start - 1.2 && h < start {
                 continue;
             }
         }
@@ -845,50 +834,6 @@ fn autonomy(
             && score > 2.0
         {
             queue.0.push_back(action);
-        }
-    }
-}
-
-/// Careers: head to work an hour before the shift, come home with pay.
-fn work_schedule(
-    mut commands: Commands,
-    clock: Res<GameClock>,
-    exit: Option<Res<LotExit>>,
-    world: Res<CurrentWorld>,
-    mut household: Option<ResMut<Household>>,
-    mut notes: ResMut<Notifications>,
-    mut workers: Query<(Entity, &Sim, &Job, &mut ActionQueue, Option<&AtWork>, &mut Transform, &mut Motives)>,
-) {
-    let h = clock.hour_f();
-    for (e, sim, job, mut queue, at_work, mut tf, mut motives) in &mut workers {
-        if let Some(w) = at_work {
-            // Being at work is tiring but social.
-            if clock.minutes >= w.until {
-                let hours = (job.0.end - job.0.start) as i64;
-                let pay = job.0.hourly * hours;
-                if let Some(hh) = household.as_mut() {
-                    hh.funds += pay;
-                }
-                notes.push(format!("{} is home from work and earned §{pay}.", sim.first));
-                motives.0[HUNGER] = (motives.0[HUNGER] - 35.0).max(-90.0);
-                motives.0[ENERGY] = (motives.0[ENERGY] - 30.0).max(-80.0);
-                motives.0[FUN] = (motives.0[FUN] - 25.0).max(-80.0);
-                motives.0[SOCIAL] = (motives.0[SOCIAL] + 40.0).min(100.0);
-                motives.0[HYGIENE] = (motives.0[HYGIENE] - 20.0).max(-80.0);
-                if let Some(x) = &exit {
-                    tf.translation = Vec3::new(x.0.x, world.data.heightmap.sample(x.0.x, x.0.y), x.0.y);
-                }
-                commands.entity(e).remove::<AtWork>().insert(Visibility::Inherited);
-            }
-            continue;
-        }
-        let going = queue.0.iter().any(|a| matches!(a.kind, ActionKind::GoToWork));
-        if clock.is_workday() && h >= job.0.start - 0.75 && h < job.0.start + 1.0 && !going {
-            // Only once per day: skip if the shift already started more than an hour ago.
-            for a in queue.0.iter_mut() {
-                a.cancel = true;
-            }
-            queue.0.push_back(Action::new("Go to Work", ActionKind::GoToWork, false));
         }
     }
 }

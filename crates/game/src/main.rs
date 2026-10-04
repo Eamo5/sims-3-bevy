@@ -4,6 +4,7 @@ mod baked;
 mod building;
 mod buy;
 mod camera;
+mod careers;
 mod clock;
 mod data;
 mod home;
@@ -80,8 +81,8 @@ fn main() {
             building::BuildingPlugin,
             music::MusicPlugin,
             town::TownPlugin,
-            life::LifePlugin,
         ))
+        .add_plugins((life::LifePlugin, careers::CareersPlugin))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)
         .run();

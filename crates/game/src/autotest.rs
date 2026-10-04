@@ -244,6 +244,17 @@ fn auto_action(
         return;
     }
     let Ok(mut q) = sel.single_mut() else { return };
+    // "Join <career>": apply at the computer.
+    if let Some(career) = name.strip_prefix("Join ") {
+        let track = crate::careers::CAREERS.iter().position(|c| c.name.eq_ignore_ascii_case(career));
+        let computer = objects.iter().find(|(_, o)| matches!(o.kind, crate::interact::ObjectKind::Computer)).map(|(e, _)| e);
+        if let (Some(track), Some(target)) = (track, computer) {
+            q.0.clear();
+            q.push_player(crate::interact::Action::new(name.clone(), crate::interact::ActionKind::JoinCareer { target, track }, false));
+        }
+        *done = true;
+        return;
+    }
     for (e, o) in &objects {
         if let Some(i) = crate::interact::interactions_for(o.kind).iter().position(|d| d.name.eq_ignore_ascii_case(name)) {
             q.0.clear();
