@@ -35,7 +35,11 @@ installation is unreachable.
   foundations, stairs and the house's own furniture; nearby lots are shown in full detail with
   the game's roofs, distant ones as the game's pre-rendered imposters.
 - **Sims**: Create-a-Sim from real CAS parts, skin tones and animation clips; needs, moods,
-  skills, careers, relationships, autonomy, social interactions.
+  skills, careers, relationships, autonomy, social interactions; children, teens, adults and
+  elders who grow up and grow old (birthdays, new traits, passing away).
+- **Town families**: every world's premade households (the Goths, Landgraabs, Altos, …) with
+  their names, bios, family portraits, traits, careers, skills, marriages and homes — play one
+  of them, or meet them around town.
 - **Play**: choose a furnished house (with the game's lot pictures) or an empty lot, buy
   mode, multi-storey navigation by stairs, day/night with lamps and street lights.
 - **Sound**: the game's own audio, converted once (EALayer3 rewrapped as MP3, EA-XAS decoded to

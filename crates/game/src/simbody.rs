@@ -316,6 +316,10 @@ fn greyscale_hair(dds: &[u8]) -> Option<Image> {
     Some(out)
 }
 
+/// A top-level piece of a Sim's body (root joint or mesh), replaced when the body is rebuilt.
+#[derive(Component)]
+pub struct SimModelPart;
+
 /// The skeleton of a spawned sim: one entity per rig bone.
 #[derive(Component)]
 pub struct Skeleton {
@@ -362,6 +366,9 @@ pub fn spawn_sim_model(commands: &mut Commands, parent: Entity, model: SimModelC
     }
     for (i, b) in rig.bones.iter().enumerate() {
         let p = if b.parent >= 0 && (b.parent as usize) < joints.len() { joints[b.parent as usize] } else { parent };
+        if p == parent {
+            commands.entity(joints[i]).insert(SimModelPart);
+        }
         commands.entity(p).add_child(joints[i]);
     }
     let inverse: Vec<Mat4> = world.iter().map(|m| m.inverse()).collect();
@@ -404,6 +411,7 @@ pub fn spawn_sim_model(commands: &mut Commands, parent: Entity, model: SimModelC
                 commands.spawn((mesh, MeshMaterial3d(m), skinned, Transform::default())).id()
             }
         };
+        commands.entity(e).insert(SimModelPart);
         commands.entity(parent).add_child(e);
     }
     commands.entity(parent).insert(Skeleton { rig, joints, bind });

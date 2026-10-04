@@ -66,6 +66,9 @@ pub struct SavedSim {
     pub outfit: Vec<Option<(u32, u32, u64)>>,
     #[serde(default)]
     pub rewards: Vec<String>,
+    /// Days into the current life stage, and how long old age lasts.
+    #[serde(default)]
+    pub aging: Option<(f32, f32)>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -248,6 +251,7 @@ fn save_game(
             Has<OffLot>,
             Has<Visitor>,
             Option<&crate::wishes::Wishes>,
+            Option<&crate::aging::Aging>,
         ),
         Without<crate::town::Townie>,
     >,
@@ -260,7 +264,7 @@ fn save_game(
     let Some(hh) = household else { return };
     let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).collect();
     let mut saved = Vec::new();
-    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes) in &sims {
+    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, aging) in &sims {
         saved.push(SavedSim {
             id: sim.id,
             look: sim.look,
@@ -293,6 +297,7 @@ fn save_game(
             lifetime_happiness: wishes.map_or(0, |w| w.points),
             outfit: vec![sim.outfit.hair, sim.outfit.top, sim.outfit.bottom, sim.outfit.full, sim.outfit.shoes],
             rewards: wishes.map(|w| w.rewards.iter().map(|r| r.name().to_string()).collect()).unwrap_or_default(),
+            aging: aging.map(|a| (a.days, a.elder_span)),
         });
     }
     let game = SaveGame {
@@ -391,6 +396,9 @@ fn apply_loaded_game(
             }
         }
         let mut ec = commands.entity(e);
+        if let Some((days, elder_span)) = s.aging {
+            ec.insert(crate::aging::Aging { days, elder_span });
+        }
         match &s.job {
             Some(j) => {
                 if let Some(track) = crate::careers::CAREERS.iter().position(|c| c.name == j.track) {

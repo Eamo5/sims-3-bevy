@@ -407,7 +407,6 @@ fn stings(
             K::Married => "sting_wedding_cake",
             K::BrokeUp => "sting_sm_bad_event",
             K::MovedIn => "sting_good_event",
-            K::Birthday => "sting_agetrans_c_t",
             K::Bought { .. } => "ui_object_plop",
             _ => continue,
         };
