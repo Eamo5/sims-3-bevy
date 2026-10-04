@@ -97,6 +97,12 @@ fn main() {
         }
     }
     println!("music tracks: {}", s3bake::bake_music(&root, &data));
+    if !s3bake::clips_ready(&root) {
+        match s3bake::bake_clips(&root, &pkgs, &progress) {
+            Ok(n) => println!("animations: {n}"),
+            Err(e) => eprintln!("animations failed: {e}"),
+        }
+    }
     let available = s3pkg::install::discover_worlds(&data);
     for path in available {
         let name = path.file_stem().unwrap().to_string_lossy().into_owned();

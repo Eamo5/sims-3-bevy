@@ -4,12 +4,13 @@
 
 pub mod bake;
 pub mod building;
+pub mod clips;
 pub mod trees;
 pub mod ddsw;
 pub mod pack;
 pub mod types;
 
-pub use bake::{BakeRoot, CLIP_NAMES, bake_global, bake_music, bake_world};
+pub use bake::{BakeRoot, bake_clips, bake_global, bake_music, bake_world, clips_ready};
 pub use pack::{PackReader, read_value};
 pub use types::*;
 

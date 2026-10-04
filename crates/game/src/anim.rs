@@ -24,6 +24,8 @@ impl Plugin for AnimPlugin {
 #[derive(Resource, Default)]
 pub struct ClipLibrary {
     cache: HashMap<String, Option<Arc<Clip>>>,
+    /// Clip names matching a (prefix, side, child) request.
+    variants: HashMap<(&'static str, Option<char>, bool), Vec<String>>,
 }
 
 impl ClipLibrary {
@@ -31,24 +33,71 @@ impl ClipLibrary {
         if let Some(c) = self.cache.get(name) {
             return c.clone();
         }
-        let clip = data.0.clips.get(name).cloned();
+        let clip = data.0.clip(name);
         if clip.is_none() {
             warn!("animation clip {name} not found");
         }
         self.cache.insert(name.to_string(), clip.clone());
         clip
     }
+
+    /// Baked clips starting with `prefix` for the Sim's side (`_x` / `_y`), preferring the
+    /// child version (`c_` / `c2o_`) for children.
+    pub fn variants(&mut self, data: &Baked, prefix: &'static str, side: Option<char>, child: bool) -> &[String] {
+        self.variants.entry((prefix, side, child)).or_insert_with(|| {
+            let matches = |p: &str| -> Vec<String> {
+                data.0
+                    .clip_names
+                    .iter()
+                    .filter(|n| n.starts_with(p) && side.is_none_or(|s| n.ends_with(&format!("_{s}"))))
+                    .cloned()
+                    .collect()
+            };
+            if child {
+                let kid = if let Some(r) = prefix.strip_prefix("a2o_") {
+                    Some(format!("c2o_{r}"))
+                } else {
+                    prefix.strip_prefix("a_").map(|r| format!("c_{r}"))
+                };
+                if let Some(k) = kid {
+                    let v = matches(&k);
+                    if !v.is_empty() {
+                        return v;
+                    }
+                }
+            }
+            matches(prefix)
+        })
+    }
 }
 
-/// An explicit clip requested by the current interaction (e.g. showering, playing chess).
-#[derive(Component, Clone)]
-pub struct ActionClip(pub &'static str);
+/// The animation of the current interaction: an optional start clip played once, then loop
+/// clips (random variants of the given name prefixes). `side` picks the Sim's half of a
+/// two-Sim social (`_x` for the one starting it, `_y` for the other).
+#[derive(Component, Clone, PartialEq, Debug)]
+pub struct ActionClip {
+    pub start: Option<&'static str>,
+    pub loops: &'static [&'static str],
+    pub side: Option<char>,
+}
+
+impl ActionClip {
+    pub const fn new(start: Option<&'static str>, loops: &'static [&'static str]) -> Self {
+        Self { start, loops, side: None }
+    }
+    pub const fn social(loops: &'static [&'static str], side: char) -> Self {
+        Self { start: None, loops, side: Some(side) }
+    }
+}
 
 #[derive(Component, Default)]
 pub struct ClipPlayer {
     pub name: String,
     pub clip: Option<Arc<Clip>>,
     pub time: f32,
+    /// The script being played, and whether its start clip is done.
+    script: Option<ActionClip>,
+    started: bool,
     /// Pose before the last clip change, faded out over a short blend.
     from: Vec<Transform>,
     blend: f32,
@@ -83,24 +132,41 @@ fn sample_track_quat(keys: &[(f32, [f32; 4])], t: f32) -> Option<Quat> {
     Some(q(keys.last()?.1))
 }
 
-/// Default clip for a pose when the interaction doesn't name one.
-fn pose_clip(pose: Pose, female: bool) -> &'static str {
+/// Default animation for a pose when the interaction doesn't name one.
+fn pose_script(pose: Pose, female: bool, child: bool) -> ActionClip {
+    const STAND: &[&str] = &["a_idle_neutral_loop_"];
+    const TALK: &[&str] = &["a_idle_friendly_loop_"];
+    const SIT: &[&str] = &["a2o_chairLiving_sit_breathe_loop_x", "a2o_chairLiving_sit_crossedLeg_front_loop_x"];
+    const LIE: &[&str] = &["a2o_bed_sleep_back"];
+    const DANCE: &[&str] = &["a_dance_beg_", "a_dance_med_"];
+    const RUN: &[&str] = &["a2o_treadmill_jog_loop"];
     match pose {
-        Pose::Walk => {
-            if female {
-                "a_female_walk"
-            } else {
-                "a_male_walk"
-            }
-        }
-        Pose::Sit => "a2o_chairLiving_sit_breathe_loop_x",
-        Pose::Lie => "a2o_bed_sleep_back_loop_x",
-        Pose::Talk => "a_idle_friendly_loop_1",
-        Pose::Dance => "a_dance_beg_posAHeadBob_x",
-        Pose::Exercise => "a2o_treadmill_jog_loop_x",
-        Pose::Use => "a_idle_neutral_loop_2",
-        Pose::Stand => "a_idle_neutral_loop_1",
+        Pose::Walk => ActionClip::new(None, if child { &["c_walk"] } else if female { &["a_female_walk"] } else { &["a_male_walk"] }),
+        Pose::Sit => ActionClip::new(None, SIT),
+        Pose::Lie => ActionClip::new(None, LIE),
+        Pose::Talk => ActionClip::new(None, TALK),
+        Pose::Dance => ActionClip::new(None, DANCE),
+        Pose::Exercise => ActionClip::new(None, RUN),
+        Pose::Use | Pose::Stand => ActionClip::new(None, STAND),
     }
+}
+
+/// Picks the next clip of a script: the start clip once, then a random loop variant.
+fn next_clip(lib: &mut ClipLibrary, data: &Baked, script: &ActionClip, child: bool, started: bool) -> Option<String> {
+    if !started && let Some(s) = script.start {
+        if let Some(n) = lib.variants(data, s, script.side, child).first() {
+            return Some(n.clone());
+        }
+    }
+    let mut all: Vec<String> = Vec::new();
+    for p in script.loops {
+        all.extend(lib.variants(data, p, script.side, child).iter().cloned());
+    }
+    if all.is_empty() {
+        return None;
+    }
+    use rand::seq::IndexedRandom;
+    all.choose(&mut rand::rng()).cloned()
 }
 
 #[allow(clippy::type_complexity)]
@@ -114,17 +180,33 @@ fn drive_skeletons(
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed];
     for (sim, anim, skel, action, mut player) in &mut sims {
-        let want = match action {
-            Some(a) if anim.pose != Pose::Walk => a.0,
-            _ => pose_clip(anim.pose, sim.female),
+        let child = sim.age == crate::sim::Age::Child;
+        let script = match action {
+            Some(a) if anim.pose != Pose::Walk => a.clone(),
+            _ => pose_script(anim.pose, sim.female, child),
         };
-        if player.name != want {
-            // Snapshot the current pose for a cross-fade.
-            player.from = skel.joints.iter().map(|j| joints.get(*j).copied().unwrap_or_default()).collect();
-            player.blend = 1.0;
-            player.name = want.to_string();
-            player.clip = lib.get(&data, want);
-            player.time = 0.0;
+        let ended = player.clip.as_ref().is_some_and(|c| player.time >= c.duration.max(0.1));
+        let changed = player.script.as_ref() != Some(&script);
+        // Walks keep looping one clip; everything else moves on to a new variant when a clip ends.
+        let cycles = !matches!(anim.pose, Pose::Walk);
+        if changed || (ended && cycles) {
+            if changed {
+                player.started = false;
+            }
+            // The start clip plays once; after that, loop variants.
+            let play_start = !player.started && script.start.is_some();
+            player.started = true;
+            if let Some(name) = next_clip(&mut lib, &data, &script, child, !play_start) {
+                if name != player.name || changed {
+                    // Snapshot the current pose for a cross-fade.
+                    player.from = skel.joints.iter().map(|j| joints.get(*j).copied().unwrap_or_default()).collect();
+                    player.blend = 1.0;
+                }
+                player.clip = lib.get(&data, &name);
+                player.name = name;
+                player.time = 0.0;
+            }
+            player.script = Some(script);
         }
         player.time += dt;
         player.blend = (player.blend - dt / 0.25).max(0.0);

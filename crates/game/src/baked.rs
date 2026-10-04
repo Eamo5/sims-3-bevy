@@ -15,7 +15,9 @@ pub struct BakedData {
     pub world_models: Option<PackReader>,
     pub cas: CasBaked,
     pub cas_pack: PackReader,
-    pub clips: HashMap<String, Arc<Clip>>,
+    pub clips: Option<PackReader>,
+    /// Names of the baked clips (for picking variants).
+    pub clip_names: Vec<String>,
 }
 
 impl BakedData {
@@ -27,9 +29,9 @@ impl BakedData {
         let world_models = world.and_then(|w| PackReader::open(&root.world_dir(w).join("models.pack")).ok());
         let cas: CasBaked = s3bake::read_value(&g.join("cas.bin")).map_err(|e| format!("cas: {e}"))?;
         let cas_pack = PackReader::open(&g.join("cas.pack")).map_err(|e| format!("cas pack: {e}"))?;
-        let clips: Vec<(String, Clip)> = s3bake::read_value(&g.join("clips.bin")).unwrap_or_default();
-        let clips = clips.into_iter().map(|(n, c)| (n, Arc::new(c))).collect();
-        Ok(Self { root, catalog, catalog_index, models, world_models, cas, cas_pack, clips })
+        let clips = PackReader::open(&g.join("clips.pack")).ok();
+        let clip_names: Vec<String> = s3bake::read_value(&g.join("clip_names.bin")).unwrap_or_default();
+        Ok(Self { root, catalog, catalog_index, models, world_models, cas, cas_pack, clips, clip_names })
     }
 
     pub fn model(&self, k: &Key) -> Option<BakedModel> {
@@ -42,6 +44,13 @@ impl BakedData {
 
     pub fn catalog_entry(&self, objd: &Key) -> Option<&CatalogEntry> {
         self.catalog_index.get(objd).map(|&i| &self.catalog[i])
+    }
+
+    /// Decodes a baked animation clip.
+    pub fn clip(&self, name: &str) -> Option<Arc<Clip>> {
+        let bytes: Vec<u8> = self.clips.as_ref()?.get(&s3bake::clips::clip_key(name))?;
+        let raw = lz4_flex::decompress_size_prepended(&bytes).ok()?;
+        postcard::from_bytes::<Clip>(&raw).ok().map(Arc::new)
     }
 
     pub fn cas_meshes(&self, k: &Key) -> Option<CasPartMeshes> {

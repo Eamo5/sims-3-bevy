@@ -361,6 +361,25 @@ fn main() {
         eprintln!("{n} clips");
         return;
     }
+    if args[1] == "clipsizes" {
+        // clipsizes <root> <names file>: raw vs decoded vs compressed sizes of named clips.
+        let root = std::path::Path::new(&args[2]);
+        let set = s3pkg::install::open_install(root, |_| true);
+        let names = std::fs::read_to_string(&args[3]).unwrap();
+        let (mut raw, mut dec, mut lz, mut n) = (0usize, 0usize, 0usize, 0usize);
+        for name in names.lines().map(str::trim).filter(|l| !l.is_empty()) {
+            let inst = s3pkg::fnv64(name) & 0x7FFF_FFFF_FFFF_FFFF;
+            let Some(d) = set.read_ti(types::CLIP, inst) else { continue };
+            let Ok(c) = s3formats::sim::Clip::parse(&d) else { continue };
+            let p = postcard::to_stdvec(&c).unwrap();
+            raw += d.len();
+            dec += p.len();
+            lz += lz4_flex::compress_prepend_size(&p).len();
+            n += 1;
+        }
+        println!("{n} clips: raw {} KB, decoded {} KB, lz4 {} KB", raw / 1024, dec / 1024, lz / 1024);
+        return;
+    }
     if args[1] == "objn" {
         let w = Package::open(&args[2]).unwrap();
         let all = s3formats::objn::load_world_objects(&w);

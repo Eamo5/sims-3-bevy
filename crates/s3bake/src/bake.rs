@@ -18,32 +18,6 @@ pub type Progress<'a> = &'a (dyn Fn(&str) + Sync);
 /// Largest texture edge kept for objects (keeps the cache compact and loads fast).
 pub const OBJECT_TEX_MAX: u32 = 512;
 
-/// Animation clips the game uses (baked up front).
-pub const CLIP_NAMES: &[&str] = &[
-    "a_female_walk",
-    "a_male_walk",
-    "a_idle_neutral_loop_1",
-    "a_idle_neutral_loop_2",
-    "a_idle_neutral_loop_3",
-    "a_idle_friendly_loop_1",
-    "a_idle_friendly_loop_2",
-    "a_dance_beg_posAHeadBob_x",
-    "a2o_chairLiving_sit_breathe_loop_x",
-    "a2o_sitTemplate_sit_loopBreathe",
-    "a2o_bed_sleep_back_loop_x",
-    "a2o_treadmill_jog_loop_x",
-    "a2o_fridge_openDoor_x",
-    "a2o_stove_clean_loop_x",
-    "a2o_shower_takeShower_loop1_x",
-    "a2o_sink_brushTeeth_Loop1_x",
-    "a2o_computer_game_loop1_counter_x",
-    "a2o_computer_chess_type_loop_counter_x",
-    "a2o_book_readBook_standing_loopRead_x",
-    "a2o_mirror_full_checkSelfOut_loop1_x",
-    "a2o_holographicEasel_loopMed_1_x",
-    "a2o_guitar_play_high_loop1_x",
-    "a2o_chessTable_loop1_x",
-];
 
 pub struct BakeRoot {
     pub dir: PathBuf,
@@ -317,6 +291,41 @@ pub fn bake_music(root: &BakeRoot, install_root: &Path) -> usize {
     n
 }
 
+/// Bakes the selected animation clips into `clips.pack` (lz4-compressed, keyed by name hash)
+/// with their names in `clip_names.bin`.
+pub fn bake_clips(root: &BakeRoot, pkgs: &PackageSet, progress: Progress) -> Result<usize, String> {
+    progress("Converting: animations…");
+    let gdir = root.global_dir();
+    std::fs::create_dir_all(&gdir).map_err(|e| e.to_string())?;
+    let keys: Vec<ResourceKey> = pkgs.keys_of_type(types::CLIP).copied().collect();
+    let found: Vec<Option<(String, Vec<u8>)>> = par_map(&keys, |k| {
+        let d = pkgs.read(k)?;
+        let name = clip_name(&d)?;
+        if !crate::clips::wanted(&name) {
+            return None;
+        }
+        let c = Clip::parse(&d).ok()?;
+        let bytes = postcard::to_stdvec(&c).ok()?;
+        Some((name, lz4_flex::compress_prepend_size(&bytes)))
+    });
+    let mut clips: Vec<(String, Vec<u8>)> = found.into_iter().flatten().collect();
+    clips.sort_by(|a, b| a.0.cmp(&b.0));
+    clips.dedup_by(|a, b| a.0.eq_ignore_ascii_case(&b.0));
+    let mut w = PackWriter::create(&gdir.join("clips.pack")).map_err(|e| e.to_string())?;
+    for (name, bytes) in &clips {
+        w.add(crate::clips::clip_key(name), bytes).map_err(|e| e.to_string())?;
+    }
+    w.finish().map_err(|e| e.to_string())?;
+    let names: Vec<String> = clips.into_iter().map(|c| c.0).collect();
+    write_value(&gdir.join("clip_names.bin"), &names).map_err(|e| e.to_string())?;
+    progress(&format!("Converting: {} animations", names.len()));
+    Ok(names.len())
+}
+
+pub fn clips_ready(root: &BakeRoot) -> bool {
+    root.global_dir().join("clips.pack").exists() && root.global_dir().join("clip_names.bin").exists()
+}
+
 pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progress: Progress) -> Result<GlobalManifest, String> {
     let gdir = root.global_dir();
     std::fs::create_dir_all(&gdir).map_err(|e| e.to_string())?;
@@ -429,16 +438,7 @@ pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progr
     let cas = CasBaked { parts: infos, tone, adult_rig, child_rig };
     write_value(&gdir.join("cas.bin"), &cas).map_err(|e| e.to_string())?;
 
-    progress("Converting: animations…");
-    let clips: Vec<(String, Clip)> = CLIP_NAMES
-        .iter()
-        .filter_map(|n| {
-            let inst = s3pkg::fnv64(n) & 0x7FFF_FFFF_FFFF_FFFF;
-            let c = Clip::parse(&pkgs.read_ti(types::CLIP, inst)?).ok()?;
-            Some((n.to_string(), c))
-        })
-        .collect();
-    write_value(&gdir.join("clips.bin"), &clips).map_err(|e| e.to_string())?;
+    let n_clips = bake_clips(root, pkgs, progress)?;
 
     let manifest = GlobalManifest {
         version: BAKE_VERSION,
@@ -447,7 +447,7 @@ pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progr
         models: n_models,
         textures: n_tex + n_cas_tex,
         cas_parts: meshes.len(),
-        clips: clips.len(),
+        clips: n_clips,
     };
     std::fs::write(gdir.join("manifest.json"), serde_json::to_vec_pretty(&manifest).unwrap()).map_err(|e| e.to_string())?;
     Ok(manifest)

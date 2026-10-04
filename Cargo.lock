@@ -4738,6 +4738,8 @@ version = "0.1.0"
 name = "s3tool"
 version = "0.1.0"
 dependencies = [
+ "lz4_flex",
+ "postcard",
  "s3formats",
  "s3pkg",
 ]
@@ -4874,6 +4876,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "lz4_flex",
+ "postcard",
  "rand 0.9.5",
  "s3bake",
  "s3formats",

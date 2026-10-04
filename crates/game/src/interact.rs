@@ -281,27 +281,59 @@ static TREADMILL: [InteractionDef; 1] = [InteractionDef {
 static CHESS: [InteractionDef; 1] =
     [InteractionDef { skill: Some("Logic"), ..def("Play Chess", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 40.0], Pose::Use) }];
 
-/// The animation clip played while performing an interaction.
-pub fn interaction_clip(name: &str) -> Option<&'static str> {
+/// The animation played while performing an interaction: start clip, then loop variants.
+pub fn interaction_clip(name: &str) -> Option<crate::anim::ActionClip> {
+    use crate::anim::ActionClip as A;
     Some(match name {
-        "Have Quick Meal" | "Grab a Snack" | "Microwave Dinner" => "a2o_fridge_openDoor_x",
-        "Cook Dinner" => "a2o_stove_clean_loop_x",
-        "Use Toilet" | "Sit" => "a2o_sitTemplate_sit_loopBreathe",
-        "Take Shower" => "a2o_shower_takeShower_loop1_x",
-        "Wash Hands" => "a2o_sink_brushTeeth_Loop1_x",
-        "Watch TV" | "Watch Cooking Channel" => "a_idle_neutral_loop_3",
-        "Play Computer Games" => "a2o_computer_game_loop1_counter_x",
-        "Write Novel" | "Find a Job" | "Quit Job" => "a2o_computer_chess_type_loop_counter_x",
-        "Dance" => "a_dance_beg_posAHeadBob_x",
-        "Read a Book" => "a2o_book_readBook_standing_loopRead_x",
-        "Practice Speech" => "a2o_mirror_full_checkSelfOut_loop1_x",
-        "Paint" => "a2o_holographicEasel_loopMed_1_x",
-        "Play Guitar" => "a2o_guitar_play_high_loop1_x",
-        "Work Out" => "a2o_treadmill_jog_loop_x",
-        "Play Chess" => "a2o_chessTable_loop1_x",
-        "Sleep" | "Nap" | "Relax" | "Take Bath" => "a2o_bed_sleep_back_loop_x",
+        "Have Quick Meal" | "Microwave Dinner" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_eat_stand_fork_neat", "a2o_eat_stand_hand_neat"]),
+        "Grab a Snack" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_eat_stand_hand_neat"]),
+        "Cook Dinner" => A::new(
+            Some("a2o_stove_fryingPan_start_fromNeutral_x"),
+            &["a2o_stove_fryingPan_idle_x", "a2o_stove_fryingPan_spatula_flip_x", "a2o_stove_fryingPan_spatula_poke_x"],
+        ),
+        "Use Toilet" => A::new(Some("a2o_toilet_useStanding_start_x"), &["a2o_toilet_useStanding_loop_x"]),
+        "Take Shower" => A::new(Some("a2o_shower_takeShower_getIn_x"), &["a2o_shower_takeShower_loop"]),
+        "Take Bath" => A::new(None, &["a2o_bathtub_relax_loop"]),
+        "Wash Hands" => A::new(Some("a2o_sink_washhands_start_x"), &["a2o_sink_washhands_scrubHands_x", "a2o_sink_washhands_rinseHands_x"]),
+        "Sleep" => A::new(Some("a2o_bed_getIn_made_x"), &["a2o_bed_sleep_back"]),
+        "Nap" => A::new(Some("a2o_bed_nap_start_x"), &["a2o_bed_nap_loop_breathe_x"]),
+        "Relax" => A::new(Some("a2o_bed_relax_getin_start_x"), &["a2o_bed_relax_loop"]),
+        "Sit" => A::new(None, &["a2o_chairLiving_sit_breathe_loop_x", "a2o_chairLiving_sit_crossedLeg_front_loop_x"]),
+        "Watch TV" | "Watch Cooking Channel" => A::new(None, &["a2o_tv_watch_idle1_standing", "a2o_tv_watch_idle2_standing", "a2o_tv_watch_idle3_standing", "a2o_tv_watch_active_standing"]),
+        "Play Computer Games" => A::new(None, &["a2o_computer_game_loop1_x", "a2o_computer_game_loop2_x"]),
+        "Write Novel" | "Find a Job" | "Quit Job" => A::new(None, &["a2o_computer_chess_type_loop_x"]),
+        "Dance" => A::new(None, &["a_dance_beg_", "a_dance_med_"]),
+        "Read a Book" => A::new(Some("a2o_book_readBook_standing_inInventory_start_x"), &["a2o_book_readBook_standing_loop"]),
+        "Practice Speech" => A::new(None, &["a2o_mirror_full_checkSelfOut_loop"]),
+        "Paint" => A::new(Some("a2o_painting_start_x"), &["a2o_painting_loopMed", "a2o_painting_loopLarge", "a2o_painting_consider"]),
+        "Play Guitar" => A::new(None, &["a2o_guitar_play_med_loop", "a2o_guitar_play_high_loop", "a2o_guitar_play_low_loop"]),
+        "Work Out" => A::new(Some("a2o_treadmill_jog_start_x"), &["a2o_treadmill_jog_loop"]),
+        "Play Chess" => A::new(None, &["a2o_chessTable_loop", "a2o_chessTable_move"]),
         _ => return None,
     })
+}
+
+/// Both sides of a social's animation.
+pub fn social_clips(name: &str) -> &'static [&'static str] {
+    match name {
+        "Tell Joke" | "Do Funny Impression" => &["a2a_soc_neutral_tellJoke_accept"],
+        "Compliment" => &["a2a_soc_Neutral_Compliment_Friendly"],
+        "Compliment Appearance" => &["a2a_soc_Neutral_Compliment_Amorous"],
+        "Hug" => &["a2a_soc_friendly_hug_accept", "a2a_soc_Neutral_FriendlyHug_Friendly_Neutral"],
+        "High Five" => &["a2a_soc_neutral_highFive_friendly_neutral"],
+        "Tickle" => &["a2a_soc_neutral_probe_tickle"],
+        "Flirt" => &["a2a_soc_Neutral_Flirt_Neutral_Neutral", "a2a_soc_Neutral_Flirt_Amorous_Amorous"],
+        "Hold Hands" => &["a2a_soc_Amorous_HoldHands_Affectionate_Amorous"],
+        "Kiss" => &["a2a_soc_Amorous_ShyKiss_Amorous_Amorous", "a2a_soc_amorous_kissRomantic_romantic_amorous"],
+        "Make Out" => &["a2a_soc_amorous_kissMakeOut_accept_loop"],
+        "Propose Marriage" => &["a2a_soc_Amorous_ProposeMarriage_Amorous_Amorous"],
+        "Get Married" => &["a2a_soc_Amorous_Wedding_Amorous_Amorous"],
+        "Insult" | "Argue" => &["a2a_soc_Bad_Mock_Insulting_Bad", "a2a_soc_Bad_Accuse_Insulting_Bad"],
+        "Slap" => &["a2a_soc_Bad_Slap_Steamed_Bad"],
+        "Break Up" => &["a2a_soc_Neutral_BreakUp_Neutral_Neutral"],
+        "Dance Together" => &["a2a_danceClub_dance_medSkill_loop1"],
+        _ => &["a2a_soc_Neutral_Gossip_Friendly_Neutral", "a2a_soc_Neutral_RambleAimlessly_talk"],
+    }
 }
 
 pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
@@ -429,6 +461,10 @@ impl Notifications {
     }
 }
 
+/// The other side of a social: animating with `.0`.
+#[derive(Component)]
+pub struct SocialPartner(pub Entity);
+
 /// A Sim joining the household (moving in or marrying in).
 #[derive(Component)]
 pub struct JoinHousehold {
@@ -543,6 +579,8 @@ fn run_actions(
     let ground = |level: u8, x: f32, z: f32| crate::nav::floor_height(&world.data, building.as_deref(), level, Vec3::new(x, 0.0, z));
     // Social effects to apply to partners after the main pass: (target, actor, social, fun, rel, pose talk)
     let mut social_fx: Vec<(Entity, Entity, f32, f32, f32, f32)> = Vec::new();
+    // Social partners whose animation should end: (target, actor).
+    let mut partners_done: Vec<(Entity, Entity)> = Vec::new();
     let positions: HashMap<Entity, (Vec3, u8)> = sims.iter().map(|s| (s.0, (s.3.translation, s.11.0))).collect();
     let partnered: HashMap<Entity, bool> = sims.iter().map(|q| (q.0, q.8.partner().is_some())).collect();
     let who: HashMap<Entity, (Sim, crate::life::Mood, bool, bool)> = people
@@ -641,7 +679,7 @@ fn run_actions(
                                     anim.pose = d.pose;
                                     *decay = DecayScale(d.decay);
                                     if let Some(c) = interaction_clip(d.name) {
-                                        commands.entity(me).insert(crate::anim::ActionClip(c));
+                                        commands.entity(me).insert(c);
                                     }
                                     let face = otf.rotation * Quat::from_rotation_y(std::f32::consts::PI);
                                     if d.on_object {
@@ -662,6 +700,9 @@ fn run_actions(
                                 }
                                 anim.pose = Pose::Talk;
                                 let s = &SOCIALS[*social];
+                                let clips = social_clips(s.name);
+                                commands.entity(me).insert(crate::anim::ActionClip::social(clips, 'x'));
+                                commands.entity(*target).insert((crate::anim::ActionClip::social(clips, 'y'), SocialPartner(me)));
                                 if let Some((tsim, tmood, _, tpartner)) = who.get(target) {
                                     let rel = rels.get(*target);
                                     let other_partner = *tpartner && rel.status == RelStatus::None;
@@ -701,7 +742,7 @@ fn run_actions(
                                     tf.rotation = otf.rotation * Quat::from_rotation_y(std::f32::consts::PI);
                                 }
                                 anim.pose = Pose::Use;
-                                commands.entity(me).insert(crate::anim::ActionClip("a2o_computer_chess_type_loop_counter_x"));
+                                commands.entity(me).insert(crate::anim::ActionClip::new(None, &["a2o_computer_chess_type_loop_x"]));
                             }
                         }
                     } else if path.is_none() {
@@ -870,6 +911,9 @@ fn run_actions(
 
         if finished {
             commands.entity(me).remove::<crate::anim::ActionClip>();
+            if let Some(Action { kind: ActionKind::Social { target, .. }, .. }) = queue.0.front() {
+                partners_done.push((*target, me));
+            }
             queue.0.pop_front();
             *decay = DecayScale::default();
             anim.pose = Pose::Stand;
@@ -881,6 +925,13 @@ fn run_actions(
         }
     }
 
+    for (target, actor) in partners_done {
+        commands.entity(target).queue_silenced(move |mut e: EntityWorldMut| {
+            if e.get::<SocialPartner>().is_some_and(|p| p.0 == actor) {
+                e.remove::<(SocialPartner, crate::anim::ActionClip)>();
+            }
+        });
+    }
     for (a, b, status, kissed) in status_fx {
         for (x, y) in [(a, b), (b, a)] {
             if let Ok(mut q) = sims.get_mut(x) {
