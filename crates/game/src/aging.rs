@@ -175,6 +175,10 @@ fn daily_aging(
         let Some(age) = next_age(sim.age) else { continue };
         sim.age = age;
         aging.days = 0.0;
+        // School is over for young adults.
+        if age == Age::YoungAdult {
+            commands.entity(e).remove::<crate::rabbitholes::SchoolGrades>();
+        }
         // A new trait slot opens for teens and young adults.
         let slots = crate::life::trait_slots(age);
         let mut gained = None;

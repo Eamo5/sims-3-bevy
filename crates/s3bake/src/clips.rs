@@ -122,6 +122,16 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "b2o_crib_",
     // Grown-ups looking after them.
     "a2b_crib_putIn",
+    // More things to do at home.
+    "a2o_dresser_use_",
+    "c2o_dresser_use_",
+    "a2o_telescope_",
+    "a2o_swingset_",
+    "c2o_swingset_",
+    "a2o_hotTub_",
+    "c2o_dollhouse_play_",
+    "c2o_JungleGym",
+    "a2o_foosballTable_play",
     "a2b_crib_pullOut",
     "a2b_babyBottle_feed",
     "a2b_changeDiaper",

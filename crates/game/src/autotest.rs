@@ -28,6 +28,8 @@ pub struct AutoArgs {
     pub lot: Option<String>,
     pub portrait: bool,
     pub action: Option<String>,
+    /// `--place <script class part>`: put that catalog object beside the selected Sim.
+    pub place: Option<String>,
     /// `--family <name>`: play this town family.
     pub family: Option<String>,
     /// `--select <first name>`: select this household member.
@@ -59,6 +61,7 @@ impl AutoArgs {
                 }
                 "--lot" => a.lot = next,
                 "--do" => a.action = next,
+                "--place" => a.place = next,
                 "--family" => a.family = next,
                 "--select" => a.select = next,
                 "--ui-flow" => a.ui_flow = next,
@@ -108,6 +111,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, auto_place.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_view_level.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_speed.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_save.run_if(in_state(crate::PlayMode::Live)))
@@ -289,6 +293,35 @@ fn portrait_cam(
         c.pitch = std::env::var("PORTRAIT_PITCH").ok().and_then(|v| v.parse().ok()).unwrap_or(0.12);
         c.yaw = fwd.x.atan2(fwd.z) + std::env::var("PORTRAIT_YAW").ok().and_then(|v| v.parse().ok()).unwrap_or(0.35);
     }
+}
+
+/// `--place <kind>`: the cheapest catalog object of that kind (`Telescope`, `HotTub`…), set down
+/// 2 m in front of the selected Sim.
+#[allow(clippy::too_many_arguments)]
+fn auto_place(
+    args: Res<AutoArgs>,
+    mut done: Local<bool>,
+    sel: Query<&Transform, With<crate::sim::Selected>>,
+    (catalog, data): (Res<crate::loading::Catalog>, Res<crate::baked::Baked>),
+    mut assets: ResMut<crate::objects::ObjectAssets>,
+    (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    mut commands: Commands,
+) {
+    let Some(want) = &args.place else { return };
+    if *done {
+        return;
+    }
+    let Ok(tf) = sel.single() else { return };
+    *done = true;
+    let want = want.to_ascii_lowercase();
+    let Some(e) = catalog.entries.iter().filter(|e| e.price > 0 && format!("{:?}", e.kind).to_ascii_lowercase() == want).min_by_key(|e| e.price) else {
+        warn!("--place {want}: nothing in the catalog");
+        return;
+    };
+    let pos = tf.translation + tf.rotation * Vec3::new(0.0, 0.0, 2.0);
+    let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+    crate::home::spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, e.key, pos, 0.0);
+    info!("placed {} for the test", e.name);
 }
 
 /// `--do <interaction>`: the selected sim performs this interaction on the first object offering it.

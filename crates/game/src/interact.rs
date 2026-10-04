@@ -58,6 +58,13 @@ pub enum ObjectKind {
     Xylophone,
     PegBox,
     PottyChair,
+    Dresser,
+    Telescope,
+    SwingSet,
+    HotTub,
+    DollHouse,
+    JungleGym,
+    Foosball,
     Table,
     Light,
     Plant,
@@ -82,6 +89,20 @@ impl ObjectKind {
             Self::PegBox
         } else if has("pottychair") {
             Self::PottyChair
+        } else if has("shelvesstorage") && (has("dresser") || has("wardrobe") || has("armoire")) {
+            Self::Dresser
+        } else if has("telescope") {
+            Self::Telescope
+        } else if has("swingset") {
+            Self::SwingSet
+        } else if has("hottub") {
+            Self::HotTub
+        } else if has("toys.dollhouse") {
+            Self::DollHouse
+        } else if has("junglegym") {
+            Self::JungleGym
+        } else if has("foosball") {
+            Self::Foosball
         } else if has("fridge") {
             Self::Fridge
         } else if has("microwave") {
@@ -142,7 +163,12 @@ impl ObjectKind {
             Self::Toilet | Self::Shower | Self::Bathtub | Self::Sink => "Plumbing",
             Self::Sofa | Self::Chair => "Seating",
             Self::Tv | Self::Computer | Self::Stereo => "Electronics",
-            Self::Bookshelf | Self::Mirror | Self::Easel | Self::Guitar | Self::Treadmill | Self::Chess => "Hobbies",
+            Self::Bookshelf | Self::Mirror | Self::Easel | Self::Guitar | Self::Treadmill | Self::Chess | Self::Telescope | Self::Foosball => {
+                "Hobbies"
+            }
+            Self::SwingSet | Self::JungleGym | Self::DollHouse => "Kids",
+            Self::HotTub => "Plumbing",
+            Self::Dresser => "Surfaces",
             Self::Table => "Surfaces",
             Self::Light => "Lighting",
             Self::Plant | Self::Decoration => "Decor",
@@ -197,6 +223,8 @@ pub enum Special {
     QuitJob,
     SellPainting,
     Cook,
+    /// Put on a different outfit.
+    ChangeClothes,
 }
 
 pub struct InteractionDef {
@@ -281,12 +309,24 @@ static CRIB: [InteractionDef; 1] = [InteractionDef {
     until_full: Some(ENERGY),
     decay: SLEEP_DECAY,
     on_object: true,
-    ..def("Nap in Crib", 180.0, [0.0, 0.0, 0.0, 140.0, 0.0, 0.0], Pose::Lie)
+    ..def("Nap in Crib", 180.0, [0.0, 0.0, 140.0, 0.0, 0.0, 0.0], Pose::Lie)
 }];
-static TOYBOX: [InteractionDef; 1] = [def("Play with Toys", 40.0, [0.0, 0.0, 0.0, -4.0, 30.0, 140.0], Pose::Use)];
-static XYLOPHONE: [InteractionDef; 1] = [def("Play Xylophone", 40.0, [0.0, 0.0, 0.0, -4.0, 20.0, 130.0], Pose::Use)];
-static PEGBOX: [InteractionDef; 1] = [def("Play with Peg Box", 40.0, [0.0, 0.0, 0.0, -4.0, 10.0, 120.0], Pose::Use)];
-static POTTY: [InteractionDef; 1] = [InteractionDef { until_full: Some(BLADDER), ..def("Use Potty", 10.0, [0.0, 600.0, -20.0, 0.0, 0.0, 0.0], Pose::Sit) }];
+static TOYBOX: [InteractionDef; 1] = [def("Play with Toys", 40.0, [0.0, 0.0, -4.0, 30.0, 0.0, 140.0], Pose::Use)];
+static XYLOPHONE: [InteractionDef; 1] = [def("Play Xylophone", 40.0, [0.0, 0.0, -4.0, 20.0, 0.0, 130.0], Pose::Use)];
+static PEGBOX: [InteractionDef; 1] = [def("Play with Peg Box", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 120.0], Pose::Use)];
+static POTTY: [InteractionDef; 1] = [InteractionDef { until_full: Some(BLADDER), ..def("Use Potty", 10.0, [0.0, 600.0, 0.0, 0.0, -20.0, 0.0], Pose::Sit) }];
+static DRESSER: [InteractionDef; 1] =
+    [InteractionDef { autonomous: false, special: Special::ChangeClothes, ..def("Change Clothes", 4.0, N, Pose::Use) }];
+static TELESCOPE: [InteractionDef; 1] =
+    [InteractionDef { skill: Some("Logic"), ..def("Stargaze", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 50.0], Pose::Use) }];
+static SWINGSET: [InteractionDef; 1] = [def("Swing", 30.0, [0.0, 0.0, -6.0, 0.0, -4.0, 75.0], Pose::Use)];
+static HOTTUB: [InteractionDef; 1] = [InteractionDef {
+    on_object: true,
+    ..def("Relax in Hot Tub", 60.0, [0.0, 0.0, 6.0, 10.0, 25.0, 50.0], Pose::Sit)
+}];
+static DOLLHOUSE: [InteractionDef; 1] = [def("Play with Dollhouse", 45.0, [0.0, 0.0, -3.0, 8.0, 0.0, 85.0], Pose::Use)];
+static JUNGLEGYM: [InteractionDef; 1] = [def("Play on Jungle Gym", 40.0, [0.0, 0.0, -8.0, 0.0, -8.0, 95.0], Pose::Use)];
+static FOOSBALL: [InteractionDef; 1] = [def("Play Foosball", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 65.0], Pose::Use)];
 static STEREO: [InteractionDef; 1] = [def("Dance", 45.0, [0.0, 0.0, -6.0, 0.0, -6.0, 70.0], Pose::Dance)];
 static BOOKSHELF: [InteractionDef; 1] =
     [InteractionDef { skill: Some("Logic"), ..def("Read a Book", 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Stand) }];
@@ -339,6 +379,13 @@ pub fn interaction_clip(name: &str) -> Option<crate::anim::ActionClip> {
         "Work Out" => A::new(Some("a2o_treadmill_jog_start_x"), &["a2o_treadmill_jog_loop"]),
         "Play Chess" => A::new(None, &["a2o_chessTable_loop", "a2o_chessTable_move"]),
         "Nap in Crib" => A::new(Some("p2o_crib_sleep_start_y"), &["p2o_crib_sleep_loop_y"]),
+        "Change Clothes" => A::new(Some("a2o_dresser_use_open"), &["a2o_dresser_use_close"]),
+        "Stargaze" => A::new(Some("a2o_telescope_start"), &["a2o_telescope_look_loop", "a2o_telescope_look_breathe", "a2o_telescope_react_wonderment"]),
+        "Swing" => A::new(Some("a2o_swingset_getIn"), &["a2o_swingset_swing"]),
+        "Relax in Hot Tub" => A::new(Some("a2o_hotTub_getIn"), &["a2o_hotTub_idles_relaxing_loop", "a2o_hotTub_idles_playingToe", "a2o_hotTub_splash"]),
+        "Play with Dollhouse" => A::new(Some("c2o_dollhouse_play_start"), &["c2o_dollhouse_play_loop"]),
+        "Play on Jungle Gym" => A::new(Some("c2o_JungleGymTower_climbUp"), &["c2o_JungleGymTower_loop", "c2o_JungleGymTower_slideDown"]),
+        "Play Foosball" => A::new(None, &["a2o_foosballTable_play"]),
         "Play with Toys" => A::new(Some("p2o_toybox_playIn_start"), &["p2o_toybox_playIn_breathe", "p2o_toybox_playIn_playWithToy", "p2o_toybox_playIn_peekOut"]),
         "Play Xylophone" => A::new(Some("p2o_toyXylophone_play_start"), &["p2o_toyXylophone_play_loop"]),
         "Play with Peg Box" => A::new(Some("p2o_toyPegBox_play_start"), &["p2o_toyPegBox_play_loopBreathe", "p2o_toyPegBox_play_loopLook", "p2o_toyPegBox_play_insertPeg"]),
@@ -397,8 +444,8 @@ impl ObjectKind {
         match age {
             Age::Baby => false,
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair),
-            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair),
-            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair),
+            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub),
+            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::DollHouse | K::JungleGym),
         }
     }
 }
@@ -429,6 +476,13 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Xylophone => &XYLOPHONE,
         ObjectKind::PegBox => &PEGBOX,
         ObjectKind::PottyChair => &POTTY,
+        ObjectKind::Dresser => &DRESSER,
+        ObjectKind::Telescope => &TELESCOPE,
+        ObjectKind::SwingSet => &SWINGSET,
+        ObjectKind::HotTub => &HOTTUB,
+        ObjectKind::DollHouse => &DOLLHOUSE,
+        ObjectKind::JungleGym => &JUNGLEGYM,
+        ObjectKind::Foosball => &FOOSBALL,
         _ => &[],
     }
 }
@@ -890,6 +944,18 @@ fn run_actions(
                                                 h.funds += value;
                                             }
                                             notes.push(format!("{} finished a painting and sold it for §{value}.", sim.first));
+                                        }
+                                        Special::ChangeClothes => {
+                                            // A different outfit from the wardrobe (the Sim's chosen
+                                            // hairstyle stays).
+                                            commands.entity(me).queue_silenced(|mut e: EntityWorldMut| {
+                                                if let Some(mut s) = e.get_mut::<Sim>() {
+                                                    s.look = rand::random();
+                                                    let hair = s.outfit.hair;
+                                                    s.outfit = OutfitChoice { hair, ..default() };
+                                                }
+                                                e.insert(crate::aging::NeedsNewBody);
+                                            });
                                         }
                                         Special::Cook | Special::None => {}
                                     }

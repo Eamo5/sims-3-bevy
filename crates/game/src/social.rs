@@ -175,12 +175,12 @@ pub static SOCIALS: [SocialDef; 31] = [
     SocialDef { min_friendship: 40.0, effect: SocialEffect::MoveIn, ..sd("Ask to Move In", Special, 10.0, 100.0, 10.0, 5.0, 0.0) },
     SocialDef { effect: SocialEffect::AskToLeave, ..sd("Say Goodbye", Special, 4.0, 40.0, 0.0, 1.0, 0.0) },
     SocialDef { min_romance: 60.0, effect: SocialEffect::TryForBaby, ..sd("Try for Baby", Romantic, 30.0, 200.0, 120.0, 6.0, 15.0) },
-    // Hunger, bladder, hygiene, energy, social, fun.
-    SocialDef { autonomous: true, care: [500.0, 0.0, 0.0, 0.0, 60.0, 0.0], ..sd("Feed", Care, 15.0, 40.0, 10.0, 5.0, 0.0) },
-    SocialDef { autonomous: true, care: [0.0, 700.0, 400.0, 0.0, 30.0, 0.0], ..sd("Change Diaper", Care, 10.0, 30.0, -10.0, 4.0, 0.0) },
-    SocialDef { autonomous: true, care: [0.0, 0.0, 0.0, 0.0, 300.0, 200.0], ..sd("Play With", Care, 20.0, 120.0, 120.0, 8.0, 0.0) },
-    SocialDef { care: [0.0, 0.0, 0.0, 0.0, 250.0, 120.0], ..sd("Read to", Care, 30.0, 80.0, 60.0, 8.0, 0.0) },
-    SocialDef { effect: SocialEffect::PutToBed, care: [0.0, 0.0, 0.0, 0.0, 60.0, 0.0], ..sd("Put to Bed", Care, 6.0, 40.0, 0.0, 3.0, 0.0) },
+    // Hunger, bladder, energy, social, hygiene, fun (per hour, for the little one).
+    SocialDef { autonomous: true, care: [500.0, 0.0, 0.0, 60.0, 0.0, 0.0], ..sd("Feed", Care, 15.0, 40.0, 10.0, 5.0, 0.0) },
+    SocialDef { autonomous: true, care: [0.0, 700.0, 0.0, 30.0, 400.0, 0.0], ..sd("Change Diaper", Care, 10.0, 30.0, -10.0, 4.0, 0.0) },
+    SocialDef { autonomous: true, care: [0.0, 0.0, 0.0, 300.0, 0.0, 200.0], ..sd("Play With", Care, 20.0, 120.0, 120.0, 8.0, 0.0) },
+    SocialDef { care: [0.0, 0.0, 0.0, 250.0, 0.0, 120.0], ..sd("Read to", Care, 30.0, 80.0, 60.0, 8.0, 0.0) },
+    SocialDef { effect: SocialEffect::PutToBed, care: [0.0, 0.0, 0.0, 60.0, 0.0, 0.0], ..sd("Put to Bed", Care, 6.0, 40.0, 0.0, 3.0, 0.0) },
 ];
 
 pub fn social_index(name: &str) -> Option<usize> {
