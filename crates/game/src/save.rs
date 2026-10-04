@@ -413,9 +413,9 @@ fn apply_loaded_game(
         }
         match &s.job {
             Some(j) => {
-                if let Some(track) = crate::careers::CAREERS.iter().position(|c| c.name == j.track) {
+                if let Some(track) = crate::careers::careers().iter().position(|c| c.name == j.track) {
                     let mut job = crate::careers::Job::new(track);
-                    job.level = j.level.min(9);
+                    job.level = j.level.min(crate::careers::careers()[track].levels.len() - 1);
                     job.performance = j.performance;
                     ec.insert(job);
                 }

@@ -56,6 +56,9 @@ pub enum PlayMode {
 }
 
 fn main() {
+    if let Some(g) = s3bake::load_gamedata(&s3bake::default_root()) {
+        careers::install_tracks(&g);
+    }
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {

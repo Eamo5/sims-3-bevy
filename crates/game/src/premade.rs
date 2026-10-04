@@ -11,7 +11,7 @@ use s3bake::{HouseholdBaked, PremadesBaked};
 use s3formats::premade::{self as pm, PremadeSim};
 
 use crate::PlayMode;
-use crate::careers::{CAREERS, Job};
+use crate::careers::{Job, careers};
 use crate::interact::{Household, Skills};
 use crate::life::Trait;
 use crate::sim::{Age, HouseholdMember, OutfitChoice, SKINS, Sim};
@@ -54,7 +54,7 @@ pub fn trait_of(name: &str) -> Option<Trait> {
 /// Our career track for the game's career class (`LawEnforcement`, `Political`, …).
 pub fn career_of(class: &str) -> Option<usize> {
     let want: String = class.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_ascii_lowercase();
-    CAREERS.iter().position(|c| {
+    careers().iter().position(|c| {
         let n: String = c.name.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_ascii_lowercase();
         n == want || want.starts_with(&n)
     })
@@ -150,7 +150,7 @@ fn apply_premade(
             && let Some(track) = career_of(class)
         {
             let mut job = Job::new(track);
-            job.level = ((*level).max(1) as usize - 1).min(CAREERS[track].levels.len() - 1);
+            job.level = ((*level).max(1) as usize - 1).min(careers()[track].levels.len() - 1);
             commands.entity(e).insert(job);
         }
         let spouse = p.spouse.or(p.partner);

@@ -185,6 +185,12 @@ fn main() {
         for s in &g.skills {
             println!("skill {} = {:?} [{} / {} / {}] max {}: {}", s.hex, s.name, s.icon, s.wish_icon, s.object_icon, s.max_level, s.desc);
         }
+        for c in &g.careers {
+            println!("career {} = {:?} [{}] part-time {}: {}", c.hex, c.name, c.icon, c.part_time, c.desc);
+            for l in &c.levels {
+                println!("   {} {:10} {:30} / {:30} §{}/h {}:00 +{}h days {:07b} skills {:?}", l.level, l.branch, l.title, l.title_female, l.hourly, l.start, l.hours, l.days, l.skills);
+            }
+        }
         return;
     }
     if args.iter().any(|a| a == "--clip-sounds") {

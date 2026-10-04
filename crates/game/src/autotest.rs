@@ -409,7 +409,7 @@ fn auto_action(
     }
     // "Join <career>": apply at the computer.
     if let Some(career) = name.strip_prefix("Join ") {
-        let track = crate::careers::CAREERS.iter().position(|c| c.name.eq_ignore_ascii_case(career));
+        let track = crate::careers::careers().iter().position(|c| c.name.eq_ignore_ascii_case(career));
         let computer = objects.iter().find(|(_, o)| matches!(o.kind, crate::interact::ObjectKind::Computer)).map(|(e, _)| e);
         if let (Some(track), Some(target)) = (track, computer) {
             q.0.clear();

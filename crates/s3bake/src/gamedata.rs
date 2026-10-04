@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 3;
+pub const GAMEDATA_VERSION: u32 = 4;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -55,12 +55,41 @@ pub struct SkillInfo {
     pub max_level: u32,
 }
 
+/// One level of a career (a row of the career's own table).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct CareerLevelInfo {
+    pub level: u32,
+    /// "Base" until the career branches, then the branch's name.
+    pub branch: String,
+    pub title: String,
+    pub title_female: String,
+    /// Simoleons per hour.
+    pub hourly: f32,
+    pub start: f32,
+    pub hours: f32,
+    /// Workdays: bit 0 = Monday.
+    pub days: u8,
+    /// Skills that count towards performance at this level.
+    pub skills: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct CareerInfo {
+    pub hex: String,
+    pub name: String,
+    pub desc: String,
+    pub icon: String,
+    pub part_time: bool,
+    pub levels: Vec<CareerLevelInfo>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct GameDataBaked {
     pub version: u32,
     pub buffs: Vec<BuffInfo>,
     pub traits: Vec<TraitInfo>,
     pub skills: Vec<SkillInfo>,
+    pub careers: Vec<CareerInfo>,
 }
 
 impl GameDataBaked {
@@ -223,6 +252,72 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         }
     }
 
+    // Careers: the base game's full-time careers and part-time jobs, each with its own table
+    // of levels (and branches).
+    if let Some(careers) = xml("Careers") {
+        let day_bit = |d: &str| match d.trim() {
+            "M" => 1u8,
+            "T" => 2,
+            "W" => 4,
+            "R" => 8,
+            "F" => 16,
+            "S" => 32,
+            "U" => 64,
+            _ => 0,
+        };
+        for f in records(&careers, "CareerList") {
+            let name_key = get(&f, "CareerName");
+            let table = get(&f, "TableName");
+            let category = get(&f, "Category");
+            if name_key.is_empty() || table.is_empty() || f.get("ProductVersion").is_some_and(|s| s != "BaseGame") {
+                continue;
+            }
+            if category != "FullTime" && category != "PartTime" {
+                continue;
+            }
+            let mut levels = Vec::new();
+            let mut last_skill: Vec<String> = Vec::new();
+            for r in records(&careers, &table) {
+                let level = num(&r, "Level") as u32;
+                if level == 0 {
+                    continue;
+                }
+                let title_key = get(&r, "Title");
+                let skills: Vec<String> = (1..=4)
+                    .filter(|i| r.get(&format!("Metric{i}")).is_some_and(|m| m == "SkillX"))
+                    .filter_map(|i| r.get(&format!("Args{i}")).cloned())
+                    .collect();
+                // (Rows that don't name the skill keep the previous level's.)
+                if !skills.is_empty() {
+                    last_skill = skills;
+                }
+                let start = num(&r, "StartTime");
+                levels.push(CareerLevelInfo {
+                    level,
+                    branch: r.get("BranchName").cloned().unwrap_or_else(|| "Base".into()),
+                    title: text(&format!("Careers/{table}"), &title_key),
+                    title_female: text(&format!("Careers/{table}"), &format!("{title_key}_Female")),
+                    hourly: num(&r, "BasePay"),
+                    start,
+                    hours: num(&r, "DayLength"),
+                    days: get(&r, "DaysToWork").split(',').map(day_bit).fold(0, |a, b| a | b),
+                    skills: last_skill.clone(),
+                });
+            }
+            if levels.is_empty() {
+                continue;
+            }
+            out.careers.push(CareerInfo {
+                name: text("Careers/CareerList", &name_key),
+                desc: text("Careers/CareerList", &get(&f, "CareerDescription")),
+                icon: get(&f, "DreamsAndPromisesIcon"),
+                part_time: category == "PartTime",
+                hex: name_key,
+                levels,
+            });
+        }
+    }
+
     // Icons: everything these tables name, plus interface pieces used directly.
     progress("Converting: interface icons…");
     let mut wanted: BTreeSet<String> = BTreeSet::new();
@@ -235,6 +330,9 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     }
     for s in &out.skills {
         wanted.extend([s.icon.clone(), s.wish_icon.clone(), s.object_icon.clone()]);
+    }
+    for c in &out.careers {
+        wanted.insert(c.icon.clone());
     }
     wanted.extend(EXTRA_ICONS.iter().map(|s| s.to_string()));
     wanted.remove("");

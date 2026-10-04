@@ -53,6 +53,9 @@ installation is unreachable.
   shoe, interface clicks, stings for promotions, weddings and other moments, birds by day
   and insects at night, music for the menus, Create-a-Sim and buy mode, and the radio
   stations on stereos.
+- **Careers** from the game's own career tables: all eleven base-game careers (Professional
+  Sports included) with every level's title, pay, hours and workdays, and the part-time jobs
+  (bookstore, grocery, spa, mausoleum) for teens.
 - **Interface**: the game's own icons and words — moodlets (name, description, time left),
   traits (Create-a-Sim and the Sim's panel) and wishes — read from the game's tuning tables
   (`GameplayData.package`) and string tables, with tooltips on hover.

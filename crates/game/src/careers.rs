@@ -1,6 +1,8 @@
-//! Careers: the base game's tracks, each ten levels with their own titles, pay and hours.
-//! Sims head off with the carpool before their shift, come home paid, and their performance
-//! (mood, the career's skill and personality) earns promotions — or demotions.
+//! Careers: the base game's tracks from the game's own career tables (titles, pay, hours and
+//! workdays per level, part-time jobs for teens), with a built-in table as a fallback until
+//! those are converted. Sims head off with the carpool before their shift, come home paid,
+//! and their performance (mood, the career's skill and personality) earns promotions — or
+//! demotions.
 
 use bevy::prelude::*;
 
@@ -25,24 +27,107 @@ pub struct CareerLevel {
     pub hourly: i64,
     pub start: f32,
     pub end: f32,
+    /// Workdays: bit 0 = Monday.
+    pub days: u8,
 }
 
 pub struct CareerTrack {
     pub name: &'static str,
     /// The skill that improves performance.
     pub skill: &'static str,
-    /// Workdays: bit 0 = Monday.
-    pub days: u8,
-    pub levels: [CareerLevel; 10],
+    /// The game's career icon.
+    pub icon: &'static str,
+    /// A teen's after-school job.
+    pub part_time: bool,
+    pub levels: Vec<CareerLevel>,
+}
+
+static TRACKS: std::sync::OnceLock<Vec<CareerTrack>> = std::sync::OnceLock::new();
+
+/// The career tracks: the game's own once converted, else the built-in table.
+pub fn careers() -> &'static [CareerTrack] {
+    TRACKS.get_or_init(|| BUILTIN.iter().map(BuiltinTrack::track).collect())
+}
+
+/// Uses the game's career tables (from `s3bake::gamedata`) for this session.
+pub fn install_tracks(data: &s3bake::GameDataBaked) {
+    let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
+    let tracks: Vec<CareerTrack> = data
+        .careers
+        .iter()
+        .filter(|c| !c.name.is_empty())
+        .map(|c| {
+            // One row per level: the base path, then the first branch the career offers.
+            let mut levels: Vec<CareerLevel> = Vec::new();
+            let mut branch: Option<&str> = None;
+            for l in &c.levels {
+                if l.level as usize != levels.len() + 1 {
+                    continue;
+                }
+                if l.branch != "Base" {
+                    match branch {
+                        Some(b) if b != l.branch => continue,
+                        _ => branch = Some(&l.branch),
+                    }
+                }
+                let start = l.start;
+                levels.push(CareerLevel {
+                    title: leak(if l.title.is_empty() { format!("Level {}", l.level) } else { l.title.clone() }),
+                    hourly: l.hourly.round() as i64,
+                    start,
+                    end: (start + l.hours) % 24.0,
+                    days: l.days,
+                });
+            }
+            let skill = c.levels.iter().find_map(|l| l.skills.first().cloned()).unwrap_or_else(|| default_skill(&c.hex).to_string());
+            CareerTrack { name: leak(c.name.clone()), skill: leak(skill), icon: leak(c.icon.clone()), part_time: c.part_time, levels }
+        })
+        .filter(|t| !t.levels.is_empty())
+        .collect();
+    if !tracks.is_empty() {
+        let _ = TRACKS.set(tracks);
+    }
+}
+
+/// The skill a career rewards when its table doesn't say.
+fn default_skill(hex: &str) -> &'static str {
+    match hex {
+        "Culinary" => "Cooking",
+        "Music" => "Guitar",
+        "Political" | "Business" => "Charisma",
+        "Journalism" => "Writing",
+        "ProfessionalSports" | "Military" | "Criminal" => "Athletic",
+        "Science" => "Gardening",
+        _ => "Logic",
+    }
+}
+
+struct BuiltinTrack {
+    name: &'static str,
+    skill: &'static str,
+    days: u8,
+    levels: [(&'static str, i64, f32, f32); 10],
+}
+
+impl BuiltinTrack {
+    fn track(&self) -> CareerTrack {
+        CareerTrack {
+            name: self.name,
+            skill: self.skill,
+            icon: "",
+            part_time: false,
+            levels: self.levels.iter().map(|&(title, hourly, start, end)| CareerLevel { title, hourly, start, end, days: self.days }).collect(),
+        }
+    }
 }
 
 const WEEKDAYS: u8 = 0b0011111;
-const fn lv(title: &'static str, hourly: i64, start: f32, end: f32) -> CareerLevel {
-    CareerLevel { title, hourly, start, end }
+const fn lv(title: &'static str, hourly: i64, start: f32, end: f32) -> (&'static str, i64, f32, f32) {
+    (title, hourly, start, end)
 }
 
-pub static CAREERS: [CareerTrack; 10] = [
-    CareerTrack {
+static BUILTIN: [BuiltinTrack; 10] = [
+    BuiltinTrack {
         name: "Business",
         skill: "Charisma",
         days: WEEKDAYS,
@@ -59,7 +144,7 @@ pub static CAREERS: [CareerTrack; 10] = [
             lv("Chairman of the Board", 210, 10.0, 15.0),
         ],
     },
-    CareerTrack {
+    BuiltinTrack {
         name: "Culinary",
         skill: "Cooking",
         days: 0b1111100,
@@ -76,7 +161,7 @@ pub static CAREERS: [CareerTrack; 10] = [
             lv("Culinary Legend", 180, 13.0, 18.0),
         ],
     },
-    CareerTrack {
+    BuiltinTrack {
         name: "Criminal",
         skill: "Athletic",
         days: 0b0111011,
@@ -93,7 +178,7 @@ pub static CAREERS: [CareerTrack; 10] = [
             lv("Criminal Mastermind", 194, 22.0, 2.0),
         ],
     },
-    CareerTrack {
+    BuiltinTrack {
         name: "Journalism",
         skill: "Writing",
         days: WEEKDAYS,
@@ -110,7 +195,7 @@ pub static CAREERS: [CareerTrack; 10] = [
             lv("Media Mogul", 172, 10.0, 15.0),
         ],
     },
-    CareerTrack {
+    BuiltinTrack {
         name: "Law Enforcement",
         skill: "Logic",
         days: WEEKDAYS,
@@ -127,7 +212,7 @@ pub static CAREERS: [CareerTrack; 10] = [
             lv("Superintendent", 192, 10.0, 16.0),
         ],
     },
-    CareerTrack {
+    BuiltinTrack {
         name: "Medical",
         skill: "Logic",
         days: WEEKDAYS,
@@ -144,7 +229,7 @@ pub static CAREERS: [CareerTrack; 10] = [
             lv("Chief of Staff", 204, 9.0, 16.0),
         ],
     },
-    CareerTrack {
+    BuiltinTrack {
         name: "Military",
         skill: "Athletic",
         days: WEEKDAYS,
@@ -161,7 +246,7 @@ pub static CAREERS: [CareerTrack; 10] = [
             lv("General", 206, 9.0, 15.0),
         ],
     },
-    CareerTrack {
+    BuiltinTrack {
         name: "Music",
         skill: "Guitar",
         days: 0b0111110,
@@ -178,7 +263,7 @@ pub static CAREERS: [CareerTrack; 10] = [
             lv("Rock God", 190, 18.0, 23.0),
         ],
     },
-    CareerTrack {
+    BuiltinTrack {
         name: "Political",
         skill: "Charisma",
         days: WEEKDAYS,
@@ -195,7 +280,7 @@ pub static CAREERS: [CareerTrack; 10] = [
             lv("Leader of the Free World", 196, 10.0, 16.0),
         ],
     },
-    CareerTrack {
+    BuiltinTrack {
         name: "Science",
         skill: "Logic",
         days: WEEKDAYS,
@@ -230,17 +315,18 @@ impl Job {
         Self { track, level: 0, performance: 0.0, last_day: None }
     }
     pub fn career(&self) -> &'static CareerTrack {
-        &CAREERS[self.track]
+        &careers()[self.track.min(careers().len() - 1)]
     }
     pub fn info(&self) -> &'static CareerLevel {
-        &CAREERS[self.track].levels[self.level]
+        let levels = &self.career().levels;
+        &levels[self.level.min(levels.len() - 1)]
     }
     pub fn hours(&self) -> f32 {
         let l = self.info();
         if l.end > l.start { l.end - l.start } else { l.end + 24.0 - l.start }
     }
     pub fn works_on(&self, weekday: usize) -> bool {
-        self.career().days & (1 << weekday) != 0
+        self.info().days & (1 << weekday) != 0
     }
     /// e.g. "Business — Junior Clerk (level 2)".
     pub fn describe(&self) -> String {

@@ -604,8 +604,10 @@ fn world_click(
             let usable = if obj.kind.usable_by(actor_sim.age) { interactions_for(obj.kind) } else { &[] };
             for (i, d) in usable.iter().enumerate() {
                 if d.special == Special::FindJob {
-                    // Job listings: every career's entry-level position.
-                    for (k, c) in crate::careers::CAREERS.iter().enumerate() {
+                    // Job listings: every career's entry-level position (part-time jobs for teens).
+                    let teen = actor_sim.age == crate::sim::Age::Teen;
+                    let can_work = !matches!(actor_sim.age, crate::sim::Age::Child) && !actor_sim.age.is_little();
+                    for (k, c) in crate::careers::careers().iter().enumerate().filter(|(_, c)| can_work && c.part_time == teen) {
                         let l = &c.levels[0];
                         options.push((
                             format!("Join {}: {} §{}/hr", c.name, l.title, l.hourly),
