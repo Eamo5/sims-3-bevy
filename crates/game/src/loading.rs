@@ -29,6 +29,7 @@ pub struct LoadResult {
     pub terrain: TerrainBuild,
     pub strings: Strings,
     pub catalog: Catalog,
+    pub world_build: crate::world::WorldBuild,
 }
 
 /// English localised strings keyed by FNV64.
@@ -135,11 +136,14 @@ fn start_loading(mut commands: Commands, install: Res<InstallPath>, selected: Re
     let task = AsyncComputeTaskPool::get().spawn(async move {
         let set_status = |s: &str| *prog.lock().unwrap() = s.to_string();
         set_status("Reading game packages (base game + expansions)…");
-        let packages = Arc::new(s3pkg::install::open_install(&root, |_| true));
-        if packages.is_empty() {
+        let mut set = s3pkg::install::open_install(&root, |_| true);
+        if set.is_empty() {
             return Err(format!("No game packages found under {}", root.display()));
         }
         set_status("Opening world file…");
+        // The world's own resources (lot imposters, their textures) join the package stack.
+        set.add(Package::open(&world_path).map_err(|e| e.to_string())?);
+        let packages = Arc::new(set);
         let world_pkg = Arc::new(Package::open(&world_path).map_err(|e| e.to_string())?);
         set_status("Reading terrain…");
         let world = Arc::new(WorldData::load(&world_pkg)?);
@@ -149,8 +153,9 @@ fn start_loading(mut commands: Commands, install: Res<InstallPath>, selected: Re
         let strings = Strings(s3formats::stbl::load_english(&packages));
         set_status("Building the buy catalog…");
         let catalog = Catalog::build(&packages, &strings);
+        let world_build = crate::world::build_world(&packages, &world_pkg, &world, &set_status);
         set_status("Done");
-        Ok(LoadResult { packages, world_pkg, world, terrain, strings, catalog })
+        Ok(LoadResult { packages, world_pkg, world, terrain, strings, catalog, world_build })
     });
     commands.insert_resource(LoadTask { task, progress });
 }
@@ -182,6 +187,7 @@ fn poll_loading(
             commands.insert_resource(r.terrain);
             commands.insert_resource(r.strings);
             commands.insert_resource(r.catalog);
+            commands.insert_resource(r.world_build);
             next.set(AppState::InGame);
         }
         Err(e) => {

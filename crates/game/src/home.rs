@@ -521,9 +521,15 @@ pub fn move_in(
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut cam: Query<&mut SimsCamera>,
     mut notes: ResMut<Notifications>,
+    imposters: Query<(Entity, &crate::world::LotImposter)>,
 ) {
     let Some(req) = request else { return };
     let lot_index = req.0;
+    for (e, imp) in &imposters {
+        if imp.0 == lot_index {
+            commands.entity(e).despawn();
+        }
+    }
     commands.remove_resource::<MoveInRequest>();
     let lot = world.data.lots[lot_index].clone();
     let hm = &world.data.heightmap;

@@ -122,6 +122,88 @@ fn main() {
         }
         return;
     }
+    if args[1] == "worldmodl" {
+        // worldmodl <root> <world>: list the world's MODL resources with decoded bounds.
+        let root = std::path::Path::new(&args[2]);
+        let mut set = s3pkg::install::open_install(root, |_| true);
+        set.add(Package::open(&args[3]).unwrap());
+        let w = Package::open(&args[3]).unwrap();
+        let mut n = 0;
+        for e in w.of_type(types::MODL) {
+            let meshes = s3formats::model::load_model(&set, &e.key).unwrap_or_default();
+            let mut mn = [f32::MAX; 3];
+            let mut mx = [f32::MIN; 3];
+            let mut tris = 0;
+            let mut shaders = std::collections::BTreeSet::new();
+            for m in &meshes {
+                tris += m.indices.len() / 3;
+                shaders.insert(format!("{:08X}", m.material.shader));
+                for p in &m.positions { for a in 0..3 { mn[a] = mn[a].min(p[a]); mx[a] = mx[a].max(p[a]); } }
+            }
+            if n < 40 || e.key.g == 0x00B0C507 && n < 60 {
+                println!("{} meshes={} tris={tris} bounds={:?}..{:?} shaders={:?}", e.key, meshes.len(), mn.map(|v| v.round()), mx.map(|v| v.round()), shaders);
+            }
+            n += 1;
+        }
+        return;
+    }
+    if args[1] == "matparams" {
+        // matparams <root> <world> <modl key>
+        let root = std::path::Path::new(&args[2]);
+        let mut set = s3pkg::install::open_install(root, |_| true);
+        set.add(Package::open(&args[3]).unwrap());
+        let parts: Vec<&str> = args[4].split(':').collect();
+        let k = s3pkg::ResourceKey::new(parse_hex(parts[0]) as u32, parse_hex(parts[1]) as u32, parse_hex(parts[2]));
+        for m in s3formats::model::load_model(&set, &k).unwrap_or_default() {
+            println!("mesh {:08X} shader {:08X}", m.name_hash, m.material.shader);
+            for (p, v) in &m.material.params { println!("  {p:08X} {v:?}"); }
+        }
+        return;
+    }
+    if args[1] == "objn" {
+        let w = Package::open(&args[2]).unwrap();
+        let all = s3formats::objn::load_world_objects(&w);
+        let mut total = 0;
+        let mut models = std::collections::HashSet::new();
+        let mut vpxys = std::collections::HashSet::new();
+        let mut trees = 0;
+        let mut spt = std::collections::HashSet::new();
+        let mut cat_types: BTreeMap<u32, usize> = BTreeMap::new();
+        let mut scripts: BTreeMap<String, usize> = BTreeMap::new();
+        for (id, objs) in &all {
+            total += objs.len();
+            let _ = id;
+            for o in objs {
+                if let Some(m) = o.model { models.insert(m); }
+                if let Some(v) = o.vpxy { vpxys.insert(v); }
+                if let Some(c) = o.catalog { *cat_types.entry(c.t).or_default() += 1; }
+                trees += o.trees.len();
+                if let Some(s) = o.speedtree { spt.insert(s); }
+                if let Some(s) = &o.script { *scripts.entry(s.rsplit('.').next().unwrap_or("").to_string()).or_default() += 1; }
+            }
+        }
+        println!("{} OBJN resources (of {}), {total} objects, {} distinct MODL, {} distinct VPXY, {trees} tree instances, {} speedtrees", all.len(), w.of_type(s3formats::objn::T_OBJN).count(), models.len(), vpxys.len(), spt.len());
+        println!("catalog types: {cat_types:X?}");
+        let lots: std::collections::HashSet<u64> = w.of_type(0xD063545B).map(|e| e.key.i).collect();
+        let mut layer_scripts: BTreeMap<String, usize> = BTreeMap::new();
+        let mut layer_objs = 0;
+        for (id, objs) in &all {
+            if lots.contains(id) { continue; }
+            layer_objs += objs.len();
+            for o in objs {
+                let k = o.script.clone().map(|s| s.rsplit('.').next().unwrap_or("").to_string()).unwrap_or_else(|| format!("noscript cat={:?} model={}", o.catalog.map(|c| format!("{:08X}", c.t)), o.model.is_some()));
+                *layer_scripts.entry(k).or_default() += 1;
+            }
+        }
+        let mut ls: Vec<_> = layer_scripts.into_iter().collect();
+        ls.sort_by_key(|x| std::cmp::Reverse(x.1));
+        println!("layer objects {layer_objs}: {:?}", &ls[..ls.len().min(40)]);
+        for (id, objs) in &all { if !lots.contains(id) { for o in objs { if o.catalog.is_some_and(|c| c.t == 0x2DA18F83) { println!("2DA18F83 example {} model={:?} vpxy={:?}", o.catalog.unwrap(), o.model, o.vpxy); break; } } } }
+        let mut sc: Vec<_> = scripts.into_iter().collect();
+        sc.sort_by_key(|x| std::cmp::Reverse(x.1));
+        println!("top scripts: {:?}", &sc[..sc.len().min(40)]);
+        return;
+    }
     if args[1] == "composite" {
         // composite <root> <objd hex> <outdir>: write each mesh's composited diffuse as raw RGBA.
         let root = std::path::Path::new(&args[2]);

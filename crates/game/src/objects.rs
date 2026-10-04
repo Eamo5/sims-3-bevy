@@ -87,31 +87,50 @@ fn txtc_fallback(d: &[u8]) -> Option<ResourceKey> {
     keys.into_iter().find(|k| k.t == types::DDS)
 }
 
-impl ObjectAssets {
-    pub fn texture(&mut self, ctx: &mut AssetCtx, key: ResourceKey) -> Option<Handle<Image>> {
-        if let Some(h) = self.textures.get(&key) {
-            return h.clone();
-        }
-        let data = ctx.pkgs.read(&key).or_else(|| ctx.pkgs.read_ti(key.t, key.i));
-        let image = match key.t {
-            types::TXTC => data
-                .as_deref()
-                .and_then(|d| s3formats::compositor::composite(ctx.pkgs, d, 512))
-                .map(rgba_image)
-                .or_else(|| {
-                    // Fall back to a representative DDS if compositing fails.
-                    let k = data.as_deref().and_then(txtc_fallback)?;
-                    dds_image(&ctx.pkgs.read(&k)?, true)
-                }),
-            types::DDS => data.and_then(|d| dds_image(&d, true)),
-            _ => None,
-        };
-        let handle = image.map(|img| ctx.images.add(img));
-        self.textures.insert(key, handle.clone());
-        handle
+/// Builds a texture (DDS or composited TXTC) without touching Bevy's asset storage.
+pub fn build_texture_cpu(pkgs: &PackageSet, key: ResourceKey, max_size: usize) -> Option<Image> {
+    let data = pkgs.read(&key).or_else(|| pkgs.read_ti(key.t, key.i));
+    match key.t {
+        types::TXTC => data
+            .as_deref()
+            .and_then(|d| s3formats::compositor::composite(pkgs, d, max_size))
+            .map(rgba_image)
+            .or_else(|| {
+                // Fall back to a representative DDS if compositing fails.
+                let k = data.as_deref().and_then(txtc_fallback)?;
+                dds_image(&pkgs.read(&k)?, true)
+            }),
+        types::DDS => data.and_then(|d| dds_image(&d, true)),
+        _ => None,
     }
+}
 
-    fn material_for(&mut self, ctx: &mut AssetCtx, m: &MeshData) -> Handle<StandardMaterial> {
+/// A mesh part decoded on any thread.
+pub struct CpuPart {
+    pub mesh: Mesh,
+    pub tex: Option<ResourceKey>,
+    pub mode: u8,
+    pub bounds: (Vec3, Vec3),
+}
+
+pub const P_IMPOSTER_TEXTURE: u32 = 0xBDCF71C5;
+
+fn diffuse_key(m: &MeshData) -> Option<ResourceKey> {
+    if m.material.shader == model::SHADER_LOT_IMPOSTER {
+        m.material.texture(P_IMPOSTER_TEXTURE).or_else(|| m.material.texture(P_DIFFUSE_MAP))
+    } else {
+        m.material.texture(P_DIFFUSE_MAP)
+    }
+}
+
+/// Decodes a MODL's meshes into Bevy meshes (any thread).
+pub fn build_model_cpu(pkgs: &PackageSet, modl: ResourceKey) -> Vec<CpuPart> {
+    let meshes = model::load_model(pkgs, &modl).unwrap_or_default();
+    let mut parts = Vec::new();
+    for m in &meshes {
+        if m.indices.is_empty() || !bounds_ok(m) {
+            continue;
+        }
         let mat = &m.material;
         let mode: u8 = if mat.is_alpha_blended() {
             2
@@ -120,7 +139,53 @@ impl ObjectAssets {
         } else {
             0
         };
-        let tex_key = mat.texture(P_DIFFUSE_MAP);
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, m.positions.clone());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, m.normals.clone());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, m.uvs.clone());
+        mesh.insert_indices(Indices::U32(m.indices.clone()));
+        parts.push(CpuPart {
+            mesh,
+            tex: diffuse_key(m),
+            mode,
+            bounds: (Vec3::from(m.bounds_min), Vec3::from(m.bounds_max)),
+        });
+    }
+    parts
+}
+
+impl ObjectAssets {
+    pub fn texture(&mut self, ctx: &mut AssetCtx, key: ResourceKey) -> Option<Handle<Image>> {
+        if let Some(h) = self.textures.get(&key) {
+            return h.clone();
+        }
+        let handle = build_texture_cpu(ctx.pkgs, key, 512).map(|img| ctx.images.add(img));
+        self.textures.insert(key, handle.clone());
+        handle
+    }
+
+    pub fn ingest_texture(&mut self, images: &mut Assets<Image>, key: ResourceKey, img: Option<Image>) {
+        if !self.textures.contains_key(&key) {
+            let h = img.map(|i| images.add(i));
+            self.textures.insert(key, h);
+        }
+    }
+
+    pub fn ingest_model(&mut self, ctx: &mut AssetCtx, modl: ResourceKey, cpu: Vec<CpuPart>) -> Vec<ModelPart> {
+        let mut parts = Vec::new();
+        for p in cpu {
+            let material = self.material_for_key(ctx, p.tex, p.mode);
+            parts.push(ModelPart { mesh: ctx.meshes.add(p.mesh), material, bounds: p.bounds });
+        }
+        self.models.insert(modl, parts.clone());
+        parts
+    }
+
+    pub fn has_model(&self, modl: &ResourceKey) -> bool {
+        self.models.contains_key(modl)
+    }
+
+    fn material_for_key(&mut self, ctx: &mut AssetCtx, tex_key: Option<ResourceKey>, mode: u8) -> Handle<StandardMaterial> {
         if let Some(h) = self.materials.get(&(tex_key, mode)) {
             return h.clone();
         }
@@ -147,26 +212,8 @@ impl ObjectAssets {
         if let Some(p) = self.models.get(&modl) {
             return p.clone();
         }
-        let meshes = model::load_model(ctx.pkgs, &modl).unwrap_or_default();
-        let mut parts = Vec::new();
-        for m in &meshes {
-            if m.indices.is_empty() || !bounds_ok(m) {
-                continue;
-            }
-            let material = self.material_for(ctx, m);
-            let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
-            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, m.positions.clone());
-            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, m.normals.clone());
-            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, m.uvs.clone());
-            mesh.insert_indices(Indices::U32(m.indices.clone()));
-            parts.push(ModelPart {
-                mesh: ctx.meshes.add(mesh),
-                material,
-                bounds: (Vec3::from(m.bounds_min), Vec3::from(m.bounds_max)),
-            });
-        }
-        self.models.insert(modl, parts.clone());
-        parts
+        let cpu = build_model_cpu(ctx.pkgs, modl);
+        self.ingest_model(ctx, modl, cpu)
     }
 
     /// All model parts of a catalog object (OBJD key).

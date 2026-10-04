@@ -2,6 +2,7 @@ pub mod compositor;
 pub mod dds;
 pub mod model;
 pub mod object;
+pub mod objn;
 pub mod rcol;
 pub mod stbl;
 pub mod txtc;

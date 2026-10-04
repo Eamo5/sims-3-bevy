@@ -101,11 +101,22 @@ fn auto_pick_world(
     }
 }
 
-fn apply_cam(args: Res<AutoArgs>, mut q: Query<&mut SimsCamera, Added<SimsCamera>>) {
-    if let (Some(c), Ok(mut cam)) = (args.cam, q.single_mut()) {
+/// Applies `--cam` shortly after play starts (after the move-in camera placement).
+fn apply_cam(args: Res<AutoArgs>, time: Res<Time>, mut since: Local<Option<f32>>, mut done: Local<bool>, mut q: Query<&mut SimsCamera>) {
+    let Some(c) = args.cam else { return };
+    if *done {
+        return;
+    }
+    let t0 = *since.get_or_insert(time.elapsed_secs());
+    if time.elapsed_secs() - t0 < 1.0 {
+        return;
+    }
+    if let Ok(mut cam) = q.single_mut() {
+        cam.look_at(Vec3::new(c[0], 0.0, c[1]));
         cam.distance = c[2];
         cam.yaw = c[3];
         cam.pitch = c[4];
+        *done = true;
     }
 }
 

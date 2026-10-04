@@ -12,6 +12,7 @@ mod nav;
 mod objects;
 mod sim;
 mod terrain;
+mod world;
 
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
@@ -64,6 +65,7 @@ fn main() {
             hud::HudPlugin,
             home::HomePlugin,
             buy::BuyPlugin,
+            world::WorldPlugin,
         ))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)
