@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 24;
+pub const GAMEDATA_VERSION: u32 = 27;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -220,6 +220,40 @@ pub struct GameDataBaked {
     pub writing: HashMap<String, f32>,
     /// Titles for the books Sims write, by genre (`Fiction`, `SciFi`, `Romance`...).
     pub book_titles: Vec<(String, Vec<String>)>,
+    pub recipes: Vec<RecipeInfo>,
+}
+
+/// Meal times a recipe is cooked for (`RecipeInfo::meals`).
+pub const MEAL_BREAKFAST: u8 = 1;
+pub const MEAL_BRUNCH: u8 = 2;
+pub const MEAL_LUNCH: u8 = 4;
+pub const MEAL_DINNER: u8 = 8;
+pub const MEAL_DESSERT: u8 = 16;
+
+/// A recipe: a base game row of `RecipeMasterList` that's cooked as a meal.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct RecipeInfo {
+    /// `Spaghetti`, `GoopyCarbonara`...
+    pub key: String,
+    pub name: String,
+    /// The Cooking level it takes.
+    pub level: u8,
+    /// Known once a Sim reaches its level (the rest are learned from recipe books).
+    pub auto: bool,
+    /// The meal times it's for (`MEAL_*` bits).
+    pub meals: u8,
+    pub vegetarian: bool,
+    /// What it costs at a restaurant.
+    pub cost: i32,
+    pub ingredients: Vec<String>,
+    /// The serving dish full and emptied, and a plateful and the empty plate: models in
+    /// `food.pack` (each key's group is its geometry state's hash).
+    pub group: Option<crate::types::Key>,
+    pub group_empty: Option<crate::types::Key>,
+    /// What its recipe book costs at the bookstore (0: there's none).
+    pub book_price: i32,
+    pub single: Option<crate::types::Key>,
+    pub single_empty: Option<crate::types::Key>,
 }
 
 /// A lifetime wish: one of the base game's "Lifetime Dreams" (`DreamsAndPromisesNodes`), with
@@ -832,6 +866,95 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             }
         }
         out.book_titles = by_genre;
+    }
+    // Recipes, with the food they make (the dish and a plate of it, full and emptied).
+    if let Some(x) = xml("RecipeMasterList") {
+        progress("Converting: recipes and food…");
+        // Food models by name (the name maps), each drawn in the geometry state a recipe names:
+        // `foodServeRatatouille#foodFull:Default` is the `foodFull` state of that model.
+        let mut food: HashMap<String, u64> = HashMap::new();
+        for k in pkgs.keys_of_type(T_NMAP) {
+            if let Some(d) = pkgs.read(k) {
+                for (inst, n) in s3formats::audio::parse_name_map(&d) {
+                    if n.starts_with("food") && !n.contains('_') && pkgs.find_ti(s3pkg::types::MODL, inst).is_some() {
+                        food.insert(n.to_ascii_lowercase(), inst);
+                    }
+                }
+            }
+        }
+        // (Some are hidden catalogue objects instead: `FoodEatHamburger`.)
+        let catalog: Vec<crate::types::CatalogEntry> = read_value(&root.global_dir().join("catalog.bin")).unwrap_or_default();
+        let mut models: Vec<(crate::types::Key, s3pkg::ResourceKey, u32)> = Vec::new();
+        let mut model_of = |spec: &str| -> Option<crate::types::Key> {
+            let (name, rest) = spec.split_once('#').unwrap_or((spec, ""));
+            let state = rest.split(':').next().filter(|s| !s.is_empty());
+            let modl = match food.get(&name.to_ascii_lowercase()) {
+                Some(&inst) => pkgs.find_ti(s3pkg::types::MODL, inst)?,
+                None => crate::types::rkey(*catalog.iter().find(|c| c.instance_name.eq_ignore_ascii_case(name))?.models.first()?),
+            };
+            let inst = modl.i;
+            let hash = state.map_or(0, s3pkg::fnv32);
+            let key = (s3pkg::types::MODL, hash, inst);
+            if !models.iter().any(|(k, ..)| *k == key) {
+                models.push((key, modl, hash));
+            }
+            Some(key)
+        };
+        for f in records(&x, "Data") {
+            let code = get(&f, "CodeVersion");
+            let key = get(&f, "Recipe_Key");
+            let meals = [("Breakfast", MEAL_BREAKFAST), ("Brunch", MEAL_BRUNCH), ("Lunch", MEAL_LUNCH), ("Dinner", MEAL_DINNER), ("Dessert", MEAL_DESSERT)]
+                .iter()
+                .filter(|(m, _)| !get(&f, m).is_empty())
+                .fold(0, |a, (_, b)| a | b);
+            if key.is_empty() || !(code.is_empty() || code == "BaseGame") || meals == 0 || get(&f, "Learnable") == "False" {
+                continue;
+            }
+            let name = text("RecipeMasterList/Data", &key);
+            out.recipes.push(RecipeInfo {
+                name: if name.is_empty() { pretty(&key) } else { name },
+                level: num(&f, "Level") as u8,
+                auto: !get(&f, "Auto_Learn").is_empty(),
+                meals,
+                vegetarian: !get(&f, "Is_Vegetarian").is_empty(),
+                cost: num(&f, "RegisterCost") as i32,
+                ingredients: ["Ingredient_1", "Ingredient_2", "Ingredient_3"].iter().map(|i| get(&f, i)).filter(|i| !i.is_empty()).collect(),
+                group: model_of(&get(&f, "Group_Full")),
+                group_empty: model_of(&get(&f, "Group_Empty")),
+                single: model_of(&get(&f, "Single_Full")),
+                single_empty: model_of(&get(&f, "Single_Empty")),
+                book_price: 0,
+                key,
+            });
+        }
+        // Recipe books (`Books`' `BookRecipe` rows) and their prices.
+        if let Some(b) = xml("Books") {
+            for f in records(&b, "BookRecipe") {
+                let key = get(&f, "Recipe");
+                if let Some(r) = out.recipes.iter_mut().find(|r| r.key == key) {
+                    r.book_price = num(&f, "Value") as i32;
+                }
+            }
+        }
+        // The food models, and their textures.
+        let g = root.global_dir();
+        std::fs::create_dir_all(&g).map_err(|e| e.to_string())?;
+        let mut fpack = PackWriter::create(&g.join("food.pack")).map_err(|e| e.to_string())?;
+        let mut tex = BTreeSet::new();
+        for (key, modl, state) in &models {
+            let m = crate::bake::bake_model_state(pkgs, modl, (*state != 0).then_some(*state));
+            tex.extend(m.parts.iter().filter_map(|p| p.texture));
+            fpack.add(*key, &m).map_err(|e| e.to_string())?;
+        }
+        fpack.finish().map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(root.textures_dir()).ok();
+        for t in tex {
+            if !root.tex_path(t).exists()
+                && let Some(dds) = crate::bake::bake_texture(pkgs, t, crate::bake::OBJECT_TEX_MAX, false)
+            {
+                let _ = std::fs::write(root.tex_path(t), dds);
+            }
+        }
     }
     // Lifetime wishes: the base game's lifetime dreams, with their instances' scores.
     if let (Some(nodes), Some(inst)) = (xml("DreamsAndPromisesNodes"), xml("DreamNodeInstanceDefaults")) {

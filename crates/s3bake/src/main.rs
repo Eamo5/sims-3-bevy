@@ -38,6 +38,53 @@ fn main() {
         }
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--model-name") {
+        // --model-name <name>: the models (MODL, VPXY) named so (instance = fnv64 of the name).
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let cat: Vec<s3bake::types::CatalogEntry> = s3bake::pack::read_value(&root.global_dir().join("catalog.bin")).unwrap_or_default();
+        for c in cat.iter().filter(|c| c.instance_name.to_ascii_lowercase().contains(&args[i + 1].to_ascii_lowercase())) {
+            println!("catalog {} {:?} models {:?}", c.instance_name, c.objd, c.models);
+        }
+        // Names from every name map.
+        let want = args[i + 1].to_ascii_lowercase();
+        for k in pkgs.keys_of_type(0x0166038C) {
+            if let Some(d) = pkgs.read(k) {
+                for (inst, n) in s3formats::audio::parse_name_map(&d) {
+                    if n.to_ascii_lowercase().contains(&want) {
+                        let types: Vec<String> = pkgs
+                            .keys()
+                            .filter(|x| x.i == inst || x.i == inst ^ (1 << 63))
+                            .map(|x| format!("{:08X}:{:X}{}", x.t, x.g, if x.i == inst { "" } else { " (top bit)" }))
+                            .collect();
+                        println!("name {n} {inst:016X} types {types:?}");
+                    }
+                }
+            }
+        }
+        // MODEL=<instance hex>: that model's meshes and their geometry states.
+        if let Some(m) = std::env::var("MODEL").ok().and_then(|h| u64::from_str_radix(&h, 16).ok()) {
+            let fnv32 = |s: &str| s.to_ascii_lowercase().bytes().fold(0x811C9DC5u32, |h, b| h.wrapping_mul(0x01000193) ^ b as u32);
+            let names = ["full", "half", "empty", "foodfull", "foodhalf", "foodempty", "default", "burnt", "cookiesfull", "foodfullmesh"];
+            if let Some(k) = pkgs.find_ti(s3pkg::types::MODL, m) {
+                for mesh in s3formats::model::load_model(&pkgs, &k).unwrap_or_default() {
+                    let st: Vec<String> = mesh
+                        .states
+                        .iter()
+                        .map(|(h, ix)| format!("{} ({} tris)", names.iter().find(|n| fnv32(n) == *h).copied().unwrap_or("?"), ix.len() / 3))
+                        .collect();
+                    println!("mesh {:08X} {} tris, states {st:?}", mesh.name_hash, mesh.indices.len() / 3);
+                }
+            }
+        }
+        let inst = s3pkg::fnv64(&args[i + 1]);
+        for t in [s3pkg::types::MODL, 0x736884F1, 0x01D10F34] {
+            for k in pkgs.keys_of_type(t).filter(|k| k.i == inst) {
+                let size = pkgs.read(k).map_or(0, |d| d.len());
+                println!("{k:?} {size} bytes");
+            }
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--strings") {
         // --strings <text>: the English strings containing the text, with their keys.
         let pkgs = s3pkg::install::open_install(&data, |_| true);
@@ -381,6 +428,12 @@ fn main() {
             println!("roof {:?} tex {:?} tile {:?}", r.name, r.texture, r.tile);
         }
         println!("writing: {} values; book titles: {:?}", g.writing.len(), g.book_titles.iter().map(|(g, t)| (g.as_str(), t.len(), t.first())).collect::<Vec<_>>());
+        for r in &g.recipes {
+            println!(
+                "recipe {} {:?} lvl {} auto {} meals {:05b} veg {} §{} {:?} group {:?} single {:?} empty {:?}/{:?}",
+                r.key, r.name, r.level, r.auto, r.meals, r.vegetarian, r.cost, r.ingredients, r.group, r.single, r.group_empty, r.single_empty
+            );
+        }
         for w in &g.lifetime_wishes {
             println!("lifetime wish {} {} [{}] {} score {}", w.id, w.check, w.icon, w.number, w.score);
         }

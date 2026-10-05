@@ -222,6 +222,8 @@ fn outings(
                 } else {
                     notes.push(format!("{} is home from school.", sim.first));
                 }
+            } else if std::ptr::eq(at.activity, &crate::meals::BUY_RECIPE) {
+                commands.entity(e).insert(crate::meals::RecipeBookBought);
             } else if std::ptr::eq(at.activity, &crate::gardening::BUY_SEEDS) {
                 commands.entity(e).insert(crate::gardening::GardenRequest::BoughtSeeds);
                 notes.push(format!("{} is back from the grocery store.", sim.first));

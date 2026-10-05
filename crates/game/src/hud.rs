@@ -660,7 +660,10 @@ fn world_click(
             Option<Res<crate::gardening::Garden>>,
         ),
     ),
-    (on_lot, writers): (Query<&crate::visit::OnLot>, Query<(Option<&crate::writing::Author>, &crate::interact::Skills)>),
+    (on_lot, writers): (
+        Query<&crate::visit::OnLot>,
+        Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
+    ),
 ) {
     if buy.is_some_and(|b| b.active) {
         return;
@@ -743,7 +746,7 @@ fn world_click(
                 }
                 if d.special == Special::WriteNovel {
                     // Carry on with the book under way, or start one in a genre they can write.
-                    let Ok((author, skills)) = writers.get(actor) else { continue };
+                    let Ok((author, skills, _)) = writers.get(actor) else { continue };
                     if let Some(dr) = author.and_then(|a| a.draft.as_ref()) {
                         options.push((format!("Continue Writing “{}” ({:.0}%)", dr.title, dr.pages / dr.length * 100.0), ActionKind::Object { target: t, def: i }));
                     }
@@ -755,6 +758,23 @@ fn world_click(
                         .collect();
                     options.push(("Write Novel ›".to_string(), submenu_kind(pie.submenus.len())));
                     pie.submenus.push(("Write Novel".to_string(), list));
+                    continue;
+                }
+                if d.special == Special::ServeMeal
+                    && let (Ok((_, skills, known)), Some(ui)) = (writers.get(actor), opp_q.0.as_ref())
+                {
+                    // The recipes they know for the time of day, and desserts.
+                    let (meal, word) = crate::meals::meal_time(opp_q.2.hour_f());
+                    for (label, m) in [(word, meal), ("Dessert", s3bake::gamedata::MEAL_DESSERT)] {
+                        let list: Vec<(String, ActionKind)> = crate::meals::cookable(&ui.data, actor_sim, skills.level("Cooking"), known, m)
+                            .into_iter()
+                            .map(|r| (format!("Cook: {}", ui.data.recipes[r].name), ActionKind::Object { target: t, def: i }))
+                            .collect();
+                        if !list.is_empty() {
+                            options.push((format!("Cook {label} ›"), submenu_kind(pie.submenus.len())));
+                            pie.submenus.push((format!("Cook {label}"), list));
+                        }
+                    }
                     continue;
                 }
                 if d.special == Special::FindJob {
@@ -802,6 +822,23 @@ fn world_click(
                     options.push((activity_label(a), ActionKind::Visit { lot, activity: i }));
                 }
                 options.extend(opp_tasks);
+                // The bookstore's recipe books.
+                if crate::opportunities::lot_types(&world.data, lot).contains(&"Bookstore")
+                    && let (Some(ui), Ok((_, skills, known))) = (opp_q.0.as_ref(), writers.get(actor))
+                {
+                    let list: Vec<(String, ActionKind)> = crate::meals::books_for(&ui.data, skills.level("Cooking"), known)
+                        .into_iter()
+                        .map(|r| {
+                            let rec = &ui.data.recipes[r];
+                            (format!("{} (§{})", rec.name, rec.book_price), ActionKind::Visit { lot, activity: crate::meals::RECIPE_TASK + r })
+                        })
+                        .collect();
+                    if !list.is_empty() {
+                        pie.submenus.clear();
+                        options.push(("Buy a Recipe Book ›".to_string(), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push(("Recipe Books".to_string(), list));
+                    }
+                }
             }
             // Planting a seed outdoors on the home lot.
             let home = opp_q.4.as_ref().map(|h| h.lot_index) == Some(lot);
@@ -827,6 +864,7 @@ fn pie_buttons(
     mut queues: Query<&mut ActionQueue>,
     selected: Query<Entity, With<Selected>>,
     (mut wishes, mut notes): (Query<(&Sim, &mut crate::wishes::Wishes), With<Selected>>, ResMut<Notifications>),
+    ui_data: Option<Res<crate::icons::GameUi>>,
 ) {
     let mut chosen = None;
     for (i, opt) in &q {
@@ -868,6 +906,12 @@ fn pie_buttons(
     if let Some(a) = actor
         && let Ok(mut queue) = queues.get_mut(a)
     {
+        // The recipe chosen.
+        if let (Some(n), Some(ui)) = (label.strip_prefix("Cook: "), ui_data.as_ref())
+            && let Some(r) = ui.data.recipes.iter().position(|r| r.name == n)
+        {
+            commands.entity(a).insert(crate::meals::MealPlan(r));
+        }
         // A book in the genre chosen.
         if let Some(g) = label.strip_prefix("Write: ").and_then(|n| crate::writing::GENRES.iter().position(|g| g.name == n)) {
             commands.entity(a).insert(crate::writing::NovelPlan(g));

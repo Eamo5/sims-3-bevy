@@ -108,10 +108,17 @@ fn split_imposter(p: &BakedPart) -> Vec<BakedPart> {
 
 /// Decodes a MODL into ready-to-upload parts.
 pub fn bake_model(pkgs: &PackageSet, modl: &ResourceKey) -> BakedModel {
+    bake_model_state(pkgs, modl, None)
+}
+
+/// A model in one of its geometry states (FNV-32 of the state's name: a dish `full` or
+/// `empty`); meshes without that state are drawn whole.
+pub fn bake_model_state(pkgs: &PackageSet, modl: &ResourceKey, state: Option<u32>) -> BakedModel {
     let meshes = model::load_model(pkgs, modl).unwrap_or_default();
     let mut parts = Vec::new();
     for m in &meshes {
-        if m.indices.is_empty() || !bounds_ok(m) {
+        let indices = state.and_then(|s| m.states.iter().find(|(h, _)| *h == s)).map_or(&m.indices, |(_, ix)| ix);
+        if indices.is_empty() || !bounds_ok(m) {
             continue;
         }
         let mat = &m.material;
@@ -132,7 +139,7 @@ pub fn bake_model(pkgs: &PackageSet, modl: &ResourceKey) -> BakedModel {
             positions: m.positions.clone(),
             normals: m.normals.clone(),
             uvs: m.uvs.clone(),
-            indices: m.indices.clone(),
+            indices: indices.clone(),
             texture: tex.map(|k| key_of(&k)),
             mode,
             unlit: imposter,

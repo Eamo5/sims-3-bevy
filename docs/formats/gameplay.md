@@ -89,6 +89,22 @@ the writing speed (`kRateBasePPM` 0.12 pages a minute, `kRateBookWormBonusPPM`,
 `kPartialWorkPageValue<level>` a page. Titles for written books are `Books`' `WrittenBookTitles`
 rows (one column per genre), text under `Gameplay/Excel/Books/WrittenBookTitles:<key>`.
 
+### Recipes and food
+
+`RecipeMasterList` has a `Data` row per recipe: `Recipe_Key` (`Spaghetti`), `CodeVersion`
+(empty for the base game), `Level` (Cooking), `Auto_Learn` (`x`: known at that level; the rest
+come from recipe books), meal-time flags `Breakfast`/`Brunch`/`Lunch`/`Dinner`/`Dessert`/`Snack`,
+`Is_Vegetarian`, `Ingredient_1..3`, `RegisterCost`, and the food's models as
+`<model>#<geometry state>[:<material state>]` for the serving dish (`Group_Full/Half/Empty`) and
+a plate (`Single_Full/Half/Empty`), e.g. `foodServeSpaghetti#full`. The name is found through
+the name maps (`0x0166038C`: the model's MODL/VPXY instance; a few are hidden catalogue
+objects such as `FoodEatHamburger`); the food sits on the game's `PlateServing` / `Plate`
+objects. A geometry state is a run of a mesh's index buffer (MLOD mesh: after the bounds, the
+skin controller, joint list and scale offset, `count` × {FNV-32 of the state name, start index,
+min vertex, vertex count, primitive count}); the whole buffer is every state together. Names
+are `Gameplay/Excel/RecipeMasterList/Data:<key>`. Recipe books are `Books`' `BookRecipe` rows
+(`Recipe`, `Value` = price).
+
 ### Career branches
 
 A `Careers` level row's `BranchName` is `Base` (or empty) until the career branches, then

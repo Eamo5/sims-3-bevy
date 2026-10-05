@@ -255,6 +255,9 @@ pub struct MeshData {
     pub material: Material,
     pub bounds_min: [f32; 3],
     pub bounds_max: [f32; 3],
+    /// Geometry states (FNV-32 of the state's name, like a dish's `full`, `half` and `empty`),
+    /// each its own run of the index buffer over the same vertices.
+    pub states: Vec<(u32, Vec<u32>)>,
 }
 
 fn color_ubyte4_vec(e: &[u8]) -> [f32; 3] {
@@ -290,6 +293,19 @@ pub fn decode_mlod(rcol: &Rcol, mlod: &[u8]) -> R<Vec<MeshData>> {
         let prim_count = r.i32()?.max(0) as usize;
         let bmin = r.vec3()?;
         let bmax = r.vec3()?;
+        // Skin controller, joints, scale offset, then the geometry states.
+        let mut states_raw: Vec<(u32, usize, usize)> = Vec::new();
+        let _skin = r.u32();
+        if let Ok(joints) = r.u32()
+            && r.skip(joints as usize * 4).is_ok()
+            && r.u32().is_ok()
+            && let Ok(n) = r.u32()
+        {
+            for _ in 0..n.min(64) {
+                let (Ok(name), Ok(si), Ok(_), Ok(_), Ok(pc)) = (r.u32(), r.i32(), r.i32(), r.i32(), r.i32()) else { break };
+                states_raw.push((name, si.max(0) as usize, pc.max(0) as usize));
+            }
+        }
         let _ = version;
         r.pos = start + size;
 
@@ -401,6 +417,11 @@ pub fn decode_mlod(rcol: &Rcol, mlod: &[u8]) -> R<Vec<MeshData>> {
         let end = start_index + prim_count * 3;
         let Some(idx) = all_idx.get(start_index..end) else { continue };
         m.indices = idx.iter().map(|&i| i.min(vertex_count.saturating_sub(1) as u32)).collect();
+        for (name, si, pc) in states_raw {
+            if let Some(s) = all_idx.get(si..si + pc * 3) {
+                m.states.push((name, s.iter().map(|&i| i.min(vertex_count.saturating_sub(1) as u32)).collect()));
+            }
+        }
         m.material = material;
         out.push(m);
     }

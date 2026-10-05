@@ -50,6 +50,8 @@ pub enum Goal {
     CareerHopper,
     /// Earn `n` simoleons a week in royalties.
     Royalties,
+    /// Know every recipe.
+    Recipes,
 }
 
 pub struct LifetimeWishDef {
@@ -142,6 +144,7 @@ pub static LIFETIME_WISHES: &[LifetimeWishDef] = &[
     LifetimeWishDef { check: "ReachLevel10InNSkillsMajorDreamCheckFunction", name: "Renaissance Sim", desc: "Master {n} skills", goal: Goal::MasterAny, n: 3.0, icon: "w_lifetime_reach_L10_skills", score: 3500, traits: &[T::Genius, T::Perfectionist, T::Bookworm, T::Ambitious] },
     LifetimeWishDef { check: "RaiseNChildrenFromBabyToYoungAdultCheckFunction", name: "Surrounded by Family", desc: "See {n} children grow up into teens", goal: Goal::RaiseChildren, n: 5.0, icon: "w_lifetime_raise_baby_to_YA", score: 3500, traits: &[T::FamilyOriented, T::Good, T::Childish] },
     LifetimeWishDef { check: "NSimoleonsPerWeekInRoyaltiesMajorDreamCheckFunction", name: "Professional Author", desc: "Earn §{n} a week in royalties from books", goal: Goal::Royalties, n: 4000.0, icon: "w_lifetime_simoleon_royalty", score: 3250, traits: &[T::Bookworm, T::Artistic, T::Genius, T::HopelessRomantic] },
+    LifetimeWishDef { check: "KnowEveryCookingRecipieMajorDreamCheckFunction", name: "The Culinary Librarian", desc: "Know every recipe", goal: Goal::Recipes, n: 0.0, icon: "w_lifetime_know_every_recipe", score: 3000, traits: &[T::NaturalCook, T::Bookworm, T::Perfectionist] },
     LifetimeWishDef { check: "ReachLevel5In4CareersMajorDreamCheckFunction", name: "Jack of All Trades", desc: "Reach level 5 in {n} different careers", goal: Goal::CareerHopper, n: 4.0, icon: "w_lifetime_L5_in4_careers", score: 3500, traits: &[T::Ambitious, T::Excitable, T::Absentminded] },
 ];
 
@@ -279,6 +282,8 @@ struct Standing<'a> {
     raised: u32,
     careers: &'a [String],
     royalties: i64,
+    /// Recipes known, of all there are.
+    recipes: (usize, usize),
 }
 
 /// How far along a lifetime wish is (0..1, past 1 when done) and what that means.
@@ -317,6 +322,7 @@ fn measure(d: &LifetimeWishDef, data: Option<&s3bake::GameDataBaked>, at: &Stand
         Goal::RaiseChildren => (at.raised as f32 / n, format!("{} of {n} children grown into teens", at.raised)),
         Goal::CareerHopper => (at.careers.len() as f32 / n, format!("Level 5 in {} of {n} careers", at.careers.len())),
         Goal::Royalties => (at.royalties as f32 / n, format!("§{} of §{} a week", group(at.royalties), group(n as i64))),
+        Goal::Recipes => (at.recipes.0 as f32 / at.recipes.1.max(1) as f32, format!("{} of {} recipes known", at.recipes.0, at.recipes.1)),
     };
     (progress.clamp(0.0, 1.0), status)
 }
@@ -330,7 +336,18 @@ fn track_lifetime_wishes(
     ui: Option<Res<crate::icons::GameUi>>,
     objects: Query<&GameObject>,
     mut sims: Query<
-        (Entity, &Sim, &mut LifetimeWish, &Skills, Option<&Job>, &Relationships, Option<&mut crate::wishes::Wishes>, &mut Moodlets, Option<&crate::writing::Author>),
+        (
+            Entity,
+            &Sim,
+            &mut LifetimeWish,
+            &Skills,
+            Option<&Job>,
+            &Relationships,
+            Option<&mut crate::wishes::Wishes>,
+            &mut Moodlets,
+            Option<&crate::writing::Author>,
+            Option<&crate::meals::KnownRecipes>,
+        ),
         With<HouseholdMember>,
     >,
     ages: Query<&Sim, With<HouseholdMember>>,
@@ -360,7 +377,7 @@ fn track_lifetime_wishes(
     *next_check = clock.minutes + 15.0;
     let funds = household.as_ref().map_or(0, |h| h.funds);
     let worth = funds + objects.iter().map(|o| o.price as i64).sum::<i64>();
-    for (_, sim, mut w, skills, job, rels, wishes, mut moodlets, author) in &mut sims {
+    for (_, sim, mut w, skills, job, rels, wishes, mut moodlets, author, known) in &mut sims {
         // Careers where they've reached level 5.
         if let Some(j) = job
             && j.level >= 4
@@ -370,7 +387,9 @@ fn track_lifetime_wishes(
         }
         let careers = w.careers.clone();
         let royalties = author.map_or(0, |a| a.weekly_royalties());
-        let at = Standing { skills, job, rels, funds, worth, raised: w.raised, careers: &careers, royalties };
+        let all = data.map_or(&[][..], |d| &d.recipes[..]);
+        let recipes = (all.iter().filter(|r| crate::meals::knows(r, skills.level("Cooking"), known)).count(), all.len());
+        let at = Standing { skills, job, rels, funds, worth, raised: w.raised, careers: &careers, royalties, recipes };
         // One picked for them that's half done already isn't much of a dream: the next that
         // suits them instead.
         if w.auto && w.status.is_empty() {

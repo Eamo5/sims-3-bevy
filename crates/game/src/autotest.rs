@@ -375,6 +375,14 @@ fn ask_question(
     ui: Option<Res<crate::icons::GameUi>>,
     sel: Query<(Entity, &crate::sim::Sim), With<crate::sim::Selected>>,
 ) {
+    // RECIPE=<key>: the selected Sim's next meal is that recipe.
+    if let (Ok(key), Some(ui)) = (std::env::var("RECIPE"), ui.as_ref())
+        && let Ok((e, _)) = sel.single()
+        && !*done
+        && let Some(r) = ui.data.recipes.iter().position(|r| r.key == key)
+    {
+        commands.entity(e).insert(crate::meals::MealPlan(r));
+    }
     let Ok(what) = std::env::var("ASK") else { return };
     if *done || time.elapsed_secs() < 3.0 {
         return;
@@ -968,6 +976,17 @@ fn auto_action(
             });
         }
         *done = true;
+        return;
+    }
+    // "BuyRecipe:<recipe key>": the selected Sim goes to the bookstore for that recipe book.
+    if let (Some(key), Some(ui)) = (name.strip_prefix("BuyRecipe:"), ui.as_ref()) {
+        let r = ui.data.recipes.iter().position(|r| r.key == key);
+        let lot = (0..world.data.lots.len()).find(|&l| crate::opportunities::lot_types(&world.data, l).contains(&"Bookstore"));
+        if let (Some(r), Some(lot), Ok(mut q)) = (r, lot, sel.single_mut()) {
+            *done = true;
+            info!("buying the recipe book for {key} at lot {lot}");
+            q.push_player(crate::interact::Action::new("Buy a Recipe Book", crate::interact::ActionKind::Visit { lot, activity: crate::meals::RECIPE_TASK + r }, false));
+        }
         return;
     }
     // "Visit:<lot name part>": the selected Sim drives to that community lot.

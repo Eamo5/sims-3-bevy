@@ -13,6 +13,8 @@ pub struct BakedData {
     pub catalog_index: HashMap<Key, usize>,
     pub models: PackReader,
     pub world_models: Option<PackReader>,
+    /// The food recipes make (dishes and plates, full and emptied).
+    pub food_models: Option<PackReader>,
     pub cas: CasBaked,
     pub cas_pack: PackReader,
     pub clips: Option<PackReader>,
@@ -27,15 +29,16 @@ impl BakedData {
         let catalog_index = catalog.iter().enumerate().map(|(i, c)| (c.objd, i)).collect();
         let models = PackReader::open(&g.join("models.pack")).map_err(|e| format!("models: {e}"))?;
         let world_models = world.and_then(|w| PackReader::open(&root.world_dir(w).join("models.pack")).ok());
+        let food_models = PackReader::open(&g.join("food.pack")).ok();
         let cas: CasBaked = s3bake::read_value(&g.join("cas.bin")).map_err(|e| format!("cas: {e}"))?;
         let cas_pack = PackReader::open(&g.join("cas.pack")).map_err(|e| format!("cas pack: {e}"))?;
         let clips = PackReader::open(&g.join("clips.pack")).ok();
         let clip_names: Vec<String> = s3bake::read_value(&g.join("clip_names.bin")).unwrap_or_default();
-        Ok(Self { root, catalog, catalog_index, models, world_models, cas, cas_pack, clips, clip_names })
+        Ok(Self { root, catalog, catalog_index, models, world_models, food_models, cas, cas_pack, clips, clip_names })
     }
 
     pub fn model(&self, k: &Key) -> Option<BakedModel> {
-        self.world_models.as_ref().and_then(|p| p.get(k)).or_else(|| self.models.get(k))
+        self.world_models.as_ref().and_then(|p| p.get(k)).or_else(|| self.models.get(k)).or_else(|| self.food_models.as_ref().and_then(|p| p.get(k)))
     }
 
     pub fn texture_bytes(&self, k: &Key) -> Option<Vec<u8>> {

@@ -1266,7 +1266,11 @@ fn run_actions(
                                     let acts = crate::rabbitholes::activities(l);
                                     let task = crate::opportunities::opportunity_task(opps, *activity)
                                         .map(|t| t.0)
-                                        .or_else(|| (*activity == crate::gardening::SEEDS_TASK).then_some(&crate::gardening::BUY_SEEDS));
+                                        .or_else(|| (*activity == crate::gardening::SEEDS_TASK).then_some(&crate::gardening::BUY_SEEDS))
+                                        .or_else(|| crate::meals::recipe_task(*activity));
+                                    if crate::meals::recipe_task(*activity).is_some() {
+                                        commands.entity(me).insert(crate::meals::BuyingRecipe(*activity - crate::meals::RECIPE_TASK));
+                                    }
                                     if let Some(a) = task.or_else(|| acts.get(*activity)) {
                                         let place = crate::rabbitholes::lot_title(l, name);
                                         crate::rabbitholes::head_out(&mut commands, &clock, me, sim, *lot, a, place, household.as_deref_mut(), &mut notes);

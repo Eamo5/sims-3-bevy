@@ -65,8 +65,8 @@ installation is unreachable.
   written and the week's royalties. Kept in saves.
 - **Lifetime wishes**, the base game's own (CEO of a Mega-Corporation, Leader of the Free
   World, Become a Master Thief, Rock Star, Swimming in Cash, Super Popular, Heartbreaker,
-  Master of the Arts, Renaissance Sim, Professional Author, Surrounded by Family, Jack of All
-  Trades and more; 27 in all), with their icons, targets and rewards from the game's dream tables. Create-a-Sim
+  Master of the Arts, Renaissance Sim, Professional Author, The Culinary Librarian, Surrounded
+  by Family, Jack of All Trades and more; 28 in all), with their icons, targets and rewards from the game's dream tables. Create-a-Sim
   offers five that suit the Sim's traits; a child growing into a teen picks one in the game's
   dialog; Sims moving in without one take the best fit (one not already half done). The wish
   sits beside the others with its progress (§12,000 of §50,000, Painting 7/10 · Guitar 4/10,
@@ -98,6 +98,13 @@ installation is unreachable.
   table, fork in hand), or eat standing when every seat is taken, and leave dirty dishes that
   neat Sims clear away. Guests eat but don't cook, children don't use the stove. Or phone for
   a pizza (the game's pizza box arrives on the kitchen counter within the hour).
+- **Recipes** from the game's recipe list: the stove offers "Cook Breakfast/Lunch/Dinner ›"
+  and "Cook Dessert ›" with the recipes the Sim knows for that time of day (Mac and Cheese and
+  Waffles to start; Goopy Carbonara, Spaghetti, Key Lime Pie, Lobster Thermidor... as Cooking
+  grows; meatless ones for vegetarians), the rest from recipe books bought at the bookstore
+  at the game's prices. The food is the game's own models in their geometry states — the dish
+  on the serving platter, a plateful in front of each Sim — scraped clean once eaten. The
+  Culinary Librarian lifetime wish asks for every one. Learned recipes are kept in saves.
 - **Props in hand**: the game's own plates, forks, books and guitars, held as its animation
   clips place them (each Sim clip's companion prop clips and their parent events).
 - **Thought and speech balloons**: the game's own balloon art and balloon table. Sims think about

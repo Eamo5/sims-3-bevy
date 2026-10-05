@@ -3,8 +3,14 @@
 //! down at a dining table to eat (the plate set on the table in front of them, a fork in hand)
 //! or eat standing when there's no seat, and leave dirty dishes behind for someone to clear
 //! away. The platter itself is left to wash up once the last serving is taken.
+//!
+//! What's cooked is one of the game's recipes (its `RecipeMasterList`): those a Sim knows (by
+//! Cooking skill, or learned from a recipe book) for the time of day — breakfast, lunch or
+//! dinner — or a dessert. The food is the game's own food models, set on the serving platter
+//! and the plates: the dish full, then scraped clean once it's been eaten.
 
 use bevy::prelude::*;
+use rand::seq::IndexedRandom;
 
 use crate::PlayMode;
 use crate::baked::Baked;
@@ -17,7 +23,7 @@ pub struct MealsPlugin;
 
 impl Plugin for MealsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (deliver_pizza, meal_requests, release_plates).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (deliver_pizza, meal_requests, release_plates, learn_recipes).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -63,6 +69,135 @@ fn deliver_pizza(
         commands.entity(p).insert(Meal { servings: 6 });
         notes.push("The pizza has arrived! It's on the kitchen counter.");
     }
+}
+
+/// What's being cooked: a recipe (index into the game's recipes).
+#[derive(Component)]
+pub struct MealPlan(pub usize);
+
+/// The recipe a platter holds (and so each plate from it).
+#[derive(Component, Clone, Copy)]
+pub struct Dish(pub usize);
+
+/// The dish a Sim took a plate of.
+#[derive(Component)]
+struct Plateful(usize);
+
+/// Recipes a Sim has learned from recipe books (by key).
+#[derive(Component, Clone, Default, Debug)]
+pub struct KnownRecipes(pub Vec<String>);
+
+/// Buying a recipe book at the bookstore, and reading it there.
+pub static BUY_RECIPE: crate::rabbitholes::Activity = crate::rabbitholes::Activity {
+    name: "Buy a Recipe Book",
+    minutes: 40.0,
+    cost: 0,
+    per_hour: [-4.0, -4.0, -2.0, 10.0, 0.0, 10.0],
+    skill: Some("Cooking"),
+    open: 9.0,
+    close: 21.0,
+};
+
+/// Visit activity numbers for recipe books: this plus the recipe's index.
+pub const RECIPE_TASK: usize = 2000;
+
+pub fn recipe_task(activity: usize) -> Option<&'static crate::rabbitholes::Activity> {
+    (RECIPE_TASK..RECIPE_TASK + 1000).contains(&activity).then_some(&BUY_RECIPE)
+}
+
+/// The recipe book a Sim has gone to buy.
+#[derive(Component)]
+pub struct BuyingRecipe(pub usize);
+
+/// Back from the bookstore with it.
+#[derive(Component)]
+pub struct RecipeBookBought;
+
+/// Whether a Sim knows a recipe: by skill, or from its book.
+pub fn knows(r: &s3bake::gamedata::RecipeInfo, cooking: u32, known: Option<&KnownRecipes>) -> bool {
+    (r.auto && r.level as u32 <= cooking) || known.is_some_and(|k| k.0.contains(&r.key))
+}
+
+/// The recipe books a Sim could learn from (those of recipes they don't know, up to their
+/// skill), with their prices.
+pub fn books_for(data: &s3bake::GameDataBaked, cooking: u32, known: Option<&KnownRecipes>) -> Vec<usize> {
+    data.recipes.iter().enumerate().filter(|(_, r)| r.book_price > 0 && r.level as u32 <= cooking && !knows(r, cooking, known)).map(|(i, _)| i).collect()
+}
+
+/// A recipe book read: the recipe learned and paid for.
+fn learn_recipes(
+    mut commands: Commands,
+    ui: Option<Res<crate::icons::GameUi>>,
+    mut household: Option<ResMut<crate::interact::Household>>,
+    mut sims: Query<(Entity, &Sim, &BuyingRecipe, Option<&mut KnownRecipes>), With<RecipeBookBought>>,
+    mut notes: ResMut<Notifications>,
+) {
+    for (e, sim, buying, known) in &mut sims {
+        commands.entity(e).remove::<(BuyingRecipe, RecipeBookBought)>();
+        let Some(r) = ui.as_ref().and_then(|u| u.data.recipes.get(buying.0)) else { continue };
+        if let Some(h) = household.as_mut() {
+            h.funds -= r.book_price as i64;
+        }
+        match known {
+            Some(mut k) => {
+                if !k.0.contains(&r.key) {
+                    k.0.push(r.key.clone());
+                }
+            }
+            None => {
+                commands.entity(e).insert(KnownRecipes(vec![r.key.clone()]));
+            }
+        }
+        notes.push(format!("{} bought a recipe book for §{} and learned to make {}.", sim.first, r.book_price, r.name));
+    }
+}
+
+/// Ingredients only found, never bought.
+const RARE: [&str; 4] = ["Lifefruit", "Deathfish", "Flame Fruit", "Ingredient"];
+
+/// The meal of the hour (`MEAL_*`) and its name.
+pub fn meal_time(hour: f32) -> (u8, &'static str) {
+    use s3bake::gamedata::{MEAL_BREAKFAST, MEAL_BRUNCH, MEAL_DINNER, MEAL_LUNCH};
+    if (4.0..10.5).contains(&hour) {
+        (MEAL_BREAKFAST | MEAL_BRUNCH, "Breakfast")
+    } else if (10.5..15.0).contains(&hour) {
+        (MEAL_LUNCH | MEAL_BRUNCH, "Lunch")
+    } else {
+        (MEAL_DINNER, "Dinner")
+    }
+}
+
+/// The recipes a Sim can cook for a meal time (vegetarians, the meatless ones).
+pub fn cookable(data: &s3bake::GameDataBaked, sim: &Sim, cooking: u32, known: Option<&KnownRecipes>, meal: u8) -> Vec<usize> {
+    let veg = sim.traits.contains(&crate::life::Trait::Vegetarian);
+    data.recipes
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.meals & meal != 0 && (!veg || r.vegetarian))
+        .filter(|(_, r)| knows(r, cooking, known))
+        .filter(|(_, r)| !r.ingredients.iter().any(|i| RARE.contains(&i.as_str())))
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// The food on a plate or platter (its model, a child of the dish).
+#[derive(Component)]
+struct DishFood(Entity);
+
+/// Sets one of the recipes' food models on a dish, in place of any food already there.
+fn set_food(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetCtx, dish: Entity, old: Option<&DishFood>, model: Option<s3bake::Key>) {
+    if let Some(f) = old {
+        commands.entity(f.0).despawn();
+        commands.entity(dish).remove::<DishFood>();
+    }
+    let Some(model) = model else { return };
+    let parts = assets.model(ctx, model);
+    if parts.is_empty() {
+        return;
+    }
+    let food = crate::objects::spawn_parts(commands, &parts, Transform::IDENTITY);
+    commands.entity(food).insert(ChildOf(dish));
+    commands.entity(dish).insert(DishFood(food));
 }
 
 /// What a Sim has just done with food (set by the interactions, handled here).
@@ -160,16 +295,28 @@ fn spawn_dish(
 #[allow(clippy::type_complexity)]
 fn meal_requests(
     mut commands: Commands,
-    mut sims: Query<(Entity, &MealRequest, &Transform, &mut ActionQueue, &Sim, Option<&EatingPlate>)>,
+    mut sims: Query<(
+        Entity,
+        &MealRequest,
+        &Transform,
+        &mut ActionQueue,
+        &Sim,
+        Option<&EatingPlate>,
+        (Option<&MealPlan>, Option<&Plateful>, &crate::interact::Skills, Option<&KnownRecipes>),
+    )>,
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy)>,
-    mut meals: Query<&mut Meal>,
+    mut meals: Query<(&mut Meal, Option<&Dish>, Option<&DishFood>)>,
+    foods: Query<&DishFood>,
     household: Query<&Sim, With<HouseholdMember>>,
     (data, catalog, mut assets): (Res<Baked>, Res<Catalog>, ResMut<ObjectAssets>),
     (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut notes: ResMut<Notifications>,
+    (ui, clock, mut funds): (Option<Res<crate::icons::GameUi>>, Res<crate::clock::GameClock>, Option<ResMut<crate::interact::Household>>),
 ) {
+    let recipes = ui.as_ref().map(|u| u.data.clone());
+    let recipe = |i: usize| recipes.as_ref().and_then(|d| d.recipes.get(i));
     let mut taken: Vec<Entity> = Vec::new();
-    for (me, req, tf, mut queue, sim, eating) in &mut sims {
+    for (me, req, tf, mut queue, sim, eating, (plan, plateful, skills, known)) in &mut sims {
         commands.entity(me).remove::<MealRequest>();
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
         match *req {
@@ -178,18 +325,56 @@ fn meal_requests(
                 let at = surface_near(&objects, s.world_center(stf), 6.0).unwrap_or(Vec3::new(s.world_center(stf).x, stf.translation.y + s.height, s.world_center(stf).z));
                 let servings = household.iter().filter(|h| h.age != Age::Baby).count().clamp(2, 8) as u8;
                 let yaw = stf.rotation.to_euler(EulerRot::YXZ).0;
+                // The recipe chosen, or the best they know for the time of day.
+                let (meal, word) = meal_time(clock.hour_f());
+                let dish = plan.map(|p| p.0).or_else(|| {
+                    let d = recipes.as_ref()?;
+                    let mut options = cookable(d, sim, skills.level("Cooking"), known, meal);
+                    options.sort_by_key(|&i| std::cmp::Reverse(d.recipes[i].level));
+                    options.truncate(3);
+                    options.choose(&mut rand::rng()).copied()
+                });
+                commands.entity(me).remove::<MealPlan>();
+                let r = dish.and_then(recipe);
+                let label = r.map_or("Group Meal".to_string(), |r| r.name.clone());
                 let Some(platter) = spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, PLATTER, ObjectKind::Meal, "Group Meal", at, yaw) else { continue };
+                set_food(&mut commands, &mut assets, &mut ctx, platter, None, r.and_then(|r| r.group));
                 commands.entity(platter).insert(Meal { servings });
-                info!("meal served at {at:.1?}");
-                notes.push(format!("{} made dinner for {servings}. Dinner is served!", sim.first));
+                if r.is_some() {
+                    let name = label.clone();
+                    commands.entity(platter).queue_silenced(move |mut w: EntityWorldMut| {
+                        if let Some(mut g) = w.get_mut::<GameObject>() {
+                            g.name = name;
+                        }
+                    });
+                }
+                if let Some(d) = dish {
+                    commands.entity(platter).insert(Dish(d));
+                }
+                // The ingredients.
+                if let (Some(r), Some(h)) = (r, funds.as_mut()) {
+                    h.funds -= r.cost as i64;
+                }
+                info!("meal served at {at:.1?}: {label}");
+                let dish_word = if r.is_some_and(|r| r.meals == s3bake::gamedata::MEAL_DESSERT) { "Dessert" } else { word };
+                notes.push(match r {
+                    Some(r) => format!("{} made {} for {servings}. {dish_word} is served!", sim.first, r.name),
+                    None => format!("{} made {} for {servings}. {dish_word} is served!", sim.first, dish_word.to_lowercase()),
+                });
                 // The cook eats too.
                 queue.0.push_front(Action::new("Grab a Plate", ActionKind::Object { target: platter, def: 0 }, true));
             }
             MealRequest::Grabbed(platter) => {
-                if let Ok(mut m) = meals.get_mut(platter) {
+                if let Ok((mut m, dish, food)) = meals.get_mut(platter) {
                     m.servings = m.servings.saturating_sub(1);
+                    match dish {
+                        Some(d) => commands.entity(me).insert(Plateful(d.0)),
+                        None => commands.entity(me).remove::<Plateful>(),
+                    };
                     if m.servings == 0 {
-                        // The empty platter waits to be washed up.
+                        // The empty platter waits to be washed up (what's left of the dish on it).
+                        let emptied = dish.and_then(|d| recipe(d.0)).and_then(|r| r.group_empty);
+                        set_food(&mut commands, &mut assets, &mut ctx, platter, food, emptied);
                         commands.entity(platter).remove::<Meal>().queue_silenced(|mut w: EntityWorldMut| {
                             if let Some(mut g) = w.get_mut::<GameObject>() {
                                 g.kind = ObjectKind::DirtyDishes;
@@ -216,6 +401,7 @@ fn meal_requests(
                 let Some((_, at)) = dining_seat_for(&objects, chair) else { continue };
                 let yaw = ctf.rotation.to_euler(EulerRot::YXZ).0;
                 if let Some(plate) = spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, PLATE, ObjectKind::DirtyDishes, "Dirty Dishes", at, yaw) {
+                    set_food(&mut commands, &mut assets, &mut ctx, plate, None, plateful.and_then(|p| recipe(p.0)).and_then(|r| r.single));
                     // (Not to be cleared away while it's being eaten from.)
                     commands.entity(plate).insert(UsedBy(Some(me)));
                     commands.entity(me).insert(EatingPlate(plate));
@@ -224,14 +410,21 @@ fn meal_requests(
             MealRequest::Ate => {
                 info!("{} finished eating", sim.first);
                 if let Some(p) = eating {
-                    commands.entity(p.0).insert(UsedBy(None));
                     commands.entity(me).remove::<EatingPlate>();
+                    commands.entity(p.0).insert(UsedBy(None));
+                    // The plate, eaten clean.
+                    let empty = plateful.and_then(|p| recipe(p.0)).and_then(|r| r.single_empty);
+                    set_food(&mut commands, &mut assets, &mut ctx, p.0, foods.get(p.0).ok(), empty);
                 }
+                commands.entity(me).remove::<Plateful>();
             }
             MealRequest::AteStanding => {
                 // The plate goes on the nearest surface, or the floor.
                 let at = surface_near(&objects, tf.translation, 4.0).unwrap_or(tf.translation + tf.rotation * Vec3::new(0.3, 0.0, 0.4));
-                spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, PLATE, ObjectKind::DirtyDishes, "Dirty Dishes", at, 0.0);
+                if let Some(plate) = spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, PLATE, ObjectKind::DirtyDishes, "Dirty Dishes", at, 0.0) {
+                    set_food(&mut commands, &mut assets, &mut ctx, plate, None, plateful.and_then(|p| recipe(p.0)).and_then(|r| r.single_empty));
+                }
+                commands.entity(me).remove::<Plateful>();
             }
         }
     }
