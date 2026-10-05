@@ -1057,7 +1057,7 @@ fn auto_action(
         let Some(tomato) = ui.data.plants.iter().position(|p| p.produce == "Tomato") else { return };
         let Ok(me) = sel_e.single() else { return };
         let Ok(tf) = sel_tf.get(me) else { return };
-        commands.insert_resource(crate::gardening::Garden { seeds: [(tomato, 2)].into_iter().collect() });
+        commands.insert_resource(crate::gardening::Garden { seeds: [(tomato, 2)].into_iter().collect(), ..default() });
         let at = tf.translation + tf.rotation * Vec3::new(0.0, 0.0, 3.0);
         if let Ok(mut q) = sel.single_mut() {
             q.push_player(crate::interact::Action::new("Plant", crate::interact::ActionKind::PlantSeed { at: Vec2::new(at.x, at.z), level: 1, plant: tomato }, false));

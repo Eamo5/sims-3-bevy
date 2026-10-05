@@ -153,6 +153,9 @@ pub struct SaveGame {
     pub seeds: Vec<(String, u32)>,
     #[serde(default)]
     pub plants: Vec<crate::gardening::SavedPlant>,
+    /// Produce the household has grown to perfection.
+    #[serde(default)]
+    pub perfect_produce: Vec<String>,
     /// The household's collection journal.
     #[serde(default)]
     pub collection: crate::collecting::Collection,
@@ -458,6 +461,7 @@ fn save_game(
             _ => Vec::new(),
         },
         plants: ui.as_deref().map(|u| crate::gardening::saved_plants(&plants, &u.data)).unwrap_or_default(),
+        perfect_produce: garden.as_deref().map(|g| g.perfect.clone()).unwrap_or_default(),
         collection: collection.clone(),
         graves: graves
             .iter()
@@ -618,7 +622,7 @@ fn apply_loaded_game(
         crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &game.paint, &mut faces);
     }
     commands.insert_resource(crate::building::LotPaint(game.paint.clone()));
-    commands.insert_resource(crate::gardening::PendingPlants(game.plants.clone(), game.seeds.clone()));
+    commands.insert_resource(crate::gardening::PendingPlants(game.plants.clone(), game.seeds.clone(), game.perfect_produce.clone()));
     commands.insert_resource(game.collection.clone());
     // The household's dead, back in their graves.
     if let Some(entry) = data.0.catalog.iter().find(|c| c.instance_name == "UrnstoneHuman") {

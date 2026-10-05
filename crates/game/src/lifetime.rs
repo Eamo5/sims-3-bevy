@@ -52,6 +52,8 @@ pub enum Goal {
     Royalties,
     /// Know every recipe.
     Recipes,
+    /// Grow `n` kinds of perfect produce.
+    PerfectPlants,
 }
 
 pub struct LifetimeWishDef {
@@ -145,6 +147,7 @@ pub static LIFETIME_WISHES: &[LifetimeWishDef] = &[
     LifetimeWishDef { check: "RaiseNChildrenFromBabyToYoungAdultCheckFunction", name: "Surrounded by Family", desc: "See {n} children grow up into teens", goal: Goal::RaiseChildren, n: 5.0, icon: "w_lifetime_raise_baby_to_YA", score: 3500, traits: &[T::FamilyOriented, T::Good, T::Childish] },
     LifetimeWishDef { check: "NSimoleonsPerWeekInRoyaltiesMajorDreamCheckFunction", name: "Professional Author", desc: "Earn §{n} a week in royalties from books", goal: Goal::Royalties, n: 4000.0, icon: "w_lifetime_simoleon_royalty", score: 3250, traits: &[T::Bookworm, T::Artistic, T::Genius, T::HopelessRomantic] },
     LifetimeWishDef { check: "KnowEveryCookingRecipieMajorDreamCheckFunction", name: "The Culinary Librarian", desc: "Know every recipe", goal: Goal::Recipes, n: 0.0, icon: "w_lifetime_know_every_recipe", score: 3000, traits: &[T::NaturalCook, T::Bookworm, T::Perfectionist] },
+    LifetimeWishDef { check: "HaveNDifferentPerfectPlantsMajorDreamCheckFunction", name: "The Perfect Garden", desc: "Grow {n} different kinds of perfect produce", goal: Goal::PerfectPlants, n: 8.0, icon: "w_lifetime_have_perfect_plants", score: 3250, traits: &[T::GreenThumb, T::LovesTheOutdoors, T::Perfectionist] },
     LifetimeWishDef { check: "ReachLevel5In4CareersMajorDreamCheckFunction", name: "Jack of All Trades", desc: "Reach level 5 in {n} different careers", goal: Goal::CareerHopper, n: 4.0, icon: "w_lifetime_L5_in4_careers", score: 3500, traits: &[T::Ambitious, T::Excitable, T::Absentminded] },
 ];
 
@@ -284,6 +287,8 @@ struct Standing<'a> {
     royalties: i64,
     /// Recipes known, of all there are.
     recipes: (usize, usize),
+    /// Kinds of produce grown perfect.
+    perfect: usize,
 }
 
 /// How far along a lifetime wish is (0..1, past 1 when done) and what that means.
@@ -323,6 +328,7 @@ fn measure(d: &LifetimeWishDef, data: Option<&s3bake::GameDataBaked>, at: &Stand
         Goal::CareerHopper => (at.careers.len() as f32 / n, format!("Level 5 in {} of {n} careers", at.careers.len())),
         Goal::Royalties => (at.royalties as f32 / n, format!("§{} of §{} a week", group(at.royalties), group(n as i64))),
         Goal::Recipes => (at.recipes.0 as f32 / at.recipes.1.max(1) as f32, format!("{} of {} recipes known", at.recipes.0, at.recipes.1)),
+        Goal::PerfectPlants => (at.perfect as f32 / n, format!("{} of {n} kinds grown perfect", at.perfect)),
     };
     (progress.clamp(0.0, 1.0), status)
 }
@@ -354,6 +360,7 @@ fn track_lifetime_wishes(
     mut notes: ResMut<Notifications>,
     mut play: MessageWriter<crate::sound::PlaySound>,
     mut next_check: Local<f64>,
+    garden: Option<Res<crate::gardening::Garden>>,
 ) {
     let data = ui.as_ref().map(|u| &*u.data);
     let mut changed = false;
@@ -389,7 +396,8 @@ fn track_lifetime_wishes(
         let royalties = author.map_or(0, |a| a.weekly_royalties());
         let all = data.map_or(&[][..], |d| &d.recipes[..]);
         let recipes = (all.iter().filter(|r| crate::meals::knows(r, skills.level("Cooking"), known)).count(), all.len());
-        let at = Standing { skills, job, rels, funds, worth, raised: w.raised, careers: &careers, royalties, recipes };
+        let perfect = garden.as_ref().map_or(0, |g| g.perfect.len());
+        let at = Standing { skills, job, rels, funds, worth, raised: w.raised, careers: &careers, royalties, recipes, perfect };
         // One picked for them that's half done already isn't much of a dream: the next that
         // suits them instead.
         if w.auto && w.status.is_empty() {

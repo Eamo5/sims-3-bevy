@@ -51,7 +51,11 @@ installation is unreachable.
   or tree) while kept watered and weeded, then bear tomatoes, apples, onions, garlic... to
   harvest and sell. Planting, watering (with the watering can), weeding and harvesting use
   the game's gardening animations and teach Gardening; green-thumbed Sims tend their plants
-  on their own. The garden is kept in saves.
+  on their own. Each plant has the game's quality, Horrifying to Perfect: it improves while
+  watered and weeded (faster for a skilled gardener) and suffers when neglected, and its
+  produce sells at the game's multiplier for its quality (up to four times for Perfect).
+  Perfect produce counts towards The Perfect Garden lifetime wish. The garden is kept in
+  saves.
 - **Breakdowns**: showers, baths, sinks, TVs, computers and stereos break now and then with
   use (toilets clog), less often the better they are; Sims repair them with the game's own
   repair animations, learning Handiness (handy and neat Sims do it on their own), or the
@@ -67,8 +71,8 @@ installation is unreachable.
   written and the week's royalties. Kept in saves.
 - **Lifetime wishes**, the base game's own (CEO of a Mega-Corporation, Leader of the Free
   World, Become a Master Thief, Rock Star, Swimming in Cash, Super Popular, Heartbreaker,
-  Master of the Arts, Renaissance Sim, Professional Author, The Culinary Librarian, Surrounded
-  by Family, Jack of All Trades and more; 28 in all), with their icons, targets and rewards
+  Master of the Arts, Renaissance Sim, Professional Author, The Culinary Librarian, The
+  Perfect Garden, Surrounded by Family, Jack of All Trades and more; 29 in all), with their icons, targets and rewards
   from the game's dream tables. Create-a-Sim offers five that suit the Sim's traits; a child
   growing into a teen picks one in the game's dialog; Sims moving in without one take the
   best fit (one not already half done). The wish sits beside the others with its progress

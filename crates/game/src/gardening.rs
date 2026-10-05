@@ -26,10 +26,37 @@ impl Plugin for GardeningPlugin {
     }
 }
 
-/// The household's seeds, by plant (index into the game data's plants).
+/// The household's seeds, by plant (index into the game data's plants), and the produce it's
+/// grown to perfection.
 #[derive(Resource, Default, Clone)]
 pub struct Garden {
     pub seeds: BTreeMap<usize, u32>,
+    pub perfect: Vec<String>,
+}
+
+/// The game's produce qualities, worst to best, with what each sells for (its harvest
+/// tuning's `kCostMultiplierForPlantables`).
+pub const QUALITIES: [(&str, f32); 10] = [
+    ("Horrifying", 0.7),
+    ("Putrid", 0.8),
+    ("Bad", 0.9),
+    ("Normal", 1.0),
+    ("Nice", 1.1),
+    ("Very Nice", 1.5),
+    ("Great", 2.0),
+    ("Excellent", 2.5),
+    ("Outstanding", 3.0),
+    ("Perfect", 4.0),
+];
+
+/// A plant's quality (0..1) as one of the game's qualities.
+pub fn quality_tier(q: f32) -> usize {
+    ((q * 10.0).ceil() as usize).clamp(1, 10) - 1
+}
+
+/// What a newly planted seed starts at (a Normal plant).
+fn seed_quality() -> f32 {
+    0.35
 }
 
 /// A planted garden plant.
@@ -45,6 +72,12 @@ pub struct GrowingPlant {
     pub ready: u32,
     pub harvests_left: u32,
     pub next_ready: f64,
+    /// 0 (Horrifying) .. 1 (Perfect): better with care and a skilled gardener, worse neglected.
+    #[serde(default = "seed_quality")]
+    pub quality: f32,
+    /// The skill (0..1) of whoever last tended it.
+    #[serde(default)]
+    pub care: f32,
 }
 
 /// A plant in a saved game (where it stands, and how it's doing).
@@ -58,7 +91,7 @@ pub struct SavedPlant {
 
 /// Plants (and seeds, by plant name) from a saved game, waiting for the game data.
 #[derive(Resource)]
-pub struct PendingPlants(pub Vec<SavedPlant>, pub Vec<(String, u32)>);
+pub struct PendingPlants(pub Vec<SavedPlant>, pub Vec<(String, u32)>, pub Vec<String>);
 
 /// What a Sim has just done in the garden (set by the interactions, handled here).
 #[derive(Component, Clone, Copy, Debug)]
@@ -206,7 +239,18 @@ fn garden_requests(
                 let Some(info) = ui.data.plants.get(plant) else { continue };
                 let Some(n) = garden.seeds.get_mut(&plant).filter(|n| **n > 0) else { continue };
                 *n -= 1;
-                let state = GrowingPlant { plant, growth: 0.0, water: 70.0, weedy: false, ready: 0, harvests_left: info.lifetime.max(1), next_ready: 0.0 };
+                // (Better gardeners plant better seeds.)
+                let state = GrowingPlant {
+                    plant,
+                    growth: 0.0,
+                    water: 70.0,
+                    weedy: false,
+                    ready: 0,
+                    harvests_left: info.lifetime.max(1),
+                    next_ready: 0.0,
+                    quality: seed_quality() + level * 0.02,
+                    care: level / 10.0,
+                };
                 let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
                 if plant_at(&mut commands, &mut assets, &mut ctx, &catalog, info, state, at, rng.random_range(0.0..6.28)).is_some() {
                     notes.push(format!("{} planted a {}.", sim.first, info.name.to_lowercase()));
@@ -216,12 +260,14 @@ fn garden_requests(
             GardenRequest::Water(e) => {
                 if let Ok((mut p, _)) = plants.get_mut(e) {
                     p.water = 100.0;
+                    p.care = level / 10.0;
                     learn(sim, me, &mut skills, &mut notes, &mut life, 25.0);
                 }
             }
             GardenRequest::Weed(e) => {
                 if let Ok((mut p, _)) = plants.get_mut(e) {
                     p.weedy = false;
+                    p.care = level / 10.0;
                     learn(sim, me, &mut skills, &mut notes, &mut life, 40.0);
                 }
             }
@@ -232,16 +278,19 @@ fn garden_requests(
                 p.ready = 0;
                 p.next_ready = clock.minutes + CROP_MINUTES;
                 p.harvests_left = p.harvests_left.saturating_sub(1);
-                // Better gardeners grow better produce.
-                let quality = 1.0 + level * 0.15;
-                // A Super Green Thumb's produce is finer.
-                let quality = if crate::wishes::has(wishes, "SuperGreenThumb") { quality * 1.5 } else { quality };
-                let worth = (picked as f32 * info.price as f32 * quality).round() as i64;
+                // The plant's quality, give or take (a Super Green Thumb's a step finer).
+                let q = p.quality + rng.random_range(-0.075..0.075) + if crate::wishes::has(wishes, "SuperGreenThumb") { 0.1 } else { 0.0 };
+                let (word, multiplier) = QUALITIES[quality_tier(q)];
+                let worth = (picked as f32 * info.price as f32 * multiplier).round() as i64;
                 if let Some(h) = household.as_mut() {
                     h.funds += worth;
                 }
                 learn(sim, me, &mut skills, &mut notes, &mut life, info.skill_harvest);
-                notes.push(format!("{} harvested {picked} {} and sold them for §{worth}.", sim.first, plural(&info.produce, picked)));
+                notes.push(format!("{} harvested {picked} {word} {} and sold them for §{worth}.", sim.first, plural(&info.produce, picked)));
+                if word == "Perfect" && !garden.perfect.contains(&info.produce) {
+                    garden.perfect.push(info.produce.clone());
+                    notes.push(format!("{} grew perfect {} for the first time!", sim.first, plural(&info.produce, 2)));
+                }
                 if p.harvests_left == 0 {
                     notes.push(format!("The {} has borne its last crop.", info.name.to_lowercase()));
                     if let Some(s) = soil {
@@ -311,6 +360,11 @@ fn grow(
         if !p.weedy && rng.random_bool((info.weeds as f64 * 0.04 * dt as f64 / 60.0).clamp(0.0, 1.0)) {
             p.weedy = true;
         }
+        // Watered and weeded, a plant improves (from the harvest tuning's base improvement);
+        // parched or weedy, it suffers.
+        let tended = p.water > 30.0 && !p.weedy;
+        let change = if tended { 0.091 * (0.4 + p.care) } else if p.water <= 0.0 || p.weedy { -0.091 * 0.5 } else { 0.0 };
+        p.quality = (p.quality + change * dt / 1440.0).clamp(0.0, 1.0);
         if p.water > 0.0 && p.growth < 1.0 {
             let rate = (0.5 + p.water / 200.0) * if p.weedy { 0.5 } else { 1.0 };
             p.growth = (p.growth + dt / GROW_MINUTES * rate).min(1.0);
@@ -340,7 +394,7 @@ fn restore_plants(
     let (Some(pending), Some(ui)) = (pending, ui) else { return };
     commands.remove_resource::<PendingPlants>();
     let seeds = pending.1.iter().filter_map(|(name, n)| Some((ui.data.plants.iter().position(|p| &p.name == name)?, *n))).collect();
-    commands.insert_resource(Garden { seeds });
+    commands.insert_resource(Garden { seeds, perfect: pending.2.clone() });
     let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
     for s in &pending.0 {
         let Some(i) = ui.data.plants.iter().position(|p| p.name == s.name) else { continue };
@@ -372,7 +426,7 @@ pub fn starter_seeds(data: &s3bake::GameDataBaked) -> Garden {
             seeds.insert(i, 1);
         }
     }
-    Garden { seeds }
+    Garden { seeds, ..default() }
 }
 
 /// The plants on the lot, for saving.
