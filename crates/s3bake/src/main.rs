@@ -27,6 +27,15 @@ fn main() {
         i += 1;
     }
     let root = s3bake::default_root();
+    if let Some(i) = args.iter().position(|a| a == "--households") {
+        // --households <world>: each premade household with its members' ages (CAS age bits).
+        let p = s3bake::load_premades(&root, &args[i + 1]).expect("premades not baked");
+        for h in &p.households {
+            let ages: Vec<String> = h.members.iter().map(|m| format!("{}:{:#x}", m.first_name.rsplit(':').next().unwrap_or(""), m.age)).collect();
+            println!("{:30} {}", h.name, ages.join(" "));
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--lots") {
         let w: s3bake::WorldBaked = s3bake::read_value(&root.world_dir(&args[i + 1]).join("world.bin")).expect("world");
         for (k, l) in w.lots.iter().enumerate() {

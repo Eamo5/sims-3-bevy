@@ -242,7 +242,8 @@ fn panic(
     >,
 ) {
     for (e, tf, mut q, sim, panicking, burning) in &mut sims {
-        if matches!(sim.age, Age::Baby) {
+        // (Babies and toddlers don't catch fire or panic: they've no animations for it.)
+        if sim.age.is_little() {
             continue;
         }
         // (Flames stand on what's burning: how far across, on the same floor.)

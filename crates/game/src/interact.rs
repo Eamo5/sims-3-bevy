@@ -1708,6 +1708,10 @@ fn autonomy(
             if !obj.kind.usable_by(sim.age) {
                 continue;
             }
+            // Visitors to the family's home don't sleep in its beds or bathe there.
+            if my_lot.is_none() && !household.contains(me) && matches!(obj.kind, ObjectKind::BedSingle | ObjectKind::BedDouble | ObjectKind::Shower | ObjectKind::Bathtub) {
+                continue;
+            }
             let dist = obj.world_center(otf).distance(tf.translation);
             if broken.contains(oe) {
                 if used.0.is_some_and(|u| u != me) {

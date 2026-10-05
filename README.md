@@ -113,6 +113,10 @@ installation is unreachable.
   and progress to the next); Career (the job and level, hours, days and pay, the performance
   meter and the next promotion); Simology (traits with what they mean, lifetime happiness and
   the rewards bought). F5 to F8 switch tabs.
+- **Babysitter**: when the grown-ups and teens are all out and a baby or toddler would be home
+  alone, a babysitter arrives by car, feeds them, changes them and plays with them, and goes
+  home (paid §10 an hour) once someone's back. Visitors don't sleep in the family's beds or
+  use its shower.
 - **Fire**: a poor (or clumsy) cook can set the stove alight; the flames flicker and light
   the room, spread to what's beside them and ruin it, and Sims nearby panic with the game's
   fire animations. Anyone caught in the flames burns: they may stop, drop and roll, or die

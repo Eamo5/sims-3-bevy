@@ -838,6 +838,22 @@ fn auto_action(
         *done = true;
         return;
     }
+    // "AllOut": every teen and grown-up heads out for four hours (the little ones stay home).
+    if name == "AllOut" {
+        commands.queue(|w: &mut World| {
+            let now = w.resource::<crate::clock::GameClock>().minutes;
+            let mut q = w.query_filtered::<(Entity, &crate::sim::Sim), With<crate::sim::HouseholdMember>>();
+            let out: Vec<Entity> = q.iter(w).filter(|(_, s)| s.age == crate::sim::Age::Teen || s.age.is_grown()).map(|(e, _)| e).collect();
+            for e in out {
+                w.entity_mut(e).insert((
+                    crate::rabbitholes::AtRabbitHole { lot: usize::MAX, activity: &crate::rabbitholes::SCHOOL, inside_from: now, until: now + 240.0, place: "town".into() },
+                    Visibility::Hidden,
+                ));
+            }
+        });
+        *done = true;
+        return;
+    }
     // "Burglar": a burglar breaks in now.
     if name == "Burglar" {
         commands.queue(|w: &mut World| w.resource_mut::<crate::burglar::Break>().force = true);
