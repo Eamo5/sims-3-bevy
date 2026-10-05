@@ -69,10 +69,14 @@ installation is unreachable.
   book gets one of the game's titles, turns out a flop, a success, a hit or a best seller, and
   pays royalties at noon each week, six times. The Skills tab shows the book under way, books
   written and the week's royalties. Kept in saves.
+- **Ranked chess** by the game's Logic tuning: "Play a Ranked Match" at a chess table pits the
+  Sim against an opponent of their rank (stronger each rank), won by Logic and a little luck;
+  wins lift them from Unranked through Apprentice, Tenderfoot, Journeyman and Instructor to
+  Grand Master. The record shows under Logic in the Skills tab and is saved.
 - **Lifetime wishes**, the base game's own (CEO of a Mega-Corporation, Leader of the Free
   World, Become a Master Thief, Rock Star, Swimming in Cash, Super Popular, Heartbreaker,
   Master of the Arts, Renaissance Sim, Professional Author, The Culinary Librarian, The
-  Perfect Garden, Surrounded by Family, Jack of All Trades and more; 29 in all), with their icons, targets and rewards
+  Perfect Garden, Chess Legend, Surrounded by Family, Jack of All Trades and more; 30 in all), with their icons, targets and rewards
   from the game's dream tables. Create-a-Sim offers five that suit the Sim's traits; a child
   growing into a teen picks one in the game's dialog; Sims moving in without one take the
   best fit (one not already half done). The wish sits beside the others with its progress

@@ -348,6 +348,8 @@ pub enum Special {
     Homework,
     /// Bake a birthday cake (it's set out on a counter).
     BakeCake,
+    /// Play a ranked chess match against an opponent of the Sim's rank.
+    ChessMatch,
     /// Blow out a birthday cake's candles and grow up.
     BlowOutCandles,
     /// Write (a page at a time) the book under way.
@@ -519,8 +521,10 @@ static TREADMILL: [InteractionDef; 1] = [InteractionDef {
     skill: Some("Athletic"),
     ..def("Work Out", 60.0, [-10.0, 0.0, -25.0, 0.0, -40.0, 5.0], Pose::Exercise)
 }];
-static CHESS: [InteractionDef; 1] =
-    [InteractionDef { skill: Some("Logic"), ..def("Play Chess", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 40.0], Pose::Use) }];
+static CHESS: [InteractionDef; 2] = [
+    InteractionDef { skill: Some("Logic"), ..def("Play Chess", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 40.0], Pose::Use) },
+    InteractionDef { autonomous: false, skill: Some("Logic"), special: Special::ChessMatch, ..def("Play a Ranked Match", 60.0, [0.0, 0.0, -2.0, 10.0, 0.0, 35.0], Pose::Use) },
+];
 
 /// The animation played while performing an interaction: start clip, then loop variants.
 pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::ActionClip> {
@@ -571,7 +575,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Paint" => A::new(Some("a2o_painting_start_x"), &["a2o_painting_loopMed", "a2o_painting_loopLarge", "a2o_painting_consider"]),
         "Play Guitar" => A::new(None, &["a2o_guitar_play_med_loop", "a2o_guitar_play_high_loop", "a2o_guitar_play_low_loop"]),
         "Work Out" => A::new(Some("a2o_treadmill_jog_start_x"), &["a2o_treadmill_jog_loop"]),
-        "Play Chess" => A::new(None, &["a2o_chessTable_loop", "a2o_chessTable_move"]),
+        "Play Chess" | "Play a Ranked Match" => A::new(None, &["a2o_chessTable_loop", "a2o_chessTable_move"]),
         "Nap in Crib" => A::new(Some("p2o_crib_sleep_start_y"), &["p2o_crib_sleep_loop_y"]),
         "Change Clothes" => A::new(Some("a2o_dresser_use_open"), &["a2o_dresser_use_close"]),
         "Stargaze" => A::new(Some("a2o_telescope_start"), &["a2o_telescope_look_loop", "a2o_telescope_look_breathe", "a2o_telescope_react_wonderment"]),
@@ -1400,6 +1404,9 @@ fn run_actions(
                                                 commands.entity(me).remove::<Job>();
                                                 notes.push(format!("{} quit their job.", sim.first));
                                             }
+                                        }
+                                        Special::ChessMatch => {
+                                            commands.entity(me).insert(crate::chess::MatchPlayed);
                                         }
                                         Special::SellPainting => {
                                             let lvl = skills.level("Painting") as i64;
