@@ -69,6 +69,15 @@ pub struct ActiveBuilding {
     /// The house's own stairs and lifts, and the staircases the household built.
     base_stairs: Vec<StairLink>,
     pub built_stairs: Vec<BuiltStairs>,
+    /// The lot came with a house (whose roof the game's imposter shows from afar).
+    pub had_house: bool,
+    /// What's spawned for each wall, the floors, the household's stairs and roofs (to redraw).
+    wall_entities: HashMap<u32, Vec<Entity>>,
+    floor_entities: Vec<Entity>,
+    stair_entities: Vec<Entity>,
+    roof_entity: Option<Entity>,
+    /// The roof pattern on the household's rooms.
+    pub roof_texture: Key,
 }
 
 impl ActiveBuilding {
@@ -388,7 +397,7 @@ pub fn surface_material(assets: &mut ObjectAssets, ctx: &mut AssetCtx, key: Key)
 }
 
 /// The house's floors: one mesh per level and covering.
-pub fn spawn_floors(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetCtx, b: &LotBuildingBaked, active: &ActiveBuilding, neighbor: Option<Entity>) {
+pub fn spawn_floors(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetCtx, b: &LotBuildingBaked, active: &ActiveBuilding, neighbor: Option<Entity>) -> Vec<Entity> {
     let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);
     let cover_key = |i: u16| (i != s3bake::types::NO_COVER).then(|| b.covers.get(i as usize).copied()).flatten();
     let mut floor_bufs: HashMap<(u8, Key), MeshBuf> = HashMap::new();
@@ -408,6 +417,7 @@ pub fn spawn_floors(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mu
             buf.tri(pts.map(|p| active.world(p.x, p.y, y)), pts.map(|p| [p.x, p.y]), Vec3::Y);
         }
     }
+    let mut out = Vec::new();
     for ((level, style), buf) in floor_bufs {
         let mat = surface_material(assets, ctx, style);
         let e = commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(mat))).id();
@@ -415,7 +425,9 @@ pub fn spawn_floors(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mu
             commands.entity(e).insert(FloorMesh);
         }
         place(commands, e, neighbor, level);
+        out.push(e);
     }
+    out
 }
 
 /// One repainting of the active house: a wall side, or a floor tile, given a covering texture.
@@ -435,6 +447,8 @@ pub enum PaintOp {
     /// A staircase built (see [`BuiltStairs`]), or the one standing on tile (`x`, `z`) taken away.
     AddStairs { x: u16, z: u16, dir: u8, level: u8 },
     RemoveStairs { x: u16, z: u16, level: u8 },
+    /// The roof pattern for the household's rooms.
+    Roof { texture: Key },
 }
 
 /// The active house's repaintings since it was built (kept in saves).
@@ -451,14 +465,13 @@ pub fn repaint(
     ctx: &mut AssetCtx,
     ops: &[PaintOp],
     faces: &mut Query<(&WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
-    floors: &Query<Entity, With<FloorMesh>>,
-    pieces: &Query<(Entity, &WallPiece)>,
 ) {
     let mut mats: HashMap<Key, Handle<StandardMaterial>> = HashMap::new();
     let mut floors_changed = false;
     let mut walls_changed: BTreeSet<u32> = BTreeSet::new();
     let mut structure = false;
     let mut stairs_changed = false;
+    let mut roof_changed = false;
     for op in ops {
         apply_paint(&mut b.data, op);
         let last = b.data.walls.len().saturating_sub(1) as u32;
@@ -499,6 +512,10 @@ pub fn repaint(
                 b.built_stairs.retain(|s| !(s.level == level && s.tiles().contains(&at)));
                 stairs_changed = true;
             }
+            PaintOp::Roof { texture } => {
+                b.roof_texture = texture;
+                roof_changed = true;
+            }
         }
     }
     if b.data.levels.len() > b.levels.len() {
@@ -508,7 +525,7 @@ pub fn repaint(
     let highest = b.data.walls.iter().map(|w| w.level).chain(b.data.floors.iter().map(|f| f.level)).max().unwrap_or(1);
     b.top_level = b.top_level.max(highest.min(b.levels.len().saturating_sub(1) as u8));
     if stairs_changed {
-        respawn_stairs(commands, b, assets, ctx, pieces);
+        respawn_stairs(commands, b, assets, ctx);
         b.always_detailed = true;
     }
     if floors_changed {
@@ -524,39 +541,32 @@ pub fn repaint(
             b.center = b.world(c.x, c.y, b.corner.y);
         }
     }
-    respawn_walls(commands, b, assets, ctx, &walls_changed, pieces);
+    respawn_walls(commands, b, assets, ctx, &walls_changed);
+    if structure || floors_changed || roof_changed {
+        respawn_roofs(commands, b, assets, ctx);
+    }
     if floors_changed {
-        for e in floors {
-            commands.entity(e).despawn();
+        for e in b.floor_entities.drain(..) {
+            commands.entity(e).try_despawn();
         }
         let data = b.data.clone();
-        spawn_floors(commands, assets, ctx, &data, b, None);
+        let floors = spawn_floors(commands, assets, ctx, &data, b, None);
+        b.floor_entities = floors;
     }
 }
 
 /// Redraws walls of the active house from its data (with the openings cut into them).
-fn respawn_walls(
-    commands: &mut Commands,
-    b: &ActiveBuilding,
-    assets: &mut ObjectAssets,
-    ctx: &mut AssetCtx,
-    walls: &BTreeSet<u32>,
-    pieces: &Query<(Entity, &WallPiece)>,
-) {
-    if walls.is_empty() {
-        return;
-    }
-    for (e, p) in pieces {
-        if walls.contains(&p.0) {
-            commands.entity(e).despawn();
-        }
-    }
+fn respawn_walls(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut ObjectAssets, ctx: &mut AssetCtx, walls: &BTreeSet<u32>) {
     let mut mats: HashMap<Key, Handle<StandardMaterial>> = HashMap::new();
     let mut material = |assets: &mut ObjectAssets, ctx: &mut AssetCtx, key: Key| mats.entry(key).or_insert_with(|| surface_material(assets, ctx, key)).clone();
     for &i in walls {
-        let Some(w) = b.data.walls.get(i as usize) else { continue };
-        let (spans, door) = openings(&b.holes, w);
-        spawn_wall(commands, assets, ctx, b, i as usize, w, &spans, door, b.exterior, &b.cap_mat, &mut material);
+        for e in b.wall_entities.remove(&i).unwrap_or_default() {
+            commands.entity(e).try_despawn();
+        }
+        let Some(w) = b.data.walls.get(i as usize).copied() else { continue };
+        let (spans, door) = openings(&b.holes, &w);
+        let ents = spawn_wall(commands, assets, ctx, b, i as usize, &w, &spans, door, b.exterior, &b.cap_mat, &mut material);
+        b.wall_entities.insert(i, ents);
     }
 }
 
@@ -706,7 +716,6 @@ fn cut_openings(
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     added: Query<(Entity, &crate::interact::GameObject, &Transform), Added<crate::interact::GameObject>>,
     mut removed: RemovedComponents<crate::interact::GameObject>,
-    pieces: Query<(Entity, &WallPiece)>,
     mut grid: Option<ResMut<crate::nav::NavGrid>>,
 ) {
     let gone: Vec<Entity> = removed.read().collect();
@@ -737,7 +746,7 @@ fn cut_openings(
     if changed.is_empty() {
         return;
     }
-    respawn_walls(&mut commands, &b, &mut assets, &mut ctx, &changed, &pieces);
+    respawn_walls(&mut commands, &mut b, &mut assets, &mut ctx, &changed);
     if let Some(g) = grid.as_mut() {
         g.dirty = true;
     }
@@ -807,7 +816,7 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
                 b.levels.push(top + s3bake::building::LEVEL_HEIGHT);
             }
         }
-        PaintOp::RemoveStairs { .. } => {}
+        PaintOp::RemoveStairs { .. } | PaintOp::Roof { .. } => {}
     }
 }
 
@@ -841,7 +850,7 @@ fn spawn_wall(
     exterior: Key,
     cap_mat: &Handle<StandardMaterial>,
     material: &mut dyn FnMut(&mut ObjectAssets, &mut AssetCtx, Key) -> Handle<StandardMaterial>,
-) {
+) -> Vec<Entity> {
     let b = &active.data;
     let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);
     let cover_key = |i: u16| (i != s3bake::types::NO_COVER).then(|| b.covers.get(i as usize).copied()).flatten();
@@ -851,7 +860,7 @@ fn spawn_wall(
     let seg = bb - a;
     let len = seg.length();
     if len < 1e-3 {
-        return;
+        return Vec::new();
     }
     let along = seg / len;
     let n_local = Vec2::new(-along.y, along.x);
@@ -864,7 +873,7 @@ fn spawn_wall(
     let ulen = len + WALL_T;
     let mid = to3(mid_local, 0.0);
     let parent = commands
-        .spawn((Transform::IDENTITY, Visibility::default(), BuildingPiece { level }, WallPiece(wall_index as u32), DespawnOnExit(AppState::InGame)))
+        .spawn((Transform::IDENTITY, Visibility::default(), BuildingPiece { level }, DespawnOnExit(AppState::InGame)))
         .id();
     for (side_index, (side, kind, cover)) in [(1.0f32, w.left, w.cover[0]), (-1.0, w.right, w.cover[1])].into_iter().enumerate() {
         let mut meshes = [MeshBuf::default(), MeshBuf::default()];
@@ -915,21 +924,22 @@ fn spawn_wall(
         commands.entity(parent).add_child(cap);
     }
     // Walls block walking on their floor, except where a door is.
+    let mut out = vec![parent];
     if !has_door {
         let dir = active.dir(along.x, along.y);
-        commands.spawn((
-            Transform::from_translation(mid).with_rotation(Quat::from_rotation_y((-dir.z).atan2(dir.x))),
-            Obstacle { half: Vec2::new(len * 0.5 + 0.02, 0.08), center_offset: Vec2::ZERO },
-            Floor(level),
-            WallPiece(wall_index as u32),
-            DespawnOnExit(AppState::InGame),
-        ));
+        out.push(
+            commands
+                .spawn((
+                    Transform::from_translation(mid).with_rotation(Quat::from_rotation_y((-dir.z).atan2(dir.x))),
+                    Obstacle { half: Vec2::new(len * 0.5 + 0.02, 0.08), center_offset: Vec2::ZERO },
+                    Floor(level),
+                    DespawnOnExit(AppState::InGame),
+                ))
+                .id(),
+        );
     }
+    out
 }
-
-/// The entities of one wall of the active house (its index in the building's walls).
-#[derive(Component)]
-pub struct WallPiece(pub u32);
 
 /// The steps of a straight staircase from `bottom` running `run` along `d` (lot-local), from
 /// floor height `y0` up to `y1`.
@@ -995,15 +1005,150 @@ impl BuiltStairs {
     }
 }
 
-/// Marks the entities of the household's own staircases (as a [`WallPiece`] index).
-pub const STAIRS_PIECE: u32 = u32::MAX;
+/// The roof the household's rooms get until another is chosen ("Asphalt Shingle Roof", as the
+/// plain field of tiles baked from its atlas).
+pub const ROOF_DEFAULT: Key = (T_COVER, 6, 0x70C833585F305186);
+/// How far roofs reach past the walls, and how steep they are (rise per run).
+const ROOF_OVERHANG: f32 = 0.35;
+const ROOF_PITCH: f32 = 0.6;
+
+/// A roof over the household's rooms (shown in the outside view, as the game's are).
+#[derive(Component)]
+pub struct BuiltRoof;
+
+/// Splits the marked cells (`w` wide, row by row) into rectangles `(x0, z0, x1, z1)` (exclusive
+/// ends), taking the widest run of each row and as many rows of it as fit.
+fn rectangles(cells: &mut [bool], w: usize, d: usize) -> Vec<(usize, usize, usize, usize)> {
+    let mut out = Vec::new();
+    for z in 0..d {
+        let mut x = 0;
+        while x < w {
+            if !cells[z * w + x] {
+                x += 1;
+                continue;
+            }
+            let mut x1 = x;
+            while x1 < w && cells[z * w + x1] {
+                x1 += 1;
+            }
+            let mut z1 = z + 1;
+            while z1 < d && (x..x1).all(|i| cells[z1 * w + i]) {
+                z1 += 1;
+            }
+            for zz in z..z1 {
+                for xx in x..x1 {
+                    cells[zz * w + xx] = false;
+                }
+            }
+            out.push((x, z, x1, z1));
+            x = x1;
+        }
+    }
+    out
+}
+
+/// A hip roof over the lot-local rectangle (`x0`, `z0`)-(`x1`, `z1`) with its eaves at height `y`.
+fn hip_roof(buf: &mut MeshBuf, b: &ActiveBuilding, (x0, z0, x1, z1): (f32, f32, f32, f32), y: f32) {
+    let o = ROOF_OVERHANG;
+    let (x0, z0, x1, z1) = (x0 - o, z0 - o, x1 + o, z1 + o);
+    let y = y - o * ROOF_PITCH;
+    // Roofed along x when it's the longer way (else along z: swap the axes).
+    let along_x = x1 - x0 >= z1 - z0;
+    let (a0, a1, c0, c1) = if along_x { (x0, x1, z0, z1) } else { (z0, z1, x0, x1) };
+    let half = (c1 - c0) * 0.5;
+    let top = y + half * ROOF_PITCH;
+    let cm = c0 + half;
+    let (r0, r1) = (a0 + half, a1 - half);
+    let pt = |a: f32, c: f32, h: f32| if along_x { b.world(a, c, h) } else { b.world(c, a, h) };
+    let slope = (1.0 + ROOF_PITCH * ROOF_PITCH).sqrt();
+    let mut face = |pts: Vec<(f32, f32, f32)>, eave: ((f32, f32), (f32, f32))| {
+        let p: Vec<Vec3> = pts.iter().map(|&(a, c, h)| pt(a, c, h)).collect();
+        let mut n = (p[1] - p[0]).cross(p[2] - p[0]).normalize_or_zero();
+        if n.y < 0.0 {
+            n = -n;
+        }
+        // Texture along the eave and up the slope.
+        let (e0, e1) = (pt(eave.0.0, eave.0.1, y), pt(eave.1.0, eave.1.1, y));
+        let ed = (e1 - e0).with_y(0.0).normalize_or_zero();
+        let up = Vec3::new(n.x, 0.0, n.z).normalize_or_zero() * -1.0;
+        let m = s3bake::gamedata::ROOF_ATLAS_METRES;
+        let uv = |q: Vec3| [(q - e0).dot(ed) / m, (q - e0).with_y(0.0).dot(up) * slope / m];
+        if p.len() == 4 {
+            buf.quad([p[0], p[1], p[2], p[3]], [uv(p[0]), uv(p[1]), uv(p[2]), uv(p[3])], n);
+        } else {
+            buf.tri([p[0], p[1], p[2]], [uv(p[0]), uv(p[1]), uv(p[2])], n);
+        }
+    };
+    // The two long slopes, and the hipped ends.
+    face(vec![(a0, c0, y), (a1, c0, y), (r1, cm, top), (r0, cm, top)], ((a0, c0), (a1, c0)));
+    face(vec![(a1, c1, y), (a0, c1, y), (r0, cm, top), (r1, cm, top)], ((a1, c1), (a0, c1)));
+    face(vec![(a0, c1, y), (a0, c0, y), (r0, cm, top)], ((a0, c1), (a0, c0)));
+    face(vec![(a1, c0, y), (a1, c1, y), (r1, cm, top)], ((a1, c0), (a1, c1)));
+}
+
+/// Roofs over the household's rooms: each room's top floor (no floor above it) gets hip roofs
+/// over rectangles of its tiles. On a lot that came with a house only rooms the household
+/// walled get one (the game's imposter shows the house's own roof).
+fn respawn_roofs(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut ObjectAssets, ctx: &mut AssetCtx) {
+    if let Some(e) = b.roof_entity.take() {
+        commands.entity(e).try_despawn();
+    }
+    let (w, d) = (b.data.width as usize, b.data.depth as usize);
+    let mut buf = MeshBuf::default();
+    let has_floor: HashSet<(u8, u16, u16)> = b.data.floors.iter().map(|f| (f.level, f.x, f.z)).collect();
+    for level in 1..b.levels.len() as u8 {
+        let rooms = rooms(&b.data, level);
+        if rooms.iter().all(|r| *r == 0) {
+            continue;
+        }
+        let roofed: HashSet<u16> = if b.had_house {
+            // The rooms on either side of the household's walls.
+            let mut s = HashSet::new();
+            for &i in &b.built {
+                let Some(wl) = b.data.walls.get(i as usize).filter(|wl| wl.level.max(1) == level) else { continue };
+                let (a, c) = (Vec2::from(wl.a), Vec2::from(wl.b));
+                if a.distance(c) < 1e-3 {
+                    continue;
+                }
+                let n = (c - a).perp().normalize();
+                for side in [n, -n] {
+                    let p = (a + c) * 0.5 + side * 0.5;
+                    let (x, z) = (p.x.floor() as i64, p.y.floor() as i64);
+                    if x >= 0 && z >= 0 && (x as usize) < w && (z as usize) < d {
+                        s.insert(rooms[z as usize * w + x as usize]);
+                    }
+                }
+            }
+            s.remove(&0);
+            s
+        } else {
+            rooms.iter().copied().filter(|r| *r > 0).collect()
+        };
+        let mut cells: Vec<bool> = (0..w * d).map(|i| roofed.contains(&rooms[i]) && !has_floor.contains(&(level + 1, (i % w) as u16, (i / w) as u16))).collect();
+        let y = b.levels[level as usize] + WALL_H;
+        for (x0, z0, x1, z1) in rectangles(&mut cells, w, d) {
+            hip_roof(&mut buf, b, (x0 as f32, z0 as f32, x1 as f32, z1 as f32), y);
+        }
+    }
+    if buf.is_empty() {
+        return;
+    }
+    let tex = assets.texture(ctx, b.roof_texture);
+    let mat = ctx.materials.add(StandardMaterial {
+        base_color: if tex.is_some() { Color::WHITE } else { Color::srgb(0.35, 0.33, 0.32) },
+        base_color_texture: tex,
+        perceptual_roughness: 0.9,
+        double_sided: true,
+        cull_mode: None,
+        ..default()
+    });
+    b.roof_entity = Some(commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(mat), BuiltRoof, Visibility::Hidden, DespawnOnExit(AppState::InGame))).id());
+}
 
 /// Spawns the household's staircases and links the floors they join.
-fn respawn_stairs(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut ObjectAssets, ctx: &mut AssetCtx, pieces: &Query<(Entity, &WallPiece)>) {
-    for (e, p) in pieces {
-        if p.0 == STAIRS_PIECE {
-            commands.entity(e).despawn();
-        }
+fn respawn_stairs(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut ObjectAssets, ctx: &mut AssetCtx) {
+    for e in b.stair_entities.drain(..) {
+        commands.entity(e).try_despawn();
     }
     let mat = surface_material(assets, ctx, STYLE_FLOOR_DECK);
     let mut links = b.base_stairs.clone();
@@ -1011,13 +1156,10 @@ fn respawn_stairs(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut 
         let (bottom, d) = s.bottom();
         let run = STAIR_RUN as f32;
         let (Some(&y0), Some(&y1)) = (b.levels.get(s.level as usize), b.levels.get(s.level as usize + 1)) else { continue };
-        commands.spawn((
-            Mesh3d(ctx.meshes.add(stair_mesh(b, bottom, d, run, y0, y1))),
-            MeshMaterial3d(mat.clone()),
-            BuildingPiece { level: s.level },
-            WallPiece(STAIRS_PIECE),
-            DespawnOnExit(AppState::InGame),
-        ));
+        let e = commands
+            .spawn((Mesh3d(ctx.meshes.add(stair_mesh(b, bottom, d, run, y0, y1))), MeshMaterial3d(mat.clone()), BuildingPiece { level: s.level }, DespawnOnExit(AppState::InGame)))
+            .id();
+        b.stair_entities.push(e);
         let bw = |q: Vec2| b.world(q.x, q.y, 0.0).xz();
         links.push(StairLink { level: s.level, upper: s.level + 1, bottom: bw(bottom - d * 0.45), top: bw(bottom + d * (run + 0.45)), y0, y1 });
     }
@@ -1062,6 +1204,12 @@ pub fn spawn_building(
         always_detailed: !b.is_house(),
         base_stairs: Vec::new(),
         built_stairs: Vec::new(),
+        had_house: b.is_house(),
+        roof_texture: ROOF_DEFAULT,
+        wall_entities: HashMap::new(),
+        floor_entities: Vec::new(),
+        stair_entities: Vec::new(),
+        roof_entity: None,
     };
     let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);
     let exterior = STYLE_EXTERIOR[(lot.id % STYLE_EXTERIOR.len() as u64) as usize];
@@ -1237,7 +1385,8 @@ pub fn spawn_building(
             }
             continue;
         }
-        spawn_wall(commands, assets, ctx, &active, wall_index, w, &seg_holes, has_door, exterior, &cap_mat, &mut material);
+        let ents = spawn_wall(commands, assets, ctx, &active, wall_index, w, &seg_holes, has_door, exterior, &cap_mat, &mut material);
+        active.wall_entities.insert(wall_index as u32, ents);
     }
 
     for (style, buf) in merged {
@@ -1251,7 +1400,8 @@ pub fn spawn_building(
     }
 
     // Floors, one mesh per level and covering.
-    spawn_floors(commands, assets, ctx, b, &active, neighbor);
+    let floor_entities = spawn_floors(commands, assets, ctx, b, &active, neighbor);
+    active.floor_entities = floor_entities;
 
     // Foundation sides from slightly below the ground up to the ground floor.
     if !b.foundation.is_empty() {
@@ -1332,6 +1482,10 @@ fn building_visibility(
     mut imposters: Query<(&LotImposter, &mut Visibility), (Without<BuildingPiece>, Without<crate::world::Tree>)>,
     mut faces: Query<(&mut WallFace, &mut Mesh3d, &mut Visibility), (Without<BuildingPiece>, Without<LotImposter>, Without<crate::world::Tree>)>,
     mut trees: Query<(&GlobalTransform, &mut Visibility), (With<crate::world::Tree>, Without<BuildingPiece>, Without<LotImposter>)>,
+    mut roofs: Query<
+        &mut Visibility,
+        (With<BuiltRoof>, Without<BuildingPiece>, Without<LotImposter>, Without<crate::world::Tree>, Without<WallFace>, Without<crate::sim::Sim>),
+    >,
     mut sims: Query<
         (&Floor, &mut Visibility),
         (
@@ -1368,6 +1522,9 @@ fn building_visibility(
     // Zoomed out, the house is seen from outside: every floor, walls up, roof on.
     let exterior = cam.distance > ROOF_DISTANCE;
     let view_level = if exterior { b.top_level } else { b.view_level };
+    for mut vis in &mut roofs {
+        vis.set_if_neq(if exterior && !far { Visibility::Inherited } else { Visibility::Hidden });
+    }
     let is_cut = |mid: Vec3, level: u8| !exterior && level == view_level && (mid - b.center).dot(view) < 0.3;
     for (floor, mut vis) in &mut sims {
         vis.set_if_neq(if floor.0 <= view_level { Visibility::Inherited } else { Visibility::Hidden });

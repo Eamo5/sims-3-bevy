@@ -103,7 +103,9 @@ installation is unreachable.
   charged, sounds like the game's build tools, and is kept in saves.
 - **Building**: wall and room tools that draw along the lot's grid (straight or diagonal, with
   a live outline and price), the sledgehammer, floor tiles and staircases up to a new floor
-  (stairwell opened, landing floored, Sims climb them); closing off a room lays its
+  (stairwell opened, landing floored, Sims climb them), and hip roofs over the rooms in any
+  of the catalogue's 27 roof patterns (the plain tiles recovered from each pattern's atlas of
+  tiles, ridges and hips); closing off a room lays its
   floor and turns its walls' inner sides to wallpaper. Doors, archways and windows from the
   catalogue snap into walls and cut their openings; knocking a wall down sells what was in
   it. Works on an empty lot or the house that came with it, a floor above the top too, and

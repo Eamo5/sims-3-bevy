@@ -390,11 +390,7 @@ fn auto_paint(
     mut building: Option<ResMut<crate::building::ActiveBuilding>>,
     (data, mut assets): (Res<crate::baked::Baked>, ResMut<crate::objects::ObjectAssets>),
     (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
-    (mut faces, floors, pieces): (
-        Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
-        Query<Entity, With<crate::building::FloorMesh>>,
-        Query<(Entity, &crate::building::WallPiece)>,
-    ),
+    mut faces: Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
 ) {
     if !args.paint || *done {
         return;
@@ -420,7 +416,7 @@ fn auto_paint(
     }
     info!("paint test: {} repaintings", ops.len());
     let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
-    crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces, &floors, &pieces);
+    crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces);
     commands.insert_resource(crate::building::LotPaint(ops));
 }
 
@@ -436,11 +432,7 @@ fn auto_build(
     mut building: Option<ResMut<crate::building::ActiveBuilding>>,
     (data, catalog, mut assets): (Res<crate::baked::Baked>, Res<crate::loading::Catalog>, ResMut<crate::objects::ObjectAssets>),
     (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
-    (mut faces, floors, pieces): (
-        Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
-        Query<Entity, With<crate::building::FloorMesh>>,
-        Query<(Entity, &crate::building::WallPiece)>,
-    ),
+    mut faces: Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
     (mut log, mut grid, mut buy): (Option<ResMut<crate::building::LotPaint>>, Option<ResMut<crate::nav::NavGrid>>, ResMut<crate::buy::BuyMode>),
     (objects, mut removed, mut household, mut notes): (
         Query<(&crate::interact::GameObject, &Transform, Has<crate::save::Bought>)>,
@@ -459,7 +451,7 @@ fn auto_build(
     let Some(b) = building.as_deref_mut() else { return };
     let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
     let mut apply = |commands: &mut Commands, assets: &mut crate::objects::ObjectAssets, b: &mut crate::building::ActiveBuilding, ctx: &mut crate::objects::AssetCtx, ops: Vec<crate::building::PaintOp>| {
-        crate::building::repaint(commands, b, assets, ctx, &ops, &mut faces, &floors, &pieces);
+        crate::building::repaint(commands, b, assets, ctx, &ops, &mut faces);
         match log.as_mut() {
             Some(l) => l.0.extend(ops),
             None => commands.insert_resource(crate::building::LotPaint(ops)),

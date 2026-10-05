@@ -231,6 +231,9 @@ fn main() {
         for p in walls.iter().take(5).chain(floors.iter().take(5)) {
             println!("pattern {:?} §{} floor {} tex {:?}", p.name, p.price, p.floor, p.texture);
         }
+        for r in &g.roofs {
+            println!("roof {:?} tex {:?} tile {:?}", r.name, r.texture, r.tile);
+        }
         for c in &g.careers {
             println!("career {} = {:?} [{}] part-time {}: {}", c.hex, c.name, c.icon, c.part_time, c.desc);
             for l in &c.levels {

@@ -6,6 +6,8 @@ use crate::util::{Eof, R, Reader};
 use s3pkg::ResourceKey;
 
 pub const T_CWAL: u32 = 0x515CA4CD;
+/// Roof pattern (catalogue resource "CRMT").
+pub const T_ROOF_PATTERN: u32 = 0xF1EDBD86;
 pub const T_COMPLATE_XML: u32 = 0x0333406C;
 
 /// Pattern kinds of a CWAL.

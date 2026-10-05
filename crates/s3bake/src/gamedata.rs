@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 15;
+pub const GAMEDATA_VERSION: u32 = 17;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -208,7 +208,99 @@ pub struct GameDataBaked {
     pub balloons: BalloonTable,
     pub opportunities: Vec<OpportunityInfo>,
     pub plants: Vec<PlantInfo>,
+    pub roofs: Vec<RoofPattern>,
 }
+
+/// A roof pattern from the build catalogue.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RoofPattern {
+    pub name: String,
+    /// The roof material's diffuse map: an atlas of the field of tiles with the ridge and hip
+    /// pieces stamped over it.
+    pub texture: crate::types::Key,
+    /// Just the field of tiles (covering [`ROOF_ATLAS_METRES`] square), for repeating over a
+    /// roof (see [`roof_tile`]).
+    pub tile: crate::types::Key,
+}
+
+/// How much roof (metres) a roof atlas covers.
+pub const ROOF_ATLAS_METRES: f32 = 3.0;
+
+/// The plain field of tiles from a roof atlas (covering as much roof as the atlas). The field
+/// repeats along one axis or both, and the ridge and hip pieces sit over parts of it, so the
+/// median of every repeat of each pixel leaves just the tiles.
+pub fn roof_tile(atlas: &s3formats::dds::Rgba) -> Option<s3formats::dds::Rgba> {
+    let (w, h) = (atlas.width, atlas.height);
+    if w < 64 || h < 64 {
+        return None;
+    }
+    let lum: Vec<f32> = atlas.data.chunks_exact(4).map(|p| p[0] as f32 * 0.3 + p[1] as f32 * 0.59 + p[2] as f32 * 0.11).collect();
+    // The repeat along an axis: the shift (16 px or more) where the atlas best matches itself,
+    // if that's clearly better than shifts in general; with how much better (lower is clearer).
+    let period = |horizontal: bool| -> Option<(usize, f32)> {
+        let n = if horizontal { w } else { h };
+        let diff = |p: usize| {
+            let (mut sum, mut cnt) = (0.0f32, 0usize);
+            let (xs, ys) = if horizontal { (w - p, h) } else { (w, h - p) };
+            for y in (0..ys).step_by(2) {
+                for x in (0..xs).step_by(2) {
+                    let (x2, y2) = if horizontal { (x + p, y) } else { (x, y + p) };
+                    sum += (lum[y * w + x] - lum[y2 * w + x2]).abs();
+                    cnt += 1;
+                }
+            }
+            sum / cnt.max(1) as f32
+        };
+        let diffs: Vec<f32> = (0..=n / 2).map(|p| if p >= 15 { diff(p) } else { 0.0 }).collect();
+        let mut sorted: Vec<f32> = diffs[16..].to_vec();
+        sorted.sort_by(|a, b| a.total_cmp(b));
+        let med = sorted[sorted.len() / 2].max(1e-3);
+        (16..n / 2)
+            .filter(|&p| diffs[p] <= diffs[p - 1] && diffs[p] <= diffs[p + 1] && diffs[p] < 0.85 * med)
+            .min_by(|&a, &b| diffs[a].total_cmp(&diffs[b]))
+            .map(|p| (p, diffs[p] / med))
+    };
+    let (mut px, mut py) = (period(true), period(false));
+    // The clearer repeat, and the other only when it's clear too.
+    match (px, py) {
+        (Some(x), Some(y)) if x.1 <= y.1 && y.1 >= 0.8 => py = None,
+        (Some(x), Some(y)) if y.1 < x.1 && x.1 >= 0.8 => px = None,
+        _ => {}
+    }
+    let tx = px.map_or(w, |p| p.0);
+    let ty = py.map_or(h, |p| p.0);
+    let (kx, ky) = (w / tx, h / ty);
+    let mut tile = vec![0u8; tx * ty * 4];
+    let mut samples: Vec<u8> = Vec::with_capacity(kx * ky);
+    for y in 0..ty {
+        for x in 0..tx {
+            for c in 0..4 {
+                samples.clear();
+                for j in 0..ky {
+                    for i in 0..kx {
+                        samples.push(atlas.data[((y + j * ty) * w + x + i * tx) * 4 + c]);
+                    }
+                }
+                samples.sort_unstable();
+                tile[(y * tx + x) * 4 + c] = samples[samples.len() / 2];
+            }
+        }
+    }
+    // Repeated over the atlas's area again, at 256 x 256.
+    let (rx, ry) = (((w as f32 / tx as f32).round() as usize).max(1), ((h as f32 / ty as f32).round() as usize).max(1));
+    let size = 256usize;
+    let mut data = vec![0u8; size * size * 4];
+    for y in 0..size {
+        for x in 0..size {
+            let sx = (x * tx * rx / size) % tx;
+            let sy = (y * ty * ry / size) % ty;
+            let o = (y * size + x) * 4;
+            data[o..o + 4].copy_from_slice(&tile[(sy * tx + sx) * 4..(sy * tx + sx) * 4 + 4]);
+        }
+    }
+    Some(s3formats::dds::Rgba { width: size, height: size, data })
+}
+
 
 impl GameDataBaked {
     pub fn buff(&self, hex: &str) -> Option<&BuffInfo> {
@@ -472,6 +564,58 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         out.patterns = found;
         out.patterns.sort_by(|a, b| a.floor.cmp(&b.floor).then(a.price.cmp(&b.price)).then(a.name.cmp(&b.name)));
         out.patterns.dedup_by(|a, b| a.floor == b.floor && a.name == b.name);
+    }
+
+    // Roof patterns: each one's first visual proxy holds its roof material, whose diffuse map
+    // is the tiles' texture. The name is a string key after the header (UTF-16BE, 7-bit length).
+    progress("Converting: roof patterns…");
+    {
+        let mut keys: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(s3formats::catalog::T_ROOF_PATTERN).copied().collect();
+        keys.sort();
+        keys.dedup_by_key(|k| k.i);
+        for k in keys {
+            let Some(d) = pkgs.read(&k) else { continue };
+            if d.len() < 0x22 {
+                continue;
+            }
+            let n = d[0x20] as usize;
+            let key_name: String = if d.len() >= 0x21 + n {
+                String::from_utf16_lossy(&d[0x21..0x21 + n].chunks(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect::<Vec<_>>())
+            } else {
+                String::new()
+            };
+            let guid = u64::from_le_bytes(d[0x10..0x18].try_into().unwrap());
+            let name = strings
+                .get(&guid)
+                .or_else(|| strings.get(&s3pkg::fnv64(&key_name.to_ascii_lowercase())))
+                .cloned()
+                .unwrap_or_else(|| key_name.rsplit(':').next().unwrap_or("").trim_start_matches("Roof").trim_start_matches('_').to_string());
+            let Ok(tgis) = s3formats::model::tgi_table_at(&d, 4) else { continue };
+            let Some(vk) = tgis.iter().find(|t| t.t == s3pkg::types::VPXY) else { continue };
+            let Some(vd) = pkgs.read(vk).or_else(|| pkgs.read_ti(vk.t, vk.i)) else { continue };
+            let Some(m) = s3formats::model::vpxy_keys(&vd).iter().filter(|t| t.t == 0x01D0E75D).find_map(|mk| s3formats::model::load_matd_resource(pkgs, mk)) else { continue };
+            let Some(tex) = m.texture(s3formats::model::P_DIFFUSE_MAP) else { continue };
+            let texture: crate::types::Key = (tex.t, tex.g, tex.i);
+            let path = root.tex_path(texture);
+            if !path.exists() {
+                let Some(dds) = crate::bake::bake_texture(pkgs, texture, 512, false) else { continue };
+                if std::fs::write(&path, dds).is_err() {
+                    continue;
+                }
+            }
+            let tile: crate::types::Key = (crate::types::T_COVER, 6, k.i);
+            let tile_path = root.tex_path(tile);
+            if !tile_path.exists() {
+                let Some(atlas) = std::fs::read(&path).ok().and_then(|d| s3formats::dds::decode(&d, 512)) else { continue };
+                let Some(img) = roof_tile(&atlas) else { continue };
+                if std::fs::write(&tile_path, crate::ddsw::encode_dds(&img)).is_err() {
+                    continue;
+                }
+            }
+            out.roofs.push(RoofPattern { name, texture, tile });
+        }
+        out.roofs.sort_by(|a, b| a.name.cmp(&b.name));
+        out.roofs.dedup_by(|a, b| a.texture == b.texture);
     }
 
     // Garden plants (the base game's everyday ones) and their produce.

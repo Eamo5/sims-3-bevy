@@ -151,6 +151,14 @@ fn parse_matd(rcol: &Rcol, d: &[u8]) -> R<Material> {
     Ok(Material { shader, params })
 }
 
+/// A material stored as a resource of its own (an RCOL holding one MATD).
+pub fn load_matd_resource(pkgs: &PackageSet, key: &ResourceKey) -> Option<Material> {
+    let data = pkgs.read(key).or_else(|| pkgs.read_ti(key.t, key.i))?;
+    let rcol = Rcol::parse(&data).ok()?;
+    let i = rcol.find_tag(b"MATD")?;
+    parse_matd(&rcol, rcol.chunk_data(i)?).ok()
+}
+
 /// Resolves a material reference (MATD, or MTST -> default MATD).
 fn resolve_material(rcol: &Rcol, raw: u32, depth: u32) -> Option<Material> {
     if depth > 4 {
@@ -462,15 +470,20 @@ pub fn load_mlod_resource(pkgs: &PackageSet, key: &ResourceKey) -> Option<Vec<Me
 
 /// Finds the MODL keys referenced by a VPXY resource.
 pub fn vpxy_models(d: &[u8]) -> Vec<ResourceKey> {
-    let Ok(rcol) = Rcol::parse(d) else { return Vec::new() };
-    let Some(i) = rcol.find_tag(b"VPXY") else { return Vec::new() };
-    let Some(c) = rcol.chunk_data(i) else { return Vec::new() };
-    let keys = tgi_table_at(c, 8).unwrap_or_default();
+    let keys = vpxy_keys(d);
     let mut models: Vec<ResourceKey> = keys.iter().filter(|k| k.t == types::MODL).copied().collect();
     if models.is_empty() {
         models = keys.iter().filter(|k| k.t == types::MLOD).copied().collect();
     }
     models
+}
+
+/// Every resource a VPXY refers to (models, lights, materials...).
+pub fn vpxy_keys(d: &[u8]) -> Vec<ResourceKey> {
+    let Ok(rcol) = Rcol::parse(d) else { return Vec::new() };
+    let Some(i) = rcol.find_tag(b"VPXY") else { return Vec::new() };
+    let Some(c) = rcol.chunk_data(i) else { return Vec::new() };
+    tgi_table_at(c, 8).unwrap_or_default()
 }
 
 /// Reads a relative TGI table whose offset field is at `off_pos` ("TGI" order: type, group, instance).

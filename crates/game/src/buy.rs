@@ -33,7 +33,7 @@ pub const CATEGORIES: [&str; 10] =
     ["Appliances", "Plumbing", "Beds", "Seating", "Surfaces", "Electronics", "Hobbies", "Kids", "Lighting", "Decor"];
 /// Build-mode tabs after the buy categories: wallpaper, floors, the construction tools, doors
 /// and windows.
-const PAINT_TABS: [&str; 5] = ["Wallpaper", "Floors", "Walls & Floors", "Doors", "Windows"];
+const PAINT_TABS: [&str; 6] = ["Wallpaper", "Floors", "Walls & Floors", "Doors", "Windows", "Roofs"];
 const PAGE: usize = 24;
 /// Objects per page (thumbnail tiles).
 const OBJECT_PAGE: usize = 30;
@@ -57,6 +57,8 @@ pub struct BuyMode {
     pub painting: Option<usize>,
     /// The construction tool in hand.
     pub tool: Option<crate::build::BuildTool>,
+    /// A roof pattern just chosen (index into the game data's roofs), to put on the house.
+    pub roof_pick: Option<usize>,
 }
 
 #[derive(Component)]
@@ -108,6 +110,7 @@ enum BuyButton {
     Item(Key),
     Pattern(usize),
     Tool(crate::build::BuildTool),
+    Roof(usize),
     Prev,
     Next,
 }
@@ -128,6 +131,7 @@ pub const FLOORS_TAB: usize = WALLPAPER_TAB + 1;
 pub const BUILD_TAB: usize = WALLPAPER_TAB + 2;
 pub const DOORS_TAB: usize = WALLPAPER_TAB + 3;
 pub const WINDOWS_TAB: usize = WALLPAPER_TAB + 4;
+pub const ROOFS_TAB: usize = WALLPAPER_TAB + 5;
 
 impl BuyMode {
     /// Puts down the tool, pattern or object in hand.
@@ -238,6 +242,43 @@ fn buy_panel(
             }
         });
         if !buy.active {
+            return;
+        }
+        // Roof patterns: one click puts it on the household's roofs.
+        if buy.category == ROOFS_TAB {
+            let Some(ui) = ui.as_deref() else { return };
+            let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+            p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|grid| {
+                for (i, r) in ui.data.roofs.iter().enumerate() {
+                    let tex = assets.texture(&mut ctx, r.tile);
+                    grid.spawn((
+                        Button,
+                        BuyButton::Roof(i),
+                        Node {
+                            width: Val::Px(176.0),
+                            height: Val::Px(42.0),
+                            column_gap: Val::Px(6.0),
+                            align_items: AlignItems::Center,
+                            padding: UiRect::horizontal(Val::Px(4.0)),
+                            border_radius: BorderRadius::all(Val::Px(8.0)),
+                            ..default()
+                        },
+                        BackgroundColor(BTN_NORMAL),
+                        crate::icons::Tooltip(r.name.clone()),
+                    ))
+                    .with_children(|b| {
+                        if let Some(t) = tex {
+                            b.spawn((ImageNode::new(t), Node { width: Val::Px(34.0), height: Val::Px(34.0), ..default() }, Pickable::IGNORE));
+                        }
+                        let mut name = r.name.trim_end_matches(" Roof").to_string();
+                        if name.chars().count() > 22 {
+                            name = name.chars().take(20).collect::<String>() + "…";
+                        }
+                        b.spawn((text(name, 12.0, Color::WHITE), Pickable::IGNORE));
+                    });
+                }
+            });
+            p.spawn(text("Roofs go on the rooms you build; they show when the camera pulls back.", 13.0, Color::WHITE));
             return;
         }
         // The construction tools.
@@ -379,6 +420,9 @@ fn buy_buttons(
                 buy.category = *c;
                 buy.page = 0;
             }
+            BuyButton::Roof(i) => {
+                buy.roof_pick = Some(*i);
+            }
             BuyButton::Tool(t) => {
                 buy.drop_tools(&mut commands);
                 buy.tool = Some(*t);
@@ -422,11 +466,7 @@ fn paint(
     mut building: Option<ResMut<crate::building::ActiveBuilding>>,
     mut assets: ResMut<ObjectAssets>,
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
-    (mut faces, floor_meshes, pieces): (
-        Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
-        Query<Entity, With<crate::building::FloorMesh>>,
-        Query<(Entity, &crate::building::WallPiece)>,
-    ),
+    mut faces: Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
     (mut household, mut notes, mut log, mut play): (
         Option<ResMut<Household>>,
         ResMut<Notifications>,
@@ -478,7 +518,7 @@ fn paint(
         h.funds -= cost;
     }
     let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-    crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces, &floor_meshes, &pieces);
+    crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces);
     match log.as_mut() {
         Some(l) => l.0.extend(ops),
         None => commands.insert_resource(crate::building::LotPaint(ops)),
@@ -557,11 +597,7 @@ fn placement(
     objects: Query<(&GameObject, &Transform)>,
     (bought_q, mut removed): (Query<(), With<crate::save::Bought>>, ResMut<crate::save::RemovedLotObjects>),
     mut tfs: Query<&mut Transform, Without<GameObject>>,
-    (mut faces, floor_meshes, pieces): (
-        Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
-        Query<Entity, With<crate::building::FloorMesh>>,
-        Query<(Entity, &crate::building::WallPiece)>,
-    ),
+    mut faces: Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
 ) {
     if !buy.active {
         return;
@@ -670,7 +706,7 @@ fn placement(
         if let (Some((_, _, ops)), Some(b)) = (in_wall, building.as_deref_mut())
             && !ops.is_empty()
         {
-            crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces, &floor_meshes, &pieces);
+            crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces);
             match log.as_mut() {
                 Some(l) => l.0.extend(ops),
                 None => commands.insert_resource(crate::building::LotPaint(ops)),

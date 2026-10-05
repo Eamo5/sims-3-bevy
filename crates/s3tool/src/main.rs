@@ -11,6 +11,56 @@ fn main() {
         eprintln!("usage: s3tool <types|list|dump|hex|dumpall> <package> [...]");
         return;
     }
+    if args[1] == "roofs" {
+        // roofs <root>: the build catalogue's roof patterns (0xF1EDBD86) and their textures.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let mut keys: Vec<_> = set.keys_of_type(0xF1EDBD86).copied().collect();
+        keys.sort();
+        keys.dedup_by_key(|k| k.i);
+        for k in keys {
+            let Some(d) = set.read(&k) else { continue };
+            let name: String = {
+                let n = u32::from_le_bytes([d[0x20], d[0x21], d[0x22], d[0x23]]) as usize;
+                let _ = n;
+                let raw: Vec<u16> = d[0x21..].chunks(2).take_while(|c| c.len() == 2 && !(c[0] == 0 && c[1] == 0)).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+                String::from_utf16_lossy(&raw)
+            };
+            let tgis = s3formats::model::tgi_table_at(&d, 4).unwrap_or_default();
+            println!("{:016X} {name} tgis {:?}", k.i, tgis.iter().map(|t| format!("{:08X}:{:08X}:{:016X}", t.t, t.g, t.i)).collect::<Vec<_>>());
+            for t in tgis.iter().filter(|t| t.t == types::VPXY) {
+                if let Some(vd) = set.read(t).or_else(|| set.read_ti(t.t, t.i))
+                    && let Ok(rcol) = s3formats::rcol::Rcol::parse(&vd)
+                {
+                    let tags: Vec<String> = (0..rcol.chunks.len()).map(|i| rcol.chunk_tag(i).map(|t| String::from_utf8_lossy(&t).to_string()).unwrap_or_default()).collect();
+                    let ext: Vec<String> = rcol.external.iter().map(|k| format!("{:08X}:{:08X}:{:016X}", k.t, k.g, k.i)).collect();
+                    println!("  vpxy {:016X} chunks {:?} external {:?}", t.i, tags, ext);
+                    if let Some(ci) = rcol.find_tag(b"VPXY") && let Some(c) = rcol.chunk_data(ci) {
+                        let keys = s3formats::model::tgi_table_at(c, 8).unwrap_or_default();
+                        println!("    keys {:?}", keys.iter().map(|k| format!("{:08X}:{:08X}:{:016X}", k.t, k.g, k.i)).collect::<Vec<_>>());
+                        for mk in keys.iter().filter(|k| k.t == 0x01D0E75D) {
+                            if let Some(m) = s3formats::model::load_matd_resource(&set, mk) {
+                                let mut ps: Vec<String> = m.params.iter().map(|(k, v)| match v {
+                                    s3formats::model::ParamValue::Texture(t) => format!("{k:08X}=tex {:08X}:{:08X}:{:016X}", t.t, t.g, t.i),
+                                    s3formats::model::ParamValue::Float(f) => format!("{k:08X}={f:?}"),
+                                    other => format!("{k:08X}={other:?}"),
+                                }).collect();
+                                ps.sort();
+                                println!("    matd shader {:08X} {}", m.shader, ps.join(" "));
+                            }
+                        }
+                    }
+                }
+                let models = set.read(t).or_else(|| set.read_ti(t.t, t.i)).map(|d| s3formats::model::vpxy_models(&d)).unwrap_or_default();
+                for mk in models {
+                    for m in s3formats::model::load_model(&set, &mk).unwrap_or_default() {
+                        let tex = m.material.texture(s3formats::model::P_DIFFUSE_MAP);
+                        println!("    mesh {} verts shader {:08X} diffuse {:?}", m.positions.len(), m.material.shader, tex.map(|t| format!("{:08X}:{:08X}:{:016X}", t.t, t.g, t.i)));
+                    }
+                }
+            }
+        }
+        return;
+    }
     if args[1] == "objects" {
         // objects <root> [max]: decode the models of many OBJDs and validate their bounds.
         let root = std::path::Path::new(&args[2]);

@@ -345,11 +345,7 @@ fn build_tool(
     mut building: Option<ResMut<ActiveBuilding>>,
     (data, mut assets): (Res<Baked>, ResMut<ObjectAssets>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
-    (mut faces, floor_meshes, pieces): (
-        Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
-        Query<Entity, With<crate::building::FloorMesh>>,
-        Query<(Entity, &crate::building::WallPiece)>,
-    ),
+    mut faces: Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
     (mut household, mut notes, mut log, mut play): (
         Option<ResMut<Household>>,
         ResMut<Notifications>,
@@ -360,8 +356,26 @@ fn build_tool(
     mut gizmos: Gizmos,
     mut drag: Local<Drag>,
     mut label: Query<(Entity, &mut Node, &mut Text), With<CostLabel>>,
-    (objects, mut removed): (Query<(&GameObject, &Transform, Has<crate::save::Bought>)>, ResMut<crate::save::RemovedLotObjects>),
+    (objects, mut removed, ui): (
+        Query<(&GameObject, &Transform, Has<crate::save::Bought>)>,
+        ResMut<crate::save::RemovedLotObjects>,
+        Option<Res<crate::icons::GameUi>>,
+    ),
 ) {
+    // A roof pattern chosen on the Roofs tab.
+    if let Some(i) = buy.roof_pick.take()
+        && let (Some(b), Some(r)) = (building.as_deref_mut(), ui.as_ref().and_then(|u| u.data.roofs.get(i)))
+    {
+        let ops = vec![PaintOp::Roof { texture: r.tile }];
+        let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+        crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces);
+        match log.as_mut() {
+            Some(l) => l.0.extend(ops),
+            None => commands.insert_resource(crate::building::LotPaint(ops)),
+        }
+        play.write(crate::sound::PlaySound::ui("ui_build_roof_mup"));
+        notes.push(format!("The roof is now {}.", r.name));
+    }
     let tool = buy.tool.filter(|_| buy.active);
     let cursor = windows.single().ok().and_then(|w| w.cursor_position());
     let (Some(tool), Some(b), Some(cursor)) = (tool, building.as_deref_mut(), cursor) else {
@@ -456,7 +470,7 @@ fn build_tool(
             h.funds -= cost;
         }
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-        crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces, &floor_meshes, &pieces);
+        crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces);
         match log.as_mut() {
             Some(l) => l.0.extend(ops),
             None => commands.insert_resource(crate::building::LotPaint(ops)),
@@ -567,7 +581,7 @@ fn build_tool(
         sell_openings(&mut commands, b, level, &edges(tool, start, cur), &objects, &mut removed, household.as_deref_mut(), &mut notes);
     }
     let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-    crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces, &floor_meshes, &pieces);
+    crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces);
     match log.as_mut() {
         Some(l) => l.0.extend(ops),
         None => commands.insert_resource(crate::building::LotPaint(ops)),

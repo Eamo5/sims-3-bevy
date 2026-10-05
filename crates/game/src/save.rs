@@ -402,12 +402,7 @@ fn apply_loaded_game(
     objects: Query<(Entity, &GameObject, &Transform), (Without<Bought>, Without<Sim>)>,
     (data, catalog, mut assets): (Res<crate::baked::Baked>, Res<Catalog>, ResMut<crate::objects::ObjectAssets>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
-    (mut building, mut faces, floor_meshes, pieces): (
-        Option<ResMut<crate::building::ActiveBuilding>>,
-        Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
-        Query<Entity, With<crate::building::FloorMesh>>,
-        Query<(Entity, &crate::building::WallPiece)>,
-    ),
+    (mut building, mut faces): (Option<ResMut<crate::building::ActiveBuilding>>, Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>),
     mut grid: Option<ResMut<crate::nav::NavGrid>>,
     mut notes: ResMut<Notifications>,
 ) {
@@ -503,7 +498,7 @@ fn apply_loaded_game(
     let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
     // The walls and floors as the household left them.
     if let Some(b) = building.as_deref_mut() {
-        crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &game.paint, &mut faces, &floor_meshes, &pieces);
+        crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &game.paint, &mut faces);
     }
     commands.insert_resource(crate::building::LotPaint(game.paint.clone()));
     commands.insert_resource(crate::gardening::PendingPlants(game.plants.clone(), game.seeds.clone()));
