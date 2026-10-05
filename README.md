@@ -113,6 +113,11 @@ installation is unreachable.
   and progress to the next); Career (the job and level, hours, days and pay, the performance
   meter and the next promotion); Simology (traits with what they mean, lifetime happiness and
   the rewards bought). F5 to F8 switch tabs.
+- **Water effects**: fountains gush and fill their basins, showers spray from the head and taps
+  run while someone's at them, each from the object's own effect slot (the game's RSLT slots).
+- **Lots' own ground**: lots keep their sculpted ground; its dips are carved back into the
+  flattened world (Central Park's sunken plaza with the fountain basin set into it, hollows on
+  the beaches), and ground-level paving follows the ground.
 - **Fireplaces**: Sims light a fire with the game's animations; it burns a few hours, flames
   dancing in the hearth and a flickering warm light on the room, and they warm their hands by
   it or put it out. Now and then a spark catches the floor in front.

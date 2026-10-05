@@ -555,6 +555,10 @@ group 0x00958344: u8[rows][cols]    // cols = 4×width: per tile 4 bytes (one pe
                                     // bit0 = steep enough for rock texture
 ```
 
+**Ground dips** [VERIFIED by rendering]: the ground grid is lower than the flattened world in
+places other than ponds too (Central Park's plaza fountain sits 0.75 m down in a pit the size
+of its basin, with the plaza paving sloping down to it). Ground-level paving follows the ground.
+
 **Ponds** [VERIFIED by rendering, 2026-10-05]. The water table is x-major (`[x][z]`, like the
 level-height grid of §9.3) and relative to the same base as the lot's ground level. Wherever the
 water table is above the lot's ground there is water: Summer Hill Springs' pond, its island, and

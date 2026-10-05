@@ -235,6 +235,9 @@ fn main() {
         for c in cat.iter().filter(|c| c.instance_name.to_ascii_lowercase().contains(&want) || c.name.to_ascii_lowercase().contains(&want)) {
             println!("{:08X}:{:08X}:{:016X} {:30} {:30} §{} models {} script {}", c.objd.0, c.objd.1, c.objd.2, c.instance_name, c.name, c.price, c.models.len(), c.script);
             // MODELS=1: each model's parts (vertices, bounds, texture, blend mode).
+            if models.is_some() {
+                println!("    model keys {:X?}", c.models);
+            }
             for m in models.iter().flat_map(|p| c.models.iter().filter_map(|k| p.get::<s3bake::BakedModel>(k))) {
                 for p in &m.parts {
                     println!("    part {} verts, bounds {:?}..{:?}, tex {:?}, mode {}", p.positions.len(), p.bmin, p.bmax, p.texture, p.mode);
@@ -247,6 +250,16 @@ fn main() {
         // The baked moodlets, traits and skills.
         let g = s3bake::load_gamedata(&s3bake::default_root()).expect("no gameplay data");
         println!("{} buffs, {} traits, {} skills", g.buffs.len(), g.traits.len(), g.skills.len());
+        // FX=<name part>: the effect slots of catalogue objects so named.
+        if let Ok(f) = std::env::var("FX") {
+            let cat: Vec<s3bake::types::CatalogEntry> = s3bake::pack::read_value(&s3bake::default_root().global_dir().join("catalog.bin")).unwrap_or_default();
+            println!("{} objects with effect slots", g.fx_slots.len());
+            for c in cat.iter().filter(|c| c.instance_name.to_ascii_lowercase().contains(&f.to_ascii_lowercase())) {
+                if let Some((_, fx)) = g.fx_slots.iter().find(|(k, _)| *k == c.objd) {
+                    println!("fx {} {:?}", c.instance_name, fx);
+                }
+            }
+        }
         println!("{} plants", g.plants.len());
         for p in &g.plants {
             println!("plant {:?} [{}] {} {} bears {} §{} x{}-{} life {} water -{}/h weeds {} skill {}+{}", p.name, p.rarity, p.model, p.height, p.produce, p.price, p.harvest_min, p.harvest_max, p.lifetime, p.water_decay, p.weeds, p.skill_plant, p.skill_harvest);

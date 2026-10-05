@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 19;
+pub const GAMEDATA_VERSION: u32 = 21;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -211,6 +211,9 @@ pub struct GameDataBaked {
     pub roofs: Vec<RoofPattern>,
     pub collectibles: Vec<CollectibleInfo>,
     pub spawners: Vec<SpawnerInfo>,
+    /// Each object's effect slots (model space): where showers spray, fountains gush and
+    /// fires burn.
+    pub fx_slots: Vec<(crate::types::Key, Vec<[f32; 3]>)>,
 }
 
 /// What kind of find a collectible is.
@@ -456,6 +459,16 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     let get = |f: &HashMap<String, String>, k: &str| f.get(k).cloned().unwrap_or_default();
 
     let mut out = GameDataBaked { version: GAMEDATA_VERSION, ..Default::default() };
+    progress("Converting: object effect slots…");
+    let mut objds: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(s3pkg::types::OBJD).copied().collect();
+    objds.sort();
+    out.fx_slots = crate::bake::par_map(&objds, |k| {
+        let fx = s3formats::object::object_fx_slots(pkgs, k);
+        (!fx.is_empty()).then(|| (crate::types::key_of(k), fx))
+    })
+    .into_iter()
+    .flatten()
+    .collect();
     // Buffs: rows without a SKU belong to the base game.
     for f in records(&xml("Buffs").ok_or("no Buffs table")?, "BuffList") {
         let hex = get(&f, "Hex");

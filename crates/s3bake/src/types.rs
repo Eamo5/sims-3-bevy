@@ -10,7 +10,7 @@ pub const BAKE_VERSION: u32 = 4;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
 pub const CAS_VERSION: u32 = 6;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 22;
+pub const WORLD_VERSION: u32 = 24;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -306,9 +306,27 @@ pub struct LotBuildingBaked {
     pub objects: Vec<LotObjectBaked>,
     /// Texture keys of the lot's wall and floor coverings.
     pub covers: Vec<Key>,
+    /// The ground's height at each lot vertex (`[x][z]`, `(width+1) x (depth+1)`), for paving
+    /// laid on it; empty for a flat lot.
+    pub ground: Vec<f32>,
 }
 
 impl LotBuildingBaked {
+    /// The ground's height at a lot-local point (paving follows it), if the lot keeps one.
+    pub fn ground_at(&self, x: f32, z: f32) -> Option<f32> {
+        if self.ground.is_empty() {
+            return None;
+        }
+        let (nx, nz) = (self.width as usize + 1, self.depth as usize + 1);
+        let at = |x: usize, z: usize| self.ground.get(x.min(nx - 1) * nz + z.min(nz - 1)).copied();
+        let (fx, fz) = (x.clamp(0.0, nx as f32 - 1.0), z.clamp(0.0, nz as f32 - 1.0));
+        let (ix, iz) = (fx.floor() as usize, fz.floor() as usize);
+        let (tx, tz) = (fx - fx.floor(), fz - fz.floor());
+        let a = at(ix, iz)? + (at(ix + 1, iz)? - at(ix, iz)?) * tx;
+        let b = at(ix, iz + 1)? + (at(ix + 1, iz + 1)? - at(ix, iz + 1)?) * tx;
+        Some(a + (b - a) * tz)
+    }
+
     /// Whether there's an actual house (walls), not just furniture on an open lot.
     pub fn is_house(&self) -> bool {
         !self.walls.is_empty()

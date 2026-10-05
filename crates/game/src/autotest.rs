@@ -341,7 +341,7 @@ fn auto_pick_world(
 fn watch_insect(
     mut q: Query<&mut SimsCamera>,
     insects: Query<(&GlobalTransform, &crate::interact::GameObject), With<crate::collecting::Insect>>,
-    objects: Query<(&GlobalTransform, &crate::interact::GameObject, Has<crate::fireplace::Lit>)>,
+    objects: Query<(&GlobalTransform, &crate::interact::GameObject, Has<crate::fireplace::Lit>, &crate::interact::UsedBy)>,
 ) {
     // WATCH_KIND=<kind>,<distance>[,<yaw>[,<pitch>]]: the camera on the first object of that kind.
     if let Some((kind, d, yaw, pitch)) = std::env::var("WATCH_KIND").ok().and_then(|v| {
@@ -349,10 +349,10 @@ fn watch_insect(
         let (k, d) = (it.next()?.to_string(), it.next()?.parse::<f32>().ok()?);
         Some((k, d, it.next().and_then(|y| y.parse::<f32>().ok()), it.next().and_then(|p| p.parse::<f32>().ok())))
     }) {
-        // (A lit fireplace first.)
-        let mut of_kind: Vec<_> = objects.iter().filter(|(_, o, _)| format!("{:?}", o.kind) == kind).collect();
-        of_kind.sort_by_key(|(_, _, lit)| !*lit);
-        if let (Ok(mut cam), Some((g, _, _))) = (q.single_mut(), of_kind.first()) {
+        // (One in use, or a lit fireplace, first.)
+        let mut of_kind: Vec<_> = objects.iter().filter(|(_, o, _, _)| format!("{:?}", o.kind) == kind || o.name.contains(&kind)).collect();
+        of_kind.sort_by_key(|(_, _, lit, used)| (used.0.is_none(), !*lit));
+        if let (Ok(mut cam), Some((g, _, _, _))) = (q.single_mut(), of_kind.first()) {
             cam.look_at(g.translation());
             cam.distance = d;
             if let Some(y) = yaw {

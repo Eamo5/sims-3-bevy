@@ -732,7 +732,7 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         }
     });
     progress(&format!("Converting {name}: houses…"));
-    let (buildings, cover_jobs): (Vec<LotBuildingBaked>, Vec<Vec<crate::building::CoverJob>>) = world
+    let (mut buildings, cover_jobs): (Vec<LotBuildingBaked>, Vec<Vec<crate::building::CoverJob>>) = world
         .lots
         .iter()
         .enumerate()
@@ -755,7 +755,23 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         .unwrap_or_default();
 
     let mut heightmap = world.heightmap.clone();
-    let ponds = crate::ponds::carve_ponds(&pkg, &world.lots, &mut heightmap);
+    let ponds = crate::ponds::carve_ponds(&pkg, &world.lots, &buildings, &mut heightmap);
+    // Paving on a lot follows its ground (where it dips, the paving goes down with it).
+    for b in &mut buildings {
+        let Some(l) = world.lots.get(b.lot as usize) else { continue };
+        let (s, c) = l.rotation.sin_cos();
+        let (nx, nz) = (b.width as usize + 1, b.depth as usize + 1);
+        let ground: Vec<f32> = (0..nx * nz)
+            .map(|k| {
+                let (x, z) = ((k / nz) as f32, (k % nz) as f32);
+                heightmap.sample(l.corner[0] + x * c + z * s, l.corner[2] - x * s + z * c)
+            })
+            .collect();
+        // (Only worth keeping where the ground isn't flat at the lot's own height.)
+        if ground.iter().any(|y| (y - b.levels[0]).abs() > 0.05) {
+            b.ground = ground;
+        }
+    }
     let baked = WorldBaked {
         version: WORLD_VERSION,
         name: name.to_string(),

@@ -82,6 +82,17 @@ pub fn object_models(pkgs: &PackageSet, objd_key: &ResourceKey) -> Vec<ResourceK
     }
 }
 
+/// An object's effect slots (where its water, steam and flames come from), in model space:
+/// OBJD -> OBJK -> VPXY -> RSLT.
+pub fn object_fx_slots(pkgs: &PackageSet, objd_key: &ResourceKey) -> Vec<[f32; 3]> {
+    let Some(objd) = pkgs.read(objd_key) else { return Vec::new() };
+    let Some(objk) = objd_objk(pkgs, &objd) else { return Vec::new() };
+    let Some(mk) = objk.model_key.filter(|k| k.t == types::VPXY) else { return Vec::new() };
+    let Some(v) = pkgs.read(&mk).or_else(|| pkgs.read_ti(mk.t, mk.i)) else { return Vec::new() };
+    let Some(rk) = crate::model::vpxy_keys(&v).into_iter().find(|k| k.t == crate::model::T_RSLT) else { return Vec::new() };
+    pkgs.read(&rk).or_else(|| pkgs.read_ti(rk.t, rk.i)).and_then(|d| crate::model::parse_rslt(&d)).map(|s| s.effects.iter().map(|e| e.pos).collect()).unwrap_or_default()
+}
+
 /// Reads a .NET-style 7-bit length prefixed UTF-16BE string (STR7).
 fn str7(r: &mut Reader) -> R<String> {
     let mut n = 0usize;

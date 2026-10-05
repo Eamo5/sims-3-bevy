@@ -398,7 +398,7 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
 
     let jobs = std::mem::take(&mut covers.jobs);
     Some((
-        LotBuildingBaked { lot: lot_index as u32, width: w, depth: d, levels, walls, floors, foundation, objects: objs, covers: covers.keys },
+        LotBuildingBaked { lot: lot_index as u32, width: w, depth: d, levels, walls, floors, foundation, objects: objs, covers: covers.keys, ground: Vec::new() },
         jobs,
     ))
 }

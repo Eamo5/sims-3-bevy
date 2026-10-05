@@ -478,6 +478,70 @@ pub fn vpxy_models(d: &[u8]) -> Vec<ResourceKey> {
     models
 }
 
+pub const T_RSLT: u32 = 0xD3044521;
+
+/// One of an object's slots: where a Sim stands to use it (routing), where things go on it
+/// (container) or where an effect plays (effect). Model space, relative to its bone.
+#[derive(Clone, Copy, Debug)]
+pub struct Slot {
+    pub name: u32,
+    pub bone: u32,
+    pub pos: [f32; 3],
+    /// Rotation rows.
+    pub rot: [[f32; 3]; 3],
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Slots {
+    pub routing: Vec<Slot>,
+    pub containers: Vec<Slot>,
+    pub effects: Vec<Slot>,
+}
+
+/// An RSLT (0xD3044521): `u32 version; u32 counts[5]` (routing, container, effect, IK, cone),
+/// then for each kind with any: the names, the bones, (containers: flags), a 3x4 row-major
+/// matrix each (translation in the last column), and a counted list of slot offsets
+/// (`u32 slot; f32 position[3]; f32 rotation[3]`, 28 bytes; not applied here).
+pub fn parse_rslt(d: &[u8]) -> Option<Slots> {
+    let rcol = Rcol::parse(d).ok()?;
+    let c = rcol.chunk_data(rcol.find_tag(b"RSLT")?)?;
+    let mut r = Reader::at(c, 4);
+    let _ver = r.u32().ok()?;
+    let counts: Vec<usize> = (0..5).map(|_| r.u32().map(|v| v as usize)).collect::<Result<_, _>>().ok()?;
+    if counts.iter().any(|&n| n > 256) {
+        return None;
+    }
+    let mut section = |n: usize, flags: bool| -> Option<Vec<Slot>> {
+        if n == 0 {
+            return Some(Vec::new());
+        }
+        let names: Vec<u32> = (0..n).map(|_| r.u32()).collect::<Result<_, _>>().ok()?;
+        let bones: Vec<u32> = (0..n).map(|_| r.u32()).collect::<Result<_, _>>().ok()?;
+        if flags {
+            for _ in 0..n {
+                r.u32().ok()?;
+            }
+        }
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            let m: Vec<f32> = (0..12).map(|_| r.f32()).collect::<Result<_, _>>().ok()?;
+            out.push(Slot { name: names[i], bone: bones[i], pos: [m[3], m[7], m[11]], rot: [[m[0], m[1], m[2]], [m[4], m[5], m[6]], [m[8], m[9], m[10]]] });
+        }
+        let offsets = r.u32().ok()? as usize;
+        if offsets > 256 {
+            return None;
+        }
+        for _ in 0..offsets * 7 {
+            r.u32().ok()?;
+        }
+        Some(out)
+    };
+    let routing = section(counts[0], false)?;
+    let containers = section(counts[1], true)?;
+    let effects = section(counts[2], false)?;
+    Some(Slots { routing, containers, effects })
+}
+
 /// Every resource a VPXY refers to (models, lights, materials...).
 pub fn vpxy_keys(d: &[u8]) -> Vec<ResourceKey> {
     let Ok(rcol) = Rcol::parse(d) else { return Vec::new() };

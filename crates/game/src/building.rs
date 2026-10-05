@@ -425,7 +425,12 @@ pub fn spawn_floors(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mu
             let buf = floor_bufs.entry((f.level, cover_key(f.cover[t]).unwrap_or_else(|| floor_style(f.kind)))).or_default();
             let (p1, p2) = (corners[t], corners[(t + 1) % 4]);
             let pts = [c, p1, p2];
-            buf.tri(pts.map(|p| active.world(p.x, p.y, y)), pts.map(|p| [p.x, p.y]), Vec3::Y);
+            // (Paving on the ground follows it.)
+            let at = |p: Vec2| match f.level {
+                0 => b.ground_at(p.x, p.y).map_or(y, |g| g + 0.03),
+                _ => y,
+            };
+            buf.tri(pts.map(|p| active.world(p.x, p.y, at(p))), pts.map(|p| [p.x, p.y]), Vec3::Y);
         }
     }
     let mut out = Vec::new();
@@ -843,6 +848,7 @@ pub fn empty_building(lot_index: usize, lot: &LotInfo, ground: f32) -> LotBuildi
         foundation: Vec::new(),
         objects: Vec::new(),
         covers: Vec::new(),
+        ground: Vec::new(),
     }
 }
 
