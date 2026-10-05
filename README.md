@@ -105,7 +105,8 @@ installation is unreachable.
   other community lots (from the lot's pie menu or its map tag) and use what's there: chess
   tables, computers, bookshelves, swings, grills, restrooms. Each lot gets its own walk grid
   and floors, its walls come down as the camera moves in, Sims on it keep to it in their own
-  choices, and "Go Home" drives them back while the household carries on at home.
+  choices, townies turn up during the day to use the place too (and to meet), and "Go Home"
+  drives them back while the household carries on at home.
 - **Building**: wall and room tools that draw along the lot's grid (straight or diagonal, with
   a live outline and price), the sledgehammer, floor tiles and staircases up to a new floor
   (stairwell opened, landing floored, Sims climb them), and hip roofs over the rooms in any

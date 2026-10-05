@@ -21,7 +21,7 @@ pub struct VisitPlugin;
 
 impl Plugin for VisitPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (arrivals, off_the_lot, close_lot, rebuild_lot_grid, walls_down).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (arrivals, off_the_lot, close_lot, rebuild_lot_grid, walls_down, guests).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -38,6 +38,16 @@ pub struct OnLot(pub usize);
 /// Driving to a community lot.
 #[derive(Component)]
 pub struct Trip(pub usize);
+
+/// A townie spending time on the visited lot until `leave_at`.
+#[derive(Component)]
+pub struct LotGuest {
+    pub leave_at: f64,
+}
+
+/// How many townies are out on a community lot at once, and when.
+const GUESTS: usize = 4;
+const GUEST_HOURS: std::ops::Range<f32> = 8.0..22.0;
 
 /// Furniture of the community lot being visited.
 #[derive(Component, Clone, Copy)]
@@ -56,6 +66,8 @@ pub struct VisitedLot {
     empty_since: Option<f64>,
     /// Frames to wait for the furniture's transforms before building the grid.
     settle: u8,
+    /// Game minute the next townie may turn up.
+    next_guest: f64,
 }
 
 /// Kinds of furniture that make a lot somewhere to spend time.
@@ -133,7 +145,7 @@ fn open_lot(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetC
     }
     let center = crate::home::lot_center(l);
     let grid = NavGrid::new(center.xz(), l.width.max(l.depth) as f32 * 0.5 + 8.0);
-    (VisitedLot { lot, grid, exit: lot_exit(l), root, objects, empty_since: None, settle: 3 }, shown)
+    (VisitedLot { lot, grid, exit: lot_exit(l), root, objects, empty_since: None, settle: 3, next_guest: 0.0 }, shown)
 }
 
 /// Sims reaching a community lot: the lot opens (only one at a time; anyone at another heads
@@ -227,6 +239,55 @@ fn close_lot(
             b.away = None;
         }
     }
+}
+
+/// Townies out on the town: while a community lot is open in the daytime a few turn up (from
+/// those not strolling past the house) and spend a while there, using it like anyone else; they
+/// go when their time's up or the lot closes.
+#[allow(clippy::type_complexity)]
+fn guests(
+    mut commands: Commands,
+    clock: Res<GameClock>,
+    world: Res<CurrentWorld>,
+    building: Option<Res<ActiveBuilding>>,
+    visited: Option<ResMut<VisitedLot>>,
+    mut townies: Query<(Entity, &mut Transform, &mut Floor, &crate::town::Townie), Without<LotGuest>>,
+    mut out: Query<(Entity, &LotGuest, &OnLot, &mut crate::interact::ActionQueue), Without<crate::town::Townie>>,
+) {
+    let mut rng = rand::rng();
+    // Time to go (or the lot closed): back to strolling.
+    let mut here = 0;
+    for (e, g, on, mut q) in &mut out {
+        if visited.as_ref().is_some_and(|v| v.lot == on.0) && clock.minutes < g.leave_at {
+            here += 1;
+            continue;
+        }
+        q.0.clear();
+        commands
+            .entity(e)
+            .remove::<(LotGuest, OnLot, crate::nav::PathFollow)>()
+            .insert((crate::town::Townie { next_walk: clock.minutes + rng.random_range(30.0..120.0), walking: false }, Visibility::Hidden));
+    }
+    let Some(mut v) = visited else { return };
+    let hour = clock.hour_f();
+    if here >= GUESTS || !GUEST_HOURS.contains(&hour) || clock.minutes < v.next_guest || v.grid.dirty {
+        return;
+    }
+    v.next_guest = clock.minutes + rng.random_range(10.0..45.0);
+    let free: Vec<Entity> = townies.iter().filter(|t| !t.3.walking).map(|t| t.0).collect();
+    if free.is_empty() {
+        return;
+    }
+    let pick = free[rng.random_range(0..free.len())];
+    let Ok((e, mut tf, mut floor, _)) = townies.get_mut(pick) else { return };
+    let p = v.exit + Vec2::new(rng.random_range(-2.0..2.0), rng.random_range(-1.0..1.0));
+    tf.translation = Vec3::new(p.x, crate::building::walk_height(&world.data, building.as_deref(), Vec3::new(p.x, 0.0, p.y)), p.y);
+    floor.0 = 1;
+    commands
+        .entity(e)
+        .remove::<(crate::town::Townie, crate::nav::PathFollow)>()
+        .insert((LotGuest { leave_at: clock.minutes + rng.random_range(90.0..240.0) }, OnLot(v.lot), Visibility::Inherited))
+        .insert_if_new((crate::interact::ActionQueue::default(), crate::interact::AutonomyTimer(rng.random_range(0.5..3.0)), crate::interact::Skills::default()));
 }
 
 /// Up close, the visited lot's walls are shown cut down so Sims inside can be seen.

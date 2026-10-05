@@ -291,7 +291,7 @@ fn save_game(
                 Has<crate::visit::OnLot>,
             ),
         ),
-        Without<crate::town::Townie>,
+        (Without<crate::town::Townie>, Without<crate::visit::LotGuest>),
     >,
     (bought, exit): (Query<(&GameObject, &Transform), With<Bought>>, Option<Res<crate::interact::LotExit>>),
     ui: Option<Res<crate::icons::GameUi>>,

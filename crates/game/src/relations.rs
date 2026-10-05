@@ -169,6 +169,7 @@ fn update_panel(
                     .with_children(|f| {
                         f.spawn((
                             ImageNode::new(portraits.portrait(&mut images, *e)),
+                            crate::portraits::PortraitOf(*e),
                             Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
                             Pickable::IGNORE,
                         ));

@@ -22,7 +22,7 @@ impl Plugin for PortraitsPlugin {
         app.init_resource::<Portraits>()
             .add_systems(OnEnter(AppState::InGame), spawn_studio)
             .add_systems(OnExit(AppState::InGame), forget)
-            .add_systems(Update, (retake_rebuilt, take_portraits).chain().run_if(in_state(AppState::InGame)));
+            .add_systems(Update, (retake_rebuilt, take_portraits, follow_portraits).chain().run_if(in_state(AppState::InGame)));
     }
 }
 
@@ -38,6 +38,9 @@ const BACKDROP_BOTTOM: [u8; 3] = [112, 150, 196];
 #[derive(Resource, Default)]
 pub struct Portraits {
     images: HashMap<Entity, Handle<Image>>,
+    /// The picture being taken goes here, and is swapped in once it's finished (so a picture
+    /// is never seen half made).
+    spare: HashMap<Entity, Handle<Image>>,
     queue: VecDeque<Entity>,
     /// The picture being taken.
     busy: Option<Shot>,
@@ -49,20 +52,44 @@ pub struct Portraits {
 }
 
 impl Portraits {
-    /// A Sim's portrait (blank until it has been taken).
+    /// A Sim's portrait (blank until it has been taken). It changes handle when retaken: UI
+    /// showing it carries [`PortraitOf`] to follow along.
     pub fn portrait(&mut self, images: &mut Assets<Image>, sim: Entity) -> Handle<Image> {
         if let Some(h) = self.images.get(&sim) {
             return h.clone();
         }
-        // (The backdrop's colour until the picture is taken.)
-        let mut img = Image::new_target_texture(SIZE, SIZE, TextureFormat::Rgba8Unorm, Some(TextureFormat::Rgba8UnormSrgb));
-        let c = BACKDROP.to_srgba();
-        let px = [(c.red * 255.0) as u8, (c.green * 255.0) as u8, (c.blue * 255.0) as u8, 255];
-        img.data = Some(px.iter().copied().cycle().take((SIZE * SIZE * 4) as usize).collect());
-        let h = images.add(img);
+        let h = blank(images);
         self.images.insert(sim, h.clone());
         self.queue.push_back(sim);
         h
+    }
+
+    /// The image the next picture of a Sim is taken into.
+    fn spare(&mut self, images: &mut Assets<Image>, sim: Entity) -> Handle<Image> {
+        self.spare.entry(sim).or_insert_with(|| blank(images)).clone()
+    }
+}
+
+/// A picture to take (the backdrop's colour until it's taken).
+fn blank(images: &mut Assets<Image>) -> Handle<Image> {
+    let mut img = Image::new_target_texture(SIZE, SIZE, TextureFormat::Rgba8Unorm, Some(TextureFormat::Rgba8UnormSrgb));
+    let c = BACKDROP.to_srgba();
+    let px = [(c.red * 255.0) as u8, (c.green * 255.0) as u8, (c.blue * 255.0) as u8, 255];
+    img.data = Some(px.iter().copied().cycle().take((SIZE * SIZE * 4) as usize).collect());
+    images.add(img)
+}
+
+/// An image showing a Sim's portrait, kept to the latest picture.
+#[derive(Component)]
+pub struct PortraitOf(pub Entity);
+
+fn follow_portraits(portraits: Res<Portraits>, mut nodes: Query<(&PortraitOf, &mut ImageNode)>) {
+    for (p, mut node) in &mut nodes {
+        if let Some(h) = portraits.images.get(&p.0)
+            && node.image != *h
+        {
+            node.image = h.clone();
+        }
     }
 }
 
@@ -127,8 +154,21 @@ fn forget(mut portraits: ResMut<Portraits>) {
 }
 
 /// A rebuilt body gets a new picture; Sims who have left the world lose theirs.
+/// Which way a Sim's face points: from the head to the tip of the nose (or between the eyes),
+/// level; the body's facing if the face bones aren't found. (The body can be turned away from
+/// where the head looks, mid-step or mid-turn.)
+fn facing(skel: &Skeleton, joints: &Query<&GlobalTransform, Without<Sim>>, head: Vec3, body: Quat) -> Quat {
+    let bone = |n: &str| skel.rig.bones.iter().position(|b| b.name == n).and_then(|i| joints.get(skel.joints[i]).ok()).map(|g| g.translation());
+    let front = bone("b__NoseTip__").or_else(|| Some((bone("b__LeftEye__")? + bone("b__RightEye__")?) * 0.5));
+    match front.map(|f| (f - head).with_y(0.0)).filter(|v| v.length() > 0.01) {
+        Some(a) => Quat::from_rotation_y(a.x.atan2(a.z)),
+        None => body,
+    }
+}
+
 fn retake_rebuilt(mut portraits: ResMut<Portraits>, rebuilt: Query<Entity, Changed<Skeleton>>, alive: Query<(), With<Sim>>, time: Res<Time>) {
     portraits.images.retain(|e, _| alive.contains(*e));
+    portraits.spare.retain(|e, _| alive.contains(*e));
     portraits.queue.retain(|e| alive.contains(*e));
     portraits.built.retain(|e, _| alive.contains(*e));
     portraits.retake.retain(|e, _| alive.contains(*e));
@@ -158,12 +198,14 @@ fn take_portraits(
     mut backdrop: Query<&mut Transform, (With<Backdrop>, Without<StudioCamera>)>,
     sims: Query<(&Sim, &SimAnim, &GlobalTransform, &Skeleton, &InheritedVisibility)>,
     placed: Query<
-        (&Transform, &Visibility, Has<crate::interact::OffLot>, Has<crate::interact::AtWork>, Has<crate::rabbitholes::AtRabbitHole>),
+        (&Transform, &Visibility, Has<crate::visit::Trip>),
         (With<Sim>, Without<StudioCamera>, Without<Backdrop>),
     >,
     joints: Query<&GlobalTransform, Without<Sim>>,
     mut light: Local<Option<Entity>>,
     time: Res<Time>,
+    (grid, visited): (Option<Res<crate::nav::NavGrid>>, Option<Res<crate::visit::VisitedLot>>),
+    mut images: ResMut<Assets<Image>>,
 ) {
     let now = time.elapsed_secs();
     let Ok((cam_e, mut camera, mut cam_tf)) = cam.single_mut() else { return };
@@ -188,9 +230,9 @@ fn take_portraits(
                 let e = shot.sim;
                 let aim = sims.get(e).ok().and_then(|(sim, _, tf, skel, _)| {
                     let head = skel.rig.bones.iter().position(|b| b.name == "b__Head__").and_then(|i| joints.get(skel.joints[i]).ok())?;
-                    Some((sim.age.is_little(), head.translation(), tf.rotation()))
+                    Some((sim.age.is_little(), head.translation(), facing(skel, &joints, head.translation(), tf.rotation())))
                 });
-                let img = portraits.images.get(&e).cloned();
+                let img = portraits.images.contains_key(&e).then(|| portraits.spare(&mut images, e));
                 // (Not mid-crouch: if the head isn't up where it belongs, try again later.)
                 let standing = sims.get(e).ok().map(|(sim, _, tf, _, _)| (sim.age, tf.translation().y));
                 let aim = aim.filter(|(_, head, _)| match standing {
@@ -241,11 +283,18 @@ fn take_portraits(
                     _ => shot.aimed = Some(0),
                 }
             }
+            // A Sim who drops out of view mid-shot (driving off, say) is taken again later.
+            Some(_) if shot.staged.is_none() && sims.get(shot.sim).is_ok_and(|s| !s.4.get()) => {
+                camera.is_active = false;
+                let taken = portraits.retake.get(&shot.sim).map_or(0, |r| r.1);
+                portraits.retake.insert(shot.sim, (now + 2.0, taken));
+                done = true;
+            }
             // Until it renders, the camera follows the face (Sims move between frames).
             Some(at) if shot.frame < at + 4 => {
                 let aim = sims.get(shot.sim).ok().and_then(|(sim, _, tf, skel, _)| {
                     let head = skel.rig.bones.iter().position(|b| b.name == "b__Head__").and_then(|i| joints.get(skel.joints[i]).ok())?;
-                    Some((sim.age.is_little(), head.translation(), tf.rotation()))
+                    Some((sim.age.is_little(), head.translation(), facing(skel, &joints, head.translation(), tf.rotation())))
                 });
                 if let Some((little, head, rot)) = aim {
                     let face = head + Vec3::Y * if little { 0.02 } else { 0.05 };
@@ -272,6 +321,12 @@ fn take_portraits(
                 }
                 let taken = portraits.retake.get(&shot.sim).map_or(0, |r| r.1) + 1;
                 portraits.retake.insert(shot.sim, (now + if taken < 2 { 12.0 } else { 240.0 }, taken));
+                // The finished picture is shown; the old one takes the next.
+                if let (Some(old), Some(new)) = (portraits.images.remove(&shot.sim), portraits.spare.remove(&shot.sim)) {
+                    portraits.images.insert(shot.sim, new);
+                    portraits.spare.insert(shot.sim, old);
+                }
+                debug!("portrait {:?} taken ({taken}) from {:?}, staged {}", shot.sim, cam_tf.translation, shot.staged.is_some());
                 done = true;
             }
             _ => {}
@@ -285,23 +340,31 @@ fn take_portraits(
     // The next Sim ready for their picture (others wait their turn).
     for _ in 0..portraits.queue.len() {
         let Some(e) = portraits.queue.pop_front() else { break };
-        let (Ok((sim, anim, _, _, vis)), Ok((tf, visibility, off_lot, at_work, out))) = (sims.get(e), placed.get(e)) else {
+        let (Ok((sim, anim, _, _, vis)), Ok((tf, visibility, driving))) = (sims.get(e), placed.get(e)) else {
             // (The body isn't built yet.)
             portraits.queue.push_back(e);
             continue;
         };
         // A Sim's first picture is taken wherever they are (staged if away); retakes wait until
         // they're in view, standing or walking about.
+        // (Someone on their way to a community lot is pictured when they get there.)
+        // A first picture is always staged (nothing in the way, the same light for everyone).
         let first = portraits.retake.get(&e).is_none();
-        let away = (off_lot || at_work || out) && first;
-        let upright = if first { anim.pose != Pose::Lie } else { matches!(anim.pose, Pose::Stand | Pose::Walk | Pose::Talk) } || sim.age == Age::Baby;
+        let away = first && !driving;
+        let upright = if first { anim.pose != Pose::Lie } else { matches!(anim.pose, Pose::Stand | Pose::Talk) } || sim.age == Age::Baby;
         // (Faces and clothes finish loading a few seconds after a body is built.)
         let settled = portraits.built.get(&e).is_none_or(|t| now - t > 4.0) && now > 6.0;
-        if !settled || !(vis.get() && upright || away) {
+        // A retake needs room in front of the face for the camera (not a stall or a corner).
+        let room = first || {
+            let eye = (tf.translation + (tf.rotation * Vec3::Z).with_y(0.0).normalize_or_zero() * 0.72).xz();
+            let clear = |g: &crate::nav::NavGrid| g.cell_of(eye).map(|(x, z)| !g.is_blocked(x, z));
+            visited.as_ref().and_then(|v| clear(&v.grid)).or_else(|| grid.as_deref().and_then(clear)).unwrap_or(true)
+        };
+        if !settled || !room || !(vis.get() && upright || away) {
             portraits.queue.push_back(e);
             continue;
         }
-        let staged = (!vis.get()).then(|| (*tf, *visibility));
+        let staged = (first || !vis.get()).then(|| (*tf, *visibility));
         if let Some((tf, _)) = staged {
             commands.entity(e).insert((Transform { translation: tf.translation - Vec3::Y * UNDERGROUND, ..tf }, Visibility::Visible));
         }
