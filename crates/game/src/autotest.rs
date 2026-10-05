@@ -184,6 +184,19 @@ impl Plugin for AutoTestPlugin {
                             }
                         });
                     }
+                    // BUYTAB=<category>: buy mode open on that tab.
+                    if let Ok(t) = std::env::var("BUYTAB")
+                        && time.elapsed_secs() > 6.0
+                    {
+                        commands.queue(move |w: &mut World| {
+                            if let Some(i) = crate::buy::CATEGORIES.iter().position(|c| c.eq_ignore_ascii_case(&t)) {
+                                let mut b = w.resource_mut::<crate::buy::BuyMode>();
+                                if !b.active || b.category != i {
+                                    b.show(i);
+                                }
+                            }
+                        });
+                    }
                     // JOURNAL=<seconds>: the collection journal opens then.
                     if let Some(t) = std::env::var("JOURNAL").ok().and_then(|t| t.parse::<f32>().ok())
                         && time.elapsed_secs() > t

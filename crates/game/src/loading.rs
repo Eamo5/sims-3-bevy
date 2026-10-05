@@ -43,6 +43,36 @@ pub struct CatalogEntry {
     pub kind: crate::interact::ObjectKind,
     /// A door or archway (`Some(true)`) or a window (`Some(false)`), set into a wall.
     pub opening: Option<bool>,
+    /// Its buy-mode tab.
+    pub category: &'static str,
+}
+
+/// The buy-mode tab of a catalogue object: by what it does, else by the game's own grouping of
+/// its script (`Sims3.Gameplay.Objects.<Group>.…`).
+fn buy_category(kind: crate::interact::ObjectKind, script: &str) -> &'static str {
+    let by_kind = kind.category();
+    if by_kind != "Misc" {
+        return by_kind;
+    }
+    let group = script.strip_prefix("Sims3.Gameplay.Objects.").and_then(|s| s.split('.').next()).unwrap_or("");
+    match group {
+        // Fountain jets only work set into a build-mode fountain pool.
+        _ if script.contains("FountainJet") => "",
+        _ if script.contains("SmokeDetector") || script.contains("BurglarAlarm") => "Electronics",
+        "Appliances" => "Appliances",
+        "Plumbing" => "Plumbing",
+        "Beds" => "Beds",
+        "Seating" => "Seating",
+        "Tables" | "Counters" | "ShelvesStorage" => "Surfaces",
+        "Electronics" => "Electronics",
+        "HobbiesSkills" | "Entertainment" => "Hobbies",
+        "Toys" | "Swingset" => "Kids",
+        "Lighting" => "Lighting",
+        "Decorations" => "Decor",
+        "Environment" | "Flora" => "Outdoors",
+        "Miscellaneous" => "Misc",
+        _ => "",
+    }
 }
 
 /// Every object in the installed game, with buy-mode prices.
@@ -63,6 +93,7 @@ impl Catalog {
                 price: c.price,
                 kind: crate::interact::ObjectKind::from_script(&c.script, &c.instance_name),
                 opening: crate::building::is_opening(&c.script),
+                category: buy_category(crate::interact::ObjectKind::from_script(&c.script, &c.instance_name), &c.script),
             })
             .collect();
         let index = entries.iter().enumerate().map(|(i, e)| (e.key, i)).collect();
@@ -84,7 +115,7 @@ impl Catalog {
     /// Buyable entries in a buy-mode category, cheapest first.
     pub fn in_category(&self, cat: &str) -> Vec<&CatalogEntry> {
         let mut v: Vec<&CatalogEntry> =
-            self.entries.iter().filter(|e| e.price > 0 && e.kind.category() == cat && !e.name.is_empty()).collect();
+            self.entries.iter().filter(|e| e.price > 0 && e.category == cat && e.opening.is_none() && !e.name.is_empty()).collect();
         v.sort_by(|a, b| a.price.cmp(&b.price).then(a.name.cmp(&b.name)));
         v.dedup_by(|a, b| a.name == b.name);
         v

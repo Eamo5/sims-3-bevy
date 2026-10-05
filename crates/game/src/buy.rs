@@ -29,8 +29,8 @@ impl Plugin for BuyPlugin {
     }
 }
 
-pub const CATEGORIES: [&str; 10] =
-    ["Appliances", "Plumbing", "Beds", "Seating", "Surfaces", "Electronics", "Hobbies", "Kids", "Lighting", "Decor"];
+pub const CATEGORIES: [&str; 12] =
+    ["Appliances", "Plumbing", "Beds", "Seating", "Surfaces", "Electronics", "Hobbies", "Kids", "Lighting", "Decor", "Outdoors", "Misc"];
 /// Build-mode tabs after the buy categories: wallpaper, floors, the construction tools, doors
 /// and windows.
 const PAINT_TABS: [&str; 6] = ["Wallpaper", "Floors", "Walls & Floors", "Doors", "Windows", "Roofs"];

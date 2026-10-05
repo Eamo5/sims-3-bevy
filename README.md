@@ -94,7 +94,9 @@ installation is unreachable.
   their names, bios, family portraits, traits, careers, skills, marriages and homes — play one
   of them, or meet them around town.
 - **Play**: choose a furnished house (with the game's lot pictures) or an empty lot, buy
-  mode with the game's own catalogue pictures (base game and every installed pack's),
+  mode with the game's own catalogue pictures (base game and every installed pack's) and
+  every catalogue object on its tab by the game's own grouping (smoke and burglar alarms,
+  gnomes, sprinklers, picnic tables and trees under Electronics, Outdoors and Misc),
   multi-storey navigation by stairs, day/night with lamps and street lights. Sims deciding on
   something by themselves think of it in a balloon with its picture.
 - **Build mode painting**: the catalogue's wallpapers and floor coverings (every base-game
