@@ -23,7 +23,7 @@ pub struct MealsPlugin;
 
 impl Plugin for MealsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (deliver_pizza, meal_requests, release_plates, learn_recipes).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (deliver_pizza, meal_requests, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -153,6 +153,35 @@ fn learn_recipes(
     }
 }
 
+/// What a birthday cake costs to bake.
+pub const CAKE_PRICE: i64 = 20;
+
+/// A birthday cake whose candles have been blown out: cut for everyone, and the household
+/// cheers.
+#[derive(Component)]
+pub struct CakeBlownOut;
+
+fn cut_cakes(
+    mut commands: Commands,
+    cakes: Query<(Entity, &Transform), With<CakeBlownOut>>,
+    sims: Query<(Entity, &Transform, &ActionQueue), (With<HouseholdMember>, Without<crate::aging::GrowUpNow>)>,
+) {
+    for (cake, ctf) in &cakes {
+        commands.entity(cake).remove::<CakeBlownOut>().insert(Meal { servings: 6 }).queue_silenced(|mut w: EntityWorldMut| {
+            if let Some(mut g) = w.get_mut::<GameObject>() {
+                g.kind = ObjectKind::Meal;
+                g.name = "Birthday Cake".into();
+            }
+        });
+        // Everyone close by with nothing else to do cheers.
+        for (e, tf, q) in &sims {
+            if q.0.is_empty() && tf.translation.distance(ctf.translation) < 8.0 {
+                commands.entity(e).insert(crate::anim::ActionClip::new(None, &["a2o_birthdayCake_cheer_x"]));
+            }
+        }
+    }
+}
+
 /// Ingredients only found, never bought.
 const RARE: [&str; 4] = ["Lifefruit", "Deathfish", "Flame Fruit", "Ingredient"];
 
@@ -206,6 +235,8 @@ fn set_food(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetC
 pub enum MealRequest {
     /// Finished cooking at this stove.
     Serve(Entity),
+    /// Baked a birthday cake (at this fridge).
+    Cake(Entity),
     /// Took a serving from this platter.
     Grabbed(Entity),
     /// Sat down to eat at this dining chair.
@@ -364,6 +395,17 @@ fn meal_requests(
                 });
                 // The cook eats too.
                 queue.0.push_front(Action::new("Grab a Plate", ActionKind::Object { target: platter, def: 0 }, true));
+            }
+            MealRequest::Cake(fridge) => {
+                // On the nearest counter or table, candles lit.
+                let Ok((_, f, ftf, _)) = objects.get(fridge) else { continue };
+                let at = surface_near(&objects, f.world_center(ftf), 8.0).unwrap_or(tf.translation + tf.rotation * Vec3::new(0.0, 0.0, 0.6));
+                if spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, "FoodBirthdayCake", ObjectKind::BirthdayCake, "Birthday Cake", at, 0.0).is_some() {
+                    if let Some(h) = funds.as_mut() {
+                        h.funds -= CAKE_PRICE;
+                    }
+                    notes.push(format!("{} baked a birthday cake (§{CAKE_PRICE}). Who'll blow out the candles?", sim.first));
+                }
             }
             MealRequest::Grabbed(platter) => {
                 if let Ok((mut m, dish, food)) = meals.get_mut(platter) {

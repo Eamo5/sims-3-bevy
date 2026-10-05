@@ -79,6 +79,10 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_newspaper_read",
     // The Grim Reaper and dying of old age.
     "a_death_appear",
+    // Blowing out a birthday cake's candles, and cheering them on.
+    "a2o_birthdayCake_blowOut",
+    "c2o_birthdayCake_blowOut",
+    "a2o_birthdayCake_cheer",
     // Dying of hunger or electrocution, and the shock from a botched repair.
     "a_die_starvation",
     "a_die_electrocution",

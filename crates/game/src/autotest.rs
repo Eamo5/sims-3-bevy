@@ -219,8 +219,20 @@ impl Plugin for AutoTestPlugin {
                   time: Res<Time>,
                   mut sel: Query<(&mut crate::interact::ActionQueue, &Transform, Option<&crate::visit::OnLot>, &mut crate::interact::Skills), With<crate::sim::Selected>>,
                   objects: Query<(Entity, &crate::interact::GameObject, &Transform, Option<&crate::visit::LotObject>)>| {
-                    let Some(want) = &args.use_kind else { return };
+                    let Some(first) = &args.use_kind else { return };
                     let Ok((mut q, tf, on, mut skills)) = sel.single_mut() else { return };
+                    // THEN_USE=<Kind>:<interaction>: once that's done, this.
+                    let mut want = first.clone();
+                    if *done
+                        && let Ok(then) = std::env::var("THEN_USE")
+                        && let Some(kind) = then.split(':').next()
+                        && objects.iter().any(|(_, o, _, _)| format!("{:?}", o.kind).eq_ignore_ascii_case(kind))
+                    {
+                        // SAFETY: a test setting, read only here, on this thread; cleared once used.
+                        unsafe { std::env::remove_var("THEN_USE") };
+                        want = then;
+                        *done = false;
+                    }
                     if *done && std::env::var("USE_REPEAT").is_ok() && q.0.is_empty() {
                         *done = false;
                     }

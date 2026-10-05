@@ -17,7 +17,7 @@ pub struct AgingPlugin;
 
 impl Plugin for AgingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (daily_aging, rebuild_bodies).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (daily_aging, grow_up_now, rebuild_bodies).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -172,31 +172,7 @@ fn daily_aging(
             }
             continue;
         }
-        let Some(age) = next_age(sim.age) else { continue };
-        sim.age = age;
-        aging.days = 0.0;
-        // School is over for young adults.
-        if age == Age::YoungAdult {
-            commands.entity(e).remove::<crate::rabbitholes::SchoolGrades>();
-        }
-        // A new trait slot opens for teens and young adults.
-        let slots = crate::life::trait_slots(age);
-        let mut gained = None;
-        while sim.traits.len() < slots {
-            let options: Vec<Trait> = Trait::ALL.into_iter().filter(|t| !sim.traits.contains(t) && t.compatible(&sim.traits)).collect();
-            let Some(&t) = options.choose(&mut rng) else { break };
-            sim.traits.push(t);
-            gained = Some(t);
-        }
-        sim.outfit = crate::sim::OutfitChoice::default();
-        moodlets.add(MoodletKind::Birthday, clock.minutes);
-        life.write(LifeEvent::new(e, LifeEventKind::Birthday));
-        play.write(PlaySound::ui(birthday_sting(age)).with_volume(0.7));
-        notes.push(match gained {
-            Some(t) => format!("Happy birthday! {} is now {} and has become {}.", sim.first, age_word(age), t.name()),
-            None => format!("Happy birthday! {} is now {}.", sim.first, age_word(age)),
-        });
-        commands.entity(e).insert(NeedsNewBody);
+        grow_up(&mut commands, e, &mut sim, &mut aging, &mut moodlets, clock.minutes, &mut life, &mut play, &mut notes, &mut rng);
     }
     for (e, _name, _selected) in died {
         // The Grim Reaper comes for them (see `death`).
@@ -207,6 +183,73 @@ fn daily_aging(
                 m.add(MoodletKind::Heartbroken, clock.minutes);
             }
         }
+    }
+}
+
+/// A Sim's birthday: the next stage of life, perhaps a new trait, and a new body.
+#[allow(clippy::too_many_arguments)]
+fn grow_up(
+    commands: &mut Commands,
+    e: Entity,
+    sim: &mut Sim,
+    aging: &mut Aging,
+    moodlets: &mut Moodlets,
+    now: f64,
+    life: &mut MessageWriter<LifeEvent>,
+    play: &mut MessageWriter<PlaySound>,
+    notes: &mut Notifications,
+    rng: &mut impl rand::Rng,
+) {
+    let Some(age) = next_age(sim.age) else { return };
+    sim.age = age;
+    aging.days = 0.0;
+    // School is over for young adults.
+    if age == Age::YoungAdult {
+        commands.entity(e).remove::<crate::rabbitholes::SchoolGrades>();
+    }
+    // A new trait slot opens for teens and young adults.
+    let slots = crate::life::trait_slots(age);
+    let mut gained = None;
+    while sim.traits.len() < slots {
+        let options: Vec<Trait> = Trait::ALL.into_iter().filter(|t| !sim.traits.contains(t) && t.compatible(&sim.traits)).collect();
+        let Some(&t) = options.choose(rng) else { break };
+        sim.traits.push(t);
+        gained = Some(t);
+    }
+    sim.outfit = crate::sim::OutfitChoice::default();
+    moodlets.add(MoodletKind::Birthday, now);
+    life.write(LifeEvent::new(e, LifeEventKind::Birthday));
+    play.write(PlaySound::ui(birthday_sting(age)).with_volume(0.7));
+    notes.push(match gained {
+        Some(t) => format!("Happy birthday! {} is now {} and has become {}.", sim.first, age_word(age), t.name()),
+        None => format!("Happy birthday! {} is now {}.", sim.first, age_word(age)),
+    });
+    commands.entity(e).insert(NeedsNewBody);
+}
+
+/// Blew out a birthday cake's candles: grows up now.
+#[derive(Component)]
+pub struct GrowUpNow;
+
+#[allow(clippy::too_many_arguments)]
+fn grow_up_now(
+    mut commands: Commands,
+    clock: Res<GameClock>,
+    mut sims: Query<(Entity, &mut Sim, Option<&mut Aging>, &mut Moodlets), With<GrowUpNow>>,
+    mut life: MessageWriter<LifeEvent>,
+    mut play: MessageWriter<PlaySound>,
+    mut notes: ResMut<Notifications>,
+) {
+    let mut rng = rand::rng();
+    for (e, mut sim, aging, mut moodlets) in &mut sims {
+        commands.entity(e).remove::<GrowUpNow>();
+        if next_age(sim.age).is_none() {
+            notes.push(format!("{} made a wish and blew out the candles.", sim.first));
+            continue;
+        }
+        let mut a = aging.map(|a| a.clone()).unwrap_or_default();
+        grow_up(&mut commands, e, &mut sim, &mut a, &mut moodlets, clock.minutes, &mut life, &mut play, &mut notes, &mut rng);
+        commands.entity(e).insert(a);
     }
 }
 

@@ -42,7 +42,9 @@ installation is unreachable.
   body-shape morphs (weight and fitness sliders; town Sims keep their builds, working out
   firms Sims up); needs, moods,
   skills, careers, relationships, autonomy, social interactions; children, teens, adults and
-  elders who grow up and grow old (birthdays, new traits, passing away).
+  elders who grow up and grow old (birthdays, new traits, passing away). A birthday cake
+  baked at the fridge (§20) lets someone grow up there and then: they blow out the candles
+  with the game's animation, the household cheers, and the cake is cut for everyone.
 - **Gardening** from the game's plant and produce tables: households start with a few seeds
   and buy more at the grocery store (rarer ones as their skill grows); seeds are planted
   anywhere outdoors on the home lot in the game's garden soil and grow (the game's bush, vine

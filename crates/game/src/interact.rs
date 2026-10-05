@@ -89,6 +89,8 @@ pub enum ObjectKind {
     Fireplace,
     /// A pool's ladder: where Sims get in for a swim.
     PoolLadder,
+    /// A birthday cake, candles lit.
+    BirthdayCake,
     /// Where the bills arrive.
     Mailbox,
     /// The morning paper.
@@ -208,7 +210,7 @@ impl ObjectKind {
             Self::Table => "Surfaces",
             Self::Light => "Lighting",
             Self::Plant | Self::Decoration => "Decor",
-            Self::Meal | Self::DirtyDishes | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder => "Misc",
+            Self::Meal | Self::DirtyDishes | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
             Self::Other => "Misc",
         }
@@ -344,6 +346,10 @@ pub enum Special {
     Swim,
     /// Do the day's homework.
     Homework,
+    /// Bake a birthday cake (it's set out on a counter).
+    BakeCake,
+    /// Blow out a birthday cake's candles and grow up.
+    BlowOutCandles,
     /// Write (a page at a time) the book under way.
     WriteNovel,
 }
@@ -380,10 +386,13 @@ const fn def(name: &'static str, minutes: f32, per_hour: [f32; 6], pose: Pose) -
     }
 }
 
-static FRIDGE: [InteractionDef; 2] = [
+static FRIDGE: [InteractionDef; 3] = [
     InteractionDef { special: Special::Cook, ..def("Have Quick Meal", 30.0, [130.0, -6.0, 0.0, 0.0, -4.0, 4.0], Pose::Use) },
     def("Grab a Snack", 12.0, [140.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Use),
+    InteractionDef { autonomous: false, skill: Some("Cooking"), special: Special::BakeCake, ..def("Bake Birthday Cake", 30.0, [0.0, 0.0, 0.0, 0.0, 0.0, 6.0], Pose::Use) },
 ];
+static CAKE: [InteractionDef; 1] =
+    [InteractionDef { autonomous: false, special: Special::BlowOutCandles, ..def("Grow Up", 3.0, [0.0, 0.0, 0.0, 10.0, 0.0, 20.0], Pose::Use) }];
 // (Cooking and grabbing a plate don't feed by themselves: the hunger figures are what they lead
 // to, for autonomy to weigh. The meal is eaten afterwards.)
 static STOVE: [InteractionDef; 1] = [InteractionDef {
@@ -538,6 +547,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Eat" if kind == ObjectKind::Stool => A::new(Some("a2o_eat_barStoolIn_fork_start_x"), &["a2o_eat_barStoolIn_fork_neat_x"]),
         "Have Quick Meal" | "Microwave Dinner" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_eat_stand_fork_neat", "a2o_eat_stand_hand_neat"]),
         "Grab a Snack" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_eat_stand_hand_neat"]),
+        "Bake Birthday Cake" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_cook_counter_chop_x"]),
+        "Grow Up" => A::new(None, &["a2o_birthdayCake_blowOut_counter_x"]),
         "Cook Dinner" => A::new(
             Some("a2o_stove_fryingPan_start_fromNeutral_x"),
             &["a2o_stove_fryingPan_idle_x", "a2o_stove_fryingPan_spatula_flip_x", "a2o_stove_fryingPan_spatula_poke_x"],
@@ -655,6 +666,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Butterfly | ObjectKind::Beetle => &INSECT,
         ObjectKind::Fireplace => &FIREPLACE,
         ObjectKind::PoolLadder => &POOL_LADDER,
+        ObjectKind::BirthdayCake => &CAKE,
         ObjectKind::Mailbox => &MAILBOX,
         ObjectKind::Newspaper => &NEWSPAPER,
         ObjectKind::Tv => &TV,
@@ -1424,6 +1436,13 @@ fn run_actions(
                                         }
                                         Special::GrabPlate => {
                                             commands.entity(me).insert(crate::meals::MealRequest::Grabbed(*target));
+                                        }
+                                        Special::BakeCake => {
+                                            commands.entity(me).insert(crate::meals::MealRequest::Cake(*target));
+                                        }
+                                        Special::BlowOutCandles => {
+                                            commands.entity(me).insert(crate::aging::GrowUpNow);
+                                            commands.entity(*target).insert(crate::meals::CakeBlownOut);
                                         }
                                         Special::EatMeal => {
                                             commands.entity(me).insert(crate::meals::MealRequest::Ate);
