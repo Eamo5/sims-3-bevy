@@ -138,18 +138,18 @@ fn tab_content(
     mut commands: Commands,
     tab: Res<SimTab>,
     content: Query<Entity, With<TabContent>>,
-    sel: Query<(Entity, &Sim, &Skills, Option<&Job>, Has<AtWork>, Option<&crate::wishes::Wishes>), With<Selected>>,
+    sel: Query<(Entity, &Sim, &Skills, Option<&Job>, Has<AtWork>, Option<&crate::wishes::Wishes>, Option<&crate::lifetime::LifetimeWish>), With<Selected>>,
     mut ui: Option<ResMut<crate::icons::GameUi>>,
     mut images: ResMut<Assets<Image>>,
     mut last: Local<String>,
 ) {
-    let (Ok(root), Ok((e, sim, skills, job, at_work, wishes))) = (content.single(), sel.single()) else { return };
+    let (Ok(root), Ok((e, sim, skills, job, at_work, wishes, ltw))) = (content.single(), sel.single()) else { return };
     // What's on show, to redraw only when it changes.
     let key = match *tab {
         SimTab::Needs => "needs".to_string(),
         SimTab::Skills => format!("{e:?} {:?}", skills.0.iter().map(|(k, v)| (*k, (*v * 20.0) as i32)).collect::<Vec<_>>()),
         SimTab::Career => format!("{e:?} {:?} {at_work}", job.map(|j| (j.track, j.level, j.performance as i32))),
-        SimTab::Simology => format!("{e:?} {:?} {:?}", sim.traits, wishes.map(|w| (w.points, w.rewards.len()))),
+        SimTab::Simology => format!("{e:?} {:?} {:?} {:?}", sim.traits, wishes.map(|w| (w.points, w.rewards.len())), ltw.map(|l| (l.wish, &l.status))),
     } + &format!(" {}", ui.is_some());
     if *last == key {
         return;
@@ -201,7 +201,8 @@ fn tab_content(
                     if let Some(h) = icon {
                         row.spawn(crate::icons::icon_bundle(h, 36.0));
                     }
-                    row.spawn(text(format!("{} — {}\nLevel {} of {}", track.name, lvl.title, j.level + 1, track.levels.len()), 15.0, Color::WHITE));
+                    let path = j.branch_label().map_or(String::new(), |b| format!(" · {b} path"));
+                    row.spawn(text(format!("{} — {}\nLevel {} of {}{path}", track.name, lvl.title, j.level + 1, j.levels().len()), 15.0, Color::WHITE));
                 });
                 let days: Vec<&str> = (0..7).filter(|d| lvl.days & (1 << d) != 0).map(|d| DAYS[d]).collect();
                 p.spawn(text(
@@ -215,7 +216,15 @@ fn tab_content(
                     let c = if j.performance >= 0.0 { Color::srgb(0.35, 0.9, 0.35) } else { Color::srgb(0.95, 0.4, 0.3) };
                     meter(row, v, 200.0, c);
                 });
-                let next = track.levels.get(j.level + 1).map_or("Top of the career!".to_string(), |n| format!("Next: {} (§{} an hour)", n.title, n.hourly));
+                let next = match j.levels().get(j.level + 1) {
+                    // At the branch, the next step depends on the path taken.
+                    Some(_) if track.branch_at == Some(j.level + 1) => {
+                        let ways: Vec<String> = track.paths.iter().map(|p| format!("{} ({})", p.levels[j.level + 1].title, p.label())).collect();
+                        format!("Next: {}", ways.join(" or "))
+                    }
+                    Some(n) => format!("Next: {} (§{} an hour)", n.title, n.hourly),
+                    None => "Top of the career!".to_string(),
+                };
                 p.spawn(text(format!("{next} · Improve with {}, and a good mood at work.", track.skill), 13.0, Color::srgb(0.8, 0.85, 0.95)));
             }
             None => {
@@ -223,6 +232,30 @@ fn tab_content(
             }
         },
         SimTab::Simology => {
+            let mut ui = ui;
+            // The lifetime wish, with how far along it is.
+            if let Some(l) = ltw {
+                let d = l.def();
+                let data = ui.as_ref().map(|u| u.data.clone());
+                let icon = ui.as_deref_mut().and_then(|u| u.icon(&mut images, &d.icon(data.as_deref())));
+                p.spawn(Node { column_gap: Val::Px(10.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
+                    if let Some(h) = icon {
+                        row.spawn(crate::icons::icon_bundle(h, 40.0));
+                    }
+                    row.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(3.0), ..default() }).with_children(|c| {
+                        c.spawn(text(format!("Lifetime Wish: {}", d.name), 14.0, Color::srgb(1.0, 0.9, 0.5)));
+                        c.spawn(text(
+                            format!("{} · {} lifetime happiness", d.describe(data.as_deref()), crate::lifetime::group(d.points(data.as_deref()) as i64)),
+                            12.0,
+                            Color::srgb(0.8, 0.85, 0.95),
+                        ));
+                        c.spawn(Node { column_gap: Val::Px(8.0), align_items: AlignItems::Center, ..default() }).with_children(|r| {
+                            meter(r, l.progress, 160.0, if l.fulfilled { Color::srgb(1.0, 0.8, 0.2) } else { Color::srgb(0.35, 0.9, 0.35) });
+                            r.spawn(text(l.status.clone(), 12.0, Color::WHITE));
+                        });
+                    });
+                });
+            }
             if let Some(ui) = ui {
                 for t in &sim.traits {
                     let info = ui.trait_info(*t);

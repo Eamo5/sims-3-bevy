@@ -152,7 +152,7 @@ fn apply_premade(
             && let Some(track) = career_of(class)
         {
             let mut job = Job::new(track);
-            job.level = ((*level).max(1) as usize - 1).min(careers()[track].levels.len() - 1);
+            job.level = ((*level).max(1) as usize - 1).min(careers()[track].levels().len() - 1);
             commands.entity(e).insert(job);
         }
         let spouse = p.spouse.or(p.partner);

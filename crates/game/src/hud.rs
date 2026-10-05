@@ -745,7 +745,7 @@ fn world_click(
                     let teen = actor_sim.age == crate::sim::Age::Teen;
                     let can_work = !matches!(actor_sim.age, crate::sim::Age::Child) && !actor_sim.age.is_little();
                     for (k, c) in crate::careers::careers().iter().enumerate().filter(|(_, c)| can_work && c.part_time == teen) {
-                        let l = &c.levels[0];
+                        let l = &c.levels()[0];
                         options.push((
                             format!("Join {}: {} §{}/hr", c.name, l.title, l.hourly),
                             ActionKind::JoinCareer { target: t, track: k },
@@ -1404,14 +1404,15 @@ fn save_button(
 fn update_wishes_panel(
     mut commands: Commands,
     panel: Query<Entity, With<WishesPanel>>,
-    sel: Query<&crate::wishes::Wishes, With<Selected>>,
+    sel: Query<(&crate::wishes::Wishes, Option<&crate::lifetime::LifetimeWish>), With<Selected>>,
     mut ui: Option<ResMut<crate::icons::GameUi>>,
     mut images: ResMut<Assets<Image>>,
     mut last: Local<Vec<String>>,
 ) {
     let Ok(p) = panel.single() else { return };
-    let Ok(w) = sel.single() else { return };
+    let Ok((w, ltw)) = sel.single() else { return };
     let mut sig: Vec<String> = w.promised.iter().map(|x| format!("P{}", x.text())).collect();
+    sig.push(ltw.map_or(String::new(), |l| format!("L{} {}", l.wish, l.status)));
     sig.extend(w.offered.iter().map(|x| format!("O{}", x.text())));
     sig.push(w.points.to_string());
     sig.push(ui.is_some().to_string());
@@ -1442,6 +1443,14 @@ fn update_wishes_panel(
     };
     let promised_icons: Vec<Option<Handle<Image>>> = w.promised.iter().map(&mut icon).collect();
     let offered_icons: Vec<Option<Handle<Image>>> = w.offered.iter().map(&mut icon).collect();
+    // The lifetime wish, larger, first in the row.
+    let lifetime = ltw.map(|l| {
+        let d = l.def();
+        let data = ui.as_ref().map(|u| u.data.clone());
+        let h = ui.as_deref_mut().and_then(|u| u.icon(&mut images, &d.icon(data.as_deref())));
+        let tip = format!("Lifetime Wish: {}\n{}\n{} (+{} lifetime happiness)", d.name, d.describe(data.as_deref()), l.status, crate::lifetime::group(d.points(data.as_deref()) as i64));
+        (h, tip, l.fulfilled)
+    });
     commands.entity(p).despawn_children();
     commands.entity(p).with_children(|c| {
         c.spawn((
@@ -1454,6 +1463,27 @@ fn update_wishes_panel(
         .with_children(|b| {
             b.spawn(text(format!("Lifetime Happiness: {}", w.points), 13.0, Color::srgb(1.0, 0.85, 0.3)));
         });
+        if let Some((Some(h), tip, fulfilled)) = lifetime {
+            c.spawn((
+                Node {
+                    width: Val::Px(58.0),
+                    height: Val::Px(58.0),
+                    border: UiRect::all(Val::Px(3.0)),
+                    border_radius: BorderRadius::all(Val::Px(29.0)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BorderColor::all(if fulfilled { Color::srgb(1.0, 0.8, 0.2) } else { PLUMBOB_GREEN }),
+                BackgroundColor(Color::srgba(0.95, 0.97, 1.0, 0.95)),
+                Interaction::default(),
+                BlocksWorld,
+                crate::icons::Tooltip(tip),
+            ))
+            .with_children(|b| {
+                b.spawn((crate::icons::icon_bundle(h, 44.0), Pickable::IGNORE));
+            });
+        }
         for (x, h) in w.promised.iter().zip(promised_icons) {
             let tip = crate::icons::Tooltip(format!("Promised: {} (+{})", x.text(), x.points));
             match h {

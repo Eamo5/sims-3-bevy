@@ -38,6 +38,17 @@ fn main() {
         }
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--strings") {
+        // --strings <text>: the English strings containing the text, with their keys.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let want = args[i + 1].to_ascii_lowercase();
+        for (k, s) in s3formats::stbl::load_english(&pkgs) {
+            if s.to_ascii_lowercase().contains(&want) {
+                println!("{k:#018x} {s}");
+            }
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--fences") {
         // --fences <lot name part>: a lot's fence posts by style, and each style's CFEN references.
         let path = data.join("GameData/Shared/NonPackaged/Worlds/Sunset Valley.world");
@@ -368,6 +379,9 @@ fn main() {
         }
         for r in &g.roofs {
             println!("roof {:?} tex {:?} tile {:?}", r.name, r.texture, r.tile);
+        }
+        for w in &g.lifetime_wishes {
+            println!("lifetime wish {} {} [{}] {} score {}", w.id, w.check, w.icon, w.number, w.score);
         }
         for c in &g.careers {
             println!("career {} = {:?} [{}] part-time {}: {}", c.hex, c.name, c.icon, c.part_time, c.desc);

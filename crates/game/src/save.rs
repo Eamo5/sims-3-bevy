@@ -80,6 +80,19 @@ pub struct SavedSim {
     pub opportunities: Vec<(String, Option<f64>)>,
     #[serde(default)]
     pub opportunities_done: Vec<String>,
+    #[serde(default)]
+    pub lifetime_wish: Option<SavedLifetimeWish>,
+}
+
+/// A lifetime wish (by the game's check for it), and what's counted towards it.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SavedLifetimeWish {
+    pub check: String,
+    pub fulfilled: bool,
+    #[serde(default)]
+    pub careers: Vec<String>,
+    #[serde(default)]
+    pub raised: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -87,6 +100,9 @@ pub struct SavedJob {
     pub track: String,
     pub level: usize,
     pub performance: f32,
+    /// The career path ("Thief"; "Base" for one that doesn't branch).
+    #[serde(default)]
+    pub branch: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -184,6 +200,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         shape: Some((sim.weight, sim.fitness)),
         opportunities: Vec::new(),
         opportunities_done: Vec::new(),
+        lifetime_wish: None,
     }
 }
 
@@ -344,6 +361,7 @@ fn save_game(
                 Option<&crate::little::Pregnancy>,
                 Option<&crate::opportunities::SimOpportunities>,
                 Has<crate::visit::OnLot>,
+                Option<&crate::lifetime::LifetimeWish>,
             ),
         ),
         (Without<crate::town::Townie>, Without<crate::visit::LotGuest>),
@@ -362,7 +380,7 @@ fn save_game(
     let Some(hh) = household else { return };
     let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).collect();
     let mut saved = Vec::new();
-    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out)) in &sims {
+    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw)) in &sims {
         // Out on a community lot: saved as back at home (the lot isn't kept).
         let (position, level) = match (out, exit.as_ref()) {
             (true, Some(x)) => ([x.0.x, world.data.heightmap.sample(x.0.x, x.0.y), x.0.y], 1),
@@ -390,7 +408,7 @@ fn save_game(
             motives: motives.0,
             skills: skills.0.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
             moodlets: moodlets.0.iter().filter(|m| m.until.is_finite()).map(|m| (m.kind.def().name.to_string(), m.until)).collect(),
-            job: job.map(|j| SavedJob { track: j.career().name.into(), level: j.level, performance: j.performance }),
+            job: job.map(|j| SavedJob { track: j.career().name.into(), level: j.level, performance: j.performance, branch: j.path().branch.into() }),
             relationships: rels
                 .0
                 .iter()
@@ -406,6 +424,7 @@ fn save_game(
             shape: Some((sim.weight, sim.fitness)),
             opportunities: opps.map(|o| o.active.iter().filter_map(|a| Some((guid(a.index)?, a.deadline))).collect()).unwrap_or_default(),
             opportunities_done: opps.map(|o| o.done.clone()).unwrap_or_default(),
+            lifetime_wish: ltw.map(|l| SavedLifetimeWish { check: l.def().check.into(), fulfilled: l.fulfilled, careers: l.careers.clone(), raised: l.raised }),
         });
     }
     let game = SaveGame {
@@ -521,6 +540,11 @@ fn apply_loaded_game(
         if let Some((days, elder_span)) = s.aging {
             ec.insert(crate::aging::Aging { days, elder_span });
         }
+        if let Some(l) = &s.lifetime_wish
+            && let Some(wish) = crate::lifetime::LifetimeWish::by_check(&l.check)
+        {
+            ec.insert(crate::lifetime::LifetimeWish { fulfilled: l.fulfilled, careers: l.careers.clone(), raised: l.raised, ..crate::lifetime::LifetimeWish::new(wish) });
+        }
         if !s.opportunities.is_empty() || !s.opportunities_done.is_empty() {
             ec.insert(crate::opportunities::PendingOpportunities(s.opportunities.clone(), s.opportunities_done.clone()));
         }
@@ -532,7 +556,8 @@ fn apply_loaded_game(
             Some(j) => {
                 if let Some(track) = crate::careers::careers().iter().position(|c| c.name == j.track) {
                     let mut job = crate::careers::Job::new(track);
-                    job.level = j.level.min(crate::careers::careers()[track].levels.len() - 1);
+                    job.branch = crate::careers::careers()[track].path_index(&j.branch).unwrap_or(0);
+                    job.level = j.level.min(job.levels().len() - 1);
                     job.performance = j.performance;
                     ec.insert(job);
                 }

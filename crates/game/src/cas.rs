@@ -7,6 +7,7 @@ use std::sync::Arc;
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::mesh::skinning::SkinnedMeshInverseBindposes;
 use bevy::prelude::*;
+use bevy::ui::RelativeCursorPosition;
 use s3bake::Key;
 use s3formats::sim::{CT_BODY, CT_BOTTOM, CT_HAIR, CT_SHOES, CT_TOP};
 
@@ -23,7 +24,7 @@ impl Plugin for CasPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::CreateHousehold), setup_cas).add_systems(
             Update,
-            (cas_actions, rebuild_ui, rebuild_model, turn_model, cas_button_visuals).chain().run_if(in_state(AppState::CreateHousehold)),
+            (cas_actions, rebuild_ui, rebuild_model, turn_model, cas_button_visuals, scroll_panel).chain().run_if(in_state(AppState::CreateHousehold)),
         );
     }
 }
@@ -81,6 +82,8 @@ pub enum CasAction {
     Pick(usize),
     Page(i32),
     Trait(usize),
+    /// Choose lifetime wish `i` (of `lifetime::LIFETIME_WISHES`).
+    LifetimeWish(usize),
     /// Body shape: weight and fitness down (-1) or up (1).
     Weight(i8),
     Fitness(i8),
@@ -109,6 +112,8 @@ struct CasScene {
     /// The world's premade households, and whether they're being browsed.
     families: Option<Arc<s3bake::PremadesBaked>>,
     browsing: bool,
+    /// How far the editing panel is scrolled down.
+    scroll: f32,
     portrait: Option<Handle<Image>>,
 }
 
@@ -157,20 +162,20 @@ fn setup_cas(
         families,
         browsing: false,
         portrait: None,
+        scroll: 0.0,
     });
     // The stage: camera, lights, pedestal.
+    // (Ambient light belongs to the camera: alone it would bring a camera of its own, and the
+    // interface would be laid out for that one.)
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(-0.35, 1.05, 3.1).looking_at(Vec3::new(-0.35, 0.92, 0.0), Vec3::Y),
+        AmbientLight { color: Color::srgb(0.85, 0.9, 1.0), brightness: 900.0, ..default() },
         DespawnOnExit(AppState::CreateHousehold),
     ));
     commands.spawn((
         DirectionalLight { illuminance: 9000.0, shadow_maps_enabled: true, ..default() },
         Transform::from_xyz(2.0, 4.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
-        DespawnOnExit(AppState::CreateHousehold),
-    ));
-    commands.spawn((
-        AmbientLight { color: Color::srgb(0.85, 0.9, 1.0), brightness: 900.0, ..default() },
         DespawnOnExit(AppState::CreateHousehold),
     ));
     commands.spawn((
@@ -220,6 +225,11 @@ fn parts_for(cas: &CasData, sim: &Sim, t: u32) -> Vec<(Key, String)> {
         .parts
         .iter()
         .filter(|p| p.baked && p.clothing_type == t && p.age_gender & age != 0 && p.age_gender & gender != 0)
+        // Clothes for every day (the swimwear, sleepwear and gym clothes are worn for those).
+        .filter(|p| {
+            !matches!(t, CT_TOP | CT_BOTTOM | CT_BODY | CT_SHOES)
+                || (p.category & s3formats::sim::CAT_EVERYDAY != 0 && p.category & s3formats::sim::CAT_SWIM == 0)
+        })
         .map(|p| (p.key, pretty_part(&p.name)))
         .collect();
     v.sort_by(|a, b| a.1.cmp(&b.1));
@@ -265,6 +275,7 @@ fn cas_actions(
     mut pending: ResMut<PendingHousehold>,
     mut next: ResMut<NextState<AppState>>,
     mut images: ResMut<Assets<Image>>,
+    mut chosen: ResMut<crate::lifetime::ChosenLifetimeWishes>,
 ) {
     let Some(mut scene) = scene else { return };
     let mut rng = rand::rng();
@@ -346,6 +357,7 @@ fn cas_actions(
             CasAction::Tab(t) => {
                 scene.tab = t;
                 scene.page = 0;
+                scene.scroll = 0.0;
                 model = false;
             }
             CasAction::Page(d) => {
@@ -386,6 +398,10 @@ fn cas_actions(
                 } else if s.traits.len() < crate::life::trait_slots(s.age) && t.compatible(&s.traits) {
                     s.traits.push(t);
                 }
+                model = false;
+            }
+            CasAction::LifetimeWish(i) => {
+                chosen.0.insert(pending.members[k].id, i);
                 model = false;
             }
             CasAction::Weight(d) => {
@@ -544,6 +560,27 @@ fn button(p: &mut ChildSpawnerCommands, label: impl Into<String>, action: CasAct
     });
 }
 
+/// The editing panel, which scrolls with the mouse wheel.
+#[derive(Component)]
+struct CasScroll;
+
+fn scroll_panel(wheel: Res<bevy::input::mouse::AccumulatedMouseScroll>, scene: Option<ResMut<CasScene>>, mut q: Query<(&mut ScrollPosition, &RelativeCursorPosition), With<CasScroll>>) {
+    let Some(mut scene) = scene else { return };
+    if wheel.delta.y == 0.0 {
+        return;
+    }
+    let dy = match wheel.unit {
+        bevy::input::mouse::MouseScrollUnit::Line => wheel.delta.y * 48.0,
+        bevy::input::mouse::MouseScrollUnit::Pixel => wheel.delta.y,
+    };
+    for (mut pos, cursor) in &mut q {
+        if cursor.cursor_over() {
+            pos.0.y = (pos.0.y - dy).max(0.0);
+            scene.scroll = pos.0.y;
+        }
+    }
+}
+
 fn panel_node(left: Option<f32>, right: Option<f32>, width: f32) -> Node {
     Node {
         position_type: PositionType::Absolute,
@@ -568,6 +605,7 @@ fn rebuild_ui(
     mut ui: Option<ResMut<crate::icons::GameUi>>,
     mut images: ResMut<Assets<Image>>,
     mut had_icons: Local<bool>,
+    chosen: Res<crate::lifetime::ChosenLifetimeWishes>,
 ) {
     let Some(mut scene) = scene else { return };
     // (Redrawn once more when the game's icons become available.)
@@ -662,8 +700,8 @@ fn rebuild_ui(
             });
             return;
         }
-        // Editing panel (right)
-        r.spawn((panel_node(None, Some(16.0), 440.0), panel_bg)).with_children(|p| {
+        // Editing panel (right), scrolled where it was.
+        r.spawn((panel_node(None, Some(16.0), 440.0), panel_bg, CasScroll, RelativeCursorPosition::default(), ScrollPosition(Vec2::new(0.0, scene.scroll)))).with_children(|p| {
             p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|tabs| {
                 for t in CasTab::ALL {
                     button(tabs, t.name(), CasAction::Tab(t), Val::Auto, t == scene.tab, 15.0);
@@ -718,6 +756,67 @@ fn rebuild_ui(
                     });
                 }
                 CasTab::Traits => {
+                    // The lifetime wish: five that suit the Sim's traits (teens and up), as
+                    // icons, the chosen one named and described.
+                    if !sim.age.is_little() && sim.age != Age::Child {
+                        use crate::lifetime::{LIFETIME_WISHES, group, suggestions};
+                        let pick = chosen.0.get(&sim.id).copied();
+                        let mut options = suggestions(&sim, 5);
+                        if let Some(c) = pick.filter(|c| !options.contains(c)) {
+                            options.insert(0, c);
+                            options.truncate(5);
+                        }
+                        let data = ui.as_ref().map(|u| u.data.clone());
+                        p.spawn(text("Lifetime Wish", 20.0, Color::WHITE));
+                        p.spawn(Node { column_gap: Val::Px(8.0), ..default() }).with_children(|row| {
+                            for &i in &options {
+                                let d = &LIFETIME_WISHES[i];
+                                let on = pick == Some(i);
+                                let icon = ui.as_deref_mut().and_then(|u| u.icon(&mut images, &d.icon(data.as_deref())));
+                                let mut e = row.spawn((
+                                    Button,
+                                    CasAction::LifetimeWish(i),
+                                    Node {
+                                        width: Val::Px(62.0),
+                                        height: Val::Px(62.0),
+                                        border: UiRect::all(Val::Px(if on { 4.0 } else { 2.0 })),
+                                        border_radius: BorderRadius::all(Val::Px(31.0)),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BorderColor::all(if on { PLUMBOB_GREEN } else { Color::srgb(0.55, 0.75, 1.0) }),
+                                    BackgroundColor(if on { Color::srgb(0.22, 0.55, 0.22) } else { BTN_NORMAL }),
+                                    crate::icons::Tooltip(format!("{}\n{}\n{} lifetime happiness", d.name, d.describe(data.as_deref()), group(d.points(data.as_deref()) as i64))),
+                                ));
+                                if on {
+                                    e.insert(Selectedness);
+                                }
+                                e.with_children(|b| match icon {
+                                    Some(h) => {
+                                        b.spawn((ImageNode::new(h), Node { width: Val::Px(46.0), height: Val::Px(46.0), ..default() }, Pickable::IGNORE));
+                                    }
+                                    None => {
+                                        b.spawn((text(d.name.chars().next().unwrap_or('?').to_string(), 20.0, Color::WHITE), Pickable::IGNORE));
+                                    }
+                                });
+                            }
+                        });
+                        match pick {
+                            Some(i) => {
+                                let d = &LIFETIME_WISHES[i];
+                                p.spawn(text(d.name, 16.0, Color::srgb(1.0, 0.9, 0.5)));
+                                p.spawn(text(
+                                    format!("{} · {} lifetime happiness", d.describe(data.as_deref()), group(d.points(data.as_deref()) as i64)),
+                                    13.0,
+                                    Color::srgb(0.8, 0.88, 1.0),
+                                ));
+                            }
+                            None => {
+                                p.spawn(text("Pick the dream of this Sim's life: these suit their traits.", 13.0, Color::srgb(0.75, 0.85, 1.0)));
+                            }
+                        }
+                    }
                     let slots = crate::life::trait_slots(sim.age);
                     p.spawn(text(format!("Traits · {} of {slots}", sim.traits.len()), 20.0, Color::WHITE));
                     p.spawn(text("Click to add or remove. Traits that clash with chosen ones are dimmed.", 13.0, Color::srgb(0.75, 0.85, 1.0)));

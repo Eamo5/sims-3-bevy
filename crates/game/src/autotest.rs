@@ -159,8 +159,9 @@ impl Plugin for AutoTestPlugin {
             app.insert_resource(CameraStart(Vec3::new(c[0], 0.0, c[1])));
         }
         app.insert_resource(args)
+            .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -334,6 +335,50 @@ fn auto_pick_world(
         next.set(AppState::Loading);
     } else {
         warn!("--world {name}: no such world");
+    }
+}
+
+/// CAMS=1: the cameras and UI roots, every couple of seconds (debugging).
+fn list_cams(time: Res<Time>, mut last: Local<f32>, cams: Query<(Entity, &Camera, Has<Camera3d>, Has<Camera2d>, Option<&bevy::camera::RenderTarget>)>, roots: Query<(Entity, &ComputedNode, Option<&UiTargetCamera>), (With<Node>, Without<ChildOf>)>) {
+    if std::env::var("CAMS").is_err() || time.elapsed_secs() - *last < 2.0 {
+        return;
+    }
+    *last = time.elapsed_secs();
+    for (e, c, d3, d2, t) in &cams {
+        info!("camera {e:?} order {} active {} 3d {d3} 2d {d2} target {:?}", c.order, c.is_active, t);
+    }
+    for (e, n, t) in &roots {
+        info!("ui root {e:?} size {:?} target {:?}", n.size(), t.map(|t| t.0));
+    }
+}
+
+/// ASK=<lifetime|career:<career>>: once play is under way, the selected Sim is asked to pick a
+/// lifetime wish, or is put just past the branch of that career and asked which path to take.
+fn ask_question(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut done: Local<bool>,
+    mut questions: ResMut<crate::dialog::Questions>,
+    ui: Option<Res<crate::icons::GameUi>>,
+    sel: Query<(Entity, &crate::sim::Sim), With<crate::sim::Selected>>,
+) {
+    let Ok(what) = std::env::var("ASK") else { return };
+    if *done || time.elapsed_secs() < 3.0 {
+        return;
+    }
+    let Ok((e, sim)) = sel.single() else { return };
+    *done = true;
+    if what == "lifetime" {
+        crate::lifetime::ask_lifetime_wish(&mut questions, ui.as_ref().map(|u| &*u.data), e, sim);
+        commands.entity(e).remove::<crate::lifetime::LifetimeWish>().insert(crate::lifetime::ChoosingLifetimeWish);
+    } else if let Some(name) = what.strip_prefix("career:")
+        && let Some(track) = crate::careers::careers().iter().position(|c| c.name == name)
+        && let Some(at) = crate::careers::careers()[track].branch_at
+    {
+        let mut job = crate::careers::Job::new(track);
+        job.level = at;
+        questions.ask_career_path(e, sim, &job);
+        commands.entity(e).insert(job);
     }
 }
 
@@ -1176,6 +1221,14 @@ fn ui_flow(
         }
         (3, AppState::CreateHousehold, _) if since > 1.0 => {
             shot(&mut commands, "2a_traits");
+            // Pick the second lifetime wish on offer.
+            if let Some((mut i, _)) = cas.iter_mut().filter(|(_, a)| matches!(a, crate::home::CasAction::LifetimeWish(_))).nth(1) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (69, now);
+        }
+        (69, AppState::CreateHousehold, _) if since > 1.0 => {
+            shot(&mut commands, "2b_lifetime_wish");
             *stage = (68, now);
         }
         (68, AppState::CreateHousehold, _) if since > 0.5 => {

@@ -55,6 +55,30 @@ use `{10.Money}`, `{9.Number}`, `{RabbitHoleName}`. The rabbit-hole type of a lo
 of its rabbit-hole object (`Sims3.Gameplay.Objects.RabbitHoles.Grocery`; one lot can hold
 several, like Sunset Valley's downtown block with the bookstore, grocery and theatre).
 
+### Lifetime wishes
+
+Wishes are "dreams" in the tables. `DreamsAndPromisesNodes` lists every kind of wish as a
+`Primitives` row: `Name` (a designer's note like `*$n simoleons in cash`), `Category`
+(`Lifetime Dreams`, `Lifetime Dreams (EP1)`...), `Id`, `TriggerEvent`, `CheckFunction` (the
+script that tests it, e.g. `NSimoleonsInCashMajorDreamCheckFunction`), `PrimaryIcon`
+(`w_lifetime_simoleon_cash`), `RequiredProductVersions` (`BaseGame`, `EP2`...) and, for a
+lifetime wish, `LifeEventIsLifetimeDream` `True` with its number in `LifeEventInputNumber`
+(50000 simoleons, 20 friends, career level 10). `DreamNodeInstanceDefaults` has the
+`DreamNodeInstance` rows that use them (`PrototypeId` = the primitive's `Id`), each with a
+`FulfillmentScore`: a tenth of the lifetime happiness it's worth (2,000 to 3,500 for the
+base game's lifetime wishes). The base game has 32; a career one names its branch in its
+check (`Level10OfCriminalThiefBranch…`), and a few have no check (an event fulfils them).
+
+Their in-game names aren't keyed by anything in these rows; the string tables do hold them
+("Swimming in Cash", "Become a Master Thief", "The Tinkerer"), with their scrapbook lines.
+
+### Career branches
+
+A `Careers` level row's `BranchName` is `Base` (or empty) until the career branches, then
+the branch's name (`Thief` / `Evil` from Criminal level 7, `ElectricRock` / `Symphonic` from
+Music 6, `SpecialAgent` / `ForensicAnalyst` from Law Enforcement 6); the branched levels
+repeat the level numbers once per branch.
+
 ## 2. Balloons
 
 The `Balloons` workbook says what Sims think and say. It has four sheets, each a list of rows with

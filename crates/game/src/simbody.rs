@@ -177,10 +177,13 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
     let gender = if sim.female { GENDER_FEMALE } else { GENDER_MALE };
     let fits = |e: &&CasPartInfo| e.baked && e.age_gender & age != 0 && e.age_gender & gender != 0;
     // Clothes and shoes by the outfit's category (heads and hair go with anything); never the
-    // townsfolk's uniforms (the Reaper's robe, firefighters', police officers', burglars').
+    // townsfolk's uniforms (the Reaper's robe, firefighters', police officers', burglars'), nor
+    // everyday clothes that are swimwear too (a seashell top).
     let worn = |e: &&CasPartInfo| {
+        let clothes = matches!(e.clothing_type, CT_TOP | CT_BOTTOM | CT_BODY | CT_SHOES);
         !["Reaper", "Firefighter", "Ninja", "Police"].iter().any(|n| e.name.contains(n))
-            && (!matches!(e.clothing_type, CT_TOP | CT_BOTTOM | CT_BODY | CT_SHOES) || e.category & cat != 0)
+            && (!clothes || e.category & cat != 0)
+            && !(clothes && kind == OutfitKind::Everyday && e.category & s3formats::sim::CAT_SWIM != 0)
     };
     let of_type = |t: u32| {
         let all: Vec<&CasPartInfo> = cas.parts.iter().filter(|e| e.clothing_type == t).filter(fits).filter(worn).collect();

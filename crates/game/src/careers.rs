@@ -2,7 +2,9 @@
 //! workdays per level, part-time jobs for teens), with a built-in table as a fallback until
 //! those are converted. Sims head off with the carpool before their shift, come home paid,
 //! and their performance (mood, the career's skill and personality) earns promotions — or
-//! demotions.
+//! demotions. Some careers branch partway up (Criminal into Thief or Evil, Music into Rock or
+//! Symphonic, Law Enforcement into Special Agent or Forensic Analyst): the promotion there
+//! asks which path to take.
 
 use bevy::prelude::*;
 
@@ -17,10 +19,11 @@ pub struct CareersPlugin;
 
 impl Plugin for CareersPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, work_schedule.run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (work_schedule, career_path_answers).run_if(in_state(PlayMode::Live)));
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct CareerLevel {
     pub title: &'static str,
     /// Pay per hour worked.
@@ -39,7 +42,84 @@ pub struct CareerTrack {
     pub icon: &'static str,
     /// A teen's after-school job.
     pub part_time: bool,
+    /// The ways up the career: each its levels from the first, sharing those before the career
+    /// branches (just one for a career that doesn't).
+    pub paths: Vec<CareerPath>,
+    /// The first level (0-based) that differs between paths.
+    pub branch_at: Option<usize>,
+}
+
+pub struct CareerPath {
+    /// The branch's name in the game's tables ("Thief", "ElectricRock"), or "Base".
+    pub branch: &'static str,
     pub levels: Vec<CareerLevel>,
+}
+
+impl CareerPath {
+    /// The branch's name for show: "Electric Rock".
+    pub fn label(&self) -> String {
+        branch_label(self.branch)
+    }
+}
+
+/// A branch's name for show: "ElectricRock" → "Electric Rock".
+pub fn branch_label(branch: &str) -> String {
+    let mut s = String::new();
+    for (i, c) in branch.chars().enumerate() {
+        if i > 0 && c.is_uppercase() {
+            s.push(' ');
+        }
+        s.push(c);
+    }
+    s
+}
+
+impl crate::dialog::Questions {
+    /// Asks which way a Sim's career goes from the level they've just reached.
+    pub fn ask_career_path(&mut self, e: Entity, sim: &Sim, job: &Job) {
+        let track = job.career();
+        let answers = track
+            .paths
+            .iter()
+            .filter_map(|p| {
+                let l = p.levels.get(job.level)?;
+                Some(crate::dialog::Answer {
+                    label: format!("{} — the {} path", l.title, p.label()),
+                    detail: format!("§{} an hour, {} to {}", l.hourly, hour_label(l.start), hour_label(l.end)),
+                    icon: String::new(),
+                })
+            })
+            .collect();
+        self.ask(crate::dialog::Ask {
+            about: crate::dialog::Question::CareerPath { sim: e, paths: (0..track.paths.len()).collect() },
+            icon: track.icon.to_string(),
+            heading: format!("Career for {}", sim.first),
+            title: format!("{} was promoted!", sim.first),
+            text: format!("The {} career branches here. Which path should {} take?", track.name, sim.first),
+            answers,
+        });
+    }
+}
+
+/// The path the player chose at a branch.
+fn career_path_answers(mut answers: MessageReader<crate::dialog::Answered>, mut jobs: Query<(&Sim, &mut Job)>, mut notes: ResMut<Notifications>) {
+    for a in answers.read() {
+        let crate::dialog::Question::CareerPath { sim, paths } = &a.about else { continue };
+        let (Ok((s, mut job)), Some(&p)) = (jobs.get_mut(*sim), paths.get(a.answer)) else { continue };
+        job.branch = p;
+        notes.push(format!("{} is now a {} on the {} path.", s.first, job.info().title, job.path().label()));
+    }
+}
+
+impl CareerTrack {
+    /// The first path's levels (all of them, for a career that doesn't branch).
+    pub fn levels(&self) -> &[CareerLevel] {
+        &self.paths[0].levels
+    }
+    /// The path along a branch.
+    pub fn path_index(&self, branch: &str) -> Option<usize> {
+        self.paths.iter().position(|p| p.branch == branch)
+    }
 }
 
 static TRACKS: std::sync::OnceLock<Vec<CareerTrack>> = std::sync::OnceLock::new();
@@ -57,32 +137,41 @@ pub fn install_tracks(data: &s3bake::GameDataBaked) {
         .iter()
         .filter(|c| !c.name.is_empty())
         .map(|c| {
-            // One row per level: the base path, then the first branch the career offers.
-            let mut levels: Vec<CareerLevel> = Vec::new();
-            let mut branch: Option<&str> = None;
+            // Each branch's path: the base levels, then the branch's own, in order.
+            let mut branches: Vec<&str> = Vec::new();
             for l in &c.levels {
-                if l.level as usize != levels.len() + 1 {
-                    continue;
+                if l.branch != "Base" && !branches.contains(&l.branch.as_str()) {
+                    branches.push(&l.branch);
                 }
-                if l.branch != "Base" {
-                    match branch {
-                        Some(b) if b != l.branch => continue,
-                        _ => branch = Some(&l.branch),
-                    }
-                }
-                let start = l.start;
-                levels.push(CareerLevel {
-                    title: leak(if l.title.is_empty() { format!("Level {}", l.level) } else { l.title.clone() }),
-                    hourly: l.hourly.round() as i64,
-                    start,
-                    end: (start + l.hours) % 24.0,
-                    days: l.days,
-                });
             }
+            if branches.is_empty() {
+                branches.push("Base");
+            }
+            let paths: Vec<CareerPath> = branches
+                .iter()
+                .map(|&b| {
+                    let mut levels: Vec<CareerLevel> = Vec::new();
+                    for l in c.levels.iter().filter(|l| l.branch == "Base" || l.branch == b) {
+                        if l.level as usize != levels.len() + 1 {
+                            continue;
+                        }
+                        let start = l.start;
+                        levels.push(CareerLevel {
+                            title: leak(if l.title.is_empty() { format!("Level {}", l.level) } else { l.title.clone() }),
+                            hourly: l.hourly.round() as i64,
+                            start,
+                            end: (start + l.hours) % 24.0,
+                            days: l.days,
+                        });
+                    }
+                    CareerPath { branch: leak(b.to_string()), levels }
+                })
+                .collect();
+            let branch_at = c.levels.iter().filter(|l| l.branch != "Base").map(|l| l.level as usize - 1).min().filter(|_| paths.len() > 1);
             let skill = c.levels.iter().find_map(|l| l.skills.first().cloned()).unwrap_or_else(|| default_skill(&c.hex).to_string());
-            CareerTrack { name: leak(c.name.clone()), skill: leak(skill), icon: leak(c.icon.clone()), part_time: c.part_time, levels }
+            CareerTrack { name: leak(c.name.clone()), skill: leak(skill), icon: leak(c.icon.clone()), part_time: c.part_time, paths, branch_at }
         })
-        .filter(|t| !t.levels.is_empty())
+        .filter(|t| t.paths.iter().all(|p| !p.levels.is_empty()))
         .collect();
     if !tracks.is_empty() {
         let _ = TRACKS.set(tracks);
@@ -116,7 +205,11 @@ impl BuiltinTrack {
             skill: self.skill,
             icon: "",
             part_time: false,
-            levels: self.levels.iter().map(|&(title, hourly, start, end)| CareerLevel { title, hourly, start, end, days: self.days }).collect(),
+            paths: vec![CareerPath {
+                branch: "Base",
+                levels: self.levels.iter().map(|&(title, hourly, start, end)| CareerLevel { title, hourly, start, end, days: self.days }).collect(),
+            }],
+            branch_at: None,
         }
     }
 }
@@ -304,6 +397,8 @@ pub struct Job {
     pub track: usize,
     /// 0-based career level.
     pub level: usize,
+    /// The path taken (index into the career's paths).
+    pub branch: usize,
     /// -100 (about to be demoted) .. 100 (promotion).
     pub performance: f32,
     /// The last day the Sim was at work (for missed-day penalties).
@@ -312,14 +407,25 @@ pub struct Job {
 
 impl Job {
     pub fn new(track: usize) -> Self {
-        Self { track, level: 0, performance: 0.0, last_day: None }
+        Self { track, level: 0, branch: 0, performance: 0.0, last_day: None }
     }
     pub fn career(&self) -> &'static CareerTrack {
         &careers()[self.track.min(careers().len() - 1)]
     }
+    pub fn path(&self) -> &'static CareerPath {
+        let paths = &self.career().paths;
+        &paths[self.branch.min(paths.len() - 1)]
+    }
+    pub fn levels(&self) -> &'static [CareerLevel] {
+        &self.path().levels
+    }
     pub fn info(&self) -> &'static CareerLevel {
-        let levels = &self.career().levels;
+        let levels = self.levels();
         &levels[self.level.min(levels.len() - 1)]
+    }
+    /// Past the branch: the path's name ("Thief").
+    pub fn branch_label(&self) -> Option<String> {
+        self.career().branch_at.filter(|&b| self.level >= b).map(|_| self.path().label())
     }
     pub fn hours(&self) -> f32 {
         let l = self.info();
@@ -350,16 +456,17 @@ fn work_schedule(
     mut notes: ResMut<Notifications>,
     mut life: MessageWriter<LifeEvent>,
     mut workers: Query<
-        (Entity, &Sim, &mut Job, &mut ActionQueue, Option<&AtWork>, &mut Transform, &mut Motives, &Mood, &Skills),
+        (Entity, &Sim, &mut Job, &mut ActionQueue, Option<&AtWork>, &mut Transform, &mut Motives, &Mood, &Skills, Option<&crate::lifetime::LifetimeWish>, Has<HouseholdMember>),
         Without<crate::rabbitholes::AtRabbitHole>,
     >,
     mut session_start: Local<Option<f64>>,
+    mut questions: ResMut<crate::dialog::Questions>,
 ) {
     let h = clock.hour_f();
     let day = clock.day();
     // A shift already under way when play began isn't held against anyone.
     let started = *session_start.get_or_insert(clock.minutes);
-    for (e, sim, mut job, mut queue, at_work, mut tf, mut motives, mood, skills) in &mut workers {
+    for (e, sim, mut job, mut queue, at_work, mut tf, mut motives, mood, skills, ltw, member) in &mut workers {
         let info = job.info();
         if let Some(w) = at_work {
             if clock.minutes < w.until {
@@ -375,14 +482,25 @@ fn work_schedule(
             let gain = (mood.level() / 100.0 * 22.0 + (skill - want) * 3.0 + 8.0) * crate::life::work_rate(&sim.traits);
             job.performance = (job.performance + gain).clamp(-100.0, 100.0);
             notes.push(format!("{} is home from work and earned §{pay}.", sim.first));
-            if job.performance >= 100.0 && job.level < 9 {
+            if job.performance >= 100.0 && job.level + 1 < job.levels().len() {
                 job.level += 1;
                 job.performance = 0.0;
+                let track = job.career();
+                let branching = track.branch_at == Some(job.level);
+                if branching {
+                    // The path their lifetime wish lies along, or the first.
+                    job.branch = ltw.and_then(|w| w.def().career_branch(track.name)).and_then(|b| track.path_index(b)).unwrap_or(0);
+                }
                 let bonus = job.info().hourly * 8;
                 if let Some(hh) = household.as_mut() {
                     hh.funds += bonus;
                 }
-                notes.push(format!("{} was promoted to {} and got a §{bonus} bonus!", sim.first, job.info().title));
+                if branching && member {
+                    notes.push(format!("{} was promoted and got a §{bonus} bonus! The {} career branches here.", sim.first, track.name));
+                    questions.ask_career_path(e, sim, &job);
+                } else {
+                    notes.push(format!("{} was promoted to {} and got a §{bonus} bonus!", sim.first, job.info().title));
+                }
                 life.write(LifeEvent::new(e, LifeEventKind::Promoted));
             } else if job.performance <= -100.0 {
                 if job.level == 0 {

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 21;
+pub const GAMEDATA_VERSION: u32 = 22;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -214,6 +214,22 @@ pub struct GameDataBaked {
     /// Each object's effect slots (model space): where showers spray, fountains gush and
     /// fires burn.
     pub fx_slots: Vec<(crate::types::Key, Vec<[f32; 3]>)>,
+    pub lifetime_wishes: Vec<LifetimeWishInfo>,
+}
+
+/// A lifetime wish: one of the base game's "Lifetime Dreams" (`DreamsAndPromisesNodes`), with
+/// its fulfillment score from `DreamNodeInstanceDefaults`.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct LifetimeWishInfo {
+    pub id: u32,
+    /// The game's check for it, e.g. `NSimoleonsInCashMajorDreamCheckFunction` (empty for a
+    /// few that are fulfilled by an event instead).
+    pub check: String,
+    /// The number it asks for (simoleons, friends, career level), when it takes one.
+    pub number: f32,
+    pub icon: String,
+    /// Fulfillment score: a tenth of the lifetime happiness it's worth.
+    pub score: u32,
 }
 
 /// What kind of find a collectible is.
@@ -770,6 +786,28 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             });
         }
     }
+    // Lifetime wishes: the base game's lifetime dreams, with their instances' scores.
+    if let (Some(nodes), Some(inst)) = (xml("DreamsAndPromisesNodes"), xml("DreamNodeInstanceDefaults")) {
+        let mut scores: HashMap<String, u32> = HashMap::new();
+        for f in records(&inst, "DreamNodeInstance") {
+            if let Some(s) = f.get("FulfillmentScore").and_then(|s| s.parse().ok()) {
+                scores.entry(get(&f, "PrototypeId")).or_insert(s);
+            }
+        }
+        for f in records(&nodes, "Primitives") {
+            if get(&f, "LifeEventIsLifetimeDream") != "True" || get(&f, "RequiredProductVersions") != "BaseGame" {
+                continue;
+            }
+            let id = get(&f, "Id");
+            out.lifetime_wishes.push(LifetimeWishInfo {
+                id: id.parse().unwrap_or(0),
+                check: get(&f, "CheckFunction"),
+                number: num(&f, "LifeEventInputNumber"),
+                icon: get(&f, "PrimaryIcon"),
+                score: scores.get(&id).copied().unwrap_or(0),
+            });
+        }
+    }
     if let Some(x) = xml("Fishing") {
         for f in records(&x, "Fish") {
             let key = get(&f, "Name");
@@ -1005,6 +1043,9 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     }
     for o in &out.opportunities {
         wanted.insert(o.icon.clone());
+    }
+    for w in &out.lifetime_wishes {
+        wanted.insert(w.icon.clone());
     }
     wanted.extend(EXTRA_ICONS.iter().map(|s| s.to_string()));
     wanted.remove("");

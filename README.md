@@ -54,6 +54,15 @@ installation is unreachable.
   use (toilets clog), less often the better they are; Sims repair them with the game's own
   repair animations, learning Handiness (handy and neat Sims do it on their own), or the
   repairman can be phoned. Fishing trips teach Fishing and bring back a catch to sell.
+- **Lifetime wishes**, the base game's own (CEO of a Mega-Corporation, Leader of the Free
+  World, Become a Master Thief, Rock Star, Swimming in Cash, Super Popular, Heartbreaker,
+  Master of the Arts, Renaissance Sim, Surrounded by Family, Jack of All Trades and more;
+  26 in all), with their icons, targets and rewards from the game's dream tables. Create-a-Sim
+  offers five that suit the Sim's traits; a child growing into a teen picks one in the game's
+  dialog; Sims moving in without one take the best fit (one not already half done). The wish
+  sits beside the others with its progress (§12,000 of §50,000, Painting 7/10 · Guitar 4/10,
+  level 6 of 10), and fulfilling it is worth 20,000 to 35,000 lifetime happiness. Kept in
+  saves.
 - **Opportunities** from the game's own tables: by day, Sims are offered ones that suit their
   career or skills in the game's dialog (its icon, name, description and reward); taken-on
   opportunities are listed in the Opportunities panel (O) with their deadlines and are done
@@ -111,8 +120,8 @@ installation is unreachable.
   drives them back while the household carries on at home.
 - **Sim panel tabs**, as the game's: Needs; Skills (each skill learned with its icon, level
   and progress to the next); Career (the job and level, hours, days and pay, the performance
-  meter and the next promotion); Simology (traits with what they mean, lifetime happiness and
-  the rewards bought). F5 to F8 switch tabs.
+  meter and the next promotion); Simology (the lifetime wish and how far along it is, traits
+  with what they mean, lifetime happiness and the rewards bought). F5 to F8 switch tabs.
 - **Fences and railings**: every lot's fences (picket, rail, iron, garden edging) and its porch
   and balcony railings, from the lot's fence posts and the catalogue's fence pieces (straight
   and diagonal runs, posts); Sims can't walk through them.
@@ -190,7 +199,9 @@ installation is unreachable.
   stations on stereos.
 - **Careers** from the game's own career tables: all eleven base-game careers (Professional
   Sports included) with every level's title, pay, hours and workdays, and the part-time jobs
-  (bookstore, grocery, spa, mausoleum) for teens.
+  (bookstore, grocery, spa, mausoleum) for teens. Careers branch where the game's do
+  (Criminal into Thief or Evil, Music into Electric Rock or Symphonic, Law Enforcement into
+  Special Agent or Forensic Analyst): the promotion there asks which path to take.
 - **Interface**: the game's own icons and words — moodlets (name, description, time left),
   traits (Create-a-Sim and the Sim's panel) and wishes — read from the game's tuning tables
   (`GameplayData.package`) and string tables, with tooltips on hover. Sims' portraits are
