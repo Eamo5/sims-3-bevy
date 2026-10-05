@@ -726,6 +726,11 @@ fn ui_flow(
             shot(&mut commands, "4_choose_lot");
             // The first furnished house, as a player would pick from the top of the list.
             let house = world.as_ref().and_then(|w| lots.iter().map(|(_, b)| b.0).filter(|i| w.data.buildings.get(i).is_some_and(|b| b.is_furnished())).min());
+            if let (Some(h), Some(w)) = (house, world.as_ref())
+                && let Some(l) = w.data.lots.get(h)
+            {
+                info!("ui flow lot {h}: {:016X} {} {:?}", l.id, l.internal_name, l.string_keys);
+            }
             if let Some((mut i, _)) = lots.iter_mut().find(|(_, b)| house.is_none_or(|h| b.0 == h)) {
                 *i = Interaction::Pressed;
             }

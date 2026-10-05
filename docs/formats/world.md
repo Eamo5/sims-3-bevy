@@ -665,6 +665,10 @@ u32 2
 ## 10. Pre-baked LOD: lot imposters and terrain tiles
 
 ### 10.1 Lot imposters  [GUESS, strong]
+
+(Verified since: the imposter atlas's alpha cuts out railings, fences, garden beds and window
+frames, so imposters are drawn alpha-tested; the colour looks premultiplied by alpha, so
+half-transparent edges come out dark.)
 Per lot (instance = lot id):
 - `MODL 0x01661233` group **0x00B0C507** (Goth: 454 KB) — low-LOD building model; standard RCOL MODL.
 - `MODL` group **0x001DA7E9** (Goth: 1.5 KB) — tiny model (lowest LOD / footprint plate).
@@ -809,8 +813,14 @@ Per lot (instance = lot id) in the world file, with REFS = `0x05ED1226:0:lot`:
   `u16 REFS index, u32 palette id, u32 painted area`.
 * **Floors.** Grid `0xB125533A:0x0093DEB7`: `u32 1, u32 w, u32 d, u32 levels` then
   `levels × d × w` cells of four `u16` palette ids (one per tile triangle); `w × d` is the lot
-  plus one row and column; grid level 1 is the ground floor, level 0 paving on the ground. The
-  value counts equal the palette's areas exactly. The floor palette is
+  plus one row and column. Grid level 0 is paving on the ground (driveways often use the
+  `Floor_Misc_TarRoof` pattern). Without a foundation, storey `n` is grid level `n`; on a
+  foundation, grid level 1 is the foundation's own top (often the unpainted `Floor_Foundation`
+  concrete, or a porch covering) and storey `n`'s floors are on grid level `n + 1`, at the same
+  height (the Landgraab mansion: furniture at the foundation top, 0.75 m, rooms painted on grid
+  level 2, the upstairs atrium's hole on level 3). The level above the top storey holds flat
+  roofs. The value counts equal the palette's areas exactly; a palette entry whose references
+  are all null (or the `0000DEAD` key) is "no covering". The floor palette is
   `0x0553EAD4:0x0093D9D1`: `u32 4, 16 zero bytes, u32 count`, then
   `u16 CWAL, u16 TXTC, u16 TXTC, u16 COMP (REFS indices), u32 id, u32 area`.
   (The `0x002E7B0E` / `0x002E7CF0` / `0x002E7CF1` grids are something else.)

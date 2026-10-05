@@ -111,7 +111,10 @@ impl ObjectAssets {
     pub fn ingest_model(&mut self, ctx: &mut AssetCtx, key: Key, cpu: Vec<CpuPart>) -> Vec<ModelPart> {
         let mut parts = Vec::new();
         for p in cpu {
-            let material = self.material_for_key(ctx, p.tex, p.mode, p.unlit);
+            // Lot imposters cut out railings, fences, shrubs and window frames with their
+            // atlas's alpha.
+            let mode = if p.layer != 0 { p.mode.max(1) } else { p.mode };
+            let material = self.material_for_key(ctx, p.tex, mode, p.unlit);
             parts.push(ModelPart { mesh: ctx.meshes.add(p.mesh), material, bounds: p.bounds, layer: p.layer });
         }
         self.models.insert(key, parts.clone());

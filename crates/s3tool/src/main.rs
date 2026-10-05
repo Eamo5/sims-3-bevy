@@ -250,6 +250,49 @@ fn main() {
         }
         return;
     }
+    if args[1] == "lotlevels" {
+        // lotlevels <root> <world>: per lot with a building, its wall levels and, per floor-grid
+        // level, the most used floor design (to see how grid levels map to storeys).
+        use s3formats::lotdesign as ld;
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let w = Package::open(&args[3]).unwrap();
+        for e in w.of_type(0xD063545B) {
+            let Ok(l) = s3formats::world::LotInfo::parse(e.key.i, &w.read(e).unwrap()) else { continue };
+            let Some(b) = s3formats::lot::LotBuildData::load(&w, l.id) else { continue };
+            if b.walls.edges.is_empty() {
+                continue;
+            }
+            let levels: std::collections::BTreeSet<i64> = b.walls.segments().map(|s| s.2 as i32 as i64).collect();
+            let rd = |t: u32, g: u32| w.find(&s3pkg::ResourceKey::new(t, g, l.id)).and_then(|e| w.read(e).ok());
+            let refs = s3formats::objn::parse_refs(&rd(0x05ED1226, 0).unwrap_or_default()).unwrap_or_default();
+            let designs = ld::parse_designs(&rd(ld::T_DESIGNS, 0).unwrap_or_default());
+            let fpal = rd(ld::T_FLOOR_PALETTE, ld::G_FLOOR_PALETTE).and_then(|d| ld::parse_floor_palette(&d).ok()).unwrap_or_default();
+            let Some(gd) = rd(ld::T_GRID, ld::G_FLOOR_GRID) else { continue };
+            let Ok(g) = ld::Grid::parse(&gd) else { continue };
+            let mut per = Vec::new();
+            for lv in 0..g.levels {
+                let mut count: std::collections::HashMap<u16, usize> = std::collections::HashMap::new();
+                for z in 0..g.depth {
+                    for x in 0..g.width {
+                        for v in g.quad(lv, x, z).unwrap_or([0; 4]) {
+                            if v != 0 {
+                                *count.entry(v).or_default() += 1;
+                            }
+                        }
+                    }
+                }
+                let top = count.iter().max_by_key(|(_, n)| **n).map(|(id, n)| {
+                    let name = fpal.get(&(*id as u32)).and_then(|(_, comp)| designs.get(comp)).and_then(|d| d.complate.get("daeFileName").map(|v| v.text())).unwrap_or_default();
+                    format!("{name}x{n}")
+                });
+                per.push(format!("L{lv}:{}", top.unwrap_or_default()));
+            }
+            let _ = &refs;
+            let _ = &set;
+            println!("{:016X} {:24} walls {:?} | {}", l.id, l.internal_name, levels, per.join(" "));
+        }
+        return;
+    }
     if args[1] == "lotobjs" {
         // lotobjs <world> <lot id hex>: the lot's placed objects with scripts and positions.
         let w = Package::open(&args[2]).unwrap();

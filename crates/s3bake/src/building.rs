@@ -205,8 +205,21 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     let floor_grid = read(ld::T_GRID, ld::G_FLOOR_GRID);
     let floor_grid = floor_grid.as_deref().and_then(|d| ld::Grid::parse(d).ok());
     let floor_palette = read(ld::T_FLOOR_PALETTE, ld::G_FLOOR_PALETTE).and_then(|d| ld::parse_floor_palette(&d).ok()).unwrap_or_default();
+    // On a foundation, grid level 1 is the foundation's own top (porches show it) and storey
+    // `n`'s floors are on grid level `n + 1`; otherwise storey `n` is grid level `n`.
+    let shift = has_foundation as u32;
     let mut floor_cover = |level: u32, x: u32, z: u32| -> [u16; 4] {
-        let Some(q) = floor_grid.as_ref().and_then(|g| g.quad(level, x, z)) else { return [NO_COVER; 4] };
+        let quad = |l: u32| floor_grid.as_ref().and_then(|g| g.quad(l, x, z));
+        let lifted = if level == 0 { quad(0) } else { quad(level + shift) };
+        let Some(mut q) = lifted.or_else(|| quad(level)) else { return [NO_COVER; 4] };
+        if shift == 1 && level == 1 {
+            let top = quad(1).unwrap_or([0; 4]);
+            for t in 0..4 {
+                if q[t] == 0 {
+                    q[t] = top[t];
+                }
+            }
+        }
         q.map(|id| match floor_palette.get(&(id as u32)) {
             Some(&(cwal, comp)) if id != 0 => covers.pick(Some(comp), Some(cwal), true),
             _ => NO_COVER,
