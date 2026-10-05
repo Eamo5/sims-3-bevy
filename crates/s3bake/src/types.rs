@@ -10,7 +10,7 @@ pub const BAKE_VERSION: u32 = 4;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
 pub const CAS_VERSION: u32 = 4;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 19;
+pub const WORLD_VERSION: u32 = 20;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -352,4 +352,8 @@ pub struct WorldBaked {
     pub lightmap: Option<WorldMap>,
     pub buildings: Vec<LotBuildingBaked>,
     pub tree_kinds: Vec<TreeKindBaked>,
+    /// The road graph: roads as cubic beziers (four x/z control points), and the intersections
+    /// joining them (x, z, angle).
+    pub road_curves: Vec<[[f32; 2]; 4]>,
+    pub road_intersections: Vec<[f32; 3]>,
 }

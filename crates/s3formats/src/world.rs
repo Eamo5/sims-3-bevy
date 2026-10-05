@@ -8,6 +8,52 @@ pub const T_TERRAIN_PAINT: u32 = 0x9063660D;
 pub const T_TERRAIN_BLEND: u32 = 0x3D8632D0;
 pub const T_LOT_INFO: u32 = 0xD063545B;
 pub const T_LOT_THUMB: u32 = 0xD84E7FC6;
+pub const T_ROAD_GRAPH: u32 = 0x9063660E;
+
+/// The world's road graph (0x9063660E): intersections, and the roads and walkways between them
+/// as cubic beziers (four control points, x/z).
+#[derive(Clone, Debug, Default)]
+pub struct RoadGraph {
+    pub road_intersections: Vec<[f32; 3]>,
+    pub road_curves: Vec<[[f32; 2]; 4]>,
+    pub walk_curves: Vec<[[f32; 2]; 4]>,
+}
+
+impl RoadGraph {
+    /// `u32 version; u16 road ints, walk ints, road curves, walk curves`; each intersection
+    /// `f32 x, z, angle; 10 bytes; u8 n; n × 4 bytes`; each curve `f32 bezier[8]; 8 bytes; u8 n;
+    /// n × 4 bytes`.
+    pub fn parse(d: &[u8]) -> R<Self> {
+        let mut r = Reader::new(d);
+        let _version = r.u32()?;
+        let (ri, wi, rc, wc) = (r.u16()? as usize, r.u16()? as usize, r.u16()? as usize, r.u16()? as usize);
+        let mut out = Self::default();
+        for i in 0..ri + wi {
+            let (x, z, angle) = (r.f32()?, r.f32()?, r.f32()?);
+            r.skip(10)?;
+            let n = r.u8()? as usize;
+            r.skip(n * 4)?;
+            if i < ri {
+                out.road_intersections.push([x, z, angle]);
+            }
+        }
+        for i in 0..rc + wc {
+            let mut b = [[0f32; 2]; 4];
+            for p in &mut b {
+                *p = [r.f32()?, r.f32()?];
+            }
+            r.skip(8)?;
+            let n = r.u8()? as usize;
+            r.skip(n * 4)?;
+            if i < rc {
+                out.road_curves.push(b);
+            } else {
+                out.walk_curves.push(b);
+            }
+        }
+        Ok(out)
+    }
+}
 
 /// A lot placed in the world. `corner` is the lot origin; the lot extends `width` metres along
 /// its local +X and `depth` metres along local +Z after rotating by `rotation` radians about +Y.

@@ -99,6 +99,9 @@ pub struct WorldInfo {
     pub sea_level: f32,
     /// Pre-built houses by lot index.
     pub buildings: std::collections::HashMap<usize, s3bake::LotBuildingBaked>,
+    /// The road graph (for traffic).
+    pub road_curves: Vec<[[f32; 2]; 4]>,
+    pub road_intersections: Vec<[f32; 3]>,
 }
 
 /// The world currently being played.
@@ -213,6 +216,8 @@ fn start_loading(
             heightmap: world.heightmap,
             sea_level: world.sea_level,
             buildings: world.buildings.into_iter().map(|b| (b.lot as usize, b)).collect(),
+            road_curves: world.road_curves,
+            road_intersections: world.road_intersections,
         };
         set_status("Done");
         Ok(LoadResult { baked, world: Arc::new(info), terrain, catalog, world_build, roads, cas, sims, premades })

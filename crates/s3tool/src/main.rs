@@ -319,6 +319,20 @@ fn main() {
         }
         return;
     }
+    if args[1] == "roadgraph" {
+        // roadgraph <world>: the road graph's counts and first curves.
+        let w = Package::open(&args[2]).unwrap();
+        let e = w.of_type(s3formats::world::T_ROAD_GRAPH).next().expect("no road graph");
+        let g = s3formats::world::RoadGraph::parse(&w.read(e).unwrap()).expect("parse");
+        println!("{} road intersections, {} road curves, {} walkways", g.road_intersections.len(), g.road_curves.len(), g.walk_curves.len());
+        for c in g.road_curves.iter().take(6) {
+            println!("{c:?}");
+        }
+        for i in g.road_intersections.iter().take(4) {
+            println!("int {i:?}");
+        }
+        return;
+    }
     if args[1] == "lots" {
         // lots <world> [x z radius]: lots with id, name, corner and size.
         let w = Package::open(&args[2]).unwrap();

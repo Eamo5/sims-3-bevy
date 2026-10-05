@@ -107,6 +107,9 @@ installation is unreachable.
   and floors, its walls come down as the camera moves in, Sims on it keep to it in their own
   choices, townies turn up during the day to use the place too (and to meet), and "Go Home"
   drives them back while the household carries on at home.
+- **Traffic**: the game's cars (sedans, hatchbacks, pickups, vans, sports cars) drive the
+  town's roads around the camera, keeping right along the world's own road graph and turning
+  at its intersections.
 - **Collecting and fishing**: the world builders' spawners leave gems, metals and space rocks
   about the community lots (from the game's own tables, with their odds and prices); Sims
   crouch to collect them, and fish at the lots' fishing spots with the game's casting and

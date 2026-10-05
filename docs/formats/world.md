@@ -696,7 +696,7 @@ For a reimplementation, the heightmap + blend masks are sufficient; these are op
 
 ## 11. Roads, routing, world boundary
 
-### 11.1 Roads & walkways 0x9063660E  [WIKI]
+### 11.1 Roads & walkways 0x9063660E  [WIKI + VERIFIED on Sunset Valley]
 ```
 u32 version (7)
 u16 roadIntersections, walkwayIntersections, roadCurves, walkwayCurves
@@ -705,6 +705,9 @@ curve        × { f32 bezier[8] /* 4 control points (x,z) */; u8[8] 0; u8 n; n �
 u16[6] (all 1)
 6 × { TGI diffuse; TGI bump; f32 width?; f32 height? }
 ```
+Sunset Valley: 54 road intersections, 142 road curves, 37 walkways; the control points are world
+x/z in metres and consecutive curves share end points, while curves meeting at an intersection
+stop short of its centre (up to ~20 m). Used for traffic (`traffic.rs`).
 Indices are 1-based across [road ints, walkway ints, road curves, walkway curves]. The wiki notes
 edits to this resource had no visible effect: the road surface is baked into the terrain textures, so
 use this for the road graph (traffic, regenerating road meshes).

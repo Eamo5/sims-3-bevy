@@ -747,6 +747,11 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
     bake_textures(root, pkgs, &tree_tex, 512, &format!("Converting {name}"), progress);
     let overview = stitch_sectors(&pkg, sectors, 2);
     let lightmap = stitch_sectors(&pkg, sectors, 7);
+    let graph = pkg
+        .of_type(s3formats::world::T_ROAD_GRAPH)
+        .next()
+        .and_then(|e| s3formats::world::RoadGraph::parse(&pkg.read(e).ok()?).ok())
+        .unwrap_or_default();
 
     let baked = WorldBaked {
         version: WORLD_VERSION,
@@ -766,6 +771,8 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         lightmap,
         buildings,
         tree_kinds,
+        road_curves: graph.road_curves,
+        road_intersections: graph.road_intersections,
     };
     write_value(&wdir.join("world.bin"), &baked).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_dir_all(&final_dir);
