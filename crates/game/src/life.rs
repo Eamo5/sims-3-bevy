@@ -492,17 +492,19 @@ pub enum MoodletKind {
     LameParty,
     AwesomeParty,
     Scared,
+    GreatDate,
+    BadDate,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 43] = {
+    pub const ALL: [MoodletKind; 45] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
             GoodMeal, AmazingMeal, HavingFun, GoodConversation, EnjoyingMusic, EnjoyingAGoodBook, Pumped, Fatigued,
             Inspired, Embarrassed, PassedOut, Uncomfortable, Promoted, Demoted, Fired, NewJob, Annoyed, Flirty, FirstKiss,
             InLove, Heartbroken, JustMarried, NewHome, Birthday, WishFulfilled, Nauseous, Pregnant, NewBaby, GreatParty,
-            LameParty, AwesomeParty, Scared,
+            LameParty, AwesomeParty, Scared, GreatDate, BadDate,
         ]
     };
 
@@ -569,6 +571,8 @@ impl MoodletKind {
             LameParty => md("Threw a Lame Party", "Not every party is a hit.", -15, 8.0),
             AwesomeParty => md("Awesome Party", "What a party!", 20, 3.0),
             Scared => md("Scared", "Something gave this Sim a terrible fright!", -25, 3.0),
+            GreatDate => md("Great Date", "It was an absolutely fantastic date!", 15, 3.0),
+            BadDate => md("Bad Date", "Ugh, what a lousy date.", -5, 3.0),
             WishFulfilled => md("Wish Fulfilled", "Dreams come true!", 10, 4.0),
         }
     }
@@ -625,6 +629,8 @@ impl MoodletKind {
             LameParty => ("ThrewLameParty", true),
             AwesomeParty => ("AwesomeParty", true),
             Scared => ("Scared", false),
+            GreatDate => ("GreatDate", true),
+            BadDate => ("BadDate", true),
         }
     }
 }

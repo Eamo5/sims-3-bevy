@@ -112,6 +112,7 @@ pub enum SocialEffect {
     WooHoo,
     TryForBaby,
     PutToBed,
+    AskOnDate,
 }
 
 pub struct SocialDef {
@@ -148,7 +149,7 @@ const fn sd(name: &'static str, cat: SocialCat, minutes: f32, social: f32, fun: 
 }
 
 use SocialCat::*;
-pub static SOCIALS: [SocialDef; 31] = [
+pub static SOCIALS: [SocialDef; 32] = [
     SocialDef { autonomous: true, ..sd("Chat", Friendly, 25.0, 110.0, 10.0, 8.0, 0.0) },
     SocialDef { autonomous: true, ..sd("Get to Know", Friendly, 15.0, 100.0, 5.0, 9.0, 0.0) },
     sd("Compliment", Friendly, 8.0, 80.0, 0.0, 7.0, 0.0),
@@ -165,6 +166,7 @@ pub static SOCIALS: [SocialDef; 31] = [
     SocialDef { min_romance: 30.0, effect: SocialEffect::Kiss, ..sd("Kiss", Romantic, 6.0, 160.0, 40.0, 4.0, 14.0) },
     SocialDef { min_romance: 50.0, effect: SocialEffect::Kiss, ..sd("Make Out", Romantic, 15.0, 180.0, 60.0, 5.0, 16.0) },
     SocialDef { min_romance: 50.0, effect: SocialEffect::GoSteady, ..sd("Ask to Go Steady", Romantic, 8.0, 120.0, 10.0, 5.0, 10.0) },
+    SocialDef { min_romance: 12.0, effect: SocialEffect::AskOnDate, ..sd("Ask on Date", Romantic, 6.0, 80.0, 20.0, 3.0, 4.0) },
     SocialDef { min_romance: 70.0, effect: SocialEffect::Propose, ..sd("Propose Marriage", Romantic, 10.0, 140.0, 20.0, 10.0, 15.0) },
     SocialDef { min_romance: 70.0, effect: SocialEffect::Marry, ..sd("Get Married", Romantic, 30.0, 160.0, 40.0, 15.0, 20.0) },
     SocialDef { min_romance: 60.0, effect: SocialEffect::WooHoo, ..sd("WooHoo", Romantic, 30.0, 200.0, 120.0, 6.0, 15.0) },

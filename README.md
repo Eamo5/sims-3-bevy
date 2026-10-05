@@ -128,6 +128,9 @@ installation is unreachable.
 - **Fireplaces**: Sims light a fire with the game's animations; it burns a few hours, flames
   dancing in the hearth and a flickering warm light on the room, and they warm their hands by
   it or put it out. Now and then a spark catches the floor in front.
+- **Dates**: Sims ask each other on dates; for a few hours the date keeps them company
+  (flirting, chatting, complimenting), and it ends a Great Date or a Bad Date (the game's
+  moodlets) by how much closer they've grown and how they feel.
 - **Babysitter**: when the grown-ups and teens are all out and a baby or toddler would be home
   alone, a babysitter arrives by car, feeds them, changes them and plays with them, and goes
   home (paid §10 an hour) once someone's back. Visitors don't sleep in the family's beds or

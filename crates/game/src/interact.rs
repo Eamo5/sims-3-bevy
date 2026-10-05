@@ -1511,6 +1511,12 @@ fn run_actions(
                                             commands.entity(*target).insert(GoingHome);
                                             notes.push(format!("{} said goodbye and is heading home.", tname));
                                         }
+                                        SocialEffect::AskOnDate => {
+                                            let (a, b) = (me, *target);
+                                            commands.queue(move |w: &mut World| {
+                                                w.write_message(crate::dates::StartDate { a, b });
+                                            });
+                                        }
                                         _ => {}
                                     }
                                 }
