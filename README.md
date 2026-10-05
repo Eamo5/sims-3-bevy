@@ -252,6 +252,8 @@ installation is unreachable.
   (bookstore, grocery, spa, mausoleum) for teens. Careers branch where the game's do
   (Criminal into Thief or Evil, Music into Electric Rock or Symphonic, Law Enforcement into
   Special Agent or Forensic Analyst): the promotion there asks which path to take.
+- **Blinking**: Sims blink every few seconds (the rig's eyelid bones closing over the eyes on
+  top of whatever they're doing), and sleep with their eyes shut.
 - **Pie menus** in the game's style: pale bubbles with dark writing, blue under the pointer,
   in a ring round the acting Sim's portrait (what was clicked named beneath it), with
   submenus (›) for long lists.

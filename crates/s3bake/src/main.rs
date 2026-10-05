@@ -59,6 +59,18 @@ fn main() {
         }
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--bones") {
+        // --bones <rig> <name part>: a rig's bones so named, with their bind positions.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let rig = pkgs.read_ti(s3pkg::types::RIG, s3pkg::fnv64(&args[i + 1])).and_then(|d| s3formats::sim::Rig::parse(&d).ok()).expect("rig");
+        let want = args.get(i + 2).map(|s| s.to_ascii_lowercase()).unwrap_or_default();
+        for (k, b) in rig.bones.iter().enumerate() {
+            if b.name.to_ascii_lowercase().contains(&want) {
+                println!("{k:3} {} parent {:?} pos {:?}", b.name, b.parent, b.position);
+            }
+        }
+        return;
+    }
     if args.iter().any(|a| a == "--hair-check") {
         // --hair-check: baked hair parts with no meshes, no layer, or a missing layer texture.
         let cas: s3bake::CasBaked = s3bake::read_value(&root.global_dir().join("cas.bin")).expect("cas.bin");
