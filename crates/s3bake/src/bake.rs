@@ -111,6 +111,36 @@ pub fn bake_model(pkgs: &PackageSet, modl: &ResourceKey) -> BakedModel {
     bake_model_state(pkgs, modl, None)
 }
 
+/// The geometry state a model is drawn in when nothing chooses one. A model with alternative
+/// states (a chess table's games, a dish full or emptied) is drawn in the one it rests in
+/// (the names are the game scripts': `boardSet`, `tableClothOff`, `basketClosed`...), else its
+/// fullest; never its catalogue `thumbnail` state. Bookshelves (`base`, `halfFull`, `full`)
+/// stand full, as does anything with one state or none (its whole mesh).
+pub fn default_state(meshes: &[model::MeshData]) -> Option<u32> {
+    let thumbnail = s3pkg::fnv32("thumbnail");
+    let mut totals: Vec<(u32, usize)> = Vec::new();
+    for m in meshes {
+        for (h, ix) in m.states.iter().filter(|(h, _)| *h != thumbnail) {
+            match totals.iter_mut().find(|(x, _)| x == h) {
+                Some((_, n)) => *n += ix.len(),
+                None => totals.push((*h, ix.len())),
+            }
+        }
+    }
+    if totals.len() < 2 {
+        return None;
+    }
+    let has = |name: &str| totals.iter().find(|(h, n)| *h == s3pkg::fnv32(name) && *n > 0).map(|(h, _)| *h);
+    if has("halfFull").is_some() && has("full").is_none() {
+        return None;
+    }
+    if let Some(h) = ["boardSet", "tableClothOff", "basketClosed", "greenLightOn", "full"].iter().find_map(|n| has(n)) {
+        return Some(h);
+    }
+    let best = totals.iter().fold(None::<(u32, usize)>, |b, &(h, n)| if b.is_none_or(|(_, bn)| n > bn) { Some((h, n)) } else { b })?;
+    (best.1 > 0).then_some(best.0)
+}
+
 /// A model in one of its geometry states (FNV-32 of the state's name: a dish `full` or
 /// `empty`); meshes without that state are drawn whole.
 pub fn bake_model_state(pkgs: &PackageSet, modl: &ResourceKey, state: Option<u32>) -> BakedModel {

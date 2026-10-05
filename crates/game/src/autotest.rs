@@ -512,7 +512,10 @@ fn showroom(
 ) {
     let Some((count, skip)) = args.showroom else { return };
     let origin = start.map(|s| s.0).unwrap_or(Vec3::new(1024.0, 0.0, 1024.0));
-    let keys: Vec<s3bake::Key> = data.0.catalog.iter().map(|c| c.objd).collect();
+    // SHOWROOM_NAMES=<a,b,...>: just those catalogue objects (by internal name).
+    let names: Option<Vec<String>> = std::env::var("SHOWROOM_NAMES").ok().map(|v| v.split(',').map(|s| s.to_ascii_lowercase()).collect());
+    let keys: Vec<s3bake::Key> =
+        data.0.catalog.iter().filter(|c| names.as_ref().is_none_or(|n| n.contains(&c.instance_name.to_ascii_lowercase()))).map(|c| c.objd).collect();
     let mut ctx = crate::objects::AssetCtx {
         baked: &data.0,
         meshes: &mut meshes,

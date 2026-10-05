@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 27;
+pub const GAMEDATA_VERSION: u32 = 29;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -955,6 +955,28 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 let _ = std::fs::write(root.tex_path(t), dds);
             }
         }
+    }
+    // Catalogue models with alternative geometry states, drawn in their fullest (the objects'
+    // models pack has every state at once: a chess table's every game piled on its board).
+    progress("Converting: object states…");
+    {
+        let catalog: Vec<crate::types::CatalogEntry> = read_value(&root.global_dir().join("catalog.bin")).unwrap_or_default();
+        let mut keys: Vec<crate::types::Key> = catalog.iter().flat_map(|c| c.models.iter().copied()).collect();
+        keys.sort();
+        keys.dedup();
+        let baked = crate::bake::par_map(&keys, |k| {
+            let rk = crate::types::rkey(*k);
+            let meshes = s3formats::model::load_model(pkgs, &rk)?;
+            let state = crate::bake::default_state(&meshes)?;
+            Some((*k, crate::bake::bake_model_state(pkgs, &rk, Some(state))))
+        });
+        let g = root.global_dir();
+        std::fs::create_dir_all(&g).map_err(|e| e.to_string())?;
+        let mut spack = PackWriter::create(&g.join("states.pack")).map_err(|e| e.to_string())?;
+        for (k, m) in baked.into_iter().flatten() {
+            spack.add(k, &m).map_err(|e| e.to_string())?;
+        }
+        spack.finish().map_err(|e| e.to_string())?;
     }
     // Lifetime wishes: the base game's lifetime dreams, with their instances' scores.
     if let (Some(nodes), Some(inst)) = (xml("DreamsAndPromisesNodes"), xml("DreamNodeInstanceDefaults")) {

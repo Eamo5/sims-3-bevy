@@ -212,8 +212,17 @@ Geometry states (for state-dependent visibility, e.g. sprinkler dome): vertices 
 `streamOffset + state.minVertexIndex*stride`, `state.vertexCount` of them; indices
 `ibuf[state.startIndex .. + state.primitiveCount*3]`, each minus `state.minVertexIndex` [code]. Game semantics
 [wiki]: a state hides everything in that mesh group outside its ranges; a state name that matches no entry shows the
-whole group; a "zero" state (all counts 0) hides the group. For a static renderer, draw the full mesh and ignore
-states.
+whole group; a "zero" state (all counts 0) hides the group.
+
+The base range is every state's geometry together, so a renderer that ignores states draws a chess table with
+pieces from all of its games on the board, or a dish full, half eaten and empty at once [observed]. State names are
+FNV-32 hashes of names the game scripts set, found in the script assemblies' strings: `boardEmpty`/`boardSet`
+(chess), `base`/`halfFull`/`full` (bookshelves), `tableClothOff`/`tableClothOn`, `basketOpen`/`basketClosed`,
+`largePainting`/`smallPainting`, `guitarOnly`, `garbageEmpty`, `indicatorOff`, `unlocked`, `empty`/`full`, and
+`thumbnail` for the catalogue picture; food states come from the recipe table (`foodServeSpaghetti#full`). Here a
+model with alternative states is drawn in the one it rests in (`boardSet`, `tableClothOff`, `basketClosed`, `full`;
+bookshelves without a `full` state whole), else its fullest, never `thumbnail` [ours]. 373 base-game catalogue models
+have states.
 
 ### 3.2 SKIN chunk (0x01D0E76B) [code+wiki]
 

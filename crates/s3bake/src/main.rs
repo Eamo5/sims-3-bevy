@@ -38,6 +38,30 @@ fn main() {
         }
         return;
     }
+    if args.iter().any(|a| a == "--geostates") {
+        // --geostates: catalogue objects whose models have geometry states, with the states.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let cat: Vec<s3bake::types::CatalogEntry> = s3bake::pack::read_value(&root.global_dir().join("catalog.bin")).unwrap_or_default();
+        let mut n = 0;
+        for c in cat.iter().filter(|c| c.price >= 0) {
+            for m in &c.models {
+                let meshes = s3formats::model::load_model(&pkgs, &s3bake::types::rkey(*m)).unwrap_or_default();
+                let states: Vec<String> = meshes
+                    .iter()
+                    .filter(|x| !x.states.is_empty())
+                    .map(|x| format!("{} tris: {:?}", x.indices.len() / 3, x.states.iter().map(|(h, ix)| format!("{h:08X}/{}", ix.len() / 3)).collect::<Vec<_>>()))
+                    .collect();
+                if !states.is_empty() {
+                    n += 1;
+                    if n <= 60 {
+                        println!("{} {:?}", c.instance_name, states);
+                    }
+                }
+            }
+        }
+        println!("{n} models with geometry states");
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--model-name") {
         // --model-name <name>: the models (MODL, VPXY) named so (instance = fnv64 of the name).
         let pkgs = s3pkg::install::open_install(&data, |_| true);
