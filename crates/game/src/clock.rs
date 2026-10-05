@@ -107,6 +107,13 @@ fn advance_clock(time: Res<Time>, mut clock: ResMut<GameClock>, mut delta: ResMu
     delta.0 = dt;
 }
 
+/// The sun's height (-1..1, 0 at the horizon): up at 6:00, highest at 13:00, down at 20:00, as
+/// the game's summer days.
+pub fn sun_elevation(h: f32) -> f32 {
+    let h = h.rem_euclid(24.0);
+    if (6.0..20.0).contains(&h) { ((h - 6.0) / 14.0 * std::f32::consts::PI).sin() } else { -((h - 20.0).rem_euclid(24.0) / 10.0 * std::f32::consts::PI).sin() }
+}
+
 /// How dark it is: 0 in daylight, 1 at night (smooth through dusk and dawn).
 #[derive(Resource, Default, Clone, Copy)]
 pub struct Night(pub f32);
@@ -119,9 +126,9 @@ fn day_night(
     mut clear: ResMut<ClearColor>,
 ) {
     let h = clock.hour_f();
-    // Sun angle: rises at 6:00, sets at 18:00.
-    let t = (h - 6.0) / 12.0;
-    let elev = (t * std::f32::consts::PI).sin();
+    // Sun angle: rises at 6:00, sets at 20:00.
+    let t = (h - 6.0) / 14.0;
+    let elev = sun_elevation(h);
     let day = elev.clamp(0.0, 1.0);
     let dark = (1.0 - (elev + 0.08) / 0.3).clamp(0.0, 1.0);
     if (night.0 - dark).abs() > 0.002 {
@@ -132,11 +139,12 @@ fn day_night(
     for (mut tf, mut light) in &mut sun {
         let pitch = -(elev.max(0.08)) * 1.2;
         tf.rotation = Quat::from_euler(EulerRot::YXZ, azimuth, pitch, 0.0);
-        light.illuminance = 400.0 + 9500.0 * day;
+        // (Evenings stay light until the sun is nearly down.)
+        light.illuminance = 400.0 + 9500.0 * day.powf(0.6);
         light.color = Color::srgb(1.0, 0.85 + 0.12 * day, 0.70 + 0.25 * day).mix(&Color::srgb(1.0, 0.6, 0.35), twilight * 0.6);
     }
     for mut a in &mut ambient {
-        a.brightness = 180.0 + 650.0 * day;
+        a.brightness = 180.0 + 650.0 * day.powf(0.6);
         a.color = Color::srgb(0.55, 0.62, 0.95).mix(&Color::srgb(0.85, 0.88, 1.0), day);
     }
     let sky_day = Color::srgb(0.53, 0.70, 0.90);

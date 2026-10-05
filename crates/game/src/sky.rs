@@ -130,7 +130,7 @@ fn update_sky(
     let Ok((cam_tf, fog)) = cam.single_mut() else { return };
     tf.translation = cam_tf.translation();
     let h = clock.as_ref().map_or(12.0, |c| c.hour_f());
-    let elev = ((h - 6.0) / 12.0 * std::f32::consts::PI).sin();
+    let elev = crate::clock::sun_elevation(h);
     let day = elev.clamp(0.0, 1.0);
     let dark = night.map_or(0.0, |n| n.0);
     let twilight = (1.0 - (elev.abs() * 3.5).min(1.0)).max(0.0);
