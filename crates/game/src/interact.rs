@@ -727,6 +727,8 @@ pub enum ActionKind {
     OrderPizza,
     /// Phone the adoption agency: a baby (0), toddler (1) or child (2), a girl when `female`.
     Adopt { age: u8, female: bool },
+    /// Phone the estate agent: the household moves to a new home.
+    MoveHouse,
     /// Fix a broken object.
     Repair { target: Entity },
     /// Phone for the repairman.
@@ -1131,7 +1133,12 @@ fn run_actions(
                         ActionKind::GoToWork | ActionKind::Visit { .. } | ActionKind::GoToLot { .. } | ActionKind::GoHomeFromLot => way_out.map(|p| (p, 1)),
                         ActionKind::JoinCareer { target, .. } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
                         ActionKind::Repair { target } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
-                        ActionKind::Invite { .. } | ActionKind::OrderPizza | ActionKind::Adopt { .. } | ActionKind::CallRepairman | ActionKind::ThrowParty => {
+                        ActionKind::Invite { .. }
+                        | ActionKind::OrderPizza
+                        | ActionKind::Adopt { .. }
+                        | ActionKind::MoveHouse
+                        | ActionKind::CallRepairman
+                        | ActionKind::ThrowParty => {
                             action.phase = Phase::Running(0.0);
                             anim.pose = Pose::Talk;
                             continue;
@@ -1280,6 +1287,7 @@ fn run_actions(
                             | ActionKind::EatHere
                             | ActionKind::OrderPizza
                             | ActionKind::Adopt { .. }
+                            | ActionKind::MoveHouse
                             | ActionKind::CallRepairman
                             | ActionKind::ThrowParty => {}
                             ActionKind::Repair { target } => {
@@ -1635,6 +1643,13 @@ fn run_actions(
                                 finished = true;
                                 commands.insert_resource(RepairmanVisit { arrive_at: clock.minutes + 90.0 });
                                 notes.push(format!("{} called the repairman. He'll be by soon (§{REPAIRMAN_PRICE}).", sim.first));
+                            }
+                        }
+                        ActionKind::MoveHouse => {
+                            if elapsed >= 5.0 {
+                                finished = true;
+                                commands.insert_resource(crate::home::MoveRequested { at: clock.minutes });
+                                notes.push(format!("{} called about moving. Choose the household's new home.", sim.first));
                             }
                         }
                         ActionKind::Adopt { age, female } => {

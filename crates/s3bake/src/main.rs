@@ -59,6 +59,24 @@ fn main() {
         }
         return;
     }
+    if args.iter().any(|a| a == "--hair-check") {
+        // --hair-check: baked hair parts with no meshes, no layer, or a missing layer texture.
+        let cas: s3bake::CasBaked = s3bake::read_value(&root.global_dir().join("cas.bin")).expect("cas.bin");
+        let pack = s3bake::PackReader::open(&root.global_dir().join("cas.pack")).expect("cas.pack");
+        let (mut n, mut bad) = (0, 0);
+        for p in cas.parts.iter().filter(|p| p.baked && p.clothing_type == s3formats::sim::CT_HAIR) {
+            n += 1;
+            let meshes: Option<s3bake::CasPartMeshes> = pack.get(&p.key);
+            let tris: usize = meshes.as_ref().map_or(0, |m| m.meshes.iter().map(|x| x.indices.len() / 3).sum());
+            let layer_ok = p.layer.is_some_and(|l| root.tex_path(l).exists());
+            if tris == 0 || !layer_ok {
+                bad += 1;
+                println!("{} ages {:#x}: {} tris, layer {:?} ok {}", p.name, p.age_gender, tris, p.layer, layer_ok);
+            }
+        }
+        println!("{bad} of {n} baked hair parts look broken");
+        return;
+    }
     if args.iter().any(|a| a == "--geostates") {
         // --geostates: catalogue objects whose models have geometry states, with the states.
         let pkgs = s3pkg::install::open_install(&data, |_| true);

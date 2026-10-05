@@ -322,6 +322,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_save.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_load.run_if(in_state(AppState::MainMenu)))
             .add_systems(PreUpdate, ui_flow.after(bevy::ui::UiSystems::Focus))
+            .add_systems(PreUpdate, auto_move_house.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::ChooseLot)))
             .add_systems(OnEnter(AppState::InGame), showroom);
     }
 }
@@ -374,6 +375,29 @@ fn list_cams(time: Res<Time>, mut last: Local<f32>, cams: Query<(Entity, &Camera
     }
     for (e, n, t) in &roots {
         info!("ui root {e:?} size {:?} target {:?}", n.size(), t.map(|t| t.0));
+    }
+}
+
+/// `--do Move:<lot name part>`: moving house, the lot is chosen and Move In pressed.
+fn auto_move_house(
+    args: Res<AutoArgs>,
+    moving: Option<Res<crate::home::Moving>>,
+    world: Res<crate::loading::CurrentWorld>,
+    mut chosen: ResMut<crate::home::ChosenLot>,
+    mut button: Query<&mut Interaction, With<crate::home::MoveInButton>>,
+    time: Res<Time>,
+    mut since: Local<Option<f32>>,
+) {
+    let (Some(_), Some(want)) = (moving, args.action.as_deref().and_then(|a| a.strip_prefix("Move:"))) else { return };
+    let t0 = *since.get_or_insert(time.elapsed_secs());
+    if time.elapsed_secs() - t0 < 2.0 {
+        return;
+    }
+    let want = want.to_ascii_lowercase();
+    let Some(l) = world.data.lot_names.iter().position(|n| n.to_ascii_lowercase().contains(&want)) else { return };
+    chosen.0 = Some(l);
+    if let Ok(mut i) = button.single_mut() {
+        *i = Interaction::Pressed;
     }
 }
 
@@ -1020,6 +1044,14 @@ fn auto_action(
         if let Ok(mut q) = sel.single_mut() {
             *done = true;
             q.push_player(crate::interact::Action::new("Adopt", crate::interact::ActionKind::Adopt { age: a, female: true }, false));
+        }
+        return;
+    }
+    // "Move:<lot name part>": the selected Sim phones to move house (the lot's picked below).
+    if name.starts_with("Move:") {
+        if let Ok(mut q) = sel.single_mut() {
+            *done = true;
+            q.push_player(crate::interact::Action::new("Move", crate::interact::ActionKind::MoveHouse, false));
         }
         return;
     }

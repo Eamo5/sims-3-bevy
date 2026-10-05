@@ -1535,6 +1535,7 @@ fn phone_button(
             .collect();
         options.push(("Adopt a Child ›".to_string(), submenu_kind(pie.submenus.len())));
         pie.submenus.push(("Adopt".to_string(), list));
+        options.push(("Move to a New Home".to_string(), ActionKind::MoveHouse));
     }
     let at = windows.single().ok().map_or(Vec2::new(600.0, 600.0), |w| Vec2::new(w.width() * 0.4, w.height() - 260.0));
     close_pie(&mut commands, &mut pie);

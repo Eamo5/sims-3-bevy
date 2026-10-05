@@ -188,6 +188,10 @@ installation is unreachable.
   alone, a babysitter arrives by car, feeds them, changes them and plays with them, and goes
   home (paid §10 an hour) once someone's back. Visitors don't sleep in the family's beds or
   use its shower.
+- **Moving house**: the phone's "Move to a New Home" saves the game and opens the lot chooser;
+  on the chosen lot the household starts afresh with everything else they had (Sims, skills,
+  jobs, relationships, money, wishes, garden seeds, collection, the town's story), the old
+  home's bought furniture sold back for four-fifths of its price.
 - **Story progression**: the rest of the town lives on. Each morning the world's other Sims
   grow older (elders passing away in time), single grown-ups pair off and couples marry,
   married couples have babies, and grown-ups find jobs and are promoted. The household hears

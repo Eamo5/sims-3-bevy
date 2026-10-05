@@ -24,7 +24,7 @@ impl Plugin for HomePlugin {
                 Update,
                 (button_visuals, lot_buttons, draw_lots, auto_move_in, premade_move_in).run_if(in_state(PlayMode::ChooseLot)),
             )
-            .add_systems(Update, draw_home_lot.run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (draw_home_lot, start_move).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -63,7 +63,7 @@ pub struct LotButton(pub usize);
 #[derive(Component)]
 pub struct MoveInButton;
 #[derive(Resource, Default)]
-struct ChosenLot(Option<usize>);
+pub struct ChosenLot(pub Option<usize>);
 
 fn spawn_lot_chooser(
     mut commands: Commands,
@@ -171,6 +171,43 @@ fn spawn_lot_chooser(
         });
 }
 
+/// Asked (by phone) to move house: the game is saved first.
+#[derive(Resource)]
+pub struct MoveRequested {
+    pub at: f64,
+}
+
+/// Moving house: the game as saved, waiting for the new lot to be chosen.
+#[derive(Resource)]
+pub struct Moving(pub crate::save::SaveGame);
+
+/// A move asked for: save, then choose the new home.
+pub fn start_move(
+    mut commands: Commands,
+    req: Option<Res<MoveRequested>>,
+    last: Option<Res<crate::save::LastSave>>,
+    mut asked: Local<bool>,
+    mut save: MessageWriter<crate::save::SaveRequest>,
+    mut next: ResMut<NextState<PlayMode>>,
+) {
+    let Some(req) = req else {
+        *asked = false;
+        return;
+    };
+    if !*asked {
+        *asked = true;
+        save.write(crate::save::SaveRequest);
+        return;
+    }
+    if let Some(l) = last.filter(|l| l.0.minutes >= req.at) {
+        commands.remove_resource::<MoveRequested>();
+        commands.insert_resource(Moving(l.0.clone()));
+        *asked = false;
+        next.set(PlayMode::ChooseLot);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn lot_buttons(
     q: Query<(&Interaction, &LotButton), Changed<Interaction>>,
     move_in: Query<&Interaction, (Changed<Interaction>, With<MoveInButton>)>,
@@ -179,6 +216,7 @@ fn lot_buttons(
     mut cam: Query<&mut SimsCamera>,
     mut next: ResMut<NextState<PlayMode>>,
     mut commands: Commands,
+    (moving, worlds, catalog, mut app): (Option<Res<Moving>>, Res<crate::data::WorldList>, Res<Catalog>, ResMut<NextState<AppState>>),
 ) {
     for (i, b) in &q {
         if *i == Interaction::Pressed {
@@ -195,6 +233,34 @@ fn lot_buttons(
         if *i == Interaction::Pressed
             && let Some(l) = chosen.0
         {
+            // Moving house: the save, rewritten for the new home, is loaded there.
+            if let Some(m) = &moving {
+                let mut g = m.0.clone();
+                g.lot_index = l;
+                g.lot_name = world.data.lot_names.get(l).cloned().unwrap_or_default();
+                // The old home's furniture is sold (for four-fifths of what it cost), and its
+                // walls, garden and graves stay behind.
+                let refund: i64 = g.bought.iter().filter_map(|o| catalog.by_key(&o.objd)).map(|e| e.price.max(0) as i64 * 4 / 5).sum();
+                g.funds += refund;
+                g.bought.clear();
+                g.removed.clear();
+                g.paint.clear();
+                g.plants.clear();
+                g.graves.clear();
+                let c = lot_center(&world.data.lots[l]);
+                let y = world.data.heightmap.sample(c.x, c.z);
+                for s in g.sims.iter_mut().filter(|s| s.member) {
+                    s.position = [c.x, y, c.z];
+                    s.floor = 1;
+                    s.whereabouts = "home".into();
+                }
+                info!("moving the {} household to lot {l} ({}); furniture sold for §{refund}", g.household, g.lot_name);
+                commands.remove_resource::<Moving>();
+                if crate::save::begin_load(&mut commands, &worlds, g) {
+                    app.set(AppState::Loading);
+                }
+                return;
+            }
             commands.insert_resource(MoveInRequest(l));
             next.set(PlayMode::Live);
         }
@@ -209,8 +275,9 @@ fn auto_move_in(
     mut commands: Commands,
     mut next: ResMut<NextState<PlayMode>>,
     mut done: Local<bool>,
+    loading_save: Option<Res<crate::save::PendingLoad>>,
 ) {
-    if *done || args.world.is_none() || pending.is_some_and(|p| p.premade.is_some()) {
+    if *done || args.world.is_none() || pending.is_some_and(|p| p.premade.is_some()) || loading_save.is_some() {
         return;
     }
     *done = true;
@@ -240,9 +307,11 @@ fn premade_move_in(
     loading_save: Option<Res<crate::save::PendingLoad>>,
     mut commands: Commands,
     mut next: ResMut<NextState<PlayMode>>,
+    moving: Option<Res<Moving>>,
 ) {
     let Some(h) = pending.as_ref().and_then(|p| p.premade.as_ref()) else { return };
-    if loading_save.is_some() {
+    // (Not when they're choosing a new home.)
+    if loading_save.is_some() || moving.is_some() {
         return;
     }
     if let Some(i) = world.data.lots.iter().position(|l| l.id == h.lot_id) {

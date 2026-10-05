@@ -194,6 +194,10 @@ fn retake_rebuilt(mut portraits: ResMut<Portraits>, rebuilt: Query<Entity, Chang
     }
 }
 
+/// The studio's own light.
+#[derive(Component)]
+struct StudioLight;
+
 #[allow(clippy::type_complexity)]
 fn take_portraits(
     mut commands: Commands,
@@ -206,17 +210,18 @@ fn take_portraits(
         (With<Sim>, Without<StudioCamera>, Without<Backdrop>),
     >,
     joints: Query<&GlobalTransform, Without<Sim>>,
-    mut light: Local<Option<Entity>>,
+    lights: Query<Entity, With<StudioLight>>,
     time: Res<Time>,
     (grid, visited): (Option<Res<crate::nav::NavGrid>>, Option<Res<crate::visit::VisitedLot>>),
     mut images: ResMut<Assets<Image>>,
 ) {
     let now = time.elapsed_secs();
     let Ok((cam_e, mut camera, mut cam_tf)) = cam.single_mut() else { return };
-    // The light that only the studio sees.
-    let light_e = *light.get_or_insert_with(|| {
+    // The light that only the studio sees (a new one for each game: it goes with the world).
+    let light_e = lights.iter().next().unwrap_or_else(|| {
         commands
             .spawn((
+                StudioLight,
                 PointLight { intensity: 40_000.0, range: 4.0, shadow_maps_enabled: false, ..default() },
                 Transform::default(),
                 RenderLayers::layer(STUDIO_LAYER),

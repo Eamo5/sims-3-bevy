@@ -274,6 +274,10 @@ pub struct Bought;
 #[derive(Message)]
 pub struct SaveRequest;
 
+/// The game as last saved (moving house starts from it).
+#[derive(Resource, Clone)]
+pub struct LastSave(pub SaveGame);
+
 /// Every save on disk, newest first.
 pub fn list_saves() -> Vec<(PathBuf, SaveGame)> {
     let mut out: Vec<(PathBuf, SaveGame, std::time::SystemTime)> = std::fs::read_dir(saves_dir())
@@ -352,6 +356,7 @@ fn saved_object(o: &GameObject, tf: &Transform) -> SavedObject {
 
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn save_game(
+    mut commands: Commands,
     mut requests: MessageReader<SaveRequest>,
     clock: Res<GameClock>,
     world: Res<CurrentWorld>,
@@ -491,6 +496,7 @@ fn save_game(
         Ok(()) => notes.push(format!("Game saved: the {} household in {}.", game.household, game.world)),
         Err(e) => notes.push(format!("Couldn't save the game: {e}")),
     }
+    commands.insert_resource(LastSave(game));
 }
 
 /// A loaded game skips the lot chooser.
