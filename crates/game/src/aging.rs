@@ -117,7 +117,7 @@ fn daily_aging(
     clock: Res<GameClock>,
     settings: Res<crate::options::Settings>,
     mut last_day: Local<Option<u32>>,
-    mut sims: Query<(Entity, &mut Sim, Option<&mut Aging>, &mut Moodlets, Has<Selected>), With<HouseholdMember>>,
+    mut sims: Query<(Entity, &mut Sim, Option<&mut Aging>, &mut Moodlets, Has<Selected>), (With<HouseholdMember>, Without<crate::death::Dying>)>,
     mut life: MessageWriter<LifeEvent>,
     mut play: MessageWriter<PlaySound>,
     mut notes: ResMut<Notifications>,
@@ -198,21 +198,15 @@ fn daily_aging(
         });
         commands.entity(e).insert(NeedsNewBody);
     }
-    for (e, name, selected) in died {
-        notes.push(format!("{name} has passed away peacefully of old age."));
+    for (e, _name, _selected) in died {
+        // The Grim Reaper comes for them (see `death`).
         play.write(PlaySound::ui("sting_death").with_volume(0.7));
-        commands.entity(e).despawn();
+        commands.entity(e).insert(crate::death::Dying::new());
         for &s in &survivors {
             if let Ok((_, _, _, mut m, _)) = sims.get_mut(s) {
                 m.add(MoodletKind::Heartbroken, clock.minutes);
             }
         }
-        if selected && let Some(&s) = survivors.first() {
-            commands.entity(s).insert(Selected);
-        }
-    }
-    if survivors.is_empty() && sims.iter().count() > 0 && sims.iter().all(|q| q.1.age == Age::Elder) {
-        notes.push("The household has no one left. Their story has come to an end.");
     }
 }
 

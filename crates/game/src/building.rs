@@ -807,6 +807,7 @@ fn building_visibility(
             Without<crate::interact::AtWork>,
             Without<crate::rabbitholes::AtRabbitHole>,
             Without<crate::interact::OffLot>,
+            Without<crate::death::Dying>,
             Without<crate::town::Townie>,
             Without<BuildingPiece>,
             Without<LotImposter>,

@@ -42,6 +42,9 @@ installation is unreachable.
   firms Sims up); needs, moods,
   skills, careers, relationships, autonomy, social interactions; children, teens, adults and
   elders who grow up and grow old (birthdays, new traits, passing away).
+- **Death**: an elder whose time has come collapses and the Grim Reaper appears in his robe
+  with his scythe (the game's own Reaper animations), raises a tombstone where they fell and
+  vanishes; the family is heartbroken and can mourn at the tombstone.
 - **Meals**: cooking serves a group meal on the game's serving platter (on the nearest counter),
   with a serving for everyone at home; Sims grab a plate and sit down at a dining table or
   counter stool to eat (the game's sit-down and bar-stool eating animations, plate on the

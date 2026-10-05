@@ -243,6 +243,10 @@ fn human(age_gender: u32) -> bool {
 
 /// Whether a CAS part is part of the random everyday wardrobe (or is a face/scalp).
 pub fn cas_bake_wanted(name: &str, ct: u32, age_gender: u32, category: u32) -> bool {
+    // The Grim Reaper's robe.
+    if name == "amBodyReaperNPC" {
+        return true;
+    }
     if !human(age_gender) || category & CAT_HIDDEN != 0 || age_gender & (AGE_BABY | AGE_TODDLER | AGE_CHILD | AGE_TEEN | AGE_YOUNG_ADULT | AGE_ADULT | AGE_ELDER) == 0 {
         return false;
     }
@@ -385,7 +389,7 @@ pub fn bake_clips(root: &BakeRoot, pkgs: &PackageSet, progress: Progress) -> Res
 }
 
 /// Bumped when the baked clip layout changes.
-pub const CLIPS_VERSION: u32 = 7;
+pub const CLIPS_VERSION: u32 = 8;
 
 pub fn clips_ready(root: &BakeRoot) -> bool {
     let g = root.global_dir();

@@ -75,6 +75,8 @@ pub enum ObjectKind {
     Meal,
     /// Plates left after eating.
     DirtyDishes,
+    /// A tombstone (the game's urnstone).
+    Tombstone,
     Other,
 }
 
@@ -109,6 +111,8 @@ impl ObjectKind {
             Self::JungleGym
         } else if has("foosball") {
             Self::Foosball
+        } else if has("urnstone") {
+            Self::Tombstone
         } else if has("fridge") {
             Self::Fridge
         } else if has("microwave") {
@@ -180,7 +184,7 @@ impl ObjectKind {
             Self::Table => "Surfaces",
             Self::Light => "Lighting",
             Self::Plant | Self::Decoration => "Decor",
-            Self::Meal | Self::DirtyDishes => "Misc",
+            Self::Meal | Self::DirtyDishes | Self::Tombstone => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
             Self::Other => "Misc",
         }
@@ -288,6 +292,7 @@ static STOVE: [InteractionDef; 1] = [InteractionDef {
     ..def("Cook Dinner", 60.0, [100.0, 0.0, 0.0, 0.0, -5.0, 10.0], Pose::Use)
 }];
 static MEAL: [InteractionDef; 1] = [InteractionDef { special: Special::GrabPlate, ..def("Grab a Plate", 2.0, [9000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) }];
+static TOMBSTONE: [InteractionDef; 1] = [def("Mourn", 20.0, [0.0, 0.0, -2.0, 15.0, 0.0, -10.0], Pose::Stand)];
 static DISHES: [InteractionDef; 1] = [InteractionDef { special: Special::CleanUp, ..def("Clean Up", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 0.0], Pose::Use) }];
 /// How a plate of food fills hunger, per hour, and how long it takes to eat.
 const MEAL_PER_HOUR: f32 = 320.0;
@@ -502,6 +507,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Chair | ObjectKind::Stool => &CHAIR,
         ObjectKind::Meal => &MEAL,
         ObjectKind::DirtyDishes => &DISHES,
+        ObjectKind::Tombstone => &TOMBSTONE,
         ObjectKind::Tv => &TV,
         ObjectKind::Computer => &COMPUTER,
         ObjectKind::Stereo => &STEREO,

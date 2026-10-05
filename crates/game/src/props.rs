@@ -35,6 +35,7 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("toothbrush", "Toothbrush", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("guitar", "musicalInstrumentGuitar", "b__R_carry_slot", [0.0, 0.43762, -0.020687], [0.0, -0.08, 0.17]),
     ("spatula", "Spatula", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("scythe", "DeathScythe", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
 ];
 
 /// The clip-actor suffixes that are props (for the clip bake).

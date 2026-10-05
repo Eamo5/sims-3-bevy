@@ -446,7 +446,7 @@ fn auto_action(
     }
     // (Once everyone has settled in.)
     let t0 = *since.get_or_insert(time.elapsed_secs());
-    if name == "Meal" && time.elapsed_secs() - t0 < 4.0 {
+    if (name == "Meal" || name == "Die") && time.elapsed_secs() - t0 < 4.0 {
         return;
     }
     // "Care:<social>": the selected Sim looks after the household's baby (or toddler with
@@ -484,6 +484,13 @@ fn auto_action(
         return;
     }
     let Ok(mut q) = sel.single_mut() else { return };
+    // "Die": the selected Sim's time has come.
+    if name == "Die" {
+        let me = sel_e.single().unwrap();
+        commands.entity(me).insert(crate::death::Dying::new());
+        *done = true;
+        return;
+    }
     // "Meal": dinner is on the table (served from the nearest stove) for the household.
     if name == "Meal" {
         let me = sel_e.single().unwrap();
