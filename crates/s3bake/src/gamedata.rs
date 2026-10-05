@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 17;
+pub const GAMEDATA_VERSION: u32 = 19;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -209,6 +209,50 @@ pub struct GameDataBaked {
     pub opportunities: Vec<OpportunityInfo>,
     pub plants: Vec<PlantInfo>,
     pub roofs: Vec<RoofPattern>,
+    pub collectibles: Vec<CollectibleInfo>,
+    pub spawners: Vec<SpawnerInfo>,
+}
+
+/// What kind of find a collectible is.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum CollectKind {
+    Gem,
+    Metal,
+    SpaceRock,
+    Butterfly,
+    Beetle,
+    Fish,
+}
+
+/// Something to find about town: a gem, metal, space rock, insect or fish (base game rows of the
+/// `RockGemMetal`, `Insects` and `Fishing` tables).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CollectibleInfo {
+    /// The tables' key ("Ruby", "ButterflyMoth", "Minnow").
+    pub key: String,
+    pub name: String,
+    pub kind: CollectKind,
+    pub min_price: i32,
+    pub max_price: i32,
+    pub rarity: String,
+    /// The skill level needed to find it (fishing for fish).
+    pub level: u8,
+    /// The catalogue object showing it (by instance name): "Gem", "Metal", "MeteorMedium",
+    /// "fishMinnow"...
+    pub model: String,
+}
+
+/// What a spawner (placed on lots by the world builders) turns up, by its script class.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SpawnerInfo {
+    /// The spawner's class ("RockGemMetalSpawner11", "InsectSpawner3", "FishingSpawner6").
+    pub class: String,
+    /// Collectible keys with relative weights ("None" = nothing).
+    pub items: Vec<(String, f32)>,
+    /// How many can be lying about at once.
+    pub capacity: u8,
+    /// Hours between finds.
+    pub hours: (f32, f32),
 }
 
 /// A roof pattern from the build catalogue.
@@ -616,6 +660,133 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         }
         out.roofs.sort_by(|a, b| a.name.cmp(&b.name));
         out.roofs.dedup_by(|a, b| a.texture == b.texture);
+    }
+
+    // Collectibles and the spawners that turn them up. (Base game: rows without a CodeVersion.)
+    let base = |f: &HashMap<String, String>| get(f, "CodeVersion").is_empty() && get(f, "RequiredWorld").is_empty();
+    let pretty = |key: &str| {
+        let mut out = String::new();
+        for (i, c) in key.chars().enumerate() {
+            if i > 0 && c.is_uppercase() {
+                out.push(' ');
+            }
+            out.push(c);
+        }
+        out
+    };
+    let list = |s: &str| -> Vec<String> { s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect() };
+    let weights = |items: &str, probs: &str| -> Vec<(String, f32)> {
+        let w: Vec<f32> = list(probs).iter().map(|p| p.parse().unwrap_or(0.0)).collect();
+        list(items).into_iter().enumerate().map(|(i, k)| (k, w.get(i).copied().unwrap_or(1.0))).collect()
+    };
+    let short = |class: &str| class.rsplit('.').next().unwrap_or(class).to_string();
+    if let Some(x) = xml("RockGemMetal") {
+        for (row, kind, sheet) in [("Gems", CollectKind::Gem, "RockGemMetal/Gems"), ("Metals", CollectKind::Metal, "RockGemMetal/Metals"), ("Rocks", CollectKind::SpaceRock, "RockGemMetal/Rocks")] {
+            for f in records(&x, row) {
+                let label = get(&f, "Name");
+                // (Spawners name rocks by their Hex: "SpaceRockSmall".)
+                let key = Some(get(&f, "Hex")).filter(|h| !h.is_empty() && h != "0").unwrap_or_else(|| label.clone());
+                if label.is_empty() || !base(&f) {
+                    continue;
+                }
+                let name = text(sheet, &label);
+                let model = match kind {
+                    CollectKind::Gem => "Gem".to_string(),
+                    CollectKind::Metal => "Metal".to_string(),
+                    _ => if key.contains("Large") { "MeteorLarge" } else { "MeteorMedium" }.to_string(),
+                };
+                out.collectibles.push(CollectibleInfo {
+                    name: if name.is_empty() { pretty(&key) } else { name },
+                    key,
+                    kind,
+                    min_price: num(&f, "MinPrice") as i32,
+                    max_price: num(&f, "MaxPrice") as i32,
+                    rarity: get(&f, "Rarity"),
+                    level: num(&f, "MinHuntSkillLevel") as u8,
+                    model,
+                });
+            }
+        }
+        for f in records(&x, "Spawners") {
+            let class = short(&get(&f, "SpawnerClassName"));
+            if class.is_empty() {
+                continue;
+            }
+            out.spawners.push(SpawnerInfo {
+                class,
+                items: weights(&get(&f, "Spawns"), &get(&f, "Probability")),
+                capacity: num(&f, "MaxSpawnCapacity").max(1.0) as u8,
+                hours: (num(&f, "SpawnMinTime"), num(&f, "SpawnMaxTime")),
+            });
+        }
+    }
+    if let Some(x) = xml("Insects") {
+        for (row, kind, sheet) in [("Butterflies", CollectKind::Butterfly, "Insects/Butterflies"), ("Beetles", CollectKind::Beetle, "Insects/Beetles")] {
+            for f in records(&x, row) {
+                let key = get(&f, "Type");
+                let label = get(&f, "LocalizedName");
+                if key.is_empty() || label.is_empty() || !base(&f) {
+                    continue;
+                }
+                let name = text(sheet, &label);
+                let noun = if kind == CollectKind::Butterfly { "Butterfly" } else { "Beetle" };
+                let name = if name.is_empty() { format!("{} {noun}", pretty(&label)) } else { name };
+                let value = num(&f, "Value") as i32;
+                out.collectibles.push(CollectibleInfo {
+                    key,
+                    name,
+                    kind,
+                    min_price: value,
+                    max_price: value,
+                    rarity: get(&f, "Rarity"),
+                    level: 0,
+                    model: get(&f, "ModelMaterial").split(':').next().unwrap_or("").to_string(),
+                });
+            }
+        }
+        for f in records(&x, "Spawners") {
+            let class = short(&get(&f, "SpawnerClassName"));
+            if class.is_empty() {
+                continue;
+            }
+            out.spawners.push(SpawnerInfo {
+                class,
+                items: weights(&get(&f, "Spawns"), &get(&f, "Probability")),
+                capacity: num(&f, "MaxSpawnCapacity").max(1.0) as u8,
+                hours: (num(&f, "MinSpawnFrequency"), num(&f, "MaxSpawnFrequency")),
+            });
+        }
+    }
+    if let Some(x) = xml("Fishing") {
+        for f in records(&x, "Fish") {
+            let key = get(&f, "Name");
+            if key.is_empty() || !base(&f) {
+                continue;
+            }
+            let name = text("Fishing/Fish", &key);
+            out.collectibles.push(CollectibleInfo {
+                name: if name.is_empty() { pretty(&key) } else { name },
+                min_price: num(&f, "MinPrice") as i32,
+                max_price: num(&f, "MaxPrice") as i32,
+                rarity: get(&f, "Rarity"),
+                level: num(&f, "Level") as u8,
+                model: get(&f, "Model_Name"),
+                kind: CollectKind::Fish,
+                key,
+            });
+        }
+        for f in records(&x, "Spawner") {
+            let class = short(&get(&f, "SpawnerClassName"));
+            if class.is_empty() {
+                continue;
+            }
+            out.spawners.push(SpawnerInfo {
+                class,
+                items: weights(&get(&f, "ActiveFish"), &get(&f, "ActiveProbability")),
+                capacity: num(&f, "ActiveMaxFish").max(1.0) as u8,
+                hours: (0.25, 1.0),
+            });
+        }
     }
 
     // Garden plants (the base game's everyday ones) and their produce.

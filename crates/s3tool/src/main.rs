@@ -11,6 +11,39 @@ fn main() {
         eprintln!("usage: s3tool <types|list|dump|hex|dumpall> <package> [...]");
         return;
     }
+    if args[1] == "xmlnames" {
+        // xmlnames <package> [filter] [outdir]: the named XML tables (0x0333406C) of a package.
+        let pkg = Package::open(&args[2]).expect("open package");
+        let mut names: std::collections::HashMap<u64, String> = std::collections::HashMap::new();
+        for e in pkg.entries.iter().filter(|e| e.key.t == 0x0166038C) {
+            if let Ok(d) = pkg.read(e) {
+                names.extend(s3formats::audio::parse_name_map(&d));
+            }
+        }
+        let filter = args.get(3).map(|s| s.to_ascii_lowercase()).unwrap_or_default();
+        let mut found: Vec<(String, usize)> = pkg
+            .entries
+            .iter()
+            .filter(|e| e.key.t == 0x0333406C)
+            .filter_map(|e| names.get(&e.key.i).map(|n| (n.clone(), e.mem_size as usize)))
+            .filter(|(n, _)| n.to_ascii_lowercase().contains(&filter))
+            .collect();
+        found.sort();
+        for (n, size) in &found {
+            println!("{n} ({size} bytes)");
+        }
+        if let Some(dir) = args.get(4) {
+            std::fs::create_dir_all(dir).ok();
+            for e in pkg.entries.iter().filter(|e| e.key.t == 0x0333406C) {
+                if let Some(n) = names.get(&e.key.i).filter(|n| n.to_ascii_lowercase().contains(&filter))
+                    && let Ok(d) = pkg.read(e)
+                {
+                    std::fs::write(std::path::Path::new(dir).join(format!("{n}.xml")), d).ok();
+                }
+            }
+        }
+        return;
+    }
     if args[1] == "roofs" {
         // roofs <root>: the build catalogue's roof patterns (0xF1EDBD86) and their textures.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);

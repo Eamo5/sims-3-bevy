@@ -329,6 +329,25 @@ fn spawn_hud(mut commands: Commands) {
                 p.spawn((
                     Button,
                     HudButton,
+                    crate::collecting::JournalButton,
+                    crate::icons::Tooltip("Collection Journal (J)".into()),
+                    Node {
+                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                        height: Val::Px(34.0),
+                        padding: UiRect::horizontal(Val::Px(8.0)),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        margin: UiRect::right(Val::Px(2.0)),
+                        ..default()
+                    },
+                    BackgroundColor(BTN_NORMAL),
+                ))
+                .with_children(|b| {
+                    b.spawn(text("Collection", 15.0, Color::WHITE));
+                });
+                p.spawn((
+                    Button,
+                    HudButton,
                     SaveButton,
                     Node {
                         border_radius: BorderRadius::all(Val::Px(8.0)),

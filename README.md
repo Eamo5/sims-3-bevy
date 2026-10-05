@@ -107,6 +107,11 @@ installation is unreachable.
   and floors, its walls come down as the camera moves in, Sims on it keep to it in their own
   choices, townies turn up during the day to use the place too (and to meet), and "Go Home"
   drives them back while the household carries on at home.
+- **Collecting and fishing**: the world builders' spawners leave gems, metals and space rocks
+  about the community lots (from the game's own tables, with their odds and prices); Sims
+  crouch to collect them, and fish at the lots' fishing spots with the game's casting and
+  reeling animations, rod in hand, catching what each spot holds by Fishing skill. Finds go in
+  a Collection Journal (J) showing everything found and still to find, and sell for money.
 - **Building**: wall and room tools that draw along the lot's grid (straight or diagonal, with
   a live outline and price), the sledgehammer, floor tiles and staircases up to a new floor
   (stairwell opened, landing floored, Sims climb them), and hip roofs over the rooms in any

@@ -39,6 +39,8 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("newspaperReading", "NewspaperReading", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("bills", "billsSingle", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("wateringCan", "WateringCan", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("fishingPole", "FishingPole", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("fishingRod", "FishingPole", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
 ];
 
 /// The clip-actor suffixes that are props (for the clip bake).

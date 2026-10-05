@@ -247,6 +247,12 @@ fn main() {
         for p in walls.iter().take(5).chain(floors.iter().take(5)) {
             println!("pattern {:?} §{} floor {} tex {:?}", p.name, p.price, p.floor, p.texture);
         }
+        for c in &g.collectibles {
+            println!("collectible {:?} {} {:?} §{}-{} {} level {} model {}", c.kind, c.key, c.name, c.min_price, c.max_price, c.rarity, c.level, c.model);
+        }
+        for s in g.spawners.iter().take(12) {
+            println!("spawner {} {:?} cap {} hours {:?}", s.class, s.items, s.capacity, s.hours);
+        }
         for r in &g.roofs {
             println!("roof {:?} tex {:?} tile {:?}", r.name, r.texture, r.tile);
         }

@@ -131,6 +131,9 @@ pub struct SaveGame {
     pub seeds: Vec<(String, u32)>,
     #[serde(default)]
     pub plants: Vec<crate::gardening::SavedPlant>,
+    /// The household's collection journal.
+    #[serde(default)]
+    pub collection: crate::collecting::Collection,
 }
 
 impl SaveGame {
@@ -262,11 +265,12 @@ fn save_game(
     clock: Res<GameClock>,
     world: Res<CurrentWorld>,
     household: Option<Res<Household>>,
-    (removed, paint, garden, plants): (
+    (removed, paint, garden, plants, collection): (
         Res<RemovedLotObjects>,
         Option<Res<crate::building::LotPaint>>,
         Option<Res<crate::gardening::Garden>>,
         Query<(&crate::gardening::GrowingPlant, &Transform)>,
+        Res<crate::collecting::Collection>,
     ),
     sims: Query<
         (
@@ -368,6 +372,7 @@ fn save_game(
             _ => Vec::new(),
         },
         plants: ui.as_deref().map(|u| crate::gardening::saved_plants(&plants, &u.data)).unwrap_or_default(),
+        collection: collection.clone(),
     };
     let dir = saves_dir();
     let _ = std::fs::create_dir_all(&dir);
@@ -512,6 +517,7 @@ fn apply_loaded_game(
     }
     commands.insert_resource(crate::building::LotPaint(game.paint.clone()));
     commands.insert_resource(crate::gardening::PendingPlants(game.plants.clone(), game.seeds.clone()));
+    commands.insert_resource(game.collection.clone());
     for b in &game.bought {
         let rot = Quat::from_array(b.rotation);
         if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, b.objd, Vec3::from(b.position), rot) {

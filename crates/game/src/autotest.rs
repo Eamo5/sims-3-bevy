@@ -40,6 +40,9 @@ pub struct AutoArgs {
     pub follow: bool,
     /// `--home-after <seconds>`: the selected Sim, out on a community lot, heads home.
     pub home_after: Option<f32>,
+    /// `--use <ObjectKind>`: once out on a lot (or at once, at home), the selected Sim uses the
+    /// nearest object of that kind there.
+    pub use_kind: Option<String>,
     /// `--storey`: after `--build`, stairs up inside the room, a floor and room above, and the
     /// selected Sim sent upstairs.
     pub storey: bool,
@@ -99,6 +102,7 @@ impl AutoArgs {
                 "--save-at" => a.save_at = next.and_then(|s| s.parse().ok()),
                 "--load" => a.load = next.and_then(|s| s.parse().ok()),
                 "--home-after" => a.home_after = next.and_then(|s| s.parse().ok()),
+                "--use" => a.use_kind = next,
                 "--showroom" => {
                     a.showroom = next.and_then(|s| {
                         let mut it = s.split(',').filter_map(|x| x.parse().ok());
@@ -166,15 +170,54 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_balloon.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(
                 Update,
-                (|args: Res<AutoArgs>, mut p: ResMut<crate::relations::RelationsPanel>, mut done: Local<bool>| {
+                (|args: Res<AutoArgs>, mut p: ResMut<crate::relations::RelationsPanel>, mut j: ResMut<crate::collecting::JournalPanel>, mut done: Local<bool>, time: Res<Time>| {
                     if args.relations && !*done {
                         *done = true;
                         p.open = true;
+                    }
+                    // JOURNAL=<seconds>: the collection journal opens then.
+                    if let Some(t) = std::env::var("JOURNAL").ok().and_then(|t| t.parse::<f32>().ok())
+                        && time.elapsed_secs() > t
+                        && !j.open
+                    {
+                        j.open = true;
                     }
                 })
                 .run_if(in_state(crate::PlayMode::Live)),
             )
             .add_systems(Update, auto_view_level.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(
+                Update,
+                (|args: Res<AutoArgs>,
+                  mut done: Local<bool>,
+                  time: Res<Time>,
+                  mut sel: Query<(&mut crate::interact::ActionQueue, &Transform, Option<&crate::visit::OnLot>), With<crate::sim::Selected>>,
+                  objects: Query<(Entity, &crate::interact::GameObject, &Transform, Option<&crate::visit::LotObject>)>| {
+                    let Some(want) = &args.use_kind else { return };
+                    if *done || time.elapsed_secs() < 8.0 {
+                        return;
+                    }
+                    let Ok((mut q, tf, on)) = sel.single_mut() else { return };
+                    if args.action.as_deref().is_some_and(|a| a.starts_with("Visit:")) && on.is_none() {
+                        return;
+                    }
+                    let lot = on.map(|l| l.0);
+                    let want = want.to_ascii_lowercase();
+                    let best = objects
+                        .iter()
+                        .filter(|(_, o, _, l)| format!("{:?}", o.kind).to_ascii_lowercase() == want && l.map(|l| l.0) == lot)
+                        .min_by(|a, b| a.2.translation.distance(tf.translation).total_cmp(&b.2.translation.distance(tf.translation)));
+                    if let Some((e, o, ..)) = best
+                        && let Some(d) = crate::interact::interactions_for(o.kind).first()
+                    {
+                        *done = true;
+                        info!("use test: {} on the {} ({e:?})", d.name, o.name);
+                        q.0.clear();
+                        q.push_player(crate::interact::Action::new(d.name, crate::interact::ActionKind::Object { target: e, def: 0 }, false));
+                    }
+                })
+                .run_if(in_state(crate::PlayMode::Live)),
+            )
             .add_systems(
                 Update,
                 (|args: Res<AutoArgs>,
@@ -212,6 +255,9 @@ impl Plugin for AutoTestPlugin {
                     *last = time.elapsed_secs();
                     if let (Ok((tf, q, on)), Ok(mut c)) = (sel.single(), cam.single_mut()) {
                         c.look_at(tf.translation);
+                        if let Some(d) = std::env::var("FOLLOW_DIST").ok().and_then(|d| d.parse::<f32>().ok()) {
+                            c.distance = d;
+                        }
                         info!(
                             "follow: at {:.1},{:.1},{:.1} on lot {:?} doing {:?}",
                             tf.translation.x,
