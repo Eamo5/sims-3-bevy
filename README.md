@@ -109,7 +109,8 @@ installation is unreachable.
   drives them back while the household carries on at home.
 - **Traffic**: the game's cars (sedans, hatchbacks, pickups, vans, sports cars) drive the
   town's roads around the camera, keeping right along the world's own road graph and turning
-  at its intersections.
+  at its intersections; the school bus, the carpool and taxis pull up at the curb to take Sims
+  away and bring them back.
 - **Collecting and fishing**: the world builders' spawners leave gems, metals and space rocks
   about the community lots (from the game's own tables, with their odds and prices); Sims
   crouch to collect them, and fish at the lots' fishing spots with the game's casting and
