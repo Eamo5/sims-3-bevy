@@ -32,6 +32,9 @@ pub struct AutoArgs {
     pub place: Option<String>,
     /// `--paint`: repaper the house's indoor walls and recover its ground floor.
     pub paint: bool,
+    /// `--balloon <kind>:<icon>[:<axis>]`: keep showing this balloon over the selected Sim
+    /// (kind thought / speech / dream; axis 1 like, 2 dislike).
+    pub balloon: Option<String>,
     /// `--family <name>`: play this town family.
     pub family: Option<String>,
     /// `--select <first name>`: select this household member.
@@ -64,6 +67,7 @@ impl AutoArgs {
                 "--lot" => a.lot = next,
                 "--do" => a.action = next,
                 "--place" => a.place = next,
+                "--balloon" => a.balloon = next,
                 "--family" => a.family = next,
                 "--select" => a.select = next,
                 "--ui-flow" => a.ui_flow = next,
@@ -120,6 +124,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_place.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_paint.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, auto_balloon.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_view_level.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_speed.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_save.run_if(in_state(crate::PlayMode::Live)))
@@ -303,6 +308,25 @@ fn portrait_cam(
     }
 }
 
+/// `--balloon`: the balloon again every three seconds.
+fn auto_balloon(args: Res<AutoArgs>, time: Res<Time>, mut next: Local<f32>, sel: Query<Entity, With<crate::sim::Selected>>, mut commands: Commands) {
+    let Some(spec) = &args.balloon else { return };
+    if time.elapsed_secs() < *next {
+        return;
+    }
+    let Ok(e) = sel.single() else { return };
+    *next = time.elapsed_secs() + 3.0;
+    let mut parts = spec.split(':');
+    let kind = match parts.next() {
+        Some("speech") => crate::balloons::BalloonKind::Speech,
+        Some("dream") => crate::balloons::BalloonKind::Dream,
+        _ => crate::balloons::BalloonKind::Thought,
+    };
+    let icon = parts.next().unwrap_or("balloon_question").to_string();
+    let axis = parts.next().and_then(|a| a.parse().ok()).unwrap_or(0);
+    commands.entity(e).insert(crate::balloons::BalloonRequest { kind, icon, axis });
+}
+
 /// `--paint`: once the house is in, every indoor wall side gets the dearest wallpaper and the
 /// ground floor the dearest flooring, through the same repainting the build tool uses.
 #[allow(clippy::too_many_arguments)]
@@ -426,6 +450,25 @@ fn auto_action(
         return;
     }
     let Ok(mut q) = sel.single_mut() else { return };
+    // "Social:<name>": the selected Sim does this social three times with another grown-up of
+    // the household (or a visitor), as friends.
+    if let Some(social) = name.strip_prefix("Social:") {
+        let me = sel_e.single().unwrap();
+        let target = members.iter().find(|(e, s)| *e != me && s.age.is_grown() && s.age != crate::sim::Age::Child).map(|(e, _)| e).or_else(|| visitors.iter().next());
+        let (Some(target), Some(si)) = (target, crate::social::social_index(social)) else { return };
+        for (a, b) in [(me, target), (target, me)] {
+            if let Ok(mut rels) = rels_q.get_mut(a) {
+                let r = rels.entry(b);
+                r.friendship = r.friendship.max(60.0);
+            }
+        }
+        q.0.clear();
+        for _ in 0..3 {
+            q.push_player(crate::interact::Action::new(social, crate::interact::ActionKind::Social { target, social: si }, false));
+        }
+        *done = true;
+        return;
+    }
     // "Try for Baby": with a household member (or visitor) of the other sex.
     if name == "Try for Baby" {
         let me = sel_e.single().unwrap();

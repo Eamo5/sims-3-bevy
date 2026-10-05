@@ -41,6 +41,10 @@ installation is unreachable.
   firms Sims up); needs, moods,
   skills, careers, relationships, autonomy, social interactions; children, teens, adults and
   elders who grow up and grow old (birthdays, new traits, passing away).
+- **Thought and speech balloons**: the game's own balloon art and balloon table. Sims think about
+  needs running low, new moodlets and their traits, dream while asleep, and take turns showing
+  what they're talking about (small talk about the weather, their work or interests; insults,
+  compliments and flirts with the game's like and dislike marks).
 - **Families grow**: couples can try for a baby; pregnancy brings morning sickness, then a
   baby in a crib (the game's swaddled baby model). Grown-ups feed, change, cuddle and settle
   babies (cradled in their arms) and pick up, read to and put toddlers to bed; toddlers toddle

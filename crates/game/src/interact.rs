@@ -351,9 +351,10 @@ static CHESS: [InteractionDef; 1] =
     [InteractionDef { skill: Some("Logic"), ..def("Play Chess", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 40.0], Pose::Use) }];
 
 /// The animation played while performing an interaction: start clip, then loop variants.
-pub fn interaction_clip(name: &str) -> Option<crate::anim::ActionClip> {
+pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::ActionClip> {
     use crate::anim::ActionClip as A;
     Some(match name {
+        "Nap" if kind == ObjectKind::Sofa => A::new(Some("a2o_sofa_sit_trans_nap_x"), &["a2o_sofa_nap_loop1_x"]),
         "Have Quick Meal" | "Microwave Dinner" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_eat_stand_fork_neat", "a2o_eat_stand_hand_neat"]),
         "Grab a Snack" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_eat_stand_hand_neat"]),
         "Cook Dinner" => A::new(
@@ -364,7 +365,8 @@ pub fn interaction_clip(name: &str) -> Option<crate::anim::ActionClip> {
         "Take Shower" => A::new(Some("a2o_shower_takeShower_getIn_x"), &["a2o_shower_takeShower_loop"]),
         "Take Bath" => A::new(None, &["a2o_bathtub_relax_loop"]),
         "Wash Hands" => A::new(Some("a2o_sink_washhands_start_x"), &["a2o_sink_washhands_scrubHands_x", "a2o_sink_washhands_rinseHands_x"]),
-        "Sleep" => A::new(Some("a2o_bed_getIn_made_x"), &["a2o_bed_sleep_back"]),
+        // (Only the plain loop: the toss-and-turn ones are authored from beside the bed.)
+        "Sleep" => A::new(Some("a2o_bed_getIn_made_x"), &["a2o_bed_sleep_back_loop_x"]),
         "Nap" => A::new(Some("a2o_bed_nap_start_x"), &["a2o_bed_nap_loop_breathe_x"]),
         "Relax" => A::new(Some("a2o_bed_relax_getin_start_x"), &["a2o_bed_relax_loop"]),
         "Sit" => A::new(None, &["a2o_chairLiving_sit_breathe_loop_x", "a2o_chairLiving_sit_crossedLeg_front_loop_x"]),
@@ -791,8 +793,11 @@ fn run_actions(
                             }
                         }
                         None => {
-                            if dest.is_some() && !action.autonomous {
-                                notes.push(format!("{} can't find a way to get there.", sim.first));
+                            if dest.is_some() {
+                                commands.entity(me).insert(crate::balloons::BalloonRequest::thought("t_balloon_routefail"));
+                                if !action.autonomous {
+                                    notes.push(format!("{} can't find a way to get there.", sim.first));
+                                }
                             }
                             finished = true;
                         }
@@ -809,14 +814,25 @@ fn run_actions(
                                     let d = &interactions_for(obj.kind)[*def];
                                     anim.pose = d.pose;
                                     *decay = DecayScale(d.decay);
-                                    if let Some(c) = interaction_clip(d.name) {
+                                    if let Some(c) = interaction_clip(d.name, obj.kind) {
                                         commands.entity(me).insert(c);
                                     }
                                     let face = otf.rotation * Quat::from_rotation_y(std::f32::consts::PI);
                                     if d.on_object {
-                                        let c = obj.world_center(otf);
+                                        let bed = matches!(obj.kind, ObjectKind::BedSingle | ObjectKind::BedDouble);
+                                        // In a double bed, one side of it.
+                                        let side = if bed && obj.half.x > 0.8 { -obj.half.x * 0.5 } else { 0.0 };
+                                        let c = otf.transform_point(Vec3::new(obj.center.x + side, 0.0, obj.center.y));
                                         tf.translation = Vec3::new(c.x, otf.translation.y, c.z);
                                         tf.rotation = otf.rotation;
+                                        if bed && d.name == "Nap" {
+                                            // The nap clips are played from beside the bed, facing
+                                            // across it (the Sim lies down 1.09 m ahead, head to
+                                            // the left).
+                                            let p = otf.transform_point(Vec3::new(obj.center.x + side - 1.09, 0.0, obj.center.y));
+                                            tf.translation = Vec3::new(p.x, otf.translation.y, p.z);
+                                            tf.rotation = otf.rotation * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+                                        }
                                         anim.seat_height = obj.seat_height();
                                     } else {
                                         tf.rotation = face;

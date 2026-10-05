@@ -182,6 +182,11 @@ fn main() {
         // The baked moodlets, traits and skills.
         let g = s3bake::load_gamedata(&s3bake::default_root()).expect("no gameplay data");
         println!("{} buffs, {} traits, {} skills", g.buffs.len(), g.traits.len(), g.skills.len());
+        let b = &g.balloons;
+        println!("balloons: {} idle, {} social, {} topic, {} random lists", b.idle.len(), b.social.len(), b.topic.len(), b.random.len());
+        for k in ["MotiveHunger", "Chat", "Weather"] {
+            println!("balloon list {k}: {:?}", b.list(k).map(|l| l.iter().map(|e| if e.icon.is_empty() { &e.refkey } else { &e.icon }).collect::<Vec<_>>()));
+        }
         for b in &g.buffs {
             println!("buff {} = {:?} [{}] {} {} {}m: {}", b.hex, b.name, b.icon, b.axis, b.value, b.timeout, b.desc);
         }

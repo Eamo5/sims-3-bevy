@@ -12,10 +12,12 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 5;
+pub const GAMEDATA_VERSION: u32 = 6;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
+/// Textures (balloon icons are 64 px DDS pictures, instance = fnv64 of the lowercase name).
+const T_DDS: u32 = 0x00B2D882;
 const T_NMAP: u32 = 0x0166038C;
 
 /// A moodlet: the game's buff table row.
@@ -93,6 +95,34 @@ pub struct PatternInfo {
     pub texture: crate::types::Key,
 }
 
+/// One choice in a balloon list: an icon, or another list to draw from (`refkey`), or one of the
+/// game's special pickers (an icon name like "GetSpeechBalloonImageForChat").
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct BalloonEntry {
+    pub icon: String,
+    pub refkey: String,
+    /// 0 neutral, 1 like (a smile badge), 2 dislike (crossed out).
+    pub axis: u8,
+    pub weight: f32,
+}
+
+/// The game's balloon table (`Balloons`): what Sims think and say, keyed by need, moodlet or
+/// trait (idle thoughts), social interaction, conversation topic, and random sets.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct BalloonTable {
+    pub idle: HashMap<String, Vec<BalloonEntry>>,
+    pub social: HashMap<String, Vec<BalloonEntry>>,
+    pub topic: HashMap<String, Vec<BalloonEntry>>,
+    pub random: HashMap<String, Vec<BalloonEntry>>,
+}
+
+impl BalloonTable {
+    /// A list by key from any of the tables (the order references are looked up in).
+    pub fn list(&self, key: &str) -> Option<&Vec<BalloonEntry>> {
+        self.idle.get(key).or_else(|| self.topic.get(key)).or_else(|| self.random.get(key)).or_else(|| self.social.get(key))
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct GameDataBaked {
     pub version: u32,
@@ -101,6 +131,7 @@ pub struct GameDataBaked {
     pub skills: Vec<SkillInfo>,
     pub careers: Vec<CareerInfo>,
     pub patterns: Vec<PatternInfo>,
+    pub balloons: BalloonTable,
 }
 
 impl GameDataBaked {
@@ -367,6 +398,35 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         out.patterns.dedup_by(|a, b| a.floor == b.floor && a.name == b.name);
     }
 
+    // Balloons: each table's rows in order; a row without a key continues the list above it.
+    if let Some(b) = xml("Balloons") {
+        for (row, key_tag, table) in [
+            ("Idle", "IdleKey", &mut out.balloons.idle),
+            ("Social", "ActionKey", &mut out.balloons.social),
+            ("Topic", "Key", &mut out.balloons.topic),
+            ("Random", "Key", &mut out.balloons.random),
+        ] {
+            let mut current = String::new();
+            for f in records(&b, row) {
+                let key = get(&f, key_tag);
+                if !key.is_empty() {
+                    current = key;
+                }
+                let (icon, refkey) = (get(&f, "BalloonName"), get(&f, "ReferencedKey"));
+                if current.is_empty() || (icon.is_empty() && refkey.is_empty()) {
+                    continue;
+                }
+                let axis = match f.get("BalloonAxis").map(String::as_str) {
+                    Some("kLike") => 1,
+                    Some("kDislike") => 2,
+                    _ => 0,
+                };
+                let weight = f.get("Weight").and_then(|w| w.parse().ok()).unwrap_or(1.0);
+                table.entry(current.clone()).or_default().push(BalloonEntry { icon, refkey, axis, weight });
+            }
+        }
+    }
+
     // Icons: everything these tables name, plus interface pieces used directly.
     progress("Converting: interface icons…");
     let mut wanted: BTreeSet<String> = BTreeSet::new();
@@ -396,10 +456,70 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             n += 1;
         }
     }
+    // Balloon pictures are textures: decoded and stored as PNG beside the interface icons.
+    let mut balloon_icons: BTreeSet<String> = BALLOON_FRAMES.iter().map(|s| s.to_string()).collect();
+    for t in [&out.balloons.idle, &out.balloons.social, &out.balloons.topic, &out.balloons.random] {
+        for e in t.values().flatten() {
+            balloon_icons.insert(e.icon.clone());
+        }
+    }
+    balloon_icons.retain(|n| !n.is_empty() && !wanted.contains(n));
+    let mut have: BTreeSet<String> = BTreeSet::new();
+    for name in &balloon_icons {
+        let Some(dds) = pkgs.read_ti(T_DDS, s3pkg::fnv64(&name.to_ascii_lowercase())) else { continue };
+        let Some(img) = s3formats::dds::decode(&dds, 128) else { continue };
+        pack.add(icon_key(name), &encode_png(&img)).map_err(|e| e.to_string())?;
+        have.insert(name.clone());
+        n += 1;
+    }
+    // Lists keep only the icons there are pictures for (and the special pickers).
+    let known = |e: &BalloonEntry| !e.refkey.is_empty() || have.contains(&e.icon) || wanted.contains(&e.icon) || SPECIAL_PICKERS.contains(&e.icon.as_str());
+    for t in [&mut out.balloons.idle, &mut out.balloons.social, &mut out.balloons.topic, &mut out.balloons.random] {
+        for list in t.values_mut() {
+            list.retain(known);
+        }
+        t.retain(|_, l| !l.is_empty());
+    }
     pack.finish().map_err(|e| e.to_string())?;
     write_value(&g.join("gamedata.bin"), &out).map_err(|e| e.to_string())?;
     Ok(n)
 }
+
+/// Encodes RGBA8 as PNG.
+fn encode_png(img: &s3formats::dds::Rgba) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut enc = png::Encoder::new(&mut out, img.width as u32, img.height as u32);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    if let Ok(mut w) = enc.write_header() {
+        let _ = w.write_image_data(&img.data);
+    }
+    out
+}
+
+/// The balloons themselves: thought clouds (the second for dreams) with the little bubbles that
+/// lead up to them, speech balloons, and the like / dislike marks.
+pub const BALLOON_FRAMES: &[&str] = &[
+    "thought_balloon",
+    "thought_balloon2",
+    "thought_balloonLead",
+    "speech_balloon",
+    "speech_balloon2",
+    "sb_like",
+    "sb_dislike",
+    "t_balloon_routefail",
+];
+
+/// Balloon "icons" that are really the game's pickers, resolved while playing.
+pub const SPECIAL_PICKERS: &[&str] = &[
+    "GetSpeechBalloonImageForChat",
+    "Thumbnail Target",
+    "Thumbnail Actor",
+    "Actor Career Topic",
+    "Target Career Topic",
+    "GetSpeechBalloonIconForCareer",
+    "GetSpeechBalloonIconForTargetCareer",
+];
 
 /// Interface pieces the game draws directly (not named by the tables).
 const EXTRA_ICONS: &[&str] = &[
