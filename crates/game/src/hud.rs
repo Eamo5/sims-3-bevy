@@ -442,7 +442,17 @@ fn close_pie(commands: &mut Commands, pie: &mut PieMenu) {
     pie.options.clear();
 }
 
-fn open_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, actor: Entity, options: Vec<(String, ActionKind)>) {
+/// A rabbit-hole activity with what it costs (or pays).
+pub fn activity_label(a: &crate::rabbitholes::Activity) -> String {
+    let cost = match a.cost {
+        c if c > 0 => format!(" (§{c})"),
+        c if c < 0 => format!(" (earn §{})", -c),
+        _ => String::new(),
+    };
+    format!("{}{cost}", a.name)
+}
+
+pub fn open_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, actor: Entity, options: Vec<(String, ActionKind)>) {
     close_pie(commands, pie);
     if options.is_empty() {
         return;
@@ -657,12 +667,7 @@ fn world_click(
                 title = crate::rabbitholes::lot_title(l, world.data.lot_names.get(lot).map_or("", |s| s.as_str()));
                 options.clear();
                 for (i, a) in acts.iter().enumerate() {
-                    let cost = match a.cost {
-                        c if c > 0 => format!(" (§{c})"),
-                        c if c < 0 => format!(" (earn §{})", -c),
-                        _ => String::new(),
-                    };
-                    options.push((format!("{}{cost}", a.name), ActionKind::Visit { lot, activity: i }));
+                    options.push((activity_label(a), ActionKind::Visit { lot, activity: i }));
                 }
             }
         }

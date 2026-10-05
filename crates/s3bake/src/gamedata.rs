@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 10;
+pub const GAMEDATA_VERSION: u32 = 11;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -507,6 +507,28 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         }
     }
 
+    // Map tags: the venue glyphs cut from the game's map-tag atlas (it has no layout table of its
+    // own; these are the glyphs' places in it), stored as `maptag_<venue>`.
+    if let Some(atlas) = pkgs.read_ti(T_ICON, s3pkg::fnv64(&"ATLAS_MapTagColors_00".to_ascii_lowercase())).and_then(|p| crate::bake::decode_png(&p)) {
+        for (name, [x0, y0, x1, y1]) in MAP_TAG_GLYPHS {
+            let (x0, y0) = (x0.saturating_sub(2), y0.saturating_sub(2));
+            let (x1, y1) = ((x1 + 2).min(atlas.width), (y1 + 2).min(atlas.height));
+            // Square, centred.
+            let side = (x1 - x0).max(y1 - y0);
+            let mut img = s3formats::dds::Rgba { width: side, height: side, data: vec![0; side * side * 4] };
+            let (ox, oy) = ((side - (x1 - x0)) / 2, (side - (y1 - y0)) / 2);
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let s = (y * atlas.width + x) * 4;
+                    let d = ((y - y0 + oy) * side + (x - x0 + ox)) * 4;
+                    img.data[d..d + 4].copy_from_slice(&atlas.data[s..s + 4]);
+                }
+            }
+            pack.add(icon_key(&format!("maptag_{name}")), &encode_png(&img)).map_err(|e| e.to_string())?;
+            n += 1;
+        }
+    }
+
     // Balloon pictures are textures: decoded and stored as PNG beside the interface icons.
     let mut balloon_icons: BTreeSet<String> = BALLOON_FRAMES.iter().chain(SKY_TEXTURES).map(|s| s.to_string()).collect();
     for t in [&out.balloons.idle, &out.balloons.social, &out.balloons.topic, &out.balloons.random] {
@@ -561,6 +583,34 @@ pub const BALLOON_FRAMES: &[&str] = &[
     "t_balloon_routefail",
 ];
 
+/// Venue glyphs in `ATLAS_MapTagColors_00` (pixel rectangles x0, y0, x1, y1).
+const MAP_TAG_GLYPHS: &[(&str, [usize; 4])] = &[
+    ("home_active", [395, 512, 435, 547]),
+    ("home", [457, 461, 485, 486]),
+    ("lot_empty", [344, 406, 373, 432]),
+    ("gym", [64, 424, 93, 445]),
+    ("library", [175, 463, 205, 485]),
+    ("eatery", [14, 139, 31, 170]),
+    ("show", [176, 573, 205, 600]),
+    ("spa", [119, 459, 150, 490]),
+    ("park", [10, 699, 35, 730]),
+    ("pool", [61, 369, 95, 387]),
+    ("museum", [119, 347, 149, 379]),
+    ("cityhall", [285, 570, 320, 603]),
+    ("science", [349, 348, 367, 379]),
+    ("hospital", [455, 178, 487, 210]),
+    ("grocery", [400, 408, 429, 429]),
+    ("bookstore", [175, 463, 205, 485]),
+    ("school", [61, 588, 96, 616]),
+    ("police", [11, 362, 35, 394]),
+    ("firestation", [285, 519, 320, 542]),
+    ("military", [343, 522, 374, 539]),
+    ("business", [17, 20, 48, 45]),
+    ("graveyard", [293, 403, 312, 434]),
+    ("stadium", [120, 292, 149, 321]),
+    ("bar", [73, 304, 85, 342]),
+];
+
 /// The sky's textures: cloud noise, the night's stars, the sun and its halo, the moon's halo.
 pub const SKY_TEXTURES: &[&str] = &["CloudNoiseBase", "NightSkyStarsFlat", "Sky_Sun", "Sky_SunHalo", "Sky_MoonHalo"];
 
@@ -582,6 +632,8 @@ const EXTRA_ICONS: &[&str] = &[
     "moodlet_itsGirl",
     "moodlet_itsTwins",
     "skill_journal_full_star_r2",
+    "hud_icon_maptagbase_r2",
+    "hud_icon_maptagbase_shell",
     "skill_journal_empty_star_r2",
     // Wishes.
     "w_tv",

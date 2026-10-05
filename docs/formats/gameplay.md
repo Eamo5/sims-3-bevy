@@ -87,6 +87,11 @@ Buy-mode pictures are not in the main packages but in `Thumbnails/AllThumbnails.
 For objects the instance is the object's OBJD instance and the group its colour variant (0 =
 the default). `s3bake::gamedata` keeps the first variant of each at 128 px.
 
+Map tags are drawn from `hud_icon_maptagbase_r2` (a white orb the game tints by kind) and a
+white glyph from the atlas `ATLAS_MapTagColors_00` (512 × 1024). The atlas has no layout table
+in the packages; `s3bake::gamedata::MAP_TAG_GLYPHS` lists the glyphs' rectangles, found by
+connected components on its alpha.
+
 ## 4. Script assemblies
 
 The game logic is .NET (Mono) code in `Game/Bin/gameplay.package`, `scripts.package` and
