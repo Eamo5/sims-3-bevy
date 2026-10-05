@@ -178,6 +178,16 @@ fn main() {
         println!("skin textures: {tones:?}");
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--catalog") {
+        // --catalog <text>: baked catalog entries whose internal or shown name contains the text.
+        let want = args.get(i + 1).map(|s| s.to_ascii_lowercase()).unwrap_or_default();
+        let root = s3bake::default_root();
+        let cat: Vec<s3bake::types::CatalogEntry> = s3bake::pack::read_value(&root.global_dir().join("catalog.bin")).expect("no catalog");
+        for c in cat.iter().filter(|c| c.instance_name.to_ascii_lowercase().contains(&want) || c.name.to_ascii_lowercase().contains(&want)) {
+            println!("{:08X}:{:08X}:{:016X} {:30} {:30} §{} models {} script {}", c.objd.0, c.objd.1, c.objd.2, c.instance_name, c.name, c.price, c.models.len(), c.script);
+        }
+        return;
+    }
     if args.iter().any(|a| a == "--gamedata") {
         // The baked moodlets, traits and skills.
         let g = s3bake::load_gamedata(&s3bake::default_root()).expect("no gameplay data");

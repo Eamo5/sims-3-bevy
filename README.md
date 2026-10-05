@@ -42,6 +42,8 @@ installation is unreachable.
   firms Sims up); needs, moods,
   skills, careers, relationships, autonomy, social interactions; children, teens, adults and
   elders who grow up and grow old (birthdays, new traits, passing away).
+- **Props in hand**: the game's own plates, forks, books and guitars, held as its animation
+  clips place them (each Sim clip's companion prop clips and their parent events).
 - **Thought and speech balloons**: the game's own balloon art and balloon table. Sims think about
   needs running low, new moodlets and their traits, dream while asleep, and take turns showing
   what they're talking about (small talk about the weather, their work or interests; insults,

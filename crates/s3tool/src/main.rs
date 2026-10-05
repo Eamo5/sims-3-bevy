@@ -549,6 +549,74 @@ fn main() {
         }
         return;
     }
+    if args[1] == "cliptracks" {
+        // cliptracks <root> <clip name>...: every track's bone hash (named when it is the fnv32 of
+        // a NAMES=a,b,c candidate) with its first and last keys.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let mut by_name = std::collections::HashMap::new();
+        for k in set.keys_of_type(types::CLIP).copied().collect::<Vec<_>>() {
+            if let Some(n) = set.read(&k).and_then(|d| s3formats::sim::clip_name(&d)) {
+                by_name.insert(n.to_ascii_lowercase(), k);
+            }
+        }
+        let names: Vec<String> = std::env::var("NAMES").unwrap_or_default().split(',').map(|s| s.to_string()).collect();
+        for name in &args[3..] {
+            let Some(d) = by_name.get(&name.to_ascii_lowercase()).and_then(|k| set.read(k)) else { println!("{name}: missing"); continue };
+            let Ok(c) = s3formats::sim::Clip::parse(&d) else { println!("{name}: unparsed"); continue };
+            println!("{name}: {:.2}s, {} tracks", c.duration, c.tracks.len());
+            for (h, t) in &c.tracks {
+                let n = names.iter().find(|n| s3pkg::fnv32(n) == *h || s3pkg::fnv32(&n.to_ascii_lowercase()) == *h).cloned().unwrap_or_default();
+                println!("  {h:08X} {n:20} t0 {:?} t1 {:?} r0 {:?}", t.translation.first().map(|x| x.1), t.translation.last().map(|x| x.1), t.rotation.first().map(|x| x.1));
+            }
+        }
+        return;
+    }
+    if args[1] == "clipevents" {
+        // clipevents <root> <clip name>...: the event table's events (kind, time, name, payload).
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let mut by_name = std::collections::HashMap::new();
+        for k in set.keys_of_type(types::CLIP).copied().collect::<Vec<_>>() {
+            if let Some(n) = set.read(&k).and_then(|d| s3formats::sim::clip_name(&d)) {
+                by_name.insert(n.to_ascii_lowercase(), k);
+            }
+        }
+        let names: Vec<String> = std::env::var("NAMES").unwrap_or_default().split(',').map(|s| s.to_string()).collect();
+        let named = |h: u32| names.iter().find(|n| s3pkg::fnv32(n) == h || s3pkg::fnv32(&n.to_ascii_lowercase()) == h).cloned().unwrap_or_else(|| format!("{h:08X}"));
+        for name in &args[3..] {
+            let Some(d) = by_name.get(&name.to_ascii_lowercase()).and_then(|k| set.read(k)) else { println!("{name}: missing"); continue };
+            println!("{name}:");
+            let rel = u32::from_le_bytes(d[0x18..0x1C].try_into().unwrap()) as usize;
+            let start = 0x18 + rel;
+            if d.get(start..start + 4) != Some(b"=CE=") {
+                continue;
+            }
+            let rd = |o: usize| u32::from_le_bytes(d[o..o + 4].try_into().unwrap());
+            let count = rd(start + 8) as usize;
+            let end = (start + 20 + rd(start + 12) as usize + 64).min(d.len());
+            let mut o = start + 20;
+            let mut found = 0;
+            while o + 28 <= end && found < count {
+                let kind = u16::from_le_bytes([d[o], d[o + 1]]);
+                if !(1..=40).contains(&kind) || rd(o + 12) != 0xBF80_0000 || rd(o + 16) != 0xBF80_0000 {
+                    o += 4;
+                    continue;
+                }
+                found += 1;
+                let time = f32::from_bits(rd(o + 8));
+                let len = rd(o + 24) as usize;
+                let ename = String::from_utf8_lossy(&d[o + 28..o + 28 + len]).into_owned();
+                let payload = o + 28 + ((len + 1 + 3) & !3);
+                let words: Vec<String> = (0..20).filter(|i| payload + i * 4 + 4 <= d.len()).map(|i| {
+                    let w = rd(payload + i * 4);
+                    let f = f32::from_bits(w);
+                    if f.abs() > 1e-4 && f.abs() < 1e4 { format!("{f:.3}") } else { named(w) }
+                }).collect();
+                println!("  kind {kind:2} t {time:.2} {ename:?} {}", words.join(" "));
+                o = payload;
+            }
+        }
+        return;
+    }
     if args[1] == "clipsizes" {
         // clipsizes <root> <names file>: raw vs decoded vs compressed sizes of named clips.
         let root = std::path::Path::new(&args[2]);

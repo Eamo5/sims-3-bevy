@@ -51,10 +51,12 @@ impl ClipLibrary {
                 if let Some(exact) = data.0.clip_names.iter().find(|n| n.eq_ignore_ascii_case(p)) {
                     return vec![exact.clone()];
                 }
+                // (Never a prop's own clip, `…_guitar`.)
+                let prop = |n: &str| n.rsplit_once('_').is_some_and(|(_, a)| crate::props::prop_actor(a));
                 data.0
                     .clip_names
                     .iter()
-                    .filter(|n| n.starts_with(p) && side.is_none_or(|s| n.ends_with(&format!("_{s}"))))
+                    .filter(|n| n.starts_with(p) && !prop(n) && side.is_none_or(|s| n.ends_with(&format!("_{s}"))))
                     .cloned()
                     .collect()
             };
@@ -108,7 +110,7 @@ pub struct ClipPlayer {
     blend: f32,
 }
 
-fn sample_track_vec(keys: &[(f32, [f32; 3])], t: f32) -> Option<Vec3> {
+pub fn sample_track_vec(keys: &[(f32, [f32; 3])], t: f32) -> Option<Vec3> {
     let first = keys.first()?;
     if t <= first.0 || keys.len() == 1 {
         return Some(Vec3::from(first.1));
@@ -122,7 +124,7 @@ fn sample_track_vec(keys: &[(f32, [f32; 3])], t: f32) -> Option<Vec3> {
     Some(Vec3::from(keys.last()?.1))
 }
 
-fn sample_track_quat(keys: &[(f32, [f32; 4])], t: f32) -> Option<Quat> {
+pub fn sample_track_quat(keys: &[(f32, [f32; 4])], t: f32) -> Option<Quat> {
     let q = |a: [f32; 4]| Quat::from_xyzw(a[0], a[1], a[2], a[3]).normalize();
     let first = keys.first()?;
     if t <= first.0 || keys.len() == 1 {
@@ -188,7 +190,7 @@ fn next_clip(lib: &mut ClipLibrary, data: &Baked, script: &ActionClip, child: bo
 }
 
 #[allow(clippy::type_complexity)]
-fn drive_skeletons(
+pub fn drive_skeletons(
     time: Res<Time>,
     clock: Res<GameClock>,
     data: Res<Baked>,

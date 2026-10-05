@@ -1004,6 +1004,28 @@ Babies have no face, scalp or hair parts: the face is painted on the baby skin-t
   floor (y 0.033 — toddlers sit on the floor when idle, `p_idle_breathe_x`) up to
   (0.17, 1.22, 0.60) when held (`a2p_pickUp_y`, `a2p_carry_chat_loop*_y`).
 
+### 5.4 Props in clips **[verified on clips]**
+
+- A Sim clip `<stem>_x` comes with one clip per prop actor, `<stem>_<actor>`:
+  `a2o_eat_stand_fork_neat_fork`, `a2o_eat_stand_hand_neat_plateDinner`,
+  `a2o_book_readBook_standing_loopTurnPage_book`, `a2o_guitar_play_med_loop1_guitar`. Not every
+  Sim clip of an interaction has them (reading's `loopRead_x` has no book clip): the prop stays
+  where the last one left it.
+- The prop clip animates the prop's rig (`b__ROOT__` → `offsetBone` → `transformBone` → IK and
+  effect slots); `transformBone` is the prop's place in the slot it is parented to — small
+  offsets (2–8 cm) from a hand slot.
+- Parenting is an event (kind 1) in the prop's *start* clip: `u32 actor, u32 parent actor,
+  u32 slot, u32 0, float[16] matrix` (names fnv32 of the lowercase name; the matrix is
+  identity in the clips seen). Standing eating parents the fork to `x`'s `b__L_Hand_slot` and
+  the plate to `b__R_Hand_slot`; the book and toothbrush go to `b__R_Hand_slot`; the guitar
+  (actor `musicalInstrumentGuitar`) to `b__R_carry_slot`. Kind 6 events toggle the prop's
+  visibility (a book appears 0.33 s into being pulled from the inventory).
+- The prop objects are ordinary OBJDs that aren't sold (`UtensilFork`, `Plate`,
+  `BookGeneral`, `Toothbrush`, `Spatula`). A prop's rig may have a bind offset on
+  `transformBone` that its model is built around: the guitar's is (0, 0.438, −0.021), its
+  middle when standing on the floor. Instruments also rely on engine IK (the guitar's
+  `_IKtarget_neck` / `_IKtarget_bridge`) to rest against the body and meet the hands.
+
 ---
 
 ## 6. Skin and clothing textures

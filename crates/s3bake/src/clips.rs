@@ -150,9 +150,14 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2p_babyBottle_giveTake",
 ];
 
+/// Clip actors that are props held by the Sim (baked with the Sim's clips).
+pub const PROP_ACTORS: &[&str] = &["fork", "plateDinner", "book", "toothbrush", "guitar", "spatula"];
+
 /// Whether a clip should be baked.
 pub fn wanted(name: &str) -> bool {
-    let actor_side = |n: &str| n.ends_with("_x") || n.ends_with("_y");
+    let actor_side = |n: &str| {
+        n.ends_with("_x") || n.ends_with("_y") || n.rsplit_once('_').is_some_and(|(_, a)| PROP_ACTORS.iter().any(|p| p.eq_ignore_ascii_case(a)))
+    };
     CLIP_PREFIXES.iter().any(|p| {
         if !name.starts_with(p) {
             return false;

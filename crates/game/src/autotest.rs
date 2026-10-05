@@ -801,10 +801,27 @@ fn auto_speed(args: Res<AutoArgs>, mut clock: ResMut<crate::clock::GameClock>, m
     *done = true;
 }
 
-fn auto_view_level(args: Res<AutoArgs>, building: Option<ResMut<crate::building::ActiveBuilding>>, mut done: Local<bool>) {
-    if let (Some(l), Some(mut b), false) = (args.view_level, building, *done) {
-        b.view_level = l.clamp(1, b.top_level);
-        *done = true;
+/// `--view-level <n>` once, or `--view-level 0`: keep viewing the selected Sim's floor.
+fn auto_view_level(
+    args: Res<AutoArgs>,
+    building: Option<ResMut<crate::building::ActiveBuilding>>,
+    mut done: Local<bool>,
+    sel: Query<&crate::nav::Floor, With<crate::sim::Selected>>,
+) {
+    match (args.view_level, building) {
+        (Some(0), Some(mut b)) => {
+            if let Ok(f) = sel.single() {
+                let l = f.0.clamp(1, b.top_level);
+                if b.view_level != l {
+                    b.view_level = l;
+                }
+            }
+        }
+        (Some(l), Some(mut b)) if !*done => {
+            b.view_level = l.clamp(1, b.top_level);
+            *done = true;
+        }
+        _ => {}
     }
 }
 
