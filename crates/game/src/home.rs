@@ -430,7 +430,7 @@ pub fn move_in(
     let mut furniture_value = 0;
     // An empty lot gets an empty building to build on.
     let empty = crate::building::empty_building(lot_index, &lot, world.data.heightmap.sample(center.x, center.z));
-    let building = Some(crate::building::spawn_building(&mut commands, &mut assets, &mut ctx, &catalog, house.unwrap_or(&empty), &lot, None));
+    let building = Some(crate::building::spawn_building(&mut commands, &mut assets, &mut ctx, &catalog, house.unwrap_or(&empty), &lot, None, false));
     let to_world = |x: f32, z: f32| {
         let p = center + rot * Vec3::new(x, 0.0, z);
         Vec3::new(p.x, crate::building::walk_height(&world.data, building.as_ref(), p), p.z)

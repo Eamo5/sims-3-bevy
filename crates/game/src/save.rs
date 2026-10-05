@@ -284,11 +284,16 @@ fn save_game(
             Has<OffLot>,
             Has<Visitor>,
             Option<&crate::wishes::Wishes>,
-            (Option<&crate::aging::Aging>, Option<&crate::little::Pregnancy>, Option<&crate::opportunities::SimOpportunities>),
+            (
+                Option<&crate::aging::Aging>,
+                Option<&crate::little::Pregnancy>,
+                Option<&crate::opportunities::SimOpportunities>,
+                Has<crate::visit::OnLot>,
+            ),
         ),
         Without<crate::town::Townie>,
     >,
-    bought: Query<(&GameObject, &Transform), With<Bought>>,
+    (bought, exit): (Query<(&GameObject, &Transform), With<Bought>>, Option<Res<crate::interact::LotExit>>),
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
 ) {
@@ -298,7 +303,12 @@ fn save_game(
     let Some(hh) = household else { return };
     let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).collect();
     let mut saved = Vec::new();
-    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps)) in &sims {
+    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out)) in &sims {
+        // Out on a community lot: saved as back at home (the lot isn't kept).
+        let (position, level) = match (out, exit.as_ref()) {
+            (true, Some(x)) => ([x.0.x, world.data.heightmap.sample(x.0.x, x.0.y), x.0.y], 1),
+            _ => (tf.translation.to_array(), floor.0),
+        };
         let guid = |i: usize| ui.as_ref().and_then(|u| u.data.opportunities.get(i)).map(|o| o.guid.clone());
         saved.push(SavedSim {
             id: sim.id,
@@ -315,9 +325,9 @@ fn save_game(
             member,
             selected,
             whereabouts: if member { "home" } else if away { "away" } else if visiting { "visiting" } else { "away" }.into(),
-            position: tf.translation.to_array(),
+            position,
             yaw: tf.rotation.to_euler(EulerRot::YXZ).0,
-            floor: floor.0,
+            floor: level,
             motives: motives.0,
             skills: skills.0.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
             moodlets: moodlets.0.iter().filter(|m| m.until.is_finite()).map(|m| (m.kind.def().name.to_string(), m.until)).collect(),

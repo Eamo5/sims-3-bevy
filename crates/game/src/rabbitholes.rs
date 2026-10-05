@@ -34,7 +34,7 @@ pub struct Activity {
     pub close: f32,
 }
 
-const fn act(name: &'static str, minutes: f32, cost: i64, per_hour: [f32; 6], skill: Option<&'static str>) -> Activity {
+pub const fn act(name: &'static str, minutes: f32, cost: i64, per_hour: [f32; 6], skill: Option<&'static str>) -> Activity {
     Activity { name, minutes, cost, per_hour, skill, open: 0.0, close: 24.0 }
 }
 

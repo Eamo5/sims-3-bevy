@@ -36,6 +36,10 @@ pub struct AutoArgs {
     pub build: Option<[i32; 4]>,
     /// `--knock <x0,z0,x1,z1>`: knock down the walls along that grid line.
     pub knock: Option<[i32; 4]>,
+    /// `--follow`: the camera keeps the selected Sim in view.
+    pub follow: bool,
+    /// `--home-after <seconds>`: the selected Sim, out on a community lot, heads home.
+    pub home_after: Option<f32>,
     /// `--storey`: after `--build`, stairs up inside the room, a floor and room above, and the
     /// selected Sim sent upstairs.
     pub storey: bool,
@@ -94,6 +98,7 @@ impl AutoArgs {
                 "--hour" => a.hour = next.and_then(|s| s.parse().ok()),
                 "--save-at" => a.save_at = next.and_then(|s| s.parse().ok()),
                 "--load" => a.load = next.and_then(|s| s.parse().ok()),
+                "--home-after" => a.home_after = next.and_then(|s| s.parse().ok()),
                 "--showroom" => {
                     a.showroom = next.and_then(|s| {
                         let mut it = s.split(',').filter_map(|x| x.parse().ok());
@@ -107,6 +112,11 @@ impl AutoArgs {
                 }
                 "--paint" => {
                     a.paint = true;
+                    i += 1;
+                    continue;
+                }
+                "--follow" => {
+                    a.follow = true;
                     i += 1;
                     continue;
                 }
@@ -165,6 +175,55 @@ impl Plugin for AutoTestPlugin {
                 .run_if(in_state(crate::PlayMode::Live)),
             )
             .add_systems(Update, auto_view_level.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(
+                Update,
+                (|args: Res<AutoArgs>,
+                  time: Res<Time>,
+                  mut since: Local<Option<f32>>,
+                  mut done: Local<bool>,
+                  mut sel: Query<&mut crate::interact::ActionQueue, (With<crate::sim::Selected>, With<crate::visit::OnLot>)>| {
+                    let Some(after) = args.home_after else { return };
+                    let t0 = *since.get_or_insert(time.elapsed_secs());
+                    if *done || time.elapsed_secs() - t0 < after {
+                        return;
+                    }
+                    if let Ok(mut q) = sel.single_mut() {
+                        *done = true;
+                        q.0.clear();
+                        q.push_player(crate::interact::Action::new("Go Home", crate::interact::ActionKind::GoHomeFromLot, false));
+                    }
+                })
+                .run_if(in_state(crate::PlayMode::Live)),
+            )
+            .add_systems(
+                Update,
+                (|mut commands: Commands,
+                  args: Res<AutoArgs>,
+                  sel: Query<(&Transform, &crate::interact::ActionQueue, Option<&crate::visit::OnLot>), With<crate::sim::Selected>>,
+                  mut cam: Query<&mut SimsCamera>,
+                  mut last: Local<f32>,
+                  time: Res<Time>| {
+                    if !args.follow || time.elapsed_secs() - *last < 2.0 {
+                        return;
+                    }
+                    if *last == 0.0 {
+                        commands.insert_resource(crate::opportunities::AutoDecline);
+                    }
+                    *last = time.elapsed_secs();
+                    if let (Ok((tf, q, on)), Ok(mut c)) = (sel.single(), cam.single_mut()) {
+                        c.look_at(tf.translation);
+                        info!(
+                            "follow: at {:.1},{:.1},{:.1} on lot {:?} doing {:?}",
+                            tf.translation.x,
+                            tf.translation.y,
+                            tf.translation.z,
+                            on.map(|l| l.0),
+                            q.0.front().map(|a| (&a.label, a.phase))
+                        );
+                    }
+                })
+                .run_if(in_state(crate::PlayMode::Live)),
+            )
             .add_systems(Update, auto_speed.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_save.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_load.run_if(in_state(AppState::MainMenu)))
@@ -676,6 +735,23 @@ fn auto_action(
                 return;
             }
         }
+        return;
+    }
+    // "Visit:<lot name part>": the selected Sim drives to that community lot.
+    if let Some(want) = name.strip_prefix("Visit:") {
+        let want = want.to_ascii_lowercase();
+        let found = (0..world.data.lots.len()).find(|&i| {
+            crate::visit::visitable(&world.data, i)
+                && (world.data.lots[i].internal_name.to_ascii_lowercase().contains(&want) || world.data.lot_names.get(i).is_some_and(|n| n.to_ascii_lowercase().contains(&want)))
+        });
+        match found {
+            Some(lot) => {
+                q.0.clear();
+                q.push_player(crate::interact::Action::new("Visit", crate::interact::ActionKind::GoToLot { lot }, false));
+            }
+            None => warn!("--do {name}: no such community lot"),
+        }
+        *done = true;
         return;
     }
     // "Garden": the selected Sim plants a tomato seed a few steps away (outdoors).

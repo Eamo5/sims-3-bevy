@@ -101,6 +101,11 @@ installation is unreachable.
   pattern with its name and price, swatched from its texture recipe) on Wallpaper and Floors
   tabs; click a wall to paper that side, or a floor to cover the whole room. Repainting is
   charged, sounds like the game's build tools, and is kept in saves.
+- **Out on the town**: Sims drive to the parks, the library, the gym, the beach and the
+  other community lots (from the lot's pie menu or its map tag) and use what's there: chess
+  tables, computers, bookshelves, swings, grills, restrooms. Each lot gets its own walk grid
+  and floors, its walls come down as the camera moves in, Sims on it keep to it in their own
+  choices, and "Go Home" drives them back while the household carries on at home.
 - **Building**: wall and room tools that draw along the lot's grid (straight or diagonal, with
   a live outline and price), the sledgehammer, floor tiles and staircases up to a new floor
   (stairwell opened, landing floored, Sims climb them), and hip roofs over the rooms in any

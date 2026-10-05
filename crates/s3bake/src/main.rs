@@ -31,7 +31,23 @@ fn main() {
         let w: s3bake::WorldBaked = s3bake::read_value(&root.world_dir(&args[i + 1]).join("world.bin")).expect("world");
         for (k, l) in w.lots.iter().enumerate() {
             if !l.info.is_residential() {
-                println!("{k:3} {:40} {}", l.info.internal_name, l.display_name);
+                let b = w.buildings.iter().find(|b| b.lot as usize == k);
+                let mut kinds: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+                for o in b.map(|b| b.objects.as_slice()).unwrap_or(&[]) {
+                    let s = o.script.rsplit('.').next().unwrap_or("").to_string();
+                    *kinds.entry(s).or_default() += 1;
+                }
+                let top: Vec<String> = kinds.iter().filter(|(k, _)| !k.is_empty()).map(|(k, n)| format!("{k}x{n}")).collect();
+                println!(
+                    "{k:3} {:40} {} [{}x{}] walls {} objs {}: {}",
+                    l.info.internal_name,
+                    l.display_name,
+                    l.info.width,
+                    l.info.depth,
+                    b.map_or(0, |b| b.walls.len()),
+                    b.map_or(0, |b| b.objects.len()),
+                    top.join(" ")
+                );
             }
         }
         return;

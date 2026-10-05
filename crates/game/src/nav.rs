@@ -297,6 +297,28 @@ impl PartialOrd for Node {
     }
 }
 
+/// Marks steep slopes, water and the obstacles on the ground floor as unwalkable.
+pub fn fill_grid(grid: &mut NavGrid, world: &crate::loading::WorldInfo, obstacles: &Query<(&GlobalTransform, &Obstacle, Option<&Floor>)>) {
+    let hm = &world.heightmap;
+    let (w, h) = (grid.w, grid.h);
+    for z in 0..h {
+        for x in 0..w {
+            let c = grid.center_of(x, z);
+            let y = hm.sample(c.x, c.y);
+            let slope = (hm.sample(c.x + 0.5, c.y) - hm.sample(c.x - 0.5, c.y))
+                .abs()
+                .max((hm.sample(c.x, c.y + 0.5) - hm.sample(c.x, c.y - 0.5)).abs());
+            grid.blocked[z * w + x] = y < world.sea_level + 0.2 || slope > 0.9;
+        }
+    }
+    for (gt, ob, floor) in obstacles {
+        if floor.is_some_and(|f| f.0 > 1) {
+            continue;
+        }
+        mark_obstacle(grid, gt, ob);
+    }
+}
+
 /// Marks obstacles, steep slopes and water as unwalkable whenever the grid is dirty.
 fn rebuild_grid(
     grid: Option<ResMut<NavGrid>>,
@@ -313,24 +335,7 @@ fn rebuild_grid(
     if let (Some(b), Some(u)) = (building.as_deref(), upper.as_deref_mut()) {
         rebuild_upper(b, u, &obstacles);
     }
-    let hm = &world.data.heightmap;
-    let (w, h) = (grid.w, grid.h);
-    for z in 0..h {
-        for x in 0..w {
-            let c = grid.center_of(x, z);
-            let y = hm.sample(c.x, c.y);
-            let slope = (hm.sample(c.x + 0.5, c.y) - hm.sample(c.x - 0.5, c.y))
-                .abs()
-                .max((hm.sample(c.x, c.y + 0.5) - hm.sample(c.x, c.y - 0.5)).abs());
-            grid.blocked[z * w + x] = y < world.data.sea_level + 0.2 || slope > 0.9;
-        }
-    }
-    for (gt, ob, floor) in &obstacles {
-        if floor.is_some_and(|f| f.0 > 1) {
-            continue;
-        }
-        mark_obstacle(&mut grid, gt, ob);
-    }
+    fill_grid(&mut grid, &world.data, &obstacles);
 }
 
 /// Marks the cells under an obstacle's footprint as blocked.

@@ -657,6 +657,10 @@ pub enum ActionKind {
     PlantSeed { at: Vec2, level: u8, plant: usize },
     /// Phone round to throw a party.
     ThrowParty,
+    /// Drive to a community lot and spend time there.
+    GoToLot { lot: usize },
+    /// Drive home from the community lot.
+    GoHomeFromLot,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -957,11 +961,12 @@ fn run_actions(
             &Floor,
             Option<&crate::wishes::Wishes>,
             Option<&crate::opportunities::SimOpportunities>,
+            Option<&crate::visit::OnLot>,
         ),
         (Without<GameObject>, Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>),
     >,
     mut objects: Query<(&GameObject, &Transform, &mut UsedBy, Option<&Floor>), Without<Sim>>,
-    (building, upper): (Option<Res<crate::building::ActiveBuilding>>, Option<Res<UpperFloors>>),
+    (building, upper, visited): (Option<Res<crate::building::ActiveBuilding>>, Option<Res<UpperFloors>>, Option<Res<crate::visit::VisitedLot>>),
     mut life: MessageWriter<LifeEvent>,
     people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
     mut conceive: MessageWriter<crate::little::Conceive>,
@@ -986,7 +991,14 @@ fn run_actions(
     // Relationship changes to apply to both Sims: (a, b, status, kissed)
     let mut status_fx: Vec<(Entity, Entity, Option<RelStatus>, bool)> = Vec::new();
 
-    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, mut job, floor, wishes, opps) in &mut sims {
+    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, mut job, floor, wishes, opps, on_lot) in &mut sims {
+        // Out on a community lot: its walk grid and way out.
+        let away = on_lot.and_then(|o| visited.as_deref().filter(|v| v.lot == o.0));
+        let (my_grid, my_upper): (&NavGrid, Option<&UpperFloors>) = match away {
+            Some(v) => (&v.grid, None),
+            None => (&grid, upper.as_deref()),
+        };
+        let way_out = away.map(|v| v.exit).or_else(|| exit.as_ref().map(|e| e.0));
         let Some(action) = queue.0.front_mut() else {
             if anim.pose != Pose::Walk && anim.pose != Pose::Stand && path.is_none() {
                 anim.pose = Pose::Stand;
@@ -1037,7 +1049,7 @@ fn run_actions(
                         ActionKind::GoHere(p, l) => Some((*p, *l)),
                         // (Kneeling beside the spot.)
                         ActionKind::PlantSeed { at, level, .. } => Some((*at + Vec2::new(0.0, 0.7), *level)),
-                        ActionKind::GoToWork | ActionKind::Visit { .. } => exit.as_ref().map(|e| (e.0, 1)),
+                        ActionKind::GoToWork | ActionKind::Visit { .. } | ActionKind::GoToLot { .. } | ActionKind::GoHomeFromLot => way_out.map(|p| (p, 1)),
                         ActionKind::JoinCareer { target, .. } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
                         ActionKind::Repair { target } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
                         ActionKind::Invite { .. } | ActionKind::OrderPizza | ActionKind::CallRepairman | ActionKind::ThrowParty => {
@@ -1072,7 +1084,7 @@ fn run_actions(
                         _ => Vec::new(),
                     };
                     let routed = dest.and_then(|(d, l)| {
-                        plan_route(&grid, upper.as_deref(), from, floor.0, d, l).or_else(|| alternatives.iter().find_map(|a| plan_route(&grid, upper.as_deref(), from, floor.0, *a, l)))
+                        plan_route(my_grid, my_upper, from, floor.0, d, l).or_else(|| alternatives.iter().find_map(|a| plan_route(my_grid, my_upper, from, floor.0, *a, l)))
                     });
                     match routed {
                         Some(wp) => {
@@ -1204,6 +1216,16 @@ fn run_actions(
                             ActionKind::GoToWork => {
                                 if let Some(j) = job.as_deref_mut() {
                                     crate::careers::leave_for_work(&mut commands, &clock, me, sim, j, &mut notes);
+                                }
+                                finished = true;
+                            }
+                            ActionKind::GoToLot { lot } => {
+                                crate::visit::drive_to(&mut commands, &clock, me, sim, *lot, crate::visit::place_name(&world.data, *lot), &mut notes);
+                                finished = true;
+                            }
+                            ActionKind::GoHomeFromLot => {
+                                if let Some(v) = away {
+                                    crate::visit::drive_home(&mut commands, &clock, me, v.lot, crate::visit::place_name(&world.data, v.lot));
                                 }
                                 finished = true;
                             }
@@ -1570,7 +1592,7 @@ fn run_actions(
         }
     }
     for (target, actor, social, fun, friendship, romance) in social_fx {
-        if let Ok((_, tsim, queue, mut tf, mut motives, _, mut anim, _, mut rels, path, _, _, _, _)) = sims.get_mut(target) {
+        if let Ok((_, tsim, queue, mut tf, mut motives, _, mut anim, _, mut rels, path, _, _, _, _, _)) = sims.get_mut(target) {
             motives.add(SOCIAL, social);
             motives.add(FUN, fun);
             rels.add(actor, friendship, romance);
@@ -1603,10 +1625,10 @@ fn autonomy(
     clock: Res<GameClock>,
     (settings, household): (Res<crate::options::Settings>, Query<(), With<HouseholdMember>>),
     mut sims: Query<
-        (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim, Has<SocialPartner>),
+        (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim, Has<SocialPartner>, Option<&crate::visit::OnLot>),
         (Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>),
     >,
-    objects: Query<(Entity, &GameObject, &Transform, &UsedBy)>,
+    objects: Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>,
     hh: Option<Res<Household>>,
     (broken, plant_q): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>),
     party_on: Option<Res<Party>>,
@@ -1614,12 +1636,13 @@ fn autonomy(
     if delta.0 <= 0.0 {
         return;
     }
-    let others: Vec<(Entity, Vec3, Age, [f32; 6])> = sims.iter().map(|s| (s.0, s.1.translation, s.7.age, s.2.0)).collect();
+    let others: Vec<(Entity, Vec3, Age, [f32; 6], Option<usize>)> = sims.iter().map(|s| (s.0, s.1.translation, s.7.age, s.2.0, s.9.map(|l| l.0))).collect();
     // A meal already out is eaten before anyone cooks another.
-    let meal_out = objects.iter().any(|(_, o, _, _)| o.kind == ObjectKind::Meal);
+    let meal_out = objects.iter().any(|(_, o, ..)| o.kind == ObjectKind::Meal);
     let bills_due = hh.is_some_and(|h| !h.bills.is_empty());
     let mut rng = rand::rng();
-    for (me, tf, motives, mut queue, mut timer, rels, job, sim, partner) in &mut sims {
+    for (me, tf, motives, mut queue, mut timer, rels, job, sim, partner, on_lot) in &mut sims {
+        let my_lot = on_lot.map(|l| l.0);
         timer.0 -= delta.0;
         // (Someone else's social partner waits for them to finish.)
         if timer.0 > 0.0 || !queue.0.is_empty() || sim.age == Age::Baby || partner {
@@ -1647,8 +1670,8 @@ fn autonomy(
             u * u * u * 4.0 + u * 0.3
         };
         let mut best: Option<(f32, Action)> = None;
-        for (oe, obj, otf, used) in &objects {
-            if used.0.is_some_and(|u| u != me) {
+        for (oe, obj, otf, used, obj_lot) in &objects {
+            if used.0.is_some_and(|u| u != me) || obj_lot.map(|l| l.0) != my_lot {
                 continue;
             }
             if !obj.kind.usable_by(sim.age) {
@@ -1721,8 +1744,8 @@ fn autonomy(
         let social_need = if sim.traits.contains(&crate::life::Trait::PartyAnimal) || sim.traits.contains(&crate::life::Trait::Friendly) { 50.0 } else { social_need };
         // A little one in need comes first for the grown-ups.
         if sim.age.is_grown() && sim.age != Age::Child {
-            for &(other, pos, age, needs) in &others {
-                if !age.is_little() {
+            for &(other, pos, age, needs, lot) in &others {
+                if !age.is_little() || lot != my_lot {
                     continue;
                 }
                 let want = [("Feed", needs[HUNGER]), ("Change Diaper", needs[BLADDER]), ("Play With", needs[SOCIAL].min(needs[FUN]))]
@@ -1744,8 +1767,8 @@ fn autonomy(
         // At a party everyone mingles.
         let partying = party_on.is_some() && sim.age.is_grown();
         if (motives.0[SOCIAL] < social_need || partying) && !sim.age.is_little() {
-            for &(other, pos, age, _) in &others {
-                if other == me || age.is_little() {
+            for &(other, pos, age, _, lot) in &others {
+                if other == me || age.is_little() || lot != my_lot {
                     continue;
                 }
                 if partying && pos.distance(tf.translation) > 20.0 {

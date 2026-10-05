@@ -628,6 +628,7 @@ fn world_click(
             Option<Res<crate::gardening::Garden>>,
         ),
     ),
+    on_lot: Query<&crate::visit::OnLot>,
 ) {
     if buy.is_some_and(|b| b.active) {
         return;
@@ -722,8 +723,10 @@ fn world_click(
     } else if let Some((p, level)) = floor_hit(ray, &world, building.as_deref()) {
         let mut options = vec![("Go Here".to_string(), ActionKind::GoHere(Vec2::new(p.x, p.z), level))];
         let mut title = String::new();
+        let here = crate::rabbitholes::lot_at(&world.data.lots, p);
+        let out_at = on_lot.get(actor).ok().map(|l| l.0);
         // A community lot: its rabbit hole's activities, and opportunities done there.
-        if let Some(lot) = crate::rabbitholes::lot_at(&world.data.lots, p) {
+        if let Some(lot) = here.filter(|l| Some(*l) != out_at) {
             let l = &world.data.lots[lot];
             let acts = crate::rabbitholes::activities(l);
             let opp_tasks = opp_q
@@ -732,9 +735,13 @@ fn world_click(
                 .map(|ui| crate::opportunities::lot_options(&world.data, lot, opp_q.1.single().ok().flatten(), &ui.data, opp_q.2.hour_f()))
                 .unwrap_or_default();
             let opp_tasks: Vec<(String, ActionKind)> = opp_tasks.into_iter().chain(crate::gardening::lot_options(&world.data, lot)).collect();
-            if !acts.is_empty() || !opp_tasks.is_empty() {
+            let visit = crate::visit::visitable(&world.data, lot);
+            if !acts.is_empty() || !opp_tasks.is_empty() || visit {
                 title = crate::rabbitholes::lot_title(l, world.data.lot_names.get(lot).map_or("", |s| s.as_str()));
                 options.clear();
+                if visit {
+                    options.push(("Visit".to_string(), ActionKind::GoToLot { lot }));
+                }
                 for (i, a) in acts.iter().enumerate() {
                     options.push((activity_label(a), ActionKind::Visit { lot, activity: i }));
                 }
@@ -748,6 +755,10 @@ fn world_click(
                     options.extend(crate::gardening::plant_options(g, &ui.data, Vec2::new(p.x, p.z), level));
                 }
             }
+        }
+        // Out on a community lot: home again.
+        if out_at.is_some() {
+            options.insert(0, ("Go Home".to_string(), ActionKind::GoHomeFromLot));
         }
         open_pie(&mut commands, &mut pie, cursor, &title, actor, options);
     }

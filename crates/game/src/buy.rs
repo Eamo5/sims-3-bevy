@@ -78,7 +78,7 @@ fn buy_pick(
     cams: Query<(&Camera, &GlobalTransform), With<SimsCamera>>,
     mut ray_cast: MeshRayCast,
     parents: Query<&ChildOf>,
-    objects: Query<(), With<GameObject>>,
+    objects: Query<(), (With<GameObject>, Without<crate::visit::LotObject>)>,
 ) {
     if !buy.active || buy.placing.is_some() || buy.painting.is_some() || buy.tool.is_some() || !mouse.just_pressed(MouseButton::Left) || over_ui.0 {
         return;

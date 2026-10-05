@@ -280,6 +280,10 @@ pub struct ForceOffer;
 #[derive(Resource)]
 pub struct AutoAccept;
 
+/// Turns offers down without asking (tests).
+#[derive(Resource)]
+pub struct AutoDecline;
+
 #[derive(Component)]
 struct OppButton(bool);
 
@@ -292,10 +296,10 @@ fn dialog_buttons(
     ui: Option<Res<crate::icons::GameUi>>,
     mut opps: Query<Option<&mut SimOpportunities>>,
     mut notes: ResMut<Notifications>,
-    auto_accept: Option<Res<AutoAccept>>,
+    (auto_accept, auto_decline): (Option<Res<AutoAccept>>, Option<Res<AutoDecline>>),
 ) {
     let Some((root, sim, index)) = board.dialog else { return };
-    let auto = auto_accept.is_some().then_some(true);
+    let auto = auto_accept.is_some().then_some(true).or_else(|| auto_decline.is_some().then_some(false));
     let Some(choice) = auto.or_else(|| buttons.iter().find(|(i, _)| **i == Interaction::Pressed).map(|(_, b)| b.0)) else { return };
     commands.entity(root).despawn();
     board.dialog = None;
