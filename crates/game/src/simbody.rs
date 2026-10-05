@@ -152,6 +152,7 @@ pub enum OutfitKind {
     Everyday,
     Swimwear,
     Sleepwear,
+    Athletic,
 }
 
 /// Wearing something other than everyday clothes (for a swim, for bed).
@@ -170,14 +171,16 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
         OutfitKind::Everyday => s3formats::sim::CAT_EVERYDAY,
         OutfitKind::Swimwear => s3formats::sim::CAT_SWIM,
         OutfitKind::Sleepwear => s3formats::sim::CAT_SLEEP,
+        OutfitKind::Athletic => s3formats::sim::CAT_ATHLETIC,
     };
     let age = age_bits(sim.age);
     let gender = if sim.female { GENDER_FEMALE } else { GENDER_MALE };
     let fits = |e: &&CasPartInfo| e.baked && e.age_gender & age != 0 && e.age_gender & gender != 0;
-    // Clothes and shoes by the outfit's category (heads and hair go with anything).
+    // Clothes and shoes by the outfit's category (heads and hair go with anything); never the
+    // townsfolk's uniforms (the Reaper's robe, firefighters', police officers', burglars').
     let worn = |e: &&CasPartInfo| {
-        !matches!(e.clothing_type, CT_TOP | CT_BOTTOM | CT_BODY | CT_SHOES)
-            || e.category & cat != 0
+        !["Reaper", "Firefighter", "Ninja", "Police"].iter().any(|n| e.name.contains(n))
+            && (!matches!(e.clothing_type, CT_TOP | CT_BOTTOM | CT_BODY | CT_SHOES) || e.category & cat != 0)
     };
     let of_type = |t: u32| {
         let all: Vec<&CasPartInfo> = cas.parts.iter().filter(|e| e.clothing_type == t).filter(fits).filter(worn).collect();
@@ -191,7 +194,7 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
             .copied()
             .filter(|e| match t {
                 CT_TOP if !sim.female && kind == OutfitKind::Swimwear => e.name.contains("TopNude"),
-                CT_SHOES => e.name.contains("ShoesNude"),
+                CT_SHOES if kind != OutfitKind::Athletic => e.name.contains("ShoesNude"),
                 _ => e.key.1 == 0,
             })
             .collect();
@@ -236,6 +239,7 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
         OutfitKind::Everyday => use_full,
         OutfitKind::Swimwear => sim.female && rng.random_bool(0.5) && !fulls.is_empty(),
         OutfitKind::Sleepwear => !fulls.is_empty() && rng.random_bool(0.7),
+        OutfitKind::Athletic => !fulls.is_empty() && rng.random_bool(0.3),
     };
     if let Some(f) = cf {
         body.push(f);

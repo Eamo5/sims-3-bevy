@@ -19,7 +19,7 @@ impl Plugin for SwimPlugin {
     }
 }
 
-/// To bed in pyjamas, and dressed again on getting up.
+/// To bed in pyjamas, a workout in athletic wear, and dressed again after.
 #[allow(clippy::type_complexity)]
 fn pyjamas(
     mut commands: Commands,
@@ -28,21 +28,32 @@ fn pyjamas(
 ) {
     use crate::simbody::{OutfitKind, Wearing};
     for (e, queue, wearing) in &sims {
-        let asleep = queue.0.front().is_some_and(|a| match (&a.kind, a.phase) {
-            (ActionKind::Object { target, def }, Phase::Running(_)) => beds.get(*target).is_ok_and(|o| {
-                matches!(o.kind, crate::interact::ObjectKind::BedSingle | crate::interact::ObjectKind::BedDouble)
-                    && interactions_for(o.kind).get(*def).is_some_and(|d| d.name == "Sleep")
-            }),
-            _ => false,
-        });
-        match (asleep, wearing.map(|w| w.0)) {
-            (true, None) => {
-                commands.entity(e).insert((Wearing(OutfitKind::Sleepwear), crate::aging::NeedsNewBody));
+        let want = queue.0.front().and_then(|a| match (&a.kind, a.phase) {
+            (ActionKind::Object { target, def }, Phase::Running(_)) => {
+                let o = beds.get(*target).ok()?;
+                let d = interactions_for(o.kind).get(*def)?;
+                if matches!(o.kind, crate::interact::ObjectKind::BedSingle | crate::interact::ObjectKind::BedDouble) && d.name == "Sleep" {
+                    Some(OutfitKind::Sleepwear)
+                } else if d.pose == crate::sim::Pose::Exercise {
+                    Some(OutfitKind::Athletic)
+                } else {
+                    None
+                }
             }
-            (false, Some(OutfitKind::Sleepwear)) => {
+            _ => None,
+        });
+        let has = wearing.map(|w| w.0);
+        // (Swimwear is the swim's to change.)
+        if has == Some(OutfitKind::Swimwear) || want == has {
+            continue;
+        }
+        match want {
+            Some(k) => {
+                commands.entity(e).insert((Wearing(k), crate::aging::NeedsNewBody));
+            }
+            None => {
                 commands.entity(e).remove::<Wearing>().insert(crate::aging::NeedsNewBody);
             }
-            _ => {}
         }
     }
 }

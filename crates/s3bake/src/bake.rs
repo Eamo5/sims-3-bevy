@@ -255,9 +255,9 @@ pub fn cas_bake_wanted(name: &str, ct: u32, age_gender: u32, category: u32) -> b
     if age_gender & AGE_BABY != 0 && age_gender & !(AGE_BABY | 0xFF00) & 0x7F == 0 {
         return name.ends_with("Body");
     }
-    // Swimwear (the men's is trunks with a bare chest, and everyone goes barefoot), and
-    // sleepwear.
-    if category & (s3formats::sim::CAT_SWIM | s3formats::sim::CAT_SLEEP) != 0
+    // Swimwear (the men's is trunks with a bare chest, and everyone goes barefoot), sleepwear
+    // and athletic wear.
+    if category & (s3formats::sim::CAT_SWIM | s3formats::sim::CAT_SLEEP | s3formats::sim::CAT_ATHLETIC) != 0
         && category & CAT_VALID_RANDOM != 0
         && matches!(ct, CT_BODY | CT_TOP | CT_BOTTOM | CT_SHOES)
         && !name.contains("burnt")
