@@ -113,6 +113,10 @@ installation is unreachable.
   (the Grim Reaper comes). A smoke alarm calls the fire department at once (otherwise someone
   phones a little later), and a firefighter in uniform arrives by fire truck to put out each
   fire with the extinguisher.
+- **Burglars**: some nights a burglar in black slips onto the lot and bags the priciest thing
+  in the house. A burglar alarm (or an awake Sim who spots them) calls the police; an officer
+  in uniform arrives in the cruiser, and if they catch the burglar with the game's cuffing
+  animation, the loot goes back where it was.
 - **Traffic**: the game's cars (sedans, hatchbacks, pickups, vans, sports cars) drive the
   town's roads around the camera, keeping right along the world's own road graph and turning
   at its intersections; the school bus, the carpool and taxis pull up at the curb to take Sims

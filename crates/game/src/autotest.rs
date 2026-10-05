@@ -783,6 +783,12 @@ fn auto_action(
         }
         return;
     }
+    // "Burglar": a burglar breaks in now.
+    if name == "Burglar" {
+        commands.queue(|w: &mut World| w.resource_mut::<crate::burglar::Break>().force = true);
+        *done = true;
+        return;
+    }
     // "Fire": the stove catches fire.
     if name == "Fire" {
         if let Some((e, _)) = objects.iter().find(|(_, o)| o.kind == crate::interact::ObjectKind::Stove) {

@@ -161,13 +161,13 @@ fn forget(mut portraits: ResMut<Portraits>) {
 /// Which way a Sim's face points: from the head to the tip of the nose (or between the eyes),
 /// level; the body's facing if the face bones aren't found. (The body can be turned away from
 /// where the head looks, mid-step or mid-turn.)
-fn facing(skel: &Skeleton, joints: &Query<&GlobalTransform, Without<Sim>>, head: Vec3, body: Quat) -> Quat {
+fn facing(skel: &Skeleton, joints: &Query<&GlobalTransform, Without<Sim>>, head: Vec3, body: Quat) -> Option<Quat> {
     let bone = |n: &str| skel.rig.bones.iter().position(|b| b.name == n).and_then(|i| joints.get(skel.joints[i]).ok()).map(|g| g.translation());
     let front = bone("b__NoseTip__").or_else(|| Some((bone("b__LeftEye__")? + bone("b__RightEye__")?) * 0.5));
-    match front.map(|f| (f - head).with_y(0.0)).filter(|v| v.length() > 0.01) {
-        Some(a) => Quat::from_rotation_y(a.x.atan2(a.z)),
-        None => body,
-    }
+    let Some(f) = front.map(|f| f - head) else { return Some(body) };
+    // (Lying down the face looks up: no picture then.)
+    let level = f.with_y(0.0);
+    (level.length() > f.length() * 0.6).then(|| Quat::from_rotation_y(level.x.atan2(level.z)))
 }
 
 fn retake_rebuilt(mut portraits: ResMut<Portraits>, rebuilt: Query<Entity, Changed<Skeleton>>, alive: Query<(), With<Sim>>, time: Res<Time>) {
@@ -234,7 +234,9 @@ fn take_portraits(
                 let e = shot.sim;
                 let aim = sims.get(e).ok().and_then(|(sim, _, tf, skel, _)| {
                     let head = skel.rig.bones.iter().position(|b| b.name == "b__Head__").and_then(|i| joints.get(skel.joints[i]).ok())?;
-                    Some((sim.age.is_little(), head.translation(), facing(skel, &joints, head.translation(), tf.rotation())))
+                    // (Babies are pictured lying in their cribs.)
+                    let face = facing(skel, &joints, head.translation(), tf.rotation()).or((sim.age == Age::Baby).then(|| tf.rotation()))?;
+                    Some((sim.age.is_little(), head.translation(), face))
                 });
                 let img = portraits.images.contains_key(&e).then(|| portraits.spare(&mut images, e));
                 // (Not mid-crouch: if the head isn't up where it belongs, try again later.)
@@ -298,7 +300,9 @@ fn take_portraits(
             Some(at) if shot.frame < at + 4 => {
                 let aim = sims.get(shot.sim).ok().and_then(|(sim, _, tf, skel, _)| {
                     let head = skel.rig.bones.iter().position(|b| b.name == "b__Head__").and_then(|i| joints.get(skel.joints[i]).ok())?;
-                    Some((sim.age.is_little(), head.translation(), facing(skel, &joints, head.translation(), tf.rotation())))
+                    // (Babies are pictured lying in their cribs.)
+                    let face = facing(skel, &joints, head.translation(), tf.rotation()).or((sim.age == Age::Baby).then(|| tf.rotation()))?;
+                    Some((sim.age.is_little(), head.translation(), face))
                 });
                 if let Some((little, head, rot)) = aim {
                     let face = head + Vec3::Y * if little { 0.02 } else { 0.05 };
