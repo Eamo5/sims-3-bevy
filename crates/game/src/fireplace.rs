@@ -53,6 +53,7 @@ fn requests(
     places: Query<(&GameObject, Option<&Lit>)>,
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut looks: Local<Looks>,
+    ui: Option<Res<crate::icons::GameUi>>,
 ) {
     for r in reqs.read() {
         match *r {
@@ -76,8 +77,10 @@ fn requests(
                         })
                     })
                     .clone();
-                // The hearth: low down in the middle of the firebox, a little in from the front.
-                let at = Vec3::new(o.center.x, 0.08, o.center.y + o.half.y * 0.15);
+                // The hearth: the fireplace's effect slot, else low down in the middle of the
+                // firebox, a little in from the front.
+                let slot = ui.as_ref().and_then(|ui| ui.data.fx_slots.iter().find(|(k, _)| *k == o.objd)).and_then(|(_, s)| s.first().copied());
+                let at = slot.map_or(Vec3::new(o.center.x, 0.08, o.center.y + o.half.y * 0.15), |s| Vec3::from(s) - Vec3::Y * 0.12);
                 let mut rng = rand::rng();
                 let flames = commands
                     .spawn((Transform::from_translation(at), Visibility::default(), DespawnOnExit(AppState::InGame), ChildOf(e)))
