@@ -428,7 +428,7 @@ fn save_game(
                 .collect(),
             lifetime_happiness: wishes.map_or(0, |w| w.points),
             outfit: vec![sim.outfit.hair, sim.outfit.top, sim.outfit.bottom, sim.outfit.full, sim.outfit.shoes],
-            rewards: wishes.map(|w| w.rewards.iter().map(|r| r.name().to_string()).collect()).unwrap_or_default(),
+            rewards: wishes.map(|w| w.rewards.clone()).unwrap_or_default(),
             aging: aging.map(|a| (a.days, a.elder_span)),
             pregnancy: pregnancy.map(|p| (p.since, p.other_parent.and_then(|o| ids.get(&o).copied()), p.stage)),
             shape: Some((sim.weight, sim.fitness)),
@@ -588,7 +588,7 @@ fn apply_loaded_game(
             ec.insert(HouseholdMember).remove::<(Visitor, OffLot)>();
             ec.insert(crate::wishes::Wishes::restored(
                 s.lifetime_happiness,
-                s.rewards.iter().filter_map(|r| crate::wishes::Reward::from_name(r)).collect(),
+                s.rewards.clone(),
                 game.minutes,
             ));
         } else if s.whereabouts == "visiting" {

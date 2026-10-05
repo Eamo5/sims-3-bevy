@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 29;
+pub const GAMEDATA_VERSION: u32 = 30;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -60,6 +60,8 @@ pub struct TraitInfo {
     pub icon: String,
     pub icon_small: String,
     pub category: String,
+    /// A lifetime reward's cost in lifetime happiness (`RewardMotive`, `RewardShop`... traits).
+    pub points: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -573,6 +575,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             icon: get(&f, "ThumbFilename"),
             icon_small: get(&f, "ThumbPieMenu"),
             category: get(&f, "Category"),
+            points: num(&f, "Points") as u32,
             hex,
         });
     }

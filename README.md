@@ -66,12 +66,18 @@ installation is unreachable.
 - **Lifetime wishes**, the base game's own (CEO of a Mega-Corporation, Leader of the Free
   World, Become a Master Thief, Rock Star, Swimming in Cash, Super Popular, Heartbreaker,
   Master of the Arts, Renaissance Sim, Professional Author, The Culinary Librarian, Surrounded
-  by Family, Jack of All Trades and more; 28 in all), with their icons, targets and rewards from the game's dream tables. Create-a-Sim
-  offers five that suit the Sim's traits; a child growing into a teen picks one in the game's
-  dialog; Sims moving in without one take the best fit (one not already half done). The wish
-  sits beside the others with its progress (§12,000 of §50,000, Painting 7/10 · Guitar 4/10,
-  level 6 of 10), and fulfilling it is worth 20,000 to 35,000 lifetime happiness. Kept in
-  saves.
+  by Family, Jack of All Trades and more; 28 in all), with their icons, targets and rewards
+  from the game's dream tables. Create-a-Sim offers five that suit the Sim's traits; a child
+  growing into a teen picks one in the game's dialog; Sims moving in without one take the
+  best fit (one not already half done). The wish sits beside the others with its progress
+  (§12,000 of §50,000, Painting 7/10 · Guitar 4/10, level 6 of 10), and fulfilling it is worth
+  20,000 to 35,000 lifetime happiness. Kept in saves.
+- **Lifetime rewards**: the game's reward traits, bought with lifetime happiness at their
+  costs in its dialog (icon, name and description): Steel Bladder, Dirt Defiant, Hardly
+  Hungry, Fast Learner, Fast Metabolism, Professional Slacker, Opportunistic (bigger
+  opportunity rewards), Attractive, Extra Creative (paintings and books earn more), Super
+  Green Thumb, Discount Diner, Complimentary Entertainment, Bookshop Bargainer, Haggler, and a
+  new lifetime wish.
 - **Opportunities** from the game's own tables: by day, Sims are offered ones that suit their
   career or skills in the game's dialog (its icon, name, description and reward); taken-on
   opportunities are listed in the Opportunities panel (O) with their deadlines and are done

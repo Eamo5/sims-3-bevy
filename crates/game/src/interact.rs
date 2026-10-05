@@ -1233,7 +1233,11 @@ fn run_actions(
                                 if let Some((tsim, tmood, _, tpartner)) = who.get(target) {
                                     let rel = rels.get(*target);
                                     let other_partner = *tpartner && rel.status == RelStatus::None;
-                                    let p = crate::social::acceptance(s, &rel, tsim, tmood, other_partner);
+                                    let mut p = crate::social::acceptance(s, &rel, tsim, tmood, other_partner);
+                                    // People simply like the Attractive more.
+                                    if s.cat != crate::social::SocialCat::Mean && crate::wishes::has(wishes, "Attractive") {
+                                        p = (p + 0.12).min(0.98);
+                                    }
                                     if !rand::rng().random_bool(p as f64) {
                                         if !action.autonomous {
                                             notes.push(format!("{} rejected {}'s attempt to {}.", tsim.first, sim.first, s.name.to_lowercase()));
@@ -1273,7 +1277,8 @@ fn run_actions(
                                     }
                                     if let Some(a) = task.or_else(|| acts.get(*activity)) {
                                         let place = crate::rabbitholes::lot_title(l, name);
-                                        crate::rabbitholes::head_out(&mut commands, &clock, me, sim, *lot, a, place, household.as_deref_mut(), &mut notes);
+                                        let price = crate::wishes::price_factor(wishes, a.name);
+                                        crate::rabbitholes::head_out(&mut commands, &clock, me, sim, *lot, a, place, household.as_deref_mut(), &mut notes, price);
                                     }
                                 }
                                 finished = true;
@@ -1332,7 +1337,9 @@ fn run_actions(
                                 // Working out builds fitness and burns off weight.
                                 if d.pose == Pose::Exercise {
                                     let h = dt / 60.0;
-                                    commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| crate::aging::reshape(&mut e, -0.03 * h, 0.05 * h));
+                                    // (Faster for a Fast Metabolism.)
+                                    let burn = if crate::wishes::has(wishes, "FastMetabolism") { 2.0 } else { 1.0 };
+                                    commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| crate::aging::reshape(&mut e, -0.03 * h * burn, 0.05 * h));
                                 }
                                 if let Some(sk) = d.skill {
                                     let rate = crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes);
@@ -1376,7 +1383,10 @@ fn run_actions(
                                         }
                                         Special::SellPainting => {
                                             let lvl = skills.level("Painting") as i64;
-                                            let value = 15 + lvl * lvl * 12 + rand::rng().random_range(0..20);
+                                            let mut value = 15 + lvl * lvl * 12 + rand::rng().random_range(0..20);
+                                            if crate::wishes::has(wishes, "ExtraCreative") {
+                                                value = value * 3 / 2;
+                                            }
                                             if let Some(h) = household.as_mut() {
                                                 h.funds += value;
                                             }

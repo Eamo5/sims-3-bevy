@@ -876,17 +876,10 @@ fn pie_buttons(
     let Some((label, kind)) = pie.options.get(idx).cloned() else { return };
     let actor = pie.actor;
     close_pie(&mut commands, &mut pie);
-    if let ActionKind::BuyReward(i) = kind {
-        if let Ok((sim, mut w)) = wishes.single_mut() {
-            let r = crate::wishes::Reward::ALL[i];
-            if w.points >= r.cost() && !w.has_reward(r) {
-                w.points -= r.cost();
-                w.rewards.push(r);
-                notes.push(format!("{} gained the {} lifetime reward!", sim.first, r.name()));
-            }
-        }
+    if let ActionKind::BuyReward(_) = kind {
         return;
     }
+    let _ = (&mut wishes, &mut notes);
     if let Some(i) = as_submenu(&kind)
         && let (Some((title, list)), Some(a)) = (pie.submenus.get(i).cloned(), actor)
     {
@@ -1598,32 +1591,21 @@ fn wish_buttons(
     mut commands: Commands,
     wishes_btn: Query<(&Interaction, &WishButton), Changed<Interaction>>,
     rewards_btn: Query<&Interaction, (Changed<Interaction>, With<RewardsButton>)>,
-    mut sel: Query<(Entity, &mut crate::wishes::Wishes), With<Selected>>,
-    windows: Query<&Window, With<PrimaryWindow>>,
+    mut sel: Query<(Entity, &Sim, &mut crate::wishes::Wishes), With<Selected>>,
     mut pie: ResMut<PieMenu>,
+    (mut questions, ui): (ResMut<crate::dialog::Questions>, Option<Res<crate::icons::GameUi>>),
 ) {
-    let Ok((actor, mut w)) = sel.single_mut() else { return };
+    let Ok((actor, sim, mut w)) = sel.single_mut() else { return };
     for (i, b) in &wishes_btn {
         if *i == Interaction::Pressed {
             w.promise(b.0);
         }
     }
-    if rewards_btn.iter().any(|i| *i == Interaction::Pressed) {
-        let options: Vec<(String, ActionKind)> = crate::wishes::Reward::ALL
-            .iter()
-            .enumerate()
-            .filter(|(_, r)| !w.has_reward(**r))
-            .map(|(i, r)| {
-                let afford = if w.points >= r.cost() { "" } else { " (need more)" };
-                (format!("{} — {} LTH{afford}", r.name(), r.cost()), ActionKind::BuyReward(i))
-            })
-            .collect();
-        if options.is_empty() {
-            return;
-        }
-        let at = windows.single().ok().map_or(Vec2::new(400.0, 500.0), |w| Vec2::new(420.0, w.height() - 420.0));
+    // The lifetime rewards, in the game's dialog.
+    if rewards_btn.iter().any(|i| *i == Interaction::Pressed)
+        && let Some(ui) = ui
+    {
         close_pie(&mut commands, &mut pie);
-        pie.at = at;
-        open_pie(&mut commands, &mut pie, at, "Lifetime Rewards", actor, options);
+        crate::wishes::ask_reward(&mut questions, &ui.data, actor, sim, &w);
     }
 }

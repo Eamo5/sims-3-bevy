@@ -185,7 +185,7 @@ fn skill_gain(points: f32) -> f32 {
 #[allow(clippy::type_complexity)]
 fn garden_requests(
     mut commands: Commands,
-    mut sims: Query<(Entity, &Sim, &GardenRequest, &mut Skills)>,
+    mut sims: Query<(Entity, &Sim, &GardenRequest, &mut Skills, Option<&crate::wishes::Wishes>)>,
     mut plants: Query<(&mut GrowingPlant, Option<&PlantSoil>)>,
     mut garden: ResMut<Garden>,
     mut household: Option<ResMut<Household>>,
@@ -198,7 +198,7 @@ fn garden_requests(
 ) {
     let Some(ui) = ui else { return };
     let mut rng = rand::rng();
-    for (me, sim, req, mut skills) in &mut sims {
+    for (me, sim, req, mut skills, wishes) in &mut sims {
         commands.entity(me).remove::<GardenRequest>();
         let level = skills.level("Gardening") as f32;
         match *req {
@@ -234,6 +234,8 @@ fn garden_requests(
                 p.harvests_left = p.harvests_left.saturating_sub(1);
                 // Better gardeners grow better produce.
                 let quality = 1.0 + level * 0.15;
+                // A Super Green Thumb's produce is finer.
+                let quality = if crate::wishes::has(wishes, "SuperGreenThumb") { quality * 1.5 } else { quality };
                 let worth = (picked as f32 * info.price as f32 * quality).round() as i64;
                 if let Some(h) = household.as_mut() {
                     h.funds += worth;

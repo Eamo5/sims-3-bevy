@@ -1,6 +1,7 @@
 //! Wishes and lifetime happiness: Sims wish for things that suit their personality and
 //! situation; the player promises up to four; fulfilling them earns lifetime happiness points
-//! to spend on lifetime rewards.
+//! to spend on lifetime rewards — the game's reward traits, with their names, icons, words and
+//! costs, those whose effects are carried out here.
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -16,7 +17,7 @@ pub struct WishesPlugin;
 
 impl Plugin for WishesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (offer_wishes, fulfil_wishes).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (offer_wishes, fulfil_wishes, buy_rewards).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -100,12 +101,24 @@ pub struct Wishes {
     pub offered: Vec<Wish>,
     pub promised: Vec<Wish>,
     pub points: u32,
-    pub rewards: Vec<Reward>,
+    /// Lifetime rewards bought (their reward traits' names: `SteelBladder`).
+    pub rewards: Vec<String>,
     next_offer: f64,
 }
 
 impl Wishes {
-    pub fn restored(points: u32, rewards: Vec<Reward>, now: f64) -> Self {
+    pub fn restored(points: u32, rewards: Vec<String>, now: f64) -> Self {
+        // (Saves from before kept the rewards' display names.)
+        let rewards = rewards
+            .into_iter()
+            .map(|r| match r.as_str() {
+                "Steel Bladder" => "SteelBladder".to_string(),
+                "Hardly Hungry" => "HardlyHungry".to_string(),
+                "Fast Learner" => "FastLearner".to_string(),
+                _ => r,
+            })
+            .filter(|r| REWARDS.contains(&r.as_str()))
+            .collect();
         Self { points, rewards, next_offer: now, ..default() }
     }
 
@@ -115,57 +128,129 @@ impl Wishes {
             self.promised.push(w);
         }
     }
-    pub fn has_reward(&self, r: Reward) -> bool {
-        self.rewards.contains(&r)
+    pub fn has_reward(&self, r: &str) -> bool {
+        self.rewards.iter().any(|x| x == r)
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Reward {
-    SteelBladder,
-    HardlyHungry,
-    FastLearner,
-    MoodManager,
-    NeverWeary,
-}
+/// The lifetime rewards offered: the game's reward traits whose effects are carried out here.
+pub const REWARDS: [&str; 15] = [
+    "SteelBladder",
+    "PermaClean",
+    "HardlyHungry",
+    "FastLearner",
+    "FastMetabolism",
+    "ProfessionalSlacker",
+    "Opportunistic",
+    "Attractive",
+    "ExtraCreative",
+    "SuperGreenThumb",
+    "DiscountDiner",
+    "ComplimentaryEntertainment",
+    "BookshopBargainer",
+    "Haggler",
+    "ChangeLifetimeWish",
+];
 
-impl Reward {
-    pub const ALL: [Reward; 5] = [Reward::SteelBladder, Reward::HardlyHungry, Reward::FastLearner, Reward::MoodManager, Reward::NeverWeary];
-    pub fn name(self) -> &'static str {
-        match self {
-            Reward::SteelBladder => "Steel Bladder",
-            Reward::HardlyHungry => "Hardly Hungry",
-            Reward::FastLearner => "Fast Learner",
-            Reward::MoodManager => "Mood Manager",
-            Reward::NeverWeary => "Never Weary",
-        }
-    }
-    pub fn cost(self) -> u32 {
-        match self {
-            Reward::SteelBladder | Reward::HardlyHungry => 5000,
-            Reward::FastLearner => 7500,
-            Reward::MoodManager => 10000,
-            Reward::NeverWeary => 15000,
-        }
-    }
-    pub fn from_name(n: &str) -> Option<Reward> {
-        Reward::ALL.into_iter().find(|r| r.name() == n)
-    }
+/// Whether a Sim has a lifetime reward.
+pub fn has(w: Option<&Wishes>, r: &str) -> bool {
+    w.is_some_and(|w| w.has_reward(r))
 }
 
 /// Need decay changes from lifetime rewards.
 pub fn reward_decay(w: Option<&Wishes>, motive: usize) -> f32 {
-    let Some(w) = w else { return 1.0 };
     match motive {
-        BLADDER if w.has_reward(Reward::SteelBladder) => 0.5,
-        HUNGER if w.has_reward(Reward::HardlyHungry) => 0.5,
-        ENERGY if w.has_reward(Reward::NeverWeary) => 0.5,
+        BLADDER if has(w, "SteelBladder") => 0.5,
+        HUNGER if has(w, "HardlyHungry") => 0.5,
+        HYGIENE if has(w, "PermaClean") => 0.0,
         _ => 1.0,
     }
 }
 
 pub fn reward_skill_rate(w: Option<&Wishes>) -> f32 {
-    if w.is_some_and(|w| w.has_reward(Reward::FastLearner)) { 1.25 } else { 1.0 }
+    if has(w, "FastLearner") { 1.25 } else { 1.0 }
+}
+
+/// What a Sim pays for a rabbit hole's activity: nothing at restaurants for a Discount
+/// Diner, or at shows for Complimentary Entertainment; less at the shops for a Haggler.
+pub fn price_factor(w: Option<&Wishes>, activity: &str) -> f32 {
+    match activity {
+        "Eat a Meal" | "Have a Drink with Friends" if has(w, "DiscountDiner") => 0.0,
+        "See a Show" if has(w, "ComplimentaryEntertainment") => 0.0,
+        "Buy Seeds" if has(w, "Haggler") => 0.75,
+        _ => 1.0,
+    }
+}
+
+/// What a recipe book costs a Sim (Bookshop Bargainers and Hagglers pay less).
+pub fn book_price(w: Option<&Wishes>, price: i32) -> i64 {
+    let mut p = price as f32;
+    if has(w, "BookshopBargainer") {
+        p *= 0.5;
+    }
+    if has(w, "Haggler") {
+        p *= 0.75;
+    }
+    p.round() as i64
+}
+
+/// Asks the player which lifetime reward to buy (those offered and not yet bought).
+pub fn ask_reward(questions: &mut crate::dialog::Questions, data: &s3bake::GameDataBaked, e: Entity, sim: &Sim, w: &Wishes) {
+    let rewards: Vec<String> = REWARDS.iter().filter(|r| !w.has_reward(r)).map(|r| r.to_string()).collect();
+    let mut answers: Vec<crate::dialog::Answer> = rewards
+        .iter()
+        .map(|r| {
+            let t = data.traits.iter().find(|t| t.hex == *r);
+            let cost = t.map_or(0, |t| t.points);
+            let afford = if w.points >= cost { "" } else { " (not enough yet)" };
+            let desc = t.map_or(String::new(), |t| t.desc.replace("{0.SimFirstName}", &sim.first));
+            crate::dialog::Answer {
+                label: format!("{} — {} lifetime happiness{afford}", t.map_or(r.as_str(), |t| t.name.as_str()), crate::lifetime::group(cost as i64)),
+                detail: desc,
+                icon: t.map_or(String::new(), |t| t.icon.clone()),
+            }
+        })
+        .collect();
+    answers.push(crate::dialog::Answer { label: "Close".into(), detail: String::new(), icon: String::new() });
+    let owned: Vec<String> = w.rewards.iter().map(|r| data.traits.iter().find(|t| t.hex == *r).map_or(r.clone(), |t| t.name.clone())).collect();
+    questions.ask(crate::dialog::Ask {
+        about: crate::dialog::Question::Reward { sim: e, rewards },
+        icon: "hud_icon_plumbob_r2".into(),
+        heading: format!("Lifetime Rewards for {}", sim.first),
+        title: format!("{} lifetime happiness to spend", crate::lifetime::group(w.points as i64)),
+        text: if owned.is_empty() { "Choose a reward:".into() } else { format!("Already earned: {}. Choose a reward:", owned.join(", ")) },
+        answers,
+    });
+}
+
+/// A lifetime reward chosen: bought, if there's lifetime happiness enough.
+fn buy_rewards(
+    mut commands: Commands,
+    mut answers: MessageReader<crate::dialog::Answered>,
+    ui: Option<Res<crate::icons::GameUi>>,
+    mut sims: Query<(&Sim, &mut Wishes)>,
+    mut questions: ResMut<crate::dialog::Questions>,
+    mut notes: ResMut<Notifications>,
+) {
+    let Some(ui) = ui else { return };
+    for a in answers.read() {
+        let crate::dialog::Question::Reward { sim: e, rewards } = &a.about else { continue };
+        let (Ok((sim, mut w)), Some(r)) = (sims.get_mut(*e), rewards.get(a.answer)) else { continue };
+        let Some(t) = ui.data.traits.iter().find(|t| t.hex == *r) else { continue };
+        if w.points < t.points {
+            notes.push(format!("{} needs {} more lifetime happiness for {}.", sim.first, crate::lifetime::group((t.points - w.points) as i64), t.name));
+            continue;
+        }
+        w.points -= t.points;
+        notes.push(format!("{} gained the {} lifetime reward!", sim.first, t.name));
+        // A new lifetime wish is chosen there and then; the rest last.
+        if r == "ChangeLifetimeWish" {
+            crate::lifetime::ask_lifetime_wish(&mut questions, Some(&ui.data), *e, sim);
+            commands.entity(*e).remove::<crate::lifetime::LifetimeWish>().insert(crate::lifetime::ChoosingLifetimeWish);
+        } else {
+            w.rewards.push(r.clone());
+        }
+    }
 }
 
 /// Wishes that suit this Sim right now.

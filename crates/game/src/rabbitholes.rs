@@ -146,8 +146,10 @@ pub fn head_out(
     place: String,
     household: Option<&mut Household>,
     notes: &mut Notifications,
+    price: f32,
 ) -> bool {
     let h = clock.hour_f();
+    let cost = (activity.cost as f32 * price).round() as i64;
     if h < activity.open || h >= activity.close {
         notes.push(format!(
             "{} can only {} between {} and {}.",
@@ -158,17 +160,17 @@ pub fn head_out(
         ));
         return false;
     }
-    if activity.cost > 0 {
+    if cost > 0 {
         let Some(h) = household else { return false };
-        if h.funds < activity.cost {
-            notes.push(format!("{} can't afford to {} (§{}).", sim.first, activity.name.to_lowercase(), activity.cost));
+        if h.funds < cost {
+            notes.push(format!("{} can't afford to {} (§{cost}).", sim.first, activity.name.to_lowercase()));
             return false;
         }
-        h.funds -= activity.cost;
-    } else if activity.cost < 0
+        h.funds -= cost;
+    } else if cost < 0
         && let Some(h) = household
     {
-        h.funds -= activity.cost;
+        h.funds -= cost;
     }
     let inside_from = clock.minutes + DRIVE_MINUTES;
     let until = inside_from + activity.minutes as f64 + DRIVE_MINUTES;

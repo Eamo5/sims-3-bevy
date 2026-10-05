@@ -129,14 +129,15 @@ fn learn_recipes(
     mut commands: Commands,
     ui: Option<Res<crate::icons::GameUi>>,
     mut household: Option<ResMut<crate::interact::Household>>,
-    mut sims: Query<(Entity, &Sim, &BuyingRecipe, Option<&mut KnownRecipes>), With<RecipeBookBought>>,
+    mut sims: Query<(Entity, &Sim, &BuyingRecipe, Option<&mut KnownRecipes>, Option<&crate::wishes::Wishes>), With<RecipeBookBought>>,
     mut notes: ResMut<Notifications>,
 ) {
-    for (e, sim, buying, known) in &mut sims {
+    for (e, sim, buying, known, wishes) in &mut sims {
         commands.entity(e).remove::<(BuyingRecipe, RecipeBookBought)>();
         let Some(r) = ui.as_ref().and_then(|u| u.data.recipes.get(buying.0)) else { continue };
+        let price = crate::wishes::book_price(wishes, r.book_price);
         if let Some(h) = household.as_mut() {
-            h.funds -= r.book_price as i64;
+            h.funds -= price;
         }
         match known {
             Some(mut k) => {
@@ -148,7 +149,7 @@ fn learn_recipes(
                 commands.entity(e).insert(KnownRecipes(vec![r.key.clone()]));
             }
         }
-        notes.push(format!("{} bought a recipe book for §{} and learned to make {}.", sim.first, r.book_price, r.name));
+        notes.push(format!("{} bought a recipe book for §{price} and learned to make {}.", sim.first, r.name));
     }
 }
 

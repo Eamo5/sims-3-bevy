@@ -850,8 +850,8 @@ fn expire_and_sum(clock: Res<GameClock>, delta: Res<SimDelta>, mut q: Query<(&mu
         }
         let sum: i32 = ml.0.iter().map(|m| m.value).sum();
         // A content Sim with nothing on their mind is fine; moodlets push it up or down.
-        let manager = if wishes.is_some_and(|w| w.has_reward(crate::wishes::Reward::MoodManager)) { 20.0 } else { 0.0 };
-        let v = sum as f32 + 10.0 + manager;
+        let _ = wishes;
+        let v = sum as f32 + 10.0;
         if (mood.0 - v).abs() > 0.01 {
             mood.0 = v;
         }

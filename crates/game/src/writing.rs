@@ -220,13 +220,13 @@ fn write_pages(
     delta: Res<SimDelta>,
     ui: Option<Res<crate::icons::GameUi>>,
     mut household: Option<ResMut<Household>>,
-    mut writers: Query<(Entity, &Sim, &mut ActionQueue, &Skills, Option<&mut Author>, Option<&NovelPlan>), With<HouseholdMember>>,
+    mut writers: Query<(Entity, &Sim, &mut ActionQueue, &Skills, Option<&mut Author>, Option<&NovelPlan>, Option<&crate::wishes::Wishes>), With<HouseholdMember>>,
     objects: Query<&GameObject>,
     mut notes: ResMut<Notifications>,
 ) {
     let data = ui.as_ref().map(|u| &*u.data);
     let mut rng = rand::rng();
-    for (e, sim, mut queue, skills, author, plan) in &mut writers {
+    for (e, sim, mut queue, skills, author, plan, wishes) in &mut writers {
         let Some(front) = queue.0.front_mut() else { continue };
         let (ActionKind::Object { target, def }, Phase::Running(_)) = (&front.kind, &front.phase) else { continue };
         let writing = objects.get(*target).ok().and_then(|o| interactions_for(o.kind).get(*def)).is_some_and(|d| d.special == Special::WriteNovel);
@@ -270,7 +270,11 @@ fn write_pages(
         }
         if d.pages >= d.length {
             let d = author.draft.take().unwrap_or_else(|| start_draft(&GENRES[0], &Author::default(), data, &mut rng));
-            let book = publish(&d, sim, skills, &author, clock.day(), data, &mut rng);
+            let mut book = publish(&d, sim, skills, &author, clock.day(), data, &mut rng);
+            // The Extra Creative's work sells better.
+            if crate::wishes::has(wishes, "ExtraCreative") {
+                book.royalty = book.royalty * 3 / 2;
+            }
             let g = GENRES[genre_index(&book.genre).unwrap_or(0)].name;
             notes.push(format!(
                 "{} finished writing “{}”, a {g} book. It's {}! Royalties of §{} will come in each week, {} times.",

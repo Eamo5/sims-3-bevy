@@ -456,7 +456,20 @@ fn work_schedule(
     mut notes: ResMut<Notifications>,
     mut life: MessageWriter<LifeEvent>,
     mut workers: Query<
-        (Entity, &Sim, &mut Job, &mut ActionQueue, Option<&AtWork>, &mut Transform, &mut Motives, &Mood, &Skills, Option<&crate::lifetime::LifetimeWish>, Has<HouseholdMember>),
+        (
+            Entity,
+            &Sim,
+            &mut Job,
+            &mut ActionQueue,
+            Option<&AtWork>,
+            &mut Transform,
+            &mut Motives,
+            &Mood,
+            &Skills,
+            Option<&crate::lifetime::LifetimeWish>,
+            Has<HouseholdMember>,
+            Option<&crate::wishes::Wishes>,
+        ),
         Without<crate::rabbitholes::AtRabbitHole>,
     >,
     mut session_start: Local<Option<f64>>,
@@ -466,7 +479,7 @@ fn work_schedule(
     let day = clock.day();
     // A shift already under way when play began isn't held against anyone.
     let started = *session_start.get_or_insert(clock.minutes);
-    for (e, sim, mut job, mut queue, at_work, mut tf, mut motives, mood, skills, ltw, member) in &mut workers {
+    for (e, sim, mut job, mut queue, at_work, mut tf, mut motives, mood, skills, ltw, member, wishes) in &mut workers {
         let info = job.info();
         if let Some(w) = at_work {
             if clock.minutes < w.until {
@@ -479,7 +492,12 @@ fn work_schedule(
             }
             let skill = skills.level(job.career().skill) as f32;
             let want = (job.level as f32 + 1.0) * 0.8;
-            let gain = (mood.level() / 100.0 * 22.0 + (skill - want) * 3.0 + 8.0) * crate::life::work_rate(&sim.traits);
+            // (A Professional Slacker's bad moods don't count against them.)
+            let mut moody = mood.level() / 100.0 * 22.0;
+            if crate::wishes::has(wishes, "ProfessionalSlacker") {
+                moody = moody.max(0.0);
+            }
+            let gain = (moody + (skill - want) * 3.0 + 8.0) * crate::life::work_rate(&sim.traits);
             job.performance = (job.performance + gain).clamp(-100.0, 100.0);
             notes.push(format!("{} is home from work and earned §{pay}.", sim.first));
             if job.performance >= 100.0 && job.level + 1 < job.levels().len() {

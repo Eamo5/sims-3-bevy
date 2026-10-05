@@ -17,7 +17,7 @@ impl Plugin for DialogPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Questions>()
             .add_message::<Answered>()
-            .add_systems(Update, (show_question, answer_buttons).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (show_question, answer_buttons, scroll_answers).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -28,13 +28,15 @@ pub enum Question {
     CareerPath { sim: Entity, paths: Vec<usize> },
     /// Which lifetime wish: indices into `lifetime::LIFETIME_WISHES`.
     LifetimeWish { sim: Entity, wishes: Vec<usize> },
+    /// Which lifetime reward to buy (reward traits' names; answers past them close).
+    Reward { sim: Entity, rewards: Vec<String> },
 }
 
 impl Question {
     /// The Sim the question is about.
     pub fn sim(&self) -> Option<Entity> {
         match self {
-            Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } => Some(*sim),
+            Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } => Some(*sim),
         }
     }
 }
@@ -81,6 +83,25 @@ pub struct Answered {
 #[derive(Component)]
 struct AnswerButton(usize);
 
+/// The answers, which scroll when there are many.
+#[derive(Component)]
+struct DialogScroll;
+
+fn scroll_answers(wheel: Res<bevy::input::mouse::AccumulatedMouseScroll>, mut q: Query<(&mut ScrollPosition, &bevy::ui::RelativeCursorPosition), With<DialogScroll>>) {
+    if wheel.delta.y == 0.0 {
+        return;
+    }
+    let dy = match wheel.unit {
+        bevy::input::mouse::MouseScrollUnit::Line => wheel.delta.y * 48.0,
+        bevy::input::mouse::MouseScrollUnit::Pixel => wheel.delta.y,
+    };
+    for (mut pos, cursor) in &mut q {
+        if cursor.cursor_over() {
+            pos.0.y = (pos.0.y - dy).max(0.0);
+        }
+    }
+}
+
 fn show_question(mut commands: Commands, mut q: ResMut<Questions>, mut ui: Option<ResMut<crate::icons::GameUi>>, mut images: ResMut<Assets<Image>>) {
     if q.shown.is_some() {
         return;
@@ -120,7 +141,13 @@ fn show_question(mut commands: Commands, mut q: ResMut<Questions>, mut ui: Optio
                 });
             });
             p.spawn(text(a.text.clone(), 15.0, Color::WHITE));
-            for (i, x) in a.answers.iter().enumerate() {
+            let mut list = p.spawn((
+                Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(8.0), max_height: Val::Vh(58.0), overflow: Overflow::scroll_y(), ..default() },
+                DialogScroll,
+                bevy::ui::RelativeCursorPosition::default(),
+                ScrollPosition::default(),
+            ));
+            list.with_children(|p| for (i, x) in a.answers.iter().enumerate() {
                 p.spawn((
                     Button,
                     AnswerButton(i),
@@ -144,7 +171,7 @@ fn show_question(mut commands: Commands, mut q: ResMut<Questions>, mut ui: Optio
                         }
                     });
                 });
-            }
+            });
         })
         .id();
     q.shown = Some(root);

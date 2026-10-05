@@ -345,24 +345,26 @@ fn complete_opportunities(
     clock: Res<crate::clock::GameClock>,
     ui: Option<Res<crate::icons::GameUi>>,
     mut household: Option<ResMut<Household>>,
-    mut sims: Query<(&Sim, &mut SimOpportunities, &mut Skills, Option<&mut crate::careers::Job>)>,
+    mut sims: Query<(&Sim, &mut SimOpportunities, &mut Skills, Option<&mut crate::careers::Job>, Option<&crate::wishes::Wishes>)>,
     mut notes: ResMut<Notifications>,
 ) {
     let Some(ui) = ui else { return };
     let data = &ui.data;
     for ev in events.read() {
         let LifeEventKind::Finished { activity, completed: true } = ev.kind else { continue };
-        let Ok((sim, mut opps, mut skills, job)) = sims.get_mut(ev.sim) else { continue };
+        let Ok((sim, mut opps, mut skills, job, wishes)) = sims.get_mut(ev.sim) else { continue };
         let Some(pos) = opps.active.iter().position(|a| std::ptr::eq(a.activity.name, activity)) else { continue };
         let a = opps.active.remove(pos);
         let Some(o) = data.opportunities.get(a.index) else { continue };
         opps.done.push(o.guid.clone());
         let mut got = Vec::new();
-        if o.money > 0
+        // (Half again for the Opportunistic.)
+        let money = if crate::wishes::has(wishes, "Opportunistic") { o.money * 3 / 2 } else { o.money };
+        if money > 0
             && let Some(h) = household.as_mut()
         {
-            h.funds += o.money;
-            got.push(format!("§{}", o.money));
+            h.funds += money;
+            got.push(format!("§{money}"));
         }
         if let Some(mut j) = job
             && (o.performance > 0.0 || o.raise > 0.0)

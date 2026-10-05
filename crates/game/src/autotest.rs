@@ -374,6 +374,7 @@ fn ask_question(
     mut questions: ResMut<crate::dialog::Questions>,
     ui: Option<Res<crate::icons::GameUi>>,
     sel: Query<(Entity, &crate::sim::Sim), With<crate::sim::Selected>>,
+    mut wishes: Query<&mut crate::wishes::Wishes>,
 ) {
     // RECIPE=<key>: the selected Sim's next meal is that recipe.
     if let (Ok(key), Some(ui)) = (std::env::var("RECIPE"), ui.as_ref())
@@ -388,6 +389,17 @@ fn ask_question(
         return;
     }
     let Ok((e, sim)) = sel.single() else { return };
+    // LTH=<points>: lifetime happiness to spend.
+    if what == "rewards" {
+        if let (Some(ui), Ok(mut w)) = (ui.as_ref(), wishes.get_mut(e)) {
+            *done = true;
+            if let Some(n) = std::env::var("LTH").ok().and_then(|n| n.parse().ok()) {
+                w.points = n;
+            }
+            crate::wishes::ask_reward(&mut questions, &ui.data, e, sim, &w);
+        }
+        return;
+    }
     *done = true;
     if what == "lifetime" {
         crate::lifetime::ask_lifetime_wish(&mut questions, ui.as_ref().map(|u| &*u.data), e, sim);

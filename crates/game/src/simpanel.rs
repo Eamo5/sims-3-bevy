@@ -278,7 +278,7 @@ fn tab_content(
                     });
                 });
             }
-            if let Some(ui) = ui {
+            if let Some(ui) = ui.as_deref_mut() {
                 for t in &sim.traits {
                     let info = ui.trait_info(*t);
                     let icon = info.as_ref().and_then(|i| ui.icon(&mut images, &i.icon_small).or_else(|| ui.icon(&mut images, &i.icon)));
@@ -296,7 +296,11 @@ fn tab_content(
                 }
             }
             if let Some(w) = wishes {
-                let rewards: Vec<&str> = w.rewards.iter().map(|r| r.name()).collect();
+                let rewards: Vec<String> = w
+                    .rewards
+                    .iter()
+                    .map(|r| ui.as_ref().and_then(|u| u.data.traits.iter().find(|t| t.hex == *r)).map_or(r.clone(), |t| t.name.clone()))
+                    .collect();
                 p.spawn(text(
                     format!("Lifetime happiness: {}{}", w.points, if rewards.is_empty() { String::new() } else { format!(" · Rewards: {}", rewards.join(", ")) }),
                     13.0,
