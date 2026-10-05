@@ -1327,6 +1327,7 @@ fn phone_button(
     let mut options: Vec<(String, ActionKind)> = vec![
         (format!("Order Pizza (§{})", crate::meals::PIZZA_PRICE), ActionKind::OrderPizza),
         (format!("Call the Repairman (§{}+)", crate::interact::REPAIRMAN_PRICE), ActionKind::CallRepairman),
+        (format!("Throw a Party (§{})", crate::interact::PARTY_PRICE), ActionKind::ThrowParty),
     ];
     options.extend(known.into_iter().take(9).map(|(_, l, k)| (l, k)));
     let at = windows.single().ok().map_or(Vec2::new(600.0, 600.0), |w| Vec2::new(w.width() * 0.4, w.height() - 260.0));

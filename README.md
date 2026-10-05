@@ -64,6 +64,10 @@ installation is unreachable.
   home in green with a star, other homes and empty lots, and each venue's own glyph (cut from
   the game's map-tag atlas); hover for the name, click a venue for its activities or a home to
   fly there.
+- **Parties**: phone round to throw one; friends (then townsfolk) arrive two hours later and
+  stay till midnight, everyone mingling, and the household gets the game's "Threw a Great
+  Party" or "Threw a Lame Party" moodlet depending on how much talking went on; party animals
+  have an "Awesome Party".
 - **Mail**: bills arrive in the mailbox on Mondays and Thursdays and are paid there (Sims see
   to them on their own too); bills left three days bring the repo man, who takes things worth
   what's owed. The paper is delivered every morning, to read or look for a job in.

@@ -227,7 +227,7 @@ fn outings(
                 let fish = ["minnows", "anchovies", "goldfish", "perch", "rainbow trout", "salmon", "tuna", "swordfish", "lobster", "angelfish"];
                 let best = fish[(level as usize + rng.random_range(0..3)).min(fish.len() - 1)];
                 let worth: i64 = (0..caught).map(|_| rng.random_range(5..15) + level as i64 * 6).sum();
-                if let Some(mut h) = household.as_deref_mut() {
+                if let Some(h) = household.as_deref_mut() {
                     h.funds += worth;
                 }
                 notes.push(format!("{} is back from fishing with {caught} fish (the best: {best}), sold for §{worth}.", sim.first));

@@ -242,7 +242,7 @@ fn take_portraits(
                 }
             }
             // Until it renders, the camera follows the face (Sims move between frames).
-            Some(at) if shot.frame < at + 2 => {
+            Some(at) if shot.frame < at + 4 => {
                 let aim = sims.get(shot.sim).ok().and_then(|(sim, _, tf, skel, _)| {
                     let head = skel.rig.bones.iter().position(|b| b.name == "b__Head__").and_then(|i| joints.get(skel.joints[i]).ok())?;
                     Some((sim.age.is_little(), head.translation(), tf.rotation()))
@@ -265,7 +265,7 @@ fn take_portraits(
             }
             // The picture renders the frame after the camera is pointed; then the camera
             // rests and a staged Sim goes back.
-            Some(at) if shot.frame >= at + 2 => {
+            Some(at) if shot.frame >= at + 4 => {
                 camera.is_active = false;
                 if let Some((tf, vis)) = shot.staged {
                     commands.entity(shot.sim).insert((tf, vis));

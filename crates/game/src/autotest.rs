@@ -533,6 +533,14 @@ fn auto_action(
         *done = true;
         return;
     }
+    // "Party": the selected Sim throws a party.
+    if name == "Party" {
+        if let Ok(mut q) = sel.single_mut() {
+            q.push_player(crate::interact::Action::new("Throw a Party", crate::interact::ActionKind::ThrowParty, false));
+        }
+        *done = true;
+        return;
+    }
     // "Pizza": the selected Sim phones for a pizza.
     if name == "Pizza" {
         if let Ok(mut q) = sel.single_mut() {
