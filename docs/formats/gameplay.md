@@ -72,6 +72,23 @@ check (`Level10OfCriminalThiefBranch…`), and a few have no check (an event ful
 Their in-game names aren't keyed by anything in these rows; the string tables do hold them
 ("Swimming in Cash", "Become a Master Thief", "The Tinkerer"), with their scrapbook lines.
 
+### Writing
+
+The Writing skill's tuning is an XML named after its class with a hash
+(`Writing_0x49f73ba878b269dc`); its `<Current_Tuning>` holds `<kName value="…">` entries:
+per genre `kLength<Genre>Min/Max` (pages), `kRoyalty<Genre>Min/Max` and `kValue<Genre>Min/Max`;
+the writing speed (`kRateBasePPM` 0.12 pages a minute, `kRateBookWormBonusPPM`,
+`kRateMaxWritingSkillPPM` at level 10); quality odds per level
+(`kQualityLevel<N>ChanceFlop/Hit/BestSeller`, percent) shifted by
+`kQualityPercentChangePerHiddenSkillPoint` per book written in the genre; royalty multipliers
+(`kRoyaltyMaxWritingSkillMultiplier`, `kRoayltyMultiplierChangePerHiddenSkillPoint` — sic,
+`kRoyaltyTraitMultiplier`, `kRoyaltyQualityMultiplierFlop/Hit/BestSeller`), `kRoyaltyLength`
+(6 payments) at `kRoyaltyPayHour`; genre unlocks (`kMinLevelForMystery`,
+`kMinLevelForRomanceHelplessRomantic`, `kNumSciFiWrittenForFantasy`,
+`kNumBooksWrittenForMasterpiece`...); partial work every `kPartialWorkSubmitEveryXPercent` at
+`kPartialWorkPageValue<level>` a page. Titles for written books are `Books`' `WrittenBookTitles`
+rows (one column per genre), text under `Gameplay/Excel/Books/WrittenBookTitles:<key>`.
+
 ### Career branches
 
 A `Careers` level row's `BranchName` is `Base` (or empty) until the career branches, then

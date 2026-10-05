@@ -138,16 +138,23 @@ fn tab_content(
     mut commands: Commands,
     tab: Res<SimTab>,
     content: Query<Entity, With<TabContent>>,
-    sel: Query<(Entity, &Sim, &Skills, Option<&Job>, Has<AtWork>, Option<&crate::wishes::Wishes>, Option<&crate::lifetime::LifetimeWish>), With<Selected>>,
+    sel: Query<
+        (Entity, &Sim, &Skills, Option<&Job>, Has<AtWork>, Option<&crate::wishes::Wishes>, Option<&crate::lifetime::LifetimeWish>, Option<&crate::writing::Author>),
+        With<Selected>,
+    >,
     mut ui: Option<ResMut<crate::icons::GameUi>>,
     mut images: ResMut<Assets<Image>>,
     mut last: Local<String>,
 ) {
-    let (Ok(root), Ok((e, sim, skills, job, at_work, wishes, ltw))) = (content.single(), sel.single()) else { return };
+    let (Ok(root), Ok((e, sim, skills, job, at_work, wishes, ltw, author))) = (content.single(), sel.single()) else { return };
     // What's on show, to redraw only when it changes.
     let key = match *tab {
         SimTab::Needs => "needs".to_string(),
-        SimTab::Skills => format!("{e:?} {:?}", skills.0.iter().map(|(k, v)| (*k, (*v * 20.0) as i32)).collect::<Vec<_>>()),
+        SimTab::Skills => format!(
+            "{e:?} {:?} {:?}",
+            skills.0.iter().map(|(k, v)| (*k, (*v * 20.0) as i32)).collect::<Vec<_>>(),
+            author.map(|a| (a.books.len(), a.weekly_royalties(), a.draft.as_ref().map(|d| (d.pages / d.length * 50.0) as i32)))
+        ),
         SimTab::Career => format!("{e:?} {:?} {at_work}", job.map(|j| (j.track, j.level, j.performance as i32))),
         SimTab::Simology => format!("{e:?} {:?} {:?} {:?}", sim.traits, wishes.map(|w| (w.points, w.rewards.len())), ltw.map(|l| (l.wish, &l.status))),
     } + &format!(" {}", ui.is_some());
@@ -190,6 +197,21 @@ fn tab_content(
                     row.spawn((text(format!("{level}/{max}"), 13.0, Color::srgb(1.0, 0.9, 0.5)), Node { width: Val::Px(42.0), ..default() }));
                     meter(row, into, 130.0, Color::srgb(0.35, 0.8, 1.0));
                 });
+            }
+            // Their writing: the book under way, books written and royalties coming in.
+            if let Some(a) = author.filter(|a| a.draft.is_some() || !a.books.is_empty()) {
+                let mut parts = Vec::new();
+                if let Some(d) = &a.draft {
+                    parts.push(format!("Writing “{}” ({:.0}%)", d.title, d.pages / d.length * 100.0));
+                }
+                if !a.books.is_empty() {
+                    parts.push(format!("{} book{} written", a.books.len(), if a.books.len() == 1 { "" } else { "s" }));
+                }
+                let weekly = a.weekly_royalties();
+                if weekly > 0 {
+                    parts.push(format!("§{weekly} a week in royalties"));
+                }
+                p.spawn(text(parts.join(" · "), 13.0, Color::srgb(1.0, 0.9, 0.5)));
             }
         }
         SimTab::Career => match job {

@@ -660,7 +660,7 @@ fn world_click(
             Option<Res<crate::gardening::Garden>>,
         ),
     ),
-    on_lot: Query<&crate::visit::OnLot>,
+    (on_lot, writers): (Query<&crate::visit::OnLot>, Query<(Option<&crate::writing::Author>, &crate::interact::Skills)>),
 ) {
     if buy.is_some_and(|b| b.active) {
         return;
@@ -729,6 +729,7 @@ fn world_click(
             }
             let usable = if obj.kind.usable_by(actor_sim.age) { interactions_for(obj.kind) } else { &[] };
             let plant = opp_q.3.get(t).ok();
+            pie.submenus.clear();
             for (i, d) in usable.iter().enumerate() {
                 if plant.is_some_and(|p| !crate::gardening::offers(p, d.special)) {
                     continue;
@@ -738,6 +739,22 @@ fn world_click(
                     continue;
                 }
                 if d.special == Special::Homework && !hw_q.contains(actor) {
+                    continue;
+                }
+                if d.special == Special::WriteNovel {
+                    // Carry on with the book under way, or start one in a genre they can write.
+                    let Ok((author, skills)) = writers.get(actor) else { continue };
+                    if let Some(dr) = author.and_then(|a| a.draft.as_ref()) {
+                        options.push((format!("Continue Writing “{}” ({:.0}%)", dr.title, dr.pages / dr.length * 100.0), ActionKind::Object { target: t, def: i }));
+                    }
+                    let data = opp_q.0.as_ref().map(|u| &*u.data);
+                    let list: Vec<(String, ActionKind)> = crate::writing::GENRES
+                        .iter()
+                        .filter(|g| crate::writing::unlocked(g, actor_sim, skills, author, data))
+                        .map(|g| (format!("Write: {}", g.name), ActionKind::Object { target: t, def: i }))
+                        .collect();
+                    options.push(("Write Novel ›".to_string(), submenu_kind(pie.submenus.len())));
+                    pie.submenus.push(("Write Novel".to_string(), list));
                     continue;
                 }
                 if d.special == Special::FindJob {
@@ -851,6 +868,10 @@ fn pie_buttons(
     if let Some(a) = actor
         && let Ok(mut queue) = queues.get_mut(a)
     {
+        // A book in the genre chosen.
+        if let Some(g) = label.strip_prefix("Write: ").and_then(|n| crate::writing::GENRES.iter().position(|g| g.name == n)) {
+            commands.entity(a).insert(crate::writing::NovelPlan(g));
+        }
         queue.push_player(Action::new(label, kind, false));
     }
 }

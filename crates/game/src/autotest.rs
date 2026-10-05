@@ -211,32 +211,45 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_view_level.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(
                 Update,
+                // --use <Kind>[:<interaction>]: the selected Sim uses the nearest such object (the
+                // named interaction, or its first); USE_REPEAT=1 queues it again whenever they're
+                // idle. SKILL=<skill>:<level> sets a skill first.
                 (|args: Res<AutoArgs>,
                   mut done: Local<bool>,
                   time: Res<Time>,
-                  mut sel: Query<(&mut crate::interact::ActionQueue, &Transform, Option<&crate::visit::OnLot>), With<crate::sim::Selected>>,
+                  mut sel: Query<(&mut crate::interact::ActionQueue, &Transform, Option<&crate::visit::OnLot>, &mut crate::interact::Skills), With<crate::sim::Selected>>,
                   objects: Query<(Entity, &crate::interact::GameObject, &Transform, Option<&crate::visit::LotObject>)>| {
                     let Some(want) = &args.use_kind else { return };
+                    let Ok((mut q, tf, on, mut skills)) = sel.single_mut() else { return };
+                    if *done && std::env::var("USE_REPEAT").is_ok() && q.0.is_empty() {
+                        *done = false;
+                    }
                     if *done || time.elapsed_secs() < 8.0 {
                         return;
                     }
-                    let Ok((mut q, tf, on)) = sel.single_mut() else { return };
+                    if let Some((s, l)) = std::env::var("SKILL").ok().and_then(|v| v.split_once(':').map(|(s, l)| (s.to_string(), l.parse::<f32>().unwrap_or(0.0))))
+                        && let Some(name) = crate::save::SKILLS.iter().find(|n| n.eq_ignore_ascii_case(&s))
+                    {
+                        let v = skills.0.entry(name).or_insert(0.0);
+                        *v = v.max(l);
+                    }
                     if args.action.as_deref().is_some_and(|a| a.starts_with("Visit:")) && on.is_none() {
                         return;
                     }
                     let lot = on.map(|l| l.0);
                     let want = want.to_ascii_lowercase();
+                    let (want, named) = want.split_once(':').map_or((want.as_str(), None), |(k, n)| (k, Some(n)));
                     let best = objects
                         .iter()
                         .filter(|(_, o, _, l)| format!("{:?}", o.kind).to_ascii_lowercase() == want && l.map(|l| l.0) == lot)
                         .min_by(|a, b| a.2.translation.distance(tf.translation).total_cmp(&b.2.translation.distance(tf.translation)));
                     if let Some((e, o, ..)) = best
-                        && let Some(d) = crate::interact::interactions_for(o.kind).first()
+                        && let Some((i, d)) = crate::interact::interactions_for(o.kind).iter().enumerate().find(|(_, d)| named.is_none_or(|n| d.name.eq_ignore_ascii_case(n)))
                     {
                         *done = true;
                         info!("use test: {} on the {} ({e:?})", d.name, o.name);
                         q.0.clear();
-                        q.push_player(crate::interact::Action::new(d.name, crate::interact::ActionKind::Object { target: e, def: 0 }, false));
+                        q.push_player(crate::interact::Action::new(d.name, crate::interact::ActionKind::Object { target: e, def: i }, false));
                     }
                 })
                 .run_if(in_state(crate::PlayMode::Live)),

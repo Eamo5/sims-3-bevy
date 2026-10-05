@@ -380,6 +380,7 @@ fn main() {
         for r in &g.roofs {
             println!("roof {:?} tex {:?} tile {:?}", r.name, r.texture, r.tile);
         }
+        println!("writing: {} values; book titles: {:?}", g.writing.len(), g.book_titles.iter().map(|(g, t)| (g.as_str(), t.len(), t.first())).collect::<Vec<_>>());
         for w in &g.lifetime_wishes {
             println!("lifetime wish {} {} [{}] {} score {}", w.id, w.check, w.icon, w.number, w.score);
         }

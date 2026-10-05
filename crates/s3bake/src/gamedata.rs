@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 22;
+pub const GAMEDATA_VERSION: u32 = 24;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -215,6 +215,11 @@ pub struct GameDataBaked {
     /// fires burn.
     pub fx_slots: Vec<(crate::types::Key, Vec<[f32; 3]>)>,
     pub lifetime_wishes: Vec<LifetimeWishInfo>,
+    /// The Writing skill's tuning (`kLengthRomanceMin`, `kRoyaltyRomanceMax`, `kRateBasePPM`,
+    /// `kQualityLevel5ChanceHit`...).
+    pub writing: HashMap<String, f32>,
+    /// Titles for the books Sims write, by genre (`Fiction`, `SciFi`, `Romance`...).
+    pub book_titles: Vec<(String, Vec<String>)>,
 }
 
 /// A lifetime wish: one of the base game's "Lifetime Dreams" (`DreamsAndPromisesNodes`), with
@@ -444,6 +449,24 @@ fn records(xml: &str, row: &str) -> Vec<HashMap<String, String>> {
     out
 }
 
+/// A tuning file's current values: `<kName value="1.5">` → ("kName", 1.5).
+fn tuning_values(xml: &str) -> HashMap<String, f32> {
+    let cur = xml.split("<Current_Tuning>").nth(1).unwrap_or(xml);
+    let cur = cur.split("</Current_Tuning>").next().unwrap_or(cur);
+    let mut out = HashMap::new();
+    let mut rest = cur;
+    while let Some(i) = rest.find("<k") {
+        rest = &rest[i + 1..];
+        let Some(end) = rest.find('>') else { break };
+        let tag = &rest[..end];
+        let name = tag.split_whitespace().next().unwrap_or("");
+        if let Some(v) = tag.split("value=\"").nth(1).and_then(|v| v.split('"').next()).and_then(|v| v.trim().parse::<f32>().ok()) {
+            out.insert(name.to_string(), v);
+        }
+    }
+    out
+}
+
 fn unescape(s: &str) -> String {
     s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
 }
@@ -460,8 +483,10 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             names.extend(s3formats::audio::parse_name_map(&d));
         }
     }
+    // (Tuning for a class is named after it with a hash: `Writing_0x49f73ba878b269dc`.)
     let xml = |name: &str| -> Option<String> {
-        let e = pkg.of_type(T_XML).find(|e| names.get(&e.key.i).is_some_and(|n| n.eq_ignore_ascii_case(name)))?;
+        let named = |n: &String| n.eq_ignore_ascii_case(name) || n.strip_prefix(name).is_some_and(|rest| rest.starts_with("_0x"));
+        let e = pkg.of_type(T_XML).find(|e| names.get(&e.key.i).is_some_and(named))?;
         pkg.read(e).ok().map(|d| String::from_utf8_lossy(&d).into_owned())
     };
     let strings = s3formats::stbl::load_english(pkgs);
@@ -785,6 +810,28 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 hours: (num(&f, "MinSpawnFrequency"), num(&f, "MaxSpawnFrequency")),
             });
         }
+    }
+    // Writing: the skill's tuning, and the titles written books get.
+    if let Some(x) = xml("Writing") {
+        out.writing = tuning_values(&x);
+    }
+    if let Some(x) = xml("Books") {
+        let mut by_genre: Vec<(String, Vec<String>)> = Vec::new();
+        for f in records(&x, "WrittenBookTitles") {
+            let mut genres: Vec<(&String, &String)> = f.iter().collect();
+            genres.sort();
+            for (genre, key) in genres {
+                let title = text("Books/WrittenBookTitles", key);
+                if title.is_empty() {
+                    continue;
+                }
+                match by_genre.iter_mut().find(|(g, _)| g == genre) {
+                    Some((_, v)) => v.push(title),
+                    None => by_genre.push((genre.clone(), vec![title])),
+                }
+            }
+        }
+        out.book_titles = by_genre;
     }
     // Lifetime wishes: the base game's lifetime dreams, with their instances' scores.
     if let (Some(nodes), Some(inst)) = (xml("DreamsAndPromisesNodes"), xml("DreamNodeInstanceDefaults")) {

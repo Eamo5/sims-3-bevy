@@ -54,10 +54,19 @@ installation is unreachable.
   use (toilets clog), less often the better they are; Sims repair them with the game's own
   repair animations, learning Handiness (handy and neat Sims do it on their own), or the
   repairman can be phoned. Fishing trips teach Fishing and bring back a catch to sell.
+- **Writing novels** by the game's Writing tuning: at a computer, "Write Novel" offers the
+  genres the Sim has opened up (Fiction and Non-Fiction to start; Sci-Fi, Trashy, Drama,
+  Humor, Mystery and Romance with skill — sooner for the good-humoured and hopeless romantics;
+  Children's with painting too; Satire, Fantasy, Vaudeville and the Masterpiece after enough
+  books of others), or carries on with the book under way. Pages go by at the Sim's writing
+  speed (bookworms and skilled writers faster) with a little pay for partial work; a finished
+  book gets one of the game's titles, turns out a flop, a success, a hit or a best seller, and
+  pays royalties at noon each week, six times. The Skills tab shows the book under way, books
+  written and the week's royalties. Kept in saves.
 - **Lifetime wishes**, the base game's own (CEO of a Mega-Corporation, Leader of the Free
   World, Become a Master Thief, Rock Star, Swimming in Cash, Super Popular, Heartbreaker,
-  Master of the Arts, Renaissance Sim, Surrounded by Family, Jack of All Trades and more;
-  26 in all), with their icons, targets and rewards from the game's dream tables. Create-a-Sim
+  Master of the Arts, Renaissance Sim, Professional Author, Surrounded by Family, Jack of All
+  Trades and more; 27 in all), with their icons, targets and rewards from the game's dream tables. Create-a-Sim
   offers five that suit the Sim's traits; a child growing into a teen picks one in the game's
   dialog; Sims moving in without one take the best fit (one not already half done). The wish
   sits beside the others with its progress (§12,000 of §50,000, Painting 7/10 · Guitar 4/10,

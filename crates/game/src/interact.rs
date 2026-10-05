@@ -344,6 +344,8 @@ pub enum Special {
     Swim,
     /// Do the day's homework.
     Homework,
+    /// Write (a page at a time) the book under way.
+    WriteNovel,
 }
 
 pub struct InteractionDef {
@@ -462,7 +464,7 @@ static TV: [InteractionDef; 2] = [
 ];
 static COMPUTER: [InteractionDef; 4] = [
     def("Play Computer Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 60.0], Pose::Use),
-    InteractionDef { autonomous: false, skill: Some("Writing"), ..def("Write Novel", 90.0, [0.0, 0.0, -4.0, 0.0, 0.0, 10.0], Pose::Use) },
+    InteractionDef { autonomous: false, skill: Some("Writing"), special: Special::WriteNovel, ..def("Write Novel", 120.0, [0.0, 0.0, -4.0, 0.0, 0.0, 10.0], Pose::Use) },
     InteractionDef { autonomous: false, special: Special::FindJob, ..def("Find a Job", 20.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::QuitJob, ..def("Quit Job", 5.0, N, Pose::Use) },
 ];
@@ -1353,7 +1355,7 @@ fn run_actions(
                                     }
                                     match d.special {
                                         // (Getting out of the pool is the swim module's.)
-                                        Special::FindJob | Special::Swim => {}
+                                        Special::FindJob | Special::Swim | Special::WriteNovel => {}
                                         Special::Homework => {
                                             notes.push(format!("{} finished their homework.", sim.first));
                                             commands.entity(me).remove::<crate::rabbitholes::Homework>().queue_silenced(|mut e: EntityWorldMut| {
