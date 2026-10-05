@@ -83,6 +83,9 @@ pub enum ObjectKind {
     Collectible,
     /// Where the fish are biting.
     FishingSpot,
+    /// A butterfly fluttering about, or a beetle in the grass, to catch.
+    Butterfly,
+    Beetle,
     /// Where the bills arrive.
     Mailbox,
     /// The morning paper.
@@ -198,7 +201,7 @@ impl ObjectKind {
             Self::Table => "Surfaces",
             Self::Light => "Lighting",
             Self::Plant | Self::Decoration => "Decor",
-            Self::Meal | Self::DirtyDishes | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot => "Misc",
+            Self::Meal | Self::DirtyDishes | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
             Self::Other => "Misc",
         }
@@ -325,6 +328,8 @@ pub enum Special {
     Collect,
     /// Fish (the catch is reckoned at the end).
     Fish,
+    /// Try to catch an insect.
+    Catch,
 }
 
 pub struct InteractionDef {
@@ -384,6 +389,7 @@ static GARDEN: [InteractionDef; 3] = [
 static COLLECTIBLE: [InteractionDef; 1] = [InteractionDef { special: Special::Collect, ..def("Collect", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 10.0], Pose::Use) }];
 static FISHING_SPOT: [InteractionDef; 1] =
     [InteractionDef { special: Special::Fish, skill: Some("Fishing"), ..def("Fish", 60.0, [-4.0, -4.0, -3.0, 0.0, -2.0, 25.0], Pose::Use) }];
+static INSECT: [InteractionDef; 1] = [InteractionDef { special: Special::Catch, ..def("Catch", 2.0, [0.0, 0.0, 0.0, 0.0, -1.0, 12.0], Pose::Use) }];
 static TOMBSTONE: [InteractionDef; 1] = [def("Mourn", 20.0, [0.0, 0.0, -2.0, 15.0, 0.0, -10.0], Pose::Stand)];
 static DISHES: [InteractionDef; 1] = [InteractionDef { special: Special::CleanUp, ..def("Clean Up", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 0.0], Pose::Use) }];
 /// How a plate of food fills hunger, per hour, and how long it takes to eat.
@@ -491,6 +497,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Weed" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_pullWeeds_x"]),
         "Harvest" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_bendover_start_x"), &["a2o_gardening_bendover_harvestmed_x"]),
         "Collect" if kind == ObjectKind::Collectible => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_harvestlow_x"]),
+        "Catch" if kind == ObjectKind::Butterfly => A::new(None, &["a2o_butterfly_catch_x"]),
+        "Catch" if kind == ObjectKind::Beetle => A::new(None, &["a2o_beetle_catch_x"]),
         "Fish" if kind == ObjectKind::FishingSpot => {
             A::new(Some("a2o_fishHereWith_cast_normal_x"), &["a2o_fishHereWith_idle1_x", "a2o_fishHereWith_idle2_x", "a2o_fishHereWith_idle3_x"])
         }
@@ -612,6 +620,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::GardenPlant => &GARDEN,
         ObjectKind::Collectible => &COLLECTIBLE,
         ObjectKind::FishingSpot => &FISHING_SPOT,
+        ObjectKind::Butterfly | ObjectKind::Beetle => &INSECT,
         ObjectKind::Mailbox => &MAILBOX,
         ObjectKind::Newspaper => &NEWSPAPER,
         ObjectKind::Tv => &TV,
@@ -1371,6 +1380,9 @@ fn run_actions(
                                         }
                                         Special::Fish => {
                                             commands.entity(me).insert(crate::collecting::CollectRequest::Fished { spot: *target, minutes: d.minutes });
+                                        }
+                                        Special::Catch => {
+                                            commands.entity(me).insert(crate::collecting::CollectRequest::Caught(*target));
                                         }
                                         Special::PayBills => {
                                             if let Some(h) = household.as_mut() {

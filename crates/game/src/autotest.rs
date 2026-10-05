@@ -160,7 +160,7 @@ impl Plugin for AutoTestPlugin {
         }
         app.insert_resource(args)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, apply_cam.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -337,8 +337,18 @@ fn auto_pick_world(
     }
 }
 
+/// WATCH_INSECT=<distance>: the camera keeps to the first butterfly or beetle about.
+fn watch_insect(mut q: Query<&mut SimsCamera>, insects: Query<(&GlobalTransform, &crate::interact::GameObject), With<crate::collecting::Insect>>) {
+    let Some(d) = std::env::var("WATCH_INSECT").ok().and_then(|v| v.parse::<f32>().ok()) else { return };
+    // (Butterflies first.)
+    let first = insects.iter().find(|(_, o)| o.kind == crate::interact::ObjectKind::Butterfly).or_else(|| insects.iter().next()).map(|(g, _)| g);
+    let (Ok(mut cam), Some(g)) = (q.single_mut(), first) else { return };
+    cam.look_at(g.translation());
+    cam.distance = d;
+}
+
 /// Applies `--cam` shortly after play starts (after the move-in camera placement).
-fn apply_cam(args: Res<AutoArgs>, time: Res<Time>, mut since: Local<Option<f32>>, mut done: Local<bool>, mut q: Query<&mut SimsCamera>) {
+fn apply_cam(args: Res<AutoArgs>, time: Res<Time>, mut since: Local<Option<f32>>, mut done: Local<bool>, mut q: Query<&mut SimsCamera>, world: Option<Res<crate::loading::CurrentWorld>>) {
     let Some(c) = args.cam else { return };
     if *done {
         return;
@@ -346,7 +356,9 @@ fn apply_cam(args: Res<AutoArgs>, time: Res<Time>, mut since: Local<Option<f32>>
     // (Held for the first seconds of play, over the move-in camera.)
     let t0 = *since.get_or_insert(time.elapsed_secs());
     if let Ok(mut cam) = q.single_mut() {
-        cam.look_at(Vec3::new(c[0], 0.0, c[1]));
+        // (At the ground there.)
+        let y = world.as_ref().map_or(0.0, |w| w.data.heightmap.sample(c[0], c[1]));
+        cam.look_at(Vec3::new(c[0], y, c[1]));
         cam.distance = c[2];
         cam.yaw = c[3];
         cam.pitch = c[4];

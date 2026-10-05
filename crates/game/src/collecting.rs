@@ -1,6 +1,7 @@
 //! Collecting: the gems, metals and space rocks the world's spawners leave lying about community
-//! lots, and the fish in their ponds. Finds go into the household's collection (a journal of all
-//! that's been found, and what's still held, worth money when sold).
+//! lots, the butterflies and beetles about them, and the fish in their ponds. Finds go into the
+//! household's collection (a journal of all that's been found, and what's still held, worth
+//! money when sold).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -28,6 +29,7 @@ impl Plugin for CollectingPlugin {
             .init_resource::<LotFinds>()
             .init_resource::<JournalPanel>()
             .add_systems(Update, (lot_finds, collect_requests, toggle_journal, journal_panel, sell_button).chain().run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, (flutter, tint_insects).run_if(in_state(PlayMode::Live)))
             .add_systems(OnExit(PlayMode::Live), |mut p: ResMut<JournalPanel>| *p = JournalPanel::default());
     }
 }
@@ -61,20 +63,39 @@ pub struct FishingSpot {
     pub class: String,
 }
 
-/// A Sim's finished collecting: a pick-up, or a spell of fishing at a spot.
+/// A Sim's finished collecting: a pick-up, a try at catching an insect, or a spell of fishing.
 #[derive(Component)]
 pub enum CollectRequest {
     Pick(Entity),
+    Caught(Entity),
     Fished { spot: Entity, minutes: f32 },
 }
 
-/// A rock spawner of the lot being visited, and what it's put out.
+/// A butterfly or beetle: wanders about where it turned up (butterflies in the air).
+#[derive(Component)]
+pub struct Insect {
+    home: Vec3,
+    ground: f32,
+    seed: f32,
+    flies: bool,
+}
+
+/// An insect's body is tinted its kind's colour once built.
+#[derive(Component)]
+struct InsectTint(Color);
+
+/// A rock or insect spawner of the lot being visited, and what it's put out.
 struct Spawner {
     class: String,
     at: Vec3,
     next: f64,
     out: Vec<Entity>,
+    /// Butterflies are about by day only.
+    butterflies: bool,
 }
+
+/// The hours butterflies are about (the game's insect table).
+const BUTTERFLY_HOURS: std::ops::Range<f32> = 7.0..19.0;
 
 /// The finds and fishing spots of the community lot being visited.
 #[derive(Resource, Default)]
@@ -180,8 +201,22 @@ fn lot_finds(
                     ))
                     .id();
                 finds.spots.push(e);
+            } else if class.starts_with("InsectSpawner")
+                && let Some(info) = ui.data.spawners.iter().find(|s| s.class == class)
+            {
+                let butterflies = info.items.iter().any(|(k, _)| k.starts_with("Butterfly"));
+                let mut s = Spawner { class, at, next: clock.minutes + rng.random_range(20.0..90.0), out: Vec::new(), butterflies };
+                if !butterflies || BUTTERFLY_HOURS.contains(&clock.hour_f()) {
+                    let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+                    for _ in 0..info.capacity.min(2) {
+                        if let Some(e) = spawn_insect(&mut commands, &mut assets, &mut ctx, &catalog, &data, ui, &world.data, v, &s) {
+                            s.out.push(e);
+                        }
+                    }
+                }
+                finds.spawners.push(s);
             } else if class.starts_with("RockGemMetalSpawner") && ui.data.spawners.iter().any(|s| s.class == class) {
-                let mut s = Spawner { class, at, next: clock.minutes + rng.random_range(60.0..600.0), out: Vec::new() };
+                let mut s = Spawner { class, at, next: clock.minutes + rng.random_range(60.0..600.0), out: Vec::new(), butterflies: false };
                 // Something already lying about, most of the time.
                 if rng.random_bool(0.7) {
                     let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
@@ -200,6 +235,14 @@ fn lot_finds(
 
     for i in 0..finds.spawners.len() {
         finds.spawners[i].out.retain(|e| alive.contains(*e));
+        // Butterflies are gone by evening.
+        let s = &mut finds.spawners[i];
+        if s.butterflies && !BUTTERFLY_HOURS.contains(&clock.hour_f()) {
+            for e in s.out.drain(..) {
+                commands.entity(e).try_despawn();
+            }
+            continue;
+        }
         let s = &finds.spawners[i];
         if clock.minutes < s.next {
             continue;
@@ -209,7 +252,11 @@ fn lot_finds(
         let next = clock.minutes + rng.random_range(lo..hi) as f64 * 60.0;
         let room = s.out.len() < info.capacity as usize;
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-        let made = if room { spawn_find(&mut commands, &mut assets, &mut ctx, &catalog, &data, ui, &world.data, building.as_deref(), v, s) } else { None };
+        let made = match (room, s.class.starts_with("InsectSpawner")) {
+            (false, _) => None,
+            (true, true) => spawn_insect(&mut commands, &mut assets, &mut ctx, &catalog, &data, ui, &world.data, v, s),
+            (true, false) => spawn_find(&mut commands, &mut assets, &mut ctx, &catalog, &data, ui, &world.data, building.as_deref(), v, s),
+        };
         let s = &mut finds.spawners[i];
         s.next = next;
         s.out.extend(made);
@@ -258,7 +305,127 @@ fn spawn_find(
     Some(o.entity)
 }
 
-/// What a Sim brings back: the find picked up, or the catch from a spell of fishing.
+/// Lets one of an insect spawner's butterflies or beetles loose near it.
+#[allow(clippy::too_many_arguments)]
+fn spawn_insect(
+    commands: &mut Commands,
+    assets: &mut ObjectAssets,
+    ctx: &mut AssetCtx,
+    catalog: &Catalog,
+    data: &Baked,
+    ui: &crate::icons::GameUi,
+    world: &crate::loading::WorldInfo,
+    v: &VisitedLot,
+    s: &Spawner,
+) -> Option<Entity> {
+    let spawner = ui.data.spawners.iter().find(|x| x.class == s.class)?;
+    let key = pick_weighted(&spawner.items, |k| info(ui, k).is_some_and(|c| matches!(c.kind, CollectKind::Butterfly | CollectKind::Beetle)))?.to_string();
+    let c = info(ui, &key)?;
+    let objd = data.0.catalog.iter().find(|o| o.instance_name.eq_ignore_ascii_case(&c.model)).map(|o| o.objd)?;
+    let mut rng = rand::rng();
+    let spot = (0..12).find_map(|_| {
+        let p = s.at.xz() + Vec2::new(rng.random_range(-SPREAD..SPREAD), rng.random_range(-SPREAD..SPREAD));
+        v.grid.cell_of(p).filter(|(x, z)| !v.grid.is_blocked(*x, *z)).map(|_| p)
+    })?;
+    let ground = world.heightmap.sample(spot.x, spot.y);
+    let flies = c.kind == CollectKind::Butterfly;
+    let at = Vec3::new(spot.x, ground + if flies { 1.1 } else { 0.02 }, spot.y);
+    let o = crate::home::spawn_game_object(commands, assets, ctx, catalog, objd, at, rng.random_range(0.0..std::f32::consts::TAU))?;
+    let (kind, name) = if flies { (ObjectKind::Butterfly, "Butterfly") } else { (ObjectKind::Beetle, "Beetle") };
+    debug!("{key} let loose at {at:?} by {}", s.class);
+    commands.entity(o.entity).remove::<Obstacle>().insert((
+        Pickup { key: key.clone() },
+        Insect { home: at, ground, seed: rng.random_range(0.0..100.0), flies },
+        InsectTint(insect_color(&key)),
+        LotObject(v.lot),
+        Floor(1),
+    ));
+    commands.entity(o.entity).queue_silenced(move |mut e: EntityWorldMut| {
+        if let Some(mut g) = e.get_mut::<GameObject>() {
+            g.kind = kind;
+            g.name = name.to_string();
+            g.half = Vec2::splat(0.25);
+        }
+    });
+    Some(o.entity)
+}
+
+/// Each kind's colour (the model is the same moth or beetle for all of them).
+fn insect_color(key: &str) -> Color {
+    let k = key.trim_start_matches("Butterfly").trim_start_matches("Beetle");
+    match k {
+        "Moth" => Color::srgb(0.75, 0.68, 0.55),
+        "Monarch" => Color::srgb(1.0, 0.55, 0.15),
+        "Gold" => Color::srgb(1.0, 0.82, 0.3),
+        "Red" | "Lady" => Color::srgb(0.95, 0.2, 0.15),
+        "Blue" | "Water" => Color::srgb(0.3, 0.5, 1.0),
+        "Green" | "Japanese" => Color::srgb(0.35, 0.85, 0.4),
+        "Purple" => Color::srgb(0.65, 0.35, 0.95),
+        "Silver" | "Trilobite" => Color::srgb(0.85, 0.87, 0.92),
+        "Zebra" => Color::srgb(0.95, 0.95, 0.9),
+        "Kite" | "Rainbow" => Color::srgb(0.95, 0.5, 0.9),
+        "Light" => Color::srgb(1.0, 1.0, 0.55),
+        "Spotted" => Color::srgb(1.0, 0.6, 0.25),
+        "Cockroach" | "Rhino" | "Stag" => Color::srgb(0.6, 0.42, 0.3),
+        _ => Color::WHITE,
+    }
+}
+
+/// Butterflies flit about over their patch, wings beating; beetles trundle through the grass.
+/// (Held still while someone tries to catch them.)
+fn flutter(time: Res<Time>, mut q: Query<(&Insect, &UsedBy, &mut Transform)>) {
+    let t = time.elapsed_secs();
+    for (i, used, mut tf) in &mut q {
+        if used.0.is_some() {
+            continue;
+        }
+        let s = i.seed;
+        let (r, speed) = if i.flies { (2.2, 0.35) } else { (0.6, 0.08) };
+        let at = |t: f32| {
+            i.home.xz()
+                + Vec2::new((t * speed + s).sin() + (t * speed * 1.7 + s * 3.0).sin() * 0.4, (t * speed * 0.8 + s * 2.0).cos() + (t * speed * 1.3 + s).cos() * 0.4) * r * 0.7
+        };
+        let (p, ahead) = (at(t), at(t + 0.1));
+        let y = if i.flies { i.ground + 1.0 + (t * 1.7 + s).sin() * 0.35 + (t * 5.3 + s).sin() * 0.05 } else { i.ground + 0.02 };
+        let dir = ahead - p;
+        tf.translation = Vec3::new(p.x, y, p.y);
+        if dir.length_squared() > 1e-8 {
+            tf.rotation = Quat::from_rotation_y(dir.x.atan2(dir.y));
+        }
+        // Wings: the body narrows and widens as they beat.
+        if i.flies {
+            let beat = 0.55 + 0.45 * (t * 22.0 + s).sin().abs();
+            // (A little larger than life, to be seen from the usual camera height.)
+            tf.scale = Vec3::new(beat, 1.0, 1.0) * 1.4;
+        }
+    }
+}
+
+/// Tints an insect's body its kind's colour once its meshes are in place.
+fn tint_insects(
+    mut commands: Commands,
+    q: Query<(Entity, &InsectTint)>,
+    children: Query<&Children>,
+    parts: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+) {
+    for (e, tint) in &q {
+        let mut done = false;
+        for d in children.iter_descendants(e) {
+            let Ok(m) = parts.get(d) else { continue };
+            let Some(base) = mats.get(&m.0).cloned() else { continue };
+            let new = mats.add(StandardMaterial { base_color: tint.0, ..base });
+            commands.entity(d).insert(MeshMaterial3d(new));
+            done = true;
+        }
+        if done {
+            commands.entity(e).remove::<InsectTint>();
+        }
+    }
+}
+
+/// What a Sim brings back: the find picked up, the insect caught, or the catch from a spell of
+/// fishing.
 #[allow(clippy::too_many_arguments)]
 fn collect_requests(
     mut commands: Commands,
@@ -291,6 +458,26 @@ fn collect_requests(
                     "{} found {a}{} (worth §{value}){}",
                     sim.first,
                     c.name,
+                    if new { ". A new find for the collection!" } else { "." }
+                ));
+                life.write(crate::life::LifeEvent::new(e, crate::life::LifeEventKind::Finished { activity: "Collect", completed: true }));
+            }
+            CollectRequest::Caught(target) => {
+                let Ok(p) = pickups.get(*target) else { continue };
+                let Some(c) = info(&ui, &p.key) else { continue };
+                let what = if c.kind == CollectKind::Butterfly { "butterfly" } else { "beetle" };
+                commands.entity(*target).try_despawn();
+                if !rng.random_bool(0.8) {
+                    notes.push(format!("{} tried to catch the {what}, but it got away.", sim.first));
+                    continue;
+                }
+                let new = collection.add(&c.key, c.min_price as i64);
+                let a = if c.name.starts_with(['A', 'E', 'I', 'O', 'U']) { "an" } else { "a" };
+                notes.push(format!(
+                    "{} caught {a} {} (worth §{}){}",
+                    sim.first,
+                    c.name,
+                    c.min_price,
                     if new { ". A new find for the collection!" } else { "." }
                 ));
                 life.write(crate::life::LifeEvent::new(e, crate::life::LifeEventKind::Finished { activity: "Collect", completed: true }));

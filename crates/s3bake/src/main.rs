@@ -27,6 +27,17 @@ fn main() {
         i += 1;
     }
     let root = s3bake::default_root();
+    if let Some(i) = args.iter().position(|a| a == "--near") {
+        // --near <world> <x> <z> <r>: world instances (and their catalogue objects) near a point.
+        let w: s3bake::WorldBaked = s3bake::read_value(&root.world_dir(&args[i + 1]).join("world.bin")).expect("world");
+        let (x, z, r): (f32, f32, f32) = (args[i + 2].parse().unwrap(), args[i + 3].parse().unwrap(), args[i + 4].parse().unwrap());
+        let cat: Vec<s3bake::types::CatalogEntry> = s3bake::pack::read_value(&root.global_dir().join("catalog.bin")).unwrap_or_default();
+        for inst in w.instances.iter().filter(|o| ((o.position[0] - x).powi(2) + (o.position[2] - z).powi(2)).sqrt() < r) {
+            let owner = cat.iter().find(|c| c.models.contains(&inst.model)).map_or("?", |c| c.instance_name.as_str());
+            println!("{:?} at {:?} lot {:?} ({owner})", inst.model, inst.position, inst.lot);
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--households") {
         // --households <world>: each premade household with its members' ages (CAS age bits).
         let p = s3bake::load_premades(&root, &args[i + 1]).expect("premades not baked");
@@ -220,8 +231,15 @@ fn main() {
         let want = args.get(i + 1).map(|s| s.to_ascii_lowercase()).unwrap_or_default();
         let root = s3bake::default_root();
         let cat: Vec<s3bake::types::CatalogEntry> = s3bake::pack::read_value(&root.global_dir().join("catalog.bin")).expect("no catalog");
+        let models = std::env::var("MODELS").is_ok().then(|| s3bake::PackReader::open(&root.global_dir().join("models.pack")).ok()).flatten();
         for c in cat.iter().filter(|c| c.instance_name.to_ascii_lowercase().contains(&want) || c.name.to_ascii_lowercase().contains(&want)) {
             println!("{:08X}:{:08X}:{:016X} {:30} {:30} §{} models {} script {}", c.objd.0, c.objd.1, c.objd.2, c.instance_name, c.name, c.price, c.models.len(), c.script);
+            // MODELS=1: each model's parts (vertices, bounds, texture, blend mode).
+            for m in models.iter().flat_map(|p| c.models.iter().filter_map(|k| p.get::<s3bake::BakedModel>(k))) {
+                for p in &m.parts {
+                    println!("    part {} verts, bounds {:?}..{:?}, tex {:?}, mode {}", p.positions.len(), p.bmin, p.bmax, p.texture, p.mode);
+                }
+            }
         }
         return;
     }

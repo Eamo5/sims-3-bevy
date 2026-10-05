@@ -137,7 +137,8 @@ installation is unreachable.
   away and bring them back.
 - **Collecting and fishing**: the world builders' spawners leave gems, metals and space rocks
   about the community lots (from the game's own tables, with their odds and prices); Sims
-  crouch to collect them, and fish at the lots' fishing spots with the game's casting and
+  crouch to collect them, catch the butterflies flitting about by day and the beetles in the
+  grass (each kind in its colour, caught with the game's catching animations), and fish at the lots' fishing spots with the game's casting and
   reeling animations, rod in hand, catching what each spot holds by Fishing skill. Finds go in
   a Collection Journal (J) showing everything found and still to find, and sell for money.
 - **Water**: the sea and the ponds ripple, reflect the sky and the sun's glints (more at
