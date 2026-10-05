@@ -38,6 +38,27 @@ fn main() {
         }
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--png") {
+        // --png <dir> <name>...: the interface pictures so named, written out as PNG files.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let dir = std::path::Path::new(&args[i + 1]);
+        std::fs::create_dir_all(dir).ok();
+        for name in &args[i + 2..] {
+            // (`layout:<name>` for an interface layout, 0x2F7D0008.)
+            let (t, name, ext) = match name.strip_prefix("layout:") {
+                Some(n) => (0x2F7D0008, n, "xml"),
+                None => (0x2F7D0004, name.as_str(), "png"),
+            };
+            match pkgs.read_ti(t, s3pkg::fnv64(name)) {
+                Some(d) => {
+                    std::fs::write(dir.join(format!("{name}.{ext}")), &d).ok();
+                    println!("{name}: {} bytes", d.len());
+                }
+                None => println!("{name}: not found"),
+            }
+        }
+        return;
+    }
     if args.iter().any(|a| a == "--geostates") {
         // --geostates: catalogue objects whose models have geometry states, with the states.
         let pkgs = s3pkg::install::open_install(&data, |_| true);

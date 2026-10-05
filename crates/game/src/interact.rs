@@ -709,6 +709,8 @@ pub enum ActionKind {
     EatHere,
     /// Phone for a pizza to be delivered.
     OrderPizza,
+    /// Phone the adoption agency: a baby (0), toddler (1) or child (2), a girl when `female`.
+    Adopt { age: u8, female: bool },
     /// Fix a broken object.
     Repair { target: Entity },
     /// Phone for the repairman.
@@ -1113,7 +1115,7 @@ fn run_actions(
                         ActionKind::GoToWork | ActionKind::Visit { .. } | ActionKind::GoToLot { .. } | ActionKind::GoHomeFromLot => way_out.map(|p| (p, 1)),
                         ActionKind::JoinCareer { target, .. } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
                         ActionKind::Repair { target } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
-                        ActionKind::Invite { .. } | ActionKind::OrderPizza | ActionKind::CallRepairman | ActionKind::ThrowParty => {
+                        ActionKind::Invite { .. } | ActionKind::OrderPizza | ActionKind::Adopt { .. } | ActionKind::CallRepairman | ActionKind::ThrowParty => {
                             action.phase = Phase::Running(0.0);
                             anim.pose = Pose::Talk;
                             continue;
@@ -1257,7 +1259,13 @@ fn run_actions(
                                 anim.pose = Pose::Use;
                                 commands.entity(me).insert(crate::anim::ActionClip::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_plantSeeds_x"]));
                             }
-                            ActionKind::Invite { .. } | ActionKind::BuyReward(_) | ActionKind::EatHere | ActionKind::OrderPizza | ActionKind::CallRepairman | ActionKind::ThrowParty => {}
+                            ActionKind::Invite { .. }
+                            | ActionKind::BuyReward(_)
+                            | ActionKind::EatHere
+                            | ActionKind::OrderPizza
+                            | ActionKind::Adopt { .. }
+                            | ActionKind::CallRepairman
+                            | ActionKind::ThrowParty => {}
                             ActionKind::Repair { target } => {
                                 if let Ok((obj, otf, _, _)) = objects.get(*target) {
                                     tf.rotation = otf.rotation * Quat::from_rotation_y(std::f32::consts::PI);
@@ -1597,6 +1605,18 @@ fn run_actions(
                                 finished = true;
                                 commands.insert_resource(RepairmanVisit { arrive_at: clock.minutes + 90.0 });
                                 notes.push(format!("{} called the repairman. He'll be by soon (§{REPAIRMAN_PRICE}).", sim.first));
+                            }
+                        }
+                        ActionKind::Adopt { age, female } => {
+                            if elapsed >= 5.0 {
+                                finished = true;
+                                let age = [Age::Baby, Age::Toddler, Age::Child][(*age as usize).min(2)];
+                                commands.insert_resource(crate::services::AdoptionOrder { arrive_at: clock.minutes + 120.0, age, female: *female });
+                                notes.push(format!(
+                                    "{} called the adoption agency. The social worker will bring {} home within a couple of hours.",
+                                    sim.first,
+                                    crate::services::adoptee(age, *female)
+                                ));
                             }
                         }
                         ActionKind::OrderPizza => {

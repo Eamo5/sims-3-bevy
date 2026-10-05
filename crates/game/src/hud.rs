@@ -1414,16 +1414,17 @@ fn update_trait_icons(
 fn phone_button(
     mut commands: Commands,
     buttons: Query<&Interaction, (Changed<Interaction>, With<PhoneButton>)>,
-    selected: Query<(Entity, &Relationships), With<Selected>>,
+    selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
     away: Query<(Entity, &Sim), (With<crate::interact::OffLot>, Without<crate::interact::Invited>)>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut pie: ResMut<PieMenu>,
     mut notes: ResMut<Notifications>,
+    objects: Query<&GameObject>,
 ) {
     if !buttons.iter().any(|i| *i == Interaction::Pressed) {
         return;
     }
-    let Ok((actor, rels)) = selected.single() else { return };
+    let Ok((actor, rels, me)) = selected.single() else { return };
     let mut known: Vec<(f32, String, ActionKind)> = away
         .iter()
         .filter(|(e, _)| rels.0.contains_key(e))
@@ -1439,6 +1440,18 @@ fn phone_button(
         (format!("Throw a Party (§{})", crate::interact::PARTY_PRICE), ActionKind::ThrowParty),
     ];
     options.extend(known.into_iter().take(9).map(|(_, l, k)| (l, k)));
+    // Grown-ups can adopt (a baby only where there's a crib for it).
+    pie.submenus.clear();
+    if me.age.is_grown() && me.age != crate::sim::Age::Child {
+        let crib = objects.iter().any(|o| o.kind == crate::interact::ObjectKind::Crib);
+        let list: Vec<(String, ActionKind)> = [(0u8, "Baby"), (1, "Toddler"), (2, "Child")]
+            .into_iter()
+            .filter(|(a, _)| *a > 0 || crib)
+            .flat_map(|(a, n)| [(format!("{n} Girl"), ActionKind::Adopt { age: a, female: true }), (format!("{n} Boy"), ActionKind::Adopt { age: a, female: false })])
+            .collect();
+        options.push(("Adopt a Child ›".to_string(), submenu_kind(pie.submenus.len())));
+        pie.submenus.push(("Adopt".to_string(), list));
+    }
     let at = windows.single().ok().map_or(Vec2::new(600.0, 600.0), |w| Vec2::new(w.width() * 0.4, w.height() - 260.0));
     close_pie(&mut commands, &mut pie);
     pie.at = at;

@@ -180,7 +180,9 @@ installation is unreachable.
   use its shower.
 - **Social worker**: a baby or toddler left starving for six hours, or a child for twelve
   (warned halfway), brings the social worker by car; she takes the child away and the family
-  is heartbroken.
+  is heartbroken. She also brings adopted children: the phone's "Adopt a Child ›" (a baby —
+  given a crib — a toddler or a child, a girl or a boy), who join the family a couple of hours
+  later.
 - **Fire**: a poor (or clumsy) cook can set the stove alight; the flames flicker and light
   the room, spread to what's beside them and ruin it, and Sims nearby panic with the game's
   fire animations. Anyone caught in the flames burns: they may stop, drop and roll, or die

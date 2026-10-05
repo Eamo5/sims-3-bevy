@@ -1,6 +1,6 @@
 //! Town services: the babysitter, who comes whenever the little ones would otherwise be home
 //! alone, feeds them, changes them and plays with them, and is paid by the hour; and the social
-//! worker, who takes away a child left starving.
+//! worker, who takes away a child left starving, and brings home a child to adopt.
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -21,7 +21,7 @@ impl Plugin for ServicesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Sitter>()
             .init_resource::<Welfare>()
-            .add_systems(Update, (babysitting, social_worker).run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (babysitting, social_worker, adoption).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -63,6 +63,80 @@ struct Welfare {
 #[derive(Component)]
 pub struct SocialWorker {
     leaving: bool,
+}
+
+/// A child to adopt, on the way.
+#[derive(Resource)]
+pub struct AdoptionOrder {
+    pub arrive_at: f64,
+    pub age: Age,
+    pub female: bool,
+}
+
+/// "a baby girl", "a child".
+pub fn adoptee(age: Age, female: bool) -> String {
+    let who = if female { "girl" } else { "boy" };
+    match age {
+        Age::Baby => format!("a baby {who}"),
+        Age::Toddler => format!("a toddler {who}"),
+        _ => format!("a {who}"),
+    }
+}
+
+/// The social worker's arrival with a child to adopt, who joins the household at the door.
+#[allow(clippy::too_many_arguments)]
+fn adoption(
+    mut commands: Commands,
+    clock: Res<GameClock>,
+    order: Option<Res<AdoptionOrder>>,
+    mut state: ResMut<Welfare>,
+    household: Option<Res<Household>>,
+    exit: Option<Res<crate::interact::LotExit>>,
+    world: Res<CurrentWorld>,
+    mut rides: ResMut<crate::traffic::PendingRides>,
+    mut notes: ResMut<Notifications>,
+) {
+    let (Some(order), Some(exit)) = (order, exit) else { return };
+    if clock.minutes < order.arrive_at || state.worker.is_some() {
+        return;
+    }
+    commands.remove_resource::<AdoptionOrder>();
+    let mut rng = rand::rng();
+    let last = household.as_ref().map_or("Sim".to_string(), |h| h.name.clone());
+    let p = exit.0;
+    let y = world.data.heightmap.sample(p.x, p.y);
+    let body = |commands: &mut Commands, sim: Sim, at: Vec3| {
+        commands
+            .spawn((
+                Transform::from_translation(at),
+                Visibility::default(),
+                sim,
+                Motives::default(),
+                DecayScale::default(),
+                crate::social::Relationships::default(),
+                Skills::default(),
+                crate::sim::SimAnim::default(),
+                crate::anim::ClipPlayer::default(),
+                crate::aging::NeedsNewBody,
+                Floor(1),
+                ActionQueue::default(),
+                DespawnOnExit(AppState::InGame),
+            ))
+            .with_children(|c| {
+                c.spawn((Transform::default(), Visibility::default()));
+            })
+            .id()
+    };
+    let worker = body(&mut commands, crate::sim::random_sim(&mut rng, "Social Worker", Some(true), Age::Adult), Vec3::new(p.x, y, p.y));
+    commands.entity(worker).insert(SocialWorker { leaving: true });
+    let child = crate::sim::random_sim(&mut rng, &last, Some(order.female), order.age);
+    let name = child.first.clone();
+    let c = body(&mut commands, child, Vec3::new(p.x + 0.8, y, p.y));
+    commands.entity(c).insert((HouseholdMember, crate::aging::Aging::default()));
+    rides.0.push((p, "CarServiceSedan"));
+    notes.push(format!("The social worker brought {} home: welcome to the family, {name}!", adoptee(order.age, order.female)));
+    // (She leaves straight away.)
+    state.worker = Some((worker, c));
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]

@@ -1003,6 +1003,14 @@ fn auto_action(
         *done = true;
         return;
     }
+    // "Adopt:<0|1|2>": the selected Sim phones to adopt a baby, toddler or child (a girl).
+    if let Some(a) = name.strip_prefix("Adopt:").and_then(|a| a.parse::<u8>().ok()) {
+        if let Ok(mut q) = sel.single_mut() {
+            *done = true;
+            q.push_player(crate::interact::Action::new("Adopt", crate::interact::ActionKind::Adopt { age: a, female: true }, false));
+        }
+        return;
+    }
     // "BuyRecipe:<recipe key>": the selected Sim goes to the bookstore for that recipe book.
     if let (Some(key), Some(ui)) = (name.strip_prefix("BuyRecipe:"), ui.as_ref()) {
         let r = ui.data.recipes.iter().position(|r| r.key == key);
