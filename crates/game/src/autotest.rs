@@ -161,7 +161,7 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -362,6 +362,16 @@ fn list_cams(time: Res<Time>, mut last: Local<f32>, cams: Query<(Entity, &Camera
     }
     for (e, n, t) in &roots {
         info!("ui root {e:?} size {:?} target {:?}", n.size(), t.map(|t| t.0));
+    }
+}
+
+/// HUNGRY=<first name>: that Sim's hunger stays at the bottom.
+fn keep_hungry(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives)>) {
+    let Ok(who) = std::env::var("HUNGRY") else { return };
+    for (s, mut m) in &mut sims {
+        if s.first == who {
+            m.0[crate::sim::HUNGER] = -100.0;
+        }
     }
 }
 
