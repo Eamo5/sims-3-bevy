@@ -113,6 +113,9 @@ installation is unreachable.
   and progress to the next); Career (the job and level, hours, days and pay, the performance
   meter and the next promotion); Simology (traits with what they mean, lifetime happiness and
   the rewards bought). F5 to F8 switch tabs.
+- **Fireplaces**: Sims light a fire with the game's animations; it burns a few hours, flames
+  dancing in the hearth and a flickering warm light on the room, and they warm their hands by
+  it or put it out. Now and then a spark catches the floor in front.
 - **Babysitter**: when the grown-ups and teens are all out and a baby or toddler would be home
   alone, a babysitter arrives by car, feeds them, changes them and plays with them, and goes
   home (paid §10 an hour) once someone's back. Visitors don't sleep in the family's beds or

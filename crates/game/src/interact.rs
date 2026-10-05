@@ -86,6 +86,7 @@ pub enum ObjectKind {
     /// A butterfly fluttering about, or a beetle in the grass, to catch.
     Butterfly,
     Beetle,
+    Fireplace,
     /// Where the bills arrive.
     Mailbox,
     /// The morning paper.
@@ -124,6 +125,8 @@ impl ObjectKind {
             Self::JungleGym
         } else if has("foosball") {
             Self::Foosball
+        } else if has("objects.fireplaces.") {
+            Self::Fireplace
         } else if has("urnstone") {
             Self::Tombstone
         } else if has("mailbox") {
@@ -201,7 +204,7 @@ impl ObjectKind {
             Self::Table => "Surfaces",
             Self::Light => "Lighting",
             Self::Plant | Self::Decoration => "Decor",
-            Self::Meal | Self::DirtyDishes | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle => "Misc",
+            Self::Meal | Self::DirtyDishes | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
             Self::Other => "Misc",
         }
@@ -330,6 +333,9 @@ pub enum Special {
     Fish,
     /// Try to catch an insect.
     Catch,
+    /// Light the fireplace, or put it out.
+    LightFire,
+    PutOutFire,
 }
 
 pub struct InteractionDef {
@@ -389,6 +395,11 @@ static GARDEN: [InteractionDef; 3] = [
 static COLLECTIBLE: [InteractionDef; 1] = [InteractionDef { special: Special::Collect, ..def("Collect", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 10.0], Pose::Use) }];
 static FISHING_SPOT: [InteractionDef; 1] =
     [InteractionDef { special: Special::Fish, skill: Some("Fishing"), ..def("Fish", 60.0, [-4.0, -4.0, -3.0, 0.0, -2.0, 25.0], Pose::Use) }];
+static FIREPLACE: [InteractionDef; 3] = [
+    InteractionDef { special: Special::LightFire, ..def("Light Fire", 2.0, [0.0, 0.0, 0.0, 0.0, 0.0, 4.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::PutOutFire, ..def("Put Out Fire", 2.0, [0.0; 6], Pose::Use) },
+    def("Warm Hands", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 14.0], Pose::Use),
+];
 static INSECT: [InteractionDef; 1] = [InteractionDef { special: Special::Catch, ..def("Catch", 2.0, [0.0, 0.0, 0.0, 0.0, -1.0, 12.0], Pose::Use) }];
 static TOMBSTONE: [InteractionDef; 1] = [def("Mourn", 20.0, [0.0, 0.0, -2.0, 15.0, 0.0, -10.0], Pose::Stand)];
 static DISHES: [InteractionDef; 1] = [InteractionDef { special: Special::CleanUp, ..def("Clean Up", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 0.0], Pose::Use) }];
@@ -497,6 +508,9 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Weed" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_pullWeeds_x"]),
         "Harvest" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_bendover_start_x"), &["a2o_gardening_bendover_harvestmed_x"]),
         "Collect" if kind == ObjectKind::Collectible => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_harvestlow_x"]),
+        "Light Fire" => A::new(None, &["a2o_fireplace_light_start_x"]),
+        "Put Out Fire" => A::new(None, &["a2o_fireplace_putOut_x"]),
+        "Warm Hands" => A::new(Some("a2o_fireplace_warmHands_start_x"), &["a2o_fireplace_warmHands_x"]),
         "Catch" if kind == ObjectKind::Butterfly => A::new(None, &["a2o_butterfly_catch_x"]),
         "Catch" if kind == ObjectKind::Beetle => A::new(None, &["a2o_beetle_catch_x"]),
         "Fish" if kind == ObjectKind::FishingSpot => {
@@ -596,7 +610,7 @@ impl ObjectKind {
             Age::Baby => false,
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair),
             // (Children can't cook.)
-            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove),
+            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace),
             _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::DollHouse | K::JungleGym),
         }
     }
@@ -621,6 +635,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Collectible => &COLLECTIBLE,
         ObjectKind::FishingSpot => &FISHING_SPOT,
         ObjectKind::Butterfly | ObjectKind::Beetle => &INSECT,
+        ObjectKind::Fireplace => &FIREPLACE,
         ObjectKind::Mailbox => &MAILBOX,
         ObjectKind::Newspaper => &NEWSPAPER,
         ObjectKind::Tv => &TV,
@@ -1384,6 +1399,12 @@ fn run_actions(
                                         Special::Catch => {
                                             commands.entity(me).insert(crate::collecting::CollectRequest::Caught(*target));
                                         }
+                                        Special::LightFire | Special::PutOutFire => {
+                                            let (t, light) = (*target, d.special == Special::LightFire);
+                                            commands.queue(move |w: &mut World| {
+                                                w.write_message(if light { crate::fireplace::FireplaceRequest::Light(t) } else { crate::fireplace::FireplaceRequest::PutOut(t) });
+                                            });
+                                        }
                                         Special::PayBills => {
                                             if let Some(h) = household.as_mut() {
                                                 let due: i64 = h.bills.iter().map(|b| b.amount).sum();
@@ -1673,7 +1694,7 @@ fn autonomy(
     >,
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>,
     hh: Option<Res<Household>>,
-    (broken, plant_q): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>),
+    (broken, plant_q, lit_q): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>, Query<(), With<crate::fireplace::Lit>>),
     party_on: Option<Res<Party>>,
 ) {
     if delta.0 <= 0.0 {
@@ -1744,6 +1765,10 @@ fn autonomy(
                     continue;
                 }
                 // Guests don't cook or do the chores.
+                // A fireplace is lit when cold, and warmed by when lit.
+                if obj.kind == ObjectKind::Fireplace && (d.special == Special::LightFire) == lit_q.contains(oe) {
+                    continue;
+                }
                 if matches!(d.special, Special::ServeMeal | Special::CleanUp | Special::PayBills) && (meal_out && d.special == Special::ServeMeal || !household.contains(me)) {
                     continue;
                 }

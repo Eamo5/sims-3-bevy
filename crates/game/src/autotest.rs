@@ -338,7 +338,32 @@ fn auto_pick_world(
 }
 
 /// WATCH_INSECT=<distance>: the camera keeps to the first butterfly or beetle about.
-fn watch_insect(mut q: Query<&mut SimsCamera>, insects: Query<(&GlobalTransform, &crate::interact::GameObject), With<crate::collecting::Insect>>) {
+fn watch_insect(
+    mut q: Query<&mut SimsCamera>,
+    insects: Query<(&GlobalTransform, &crate::interact::GameObject), With<crate::collecting::Insect>>,
+    objects: Query<(&GlobalTransform, &crate::interact::GameObject, Has<crate::fireplace::Lit>)>,
+) {
+    // WATCH_KIND=<kind>,<distance>[,<yaw>[,<pitch>]]: the camera on the first object of that kind.
+    if let Some((kind, d, yaw, pitch)) = std::env::var("WATCH_KIND").ok().and_then(|v| {
+        let mut it = v.split(',');
+        let (k, d) = (it.next()?.to_string(), it.next()?.parse::<f32>().ok()?);
+        Some((k, d, it.next().and_then(|y| y.parse::<f32>().ok()), it.next().and_then(|p| p.parse::<f32>().ok())))
+    }) {
+        // (A lit fireplace first.)
+        let mut of_kind: Vec<_> = objects.iter().filter(|(_, o, _)| format!("{:?}", o.kind) == kind).collect();
+        of_kind.sort_by_key(|(_, _, lit)| !*lit);
+        if let (Ok(mut cam), Some((g, _, _))) = (q.single_mut(), of_kind.first()) {
+            cam.look_at(g.translation());
+            cam.distance = d;
+            if let Some(y) = yaw {
+                cam.yaw = y;
+            }
+            if let Some(p) = pitch {
+                cam.pitch = p;
+            }
+        }
+        return;
+    }
     let Some(d) = std::env::var("WATCH_INSECT").ok().and_then(|v| v.parse::<f32>().ok()) else { return };
     // (Butterflies first.)
     let first = insects.iter().find(|(_, o)| o.kind == crate::interact::ObjectKind::Butterfly).or_else(|| insects.iter().next()).map(|(g, _)| g);

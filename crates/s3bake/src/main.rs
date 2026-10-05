@@ -50,7 +50,7 @@ fn main() {
     if let Some(i) = args.iter().position(|a| a == "--lots") {
         let w: s3bake::WorldBaked = s3bake::read_value(&root.world_dir(&args[i + 1]).join("world.bin")).expect("world");
         for (k, l) in w.lots.iter().enumerate() {
-            if !l.info.is_residential() {
+            if !l.info.is_residential() || std::env::var("LOTOBJS").is_ok_and(|f| l.info.internal_name.contains(&f)) {
                 let b = w.buildings.iter().find(|b| b.lot as usize == k);
                 let mut kinds: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
                 for o in b.map(|b| b.objects.as_slice()).unwrap_or(&[]) {

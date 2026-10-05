@@ -38,6 +38,10 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_fishHereWith_idle",
     "a2o_catchFish_reelIn",
     "a2o_catchFish_react",
+    // Fireplaces.
+    "a2o_fireplace_light_start",
+    "a2o_fireplace_putOut",
+    "a2o_fireplace_warmHands",
     // Catching butterflies and beetles.
     "a2o_butterfly_catch",
     "a2o_beetle_catch",

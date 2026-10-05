@@ -84,7 +84,7 @@ pub fn cooking_fire(cooking_level: u32, clumsy: bool) -> bool {
 }
 
 /// A flame's texture: bright at the root, orange and red above, fading out at the tips.
-fn flame_image() -> Image {
+pub(crate) fn flame_image() -> Image {
     let (w, h) = (32u32, 64u32);
     let mut data = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
@@ -111,10 +111,16 @@ fn flame_image() -> Image {
 
 /// One tongue of flame (a quad turned to the camera), its size and flicker phase.
 #[derive(Component)]
-struct Flame {
+pub(crate) struct Flame {
     size: Vec2,
     phase: f32,
     offset: Vec3,
+}
+
+impl Flame {
+    pub(crate) fn new(size: Vec2, phase: f32, offset: Vec3) -> Self {
+        Self { size, phase, offset }
+    }
 }
 
 /// The fires' looks, made once.

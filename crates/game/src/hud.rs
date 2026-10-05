@@ -638,7 +638,7 @@ fn world_click(
     mut ray_cast: MeshRayCast,
     parents: Query<&ChildOf>,
     sims: Query<(&Sim, Has<HouseholdMember>, Has<Selected>)>,
-    (objects, broken_q): (Query<&GameObject>, Query<(), With<crate::interact::Broken>>),
+    (objects, broken_q, lit_q): (Query<&GameObject>, Query<(), With<crate::interact::Broken>>, Query<(), With<crate::fireplace::Lit>>),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
     members_q: Query<(), With<HouseholdMember>>,
     world: Res<CurrentWorld>,
@@ -726,6 +726,10 @@ fn world_click(
             let plant = opp_q.3.get(t).ok();
             for (i, d) in usable.iter().enumerate() {
                 if plant.is_some_and(|p| !crate::gardening::offers(p, d.special)) {
+                    continue;
+                }
+                // A fireplace offers lighting when cold, the rest when lit.
+                if obj.kind == ObjectKind::Fireplace && (d.special == Special::LightFire) == lit_q.contains(t) {
                     continue;
                 }
                 if d.special == Special::FindJob {
