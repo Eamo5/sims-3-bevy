@@ -43,6 +43,10 @@ installation is unreachable.
   firms Sims up); needs, moods,
   skills, careers, relationships, autonomy, social interactions; children, teens, adults and
   elders who grow up and grow old (birthdays, new traits, passing away).
+- **Breakdowns**: showers, baths, sinks, TVs, computers and stereos break now and then with
+  use (toilets clog), less often the better they are; Sims repair them with the game's own
+  repair animations, learning Handiness (handy and neat Sims do it on their own), or the
+  repairman can be phoned. Fishing trips teach Fishing and bring back a catch to sell.
 - **Opportunities** from the game's own tables: by day, Sims are offered ones that suit their
   career or skills in the game's dialog (its icon, name, description and reward); taken-on
   opportunities are listed in the Opportunities panel (O) with their deadlines and are done

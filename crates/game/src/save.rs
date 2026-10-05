@@ -245,7 +245,7 @@ fn status_from(s: &str) -> RelStatus {
     }
 }
 
-pub const SKILLS: [&str; 7] = ["Athletic", "Charisma", "Cooking", "Guitar", "Logic", "Painting", "Writing"];
+pub const SKILLS: [&str; 9] = ["Athletic", "Charisma", "Cooking", "Fishing", "Guitar", "Handiness", "Logic", "Painting", "Writing"];
 
 fn saved_object(o: &GameObject, tf: &Transform) -> SavedObject {
     SavedObject { objd: o.objd, position: tf.translation.to_array(), rotation: tf.rotation.to_array() }

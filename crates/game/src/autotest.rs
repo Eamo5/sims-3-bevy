@@ -508,6 +508,17 @@ fn auto_action(
         }
         return;
     }
+    // "Break": a shower breaks and the selected Sim repairs it.
+    if name == "Break" {
+        if let Some((e, _)) = objects.iter().find(|(_, o)| o.kind == crate::interact::ObjectKind::Shower) {
+            commands.entity(e).insert(crate::interact::Broken);
+            if let Ok(mut q) = sel.single_mut() {
+                q.push_player(crate::interact::Action::new("Repair", crate::interact::ActionKind::Repair { target: e }, false));
+            }
+        }
+        *done = true;
+        return;
+    }
     // "Pizza": the selected Sim phones for a pizza.
     if name == "Pizza" {
         if let Ok(mut q) = sel.single_mut() {

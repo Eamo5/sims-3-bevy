@@ -611,7 +611,7 @@ fn world_click(
     mut ray_cast: MeshRayCast,
     parents: Query<&ChildOf>,
     sims: Query<(&Sim, Has<HouseholdMember>, Has<Selected>)>,
-    objects: Query<&GameObject>,
+    (objects, broken_q): (Query<&GameObject>, Query<(), With<crate::interact::Broken>>),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
     members_q: Query<(), With<HouseholdMember>>,
     world: Res<CurrentWorld>,
@@ -683,6 +683,14 @@ fn world_click(
             });
         } else if let Ok(obj) = objects.get(t) {
             let mut options: Vec<(String, ActionKind)> = Vec::new();
+            if broken_q.contains(t) {
+                let grown = actor_sim.age.is_grown() && actor_sim.age != crate::sim::Age::Child;
+                if grown {
+                    options.push((crate::interact::repair_of(obj.kind).0.to_string(), ActionKind::Repair { target: t }));
+                }
+                open_pie(&mut commands, &mut pie, cursor, &format!("{} (broken)", obj.name), actor, options);
+                return;
+            }
             let usable = if obj.kind.usable_by(actor_sim.age) { interactions_for(obj.kind) } else { &[] };
             for (i, d) in usable.iter().enumerate() {
                 if d.special == Special::FindJob {
@@ -1300,7 +1308,10 @@ fn phone_button(
         notes.push("There's nobody to call yet — meet some Sims first!");
     }
     known.sort_by(|a, b| b.0.total_cmp(&a.0));
-    let mut options: Vec<(String, ActionKind)> = vec![(format!("Order Pizza (§{})", crate::meals::PIZZA_PRICE), ActionKind::OrderPizza)];
+    let mut options: Vec<(String, ActionKind)> = vec![
+        (format!("Order Pizza (§{})", crate::meals::PIZZA_PRICE), ActionKind::OrderPizza),
+        (format!("Call the Repairman (§{}+)", crate::interact::REPAIRMAN_PRICE), ActionKind::CallRepairman),
+    ];
     options.extend(known.into_iter().take(9).map(|(_, l, k)| (l, k)));
     let at = windows.single().ok().map_or(Vec2::new(600.0, 600.0), |w| Vec2::new(w.width() * 0.4, w.height() - 260.0));
     close_pie(&mut commands, &mut pie);

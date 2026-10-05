@@ -30,6 +30,15 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_eat_stand_fork",
     "a2o_eat_stand_hand",
     "a2o_eat_diningIn_fork",
+    // Repairs.
+    "a2o_toilet_unclog",
+    "a2o_shower_repairShower",
+    "a2o_bathtub_repair",
+    "a2o_sink_repair",
+    "a2o_tv_repair",
+    "a2o_computer_repair",
+    "a2o_stereo_repair",
+    "a2o_dishwasher_repair_loopTinker",
     // The mailbox and the paper.
     "a2o_mailbox_getMail",
     "a2o_newspaper_read",

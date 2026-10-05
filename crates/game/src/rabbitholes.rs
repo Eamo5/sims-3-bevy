@@ -3,6 +3,7 @@
 //! the park — and the school children attend on weekdays.
 
 use bevy::prelude::*;
+use rand::Rng;
 use s3formats::world::LotInfo;
 
 use crate::PlayMode;
@@ -57,7 +58,7 @@ static SPA: [Activity; 2] = [
 ];
 static PARK: [Activity; 2] = [
     act("Hang Out", 90.0, 0, [-6.0, -8.0, -4.0, 50.0, -5.0, 35.0], None),
-    act("Go Fishing", 120.0, 0, [-5.0, -6.0, -3.0, 5.0, -5.0, 35.0], None),
+    act("Go Fishing", 120.0, 0, [-5.0, -6.0, -3.0, 5.0, -5.0, 35.0], Some("Fishing")),
 ];
 static POOL: [Activity; 1] = [act("Go Swimming", 90.0, 0, [-10.0, -6.0, -12.0, 20.0, 20.0, 45.0], Some("Athletic"))];
 static MUSEUM: [Activity; 1] = [act("View Art", 90.0, 15, [-5.0, -5.0, -3.0, 15.0, 0.0, 35.0], Some("Painting"))];
@@ -187,6 +188,7 @@ fn outings(
     mut notes: ResMut<Notifications>,
     mut life: MessageWriter<LifeEvent>,
     mut q: Query<(Entity, &Sim, &AtRabbitHole, &mut Motives, &mut Skills, &mut Transform, Option<&mut SchoolGrades>)>,
+    mut household: Option<ResMut<Household>>,
 ) {
     let dt = delta.0;
     for (e, sim, at, mut motives, mut skills, mut tf, grades) in &mut q {
@@ -214,6 +216,19 @@ fn outings(
                     g.0 = (g.0 + if mood_ok { 8.0 } else { -12.0 }).clamp(0.0, 100.0);
                 }
                 notes.push(format!("{} is home from school.", sim.first));
+            } else if at.activity.name == "Go Fishing" {
+                // The catch, sold: more and better fish with skill.
+                let level = skills.level("Fishing") as f32 + if sim.traits.contains(&crate::life::Trait::Angler) { 2.0 } else { 0.0 };
+                let mut rng = rand::rng();
+                let caught = rng.random_range(1..=(2 + level as u32 / 2));
+                let fish = ["minnows", "anchovies", "goldfish", "perch", "rainbow trout", "salmon", "tuna", "swordfish", "lobster", "angelfish"];
+                let best = fish[(level as usize + rng.random_range(0..3)).min(fish.len() - 1)];
+                let worth: i64 = (0..caught).map(|_| rng.random_range(5..15) + level as i64 * 6).sum();
+                if let Some(mut h) = household.as_deref_mut() {
+                    h.funds += worth;
+                }
+                notes.push(format!("{} is back from fishing with {caught} fish (the best: {best}), sold for §{worth}.", sim.first));
+                life.write(LifeEvent::new(e, LifeEventKind::Finished { activity: at.activity.name, completed: true }));
             } else {
                 notes.push(format!("{} is back from {}.", sim.first, at.place));
                 life.write(LifeEvent::new(e, LifeEventKind::Finished { activity: at.activity.name, completed: true }));

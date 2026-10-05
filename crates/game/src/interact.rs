@@ -20,7 +20,7 @@ impl Plugin for InteractPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Notifications>().add_systems(
             Update,
-            (comings_and_goings, autonomy, run_actions, motive_warnings, pay_bills)
+            (comings_and_goings, autonomy, run_actions, motive_warnings, pay_bills, repairman)
                 .chain()
                 .run_if(in_state(PlayMode::Live)),
         );
@@ -236,6 +236,59 @@ impl GameObject {
 
 #[derive(Component, Default)]
 pub struct UsedBy(pub Option<Entity>);
+
+/// A broken object: only repairing it is possible.
+#[derive(Component)]
+pub struct Broken;
+
+/// How likely an object is to break when used (per use).
+fn break_chance(kind: ObjectKind, price: i32) -> f64 {
+    let base = match kind {
+        ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::Sink => 0.04,
+        ObjectKind::Toilet => 0.05,
+        ObjectKind::Tv | ObjectKind::Computer | ObjectKind::Stereo => 0.03,
+        _ => 0.0,
+    };
+    // (Better things last longer.)
+    base * if price >= 1000 { 0.4 } else if price >= 500 { 0.7 } else { 1.0 }
+}
+
+/// What fixing an object is called, and the game's animation for it.
+pub fn repair_of(kind: ObjectKind) -> (&'static str, crate::anim::ActionClip) {
+    use crate::anim::ActionClip as A;
+    match kind {
+        ObjectKind::Toilet => ("Unclog", A::new(Some("a2o_toilet_unclog_start_x"), &["a2o_toilet_unclog_loop_x"])),
+        ObjectKind::Shower => ("Repair", A::new(Some("a2o_shower_repairShower_start_x"), &["a2o_shower_repairShower_loop1_x", "a2o_shower_repairShower_loop2_x"])),
+        ObjectKind::Bathtub | ObjectKind::HotTub => (
+            "Repair",
+            A::new(Some("a2o_bathtub_repair_start_x"), &["a2o_bathtub_repair_loopTightenLeft_x", "a2o_bathtub_repair_loopTightenRight_x", "a2o_bathtub_repair_loopWhackFaucet_x"]),
+        ),
+        ObjectKind::Sink => ("Repair", A::new(Some("a2o_sink_repair_start_x"), &["a2o_sink_repair_loop1_x", "a2o_sink_repair_loop2_x"])),
+        ObjectKind::Tv => ("Repair", A::new(Some("a2o_tv_repair_start_x"), &["a2o_tv_repair_loop1_x", "a2o_tv_repair_loop2_x"])),
+        ObjectKind::Computer => ("Repair", A::new(Some("a2o_computer_repair_start_x"), &["a2o_computer_repair_loop1_x", "a2o_computer_repair_loop2_x"])),
+        ObjectKind::Stereo => ("Repair", A::new(Some("a2o_stereo_repair_start_x"), &["a2o_stereo_repair_loop1_x", "a2o_stereo_repair_loop2_x"])),
+        _ => ("Repair", A::new(None, &["a2o_dishwasher_repair_loopTinker_x"])),
+    }
+}
+
+/// "the Shower of Power" (but not "the The Porcelain Throne").
+pub fn the(name: &str) -> String {
+    if name.starts_with("The ") || name.starts_with("the ") { name.to_string() } else { format!("the {name}") }
+}
+
+pub fn upper_first(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+}
+
+/// The repairman's call-out fee.
+pub const REPAIRMAN_PRICE: i64 = 75;
+
+/// The repairman, on his way.
+#[derive(Resource)]
+pub struct RepairmanVisit {
+    pub arrive_at: f64,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Special {
@@ -581,6 +634,10 @@ pub enum ActionKind {
     EatHere,
     /// Phone for a pizza to be delivered.
     OrderPizza,
+    /// Fix a broken object.
+    Repair { target: Entity },
+    /// Phone for the repairman.
+    CallRepairman,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -814,7 +871,7 @@ fn run_actions(
 
         // Cancellation
         if action.cancel {
-            if let ActionKind::Object { target, .. } = action.kind
+            if let ActionKind::Object { target, .. } | ActionKind::Repair { target } = action.kind
                 && let Ok((obj, otf, mut used, _)) = objects.get_mut(target)
             {
                 if used.0 == Some(me) {
@@ -853,7 +910,8 @@ fn run_actions(
                         ActionKind::GoHere(p, l) => Some((*p, *l)),
                         ActionKind::GoToWork | ActionKind::Visit { .. } => exit.as_ref().map(|e| (e.0, 1)),
                         ActionKind::JoinCareer { target, .. } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
-                        ActionKind::Invite { .. } | ActionKind::OrderPizza => {
+                        ActionKind::Repair { target } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
+                        ActionKind::Invite { .. } | ActionKind::OrderPizza | ActionKind::CallRepairman => {
                             action.phase = Phase::Running(0.0);
                             anim.pose = Pose::Talk;
                             continue;
@@ -891,7 +949,7 @@ fn run_actions(
                         Some(wp) => {
                             commands.entity(me).insert(PathFollow::new(wp));
                             action.phase = Phase::Routing;
-                            if let ActionKind::Object { target, .. } = action.kind
+                            if let ActionKind::Object { target, .. } | ActionKind::Repair { target } = action.kind
                                 && let Ok((_, _, mut used, _)) = objects.get_mut(target)
                             {
                                 used.0 = Some(me);
@@ -987,7 +1045,14 @@ fn run_actions(
                                 }
                             }
                             ActionKind::GoHere(..) => finished = true,
-                            ActionKind::Invite { .. } | ActionKind::BuyReward(_) | ActionKind::EatHere | ActionKind::OrderPizza => {}
+                            ActionKind::Invite { .. } | ActionKind::BuyReward(_) | ActionKind::EatHere | ActionKind::OrderPizza | ActionKind::CallRepairman => {}
+                            ActionKind::Repair { target } => {
+                                if let Ok((obj, otf, _, _)) = objects.get(*target) {
+                                    tf.rotation = otf.rotation * Quat::from_rotation_y(std::f32::consts::PI);
+                                    commands.entity(me).insert(repair_of(obj.kind).1);
+                                }
+                                anim.pose = Pose::Use;
+                            }
                             ActionKind::Visit { lot, activity } => {
                                 if let (Some(l), Some(name)) = (world.data.lots.get(*lot), world.data.lot_names.get(*lot)) {
                                     let acts = crate::rabbitholes::activities(l);
@@ -1060,6 +1125,11 @@ fn run_actions(
                                     finished = true;
                                     life.write(LifeEvent::new(me, LifeEventKind::Finished { activity: d.name, completed: true }));
                                     used.0 = None;
+                                    if rand::rng().random_bool(break_chance(obj.kind, obj.price)) {
+                                        commands.entity(*target).insert(Broken);
+                                        let what = if obj.kind == ObjectKind::Toilet { "is clogged" } else { "broke" };
+                                        notes.push(format!("Oh no! {} {what}. Repair it, or call the repairman.", upper_first(&the(&obj.name))));
+                                    }
                                     if d.on_object {
                                         stand_up_at = Some(obj.use_point(otf));
                                     }
@@ -1198,6 +1268,33 @@ fn run_actions(
                                         _ => {}
                                     }
                                 }
+                            }
+                        }
+                        ActionKind::Repair { target } => {
+                            let handy = skills.level("Handiness") as f32 + if sim.traits.contains(&crate::life::Trait::Handy) { 3.0 } else { 0.0 };
+                            let minutes = 90.0 / (1.0 + handy * 0.35);
+                            let e = skills.0.entry("Handiness").or_insert(0.0);
+                            let before = *e as u32;
+                            *e = (*e + dt / 60.0 * 0.5 * crate::life::skill_rate(&sim.traits, "Handiness") / (1.0 + *e * 0.25)).min(10.0);
+                            if *e as u32 > before {
+                                notes.push(format!("{} reached level {} in Handiness!", sim.first, *e as u32));
+                                life.write(LifeEvent::new(me, LifeEventKind::SkillUp { skill: "Handiness", level: *e as u32 }));
+                            }
+                            motives.add(FUN, -4.0 * dt / 60.0);
+                            if elapsed >= minutes {
+                                finished = true;
+                                commands.entity(*target).remove::<Broken>();
+                                if let Ok((o, _, mut used, _)) = objects.get_mut(*target) {
+                                    used.0 = None;
+                                    notes.push(format!("{} fixed {}.", sim.first, the(&o.name)));
+                                }
+                            }
+                        }
+                        ActionKind::CallRepairman => {
+                            if elapsed >= 5.0 {
+                                finished = true;
+                                commands.insert_resource(RepairmanVisit { arrive_at: clock.minutes + 90.0 });
+                                notes.push(format!("{} called the repairman. He'll be by soon (§{REPAIRMAN_PRICE}).", sim.first));
                             }
                         }
                         ActionKind::OrderPizza => {
@@ -1352,6 +1449,7 @@ fn autonomy(
     >,
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy)>,
     hh: Option<Res<Household>>,
+    broken: Query<(), With<Broken>>,
 ) {
     if delta.0 <= 0.0 {
         return;
@@ -1397,6 +1495,20 @@ fn autonomy(
                 continue;
             }
             let dist = obj.world_center(otf).distance(tf.translation);
+            if broken.contains(oe) {
+                if used.0.is_some_and(|u| u != me) {
+                    continue;
+                }
+                // Handy (or neat) household Sims see to repairs on their own.
+                let keen = sim.traits.contains(&crate::life::Trait::Handy) || sim.traits.contains(&crate::life::Trait::Neat);
+                if household.contains(me) && sim.age.is_grown() && sim.age != Age::Child && keen {
+                    let score = 25.0 / (1.0 + dist / 25.0);
+                    if best.as_ref().is_none_or(|b| score > b.0) {
+                        best = Some((score, Action::new(repair_of(obj.kind).0, ActionKind::Repair { target: oe }, true)));
+                    }
+                }
+                continue;
+            }
             for (di, d) in interactions_for(obj.kind).iter().enumerate() {
                 if !d.autonomous {
                     continue;
@@ -1518,6 +1630,35 @@ fn motive_warnings(
             }
         }
     }
+}
+
+/// The repairman comes and fixes everything broken on the lot.
+fn repairman(
+    mut commands: Commands,
+    visit: Option<Res<RepairmanVisit>>,
+    clock: Res<GameClock>,
+    mut household: Option<ResMut<Household>>,
+    broken: Query<Entity, With<Broken>>,
+    mut notes: ResMut<Notifications>,
+) {
+    let Some(v) = visit else { return };
+    if clock.minutes < v.arrive_at {
+        return;
+    }
+    commands.remove_resource::<RepairmanVisit>();
+    let n = broken.iter().count();
+    for e in &broken {
+        commands.entity(e).remove::<Broken>();
+    }
+    let cost = REPAIRMAN_PRICE + 25 * n as i64;
+    if let Some(h) = household.as_mut() {
+        h.funds -= cost;
+    }
+    notes.push(match n {
+        0 => format!("The repairman came by but found nothing to fix (§{cost})."),
+        1 => format!("The repairman fixed the broken object (§{cost})."),
+        n => format!("The repairman fixed {n} broken objects (§{cost})."),
+    });
 }
 
 fn pay_bills(
