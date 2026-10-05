@@ -208,6 +208,7 @@ pub const CT_EYEBROW: u32 = 0x16;
 pub const CAT_NAKED: u32 = 0x1;
 pub const CAT_EVERYDAY: u32 = 0x2;
 pub const CAT_SLEEP: u32 = 0x8;
+pub const CAT_SWIM: u32 = 0x10;
 pub const CAT_VALID_RANDOM: u32 = 0x200000;
 pub const CAT_HIDDEN: u32 = 0x1000000;
 

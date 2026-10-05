@@ -255,6 +255,15 @@ pub fn cas_bake_wanted(name: &str, ct: u32, age_gender: u32, category: u32) -> b
     if age_gender & AGE_BABY != 0 && age_gender & !(AGE_BABY | 0xFF00) & 0x7F == 0 {
         return name.ends_with("Body");
     }
+    // Swimwear (the men's is trunks with a bare chest, and everyone goes barefoot).
+    if category & s3formats::sim::CAT_SWIM != 0
+        && category & CAT_VALID_RANDOM != 0
+        && matches!(ct, CT_BODY | CT_TOP | CT_BOTTOM | CT_SHOES)
+        && !name.contains("burnt")
+        && !name.to_ascii_lowercase().contains("hat")
+    {
+        return true;
+    }
     match ct {
         CT_FACE => name.ends_with("Face"),
         CT_SCALP => name.ends_with("Scalp"),
@@ -390,7 +399,7 @@ pub fn bake_clips(root: &BakeRoot, pkgs: &PackageSet, progress: Progress) -> Res
 }
 
 /// Bumped when the baked clip layout changes.
-pub const CLIPS_VERSION: u32 = 17;
+pub const CLIPS_VERSION: u32 = 18;
 
 pub fn clips_ready(root: &BakeRoot) -> bool {
     let g = root.global_dir();

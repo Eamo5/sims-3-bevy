@@ -73,7 +73,13 @@ pub struct PoolWaterMaterial(pub Handle<WaterMaterial>);
 fn pool_water(mut commands: Commands, q: Query<Entity, With<PoolWater>>, mat: Option<Res<PoolWaterMaterial>>) {
     let Some(mat) = mat else { return };
     for e in &q {
-        commands.entity(e).remove::<PoolWater>().insert((MeshMaterial3d(mat.0.clone()), Water(mat.0.clone()), NotShadowCaster));
+        // (The pool may be gone again the same frame, as a visited lot is redrawn.)
+        commands.entity(e).queue_silenced({
+            let m = mat.0.clone();
+            move |mut w: EntityWorldMut| {
+                w.remove::<PoolWater>().insert((MeshMaterial3d(m.clone()), Water(m), NotShadowCaster));
+            }
+        });
     }
 }
 

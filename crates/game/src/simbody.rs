@@ -145,11 +145,42 @@ pub struct Outfit {
     pub body: Vec<CasPartInfo>,
 }
 
+/// In swimwear (for a swim): the body is dressed from the swimwear parts.
+#[derive(Component)]
+pub struct InSwimwear;
+
 pub fn pick_outfit(cas: &CasData, sim: &Sim, rng: &mut impl Rng) -> Outfit {
+    pick_outfit_for(cas, sim, rng, false)
+}
+
+/// What a Sim wears: everyday clothes, or swimwear.
+pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, swim: bool) -> Outfit {
     let age = age_bits(sim.age);
     let gender = if sim.female { GENDER_FEMALE } else { GENDER_MALE };
     let fits = |e: &&CasPartInfo| e.baked && e.age_gender & age != 0 && e.age_gender & gender != 0;
-    let of_type = |t: u32| cas.parts.iter().filter(|e| e.clothing_type == t).filter(fits).collect::<Vec<_>>();
+    // Clothes and shoes by the outfit's category (heads and hair go with anything).
+    let worn = |e: &&CasPartInfo| {
+        !matches!(e.clothing_type, CT_TOP | CT_BOTTOM | CT_BODY | CT_SHOES)
+            || if swim { e.category & s3formats::sim::CAT_SWIM != 0 } else { e.category & s3formats::sim::CAT_EVERYDAY != 0 }
+    };
+    let of_type = |t: u32| {
+        let all: Vec<&CasPartInfo> = cas.parts.iter().filter(|e| e.clothing_type == t).filter(fits).filter(worn).collect();
+        if !swim {
+            return all;
+        }
+        // Swimwear: the base game's (the packs' swimwear counts T-shirts and flippers), a bare
+        // chest for men and bare feet for everyone.
+        let preferred: Vec<&CasPartInfo> = all
+            .iter()
+            .copied()
+            .filter(|e| match t {
+                CT_TOP if !sim.female => e.name.contains("TopNude"),
+                CT_SHOES => e.name.contains("ShoesNude"),
+                _ => e.key.1 == 0,
+            })
+            .collect();
+        if preferred.is_empty() { all } else { preferred }
+    };
     let chosen = |k: Option<Key>, t: u32| k.and_then(|k| cas.parts.iter().find(|p| p.key == k && p.clothing_type == t).filter(|p| fits(p)).cloned());
     // A baby is a single body with its own head.
     if sim.age == Age::Baby {
@@ -174,7 +205,13 @@ pub fn pick_outfit(cas: &CasData, sim: &Sim, rng: &mut impl Rng) -> Outfit {
     let random_top = tops.choose(rng).map(|f| (*f).clone());
     let random_bottom = bottoms.choose(rng).map(|f| (*f).clone());
     let random_shoes = of_type(CT_SHOES).choose(rng).map(|f| (*f).clone());
-    let (ct, cb, cf) = (chosen(sim.outfit.top, CT_TOP), chosen(sim.outfit.bottom, CT_BOTTOM), chosen(sim.outfit.full, CT_BODY));
+    let (ct, cb, cf) = if swim {
+        (None, None, None)
+    } else {
+        (chosen(sim.outfit.top, CT_TOP), chosen(sim.outfit.bottom, CT_BOTTOM), chosen(sim.outfit.full, CT_BODY))
+    };
+    // (Swimming, men wear trunks and a bare chest; women a swimsuit or a two-piece.)
+    let use_full = if swim { sim.female && rng.random_bool(0.5) && !fulls.is_empty() } else { use_full };
     if let Some(f) = cf {
         body.push(f);
     } else if ct.is_some() || cb.is_some() {
@@ -186,7 +223,7 @@ pub fn pick_outfit(cas: &CasData, sim: &Sim, rng: &mut impl Rng) -> Outfit {
         body.extend(random_bottom);
         body.extend(random_top);
     }
-    body.extend(chosen(sim.outfit.shoes, CT_SHOES).or(random_shoes));
+    body.extend(if swim { random_shoes } else { chosen(sim.outfit.shoes, CT_SHOES).or(random_shoes) });
     Outfit { face, scalp, hair, brows, body }
 }
 

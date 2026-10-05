@@ -87,6 +87,8 @@ pub enum ObjectKind {
     Butterfly,
     Beetle,
     Fireplace,
+    /// A pool's ladder: where Sims get in for a swim.
+    PoolLadder,
     /// Where the bills arrive.
     Mailbox,
     /// The morning paper.
@@ -125,6 +127,8 @@ impl ObjectKind {
             Self::JungleGym
         } else if has("foosball") {
             Self::Foosball
+        } else if has("pools.poolladder") {
+            Self::PoolLadder
         } else if has("objects.fireplaces.") {
             Self::Fireplace
         } else if has("urnstone") {
@@ -204,7 +208,7 @@ impl ObjectKind {
             Self::Table => "Surfaces",
             Self::Light => "Lighting",
             Self::Plant | Self::Decoration => "Decor",
-            Self::Meal | Self::DirtyDishes | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace => "Misc",
+            Self::Meal | Self::DirtyDishes | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
             Self::Other => "Misc",
         }
@@ -336,6 +340,8 @@ pub enum Special {
     /// Light the fireplace, or put it out.
     LightFire,
     PutOutFire,
+    /// Get in the pool and swim about.
+    Swim,
 }
 
 pub struct InteractionDef {
@@ -400,6 +406,11 @@ static FIREPLACE: [InteractionDef; 3] = [
     InteractionDef { autonomous: false, special: Special::PutOutFire, ..def("Put Out Fire", 2.0, [0.0; 6], Pose::Use) },
     def("Warm Hands", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 14.0], Pose::Use),
 ];
+static POOL_LADDER: [InteractionDef; 1] = [InteractionDef {
+    special: Special::Swim,
+    skill: Some("Athletic"),
+    ..def("Swim", 60.0, [-6.0, -4.0, -12.0, 0.0, 10.0, 32.0], Pose::Use)
+}];
 static INSECT: [InteractionDef; 1] = [InteractionDef { special: Special::Catch, ..def("Catch", 2.0, [0.0, 0.0, 0.0, 0.0, -1.0, 12.0], Pose::Use) }];
 static TOMBSTONE: [InteractionDef; 1] = [def("Mourn", 20.0, [0.0, 0.0, -2.0, 15.0, 0.0, -10.0], Pose::Stand)];
 static DISHES: [InteractionDef; 1] = [InteractionDef { special: Special::CleanUp, ..def("Clean Up", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 0.0], Pose::Use) }];
@@ -508,6 +519,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Weed" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_pullWeeds_x"]),
         "Harvest" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_bendover_start_x"), &["a2o_gardening_bendover_harvestmed_x"]),
         "Collect" if kind == ObjectKind::Collectible => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_harvestlow_x"]),
+        "Swim" => A::new(Some("a2o_ladder_climbDown_L_x"), &["a_swim_cycle_x"]),
         "Light Fire" => A::new(None, &["a2o_fireplace_light_start_x"]),
         "Put Out Fire" => A::new(None, &["a2o_fireplace_putOut_x"]),
         "Warm Hands" => A::new(Some("a2o_fireplace_warmHands_start_x"), &["a2o_fireplace_warmHands_x"]),
@@ -636,6 +648,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::FishingSpot => &FISHING_SPOT,
         ObjectKind::Butterfly | ObjectKind::Beetle => &INSECT,
         ObjectKind::Fireplace => &FIREPLACE,
+        ObjectKind::PoolLadder => &POOL_LADDER,
         ObjectKind::Mailbox => &MAILBOX,
         ObjectKind::Newspaper => &NEWSPAPER,
         ObjectKind::Tv => &TV,
@@ -1335,7 +1348,8 @@ fn run_actions(
                                         stand_up_at = Some(obj.use_point(otf));
                                     }
                                     match d.special {
-                                        Special::FindJob => {}
+                                        // (Getting out of the pool is the swim module's.)
+                                        Special::FindJob | Special::Swim => {}
                                         Special::QuitJob => {
                                             if job.is_some() {
                                                 commands.entity(me).remove::<Job>();

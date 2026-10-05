@@ -115,7 +115,10 @@ installation is unreachable.
   the rewards bought). F5 to F8 switch tabs.
 - **Pools**: the lots' pools (Le Petit Shark Pool Center, the apartments', the gym's, estates')
   are let into the ground with their tiled floors and sides, a stone coping and clear turquoise
-  water over the mosaics; the terrain is left open over them.
+  water over the mosaics; the terrain is left open over them. Sims swim from the ladders: they
+  change into swimwear (the game's own: trunks and a bare chest, swimsuits and two-pieces),
+  climb down, swim about the pool with the game's swim cycle (building Athletic skill) and
+  climb out back into their clothes.
 - **Water effects**: fountains gush and fill their basins, showers spray from the head and taps
   run while someone's at them, each from the object's own effect slot (the game's RSLT slots).
 - **Lots' own ground**: lots keep their sculpted ground; its dips are carved back into the
