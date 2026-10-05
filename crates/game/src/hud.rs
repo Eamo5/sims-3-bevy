@@ -288,6 +288,25 @@ fn spawn_hud(mut commands: Commands) {
                 p.spawn((
                     Button,
                     HudButton,
+                    crate::relations::RelationsButton,
+                    crate::icons::Tooltip("Relationships (R)".into()),
+                    Node {
+                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                        height: Val::Px(34.0),
+                        padding: UiRect::horizontal(Val::Px(10.0)),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        margin: UiRect::right(Val::Px(8.0)),
+                        ..default()
+                    },
+                    BackgroundColor(BTN_NORMAL),
+                ))
+                .with_children(|b| {
+                    b.spawn(text("Relationships", 16.0, Color::WHITE));
+                });
+                p.spawn((
+                    Button,
+                    HudButton,
                     SaveButton,
                     Node {
                         border_radius: BorderRadius::all(Val::Px(8.0)),
@@ -917,6 +936,7 @@ fn update_members_panel(
     panel: Query<Entity, With<MembersPanel>>,
     members: Query<(Entity, &Sim, &crate::life::Mood, Has<Selected>), With<HouseholdMember>>,
     mut last: Local<Vec<(Entity, bool, u8)>>,
+    (mut portraits, mut images): (ResMut<crate::portraits::Portraits>, ResMut<Assets<Image>>),
 ) {
     let Ok(p) = panel.single() else { return };
     let mut list: Vec<(Entity, String, bool, f32)> = members.iter().map(|(e, s, m, sel)| (e, s.first.clone(), sel, m.level())).collect();
@@ -935,10 +955,10 @@ fn update_members_panel(
                 MemberButton(e),
                 Node {
                     border_radius: BorderRadius::all(Val::Px(10.0)),
-                    width: Val::Px(150.0),
-                    padding: UiRect::axes(Val::Px(10.0), Val::Px(8.0)),
+                    width: Val::Px(170.0),
+                    padding: UiRect::all(Val::Px(5.0)),
                     border: UiRect::all(Val::Px(if sel { 3.0 } else { 1.0 })),
-                    column_gap: Val::Px(8.0),
+                    column_gap: Val::Px(9.0),
                     align_items: AlignItems::Center,
                     ..default()
                 },
@@ -946,10 +966,26 @@ fn update_members_panel(
                 BackgroundColor(BTN_NORMAL),
             ))
             .with_children(|b| {
+                // The Sim's face, ringed in the colour of their mood.
                 b.spawn((
-                    Node { width: Val::Px(14.0), height: Val::Px(14.0), border_radius: BorderRadius::all(Val::Px(7.0)), ..default() },
-                    BackgroundColor(mood_color(mood)),
-                ));
+                    Node {
+                        width: Val::Px(50.0),
+                        height: Val::Px(50.0),
+                        border: UiRect::all(Val::Px(3.0)),
+                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    BorderColor::all(mood_color(mood)),
+                    Pickable::IGNORE,
+                ))
+                .with_children(|f| {
+                    f.spawn((
+                        ImageNode::new(portraits.portrait(&mut images, e)),
+                        Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+                        Pickable::IGNORE,
+                    ));
+                });
                 b.spawn(text(name, 17.0, Color::WHITE));
             });
         }

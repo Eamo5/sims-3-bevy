@@ -68,7 +68,11 @@ installation is unreachable.
   (bookstore, grocery, spa, mausoleum) for teens.
 - **Interface**: the game's own icons and words — moodlets (name, description, time left),
   traits (Create-a-Sim and the Sim's panel) and wishes — read from the game's tuning tables
-  (`GameplayData.package`) and string tables, with tooltips on hover.
+  (`GameplayData.package`) and string tables, with tooltips on hover. Sims' portraits are
+  photographed live (a small studio camera with its own light and backdrop, retaken after new
+  clothes or a birthday) for the household buttons, ringed in each Sim's mood colour, for
+  balloons about someone, and for the Relationships panel (R): everyone the Sim knows with
+  what they are to each other and friendship and romance bars.
 - **Options**: Escape pauses with a game menu (resume, options, save, main menu, quit); the
   options set master, music, effects, voice and ambient levels, aging and life span (short
   to epic), free will, shadows and the frame-rate counter, kept in `settings.json`.
@@ -88,6 +92,7 @@ installation is unreachable.
 | Space | Pause |
 | 1 / 2 / 3 | Game speed |
 | B or F2 | Buy mode (, and . rotate, Delete sells, Esc leaves) |
+| R | Relationships panel |
 | Esc | Game menu: pause, options, save, quit |
 
 ## Layout

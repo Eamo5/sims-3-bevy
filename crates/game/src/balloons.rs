@@ -157,9 +157,13 @@ fn career_topic(table: &BalloonTable, career: &str) -> Option<String> {
 
 /// Who a balloon is about.
 struct Who<'a> {
+    entity: Entity,
     sim: &'a Sim,
     career: Option<&'a str>,
 }
+
+/// The icon name standing for a Sim's portrait.
+const PORTRAIT: &str = "@portrait:";
 
 struct Picker<'a> {
     table: &'a BalloonTable,
@@ -209,13 +213,9 @@ impl Picker<'_> {
         self.key(k, depth)
     }
 
-    /// Something about a Sim (the game shows their picture): one of their traits' thoughts.
-    fn about(&self, who: &Who, depth: u32) -> Option<(String, u8)> {
-        let keys: Vec<String> = who.sim.traits.iter().map(|t| format!("Trait{}", t.game_id())).filter(|k| self.table.idle.contains_key(k)).collect();
-        match keys.get(rand::rng().random_range(0..keys.len().max(1))) {
-            Some(k) => self.key(k, depth),
-            None => Some(("balloon_heart".into(), 0)),
-        }
+    /// A Sim's picture.
+    fn about(&self, who: &Who, _depth: u32) -> Option<(String, u8)> {
+        Some((format!("{PORTRAIT}{}", who.entity.to_bits()), 0))
     }
 
     fn work(&self, who: &Who, depth: u32) -> Option<(String, u8)> {
@@ -250,7 +250,7 @@ fn balloon_triggers(
     clock: Res<crate::clock::GameClock>,
     mut state: ResMut<BalloonState>,
     ui: Option<ResMut<crate::icons::GameUi>>,
-    mut images: ResMut<Assets<Image>>,
+    (mut images, mut portraits): (ResMut<Assets<Image>>, ResMut<crate::portraits::Portraits>),
     sims: Query<(
         Entity,
         &Sim,
@@ -296,7 +296,7 @@ fn balloon_triggers(
                 continue;
             }
             let busy = st.showing.is_some() && now < st.until;
-            let picker = Picker { table, actor: Who { sim, career: job.map(|j| j.career().name) }, target: None };
+            let picker = Picker { table, actor: Who { entity: me, sim, career: job.map(|j| j.career().name) }, target: None };
             let front = queue.0.front();
 
             // Socials: the topic of conversation, both Sims taking turns.
@@ -313,8 +313,8 @@ fn balloon_triggers(
                         let (speaker, listener) = if their_turn { (*target, me) } else { (me, *target) };
                         let p = Picker {
                             table,
-                            actor: Who { sim: if their_turn { tsim } else { sim }, career: careers.get(&speaker).copied() },
-                            target: Some(Who { sim: if their_turn { sim } else { tsim }, career: careers.get(&listener).copied() }),
+                            actor: Who { entity: speaker, sim: if their_turn { tsim } else { sim }, career: careers.get(&speaker).copied() },
+                            target: Some(Who { entity: listener, sim: if their_turn { sim } else { tsim }, career: careers.get(&listener).copied() }),
                         };
                         if let Some((icon, axis)) = p.resolve(&list, 0) {
                             show.push((speaker, BalloonKind::Speech, icon, axis, true));
@@ -387,7 +387,7 @@ fn balloon_triggers(
             commands.entity(old).try_despawn();
         }
         let dur = if kind == BalloonKind::Dream { SHOW_SECS + 1.0 } else { SHOW_SECS };
-        st.showing = spawn_balloon(&mut commands, &mut ui, &mut images, sim, kind, &icon, axis, now, dur);
+        st.showing = spawn_balloon(&mut commands, &mut ui, &mut images, &mut portraits, sim, kind, &icon, axis, now, dur);
         st.until = now + dur;
     }
 }
@@ -419,6 +419,7 @@ fn spawn_balloon(
     commands: &mut Commands,
     ui: &mut crate::icons::GameUi,
     images: &mut Assets<Image>,
+    portraits: &mut crate::portraits::Portraits,
     sim: Entity,
     kind: BalloonKind,
     icon: &str,
@@ -426,7 +427,12 @@ fn spawn_balloon(
     now: f32,
     dur: f32,
 ) -> Option<Entity> {
-    let icon_h = ui.icon(images, icon)?;
+    // A Sim's picture (rounded into the balloon), or an icon.
+    let picture = icon.strip_prefix(PORTRAIT).and_then(|b| b.parse::<u64>().ok()).and_then(Entity::try_from_bits);
+    let icon_h = match picture {
+        Some(e) => portraits.portrait(images, e),
+        None => ui.icon(images, icon)?,
+    };
     let frame = ui.icon(
         images,
         match kind {
@@ -459,7 +465,13 @@ fn spawn_balloon(
                 r.spawn(part(l, rect(0.28, 1.12, 0.1, 0.1, h)));
             }
             r.spawn(part(frame, rect(0.0, 0.0, 1.0, 1.0, h)));
-            r.spawn(part(icon_h, rect(0.25, icon_y, 0.5, 0.5, h)));
+            if picture.is_some() {
+                let mut n = rect(0.27, icon_y + 0.02, 0.46, 0.46, h);
+                n.border_radius = BorderRadius::all(Val::Percent(50.0));
+                r.spawn((ImageNode::new(icon_h), n, BalloonPart, Pickable::IGNORE));
+            } else {
+                r.spawn(part(icon_h, rect(0.25, icon_y, 0.5, 0.5, h)));
+            }
             match (axis, mark) {
                 (2, Some(m)) => {
                     r.spawn(part(m, rect(0.22, icon_y - 0.03, 0.56, 0.56, h)));

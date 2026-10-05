@@ -32,6 +32,8 @@ pub struct AutoArgs {
     pub place: Option<String>,
     /// `--paint`: repaper the house's indoor walls and recover its ground floor.
     pub paint: bool,
+    /// `--relations`: open the Relationships panel.
+    pub relations: bool,
     /// `--balloon <kind>:<icon>[:<axis>]`: keep showing this balloon over the selected Sim
     /// (kind thought / speech / dream; axis 1 like, 2 dislike).
     pub balloon: Option<String>,
@@ -92,6 +94,11 @@ impl AutoArgs {
                     i += 1;
                     continue;
                 }
+                "--relations" => {
+                    a.relations = true;
+                    i += 1;
+                    continue;
+                }
                 "--exit-after-shot" => {
                     a.exit_after = true;
                     i += 1;
@@ -125,6 +132,16 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_place.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_paint.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_balloon.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(
+                Update,
+                (|args: Res<AutoArgs>, mut p: ResMut<crate::relations::RelationsPanel>, mut done: Local<bool>| {
+                    if args.relations && !*done {
+                        *done = true;
+                        p.open = true;
+                    }
+                })
+                .run_if(in_state(crate::PlayMode::Live)),
+            )
             .add_systems(Update, auto_view_level.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_speed.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_save.run_if(in_state(crate::PlayMode::Live)))
@@ -309,7 +326,14 @@ fn portrait_cam(
 }
 
 /// `--balloon`: the balloon again every three seconds.
-fn auto_balloon(args: Res<AutoArgs>, time: Res<Time>, mut next: Local<f32>, sel: Query<Entity, With<crate::sim::Selected>>, mut commands: Commands) {
+fn auto_balloon(
+    args: Res<AutoArgs>,
+    time: Res<Time>,
+    mut next: Local<f32>,
+    sel: Query<Entity, With<crate::sim::Selected>>,
+    members: Query<Entity, With<crate::sim::HouseholdMember>>,
+    mut commands: Commands,
+) {
     let Some(spec) = &args.balloon else { return };
     if time.elapsed_secs() < *next {
         return;
@@ -322,7 +346,13 @@ fn auto_balloon(args: Res<AutoArgs>, time: Res<Time>, mut next: Local<f32>, sel:
         Some("dream") => crate::balloons::BalloonKind::Dream,
         _ => crate::balloons::BalloonKind::Thought,
     };
-    let icon = parts.next().unwrap_or("balloon_question").to_string();
+    let mut icon = parts.next().unwrap_or("balloon_question").to_string();
+    // "@other": another household member's picture.
+    if icon == "@other"
+        && let Some(o) = members.iter().find(|m| *m != e)
+    {
+        icon = format!("@portrait:{}", o.to_bits());
+    }
     let axis = parts.next().and_then(|a| a.parse().ok()).unwrap_or(0);
     commands.entity(e).insert(crate::balloons::BalloonRequest { kind, icon, axis });
 }

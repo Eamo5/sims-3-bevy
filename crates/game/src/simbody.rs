@@ -314,6 +314,32 @@ fn hair_grey_key(k: Key) -> Key {
     (k.0 ^ 0x4000_0000, k.1, k.2)
 }
 
+/// Scales the alpha of each smaller mip level so as many texels pass the alpha test (`cut`) as
+/// at full size: averaged-down strands otherwise fall under it and hair thins out to nothing
+/// when seen small.
+fn keep_coverage(data: &mut [u8], width: usize, height: usize, cut: u8) {
+    let coverage = |px: &[u8], scale: f32| px.chunks_exact(4).filter(|p| p[3] as f32 * scale >= cut as f32).count() as f32 / (px.len() / 4).max(1) as f32;
+    let (mut w, mut h, mut at) = (width, height, 0usize);
+    let target = coverage(&data[..w * h * 4], 1.0);
+    while w > 1 || h > 1 {
+        at += w * h * 4;
+        (w, h) = ((w / 2).max(1), (h / 2).max(1));
+        let level = &mut data[at..at + w * h * 4];
+        if coverage(level, 1.0) >= target {
+            continue;
+        }
+        // The smallest scale that brings the level back up to the full-size coverage.
+        let (mut lo, mut hi) = (1.0f32, 16.0f32);
+        for _ in 0..12 {
+            let mid = (lo + hi) * 0.5;
+            if coverage(level, mid) < target { lo = mid } else { hi = mid }
+        }
+        for p in level.chunks_exact_mut(4) {
+            p[3] = (p[3] as f32 * hi).min(255.0) as u8;
+        }
+    }
+}
+
 /// A hair texture (DDS bytes) as a greyscale RGBA image, brightened so its average is a light
 /// grey: the material's tint colour then sets the hair colour.
 fn greyscale_hair(dds: &[u8]) -> Option<Image> {
@@ -335,7 +361,8 @@ fn greyscale_hair(dds: &[u8]) -> Option<Image> {
         px[1] = v;
         px[2] = v;
     }
-    let (mips, levels) = s3formats::dds::build_mips(&img);
+    let (mut mips, levels) = s3formats::dds::build_mips(&img);
+    keep_coverage(&mut mips, img.width, img.height, 102);
     let mut out = Image::new(
         Extent3d { width: img.width as u32, height: img.height as u32, depth_or_array_layers: 1 },
         TextureDimension::D2,
@@ -430,16 +457,25 @@ pub fn spawn_sim_model(commands: &mut Commands, parent: Entity, model: SimModelC
                 commands.spawn((mesh, MeshMaterial3d(m), skinned, Transform::default())).id()
             }
             SimMat::Plain { tex: t, mask, tint } => {
-                let m = ctx.mats.add(StandardMaterial {
+                let material = |alpha_mode: AlphaMode| StandardMaterial {
                     base_color: tint.unwrap_or(Color::WHITE),
                     base_color_texture: tex(t, ctx.textures),
                     perceptual_roughness: 0.6,
                     reflectance: 0.25,
-                    alpha_mode: if mask { AlphaMode::Mask(0.4) } else { AlphaMode::Opaque },
+                    alpha_mode,
                     double_sided: mask,
                     cull_mode: if mask { None } else { Some(bevy::render::render_resource::Face::Back) },
                     ..default()
-                });
+                };
+                let m = ctx.mats.add(material(if mask { AlphaMode::Mask(0.5) } else { AlphaMode::Opaque }));
+                if mask {
+                    // Hair and see-through clothes: the solid core is alpha-tested (in depth
+                    // order), then the same mesh is blended over it for the soft edges, which
+                    // short hairstyles are mostly made of.
+                    let soft = ctx.mats.add(material(AlphaMode::Blend));
+                    let e = commands.spawn((mesh.clone(), MeshMaterial3d(soft), skinned.clone(), Transform::default(), SimModelPart)).id();
+                    commands.entity(parent).add_child(e);
+                }
                 commands.spawn((mesh, MeshMaterial3d(m), skinned, Transform::default())).id()
             }
         };
