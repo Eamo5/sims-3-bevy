@@ -478,13 +478,17 @@ pub fn spawn_sim_model(commands: &mut Commands, parent: Entity, model: SimModelC
                     // order), then the same mesh is blended over it for the soft edges, which
                     // short hairstyles are mostly made of.
                     let soft = ctx.mats.add(material(AlphaMode::Blend));
-                    let e = commands.spawn((mesh.clone(), MeshMaterial3d(soft), skinned.clone(), Transform::default(), SimModelPart, sim_layers())).id();
+                    let e = commands
+                        .spawn((mesh.clone(), MeshMaterial3d(soft), skinned.clone(), Transform::default(), SimModelPart, sim_layers(), bevy::camera::visibility::NoFrustumCulling))
+                        .id();
                     commands.entity(parent).add_child(e);
                 }
                 commands.spawn((mesh, MeshMaterial3d(m), skinned, Transform::default())).id()
             }
         };
-        commands.entity(e).insert((SimModelPart, sim_layers()));
+        // (Skinned bounds are the bind pose's: a Sim crouching, sitting or crawling would lose
+        // their head to culling, worst in the portrait camera's narrow view.)
+        commands.entity(e).insert((SimModelPart, sim_layers(), bevy::camera::visibility::NoFrustumCulling));
         commands.entity(parent).add_child(e);
     }
     commands.entity(parent).insert(Skeleton { rig, joints, bind });
