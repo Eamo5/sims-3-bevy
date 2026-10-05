@@ -894,6 +894,12 @@ fn run_actions(
                                         let c = otf.transform_point(Vec3::new(obj.center.x + side, 0.0, obj.center.y));
                                         tf.translation = Vec3::new(c.x, otf.translation.y, c.z);
                                         tf.rotation = otf.rotation;
+                                        if d.special == Special::EatMeal {
+                                            // The eating clips sit the Sim back from their root,
+                                            // which belongs at the table's edge.
+                                            let back = if obj.kind == ObjectKind::Stool { 0.67 } else { 0.576 };
+                                            tf.translation += (otf.rotation * Vec3::Z).with_y(0.0).normalize_or_zero() * back;
+                                        }
                                         if bed && d.name == "Nap" {
                                             // The nap clips are played from beside the bed, facing
                                             // across it (the Sim lies down 1.09 m ahead, head to

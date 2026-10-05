@@ -125,7 +125,7 @@ impl Plugin for AutoTestPlugin {
         }
         app.insert_resource(args)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, apply_cam.run_if(in_state(AppState::InGame)))
+            .add_systems(Update, apply_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -194,16 +194,14 @@ fn apply_cam(args: Res<AutoArgs>, time: Res<Time>, mut since: Local<Option<f32>>
     if *done {
         return;
     }
+    // (Held for the first seconds of play, over the move-in camera.)
     let t0 = *since.get_or_insert(time.elapsed_secs());
-    if time.elapsed_secs() - t0 < 1.0 {
-        return;
-    }
     if let Ok(mut cam) = q.single_mut() {
         cam.look_at(Vec3::new(c[0], 0.0, c[1]));
         cam.distance = c[2];
         cam.yaw = c[3];
         cam.pitch = c[4];
-        *done = true;
+        *done = time.elapsed_secs() - t0 > 6.0;
     }
 }
 
