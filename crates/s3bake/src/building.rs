@@ -286,6 +286,31 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
         }
     }
 
+    // A pool: the tiles of the level below the ground (and how deep it is).
+    let (pool, pool_depth) = match (ground_index, floor_grid.as_ref(), terrain.as_ref()) {
+        (1.., Some(g), Some(t)) => {
+            let below = ground_index - 1;
+            let mut tiles = Vec::new();
+            for x in 0..g.width.min(w + 1) {
+                for z in 0..g.depth.min(d + 1) {
+                    let Some(q) = g.quad(below, x, z) else { continue };
+                    let mask = (0..4).filter(|&t| q[t] != 0).fold(0u8, |m, t| m | (1 << t));
+                    if mask == 0 {
+                        continue;
+                    }
+                    let cover = q.map(|id| match floor_palette.get(&(id as u32)) {
+                        Some(&(cwal, comp)) if id != 0 => covers.pick(Some(comp), Some(cwal), true),
+                        _ => NO_COVER,
+                    });
+                    tiles.push(FloorBaked { level: 0, x: x as u16, z: z as u16, mask, kind: ROOM_OUTSIDE, region: 0, cover });
+                }
+            }
+            let depth = tiles.iter().map(|f| t.at(below as usize, f.x as usize, f.z as usize) - t.at(ground_index as usize, f.x as usize, f.z as usize)).sum::<f32>() / tiles.len().max(1) as f32;
+            (tiles, depth)
+        }
+        _ => (Vec::new(), 0.0),
+    };
+
     // Walls with the kind of room on each side (outdoors when no indoor floor is there).
     let floor_at: HashMap<(u8, u16, u16), (u8, u8)> = floors.iter().map(|f| ((f.level, f.x, f.z), (f.mask, f.kind))).collect();
     let has_floor = |level: u32, p: [f32; 2]| -> bool {
@@ -415,7 +440,20 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
 
     let jobs = std::mem::take(&mut covers.jobs);
     Some((
-        LotBuildingBaked { lot: lot_index as u32, width: w, depth: d, levels, walls, floors, foundation, objects: objs, covers: covers.keys, ground: Vec::new() },
+        LotBuildingBaked {
+            lot: lot_index as u32,
+            width: w,
+            depth: d,
+            levels,
+            walls,
+            floors,
+            foundation,
+            objects: objs,
+            covers: covers.keys,
+            ground: Vec::new(),
+            pool,
+            pool_depth,
+        },
         jobs,
     ))
 }

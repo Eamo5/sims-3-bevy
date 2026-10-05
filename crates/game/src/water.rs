@@ -54,13 +54,28 @@ pub struct WaterPlugin;
 impl Plugin for WaterPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "shaders/water.wgsl");
-        app.add_plugins(MaterialPlugin::<WaterMaterial>::default()).add_systems(Update, update_water.run_if(in_state(AppState::InGame)));
+        app.add_plugins(MaterialPlugin::<WaterMaterial>::default()).add_systems(Update, (pool_water, update_water).run_if(in_state(AppState::InGame)));
     }
 }
 
 /// A body of water's material.
 #[derive(Component)]
 pub struct Water(pub Handle<WaterMaterial>);
+
+/// A pool's water, to be given the pool water material.
+#[derive(Component)]
+pub struct PoolWater;
+
+/// The pools' water material (clear, turquoise, still).
+#[derive(Resource)]
+pub struct PoolWaterMaterial(pub Handle<WaterMaterial>);
+
+fn pool_water(mut commands: Commands, q: Query<Entity, With<PoolWater>>, mat: Option<Res<PoolWaterMaterial>>) {
+    let Some(mat) = mat else { return };
+    for e in &q {
+        commands.entity(e).remove::<PoolWater>().insert((MeshMaterial3d(mat.0.clone()), Water(mat.0.clone()), NotShadowCaster));
+    }
+}
 
 /// The terrain's heights as a texture (raw 16-bit samples).
 pub fn height_image(hm: &Heightmap) -> Image {
@@ -151,6 +166,16 @@ pub fn ripple_image() -> Image {
         ..default()
     });
     img
+}
+
+/// A pool's water: clear and turquoise over its tiled floor.
+pub fn pool_material(heights: Handle<Image>, ripples: Handle<Image>, samples: u32, scale: f32) -> WaterMaterial {
+    let mut m = water_material(heights, ripples, samples, scale, true);
+    let lin = |r: f32, g: f32, b: f32| Color::srgb(r, g, b).to_linear().to_vec4();
+    m.extension.water.deep = lin(0.08, 0.42, 0.62);
+    m.extension.water.shallow = lin(0.38, 0.78, 0.86);
+    m.extension.water.misc.w = 2.0;
+    m
 }
 
 /// The water's material: the sea's blue-green, or a pond's darker green.

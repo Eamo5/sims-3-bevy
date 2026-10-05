@@ -10,7 +10,7 @@ pub const BAKE_VERSION: u32 = 4;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
 pub const CAS_VERSION: u32 = 6;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 25;
+pub const WORLD_VERSION: u32 = 26;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -309,6 +309,10 @@ pub struct LotBuildingBaked {
     /// The ground's height at each lot vertex (`[x][z]`, `(width+1) x (depth+1)`), for paving
     /// laid on it; empty for a flat lot.
     pub ground: Vec<f32>,
+    /// The pool's floor tiles (with their coverings), and how far down its floor is below the
+    /// ground (metres, negative).
+    pub pool: Vec<FloorBaked>,
+    pub pool_depth: f32,
 }
 
 impl LotBuildingBaked {
@@ -376,6 +380,8 @@ pub struct WorldBaked {
     pub road_intersections: Vec<[f32; 3]>,
     /// Ponds on lots (their basins already carved into `heightmap`).
     pub ponds: Vec<PondBaked>,
+    /// World cells (x, z) the terrain leaves open: pools are let into the ground there.
+    pub terrain_holes: Vec<[i32; 2]>,
 }
 
 /// A lot's water: the water height at each lot-grid vertex (`[x][z]`, `nx × nz`, the lot's

@@ -756,6 +756,36 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
 
     let mut heightmap = world.heightmap.clone();
     let ponds = crate::ponds::carve_ponds(&pkg, &world.lots, &buildings, &mut heightmap);
+    // Pools are let into the ground: the terrain is open over them, and dug down under them
+    // (for the water's depth and to keep Sims out).
+    let mut terrain_holes = Vec::new();
+    for b in buildings.iter().filter(|b| !b.pool.is_empty()) {
+        let Some(l) = world.lots.get(b.lot as usize) else { continue };
+        let (s, c) = l.rotation.sin_cos();
+        let to_world = |x: f32, z: f32| (l.corner[0] + x * c + z * s, l.corner[2] - x * s + z * c);
+        let mut cells = HashSet::new();
+        for f in &b.pool {
+            for (u, v) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75), (0.5, 0.5)] {
+                let (wx, wz) = to_world(f.x as f32 + u, f.z as f32 + v);
+                cells.insert([wx.floor() as i32, wz.floor() as i32]);
+            }
+        }
+        // Heightmap points with open cells all around them go down to the pool's floor.
+        let floor_y = b.levels[0] + b.pool_depth;
+        for &[x, z] in &cells {
+            for (px, pz) in [(x, z), (x + 1, z), (x, z + 1), (x + 1, z + 1)] {
+                let around = [[px - 1, pz - 1], [px, pz - 1], [px - 1, pz], [px, pz]];
+                if around.iter().all(|c| cells.contains(c)) && px >= 0 && pz >= 0 && (px as usize) < heightmap.width && (pz as usize) < heightmap.height {
+                    let k = pz as usize * heightmap.width + px as usize;
+                    heightmap.data[k] = (floor_y / heightmap.scale).round().clamp(0.0, 65535.0) as u16;
+                }
+            }
+        }
+        terrain_holes.extend(cells);
+    }
+    terrain_holes.sort();
+    terrain_holes.dedup();
+
     // Paving on a lot follows its ground (where it dips, the paving goes down with it).
     for b in &mut buildings {
         let Some(l) = world.lots.get(b.lot as usize) else { continue };
@@ -793,6 +823,7 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         road_curves: graph.road_curves,
         road_intersections: graph.road_intersections,
         ponds,
+        terrain_holes,
     };
     write_value(&wdir.join("world.bin"), &baked).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_dir_all(&final_dir);

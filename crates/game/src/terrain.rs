@@ -169,8 +169,10 @@ pub fn build_terrain(world: &WorldBaked) -> TerrainBuild {
     let n = cells / CHUNK;
     let tiles: Vec<(usize, usize, usize)> =
         (0..n).flat_map(|cz| (0..n).flat_map(move |cx| (0..LODS.len()).map(move |lod| (cx, cz, lod)))).collect();
+    // (The nearest detail leaves the ground open where pools are let into it.)
+    let holes: std::collections::HashSet<(i64, i64)> = world.terrain_holes.iter().map(|c| (c[0] as i64, c[1] as i64)).collect();
     let chunks = crate::world::par_map(&tiles, |&(cx, cz, lod)| {
-        let (mesh, center) = chunk_mesh(hm, cx * CHUNK, cz * CHUNK, LODS[lod].0);
+        let (mesh, center) = chunk_mesh(hm, cx * CHUNK, cz * CHUNK, LODS[lod].0, if lod == 0 { Some(&holes) } else { None });
         ChunkMesh { mesh, center, lod }
     });
 
@@ -236,7 +238,7 @@ pub fn build_terrain(world: &WorldBaked) -> TerrainBuild {
     }
 }
 
-fn chunk_mesh(hm: &Heightmap, x0: usize, z0: usize, step: usize) -> (Mesh, Vec3) {
+fn chunk_mesh(hm: &Heightmap, x0: usize, z0: usize, step: usize, holes: Option<&std::collections::HashSet<(i64, i64)>>) -> (Mesh, Vec3) {
     let side = CHUNK / step + 1;
     let center = Vec3::new((x0 + CHUNK / 2) as f32, 0.0, (z0 + CHUNK / 2) as f32);
     let wsize = (hm.width - 1) as f32;
@@ -255,6 +257,9 @@ fn chunk_mesh(hm: &Heightmap, x0: usize, z0: usize, step: usize) -> (Mesh, Vec3)
     let mut idx: Vec<u32> = Vec::with_capacity((side - 1) * (side - 1) * 6 + side * 24);
     for j in 0..side - 1 {
         for i in 0..side - 1 {
+            if holes.is_some_and(|h| h.contains(&((x0 + i * step) as i64, (z0 + j * step) as i64))) {
+                continue;
+            }
             let a = (j * side + i) as u32;
             let b = a + 1;
             let c = a + side as u32;
@@ -363,7 +368,8 @@ fn spawn_terrain(
     let sea = water_mats.add(crate::water::water_material(heights.clone(), ripples.clone(), samples, build.height_scale, false));
     let plane = meshes.add(Plane3d::default().mesh().size(world * 6.0, world * 6.0).subdivisions(64));
     crate::water::spawn_water(&mut commands, plane, sea, Transform::from_xyz(world * 0.5, build.sea_level, world * 0.5));
-    let pond = water_mats.add(crate::water::water_material(heights, ripples, samples, build.height_scale, true));
+    let pond = water_mats.add(crate::water::water_material(heights.clone(), ripples.clone(), samples, build.height_scale, true));
+    commands.insert_resource(crate::water::PoolWaterMaterial(water_mats.add(crate::water::pool_material(heights, ripples, samples, build.height_scale))));
     for m in build.ponds.drain(..) {
         crate::water::spawn_water(&mut commands, meshes.add(m), pond.clone(), Transform::default());
     }

@@ -59,6 +59,7 @@ fn fragment(
     let p = in.world_position.xyz;
     let t = water.misc.x;
     let pond = water.misc.w > 0.5;
+    let pool = water.misc.w > 1.5;
 
     // Ripples: the slope field at three scales, drifting different ways (ponds stiller).
     let s1 = textureSample(ripple_tex, ripple_samp, p.xz / 9.0 + vec2<f32>(t * 0.011, t * 0.007)).rg * 2.0 - 1.0;
@@ -91,11 +92,15 @@ fn fragment(
     let glint = (pow(to_sun, 700.0) * 8.0 + pow(to_sun, 40.0) * 0.25) * water.sun.w;
     var col = mix(lit.rgb, sky, fres * 0.9) + water.sun_color.rgb * glint;
     // Foam where the water meets the shore.
-    let edge = 1.0 - smoothstep(0.0, select(0.45, 0.2, pond), depth);
+    let edge = select(1.0 - smoothstep(0.0, select(0.45, 0.2, pond), depth), 0.0, pool);
     let froth = 0.55 + 0.45 * sin(t * 1.3 + (s3.x + s1.y) * 6.0);
     col = mix(col, vec3<f32>(0.85, 0.9, 0.9) * (0.35 + 0.65 * water.sun.w), edge * froth * select(0.7, 0.35, pond));
     // Clearer in the shallows, opaque in the deep and at grazing angles, soft at the very edge.
-    let alpha = clamp(mix(0.5, 0.96, smoothstep(0.0, 1.5, depth)) + fres * 0.4 + edge * 0.2, 0.0, 1.0) * smoothstep(0.0, 0.06, depth);
+    var alpha = clamp(mix(0.5, 0.96, smoothstep(0.0, 1.5, depth)) + fres * 0.4 + edge * 0.2, 0.0, 1.0) * smoothstep(0.0, 0.06, depth);
+    // (A pool's clear water shows its tiles.)
+    if (pool) {
+        alpha = clamp(0.55 + fres * 0.4, 0.0, 1.0);
+    }
     out.color = vec4<f32>(col, alpha);
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
 #endif

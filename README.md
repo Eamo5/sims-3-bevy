@@ -113,6 +113,9 @@ installation is unreachable.
   and progress to the next); Career (the job and level, hours, days and pay, the performance
   meter and the next promotion); Simology (traits with what they mean, lifetime happiness and
   the rewards bought). F5 to F8 switch tabs.
+- **Pools**: the lots' pools (Le Petit Shark Pool Center, the apartments', the gym's, estates')
+  are let into the ground with their tiled floors and sides, a stone coping and clear turquoise
+  water over the mosaics; the terrain is left open over them.
 - **Water effects**: fountains gush and fill their basins, showers spray from the head and taps
   run while someone's at them, each from the object's own effect slot (the game's RSLT slots).
 - **Lots' own ground**: lots keep their sculpted ground; its dips are carved back into the

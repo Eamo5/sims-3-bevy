@@ -849,6 +849,8 @@ pub fn empty_building(lot_index: usize, lot: &LotInfo, ground: f32) -> LotBuildi
         objects: Vec::new(),
         covers: Vec::new(),
         ground: Vec::new(),
+        pool: Vec::new(),
+        pool_depth: 0.0,
     }
 }
 
@@ -1471,6 +1473,62 @@ pub fn spawn_building(
             let e = commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(mat))).id();
             place(commands, e, neighbor, 0);
         }
+    }
+    // A pool let into the ground: its tiled floor and sides, a stone coping round the edge,
+    // and the water (given its material by the water module).
+    if !b.pool.is_empty() {
+        let tiles: HashSet<(i32, i32)> = b.pool.iter().map(|f| (f.x as i32, f.z as i32)).collect();
+        let cover_key = |i: u16| (i != s3bake::types::NO_COVER).then(|| b.covers.get(i as usize).copied()).flatten();
+        let ground_y = |x: f32, z: f32| b.ground_at(x, z).unwrap_or(level_y(0));
+        let floor_y = level_y(0) + b.pool_depth;
+        let water_y = level_y(0) - 0.22;
+        let mut bufs: HashMap<Key, MeshBuf> = HashMap::new();
+        let mut coping = MeshBuf::default();
+        let mut water = MeshBuf::default();
+        for f in &b.pool {
+            let (x, z) = (f.x as f32, f.z as f32);
+            let key = f.cover.iter().find_map(|&c| cover_key(c)).unwrap_or(STYLE_FLOOR_TERRACOTTA);
+            let buf = bufs.entry(key).or_default();
+            buf.quad(
+                [active.world(x, z, floor_y), active.world(x + 1.0, z, floor_y), active.world(x + 1.0, z + 1.0, floor_y), active.world(x, z + 1.0, floor_y)],
+                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                Vec3::Y,
+            );
+            water.quad(
+                [active.world(x, z, water_y), active.world(x + 1.0, z, water_y), active.world(x + 1.0, z + 1.0, water_y), active.world(x, z + 1.0, water_y)],
+                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                Vec3::Y,
+            );
+            // Sides where the pool ends: tiled down to the floor, the coping along the top.
+            for (dx, dz, a, c) in [(-1, 0, (x, z + 1.0), (x, z)), (1, 0, (x + 1.0, z), (x + 1.0, z + 1.0)), (0, -1, (x, z), (x + 1.0, z)), (0, 1, (x + 1.0, z + 1.0), (x, z + 1.0))] {
+                if tiles.contains(&(f.x as i32 + dx, f.z as i32 + dz)) {
+                    continue;
+                }
+                let inward = active.dir(-dx as f32, -dz as f32);
+                let (ya, yc) = (ground_y(a.0, a.1), ground_y(c.0, c.1));
+                buf.quad(
+                    [active.world(a.0, a.1, floor_y), active.world(c.0, c.1, floor_y), active.world(c.0, c.1, yc), active.world(a.0, a.1, ya)],
+                    [[0.0, 0.0], [1.0, 0.0], [1.0, ya - floor_y], [0.0, yc - floor_y]],
+                    inward,
+                );
+                let out = Vec2::new(dx as f32, dz as f32) * 0.3;
+                coping.quad(
+                    [active.world(a.0, a.1, ya + 0.04), active.world(c.0, c.1, yc + 0.04), active.world(c.0 + out.x, c.1 + out.y, yc + 0.04), active.world(a.0 + out.x, a.1 + out.y, ya + 0.04)],
+                    [[0.0, 0.0], [1.0, 0.0], [1.0, 0.3], [0.0, 0.3]],
+                    Vec3::Y,
+                );
+            }
+        }
+        for (key, buf) in bufs {
+            let mat = surface_material(assets, ctx, key);
+            let e = commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(mat))).id();
+            place(commands, e, neighbor, 1);
+        }
+        let stone = ctx.materials.add(StandardMaterial { base_color: Color::srgb(0.82, 0.8, 0.74), perceptual_roughness: 0.8, ..default() });
+        let e = commands.spawn((Mesh3d(ctx.meshes.add(coping.mesh())), MeshMaterial3d(stone))).id();
+        place(commands, e, neighbor, 1);
+        let e = commands.spawn((Mesh3d(ctx.meshes.add(water.mesh())), Transform::default(), Visibility::default(), crate::water::PoolWater)).id();
+        place(commands, e, neighbor, 1);
     }
     active.holes = holes;
     active.base_stairs = active.stairs.clone();
