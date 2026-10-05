@@ -116,7 +116,23 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
         data.rooms.width.max(data.walls.width).max(lot.width + 1).saturating_sub(1),
         data.rooms.depth.max(data.walls.depth).max(lot.depth + 1).saturating_sub(1),
     );
-    let has_foundation = data.rooms.segments().any(|s| s.2 == 0);
+    // The lot's level grids (0x0093D6D4, heights relative to the lot): the ground's index `g`
+    // (1 when there's a level below it for pools and basements), and whether the house stands
+    // on a foundation (the level above the ground is 0.75 m up under it).
+    let terrain = s3formats::lot::LotTerrain::load(pkg, lot.id);
+    let (ground_index, has_foundation) = match &terrain {
+        Some(t) => {
+            let median = |l: &Vec<f32>| {
+                let mut v = l.clone();
+                v.sort_by(f32::total_cmp);
+                v[v.len() / 2]
+            };
+            let g = (0..t.levels.len()).min_by(|&a, &b| median(&t.levels[a]).abs().total_cmp(&median(&t.levels[b]).abs())).unwrap_or(0);
+            let f = t.levels.get(g + 1).is_some_and(|l| l.iter().filter(|h| (0.4..1.2).contains(*h)).count() >= 4);
+            (g as u32, f)
+        }
+        None => (0, data.rooms.segments().any(|s| s.2 == 0)),
+    };
     let ground = lot.corner[1];
     let base = ground + if has_foundation { FOUNDATION_HEIGHT } else { 0.0 };
     let top_level = data
@@ -199,27 +215,28 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
         });
     }
 
-    // Floors: per level, the triangles enclosed by room boundaries (the foundation outline
-    // counts for the ground floor). Rooms enclosed only by railings / foundation are porches.
+    // Floors: per storey, the tiles laid on its grid level (storey `n` is grid level
+    // `g + n + F - 1`: on a foundation the ground floor is its own level above the ground);
+    // indoors where walls enclose them, porches and paving elsewhere.
     let mut floors = Vec::new();
     let floor_grid = read(ld::T_GRID, ld::G_FLOOR_GRID);
     let floor_grid = floor_grid.as_deref().and_then(|d| ld::Grid::parse(d).ok());
     let floor_palette = read(ld::T_FLOOR_PALETTE, ld::G_FLOOR_PALETTE).and_then(|d| ld::parse_floor_palette(&d).ok()).unwrap_or_default();
-    // On a foundation, grid level 1 is the foundation's own top (porches show it) and storey
-    // `n`'s floors are on grid level `n + 1`; otherwise storey `n` is grid level `n`.
-    let shift = has_foundation as u32;
+    let grid_level = |level: u32| if level == 0 { ground_index } else { ground_index + level + has_foundation as u32 - 1 };
+    let tiles = |level: u32| -> Vec<(u32, u32, u8)> {
+        let Some(g) = floor_grid.as_ref() else { return Vec::new() };
+        let gl = grid_level(level);
+        (0..g.width.min(w + 1))
+            .flat_map(|x| (0..g.depth.min(d + 1)).map(move |z| (x, z)))
+            .filter_map(|(x, z)| {
+                let q = g.quad(gl, x, z)?;
+                let mask = (0..4).filter(|&t| q[t] != 0).fold(0u8, |m, t| m | (1 << t));
+                (mask != 0).then_some((x, z, mask))
+            })
+            .collect()
+    };
     let mut floor_cover = |level: u32, x: u32, z: u32| -> [u16; 4] {
-        let quad = |l: u32| floor_grid.as_ref().and_then(|g| g.quad(l, x, z));
-        let lifted = if level == 0 { quad(0) } else { quad(level + shift) };
-        let Some(mut q) = lifted.or_else(|| quad(level)) else { return [NO_COVER; 4] };
-        if shift == 1 && level == 1 {
-            let top = quad(1).unwrap_or([0; 4]);
-            for t in 0..4 {
-                if q[t] == 0 {
-                    q[t] = top[t];
-                }
-            }
-        }
+        let Some(q) = floor_grid.as_ref().and_then(|g| g.quad(grid_level(level), x, z)) else { return [NO_COVER; 4] };
         q.map(|id| match floor_palette.get(&(id as u32)) {
             Some(&(cwal, comp)) if id != 0 => covers.pick(Some(comp), Some(cwal), true),
             _ => NO_COVER,
@@ -233,7 +250,8 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
             .map(|s| (s.0, s.1))
             .collect();
         let wall_edges: Vec<([f32; 2], [f32; 2])> = data.walls.segments().filter(|s| s.2 == level).map(|s| (s.0, s.1)).collect();
-        let cells = enclosed_floor(&bounds, w, d);
+        // (Without a level grid, the floor is wherever the rooms' boundaries enclose.)
+        let cells: Vec<(u32, u32, u8)> = if floor_grid.is_some() { tiles(level) } else { enclosed_floor(&bounds, w, d).iter().map(|c| (c.x, c.z, c.mask)).collect() };
         let inside = enclosed_floor(&wall_edges, w, d);
         let indoor: HashMap<(u32, u32), (u8, u32)> = inside.iter().map(|c| ((c.x, c.z), (c.mask, c.region))).collect();
         // Room kinds from the furniture standing in each indoor region.
@@ -249,28 +267,22 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
                 *e = (*e).min(k);
             }
         }
-        for cell in cells {
-            let (kind, region) = match indoor.get(&(cell.x, cell.z)) {
-                Some(&(mask, region)) if mask & cell.mask != 0 => (kinds.get(&region).copied().unwrap_or(ROOM_LIVING), region),
+        for (x, z, mask) in cells {
+            let (kind, region) = match indoor.get(&(x, z)) {
+                Some(&(m, region)) if m & mask != 0 => (kinds.get(&region).copied().unwrap_or(ROOM_LIVING), region),
                 _ => (ROOM_PORCH, 0),
             };
-            let cover = floor_cover(level, cell.x, cell.z);
-            floors.push(FloorBaked { level: level as u8, x: cell.x as u16, z: cell.z as u16, mask: cell.mask, kind, region: region as u16, cover });
+            let cover = floor_cover(level, x, z);
+            floors.push(FloorBaked { level: level as u8, x: x as u16, z: z as u16, mask, kind, region: region as u16, cover });
         }
     }
 
-    // Ground-level paving (paths, patios): floor tiles laid on the lot's ground.
-    if let Some(g) = floor_grid.as_ref() {
-        for z in 0..g.depth.min(d + 1) {
-            for x in 0..g.width.min(w + 1) {
-                let Some(q) = g.quad(0, x, z) else { continue };
-                let mask = (0..4).filter(|&t| q[t] != 0).fold(0u8, |m, t| m | (1 << t));
-                if mask == 0 {
-                    continue;
-                }
-                let cover = floor_cover(0, x, z);
-                floors.push(FloorBaked { level: 0, x: x as u16, z: z as u16, mask, kind: ROOM_PORCH, region: 0, cover });
-            }
+    // Ground-level paving (paths, patios) laid on the lot's ground, when the house is on a
+    // foundation (otherwise the ground level is the ground floor's, done above).
+    if has_foundation {
+        for (x, z, mask) in tiles(0) {
+            let cover = floor_cover(0, x, z);
+            floors.push(FloorBaked { level: 0, x: x as u16, z: z as u16, mask, kind: ROOM_PORCH, region: 0, cover });
         }
     }
 
@@ -326,6 +338,10 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     let (design_palette, pattern_palette) = (palette(ld::G_WALL_DESIGN_PALETTE), palette(ld::G_WALL_PATTERN_PALETTE));
     let cover_edges: Vec<([f32; 2], [f32; 2], u32, u32)> = cover_graph.segments().map(|(a, b, l, e)| (a, b, l, e.id)).collect();
     for (a, b, level, e) in data.walls.segments() {
+        // (Walls below the ground are a pool's or a basement's.)
+        if level == 0 && ground_index > 0 {
+            continue;
+        }
         let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
         let len = (dx * dx + dz * dz).sqrt();
         if len < 1e-3 {
@@ -394,7 +410,8 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
             }
         }
     }
-    let foundation: Vec<([f32; 2], [f32; 2])> = data.rooms.segments().filter(|s| s.2 == 0).map(|s| (s.0, s.1)).collect();
+    let foundation: Vec<([f32; 2], [f32; 2])> =
+        if has_foundation { data.rooms.segments().filter(|s| s.2 == 0).map(|s| (s.0, s.1)).collect() } else { Vec::new() };
 
     let jobs = std::mem::take(&mut covers.jobs);
     Some((

@@ -38,6 +38,24 @@ fn main() {
         }
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--graphlevels") {
+        // --graphlevels <lot name part>: the wall and room graphs' edges per level (Sunset Valley).
+        let path = data.join("GameData/Shared/NonPackaged/Worlds/Sunset Valley.world");
+        let pkg = s3pkg::Package::open(&path).expect("world");
+        let world = s3formats::world::WorldData::load(&pkg).expect("world data");
+        for l in world.lots.iter().filter(|l| l.internal_name.contains(&args[i + 1])) {
+            let b = s3formats::lot::LotBuildData::load(&pkg, l.id).unwrap_or_default();
+            let count = |g: &s3formats::lot::WallGraph| {
+                let mut m = std::collections::BTreeMap::new();
+                for s in g.segments() {
+                    *m.entry(s.2).or_insert(0) += 1;
+                }
+                m
+            };
+            println!("{}: walls {:?} rooms {:?}", l.internal_name, count(&b.walls), count(&b.rooms));
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--households") {
         // --households <world>: each premade household with its members' ages (CAS age bits).
         let p = s3bake::load_premades(&root, &args[i + 1]).expect("premades not baked");

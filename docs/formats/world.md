@@ -627,6 +627,20 @@ payload = w × h × levels × bytesPerCell     (sizes verified for the Goth lot,
 cells are x-major: index = (level × w + x) × h + z   [VERIFIED: Old Pier Beach's 61×38 paving,
                                                       Summer Hill Springs' pond vs its fishing spots]
 ```
+
+**Grid levels** [VERIFIED on the Bachelor, Goth, Bunch, Andrews and pool-center lots]. The grid
+levels are the lot's levels from the lowest: on some lots (15 of 92 in Sunset Valley: the Goths',
+the pool center, ...) level 0 is 3 m down, for pools and basements, and the ground is level 1;
+elsewhere the ground is level 0. Find the ground `g` as the level whose heights (0x0093D6D4,
+relative to the lot) sit nearest 0. A house stands on a foundation when level `g+1` is 0.75 m up
+under it (3 m elsewhere). Storey `n` (1 = ground floor) is grid level `g + n + F - 1` (F = 1 on a
+foundation); its floor tiles are exactly the cells with a tile there (not every area the rooms'
+boundaries enclose: fenced yards aren't floored). With a foundation, level `g` holds the ground
+paving around it; without, the ground floor and the paving share level `g`. Pool floors are
+the tiles on level `g - 1`, and walls on graph level 0 of such lots are the pool's sides. The
+wall graphs number storeys the same way on every lot (graph level 1 = ground floor).
+```
+```
 | group | grid | bytes/cell | Goth lot sample | guess |
 |---|---|---|---|---|
 | 0x002E7B0E, 0x002E7CF0, 0x002E7CF1 | tiles | 8 | zeros/ids | floor pattern per quarter-tile (4×u16), 3 material channels like walls |
