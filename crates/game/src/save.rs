@@ -134,6 +134,57 @@ pub struct SaveGame {
     /// The household's collection journal.
     #[serde(default)]
     pub collection: crate::collecting::Collection,
+    /// Tombstones on the lot, with who lies there.
+    #[serde(default)]
+    pub graves: Vec<SavedGrave>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SavedGrave {
+    pub position: [f32; 3],
+    pub rotation: [f32; 4],
+    pub cause: String,
+    pub sim: SavedSim,
+}
+
+/// How a Sim looks, for saving someone no longer about (the rest left empty).
+fn saved_look(sim: &Sim) -> SavedSim {
+    let rgb = |c: Color| {
+        let s = c.to_srgba();
+        [s.red, s.green, s.blue]
+    };
+    SavedSim {
+        id: sim.id,
+        look: sim.look,
+        first: sim.first.clone(),
+        last: sim.last.clone(),
+        female: sim.female,
+        age: age_name(sim.age).into(),
+        traits: sim.traits.iter().map(|t| t.name().to_string()).collect(),
+        skin: rgb(sim.skin),
+        hair: rgb(sim.hair),
+        top: rgb(sim.top),
+        bottom: rgb(sim.bottom),
+        member: false,
+        selected: false,
+        whereabouts: "away".into(),
+        position: [0.0; 3],
+        yaw: 0.0,
+        floor: 1,
+        motives: [0.0; 6],
+        skills: Vec::new(),
+        moodlets: Vec::new(),
+        job: None,
+        relationships: Vec::new(),
+        lifetime_happiness: 0,
+        outfit: vec![sim.outfit.hair, sim.outfit.top, sim.outfit.bottom, sim.outfit.full, sim.outfit.shoes],
+        rewards: Vec::new(),
+        aging: None,
+        pregnancy: None,
+        shape: Some((sim.weight, sim.fitness)),
+        opportunities: Vec::new(),
+        opportunities_done: Vec::new(),
+    }
 }
 
 impl SaveGame {
@@ -297,7 +348,11 @@ fn save_game(
         ),
         (Without<crate::town::Townie>, Without<crate::visit::LotGuest>),
     >,
-    (bought, exit): (Query<(&GameObject, &Transform), With<Bought>>, Option<Res<crate::interact::LotExit>>),
+    (bought, exit, graves): (
+        Query<(&GameObject, &Transform), With<Bought>>,
+        Option<Res<crate::interact::LotExit>>,
+        Query<(&crate::ghosts::Grave, &Transform)>,
+    ),
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
 ) {
@@ -373,6 +428,10 @@ fn save_game(
         },
         plants: ui.as_deref().map(|u| crate::gardening::saved_plants(&plants, &u.data)).unwrap_or_default(),
         collection: collection.clone(),
+        graves: graves
+            .iter()
+            .map(|(g, tf)| SavedGrave { position: tf.translation.to_array(), rotation: tf.rotation.to_array(), cause: g.cause.clone(), sim: saved_look(&g.sim) })
+            .collect(),
     };
     let dir = saves_dir();
     let _ = std::fs::create_dir_all(&dir);
@@ -518,6 +577,20 @@ fn apply_loaded_game(
     commands.insert_resource(crate::building::LotPaint(game.paint.clone()));
     commands.insert_resource(crate::gardening::PendingPlants(game.plants.clone(), game.seeds.clone()));
     commands.insert_resource(game.collection.clone());
+    // The household's dead, back in their graves.
+    if let Some(entry) = data.0.catalog.iter().find(|c| c.instance_name == "UrnstoneHuman") {
+        for g in &game.graves {
+            let sim = SaveGame::sim(&g.sim);
+            let label = format!("{}'s Tombstone", sim.full_name());
+            if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, entry.objd, Vec3::from(g.position), Quat::from_array(g.rotation)) {
+                commands.entity(o.entity).insert(crate::ghosts::Grave { sim, cause: g.cause.clone() }).queue_silenced(move |mut w: EntityWorldMut| {
+                    if let Some(mut obj) = w.get_mut::<GameObject>() {
+                        obj.name = label;
+                    }
+                });
+            }
+        }
+    }
     for b in &game.bought {
         let rot = Quat::from_array(b.rotation);
         if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, b.objd, Vec3::from(b.position), rot) {

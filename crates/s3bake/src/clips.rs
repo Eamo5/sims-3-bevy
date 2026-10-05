@@ -42,6 +42,10 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a_fire_panic",
     "a_fire_onFire",
     "a_fireFighter_extinguishFire_floor1",
+    // Ghosts, and the frights they give.
+    "a_ghost_float",
+    "a_ghost_scare",
+    "a_react_startled",
     // Burglars and the police.
     "a2o_burglar_steal",
     "a2o_burglar_sneak",

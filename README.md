@@ -117,6 +117,10 @@ installation is unreachable.
   (the Grim Reaper comes). A smoke alarm calls the fire department at once (otherwise someone
   phones a little later), and a firefighter in uniform arrives by fire truck to put out each
   fire with the extinguisher.
+- **Ghosts**: the household's dead rise from their tombstones in the small hours, see-through
+  and tinted by how they died (pale blue for old age, ember-orange for fire), float about the
+  lot with the game's ghost animations and give the living a fright (Scared). Graves and who
+  lies in them are kept in saves.
 - **Burglars**: some nights a burglar in black slips onto the lot and bags the priciest thing
   in the house. A burglar alarm (or an awake Sim who spots them) calls the police; an officer
   in uniform arrives in the cruiser, and if they catch the burglar with the game's cuffing

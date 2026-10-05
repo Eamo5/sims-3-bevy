@@ -491,17 +491,18 @@ pub enum MoodletKind {
     GreatParty,
     LameParty,
     AwesomeParty,
+    Scared,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 42] = {
+    pub const ALL: [MoodletKind; 43] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
             GoodMeal, AmazingMeal, HavingFun, GoodConversation, EnjoyingMusic, EnjoyingAGoodBook, Pumped, Fatigued,
             Inspired, Embarrassed, PassedOut, Uncomfortable, Promoted, Demoted, Fired, NewJob, Annoyed, Flirty, FirstKiss,
             InLove, Heartbroken, JustMarried, NewHome, Birthday, WishFulfilled, Nauseous, Pregnant, NewBaby, GreatParty,
-            LameParty, AwesomeParty,
+            LameParty, AwesomeParty, Scared,
         ]
     };
 
@@ -567,6 +568,7 @@ impl MoodletKind {
             GreatParty => md("Threw a Great Party", "Sims love a great party and the host that throws them.", 30, 24.0),
             LameParty => md("Threw a Lame Party", "Not every party is a hit.", -15, 8.0),
             AwesomeParty => md("Awesome Party", "What a party!", 20, 3.0),
+            Scared => md("Scared", "Something gave this Sim a terrible fright!", -25, 3.0),
             WishFulfilled => md("Wish Fulfilled", "Dreams come true!", 10, 4.0),
         }
     }
@@ -622,6 +624,7 @@ impl MoodletKind {
             GreatParty => ("ThrewAGreatParty", true),
             LameParty => ("ThrewLameParty", true),
             AwesomeParty => ("AwesomeParty", true),
+            Scared => ("Scared", false),
         }
     }
 }

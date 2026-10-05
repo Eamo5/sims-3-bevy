@@ -131,6 +131,7 @@ fn reap(
                     && let Some(stone) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, entry.objd, tf.translation, tf.rotation)
                 {
                     let label = format!("{}'s Tombstone", sim.full_name());
+                    commands.entity(stone.entity).insert(crate::ghosts::Grave { sim: sim.clone(), cause: d.cause.to_string() });
                     commands.entity(stone.entity).queue_silenced(move |mut w: EntityWorldMut| {
                         if let Some(mut g) = w.get_mut::<GameObject>() {
                             g.name = label;

@@ -792,6 +792,39 @@ fn auto_action(
         }
         return;
     }
+    // "Grave": a grave by the selected Sim, of someone who died in a fire (for the ghosts).
+    if name == "Grave" {
+        let Ok(me) = sel_e.single() else { return };
+        let Ok(tf) = sel_tf.get(me) else { return };
+        let at = tf.translation + tf.rotation * Vec3::new(0.0, 0.0, 2.5);
+        let rot = tf.rotation;
+        commands.queue(move |w: &mut World| {
+            let sim = crate::sim::random_sim(&mut rand::rng(), "Lothario", Some(false), crate::sim::Age::Adult);
+            let objd = w.resource::<crate::baked::Baked>().0.catalog.iter().find(|c| c.instance_name == "UrnstoneHuman").map(|c| c.objd);
+            let Some(objd) = objd else { return };
+            w.resource_scope(|w, mut assets: Mut<crate::objects::ObjectAssets>| {
+                w.resource_scope(|w, catalog: Mut<crate::loading::Catalog>| {
+                    w.resource_scope(|w, data: Mut<crate::baked::Baked>| {
+                        w.resource_scope(|w, mut meshes: Mut<Assets<Mesh>>| {
+                            w.resource_scope(|w, mut images: Mut<Assets<Image>>| {
+                                w.resource_scope(|w, mut mats: Mut<Assets<StandardMaterial>>| {
+                                    let mut queue = bevy::ecs::world::CommandQueue::default();
+                                    let mut commands = Commands::new(&mut queue, w);
+                                    let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+                                    if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, objd, at, rot) {
+                                        commands.entity(o.entity).insert(crate::ghosts::Grave { sim, cause: "in a fire".into() });
+                                    }
+                                    queue.apply(w);
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        });
+        *done = true;
+        return;
+    }
     // "Burglar": a burglar breaks in now.
     if name == "Burglar" {
         commands.queue(|w: &mut World| w.resource_mut::<crate::burglar::Break>().force = true);
