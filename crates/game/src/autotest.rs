@@ -723,6 +723,14 @@ fn ui_flow(
             advance(&mut stage);
         }
         (8, AppState::InGame, _) if since > 1.0 => {
+            buy.show(0);
+            *stage = (63, now);
+        }
+        (63, AppState::InGame, _) if since > 1.5 => {
+            shot(&mut commands, "6a_buy");
+            *stage = (64, now);
+        }
+        (64, AppState::InGame, _) if since > 0.5 => {
             buy.show(crate::buy::WALLPAPER_TAB);
             *stage = (60, now);
         }

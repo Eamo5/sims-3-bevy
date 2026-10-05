@@ -34,6 +34,8 @@ pub const CATEGORIES: [&str; 10] =
 /// Build-mode tabs after the buy categories: wallpaper and floors.
 const PAINT_TABS: [&str; 2] = ["Wallpaper", "Floors"];
 const PAGE: usize = 24;
+/// Objects per page (thumbnail tiles).
+const OBJECT_PAGE: usize = 30;
 
 pub struct Placing {
     pub objd: Key,
@@ -170,7 +172,7 @@ fn buy_panel(
     catalog: Res<Catalog>,
     panel: Query<Entity, With<BuyPanel>>,
     mut spawned_toggle: Local<bool>,
-    ui: Option<Res<crate::icons::GameUi>>,
+    mut ui: Option<ResMut<crate::icons::GameUi>>,
     (data, mut assets): (Res<Baked>, ResMut<ObjectAssets>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
 ) {
@@ -273,15 +275,39 @@ fn buy_panel(
             return;
         }
         let items = catalog.in_category(CATEGORIES[buy.category]);
-        let pages = items.len().div_ceil(PAGE).max(1);
+        let pages = items.len().div_ceil(OBJECT_PAGE).max(1);
         let page = buy.page.min(pages - 1);
         p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|grid| {
-            for item in items.iter().skip(page * PAGE).take(PAGE) {
-                let mut name = item.name.clone();
-                if name.chars().count() > 28 {
-                    name = name.chars().take(26).collect::<String>() + "…";
-                }
-                button(grid, format!("{name}\n§{}", item.price), BuyButton::Item(item.key), Val::Px(176.0), 42.0, false);
+            for item in items.iter().skip(page * OBJECT_PAGE).take(OBJECT_PAGE) {
+                // The game's catalogue picture, with the price under it (the name on hover).
+                let thumb = ui.as_deref_mut().and_then(|ui| ui.icon(&mut images, &s3bake::gamedata::thumb_name(item.key.2)));
+                let Some(thumb) = thumb else {
+                    let mut name = item.name.clone();
+                    if name.chars().count() > 12 {
+                        name = name.chars().take(11).collect::<String>() + "…";
+                    }
+                    button(grid, format!("{name}\n§{}", item.price), BuyButton::Item(item.key), Val::Px(84.0), 96.0, false);
+                    continue;
+                };
+                grid.spawn((
+                    Button,
+                    BuyButton::Item(item.key),
+                    Node {
+                        width: Val::Px(84.0),
+                        height: Val::Px(96.0),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        padding: UiRect::all(Val::Px(3.0)),
+                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                        ..default()
+                    },
+                    BackgroundColor(BTN_NORMAL),
+                    crate::icons::Tooltip(format!("{} — §{}", item.name, item.price)),
+                ))
+                .with_children(|b| {
+                    b.spawn((ImageNode::new(thumb), Node { width: Val::Px(72.0), height: Val::Px(72.0), ..default() }, Pickable::IGNORE));
+                    b.spawn((text(format!("§{}", item.price), 13.0, Color::WHITE), Pickable::IGNORE));
+                });
             }
         });
         p.spawn(Node { column_gap: Val::Px(8.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {

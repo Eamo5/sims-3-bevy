@@ -70,6 +70,8 @@ struct SimBalloons {
     talk_turn: u32,
     moodlets: Vec<crate::life::MoodletKind>,
     known: bool,
+    /// The object the Sim last decided on by themselves (thought of once).
+    decided: Option<Entity>,
 }
 
 #[derive(Resource, Default)]
@@ -262,6 +264,7 @@ fn balloon_triggers(
         &InheritedVisibility,
     )>,
     requests: Query<(Entity, &BalloonRequest)>,
+    objects: Query<&crate::interact::GameObject>,
 ) {
     let Some(mut ui) = ui else { return };
     let now = time.elapsed_secs();
@@ -339,6 +342,23 @@ fn balloon_triggers(
                 }
                 st.moodlets = kinds;
                 continue;
+            }
+
+            // Deciding on something by themselves: a thought of it (the game's picture of the
+            // object), now and then.
+            if let Some(a) = front
+                && let (ActionKind::Object { target, .. }, true) = (&a.kind, a.autonomous)
+                && st.decided != Some(*target)
+            {
+                st.decided = Some(*target);
+                if !busy
+                    && rng.random_bool(0.7)
+                    && let Ok(obj) = objects.get(*target)
+                {
+                    show.push((me, BalloonKind::Thought, s3bake::gamedata::thumb_name(obj.objd.2), 0, false));
+                    st.moodlets = kinds;
+                    continue;
+                }
             }
 
             // A new moodlet.

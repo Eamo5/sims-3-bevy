@@ -12,12 +12,20 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 6;
+pub const GAMEDATA_VERSION: u32 = 8;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
 /// Textures (balloon icons are 64 px DDS pictures, instance = fnv64 of the lowercase name).
 const T_DDS: u32 = 0x00B2D882;
+/// Buy-mode catalogue thumbnails, 128 px PNG (`Thumbnails/AllThumbnails.package`): instance =
+/// the object's OBJD instance, group = its colour variant.
+const T_THUMB_LARGE: u32 = 0x0580A2B6;
+
+/// The icon name an object's catalogue thumbnail is stored under.
+pub fn thumb_name(objd_instance: u64) -> String {
+    format!("thumb_{objd_instance:016x}")
+}
 const T_NMAP: u32 = 0x0166038C;
 
 /// A moodlet: the game's buff table row.
@@ -456,6 +464,34 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             n += 1;
         }
     }
+    // The catalogue's object thumbnails (the first colour variant of each), for buy mode: the
+    // base game's and each installed pack's (`EP*/Thumbnails`, `SP*/Thumbnails`).
+    progress("Converting: catalogue thumbnails…");
+    let mut dirs = vec![install_root.join("Thumbnails")];
+    if let Ok(rd) = std::fs::read_dir(install_root) {
+        let mut packs: Vec<std::path::PathBuf> = rd.flatten().map(|e| e.path().join("Thumbnails")).filter(|p| p.is_dir()).collect();
+        packs.sort();
+        dirs.extend(packs);
+    }
+    let mut seen: BTreeSet<u64> = BTreeSet::new();
+    for dir in dirs {
+        let Ok(tp) = Package::open(dir.join("AllThumbnails.package")) else { continue };
+        let mut first: HashMap<u64, &s3pkg::IndexEntry> = HashMap::new();
+        for e in tp.of_type(T_THUMB_LARGE) {
+            let keep = !seen.contains(&e.key.i) && first.get(&e.key.i).is_none_or(|f| e.key.g < f.key.g);
+            if keep {
+                first.insert(e.key.i, e);
+            }
+        }
+        for (i, e) in first {
+            if let Ok(png) = tp.read(e) {
+                pack.add(icon_key(&thumb_name(i)), &png).map_err(|e| e.to_string())?;
+                seen.insert(i);
+                n += 1;
+            }
+        }
+    }
+
     // Balloon pictures are textures: decoded and stored as PNG beside the interface icons.
     let mut balloon_icons: BTreeSet<String> = BALLOON_FRAMES.iter().map(|s| s.to_string()).collect();
     for t in [&out.balloons.idle, &out.balloons.social, &out.balloons.topic, &out.balloons.random] {

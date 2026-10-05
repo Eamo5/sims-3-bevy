@@ -71,7 +71,23 @@ The balloon icons are textures, not interface PNGs: 64 × 64 DDS (`0x00B2D882`, 
 | `sb_dislike`          | red "no" sign drawn over the icon for `kDislike`     |
 | `t_balloon_routefail` | the Sim can't get somewhere                          |
 
-## 3. Script assemblies
+## 3. Catalogue thumbnails
+
+Buy-mode pictures are not in the main packages but in `Thumbnails/AllThumbnails.package` (and
+`EP*/Thumbnails`, `SP*/Thumbnails` for the packs), outside `Resource.cfg`:
+
+| Type         | Contents                                             |
+|--------------|------------------------------------------------------|
+| `0x0580A2B4` | objects, small PNG                                   |
+| `0x0580A2B5` | objects, 54 px PNG                                   |
+| `0x0580A2B6` | objects, 128 px PNG on transparency                  |
+| `0x0589DC44`–`46` | wallpapers and floors (three sizes)             |
+| `0x626F60CC`–`CE` | CAS parts, in `CasThumbnails.package`           |
+
+For objects the instance is the object's OBJD instance and the group its colour variant (0 =
+the default). `s3bake::gamedata` keeps the first variant of each at 128 px.
+
+## 4. Script assemblies
 
 The game logic is .NET (Mono) code in `Game/Bin/gameplay.package`, `scripts.package` and
 `simcore.package`: resources of type `0x073FAA07` (S3SA), one per assembly
