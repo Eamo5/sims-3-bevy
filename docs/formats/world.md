@@ -856,6 +856,23 @@ u32 sub-blocks, sub-blocks…`. Strings: `0x80 | len` inline bytes; `0x40 k` = t
 `catalog.rs`). Value types: 1 string, 2 ARGB u32, 3 TGI index u8, 4 f32, 5 2×f32, 6 3×f32,
 7 bool.
 
+### Roof patterns: CRMT `0xF1EDBD86`  [VERIFIED on the 27 base-game patterns]
+
+`u32 version (3), u32 TGI-list offset (from offset 8), u32 TGI-list size, u32 0x0C, u64 name
+GUID, u64 desc GUID`, then the name key as 7-bit-length big-endian UTF-16
+(`CatalogObjects/Name:Roof_…`) and a second string, `f32 1.0`, a `0x21`-tagged u64 (the
+pattern's own instance), a few flags, and the TGI list: two or three VPXYs `0x736884F1` (group
+1) then the three catalogue icons `0x2E75C764/5/6`. The first VPXY lists a LITE, a MATD
+`0x01D0E75D` (standalone RCOL), a MODL/MLOD pair (a 24-vertex preview box) and a footprint.
+That MATD uses the Roof shader `0x7BD05F63`; its DiffuseMap is a 512² DDS whose instance is
+usually the CRMT's own: an **atlas** — the field of tiles fills it and the ridge, hip and
+gutter pieces are stamped over it at fixed places (shared layout across patterns), so the
+field itself repeats along one axis or both (shingle rows every 102 px; corrugations ~34 px).
+`0x2CE11842` is a grey scalar (≈ specular: metals 1.0, thatch 0.04), not a tint. Some roofs
+(e.g. "Burnt Red Tile") have greyscale atlases, so their colour comes from elsewhere
+(unresolved). CRST `0x91EDBD3E` (16 in the base game) are the roof styles (gable, hip…), with
+the same catalogue block.
+
 ### Complates `_XML` 0x0333406C
 
 Plain XML: `<complate name>` with `<param type name default>` variables and `<destination>`
