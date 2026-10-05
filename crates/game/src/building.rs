@@ -1465,9 +1465,12 @@ pub fn spawn_building(
             }
             let n = (bb - a) / len;
             let n3 = active.dir(-n.y, n.x);
-            let p = [active.world(a.x, a.y, g), active.world(bb.x, bb.y, g), active.world(bb.x, bb.y, top), active.world(a.x, a.y, top)];
-            let v = (top - g) / WALL_H;
-            buf.quad(p, [[0.0, v], [len, v], [len, 0.0], [0.0, 0.0]], n3);
+            // (Down to the ground where the lot slopes away under the house.)
+            let ga = b.ground_at(a.x, a.y).map_or(g, |y| y.min(level_y(0)) - 0.6);
+            let gb = b.ground_at(bb.x, bb.y).map_or(g, |y| y.min(level_y(0)) - 0.6);
+            let p = [active.world(a.x, a.y, ga), active.world(bb.x, bb.y, gb), active.world(bb.x, bb.y, top), active.world(a.x, a.y, top)];
+            let (va, vb) = ((top - ga) / WALL_H, (top - gb) / WALL_H);
+            buf.quad(p, [[0.0, va], [len, vb], [len, 0.0], [0.0, 0.0]], n3);
         }
         if !buf.is_empty() {
             let mat = material(assets, ctx, STYLE_FOUNDATION);
@@ -1560,7 +1563,15 @@ pub fn spawn_building(
         active.center = active.world(c.x, c.y, corner.y);
     }
     if neighbor.is_none() {
-        info!("house: {} floors, {} objects ({} without a model)", top_level, b.objects.len(), missing.len());
+        info!(
+            "house: {} floors, {} objects ({} without a model); levels {:?}, {} foundation edges, ground grid {}",
+            top_level,
+            b.objects.len(),
+            missing.len(),
+            b.levels,
+            b.foundation.len(),
+            b.ground.len()
+        );
     }
     active.view_level = 1;
     active

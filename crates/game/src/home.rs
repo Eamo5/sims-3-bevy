@@ -227,6 +227,7 @@ fn auto_move_in(
     }
     .or_else(|| world.data.lots.iter().position(|l| l.is_residential()));
     if let Some(i) = idx {
+        info!("moving into {} ({})", world.data.lots[i].internal_name, world.data.lot_names[i]);
         commands.insert_resource(MoveInRequest(i));
         next.set(PlayMode::Live);
     }

@@ -9,6 +9,39 @@ use s3pkg::Package;
 
 use crate::types::{LotBuildingBaked, PondBaked};
 
+/// A lot's ground level and its base height: the level whose edge, set on the base that best
+/// fits the world terrain along the lot's edge, sits nearest the lot's own height; with how
+/// closely the edge then meets the world (the median deviation).
+pub fn ground_level(t: &LotTerrain, lot: &LotInfo, hm: &Heightmap) -> Option<(usize, f32, f32)> {
+    let (s, c) = lot.rotation.sin_cos();
+    let to_world = |x: f32, z: f32| (lot.corner[0] + x * c + z * s, lot.corner[2] - x * s + z * c);
+    let mut edge = Vec::new();
+    for x in 0..t.nx {
+        edge.push((x, 0));
+        edge.push((x, t.nz - 1));
+    }
+    for z in 0..t.nz {
+        edge.push((0, z));
+        edge.push((t.nx - 1, z));
+    }
+    (0..t.levels.len())
+        .map(|l| {
+            let mut d: Vec<f32> = edge
+                .iter()
+                .map(|&(x, z)| {
+                    let (wx, wz) = to_world(x as f32, z as f32);
+                    hm.sample(wx, wz) - t.at(l, x, z)
+                })
+                .collect();
+            d.sort_by(f32::total_cmp);
+            let mid = d[d.len() / 2];
+            let mut dev: Vec<f32> = d.iter().map(|v| (v - mid).abs()).collect();
+            dev.sort_by(f32::total_cmp);
+            (l, mid, dev[dev.len() / 2])
+        })
+        .min_by(|a, b| (a.1 - lot.corner[1]).abs().total_cmp(&(b.1 - lot.corner[1]).abs()))
+}
+
 /// Carves each lot's dips (all of a pond lot's ground around the water) into `hm` and returns the
 /// lots' water. Ground under a house's floors is left alone.
 pub fn carve_ponds(pkg: &Package, lots: &[LotInfo], buildings: &[LotBuildingBaked], hm: &mut Heightmap) -> Vec<PondBaked> {
@@ -54,7 +87,12 @@ pub fn carve_ponds(pkg: &Package, lots: &[LotInfo], buildings: &[LotBuildingBake
                 (l, mid, dev[dev.len() / 2])
             })
             .min_by(|a, b| (a.1 - lot.corner[1]).abs().total_cmp(&(b.1 - lot.corner[1]).abs()))
-            .filter(|(_, _, dev)| *dev < 0.15)
+            .filter(|(_, b, dev)| {
+                if std::env::var("CARVEDEBUG").is_ok() {
+                    eprintln!("lot {}: base {b:.2} (corner {:.2}) edge deviation {dev:.3}", lot.internal_name, lot.corner[1]);
+                }
+                *dev < 0.15
+            })
             .map(|(l, b, _)| (l, b))
         else {
             continue;
@@ -96,12 +134,9 @@ pub fn carve_ponds(pkg: &Package, lots: &[LotInfo], buildings: &[LotBuildingBake
                 let h = base + ground_at(lx, lz);
                 let v = (h / hm.scale).round().clamp(0.0, 65535.0) as u16;
                 let k = iz * hm.width + ix;
-                // Around a pond, the lot's ground as it is; elsewhere only its dips, and not
-                // under a house.
-                let dip = v < hm.data[k] && (hm.data[k] - v) as f32 * hm.scale > 0.1 && !housed.contains(&(lx.floor() as i64, lz.floor() as i64));
-                if !(pond && near_water(lx, lz) || dip) {
-                    continue;
-                }
+                // The lot's own ground is the ground (its edges meet the world's): its dips and
+                // rises both, and level under its house.
+                let _ = (&housed, pond);
                 if hm.data[k] != v {
                     hm.data[k] = v;
                     carved += 1;

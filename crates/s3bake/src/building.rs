@@ -105,7 +105,7 @@ fn along_segment(p: [f32; 2], q: [f32; 2], r: [f32; 2]) -> Option<f32> {
     ((-0.01..=1.01).contains(&t) && cx * cx + cz * cz < 1e-4).then_some(t.clamp(0.0, 1.0))
 }
 
-pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[PlacedObject]) -> Option<(LotBuildingBaked, Vec<CoverJob>)> {
+pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[PlacedObject], hm: &s3formats::world::Heightmap) -> Option<(LotBuildingBaked, Vec<CoverJob>)> {
     let data = LotBuildData::load(pkg, lot.id).unwrap_or_default();
     let read = |t: u32, g: u32| pkg.find(&s3pkg::ResourceKey::new(t, g, lot.id)).and_then(|e| pkg.read(e).ok());
     let mut covers = Covers::load(pkg, lot.id);
@@ -122,12 +122,8 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     let terrain = s3formats::lot::LotTerrain::load(pkg, lot.id);
     let (ground_index, has_foundation) = match &terrain {
         Some(t) => {
-            let median = |l: &Vec<f32>| {
-                let mut v = l.clone();
-                v.sort_by(f32::total_cmp);
-                v[v.len() / 2]
-            };
-            let g = (0..t.levels.len()).min_by(|&a, &b| median(&t.levels[a]).abs().total_cmp(&median(&t.levels[b]).abs())).unwrap_or(0);
+            // (Where the lot's edge meets the world's terrain.)
+            let g = crate::ponds::ground_level(t, lot, hm).map_or(0, |(g, _, _)| g);
             let f = t.levels.get(g + 1).is_some_and(|l| l.iter().filter(|h| (0.4..1.2).contains(*h)).count() >= 4);
             (g as u32, f)
         }
