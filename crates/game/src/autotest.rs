@@ -670,6 +670,26 @@ fn ui_flow(
         }
         (3, AppState::CreateHousehold, _) if since > 1.0 => {
             shot(&mut commands, "2a_traits");
+            *stage = (68, now);
+        }
+        (68, AppState::CreateHousehold, _) if since > 0.5 => {
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::Tab(crate::cas::CasTab::Hair))) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (65, now);
+        }
+        (65, AppState::CreateHousehold, _) if since > 1.5 => {
+            shot(&mut commands, "2h_hair");
+            *stage = (67, now);
+        }
+        (67, AppState::CreateHousehold, _) if since > 0.5 => {
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::Tab(crate::cas::CasTab::Tops))) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (66, now);
+        }
+        (66, AppState::CreateHousehold, _) if since > 1.5 => {
+            shot(&mut commands, "2t_tops");
             // With --family, browse the town's families first.
             let want = if args.family.is_some() { crate::home::CasAction::Families } else { crate::home::CasAction::Done };
             if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == want) {
@@ -678,7 +698,7 @@ fn ui_flow(
             if args.family.is_some() {
                 *stage = (20, now);
             } else {
-                advance(&mut stage);
+                *stage = (4, now);
             }
         }
         (20, AppState::CreateHousehold, _) if since > 1.0 => {

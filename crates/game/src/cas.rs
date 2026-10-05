@@ -75,6 +75,7 @@ pub enum CasAction {
     Gender,
     Age,
     Skin(usize),
+    HairColor(usize),
     Tab(CasTab),
     /// Wear entry `i` of the current tab's list.
     Pick(usize),
@@ -90,7 +91,8 @@ pub enum CasAction {
     Done,
 }
 
-const PAGE: usize = 14;
+/// Styles per page (picture tiles).
+const PAGE: usize = 20;
 
 #[derive(Resource)]
 struct CasScene {
@@ -337,6 +339,10 @@ fn cas_actions(
                 let (r, g, b) = SKINS[i.min(SKINS.len() - 1)];
                 pending.members[k].skin = Color::srgb(r, g, b);
             }
+            CasAction::HairColor(i) => {
+                let (r, g, b) = crate::sim::HAIRS[i.min(crate::sim::HAIRS.len() - 1)];
+                pending.members[k].hair = Color::srgb(r, g, b);
+            }
             CasAction::Tab(t) => {
                 scene.tab = t;
                 scene.page = 0;
@@ -489,7 +495,7 @@ fn turn_model(
     }
 }
 
-fn cas_button_visuals(mut q: Query<(&Interaction, &mut BackgroundColor, &CasAction, Option<&Selectedness>, Has<Dimmed>), Changed<Interaction>>) {
+fn cas_button_visuals(mut q: Query<(&Interaction, &mut BackgroundColor, &CasAction, Option<&Selectedness>, Has<Dimmed>), (Changed<Interaction>, Without<Swatch>)>) {
     for (i, mut bg, _, sel, dimmed) in &mut q {
         bg.0 = match i {
             Interaction::Pressed => BTN_PRESS,
@@ -504,6 +510,10 @@ fn cas_button_visuals(mut q: Query<(&Interaction, &mut BackgroundColor, &CasActi
 /// A choice that isn't available right now.
 #[derive(Component)]
 struct Dimmed;
+
+/// A colour swatch (keeps its own colour on hover).
+#[derive(Component)]
+struct Swatch;
 
 const DIMMED: Color = Color::srgba(0.1, 0.18, 0.28, 0.6);
 
@@ -692,6 +702,7 @@ fn rebuild_ui(
                             let on = (cur.red - r).abs() < 0.01 && (cur.green - g).abs() < 0.01;
                             row.spawn((
                                 Button,
+                                Swatch,
                                 CasAction::Skin(i),
                                 Node {
                                     width: Val::Px(52.0),
@@ -764,10 +775,63 @@ fn rebuild_ui(
                     let pages = list.len().div_ceil(PAGE).max(1);
                     let page = scene.page.min(pages - 1);
                     scene.page = page;
-                    p.spawn(text(format!("{} · {} styles", tab.name(), list.len()), 20.0, Color::WHITE));
-                    for (i, (key, name)) in list.iter().enumerate().skip(page * PAGE).take(PAGE) {
-                        button(p, name.clone(), CasAction::Pick(i - page * PAGE), Val::Percent(100.0), Some(*key) == current, 14.0);
+                    if tab == CasTab::Hair {
+                        // The hair colour, as swatches.
+                        p.spawn(text("Hair Color", 16.0, Color::WHITE));
+                        p.spawn(Node { column_gap: Val::Px(8.0), ..default() }).with_children(|row| {
+                            let cur = sim.hair.to_srgba();
+                            for (i, (r, g, b)) in crate::sim::HAIRS.iter().enumerate() {
+                                let on = (cur.red - r).abs() < 0.01 && (cur.green - g).abs() < 0.01 && (cur.blue - b).abs() < 0.01;
+                                row.spawn((
+                                    Button,
+                                    Swatch,
+                                    CasAction::HairColor(i),
+                                    Node {
+                                        width: Val::Px(40.0),
+                                        height: Val::Px(40.0),
+                                        border: UiRect::all(Val::Px(if on { 4.0 } else { 1.0 })),
+                                        border_radius: BorderRadius::all(Val::Px(20.0)),
+                                        ..default()
+                                    },
+                                    BorderColor::all(if on { PLUMBOB_GREEN } else { Color::WHITE }),
+                                    BackgroundColor(Color::srgb(*r, *g, *b)),
+                                ));
+                            }
+                        });
                     }
+                    p.spawn(text(format!("{} · {} styles", tab.name(), list.len()), 20.0, Color::WHITE));
+                    // The game's pictures of each style (names on hover).
+                    p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|grid| {
+                        for (i, (key, name)) in list.iter().enumerate().skip(page * PAGE).take(PAGE) {
+                            let action = CasAction::Pick(i - page * PAGE);
+                            let chosen = Some(*key) == current;
+                            let thumb = ui.as_deref_mut().and_then(|u| u.icon(&mut images, &s3bake::gamedata::cas_thumb_name(key.2)));
+                            let Some(thumb) = thumb else {
+                                button(grid, name.clone(), action, Val::Px(96.0), chosen, 12.0);
+                                continue;
+                            };
+                            let mut e = grid.spawn((
+                                Button,
+                                action,
+                                Node {
+                                    width: Val::Px(96.0),
+                                    height: Val::Px(96.0),
+                                    border: UiRect::all(Val::Px(if chosen { 3.0 } else { 0.0 })),
+                                    border_radius: BorderRadius::all(Val::Px(8.0)),
+                                    ..default()
+                                },
+                                BorderColor::all(PLUMBOB_GREEN),
+                                BackgroundColor(if chosen { Color::srgb(0.22, 0.55, 0.22) } else { BTN_NORMAL }),
+                                crate::icons::Tooltip(name.clone()),
+                            ));
+                            if chosen {
+                                e.insert(Selectedness);
+                            }
+                            e.with_children(|b| {
+                                b.spawn((ImageNode::new(thumb), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
+                            });
+                        }
+                    });
                     p.spawn(Node { column_gap: Val::Px(8.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
                         button(row, "< Prev", CasAction::Page(-1), Val::Px(110.0), false, 15.0);
                         row.spawn(text(format!("{} / {}", page + 1, pages), 15.0, Color::WHITE));

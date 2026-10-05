@@ -256,7 +256,8 @@ const LAST: [&str; 12] = [
     "Goth", "Landgraab", "Alto", "Bunch", "Keaton", "Frio", "Hart", "Wolff", "Steel", "Andrews", "Clavell", "Kennedy",
 ];
 pub const SKINS: [(f32, f32, f32); 5] = [(0.96, 0.80, 0.69), (0.87, 0.68, 0.53), (0.72, 0.53, 0.38), (0.55, 0.38, 0.26), (0.38, 0.26, 0.18)];
-const HAIRS: [(f32, f32, f32); 6] = [(0.08, 0.06, 0.05), (0.30, 0.18, 0.08), (0.55, 0.35, 0.15), (0.85, 0.70, 0.40), (0.60, 0.20, 0.10), (0.55, 0.55, 0.55)];
+/// Hair colours, as Create-a-Sim offers them: black, dark brown, brown, blonde, red and grey.
+pub const HAIRS: [(f32, f32, f32); 6] = [(0.08, 0.06, 0.05), (0.30, 0.18, 0.08), (0.55, 0.35, 0.15), (0.85, 0.70, 0.40), (0.60, 0.20, 0.10), (0.55, 0.55, 0.55)];
 
 pub fn random_sim(rng: &mut impl Rng, last: &str, female: Option<bool>, age: Age) -> Sim {
     let female = female.unwrap_or_else(|| rng.random_bool(0.5));

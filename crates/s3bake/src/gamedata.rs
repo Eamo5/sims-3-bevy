@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 8;
+pub const GAMEDATA_VERSION: u32 = 9;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -22,9 +22,18 @@ const T_DDS: u32 = 0x00B2D882;
 /// the object's OBJD instance, group = its colour variant.
 const T_THUMB_LARGE: u32 = 0x0580A2B6;
 
+/// Create-a-Sim part thumbnails, 128 px PNG (`Thumbnails/CasThumbnails.package`): instance =
+/// the CASP instance, group = its colour preset.
+const T_CAS_THUMB: u32 = 0x626F60CD;
+
 /// The icon name an object's catalogue thumbnail is stored under.
 pub fn thumb_name(objd_instance: u64) -> String {
     format!("thumb_{objd_instance:016x}")
+}
+
+/// The icon name a CAS part's thumbnail is stored under.
+pub fn cas_thumb_name(casp_instance: u64) -> String {
+    format!("casthumb_{casp_instance:016x}")
 }
 const T_NMAP: u32 = 0x0166038C;
 
@@ -473,21 +482,27 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         packs.sort();
         dirs.extend(packs);
     }
-    let mut seen: BTreeSet<u64> = BTreeSet::new();
-    for dir in dirs {
-        let Ok(tp) = Package::open(dir.join("AllThumbnails.package")) else { continue };
-        let mut first: HashMap<u64, &s3pkg::IndexEntry> = HashMap::new();
-        for e in tp.of_type(T_THUMB_LARGE) {
-            let keep = !seen.contains(&e.key.i) && first.get(&e.key.i).is_none_or(|f| e.key.g < f.key.g);
-            if keep {
-                first.insert(e.key.i, e);
+    // (Objects, then Create-a-Sim parts.)
+    for (file, kind, name) in [
+        ("AllThumbnails.package", T_THUMB_LARGE, thumb_name as fn(u64) -> String),
+        ("CasThumbnails.package", T_CAS_THUMB, cas_thumb_name as fn(u64) -> String),
+    ] {
+        let mut seen: BTreeSet<u64> = BTreeSet::new();
+        for dir in &dirs {
+            let Ok(tp) = Package::open(dir.join(file)) else { continue };
+            let mut first: HashMap<u64, &s3pkg::IndexEntry> = HashMap::new();
+            for e in tp.of_type(kind) {
+                let keep = !seen.contains(&e.key.i) && first.get(&e.key.i).is_none_or(|f| e.key.g < f.key.g);
+                if keep {
+                    first.insert(e.key.i, e);
+                }
             }
-        }
-        for (i, e) in first {
-            if let Ok(png) = tp.read(e) {
-                pack.add(icon_key(&thumb_name(i)), &png).map_err(|e| e.to_string())?;
-                seen.insert(i);
-                n += 1;
+            for (i, e) in first {
+                if let Ok(png) = tp.read(e) {
+                    pack.add(icon_key(&name(i)), &png).map_err(|e| e.to_string())?;
+                    seen.insert(i);
+                    n += 1;
+                }
             }
         }
     }
