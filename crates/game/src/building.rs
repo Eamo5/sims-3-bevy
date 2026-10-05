@@ -1655,15 +1655,15 @@ fn stream_nearby_lots(
             nearby.spawned.insert(i, root);
         }
     }
-    // Imposter layers: detailed lots keep their ground and roofs; the active house loses its
-    // roof when the camera comes in close.
+    // Imposter layers: detailed lots keep their roofs (the active house loses its roof when
+    // the camera comes in close); their pre-lit ground picture would only show through the
+    // terrain in patches.
     let lot_of: HashMap<Entity, usize> = imposters.iter().map(|(e, l)| (e, l.0)).collect();
     let active_far = active.as_ref().is_none_or(|a| a.far != Some(false));
     for (layer, parent, mut vis) in &mut layers {
         let Some(&lot) = lot_of.get(&parent.parent()) else { continue };
         let detailed = nearby.spawned.contains_key(&lot) || (Some(lot) == active_lot && !active_far) || Some(lot) == visited_lot;
         let show = !detailed
-            || layer.0 == LAYER_GROUND
             || (layer.0 == LAYER_ROOF && ((Some(lot) != active_lot && Some(lot) != visited_lot) || cam.distance > ROOF_DISTANCE));
         vis.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });
     }

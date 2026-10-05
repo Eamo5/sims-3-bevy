@@ -754,10 +754,12 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         .and_then(|e| s3formats::world::RoadGraph::parse(&pkg.read(e).ok()?).ok())
         .unwrap_or_default();
 
+    let mut heightmap = world.heightmap.clone();
+    let ponds = crate::ponds::carve_ponds(&pkg, &world.lots, &mut heightmap);
     let baked = WorldBaked {
         version: WORLD_VERSION,
         name: name.to_string(),
-        heightmap: world.heightmap.clone(),
+        heightmap,
         sea_level,
         layer_dims,
         layer_data,
@@ -774,6 +776,7 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         tree_kinds,
         road_curves: graph.road_curves,
         road_intersections: graph.road_intersections,
+        ponds,
     };
     write_value(&wdir.join("world.bin"), &baked).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_dir_all(&final_dir);

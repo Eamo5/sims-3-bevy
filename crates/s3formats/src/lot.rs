@@ -162,6 +162,52 @@ impl LotBuildData {
     }
 }
 
+pub const T_LOT_GRID: u32 = 0xB125533A;
+/// Grid channel holding each level's vertex heights.
+pub const G_LEVEL_HEIGHTS: u32 = 0x0093D6D4;
+pub const T_LOT_ARRAY: u32 = 0x05FF6BA4;
+/// Array channel holding the water table.
+pub const G_WATER_TABLE: u32 = 0x00FF2067;
+
+/// A lot's own terrain. The world heightmap is flattened under lots; the lot keeps its
+/// sculpted ground (pond basins and the like) as a vertex grid per level, heights relative to
+/// the lot, and a water table: wherever the ground dips below it there is water (ponds).
+/// Grids are `(width+1) × (depth+1)` vertices, x-major (`[x][z]`).
+#[derive(Clone, Debug, Default)]
+pub struct LotTerrain {
+    pub nx: usize,
+    pub nz: usize,
+    /// Vertex heights of each level, lowest (basements) first.
+    pub levels: Vec<Vec<f32>>,
+    pub water: Option<Vec<f32>>,
+}
+
+impl LotTerrain {
+    pub fn load(pkg: &Package, lot_id: u64) -> Option<Self> {
+        let read = |t: u32, g: u32| pkg.find(&ResourceKey::new(t, g, lot_id)).and_then(|e| pkg.read(e).ok());
+        let d = read(T_LOT_GRID, G_LEVEL_HEIGHTS)?;
+        let mut r = Reader::new(&d);
+        let _ver = r.u32().ok()?;
+        let (nx, nz, n) = (r.u32().ok()? as usize, r.u32().ok()? as usize, r.u32().ok()? as usize);
+        if nx * nz * n == 0 || nx > 600 || nz > 600 || n > 16 {
+            return None;
+        }
+        let floats = |r: &mut Reader, k: usize| -> Option<Vec<f32>> { (0..k).map(|_| r.f32().ok()).collect() };
+        let levels: Vec<Vec<f32>> = (0..n).map(|_| floats(&mut r, nx * nz)).collect::<Option<_>>()?;
+        let water = read(T_LOT_ARRAY, G_WATER_TABLE).and_then(|d| {
+            let mut r = Reader::new(&d);
+            let _ver = r.u32().ok()?;
+            let (wx, wz) = (r.u32().ok()? as usize, r.u32().ok()? as usize);
+            (wx == nx && wz == nz).then(|| floats(&mut r, nx * nz)).flatten()
+        });
+        Some(Self { nx, nz, levels, water })
+    }
+
+    pub fn at(&self, level: usize, x: usize, z: usize) -> f32 {
+        self.levels[level][x.min(self.nx - 1) * self.nz + z.min(self.nz - 1)]
+    }
+}
+
 /// Which of a tile's four triangles (split along both diagonals) are covered by floor:
 /// bit 0 = -Z side, bit 1 = +X side, bit 2 = +Z side, bit 3 = -X side.
 #[derive(Clone, Copy, Debug)]

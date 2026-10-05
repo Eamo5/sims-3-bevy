@@ -38,6 +38,18 @@ fn main() {
                     *kinds.entry(s).or_default() += 1;
                 }
                 let top: Vec<String> = kinds.iter().filter(|(k, _)| !k.is_empty()).map(|(k, n)| format!("{k}x{n}")).collect();
+                // LOTOBJS=<lot name part>: every object on it, with its catalogue name.
+                if let Ok(f) = std::env::var("LOTOBJS")
+                    && l.info.internal_name.contains(&f)
+                {
+                    let cat: std::collections::HashMap<s3bake::Key, String> =
+                        s3bake::pack::read_value::<Vec<s3bake::types::CatalogEntry>>(&root.global_dir().join("catalog.bin"))
+                            .map(|d| d.iter().map(|c| (c.objd, c.instance_name.clone())).collect())
+                            .unwrap_or_default();
+                    for o in b.map(|b| b.objects.as_slice()).unwrap_or(&[]) {
+                        println!("    {:?} {} at {:?} {}", o.objd, cat.get(&o.objd).map_or("?", |s| s.as_str()), o.position, o.script);
+                    }
+                }
                 println!(
                     "{k:3} {:40} {} [{}x{}] walls {} objs {}: {}",
                     l.info.internal_name,

@@ -133,6 +133,26 @@ pub struct WorldInfo {
     /// The road graph (for traffic).
     pub road_curves: Vec<[[f32; 2]; 4]>,
     pub road_intersections: Vec<[f32; 3]>,
+    /// Ponds on lots.
+    pub ponds: Vec<s3bake::PondBaked>,
+}
+
+impl WorldInfo {
+    /// The water surface at a point, if it's on a pond.
+    pub fn pond_at(&self, x: f32, z: f32) -> Option<f32> {
+        self.ponds.iter().find_map(|p| {
+            let l = self.lots.get(p.lot as usize)?;
+            let (s, c) = l.rotation.sin_cos();
+            let (dx, dz) = (x - l.corner[0], z - l.corner[2]);
+            let (lx, lz) = (dx * c - dz * s, dx * s + dz * c);
+            if lx < 0.0 || lz < 0.0 || lx >= (p.nx - 1) as f32 || lz >= (p.nz - 1) as f32 {
+                return None;
+            }
+            let (ix, iz, nz) = (lx as usize, lz as usize, p.nz as usize);
+            let level = [(0, 0), (1, 0), (0, 1), (1, 1)].iter().map(|(a, b)| p.water[(ix + a) * nz + iz + b]).filter(|v| !v.is_nan()).fold(f32::NAN, f32::max);
+            (!level.is_nan()).then_some(level)
+        })
+    }
 }
 
 /// The world currently being played.
@@ -249,6 +269,7 @@ fn start_loading(
             buildings: world.buildings.into_iter().map(|b| (b.lot as usize, b)).collect(),
             road_curves: world.road_curves,
             road_intersections: world.road_intersections,
+            ponds: world.ponds,
         };
         set_status("Done");
         Ok(LoadResult { baked, world: Arc::new(info), terrain, catalog, world_build, roads, cas, sims, premades })

@@ -308,7 +308,8 @@ pub fn fill_grid(grid: &mut NavGrid, world: &crate::loading::WorldInfo, obstacle
             let slope = (hm.sample(c.x + 0.5, c.y) - hm.sample(c.x - 0.5, c.y))
                 .abs()
                 .max((hm.sample(c.x, c.y + 0.5) - hm.sample(c.x, c.y - 0.5)).abs());
-            grid.blocked[z * w + x] = y < world.sea_level + 0.2 || slope > 0.9;
+            let pond = world.pond_at(c.x, c.y).is_some_and(|w| y < w + 0.1);
+            grid.blocked[z * w + x] = y < world.sea_level + 0.2 || pond || slope > 0.9;
         }
     }
     for (gt, ob, floor) in obstacles {

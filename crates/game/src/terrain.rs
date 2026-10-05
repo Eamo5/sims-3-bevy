@@ -97,6 +97,39 @@ pub struct TerrainBuild {
     pub overview: Option<Image>,
     pub lightmap: Option<Image>,
     pub layer_avg: [Vec4; 16],
+    /// The water of each pond.
+    pub ponds: Vec<Mesh>,
+}
+
+/// A pond's water surface: every lot-grid cell touching water, flat at its water level (the
+/// basin's rising ground cuts the shoreline).
+fn pond_mesh(p: &s3bake::PondBaked, lot: &s3bake::LotInfo) -> Mesh {
+    let (s, c) = lot.rotation.sin_cos();
+    let (nx, nz) = (p.nx as usize, p.nz as usize);
+    let mut positions = Vec::new();
+    let mut indices = Vec::new();
+    for x in 0..nx.saturating_sub(1) {
+        for z in 0..nz.saturating_sub(1) {
+            let corners = [(x, z), (x + 1, z), (x + 1, z + 1), (x, z + 1)];
+            let level = corners.iter().map(|&(a, b)| p.water[a * nz + b]).filter(|v| !v.is_nan()).fold(f32::NAN, f32::max);
+            if level.is_nan() {
+                continue;
+            }
+            let base = positions.len() as u32;
+            for (a, b) in corners {
+                let (lx, lz) = (a as f32, b as f32);
+                positions.push([lot.corner[0] + lx * c + lz * s, level, lot.corner[2] - lx * s + lz * c]);
+            }
+            indices.extend([base, base + 2, base + 1, base, base + 3, base + 2]);
+        }
+    }
+    let n = positions.len();
+    let uvs: Vec<[f32; 2]> = positions.iter().map(|p| [p[0] * 0.25, p[2] * 0.25]).collect();
+    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; n])
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+        .with_inserted_indices(Indices::U32(indices))
 }
 
 /// A stitched world map (block-compressed mip chain) as a GPU image.
@@ -194,6 +227,7 @@ pub fn build_terrain(world: &WorldBaked) -> TerrainBuild {
         overview: world.overview.as_ref().filter(|m| m.size as usize == cells).map(|m| world_map_image(m, true)),
         lightmap: world.lightmap.as_ref().filter(|m| m.size as usize == cells).map(|m| world_map_image(m, false)),
         layer_avg: std::array::from_fn(|i| world.layer_avg.get(i).map_or(Vec4::splat(0.2), |c| Vec3::from(*c).extend(1.0))),
+        ponds: world.ponds.iter().filter_map(|p| Some(pond_mesh(p, &world.lots.get(p.lot as usize)?.info))).collect(),
     }
 }
 
@@ -330,4 +364,15 @@ fn spawn_terrain(
         Transform::from_xyz(world * 0.5, build.sea_level, world * 0.5),
         DespawnOnExit(AppState::InGame),
     ));
+    // Ponds: still, greener water.
+    let pond = std_mats.add(StandardMaterial {
+        base_color: Color::srgba(0.10, 0.27, 0.26, 0.82),
+        perceptual_roughness: 0.06,
+        reflectance: 0.55,
+        alpha_mode: AlphaMode::Blend,
+        ..default()
+    });
+    for m in build.ponds.drain(..) {
+        commands.spawn((Mesh3d(meshes.add(m)), MeshMaterial3d(pond.clone()), Transform::default(), DespawnOnExit(AppState::InGame)));
+    }
 }

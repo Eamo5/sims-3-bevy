@@ -136,6 +136,10 @@ installation is unreachable.
   crouch to collect them, and fish at the lots' fishing spots with the game's casting and
   reeling animations, rod in hand, catching what each spot holds by Fishing skill. Finds go in
   a Collection Journal (J) showing everything found and still to find, and sell for money.
+- **Ponds**: the lots' own sculpted ground and water tables give Sunset Valley its ponds
+  and lakes (Summer Hill Springs with its island and bridge, Central Park's twin ponds,
+  Crystal Springs between its rocky hills, Stoney Falls, Pinochle Pond, the estates' pools);
+  Sims walk around them and fish from the shore.
 - **Building**: wall and room tools that draw along the lot's grid (straight or diagonal, with
   a live outline and price), the sledgehammer, floor tiles and staircases up to a new floor
   (stairwell opened, landing floored, Sims climb them), and hip roofs over the rooms in any

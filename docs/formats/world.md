@@ -555,6 +555,20 @@ group 0x00958344: u8[rows][cols]    // cols = 4×width: per tile 4 bytes (one pe
                                     // bit0 = steep enough for rock texture
 ```
 
+**Ponds** [VERIFIED by rendering, 2026-10-05]. The water table is x-major (`[x][z]`, like the
+level-height grid of §9.3) and relative to the same base as the lot's ground level. Wherever the
+water table is above the lot's ground there is water: Summer Hill Springs' pond, its island, and
+the three fishing spawners at 88.765 m all line up with water at base 89.04 − 0.27. Dry ground
+holds −1.0 or other values below the ground. Each pond has a single level (Crystal Springs sits
+8.63 m below its lot's base, between rocky hills). The pond basins are **not** in the world
+heightmap (0x2AD195F2), which is flat under lots: they come from the lot's own ground grid
+(§9.3, 0x0093D6D4). Pools on residential lots (the Goths') show up the same way.
+
+The world's water resource 0xB074ACE6 is the **sea only**: header `u16 3, f32 seaLevel, u32 2,
+u32 n`, then n × 11-byte vertices of a triangle list (`i16 x, i16 z` in quarter-metres, the sea
+reaching beyond the world edge; `i16` clamped shore depth or ±32700; 5 bytes of flags and packed
+normal).
+
 ---
 
 ## 9. Lot buildings
@@ -612,7 +626,7 @@ payload = w × h × levels × bytesPerCell     (sizes verified for the Goth lot,
 | 0x002E7B0E, 0x002E7CF0, 0x002E7CF1 | tiles | 8 | zeros/ids | floor pattern per quarter-tile (4×u16), 3 material channels like walls |
 | 0x0093D6A5 | tiles | 1 | 0xFF | flags |
 | 0x00A6D544 | tiles | 1 | 0 | flags / room id |
-| 0x0093D6D4 | vertices (61×61) | 4 (f32) | −2.80 | per-level floor vertex heights |
+| 0x0093D6D4 | vertices (61×61) | 4 (f32) | −2.80 | per-level vertex heights, x-major `[level][x][z]`, lowest level first (basements); the ground level's grid is the lot's sculpted terrain relative to its base (pond basins included). Ground = the level whose edge, on the base that fits the surrounding world terrain, sits nearest the lot's height; upper levels are ground + 3 m per storey |
 | 0x0093DEB7 | vertices | 8 | | |
 | 0x0093D6D6 | tiles, levels−1 | 16 | 0xFF.. | |
 | 0x00C0A9F3 | – | 0 | header only | |

@@ -10,7 +10,7 @@ pub const BAKE_VERSION: u32 = 4;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
 pub const CAS_VERSION: u32 = 6;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 20;
+pub const WORLD_VERSION: u32 = 21;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -356,4 +356,16 @@ pub struct WorldBaked {
     /// joining them (x, z, angle).
     pub road_curves: Vec<[[f32; 2]; 4]>,
     pub road_intersections: Vec<[f32; 3]>,
+    /// Ponds on lots (their basins already carved into `heightmap`).
+    pub ponds: Vec<PondBaked>,
+}
+
+/// A lot's water: the water height at each lot-grid vertex (`[x][z]`, `nx × nz`, the lot's
+/// own axes), NaN where the ground is above it.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct PondBaked {
+    pub lot: u32,
+    pub nx: u32,
+    pub nz: u32,
+    pub water: Vec<f32>,
 }
