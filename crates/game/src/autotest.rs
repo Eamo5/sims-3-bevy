@@ -341,7 +341,7 @@ fn auto_pick_world(
 fn watch_insect(
     mut q: Query<&mut SimsCamera>,
     insects: Query<(&GlobalTransform, &crate::interact::GameObject), With<crate::collecting::Insect>>,
-    objects: Query<(&GlobalTransform, &crate::interact::GameObject, Has<crate::fireplace::Lit>, &crate::interact::UsedBy)>,
+    objects: Query<(&GlobalTransform, &crate::interact::GameObject, (Has<crate::fireplace::Lit>, Has<crate::effects::TvOn>), &crate::interact::UsedBy)>,
 ) {
     // WATCH_KIND=<kind>,<distance>[,<yaw>[,<pitch>]]: the camera on the first object of that kind.
     if let Some((kind, d, yaw, pitch)) = std::env::var("WATCH_KIND").ok().and_then(|v| {
@@ -351,7 +351,7 @@ fn watch_insect(
     }) {
         // (One in use, or a lit fireplace, first.)
         let mut of_kind: Vec<_> = objects.iter().filter(|(_, o, _, _)| format!("{:?}", o.kind) == kind || o.name.contains(&kind)).collect();
-        of_kind.sort_by_key(|(_, _, lit, used)| (used.0.is_none(), !*lit));
+        of_kind.sort_by_key(|(_, _, (lit, on), used)| (used.0.is_none() && !*on, !*lit));
         if let (Ok(mut cam), Some((g, _, _, _))) = (q.single_mut(), of_kind.first()) {
             cam.look_at(g.translation());
             cam.distance = d;

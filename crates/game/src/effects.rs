@@ -18,7 +18,7 @@ pub struct EffectsPlugin;
 
 impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (attach, fountain_water, emit, fall).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (attach, fountain_water, emit, fall, tv_screens).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -56,6 +56,129 @@ struct Droplet {
     life: f32,
 }
 
+/// A TV's screen: where it is, and the picture on it while it's on.
+#[derive(Component)]
+struct TvScreen {
+    slot: Vec3,
+    width: f32,
+    shown: Option<Entity>,
+}
+
+/// A TV that's on.
+#[derive(Component)]
+pub struct TvOn;
+
+/// A TV picture: its frames' materials, and when it next changes.
+#[derive(Component)]
+struct TvPicture {
+    next: f32,
+    light: Entity,
+}
+
+/// Frames of programmes: a sky and ground, a few bright shapes (people, cars, cartoons).
+fn tv_frames(images: &mut Assets<Image>, mats: &mut Assets<StandardMaterial>) -> Vec<Handle<StandardMaterial>> {
+    let mut rng = rand::rng();
+    (0..10)
+        .map(|_| {
+            let (w, h) = (48u32, 27u32);
+            let hue = rng.random_range(0.0..360.0);
+            let sky = Color::hsl(hue, 0.5, 0.55).to_srgba();
+            let ground = Color::hsl((hue + 120.0) % 360.0, 0.45, 0.35).to_srgba();
+            let horizon = rng.random_range(10..20);
+            let shapes: Vec<(u32, u32, u32, Srgba)> =
+                (0..rng.random_range(2..6)).map(|_| (rng.random_range(0..w), rng.random_range(4..h), rng.random_range(2..7), Color::hsl(rng.random_range(0.0..360.0), 0.8, 0.6).to_srgba())).collect();
+            let mut data = Vec::with_capacity((w * h * 4) as usize);
+            for y in 0..h {
+                for x in 0..w {
+                    let mut c = if y < horizon { sky } else { ground };
+                    for &(sx, sy, r, sc) in &shapes {
+                        let (dx, dy) = (x as i32 - sx as i32, y as i32 - sy as i32);
+                        if dx * dx + dy * dy <= (r * r) as i32 {
+                            c = sc;
+                        }
+                    }
+                    // Scanlines.
+                    let k = if y % 2 == 0 { 1.0 } else { 0.82 };
+                    data.extend_from_slice(&[(c.red * 255.0 * k) as u8, (c.green * 255.0 * k) as u8, (c.blue * 255.0 * k) as u8, 255]);
+                }
+            }
+            let img = images.add(Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, data, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD));
+            mats.add(StandardMaterial { base_color: Color::BLACK, emissive: LinearRgba::rgb(1.6, 1.6, 1.6), emissive_texture: Some(img), unlit: false, ..default() })
+        })
+        .collect()
+}
+
+/// TVs show a programme while someone's watching: the picture changes now and then, and its
+/// light flickers on the room.
+#[allow(clippy::type_complexity)]
+fn tv_screens(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut tvs: Query<(Entity, &mut TvScreen, &UsedBy)>,
+    watchers: Query<&crate::interact::ActionQueue>,
+    mut pictures: Query<(&mut TvPicture, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut lights: Query<&mut PointLight>,
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    mut frames: Local<Vec<Handle<StandardMaterial>>>,
+    mut quad: Local<Option<Handle<Mesh>>>,
+) {
+    let now = time.elapsed_secs();
+    let mut rng = rand::rng();
+    // (Several can watch at once without any of them having the set to themselves.)
+    let watched: std::collections::HashSet<Entity> = watchers
+        .iter()
+        .filter_map(|q| match q.0.front().map(|a| (&a.kind, a.phase)) {
+            Some((crate::interact::ActionKind::Object { target, .. }, crate::interact::Phase::Running(_))) => Some(*target),
+            _ => None,
+        })
+        .collect();
+    for (e, mut tv, used) in &mut tvs {
+        match (used.0.is_some() || watched.contains(&e), tv.shown) {
+            (true, None) => {
+                if frames.is_empty() {
+                    *frames = tv_frames(&mut images, &mut mats);
+                }
+                let q = quad.get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0))).clone();
+                let (w, h) = (tv.width, tv.width * 0.56);
+                let light = commands
+                    .spawn((PointLight { color: Color::srgb(0.7, 0.8, 1.0), intensity: 4000.0, range: 4.0, shadow_maps_enabled: false, ..default() }, Transform::from_xyz(0.0, 0.0, 0.6)))
+                    .id();
+                let pic = commands
+                    .spawn((
+                        Mesh3d(q),
+                        MeshMaterial3d(frames[rng.random_range(0..frames.len())].clone()),
+                        Transform::from_translation(tv.slot + Vec3::Z * 0.035).with_scale(Vec3::new(w, h, 1.0)),
+                        TvPicture { next: now + rng.random_range(0.5..2.0), light },
+                        NotShadowCaster,
+                        ChildOf(e),
+                    ))
+                    .id();
+                commands.entity(light).insert(ChildOf(pic));
+                tv.shown = Some(pic);
+                commands.entity(e).insert(TvOn);
+            }
+            (false, Some(pic)) => {
+                commands.entity(pic).try_despawn();
+                commands.entity(e).remove::<TvOn>();
+                tv.shown = None;
+            }
+            (true, Some(pic)) => {
+                if let Ok((mut p, mut m)) = pictures.get_mut(pic)
+                    && now >= p.next
+                    && !frames.is_empty()
+                {
+                    p.next = now + rng.random_range(0.4..2.5);
+                    m.0 = frames[rng.random_range(0..frames.len())].clone();
+                    if let Ok(mut l) = lights.get_mut(p.light) {
+                        l.intensity = rng.random_range(2500.0..6000.0);
+                    }
+                }
+            }
+            (false, None) => {}
+        }
+    }
+}
+
 /// The droplets' looks, made once.
 #[derive(Default)]
 struct Looks {
@@ -90,6 +213,14 @@ fn attach(
     for (e, o) in &objects {
         commands.entity(e).insert(FxChecked);
         let script = data.0.catalog_entry(&o.objd).map_or("", |c| c.script.as_str());
+        // A TV's screen: the effect slot in its middle, up off the floor.
+        if o.kind == ObjectKind::Tv {
+            let screen = slots.get(&o.objd).and_then(|s| s.iter().filter(|p| p[1] > 0.3 && p[0].abs() < 0.2).max_by(|a, b| a[1].total_cmp(&b[1])).copied());
+            if let Some(s) = screen {
+                commands.entity(e).insert(TvScreen { slot: Vec3::from(s), width: (o.half.x * 2.0 * 0.75).clamp(0.35, 1.4), shown: None });
+            }
+            continue;
+        }
         let spray = match o.kind {
             ObjectKind::Shower => Spray::Shower,
             ObjectKind::Sink => Spray::Tap,

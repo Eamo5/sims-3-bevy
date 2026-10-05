@@ -125,6 +125,8 @@ installation is unreachable.
   nightgowns, boxers), and into athletic wear to work out, and dress again after.
 - **Water effects**: fountains gush and fill their basins, showers spray from the head and taps
   run while someone's at them, each from the object's own effect slot (the game's RSLT slots).
+  TVs show a programme on the screen (at the TV's screen slot) while anyone's watching, its
+  light flickering on the room.
 - **Lots' own ground**: lots keep their sculpted ground; its dips are carved back into the
   flattened world (Central Park's sunken plaza with the fountain basin set into it, hollows on
   the beaches), and ground-level paving follows the ground.
