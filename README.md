@@ -118,7 +118,8 @@ installation is unreachable.
   water over the mosaics; the terrain is left open over them. Sims swim from the ladders: they
   change into swimwear (the game's own: trunks and a bare chest, swimsuits and two-pieces),
   climb down, swim about the pool with the game's swim cycle (building Athletic skill) and
-  climb out back into their clothes.
+  climb out back into their clothes. At bedtime they change into their sleepwear (pyjamas,
+  nightgowns, boxers) and dress again when they get up.
 - **Water effects**: fountains gush and fill their basins, showers spray from the head and taps
   run while someone's at them, each from the object's own effect slot (the game's RSLT slots).
 - **Lots' own ground**: lots keep their sculpted ground; its dips are carved back into the

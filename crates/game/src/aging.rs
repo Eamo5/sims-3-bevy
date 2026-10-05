@@ -214,7 +214,7 @@ fn daily_aging(
 #[allow(clippy::too_many_arguments)]
 fn rebuild_bodies(
     mut commands: Commands,
-    sims: Query<(Entity, &Sim, &Children, Has<crate::simbody::InSwimwear>), With<NeedsNewBody>>,
+    sims: Query<(Entity, &Sim, &Children, Option<&crate::simbody::Wearing>), With<NeedsNewBody>>,
     parts: Query<(), With<crate::simbody::SimModelPart>>,
     data: Option<Res<crate::baked::Baked>>,
     cas: Option<Res<crate::simbody::CasData>>,
@@ -226,10 +226,11 @@ fn rebuild_bodies(
     ),
 ) {
     let (Some(data), Some(cas)) = (data, cas) else { return };
-    for (e, sim, children, swim) in &sims {
+    for (e, sim, children, wearing) in &sims {
         commands.entity(e).remove::<NeedsNewBody>();
-        let outfit = crate::simbody::pick_outfit_for(&cas, sim, &mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look), swim);
-        debug!("{} dressed{}: {:?}", sim.first, if swim { " for a swim" } else { "" }, outfit.body.iter().map(|p| p.name.as_str()).collect::<Vec<_>>());
+        let kind = wearing.map_or(crate::simbody::OutfitKind::Everyday, |w| w.0);
+        let outfit = crate::simbody::pick_outfit_for(&cas, sim, &mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look), kind);
+        debug!("{} dressed ({kind:?}): {:?}", sim.first, outfit.body.iter().map(|p| p.name.as_str()).collect::<Vec<_>>());
         let Some(model) = crate::simbody::build_sim_model(&data.0, &cas, sim, &outfit, crate::simbody::tone_of(sim)) else { continue };
         for c in children.iter() {
             if parts.get(c).is_ok() {

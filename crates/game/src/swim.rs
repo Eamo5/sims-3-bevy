@@ -15,7 +15,35 @@ pub struct SwimPlugin;
 
 impl Plugin for SwimPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, swim.run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (swim, pyjamas).run_if(in_state(PlayMode::Live)));
+    }
+}
+
+/// To bed in pyjamas, and dressed again on getting up.
+#[allow(clippy::type_complexity)]
+fn pyjamas(
+    mut commands: Commands,
+    sims: Query<(Entity, &ActionQueue, Option<&crate::simbody::Wearing>), (With<Sim>, With<crate::sim::HouseholdMember>)>,
+    beds: Query<&GameObject>,
+) {
+    use crate::simbody::{OutfitKind, Wearing};
+    for (e, queue, wearing) in &sims {
+        let asleep = queue.0.front().is_some_and(|a| match (&a.kind, a.phase) {
+            (ActionKind::Object { target, def }, Phase::Running(_)) => beds.get(*target).is_ok_and(|o| {
+                matches!(o.kind, crate::interact::ObjectKind::BedSingle | crate::interact::ObjectKind::BedDouble)
+                    && interactions_for(o.kind).get(*def).is_some_and(|d| d.name == "Sleep")
+            }),
+            _ => false,
+        });
+        match (asleep, wearing.map(|w| w.0)) {
+            (true, None) => {
+                commands.entity(e).insert((Wearing(OutfitKind::Sleepwear), crate::aging::NeedsNewBody));
+            }
+            (false, Some(OutfitKind::Sleepwear)) => {
+                commands.entity(e).remove::<Wearing>().insert(crate::aging::NeedsNewBody);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -81,7 +109,7 @@ fn swim(
                 commands.entity(e).insert((
                     Swimming { tiles, water_y, target, exit },
                     ActionClip::new(None, &["a_swim_cycle_x"]),
-                    crate::simbody::InSwimwear,
+                    crate::simbody::Wearing(crate::simbody::OutfitKind::Swimwear),
                     crate::aging::NeedsNewBody,
                 ));
             }
@@ -106,7 +134,7 @@ fn swim(
                 tf.translation = s.exit;
                 commands
                     .entity(e)
-                    .remove::<(Swimming, crate::simbody::InSwimwear)>()
+                    .remove::<(Swimming, crate::simbody::Wearing)>()
                     .insert((ActionClip::new(Some("a2o_ladder_climbUp_L_x"), &[]), crate::aging::NeedsNewBody));
             }
             (None, None) => {}

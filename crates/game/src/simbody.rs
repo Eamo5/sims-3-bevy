@@ -145,36 +145,52 @@ pub struct Outfit {
     pub body: Vec<CasPartInfo>,
 }
 
-/// In swimwear (for a swim): the body is dressed from the swimwear parts.
-#[derive(Component)]
-pub struct InSwimwear;
-
-pub fn pick_outfit(cas: &CasData, sim: &Sim, rng: &mut impl Rng) -> Outfit {
-    pick_outfit_for(cas, sim, rng, false)
+/// Which of a Sim's outfits they have on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum OutfitKind {
+    #[default]
+    Everyday,
+    Swimwear,
+    Sleepwear,
 }
 
-/// What a Sim wears: everyday clothes, or swimwear.
-pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, swim: bool) -> Outfit {
+/// Wearing something other than everyday clothes (for a swim, for bed).
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Wearing(pub OutfitKind);
+
+pub fn pick_outfit(cas: &CasData, sim: &Sim, rng: &mut impl Rng) -> Outfit {
+    pick_outfit_for(cas, sim, rng, OutfitKind::Everyday)
+}
+
+/// What a Sim wears: everyday clothes, swimwear or sleepwear (everyday clothes when there's
+/// nothing of the kind for them).
+pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: OutfitKind) -> Outfit {
+    let swim = kind != OutfitKind::Everyday;
+    let cat = match kind {
+        OutfitKind::Everyday => s3formats::sim::CAT_EVERYDAY,
+        OutfitKind::Swimwear => s3formats::sim::CAT_SWIM,
+        OutfitKind::Sleepwear => s3formats::sim::CAT_SLEEP,
+    };
     let age = age_bits(sim.age);
     let gender = if sim.female { GENDER_FEMALE } else { GENDER_MALE };
     let fits = |e: &&CasPartInfo| e.baked && e.age_gender & age != 0 && e.age_gender & gender != 0;
     // Clothes and shoes by the outfit's category (heads and hair go with anything).
     let worn = |e: &&CasPartInfo| {
         !matches!(e.clothing_type, CT_TOP | CT_BOTTOM | CT_BODY | CT_SHOES)
-            || if swim { e.category & s3formats::sim::CAT_SWIM != 0 } else { e.category & s3formats::sim::CAT_EVERYDAY != 0 }
+            || e.category & cat != 0
     };
     let of_type = |t: u32| {
         let all: Vec<&CasPartInfo> = cas.parts.iter().filter(|e| e.clothing_type == t).filter(fits).filter(worn).collect();
         if !swim {
             return all;
         }
-        // Swimwear: the base game's (the packs' swimwear counts T-shirts and flippers), a bare
-        // chest for men and bare feet for everyone.
+        // Swimwear and sleepwear: the base game's (the packs' swimwear counts T-shirts and
+        // flippers); swimming, a bare chest for men; bare feet for everyone.
         let preferred: Vec<&CasPartInfo> = all
             .iter()
             .copied()
             .filter(|e| match t {
-                CT_TOP if !sim.female => e.name.contains("TopNude"),
+                CT_TOP if !sim.female && kind == OutfitKind::Swimwear => e.name.contains("TopNude"),
                 CT_SHOES => e.name.contains("ShoesNude"),
                 _ => e.key.1 == 0,
             })
@@ -200,6 +216,10 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, swim: bool)
         .map(|e| (*e).clone());
     let mut body = Vec::new();
     let (tops, bottoms, fulls) = (of_type(CT_TOP), of_type(CT_BOTTOM), of_type(CT_BODY));
+    // (Nothing of the kind for them: their everyday clothes.)
+    if swim && fulls.is_empty() && (tops.is_empty() || bottoms.is_empty()) {
+        return pick_outfit_for(cas, sim, rng, OutfitKind::Everyday);
+    }
     let use_full = rng.random_bool(0.25);
     let random_full = fulls.choose(rng).map(|f| (*f).clone());
     let random_top = tops.choose(rng).map(|f| (*f).clone());
@@ -210,8 +230,13 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, swim: bool)
     } else {
         (chosen(sim.outfit.top, CT_TOP), chosen(sim.outfit.bottom, CT_BOTTOM), chosen(sim.outfit.full, CT_BODY))
     };
-    // (Swimming, men wear trunks and a bare chest; women a swimsuit or a two-piece.)
-    let use_full = if swim { sim.female && rng.random_bool(0.5) && !fulls.is_empty() } else { use_full };
+    // (Swimming, men wear trunks and a bare chest, women a swimsuit or a two-piece; pyjamas
+    // are mostly all-in-ones.)
+    let use_full = match kind {
+        OutfitKind::Everyday => use_full,
+        OutfitKind::Swimwear => sim.female && rng.random_bool(0.5) && !fulls.is_empty(),
+        OutfitKind::Sleepwear => !fulls.is_empty() && rng.random_bool(0.7),
+    };
     if let Some(f) = cf {
         body.push(f);
     } else if ct.is_some() || cb.is_some() {
