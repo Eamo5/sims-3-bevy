@@ -54,7 +54,12 @@ impl Portraits {
         if let Some(h) = self.images.get(&sim) {
             return h.clone();
         }
-        let h = images.add(Image::new_target_texture(SIZE, SIZE, TextureFormat::Rgba8Unorm, Some(TextureFormat::Rgba8UnormSrgb)));
+        // (The backdrop's colour until the picture is taken.)
+        let mut img = Image::new_target_texture(SIZE, SIZE, TextureFormat::Rgba8Unorm, Some(TextureFormat::Rgba8UnormSrgb));
+        let c = BACKDROP.to_srgba();
+        let px = [(c.red * 255.0) as u8, (c.green * 255.0) as u8, (c.blue * 255.0) as u8, 255];
+        img.data = Some(px.iter().copied().cycle().take((SIZE * SIZE * 4) as usize).collect());
+        let h = images.add(img);
         self.images.insert(sim, h.clone());
         self.queue.push_back(sim);
         h
@@ -241,7 +246,8 @@ fn take_portraits(
             continue;
         };
         let away = off_lot || at_work || out;
-        let upright = matches!(anim.pose, Pose::Stand | Pose::Walk | Pose::Talk | Pose::Use) || sim.age == Age::Baby;
+        // (Not while lying down.)
+        let upright = anim.pose != Pose::Lie || sim.age == Age::Baby;
         // (Faces and clothes finish loading a few seconds after a body is built.)
         let settled = portraits.built.get(&e).is_none_or(|t| now - t > 4.0) && now > 6.0;
         if !settled || !(vis.get() && upright || away) {
