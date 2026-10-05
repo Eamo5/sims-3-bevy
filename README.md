@@ -107,6 +107,10 @@ installation is unreachable.
   and floors, its walls come down as the camera moves in, Sims on it keep to it in their own
   choices, townies turn up during the day to use the place too (and to meet), and "Go Home"
   drives them back while the household carries on at home.
+- **Sim panel tabs**, as the game's: Needs; Skills (each skill learned with its icon, level
+  and progress to the next); Career (the job and level, hours, days and pay, the performance
+  meter and the next promotion); Simology (traits with what they mean, lifetime happiness and
+  the rewards bought). F5 to F8 switch tabs.
 - **Fire**: a poor (or clumsy) cook can set the stove alight; the flames flicker and light
   the room, spread to what's beside them and ruin it, and Sims nearby panic with the game's
   fire animations. Anyone caught in the flames burns: they may stop, drop and roll, or die

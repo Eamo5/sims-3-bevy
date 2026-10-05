@@ -170,10 +170,19 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_balloon.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(
                 Update,
-                (|args: Res<AutoArgs>, mut p: ResMut<crate::relations::RelationsPanel>, mut j: ResMut<crate::collecting::JournalPanel>, mut done: Local<bool>, time: Res<Time>| {
+                (|mut commands: Commands, args: Res<AutoArgs>, mut p: ResMut<crate::relations::RelationsPanel>, mut j: ResMut<crate::collecting::JournalPanel>, mut done: Local<bool>, time: Res<Time>| {
                     if args.relations && !*done {
                         *done = true;
                         p.open = true;
+                    }
+                    // SIMTAB=<Skills|Career|Simology>: that tab of the Sim panel.
+                    if let Ok(t) = std::env::var("SIMTAB") {
+                        commands.queue(move |w: &mut World| {
+                            let tab = crate::simpanel::SimTab::ALL.into_iter().find(|x| x.label().eq_ignore_ascii_case(&t)).unwrap_or_default();
+                            if *w.resource::<crate::simpanel::SimTab>() != tab {
+                                *w.resource_mut::<crate::simpanel::SimTab>() = tab;
+                            }
+                        });
                     }
                     // JOURNAL=<seconds>: the collection journal opens then.
                     if let Some(t) = std::env::var("JOURNAL").ok().and_then(|t| t.parse::<f32>().ok())

@@ -190,16 +190,24 @@ fn spawn_hud(mut commands: Commands) {
         .with_children(|p| {
             p.spawn((text("", 22.0, Color::WHITE), NeedsName));
             p.spawn((text("", 14.0, Color::srgb(0.75, 0.85, 1.0)), NeedsDetail));
-            p.spawn((text("", 13.0, Color::srgb(0.95, 0.85, 0.55)), TraitsText, Node::default()));
-            p.spawn((TraitIcons, Node { flex_direction: FlexDirection::Row, column_gap: Val::Px(4.0), ..default() }));
-            p.spawn((SkillIcons, Node { flex_direction: FlexDirection::Row, flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(8.0), ..default() }));
-            p.spawn(Node {
-                flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
-                column_gap: Val::Px(10.0),
-                row_gap: Val::Px(6.0),
-                ..default()
-            })
+            crate::simpanel::tab_strip(p);
+            p.spawn((text("", 13.0, Color::srgb(0.95, 0.85, 0.55)), TraitsText, crate::simpanel::NeedsOnly, Node::default()));
+            p.spawn((TraitIcons, crate::simpanel::NeedsOnly, Node { flex_direction: FlexDirection::Row, column_gap: Val::Px(4.0), ..default() }));
+            p.spawn((SkillIcons, crate::simpanel::NeedsOnly, Node { flex_direction: FlexDirection::Row, flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(8.0), ..default() }));
+            p.spawn((
+                crate::simpanel::TabContent,
+                Node { display: Display::None, flex_direction: FlexDirection::Column, row_gap: Val::Px(5.0), ..default() },
+            ));
+            p.spawn((
+                crate::simpanel::NeedsOnly,
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(10.0),
+                    row_gap: Val::Px(6.0),
+                    ..default()
+                },
+            ))
             .with_children(|g| {
                 for (i, name) in MOTIVE_NAMES.iter().enumerate() {
                     g.spawn(Node { width: Val::Px(173.0), flex_direction: FlexDirection::Column, ..default() })
