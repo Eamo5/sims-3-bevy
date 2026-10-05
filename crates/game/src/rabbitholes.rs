@@ -215,7 +215,13 @@ fn outings(
                     let mood_ok = motives.0.iter().all(|m| *m > -40.0);
                     g.0 = (g.0 + if mood_ok { 8.0 } else { -12.0 }).clamp(0.0, 100.0);
                 }
-                notes.push(format!("{} is home from school.", sim.first));
+                // With homework for tomorrow (on school nights).
+                if clock.weekday() < 4 {
+                    commands.entity(e).insert(Homework);
+                    notes.push(format!("{} is home from school, with homework.", sim.first));
+                } else {
+                    notes.push(format!("{} is home from school.", sim.first));
+                }
             } else if std::ptr::eq(at.activity, &crate::gardening::BUY_SEEDS) {
                 commands.entity(e).insert(crate::gardening::GardenRequest::BoughtSeeds);
                 notes.push(format!("{} is back from the grocery store.", sim.first));
@@ -240,6 +246,10 @@ fn outings(
         }
     }
 }
+
+/// Homework from today's school, not yet done.
+#[derive(Component)]
+pub struct Homework;
 
 /// A child's school performance, 0..100 (A+ at the top).
 #[derive(Component, Clone, Copy)]
@@ -269,13 +279,13 @@ impl SchoolGrades {
 fn school_bus(
     mut commands: Commands,
     clock: Res<GameClock>,
-    mut kids: Query<(Entity, &Sim, &mut ActionQueue, Option<&SchoolGrades>, Option<&AtRabbitHole>), With<HouseholdMember>>,
+    mut kids: Query<(Entity, &Sim, &mut ActionQueue, Option<&mut SchoolGrades>, Option<&AtRabbitHole>, Has<Homework>), With<HouseholdMember>>,
     mut last_day: Local<std::collections::HashMap<Entity, u32>>,
     mut notes: ResMut<Notifications>,
 ) {
     let h = clock.hour_f();
     let day = clock.day();
-    for (e, sim, mut queue, grades, away) in &mut kids {
+    for (e, sim, mut queue, mut grades, away, homework) in &mut kids {
         if !matches!(sim.age, Age::Child | Age::Teen) {
             continue;
         }
@@ -288,6 +298,14 @@ fn school_bus(
         last_day.insert(e, day);
         for a in queue.0.iter_mut() {
             a.cancel = true;
+        }
+        // Homework left undone goes against them.
+        if homework {
+            commands.entity(e).remove::<Homework>();
+            if let Some(g) = grades.as_mut() {
+                g.0 = (g.0 - 10.0).max(0.0);
+            }
+            notes.push(format!("{} didn't do their homework.", sim.first));
         }
         let day_start = (clock.minutes / 1440.0).floor() * 1440.0;
         let until = day_start + 15.0 * 60.0 + DRIVE_MINUTES;

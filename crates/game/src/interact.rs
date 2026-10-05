@@ -342,6 +342,8 @@ pub enum Special {
     PutOutFire,
     /// Get in the pool and swim about.
     Swim,
+    /// Do the day's homework.
+    Homework,
 }
 
 pub struct InteractionDef {
@@ -442,7 +444,7 @@ static SOFA: [InteractionDef; 2] = [
     InteractionDef { on_object: true, ..def("Sit", 40.0, [0.0, 0.0, 5.0, 0.0, 0.0, 10.0], Pose::Sit) },
     InteractionDef { on_object: true, decay: SLEEP_DECAY, ..def("Nap", 60.0, [0.0, 0.0, 18.0, 0.0, 0.0, 0.0], Pose::Lie) },
 ];
-static CHAIR: [InteractionDef; 2] = [
+static CHAIR: [InteractionDef; 3] = [
     InteractionDef { on_object: true, autonomous: false, ..def("Sit", 30.0, [0.0, 0.0, 4.0, 0.0, 0.0, 4.0], Pose::Sit) },
     InteractionDef {
         on_object: true,
@@ -450,6 +452,7 @@ static CHAIR: [InteractionDef; 2] = [
         special: Special::EatMeal,
         ..def("Eat", MEAL_MINUTES, [MEAL_PER_HOUR, -4.0, 0.0, 20.0, -4.0, 6.0], Pose::Sit)
     },
+    InteractionDef { on_object: true, special: Special::Homework, ..def("Do Homework", 45.0, [0.0, 0.0, -2.0, 0.0, 0.0, -6.0], Pose::Sit) },
 ];
 /// The dining chair's "Eat" (not offered in its menu).
 pub const CHAIR_EAT: usize = 1;
@@ -514,6 +517,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
     Some(match name {
         "Nap" if kind == ObjectKind::Sofa => A::new(Some("a2o_sofa_sit_trans_nap_x"), &["a2o_sofa_nap_loop1_x"]),
         "Eat" if kind == ObjectKind::Chair => A::new(Some("a2o_eat_diningIn_fork_start_x"), &["a2o_eat_diningIn_fork_neat_x"]),
+        "Do Homework" => A::new(Some("a2o_homework_table_start_x"), &["a2o_homework_table_write_x", "a2o_homework_table_read_x", "a2o_homework_table_think_x", "a2o_homework_table_erase_x"]),
         "Pay Bills" => A::new(None, &["a2o_mailbox_getMail_x"]),
         "Water" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_wateringCan_start_x"), &["a2o_gardening_wateringCan_waterPlants_x"]),
         "Weed" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_pullWeeds_x"]),
@@ -1350,6 +1354,14 @@ fn run_actions(
                                     match d.special {
                                         // (Getting out of the pool is the swim module's.)
                                         Special::FindJob | Special::Swim => {}
+                                        Special::Homework => {
+                                            notes.push(format!("{} finished their homework.", sim.first));
+                                            commands.entity(me).remove::<crate::rabbitholes::Homework>().queue_silenced(|mut e: EntityWorldMut| {
+                                                if let Some(mut g) = e.get_mut::<crate::rabbitholes::SchoolGrades>() {
+                                                    g.0 = (g.0 + 6.0).min(100.0);
+                                                }
+                                            });
+                                        }
                                         Special::QuitJob => {
                                             if job.is_some() {
                                                 commands.entity(me).remove::<Job>();
@@ -1714,7 +1726,7 @@ fn autonomy(
     >,
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>,
     hh: Option<Res<Household>>,
-    (broken, plant_q, lit_q): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>, Query<(), With<crate::fireplace::Lit>>),
+    (broken, plant_q, lit_q, hw_q): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>, Query<(), With<crate::fireplace::Lit>>, Query<(), With<crate::rabbitholes::Homework>>),
     party_on: Option<Res<Party>>,
 ) {
     if delta.0 <= 0.0 {
@@ -1789,6 +1801,10 @@ fn autonomy(
                 if obj.kind == ObjectKind::Fireplace && (d.special == Special::LightFire) == lit_q.contains(oe) {
                     continue;
                 }
+                // Homework is for those who have some.
+                if d.special == Special::Homework && !hw_q.contains(me) {
+                    continue;
+                }
                 if matches!(d.special, Special::ServeMeal | Special::CleanUp | Special::PayBills) && (meal_out && d.special == Special::ServeMeal || !household.contains(me)) {
                     continue;
                 }
@@ -1801,6 +1817,11 @@ fn autonomy(
                 // Only sleep when actually tired.
                 if d.until_full == Some(ENERGY) && motives.0[ENERGY] > -10.0 {
                     score *= 0.1;
+                }
+                // Homework gets done (by the bookish sooner), unless they're miserable.
+                if d.special == Special::Homework && motives.0.iter().all(|m| *m > -30.0) {
+                    let keen = [crate::life::Trait::Bookworm, crate::life::Trait::Genius, crate::life::Trait::Perfectionist].iter().any(|t| sim.traits.contains(t));
+                    score = if keen { 45.0 } else { 22.0 };
                 }
                 if matches!(d.special, Special::Water | Special::Weed | Special::Harvest) {
                     let keen = household.contains(me) && (sim.traits.contains(&crate::life::Trait::GreenThumb) || plant_q.get(oe).is_ok());

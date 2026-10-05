@@ -638,7 +638,12 @@ fn world_click(
     mut ray_cast: MeshRayCast,
     parents: Query<&ChildOf>,
     sims: Query<(&Sim, Has<HouseholdMember>, Has<Selected>)>,
-    (objects, broken_q, lit_q): (Query<&GameObject>, Query<(), With<crate::interact::Broken>>, Query<(), With<crate::fireplace::Lit>>),
+    (objects, broken_q, lit_q, hw_q): (
+        Query<&GameObject>,
+        Query<(), With<crate::interact::Broken>>,
+        Query<(), With<crate::fireplace::Lit>>,
+        Query<(), With<crate::rabbitholes::Homework>>,
+    ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
     members_q: Query<(), With<HouseholdMember>>,
     world: Res<CurrentWorld>,
@@ -730,6 +735,9 @@ fn world_click(
                 }
                 // A fireplace offers lighting when cold, the rest when lit.
                 if obj.kind == ObjectKind::Fireplace && (d.special == Special::LightFire) == lit_q.contains(t) {
+                    continue;
+                }
+                if d.special == Special::Homework && !hw_q.contains(actor) {
                     continue;
                 }
                 if d.special == Special::FindJob {

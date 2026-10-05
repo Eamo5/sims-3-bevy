@@ -38,6 +38,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_fishHereWith_idle",
     "a2o_catchFish_reelIn",
     "a2o_catchFish_react",
+    // Homework at a table.
+    "c2o_homework_table_",
     // Swimming, and the pool ladders.
     "a_swim_",
     "a_swim2stand",
