@@ -36,6 +36,8 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("guitar", "musicalInstrumentGuitar", "b__R_carry_slot", [0.0, 0.43762, -0.020687], [0.0, -0.08, 0.17]),
     ("spatula", "Spatula", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("scythe", "DeathScythe", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("newspaperReading", "NewspaperReading", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("bills", "billsSingle", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
 ];
 
 /// The clip-actor suffixes that are props (for the clip bake).
@@ -80,8 +82,12 @@ fn hold_props(
                     .iter()
                     .enumerate()
                     .filter_map(|(i, (actor, ..))| {
-                        let name = format!("{stem}_{actor}");
-                        data.0.clip_names.iter().find(|n| n.eq_ignore_ascii_case(&name)).map(|n| (i, n.clone()))
+                        // (Standing and seated Sim clips can share their props' clips.)
+                        let general = stem.replace("_standing", "").replace("_seated", "");
+                        [format!("{stem}_{actor}"), format!("{general}_{actor}")]
+                            .iter()
+                            .find_map(|name| data.0.clip_names.iter().find(|n| n.eq_ignore_ascii_case(name)))
+                            .map(|n| (i, n.clone()))
                     })
                     .collect()
             })

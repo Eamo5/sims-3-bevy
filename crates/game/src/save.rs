@@ -109,6 +109,9 @@ pub struct SaveGame {
     pub household: String,
     pub funds: i64,
     pub last_bill_day: u32,
+    /// Bills waiting in the mailbox.
+    #[serde(default)]
+    pub bills: Vec<crate::interact::Bill>,
     pub minutes: f64,
     pub sims: Vec<SavedSim>,
     /// Objects bought in buy mode.
@@ -325,6 +328,7 @@ fn save_game(
         household: hh.name.clone(),
         funds: hh.funds,
         last_bill_day: hh.last_bill_day,
+        bills: hh.bills.clone(),
         minutes: clock.minutes,
         sims: saved,
         bought: bought.iter().map(|(o, tf)| saved_object(o, tf)).collect(),
@@ -391,6 +395,7 @@ fn apply_loaded_game(
     if let Some(h) = household.as_mut() {
         h.funds = game.funds;
         h.last_bill_day = game.last_bill_day;
+        h.bills = game.bills.clone();
         h.name = game.household.clone();
     }
     let by_id: HashMap<u64, Entity> = sims.iter().map(|q| (q.1.id, q.0)).collect();

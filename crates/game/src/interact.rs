@@ -77,6 +77,10 @@ pub enum ObjectKind {
     DirtyDishes,
     /// A tombstone (the game's urnstone).
     Tombstone,
+    /// Where the bills arrive.
+    Mailbox,
+    /// The morning paper.
+    Newspaper,
     Other,
 }
 
@@ -113,6 +117,10 @@ impl ObjectKind {
             Self::Foosball
         } else if has("urnstone") {
             Self::Tombstone
+        } else if has("mailbox") {
+            Self::Mailbox
+        } else if has("miscellaneous.newspaper") {
+            Self::Newspaper
         } else if has("fridge") {
             Self::Fridge
         } else if has("microwave") {
@@ -184,7 +192,7 @@ impl ObjectKind {
             Self::Table => "Surfaces",
             Self::Light => "Lighting",
             Self::Plant | Self::Decoration => "Decor",
-            Self::Meal | Self::DirtyDishes | Self::Tombstone => "Misc",
+            Self::Meal | Self::DirtyDishes | Self::Tombstone | Self::Mailbox | Self::Newspaper => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
             Self::Other => "Misc",
         }
@@ -246,6 +254,10 @@ pub enum Special {
     EatMeal,
     /// Clear away dirty dishes.
     CleanUp,
+    /// Pay the bills waiting in the mailbox.
+    PayBills,
+    /// Read the paper (then recycle it).
+    ReadPaper,
 }
 
 pub struct InteractionDef {
@@ -292,6 +304,11 @@ static STOVE: [InteractionDef; 1] = [InteractionDef {
     ..def("Cook Dinner", 60.0, [100.0, 0.0, 0.0, 0.0, -5.0, 10.0], Pose::Use)
 }];
 static MEAL: [InteractionDef; 1] = [InteractionDef { special: Special::GrabPlate, ..def("Grab a Plate", 2.0, [9000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) }];
+static MAILBOX: [InteractionDef; 1] = [InteractionDef { special: Special::PayBills, ..def("Pay Bills", 3.0, N, Pose::Use) }];
+static NEWSPAPER: [InteractionDef; 2] = [
+    InteractionDef { special: Special::ReadPaper, ..def("Read", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 45.0], Pose::Use) },
+    InteractionDef { special: Special::FindJob, ..def("Look for a Job", 10.0, N, Pose::Use) },
+];
 static TOMBSTONE: [InteractionDef; 1] = [def("Mourn", 20.0, [0.0, 0.0, -2.0, 15.0, 0.0, -10.0], Pose::Stand)];
 static DISHES: [InteractionDef; 1] = [InteractionDef { special: Special::CleanUp, ..def("Clean Up", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 0.0], Pose::Use) }];
 /// How a plate of food fills hunger, per hour, and how long it takes to eat.
@@ -394,6 +411,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
     Some(match name {
         "Nap" if kind == ObjectKind::Sofa => A::new(Some("a2o_sofa_sit_trans_nap_x"), &["a2o_sofa_nap_loop1_x"]),
         "Eat" if kind == ObjectKind::Chair => A::new(Some("a2o_eat_diningIn_fork_start_x"), &["a2o_eat_diningIn_fork_neat_x"]),
+        "Pay Bills" => A::new(None, &["a2o_mailbox_getMail_x"]),
+        "Read" if kind == ObjectKind::Newspaper => A::new(Some("a2o_newspaper_read_standing_start_x"), &["a2o_newspaper_read_standing_loop"]),
         "Eat" if kind == ObjectKind::Stool => A::new(Some("a2o_eat_barStoolIn_fork_start_x"), &["a2o_eat_barStoolIn_fork_neat_x"]),
         "Have Quick Meal" | "Microwave Dinner" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_eat_stand_fork_neat", "a2o_eat_stand_hand_neat"]),
         "Grab a Snack" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_eat_stand_hand_neat"]),
@@ -508,6 +527,8 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Meal => &MEAL,
         ObjectKind::DirtyDishes => &DISHES,
         ObjectKind::Tombstone => &TOMBSTONE,
+        ObjectKind::Mailbox => &MAILBOX,
+        ObjectKind::Newspaper => &NEWSPAPER,
         ObjectKind::Tv => &TV,
         ObjectKind::Computer => &COMPUTER,
         ObjectKind::Stereo => &STEREO,
@@ -619,6 +640,15 @@ pub struct Household {
     pub funds: i64,
     pub lot_index: usize,
     pub last_bill_day: u32,
+    /// Bills waiting in the mailbox.
+    pub bills: Vec<Bill>,
+}
+
+/// A bill: how much, and the day it arrived.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+pub struct Bill {
+    pub amount: i64,
+    pub day: u32,
 }
 
 #[derive(Resource, Default)]
@@ -1066,8 +1096,22 @@ fn run_actions(
                                         Special::EatMeal => {
                                             commands.entity(me).insert(crate::meals::MealRequest::Ate);
                                         }
-                                        Special::CleanUp => {
+                                        Special::CleanUp | Special::ReadPaper => {
                                             commands.entity(*target).try_despawn();
+                                        }
+                                        Special::PayBills => {
+                                            if let Some(h) = household.as_mut() {
+                                                let due: i64 = h.bills.iter().map(|b| b.amount).sum();
+                                                if due == 0 {
+                                                    notes.push("There are no bills to pay.");
+                                                } else if h.funds >= due {
+                                                    h.funds -= due;
+                                                    h.bills.clear();
+                                                    notes.push(format!("{} paid the bills: §{due}.", sim.first));
+                                                } else {
+                                                    notes.push(format!("There isn't enough money to pay the bills (§{due})."));
+                                                }
+                                            }
                                         }
                                         Special::Cook | Special::None => {}
                                     }
@@ -1290,6 +1334,7 @@ fn autonomy(
         (Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>),
     >,
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy)>,
+    hh: Option<Res<Household>>,
 ) {
     if delta.0 <= 0.0 {
         return;
@@ -1297,6 +1342,7 @@ fn autonomy(
     let others: Vec<(Entity, Vec3, Age, [f32; 6])> = sims.iter().map(|s| (s.0, s.1.translation, s.7.age, s.2.0)).collect();
     // A meal already out is eaten before anyone cooks another.
     let meal_out = objects.iter().any(|(_, o, _, _)| o.kind == ObjectKind::Meal);
+    let bills_due = hh.is_some_and(|h| !h.bills.is_empty());
     let mut rng = rand::rng();
     for (me, tf, motives, mut queue, mut timer, rels, job, sim, partner) in &mut sims {
         timer.0 -= delta.0;
@@ -1339,7 +1385,7 @@ fn autonomy(
                     continue;
                 }
                 // Guests don't cook or do the chores.
-                if matches!(d.special, Special::ServeMeal | Special::CleanUp) && (meal_out && d.special == Special::ServeMeal || !household.contains(me)) {
+                if matches!(d.special, Special::ServeMeal | Special::CleanUp | Special::PayBills) && (meal_out && d.special == Special::ServeMeal || !household.contains(me)) {
                     continue;
                 }
                 let mut score = 0.0;
@@ -1351,6 +1397,9 @@ fn autonomy(
                 // Only sleep when actually tired.
                 if d.until_full == Some(ENERGY) && motives.0[ENERGY] > -10.0 {
                     score *= 0.1;
+                }
+                if d.special == Special::PayBills {
+                    score = if bills_due { 25.0 } else { 0.0 };
                 }
                 if d.special == Special::CleanUp {
                     score = if sim.traits.contains(&crate::life::Trait::Slob) {
@@ -1455,22 +1504,50 @@ fn motive_warnings(
 }
 
 fn pay_bills(
+    mut commands: Commands,
     clock: Res<GameClock>,
     household: Option<ResMut<Household>>,
     mut notes: ResMut<Notifications>,
-    objects: Query<&GameObject>,
+    objects: Query<(Entity, &GameObject)>,
 ) {
     let Some(mut h) = household else { return };
     let day = clock.day();
+    let mailbox = objects.iter().any(|(_, o)| o.kind == ObjectKind::Mailbox);
     // Bills arrive Monday and Thursday mornings.
     if day != h.last_bill_day && (day % 7 == 0 || day % 7 == 3) && clock.hour_f() >= 9.0 {
         h.last_bill_day = day;
         if day == 0 {
             return;
         }
-        let value: i64 = objects.iter().map(|o| o.price as i64).sum();
+        let value: i64 = objects.iter().map(|(_, o)| o.price as i64).sum();
         let bill = 60 + value / 60;
-        h.funds -= bill;
-        notes.push(format!("The bills arrived: §{bill} was paid automatically."));
+        if mailbox {
+            h.bills.push(Bill { amount: bill, day });
+            notes.push(format!("The bills have arrived in the mailbox: §{bill}. Pay them within three days."));
+        } else {
+            h.funds -= bill;
+            notes.push(format!("The bills arrived: §{bill} was paid automatically."));
+        }
+    }
+    // Three days late: the repo man takes things worth what's owed.
+    let overdue: i64 = h.bills.iter().filter(|b| day >= b.day + 3).map(|b| b.amount).sum();
+    if overdue > 0 && clock.hour_f() >= 10.0 {
+        h.bills.retain(|b| day < b.day + 3);
+        let mut items: Vec<(Entity, &GameObject)> = objects
+            .iter()
+            .filter(|(_, o)| o.price > 0 && !matches!(o.kind, ObjectKind::Mailbox | ObjectKind::Tombstone | ObjectKind::Meal | ObjectKind::DirtyDishes))
+            .collect();
+        items.sort_by_key(|(_, o)| -o.price);
+        let mut taken = 0i64;
+        let mut names = Vec::new();
+        for (e, o) in items {
+            if taken >= overdue {
+                break;
+            }
+            taken += o.price as i64;
+            names.push(o.name.clone());
+            commands.entity(e).despawn();
+        }
+        notes.push(format!("The repo man came for the unpaid bills (§{overdue}) and took: {}.", names.join(", ")));
     }
 }

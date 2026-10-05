@@ -475,6 +475,7 @@ pub fn move_in(
         funds: starting_funds,
         lot_index,
         last_bill_day: 0,
+        bills: Vec::new(),
     });
     let exit = to_world(0.0, -(lot.depth as f32) * 0.5 - 2.0);
     commands.insert_resource(LotExit(Vec2::new(exit.x, exit.z)));
