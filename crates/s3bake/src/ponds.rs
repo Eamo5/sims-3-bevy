@@ -42,8 +42,8 @@ pub fn ground_level(t: &LotTerrain, lot: &LotInfo, hm: &Heightmap) -> Option<(us
         .min_by(|a, b| (a.1 - lot.corner[1]).abs().total_cmp(&(b.1 - lot.corner[1]).abs()))
 }
 
-/// Carves each lot's dips (all of a pond lot's ground around the water) into `hm` and returns the
-/// lots' water. Ground under a house's floors is left alone.
+/// Lays each lot's own ground into `hm` (where the lot's edge meets the world) and returns the
+/// lots' water.
 pub fn carve_ponds(pkg: &Package, lots: &[LotInfo], hm: &mut Heightmap) -> Vec<PondBaked> {
     let mut out = Vec::new();
     for (i, lot) in lots.iter().enumerate() {
