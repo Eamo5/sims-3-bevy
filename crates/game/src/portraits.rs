@@ -245,9 +245,11 @@ fn take_portraits(
             portraits.queue.push_back(e);
             continue;
         };
-        let away = off_lot || at_work || out;
-        // (Not while lying down.)
-        let upright = anim.pose != Pose::Lie || sim.age == Age::Baby;
+        // A Sim's first picture is taken wherever they are (staged if away); retakes wait until
+        // they're in view, standing or walking about.
+        let first = portraits.retake.get(&e).is_none();
+        let away = (off_lot || at_work || out) && first;
+        let upright = if first { anim.pose != Pose::Lie } else { matches!(anim.pose, Pose::Stand | Pose::Walk | Pose::Talk) } || sim.age == Age::Baby;
         // (Faces and clothes finish loading a few seconds after a body is built.)
         let settled = portraits.built.get(&e).is_none_or(|t| now - t > 4.0) && now > 6.0;
         if !settled || !(vis.get() && upright || away) {

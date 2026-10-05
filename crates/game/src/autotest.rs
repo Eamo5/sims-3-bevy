@@ -508,6 +508,14 @@ fn auto_action(
         }
         return;
     }
+    // "Pizza": the selected Sim phones for a pizza.
+    if name == "Pizza" {
+        if let Ok(mut q) = sel.single_mut() {
+            q.push_player(crate::interact::Action::new("Order Pizza", crate::interact::ActionKind::OrderPizza, false));
+        }
+        *done = true;
+        return;
+    }
     // "Die": the selected Sim's time has come.
     if name == "Die" {
         let me = sel_e.single().unwrap();

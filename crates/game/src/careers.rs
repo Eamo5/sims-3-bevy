@@ -353,9 +353,12 @@ fn work_schedule(
         (Entity, &Sim, &mut Job, &mut ActionQueue, Option<&AtWork>, &mut Transform, &mut Motives, &Mood, &Skills),
         Without<crate::rabbitholes::AtRabbitHole>,
     >,
+    mut session_start: Local<Option<f64>>,
 ) {
     let h = clock.hour_f();
     let day = clock.day();
+    // A shift already under way when play began isn't held against anyone.
+    let started = *session_start.get_or_insert(clock.minutes);
     for (e, sim, mut job, mut queue, at_work, mut tf, mut motives, mood, skills) in &mut workers {
         let info = job.info();
         if let Some(w) = at_work {
@@ -405,6 +408,11 @@ fn work_schedule(
             continue;
         }
         let workday = job.works_on(clock.weekday());
+        let shift_began = day as f64 * 1440.0 + (info.start as f64 - 0.75) * 60.0;
+        if workday && started > shift_began && clock.minutes - started < 24.0 * 60.0 && job.last_day != Some(day) && h > info.start + 2.0 {
+            job.last_day = Some(day);
+            continue;
+        }
         // A missed shift costs performance.
         if workday && h > info.start + 2.0 && h < info.start + 3.0 && job.last_day != Some(day) {
             job.last_day = Some(day);

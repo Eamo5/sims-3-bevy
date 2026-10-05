@@ -579,6 +579,8 @@ pub enum ActionKind {
     Visit { lot: usize, activity: usize },
     /// Eat a plate of food standing (no free seat at a table).
     EatHere,
+    /// Phone for a pizza to be delivered.
+    OrderPizza,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -851,7 +853,7 @@ fn run_actions(
                         ActionKind::GoHere(p, l) => Some((*p, *l)),
                         ActionKind::GoToWork | ActionKind::Visit { .. } => exit.as_ref().map(|e| (e.0, 1)),
                         ActionKind::JoinCareer { target, .. } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
-                        ActionKind::Invite { .. } => {
+                        ActionKind::Invite { .. } | ActionKind::OrderPizza => {
                             action.phase = Phase::Running(0.0);
                             anim.pose = Pose::Talk;
                             continue;
@@ -985,7 +987,7 @@ fn run_actions(
                                 }
                             }
                             ActionKind::GoHere(..) => finished = true,
-                            ActionKind::Invite { .. } | ActionKind::BuyReward(_) | ActionKind::EatHere => {}
+                            ActionKind::Invite { .. } | ActionKind::BuyReward(_) | ActionKind::EatHere | ActionKind::OrderPizza => {}
                             ActionKind::Visit { lot, activity } => {
                                 if let (Some(l), Some(name)) = (world.data.lots.get(*lot), world.data.lot_names.get(*lot)) {
                                     let acts = crate::rabbitholes::activities(l);
@@ -1195,6 +1197,19 @@ fn run_actions(
                                         }
                                         _ => {}
                                     }
+                                }
+                            }
+                        }
+                        ActionKind::OrderPizza => {
+                            if elapsed >= 5.0 {
+                                finished = true;
+                                match household.as_deref_mut() {
+                                    Some(h) if h.funds >= crate::meals::PIZZA_PRICE => {
+                                        h.funds -= crate::meals::PIZZA_PRICE;
+                                        commands.insert_resource(crate::meals::PizzaOrder { arrive_at: clock.minutes + 60.0 });
+                                        notes.push(format!("{} ordered a pizza (§{}). It'll be here within the hour.", sim.first, crate::meals::PIZZA_PRICE));
+                                    }
+                                    _ => notes.push("There isn't enough money for a pizza."),
                                 }
                             }
                         }

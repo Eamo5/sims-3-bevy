@@ -1298,10 +1298,10 @@ fn phone_button(
         .collect();
     if known.is_empty() {
         notes.push("There's nobody to call yet — meet some Sims first!");
-        return;
     }
     known.sort_by(|a, b| b.0.total_cmp(&a.0));
-    let options: Vec<(String, ActionKind)> = known.into_iter().take(10).map(|(_, l, k)| (l, k)).collect();
+    let mut options: Vec<(String, ActionKind)> = vec![(format!("Order Pizza (§{})", crate::meals::PIZZA_PRICE), ActionKind::OrderPizza)];
+    options.extend(known.into_iter().take(9).map(|(_, l, k)| (l, k)));
     let at = windows.single().ok().map_or(Vec2::new(600.0, 600.0), |w| Vec2::new(w.width() * 0.4, w.height() - 260.0));
     close_pie(&mut commands, &mut pie);
     pie.at = at;

@@ -63,7 +63,8 @@ installation is unreachable.
   with a serving for everyone at home; Sims grab a plate and sit down at a dining table or
   counter stool to eat (the game's sit-down and bar-stool eating animations, plate on the
   table, fork in hand), or eat standing when every seat is taken, and leave dirty dishes that
-  neat Sims clear away. Guests eat but don't cook, children don't use the stove.
+  neat Sims clear away. Guests eat but don't cook, children don't use the stove. Or phone for
+  a pizza (the game's pizza box arrives on the kitchen counter within the hour).
 - **Props in hand**: the game's own plates, forks, books and guitars, held as its animation
   clips place them (each Sim clip's companion prop clips and their parent events).
 - **Thought and speech balloons**: the game's own balloon art and balloon table. Sims think about
