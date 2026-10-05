@@ -638,7 +638,7 @@ fn world_click(
                             ActionKind::JoinCareer { target: t, track: k },
                         ));
                     }
-                } else {
+                } else if d.special != Special::EatMeal {
                     options.push((d.name.to_string(), ActionKind::Object { target: t, def: i }));
                 }
             }

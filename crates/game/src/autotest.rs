@@ -440,9 +440,15 @@ fn auto_action(
     mut rels_q: Query<&mut crate::sim::Relationships>,
     world: Res<crate::loading::CurrentWorld>,
     (mut commands, clock, members): (Commands, Res<crate::clock::GameClock>, Query<(Entity, &crate::sim::Sim), With<crate::sim::HouseholdMember>>),
+    (time, mut since): (Res<Time>, Local<Option<f32>>),
 ) {
     let Some(name) = &args.action else { return };
     if *done {
+        return;
+    }
+    // (Once everyone has settled in.)
+    let t0 = *since.get_or_insert(time.elapsed_secs());
+    if name == "Meal" && time.elapsed_secs() - t0 < 4.0 {
         return;
     }
     // "Care:<social>": the selected Sim looks after the household's baby (or toddler with
@@ -480,6 +486,15 @@ fn auto_action(
         return;
     }
     let Ok(mut q) = sel.single_mut() else { return };
+    // "Meal": dinner is on the table (served from the nearest stove) for the household.
+    if name == "Meal" {
+        let me = sel_e.single().unwrap();
+        if let Some((stove, _)) = objects.iter().find(|(_, o)| o.kind == crate::interact::ObjectKind::Stove) {
+            commands.entity(me).insert(crate::meals::MealRequest::Serve(stove));
+        }
+        *done = true;
+        return;
+    }
     // "Social:<name>": the selected Sim does this social three times with another grown-up of
     // the household (or a visitor), as friends.
     if let Some(social) = name.strip_prefix("Social:") {

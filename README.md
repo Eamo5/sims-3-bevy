@@ -42,6 +42,11 @@ installation is unreachable.
   firms Sims up); needs, moods,
   skills, careers, relationships, autonomy, social interactions; children, teens, adults and
   elders who grow up and grow old (birthdays, new traits, passing away).
+- **Meals**: cooking serves a group meal on the game's serving platter (on the nearest counter),
+  with a serving for everyone at home; Sims grab a plate and sit down at a dining table or
+  counter stool to eat (the game's sit-down and bar-stool eating animations, plate on the
+  table, fork in hand), or eat standing when every seat is taken, and leave dirty dishes that
+  neat Sims clear away. Guests eat but don't cook, children don't use the stove.
 - **Props in hand**: the game's own plates, forks, books and guitars, held as its animation
   clips place them (each Sim clip's companion prop clips and their parent events).
 - **Thought and speech balloons**: the game's own balloon art and balloon table. Sims think about

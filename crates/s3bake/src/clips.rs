@@ -29,6 +29,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_stove_clean",
     "a2o_eat_stand_fork",
     "a2o_eat_stand_hand",
+    "a2o_eat_diningIn_fork",
+    "a2o_eat_barStoolIn_fork",
     // Bathroom.
     "a2o_toilet_useStanding",
     "a2o_toilet_flush_x",

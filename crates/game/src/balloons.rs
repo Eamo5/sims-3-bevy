@@ -377,7 +377,8 @@ fn balloon_triggers(
             if !busy && idle && now >= st.next_need {
                 st.next_need = now + rng.random_range(7.0..12.0);
                 let (low, value) = motives.0.iter().enumerate().fold((0, f32::MAX), |b, (i, v)| if *v < b.1 { (i, *v) } else { b });
-                if value < 30.0 && !(sim.age == Age::Baby && low == crate::sim::SOCIAL) {
+                // (Needs run from -100 to 100; the game thinks of them once they're in the red.)
+                if value < -25.0 && !(sim.age == Age::Baby && low == crate::sim::SOCIAL) {
                     if let Some((icon, axis)) = picker.key(NEED_KEYS[low], 0) {
                         show.push((me, BalloonKind::Thought, icon, axis, false));
                         continue;

@@ -43,6 +43,8 @@ pub enum ObjectKind {
     Sink,
     Sofa,
     Chair,
+    /// Bar stools (seats at counters).
+    Stool,
     Tv,
     Computer,
     Stereo,
@@ -69,6 +71,10 @@ pub enum ObjectKind {
     Light,
     Plant,
     Decoration,
+    /// A cooked group meal on its serving platter.
+    Meal,
+    /// Plates left after eating.
+    DirtyDishes,
     Other,
 }
 
@@ -123,7 +129,9 @@ impl ObjectKind {
             Self::Sink
         } else if has("sofa") || has("loveseat") {
             Self::Sofa
-        } else if has("seating") || has("chair") || has("stool") || has("bench") {
+        } else if has("stool") {
+            Self::Stool
+        } else if has("seating") || has("chair") || has("bench") {
             Self::Chair
         } else if has("electronics.tv") {
             Self::Tv
@@ -161,7 +169,7 @@ impl ObjectKind {
             Self::Fridge | Self::Stove | Self::Microwave => "Appliances",
             Self::BedDouble | Self::BedSingle => "Beds",
             Self::Toilet | Self::Shower | Self::Bathtub | Self::Sink => "Plumbing",
-            Self::Sofa | Self::Chair => "Seating",
+            Self::Sofa | Self::Chair | Self::Stool => "Seating",
             Self::Tv | Self::Computer | Self::Stereo => "Electronics",
             Self::Bookshelf | Self::Mirror | Self::Easel | Self::Guitar | Self::Treadmill | Self::Chess | Self::Telescope | Self::Foosball => {
                 "Hobbies"
@@ -172,6 +180,7 @@ impl ObjectKind {
             Self::Table => "Surfaces",
             Self::Light => "Lighting",
             Self::Plant | Self::Decoration => "Decor",
+            Self::Meal | Self::DirtyDishes => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
             Self::Other => "Misc",
         }
@@ -225,6 +234,14 @@ pub enum Special {
     Cook,
     /// Put on a different outfit.
     ChangeClothes,
+    /// Cook a group meal and serve it on a platter.
+    ServeMeal,
+    /// Take a serving from a platter (then sit down to eat it).
+    GrabPlate,
+    /// Eat a plate of food at a table (a dining chair's hidden interaction).
+    EatMeal,
+    /// Clear away dirty dishes.
+    CleanUp,
 }
 
 pub struct InteractionDef {
@@ -263,11 +280,18 @@ static FRIDGE: [InteractionDef; 2] = [
     InteractionDef { special: Special::Cook, ..def("Have Quick Meal", 30.0, [130.0, -6.0, 0.0, 0.0, -4.0, 4.0], Pose::Use) },
     def("Grab a Snack", 12.0, [140.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Use),
 ];
+// (Cooking and grabbing a plate don't feed by themselves: the hunger figures are what they lead
+// to, for autonomy to weigh. The meal is eaten afterwards.)
 static STOVE: [InteractionDef; 1] = [InteractionDef {
     skill: Some("Cooking"),
-    special: Special::Cook,
+    special: Special::ServeMeal,
     ..def("Cook Dinner", 60.0, [100.0, 0.0, 0.0, 0.0, -5.0, 10.0], Pose::Use)
 }];
+static MEAL: [InteractionDef; 1] = [InteractionDef { special: Special::GrabPlate, ..def("Grab a Plate", 2.0, [9000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) }];
+static DISHES: [InteractionDef; 1] = [InteractionDef { special: Special::CleanUp, ..def("Clean Up", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 0.0], Pose::Use) }];
+/// How a plate of food fills hunger, per hour, and how long it takes to eat.
+const MEAL_PER_HOUR: f32 = 320.0;
+const MEAL_MINUTES: f32 = 25.0;
 static MICROWAVE: [InteractionDef; 1] = [def("Microwave Dinner", 20.0, [150.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use)];
 static BED: [InteractionDef; 3] = [
     InteractionDef {
@@ -293,8 +317,17 @@ static SOFA: [InteractionDef; 2] = [
     InteractionDef { on_object: true, ..def("Sit", 40.0, [0.0, 0.0, 5.0, 0.0, 0.0, 10.0], Pose::Sit) },
     InteractionDef { on_object: true, decay: SLEEP_DECAY, ..def("Nap", 60.0, [0.0, 0.0, 18.0, 0.0, 0.0, 0.0], Pose::Lie) },
 ];
-static CHAIR: [InteractionDef; 1] =
-    [InteractionDef { on_object: true, autonomous: false, ..def("Sit", 30.0, [0.0, 0.0, 4.0, 0.0, 0.0, 4.0], Pose::Sit) }];
+static CHAIR: [InteractionDef; 2] = [
+    InteractionDef { on_object: true, autonomous: false, ..def("Sit", 30.0, [0.0, 0.0, 4.0, 0.0, 0.0, 4.0], Pose::Sit) },
+    InteractionDef {
+        on_object: true,
+        autonomous: false,
+        special: Special::EatMeal,
+        ..def("Eat", MEAL_MINUTES, [MEAL_PER_HOUR, -4.0, 0.0, 20.0, -4.0, 6.0], Pose::Sit)
+    },
+];
+/// The dining chair's "Eat" (not offered in its menu).
+pub const CHAIR_EAT: usize = 1;
 static TV: [InteractionDef; 2] = [
     def("Watch TV", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 55.0], Pose::Stand),
     def("Watch Cooking Channel", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 35.0], Pose::Stand),
@@ -355,6 +388,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
     use crate::anim::ActionClip as A;
     Some(match name {
         "Nap" if kind == ObjectKind::Sofa => A::new(Some("a2o_sofa_sit_trans_nap_x"), &["a2o_sofa_nap_loop1_x"]),
+        "Eat" if kind == ObjectKind::Chair => A::new(Some("a2o_eat_diningIn_fork_start_x"), &["a2o_eat_diningIn_fork_neat_x"]),
+        "Eat" if kind == ObjectKind::Stool => A::new(Some("a2o_eat_barStoolIn_fork_start_x"), &["a2o_eat_barStoolIn_fork_neat_x"]),
         "Have Quick Meal" | "Microwave Dinner" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_eat_stand_fork_neat", "a2o_eat_stand_hand_neat"]),
         "Grab a Snack" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_eat_stand_hand_neat"]),
         "Cook Dinner" => A::new(
@@ -446,7 +481,8 @@ impl ObjectKind {
         match age {
             Age::Baby => false,
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair),
-            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub),
+            // (Children can't cook.)
+            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove),
             _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::DollHouse | K::JungleGym),
         }
     }
@@ -463,7 +499,9 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Bathtub => &BATHTUB,
         ObjectKind::Sink => &SINK,
         ObjectKind::Sofa => &SOFA,
-        ObjectKind::Chair => &CHAIR,
+        ObjectKind::Chair | ObjectKind::Stool => &CHAIR,
+        ObjectKind::Meal => &MEAL,
+        ObjectKind::DirtyDishes => &DISHES,
         ObjectKind::Tv => &TV,
         ObjectKind::Computer => &COMPUTER,
         ObjectKind::Stereo => &STEREO,
@@ -512,6 +550,8 @@ pub enum ActionKind {
     BuyReward(usize),
     /// Drive to a community lot's rabbit hole for an activity.
     Visit { lot: usize, activity: usize },
+    /// Eat a plate of food standing (no free seat at a table).
+    EatHere,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -780,9 +820,35 @@ fn run_actions(
                             continue;
                         }
                         ActionKind::BuyReward(_) => None,
+                        ActionKind::EatHere => {
+                            action.phase = Phase::Running(0.0);
+                            anim.pose = Pose::Use;
+                            commands.entity(me).insert(crate::anim::ActionClip::new(Some("a2o_eat_stand_fork_start_x"), &["a2o_eat_stand_fork_neat_x"]));
+                            continue;
+                        }
                     };
                     let from = Vec2::new(tf.translation.x, tf.translation.z);
-                    match dest.and_then(|(d, l)| plan_route(&grid, upper.as_deref(), from, floor.0, d, l)) {
+                    // A chair pushed in at a table is reached from behind or beside it.
+                    let alternatives: Vec<Vec2> = match &action.kind {
+                        ActionKind::Object { target, .. } => objects
+                            .get(*target)
+                            .ok()
+                            .filter(|(o, ..)| matches!(o.kind, ObjectKind::Chair | ObjectKind::Stool | ObjectKind::Sofa))
+                            .map(|(o, otf, ..)| {
+                                [Vec3::new(o.center.x, 0.0, o.center.y - o.half.y - 0.45), Vec3::new(o.center.x + o.half.x + 0.45, 0.0, o.center.y), Vec3::new(o.center.x - o.half.x - 0.45, 0.0, o.center.y)]
+                                    .map(|p| {
+                                        let w = otf.transform_point(p);
+                                        Vec2::new(w.x, w.z)
+                                    })
+                                    .to_vec()
+                            })
+                            .unwrap_or_default(),
+                        _ => Vec::new(),
+                    };
+                    let routed = dest.and_then(|(d, l)| {
+                        plan_route(&grid, upper.as_deref(), from, floor.0, d, l).or_else(|| alternatives.iter().find_map(|a| plan_route(&grid, upper.as_deref(), from, floor.0, *a, l)))
+                    });
+                    match routed {
                         Some(wp) => {
                             commands.entity(me).insert(PathFollow::new(wp));
                             action.phase = Phase::Routing;
@@ -813,6 +879,9 @@ fn run_actions(
                                 if let Ok((obj, otf, _, _)) = objects.get(*target) {
                                     let d = &interactions_for(obj.kind)[*def];
                                     anim.pose = d.pose;
+                                    if d.special == Special::EatMeal {
+                                        commands.entity(me).insert(crate::meals::MealRequest::PlateAt(*target));
+                                    }
                                     *decay = DecayScale(d.decay);
                                     if let Some(c) = interaction_clip(d.name, obj.kind) {
                                         commands.entity(me).insert(c);
@@ -873,7 +942,7 @@ fn run_actions(
                                 }
                             }
                             ActionKind::GoHere(..) => finished = true,
-                            ActionKind::Invite { .. } | ActionKind::BuyReward(_) => {}
+                            ActionKind::Invite { .. } | ActionKind::BuyReward(_) | ActionKind::EatHere => {}
                             ActionKind::Visit { lot, activity } => {
                                 if let (Some(l), Some(name)) = (world.data.lots.get(*lot), world.data.lot_names.get(*lot)) {
                                     let acts = crate::rabbitholes::activities(l);
@@ -912,6 +981,9 @@ fn run_actions(
                                 let affinity = crate::life::activity_affinity(&sim.traits, d.name);
                                 for i in 0..6 {
                                     let mut gain = d.per_hour[i];
+                                    if i == HUNGER && matches!(d.special, Special::ServeMeal | Special::GrabPlate) {
+                                        gain = 0.0;
+                                    }
                                     if i == FUN && gain > 0.0 {
                                         gain *= affinity;
                                     } else if i == FUN && affinity < 0.5 {
@@ -972,6 +1044,18 @@ fn run_actions(
                                                 }
                                                 e.insert(crate::aging::NeedsNewBody);
                                             });
+                                        }
+                                        Special::ServeMeal => {
+                                            commands.entity(me).insert(crate::meals::MealRequest::Serve(*target));
+                                        }
+                                        Special::GrabPlate => {
+                                            commands.entity(me).insert(crate::meals::MealRequest::Grabbed(*target));
+                                        }
+                                        Special::EatMeal => {
+                                            commands.entity(me).insert(crate::meals::MealRequest::Ate);
+                                        }
+                                        Special::CleanUp => {
+                                            commands.entity(*target).try_despawn();
                                         }
                                         Special::Cook | Special::None => {}
                                     }
@@ -1080,6 +1164,13 @@ fn run_actions(
                                 ));
                                 commands.entity(me).insert(j);
                                 life.write(LifeEvent::new(me, LifeEventKind::NewJob));
+                            }
+                        }
+                        ActionKind::EatHere => {
+                            motives.add(HUNGER, MEAL_PER_HOUR * dt / 60.0);
+                            if elapsed >= MEAL_MINUTES * 0.8 {
+                                finished = true;
+                                commands.entity(me).insert(crate::meals::MealRequest::AteStanding);
                             }
                         }
                         _ => finished = true,
@@ -1192,6 +1283,8 @@ fn autonomy(
         return;
     }
     let others: Vec<(Entity, Vec3, Age, [f32; 6])> = sims.iter().map(|s| (s.0, s.1.translation, s.7.age, s.2.0)).collect();
+    // A meal already out is eaten before anyone cooks another.
+    let meal_out = objects.iter().any(|(_, o, _, _)| o.kind == ObjectKind::Meal);
     let mut rng = rand::rng();
     for (me, tf, motives, mut queue, mut timer, rels, job, sim, partner) in &mut sims {
         timer.0 -= delta.0;
@@ -1233,6 +1326,10 @@ fn autonomy(
                 if !d.autonomous {
                     continue;
                 }
+                // Guests don't cook or do the chores.
+                if matches!(d.special, Special::ServeMeal | Special::CleanUp) && (meal_out && d.special == Special::ServeMeal || !household.contains(me)) {
+                    continue;
+                }
                 let mut score = 0.0;
                 for i in 0..6 {
                     let gain = d.per_hour[i] * d.minutes / 60.0;
@@ -1242,6 +1339,15 @@ fn autonomy(
                 // Only sleep when actually tired.
                 if d.until_full == Some(ENERGY) && motives.0[ENERGY] > -10.0 {
                     score *= 0.1;
+                }
+                if d.special == Special::CleanUp {
+                    score = if sim.traits.contains(&crate::life::Trait::Slob) {
+                        0.0
+                    } else if sim.traits.contains(&crate::life::Trait::Neat) {
+                        30.0
+                    } else {
+                        8.0
+                    };
                 }
                 score *= crate::life::activity_affinity(&sim.traits, d.name).sqrt();
                 score /= 1.0 + dist / 25.0;

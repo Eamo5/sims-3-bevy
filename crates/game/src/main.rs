@@ -17,6 +17,7 @@ mod interact;
 mod life;
 mod little;
 mod loading;
+mod meals;
 mod menu;
 mod music;
 mod nav;
@@ -101,7 +102,7 @@ fn main() {
             town::TownPlugin,
         ))
         .add_plugins((life::LifePlugin, careers::CareersPlugin, save::SavePlugin, wishes::WishesPlugin, rabbitholes::RabbitHolePlugin, cas::CasPlugin, sound::SoundPlugin, premade::PremadePlugin, aging::AgingPlugin, little::LittlePlugin))
-        .add_plugins((options::OptionsPlugin, icons::IconsPlugin, balloons::BalloonsPlugin, portraits::PortraitsPlugin, relations::RelationsPlugin, props::PropsPlugin))
+        .add_plugins((options::OptionsPlugin, icons::IconsPlugin, balloons::BalloonsPlugin, portraits::PortraitsPlugin, relations::RelationsPlugin, props::PropsPlugin, meals::MealsPlugin))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)
         .run();
