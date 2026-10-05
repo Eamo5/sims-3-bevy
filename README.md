@@ -178,6 +178,9 @@ installation is unreachable.
   alone, a babysitter arrives by car, feeds them, changes them and plays with them, and goes
   home (paid §10 an hour) once someone's back. Visitors don't sleep in the family's beds or
   use its shower.
+- **Social worker**: a baby or toddler left starving for six hours, or a child for twelve
+  (warned halfway), brings the social worker by car; she takes the child away and the family
+  is heartbroken.
 - **Fire**: a poor (or clumsy) cook can set the stove alight; the flames flicker and light
   the room, spread to what's beside them and ruin it, and Sims nearby panic with the game's
   fire animations. Anyone caught in the flames burns: they may stop, drop and roll, or die
