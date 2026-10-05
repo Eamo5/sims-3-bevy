@@ -79,6 +79,10 @@ fn blank(images: &mut Assets<Image>) -> Handle<Image> {
     images.add(img)
 }
 
+/// A Sim brought under the world for their picture (nothing else moves them meanwhile).
+#[derive(Component)]
+pub struct Staged;
+
 /// An image showing a Sim's portrait, kept to the latest picture.
 #[derive(Component)]
 pub struct PortraitOf(pub Entity);
@@ -250,7 +254,7 @@ fn take_portraits(
                 if aim.is_none() && img.is_some() {
                     // Back in the queue, and anyone staged goes back.
                     if let Some((tf, vis)) = shot.staged {
-                        commands.entity(shot.sim).insert((tf, vis));
+                        commands.entity(shot.sim).insert((tf, vis)).remove::<Staged>();
                     }
                     portraits.queue.push_back(shot.sim);
                     return;
@@ -317,7 +321,7 @@ fn take_portraits(
             Some(at) if shot.frame >= at + 4 => {
                 camera.is_active = false;
                 if let Some((tf, vis)) = shot.staged {
-                    commands.entity(shot.sim).insert((tf, vis));
+                    commands.entity(shot.sim).insert((tf, vis)).remove::<Staged>();
                 }
                 let taken = portraits.retake.get(&shot.sim).map_or(0, |r| r.1) + 1;
                 portraits.retake.insert(shot.sim, (now + if taken < 2 { 12.0 } else { 240.0 }, taken));
@@ -366,7 +370,7 @@ fn take_portraits(
         }
         let staged = (first || !vis.get()).then(|| (*tf, *visibility));
         if let Some((tf, _)) = staged {
-            commands.entity(e).insert((Transform { translation: tf.translation - Vec3::Y * UNDERGROUND, ..tf }, Visibility::Visible));
+            commands.entity(e).insert((Transform { translation: tf.translation - Vec3::Y * UNDERGROUND, ..tf }, Visibility::Visible, Staged));
         }
         portraits.busy = Some(Shot { sim: e, frame: 0, staged, aimed: None });
         break;

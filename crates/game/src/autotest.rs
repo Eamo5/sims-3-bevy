@@ -783,6 +783,21 @@ fn auto_action(
         }
         return;
     }
+    // "Fire": the stove catches fire.
+    if name == "Fire" {
+        if let Some((e, _)) = objects.iter().find(|(_, o)| o.kind == crate::interact::ObjectKind::Stove) {
+            commands.entity(e).queue_silenced(|w: EntityWorldMut| {
+                let lift = w.get::<crate::interact::GameObject>().map_or(0.0, |o| o.height * 0.85);
+                let at = w.get::<Transform>().map(|t| t.translation + Vec3::Y * lift);
+                let level = w.get::<crate::nav::Floor>().map_or(1, |f| f.0);
+                if let Some(at) = at {
+                    w.into_world_mut().write_message(crate::fire::StartFire { at, level });
+                }
+            });
+        }
+        *done = true;
+        return;
+    }
     // "Visit:<lot name part>": the selected Sim drives to that community lot.
     if let Some(want) = name.strip_prefix("Visit:") {
         let want = want.to_ascii_lowercase();

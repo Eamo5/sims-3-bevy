@@ -107,6 +107,12 @@ installation is unreachable.
   and floors, its walls come down as the camera moves in, Sims on it keep to it in their own
   choices, townies turn up during the day to use the place too (and to meet), and "Go Home"
   drives them back while the household carries on at home.
+- **Fire**: a poor (or clumsy) cook can set the stove alight; the flames flicker and light
+  the room, spread to what's beside them and ruin it, and Sims nearby panic with the game's
+  fire animations. Anyone caught in the flames burns: they may stop, drop and roll, or die
+  (the Grim Reaper comes). A smoke alarm calls the fire department at once (otherwise someone
+  phones a little later), and a firefighter in uniform arrives by fire truck to put out each
+  fire with the extinguisher.
 - **Traffic**: the game's cars (sedans, hatchbacks, pickups, vans, sports cars) drive the
   town's roads around the camera, keeping right along the world's own road graph and turning
   at its intersections; the school bus, the carpool and taxis pull up at the curb to take Sims

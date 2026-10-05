@@ -124,9 +124,9 @@ struct Car {
 #[derive(Component)]
 struct Ride;
 
-/// Rides to send: where (the curb nearest), and which vehicle.
+/// Rides to send: where (the curb nearest), and which vehicle (catalogue instance name).
 #[derive(Resource, Default)]
-struct PendingRides(Vec<(Vec2, &'static str)>);
+pub struct PendingRides(pub Vec<(Vec2, &'static str)>);
 
 impl Roads {
     /// The point of a road nearest `p`: which road and how far along.

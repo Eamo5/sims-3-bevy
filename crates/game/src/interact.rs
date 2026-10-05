@@ -987,6 +987,7 @@ fn run_actions(
     mut life: MessageWriter<LifeEvent>,
     people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
     mut conceive: MessageWriter<crate::little::Conceive>,
+    mut fire: MessageWriter<crate::fire::StartFire>,
 ) {
     let Some(grid) = grid else { return };
     let dt = delta.0;
@@ -1263,7 +1264,7 @@ fn run_actions(
                     action.phase = Phase::Running(elapsed);
                     match &action.kind {
                         ActionKind::Object { target, def } => {
-                            if let Ok((obj, otf, mut used, _)) = objects.get_mut(*target) {
+                            if let Ok((obj, otf, mut used, of)) = objects.get_mut(*target) {
                                 let d = &interactions_for(obj.kind)[*def];
                                 let affinity = crate::life::activity_affinity(&sim.traits, d.name);
                                 for i in 0..6 {
@@ -1338,7 +1339,14 @@ fn run_actions(
                                             });
                                         }
                                         Special::ServeMeal => {
-                                            commands.entity(me).insert(crate::meals::MealRequest::Serve(*target));
+                                            // A poor cook may set the stove on fire instead.
+                                            let clumsy = sim.traits.contains(&crate::life::Trait::Clumsy);
+                                            if crate::fire::cooking_fire(skills.level("Cooking"), clumsy) {
+                                                fire.write(crate::fire::StartFire { at: otf.translation + Vec3::Y * obj.height * 0.85, level: of.map_or(1, |f| f.0) });
+                                                notes.push(format!("{} set the stove on fire!", sim.first));
+                                            } else {
+                                                commands.entity(me).insert(crate::meals::MealRequest::Serve(*target));
+                                            }
                                         }
                                         Special::GrabPlate => {
                                             commands.entity(me).insert(crate::meals::MealRequest::Grabbed(*target));

@@ -21,17 +21,23 @@ impl Plugin for DeathPlugin {
     }
 }
 
-/// An elder whose time has come (set by aging; the scene plays out here).
+/// A Sim whose time has come (an elder, by aging; or in a fire). The scene plays out here.
 #[derive(Component)]
 pub struct Dying {
     t: f32,
     stage: u8,
     reaper: Option<Entity>,
+    /// How they died, for the notice ("of old age", "in a fire").
+    pub cause: &'static str,
 }
 
 impl Dying {
     pub fn new() -> Self {
-        Self { t: 0.0, stage: 0, reaper: None }
+        Self { t: 0.0, stage: 0, reaper: None, cause: "peacefully of old age" }
+    }
+
+    pub fn in_fire() -> Self {
+        Self { cause: "in a fire", ..Self::new() }
     }
 }
 
@@ -131,7 +137,7 @@ fn reap(
                         }
                     });
                 }
-                notes.push(format!("{} has passed away peacefully of old age. Rest in peace.", sim.full_name()));
+                notes.push(format!("{} has passed away {}. Rest in peace.", sim.full_name(), d.cause));
                 let others: Vec<Entity> = survivors.iter().filter(|e| *e != me).collect();
                 if selected && let Some(&s) = others.first() {
                     commands.entity(s).insert(Selected);
