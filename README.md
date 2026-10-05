@@ -239,6 +239,9 @@ installation is unreachable.
   (bookstore, grocery, spa, mausoleum) for teens. Careers branch where the game's do
   (Criminal into Thief or Evil, Music into Electric Rock or Symphonic, Law Enforcement into
   Special Agent or Forensic Analyst): the promotion there asks which path to take.
+- **Pie menus** in the game's style: pale bubbles with dark writing, blue under the pointer,
+  in a ring round the acting Sim's portrait (what was clicked named beneath it), with
+  submenus (›) for long lists.
 - **Interface**: the game's own icons and words — moodlets (name, description, time left),
   traits (Create-a-Sim and the Sim's panel) and wishes — read from the game's tuning tables
   (`GameplayData.package`) and string tables, with tooltips on hover. Sims' portraits are

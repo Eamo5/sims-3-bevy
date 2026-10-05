@@ -35,6 +35,9 @@ impl Plugin for HudPlugin {
                     update_notifications,
                     keyboard_shortcuts,
                     hud_button_visuals,
+                    pie_bubble_visuals,
+                    pie_portrait,
+                    test_pie,
                     update_fps,
                     update_trait_icons,
                     update_skill_icons,
@@ -520,13 +523,27 @@ pub fn activity_label(a: &crate::rabbitholes::Activity) -> String {
     format!("{}{cost}", a.name)
 }
 
+/// The game's pie menu look: pale bubbles with dark writing, blue under the pointer.
+const BUBBLE: Color = Color::srgba(0.97, 0.98, 1.0, 0.97);
+const BUBBLE_HOVER: Color = Color::srgb(0.70, 0.85, 1.0);
+const BUBBLE_PRESS: Color = Color::srgb(0.55, 0.80, 0.45);
+const BUBBLE_TEXT: Color = Color::srgb(0.08, 0.16, 0.33);
+
+/// A pie menu option's bubble.
+#[derive(Component)]
+struct PieBubble;
+
+/// The middle of a pie menu, where the Sim's portrait goes.
+#[derive(Component)]
+struct PieCenter(Entity);
+
 pub fn open_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, actor: Entity, options: Vec<(String, ActionKind)>) {
     close_pie(commands, pie);
     if options.is_empty() {
         return;
     }
     let n = options.len();
-    let radius = 70.0 + n as f32 * 9.0;
+    let radius = 90.0 + n as f32 * 10.0;
     let root = commands
         .spawn((
             DespawnOnExit(AppState::InGame),
@@ -534,33 +551,65 @@ pub fn open_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &st
             GlobalZIndex(10),
         ))
         .with_children(|p| {
+            // The one acting, in the middle, with what's been clicked above.
             p.spawn((
-                text(title, 16.0, Color::WHITE),
-                Node { position_type: PositionType::Absolute, left: Val::Px(-60.0), top: Val::Px(-10.0), width: Val::Px(120.0), ..default() },
-                TextShadow::default(),
+                PieCenter(actor),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(-28.0),
+                    top: Val::Px(-28.0),
+                    width: Val::Px(56.0),
+                    height: Val::Px(56.0),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(28.0)),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+                BorderColor::all(Color::WHITE),
+                BackgroundColor(Color::srgb(0.55, 0.7, 0.9)),
+                BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.45), Val::Px(0.0), Val::Px(2.0), Val::Px(0.0), Val::Px(6.0)),
+                Pickable::IGNORE,
             ));
+            // (A label under it, on a dark pill so it reads over anything.)
+            p.spawn((
+                Node { position_type: PositionType::Absolute, left: Val::Px(-110.0), top: Val::Px(31.0), width: Val::Px(220.0), justify_content: JustifyContent::Center, ..default() },
+                Pickable::IGNORE,
+            ))
+            .with_children(|l| {
+                l.spawn((
+                    Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(1.0)), border_radius: BorderRadius::all(Val::Px(9.0)), ..default() },
+                    BackgroundColor(Color::srgba(0.05, 0.12, 0.25, 0.75)),
+                    Pickable::IGNORE,
+                ))
+                .with_children(|b| {
+                    b.spawn((text(title, 13.0, Color::WHITE), Pickable::IGNORE));
+                });
+            });
             for (i, (label, _)) in options.iter().enumerate() {
                 let a = -std::f32::consts::FRAC_PI_2 + i as f32 / n as f32 * std::f32::consts::TAU;
                 let (x, y) = (a.cos() * radius, a.sin() * radius * 0.8);
                 p.spawn((
                     Button,
-                    HudButton,
+                    PieBubble,
                     PieOption(i),
                     Node {
                         border_radius: BorderRadius::all(Val::Px(17.0)),
+                        border: UiRect::all(Val::Px(1.5)),
                         position_type: PositionType::Absolute,
-                        left: Val::Px(x - 85.0),
-                        top: Val::Px(y - 17.0),
-                        width: Val::Px(170.0),
-                        height: Val::Px(34.0),
+                        left: Val::Px(x - 88.0),
+                        top: Val::Px(y - 16.0),
+                        width: Val::Px(176.0),
+                        height: Val::Px(32.0),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
                         ..default()
                     },
-                    BackgroundColor(BTN_NORMAL),
+                    BorderColor::all(Color::srgb(0.45, 0.6, 0.82)),
+                    BackgroundColor(BUBBLE),
+                    BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.35), Val::Px(0.0), Val::Px(2.0), Val::Px(0.0), Val::Px(5.0)),
                 ))
                 .with_children(|b| {
-                    b.spawn(text(label.clone(), 15.0, Color::WHITE));
+                    b.spawn((text(label.clone(), 14.0, BUBBLE_TEXT), Pickable::IGNORE));
                 });
             }
         })
@@ -983,6 +1032,39 @@ fn floor_controls(
         if t.0 != s {
             t.0 = s.clone();
         }
+    }
+}
+
+fn pie_bubble_visuals(mut q: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<PieBubble>)>) {
+    for (i, mut bg) in &mut q {
+        bg.0 = match i {
+            Interaction::Pressed => BUBBLE_PRESS,
+            Interaction::Hovered => BUBBLE_HOVER,
+            Interaction::None => BUBBLE,
+        };
+    }
+}
+
+/// PIE=1: a pie menu opens in the middle of the screen (tests).
+fn test_pie(mut commands: Commands, mut pie: ResMut<PieMenu>, time: Res<Time>, sel: Query<Entity, With<Selected>>, windows: Query<&Window, With<PrimaryWindow>>, mut done: Local<bool>) {
+    if *done || std::env::var("PIE").is_err() || time.elapsed_secs() < 8.0 {
+        return;
+    }
+    let (Ok(actor), Ok(w)) = (sel.single(), windows.single()) else { return };
+    *done = true;
+    let options = ["Have Quick Meal", "Grab a Snack", "Bake Birthday Cake", "Cook Dinner ›", "Cook Dessert ›", "Clean"].iter().map(|s| (s.to_string(), ActionKind::EatHere)).collect();
+    open_pie(&mut commands, &mut pie, Vec2::new(w.width() * 0.5, w.height() * 0.45), "Fridge", actor, options);
+}
+
+/// The acting Sim's portrait in the middle of a pie menu.
+fn pie_portrait(
+    mut commands: Commands,
+    centers: Query<(Entity, &PieCenter), Without<ImageNode>>,
+    (mut portraits, mut images): (ResMut<crate::portraits::Portraits>, ResMut<Assets<Image>>),
+) {
+    for (e, c) in &centers {
+        let h = portraits.portrait(&mut images, c.0);
+        commands.entity(e).insert((ImageNode::new(h), crate::portraits::PortraitOf(c.0)));
     }
 }
 
