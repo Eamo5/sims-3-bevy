@@ -623,6 +623,9 @@ fn world_click(
             Option<Res<crate::icons::GameUi>>,
             Query<Option<&crate::opportunities::SimOpportunities>, With<Selected>>,
             Res<crate::clock::GameClock>,
+            Query<&crate::gardening::GrowingPlant>,
+            Option<Res<crate::interact::Household>>,
+            Option<Res<crate::gardening::Garden>>,
         ),
     ),
 ) {
@@ -692,7 +695,11 @@ fn world_click(
                 return;
             }
             let usable = if obj.kind.usable_by(actor_sim.age) { interactions_for(obj.kind) } else { &[] };
+            let plant = opp_q.3.get(t).ok();
             for (i, d) in usable.iter().enumerate() {
+                if plant.is_some_and(|p| !crate::gardening::offers(p, d.special)) {
+                    continue;
+                }
                 if d.special == Special::FindJob {
                     // Job listings: every career's entry-level position (part-time jobs for teens).
                     let teen = actor_sim.age == crate::sim::Age::Teen;
@@ -724,6 +731,7 @@ fn world_click(
                 .as_ref()
                 .map(|ui| crate::opportunities::lot_options(&world.data, lot, opp_q.1.single().ok().flatten(), &ui.data, opp_q.2.hour_f()))
                 .unwrap_or_default();
+            let opp_tasks: Vec<(String, ActionKind)> = opp_tasks.into_iter().chain(crate::gardening::lot_options(&world.data, lot)).collect();
             if !acts.is_empty() || !opp_tasks.is_empty() {
                 title = crate::rabbitholes::lot_title(l, world.data.lot_names.get(lot).map_or("", |s| s.as_str()));
                 options.clear();
@@ -731,6 +739,14 @@ fn world_click(
                     options.push((activity_label(a), ActionKind::Visit { lot, activity: i }));
                 }
                 options.extend(opp_tasks);
+            }
+            // Planting a seed outdoors on the home lot.
+            let home = opp_q.4.as_ref().map(|h| h.lot_index) == Some(lot);
+            let outdoors = building.as_deref().is_none_or(|b| !b.is_indoors(p));
+            if home && outdoors && level <= 1 {
+                if let (Some(g), Some(ui)) = (opp_q.5.as_ref(), opp_q.0.as_ref()) {
+                    options.extend(crate::gardening::plant_options(g, &ui.data, Vec2::new(p.x, p.z), level));
+                }
             }
         }
         open_pie(&mut commands, &mut pie, cursor, &title, actor, options);

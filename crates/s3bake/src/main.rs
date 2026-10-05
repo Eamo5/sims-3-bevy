@@ -192,6 +192,10 @@ fn main() {
         // The baked moodlets, traits and skills.
         let g = s3bake::load_gamedata(&s3bake::default_root()).expect("no gameplay data");
         println!("{} buffs, {} traits, {} skills", g.buffs.len(), g.traits.len(), g.skills.len());
+        println!("{} plants", g.plants.len());
+        for p in &g.plants {
+            println!("plant {:?} [{}] {} {} bears {} §{} x{}-{} life {} water -{}/h weeds {} skill {}+{}", p.name, p.rarity, p.model, p.height, p.produce, p.price, p.harvest_min, p.harvest_max, p.lifetime, p.water_decay, p.weeds, p.skill_plant, p.skill_harvest);
+        }
         println!("{} opportunities", g.opportunities.len());
         let mut tokens = std::collections::BTreeSet::new();
         for o in &g.opportunities {

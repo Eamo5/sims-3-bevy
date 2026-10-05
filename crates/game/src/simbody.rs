@@ -375,6 +375,11 @@ fn greyscale_hair(dds: &[u8]) -> Option<Image> {
     Some(out)
 }
 
+/// Sims are drawn in the world and in the portrait studio.
+fn sim_layers() -> bevy::camera::visibility::RenderLayers {
+    bevy::camera::visibility::RenderLayers::from_layers(&[0, crate::portraits::STUDIO_LAYER])
+}
+
 /// A top-level piece of a Sim's body (root joint or mesh), replaced when the body is rebuilt.
 #[derive(Component)]
 pub struct SimModelPart;
@@ -473,13 +478,13 @@ pub fn spawn_sim_model(commands: &mut Commands, parent: Entity, model: SimModelC
                     // order), then the same mesh is blended over it for the soft edges, which
                     // short hairstyles are mostly made of.
                     let soft = ctx.mats.add(material(AlphaMode::Blend));
-                    let e = commands.spawn((mesh.clone(), MeshMaterial3d(soft), skinned.clone(), Transform::default(), SimModelPart)).id();
+                    let e = commands.spawn((mesh.clone(), MeshMaterial3d(soft), skinned.clone(), Transform::default(), SimModelPart, sim_layers())).id();
                     commands.entity(parent).add_child(e);
                 }
                 commands.spawn((mesh, MeshMaterial3d(m), skinned, Transform::default())).id()
             }
         };
-        commands.entity(e).insert(SimModelPart);
+        commands.entity(e).insert((SimModelPart, sim_layers()));
         commands.entity(parent).add_child(e);
     }
     commands.entity(parent).insert(Skeleton { rig, joints, bind });

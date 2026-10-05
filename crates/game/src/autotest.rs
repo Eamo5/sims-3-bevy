@@ -439,7 +439,7 @@ fn auto_action(
     world: Res<crate::loading::CurrentWorld>,
     (mut commands, clock, members): (Commands, Res<crate::clock::GameClock>, Query<(Entity, &crate::sim::Sim), With<crate::sim::HouseholdMember>>),
     (time, mut since): (Res<Time>, Local<Option<f32>>),
-    (opps_q, ui): (Query<&crate::opportunities::SimOpportunities>, Option<Res<crate::icons::GameUi>>),
+    (opps_q, ui, sel_tf): (Query<&crate::opportunities::SimOpportunities>, Option<Res<crate::icons::GameUi>>, Query<&Transform, With<crate::sim::Selected>>),
 ) {
     let Some(name) = &args.action else { return };
     if *done {
@@ -506,6 +506,20 @@ fn auto_action(
                 return;
             }
         }
+        return;
+    }
+    // "Garden": the selected Sim plants a tomato seed a few steps away (outdoors).
+    if name == "Garden" {
+        let Some(ui) = ui.as_ref() else { return };
+        let Some(tomato) = ui.data.plants.iter().position(|p| p.produce == "Tomato") else { return };
+        let Ok(me) = sel_e.single() else { return };
+        let Ok(tf) = sel_tf.get(me) else { return };
+        commands.insert_resource(crate::gardening::Garden { seeds: [(tomato, 2)].into_iter().collect() });
+        let at = tf.translation + tf.rotation * Vec3::new(0.0, 0.0, 3.0);
+        if let Ok(mut q) = sel.single_mut() {
+            q.push_player(crate::interact::Action::new("Plant", crate::interact::ActionKind::PlantSeed { at: Vec2::new(at.x, at.z), level: 1, plant: tomato }, false));
+        }
+        *done = true;
         return;
     }
     // "Break": a shower breaks and the selected Sim repairs it.

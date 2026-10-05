@@ -126,6 +126,11 @@ pub struct SaveGame {
     /// Walls and floors repainted in build mode.
     #[serde(default)]
     pub paint: Vec<crate::building::PaintOp>,
+    /// The garden: seeds in hand and what's planted.
+    #[serde(default)]
+    pub seeds: Vec<(String, u32)>,
+    #[serde(default)]
+    pub plants: Vec<crate::gardening::SavedPlant>,
 }
 
 impl SaveGame {
@@ -245,7 +250,7 @@ fn status_from(s: &str) -> RelStatus {
     }
 }
 
-pub const SKILLS: [&str; 9] = ["Athletic", "Charisma", "Cooking", "Fishing", "Guitar", "Handiness", "Logic", "Painting", "Writing"];
+pub const SKILLS: [&str; 10] = ["Athletic", "Charisma", "Cooking", "Fishing", "Gardening", "Guitar", "Handiness", "Logic", "Painting", "Writing"];
 
 fn saved_object(o: &GameObject, tf: &Transform) -> SavedObject {
     SavedObject { objd: o.objd, position: tf.translation.to_array(), rotation: tf.rotation.to_array() }
@@ -257,7 +262,12 @@ fn save_game(
     clock: Res<GameClock>,
     world: Res<CurrentWorld>,
     household: Option<Res<Household>>,
-    (removed, paint): (Res<RemovedLotObjects>, Option<Res<crate::building::LotPaint>>),
+    (removed, paint, garden, plants): (
+        Res<RemovedLotObjects>,
+        Option<Res<crate::building::LotPaint>>,
+        Option<Res<crate::gardening::Garden>>,
+        Query<(&crate::gardening::GrowingPlant, &Transform)>,
+    ),
     sims: Query<
         (
             Entity,
@@ -343,6 +353,11 @@ fn save_game(
         bought: bought.iter().map(|(o, tf)| saved_object(o, tf)).collect(),
         removed: removed.0.clone(),
         paint: paint.map(|p| p.0.clone()).unwrap_or_default(),
+        seeds: match (garden.as_deref(), ui.as_deref()) {
+            (Some(g), Some(u)) => crate::gardening::saved_seeds(g, &u.data),
+            _ => Vec::new(),
+        },
+        plants: ui.as_deref().map(|u| crate::gardening::saved_plants(&plants, &u.data)).unwrap_or_default(),
     };
     let dir = saves_dir();
     let _ = std::fs::create_dir_all(&dir);
@@ -490,6 +505,7 @@ fn apply_loaded_game(
         crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &game.paint, &mut faces, &floor_meshes);
     }
     commands.insert_resource(crate::building::LotPaint(game.paint.clone()));
+    commands.insert_resource(crate::gardening::PendingPlants(game.plants.clone(), game.seeds.clone()));
     for b in &game.bought {
         let rot = Quat::from_array(b.rotation);
         if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, b.objd, Vec3::from(b.position), rot) {

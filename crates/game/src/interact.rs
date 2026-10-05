@@ -77,6 +77,8 @@ pub enum ObjectKind {
     DirtyDishes,
     /// A tombstone (the game's urnstone).
     Tombstone,
+    /// A plant growing in the garden.
+    GardenPlant,
     /// Where the bills arrive.
     Mailbox,
     /// The morning paper.
@@ -192,7 +194,7 @@ impl ObjectKind {
             Self::Table => "Surfaces",
             Self::Light => "Lighting",
             Self::Plant | Self::Decoration => "Decor",
-            Self::Meal | Self::DirtyDishes | Self::Tombstone | Self::Mailbox | Self::Newspaper => "Misc",
+            Self::Meal | Self::DirtyDishes | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
             Self::Other => "Misc",
         }
@@ -311,6 +313,10 @@ pub enum Special {
     PayBills,
     /// Read the paper (then recycle it).
     ReadPaper,
+    /// Garden plants.
+    Water,
+    Weed,
+    Harvest,
 }
 
 pub struct InteractionDef {
@@ -361,6 +367,11 @@ static MAILBOX: [InteractionDef; 1] = [InteractionDef { special: Special::PayBil
 static NEWSPAPER: [InteractionDef; 2] = [
     InteractionDef { special: Special::ReadPaper, ..def("Read", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 45.0], Pose::Use) },
     InteractionDef { special: Special::FindJob, ..def("Look for a Job", 10.0, N, Pose::Use) },
+];
+static GARDEN: [InteractionDef; 3] = [
+    InteractionDef { special: Special::Water, skill: Some("Gardening"), ..def("Water", 12.0, [0.0, 0.0, 0.0, 0.0, -3.0, 4.0], Pose::Use) },
+    InteractionDef { special: Special::Weed, skill: Some("Gardening"), ..def("Weed", 15.0, [0.0, 0.0, 0.0, 0.0, -8.0, 2.0], Pose::Use) },
+    InteractionDef { special: Special::Harvest, skill: Some("Gardening"), ..def("Harvest", 10.0, [0.0, 0.0, 0.0, 0.0, -3.0, 8.0], Pose::Use) },
 ];
 static TOMBSTONE: [InteractionDef; 1] = [def("Mourn", 20.0, [0.0, 0.0, -2.0, 15.0, 0.0, -10.0], Pose::Stand)];
 static DISHES: [InteractionDef; 1] = [InteractionDef { special: Special::CleanUp, ..def("Clean Up", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 0.0], Pose::Use) }];
@@ -465,6 +476,9 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Nap" if kind == ObjectKind::Sofa => A::new(Some("a2o_sofa_sit_trans_nap_x"), &["a2o_sofa_nap_loop1_x"]),
         "Eat" if kind == ObjectKind::Chair => A::new(Some("a2o_eat_diningIn_fork_start_x"), &["a2o_eat_diningIn_fork_neat_x"]),
         "Pay Bills" => A::new(None, &["a2o_mailbox_getMail_x"]),
+        "Water" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_wateringCan_start_x"), &["a2o_gardening_wateringCan_waterPlants_x"]),
+        "Weed" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_pullWeeds_x"]),
+        "Harvest" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_bendover_start_x"), &["a2o_gardening_bendover_harvestmed_x"]),
         "Read" if kind == ObjectKind::Newspaper => A::new(Some("a2o_newspaper_read_standing_start_x"), &["a2o_newspaper_read_standing_loop"]),
         "Eat" if kind == ObjectKind::Stool => A::new(Some("a2o_eat_barStoolIn_fork_start_x"), &["a2o_eat_barStoolIn_fork_neat_x"]),
         "Have Quick Meal" | "Microwave Dinner" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_eat_stand_fork_neat", "a2o_eat_stand_hand_neat"]),
@@ -580,6 +594,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Meal => &MEAL,
         ObjectKind::DirtyDishes => &DISHES,
         ObjectKind::Tombstone => &TOMBSTONE,
+        ObjectKind::GardenPlant => &GARDEN,
         ObjectKind::Mailbox => &MAILBOX,
         ObjectKind::Newspaper => &NEWSPAPER,
         ObjectKind::Tv => &TV,
@@ -638,6 +653,8 @@ pub enum ActionKind {
     Repair { target: Entity },
     /// Phone for the repairman.
     CallRepairman,
+    /// Plant a seed here.
+    PlantSeed { at: Vec2, level: u8, plant: usize },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -908,6 +925,8 @@ fn run_actions(
                             (theirs + (mine - theirs).normalize_or(Vec2::X) * 0.9, *l)
                         }),
                         ActionKind::GoHere(p, l) => Some((*p, *l)),
+                        // (Kneeling beside the spot.)
+                        ActionKind::PlantSeed { at, level, .. } => Some((*at + Vec2::new(0.0, 0.7), *level)),
                         ActionKind::GoToWork | ActionKind::Visit { .. } => exit.as_ref().map(|e| (e.0, 1)),
                         ActionKind::JoinCareer { target, .. } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
                         ActionKind::Repair { target } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
@@ -1045,6 +1064,12 @@ fn run_actions(
                                 }
                             }
                             ActionKind::GoHere(..) => finished = true,
+                            ActionKind::PlantSeed { at, .. } => {
+                                let to = *at - Vec2::new(tf.translation.x, tf.translation.z);
+                                tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
+                                anim.pose = Pose::Use;
+                                commands.entity(me).insert(crate::anim::ActionClip::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_plantSeeds_x"]));
+                            }
                             ActionKind::Invite { .. } | ActionKind::BuyReward(_) | ActionKind::EatHere | ActionKind::OrderPizza | ActionKind::CallRepairman => {}
                             ActionKind::Repair { target } => {
                                 if let Ok((obj, otf, _, _)) = objects.get(*target) {
@@ -1056,7 +1081,9 @@ fn run_actions(
                             ActionKind::Visit { lot, activity } => {
                                 if let (Some(l), Some(name)) = (world.data.lots.get(*lot), world.data.lot_names.get(*lot)) {
                                     let acts = crate::rabbitholes::activities(l);
-                                    let task = crate::opportunities::opportunity_task(opps, *activity).map(|t| t.0);
+                                    let task = crate::opportunities::opportunity_task(opps, *activity)
+                                        .map(|t| t.0)
+                                        .or_else(|| (*activity == crate::gardening::SEEDS_TASK).then_some(&crate::gardening::BUY_SEEDS));
                                     if let Some(a) = task.or_else(|| acts.get(*activity)) {
                                         let place = crate::rabbitholes::lot_title(l, name);
                                         crate::rabbitholes::head_out(&mut commands, &clock, me, sim, *lot, a, place, household.as_deref_mut(), &mut notes);
@@ -1173,6 +1200,15 @@ fn run_actions(
                                         Special::CleanUp | Special::ReadPaper => {
                                             commands.entity(*target).try_despawn();
                                         }
+                                        Special::Water => {
+                                            commands.entity(me).insert(crate::gardening::GardenRequest::Water(*target));
+                                        }
+                                        Special::Weed => {
+                                            commands.entity(me).insert(crate::gardening::GardenRequest::Weed(*target));
+                                        }
+                                        Special::Harvest => {
+                                            commands.entity(me).insert(crate::gardening::GardenRequest::Harvest(*target));
+                                        }
                                         Special::PayBills => {
                                             if let Some(h) = household.as_mut() {
                                                 let due: i64 = h.bills.iter().map(|b| b.amount).sum();
@@ -1268,6 +1304,13 @@ fn run_actions(
                                         _ => {}
                                     }
                                 }
+                            }
+                        }
+                        ActionKind::PlantSeed { at, plant, .. } => {
+                            if elapsed >= 20.0 {
+                                finished = true;
+                                let y = ground(floor.0, at.x, at.y);
+                                commands.entity(me).insert(crate::gardening::GardenRequest::Plant { at: Vec3::new(at.x, y, at.y), plant: *plant });
                             }
                         }
                         ActionKind::Repair { target } => {
@@ -1449,7 +1492,7 @@ fn autonomy(
     >,
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy)>,
     hh: Option<Res<Household>>,
-    broken: Query<(), With<Broken>>,
+    (broken, plant_q): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>),
 ) {
     if delta.0 <= 0.0 {
         return;
@@ -1526,6 +1569,16 @@ fn autonomy(
                 // Only sleep when actually tired.
                 if d.until_full == Some(ENERGY) && motives.0[ENERGY] > -10.0 {
                     score *= 0.1;
+                }
+                if matches!(d.special, Special::Water | Special::Weed | Special::Harvest) {
+                    let keen = household.contains(me) && (sim.traits.contains(&crate::life::Trait::GreenThumb) || plant_q.get(oe).is_ok());
+                    let ok = plant_q.get(oe).is_ok_and(|p| crate::gardening::offers(p, d.special));
+                    score = if !ok || !keen {
+                        0.0
+                    } else {
+                        let base = if d.special == Special::Harvest { 30.0 } else { 14.0 };
+                        base * if sim.traits.contains(&crate::life::Trait::GreenThumb) { 2.0 } else { 1.0 }
+                    };
                 }
                 if d.special == Special::PayBills {
                     score = if bills_due { 25.0 } else { 0.0 };

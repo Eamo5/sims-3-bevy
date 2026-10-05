@@ -27,7 +27,7 @@ impl Plugin for PortraitsPlugin {
 }
 
 /// The studio's own light and camera layer.
-const STUDIO_LAYER: usize = 7;
+pub const STUDIO_LAYER: usize = 7;
 const SIZE: u32 = 128;
 /// The portraits' backdrop: the game's soft blue, lighter towards the top.
 const BACKDROP: Color = Color::srgb(0.56, 0.72, 0.88);
@@ -191,6 +191,28 @@ fn take_portraits(
                     Some((sim.age.is_little(), head.translation(), tf.rotation()))
                 });
                 let img = portraits.images.get(&e).cloned();
+                // (Not mid-crouch: if the head isn't up where it belongs, try again later.)
+                let standing = sims.get(e).ok().map(|(sim, _, tf, _, _)| (sim.age, tf.translation().y));
+                let aim = aim.filter(|(_, head, _)| match standing {
+                    Some((age, root_y)) => {
+                        let tall = match age {
+                            Age::Baby => 0.0,
+                            Age::Toddler => 0.5,
+                            Age::Child => 0.95,
+                            _ => 1.35,
+                        };
+                        head.y - root_y >= tall || shot.staged.is_some() && head.y - root_y >= tall * 0.6
+                    }
+                    None => false,
+                });
+                if aim.is_none() && img.is_some() {
+                    // Back in the queue, and anyone staged goes back.
+                    if let Some((tf, vis)) = shot.staged {
+                        commands.entity(shot.sim).insert((tf, vis));
+                    }
+                    portraits.queue.push_back(shot.sim);
+                    return;
+                }
                 match (aim, img) {
                     (Some((little, head, rot)), Some(img)) => {
                         let face = head + Vec3::Y * if little { 0.02 } else { 0.05 };
@@ -214,8 +236,31 @@ fn take_portraits(
                         ));
                         camera.is_active = true;
                         shot.aimed = Some(shot.frame);
+
                     }
                     _ => shot.aimed = Some(0),
+                }
+            }
+            // Until it renders, the camera follows the face (Sims move between frames).
+            Some(at) if shot.frame < at + 2 => {
+                let aim = sims.get(shot.sim).ok().and_then(|(sim, _, tf, skel, _)| {
+                    let head = skel.rig.bones.iter().position(|b| b.name == "b__Head__").and_then(|i| joints.get(skel.joints[i]).ok())?;
+                    Some((sim.age.is_little(), head.translation(), tf.rotation()))
+                });
+                if let Some((little, head, rot)) = aim {
+                    let face = head + Vec3::Y * if little { 0.02 } else { 0.05 };
+                    let ahead = (rot * Vec3::Z).with_y(0.0).normalize_or(Vec3::Z);
+                    let dist = if little { 0.5 } else { 0.72 };
+                    let eye = face + ahead * dist + Vec3::Y * 0.03;
+                    *cam_tf = Transform::from_translation(eye).looking_at(face, Vec3::Y);
+                    let right = cam_tf.right().as_vec3();
+                    commands.entity(light_e).insert(Transform::from_translation(eye + right * 0.5 + Vec3::Y * 0.45));
+                    if let Ok(mut b) = backdrop.single_mut() {
+                        let behind = dist + 0.3;
+                        let size = 2.0 * behind * (12f32.to_radians()).tan() * 1.3;
+                        let at = eye + (face - eye).normalize() * behind;
+                        *b = Transform::from_translation(at).looking_to(at - eye, Vec3::Y).with_scale(Vec3::splat(size));
+                    }
                 }
             }
             // The picture renders the frame after the camera is pointed; then the camera

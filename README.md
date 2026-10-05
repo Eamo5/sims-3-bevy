@@ -43,6 +43,13 @@ installation is unreachable.
   firms Sims up); needs, moods,
   skills, careers, relationships, autonomy, social interactions; children, teens, adults and
   elders who grow up and grow old (birthdays, new traits, passing away).
+- **Gardening** from the game's plant and produce tables: households start with a few seeds
+  and buy more at the grocery store (rarer ones as their skill grows); seeds are planted
+  anywhere outdoors on the home lot in the game's garden soil and grow (the game's bush, vine
+  or tree) while kept watered and weeded, then bear tomatoes, apples, onions, garlic... to
+  harvest and sell. Planting, watering (with the watering can), weeding and harvesting use
+  the game's gardening animations and teach Gardening; green-thumbed Sims tend their plants
+  on their own. The garden is kept in saves.
 - **Breakdowns**: showers, baths, sinks, TVs, computers and stereos break now and then with
   use (toilets clog), less often the better they are; Sims repair them with the game's own
   repair animations, learning Handiness (handy and neat Sims do it on their own), or the

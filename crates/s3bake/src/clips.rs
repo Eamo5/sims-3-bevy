@@ -30,6 +30,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_eat_stand_fork",
     "a2o_eat_stand_hand",
     "a2o_eat_diningIn_fork",
+    // Gardening.
+    "a2o_gardening_",
     // Repairs.
     "a2o_toilet_unclog",
     "a2o_shower_repairShower",
@@ -170,7 +172,7 @@ pub const CLIP_PREFIXES: &[&str] = &[
 ];
 
 /// Clip actors that are props held by the Sim (baked with the Sim's clips).
-pub const PROP_ACTORS: &[&str] = &["fork", "plateDinner", "book", "toothbrush", "guitar", "spatula", "scythe", "newspaperReading", "bills"];
+pub const PROP_ACTORS: &[&str] = &["fork", "plateDinner", "book", "toothbrush", "guitar", "spatula", "scythe", "newspaperReading", "bills", "wateringCan"];
 
 /// Whether a clip should be baked.
 pub fn wanted(name: &str) -> bool {

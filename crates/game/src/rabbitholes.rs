@@ -216,6 +216,9 @@ fn outings(
                     g.0 = (g.0 + if mood_ok { 8.0 } else { -12.0 }).clamp(0.0, 100.0);
                 }
                 notes.push(format!("{} is home from school.", sim.first));
+            } else if std::ptr::eq(at.activity, &crate::gardening::BUY_SEEDS) {
+                commands.entity(e).insert(crate::gardening::GardenRequest::BoughtSeeds);
+                notes.push(format!("{} is back from the grocery store.", sim.first));
             } else if at.activity.name == "Go Fishing" {
                 // The catch, sold: more and better fish with skill.
                 let level = skills.level("Fishing") as f32 + if sim.traits.contains(&crate::life::Trait::Angler) { 2.0 } else { 0.0 };

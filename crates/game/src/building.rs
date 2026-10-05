@@ -68,6 +68,12 @@ impl ActiveBuilding {
         Vec3::new(p.x, y, p.z)
     }
 
+    /// Whether a point on the ground floor is inside a room (not a porch or the yard).
+    pub fn is_indoors(&self, p: Vec3) -> bool {
+        let l = self.local(p);
+        self.floor_kinds.get(&(1, l.x.floor() as i32, l.y.floor() as i32)).is_some_and(|k| *k != s3bake::ROOM_PORCH && *k != s3bake::ROOM_OUTSIDE)
+    }
+
     fn dir(&self, x: f32, z: f32) -> Vec3 {
         self.rot * Vec3::new(x, 0.0, z)
     }

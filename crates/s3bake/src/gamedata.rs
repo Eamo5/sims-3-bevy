@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 14;
+pub const GAMEDATA_VERSION: u32 = 15;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -134,6 +134,31 @@ pub struct OpportunityInfo {
     pub repeat: bool,
 }
 
+/// A garden plant from the game's `plants` table, with what it bears (`ingredients`).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct PlantInfo {
+    pub name: String,
+    /// Common, Uncommon or Rare.
+    pub rarity: String,
+    /// The plant object (`GardenPlantBush`, `PlantLargeTree`, `PlantSmallVine`) and how high its
+    /// produce grows (Low, Medium, High: the harvesting animation).
+    pub model: String,
+    pub height: String,
+    /// What it bears and what each is worth.
+    pub produce: String,
+    pub price: i64,
+    pub harvest_min: u32,
+    pub harvest_max: u32,
+    /// Harvests in its life.
+    pub lifetime: u32,
+    /// Water lost per hour (percent), and how weedy it gets.
+    pub water_decay: f32,
+    pub weeds: f32,
+    /// Gardening skill points for planting and harvesting.
+    pub skill_plant: f32,
+    pub skill_harvest: f32,
+}
+
 /// A wallpaper or floor covering from the build catalogue.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PatternInfo {
@@ -182,6 +207,7 @@ pub struct GameDataBaked {
     pub patterns: Vec<PatternInfo>,
     pub balloons: BalloonTable,
     pub opportunities: Vec<OpportunityInfo>,
+    pub plants: Vec<PlantInfo>,
 }
 
 impl GameDataBaked {
@@ -446,6 +472,40 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         out.patterns = found;
         out.patterns.sort_by(|a, b| a.floor.cmp(&b.floor).then(a.price.cmp(&b.price)).then(a.name.cmp(&b.name)));
         out.patterns.dedup_by(|a, b| a.floor == b.floor && a.name == b.name);
+    }
+
+    // Garden plants (the base game's everyday ones) and their produce.
+    if let (Some(p), Some(ing)) = (xml("plants"), xml("ingredients")) {
+        let heights: HashMap<String, String> = records(&p, "MedatorInstanceList").into_iter().map(|f| (get(&f, "MedatorName"), get(&f, "PlantHeight"))).collect();
+        let produce: HashMap<String, (String, i64)> = records(&ing, "Data")
+            .into_iter()
+            .filter(|f| f.get("CodeVersion").is_none_or(|v| v == "BaseGame"))
+            .filter_map(|f| Some((f.get("Plant_Name").filter(|s| !s.is_empty())?.clone(), (get(&f, "Ingredient_Key"), num(&f, "Price") as i64))))
+            .collect();
+        for f in records(&p, "PlantList") {
+            let name = get(&f, "PlantName");
+            let rarity = get(&f, "Rarity");
+            if name.is_empty() || f.get("CodeVersion").is_some_and(|v| v != "BaseGame") || !matches!(rarity.as_str(), "Common" | "Uncommon" | "Rare") {
+                continue;
+            }
+            let Some((produce, price)) = produce.get(&name).cloned() else { continue };
+            let model = get(&f, "MedatorName");
+            out.plants.push(PlantInfo {
+                height: heights.get(&model).cloned().unwrap_or_else(|| "Medium".into()),
+                name,
+                rarity,
+                model,
+                produce,
+                price,
+                harvest_min: num(&f, "NumHarvestablesMin") as u32,
+                harvest_max: num(&f, "NumHarvestablesMax") as u32,
+                lifetime: num(&f, "NumLifetimeHarvestables") as u32,
+                water_decay: num(&f, "WaterDecay"),
+                weeds: num(&f, "WeedProblem"),
+                skill_plant: num(&f, "SkillPointsPlant"),
+                skill_harvest: num(&f, "SkillPointsHarvest"),
+            });
+        }
     }
 
     // Opportunities (the base game's), the ones done at a rabbit hole.

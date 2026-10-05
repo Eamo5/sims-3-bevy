@@ -419,6 +419,8 @@ pub fn move_in(
     commands.remove_resource::<MoveInRequest>();
     if fresh {
         commands.insert_resource(crate::building::LotPaint::default());
+        commands.insert_resource(crate::gardening::Garden::default());
+        commands.insert_resource(crate::gardening::StarterSeeds);
     }
     let lot = world.data.lots[lot_index].clone();
     let rot = Quat::from_rotation_y(lot.rotation);

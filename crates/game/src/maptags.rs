@@ -161,7 +161,8 @@ fn tag_clicks(
         }
         let Some(lot) = world.data.lots.get(tag.lot) else { continue };
         let acts = crate::rabbitholes::activities(lot);
-        let tasks = ui.as_ref().map(|u| crate::opportunities::lot_options(&world.data, tag.lot, opps.single().ok().flatten(), &u.data, clock.hour_f())).unwrap_or_default();
+        let mut tasks = ui.as_ref().map(|u| crate::opportunities::lot_options(&world.data, tag.lot, opps.single().ok().flatten(), &u.data, clock.hour_f())).unwrap_or_default();
+        tasks.extend(crate::gardening::lot_options(&world.data, tag.lot));
         if !lot.is_residential() && (!acts.is_empty() || !tasks.is_empty()) {
             let (Ok(actor), Some(cursor)) = (selected.single(), windows.single().ok().and_then(|w| w.cursor_position())) else { continue };
             let name = world.data.lot_names.get(tag.lot).map_or("", |s| s.as_str());
