@@ -19,16 +19,20 @@ impl Plugin for SwimPlugin {
     }
 }
 
-/// To bed in pyjamas, a workout in athletic wear, and dressed again after.
+/// To bed in pyjamas, a workout in athletic wear, and dressed again after; off to work in
+/// the career's uniform (still worn home, until it's time for something else).
 #[allow(clippy::type_complexity)]
 fn pyjamas(
     mut commands: Commands,
-    sims: Query<(Entity, &ActionQueue, Option<&crate::simbody::Wearing>), (With<Sim>, With<crate::sim::HouseholdMember>)>,
+    sims: Query<(Entity, &Sim, &ActionQueue, Option<&crate::simbody::Wearing>, Option<&crate::careers::Job>), With<crate::sim::HouseholdMember>>,
     beds: Query<&GameObject>,
+    cas: Option<Res<crate::simbody::CasData>>,
 ) {
     use crate::simbody::{OutfitKind, Wearing};
-    for (e, queue, wearing) in &sims {
+    for (e, sim, queue, wearing, job) in &sims {
+        let uniform = job.and_then(|j| j.uniform(sim)).is_some_and(|u| cas.as_ref().is_some_and(|c| c.outfits.contains_key(u)));
         let want = queue.0.front().and_then(|a| match (&a.kind, a.phase) {
+            (ActionKind::GoToWork, _) if uniform => Some(OutfitKind::Career),
             (ActionKind::Object { target, def }, Phase::Running(_)) => {
                 let o = beds.get(*target).ok()?;
                 let d = interactions_for(o.kind).get(*def)?;
@@ -43,8 +47,8 @@ fn pyjamas(
             _ => None,
         });
         let has = wearing.map(|w| w.0);
-        // (Swimwear is the swim's to change.)
-        if has == Some(OutfitKind::Swimwear) || want == has {
+        // (Swimwear is the swim's to change; the uniform stays on after work.)
+        if has == Some(OutfitKind::Swimwear) || want == has || (has == Some(OutfitKind::Career) && want.is_none() && uniform) {
             continue;
         }
         match want {

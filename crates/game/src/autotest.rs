@@ -161,7 +161,7 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -402,6 +402,27 @@ fn auto_move_house(
 }
 
 /// HUNGRY=<first name>: that Sim's hunger stays at the bottom.
+/// UNIFORM=<career>:<level>: the selected Sim takes that job (level from 1) and puts its
+/// uniform on.
+fn wear_uniform(mut commands: Commands, sel: Query<Entity, With<crate::sim::Selected>>, mut done: Local<bool>, time: Res<Time>) {
+    let Ok(v) = std::env::var("UNIFORM") else { return };
+    if *done || time.elapsed_secs() < 4.0 {
+        return;
+    }
+    let Ok(e) = sel.single() else { return };
+    let (name, level) = v.split_once(':').map_or((v.as_str(), 1), |(n, l)| (n, l.parse().unwrap_or(1)));
+    let Some(track) = crate::careers::careers().iter().position(|c| c.name.eq_ignore_ascii_case(name)) else {
+        warn!("no career {name}");
+        *done = true;
+        return;
+    };
+    *done = true;
+    let mut job = crate::careers::Job::new(track);
+    job.level = level.max(1) - 1;
+    info!("uniform test: {} level {}", name, job.level + 1);
+    commands.entity(e).insert((job, crate::simbody::Wearing(crate::simbody::OutfitKind::Career), crate::aging::NeedsNewBody));
+}
+
 fn keep_hungry(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives)>) {
     let Ok(who) = std::env::var("HUNGRY") else { return };
     for (s, mut m) in &mut sims {

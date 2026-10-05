@@ -446,6 +446,18 @@ pub fn clips_ready(root: &BakeRoot) -> bool {
         && std::fs::read_to_string(g.join("clips.version")).is_ok_and(|v| v.trim() == CLIPS_VERSION.to_string())
 }
 
+/// A CAS part's skinned meshes (most detailed LOD) with their body-shape morphs.
+pub fn cas_part_meshes(pkgs: &PackageSet, c: &CasPart, rig: &Rig, baby_rig: Option<&Rig>) -> CasPartMeshes {
+    // Babies are skinned to their own skeleton; every other age shares bone names.
+    let baby = c.age_gender & AGE_BABY != 0 && c.age_gender & 0x7E == 0;
+    let part_rig = if baby { baby_rig.unwrap_or(rig) } else { rig };
+    let parsed: Vec<Geom> =
+        c.lod0_geoms(pkgs).iter().filter_map(|g| Geom::parse(&pkgs.read(g).or_else(|| pkgs.read_ti(g.t, g.i))?).ok()).collect();
+    let mut geoms: Vec<SkinMesh> = parsed.iter().map(|g| skin_mesh(g, part_rig)).collect();
+    shape_morphs(pkgs, c, &parsed, &mut geoms);
+    CasPartMeshes { meshes: geoms }
+}
+
 pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progress: Progress) -> Result<GlobalManifest, String> {
     let gdir = root.global_dir();
     std::fs::create_dir_all(&gdir).map_err(|e| e.to_string())?;
@@ -497,21 +509,8 @@ pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progr
     let wanted: Vec<&(ResourceKey, CasPart)> =
         parsed.iter().filter(|(_, c)| cas_bake_wanted(&c.name, c.clothing_type, c.age_gender, c.category)).collect();
     let rig = adult_rig.clone().ok_or("adult rig (auRig) not found")?;
-    let meshes: HashMap<Key, CasPartMeshes> = par_map(&wanted, |(k, c)| {
-        // Babies are skinned to their own skeleton; every other age shares bone names.
-        let baby = c.age_gender & AGE_BABY != 0 && c.age_gender & 0x7E == 0;
-        let part_rig = if baby { baby_rig.as_ref().unwrap_or(&rig) } else { &rig };
-        let parsed: Vec<Geom> = c
-            .lod0_geoms(pkgs)
-            .iter()
-            .filter_map(|g| Geom::parse(&pkgs.read(g).or_else(|| pkgs.read_ti(g.t, g.i))?).ok())
-            .collect();
-        let mut geoms: Vec<SkinMesh> = parsed.iter().map(|g| skin_mesh(g, part_rig)).collect();
-        shape_morphs(pkgs, c, &parsed, &mut geoms);
-        (key_of(k), CasPartMeshes { meshes: geoms })
-    })
-    .into_iter()
-    .collect();
+    let meshes: HashMap<Key, CasPartMeshes> =
+        par_map(&wanted, |(k, c)| (key_of(k), cas_part_meshes(pkgs, c, &rig, baby_rig.as_ref()))).into_iter().collect();
     for (k, c) in &parsed {
         let key = key_of(k);
         // Eyebrows are texture-only: a layer drawn onto the face.

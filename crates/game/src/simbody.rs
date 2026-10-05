@@ -86,6 +86,8 @@ pub struct CasData {
     pub baby_rig: Option<Arc<Rig>>,
     pub tone_textures: Arc<Vec<(u32, u32, Key)>>,
     pub ramp: Arc<Vec<[f32; 3]>>,
+    /// The careers' uniforms by name.
+    pub outfits: Arc<HashMap<String, s3bake::OutfitInfo>>,
 }
 
 impl CasData {
@@ -98,6 +100,7 @@ impl CasData {
             baby_rig: b.cas.baby_rig.clone().map(Arc::new),
             tone_textures: Arc::new(b.cas.tone.textures.clone()),
             ramp: Arc::new(b.cas.tone.ramp.clone()),
+            outfits: Arc::new(b.outfits.iter().map(|o| (o.name.clone(), o.clone())).collect()),
         }
     }
 
@@ -143,6 +146,10 @@ pub struct Outfit {
     pub hair: Option<CasPartInfo>,
     pub brows: Option<CasPartInfo>,
     pub body: Vec<CasPartInfo>,
+    /// A hat's own layer, over the hair it's worn with.
+    pub hat: Option<Key>,
+    /// Layers over the face beyond its own and the brows' (a burglar's mask).
+    pub face_layers: Vec<Key>,
 }
 
 /// Which of a Sim's outfits they have on.
@@ -153,6 +160,8 @@ pub enum OutfitKind {
     Swimwear,
     Sleepwear,
     Athletic,
+    /// Their career's uniform.
+    Career,
 }
 
 /// Wearing something other than everyday clothes (for a swim, for bed).
@@ -166,12 +175,17 @@ pub fn pick_outfit(cas: &CasData, sim: &Sim, rng: &mut impl Rng) -> Outfit {
 /// What a Sim wears: everyday clothes, swimwear or sleepwear (everyday clothes when there's
 /// nothing of the kind for them).
 pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: OutfitKind) -> Outfit {
+    // (A uniform is worn over the everyday look: see `uniform`.)
+    if kind == OutfitKind::Career {
+        return pick_outfit_for(cas, sim, rng, OutfitKind::Everyday);
+    }
     let swim = kind != OutfitKind::Everyday;
     let cat = match kind {
         OutfitKind::Everyday => s3formats::sim::CAT_EVERYDAY,
         OutfitKind::Swimwear => s3formats::sim::CAT_SWIM,
         OutfitKind::Sleepwear => s3formats::sim::CAT_SLEEP,
         OutfitKind::Athletic => s3formats::sim::CAT_ATHLETIC,
+        OutfitKind::Career => s3formats::sim::CAT_EVERYDAY,
     };
     let age = age_bits(sim.age);
     let gender = if sim.female { GENDER_FEMALE } else { GENDER_MALE };
@@ -207,7 +221,7 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
     // A baby is a single body with its own head.
     if sim.age == Age::Baby {
         let body = of_type(CT_BODY).into_iter().next().cloned();
-        return Outfit { face: None, scalp: None, hair: None, brows: None, body: body.into_iter().collect() };
+        return Outfit { body: body.into_iter().collect(), ..default() };
     }
     let face = of_type(CT_FACE).into_iter().min_by_key(|e| e.name.len()).cloned();
     let scalp = of_type(CT_SCALP).into_iter().min_by_key(|e| e.name.len()).cloned();
@@ -243,6 +257,7 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
         OutfitKind::Swimwear => sim.female && rng.random_bool(0.5) && !fulls.is_empty(),
         OutfitKind::Sleepwear => !fulls.is_empty() && rng.random_bool(0.7),
         OutfitKind::Athletic => !fulls.is_empty() && rng.random_bool(0.3),
+        OutfitKind::Career => use_full,
     };
     if let Some(f) = cf {
         body.push(f);
@@ -256,7 +271,40 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
         body.extend(random_top);
     }
     body.extend(if swim { random_shoes } else { chosen(sim.outfit.shoes, CT_SHOES).or(random_shoes) });
-    Outfit { face, scalp, hair, brows, body }
+    Outfit { face, scalp, hair, brows, body, ..default() }
+}
+
+/// A Sim in their work uniform (the outfit so named): its clothes, and any hat or mask, with
+/// their own face and hair (under the hat).
+pub fn uniform(cas: &CasData, sim: &Sim, name: &str, rng: &mut impl Rng) -> Option<Outfit> {
+    let info = cas.outfits.get(name)?;
+    let mut o = pick_outfit_for(cas, sim, rng, OutfitKind::Everyday);
+    let worn = |p: &&s3bake::OutfitPartInfo| match p.part.clothing_type {
+        CT_TOP | CT_BOTTOM | CT_BODY | CT_SHOES => !p.layer_only,
+        CT_GLOVES | CT_STOCKINGS => p.layer_only,
+        _ => false,
+    };
+    let mut body: Vec<&s3bake::OutfitPartInfo> = info.parts.iter().filter(worn).collect();
+    // (Clothes made for another age aren't worn: their everyday clothes instead.)
+    if body.is_empty() || body.iter().any(|p| p.part.age_gender & age_bits(sim.age) == 0) {
+        return None;
+    }
+    // Layered from the skin out: stockings, then the clothes and shoes (gloves last, dropped
+    // when there are too many layers).
+    body.sort_by_key(|p| match p.part.clothing_type {
+        CT_STOCKINGS => 0,
+        CT_BOTTOM | CT_BODY => 1,
+        CT_TOP => 2,
+        CT_SHOES => 3,
+        _ => 4,
+    });
+    o.body = body.into_iter().map(|p| p.part.clone()).collect();
+    o.face_layers = info.parts.iter().filter(|p| p.layer_only && p.part.clothing_type == CT_MASK).filter_map(|p| p.part.layer).collect();
+    if let Some(h) = info.parts.iter().find(|p| p.part.clothing_type == CT_HAIR && !p.layer_only) {
+        o.hair = Some(h.part.clone());
+        o.hat = h.hat;
+    }
+    Some(o)
 }
 
 /// How a sim mesh is shaded.
@@ -266,6 +314,8 @@ pub enum SimMat {
     /// A plain texture (hair, eyes, lashes), alpha-tested when `mask`, optionally tinted
     /// (hair: the texture is greyscale, coloured by the Sim's hair colour).
     Plain { tex: Option<Key>, mask: bool, tint: Option<Color> },
+    /// Hair under a hat: the (greyscale) hair in the Sim's colour, the hat's layer over it.
+    Hat { tex: Key, tint: Color, hat: Key },
 }
 
 /// A sim body decoded on the loading thread.
@@ -331,7 +381,7 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
     }
     if let Some(face) = &outfit.face {
         let face_base = cas.skin_texture(age, gender, 4);
-        let face_layers: Vec<Key> = face.layer.into_iter().chain(outfit.brows.as_ref().and_then(|b| b.layer)).collect();
+        let face_layers: Vec<Key> = face.layer.into_iter().chain(outfit.brows.as_ref().and_then(|b| b.layer)).chain(outfit.face_layers.iter().copied()).take(4).collect();
         tex_keys.extend(face_base);
         tex_keys.extend(&face_layers);
         for m in baked.cas_meshes(&face.key).map(|m| m.meshes).unwrap_or_default() {
@@ -355,7 +405,14 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
             if i == 1 {
                 let grey = hair_grey_key(src);
                 hair_keys.push((src, grey));
-                parts.push((skin_mesh(m), SimMat::Plain { tex: Some(grey), mask: true, tint: Some(sim.hair) }));
+                let mat = match outfit.hat {
+                    Some(hat) => {
+                        tex_keys.push(hat);
+                        SimMat::Hat { tex: grey, tint: sim.hair, hat }
+                    }
+                    None => SimMat::Plain { tex: Some(grey), mask: true, tint: Some(sim.hair) },
+                };
+                parts.push((skin_mesh(m), mat));
             } else {
                 tex_keys.push(src);
                 parts.push((skin_mesh(m), SimMat::Plain { tex: Some(src), mask: true, tint: None }));
@@ -528,6 +585,36 @@ pub fn spawn_sim_model(commands: &mut Commands, parent: Entity, model: SimModelC
                         layer3: layer(3),
                     },
                 });
+                commands.spawn((mesh, MeshMaterial3d(m), skinned, Transform::default())).id()
+            }
+            SimMat::Hat { tex: t, tint, hat } => {
+                let l = tint.to_linear();
+                let material = |alpha_mode: AlphaMode| SimSkinMaterial {
+                    base: StandardMaterial {
+                        base_color_texture: tex(Some(t), ctx.textures),
+                        perceptual_roughness: 0.6,
+                        reflectance: 0.25,
+                        alpha_mode,
+                        double_sided: true,
+                        cull_mode: None,
+                        ..default()
+                    },
+                    extension: SimSkinExt {
+                        // (Ten more than its one layer: the hair keeps its alpha.)
+                        params: Vec4::new(l.red, l.green, l.blue, 11.0),
+                        layer0: tex(Some(hat), ctx.textures).unwrap_or(ctx.textures.blank.clone()),
+                        layer1: ctx.textures.blank.clone(),
+                        layer2: ctx.textures.blank.clone(),
+                        layer3: ctx.textures.blank.clone(),
+                    },
+                };
+                // (Solid core alpha-tested, soft edges blended over it, as for hair.)
+                let soft = ctx.skin_mats.add(material(AlphaMode::Blend));
+                let e = commands
+                    .spawn((mesh.clone(), MeshMaterial3d(soft), skinned.clone(), Transform::default(), SimModelPart, sim_layers(), bevy::camera::visibility::NoFrustumCulling))
+                    .id();
+                commands.entity(parent).add_child(e);
+                let m = ctx.skin_mats.add(material(AlphaMode::Mask(0.5)));
                 commands.spawn((mesh, MeshMaterial3d(m), skinned, Transform::default())).id()
             }
             SimMat::Plain { tex: t, mask, tint } => {

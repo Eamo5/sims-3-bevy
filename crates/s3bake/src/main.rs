@@ -128,7 +128,7 @@ fn main() {
                     if n.to_ascii_lowercase().contains(&want) {
                         let types: Vec<String> = pkgs
                             .keys()
-                            .filter(|x| x.i == inst || x.i == inst ^ (1 << 63))
+                            .filter(|x| x.i == inst || x.i == inst ^ (1 << 63) || (inst >> 32 == 0 && x.i as u32 == inst as u32))
                             .map(|x| format!("{:08X}:{:X}{}", x.t, x.g, if x.i == inst { "" } else { " (top bit)" }))
                             .collect();
                         println!("name {n} {inst:016X} types {types:?}");
@@ -152,6 +152,10 @@ fn main() {
             }
         }
         let inst = s3pkg::fnv64(&args[i + 1]);
+        for k in pkgs.keys().filter(|k| k.i == inst || k.i == s3pkg::fnv32(&args[i + 1]) as u64) {
+            println!("any type: {k:?}");
+        }
+        println!("SIMO resources: {}", pkgs.keys_of_type(0x025ED6F4).count());
         for t in [s3pkg::types::MODL, 0x736884F1, 0x01D10F34] {
             for k in pkgs.keys_of_type(t).filter(|k| k.i == inst) {
                 let size = pkgs.read(k).map_or(0, |d| d.len());
@@ -444,6 +448,23 @@ fn main() {
         // The baked moodlets, traits and skills.
         let g = s3bake::load_gamedata(&s3bake::default_root()).expect("no gameplay data");
         println!("{} buffs, {} traits, {} skills", g.buffs.len(), g.traits.len(), g.skills.len());
+        // The careers' uniforms.
+        let outfits: Vec<s3bake::OutfitInfo> = s3bake::read_value(&s3bake::default_root().global_dir().join("outfits.bin")).unwrap_or_default();
+        println!("{} outfits", outfits.len());
+        let packs: Vec<s3bake::PackReader> =
+            ["cas.pack", "outfits.pack"].iter().filter_map(|n| s3bake::PackReader::open(&s3bake::default_root().global_dir().join(n)).ok()).collect();
+        let meshes = |k: &s3bake::Key| packs.iter().find_map(|p| p.get::<s3bake::CasPartMeshes>(k)).map_or(0, |m| m.meshes.len());
+        for o in &outfits {
+            let parts: Vec<String> = o
+                .parts
+                .iter()
+                .map(|p| {
+                    let (q, n) = (&p.part, meshes(&p.part.key));
+                    format!("{} ({}, {n} meshes{}{})", q.name, q.clothing_type, if q.layer.is_some() { "" } else { ", no layer" }, if p.hat.is_some() { ", hat" } else { "" })
+                })
+                .collect();
+            println!("outfit {}: {}", o.name, parts.join(", "));
+        }
         // FX=<name part>: the effect slots of catalogue objects so named.
         if let Ok(f) = std::env::var("FX") {
             let cat: Vec<s3bake::types::CatalogEntry> = s3bake::pack::read_value(&s3bake::default_root().global_dir().join("catalog.bin")).unwrap_or_default();

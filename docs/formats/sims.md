@@ -1167,6 +1167,24 @@ tgi table: (v >= 0x15 ? i16 : u8) count; count × { u64 instance; u32 group; u32
 You don't need SIMO to render a default sim (pick CASPs directly), but it is how household/premade
 sims specify outfits (and the face-slider amounts).
 
+**Career uniforms [verified on the base game's data]**: `Careers.xml`'s level tables name each
+level's uniform in `OutfitMale`, `OutfitFemale`, `OutfitMaleElder` and `OutfitFemaleElder`
+(`career_mayor_male`, `career_cop_femaleelder`, empty for everyday clothes); the SIMO's instance
+is the FNV-64 of the lowercase name (group 0). Base-game uniforms are version 0x10, a few
+later ones 0x15 (16-bit indices, longer header). There is one preset per part, **in the part
+list's order** (its `bodyType` value agrees). The parts' TXTC indices point at keys no package
+holds (the game's own texture cache), so a part's look comes from rendering its preset XML:
+a `CasRgbMask` complate (clothes) or `HairUniversal` (hair, with `IsHat` for hats), with
+`<value key= value=>` overrides (`key:TTTTTTTT:GGGGGGGG:IIIIIIIIIIIIIIII` for textures) and
+nested `<pattern variable="Pattern A">` blocks for the fabrics. Rendering a CASP's own first
+preset this way reproduces its compiled TXTC exactly. A part with an empty preset (the
+astronaut suits) wears the CASP's default. Clothes are drawn into render target B (the layer
+over the skin, coverage in alpha); hair is drawn whole into A, and a hat's own part of it is
+target B (alpha = the hat's coverage), which lets the hair under a hat take the Sim's colour.
+Uniforms also carry stockings and socks (`bodyType` 25), gloves (24) and a burglar's mask (21)
+as layers with no meshes, earrings and bracelets with meshes, and hats as hair parts
+(`amHairPoliceman`, `afHairSousChefUpdo`).
+
 ### 7.2 FACE 0x0358B08A / BBLN 0x062C8204 — blend (slider) definitions **[wiki; src: s3py BlendData]**
 
 ```

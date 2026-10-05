@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use crate::catalog::{Complate, T_COMPLATE_XML};
+use crate::catalog::{CValue, Complate, T_COMPLATE_XML};
 use crate::txtc::*;
 use s3pkg::{PackageSet, ResourceKey, types};
 
@@ -320,5 +320,74 @@ pub fn render(pkgs: &PackageSet, inst: &Complate, mkeys: &[ResourceKey], w: usiz
     let t = build(pkgs, &xml, inst, mkeys, 0)?;
     let mut c = crate::compositor::Compositor::new(pkgs);
     c.max_size = w.max(h);
+    Some(c.run(&t, w, h))
+}
+
+/// A CAS design preset (`<preset><complate …><value …/><pattern …>…</pattern></complate>`,
+/// as CAS parts and outfits keep them) as a complate instance and its resource list.
+pub fn preset(xml: &str) -> Option<(Complate, Vec<ResourceKey>)> {
+    let parse_key = |s: &str| -> Option<ResourceKey> {
+        let mut it = s.strip_prefix("key:")?.split(':');
+        let t = u32::from_str_radix(it.next()?, 16).ok()?;
+        let g = u32::from_str_radix(it.next()?, 16).ok()?;
+        let i = u64::from_str_radix(it.next()?, 16).ok()?;
+        Some(ResourceKey::new(t, g, i))
+    };
+    let mut keys: Vec<ResourceKey> = Vec::new();
+    let mut index = |k: ResourceKey| -> u8 {
+        match keys.iter().position(|x| *x == k) {
+            Some(i) => i as u8,
+            None => {
+                keys.push(k);
+                (keys.len() - 1) as u8
+            }
+        }
+    };
+    // The open complate and patterns, innermost last.
+    let mut stack: Vec<Complate> = Vec::new();
+    let mut top = None;
+    for t in tags(xml) {
+        match (t.name.as_str(), t.closing) {
+            ("complate" | "pattern", false) => {
+                let xml = t.attr("reskey").and_then(parse_key).map_or(u8::MAX, &mut index);
+                stack.push(Complate {
+                    xml,
+                    name: t.attr("name").unwrap_or("").to_string(),
+                    pattern: t.attr("variable").unwrap_or("").to_string(),
+                    ..Default::default()
+                });
+            }
+            ("complate" | "pattern", true) => {
+                let c = stack.pop()?;
+                match stack.last_mut() {
+                    Some(parent) => parent.blocks.push(c),
+                    None => top = Some(c),
+                }
+            }
+            ("value", false) => {
+                let (Some(k), Some(v), Some(c)) = (t.attr("key"), t.attr("value"), stack.last_mut()) else { continue };
+                let v = match parse_key(v) {
+                    Some(rk) => CValue::Tgi(index(rk)),
+                    None => CValue::Str(v.to_string()),
+                };
+                c.overrides.push((k.to_string(), v));
+            }
+            _ => {}
+        }
+    }
+    Some((top?, keys))
+}
+
+/// Renders a CAS design preset; `layer` keeps the part's own layer (coverage in alpha) rather
+/// than the composite over skin.
+pub fn render_preset(pkgs: &PackageSet, xml: &str, max: usize, layer: bool) -> Option<crate::dds::Rgba> {
+    let (inst, keys) = preset(xml)?;
+    let x = load(pkgs, keys.get(inst.xml as usize)?)?;
+    let t = build(pkgs, &x, &inst, &keys, 0)?;
+    let mut c = crate::compositor::Compositor::new(pkgs);
+    c.max_size = max;
+    let (w, h) = c.output_size(&t);
+    let (w, h) = (w.min(max), h.min(max));
+    c.layer_mode = layer;
     Some(c.run(&t, w, h))
 }

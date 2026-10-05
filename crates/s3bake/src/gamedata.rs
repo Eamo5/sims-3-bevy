@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 30;
+pub const GAMEDATA_VERSION: u32 = 33;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -92,6 +92,9 @@ pub struct CareerLevelInfo {
     pub days: u8,
     /// Skills that count towards performance at this level.
     pub skills: Vec<String>,
+    /// The uniform (an outfit's name, or empty for everyday clothes) for men, women, elderly
+    /// men and elderly women.
+    pub outfits: [String; 4],
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -508,6 +511,101 @@ fn unescape(s: &str) -> String {
 }
 
 /// Converts the base game's buffs, traits and skills and their icons.
+/// The careers' uniforms (`outfits.bin`): each outfit's parts with their designs rendered from
+/// the outfit's presets into the texture store, and the meshes of parts the everyday wardrobe
+/// doesn't have (`outfits.pack`).
+fn bake_outfits(root: &BakeRoot, pkgs: &PackageSet, careers: &[CareerInfo]) -> Result<(), String> {
+    use crate::types::{CasBaked, CasPartInfo, CasPartMeshes, Key, OutfitInfo, OutfitPartInfo, key_of};
+    use s3formats::sim::{CasPart, SimOutfit, T_OUTFIT};
+    let g = root.global_dir();
+    let mut names: Vec<String> = careers.iter().flat_map(|c| c.levels.iter().flat_map(|l| l.outfits.iter().cloned())).filter(|n| !n.is_empty()).collect();
+    names.sort_by_key(|n| n.to_ascii_lowercase());
+    names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    let cas: CasBaked = read_value(&g.join("cas.bin")).map_err(|e| format!("cas.bin: {e}"))?;
+    let rig = cas.adult_rig.as_ref().ok_or("no adult rig")?;
+    let have: std::collections::HashSet<Key> = cas.parts.iter().filter(|p| p.baked).map(|p| p.key).collect();
+    // (Of those, the ones with meshes: the rest are layers alone, like eyebrows.)
+    let cas_pack = PackReader::open(&g.join("cas.pack")).map_err(|e| e.to_string())?;
+    let have_meshes: std::collections::HashSet<Key> =
+        have.iter().copied().filter(|k| cas_pack.get::<CasPartMeshes>(k).is_some_and(|m| !m.meshes.is_empty())).collect();
+    std::fs::create_dir_all(root.textures_dir()).ok();
+    type Baked = (OutfitInfo, Vec<(Key, CasPartMeshes)>);
+    let baked: Vec<Option<Baked>> = crate::bake::par_map(&names, |name| {
+        let o = SimOutfit::parse(&pkgs.read_ti(T_OUTFIT, s3pkg::fnv64(name))?).ok()?;
+        let mut info = OutfitInfo { name: name.to_ascii_lowercase(), parts: Vec::new() };
+        let mut meshes = Vec::new();
+        for (i, p) in o.parts.iter().enumerate() {
+            let Some(c) = pkgs.read(&p.casp).or_else(|| pkgs.read_ti(p.casp.t, p.casp.i)).and_then(|d| CasPart::parse(&d).ok()) else { continue };
+            let key = key_of(&p.casp);
+            let mut layer_only = have.contains(&key) && !have_meshes.contains(&key);
+            if !have.contains(&key) {
+                let m = crate::bake::cas_part_meshes(pkgs, &c, rig, cas.baby_rig.as_ref());
+                layer_only = m.meshes.is_empty();
+                for t in m.meshes.iter().filter_map(|m| m.texture) {
+                    if !root.tex_path(t).exists()
+                        && let Some(dds) = crate::bake::bake_texture(pkgs, t, 512, false)
+                    {
+                        let _ = std::fs::write(root.tex_path(t), dds);
+                    }
+                }
+                meshes.push((key, m));
+            }
+            // The part's layer in the outfit's colours: clothes as a layer over the skin (the
+            // compositor's second target), hair whole (its hat drawn over it there).
+            let hair = c.clothing_type == s3formats::sim::CT_HAIR;
+            let layer: Key = (T_OUTFIT, i as u32, s3pkg::fnv64(name));
+            let img = s3formats::complate::render_preset(pkgs, &p.preset, 512, !hair);
+            if let Some(img) = &img {
+                let _ = std::fs::write(root.tex_path(layer), crate::ddsw::encode_dds(img));
+            }
+            // (Without a design of its own, the part's default.)
+            let fallback = c.diffuse.first().map(key_of).filter(|_| img.is_none());
+            if let Some(k) = fallback
+                && !root.tex_path(k).exists()
+                && let Some(dds) = crate::bake::bake_texture(pkgs, k, 512, !hair)
+            {
+                let _ = std::fs::write(root.tex_path(k), dds);
+            }
+            // A hat's own layer, so the hair under it can take the Sim's colour.
+            let mut hat = None;
+            if hair && p.preset.contains(r#"key="IsHat" value="true""#) {
+                let k: Key = (T_OUTFIT, 0x100 + i as u32, s3pkg::fnv64(name));
+                if let Some(img) = s3formats::complate::render_preset(pkgs, &p.preset, 512, true) {
+                    let _ = std::fs::write(root.tex_path(k), crate::ddsw::encode_dds(&img));
+                    hat = Some(k);
+                }
+            }
+            info.parts.push(OutfitPartInfo {
+                part: CasPartInfo {
+                    key,
+                    name: c.name,
+                    clothing_type: c.clothing_type,
+                    age_gender: c.age_gender,
+                    category: c.category,
+                    baked: true,
+                    layer: img.map(|_| layer).or(fallback),
+                },
+                layer_only,
+                hat,
+            });
+        }
+        Some((info, meshes))
+    });
+    let mut w = PackWriter::create(&g.join("outfits.pack")).map_err(|e| e.to_string())?;
+    let mut seen = std::collections::HashSet::new();
+    let mut outfits = Vec::new();
+    for (info, meshes) in baked.into_iter().flatten() {
+        for (k, m) in meshes {
+            if seen.insert(k) {
+                w.add(k, &m).map_err(|e| e.to_string())?;
+            }
+        }
+        outfits.push(info);
+    }
+    w.finish().map_err(|e| e.to_string())?;
+    write_value(&g.join("outfits.bin"), &outfits).map_err(|e| e.to_string())
+}
+
 pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::path::Path, progress: &dyn Fn(&str)) -> Result<usize, String> {
     progress("Converting: moodlets, traits and skills…");
     let path = install_root.join("Game").join("Bin").join("Gameplay").join("GameplayData.package");
@@ -647,6 +745,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                     hours: num(&r, "DayLength"),
                     days: get(&r, "DaysToWork").split(',').map(day_bit).fold(0, |a, b| a | b),
                     skills: last_skill.clone(),
+                    outfits: ["OutfitMale", "OutfitFemale", "OutfitMaleElder", "OutfitFemaleElder"].map(|c| get(&r, c)),
                 });
             }
             if levels.is_empty() {
@@ -959,6 +1058,8 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             }
         }
     }
+    progress("Converting: career outfits…");
+    bake_outfits(root, pkgs, &out.careers)?;
     // Catalogue models with alternative geometry states, drawn in their fullest (the objects'
     // models pack has every state at once: a chess table's every game piled on its board).
     progress("Converting: object states…");

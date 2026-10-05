@@ -32,6 +32,9 @@ pub struct CareerLevel {
     pub end: f32,
     /// Workdays: bit 0 = Monday.
     pub days: u8,
+    /// The uniform (an outfit's name; empty for everyday clothes) for men, women, elderly men
+    /// and elderly women.
+    pub outfits: [&'static str; 4],
 }
 
 pub struct CareerTrack {
@@ -162,6 +165,7 @@ pub fn install_tracks(data: &s3bake::GameDataBaked) {
                             start,
                             end: (start + l.hours) % 24.0,
                             days: l.days,
+                            outfits: [0, 1, 2, 3].map(|i| leak(l.outfits[i].to_ascii_lowercase())),
                         });
                     }
                     CareerPath { branch: leak(b.to_string()), levels }
@@ -207,7 +211,7 @@ impl BuiltinTrack {
             part_time: false,
             paths: vec![CareerPath {
                 branch: "Base",
-                levels: self.levels.iter().map(|&(title, hourly, start, end)| CareerLevel { title, hourly, start, end, days: self.days }).collect(),
+                levels: self.levels.iter().map(|&(title, hourly, start, end)| CareerLevel { title, hourly, start, end, days: self.days, outfits: [""; 4] }).collect(),
             }],
             branch_at: None,
         }
@@ -426,6 +430,13 @@ impl Job {
     /// Past the branch: the path's name ("Thief").
     pub fn branch_label(&self) -> Option<String> {
         self.career().branch_at.filter(|&b| self.level >= b).map(|_| self.path().label())
+    }
+    /// The uniform a Sim wears to work at their level, if it has one.
+    pub fn uniform(&self, sim: &Sim) -> Option<&'static str> {
+        let o = &self.info().outfits;
+        let i = sim.female as usize;
+        let elder = (sim.age == Age::Elder).then(|| o[2 + i]).filter(|s| !s.is_empty());
+        elder.or(Some(o[i])).filter(|s| !s.is_empty())
     }
     pub fn hours(&self) -> f32 {
         let l = self.info();

@@ -19,6 +19,9 @@ pub struct BakedData {
     pub state_models: Option<PackReader>,
     pub cas: CasBaked,
     pub cas_pack: PackReader,
+    /// The careers' uniforms, and the meshes of their parts the wardrobe doesn't have.
+    pub outfits: Vec<s3bake::OutfitInfo>,
+    pub outfit_pack: Option<PackReader>,
     pub clips: Option<PackReader>,
     /// Names of the baked clips (for picking variants).
     pub clip_names: Vec<String>,
@@ -35,9 +38,11 @@ impl BakedData {
         let state_models = PackReader::open(&g.join("states.pack")).ok();
         let cas: CasBaked = s3bake::read_value(&g.join("cas.bin")).map_err(|e| format!("cas: {e}"))?;
         let cas_pack = PackReader::open(&g.join("cas.pack")).map_err(|e| format!("cas pack: {e}"))?;
+        let outfits = s3bake::read_value(&g.join("outfits.bin")).unwrap_or_default();
+        let outfit_pack = PackReader::open(&g.join("outfits.pack")).ok();
         let clips = PackReader::open(&g.join("clips.pack")).ok();
         let clip_names: Vec<String> = s3bake::read_value(&g.join("clip_names.bin")).unwrap_or_default();
-        Ok(Self { root, catalog, catalog_index, models, world_models, food_models, state_models, cas, cas_pack, clips, clip_names })
+        Ok(Self { root, catalog, catalog_index, models, world_models, food_models, state_models, cas, cas_pack, outfits, outfit_pack, clips, clip_names })
     }
 
     pub fn model(&self, k: &Key) -> Option<BakedModel> {
@@ -65,7 +70,7 @@ impl BakedData {
     }
 
     pub fn cas_meshes(&self, k: &Key) -> Option<CasPartMeshes> {
-        self.cas_pack.get(k)
+        self.cas_pack.get(k).or_else(|| self.outfit_pack.as_ref()?.get(k))
     }
 }
 

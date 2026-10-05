@@ -204,6 +204,10 @@ pub const CT_TOP: u32 = 5;
 pub const CT_BOTTOM: u32 = 6;
 pub const CT_SHOES: u32 = 7;
 pub const CT_EYEBROW: u32 = 0x16;
+/// Masks (a burglar's), gloves and stockings: worn as layers over the face, hands and legs.
+pub const CT_MASK: u32 = 21;
+pub const CT_GLOVES: u32 = 24;
+pub const CT_STOCKINGS: u32 = 25;
 
 pub const CAT_NAKED: u32 = 0x1;
 pub const CAT_EVERYDAY: u32 = 0x2;
@@ -809,4 +813,85 @@ pub fn parse_bgeo(d: &[u8]) -> R<Vec<BgeoBlend>> {
         out.push(BgeoBlend { age_gender, region, deltas });
     }
     Ok(out)
+}
+
+/// Sim outfits (SIMO): a premade set of clothes, like a career's uniform.
+pub const T_OUTFIT: u32 = 0x025ED6F4;
+
+/// One part of an outfit: the CAS part and the design (colours and patterns) it's worn in.
+#[derive(Clone, Debug)]
+pub struct OutfitPart {
+    pub casp: ResourceKey,
+    pub body_type: u32,
+    /// The part's preset XML (a `CasRgbMask` complate and its patterns).
+    pub preset: String,
+}
+
+/// A Sim outfit: its age and gender, and its parts.
+#[derive(Clone, Debug, Default)]
+pub struct SimOutfit {
+    pub age: u32,
+    pub gender: u32,
+    pub parts: Vec<OutfitPart>,
+}
+
+impl SimOutfit {
+    pub fn parse(d: &[u8]) -> R<Self> {
+        let mut r = Reader::new(d);
+        let version = r.u32()?;
+        let tgi_pos = 8 + r.u32()? as usize;
+        let mut keys = Vec::new();
+        {
+            // (Counted with a short from version 0x15.)
+            let mut t = Reader::at(d, tgi_pos);
+            let n = if version >= 0x15 { t.u16()? as usize } else { t.u8()? as usize };
+            for _ in 0..n {
+                let i = t.u64()?;
+                let g = t.u32()?;
+                let ty = t.u32()?;
+                keys.push(ResourceKey::new(ty, g, i));
+            }
+        }
+        // The parts' presets, in the order of the parts.
+        let n = r.u32()? as usize;
+        let mut presets = Vec::new();
+        for _ in 0..n.min(32) {
+            r.u8()?;
+            let chars = r.u32()? as usize;
+            let b = r.bytes(chars * 2)?;
+            presets.push(String::from_utf16_lossy(&b.chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect::<Vec<_>>()));
+        }
+        let start = r.pos;
+        let mid = d.get(start..tgi_pos).ok_or(Eof)?;
+        let u = |o: usize| mid.get(o..o + 4).map_or(0, |b| u32::from_le_bytes(b.try_into().unwrap()));
+        let (age, gender) = (u(24), u(28));
+        // Then the body sliders, skin and hair, and the part list (each part: its CASP's index,
+        // its body type, and its textures' indices), then a zero and the face sliders (each an
+        // index and an amount). The header before the list differs by version, so the list is
+        // found by where it fits: one part per preset, each naming a CAS part, ending just so.
+        // Base-game outfits index with bytes, later ones with shorts.
+        let parse_at = |at: usize, wide: bool| -> Option<Vec<OutfitPart>> {
+            let ix = |o: usize| -> Option<usize> { if wide { mid.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]]) as usize) } else { mid.get(o).map(|b| *b as usize) } };
+            let w = if wide { 2 } else { 1 };
+            if *mid.get(at)? as usize != presets.len() || presets.is_empty() {
+                return None;
+            }
+            let mut o = at + 1;
+            let mut parts = Vec::new();
+            for p in &presets {
+                let casp = *keys.get(ix(o)?)?;
+                if casp.t != s3pkg::types::CASP {
+                    return None;
+                }
+                let body_type = u32::from_le_bytes(mid.get(o + w..o + w + 4)?.try_into().ok()?);
+                let m = *mid.get(o + w + 4)? as usize;
+                o += w + 5 + m * 2 * w;
+                parts.push(OutfitPart { casp, body_type, preset: p.clone() });
+            }
+            let faces = *mid.get(o + 1)? as usize;
+            (mid[o] == 0 && o + 2 + faces * (w + 4) == mid.len()).then_some(parts)
+        };
+        let parts = (32..mid.len()).rev().find_map(|at| parse_at(at, false).or_else(|| parse_at(at, true))).unwrap_or_default();
+        Ok(Self { age, gender, parts })
+    }
 }

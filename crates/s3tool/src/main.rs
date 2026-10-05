@@ -845,6 +845,53 @@ fn main() {
         }
         return;
     }
+    if args[1] == "simo" {
+        // simo <root> <outfit name> <outdir>: an outfit's parts, with each part's design
+        // rendered from its preset (and the part's own default texture alongside).
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let d = set.read_ti(s3formats::sim::T_OUTFIT, s3pkg::fnv64(&args[3])).expect("no such outfit");
+        let o = s3formats::sim::SimOutfit::parse(&d).unwrap();
+        println!("age {:x} gender {:x}", o.age, o.gender);
+        let out = std::path::Path::new(&args[4]);
+        std::fs::create_dir_all(out).ok();
+        let png = |img: &s3formats::dds::Rgba, name: &str| {
+            let f = std::fs::File::create(out.join(name)).unwrap();
+            let mut enc = png::Encoder::new(std::io::BufWriter::new(f), img.width as u32, img.height as u32);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            enc.write_header().unwrap().write_image_data(&img.data).unwrap();
+        };
+        for (i, p) in o.parts.iter().enumerate() {
+            let c = set.read(&p.casp).or_else(|| set.read_ti(p.casp.t, p.casp.i)).and_then(|d| s3formats::sim::CasPart::parse(&d).ok());
+            println!("part {i}: {:?} body type {} {:?}", p.casp, p.body_type, c.as_ref().map(|c| (&c.name, c.clothing_type, c.presets.len())));
+            if let Some(img) = s3formats::complate::render_preset(&set, &p.preset, 1024, true) {
+                png(&img, &format!("{i}_outfit.png"));
+            }
+            if let Some(c) = &c {
+                if let Some(t) = c.diffuse.first().and_then(|k| set.read(k)).and_then(|d| s3formats::txtc::Txtc::parse(&d).ok()) {
+                    let mut comp = s3formats::compositor::Compositor::new(&set);
+                    comp.max_size = 1024;
+                    let (w, h) = comp.output_size(&t);
+                    comp.layer_mode = true;
+                    png(&comp.run(&t, w, h), &format!("{i}_txtc.png"));
+                }
+                if let Some(img) = c.presets.first().and_then(|x| s3formats::complate::render_preset(&set, x, 1024, true)) {
+                    png(&img, &format!("{i}_preset0.png"));
+                }
+            }
+        }
+        return;
+    }
+    if args[1] == "raw" {
+        // raw <root> <type:group:instance> <out>: one resource's (decompressed) bytes.
+        let root = std::path::Path::new(&args[2]);
+        let set = s3pkg::install::open_install(root, |_| true);
+        let parts: Vec<&str> = args[3].split(':').collect();
+        let k = s3pkg::ResourceKey::new(parse_hex(parts[0]) as u32, parse_hex(parts[1]) as u32, parse_hex(parts[2]));
+        let d = set.read(&k).or_else(|| set.read_ti(k.t, k.i)).expect("no such resource");
+        std::fs::write(&args[4], d).unwrap();
+        return;
+    }
     if args[1] == "txtcraw" {
         // txtcraw <root> <txtc key> <out.rgba>: composite a TXTC to raw RGBA (w, h as u32 header).
         let root = std::path::Path::new(&args[2]);

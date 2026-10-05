@@ -15,7 +15,8 @@
 }
 #endif
 
-// rgb: skin tint, w: number of clothing layers
+// rgb: skin tint, w: number of clothing layers (plus ten for hair under a hat, which keeps
+// its alpha)
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> skin_params: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var layer0_tex: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var layer0_samp: sampler;
@@ -33,19 +34,22 @@ fn fragment(
 ) -> FragmentOutput {
     var pbr_input = pbr_input_from_standard_material(in, is_front);
     var c = pbr_input.material.base_color.rgb * skin_params.rgb;
+    let hair = skin_params.w > 9.5;
+    var n = skin_params.w;
+    if (hair) { n = n - 10.0; }
 #ifdef VERTEX_UVS_A
     let uv = in.uv;
     let l0 = textureSample(layer0_tex, layer0_samp, uv);
     let l1 = textureSample(layer1_tex, layer1_samp, uv);
     let l2 = textureSample(layer2_tex, layer2_samp, uv);
     let l3 = textureSample(layer3_tex, layer3_samp, uv);
-    let n = skin_params.w;
     if (n > 0.5) { c = mix(c, l0.rgb, l0.a); }
     if (n > 1.5) { c = mix(c, l1.rgb, l1.a); }
     if (n > 2.5) { c = mix(c, l2.rgb, l2.a); }
     if (n > 3.5) { c = mix(c, l3.rgb, l3.a); }
 #endif
-    pbr_input.material.base_color = vec4<f32>(c, 1.0);
+    pbr_input.material.base_color = vec4<f32>(c, select(1.0, pbr_input.material.base_color.a, hair));
+    pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
 
 #ifdef PREPASS_PIPELINE
     let out = deferred_output(in, pbr_input);

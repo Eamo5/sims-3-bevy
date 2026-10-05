@@ -90,6 +90,24 @@ pub struct CasPartInfo {
     pub layer: Option<Key>,
 }
 
+/// A premade outfit (a career's uniform): its CAS parts, each with the layer its own design
+/// makes (rendered from the outfit's presets).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct OutfitInfo {
+    pub name: String,
+    pub parts: Vec<OutfitPartInfo>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct OutfitPartInfo {
+    pub part: CasPartInfo,
+    /// Only a layer, without meshes of its own (stockings, a burglar's mask).
+    pub layer_only: bool,
+    /// A hat's layer (coverage in alpha), drawn as it is over the hair it comes with (which
+    /// takes the Sim's own hair colour).
+    pub hat: Option<Key>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct CasPartMeshes {
     pub meshes: Vec<SkinMesh>,
