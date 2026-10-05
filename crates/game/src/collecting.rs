@@ -574,7 +574,7 @@ fn journal_panel(mut commands: Commands, mut panel: ResMut<JournalPanel>, collec
                 border_radius: BorderRadius::all(Val::Px(12.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.05, 0.15, 0.30, 0.94)),
+            BackgroundColor(crate::menu::PANEL_BG),
             Interaction::default(),
             BlocksWorld,
             DespawnOnExit(AppState::InGame),

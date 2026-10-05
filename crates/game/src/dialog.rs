@@ -124,7 +124,7 @@ fn show_question(mut commands: Commands, mut q: ResMut<Questions>, mut ui: Optio
                 border_radius: BorderRadius::all(Val::Px(14.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.05, 0.15, 0.30, 0.97)),
+            BackgroundColor(crate::menu::PANEL_BG),
             BorderColor::all(PLUMBOB_GREEN),
             Interaction::default(),
             BlocksWorld,

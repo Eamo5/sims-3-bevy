@@ -222,7 +222,7 @@ fn buy_panel(
                 row_gap: Val::Px(8.0),
                 ..default()
             },
-            BackgroundColor(if buy.active { Color::srgba(0.05, 0.15, 0.30, 0.92) } else { Color::NONE }),
+            BackgroundColor(if buy.active { crate::menu::PANEL_BG } else { Color::NONE }),
             Interaction::default(),
         ))
         .id();

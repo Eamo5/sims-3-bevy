@@ -525,7 +525,7 @@ pub fn toggle_game_menu(commands: &mut Commands, menu: &mut GameMenu, mut clock:
                     border_radius: BorderRadius::all(Val::Px(14.0)),
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.05, 0.16, 0.30, 0.97)),
+                BackgroundColor(crate::menu::PANEL_BG),
             ))
             .with_children(|p| {
                 p.spawn((text("Paused", 30.0, Color::WHITE), Node { margin: UiRect::bottom(Val::Px(6.0)), ..default() }));

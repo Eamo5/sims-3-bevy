@@ -22,8 +22,14 @@ pub enum MenuAction {
     Quit,
 }
 
-pub const BTN_NORMAL: Color = Color::srgba(0.10, 0.32, 0.55, 0.92);
-pub const BTN_HOVER: Color = Color::srgba(0.16, 0.45, 0.75, 0.95);
+/// The game's interface blue (its HUD panels' (110, 146, 216), a shade darker to keep light
+/// writing legible), their navy outline, and the notices' darker blue.
+pub const PANEL_BG: Color = Color::srgba(0.26, 0.40, 0.71, 0.95);
+pub const PANEL_BORDER: Color = Color::srgb(0.04, 0.09, 0.27);
+pub const NOTICE_BG: Color = Color::srgba(0.10, 0.20, 0.42, 0.94);
+
+pub const BTN_NORMAL: Color = Color::srgba(0.10, 0.21, 0.46, 0.95);
+pub const BTN_HOVER: Color = Color::srgba(0.20, 0.42, 0.80, 0.97);
 pub const BTN_PRESS: Color = Color::srgba(0.30, 0.65, 0.20, 1.0);
 pub const PLUMBOB_GREEN: Color = Color::srgb(0.35, 0.85, 0.25);
 

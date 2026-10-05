@@ -106,7 +106,7 @@ fn spawn_lot_chooser(
                 overflow: Overflow::scroll_y(),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.05, 0.15, 0.30, 0.92)),
+            BackgroundColor(crate::menu::PANEL_BG),
         ))
         .with_children(|p| {
             p.spawn(text(format!("{} — choose a home", world.name), 24.0, Color::WHITE));

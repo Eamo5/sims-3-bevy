@@ -227,7 +227,7 @@ fn offer_opportunities(
                 border_radius: BorderRadius::all(Val::Px(14.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.05, 0.15, 0.30, 0.96)),
+            BackgroundColor(crate::menu::PANEL_BG),
             BorderColor::all(PLUMBOB_GREEN),
             Interaction::default(),
             BlocksWorld,
@@ -455,7 +455,7 @@ fn update_panel(
                 border_radius: BorderRadius::all(Val::Px(12.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.05, 0.15, 0.30, 0.92)),
+            BackgroundColor(crate::menu::PANEL_BG),
             Interaction::default(),
             BlocksWorld,
         ))

@@ -622,7 +622,7 @@ fn rebuild_ui(
     }
     let sel = scene.selected.min(pending.members.len().saturating_sub(1));
     let sim = pending.members[sel].clone();
-    let panel_bg = BackgroundColor(Color::srgba(0.05, 0.15, 0.30, 0.9));
+    let panel_bg = BackgroundColor(crate::menu::PANEL_BG);
     let root = commands
         .spawn((Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, DespawnOnExit(AppState::CreateHousehold)))
         .id();

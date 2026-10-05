@@ -48,7 +48,7 @@ impl Plugin for HudPlugin {
     }
 }
 
-const PANEL_BG: Color = Color::srgba(0.05, 0.15, 0.30, 0.88);
+use crate::menu::PANEL_BG;
 
 #[derive(Resource, Default)]
 pub struct PointerOverUi(pub bool);
@@ -153,8 +153,10 @@ pub struct BlocksWorld;
 
 fn panel(node: Node) -> impl Bundle {
     (
-        Node { border_radius: BorderRadius::all(Val::Px(12.0)), ..node },
+        Node { border_radius: BorderRadius::all(Val::Px(12.0)), border: UiRect::all(Val::Px(2.0)), ..node },
         BackgroundColor(PANEL_BG),
+        BorderColor::all(crate::menu::PANEL_BORDER),
+        BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.35), Val::Px(0.0), Val::Px(3.0), Val::Px(0.0), Val::Px(8.0)),
         Interaction::default(),
         BlocksWorld,
     )
@@ -1162,7 +1164,7 @@ fn update_clock_panel(
         }
     }
     if let (Ok(mut f), Some(h)) = (f.single_mut(), household) {
-        let s = format!("§{}", h.funds);
+        let s = format!("§{}", crate::lifetime::group(h.funds));
         if f.0 != s {
             f.0 = s;
         }
@@ -1289,7 +1291,7 @@ fn update_notifications(
         for (msg, _) in notes.0.iter() {
             c.spawn((
                 Node { padding: UiRect::all(Val::Px(10.0)), border_radius: BorderRadius::all(Val::Px(8.0)), ..default() },
-                BackgroundColor(Color::srgba(0.08, 0.22, 0.40, 0.92)),
+                BackgroundColor(crate::menu::NOTICE_BG),
             ))
             .with_children(|b| {
                 b.spawn(text(msg.clone(), 15.0, Color::WHITE));

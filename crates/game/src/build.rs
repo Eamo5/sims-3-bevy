@@ -557,7 +557,7 @@ fn build_tool(
                 TextFont::from_font_size(16.0),
                 TextColor(Color::WHITE),
                 Node { position_type: PositionType::Absolute, left, top, padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)), border_radius: BorderRadius::all(Val::Px(6.0)), ..default() },
-                BackgroundColor(Color::srgba(0.05, 0.15, 0.30, 0.85)),
+                BackgroundColor(crate::menu::PANEL_BG),
                 Pickable::IGNORE,
                 DespawnOnExit(AppState::InGame),
             ));
