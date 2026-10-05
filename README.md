@@ -97,7 +97,11 @@ installation is unreachable.
   what's owed. The paper is delivered every morning, to read or look for a job in.
 - **Death**: an elder whose time has come collapses and the Grim Reaper appears in his robe
   with his scythe (the game's own Reaper animations), raises a tombstone where they fell and
-  vanishes; the family is heartbroken and can mourn at the tombstone.
+  vanishes; the family is heartbroken and can mourn at the tombstone. Sims can also die of
+  hunger (a day and a half starving, with a warning halfway) and of electrocution: fixing a
+  TV, computer or stereo with little Handiness can shock them (the game's Singed moodlet and
+  shock animation, the repair failed), and a second shock while still singed stops their
+  heart. Each death has the game's own last moments, and its ghost its own colour.
 - **Meals**: cooking serves a group meal on the game's serving platter (on the nearest counter),
   with a serving for everyone at home; Sims grab a plate and sit down at a dining table or
   counter stool to eat (the game's sit-down and bar-stool eating animations, plate on the

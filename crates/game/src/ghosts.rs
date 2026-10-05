@@ -48,7 +48,15 @@ struct Ghosted;
 const NIGHT: std::ops::Range<f32> = 0.0..4.5;
 
 fn tint(cause: &str) -> Color {
-    if cause.contains("fire") { Color::srgb(1.0, 0.55, 0.25) } else { Color::srgb(0.7, 0.85, 1.0) }
+    if cause.contains("fire") {
+        Color::srgb(1.0, 0.55, 0.25)
+    } else if cause.contains("electrocution") {
+        Color::srgb(0.75, 0.6, 1.0)
+    } else if cause.contains("hunger") {
+        Color::srgb(0.85, 0.8, 0.45)
+    } else {
+        Color::srgb(0.7, 0.85, 1.0)
+    }
 }
 
 /// At night each grave's ghost rises beside it; by dawn they're gone.

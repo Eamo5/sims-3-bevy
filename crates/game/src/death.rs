@@ -2,6 +2,9 @@
 //! Grim Reaper appears beside them in his robe, scythe in hand (`a_death_appear`, floating while
 //! he waits), and with a wave of the scythe raises a tombstone where they fell (`a_death_create`)
 //! before vanishing. The family mourns at the tombstone, which stays on the lot.
+//!
+//! Sims die of old age, in fires, of hunger (a day and a half starving) and of electrocution
+//! (a second shock while still singed from the first), each with the game's own last moments.
 
 use bevy::prelude::*;
 
@@ -17,7 +20,7 @@ pub struct DeathPlugin;
 
 impl Plugin for DeathPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, reap.run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (shocks, starve, reap).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -29,15 +32,79 @@ pub struct Dying {
     reaper: Option<Entity>,
     /// How they died, for the notice ("of old age", "in a fire").
     pub cause: &'static str,
+    /// Their last moments.
+    clip: &'static [&'static str],
 }
 
 impl Dying {
     pub fn new() -> Self {
-        Self { t: 0.0, stage: 0, reaper: None, cause: "peacefully of old age" }
+        Self { t: 0.0, stage: 0, reaper: None, cause: "peacefully of old age", clip: &["e_die_oldAge_x"] }
     }
 
     pub fn in_fire() -> Self {
         Self { cause: "in a fire", ..Self::new() }
+    }
+
+    pub fn starved() -> Self {
+        Self { cause: "of hunger", clip: &["a_die_starvation_x"], ..Self::new() }
+    }
+
+    pub fn electrocuted() -> Self {
+        Self { cause: "of electrocution", clip: &["a_die_electrocution_x"], ..Self::new() }
+    }
+}
+
+/// Shocked while repairing something electric: singed, or, singed already, electrocuted.
+#[derive(Component)]
+pub struct Shocked;
+
+fn shocks(mut commands: Commands, clock: Res<crate::clock::GameClock>, mut sims: Query<(Entity, &mut crate::life::Moodlets), With<Shocked>>) {
+    for (e, mut m) in &mut sims {
+        commands.entity(e).remove::<Shocked>();
+        if m.0.iter().any(|x| x.kind == crate::life::MoodletKind::Singed) {
+            commands.entity(e).insert(Dying::electrocuted());
+        } else {
+            m.add(crate::life::MoodletKind::Singed, clock.minutes);
+            commands.entity(e).insert(ActionClip::new(None, &["a2o_handiness_fail_electrocution_x"]));
+        }
+    }
+}
+
+/// Game minutes a Sim has gone starving.
+#[derive(Component, Default)]
+struct Starvation(f64);
+
+/// How long a Sim can go starving before they die of it (game minutes).
+const STARVE_MINUTES: f64 = 36.0 * 60.0;
+
+/// Teens and grown-ups left starving die of it; a warning comes halfway.
+fn starve(
+    mut commands: Commands,
+    delta: Res<crate::clock::SimDelta>,
+    mut sims: Query<(Entity, &Sim, &crate::sim::Motives, Option<&mut Starvation>), (With<crate::sim::HouseholdMember>, Without<Dying>)>,
+    mut notes: ResMut<Notifications>,
+) {
+    for (e, sim, m, starving) in &mut sims {
+        let hungry = m.0[crate::sim::HUNGER] <= -95.0 && !sim.age.is_little() && sim.age != Age::Child;
+        match (hungry, starving) {
+            (true, Some(mut s)) => {
+                let before = s.0;
+                s.0 += delta.0 as f64;
+                if before < STARVE_MINUTES / 2.0 && s.0 >= STARVE_MINUTES / 2.0 {
+                    notes.push(format!("{} is starving and will die if {} doesn't eat soon!", sim.first, if sim.female { "she" } else { "he" }));
+                }
+                if s.0 >= STARVE_MINUTES {
+                    commands.entity(e).remove::<Starvation>().insert(Dying::starved());
+                }
+            }
+            (true, None) => {
+                commands.entity(e).insert(Starvation::default());
+            }
+            (false, Some(_)) => {
+                commands.entity(e).remove::<Starvation>();
+            }
+            (false, None) => {}
+        }
     }
 }
 
@@ -76,7 +143,7 @@ fn reap(
                 if let Some(mut q) = queue {
                     q.0.clear();
                 }
-                commands.entity(me).remove::<crate::nav::PathFollow>().insert(ActionClip::new(Some("e_die_oldAge_x"), &["e_die_oldAge_x"]));
+                commands.entity(me).remove::<crate::nav::PathFollow>().insert(ActionClip::new(Some(d.clip[0]), d.clip));
                 d.stage = 1;
             }
             // The Reaper comes.

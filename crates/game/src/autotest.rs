@@ -862,7 +862,7 @@ fn auto_action(
     }
     // (Once everyone has settled in.)
     let t0 = *since.get_or_insert(time.elapsed_secs());
-    if (name == "Meal" || name == "Die") && time.elapsed_secs() - t0 < 4.0 {
+    if matches!(name.as_str(), "Meal" | "Die" | "Starve" | "Shock" | "Electrocute") && time.elapsed_secs() - t0 < 4.0 {
         return;
     }
     // "Care:<social>": the selected Sim looks after the household's baby (or toddler with
@@ -1066,6 +1066,23 @@ fn auto_action(
     if name == "Die" {
         let me = sel_e.single().unwrap();
         commands.entity(me).insert(crate::death::Dying::new());
+        *done = true;
+        return;
+    }
+    // "Starve": the selected Sim dies of hunger. "Shock": an electric shock (a second one kills).
+    if name == "Starve" {
+        let me = sel_e.single().unwrap();
+        commands.entity(me).insert(crate::death::Dying::starved());
+        *done = true;
+        return;
+    }
+    if name == "Shock" || name == "Electrocute" {
+        let me = sel_e.single().unwrap();
+        if name == "Shock" {
+            commands.entity(me).insert(crate::death::Shocked);
+        } else {
+            commands.entity(me).insert(crate::death::Dying::electrocuted());
+        }
         *done = true;
         return;
     }

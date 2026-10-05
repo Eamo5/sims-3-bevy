@@ -1570,10 +1570,19 @@ fn run_actions(
                             motives.add(FUN, -4.0 * dt / 60.0);
                             if elapsed >= minutes {
                                 finished = true;
-                                commands.entity(*target).remove::<Broken>();
+                                // Electronics can shock the unskilled; a second shock while
+                                // still singed stops their heart.
+                                let electric = objects.get(*target).is_ok_and(|(o, ..)| matches!(o.kind, ObjectKind::Tv | ObjectKind::Computer | ObjectKind::Stereo));
+                                let shocked = electric && rand::rng().random_bool(((0.35 - handy * 0.04) as f64).clamp(0.0, 1.0));
                                 if let Ok((o, _, mut used, _)) = objects.get_mut(*target) {
                                     used.0 = None;
-                                    notes.push(format!("{} fixed {}.", sim.first, the(&o.name)));
+                                    if shocked {
+                                        commands.entity(me).insert(crate::death::Shocked);
+                                        notes.push(format!("{} was electrocuted trying to fix {}!", sim.first, the(&o.name)));
+                                    } else {
+                                        commands.entity(*target).remove::<Broken>();
+                                        notes.push(format!("{} fixed {}.", sim.first, the(&o.name)));
+                                    }
                                 }
                             }
                         }
