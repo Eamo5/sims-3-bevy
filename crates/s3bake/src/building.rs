@@ -453,6 +453,7 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
             ground: Vec::new(),
             pool,
             pool_depth,
+            fences: Vec::new(),
         },
         jobs,
     ))

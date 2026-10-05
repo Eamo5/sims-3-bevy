@@ -38,6 +38,49 @@ fn main() {
         }
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--fences") {
+        // --fences <lot name part>: a lot's fence posts by style, and each style's CFEN references.
+        let path = data.join("GameData/Shared/NonPackaged/Worlds/Sunset Valley.world");
+        let pkg = s3pkg::Package::open(&path).expect("world");
+        let world = s3formats::world::WorldData::load(&pkg).expect("world data");
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        for l in world.lots.iter().filter(|l| l.internal_name.contains(&args[i + 1])) {
+            let read = |t: u32| pkg.find(&s3pkg::ResourceKey::new(t, 0, l.id)).and_then(|e| pkg.read(e).ok());
+            let refs = read(0x05ED1226).and_then(|d| s3formats::objn::parse_refs(&d).ok()).unwrap_or_default();
+            let Some(d) = read(0x913381F2) else { continue };
+            let n = u32::from_le_bytes(d[4..8].try_into().unwrap()) as usize;
+            let mut styles = std::collections::BTreeMap::new();
+            for k in 0..n {
+                let o = 8 + k * 14;
+                let ri = u16::from_le_bytes(d[o + 12..o + 14].try_into().unwrap());
+                *styles.entry(ri).or_insert(0) += 1;
+            }
+            println!("{}: {n} posts {styles:?}", l.internal_name);
+            for ri in styles.keys() {
+                let Some(k) = refs.get(ri) else { continue };
+                println!("  style {ri}: {k:?}");
+                if let Some(c) = pkgs.read(k).or_else(|| pkgs.read_ti(k.t, k.i)) {
+                    std::fs::write(format!("cache/cfen_{ri}.bin"), &c).ok();
+                    println!("    {} bytes", c.len());
+                    // The models it refers to (VPXYs), with their bounds.
+                    for o in (0..c.len().saturating_sub(16)).filter(|&o| c[o..o + 4] == 0x736884F1u32.to_le_bytes()) {
+                        let g = u32::from_le_bytes(c[o + 4..o + 8].try_into().unwrap());
+                        let inst = u64::from_le_bytes(c[o + 8..o + 16].try_into().unwrap());
+                        let v = s3pkg::ResourceKey::new(0x736884F1, g, inst);
+                        let models = pkgs.read(&v).or_else(|| pkgs.read_ti(v.t, v.i)).map(|d| s3formats::model::vpxy_models(&d)).unwrap_or_default();
+                        for m in models.iter().take(1) {
+                            let b = s3bake::bake::bake_model(&pkgs, m);
+                            let (mn, mx) = b.parts.iter().fold(([f32::MAX; 3], [f32::MIN; 3]), |(a, c2), p| {
+                                ([a[0].min(p.bmin[0]), a[1].min(p.bmin[1]), a[2].min(p.bmin[2])], [c2[0].max(p.bmax[0]), c2[1].max(p.bmax[1]), c2[2].max(p.bmax[2])])
+                            });
+                            println!("    vpxy @{o} {inst:X} -> {m:?} parts {} bounds {mn:?}..{mx:?}", b.parts.len());
+                        }
+                    }
+                }
+            }
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--graphlevels") {
         // --graphlevels <lot name part>: the wall and room graphs' edges per level (Sunset Valley).
         let path = data.join("GameData/Shared/NonPackaged/Worlds/Sunset Valley.world");

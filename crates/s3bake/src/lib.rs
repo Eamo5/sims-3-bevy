@@ -9,6 +9,7 @@ pub mod trees;
 pub mod ddsw;
 pub mod gamedata;
 pub mod pack;
+pub mod fences;
 pub mod ponds;
 pub mod premades;
 pub mod sounds;

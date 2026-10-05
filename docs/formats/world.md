@@ -863,7 +863,11 @@ Per lot (instance = lot id) in the world file, with REFS = `0x05ED1226:0:lot`:
   `u16 CWAL, u16 TXTC, u16 TXTC, u16 COMP (REFS indices), u32 id, u32 area`.
   (The `0x002E7B0E` / `0x002E7CF0` / `0x002E7CF1` grids are something else.)
 * **Fences** `0x913381F2`: `u32 version, u32 count`, then `u32 level, f32 x, f32 z, u16 REFS
-  index (CFEN 0x0418FE2A)`.
+  index (CFEN 0x0418FE2A)` — one record per **post** (whole-metre points; level 0 = the ground,
+  railings on the storeys' levels). The runs between posts are the room graph's (`0x2E7B1C`)
+  edges between them. A CFEN names its pieces as VPXYs in its TGI list: a straight run
+  (model spanning 0..1 along +X), a diagonal run (0..1.414) and, for some, a post. [VERIFIED by
+  rendering the Bachelor lot: yard fence, porch railings, garden edging]
 
 ### The lot's designs (`0x0563919E`)
 

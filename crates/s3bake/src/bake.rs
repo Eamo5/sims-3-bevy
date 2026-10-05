@@ -701,7 +701,11 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         }
     }
 
-    let mut model_keys: Vec<Key> = instances.iter().map(|i| i.model).collect::<HashSet<_>>().into_iter().collect();
+    // Fences and railings (their pieces' models go in with the world's).
+    let mut fence_styles = HashMap::new();
+    let mut fences: Vec<Vec<FenceBaked>> = world.lots.iter().map(|l| crate::fences::bake_fences(&pkg, pkgs, l, &mut fence_styles)).collect();
+    let mut model_keys: Vec<Key> =
+        instances.iter().map(|i| i.model).chain(fences.iter().flatten().map(|f| f.model)).collect::<HashSet<_>>().into_iter().collect();
     model_keys.sort();
     let (_, tex) = write_models(&wdir.join("models.pack"), pkgs, &model_keys, &format!("Converting {name}"), progress)?;
     bake_textures(root, pkgs, &tex, OBJECT_TEX_MAX, &format!("Converting {name}"), progress);
@@ -749,6 +753,11 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         .filter_map(|(i, l)| crate::building::bake_building(&pkg, i, l, placed.get(&l.id).map(|v| v.as_slice()).unwrap_or(&[])))
         .unzip();
     bake_covers(root, pkgs, cover_jobs.into_iter().flatten().collect(), &format!("Converting {name}: walls and floors"), progress);
+    for b in &mut buildings {
+        if let Some(f) = fences.get_mut(b.lot as usize) {
+            b.fences = std::mem::take(f);
+        }
+    }
     let styles: Vec<(Key, bool)> = BUILD_STYLES.iter().map(|k| (*k, false)).collect();
     bake_textures(root, pkgs, &styles, 256, &format!("Converting {name}"), progress);
     progress(&format!("Converting {name}: trees…"));

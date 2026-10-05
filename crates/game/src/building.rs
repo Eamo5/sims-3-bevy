@@ -851,6 +851,7 @@ pub fn empty_building(lot_index: usize, lot: &LotInfo, ground: f32) -> LotBuildi
         ground: Vec::new(),
         pool: Vec::new(),
         pool_depth: 0.0,
+        fences: Vec::new(),
     }
 }
 
@@ -1474,6 +1475,26 @@ pub fn spawn_building(
             place(commands, e, neighbor, 0);
         }
     }
+    // Fences and railings: each run (and post) is its fence's piece, turned along the run.
+    for f in &b.fences {
+        let parts = assets.model(ctx, f.model);
+        if parts.is_empty() {
+            continue;
+        }
+        let (a, c) = (Vec2::from(f.a), Vec2::from(f.b));
+        let y = if f.level == 0 { b.ground_at(a.x, a.y).unwrap_or(level_y(0)) } else { level_y(f.level) };
+        let d = c - a;
+        let turn = if d.length_squared() > 1e-6 { Quat::from_rotation_y((-d.y).atan2(d.x)) } else { Quat::IDENTITY };
+        let tf = Transform::from_translation(active.world(a.x, a.y, y)).with_rotation(active.rot * turn);
+        let e = crate::objects::spawn_parts(commands, &parts, tf);
+        place(commands, e, neighbor, f.level.max(1));
+        // (A run is a barrier along its length, on its own floor.)
+        if d.length_squared() > 1e-6 {
+            let len = d.length();
+            commands.entity(e).insert((crate::nav::Obstacle { half: Vec2::new(len * 0.5, 0.06), center_offset: Vec2::new(len * 0.5, 0.0) }, crate::nav::Floor(f.level.max(1))));
+        }
+    }
+
     // A pool let into the ground: its tiled floor and sides, a stone coping round the edge,
     // and the water (given its material by the water module).
     if !b.pool.is_empty() {

@@ -113,6 +113,9 @@ installation is unreachable.
   and progress to the next); Career (the job and level, hours, days and pay, the performance
   meter and the next promotion); Simology (traits with what they mean, lifetime happiness and
   the rewards bought). F5 to F8 switch tabs.
+- **Fences and railings**: every lot's fences (picket, rail, iron, garden edging) and its porch
+  and balcony railings, from the lot's fence posts and the catalogue's fence pieces (straight
+  and diagonal runs, posts); Sims can't walk through them.
 - **Pools**: the lots' pools (Le Petit Shark Pool Center, the apartments', the gym's, estates')
   are let into the ground with their tiled floors and sides, a stone coping and clear turquoise
   water over the mosaics; the terrain is left open over them. Sims swim from the ladders: they

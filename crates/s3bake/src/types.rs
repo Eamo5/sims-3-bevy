@@ -10,7 +10,7 @@ pub const BAKE_VERSION: u32 = 4;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
 pub const CAS_VERSION: u32 = 9;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 26;
+pub const WORLD_VERSION: u32 = 27;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -313,6 +313,18 @@ pub struct LotBuildingBaked {
     /// ground (metres, negative).
     pub pool: Vec<FloorBaked>,
     pub pool_depth: f32,
+    /// Fence and railing runs (and posts) about the lot.
+    pub fences: Vec<FenceBaked>,
+}
+
+/// A run of fence from `a` to `b` (lot-local, a tile or a diagonal long), or a post (`a == b`),
+/// on a level (0 = the ground), drawn with a model whose run lies along +X.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct FenceBaked {
+    pub a: [f32; 2],
+    pub b: [f32; 2],
+    pub level: u8,
+    pub model: Key,
 }
 
 impl LotBuildingBaked {
