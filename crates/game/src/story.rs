@@ -154,14 +154,20 @@ fn progress(
     let mut aged: Vec<(u64, Age)> = Vec::new();
     let mut died: Vec<u64> = Vec::new();
     for _ in 0..days {
-        // Everyone's record, from the world's to begin with.
+        // Everyone's record, from the world's to begin with (each at some point in their life
+        // stage, so the town doesn't all have its birthdays at once).
         for (w, m) in &world {
-            story.sims.entry(w.id).or_insert_with(|| TownSim {
-                partner: m.partner,
-                spouse: m.spouse,
-                job: m.career.as_ref().map(|(c, l)| (c.clone(), (*l).max(1) as u32)),
-                ..default()
-            });
+            if !story.sims.contains_key(&w.id) {
+                let span = crate::aging::stage_days(crate::premade::age_of(m.age));
+                let t = TownSim {
+                    partner: m.partner,
+                    spouse: m.spouse,
+                    job: m.career.as_ref().map(|(c, l)| (c.clone(), (*l).max(1) as u32)),
+                    days: rng.random_range(0.0..span.max(1.0) * 0.6).floor(),
+                    ..default()
+                };
+                story.sims.insert(w.id, t);
+            }
         }
         let age_of = |story: &TownStory, w: &Who, m: &s3formats::premade::PremadeSim| {
             story.sims.get(&w.id).and_then(|t| t.age.as_deref()).map_or_else(|| crate::premade::age_of(m.age), crate::save::age_from_name)
