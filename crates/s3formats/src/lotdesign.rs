@@ -119,12 +119,12 @@ impl<'a> Grid<'a> {
         Ok(Self { width, depth, levels, cell: data.len() / cells, data })
     }
 
-    /// The four u16 values of a cell (x across, z down, per level).
+    /// The four u16 values of a cell. Cells are stored x-major: `[level][x][z]`.
     pub fn quad(&self, level: u32, x: u32, z: u32) -> Option<[u16; 4]> {
         if x >= self.width || z >= self.depth || level >= self.levels || self.cell < 8 {
             return None;
         }
-        let i = ((level * self.depth + z) * self.width + x) as usize * self.cell;
+        let i = ((level * self.width + x) * self.depth + z) as usize * self.cell;
         let b = self.data.get(i..i + 8)?;
         Some([0, 1, 2, 3].map(|k| u16::from_le_bytes([b[k * 2], b[k * 2 + 1]])))
     }

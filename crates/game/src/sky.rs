@@ -24,6 +24,10 @@ pub struct SkyParams {
     pub params: Vec4,
 }
 
+/// The sky as it is now (for the water to reflect).
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct SkyNow(pub SkyParams);
+
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
 pub struct SkyExt {
     #[uniform(100)]
@@ -51,6 +55,7 @@ impl Plugin for SkyPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "shaders/sky.wgsl");
         app.add_plugins(MaterialPlugin::<SkyMaterial>::default())
+            .init_resource::<SkyNow>()
             .add_systems(Update, (spawn_sky, update_sky).chain().run_if(in_state(AppState::InGame)));
     }
 }
@@ -119,6 +124,7 @@ fn update_sky(
     mut cam: Query<(&GlobalTransform, Option<&mut DistanceFog>), With<SimsCamera>>,
     sun: Query<&GlobalTransform, With<DirectionalLight>>,
     mut mats: ResMut<Assets<SkyMaterial>>,
+    mut now: ResMut<SkyNow>,
 ) {
     let Ok((dome, mut tf)) = dome.single_mut() else { return };
     let Ok((cam_tf, fog)) = cam.single_mut() else { return };
@@ -136,14 +142,15 @@ fn update_sky(
     let zenith = mix(mix(Color::srgb(0.02, 0.03, 0.08), Color::srgb(0.24, 0.45, 0.82), day), Color::srgb(0.30, 0.32, 0.55), twilight * 0.6);
     let horizon = mix(mix(Color::srgb(0.06, 0.08, 0.15), Color::srgb(0.70, 0.82, 0.95), day), Color::srgb(0.98, 0.62, 0.42), twilight * 0.8);
     let sun_color = mix(Color::srgb(1.0, 0.96, 0.85), Color::srgb(1.0, 0.55, 0.30), twilight);
+    now.0 = SkyParams {
+        sun: to_sun.extend(day),
+        zenith: lin(zenith),
+        horizon: lin(horizon),
+        sun_color: lin(sun_color).truncate().extend(twilight),
+        params: Vec4::new(time.elapsed_secs(), dark, 0.45, 0.0),
+    };
     if let Some(mut m) = mats.get_mut(&dome.0) {
-        m.extension.sky = SkyParams {
-            sun: to_sun.extend(day),
-            zenith: lin(zenith),
-            horizon: lin(horizon),
-            sun_color: lin(sun_color).truncate().extend(twilight),
-            params: Vec4::new(time.elapsed_secs(), dark, 0.45, 0.0),
-        };
+        m.extension.sky = now.0;
     }
     // Distant things fade into the horizon.
     if let Some(mut f) = fog {

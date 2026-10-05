@@ -136,6 +136,9 @@ installation is unreachable.
   crouch to collect them, and fish at the lots' fishing spots with the game's casting and
   reeling animations, rod in hand, catching what each spot holds by Fishing skill. Finds go in
   a Collection Journal (J) showing everything found and still to find, and sell for money.
+- **Water**: the sea and the ponds ripple, reflect the sky and the sun's glints (more at
+  grazing angles), deepen in colour with the depth of water over the ground, and turn clear
+  and turquoise in the shallows with a line of foam on the shore.
 - **Ponds**: the lots' own sculpted ground and water tables give Sunset Valley its ponds
   and lakes (Summer Hill Springs with its island and bridge, Central Park's twin ponds,
   Crystal Springs between its rocky hills, Stoney Falls, Pinochle Pond, the estates' pools);

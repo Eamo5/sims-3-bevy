@@ -99,6 +99,9 @@ pub struct TerrainBuild {
     pub layer_avg: [Vec4; 16],
     /// The water of each pond.
     pub ponds: Vec<Mesh>,
+    /// The heights, for the water's depth.
+    pub heights: Image,
+    pub height_scale: f32,
 }
 
 /// A pond's water surface: every lot-grid cell touching water, flat at its water level (the
@@ -228,6 +231,8 @@ pub fn build_terrain(world: &WorldBaked) -> TerrainBuild {
         lightmap: world.lightmap.as_ref().filter(|m| m.size as usize == cells).map(|m| world_map_image(m, false)),
         layer_avg: std::array::from_fn(|i| world.layer_avg.get(i).map_or(Vec4::splat(0.2), |c| Vec3::from(*c).extend(1.0))),
         ponds: world.ponds.iter().filter_map(|p| Some(pond_mesh(p, &world.lots.get(p.lot as usize)?.info))).collect(),
+        heights: crate::water::height_image(hm),
+        height_scale: hm.scale,
     }
 }
 
@@ -295,7 +300,7 @@ fn spawn_terrain(
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut terrain_mats: ResMut<Assets<TerrainMaterial>>,
-    mut std_mats: ResMut<Assets<StandardMaterial>>,
+    mut water_mats: ResMut<Assets<crate::water::WaterMaterial>>,
 ) {
     let layers = images.add(build.layers.take().unwrap_or_else(|| {
         let mut img = Image::new(
@@ -350,29 +355,16 @@ fn spawn_terrain(
         ));
     }
 
-    // The sea: a large translucent plane at sea level.
+    // The sea, out past the world's edge, and the ponds (greener, stiller).
     let world = build.world_size;
-    commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(world * 6.0, world * 6.0))),
-        MeshMaterial3d(std_mats.add(StandardMaterial {
-            base_color: Color::srgba(0.10, 0.36, 0.48, 0.78),
-            perceptual_roughness: 0.08,
-            reflectance: 0.6,
-            alpha_mode: AlphaMode::Blend,
-            ..default()
-        })),
-        Transform::from_xyz(world * 0.5, build.sea_level, world * 0.5),
-        DespawnOnExit(AppState::InGame),
-    ));
-    // Ponds: still, greener water.
-    let pond = std_mats.add(StandardMaterial {
-        base_color: Color::srgba(0.10, 0.27, 0.26, 0.82),
-        perceptual_roughness: 0.06,
-        reflectance: 0.55,
-        alpha_mode: AlphaMode::Blend,
-        ..default()
-    });
+    let heights = images.add(std::mem::replace(&mut build.heights, Image::default()));
+    let ripples = images.add(crate::water::ripple_image());
+    let samples = world as u32 + 1;
+    let sea = water_mats.add(crate::water::water_material(heights.clone(), ripples.clone(), samples, build.height_scale, false));
+    let plane = meshes.add(Plane3d::default().mesh().size(world * 6.0, world * 6.0).subdivisions(64));
+    crate::water::spawn_water(&mut commands, plane, sea, Transform::from_xyz(world * 0.5, build.sea_level, world * 0.5));
+    let pond = water_mats.add(crate::water::water_material(heights, ripples, samples, build.height_scale, true));
     for m in build.ponds.drain(..) {
-        commands.spawn((Mesh3d(meshes.add(m)), MeshMaterial3d(pond.clone()), Transform::default(), DespawnOnExit(AppState::InGame)));
+        crate::water::spawn_water(&mut commands, meshes.add(m), pond.clone(), Transform::default());
     }
 }

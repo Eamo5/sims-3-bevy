@@ -620,6 +620,8 @@ u32 w            // lot width (tiles) or width+1 (vertices)
 u32 h
 u32 levels
 payload = w × h × levels × bytesPerCell     (sizes verified for the Goth lot, 60×60, 7 levels)
+cells are x-major: index = (level × w + x) × h + z   [VERIFIED: Old Pier Beach's 61×38 paving,
+                                                      Summer Hill Springs' pond vs its fishing spots]
 ```
 | group | grid | bytes/cell | Goth lot sample | guess |
 |---|---|---|---|---|
@@ -829,7 +831,8 @@ Per lot (instance = lot id) in the world file, with REFS = `0x05ED1226:0:lot`:
 * **Palettes** `0xF12E5E12`: `u32 version (2), 16 zero bytes, u32 count`, then
   `u16 REFS index, u32 palette id, u32 painted area`.
 * **Floors.** Grid `0xB125533A:0x0093DEB7`: `u32 1, u32 w, u32 d, u32 levels` then
-  `levels × d × w` cells of four `u16` palette ids (one per tile triangle); `w × d` is the lot
+  `levels × w × d` cells (x-major: `[level][x][z]`, like every 0xB125533A grid; read z-major,
+  non-square lots come out as stripes) of four `u16` palette ids (one per tile triangle); `w × d` is the lot
   plus one row and column. Grid level 0 is paving on the ground (driveways often use the
   `Floor_Misc_TarRoof` pattern). Without a foundation, storey `n` is grid level `n`; on a
   foundation, grid level 1 is the foundation's own top (often the unpainted `Floor_Foundation`
