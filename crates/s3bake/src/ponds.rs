@@ -7,7 +7,7 @@ use s3formats::lot::LotTerrain;
 use s3formats::world::{Heightmap, LotInfo};
 use s3pkg::Package;
 
-use crate::types::{LotBuildingBaked, PondBaked};
+use crate::types::PondBaked;
 
 /// A lot's ground level and its base height: the level whose edge, set on the base that best
 /// fits the world terrain along the lot's edge, sits nearest the lot's own height; with how
@@ -44,19 +44,12 @@ pub fn ground_level(t: &LotTerrain, lot: &LotInfo, hm: &Heightmap) -> Option<(us
 
 /// Carves each lot's dips (all of a pond lot's ground around the water) into `hm` and returns the
 /// lots' water. Ground under a house's floors is left alone.
-pub fn carve_ponds(pkg: &Package, lots: &[LotInfo], buildings: &[LotBuildingBaked], hm: &mut Heightmap) -> Vec<PondBaked> {
+pub fn carve_ponds(pkg: &Package, lots: &[LotInfo], hm: &mut Heightmap) -> Vec<PondBaked> {
     let mut out = Vec::new();
     for (i, lot) in lots.iter().enumerate() {
         let Some(t) = LotTerrain::load(pkg, lot.id) else { continue };
         let no_water = vec![-100.0; t.nx * t.nz];
         let water = t.water.as_ref().unwrap_or(&no_water);
-        // Cells under a house's floors (with a tile around them).
-        let housed: std::collections::HashSet<(i64, i64)> = buildings
-            .iter()
-            .filter(|b| b.lot as usize == i)
-            .flat_map(|b| b.floors.iter().filter(|f| f.level >= 1))
-            .flat_map(|f| (-1..=1).flat_map(move |dx| (-1..=1).map(move |dz| (f.x as i64 + dx, f.z as i64 + dz))))
-            .collect();
         let (s, c) = lot.rotation.sin_cos();
         let to_world = |x: f32, z: f32| (lot.corner[0] + x * c + z * s, lot.corner[2] - x * s + z * c);
         // The ground level, and the lot's base height: set on the base that best fits the world
@@ -100,17 +93,7 @@ pub fn carve_ponds(pkg: &Package, lots: &[LotInfo], buildings: &[LotBuildingBake
         let g = &t.levels[ground];
         let wet = |k: usize| water[k] > g[k] + 0.01;
         let pond = (0..t.nx * t.nz).filter(|&k| wet(k)).count() >= 4;
-        // Carve the lot's ground into the world around the water (the rest of the lot is left
-        // as the world has it, so floors and foundations aren't disturbed).
-        let near_water = |lx: f32, lz: f32| {
-            let (cx, cz) = (lx.round() as i64, lz.round() as i64);
-            (-2..=2).any(|dx| {
-                (-2..=2).any(|dz| {
-                    let (x, z) = (cx + dx, cz + dz);
-                    x >= 0 && z >= 0 && (x as usize) < t.nx && (z as usize) < t.nz && wet(x as usize * t.nz + z as usize)
-                })
-            })
-        };
+        // The lot's ground into the world.
         let corners = [(0.0, 0.0), (t.nx as f32 - 1.0, 0.0), (0.0, t.nz as f32 - 1.0), (t.nx as f32 - 1.0, t.nz as f32 - 1.0)].map(|(x, z)| to_world(x, z));
         let (x0, x1) = corners.iter().fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p.0), b.max(p.0)));
         let (z0, z1) = corners.iter().fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p.1), b.max(p.1)));
@@ -134,9 +117,7 @@ pub fn carve_ponds(pkg: &Package, lots: &[LotInfo], buildings: &[LotBuildingBake
                 let h = base + ground_at(lx, lz);
                 let v = (h / hm.scale).round().clamp(0.0, 65535.0) as u16;
                 let k = iz * hm.width + ix;
-                // The lot's own ground is the ground (its edges meet the world's): its dips and
-                // rises both, and level under its house.
-                let _ = (&housed, pond);
+                // (The lot's own ground is the ground: its edges meet the world's.)
                 if hm.data[k] != v {
                     hm.data[k] = v;
                     carved += 1;

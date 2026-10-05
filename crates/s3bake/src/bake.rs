@@ -778,7 +778,7 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         .unwrap_or_default();
 
     let mut heightmap = world.heightmap.clone();
-    let ponds = crate::ponds::carve_ponds(&pkg, &world.lots, &buildings, &mut heightmap);
+    let ponds = crate::ponds::carve_ponds(&pkg, &world.lots, &mut heightmap);
     // Pools are let into the ground: the terrain is open over them, and dug down under them
     // (for the water's depth and to keep Sims out).
     let mut terrain_holes = Vec::new();
