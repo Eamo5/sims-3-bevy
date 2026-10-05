@@ -47,7 +47,7 @@ pub fn stage_days(age: Age) -> f32 {
     }
 }
 
-fn next_age(age: Age) -> Option<Age> {
+pub fn next_age(age: Age) -> Option<Age> {
     match age {
         Age::Baby => Some(Age::Toddler),
         Age::Toddler => Some(Age::Child),
@@ -59,7 +59,7 @@ fn next_age(age: Age) -> Option<Age> {
     }
 }
 
-fn age_word(age: Age) -> &'static str {
+pub fn age_word(age: Age) -> &'static str {
     match age {
         Age::Baby => "a baby",
         Age::Toddler => "a toddler",

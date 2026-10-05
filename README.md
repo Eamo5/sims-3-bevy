@@ -184,6 +184,11 @@ installation is unreachable.
   alone, a babysitter arrives by car, feeds them, changes them and plays with them, and goes
   home (paid §10 an hour) once someone's back. Visitors don't sleep in the family's beds or
   use its shower.
+- **Story progression**: the rest of the town lives on. Each morning the world's other Sims
+  grow older (elders passing away in time), single grown-ups pair off and couples marry,
+  married couples have babies, and grown-ups find jobs and are promoted. The household hears
+  about Sims it knows, the morning paper carries the town's news, and it's all kept in saves:
+  the town's Sims come back older (or not at all) when the game is loaded.
 - **Social worker**: a baby or toddler left starving for six hours, or a child for twelve
   (warned halfway), brings the social worker by car; she takes the child away and the family
   is heartbroken. She also brings adopted children: the phone's "Adopt a Child ›" (a baby —

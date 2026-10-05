@@ -156,6 +156,9 @@ pub struct SaveGame {
     /// Produce the household has grown to perfection.
     #[serde(default)]
     pub perfect_produce: Vec<String>,
+    /// How the rest of the town has moved on.
+    #[serde(default)]
+    pub town: crate::story::TownStory,
     /// The household's collection journal.
     #[serde(default)]
     pub collection: crate::collecting::Collection,
@@ -226,15 +229,7 @@ impl SaveGame {
             first: s.first.clone(),
             last: s.last.clone(),
             female: s.female,
-            age: match s.age.as_str() {
-                "Baby" => Age::Baby,
-                "Toddler" => Age::Toddler,
-                "Child" => Age::Child,
-                "Teen" => Age::Teen,
-                "Adult" => Age::Adult,
-                "Elder" => Age::Elder,
-                _ => Age::YoungAdult,
-            },
+            age: age_from_name(&s.age),
             traits: s.traits.iter().filter_map(|t| Trait::from_name(t)).collect(),
             weight: s.shape.map_or(0.0, |x| x.0),
             fitness: s.shape.map_or(0.0, |x| x.1),
@@ -300,7 +295,20 @@ fn rgb(c: Color) -> [f32; 3] {
     [s.red, s.green, s.blue]
 }
 
-fn age_name(a: Age) -> &'static str {
+/// A life stage from its saved name.
+pub fn age_from_name(s: &str) -> Age {
+    match s {
+        "Baby" => Age::Baby,
+        "Toddler" => Age::Toddler,
+        "Child" => Age::Child,
+        "Teen" => Age::Teen,
+        "Adult" => Age::Adult,
+        "Elder" => Age::Elder,
+        _ => Age::YoungAdult,
+    }
+}
+
+pub fn age_name(a: Age) -> &'static str {
     match a {
         Age::Baby => "Baby",
         Age::Toddler => "Toddler",
@@ -386,6 +394,7 @@ fn save_game(
     ),
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
+    story: Res<crate::story::TownStory>,
 ) {
     if requests.read().count() == 0 {
         return;
@@ -462,6 +471,7 @@ fn save_game(
         },
         plants: ui.as_deref().map(|u| crate::gardening::saved_plants(&plants, &u.data)).unwrap_or_default(),
         perfect_produce: garden.as_deref().map(|g| g.perfect.clone()).unwrap_or_default(),
+        town: story.clone(),
         collection: collection.clone(),
         graves: graves
             .iter()
@@ -623,6 +633,7 @@ fn apply_loaded_game(
     }
     commands.insert_resource(crate::building::LotPaint(game.paint.clone()));
     commands.insert_resource(crate::gardening::PendingPlants(game.plants.clone(), game.seeds.clone(), game.perfect_produce.clone()));
+    commands.insert_resource(game.town.clone());
     commands.insert_resource(game.collection.clone());
     // The household's dead, back in their graves.
     if let Some(entry) = data.0.catalog.iter().find(|c| c.instance_name == "UrnstoneHuman") {

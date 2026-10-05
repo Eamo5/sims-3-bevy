@@ -1447,8 +1447,12 @@ fn run_actions(
                                         Special::EatMeal => {
                                             commands.entity(me).insert(crate::meals::MealRequest::Ate);
                                         }
-                                        Special::CleanUp | Special::ReadPaper => {
+                                        Special::CleanUp => {
                                             commands.entity(*target).try_despawn();
+                                        }
+                                        Special::ReadPaper => {
+                                            commands.entity(*target).try_despawn();
+                                            commands.entity(me).insert(crate::story::ReadTheNews);
                                         }
                                         Special::Water => {
                                             commands.entity(me).insert(crate::gardening::GardenRequest::Water(*target));

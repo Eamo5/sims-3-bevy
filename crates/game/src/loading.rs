@@ -180,7 +180,9 @@ fn start_loading(
 ) {
     let members: Vec<crate::sim::Sim> = pending.as_ref().map(|p| p.members.clone()).unwrap_or_default();
     let playing: Option<u64> = pending.as_ref().and_then(|p| p.premade.as_ref()).map(|h| h.id);
-    let known: Option<Vec<crate::sim::Sim>> = save.map(|s| s.0.known_sims());
+    let known: Option<Vec<crate::sim::Sim>> = save.as_ref().map(|s| s.0.known_sims());
+    // The town as the save left it.
+    let story: crate::story::TownStory = save.as_ref().map(|s| s.0.town.clone()).unwrap_or_default();
     commands.spawn((Camera2d, DespawnOnExit(AppState::Loading)));
     commands
         .spawn((
@@ -258,7 +260,7 @@ fn start_loading(
         // The town's own Sims stroll past and come to visit.
         let town: Vec<crate::sim::Sim> = premades
             .as_ref()
-            .map(|p| crate::premade::TownPremades(p.clone()).others(playing).into_iter().map(crate::premade::to_sim).collect())
+            .map(|p| crate::premade::TownPremades(p.clone()).others(playing).into_iter().map(crate::premade::to_sim).filter_map(|s| story.apply(s)).collect())
             .unwrap_or_default();
         let sims = crate::simbody::prepare_sims(&baked, &cas, &members, known.as_deref(), &town);
         let info = WorldInfo {
