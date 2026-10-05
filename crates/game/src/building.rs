@@ -66,6 +66,9 @@ pub struct ActiveBuilding {
     pub built: HashSet<u32>,
     /// No imposter stands in for the house from afar (an empty lot built on, or a house rebuilt).
     pub always_detailed: bool,
+    /// The house's own stairs and lifts, and the staircases the household built.
+    base_stairs: Vec<StairLink>,
+    pub built_stairs: Vec<BuiltStairs>,
 }
 
 impl ActiveBuilding {
@@ -429,6 +432,9 @@ pub enum PaintOp {
     /// A floor tile laid; `region` groups a room's tiles for painting (0 = a tile on its own).
     AddFloor { level: u8, x: u16, z: u16, region: u16 },
     RemoveFloor { level: u8, x: u16, z: u16 },
+    /// A staircase built (see [`BuiltStairs`]), or the one standing on tile (`x`, `z`) taken away.
+    AddStairs { x: u16, z: u16, dir: u8, level: u8 },
+    RemoveStairs { x: u16, z: u16, level: u8 },
 }
 
 /// The active house's repaintings since it was built (kept in saves).
@@ -452,6 +458,7 @@ pub fn repaint(
     let mut floors_changed = false;
     let mut walls_changed: BTreeSet<u32> = BTreeSet::new();
     let mut structure = false;
+    let mut stairs_changed = false;
     for op in ops {
         apply_paint(&mut b.data, op);
         let last = b.data.walls.len().saturating_sub(1) as u32;
@@ -483,7 +490,26 @@ pub fn repaint(
                 walls_changed.extend([wall, last]);
                 structure = true;
             }
+            PaintOp::AddStairs { x, z, dir, level } => {
+                b.built_stairs.push(BuiltStairs { x, z, dir, level });
+                stairs_changed = true;
+            }
+            PaintOp::RemoveStairs { x, z, level } => {
+                let at = IVec2::new(x as i32, z as i32);
+                b.built_stairs.retain(|s| !(s.level == level && s.tiles().contains(&at)));
+                stairs_changed = true;
+            }
         }
+    }
+    if b.data.levels.len() > b.levels.len() {
+        b.levels = b.data.levels.clone();
+    }
+    // Floors with something on them are in view (and walkable).
+    let highest = b.data.walls.iter().map(|w| w.level).chain(b.data.floors.iter().map(|f| f.level)).max().unwrap_or(1);
+    b.top_level = b.top_level.max(highest.min(b.levels.len().saturating_sub(1) as u8));
+    if stairs_changed {
+        respawn_stairs(commands, b, assets, ctx, pieces);
+        b.always_detailed = true;
     }
     if floors_changed {
         b.reindex();
@@ -491,16 +517,12 @@ pub fn repaint(
     if structure {
         walls_changed.extend(restyle(b));
         b.always_detailed = true;
-        if b.data.levels.len() > b.levels.len() {
-            b.levels = b.data.levels.clone();
-        }
         // Cutaway works around the middle of the walls.
         let mids: Vec<Vec2> = b.data.walls.iter().filter(|w| Vec2::from(w.a) != Vec2::from(w.b)).map(|w| (Vec2::from(w.a) + Vec2::from(w.b)) * 0.5).collect();
         if !mids.is_empty() {
             let c = mids.iter().copied().sum::<Vec2>() / mids.len() as f32;
             b.center = b.world(c.x, c.y, b.corner.y);
         }
-        b.top_level = b.top_level.max(b.data.walls.iter().map(|w| w.level).max().unwrap_or(1).min(b.levels.len().saturating_sub(1) as u8));
     }
     respawn_walls(commands, b, assets, ctx, &walls_changed, pieces);
     if floors_changed {
@@ -779,6 +801,13 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
             }),
         },
         PaintOp::RemoveFloor { level, x, z } => b.floors.retain(|f| !(f.level == level && f.x == x && f.z == z)),
+        PaintOp::AddStairs { level, .. } => {
+            while b.levels.len() <= level as usize + 1 {
+                let top = b.levels[b.levels.len() - 1];
+                b.levels.push(top + s3bake::building::LEVEL_HEIGHT);
+            }
+        }
+        PaintOp::RemoveStairs { .. } => {}
     }
 }
 
@@ -902,6 +931,99 @@ fn spawn_wall(
 #[derive(Component)]
 pub struct WallPiece(pub u32);
 
+/// The steps of a straight staircase from `bottom` running `run` along `d` (lot-local), from
+/// floor height `y0` up to `y1`.
+fn stair_mesh(active: &ActiveBuilding, bottom: Vec2, d: Vec2, run: f32, y0: f32, y1: f32) -> Mesh {
+    let side = Vec2::new(-d.y, d.x) * 0.5;
+    let steps = ((y1 - y0) / 0.25).round().max(1.0) as usize;
+    let mut buf = MeshBuf::default();
+    let w = |q: Vec2, y: f32| active.world(q.x, q.y, y);
+    for i in 0..steps {
+        let (t0, t1) = (i as f32 / steps as f32, (i + 1) as f32 / steps as f32);
+        let a = bottom + d * (run * t0);
+        let c = bottom + d * (run * t1);
+        let h = y0 + (y1 - y0) * t1;
+        // Tread.
+        buf.quad([w(a - side, h), w(a + side, h), w(c + side, h), w(c - side, h)], [[0.0, t0 * run], [1.0, t0 * run], [1.0, t1 * run], [0.0, t1 * run]], Vec3::Y);
+        // Riser.
+        let back = active.dir(-d.x, -d.y);
+        let hb = y0 + (y1 - y0) * t0;
+        buf.quad([w(a - side, hb), w(a + side, hb), w(a + side, h), w(a - side, h)], [[0.0, 0.0], [1.0, 0.0], [1.0, 0.25], [0.0, 0.25]], back);
+        // Sides down to the floor.
+        for sgn in [-1.0f32, 1.0] {
+            let n = active.dir(side.x * sgn * 2.0, side.y * sgn * 2.0);
+            let e = side * sgn;
+            buf.quad([w(a + e, y0), w(c + e, y0), w(c + e, h), w(a + e, h)], [[t0 * run, 1.0], [t1 * run, 1.0], [t1 * run, 0.0], [t0 * run, 0.0]], n);
+        }
+    }
+    buf.mesh()
+}
+
+/// A staircase the household built: four tiles from tile (`x`, `z`) on `level` up along `dir`
+/// (0 = +x, 1 = +z, 2 = -x, 3 = -z) to the floor above.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct BuiltStairs {
+    pub x: u16,
+    pub z: u16,
+    pub dir: u8,
+    pub level: u8,
+}
+
+/// How far a built staircase runs (tiles).
+pub const STAIR_RUN: i32 = 4;
+
+impl BuiltStairs {
+    pub fn step(dir: u8) -> IVec2 {
+        [IVec2::X, IVec2::Y, IVec2::NEG_X, IVec2::NEG_Y][(dir & 3) as usize]
+    }
+
+    /// The tiles it stands on, bottom first.
+    pub fn tiles(&self) -> Vec<IVec2> {
+        let s = Self::step(self.dir);
+        (0..STAIR_RUN).map(|k| IVec2::new(self.x as i32, self.z as i32) + s * k).collect()
+    }
+
+    /// The tile it arrives at upstairs.
+    pub fn landing(&self) -> IVec2 {
+        IVec2::new(self.x as i32, self.z as i32) + Self::step(self.dir) * STAIR_RUN
+    }
+
+    /// Where its steps start (lot-local) and which way they climb.
+    fn bottom(&self) -> (Vec2, Vec2) {
+        let d = Self::step(self.dir).as_vec2();
+        (Vec2::new(self.x as f32 + 0.5, self.z as f32 + 0.5) - d * 0.5, d)
+    }
+}
+
+/// Marks the entities of the household's own staircases (as a [`WallPiece`] index).
+pub const STAIRS_PIECE: u32 = u32::MAX;
+
+/// Spawns the household's staircases and links the floors they join.
+fn respawn_stairs(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut ObjectAssets, ctx: &mut AssetCtx, pieces: &Query<(Entity, &WallPiece)>) {
+    for (e, p) in pieces {
+        if p.0 == STAIRS_PIECE {
+            commands.entity(e).despawn();
+        }
+    }
+    let mat = surface_material(assets, ctx, STYLE_FLOOR_DECK);
+    let mut links = b.base_stairs.clone();
+    for s in b.built_stairs.clone() {
+        let (bottom, d) = s.bottom();
+        let run = STAIR_RUN as f32;
+        let (Some(&y0), Some(&y1)) = (b.levels.get(s.level as usize), b.levels.get(s.level as usize + 1)) else { continue };
+        commands.spawn((
+            Mesh3d(ctx.meshes.add(stair_mesh(b, bottom, d, run, y0, y1))),
+            MeshMaterial3d(mat.clone()),
+            BuildingPiece { level: s.level },
+            WallPiece(STAIRS_PIECE),
+            DespawnOnExit(AppState::InGame),
+        ));
+        let bw = |q: Vec2| b.world(q.x, q.y, 0.0).xz();
+        links.push(StairLink { level: s.level, upper: s.level + 1, bottom: bw(bottom - d * 0.45), top: bw(bottom + d * (run + 0.45)), y0, y1 });
+    }
+    b.stairs = links;
+}
+
 /// Spawns the detailed house of `lot` with all its furniture and returns its state. With a
 /// `neighbor` root, it's built for show only (merged meshes, furniture without gameplay).
 #[allow(clippy::too_many_arguments)]
@@ -938,6 +1060,8 @@ pub fn spawn_building(
         holes: Vec::new(),
         built: HashSet::new(),
         always_detailed: !b.is_house(),
+        base_stairs: Vec::new(),
+        built_stairs: Vec::new(),
     };
     let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);
     let exterior = STYLE_EXTERIOR[(lot.id % STYLE_EXTERIOR.len() as u64) as usize];
@@ -1045,30 +1169,7 @@ pub fn spawn_building(
         let (y0, y1) = (level_y(lower), level_y(upper_level));
         let bottom = p - d * 0.5;
         let top = bottom + d * run;
-        let side = Vec2::new(-d.y, d.x) * 0.5;
-        let steps = ((y1 - y0) / 0.25).round().max(1.0) as usize;
-        let mut buf = MeshBuf::default();
-        for i in 0..steps {
-            let (t0, t1) = (i as f32 / steps as f32, (i + 1) as f32 / steps as f32);
-            let a = bottom + d * (run * t0);
-            let c = bottom + d * (run * t1);
-            let h = y0 + (y1 - y0) * t1;
-            let w = |q: Vec2, y: f32| active.world(q.x, q.y, y);
-            let up3 = Vec3::Y;
-            // Tread.
-            buf.quad([w(a - side, h), w(a + side, h), w(c + side, h), w(c - side, h)], [[0.0, t0 * run], [1.0, t0 * run], [1.0, t1 * run], [0.0, t1 * run]], up3);
-            // Riser.
-            let back = active.dir(-d.x, -d.y);
-            let hb = y0 + (y1 - y0) * t0;
-            buf.quad([w(a - side, hb), w(a + side, hb), w(a + side, h), w(a - side, h)], [[0.0, 0.0], [1.0, 0.0], [1.0, 0.25], [0.0, 0.25]], back);
-            // Sides down to the floor.
-            for sgn in [-1.0f32, 1.0] {
-                let n = active.dir(side.x * sgn * 2.0, side.y * sgn * 2.0);
-                let e = side * sgn;
-                buf.quad([w(a + e, y0), w(c + e, y0), w(c + e, h), w(a + e, h)], [[t0 * run, 1.0], [t1 * run, 1.0], [t1 * run, 0.0], [t0 * run, 0.0]], n);
-            }
-        }
-        let e = commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(stair_mat.clone()))).id();
+        let e = commands.spawn((Mesh3d(ctx.meshes.add(stair_mesh(&active, bottom, d, run, y0, y1))), MeshMaterial3d(stair_mat.clone()))).id();
         place(commands, e, neighbor, if storey { lower } else { 0 });
         if storey && neighbor.is_none() {
             let bw = |q: Vec2| active.world(q.x, q.y, 0.0).xz();
@@ -1175,6 +1276,7 @@ pub fn spawn_building(
         }
     }
     active.holes = holes;
+    active.base_stairs = active.stairs.clone();
     // Cutaway and imposter swaps work around the middle of the walls, not of the lot.
     let mids: Vec<Vec2> = b.walls.iter().map(|w| (Vec2::from(w.a) + Vec2::from(w.b)) * 0.5).collect();
     if !mids.is_empty() {

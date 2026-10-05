@@ -36,6 +36,9 @@ pub struct AutoArgs {
     pub build: Option<[i32; 4]>,
     /// `--knock <x0,z0,x1,z1>`: knock down the walls along that grid line.
     pub knock: Option<[i32; 4]>,
+    /// `--storey`: after `--build`, stairs up inside the room, a floor and room above, and the
+    /// selected Sim sent upstairs.
+    pub storey: bool,
     /// `--relations`: open the Relationships panel.
     pub relations: bool,
     /// `--balloon <kind>:<icon>[:<axis>]`: keep showing this balloon over the selected Sim
@@ -104,6 +107,11 @@ impl AutoArgs {
                 }
                 "--paint" => {
                     a.paint = true;
+                    i += 1;
+                    continue;
+                }
+                "--storey" => {
+                    a.storey = true;
                     i += 1;
                     continue;
                 }
@@ -440,6 +448,8 @@ fn auto_build(
         Option<ResMut<crate::interact::Household>>,
         ResMut<crate::interact::Notifications>,
     ),
+    mut sel: Query<(&mut crate::interact::ActionQueue, &Transform, &crate::nav::Floor, Option<&crate::nav::PathFollow>), With<crate::sim::Selected>>,
+    mut last_log: Local<f32>,
 ) {
     if args.build.is_none() && args.knock.is_none() {
         return;
@@ -507,6 +517,34 @@ fn auto_build(
             buy.tool = Some(crate::build::BuildTool::Wall);
             *stage = 2;
         }
+        3 if time.elapsed_secs() - t0 > 6.0 => {
+            *stage = 4;
+            if !args.storey {
+                return;
+            }
+            let level = b.view_level;
+            match crate::build::plan_stairs(b, level, IVec2::new(x + 1, z + 1), 0, false) {
+                Ok(ops) => {
+                    info!("build test: stairs — {} ops", ops.len());
+                    apply(&mut commands, &mut assets, b, &mut ctx, ops);
+                }
+                Err(why) => warn!("build test: stairs: {why}"),
+            }
+            let (ops, cost) = crate::build::plan(b, crate::build::BuildTool::Floor, false, level + 1, IVec2::new(x, z), IVec2::new(x + w - 1, z + d - 1));
+            info!("build test: upstairs floor — {} tiles, §{cost}", ops.len());
+            apply(&mut commands, &mut assets, b, &mut ctx, ops);
+            let (ops, cost) = crate::build::plan(b, crate::build::BuildTool::Room, false, level + 1, IVec2::new(x, z), IVec2::new(x + w, z + d));
+            info!("build test: upstairs room — {} ops, §{cost}", ops.len());
+            apply(&mut commands, &mut assets, b, &mut ctx, ops);
+            if let Some(g) = grid.as_mut() {
+                g.dirty = true;
+            }
+            let to = b.world(x as f32 + w as f32 - 1.5, z as f32 + d as f32 - 1.5, 0.0).xz();
+            if let Ok((mut q, ..)) = sel.single_mut() {
+                q.0.clear();
+                q.0.push_back(crate::interact::Action::new("Go Here", crate::interact::ActionKind::GoHere(to, level + 1), false));
+            }
+        }
         2 if time.elapsed_secs() - t0 > 5.0 => {
             *stage = 3;
             let Some([x0, z0, x1, z1]) = args.knock else { return };
@@ -518,6 +556,20 @@ fn auto_build(
             apply(&mut commands, &mut assets, b, &mut ctx, ops);
             if let Some(g) = grid.as_mut() {
                 g.dirty = true;
+            }
+        }
+        4 if args.storey && time.elapsed_secs() - *last_log > 4.0 => {
+            *last_log = time.elapsed_secs();
+            if let Ok((q, tf, floor, path)) = sel.single() {
+                info!(
+                    "build test: selected at {:.1},{:.1},{:.1} floor {} — {:?}, path {:?}",
+                    tf.translation.x,
+                    tf.translation.y,
+                    tf.translation.z,
+                    floor.0,
+                    q.0.front().map(|a| (&a.label, a.phase)),
+                    path.map(|p| p.waypoints.len())
+                );
             }
         }
         _ => {}

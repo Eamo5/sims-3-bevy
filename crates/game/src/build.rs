@@ -23,26 +23,30 @@ impl Plugin for BuildPlugin {
     }
 }
 
-/// What a wall section and a floor tile cost (floors laid when a room is closed come free).
+/// What a wall section, a floor tile and a staircase cost (floors laid when a room is closed
+/// come free).
 pub const WALL_PRICE: i64 = 70;
 pub const FLOOR_PRICE: i64 = 5;
+pub const STAIRS_PRICE: i64 = 300;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BuildTool {
     Wall,
     Room,
     Floor,
+    Stairs,
     Sledgehammer,
 }
 
 impl BuildTool {
-    pub const ALL: [BuildTool; 4] = [BuildTool::Wall, BuildTool::Room, BuildTool::Floor, BuildTool::Sledgehammer];
+    pub const ALL: [BuildTool; 5] = [BuildTool::Wall, BuildTool::Room, BuildTool::Floor, BuildTool::Stairs, BuildTool::Sledgehammer];
 
     pub fn label(self) -> String {
         match self {
             BuildTool::Wall => format!("Wall Tool\n§{WALL_PRICE} a section"),
             BuildTool::Room => format!("Room Tool\n§{WALL_PRICE} a section"),
             BuildTool::Floor => format!("Floor Tiles\n§{FLOOR_PRICE} a tile"),
+            BuildTool::Stairs => format!("Staircase\n§{STAIRS_PRICE}"),
             BuildTool::Sledgehammer => "Sledgehammer\nknock down walls".to_string(),
         }
     }
@@ -52,6 +56,7 @@ impl BuildTool {
             BuildTool::Wall => "Drag along the grid to build a wall; Ctrl+drag knocks one down. Closing off a room lays its floor.",
             BuildTool::Room => "Drag out a rectangle to build a room's four walls; Ctrl+drag knocks them down.",
             BuildTool::Floor => "Drag out a rectangle of floor tiles; Ctrl+drag takes them up.",
+            BuildTool::Stairs => "Click to put in a staircase up to the next floor (its landing gets a floor); , and . turn it; Ctrl+click takes one away.",
             BuildTool::Sledgehammer => "Drag along a wall to knock it down.",
         }
         .to_string()
@@ -59,10 +64,12 @@ impl BuildTool {
     }
 }
 
-/// Where the current drag started (a grid point, or a tile for floors).
+/// Where the current drag started (a grid point, or a tile for floors), and which way a
+/// staircase climbs.
 #[derive(Default)]
 struct Drag {
     start: Option<IVec2>,
+    stair_dir: u8,
 }
 
 /// The price of what's being dragged out, next to the pointer.
@@ -222,6 +229,55 @@ pub fn sell_openings(
     }
 }
 
+/// A staircase on `level` from tile `at` climbing along `dir`: its ops (opening the stairwell
+/// above and flooring the landing), or why it can't go there. Taking one away instead when
+/// `removing`.
+pub fn plan_stairs(b: &ActiveBuilding, level: u8, at: IVec2, dir: u8, removing: bool) -> Result<Vec<PaintOp>, &'static str> {
+    if removing {
+        return match b.built_stairs.iter().find(|s| s.level == level && s.tiles().contains(&at)) {
+            Some(_) => Ok(vec![PaintOp::RemoveStairs { x: at.x as u16, z: at.y as u16, level }]),
+            None => Err("There's no staircase you built there."),
+        };
+    }
+    let s = crate::building::BuiltStairs { x: at.x as u16, z: at.y as u16, dir, level };
+    let (w, d) = (b.data.width as i32, b.data.depth as i32);
+    let inside = |t: IVec2| t.x >= 0 && t.y >= 0 && t.x < w && t.y < d;
+    let tiles = s.tiles();
+    let landing = s.landing();
+    if !tiles.iter().all(|t| inside(*t)) || !inside(landing) {
+        return Err("The staircase doesn't fit on the lot there.");
+    }
+    let has_floor = |l: u8, t: IVec2| b.data.floors.iter().any(|f| f.level == l && f.x as i32 == t.x && f.z as i32 == t.y);
+    if level > 1 && !tiles.iter().all(|t| has_floor(level, *t)) {
+        return Err("Stairs upstairs need floor under them.");
+    }
+    if b.built_stairs.iter().any(|o| o.level == level && o.tiles().iter().any(|t| tiles.contains(t))) {
+        return Err("There's a staircase there already.");
+    }
+    // Nothing walled across the way up (or onto the landing).
+    let step = crate::building::BuiltStairs::step(dir);
+    let across = |l: u8, from: IVec2| {
+        // The grid edge between tile `from` and the next one up the stairs.
+        let c = from.as_vec2() + Vec2::splat(0.5) + step.as_vec2() * 0.5;
+        let half = step.as_vec2().perp() * 0.5;
+        wall_along(&b.data, l, c - half, c + half).is_some()
+    };
+    if tiles[..tiles.len() - 1].iter().any(|t| across(level, *t)) || across(level + 1, tiles[tiles.len() - 1]) {
+        return Err("A wall is in the way of the staircase.");
+    }
+    let mut ops = vec![PaintOp::AddStairs { x: s.x, z: s.z, dir, level }];
+    // The stairwell: no floor above the steps; a landing at the top.
+    for t in &tiles {
+        if has_floor(level + 1, *t) {
+            ops.push(PaintOp::RemoveFloor { level: level + 1, x: t.x as u16, z: t.y as u16 });
+        }
+    }
+    if !has_floor(level + 1, landing) {
+        ops.push(PaintOp::AddFloor { level: level + 1, x: landing.x as u16, z: landing.y as u16, region: 0 });
+    }
+    Ok(ops)
+}
+
 /// The change a drag makes: its ops and what they cost.
 pub fn plan(b: &ActiveBuilding, tool: BuildTool, removing: bool, level: u8, start: IVec2, cur: IVec2) -> (Vec<PaintOp>, i64) {
     let mut sim = b.data.clone();
@@ -233,6 +289,11 @@ pub fn plan(b: &ActiveBuilding, tool: BuildTool, removing: bool, level: u8, star
             for x in lo.x..=hi.x {
                 let (x, z) = (x as u16, z as u16);
                 let tile = sim.floors.iter().find(|f| f.level == level && f.x == x && f.z == z);
+                // (Not over a stairwell.)
+                let well = b.built_stairs.iter().any(|s| s.level + 1 == level && s.tiles().contains(&IVec2::new(x as i32, z as i32)));
+                if well && !removing {
+                    continue;
+                }
                 if removing && tile.is_some() {
                     ops.push(PaintOp::RemoveFloor { level, x, z });
                 } else if !removing && tile.is_none_or(|t| t.mask != 0xF) {
@@ -328,7 +389,7 @@ fn build_tool(
     }
     let local = b.local(ray.origin + *ray.direction * t);
     let (w, d) = (b.data.width as i32, b.data.depth as i32);
-    let tiles = tool == BuildTool::Floor;
+    let tiles = tool == BuildTool::Floor || tool == BuildTool::Stairs;
     let cur = if tiles {
         IVec2::new((local.x.floor() as i32).clamp(0, w - 1), (local.y.floor() as i32).clamp(0, d - 1))
     } else {
@@ -336,6 +397,76 @@ fn build_tool(
     };
     let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     let removing = ctrl || tool == BuildTool::Sledgehammer;
+    if tool == BuildTool::Stairs {
+        if keys.just_pressed(KeyCode::Comma) {
+            drag.stair_dir = (drag.stair_dir + 1) % 4;
+        }
+        if keys.just_pressed(KeyCode::Period) {
+            drag.stair_dir = (drag.stair_dir + 3) % 4;
+        }
+        let plan = plan_stairs(b, level, cur, drag.stair_dir, removing);
+        // The staircase's footprint and its landing, green where it fits.
+        let color = match (&plan, removing) {
+            (Err(_), _) => Color::srgb(0.9, 0.2, 0.2),
+            (Ok(_), true) => Color::srgb(1.0, 0.35, 0.25),
+            (Ok(_), false) => Color::srgb(0.35, 1.0, 0.45),
+        };
+        let at = |p: Vec2, h: f32| b.world(p.x, p.y, y + h);
+        let s = crate::building::BuiltStairs { x: cur.x as u16, z: cur.y as u16, dir: drag.stair_dir, level };
+        let step = crate::building::BuiltStairs::step(drag.stair_dir).as_vec2();
+        let side = step.perp() * 0.5;
+        let bottom = cur.as_vec2() + Vec2::splat(0.5) - step * 0.5;
+        let top = bottom + step * crate::building::STAIR_RUN as f32;
+        let rise = s3bake::building::LEVEL_HEIGHT;
+        if !removing {
+            gizmos.line(at(bottom - side, 0.03), at(top - side, rise), color);
+            gizmos.line(at(bottom + side, 0.03), at(top + side, rise), color);
+            gizmos.line(at(bottom - side, 0.03), at(bottom + side, 0.03), color);
+            gizmos.line(at(top - side, rise), at(top + side, rise), color);
+            let l = s.landing().as_vec2();
+            for (a, q) in [(l, l + Vec2::X), (l + Vec2::X, l + Vec2::ONE), (l + Vec2::ONE, l + Vec2::Y), (l + Vec2::Y, l)] {
+                gizmos.line(at(a, rise + 0.03), at(q, rise + 0.03), color.with_alpha(0.6));
+            }
+        } else {
+            let p = cur.as_vec2();
+            for (a, q) in [(p, p + Vec2::X), (p + Vec2::X, p + Vec2::ONE), (p + Vec2::ONE, p + Vec2::Y), (p + Vec2::Y, p)] {
+                gizmos.line(at(a, 0.03), at(q, 0.03), color);
+            }
+        }
+        for (e, ..) in &label {
+            commands.entity(e).despawn();
+        }
+        drag.start = None;
+        if !mouse.just_pressed(MouseButton::Left) || over_ui.0 {
+            return;
+        }
+        let ops = match plan {
+            Ok(ops) => ops,
+            Err(why) => {
+                notes.push(why);
+                return;
+            }
+        };
+        let cost = if removing { 0 } else { STAIRS_PRICE };
+        if household.as_ref().is_some_and(|h| h.funds < cost) {
+            notes.push("You can't afford that.");
+            return;
+        }
+        if let Some(h) = household.as_mut() {
+            h.funds -= cost;
+        }
+        let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+        crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces, &floor_meshes, &pieces);
+        match log.as_mut() {
+            Some(l) => l.0.extend(ops),
+            None => commands.insert_resource(crate::building::LotPaint(ops)),
+        }
+        if let Some(g) = grid.as_mut() {
+            g.dirty = true;
+        }
+        play.write(crate::sound::PlaySound::ui(if removing { "ui_build_walldelete_section" } else { "ui_build_stair_plop" }));
+        return;
+    }
     if mouse.just_pressed(MouseButton::Left) && !over_ui.0 {
         drag.start = Some(cur);
         play.write(crate::sound::PlaySound::ui(match (tiles, removing) {
