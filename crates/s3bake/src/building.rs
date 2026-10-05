@@ -273,6 +273,10 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
                 _ => (ROOM_PORCH, 0),
             };
             let cover = floor_cover(level, x, z);
+            // (A tile with no covering outdoors is no floor at all.)
+            if kind == ROOM_PORCH && floor_grid.is_some() && cover.iter().all(|&c| c == NO_COVER) {
+                continue;
+            }
             floors.push(FloorBaked { level: level as u8, x: x as u16, z: z as u16, mask, kind, region: region as u16, cover });
         }
     }
@@ -282,6 +286,9 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     if has_foundation {
         for (x, z, mask) in tiles(0) {
             let cover = floor_cover(0, x, z);
+            if cover.iter().all(|&c| c == NO_COVER) {
+                continue;
+            }
             floors.push(FloorBaked { level: 0, x: x as u16, z: z as u16, mask, kind: ROOM_PORCH, region: 0, cover });
         }
     }

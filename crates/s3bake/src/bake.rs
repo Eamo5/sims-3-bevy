@@ -680,6 +680,10 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
             if on_lot {
                 continue;
             }
+            // (Spawners and the world builders' other helpers are invisible in play.)
+            if o.script.as_deref().is_some_and(|s| s.contains("Spawner") || s.contains("Helper")) {
+                continue;
+            }
             let Some(p) = o.position else { continue };
             let models: Vec<ResourceKey> = if let Some(m) = o.model {
                 vec![m]
