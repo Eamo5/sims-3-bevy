@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 9;
+pub const GAMEDATA_VERSION: u32 = 10;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -508,7 +508,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     }
 
     // Balloon pictures are textures: decoded and stored as PNG beside the interface icons.
-    let mut balloon_icons: BTreeSet<String> = BALLOON_FRAMES.iter().map(|s| s.to_string()).collect();
+    let mut balloon_icons: BTreeSet<String> = BALLOON_FRAMES.iter().chain(SKY_TEXTURES).map(|s| s.to_string()).collect();
     for t in [&out.balloons.idle, &out.balloons.social, &out.balloons.topic, &out.balloons.random] {
         for e in t.values().flatten() {
             balloon_icons.insert(e.icon.clone());
@@ -560,6 +560,9 @@ pub const BALLOON_FRAMES: &[&str] = &[
     "sb_dislike",
     "t_balloon_routefail",
 ];
+
+/// The sky's textures: cloud noise, the night's stars, the sun and its halo, the moon's halo.
+pub const SKY_TEXTURES: &[&str] = &["CloudNoiseBase", "NightSkyStarsFlat", "Sky_Sun", "Sky_SunHalo", "Sky_MoonHalo"];
 
 /// Balloon "icons" that are really the game's pickers, resolved while playing.
 pub const SPECIAL_PICKERS: &[&str] = &[

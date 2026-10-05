@@ -51,6 +51,11 @@ impl GameUi {
         h
     }
 
+    /// An icon's PNG bytes (for images that need their own sampler).
+    pub fn png(&self, name: &str) -> Option<Vec<u8>> {
+        self.icons.as_ref()?.png(name)
+    }
+
     /// The game's name, description and icon of a trait (the pets' version lends only its icon).
     pub fn trait_info(&self, t: crate::life::Trait) -> Option<s3bake::gamedata::TraitInfo> {
         let mut info = self.data.trait_info(&t.game_id())?.clone();
