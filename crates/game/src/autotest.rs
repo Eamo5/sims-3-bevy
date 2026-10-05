@@ -32,6 +32,10 @@ pub struct AutoArgs {
     pub place: Option<String>,
     /// `--paint`: repaper the house's indoor walls and recover its ground floor.
     pub paint: bool,
+    /// `--build <x,z,w,d>`: build a room there (lot tiles) with a door and a window.
+    pub build: Option<[i32; 4]>,
+    /// `--knock <x0,z0,x1,z1>`: knock down the walls along that grid line.
+    pub knock: Option<[i32; 4]>,
     /// `--relations`: open the Relationships panel.
     pub relations: bool,
     /// `--balloon <kind>:<icon>[:<axis>]`: keep showing this balloon over the selected Sim
@@ -69,6 +73,15 @@ impl AutoArgs {
                 "--lot" => a.lot = next,
                 "--do" => a.action = next,
                 "--place" => a.place = next,
+                "--build" | "--knock" => {
+                    let v: Vec<i32> = next.as_deref().unwrap_or("").split(',').filter_map(|s| s.trim().parse().ok()).collect();
+                    let v = (v.len() == 4).then(|| [v[0], v[1], v[2], v[3]]);
+                    if args[i] == "--build" {
+                        a.build = v;
+                    } else {
+                        a.knock = v;
+                    }
+                }
                 "--balloon" => a.balloon = next,
                 "--family" => a.family = next,
                 "--select" => a.select = next,
@@ -131,6 +144,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_place.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_paint.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, auto_build.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_balloon.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(
                 Update,
@@ -368,7 +382,11 @@ fn auto_paint(
     mut building: Option<ResMut<crate::building::ActiveBuilding>>,
     (data, mut assets): (Res<crate::baked::Baked>, ResMut<crate::objects::ObjectAssets>),
     (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
-    (mut faces, floors): (Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>, Query<Entity, With<crate::building::FloorMesh>>),
+    (mut faces, floors, pieces): (
+        Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
+        Query<Entity, With<crate::building::FloorMesh>>,
+        Query<(Entity, &crate::building::WallPiece)>,
+    ),
 ) {
     if !args.paint || *done {
         return;
@@ -394,8 +412,116 @@ fn auto_paint(
     }
     info!("paint test: {} repaintings", ops.len());
     let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
-    crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces, &floors);
+    crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces, &floors, &pieces);
     commands.insert_resource(crate::building::LotPaint(ops));
+}
+
+/// `--build`: a room built with the room tool, a door put in its front wall and a window in its
+/// side (through the same snapping as the pointer), then build mode left open on the tools.
+#[allow(clippy::too_many_arguments)]
+fn auto_build(
+    args: Res<AutoArgs>,
+    mut stage: Local<u8>,
+    time: Res<Time>,
+    mut since: Local<Option<f32>>,
+    mut commands: Commands,
+    mut building: Option<ResMut<crate::building::ActiveBuilding>>,
+    (data, catalog, mut assets): (Res<crate::baked::Baked>, Res<crate::loading::Catalog>, ResMut<crate::objects::ObjectAssets>),
+    (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    (mut faces, floors, pieces): (
+        Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
+        Query<Entity, With<crate::building::FloorMesh>>,
+        Query<(Entity, &crate::building::WallPiece)>,
+    ),
+    (mut log, mut grid, mut buy): (Option<ResMut<crate::building::LotPaint>>, Option<ResMut<crate::nav::NavGrid>>, ResMut<crate::buy::BuyMode>),
+    (objects, mut removed, mut household, mut notes): (
+        Query<(&crate::interact::GameObject, &Transform, Has<crate::save::Bought>)>,
+        ResMut<crate::save::RemovedLotObjects>,
+        Option<ResMut<crate::interact::Household>>,
+        ResMut<crate::interact::Notifications>,
+    ),
+) {
+    if args.build.is_none() && args.knock.is_none() {
+        return;
+    }
+    let [x, z, w, d] = args.build.unwrap_or([0, 0, 0, 0]);
+    let t0 = *since.get_or_insert(time.elapsed_secs());
+    let Some(b) = building.as_deref_mut() else { return };
+    let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+    let mut apply = |commands: &mut Commands, assets: &mut crate::objects::ObjectAssets, b: &mut crate::building::ActiveBuilding, ctx: &mut crate::objects::AssetCtx, ops: Vec<crate::building::PaintOp>| {
+        crate::building::repaint(commands, b, assets, ctx, &ops, &mut faces, &floors, &pieces);
+        match log.as_mut() {
+            Some(l) => l.0.extend(ops),
+            None => commands.insert_resource(crate::building::LotPaint(ops)),
+        }
+    };
+    match *stage {
+        0 if time.elapsed_secs() - t0 > 3.0 && args.build.is_none() => {
+            let long: Vec<String> = b
+                .data
+                .walls
+                .iter()
+                .filter(|w| Vec2::from(w.a).distance(Vec2::from(w.b)) > 1.05)
+                .take(6)
+                .map(|w| format!("({:.0},{:.0})-({:.0},{:.0})", w.a[0], w.a[1], w.b[0], w.b[1]))
+                .collect();
+            info!("build test: {} walls; long ones {}", b.data.walls.len(), long.join(" "));
+            let [x0, z0, x1, z1] = args.knock.unwrap();
+            let (ops, _) = crate::build::plan(b, crate::build::BuildTool::Sledgehammer, true, b.view_level, IVec2::new(x0, z0), IVec2::new(x1, z1));
+            info!("build test: knock-down — {} ops: {:?}", ops.len(), ops);
+            let c = b.world((x0 + x1) as f32 * 0.5, (z0 + z1) as f32 * 0.5, 0.0);
+            info!("build test: knocked at {:.1},{:.1}", c.x, c.z);
+            apply(&mut commands, &mut assets, b, &mut ctx, ops);
+            *stage = 3;
+        }
+        0 if time.elapsed_secs() - t0 > 3.0 => {
+            let (ops, cost) = crate::build::plan(b, crate::build::BuildTool::Room, false, b.view_level, IVec2::new(x, z), IVec2::new(x + w, z + d));
+            let c = b.world(x as f32 + w as f32 * 0.5, z as f32 + d as f32 * 0.5, 0.0);
+            info!("build test: room {}x{} at {:.1},{:.1} — {} ops, §{cost}", w, d, c.x, c.z, ops.len());
+            apply(&mut commands, &mut assets, b, &mut ctx, ops);
+            *stage = 1;
+        }
+        1 if time.elapsed_secs() - t0 > 4.0 => {
+            // A door in the middle of the front wall (z = start), a window in the left wall.
+            let y = b.levels[b.view_level as usize];
+            let down = |lx: f32, lz: f32, b: &crate::building::ActiveBuilding| Ray3d::new(b.world(lx, lz, y + 40.0), Dir3::NEG_Y);
+            let cheapest = |doors: bool| catalog.openings(doors).into_iter().find(|e| e.name.len() > 2).map(|e| e.key);
+            for (doors, lx, lz) in [(true, x as f32 + w as f32 * 0.5, z as f32 - 0.3), (false, x as f32 - 0.3, z as f32 + d as f32 * 0.5)] {
+                let Some(key) = cheapest(doors) else { continue };
+                let tiles = crate::objects::parts_bounds(&assets.object(&mut ctx, key)).map_or(1, |(mn, mx)| ((mx.x - mn.x).round() as u32).max(1));
+                let Some((pos, rot, ops)) = crate::build::snap_to_wall(b, down(lx, lz, b), tiles) else {
+                    warn!("build test: no wall for the {}", if doors { "door" } else { "window" });
+                    continue;
+                };
+                if !ops.is_empty() {
+                    apply(&mut commands, &mut assets, b, &mut ctx, ops);
+                }
+                if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, key, pos, rot) {
+                    commands.entity(o.entity).insert(crate::save::Bought);
+                }
+            }
+            if let Some(g) = grid.as_mut() {
+                g.dirty = true;
+            }
+            buy.show(crate::buy::BUILD_TAB);
+            buy.tool = Some(crate::build::BuildTool::Wall);
+            *stage = 2;
+        }
+        2 if time.elapsed_secs() - t0 > 5.0 => {
+            *stage = 3;
+            let Some([x0, z0, x1, z1]) = args.knock else { return };
+            let (s, e) = (IVec2::new(x0, z0), IVec2::new(x1, z1));
+            let (ops, _) = crate::build::plan(b, crate::build::BuildTool::Sledgehammer, true, b.view_level, s, e);
+            info!("build test: knock-down — {} ops", ops.len());
+            let level = b.view_level;
+            crate::build::sell_openings(&mut commands, b, level, &crate::build::edges(crate::build::BuildTool::Sledgehammer, s, e), &objects, &mut removed, household.as_deref_mut(), &mut notes);
+            apply(&mut commands, &mut assets, b, &mut ctx, ops);
+            if let Some(g) = grid.as_mut() {
+                g.dirty = true;
+            }
+        }
+        _ => {}
+    }
 }
 
 /// `--place <kind>`: the cheapest catalog object of that kind (`Telescope`, `HotTub`…), set down

@@ -2,7 +2,7 @@
 //! with door and window openings, floors styled by room, the foundation, a cutaway view and
 //! per-floor visibility. From afar the game's own pre-rendered lot imposter stands in.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -23,7 +23,9 @@ impl Plugin for BuildingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NearbyLots>().add_systems(
             Update,
-            (follow_selected_floor, view_level_keys, building_visibility, stream_nearby_lots, lamps_at_night).chain().run_if(in_state(PlayMode::Live)),
+            (follow_selected_floor, view_level_keys, building_visibility, stream_nearby_lots, lamps_at_night, cut_openings)
+                .chain()
+                .run_if(in_state(PlayMode::Live)),
         );
     }
 }
@@ -55,6 +57,15 @@ pub struct ActiveBuilding {
     far: Option<bool>,
     /// The house as built (with any repainting), for redrawing parts of it.
     pub data: LotBuildingBaked,
+    /// The exterior wall style and the wall caps' material (for building new walls).
+    pub exterior: Key,
+    pub cap_mat: Handle<StandardMaterial>,
+    /// Doors and windows cut into the walls (with their furniture, when it's in play).
+    holes: Vec<(Option<Entity>, Hole)>,
+    /// Walls the household built: their sides face the rooms they enclose or the outdoors.
+    pub built: HashSet<u32>,
+    /// No imposter stands in for the house from afar (an empty lot built on, or a house rebuilt).
+    pub always_detailed: bool,
 }
 
 impl ActiveBuilding {
@@ -76,6 +87,35 @@ impl ActiveBuilding {
 
     fn dir(&self, x: f32, z: f32) -> Vec3 {
         self.rot * Vec3::new(x, 0.0, z)
+    }
+
+    /// The floor (1 = ground) a height is on.
+    pub fn level_at(&self, y: f32) -> u8 {
+        let mut level = 1;
+        for (l, h) in self.levels.iter().enumerate().skip(1) {
+            if y > h - 0.3 {
+                level = l as u8;
+            }
+        }
+        level
+    }
+
+    /// Refreshes the floor lookups after the floors changed.
+    fn reindex(&mut self) {
+        self.floor_cells = self.data.floors.iter().map(|f| ((f.level, f.x as i32, f.z as i32), f.mask)).collect();
+        self.floor_kinds = self.data.floors.iter().map(|f| ((f.level, f.x as i32, f.z as i32), f.kind)).collect();
+    }
+
+    /// Doors and windows set in the wall section from `p` to `q` on `level`.
+    pub fn openings_on(&self, level: u8, p: Vec2, q: Vec2) -> Vec<Entity> {
+        let w = WallBaked { a: p.into(), b: q.into(), level, left: ROOM_OUTSIDE, right: ROOM_OUTSIDE, cover: [NO_COVER; 2] };
+        self.holes.iter().filter(|(_, h)| h.cuts(&w)).filter_map(|(e, _)| *e).collect()
+    }
+
+    /// Lot-local direction of a world rotation's axis.
+    fn local_dir(&self, v: Vec3) -> Vec2 {
+        let l = self.rot.inverse() * v;
+        Vec2::new(l.x, l.z).normalize_or_zero()
     }
 
     /// Whether there's floor at lot-local `p` on `level`.
@@ -247,6 +287,7 @@ fn wall_spans(holes: &[(f32, f32)], top: f32) -> Vec<(f32, f32)> {
 }
 
 /// A door or window cut into the wall behind it (lot-local coordinates, heights above the floor).
+#[derive(Clone)]
 struct Hole {
     level: u8,
     wall_point: Vec2,
@@ -259,7 +300,51 @@ struct Hole {
     door: bool,
 }
 
-fn is_opening(script: &str) -> Option<bool> {
+impl Hole {
+    /// The opening a door (or window) makes: it stands half a tile in front of its wall, facing
+    /// away from it; `mn`/`mx` are its model's bounds.
+    fn new(local: Vec2, fwd: Vec2, right: Vec2, (mn, mx): (Vec3, Vec3), door: bool, level: u8) -> Self {
+        Hole {
+            level,
+            wall_point: local - fwd * 0.5,
+            fwd,
+            right,
+            x0: mn.x,
+            x1: mx.x,
+            y0: if door { 0.0 } else { mn.y.max(0.0) },
+            y1: mx.y.min(WALL_H - 0.05),
+            door,
+        }
+    }
+
+    /// Whether the opening goes through (a section of) wall `w`.
+    fn cuts(&self, w: &s3bake::types::WallBaked) -> bool {
+        let (a, b) = (Vec2::from(w.a), Vec2::from(w.b));
+        let len = (b - a).length();
+        if len < 1e-3 || self.level.max(1) != w.level.max(1) || ((b - a) / len).dot(self.right).abs() < 0.9 {
+            return false;
+        }
+        let d = (a + b) * 0.5 - self.wall_point;
+        let t = d.dot(self.right);
+        d.dot(self.fwd).abs() < 0.3 && t > self.x0 - 0.1 && t < self.x1 + 0.1
+    }
+}
+
+/// The vertical spans the openings cut out of wall `w`, and whether one is a door.
+fn openings(holes: &[(Option<Entity>, Hole)], w: &s3bake::types::WallBaked) -> (Vec<(f32, f32)>, bool) {
+    let mut spans = Vec::new();
+    let mut door = false;
+    for (_, h) in holes {
+        if h.cuts(w) {
+            spans.push((h.y0, h.y1));
+            door |= h.door;
+        }
+    }
+    (spans, door)
+}
+
+/// Whether a catalogue script is a door or archway (`Some(true)`) or a window (`Some(false)`).
+pub fn is_opening(script: &str) -> Option<bool> {
     let s = script.to_ascii_lowercase();
     if s.contains(".door.") || s.contains("archway") {
         Some(true)
@@ -335,14 +420,24 @@ pub fn spawn_floors(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mu
 pub enum PaintOp {
     Wall { wall: u32, side: u8, texture: Key },
     Floor { level: u8, x: u16, z: u16, texture: Key },
+    /// A wall section built (added to the end of the walls).
+    AddWall { a: [f32; 2], b: [f32; 2], level: u8 },
+    /// A wall knocked down (left in the list with no length, so the others keep their indices).
+    RemoveWall { wall: u32 },
+    /// A wall cut in two at `at`: it keeps the part from its start; the rest is added to the end.
+    SplitWall { wall: u32, at: [f32; 2] },
+    /// A floor tile laid; `region` groups a room's tiles for painting (0 = a tile on its own).
+    AddFloor { level: u8, x: u16, z: u16, region: u16 },
+    RemoveFloor { level: u8, x: u16, z: u16 },
 }
 
 /// The active house's repaintings since it was built (kept in saves).
 #[derive(Resource, Default, Clone)]
 pub struct LotPaint(pub Vec<PaintOp>);
 
-/// Repaints the active house: applies the operations to its data and redraws the walls painted
-/// and, if any floor changed, the floors.
+/// Repaints and rebuilds the active house: applies the operations to its data and redraws the
+/// walls painted, built or knocked down and, if any floor changed, the floors.
+#[allow(clippy::too_many_arguments)]
 pub fn repaint(
     commands: &mut Commands,
     b: &mut ActiveBuilding,
@@ -351,11 +446,15 @@ pub fn repaint(
     ops: &[PaintOp],
     faces: &mut Query<(&WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
     floors: &Query<Entity, With<FloorMesh>>,
+    pieces: &Query<(Entity, &WallPiece)>,
 ) {
     let mut mats: HashMap<Key, Handle<StandardMaterial>> = HashMap::new();
     let mut floors_changed = false;
+    let mut walls_changed: BTreeSet<u32> = BTreeSet::new();
+    let mut structure = false;
     for op in ops {
         apply_paint(&mut b.data, op);
+        let last = b.data.walls.len().saturating_sub(1) as u32;
         match *op {
             PaintOp::Wall { wall, side, texture } => {
                 let m = mats.entry(texture).or_insert_with(|| surface_material(assets, ctx, texture)).clone();
@@ -364,16 +463,261 @@ pub fn repaint(
                         mat.0 = m.clone();
                     }
                 }
+                walls_changed.extend(b.built.get(&wall));
             }
-            PaintOp::Floor { .. } => floors_changed = true,
+            PaintOp::Floor { .. } | PaintOp::AddFloor { .. } | PaintOp::RemoveFloor { .. } => floors_changed = true,
+            PaintOp::AddWall { .. } => {
+                b.built.insert(last);
+                walls_changed.insert(last);
+                structure = true;
+            }
+            PaintOp::RemoveWall { wall } => {
+                b.built.remove(&wall);
+                walls_changed.insert(wall);
+                structure = true;
+            }
+            PaintOp::SplitWall { wall, .. } => {
+                if b.built.contains(&wall) {
+                    b.built.insert(last);
+                }
+                walls_changed.extend([wall, last]);
+                structure = true;
+            }
         }
     }
+    if floors_changed {
+        b.reindex();
+    }
+    if structure {
+        walls_changed.extend(restyle(b));
+        b.always_detailed = true;
+        if b.data.levels.len() > b.levels.len() {
+            b.levels = b.data.levels.clone();
+        }
+        // Cutaway works around the middle of the walls.
+        let mids: Vec<Vec2> = b.data.walls.iter().filter(|w| Vec2::from(w.a) != Vec2::from(w.b)).map(|w| (Vec2::from(w.a) + Vec2::from(w.b)) * 0.5).collect();
+        if !mids.is_empty() {
+            let c = mids.iter().copied().sum::<Vec2>() / mids.len() as f32;
+            b.center = b.world(c.x, c.y, b.corner.y);
+        }
+        b.top_level = b.top_level.max(b.data.walls.iter().map(|w| w.level).max().unwrap_or(1).min(b.levels.len().saturating_sub(1) as u8));
+    }
+    respawn_walls(commands, b, assets, ctx, &walls_changed, pieces);
     if floors_changed {
         for e in floors {
             commands.entity(e).despawn();
         }
         let data = b.data.clone();
         spawn_floors(commands, assets, ctx, &data, b, None);
+    }
+}
+
+/// Redraws walls of the active house from its data (with the openings cut into them).
+fn respawn_walls(
+    commands: &mut Commands,
+    b: &ActiveBuilding,
+    assets: &mut ObjectAssets,
+    ctx: &mut AssetCtx,
+    walls: &BTreeSet<u32>,
+    pieces: &Query<(Entity, &WallPiece)>,
+) {
+    if walls.is_empty() {
+        return;
+    }
+    for (e, p) in pieces {
+        if walls.contains(&p.0) {
+            commands.entity(e).despawn();
+        }
+    }
+    let mut mats: HashMap<Key, Handle<StandardMaterial>> = HashMap::new();
+    let mut material = |assets: &mut ObjectAssets, ctx: &mut AssetCtx, key: Key| mats.entry(key).or_insert_with(|| surface_material(assets, ctx, key)).clone();
+    for &i in walls {
+        let Some(w) = b.data.walls.get(i as usize) else { continue };
+        let (spans, door) = openings(&b.holes, w);
+        spawn_wall(commands, assets, ctx, b, i as usize, w, &spans, door, b.exterior, &b.cap_mat, &mut material);
+    }
+}
+
+/// Every tile of `level` with the room it's in (row by row along z; 0 = outdoors). Rooms are
+/// what the walls along the lot's grid lines close off from the lot's edge.
+pub fn rooms(b: &LotBuildingBaked, level: u8) -> Vec<u16> {
+    let (w, d) = (b.width as usize, b.depth as usize);
+    // Walled grid edges: along x on line z (`hz`), and along z on line x (`vt`).
+    let mut hz = vec![false; w * (d + 1)];
+    let mut vt = vec![false; (w + 1) * d];
+    for wall in b.walls.iter().filter(|wl| wl.level.max(1) == level) {
+        let (a, c) = (Vec2::from(wall.a), Vec2::from(wall.b));
+        if a.distance(c) < 0.5 {
+            continue;
+        }
+        let on_line = |v: f32| (v - v.round()).abs() < 0.05;
+        if (a.y - c.y).abs() < 0.05 && on_line(a.y) {
+            let z = a.y.round() as i32;
+            if (0..=d as i32).contains(&z) {
+                for x in (a.x.min(c.x).round() as i32).max(0)..(a.x.max(c.x).round() as i32).min(w as i32) {
+                    hz[z as usize * w + x as usize] = true;
+                }
+            }
+        } else if (a.x - c.x).abs() < 0.05 && on_line(a.x) {
+            let x = a.x.round() as i32;
+            if (0..=w as i32).contains(&x) {
+                for z in (a.y.min(c.y).round() as i32).max(0)..(a.y.max(c.y).round() as i32).min(d as i32) {
+                    vt[z as usize * (w + 1) + x as usize] = true;
+                }
+            }
+        }
+    }
+    // Flood the grid, with a ring of outdoor cells around it (padded coordinates).
+    let (pw, pd) = (w as i32 + 2, d as i32 + 2);
+    let mut label = vec![u16::MAX; (pw * pd) as usize];
+    let blocked = |x: i32, z: i32, dx: i32, dz: i32| -> bool {
+        // Crossing from padded cell (x, z) to its neighbour (x + dx, z + dz).
+        if dx != 0 {
+            let line = x.max(x + dx) - 1; // the grid line x between the cells (lot coordinates)
+            let rz = z - 1;
+            rz >= 0 && rz < d as i32 && line <= w as i32 && line >= 0 && vt[rz as usize * (w + 1) + line as usize]
+        } else {
+            let line = z.max(z + dz) - 1;
+            let rx = x - 1;
+            rx >= 0 && rx < w as i32 && line <= d as i32 && line >= 0 && hz[line as usize * w + rx as usize]
+        }
+    };
+    let mut next_room = 0u16;
+    for start in 0..label.len() {
+        if label[start] != u16::MAX {
+            continue;
+        }
+        let id = next_room;
+        next_room += 1;
+        let mut stack = vec![start as i32];
+        label[start] = id;
+        while let Some(c) = stack.pop() {
+            let (x, z) = (c % pw, c / pw);
+            for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                let (nx, nz) = (x + dx, z + dz);
+                if nx < 0 || nz < 0 || nx >= pw || nz >= pd || blocked(x, z, dx, dz) {
+                    continue;
+                }
+                let n = (nz * pw + nx) as usize;
+                if label[n] == u16::MAX {
+                    label[n] = id;
+                    stack.push(n as i32);
+                }
+            }
+        }
+    }
+    // The first region flooded holds the padding: the outdoors.
+    let mut out = vec![0u16; w * d];
+    for z in 0..d {
+        for x in 0..w {
+            out[z * w + x] = label[(z as i32 + 1) as usize * pw as usize + x + 1];
+        }
+    }
+    out
+}
+
+/// Floor for the rooms on `level` that have none yet (as the game lays when walls close a room).
+pub fn room_floors(b: &LotBuildingBaked, level: u8) -> Vec<PaintOp> {
+    let rooms = rooms(b, level);
+    let w = b.width as usize;
+    let have: HashSet<(u16, u16)> = b.floors.iter().filter(|f| f.level == level).map(|f| (f.x, f.z)).collect();
+    let base = b.floors.iter().map(|f| f.region).max().unwrap_or(0);
+    let mut ops = Vec::new();
+    for (i, &room) in rooms.iter().enumerate() {
+        let (x, z) = ((i % w) as u16, (i / w) as u16);
+        if room > 0 && !have.contains(&(x, z)) {
+            ops.push(PaintOp::AddFloor { level, x, z, region: base + room });
+        }
+    }
+    ops
+}
+
+/// Faces the sides of the household's own walls into the rooms they close off (or the
+/// outdoors); returns the walls whose sides changed.
+fn restyle(b: &mut ActiveBuilding) -> Vec<u32> {
+    let levels: BTreeSet<u8> = b.built.iter().filter_map(|&i| b.data.walls.get(i as usize)).map(|w| w.level.max(1)).collect();
+    let rooms: HashMap<u8, Vec<u16>> = levels.into_iter().map(|l| (l, rooms(&b.data, l))).collect();
+    let (w, d) = (b.data.width as i32, b.data.depth as i32);
+    let mut changed = Vec::new();
+    let mut built: Vec<u32> = b.built.iter().copied().collect();
+    built.sort();
+    for i in built {
+        let Some(wall) = b.data.walls.get(i as usize).copied() else { continue };
+        let (a, c) = (Vec2::from(wall.a), Vec2::from(wall.b));
+        let len = a.distance(c);
+        if len < 1e-3 {
+            continue;
+        }
+        let level = wall.level.max(1);
+        let n = Vec2::new(-(c.y - a.y), c.x - a.x) / len;
+        let mid = (a + c) * 0.5;
+        let kind_at = |p: Vec2| {
+            let (x, z) = (p.x.floor() as i32, p.y.floor() as i32);
+            if x < 0 || z < 0 || x >= w || z >= d || rooms[&level][(z * w + x) as usize] == 0 {
+                return ROOM_OUTSIDE;
+            }
+            // Indoors: the room's own kind where the house has one.
+            match b.floor_kinds.get(&(level, x, z)) {
+                Some(&k) if k != ROOM_OUTSIDE && k != ROOM_PORCH => k,
+                _ => ROOM_LIVING,
+            }
+        };
+        let (l, r) = (kind_at(mid + n * 0.5), kind_at(mid - n * 0.5));
+        if (l, r) != (wall.left, wall.right) {
+            let wl = &mut b.data.walls[i as usize];
+            wl.left = l;
+            wl.right = r;
+            changed.push(i);
+        }
+    }
+    changed
+}
+
+/// Doors and windows placed in the house cut their openings into the walls behind them (and
+/// close them up again when they're moved or sold).
+#[allow(clippy::too_many_arguments)]
+fn cut_openings(
+    mut commands: Commands,
+    building: Option<ResMut<ActiveBuilding>>,
+    (catalog, data): (Res<Catalog>, Res<crate::baked::Baked>),
+    mut assets: ResMut<ObjectAssets>,
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    added: Query<(Entity, &crate::interact::GameObject, &Transform), Added<crate::interact::GameObject>>,
+    mut removed: RemovedComponents<crate::interact::GameObject>,
+    pieces: Query<(Entity, &WallPiece)>,
+    mut grid: Option<ResMut<crate::nav::NavGrid>>,
+) {
+    let gone: Vec<Entity> = removed.read().collect();
+    let Some(mut b) = building else { return };
+    let mut changed: BTreeSet<u32> = BTreeSet::new();
+    let walls_cut = |b: &ActiveBuilding, h: &Hole| -> Vec<u32> { b.data.walls.iter().enumerate().filter(|(_, w)| h.cuts(w)).map(|(i, _)| i as u32).collect() };
+    if !gone.is_empty() {
+        let closed: Vec<Hole> = b.holes.iter().filter(|(e, _)| e.is_some_and(|e| gone.contains(&e))).map(|(_, h)| h.clone()).collect();
+        for h in &closed {
+            changed.extend(walls_cut(&b, h));
+        }
+        b.holes.retain(|(e, _)| !e.is_some_and(|e| gone.contains(&e)));
+    }
+    let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+    for (e, obj, tf) in &added {
+        if b.holes.iter().any(|(he, _)| *he == Some(e)) {
+            continue;
+        }
+        let Some(door) = catalog.by_key(&obj.objd).and_then(|c| c.opening) else { continue };
+        let Some(bounds) = parts_bounds(&assets.object(&mut ctx, obj.objd)) else { continue };
+        let level = b.level_at(tf.translation.y);
+        let hole = Hole::new(b.local(tf.translation), b.local_dir(tf.rotation * Vec3::Z), b.local_dir(tf.rotation * Vec3::X), bounds, door, level);
+        changed.extend(walls_cut(&b, &hole));
+        let mid = b.world(hole.wall_point.x, hole.wall_point.y, tf.translation.y);
+        commands.entity(e).remove::<Obstacle>().insert((WallObject { mid }, BuildingPiece { level }, Floor(level)));
+        b.holes.push((Some(e), hole));
+    }
+    if changed.is_empty() {
+        return;
+    }
+    respawn_walls(&mut commands, &b, &mut assets, &mut ctx, &changed, &pieces);
+    if let Some(g) = grid.as_mut() {
+        g.dirty = true;
     }
 }
 
@@ -401,8 +745,162 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
                 f.cover = [i; 4];
             }
         }
+        PaintOp::AddWall { a, b: end, level } => {
+            while b.levels.len() <= level as usize {
+                let top = b.levels[b.levels.len() - 1];
+                b.levels.push(top + s3bake::building::LEVEL_HEIGHT);
+            }
+            b.walls.push(WallBaked { a, b: end, level, left: ROOM_OUTSIDE, right: ROOM_OUTSIDE, cover: [NO_COVER; 2] });
+        }
+        PaintOp::RemoveWall { wall } => {
+            if let Some(w) = b.walls.get_mut(wall as usize) {
+                w.b = w.a;
+            }
+        }
+        PaintOp::SplitWall { wall, at } => {
+            if let Some(w) = b.walls.get(wall as usize).copied() {
+                let p = Vec2::from(at);
+                if p.distance(Vec2::from(w.a)) > 0.05 && p.distance(Vec2::from(w.b)) > 0.05 {
+                    b.walls[wall as usize].b = at;
+                    b.walls.push(WallBaked { a: at, ..w });
+                }
+            }
+        }
+        PaintOp::AddFloor { level, x, z, region } => match b.floors.iter_mut().find(|f| f.level == level && f.x == x && f.z == z) {
+            Some(f) => f.mask = 0xF,
+            None => b.floors.push(FloorBaked {
+                level,
+                x,
+                z,
+                mask: 0xF,
+                kind: if region > 0 { ROOM_LIVING } else { ROOM_OUTSIDE },
+                region,
+                cover: [NO_COVER; 4],
+            }),
+        },
+        PaintOp::RemoveFloor { level, x, z } => b.floors.retain(|f| !(f.level == level && f.x == x && f.z == z)),
     }
 }
+
+/// The building data of a lot with no house yet: nothing on it, its ground floor at `ground`.
+pub fn empty_building(lot_index: usize, lot: &LotInfo, ground: f32) -> LotBuildingBaked {
+    LotBuildingBaked {
+        lot: lot_index as u32,
+        width: lot.width,
+        depth: lot.depth,
+        levels: vec![ground, ground],
+        walls: Vec::new(),
+        floors: Vec::new(),
+        foundation: Vec::new(),
+        objects: Vec::new(),
+        covers: Vec::new(),
+    }
+}
+
+/// A wall segment of the active house: a face per side (full and cut-away versions), its top
+/// caps, and (without a door) the obstacle that keeps Sims from walking through it.
+#[allow(clippy::too_many_arguments)]
+fn spawn_wall(
+    commands: &mut Commands,
+    assets: &mut ObjectAssets,
+    ctx: &mut AssetCtx,
+    active: &ActiveBuilding,
+    wall_index: usize,
+    w: &s3bake::types::WallBaked,
+    seg_holes: &[(f32, f32)],
+    has_door: bool,
+    exterior: Key,
+    cap_mat: &Handle<StandardMaterial>,
+    material: &mut dyn FnMut(&mut ObjectAssets, &mut AssetCtx, Key) -> Handle<StandardMaterial>,
+) {
+    let b = &active.data;
+    let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);
+    let cover_key = |i: u16| (i != s3bake::types::NO_COVER).then(|| b.covers.get(i as usize).copied()).flatten();
+    let level = w.level.max(1);
+    let y0 = level_y(level);
+    let (a, bb) = (Vec2::from(w.a), Vec2::from(w.b));
+    let seg = bb - a;
+    let len = seg.length();
+    if len < 1e-3 {
+        return;
+    }
+    let along = seg / len;
+    let n_local = Vec2::new(-along.y, along.x);
+    let mid_local = (a + bb) * 0.5;
+    let ext = along * (WALL_T * 0.5);
+    let (pa, pb) = (a - ext, bb + ext);
+    let to3 = |p: Vec2, y: f32| active.world(p.x, p.y, y0 + y);
+    let n3 = active.dir(n_local.x, n_local.y);
+    let half = n3 * (WALL_T * 0.5);
+    let ulen = len + WALL_T;
+    let mid = to3(mid_local, 0.0);
+    let parent = commands
+        .spawn((Transform::IDENTITY, Visibility::default(), BuildingPiece { level }, WallPiece(wall_index as u32), DespawnOnExit(AppState::InGame)))
+        .id();
+    for (side_index, (side, kind, cover)) in [(1.0f32, w.left, w.cover[0]), (-1.0, w.right, w.cover[1])].into_iter().enumerate() {
+        let mut meshes = [MeshBuf::default(), MeshBuf::default()];
+        for (mi, top) in [(0usize, WALL_H), (1, CUT_H)] {
+            for (s0, s1) in wall_spans(&seg_holes, top) {
+                let off = half * side;
+                let p = [to3(pa, s0) + off, to3(pb, s0) + off, to3(pb, s1) + off, to3(pa, s1) + off];
+                let (v0, v1) = (1.0 - s0 / WALL_H, 1.0 - s1 / WALL_H);
+                let (u0, u1) = if side > 0.0 { (0.0, ulen) } else { (ulen, 0.0) };
+                meshes[mi].quad(p, [[u0, v0], [u1, v0], [u1, v1], [u0, v1]], n3 * side);
+            }
+        }
+        let [full, cut] = meshes;
+        if full.is_empty() {
+            continue;
+        }
+        let mat = material(assets, ctx, cover_key(cover).unwrap_or_else(|| wall_style(kind, exterior)));
+        let full = ctx.meshes.add(full.mesh());
+        let cut = (!cut.is_empty()).then(|| ctx.meshes.add(cut.mesh()));
+        let face = commands
+            .spawn((
+                Mesh3d(full.clone()),
+                MeshMaterial3d(mat),
+                WallFace { wall: wall_index as u32, side: side_index as u8, full, cut, mid, level, is_cut: false },
+            ))
+            .id();
+        commands.entity(parent).add_child(face);
+    }
+    // Wall tops: caps over every span, for both heights.
+    let mut caps = [MeshBuf::default(), MeshBuf::default()];
+    for (mi, top) in [(0usize, WALL_H), (1, CUT_H)] {
+        for (_, s1) in wall_spans(&seg_holes, top) {
+            let p = [to3(pa, s1) + half, to3(pb, s1) + half, to3(pb, s1) - half, to3(pa, s1) - half];
+            caps[mi].quad(p, [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], Vec3::Y);
+        }
+    }
+    let [full, cut] = caps;
+    if !full.is_empty() {
+        let full = ctx.meshes.add(full.mesh());
+        let cut = (!cut.is_empty()).then(|| ctx.meshes.add(cut.mesh()));
+        let cap = commands
+            .spawn((
+                Mesh3d(full.clone()),
+                MeshMaterial3d(cap_mat.clone()),
+                WallFace { wall: wall_index as u32, side: 255, full, cut, mid, level, is_cut: false },
+            ))
+            .id();
+        commands.entity(parent).add_child(cap);
+    }
+    // Walls block walking on their floor, except where a door is.
+    if !has_door {
+        let dir = active.dir(along.x, along.y);
+        commands.spawn((
+            Transform::from_translation(mid).with_rotation(Quat::from_rotation_y((-dir.z).atan2(dir.x))),
+            Obstacle { half: Vec2::new(len * 0.5 + 0.02, 0.08), center_offset: Vec2::ZERO },
+            Floor(level),
+            WallPiece(wall_index as u32),
+            DespawnOnExit(AppState::InGame),
+        ));
+    }
+}
+
+/// The entities of one wall of the active house (its index in the building's walls).
+#[derive(Component)]
+pub struct WallPiece(pub u32);
 
 /// Spawns the detailed house of `lot` with all its furniture and returns its state. With a
 /// `neighbor` root, it's built for show only (merged meshes, furniture without gameplay).
@@ -435,6 +933,11 @@ pub fn spawn_building(
         floor_kinds,
         far: None,
         data: b.clone(),
+        exterior: STYLE_EXTERIOR[(lot.id % STYLE_EXTERIOR.len() as u64) as usize],
+        cap_mat: Handle::default(),
+        holes: Vec::new(),
+        built: HashSet::new(),
+        always_detailed: !b.is_house(),
     };
     let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);
     let exterior = STYLE_EXTERIOR[(lot.id % STYLE_EXTERIOR.len() as u64) as usize];
@@ -459,9 +962,10 @@ pub fn spawn_building(
     // A wall side's or floor triangle's covering texture, when the lot has one there.
     let cover_key = |i: u16| (i != s3bake::types::NO_COVER).then(|| b.covers.get(i as usize).copied()).flatten();
     let cap_mat = ctx.materials.add(StandardMaterial { base_color: Color::srgb(0.93, 0.91, 0.86), perceptual_roughness: 0.9, ..default() });
+    active.cap_mat = cap_mat.clone();
 
     // Furniture, doors and windows.
-    let mut holes: Vec<Hole> = Vec::new();
+    let mut holes: Vec<(Option<Entity>, Hole)> = Vec::new();
     let mut missing: Vec<String> = Vec::new();
     let mut stairs: Vec<(LotObjectBaked, Quat)> = Vec::new();
     for o in &b.objects {
@@ -505,27 +1009,13 @@ pub fn spawn_building(
             }
             spawned.entity
         };
-        if let (Some(door), Some((mn, mx))) = (opening, parts_bounds(&assets.object(ctx, o.objd))) {
-            let to_local = |v: Vec3| {
-                let l = rot.inverse() * v;
-                Vec2::new(l.x, l.z).normalize_or_zero()
-            };
-            let fwd = to_local(q * Vec3::Z);
-            let wp = Vec2::from(o.local) - fwd * 0.5;
+        if let (Some(door), Some(bounds)) = (opening, parts_bounds(&assets.object(ctx, o.objd))) {
+            let hole = Hole::new(Vec2::from(o.local), active.local_dir(q * Vec3::Z), active.local_dir(q * Vec3::X), bounds, door, o.level);
+            let wp = hole.wall_point;
             if neighbor.is_none() {
                 commands.entity(entity).insert(WallObject { mid: active.world(wp.x, wp.y, o.position[1]) });
             }
-            holes.push(Hole {
-                level: o.level,
-                wall_point: Vec2::from(o.local) - fwd * 0.5,
-                fwd,
-                right: to_local(q * Vec3::X),
-                x0: mn.x,
-                x1: mx.x,
-                y0: if door { 0.0 } else { mn.y.max(0.0) },
-                y1: mx.y.min(WALL_H - 0.05),
-                door,
-            });
+            holes.push((neighbor.is_none().then_some(entity), hole));
         }
     }
 
@@ -622,27 +1112,13 @@ pub fn spawn_building(
         }
         let along = seg / len;
         let n_local = Vec2::new(-along.y, along.x);
-        let mid_local = (a + bb) * 0.5;
-        let mut seg_holes = Vec::new();
-        let mut has_door = false;
-        for h in &holes {
-            if h.level != w.level || along.dot(h.right).abs() < 0.9 {
-                continue;
-            }
-            let d = mid_local - h.wall_point;
-            let t = d.dot(h.right);
-            if d.dot(h.fwd).abs() < 0.3 && t > h.x0 - 0.1 && t < h.x1 + 0.1 {
-                seg_holes.push((h.y0, h.y1));
-                has_door |= h.door;
-            }
-        }
+        let (seg_holes, has_door) = openings(&holes, w);
         let ext = along * (WALL_T * 0.5);
         let (pa, pb) = (a - ext, bb + ext);
         let to3 = |p: Vec2, y: f32| active.world(p.x, p.y, y0 + y);
         let n3 = active.dir(n_local.x, n_local.y);
         let half = n3 * (WALL_T * 0.5);
         let ulen = len + WALL_T;
-        let mid = to3(mid_local, 0.0);
         if neighbor.is_some() {
             for (side, kind, cover) in [(1.0f32, w.left, w.cover[0]), (-1.0, w.right, w.cover[1])] {
                 let buf = merged.entry(cover_key(cover).unwrap_or_else(|| wall_style(kind, exterior))).or_default();
@@ -660,67 +1136,7 @@ pub fn spawn_building(
             }
             continue;
         }
-        let parent = commands
-            .spawn((Transform::IDENTITY, Visibility::default(), BuildingPiece { level }, DespawnOnExit(AppState::InGame)))
-            .id();
-        for (side_index, (side, kind, cover)) in [(1.0f32, w.left, w.cover[0]), (-1.0, w.right, w.cover[1])].into_iter().enumerate() {
-            let mut meshes = [MeshBuf::default(), MeshBuf::default()];
-            for (mi, top) in [(0usize, WALL_H), (1, CUT_H)] {
-                for (s0, s1) in wall_spans(&seg_holes, top) {
-                    let off = half * side;
-                    let p = [to3(pa, s0) + off, to3(pb, s0) + off, to3(pb, s1) + off, to3(pa, s1) + off];
-                    let (v0, v1) = (1.0 - s0 / WALL_H, 1.0 - s1 / WALL_H);
-                    let (u0, u1) = if side > 0.0 { (0.0, ulen) } else { (ulen, 0.0) };
-                    meshes[mi].quad(p, [[u0, v0], [u1, v0], [u1, v1], [u0, v1]], n3 * side);
-                }
-            }
-            let [full, cut] = meshes;
-            if full.is_empty() {
-                continue;
-            }
-            let mat = material(assets, ctx, cover_key(cover).unwrap_or_else(|| wall_style(kind, exterior)));
-            let full = ctx.meshes.add(full.mesh());
-            let cut = (!cut.is_empty()).then(|| ctx.meshes.add(cut.mesh()));
-            let face = commands
-                .spawn((
-                    Mesh3d(full.clone()),
-                    MeshMaterial3d(mat),
-                    WallFace { wall: wall_index as u32, side: side_index as u8, full, cut, mid, level, is_cut: false },
-                ))
-                .id();
-            commands.entity(parent).add_child(face);
-        }
-        // Wall tops: caps over every span, for both heights.
-        let mut caps = [MeshBuf::default(), MeshBuf::default()];
-        for (mi, top) in [(0usize, WALL_H), (1, CUT_H)] {
-            for (_, s1) in wall_spans(&seg_holes, top) {
-                let p = [to3(pa, s1) + half, to3(pb, s1) + half, to3(pb, s1) - half, to3(pa, s1) - half];
-                caps[mi].quad(p, [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], Vec3::Y);
-            }
-        }
-        let [full, cut] = caps;
-        if !full.is_empty() {
-            let full = ctx.meshes.add(full.mesh());
-            let cut = (!cut.is_empty()).then(|| ctx.meshes.add(cut.mesh()));
-            let cap = commands
-                .spawn((
-                    Mesh3d(full.clone()),
-                    MeshMaterial3d(cap_mat.clone()),
-                    WallFace { wall: wall_index as u32, side: 255, full, cut, mid, level, is_cut: false },
-                ))
-                .id();
-            commands.entity(parent).add_child(cap);
-        }
-        // Walls block walking on their floor, except where a door is.
-        if !has_door {
-            let dir = active.dir(along.x, along.y);
-            commands.spawn((
-                Transform::from_translation(mid).with_rotation(Quat::from_rotation_y((-dir.z).atan2(dir.x))),
-                Obstacle { half: Vec2::new(len * 0.5 + 0.02, 0.08), center_offset: Vec2::ZERO },
-                Floor(level),
-                DespawnOnExit(AppState::InGame),
-            ));
-        }
+        spawn_wall(commands, assets, ctx, &active, wall_index, w, &seg_holes, has_door, exterior, &cap_mat, &mut material);
     }
 
     for (style, buf) in merged {
@@ -758,6 +1174,7 @@ pub fn spawn_building(
             place(commands, e, neighbor, 0);
         }
     }
+    active.holes = holes;
     // Cutaway and imposter swaps work around the middle of the walls, not of the lot.
     let mids: Vec<Vec2> = b.walls.iter().map(|w| (Vec2::from(w.a) + Vec2::from(w.b)) * 0.5).collect();
     if !mids.is_empty() {
@@ -786,10 +1203,17 @@ fn follow_selected_floor(
 }
 
 /// PageUp / PageDown move the floor being viewed.
-fn view_level_keys(keys: Res<ButtonInput<KeyCode>>, building: Option<ResMut<ActiveBuilding>>) {
+fn view_level_keys(keys: Res<ButtonInput<KeyCode>>, building: Option<ResMut<ActiveBuilding>>, buy: Option<Res<crate::buy::BuyMode>>) {
     let Some(mut b) = building else { return };
-    if keys.just_pressed(KeyCode::PageUp) && b.view_level < b.top_level {
+    // With a construction tool in hand, one floor above the top can be built on.
+    let building_up = buy.is_some_and(|m| m.active && m.tool.is_some());
+    let top = if building_up { (b.top_level + 1).min(6) } else { b.top_level };
+    if keys.just_pressed(KeyCode::PageUp) && b.view_level < top {
         b.view_level += 1;
+        while b.levels.len() <= b.view_level as usize {
+            let h = b.levels[b.levels.len() - 1] + s3bake::building::LEVEL_HEIGHT;
+            b.levels.push(h);
+        }
     }
     if keys.just_pressed(KeyCode::PageDown) && b.view_level > 1 {
         b.view_level -= 1;
@@ -824,7 +1248,7 @@ fn building_visibility(
 ) {
     let Some(mut b) = building else { return };
     let Ok((cam, cam_tf)) = cams.single() else { return };
-    let far = cam.distance > IMPOSTER_DISTANCE || cam.focus.distance(b.center) > IMPOSTER_DISTANCE * 1.4;
+    let far = !b.always_detailed && (cam.distance > IMPOSTER_DISTANCE || cam.focus.distance(b.center) > IMPOSTER_DISTANCE * 1.4);
     if b.far != Some(far) {
         b.far = Some(far);
         let _ = &mut imposters;

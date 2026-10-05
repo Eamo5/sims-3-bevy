@@ -41,6 +41,8 @@ pub struct CatalogEntry {
     pub name: String,
     pub price: i32,
     pub kind: crate::interact::ObjectKind,
+    /// A door or archway (`Some(true)`) or a window (`Some(false)`), set into a wall.
+    pub opening: Option<bool>,
 }
 
 /// Every object in the installed game, with buy-mode prices.
@@ -60,6 +62,7 @@ impl Catalog {
                 name: if c.name.is_empty() { c.instance_name.clone() } else { c.name.clone() },
                 price: c.price,
                 kind: crate::interact::ObjectKind::from_script(&c.script, &c.instance_name),
+                opening: crate::building::is_opening(&c.script),
             })
             .collect();
         let index = entries.iter().enumerate().map(|(i, e)| (e.key, i)).collect();
@@ -68,6 +71,14 @@ impl Catalog {
 
     pub fn by_key(&self, k: &Key) -> Option<&CatalogEntry> {
         self.index.get(k).map(|&i| &self.entries[i])
+    }
+
+    /// Buyable doors (or windows), cheapest first.
+    pub fn openings(&self, doors: bool) -> Vec<&CatalogEntry> {
+        let mut v: Vec<&CatalogEntry> = self.entries.iter().filter(|e| e.price > 0 && e.opening == Some(doors) && !e.name.is_empty()).collect();
+        v.sort_by(|a, b| a.price.cmp(&b.price).then(a.name.cmp(&b.name)));
+        v.dedup_by(|a, b| a.name == b.name);
+        v
     }
 
     /// Buyable entries in a buy-mode category, cheapest first.

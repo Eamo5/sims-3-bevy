@@ -101,6 +101,12 @@ installation is unreachable.
   pattern with its name and price, swatched from its texture recipe) on Wallpaper and Floors
   tabs; click a wall to paper that side, or a floor to cover the whole room. Repainting is
   charged, sounds like the game's build tools, and is kept in saves.
+- **Building**: wall and room tools that draw along the lot's grid (straight or diagonal, with
+  a live outline and price), the sledgehammer, and floor tiles; closing off a room lays its
+  floor and turns its walls' inner sides to wallpaper. Doors, archways and windows from the
+  catalogue snap into walls and cut their openings; knocking a wall down sells what was in
+  it. Works on an empty lot or the house that came with it, a floor above the top too, and
+  every change is replayed from the save.
 - **Sound**: the game's own audio, converted once (EALayer3 rewrapped as MP3, EA-XAS decoded to
   WAV): object sounds and Simlish voices cued by the animations, footsteps by floor and
   shoe, interface clicks, stings for promotions, weddings and other moments, birds by day

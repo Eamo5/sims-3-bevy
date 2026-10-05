@@ -249,7 +249,7 @@ pub const BUILD_STYLES: [Key; 14] = [
 
 /// A wall segment in lot-local tile coordinates, with the kind of room on each side
 /// (left = the +normal side, normal = (-dz, dx) of a->b).
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct WallBaked {
     pub a: [f32; 2],
     pub b: [f32; 2],

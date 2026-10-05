@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::{BakeRoot, Progress, par_map};
 use crate::pack::{PackReader, PackWriter, write_value};
 
-pub const SOUNDS_VERSION: u32 = 3;
+pub const SOUNDS_VERSION: u32 = 4;
 
 /// Sample file formats in `sounds.pack`.
 pub const FORMAT_MP3: u8 = 0;
@@ -74,6 +74,13 @@ pub const EXTRA_SOUNDS: &[&str] = &[
     "ui_build_flooring_plop",
     "ui_build_wallcovering_plop",
     "ui_build_design_tool_open",
+    "ui_build_wall_mdown",
+    "ui_build_wall_mup",
+    "ui_build_walldelete_section",
+    "ui_build_delete_tool_mdown",
+    "ui_build_door_plop",
+    "ui_build_flooring_mdown",
+    "ui_build_flooring_section",
     "ui_object_sell",
     "ui_cart_add_to",
     "ui_text_notification_open",

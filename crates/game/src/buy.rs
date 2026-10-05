@@ -31,8 +31,9 @@ impl Plugin for BuyPlugin {
 
 pub const CATEGORIES: [&str; 10] =
     ["Appliances", "Plumbing", "Beds", "Seating", "Surfaces", "Electronics", "Hobbies", "Kids", "Lighting", "Decor"];
-/// Build-mode tabs after the buy categories: wallpaper and floors.
-const PAINT_TABS: [&str; 2] = ["Wallpaper", "Floors"];
+/// Build-mode tabs after the buy categories: wallpaper, floors, the construction tools, doors
+/// and windows.
+const PAINT_TABS: [&str; 5] = ["Wallpaper", "Floors", "Walls & Floors", "Doors", "Windows"];
 const PAGE: usize = 24;
 /// Objects per page (thumbnail tiles).
 const OBJECT_PAGE: usize = 30;
@@ -54,6 +55,8 @@ pub struct BuyMode {
     dirty: bool,
     /// The wallpaper or floor being painted with (index into the game data's patterns).
     pub painting: Option<usize>,
+    /// The construction tool in hand.
+    pub tool: Option<crate::build::BuildTool>,
 }
 
 #[derive(Component)]
@@ -75,7 +78,7 @@ fn buy_pick(
     parents: Query<&ChildOf>,
     objects: Query<(), With<GameObject>>,
 ) {
-    if !buy.active || buy.placing.is_some() || !mouse.just_pressed(MouseButton::Left) || over_ui.0 {
+    if !buy.active || buy.placing.is_some() || buy.painting.is_some() || buy.tool.is_some() || !mouse.just_pressed(MouseButton::Left) || over_ui.0 {
         return;
     }
     let Ok(window) = windows.single() else { return };
@@ -104,6 +107,7 @@ enum BuyButton {
     Category(usize),
     Item(Key),
     Pattern(usize),
+    Tool(crate::build::BuildTool),
     Prev,
     Next,
 }
@@ -118,8 +122,24 @@ impl BuyMode {
     }
 }
 
-/// Index of the wallpaper tab.
+/// Index of the wallpaper tab (the floors, construction, doors and windows tabs follow).
 pub const WALLPAPER_TAB: usize = CATEGORIES.len();
+pub const FLOORS_TAB: usize = WALLPAPER_TAB + 1;
+pub const BUILD_TAB: usize = WALLPAPER_TAB + 2;
+pub const DOORS_TAB: usize = WALLPAPER_TAB + 3;
+pub const WINDOWS_TAB: usize = WALLPAPER_TAB + 4;
+
+impl BuyMode {
+    /// Puts down the tool, pattern or object in hand.
+    pub fn drop_tools(&mut self, commands: &mut Commands) {
+        self.painting = None;
+        self.tool = None;
+        if let Some(p) = self.placing.take() {
+            commands.entity(p.ghost).despawn();
+        }
+        self.dirty = true;
+    }
+}
 
 fn toggle_buy(keys: Res<ButtonInput<KeyCode>>, mut buy: ResMut<BuyMode>, mut commands: Commands, mut clock: ResMut<crate::clock::GameClock>) {
     if keys.just_pressed(KeyCode::KeyB) || keys.just_pressed(KeyCode::F2) {
@@ -130,11 +150,7 @@ fn toggle_buy(keys: Res<ButtonInput<KeyCode>>, mut buy: ResMut<BuyMode>, mut com
 
 fn set_active(buy: &mut BuyMode, on: bool, commands: &mut Commands, clock: &mut crate::clock::GameClock) {
     buy.active = on;
-    buy.dirty = true;
-    buy.painting = None;
-    if let Some(p) = buy.placing.take() {
-        commands.entity(p.ghost).despawn();
-    }
+    buy.drop_tools(commands);
     // Time stops while shopping, like the original.
     if on {
         clock.set_speed(0);
@@ -224,9 +240,23 @@ fn buy_panel(
         if !buy.active {
             return;
         }
+        // The construction tools.
+        if buy.category == BUILD_TAB {
+            p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|grid| {
+                for t in crate::build::BuildTool::ALL {
+                    button(grid, t.label(), BuyButton::Tool(t), Val::Px(190.0), 42.0, buy.tool == Some(t));
+                }
+            });
+            let help = match buy.tool {
+                Some(t) => t.help(),
+                None => "Pick a tool. Ctrl+drag with the wall, room or floor tool takes away instead.".to_string(),
+            };
+            p.spawn(text(help, 13.0, Color::WHITE));
+            return;
+        }
         // Wallpaper and floors: swatches of the catalogue's patterns.
-        if buy.category >= CATEGORIES.len() {
-            let floor = buy.category == CATEGORIES.len() + 1;
+        if buy.category == WALLPAPER_TAB || buy.category == FLOORS_TAB {
+            let floor = buy.category == FLOORS_TAB;
             let Some(ui) = ui.as_deref() else { return };
             let items: Vec<(usize, &s3bake::gamedata::PatternInfo)> = ui.data.patterns.iter().enumerate().filter(|(_, p)| p.floor == floor).collect();
             let pages = items.len().div_ceil(PAGE).max(1);
@@ -274,7 +304,11 @@ fn buy_panel(
             });
             return;
         }
-        let items = catalog.in_category(CATEGORIES[buy.category]);
+        let items = match buy.category {
+            DOORS_TAB => catalog.openings(true),
+            WINDOWS_TAB => catalog.openings(false),
+            c => catalog.in_category(CATEGORIES[c.min(CATEGORIES.len() - 1)]),
+        };
         let pages = items.len().div_ceil(OBJECT_PAGE).max(1);
         let page = buy.page.min(pages - 1);
         p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|grid| {
@@ -329,6 +363,7 @@ fn buy_buttons(
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    mut play: MessageWriter<crate::sound::PlaySound>,
 ) {
     for (i, b) in &q {
         if *i != Interaction::Pressed {
@@ -340,10 +375,14 @@ fn buy_buttons(
                 set_active(&mut buy, on, &mut commands, &mut clock);
             }
             BuyButton::Category(c) => {
+                buy.drop_tools(&mut commands);
                 buy.category = *c;
                 buy.page = 0;
-                buy.painting = None;
-                buy.dirty = true;
+            }
+            BuyButton::Tool(t) => {
+                buy.drop_tools(&mut commands);
+                buy.tool = Some(*t);
+                play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
             }
             BuyButton::Prev => {
                 buy.page = buy.page.saturating_sub(1);
@@ -354,17 +393,11 @@ fn buy_buttons(
                 buy.dirty = true;
             }
             BuyButton::Pattern(i) => {
-                if let Some(p) = buy.placing.take() {
-                    commands.entity(p.ghost).despawn();
-                }
+                buy.drop_tools(&mut commands);
                 buy.painting = Some(*i);
-                buy.dirty = true;
             }
             BuyButton::Item(key) => {
-                buy.painting = None;
-                if let Some(p) = buy.placing.take() {
-                    commands.entity(p.ghost).despawn();
-                }
+                buy.drop_tools(&mut commands);
                 let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
                 let parts = assets.object(&mut ctx, *key);
                 if parts.is_empty() {
@@ -389,9 +422,10 @@ fn paint(
     mut building: Option<ResMut<crate::building::ActiveBuilding>>,
     mut assets: ResMut<ObjectAssets>,
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
-    (mut faces, floor_meshes): (
+    (mut faces, floor_meshes, pieces): (
         Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
         Query<Entity, With<crate::building::FloorMesh>>,
+        Query<(Entity, &crate::building::WallPiece)>,
     ),
     (mut household, mut notes, mut log, mut play): (
         Option<ResMut<Household>>,
@@ -444,7 +478,7 @@ fn paint(
         h.funds -= cost;
     }
     let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-    crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces, &floor_meshes);
+    crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces, &floor_meshes, &pieces);
     match log.as_mut() {
         Some(l) => l.0.extend(ops),
         None => commands.insert_resource(crate::building::LotPaint(ops)),
@@ -508,17 +542,26 @@ fn placement(
     (keys, mouse): (Res<ButtonInput<KeyCode>>, Res<ButtonInput<MouseButton>>),
     over_ui: Res<PointerOverUi>,
     (windows, cams): (Query<&Window, With<PrimaryWindow>>, Query<(&Camera, &GlobalTransform), With<SimsCamera>>),
-    (world, data, catalog, building): (Res<CurrentWorld>, Res<Baked>, Res<Catalog>, Option<Res<crate::building::ActiveBuilding>>),
+    (world, data, catalog, mut building): (Res<CurrentWorld>, Res<Baked>, Res<Catalog>, Option<ResMut<crate::building::ActiveBuilding>>),
     mut assets: ResMut<ObjectAssets>,
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
-    mut household: Option<ResMut<Household>>,
-    mut notes: ResMut<Notifications>,
+    (mut household, mut notes, mut log, mut play): (
+        Option<ResMut<Household>>,
+        ResMut<Notifications>,
+        Option<ResMut<crate::building::LotPaint>>,
+        MessageWriter<crate::sound::PlaySound>,
+    ),
     (selected, mut life): (Query<Entity, With<crate::sim::Selected>>, MessageWriter<crate::life::LifeEvent>),
     mut grid: Option<ResMut<NavGrid>>,
     pickup: Option<Res<PickupRequest>>,
     objects: Query<(&GameObject, &Transform)>,
     (bought_q, mut removed): (Query<(), With<crate::save::Bought>>, ResMut<crate::save::RemovedLotObjects>),
     mut tfs: Query<&mut Transform, Without<GameObject>>,
+    (mut faces, floor_meshes, pieces): (
+        Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
+        Query<Entity, With<crate::building::FloorMesh>>,
+        Query<(Entity, &crate::building::WallPiece)>,
+    ),
 ) {
     if !buy.active {
         return;
@@ -561,11 +604,26 @@ fn placement(
     let objd = placing.objd;
     let owned = placing.owned;
     let ground = ground_hit(ray, &world);
-    if let (Some(p), Ok(mut tf)) = (ground, tfs.get_mut(ghost)) {
-        let snap = |v: f32| (v * 4.0).round() / 4.0;
-        let (x, z) = (snap(p.x), snap(p.z));
-        tf.translation = Vec3::new(x, crate::building::walk_height(&world.data, building.as_deref(), Vec3::new(x, 0.0, z)), z);
-        tf.rotation = Quat::from_rotation_y(buy.yaw);
+    // Doors and windows go into the wall under the pointer.
+    let opening = catalog.by_key(&objd).and_then(|e| e.opening);
+    let in_wall = match (opening, building.as_deref()) {
+        (Some(_), Some(b)) => {
+            let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+            let tiles = crate::objects::parts_bounds(&assets.object(&mut ctx, objd)).map_or(1, |(mn, mx)| ((mx.x - mn.x).round() as u32).max(1));
+            crate::build::snap_to_wall(b, ray, tiles)
+        }
+        _ => None,
+    };
+    if let Ok(mut tf) = tfs.get_mut(ghost) {
+        if let Some((pos, rot, _)) = &in_wall {
+            tf.translation = *pos;
+            tf.rotation = *rot;
+        } else if let Some(p) = ground {
+            let snap = |v: f32| (v * 4.0).round() / 4.0;
+            let (x, z) = (snap(p.x), snap(p.z));
+            tf.translation = Vec3::new(x, crate::building::walk_height(&world.data, building.as_deref(), Vec3::new(x, 0.0, z)), z);
+            tf.rotation = Quat::from_rotation_y(buy.yaw);
+        }
     }
     let price = catalog.by_key(&objd).map(|e| e.price).unwrap_or(0) as i64;
     if (keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace)) && owned {
@@ -601,10 +659,27 @@ fn placement(
             notes.push("You can't afford that.");
             return;
         }
+        if opening.is_some() && in_wall.is_none() {
+            notes.push("Doors and windows go into a straight wall, on the floor in view.");
+            return;
+        }
         let Ok(tf) = tfs.get(ghost) else { return };
-        let (pos, yaw) = (tf.translation, buy.yaw);
+        let (pos, rot) = (tf.translation, tf.rotation);
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-        if let Some(o) = spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, yaw) {
+        // A door needs its own wall sections: cut them free of any longer wall first.
+        if let (Some((_, _, ops)), Some(b)) = (in_wall, building.as_deref_mut())
+            && !ops.is_empty()
+        {
+            crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces, &floor_meshes, &pieces);
+            match log.as_mut() {
+                Some(l) => l.0.extend(ops),
+                None => commands.insert_resource(crate::building::LotPaint(ops)),
+            }
+        }
+        if opening.is_some() {
+            play.write(crate::sound::PlaySound::ui("ui_build_door_plop"));
+        }
+        if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, rot) {
             commands.entity(o.entity).insert(crate::save::Bought);
             if !owned && let Some(h) = household.as_mut() {
                 h.funds -= price;

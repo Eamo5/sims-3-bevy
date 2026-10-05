@@ -428,7 +428,9 @@ pub fn move_in(
 
     let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
     let mut furniture_value = 0;
-    let building = house.map(|b| crate::building::spawn_building(&mut commands, &mut assets, &mut ctx, &catalog, b, &lot, None));
+    // An empty lot gets an empty building to build on.
+    let empty = crate::building::empty_building(lot_index, &lot, world.data.heightmap.sample(center.x, center.z));
+    let building = Some(crate::building::spawn_building(&mut commands, &mut assets, &mut ctx, &catalog, house.unwrap_or(&empty), &lot, None));
     let to_world = |x: f32, z: f32| {
         let p = center + rot * Vec3::new(x, 0.0, z);
         Vec3::new(p.x, crate::building::walk_height(&world.data, building.as_ref(), p), p.z)
@@ -468,7 +470,7 @@ pub fn move_in(
     }
     let dc = building.as_ref().map(|b| Vec3::new(b.center.x, b.levels[1], b.center.z)).unwrap_or_else(|| to_world(0.0, 0.0));
     // Sims arrive at the front of the lot (by the road) when there's a house in the way.
-    let arrive_z = if building.is_some() { -(lot.depth as f32) * 0.5 + 2.0 } else { 0.9 };
+    let arrive_z = if house.is_some() { -(lot.depth as f32) * 0.5 + 2.0 } else { 0.9 };
     let pending = pending.map(|p| p.clone()).unwrap_or_else(PendingHousehold::random);
     let starting_funds = if house.is_some() { 20000 - furniture_value as i64 / 4 } else { 20000 - furniture_value as i64 / 2 };
     let starting_funds = pending.premade.as_ref().map_or(starting_funds.max(5000), |h| h.funds.max(0));

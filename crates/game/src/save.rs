@@ -123,7 +123,7 @@ pub struct SaveGame {
     pub bought: Vec<SavedObject>,
     /// The lot's own furniture that was sold or moved.
     pub removed: Vec<SavedObject>,
-    /// Walls and floors repainted in build mode.
+    /// Walls and floors built and repainted in build mode.
     #[serde(default)]
     pub paint: Vec<crate::building::PaintOp>,
     /// The garden: seeds in hand and what's planted.
@@ -402,10 +402,11 @@ fn apply_loaded_game(
     objects: Query<(Entity, &GameObject, &Transform), (Without<Bought>, Without<Sim>)>,
     (data, catalog, mut assets): (Res<crate::baked::Baked>, Res<Catalog>, ResMut<crate::objects::ObjectAssets>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
-    (mut building, mut faces, floor_meshes): (
+    (mut building, mut faces, floor_meshes, pieces): (
         Option<ResMut<crate::building::ActiveBuilding>>,
         Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
         Query<Entity, With<crate::building::FloorMesh>>,
+        Query<(Entity, &crate::building::WallPiece)>,
     ),
     mut grid: Option<ResMut<crate::nav::NavGrid>>,
     mut notes: ResMut<Notifications>,
@@ -502,7 +503,7 @@ fn apply_loaded_game(
     let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
     // The walls and floors as the household left them.
     if let Some(b) = building.as_deref_mut() {
-        crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &game.paint, &mut faces, &floor_meshes);
+        crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &game.paint, &mut faces, &floor_meshes, &pieces);
     }
     commands.insert_resource(crate::building::LotPaint(game.paint.clone()));
     commands.insert_resource(crate::gardening::PendingPlants(game.plants.clone(), game.seeds.clone()));
