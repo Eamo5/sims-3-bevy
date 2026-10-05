@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 11;
+pub const GAMEDATA_VERSION: u32 = 14;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -102,6 +102,38 @@ pub struct CareerInfo {
     pub levels: Vec<CareerLevelInfo>,
 }
 
+/// An opportunity done at a rabbit hole (the game's most common kind): go to a venue of a type
+/// during its hours and spend some time there, for a reward.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct OpportunityInfo {
+    pub guid: String,
+    pub name: String,
+    pub desc: String,
+    pub completion: String,
+    pub failure: String,
+    pub icon: String,
+    /// The rabbit hole type (`CityHall`, `Restaurant`, `ScienceLab`...).
+    pub rabbit_hole: String,
+    /// What the Sim does there, and for how long (minutes), between these hours.
+    pub interaction: String,
+    pub minutes: f32,
+    pub open: f32,
+    pub close: f32,
+    /// Days to do it in (0: no limit).
+    pub days: f32,
+    /// A career (its key, like `Business`) or skill (`Logic`, min..max level) it's offered for.
+    pub career: String,
+    pub skill: String,
+    pub skill_min: u32,
+    pub skill_max: u32,
+    /// Rewards: simoleons, job performance, a raise (percent), skill (percent of a level).
+    pub money: i64,
+    pub performance: f32,
+    pub raise: f32,
+    pub skill_reward: f32,
+    pub repeat: bool,
+}
+
 /// A wallpaper or floor covering from the build catalogue.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PatternInfo {
@@ -149,6 +181,7 @@ pub struct GameDataBaked {
     pub careers: Vec<CareerInfo>,
     pub patterns: Vec<PatternInfo>,
     pub balloons: BalloonTable,
+    pub opportunities: Vec<OpportunityInfo>,
 }
 
 impl GameDataBaked {
@@ -415,6 +448,128 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         out.patterns.dedup_by(|a, b| a.floor == b.floor && a.name == b.name);
     }
 
+    // Opportunities (the base game's), the ones done at a rabbit hole.
+    if let Some(x) = xml("Opportunities_BaseGame") {
+        let by_guid = |sheet: &str| -> HashMap<String, HashMap<String, String>> {
+            records(&x, sheet).into_iter().filter_map(|f| Some((f.get("GUID").filter(|g| !g.is_empty())?.clone(), f))).collect()
+        };
+        let (setup, reqs, done, names) = (by_guid("OpportunitiesSetup"), by_guid("OpportunitiesRequirements"), by_guid("OpportunitiesCompletion"), by_guid("Names"));
+        // The text keys' workbook isn't the XML's name: try the likely ones.
+        let opp_text = |key: &str| -> String {
+            if key.is_empty() {
+                return String::new();
+            }
+            ["Opportunities_BaseGame/Names", "Opportunities/Names", "Opportunities_BaseGame/OpportunitiesSetup", "Opportunities/OpportunitiesSetup"]
+                .iter()
+                .find_map(|t| strings.get(&s3pkg::fnv64(&format!("Gameplay/Excel/{t}:{key}").to_ascii_lowercase())).cloned())
+                .unwrap_or_default()
+        };
+        let hour = |t: &str| -> f32 {
+            let t = t.trim().to_ascii_uppercase();
+            let pm = t.ends_with("PM");
+            let core = t.trim_end_matches("AM").trim_end_matches("PM");
+            let (h, m) = core.split_once(':').unwrap_or((core, "0"));
+            let h: f32 = h.parse().unwrap_or(0.0);
+            let m: f32 = m.parse().unwrap_or(0.0);
+            (h % 12.0) + if pm { 12.0 } else { 0.0 } + m / 60.0
+        };
+        let careers = [
+            ("BusinessCareer", "Business"),
+            ("CriminalCareer", "Criminal"),
+            ("CulinaryCareer", "Culinary"),
+            ("PoliticalCareer", "Political"),
+            ("AthleticCareer", "ProfessionalSports"),
+            ("ScienceCareer", "Science"),
+            ("JournalismCareer", "Journalism"),
+            ("LawEnforcement", "LawEnforcement"),
+            ("MilitaryCareer", "Military"),
+            ("MusicCareer", "Music"),
+            ("MedicalCareer", "Medical"),
+        ];
+        let mut guids: Vec<&String> = setup.keys().collect();
+        guids.sort();
+        for g in guids {
+            let s = &setup[g];
+            // (Only the ones that are done by going there: some also need a feat first, which
+            // the game listens for with its event listeners.)
+            // (Nor ones that need things brought along: paintings, fish, produce.)
+            if get(s, "CompletionEvent") != "kVisitedRabbitHole"
+                || get(s, "Target") != "RabbitHole"
+                || !get(s, "Object").is_empty()
+                || !get(s, "EventListenerInfo1").is_empty()
+                || !get(s, "TargetInteractionItemRequired").is_empty()
+                || !get(s, "TargetInteractionNumberItemsRequired").is_empty()
+            {
+                continue;
+            }
+            let mut o = OpportunityInfo { guid: g.clone(), ..Default::default() };
+            o.rabbit_hole = get(s, "TargetData");
+            o.icon = get(s, "Icon");
+            o.minutes = num(s, "TargetInteractionLength").max(15.0);
+            o.open = s.get("TargetInteractionStartTime").map_or(0.0, |t| hour(t));
+            o.close = s.get("TargetInteractionEndTime").map_or(24.0, |t| hour(t));
+            if o.close <= o.open {
+                o.close = 24.0;
+            }
+            o.days = if get(s, "Timeout") == "SimDays" { num(s, "TimeoutData") } else { 0.0 };
+            o.repeat = get(s, "RepeatLevel") == "Always";
+            let prefix = g.split('_').next().unwrap_or("");
+            if get(s, "OpportunityType") == "Skill" {
+                // (The skill comes from the requirements.)
+            } else if let Some((_, c)) = careers.iter().find(|(p, _)| *p == prefix) {
+                o.career = c.to_string();
+            } else {
+                continue;
+            }
+            // Requirements: only the ones this game can tell.
+            let mut ok = true;
+            for (k, v) in reqs.get(g).into_iter().flatten() {
+                if !k.starts_with("Requirement") || v.is_empty() {
+                    continue;
+                }
+                let p: Vec<&str> = v.split(',').map(|x| x.trim()).collect();
+                match p[0] {
+                    "Skill" if p.len() >= 4 => {
+                        o.skill = p[1].to_string();
+                        o.skill_min = p[2].parse().unwrap_or(0);
+                        o.skill_max = p[3].parse().unwrap_or(10);
+                    }
+                    "WorldHasRabbitHoleType" => {}
+                    _ => ok = false,
+                }
+            }
+            if !ok || (o.career.is_empty() && o.skill.is_empty()) {
+                continue;
+            }
+            for (k, v) in done.get(g).into_iter().flatten() {
+                if !k.starts_with("CompletionWinReward") && !k.starts_with("CompletionModifier") {
+                    continue;
+                }
+                let p: Vec<&str> = v.split(',').map(|x| x.trim()).collect();
+                let n = |i: usize| p.get(i).and_then(|x| x.parse::<f32>().ok()).unwrap_or(0.0);
+                match p[0] {
+                    "Money" => o.money += n(1) as i64,
+                    "CareerPerformance" => o.performance += n(1),
+                    "CareerRaise" => o.raise += n(1),
+                    "SkillPercentage" => o.skill_reward += n(2).max(n(1)),
+                    "Skill" => o.skill_reward += n(2),
+                    _ => {}
+                }
+            }
+            let nm = names.get(g);
+            let key = |k: &str| nm.map(|f| get(f, k)).unwrap_or_default();
+            o.name = opp_text(&key("OpportunityName"));
+            o.desc = opp_text(&key("OpportunityDescription"));
+            o.completion = opp_text(&key("CompletionText"));
+            o.failure = opp_text(&key("FailureText"));
+            o.interaction = opp_text(&get(s, "TargetInteractionName"));
+            if o.name.is_empty() {
+                continue;
+            }
+            out.opportunities.push(o);
+        }
+    }
+
     // Balloons: each table's rows in order; a row without a key continues the list above it.
     if let Some(b) = xml("Balloons") {
         for (row, key_tag, table) in [
@@ -459,6 +614,9 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     }
     for c in &out.careers {
         wanted.insert(c.icon.clone());
+    }
+    for o in &out.opportunities {
+        wanted.insert(o.icon.clone());
     }
     wanted.extend(EXTRA_ICONS.iter().map(|s| s.to_string()));
     wanted.remove("");

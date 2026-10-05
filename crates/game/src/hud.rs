@@ -20,7 +20,7 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PieMenu>()
             .add_systems(OnEnter(PlayMode::Live), spawn_hud)
-            .add_systems(Update, (floor_controls, update_moodlets_panel, phone_button, save_button, update_wishes_panel, wish_buttons).run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, (floor_controls, update_moodlets_panel, phone_button, save_button, update_wishes_panel, wish_buttons, fade_help).run_if(in_state(PlayMode::Live)))
             .add_systems(
                 Update,
                 (
@@ -261,8 +261,11 @@ fn spawn_hud(mut commands: Commands) {
         ))
         .with_children(|row| {
             row.spawn(panel(Node {
-                padding: UiRect::axes(Val::Px(14.0), Val::Px(8.0)),
-                column_gap: Val::Px(8.0),
+                padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
+                column_gap: Val::Px(5.0),
+                row_gap: Val::Px(5.0),
+                flex_wrap: FlexWrap::Wrap,
+                justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 ..default()
             }))
@@ -277,13 +280,13 @@ fn spawn_hud(mut commands: Commands) {
                         height: Val::Px(34.0),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
-                        margin: UiRect::right(Val::Px(8.0)),
+                        margin: UiRect::right(Val::Px(2.0)),
                         ..default()
                     },
                     BackgroundColor(BTN_NORMAL),
                 ))
                 .with_children(|b| {
-                    b.spawn(text("Phone", 16.0, Color::WHITE));
+                    b.spawn(text("Phone", 15.0, Color::WHITE));
                 });
                 p.spawn((
                     Button,
@@ -293,16 +296,35 @@ fn spawn_hud(mut commands: Commands) {
                     Node {
                         border_radius: BorderRadius::all(Val::Px(8.0)),
                         height: Val::Px(34.0),
-                        padding: UiRect::horizontal(Val::Px(10.0)),
+                        padding: UiRect::horizontal(Val::Px(8.0)),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
-                        margin: UiRect::right(Val::Px(8.0)),
+                        margin: UiRect::right(Val::Px(2.0)),
                         ..default()
                     },
                     BackgroundColor(BTN_NORMAL),
                 ))
                 .with_children(|b| {
-                    b.spawn(text("Relationships", 16.0, Color::WHITE));
+                    b.spawn(text("Relationships", 15.0, Color::WHITE));
+                });
+                p.spawn((
+                    Button,
+                    HudButton,
+                    crate::opportunities::OpportunitiesButton,
+                    crate::icons::Tooltip("Opportunities (O)".into()),
+                    Node {
+                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                        height: Val::Px(34.0),
+                        padding: UiRect::horizontal(Val::Px(8.0)),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        margin: UiRect::right(Val::Px(2.0)),
+                        ..default()
+                    },
+                    BackgroundColor(BTN_NORMAL),
+                ))
+                .with_children(|b| {
+                    b.spawn(text("Opportunities", 15.0, Color::WHITE));
                 });
                 p.spawn((
                     Button,
@@ -314,15 +336,15 @@ fn spawn_hud(mut commands: Commands) {
                         height: Val::Px(34.0),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
-                        margin: UiRect::right(Val::Px(8.0)),
+                        margin: UiRect::right(Val::Px(2.0)),
                         ..default()
                     },
                     BackgroundColor(BTN_NORMAL),
                 ))
                 .with_children(|b| {
-                    b.spawn(text("Save", 16.0, Color::WHITE));
+                    b.spawn(text("Save", 15.0, Color::WHITE));
                 });
-                p.spawn((text("", 20.0, Color::WHITE), ClockText, Node { width: Val::Px(210.0), ..default() }));
+                p.spawn((text("", 18.0, Color::WHITE), ClockText, Node { width: Val::Px(182.0), ..default() }));
                 for (i, label) in ["II", ">", ">>", ">>>"].iter().enumerate() {
                     p.spawn((
                         Button,
@@ -419,16 +441,35 @@ fn spawn_hud(mut commands: Commands) {
         Node { position_type: PositionType::Absolute, top: Val::Px(6.0), left: Val::Percent(48.0), ..default() },
     ));
 
-    // Help line
+    // Help line (top, fading once play has started)
     commands.spawn((
         DespawnOnExit(AppState::InGame),
+        HelpLine,
         text(
-            "Click objects / sims for actions · Click ground to walk · WASD/arrows pan · Q/E rotate · wheel zoom · Space pause · 1/2/3 speed · Tab next sim · C centre camera · PgUp/PgDn floors · B buy mode",
+            "Click objects / sims for actions · Click ground to walk · WASD/arrows pan · Q/E rotate · wheel zoom · Space pause · 1/2/3 speed · Tab next sim · C centre camera · PgUp/PgDn floors · B buy mode · R relationships · O opportunities",
             13.0,
             Color::srgba(1.0, 1.0, 1.0, 0.75),
         ),
-        Node { position_type: PositionType::Absolute, left: Val::Px(420.0), right: Val::Px(240.0), bottom: Val::Px(70.0), ..default() },
+        TextLayout::justify(Justify::Center),
+        Node { position_type: PositionType::Absolute, left: Val::Px(160.0), right: Val::Px(160.0), top: Val::Px(26.0), ..default() },
+        Pickable::IGNORE,
     ));
+}
+
+#[derive(Component)]
+struct HelpLine;
+
+/// The help line fades out after the first minute and a half.
+fn fade_help(mut commands: Commands, time: Res<Time>, mut since: Local<Option<f32>>, mut q: Query<(Entity, &mut TextColor), With<HelpLine>>) {
+    let t0 = *since.get_or_insert(time.elapsed_secs());
+    let a = (1.0 - (time.elapsed_secs() - t0 - 90.0) / 5.0).clamp(0.0, 1.0) * 0.75;
+    for (e, mut c) in &mut q {
+        if a <= 0.0 {
+            commands.entity(e).despawn();
+        } else {
+            c.0 = Color::srgba(1.0, 1.0, 1.0, a);
+        }
+    }
 }
 
 fn pointer_over_ui(mut over: ResMut<PointerOverUi>, q: Query<&Interaction, Or<(With<BlocksWorld>, With<Button>)>>) {
@@ -576,7 +617,14 @@ fn world_click(
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
     buy: Option<Res<crate::buy::BuyMode>>,
-    building: Option<Res<crate::building::ActiveBuilding>>,
+    (building, opp_q): (
+        Option<Res<crate::building::ActiveBuilding>>,
+        (
+            Option<Res<crate::icons::GameUi>>,
+            Query<Option<&crate::opportunities::SimOpportunities>, With<Selected>>,
+            Res<crate::clock::GameClock>,
+        ),
+    ),
 ) {
     if buy.is_some_and(|b| b.active) {
         return;
@@ -659,16 +707,22 @@ fn world_click(
     } else if let Some((p, level)) = floor_hit(ray, &world, building.as_deref()) {
         let mut options = vec![("Go Here".to_string(), ActionKind::GoHere(Vec2::new(p.x, p.z), level))];
         let mut title = String::new();
-        // A community lot: its rabbit hole's activities.
+        // A community lot: its rabbit hole's activities, and opportunities done there.
         if let Some(lot) = crate::rabbitholes::lot_at(&world.data.lots, p) {
             let l = &world.data.lots[lot];
             let acts = crate::rabbitholes::activities(l);
-            if !acts.is_empty() {
+            let opp_tasks = opp_q
+                .0
+                .as_ref()
+                .map(|ui| crate::opportunities::lot_options(&world.data, lot, opp_q.1.single().ok().flatten(), &ui.data, opp_q.2.hour_f()))
+                .unwrap_or_default();
+            if !acts.is_empty() || !opp_tasks.is_empty() {
                 title = crate::rabbitholes::lot_title(l, world.data.lot_names.get(lot).map_or("", |s| s.as_str()));
                 options.clear();
                 for (i, a) in acts.iter().enumerate() {
                     options.push((activity_label(a), ActionKind::Visit { lot, activity: i }));
                 }
+                options.extend(opp_tasks);
             }
         }
         open_pie(&mut commands, &mut pie, cursor, &title, actor, options);

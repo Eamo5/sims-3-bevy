@@ -43,6 +43,12 @@ installation is unreachable.
   firms Sims up); needs, moods,
   skills, careers, relationships, autonomy, social interactions; children, teens, adults and
   elders who grow up and grow old (birthdays, new traits, passing away).
+- **Opportunities** from the game's own tables: by day, Sims are offered ones that suit their
+  career or skills in the game's dialog (its icon, name, description and reward); taken-on
+  opportunities are listed in the Opportunities panel (O) with their deadlines and are done
+  at the right venue during its hours (Business Sims sign deals at the office, cooks compete
+  at the restaurant...), paying money, performance at work or skill, with the game's
+  completion and failure texts. Kept in saves.
 - **Map View**: zoomed out over town, every lot gets the game's map tag — the household's
   home in green with a star, other homes and empty lots, and each venue's own glyph (cut from
   the game's map-tag atlas); hover for the name, click a venue for its activities or a home to
@@ -114,6 +120,7 @@ installation is unreachable.
 | 1 / 2 / 3 | Game speed |
 | B or F2 | Buy mode (, and . rotate, Delete sells, Esc leaves) |
 | R | Relationships panel |
+| O | Opportunities panel |
 | Esc | Game menu: pause, options, save, quit |
 
 ## Layout

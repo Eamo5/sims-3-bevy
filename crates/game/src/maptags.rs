@@ -153,6 +153,7 @@ fn tag_clicks(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut pie: ResMut<crate::hud::PieMenu>,
     mut cam: Query<&mut SimsCamera>,
+    (ui, opps, clock): (Option<Res<crate::icons::GameUi>>, Query<Option<&crate::opportunities::SimOpportunities>, With<crate::sim::Selected>>, Res<crate::clock::GameClock>),
 ) {
     for (i, tag) in &tags {
         if *i != Interaction::Pressed {
@@ -160,10 +161,12 @@ fn tag_clicks(
         }
         let Some(lot) = world.data.lots.get(tag.lot) else { continue };
         let acts = crate::rabbitholes::activities(lot);
-        if !lot.is_residential() && !acts.is_empty() {
+        let tasks = ui.as_ref().map(|u| crate::opportunities::lot_options(&world.data, tag.lot, opps.single().ok().flatten(), &u.data, clock.hour_f())).unwrap_or_default();
+        if !lot.is_residential() && (!acts.is_empty() || !tasks.is_empty()) {
             let (Ok(actor), Some(cursor)) = (selected.single(), windows.single().ok().and_then(|w| w.cursor_position())) else { continue };
             let name = world.data.lot_names.get(tag.lot).map_or("", |s| s.as_str());
-            let options = acts.iter().enumerate().map(|(k, a)| (crate::hud::activity_label(a), ActionKind::Visit { lot: tag.lot, activity: k })).collect();
+            let mut options: Vec<(String, ActionKind)> = acts.iter().enumerate().map(|(k, a)| (crate::hud::activity_label(a), ActionKind::Visit { lot: tag.lot, activity: k })).collect();
+            options.extend(tasks);
             pie.at = cursor;
             crate::hud::open_pie(&mut commands, &mut pie, cursor, &crate::rabbitholes::lot_title(lot, name), actor, options);
         } else if let Ok(mut c) = cam.single_mut() {

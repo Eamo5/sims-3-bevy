@@ -75,6 +75,11 @@ pub struct SavedSim {
     /// Body shape: weight and fitness.
     #[serde(default)]
     pub shape: Option<(f32, f32)>,
+    /// Opportunities taken on (by the game's id, with their deadline) and done.
+    #[serde(default)]
+    pub opportunities: Vec<(String, Option<f64>)>,
+    #[serde(default)]
+    pub opportunities_done: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -269,11 +274,12 @@ fn save_game(
             Has<OffLot>,
             Has<Visitor>,
             Option<&crate::wishes::Wishes>,
-            (Option<&crate::aging::Aging>, Option<&crate::little::Pregnancy>),
+            (Option<&crate::aging::Aging>, Option<&crate::little::Pregnancy>, Option<&crate::opportunities::SimOpportunities>),
         ),
         Without<crate::town::Townie>,
     >,
     bought: Query<(&GameObject, &Transform), With<Bought>>,
+    ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
 ) {
     if requests.read().count() == 0 {
@@ -282,7 +288,8 @@ fn save_game(
     let Some(hh) = household else { return };
     let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).collect();
     let mut saved = Vec::new();
-    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy)) in &sims {
+    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps)) in &sims {
+        let guid = |i: usize| ui.as_ref().and_then(|u| u.data.opportunities.get(i)).map(|o| o.guid.clone());
         saved.push(SavedSim {
             id: sim.id,
             look: sim.look,
@@ -318,6 +325,8 @@ fn save_game(
             aging: aging.map(|a| (a.days, a.elder_span)),
             pregnancy: pregnancy.map(|p| (p.since, p.other_parent.and_then(|o| ids.get(&o).copied()), p.stage)),
             shape: Some((sim.weight, sim.fitness)),
+            opportunities: opps.map(|o| o.active.iter().filter_map(|a| Some((guid(a.index)?, a.deadline))).collect()).unwrap_or_default(),
+            opportunities_done: opps.map(|o| o.done.clone()).unwrap_or_default(),
         });
     }
     let game = SaveGame {
@@ -426,6 +435,9 @@ fn apply_loaded_game(
         let mut ec = commands.entity(e);
         if let Some((days, elder_span)) = s.aging {
             ec.insert(crate::aging::Aging { days, elder_span });
+        }
+        if !s.opportunities.is_empty() || !s.opportunities_done.is_empty() {
+            ec.insert(crate::opportunities::PendingOpportunities(s.opportunities.clone(), s.opportunities_done.clone()));
         }
         if let Some((since, other, stage)) = s.pregnancy {
             let other_parent = other.and_then(|o| by_id.get(&o).copied());

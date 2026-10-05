@@ -770,6 +770,7 @@ fn run_actions(
             Option<&mut Job>,
             &Floor,
             Option<&crate::wishes::Wishes>,
+            Option<&crate::opportunities::SimOpportunities>,
         ),
         (Without<GameObject>, Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>),
     >,
@@ -799,7 +800,7 @@ fn run_actions(
     // Relationship changes to apply to both Sims: (a, b, status, kissed)
     let mut status_fx: Vec<(Entity, Entity, Option<RelStatus>, bool)> = Vec::new();
 
-    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, mut job, floor, wishes) in &mut sims {
+    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, mut job, floor, wishes, opps) in &mut sims {
         let Some(action) = queue.0.front_mut() else {
             if anim.pose != Pose::Walk && anim.pose != Pose::Stand && path.is_none() {
                 anim.pose = Pose::Stand;
@@ -988,7 +989,8 @@ fn run_actions(
                             ActionKind::Visit { lot, activity } => {
                                 if let (Some(l), Some(name)) = (world.data.lots.get(*lot), world.data.lot_names.get(*lot)) {
                                     let acts = crate::rabbitholes::activities(l);
-                                    if let Some(a) = acts.get(*activity) {
+                                    let task = crate::opportunities::opportunity_task(opps, *activity).map(|t| t.0);
+                                    if let Some(a) = task.or_else(|| acts.get(*activity)) {
                                         let place = crate::rabbitholes::lot_title(l, name);
                                         crate::rabbitholes::head_out(&mut commands, &clock, me, sim, *lot, a, place, household.as_deref_mut(), &mut notes);
                                     }
@@ -1297,7 +1299,7 @@ fn run_actions(
         }
     }
     for (target, actor, social, fun, friendship, romance) in social_fx {
-        if let Ok((_, tsim, queue, mut tf, mut motives, _, mut anim, _, mut rels, path, _, _, _)) = sims.get_mut(target) {
+        if let Ok((_, tsim, queue, mut tf, mut motives, _, mut anim, _, mut rels, path, _, _, _, _)) = sims.get_mut(target) {
             motives.add(SOCIAL, social);
             motives.add(FUN, fun);
             rels.add(actor, friendship, romance);

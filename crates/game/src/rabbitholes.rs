@@ -20,6 +20,7 @@ impl Plugin for RabbitHolePlugin {
     }
 }
 
+#[derive(Debug)]
 pub struct Activity {
     pub name: &'static str,
     pub minutes: f32,
@@ -27,10 +28,13 @@ pub struct Activity {
     /// Need changes per hour inside.
     pub per_hour: [f32; 6],
     pub skill: Option<&'static str>,
+    /// The hours it can be started in.
+    pub open: f32,
+    pub close: f32,
 }
 
 const fn act(name: &'static str, minutes: f32, cost: i64, per_hour: [f32; 6], skill: Option<&'static str>) -> Activity {
-    Activity { name, minutes, cost, per_hour, skill }
+    Activity { name, minutes, cost, per_hour, skill, open: 0.0, close: 24.0 }
 }
 
 //                      hunger bladder energy social hygiene fun
@@ -142,6 +146,17 @@ pub fn head_out(
     household: Option<&mut Household>,
     notes: &mut Notifications,
 ) -> bool {
+    let h = clock.hour_f();
+    if h < activity.open || h >= activity.close {
+        notes.push(format!(
+            "{} can only {} between {} and {}.",
+            sim.first,
+            activity.name.to_lowercase(),
+            crate::interact::hour_label(activity.open),
+            crate::interact::hour_label(activity.close)
+        ));
+        return false;
+    }
     if activity.cost > 0 {
         let Some(h) = household else { return false };
         if h.funds < activity.cost {

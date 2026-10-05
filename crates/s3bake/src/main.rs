@@ -192,6 +192,22 @@ fn main() {
         // The baked moodlets, traits and skills.
         let g = s3bake::load_gamedata(&s3bake::default_root()).expect("no gameplay data");
         println!("{} buffs, {} traits, {} skills", g.buffs.len(), g.traits.len(), g.skills.len());
+        println!("{} opportunities", g.opportunities.len());
+        let mut tokens = std::collections::BTreeSet::new();
+        for o in &g.opportunities {
+            for t in [&o.name, &o.desc, &o.completion, &o.failure, &o.interaction] {
+                let mut s = t.as_str();
+                while let Some(a) = s.find('{') {
+                    let Some(b) = s[a..].find('}') else { break };
+                    tokens.insert(s[a..a + b + 1].to_string());
+                    s = &s[a + b + 1..];
+                }
+            }
+        }
+        println!("opportunity text tokens: {tokens:?}");
+        for o in g.opportunities.iter().take(6) {
+            println!("opp {} [{}] {:?} at {} {}..{} {}m days {} career {:?} skill {:?} {}-{} money {} perf {} raise {} skill+{} | {:?} | {:?}", o.guid, o.icon, o.name, o.rabbit_hole, o.open, o.close, o.minutes, o.days, o.career, o.skill, o.skill_min, o.skill_max, o.money, o.performance, o.raise, o.skill_reward, o.interaction, o.desc);
+        }
         let b = &g.balloons;
         println!("balloons: {} idle, {} social, {} topic, {} random lists", b.idle.len(), b.social.len(), b.topic.len(), b.random.len());
         for k in ["MotiveHunger", "Chat", "Weather"] {

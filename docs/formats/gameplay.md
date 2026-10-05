@@ -39,6 +39,22 @@ resources under key `fnv64(lower("Gameplay/Excel/<Workbook>/<Sheet>:<Key>"))`, f
 Icons named in the tables (`moodlet_hungry`, `trait_genius_s`, `w_tv`…) are PNG resources of type
 `0x2F7D0004` with instance `fnv64(lower(name))` in the main packages.
 
+### Opportunities
+
+`Opportunities_BaseGame` (and `Opportunities_EP*` for the packs) has four sheets joined by
+`GUID`: `OpportunitiesSetup` (icon, `Target` / `TargetData` — e.g. `RabbitHole` / `CityHall`,
+`TargetInteractionName`, `…Length` in minutes, `…StartTime` / `…EndTime` like `9:00AM`,
+`Timeout` `SimDays` with `TimeoutData` days, `CompletionEvent`, `EventListenerInfo1..3` for
+feats to perform first, `Object` for things to deliver), `OpportunitiesRequirements`
+(`Requirement1..` like `Skill,Athletic,5,10` or `WorldHasRabbitHoleType,Stadium`),
+`OpportunitiesCompletion` (`CompletionWinReward1..` like `Money,650`, `CareerPerformance,25`,
+`CareerRaise,10`, `SkillPercentage,…`; `CompletionModifier…`) and `Names` (string keys). An
+empty `OpportunityType` means `Career` (the template row's default); the career is the GUID's
+prefix (`BusinessCareer_…`). Texts are under `Gameplay/Excel/Opportunities/Names:<key>` and
+use `{10.Money}`, `{9.Number}`, `{RabbitHoleName}`. The rabbit-hole type of a lot is the class
+of its rabbit-hole object (`Sims3.Gameplay.Objects.RabbitHoles.Grocery`; one lot can hold
+several, like Sunset Valley's downtown block with the bookstore, grocery and theatre).
+
 ## 2. Balloons
 
 The `Balloons` workbook says what Sims think and say. It has four sheets, each a list of rows with

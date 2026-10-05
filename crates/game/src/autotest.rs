@@ -439,6 +439,7 @@ fn auto_action(
     world: Res<crate::loading::CurrentWorld>,
     (mut commands, clock, members): (Commands, Res<crate::clock::GameClock>, Query<(Entity, &crate::sim::Sim), With<crate::sim::HouseholdMember>>),
     (time, mut since): (Res<Time>, Local<Option<f32>>),
+    (opps_q, ui): (Query<&crate::opportunities::SimOpportunities>, Option<Res<crate::icons::GameUi>>),
 ) {
     let Some(name) = &args.action else { return };
     if *done {
@@ -484,6 +485,29 @@ fn auto_action(
         return;
     }
     let Ok(mut q) = sel.single_mut() else { return };
+    // "Opp": an opportunity is offered now. "OppDo": accepted, and the Sim goes to do it.
+    if name == "Opp" || name == "OppDo" {
+        commands.insert_resource(crate::opportunities::ForceOffer);
+        if name == "OppDo" {
+            commands.insert_resource(crate::opportunities::AutoAccept);
+        } else {
+            *done = true;
+        }
+        let Ok(mut q) = sel.single_mut() else { return };
+        let Ok(me) = sel_e.single() else { return };
+        let Ok(opps) = opps_q.get(me) else { return };
+        let Some(ui) = ui.as_ref() else { return };
+        for lot in 0..world.data.lots.len() {
+            if let Some((label, kind)) = crate::opportunities::lot_options(&world.data, lot, Some(opps), &ui.data, 12.0).into_iter().next() {
+                info!("going to do {label}");
+                q.0.clear();
+                q.push_player(crate::interact::Action::new(label, kind, false));
+                *done = true;
+                return;
+            }
+        }
+        return;
+    }
     // "Die": the selected Sim's time has come.
     if name == "Die" {
         let me = sel_e.single().unwrap();
