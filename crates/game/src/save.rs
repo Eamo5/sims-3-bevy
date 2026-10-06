@@ -99,6 +99,9 @@ pub struct SavedSim {
     /// A toddler's walking and talking.
     #[serde(default)]
     pub toddler: Option<crate::little::ToddlerSkills>,
+    /// Eye colour (saves from before eye colours: by the Sim's look).
+    #[serde(default)]
+    pub eyes: Option<[f32; 3]>,
 }
 
 /// A lifetime wish (by the game's check for it), and what's counted towards it.
@@ -252,6 +255,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         chess: None,
         inventory: Default::default(),
         toddler: None,
+        eyes: Some(rgb(sim.eyes)),
     }
 }
 
@@ -272,6 +276,7 @@ impl SaveGame {
             fitness: s.shape.map_or(0.0, |x| x.1),
             skin: c(s.skin),
             hair: c(s.hair),
+            eyes: s.eyes.map_or_else(|| crate::sim::eyes_by_look(s.look), c),
             top: c(s.top),
             bottom: c(s.bottom),
         }
@@ -540,6 +545,7 @@ fn save_game(
             chess: chess.copied(),
             inventory: inventory.cloned().unwrap_or_default(),
             toddler: toddler.copied(),
+            eyes: Some(rgb(sim.eyes)),
         });
     }
     let game = SaveGame {
@@ -806,4 +812,44 @@ pub fn note_removed(removed: &mut RemovedLotObjects, o: &GameObject, tf: &Transf
 
 pub fn request_save(w: &mut MessageWriter<SaveRequest>) {
     w.write(SaveRequest);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn close(a: Color, b: Color) -> bool {
+        let (a, b) = (a.to_srgba(), b.to_srgba());
+        (a.red - b.red).abs() < 1e-4 && (a.green - b.green).abs() < 1e-4 && (a.blue - b.blue).abs() < 1e-4
+    }
+
+    #[test]
+    fn eye_colour_saved_and_restored() {
+        let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(7);
+        let mut sim = random_sim(&mut rng, "Test", Some(true), Age::Adult);
+        let (r, g, b) = EYES[3];
+        sim.eyes = Color::srgb(r, g, b);
+        let json = serde_json::to_string(&saved_look(&sim)).unwrap();
+        let back: SavedSim = serde_json::from_str(&json).unwrap();
+        assert!(close(SaveGame::sim(&back).eyes, sim.eyes));
+    }
+
+    #[test]
+    fn saves_from_before_eye_colours_still_load() {
+        let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(8);
+        let sim = random_sim(&mut rng, "Test", Some(false), Age::Adult);
+        let mut v = serde_json::to_value(saved_look(&sim)).unwrap();
+        v.as_object_mut().unwrap().remove("eyes");
+        let old: SavedSim = serde_json::from_value(v).unwrap();
+        let loaded = SaveGame::sim(&old);
+        assert!(close(loaded.eyes, eyes_by_look(sim.look)));
+        // (And a household's Sims don't all get the same eyes.)
+        let colours: std::collections::HashSet<usize> = (0..64u64)
+            .map(|look| {
+                let c = eyes_by_look(look.wrapping_mul(0x1234_5678_9ABC_DEF1)).to_srgba();
+                EYES.iter().position(|e| (e.0 - c.red).abs() < 1e-4 && (e.1 - c.green).abs() < 1e-4).unwrap()
+            })
+            .collect();
+        assert_eq!(colours.len(), EYES.len());
+    }
 }

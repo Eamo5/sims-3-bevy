@@ -69,6 +69,9 @@ pub struct Sim {
     pub traits: Vec<crate::life::Trait>,
     pub skin: Color,
     pub hair: Color,
+    /// Eye colour (the iris's, as Create a Sim's colours are: about half-strength, doubled
+    /// over the iris's own shading).
+    pub eyes: Color,
     pub top: Color,
     pub bottom: Color,
     /// Body shape: weight from thin (-1) to heavy (1), and fitness (0..1).
@@ -269,6 +272,27 @@ pub const SKINS: [(f32, f32, f32); 5] = [(0.96, 0.80, 0.69), (0.87, 0.68, 0.53),
 /// Hair colours, as Create-a-Sim offers them: black, dark brown, brown, blonde, red and grey.
 pub const HAIRS: [(f32, f32, f32); 6] = [(0.08, 0.06, 0.05), (0.30, 0.18, 0.08), (0.55, 0.35, 0.15), (0.85, 0.70, 0.40), (0.60, 0.20, 0.10), (0.55, 0.55, 0.55)];
 
+/// Create a Sim's eye colours (the eye colour part's presets): hazel, blue, olive, green, brown,
+/// amber, grey and violet.
+pub const EYES: [(f32, f32, f32); 8] = [
+    (0.5647, 0.5098, 0.4392),
+    (0.4902, 0.5490, 0.6471),
+    (0.5255, 0.5137, 0.3098),
+    (0.4275, 0.5059, 0.4667),
+    (0.5882, 0.4118, 0.3333),
+    (0.6275, 0.5098, 0.3333),
+    (0.5490, 0.5490, 0.5490),
+    (0.5373, 0.4353, 0.5333),
+];
+
+/// An eye colour from the presets, by a Sim's look (for Sims made before eye colours).
+pub fn eyes_by_look(look: u64) -> Color {
+    // (The look's bits mixed, so a family's looks don't all land on one colour.)
+    let h = (look ^ 0xE7E5_C010).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    let (r, g, b) = EYES[((h >> 32) % EYES.len() as u64) as usize];
+    Color::srgb(r, g, b)
+}
+
 pub fn random_sim(rng: &mut impl Rng, last: &str, female: Option<bool>, age: Age) -> Sim {
     let female = female.unwrap_or_else(|| rng.random_bool(0.5));
     let first = if female { FIRST_F[rng.random_range(0..FIRST_F.len())] } else { FIRST_M[rng.random_range(0..FIRST_M.len())] };
@@ -291,6 +315,10 @@ pub fn random_sim(rng: &mut impl Rng, last: &str, female: Option<bool>, age: Age
         // Most Sims are of middling build; a few are thin, heavy or very fit.
         weight: if age.is_little() { 0.0 } else { ((rng.random_range(-1.0f32..1.0) + rng.random_range(-1.0f32..1.0)) * 0.45).clamp(-1.0, 1.0) },
         fitness: if age.is_little() { 0.0 } else { (rng.random_range(0.0f32..1.0) * rng.random_range(0.0f32..1.0)).min(1.0) },
+        eyes: {
+            let (r, g, b) = EYES[rng.random_range(0..EYES.len())];
+            Color::srgb(r, g, b)
+        },
     }
 }
 

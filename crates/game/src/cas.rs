@@ -80,6 +80,8 @@ pub enum CasAction {
     Age,
     Skin(usize),
     HairColor(usize),
+    /// Eye colour `i` (of `sim::EYES`).
+    EyeColor(usize),
     Tab(CasTab),
     /// Wear entry `i` of the current tab's list.
     Pick(usize),
@@ -364,6 +366,10 @@ fn cas_actions(
             CasAction::HairColor(i) => {
                 let (r, g, b) = crate::sim::HAIRS[i.min(crate::sim::HAIRS.len() - 1)];
                 pending.members[k].hair = Color::srgb(r, g, b);
+            }
+            CasAction::EyeColor(i) => {
+                let (r, g, b) = crate::sim::EYES[i.min(crate::sim::EYES.len() - 1)];
+                pending.members[k].eyes = Color::srgb(r, g, b);
             }
             CasAction::Tab(t) => {
                 scene.tab = t;
@@ -934,6 +940,29 @@ fn rebuild_ui(
                     .filter(|s| s.2)
                     .map(|(t, n, _, c)| (t, n, c))
                     .collect();
+                    // The eye colour, as swatches (shown as the iris looks: the colour's doubled
+                    // over its shading).
+                    p.spawn(text("Eye Color", 16.0, Color::WHITE));
+                    p.spawn(Node { column_gap: Val::Px(8.0), ..default() }).with_children(|row| {
+                        let cur = sim.eyes.to_srgba();
+                        for (i, (r, g, b)) in crate::sim::EYES.iter().enumerate() {
+                            let on = (cur.red - r).abs() < 0.01 && (cur.green - g).abs() < 0.01 && (cur.blue - b).abs() < 0.01;
+                            row.spawn((
+                                Button,
+                                Swatch,
+                                CasAction::EyeColor(i),
+                                Node {
+                                    width: Val::Px(34.0),
+                                    height: Val::Px(34.0),
+                                    border: UiRect::all(Val::Px(if on { 4.0 } else { 1.0 })),
+                                    border_radius: BorderRadius::all(Val::Px(17.0)),
+                                    ..default()
+                                },
+                                BorderColor::all(if on { PLUMBOB_GREEN } else { Color::WHITE }),
+                                BackgroundColor(Color::srgb((r * 1.5).min(1.0), (g * 1.5).min(1.0), (b * 1.5).min(1.0))),
+                            ));
+                        }
+                    });
                     for (t, title, current) in sections {
                         let list = parts_for(&scene.cas, &sim, t);
                         p.spawn(text(title, 16.0, Color::WHITE));

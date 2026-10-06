@@ -90,6 +90,8 @@ pub struct CasData {
     pub outfits: Arc<HashMap<String, s3bake::OutfitInfo>>,
     /// The face sliders' bone adjustments by age-and-sex prefix ("am", "tf", "cu"...).
     pub face_bones: Arc<HashMap<String, Vec<(u8, Vec<s3bake::gamedata::FaceBone>)>>>,
+    /// The iris, drawn over the eyes in a Sim's eye colour.
+    pub eye_overlay: Option<Key>,
 }
 
 impl CasData {
@@ -104,6 +106,7 @@ impl CasData {
             ramp: Arc::new(b.cas.tone.ramp.clone()),
             outfits: Arc::new(b.outfits.iter().map(|o| (o.name.clone(), o.clone())).collect()),
             face_bones: Arc::new(b.face_bones.iter().map(|f| (f.prefix.clone(), f.sliders.clone())).collect()),
+            eye_overlay: b.eye_colors.overlay.filter(|k| b.texture_bytes(k).is_some()),
         }
     }
 
@@ -534,6 +537,8 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
     let mut tex_keys: Vec<Key> = Vec::new();
     // Face layers made at load in a colour: (source, copy, colour).
     let mut beard_tints: Vec<(Key, Key, Color)> = Vec::new();
+    // The eyes' texture with the iris in the Sim's eye colour: (source, copy).
+    let mut eye_tints: Vec<(Key, Key)> = Vec::new();
 
     // Body: shared skin texture + one clothing layer per worn part.
     let body_base = cas.skin_texture(age, gender, 8);
@@ -559,11 +564,23 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
         tex_keys.extend(&face_layers);
         for m in baked.cas_meshes(&face.key).map(|m| m.meshes).unwrap_or_default() {
             let mat = match m.shader {
-                SHADER_SIM_EYES => SimMat::Plain { tex: m.texture, mask: false, tint: None },
+                SHADER_SIM_EYES => {
+                    let tex = match (m.texture, cas.eye_overlay) {
+                        (Some(src), Some(_)) => {
+                            let coloured = eye_tint_key(src, sim.eyes);
+                            eye_tints.push((src, coloured));
+                            Some(coloured)
+                        }
+                        _ => m.texture,
+                    };
+                    SimMat::Plain { tex, mask: false, tint: None }
+                }
                 SHADER_SIM_EYELASHES => SimMat::Plain { tex: m.texture, mask: true, tint: None },
                 _ => SimMat::Skin { base: face_base, tint, layers: face_layers.clone() },
             };
-            if let SimMat::Plain { tex: Some(t), .. } = &mat {
+            if let SimMat::Plain { tex: Some(t), .. } = &mat
+                && !eye_tints.iter().any(|(_, c)| c == t)
+            {
                 tex_keys.push(*t);
             }
             parts.push((skin_mesh(m), mat));
@@ -624,7 +641,62 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
             textures.push((tinted, img));
         }
     }
+    eye_tints.dedup();
+    let iris = cas.eye_overlay.and_then(|k| baked.texture_bytes(&k));
+    for (src, coloured) in eye_tints {
+        if let Some(img) = iris.as_deref().zip(baked.texture_bytes(&src)).and_then(|(iris, eyes)| coloured_eyes(&eyes, iris, sim.eyes)) {
+            textures.push((coloured, img));
+        }
+    }
     Some(SimModelCpu { rig, parts, textures, face: face_shape(cas, sim) })
+}
+
+/// Texture-store key of the eyes' texture with the iris in a colour.
+fn eye_tint_key(k: Key, c: Color) -> Key {
+    let c = c.to_srgba();
+    let rgb = ((c.red * 255.0) as u32) << 16 | ((c.green * 255.0) as u32) << 8 | (c.blue * 255.0) as u32;
+    (k.0 ^ 0x4000_0000 ^ rgb, k.1, k.2)
+}
+
+/// The eyes' texture (DDS bytes) with the iris in `colour`, as the game's eye colour overlay
+/// draws it: the iris image at twice its shade times the colour, over the eyes by its alpha.
+fn coloured_eyes(eyes: &[u8], iris: &[u8], colour: Color) -> Option<Image> {
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    let mut img = s3formats::dds::decode(eyes, 512)?;
+    let ov = s3formats::dds::decode(iris, 512)?;
+    let c = colour.to_srgba();
+    let c = [c.red, c.green, c.blue];
+    let (w, h) = (img.width as usize, img.height as usize);
+    let (ow, oh) = (ov.width as usize, ov.height as usize);
+    if ow == 0 || oh == 0 {
+        return None;
+    }
+    for y in 0..h {
+        let oy = y * oh / h;
+        for x in 0..w {
+            let o = &ov.data[(oy * ow + x * ow / w) * 4..][..4];
+            let a = o[3] as f32 / 255.0;
+            if a <= 0.0 {
+                continue;
+            }
+            let p = &mut img.data[(y * w + x) * 4..][..4];
+            for k in 0..3 {
+                let iris = (2.0 * c[k] * o[k] as f32 / 255.0).min(1.0);
+                p[k] = ((p[k] as f32 / 255.0 * (1.0 - a) + iris * a) * 255.0).round() as u8;
+            }
+        }
+    }
+    let (mips, levels) = s3formats::dds::build_mips(&img);
+    let mut out = Image::new(
+        Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        mips,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    out.texture_descriptor.mip_level_count = levels;
+    out.sampler = crate::objects::sampler();
+    Some(out)
 }
 
 /// Texture-store key of a face layer's copy in a colour.

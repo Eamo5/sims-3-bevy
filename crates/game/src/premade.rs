@@ -80,10 +80,11 @@ pub fn to_sim(p: &PremadeSim) -> Sim {
     traits.truncate(crate::life::trait_slots(age));
     // Clothes: deterministic per Sim; colours lean on their favourite colour.
     let hue = p.favourite_color.map(|c| Hsla::from(argb(c)).hue).unwrap_or((p.id % 360) as f32);
+    let look = p.id.rotate_left(17) ^ 0x9E37_79B9_7F4A_7C15;
     Sim {
         id: p.id,
         outfit: OutfitChoice::default(),
-        look: p.id.rotate_left(17) ^ 0x9E37_79B9_7F4A_7C15,
+        look,
         first: p.first_name.clone(),
         last: p.last_name.clone(),
         female: p.female,
@@ -91,6 +92,8 @@ pub fn to_sim(p: &PremadeSim) -> Sim {
         traits,
         skin: skin_of(p.skin_shade),
         hair: p.hair_color.map(argb).unwrap_or(Color::srgb(0.3, 0.2, 0.1)),
+        // (The town's Sims' eye colours are in their outfits, which the install doesn't have.)
+        eyes: crate::sim::eyes_by_look(look),
         top: Color::hsl(hue, 0.5, 0.5),
         bottom: Color::hsl((hue + 180.0) % 360.0, 0.3, 0.3),
         weight: (p.fat - p.thin).clamp(-1.0, 1.0),

@@ -186,6 +186,13 @@ fn pregnancy(
         let mut baby = random_sim(&mut rng, &sim.last, Some(female), Age::Baby);
         baby.skin = sim.skin;
         baby.hair = if rng.random_bool(0.5) { sim.hair } else { baby.hair };
+        // Eyes like the mother's or the father's.
+        let father = p.other_parent.and_then(|f| fathers.get(f).ok());
+        baby.eyes = match father {
+            Some(f) if rng.random_bool(0.5) => f.eyes,
+            _ if rng.random_bool(0.85) || father.is_some() => sim.eyes,
+            _ => baby.eyes,
+        };
         // The crib: the household's own, or a new one beside the mother.
         let crib = cribs.iter().filter(|(o, _)| o.kind == ObjectKind::Crib).min_by(|a, b| {
             a.1.translation.distance(tf.translation).total_cmp(&b.1.translation.distance(tf.translation))

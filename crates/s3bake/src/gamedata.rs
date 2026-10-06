@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 47;
+pub const GAMEDATA_VERSION: u32 = 48;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -573,6 +573,50 @@ pub struct FaceBone {
 pub struct FaceBones {
     pub prefix: String,
     pub sliders: Vec<(u8, Vec<FaceBone>)>,
+}
+
+/// Eye colours, as the game draws them: the iris (a greyscale image, its alpha the iris's
+/// shape) in the eye colour, at twice the image's shade times the colour, over the eyes' own
+/// texture (every face's eyes have their iris in the same place); and Create a Sim's presets.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct EyeColors {
+    /// The iris (in the texture store).
+    pub overlay: Option<crate::types::Key>,
+    pub presets: Vec<[f32; 3]>,
+}
+
+/// The eye colour part's presets: its iris overlay and colours.
+fn bake_eye_colors(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, String> {
+    use s3formats::catalog::CValue;
+    let mut out = EyeColors::default();
+    let part = pkgs.read_ti(s3pkg::types::CASP, s3pkg::fnv64("amFaceEyeColor")).and_then(|d| s3formats::sim::CasPart::parse(&d).ok());
+    for p in part.map(|c| c.presets).unwrap_or_default() {
+        let Some((c, keys)) = s3formats::complate::preset(&p) else { continue };
+        let value = |c: &s3formats::catalog::Complate, name: &str| c.overrides.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
+        if out.overlay.is_none()
+            && let Some(CValue::Tgi(i)) = value(&c, "Face Overlay")
+            && let Some(k) = keys.get(i as usize)
+        {
+            out.overlay = Some((k.t, k.g, k.i));
+        }
+        let colour = c.blocks.iter().find_map(|b| match value(b, "Color") {
+            Some(CValue::Str(s)) => {
+                let v: Vec<f32> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                (v.len() >= 3).then(|| [v[0], v[1], v[2]])
+            }
+            _ => None,
+        });
+        out.presets.extend(colour);
+    }
+    if let Some(k) = out.overlay
+        && !root.tex_path(k).exists()
+        && let Some(dds) = crate::bake::bake_texture(pkgs, k, 512, false)
+    {
+        let _ = std::fs::write(root.tex_path(k), dds);
+    }
+    let n = out.presets.len();
+    write_value(&root.global_dir().join("eye_colors.bin"), &out).map_err(|e| e.to_string())?;
+    Ok(n)
 }
 
 fn bake_face_bones(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, String> {
@@ -1247,6 +1291,8 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     bake_outfits(root, pkgs, &out.careers)?;
     let faces = bake_face_bones(root, pkgs)?;
     progress(&format!("Converting: face shapes ({faces} slider bones)…"));
+    let eyes = bake_eye_colors(root, pkgs)?;
+    progress(&format!("Converting: eye colours ({eyes} presets)…"));
     progress("Converting: fences…");
     out.fences = bake_fence_styles(root, pkgs, &strings)?;
     // Catalogue models with alternative geometry states, drawn in their fullest (the objects'

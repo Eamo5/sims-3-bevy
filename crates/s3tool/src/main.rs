@@ -606,9 +606,23 @@ fn main() {
                     if !filter.is_empty() && c.name.to_lowercase().contains(&filter) {
                         let geoms = c.lod0_geoms(&set);
                         println!("{k} {} type={} dt={:X} ag={:08X} cat={:08X} vpxy={} diffuse={:?} geoms={:?} presets={}", c.name, c.clothing_type, c.data_type, c.age_gender, c.category, c.vpxy.len(), c.diffuse, geoms, c.presets.len());
+                        // (PRESETS=1: the part's presets too.)
+                        if std::env::var("PRESETS").is_ok() {
+                            for p in &c.presets {
+                                println!("    preset {p}");
+                            }
+                        }
                         for g in geoms.iter().take(3) {
                             match s3formats::sim::Geom::parse(&set.read(g).or_else(|| set.read_ti(g.t, g.i)).unwrap_or_default()) {
-                                Ok(geo) => println!("    geom {g}: verts={} tris={} bones={} shader={:08X} params={}", geo.positions.len(), geo.indices.len()/3, geo.bone_hashes.len(), geo.shader, geo.params.len()),
+                                Ok(geo) => println!(
+                                    "    geom {g}: verts={} tris={} bones={} shader={:08X} params={} diffuse={:?}",
+                                    geo.positions.len(),
+                                    geo.indices.len() / 3,
+                                    geo.bone_hashes.len(),
+                                    geo.shader,
+                                    geo.params.len(),
+                                    geo.params.get(&s3formats::model::P_DIFFUSE_MAP)
+                                ),
                                 Err(e) => println!("    geom {g}: ERR {e}"),
                             }
                         }
