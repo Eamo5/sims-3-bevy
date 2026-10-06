@@ -815,6 +815,8 @@ pub enum ActionKind {
     MoveHouse,
     /// Fix a broken object.
     Repair { target: Entity },
+    /// Upgrade an object (a bit of `upgrades::Upgrade`).
+    Upgrade { target: Entity, bit: u8 },
     /// Phone for the repairman.
     CallRepairman,
     /// Phone to hire a maid (or to let her go).
@@ -1150,7 +1152,7 @@ fn run_actions(
     mut life: MessageWriter<LifeEvent>,
     people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
     mut conceive: MessageWriter<crate::little::Conceive>,
-    mut fire: MessageWriter<crate::fire::StartFire>,
+    (mut fire, upgraded): (MessageWriter<crate::fire::StartFire>, Query<&crate::upgrades::Upgrades>),
 ) {
     let Some(grid) = grid else { return };
     let dt = delta.0;
@@ -1191,7 +1193,7 @@ fn run_actions(
 
         // Cancellation
         if action.cancel {
-            if let ActionKind::Object { target, .. } | ActionKind::Repair { target } = action.kind
+            if let ActionKind::Object { target, .. } | ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } = action.kind
                 && let Ok((obj, otf, mut used, _)) = objects.get_mut(target)
             {
                 if used.0 == Some(me) {
@@ -1232,7 +1234,7 @@ fn run_actions(
                         ActionKind::PlantSeed { at, level, .. } => Some((*at + Vec2::new(0.0, 0.7), *level)),
                         ActionKind::GoToWork | ActionKind::Visit { .. } | ActionKind::GoToLot { .. } | ActionKind::GoHomeFromLot => way_out.map(|p| (p, 1)),
                         ActionKind::JoinCareer { target, .. } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
-                        ActionKind::Repair { target } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
+                        ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
                         ActionKind::Invite { .. }
                         | ActionKind::OrderPizza
                         | ActionKind::Adopt { .. }
@@ -1283,7 +1285,7 @@ fn run_actions(
                         Some(wp) => {
                             commands.entity(me).insert(PathFollow::new(wp));
                             action.phase = Phase::Routing;
-                            if let ActionKind::Object { target, .. } | ActionKind::Repair { target } = action.kind
+                            if let ActionKind::Object { target, .. } | ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } = action.kind
                                 && let Ok((_, _, mut used, _)) = objects.get_mut(target)
                             {
                                 used.0 = Some(me);
@@ -1399,7 +1401,7 @@ fn run_actions(
                             | ActionKind::CallRepairman
                             | ActionKind::HireMaid(_)
                             | ActionKind::ThrowParty => {}
-                            ActionKind::Repair { target } => {
+                            ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } => {
                                 if let Ok((obj, otf, _, _)) = objects.get(*target) {
                                     tf.rotation = otf.rotation * Quat::from_rotation_y(std::f32::consts::PI);
                                     commands.entity(me).insert(repair_of(obj.kind).1);
@@ -1473,6 +1475,7 @@ fn run_actions(
                                     if i == ENERGY && d.until_full == Some(ENERGY) {
                                         gain *= crate::life::sleep_rate(&sim.traits);
                                     }
+                                    gain = crate::upgrades::boost(obj.kind, upgraded.get(*target).ok(), i, gain);
                                     motives.add(i, gain * dt / 60.0);
                                 }
                                 // Working out builds fitness and burns off weight.
@@ -1497,7 +1500,8 @@ fn run_actions(
                                     finished = true;
                                     life.write(LifeEvent::new(me, LifeEventKind::Finished { activity: d.name, completed: true }));
                                     used.0 = None;
-                                    if rand::rng().random_bool(break_chance(obj.kind, obj.price)) {
+                                    let unbreakable = upgraded.get(*target).is_ok_and(|u| u.has(crate::upgrades::Upgrade::Unbreakable));
+                                    if !unbreakable && rand::rng().random_bool(break_chance(obj.kind, obj.price)) {
                                         commands.entity(*target).insert(Broken);
                                         let what = if obj.kind == ObjectKind::Toilet { "is clogged" } else { "broke" };
                                         notes.push(format!("Oh no! {} {what}. Repair it, or call the repairman.", upper_first(&the(&obj.name))));
@@ -1807,6 +1811,35 @@ fn run_actions(
                                     } else {
                                         commands.entity(*target).remove::<Broken>();
                                         notes.push(format!("{} fixed {}.", sim.first, the(&o.name)));
+                                    }
+                                }
+                            }
+                        }
+                        ActionKind::Upgrade { target, bit } => {
+                            let handy = skills.level("Handiness") as f32 + if sim.traits.contains(&crate::life::Trait::Handy) { 3.0 } else { 0.0 };
+                            let minutes = crate::upgrades::Upgrade::MINUTES / (1.0 + handy * 0.35);
+                            let e = skills.0.entry("Handiness").or_insert(0.0);
+                            let before = *e as u32;
+                            *e = (*e + dt / 60.0 * 0.6 * crate::life::skill_rate(&sim.traits, "Handiness") / (1.0 + *e * 0.25)).min(10.0);
+                            if *e as u32 > before {
+                                notes.push(format!("{} reached level {} in Handiness!", sim.first, *e as u32));
+                                life.write(LifeEvent::new(me, LifeEventKind::SkillUp { skill: "Handiness", level: *e as u32 }));
+                            }
+                            motives.add(FUN, -3.0 * dt / 60.0);
+                            if elapsed >= minutes {
+                                finished = true;
+                                let electric = objects.get(*target).is_ok_and(|(o, ..)| matches!(o.kind, ObjectKind::Tv | ObjectKind::Computer | ObjectKind::Stereo));
+                                let shocked = electric && rand::rng().random_bool(((0.25 - handy * 0.03) as f64).clamp(0.0, 1.0));
+                                if let Ok((o, _, mut used, _)) = objects.get_mut(*target) {
+                                    used.0 = None;
+                                    let name = crate::upgrades::Upgrade::from_bit(*bit).and_then(|u| u.name(o.kind)).unwrap_or("upgrade");
+                                    if shocked {
+                                        commands.entity(me).insert(crate::death::Shocked);
+                                        notes.push(format!("{} was electrocuted upgrading {}!", sim.first, the(&o.name)));
+                                    } else {
+                                        let had = upgraded.get(*target).map_or(0, |u| u.0);
+                                        commands.entity(*target).insert(crate::upgrades::Upgrades(had | *bit));
+                                        notes.push(format!("{} upgraded {}: {name}.", sim.first, the(&o.name)));
                                     }
                                 }
                             }

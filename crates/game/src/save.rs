@@ -181,6 +181,9 @@ pub struct SaveGame {
     /// Whether the household has a maid.
     #[serde(default)]
     pub maid: bool,
+    /// Objects' handiness upgrades.
+    #[serde(default)]
+    pub upgrades: Vec<crate::upgrades::SavedUpgrades>,
     /// The household's collection journal.
     #[serde(default)]
     pub collection: crate::collecting::Collection,
@@ -462,7 +465,12 @@ fn save_game(
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
     (story, alarm, bowls): (Res<crate::story::TownStory>, Res<crate::appliances::Alarm>, Query<(&crate::fishbowl::BowlFish, &Transform), Without<crate::visit::LotObject>>),
-    (mut slot, maid, mail_due): (ResMut<SaveSlot>, Res<crate::services::MaidService>, Option<Res<crate::services::MailDue>>),
+    (mut slot, maid, mail_due, upgraded): (
+        ResMut<SaveSlot>,
+        Res<crate::services::MaidService>,
+        Option<Res<crate::services::MailDue>>,
+        Query<(&GameObject, &Transform, &crate::upgrades::Upgrades)>,
+    ),
 ) {
     if requests.read().count() == 0 {
         return;
@@ -547,6 +555,7 @@ fn save_game(
         alarm: *alarm,
         fishbowls: crate::fishbowl::saved(&bowls),
         maid: maid.hired,
+        upgrades: crate::upgrades::saved(&upgraded),
         collection: collection.clone(),
         graves: graves
             .iter()
@@ -723,6 +732,7 @@ fn apply_loaded_game(
     commands.insert_resource(crate::gardening::PendingPlants(game.plants.clone(), game.seeds.clone(), game.perfect_produce.clone()));
     commands.insert_resource(game.town.clone());
     commands.insert_resource(game.alarm);
+    commands.insert_resource(crate::upgrades::PendingUpgrades(game.upgrades.clone(), 0.0));
     let hired = game.maid;
     commands.queue(move |w: &mut World| w.resource_mut::<crate::services::MaidService>().hired = hired);
     commands.insert_resource(crate::fishbowl::PendingBowls(game.fishbowls.clone()));

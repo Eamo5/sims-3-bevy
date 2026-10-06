@@ -713,13 +713,14 @@ fn world_click(
             Res<crate::appliances::Alarm>,
         ),
     ),
-    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q): (
+    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
         Query<&crate::little::ToddlerSkills>,
         Query<&crate::fishbowl::BowlFish>,
         Query<&crate::inventory::Inventory>,
+        Query<&crate::upgrades::Upgrades>,
     ),
 ) {
     if buy.is_some_and(|b| b.active) {
@@ -908,6 +909,23 @@ fn world_click(
                     }
                 } else if d.special != Special::EatMeal {
                     options.push((d.name.to_string(), ActionKind::Object { target: t, def: i }));
+                }
+            }
+            // The upgrades a handy enough grown-up can make to it.
+            if actor_sim.age.is_grown()
+                && actor_sim.age != crate::sim::Age::Child
+                && let Ok((_, skills, _)) = writers.get(actor)
+            {
+                let have = upg_q.get(t).map_or(0, |u| u.0);
+                let level = skills.level("Handiness") as u32;
+                let list: Vec<(String, ActionKind)> = crate::upgrades::Upgrade::ALL
+                    .into_iter()
+                    .filter(|u| have & u.bit() == 0 && level >= u.level())
+                    .filter_map(|u| Some((format!("Upgrade: {}", u.name(obj.kind)?), ActionKind::Upgrade { target: t, bit: u.bit() })))
+                    .collect();
+                if !list.is_empty() {
+                    options.push(("Upgrade ›".to_string(), submenu_kind(pie.submenus.len())));
+                    pie.submenus.push(("Upgrade".to_string(), list));
                 }
             }
             open_pie(&mut commands, &mut pie, cursor, &obj.name, actor, options);

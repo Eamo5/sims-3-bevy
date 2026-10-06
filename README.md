@@ -61,8 +61,12 @@ installation is unreachable.
   repair animations, learning Handiness (handy and neat Sims do it on their own), or the
   repairman can be phoned: he pulls up in the game's handyman pickup, in his overalls, fixes
   each broken thing in turn with the same animations (the household leaves the repairs to
-  him), and is paid §75 and §25 a fix. Fishing trips teach Fishing and bring back a catch to
-  sell.
+  him), and is paid §75 and §25 a fix. Handy grown-ups can upgrade appliances too ("Upgrade
+  ›", with the same animations, building Handiness): at level 3 a water heater for the shower
+  and the bath, improved channels for the TV, better speakers for the stereo and a faster
+  processor for the computer (half as much again of what they give); at level 5 Unbreakable.
+  Electronics can shock the unskilled; upgrades are kept in saves. Fishing trips teach Fishing
+  and bring back a catch to sell.
 - **Writing novels** by the game's Writing tuning: at a computer, "Write Novel" offers the
   genres the Sim has opened up (Fiction and Non-Fiction to start; Sci-Fi, Trashy, Drama,
   Humor, Mystery and Romance with skill — sooner for the good-humoured and hopeless romantics;

@@ -1393,6 +1393,24 @@ fn auto_action(
         *done = true;
         return;
     }
+    // "Upgrade": the selected Sim (made handy) makes the shower unbreakable and gives it a water
+    // heater.
+    if name == "Upgrade" {
+        if let (Ok(me), Some((shower, _))) = (sel_e.single(), objects.iter().find(|(_, o)| o.kind == crate::interact::ObjectKind::Shower)) {
+            commands.queue(move |w: &mut World| {
+                if let Some(mut s) = w.get_mut::<crate::interact::Skills>(me) {
+                    s.0.insert("Handiness", 6.0);
+                }
+            });
+            if let Ok(mut q) = sel.single_mut() {
+                for u in crate::upgrades::Upgrade::ALL {
+                    q.push_player(crate::interact::Action::new("Upgrade", crate::interact::ActionKind::Upgrade { target: shower, bit: u.bit() }, false));
+                }
+            }
+        }
+        *done = true;
+        return;
+    }
     // "Mail": bills for §123 go out with the mail carrier.
     if name == "Mail" {
         commands.insert_resource(crate::services::MailDue(crate::interact::Bill { amount: 123, day: 0 }));
