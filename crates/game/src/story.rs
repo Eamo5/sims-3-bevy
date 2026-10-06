@@ -166,7 +166,8 @@ fn progress(
                 let t = TownSim {
                     partner: m.partner,
                     spouse: m.spouse,
-                    job: m.career.as_ref().map(|(c, l)| (c.clone(), (*l).max(1) as u32)),
+                    // (The world file names the career by its class: ours by its name.)
+                    job: m.career.as_ref().map(|(c, l)| (track(c).map_or_else(|| c.clone(), |t| t.name.to_string()), (*l).max(1) as u32)),
                     days: rng.random_range(0.0..span.max(1.0) * 0.6).floor(),
                     ..default()
                 };
@@ -287,14 +288,11 @@ fn progress(
                     }
                 }
                 Some((career, level)) => {
-                    let top = crate::careers::careers().iter().find(|c| c.name == career.as_str()).map_or(10, |c| c.levels().len() as u32);
-                    if *level < top && rng.random_bool(PROMOTION) {
+                    // (Only careers the game has: the news needs the job's title.)
+                    let Some(c) = track(career) else { continue };
+                    if (*level as usize) < c.levels().len() && rng.random_bool(PROMOTION) {
                         *level += 1;
-                        let title = crate::careers::careers()
-                            .iter()
-                            .find(|c| c.name == career.as_str())
-                            .and_then(|c| c.levels().get(*level as usize - 1))
-                            .map_or(String::new(), |l| l.title.to_string());
+                        let title = c.levels()[*level as usize - 1].title;
                         let news = format!("{} was promoted to {title}.", w.name);
                         story.tell(news);
                     }
@@ -337,4 +335,10 @@ fn read_the_news(mut commands: Commands, story: Res<TownStory>, sims: Query<(Ent
             notes.push(format!("{} read the paper. In the news: {}", sim.first, list.join(" ")));
         }
     }
+}
+
+/// A career by its name, or by the class the world files name it by (`LawEnforcement`).
+fn track(name: &str) -> Option<&'static crate::careers::CareerTrack> {
+    let all = crate::careers::careers();
+    all.iter().find(|c| c.name == name).or_else(|| crate::premade::career_of(name).and_then(|i| all.get(i)))
 }
