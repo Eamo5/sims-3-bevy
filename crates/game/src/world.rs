@@ -3,10 +3,14 @@
 
 use std::collections::{HashMap, HashSet};
 
+use bevy::asset::{RenderAssetUsages, embedded_asset};
+use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::VisibilityRange;
-use bevy::prelude::*;
-use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::pbr::{ExtendedMaterial, MaterialExtension};
+use bevy::prelude::*;
+use bevy::render::render_resource::{AsBindGroup, ShaderType};
+use bevy::shader::ShaderRef;
 use s3bake::{InstanceBaked, Key, TreeBaked, TreeKindBaked, WorldBaked};
 
 use crate::AppState;
@@ -17,8 +21,51 @@ pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::InGame), spawn_world_content);
+        embedded_asset!(app, "shaders/tree.wgsl");
+        app.add_plugins(MaterialPlugin::<TreeMaterial>::default()).add_systems(OnEnter(AppState::InGame), spawn_world_content);
     }
+}
+
+/// A tree drawn from its 360° billboard: the picture of it from the side it's seen from, turned
+/// to face the view (see `shaders/tree.wgsl`).
+pub type TreeMaterial = ExtendedMaterial<StandardMaterial, TreeExt>;
+
+#[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
+pub struct TreeExt {
+    #[uniform(100)]
+    pub billboard: TreeBillboard,
+}
+
+#[derive(ShaderType, Reflect, Debug, Clone)]
+pub struct TreeBillboard {
+    /// The views round the tree, in order (uv rectangles).
+    pub views: [Vec4; 16],
+    /// x: how many views, y: the atlas's width / height, z: the tree's height.
+    pub params: Vec4,
+}
+
+impl MaterialExtension for TreeExt {
+    fn vertex_shader() -> ShaderRef {
+        "embedded://sims3/shaders/tree.wgsl".into()
+    }
+    fn prepass_vertex_shader() -> ShaderRef {
+        "embedded://sims3/shaders/tree.wgsl".into()
+    }
+}
+
+/// The quad a 360° billboard is drawn on (the shader places and sizes it), and the room it
+/// takes up whichever way it's turned.
+fn billboard_quad(k: &TreeKindBaked) -> (Mesh, Aabb) {
+    let h = k.height.max(0.3);
+    let w = k.views.iter().map(|v| h * (v[2] - v[0]) * k.atlas_aspect / (v[3] - v[1]).max(1e-3)).fold(0.5, f32::max);
+    let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+    m.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[-w * 0.5, 0.0, 0.0], [w * 0.5, 0.0, 0.0], [w * 0.5, h, 0.0], [-w * 0.5, h, 0.0]]);
+    m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; 4]);
+    m.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]);
+    m.insert_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3]));
+    // (Leaning back towards the view, its top can reach out as far as it's tall.)
+    let r = (w * 0.5).max(h);
+    (m, Aabb::from_min_max(Vec3::new(-r, 0.0, -r), Vec3::new(r, h * 1.05, r)))
 }
 
 /// World content decoded on the loading thread.
@@ -107,6 +154,7 @@ fn spawn_world_content(
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    mut tree_mats: ResMut<Assets<TreeMaterial>>,
 ) {
     let Some(mut build) = build else { return };
     for (k, img) in build.textures.drain(..) {
@@ -136,14 +184,16 @@ fn spawn_world_content(
         spawned += 1;
     }
 
-    // Trees: each species from its billboard pictures; stand-ins when a species has none.
+    // Trees: each species from its billboard pictures (a tree's from all the way round, turned
+    // to the view; shrubs' and flowers' leaf cards crossed); stand-ins when a species has none.
     let mut kinds: HashMap<u64, (Handle<Mesh>, Handle<StandardMaterial>)> = HashMap::new();
+    let mut billboards: HashMap<u64, (Handle<Mesh>, Handle<TreeMaterial>, Aabb)> = HashMap::new();
     for k in build.tree_kinds.drain(..) {
         let Some(tex) = assets.texture(&mut AssetCtx { baked: &baked.0, meshes: &mut meshes, images: &mut images, materials: &mut mats }, k.billboard)
         else {
             continue;
         };
-        let mat = mats.add(StandardMaterial {
+        let base = StandardMaterial {
             base_color_texture: Some(tex),
             alpha_mode: AlphaMode::Mask(0.45),
             double_sided: true,
@@ -151,8 +201,18 @@ fn spawn_world_content(
             perceptual_roughness: 0.95,
             reflectance: 0.1,
             ..default()
-        });
-        kinds.insert(k.kind, (meshes.add(tree_mesh(&k)), mat));
+        };
+        if k.round && k.views.len() >= 3 {
+            let mut views = [Vec4::ZERO; 16];
+            for (v, r) in views.iter_mut().zip(&k.views) {
+                *v = Vec4::from(*r);
+            }
+            let billboard = TreeBillboard { views, params: Vec4::new(k.views.len().min(16) as f32, k.atlas_aspect, k.height.max(0.3), 0.0) };
+            let (mesh, aabb) = billboard_quad(&k);
+            billboards.insert(k.kind, (meshes.add(mesh), tree_mats.add(TreeMaterial { base, extension: TreeExt { billboard } }), aabb));
+            continue;
+        }
+        kinds.insert(k.kind, (meshes.add(tree_mesh(&k)), mats.add(base)));
     }
     let trunk = meshes.add(Cylinder::new(0.22, 4.0));
     let round = meshes.add(Sphere::new(2.6).mesh().ico(2).unwrap());
@@ -165,6 +225,21 @@ fn spawn_world_content(
     ];
     let n_trees = build.trees.len();
     for t in build.trees.drain(..) {
+        if let Some((mesh, mat, aabb)) = billboards.get(&t.kind) {
+            let tf = Transform::from_translation(Vec3::from(t.position))
+                .with_rotation(quat(t.rotation))
+                .with_scale(Vec3::splat(t.scale));
+            commands.spawn((
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(mat.clone()),
+                tf,
+                *aabb,
+                Tree,
+                DespawnOnExit(AppState::InGame),
+                VisibilityRange::abrupt(0.0, 900.0),
+            ));
+            continue;
+        }
         if let Some((mesh, mat)) = kinds.get(&t.kind) {
             let tf = Transform::from_translation(Vec3::from(t.position))
                 .with_rotation(quat(t.rotation))

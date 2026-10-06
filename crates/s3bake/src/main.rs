@@ -443,6 +443,17 @@ fn main() {
         println!("skin textures: {tones:?}");
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--trees") {
+        // --trees <world>: the world's tree species, their billboard atlas and views, and how
+        // many trees of each.
+        let root = s3bake::default_root();
+        let w: s3bake::WorldBaked = s3bake::read_value(&root.world_dir(&args[i + 1]).join("world.bin")).expect("world");
+        for k in &w.tree_kinds {
+            let n = w.trees.iter().filter(|t| t.kind == k.kind).count();
+            println!("{:016X} {n:5} trees  atlas {:?} aspect {:.2} height {:.1} radius {:.1} views {:?}", k.kind, root.tex_path(k.billboard), k.atlas_aspect, k.height, k.radius, k.views);
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--catalog") {
         // --catalog <text>: baked catalog entries whose internal or shown name contains the text.
         let want = args.get(i + 1).map(|s| s.to_ascii_lowercase()).unwrap_or_default();

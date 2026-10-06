@@ -10,7 +10,7 @@ pub const BAKE_VERSION: u32 = 4;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
 pub const CAS_VERSION: u32 = 9;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 33;
+pub const WORLD_VERSION: u32 = 34;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -174,8 +174,14 @@ pub struct TreeKindBaked {
     /// SpeedTree resource instance (matches [`TreeBaked::kind`]).
     pub kind: u64,
     pub billboard: Key,
-    /// Side views in the billboard atlas: uv rectangles [u0, v0, u1, v1].
+    /// Side views in the billboard atlas: uv rectangles [u0, v0, u1, v1] (for a tree's 360°
+    /// billboard, its views all the way round, in the atlas's order; for shrubs and flowers,
+    /// their leaf cards).
     pub views: Vec<[f32; 4]>,
+    /// The view from above, of a 360° billboard.
+    pub top: Option<[f32; 4]>,
+    /// Whether `views` go all the way round the tree (a 360° billboard).
+    pub round: bool,
     /// Width / height of the atlas texture.
     pub atlas_aspect: f32,
     pub height: f32,

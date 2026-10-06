@@ -42,6 +42,66 @@ fn tree_bounds(d: &[u8]) -> Option<([f32; 3], [f32; 3])> {
     (mx[1] > mn[1] && mx[1] - mn[1] < 200.0).then_some((mn, mx))
 }
 
+/// The pictures of a 360° billboard atlas, cut apart along its empty rows and columns (an XY
+/// cut, again and again until each piece is one picture), in the atlas's order: the views round
+/// the tree, and the one from above (the odd one out, much bigger than the rest). None when it
+/// doesn't come apart into at least three.
+fn round_views(img: &s3formats::dds::Rgba) -> Option<(Vec<[f32; 4]>, Option<[f32; 4]>)> {
+    let (w, h) = (img.width, img.height);
+    let solid = |x: usize, y: usize| img.data[(y * w + x) * 4 + 3] > 96;
+    // Runs of non-empty lines at least a few pixels long.
+    fn runs(v: &[usize]) -> Vec<(usize, usize)> {
+        let mut out = Vec::new();
+        let mut start = None;
+        for (i, &n) in v.iter().chain(std::iter::once(&0)).enumerate() {
+            match (n > 0, start) {
+                (true, None) => start = Some(i),
+                (false, Some(s)) => {
+                    if i - s >= 6 {
+                        out.push((s, i));
+                    }
+                    start = None;
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+    let mut cells = Vec::new();
+    // (x0, y0, x1, y1, cut rows first, depth)
+    let mut todo = vec![(0usize, 0usize, w, h, true, 0u8)];
+    while let Some((x0, y0, x1, y1, rows_first, depth)) = todo.pop() {
+        let rows: Vec<usize> = (y0..y1).map(|y| (x0..x1).filter(|&x| solid(x, y)).count()).collect();
+        let cols: Vec<usize> = (x0..x1).map(|x| (y0..y1).filter(|&y| solid(x, y)).count()).collect();
+        let (r, c) = (runs(&rows), runs(&cols));
+        let split_rows = if rows_first { r.len() > 1 || c.len() <= 1 } else { c.len() <= 1 && r.len() > 1 };
+        if depth < 8 && split_rows && r.len() > 1 {
+            for &(a, b) in r.iter().rev() {
+                todo.push((x0, y0 + a, x1, y0 + b, false, depth + 1));
+            }
+        } else if depth < 8 && c.len() > 1 {
+            for &(a, b) in c.iter().rev() {
+                todo.push((x0 + a, y0, x0 + b, y1, true, depth + 1));
+            }
+        } else if let (Some(&(ra, rb)), Some(&(ca, cb))) = (r.first(), c.first()) {
+            if (cb - ca) * (rb - ra) * 200 > w * h {
+                cells.push((x0 + ca, y0 + ra, x0 + cb, y0 + rb));
+            }
+        }
+    }
+    if cells.len() < 3 {
+        return None;
+    }
+    let uv = |(x0, y0, x1, y1): (usize, usize, usize, usize)| [x0 as f32 / w as f32, y0 as f32 / h as f32, x1 as f32 / w as f32, y1 as f32 / h as f32];
+    let area = |c: &(usize, usize, usize, usize)| ((c.2 - c.0) * (c.3 - c.1)) as f32;
+    let mut areas: Vec<f32> = cells.iter().map(area).collect();
+    areas.sort_by(|a, b| a.total_cmp(b));
+    let median = areas[areas.len() / 2];
+    let top = cells.iter().position(|c| area(c) > median * 1.3);
+    let views = cells.iter().enumerate().filter(|(i, _)| Some(*i) != top).map(|(_, c)| uv(*c)).collect();
+    Some((views, top.map(|i| uv(cells[i]))))
+}
+
 /// Finds the separate tree pictures in a billboard atlas: connected opaque regions.
 /// Returns uv rectangles [u0, v0, u1, v1] of side views (those with a trunk at the bottom).
 fn find_views(img: &s3formats::dds::Rgba, side_only: bool) -> Vec<[f32; 4]> {
@@ -127,14 +187,28 @@ pub fn bake_tree_kinds(pkgs: &PackageSet, kinds: &[u64]) -> (Vec<TreeKindBaked>,
             continue;
         };
         let Some(img) = s3formats::dds::decode(&dds, 4096) else { continue };
-        let views = find_views(&img, is_billboard);
+        // A tree's 360° billboard: every view round it and the one from above, cut apart along
+        // the atlas's gutters (shrubs and flowers: their leaf cards).
+        let (views, top, round) = match is_billboard.then(|| round_views(&img)).flatten() {
+            Some((v, t)) => (v, t, true),
+            None => (find_views(&img, is_billboard), None, false),
+        };
         if views.is_empty() {
             continue;
         }
         let (mn, mx) = pkgs.read_ti(T_TREE_INFO, kind).and_then(|d| tree_bounds(&d)).unwrap_or(([-3.0, 0.0, -3.0], [3.0, 8.0, 3.0]));
         let key = key_of(&tex);
         textures.push((key, false));
-        out.push(TreeKindBaked { kind, billboard: key, views, atlas_aspect: img.width as f32 / img.height.max(1) as f32, height: mx[1] - mn[1].min(0.0), radius: ((mx[0] - mn[0]).max(mx[2] - mn[2])) * 0.5 });
+        out.push(TreeKindBaked {
+            kind,
+            billboard: key,
+            views,
+            top,
+            round,
+            atlas_aspect: img.width as f32 / img.height.max(1) as f32,
+            height: mx[1] - mn[1].min(0.0),
+            radius: ((mx[0] - mn[0]).max(mx[2] - mn[2])) * 0.5,
+        });
     }
     (out, textures)
 }
