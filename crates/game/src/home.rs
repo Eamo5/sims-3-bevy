@@ -246,6 +246,7 @@ fn lot_buttons(
                 g.removed.clear();
                 g.paint.clear();
                 g.terrain.clear();
+                g.heights.clear();
                 g.plants.clear();
                 g.graves.clear();
                 let c = lot_center(&world.data.lots[l]);

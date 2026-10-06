@@ -301,7 +301,9 @@ installation is unreachable.
   ladders from the catalogue snap to a pool's edge, and Sims swim in the pool they stand
   at (a lot's other pools are left alone). A Terrain tab paints the ground on the lot with
   the world's own terrain paints (pictured from their textures), in three brush sizes, or
-  erases back to how the world had it; the paint is kept in saves.
+  erases back to how the world had it; its terrain tools raise, lower, flatten and smooth the
+  ground (not under the house, the pool or anything standing on the lot, nor at its edges).
+  Paint and sculpted ground are kept in saves.
 - **Sound**: the game's own audio, converted once (EALayer3 rewrapped as MP3, EA-XAS decoded to
   WAV): object sounds and Simlish voices cued by the animations, footsteps by floor and
   shoe, interface clicks, stings for promotions, weddings and other moments, birds by day

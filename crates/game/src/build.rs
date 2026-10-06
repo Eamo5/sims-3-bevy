@@ -44,6 +44,8 @@ pub enum BuildTool {
     Pool,
     /// Paint the ground (the paint picked on the Terrain tab).
     Terrain,
+    /// Raise, lower, flatten or smooth the ground (the tool picked on the Terrain tab).
+    Sculpt,
 }
 
 impl BuildTool {
@@ -59,6 +61,7 @@ impl BuildTool {
             BuildTool::Fence => "Fence Tool".to_string(),
             BuildTool::Pool => format!("Pool Tool\n§{POOL_PRICE} a tile"),
             BuildTool::Terrain => "Terrain Paint".to_string(),
+            BuildTool::Sculpt => "Terrain Tools".to_string(),
         }
     }
 
@@ -72,6 +75,7 @@ impl BuildTool {
             BuildTool::Fence => "Drag along the grid to put up the fence; Ctrl+drag takes fencing down.",
             BuildTool::Pool => "Drag out a pool on the ground out of doors; Ctrl+drag fills it in. Buy a pool ladder for Sims to swim.",
             BuildTool::Terrain => "Hold the mouse down to paint the ground on the lot.",
+            BuildTool::Sculpt => "Hold the mouse down to work the ground on the lot (not under the house or things).",
         }
         .to_string()
             + " Page Up/Down change floors · Esc puts the tool down."
@@ -496,7 +500,7 @@ fn build_tool(
         return;
     }
     // (The terrain brush is the terrain paint module's.)
-    if tool == BuildTool::Terrain {
+    if matches!(tool, BuildTool::Terrain | BuildTool::Sculpt) {
         drag.start = None;
         return;
     }

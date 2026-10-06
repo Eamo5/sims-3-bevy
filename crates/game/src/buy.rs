@@ -60,9 +60,11 @@ pub struct BuyMode {
     pub roof_pick: Option<usize>,
     /// The fence the fence tool puts up (index into the game data's fences).
     pub fence: Option<usize>,
-    /// The terrain paint in the brush (a paint layer, or `terrain_paint::ERASE`), and the
-    /// brush's radius (metres; 0 for the middle size).
+    /// The terrain paint in the brush (a paint layer, or `terrain_paint::ERASE`), the terrain
+    /// tool (index into `terrain_paint::Sculpt::ALL`), and the brush's radius (metres; 0 for
+    /// the middle size).
     pub terrain: u8,
+    pub sculpt: u8,
     pub brush: f32,
 }
 
@@ -120,6 +122,7 @@ enum BuyButton {
     /// A terrain paint (or the eraser), or a brush size (index into `BRUSHES`).
     Terrain(u8),
     Brush(usize),
+    Sculpt(u8),
     Prev,
     Next,
 }
@@ -340,7 +343,26 @@ fn buy_panel(
                 });
             });
             p.spawn(Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
-                row.spawn(text("Brush:", 13.0, Color::WHITE));
+                row.spawn(text("Terrain tools:", 13.0, Color::WHITE));
+                for (i, s) in crate::terrain_paint::Sculpt::ALL.iter().enumerate() {
+                    let picked = buy.tool == Some(crate::build::BuildTool::Sculpt) && buy.sculpt == i as u8;
+                    row.spawn((
+                        Button,
+                        BuyButton::Sculpt(i as u8),
+                        Node {
+                            padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                            border: UiRect::all(Val::Px(if picked { 2.0 } else { 0.0 })),
+                            border_radius: BorderRadius::all(Val::Px(6.0)),
+                            ..default()
+                        },
+                        BorderColor::all(crate::menu::PLUMBOB_GREEN),
+                        BackgroundColor(BTN_NORMAL),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((text(s.label(), 13.0, Color::WHITE), Pickable::IGNORE));
+                    });
+                }
+                row.spawn(text("   Brush:", 13.0, Color::WHITE));
                 for (i, (r, name)) in crate::terrain_paint::BRUSHES.iter().enumerate() {
                     let picked = (brush - r).abs() < 0.01;
                     row.spawn((
@@ -360,7 +382,7 @@ fn buy_panel(
                     });
                 }
             });
-            p.spawn(text("Pick a paint, then hold the mouse down to paint the ground on the lot.", 13.0, Color::WHITE));
+            p.spawn(text("Pick a paint or a terrain tool, then hold the mouse down over the lot.", 13.0, Color::WHITE));
             return;
         }
         // Fences: pick one, then drag it out along the grid.
@@ -563,6 +585,13 @@ fn buy_buttons(
             BuyButton::Brush(i) => {
                 buy.brush = crate::terrain_paint::BRUSHES[*i].0;
                 buy.dirty = true;
+            }
+            BuyButton::Sculpt(i) => {
+                buy.drop_tools(&mut commands);
+                buy.tool = Some(crate::build::BuildTool::Sculpt);
+                buy.sculpt = *i;
+                buy.dirty = true;
+                play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
             }
             BuyButton::Tool(t) => {
                 buy.drop_tools(&mut commands);

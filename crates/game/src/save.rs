@@ -190,6 +190,9 @@ pub struct SaveGame {
     /// The ground painted on the lot in build mode.
     #[serde(default)]
     pub terrain: Vec<crate::terrain_paint::Stroke>,
+    /// The ground sculpted on the lot in build mode.
+    #[serde(default)]
+    pub heights: Vec<crate::terrain_paint::SavedHeight>,
     /// The household's collection journal.
     #[serde(default)]
     pub collection: crate::collecting::Collection,
@@ -471,13 +474,14 @@ fn save_game(
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
     (story, alarm, bowls): (Res<crate::story::TownStory>, Res<crate::appliances::Alarm>, Query<(&crate::fishbowl::BowlFish, &Transform), Without<crate::visit::LotObject>>),
-    (mut slot, maid, mail_due, upgraded, family, strokes): (
+    (mut slot, maid, mail_due, upgraded, family, strokes, sculpted): (
         ResMut<SaveSlot>,
         Res<crate::services::MaidService>,
         Option<Res<crate::services::MailDue>>,
         Query<(&GameObject, &Transform, &crate::upgrades::Upgrades)>,
         Res<crate::family::Genealogy>,
         Res<crate::terrain_paint::Strokes>,
+        Res<crate::terrain_paint::Sculpted>,
     ),
 ) {
     if requests.read().count() == 0 {
@@ -566,6 +570,7 @@ fn save_game(
         upgrades: crate::upgrades::saved(&upgraded),
         family: family.saved(),
         terrain: strokes.saved(),
+        heights: sculpted.saved(),
         collection: collection.clone(),
         graves: graves
             .iter()
@@ -743,6 +748,8 @@ fn apply_loaded_game(
     commands.insert_resource(game.town.clone());
     commands.insert_resource(game.alarm);
     commands.insert_resource(crate::upgrades::PendingUpgrades(game.upgrades.clone(), 0.0));
+    let heights = game.heights.clone();
+    commands.queue(move |w: &mut World| w.resource_mut::<crate::terrain_paint::Sculpted>().pending = heights);
     let painted = game.terrain.clone();
     commands.queue(move |w: &mut World| w.resource_mut::<crate::terrain_paint::Strokes>().restore(&painted));
     let people = game.family.clone();

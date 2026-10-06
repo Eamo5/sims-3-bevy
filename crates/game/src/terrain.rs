@@ -497,20 +497,29 @@ fn dig_pools(
     if let (Some(m), Some(mat)) = (collar_mesh(&data.heightmap, &lot, &b.data), material) {
         commands.spawn((PoolCollar(b.lot), Mesh3d(meshes.add(m)), MeshMaterial3d(mat.0.clone()), Transform::default(), DespawnOnExit(AppState::InGame)));
     }
-    // The nearest chunks over the cells, rebuilt.
-    let hm = &data.heightmap;
-    for (chunk, mesh) in &chunks {
+    rebuild_chunks(&touched, &data.heightmap, &chunks, &mut meshes, &holes.0);
+    if let Some(g) = grid.as_mut() {
+        g.dirty = true;
+    }
+}
+
+/// The nearest terrain chunks over these heightmap cells, rebuilt from the heights.
+pub fn rebuild_chunks(
+    cells: &[(i64, i64)],
+    hm: &Heightmap,
+    chunks: &Query<(&TerrainChunk, &Mesh3d)>,
+    meshes: &mut Assets<Mesh>,
+    holes: &std::collections::HashSet<(i64, i64)>,
+) {
+    for (chunk, mesh) in chunks {
         if chunk.lod != 0 {
             continue;
         }
         let (x0, z0) = (chunk.at.0 as i64, chunk.at.1 as i64);
-        if touched.iter().any(|&(x, z)| x >= x0 - 1 && z >= z0 - 1 && x <= x0 + CHUNK as i64 && z <= z0 + CHUNK as i64) {
-            let (m, _) = chunk_mesh(hm, chunk.at.0, chunk.at.1, LODS[0].0, Some(&holes.0));
+        if cells.iter().any(|&(x, z)| x >= x0 - 1 && z >= z0 - 1 && x <= x0 + CHUNK as i64 && z <= z0 + CHUNK as i64) {
+            let (m, _) = chunk_mesh(hm, chunk.at.0, chunk.at.1, LODS[0].0, Some(holes));
             let _ = meshes.insert(mesh.0.id(), m);
         }
-    }
-    if let Some(g) = grid.as_mut() {
-        g.dirty = true;
     }
 }
 

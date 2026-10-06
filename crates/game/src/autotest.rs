@@ -161,7 +161,7 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -562,6 +562,37 @@ fn auto_terrain(
             c.focus = Vec3::new(at.x, c.focus.y, at.z);
             c.distance = 18.0;
         }
+    }
+}
+
+/// SCULPT=<x>,<z>,<tool>,<steps>: the terrain tool (0 raise, 1 lower, 2 flatten, 3 smooth)
+/// held down at that lot point, with the camera on it.
+fn auto_sculpt(
+    mut test: ResMut<crate::terrain_paint::SculptAt>,
+    mut buy: ResMut<crate::buy::BuyMode>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+    world: Res<crate::loading::CurrentWorld>,
+    mut cam: Query<&mut SimsCamera>,
+    mut done: Local<bool>,
+    time: Res<Time>,
+) {
+    let Ok(v) = std::env::var("SCULPT") else { return };
+    let Some(b) = building else { return };
+    if *done || time.elapsed_secs() < 5.0 {
+        return;
+    }
+    *done = true;
+    let n: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+    if n.len() < 4 {
+        return;
+    }
+    let at = b.world(n[0], n[1], 0.0);
+    let at = Vec3::new(at.x, world.data.heightmap.sample(at.x, at.z), at.z);
+    buy.sculpt = n[2] as u8;
+    test.0 = Some((at, n[3] as u32));
+    if let Ok(mut c) = cam.single_mut() {
+        c.focus = Vec3::new(at.x, c.focus.y, at.z);
+        c.distance = 16.0;
     }
 }
 
