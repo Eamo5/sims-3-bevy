@@ -74,6 +74,10 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_computer_repair",
     "a2o_stereo_repair",
     "a2o_dishwasher_repair_loopTinker",
+    // Phone calls on the cell phone: taking it out, chatting, putting it away.
+    "a2o_phone_makeCall_cellPhone",
+    "a2o_phone_chat_",
+    "a2o_phone_hangUp_cellPhone",
     // The mailbox and the paper.
     "a2o_mailbox_getMail",
     "a2o_mailbox_putFlagUp",
@@ -240,7 +244,24 @@ pub const CLIP_PREFIXES: &[&str] = &[
 ];
 
 /// Clip actors that are props held by the Sim (baked with the Sim's clips).
-pub const PROP_ACTORS: &[&str] = &["fork", "plateDinner", "book", "toothbrush", "guitar", "spatula", "scythe", "newspaperReading", "bills", "wateringCan", "fishingPole", "fishingRod", "fireExtinguisher", "bag"];
+pub const PROP_ACTORS: &[&str] = &[
+    "fork",
+    "plateDinner",
+    "book",
+    "toothbrush",
+    "guitar",
+    "spatula",
+    "scythe",
+    "newspaperReading",
+    "bills",
+    "wateringCan",
+    "fishingPole",
+    "fishingRod",
+    "fireExtinguisher",
+    "bag",
+    "phone",
+    "phone1",
+];
 
 /// Whether a clip should be baked.
 pub fn wanted(name: &str) -> bool {

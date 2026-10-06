@@ -799,6 +799,8 @@ pub enum ActionKind {
     JoinCareer { target: Entity, track: usize },
     /// Phone someone and invite them over.
     Invite { target: Entity },
+    /// Phone a friend for a chat.
+    PhoneChat { target: Entity },
     /// Spend lifetime happiness on a reward (instant, from the rewards menu).
     BuyReward(usize),
     /// Drive to a community lot's rabbit hole for an activity.
@@ -1113,6 +1115,18 @@ fn parties(
     notes.push(if great { "The party was a hit! The guests had a great time.".to_string() } else { "The party fizzled out. Better luck next time.".to_string() });
 }
 
+/// A phone call: the cell phone out, then chatting (the game's clips, with the phone in hand).
+const PHONE_CALL: crate::anim::ActionClip = crate::anim::ActionClip::new(
+    Some("a2o_phone_makeCall_cellPhone_x"),
+    &["a2o_phone_chat_talk_a_x", "a2o_phone_chat_talk_b_x", "a2o_phone_chat_listenRespond_agree_laugh_x", "a2o_phone_chat_talk_c_x", "a2o_phone_chat_talk_d_x"],
+);
+/// A chat on the phone: how long, and what it does for Social and Fun (an hour's worth) and the
+/// friendship (all told).
+const PHONE_CHAT_MINUTES: f32 = 30.0;
+const PHONE_CHAT_SOCIAL: f32 = 90.0;
+const PHONE_CHAT_FUN: f32 = 10.0;
+const PHONE_CHAT_FRIENDSHIP: f32 = 6.0;
+
 /// The home lot's walk-off point where sims leave for work and carpools arrive.
 #[derive(Resource, Clone, Copy)]
 pub struct LotExit(pub Vec2);
@@ -1239,14 +1253,17 @@ fn run_actions(
                         ActionKind::JoinCareer { target, .. } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
                         ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
                         ActionKind::Invite { .. }
+                        | ActionKind::PhoneChat { .. }
                         | ActionKind::OrderPizza
                         | ActionKind::Adopt { .. }
                         | ActionKind::MoveHouse
                         | ActionKind::CallRepairman
                         | ActionKind::HireMaid(_)
                         | ActionKind::ThrowParty => {
+                            // On the cell phone, as the game's Sims are.
                             action.phase = Phase::Running(0.0);
                             anim.pose = Pose::Talk;
+                            commands.entity(me).insert(PHONE_CALL);
                             continue;
                         }
                         ActionKind::MotiveFail(k) => {
@@ -1406,6 +1423,7 @@ fn run_actions(
                                 commands.entity(me).insert(crate::anim::ActionClip::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_plantSeeds_x"]));
                             }
                             ActionKind::Invite { .. }
+                            | ActionKind::PhoneChat { .. }
                             | ActionKind::BuyReward(_)
                             | ActionKind::EatHere
                             | ActionKind::EatItem { .. }
@@ -1935,6 +1953,19 @@ fn run_actions(
                                     }
                                     _ => notes.push("There isn't enough money for a pizza."),
                                 }
+                            }
+                        }
+                        ActionKind::PhoneChat { target } => {
+                            // A chat on the phone: a little less than one in person.
+                            let (s, f) = (PHONE_CHAT_SOCIAL * dt / 60.0, PHONE_CHAT_FUN * dt / 60.0);
+                            motives.add(SOCIAL, s);
+                            motives.add(FUN, f);
+                            let df = PHONE_CHAT_FRIENDSHIP * dt / PHONE_CHAT_MINUTES * crate::life::social_affinity(&sim.traits, "Chat");
+                            rels.add(*target, df, 0.0);
+                            social_fx.push((*target, me, s, f, df, 0.0));
+                            if elapsed >= PHONE_CHAT_MINUTES {
+                                finished = true;
+                                life.write(LifeEvent::new(me, LifeEventKind::Socialized { other: *target, social: "Chat" }));
                             }
                         }
                         ActionKind::Invite { target } => {

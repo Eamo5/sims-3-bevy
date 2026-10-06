@@ -1628,6 +1628,27 @@ fn auto_action(
         *done = true;
         return;
     }
+    // "Call": the selected Sim phones the Sim they know best (who isn't about) for a chat.
+    if name == "Call" {
+        let me = sel_e.single().unwrap();
+        commands.queue(move |w: &mut World| {
+            let mut away = w.query_filtered::<Entity, With<crate::interact::OffLot>>();
+            let away: Vec<Entity> = away.iter(w).collect();
+            let Some(rels) = w.get::<crate::social::Relationships>(me) else { return };
+            let Some(target) = away.into_iter().filter(|e| rels.0.contains_key(e)).max_by(|a, b| rels.friendship(*a).total_cmp(&rels.friendship(*b))) else {
+                warn!("call test: nobody to call");
+                return;
+            };
+            let name = w.get::<crate::sim::Sim>(target).map(|s| s.full_name()).unwrap_or_default();
+            let before = rels.friendship(target);
+            info!("call test: phoning {name} (friendship {before:.1})");
+            if let Some(mut q) = w.get_mut::<crate::interact::ActionQueue>(me) {
+                q.push_player(crate::interact::Action::new(&format!("Chat with {name}"), crate::interact::ActionKind::PhoneChat { target }, false));
+            }
+        });
+        *done = true;
+        return;
+    }
     // "Pizza": the selected Sim phones for a pizza.
     if name == "Pizza" {
         if let Ok(mut q) = sel.single_mut() {

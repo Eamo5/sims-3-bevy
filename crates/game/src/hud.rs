@@ -1632,15 +1632,13 @@ fn phone_button(
         return;
     }
     let Ok((actor, rels, me)) = selected.single() else { return };
-    let mut known: Vec<(f32, String, ActionKind)> = away
-        .iter()
-        .filter(|(e, _)| rels.0.contains_key(e))
-        .map(|(e, s)| (rels.friendship(e), format!("Invite {} Over", s.full_name()), ActionKind::Invite { target: e }))
-        .collect();
+    // The Sims they know, best friends first.
+    let mut known: Vec<(f32, Entity, String)> = away.iter().filter(|(e, _)| rels.0.contains_key(e)).map(|(e, s)| (rels.friendship(e), e, s.full_name())).collect();
     if known.is_empty() {
         notes.push("There's nobody to call yet — meet some Sims first!");
     }
     known.sort_by(|a, b| b.0.total_cmp(&a.0));
+    known.truncate(12);
     let mut options: Vec<(String, ActionKind)> = vec![
         (format!("Order Pizza (§{})", crate::meals::PIZZA_PRICE), ActionKind::OrderPizza),
         (format!("Call the Repairman (§{}+)", crate::interact::REPAIRMAN_PRICE), ActionKind::CallRepairman),
@@ -1651,9 +1649,17 @@ fn phone_button(
         },
         (format!("Throw a Party (§{})", crate::interact::PARTY_PRICE), ActionKind::ThrowParty),
     ];
-    options.extend(known.into_iter().take(9).map(|(_, l, k)| (l, k)));
-    // Grown-ups can adopt (a baby only where there's a crib for it).
+    // Calling someone they know: for a chat, or to invite them over.
     pie.submenus.clear();
+    if !known.is_empty() {
+        let chat = known.iter().map(|(_, e, n)| (format!("Chat with {n}"), ActionKind::PhoneChat { target: *e })).collect();
+        options.push(("Chat with a Friend ›".to_string(), submenu_kind(pie.submenus.len())));
+        pie.submenus.push(("Chat".to_string(), chat));
+        let invite = known.iter().map(|(_, e, n)| (format!("Invite {n} Over"), ActionKind::Invite { target: *e })).collect();
+        options.push(("Invite Someone Over ›".to_string(), submenu_kind(pie.submenus.len())));
+        pie.submenus.push(("Invite Over".to_string(), invite));
+    }
+    // Grown-ups can adopt (a baby only where there's a crib for it).
     if me.age.is_grown() && me.age != crate::sim::Age::Child {
         let crib = objects.iter().any(|o| o.kind == crate::interact::ObjectKind::Crib);
         let list: Vec<(String, ActionKind)> = [(0u8, "Baby"), (1, "Toddler"), (2, "Child")]
