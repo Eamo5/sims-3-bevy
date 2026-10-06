@@ -357,6 +357,23 @@ mod tests {
     }
 
     #[test]
+    fn siblings_made_in_cas() {
+        // Two sisters with no parents in the tree (20, 21); 20 has a son (22), 21 a daughter (23).
+        let mut g = Genealogy::default();
+        for (id, female) in [(20, true), (21, true), (22, false), (23, true)] {
+            g.note(id, "", female);
+        }
+        g.add_sibling(20, 21);
+        g.add_parent(22, 20);
+        g.add_parent(23, 21);
+        assert_eq!(g.word(20, 21), Some("Sister"));
+        assert_eq!(g.word(22, 21), Some("Aunt"));
+        assert_eq!(g.word(21, 22), Some("Nephew"));
+        assert_eq!(g.word(22, 23), Some("Cousin"));
+        assert_eq!(g.siblings_of(20), vec![21]);
+    }
+
+    #[test]
     fn saved_and_restored() {
         let g = tree();
         let mut h = Genealogy::default();
