@@ -253,8 +253,7 @@ fn update_tree(
     let spouse = rels.0.iter().find(|(_, r)| r.status == crate::social::RelStatus::Married).and_then(|(e, _)| people.get(*e).ok()).map(|(_, s)| s.id);
     let parents: Vec<u64> = family.parents(me.id).to_vec();
     let grandparents: Vec<u64> = parents.iter().flat_map(|p| family.parents(*p).iter().copied()).collect();
-    let mut siblings: Vec<u64> = family.0.values().filter(|p| p.id != me.id && p.parents.iter().any(|x| parents.contains(x))).map(|p| p.id).collect();
-    siblings.sort();
+    let siblings: Vec<u64> = family.siblings_of(me.id);
     let children = family.children(me.id);
     let grandchildren: Vec<u64> = children.iter().flat_map(|c| family.children(*c)).collect();
     let mut middle = siblings.clone();

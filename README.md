@@ -38,7 +38,9 @@ installation is unreachable.
   house's own furniture; nearby lots are shown in full detail with
   the game's roofs, distant ones as the game's pre-rendered imposters.
 - **Sims**: Create-a-Sim from real CAS parts (browsed as the game's own style pictures), skin
-  tones, hair colours and animation clips, with the game's
+  tones, hair colours and animation clips, and what the household's Sims are to each other
+  (roommates, spouses, partners, siblings, parent and child, as fits their ages: they start
+  married, family or at least friends, and in the family tree), with the game's
   body-shape morphs (weight and fitness sliders; town Sims keep their builds, working out
   firms Sims up); needs, moods,
   skills, careers, relationships, autonomy, social interactions; children, teens, adults and

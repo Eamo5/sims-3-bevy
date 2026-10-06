@@ -17,7 +17,7 @@ impl Plugin for FamilyPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Genealogy>()
             .add_systems(OnEnter(AppState::Loading), |mut g: ResMut<Genealogy>| *g = Genealogy::default())
-            .add_systems(Update, from_town.run_if(in_state(AppState::InGame)));
+            .add_systems(Update, (from_town, apply_ties).run_if(in_state(AppState::InGame)));
     }
 }
 
@@ -28,6 +28,9 @@ pub struct Person {
     pub name: String,
     pub female: bool,
     pub parents: Vec<u64>,
+    /// Brothers and sisters known without parents (made so in Create a Sim).
+    #[serde(default)]
+    pub siblings: Vec<u64>,
 }
 
 #[derive(Resource, Default, Clone, Debug)]
@@ -103,8 +106,27 @@ impl Genealogy {
         self.parents(id).iter().flat_map(|p| self.parents(*p).iter().copied()).collect()
     }
 
-    fn siblings(&self, a: u64, b: u64) -> bool {
-        a != b && self.parents(a).iter().any(|p| self.parents(b).contains(p))
+    pub fn add_sibling(&mut self, a: u64, b: u64) {
+        if a == b {
+            return;
+        }
+        for (x, y) in [(a, b), (b, a)] {
+            let p = self.0.entry(x).or_insert_with(|| Person { id: x, ..default() });
+            if !p.siblings.contains(&y) {
+                p.siblings.push(y);
+            }
+        }
+    }
+
+    pub fn siblings(&self, a: u64, b: u64) -> bool {
+        a != b && (self.parents(a).iter().any(|p| self.parents(b).contains(p)) || self.0.get(&a).is_some_and(|p| p.siblings.contains(&b)))
+    }
+
+    /// Everyone who is a brother or sister to `id`.
+    pub fn siblings_of(&self, id: u64) -> Vec<u64> {
+        let mut v: Vec<u64> = self.0.values().filter(|p| self.siblings(id, p.id)).map(|p| p.id).collect();
+        v.sort();
+        v
     }
 
     /// What `b` is to `a`, if they're family.
@@ -135,7 +157,7 @@ impl Genealogy {
         if pb.iter().any(|p| self.siblings(*p, a)) {
             return Some(Kin::NieceNephew);
         }
-        if ga.iter().any(|g| gb.contains(g)) {
+        if ga.iter().any(|g| gb.contains(g)) || pa.iter().any(|p| pb.iter().any(|q| self.siblings(*p, *q))) {
             return Some(Kin::Cousin);
         }
         None
@@ -159,6 +181,117 @@ impl Genealogy {
             self.note(p.id, &p.name, p.female);
             for &parent in &p.parents {
                 self.add_parent(p.id, parent);
+            }
+            for &s in &p.siblings {
+                self.add_sibling(p.id, s);
+            }
+        }
+    }
+}
+
+/// What two Sims of a household made in Create a Sim are to each other.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Tie {
+    Roommates,
+    Spouses,
+    Partners,
+    Siblings,
+    /// The first is the second's parent.
+    ParentOf,
+    /// The second is the first's parent.
+    ChildOf,
+}
+
+impl Tie {
+    pub const ALL: [Tie; 6] = [Tie::Roommates, Tie::Spouses, Tie::Partners, Tie::Siblings, Tie::ParentOf, Tie::ChildOf];
+
+    /// Whether two Sims of these ages can be this to each other.
+    pub fn fits(self, a: crate::sim::Age, b: crate::sim::Age) -> bool {
+        let rank = |x: crate::sim::Age| x as u8;
+        match self {
+            Tie::Roommates | Tie::Siblings => true,
+            Tie::Spouses => a.is_grown() && b.is_grown(),
+            Tie::Partners => a.is_grown() == b.is_grown() && !a.is_little() && !b.is_little() && a != crate::sim::Age::Child && b != crate::sim::Age::Child,
+            Tie::ParentOf => a.is_grown() && rank(a) > rank(b),
+            Tie::ChildOf => b.is_grown() && rank(b) > rank(a),
+        }
+    }
+
+    /// "Gretchen and Elvis are spouses".
+    pub fn describe(self, a: &str, b: &str) -> String {
+        match self {
+            Tie::Roommates => format!("{a} & {b}: Roommates"),
+            Tie::Spouses => format!("{a} & {b}: Spouses"),
+            Tie::Partners => format!("{a} & {b}: Partners"),
+            Tie::Siblings => format!("{a} & {b}: Siblings"),
+            Tie::ParentOf => format!("{a} is {b}'s parent"),
+            Tie::ChildOf => format!("{b} is {a}'s parent"),
+        }
+    }
+}
+
+/// A household made in Create a Sim, just moved in: what its Sims are to each other (by Sim
+/// id), to be set once they're all about.
+#[derive(Resource, Clone)]
+pub struct HouseholdTies {
+    pub members: Vec<u64>,
+    pub ties: Vec<(u64, u64, Tie)>,
+}
+
+/// Household ties made real: marriages and partners, family (in the family tree too), and
+/// housemates who at least know each other.
+fn apply_ties(
+    mut commands: Commands,
+    ties: Option<Res<HouseholdTies>>,
+    mut sims: Query<(Entity, &crate::sim::Sim, &mut crate::social::Relationships), With<crate::sim::HouseholdMember>>,
+    mut g: ResMut<Genealogy>,
+) {
+    use crate::social::RelStatus;
+    let Some(t) = ties else { return };
+    let by_id: HashMap<u64, (Entity, String, bool)> = sims.iter().map(|(e, s, _)| (s.id, (e, s.full_name(), s.female))).collect();
+    if !t.members.iter().all(|id| by_id.contains_key(id)) {
+        return;
+    }
+    commands.remove_resource::<HouseholdTies>();
+    for (id, (_, name, female)) in &by_id {
+        g.note(*id, name, *female);
+    }
+    let tie_of = |a: u64, b: u64| t.ties.iter().find(|(x, y, _)| (*x, *y) == (a, b) || (*x, *y) == (b, a)).map(|(x, _, k)| (*x == a, *k));
+    let mut links = Vec::new();
+    for (i, &a) in t.members.iter().enumerate() {
+        for &b in &t.members[i + 1..] {
+            let (friendship, romance, status) = match tie_of(a, b) {
+                Some((_, Tie::Spouses)) => (80.0, 80.0, RelStatus::Married),
+                Some((_, Tie::Partners)) => (60.0, 60.0, RelStatus::Partner),
+                Some((_, Tie::Siblings)) => {
+                    g.add_sibling(a, b);
+                    (60.0, 0.0, RelStatus::None)
+                }
+                Some((first_is_a, Tie::ParentOf)) => {
+                    let (p, c) = if first_is_a { (a, b) } else { (b, a) };
+                    g.add_parent(c, p);
+                    (70.0, 0.0, RelStatus::None)
+                }
+                Some((first_is_a, Tie::ChildOf)) => {
+                    let (c, p) = if first_is_a { (a, b) } else { (b, a) };
+                    g.add_parent(c, p);
+                    (70.0, 0.0, RelStatus::None)
+                }
+                _ => (25.0, 0.0, RelStatus::None),
+            };
+            links.push((by_id[&a].0, by_id[&b].0, friendship, romance, status));
+        }
+    }
+    for (a, b, friendship, romance, status) in links {
+        for (x, y) in [(a, b), (b, a)] {
+            if let Ok((_, _, mut rels)) = sims.get_mut(x) {
+                let r = rels.entry(y);
+                r.friendship = r.friendship.max(friendship);
+                r.romance = r.romance.max(romance);
+                if status != RelStatus::None {
+                    r.status = status;
+                    r.kissed = true;
+                }
             }
         }
     }

@@ -364,6 +364,21 @@ fn auto_pick_world(
                 None => warn!("--family {fam}: no such family in {}", w.name),
             }
         }
+        // TIES=<i>-<j>:<Spouses|Partners|Siblings|ParentOf|ChildOf>[;...]: what the new
+        // household's Sims are to each other.
+        if let Ok(v) = std::env::var("TIES") {
+            let ties = v
+                .split(';')
+                .filter_map(|t| {
+                    let (pair, kind) = t.split_once(':')?;
+                    let (i, j) = pair.split_once('-')?;
+                    let (a, b) = (pending.members.get(i.parse::<usize>().ok()?)?.id, pending.members.get(j.parse::<usize>().ok()?)?.id);
+                    let kind = crate::family::Tie::ALL.into_iter().find(|k| format!("{k:?}").eq_ignore_ascii_case(kind))?;
+                    Some((a, b, kind))
+                })
+                .collect();
+            commands.insert_resource(crate::family::HouseholdTies { members: pending.members.iter().map(|m| m.id).collect(), ties });
+        }
         commands.insert_resource(pending);
         next.set(AppState::Loading);
     } else {

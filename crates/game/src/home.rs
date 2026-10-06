@@ -35,6 +35,8 @@ pub struct PendingHousehold {
     pub members: Vec<Sim>,
     /// A town family being played (they move straight into their own home).
     pub premade: Option<s3bake::HouseholdBaked>,
+    /// What its Sims are to each other (by Sim id; pairs not listed are roommates).
+    pub ties: Vec<(u64, u64, crate::family::Tie)>,
 }
 
 impl PendingHousehold {
@@ -43,7 +45,7 @@ impl PendingHousehold {
         let last = random_last_name(&mut rng);
         let a = random_sim(&mut rng, &last, Some(true), Age::YoungAdult);
         let b = random_sim(&mut rng, &last, Some(false), Age::YoungAdult);
-        Self { last_name: last, members: vec![a, b], premade: None }
+        Self { last_name: last, members: vec![a, b], premade: None, ties: Vec::new() }
     }
 }
 

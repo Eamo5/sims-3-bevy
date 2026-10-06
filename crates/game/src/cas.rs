@@ -91,6 +91,8 @@ pub enum CasAction {
     Families,
     /// Play town family `i` (of the playable ones).
     Family(usize),
+    /// What two members are to each other: the next tie that fits (members by index).
+    Tie(usize, usize),
     Done,
 }
 
@@ -271,6 +273,7 @@ fn worn(scene: &CasScene, sim: &Sim, t: u32) -> Option<Key> {
 
 #[allow(clippy::too_many_arguments)]
 fn cas_actions(
+    mut commands: Commands,
     q: Query<(&Interaction, &CasAction), Changed<Interaction>>,
     scene: Option<ResMut<CasScene>>,
     mut pending: ResMut<PendingHousehold>,
@@ -300,6 +303,8 @@ fn cas_actions(
             }
             CasAction::Remove => {
                 if pending.members.len() > 1 {
+                    let gone = pending.members[k].id;
+                    pending.ties.retain(|(a, b, _)| *a != gone && *b != gone);
                     pending.members.remove(k);
                     scene.selected = k.saturating_sub(1);
                 }
@@ -428,7 +433,27 @@ fn cas_actions(
                 pending.premade = Some(h);
                 scene.selected = 0;
             }
+            CasAction::Tie(i, j) => {
+                use crate::family::Tie;
+                let (Some(a), Some(b)) = (pending.members.get(i).cloned(), pending.members.get(j).cloned()) else { continue };
+                let now = pending.ties.iter().find(|(x, y, _)| (*x, *y) == (a.id, b.id)).map_or(Tie::Roommates, |t| t.2);
+                let at = Tie::ALL.iter().position(|t| *t == now).unwrap_or(0);
+                let next_tie = (1..=Tie::ALL.len()).map(|d| Tie::ALL[(at + d) % Tie::ALL.len()]).find(|t| t.fits(a.age, b.age)).unwrap_or(Tie::Roommates);
+                pending.ties.retain(|(x, y, _)| (*x, *y) != (a.id, b.id) && (*x, *y) != (b.id, a.id));
+                if next_tie != Tie::Roommates {
+                    pending.ties.push((a.id, b.id, next_tie));
+                }
+            }
             CasAction::Done => {
+                // (What they are to each other, set once they've moved in.)
+                if pending.premade.is_none() && pending.members.len() > 1 {
+                    let fits = |a: u64, b: u64, t: crate::family::Tie| {
+                        let age = |id: u64| pending.members.iter().find(|m| m.id == id).map(|m| m.age);
+                        matches!((age(a), age(b)), (Some(x), Some(y)) if t.fits(x, y))
+                    };
+                    let ties = pending.ties.iter().copied().filter(|(a, b, t)| fits(*a, *b, *t)).collect();
+                    commands.insert_resource(crate::family::HouseholdTies { members: pending.members.iter().map(|m| m.id).collect(), ties });
+                }
                 next.set(AppState::Loading);
                 return;
             }
@@ -640,6 +665,17 @@ fn rebuild_ui(
                 button(row, "Remove", CasAction::Remove, Val::Px(128.0), false, 15.0);
             });
             button(p, "New Family", CasAction::NewFamily, Val::Percent(100.0), false, 15.0);
+            // What they are to each other (click to change).
+            if pending.members.len() > 1 && pending.premade.is_none() {
+                p.spawn(text("Relationships", 16.0, PLUMBOB_GREEN));
+                for i in 0..pending.members.len() {
+                    for j in i + 1..pending.members.len() {
+                        let (a, b) = (&pending.members[i], &pending.members[j]);
+                        let tie = pending.ties.iter().find(|(x, y, _)| (*x, *y) == (a.id, b.id)).map_or(crate::family::Tie::Roommates, |t| t.2);
+                        button(p, tie.describe(&a.first, &b.first), CasAction::Tie(i, j), Val::Percent(100.0), false, 13.0);
+                    }
+                }
+            }
             if scene.families.is_some() {
                 button(p, if scene.browsing { "Back to Create a Sim" } else { "Play a Town Family" }, CasAction::Families, Val::Percent(100.0), scene.browsing, 15.0);
             }

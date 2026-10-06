@@ -793,7 +793,7 @@ pub fn begin_load(commands: &mut Commands, worlds: &crate::data::WorldList, game
         return false;
     };
     commands.insert_resource(crate::data::SelectedWorld(w.clone()));
-    commands.insert_resource(crate::home::PendingHousehold { last_name: game.household.clone(), members: game.members(), premade: None });
+    commands.insert_resource(crate::home::PendingHousehold { last_name: game.household.clone(), members: game.members(), premade: None, ties: Vec::new() });
     commands.insert_resource(PendingLoad(game));
     commands.insert_resource(SaveSlot(path));
     true
