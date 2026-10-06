@@ -2271,8 +2271,8 @@ fn pay_bills(
         let value: i64 = objects.iter().map(|(_, o)| o.price as i64).sum();
         let bill = 60 + value / 60;
         if mailbox {
-            h.bills.push(Bill { amount: bill, day });
-            notes.push(format!("The bills have arrived in the mailbox: §{bill}. Pay them within three days."));
+            // (The mail carrier brings them.)
+            commands.insert_resource(crate::services::MailDue(Bill { amount: bill, day }));
         } else {
             h.funds -= bill;
             notes.push(format!("The bills arrived: §{bill} was paid automatically."));

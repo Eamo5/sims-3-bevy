@@ -1393,6 +1393,12 @@ fn auto_action(
         *done = true;
         return;
     }
+    // "Mail": bills for §123 go out with the mail carrier.
+    if name == "Mail" {
+        commands.insert_resource(crate::services::MailDue(crate::interact::Bill { amount: 123, day: 0 }));
+        *done = true;
+        return;
+    }
     // "Party": the selected Sim throws a party.
     if name == "Party" {
         if let Ok(mut q) = sel.single_mut() {

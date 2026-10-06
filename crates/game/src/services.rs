@@ -28,7 +28,7 @@ impl Plugin for ServicesPlugin {
             .init_resource::<Welfare>()
             .init_resource::<MaidService>()
             .add_systems(OnEnter(AppState::Loading), |mut maid: ResMut<MaidService>| *maid = MaidService::default())
-            .add_systems(Update, (babysitting, social_worker, adoption, repairman, maid, pizza_delivery).run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (babysitting, social_worker, adoption, repairman, maid, pizza_delivery, mail_carrier).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -278,6 +278,102 @@ fn maid(
                 h.funds -= wage;
             }
             notes.push(format!("The maid finished cleaning: {hours} hour{} came to §{wage}.", if hours == 1 { "" } else { "s" }));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The mail carrier
+
+/// The bills on their way to the mailbox.
+#[derive(Resource)]
+pub struct MailDue(pub crate::interact::Bill);
+
+#[derive(Component)]
+pub struct MailCarrier {
+    since: f64,
+    /// When they got to the mailbox.
+    at_box: Option<f64>,
+    delivered: bool,
+}
+
+/// On bill days the mail carrier walks up to the mailbox in uniform, puts the bills in and the
+/// flag up (the game's own animation), and goes on.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn mail_carrier(
+    mut commands: Commands,
+    clock: Res<GameClock>,
+    due: Option<Res<MailDue>>,
+    mut household: Option<ResMut<Household>>,
+    boxes: Query<(&GameObject, &Transform), Without<Sim>>,
+    mut carriers: Query<(Entity, &mut MailCarrier, &mut ActionQueue, &mut Transform, Option<&PathFollow>), With<Sim>>,
+    exit: Option<Res<crate::interact::LotExit>>,
+    world: Res<CurrentWorld>,
+    mut notes: ResMut<Notifications>,
+) {
+    let mailbox = boxes.iter().find(|(o, _)| o.kind == ObjectKind::Mailbox);
+    let mut deliver = |commands: &mut Commands, household: &mut Option<ResMut<Household>>, bill: &crate::interact::Bill| {
+        commands.remove_resource::<MailDue>();
+        if let Some(h) = household.as_mut() {
+            h.bills.push(bill.clone());
+        }
+        notes.push(format!("The mail carrier brought the bills: §{}. Pay them at the mailbox within three days.", bill.amount));
+    };
+    if let Some(d) = due.as_ref()
+        && carriers.is_empty()
+    {
+        match (exit.as_ref(), mailbox) {
+            (Some(x), Some(_)) => {
+                let mut rng = rand::rng();
+                let female = rng.random_bool(0.5);
+                let sim = crate::sim::random_sim(&mut rng, "Mail Carrier", Some(female), Age::Adult);
+                let at = Vec3::new(x.0.x, world.data.heightmap.sample(x.0.x, x.0.y), x.0.y);
+                let e = arrive(&mut commands, sim, at, Some(ServiceUniform::MailCarrier), Skills::default());
+                commands.entity(e).insert(MailCarrier { since: clock.minutes, at_box: None, delivered: false });
+            }
+            _ => deliver(&mut commands, &mut household, &d.0),
+        }
+        return;
+    }
+    let Some(exit) = exit else { return };
+    for (me, mut c, mut queue, mut tf, path) in &mut carriers {
+        if c.delivered {
+            leave(&mut commands, me, &mut queue, &tf, path, exit.0);
+            continue;
+        }
+        let Some((o, mtf)) = mailbox else {
+            c.delivered = true;
+            continue;
+        };
+        let spot = o.use_point(mtf);
+        // There (the walk over), or as near as the way allows, or kept too long.
+        let idle = queue.0.is_empty() && path.is_none();
+        let there = idle && tf.translation.xz().distance(spot) < 1.2;
+        let stuck = idle && clock.minutes - c.since > 15.0;
+        if c.at_box.is_none() && !there && !stuck && clock.minutes - c.since < 120.0 {
+            if idle {
+                queue.0.push_back(Action::new("Deliver the Mail", ActionKind::GoHere(spot, 1), false));
+            }
+            continue;
+        }
+        match c.at_box {
+            None => {
+                // Facing the box, flag up.
+                c.at_box = Some(clock.minutes);
+                let to = mtf.translation.xz() - tf.translation.xz();
+                if to.length() > 0.01 {
+                    tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
+                }
+                commands.entity(me).insert(crate::anim::ActionClip::new(None, &["a2o_mailbox_putFlagUp_x"]));
+            }
+            Some(t) if clock.minutes - t >= 3.0 => {
+                commands.entity(me).remove::<crate::anim::ActionClip>();
+                c.delivered = true;
+                if let Some(d) = due.as_ref() {
+                    deliver(&mut commands, &mut household, &d.0);
+                }
+            }
+            Some(_) => {}
         }
     }
 }

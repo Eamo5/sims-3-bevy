@@ -107,7 +107,8 @@ installation is unreachable.
   stay till midnight, everyone mingling, and the household gets the game's "Threw a Great
   Party" or "Threw a Lame Party" moodlet depending on how much talking went on; party animals
   have an "Awesome Party".
-- **Mail**: bills arrive in the mailbox on Mondays and Thursdays and are paid there (Sims see
+- **Mail**: on Mondays and Thursdays the mail carrier walks up in uniform, puts the bills in
+  the mailbox and the flag up (the game's animation); they're paid there (Sims see
   to them on their own too); bills left three days bring the repo man, who takes things worth
   what's owed. The paper is delivered every morning, to read or look for a job in.
 - **Death**: an elder whose time has come collapses and the Grim Reaper appears in his robe

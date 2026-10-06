@@ -76,6 +76,7 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_dishwasher_repair_loopTinker",
     // The mailbox and the paper.
     "a2o_mailbox_getMail",
+    "a2o_mailbox_putFlagUp",
     "a2o_newspaper_read",
     // The Grim Reaper and dying of old age.
     "a_death_appear",

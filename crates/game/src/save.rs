@@ -462,7 +462,7 @@ fn save_game(
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
     (story, alarm, bowls): (Res<crate::story::TownStory>, Res<crate::appliances::Alarm>, Query<(&crate::fishbowl::BowlFish, &Transform), Without<crate::visit::LotObject>>),
-    (mut slot, maid): (ResMut<SaveSlot>, Res<crate::services::MaidService>),
+    (mut slot, maid, mail_due): (ResMut<SaveSlot>, Res<crate::services::MaidService>, Option<Res<crate::services::MailDue>>),
 ) {
     if requests.read().count() == 0 {
         return;
@@ -530,7 +530,8 @@ fn save_game(
         household: hh.name.clone(),
         funds: hh.funds,
         last_bill_day: hh.last_bill_day,
-        bills: hh.bills.clone(),
+        // (Bills still in the mail count as come.)
+        bills: hh.bills.iter().cloned().chain(mail_due.as_ref().map(|m| m.0.clone())).collect(),
         minutes: clock.minutes,
         sims: saved,
         bought: bought.iter().map(|(o, tf)| saved_object(o, tf)).collect(),
