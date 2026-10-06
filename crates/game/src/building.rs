@@ -1767,7 +1767,7 @@ fn view_level_keys(keys: Res<ButtonInput<KeyCode>>, building: Option<ResMut<Acti
 fn building_visibility(
     (building, walls): (Option<ResMut<ActiveBuilding>>, Res<WallMode>),
     cams: Query<(&SimsCamera, &GlobalTransform)>,
-    mut pieces: Query<(&BuildingPiece, Option<&WallObject>, &mut Visibility), (Without<LotImposter>, Without<crate::world::Tree>)>,
+    mut pieces: Query<(&BuildingPiece, Option<&WallObject>, &mut Visibility, Has<crate::traffic::CarOut>), (Without<LotImposter>, Without<crate::world::Tree>)>,
     mut imposters: Query<(&LotImposter, &mut Visibility), (Without<BuildingPiece>, Without<crate::world::Tree>)>,
     mut faces: Query<(&mut WallFace, &mut Mesh3d, &mut Visibility), (Without<BuildingPiece>, Without<LotImposter>, Without<crate::world::Tree>)>,
     mut trees: Query<(&GlobalTransform, &mut Visibility), (With<crate::world::Tree>, Without<BuildingPiece>, Without<LotImposter>)>,
@@ -1818,8 +1818,9 @@ fn building_visibility(
     for (floor, mut vis) in &mut sims {
         vis.set_if_neq(if floor.0 <= view_level { Visibility::Inherited } else { Visibility::Hidden });
     }
-    for (piece, wall_obj, mut vis) in &mut pieces {
-        let show = !far && piece.level <= view_level && !wall_obj.is_some_and(|w| is_cut(w.mid, piece.level));
+    for (piece, wall_obj, mut vis, car_out) in &mut pieces {
+        // (The household's car is away while someone's out in it.)
+        let show = !far && !car_out && piece.level <= view_level && !wall_obj.is_some_and(|w| is_cut(w.mid, piece.level));
         vis.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });
     }
     if far {

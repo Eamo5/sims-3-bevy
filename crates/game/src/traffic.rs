@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use rand::Rng;
 
 use crate::baked::Baked;
+use s3bake::Key;
 use crate::camera::SimsCamera;
 use crate::clock::{GameClock, SPEED_RATES};
 use crate::loading::CurrentWorld;
@@ -124,9 +125,25 @@ struct Car {
 #[derive(Component)]
 struct Ride;
 
-/// Rides to send: where (the curb nearest), and which vehicle (catalogue instance name).
+/// Rides to send: where (the curb nearest), and which vehicle (catalogue instance name); and the
+/// household's own car, out on the road (its catalogue key).
 #[derive(Resource, Default)]
-pub struct PendingRides(pub Vec<(Vec2, &'static str)>);
+pub struct PendingRides(pub Vec<(Vec2, &'static str)>, pub Vec<(Vec2, Key)>);
+
+/// The household's own car, out with someone: gone from the driveway until they're back.
+#[derive(Component)]
+pub struct CarOut {
+    driver: Entity,
+    /// When it's back in the driveway (real seconds, once it's pulled up at the curb).
+    back_at: Option<f32>,
+}
+
+/// Whether a catalogue object is a car a household can own (not the town's service vehicles).
+fn own_car(data: &crate::baked::BakedData, objd: Key) -> bool {
+    data.catalog_entry(&objd).is_some_and(|c| {
+        c.script.starts_with("Sims3.Gameplay.Objects.Vehicles.Car") && !["Service", "Taxi", "Bus", "Police", "Limo"].iter().any(|x| c.script.contains(x))
+    })
+}
 
 impl Roads {
     /// The point of a road nearest `p`: which road and how far along.
@@ -146,25 +163,53 @@ impl Roads {
 }
 
 /// Someone leaving (for work in the carpool, for school on the bus, or by taxi) or coming back
-/// gets a ride at the curb nearest them.
-#[allow(clippy::type_complexity)]
+/// gets a ride at the curb nearest them. Out on a trip of their own, a household with a car
+/// takes it: it leaves the driveway, and comes back with them.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn rides(
+    mut commands: Commands,
+    time: Res<Time>,
+    data: Res<Baked>,
     mut queue: ResMut<PendingRides>,
-    departed: Query<(&Transform, Option<&crate::rabbitholes::AtRabbitHole>, Has<crate::interact::AtWork>), Or<(Added<crate::interact::AtWork>, Added<crate::rabbitholes::AtRabbitHole>)>>,
+    departed: Query<
+        (Entity, &Transform, Option<&crate::rabbitholes::AtRabbitHole>, Has<crate::interact::AtWork>, Has<crate::sim::HouseholdMember>),
+        Or<(Added<crate::interact::AtWork>, Added<crate::rabbitholes::AtRabbitHole>)>,
+    >,
     (mut back_work, mut back_trip): (RemovedComponents<crate::interact::AtWork>, RemovedComponents<crate::rabbitholes::AtRabbitHole>),
     members: Query<&Transform, With<crate::sim::HouseholdMember>>,
+    mut cars: Query<(Entity, &crate::interact::GameObject, Option<&mut CarOut>), Without<crate::visit::LotObject>>,
 ) {
-    for (tf, trip, work) in &departed {
+    for (e, tf, trip, work, member) in &departed {
         let kind = match trip {
             Some(t) if std::ptr::eq(t.activity, &crate::rabbitholes::SCHOOL) => "CarBusSchool",
             _ if work => "CarServiceSedan",
             _ => "CarTaxi",
         };
+        if kind == "CarTaxi"
+            && member
+            && let Some((car, o, _)) = cars.iter().find(|(_, o, out)| out.is_none() && own_car(&data.0, o.objd))
+        {
+            commands.entity(car).insert((CarOut { driver: e, back_at: None }, Visibility::Hidden));
+            queue.1.push((tf.translation.xz(), o.objd));
+            continue;
+        }
         queue.0.push((tf.translation.xz(), kind));
     }
+    let now = time.elapsed_secs();
     for e in back_work.read().chain(back_trip.read()) {
-        if let Ok(tf) = members.get(e) {
-            queue.0.push((tf.translation.xz(), "CarTaxi"));
+        let Ok(tf) = members.get(e) else { continue };
+        match cars.iter_mut().find(|(_, _, out)| out.as_ref().is_some_and(|c| c.driver == e && c.back_at.is_none())) {
+            Some((_, o, Some(mut out))) => {
+                queue.1.push((tf.translation.xz(), o.objd));
+                out.back_at = Some(now + 4.0);
+            }
+            _ => queue.0.push((tf.translation.xz(), "CarTaxi")),
+        }
+    }
+    // Back in the driveway once it's pulled up.
+    for (car, _, out) in &cars {
+        if out.is_some_and(|c| c.back_at.is_some_and(|t| now >= t)) {
+            commands.entity(car).remove::<CarOut>().insert(Visibility::Inherited);
         }
     }
 }
@@ -193,10 +238,11 @@ fn traffic(
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed].min(4.0);
     let hm = &world.data.heightmap;
     let mut count = 0;
-    // Rides pull up at the curb.
-    for (at, model) in pending.0.drain(..) {
+    // Rides pull up at the curb (the household's own car too).
+    let named: Vec<(Vec2, Key)> = pending.0.drain(..).filter_map(|(at, model)| Some((at, data.0.catalog.iter().find(|c| c.instance_name == model)?.objd))).collect();
+    let own: Vec<(Vec2, Key)> = pending.1.drain(..).collect();
+    for (at, objd) in named.into_iter().chain(own) {
         let Some((road, t, _)) = roads.nearest(at) else { continue };
-        let Some(objd) = data.0.catalog.iter().find(|c| c.instance_name == model).map(|c| c.objd) else { continue };
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
         let parts = assets.object(&mut ctx, objd);
         if parts.is_empty() {
