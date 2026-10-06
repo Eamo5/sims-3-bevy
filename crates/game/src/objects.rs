@@ -236,6 +236,10 @@ pub fn spawn_parts(commands: &mut Commands, parts: &[ModelPart], transform: Tran
                 if p.layer != 0 {
                     e.insert(ImposterLayer(p.layer));
                 }
+                // (A lot imposter's pre-lit ground picture is never drawn: see `building`.)
+                if p.layer == s3bake::LAYER_GROUND {
+                    e.insert(Visibility::Hidden);
+                }
             }
         })
         .id()
