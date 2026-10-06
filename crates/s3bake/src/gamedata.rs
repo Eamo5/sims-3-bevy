@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 37;
+pub const GAMEDATA_VERSION: u32 = 38;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -166,6 +166,18 @@ pub struct PlantInfo {
     pub produce_model: Option<crate::types::Key>,
 }
 
+/// A fence from the build catalogue, with its pieces' models (in `fences.pack`).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct FenceStyle {
+    /// The CFEN.
+    pub key: crate::types::Key,
+    pub name: String,
+    pub price: i32,
+    pub straight: Option<crate::types::Key>,
+    pub diagonal: Option<crate::types::Key>,
+    pub post: Option<crate::types::Key>,
+}
+
 /// A wallpaper or floor covering from the build catalogue.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PatternInfo {
@@ -218,6 +230,8 @@ pub struct GameDataBaked {
     pub roofs: Vec<RoofPattern>,
     pub collectibles: Vec<CollectibleInfo>,
     pub spawners: Vec<SpawnerInfo>,
+    /// The build catalogue's fences.
+    pub fences: Vec<FenceStyle>,
     /// Each object's effect slots (model space): where showers spray, fountains gush and
     /// fires burn.
     pub fx_slots: Vec<(crate::types::Key, Vec<[f32; 3]>)>,
@@ -647,6 +661,47 @@ fn bake_outfits(root: &BakeRoot, pkgs: &PackageSet, careers: &[CareerInfo]) -> R
     }
     w.finish().map_err(|e| e.to_string())?;
     write_value(&g.join("outfits.bin"), &outfits).map_err(|e| e.to_string())
+}
+
+/// The catalogue's fences (`fences.pack` holds their pieces).
+fn bake_fence_styles(root: &BakeRoot, pkgs: &PackageSet, strings: &HashMap<u64, String>) -> Result<Vec<FenceStyle>, String> {
+    let mut keys: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(0x0418FE2A).copied().collect();
+    keys.sort();
+    keys.dedup_by_key(|k| k.i);
+    let styles: Vec<Option<FenceStyle>> = crate::bake::par_map(&keys, |k| {
+        let d = pkgs.read(k)?;
+        let (guid, price, shown) = crate::fences::catalog_entry(&d)?;
+        let name = strings.get(&guid).cloned().filter(|n| !n.is_empty())?;
+        if !shown {
+            return None;
+        }
+        let p = crate::fences::pieces(pkgs, k);
+        p.straight?;
+        Some(FenceStyle { key: crate::types::key_of(k), name, price: price.round() as i32, straight: p.straight, diagonal: p.diagonal, post: p.post })
+    });
+    let mut styles: Vec<FenceStyle> = styles.into_iter().flatten().collect();
+    styles.sort_by_key(|s| (s.price, s.name.clone()));
+    let g = root.global_dir();
+    let mut w = PackWriter::create(&g.join("fences.pack")).map_err(|e| e.to_string())?;
+    let mut seen = BTreeSet::new();
+    for s in &styles {
+        for m in [s.straight, s.diagonal, s.post].into_iter().flatten() {
+            if !seen.insert(m) {
+                continue;
+            }
+            let b = crate::bake::bake_model(pkgs, &crate::types::rkey(m));
+            for t in b.parts.iter().filter_map(|p| p.texture) {
+                if !root.tex_path(t).exists()
+                    && let Some(dds) = crate::bake::bake_texture(pkgs, t, crate::bake::OBJECT_TEX_MAX, false)
+                {
+                    let _ = std::fs::write(root.tex_path(t), dds);
+                }
+            }
+            w.add(m, &b).map_err(|e| e.to_string())?;
+        }
+    }
+    w.finish().map_err(|e| e.to_string())?;
+    Ok(styles)
 }
 
 pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::path::Path, progress: &dyn Fn(&str)) -> Result<usize, String> {
@@ -1103,6 +1158,8 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     }
     progress("Converting: career outfits…");
     bake_outfits(root, pkgs, &out.careers)?;
+    progress("Converting: fences…");
+    out.fences = bake_fence_styles(root, pkgs, &strings)?;
     // Catalogue models with alternative geometry states, drawn in their fullest (the objects'
     // models pack has every state at once: a chess table's every game piled on its board).
     progress("Converting: object states…");

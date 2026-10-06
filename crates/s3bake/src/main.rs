@@ -453,6 +453,11 @@ fn main() {
         // The baked moodlets, traits and skills.
         let g = s3bake::load_gamedata(&s3bake::default_root()).expect("no gameplay data");
         println!("{} buffs, {} traits, {} skills", g.buffs.len(), g.traits.len(), g.skills.len());
+        // The build catalogue's fences.
+        println!("{} fences", g.fences.len());
+        for f in &g.fences {
+            println!("fence {:?} §{} straight {} diagonal {} post {}", f.name, f.price, f.straight.is_some(), f.diagonal.is_some(), f.post.is_some());
+        }
         // The careers' uniforms.
         let outfits: Vec<s3bake::OutfitInfo> = s3bake::read_value(&s3bake::default_root().global_dir().join("outfits.bin")).unwrap_or_default();
         println!("{} outfits", outfits.len());

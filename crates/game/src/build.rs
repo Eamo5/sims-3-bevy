@@ -36,6 +36,8 @@ pub enum BuildTool {
     Floor,
     Stairs,
     Sledgehammer,
+    /// The fence picked on the Fences tab.
+    Fence,
 }
 
 impl BuildTool {
@@ -48,6 +50,7 @@ impl BuildTool {
             BuildTool::Floor => format!("Floor Tiles\n§{FLOOR_PRICE} a tile"),
             BuildTool::Stairs => format!("Staircase\n§{STAIRS_PRICE}"),
             BuildTool::Sledgehammer => "Sledgehammer\nknock down walls".to_string(),
+            BuildTool::Fence => "Fence Tool".to_string(),
         }
     }
 
@@ -58,6 +61,7 @@ impl BuildTool {
             BuildTool::Floor => "Drag out a rectangle of floor tiles; Ctrl+drag takes them up.",
             BuildTool::Stairs => "Click to put in a staircase up to the next floor (its landing gets a floor); , and . turn it; Ctrl+click takes one away.",
             BuildTool::Sledgehammer => "Drag along a wall to knock it down.",
+            BuildTool::Fence => "Drag along the grid to put up the fence; Ctrl+drag takes fencing down.",
         }
         .to_string()
             + " Page Up/Down change floors · Esc puts the tool down."
@@ -276,6 +280,39 @@ pub fn plan_stairs(b: &ActiveBuilding, level: u8, at: IVec2, dir: u8, removing: 
         ops.push(PaintOp::AddFloor { level: level + 1, x: landing.x as u16, z: landing.y as u16, region: 0 });
     }
     Ok(ops)
+}
+
+/// A fence along the grid from `start` to `cur` (or taken down): its ops and what it costs.
+/// Out of doors on the ground floor it stands on the ground.
+pub fn plan_fence(b: &ActiveBuilding, style: &s3bake::gamedata::FenceStyle, removing: bool, level: u8, start: IVec2, cur: IVec2) -> (Vec<PaintOp>, i64) {
+    let mut ops = Vec::new();
+    for (p, q) in line(start, cur) {
+        let (pv, qv) = (p.as_vec2(), q.as_vec2());
+        let mid = (pv + qv) * 0.5;
+        let on_floor = |l: u8| {
+            let n = (qv - pv).perp().normalize_or_zero() * 0.5;
+            [mid + n, mid - n].iter().any(|c| b.data.floors.iter().any(|f| f.level == l && f.x as f32 == c.x.floor() && f.z as f32 == c.y.floor()))
+        };
+        let at = if level == 1 && !on_floor(1) { 0 } else { level };
+        if removing {
+            if b.data.fences.iter().any(|f| f.level == at && f.a != f.b && {
+                let (a, c) = (Vec2::from(f.a), Vec2::from(f.b));
+                (a.distance(pv) < 0.05 && c.distance(qv) < 0.05) || (a.distance(qv) < 0.05 && c.distance(pv) < 0.05)
+            }) {
+                ops.push(PaintOp::RemoveFence { a: pv.into(), b: qv.into(), level: at });
+            }
+            continue;
+        }
+        // (Not through a wall.)
+        if wall_along(&b.data, level.max(1), pv, qv).is_some() {
+            continue;
+        }
+        let diagonal = p.x != q.x && p.y != q.y;
+        let Some(model) = (if diagonal { style.diagonal } else { style.straight }) else { continue };
+        ops.push(PaintOp::AddFence { a: pv.into(), b: qv.into(), level: at, model, post: style.post });
+    }
+    let cost = if removing { 0 } else { ops.len() as i64 * style.price.max(1) as i64 };
+    (ops, cost)
 }
 
 /// The change a drag makes: its ops and what they cost.
@@ -509,7 +546,12 @@ fn build_tool(
         }
         return;
     };
-    let (ops, cost) = plan(b, tool, removing, level, start, cur);
+    let fence = buy.fence.and_then(|i| ui.as_ref()?.data.fences.get(i).cloned());
+    let (ops, cost) = match (&fence, tool) {
+        (Some(style), BuildTool::Fence) => plan_fence(b, style, removing, level, start, cur),
+        (None, BuildTool::Fence) => (Vec::new(), 0),
+        _ => plan(b, tool, removing, level, start, cur),
+    };
     let funds = household.as_ref().map_or(i64::MAX, |h| h.funds);
     let color = if removing {
         Color::srgb(1.0, 0.35, 0.25)
@@ -534,7 +576,7 @@ fn build_tool(
     } else {
         for (p, q) in edges(tool, start, cur) {
             let (p, q) = (p.as_vec2(), q.as_vec2());
-            let h = if removing { 0.3 } else { wall_h };
+            let h = if removing { 0.3 } else if tool == BuildTool::Fence { 1.0 } else { wall_h };
             gizmos.line(at(p, 0.02), at(q, 0.02), color);
             gizmos.line(at(p, h), at(q, h), color);
             gizmos.line(at(p, 0.0), at(p, h), color);
@@ -577,7 +619,7 @@ fn build_tool(
     if let Some(h) = household.as_mut() {
         h.funds -= cost;
     }
-    if removing && !tiles {
+    if removing && !tiles && tool != BuildTool::Fence {
         sell_openings(&mut commands, b, level, &edges(tool, start, cur), &objects, &mut removed, household.as_deref_mut(), &mut notes);
     }
     let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
@@ -592,6 +634,7 @@ fn build_tool(
     play.write(crate::sound::PlaySound::ui(match (tiles, removing) {
         (true, _) => "ui_build_flooring_section",
         (false, true) => "ui_build_walldelete_section",
+        (false, false) if tool == BuildTool::Fence => "ui_build_rail_plop",
         (false, false) => "ui_build_wall_mup",
     }));
 }

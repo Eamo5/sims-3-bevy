@@ -868,6 +868,13 @@ Per lot (instance = lot id) in the world file, with REFS = `0x05ED1226:0:lot`:
   edges between them. A CFEN names its pieces as VPXYs in its TGI list: a straight run
   (model spanning 0..1 along +X), a diagonal run (0..1.414) and, for some, a post. [VERIFIED by
   rendering the Bachelor lot: yard fence, porch railings, garden edging]
+* **CFEN** `0x0418FE2A` (version 10): `u32 version, u32 TGI offset (from byte 8), u32 TGI
+  size, u32 material count (0)`, then the catalogue's common block (`u32 version, u64 name key,
+  u64 description key, 7-bit-length UTF-16BE name and description key strings
+  (`CatalogObjects/Name:FenceRailwayTiesSuite`), f32 price, f32 niceness, f32 crap score, u8
+  status (bit 0: in the catalogue), ...`), then the TGI list (`u32 count`, TGI order) of its
+  VPXY pieces. The base game shows 19 fences (colour variants are separate CFENs with the
+  same name); the thumbnails package has no pictures of them. [VERIFIED]
 
 ### The lot's designs (`0x0563919E`)
 

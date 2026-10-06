@@ -75,6 +75,7 @@ pub struct ActiveBuilding {
     wall_entities: HashMap<u32, Vec<Entity>>,
     floor_entities: Vec<Entity>,
     stair_entities: Vec<Entity>,
+    fence_entities: Vec<Entity>,
     roof_entity: Option<Entity>,
     /// The roof pattern on the household's rooms.
     pub roof_texture: Key,
@@ -465,6 +466,10 @@ pub enum PaintOp {
     RemoveStairs { x: u16, z: u16, level: u8 },
     /// The roof pattern for the household's rooms.
     Roof { texture: Key },
+    /// A fence run built along a grid edge (with posts at its ends, for fences that have them).
+    AddFence { a: [f32; 2], b: [f32; 2], level: u8, model: Key, post: Option<Key> },
+    /// The fence along a grid edge taken down (and posts left standing alone).
+    RemoveFence { a: [f32; 2], b: [f32; 2], level: u8 },
 }
 
 /// The active house's repaintings since it was built (kept in saves).
@@ -488,6 +493,7 @@ pub fn repaint(
     let mut structure = false;
     let mut stairs_changed = false;
     let mut roof_changed = false;
+    let mut fences_changed = false;
     for op in ops {
         apply_paint(&mut b.data, op);
         let last = b.data.walls.len().saturating_sub(1) as u32;
@@ -532,7 +538,15 @@ pub fn repaint(
                 b.roof_texture = texture;
                 roof_changed = true;
             }
+            PaintOp::AddFence { .. } | PaintOp::RemoveFence { .. } => fences_changed = true,
         }
+    }
+    if fences_changed {
+        for e in b.fence_entities.drain(..) {
+            commands.entity(e).try_despawn();
+        }
+        let data = b.data.clone();
+        b.fence_entities = spawn_fences(commands, assets, ctx, &data, b, None);
     }
     if b.data.levels.len() > b.levels.len() {
         b.levels = b.data.levels.clone();
@@ -833,7 +847,53 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
             }
         }
         PaintOp::RemoveStairs { .. } | PaintOp::Roof { .. } => {}
+        PaintOp::AddFence { a, b: end, level, model, post } => {
+            let same = |f: &s3bake::FenceBaked| f.level == level && ((f.a == a && f.b == end) || (f.a == end && f.b == a));
+            if !b.fences.iter().any(same) {
+                b.fences.push(s3bake::FenceBaked { a, b: end, level, model });
+            }
+            if let Some(post) = post {
+                for p in [a, end] {
+                    if !b.fences.iter().any(|f| f.level == level && f.a == p && f.b == p) {
+                        b.fences.push(s3bake::FenceBaked { a: p, b: p, level, model: post });
+                    }
+                }
+            }
+        }
+        PaintOp::RemoveFence { a, b: end, level } => {
+            let near = |p: [f32; 2], q: [f32; 2]| Vec2::from(p).distance(Vec2::from(q)) < 0.05;
+            b.fences.retain(|f| !(f.level == level && f.a != f.b && ((near(f.a, a) && near(f.b, end)) || (near(f.a, end) && near(f.b, a)))));
+            // (Posts with no run left at them go too.)
+            let runs: Vec<([f32; 2], [f32; 2])> = b.fences.iter().filter(|f| f.level == level && f.a != f.b).map(|f| (f.a, f.b)).collect();
+            b.fences.retain(|f| f.level != level || f.a != f.b || !(near(f.a, a) || near(f.a, end)) || runs.iter().any(|r| near(r.0, f.a) || near(r.1, f.a)));
+        }
     }
+}
+
+/// Fences and railings: each run (and post) is its fence's piece, turned along the run.
+fn spawn_fences(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetCtx, b: &LotBuildingBaked, active: &ActiveBuilding, neighbor: Option<Entity>) -> Vec<Entity> {
+    let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);
+    let mut out = Vec::new();
+    for f in &b.fences {
+        let parts = assets.model(ctx, f.model);
+        if parts.is_empty() {
+            continue;
+        }
+        let (a, c) = (Vec2::from(f.a), Vec2::from(f.b));
+        let y = if f.level == 0 { b.ground_at(a.x, a.y).unwrap_or(level_y(0)) } else { level_y(f.level) };
+        let d = c - a;
+        let turn = if d.length_squared() > 1e-6 { Quat::from_rotation_y((-d.y).atan2(d.x)) } else { Quat::IDENTITY };
+        let tf = Transform::from_translation(active.world(a.x, a.y, y)).with_rotation(active.rot * turn);
+        let e = crate::objects::spawn_parts(commands, &parts, tf);
+        place(commands, e, neighbor, f.level.max(1));
+        // (A run is a barrier along its length, on its own floor.)
+        if d.length_squared() > 1e-6 {
+            let len = d.length();
+            commands.entity(e).insert((crate::nav::Obstacle { half: Vec2::new(len * 0.5, 0.06), center_offset: Vec2::new(len * 0.5, 0.0) }, crate::nav::Floor(f.level.max(1))));
+        }
+        out.push(e);
+    }
+    out
 }
 
 /// The building data of a lot with no house yet: nothing on it, its ground floor at `ground`.
@@ -1232,6 +1292,7 @@ pub fn spawn_building(
         wall_entities: HashMap::new(),
         floor_entities: Vec::new(),
         stair_entities: Vec::new(),
+        fence_entities: Vec::new(),
         roof_entity: None,
     };
     let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);
@@ -1478,25 +1539,8 @@ pub fn spawn_building(
             place(commands, e, neighbor, 0);
         }
     }
-    // Fences and railings: each run (and post) is its fence's piece, turned along the run.
-    for f in &b.fences {
-        let parts = assets.model(ctx, f.model);
-        if parts.is_empty() {
-            continue;
-        }
-        let (a, c) = (Vec2::from(f.a), Vec2::from(f.b));
-        let y = if f.level == 0 { b.ground_at(a.x, a.y).unwrap_or(level_y(0)) } else { level_y(f.level) };
-        let d = c - a;
-        let turn = if d.length_squared() > 1e-6 { Quat::from_rotation_y((-d.y).atan2(d.x)) } else { Quat::IDENTITY };
-        let tf = Transform::from_translation(active.world(a.x, a.y, y)).with_rotation(active.rot * turn);
-        let e = crate::objects::spawn_parts(commands, &parts, tf);
-        place(commands, e, neighbor, f.level.max(1));
-        // (A run is a barrier along its length, on its own floor.)
-        if d.length_squared() > 1e-6 {
-            let len = d.length();
-            commands.entity(e).insert((crate::nav::Obstacle { half: Vec2::new(len * 0.5, 0.06), center_offset: Vec2::new(len * 0.5, 0.0) }, crate::nav::Floor(f.level.max(1))));
-        }
-    }
+    // Fences and railings.
+    active.fence_entities = spawn_fences(commands, assets, ctx, b, &active, neighbor);
 
     // A pool let into the ground: its tiled floor and sides, a stone coping round the edge,
     // and the water (given its material by the water module).

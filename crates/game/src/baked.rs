@@ -19,6 +19,8 @@ pub struct BakedData {
     pub state_models: Option<PackReader>,
     /// The produce gardens bear.
     pub produce_models: Option<PackReader>,
+    /// The build catalogue's fences' pieces.
+    pub fence_models: Option<PackReader>,
     pub cas: CasBaked,
     pub cas_pack: PackReader,
     /// The careers' uniforms, and the meshes of their parts the wardrobe doesn't have.
@@ -39,6 +41,7 @@ impl BakedData {
         let food_models = PackReader::open(&g.join("food.pack")).ok();
         let state_models = PackReader::open(&g.join("states.pack")).ok();
         let produce_models = PackReader::open(&g.join("produce.pack")).ok();
+        let fence_models = PackReader::open(&g.join("fences.pack")).ok();
         let mut cas: CasBaked = s3bake::read_value(&g.join("cas.bin")).map_err(|e| format!("cas: {e}"))?;
         // (With the formal wear baked alongside the careers' uniforms.)
         cas.parts.extend(s3bake::read_value::<Vec<s3bake::CasPartInfo>>(&g.join("wardrobe.bin")).unwrap_or_default());
@@ -47,7 +50,7 @@ impl BakedData {
         let outfit_pack = PackReader::open(&g.join("outfits.pack")).ok();
         let clips = PackReader::open(&g.join("clips.pack")).ok();
         let clip_names: Vec<String> = s3bake::read_value(&g.join("clip_names.bin")).unwrap_or_default();
-        Ok(Self { root, catalog, catalog_index, models, world_models, food_models, state_models, produce_models, cas, cas_pack, outfits, outfit_pack, clips, clip_names })
+        Ok(Self { root, catalog, catalog_index, models, world_models, food_models, state_models, produce_models, fence_models, cas, cas_pack, outfits, outfit_pack, clips, clip_names })
     }
 
     pub fn model(&self, k: &Key) -> Option<BakedModel> {
@@ -58,6 +61,7 @@ impl BakedData {
             .or_else(|| self.models.get(k))
             .or_else(|| self.food_models.as_ref().and_then(|p| p.get(k)))
             .or_else(|| self.produce_models.as_ref().and_then(|p| p.get(k)))
+            .or_else(|| self.fence_models.as_ref().and_then(|p| p.get(k)))
     }
 
     pub fn texture_bytes(&self, k: &Key) -> Option<Vec<u8>> {

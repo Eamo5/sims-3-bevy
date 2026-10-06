@@ -33,7 +33,7 @@ pub const CATEGORIES: [&str; 12] =
     ["Appliances", "Plumbing", "Beds", "Seating", "Surfaces", "Electronics", "Hobbies", "Kids", "Lighting", "Decor", "Outdoors", "Misc"];
 /// Build-mode tabs after the buy categories: wallpaper, floors, the construction tools, doors
 /// and windows.
-const PAINT_TABS: [&str; 6] = ["Wallpaper", "Floors", "Walls & Floors", "Doors", "Windows", "Roofs"];
+pub const PAINT_TABS: [&str; 7] = ["Wallpaper", "Floors", "Walls & Floors", "Doors", "Windows", "Roofs", "Fences"];
 const PAGE: usize = 24;
 /// Objects per page (thumbnail tiles).
 const OBJECT_PAGE: usize = 30;
@@ -59,6 +59,8 @@ pub struct BuyMode {
     pub tool: Option<crate::build::BuildTool>,
     /// A roof pattern just chosen (index into the game data's roofs), to put on the house.
     pub roof_pick: Option<usize>,
+    /// The fence the fence tool puts up (index into the game data's fences).
+    pub fence: Option<usize>,
 }
 
 #[derive(Component)]
@@ -111,6 +113,7 @@ enum BuyButton {
     Pattern(usize),
     Tool(crate::build::BuildTool),
     Roof(usize),
+    Fence(usize),
     Prev,
     Next,
 }
@@ -132,6 +135,7 @@ pub const BUILD_TAB: usize = WALLPAPER_TAB + 2;
 pub const DOORS_TAB: usize = WALLPAPER_TAB + 3;
 pub const WINDOWS_TAB: usize = WALLPAPER_TAB + 4;
 pub const ROOFS_TAB: usize = WALLPAPER_TAB + 5;
+pub const FENCES_TAB: usize = WALLPAPER_TAB + 6;
 
 impl BuyMode {
     /// Puts down the tool, pattern or object in hand.
@@ -193,7 +197,7 @@ fn buy_panel(
     panel: Query<Entity, With<BuyPanel>>,
     mut spawned_toggle: Local<bool>,
     mut ui: Option<ResMut<crate::icons::GameUi>>,
-    (data, mut assets): (Res<Baked>, ResMut<ObjectAssets>),
+    (data, mut assets, mut thumbs): (Res<Baked>, ResMut<ObjectAssets>, ResMut<crate::thumbs::ModelThumbs>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
 ) {
     if !*spawned_toggle {
@@ -279,6 +283,47 @@ fn buy_panel(
                 }
             });
             p.spawn(text("Roofs go on the rooms you build; they show when the camera pulls back.", 13.0, Color::WHITE));
+            return;
+        }
+        // Fences: pick one, then drag it out along the grid.
+        if buy.category == FENCES_TAB {
+            let Some(ui) = ui.as_deref_mut() else { return };
+            let fences = ui.data.fences.clone();
+            p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|grid| {
+                for (i, f) in fences.iter().enumerate() {
+                    // (The game keeps no pictures of its fences: a piece of each, rendered.)
+                    let thumb = ui.icon(&mut images, &s3bake::gamedata::thumb_name(f.key.2)).or_else(|| f.straight.map(|m| thumbs.get(&mut images, m)));
+                    let picked = buy.tool == Some(crate::build::BuildTool::Fence) && buy.fence == Some(i);
+                    grid.spawn((
+                        Button,
+                        BuyButton::Fence(i),
+                        Node {
+                            width: Val::Px(176.0),
+                            height: Val::Px(48.0),
+                            column_gap: Val::Px(6.0),
+                            align_items: AlignItems::Center,
+                            padding: UiRect::horizontal(Val::Px(4.0)),
+                            border: UiRect::all(Val::Px(if picked { 2.0 } else { 0.0 })),
+                            border_radius: BorderRadius::all(Val::Px(8.0)),
+                            ..default()
+                        },
+                        BorderColor::all(crate::menu::PLUMBOB_GREEN),
+                        BackgroundColor(BTN_NORMAL),
+                        crate::icons::Tooltip(format!("{} — §{} a section", f.name, f.price)),
+                    ))
+                    .with_children(|b| {
+                        if let Some(t) = thumb {
+                            b.spawn((ImageNode::new(t), Node { width: Val::Px(40.0), height: Val::Px(40.0), ..default() }, Pickable::IGNORE));
+                        }
+                        let mut name = f.name.clone();
+                        if name.chars().count() > 18 {
+                            name = name.chars().take(16).collect::<String>() + "…";
+                        }
+                        b.spawn((text(format!("{name}\n§{}", f.price), 12.0, Color::WHITE), Pickable::IGNORE));
+                    });
+                }
+            });
+            p.spawn(text(crate::build::BuildTool::Fence.help(), 13.0, Color::WHITE));
             return;
         }
         // The construction tools.
@@ -422,6 +467,13 @@ fn buy_buttons(
             }
             BuyButton::Roof(i) => {
                 buy.roof_pick = Some(*i);
+            }
+            BuyButton::Fence(i) => {
+                buy.drop_tools(&mut commands);
+                buy.tool = Some(crate::build::BuildTool::Fence);
+                buy.fence = Some(*i);
+                buy.dirty = true;
+                play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
             }
             BuyButton::Tool(t) => {
                 buy.drop_tools(&mut commands);

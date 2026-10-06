@@ -17,12 +17,41 @@ const T_VPXY: u32 = 0x736884F1;
 /// A fence's piece models: straight, diagonal, post.
 #[derive(Clone, Copy, Default)]
 pub struct Pieces {
-    straight: Option<Key>,
-    diagonal: Option<Key>,
-    post: Option<Key>,
+    pub straight: Option<Key>,
+    pub diagonal: Option<Key>,
+    pub post: Option<Key>,
 }
 
-fn pieces(pkgs: &PackageSet, cfen: &ResourceKey) -> Pieces {
+/// A CFEN's catalogue entry: its name's string key, its price, and whether the catalogue
+/// shows it. (Version 10: a header, no materials, then the catalogue's common block.)
+pub fn catalog_entry(d: &[u8]) -> Option<(u64, f32, bool)> {
+    let u32_at = |o: usize| d.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
+    if u32_at(12)? != 0 {
+        return None;
+    }
+    let name_guid = u64::from_le_bytes(d.get(20..28)?.try_into().ok()?);
+    let mut o = 36;
+    // The name and description keys: 7-bit-length UTF-16 strings.
+    for _ in 0..2 {
+        let mut n = 0usize;
+        let mut shift = 0;
+        loop {
+            let b = *d.get(o)?;
+            o += 1;
+            n |= ((b & 0x7F) as usize) << shift;
+            if b & 0x80 == 0 {
+                break;
+            }
+            shift += 7;
+        }
+        o += n;
+    }
+    let price = f32::from_le_bytes(d.get(o..o + 4)?.try_into().ok()?);
+    let status = *d.get(o + 12)?;
+    Some((name_guid, price, status & 1 != 0))
+}
+
+pub fn pieces(pkgs: &PackageSet, cfen: &ResourceKey) -> Pieces {
     let Some(c) = pkgs.read(cfen).or_else(|| pkgs.read_ti(cfen.t, cfen.i)) else { return Pieces::default() };
     let mut out = Pieces::default();
     let mut o = 0;

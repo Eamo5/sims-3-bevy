@@ -168,6 +168,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_place.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_paint.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_build.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, auto_fence.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_balloon.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(
                 Update,
@@ -190,7 +191,8 @@ impl Plugin for AutoTestPlugin {
                         && time.elapsed_secs() > 6.0
                     {
                         commands.queue(move |w: &mut World| {
-                            if let Some(i) = crate::buy::CATEGORIES.iter().position(|c| c.eq_ignore_ascii_case(&t)) {
+                            let paint = crate::buy::PAINT_TABS.iter().position(|c| c.eq_ignore_ascii_case(&t)).map(|i| crate::buy::CATEGORIES.len() + i);
+                            if let Some(i) = crate::buy::CATEGORIES.iter().position(|c| c.eq_ignore_ascii_case(&t)).or(paint) {
                                 let mut b = w.resource_mut::<crate::buy::BuyMode>();
                                 if !b.active || b.category != i {
                                     b.show(i);
@@ -816,6 +818,51 @@ fn auto_paint(
 /// `--build`: a room built with the room tool, a door put in its front wall and a window in its
 /// side (through the same snapping as the pointer), then build mode left open on the tools.
 #[allow(clippy::too_many_arguments)]
+/// FENCE=<x0>,<z0>,<x1>,<z1>[,<style>]: a fence put up along the grid between those lot points
+/// (the style an index into the game's fences); FENCE_CAM=1 then looks at it.
+#[allow(clippy::too_many_arguments)]
+fn auto_fence(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut done: Local<bool>,
+    mut building: Option<ResMut<crate::building::ActiveBuilding>>,
+    (data, mut assets, ui): (Res<crate::baked::Baked>, ResMut<crate::objects::ObjectAssets>, Option<Res<crate::icons::GameUi>>),
+    (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    mut faces: Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
+    (mut log, mut grid): (Option<ResMut<crate::building::LotPaint>>, Option<ResMut<crate::nav::NavGrid>>),
+    mut cam: Query<&mut SimsCamera>,
+) {
+    let Ok(v) = std::env::var("FENCE") else { return };
+    if *done || time.elapsed_secs() < 4.0 {
+        return;
+    }
+    let (Some(b), Some(ui)) = (building.as_deref_mut(), ui) else { return };
+    *done = true;
+    let n: Vec<i32> = v.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+    if n.len() < 4 {
+        return;
+    }
+    let Some(style) = ui.data.fences.get(n.get(4).copied().unwrap_or(0) as usize) else { return };
+    let (ops, cost) = crate::build::plan_fence(b, style, false, b.view_level, IVec2::new(n[0], n[1]), IVec2::new(n[2], n[3]));
+    info!("fence test: {} ({} ops, §{cost})", style.name, ops.len());
+    let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+    crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces);
+    match log.as_mut() {
+        Some(l) => l.0.extend(ops),
+        None => commands.insert_resource(crate::building::LotPaint(ops)),
+    }
+    if let Some(g) = grid.as_mut() {
+        g.dirty = true;
+    }
+    if std::env::var("FENCE_CAM").is_ok()
+        && let Ok(mut c) = cam.single_mut()
+    {
+        let mid = b.world((n[0] + n[2]) as f32 * 0.5, (n[1] + n[3]) as f32 * 0.5, 0.0);
+        c.focus = Vec3::new(mid.x, c.focus.y, mid.z);
+        c.distance = 14.0;
+    }
+}
+
 fn auto_build(
     args: Res<AutoArgs>,
     mut stage: Local<u8>,

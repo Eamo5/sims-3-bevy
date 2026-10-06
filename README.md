@@ -256,7 +256,10 @@ installation is unreachable.
   floor and turns its walls' inner sides to wallpaper. Doors, archways and windows from the
   catalogue snap into walls and cut their openings; knocking a wall down sells what was in
   it. Works on an empty lot or the house that came with it, a floor above the top too, and
-  every change is replayed from the save.
+  every change is replayed from the save. A Fences tab holds the catalogue's 19 fences and
+  hedges (pictured by rendering a piece of each); the fence tool drags runs along the grid
+  (straight or diagonal, posts at the ends, standing on the ground out of doors), Ctrl+drag
+  takes them down, and Sims walk round them.
 - **Sound**: the game's own audio, converted once (EALayer3 rewrapped as MP3, EA-XAS decoded to
   WAV): object sounds and Simlish voices cued by the animations, footsteps by floor and
   shoe, interface clicks, stings for promotions, weddings and other moments, birds by day
