@@ -94,6 +94,8 @@ const FIND_JOB: f64 = 0.03;
 const PROMOTION: f64 = 0.02;
 /// An elder's chance each day, once their old age has run its course, of passing away.
 const PASS_AWAY: f64 = 0.1;
+/// Days into old age before a town elder may pass away (a household elder's span is 14–22).
+const ELDER_DAYS: f32 = 14.0;
 
 /// A town Sim's record, as the world has them and the town has changed them.
 struct Who {
@@ -158,7 +160,9 @@ fn progress(
         // stage, so the town doesn't all have its birthdays at once).
         for (w, m) in &world {
             if !story.sims.contains_key(&w.id) {
+                // (A stage with no end, like an elder's, counts as a month or so.)
                 let span = crate::aging::stage_days(crate::premade::age_of(m.age));
+                let span = if span.is_finite() { span } else { ELDER_DAYS };
                 let t = TownSim {
                     partner: m.partner,
                     spouse: m.spouse,
@@ -182,7 +186,7 @@ fn progress(
                 }
                 t.days += per_day;
                 if age == Age::Elder {
-                    if t.days >= crate::aging::stage_days(Age::Elder) && rng.random_bool(PASS_AWAY) {
+                    if t.days >= ELDER_DAYS && rng.random_bool(PASS_AWAY) {
                         t.dead = true;
                         died.push(w.id);
                         let spouse = t.spouse;
