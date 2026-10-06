@@ -12,7 +12,7 @@ use crate::ddsw::encode_dds;
 use crate::pack::{read_value, write_value};
 use crate::types::Key;
 
-pub const PREMADES_VERSION: u32 = 1;
+pub const PREMADES_VERSION: u32 = 2;
 /// Household portraits in the world file (by household id).
 pub const T_HOUSEHOLD_PORTRAIT: u32 = 0x6B6D837E;
 

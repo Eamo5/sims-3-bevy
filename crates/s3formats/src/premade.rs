@@ -40,6 +40,8 @@ pub struct PremadeSim {
     pub thin: f32,
     pub fit: f32,
     pub voice_pitch: f32,
+    /// Which of the three voices (0..2).
+    pub voice: u32,
     /// Ids of the Sim's partner and spouse.
     pub partner: Option<u64>,
     pub spouse: Option<u64>,
@@ -250,6 +252,10 @@ fn read_sim(
         thin: shape_f("Thin"),
         fit: shape_f("mFit"),
         voice_pitch: get("mVoicePitchModifier").and_then(|v| v.as_f32()).unwrap_or(0.5),
+        voice: match get("mVoiceVariation") {
+            Some(Value::Enum(_, v)) => v as u32,
+            _ => 0,
+        },
         partner: get("mPartner").and_then(|v| v.as_ref()).and_then(|p| ids.get(&p).copied()),
         spouse,
         parents,

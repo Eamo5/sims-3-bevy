@@ -94,6 +94,7 @@ pub fn to_sim(p: &PremadeSim) -> Sim {
         hair: p.hair_color.map(argb).unwrap_or(Color::srgb(0.3, 0.2, 0.1)),
         // (The town's Sims' eye colours are in their outfits, which the install doesn't have.)
         eyes: crate::sim::eyes_by_look(look),
+        voice: (p.voice % 3) as u8,
         top: Color::hsl(hue, 0.5, 0.5),
         bottom: Color::hsl((hue + 180.0) % 360.0, 0.3, 0.3),
         weight: (p.fat - p.thin).clamp(-1.0, 1.0),

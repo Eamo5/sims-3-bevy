@@ -102,6 +102,9 @@ pub struct SavedSim {
     /// Eye colour (saves from before eye colours: by the Sim's look).
     #[serde(default)]
     pub eyes: Option<[f32; 3]>,
+    /// Their voice (saves from before voices could be chosen: the one their look gave them).
+    #[serde(default)]
+    pub voice: Option<u8>,
 }
 
 /// A lifetime wish (by the game's check for it), and what's counted towards it.
@@ -275,6 +278,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         inventory: Default::default(),
         toddler: None,
         eyes: Some(rgb(sim.eyes)),
+        voice: Some(sim.voice),
     }
 }
 
@@ -296,6 +300,7 @@ impl SaveGame {
             skin: c(s.skin),
             hair: c(s.hair),
             eyes: s.eyes.map_or_else(|| crate::sim::eyes_by_look(s.look), c),
+            voice: s.voice.unwrap_or((s.look % 3) as u8).min(2),
             top: c(s.top),
             bottom: c(s.bottom),
         }
@@ -579,6 +584,7 @@ fn save_game(
             inventory: inventory.cloned().unwrap_or_default(),
             toddler: toddler.copied(),
             eyes: Some(rgb(sim.eyes)),
+            voice: Some(sim.voice),
         });
     }
     let game = SaveGame {

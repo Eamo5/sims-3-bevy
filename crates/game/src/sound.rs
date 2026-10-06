@@ -125,6 +125,16 @@ impl PlaySound {
     }
 }
 
+/// A Create a Sim line in a Sim's voice: `stem` (`vo_cas_trait_friendlyA`) for their sex and
+/// voice (`_fa`...), when the game has it (children's lines end in C, theirs `_ca`/`_cb`).
+pub fn cas_line(sounds: &Sounds, stem: &str, sim: &Sim) -> Option<String> {
+    let pitch = ['a', 'b', 'c'][(sim.voice as usize).min(2)];
+    let child = matches!(sim.age, Age::Child);
+    let who = if child { 'c' } else if sim.female { 'f' } else { 'm' };
+    let stem = if child { stem.trim_end_matches('A').to_string() + "C" } else { stem.to_string() };
+    [pitch, 'a', 'b', 'c'].into_iter().map(|p| format!("{stem}_{who}{p}")).find(|n| sounds.def(n).is_some())
+}
+
 /// A sound cue reached in a Sim's animation clip. An empty name with `StopLoop` stops every
 /// loop the Sim started (the animation changed).
 #[derive(Message, Clone, Debug)]
@@ -161,7 +171,7 @@ fn resolve_cue(sounds: &Sounds, name: &str, sim: &Sim, surface: &str) -> Option<
     let has = |n: &str| sounds.def(n).is_some();
     let child = sim.age == Age::Child;
     if name.starts_with("vo_") {
-        let pitch = ['a', 'b', 'c'][(sim.look % 3) as usize];
+        let pitch = ['a', 'b', 'c'][(sim.voice as usize).min(2)];
         let who = if child { 'c' } else if sim.female { 'f' } else { 'm' };
         for p in [pitch, 'a', 'b', 'c'] {
             let n = format!("{name}_{who}{p}");

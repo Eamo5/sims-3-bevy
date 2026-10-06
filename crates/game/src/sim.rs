@@ -72,6 +72,8 @@ pub struct Sim {
     /// Eye colour (the iris's, as Create a Sim's colours are: about half-strength, doubled
     /// over the iris's own shading).
     pub eyes: Color,
+    /// Which of the game's three voices they speak Simlish in (0..2).
+    pub voice: u8,
     pub top: Color,
     pub bottom: Color,
     /// Body shape: weight from thin (-1) to heavy (1), and fitness (0..1).
@@ -319,6 +321,7 @@ pub fn random_sim(rng: &mut impl Rng, last: &str, female: Option<bool>, age: Age
             let (r, g, b) = EYES[rng.random_range(0..EYES.len())];
             Color::srgb(r, g, b)
         },
+        voice: rng.random_range(0..3),
     }
 }
 

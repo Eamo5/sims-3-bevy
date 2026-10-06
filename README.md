@@ -41,7 +41,9 @@ installation is unreachable.
 - **Sims**: Create-a-Sim from real CAS parts (browsed as the game's own style pictures), skin
   tones, hair colours and animation clips, and what the household's Sims are to each other
   (roommates, spouses, partners, siblings, parent and child, as fits their ages: they start
-  married, family or at least friends, and in the family tree); a Face tab with the game's
+  married, family or at least friends, and in the family tree); the game's three Simlish
+  voices to choose from (each heard as it's picked; taking a trait, the Sim says the game's
+  line for it; the town's Sims keep their own); a Face tab with the game's
   eye colours (its iris drawn in the colour, as the game does; babies get a parent's eyes) and
   its beards (full ones drawn as hair is; goatees, chinstraps and the like painted onto the face;
   all in the Sim's hair colour), glasses, lipsticks and eye shadows

@@ -82,6 +82,8 @@ pub enum CasAction {
     HairColor(usize),
     /// Eye colour `i` (of `sim::EYES`).
     EyeColor(usize),
+    /// Voice `i` (of the three).
+    Voice(u8),
     Tab(CasTab),
     /// Wear entry `i` of the current tab's list.
     Pick(usize),
@@ -287,6 +289,7 @@ fn cas_actions(
     mut next: ResMut<NextState<AppState>>,
     mut images: ResMut<Assets<Image>>,
     mut chosen: ResMut<crate::lifetime::ChosenLifetimeWishes>,
+    (mut play, sounds): (MessageWriter<crate::sound::PlaySound>, Option<Res<crate::sound::Sounds>>),
 ) {
     let Some(mut scene) = scene else { return };
     let mut rng = rand::rng();
@@ -371,6 +374,16 @@ fn cas_actions(
                 let (r, g, b) = crate::sim::EYES[i.min(crate::sim::EYES.len() - 1)];
                 pending.members[k].eyes = Color::srgb(r, g, b);
             }
+            CasAction::Voice(v) => {
+                // The new voice, heard (a line of them checking themselves out).
+                let s = &mut pending.members[k];
+                s.voice = v.min(2);
+                let stem = if s.female { "vo_cas_flavor_checkbA" } else { "vo_cas_flavor_checkaA" };
+                if let Some(line) = sounds.as_deref().and_then(|snd| crate::sound::cas_line(snd, stem, s).or_else(|| crate::sound::cas_line(snd, "vo_cas_flavor_greetA", s))) {
+                    play.write(crate::sound::PlaySound::ui(&line).with_volume(0.9));
+                }
+                model = false;
+            }
             CasAction::Tab(t) => {
                 scene.tab = t;
                 scene.page = 0;
@@ -414,6 +427,12 @@ fn cas_actions(
                     s.traits.remove(pos);
                 } else if s.traits.len() < crate::life::trait_slots(s.age) && t.compatible(&s.traits) {
                     s.traits.push(t);
+                    // The Sim says something in character, where the game has a line for it.
+                    if let Some(stem) = trait_line(t)
+                        && let Some(line) = sounds.as_deref().and_then(|snd| crate::sound::cas_line(snd, stem, s))
+                    {
+                        play.write(crate::sound::PlaySound::ui(&line).with_volume(0.9));
+                    }
                 }
                 model = false;
             }
@@ -792,6 +811,13 @@ fn rebuild_ui(
                             });
                         }
                     }
+                    // The three voices, each heard when chosen.
+                    p.spawn(text("Voice", 16.0, Color::WHITE));
+                    p.spawn(Node { column_gap: Val::Px(8.0), ..default() }).with_children(|row| {
+                        for v in 0..3u8 {
+                            button(row, format!("Voice {}", v + 1), CasAction::Voice(v), Val::Px(92.0), sim.voice == v, 14.0);
+                        }
+                    });
                     p.spawn(text("Skin Tone", 16.0, Color::WHITE));
                     p.spawn(Node { column_gap: Val::Px(8.0), ..default() }).with_children(|row| {
                         let cur = sim.skin.to_srgba();
@@ -1071,4 +1097,29 @@ fn rebuild_ui(
         });
     });
     scene.ui = Some(root);
+}
+
+/// The Create a Sim line a Sim says on taking a trait, where the game has one.
+fn trait_line(t: crate::life::Trait) -> Option<&'static str> {
+    use crate::life::Trait as T;
+    Some(match t {
+        T::Artistic => "vo_cas_trait_artA",
+        T::ComputerWhiz => "vo_cas_trait_compA",
+        T::FamilyOriented => "vo_cas_trait_famA",
+        T::Friendly => "vo_cas_trait_friendlyA",
+        T::Good => "vo_cas_trait_goodA",
+        T::Hydrophobic => "vo_cas_trait_hydroA",
+        T::Inappropriate => "vo_cas_trait_impA",
+        T::GreatKisser => "vo_cas_trait_kisserA",
+        T::LightSleeper => "vo_cas_trait_lsleepA",
+        T::Lucky => "vo_cas_trait_luckyA",
+        T::Mooch => "vo_cas_trait_moochA",
+        T::Schmoozer => "vo_cas_trait_schmA",
+        T::Technophobe => "vo_cas_trait_tphobeA",
+        T::Unflirty => "vo_cas_trait_unflirtyA",
+        T::Unlucky => "vo_cas_trait_unluckyA",
+        T::Vegetarian => "vo_cas_trait_vegA",
+        T::Workaholic => "vo_cas_trait_workA",
+        _ => return None,
+    })
 }
