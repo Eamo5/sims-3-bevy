@@ -1,7 +1,7 @@
 //! The Sim panel's tabs, as the game's: Needs (the bars), Skills (every skill learned, with its
 //! level and progress to the next), Career (the job, its hours and pay, the performance meter
-//! and the next promotion) and Simology (traits with what they mean, lifetime happiness and the
-//! rewards bought with it).
+//! and the next promotion), Simology (traits with what they mean, lifetime happiness and the
+//! rewards bought with it) and Inventory (what they carry).
 
 use bevy::prelude::*;
 
@@ -27,10 +27,11 @@ pub enum SimTab {
     Skills,
     Career,
     Simology,
+    Inventory,
 }
 
 impl SimTab {
-    pub const ALL: [SimTab; 4] = [SimTab::Needs, SimTab::Skills, SimTab::Career, SimTab::Simology];
+    pub const ALL: [SimTab; 5] = [SimTab::Needs, SimTab::Skills, SimTab::Career, SimTab::Simology, SimTab::Inventory];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -38,6 +39,7 @@ impl SimTab {
             SimTab::Skills => "Skills",
             SimTab::Career => "Career",
             SimTab::Simology => "Simology",
+            SimTab::Inventory => "Inventory",
         }
     }
 }
@@ -88,8 +90,8 @@ fn tab_buttons(
             *tab = b.0;
         }
     }
-    // F5 to F8 pick a tab.
-    for (k, t) in [(KeyCode::F5, SimTab::Needs), (KeyCode::F6, SimTab::Skills), (KeyCode::F7, SimTab::Career), (KeyCode::F8, SimTab::Simology)] {
+    // F5 to F9 pick a tab.
+    for (k, t) in [(KeyCode::F5, SimTab::Needs), (KeyCode::F6, SimTab::Skills), (KeyCode::F7, SimTab::Career), (KeyCode::F8, SimTab::Simology), (KeyCode::F9, SimTab::Inventory)] {
         if keys.just_pressed(k) {
             *tab = t;
         }
@@ -149,14 +151,16 @@ fn tab_content(
             Option<&crate::lifetime::LifetimeWish>,
             Option<&crate::writing::Author>,
             Option<&crate::chess::ChessRecord>,
+            Option<&crate::inventory::Inventory>,
         ),
         With<Selected>,
     >,
     mut ui: Option<ResMut<crate::icons::GameUi>>,
     mut images: ResMut<Assets<Image>>,
     mut last: Local<String>,
+    (baked, chosen): (Option<Res<crate::baked::Baked>>, Res<crate::inventory::Chosen>),
 ) {
-    let (Ok(root), Ok((e, sim, skills, job, at_work, wishes, ltw, author, chess))) = (content.single(), sel.single()) else { return };
+    let (Ok(root), Ok((e, sim, skills, job, at_work, wishes, ltw, author, chess, inv))) = (content.single(), sel.single()) else { return };
     // What's on show, to redraw only when it changes.
     let key = match *tab {
         SimTab::Needs => "needs".to_string(),
@@ -167,6 +171,7 @@ fn tab_content(
         ),
         SimTab::Career => format!("{e:?} {:?} {at_work}", job.map(|j| (j.track, j.level, j.performance as i32))),
         SimTab::Simology => format!("{e:?} {:?} {:?} {:?}", sim.traits, wishes.map(|w| (w.points, w.rewards.len())), ltw.map(|l| (l.wish, &l.status))),
+        SimTab::Inventory => format!("{e:?} {:?} {:?}", inv.map(|i| i.0.iter().map(|s| (&s.key, s.quality, s.count)).collect::<Vec<_>>()), chosen.0),
     } + &format!(" {}", ui.is_some());
     if *last == key {
         return;
@@ -321,6 +326,17 @@ fn tab_content(
                     Color::srgb(1.0, 0.9, 0.5),
                 ));
             }
+        }
+        SimTab::Inventory => {
+            // Finds and fish are pictured by their catalogue objects.
+            let mut ui = ui;
+            let picture = |s: &crate::inventory::Stack| -> Option<Handle<Image>> {
+                let ui = ui.as_deref_mut()?;
+                let model = ui.data.collectibles.iter().find(|c| c.key == s.key)?.model.clone();
+                let objd = baked.as_ref()?.0.catalog.iter().find(|c| c.instance_name.eq_ignore_ascii_case(&model))?.objd;
+                ui.icon(&mut images, &s3bake::gamedata::thumb_name(objd.2))
+            };
+            crate::inventory::draw_tab(p, sim, inv, chosen.0, picture);
         }
         SimTab::Needs => {}
     });

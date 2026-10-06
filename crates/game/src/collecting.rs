@@ -1,7 +1,7 @@
 //! Collecting: the gems, metals and space rocks the world's spawners leave lying about community
 //! lots, the butterflies and beetles about them, and the fish in their ponds. Finds go into the
-//! household's collection (a journal of all that's been found, and what's still held, worth
-//! money when sold).
+//! finder's inventory, and the household's collection journal records all that's been found
+//! (and counts what's held, worth money when sold).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -18,6 +18,7 @@ use crate::menu::{BTN_NORMAL, text};
 use crate::nav::{Floor, Obstacle};
 use crate::objects::{AssetCtx, ObjectAssets};
 use crate::sim::Sim;
+use crate::inventory::{Inventory, ItemKind, give};
 use crate::visit::{LotObject, VisitedLot};
 use crate::{AppState, PlayMode};
 
@@ -34,7 +35,8 @@ impl Plugin for CollectingPlugin {
     }
 }
 
-/// Everything the household has found, and what they still hold (count and total worth).
+/// Everything the household has found. (`held`: what older saves kept here rather than in
+/// the Sims' inventories, moved there on load.)
 #[derive(Resource, Default, Clone, Debug, Serialize, Deserialize)]
 pub struct Collection {
     pub found: BTreeSet<String>,
@@ -42,12 +44,18 @@ pub struct Collection {
 }
 
 impl Collection {
-    fn add(&mut self, key: &str, value: i64) -> bool {
-        let new = self.found.insert(key.to_string());
-        let h = self.held.entry(key.to_string()).or_default();
-        h.0 += 1;
-        h.1 += value;
-        new
+    /// Records a find: whether it's new to the collection.
+    fn add(&mut self, key: &str) -> bool {
+        self.found.insert(key.to_string())
+    }
+}
+
+/// Where a collectible goes in an inventory.
+fn item_kind(kind: CollectKind) -> ItemKind {
+    match kind {
+        CollectKind::Fish => ItemKind::Fish,
+        CollectKind::Butterfly | CollectKind::Beetle => ItemKind::Insect,
+        _ => ItemKind::Find,
     }
 }
 
@@ -446,7 +454,8 @@ fn collect_requests(
                 let Ok(p) = pickups.get(*target) else { continue };
                 let Some(c) = info(&ui, &p.key) else { continue };
                 let value = rng.random_range(c.min_price..=c.max_price.max(c.min_price)) as i64;
-                let new = collection.add(&c.key, value);
+                let new = collection.add(&c.key);
+                give(&mut commands, e, item_kind(c.kind), c.key.clone(), c.name.clone(), 0, value, 1);
                 commands.entity(*target).try_despawn();
                 // ("found Silver", "found a Ruby".)
                 let a = match c.kind {
@@ -471,7 +480,8 @@ fn collect_requests(
                     notes.push(format!("{} tried to catch the {what}, but it got away.", sim.first));
                     continue;
                 }
-                let new = collection.add(&c.key, c.min_price as i64);
+                let new = collection.add(&c.key);
+                give(&mut commands, e, item_kind(c.kind), c.key.clone(), c.name.clone(), 0, c.min_price as i64, 1);
                 let a = if c.name.starts_with(['A', 'E', 'I', 'O', 'U']) { "an" } else { "a" };
                 notes.push(format!(
                     "{} caught {a} {} (worth §{}){}",
@@ -498,7 +508,8 @@ fn collect_requests(
                     // Bigger fish for better anglers.
                     let t = (level as f32 / 10.0 + rng.random_range(-0.2..0.3)).clamp(0.0, 1.0);
                     let value = (c.min_price as f32 + (c.max_price - c.min_price) as f32 * t).round() as i64;
-                    collection.add(&c.key, value);
+                    collection.add(&c.key);
+                    give(&mut commands, e, ItemKind::Fish, c.key.clone(), c.name.clone(), 0, value, 1);
                     caught.push((c.name.clone(), value));
                 }
                 if caught.is_empty() {
@@ -546,12 +557,21 @@ fn toggle_journal(
     }
 }
 
-fn journal_panel(mut commands: Commands, mut panel: ResMut<JournalPanel>, collection: Res<Collection>, ui: Option<Res<crate::icons::GameUi>>) {
+fn journal_panel(
+    mut commands: Commands,
+    mut panel: ResMut<JournalPanel>,
+    collection: Res<Collection>,
+    ui: Option<Res<crate::icons::GameUi>>,
+    inventories: Query<&Inventory, With<crate::sim::HouseholdMember>>,
+) {
     if !panel.open {
         return;
     }
     let Some(ui) = ui else { return };
-    let held: usize = collection.held.values().map(|h| h.0 as usize).sum();
+    // What the household's Sims hold.
+    let (held, worth) = inventories.iter().map(|i| i.collectibles()).fold((0u32, 0i64), |a, b| (a.0 + b.0, a.1 + b.1));
+    let held = held as usize;
+    let held_of = |key: &str| -> u32 { inventories.iter().map(|i| i.held(key)).sum() };
     let key = (collection.found.len(), held);
     if panel.root.is_some() && panel.shown == Some(key) {
         return;
@@ -560,7 +580,6 @@ fn journal_panel(mut commands: Commands, mut panel: ResMut<JournalPanel>, collec
     if let Some(r) = panel.root.take() {
         commands.entity(r).despawn();
     }
-    let worth: i64 = collection.held.values().map(|h| h.1).sum();
     let root = commands
         .spawn((
             Node {
@@ -594,8 +613,8 @@ fn journal_panel(mut commands: Commands, mut panel: ResMut<JournalPanel>, collec
                 p.spawn(text(format!("{title} ({found}/{})", items.len()), 15.0, Color::srgb(0.75, 0.9, 1.0)));
                 p.spawn(Node { width: Val::Percent(100.0), flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(10.0), row_gap: Val::Px(2.0), ..default() }).with_children(|row| {
                     for c in items {
-                        let label = match (collection.found.contains(&c.key), collection.held.get(&c.key)) {
-                            (true, Some((n, _))) if *n > 0 => format!("{} ×{n}", c.name),
+                        let label = match (collection.found.contains(&c.key), held_of(&c.key)) {
+                            (true, n) if n > 0 => format!("{} ×{n}", c.name),
                             (true, _) => c.name.clone(),
                             (false, _) => "???".to_string(),
                         };
@@ -629,7 +648,7 @@ fn journal_panel(mut commands: Commands, mut panel: ResMut<JournalPanel>, collec
 
 fn sell_button(
     buttons: Query<&Interaction, (Changed<Interaction>, With<SellButton>)>,
-    mut collection: ResMut<Collection>,
+    mut inventories: Query<&mut Inventory, With<crate::sim::HouseholdMember>>,
     mut household: Option<ResMut<Household>>,
     mut notes: ResMut<Notifications>,
     mut play: MessageWriter<crate::sound::PlaySound>,
@@ -637,8 +656,12 @@ fn sell_button(
     if !buttons.iter().any(|i| *i == Interaction::Pressed) {
         return;
     }
-    let worth: i64 = collection.held.values().map(|h| h.1).sum();
-    collection.held.clear();
+    // Every find, fish and insect the household's Sims carry (their produce stays).
+    let mut worth = 0;
+    for mut inv in &mut inventories {
+        worth += inv.collectibles().1;
+        inv.0.retain(|s| s.kind == ItemKind::Produce);
+    }
     if let Some(h) = household.as_mut() {
         h.funds += worth;
     }

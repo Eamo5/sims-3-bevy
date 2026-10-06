@@ -1,0 +1,288 @@
+//! Sims' inventories, as the game's: what each Sim carries — the produce they've picked, the
+//! fish they've caught, the gems, metals, space rocks and insects they've found — in stacks of
+//! a kind, shown on the Sim panel's Inventory tab (with the objects' catalogue pictures) to
+//! sell, or, for produce, to eat. The collection journal counts what the household holds.
+
+use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
+
+use crate::hud::BlocksWorld;
+use crate::interact::{Action, ActionKind, ActionQueue, Household, Notifications};
+use crate::menu::{BTN_HOVER, BTN_NORMAL, PLUMBOB_GREEN, text};
+use crate::sim::{HouseholdMember, Selected, Sim};
+use crate::PlayMode;
+
+pub struct InventoryPlugin;
+
+impl Plugin for InventoryPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<Chosen>().add_systems(Update, (inventory_buttons, migrate_held).run_if(in_state(PlayMode::Live)));
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ItemKind {
+    Produce,
+    Fish,
+    /// Gems, metals and space rocks.
+    Find,
+    /// Butterflies and beetles.
+    Insect,
+}
+
+/// Items of one kind (and, for produce, one quality).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Stack {
+    pub kind: ItemKind,
+    /// The collectible's key, or the produce's name.
+    pub key: String,
+    /// What's shown: "Perfect Tomato", "Ruby".
+    pub name: String,
+    /// Produce's quality (a tier of the gardening qualities).
+    pub quality: u8,
+    pub count: u32,
+    /// What they're all worth.
+    pub worth: i64,
+}
+
+impl Stack {
+    /// What one of them is worth.
+    pub fn each(&self) -> i64 {
+        (self.worth as f64 / self.count.max(1) as f64).round() as i64
+    }
+}
+
+/// What a Sim carries.
+#[derive(Component, Clone, Debug, Default, Serialize, Deserialize)]
+pub struct Inventory(pub Vec<Stack>);
+
+impl Inventory {
+    pub fn add(&mut self, kind: ItemKind, key: &str, name: &str, quality: u8, value: i64) {
+        match self.0.iter_mut().find(|s| s.kind == kind && s.key == key && s.quality == quality) {
+            Some(s) => {
+                s.count += 1;
+                s.worth += value;
+            }
+            None => self.0.push(Stack { kind, key: key.to_string(), name: name.to_string(), quality, count: 1, worth: value }),
+        }
+    }
+
+    /// Takes one item from a stack: what it's worth.
+    pub fn take_one(&mut self, i: usize) -> Option<i64> {
+        let s = self.0.get_mut(i)?;
+        let v = s.each();
+        s.count -= 1;
+        s.worth -= v;
+        if s.count == 0 {
+            self.0.remove(i);
+        }
+        Some(v)
+    }
+
+    /// How many of a collectible they hold.
+    pub fn held(&self, key: &str) -> u32 {
+        self.0.iter().filter(|s| s.kind != ItemKind::Produce && s.key == key).map(|s| s.count).sum()
+    }
+
+    /// Their collectibles (finds, fish and insects): count and worth.
+    pub fn collectibles(&self) -> (u32, i64) {
+        self.0.iter().filter(|s| s.kind != ItemKind::Produce).fold((0, 0), |(n, w), s| (n + s.count, w + s.worth))
+    }
+}
+
+/// Puts an item in a Sim's inventory (giving them one if they have none).
+pub fn give(commands: &mut Commands, sim: Entity, kind: ItemKind, key: String, name: String, quality: u8, value: i64, count: u32) {
+    commands.entity(sim).queue_silenced(move |mut e: EntityWorldMut| {
+        if e.get::<Inventory>().is_none() {
+            e.insert(Inventory::default());
+        }
+        if let Some(mut inv) = e.get_mut::<Inventory>() {
+            for _ in 0..count {
+                inv.add(kind, &key, &name, quality, value);
+            }
+        }
+    });
+}
+
+/// The stack picked on the Inventory tab.
+#[derive(Resource, Default)]
+pub struct Chosen(pub Option<usize>);
+
+#[derive(Component)]
+pub struct ItemTile(usize);
+
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub enum ItemButton {
+    SellOne,
+    SellAll,
+    Eat,
+}
+
+/// The tile's colour for produce, by quality (grey for the worst, gold for perfect).
+fn quality_color(q: u8) -> Color {
+    let t = q as f32 / 9.0;
+    Color::srgb(0.35 + t * 0.55, 0.45 + t * 0.35, 0.55 - t * 0.35)
+}
+
+/// The Inventory tab: a tile for each stack (the object's picture and how many), and what can
+/// be done with the one picked.
+pub fn draw_tab(
+    p: &mut ChildSpawnerCommands,
+    sim: &Sim,
+    inv: Option<&Inventory>,
+    chosen: Option<usize>,
+    mut picture: impl FnMut(&Stack) -> Option<Handle<Image>>,
+) {
+    let stacks = inv.map(|i| i.0.as_slice()).unwrap_or_default();
+    if stacks.is_empty() {
+        p.spawn(text(
+            format!("{}'s inventory is empty. Produce picked, fish caught and things found go here.", sim.first),
+            13.0,
+            Color::srgb(0.8, 0.85, 0.95),
+        ));
+        return;
+    }
+    p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), max_width: Val::Px(450.0), ..default() }).with_children(|grid| {
+        for (i, s) in stacks.iter().enumerate() {
+            let bg = if s.kind == ItemKind::Produce { quality_color(s.quality) } else { Color::srgba(1.0, 1.0, 1.0, 0.85) };
+            grid.spawn((
+                Button,
+                ItemTile(i),
+                BlocksWorld,
+                Node {
+                    width: Val::Px(52.0),
+                    height: Val::Px(52.0),
+                    border: UiRect::all(Val::Px(if chosen == Some(i) { 3.0 } else { 1.0 })),
+                    border_radius: BorderRadius::all(Val::Px(8.0)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BorderColor::all(if chosen == Some(i) { PLUMBOB_GREEN } else { Color::srgba(0.0, 0.0, 0.0, 0.4) }),
+                BackgroundColor(bg),
+            ))
+            .with_children(|t| {
+                match picture(s) {
+                    Some(h) => {
+                        t.spawn((crate::icons::icon_bundle(h, 44.0), Pickable::IGNORE));
+                    }
+                    None => {
+                        // (Produce: its name.)
+                        let word = s.key.split_whitespace().next().unwrap_or("").chars().take(7).collect::<String>();
+                        t.spawn((text(word, 11.0, Color::BLACK), Pickable::IGNORE));
+                    }
+                }
+                if s.count > 1 {
+                    t.spawn((
+                        Node { position_type: PositionType::Absolute, right: Val::Px(2.0), bottom: Val::Px(0.0), ..default() },
+                        text(format!("{}", s.count), 12.0, Color::BLACK),
+                        Pickable::IGNORE,
+                    ));
+                }
+            });
+        }
+    });
+    let total: i64 = stacks.iter().map(|s| s.worth).sum();
+    let line = match chosen.and_then(|i| stacks.get(i)) {
+        Some(s) => format!("{}{} · §{} each, §{} in all", s.name, if s.count > 1 { format!(" ×{}", s.count) } else { String::new() }, s.each(), s.worth),
+        None => format!("{} items worth §{total}. Pick one to sell it{}.", stacks.iter().map(|s| s.count).sum::<u32>(), if stacks.iter().any(|s| s.kind == ItemKind::Produce) { " or eat it" } else { "" }),
+    };
+    p.spawn(text(line, 13.0, Color::WHITE));
+    if let Some(s) = chosen.and_then(|i| stacks.get(i)) {
+        p.spawn(Node { column_gap: Val::Px(6.0), ..default() }).with_children(|row| {
+            let mut buttons = vec![(ItemButton::SellOne, format!("Sell (§{})", s.each()))];
+            if s.count > 1 {
+                buttons.push((ItemButton::SellAll, format!("Sell All (§{})", s.worth)));
+            }
+            if s.kind == ItemKind::Produce && !sim.age.is_little() {
+                buttons.push((ItemButton::Eat, "Eat".to_string()));
+            }
+            for (b, label) in buttons {
+                row.spawn((
+                    Button,
+                    b,
+                    BlocksWorld,
+                    Node { padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)), border_radius: BorderRadius::all(Val::Px(8.0)), ..default() },
+                    BackgroundColor(BTN_NORMAL),
+                ))
+                .with_children(|b| {
+                    b.spawn((text(label, 13.0, Color::WHITE), Pickable::IGNORE));
+                });
+            }
+        });
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn inventory_buttons(
+    tiles: Query<(&Interaction, &ItemTile), Changed<Interaction>>,
+    mut buttons: Query<(&Interaction, &ItemButton, &mut BackgroundColor)>,
+    mut chosen: ResMut<Chosen>,
+    mut sel: Query<(&Sim, &mut Inventory, &mut ActionQueue), With<Selected>>,
+    mut household: Option<ResMut<Household>>,
+    mut notes: ResMut<Notifications>,
+    mut play: MessageWriter<crate::sound::PlaySound>,
+    selected: Query<Entity, Changed<Selected>>,
+) {
+    // (A different Sim: nothing picked.)
+    if !selected.is_empty() {
+        chosen.0 = None;
+    }
+    for (i, t) in &tiles {
+        if *i == Interaction::Pressed {
+            chosen.0 = if chosen.0 == Some(t.0) { None } else { Some(t.0) };
+        }
+    }
+    for (i, b, mut bg) in &mut buttons {
+        bg.0 = if *i == Interaction::Hovered { BTN_HOVER } else { BTN_NORMAL };
+        if *i != Interaction::Pressed {
+            continue;
+        }
+        let (Ok((sim, mut inv, mut queue)), Some(k)) = (sel.single_mut(), chosen.0) else { continue };
+        let Some(s) = inv.0.get(k).cloned() else { continue };
+        match b {
+            ItemButton::SellOne | ItemButton::SellAll => {
+                let n = if *b == ItemButton::SellAll { s.count } else { 1 };
+                let mut got = 0;
+                for _ in 0..n {
+                    got += inv.take_one(k).unwrap_or(0);
+                }
+                if let Some(h) = household.as_mut() {
+                    h.funds += got;
+                }
+                notes.push(format!("{} sold {} for §{got}.", sim.first, if n > 1 { format!("{n} × {}", s.name) } else { s.name.clone() }));
+                play.write(crate::sound::PlaySound::ui("ui_object_sell"));
+                if inv.0.get(k).is_none_or(|x| x.key != s.key || x.quality != s.quality) {
+                    chosen.0 = None;
+                }
+            }
+            ItemButton::Eat => {
+                queue.push_player(Action::new(format!("Eat {}", s.name), ActionKind::EatItem { key: s.key.clone(), quality: s.quality }, false));
+            }
+        }
+    }
+}
+
+/// Finds held in the old household-wide collection go to a household member's inventory.
+fn migrate_held(
+    mut commands: Commands,
+    mut collection: ResMut<crate::collecting::Collection>,
+    members: Query<Entity, With<HouseholdMember>>,
+    selected: Query<Entity, (With<HouseholdMember>, With<Selected>)>,
+    ui: Option<Res<crate::icons::GameUi>>,
+) {
+    if collection.held.is_empty() {
+        return;
+    }
+    let (Some(who), Some(ui)) = (selected.iter().next().or_else(|| members.iter().next()), ui) else { return };
+    for (key, (n, worth)) in std::mem::take(&mut collection.held) {
+        let Some(c) = ui.data.collectibles.iter().find(|c| c.key == key) else { continue };
+        let kind = match c.kind {
+            s3bake::gamedata::CollectKind::Fish => ItemKind::Fish,
+            s3bake::gamedata::CollectKind::Butterfly | s3bake::gamedata::CollectKind::Beetle => ItemKind::Insect,
+            _ => ItemKind::Find,
+        };
+        let each = worth / n.max(1) as i64;
+        give(&mut commands, who, kind, key, c.name.clone(), 0, each, n);
+    }
+}

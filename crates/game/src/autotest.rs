@@ -161,7 +161,7 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -430,6 +430,52 @@ fn wear_uniform(mut commands: Commands, sel: Query<Entity, With<crate::sim::Sele
     job.level = level.max(1) - 1;
     info!("uniform test: {} level {}", name, job.level + 1);
     commands.entity(e).insert((job, crate::simbody::Wearing(crate::simbody::OutfitKind::Career), crate::aging::NeedsNewBody));
+}
+
+/// GIVE=<item>,...: puts things in the selected Sim's inventory: a collectible's key
+/// (`Ruby`, `Minnow`) or `<produce>/<quality 0-9>`, each with an optional `*<count>`.
+/// EAT=1: then they eat the first produce.
+fn give_items(
+    mut commands: Commands,
+    mut sel: Query<(Entity, &mut crate::interact::ActionQueue, Option<&crate::inventory::Inventory>), With<crate::sim::Selected>>,
+    ui: Option<Res<crate::icons::GameUi>>,
+    mut done: Local<u8>,
+    time: Res<Time>,
+) {
+    let Ok(v) = std::env::var("GIVE") else { return };
+    let (Ok((e, mut queue, inv)), Some(ui)) = (sel.single_mut(), ui) else { return };
+    if *done == 1
+        && std::env::var("EAT").is_ok()
+        && let Some(s) = inv.and_then(|i| i.0.iter().find(|s| s.kind == crate::inventory::ItemKind::Produce))
+    {
+        *done = 2;
+        info!("eating {} (have {})", s.name, s.count);
+        queue.push_player(crate::interact::Action::new(format!("Eat {}", s.name), crate::interact::ActionKind::EatItem { key: s.key.clone(), quality: s.quality }, false));
+    }
+    if *done > 0 || time.elapsed_secs() < 6.0 {
+        return;
+    }
+    *done = 1;
+    use crate::inventory::ItemKind;
+    for item in v.split(',') {
+        let (what, n) = item.split_once('*').map_or((item, 1), |(w, n)| (w, n.parse().unwrap_or(1)));
+        if let Some((produce, q)) = what.split_once('/') {
+            let q: usize = q.parse().unwrap_or(3).min(9);
+            let Some(p) = ui.data.plants.iter().find(|p| p.produce.eq_ignore_ascii_case(produce)) else { continue };
+            let (word, m) = crate::gardening::QUALITIES[q];
+            let each = (p.price as f32 * m).round() as i64;
+            crate::inventory::give(&mut commands, e, ItemKind::Produce, p.produce.clone(), format!("{word} {}", p.produce), q as u8, each, n);
+        } else if let Some(c) = ui.data.collectibles.iter().find(|c| c.key.eq_ignore_ascii_case(what)) {
+            let kind = match c.kind {
+                s3bake::gamedata::CollectKind::Fish => ItemKind::Fish,
+                s3bake::gamedata::CollectKind::Butterfly | s3bake::gamedata::CollectKind::Beetle => ItemKind::Insect,
+                _ => ItemKind::Find,
+            };
+            crate::inventory::give(&mut commands, e, kind, c.key.clone(), c.name.clone(), 0, c.min_price as i64, n);
+        } else {
+            warn!("GIVE: no such item {what}");
+        }
+    }
 }
 
 fn keep_hungry(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives)>) {

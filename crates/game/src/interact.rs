@@ -375,6 +375,9 @@ const N: [f32; 6] = [0.0; 6];
 const D1: [f32; 6] = [1.0; 6];
 const SLEEP_DECAY: [f32; 6] = [0.35, 0.35, 0.0, 0.3, 0.4, 0.2];
 
+/// Minutes to eat a piece of produce.
+const PRODUCE_MINUTES: f32 = 8.0;
+
 const fn def(name: &'static str, minutes: f32, per_hour: [f32; 6], pose: Pose) -> InteractionDef {
     InteractionDef {
         name,
@@ -727,6 +730,8 @@ pub enum ActionKind {
     Visit { lot: usize, activity: usize },
     /// Eat a plate of food standing (no free seat at a table).
     EatHere,
+    /// Eat a piece of produce from their inventory.
+    EatItem { key: String, quality: u8 },
     /// Phone for a pizza to be delivered.
     OrderPizza,
     /// Phone the adoption agency: a baby (0), toddler (1) or child (2), a girl when `female`.
@@ -1154,6 +1159,12 @@ fn run_actions(
                             commands.entity(me).insert(crate::anim::ActionClip::new(Some("a2o_eat_stand_fork_start_x"), &["a2o_eat_stand_fork_neat_x"]));
                             continue;
                         }
+                        ActionKind::EatItem { .. } => {
+                            action.phase = Phase::Running(0.0);
+                            anim.pose = Pose::Use;
+                            commands.entity(me).insert(crate::anim::ActionClip::new(None, &["a2o_eat_stand_hand_neat"]));
+                            continue;
+                        }
                     };
                     let from = Vec2::new(tf.translation.x, tf.translation.z);
                     // A chair pushed in at a table is reached from behind or beside it.
@@ -1289,6 +1300,7 @@ fn run_actions(
                             ActionKind::Invite { .. }
                             | ActionKind::BuyReward(_)
                             | ActionKind::EatHere
+                            | ActionKind::EatItem { .. }
                             | ActionKind::OrderPizza
                             | ActionKind::Adopt { .. }
                             | ActionKind::MoveHouse
@@ -1725,6 +1737,21 @@ fn run_actions(
                             if elapsed >= MEAL_MINUTES * 0.8 {
                                 finished = true;
                                 commands.entity(me).insert(crate::meals::MealRequest::AteStanding);
+                            }
+                        }
+                        ActionKind::EatItem { key, quality } => {
+                            // A snack's worth, a little more for finer produce.
+                            motives.add(HUNGER, (150.0 + *quality as f32 * 12.0) * dt / 60.0);
+                            if elapsed >= PRODUCE_MINUTES {
+                                finished = true;
+                                let (key, quality) = (key.clone(), *quality);
+                                commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| {
+                                    if let Some(mut inv) = e.get_mut::<crate::inventory::Inventory>()
+                                        && let Some(i) = inv.0.iter().position(|s| s.kind == crate::inventory::ItemKind::Produce && s.key == key && s.quality == quality)
+                                    {
+                                        inv.take_one(i);
+                                    }
+                                });
                             }
                         }
                         _ => finished = true,

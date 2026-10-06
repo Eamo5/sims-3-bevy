@@ -49,7 +49,7 @@ installation is unreachable.
   and buy more at the grocery store (rarer ones as their skill grows); seeds are planted
   anywhere outdoors on the home lot in the game's garden soil and grow (the game's bush, vine
   or tree) while kept watered and weeded, then bear tomatoes, apples, onions, garlic... to
-  harvest and sell. Planting, watering (with the watering can), weeding and harvesting use
+  harvest into the gardener's inventory, to sell or eat. Planting, watering (with the watering can), weeding and harvesting use
   the game's gardening animations and teach Gardening; green-thumbed Sims tend their plants
   on their own. Each plant has the game's quality, Horrifying to Perfect: it improves while
   watered and weeded (faster for a skilled gardener) and suffers when neglected, and its
@@ -225,7 +225,12 @@ installation is unreachable.
   crouch to collect them, catch the butterflies flitting about by day and the beetles in the
   grass (each kind in its colour, caught with the game's catching animations), and fish at the lots' fishing spots with the game's casting and
   reeling animations, rod in hand, catching what each spot holds by Fishing skill. Finds go in
-  a Collection Journal (J) showing everything found and still to find, and sell for money.
+  the finder's inventory, and the Collection Journal (J) shows everything found and still to
+  find, how many the household holds, and sells them all.
+- **Inventories**: each Sim carries what they've picked, caught and found, in stacks on the
+  Sim panel's Inventory tab (F9) with the objects' catalogue pictures (produce by quality);
+  pick a stack to sell one or all of it, or to eat a piece of produce (a snack's worth,
+  more for finer produce). Inventories are kept in saves.
 - **Water**: the sea and the ponds ripple, reflect the sky and the sun's glints (more at
   grazing angles), deepen in colour with the depth of water over the ground, and turn clear
   and turquoise in the shallows with a line of foam on the shore.

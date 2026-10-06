@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::PlayMode;
 use crate::baked::Baked;
-use crate::interact::{GameObject, Household, Notifications, ObjectKind, Skills};
+use crate::interact::{GameObject, Notifications, ObjectKind, Skills};
 use crate::loading::Catalog;
 use crate::objects::{AssetCtx, ObjectAssets};
 use crate::rabbitholes::Activity;
@@ -221,7 +221,6 @@ fn garden_requests(
     mut sims: Query<(Entity, &Sim, &GardenRequest, &mut Skills, Option<&crate::wishes::Wishes>)>,
     mut plants: Query<(&mut GrowingPlant, Option<&PlantSoil>)>,
     mut garden: ResMut<Garden>,
-    mut household: Option<ResMut<Household>>,
     ui: Option<Res<crate::icons::GameUi>>,
     clock: Res<crate::clock::GameClock>,
     (data, catalog, mut assets): (Res<Baked>, Res<Catalog>, ResMut<ObjectAssets>),
@@ -280,13 +279,13 @@ fn garden_requests(
                 p.harvests_left = p.harvests_left.saturating_sub(1);
                 // The plant's quality, give or take (a Super Green Thumb's a step finer).
                 let q = p.quality + rng.random_range(-0.075..0.075) + if crate::wishes::has(wishes, "SuperGreenThumb") { 0.1 } else { 0.0 };
-                let (word, multiplier) = QUALITIES[quality_tier(q)];
-                let worth = (picked as f32 * info.price as f32 * multiplier).round() as i64;
-                if let Some(h) = household.as_mut() {
-                    h.funds += worth;
-                }
+                let tier = quality_tier(q);
+                let (word, multiplier) = QUALITIES[tier];
+                // Into their inventory, to sell or eat.
+                let each = (info.price as f32 * multiplier).round() as i64;
+                crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Produce, info.produce.clone(), format!("{word} {}", info.produce), tier as u8, each, picked);
                 learn(sim, me, &mut skills, &mut notes, &mut life, info.skill_harvest);
-                notes.push(format!("{} harvested {picked} {word} {} and sold them for §{worth}.", sim.first, plural(&info.produce, picked)));
+                notes.push(format!("{} harvested {picked} {word} {} (worth §{}).", sim.first, plural(&info.produce, picked), each * picked as i64));
                 if word == "Perfect" && !garden.perfect.contains(&info.produce) {
                     garden.perfect.push(info.produce.clone());
                     notes.push(format!("{} grew perfect {} for the first time!", sim.first, plural(&info.produce, 2)));

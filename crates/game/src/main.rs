@@ -27,6 +27,7 @@ mod swim;
 mod dates;
 mod hud;
 mod interact;
+mod inventory;
 mod life;
 mod little;
 mod loading;
@@ -130,7 +131,7 @@ fn main() {
         .add_plugins((life::LifePlugin, careers::CareersPlugin, save::SavePlugin, wishes::WishesPlugin, rabbitholes::RabbitHolePlugin, cas::CasPlugin, sound::SoundPlugin, premade::PremadePlugin, aging::AgingPlugin, little::LittlePlugin))
         .add_plugins((options::OptionsPlugin, icons::IconsPlugin, balloons::BalloonsPlugin, portraits::PortraitsPlugin, relations::RelationsPlugin, props::PropsPlugin, meals::MealsPlugin, death::DeathPlugin, mail::MailPlugin, sky::SkyPlugin, maptags::MapTagsPlugin, opportunities::OpportunitiesPlugin, gardening::GardeningPlugin, build::BuildPlugin, visit::VisitPlugin))
         .add_plugins((collecting::CollectingPlugin, traffic::TrafficPlugin, fire::FirePlugin, burglar::BurglarPlugin, simpanel::SimPanelPlugin, ghosts::GhostsPlugin, water::WaterPlugin, services::ServicesPlugin, fireplace::FireplacePlugin, effects::EffectsPlugin, swim::SwimPlugin, dates::DatesPlugin, dialog::DialogPlugin, lifetime::LifetimePlugin))
-        .add_plugins((writing::WritingPlugin, story::StoryPlugin, chess::ChessPlugin, blink::BlinkPlugin))
+        .add_plugins((writing::WritingPlugin, story::StoryPlugin, chess::ChessPlugin, blink::BlinkPlugin, inventory::InventoryPlugin))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)
         .run();
