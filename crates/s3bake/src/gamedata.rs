@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 38;
+pub const GAMEDATA_VERSION: u32 = 39;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -531,6 +531,9 @@ fn unescape(s: &str) -> String {
 /// the outfit's presets into the texture store, and the meshes of parts the everyday wardrobe
 /// doesn't have (`outfits.pack`). Formal wear that isn't everyday wear too (suits, tuxedos,
 /// cocktail dresses) joins the wardrobe the same way (`wardrobe.bin`).
+/// The CAS parts of the town's service uniforms, by name.
+pub const SERVICE_UNIFORMS: [&str; 5] = ["BodyFrenchMaid", "HairFrenchMaidBunLoose", "BodyRepair", "BodyMailCarrier", "BodyPizzaDeliveryOutfit"];
+
 fn bake_outfits(root: &BakeRoot, pkgs: &PackageSet, careers: &[CareerInfo]) -> Result<(), String> {
     use crate::types::{CasBaked, CasPartInfo, CasPartMeshes, Key, OutfitInfo, OutfitPartInfo, key_of};
     use s3formats::sim::{CasPart, SimOutfit, T_OUTFIT};
@@ -608,16 +611,19 @@ fn bake_outfits(root: &BakeRoot, pkgs: &PackageSet, careers: &[CareerInfo]) -> R
         }
         Some((info, meshes))
     });
-    // Formal wear, with its default design.
+    // Formal wear, with its default design; and the town's service uniforms (the maid's dress
+    // and capped bun, the repairman's overalls, the mail carrier's and the pizza delivery's).
     let formal: Vec<(s3pkg::ResourceKey, CasPart)> = crate::bake::par_map(&pkgs.keys_of_type(s3pkg::types::CASP).copied().collect::<Vec<_>>(), |k| {
         let c = CasPart::parse(&pkgs.read(k)?).ok()?;
         let human = matches!((c.age_gender >> 8) & 0xF, 0 | 1) && c.age_gender & 0x7E != 0;
-        let wanted = human
-            && c.category & s3formats::sim::CAT_FORMAL != 0
+        let formal = c.category & s3formats::sim::CAT_FORMAL != 0
             && c.category & s3formats::sim::CAT_VALID_RANDOM != 0
             && c.category & s3formats::sim::CAT_HIDDEN == 0
-            && matches!(c.clothing_type, s3formats::sim::CT_BODY | s3formats::sim::CT_TOP | s3formats::sim::CT_BOTTOM | s3formats::sim::CT_SHOES)
-            && !have.contains(&key_of(k));
+            && matches!(c.clothing_type, s3formats::sim::CT_BODY | s3formats::sim::CT_TOP | s3formats::sim::CT_BOTTOM | s3formats::sim::CT_SHOES);
+        let service = SERVICE_UNIFORMS.iter().any(|n| c.name.contains(n))
+            && !c.name.to_ascii_lowercase().ends_with("_unlock")
+            && matches!(c.clothing_type, s3formats::sim::CT_BODY | s3formats::sim::CT_HAIR);
+        let wanted = human && (formal || service) && !have.contains(&key_of(k));
         wanted.then_some((*k, c))
     })
     .into_iter()

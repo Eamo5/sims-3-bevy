@@ -59,7 +59,10 @@ installation is unreachable.
 - **Breakdowns**: showers, baths, sinks, TVs, computers and stereos break now and then with
   use (toilets clog), less often the better they are; Sims repair them with the game's own
   repair animations, learning Handiness (handy and neat Sims do it on their own), or the
-  repairman can be phoned. Fishing trips teach Fishing and bring back a catch to sell.
+  repairman can be phoned: he pulls up in the game's handyman pickup, in his overalls, fixes
+  each broken thing in turn with the same animations (the household leaves the repairs to
+  him), and is paid §75 and §25 a fix. Fishing trips teach Fishing and bring back a catch to
+  sell.
 - **Writing novels** by the game's Writing tuning: at a computer, "Write Novel" offers the
   genres the Sim has opened up (Fiction and Non-Fiction to start; Sci-Fi, Trashy, Drama,
   Humor, Mystery and Romance with skill — sooner for the good-humoured and hopeless romantics;
@@ -119,7 +122,8 @@ installation is unreachable.
   counter stool to eat (the game's sit-down and bar-stool eating animations, plate on the
   table, fork in hand), or eat standing when every seat is taken, and leave dirty dishes that
   neat Sims clear away. Guests eat but don't cook, children don't use the stove. Or phone for
-  a pizza (the game's pizza box arrives on the kitchen counter within the hour).
+  a pizza: within the hour the delivery, in the game's pizza uniform, carries the pizza box in
+  to the kitchen counter.
 - **Recipes** from the game's recipe list: the stove offers "Cook Breakfast/Lunch/Dinner ›"
   and "Cook Dessert ›" with the recipes the Sim knows for that time of day (Mac and Cheese and
   Waffles to start; Goopy Carbonara, Spaghetti, Key Lime Pie, Lobster Thermidor... as Cooking
@@ -199,6 +203,10 @@ installation is unreachable.
   alone, a babysitter arrives by car, feeds them, changes them and plays with them, and goes
   home (paid §10 an hour) once someone's back. Visitors don't sleep in the family's beds or
   use its shower.
+- **Maid**: hired by phone (§15 an hour, kept in saves), she comes every morning at nine in the
+  game's maid service car and French maid's uniform, clears away the dirty dishes and spoiled
+  food, empties the trash cans and goes. The service Sims wear the game's own uniforms (never
+  worn by anyone else) and aren't kept in saves.
 - **Moving house**: the phone's "Move to a New Home" saves the game and opens the lot chooser;
   on the chosen lot the household starts afresh with everything else they had (Sims, skills,
   jobs, relationships, money, wishes, garden seeds, collection, the town's story), the old

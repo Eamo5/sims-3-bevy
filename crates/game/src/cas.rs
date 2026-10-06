@@ -224,7 +224,7 @@ pub(crate) fn parts_for(cas: &CasData, sim: &Sim, t: u32) -> Vec<(Key, String)> 
     let mut v: Vec<(Key, String)> = cas
         .parts
         .iter()
-        .filter(|p| p.baked && p.clothing_type == t && p.age_gender & age != 0 && p.age_gender & gender != 0)
+        .filter(|p| p.baked && p.clothing_type == t && p.age_gender & age != 0 && p.age_gender & gender != 0 && !crate::simbody::is_uniform(&p.name))
         // Clothes for every day (the swimwear, sleepwear and gym clothes are worn for those).
         .filter(|p| {
             !matches!(t, CT_TOP | CT_BOTTOM | CT_BODY | CT_SHOES)

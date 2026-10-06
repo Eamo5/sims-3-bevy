@@ -161,7 +161,7 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -293,6 +293,7 @@ impl Plugin for AutoTestPlugin {
                 (|mut commands: Commands,
                   args: Res<AutoArgs>,
                   sel: Query<(&Transform, &crate::interact::ActionQueue, Option<&crate::visit::OnLot>), With<crate::sim::Selected>>,
+                  named: Query<(&Transform, &crate::interact::ActionQueue, Option<&crate::visit::OnLot>, &crate::sim::Sim)>,
                   mut cam: Query<&mut SimsCamera>,
                   mut last: Local<f32>,
                   time: Res<Time>| {
@@ -303,7 +304,9 @@ impl Plugin for AutoTestPlugin {
                         commands.insert_resource(crate::opportunities::AutoDecline);
                     }
                     *last = time.elapsed_secs();
-                    if let (Ok((tf, q, on)), Ok(mut c)) = (sel.single(), cam.single_mut()) {
+                    // (FOLLOW_NAME=<name>: whoever has that first or last name, while they're about.)
+                    let who = std::env::var("FOLLOW_NAME").ok().and_then(|n| named.iter().find(|s| s.3.first == n || s.3.last == n).map(|s| (s.0, s.1, s.2)));
+                    if let (Some((tf, q, on)), Ok(mut c)) = (who.or(sel.single().ok()), cam.single_mut()) {
                         c.look_at(tf.translation);
                         if let Some(d) = std::env::var("FOLLOW_DIST").ok().and_then(|d| d.parse::<f32>().ok()) {
                             c.distance = d;
@@ -526,6 +529,34 @@ fn make_mess(
         let at = tf.translation + Vec3::new(a.cos() * 1.2, 0.0, a.sin() * 1.2);
         let e = crate::meals::spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, crate::meals::PLATE, crate::interact::ObjectKind::DirtyDishes, "Dirty Dishes", at, a);
         info!("mess: plate {e:?} at {at:.1?}");
+    }
+}
+
+/// SHOW_UNIFORM=1: the maid, the repairman, the mail carrier and the pizza delivery stand in a
+/// row in front of the selected Sim (who stays put), with the camera on them.
+fn show_uniforms(mut commands: Commands, mut sel: Query<(&Transform, &mut crate::interact::ActionQueue), With<crate::sim::Selected>>, mut cam: Query<&mut SimsCamera>, mut done: Local<bool>, time: Res<Time>) {
+    if std::env::var("SHOW_UNIFORM").is_err() {
+        return;
+    }
+    let Ok((tf, mut queue)) = sel.single_mut() else { return };
+    queue.0.clear();
+    if *done || time.elapsed_secs() < 6.0 {
+        return;
+    }
+    *done = true;
+    use crate::simbody::ServiceUniform as U;
+    let mut rng = rand::rng();
+    let ahead = (tf.rotation * Vec3::Z).with_y(0.0).normalize_or(Vec3::Z);
+    let side = Vec3::new(ahead.z, 0.0, -ahead.x);
+    for (i, (u, female, age)) in [(U::Maid, true, crate::sim::Age::Adult), (U::Repair, false, crate::sim::Age::Adult), (U::MailCarrier, true, crate::sim::Age::Adult), (U::PizzaDelivery, false, crate::sim::Age::Teen)].into_iter().enumerate() {
+        let at = tf.translation + ahead * 2.2 + side * (i as f32 - 1.5) * 0.9;
+        let sim = crate::sim::random_sim(&mut rng, "Uniform", Some(female), age);
+        let e = crate::services::arrive(&mut commands, sim, at, Some(u), crate::interact::Skills::default());
+        commands.entity(e).insert(Transform::from_translation(at).looking_to(-ahead, Vec3::Y));
+    }
+    if let Ok(mut c) = cam.single_mut() {
+        c.look_at(tf.translation + ahead * 2.2 + Vec3::Y * 0.9);
+        c.distance = 5.5;
     }
 }
 
@@ -1335,6 +1366,33 @@ fn auto_action(
         *done = true;
         return;
     }
+    // "Repairman": a shower breaks and the selected Sim phones the repairman; "Maid": they hire
+    // a maid; "Pizza": they order a pizza.
+    if let Some(kind) = match name.as_str() {
+        "Repairman" => Some(crate::interact::ActionKind::CallRepairman),
+        "Maid" => Some(crate::interact::ActionKind::HireMaid(true)),
+        "Pizza" => Some(crate::interact::ActionKind::OrderPizza),
+        _ => None,
+    } {
+        // (A shower, a TV, a computer, a sink, a stereo and a toilet break.)
+        if name == "Repairman" {
+            use crate::interact::ObjectKind as K;
+            for kind in [K::Shower, K::Tv, K::Computer, K::Sink, K::Stereo, K::Toilet] {
+                if let Some((e, _)) = objects.iter().find(|(_, o)| o.kind == kind) {
+                    commands.entity(e).insert(crate::interact::Broken);
+                }
+            }
+        }
+        // (The maid's hired straight away too, should the call be cut short.)
+        if name == "Maid" {
+            commands.queue(|w: &mut World| w.resource_mut::<crate::services::MaidService>().hired = true);
+        }
+        if let Ok(mut q) = sel.single_mut() {
+            q.push_player(crate::interact::Action::new(name.clone(), kind, false));
+        }
+        *done = true;
+        return;
+    }
     // "Party": the selected Sim throws a party.
     if name == "Party" {
         if let Ok(mut q) = sel.single_mut() {
@@ -1705,17 +1763,20 @@ fn ui_flow(
     }
 }
 
-fn auto_speed(args: Res<AutoArgs>, mut clock: ResMut<crate::clock::GameClock>, mut done: Local<bool>) {
-    if *done {
-        return;
+fn auto_speed(args: Res<AutoArgs>, mut clock: ResMut<crate::clock::GameClock>, mut done: Local<(bool, bool)>, pending: Option<Res<crate::save::PendingLoad>>, live: Option<Res<State<crate::PlayMode>>>) {
+    if !done.0 {
+        done.0 = true;
+        if let Some(s) = args.speed {
+            clock.speed = s.min(3);
+        }
     }
-    if let Some(s) = args.speed {
-        clock.speed = s.min(3);
+    // The hour of the day (on the save's own day, once a saved game has loaded).
+    if !done.1 && pending.is_none() && live.is_some_and(|s| *s.get() == crate::PlayMode::Live) {
+        done.1 = true;
+        if let Some(h) = args.hour {
+            clock.minutes = (clock.minutes / 1440.0).floor() * 1440.0 + h * 60.0;
+        }
     }
-    if let Some(h) = args.hour {
-        clock.minutes = h * 60.0;
-    }
-    *done = true;
 }
 
 /// `--view-level <n>` once, or `--view-level 0`: keep viewing the selected Sim's floor.

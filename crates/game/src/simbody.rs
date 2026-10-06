@@ -192,6 +192,49 @@ pub struct ChangeIntoPlan(pub OutfitKind);
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Wearing(pub OutfitKind);
 
+/// The town's uniforms (the Reaper's robe, firefighters', police officers', burglars', the
+/// maid's, the repairman's, the mail carrier's, the pizza delivery's): worn only on duty.
+pub fn is_uniform(name: &str) -> bool {
+    ["Reaper", "Firefighter", "Ninja", "Police", "FrenchMaid", "MaidLowLevel", "BodyRepair", "MailCarrier", "PizzaDelivery"].iter().any(|n| name.contains(n))
+}
+
+/// A service Sim's uniform.
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ServiceUniform {
+    Maid,
+    Repair,
+    MailCarrier,
+    PizzaDelivery,
+}
+
+impl ServiceUniform {
+    /// Its body, and the hair that goes with it (the maid's bun under her cap).
+    fn parts(self) -> (&'static str, Option<&'static str>) {
+        match self {
+            Self::Maid => ("BodyFrenchMaid", Some("HairFrenchMaidBunLoose")),
+            Self::Repair => ("BodyRepair", None),
+            Self::MailCarrier => ("BodyMailCarrier", None),
+            Self::PizzaDelivery => ("BodyPizzaDeliveryOutfit", None),
+        }
+    }
+}
+
+/// A service Sim's everyday look with their uniform on (and their own shoes).
+pub fn service_outfit(cas: &CasData, sim: &Sim, uniform: ServiceUniform, rng: &mut impl Rng) -> Outfit {
+    let mut o = pick_outfit_for(cas, sim, rng, OutfitKind::Everyday);
+    let (age, gender) = (age_bits(sim.age), if sim.female { GENDER_FEMALE } else { GENDER_MALE });
+    let find = |n: &str, t: u32| cas.parts.iter().find(|p| p.baked && p.clothing_type == t && p.age_gender & age != 0 && p.age_gender & gender != 0 && p.name.contains(n)).cloned();
+    let (body, hair) = uniform.parts();
+    if let Some(b) = find(body, CT_BODY) {
+        o.body.retain(|p| p.clothing_type == CT_SHOES);
+        o.body.insert(0, b);
+    }
+    if let Some(h) = hair.and_then(|h| find(h, CT_HAIR)) {
+        o.hair = Some(h);
+    }
+    o
+}
+
 pub fn pick_outfit(cas: &CasData, sim: &Sim, rng: &mut impl Rng) -> Outfit {
     pick_outfit_for(cas, sim, rng, OutfitKind::Everyday)
 }
@@ -216,11 +259,10 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
     let gender = if sim.female { GENDER_FEMALE } else { GENDER_MALE };
     let fits = |e: &&CasPartInfo| e.baked && e.age_gender & age != 0 && e.age_gender & gender != 0;
     // Clothes and shoes by the outfit's category (heads and hair go with anything); never the
-    // townsfolk's uniforms (the Reaper's robe, firefighters', police officers', burglars'), nor
-    // everyday clothes that are swimwear too (a seashell top).
+    // townsfolk's uniforms, nor everyday clothes that are swimwear too (a seashell top).
     let worn = |e: &&CasPartInfo| {
         let clothes = matches!(e.clothing_type, CT_TOP | CT_BOTTOM | CT_BODY | CT_SHOES);
-        !["Reaper", "Firefighter", "Ninja", "Police"].iter().any(|n| e.name.contains(n))
+        !is_uniform(&e.name)
             && (!clothes || e.category & cat != 0)
             && !(clothes && kind == OutfitKind::Everyday && e.category & s3formats::sim::CAT_SWIM != 0)
     };

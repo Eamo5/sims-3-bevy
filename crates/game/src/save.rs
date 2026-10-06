@@ -178,6 +178,9 @@ pub struct SaveGame {
     /// The fish in the household's fish bowls.
     #[serde(default)]
     pub fishbowls: Vec<crate::fishbowl::SavedBowl>,
+    /// Whether the household has a maid.
+    #[serde(default)]
+    pub maid: bool,
     /// The household's collection journal.
     #[serde(default)]
     pub collection: crate::collecting::Collection,
@@ -449,7 +452,7 @@ fn save_game(
                 Option<&crate::little::ToddlerSkills>,
             ),
         ),
-        (Without<crate::town::Townie>, Without<crate::visit::LotGuest>),
+        (Without<crate::town::Townie>, Without<crate::visit::LotGuest>, Without<crate::services::ServiceNpc>),
     >,
     (bought, exit, graves): (
         Query<(&GameObject, &Transform), With<Bought>>,
@@ -459,7 +462,7 @@ fn save_game(
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
     (story, alarm, bowls): (Res<crate::story::TownStory>, Res<crate::appliances::Alarm>, Query<(&crate::fishbowl::BowlFish, &Transform), Without<crate::visit::LotObject>>),
-    mut slot: ResMut<SaveSlot>,
+    (mut slot, maid): (ResMut<SaveSlot>, Res<crate::services::MaidService>),
 ) {
     if requests.read().count() == 0 {
         return;
@@ -542,6 +545,7 @@ fn save_game(
         town: story.clone(),
         alarm: *alarm,
         fishbowls: crate::fishbowl::saved(&bowls),
+        maid: maid.hired,
         collection: collection.clone(),
         graves: graves
             .iter()
@@ -718,6 +722,8 @@ fn apply_loaded_game(
     commands.insert_resource(crate::gardening::PendingPlants(game.plants.clone(), game.seeds.clone(), game.perfect_produce.clone()));
     commands.insert_resource(game.town.clone());
     commands.insert_resource(game.alarm);
+    let hired = game.maid;
+    commands.queue(move |w: &mut World| w.resource_mut::<crate::services::MaidService>().hired = hired);
     commands.insert_resource(crate::fishbowl::PendingBowls(game.fishbowls.clone()));
     commands.insert_resource(game.collection.clone());
     // The household's dead, back in their graves.

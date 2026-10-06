@@ -1581,6 +1581,7 @@ fn phone_button(
     mut pie: ResMut<PieMenu>,
     mut notes: ResMut<Notifications>,
     objects: Query<&GameObject>,
+    maid: Res<crate::services::MaidService>,
 ) {
     if !buttons.iter().any(|i| *i == Interaction::Pressed) {
         return;
@@ -1598,6 +1599,11 @@ fn phone_button(
     let mut options: Vec<(String, ActionKind)> = vec![
         (format!("Order Pizza (§{})", crate::meals::PIZZA_PRICE), ActionKind::OrderPizza),
         (format!("Call the Repairman (§{}+)", crate::interact::REPAIRMAN_PRICE), ActionKind::CallRepairman),
+        if maid.hired {
+            ("Fire the Maid".to_string(), ActionKind::HireMaid(false))
+        } else {
+            (format!("Hire a Maid (§{} an hour)", crate::services::MAID_WAGE), ActionKind::HireMaid(true))
+        },
         (format!("Throw a Party (§{})", crate::interact::PARTY_PRICE), ActionKind::ThrowParty),
     ];
     options.extend(known.into_iter().take(9).map(|(_, l, k)| (l, k)));

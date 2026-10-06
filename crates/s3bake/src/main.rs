@@ -428,6 +428,9 @@ fn main() {
         // Adult women's hair, with the pack each comes from (group).
         let hair: Vec<String> = cas.parts.iter().filter(|p| p.baked && p.clothing_type == 1 && p.age_gender & 0x20 != 0 && p.age_gender & 0x2000 != 0).map(|p| format!("{} ({:x}, cat {:x})", p.name, p.key.1, p.category)).collect();
         println!("adult F hair: {hair:?}");
+        // Service uniforms (the maid's, the repairman's, the mail carrier's).
+        let svc: Vec<String> = cas.parts.iter().filter(|p| ["Maid", "Repair", "MailCarrier", "PizzaDelivery"].iter().any(|n| p.name.contains(n))).map(|p| format!("{} (type {}, baked {}, cat {:x}, ag {:x})", p.name, p.clothing_type, p.baked, p.category, p.age_gender)).collect();
+        println!("service parts: {svc:#?}");
         let tones: Vec<String> = cas.tone.textures.iter().map(|(ag, t, _)| format!("{ag:x}/{t:x}")).collect();
         println!("skin textures: {tones:?}");
         return;

@@ -20,7 +20,7 @@ impl Plugin for InteractPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Notifications>().add_systems(
             Update,
-            (comings_and_goings, autonomy, run_actions, motive_warnings, pay_bills, repairman, parties)
+            (comings_and_goings, autonomy, run_actions, motive_warnings, pay_bills, parties)
                 .chain()
                 .run_if(in_state(PlayMode::Live)),
         );
@@ -817,6 +817,8 @@ pub enum ActionKind {
     Repair { target: Entity },
     /// Phone for the repairman.
     CallRepairman,
+    /// Phone to hire a maid (or to let her go).
+    HireMaid(bool),
     /// Plant a seed here.
     PlantSeed { at: Vec2, level: u8, plant: usize },
     /// Phone round to throw a party.
@@ -1236,6 +1238,7 @@ fn run_actions(
                         | ActionKind::Adopt { .. }
                         | ActionKind::MoveHouse
                         | ActionKind::CallRepairman
+                        | ActionKind::HireMaid(_)
                         | ActionKind::ThrowParty => {
                             action.phase = Phase::Running(0.0);
                             anim.pose = Pose::Talk;
@@ -1394,6 +1397,7 @@ fn run_actions(
                             | ActionKind::Adopt { .. }
                             | ActionKind::MoveHouse
                             | ActionKind::CallRepairman
+                            | ActionKind::HireMaid(_)
                             | ActionKind::ThrowParty => {}
                             ActionKind::Repair { target } => {
                                 if let Ok((obj, otf, _, _)) = objects.get(*target) {
@@ -1820,6 +1824,18 @@ fn run_actions(
                                 notes.push(format!("{} called the repairman. He'll be by soon (§{REPAIRMAN_PRICE}).", sim.first));
                             }
                         }
+                        ActionKind::HireMaid(hire) => {
+                            if elapsed >= 5.0 {
+                                finished = true;
+                                let hire = *hire;
+                                commands.queue(move |w: &mut World| w.resource_mut::<crate::services::MaidService>().hired = hire);
+                                notes.push(if hire {
+                                    format!("{} hired a maid. She'll come every morning at nine (§{} an hour).", sim.first, crate::services::MAID_WAGE)
+                                } else {
+                                    format!("{} let the maid go.", sim.first)
+                                });
+                            }
+                        }
                         ActionKind::MoveHouse => {
                             if elapsed >= 5.0 {
                                 finished = true;
@@ -2011,10 +2027,13 @@ fn autonomy(
     hh: Option<Res<Household>>,
     (broken, plant_q, lit_q, hw_q): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>, Query<(), With<crate::fireplace::Lit>>, Query<(), With<crate::rabbitholes::Homework>>),
     (party_on, trash_q): (Option<Res<Party>>, Query<&crate::surroundings::TrashFill>),
+    (called, repairmen): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>),
 ) {
     if delta.0 <= 0.0 {
         return;
     }
+    // (The repairman's been called: repairs are left to him.)
+    let repairman = called.is_some() || !repairmen.is_empty();
     let others: Vec<(Entity, Vec3, Age, [f32; 6], Option<usize>)> = sims.iter().map(|s| (s.0, s.1.translation, s.7.age, s.2.0, s.9.map(|l| l.0))).collect();
     // A meal already out is eaten before anyone cooks another.
     let meal_out = objects.iter().any(|(_, o, ..)| o.kind == ObjectKind::Meal);
@@ -2067,7 +2086,7 @@ fn autonomy(
                 }
                 // Handy (or neat) household Sims see to repairs on their own.
                 let keen = sim.traits.contains(&crate::life::Trait::Handy) || sim.traits.contains(&crate::life::Trait::Neat);
-                if household.contains(me) && sim.age.is_grown() && sim.age != Age::Child && keen {
+                if household.contains(me) && sim.age.is_grown() && sim.age != Age::Child && keen && !repairman {
                     let score = 25.0 / (1.0 + dist / 25.0);
                     if best.as_ref().is_none_or(|b| score > b.0) {
                         best = Some((score, Action::new(repair_of(obj.kind).0, ActionKind::Repair { target: oe }, true)));
@@ -2231,35 +2250,6 @@ fn motive_warnings(
             }
         }
     }
-}
-
-/// The repairman comes and fixes everything broken on the lot.
-fn repairman(
-    mut commands: Commands,
-    visit: Option<Res<RepairmanVisit>>,
-    clock: Res<GameClock>,
-    mut household: Option<ResMut<Household>>,
-    broken: Query<Entity, With<Broken>>,
-    mut notes: ResMut<Notifications>,
-) {
-    let Some(v) = visit else { return };
-    if clock.minutes < v.arrive_at {
-        return;
-    }
-    commands.remove_resource::<RepairmanVisit>();
-    let n = broken.iter().count();
-    for e in &broken {
-        commands.entity(e).remove::<Broken>();
-    }
-    let cost = REPAIRMAN_PRICE + 25 * n as i64;
-    if let Some(h) = household.as_mut() {
-        h.funds -= cost;
-    }
-    notes.push(match n {
-        0 => format!("The repairman came by but found nothing to fix (§{cost})."),
-        1 => format!("The repairman fixed the broken object (§{cost})."),
-        n => format!("The repairman fixed {n} broken objects (§{cost})."),
-    });
 }
 
 fn pay_bills(

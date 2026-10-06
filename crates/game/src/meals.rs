@@ -23,7 +23,7 @@ pub struct MealsPlugin;
 
 impl Plugin for MealsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (deliver_pizza, meal_requests, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (meal_requests, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -36,39 +36,12 @@ pub struct PizzaOrder {
     pub arrive_at: f64,
 }
 
-/// The pizza arrives: the game's pizza box, set down on the kitchen counter (by the stove),
-/// with a slice for everyone.
-#[allow(clippy::too_many_arguments)]
-fn deliver_pizza(
-    mut commands: Commands,
-    order: Option<Res<PizzaOrder>>,
-    clock: Res<crate::clock::GameClock>,
-    objects: Query<(Entity, &GameObject, &Transform, &UsedBy)>,
-    (data, catalog, mut assets): (Res<Baked>, Res<Catalog>, ResMut<ObjectAssets>),
-    (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
-    exit: Option<Res<crate::interact::LotExit>>,
-    mut notes: ResMut<Notifications>,
-) {
-    let Some(order) = order else { return };
-    if clock.minutes < order.arrive_at {
-        return;
-    }
-    commands.remove_resource::<PizzaOrder>();
-    let near = objects
-        .iter()
-        .find(|(_, o, _, _)| o.kind == ObjectKind::Stove)
-        .map(|(_, o, tf, _)| o.world_center(tf))
-        .or_else(|| exit.as_ref().map(|x| Vec3::new(x.0.x, 0.0, x.0.y)))
-        .unwrap_or_default();
-    let Some(at) = surface_near(&objects, near, 12.0) else {
-        notes.push("The pizza came, but there was nowhere to put it.");
-        return;
-    };
-    let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
-    if let Some(p) = spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, "FoodPizza", ObjectKind::Meal, "Pizza", at, 0.0) {
-        commands.entity(p).insert(Meal { servings: 6 });
-        notes.push("The pizza has arrived! It's on the kitchen counter.");
-    }
+/// Where a delivered pizza goes: the game's pizza box, set down on the kitchen counter (by the
+/// stove), or the surface nearest the curb, with a slice for everyone. (The delivery brings it:
+/// see `services`.)
+pub fn pizza_spot(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, curb: Vec3) -> Option<Vec3> {
+    let near = objects.iter().find(|(_, o, _, _)| o.kind == ObjectKind::Stove).map(|(_, o, tf, _)| o.world_center(tf)).unwrap_or(curb);
+    surface_near(objects, near, 12.0)
 }
 
 /// What's being cooked: a recipe (index into the game's recipes).
