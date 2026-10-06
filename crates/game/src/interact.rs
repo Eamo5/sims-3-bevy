@@ -1880,7 +1880,12 @@ fn run_actions(
                             if elapsed >= 5.0 {
                                 finished = true;
                                 let age = [Age::Baby, Age::Toddler, Age::Child][(*age as usize).min(2)];
-                                commands.insert_resource(crate::services::AdoptionOrder { arrive_at: clock.minutes + 120.0, age, female: *female });
+                                // The parents-to-be: whoever called, and their spouse.
+                                let mut parents = vec![(sim.id, sim.full_name(), sim.female)];
+                                if let Some((_, s, ..)) = rels.0.iter().find(|(_, r)| r.status == RelStatus::Married).and_then(|(e, _)| people.get(*e).ok()) {
+                                    parents.push((s.id, s.full_name(), s.female));
+                                }
+                                commands.insert_resource(crate::services::AdoptionOrder { arrive_at: clock.minutes + 120.0, age, female: *female, parents });
                                 notes.push(format!(
                                     "{} called the adoption agency. The social worker will bring {} home within a couple of hours.",
                                     sim.first,

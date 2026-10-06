@@ -495,6 +495,8 @@ pub struct AdoptionOrder {
     pub arrive_at: f64,
     pub age: Age,
     pub female: bool,
+    /// The parents-to-be (the Sim who called and their spouse): (id, name, female).
+    pub parents: Vec<(u64, String, bool)>,
 }
 
 /// "a baby girl", "a child".
@@ -519,6 +521,7 @@ fn adoption(
     world: Res<CurrentWorld>,
     mut rides: ResMut<crate::traffic::PendingRides>,
     mut notes: ResMut<Notifications>,
+    mut family: ResMut<crate::family::Genealogy>,
 ) {
     let (Some(order), Some(exit)) = (order, exit) else { return };
     if clock.minutes < order.arrive_at || state.worker.is_some() {
@@ -555,6 +558,11 @@ fn adoption(
     commands.entity(worker).insert((SocialWorker { leaving: true }, ServiceNpc));
     let child = crate::sim::random_sim(&mut rng, &last, Some(order.female), order.age);
     let name = child.first.clone();
+    family.note(child.id, &child.full_name(), child.female);
+    for (id, pname, female) in &order.parents {
+        family.note(*id, pname, *female);
+        family.add_parent(child.id, *id);
+    }
     let c = body(&mut commands, child, Vec3::new(p.x + 0.8, y, p.y));
     commands.entity(c).insert((HouseholdMember, crate::aging::Aging::default()));
     rides.0.push((p, "CarServiceSedan"));

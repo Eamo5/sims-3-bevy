@@ -154,6 +154,7 @@ fn pregnancy(
         ResMut<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>,
         ResMut<crate::simbody::SimTextures>,
     ),
+    (mut family, fathers): (ResMut<crate::family::Genealogy>, Query<&Sim, Without<Pregnancy>>),
 ) {
     for (mother, sim, mut p, mut moodlets, tf, member) in &mut mothers {
         let days = (clock.minutes - p.since) / 1440.0;
@@ -206,6 +207,14 @@ fn pregnancy(
             crate::simbody::build_sim_model(&data.0, cas, &baby, &outfit, crate::simbody::tone_of(&baby))
         });
         let name = baby.first.clone();
+        // The family tree: the mother, and the father if he's known.
+        family.note(sim.id, &sim.full_name(), sim.female);
+        family.note(baby.id, &baby.full_name(), baby.female);
+        family.add_parent(baby.id, sim.id);
+        if let Some(f) = p.other_parent.and_then(|f| fathers.get(f).ok()) {
+            family.note(f.id, &f.full_name(), f.female);
+            family.add_parent(baby.id, f.id);
+        }
         let mut sctx = SimSpawnCtx {
             assets: &sim_assets,
             render: crate::simbody::SimRenderCtx {

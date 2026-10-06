@@ -94,6 +94,7 @@ fn update_panel(
     selected: Query<(Entity, &Sim, &Relationships), With<Selected>>,
     people: Query<&Sim>,
     (mut portraits, mut images): (ResMut<crate::portraits::Portraits>, ResMut<Assets<Image>>),
+    family: Res<crate::family::Genealogy>,
 ) {
     if !panel.open {
         return;
@@ -176,7 +177,12 @@ fn update_panel(
                     });
                     row.spawn((Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(3.0), ..default() }, Pickable::IGNORE)).with_children(|c| {
                         c.spawn((text(sim.full_name(), 15.0, Color::WHITE), Pickable::IGNORE));
-                        c.spawn((text(rel.label(), 12.0, Color::srgb(0.75, 0.85, 1.0)), Pickable::IGNORE));
+                        // (Family first: "Son · Good Friend".)
+                        let label = match family.word(my_sim.id, sim.id) {
+                            Some(w) => format!("{w} · {}", rel.label_for(sim.female)),
+                            None => rel.label_for(sim.female),
+                        };
+                        c.spawn((text(label, 12.0, Color::srgb(0.75, 0.85, 1.0)), Pickable::IGNORE));
                         bar(c, rel.friendship, Color::srgb(0.35, 0.85, 0.35), Color::srgb(0.9, 0.3, 0.25));
                         if rel.romance > 0.5 {
                             bar(c, rel.romance, Color::srgb(0.95, 0.45, 0.7), Color::srgb(0.6, 0.25, 0.4));

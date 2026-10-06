@@ -208,6 +208,10 @@ installation is unreachable.
   alone, a babysitter arrives by car, feeds them, changes them and plays with them, and goes
   home (paid §10 an hour) once someone's back. Visitors don't sleep in the family's beds or
   use its shower.
+- **Families**: who is whose parent, from the town's premade families and the household's
+  births and adoptions (kept in saves). The Relationships panel names family ("Son · Good
+  Friend", "Grandmother", "Cousin") and partners as the game does (Wife, Boyfriend, Fiancée),
+  and relatives, out to cousins, can't romance one another.
 - **Maid**: hired by phone (§15 an hour, kept in saves), she comes every morning at nine in the
   game's maid service car and French maid's uniform, clears away the dirty dishes and spoiled
   food, empties the trash cans and goes. The service Sims wear the game's own uniforms (never

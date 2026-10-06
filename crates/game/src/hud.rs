@@ -713,7 +713,7 @@ fn world_click(
             Res<crate::appliances::Alarm>,
         ),
     ),
-    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q): (
+    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -721,6 +721,7 @@ fn world_click(
         Query<&crate::fishbowl::BowlFish>,
         Query<&crate::inventory::Inventory>,
         Query<&crate::upgrades::Upgrades>,
+        Res<crate::family::Genealogy>,
     ),
 ) {
     if buy.is_some_and(|b| b.active) {
@@ -761,7 +762,7 @@ fn world_click(
                 let list: Vec<(String, ActionKind)> = SOCIALS
                     .iter()
                     .enumerate()
-                    .filter(|(_, s)| s.cat == cat && crate::social::available(s, &rel, actor_sim, sim, target_member))
+                    .filter(|(_, s)| s.cat == cat && crate::social::available(s, &rel, actor_sim, sim, target_member, family.kin(actor_sim.id, sim.id).is_some()))
                     // (Nothing more to teach a toddler who's learned it.)
                     .filter(|(_, s)| match s.effect {
                         crate::social::SocialEffect::TeachWalk => !toddler_q.get(t).is_ok_and(|k| k.walks()),
@@ -775,7 +776,7 @@ fn world_click(
                     pie.submenus.push((cat.name().to_string(), list));
                 }
             }
-            let title = format!("{} ({})", sim.full_name(), rel.label());
+            let title = format!("{} ({})", sim.full_name(), rel.label_for(sim.female));
             pie.at = cursor;
             open_pie(&mut commands, &mut pie, cursor, &title, actor, options);
             // Remember which sim "Select" refers to.

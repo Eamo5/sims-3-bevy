@@ -30,6 +30,18 @@ pub struct Relationship {
 }
 
 impl Relationship {
+    /// What they are to one another, in the words for `other` (a woman or a man): "Wife",
+    /// "Boyfriend", "Fiancée", "Good Friend".
+    pub fn label_for(&self, other_female: bool) -> String {
+        let pick = |f: &'static str, m: &'static str| if other_female { f } else { m };
+        match self.status {
+            RelStatus::Married => pick("Wife", "Husband").into(),
+            RelStatus::Engaged => pick("Fiancée", "Fiancé").into(),
+            RelStatus::Partner => pick("Girlfriend", "Boyfriend").into(),
+            _ => self.label(),
+        }
+    }
+
     pub fn label(&self) -> String {
         let friend = match self.friendship {
             v if v < -60.0 => "Enemy",
@@ -224,9 +236,13 @@ pub fn social_index(name: &str) -> Option<usize> {
     SOCIALS.iter().position(|s| s.name == name)
 }
 
-/// Whether `actor` can start this social with `target` (shown in the pie menu).
-pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim, target_in_household: bool) -> bool {
+/// Whether `actor` can start this social with `target` (shown in the pie menu); `kin`: whether
+/// they're family (no romance between relatives).
+pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim, target_in_household: bool, kin: bool) -> bool {
     if rel.friendship < def.min_friendship || rel.romance < def.min_romance || rel.friendship > def.max_friendship {
+        return false;
+    }
+    if kin && (def.cat == SocialCat::Romantic || matches!(def.effect, SocialEffect::WooHoo | SocialEffect::TryForBaby | SocialEffect::Propose | SocialEffect::Marry | SocialEffect::GoSteady)) {
         return false;
     }
     // Babies and toddlers are looked after rather than chatted with.
