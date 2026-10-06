@@ -299,6 +299,8 @@ installation is unreachable.
   each piece as it's picked.
 - **Blinking**: Sims blink every few seconds (the rig's eyelid bones closing over the eyes on
   top of whatever they're doing), and sleep with their eyes shut.
+- **Looking at each other**: in conversation a Sim's head turns towards the other's face on
+  top of their animation, within a natural reach, easing round.
 - **Pie menus** in the game's style: pale bubbles with dark writing, blue under the pointer,
   in a ring round the acting Sim's portrait (what was clicked named beneath it), with
   submenus (›) for long lists.

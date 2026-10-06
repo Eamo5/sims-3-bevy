@@ -339,8 +339,6 @@ pub enum Special {
     Cook,
     /// Change into another of the Sim's outfits (the one planned: `ChangeIntoPlan`).
     ChangeClothes,
-    /// A new everyday outfit from the wardrobe.
-    NewLook,
     /// Choose the everyday outfit piece by piece.
     PlanOutfit,
     /// Set the alarm clock, or turn it off.
@@ -1561,18 +1559,6 @@ fn run_actions(
                                         }
                                         Special::PlanOutfit => {
                                             commands.insert_resource(crate::planner::OutfitPlanner::open(me));
-                                        }
-                                        Special::NewLook => {
-                                            // A different outfit from the wardrobe (the Sim's chosen
-                                            // hairstyle stays).
-                                            commands.entity(me).queue_silenced(|mut e: EntityWorldMut| {
-                                                if let Some(mut s) = e.get_mut::<Sim>() {
-                                                    s.look = rand::random();
-                                                    let hair = s.outfit.hair;
-                                                    s.outfit = OutfitChoice { hair, ..default() };
-                                                }
-                                                e.insert(crate::aging::NeedsNewBody);
-                                            });
                                         }
                                         Special::ServeMeal => {
                                             // A poor cook may set the stove on fire instead.
