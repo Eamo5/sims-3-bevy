@@ -52,6 +52,26 @@ fn vertex(v: Vertex) -> VertexOutput {
     // Its picture's shape, standing on the ground at the tree.
     let h = tree.params.z * scale;
     let w = h * (r.z - r.x) * tree.params.y / max(r.w - r.y, 0.001);
+    // Trees standing between the camera and what it's looking at are faded out of the way, as
+    // the game's are (and right up close the picture is only a blur of big texels anyway). Not
+    // in the sun's view: the shadow stays.
+#ifndef PREPASS_PIPELINE
+    let cam = view.world_position;
+    let mid = origin + vec3<f32>(0.0, h * 0.55, 0.0);
+    var hide = distance(cam, mid) < h * 1.4;
+    let ahead = -back;
+    if (ahead.y < -0.05) {
+        // Where the view meets the ground at the tree's foot, and how near the crown is to the
+        // line of sight to it.
+        let seg = ahead * ((origin.y - cam.y) / ahead.y);
+        let s = clamp(dot(mid - cam, seg) / max(dot(seg, seg), 1e-4), 0.0, 1.0);
+        hide = hide || (s < 0.92 && distance(mid, cam + seg * s) < max(w * 0.5, h * 0.25) + 1.0);
+    }
+    if (hide) {
+        out.position = vec4<f32>(0.0, 0.0, -1.0, 1.0);
+        return out;
+    }
+#endif
     let p = origin + right * ((v.uv.x - 0.5) * w) + up * ((1.0 - v.uv.y) * h);
 
     out.world_position = vec4<f32>(p, 1.0);

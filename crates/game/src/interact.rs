@@ -2200,7 +2200,8 @@ fn autonomy(
                 // badly needs the bathroom unclogs the toilet (the plunger needs no skill).
                 let keen = sim.traits.contains(&crate::life::Trait::Handy) || sim.traits.contains(&crate::life::Trait::Neat);
                 let desperate = obj.kind == ObjectKind::Toilet && motives.0[BLADDER] < -20.0;
-                if household.contains(me) && sim.age.is_grown() && sim.age != Age::Child && (keen || desperate) && !repairman {
+                // (At home: the town's own things are the town's to fix.)
+                if household.contains(me) && my_lot.is_none() && sim.age.is_grown() && sim.age != Age::Child && (keen || desperate) && !repairman {
                     let score = if desperate { urgency(BLADDER) * 40.0 } else { 25.0 } / (1.0 + dist / 25.0);
                     if best.as_ref().is_none_or(|b| score > b.0) {
                         best = Some((score, Action::new(repair_of(obj.kind).0, ActionKind::Repair { target: oe }, true)));

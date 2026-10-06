@@ -450,7 +450,7 @@ fn main() {
         let w: s3bake::WorldBaked = s3bake::read_value(&root.world_dir(&args[i + 1]).join("world.bin")).expect("world");
         for k in &w.tree_kinds {
             let n = w.trees.iter().filter(|t| t.kind == k.kind).count();
-            println!("{:016X} {n:5} trees  atlas {:?} aspect {:.2} height {:.1} radius {:.1} views {:?}", k.kind, root.tex_path(k.billboard), k.atlas_aspect, k.height, k.radius, k.views);
+            println!("{:016X} {n:5} trees round {} views {} atlas {:?} aspect {:.2} height {:.1} radius {:.1}", k.kind, k.round, k.views.len(), root.tex_path(k.billboard), k.atlas_aspect, k.height, k.radius);
         }
         return;
     }
