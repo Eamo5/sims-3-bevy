@@ -21,12 +21,50 @@ pub struct BuildingPlugin;
 
 impl Plugin for BuildingPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<NearbyLots>().add_message::<PoolChanged>().add_systems(
+        app.init_resource::<NearbyLots>().init_resource::<WallMode>().add_message::<PoolChanged>().add_systems(
             Update,
             (follow_selected_floor, view_level_keys, building_visibility, stream_nearby_lots, lamps_at_night, cut_openings)
                 .chain()
                 .run_if(in_state(PlayMode::Live)),
         );
+    }
+}
+
+/// How the house's walls are shown, as the game's three wall buttons have it: up, cut away on
+/// the camera's side, or down.
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WallMode {
+    Up,
+    #[default]
+    Cutaway,
+    Down,
+}
+
+impl WallMode {
+    pub fn next(self) -> Self {
+        match self {
+            WallMode::Up => WallMode::Cutaway,
+            WallMode::Cutaway => WallMode::Down,
+            WallMode::Down => WallMode::Up,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            WallMode::Up => "Walls Up",
+            WallMode::Cutaway => "Cutaway",
+            WallMode::Down => "Walls Down",
+        }
+    }
+
+    /// Whether a wall of the viewed floor at `mid` is cut down, for a camera looking along
+    /// `view` at a house centred on `center`.
+    pub fn cuts(self, mid: Vec3, center: Vec3, view: Vec3) -> bool {
+        match self {
+            WallMode::Up => false,
+            WallMode::Cutaway => (mid - center).dot(view) < 0.3,
+            WallMode::Down => true,
+        }
     }
 }
 
@@ -1714,7 +1752,7 @@ fn view_level_keys(keys: Res<ButtonInput<KeyCode>>, building: Option<ResMut<Acti
 /// away) and the game's imposter from afar.
 #[allow(clippy::type_complexity)]
 fn building_visibility(
-    building: Option<ResMut<ActiveBuilding>>,
+    (building, walls): (Option<ResMut<ActiveBuilding>>, Res<WallMode>),
     cams: Query<(&SimsCamera, &GlobalTransform)>,
     mut pieces: Query<(&BuildingPiece, Option<&WallObject>, &mut Visibility), (Without<LotImposter>, Without<crate::world::Tree>)>,
     mut imposters: Query<(&LotImposter, &mut Visibility), (Without<BuildingPiece>, Without<crate::world::Tree>)>,
@@ -1763,7 +1801,7 @@ fn building_visibility(
     for mut vis in &mut roofs {
         vis.set_if_neq(if exterior && !far { Visibility::Inherited } else { Visibility::Hidden });
     }
-    let is_cut = |mid: Vec3, level: u8| !exterior && level == view_level && (mid - b.center).dot(view) < 0.3;
+    let is_cut = |mid: Vec3, level: u8| !exterior && level == view_level && walls.cuts(mid, b.center, view);
     for (floor, mut vis) in &mut sims {
         vis.set_if_neq(if floor.0 <= view_level { Visibility::Inherited } else { Visibility::Hidden });
     }

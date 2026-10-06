@@ -161,7 +161,7 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, show_designs).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, show_designs, walls_hook).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -384,6 +384,19 @@ fn auto_pick_world(
     } else {
         warn!("--world {name}: no such world");
     }
+}
+
+/// WALLS=up|cutaway|down: the walls shown that way.
+fn walls_hook(mut walls: ResMut<crate::building::WallMode>, mut done: Local<bool>) {
+    if *done {
+        return;
+    }
+    *done = true;
+    *walls = match std::env::var("WALLS").as_deref() {
+        Ok("up") => crate::building::WallMode::Up,
+        Ok("down") => crate::building::WallMode::Down,
+        _ => return,
+    };
 }
 
 /// SHOTS_EVERY=<seconds> (with SHOTS_DIR=<folder>): a picture that often while playing, with

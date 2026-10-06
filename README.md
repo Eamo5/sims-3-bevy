@@ -181,7 +181,8 @@ installation is unreachable.
   roses; picked from swatches while it's in hand, and kept in saves); the town's houses are
   furnished in the very designs their builders chose (each placed object's own, drawn from
   the lot data: quilts, cribs, counter tops and upholstery as they were),
-  multi-storey navigation by stairs, day/night with lamps and street lights. Sims deciding on
+  multi-storey navigation by stairs, walls up, cut away or down (the HUD's walls button or
+  Home), day/night with lamps and street lights. Sims deciding on
   something by themselves think of it in a balloon with its picture.
 - **Build mode painting**: the catalogue's wallpapers and floor coverings (every base-game
   pattern with its name and price, swatched from its texture recipe) on Wallpaper and Floors

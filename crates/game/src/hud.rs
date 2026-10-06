@@ -113,6 +113,13 @@ struct SpeedButton(usize);
 #[derive(Component)]
 struct FloorButton(i8);
 
+/// Cycles the walls: up, cutaway, down (Home too).
+#[derive(Component)]
+struct WallButton;
+
+#[derive(Component)]
+struct WallText;
+
 #[derive(Component)]
 struct FloorText;
 
@@ -397,6 +404,25 @@ fn spawn_hud(mut commands: Commands) {
                     });
                 }
                 p.spawn((text("", 20.0, PLUMBOB_GREEN), FundsText, Node { margin: UiRect::left(Val::Px(12.0)), ..default() }));
+                p.spawn((
+                    Button,
+                    HudButton,
+                    WallButton,
+                    Node {
+                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                        width: Val::Px(104.0),
+                        height: Val::Px(34.0),
+                        margin: UiRect::left(Val::Px(12.0)),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(BTN_NORMAL),
+                    crate::icons::Tooltip("Walls up, cut away or down (Home)".into()),
+                ))
+                .with_children(|b| {
+                    b.spawn((text("Cutaway", 15.0, Color::WHITE), WallText));
+                });
                 p.spawn((Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, margin: UiRect::left(Val::Px(12.0)), display: Display::None, ..default() }, FloorControls))
                     .with_children(|f| {
                         f.spawn((text("", 16.0, Color::WHITE), FloorText, Node { width: Val::Px(62.0), ..default() }));
@@ -1101,13 +1127,29 @@ fn hud_buttons(
     }
 }
 
-/// Floor buttons step the viewed floor; the label shows which floor is in view.
+/// Floor buttons step the viewed floor; the label shows which floor is in view. The walls
+/// button (and Home) cycles walls up, cutaway and down.
+#[allow(clippy::type_complexity)]
 fn floor_controls(
     building: Option<ResMut<crate::building::ActiveBuilding>>,
     buttons: Query<(&Interaction, &FloorButton), Changed<Interaction>>,
-    mut label: Query<&mut Text, With<FloorText>>,
+    mut label: Query<&mut Text, (With<FloorText>, Without<WallText>)>,
     mut controls: Query<&mut Node, With<FloorControls>>,
+    (wall_button, mut wall_text, mut walls, keys): (
+        Query<&Interaction, (Changed<Interaction>, With<WallButton>)>,
+        Query<&mut Text, (With<WallText>, Without<FloorText>)>,
+        ResMut<crate::building::WallMode>,
+        Res<ButtonInput<KeyCode>>,
+    ),
 ) {
+    if wall_button.iter().any(|i| *i == Interaction::Pressed) || keys.just_pressed(KeyCode::Home) {
+        *walls = walls.next();
+    }
+    for mut t in &mut wall_text {
+        if t.0 != walls.label() {
+            t.0 = walls.label().to_string();
+        }
+    }
     let Some(mut b) = building else {
         for mut n in &mut controls {
             n.display = Display::None;
