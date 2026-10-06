@@ -27,6 +27,72 @@ pub struct Relationship {
     pub romance: f32,
     pub status: RelStatus,
     pub kissed: bool,
+    /// When they last spent time together (game minutes; 0: not known, taken as now).
+    pub last: f64,
+}
+
+/// Days without seeing or speaking to each other before a relationship starts to fade.
+pub const FADE_AFTER_DAYS: f64 = 3.0;
+
+/// Keeps track of when Sims last spent time together (a social in person or on the phone).
+pub fn note_contact(clock: Res<crate::clock::GameClock>, mut events: MessageReader<crate::life::LifeEvent>, mut rels: Query<&mut Relationships>) {
+    for ev in events.read() {
+        if let crate::life::LifeEventKind::Socialized { other, .. } = ev.kind
+            && let Ok(mut r) = rels.get_mut(ev.sim)
+        {
+            r.entry(other).last = clock.minutes;
+        }
+    }
+}
+
+/// Relationships fade when Sims don't see or speak to each other for a few days, as the game's
+/// do: friends drift towards acquaintances (good friends more slowly), romance cools unless
+/// they're together, and grudges soften. Spouses, partners and family stay close. The
+/// household's relationships, both ways (the town's Sims among themselves are left as they
+/// are).
+pub fn fade_relationships(
+    clock: Res<crate::clock::GameClock>,
+    mut last_hour: Local<i64>,
+    mut q: Query<(Entity, &crate::sim::Sim, &mut Relationships, Has<crate::sim::HouseholdMember>)>,
+    family: Res<crate::family::Genealogy>,
+) {
+    let hour = (clock.minutes / 60.0) as i64;
+    if hour == *last_hour {
+        return;
+    }
+    *last_hour = hour;
+    let household: std::collections::HashSet<Entity> = q.iter().filter(|x| x.3).map(|x| x.0).collect();
+    let ids: HashMap<Entity, u64> = q.iter().map(|x| (x.0, x.1.id)).collect();
+    for (_, sim, mut rels, member) in &mut q {
+        for (other, r) in rels.0.iter_mut() {
+            if r.last <= 0.0 {
+                r.last = clock.minutes;
+                continue;
+            }
+            if (!member && !household.contains(other)) || (clock.minutes - r.last) / 1440.0 < FADE_AFTER_DAYS {
+                continue;
+            }
+            let together = matches!(r.status, RelStatus::Married | RelStatus::Engaged | RelStatus::Partner);
+            let kin = ids.get(other).is_some_and(|o| family.kin(sim.id, *o).is_some());
+            let per_day = if together || kin {
+                0.25
+            } else if r.friendship >= 60.0 {
+                0.5
+            } else {
+                1.0
+            };
+            let step = per_day / 24.0;
+            let floor = if together || kin { 40.0 } else { 0.0 };
+            if r.friendship > floor {
+                r.friendship = (r.friendship - step).max(floor);
+            } else if r.friendship < 0.0 {
+                r.friendship = (r.friendship + step * 0.5).min(0.0);
+            }
+            if !together && r.romance > 0.0 {
+                r.romance = (r.romance - step).max(0.0);
+            }
+        }
+    }
 }
 
 impl Relationship {
@@ -339,4 +405,47 @@ pub fn acceptance(def: &SocialDef, rel: &Relationship, target: &Sim, target_mood
         p -= 0.15;
     }
     p.clamp(0.02, 1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn friendships_fade_without_contact() {
+        let mut app = App::new();
+        app.insert_resource(crate::clock::GameClock::default()).init_resource::<crate::family::Genealogy>().add_systems(Update, fade_relationships);
+        let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(3);
+        let a_sim = crate::sim::random_sim(&mut rng, "Test", Some(true), Age::Adult);
+        let b_sim = crate::sim::random_sim(&mut rng, "Test", Some(false), Age::Adult);
+        let b = app.world_mut().spawn((b_sim, Relationships::default())).id();
+        let a = app.world_mut().spawn((a_sim, crate::sim::HouseholdMember, Relationships::default())).id();
+        let start = 1440.0;
+        for (me, other, status) in [(a, b, RelStatus::None), (b, a, RelStatus::None)] {
+            let mut rels = app.world_mut().get_mut::<Relationships>(me).unwrap();
+            *rels.entry(other) = Relationship { friendship: 50.0, romance: 20.0, status, kissed: false, last: start };
+        }
+        let mut run_hours = |app: &mut App, from: f64, hours: usize| {
+            for h in 0..hours {
+                app.world_mut().resource_mut::<crate::clock::GameClock>().minutes = from + h as f64 * 60.0;
+                app.update();
+            }
+        };
+        // Two days apart: as they were.
+        run_hours(&mut app, start + 60.0, 48);
+        assert_eq!(app.world().get::<Relationships>(a).unwrap().friendship(b), 50.0);
+        // Five days apart: a day and a half of fading, both ways (friendship a point a day,
+        // romance too).
+        run_hours(&mut app, start + 3.5 * 1440.0, 48);
+        for (me, other) in [(a, b), (b, a)] {
+            let r = app.world().get::<Relationships>(me).unwrap().get(other);
+            assert!(r.friendship < 50.0 && r.friendship > 47.5, "{}", r.friendship);
+            assert!(r.romance < 20.0, "{}", r.romance);
+        }
+        // Spouses stay close.
+        app.world_mut().get_mut::<Relationships>(a).unwrap().entry(b).status = RelStatus::Married;
+        app.world_mut().get_mut::<Relationships>(a).unwrap().entry(b).friendship = 41.0;
+        run_hours(&mut app, start + 10.0 * 1440.0, 24 * 10);
+        assert_eq!(app.world().get::<Relationships>(a).unwrap().friendship(b), 40.0);
+    }
 }

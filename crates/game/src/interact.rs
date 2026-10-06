@@ -20,7 +20,7 @@ impl Plugin for InteractPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Notifications>().add_systems(
             Update,
-            (comings_and_goings, off_lot_idle, autonomy, run_actions, motive_warnings, pay_bills, parties)
+            (comings_and_goings, off_lot_idle, autonomy, run_actions, motive_warnings, pay_bills, parties, crate::social::note_contact, crate::social::fade_relationships)
                 .chain()
                 .run_if(in_state(PlayMode::Live)),
         );
@@ -1976,6 +1976,7 @@ fn run_actions(
                             if elapsed >= PHONE_CHAT_MINUTES {
                                 finished = true;
                                 life.write(LifeEvent::new(me, LifeEventKind::Socialized { other: *target, social: "Chat" }));
+                                life.write(LifeEvent::new(*target, LifeEventKind::Socialized { other: me, social: "Chat" }));
                             }
                         }
                         ActionKind::Invite { target } => {
@@ -2138,6 +2139,7 @@ fn autonomy(
     (broken, plant_q, lit_q, hw_q): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>, Query<(), With<crate::fireplace::Lit>>, Query<(), With<crate::rabbitholes::Homework>>),
     (party_on, trash_q): (Option<Res<Party>>, Query<&crate::surroundings::TrashFill>),
     (called, repairmen): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>),
+    friends_away: Query<(Entity, &Sim), (With<OffLot>, Without<Invited>)>,
 ) {
     if delta.0 <= 0.0 {
         return;
@@ -2320,6 +2322,18 @@ fn autonomy(
                 if best.as_ref().is_none_or(|b| score > b.0) {
                     best = Some((score, Action::new(s.name, ActionKind::Social { target: other, social: si }, true)));
                 }
+            }
+        }
+        // Lonely at home with nobody to talk to: a friend on the phone (a chat in person is
+        // better, when there's someone about).
+        let grown = matches!(sim.age, Age::Teen | Age::YoungAdult | Age::Adult | Age::Elder);
+        if motives.0[SOCIAL] < social_need && grown && my_lot.is_none() && household.contains(me)
+            && let Some((_, friend, name)) =
+                friends_away.iter().filter_map(|(e, s)| Some((rels.0.get(&e)?.friendship, e, s.full_name()))).filter(|x| x.0 > 15.0).max_by(|a, b| a.0.total_cmp(&b.0))
+        {
+            let score = (PHONE_CHAT_SOCIAL * PHONE_CHAT_MINUTES / 60.0) * urgency(SOCIAL) * 0.6 * rng.random_range(0.8..1.2);
+            if best.as_ref().is_none_or(|b| score > b.0) {
+                best = Some((score, Action::new(format!("Chat with {name}"), ActionKind::PhoneChat { target: friend }, true)));
             }
         }
         if let Some((score, action)) = best

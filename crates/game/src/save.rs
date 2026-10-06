@@ -134,6 +134,9 @@ pub struct SavedRel {
     pub romance: f32,
     pub status: String,
     pub kissed: bool,
+    /// When they last spent time together (game minutes; older saves: taken as when loaded).
+    #[serde(default)]
+    pub last: f64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -549,7 +552,7 @@ fn save_game(
                 .0
                 .iter()
                 .filter_map(|(e, r)| {
-                    Some(SavedRel { with: *ids.get(e)?, friendship: r.friendship, romance: r.romance, status: status_name(r.status).into(), kissed: r.kissed })
+                    Some(SavedRel { with: *ids.get(e)?, friendship: r.friendship, romance: r.romance, status: status_name(r.status).into(), kissed: r.kissed, last: r.last })
                 })
                 .collect(),
             lifetime_happiness: wishes.map_or(0, |w| w.points),
@@ -690,6 +693,7 @@ fn apply_loaded_game(
                 x.romance = r.romance;
                 x.status = status_from(&r.status);
                 x.kissed = r.kissed;
+                x.last = r.last;
             }
         }
         let mut ec = commands.entity(e);
