@@ -436,7 +436,7 @@ pub fn spawn_game_object_rot(
     spawn_game_object_design(commands, assets, ctx, catalog, objd, pos, rotation, None)
 }
 
-/// [`spawn_game_object_rot`] in one of the object's designs (`None`: as the game ships it).
+/// [`spawn_game_object_rot`] in a design (`None`: as the game ships it).
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_game_object_design(
     commands: &mut Commands,
@@ -446,9 +446,9 @@ pub fn spawn_game_object_design(
     objd: Key,
     pos: Vec3,
     rotation: Quat,
-    design: Option<u8>,
+    design: Option<Key>,
 ) -> Option<SpawnedObject> {
-    let design = design.filter(|d| *d < ObjectAssets::design_count(ctx, objd));
+    let design = design.filter(|d| assets.design_applies(ctx, objd, *d));
     let parts = assets.object_design(ctx, objd, design);
     let (mn, mx) = parts_bounds(&parts)?;
     let entry = catalog.by_key(&objd);

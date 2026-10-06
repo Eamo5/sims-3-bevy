@@ -10,7 +10,7 @@ pub const BAKE_VERSION: u32 = 4;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
 pub const CAS_VERSION: u32 = 9;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 32;
+pub const WORLD_VERSION: u32 = 33;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -306,7 +306,14 @@ pub struct LotObjectBaked {
     pub level: u8,
     /// Position in lot-local tile coordinates.
     pub local: [f32; 2],
+    /// The design it was furnished in (its colours and patterns, drawn into the texture store),
+    /// in place of the object's own composited texture.
+    pub design: Option<Key>,
 }
+
+/// Texture-store type of the designs the lots' furniture is in: `(T_LOT_DESIGN, 0, hash of
+/// the design)`, shared by every object in the same design.
+pub const T_LOT_DESIGN: u32 = 0x0DE5_1601;
 
 /// A pre-built house: walls, floors and furniture of one lot.
 #[derive(Serialize, Deserialize, Clone, Debug)]

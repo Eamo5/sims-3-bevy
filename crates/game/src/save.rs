@@ -141,9 +141,19 @@ pub struct SavedObject {
     pub objd: (u32, u32, u64),
     pub position: [f32; 3],
     pub rotation: [f32; 4],
-    /// The design it's in (none: as the game ships it).
+    /// The design it's in: one of the catalogue's (by number), or one a lot was furnished in
+    /// (its texture); neither: as the game ships it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub design: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub design_key: Option<(u32, u32, u64)>,
+}
+
+impl SavedObject {
+    /// The design's texture.
+    pub fn design_texture(&self) -> Option<s3bake::Key> {
+        self.design_key.or(self.design.map(|d| crate::objects::design_texture(self.objd, d)))
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -426,7 +436,15 @@ fn status_from(s: &str) -> RelStatus {
 pub const SKILLS: [&str; 10] = ["Athletic", "Charisma", "Cooking", "Fishing", "Gardening", "Guitar", "Handiness", "Logic", "Painting", "Writing"];
 
 fn saved_object(o: &GameObject, tf: &Transform, design: Option<&crate::objects::Design>) -> SavedObject {
-    SavedObject { objd: o.objd, position: tf.translation.to_array(), rotation: tf.rotation.to_array(), design: design.map(|d| d.0) }
+    let key = design.map(|d| d.0);
+    let preset = key.filter(|k| k.0 == s3bake::gamedata::T_DESIGN && k.2 == o.objd.2).map(|k| k.1 as u8);
+    SavedObject {
+        objd: o.objd,
+        position: tf.translation.to_array(),
+        rotation: tf.rotation.to_array(),
+        design: preset,
+        design_key: key.filter(|_| preset.is_none()),
+    }
 }
 
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
@@ -783,7 +801,7 @@ fn apply_loaded_game(
     }
     for b in &game.bought {
         let rot = Quat::from_array(b.rotation);
-        if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, b.objd, Vec3::from(b.position), rot, b.design) {
+        if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, b.objd, Vec3::from(b.position), rot, b.design_texture()) {
             commands.entity(o.entity).insert(Bought);
         }
     }
@@ -841,9 +859,14 @@ mod tests {
     fn bought_objects_keep_their_design() {
         let old: SavedObject = serde_json::from_str(r#"{"objd":[1,0,2],"position":[1.0,2.0,3.0],"rotation":[0.0,0.0,0.0,1.0]}"#).unwrap();
         assert_eq!(old.design, None);
-        let o = SavedObject { design: Some(3), ..old };
+        assert_eq!(old.design_texture(), None);
+        let o = SavedObject { design: Some(3), ..old.clone() };
         let back: SavedObject = serde_json::from_str(&serde_json::to_string(&o).unwrap()).unwrap();
-        assert_eq!(back.design, Some(3));
+        assert_eq!(back.design_texture(), Some(crate::objects::design_texture((1, 0, 2), 3)));
+        // (A lot's own design, by its texture.)
+        let o = SavedObject { design_key: Some((7, 0, 9)), ..old };
+        let back: SavedObject = serde_json::from_str(&serde_json::to_string(&o).unwrap()).unwrap();
+        assert_eq!(back.design_texture(), Some((7, 0, 9)));
     }
 
     #[test]

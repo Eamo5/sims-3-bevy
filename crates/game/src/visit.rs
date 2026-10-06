@@ -128,14 +128,14 @@ fn open_lot(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetC
             let pos = Vec3::from(o.position);
             // Upstairs is out of reach: shown only.
             if o.level > 1 {
-                let parts = assets.object(ctx, o.objd);
+                let parts = assets.object_design(ctx, o.objd, o.design);
                 if !parts.is_empty() {
                     let e = spawn_parts(commands, &parts, Transform::from_translation(pos).with_rotation(q));
                     commands.entity(e).insert(ChildOf(root));
                 }
                 continue;
             }
-            let Some(s) = crate::home::spawn_game_object_rot(commands, assets, ctx, catalog, o.objd, pos, q) else { continue };
+            let Some(s) = crate::home::spawn_game_object_design(commands, assets, ctx, catalog, o.objd, pos, q, o.design) else { continue };
             commands.entity(s.entity).insert((LotObject(lot), Floor(1)));
             if crate::building::is_opening(&o.script).is_some() || o.script.contains("Column") {
                 commands.entity(s.entity).remove::<Obstacle>();

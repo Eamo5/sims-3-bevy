@@ -713,7 +713,7 @@ fn show_designs(
     let face = Quat::from_rotation_arc(Vec3::Z, -ahead);
     for d in 0..n.max(1) {
         let at = tf.translation + ahead * 2.5 + side * (d as f32 - (n as f32 - 1.0) / 2.0) * width;
-        crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, objd, at, face, Some(d));
+        crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, objd, at, face, Some(crate::objects::design_texture(objd, d)));
     }
     if let Ok(mut c) = cam.single_mut() {
         c.look_at(tf.translation + ahead * 2.5);
@@ -730,7 +730,7 @@ fn show_designs(
                     w.resource_scope(|w, mut images: Mut<Assets<Image>>| {
                         let mut mats = w.resource_mut::<Assets<StandardMaterial>>();
                         let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-                        assets.object_design(&mut ctx, objd, Some(1))
+                        assets.object_design(&mut ctx, objd, Some(crate::objects::design_texture(objd, 1)))
                     })
                 })
             })
@@ -742,7 +742,7 @@ fn show_designs(
         }
         let mut b = w.resource_mut::<crate::buy::BuyMode>();
         b.show(0);
-        b.placing = Some(crate::buy::Placing { objd, ghost, owned: false, design: Some(1) });
+        b.placing = Some(crate::buy::Placing { objd, ghost, owned: false, design: Some(crate::objects::design_texture(objd, 1)) });
     });
 }
 

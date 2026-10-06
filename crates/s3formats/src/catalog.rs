@@ -76,6 +76,50 @@ pub struct Complate {
 }
 
 impl Complate {
+    /// The complate written out with its resources by key (not by index into a resource
+    /// list), so the same design reads the same wherever it's kept.
+    pub fn canonical(&self, keys: &[ResourceKey]) -> String {
+        let mut s = String::new();
+        self.write_canonical(keys, &mut s);
+        s
+    }
+
+    fn write_canonical(&self, keys: &[ResourceKey], s: &mut String) {
+        use std::fmt::Write;
+        let key = |i: u8| keys.get(i as usize).map_or_else(|| "-".to_string(), |k| k.to_string());
+        let _ = write!(s, "[{}|{}|{}", key(self.xml), self.name, self.pattern);
+        // (Where the artist's file was, and the last digits of numbers, don't change the look.)
+        let num = |x: f32| format!("{:.3}", x);
+        let mut ov: Vec<String> = self
+            .overrides
+            .iter()
+            .filter(|(k, _)| !k.eq_ignore_ascii_case("daeFilePath"))
+            .map(|(k, v)| match v {
+                CValue::Tgi(i) => format!("{k}={}", key(*i)),
+                CValue::Float(x) => format!("{k}={}", num(*x)),
+                CValue::Xy(x) => format!("{k}={},{}", num(x[0]), num(x[1])),
+                CValue::Xyz(x) => format!("{k}={},{},{}", num(x[0]), num(x[1]), num(x[2])),
+                CValue::Str(s) => {
+                    let parts: Vec<Option<f32>> = s.split(',').map(|p| p.trim().parse::<f32>().ok()).collect();
+                    if parts.iter().all(|p| p.is_some()) {
+                        format!("{k}={}", parts.iter().map(|p| num(p.unwrap())).collect::<Vec<_>>().join(","))
+                    } else {
+                        format!("{k}={s}")
+                    }
+                }
+                v => format!("{k}={v:?}"),
+            })
+            .collect();
+        ov.sort();
+        for o in ov {
+            let _ = write!(s, ";{o}");
+        }
+        for b in &self.blocks {
+            b.write_canonical(keys, s);
+        }
+        s.push(']');
+    }
+
     pub fn get(&self, name: &str) -> Option<&CValue> {
         self.overrides.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, v)| v)
     }

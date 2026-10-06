@@ -362,8 +362,11 @@ model:       u16 residxModel                      // -> MODL 0x01661233 (group 1
              if REFS[residxComplate] is not the null TGI:
                  u32 2; u32 2; u32 blockLen
                  if blockLen != 0:
-                     u8 block[blockLen]            // material block (see catalog resource docs) [WIKI]
-                     u8 n6; u16 residx[n6]
+                     u8 block[blockLen]            // the object's own design [VERIFIED]: u16 0x42,
+                                                   // u32 TGI offset, u32 TGI size, then a compact
+                                                   // complate (as in a CWAL) whose Tgi indices go
+                                                   // through residx[] below (its TGI list is empty)
+                     u8 n6; u16 residx[n6]         // -> REFS (the OBJN's own)
              if visualstate component present:
                  u8 ?[9]                           // [WIKI: 4 bytes, u32 MTST state hash, 1 byte]
                  f32 bbox[6]                       // minX,minY,minZ,maxX,maxY,maxZ (object space)
@@ -404,6 +407,19 @@ OBJD instance 0x78A while its OBJN header lists the same 0x78A under the OBJK ty
 Final transform = `T(location) · R(quaternion)`; for `tree`, use each instance matrix and scale.
 Objects with `parentGuid != 0` (260 in SV) are slotted into another object (e.g. flag effects on a
 pole, items on counters); their location is still given in world space.
+
+**Designs.** An OBJD's materials are its catalogue designs: each `u8 type, (u32 if type != 1),
+u32 len, u16 0x42, u32 TGI offset, u32 TGI size, complate, TGI list, u32`, the complate usually
+`ObjectRgbMask` / `ObjectRgbaMask` (mask, overlay, multiplier, specular and up to four pattern
+blocks). Rendered at the size of the object's composited (TXTC) diffuse, a design stands in for
+that texture on every mesh using it; the shipped TXTC is one of them (not always the first: the
+country couch ships its third, red plaid). Placed objects keep their own design inline in the
+model component (above): in Sunset Valley 7,277 of 10,483 objects have one, but most of the
+world's props name a legacy placeholder (`Pattern A = OLD\defaultWood`, flat colours); those
+keep their shipped texture here [GUESS: what the game itself draws for them is unchecked], and
+only the other designs are drawn (580 different ones in SV, about 2,500 in Twinbrook or
+Bridgeport). Compared with the catalogue's designs, a placed object's has an extra
+`daeFilePath` and fewer decimals. [VERIFIED apart from the placeholders]
 
 Sunset Valley totals: 10,119 objects; 406 tree objects carrying 5,596 tree instances; script classes
 include windows/doors/stairs/street lights/mailboxes/parking spaces/rabbit holes.

@@ -397,8 +397,29 @@ fn main() {
         let all = s3formats::objn::load_world_objects(&w);
         let lot = w.of_type(0xD063545B).find(|e| e.key.i == id).and_then(|e| s3formats::world::LotInfo::parse(id, &w.read(e).ok()?).ok());
         if let Some(l) = &lot { println!("lot corner {:?} rot {} size {}x{}", l.corner, l.rotation, l.width, l.depth); }
-        for o in all.get(&id).map(|v| v.as_slice()).unwrap_or(&[]) {
+        // (DESIGNS=<install root>: each object's own design, its complate and patterns; with
+        // DESIGN_PNG=<dir>, drawn too.)
+        let install = std::env::var("DESIGNS").ok().map(|root| {
+            let mut set = s3pkg::install::open_install(std::path::Path::new(&root), |_| true);
+            set.add(Package::open(&args[2]).unwrap());
+            set
+        });
+        for (n, o) in all.get(&id).map(|v| v.as_slice()).unwrap_or(&[]).iter().enumerate() {
             println!("{:?} pos {:?} rot {:?} script {:?} model {:?}", o.catalog.map(|c| c.to_string()), o.position.map(|p| p.map(|v| (v * 100.0).round() / 100.0)), o.rotation.map(|v| (v * 1000.0).round() / 1000.0), o.script, o.model.map(|m| m.to_string()));
+            if let (Some(set), Some((c, keys))) = (&install, &o.design) {
+                let blocks: Vec<String> = c.blocks.iter().map(|b| format!("{} ({})", b.name, b.pattern)).collect();
+                println!("    design {} xml {:?} keys {} blocks {blocks:?}", c.name, keys.get(c.xml as usize).map(|k| k.to_string()), keys.len());
+                if let Ok(dir) = std::env::var("DESIGN_PNG")
+                    && let Some(img) = s3formats::complate::render(set, c, keys, 256, 256)
+                {
+                    let name = o.catalog.and_then(|k| set.read(&k)).and_then(|d| s3formats::object::parse_objd(&d).ok()).map(|x| x.instance_name).unwrap_or_default();
+                    let f = std::fs::File::create(std::path::Path::new(&dir).join(format!("{n:03}_{name}.png"))).unwrap();
+                    let mut enc = png::Encoder::new(std::io::BufWriter::new(f), img.width as u32, img.height as u32);
+                    enc.set_color(png::ColorType::Rgba);
+                    enc.set_depth(png::BitDepth::Eight);
+                    enc.write_header().unwrap().write_image_data(&img.data).unwrap();
+                }
+            }
         }
         return;
     }
@@ -970,6 +991,54 @@ fn main() {
             }
         }
         let _ = d;
+        return;
+    }
+    if args[1] == "lotdesignstats" {
+        // lotdesignstats <root> <world>: how many of the lots' objects have designs of their own,
+        // how many different ones, and how many are one of the catalogue's.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let w = Package::open(&args[3]).unwrap();
+        let all = s3formats::objn::load_world_objects(&w);
+        let mut stock: std::collections::HashMap<String, (u64, usize)> = std::collections::HashMap::new();
+        let mut presets_of: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+        let (mut with, mut total, mut matched) = (0, 0, 0);
+        let mut unique: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for objs in all.values() {
+            for o in objs {
+                total += 1;
+                let (Some((c, keys)), Some(cat)) = (&o.design, o.catalog) else { continue };
+                with += 1;
+                if let std::collections::hash_map::Entry::Vacant(e) = presets_of.entry(cat.i) {
+                    let objd = set.read(&cat).and_then(|d| s3formats::object::parse_objd(&d).ok());
+                    for (i, p) in objd.iter().flat_map(|o| o.presets.iter()).enumerate() {
+                        stock.insert(p.complate.canonical(&p.keys), (cat.i, i));
+                    }
+                    e.insert(objd.map_or(0, |o| o.presets.len()));
+                }
+                let canon = c.canonical(keys);
+                if canon.contains("=OLD\\") {
+                    *unique.entry("OLD".into()).or_default() += 1;
+                    continue;
+                }
+                // (DIFF=<n>: the first n unmatched next to the object's first design.)
+                if let Some(n) = std::env::var("DIFF").ok().and_then(|v| v.parse::<usize>().ok())
+                    && unique.len() < n
+                    && !stock.contains_key(&canon)
+                {
+                    let objd = set.read(&cat).and_then(|d| s3formats::object::parse_objd(&d).ok());
+                    println!("LOT   {canon}");
+                    if let Some(p) = objd.as_ref().and_then(|o| o.presets.first()) {
+                        println!("STOCK {}", p.complate.canonical(&p.keys));
+                    }
+                }
+                if stock.get(&canon).is_some_and(|(i, _)| *i == cat.i) {
+                    matched += 1;
+                } else {
+                    *unique.entry(canon).or_default() += 1;
+                }
+            }
+        }
+        println!("{total} objects, {with} with a design, {matched} of them a catalogue design, {} other designs ({} uses)", unique.len(), unique.values().sum::<usize>());
         return;
     }
     if args[1] == "presetstats" {

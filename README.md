@@ -172,7 +172,9 @@ installation is unreachable.
   gnomes, sprinklers, picnic tables and trees under Electronics, Outdoors and Misc), each in
   any of the game's designs for it (the catalogue's colour and pattern presets, drawn from
   their texture recipes: the country couch in blue dots, green stripes, red plaid, cowhide or
-  roses; picked from swatches while it's in hand, and kept in saves),
+  roses; picked from swatches while it's in hand, and kept in saves); the town's houses are
+  furnished in the very designs their builders chose (each placed object's own, drawn from
+  the lot data: quilts, cribs, counter tops and upholstery as they were),
   multi-storey navigation by stairs, day/night with lamps and street lights. Sims deciding on
   something by themselves think of it in a balloon with its picture.
 - **Build mode painting**: the catalogue's wallpapers and floor coverings (every base-game

@@ -1450,7 +1450,7 @@ pub fn spawn_building(
         let entity = if visit {
             Entity::PLACEHOLDER
         } else if let Some(root) = neighbor {
-            let parts = assets.object(ctx, o.objd);
+            let parts = assets.object_design(ctx, o.objd, o.design);
             if parts.is_empty() {
                 continue;
             }
@@ -1458,7 +1458,7 @@ pub fn spawn_building(
             commands.entity(e).insert(ChildOf(root));
             e
         } else {
-            let Some(spawned) = crate::home::spawn_game_object_rot(commands, assets, ctx, catalog, o.objd, Vec3::from(o.position), q) else {
+            let Some(spawned) = crate::home::spawn_game_object_design(commands, assets, ctx, catalog, o.objd, Vec3::from(o.position), q, o.design) else {
                 missing.push(o.script.rsplit('.').next().unwrap_or("").to_string());
                 continue;
             };

@@ -24,9 +24,10 @@ pub struct ModelPart {
     pub unlit: bool,
 }
 
-/// A catalogue object in one of its designs (index into the game's presets for it).
+/// A catalogue object in a design: the texture drawn from it, in place of the object's own
+/// composited texture (one of the catalogue's designs, or one the lot was furnished in).
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Design(pub u8);
+pub struct Design(pub Key);
 
 /// The texture of an object's design.
 pub fn design_texture(objd: Key, design: u8) -> Key {
@@ -41,7 +42,7 @@ pub struct ImposterLayer(pub u8);
 pub struct ObjectAssets {
     models: HashMap<Key, Vec<ModelPart>>,
     objects: HashMap<Key, Vec<ModelPart>>,
-    designed: HashMap<(Key, u8), Vec<ModelPart>>,
+    designed: HashMap<(Key, Key), Vec<ModelPart>>,
     textures: HashMap<Key, Option<Handle<Image>>>,
     materials: HashMap<(Option<Key>, u8, bool), Handle<StandardMaterial>>,
 }
@@ -179,28 +180,34 @@ impl ObjectAssets {
         ctx.baked.designs.get(&objd).map_or(0, |d| d.count)
     }
 
-    /// A catalogue object's parts in one of its designs (`None`: as the game ships it).
-    pub fn object_design(&mut self, ctx: &mut AssetCtx, objd: Key, design: Option<u8>) -> Vec<ModelPart> {
+    /// Whether an object can be drawn in a design (it has a composited texture for designs to
+    /// stand in for, and the design's been drawn).
+    pub fn design_applies(&mut self, ctx: &mut AssetCtx, objd: Key, design: Key) -> bool {
+        ctx.baked.designs.contains_key(&objd) && self.texture(ctx, design).is_some()
+    }
+
+    /// A catalogue object's parts in a design (`None`: as the game ships it).
+    pub fn object_design(&mut self, ctx: &mut AssetCtx, objd: Key, design: Option<Key>) -> Vec<ModelPart> {
         let parts = self.object(ctx, objd);
-        let (Some(d), Some(info)) = (design, ctx.baked.designs.get(&objd)) else { return parts };
-        if d >= info.count {
-            return parts;
-        }
-        if let Some(p) = self.designed.get(&(objd, d)) {
+        let (Some(tex), Some(texture)) = (design, ctx.baked.designs.get(&objd).map(|d| d.texture)) else { return parts };
+        if let Some(p) = self.designed.get(&(objd, tex)) {
             return p.clone();
         }
-        let (texture, tex) = (info.texture, design_texture(objd, d));
-        let out: Vec<ModelPart> = parts
-            .into_iter()
-            .map(|mut p| {
-                if p.tex == Some(texture) {
-                    p.material = self.material_for_key(ctx, Some(tex), p.mode, p.unlit);
-                    p.tex = Some(tex);
-                }
-                p
-            })
-            .collect();
-        self.designed.insert((objd, d), out.clone());
+        let out: Vec<ModelPart> = if self.texture(ctx, tex).is_none() {
+            parts
+        } else {
+            parts
+                .into_iter()
+                .map(|mut p| {
+                    if p.tex == Some(texture) {
+                        p.material = self.material_for_key(ctx, Some(tex), p.mode, p.unlit);
+                        p.tex = Some(tex);
+                    }
+                    p
+                })
+                .collect()
+        };
+        self.designed.insert((objd, tex), out.clone());
         out
     }
 

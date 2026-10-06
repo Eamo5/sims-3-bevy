@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 49;
+pub const GAMEDATA_VERSION: u32 = 50;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -590,8 +590,9 @@ pub const T_DESIGN: u32 = 0x0DE5_1600;
 /// How big designs are drawn (the longer side).
 const DESIGN_SIZE: usize = 256;
 
-/// A catalogue object's designs (the game's colour and pattern presets for it): how many, and
-/// the texture of its meshes they stand in for (the object's composited texture).
+/// A catalogue object's designs (the game's colour and pattern presets for it): how many drawn
+/// (none when it comes in just the one), and the texture of its meshes designs stand in for
+/// (the object's composited texture; the lots' furniture is in designs of its own too).
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ObjectDesigns {
     pub objd: crate::types::Key,
@@ -609,7 +610,7 @@ fn bake_object_designs(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, Stri
     let buyable: Vec<&crate::types::CatalogEntry> = catalog.iter().filter(|c| c.price >= 0).collect();
     let out: Vec<ObjectDesigns> = crate::bake::par_map(&buyable, |c| {
         let o = s3formats::object::parse_objd(&pkgs.read(&crate::types::rkey(c.objd))?).ok()?;
-        if o.presets.len() < 2 {
+        if o.presets.is_empty() {
             return None;
         }
         // The one composited texture the designs are recipes for.
@@ -633,7 +634,7 @@ fn bake_object_designs(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, Stri
         let scale = DESIGN_SIZE as f32 / w.max(h) as f32;
         let (w, h) = (((w as f32 * scale) as usize).max(16), ((h as f32 * scale) as usize).max(16));
         let mut count = 0u8;
-        for (i, p) in o.presets.iter().enumerate().take(16) {
+        for (i, p) in o.presets.iter().enumerate().take(16).filter(|_| o.presets.len() > 1) {
             let key = (T_DESIGN, i as u32, c.objd.2);
             if !root.tex_path(key).exists() {
                 let Some(img) = s3formats::complate::render(pkgs, &p.complate, &p.keys, w, h) else { break };
@@ -641,7 +642,7 @@ fn bake_object_designs(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, Stri
             }
             count = i as u8 + 1;
         }
-        (count >= 2).then_some(ObjectDesigns { objd: c.objd, count, texture })
+        Some(ObjectDesigns { objd: c.objd, count, texture })
     })
     .into_iter()
     .flatten()

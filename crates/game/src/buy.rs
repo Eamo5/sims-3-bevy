@@ -42,8 +42,8 @@ pub struct Placing {
     pub ghost: Entity,
     /// Moving an object already owned (no charge).
     pub owned: bool,
-    /// The design it's in (none: as the game ships it).
-    pub design: Option<u8>,
+    /// The design it's in (its texture; none: as the game ships it).
+    pub design: Option<Key>,
 }
 
 #[derive(Resource, Default)]
@@ -504,7 +504,7 @@ fn buy_panel(
                     row.spawn(text(format!("{name} · Design"), 14.0, Color::WHITE));
                     for d in 0..n {
                         let tex = assets.texture(&mut ctx, crate::objects::design_texture(pl.objd, d));
-                        let chosen = pl.design == Some(d);
+                        let chosen = pl.design == Some(crate::objects::design_texture(pl.objd, d));
                         row.spawn((
                             Button,
                             BuyButton::Design(d),
@@ -611,12 +611,13 @@ fn buy_buttons(
                 // The object in hand, in that design.
                 let Some(p) = buy.placing.as_mut() else { continue };
                 let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-                let parts = assets.object_design(&mut ctx, p.objd, Some(*d));
+                let design = crate::objects::design_texture(p.objd, *d);
+                let parts = assets.object_design(&mut ctx, p.objd, Some(design));
                 let at = ghost_tf.get(p.ghost).copied().unwrap_or_default();
                 commands.entity(p.ghost).despawn();
                 p.ghost = spawn_parts(&mut commands, &parts, at);
                 commands.entity(p.ghost).insert(DespawnOnExit(AppState::InGame));
-                p.design = Some(*d);
+                p.design = Some(design);
                 buy.dirty = true;
                 play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
             }

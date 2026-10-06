@@ -62,6 +62,9 @@ pub struct PlacedObject {
     pub script: Option<String>,
     pub speedtree: Option<ResourceKey>,
     pub trees: Vec<TreeInstance>,
+    /// The design it's in (its colours and patterns, as chosen for this one): a complate and
+    /// the resources it refers to.
+    pub design: Option<(crate::catalog::Complate, Vec<ResourceKey>)>,
 }
 
 fn skip_anim(r: &mut Reader) -> R<()> {
@@ -240,9 +243,23 @@ fn parse_object(r: &mut Reader, refs: &HashMap<u16, ResourceKey>) -> R<PlacedObj
             r.u32()?;
             let off = r.u32()? as usize;
             if off != 0 {
+                // The design: a material block (u16, the TGI list's offset and size, the
+                // complate), then the REFS indices its resources resolve through.
+                let start = r.pos;
+                let mut m = Reader::at(r.data, start);
+                let complate = (|| -> R<crate::catalog::Complate> {
+                    m.u16()?;
+                    m.u32()?;
+                    m.u32()?;
+                    crate::catalog::read_complate(&mut m)
+                })();
                 r.skip(off)?;
                 let c6 = r.u8()? as usize;
-                r.skip(c6 * 2)?;
+                let idx = (0..c6).map(|_| r.u16()).collect::<R<Vec<u16>>>()?;
+                if let Ok(c) = complate {
+                    let keys = idx.iter().map(|i| refs.get(i).copied().unwrap_or(ResourceKey::new(0, 0, 0))).collect();
+                    o.design = Some((c, keys));
+                }
             }
         }
         if has(C_VISUALSTATE) {
