@@ -359,9 +359,14 @@ fn meal_requests(
                 let yaw = stf.rotation.to_euler(EulerRot::YXZ).0;
                 // The recipe chosen, or the best they know for the time of day.
                 let (meal, word) = meal_time(clock.hour_f());
+                let grill = s.kind == ObjectKind::Grill;
                 let dish = plan.map(|p| p.0).or_else(|| {
                     let d = recipes.as_ref()?;
-                    let mut options = cookable(d, sim, skills.level("Cooking"), known, meal);
+                    let mut options = cookable(d, sim, skills.level("Cooking"), known, if grill { 0xFF } else { meal });
+                    // (A grill cooks its own menu.)
+                    if grill {
+                        options.retain(|&i| crate::appliances::GRILL_RECIPES.contains(&d.recipes[i].key.as_str()));
+                    }
                     options.sort_by_key(|&i| std::cmp::Reverse(d.recipes[i].level));
                     options.truncate(3);
                     options.choose(&mut rand::rng()).copied()
@@ -370,7 +375,8 @@ fn meal_requests(
                 let r = dish.and_then(recipe);
                 let label = r.map_or("Group Meal".to_string(), |r| r.name.clone());
                 let Some(platter) = spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, PLATTER, ObjectKind::Meal, "Group Meal", at, yaw) else { continue };
-                set_food(&mut commands, &mut assets, &mut ctx, platter, None, r.and_then(|r| r.group));
+                // (Hot dogs and burgers have no platter of their own: a plate of them.)
+                set_food(&mut commands, &mut assets, &mut ctx, platter, None, r.and_then(|r| r.group.or(r.single)));
                 commands.entity(platter).insert(Meal { servings });
                 if r.is_some() {
                     let name = label.clone();

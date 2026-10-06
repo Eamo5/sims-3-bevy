@@ -165,6 +165,9 @@ pub struct SaveGame {
     /// How the rest of the town has moved on.
     #[serde(default)]
     pub town: crate::story::TownStory,
+    /// Whether the alarm clock is set.
+    #[serde(default)]
+    pub alarm: crate::appliances::Alarm,
     /// The household's collection journal.
     #[serde(default)]
     pub collection: crate::collecting::Collection,
@@ -409,7 +412,7 @@ fn save_game(
     ),
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
-    story: Res<crate::story::TownStory>,
+    (story, alarm): (Res<crate::story::TownStory>, Res<crate::appliances::Alarm>),
 ) {
     if requests.read().count() == 0 {
         return;
@@ -489,6 +492,7 @@ fn save_game(
         plants: ui.as_deref().map(|u| crate::gardening::saved_plants(&plants, &u.data)).unwrap_or_default(),
         perfect_produce: garden.as_deref().map(|g| g.perfect.clone()).unwrap_or_default(),
         town: story.clone(),
+        alarm: *alarm,
         collection: collection.clone(),
         graves: graves
             .iter()
@@ -658,6 +662,7 @@ fn apply_loaded_game(
     commands.insert_resource(crate::building::LotPaint(game.paint.clone()));
     commands.insert_resource(crate::gardening::PendingPlants(game.plants.clone(), game.seeds.clone(), game.perfect_produce.clone()));
     commands.insert_resource(game.town.clone());
+    commands.insert_resource(game.alarm);
     commands.insert_resource(game.collection.clone());
     // The household's dead, back in their graves.
     if let Some(entry) = data.0.catalog.iter().find(|c| c.instance_name == "UrnstoneHuman") {

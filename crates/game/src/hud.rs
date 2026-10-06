@@ -709,6 +709,7 @@ fn world_click(
             Query<&crate::gardening::GrowingPlant>,
             Option<Res<crate::interact::Household>>,
             Option<Res<crate::gardening::Garden>>,
+            Res<crate::appliances::Alarm>,
         ),
     ),
     (on_lot, writers, jobs_q): (
@@ -810,6 +811,27 @@ fn world_click(
                         .collect();
                     options.push(("Write Novel ›".to_string(), submenu_kind(pie.submenus.len())));
                     pie.submenus.push(("Write Novel".to_string(), list));
+                    continue;
+                }
+                // The grill's menu: the recipes they know that grill.
+                if d.special == Special::ServeMeal
+                    && obj.kind == ObjectKind::Grill
+                    && let (Ok((_, skills, known)), Some(ui)) = (writers.get(actor), opp_q.0.as_ref())
+                {
+                    let list: Vec<(String, ActionKind)> = crate::meals::cookable(&ui.data, actor_sim, skills.level("Cooking"), known, 0xFF)
+                        .into_iter()
+                        .filter(|&r| crate::appliances::GRILL_RECIPES.contains(&ui.data.recipes[r].key.as_str()))
+                        .map(|r| (format!("Grill: {}", ui.data.recipes[r].name), ActionKind::Object { target: t, def: i }))
+                        .collect();
+                    if !list.is_empty() {
+                        options.push(("Grill ›".to_string(), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push(("Grill".to_string(), list));
+                    }
+                    continue;
+                }
+                if d.special == Special::ToggleAlarm {
+                    let label = if opp_q.6.on { "Turn Off Alarm" } else { "Set Alarm" };
+                    options.push((label.to_string(), ActionKind::Object { target: t, def: i }));
                     continue;
                 }
                 if d.special == Special::ServeMeal
@@ -964,7 +986,7 @@ fn pie_buttons(
         && let Ok(mut queue) = queues.get_mut(a)
     {
         // The recipe chosen.
-        if let (Some(n), Some(ui)) = (label.strip_prefix("Cook: "), ui_data.as_ref())
+        if let (Some(n), Some(ui)) = (label.strip_prefix("Cook: ").or_else(|| label.strip_prefix("Grill: ")), ui_data.as_ref())
             && let Some(r) = ui.data.recipes.iter().position(|r| r.name == n)
         {
             commands.entity(a).insert(crate::meals::MealPlan(r));

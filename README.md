@@ -227,6 +227,12 @@ installation is unreachable.
   reeling animations, rod in hand, catching what each spot holds by Fishing skill. Finds go in
   the finder's inventory, and the Collection Journal (J) shows everything found and still to
   find, how many the household holds, and sells them all.
+- **Grills, coffee makers and alarm clocks** from the catalogue: a grill's *Grill ›* menu
+  cooks the game's grilled recipes the Sim knows (hot dogs, tofu dogs, burgers, veggie
+  burgers, grilled salmon, tri-tip) with the barbecue animations and serves them like a
+  group meal; a hot-beverage maker brews a cup for energy (and a trip to the bathroom
+  later); a set alarm clock wakes the household's workers an hour before their shift and
+  the schoolchildren an hour before the bus, and stays set in saves.
 - **Inventories**: each Sim carries what they've picked, caught and found, in stacks on the
   Sim panel's Inventory tab (F9) with the objects' catalogue pictures (produce by quality);
   pick a stack to sell one or all of it, or to eat a piece of produce (a snack's worth,
