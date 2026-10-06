@@ -336,6 +336,8 @@ pub enum Special {
     ChangeClothes,
     /// A new everyday outfit from the wardrobe.
     NewLook,
+    /// Choose the everyday outfit piece by piece.
+    PlanOutfit,
     /// Set the alarm clock, or turn it off.
     ToggleAlarm,
     /// Empty a full trash can.
@@ -527,7 +529,7 @@ static PEGBOX: [InteractionDef; 1] = [def("Play with Peg Box", 40.0, [0.0, 0.0, 
 static POTTY: [InteractionDef; 1] = [InteractionDef { until_full: Some(BLADDER), ..def("Use Potty", 10.0, [0.0, 600.0, 0.0, 0.0, -20.0, 0.0], Pose::Sit) }];
 static DRESSER: [InteractionDef; 2] = [
     InteractionDef { autonomous: false, special: Special::ChangeClothes, ..def("Change Into", 4.0, N, Pose::Use) },
-    InteractionDef { autonomous: false, special: Special::NewLook, ..def("New Everyday Outfit", 4.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::PlanOutfit, ..def("Plan Outfit", 2.0, N, Pose::Use) },
 ];
 static TELESCOPE: [InteractionDef; 1] =
     [InteractionDef { skill: Some("Logic"), ..def("Stargaze", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 50.0], Pose::Use) }];
@@ -615,7 +617,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Work Out" => A::new(Some("a2o_treadmill_jog_start_x"), &["a2o_treadmill_jog_loop"]),
         "Play Chess" | "Play a Ranked Match" => A::new(None, &["a2o_chessTable_loop", "a2o_chessTable_move"]),
         "Nap in Crib" => A::new(Some("p2o_crib_sleep_start_y"), &["p2o_crib_sleep_loop_y"]),
-        "Change Clothes" | "Change Into" | "New Everyday Outfit" => A::new(Some("a2o_dresser_use_open"), &["a2o_dresser_use_close"]),
+        "Change Clothes" | "Change Into" | "New Everyday Outfit" | "Plan Outfit" => A::new(Some("a2o_dresser_use_open"), &["a2o_dresser_use_close"]),
         "Grill" => A::new(Some("a2o_bbq_grill_start"), &["a2o_bbq_grill_loopBreathe", "a2o_bbq_grill_loopPokeLeft", "a2o_bbq_grill_loopPokeRight", "a2o_bbq_grill_loopExpert"]),
         "Empty Trash" => A::new(None, &["a2o_trashCan_empty_pullout_x"]),
         "Make Hot Beverage" => A::new(Some("a2o_hotBeverageMachine_fill"), &["a2o_hotBeverageMachine_drink_loopSip_standing", "a2o_hotBeverageMachine_drink_loopLongSip_standing"]),
@@ -1523,6 +1525,9 @@ fn run_actions(
                                                 let msg = if a.on { "The alarm is set: it'll wake the household for work and school." } else { "The alarm is off." };
                                                 w.resource_mut::<Notifications>().push(msg.to_string());
                                             });
+                                        }
+                                        Special::PlanOutfit => {
+                                            commands.insert_resource(crate::planner::OutfitPlanner::open(me));
                                         }
                                         Special::NewLook => {
                                             // A different outfit from the wardrobe (the Sim's chosen

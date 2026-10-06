@@ -218,7 +218,7 @@ fn age_bits(a: Age) -> u32 {
 }
 
 /// CAS parts of a type that fit the Sim, sorted by name.
-fn parts_for(cas: &CasData, sim: &Sim, t: u32) -> Vec<(Key, String)> {
+pub(crate) fn parts_for(cas: &CasData, sim: &Sim, t: u32) -> Vec<(Key, String)> {
     let age = age_bits(sim.age);
     let gender = if sim.female { s3formats::sim::GENDER_FEMALE } else { s3formats::sim::GENDER_MALE };
     let mut v: Vec<(Key, String)> = cas
@@ -232,7 +232,8 @@ fn parts_for(cas: &CasData, sim: &Sim, t: u32) -> Vec<(Key, String)> {
         })
         .map(|p| (p.key, pretty_part(&p.name)))
         .collect();
-    v.sort_by(|a, b| a.1.cmp(&b.1));
+    // The base game's first (its parts are in group 0), then the packs', by name.
+    v.sort_by(|a, b| (a.0.1 != 0, &a.1).cmp(&(b.0.1 != 0, &b.1)));
     v.dedup_by(|a, b| a.0 == b.0);
     v
 }
