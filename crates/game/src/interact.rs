@@ -20,7 +20,7 @@ impl Plugin for InteractPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Notifications>().add_systems(
             Update,
-            (comings_and_goings, autonomy, run_actions, motive_warnings, pay_bills, parties)
+            (comings_and_goings, off_lot_idle, autonomy, run_actions, motive_warnings, pay_bills, parties)
                 .chain()
                 .run_if(in_state(PlayMode::Live)),
         );
@@ -937,6 +937,16 @@ pub struct GoingHome;
 /// Off the lot (at home elsewhere in town); can be phoned and invited over.
 #[derive(Component)]
 pub struct OffLot;
+
+/// Sims at home elsewhere do nothing here: what they were about is called off (and what they
+/// were using let go).
+fn off_lot_idle(mut q: Query<&mut ActionQueue, With<OffLot>>) {
+    for mut queue in &mut q {
+        for a in queue.0.iter_mut().filter(|a| !a.cancel) {
+            a.cancel = true;
+        }
+    }
+}
 
 /// Invited over: arrives at the lot exit at this time.
 #[derive(Component)]
@@ -2121,7 +2131,7 @@ fn autonomy(
     (settings, household): (Res<crate::options::Settings>, Query<(), With<HouseholdMember>>),
     mut sims: Query<
         (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim, Has<SocialPartner>, Option<&crate::visit::OnLot>),
-        (Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>),
+        (Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>, Without<OffLot>),
     >,
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>,
     hh: Option<Res<Household>>,

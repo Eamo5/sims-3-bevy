@@ -462,7 +462,8 @@ pub fn spawn_sim(
 #[allow(clippy::type_complexity)]
 fn decay_motives(
     delta: Res<SimDelta>,
-    mut q: Query<(&mut Motives, &DecayScale, &Sim, Option<&crate::wishes::Wishes>, Has<crate::careers::AtWork>, Has<crate::rabbitholes::AtRabbitHole>)>,
+    // (Sims at home elsewhere in town live off stage: they come over as they were.)
+    mut q: Query<(&mut Motives, &DecayScale, &Sim, Option<&crate::wishes::Wishes>, Has<crate::careers::AtWork>, Has<crate::rabbitholes::AtRabbitHole>), Without<crate::interact::OffLot>>,
 ) {
     let hours = delta.0 / 60.0;
     if hours <= 0.0 {
