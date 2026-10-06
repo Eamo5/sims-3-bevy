@@ -116,6 +116,15 @@ pub enum SocialEffect {
     /// A toddler's lesson in walking or talking.
     TeachWalk,
     TeachTalk,
+    /// A scuffle: one wins, the other is left embarrassed.
+    Fight,
+    /// Making up after falling out.
+    Apologize,
+    DeclareNemesis,
+    /// Comforting a Sim in a bad mood.
+    CheerUp,
+    /// A massage that leaves the other Sim comfortable.
+    BackRub,
 }
 
 pub struct SocialDef {
@@ -128,6 +137,8 @@ pub struct SocialDef {
     pub romance: f32,
     pub min_friendship: f32,
     pub min_romance: f32,
+    /// Only for Sims who don't get on this well (a fight, an apology).
+    pub max_friendship: f32,
     pub autonomous: bool,
     pub effect: SocialEffect,
     /// What a care social does for the little one's needs, per hour.
@@ -145,6 +156,7 @@ const fn sd(name: &'static str, cat: SocialCat, minutes: f32, social: f32, fun: 
         romance,
         min_friendship: -100.0,
         min_romance: -100.0,
+        max_friendship: 101.0,
         autonomous: false,
         effect: SocialEffect::None,
         care: [0.0; 6],
@@ -152,7 +164,7 @@ const fn sd(name: &'static str, cat: SocialCat, minutes: f32, social: f32, fun: 
 }
 
 use SocialCat::*;
-pub static SOCIALS: [SocialDef; 34] = [
+pub static SOCIALS: [SocialDef; 51] = [
     SocialDef { autonomous: true, ..sd("Chat", Friendly, 25.0, 110.0, 10.0, 8.0, 0.0) },
     SocialDef { autonomous: true, ..sd("Get to Know", Friendly, 15.0, 100.0, 5.0, 9.0, 0.0) },
     sd("Compliment", Friendly, 8.0, 80.0, 0.0, 7.0, 0.0),
@@ -188,6 +200,24 @@ pub static SOCIALS: [SocialDef; 34] = [
     SocialDef { effect: SocialEffect::PutToBed, care: [0.0, 0.0, 0.0, 60.0, 0.0, 0.0], ..sd("Put to Bed", Care, 6.0, 40.0, 0.0, 3.0, 0.0) },
     SocialDef { effect: SocialEffect::TeachWalk, care: [0.0, 0.0, -20.0, 150.0, 0.0, 60.0], ..sd("Teach to Walk", Care, 30.0, 60.0, 20.0, 6.0, 0.0) },
     SocialDef { effect: SocialEffect::TeachTalk, care: [0.0, 0.0, 0.0, 200.0, 0.0, 40.0], ..sd("Teach to Talk", Care, 30.0, 70.0, 10.0, 6.0, 0.0) },
+    // More of the game's socials.
+    SocialDef { autonomous: true, min_friendship: 10.0, ..sd("Tell Funny Story", Funny, 12.0, 100.0, 50.0, 8.0, 0.0) },
+    SocialDef { min_friendship: 10.0, ..sd("Tell Dramatic Story", Friendly, 15.0, 100.0, 20.0, 7.0, 0.0) },
+    sd("Brag", Friendly, 8.0, 70.0, 5.0, 2.0, 0.0),
+    SocialDef { autonomous: true, min_friendship: 20.0, ..sd("Goof Around", Funny, 10.0, 90.0, 70.0, 7.0, 0.0) },
+    sd("Make Silly Face", Funny, 5.0, 60.0, 40.0, 4.0, 0.0),
+    SocialDef { min_friendship: 40.0, ..sd("Cry on Shoulder", Friendly, 10.0, 120.0, -10.0, 10.0, 0.0) },
+    SocialDef { effect: SocialEffect::CheerUp, min_friendship: 15.0, ..sd("Cheer Up", Friendly, 8.0, 90.0, 20.0, 8.0, 0.0) },
+    SocialDef { effect: SocialEffect::Apologize, max_friendship: 0.0, ..sd("Apologize", Special, 6.0, 40.0, 0.0, 12.0, 0.0) },
+    SocialDef { effect: SocialEffect::Fight, max_friendship: -20.0, ..sd("Fight", Mean, 8.0, -20.0, 10.0, -20.0, -10.0) },
+    sd("Yell At", Mean, 6.0, -10.0, -5.0, -9.0, -3.0),
+    sd("Irritate", Mean, 6.0, -5.0, 5.0, -6.0, 0.0),
+    SocialDef { effect: SocialEffect::DeclareNemesis, max_friendship: -60.0, ..sd("Declare Nemesis", Mean, 5.0, -20.0, 0.0, -20.0, -10.0) },
+    SocialDef { min_romance: 15.0, ..sd("Embrace", Romantic, 6.0, 120.0, 20.0, 5.0, 8.0) },
+    SocialDef { min_romance: 20.0, ..sd("Gaze Into Eyes", Romantic, 6.0, 100.0, 20.0, 3.0, 9.0) },
+    SocialDef { effect: SocialEffect::BackRub, min_friendship: 30.0, ..sd("Give Back Rub", Romantic, 12.0, 120.0, 40.0, 6.0, 6.0) },
+    SocialDef { min_romance: 50.0, ..sd("Leap Into Arms", Romantic, 5.0, 140.0, 40.0, 4.0, 10.0) },
+    SocialDef { effect: SocialEffect::Kiss, min_romance: 60.0, ..sd("Dip Kiss", Romantic, 6.0, 150.0, 30.0, 4.0, 12.0) },
 ];
 
 pub fn social_index(name: &str) -> Option<usize> {
@@ -196,7 +226,7 @@ pub fn social_index(name: &str) -> Option<usize> {
 
 /// Whether `actor` can start this social with `target` (shown in the pie menu).
 pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim, target_in_household: bool) -> bool {
-    if rel.friendship < def.min_friendship || rel.romance < def.min_romance {
+    if rel.friendship < def.min_friendship || rel.romance < def.min_romance || rel.friendship > def.max_friendship {
         return false;
     }
     // Babies and toddlers are looked after rather than chatted with.

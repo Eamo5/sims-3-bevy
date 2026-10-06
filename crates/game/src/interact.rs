@@ -639,6 +639,8 @@ pub fn social_start(name: &str, little: Option<Age>) -> Option<&'static str> {
         ("Play With" | "Cuddle" | "Change Diaper" | "Put to Bed", Some(Age::Toddler)) => Some("a2p_pickUp"),
         ("Read to", Some(Age::Toddler)) => Some("a2p_book_readWith_start"),
         ("Teach to Walk", _) => Some("a2p_teachToWalk_start_kneelDown"),
+        ("Fight", _) => Some("a2a_soc_Bad_Fight_Start"),
+        ("Give Back Rub", _) => Some("a2a_soc_Amorous_Massage_Amorous_start"),
         _ => None,
     }
 }
@@ -654,6 +656,23 @@ pub fn social_clips(name: &str, little: Option<Age>) -> &'static [&'static str] 
         "Cuddle" | "Play With" => &["a2p_carry_chat_loop", "a2p_idle_carry_breathe_y", "a2p_idle_carry_idle"],
         "Read to" => &["a2p_book_readWith_loop"],
         "Teach to Walk" => &["a2p_teachToWalk_loopBreathe", "a2p_teachToWalk_firstSteps"],
+        "Tell Funny Story" => &["a2a_soc_Neutral_TellFunnyStory_Funny_Friendly"],
+        "Tell Dramatic Story" => &["a2a_soc_Neutral_TellDramaticStory_Impressive_Neutral"],
+        "Brag" => &["a2a_soc_Neutral_BoastAbout_Impressive_Friendly"],
+        "Goof Around" => &["a2a_soc_Neutral_GoofAround_Funny_Neutral"],
+        "Make Silly Face" => &["a2a_soc_Neutral_MakeSillyFace_Funny_Neutral"],
+        "Cry on Shoulder" => &["a2a_soc_Neutral_CryOnShoulder_Friendly_Neutral"],
+        "Cheer Up" => &["a2a_soc_Neutral_CheerUp_Friendly_Neutral"],
+        "Apologize" => &["a2a_soc_Neutral_Apologize_Awkward_Neutral"],
+        "Fight" => &["a2a_soc_Bad_Fight_Grapple_Loop", "a2a_soc_Bad_Fight_HeadLock_Loop"],
+        "Yell At" => &["a2a_soc_bad_YellAt_Steamed_Bad"],
+        "Irritate" => &["a2a_soc_bad_irritate_insulting_bad"],
+        "Declare Nemesis" => &["a2a_soc_Bad_DeclareNemesis_Steamed_Bad"],
+        "Embrace" => &["a2a_soc_Amorous_Embrace_Amorous_Amorous"],
+        "Gaze Into Eyes" => &["a2a_soc_Amorous_GazeIntoEyes_Amorous_Amorous"],
+        "Give Back Rub" => &["a2a_soc_Amorous_Massage_Amorous_Amorous"],
+        "Leap Into Arms" => &["a2a_soc_Amorous_LeapIntoArms_Amorous_Amorous"],
+        "Dip Kiss" => &["a2a_soc_amorous_dipKiss_amorous_amorous"],
         "Teach to Talk" => &["a2p_teachToTalk_loop", "a2p_teachToTalk_talkLoop", "a2p_teachToTalk_listen"],
         "Put to Bed" if baby => &["a2b_crib_putIn"],
         "Put to Bed" => &["a2p_crib_putIn"],
@@ -1662,6 +1681,42 @@ fn run_actions(
                                         }
                                         SocialEffect::PutToBed => {
                                             commands.entity(*target).insert(crate::little::Bedtime);
+                                        }
+                                        SocialEffect::Fight => {
+                                            // The stronger and braver usually win.
+                                            let them = who.get(target).map(|w| w.0.clone());
+                                            let traits = |s: &Sim| {
+                                                [crate::life::Trait::Athletic, crate::life::Trait::Brave].iter().filter(|t| s.traits.contains(t)).count() as f32 * 0.12
+                                                    - if s.traits.contains(&crate::life::Trait::Coward) { 0.15 } else { 0.0 }
+                                            };
+                                            let p = 0.5 + skills.level("Athletic") as f32 * 0.035 + traits(sim) - them.as_ref().map_or(0.0, traits);
+                                            let won = rand::rng().random_bool(p.clamp(0.1, 0.9) as f64);
+                                            let (winner, loser) = if won { (me, *target) } else { (*target, me) };
+                                            let (wn, ln) = if won { (sim.first.clone(), tname.clone()) } else { (tname.clone(), sim.first.clone()) };
+                                            notes.push(format!("{wn} won the fight with {ln}!"));
+                                            let now = clock.minutes;
+                                            for (e, kind) in [(winner, crate::life::MoodletKind::Pumped), (loser, crate::life::MoodletKind::Embarrassed)] {
+                                                commands.entity(e).queue_silenced(move |mut w: EntityWorldMut| {
+                                                    if let Some(mut m) = w.get_mut::<crate::life::Moodlets>() {
+                                                        m.add(kind, now);
+                                                    }
+                                                });
+                                            }
+                                        }
+                                        SocialEffect::Apologize => {
+                                            notes.push(format!("{} apologized to {}.", sim.first, tname));
+                                        }
+                                        SocialEffect::DeclareNemesis => {
+                                            notes.push(format!("{} declared {} their nemesis!", sim.first, tname));
+                                        }
+                                        SocialEffect::CheerUp | SocialEffect::BackRub => {
+                                            let now = clock.minutes;
+                                            let kind = if s.effect == SocialEffect::BackRub { crate::life::MoodletKind::Comfy } else { crate::life::MoodletKind::GoodConversation };
+                                            commands.entity(*target).queue_silenced(move |mut w: EntityWorldMut| {
+                                                if let Some(mut m) = w.get_mut::<crate::life::Moodlets>() {
+                                                    m.add(kind, now);
+                                                }
+                                            });
                                         }
                                         SocialEffect::TeachWalk | SocialEffect::TeachTalk => {
                                             let (toddler, teacher, walk) = (*target, me, s.effect == SocialEffect::TeachWalk);

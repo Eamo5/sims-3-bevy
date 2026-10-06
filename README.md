@@ -131,6 +131,12 @@ installation is unreachable.
   needs running low, new moodlets and their traits, dream while asleep, and take turns showing
   what they're talking about (small talk about the weather, their work or interests; insults,
   compliments and flirts with the game's like and dislike marks).
+- **Socials** by the game's categories (Friendly, Funny, Romantic, Mean, Special) with its own
+  animations: chatting, jokes, funny and dramatic stories, bragging, goofing around, silly
+  faces, crying on a shoulder, cheering up and apologising; flirting, embracing, gazing into
+  eyes, back rubs, leaping into arms and kisses up to the dip kiss as romance grows; insults,
+  yelling, irritating, slaps, declaring a nemesis and fights (the grapple and headlock, won
+  by the athletic and the brave, the loser embarrassed) for those who don't get on.
 - **Families grow**: couples can try for a baby; pregnancy brings morning sickness, then a
   baby in a crib (the game's swaddled baby model). Grown-ups feed, change, cuddle and settle
   babies (cradled in their arms) and pick up, read to and put toddlers to bed; toddlers
