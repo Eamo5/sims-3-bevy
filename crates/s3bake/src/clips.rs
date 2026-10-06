@@ -168,6 +168,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "c2o_computer_game_loop",
     // Toddlers.
     "p_walk",
+    "p_crawl",
+    "a2p_teachToWalk_",
+    "a2p_teachToTalk_",
     "p_idle_neutral_loop",
     "p_idle_friendly_loop",
     "p_idle_breathe_x",

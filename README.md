@@ -133,8 +133,11 @@ installation is unreachable.
   compliments and flirts with the game's like and dislike marks).
 - **Families grow**: couples can try for a baby; pregnancy brings morning sickness, then a
   baby in a crib (the game's swaddled baby model). Grown-ups feed, change, cuddle and settle
-  babies (cradled in their arms) and pick up, read to and put toddlers to bed; toddlers toddle
-  about, play with toy boxes, xylophones and peg boxes, nap in cribs and cry when neglected.
+  babies (cradled in their arms) and pick up, read to and put toddlers to bed; toddlers
+  crawl about until a grown-up has taught them to walk (three lessons, with the game's
+  kneel-and-hold-hands animation; talking is taught the same way, and both show on the
+  toddler's Skills tab), play with toy boxes, xylophones and peg boxes, nap in cribs and cry
+  when neglected.
 - **Town families**: every world's premade households (the Goths, Landgraabs, Altos, …) with
   their names, bios, family portraits, traits, careers, skills, marriages and homes — play one
   of them, or meet them around town.

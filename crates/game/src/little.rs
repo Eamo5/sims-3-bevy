@@ -13,11 +13,79 @@ use crate::sim::*;
 use crate::sound::PlaySound;
 use crate::{AppState, PlayMode};
 
+/// A toddler's skills, as the game's: walking and talking, each learned (at 1) over a few
+/// lessons from a grown-up. Until they can walk, toddlers crawl.
+#[derive(Component, Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct ToddlerSkills {
+    pub walk: f32,
+    pub talk: f32,
+}
+
+impl ToddlerSkills {
+    pub fn walks(&self) -> bool {
+        self.walk >= 1.0
+    }
+    pub fn talks(&self) -> bool {
+        self.talk >= 1.0
+    }
+}
+
+/// How far one lesson takes a toddler (three to learn).
+const LESSON: f32 = 0.34;
+
+/// A lesson finished: what was taught, to whom, by whom.
+#[derive(Message, Clone, Copy)]
+pub struct Lesson {
+    pub toddler: Entity,
+    pub teacher: Entity,
+    pub walk: bool,
+}
+
+/// Lessons count towards the toddler's skill; untaught toddlers crawl (slowly).
+fn lessons(
+    mut lessons: MessageReader<Lesson>,
+    mut commands: Commands,
+    mut toddlers: Query<(&Sim, Option<&mut ToddlerSkills>)>,
+    teachers: Query<&Sim>,
+    mut notes: ResMut<Notifications>,
+) {
+    for l in lessons.read() {
+        let Ok((sim, skills)) = toddlers.get_mut(l.toddler) else { continue };
+        let teacher = teachers.get(l.teacher).map(|t| t.first.clone()).unwrap_or_default();
+        let mut s = skills.as_deref().copied().unwrap_or_default();
+        let v = if l.walk { &mut s.walk } else { &mut s.talk };
+        let before = *v;
+        *v = (*v + LESSON).min(1.0);
+        info!("{} had a lesson in {}: {:.0}%", sim.first, if l.walk { "walking" } else { "talking" }, *v * 100.0);
+        if before < 1.0 && *v >= 1.0 {
+            notes.push(format!("{} learned to {} with {}'s help!", sim.first, if l.walk { "walk" } else { "talk" }, teacher));
+        } else {
+            notes.push(format!("{} is learning to {} ({:.0}%).", sim.first, if l.walk { "walk" } else { "talk" }, *v * 100.0));
+        }
+        match skills {
+            Some(mut k) => *k = s,
+            None => {
+                commands.entity(l.toddler).insert(s);
+            }
+        }
+    }
+}
+
+fn crawl_speed(mut q: Query<(&Sim, Option<&ToddlerSkills>, &mut crate::nav::PathFollow), Added<crate::nav::PathFollow>>) {
+    for (sim, skills, mut pf) in &mut q {
+        if sim.age == Age::Toddler && !skills.is_some_and(|s| s.walks()) {
+            pf.speed = 0.55;
+        }
+    }
+}
+
 pub struct LittlePlugin;
 
 impl Plugin for LittlePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<Conceive>()
+        app.add_message::<Lesson>()
+            .add_systems(Update, (lessons, crawl_speed).run_if(in_state(PlayMode::Live)))
+            .add_message::<Conceive>()
             .add_systems(Update, (conceive, pregnancy, little_life, put_down).chain().run_if(in_state(PlayMode::Live)))
             .add_systems(PostUpdate, carry_follow.after(bevy::transform::TransformSystems::Propagate));
     }

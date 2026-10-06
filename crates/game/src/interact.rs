@@ -638,6 +638,7 @@ pub fn social_start(name: &str, little: Option<Age>) -> Option<&'static str> {
     match (name, little) {
         ("Play With" | "Cuddle" | "Change Diaper" | "Put to Bed", Some(Age::Toddler)) => Some("a2p_pickUp"),
         ("Read to", Some(Age::Toddler)) => Some("a2p_book_readWith_start"),
+        ("Teach to Walk", _) => Some("a2p_teachToWalk_start_kneelDown"),
         _ => None,
     }
 }
@@ -652,6 +653,8 @@ pub fn social_clips(name: &str, little: Option<Age>) -> &'static [&'static str] 
         "Change Diaper" => &["a2p_changeDiaper"],
         "Cuddle" | "Play With" => &["a2p_carry_chat_loop", "a2p_idle_carry_breathe_y", "a2p_idle_carry_idle"],
         "Read to" => &["a2p_book_readWith_loop"],
+        "Teach to Walk" => &["a2p_teachToWalk_loopBreathe", "a2p_teachToWalk_firstSteps"],
+        "Teach to Talk" => &["a2p_teachToTalk_loop", "a2p_teachToTalk_talkLoop", "a2p_teachToTalk_listen"],
         "Put to Bed" if baby => &["a2b_crib_putIn"],
         "Put to Bed" => &["a2p_crib_putIn"],
         "Try for Baby" => &["a2a_soc_amorous_kissMakeOut_accept_loop"],
@@ -1660,6 +1663,12 @@ fn run_actions(
                                         SocialEffect::PutToBed => {
                                             commands.entity(*target).insert(crate::little::Bedtime);
                                         }
+                                        SocialEffect::TeachWalk | SocialEffect::TeachTalk => {
+                                            let (toddler, teacher, walk) = (*target, me, s.effect == SocialEffect::TeachWalk);
+                                            commands.queue(move |w: &mut World| {
+                                                w.write_message(crate::little::Lesson { toddler, teacher, walk });
+                                            });
+                                        }
                                         SocialEffect::AskToLeave => {
                                             commands.entity(*target).insert(GoingHome);
                                             notes.push(format!("{} said goodbye and is heading home.", tname));
@@ -1811,6 +1820,9 @@ fn run_actions(
         }
 
         if finished {
+            if let Some(a) = queue.0.front() {
+                debug!("{} finished {} ({:?}{})", sim.first, a.label, a.phase, if a.cancel { ", cancelled" } else { "" });
+            }
             commands.entity(me).remove::<crate::anim::ActionClip>();
             if let Some(Action { kind: ActionKind::Social { target, .. }, .. }) = queue.0.front() {
                 partners_done.push((*target, me));

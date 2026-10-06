@@ -152,6 +152,7 @@ fn tab_content(
             Option<&crate::writing::Author>,
             Option<&crate::chess::ChessRecord>,
             Option<&crate::inventory::Inventory>,
+            Option<&crate::little::ToddlerSkills>,
         ),
         With<Selected>,
     >,
@@ -160,14 +161,14 @@ fn tab_content(
     mut last: Local<String>,
     (baked, chosen, mut thumbs): (Option<Res<crate::baked::Baked>>, Res<crate::inventory::Chosen>, ResMut<crate::thumbs::ModelThumbs>),
 ) {
-    let (Ok(root), Ok((e, sim, skills, job, at_work, wishes, ltw, author, chess, inv))) = (content.single(), sel.single()) else { return };
+    let (Ok(root), Ok((e, sim, skills, job, at_work, wishes, ltw, author, chess, inv, toddler))) = (content.single(), sel.single()) else { return };
     // What's on show, to redraw only when it changes.
     let key = match *tab {
         SimTab::Needs => "needs".to_string(),
         SimTab::Skills => format!(
             "{e:?} {:?} {:?}",
             skills.0.iter().map(|(k, v)| (*k, (*v * 20.0) as i32)).collect::<Vec<_>>(),
-            (author.map(|a| (a.books.len(), a.weekly_royalties(), a.draft.as_ref().map(|d| (d.pages / d.length * 50.0) as i32))), chess.map(|c| (c.wins, c.losses)))
+            (author.map(|a| (a.books.len(), a.weekly_royalties(), a.draft.as_ref().map(|d| (d.pages / d.length * 50.0) as i32))), chess.map(|c| (c.wins, c.losses)), toddler.map(|t| ((t.walk * 100.0) as i32, (t.talk * 100.0) as i32)))
         ),
         SimTab::Career => format!("{e:?} {:?} {at_work}", job.map(|j| (j.track, j.level, j.performance as i32))),
         SimTab::Simology => format!("{e:?} {:?} {:?} {:?}", sim.traits, wishes.map(|w| (w.points, w.rewards.len())), ltw.map(|l| (l.wish, &l.status))),
@@ -186,6 +187,22 @@ fn tab_content(
         SimTab::Skills => {
             let mut list: Vec<(&'static str, f32)> = skills.0.iter().filter(|(_, v)| **v > 0.01).map(|(k, v)| (*k, *v)).collect();
             list.sort_by(|a, b| b.1.total_cmp(&a.1));
+            // A toddler's walking and talking, learned from grown-ups.
+            if sim.age == crate::sim::Age::Toddler {
+                let t = toddler.copied().unwrap_or_default();
+                for (name, v, done) in [("Walking", t.walk, "Can walk"), ("Talking", t.talk, "Can talk")] {
+                    p.spawn(Node { column_gap: Val::Px(8.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
+                        row.spawn((text(name, 14.0, Color::WHITE), Node { width: Val::Px(120.0), ..default() }));
+                        if v >= 1.0 {
+                            row.spawn(text(done, 13.0, Color::srgb(1.0, 0.9, 0.5)));
+                        } else {
+                            meter(row, v, 130.0, Color::srgb(0.35, 0.8, 1.0));
+                        }
+                    });
+                }
+                p.spawn(text(format!("A grown-up can teach {} to walk and talk.", sim.first), 12.0, Color::srgb(0.8, 0.85, 0.95)));
+                return;
+            }
             if list.is_empty() {
                 p.spawn(text(format!("{} hasn't learned any skills yet. Reading, practising or taking a class all help.", sim.first), 13.0, Color::srgb(0.8, 0.85, 0.95)));
             }

@@ -713,10 +713,11 @@ fn world_click(
             Res<crate::appliances::Alarm>,
         ),
     ),
-    (on_lot, writers, jobs_q): (
+    (on_lot, writers, jobs_q, toddler_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
+        Query<&crate::little::ToddlerSkills>,
     ),
 ) {
     if buy.is_some_and(|b| b.active) {
@@ -758,6 +759,12 @@ fn world_click(
                     .iter()
                     .enumerate()
                     .filter(|(_, s)| s.cat == cat && crate::social::available(s, &rel, actor_sim, sim, target_member))
+                    // (Nothing more to teach a toddler who's learned it.)
+                    .filter(|(_, s)| match s.effect {
+                        crate::social::SocialEffect::TeachWalk => !toddler_q.get(t).is_ok_and(|k| k.walks()),
+                        crate::social::SocialEffect::TeachTalk => !toddler_q.get(t).is_ok_and(|k| k.talks()),
+                        _ => true,
+                    })
                     .map(|(i, s)| (s.name.to_string(), ActionKind::Social { target: t, social: i }))
                     .collect();
                 if !list.is_empty() {

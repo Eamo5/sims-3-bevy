@@ -113,6 +113,9 @@ pub enum SocialEffect {
     TryForBaby,
     PutToBed,
     AskOnDate,
+    /// A toddler's lesson in walking or talking.
+    TeachWalk,
+    TeachTalk,
 }
 
 pub struct SocialDef {
@@ -149,7 +152,7 @@ const fn sd(name: &'static str, cat: SocialCat, minutes: f32, social: f32, fun: 
 }
 
 use SocialCat::*;
-pub static SOCIALS: [SocialDef; 32] = [
+pub static SOCIALS: [SocialDef; 34] = [
     SocialDef { autonomous: true, ..sd("Chat", Friendly, 25.0, 110.0, 10.0, 8.0, 0.0) },
     SocialDef { autonomous: true, ..sd("Get to Know", Friendly, 15.0, 100.0, 5.0, 9.0, 0.0) },
     sd("Compliment", Friendly, 8.0, 80.0, 0.0, 7.0, 0.0),
@@ -183,6 +186,8 @@ pub static SOCIALS: [SocialDef; 32] = [
     SocialDef { autonomous: true, care: [0.0, 0.0, 0.0, 300.0, 0.0, 200.0], ..sd("Play With", Care, 20.0, 120.0, 120.0, 8.0, 0.0) },
     SocialDef { care: [0.0, 0.0, 0.0, 250.0, 0.0, 120.0], ..sd("Read to", Care, 30.0, 80.0, 60.0, 8.0, 0.0) },
     SocialDef { effect: SocialEffect::PutToBed, care: [0.0, 0.0, 0.0, 60.0, 0.0, 0.0], ..sd("Put to Bed", Care, 6.0, 40.0, 0.0, 3.0, 0.0) },
+    SocialDef { effect: SocialEffect::TeachWalk, care: [0.0, 0.0, -20.0, 150.0, 0.0, 60.0], ..sd("Teach to Walk", Care, 30.0, 60.0, 20.0, 6.0, 0.0) },
+    SocialDef { effect: SocialEffect::TeachTalk, care: [0.0, 0.0, 0.0, 200.0, 0.0, 40.0], ..sd("Teach to Talk", Care, 30.0, 70.0, 10.0, 6.0, 0.0) },
 ];
 
 pub fn social_index(name: &str) -> Option<usize> {
@@ -199,7 +204,8 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
         return false;
     }
     if target.age.is_little() {
-        return def.cat == SocialCat::Care && !matches!(actor.age, Age::Child) && (def.name != "Read to" || target.age == Age::Toddler);
+        let toddler_only = matches!(def.effect, SocialEffect::TeachWalk | SocialEffect::TeachTalk) || def.name == "Read to";
+        return def.cat == SocialCat::Care && !matches!(actor.age, Age::Child) && (!toddler_only || target.age == Age::Toddler);
     }
     if def.cat == SocialCat::Care {
         return false;

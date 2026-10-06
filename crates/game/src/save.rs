@@ -94,6 +94,9 @@ pub struct SavedSim {
     /// What they carry.
     #[serde(default)]
     pub inventory: crate::inventory::Inventory,
+    /// A toddler's walking and talking.
+    #[serde(default)]
+    pub toddler: Option<crate::little::ToddlerSkills>,
 }
 
 /// A lifetime wish (by the game's check for it), and what's counted towards it.
@@ -226,6 +229,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         recipes: Vec::new(),
         chess: None,
         inventory: Default::default(),
+        toddler: None,
     }
 }
 
@@ -401,6 +405,7 @@ fn save_game(
                 Option<&crate::meals::KnownRecipes>,
                 Option<&crate::chess::ChessRecord>,
                 Option<&crate::inventory::Inventory>,
+                Option<&crate::little::ToddlerSkills>,
             ),
         ),
         (Without<crate::town::Townie>, Without<crate::visit::LotGuest>),
@@ -420,7 +425,7 @@ fn save_game(
     let Some(hh) = household else { return };
     let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).collect();
     let mut saved = Vec::new();
-    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory)) in &sims {
+    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler)) in &sims {
         // Out on a community lot: saved as back at home (the lot isn't kept).
         let (position, level) = match (out, exit.as_ref()) {
             (true, Some(x)) => ([x.0.x, world.data.heightmap.sample(x.0.x, x.0.y), x.0.y], 1),
@@ -469,6 +474,7 @@ fn save_game(
             recipes: recipes.map(|r| r.0.clone()).unwrap_or_default(),
             chess: chess.copied(),
             inventory: inventory.cloned().unwrap_or_default(),
+            toddler: toddler.copied(),
         });
     }
     let game = SaveGame {
@@ -599,6 +605,9 @@ fn apply_loaded_game(
         }
         if !s.inventory.0.is_empty() {
             ec.insert(s.inventory.clone());
+        }
+        if let Some(t) = s.toddler {
+            ec.insert(t);
         }
         if let Some(l) = &s.lifetime_wish
             && let Some(wish) = crate::lifetime::LifetimeWish::by_check(&l.check)

@@ -1055,6 +1055,12 @@ fn auto_action(
     if *done {
         return;
     }
+    // (Once the Sim asked for is the one selected.)
+    if let Some(want) = &args.select
+        && !sel_e.single().ok().and_then(|e| members.get(e).ok()).is_some_and(|(_, s)| s.first.eq_ignore_ascii_case(want))
+    {
+        return;
+    }
     // (Once everyone has settled in.)
     let t0 = *since.get_or_insert(time.elapsed_secs());
     if matches!(name.as_str(), "Meal" | "Die" | "Starve" | "Shock" | "Electrocute") && time.elapsed_secs() - t0 < 4.0 {
@@ -1070,6 +1076,7 @@ fn auto_action(
                 let si = crate::social::social_index(social).unwrap();
                 q.0.clear();
                 q.push_player(crate::interact::Action::new(social, crate::interact::ActionKind::Social { target, social: si }, false));
+                info!("care test: {social} queued on {target:?}");
                 *done = true;
             }
             None if want == crate::sim::Age::Baby => {
