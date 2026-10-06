@@ -64,8 +64,9 @@ fn pyjamas(
     }
 }
 
-/// How far below the water a swimmer's feet are (their head and shoulders stay above it).
-const SWIM_DROP: f32 = 1.25;
+/// How far below the water a swimmer is held: the game's swim cycle swims level with its root,
+/// the head a little above it, so this keeps the head at the surface and the body just under.
+const SWIM_DROP: f32 = 0.12;
 /// Swimming speed (metres per game minute, i.e. per second at normal speed).
 const SWIM_SPEED: f32 = 0.9;
 

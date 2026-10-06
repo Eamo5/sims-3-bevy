@@ -53,6 +53,9 @@ pub struct Portraits {
     /// is never seen half made).
     spare: HashMap<Entity, Handle<Image>>,
     queue: VecDeque<Entity>,
+    /// Pictures finished this game: the first few are held a moment longer, while the studio's
+    /// shaders for the Sims' skin and hair are still being readied (until then they don't draw).
+    finished: u32,
     /// The picture being taken.
     busy: Option<Shot>,
     /// When each Sim's body was (re)built: their skin takes a moment to be ready.
@@ -113,6 +116,8 @@ fn follow_portraits(portraits: Res<Portraits>, mut nodes: Query<(&PortraitOf, &m
 struct Shot {
     sim: Entity,
     frame: u8,
+    /// When the camera was pointed (seconds).
+    aimed_at: f32,
     /// Where the Sim was and their visibility, when staged.
     staged: Option<(Transform, Visibility)>,
     /// The frame the camera was pointed.
@@ -180,7 +185,21 @@ fn facing(skel: &Skeleton, joints: &Query<&GlobalTransform, Without<Sim>>, head:
     let Some(f) = front.map(|f| f - head) else { return Some(body) };
     // (Lying down the face looks up: no picture then.)
     let level = f.with_y(0.0);
-    (level.length() > f.length() * 0.6).then(|| Quat::from_rotation_y(level.x.atan2(level.z)))
+    if level.length() <= f.length() * 0.6 {
+        return None;
+    }
+    // Its pitch too, within reason: a Sim looking down at something is pictured from a little
+    // below, into the face, not over the top of the head.
+    let pitch = f.y.atan2(level.length()).clamp(-0.6, 0.4);
+    Some(Quat::from_rotation_y(level.x.atan2(level.z)) * Quat::from_rotation_x(-pitch))
+}
+
+/// Where the camera goes for a face: `dist` out along where it looks, a touch above.
+fn eye_for(head: Vec3, rot: Quat, little: bool) -> (Vec3, Vec3, f32) {
+    let face = head + Vec3::Y * if little { 0.02 } else { 0.05 };
+    let ahead = (rot * Vec3::Z).normalize_or(Vec3::Z);
+    let dist = if little { 0.5 } else { 0.72 };
+    (face + ahead * dist + Vec3::Y * 0.03, face, dist)
 }
 
 fn retake_rebuilt(mut portraits: ResMut<Portraits>, rebuilt: Query<Entity, Changed<Skeleton>>, alive: Query<(), With<Sim>>, time: Res<Time>) {
@@ -245,7 +264,8 @@ fn take_portraits(
     });
 
     if let Some(mut shot) = portraits.busy.take() {
-        shot.frame += 1;
+        shot.frame = shot.frame.saturating_add(1);
+        let hold = if portraits.finished < 3 { 1.2 } else { 0.0 };
         let mut done = false;
         match shot.aimed {
             // A staged Sim's pose settles under the world first.
@@ -282,10 +302,7 @@ fn take_portraits(
                 }
                 match (aim, img) {
                     (Some((little, head, rot)), Some(img)) => {
-                        let face = head + Vec3::Y * if little { 0.02 } else { 0.05 };
-                        let ahead = (rot * Vec3::Z).with_y(0.0).normalize_or(Vec3::Z);
-                        let dist = if little { 0.5 } else { 0.72 };
-                        let eye = face + ahead * dist + Vec3::Y * 0.03;
+                        let (eye, face, dist) = eye_for(head, rot, little);
                         *cam_tf = Transform::from_translation(eye).looking_at(face, Vec3::Y);
                         let right = cam_tf.right().as_vec3();
                         commands.entity(light_e).insert(Transform::from_translation(eye + right * 0.5 + Vec3::Y * 0.45));
@@ -305,7 +322,9 @@ fn take_portraits(
                         ));
                         camera.is_active = true;
                         into_studio(&mut commands, &children, &parts, shot.sim, true);
+
                         shot.aimed = Some(shot.frame);
+                        shot.aimed_at = now;
 
                     }
                     _ => shot.aimed = Some(0),
@@ -320,7 +339,7 @@ fn take_portraits(
                 done = true;
             }
             // Until it renders, the camera follows the face (Sims move between frames).
-            Some(at) if shot.frame < at + 4 => {
+            Some(at) if shot.frame < at.saturating_add(4) || now - shot.aimed_at < hold => {
                 let aim = sims.get(shot.sim).ok().and_then(|(sim, _, tf, skel, _)| {
                     let head = skel.rig.bones.iter().position(|b| b.name == "b__Head__").and_then(|i| joints.get(skel.joints[i]).ok())?;
                     // (Babies are pictured lying in their cribs.)
@@ -328,10 +347,7 @@ fn take_portraits(
                     Some((sim.age.is_little(), head.translation(), face))
                 });
                 if let Some((little, head, rot)) = aim {
-                    let face = head + Vec3::Y * if little { 0.02 } else { 0.05 };
-                    let ahead = (rot * Vec3::Z).with_y(0.0).normalize_or(Vec3::Z);
-                    let dist = if little { 0.5 } else { 0.72 };
-                    let eye = face + ahead * dist + Vec3::Y * 0.03;
+                    let (eye, face, dist) = eye_for(head, rot, little);
                     *cam_tf = Transform::from_translation(eye).looking_at(face, Vec3::Y);
                     let right = cam_tf.right().as_vec3();
                     commands.entity(light_e).insert(Transform::from_translation(eye + right * 0.5 + Vec3::Y * 0.45));
@@ -345,7 +361,8 @@ fn take_portraits(
             }
             // The picture renders the frame after the camera is pointed; then the camera
             // rests and a staged Sim goes back.
-            Some(at) if shot.frame >= at + 4 => {
+            Some(_) => {
+                portraits.finished += 1;
                 camera.is_active = false;
                 into_studio(&mut commands, &children, &parts, shot.sim, false);
                 if let Some((tf, vis)) = shot.staged {
@@ -356,13 +373,10 @@ fn take_portraits(
                 let good = sims.get(shot.sim).ok().and_then(|(sim, _, tf, skel, _)| {
                     let head = skel.rig.bones.iter().position(|b| b.name == "b__Head__").and_then(|i| joints.get(skel.joints[i]).ok())?.translation();
                     let rot = facing(skel, &joints, head, tf.rotation()).or((sim.age == Age::Baby).then(|| tf.rotation()))?;
-                    let little = sim.age.is_little();
-                    let (dist, up) = if little { (0.5, 0.05) } else { (0.72, 0.08) };
-                    let off = cam_tf.translation - head;
-                    let ahead = (rot * Vec3::Z).xz().normalize_or(Vec2::Y);
-                    let ok = off.xz().normalize_or_zero().dot(ahead) > 0.85 && (off.xz().length() - dist).abs() < 0.2 && (off.y - up).abs() < 0.15;
+                    let (eye, ..) = eye_for(head, rot, sim.age.is_little());
+                    let ok = cam_tf.translation.distance(eye) < 0.22;
                     if !ok {
-                        debug!("portrait of {} spoilt (camera off {off:?}, face {ahead:?}): taken again", sim.first);
+                        debug!("portrait of {} spoilt (camera {:?} from where it belongs): taken again", sim.first, cam_tf.translation - eye);
                     }
                     Some(ok)
                 }) == Some(true);
@@ -426,7 +440,7 @@ fn take_portraits(
         if let Some((tf, _)) = staged {
             commands.entity(e).insert((Transform { translation: tf.translation - Vec3::Y * UNDERGROUND, ..tf }, Visibility::Visible, Staged));
         }
-        portraits.busy = Some(Shot { sim: e, frame: 0, staged, aimed: None });
+        portraits.busy = Some(Shot { sim: e, frame: 0, aimed_at: 0.0, staged, aimed: None });
         break;
     }
 }
