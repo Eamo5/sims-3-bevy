@@ -470,6 +470,18 @@ Type definition grammar, the 0x00–0x1A PersistedTypeCode table (0x01 reference
 `ScriptCore.ScriptObjectGroup`, `Sims3.Gameplay.Core.Null` with fields `mValueModifier:int`,
 `mPurchasedPrice:int`, `mOwnerLot:ref`, `mFlags:enum` … Treat as a later-phase task.
 
+**Premade Sims' outfits** [VERIFIED on Sunset Valley]. A `SimDescription` holds
+`mDefaultOutfitKey` (a SIMO key) and `mOutfits`, an `Sims3.Gameplay.CAS.OutfitCategoryMap`
+that serializes without a field list: `u8 0x10, u32 class, u32 n`, then `n` ×
+`{u32 OutfitCategories, u64 instance, u32 group, u32 type}` (one SIMO per category: 1 everyday,
+2 formal, 4 sleepwear, 8 swimwear, 0x10 athletic, 0x20, 0x40, 0x100 ...). Those SIMO resources
+are **not in the world file nor in any installed package** (searched every package index for
+the instances; the only hits are the OBJS key table and the REFS manifests `05ED1226:00BBB9D2`
+and `05ED1226:00F0B54D:*`, which list them as dependencies), so a premade Sim's real clothes
+and hair can't be recovered from an install; the household-bin families in
+`GameData/Shared/NonPackaged/Library/*.package` do ship their SIMO (with TXTC and `0x0341ACC9`).
+The SimDescription's `mGeneticHairstyleKey` (a `0x00000013` key) and hair colours are there.
+
 ---
 
 ## 8. Lots

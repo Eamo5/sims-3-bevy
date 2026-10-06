@@ -250,15 +250,19 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
     }
     let face = of_type(CT_FACE).into_iter().min_by_key(|e| e.name.len()).cloned();
     let scalp = of_type(CT_SCALP).into_iter().min_by_key(|e| e.name.len()).cloned();
-    let random_hair = of_type(CT_HAIR).choose(rng).map(|e| (*e).clone());
-    let hair = chosen(sim.outfit.hair, CT_HAIR).or(random_hair);
     // Natural eyebrows (not the novelty ones).
-    let brows = of_type(CT_EYEBROW)
-        .into_iter()
-        .filter(|e| !["Hairless", "Monobrow", "Extreme"].iter().any(|n| e.name.contains(n)))
-        .collect::<Vec<_>>()
-        .choose(rng)
-        .map(|e| (*e).clone());
+    let natural = |e: &&CasPartInfo| !["Hairless", "Monobrow", "Extreme"].iter().any(|n| e.name.contains(n));
+    // (Drawn as before, to keep the clothes picked after them the same.)
+    let _ = of_type(CT_HAIR).choose(rng);
+    let _ = of_type(CT_EYEBROW).into_iter().filter(natural).collect::<Vec<_>>().choose(rng);
+    // Hair and brows are theirs whatever they wear: drawn from everything that fits, as for
+    // their everyday look (swimwear and pyjamas narrow the clothes to the base game's, which
+    // gave them other hair).
+    let everyday = |t: u32| cas.parts.iter().filter(|e| e.clothing_type == t).filter(fits).filter(worn).collect::<Vec<_>>();
+    let mut own = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look);
+    let random_hair = everyday(CT_HAIR).choose(&mut own).map(|e| (*e).clone());
+    let hair = chosen(sim.outfit.hair, CT_HAIR).or(random_hair);
+    let brows = everyday(CT_EYEBROW).into_iter().filter(natural).collect::<Vec<_>>().choose(&mut own).map(|e| (*e).clone());
     let mut body = Vec::new();
     let (tops, bottoms, fulls) = (of_type(CT_TOP), of_type(CT_BOTTOM), of_type(CT_BODY));
     // (Nothing of the kind for them: their everyday clothes.)

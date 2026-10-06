@@ -278,7 +278,7 @@ fn rebuild_bodies(
             Some(o) => o,
             None => crate::simbody::pick_outfit_for(&cas, sim, &mut rng, kind),
         };
-        debug!("{} dressed ({kind:?}): {:?}", sim.first, outfit.body.iter().map(|p| p.name.as_str()).collect::<Vec<_>>());
+        debug!("{} dressed ({kind:?}): {:?}, hair {:?}", sim.first, outfit.body.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), outfit.hair.as_ref().map(|h| h.name.as_str()));
         let Some(model) = crate::simbody::build_sim_model(&data.0, &cas, sim, &outfit, crate::simbody::tone_of(sim)) else { continue };
         for c in children.iter() {
             if parts.get(c).is_ok() {

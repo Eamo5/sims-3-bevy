@@ -425,6 +425,9 @@ fn main() {
             let f: Vec<&str> = cas.parts.iter().filter(|p| p.category & 0x4 != 0 && p.category & 0x200000 != 0 && matches!(p.clothing_type, 4..=7) && p.baked == baked && p.age_gender & 0xF00 == 0).map(|p| p.name.as_str()).collect();
             println!("formal (baked {baked}): {} e.g. {:?}", f.len(), &f[..f.len().min(12)]);
         }
+        // Adult women's hair, with the pack each comes from (group).
+        let hair: Vec<String> = cas.parts.iter().filter(|p| p.baked && p.clothing_type == 1 && p.age_gender & 0x20 != 0 && p.age_gender & 0x2000 != 0).map(|p| format!("{} ({:x}, cat {:x})", p.name, p.key.1, p.category)).collect();
+        println!("adult F hair: {hair:?}");
         let tones: Vec<String> = cas.tone.textures.iter().map(|(ag, t, _)| format!("{ag:x}/{t:x}")).collect();
         println!("skin textures: {tones:?}");
         return;

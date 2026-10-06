@@ -1467,6 +1467,21 @@ fn main() {
         }
         return;
     }
+    if args[1] == "objsclasses" {
+        // objsclasses <world file> [filter]: the object graph's classes (and how many of each).
+        let w = Package::open(&args[2]).unwrap();
+        let e = w.of_type(s3formats::objs::T_OBJS).next().expect("no OBJS");
+        let d = w.read(e).unwrap();
+        let objs = s3formats::objs::ObjStream::parse(&d).expect("OBJS");
+        let mut n = BTreeMap::<String, usize>::new();
+        for id in 1..=objs.len() as u32 {
+            *n.entry(objs.class_name(id).unwrap_or("?").to_string()).or_default() += 1;
+        }
+        for (c, k) in n.iter().filter(|(c, _)| args.get(3).is_none_or(|f| c.contains(f.as_str()))) {
+            println!("{k:6} {c}");
+        }
+        return;
+    }
     if args[1] == "objsdump" {
         // objsdump <world file> <class name> [count]: decoded fields of objects of a class.
         let w = Package::open(&args[2]).unwrap();
@@ -1482,7 +1497,8 @@ fn main() {
         let n: usize = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(3);
         for id in objs.objects_of(&args[3]).into_iter().take(n) {
             println!("#{id} {}", objs.class_name(id).unwrap_or("?"));
-            if objs.fields(id).is_none() {
+            // (RAW=1: every object's bytes too.)
+            if objs.fields(id).is_none() || std::env::var("RAW").is_ok() {
                 let c = &objs.classes[objs.class(id).unwrap()];
                 println!("   (undecodable) fields {:?}", c.fields.iter().map(|(n, t)| format!("{n}:{t:x}")).collect::<Vec<_>>());
                 println!("   {:02x?}", objs.raw(id));
