@@ -1311,36 +1311,85 @@ fn update_clock_panel(
     }
 }
 
+/// What a queued action is shown with, as the game's queue: the object's catalogue picture, or
+/// the other Sim's portrait.
+#[derive(Clone, PartialEq)]
+enum QueuePicture {
+    None,
+    Object(s3bake::Key),
+    Sim(Entity),
+}
+
+#[allow(clippy::type_complexity)]
 fn update_queue_panel(
     mut commands: Commands,
     panel: Query<Entity, With<QueuePanel>>,
     sel: Query<&ActionQueue, With<Selected>>,
-    mut last: Local<Vec<String>>,
+    objects: Query<&GameObject>,
+    sims: Query<(), With<Sim>>,
+    mut last: Local<Vec<(String, bool)>>,
+    (mut ui, mut portraits, mut images): (Option<ResMut<crate::icons::GameUi>>, ResMut<crate::portraits::Portraits>, ResMut<Assets<Image>>),
 ) {
     let Ok(p) = panel.single() else { return };
-    let labels: Vec<String> = sel.single().map(|q| q.0.iter().filter(|a| !a.cancel).map(|a| a.label.clone()).collect()).unwrap_or_default();
-    if *last == labels {
+    let entries: Vec<(String, QueuePicture)> = sel
+        .single()
+        .map(|q| {
+            q.0.iter()
+                .filter(|a| !a.cancel)
+                .map(|a| {
+                    let pic = match &a.kind {
+                        ActionKind::Object { target, .. } | ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } => {
+                            objects.get(*target).map_or(QueuePicture::None, |o| QueuePicture::Object(o.objd))
+                        }
+                        ActionKind::Social { target, .. } | ActionKind::PhoneChat { target } | ActionKind::Invite { target } if sims.contains(*target) => QueuePicture::Sim(*target),
+                        _ => QueuePicture::None,
+                    };
+                    (a.label.clone(), pic)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let sig: Vec<(String, bool)> = entries.iter().map(|(l, p)| (l.clone(), *p != QueuePicture::None)).collect();
+    if *last == sig {
         return;
     }
-    *last = labels.clone();
+    *last = sig;
     commands.entity(p).despawn_children();
     commands.entity(p).with_children(|c| {
-        for (i, l) in labels.iter().enumerate() {
+        for (i, (l, pic)) in entries.iter().enumerate() {
+            let image = match pic {
+                QueuePicture::Object(objd) => ui.as_deref_mut().and_then(|u| u.icon(&mut images, &s3bake::gamedata::thumb_name(objd.2))).map(|h| (h, None)),
+                QueuePicture::Sim(e) => Some((portraits.portrait(&mut images, *e), Some(*e))),
+                QueuePicture::None => None,
+            };
             c.spawn((
                 Button,
                 HudButton,
                 QueueButton(i),
                 Node {
                     border_radius: BorderRadius::all(Val::Px(10.0)),
-                    padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+                    padding: UiRect::axes(Val::Px(if image.is_some() { 6.0 } else { 12.0 }), Val::Px(if image.is_some() { 4.0 } else { 8.0 })),
                     border: UiRect::all(Val::Px(2.0)),
+                    column_gap: Val::Px(6.0),
+                    align_items: AlignItems::Center,
                     ..default()
                 },
                 BorderColor::all(if i == 0 { PLUMBOB_GREEN } else { Color::WHITE }),
                 BackgroundColor(BTN_NORMAL),
+                crate::icons::Tooltip(format!("{l} (click to cancel)")),
             ))
             .with_children(|b| {
-                b.spawn(text(l.clone(), 15.0, Color::WHITE));
+                if let Some((h, of)) = image {
+                    let mut img = b.spawn((
+                        ImageNode::new(h),
+                        Node { width: Val::Px(30.0), height: Val::Px(30.0), border_radius: BorderRadius::all(Val::Px(6.0)), ..default() },
+                        Pickable::IGNORE,
+                    ));
+                    if let Some(e) = of {
+                        img.insert(crate::portraits::PortraitOf(e));
+                    }
+                }
+                b.spawn((text(l.clone(), 15.0, Color::WHITE), Pickable::IGNORE));
             });
         }
     });
