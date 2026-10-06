@@ -7,7 +7,6 @@ use s3bake::Key;
 
 use crate::camera::SimsCamera;
 use crate::baked::Baked;
-use crate::home::spawn_game_object;
 use crate::hud::{PointerOverUi, ground_hit};
 use crate::interact::{GameObject, Household, Notifications, ObjectKind};
 use crate::loading::{Catalog, CurrentWorld};
@@ -702,10 +701,19 @@ fn placement(
         }
         _ => None,
     };
+    // Pool ladders go on a pool's edge.
+    let ladder = catalog.by_key(&objd).is_some_and(|e| e.kind == ObjectKind::PoolLadder);
+    let on_edge = match (ladder, building.as_deref(), ground) {
+        (true, Some(b), Some(p)) => crate::build::snap_to_pool(b, p),
+        _ => None,
+    };
     if let Ok(mut tf) = tfs.get_mut(ghost) {
         if let Some((pos, rot, _)) = &in_wall {
             tf.translation = *pos;
             tf.rotation = *rot;
+        } else if let Some((pos, rot)) = on_edge {
+            tf.translation = pos;
+            tf.rotation = rot;
         } else if let Some(p) = ground {
             let snap = |v: f32| (v * 4.0).round() / 4.0;
             let (x, z) = (snap(p.x), snap(p.z));
@@ -727,9 +735,9 @@ fn placement(
         if owned {
             // Put it back where the ghost is.
             if let Ok(tf) = tfs.get(ghost) {
-                let (pos, yaw) = (tf.translation, buy.yaw);
+                let (pos, rot) = (tf.translation, tf.rotation);
                 let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-                if let Some(o) = spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, yaw) {
+                if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, rot) {
                     commands.entity(o.entity).insert(crate::save::Bought);
                 }
             }
@@ -749,6 +757,10 @@ fn placement(
         }
         if opening.is_some() && in_wall.is_none() {
             notes.push("Doors and windows go into a straight wall, on the floor in view.");
+            return;
+        }
+        if ladder && on_edge.is_none() {
+            notes.push("Pool ladders go on the edge of a pool.");
             return;
         }
         let Ok(tf) = tfs.get(ghost) else { return };

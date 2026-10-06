@@ -255,7 +255,9 @@ pub struct GameObject {
 impl GameObject {
     /// Where a sim stands to use the object (in front, along local +Z).
     pub fn use_point(&self, tf: &Transform) -> Vec2 {
-        let local = Vec3::new(self.center.x, 0.0, self.center.y + self.half.y + 0.45);
+        // (A pool ladder faces into the water: Sims stand behind it, on the side.)
+        let ahead = if self.kind == ObjectKind::PoolLadder { -(self.half.y + 0.45) } else { self.half.y + 0.45 };
+        let local = Vec3::new(self.center.x, 0.0, self.center.y + ahead);
         let p = tf.transform_point(local);
         Vec2::new(p.x, p.z)
     }

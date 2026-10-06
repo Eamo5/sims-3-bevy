@@ -79,20 +79,29 @@ pub struct Swimming {
     exit: Vec3,
 }
 
-/// The pool a ladder stands at: its tiles' centres in the world and its water height.
+/// The pool a ladder stands at (only that one, of all a lot's pools): its tiles' centres in the
+/// world and its water height.
 fn pool_at(world: &crate::loading::WorldInfo, at: Vec3) -> Option<(Vec<Vec2>, f32)> {
     world.buildings.values().filter(|b| !b.pool.is_empty()).find_map(|b| {
         let l = world.lots.get(b.lot as usize)?;
         let (s, c) = l.rotation.sin_cos();
-        let tiles: Vec<Vec2> = b
-            .pool
-            .iter()
-            .map(|f| {
-                let (x, z) = (f.x as f32 + 0.5, f.z as f32 + 0.5);
-                Vec2::new(l.corner[0] + x * c + z * s, l.corner[2] - x * s + z * c)
-            })
-            .collect();
-        tiles.iter().any(|t| t.distance(at.xz()) < 2.5).then(|| (tiles, b.levels[0] - 0.22))
+        let centre = |(x, z): (i32, i32)| {
+            let (x, z) = (x as f32 + 0.5, z as f32 + 0.5);
+            Vec2::new(l.corner[0] + x * c + z * s, l.corner[2] - x * s + z * c)
+        };
+        let all: std::collections::HashSet<(i32, i32)> = b.pool.iter().map(|f| (f.x as i32, f.z as i32)).collect();
+        let start = all.iter().copied().map(|t| (t, centre(t).distance(at.xz()))).filter(|(_, d)| *d < 2.5).min_by(|a, b| a.1.total_cmp(&b.1))?.0;
+        // The tiles joined to the ladder's.
+        let mut pool = std::collections::HashSet::from([start]);
+        let mut open = vec![start];
+        while let Some((x, z)) = open.pop() {
+            for n in [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)] {
+                if all.contains(&n) && pool.insert(n) {
+                    open.push(n);
+                }
+            }
+        }
+        Some((pool.into_iter().map(centre).collect(), b.levels[0] - 0.22))
     })
 }
 

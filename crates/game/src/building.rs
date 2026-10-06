@@ -21,7 +21,7 @@ pub struct BuildingPlugin;
 
 impl Plugin for BuildingPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<NearbyLots>().add_systems(
+        app.init_resource::<NearbyLots>().add_message::<PoolChanged>().add_systems(
             Update,
             (follow_selected_floor, view_level_keys, building_visibility, stream_nearby_lots, lamps_at_night, cut_openings)
                 .chain()
@@ -76,6 +76,7 @@ pub struct ActiveBuilding {
     floor_entities: Vec<Entity>,
     stair_entities: Vec<Entity>,
     fence_entities: Vec<Entity>,
+    pool_entities: Vec<Entity>,
     roof_entity: Option<Entity>,
     /// The roof pattern on the household's rooms.
     pub roof_texture: Key,
@@ -470,7 +471,17 @@ pub enum PaintOp {
     AddFence { a: [f32; 2], b: [f32; 2], level: u8, model: Key, post: Option<Key> },
     /// The fence along a grid edge taken down (and posts left standing alone).
     RemoveFence { a: [f32; 2], b: [f32; 2], level: u8 },
+    /// A pool tile dug (on the ground floor, out of doors), or filled in again.
+    AddPool { x: u16, z: u16 },
+    RemovePool { x: u16, z: u16 },
 }
+
+/// How deep a pool dug in build mode is (a storey down, as the game's).
+pub const POOL_DEPTH: f32 = -2.6;
+
+/// The active lot's pool changed: the ground over it opens (or closes) to match.
+#[derive(Message, Clone, Copy)]
+pub struct PoolChanged;
 
 /// The active house's repaintings since it was built (kept in saves).
 #[derive(Resource, Default, Clone)]
@@ -494,6 +505,7 @@ pub fn repaint(
     let mut stairs_changed = false;
     let mut roof_changed = false;
     let mut fences_changed = false;
+    let mut pool_changed = false;
     for op in ops {
         apply_paint(&mut b.data, op);
         let last = b.data.walls.len().saturating_sub(1) as u32;
@@ -539,7 +551,18 @@ pub fn repaint(
                 roof_changed = true;
             }
             PaintOp::AddFence { .. } | PaintOp::RemoveFence { .. } => fences_changed = true,
+            PaintOp::AddPool { .. } | PaintOp::RemovePool { .. } => pool_changed = true,
         }
+    }
+    if pool_changed {
+        for e in b.pool_entities.drain(..) {
+            commands.entity(e).try_despawn();
+        }
+        let data = b.data.clone();
+        b.pool_entities = spawn_pool(commands, assets, ctx, &data, b, None);
+        commands.queue(|w: &mut World| {
+            w.write_message(PoolChanged);
+        });
     }
     if fences_changed {
         for e in b.fence_entities.drain(..) {
@@ -860,6 +883,15 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
                 }
             }
         }
+        PaintOp::AddPool { x, z } => {
+            if !b.pool.iter().any(|f| f.x == x && f.z == z) {
+                b.pool.push(FloorBaked { level: 0, x, z, mask: 0xF, kind: ROOM_OUTSIDE, region: 0, cover: [NO_COVER; 4] });
+            }
+            if b.pool_depth == 0.0 {
+                b.pool_depth = POOL_DEPTH;
+            }
+        }
+        PaintOp::RemovePool { x, z } => b.pool.retain(|f| !(f.x == x && f.z == z)),
         PaintOp::RemoveFence { a, b: end, level } => {
             let near = |p: [f32; 2], q: [f32; 2]| Vec2::from(p).distance(Vec2::from(q)) < 0.05;
             b.fences.retain(|f| !(f.level == level && f.a != f.b && ((near(f.a, a) && near(f.b, end)) || (near(f.a, end) && near(f.b, a)))));
@@ -868,6 +900,84 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
             b.fences.retain(|f| f.level != level || f.a != f.b || !(near(f.a, a) || near(f.a, end)) || runs.iter().any(|r| near(r.0, f.a) || near(r.1, f.a)));
         }
     }
+}
+
+/// A pool let into the ground: its tiled floor and sides, a stone coping round the edge, and
+/// the water (given its material by the water module).
+fn spawn_pool(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetCtx, b: &LotBuildingBaked, active: &ActiveBuilding, neighbor: Option<Entity>) -> Vec<Entity> {
+    let mut out = Vec::new();
+    if b.pool.is_empty() {
+        return out;
+    }
+    let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);
+    let tiles: HashSet<(i32, i32)> = b.pool.iter().map(|f| (f.x as i32, f.z as i32)).collect();
+    let cover_key = |i: u16| (i != s3bake::types::NO_COVER).then(|| b.covers.get(i as usize).copied()).flatten();
+    let ground_y = |x: f32, z: f32| b.ground_at(x, z).unwrap_or(level_y(0));
+    let floor_y = level_y(0) + b.pool_depth;
+    let water_y = level_y(0) - 0.22;
+    let mut bufs: HashMap<Key, MeshBuf> = HashMap::new();
+    let mut coping = MeshBuf::default();
+    let mut water = MeshBuf::default();
+    for f in &b.pool {
+        let (x, z) = (f.x as f32, f.z as f32);
+        let key = f.cover.iter().find_map(|&c| cover_key(c)).unwrap_or(STYLE_FLOOR_TERRACOTTA);
+        let buf = bufs.entry(key).or_default();
+        buf.quad(
+            [active.world(x, z, floor_y), active.world(x + 1.0, z, floor_y), active.world(x + 1.0, z + 1.0, floor_y), active.world(x, z + 1.0, floor_y)],
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            Vec3::Y,
+        );
+        water.quad(
+            [active.world(x, z, water_y), active.world(x + 1.0, z, water_y), active.world(x + 1.0, z + 1.0, water_y), active.world(x, z + 1.0, water_y)],
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            Vec3::Y,
+        );
+        // Sides where the pool ends: tiled down to the floor, the coping along the top.
+        for (dx, dz, a, c) in [(-1, 0, (x, z + 1.0), (x, z)), (1, 0, (x + 1.0, z), (x + 1.0, z + 1.0)), (0, -1, (x, z), (x + 1.0, z)), (0, 1, (x + 1.0, z + 1.0), (x, z + 1.0))] {
+            if tiles.contains(&(f.x as i32 + dx, f.z as i32 + dz)) {
+                continue;
+            }
+            let inward = active.dir(-dx as f32, -dz as f32);
+            let (ya, yc) = (ground_y(a.0, a.1), ground_y(c.0, c.1));
+            buf.quad(
+                [active.world(a.0, a.1, floor_y), active.world(c.0, c.1, floor_y), active.world(c.0, c.1, yc), active.world(a.0, a.1, ya)],
+                [[0.0, 0.0], [1.0, 0.0], [1.0, ya - floor_y], [0.0, yc - floor_y]],
+                inward,
+            );
+            let out = Vec2::new(dx as f32, dz as f32) * 0.3;
+            coping.quad(
+                [active.world(a.0, a.1, ya + 0.04), active.world(c.0, c.1, yc + 0.04), active.world(c.0 + out.x, c.1 + out.y, yc + 0.04), active.world(a.0 + out.x, a.1 + out.y, ya + 0.04)],
+                [[0.0, 0.0], [1.0, 0.0], [1.0, 0.3], [0.0, 0.3]],
+                Vec3::Y,
+            );
+        }
+        // The coping round the pool's outer corners.
+        for (dx, dz) in [(-1, -1), (1, -1), (1, 1), (-1, 1)] {
+            let (tx, tz) = (f.x as i32, f.z as i32);
+            if tiles.contains(&(tx + dx, tz)) || tiles.contains(&(tx, tz + dz)) {
+                continue;
+            }
+            let (cx, cz) = (x + (dx + 1) as f32 * 0.5, z + (dz + 1) as f32 * 0.5);
+            let y = ground_y(cx, cz) + 0.04;
+            let (ox, oz) = (dx as f32 * 0.3, dz as f32 * 0.3);
+            let q = [active.world(cx, cz, y), active.world(cx + ox, cz, y), active.world(cx + ox, cz + oz, y), active.world(cx, cz + oz, y)];
+            coping.quad(q, [[0.0, 0.0], [0.3, 0.0], [0.3, 0.3], [0.0, 0.3]], Vec3::Y);
+        }
+    }
+    for (key, buf) in bufs {
+        let mat = surface_material(assets, ctx, key);
+        let e = commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(mat))).id();
+        place(commands, e, neighbor, 1);
+        out.push(e);
+    }
+    let stone = ctx.materials.add(StandardMaterial { base_color: Color::srgb(0.82, 0.8, 0.74), perceptual_roughness: 0.8, ..default() });
+    let e = commands.spawn((Mesh3d(ctx.meshes.add(coping.mesh())), MeshMaterial3d(stone))).id();
+    place(commands, e, neighbor, 1);
+    out.push(e);
+    let e = commands.spawn((Mesh3d(ctx.meshes.add(water.mesh())), Transform::default(), Visibility::default(), crate::water::PoolWater)).id();
+    place(commands, e, neighbor, 1);
+    out.push(e);
+    out
 }
 
 /// Fences and railings: each run (and post) is its fence's piece, turned along the run.
@@ -1293,6 +1403,7 @@ pub fn spawn_building(
         floor_entities: Vec::new(),
         stair_entities: Vec::new(),
         fence_entities: Vec::new(),
+        pool_entities: Vec::new(),
         roof_entity: None,
     };
     let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);
@@ -1542,62 +1653,8 @@ pub fn spawn_building(
     // Fences and railings.
     active.fence_entities = spawn_fences(commands, assets, ctx, b, &active, neighbor);
 
-    // A pool let into the ground: its tiled floor and sides, a stone coping round the edge,
-    // and the water (given its material by the water module).
-    if !b.pool.is_empty() {
-        let tiles: HashSet<(i32, i32)> = b.pool.iter().map(|f| (f.x as i32, f.z as i32)).collect();
-        let cover_key = |i: u16| (i != s3bake::types::NO_COVER).then(|| b.covers.get(i as usize).copied()).flatten();
-        let ground_y = |x: f32, z: f32| b.ground_at(x, z).unwrap_or(level_y(0));
-        let floor_y = level_y(0) + b.pool_depth;
-        let water_y = level_y(0) - 0.22;
-        let mut bufs: HashMap<Key, MeshBuf> = HashMap::new();
-        let mut coping = MeshBuf::default();
-        let mut water = MeshBuf::default();
-        for f in &b.pool {
-            let (x, z) = (f.x as f32, f.z as f32);
-            let key = f.cover.iter().find_map(|&c| cover_key(c)).unwrap_or(STYLE_FLOOR_TERRACOTTA);
-            let buf = bufs.entry(key).or_default();
-            buf.quad(
-                [active.world(x, z, floor_y), active.world(x + 1.0, z, floor_y), active.world(x + 1.0, z + 1.0, floor_y), active.world(x, z + 1.0, floor_y)],
-                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-                Vec3::Y,
-            );
-            water.quad(
-                [active.world(x, z, water_y), active.world(x + 1.0, z, water_y), active.world(x + 1.0, z + 1.0, water_y), active.world(x, z + 1.0, water_y)],
-                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-                Vec3::Y,
-            );
-            // Sides where the pool ends: tiled down to the floor, the coping along the top.
-            for (dx, dz, a, c) in [(-1, 0, (x, z + 1.0), (x, z)), (1, 0, (x + 1.0, z), (x + 1.0, z + 1.0)), (0, -1, (x, z), (x + 1.0, z)), (0, 1, (x + 1.0, z + 1.0), (x, z + 1.0))] {
-                if tiles.contains(&(f.x as i32 + dx, f.z as i32 + dz)) {
-                    continue;
-                }
-                let inward = active.dir(-dx as f32, -dz as f32);
-                let (ya, yc) = (ground_y(a.0, a.1), ground_y(c.0, c.1));
-                buf.quad(
-                    [active.world(a.0, a.1, floor_y), active.world(c.0, c.1, floor_y), active.world(c.0, c.1, yc), active.world(a.0, a.1, ya)],
-                    [[0.0, 0.0], [1.0, 0.0], [1.0, ya - floor_y], [0.0, yc - floor_y]],
-                    inward,
-                );
-                let out = Vec2::new(dx as f32, dz as f32) * 0.3;
-                coping.quad(
-                    [active.world(a.0, a.1, ya + 0.04), active.world(c.0, c.1, yc + 0.04), active.world(c.0 + out.x, c.1 + out.y, yc + 0.04), active.world(a.0 + out.x, a.1 + out.y, ya + 0.04)],
-                    [[0.0, 0.0], [1.0, 0.0], [1.0, 0.3], [0.0, 0.3]],
-                    Vec3::Y,
-                );
-            }
-        }
-        for (key, buf) in bufs {
-            let mat = surface_material(assets, ctx, key);
-            let e = commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(mat))).id();
-            place(commands, e, neighbor, 1);
-        }
-        let stone = ctx.materials.add(StandardMaterial { base_color: Color::srgb(0.82, 0.8, 0.74), perceptual_roughness: 0.8, ..default() });
-        let e = commands.spawn((Mesh3d(ctx.meshes.add(coping.mesh())), MeshMaterial3d(stone))).id();
-        place(commands, e, neighbor, 1);
-        let e = commands.spawn((Mesh3d(ctx.meshes.add(water.mesh())), Transform::default(), Visibility::default(), crate::water::PoolWater)).id();
-        place(commands, e, neighbor, 1);
-    }
+    // The pool.
+    active.pool_entities = spawn_pool(commands, assets, ctx, b, &active, neighbor);
     active.holes = holes;
     active.base_stairs = active.stairs.clone();
     // Cutaway and imposter swaps work around the middle of the walls, not of the lot.

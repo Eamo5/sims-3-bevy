@@ -848,11 +848,9 @@ fn auto_paint(
     commands.insert_resource(crate::building::LotPaint(ops));
 }
 
-/// `--build`: a room built with the room tool, a door put in its front wall and a window in its
-/// side (through the same snapping as the pointer), then build mode left open on the tools.
-#[allow(clippy::too_many_arguments)]
+/// POOL_MAP=1 logs the lot's floors and pools as a map, a row of tiles a line.
 /// FENCE=<x0>,<z0>,<x1>,<z1>[,<style>]: a fence put up along the grid between those lot points
-/// (the style an index into the game's fences); FENCE_CAM=1 then looks at it.
+/// (the style an index into the game's fences); FENCE_CAM=1 then looks at it (FENCE_CAM=<n>: from n metres).
 #[allow(clippy::too_many_arguments)]
 fn auto_fence(
     mut commands: Commands,
@@ -864,8 +862,12 @@ fn auto_fence(
     mut faces: Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
     (mut log, mut grid): (Option<ResMut<crate::building::LotPaint>>, Option<ResMut<crate::nav::NavGrid>>),
     mut cam: Query<&mut SimsCamera>,
+    catalog: Res<crate::loading::Catalog>,
 ) {
-    let Ok(v) = std::env::var("FENCE") else { return };
+    // POOL=<x0>,<z0>,<x1>,<z1>: a pool dug over those lot tiles instead (POOL_LADDER=1: with a
+    // ladder at its first edge).
+    let pool = std::env::var("POOL").ok();
+    let Some(v) = std::env::var("FENCE").ok().or(pool.clone()) else { return };
     if *done || time.elapsed_secs() < 4.0 {
         return;
     }
@@ -875,9 +877,31 @@ fn auto_fence(
     if n.len() < 4 {
         return;
     }
-    let Some(style) = ui.data.fences.get(n.get(4).copied().unwrap_or(0) as usize) else { return };
-    let (ops, cost) = crate::build::plan_fence(b, style, false, b.view_level, IVec2::new(n[0], n[1]), IVec2::new(n[2], n[3]));
-    info!("fence test: {} ({} ops, §{cost})", style.name, ops.len());
+    let (ops, cost) = if pool.is_some() {
+        crate::build::plan_pool(b, false, b.view_level, IVec2::new(n[0], n[1]), IVec2::new(n[2], n[3]))
+    } else {
+        let Some(style) = ui.data.fences.get(n.get(4).copied().unwrap_or(0) as usize) else { return };
+        crate::build::plan_fence(b, style, false, b.view_level, IVec2::new(n[0], n[1]), IVec2::new(n[2], n[3]))
+    };
+    let (mut lo, mut hi) = (IVec2::MAX, IVec2::MIN);
+    for f in &b.data.floors {
+        lo = lo.min(IVec2::new(f.x as i32, f.z as i32));
+        hi = hi.max(IVec2::new(f.x as i32, f.z as i32));
+    }
+    info!("build test: {} ops, §{cost}; lot {}x{}, floors {lo}..{hi}", ops.len(), b.data.width, b.data.depth);
+    if std::env::var("POOL_MAP").is_ok() {
+
+        for z in 0..b.data.depth as u16 {
+            let row: String = (0..b.data.width as u16)
+                .map(|x| match (b.data.pool.iter().any(|f| f.x == x && f.z == z), b.data.floors.iter().filter(|f| f.x == x && f.z == z).map(|f| f.level).max()) {
+                    (true, _) => '~',
+                    (_, Some(l)) => char::from_digit(l as u32, 10).unwrap_or('#'),
+                    _ => '.',
+                })
+                .collect();
+            info!("map {z:2} {row}");
+        }
+    }
     let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
     crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces);
     match log.as_mut() {
@@ -887,15 +911,29 @@ fn auto_fence(
     if let Some(g) = grid.as_mut() {
         g.dirty = true;
     }
-    if std::env::var("FENCE_CAM").is_ok()
+    if pool.is_some()
+        && std::env::var("POOL_LADDER").is_ok()
+        && let Some(e) = catalog.entries.iter().filter(|e| e.price > 0 && e.kind == crate::interact::ObjectKind::PoolLadder).min_by_key(|e| e.price)
+        // At the pool's near edge, facing into the water.
+        && let Some((at, face)) = crate::build::snap_to_pool(b, b.world(n[0] as f32 + 0.5, n[1] as f32, b.levels[0]))
+    {
+        if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, e.key, at, face) {
+            commands.entity(o.entity).insert(crate::save::Bought);
+        }
+        info!("build test: {} at the pool, {at}", e.name);
+    }
+    if let Ok(d) = std::env::var("FENCE_CAM")
         && let Ok(mut c) = cam.single_mut()
     {
         let mid = b.world((n[0] + n[2]) as f32 * 0.5, (n[1] + n[3]) as f32 * 0.5, 0.0);
         c.focus = Vec3::new(mid.x, c.focus.y, mid.z);
-        c.distance = 14.0;
+        c.distance = d.parse().unwrap_or(14.0);
     }
 }
 
+/// `--build`: a room built with the room tool, a door put in its front wall and a window in its
+/// side (through the same snapping as the pointer), then build mode left open on the tools.
+#[allow(clippy::too_many_arguments)]
 fn auto_build(
     args: Res<AutoArgs>,
     mut stage: Local<u8>,

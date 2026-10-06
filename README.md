@@ -276,7 +276,11 @@ installation is unreachable.
   every change is replayed from the save. A Fences tab holds the catalogue's 19 fences and
   hedges (pictured by rendering a piece of each); the fence tool drags runs along the grid
   (straight or diagonal, posts at the ends, standing on the ground out of doors), Ctrl+drag
-  takes them down, and Sims walk round them.
+  takes them down, and Sims walk round them. The pool tool digs a pool out of doors (§40 a
+  tile, never under a floor or a garage): the ground opens over it, a coping goes round it
+  and the terrain round its edge is laid along the lot's grid; Ctrl+drag fills it in. Pool
+  ladders from the catalogue snap to a pool's edge, and Sims swim in the pool they stand
+  at (a lot's other pools are left alone).
 - **Sound**: the game's own audio, converted once (EALayer3 rewrapped as MP3, EA-XAS decoded to
   WAV): object sounds and Simlish voices cued by the animations, footsteps by floor and
   shoe, interface clicks, stings for promotions, weddings and other moments, birds by day

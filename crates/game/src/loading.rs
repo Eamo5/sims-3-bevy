@@ -123,6 +123,7 @@ impl Catalog {
 }
 
 /// Terrain heights, lots and water of the world being played.
+#[derive(Clone)]
 pub struct WorldInfo {
     pub heightmap: Heightmap,
     pub lots: Vec<LotInfo>,

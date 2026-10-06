@@ -28,6 +28,8 @@ impl Plugin for BuildPlugin {
 pub const WALL_PRICE: i64 = 70;
 pub const FLOOR_PRICE: i64 = 5;
 pub const STAIRS_PRICE: i64 = 300;
+/// What a pool tile costs to dig.
+pub const POOL_PRICE: i64 = 40;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BuildTool {
@@ -38,10 +40,12 @@ pub enum BuildTool {
     Sledgehammer,
     /// The fence picked on the Fences tab.
     Fence,
+    /// Dig a pool out of doors on the ground floor.
+    Pool,
 }
 
 impl BuildTool {
-    pub const ALL: [BuildTool; 5] = [BuildTool::Wall, BuildTool::Room, BuildTool::Floor, BuildTool::Stairs, BuildTool::Sledgehammer];
+    pub const ALL: [BuildTool; 6] = [BuildTool::Wall, BuildTool::Room, BuildTool::Floor, BuildTool::Stairs, BuildTool::Pool, BuildTool::Sledgehammer];
 
     pub fn label(self) -> String {
         match self {
@@ -51,6 +55,7 @@ impl BuildTool {
             BuildTool::Stairs => format!("Staircase\n§{STAIRS_PRICE}"),
             BuildTool::Sledgehammer => "Sledgehammer\nknock down walls".to_string(),
             BuildTool::Fence => "Fence Tool".to_string(),
+            BuildTool::Pool => format!("Pool Tool\n§{POOL_PRICE} a tile"),
         }
     }
 
@@ -62,6 +67,7 @@ impl BuildTool {
             BuildTool::Stairs => "Click to put in a staircase up to the next floor (its landing gets a floor); , and . turn it; Ctrl+click takes one away.",
             BuildTool::Sledgehammer => "Drag along a wall to knock it down.",
             BuildTool::Fence => "Drag along the grid to put up the fence; Ctrl+drag takes fencing down.",
+            BuildTool::Pool => "Drag out a pool on the ground out of doors; Ctrl+drag fills it in. Buy a pool ladder for Sims to swim.",
         }
         .to_string()
             + " Page Up/Down change floors · Esc puts the tool down."
@@ -141,6 +147,34 @@ fn knock_down(sim: &mut LotBuildingBaked, level: u8, p: Vec2, q: Vec2, ops: &mut
         crate::building::apply_paint(sim, &op);
         ops.push(op);
     }
+}
+
+/// Where a pool ladder goes on the pool edge nearest `p` (a point on the lot, within a tile and a
+/// half of the edge): standing on the pool's floor in the middle of the edge's pool tile, facing
+/// into the water (the game's ladders are modelled from the pool's floor up, their rails
+/// curving out over the coping behind them).
+pub fn snap_to_pool(b: &ActiveBuilding, p: Vec3) -> Option<(Vec3, Quat)> {
+    let tiles: std::collections::HashSet<(i32, i32)> = b.data.pool.iter().map(|f| (f.x as i32, f.z as i32)).collect();
+    let lp = b.local(p);
+    let mut best: Option<(f32, (i32, i32), (i32, i32))> = None;
+    for &(x, z) in &tiles {
+        for d in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+            if tiles.contains(&(x + d.0, z + d.1)) {
+                continue;
+            }
+            let mid = Vec2::new(x as f32 + 0.5 + d.0 as f32 * 0.5, z as f32 + 0.5 + d.1 as f32 * 0.5);
+            let dist = mid.distance(lp);
+            if dist < 1.5 && best.is_none_or(|bb| dist < bb.0) {
+                best = Some((dist, (x, z), d));
+            }
+        }
+    }
+    let (_, (x, z), d) = best?;
+    let ground = *b.data.levels.first()?;
+    let pos = b.world(x as f32 + 0.5, z as f32 + 0.5, ground + b.data.pool_depth);
+    // Its front (+z) away from the edge, into the pool.
+    let yaw = (-d.0 as f32).atan2(-d.1 as f32);
+    Some((pos, b.rot * Quat::from_rotation_y(yaw)))
 }
 
 /// Where a door or window `tiles` wide goes in the wall under the pointer (on the floor in
@@ -280,6 +314,36 @@ pub fn plan_stairs(b: &ActiveBuilding, level: u8, at: IVec2, dir: u8, removing: 
         ops.push(PaintOp::AddFloor { level: level + 1, x: landing.x as u16, z: landing.y as u16, region: 0 });
     }
     Ok(ops)
+}
+
+/// A pool dug over the tiles from `start` to `cur` (or filled in), on the ground out of doors:
+/// its ops and what it costs.
+pub fn plan_pool(b: &ActiveBuilding, removing: bool, level: u8, start: IVec2, cur: IVec2) -> (Vec<PaintOp>, i64) {
+    if level != 1 {
+        return (Vec::new(), 0);
+    }
+    let (lo, hi) = (start.min(cur), start.max(cur));
+    let mut ops = Vec::new();
+    for z in lo.y..=hi.y {
+        for x in lo.x..=hi.x {
+            let (x, z) = (x as u16, z as u16);
+            let pool = b.data.pool.iter().any(|f| f.x == x && f.z == z);
+            if removing {
+                if pool {
+                    ops.push(PaintOp::RemovePool { x, z });
+                }
+                continue;
+            }
+            // (Not under a floor at any level, a basement's or a garage's too, nor a staircase.)
+            let floored = b.data.floors.iter().any(|f| f.x == x && f.z == z);
+            let stairs = b.built_stairs.iter().any(|s| s.tiles().contains(&IVec2::new(x as i32, z as i32)));
+            if !pool && !floored && !stairs {
+                ops.push(PaintOp::AddPool { x, z });
+            }
+        }
+    }
+    let cost = if removing { 0 } else { ops.len() as i64 * POOL_PRICE };
+    (ops, cost)
 }
 
 /// A fence along the grid from `start` to `cur` (or taken down): its ops and what it costs.
@@ -440,7 +504,7 @@ fn build_tool(
     }
     let local = b.local(ray.origin + *ray.direction * t);
     let (w, d) = (b.data.width as i32, b.data.depth as i32);
-    let tiles = tool == BuildTool::Floor || tool == BuildTool::Stairs;
+    let tiles = matches!(tool, BuildTool::Floor | BuildTool::Stairs | BuildTool::Pool);
     let cur = if tiles {
         IVec2::new((local.x.floor() as i32).clamp(0, w - 1), (local.y.floor() as i32).clamp(0, d - 1))
     } else {
@@ -550,6 +614,7 @@ fn build_tool(
     let (ops, cost) = match (&fence, tool) {
         (Some(style), BuildTool::Fence) => plan_fence(b, style, removing, level, start, cur),
         (None, BuildTool::Fence) => (Vec::new(), 0),
+        (_, BuildTool::Pool) => plan_pool(b, removing, level, start, cur),
         _ => plan(b, tool, removing, level, start, cur),
     };
     let funds = household.as_ref().map_or(i64::MAX, |h| h.funds);
@@ -632,6 +697,7 @@ fn build_tool(
         g.dirty = true;
     }
     play.write(crate::sound::PlaySound::ui(match (tiles, removing) {
+        (true, _) if tool == BuildTool::Pool => "ui_build_pool_mdown",
         (true, _) => "ui_build_flooring_section",
         (false, true) => "ui_build_walldelete_section",
         (false, false) if tool == BuildTool::Fence => "ui_build_rail_plop",
