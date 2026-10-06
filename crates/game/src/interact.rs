@@ -102,6 +102,8 @@ pub enum ObjectKind {
     AlarmClock,
     /// A trash can: clearing dishes fills it.
     TrashCan,
+    /// A fish bowl: a fish from a Sim's inventory swims in it.
+    FishBowl,
     Other,
 }
 
@@ -120,6 +122,8 @@ impl ObjectKind {
             Self::AlarmClock
         } else if has("trashcan") {
             Self::TrashCan
+        } else if has("decorations.fishbowl") {
+            Self::FishBowl
         } else if has("highchair") {
             Self::HighChair
         } else if has("toys.toybox") || has("toys.mimics.toybox") {
@@ -214,6 +218,7 @@ impl ObjectKind {
             Self::Fridge | Self::Stove | Self::Microwave | Self::Grill | Self::HotBeverage => "Appliances",
             Self::AlarmClock => "Electronics",
             Self::TrashCan => "Misc",
+            Self::FishBowl => "Decor",
             Self::BedDouble | Self::BedSingle => "Beds",
             Self::Toilet | Self::Shower | Self::Bathtub | Self::Sink => "Plumbing",
             Self::Sofa | Self::Chair | Self::Stool => "Seating",
@@ -342,6 +347,9 @@ pub enum Special {
     ToggleAlarm,
     /// Empty a full trash can.
     EmptyTrash,
+    /// Put a fish (the one planned: `FishPlan`) in a bowl, or take it out.
+    PlaceFish,
+    TakeFish,
     /// Cook a group meal and serve it on a platter.
     ServeMeal,
     /// Take a serving from a platter (then sit down to eat it).
@@ -465,6 +473,10 @@ static GRILL: [InteractionDef; 1] = [InteractionDef {
 static HOT_BEVERAGE: [InteractionDef; 1] = [def("Make Hot Beverage", 15.0, [24.0, -48.0, 80.0, 0.0, 0.0, 20.0], Pose::Use)];
 static TRASH: [InteractionDef; 1] =
     [InteractionDef { special: Special::EmptyTrash, ..def("Empty Trash", 6.0, [0.0, 0.0, 0.0, 0.0, -6.0, 0.0], Pose::Use) }];
+static FISHBOWL: [InteractionDef; 2] = [
+    InteractionDef { autonomous: false, special: Special::PlaceFish, ..def("Place Fish", 2.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::TakeFish, ..def("Take Fish", 2.0, N, Pose::Use) },
+];
 static ALARM: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::ToggleAlarm, ..def("Set Alarm", 1.0, N, Pose::Use) }];
 static DISHES: [InteractionDef; 1] = [InteractionDef { special: Special::CleanUp, ..def("Clean Up", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 0.0], Pose::Use) }];
 /// How a plate of food fills hunger, per hour, and how long it takes to eat.
@@ -757,6 +769,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::HotBeverage => &HOT_BEVERAGE,
         ObjectKind::AlarmClock => &ALARM,
         ObjectKind::TrashCan => &TRASH,
+        ObjectKind::FishBowl => &FISHBOWL,
         ObjectKind::Telescope => &TELESCOPE,
         ObjectKind::SwingSet => &SWINGSET,
         ObjectKind::HotTub => &HOTTUB,
@@ -1573,6 +1586,12 @@ fn run_actions(
                                         Special::CleanUp => {
                                             commands.entity(*target).try_despawn();
                                             commands.entity(me).insert(crate::surroundings::Discarded);
+                                        }
+                                        Special::PlaceFish => {
+                                            commands.entity(me).insert(crate::fishbowl::BowlRequest::Place(*target));
+                                        }
+                                        Special::TakeFish => {
+                                            commands.entity(me).insert(crate::fishbowl::BowlRequest::Take(*target));
                                         }
                                         Special::EmptyTrash => {
                                             commands.entity(*target).insert(crate::surroundings::TrashFill(0));

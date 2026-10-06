@@ -713,11 +713,13 @@ fn world_click(
             Res<crate::appliances::Alarm>,
         ),
     ),
-    (on_lot, writers, jobs_q, toddler_q): (
+    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
         Query<&crate::little::ToddlerSkills>,
+        Query<&crate::fishbowl::BowlFish>,
+        Query<&crate::inventory::Inventory>,
     ),
 ) {
     if buy.is_some_and(|b| b.active) {
@@ -803,6 +805,24 @@ fn world_click(
                     continue;
                 }
                 if d.special == Special::Homework && !hw_q.contains(actor) {
+                    continue;
+                }
+                // A fish bowl: a fish from their inventory in, or the one there out.
+                if d.special == Special::PlaceFish {
+                    if bowl_q.contains(t) {
+                        continue;
+                    }
+                    let list: Vec<(String, ActionKind)> = inv_q
+                        .get(actor)
+                        .map(|inv| inv.0.iter().filter(|s| s.kind == crate::inventory::ItemKind::Fish).map(|s| (format!("Place Fish: {}", s.name), ActionKind::Object { target: t, def: i })).collect())
+                        .unwrap_or_default();
+                    if !list.is_empty() {
+                        options.push(("Place Fish ›".to_string(), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push(("Place Fish".to_string(), list));
+                    }
+                    continue;
+                }
+                if d.special == Special::TakeFish && !bowl_q.contains(t) {
                     continue;
                 }
                 // (An empty trash can has nothing to take out.)
@@ -962,7 +982,7 @@ fn pie_buttons(
     mut queues: Query<&mut ActionQueue>,
     selected: Query<Entity, With<Selected>>,
     (mut wishes, mut notes): (Query<(&Sim, &mut crate::wishes::Wishes), With<Selected>>, ResMut<Notifications>),
-    ui_data: Option<Res<crate::icons::GameUi>>,
+    (ui_data, inventories): (Option<Res<crate::icons::GameUi>>, Query<&crate::inventory::Inventory>),
 ) {
     let mut chosen = None;
     for (i, opt) in &q {
@@ -1002,6 +1022,12 @@ fn pie_buttons(
             && let Some(r) = ui.data.recipes.iter().position(|r| r.name == n)
         {
             commands.entity(a).insert(crate::meals::MealPlan(r));
+        }
+        // The fish chosen for a bowl.
+        if let Some(n) = label.strip_prefix("Place Fish: ")
+            && let Some(s) = inventories.get(a).ok().and_then(|inv| inv.0.iter().find(|s| s.kind == crate::inventory::ItemKind::Fish && s.name == n))
+        {
+            commands.entity(a).insert(crate::fishbowl::FishPlan(s.key.clone(), s.quality));
         }
         // The outfit chosen.
         if let Some(k) = label.strip_prefix("Change Into: ").and_then(|n| crate::simbody::OutfitKind::CHOICES.into_iter().find(|k| k.label() == n)) {

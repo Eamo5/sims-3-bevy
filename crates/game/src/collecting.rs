@@ -505,12 +505,16 @@ fn collect_requests(
                     let ok = |k: &str| info(&ui, k).is_some_and(|c| c.kind == CollectKind::Fish && c.level <= level + 1);
                     let Some(key) = pick_weighted(&spawner.items, ok) else { continue };
                     let Some(c) = info(&ui, key) else { continue };
-                    // Bigger fish for better anglers.
+                    // Bigger fish for better anglers, and finer ones: a master angler often
+                    // lands a perfect fish.
                     let t = (level as f32 / 10.0 + rng.random_range(-0.2..0.3)).clamp(0.0, 1.0);
                     let value = (c.min_price as f32 + (c.max_price - c.min_price) as f32 * t).round() as i64;
+                    let tier = crate::gardening::quality_tier((level as f32 / 10.0).min(1.0) * 0.85 + rng.random_range(0.0..0.2));
+                    let word = crate::gardening::QUALITIES[tier].0;
+                    let name = if word == "Normal" { c.name.clone() } else { format!("{word} {}", c.name) };
                     collection.add(&c.key);
-                    give(&mut commands, e, ItemKind::Fish, c.key.clone(), c.name.clone(), 0, value, 1);
-                    caught.push((c.name.clone(), value));
+                    give(&mut commands, e, ItemKind::Fish, c.key.clone(), name.clone(), tier as u8, value, 1);
+                    caught.push((name, value));
                 }
                 if caught.is_empty() {
                     notes.push(format!("{} didn't catch anything.", sim.first));

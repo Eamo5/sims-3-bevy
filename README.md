@@ -246,6 +246,10 @@ installation is unreachable.
   hours) and a full trash can give nearby household Sims the game's *Dirty Surroundings*,
   then *Filthy Surroundings*, moodlets. Clearing dishes away fills the nearest trash can;
   once full, someone has to *Empty Trash* (neat Sims see to it, slobs never do).
+- **Fish bowls**: a fish from a Sim's inventory (fish now come in the game's qualities, a
+  master angler often landing a perfect one) put in a bowl swims there, its own model
+  turning slowly in the glass, and can be taken out again; bowls are kept in saves, and
+  bowls of perfect fish of different kinds count towards The Perfect Aquarium lifetime wish.
 - **Inventories**: each Sim carries what they've picked, caught, found and painted (finished
   paintings, amateur to masterpiece by Painting skill, go in the painter's inventory to sell
   or keep), in stacks on the

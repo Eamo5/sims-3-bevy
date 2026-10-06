@@ -470,6 +470,18 @@ fn give_items(
     use crate::inventory::ItemKind;
     for item in v.split(',') {
         let (what, n) = item.split_once('*').map_or((item, 1), |(w, n)| (w, n.parse().unwrap_or(1)));
+        // A fish of a quality: `Minnow/9`.
+        if let Some((key, q)) = what.split_once('/')
+            && let Some(c) = ui.data.collectibles.iter().find(|c| c.key.eq_ignore_ascii_case(key) && c.kind == s3bake::gamedata::CollectKind::Fish)
+        {
+            let q: usize = q.parse().unwrap_or(3).min(9);
+            let word = crate::gardening::QUALITIES[q].0;
+            crate::inventory::give(&mut commands, e, ItemKind::Fish, c.key.clone(), format!("{word} {}", c.name), q as u8, c.max_price as i64, n);
+            if std::env::var("BOWL").is_ok() {
+                commands.entity(e).insert(crate::fishbowl::FishPlan(c.key.clone(), q as u8));
+            }
+            continue;
+        }
         if what.eq_ignore_ascii_case("painting") {
             crate::inventory::give(&mut commands, e, ItemKind::Painting, "painting#test".into(), "Fine Painting".into(), 0, 120, n);
         } else if let Some((produce, q)) = what.split_once('/') {
