@@ -158,7 +158,7 @@ fn tab_content(
     mut ui: Option<ResMut<crate::icons::GameUi>>,
     mut images: ResMut<Assets<Image>>,
     mut last: Local<String>,
-    (baked, chosen): (Option<Res<crate::baked::Baked>>, Res<crate::inventory::Chosen>),
+    (baked, chosen, mut thumbs): (Option<Res<crate::baked::Baked>>, Res<crate::inventory::Chosen>, ResMut<crate::thumbs::ModelThumbs>),
 ) {
     let (Ok(root), Ok((e, sim, skills, job, at_work, wishes, ltw, author, chess, inv))) = (content.single(), sel.single()) else { return };
     // What's on show, to redraw only when it changes.
@@ -328,10 +328,14 @@ fn tab_content(
             }
         }
         SimTab::Inventory => {
-            // Finds and fish are pictured by their catalogue objects.
+            // Finds and fish are pictured by their catalogue objects, produce by its model.
             let mut ui = ui;
             let picture = |s: &crate::inventory::Stack| -> Option<Handle<Image>> {
                 let ui = ui.as_deref_mut()?;
+                if s.kind == crate::inventory::ItemKind::Produce {
+                    let model = ui.data.plants.iter().find(|p| p.produce == s.key)?.produce_model?;
+                    return Some(thumbs.get(&mut images, model));
+                }
                 let model = ui.data.collectibles.iter().find(|c| c.key == s.key)?.model.clone();
                 let objd = baked.as_ref()?.0.catalog.iter().find(|c| c.instance_name.eq_ignore_ascii_case(&model))?.objd;
                 ui.icon(&mut images, &s3bake::gamedata::thumb_name(objd.2))

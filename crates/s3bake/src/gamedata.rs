@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 34;
+pub const GAMEDATA_VERSION: u32 = 37;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -162,6 +162,8 @@ pub struct PlantInfo {
     /// Gardening skill points for planting and harvesting.
     pub skill_plant: f32,
     pub skill_harvest: f32,
+    /// The produce's model (in `produce.pack`; its group is the geometry state's hash).
+    pub produce_model: Option<crate::types::Key>,
 }
 
 /// A wallpaper or floor covering from the build catalogue.
@@ -1180,19 +1182,59 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     // Garden plants (the base game's everyday ones) and their produce.
     if let (Some(p), Some(ing)) = (xml("plants"), xml("ingredients")) {
         let heights: HashMap<String, String> = records(&p, "MedatorInstanceList").into_iter().map(|f| (get(&f, "MedatorName"), get(&f, "PlantHeight"))).collect();
-        let produce: HashMap<String, (String, i64)> = records(&ing, "Data")
+        let produce: HashMap<String, (String, i64, String)> = records(&ing, "Data")
             .into_iter()
             .filter(|f| f.get("CodeVersion").is_none_or(|v| v == "BaseGame"))
-            .filter_map(|f| Some((f.get("Plant_Name").filter(|s| !s.is_empty())?.clone(), (get(&f, "Ingredient_Key"), num(&f, "Price") as i64))))
+            .filter_map(|f| Some((f.get("Plant_Name").filter(|s| !s.is_empty())?.clone(), (get(&f, "Ingredient_Key"), num(&f, "Price") as i64, get(&f, "Model_Name")))))
             .collect();
+        // The produce's models by name (`tomatoesWhole#tomatoWhole`: that model in that state).
+        // (A name is shared by a model's rig and footprint: only the model's instance counts.)
+        let mut names: HashMap<String, u64> = HashMap::new();
+        for k in pkgs.keys_of_type(T_NMAP) {
+            if let Some(d) = pkgs.read(k) {
+                for (i, n) in s3formats::audio::parse_name_map(&d) {
+                    if pkgs.find_ti(s3pkg::types::MODL, i).is_some() {
+                        names.insert(n.to_ascii_lowercase(), i);
+                    }
+                }
+            }
+        }
+        // (Or a catalogue object of that name: `apple`.)
+        let catalog: Vec<crate::types::CatalogEntry> = read_value(&root.global_dir().join("catalog.bin")).unwrap_or_default();
+        let g = root.global_dir();
+        std::fs::create_dir_all(&g).map_err(|e| e.to_string())?;
+        let mut ppack = PackWriter::create(&g.join("produce.pack")).map_err(|e| e.to_string())?;
+        let mut baked_models: BTreeSet<crate::types::Key> = BTreeSet::new();
+        let mut produce_model = |spec: &str| -> Option<crate::types::Key> {
+            let (name, state) = spec.split_once('#').map_or((spec, None), |(n, s)| (n, Some(s)));
+            let modl = match names.get(&name.to_ascii_lowercase()) {
+                Some(&i) => pkgs.find_ti(s3pkg::types::MODL, i)?,
+                None => crate::types::rkey(*catalog.iter().find(|c| c.instance_name.eq_ignore_ascii_case(name))?.models.first()?),
+            };
+            let hash = state.map_or(0, s3pkg::fnv32);
+            let key = (s3pkg::types::MODL, hash, modl.i);
+            if baked_models.insert(key) {
+                let m = crate::bake::bake_model_state(pkgs, &modl, state.map(s3pkg::fnv32));
+                for t in m.parts.iter().filter_map(|p| p.texture) {
+                    if !root.tex_path(t).exists()
+                        && let Some(dds) = crate::bake::bake_texture(pkgs, t, crate::bake::OBJECT_TEX_MAX, false)
+                    {
+                        let _ = std::fs::write(root.tex_path(t), dds);
+                    }
+                }
+                ppack.add(key, &m).ok()?;
+            }
+            Some(key)
+        };
         for f in records(&p, "PlantList") {
             let name = get(&f, "PlantName");
             let rarity = get(&f, "Rarity");
             if name.is_empty() || f.get("CodeVersion").is_some_and(|v| v != "BaseGame") || !matches!(rarity.as_str(), "Common" | "Uncommon" | "Rare") {
                 continue;
             }
-            let Some((produce, price)) = produce.get(&name).cloned() else { continue };
+            let Some((produce, price, spec)) = produce.get(&name).cloned() else { continue };
             let model = get(&f, "MedatorName");
+            let produce_model = produce_model(&spec);
             out.plants.push(PlantInfo {
                 height: heights.get(&model).cloned().unwrap_or_else(|| "Medium".into()),
                 name,
@@ -1207,8 +1249,10 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 weeds: num(&f, "WeedProblem"),
                 skill_plant: num(&f, "SkillPointsPlant"),
                 skill_harvest: num(&f, "SkillPointsHarvest"),
+                produce_model,
             });
         }
+        ppack.finish().map_err(|e| e.to_string())?;
     }
 
     // Opportunities (the base game's), the ones done at a rabbit hole.

@@ -483,6 +483,7 @@ fn main() {
         println!("{} plants", g.plants.len());
         for p in &g.plants {
             println!("plant {:?} [{}] {} {} bears {} §{} x{}-{} life {} water -{}/h weeds {} skill {}+{}", p.name, p.rarity, p.model, p.height, p.produce, p.price, p.harvest_min, p.harvest_max, p.lifetime, p.water_decay, p.weeds, p.skill_plant, p.skill_harvest);
+            println!("    produce model {:?}", p.produce_model);
         }
         println!("{} opportunities", g.opportunities.len());
         let mut tokens = std::collections::BTreeSet::new();

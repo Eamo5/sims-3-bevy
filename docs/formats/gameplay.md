@@ -105,6 +105,16 @@ min vertex, vertex count, primitive count}); the whole buffer is every state tog
 are `Gameplay/Excel/RecipeMasterList/Data:<key>`. Recipe books are `Books`' `BookRecipe` rows
 (`Recipe`, `Value` = price).
 
+Produce is `Ingredients`' `Data` rows: `Ingredient_Key` (`Onion`), `Plant_Name` (the
+`plants` row bearing it), `Price`, and `Model_Name` in the same `<model>#<state>` form
+(`onionsWhole#onionsWhole`, `lime#limesWhole`, `apple#foodWhole`; `Thumbnail_Model_Name`, when
+given, is the state the game pictures it in: `#plantSurface`, `#thumbnail`). A name map entry
+for the model's name can belong to its rig (0x8EAF13DE) or footprint (0xD382BF57) rather than
+the MODL, so only names whose instance has a MODL count; a few are catalogue objects instead
+(`apple`). `tomatoesWhole` has a rig and footprint in the base game but no model. A state's
+vertex range sits inside a buffer shared by all states, so its bounds are its own indexed
+vertices'.
+
 ### Career branches
 
 A `Careers` level row's `BranchName` is `Base` (or empty) until the career branches, then

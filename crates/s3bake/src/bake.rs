@@ -165,6 +165,13 @@ pub fn bake_model_state(pkgs: &PackageSet, modl: &ResourceKey, state: Option<u32
         } else {
             0
         };
+        // (A state's bounds are its own vertices': the buffer holds every state's.)
+        let (bmin, bmax) = match state {
+            Some(_) => indices.iter().filter_map(|&i| m.positions.get(i as usize)).fold(([f32::MAX; 3], [f32::MIN; 3]), |(lo, hi), p| {
+                ([lo[0].min(p[0]), lo[1].min(p[1]), lo[2].min(p[2])], [hi[0].max(p[0]), hi[1].max(p[1]), hi[2].max(p[2])])
+            }),
+            None => (m.bounds_min, m.bounds_max),
+        };
         let part = BakedPart {
             positions: m.positions.clone(),
             normals: m.normals.clone(),
@@ -174,8 +181,8 @@ pub fn bake_model_state(pkgs: &PackageSet, modl: &ResourceKey, state: Option<u32
             mode,
             unlit: imposter,
             layer: 0,
-            bmin: m.bounds_min,
-            bmax: m.bounds_max,
+            bmin,
+            bmax,
         };
         if imposter {
             parts.extend(split_imposter(&part));
