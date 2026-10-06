@@ -161,7 +161,7 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, show_designs).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -678,6 +678,72 @@ fn show_uniforms(mut commands: Commands, mut sel: Query<(&Transform, &mut crate:
         c.look_at(tf.translation + ahead * 2.2 + Vec3::Y * 0.9);
         c.distance = 5.5;
     }
+}
+
+/// DESIGNS=<catalogue instance name>: that object in each of its designs, in a row in front of
+/// the selected Sim, with the camera on them (DESIGNS_BUY=1: and buy mode holding one, its
+/// designs on show).
+#[allow(clippy::too_many_arguments)]
+fn show_designs(
+    mut commands: Commands,
+    sel: Query<&Transform, With<crate::sim::Selected>>,
+    mut cam: Query<&mut SimsCamera>,
+    mut done: Local<bool>,
+    time: Res<Time>,
+    (data, catalog, mut assets): (Res<crate::baked::Baked>, Res<crate::loading::Catalog>, ResMut<crate::objects::ObjectAssets>),
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+) {
+    let Ok(name) = std::env::var("DESIGNS") else { return };
+    if *done || time.elapsed_secs() < 6.0 {
+        return;
+    }
+    let Ok(tf) = sel.single() else { return };
+    *done = true;
+    let Some(objd) = data.0.catalog.iter().find(|e| e.instance_name.eq_ignore_ascii_case(&name)).map(|e| e.objd) else {
+        warn!("designs test: no catalogue object {name}");
+        return;
+    };
+    let Some(entry) = catalog.by_key(&objd) else { return };
+    let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+    let n = crate::objects::ObjectAssets::design_count(&ctx, objd);
+    info!("designs test: {} has {n} designs", entry.name);
+    let width = crate::objects::parts_bounds(&assets.object(&mut ctx, objd)).map_or(1.0, |(a, b)| (b.x - a.x).max(b.z - a.z) + 0.4);
+    let ahead = (tf.rotation * Vec3::Z).with_y(0.0).normalize_or(Vec3::Z);
+    let side = Vec3::new(ahead.z, 0.0, -ahead.x);
+    let face = Quat::from_rotation_arc(Vec3::Z, -ahead);
+    for d in 0..n.max(1) {
+        let at = tf.translation + ahead * 2.5 + side * (d as f32 - (n as f32 - 1.0) / 2.0) * width;
+        crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, objd, at, face, Some(d));
+    }
+    if let Ok(mut c) = cam.single_mut() {
+        c.look_at(tf.translation + ahead * 2.5);
+        c.distance = (n as f32 * width * 0.9).max(4.0);
+    }
+    // Buy mode, holding one.
+    if std::env::var("DESIGNS_BUY").is_err() {
+        return;
+    }
+    commands.queue(move |w: &mut World| {
+        let parts = w.resource_scope(|w, mut assets: Mut<crate::objects::ObjectAssets>| {
+            w.resource_scope(|w, data: Mut<crate::baked::Baked>| {
+                w.resource_scope(|w, mut meshes: Mut<Assets<Mesh>>| {
+                    w.resource_scope(|w, mut images: Mut<Assets<Image>>| {
+                        let mut mats = w.resource_mut::<Assets<StandardMaterial>>();
+                        let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+                        assets.object_design(&mut ctx, objd, Some(1))
+                    })
+                })
+            })
+        });
+        let ghost = w.spawn((Transform::from_xyz(0.0, -1000.0, 0.0), Visibility::default())).id();
+        for p in parts {
+            let child = w.spawn((Mesh3d(p.mesh.clone()), MeshMaterial3d(p.material.clone()))).id();
+            w.entity_mut(ghost).add_child(child);
+        }
+        let mut b = w.resource_mut::<crate::buy::BuyMode>();
+        b.show(0);
+        b.placing = Some(crate::buy::Placing { objd, ghost, owned: false, design: Some(1) });
+    });
 }
 
 /// EXHAUST=<first name>: that Sim's energy (or BLADDER_FAIL=<first name>: bladder) runs out,

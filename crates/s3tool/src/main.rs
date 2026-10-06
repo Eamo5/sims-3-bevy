@@ -972,6 +972,84 @@ fn main() {
         let _ = d;
         return;
     }
+    if args[1] == "presetstats" {
+        // presetstats <root>: how many catalogue objects have designs, and how many designs.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let (mut objs, mut multi, mut total, mut catalog_total) = (0, 0, 0, 0);
+        let mut by_complate = BTreeMap::<String, usize>::new();
+        for k in set.keys_of_type(types::OBJD).copied().collect::<Vec<_>>() {
+            let Some(d) = set.read(&k) else { continue };
+            let Ok(o) = s3formats::object::parse_objd(&d) else { continue };
+            objs += 1;
+            total += o.presets.len();
+            if o.presets.len() > 1 {
+                multi += 1;
+                if o.show_in_catalog {
+                    catalog_total += o.presets.len();
+                }
+            }
+            for p in &o.presets {
+                *by_complate.entry(p.complate.name.clone()).or_default() += 1;
+            }
+        }
+        println!("{objs} objects, {multi} with designs to choose from, {total} designs ({catalog_total} of catalogue objects with a choice)");
+        for (n, c) in by_complate.iter().filter(|(_, c)| **c > 50) {
+            println!("  {c:6} {n}");
+        }
+        return;
+    }
+    if args[1] == "objpresets" {
+        // objpresets <root> <instance name filter> <out dir>: a catalogue object's designs
+        // (OBJD presets), each rendered from its complate, and its meshes' diffuse textures.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let want = args[3].to_ascii_lowercase();
+        let dir = std::path::Path::new(&args[4]);
+        let _ = std::fs::create_dir_all(dir);
+        let save = |img: &s3formats::dds::Rgba, name: &str| {
+            let f = std::fs::File::create(dir.join(name)).unwrap();
+            let mut enc = png::Encoder::new(std::io::BufWriter::new(f), img.width as u32, img.height as u32);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            enc.write_header().unwrap().write_image_data(&img.data).unwrap();
+        };
+        let mut shown = 0;
+        for k in set.keys_of_type(types::OBJD).copied().collect::<Vec<_>>() {
+            let Some(d) = set.read(&k) else { continue };
+            let Ok(o) = s3formats::object::parse_objd(&d) else { continue };
+            if !o.instance_name.to_ascii_lowercase().contains(&want) || shown >= 3 {
+                continue;
+            }
+            shown += 1;
+            println!("{k} {} ({}) presets {}", o.instance_name, o.name, o.presets.len());
+            for (i, p) in o.presets.iter().enumerate() {
+                let xml = p.keys.get(p.complate.xml as usize).map(|k| k.to_string()).unwrap_or_default();
+                let ov: Vec<String> = p.complate.overrides.iter().map(|(k, v)| format!("{k}={v:?}")).collect();
+                println!("  preset {i}: complate {} xml {xml} keys {} overrides {}", p.complate.name, p.keys.len(), ov.join(" "));
+                for b in &p.complate.blocks {
+                    let ov: Vec<String> = b.overrides.iter().map(|(k, v)| format!("{k}={v:?}")).collect();
+                    println!("     block {} ({}) {}", b.name, b.pattern, ov.join(" "));
+                }
+                if let Some(img) = s3formats::complate::render(&set, &p.complate, &p.keys, 256, 256) {
+                    save(&img, &format!("{}_{i}.png", o.instance_name));
+                }
+            }
+            for mk in s3formats::object::object_models(&set, &k) {
+                for (j, m) in s3formats::model::load_model(&set, &mk).unwrap_or_default().iter().enumerate() {
+                    let t = m.material.texture(s3formats::model::P_DIFFUSE_MAP);
+                    println!("  mesh {j}: shader {:08X} diffuse {:?}", m.material.shader, t.map(|k| k.to_string()));
+                    if let Some(t) = t
+                        && let Some(td) = set.read(&t).or_else(|| set.read_ti(t.t, t.i))
+                    {
+                        let img = if t.t == types::TXTC { s3formats::compositor::composite(&set, &td, 256) } else { s3formats::dds::decode(&td, 256) };
+                        if let Some(img) = img {
+                            save(&img, &format!("{}_mesh{j}.png", o.instance_name));
+                        }
+                    }
+                }
+            }
+        }
+        return;
+    }
     if args[1] == "texpng" {
         // texpng <root> <type:group:instance> <out.png>: a DDS texture or TXTC composite as PNG
         // (WORLD=<world file> also searches that world).

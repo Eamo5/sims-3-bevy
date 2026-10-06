@@ -122,6 +122,9 @@ pub struct ObjdInfo {
     pub show_in_catalog: bool,
     pub objk_index: u32,
     pub keys: Vec<ResourceKey>,
+    /// The object's designs (the catalogue's colour and pattern presets): each a complate with
+    /// the resources it refers to. The first is the default.
+    pub presets: Vec<crate::catalog::PatternMaterial>,
 }
 
 pub fn parse_objd(d: &[u8]) -> R<ObjdInfo> {
@@ -130,13 +133,30 @@ pub fn parse_objd(d: &[u8]) -> R<ObjdInfo> {
     let version = r.u32()?;
     r.skip(8)?;
     let mat_count = r.i32()?.max(0) as usize;
+    let mut presets = Vec::new();
     for _ in 0..mat_count {
         let mtype = r.u8()?;
         if mtype != 1 {
             r.u32()?;
         }
-        let end = r.u32()? as usize;
-        r.pos += end;
+        let len = r.u32()? as usize;
+        let end = r.pos + len;
+        // u16, the TGI list's offset (relative) and size, the complate, the TGI list.
+        let mut m = Reader::at(d, r.pos);
+        let preset = (|| -> R<crate::catalog::PatternMaterial> {
+            m.u16()?;
+            let rel = m.u32()? as usize;
+            let keys_at = m.pos + rel;
+            m.u32()?;
+            let complate = crate::catalog::complate(&mut m, 0)?;
+            m.pos = keys_at;
+            let keys = crate::catalog::tgi_list(&mut m)?;
+            Ok(crate::catalog::PatternMaterial { complate, keys })
+        })();
+        if let Ok(p) = preset {
+            presets.push(p);
+        }
+        r.pos = end;
         r.u32()?;
     }
     let instance_name = if version >= 0x16 { str7(&mut r)? } else { String::new() };
@@ -177,5 +197,6 @@ pub fn parse_objd(d: &[u8]) -> R<ObjdInfo> {
         show_in_catalog: status & 1 != 0,
         objk_index,
         keys,
+        presets,
     })
 }

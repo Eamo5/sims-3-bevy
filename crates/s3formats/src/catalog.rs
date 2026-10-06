@@ -120,7 +120,7 @@ pub fn read_complate(r: &mut Reader) -> R<Complate> {
     complate(r, 0)
 }
 
-fn complate(r: &mut Reader, depth: usize) -> R<Complate> {
+pub(crate) fn complate(r: &mut Reader, depth: usize) -> R<Complate> {
     if depth > 4 {
         return Err(Eof);
     }
@@ -154,7 +154,7 @@ fn complate(r: &mut Reader, depth: usize) -> R<Complate> {
     Ok(Complate { xml, name, pattern, overrides, blocks })
 }
 
-fn tgi_list(r: &mut Reader) -> R<Vec<ResourceKey>> {
+pub(crate) fn tgi_list(r: &mut Reader) -> R<Vec<ResourceKey>> {
     let n = r.u32()? as usize;
     if n > 4096 {
         return Err(Eof);

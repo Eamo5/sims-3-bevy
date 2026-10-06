@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 48;
+pub const GAMEDATA_VERSION: u32 = 49;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -583,6 +583,72 @@ pub struct EyeColors {
     /// The iris (in the texture store).
     pub overlay: Option<crate::types::Key>,
     pub presets: Vec<[f32; 3]>,
+}
+
+/// Texture-store type of a catalogue object's designs: `(T_DESIGN, design, OBJD instance)`.
+pub const T_DESIGN: u32 = 0x0DE5_1600;
+/// How big designs are drawn (the longer side).
+const DESIGN_SIZE: usize = 256;
+
+/// A catalogue object's designs (the game's colour and pattern presets for it): how many, and
+/// the texture of its meshes they stand in for (the object's composited texture).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct ObjectDesigns {
+    pub objd: crate::types::Key,
+    pub count: u8,
+    pub texture: crate::types::Key,
+}
+
+/// Every buyable object's designs, each drawn from its complate into the texture store (objects
+/// whose meshes share one composited texture: the designs are recipes for it).
+fn bake_object_designs(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, String> {
+    let g = root.global_dir();
+    let catalog: Vec<crate::types::CatalogEntry> = read_value(&g.join("catalog.bin")).map_err(|e| format!("catalog.bin: {e}"))?;
+    let models = PackReader::open(&g.join("models.pack")).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(root.textures_dir()).ok();
+    let buyable: Vec<&crate::types::CatalogEntry> = catalog.iter().filter(|c| c.price >= 0).collect();
+    let out: Vec<ObjectDesigns> = crate::bake::par_map(&buyable, |c| {
+        let o = s3formats::object::parse_objd(&pkgs.read(&crate::types::rkey(c.objd))?).ok()?;
+        if o.presets.len() < 2 {
+            return None;
+        }
+        // The one composited texture the designs are recipes for.
+        let mut txtcs: Vec<crate::types::Key> = c
+            .models
+            .iter()
+            .filter_map(|m| models.get::<crate::types::BakedModel>(m))
+            .flat_map(|m| m.parts.into_iter().filter_map(|p| p.texture))
+            .filter(|t| t.0 == s3pkg::types::TXTC)
+            .collect();
+        txtcs.sort();
+        txtcs.dedup();
+        let [texture] = txtcs[..] else { return None };
+        // (Drawn in the shape of that texture.)
+        let (w, h) = pkgs
+            .read(&crate::types::rkey(texture))
+            .and_then(|d| s3formats::txtc::Txtc::parse(&d).ok())
+            .map(|t| s3formats::compositor::Compositor::new(pkgs).output_size(&t))
+            .filter(|(w, h)| *w > 0 && *h > 0)
+            .unwrap_or((DESIGN_SIZE, DESIGN_SIZE));
+        let scale = DESIGN_SIZE as f32 / w.max(h) as f32;
+        let (w, h) = (((w as f32 * scale) as usize).max(16), ((h as f32 * scale) as usize).max(16));
+        let mut count = 0u8;
+        for (i, p) in o.presets.iter().enumerate().take(16) {
+            let key = (T_DESIGN, i as u32, c.objd.2);
+            if !root.tex_path(key).exists() {
+                let Some(img) = s3formats::complate::render(pkgs, &p.complate, &p.keys, w, h) else { break };
+                let _ = std::fs::write(root.tex_path(key), crate::ddsw::encode_dds(&img));
+            }
+            count = i as u8 + 1;
+        }
+        (count >= 2).then_some(ObjectDesigns { objd: c.objd, count, texture })
+    })
+    .into_iter()
+    .flatten()
+    .collect();
+    let n = out.len();
+    write_value(&g.join("object_designs.bin"), &out).map_err(|e| e.to_string())?;
+    Ok(n)
 }
 
 /// The eye colour part's presets: its iris overlay and colours.
@@ -1293,6 +1359,9 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     progress(&format!("Converting: face shapes ({faces} slider bones)…"));
     let eyes = bake_eye_colors(root, pkgs)?;
     progress(&format!("Converting: eye colours ({eyes} presets)…"));
+    progress("Converting: object designs…");
+    let designs = bake_object_designs(root, pkgs)?;
+    progress(&format!("Converting: designs for {designs} objects…"));
     progress("Converting: fences…");
     out.fences = bake_fence_styles(root, pkgs, &strings)?;
     // Catalogue models with alternative geometry states, drawn in their fullest (the objects'

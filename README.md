@@ -169,7 +169,10 @@ installation is unreachable.
 - **Play**: choose a furnished house (with the game's lot pictures) or an empty lot, buy
   mode with the game's own catalogue pictures (base game and every installed pack's) and
   every catalogue object on its tab by the game's own grouping (smoke and burglar alarms,
-  gnomes, sprinklers, picnic tables and trees under Electronics, Outdoors and Misc),
+  gnomes, sprinklers, picnic tables and trees under Electronics, Outdoors and Misc), each in
+  any of the game's designs for it (the catalogue's colour and pattern presets, drawn from
+  their texture recipes: the country couch in blue dots, green stripes, red plaid, cowhide or
+  roses; picked from swatches while it's in hand, and kept in saves),
   multi-storey navigation by stairs, day/night with lamps and street lights. Sims deciding on
   something by themselves think of it in a balloon with its picture.
 - **Build mode painting**: the catalogue's wallpapers and floor coverings (every base-game

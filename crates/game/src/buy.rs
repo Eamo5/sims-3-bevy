@@ -42,6 +42,8 @@ pub struct Placing {
     pub ghost: Entity,
     /// Moving an object already owned (no charge).
     pub owned: bool,
+    /// The design it's in (none: as the game ships it).
+    pub design: Option<u8>,
 }
 
 #[derive(Resource, Default)]
@@ -119,6 +121,8 @@ enum BuyButton {
     Tool(crate::build::BuildTool),
     Roof(usize),
     Fence(usize),
+    /// A design for the object in hand.
+    Design(u8),
     /// A terrain paint (or the eraser), or a brush size (index into `BRUSHES`).
     Terrain(u8),
     Brush(usize),
@@ -490,6 +494,40 @@ fn buy_panel(
             });
             return;
         }
+        // The object in hand's designs (the game's colour and pattern presets for it).
+        if let Some(pl) = &buy.placing {
+            let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+            let n = ObjectAssets::design_count(&ctx, pl.objd);
+            if n > 1 {
+                let name = catalog.by_key(&pl.objd).map(|e| e.name.clone()).unwrap_or_default();
+                p.spawn(Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
+                    row.spawn(text(format!("{name} · Design"), 14.0, Color::WHITE));
+                    for d in 0..n {
+                        let tex = assets.texture(&mut ctx, crate::objects::design_texture(pl.objd, d));
+                        let chosen = pl.design == Some(d);
+                        row.spawn((
+                            Button,
+                            BuyButton::Design(d),
+                            Node {
+                                width: Val::Px(40.0),
+                                height: Val::Px(40.0),
+                                border: UiRect::all(Val::Px(if chosen { 3.0 } else { 1.0 })),
+                                border_radius: BorderRadius::all(Val::Px(6.0)),
+                                ..default()
+                            },
+                            BorderColor::all(if chosen { PLUMBOB_GREEN } else { Color::WHITE }),
+                            BackgroundColor(BTN_NORMAL),
+                            crate::icons::Tooltip(format!("Design {}", d + 1)),
+                        ))
+                        .with_children(|b| {
+                            if let Some(t) = tex {
+                                b.spawn((ImageNode::new(t), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
+                            }
+                        });
+                    }
+                });
+            }
+        }
         let items = match buy.category {
             DOORS_TAB => catalog.openings(true),
             WINDOWS_TAB => catalog.openings(false),
@@ -550,6 +588,7 @@ fn buy_buttons(
     mut images: ResMut<Assets<Image>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut play: MessageWriter<crate::sound::PlaySound>,
+    ghost_tf: Query<&Transform>,
 ) {
     for (i, b) in &q {
         if *i != Interaction::Pressed {
@@ -567,6 +606,19 @@ fn buy_buttons(
             }
             BuyButton::Roof(i) => {
                 buy.roof_pick = Some(*i);
+            }
+            BuyButton::Design(d) => {
+                // The object in hand, in that design.
+                let Some(p) = buy.placing.as_mut() else { continue };
+                let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+                let parts = assets.object_design(&mut ctx, p.objd, Some(*d));
+                let at = ghost_tf.get(p.ghost).copied().unwrap_or_default();
+                commands.entity(p.ghost).despawn();
+                p.ghost = spawn_parts(&mut commands, &parts, at);
+                commands.entity(p.ghost).insert(DespawnOnExit(AppState::InGame));
+                p.design = Some(*d);
+                buy.dirty = true;
+                play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
             }
             BuyButton::Fence(i) => {
                 buy.drop_tools(&mut commands);
@@ -619,7 +671,8 @@ fn buy_buttons(
                 }
                 let ghost = spawn_parts(&mut commands, &parts, Transform::from_xyz(0.0, -1000.0, 0.0));
                 commands.entity(ghost).insert(DespawnOnExit(AppState::InGame));
-                buy.placing = Some(Placing { objd: *key, ghost, owned: false });
+                buy.placing = Some(Placing { objd: *key, ghost, owned: false, design: None });
+                buy.dirty = true;
             }
         }
     }
@@ -764,7 +817,7 @@ fn placement(
     (selected, mut life): (Query<Entity, With<crate::sim::Selected>>, MessageWriter<crate::life::LifeEvent>),
     mut grid: Option<ResMut<NavGrid>>,
     pickup: Option<Res<PickupRequest>>,
-    objects: Query<(&GameObject, &Transform)>,
+    objects: Query<(&GameObject, &Transform, Option<&crate::objects::Design>)>,
     (bought_q, mut removed): (Query<(), With<crate::save::Bought>>, ResMut<crate::save::RemovedLotObjects>),
     mut tfs: Query<&mut Transform, Without<GameObject>>,
     mut faces: Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
@@ -786,16 +839,18 @@ fn placement(
     if buy.placing.is_none() {
         if let Some(req) = pickup {
             commands.remove_resource::<PickupRequest>();
-            if let Ok((obj, tf)) = objects.get(req.0) {
+            if let Ok((obj, tf, design)) = objects.get(req.0) {
                 if !bought_q.contains(req.0) {
                     crate::save::note_removed(&mut removed, obj, tf);
                 }
+                let design = design.map(|d| d.0);
                 let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-                let parts = assets.object(&mut ctx, obj.objd);
+                let parts = assets.object_design(&mut ctx, obj.objd, design);
                 let ghost = spawn_parts(&mut commands, &parts, *tf);
                 commands.entity(ghost).insert(DespawnOnExit(AppState::InGame));
                 buy.yaw = tf.rotation.to_euler(EulerRot::YXZ).0;
-                buy.placing = Some(Placing { objd: obj.objd, ghost, owned: true });
+                buy.placing = Some(Placing { objd: obj.objd, ghost, owned: true, design });
+                buy.dirty = true;
                 commands.entity(req.0).despawn();
                 if let Some(g) = grid.as_mut() {
                     g.dirty = true;
@@ -809,6 +864,7 @@ fn placement(
     let ghost = placing.ghost;
     let objd = placing.objd;
     let owned = placing.owned;
+    let design = placing.design;
     let ground = ground_hit(ray, &world);
     // Doors and windows go into the wall under the pointer.
     let opening = catalog.by_key(&objd).and_then(|e| e.opening);
@@ -844,6 +900,7 @@ fn placement(
     if (keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace)) && owned {
         commands.entity(ghost).despawn();
         buy.placing = None;
+        buy.dirty = true;
         if let Some(h) = household.as_mut() {
             h.funds += price;
         }
@@ -856,13 +913,14 @@ fn placement(
             if let Ok(tf) = tfs.get(ghost) {
                 let (pos, rot) = (tf.translation, tf.rotation);
                 let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-                if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, rot) {
+                if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, rot, design) {
                     commands.entity(o.entity).insert(crate::save::Bought);
                 }
             }
         }
         commands.entity(ghost).despawn();
         buy.placing = None;
+        buy.dirty = true;
         if let Some(g) = grid.as_mut() {
             g.dirty = true;
         }
@@ -898,7 +956,7 @@ fn placement(
         if opening.is_some() {
             play.write(crate::sound::PlaySound::ui("ui_build_door_plop"));
         }
-        if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, rot) {
+        if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, rot, design) {
             commands.entity(o.entity).insert(crate::save::Bought);
             if !owned && let Some(h) = household.as_mut() {
                 h.funds -= price;
@@ -912,6 +970,7 @@ fn placement(
             if owned {
                 commands.entity(ghost).despawn();
                 buy.placing = None;
+                buy.dirty = true;
             }
         }
     }

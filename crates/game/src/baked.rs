@@ -29,6 +29,8 @@ pub struct BakedData {
     pub face_bones: Vec<s3bake::gamedata::FaceBones>,
     /// The eye colour overlay (the iris) and Create a Sim's eye colours.
     pub eye_colors: s3bake::gamedata::EyeColors,
+    /// The catalogue objects' designs, by OBJD key.
+    pub designs: std::collections::HashMap<Key, s3bake::gamedata::ObjectDesigns>,
     pub outfit_pack: Option<PackReader>,
     pub clips: Option<PackReader>,
     /// Names of the baked clips (for picking variants).
@@ -53,10 +55,11 @@ impl BakedData {
         let outfits = s3bake::read_value(&g.join("outfits.bin")).unwrap_or_default();
         let face_bones = s3bake::read_value(&g.join("face_bones.bin")).unwrap_or_default();
         let eye_colors = s3bake::read_value(&g.join("eye_colors.bin")).unwrap_or_default();
+        let designs = s3bake::read_value::<Vec<s3bake::gamedata::ObjectDesigns>>(&g.join("object_designs.bin")).unwrap_or_default().into_iter().map(|d| (d.objd, d)).collect();
         let outfit_pack = PackReader::open(&g.join("outfits.pack")).ok();
         let clips = PackReader::open(&g.join("clips.pack")).ok();
         let clip_names: Vec<String> = s3bake::read_value(&g.join("clip_names.bin")).unwrap_or_default();
-        Ok(Self { root, catalog, catalog_index, models, world_models, food_models, state_models, produce_models, fence_models, cas, cas_pack, outfits, outfit_pack, clips, clip_names, face_bones, eye_colors })
+        Ok(Self { root, catalog, catalog_index, models, world_models, food_models, state_models, produce_models, fence_models, cas, cas_pack, outfits, outfit_pack, clips, clip_names, face_bones, eye_colors, designs })
     }
 
     pub fn model(&self, k: &Key) -> Option<BakedModel> {

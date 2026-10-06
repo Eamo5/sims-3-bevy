@@ -433,7 +433,23 @@ pub fn spawn_game_object_rot(
     pos: Vec3,
     rotation: Quat,
 ) -> Option<SpawnedObject> {
-    let parts = assets.object(ctx, objd);
+    spawn_game_object_design(commands, assets, ctx, catalog, objd, pos, rotation, None)
+}
+
+/// [`spawn_game_object_rot`] in one of the object's designs (`None`: as the game ships it).
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_game_object_design(
+    commands: &mut Commands,
+    assets: &mut ObjectAssets,
+    ctx: &mut AssetCtx,
+    catalog: &Catalog,
+    objd: Key,
+    pos: Vec3,
+    rotation: Quat,
+    design: Option<u8>,
+) -> Option<SpawnedObject> {
+    let design = design.filter(|d| *d < ObjectAssets::design_count(ctx, objd));
+    let parts = assets.object_design(ctx, objd, design);
     let (mn, mx) = parts_bounds(&parts)?;
     let entry = catalog.by_key(&objd);
     let (name, price, kind) = entry
@@ -448,6 +464,9 @@ pub fn spawn_game_object_rot(
         UsedBy::default(),
         DespawnOnExit(AppState::InGame),
     ));
+    if let Some(d) = design {
+        commands.entity(e).insert(crate::objects::Design(d));
+    }
     // Small decorations don't block walking.
     if half.x * half.y > 0.04 && mx.y > 0.25 && !matches!(kind, ObjectKind::Light) {
         commands.entity(e).insert(Obstacle { half, center_offset: center });
