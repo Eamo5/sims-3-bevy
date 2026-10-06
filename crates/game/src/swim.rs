@@ -24,12 +24,12 @@ impl Plugin for SwimPlugin {
 #[allow(clippy::type_complexity)]
 fn pyjamas(
     mut commands: Commands,
-    sims: Query<(Entity, &Sim, &ActionQueue, Option<&crate::simbody::Wearing>, Option<&crate::careers::Job>), With<crate::sim::HouseholdMember>>,
+    sims: Query<(Entity, &Sim, &ActionQueue, Option<&crate::simbody::Wearing>, Option<&crate::careers::Job>, Has<crate::simbody::ChangedInto>), With<crate::sim::HouseholdMember>>,
     beds: Query<&GameObject>,
     cas: Option<Res<crate::simbody::CasData>>,
 ) {
     use crate::simbody::{OutfitKind, Wearing};
-    for (e, sim, queue, wearing, job) in &sims {
+    for (e, sim, queue, wearing, job, chosen) in &sims {
         let uniform = job.and_then(|j| j.uniform(sim)).is_some_and(|u| cas.as_ref().is_some_and(|c| c.outfits.contains_key(u)));
         let want = queue.0.front().and_then(|a| match (&a.kind, a.phase) {
             (ActionKind::GoToWork, _) if uniform => Some(OutfitKind::Career),
@@ -47,13 +47,15 @@ fn pyjamas(
             _ => None,
         });
         let has = wearing.map(|w| w.0);
-        // (Swimwear is the swim's to change; the uniform stays on after work.)
-        if has == Some(OutfitKind::Swimwear) || want == has || (has == Some(OutfitKind::Career) && want.is_none() && uniform) {
+        // (Swimwear is the swim's to change; the uniform stays on after work, and an outfit
+        // chosen at the dresser until it's time for another.)
+        let keep = want.is_none() && (chosen || (has == Some(OutfitKind::Career) && uniform));
+        if has == Some(OutfitKind::Swimwear) || want == has || keep {
             continue;
         }
         match want {
             Some(k) => {
-                commands.entity(e).insert((Wearing(k), crate::aging::NeedsNewBody));
+                commands.entity(e).remove::<crate::simbody::ChangedInto>().insert((Wearing(k), crate::aging::NeedsNewBody));
             }
             None => {
                 commands.entity(e).remove::<Wearing>().insert(crate::aging::NeedsNewBody);

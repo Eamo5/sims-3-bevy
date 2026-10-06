@@ -211,6 +211,7 @@ pub const CT_STOCKINGS: u32 = 25;
 
 pub const CAT_NAKED: u32 = 0x1;
 pub const CAT_EVERYDAY: u32 = 0x2;
+pub const CAT_FORMAL: u32 = 0x4;
 pub const CAT_SLEEP: u32 = 0x8;
 pub const CAT_SWIM: u32 = 0x10;
 pub const CAT_ATHLETIC: u32 = 0x20;

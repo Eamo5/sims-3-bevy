@@ -36,7 +36,9 @@ impl BakedData {
         let world_models = world.and_then(|w| PackReader::open(&root.world_dir(w).join("models.pack")).ok());
         let food_models = PackReader::open(&g.join("food.pack")).ok();
         let state_models = PackReader::open(&g.join("states.pack")).ok();
-        let cas: CasBaked = s3bake::read_value(&g.join("cas.bin")).map_err(|e| format!("cas: {e}"))?;
+        let mut cas: CasBaked = s3bake::read_value(&g.join("cas.bin")).map_err(|e| format!("cas: {e}"))?;
+        // (With the formal wear baked alongside the careers' uniforms.)
+        cas.parts.extend(s3bake::read_value::<Vec<s3bake::CasPartInfo>>(&g.join("wardrobe.bin")).unwrap_or_default());
         let cas_pack = PackReader::open(&g.join("cas.pack")).map_err(|e| format!("cas pack: {e}"))?;
         let outfits = s3bake::read_value(&g.join("outfits.bin")).unwrap_or_default();
         let outfit_pack = PackReader::open(&g.join("outfits.pack")).ok();

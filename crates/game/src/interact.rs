@@ -315,8 +315,10 @@ pub enum Special {
     QuitJob,
     SellPainting,
     Cook,
-    /// Put on a different outfit.
+    /// Change into another of the Sim's outfits (the one planned: `ChangeIntoPlan`).
     ChangeClothes,
+    /// A new everyday outfit from the wardrobe.
+    NewLook,
     /// Cook a group meal and serve it on a platter.
     ServeMeal,
     /// Take a serving from a platter (then sit down to eat it).
@@ -489,8 +491,10 @@ static TOYBOX: [InteractionDef; 1] = [def("Play with Toys", 40.0, [0.0, 0.0, -4.
 static XYLOPHONE: [InteractionDef; 1] = [def("Play Xylophone", 40.0, [0.0, 0.0, -4.0, 20.0, 0.0, 130.0], Pose::Use)];
 static PEGBOX: [InteractionDef; 1] = [def("Play with Peg Box", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 120.0], Pose::Use)];
 static POTTY: [InteractionDef; 1] = [InteractionDef { until_full: Some(BLADDER), ..def("Use Potty", 10.0, [0.0, 600.0, 0.0, 0.0, -20.0, 0.0], Pose::Sit) }];
-static DRESSER: [InteractionDef; 1] =
-    [InteractionDef { autonomous: false, special: Special::ChangeClothes, ..def("Change Clothes", 4.0, N, Pose::Use) }];
+static DRESSER: [InteractionDef; 2] = [
+    InteractionDef { autonomous: false, special: Special::ChangeClothes, ..def("Change Into", 4.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::NewLook, ..def("New Everyday Outfit", 4.0, N, Pose::Use) },
+];
 static TELESCOPE: [InteractionDef; 1] =
     [InteractionDef { skill: Some("Logic"), ..def("Stargaze", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 50.0], Pose::Use) }];
 static SWINGSET: [InteractionDef; 1] = [def("Swing", 30.0, [0.0, 0.0, -6.0, 0.0, -4.0, 75.0], Pose::Use)];
@@ -1428,6 +1432,19 @@ fn run_actions(
                                             notes.push(format!("{} finished a painting and sold it for §{value}.", sim.first));
                                         }
                                         Special::ChangeClothes => {
+                                            // Into the outfit chosen, kept on until it's time for another.
+                                            commands.entity(me).queue_silenced(|mut e: EntityWorldMut| {
+                                                use crate::simbody::{ChangeIntoPlan, ChangedInto, OutfitKind, Wearing};
+                                                let Some(ChangeIntoPlan(kind)) = e.take::<ChangeIntoPlan>() else { return };
+                                                if kind == OutfitKind::Everyday {
+                                                    e.remove::<(Wearing, ChangedInto)>();
+                                                } else {
+                                                    e.insert((Wearing(kind), ChangedInto));
+                                                }
+                                                e.insert(crate::aging::NeedsNewBody);
+                                            });
+                                        }
+                                        Special::NewLook => {
                                             // A different outfit from the wardrobe (the Sim's chosen
                                             // hairstyle stays).
                                             commands.entity(me).queue_silenced(|mut e: EntityWorldMut| {

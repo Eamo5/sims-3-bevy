@@ -256,6 +256,10 @@ installation is unreachable.
   outfits (suits, chef's whites with toques, police blues with the peaked cap, lab coats,
   scrubs, fatigues, the henchman's mask) in the outfit's own colours and fabrics, with their
   own hair colour under a hat. They come home in it and change for bed, a swim or a workout.
+- **Changing clothes**: a dresser's *Change Into ›* puts a Sim in their everyday, formal (the
+  wardrobe's suits, tuxedos and cocktail dresses among them), sleep, athletic or swim wear,
+  or their career's uniform, kept on until it's time for something else; *New Everyday
+  Outfit* picks a fresh everyday look.
 - **Blinking**: Sims blink every few seconds (the rig's eyelid bones closing over the eyes on
   top of whatever they're doing), and sleep with their eyes shut.
 - **Pie menus** in the game's style: pale bubbles with dark writing, blue under the pointer,

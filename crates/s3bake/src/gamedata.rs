@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 33;
+pub const GAMEDATA_VERSION: u32 = 34;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -513,7 +513,8 @@ fn unescape(s: &str) -> String {
 /// Converts the base game's buffs, traits and skills and their icons.
 /// The careers' uniforms (`outfits.bin`): each outfit's parts with their designs rendered from
 /// the outfit's presets into the texture store, and the meshes of parts the everyday wardrobe
-/// doesn't have (`outfits.pack`).
+/// doesn't have (`outfits.pack`). Formal wear that isn't everyday wear too (suits, tuxedos,
+/// cocktail dresses) joins the wardrobe the same way (`wardrobe.bin`).
 fn bake_outfits(root: &BakeRoot, pkgs: &PackageSet, careers: &[CareerInfo]) -> Result<(), String> {
     use crate::types::{CasBaked, CasPartInfo, CasPartMeshes, Key, OutfitInfo, OutfitPartInfo, key_of};
     use s3formats::sim::{CasPart, SimOutfit, T_OUTFIT};
@@ -591,8 +592,48 @@ fn bake_outfits(root: &BakeRoot, pkgs: &PackageSet, careers: &[CareerInfo]) -> R
         }
         Some((info, meshes))
     });
+    // Formal wear, with its default design.
+    let formal: Vec<(s3pkg::ResourceKey, CasPart)> = crate::bake::par_map(&pkgs.keys_of_type(s3pkg::types::CASP).copied().collect::<Vec<_>>(), |k| {
+        let c = CasPart::parse(&pkgs.read(k)?).ok()?;
+        let human = matches!((c.age_gender >> 8) & 0xF, 0 | 1) && c.age_gender & 0x7E != 0;
+        let wanted = human
+            && c.category & s3formats::sim::CAT_FORMAL != 0
+            && c.category & s3formats::sim::CAT_VALID_RANDOM != 0
+            && c.category & s3formats::sim::CAT_HIDDEN == 0
+            && matches!(c.clothing_type, s3formats::sim::CT_BODY | s3formats::sim::CT_TOP | s3formats::sim::CT_BOTTOM | s3formats::sim::CT_SHOES)
+            && !have.contains(&key_of(k));
+        wanted.then_some((*k, c))
+    })
+    .into_iter()
+    .flatten()
+    .collect();
+    let formal: Vec<(CasPartInfo, CasPartMeshes)> = crate::bake::par_map(&formal, |(k, c)| {
+        let m = crate::bake::cas_part_meshes(pkgs, c, rig, cas.baby_rig.as_ref());
+        let layer = c.diffuse.first().map(key_of);
+        let textures = m.meshes.iter().filter_map(|m| m.texture).map(|t| (t, false)).chain(layer.map(|l| (l, true)));
+        for (t, as_layer) in textures {
+            if !root.tex_path(t).exists()
+                && let Some(dds) = crate::bake::bake_texture(pkgs, t, 512, as_layer)
+            {
+                let _ = std::fs::write(root.tex_path(t), dds);
+            }
+        }
+        let info = CasPartInfo { key: key_of(k), name: c.name.clone(), clothing_type: c.clothing_type, age_gender: c.age_gender, category: c.category, baked: !m.meshes.is_empty(), layer };
+        Some((info, m))
+    })
+    .into_iter()
+    .flatten()
+    .collect();
     let mut w = PackWriter::create(&g.join("outfits.pack")).map_err(|e| e.to_string())?;
     let mut seen = std::collections::HashSet::new();
+    let mut wardrobe = Vec::new();
+    for (info, m) in formal {
+        if seen.insert(info.key) {
+            w.add(info.key, &m).map_err(|e| e.to_string())?;
+        }
+        wardrobe.push(info);
+    }
+    write_value(&g.join("wardrobe.bin"), &wardrobe).map_err(|e| e.to_string())?;
     let mut outfits = Vec::new();
     for (info, meshes) in baked.into_iter().flatten() {
         for (k, m) in meshes {

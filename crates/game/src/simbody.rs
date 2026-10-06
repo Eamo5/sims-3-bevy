@@ -157,12 +157,36 @@ pub struct Outfit {
 pub enum OutfitKind {
     #[default]
     Everyday,
+    Formal,
     Swimwear,
     Sleepwear,
     Athletic,
     /// Their career's uniform.
     Career,
 }
+
+impl OutfitKind {
+    /// The outfits a dresser offers to change into.
+    pub const CHOICES: [OutfitKind; 6] = [Self::Everyday, Self::Formal, Self::Sleepwear, Self::Athletic, Self::Swimwear, Self::Career];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Everyday => "Everyday",
+            Self::Formal => "Formal",
+            Self::Swimwear => "Swimwear",
+            Self::Sleepwear => "Sleepwear",
+            Self::Athletic => "Athletic",
+            Self::Career => "Career",
+        }
+    }
+}
+
+/// The outfit a Sim chose to change into at a dresser: kept on until it's time for another.
+#[derive(Component)]
+pub struct ChangedInto;
+
+/// The outfit a Sim is going to the dresser to change into.
+#[derive(Component)]
+pub struct ChangeIntoPlan(pub OutfitKind);
 
 /// Wearing something other than everyday clothes (for a swim, for bed).
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
@@ -185,6 +209,7 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
         OutfitKind::Swimwear => s3formats::sim::CAT_SWIM,
         OutfitKind::Sleepwear => s3formats::sim::CAT_SLEEP,
         OutfitKind::Athletic => s3formats::sim::CAT_ATHLETIC,
+        OutfitKind::Formal => s3formats::sim::CAT_FORMAL,
         OutfitKind::Career => s3formats::sim::CAT_EVERYDAY,
     };
     let age = age_bits(sim.age);
@@ -211,7 +236,7 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
             .copied()
             .filter(|e| match t {
                 CT_TOP if !sim.female && kind == OutfitKind::Swimwear => e.name.contains("TopNude"),
-                CT_SHOES if kind != OutfitKind::Athletic => e.name.contains("ShoesNude"),
+                CT_SHOES if matches!(kind, OutfitKind::Swimwear | OutfitKind::Sleepwear) => e.name.contains("ShoesNude"),
                 _ => e.key.1 == 0,
             })
             .collect();
@@ -257,6 +282,8 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
         OutfitKind::Swimwear => sim.female && rng.random_bool(0.5) && !fulls.is_empty(),
         OutfitKind::Sleepwear => !fulls.is_empty() && rng.random_bool(0.7),
         OutfitKind::Athletic => !fulls.is_empty() && rng.random_bool(0.3),
+        // (Suits and dresses as often as separates.)
+        OutfitKind::Formal => !fulls.is_empty() && rng.random_bool(0.5),
         OutfitKind::Career => use_full,
     };
     if let Some(f) = cf {

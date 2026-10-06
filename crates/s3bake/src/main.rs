@@ -420,6 +420,11 @@ fn main() {
                 println!("{an:5} {gn}: {}", counts.join(", "));
             }
         }
+        // Formal wear: baked with the everyday wardrobe, or not.
+        for baked in [true, false] {
+            let f: Vec<&str> = cas.parts.iter().filter(|p| p.category & 0x4 != 0 && p.category & 0x200000 != 0 && matches!(p.clothing_type, 4..=7) && p.baked == baked && p.age_gender & 0xF00 == 0).map(|p| p.name.as_str()).collect();
+            println!("formal (baked {baked}): {} e.g. {:?}", f.len(), &f[..f.len().min(12)]);
+        }
         let tones: Vec<String> = cas.tone.textures.iter().map(|(ag, t, _)| format!("{ag:x}/{t:x}")).collect();
         println!("skin textures: {tones:?}");
         return;

@@ -711,9 +711,10 @@ fn world_click(
             Option<Res<crate::gardening::Garden>>,
         ),
     ),
-    (on_lot, writers): (
+    (on_lot, writers, jobs_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
+        Query<Option<&crate::careers::Job>>,
     ),
 ) {
     if buy.is_some_and(|b| b.active) {
@@ -826,6 +827,18 @@ fn world_click(
                             pie.submenus.push((format!("Cook {label}"), list));
                         }
                     }
+                    continue;
+                }
+                if d.special == Special::ChangeClothes {
+                    // The outfits to change into (their uniform, if their job has one).
+                    let uniform = jobs_q.get(actor).ok().flatten().is_some_and(|j| j.uniform(actor_sim).is_some());
+                    let list: Vec<(String, ActionKind)> = crate::simbody::OutfitKind::CHOICES
+                        .iter()
+                        .filter(|k| **k != crate::simbody::OutfitKind::Career || uniform)
+                        .map(|k| (format!("Change Into: {}", k.label()), ActionKind::Object { target: t, def: i }))
+                        .collect();
+                    options.push(("Change Into ›".to_string(), submenu_kind(pie.submenus.len())));
+                    pie.submenus.push(("Change Into".to_string(), list));
                     continue;
                 }
                 if d.special == Special::FindJob {
@@ -955,6 +968,10 @@ fn pie_buttons(
             && let Some(r) = ui.data.recipes.iter().position(|r| r.name == n)
         {
             commands.entity(a).insert(crate::meals::MealPlan(r));
+        }
+        // The outfit chosen.
+        if let Some(k) = label.strip_prefix("Change Into: ").and_then(|n| crate::simbody::OutfitKind::CHOICES.into_iter().find(|k| k.label() == n)) {
+            commands.entity(a).insert(crate::simbody::ChangeIntoPlan(k));
         }
         // A book in the genre chosen.
         if let Some(g) = label.strip_prefix("Write: ").and_then(|n| crate::writing::GENRES.iter().position(|g| g.name == n)) {
