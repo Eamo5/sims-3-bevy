@@ -227,6 +227,9 @@ pub struct SaveGame {
     /// Tombstones on the lot, with who lies there.
     #[serde(default)]
     pub graves: Vec<SavedGrave>,
+    /// Leftovers in the fridge (servings, by recipe).
+    #[serde(default)]
+    pub leftovers: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -515,7 +518,12 @@ fn save_game(
     ),
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
-    (story, alarm, bowls): (Res<crate::story::TownStory>, Res<crate::appliances::Alarm>, Query<(&crate::fishbowl::BowlFish, &Transform), Without<crate::visit::LotObject>>),
+    (story, alarm, bowls, leftovers): (
+        Res<crate::story::TownStory>,
+        Res<crate::appliances::Alarm>,
+        Query<(&crate::fishbowl::BowlFish, &Transform), Without<crate::visit::LotObject>>,
+        Res<crate::meals::Leftovers>,
+    ),
     (mut slot, maid, mail_due, upgraded, family, strokes, sculpted): (
         ResMut<SaveSlot>,
         Res<crate::services::MaidService>,
@@ -627,6 +635,7 @@ fn save_game(
             .iter()
             .map(|(g, tf)| SavedGrave { position: tf.translation.to_array(), rotation: tf.rotation.to_array(), cause: g.cause.clone(), sim: saved_look(&g.sim) })
             .collect(),
+        leftovers: leftovers.0.clone(),
     };
     let dir = saves_dir();
     let _ = std::fs::create_dir_all(&dir);
@@ -814,6 +823,7 @@ fn apply_loaded_game(
     commands.queue(move |w: &mut World| w.resource_mut::<crate::services::MaidService>().hired = hired);
     commands.insert_resource(crate::fishbowl::PendingBowls(game.fishbowls.clone()));
     commands.insert_resource(game.collection.clone());
+    commands.insert_resource(crate::meals::Leftovers(game.leftovers.clone()));
     // The household's dead, back in their graves.
     if let Some(entry) = data.0.catalog.iter().find(|c| c.instance_name == "UrnstoneHuman") {
         for g in &game.graves {

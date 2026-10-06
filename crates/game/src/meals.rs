@@ -23,7 +23,9 @@ pub struct MealsPlugin;
 
 impl Plugin for MealsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (meal_requests, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
+        app.init_resource::<Leftovers>()
+            .add_systems(OnEnter(crate::AppState::InGame), |mut l: ResMut<Leftovers>| l.0.clear())
+            .add_systems(Update, (meal_requests, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -212,6 +214,10 @@ pub enum MealRequest {
     Cake(Entity),
     /// Took a serving from this platter.
     Grabbed(Entity),
+    /// Put what's left on this platter in the fridge.
+    PutAway(Entity),
+    /// Took a plate of leftovers from the fridge.
+    FromFridge,
     /// Sat down to eat at this dining chair.
     PlateAt(Entity),
     /// Finished eating at the table.
@@ -225,6 +231,13 @@ pub enum MealRequest {
 pub struct Meal {
     pub servings: u8,
 }
+
+/// How many servings of leftovers the fridge keeps.
+const MAX_LEFTOVERS: usize = 12;
+
+/// Servings of meals put away in the fridge (by recipe, oldest first), to be had another time.
+#[derive(Resource, Default, Clone, Debug)]
+pub struct Leftovers(pub Vec<String>);
 
 /// The plate in front of a Sim eating at a table.
 #[derive(Component)]
@@ -316,7 +329,7 @@ fn meal_requests(
     (data, catalog, mut assets): (Res<Baked>, Res<Catalog>, ResMut<ObjectAssets>),
     (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut notes: ResMut<Notifications>,
-    (ui, clock, mut funds): (Option<Res<crate::icons::GameUi>>, Res<crate::clock::GameClock>, Option<ResMut<crate::interact::Household>>),
+    (ui, clock, mut funds, mut leftovers): (Option<Res<crate::icons::GameUi>>, Res<crate::clock::GameClock>, Option<ResMut<crate::interact::Household>>, ResMut<Leftovers>),
 ) {
     let recipes = ui.as_ref().map(|u| u.data.clone());
     let recipe = |i: usize| recipes.as_ref().and_then(|d| d.recipes.get(i));
@@ -415,6 +428,39 @@ fn meal_requests(
                         info!("{} eats standing at {:.1?}", sim.first, tf.translation);
                         queue.0.push_front(Action::new("Eat", ActionKind::EatHere, true));
                     }
+                }
+            }
+            MealRequest::PutAway(platter) => {
+                // What's left goes in the fridge; the platter with it.
+                if let Ok((m, dish, _)) = meals.get_mut(platter) {
+                    if let Some(r) = dish.and_then(|d| recipe(d.0)) {
+                        for _ in 0..m.servings {
+                            leftovers.0.push(r.key.clone());
+                        }
+                        // (The fridge holds a dozen; the oldest go out.)
+                        let n = leftovers.0.len().saturating_sub(MAX_LEFTOVERS);
+                        leftovers.0.drain(..n);
+                    }
+                    commands.entity(platter).try_despawn();
+                }
+            }
+            MealRequest::FromFridge => {
+                // (The oldest first.)
+                if leftovers.0.is_empty() {
+                    continue;
+                }
+                let key = leftovers.0.remove(0);
+                match recipes.as_ref().and_then(|d| d.recipes.iter().position(|r| r.key == key)) {
+                    Some(i) => commands.entity(me).insert(Plateful(i)),
+                    None => commands.entity(me).remove::<Plateful>(),
+                };
+                match dining_seat(&objects, tf.translation, &taken) {
+                    Some((chair, at)) => {
+                        info!("{} takes leftovers to the table at {:.1?}", sim.first, at);
+                        taken.push(chair);
+                        queue.0.push_front(Action::new("Eat", ActionKind::Object { target: chair, def: CHAIR_EAT }, true));
+                    }
+                    None => queue.0.push_front(Action::new("Eat", ActionKind::EatHere, true)),
                 }
             }
             MealRequest::PlateAt(chair) => {

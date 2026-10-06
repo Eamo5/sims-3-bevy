@@ -715,12 +715,13 @@ fn world_click(
     mut ray_cast: MeshRayCast,
     parents: Query<&ChildOf>,
     sims: Query<(&Sim, Has<HouseholdMember>, Has<Selected>)>,
-    (objects, broken_q, lit_q, hw_q, trash_q): (
+    (objects, broken_q, lit_q, hw_q, trash_q, leftovers): (
         Query<&GameObject>,
         Query<(), With<crate::interact::Broken>>,
         Query<(), With<crate::fireplace::Lit>>,
         Query<(), With<crate::rabbitholes::Homework>>,
         Query<&crate::surroundings::TrashFill>,
+        Res<crate::meals::Leftovers>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
     members_q: Query<(), With<HouseholdMember>>,
@@ -854,6 +855,9 @@ fn world_click(
                     continue;
                 }
                 // (An empty trash can has nothing to take out.)
+                if d.special == Special::Leftovers && leftovers.0.is_empty() {
+                    continue;
+                }
                 if d.special == Special::EmptyTrash && !trash_q.get(t).is_ok_and(|f| f.0 > 0) {
                     continue;
                 }

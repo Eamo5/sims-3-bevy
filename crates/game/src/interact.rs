@@ -354,6 +354,10 @@ pub enum Special {
     ServeMeal,
     /// Take a serving from a platter (then sit down to eat it).
     GrabPlate,
+    /// Put what's left of a meal in the fridge.
+    PutAway,
+    /// A plate of leftovers from the fridge.
+    Leftovers,
     /// Eat a plate of food at a table (a dining chair's hidden interaction).
     EatMeal,
     /// Clear away dirty dishes.
@@ -424,8 +428,10 @@ const fn def(name: &'static str, minutes: f32, per_hour: [f32; 6], pose: Pose) -
     }
 }
 
-static FRIDGE: [InteractionDef; 3] = [
+static FRIDGE: [InteractionDef; 4] = [
     InteractionDef { special: Special::Cook, ..def("Have Quick Meal", 30.0, [130.0, -6.0, 0.0, 0.0, -4.0, 4.0], Pose::Use) },
+    // (What it leads to: a plate of a proper meal, eaten at the table.)
+    InteractionDef { special: Special::Leftovers, ..def("Have Leftovers", 3.0, [5000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) },
     def("Grab a Snack", 12.0, [140.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Use),
     InteractionDef { autonomous: false, skill: Some("Cooking"), special: Special::BakeCake, ..def("Bake Birthday Cake", 30.0, [0.0, 0.0, 0.0, 0.0, 0.0, 6.0], Pose::Use) },
 ];
@@ -438,7 +444,10 @@ static STOVE: [InteractionDef; 1] = [InteractionDef {
     special: Special::ServeMeal,
     ..def("Cook Dinner", 60.0, [100.0, 0.0, 0.0, 0.0, -5.0, 10.0], Pose::Use)
 }];
-static MEAL: [InteractionDef; 1] = [InteractionDef { special: Special::GrabPlate, ..def("Grab a Plate", 2.0, [9000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) }];
+static MEAL: [InteractionDef; 2] = [
+    InteractionDef { special: Special::GrabPlate, ..def("Grab a Plate", 2.0, [9000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) },
+    InteractionDef { special: Special::PutAway, ..def("Put Away Leftovers", 3.0, N, Pose::Use) },
+];
 static MAILBOX: [InteractionDef; 1] = [InteractionDef { special: Special::PayBills, ..def("Pay Bills", 3.0, N, Pose::Use) }];
 static NEWSPAPER: [InteractionDef; 2] = [
     InteractionDef { special: Special::ReadPaper, ..def("Read", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 45.0], Pose::Use) },
@@ -1630,6 +1639,12 @@ fn run_actions(
                                         Special::GrabPlate => {
                                             commands.entity(me).insert(crate::meals::MealRequest::Grabbed(*target));
                                         }
+                                        Special::PutAway => {
+                                            commands.entity(me).insert(crate::meals::MealRequest::PutAway(*target));
+                                        }
+                                        Special::Leftovers => {
+                                            commands.entity(me).insert(crate::meals::MealRequest::FromFridge);
+                                        }
                                         Special::BakeCake => {
                                             commands.entity(me).insert(crate::meals::MealRequest::Cake(*target));
                                         }
@@ -2156,7 +2171,12 @@ fn autonomy(
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>,
     hh: Option<Res<Household>>,
     (broken, plant_q, lit_q, hw_q): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>, Query<(), With<crate::fireplace::Lit>>, Query<(), With<crate::rabbitholes::Homework>>),
-    (party_on, trash_q): (Option<Res<Party>>, Query<&crate::surroundings::TrashFill>),
+    (party_on, trash_q, served_q, leftovers): (
+        Option<Res<Party>>,
+        Query<&crate::surroundings::TrashFill>,
+        Query<&crate::surroundings::ServedAt>,
+        Res<crate::meals::Leftovers>,
+    ),
     (called, repairmen): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>),
     friends_away: Query<(Entity, &Sim), (With<OffLot>, Without<Invited>)>,
 ) {
@@ -2241,6 +2261,20 @@ fn autonomy(
                 if d.special == Special::Homework && !hw_q.contains(me) {
                     continue;
                 }
+                // Leftovers: once a meal's been out a while, a grown-up of the house puts them
+                // in the fridge (not a slob); and they're there to be had when someone's hungry.
+                if d.special == Special::PutAway
+                    && (!household.contains(me)
+                        || !sim.age.is_grown()
+                        || sim.age == Age::Child
+                        || sim.traits.contains(&crate::life::Trait::Slob)
+                        || !served_q.get(oe).is_ok_and(|s| clock.minutes - s.0 >= 90.0))
+                {
+                    continue;
+                }
+                if d.special == Special::Leftovers && (leftovers.0.is_empty() || my_lot.is_some()) {
+                    continue;
+                }
                 if matches!(d.special, Special::ServeMeal | Special::CleanUp | Special::PayBills) && (meal_out && d.special == Special::ServeMeal || !household.contains(me)) {
                     continue;
                 }
@@ -2285,6 +2319,9 @@ fn autonomy(
                 // A full trash can is a chore like dishes; an emptier one isn't.
                 if d.special == Special::EmptyTrash && !trash_q.get(oe).is_ok_and(|f| f.0 >= crate::surroundings::TRASH_CAPACITY) {
                     continue;
+                }
+                if d.special == Special::PutAway {
+                    score = if sim.traits.contains(&crate::life::Trait::Neat) { 30.0 } else { 12.0 };
                 }
                 if matches!(d.special, Special::CleanUp | Special::EmptyTrash) {
                     score = if sim.traits.contains(&crate::life::Trait::Slob) {
