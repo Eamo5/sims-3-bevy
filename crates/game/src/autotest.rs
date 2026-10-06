@@ -176,6 +176,8 @@ impl Plugin for AutoTestPlugin {
                     if args.relations && !*done {
                         *done = true;
                         p.open = true;
+                        // (FAMILY_TREE=1: the family tree too.)
+                        p.with_tree = std::env::var("FAMILY_TREE").is_ok();
                     }
                     // SIMTAB=<Skills|Career|Simology>: that tab of the Sim panel.
                     if let Ok(t) = std::env::var("SIMTAB") {

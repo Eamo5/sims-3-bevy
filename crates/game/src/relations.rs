@@ -1,6 +1,8 @@
 //! The Relationships panel, like the game's relationships tab: everyone the selected Sim knows,
 //! closest first, each with their portrait, what they are to each other, and friendship and
-//! romance bars. Clicking someone on the lot brings the camera to them.
+//! romance bars. Clicking someone on the lot brings the camera to them. Its Family Tree button
+//! opens the selected Sim's family tree: grandparents, parents, brothers and sisters and
+//! spouse, children and grandchildren, pictured where they're about.
 
 use bevy::prelude::*;
 
@@ -15,7 +17,7 @@ pub struct RelationsPlugin;
 impl Plugin for RelationsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RelationsPanel>()
-            .add_systems(Update, (toggle_panel, update_panel, row_clicks).chain().run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, (toggle_panel, update_panel, row_clicks, tree_button, update_tree).chain().run_if(in_state(PlayMode::Live)))
             .add_systems(OnExit(PlayMode::Live), |mut p: ResMut<RelationsPanel>| *p = RelationsPanel::default());
     }
 }
@@ -27,10 +29,20 @@ pub struct RelationsButton;
 #[derive(Resource, Default)]
 pub struct RelationsPanel {
     pub open: bool,
+    /// (Test hook: open with the family tree beside it.)
+    pub with_tree: bool,
     root: Option<Entity>,
     /// What the panel shows, to redraw it only on change.
     shown: Vec<(Entity, i32, i32, u8)>,
+    /// The family tree beside it, and who it shows.
+    tree: bool,
+    tree_root: Option<Entity>,
+    tree_shown: Vec<u64>,
 }
+
+/// The panel's Family Tree button.
+#[derive(Component)]
+struct TreeButton;
 
 #[derive(Component)]
 struct RelationRow(Entity);
@@ -48,10 +60,12 @@ fn toggle_panel(
     if pressed {
         panel.open = !panel.open;
         panel.shown.clear();
-        if !panel.open
-            && let Some(r) = panel.root.take()
-        {
-            commands.entity(r).despawn();
+        if !panel.open {
+            for r in [panel.root.take(), panel.tree_root.take()].into_iter().flatten() {
+                commands.entity(r).despawn();
+            }
+            panel.tree = false;
+            panel.tree_shown.clear();
         }
     }
 }
@@ -130,7 +144,18 @@ fn update_panel(
             BlocksWorld,
         ))
         .with_children(|p| {
-            p.spawn(text(format!("{}'s Relationships", my_sim.first), 18.0, Color::WHITE));
+            p.spawn(Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() }).with_children(|h| {
+                h.spawn(text(format!("{}'s Relationships", my_sim.first), 18.0, Color::WHITE));
+                h.spawn((
+                    Button,
+                    TreeButton,
+                    Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)), border_radius: BorderRadius::all(Val::Px(6.0)), ..default() },
+                    BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.12)),
+                ))
+                .with_children(|b| {
+                    b.spawn((text("Family Tree", 13.0, Color::WHITE), Pickable::IGNORE));
+                });
+            });
             if known.is_empty() {
                 p.spawn(text("Nobody yet. Go and meet some Sims!", 14.0, Color::srgb(0.8, 0.85, 0.95)));
             }
@@ -193,6 +218,147 @@ fn update_panel(
         })
         .id();
     panel.root = Some(root);
+}
+
+fn tree_button(mut commands: Commands, buttons: Query<&Interaction, (Changed<Interaction>, With<TreeButton>)>, mut panel: ResMut<RelationsPanel>) {
+    if buttons.iter().any(|i| *i == Interaction::Pressed) {
+        panel.tree = !panel.tree;
+        panel.tree_shown.clear();
+        if !panel.tree
+            && let Some(r) = panel.tree_root.take()
+        {
+            commands.entity(r).despawn();
+        }
+    }
+}
+
+/// The selected Sim's family tree, a generation to a row.
+#[allow(clippy::type_complexity)]
+fn update_tree(
+    mut commands: Commands,
+    mut panel: ResMut<RelationsPanel>,
+    selected: Query<(&Sim, &Relationships), With<Selected>>,
+    people: Query<(Entity, &Sim)>,
+    family: Res<crate::family::Genealogy>,
+    (mut portraits, mut images): (ResMut<crate::portraits::Portraits>, ResMut<Assets<Image>>),
+) {
+    if panel.with_tree && panel.open {
+        panel.with_tree = false;
+        panel.tree = true;
+    }
+    if !panel.open || !panel.tree {
+        return;
+    }
+    let Ok((me, rels)) = selected.single() else { return };
+    let spouse = rels.0.iter().find(|(_, r)| r.status == crate::social::RelStatus::Married).and_then(|(e, _)| people.get(*e).ok()).map(|(_, s)| s.id);
+    let parents: Vec<u64> = family.parents(me.id).to_vec();
+    let grandparents: Vec<u64> = parents.iter().flat_map(|p| family.parents(*p).iter().copied()).collect();
+    let mut siblings: Vec<u64> = family.0.values().filter(|p| p.id != me.id && p.parents.iter().any(|x| parents.contains(x))).map(|p| p.id).collect();
+    siblings.sort();
+    let children = family.children(me.id);
+    let grandchildren: Vec<u64> = children.iter().flat_map(|c| family.children(*c)).collect();
+    let mut middle = siblings.clone();
+    middle.push(me.id);
+    middle.extend(spouse);
+    let rows: Vec<(&str, Vec<u64>)> = vec![("Grandparents", grandparents), ("Parents", parents), ("", middle), ("Children", children), ("Grandchildren", grandchildren)];
+    // (Redrawn only when the tree changes.)
+    let shown: Vec<u64> = rows.iter().flat_map(|(_, r)| r.iter().copied().chain([u64::MAX])).collect();
+    if panel.tree_root.is_some() && panel.tree_shown == shown {
+        return;
+    }
+    panel.tree_shown = shown;
+    if let Some(r) = panel.tree_root.take() {
+        commands.entity(r).despawn();
+    }
+    let entity_of = |id: u64| people.iter().find(|(_, s)| s.id == id);
+    let name_of = |id: u64| entity_of(id).map(|(_, s)| s.full_name()).or_else(|| family.0.get(&id).map(|p| p.name.clone())).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "Unknown".into());
+    let word_of = |id: u64| {
+        if id == me.id {
+            "".to_string()
+        } else if Some(id) == spouse {
+            if entity_of(id).is_some_and(|(_, s)| s.female) { "Wife".into() } else { "Husband".into() }
+        } else {
+            family.word(me.id, id).unwrap_or("").to_string()
+        }
+    };
+    let root = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(860.0),
+                bottom: Val::Px(180.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(8.0),
+                padding: UiRect::all(Val::Px(12.0)),
+                border_radius: BorderRadius::all(Val::Px(12.0)),
+                ..default()
+            },
+            BackgroundColor(crate::menu::PANEL_BG),
+            Interaction::default(),
+            BlocksWorld,
+        ))
+        .with_children(|p| {
+            p.spawn(text(format!("{}'s Family Tree", me.first), 18.0, Color::WHITE));
+            let lone = rows.iter().all(|(t, r)| !t.is_empty() && r.is_empty()) && spouse.is_none();
+            if lone {
+                p.spawn(text("No family yet: babies, adoptions and marriages fill it in.", 13.0, Color::srgb(0.8, 0.85, 0.95)));
+            }
+            for (title, row) in &rows {
+                if row.is_empty() {
+                    continue;
+                }
+                if !title.is_empty() {
+                    p.spawn(text(title.to_string(), 12.0, Color::srgb(0.7, 0.8, 0.95)));
+                }
+                p.spawn(Node { column_gap: Val::Px(10.0), ..default() }).with_children(|r| {
+                    for &id in row.iter().take(8) {
+                        let picture = entity_of(id).map(|(e, _)| (e, portraits.portrait(&mut images, e)));
+                        let ring = if id == me.id { Color::srgb(0.45, 0.9, 0.45) } else { Color::srgba(1.0, 1.0, 1.0, 0.45) };
+                        r.spawn((Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, width: Val::Px(78.0), row_gap: Val::Px(2.0), ..default() }, Pickable::IGNORE))
+                            .with_children(|n| {
+                                n.spawn((
+                                    Node {
+                                        width: Val::Px(52.0),
+                                        height: Val::Px(52.0),
+                                        border: UiRect::all(Val::Px(2.0)),
+                                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                                        overflow: Overflow::clip(),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BorderColor::all(ring),
+                                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.25)),
+                                    Pickable::IGNORE,
+                                ))
+                                .with_children(|f| match picture {
+                                    Some((e, img)) => {
+                                        f.spawn((
+                                            ImageNode::new(img),
+                                            crate::portraits::PortraitOf(e),
+                                            Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+                                            Pickable::IGNORE,
+                                        ));
+                                    }
+                                    // (Someone not about: their initials.)
+                                    None => {
+                                        let initials: String = name_of(id).split_whitespace().filter_map(|w| w.chars().next()).take(2).collect();
+                                        f.spawn((text(initials, 18.0, Color::srgba(1.0, 1.0, 1.0, 0.7)), Pickable::IGNORE));
+                                    }
+                                });
+                                n.spawn((text(name_of(id), 11.0, Color::WHITE), TextLayout::justify(Justify::Center), Pickable::IGNORE));
+                                let w = word_of(id);
+                                if !w.is_empty() {
+                                    n.spawn((text(w, 10.0, Color::srgb(0.75, 0.85, 1.0)), Pickable::IGNORE));
+                                }
+                            });
+                    }
+                });
+            }
+        })
+        .id();
+    panel.tree_root = Some(root);
 }
 
 /// Clicking someone on the lot brings the camera to them.
