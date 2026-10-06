@@ -198,7 +198,9 @@ installation is unreachable.
   drives them back while the household carries on at home.
 - **Sim panel tabs**, as the game's: Needs; Skills (each skill learned with its icon, level
   and progress to the next); Career (the job and level, hours, days and pay, the performance
-  meter and the next promotion); Simology (the lifetime wish and how far along it is, traits
+  meter and the next promotion, and how they go about their work: normally, working hard —
+  half as fast again to promotion but tiring and no fun — taking it easy, hanging with
+  co-workers, or studying the career's skill on the job); Simology (the lifetime wish and how far along it is, traits
   with what they mean, lifetime happiness and the rewards bought). F5 to F8 switch tabs.
 - **Fences and railings**: every lot's fences (picket, rail, iron, garden edging) and its porch
   and balcony railings, from the lot's fence posts and the catalogue's fence pieces (straight

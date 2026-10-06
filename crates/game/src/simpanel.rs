@@ -16,7 +16,7 @@ pub struct SimPanelPlugin;
 
 impl Plugin for SimPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<SimTab>().add_systems(Update, (tab_buttons, tab_layout, tab_content).chain().run_if(in_state(PlayMode::Live)));
+        app.init_resource::<SimTab>().add_systems(Update, (tab_buttons, tone_buttons, tab_layout, tab_content).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -102,6 +102,20 @@ fn tab_buttons(
     }
 }
 
+/// A work tone to choose on the Career tab.
+#[derive(Component)]
+struct ToneButton(crate::careers::WorkTone);
+
+fn tone_buttons(q: Query<(&Interaction, &ToneButton), Changed<Interaction>>, mut sel: Query<&mut Job, With<Selected>>) {
+    for (i, b) in &q {
+        if *i == Interaction::Pressed
+            && let Ok(mut j) = sel.single_mut()
+        {
+            j.tone = b.0;
+        }
+    }
+}
+
 fn tab_layout(tab: Res<SimTab>, mut needs: Query<&mut Node, (With<NeedsOnly>, Without<TabContent>)>, mut content: Query<&mut Node, (With<TabContent>, Without<NeedsOnly>)>) {
     if !tab.is_changed() {
         return;
@@ -170,7 +184,7 @@ fn tab_content(
             skills.0.iter().map(|(k, v)| (*k, (*v * 20.0) as i32)).collect::<Vec<_>>(),
             (author.map(|a| (a.books.len(), a.weekly_royalties(), a.draft.as_ref().map(|d| (d.pages / d.length * 50.0) as i32))), chess.map(|c| (c.wins, c.losses)), toddler.map(|t| ((t.walk * 100.0) as i32, (t.talk * 100.0) as i32)))
         ),
-        SimTab::Career => format!("{e:?} {:?} {at_work}", job.map(|j| (j.track, j.level, j.performance as i32))),
+        SimTab::Career => format!("{e:?} {:?} {at_work}", job.map(|j| (j.track, j.level, j.performance as i32, j.tone))),
         SimTab::Simology => format!("{e:?} {:?} {:?} {:?}", sim.traits, wishes.map(|w| (w.points, w.rewards.len())), ltw.map(|l| (l.wish, &l.status))),
         SimTab::Inventory => format!("{e:?} {:?} {:?}", inv.map(|i| i.0.iter().map(|s| (&s.key, s.quality, s.count)).collect::<Vec<_>>()), chosen.0),
     } + &format!(" {}", ui.is_some());
@@ -284,6 +298,27 @@ fn tab_content(
                     None => "Top of the career!".to_string(),
                 };
                 p.spawn(text(format!("{next} · Improve with {}, and a good mood at work.", track.skill), 13.0, Color::srgb(0.8, 0.85, 0.95)));
+                // How they go about their work.
+                p.spawn(Node { column_gap: Val::Px(5.0), row_gap: Val::Px(4.0), flex_wrap: FlexWrap::Wrap, max_width: Val::Px(440.0), ..default() }).with_children(|row| {
+                    for t in crate::careers::WorkTone::ALL {
+                        let on = j.tone == t;
+                        row.spawn((
+                            Button,
+                            ToneButton(t),
+                            Node {
+                                padding: UiRect::axes(Val::Px(7.0), Val::Px(3.0)),
+                                border: UiRect::all(Val::Px(if on { 2.0 } else { 0.0 })),
+                                border_radius: BorderRadius::all(Val::Px(6.0)),
+                                ..default()
+                            },
+                            BorderColor::all(PLUMBOB_GREEN),
+                            BackgroundColor(if on { Color::srgb(0.22, 0.5, 0.22) } else { BTN_NORMAL }),
+                        ))
+                        .with_children(|b| {
+                            b.spawn((text(t.label(track.skill), 12.0, Color::WHITE), Pickable::IGNORE));
+                        });
+                    }
+                });
             }
             None => {
                 p.spawn(text(format!("{} doesn't have a job. Look in the newspaper, or on a computer, for one.", sim.first), 13.0, Color::srgb(0.8, 0.85, 0.95)));

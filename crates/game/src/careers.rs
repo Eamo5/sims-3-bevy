@@ -407,11 +407,74 @@ pub struct Job {
     pub performance: f32,
     /// The last day the Sim was at work (for missed-day penalties).
     pub last_day: Option<u32>,
+    /// How they go about their work.
+    pub tone: WorkTone,
+}
+
+/// How a Sim goes about their work, as the game's work tones: hard (faster to promotion, but
+/// tiring and no fun), easy (slower, but restful), with the co-workers (sociable), or studying
+/// the career's skill.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum WorkTone {
+    #[default]
+    Normal,
+    WorkHard,
+    TakeItEasy,
+    Socialize,
+    Study,
+}
+
+impl WorkTone {
+    pub const ALL: [WorkTone; 5] = [WorkTone::Normal, WorkTone::WorkHard, WorkTone::TakeItEasy, WorkTone::Socialize, WorkTone::Study];
+
+    pub fn label(self, skill: &str) -> String {
+        match self {
+            WorkTone::Normal => "Work Normally".into(),
+            WorkTone::WorkHard => "Work Hard".into(),
+            WorkTone::TakeItEasy => "Take It Easy".into(),
+            WorkTone::Socialize => "Hang With Co-Workers".into(),
+            WorkTone::Study => format!("Study {skill}"),
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            WorkTone::Normal => "Normal",
+            WorkTone::WorkHard => "WorkHard",
+            WorkTone::TakeItEasy => "TakeItEasy",
+            WorkTone::Socialize => "Socialize",
+            WorkTone::Study => "Study",
+        }
+    }
+
+    pub fn from_name(s: &str) -> Self {
+        Self::ALL.into_iter().find(|t| t.name() == s).unwrap_or_default()
+    }
+
+    /// How much of a shift's performance it earns.
+    fn performance(self) -> f32 {
+        match self {
+            WorkTone::Normal => 1.0,
+            WorkTone::WorkHard => 1.5,
+            WorkTone::TakeItEasy => 0.5,
+            WorkTone::Socialize | WorkTone::Study => 0.8,
+        }
+    }
+
+    /// What a shift does to energy, fun and social, on top of a normal one's.
+    fn motives(self) -> [f32; 3] {
+        match self {
+            WorkTone::Normal | WorkTone::Study => [0.0; 3],
+            WorkTone::WorkHard => [-15.0, -15.0, 0.0],
+            WorkTone::TakeItEasy => [15.0, 20.0, 0.0],
+            WorkTone::Socialize => [0.0, 10.0, 30.0],
+        }
+    }
 }
 
 impl Job {
     pub fn new(track: usize) -> Self {
-        Self { track, level: 0, branch: 0, performance: 0.0, last_day: None }
+        Self { track, level: 0, branch: 0, performance: 0.0, last_day: None, tone: WorkTone::Normal }
     }
     pub fn career(&self) -> &'static CareerTrack {
         &careers()[self.track.min(careers().len() - 1)]
@@ -476,7 +539,7 @@ fn work_schedule(
             &mut Transform,
             &mut Motives,
             &Mood,
-            &Skills,
+            &mut Skills,
             Option<&crate::lifetime::LifetimeWish>,
             Has<HouseholdMember>,
             Option<&crate::wishes::Wishes>,
@@ -490,7 +553,7 @@ fn work_schedule(
     let day = clock.day();
     // A shift already under way when play began isn't held against anyone.
     let started = *session_start.get_or_insert(clock.minutes);
-    for (e, sim, mut job, mut queue, at_work, mut tf, mut motives, mood, skills, ltw, member, wishes) in &mut workers {
+    for (e, sim, mut job, mut queue, at_work, mut tf, mut motives, mood, mut skills, ltw, member, wishes) in &mut workers {
         let info = job.info();
         if let Some(w) = at_work {
             if clock.minutes < w.until {
@@ -509,7 +572,20 @@ fn work_schedule(
                 moody = moody.max(0.0);
             }
             let gain = (moody + (skill - want) * 3.0 + 8.0) * crate::life::work_rate(&sim.traits);
+            // (Working hard gets them noticed faster; taking it easy, the other way.)
+            let gain = if gain > 0.0 { gain * job.tone.performance() } else { gain / job.tone.performance().max(0.5) };
             job.performance = (job.performance + gain).clamp(-100.0, 100.0);
+            // Studying the career's skill on the job.
+            if job.tone == WorkTone::Study {
+                let sk = job.career().skill;
+                let v = skills.0.entry(sk).or_insert(0.0);
+                let before = *v as u32;
+                *v = (*v + job.hours() * 0.12 * crate::life::skill_rate(&sim.traits, sk) / (1.0 + *v * 0.25)).min(10.0);
+                if *v as u32 > before && member {
+                    notes.push(format!("{} reached level {} in {}!", sim.first, *v as u32, sk));
+                    life.write(LifeEvent::new(e, LifeEventKind::SkillUp { skill: sk, level: *v as u32 }));
+                }
+            }
             notes.push(format!("{} is home from work and earned §{pay}.", sim.first));
             if job.performance >= 100.0 && job.level + 1 < job.levels().len() {
                 job.level += 1;
@@ -548,6 +624,10 @@ fn work_schedule(
             motives.0[FUN] = (motives.0[FUN] - 25.0).max(-80.0);
             motives.0[SOCIAL] = (motives.0[SOCIAL] + 40.0).min(100.0);
             motives.0[HYGIENE] = (motives.0[HYGIENE] - 20.0).max(-80.0);
+            let [energy, fun, social] = job.tone.motives();
+            motives.add(ENERGY, energy);
+            motives.add(FUN, fun);
+            motives.add(SOCIAL, social);
             if let Some(x) = &exit {
                 tf.translation = Vec3::new(x.0.x, world.data.heightmap.sample(x.0.x, x.0.y), x.0.y);
             }
@@ -589,4 +669,20 @@ pub fn leave_for_work(commands: &mut Commands, clock: &GameClock, e: Entity, sim
     let until = start_minute + job.hours() as f64 * 60.0;
     commands.entity(e).insert((AtWork { until: until.max(clock.minutes + 30.0) }, Visibility::Hidden));
     notes.push(format!("{} left for work as a {}.", sim.first, info.title));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn work_tones_keep_their_names() {
+        for t in WorkTone::ALL {
+            assert_eq!(WorkTone::from_name(t.name()), t);
+        }
+        // (Saves from before work tones, or with one this doesn't know: normally.)
+        assert_eq!(WorkTone::from_name(""), WorkTone::Normal);
+        assert!(WorkTone::WorkHard.performance() > WorkTone::Normal.performance());
+        assert!(WorkTone::TakeItEasy.performance() < WorkTone::Normal.performance());
+    }
 }

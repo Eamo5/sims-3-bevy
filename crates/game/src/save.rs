@@ -125,6 +125,9 @@ pub struct SavedJob {
     /// The career path ("Thief"; "Base" for one that doesn't branch).
     #[serde(default)]
     pub branch: String,
+    /// How they go about their work ("WorkHard"...; none: normally).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tone: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -547,7 +550,13 @@ fn save_game(
             motives: motives.0,
             skills: skills.0.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
             moodlets: moodlets.0.iter().filter(|m| m.until.is_finite()).map(|m| (m.kind.def().name.to_string(), m.until)).collect(),
-            job: job.map(|j| SavedJob { track: j.career().name.into(), level: j.level, performance: j.performance, branch: j.path().branch.into() }),
+            job: job.map(|j| SavedJob {
+                track: j.career().name.into(),
+                level: j.level,
+                performance: j.performance,
+                branch: j.path().branch.into(),
+                tone: (j.tone != crate::careers::WorkTone::Normal).then(|| j.tone.name().into()),
+            }),
             relationships: rels
                 .0
                 .iter()
@@ -734,6 +743,7 @@ fn apply_loaded_game(
                     job.branch = crate::careers::careers()[track].path_index(&j.branch).unwrap_or(0);
                     job.level = j.level.min(job.levels().len() - 1);
                     job.performance = j.performance;
+                    job.tone = j.tone.as_deref().map(crate::careers::WorkTone::from_name).unwrap_or_default();
                     ec.insert(job);
                 }
             }
