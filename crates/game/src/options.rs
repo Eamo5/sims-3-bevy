@@ -361,14 +361,12 @@ pub fn open_options(commands: &mut Commands, panel: &mut OptionsPanel, settings:
                     }
                     p.spawn(Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: Val::Px(10.0), ..default() })
                         .with_children(|row| {
-                            row.spawn((text(opt.label(), 19.0, Color::WHITE), Node { width: Val::Px(200.0), ..default() }));
+                            // (On one line, level with its buttons.)
+                            row.spawn((text(opt.label(), 19.0, Color::WHITE), TextLayout::default().with_no_wrap(), Node { width: Val::Px(200.0), flex_shrink: 0.0, ..default() }));
                             small_button(row, "<", OptionButton::Step(opt, -1), 40.0);
-                            row.spawn((
-                                text(opt.value(settings), 19.0, Color::srgb(1.0, 0.95, 0.7)),
-                                OptionValue(opt),
-                                Node { width: Val::Px(180.0), justify_content: JustifyContent::Center, ..default() },
-                                TextLayout::justify(Justify::Center),
-                            ));
+                            row.spawn(Node { width: Val::Px(200.0), flex_shrink: 0.0, justify_content: JustifyContent::Center, ..default() }).with_children(|cell| {
+                                cell.spawn((text(opt.value(settings), 19.0, Color::srgb(1.0, 0.95, 0.7)), OptionValue(opt), TextLayout::default().with_no_wrap()));
+                            });
                             small_button(row, ">", OptionButton::Step(opt, 1), 40.0);
                         });
                 }
