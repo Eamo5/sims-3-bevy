@@ -1370,6 +1370,7 @@ fn update_notifications(
     mut notes: ResMut<Notifications>,
     panel: Query<Entity, With<NotesPanel>>,
     mut last: Local<usize>,
+    (people, mut portraits, mut images): (Query<(Entity, &Sim, Has<HouseholdMember>)>, ResMut<crate::portraits::Portraits>, ResMut<Assets<Image>>),
 ) {
     for n in notes.0.iter_mut() {
         n.1 -= time.delta_secs();
@@ -1385,11 +1386,34 @@ fn update_notifications(
     commands.entity(p).despawn_children();
     commands.entity(p).with_children(|c| {
         for (msg, _) in notes.0.iter() {
+            // Like the game's, a notice about a Sim carries their picture: the household's Sim
+            // (or else anyone about) the notice begins with.
+            let starts = |s: &Sim| msg.starts_with(&format!("{} ", s.first)) || msg.starts_with(&format!("{}'", s.first)) || msg.starts_with(&s.full_name());
+            let about = people.iter().filter(|(_, s, _)| !s.first.is_empty() && starts(s)).max_by_key(|(_, _, member)| *member).map(|(e, ..)| e);
             c.spawn((
-                Node { padding: UiRect::all(Val::Px(10.0)), border_radius: BorderRadius::all(Val::Px(8.0)), ..default() },
+                Node {
+                    padding: UiRect::all(Val::Px(if about.is_some() { 6.0 } else { 10.0 })),
+                    column_gap: Val::Px(8.0),
+                    align_items: AlignItems::Center,
+                    border_radius: BorderRadius::all(Val::Px(8.0)),
+                    ..default()
+                },
                 BackgroundColor(crate::menu::NOTICE_BG),
             ))
             .with_children(|b| {
+                if let Some(e) = about {
+                    b.spawn((
+                        Node { width: Val::Px(40.0), height: Val::Px(40.0), flex_shrink: 0.0, border_radius: BorderRadius::all(Val::Px(6.0)), overflow: Overflow::clip(), ..default() },
+                        Pickable::IGNORE,
+                    ))
+                    .with_children(|f| {
+                        f.spawn((
+                            ImageNode::new(portraits.portrait(&mut images, e)),
+                            crate::portraits::PortraitOf(e),
+                            Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+                        ));
+                    });
+                }
                 b.spawn(text(msg.clone(), 15.0, Color::WHITE));
             });
         }
