@@ -669,6 +669,45 @@ impl SkinTone {
 }
 
 // ---------------------------------------------------------------------------------------------
+// BOND 0x0355E0A6 (bone adjustments: face sliders move the face's bones)
+
+pub const T_BOND: u32 = 0x0355E0A6;
+
+/// One bone's adjustment: its name's FNV-32, and what's added to its offset and scale, and
+/// its rotation (a quaternion x, y, z, w).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BoneAdjust {
+    pub bone: u32,
+    pub offset: [f32; 3],
+    pub scale: [f32; 3],
+    pub rotation: [f32; 4],
+}
+
+/// A BOND: an RCOL with one untagged chunk of `u32 version, u32 count, count × {u32 bone hash,
+/// f32 offset[3], f32 scale[3], f32 quat[4]}`.
+pub fn parse_bond(d: &[u8]) -> R<Vec<BoneAdjust>> {
+    let rcol = crate::rcol::Rcol::parse(d)?;
+    let ch = rcol.chunks.first().ok_or(Eof)?;
+    let data = d.get(ch.offset..ch.offset + ch.size).ok_or(Eof)?;
+    let mut r = Reader::new(data);
+    let _version = r.u32()?;
+    let n = r.u32()? as usize;
+    if n > 512 {
+        return Err(Eof);
+    }
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        let bone = r.u32()?;
+        let mut f = [0f32; 10];
+        for v in f.iter_mut() {
+            *v = r.f32()?;
+        }
+        out.push(BoneAdjust { bone, offset: [f[0], f[1], f[2]], scale: [f[3], f[4], f[5]], rotation: [f[6], f[7], f[8], f[9]] });
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------------------------
 // BBLN 0x062C8204 (body blends) / FACE 0x0358B08A (face sliders)
 
 pub const T_BLEND: u32 = 0x062C8204;

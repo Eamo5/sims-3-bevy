@@ -88,6 +88,8 @@ pub struct CasData {
     pub ramp: Arc<Vec<[f32; 3]>>,
     /// The careers' uniforms by name.
     pub outfits: Arc<HashMap<String, s3bake::OutfitInfo>>,
+    /// The face sliders' bone adjustments by age-and-sex prefix ("am", "tf", "cu"...).
+    pub face_bones: Arc<HashMap<String, Vec<(u8, Vec<s3bake::gamedata::FaceBone>)>>>,
 }
 
 impl CasData {
@@ -101,6 +103,7 @@ impl CasData {
             tone_textures: Arc::new(b.cas.tone.textures.clone()),
             ramp: Arc::new(b.cas.tone.ramp.clone()),
             outfits: Arc::new(b.outfits.iter().map(|o| (o.name.clone(), o.clone())).collect()),
+            face_bones: Arc::new(b.face_bones.iter().map(|f| (f.prefix.clone(), f.sliders.clone())).collect()),
         }
     }
 
@@ -429,6 +432,61 @@ pub struct SimModelCpu {
     pub rig: Arc<Rig>,
     pub parts: Vec<(Mesh, SimMat)>,
     pub textures: Vec<(Key, Image)>,
+    /// The face's shape: adjustments to its bones (by name hash): offset, scale and rotation
+    /// added.
+    pub face: HashMap<u32, BoneShape>,
+}
+
+/// What's added to a bone's offset, scale and rotation (a quaternion's x, y, z, w).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BoneShape {
+    pub offset: Vec3,
+    pub scale: Vec3,
+    pub rotation: Vec4,
+}
+
+impl BoneShape {
+    pub fn apply_rotation(&self, q: Quat) -> Quat {
+        if self.rotation == Vec4::ZERO {
+            return q;
+        }
+        Quat::from_xyzw(q.x + self.rotation.x, q.y + self.rotation.y, q.z + self.rotation.z, q.w + self.rotation.w).normalize()
+    }
+
+    pub fn apply(&self, t: Transform) -> Transform {
+        Transform { translation: t.translation + self.offset, rotation: self.apply_rotation(t.rotation), scale: t.scale + self.scale }
+    }
+}
+
+/// A Sim's face shape, by their look: on each of the game's face sliders (in opposing pairs,
+/// as Create a Sim's are) they lean one way or the other, some a lot, most a little.
+pub fn face_shape(cas: &CasData, sim: &Sim) -> HashMap<u32, BoneShape> {
+    let mut out: HashMap<u32, BoneShape> = HashMap::new();
+    let prefix = match (sim.age, sim.female) {
+        (Age::Baby, _) => return out,
+        (Age::Toddler, _) => "pu",
+        (Age::Child, _) => "cu",
+        (Age::Teen, f) => if f { "tf" } else { "tm" },
+        (Age::YoungAdult, f) => if f { "yf" } else { "ym" },
+        (Age::Adult, f) => if f { "af" } else { "am" },
+        (Age::Elder, f) => if f { "ef" } else { "em" },
+    };
+    // (NO_FACE_SHAPE=1, for comparisons: every face as the game models it.)
+    let Some(sliders) = cas.face_bones.get(prefix).filter(|_| std::env::var("NO_FACE_SHAPE").is_err()) else { return out };
+    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look ^ 0xFACE_B0E5);
+    for pair in 0..s3bake::gamedata::FACE_SLIDERS.len() {
+        // (Anywhere along the slider's range, as Create a Sim's randomising does.)
+        let w: f32 = rng.random_range(-1.0..1.0);
+        let slider = if w >= 0.0 { pair * 2 } else { pair * 2 + 1 };
+        let Some((_, bones)) = sliders.iter().find(|(i, _)| *i as usize == slider) else { continue };
+        for b in bones {
+            let s = out.entry(b.bone).or_default();
+            s.offset += Vec3::from(b.offset) * w.abs();
+            s.scale += Vec3::from(b.scale) * w.abs();
+            s.rotation += Vec4::from(b.rotation) * w.abs();
+        }
+    }
+    out
 }
 
 /// The mesh with the Sim's body shape applied (the part's heavy, fit and thin morphs).
@@ -566,7 +624,7 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
             textures.push((tinted, img));
         }
     }
-    Some(SimModelCpu { rig, parts, textures })
+    Some(SimModelCpu { rig, parts, textures, face: face_shape(cas, sim) })
 }
 
 /// Texture-store key of a face layer's copy in a colour.
@@ -691,7 +749,10 @@ pub struct SimModelPart;
 pub struct Skeleton {
     pub rig: Arc<Rig>,
     pub joints: Vec<Entity>,
+    /// Each bone's rest pose (with the face's shape in it).
     pub bind: Vec<Transform>,
+    /// The face's shape on each bone, put back over animations that move it.
+    pub shape: Vec<Option<BoneShape>>,
 }
 
 pub struct SimRenderCtx<'a> {
@@ -714,6 +775,7 @@ pub fn spawn_sim_model(commands: &mut Commands, parent: Entity, model: SimModelC
     let rig = model.rig.clone();
     let mut joints = Vec::with_capacity(rig.bones.len());
     let mut bind = Vec::with_capacity(rig.bones.len());
+    let mut shape = Vec::with_capacity(rig.bones.len());
     let mut world: Vec<Mat4> = Vec::with_capacity(rig.bones.len());
     for b in &rig.bones {
         let local = Transform {
@@ -727,8 +789,12 @@ pub fn spawn_sim_model(commands: &mut Commands, parent: Entity, model: SimModelC
             local.to_matrix()
         };
         world.push(w);
-        bind.push(local);
-        joints.push(commands.spawn((local, Visibility::default())).id());
+        // (The skin is bound to the rig as it is; the face's shape moves its bones from there.)
+        let s = model.face.get(&s3pkg::fnv32(&b.name)).copied();
+        let posed = s.map_or(local, |s| s.apply(local));
+        shape.push(s);
+        bind.push(posed);
+        joints.push(commands.spawn((posed, Visibility::default())).id());
     }
     for (i, b) in rig.bones.iter().enumerate() {
         let p = if b.parent >= 0 && (b.parent as usize) < joints.len() { joints[b.parent as usize] } else { parent };
@@ -823,7 +889,7 @@ pub fn spawn_sim_model(commands: &mut Commands, parent: Entity, model: SimModelC
         commands.entity(e).insert((SimModelPart, sim_layers(), bevy::camera::visibility::NoFrustumCulling));
         commands.entity(parent).add_child(e);
     }
-    commands.entity(parent).insert(Skeleton { rig, joints, bind });
+    commands.entity(parent).insert(Skeleton { rig, joints, bind, shape });
     parent
 }
 

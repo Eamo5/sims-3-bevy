@@ -25,6 +25,8 @@ pub struct BakedData {
     pub cas_pack: PackReader,
     /// The careers' uniforms, and the meshes of their parts the wardrobe doesn't have.
     pub outfits: Vec<s3bake::OutfitInfo>,
+    /// The face sliders' bone adjustments by age-and-sex prefix.
+    pub face_bones: Vec<s3bake::gamedata::FaceBones>,
     pub outfit_pack: Option<PackReader>,
     pub clips: Option<PackReader>,
     /// Names of the baked clips (for picking variants).
@@ -47,10 +49,11 @@ impl BakedData {
         cas.parts.extend(s3bake::read_value::<Vec<s3bake::CasPartInfo>>(&g.join("wardrobe.bin")).unwrap_or_default());
         let cas_pack = PackReader::open(&g.join("cas.pack")).map_err(|e| format!("cas pack: {e}"))?;
         let outfits = s3bake::read_value(&g.join("outfits.bin")).unwrap_or_default();
+        let face_bones = s3bake::read_value(&g.join("face_bones.bin")).unwrap_or_default();
         let outfit_pack = PackReader::open(&g.join("outfits.pack")).ok();
         let clips = PackReader::open(&g.join("clips.pack")).ok();
         let clip_names: Vec<String> = s3bake::read_value(&g.join("clip_names.bin")).unwrap_or_default();
-        Ok(Self { root, catalog, catalog_index, models, world_models, food_models, state_models, produce_models, fence_models, cas, cas_pack, outfits, outfit_pack, clips, clip_names })
+        Ok(Self { root, catalog, catalog_index, models, world_models, food_models, state_models, produce_models, fence_models, cas, cas_pack, outfits, outfit_pack, clips, clip_names, face_bones })
     }
 
     pub fn model(&self, k: &Key) -> Option<BakedModel> {

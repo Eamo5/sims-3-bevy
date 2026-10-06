@@ -258,14 +258,16 @@ pub fn drive_skeletons(
             let mut target = bind;
             let placed = carried && bone.name == "transformBone";
             if let Some(track) = clip.tracks.get(&bone.hash).filter(|_| !placed) {
+                // (The face's shape goes back over what the animation does to a bone.)
+                let shape = skel.shape.get(i).copied().flatten();
                 // The root's translation is root motion; movement is driven by the pathfinder.
                 if i != 0
                     && let Some(p) = sample_track_vec(&track.translation, t)
                 {
-                    target.translation = p;
+                    target.translation = p + shape.map_or(Vec3::ZERO, |s| s.offset);
                 }
                 if let Some(r) = sample_track_quat(&track.rotation, t) {
-                    target.rotation = r;
+                    target.rotation = shape.map_or(r, |s| s.apply_rotation(r));
                 }
             }
             if i == 0 {

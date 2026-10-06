@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 44;
+pub const GAMEDATA_VERSION: u32 = 47;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -531,6 +531,73 @@ fn unescape(s: &str) -> String {
 /// the outfit's presets into the texture store, and the meshes of parts the everyday wardrobe
 /// doesn't have (`outfits.pack`). Formal wear that isn't everyday wear too (suits, tuxedos,
 /// cocktail dresses) joins the wardrobe the same way (`wardrobe.bin`).
+/// The face sliders every Sim's face is shaped with, in opposing pairs (a Sim leans one way or
+/// the other on each, by their look). The game shapes faces by moving the face's bones: a
+/// slider is one bone adjustment (BOND) per age and sex, `<age><sex>FaceDeformations<Slider>`.
+pub const FACE_SLIDERS: [(&str, &str); 17] = [
+    ("JawWide", "JawThin"),
+    ("JawChinScaleUp", "JawChinScaleDown"),
+    ("JawChinUp", "JawChinDown"),
+    ("MouthWide", "MouthThin"),
+    ("MouthOut", "MouthIn"),
+    ("TranslateMouthUp", "TranslateMouthDown"),
+    ("EyesScaleUp", "EyesScaleDown"),
+    ("EyesApart", "EyesIn"),
+    ("TranslateEyesUp", "TranslateEyesDown"),
+    ("EyesBrowsUp", "EyesBrowsDown"),
+    ("NoseScaleUp", "NoseScaleDown"),
+    ("NoseWide", "NoseThin"),
+    ("NoseUp", "NoseDown"),
+    ("NoseTipScaleUp", "NoseTipScaleDown"),
+    ("JawCheeksBoneUp", "JawCheeksBoneDown"),
+    ("JawCheeksOut", "JawCheeksIn"),
+    ("HeadWide", "HeadThin"),
+];
+
+/// The age-and-sex prefixes of the face sliders' bone adjustments.
+pub const FACE_PREFIXES: [&str; 10] = ["am", "af", "ym", "yf", "em", "ef", "tm", "tf", "cu", "pu"];
+
+/// One bone's adjustment by a face slider (at full strength).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default)]
+pub struct FaceBone {
+    /// FNV-32 of the bone's name (lowercase).
+    pub bone: u32,
+    pub offset: [f32; 3],
+    pub scale: [f32; 3],
+    pub rotation: [f32; 4],
+}
+
+/// The face sliders' bone adjustments by age-and-sex prefix: per slider (index into the
+/// flattened `FACE_SLIDERS`), its bones.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct FaceBones {
+    pub prefix: String,
+    pub sliders: Vec<(u8, Vec<FaceBone>)>,
+}
+
+fn bake_face_bones(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, String> {
+    let names: Vec<&str> = FACE_SLIDERS.iter().flat_map(|(a, b)| [*a, *b]).collect();
+    let out: Vec<FaceBones> = FACE_PREFIXES
+        .iter()
+        .map(|prefix| {
+            let sliders = names
+                .iter()
+                .enumerate()
+                .filter_map(|(i, n)| {
+                    let key = s3pkg::ResourceKey::new(s3formats::sim::T_BOND, 1, s3pkg::fnv32(&format!("{prefix}FaceDeformations{n}")) as u64);
+                    let adj = s3formats::sim::parse_bond(&pkgs.read(&key)?).ok()?;
+                    let bones: Vec<FaceBone> = adj.iter().map(|a| FaceBone { bone: a.bone, offset: a.offset, scale: a.scale, rotation: a.rotation }).collect();
+                    (!bones.is_empty()).then_some((i as u8, bones))
+                })
+                .collect();
+            FaceBones { prefix: prefix.to_string(), sliders }
+        })
+        .collect();
+    let n = out.iter().map(|f| f.sliders.len()).sum();
+    write_value(&root.global_dir().join("face_bones.bin"), &out).map_err(|e| e.to_string())?;
+    Ok(n)
+}
+
 /// Create a Sim's Face tab: beards, glasses, lipsticks and eye shadows.
 pub const FACE_TYPES: [u32; 4] = [s3formats::sim::CT_BEARD, s3formats::sim::CT_GLASSES, s3formats::sim::CT_LIPSTICK, s3formats::sim::CT_EYESHADOW];
 
@@ -1178,6 +1245,8 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     }
     progress("Converting: career outfits…");
     bake_outfits(root, pkgs, &out.careers)?;
+    let faces = bake_face_bones(root, pkgs)?;
+    progress(&format!("Converting: face shapes ({faces} slider bones)…"));
     progress("Converting: fences…");
     out.fences = bake_fence_styles(root, pkgs, &strings)?;
     // Catalogue models with alternative geometry states, drawn in their fullest (the objects'

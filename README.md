@@ -43,7 +43,9 @@ installation is unreachable.
   married, family or at least friends, and in the family tree); a Face tab for the game's
   beards (full ones drawn as hair is; goatees, chinstraps and the like painted onto the face;
   all in the Sim's hair colour), glasses, lipsticks and eye shadows
-  (town Sims wear them now and then too), with the game's
+  (town Sims wear them now and then too). Every Sim's face has its own shape, as the game's
+  face sliders make them: jaw, chin, mouth, eyes, brows, nose, cheeks and head leaning one way
+  or the other (the game's own bone adjustments per age and sex), with the game's
   body-shape morphs (weight and fitness sliders; town Sims keep their builds, working out
   firms Sims up); needs, moods,
   skills, careers, relationships, autonomy, social interactions; children, teens, adults and

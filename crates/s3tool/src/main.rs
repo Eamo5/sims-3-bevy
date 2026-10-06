@@ -1467,6 +1467,62 @@ fn main() {
         }
         return;
     }
+    if args[1] == "bond" {
+        // bond <root> <name>...: a BOND's bone adjustments (group 1, instance FNV-32 of the name).
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        for name in &args[3..] {
+            let k = s3pkg::ResourceKey::new(0x0355E0A6, 1, s3pkg::fnv32(name) as u64);
+            match set.read(&k).map(|d| s3formats::sim::parse_bond(&d)) {
+                Some(Ok(v)) => {
+                    println!("{name} {k}: {} bones", v.len());
+                    for a in v {
+                        println!("  {:08x} off {:?} scale {:?} rot {:?}", a.bone, a.offset, a.scale, a.rotation);
+                    }
+                }
+                Some(Err(e)) => println!("{name}: unparsed {e:?}"),
+                None => println!("{name}: not found"),
+            }
+        }
+        return;
+    }
+    if args[1] == "faces" {
+        // faces <root> [filter]: the face sliders (FACE 0x0358B08A): name, version, regions, BGEO.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let filter = args.get(3).map(|s| s.to_ascii_lowercase());
+        let mut rows = Vec::new();
+        for k in set.keys_of_type(0x0358B08A).copied().collect::<Vec<_>>() {
+            let Some(d) = set.read(&k) else { continue };
+            let version = u32::from_le_bytes(d[..4].try_into().unwrap());
+            let Ok(b) = s3formats::sim::BlendInfo::parse(&d) else {
+                rows.push(format!("{k} v{version}: unparsed"));
+                continue;
+            };
+            if filter.as_ref().is_some_and(|f| !b.name.to_ascii_lowercase().contains(f)) {
+                continue;
+            }
+            let regions: Vec<String> = b.entries.iter().map(|e| format!("{:x}:{}g/{}b", e.region, e.geoms.len(), e.bones.len())).collect();
+            rows.push(format!("{} v{version} bgeo {:?} regions {regions:?}", b.name, b.bgeo.map(|k| k.to_string())));
+            // (DETAIL=1: each entry's bone adjustments.)
+            if std::env::var("DETAIL").is_ok() {
+                for e in &b.entries {
+                    for (ag, amount, idx) in &e.bones {
+                        let Some(key) = b.keys.get(*idx as usize) else { continue };
+                        let adj = set.read(key).or_else(|| set.read_ti(key.t, key.i)).and_then(|d| s3formats::sim::parse_bond(&d).ok()).unwrap_or_default();
+                        rows.push(format!("    region {:x} ag {ag:x} amount {amount} {key}: {} bones", e.region, adj.len()));
+                        for a in adj.iter().take(6) {
+                            rows.push(format!("      bone {:08x} off {:?} scale {:?} rot {:?}", a.bone, a.offset, a.scale, a.rotation));
+                        }
+                    }
+                }
+            }
+        }
+        rows.sort();
+        for r in &rows {
+            println!("{r}");
+        }
+        println!("{} sliders", rows.len());
+        return;
+    }
     if args[1] == "objsclasses" {
         // objsclasses <world file> [filter]: the object graph's classes (and how many of each).
         let w = Package::open(&args[2]).unwrap();
