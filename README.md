@@ -203,7 +203,8 @@ installation is unreachable.
   and progress to the next); Career (the job and level, hours, days and pay, the performance
   meter and the next promotion, and how they go about their work: normally, working hard —
   half as fast again to promotion but tiring and no fun — taking it easy, hanging with
-  co-workers, or studying the career's skill on the job); Simology (the lifetime wish and how far along it is, traits
+  co-workers, or studying the career's skill on the job; elders can phone to retire, on a
+  pension of half their average day's pay, paid each morning); Simology (the lifetime wish and how far along it is, traits
   with what they mean, lifetime happiness and the rewards bought). F5 to F8 switch tabs.
 - **Fences and railings**: every lot's fences (picket, rail, iron, garden edging) and its porch
   and balcony railings, from the lot's fence posts and the catalogue's fence pieces (straight

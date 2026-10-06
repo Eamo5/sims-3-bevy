@@ -1674,6 +1674,14 @@ fn auto_action(
         *done = true;
         return;
     }
+    // "Retire": the selected Sim retires from their career, on a pension.
+    if name == "Retire" {
+        if let Ok(mut q) = sel.single_mut() {
+            q.push_player(crate::interact::Action::new("Retire", crate::interact::ActionKind::Retire, false));
+        }
+        *done = true;
+        return;
+    }
     // "Pizza": the selected Sim phones for a pizza.
     if name == "Pizza" {
         if let Ok(mut q) = sel.single_mut() {

@@ -801,6 +801,8 @@ pub enum ActionKind {
     Invite { target: Entity },
     /// Phone a friend for a chat.
     PhoneChat { target: Entity },
+    /// Phone the boss: an elder retires from their career, on a pension.
+    Retire,
     /// Spend lifetime happiness on a reward (instant, from the rewards menu).
     BuyReward(usize),
     /// Drive to a community lot's rabbit hole for an activity.
@@ -1264,6 +1266,7 @@ fn run_actions(
                         ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
                         ActionKind::Invite { .. }
                         | ActionKind::PhoneChat { .. }
+                        | ActionKind::Retire
                         | ActionKind::OrderPizza
                         | ActionKind::Adopt { .. }
                         | ActionKind::MoveHouse
@@ -1434,6 +1437,7 @@ fn run_actions(
                             }
                             ActionKind::Invite { .. }
                             | ActionKind::PhoneChat { .. }
+                            | ActionKind::Retire
                             | ActionKind::BuyReward(_)
                             | ActionKind::EatHere
                             | ActionKind::EatItem { .. }
@@ -1962,6 +1966,21 @@ fn run_actions(
                                         notes.push(format!("{} ordered a pizza (§{}). It'll be here within the hour.", sim.first, crate::meals::PIZZA_PRICE));
                                     }
                                     _ => notes.push("There isn't enough money for a pizza."),
+                                }
+                            }
+                        }
+                        ActionKind::Retire => {
+                            if elapsed >= 10.0 {
+                                finished = true;
+                                if let Some(j) = job.as_ref() {
+                                    let daily = j.pension();
+                                    notes.push(format!(
+                                        "{} retired from the {} career after years as a {}, and will be paid a pension of §{daily} a day.",
+                                        sim.first,
+                                        j.career().name,
+                                        j.info().title
+                                    ));
+                                    commands.entity(me).remove::<Job>().insert(crate::careers::Pension { daily, paid: clock.day() });
                                 }
                             }
                         }

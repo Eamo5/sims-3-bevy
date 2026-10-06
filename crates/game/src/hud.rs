@@ -1711,7 +1711,7 @@ fn update_trait_icons(
 fn phone_button(
     mut commands: Commands,
     buttons: Query<&Interaction, (Changed<Interaction>, With<PhoneButton>)>,
-    selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
+    selected: Query<(Entity, &Relationships, &Sim, Has<crate::careers::Job>), With<Selected>>,
     away: Query<(Entity, &Sim), (With<crate::interact::OffLot>, Without<crate::interact::Invited>)>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut pie: ResMut<PieMenu>,
@@ -1722,7 +1722,7 @@ fn phone_button(
     if !buttons.iter().any(|i| *i == Interaction::Pressed) {
         return;
     }
-    let Ok((actor, rels, me)) = selected.single() else { return };
+    let Ok((actor, rels, me, has_job)) = selected.single() else { return };
     // The Sims they know, best friends first.
     let mut known: Vec<(f32, Entity, String)> = away.iter().filter(|(e, _)| rels.0.contains_key(e)).map(|(e, s)| (rels.friendship(e), e, s.full_name())).collect();
     if known.is_empty() {
@@ -1761,6 +1761,10 @@ fn phone_button(
         options.push(("Adopt a Child ›".to_string(), submenu_kind(pie.submenus.len())));
         pie.submenus.push(("Adopt".to_string(), list));
         options.push(("Move to a New Home".to_string(), ActionKind::MoveHouse));
+    }
+    // An elder with a job can retire, on a pension.
+    if me.age == crate::sim::Age::Elder && has_job {
+        options.push(("Retire".to_string(), ActionKind::Retire));
     }
     let at = windows.single().ok().map_or(Vec2::new(600.0, 600.0), |w| Vec2::new(w.width() * 0.4, w.height() - 260.0));
     close_pie(&mut commands, &mut pie);

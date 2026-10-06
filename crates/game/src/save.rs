@@ -105,6 +105,9 @@ pub struct SavedSim {
     /// Their voice (saves from before voices could be chosen: the one their look gave them).
     #[serde(default)]
     pub voice: Option<u8>,
+    /// A retired Sim's pension.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pension: Option<crate::careers::Pension>,
 }
 
 /// A lifetime wish (by the game's check for it), and what's counted towards it.
@@ -279,6 +282,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         toddler: None,
         eyes: Some(rgb(sim.eyes)),
         voice: Some(sim.voice),
+        pension: None,
     }
 }
 
@@ -499,6 +503,7 @@ fn save_game(
                 Option<&crate::chess::ChessRecord>,
                 Option<&crate::inventory::Inventory>,
                 Option<&crate::little::ToddlerSkills>,
+                Option<&crate::careers::Pension>,
             ),
         ),
         (Without<crate::town::Townie>, Without<crate::visit::LotGuest>, Without<crate::services::ServiceNpc>),
@@ -527,7 +532,7 @@ fn save_game(
     let Some(hh) = household else { return };
     let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).collect();
     let mut saved = Vec::new();
-    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler)) in &sims {
+    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension)) in &sims {
         // Out on a community lot: saved as back at home (the lot isn't kept).
         let (position, level) = match (out, exit.as_ref()) {
             (true, Some(x)) => ([x.0.x, world.data.heightmap.sample(x.0.x, x.0.y), x.0.y], 1),
@@ -585,6 +590,7 @@ fn save_game(
             toddler: toddler.copied(),
             eyes: Some(rgb(sim.eyes)),
             voice: Some(sim.voice),
+            pension: pension.copied(),
         });
     }
     let game = SaveGame {
@@ -717,6 +723,9 @@ fn apply_loaded_game(
         }
         if let Some(a) = &s.author {
             ec.insert(a.clone());
+        }
+        if let Some(p) = s.pension {
+            ec.insert(p);
         }
         if !s.recipes.is_empty() {
             ec.insert(crate::meals::KnownRecipes(s.recipes.clone()));

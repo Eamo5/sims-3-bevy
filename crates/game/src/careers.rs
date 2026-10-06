@@ -19,7 +19,7 @@ pub struct CareersPlugin;
 
 impl Plugin for CareersPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (work_schedule, career_path_answers).run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (work_schedule, career_path_answers, pay_pensions).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -409,6 +409,39 @@ pub struct Job {
     pub last_day: Option<u32>,
     /// How they go about their work.
     pub tone: WorkTone,
+}
+
+/// A retired Sim's pension: paid each morning (half of what the job paid, on average, a day).
+#[derive(Component, Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+pub struct Pension {
+    pub daily: i64,
+    /// The last day it was paid.
+    pub paid: u32,
+}
+
+impl Job {
+    /// The pension retiring from this job brings: half its average day's pay.
+    pub fn pension(&self) -> i64 {
+        let l = self.info();
+        let days = l.days.count_ones() as f32;
+        ((l.hourly as f32 * self.hours() * days / 7.0) * 0.5).round() as i64
+    }
+}
+
+/// Pensions are paid each morning (into the household's funds).
+fn pay_pensions(clock: Res<GameClock>, mut household: Option<ResMut<Household>>, mut retired: Query<&mut Pension, With<HouseholdMember>>) {
+    let day = clock.day();
+    if clock.hour_f() < 9.0 {
+        return;
+    }
+    for mut p in &mut retired {
+        if p.paid != day {
+            p.paid = day;
+            if let Some(h) = household.as_mut() {
+                h.funds += p.daily;
+            }
+        }
+    }
 }
 
 /// How a Sim goes about their work, as the game's work tones: hard (faster to promotion, but
