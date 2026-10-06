@@ -9,7 +9,7 @@ use bevy::mesh::skinning::SkinnedMeshInverseBindposes;
 use bevy::prelude::*;
 use bevy::ui::RelativeCursorPosition;
 use s3bake::Key;
-use s3formats::sim::{CT_BODY, CT_BOTTOM, CT_HAIR, CT_SHOES, CT_TOP};
+use s3formats::sim::{CT_BODY, CT_BOTTOM, CT_HAIR, CT_SHOES, CT_TOP, CT_BEARD, CT_EYESHADOW, CT_GLASSES, CT_LIPSTICK};
 
 use crate::AppState;
 use crate::baked::{Baked, BakedData};
@@ -37,11 +37,13 @@ pub enum CasTab {
     Bottoms,
     Outfits,
     Shoes,
+    /// Facial hair, glasses and make-up.
+    Face,
     Traits,
 }
 
 impl CasTab {
-    const ALL: [CasTab; 7] = [CasTab::Basics, CasTab::Hair, CasTab::Tops, CasTab::Bottoms, CasTab::Outfits, CasTab::Shoes, CasTab::Traits];
+    const ALL: [CasTab; 8] = [CasTab::Basics, CasTab::Hair, CasTab::Tops, CasTab::Bottoms, CasTab::Outfits, CasTab::Shoes, CasTab::Face, CasTab::Traits];
     fn name(self) -> &'static str {
         match self {
             CasTab::Basics => "Basics",
@@ -50,6 +52,7 @@ impl CasTab {
             CasTab::Bottoms => "Bottoms",
             CasTab::Outfits => "Outfits",
             CasTab::Shoes => "Shoes",
+            CasTab::Face => "Face",
             CasTab::Traits => "Traits",
         }
     }
@@ -93,6 +96,8 @@ pub enum CasAction {
     Family(usize),
     /// What two members are to each other: the next tie that fits (members by index).
     Tie(usize, usize),
+    /// A face part of this clothing type: entry `i` of its list (`usize::MAX`: none).
+    FacePart(u32, usize),
     Done,
 }
 
@@ -432,6 +437,17 @@ fn cas_actions(
                 });
                 pending.premade = Some(h);
                 scene.selected = 0;
+            }
+            CasAction::FacePart(t, i) => {
+                let list = parts_for(&scene.cas, &pending.members[k], t);
+                let key = if i == usize::MAX { Some(crate::sim::OutfitChoice::NONE) } else { list.get(i).map(|p| p.0) };
+                let o = &mut pending.members[k].outfit;
+                match t {
+                    CT_BEARD => o.beard = key,
+                    CT_GLASSES => o.glasses = key,
+                    CT_LIPSTICK => o.lipstick = key,
+                    _ => o.eyeshadow = key,
+                }
             }
             CasAction::Tie(i, j) => {
                 use crate::family::Tie;
@@ -903,6 +919,54 @@ fn rebuild_ui(
                             });
                         }
                     });
+                }
+                CasTab::Face => {
+                    // Facial hair (grown men), glasses, and make-up (women and teen girls).
+                    let grown = matches!(sim.age, Age::YoungAdult | Age::Adult | Age::Elder);
+                    let girl = sim.female && (grown || sim.age == Age::Teen);
+                    let sections: Vec<(u32, &str, Option<s3bake::Key>)> = [
+                        (CT_BEARD, "Facial Hair", !sim.female && grown, sim.outfit.beard),
+                        (CT_GLASSES, "Glasses", !sim.age.is_little(), sim.outfit.glasses),
+                        (CT_LIPSTICK, "Lipstick", girl, sim.outfit.lipstick),
+                        (CT_EYESHADOW, "Eye Shadow", girl, sim.outfit.eyeshadow),
+                    ]
+                    .into_iter()
+                    .filter(|s| s.2)
+                    .map(|(t, n, _, c)| (t, n, c))
+                    .collect();
+                    for (t, title, current) in sections {
+                        let list = parts_for(&scene.cas, &sim, t);
+                        p.spawn(text(title, 16.0, Color::WHITE));
+                        p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(5.0), row_gap: Val::Px(5.0), ..default() }).with_children(|grid| {
+                            let none = current == Some(crate::sim::OutfitChoice::NONE);
+                            button(grid, "None", CasAction::FacePart(t, usize::MAX), Val::Px(56.0), none, 12.0);
+                            for (i, (key, name)) in list.iter().enumerate().take(24) {
+                                let chosen = current == Some(*key);
+                                let thumb = ui.as_deref_mut().and_then(|u| u.icon(&mut images, &s3bake::gamedata::cas_thumb_name(key.2)));
+                                let Some(thumb) = thumb else {
+                                    button(grid, name.clone(), CasAction::FacePart(t, i), Val::Px(56.0), chosen, 10.0);
+                                    continue;
+                                };
+                                grid.spawn((
+                                    Button,
+                                    CasAction::FacePart(t, i),
+                                    Node {
+                                        width: Val::Px(56.0),
+                                        height: Val::Px(56.0),
+                                        border: UiRect::all(Val::Px(if chosen { 3.0 } else { 0.0 })),
+                                        border_radius: BorderRadius::all(Val::Px(6.0)),
+                                        ..default()
+                                    },
+                                    BorderColor::all(PLUMBOB_GREEN),
+                                    BackgroundColor(if chosen { Color::srgb(0.22, 0.55, 0.22) } else { BTN_NORMAL }),
+                                    crate::icons::Tooltip(name.clone()),
+                                ))
+                                .with_children(|b| {
+                                    b.spawn((ImageNode::new(thumb), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
+                                });
+                            }
+                        });
+                    }
                 }
                 tab => {
                     let t = tab.clothing_type().unwrap();

@@ -204,6 +204,10 @@ pub const CT_TOP: u32 = 5;
 pub const CT_BOTTOM: u32 = 6;
 pub const CT_SHOES: u32 = 7;
 pub const CT_EYEBROW: u32 = 0x16;
+pub const CT_GLASSES: u32 = 12;
+pub const CT_BEARD: u32 = 16;
+pub const CT_LIPSTICK: u32 = 17;
+pub const CT_EYESHADOW: u32 = 18;
 /// Masks (a burglar's), gloves and stockings: worn as layers over the face, hands and legs.
 pub const CT_MASK: u32 = 21;
 pub const CT_GLOVES: u32 = 24;

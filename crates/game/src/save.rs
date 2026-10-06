@@ -63,7 +63,7 @@ pub struct SavedSim {
     pub relationships: Vec<SavedRel>,
     #[serde(default)]
     pub lifetime_happiness: u32,
-    /// Chosen hair, top, bottom, outfit and shoes.
+    /// Chosen hair, top, bottom, outfit and shoes, then beard, glasses, lipstick and eye shadow.
     #[serde(default)]
     pub outfit: Vec<Option<(u32, u32, u64)>>,
     #[serde(default)]
@@ -239,7 +239,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         job: None,
         relationships: Vec::new(),
         lifetime_happiness: 0,
-        outfit: vec![sim.outfit.hair, sim.outfit.top, sim.outfit.bottom, sim.outfit.full, sim.outfit.shoes],
+        outfit: vec![sim.outfit.hair, sim.outfit.top, sim.outfit.bottom, sim.outfit.full, sim.outfit.shoes, sim.outfit.beard, sim.outfit.glasses, sim.outfit.lipstick, sim.outfit.eyeshadow],
         rewards: Vec::new(),
         aging: None,
         pregnancy: None,
@@ -262,7 +262,7 @@ impl SaveGame {
         Sim {
             id: s.id,
             look: s.look,
-            outfit: OutfitChoice { hair: o(0), top: o(1), bottom: o(2), full: o(3), shoes: o(4) },
+            outfit: OutfitChoice { hair: o(0), top: o(1), bottom: o(2), full: o(3), shoes: o(4), beard: o(5), glasses: o(6), lipstick: o(7), eyeshadow: o(8) },
             first: s.first.clone(),
             last: s.last.clone(),
             female: s.female,
@@ -527,7 +527,7 @@ fn save_game(
                 })
                 .collect(),
             lifetime_happiness: wishes.map_or(0, |w| w.points),
-            outfit: vec![sim.outfit.hair, sim.outfit.top, sim.outfit.bottom, sim.outfit.full, sim.outfit.shoes],
+            outfit: vec![sim.outfit.hair, sim.outfit.top, sim.outfit.bottom, sim.outfit.full, sim.outfit.shoes, sim.outfit.beard, sim.outfit.glasses, sim.outfit.lipstick, sim.outfit.eyeshadow],
             rewards: wishes.map(|w| w.rewards.clone()).unwrap_or_default(),
             aging: aging.map(|a| (a.days, a.elder_span)),
             pregnancy: pregnancy.map(|p| (p.since, p.other_parent.and_then(|o| ids.get(&o).copied()), p.stage)),

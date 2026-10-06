@@ -84,6 +84,16 @@ pub struct OutfitChoice {
     pub bottom: Option<s3bake::Key>,
     pub full: Option<s3bake::Key>,
     pub shoes: Option<s3bake::Key>,
+    /// Facial hair, glasses and make-up (`NONE`: chosen to go without).
+    pub beard: Option<s3bake::Key>,
+    pub glasses: Option<s3bake::Key>,
+    pub lipstick: Option<s3bake::Key>,
+    pub eyeshadow: Option<s3bake::Key>,
+}
+
+impl OutfitChoice {
+    /// A face choice of nothing at all.
+    pub const NONE: s3bake::Key = (0, 0, 0);
 }
 
 impl Sim {

@@ -428,6 +428,14 @@ fn main() {
         // Adult women's hair, with the pack each comes from (group).
         let hair: Vec<String> = cas.parts.iter().filter(|p| p.baked && p.clothing_type == 1 && p.age_gender & 0x20 != 0 && p.age_gender & 0x2000 != 0).map(|p| format!("{} ({:x}, cat {:x})", p.name, p.key.1, p.category)).collect();
         println!("adult F hair: {hair:?}");
+        // Facial hair and accessories by clothing type.
+        let mut by_type = std::collections::BTreeMap::<u32, Vec<String>>::new();
+        for p in cas.parts.iter().filter(|p| ["Beard", "Glasses", "Earring", "Necklace", "Hat", "Bracelet", "Ring", "Mustache", "Goatee", "Sideburn", "Makeup", "Lipstick", "EyeShadow", "Eyeliner", "Blush"].iter().any(|n| p.name.contains(n))) {
+            by_type.entry(p.clothing_type).or_default().push(format!("{}{}", p.name, if p.baked { "" } else { "*" }));
+        }
+        for (t, v) in &by_type {
+            println!("type {t}: {} parts, e.g. {:?}", v.len(), &v[..v.len().min(6)]);
+        }
         // Service uniforms (the maid's, the repairman's, the mail carrier's).
         let svc: Vec<String> = cas.parts.iter().filter(|p| ["Maid", "Repair", "MailCarrier", "PizzaDelivery"].iter().any(|n| p.name.contains(n))).map(|p| format!("{} (type {}, baked {}, cat {:x}, ag {:x})", p.name, p.clothing_type, p.baked, p.category, p.age_gender)).collect();
         println!("service parts: {svc:#?}");

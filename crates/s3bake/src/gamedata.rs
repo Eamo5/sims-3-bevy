@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 39;
+pub const GAMEDATA_VERSION: u32 = 43;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -531,6 +531,9 @@ fn unescape(s: &str) -> String {
 /// the outfit's presets into the texture store, and the meshes of parts the everyday wardrobe
 /// doesn't have (`outfits.pack`). Formal wear that isn't everyday wear too (suits, tuxedos,
 /// cocktail dresses) joins the wardrobe the same way (`wardrobe.bin`).
+/// Create a Sim's Face tab: beards, glasses, lipsticks and eye shadows.
+pub const FACE_TYPES: [u32; 4] = [s3formats::sim::CT_BEARD, s3formats::sim::CT_GLASSES, s3formats::sim::CT_LIPSTICK, s3formats::sim::CT_EYESHADOW];
+
 /// The CAS parts of the town's service uniforms, by name.
 pub const SERVICE_UNIFORMS: [&str; 5] = ["BodyFrenchMaid", "HairFrenchMaidBunLoose", "BodyRepair", "BodyMailCarrier", "BodyPizzaDeliveryOutfit"];
 
@@ -623,7 +626,13 @@ fn bake_outfits(root: &BakeRoot, pkgs: &PackageSet, careers: &[CareerInfo]) -> R
         let service = SERVICE_UNIFORMS.iter().any(|n| c.name.contains(n))
             && !c.name.to_ascii_lowercase().ends_with("_unlock")
             && matches!(c.clothing_type, s3formats::sim::CT_BODY | s3formats::sim::CT_HAIR);
-        let wanted = human && (formal || service) && !have.contains(&key_of(k));
+        // The base game's beards, glasses, lipsticks and eye shadows (for Create a Sim's Face tab).
+        let face = FACE_TYPES.contains(&c.clothing_type)
+            && k.g == 0
+            && c.category & s3formats::sim::CAT_HIDDEN == 0
+            && !c.name.to_ascii_lowercase().ends_with("_unlock")
+            && (matches!(c.clothing_type, s3formats::sim::CT_GLASSES | s3formats::sim::CT_BEARD) || !c.diffuse.is_empty());
+        let wanted = human && (formal || service || face) && !have.contains(&key_of(k));
         wanted.then_some((*k, c))
     })
     .into_iter()
@@ -640,7 +649,10 @@ fn bake_outfits(root: &BakeRoot, pkgs: &PackageSet, careers: &[CareerInfo]) -> R
                 let _ = std::fs::write(root.tex_path(t), dds);
             }
         }
-        let info = CasPartInfo { key: key_of(k), name: c.name.clone(), clothing_type: c.clothing_type, age_gender: c.age_gender, category: c.category, baked: !m.meshes.is_empty(), layer };
+        // (Make-up is layers drawn onto the face, with no mesh of its own; glasses and beards are
+        // meshes: the beards drawn only as tinted layers (goatees, chinstraps...) aren't baked.)
+        let layer_only = matches!(c.clothing_type, s3formats::sim::CT_LIPSTICK | s3formats::sim::CT_EYESHADOW);
+        let info = CasPartInfo { key: key_of(k), name: c.name.clone(), clothing_type: c.clothing_type, age_gender: c.age_gender, category: c.category, baked: !m.meshes.is_empty() || layer_only && layer.is_some(), layer };
         Some((info, m))
     })
     .into_iter()

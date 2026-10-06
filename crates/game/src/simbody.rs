@@ -148,6 +148,9 @@ pub struct Outfit {
     pub body: Vec<CasPartInfo>,
     /// A hat's own layer, over the hair it's worn with.
     pub hat: Option<Key>,
+    /// Glasses (drawn with their own texture), and a beard (drawn as hair is).
+    pub glasses: Option<CasPartInfo>,
+    pub beard: Option<CasPartInfo>,
     /// Layers over the face beyond its own and the brows' (a burglar's mask).
     pub face_layers: Vec<Key>,
 }
@@ -284,7 +287,9 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
             .collect();
         if preferred.is_empty() { all } else { preferred }
     };
-    let chosen = |k: Option<Key>, t: u32| k.and_then(|k| cas.parts.iter().find(|p| p.key == k && p.clothing_type == t).filter(|p| fits(p)).cloned());
+    // (The baked copy: a part baked with the wardrobe is listed a second time, after its
+    // unbaked entry.)
+    let chosen = |k: Option<Key>, t: u32| k.and_then(|k| cas.parts.iter().filter(|p| p.key == k && p.clothing_type == t).find(|p| fits(p)).cloned());
     // A baby is a single body with its own head.
     if sim.age == Age::Baby {
         let body = of_type(CT_BODY).into_iter().next().cloned();
@@ -305,6 +310,31 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
     let random_hair = everyday(CT_HAIR).choose(&mut own).map(|e| (*e).clone());
     let hair = chosen(sim.outfit.hair, CT_HAIR).or(random_hair);
     let brows = everyday(CT_EYEBROW).into_iter().filter(natural).collect::<Vec<_>>().choose(&mut own).map(|e| (*e).clone());
+    // Facial hair, glasses and make-up, as chosen (or now and then, by their look).
+    let mut extra = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look ^ 0x5EED_FACE);
+    let grown = matches!(sim.age, Age::YoungAdult | Age::Adult | Age::Elder);
+    let mut face_extra = |choice: Option<Key>, t: u32, chance: f64| -> Option<CasPartInfo> {
+        let roll = extra.random_bool(chance.clamp(0.0, 1.0));
+        let pick = extra.random::<u32>() as usize;
+        match choice {
+            Some(k) if k == crate::sim::OutfitChoice::NONE => None,
+            Some(k) => chosen(Some(k), t),
+            None if roll => {
+                let list = everyday(t);
+                (!list.is_empty()).then(|| list[pick % list.len()].clone())
+            }
+            None => None,
+        }
+    };
+    let beard = face_extra(sim.outfit.beard, CT_BEARD, if !sim.female && grown { 0.15 } else { 0.0 });
+    let glasses = face_extra(sim.outfit.glasses, CT_GLASSES, match sim.age {
+        Age::Elder => 0.3,
+        Age::Adult => 0.08,
+        Age::YoungAdult | Age::Teen | Age::Child => 0.04,
+        _ => 0.0,
+    });
+    let lipstick = face_extra(sim.outfit.lipstick, CT_LIPSTICK, if sim.female && (grown || sim.age == Age::Teen) { 0.3 } else { 0.0 });
+    let eyeshadow = face_extra(sim.outfit.eyeshadow, CT_EYESHADOW, if sim.female && (grown || sim.age == Age::Teen) { 0.2 } else { 0.0 });
     let mut body = Vec::new();
     let (tops, bottoms, fulls) = (of_type(CT_TOP), of_type(CT_BOTTOM), of_type(CT_BODY));
     // (Nothing of the kind for them: their everyday clothes.)
@@ -344,7 +374,10 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
         body.extend(random_top);
     }
     body.extend(if swim { random_shoes } else { chosen(sim.outfit.shoes, CT_SHOES).or(random_shoes) });
-    Outfit { face, scalp, hair, brows, body, ..default() }
+    // (Glasses come off for a swim.)
+    let glasses = glasses.filter(|_| kind != OutfitKind::Swimwear);
+    let face_layers = [lipstick, eyeshadow].into_iter().flatten().filter_map(|p| p.layer).collect();
+    Outfit { face, scalp, hair, brows, body, glasses, beard, face_layers, ..default() }
 }
 
 /// A Sim in their work uniform (the outfit so named): its clothes, and any hat or mask, with
@@ -469,13 +502,26 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
             parts.push((skin_mesh(m), mat));
         }
     }
+    // Glasses, in their own texture (the lenses see-through).
+    if let Some(g) = &outfit.glasses {
+        for m in baked.cas_meshes(&g.key).map(|m| m.meshes).unwrap_or_default() {
+            let tex = m.texture.or(g.layer);
+            tex_keys.extend(tex);
+            parts.push((skin_mesh(m), SimMat::Plain { tex, mask: true, tint: None }));
+        }
+    }
     // Hair is drawn from a greyscale copy of its texture tinted with the Sim's hair colour.
     let mut hair_keys: Vec<(Key, Key)> = Vec::new();
-    for (i, p) in [&outfit.scalp, &outfit.hair].into_iter().enumerate() {
+    for (i, p) in [&outfit.scalp, &outfit.hair, &outfit.beard].into_iter().enumerate() {
         let Some(p) = p else { continue };
         for m in baked.cas_meshes(&p.key).map(|m| m.meshes).unwrap_or_default() {
             let Some(src) = p.layer.or(m.texture) else { continue };
-            if i == 1 {
+            // (A beard is never under the hat.)
+            if i == 2 {
+                let grey = hair_grey_key(src);
+                hair_keys.push((src, grey));
+                parts.push((skin_mesh(m), SimMat::Plain { tex: Some(grey), mask: true, tint: Some(sim.hair) }));
+            } else if i == 1 {
                 let grey = hair_grey_key(src);
                 hair_keys.push((src, grey));
                 let mat = match outfit.hat {

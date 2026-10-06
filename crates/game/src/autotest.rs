@@ -161,7 +161,7 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -608,6 +608,32 @@ fn auto_sculpt(
     if let Ok(mut c) = cam.single_mut() {
         c.focus = Vec3::new(at.x, c.focus.y, at.z);
         c.distance = 16.0;
+    }
+}
+
+/// FACE=<beard index>[,<glasses index>]: the household's men get that beard (and everyone
+/// those glasses), from the game's baked lists, a few seconds in.
+fn face_hook(mut commands: Commands, mut sims: Query<(Entity, &mut crate::sim::Sim), With<crate::sim::HouseholdMember>>, cas: Option<Res<crate::simbody::CasData>>, mut done: Local<bool>, time: Res<Time>) {
+    let Ok(v) = std::env::var("FACE") else { return };
+    let Some(cas) = cas else { return };
+    if *done || time.elapsed_secs() < 6.0 {
+        return;
+    }
+    *done = true;
+    let n: Vec<usize> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+    let list = |t: u32| cas.parts.iter().filter(|p| p.baked && p.clothing_type == t && p.age_gender & 0x20 != 0).map(|p| (p.key, p.name.clone())).collect::<Vec<_>>();
+    for (e, mut s) in &mut sims {
+        if !s.female
+            && let Some((k, name)) = n.first().and_then(|i| list(s3formats::sim::CT_BEARD).get(*i).cloned())
+        {
+            info!("face test: {} grows {name}", s.first);
+            s.outfit.beard = Some(k);
+        }
+        if let Some((k, name)) = n.get(1).and_then(|i| list(s3formats::sim::CT_GLASSES).get(*i).cloned()) {
+            info!("face test: {} puts on {name}", s.first);
+            s.outfit.glasses = Some(k);
+        }
+        commands.entity(e).insert(crate::aging::NeedsNewBody);
     }
 }
 
@@ -1780,6 +1806,32 @@ fn ui_flow(
         }
         (66, AppState::CreateHousehold, _) if since > 1.5 => {
             shot(&mut commands, "2t_tops");
+            // The second Sim's face: a beard and glasses.
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::Select(1))) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (65, now);
+        }
+        (65, AppState::CreateHousehold, _) if since > 0.8 => {
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::Tab(crate::cas::CasTab::Face))) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (64, now);
+        }
+        (64, AppState::CreateHousehold, _) if since > 1.0 => {
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::FacePart(16, 3))) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (63, now);
+        }
+        (63, AppState::CreateHousehold, _) if since > 1.0 => {
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::FacePart(12, 2))) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (62, now);
+        }
+        (62, AppState::CreateHousehold, _) if since > 2.0 => {
+            shot(&mut commands, "2f_face");
             // With --family, browse the town's families first.
             let want = if args.family.is_some() { crate::home::CasAction::Families } else { crate::home::CasAction::Done };
             if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == want) {
