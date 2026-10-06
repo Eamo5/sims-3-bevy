@@ -32,7 +32,7 @@ pub const CATEGORIES: [&str; 12] =
     ["Appliances", "Plumbing", "Beds", "Seating", "Surfaces", "Electronics", "Hobbies", "Kids", "Lighting", "Decor", "Outdoors", "Misc"];
 /// Build-mode tabs after the buy categories: wallpaper, floors, the construction tools, doors
 /// and windows.
-pub const PAINT_TABS: [&str; 7] = ["Wallpaper", "Floors", "Walls & Floors", "Doors", "Windows", "Roofs", "Fences"];
+pub const PAINT_TABS: [&str; 8] = ["Wallpaper", "Floors", "Walls & Floors", "Doors", "Windows", "Roofs", "Fences", "Terrain"];
 const PAGE: usize = 24;
 /// Objects per page (thumbnail tiles).
 const OBJECT_PAGE: usize = 30;
@@ -60,6 +60,10 @@ pub struct BuyMode {
     pub roof_pick: Option<usize>,
     /// The fence the fence tool puts up (index into the game data's fences).
     pub fence: Option<usize>,
+    /// The terrain paint in the brush (a paint layer, or `terrain_paint::ERASE`), and the
+    /// brush's radius (metres; 0 for the middle size).
+    pub terrain: u8,
+    pub brush: f32,
 }
 
 #[derive(Component)]
@@ -113,6 +117,9 @@ enum BuyButton {
     Tool(crate::build::BuildTool),
     Roof(usize),
     Fence(usize),
+    /// A terrain paint (or the eraser), or a brush size (index into `BRUSHES`).
+    Terrain(u8),
+    Brush(usize),
     Prev,
     Next,
 }
@@ -135,6 +142,7 @@ pub const DOORS_TAB: usize = WALLPAPER_TAB + 3;
 pub const WINDOWS_TAB: usize = WALLPAPER_TAB + 4;
 pub const ROOFS_TAB: usize = WALLPAPER_TAB + 5;
 pub const FENCES_TAB: usize = WALLPAPER_TAB + 6;
+pub const TERRAIN_TAB: usize = WALLPAPER_TAB + 7;
 
 impl BuyMode {
     /// Puts down the tool, pattern or object in hand.
@@ -198,6 +206,7 @@ fn buy_panel(
     mut ui: Option<ResMut<crate::icons::GameUi>>,
     (data, mut assets, mut thumbs): (Res<Baked>, ResMut<ObjectAssets>, ResMut<crate::thumbs::ModelThumbs>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    swatches: Res<crate::terrain_paint::Swatches>,
 ) {
     if !*spawned_toggle {
         *spawned_toggle = true;
@@ -282,6 +291,76 @@ fn buy_panel(
                 }
             });
             p.spawn(text("Roofs go on the rooms you build; they show when the camera pulls back.", 13.0, Color::WHITE));
+            return;
+        }
+        // Terrain paints: the world's own, then the eraser, and the brush's size.
+        if buy.category == TERRAIN_TAB {
+            let brush = if buy.brush > 0.0 { buy.brush } else { crate::terrain_paint::BRUSHES[1].0 };
+            let painting = buy.tool == Some(crate::build::BuildTool::Terrain);
+            p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|grid| {
+                for (i, s) in swatches.0.iter().enumerate() {
+                    let picked = painting && buy.terrain == i as u8;
+                    grid.spawn((
+                        Button,
+                        BuyButton::Terrain(i as u8),
+                        Node {
+                            width: Val::Px(56.0),
+                            height: Val::Px(56.0),
+                            border: UiRect::all(Val::Px(if picked { 3.0 } else { 1.0 })),
+                            border_radius: BorderRadius::all(Val::Px(8.0)),
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        BorderColor::all(if picked { crate::menu::PLUMBOB_GREEN } else { Color::srgba(1.0, 1.0, 1.0, 0.3) }),
+                        BackgroundColor(BTN_NORMAL),
+                        crate::icons::Tooltip(format!("Terrain paint {}", i + 1)),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((ImageNode::new(s.clone()), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
+                    });
+                }
+                let erasing = painting && buy.terrain == crate::terrain_paint::ERASE;
+                grid.spawn((
+                    Button,
+                    BuyButton::Terrain(crate::terrain_paint::ERASE),
+                    Node {
+                        height: Val::Px(56.0),
+                        padding: UiRect::horizontal(Val::Px(10.0)),
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(if erasing { 3.0 } else { 1.0 })),
+                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                        ..default()
+                    },
+                    BorderColor::all(if erasing { crate::menu::PLUMBOB_GREEN } else { Color::srgba(1.0, 1.0, 1.0, 0.3) }),
+                    BackgroundColor(BTN_NORMAL),
+                    crate::icons::Tooltip("Takes the ground back to how it was".to_string()),
+                ))
+                .with_children(|b| {
+                    b.spawn((text("Eraser", 13.0, Color::WHITE), Pickable::IGNORE));
+                });
+            });
+            p.spawn(Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
+                row.spawn(text("Brush:", 13.0, Color::WHITE));
+                for (i, (r, name)) in crate::terrain_paint::BRUSHES.iter().enumerate() {
+                    let picked = (brush - r).abs() < 0.01;
+                    row.spawn((
+                        Button,
+                        BuyButton::Brush(i),
+                        Node {
+                            padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                            border: UiRect::all(Val::Px(if picked { 2.0 } else { 0.0 })),
+                            border_radius: BorderRadius::all(Val::Px(6.0)),
+                            ..default()
+                        },
+                        BorderColor::all(crate::menu::PLUMBOB_GREEN),
+                        BackgroundColor(BTN_NORMAL),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((text(name.to_string(), 13.0, Color::WHITE), Pickable::IGNORE));
+                    });
+                }
+            });
+            p.spawn(text("Pick a paint, then hold the mouse down to paint the ground on the lot.", 13.0, Color::WHITE));
             return;
         }
         // Fences: pick one, then drag it out along the grid.
@@ -473,6 +552,17 @@ fn buy_buttons(
                 buy.fence = Some(*i);
                 buy.dirty = true;
                 play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
+            }
+            BuyButton::Terrain(l) => {
+                buy.drop_tools(&mut commands);
+                buy.tool = Some(crate::build::BuildTool::Terrain);
+                buy.terrain = *l;
+                buy.dirty = true;
+                play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
+            }
+            BuyButton::Brush(i) => {
+                buy.brush = crate::terrain_paint::BRUSHES[*i].0;
+                buy.dirty = true;
             }
             BuyButton::Tool(t) => {
                 buy.drop_tools(&mut commands);

@@ -161,7 +161,7 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -531,6 +531,37 @@ fn make_mess(
         let at = tf.translation + Vec3::new(a.cos() * 1.2, 0.0, a.sin() * 1.2);
         let e = crate::meals::spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, crate::meals::PLATE, crate::interact::ObjectKind::DirtyDishes, "Dirty Dishes", at, a);
         info!("mess: plate {e:?} at {at:.1?}");
+    }
+}
+
+/// TERRAIN=<x>,<z>,<radius>,<layer>[;...]: terrain paint strokes on the lot (lot coordinates;
+/// layer 255 erases), with the camera on the first.
+fn auto_terrain(
+    mut strokes: ResMut<crate::terrain_paint::Strokes>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+    mut cam: Query<&mut SimsCamera>,
+    mut done: Local<bool>,
+    time: Res<Time>,
+) {
+    let Ok(v) = std::env::var("TERRAIN") else { return };
+    let Some(b) = building else { return };
+    if *done || time.elapsed_secs() < 5.0 {
+        return;
+    }
+    *done = true;
+    for (i, s) in v.split(';').enumerate() {
+        let n: Vec<f32> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+        if n.len() < 4 {
+            continue;
+        }
+        let at = b.world(n[0], n[1], 0.0);
+        strokes.pending.push(crate::terrain_paint::Stroke { x: at.x, z: at.z, radius: n[2], layer: n[3] as u8 });
+        if i == 0
+            && let Ok(mut c) = cam.single_mut()
+        {
+            c.focus = Vec3::new(at.x, c.focus.y, at.z);
+            c.distance = 18.0;
+        }
     }
 }
 

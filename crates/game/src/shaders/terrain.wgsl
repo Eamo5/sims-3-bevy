@@ -28,6 +28,9 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(108) var light_samp: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(109) var<uniform> layer_avg: array<vec4<f32>, 16>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(110) var<uniform> terrain_night: vec4<f32>;
+// r: paint layer (index / 15), g: how much (ground painted in build mode)
+@group(#{MATERIAL_BIND_GROUP}) @binding(111) var paint_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(112) var paint_samp: sampler;
 
 @fragment
 fn fragment(
@@ -66,6 +69,7 @@ fn fragment(
         }
     }
     let flags = u32(terrain_params.w);
+    var shade = 1.0;
     if ((flags & 1u) != 0u) {
         // Colour comes from the game's own pre-composited terrain map (paint, lot ground, tree
         // shadows); the paint layers only add their texture detail on top of it.
@@ -74,8 +78,31 @@ fn fragment(
         let dist = distance(view.world_position.xyz, in.world_position.xyz);
         col = ov * mix(detail, vec3<f32>(1.0), smoothstep(150.0, 450.0, dist));
     } else if ((flags & 2u) != 0u) {
-        let shade = textureSample(light_tex, light_samp, wuv).a;
-        col = col * mix(0.55, 1.0, shade);
+        shade = mix(0.55, 1.0, textureSample(light_tex, light_samp, wuv).a);
+        col = col * shade;
+    }
+    // Ground painted in build mode: each of the four nearest paint texels has its own layer,
+    // blended by how much and how near.
+    let psize = vec2<f32>(textureDimensions(paint_tex));
+    let pc = wuv * psize - 0.5;
+    let p0 = floor(pc);
+    let pf = pc - p0;
+    var paint_col = vec3<f32>(0.0);
+    var paint_w = 0.0;
+    for (var k = 0; k < 4; k = k + 1) {
+        let o = vec2<i32>(k & 1, k >> 1);
+        let t = clamp(vec2<i32>(p0) + o, vec2<i32>(0), vec2<i32>(psize) - vec2<i32>(1));
+        let texel = textureLoad(paint_tex, t, 0);
+        let bw = select(1.0 - pf.x, pf.x, o.x == 1) * select(1.0 - pf.y, pf.y, o.y == 1);
+        let s = texel.g * bw;
+        if (s > 0.002 && n > 0) {
+            let li = clamp(i32(round(texel.r * 15.0)), 0, n - 1);
+            paint_col += textureSampleGrad(layer_tex, layer_samp, tuv, li, ddx_t, ddy_t).rgb * s;
+            paint_w += s;
+        }
+    }
+    if (paint_w > 0.002) {
+        col = mix(col, paint_col / paint_w * shade, clamp(paint_w, 0.0, 1.0));
     }
     pbr_input.material.base_color = vec4<f32>(col, 1.0);
     if ((flags & 2u) != 0u && terrain_night.x > 0.01) {

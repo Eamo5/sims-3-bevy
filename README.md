@@ -299,7 +299,9 @@ installation is unreachable.
   tile, never under a floor or a garage): the ground opens over it, a coping goes round it
   and the terrain round its edge is laid along the lot's grid; Ctrl+drag fills it in. Pool
   ladders from the catalogue snap to a pool's edge, and Sims swim in the pool they stand
-  at (a lot's other pools are left alone).
+  at (a lot's other pools are left alone). A Terrain tab paints the ground on the lot with
+  the world's own terrain paints (pictured from their textures), in three brush sizes, or
+  erases back to how the world had it; the paint is kept in saves.
 - **Sound**: the game's own audio, converted once (EALayer3 rewrapped as MP3, EA-XAS decoded to
   WAV): object sounds and Simlish voices cued by the animations, footsteps by floor and
   shoe, interface clicks, stings for promotions, weddings and other moments, birds by day

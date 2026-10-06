@@ -46,6 +46,11 @@ pub struct TerrainExt {
     /// x: darkness (0 day .. 1 night) for the street-light glow.
     #[uniform(110)]
     pub night: Vec4,
+    /// Ground painted in build mode: r the paint layer (index / 15), g how much
+    /// (`terrain_paint`).
+    #[texture(111)]
+    #[sampler(112)]
+    pub paint: Handle<Image>,
 }
 
 /// The terrain material, for per-frame lighting updates.
@@ -109,6 +114,35 @@ pub struct TerrainBuild {
     pub holes: std::collections::HashSet<(i64, i64)>,
     /// The ground round each pool, by lot.
     pub collars: Vec<(usize, Mesh)>,
+    /// A small picture of each paint layer (RGBA8, `SWATCH` square), for the build-mode palette.
+    pub swatches: Vec<Vec<u8>>,
+    /// The size of the weights map (texels across the world).
+    pub weights_size: u32,
+}
+
+/// The side of a paint layer's swatch (texels).
+pub const SWATCH: u32 = 32;
+
+/// Each paint layer's mip of `SWATCH` texels, decoded.
+fn layer_swatches(world: &WorldBaked) -> Vec<Vec<u8>> {
+    let (w, h, mips, count) = world.layer_dims;
+    if count == 0 || world.layer_data.is_empty() {
+        return Vec::new();
+    }
+    let mip_bytes = |m: u32| (((w >> m).max(1) as usize).div_ceil(4)) * (((h >> m).max(1) as usize).div_ceil(4)) * 16;
+    let layer_bytes: usize = (0..mips).map(mip_bytes).sum();
+    let Some(m) = (0..mips).find(|m| (w >> m) <= SWATCH) else { return Vec::new() };
+    let before: usize = (0..m).map(mip_bytes).sum();
+    let (mw, mh) = ((w >> m).max(1) as usize, (h >> m).max(1) as usize);
+    (0..count as usize)
+        .filter_map(|l| {
+            let at = l * layer_bytes + before;
+            let rgba = s3bake::ddsw::decode_bc3(world.layer_data.get(at..at + mip_bytes(m))?, mw, mh);
+            // (Scaled to the swatch size, should the mip be smaller.)
+            let s = SWATCH as usize;
+            Some((0..s * s).flat_map(|i| { let (x, y) = (i % s * mw / s, i / s * mh / s); let o = (y * mw + x) * 4; [rgba[o], rgba[o + 1], rgba[o + 2], 255] }).collect())
+        })
+        .collect()
 }
 
 /// The ground round a pool, laid along its lot's grid: the world's terrain is opened by whole
@@ -296,6 +330,8 @@ pub fn build_terrain(world: &WorldBaked) -> TerrainBuild {
     weights.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::D2Array), ..default() });
 
     TerrainBuild {
+        swatches: layer_swatches(world),
+        weights_size: size,
         chunks,
         layers,
         weights,
@@ -501,6 +537,11 @@ fn spawn_terrain(
         img
     }));
     let weights = images.add(std::mem::take(&mut build.weights));
+    // The ground painted in build mode, a texel to the weights' (nothing at first).
+    let paint = images.add(crate::terrain_paint::blank(build.weights_size));
+    commands.insert_resource(crate::terrain_paint::PaintMap { image: paint.clone(), size: build.weights_size, world_size: build.world_size });
+    let swatches: Vec<Handle<Image>> = build.swatches.drain(..).map(|s| images.add(crate::terrain_paint::swatch_image(s))).collect();
+    commands.insert_resource(crate::terrain_paint::Swatches(swatches));
     let flags = build.overview.is_some() as u32 | (build.lightmap.is_some() as u32) << 1;
     let overview = build.overview.take().map(|i| images.add(i));
     let lightmap = build.lightmap.take().map(|i| images.add(i));
@@ -519,6 +560,7 @@ fn spawn_terrain(
             lightmap,
             layer_avg: build.layer_avg,
             night: Vec4::ZERO,
+            paint,
         },
     });
     commands.insert_resource(TerrainMaterialHandle(material.clone()));

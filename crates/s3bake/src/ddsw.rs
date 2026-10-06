@@ -1,6 +1,13 @@
 //! Writing GPU-ready DDS files: BC1/BC3 encoding of composited images and mip-chain
 //! trimming of the game's own DDS textures (no re-encode).
 
+/// Decodes BC3 (DXT5) blocks to RGBA8.
+pub fn decode_bc3(data: &[u8], width: usize, height: usize) -> Vec<u8> {
+    let mut out = vec![0u8; width * height * 4];
+    texpresso::Format::Bc3.decompress(data, width, height, &mut out);
+    out
+}
+
 use s3formats::dds::{Rgba, build_mips};
 
 fn dds_header(width: u32, height: u32, mips: u32, fourcc: &[u8; 4], top_level_size: u32) -> Vec<u8> {
