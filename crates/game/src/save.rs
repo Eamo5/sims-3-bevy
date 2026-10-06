@@ -108,6 +108,8 @@ pub struct SavedLifetimeWish {
     pub careers: Vec<String>,
     #[serde(default)]
     pub raised: u32,
+    #[serde(default)]
+    pub rich_spouse: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -472,7 +474,7 @@ fn save_game(
             shape: Some((sim.weight, sim.fitness)),
             opportunities: opps.map(|o| o.active.iter().filter_map(|a| Some((guid(a.index)?, a.deadline))).collect()).unwrap_or_default(),
             opportunities_done: opps.map(|o| o.done.clone()).unwrap_or_default(),
-            lifetime_wish: ltw.map(|l| SavedLifetimeWish { check: l.def().check.into(), fulfilled: l.fulfilled, careers: l.careers.clone(), raised: l.raised }),
+            lifetime_wish: ltw.map(|l| SavedLifetimeWish { check: l.def().check.into(), fulfilled: l.fulfilled, careers: l.careers.clone(), raised: l.raised, rich_spouse: l.rich_spouse }),
             author: author.cloned(),
             recipes: recipes.map(|r| r.0.clone()).unwrap_or_default(),
             chess: chess.copied(),
@@ -616,7 +618,7 @@ fn apply_loaded_game(
         if let Some(l) = &s.lifetime_wish
             && let Some(wish) = crate::lifetime::LifetimeWish::by_check(&l.check)
         {
-            ec.insert(crate::lifetime::LifetimeWish { fulfilled: l.fulfilled, careers: l.careers.clone(), raised: l.raised, ..crate::lifetime::LifetimeWish::new(wish) });
+            ec.insert(crate::lifetime::LifetimeWish { fulfilled: l.fulfilled, careers: l.careers.clone(), raised: l.raised, rich_spouse: l.rich_spouse, ..crate::lifetime::LifetimeWish::new(wish) });
         }
         if !s.opportunities.is_empty() || !s.opportunities_done.is_empty() {
             ec.insert(crate::opportunities::PendingOpportunities(s.opportunities.clone(), s.opportunities_done.clone()));

@@ -76,12 +76,14 @@ installation is unreachable.
 - **Lifetime wishes**, the base game's own (CEO of a Mega-Corporation, Leader of the Free
   World, Become a Master Thief, Rock Star, Swimming in Cash, Super Popular, Heartbreaker,
   Master of the Arts, Renaissance Sim, Professional Author, The Culinary Librarian, The
-  Perfect Garden, Chess Legend, Surrounded by Family, Jack of All Trades and more; 30 in all), with their icons, targets and rewards
+  Perfect Garden, The Perfect Aquarium, Gold Digger, Chess Legend, Surrounded by Family, Jack
+  of All Trades and more; all 32 of them), with their icons, targets and rewards
   from the game's dream tables. Create-a-Sim offers five that suit the Sim's traits; a child
   growing into a teen picks one in the game's dialog; Sims moving in without one take the
   best fit (one not already half done). The wish sits beside the others with its progress
   (§12,000 of §50,000, Painting 7/10 · Guitar 4/10, level 6 of 10), and fulfilling it is worth
-  20,000 to 35,000 lifetime happiness. Kept in saves.
+  20,000 to 35,000 lifetime happiness. Kept in saves. A townie marrying in brings their share
+  of their family's funds (marry a Landgraab, an Alto or a Goth to start on Gold Digger).
 - **Lifetime rewards**: the game's reward traits, bought with lifetime happiness at their
   costs in its dialog (icon, name and description): Steel Bladder, Dirt Defiant, Hardly
   Hungry, Fast Learner, Fast Metabolism, Professional Slacker, Opportunistic (bigger

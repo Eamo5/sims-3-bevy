@@ -56,6 +56,8 @@ pub enum Goal {
     PerfectPlants,
     /// Have `n` kinds of perfect fish in fish bowls.
     PerfectFish,
+    /// Marry a rich Sim, and outlive them.
+    GoldDigger,
     /// Master Logic and reach the top chess rank.
     ChessLegend,
 }
@@ -153,6 +155,7 @@ pub static LIFETIME_WISHES: &[LifetimeWishDef] = &[
     LifetimeWishDef { check: "KnowEveryCookingRecipieMajorDreamCheckFunction", name: "The Culinary Librarian", desc: "Know every recipe", goal: Goal::Recipes, n: 0.0, icon: "w_lifetime_know_every_recipe", score: 3000, traits: &[T::NaturalCook, T::Bookworm, T::Perfectionist] },
     LifetimeWishDef { check: "HaveNDifferentPerfectPlantsMajorDreamCheckFunction", name: "The Perfect Garden", desc: "Grow {n} different kinds of perfect produce", goal: Goal::PerfectPlants, n: 8.0, icon: "w_lifetime_have_perfect_plants", score: 3250, traits: &[T::GreenThumb, T::LovesTheOutdoors, T::Perfectionist] },
     LifetimeWishDef { check: "HaveNPerfectFishInFishbowlsMajorDreamCheckFunction", name: "The Perfect Aquarium", desc: "Have {n} different kinds of perfect fish in fish bowls", goal: Goal::PerfectFish, n: 13.0, icon: "w_lifetime_have_perfect_fish", score: 3250, traits: &[T::Angler, T::LovesTheOutdoors, T::Perfectionist] },
+    LifetimeWishDef { check: "MarryRichSim", name: "Gold Digger", desc: "Marry a rich Sim (of a family worth §{n}), and outlive them", goal: Goal::GoldDigger, n: 40000.0, icon: "w_lifetime_marry_rich_sim", score: 2000, traits: &[T::Snob, T::Evil, T::MeanSpirited, T::Schmoozer] },
     LifetimeWishDef { check: "LogicL10AndChessMasterRankMajorDreamCheckFunction", name: "Chess Legend", desc: "Master Logic and become a Grand Master of chess", goal: Goal::ChessLegend, n: 0.0, icon: "w_lifetime_chess_master", score: 2750, traits: &[T::Genius, T::Perfectionist, T::Loner] },
     LifetimeWishDef { check: "ReachLevel5In4CareersMajorDreamCheckFunction", name: "Jack of All Trades", desc: "Reach level 5 in {n} different careers", goal: Goal::CareerHopper, n: 4.0, icon: "w_lifetime_L5_in4_careers", score: 3500, traits: &[T::Ambitious, T::Excitable, T::Absentminded] },
 ];
@@ -172,6 +175,8 @@ pub struct LifetimeWish {
     pub status: String,
     /// Picked for them (not by the player).
     pub auto: bool,
+    /// The rich Sim they married (by id), for Gold Digger.
+    pub rich_spouse: Option<u64>,
 }
 
 impl LifetimeWish {
@@ -297,6 +302,8 @@ struct Standing<'a> {
     perfect: usize,
     /// Kinds of perfect fish in the household's bowls.
     perfect_fish: usize,
+    /// Married into money (1), and widowed by it (2).
+    gold: u8,
     /// Chess rank (0..5).
     chess_rank: u8,
 }
@@ -340,6 +347,11 @@ fn measure(d: &LifetimeWishDef, data: Option<&s3bake::GameDataBaked>, at: &Stand
         Goal::Recipes => (at.recipes.0 as f32 / at.recipes.1.max(1) as f32, format!("{} of {} recipes known", at.recipes.0, at.recipes.1)),
         Goal::PerfectPlants => (at.perfect as f32 / n, format!("{} of {n} kinds grown perfect", at.perfect)),
         Goal::PerfectFish => (at.perfect_fish as f32 / n, format!("{} of {n} kinds of perfect fish in bowls", at.perfect_fish)),
+        Goal::GoldDigger => match at.gold {
+            0 => (0.0, "Not yet married into money".to_string()),
+            1 => (0.5, "Married into money".to_string()),
+            _ => (1.0, "Widowed, and rich".to_string()),
+        },
         Goal::ChessLegend => (
             (skills.level("Logic") as f32 / 10.0 + at.chess_rank as f32 / 5.0) / 2.0,
             format!("Logic {}/10 · {}", skills.level("Logic"), crate::chess::RANKS[(at.chess_rank as usize).min(5)]),
@@ -377,6 +389,7 @@ fn track_lifetime_wishes(
     mut play: MessageWriter<crate::sound::PlaySound>,
     mut next_check: Local<f64>,
     (garden, bowls): (Option<Res<crate::gardening::Garden>>, Option<Res<crate::fishbowl::PerfectFish>>),
+    (everyone, town, graves): (Query<(&Sim, Has<HouseholdMember>)>, Option<Res<crate::premade::TownPremades>>, Query<&crate::ghosts::Grave>),
 ) {
     let data = ui.as_ref().map(|u| &*u.data);
     let mut changed = false;
@@ -384,6 +397,20 @@ fn track_lifetime_wishes(
         changed = true;
         match ev.kind {
             // A child grown into a teen counts for each grown-up of the household.
+            // Married into money: a spouse from one of the town's rich families.
+            LifeEventKind::Married => {
+                let Ok((_, _, mut w, _, _, rels, ..)) = sims.get_mut(ev.sim) else { continue };
+                if !matches!(w.def().goal, Goal::GoldDigger) || w.rich_spouse.is_some() {
+                    continue;
+                }
+                let Some((spouse, _)) = rels.partner() else { continue };
+                let Ok((s, _)) = everyone.get(spouse) else { continue };
+                let rich = town.as_ref().and_then(|t| t.0.households.iter().find(|h| h.members.iter().any(|m| m.id == s.id))).is_some_and(|h| h.funds as f32 >= w.def().n);
+                if rich {
+                    w.rich_spouse = Some(s.id);
+                    notes.push(format!("{} has married into money!", s.full_name()));
+                }
+            }
             LifeEventKind::Birthday if ages.get(ev.sim).is_ok_and(|s| s.age == Age::Teen) => {
                 for (_, sim, mut w, ..) in &mut sims {
                     if !sim.age.is_little() && sim.age != Age::Child && sim.age != Age::Teen {
@@ -415,7 +442,12 @@ fn track_lifetime_wishes(
         let perfect = garden.as_ref().map_or(0, |g| g.perfect.len());
         let chess_rank = chess.map_or(0, |c| c.rank);
         let perfect_fish = bowls.as_ref().map_or(0, |b| b.0);
-        let at = Standing { skills, job, rels, funds, worth, raised: w.raised, careers: &careers, royalties, recipes, perfect, perfect_fish, chess_rank };
+        let gold = match w.rich_spouse {
+            Some(id) if graves.iter().any(|g| g.sim.id == id) => 2,
+            Some(_) => 1,
+            None => 0,
+        };
+        let at = Standing { skills, job, rels, funds, worth, raised: w.raised, careers: &careers, royalties, recipes, perfect, perfect_fish, gold, chess_rank };
         // One picked for them that's half done already isn't much of a dream: the next that
         // suits them instead.
         if w.auto && w.status.is_empty() {

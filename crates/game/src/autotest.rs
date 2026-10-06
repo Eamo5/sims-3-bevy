@@ -557,6 +557,16 @@ fn ask_question(
     {
         commands.entity(e).insert(crate::meals::MealPlan(r));
     }
+    // LTW=<name>: the selected Sim's lifetime wish.
+    if let Ok(name) = std::env::var("LTW")
+        && let Ok((e, _)) = sel.single()
+        && !*done
+        && time.elapsed_secs() > 4.0
+        && let Some(i) = crate::lifetime::LIFETIME_WISHES.iter().position(|w| w.name.eq_ignore_ascii_case(&name))
+    {
+        *done = true;
+        commands.entity(e).insert(crate::lifetime::LifetimeWish::new(i));
+    }
     let Ok(what) = std::env::var("ASK") else { return };
     if *done || time.elapsed_secs() < 3.0 {
         return;

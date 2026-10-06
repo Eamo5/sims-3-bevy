@@ -952,10 +952,24 @@ fn comings_and_goings(
     mut leaving: Query<(Entity, &mut ActionQueue, &Transform), (With<GoingHome>, Without<OffLot>)>,
     mut visitors: Query<(Entity, &Visitor), (Without<GoingHome>, Without<OffLot>, Without<HouseholdMember>)>,
     mut arriving: Query<(Entity, &Invited, &mut Transform), Without<GoingHome>>,
+    (town, mut household, mut notes, members): (Option<Res<crate::premade::TownPremades>>, Option<ResMut<Household>>, ResMut<Notifications>, Query<(), With<HouseholdMember>>),
 ) {
     for (e, mut sim, j) in &mut joining {
         if let Some(l) = &j.last_name {
             sim.last = l.clone();
+        }
+        // A townie moving in brings their share of their family's funds.
+        if !members.contains(e)
+            && let Some(h) = town.as_ref().and_then(|t| t.0.households.iter().find(|h| h.members.iter().any(|m| m.id == sim.id)))
+        {
+            let grown = h.members.iter().filter(|m| m.age & (s3formats::premade::AGE_YOUNG_ADULT | s3formats::premade::AGE_ADULT | s3formats::premade::AGE_ELDER) != 0).count().max(1);
+            let share = h.funds.max(0) / grown as i64;
+            if share > 0
+                && let Some(hh) = household.as_mut()
+            {
+                hh.funds += share;
+                notes.push(format!("{} brought §{} into the household.", sim.first, crate::lifetime::group(share)));
+            }
         }
         commands.entity(e).remove::<(JoinHousehold, Visitor, GoingHome, OffLot)>().insert(HouseholdMember);
     }
