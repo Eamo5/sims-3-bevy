@@ -22,7 +22,9 @@ pub struct SavePlugin;
 impl Plugin for SavePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RemovedLotObjects>()
+            .init_resource::<SaveSlot>()
             .add_message::<SaveRequest>()
+            .add_systems(OnEnter(crate::AppState::Loading), new_game_slot)
             .add_systems(Update, resume_saved_lot.run_if(in_state(PlayMode::ChooseLot)))
             .add_systems(Update, (apply_loaded_game, save_game).run_if(in_state(PlayMode::Live)));
     }
@@ -294,6 +296,40 @@ pub struct SaveRequest;
 #[derive(Resource, Clone)]
 pub struct LastSave(pub SaveGame);
 
+/// The file this game is saved to: the one it was loaded from, or (for a new game) one chosen
+/// at its first save that no other save had. A save never writes over another game's file.
+#[derive(Resource, Default, Clone)]
+pub struct SaveSlot(pub Option<PathBuf>);
+
+/// A new game (not one loaded) starts with no file of its own.
+fn new_game_slot(pending: Option<Res<PendingLoad>>, mut slot: ResMut<SaveSlot>) {
+    if pending.is_none() {
+        slot.0 = None;
+    }
+}
+
+/// A file name in `dir` for `game` that no save has yet ("Goth - Sunset Valley (2).json", ...).
+fn free_save_path(dir: &std::path::Path, game: &SaveGame) -> PathBuf {
+    let base = game.file_name();
+    let stem = base.trim_end_matches(".json");
+    (1..)
+        .map(|n| dir.join(if n == 1 { base.clone() } else { format!("{stem} ({n}).json") }))
+        .find(|p| !p.exists() && !p.with_extension("json.bak").exists())
+        .expect("a free file name")
+}
+
+/// Writes a save without ever leaving it half-written: the game goes to a temporary file first,
+/// the save it replaces (this game's own, from before) is kept as `.json.bak`, and only then
+/// does the new one take its place.
+fn write_save(path: &std::path::Path, data: &[u8]) -> std::io::Result<()> {
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, data)?;
+    if path.exists() {
+        std::fs::copy(path, path.with_extension("json.bak"))?;
+    }
+    std::fs::rename(&tmp, path)
+}
+
 /// Every save on disk, newest first.
 pub fn list_saves() -> Vec<(PathBuf, SaveGame)> {
     let mut out: Vec<(PathBuf, SaveGame, std::time::SystemTime)> = std::fs::read_dir(saves_dir())
@@ -423,6 +459,7 @@ fn save_game(
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
     (story, alarm, bowls): (Res<crate::story::TownStory>, Res<crate::appliances::Alarm>, Query<(&crate::fishbowl::BowlFish, &Transform), Without<crate::visit::LotObject>>),
+    mut slot: ResMut<SaveSlot>,
 ) {
     if requests.read().count() == 0 {
         return;
@@ -513,9 +550,12 @@ fn save_game(
     };
     let dir = saves_dir();
     let _ = std::fs::create_dir_all(&dir);
-    let path = dir.join(game.file_name());
-    match serde_json::to_vec_pretty(&game).map_err(|e| e.to_string()).and_then(|d| std::fs::write(&path, d).map_err(|e| e.to_string())) {
-        Ok(()) => notes.push(format!("Game saved: the {} household in {}.", game.household, game.world)),
+    let path = slot.0.clone().unwrap_or_else(|| free_save_path(&dir, &game));
+    match serde_json::to_vec_pretty(&game).map_err(|e| e.to_string()).and_then(|d| write_save(&path, &d).map_err(|e| e.to_string())) {
+        Ok(()) => {
+            slot.0 = Some(path);
+            notes.push(format!("Game saved: the {} household in {}.", game.household, game.world));
+        }
         Err(e) => notes.push(format!("Couldn't save the game: {e}")),
     }
     commands.insert_resource(LastSave(game));
@@ -708,14 +748,16 @@ fn apply_loaded_game(
     commands.remove_resource::<PendingLoad>();
 }
 
-/// Starts loading a saved game: the world, then the household.
-pub fn begin_load(commands: &mut Commands, worlds: &crate::data::WorldList, game: SaveGame) -> bool {
+/// Starts loading a saved game: the world, then the household. It saves back to `path`, the
+/// file it came from.
+pub fn begin_load(commands: &mut Commands, worlds: &crate::data::WorldList, game: SaveGame, path: Option<PathBuf>) -> bool {
     let Some(w) = worlds.0.iter().find(|w| w.path.file_stem().is_some_and(|s| s.to_string_lossy() == game.world) || w.name == game.world) else {
         return false;
     };
     commands.insert_resource(crate::data::SelectedWorld(w.clone()));
     commands.insert_resource(crate::home::PendingHousehold { last_name: game.household.clone(), members: game.members(), premade: None });
     commands.insert_resource(PendingLoad(game));
+    commands.insert_resource(SaveSlot(path));
     true
 }
 

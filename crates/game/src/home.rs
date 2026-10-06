@@ -216,7 +216,7 @@ fn lot_buttons(
     mut cam: Query<&mut SimsCamera>,
     mut next: ResMut<NextState<PlayMode>>,
     mut commands: Commands,
-    (moving, worlds, catalog, mut app): (Option<Res<Moving>>, Res<crate::data::WorldList>, Res<Catalog>, ResMut<NextState<AppState>>),
+    (moving, worlds, catalog, mut app, slot): (Option<Res<Moving>>, Res<crate::data::WorldList>, Res<Catalog>, ResMut<NextState<AppState>>, Res<crate::save::SaveSlot>),
 ) {
     for (i, b) in &q {
         if *i == Interaction::Pressed {
@@ -256,7 +256,8 @@ fn lot_buttons(
                 }
                 info!("moving the {} household to lot {l} ({}); furniture sold for §{refund}", g.household, g.lot_name);
                 commands.remove_resource::<Moving>();
-                if crate::save::begin_load(&mut commands, &worlds, g) {
+                // (Into the same file: it's the same game.)
+                if crate::save::begin_load(&mut commands, &worlds, g, slot.0.clone()) {
                     app.set(AppState::Loading);
                 }
                 return;

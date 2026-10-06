@@ -137,8 +137,8 @@ fn menu_actions(
                 next.set(AppState::CreateHousehold);
             }
             MenuAction::LoadSave(k) => {
-                if let Some((_, g)) = crate::save::list_saves().into_iter().nth(*k)
-                    && crate::save::begin_load(&mut commands, &worlds, g)
+                if let Some((p, g)) = crate::save::list_saves().into_iter().nth(*k)
+                    && crate::save::begin_load(&mut commands, &worlds, g, Some(p))
                 {
                     next.set(AppState::Loading);
                 }

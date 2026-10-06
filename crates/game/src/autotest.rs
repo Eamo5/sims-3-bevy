@@ -1719,8 +1719,8 @@ fn auto_load(args: Res<AutoArgs>, worlds: Res<WorldList>, mut commands: Commands
         return;
     }
     *done = true;
-    if let Some((_, g)) = crate::save::list_saves().into_iter().nth(n)
-        && crate::save::begin_load(&mut commands, &worlds, g)
+    if let Some((p, g)) = crate::save::list_saves().into_iter().nth(n)
+        && crate::save::begin_load(&mut commands, &worlds, g, Some(p))
     {
         next.set(AppState::Loading);
     }

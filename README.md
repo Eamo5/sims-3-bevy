@@ -311,6 +311,11 @@ installation is unreachable.
   clothes or a birthday) for the household buttons, ringed in each Sim's mood colour, for
   balloons about someone, and for the Relationships panel (R): everyone the Sim knows with
   what they are to each other and friendship and romance bars.
+- **Saves**: a game saves (as JSON in `saves/`, or the folder `SIMS3_SAVES` names) back to the
+  file it was loaded from; a new game takes a file name no other save has ("Goth - Sunset
+  Valley (2).json"), so one household never writes over another's game. Each save goes to a
+  temporary file first and keeps the one it replaces as `.json.bak`, and saves from older
+  versions of the game still load.
 - **Options**: Escape pauses with a game menu (resume, options, save, main menu, quit); the
   options set master, music, effects, voice and ambient levels, aging and life span (short
   to epic), free will, shadows and the frame-rate counter, kept in `settings.json`.
