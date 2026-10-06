@@ -100,6 +100,8 @@ pub enum ObjectKind {
     /// A coffee maker.
     HotBeverage,
     AlarmClock,
+    /// A trash can: clearing dishes fills it.
+    TrashCan,
     Other,
 }
 
@@ -116,6 +118,8 @@ impl ObjectKind {
             Self::HotBeverage
         } else if has("alarmclock") {
             Self::AlarmClock
+        } else if has("trashcan") {
+            Self::TrashCan
         } else if has("highchair") {
             Self::HighChair
         } else if has("toys.toybox") || has("toys.mimics.toybox") {
@@ -209,6 +213,7 @@ impl ObjectKind {
         match self {
             Self::Fridge | Self::Stove | Self::Microwave | Self::Grill | Self::HotBeverage => "Appliances",
             Self::AlarmClock => "Electronics",
+            Self::TrashCan => "Misc",
             Self::BedDouble | Self::BedSingle => "Beds",
             Self::Toilet | Self::Shower | Self::Bathtub | Self::Sink => "Plumbing",
             Self::Sofa | Self::Chair | Self::Stool => "Seating",
@@ -333,6 +338,8 @@ pub enum Special {
     NewLook,
     /// Set the alarm clock, or turn it off.
     ToggleAlarm,
+    /// Empty a full trash can.
+    EmptyTrash,
     /// Cook a group meal and serve it on a platter.
     ServeMeal,
     /// Take a serving from a platter (then sit down to eat it).
@@ -454,6 +461,8 @@ static GRILL: [InteractionDef; 1] = [InteractionDef {
 }];
 /// A cup of coffee: a lift for the tired, and a trip to the bathroom later.
 static HOT_BEVERAGE: [InteractionDef; 1] = [def("Make Hot Beverage", 15.0, [24.0, -48.0, 80.0, 0.0, 0.0, 20.0], Pose::Use)];
+static TRASH: [InteractionDef; 1] =
+    [InteractionDef { special: Special::EmptyTrash, ..def("Empty Trash", 6.0, [0.0, 0.0, 0.0, 0.0, -6.0, 0.0], Pose::Use) }];
 static ALARM: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::ToggleAlarm, ..def("Set Alarm", 1.0, N, Pose::Use) }];
 static DISHES: [InteractionDef; 1] = [InteractionDef { special: Special::CleanUp, ..def("Clean Up", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 0.0], Pose::Use) }];
 /// How a plate of food fills hunger, per hour, and how long it takes to eat.
@@ -608,6 +617,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Nap in Crib" => A::new(Some("p2o_crib_sleep_start_y"), &["p2o_crib_sleep_loop_y"]),
         "Change Clothes" | "Change Into" | "New Everyday Outfit" => A::new(Some("a2o_dresser_use_open"), &["a2o_dresser_use_close"]),
         "Grill" => A::new(Some("a2o_bbq_grill_start"), &["a2o_bbq_grill_loopBreathe", "a2o_bbq_grill_loopPokeLeft", "a2o_bbq_grill_loopPokeRight", "a2o_bbq_grill_loopExpert"]),
+        "Empty Trash" => A::new(None, &["a2o_trashCan_empty_pullout_x"]),
         "Make Hot Beverage" => A::new(Some("a2o_hotBeverageMachine_fill"), &["a2o_hotBeverageMachine_drink_loopSip_standing", "a2o_hotBeverageMachine_drink_loopLongSip_standing"]),
         "Stargaze" => A::new(Some("a2o_telescope_start"), &["a2o_telescope_look_loop", "a2o_telescope_look_breathe", "a2o_telescope_react_wonderment"]),
         "Swing" => A::new(Some("a2o_swingset_getIn"), &["a2o_swingset_swing"]),
@@ -722,6 +732,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Grill => &GRILL,
         ObjectKind::HotBeverage => &HOT_BEVERAGE,
         ObjectKind::AlarmClock => &ALARM,
+        ObjectKind::TrashCan => &TRASH,
         ObjectKind::Telescope => &TELESCOPE,
         ObjectKind::SwingSet => &SWINGSET,
         ObjectKind::HotTub => &HOTTUB,
@@ -1528,6 +1539,10 @@ fn run_actions(
                                         }
                                         Special::CleanUp => {
                                             commands.entity(*target).try_despawn();
+                                            commands.entity(me).insert(crate::surroundings::Discarded);
+                                        }
+                                        Special::EmptyTrash => {
+                                            commands.entity(*target).insert(crate::surroundings::TrashFill(0));
                                         }
                                         Special::ReadPaper => {
                                             commands.entity(*target).try_despawn();
@@ -1896,7 +1911,7 @@ fn autonomy(
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>,
     hh: Option<Res<Household>>,
     (broken, plant_q, lit_q, hw_q): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>, Query<(), With<crate::fireplace::Lit>>, Query<(), With<crate::rabbitholes::Homework>>),
-    party_on: Option<Res<Party>>,
+    (party_on, trash_q): (Option<Res<Party>>, Query<&crate::surroundings::TrashFill>),
 ) {
     if delta.0 <= 0.0 {
         return;
@@ -2005,7 +2020,11 @@ fn autonomy(
                 if d.special == Special::PayBills {
                     score = if bills_due { 25.0 } else { 0.0 };
                 }
-                if d.special == Special::CleanUp {
+                // A full trash can is a chore like dishes; an emptier one isn't.
+                if d.special == Special::EmptyTrash && !trash_q.get(oe).is_ok_and(|f| f.0 >= crate::surroundings::TRASH_CAPACITY) {
+                    continue;
+                }
+                if matches!(d.special, Special::CleanUp | Special::EmptyTrash) {
                     score = if sim.traits.contains(&crate::life::Trait::Slob) {
                         0.0
                     } else if sim.traits.contains(&crate::life::Trait::Neat) {

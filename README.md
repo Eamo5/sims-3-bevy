@@ -233,6 +233,10 @@ installation is unreachable.
   group meal; a hot-beverage maker brews a cup for energy (and a trip to the bathroom
   later); a set alarm clock wakes the household's workers an hour before their shift and
   the schoolchildren an hour before the bus, and stays set in saves.
+- **Dirty surroundings**: dirty dishes left about, food left out until it spoils (eight
+  hours) and a full trash can give nearby household Sims the game's *Dirty Surroundings*,
+  then *Filthy Surroundings*, moodlets. Clearing dishes away fills the nearest trash can;
+  once full, someone has to *Empty Trash* (neat Sims see to it, slobs never do).
 - **Inventories**: each Sim carries what they've picked, caught and found, in stacks on the
   Sim panel's Inventory tab (F9) with the objects' catalogue pictures (produce by quality);
   pick a stack to sell one or all of it, or to eat a piece of produce (a snack's worth,

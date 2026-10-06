@@ -161,7 +161,7 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -475,6 +475,32 @@ fn give_items(
         } else {
             warn!("GIVE: no such item {what}");
         }
+    }
+}
+
+/// MESS=<n>: n dirty plates set down around the selected Sim (who then stays put).
+#[allow(clippy::too_many_arguments)]
+fn make_mess(
+    mut commands: Commands,
+    mut sel: Query<(&Transform, &mut crate::interact::ActionQueue), With<crate::sim::Selected>>,
+    (data, catalog, mut assets): (Res<crate::baked::Baked>, Res<crate::loading::Catalog>, ResMut<crate::objects::ObjectAssets>),
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    mut done: Local<bool>,
+    time: Res<Time>,
+) {
+    let Some(n) = std::env::var("MESS").ok().and_then(|v| v.parse::<usize>().ok()) else { return };
+    let Ok((tf, mut queue)) = sel.single_mut() else { return };
+    queue.0.clear();
+    if *done || time.elapsed_secs() < 6.0 {
+        return;
+    }
+    *done = true;
+    let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+    for i in 0..n {
+        let a = i as f32 * 1.3;
+        let at = tf.translation + Vec3::new(a.cos() * 1.2, 0.0, a.sin() * 1.2);
+        let e = crate::meals::spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, crate::meals::PLATE, crate::interact::ObjectKind::DirtyDishes, "Dirty Dishes", at, a);
+        info!("mess: plate {e:?} at {at:.1?}");
     }
 }
 

@@ -259,7 +259,7 @@ struct EatingPlate(Entity);
 
 /// The game's own objects for the platter and plates.
 const PLATTER: &str = "PlateServing";
-const PLATE: &str = "Plate";
+pub const PLATE: &str = "Plate";
 
 /// A surface (table or counter) near a point: its top centre.
 fn surface_near(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, at: Vec3, within: f32) -> Option<Vec3> {
@@ -300,7 +300,7 @@ fn dining_seat(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, near
 
 /// Spawns one of the game's objects (by internal name) as an object of `kind`.
 #[allow(clippy::too_many_arguments)]
-fn spawn_dish(
+pub fn spawn_dish(
     commands: &mut Commands,
     assets: &mut ObjectAssets,
     ctx: &mut AssetCtx,

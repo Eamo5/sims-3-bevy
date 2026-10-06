@@ -495,17 +495,19 @@ pub enum MoodletKind {
     GreatDate,
     BadDate,
     Singed,
+    DirtySurroundings,
+    FilthySurroundings,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 46] = {
+    pub const ALL: [MoodletKind; 48] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
             GoodMeal, AmazingMeal, HavingFun, GoodConversation, EnjoyingMusic, EnjoyingAGoodBook, Pumped, Fatigued,
             Inspired, Embarrassed, PassedOut, Uncomfortable, Promoted, Demoted, Fired, NewJob, Annoyed, Flirty, FirstKiss,
             InLove, Heartbroken, JustMarried, NewHome, Birthday, WishFulfilled, Nauseous, Pregnant, NewBaby, GreatParty,
-            LameParty, AwesomeParty, Scared, GreatDate, BadDate, Singed,
+            LameParty, AwesomeParty, Scared, GreatDate, BadDate, Singed, DirtySurroundings, FilthySurroundings,
         ]
     };
 
@@ -575,6 +577,8 @@ impl MoodletKind {
             GreatDate => md("Great Date", "It was an absolutely fantastic date!", 15, 3.0),
             BadDate => md("Bad Date", "Ugh, what a lousy date.", -5, 3.0),
             Singed => md("Singed", "Electrocuted! Another shock now could stop their heart.", -40, 6.0),
+            DirtySurroundings => md("Dirty Surroundings", "Dirty dishes, garbage and spoiled food are never a kind sight to the eyes, or nose...", -15, 0.0),
+            FilthySurroundings => md("Filthy Surroundings", "The grime and muck is really starting to pile high.", -30, 0.0),
             WishFulfilled => md("Wish Fulfilled", "Dreams come true!", 10, 4.0),
         }
     }
@@ -634,6 +638,8 @@ impl MoodletKind {
             GreatDate => ("GreatDate", true),
             BadDate => ("BadDate", true),
             Singed => ("SingedElectricity", true),
+            DirtySurroundings => ("DirtySurroundings", true),
+            FilthySurroundings => ("FilthySurroundings", true),
         }
     }
 }
@@ -667,6 +673,11 @@ impl Moodlets {
 
     pub fn has(&self, kind: MoodletKind) -> bool {
         self.0.iter().any(|m| m.kind == kind)
+    }
+
+    /// A moodlet present while its cause lasts.
+    pub fn set_while(&mut self, kind: MoodletKind, on: bool) {
+        self.set_need(kind, on);
     }
 
     fn set_need(&mut self, kind: MoodletKind, on: bool) {
