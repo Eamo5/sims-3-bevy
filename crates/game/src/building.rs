@@ -235,6 +235,12 @@ pub struct WallObject {
     mid: Vec3,
 }
 
+/// Whether an object hangs on a wall, by its model's bounds: the game's paintings, mirrors and
+/// wall lamps hang behind their middle (on the wall at the back of their tile), off the floor.
+pub fn hangs_on_wall((mn, mx): (Vec3, Vec3)) -> bool {
+    mn.y > 0.3 && mx.z < 0.0 && mn.z < -0.3
+}
+
 /// One face of a wall segment with its full-height and cut-away meshes.
 #[derive(Component)]
 pub struct WallFace {
@@ -825,9 +831,16 @@ fn cut_openings(
         if b.holes.iter().any(|(he, _)| *he == Some(e)) {
             continue;
         }
-        let Some(door) = catalog.by_key(&obj.objd).and_then(|c| c.opening) else { continue };
         let Some(bounds) = parts_bounds(&assets.object(&mut ctx, obj.objd)) else { continue };
         let level = b.level_at(tf.translation.y);
+        let Some(door) = catalog.by_key(&obj.objd).and_then(|c| c.opening) else {
+            // Paintings, mirrors and wall lamps hang on the wall behind them: cut away with it.
+            if hangs_on_wall(bounds) {
+                let mid = tf.translation - tf.rotation * Vec3::Z * 0.5;
+                commands.entity(e).insert((WallObject { mid }, BuildingPiece { level }, Floor(level)));
+            }
+            continue;
+        };
         let hole = Hole::new(b.local(tf.translation), b.local_dir(tf.rotation * Vec3::Z), b.local_dir(tf.rotation * Vec3::X), bounds, door, level);
         changed.extend(walls_cut(&b, &hole));
         let mid = b.world(hole.wall_point.x, hole.wall_point.y, tf.translation.y);

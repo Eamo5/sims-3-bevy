@@ -867,13 +867,18 @@ fn placement(
     let owned = placing.owned;
     let design = placing.design;
     let ground = ground_hit(ray, &world);
-    // Doors and windows go into the wall under the pointer.
+    // Doors and windows go into the wall under the pointer; paintings, mirrors and wall lamps
+    // hang on it (their models hang behind their middle, on the tile's wall, off the floor).
     let opening = catalog.by_key(&objd).and_then(|e| e.opening);
-    let in_wall = match (opening, building.as_deref()) {
-        (Some(_), Some(b)) => {
-            let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-            let tiles = crate::objects::parts_bounds(&assets.object(&mut ctx, objd)).map_or(1, |(mn, mx)| ((mx.x - mn.x).round() as u32).max(1));
-            crate::build::snap_to_wall(b, ray, tiles)
+    let bounds = {
+        let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+        crate::objects::parts_bounds(&assets.object(&mut ctx, objd))
+    };
+    let wall_hung = opening.is_none() && bounds.is_some_and(crate::building::hangs_on_wall);
+    let in_wall = match (opening.is_some() || wall_hung, building.as_deref()) {
+        (true, Some(b)) => {
+            let tiles = bounds.map_or(1, |(mn, mx)| ((mx.x - mn.x).round() as u32).max(1));
+            crate::build::snap_to_wall(b, ray, tiles).map(|(p, r, ops)| (p, r, if wall_hung { Vec::new() } else { ops }))
         }
         _ => None,
     };
@@ -935,6 +940,10 @@ fn placement(
         }
         if opening.is_some() && in_wall.is_none() {
             notes.push("Doors and windows go into a straight wall, on the floor in view.");
+            return;
+        }
+        if wall_hung && in_wall.is_none() {
+            notes.push("Paintings, mirrors and wall lamps go on a straight wall, on the floor in view.");
             return;
         }
         if ladder && on_edge.is_none() {

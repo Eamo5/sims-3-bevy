@@ -1260,6 +1260,18 @@ fn auto_build(
                     commands.entity(o.entity).insert(crate::save::Bought);
                 }
             }
+            // A painting on the back wall and a sconce on the left one, inside.
+            for (name, lx, lz) in [("PaintingMission", x as f32 + w as f32 * 0.5, (z + d) as f32 - 0.3), ("LightingWallSconceCountry", x as f32 + 0.3, z as f32 + d as f32 * 0.5 + 1.0)] {
+                let Some(key) = data.0.catalog.iter().find(|c| c.instance_name == name).map(|c| c.objd) else { continue };
+                let Some((pos, rot, _)) = crate::build::snap_to_wall(b, down(lx, lz, b), 1) else {
+                    warn!("build test: no wall for the {name}");
+                    continue;
+                };
+                info!("build test: {name} hung at {:.2},{:.2},{:.2}", pos.x, pos.y, pos.z);
+                if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, key, pos, rot) {
+                    commands.entity(o.entity).insert(crate::save::Bought);
+                }
+            }
             if let Some(g) = grid.as_mut() {
                 g.dirty = true;
             }
