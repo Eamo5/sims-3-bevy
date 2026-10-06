@@ -31,6 +31,9 @@ pub struct BakedData {
     pub eye_colors: s3bake::gamedata::EyeColors,
     /// The catalogue objects' designs, by OBJD key.
     pub designs: std::collections::HashMap<Key, s3bake::gamedata::ObjectDesigns>,
+    /// The pictures Sims paint, and the canvases (their catalogue objects drawn at their sizes).
+    pub paintings: s3bake::gamedata::PaintingsBaked,
+    pub canvas_models: Option<PackReader>,
     pub outfit_pack: Option<PackReader>,
     pub clips: Option<PackReader>,
     /// Names of the baked clips (for picking variants).
@@ -41,7 +44,7 @@ impl BakedData {
     pub fn open(root: BakeRoot, world: Option<&str>) -> Result<Self, String> {
         let g = root.global_dir();
         let catalog: Vec<CatalogEntry> = s3bake::read_value(&g.join("catalog.bin")).map_err(|e| format!("catalog: {e}"))?;
-        let catalog_index = catalog.iter().enumerate().map(|(i, c)| (c.objd, i)).collect();
+        let catalog_index: HashMap<Key, usize> = catalog.iter().enumerate().map(|(i, c)| (c.objd, i)).collect();
         let models = PackReader::open(&g.join("models.pack")).map_err(|e| format!("models: {e}"))?;
         let world_models = world.and_then(|w| PackReader::open(&root.world_dir(w).join("models.pack")).ok());
         let food_models = PackReader::open(&g.join("food.pack")).ok();
@@ -55,11 +58,45 @@ impl BakedData {
         let outfits = s3bake::read_value(&g.join("outfits.bin")).unwrap_or_default();
         let face_bones = s3bake::read_value(&g.join("face_bones.bin")).unwrap_or_default();
         let eye_colors = s3bake::read_value(&g.join("eye_colors.bin")).unwrap_or_default();
-        let designs = s3bake::read_value::<Vec<s3bake::gamedata::ObjectDesigns>>(&g.join("object_designs.bin")).unwrap_or_default().into_iter().map(|d| (d.objd, d)).collect();
+        let mut designs: HashMap<Key, s3bake::gamedata::ObjectDesigns> =
+            s3bake::read_value::<Vec<s3bake::gamedata::ObjectDesigns>>(&g.join("object_designs.bin")).unwrap_or_default().into_iter().map(|d| (d.objd, d)).collect();
+        // A finished painting is its canvas at its size, its picture a design on its face.
+        let paintings: s3bake::gamedata::PaintingsBaked = s3bake::read_value(&g.join("paintings.bin")).unwrap_or_default();
+        let canvas_models = PackReader::open(&g.join("canvases.pack")).ok();
+        let mut catalog = catalog;
+        if canvas_models.is_some() {
+            for c in &paintings.canvases {
+                if let Some(&i) = catalog_index.get(&c.objd) {
+                    catalog[i].models = vec![c.model];
+                }
+                designs.insert(c.objd, s3bake::gamedata::ObjectDesigns { objd: c.objd, count: 0, texture: paintings.face });
+            }
+        }
         let outfit_pack = PackReader::open(&g.join("outfits.pack")).ok();
         let clips = PackReader::open(&g.join("clips.pack")).ok();
         let clip_names: Vec<String> = s3bake::read_value(&g.join("clip_names.bin")).unwrap_or_default();
-        Ok(Self { root, catalog, catalog_index, models, world_models, food_models, state_models, produce_models, fence_models, cas, cas_pack, outfits, outfit_pack, clips, clip_names, face_bones, eye_colors, designs })
+        Ok(Self {
+            root,
+            catalog,
+            catalog_index,
+            models,
+            world_models,
+            food_models,
+            state_models,
+            produce_models,
+            fence_models,
+            cas,
+            cas_pack,
+            outfits,
+            outfit_pack,
+            clips,
+            clip_names,
+            face_bones,
+            eye_colors,
+            designs,
+            paintings,
+            canvas_models,
+        })
     }
 
     pub fn model(&self, k: &Key) -> Option<BakedModel> {
@@ -71,6 +108,7 @@ impl BakedData {
             .or_else(|| self.food_models.as_ref().and_then(|p| p.get(k)))
             .or_else(|| self.produce_models.as_ref().and_then(|p| p.get(k)))
             .or_else(|| self.fence_models.as_ref().and_then(|p| p.get(k)))
+            .or_else(|| self.canvas_models.as_ref().and_then(|p| p.get(k)))
     }
 
     pub fn texture_bytes(&self, k: &Key) -> Option<Vec<u8>> {

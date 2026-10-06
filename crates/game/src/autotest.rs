@@ -161,7 +161,7 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, show_designs, walls_hook).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, show_designs, walls_hook, hang_paintings, buy_close).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -755,8 +755,134 @@ fn show_designs(
         }
         let mut b = w.resource_mut::<crate::buy::BuyMode>();
         b.show(0);
-        b.placing = Some(crate::buy::Placing { objd, ghost, owned: false, design: Some(crate::objects::design_texture(objd, 1)) });
+        b.placing = Some(crate::buy::Placing::new(objd, ghost, false, Some(crate::objects::design_texture(objd, 1))));
     });
+}
+
+/// PAINTINGS=<Painting level>: the selected Sim paints a painting on each canvas at that level
+/// (into their inventory), and three more hang on the nearest long wall, with the camera on
+/// them (PAINTINGS_BUY=1: and buy mode holding the first from the inventory). PAINTINGS=look:
+/// the camera on the first painting already hanging.
+#[allow(clippy::too_many_arguments)]
+fn hang_paintings(
+    mut commands: Commands,
+    sel: Query<(Entity, &Transform, &crate::sim::Sim), With<crate::sim::Selected>>,
+    mut cam: Query<&mut SimsCamera>,
+    mut done: Local<bool>,
+    time: Res<Time>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+    (data, catalog, mut assets): (Res<crate::baked::Baked>, Res<crate::loading::Catalog>, ResMut<crate::objects::ObjectAssets>),
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    hung: Query<(&Transform, &crate::paintings::Hung)>,
+) {
+    use crate::inventory::{ItemKind, Stack};
+    let Ok(v) = std::env::var("PAINTINGS") else { return };
+    if *done || time.elapsed_secs() < 6.0 {
+        return;
+    }
+    let frame = |c: &mut SimsCamera, pos: Vec3, rot: Quat| {
+        let fwd = rot * Vec3::Z;
+        c.look_at(pos - fwd * 0.5 + Vec3::Y * 1.2);
+        c.yaw = fwd.x.atan2(fwd.z);
+        c.pitch = 0.12;
+        c.distance = 5.0;
+        c.height_offset = 2.6;
+    };
+    if v == "look" {
+        *done = true;
+        info!("paintings test: {} hanging: {:?}", hung.iter().count(), hung.iter().map(|(_, h)| &h.0.key).collect::<Vec<_>>());
+        if let (Some((tf, _)), Ok(mut c)) = (hung.iter().next(), cam.single_mut()) {
+            frame(&mut c, tf.translation, tf.rotation);
+        }
+        return;
+    }
+    let (Ok((me, tf, sim)), Some(b)) = (sel.single(), building) else { return };
+    *done = true;
+    let level: u32 = v.parse().unwrap_or(5);
+    let pd = &data.0.paintings;
+    info!("paintings test: {} pictures, canvases {:?}", pd.paintings.len(), pd.canvases.iter().map(|c| (c.objd, c.uv)).collect::<Vec<_>>());
+    let mut rng = rand::rng();
+    let items: Vec<Stack> = [0u8, 1, 2, 2, 1, 0]
+        .into_iter()
+        .map(|size| {
+            let p = crate::paintings::paint(Some(pd), size, level, &sim.traits, false, false, &mut rng);
+            info!("painted {} ({}, §{})", p.key, p.name, p.worth);
+            Stack { kind: ItemKind::Painting, key: p.key, name: p.name.into(), quality: 0, count: 1, worth: p.worth }
+        })
+        .collect();
+    for s in &items[3..] {
+        crate::inventory::give(&mut commands, me, s.kind, s.key.clone(), s.name.clone(), 0, s.worth, 1);
+    }
+    // Three spots on the nearest walls.
+    let here = b.local(tf.translation);
+    let dist = |w: &&s3bake::types::WallBaked| {
+        let (a, c) = (Vec2::from(w.a), Vec2::from(w.b));
+        let t = ((here - a).dot(c - a) / (c - a).length_squared()).clamp(0.0, 1.0);
+        here.distance(a + (c - a) * t)
+    };
+    let straight: Vec<&s3bake::types::WallBaked> =
+        b.data.walls.iter().filter(|w| w.level.max(1) == 1 && ((w.a[0] - w.b[0]).abs() < 0.01 || (w.a[1] - w.b[1]).abs() < 0.01)).collect();
+    let y = b.levels.get(1).copied().unwrap_or(0.0);
+    let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+    let mut first = None;
+    // (With no window behind, two metres apart, facing the same way.)
+    let mut near = straight;
+    near.sort_by(|x, y| dist(x).total_cmp(&dist(y)));
+    let mut spots: Vec<(Vec3, Quat)> = Vec::new();
+    for w in near {
+        let (a, c) = (Vec2::from(w.a), Vec2::from(w.b));
+        let n = (c - a).normalize().perp();
+        for side in [1.0, -1.0] {
+            let lp = (a + c) / 2.0 + n * 0.4 * side;
+            let ray = Ray3d::new(b.world(lp.x, lp.y, y) + Vec3::Y * 5.0, Dir3::NEG_Y);
+            if let Some((pos, rot, _)) = crate::build::snap_to_wall(&b, ray, 1)
+                && !b.opening_behind(pos, rot, 1)
+                && spots.first().is_none_or(|(_, r)| (*r * Vec3::Z).dot(rot * Vec3::Z) > 0.9)
+                && spots.iter().all(|(p, _)| p.distance(pos) > 1.8)
+            {
+                spots.push((pos, rot));
+            }
+        }
+        if spots.len() == 3 {
+            break;
+        }
+    }
+    for (s, (pos, rot)) in items[..3].iter().zip(spots) {
+        let Some((objd, design)) = crate::paintings::object(pd, s) else { continue };
+        if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, rot, Some(design)) {
+            commands.entity(o.entity).insert((crate::save::Bought, crate::paintings::Hung(s.clone())));
+            first.get_or_insert((pos, rot));
+            info!("hung {} at {pos:.1?}", s.key);
+        }
+    }
+    if let (Some((pos, rot)), Ok(mut c)) = (first, cam.single_mut()) {
+        frame(&mut c, pos, rot);
+    }
+    if std::env::var("PAINTINGS_BUY").is_ok()
+        && let Some((objd, design)) = crate::paintings::object(pd, &items[3])
+    {
+        commands.insert_resource(crate::buy::HoldRequest { objd, design: Some(design), item: items[3].clone(), from: me });
+    }
+}
+
+/// BUY_CLOSE_AT=<seconds>: buy mode closed then (with whatever's in hand), and the selected
+/// Sim's inventory logged before and after.
+fn buy_close(mut commands: Commands, time: Res<Time>, mut state: Local<u8>, mut buy: ResMut<crate::buy::BuyMode>, sel: Query<&crate::inventory::Inventory, With<crate::sim::Selected>>) {
+    let Some(at) = std::env::var("BUY_CLOSE_AT").ok().and_then(|v| v.parse::<f32>().ok()) else { return };
+    let t = time.elapsed_secs();
+    let log = |when: &str| {
+        let items: Vec<String> = sel.single().map(|i| i.0.iter().map(|s| format!("{}×{}", s.key, s.count)).collect()).unwrap_or_default();
+        info!("buy close test {when}: holding {}, inventory {items:?}", buy.placing.as_ref().map_or("nothing".to_string(), |p| format!("{:?}", p.item.as_ref().map(|i| &i.key))));
+    };
+    if *state == 0 && t > at {
+        log("before");
+        buy.active = false;
+        buy.drop_tools(&mut commands);
+        *state = 1;
+    } else if *state == 1 && t > at + 2.0 {
+        log("after");
+        *state = 2;
+    }
 }
 
 /// EXHAUST=<first name>: that Sim's energy (or BLADDER_FAIL=<first name>: bladder) runs out,
@@ -1818,8 +1944,14 @@ fn auto_action(
         *done = true;
         return;
     }
+    // ("Paint: Large Canvas": on that canvas.)
+    let canvas = name.strip_prefix("Paint: ").and_then(|c| crate::paintings::CANVASES.iter().position(|x| x.eq_ignore_ascii_case(c)));
+    let def_name = if canvas.is_some() { "Paint" } else { name.as_str() };
     for (e, o) in &objects {
-        if let Some(i) = crate::interact::interactions_for(o.kind).iter().position(|d| d.name.eq_ignore_ascii_case(name)) {
+        if let Some(i) = crate::interact::interactions_for(o.kind).iter().position(|d| d.name.eq_ignore_ascii_case(def_name)) {
+            if let (Some(c), Ok(me)) = (canvas, sel_e.single()) {
+                commands.entity(me).insert(crate::paintings::PaintPlan(c as u8));
+            }
             q.0.clear();
             q.push_player(crate::interact::Action::new(name.clone(), crate::interact::ActionKind::Object { target: e, def: i }, false));
             *done = true;

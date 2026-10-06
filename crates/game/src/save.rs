@@ -159,6 +159,9 @@ pub struct SavedObject {
     pub design: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub design_key: Option<(u32, u32, u64)>,
+    /// A painting hung on a wall: the inventory item it is (its picture and worth).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item: Option<crate::inventory::Stack>,
 }
 
 impl SavedObject {
@@ -453,7 +456,7 @@ fn status_from(s: &str) -> RelStatus {
 
 pub const SKILLS: [&str; 10] = ["Athletic", "Charisma", "Cooking", "Fishing", "Gardening", "Guitar", "Handiness", "Logic", "Painting", "Writing"];
 
-fn saved_object(o: &GameObject, tf: &Transform, design: Option<&crate::objects::Design>) -> SavedObject {
+fn saved_object(o: &GameObject, tf: &Transform, design: Option<&crate::objects::Design>, hung: Option<&crate::paintings::Hung>) -> SavedObject {
     let key = design.map(|d| d.0);
     let preset = key.filter(|k| k.0 == s3bake::gamedata::T_DESIGN && k.2 == o.objd.2).map(|k| k.1 as u8);
     SavedObject {
@@ -462,6 +465,7 @@ fn saved_object(o: &GameObject, tf: &Transform, design: Option<&crate::objects::
         rotation: tf.rotation.to_array(),
         design: preset,
         design_key: key.filter(|_| preset.is_none()),
+        item: hung.map(|h| h.0.clone()),
     }
 }
 
@@ -512,7 +516,7 @@ fn save_game(
         (Without<crate::town::Townie>, Without<crate::visit::LotGuest>, Without<crate::services::ServiceNpc>),
     >,
     (bought, exit, graves): (
-        Query<(&GameObject, &Transform, Option<&crate::objects::Design>), With<Bought>>,
+        Query<(&GameObject, &Transform, Option<&crate::objects::Design>, Option<&crate::paintings::Hung>), With<Bought>>,
         Option<Res<crate::interact::LotExit>>,
         Query<(&crate::ghosts::Grave, &Transform)>,
     ),
@@ -613,7 +617,7 @@ fn save_game(
         bills: hh.bills.iter().cloned().chain(mail_due.as_ref().map(|m| m.0.clone())).collect(),
         minutes: clock.minutes,
         sims: saved,
-        bought: bought.iter().map(|(o, tf, d)| saved_object(o, tf, d)).collect(),
+        bought: bought.iter().map(|(o, tf, d, h)| saved_object(o, tf, d, h)).collect(),
         removed: removed.0.clone(),
         paint: paint.map(|p| p.0.clone()).unwrap_or_default(),
         seeds: match (garden.as_deref(), ui.as_deref()) {
@@ -842,6 +846,9 @@ fn apply_loaded_game(
         let rot = Quat::from_array(b.rotation);
         if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, b.objd, Vec3::from(b.position), rot, b.design_texture()) {
             commands.entity(o.entity).insert(Bought);
+            if let Some(item) = &b.item {
+                commands.entity(o.entity).insert(crate::paintings::Hung(item.clone()));
+            }
         }
     }
     if let Some(g) = grid.as_mut() {
@@ -867,7 +874,7 @@ pub fn begin_load(commands: &mut Commands, worlds: &crate::data::WorldList, game
 
 /// Records the lot's own furniture being picked up or sold.
 pub fn note_removed(removed: &mut RemovedLotObjects, o: &GameObject, tf: &Transform) {
-    removed.0.push(saved_object(o, tf, None));
+    removed.0.push(saved_object(o, tf, None, None));
 }
 
 pub fn request_save(w: &mut MessageWriter<SaveRequest>) {
@@ -903,9 +910,15 @@ mod tests {
         let back: SavedObject = serde_json::from_str(&serde_json::to_string(&o).unwrap()).unwrap();
         assert_eq!(back.design_texture(), Some(crate::objects::design_texture((1, 0, 2), 3)));
         // (A lot's own design, by its texture.)
-        let o = SavedObject { design_key: Some((7, 0, 9)), ..old };
+        let o = SavedObject { design_key: Some((7, 0, 9)), ..old.clone() };
         let back: SavedObject = serde_json::from_str(&serde_json::to_string(&o).unwrap()).unwrap();
         assert_eq!(back.design_texture(), Some((7, 0, 9)));
+        // (A hung painting keeps what it is; other things say nothing of it.)
+        assert!(!serde_json::to_string(&old).unwrap().contains("item"));
+        let item = crate::inventory::Stack { kind: crate::inventory::ItemKind::Painting, key: "painting:1:3_2_Medium#7".into(), name: "Fine Painting".into(), quality: 0, count: 1, worth: 210 };
+        let o = SavedObject { item: Some(item), ..old };
+        let back: SavedObject = serde_json::from_str(&serde_json::to_string(&o).unwrap()).unwrap();
+        assert!(back.item.is_some_and(|i| i.key == "painting:1:3_2_Medium#7" && i.worth == 210));
     }
 
     #[test]

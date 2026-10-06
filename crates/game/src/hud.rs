@@ -893,6 +893,14 @@ fn world_click(
                     }
                     continue;
                 }
+                // The canvas to paint on.
+                if d.special == Special::SellPainting {
+                    let list: Vec<(String, ActionKind)> =
+                        crate::paintings::CANVASES.iter().map(|c| (format!("Paint: {c}"), ActionKind::Object { target: t, def: i })).collect();
+                    options.push(("Paint ›".to_string(), submenu_kind(pie.submenus.len())));
+                    pie.submenus.push(("Paint".to_string(), list));
+                    continue;
+                }
                 if d.special == Special::ToggleAlarm {
                     let label = if opp_q.6.on { "Turn Off Alarm" } else { "Set Alarm" };
                     options.push((label.to_string(), ActionKind::Object { target: t, def: i }));
@@ -1081,6 +1089,10 @@ fn pie_buttons(
         // The outfit chosen.
         if let Some(k) = label.strip_prefix("Change Into: ").and_then(|n| crate::simbody::OutfitKind::CHOICES.into_iter().find(|k| k.label() == n)) {
             commands.entity(a).insert(crate::simbody::ChangeIntoPlan(k));
+        }
+        // The canvas chosen.
+        if let Some(c) = label.strip_prefix("Paint: ").and_then(|n| crate::paintings::CANVASES.iter().position(|c| *c == n)) {
+            commands.entity(a).insert(crate::paintings::PaintPlan(c as u8));
         }
         // A book in the genre chosen.
         if let Some(g) = label.strip_prefix("Write: ").and_then(|n| crate::writing::GENRES.iter().position(|g| g.name == n)) {

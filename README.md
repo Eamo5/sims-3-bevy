@@ -302,6 +302,14 @@ installation is unreachable.
   master angler often landing a perfect one) put in a bowl swims there, its own model
   turning slowly in the glass, and can be taken out again; bowls are kept in saves, and
   bowls of perfect fish of different kinds count towards The Perfect Aquarium lifetime wish.
+- **Paintings**: at an easel, *Paint ›* offers a small, medium or large canvas (longer to paint,
+  worth more), and what a Sim paints is one of the game's own pictures, from the Painting
+  skill's picture table: chosen by their skill, in their traits' version of it (an evil Sim's,
+  a gloomy one's, a virtuoso's) and now and then a brilliant painting or a masterpiece at higher
+  skill. Finished paintings go in their inventory with their picture; *Hang on a Wall* holds
+  one up in Buy mode to hang on any straight wall (not over a window or door), where it's the
+  game's canvas at its size with the picture on it. Hung paintings can be moved or sold (for
+  what they're worth), go back to the inventory if not put up, and are kept in saves.
 - **Inventories**: each Sim carries what they've picked, caught, found and painted (finished
   paintings, amateur to masterpiece by Painting skill, go in the painter's inventory to sell
   or keep), in stacks on the
@@ -414,3 +422,7 @@ Format notes are in `docs/formats/`.
 `sims3 --world <name> --lot <id | house> --cam x,z,dist,yaw,pitch --hour <h> --speed <0-3>
 --view-level <n> --do <interaction> --screenshot <png> --shot-delay <s> --exit-after-shot`,
 and `--ui-flow <dir>` clicks through the menus saving a screenshot of each screen.
+`--do "Paint: Large Canvas"` paints on that canvas; `PAINTINGS=<level>` paints six (three into
+the inventory, three hung on the nearest walls, the camera on them), `PAINTINGS=look` puts the
+camera on a hung painting, `PAINTINGS_BUY=1` holds one up in Buy mode and `BUY_CLOSE_AT=<s>`
+closes Buy mode then, logging the inventory.

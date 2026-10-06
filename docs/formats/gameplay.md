@@ -115,6 +115,28 @@ the MODL, so only names whose instance has a MODL count; a few are catalogue obj
 vertex range sits inside a buffer shared by all states, so its bounds are its own indexed
 vertices'.
 
+### Paintings
+
+`PaintingSkillDB` (GameplayData, 229 KB) is the Painting skill's picture table, a section per
+canvas: `<Small>`, `<Medium>`, `<Large>` rows (and `<Sketch>`, `<Names>` from expansions). Each
+section's first row holds the defaults every later row takes for the columns it leaves out
+(`SKU` `BaseGame`, `Skill` `Painting`, `Occupation` `Undefined`, levels 0 to 10, flags false);
+rows naming another `SKU` (`EP2`'s designer and stylist pictures, `EP9`, `EP11`) are the
+expansions'. A row has `PaintingNames` (the picture: `3_2_Medium`, `Brilliant_1_Small`),
+`MinLevelToPaint`/`MaxLevelToPaint`, the flags `Dabble`, `Brilliant`, `Masterpiece`, and the
+versions Sims of a trait paint, one column per trait: `Artistic`, `CantStandArt`,
+`ComputerWhiz`, `Evil`, `Genius`, `Grumpy` (its pictures are named `…_Gloomy`), `Insane`,
+`Neurotic`, `Virtuoso`. Each picture is a DDS of instance fnv64(name) in FullBuild2 (`256 × 128`
+for a small canvas); the base game has 162 rows.
+
+The finished paintings are the catalogue's `EaselCanvasPaintingSmall`/`Medium`/`Large`
+(OBJD `0x116F`, `0x1170`, `0x116E`), all drawn by one model (`0x3D4654`): a canvas body and a
+painted face of three quads, each canvas size a geometry state of both (the state names'
+FNV-32 aren't simple words; smallest face to largest is small, medium, large). The face's
+diffuse texture is `easelPainting_reveal1`, which the picture stands in for, and its UVs take
+only part of the picture's texture (small 0–0.78 × 0–1, medium 0–0.65 × 0–1, large
+0–1 × 0.18–1). The tuning `Easel` has the canvases' painting times (180, 300 and 480 minutes).
+
 ### Career branches
 
 A `Careers` level row's `BranchName` is `Base` (or empty) until the career branches, then
@@ -182,8 +204,12 @@ The game logic is .NET (Mono) code in `Game/Bin/gameplay.package`, `scripts.pack
 (`Sims3GameplaySystems`, `Sims3GameplayObjects`, `UI`, `ScriptCore`, `SimIFace`, …).
 
 An S3SA resource starts with a version byte (2), a 32-bit character count and that many UTF-16
-characters of game version (`0.0.0.32`), then a 32-bit value, a block count and one 32-bit entry
-per 512-byte block, followed by the obfuscated assembly. s3pi's `ScriptResource` wrapper undoes
-the obfuscation (its `Assembly` property is a reader over the plain DLL); `cache/s3sa_extract.ps1`
-calls it through PowerShell reflection to write the DLLs out. The assemblies' string heaps are
-the quickest way to find resource names the code uses, such as the balloon icon names above.
+characters of game version (`0.0.0.32`), a 32-bit value and a 64-byte checksum (89 bytes in
+all), then a 16-bit block count, a table of 8 bytes per 512-byte block, and the blocks. A block
+whose table entry's first byte is odd isn't stored (it's zeros). The rest are XOR-obfuscated:
+seed = the sum of the table's 64-bit words, masked with (table length − 1); then for each
+stored byte `v`, out = `v` XOR `table[seed]` and seed = (seed + `v`) mod table length. The
+result is the plain DLL (`MZ…`). s3pi's `ScriptResource` wrapper does the same (its `Assembly`
+property is a reader over the plain DLL); `cache/s3sa_extract.ps1` calls it through PowerShell
+reflection to write the DLLs out. The assemblies' string heaps are the quickest way to find
+resource names the code uses, such as the balloon icon names above.

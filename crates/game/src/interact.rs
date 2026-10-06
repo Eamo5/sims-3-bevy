@@ -1179,7 +1179,7 @@ fn run_actions(
             Option<&mut PathFollow>,
             Option<&mut Job>,
             &Floor,
-            Option<&crate::wishes::Wishes>,
+            (Option<&crate::wishes::Wishes>, Option<&crate::paintings::PaintPlan>),
             Option<&crate::opportunities::SimOpportunities>,
             Option<&crate::visit::OnLot>,
         ),
@@ -1190,7 +1190,7 @@ fn run_actions(
     mut life: MessageWriter<LifeEvent>,
     people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
     mut conceive: MessageWriter<crate::little::Conceive>,
-    (mut fire, upgraded): (MessageWriter<crate::fire::StartFire>, Query<&crate::upgrades::Upgrades>),
+    (mut fire, upgraded, baked): (MessageWriter<crate::fire::StartFire>, Query<&crate::upgrades::Upgrades>, Option<Res<crate::baked::Baked>>),
 ) {
     let Some(grid) = grid else { return };
     let dt = delta.0;
@@ -1212,7 +1212,7 @@ fn run_actions(
     // Relationship changes to apply to both Sims: (a, b, status, kissed)
     let mut status_fx: Vec<(Entity, Entity, Option<RelStatus>, bool)> = Vec::new();
 
-    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, mut job, floor, wishes, opps, on_lot) in &mut sims {
+    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, mut job, floor, (wishes, plan), opps, on_lot) in &mut sims {
         // Out on a community lot: its walk grid and way out.
         let away = on_lot.and_then(|o| visited.as_deref().filter(|v| v.lot == o.0));
         let (my_grid, my_upper): (&NavGrid, Option<&UpperFloors>) = match away {
@@ -1552,7 +1552,12 @@ fn run_actions(
                                     }
                                 }
                                 let full = d.until_full.is_some_and(|m| motives.0[m] >= 98.0);
-                                if elapsed >= d.minutes || full {
+                                // (A painting takes as long as its canvas.)
+                                let minutes = match d.special {
+                                    Special::SellPainting => crate::paintings::CANVAS_MINUTES[crate::paintings::canvas(plan, skills.level("Painting")) as usize],
+                                    _ => d.minutes,
+                                };
+                                if elapsed >= minutes || full {
                                     finished = true;
                                     life.write(LifeEvent::new(me, LifeEventKind::Finished { activity: d.name, completed: true }));
                                     used.0 = None;
@@ -1586,21 +1591,22 @@ fn run_actions(
                                             commands.entity(me).insert(crate::chess::MatchPlayed);
                                         }
                                         Special::SellPainting => {
-                                            let lvl = skills.level("Painting") as i64;
-                                            let mut value = 15 + lvl * lvl * 12 + rand::rng().random_range(0..20);
-                                            if crate::wishes::has(wishes, "ExtraCreative") {
-                                                value = value * 3 / 2;
-                                            }
-                                            // Into their inventory, to sell or keep.
-                                            let kind = match lvl {
-                                                0..=2 => "Amateur Painting",
-                                                3..=5 => "Fine Painting",
-                                                6..=8 => "Brilliant Painting",
-                                                _ => "Masterpiece",
-                                            };
-                                            let key = format!("painting#{}", rand::rng().random::<u32>());
-                                            crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Painting, key, kind.to_string(), 0, value, 1);
-                                            notes.push(format!("{} finished a painting ({}, worth §{value}). It's in their inventory.", sim.first, kind.to_lowercase()));
+                                            // One of the game's pictures, for their canvas, skill and traits.
+                                            let lvl = skills.level("Painting");
+                                            let size = crate::paintings::canvas(plan, lvl);
+                                            let p = crate::paintings::paint(
+                                                baked.as_ref().map(|b| &b.0.paintings),
+                                                size,
+                                                lvl,
+                                                &sim.traits,
+                                                sim.age == Age::Child,
+                                                crate::wishes::has(wishes, "ExtraCreative"),
+                                                &mut rand::rng(),
+                                            );
+                                            commands.entity(me).remove::<crate::paintings::PaintPlan>();
+                                            // Into their inventory, to sell, keep or hang.
+                                            crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Painting, p.key, p.name.to_string(), 0, p.worth, 1);
+                                            notes.push(format!("{} finished a painting ({}, worth §{}). It's in their inventory.", sim.first, p.name.to_lowercase(), p.worth));
                                         }
                                         Special::ChangeClothes => {
                                             // Into the outfit chosen, kept on until it's time for another.

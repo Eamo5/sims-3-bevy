@@ -44,6 +44,28 @@ pub struct Placing {
     pub owned: bool,
     /// The design it's in (its texture; none: as the game ships it).
     pub design: Option<Key>,
+    /// What it is as an inventory item (a painting), if it is one.
+    pub item: Option<crate::inventory::Stack>,
+    /// Where it was picked up from (one of the lot's objects), or the Sim whose inventory it
+    /// came out of: where it goes back to if it isn't put down.
+    pub origin: Option<Transform>,
+    pub from: Option<Entity>,
+}
+
+impl Placing {
+    /// Something from the catalogue (or the lot) in hand.
+    pub fn new(objd: Key, ghost: Entity, owned: bool, design: Option<Key>) -> Self {
+        Self { objd, ghost, owned, design, item: None, origin: None, from: None }
+    }
+}
+
+/// Something from a Sim's inventory to hold up in Buy mode: a painting to hang.
+#[derive(Resource)]
+pub struct HoldRequest {
+    pub objd: Key,
+    pub design: Option<Key>,
+    pub item: crate::inventory::Stack,
+    pub from: Entity,
 }
 
 #[derive(Resource, Default)]
@@ -68,6 +90,9 @@ pub struct BuyMode {
     pub terrain: u8,
     pub sculpt: u8,
     pub brush: f32,
+    /// Things being moved that were put down unplaced (Buy mode closed with them in hand), to
+    /// go back where they came from.
+    returning: Vec<Placing>,
 }
 
 #[derive(Component)]
@@ -158,15 +183,44 @@ impl BuyMode {
         self.tool = None;
         if let Some(p) = self.placing.take() {
             commands.entity(p.ghost).despawn();
+            if p.owned {
+                self.returning.push(p);
+            }
         }
         self.dirty = true;
     }
 }
 
-fn toggle_buy(keys: Res<ButtonInput<KeyCode>>, mut buy: ResMut<BuyMode>, mut commands: Commands, mut clock: ResMut<crate::clock::GameClock>) {
+fn toggle_buy(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut buy: ResMut<BuyMode>,
+    mut commands: Commands,
+    mut clock: ResMut<crate::clock::GameClock>,
+    hold: Option<Res<HoldRequest>>,
+) {
     if keys.just_pressed(KeyCode::KeyB) || keys.just_pressed(KeyCode::F2) {
         let on = !buy.active;
         set_active(&mut buy, on, &mut commands, &mut clock);
+    }
+    // Something from an inventory to put down: Buy mode, on the decorations.
+    if hold.is_some() && !buy.active {
+        set_active(&mut buy, true, &mut commands, &mut clock);
+        buy.show(9);
+    }
+}
+
+/// Puts something being moved back: in the inventory it came out of, or where it stood.
+fn put_back(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetCtx, catalog: &Catalog, p: &Placing) {
+    if let (Some(sim), Some(item)) = (p.from, &p.item) {
+        crate::inventory::give(commands, sim, item.kind, item.key.clone(), item.name.clone(), item.quality, item.each(), item.count);
+        return;
+    }
+    let Some(tf) = p.origin else { return };
+    if let Some(o) = crate::home::spawn_game_object_design(commands, assets, ctx, catalog, p.objd, tf.translation, tf.rotation, p.design) {
+        commands.entity(o.entity).insert(crate::save::Bought);
+        if let Some(item) = &p.item {
+            commands.entity(o.entity).insert(crate::paintings::Hung(item.clone()));
+        }
     }
 }
 
@@ -672,7 +726,7 @@ fn buy_buttons(
                 }
                 let ghost = spawn_parts(&mut commands, &parts, Transform::from_xyz(0.0, -1000.0, 0.0));
                 commands.entity(ghost).insert(DespawnOnExit(AppState::InGame));
-                buy.placing = Some(Placing { objd: *key, ghost, owned: false, design: None });
+                buy.placing = Some(Placing::new(*key, ghost, false, None));
                 buy.dirty = true;
             }
         }
@@ -817,13 +871,26 @@ fn placement(
     ),
     (selected, mut life): (Query<Entity, With<crate::sim::Selected>>, MessageWriter<crate::life::LifeEvent>),
     mut grid: Option<ResMut<NavGrid>>,
-    pickup: Option<Res<PickupRequest>>,
-    objects: Query<(&GameObject, &Transform, Option<&crate::objects::Design>)>,
+    (pickup, hold): (Option<Res<PickupRequest>>, Option<Res<HoldRequest>>),
+    objects: Query<(&GameObject, &Transform, Option<&crate::objects::Design>, Option<&crate::paintings::Hung>)>,
     (bought_q, mut removed): (Query<(), With<crate::save::Bought>>, ResMut<crate::save::RemovedLotObjects>),
     mut tfs: Query<&mut Transform, Without<GameObject>>,
     mut faces: Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
 ) {
+    // What was being moved when Buy mode closed goes back.
+    for p in std::mem::take(&mut buy.returning) {
+        let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+        put_back(&mut commands, &mut assets, &mut ctx, &catalog, &p);
+        if let Some(g) = grid.as_mut() {
+            g.dirty = true;
+        }
+    }
     if !buy.active {
+        return;
+    }
+    // (Something else in hand when a painting's to be hung: it's put down first.)
+    if hold.is_some() && buy.placing.is_some() {
+        buy.drop_tools(&mut commands);
         return;
     }
     if keys.just_pressed(KeyCode::Comma) {
@@ -832,15 +899,21 @@ fn placement(
     if keys.just_pressed(KeyCode::Period) {
         buy.yaw -= std::f32::consts::FRAC_PI_4;
     }
-    let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
-    let Ok((camera, cam_tf)) = cams.single() else { return };
-    let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else { return };
-
     if buy.placing.is_none() {
+        // A painting from an inventory, held up to the walls.
+        if let Some(h) = hold {
+            commands.remove_resource::<HoldRequest>();
+            let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+            let parts = assets.object_design(&mut ctx, h.objd, h.design);
+            let ghost = spawn_parts(&mut commands, &parts, Transform::from_xyz(0.0, -1000.0, 0.0));
+            commands.entity(ghost).insert(DespawnOnExit(AppState::InGame));
+            buy.placing = Some(Placing { item: Some(h.item.clone()), from: Some(h.from), ..Placing::new(h.objd, ghost, true, h.design) });
+            buy.dirty = true;
+            return;
+        }
         if let Some(req) = pickup {
             commands.remove_resource::<PickupRequest>();
-            if let Ok((obj, tf, design)) = objects.get(req.0) {
+            if let Ok((obj, tf, design, hung)) = objects.get(req.0) {
                 if !bought_q.contains(req.0) {
                     crate::save::note_removed(&mut removed, obj, tf);
                 }
@@ -850,7 +923,7 @@ fn placement(
                 let ghost = spawn_parts(&mut commands, &parts, *tf);
                 commands.entity(ghost).insert(DespawnOnExit(AppState::InGame));
                 buy.yaw = tf.rotation.to_euler(EulerRot::YXZ).0;
-                buy.placing = Some(Placing { objd: obj.objd, ghost, owned: true, design });
+                buy.placing = Some(Placing { item: hung.map(|h| h.0.clone()), origin: Some(*tf), ..Placing::new(obj.objd, ghost, true, design) });
                 buy.dirty = true;
                 commands.entity(req.0).despawn();
                 if let Some(g) = grid.as_mut() {
@@ -860,6 +933,11 @@ fn placement(
         }
         return;
     }
+
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    let Ok((camera, cam_tf)) = cams.single() else { return };
+    let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else { return };
 
     let placing = buy.placing.as_ref().unwrap();
     let ghost = placing.ghost;
@@ -903,6 +981,8 @@ fn placement(
         }
     }
     let price = catalog.by_key(&objd).map(|e| e.price).unwrap_or(0) as i64;
+    // (A painting sells for what it's worth.)
+    let price = placing.item.as_ref().map_or(price, |i| i.worth);
     if (keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace)) && owned {
         commands.entity(ghost).despawn();
         buy.placing = None;
@@ -914,15 +994,10 @@ fn placement(
         return;
     }
     if mouse.just_pressed(MouseButton::Right) || keys.just_pressed(KeyCode::Escape) {
-        if owned {
-            // Put it back where the ghost is.
-            if let Ok(tf) = tfs.get(ghost) {
-                let (pos, rot) = (tf.translation, tf.rotation);
-                let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-                if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, rot, design) {
-                    commands.entity(o.entity).insert(crate::save::Bought);
-                }
-            }
+        // Put it back where it was (or in the inventory it came from).
+        if let Some(p) = buy.placing.as_ref().filter(|p| p.owned) {
+            let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+            put_back(&mut commands, &mut assets, &mut ctx, &catalog, p);
         }
         commands.entity(ghost).despawn();
         buy.placing = None;
@@ -944,6 +1019,14 @@ fn placement(
         }
         if wall_hung && in_wall.is_none() {
             notes.push("Paintings, mirrors and wall lamps go on a straight wall, on the floor in view.");
+            return;
+        }
+        // (Not over a window or a door.)
+        if wall_hung
+            && let (Some((p, r, _)), Some(b)) = (&in_wall, building.as_deref())
+            && b.opening_behind(*p, *r, bounds.map_or(1, |(mn, mx)| ((mx.x - mn.x).round() as u32).max(1)))
+        {
+            notes.push("There's a window or door in the way.");
             return;
         }
         if ladder && on_edge.is_none() {
@@ -968,6 +1051,9 @@ fn placement(
         }
         if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, rot, design) {
             commands.entity(o.entity).insert(crate::save::Bought);
+            if let Some(item) = buy.placing.as_ref().and_then(|p| p.item.clone()) {
+                commands.entity(o.entity).insert(crate::paintings::Hung(item));
+            }
             if !owned && let Some(h) = household.as_mut() {
                 h.funds -= price;
                 if let Ok(s) = selected.single() {

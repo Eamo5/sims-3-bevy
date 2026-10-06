@@ -173,7 +173,12 @@ fn tab_content(
     mut ui: Option<ResMut<crate::icons::GameUi>>,
     mut images: ResMut<Assets<Image>>,
     mut last: Local<String>,
-    (baked, chosen, mut thumbs): (Option<Res<crate::baked::Baked>>, Res<crate::inventory::Chosen>, ResMut<crate::thumbs::ModelThumbs>),
+    (baked, chosen, mut thumbs, mut pictures): (
+        Option<Res<crate::baked::Baked>>,
+        Res<crate::inventory::Chosen>,
+        ResMut<crate::thumbs::ModelThumbs>,
+        ResMut<crate::paintings::PaintingImages>,
+    ),
 ) {
     let (Ok(root), Ok((e, sim, skills, job, at_work, wishes, ltw, author, chess, inv, toddler))) = (content.single(), sel.single()) else { return };
     // What's on show, to redraw only when it changes.
@@ -382,20 +387,19 @@ fn tab_content(
         SimTab::Inventory => {
             // Finds and fish are pictured by their catalogue objects, produce by its model.
             let mut ui = ui;
-            let picture = |s: &crate::inventory::Stack| -> Option<Handle<Image>> {
+            let picture = |s: &crate::inventory::Stack| -> Option<(Handle<Image>, Option<Rect>)> {
+                // (A painting: its picture.)
+                if s.kind == crate::inventory::ItemKind::Painting {
+                    return crate::paintings::image(&mut pictures, &mut images, &baked.as_ref()?.0, s).map(|(h, r)| (h, Some(r)));
+                }
                 let ui = ui.as_deref_mut()?;
                 if s.kind == crate::inventory::ItemKind::Produce {
                     let model = ui.data.plants.iter().find(|p| p.produce == s.key)?.produce_model?;
-                    return Some(thumbs.get(&mut images, model));
-                }
-                // (A painting: the catalogue's painted canvas, rendered.)
-                if s.kind == crate::inventory::ItemKind::Painting {
-                    let m = *baked.as_ref()?.0.catalog.iter().find(|c| c.instance_name == "EaselCanvasPaintingMedium")?.models.first()?;
-                    return Some(thumbs.get(&mut images, m));
+                    return Some((thumbs.get(&mut images, model), None));
                 }
                 let model = ui.data.collectibles.iter().find(|c| c.key == s.key)?.model.clone();
                 let objd = baked.as_ref()?.0.catalog.iter().find(|c| c.instance_name.eq_ignore_ascii_case(&model))?.objd;
-                ui.icon(&mut images, &s3bake::gamedata::thumb_name(objd.2))
+                ui.icon(&mut images, &s3bake::gamedata::thumb_name(objd.2)).map(|h| (h, None))
             };
             crate::inventory::draw_tab(p, sim, inv, chosen.0, picture);
         }

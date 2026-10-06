@@ -118,6 +118,8 @@ pub enum ItemButton {
     SellOne,
     SellAll,
     Eat,
+    /// Hang a painting on a wall.
+    Hang,
 }
 
 /// The tile's colour for produce, by quality (grey for the worst, gold for perfect).
@@ -133,7 +135,7 @@ pub fn draw_tab(
     sim: &Sim,
     inv: Option<&Inventory>,
     chosen: Option<usize>,
-    mut picture: impl FnMut(&Stack) -> Option<Handle<Image>>,
+    mut picture: impl FnMut(&Stack) -> Option<(Handle<Image>, Option<Rect>)>,
 ) {
     let stacks = inv.map(|i| i.0.as_slice()).unwrap_or_default();
     if stacks.is_empty() {
@@ -169,7 +171,16 @@ pub fn draw_tab(
             ))
             .with_children(|t| {
                 match picture(s) {
-                    Some(h) => {
+                    // (A painting's picture, in its own shape.)
+                    Some((h, Some(r))) => {
+                        let k = 46.0 / r.width().max(r.height()).max(1.0);
+                        t.spawn((
+                            ImageNode { image: h, rect: Some(r), ..default() },
+                            Node { width: Val::Px(r.width() * k), height: Val::Px(r.height() * k), ..default() },
+                            Pickable::IGNORE,
+                        ));
+                    }
+                    Some((h, None)) => {
                         t.spawn((crate::icons::icon_bundle(h, 44.0), Pickable::IGNORE));
                     }
                     None => {
@@ -204,6 +215,9 @@ pub fn draw_tab(
             if s.kind == ItemKind::Produce && !sim.age.is_little() {
                 buttons.push((ItemButton::Eat, "Eat".to_string()));
             }
+            if s.kind == ItemKind::Painting {
+                buttons.push((ItemButton::Hang, "Hang on a Wall".to_string()));
+            }
             for (b, label) in buttons {
                 row.spawn((
                     Button,
@@ -222,10 +236,12 @@ pub fn draw_tab(
 
 #[allow(clippy::type_complexity)]
 fn inventory_buttons(
+    mut commands: Commands,
+    baked: Option<Res<crate::baked::Baked>>,
     tiles: Query<(&Interaction, &ItemTile), Changed<Interaction>>,
     mut buttons: Query<(&Interaction, &ItemButton, &mut BackgroundColor)>,
     mut chosen: ResMut<Chosen>,
-    mut sel: Query<(&Sim, &mut Inventory, &mut ActionQueue), With<Selected>>,
+    mut sel: Query<(Entity, &Sim, &mut Inventory, &mut ActionQueue), With<Selected>>,
     mut household: Option<ResMut<Household>>,
     mut notes: ResMut<Notifications>,
     mut play: MessageWriter<crate::sound::PlaySound>,
@@ -245,7 +261,7 @@ fn inventory_buttons(
         if *i != Interaction::Pressed {
             continue;
         }
-        let (Ok((sim, mut inv, mut queue)), Some(k)) = (sel.single_mut(), chosen.0) else { continue };
+        let (Ok((me, sim, mut inv, mut queue)), Some(k)) = (sel.single_mut(), chosen.0) else { continue };
         let Some(s) = inv.0.get(k).cloned() else { continue };
         match b {
             ItemButton::SellOne | ItemButton::SellAll => {
@@ -265,6 +281,14 @@ fn inventory_buttons(
             }
             ItemButton::Eat => {
                 queue.push_player(Action::new(format!("Eat {}", s.name), ActionKind::EatItem { key: s.key.clone(), quality: s.quality }, false));
+            }
+            ItemButton::Hang => {
+                // Out of the inventory and up to the walls, in Buy mode (back if it isn't hung).
+                let Some((objd, design)) = baked.as_ref().and_then(|b| crate::paintings::object(&b.0.paintings, &s)) else { continue };
+                let Some(each) = inv.take_one(k) else { continue };
+                let item = Stack { count: 1, worth: each, ..s.clone() };
+                commands.insert_resource(crate::buy::HoldRequest { objd, design: Some(design), item, from: me });
+                chosen.0 = None;
             }
         }
     }

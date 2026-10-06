@@ -59,7 +59,9 @@ fn spoil_food(
         }
         // Left out too long: only fit for clearing away.
         commands.entity(e).remove::<Meal>().insert(Spoiled);
-        notes.push(format!("The {} left out has spoiled.", obj.name.to_lowercase()));
+        let dish = obj.name.to_lowercase();
+        let has = if dish.ends_with('s') { "have" } else { "has" };
+        notes.push(format!("The {dish} left out {has} spoiled."));
         obj.kind = ObjectKind::DirtyDishes;
         obj.name = "Spoiled Food".into();
     }

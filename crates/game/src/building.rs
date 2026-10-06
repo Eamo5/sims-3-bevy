@@ -166,6 +166,20 @@ impl ActiveBuilding {
         self.holes.iter().filter(|(_, h)| h.cuts(&w)).filter_map(|(e, _)| *e).collect()
     }
 
+    /// Whether a door or window is in the wall behind something hung on it, `tiles` wide (as
+    /// `build::snap_to_wall` puts it: at `at`, facing out of the wall).
+    pub fn opening_behind(&self, at: Vec3, rot: Quat, tiles: u32) -> bool {
+        let fwd = self.local_dir(rot * Vec3::Z);
+        let dir = fwd.perp();
+        let n = tiles.max(1);
+        let start = self.local(at) - fwd * 0.5 - dir * (n as f32 * 0.5);
+        (0..n).any(|k| {
+            let p = start + dir * k as f32;
+            let w = WallBaked { a: p.into(), b: (p + dir).into(), level: self.view_level, left: ROOM_OUTSIDE, right: ROOM_OUTSIDE, cover: [NO_COVER; 2] };
+            self.holes.iter().any(|(_, h)| h.cuts(&w))
+        })
+    }
+
     /// Lot-local direction of a world rotation's axis.
     fn local_dir(&self, v: Vec3) -> Vec2 {
         let l = self.rot.inverse() * v;

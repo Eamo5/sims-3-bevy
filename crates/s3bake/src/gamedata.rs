@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 50;
+pub const GAMEDATA_VERSION: u32 = 51;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -649,6 +649,142 @@ fn bake_object_designs(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, Stri
     .collect();
     let n = out.len();
     write_value(&g.join("object_designs.bin"), &out).map_err(|e| e.to_string())?;
+    Ok(n)
+}
+
+/// One of the game's painting pictures (a row of the Painting skill's picture table, base game).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct PaintingInfo {
+    /// The canvas: 0 small, 1 medium, 2 large.
+    pub size: u8,
+    /// The picture's name (its texture is the DDS of instance fnv64 of it).
+    pub name: String,
+    /// The Painting skill levels it's painted at.
+    pub min: u8,
+    pub max: u8,
+    /// 0 an ordinary painting, 1 a dabble, 2 a brilliant painting, 3 a masterpiece.
+    pub kind: u8,
+    /// The versions painted by Sims of a trait: (the table's trait column, picture).
+    pub traits: Vec<(String, String)>,
+}
+
+/// A canvas size: the finished painting's catalogue object, its model (drawn at its size) and
+/// where on a picture's texture the painted face shows it (u0, v0, u1, v1).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct CanvasInfo {
+    pub objd: crate::types::Key,
+    pub model: crate::types::Key,
+    pub uv: [f32; 4],
+}
+
+/// The paintings Sims paint, and the canvases they're painted on (small, medium, large).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct PaintingsBaked {
+    pub paintings: Vec<PaintingInfo>,
+    pub canvases: Vec<CanvasInfo>,
+    /// The texture of the canvas's painted face (the picture stands in for it, as a design).
+    pub face: crate::types::Key,
+}
+
+/// The texture of a painting picture.
+pub fn painting_texture(name: &str) -> crate::types::Key {
+    (T_DDS, 0, s3pkg::fnv64(name))
+}
+
+/// Model-store group of the canvases drawn at each size (over the canvas model's instance).
+pub const CANVAS_GROUP: u32 = 0x0CA4_7A50;
+
+/// The Painting skill's picture table and the pictures, and the canvas model at each size
+/// (one model for all three, its geometry states the sizes).
+fn bake_paintings(root: &BakeRoot, pkgs: &PackageSet, table: Option<String>) -> Result<usize, String> {
+    let g = root.global_dir();
+    let mut out = PaintingsBaked::default();
+    let catalog: Vec<crate::types::CatalogEntry> = read_value(&g.join("catalog.bin")).map_err(|e| format!("catalog.bin: {e}"))?;
+    let has_tex = |name: &str| pkgs.read_ti(T_DDS, s3pkg::fnv64(name)).is_some();
+    let traits = ["Artistic", "CantStandArt", "ComputerWhiz", "Evil", "Genius", "Grumpy", "Insane", "Neurotic", "Virtuoso"];
+    for (size, tag) in ["Small", "Medium", "Large"].into_iter().enumerate() {
+        let rows = table.as_deref().map(|x| records(x, tag)).unwrap_or_default();
+        let Some((defaults, rows)) = rows.split_first() else { continue };
+        let field = |f: &HashMap<String, String>, k: &str| f.get(k).or_else(|| defaults.get(k)).cloned().unwrap_or_default();
+        for f in rows {
+            // (The base game's: the expansions' rows name theirs.)
+            if field(f, "SKU") != "BaseGame" || field(f, "Skill") != "Painting" || field(f, "Occupation") != "Undefined" {
+                continue;
+            }
+            let name = field(f, "PaintingNames");
+            if name.is_empty() || !has_tex(&name) {
+                continue;
+            }
+            let flag = |k: &str| field(f, k) == "True";
+            let kind = if flag("Masterpiece") {
+                3
+            } else if flag("Brilliant") {
+                2
+            } else if flag("Dabble") {
+                1
+            } else {
+                0
+            };
+            out.paintings.push(PaintingInfo {
+                size: size as u8,
+                min: field(f, "MinLevelToPaint").parse().unwrap_or(0),
+                max: field(f, "MaxLevelToPaint").parse().unwrap_or(10),
+                kind,
+                traits: traits
+                    .iter()
+                    .filter_map(|t| {
+                        let v = f.get(*t)?;
+                        (!v.is_empty() && has_tex(v)).then(|| (t.to_string(), v.clone()))
+                    })
+                    .collect(),
+                name,
+            });
+        }
+    }
+    std::fs::create_dir_all(root.textures_dir()).ok();
+    let names: Vec<String> = out.paintings.iter().flat_map(|p| std::iter::once(p.name.clone()).chain(p.traits.iter().map(|(_, n)| n.clone()))).collect();
+    crate::bake::par_map(&names, |n| {
+        let k = painting_texture(n);
+        if !root.tex_path(k).exists()
+            && let Some(dds) = crate::bake::bake_texture(pkgs, k, 256, false)
+        {
+            let _ = std::fs::write(root.tex_path(k), dds);
+        }
+    });
+    // The canvas: its painted face's three states, smallest to largest, are the sizes.
+    let objd = |n: &str| catalog.iter().find(|c| c.instance_name == n).map(|c| (c.objd, c.models.first().copied()));
+    if let (Some((small, Some(modl))), Some((medium, _)), Some((large, _))) =
+        (objd("EaselCanvasPaintingSmall"), objd("EaselCanvasPaintingMedium"), objd("EaselCanvasPaintingLarge"))
+    {
+        let meshes = s3formats::model::load_model(pkgs, &crate::types::rkey(modl)).unwrap_or_default();
+        if let Some(face) = meshes.iter().filter(|m| m.states.len() == 3).min_by_key(|m| m.indices.len()) {
+            out.face = face.material.texture(s3formats::model::P_DIFFUSE_MAP).map(|k| crate::types::key_of(&k)).unwrap_or_default();
+            let mut sizes: Vec<(f32, u32, [f32; 4])> = face
+                .states
+                .iter()
+                .map(|(h, ix)| {
+                    let (mut lo, mut hi, mut uv) = ([f32::MAX; 2], [f32::MIN; 2], [f32::MAX, f32::MAX, f32::MIN, f32::MIN]);
+                    for &i in ix {
+                        let (p, t) = (face.positions[i as usize], face.uvs[i as usize]);
+                        lo = [lo[0].min(p[0]), lo[1].min(p[1])];
+                        hi = [hi[0].max(p[0]), hi[1].max(p[1])];
+                        uv = [uv[0].min(t[0]), uv[1].min(t[1]), uv[2].max(t[0]), uv[3].max(t[1])];
+                    }
+                    ((hi[0] - lo[0]) * (hi[1] - lo[1]), *h, uv.map(|v| v.clamp(0.0, 1.0)))
+                })
+                .collect();
+            sizes.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let mut pack = PackWriter::create(&g.join("canvases.pack")).map_err(|e| e.to_string())?;
+            for ((_, state, uv), objd) in sizes.into_iter().zip([small, medium, large]) {
+                let model = (modl.0, CANVAS_GROUP + out.canvases.len() as u32, modl.2);
+                pack.add(model, &crate::bake::bake_model_state(pkgs, &crate::types::rkey(modl), Some(state))).map_err(|e| e.to_string())?;
+                out.canvases.push(CanvasInfo { objd, model, uv });
+            }
+            pack.finish().map_err(|e| e.to_string())?;
+        }
+    }
+    let n = out.paintings.len();
+    write_value(&g.join("paintings.bin"), &out).map_err(|e| e.to_string())?;
     Ok(n)
 }
 
@@ -1363,6 +1499,8 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     progress("Converting: object designs…");
     let designs = bake_object_designs(root, pkgs)?;
     progress(&format!("Converting: designs for {designs} objects…"));
+    let paintings = bake_paintings(root, pkgs, xml("PaintingSkillDB"))?;
+    progress(&format!("Converting: {paintings} paintings…"));
     progress("Converting: fences…");
     out.fences = bake_fence_styles(root, pkgs, &strings)?;
     // Catalogue models with alternative geometry states, drawn in their fullest (the objects'
