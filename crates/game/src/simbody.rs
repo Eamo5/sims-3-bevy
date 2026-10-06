@@ -474,6 +474,8 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
     let tint = cas.tint(tone_t);
     let mut parts = Vec::new();
     let mut tex_keys: Vec<Key> = Vec::new();
+    // Face layers made at load in a colour: (source, copy, colour).
+    let mut beard_tints: Vec<(Key, Key, Color)> = Vec::new();
 
     // Body: shared skin texture + one clothing layer per worn part.
     let body_base = cas.skin_texture(age, gender, 8);
@@ -487,7 +489,14 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
     }
     if let Some(face) = &outfit.face {
         let face_base = cas.skin_texture(age, gender, 4);
-        let face_layers: Vec<Key> = face.layer.into_iter().chain(outfit.brows.as_ref().and_then(|b| b.layer)).chain(outfit.face_layers.iter().copied()).take(4).collect();
+        // A beard drawn on the face (no mesh of its own) is a layer in the Sim's hair colour.
+        let painted_beard = outfit.beard.as_ref().filter(|b| baked.cas_meshes(&b.key).is_none_or(|m| m.meshes.is_empty())).and_then(|b| b.layer).map(|src| {
+            let tinted = beard_tint_key(src, sim.hair);
+            beard_tints.push((src, tinted, sim.hair));
+            tinted
+        });
+        let face_layers: Vec<Key> =
+            face.layer.into_iter().chain(outfit.brows.as_ref().and_then(|b| b.layer)).chain(painted_beard).chain(outfit.face_layers.iter().copied()).take(4).collect();
         tex_keys.extend(face_base);
         tex_keys.extend(&face_layers);
         for m in baked.cas_meshes(&face.key).map(|m| m.meshes).unwrap_or_default() {
@@ -514,6 +523,7 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
     let mut hair_keys: Vec<(Key, Key)> = Vec::new();
     for (i, p) in [&outfit.scalp, &outfit.hair, &outfit.beard].into_iter().enumerate() {
         let Some(p) = p else { continue };
+        // (A beard with no mesh is painted on the face instead.)
         for m in baked.cas_meshes(&p.key).map(|m| m.meshes).unwrap_or_default() {
             let Some(src) = p.layer.or(m.texture) else { continue };
             // (A beard is never under the hat.)
@@ -551,7 +561,53 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
             textures.push((grey, img));
         }
     }
+    for (src, tinted, colour) in beard_tints {
+        if let Some(img) = baked.texture_bytes(&src).and_then(|b| tinted_layer(&b, colour)) {
+            textures.push((tinted, img));
+        }
+    }
     Some(SimModelCpu { rig, parts, textures })
+}
+
+/// Texture-store key of a face layer's copy in a colour.
+fn beard_tint_key(k: Key, c: Color) -> Key {
+    let c = c.to_srgba();
+    let rgb = ((c.red * 255.0) as u32) << 16 | ((c.green * 255.0) as u32) << 8 | (c.blue * 255.0) as u32;
+    (k.0 ^ 0x2000_0000 ^ rgb, k.1, k.2)
+}
+
+/// A face layer (DDS bytes) recoloured: its light and shade kept, in `colour` (a beard in the
+/// Sim's hair colour), its alpha as it was.
+fn tinted_layer(dds: &[u8], colour: Color) -> Option<Image> {
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    let mut img = s3formats::dds::decode(dds, 512)?;
+    let (mut sum, mut n) = (0.0f64, 0u64);
+    for px in img.data.chunks_exact(4) {
+        if px[3] > 60 {
+            sum += (0.3 * px[0] as f64 + 0.59 * px[1] as f64 + 0.11 * px[2] as f64) / 255.0;
+            n += 1;
+        }
+    }
+    let mean = if n > 0 { (sum / n as f64).max(0.05) } else { 0.5 };
+    let c = colour.to_srgba();
+    for px in img.data.chunks_exact_mut(4) {
+        let l = (0.3 * px[0] as f64 + 0.59 * px[1] as f64 + 0.11 * px[2] as f64) / 255.0;
+        let shade = (l / mean).min(1.6) as f32;
+        px[0] = (c.red * shade * 255.0).min(255.0) as u8;
+        px[1] = (c.green * shade * 255.0).min(255.0) as u8;
+        px[2] = (c.blue * shade * 255.0).min(255.0) as u8;
+    }
+    let (mips, levels) = s3formats::dds::build_mips(&img);
+    let mut out = Image::new(
+        Extent3d { width: img.width as u32, height: img.height as u32, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        mips,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    out.texture_descriptor.mip_level_count = levels;
+    out.sampler = crate::objects::sampler();
+    Some(out)
 }
 
 /// Texture-store key of a hair texture's greyscale copy.
