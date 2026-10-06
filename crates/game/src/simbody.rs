@@ -574,9 +574,10 @@ fn greyscale_hair(dds: &[u8]) -> Option<Image> {
     Some(out)
 }
 
-/// Sims are drawn in the world and in the portrait studio.
-fn sim_layers() -> bevy::camera::visibility::RenderLayers {
-    bevy::camera::visibility::RenderLayers::from_layers(&[0, crate::portraits::STUDIO_LAYER])
+/// Sims are drawn in the world (and in the portrait studio while their picture's taken: see
+/// `portraits`).
+pub fn sim_layers() -> bevy::camera::visibility::RenderLayers {
+    bevy::camera::visibility::RenderLayers::layer(0)
 }
 
 /// A top-level piece of a Sim's body (root joint or mesh), replaced when the body is rebuilt.

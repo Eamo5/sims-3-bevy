@@ -26,8 +26,19 @@ impl Plugin for PortraitsPlugin {
     }
 }
 
-/// The studio's own light and camera layer.
+/// The studio's own light and camera layer (and the Sim having their picture taken).
 pub const STUDIO_LAYER: usize = 7;
+
+/// The Sim having their picture taken steps into the studio (or out again): only they are
+/// pictured, never anyone standing close by.
+fn into_studio(commands: &mut Commands, children: &Query<&Children>, parts: &Query<(), (With<crate::simbody::SimModelPart>, With<Mesh3d>)>, sim: Entity, on: bool) {
+    let layers = if on { RenderLayers::from_layers(&[0, STUDIO_LAYER]) } else { crate::simbody::sim_layers() };
+    for c in children.get(sim).into_iter().flatten() {
+        if parts.contains(*c) {
+            commands.entity(*c).insert(layers.clone());
+        }
+    }
+}
 const SIZE: u32 = 128;
 /// The portraits' backdrop: the game's soft blue, lighter towards the top.
 const BACKDROP: Color = Color::srgb(0.56, 0.72, 0.88);
@@ -148,7 +159,9 @@ fn spawn_studio(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut ma
         Camera { order: -5, is_active: false, clear_color: ClearColorConfig::Custom(BACKDROP), ..default() },
         Projection::Perspective(PerspectiveProjection { fov: 24f32.to_radians(), near: 0.08, far: 1.0, ..default() }),
         AmbientLight { color: Color::srgb(0.9, 0.93, 1.0), brightness: 1500.0, ..default() },
-        RenderLayers::from_layers(&[0, STUDIO_LAYER]),
+        // (The studio only: the world's walls and furniture never get in the way, and its sun
+        // and evening light don't colour the face.)
+        RenderLayers::layer(STUDIO_LAYER),
         DespawnOnExit(AppState::InGame),
     ));
 }
@@ -206,7 +219,7 @@ fn take_portraits(
     mut backdrop: Query<&mut Transform, (With<Backdrop>, Without<StudioCamera>)>,
     sims: Query<(&Sim, &SimAnim, &GlobalTransform, &Skeleton, &InheritedVisibility)>,
     placed: Query<
-        (&Transform, &Visibility, Has<crate::visit::Trip>),
+        (&Transform, &Visibility, Has<crate::visit::Trip>, Has<crate::nav::PathFollow>),
         (With<Sim>, Without<StudioCamera>, Without<Backdrop>),
     >,
     joints: Query<&GlobalTransform, Without<Sim>>,
@@ -214,6 +227,7 @@ fn take_portraits(
     time: Res<Time>,
     (grid, visited): (Option<Res<crate::nav::NavGrid>>, Option<Res<crate::visit::VisitedLot>>),
     mut images: ResMut<Assets<Image>>,
+    (children, parts): (Query<&Children>, Query<(), (With<crate::simbody::SimModelPart>, With<Mesh3d>)>),
 ) {
     let now = time.elapsed_secs();
     let Ok((cam_e, mut camera, mut cam_tf)) = cam.single_mut() else { return };
@@ -285,9 +299,12 @@ fn take_portraits(
                         }
                         commands.entity(cam_e).insert((
                             RenderTarget::Image(img.into()),
-                            Projection::Perspective(PerspectiveProjection { fov: 24f32.to_radians(), near: 0.08, far: dist + 0.28, ..default() }),
+                            // (Only the Sim and the card are in the studio: the far plane can be
+                            // generous, so a Sim who shifts a little isn't cut away.)
+                            Projection::Perspective(PerspectiveProjection { fov: 24f32.to_radians(), near: 0.08, far: dist + 1.2, ..default() }),
                         ));
                         camera.is_active = true;
+                        into_studio(&mut commands, &children, &parts, shot.sim, true);
                         shot.aimed = Some(shot.frame);
 
                     }
@@ -297,6 +314,7 @@ fn take_portraits(
             // A Sim who drops out of view mid-shot (driving off, say) is taken again later.
             Some(_) if shot.staged.is_none() && sims.get(shot.sim).is_ok_and(|s| !s.4.get()) => {
                 camera.is_active = false;
+                into_studio(&mut commands, &children, &parts, shot.sim, false);
                 let taken = portraits.retake.get(&shot.sim).map_or(0, |r| r.1);
                 portraits.retake.insert(shot.sim, (now + 2.0, taken));
                 done = true;
@@ -329,17 +347,42 @@ fn take_portraits(
             // rests and a staged Sim goes back.
             Some(at) if shot.frame >= at + 4 => {
                 camera.is_active = false;
+                into_studio(&mut commands, &children, &parts, shot.sim, false);
                 if let Some((tf, vis)) = shot.staged {
                     commands.entity(shot.sim).insert((tf, vis)).remove::<Staged>();
                 }
-                let taken = portraits.retake.get(&shot.sim).map_or(0, |r| r.1) + 1;
-                portraits.retake.insert(shot.sim, (now + if taken < 2 { 12.0 } else { 240.0 }, taken));
-                // The finished picture is shown; the old one takes the next.
-                if let (Some(old), Some(new)) = (portraits.images.remove(&shot.sim), portraits.spare.remove(&shot.sim)) {
-                    portraits.images.insert(shot.sim, new);
-                    portraits.spare.insert(shot.sim, old);
+                // Whether it came out: the camera still looking them in the face, as far off and
+                // as high as it was put (a Sim can turn to something, or set off, mid-shot).
+                let good = sims.get(shot.sim).ok().and_then(|(sim, _, tf, skel, _)| {
+                    let head = skel.rig.bones.iter().position(|b| b.name == "b__Head__").and_then(|i| joints.get(skel.joints[i]).ok())?.translation();
+                    let rot = facing(skel, &joints, head, tf.rotation()).or((sim.age == Age::Baby).then(|| tf.rotation()))?;
+                    let little = sim.age.is_little();
+                    let (dist, up) = if little { (0.5, 0.05) } else { (0.72, 0.08) };
+                    let off = cam_tf.translation - head;
+                    let ahead = (rot * Vec3::Z).xz().normalize_or(Vec2::Y);
+                    let ok = off.xz().normalize_or_zero().dot(ahead) > 0.85 && (off.xz().length() - dist).abs() < 0.2 && (off.y - up).abs() < 0.15;
+                    if !ok {
+                        debug!("portrait of {} spoilt (camera off {off:?}, face {ahead:?}): taken again", sim.first);
+                    }
+                    Some(ok)
+                }) == Some(true);
+                let first = !portraits.retake.contains_key(&shot.sim);
+                let before = portraits.retake.get(&shot.sim).map_or(0, |r| r.1);
+                if good {
+                    let taken = before + 1;
+                    portraits.retake.insert(shot.sim, (now + if taken < 2 { 12.0 } else { 240.0 }, taken));
+                    // The finished picture is shown; the old one takes the next.
+                    if let (Some(old), Some(new)) = (portraits.images.remove(&shot.sim), portraits.spare.remove(&shot.sim)) {
+                        portraits.images.insert(shot.sim, new);
+                        portraits.spare.insert(shot.sim, old);
+                    }
+                } else if first {
+                    // (A first picture is staged again straight away.)
+                    portraits.queue.push_back(shot.sim);
+                } else {
+                    // (The old picture stays up meanwhile.)
+                    portraits.retake.insert(shot.sim, (now + 2.0, before));
                 }
-                debug!("portrait {:?} taken ({taken}) from {:?}, staged {}", shot.sim, cam_tf.translation, shot.staged.is_some());
                 done = true;
             }
             _ => {}
@@ -353,7 +396,7 @@ fn take_portraits(
     // The next Sim ready for their picture (others wait their turn).
     for _ in 0..portraits.queue.len() {
         let Some(e) = portraits.queue.pop_front() else { break };
-        let (Ok((sim, anim, _, _, vis)), Ok((tf, visibility, driving))) = (sims.get(e), placed.get(e)) else {
+        let (Ok((sim, anim, _, _, vis)), Ok((tf, visibility, driving, walking))) = (sims.get(e), placed.get(e)) else {
             // (The body isn't built yet.)
             portraits.queue.push_back(e);
             continue;
@@ -364,7 +407,9 @@ fn take_portraits(
         // A first picture is always staged (nothing in the way, the same light for everyone).
         let first = portraits.retake.get(&e).is_none();
         let away = first && !driving;
-        let upright = if first { anim.pose != Pose::Lie } else { matches!(anim.pose, Pose::Stand | Pose::Talk) } || sim.age == Age::Baby;
+        // (Retakes in view wait for them to stand still: the camera can't keep up with a Sim
+        // on the move, least of all at speed.)
+        let upright = if first { anim.pose != Pose::Lie } else { matches!(anim.pose, Pose::Stand | Pose::Talk) && !walking } || sim.age == Age::Baby;
         // (Faces and clothes finish loading a few seconds after a body is built.)
         let settled = portraits.built.get(&e).is_none_or(|t| now - t > 4.0) && now > 6.0;
         // A retake needs room in front of the face for the camera (not a stall or a corner).
