@@ -100,9 +100,11 @@ fn speed_keys(keys: Res<ButtonInput<KeyCode>>, mut clock: ResMut<GameClock>) {
     }
 }
 
-fn advance_clock(time: Res<Time>, mut clock: ResMut<GameClock>, mut delta: ResMut<SimDelta>) {
-    // Normal speed: one game minute per real second, like the original.
-    let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed];
+fn advance_clock(time: Res<Time>, mut clock: ResMut<GameClock>, mut delta: ResMut<SimDelta>, modal: Query<(), With<crate::dialog::Modal>>) {
+    // Normal speed: one game minute per real second, like the original (and the game stands
+    // still while a question's waiting for an answer).
+    let rate = if modal.is_empty() { SPEED_RATES[clock.speed] } else { 0.0 };
+    let dt = time.delta_secs().min(0.1) * rate;
     clock.minutes += dt as f64;
     delta.0 = dt;
 }

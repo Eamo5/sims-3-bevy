@@ -65,7 +65,8 @@ static MUSEUM: [Activity; 1] = [act("View Art", 90.0, 15, [-5.0, -5.0, -3.0, 15.
 static SCIENCE: [Activity; 1] = [act("Volunteer as a Test Subject", 120.0, -80, [-8.0, -8.0, -8.0, 5.0, -10.0, -10.0], None)];
 static HOSPITAL: [Activity; 1] = [act("Get a Checkup", 60.0, 40, [-4.0, -4.0, 5.0, 5.0, 5.0, -5.0], None)];
 static SHOPS: [Activity; 1] = [act("Browse the Shelves", 60.0, 0, [-4.0, -4.0, -2.0, 15.0, 0.0, 25.0], Some("Writing"))];
-pub static SCHOOL: Activity = act("School", 0.0, 0, [-12.0, -6.0, -6.0, 25.0, -6.0, -8.0], Some("Logic"));
+// (With lunch at school.)
+pub static SCHOOL: Activity = act("School", 0.0, 0, [-6.0, -3.0, -6.0, 25.0, -6.0, -8.0], Some("Logic"));
 
 /// The rabbit-hole activities a community lot offers, from its name.
 pub fn activities(lot: &LotInfo) -> &'static [Activity] {

@@ -231,6 +231,7 @@ fn offer_opportunities(
             BorderColor::all(PLUMBOB_GREEN),
             Interaction::default(),
             BlocksWorld,
+            crate::dialog::Modal,
             GlobalZIndex(20),
         ))
         .with_children(|p| {

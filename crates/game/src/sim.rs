@@ -459,13 +459,22 @@ pub fn spawn_sim(
     entity
 }
 
-fn decay_motives(delta: Res<SimDelta>, mut q: Query<(&mut Motives, &DecayScale, &Sim, Option<&crate::wishes::Wishes>)>) {
+#[allow(clippy::type_complexity)]
+fn decay_motives(
+    delta: Res<SimDelta>,
+    mut q: Query<(&mut Motives, &DecayScale, &Sim, Option<&crate::wishes::Wishes>, Has<crate::careers::AtWork>, Has<crate::rabbitholes::AtRabbitHole>)>,
+) {
     let hours = delta.0 / 60.0;
     if hours <= 0.0 {
         return;
     }
-    for (mut m, scale, sim, wishes) in &mut q {
+    for (mut m, scale, sim, wishes, at_work, away) in &mut q {
         for i in 0..6 {
+            // (At work, school or out in town, lunch and the bathrooms are there: what the place
+            // does to their hunger and bladder is its own.)
+            if (at_work || away) && (i == HUNGER || i == BLADDER) {
+                continue;
+            }
             let d = DECAY_PER_HOUR[i] * scale.0[i] * crate::life::decay_rate(&sim.traits, i) * crate::wishes::reward_decay(wishes, i) * hours;
             m.add(i, d);
         }

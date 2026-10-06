@@ -2236,7 +2236,8 @@ fn autonomy(
                 if !age.is_little() || lot != my_lot {
                     continue;
                 }
-                let want = [("Feed", needs[HUNGER]), ("Change Diaper", needs[BLADDER]), ("Play With", needs[SOCIAL].min(needs[FUN]))]
+                // (A change cleans them up too.)
+                let want = [("Feed", needs[HUNGER]), ("Change Diaper", needs[BLADDER].min(needs[HYGIENE])), ("Play With", needs[SOCIAL].min(needs[FUN]))]
                     .into_iter()
                     .filter(|(_, v)| *v < 0.0)
                     .min_by(|a, b| a.1.total_cmp(&b.1));
@@ -2293,7 +2294,7 @@ fn motive_warnings(
     mut last_check: Local<f64>,
     mut notes: ResMut<Notifications>,
     sims: Query<(&Sim, &Motives), With<HouseholdMember>>,
-    mut warned: Local<HashMap<(String, usize), f64>>,
+    mut warned: Local<std::collections::HashSet<(u64, usize)>>,
 ) {
     if clock.minutes - *last_check < 15.0 {
         return;
@@ -2307,15 +2308,16 @@ fn motive_warnings(
         "is filthy!",
         "is bored out of their mind!",
     ];
+    // Once as a need runs out (again once it's been seen to).
     for (sim, m) in &sims {
         for i in 0..6 {
+            let key = (sim.id, i);
             if m.0[i] < -75.0 {
-                let key = (sim.full_name(), i);
-                let last = warned.get(&key).copied().unwrap_or(-1e9);
-                if clock.minutes - last > 180.0 {
-                    warned.insert(key, clock.minutes);
+                if warned.insert(key) {
                     notes.push(format!("{} {}", sim.first, msgs[i]));
                 }
+            } else if m.0[i] > -40.0 {
+                warned.remove(&key);
             }
         }
     }

@@ -1166,9 +1166,11 @@ fn pie_portrait(
     }
 }
 
-fn hud_button_visuals(mut q: Query<(&Interaction, &mut BackgroundColor, Option<&SpeedButton>), With<HudButton>>, clock: Res<GameClock>) {
+fn hud_button_visuals(mut q: Query<(&Interaction, &mut BackgroundColor, Option<&SpeedButton>), With<HudButton>>, clock: Res<GameClock>, modal: Query<(), With<crate::dialog::Modal>>) {
+    // (Paused while a question waits for an answer.)
+    let speed_now = if modal.is_empty() { clock.speed } else { 0 };
     for (i, mut bg, speed) in &mut q {
-        let active = speed.is_some_and(|s| s.0 == clock.speed);
+        let active = speed.is_some_and(|s| s.0 == speed_now);
         bg.0 = match i {
             Interaction::Pressed => BTN_PRESS,
             Interaction::Hovered => BTN_HOVER,

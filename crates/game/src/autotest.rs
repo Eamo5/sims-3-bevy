@@ -161,7 +161,7 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -384,6 +384,21 @@ fn auto_pick_world(
     } else {
         warn!("--world {name}: no such world");
     }
+}
+
+/// SHOTS_EVERY=<seconds> (with SHOTS_DIR=<folder>): a picture that often while playing, with
+/// the game clock in its name (for long runs looked over afterwards).
+fn shots_every(mut commands: Commands, time: Res<Time>, clock: Res<crate::clock::GameClock>, mut last: Local<f32>, mut n: Local<u32>) {
+    let (Some(every), Ok(dir)) = (std::env::var("SHOTS_EVERY").ok().and_then(|v| v.parse::<f32>().ok()), std::env::var("SHOTS_DIR")) else { return };
+    if time.elapsed_secs() - *last < every {
+        return;
+    }
+    *last = time.elapsed_secs();
+    *n += 1;
+    let m = clock.minutes as i64;
+    let path = std::path::Path::new(&dir).join(format!("{:03}_day{}_{:02}{:02}.png", *n, m / 1440, (m / 60) % 24, m % 60));
+    info!("shot {}", path.display());
+    commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
 }
 
 /// CAMS=1: the cameras and UI roots, every couple of seconds (debugging).
@@ -1941,11 +1956,18 @@ fn ui_flow(
     }
 }
 
-fn auto_speed(args: Res<AutoArgs>, mut clock: ResMut<crate::clock::GameClock>, mut done: Local<(bool, bool)>, pending: Option<Res<crate::save::PendingLoad>>, live: Option<Res<State<crate::PlayMode>>>) {
+fn auto_speed(mut commands: Commands, args: Res<AutoArgs>, mut clock: ResMut<crate::clock::GameClock>, mut done: Local<(bool, bool)>, pending: Option<Res<crate::save::PendingLoad>>, live: Option<Res<State<crate::PlayMode>>>) {
     if !done.0 {
         done.0 = true;
         if let Some(s) = args.speed {
             clock.speed = s.min(3);
+            // (Left on its own, the game answers its own questions and turns opportunities
+            // down, rather than standing still waiting for an answer.)
+            let opp = args.action.as_deref().is_some_and(|a| a.starts_with("Opp"));
+            commands.insert_resource(crate::dialog::AutoAnswer(0));
+            if !opp {
+                commands.insert_resource(crate::opportunities::AutoDecline);
+            }
         }
     }
     // The hour of the day (on the save's own day, once a saved game has loaded).

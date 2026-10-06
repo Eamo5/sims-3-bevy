@@ -57,6 +57,15 @@ pub struct Ask {
     pub answers: Vec<Answer>,
 }
 
+/// A box waiting for the player's answer: the game stands still while one is up, as the
+/// original's do.
+#[derive(Component)]
+pub struct Modal;
+
+/// Questions answer themselves with this answer (tests that run the game on its own).
+#[derive(Resource)]
+pub struct AutoAnswer(pub usize);
+
 /// Questions waiting to be answered, the first on show.
 #[derive(Resource, Default)]
 pub struct Questions {
@@ -128,6 +137,7 @@ fn show_question(mut commands: Commands, mut q: ResMut<Questions>, mut ui: Optio
             BorderColor::all(PLUMBOB_GREEN),
             Interaction::default(),
             BlocksWorld,
+            Modal,
             GlobalZIndex(25),
         ))
         .with_children(|p| {
@@ -183,13 +193,14 @@ fn answer_buttons(
     buttons: Query<(&Interaction, &AnswerButton), Changed<Interaction>>,
     mut answered: MessageWriter<Answered>,
     time: Res<Time>,
+    auto: Option<Res<AutoAnswer>>,
 ) {
     let Some(root) = q.shown else { return };
     let mut pick = buttons.iter().find(|(i, _)| **i == Interaction::Pressed).map(|(_, b)| b.0);
     // ANSWER=<n>: questions answer themselves (tests).
     if pick.is_none()
         && time.elapsed_secs() > 4.0
-        && let Some(n) = std::env::var("ANSWER").ok().and_then(|s| s.parse::<usize>().ok())
+        && let Some(n) = std::env::var("ANSWER").ok().and_then(|s| s.parse::<usize>().ok()).or(auto.map(|a| a.0))
     {
         pick = Some(n.min(q.queue.front().map_or(1, |a| a.answers.len()).saturating_sub(1)));
     }

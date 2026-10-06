@@ -788,7 +788,7 @@ fn babysitting(
     // The neediest little one: food, a change, a nap or some fun.
     let mut best: Option<(f32, Entity, &str)> = None;
     for (e, _, m, _) in &littles {
-        let wants = [("Feed", m.0[HUNGER]), ("Change Diaper", m.0[BLADDER]), ("Play With", m.0[SOCIAL].min(m.0[FUN]))];
+        let wants = [("Feed", m.0[HUNGER]), ("Change Diaper", m.0[BLADDER].min(m.0[crate::sim::HYGIENE])), ("Play With", m.0[SOCIAL].min(m.0[FUN]))];
         for (what, v) in wants {
             if v < 40.0 && best.is_none_or(|b| v < b.0) {
                 best = Some((v, *e, what));
