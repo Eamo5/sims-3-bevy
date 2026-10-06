@@ -190,11 +190,11 @@ fn outings(
     world: Res<CurrentWorld>,
     mut notes: ResMut<Notifications>,
     mut life: MessageWriter<LifeEvent>,
-    mut q: Query<(Entity, &Sim, &AtRabbitHole, &mut Motives, &mut Skills, &mut Transform, Option<&mut SchoolGrades>)>,
+    mut q: Query<(Entity, &Sim, &AtRabbitHole, &mut Motives, &mut Skills, &mut Transform, Option<&mut SchoolGrades>, &mut crate::nav::Floor)>,
     mut household: Option<ResMut<Household>>,
 ) {
     let dt = delta.0;
-    for (e, sim, at, mut motives, mut skills, mut tf, grades) in &mut q {
+    for (e, sim, at, mut motives, mut skills, mut tf, grades, mut floor) in &mut q {
         if clock.minutes >= at.inside_from && clock.minutes < at.until - DRIVE_MINUTES {
             for i in 0..6 {
                 motives.add(i, at.activity.per_hour[i] * dt / 60.0);
@@ -210,8 +210,11 @@ fn outings(
             }
         }
         if clock.minutes >= at.until {
+            // Back at the lot's edge, on the ground (whichever floor they left from: the bus
+            // takes children from wherever they are).
             if let Some(x) = &exit {
                 tf.translation = Vec3::new(x.0.x, world.data.heightmap.sample(x.0.x, x.0.y), x.0.y);
+                floor.0 = 1;
             }
             if std::ptr::eq(at.activity, &SCHOOL) {
                 if let Some(mut g) = grades {

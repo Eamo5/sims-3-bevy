@@ -2222,9 +2222,19 @@ fn autonomy(
                 if matches!(d.special, Special::ServeMeal | Special::CleanUp | Special::PayBills) && (meal_out && d.special == Special::ServeMeal || !household.contains(me)) {
                     continue;
                 }
+                // (What lasts until a need is full is no use while it's full already: a bath for
+                // its fun would end as soon as it began.)
+                if d.until_full.is_some_and(|m| motives.0[m] >= 95.0) {
+                    continue;
+                }
+                // (And what it does for the other needs only lasts as long as it does.)
+                let minutes = match d.until_full {
+                    Some(m) if d.per_hour[m] > 0.0 => d.minutes.min((100.0 - motives.0[m]).max(0.0) / (d.per_hour[m] / 60.0)),
+                    _ => d.minutes,
+                };
                 let mut score = 0.0;
                 for i in 0..6 {
-                    let gain = d.per_hour[i] * d.minutes / 60.0;
+                    let gain = d.per_hour[i] * minutes / 60.0;
                     let room = (100.0 - motives.0[i]).max(0.0);
                     score += gain.min(room).max(-50.0) * urgency(i);
                 }

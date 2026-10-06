@@ -631,7 +631,8 @@ fn work_schedule(
             if let Some(x) = &exit {
                 tf.translation = Vec3::new(x.0.x, world.data.heightmap.sample(x.0.x, x.0.y), x.0.y);
             }
-            commands.entity(e).remove::<AtWork>().insert(Visibility::Inherited);
+            // (Back on the ground, whichever floor they left from.)
+            commands.entity(e).remove::<AtWork>().insert((Visibility::Inherited, crate::nav::Floor(1)));
             continue;
         }
         let workday = job.works_on(clock.weekday());
