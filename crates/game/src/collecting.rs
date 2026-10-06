@@ -660,7 +660,7 @@ fn sell_button(
     let mut worth = 0;
     for mut inv in &mut inventories {
         worth += inv.collectibles().1;
-        inv.0.retain(|s| s.kind == ItemKind::Produce);
+        inv.0.retain(|s| !matches!(s.kind, ItemKind::Fish | ItemKind::Find | ItemKind::Insect));
     }
     if let Some(h) = household.as_mut() {
         h.funds += worth;

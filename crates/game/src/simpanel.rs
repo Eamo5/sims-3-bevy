@@ -353,6 +353,11 @@ fn tab_content(
                     let model = ui.data.plants.iter().find(|p| p.produce == s.key)?.produce_model?;
                     return Some(thumbs.get(&mut images, model));
                 }
+                // (A painting: the catalogue's painted canvas, rendered.)
+                if s.kind == crate::inventory::ItemKind::Painting {
+                    let m = *baked.as_ref()?.0.catalog.iter().find(|c| c.instance_name == "EaselCanvasPaintingMedium")?.models.first()?;
+                    return Some(thumbs.get(&mut images, m));
+                }
                 let model = ui.data.collectibles.iter().find(|c| c.key == s.key)?.model.clone();
                 let objd = baked.as_ref()?.0.catalog.iter().find(|c| c.instance_name.eq_ignore_ascii_case(&model))?.objd;
                 ui.icon(&mut images, &s3bake::gamedata::thumb_name(objd.2))

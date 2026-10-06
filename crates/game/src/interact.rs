@@ -188,7 +188,7 @@ impl ObjectKind {
             Self::Bookshelf
         } else if has("mirror") {
             Self::Mirror
-        } else if has("easel") && !has("canvas") {
+        } else if has("hobbiesskills.") && has("easel") && !has("canvas") {
             Self::Easel
         } else if has("guitar") && !has("decorations") {
             Self::Guitar
@@ -1500,10 +1500,16 @@ fn run_actions(
                                             if crate::wishes::has(wishes, "ExtraCreative") {
                                                 value = value * 3 / 2;
                                             }
-                                            if let Some(h) = household.as_mut() {
-                                                h.funds += value;
-                                            }
-                                            notes.push(format!("{} finished a painting and sold it for §{value}.", sim.first));
+                                            // Into their inventory, to sell or keep.
+                                            let kind = match lvl {
+                                                0..=2 => "Amateur Painting",
+                                                3..=5 => "Fine Painting",
+                                                6..=8 => "Brilliant Painting",
+                                                _ => "Masterpiece",
+                                            };
+                                            let key = format!("painting#{}", rand::rng().random::<u32>());
+                                            crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Painting, key, kind.to_string(), 0, value, 1);
+                                            notes.push(format!("{} finished a painting ({}, worth §{value}). It's in their inventory.", sim.first, kind.to_lowercase()));
                                         }
                                         Special::ChangeClothes => {
                                             // Into the outfit chosen, kept on until it's time for another.

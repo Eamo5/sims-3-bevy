@@ -246,7 +246,9 @@ installation is unreachable.
   hours) and a full trash can give nearby household Sims the game's *Dirty Surroundings*,
   then *Filthy Surroundings*, moodlets. Clearing dishes away fills the nearest trash can;
   once full, someone has to *Empty Trash* (neat Sims see to it, slobs never do).
-- **Inventories**: each Sim carries what they've picked, caught and found, in stacks on the
+- **Inventories**: each Sim carries what they've picked, caught, found and painted (finished
+  paintings, amateur to masterpiece by Painting skill, go in the painter's inventory to sell
+  or keep), in stacks on the
   Sim panel's Inventory tab (F9) with the objects' catalogue pictures (produce by quality);
   pick a stack to sell one or all of it, or to eat a piece of produce (a snack's worth,
   more for finer produce). Inventories are kept in saves.

@@ -28,6 +28,8 @@ pub enum ItemKind {
     Find,
     /// Butterflies and beetles.
     Insect,
+    /// A painting the Sim painted.
+    Painting,
 }
 
 /// Items of one kind (and, for produce, one quality).
@@ -81,12 +83,12 @@ impl Inventory {
 
     /// How many of a collectible they hold.
     pub fn held(&self, key: &str) -> u32 {
-        self.0.iter().filter(|s| s.kind != ItemKind::Produce && s.key == key).map(|s| s.count).sum()
+        self.0.iter().filter(|s| matches!(s.kind, ItemKind::Fish | ItemKind::Find | ItemKind::Insect) && s.key == key).map(|s| s.count).sum()
     }
 
     /// Their collectibles (finds, fish and insects): count and worth.
     pub fn collectibles(&self) -> (u32, i64) {
-        self.0.iter().filter(|s| s.kind != ItemKind::Produce).fold((0, 0), |(n, w), s| (n + s.count, w + s.worth))
+        self.0.iter().filter(|s| matches!(s.kind, ItemKind::Fish | ItemKind::Find | ItemKind::Insect)).fold((0, 0), |(n, w), s| (n + s.count, w + s.worth))
     }
 }
 
@@ -144,7 +146,11 @@ pub fn draw_tab(
     }
     p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), max_width: Val::Px(450.0), ..default() }).with_children(|grid| {
         for (i, s) in stacks.iter().enumerate() {
-            let bg = if s.kind == ItemKind::Produce { quality_color(s.quality) } else { Color::srgba(1.0, 1.0, 1.0, 0.85) };
+            let bg = match s.kind {
+                ItemKind::Produce => quality_color(s.quality),
+                ItemKind::Painting => Color::srgb(0.85, 0.75, 0.55),
+                _ => Color::srgba(1.0, 1.0, 1.0, 0.85),
+            };
             grid.spawn((
                 Button,
                 ItemTile(i),
@@ -167,8 +173,9 @@ pub fn draw_tab(
                         t.spawn((crate::icons::icon_bundle(h, 44.0), Pickable::IGNORE));
                     }
                     None => {
-                        // (Produce: its name.)
-                        let word = s.key.split_whitespace().next().unwrap_or("").chars().take(7).collect::<String>();
+                        // (Produce and paintings: their name.)
+                        let word = if s.kind == ItemKind::Painting { s.name.split_whitespace().next().unwrap_or("") } else { s.key.split_whitespace().next().unwrap_or("") };
+                        let word = word.chars().take(9).collect::<String>();
                         t.spawn((text(word, 11.0, Color::BLACK), Pickable::IGNORE));
                     }
                 }
