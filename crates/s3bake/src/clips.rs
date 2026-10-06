@@ -77,6 +77,12 @@ pub const CLIP_PREFIXES: &[&str] = &[
     // The mailbox and the paper.
     "a2o_mailbox_getMail",
     "a2o_mailbox_putFlagUp",
+    // Need failures: an accident, collapsing from exhaustion, sleeping on the floor.
+    "a_motFail_",
+    "c_motFail_",
+    "a_sleeponFloor_",
+    "c_sleeponFloor_",
+    "t_sleeponFloor_",
     "a2o_newspaper_read",
     // The Grim Reaper and dying of old age.
     "a_death_appear",

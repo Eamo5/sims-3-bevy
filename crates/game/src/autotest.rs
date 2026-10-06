@@ -161,7 +161,7 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -621,6 +621,23 @@ fn show_uniforms(mut commands: Commands, mut sel: Query<(&Transform, &mut crate:
     if let Ok(mut c) = cam.single_mut() {
         c.look_at(tf.translation + ahead * 2.2 + Vec3::Y * 0.9);
         c.distance = 5.5;
+    }
+}
+
+/// EXHAUST=<first name>: that Sim's energy (or BLADDER_FAIL=<first name>: bladder) runs out,
+/// once, a few seconds in.
+fn run_out(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives)>, mut done: Local<bool>, time: Res<Time>) {
+    if *done || time.elapsed_secs() < 8.0 {
+        return;
+    }
+    for (var, motive) in [("EXHAUST", crate::sim::ENERGY), ("BLADDER_FAIL", crate::sim::BLADDER)] {
+        let Ok(who) = std::env::var(var) else { continue };
+        *done = true;
+        for (s, mut m) in &mut sims {
+            if s.first == who {
+                m.0[motive] = -100.0;
+            }
+        }
     }
 }
 

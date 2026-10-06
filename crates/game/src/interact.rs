@@ -821,6 +821,9 @@ pub enum ActionKind {
     CallRepairman,
     /// Phone to hire a maid (or to let her go).
     HireMaid(bool),
+    /// A need gone to nothing: 0, an accident (bladder); 1, collapsing from exhaustion and
+    /// sleeping on the floor a while.
+    MotiveFail(u8),
     /// Plant a seed here.
     PlantSeed { at: Vec2, level: u8, plant: usize },
     /// Phone round to throw a party.
@@ -1246,6 +1249,17 @@ fn run_actions(
                             anim.pose = Pose::Talk;
                             continue;
                         }
+                        ActionKind::MotiveFail(k) => {
+                            action.phase = Phase::Running(0.0);
+                            anim.pose = Pose::Use;
+                            let clip = if *k == 0 {
+                                crate::anim::ActionClip::new(None, &["a_motFail_bladder_x"])
+                            } else {
+                                crate::anim::ActionClip::new(Some("a_motFail_exhausted_x"), &["a_sleeponFloor_breathe_x"])
+                            };
+                            commands.entity(me).insert(clip);
+                            continue;
+                        }
                         ActionKind::BuyReward(_) => None,
                         ActionKind::EatHere => {
                             action.phase = Phase::Running(0.0);
@@ -1400,6 +1414,7 @@ fn run_actions(
                             | ActionKind::MoveHouse
                             | ActionKind::CallRepairman
                             | ActionKind::HireMaid(_)
+                            | ActionKind::MotiveFail(_)
                             | ActionKind::ThrowParty => {}
                             ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } => {
                                 if let Ok((obj, otf, _, _)) = objects.get(*target) {
@@ -1848,6 +1863,22 @@ fn run_actions(
                             if elapsed >= 10.0 {
                                 finished = true;
                                 commands.insert_resource(PartyPlan { by: me, start: clock.minutes + 120.0 });
+                            }
+                        }
+                        ActionKind::MotiveFail(k) => {
+                            const ACCIDENT: f32 = 4.0;
+                            // (Asleep on the floor a couple of hours, then up again, still tired.)
+                            const FLOOR: f32 = 150.0;
+                            const UP: f32 = 4.0;
+                            if *k == 0 {
+                                finished = elapsed >= ACCIDENT;
+                            } else {
+                                if elapsed < FLOOR {
+                                    motives.add(ENERGY, 0.45 * dt);
+                                } else if elapsed - dt < FLOOR {
+                                    commands.entity(me).insert(crate::anim::ActionClip::new(None, &["a_sleeponFloor_getUp_x"]));
+                                }
+                                finished = elapsed >= FLOOR + UP;
                             }
                         }
                         ActionKind::CallRepairman => {

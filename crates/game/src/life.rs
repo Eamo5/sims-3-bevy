@@ -759,26 +759,41 @@ fn need_moodlets(mut q: Query<(&Motives, &Sim, &mut Moodlets)>) {
     }
 }
 
-/// Bladder failure and passing out.
+/// Bladder failure and passing out (the game's own animations: the accident; collapsing,
+/// sleeping on the floor a couple of hours and getting up again).
 fn need_failures(
     clock: Res<GameClock>,
-    mut q: Query<(Entity, &Sim, &mut Motives, &mut Moodlets, &mut crate::interact::ActionQueue)>,
+    mut q: Query<(Entity, &Sim, &mut Motives, &mut Moodlets, &mut crate::interact::ActionQueue, &InheritedVisibility)>,
     mut notes: ResMut<crate::interact::Notifications>,
 ) {
-    for (_, sim, mut m, mut ml, mut queue) in &mut q {
+    use crate::interact::{Action, ActionKind};
+    for (_, sim, mut m, mut ml, mut queue, vis) in &mut q {
+        // (Babies and toddlers are seen to by others; away, it happens off stage.)
+        let shown = vis.get() && !sim.age.is_little();
+        let failing = |q: &crate::interact::ActionQueue| q.0.iter().any(|a| matches!(a.kind, ActionKind::MotiveFail(_)) && !a.cancel);
         if m.0[BLADDER] <= -99.0 {
             m.0[BLADDER] = 100.0;
             m.add(HYGIENE, -60.0);
             ml.add(MoodletKind::Embarrassed, clock.minutes);
             notes.push(format!("{} couldn't make it to the bathroom in time!", sim.first));
+            if shown && !failing(&queue) {
+                for a in queue.0.iter_mut() {
+                    a.cancel = true;
+                }
+                queue.0.push_back(Action::new("Accident", ActionKind::MotiveFail(0), false));
+            }
         }
-        if m.0[ENERGY] <= -99.0 {
-            m.0[ENERGY] = 30.0;
+        if m.0[ENERGY] <= -99.0 && !failing(&queue) {
             ml.add(MoodletKind::PassedOut, clock.minutes);
             for a in queue.0.iter_mut() {
                 a.cancel = true;
             }
             notes.push(format!("{} passed out from exhaustion.", sim.first));
+            if shown {
+                queue.0.push_back(Action::new("Passed Out", ActionKind::MotiveFail(1), false));
+            } else {
+                m.0[ENERGY] = 30.0;
+            }
         }
     }
 }
