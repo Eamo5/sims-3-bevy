@@ -110,6 +110,8 @@ pub enum ObjectKind {
     VrGoggles,
     /// A teddy bear or one of the little toys (a toy boat, a pony, a robot...).
     StuffedToy,
+    /// A garden sprinkler.
+    Sprinkler,
     Other,
 }
 
@@ -128,6 +130,8 @@ impl ObjectKind {
             || ["boat", "rocket", "pony", "car", "rabbit", "sheep", "dragon", "lochness", "yeti", "robot", "alligator"].iter().any(|t| s.ends_with(&format!("objects.toys.{t}")))
         {
             Self::StuffedToy
+        } else if has("environment.sprinkler") {
+            Self::Sprinkler
         } else if has("barbeque") {
             Self::Grill
         } else if has("hotbeveragemachine") {
@@ -241,6 +245,7 @@ impl ObjectKind {
                 "Hobbies"
             }
             Self::SwingSet | Self::JungleGym | Self::DollHouse | Self::StuffedToy => "Kids",
+            Self::Sprinkler => "Outdoors",
             Self::HotTub => "Plumbing",
             Self::Dresser => "Surfaces",
             Self::Table => "Surfaces",
@@ -349,6 +354,11 @@ pub struct RepairmanVisit {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Special {
     None,
+    /// A garden sprinkler turned on (it runs a couple of hours) or off.
+    SprinklerOn,
+    SprinklerOff,
+    /// Running about in a sprinkler's spray (only while it's on).
+    PlayInSprinkler,
     FindJob,
     QuitJob,
     SellPainting,
@@ -577,6 +587,12 @@ static DOLLHOUSE: [InteractionDef; 1] = [def("Play with Dollhouse", 45.0, [0.0, 
 static JUNGLEGYM: [InteractionDef; 1] = [def("Play on Jungle Gym", 40.0, [0.0, 0.0, -8.0, 0.0, -8.0, 95.0], Pose::Use)];
 static FOOSBALL: [InteractionDef; 1] = [def("Play Foosball", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 65.0], Pose::Use)];
 static VIDEOGAME: [InteractionDef; 1] = [def("Play Video Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 70.0], Pose::Use)];
+static SPRINKLER: [InteractionDef; 3] = [
+    InteractionDef { autonomous: false, special: Special::SprinklerOn, ..def("Turn On", 2.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::SprinklerOff, ..def("Turn Off", 2.0, N, Pose::Use) },
+    // (Only while it's running.)
+    InteractionDef { special: Special::PlayInSprinkler, ..def("Play in Sprinkler", 30.0, [0.0, 0.0, -6.0, 0.0, 0.0, 110.0], Pose::Use) },
+];
 static STUFFED_TOY: [InteractionDef; 1] = [def("Play with Toy", 30.0, [0.0, 0.0, -2.0, 6.0, 0.0, 75.0], Pose::Use)];
 static VRGOGGLES: [InteractionDef; 1] = [def("Explore Virtual Worlds", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 95.0], Pose::Use)];
 static STEREO: [InteractionDef; 1] = [def("Dance", 45.0, [0.0, 0.0, -6.0, 0.0, -6.0, 70.0], Pose::Dance)];
@@ -677,6 +693,17 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
             ],
         ),
         // (Children's: grown-ups play with toys only with a little one.)
+        "Play in Sprinkler" => A::new(
+            Some("a2o_sprinklerGarden_playWith_start_x"),
+            &[
+                "a2o_sprinklerGarden_playWith_loop1_x",
+                "a2o_sprinklerGarden_playWith_loop2_x",
+                "a2o_sprinklerGarden_playWith_loop3_x",
+                "a2o_sprinklerGarden_playWith_loop4_x",
+                "a2o_sprinklerGarden_playWith_jumpOver_x",
+            ],
+        ),
+        "Turn On" | "Turn Off" if kind == ObjectKind::Sprinkler => A::new(None, &["a2o_gardening_crouch_pullWeeds_x"]),
         "Play with Toy" => A::new(
             Some("a2o_stuffedAnimal_play_start_normal_x"),
             &["a2o_stuffedAnimal_play_loop1_x", "a2o_stuffedAnimal_play_loop2_x", "a2o_stuffedAnimal_play_loop3_x"],
@@ -825,6 +852,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::VideoGame => &VIDEOGAME,
         ObjectKind::VrGoggles => &VRGOGGLES,
         ObjectKind::StuffedToy => &STUFFED_TOY,
+        ObjectKind::Sprinkler => &SPRINKLER,
         _ => &[],
     }
 }
@@ -1620,7 +1648,7 @@ fn run_actions(
                                     }
                                     match d.special {
                                         // (Getting out of the pool is the swim module's.)
-                                        Special::FindJob | Special::Swim | Special::WriteNovel => {}
+                                        Special::FindJob | Special::Swim | Special::WriteNovel | Special::PlayInSprinkler => {}
                                         Special::Homework => {
                                             notes.push(format!("{} finished their homework.", sim.first));
                                             commands.entity(me).remove::<crate::rabbitholes::Homework>().queue_silenced(|mut e: EntityWorldMut| {
@@ -1695,6 +1723,12 @@ fn run_actions(
                                         }
                                         Special::GrabPlate => {
                                             commands.entity(me).insert(crate::meals::MealRequest::Grabbed(*target));
+                                        }
+                                        Special::SprinklerOn => {
+                                            commands.entity(*target).insert(crate::gardening::Sprinkling { until: clock.minutes + 120.0 });
+                                        }
+                                        Special::SprinklerOff => {
+                                            commands.entity(*target).remove::<crate::gardening::Sprinkling>();
                                         }
                                         Special::PutAway => {
                                             commands.entity(me).insert(crate::meals::MealRequest::PutAway(*target));
@@ -2228,11 +2262,12 @@ fn autonomy(
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>,
     hh: Option<Res<Household>>,
     (broken, plant_q, lit_q, hw_q): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>, Query<(), With<crate::fireplace::Lit>>, Query<(), With<crate::rabbitholes::Homework>>),
-    (party_on, trash_q, served_q, leftovers): (
+    (party_on, trash_q, served_q, leftovers, sprinkling): (
         Option<Res<Party>>,
         Query<&crate::surroundings::TrashFill>,
         Query<&crate::surroundings::ServedAt>,
         Res<crate::meals::Leftovers>,
+        Query<(), With<crate::gardening::Sprinkling>>,
     ),
     (called, repairmen): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>),
     friends_away: Query<(Entity, &Sim), (With<OffLot>, Without<Invited>)>,
@@ -2330,6 +2365,9 @@ fn autonomy(
                     continue;
                 }
                 if d.special == Special::Leftovers && (leftovers.0.is_empty() || my_lot.is_some()) {
+                    continue;
+                }
+                if d.special == Special::PlayInSprinkler && !sprinkling.contains(oe) {
                     continue;
                 }
                 if matches!(d.special, Special::ServeMeal | Special::CleanUp | Special::PayBills) && (meal_out && d.special == Special::ServeMeal || !household.contains(me)) {

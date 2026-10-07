@@ -22,7 +22,8 @@ pub struct GardeningPlugin;
 
 impl Plugin for GardeningPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Garden>().add_systems(Update, (starter_packet, restore_plants, garden_requests, grow).chain().run_if(in_state(PlayMode::Live)));
+        app.init_resource::<Garden>()
+            .add_systems(Update, (starter_packet, restore_plants, garden_requests, grow, sprinkle).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -341,6 +342,35 @@ fn plural(produce: &str, n: u32) -> String {
 }
 
 /// Plants dry out, get weedy, grow and bear produce.
+/// A garden sprinkler turned on: until when it runs.
+#[derive(Component)]
+pub struct Sprinkling {
+    pub until: f64,
+}
+
+/// How far a sprinkler waters (metres).
+const SPRINKLER_REACH: f32 = 3.5;
+
+/// A sprinkler running waters the plants in its reach, and turns itself off after a while.
+fn sprinkle(
+    mut commands: Commands,
+    clock: Res<crate::clock::GameClock>,
+    sprinklers: Query<(Entity, &Sprinkling, &Transform)>,
+    mut plants: Query<(&mut GrowingPlant, &Transform), Without<Sprinkling>>,
+) {
+    for (e, s, tf) in &sprinklers {
+        if clock.minutes >= s.until {
+            commands.entity(e).remove::<Sprinkling>();
+            continue;
+        }
+        for (mut p, ptf) in &mut plants {
+            if ptf.translation.xz().distance(tf.translation.xz()) <= SPRINKLER_REACH && p.water < 100.0 {
+                p.water = 100.0;
+            }
+        }
+    }
+}
+
 fn grow(
     delta: Res<crate::clock::SimDelta>,
     clock: Res<crate::clock::GameClock>,

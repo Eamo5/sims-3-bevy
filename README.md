@@ -67,7 +67,10 @@ installation is unreachable.
   the game's gardening animations and teach Gardening; green-thumbed Sims tend their plants
   on their own. Each plant has the game's quality, Horrifying to Perfect: it improves while
   watered and weeded (faster for a skilled gardener) and suffers when neglected, and its
-  produce sells at the game's multiplier for its quality (up to four times for Perfect).
+  produce sells at the game's multiplier for its quality (up to four times for Perfect). A
+  garden sprinkler, turned on, runs for two hours watering the plants in its reach (its dome
+  of spray from the game's model, and droplets), and Sims play in it while it runs, with the
+  game's animations.
   Perfect produce counts towards The Perfect Garden lifetime wish. The garden is kept in
   saves.
 - **Breakdowns**: showers, baths, sinks, TVs, computers and stereos break now and then with

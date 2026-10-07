@@ -715,13 +715,14 @@ fn world_click(
     mut ray_cast: MeshRayCast,
     parents: Query<&ChildOf>,
     sims: Query<(&Sim, Has<HouseholdMember>, Has<Selected>)>,
-    (objects, broken_q, lit_q, hw_q, trash_q, leftovers): (
+    (objects, broken_q, lit_q, hw_q, trash_q, leftovers, sprinkling): (
         Query<&GameObject>,
         Query<(), With<crate::interact::Broken>>,
         Query<(), With<crate::fireplace::Lit>>,
         Query<(), With<crate::rabbitholes::Homework>>,
         Query<&crate::surroundings::TrashFill>,
         Res<crate::meals::Leftovers>,
+        Query<(), With<crate::gardening::Sprinkling>>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
     members_q: Query<(), With<HouseholdMember>>,
@@ -856,6 +857,11 @@ fn world_click(
                 }
                 // (An empty trash can has nothing to take out.)
                 if d.special == Special::Leftovers && leftovers.0.is_empty() {
+                    continue;
+                }
+                // A sprinkler: on or off, and played in while it's on.
+                let on = sprinkling.contains(t);
+                if (d.special == Special::SprinklerOn && on) || (matches!(d.special, Special::SprinklerOff | Special::PlayInSprinkler) && !on) {
                     continue;
                 }
                 if d.special == Special::EmptyTrash && !trash_q.get(t).is_ok_and(|f| f.0 > 0) {

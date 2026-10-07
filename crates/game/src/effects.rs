@@ -18,7 +18,7 @@ pub struct EffectsPlugin;
 
 impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (attach, fountain_water, emit, fall, tv_screens).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (attach, fountain_water, sprinkler_spray, emit, fall, tv_screens).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -30,6 +30,8 @@ enum Spray {
     Shower,
     /// A thin stream from the tap.
     Tap,
+    /// Arcs thrown out round a garden sprinkler, while it's on.
+    Sprinkler,
 }
 
 /// Where an object's water comes from (object space) and how.
@@ -43,6 +45,11 @@ struct Emitter {
 /// An object already looked at for effects.
 #[derive(Component)]
 struct FxChecked;
+
+/// A sprinkler's spray: the dome of water in its model (the game draws it in the sprinkler's
+/// blue, see-through), shown while it's on.
+#[derive(Component)]
+struct SprayDome;
 
 /// A fountain whose water surfaces (its untextured parts, drawn by the game's water shader)
 /// are still to be made water.
@@ -224,15 +231,21 @@ fn attach(
         let spray = match o.kind {
             ObjectKind::Shower => Spray::Shower,
             ObjectKind::Sink => Spray::Tap,
+            ObjectKind::Sprinkler => Spray::Sprinkler,
             _ if script.contains(".Environment.Fountain") && !script.contains("FountainJet") => Spray::Fountain,
             _ => continue,
         };
         if spray == Spray::Fountain {
             commands.entity(e).insert(FountainWater);
         }
-        // The highest slot: the shower head, the tap, the fountain's top.
-        let Some(slot) = slots.get(&o.objd).and_then(|s| s.iter().max_by(|a, b| a[1].total_cmp(&b[1])).copied()) else { continue };
-        if spray != Spray::Tap && slot[1] < 0.3 {
+        if spray == Spray::Sprinkler {
+            commands.entity(e).insert(SprayDome);
+        }
+        // The highest slot: the shower head, the tap, the fountain's top (a sprinkler's head, or
+        // its middle when it has no slot).
+        let highest = slots.get(&o.objd).and_then(|s| s.iter().max_by(|a, b| a[1].total_cmp(&b[1])).copied());
+        let Some(slot) = highest.or((spray == Spray::Sprinkler).then_some([0.0, 0.1, 0.0])) else { continue };
+        if !matches!(spray, Spray::Tap | Spray::Sprinkler) && slot[1] < 0.3 {
             continue;
         }
         commands.entity(e).insert(Emitter { slot: Vec3::from(slot), spray, owed: 0.0 });
@@ -270,24 +283,65 @@ fn fountain_water(
     }
 }
 
+/// A sprinkler's spray dome (its blended part) in see-through water blue, shown while it runs.
+#[allow(clippy::type_complexity)]
+fn sprinkler_spray(
+    mut commands: Commands,
+    sprinklers: Query<(&Children, Has<crate::gardening::Sprinkling>), With<SprayDome>>,
+    mut parts: Query<(&mut MeshMaterial3d<StandardMaterial>, &mut Visibility)>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+    mut water: Local<Option<Handle<StandardMaterial>>>,
+) {
+    let w = water
+        .get_or_insert_with(|| {
+            mats.add(StandardMaterial {
+                // (A faint shimmer of water: the game draws it with its glass shader.)
+                base_color: Color::srgba(0.82, 0.9, 1.0, 0.1),
+                perceptual_roughness: 0.05,
+                reflectance: 0.8,
+                alpha_mode: AlphaMode::Blend,
+                double_sided: true,
+                cull_mode: None,
+                ..default()
+            })
+        })
+        .clone();
+    for (children, on) in &sprinklers {
+        for c in children {
+            let Ok((mut m, mut v)) = parts.get_mut(*c) else { continue };
+            let dome = m.0 == w || mats.get(&m.0).is_some_and(|m| m.alpha_mode == AlphaMode::Blend);
+            if !dome {
+                continue;
+            }
+            if m.0 != w {
+                m.0 = w.clone();
+                // (Spray casts no shadow.)
+                commands.entity(*c).insert(NotShadowCaster);
+            }
+            v.set_if_neq(if on { Visibility::Inherited } else { Visibility::Hidden });
+        }
+    }
+}
+
 /// Fountains play; showers and taps run while someone's at them.
 #[allow(clippy::type_complexity)]
 fn emit(
     mut commands: Commands,
     time: Res<Time>,
-    mut emitters: Query<(&mut Emitter, &GlobalTransform, &UsedBy, &InheritedVisibility)>,
+    mut emitters: Query<(&mut Emitter, &GlobalTransform, &UsedBy, &InheritedVisibility, Has<crate::gardening::Sprinkling>)>,
     users: Query<&GlobalTransform, With<crate::sim::Sim>>,
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut looks: Local<Looks>,
 ) {
     let dt = time.delta_secs().min(0.1);
     let mut rng = rand::rng();
-    for (mut em, gt, used, vis) in &mut emitters {
+    for (mut em, gt, used, vis, sprinkling) in &mut emitters {
         if !vis.get() {
             continue;
         }
         let on = match em.spray {
             Spray::Fountain => true,
+            Spray::Sprinkler => sprinkling,
             // (Someone at it, not just on their way.)
             _ => used.0.and_then(|u| users.get(u).ok()).is_some_and(|u| u.translation().xz().distance(gt.translation().xz()) < 1.3),
         };
@@ -295,11 +349,12 @@ fn emit(
             em.owed = 0.0;
             continue;
         }
-        if em.owed == 0.0 && em.spray != Spray::Fountain {
+        if em.owed == 0.0 && !matches!(em.spray, Spray::Fountain | Spray::Sprinkler) {
             debug!("{:?} running at {:?}", em.spray, gt.transform_point(em.slot));
         }
         let rate = match em.spray {
             Spray::Fountain => 170.0,
+            Spray::Sprinkler => 140.0,
             Spray::Shower => 110.0,
             Spray::Tap => 40.0,
         };
@@ -328,6 +383,11 @@ fn emit(
                 Spray::Fountain => {
                     let out = rng.random_range(0.08..0.4);
                     (Vec3::new(a.cos() * out, 1.0, a.sin() * out), rng.random_range(3.0..4.2), rng.random_range(0.9..1.2), 0.09, 0.05)
+                }
+                // Out and up in every direction, landing a few metres off.
+                Spray::Sprinkler => {
+                    let up = rng.random_range(0.5..1.0);
+                    (Vec3::new(a.cos(), up, a.sin()), rng.random_range(3.0..4.5), rng.random_range(0.8..1.1), 0.07, 0.04)
                 }
                 Spray::Shower => {
                     let out = rng.random_range(0.0..0.22);

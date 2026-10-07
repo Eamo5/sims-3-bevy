@@ -233,6 +233,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "p2o_stuffedAnimal_play_loop",
     "c2o_stuffedAnimal_play_start_normal",
     "p2o_stuffedAnimal_play_start_normal",
+    "a2o_sprinklerGarden_playWith_",
+    "c2o_sprinklerGarden_playWith_",
     "a2b_crib_pullOut",
     "a2b_babyBottle_feed",
     "a2b_changeDiaper",

@@ -450,11 +450,13 @@ pub fn spawn_game_object_design(
 ) -> Option<SpawnedObject> {
     let design = design.filter(|d| assets.design_applies(ctx, objd, *d));
     let parts = assets.object_design(ctx, objd, design);
-    let (mn, mx) = parts_bounds(&parts)?;
     let entry = catalog.by_key(&objd);
     let (name, price, kind) = entry
         .map(|e| (e.name.clone(), e.price, e.kind))
         .unwrap_or_else(|| ("Object".into(), 0, ObjectKind::Other));
+    // (A sprinkler's model holds the dome of its spray: it stands where its solid parts are.)
+    let solid: Vec<_> = parts.iter().filter(|p| kind != ObjectKind::Sprinkler || p.mode == 0).cloned().collect();
+    let (mn, mx) = parts_bounds(if solid.is_empty() { &parts } else { &solid })?;
     let tf = Transform::from_translation(pos).with_rotation(rotation);
     let e = spawn_parts(commands, &parts, tf);
     let center = Vec2::new((mn.x + mx.x) * 0.5, (mn.z + mx.z) * 0.5);
