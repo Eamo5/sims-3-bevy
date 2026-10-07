@@ -236,6 +236,8 @@ fn put_down_carried(mut commands: Commands, sims: Query<(Entity, &crate::anim::C
             TRASH_CARRY => &["Throw Out Trash"],
             BOOK_CARRY => &["Read Book"],
             PAPER_CARRY => &["Read the Paper"],
+            crate::meals::FOOD_CARRY => &["Prepare Food"],
+            crate::meals::PAN_CARRY => &["Cook Dinner"],
             _ => continue,
         };
         let going = queue.0.front().is_some_and(|a| goes_to.contains(&a.label.as_str()));

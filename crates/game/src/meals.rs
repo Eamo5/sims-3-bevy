@@ -14,7 +14,7 @@ use rand::seq::IndexedRandom;
 
 use crate::PlayMode;
 use crate::baked::Baked;
-use crate::interact::{Action, ActionKind, ActionQueue, CHAIR_EAT, GameObject, Notifications, ObjectKind, UsedBy};
+use crate::interact::{Action, ActionKind, ActionQueue, CHAIR_EAT, GameObject, Notifications, ObjectKind, Special, UsedBy};
 use crate::loading::Catalog;
 use crate::objects::{AssetCtx, ObjectAssets};
 use crate::sim::{Age, HouseholdMember, Sim};
@@ -25,7 +25,65 @@ impl Plugin for MealsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Leftovers>()
             .add_systems(OnEnter(crate::AppState::InGame), |mut l: ResMut<Leftovers>| l.0.clear())
-            .add_systems(Update, (meal_requests, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (cook_prep, cook_prep_done, meal_requests, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
+    }
+}
+
+/// The game's walks with the ingredients' tray, and with the frying pan.
+pub const FOOD_CARRY: &str = "a2o_foodTray_carry_x";
+pub const PAN_CARRY: &str = "a2o_fryingPan_carry_x";
+
+/// A cook whose meal is being prepared (ingredients from the fridge, chopped at a counter) on
+/// the way to the stove.
+#[derive(Component)]
+pub struct CookPrepped;
+
+/// Setting out to cook dinner at the stove, a cook first fetches the ingredients from the
+/// nearest fridge and chops them at the nearest counter, as the game's cooks do.
+#[allow(clippy::type_complexity)]
+fn cook_prep(
+    mut commands: Commands,
+    data: Res<Baked>,
+    mut sims: Query<(Entity, &Transform, &mut ActionQueue), Without<CookPrepped>>,
+    objects: Query<(Entity, &GameObject, &Transform, &UsedBy), Without<crate::interact::Broken>>,
+) {
+    for (e, tf, mut queue) in &mut sims {
+        let Some(front) = queue.0.front_mut() else { continue };
+        if front.label != "Cook Dinner" || !matches!(front.phase, crate::interact::Phase::Start | crate::interact::Phase::Routing) || front.cancel {
+            continue;
+        }
+        // (Not on its way to the stove yet: there's the fridge and a counter first.)
+        front.phase = crate::interact::Phase::Start;
+        let front = queue.0.front().unwrap();
+        let ActionKind::Object { target: stove, .. } = front.kind else { continue };
+        let Ok((_, _, stf, _)) = objects.get(stove) else { continue };
+        commands.entity(e).insert(CookPrepped);
+        let near = |want: &dyn Fn(&GameObject) -> bool| {
+            objects
+                .iter()
+                .filter(|(_, o, t, used)| want(o) && used.0.is_none_or(|u| u == e) && (t.translation.y - stf.translation.y).abs() < 1.5 && t.translation.distance(stf.translation) < 15.0)
+                .min_by(|a, b| a.2.translation.distance(stf.translation).total_cmp(&b.2.translation.distance(stf.translation)))
+                .map(|(o, ..)| o)
+        };
+        let counter = near(&|o: &GameObject| o.kind == ObjectKind::Table && data.0.catalog_entry(&o.objd).is_some_and(|c| c.script.contains("Counter")));
+        let fridge = near(&|o: &GameObject| o.kind == ObjectKind::Fridge);
+        let def = |kind: ObjectKind, s: Special| crate::interact::interactions_for(kind).iter().position(|d| d.special == s);
+        if let (Some(c), Some(d)) = (counter, def(ObjectKind::Table, Special::PrepFood)) {
+            queue.0.push_front(Action::new("Prepare Food", ActionKind::Object { target: c, def: d }, true));
+        }
+        if let (Some(f), Some(d)) = (fridge, def(ObjectKind::Fridge, Special::GetIngredients)) {
+            queue.0.push_front(Action::new("Get Ingredients", ActionKind::Object { target: f, def: d }, true));
+        }
+        let _ = tf;
+    }
+}
+
+/// Once the cooking's done (or given up), the next meal is prepared afresh.
+fn cook_prep_done(mut commands: Commands, sims: Query<(Entity, &ActionQueue), With<CookPrepped>>) {
+    for (e, queue) in &sims {
+        if !queue.0.front().is_some_and(|a| matches!(a.label.as_str(), "Get Ingredients" | "Prepare Food" | "Cook Dinner")) {
+            commands.entity(e).remove::<CookPrepped>();
+        }
     }
 }
 

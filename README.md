@@ -259,6 +259,9 @@ installation is unreachable.
 - **Lots' own ground**: lots keep their sculpted ground; its dips are carved back into the
   flattened world (Central Park's sunken plaza with the fountain basin set into it, hollows on
   the beaches), and ground-level paving follows the ground.
+- **Cooking dinner**: the cook first fetches the ingredients from the fridge (its door swinging
+  open and shut), carries the tray to the nearest counter and chops them there, then takes the
+  frying pan to the stove, each with the game's animations and props.
 - **Reading**: *Read a Book* at a bookshelf takes a book down (the game's animation), carries it
   to the nearest free sofa or chair and reads it sitting there, turning the pages (standing at
   the shelf when there's no seat free). The morning paper is picked up off the ground and carried

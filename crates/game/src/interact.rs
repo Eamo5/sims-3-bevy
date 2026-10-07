@@ -421,6 +421,9 @@ pub enum Special {
     ReadBook,
     /// The paper picked up, to read in a seat (or where it lay, with none free).
     GetPaper,
+    /// Before cooking: the ingredients from the fridge, and chopped at a counter.
+    GetIngredients,
+    PrepFood,
     /// A garden sprinkler turned on (it runs a couple of hours) or off.
     SprinklerOn,
     SprinklerOff,
@@ -519,13 +522,18 @@ const fn def(name: &'static str, minutes: f32, per_hour: [f32; 6], pose: Pose) -
     }
 }
 
-static FRIDGE: [InteractionDef; 4] = [
+static FRIDGE: [InteractionDef; 5] = [
     InteractionDef { special: Special::Cook, ..def("Have Quick Meal", 30.0, [130.0, -6.0, 0.0, 0.0, -4.0, 4.0], Pose::Use) },
     // (What it leads to: a plate of a proper meal, eaten at the table.)
     InteractionDef { special: Special::Leftovers, ..def("Have Leftovers", 3.0, [5000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) },
     def("Grab a Snack", 12.0, [140.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Use),
     InteractionDef { autonomous: false, skill: Some("Cooking"), special: Special::BakeCake, ..def("Bake Birthday Cake", 30.0, [0.0, 0.0, 0.0, 0.0, 0.0, 6.0], Pose::Use) },
+    // (Before cooking at the stove: never on the menu.)
+    InteractionDef { autonomous: false, special: Special::GetIngredients, ..def("Get Ingredients", 6.0, N, Pose::Use) },
 ];
+/// (A counter, where the ingredients are chopped before cooking: never on the menu.)
+static COUNTER: [InteractionDef; 1] =
+    [InteractionDef { autonomous: false, skill: Some("Cooking"), special: Special::PrepFood, ..def("Prepare Food", 15.0, [0.0, 0.0, 0.0, 0.0, -2.0, 4.0], Pose::Use) }];
 static CAKE: [InteractionDef; 1] =
     [InteractionDef { autonomous: false, special: Special::BlowOutCandles, ..def("Grow Up", 3.0, [0.0, 0.0, 0.0, 10.0, 0.0, 20.0], Pose::Use) }];
 // (Cooking and grabbing a plate don't feed by themselves: the hunger figures are what they lead
@@ -796,6 +804,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Write Novel" | "Find a Job" | "Quit Job" => A::new(None, &["a2o_computer_chess_type_loop_x"]),
         "Dance" => A::new(None, &["a_dance_beg_", "a_dance_med_"]),
         "Read a Book" => A::new(None, &["a2o_bookshelf_getBook_Carry_x"]),
+        "Get Ingredients" => A::steps("a2o_fridge_openDoor_x", &["a2o_fridge_takeFoodOut_foodTray_x", "a2o_fridge_closeDoor_x"], &["a2o_foodTray_carry_x"]),
+        "Prepare Food" => A::new(Some("a2o_cuttingBoard_start_fromCarry_x"), &["a2o_cuttingBoard_chop_loopMedSkill_x", "a2o_cuttingBoard_chop_loopLowSkill_x"]),
         "Read Book" if matches!(kind, ObjectKind::Sofa | ObjectKind::Chair | ObjectKind::Stool) => {
             A::new(Some("a2o_book_readBook_sitting_fromCarry_start_x"), &["a2o_book_readBook_sitting_loopRead_x", "a2o_book_readBook_sitting_loopTurnPage_x"])
         }
@@ -1012,6 +1022,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Teleporter => &TELEPORTER,
         ObjectKind::BodySculptor => &BODY_SCULPTOR,
         ObjectKind::MoodletManager => &MOODLET_MANAGER,
+        ObjectKind::Table => &COUNTER,
         _ => &[],
     }
 }
@@ -1429,11 +1440,12 @@ fn run_actions(
     mut life: MessageWriter<LifeEvent>,
     people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
     mut conceive: MessageWriter<crate::little::Conceive>,
-    (mut fire, upgraded, baked, paper_in_hand): (
+    (mut fire, upgraded, baked, paper_in_hand, prepped): (
         MessageWriter<crate::fire::StartFire>,
         Query<&crate::upgrades::Upgrades>,
         Option<Res<crate::baked::Baked>>,
         Query<&crate::surroundings::PaperInHand>,
+        Query<(), With<crate::meals::CookPrepped>>,
     ),
 ) {
     let Some(grid) = grid else { return };
@@ -1828,6 +1840,8 @@ fn run_actions(
                                     Special::SellPainting => crate::paintings::CANVAS_MINUTES[crate::paintings::canvas(plan, skills.level("Painting")) as usize],
                                     // (Only taking the book down, or picking the paper up: they're read elsewhere.)
                                     Special::GetBook | Special::GetPaper => 2.0,
+                                    // (Less time at the stove once the food's been prepared.)
+                                    Special::ServeMeal if prepped.contains(me) && d.minutes > 30.0 => d.minutes - 15.0,
                                     // (Twice as quick for a Speedy Cleaner; homework too for a Multi-Tasker.)
                                     Special::CleanUp | Special::EmptyTrash if crate::wishes::has(wishes, "SpeedyCleaner") => d.minutes * 0.5,
                                     Special::Homework if crate::wishes::has(wishes, "MultiTasker") => d.minutes * 0.5,
@@ -1851,6 +1865,12 @@ fn run_actions(
                                         Special::FindJob | Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport | Special::WashDishes | Special::DropTrash | Special::ReadBook => {}
                                         Special::GetBook => {
                                             commands.entity(me).insert(crate::surroundings::ReadSomewhere(*target));
+                                        }
+                                        Special::GetIngredients => {
+                                            commands.entity(me).insert(crate::anim::Carrying(crate::meals::FOOD_CARRY));
+                                        }
+                                        Special::PrepFood => {
+                                            commands.entity(me).insert(crate::anim::Carrying(crate::meals::PAN_CARRY));
                                         }
                                         Special::GetPaper => {
                                             commands.entity(*target).insert(Visibility::Hidden);
