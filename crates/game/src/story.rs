@@ -117,6 +117,7 @@ fn progress(
     members: Query<(&Sim, &Relationships), With<HouseholdMember>>,
     mut spawned: Query<(Entity, &mut Sim, &Visibility), Without<HouseholdMember>>,
     mut notes: ResMut<Notifications>,
+    dormant: Res<crate::household::Dormant>,
 ) {
     let Some(town) = town else { return };
     let today = clock.day();
@@ -131,7 +132,8 @@ fn progress(
     story.day = today;
     // Who the household knows: any of the town's Sims about with whom one of them has a
     // relationship.
-    let household_ids: Vec<u64> = members.iter().map(|(s, _)| s.id).collect();
+    // (Nor those of the households played before: they're as they were left.)
+    let household_ids: Vec<u64> = members.iter().map(|(s, _)| s.id).chain(dormant.member_ids()).collect();
     let mut known: Vec<u64> = Vec::new();
     for (e, s, _) in &spawned {
         if members.iter().any(|(_, r)| r.0.contains_key(&e)) {

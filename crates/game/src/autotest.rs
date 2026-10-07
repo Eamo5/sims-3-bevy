@@ -330,6 +330,7 @@ impl Plugin for AutoTestPlugin {
             )
             .add_systems(Update, auto_speed.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_save.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, auto_switch.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_load.run_if(in_state(AppState::MainMenu)))
             .add_systems(PreUpdate, ui_flow.after(bevy::ui::UiSystems::Focus))
             .add_systems(PreUpdate, auto_move_house.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::ChooseLot)))
@@ -2494,6 +2495,35 @@ fn auto_save(args: Res<AutoArgs>, time: Res<Time>, mut since: Local<Option<f32>>
     if !*done && time.elapsed_secs() - start >= at {
         *done = true;
         crate::save::request_save(&mut w);
+    }
+}
+
+/// SWITCH_EVERY=<secs>: the household is changed (as by the pause menu's Change Household) that
+/// long after each one moves in, ANSWER=<n> choosing which; SWITCH_SAVE=1 saves a few seconds
+/// after each one moves in.
+fn auto_switch(
+    time: Res<Time>,
+    household: Option<Res<crate::interact::Household>>,
+    mut since: Local<Option<(String, f32, bool, bool)>>,
+    mut ask: MessageWriter<crate::household::ChooseHousehold>,
+    mut save: MessageWriter<crate::save::SaveRequest>,
+) {
+    let Some(every) = std::env::var("SWITCH_EVERY").ok().and_then(|v| v.parse::<f32>().ok()) else { return };
+    let Some(h) = household else { return };
+    if since.as_ref().is_none_or(|s| s.0 != h.name) {
+        *since = Some((h.name.clone(), time.elapsed_secs(), false, false));
+    }
+    let Some((_, t0, saved, asked)) = since.as_mut() else { return };
+    let t = time.elapsed_secs() - *t0;
+    if !*saved && t > 8.0 && std::env::var("SWITCH_SAVE").is_ok() {
+        *saved = true;
+        info!("autotest: saving the {} household", h.name);
+        save.write(crate::save::SaveRequest);
+    }
+    if !*asked && t > every {
+        *asked = true;
+        info!("autotest: changing household from the {} household", h.name);
+        ask.write(crate::household::ChooseHousehold);
     }
 }
 

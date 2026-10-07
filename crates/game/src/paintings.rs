@@ -194,7 +194,7 @@ fn easel_canvases(
         }
         let level = skills.level("Painting");
         let size = canvas(plan.as_deref(), level);
-        let mut chosen = || paint(Some(data), size, level, &sim.traits, sim.age == crate::sim::Age::Child, crate::wishes::has(wishes, "ExtraCreative"), &mut rand::rng());
+        let chosen = || paint(Some(data), size, level, &sim.traits, sim.age == crate::sim::Age::Child, crate::wishes::has(wishes, "ExtraCreative"), &mut rand::rng());
         let painted = match plan {
             Some(mut p) => p.painted.get_or_insert_with(chosen).clone(),
             None => {

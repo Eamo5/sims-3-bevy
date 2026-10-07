@@ -307,6 +307,14 @@ installation is unreachable.
   on the chosen lot the household starts afresh with everything else they had (Sims, skills,
   jobs, relationships, money, wishes, garden seeds, collection, the town's story), the old
   home's bought furniture sold back for four-fifths of its price.
+- **Changing household**: the game menu's "Change Household" lists the town's other families
+  (each with who's in it, their money and their home): the households played before, then
+  the world's families never played. The household being played stays in town just as it is,
+  kept in the save to come back to, and the one chosen takes over at the same time, in the
+  same town, with the town's story and family tree as they stand. A household played before
+  picks up where it was left; a town family moves into their own home. Who knew whom goes
+  across both ways, and the families played before are about town while another is played
+  (the town's story leaves them as they were). Changing doesn't save the game by itself.
 - **Story progression**: the rest of the town lives on. Each morning the world's other Sims
   grow older (elders passing away in time), single grown-ups pair off and couples marry,
   married couples have babies, and grown-ups find jobs and are promoted. The household hears
@@ -448,7 +456,8 @@ installation is unreachable.
   Valley (2).json"), so one household never writes over another's game. Each save goes to a
   temporary file first and keeps the one it replaces as `.json.bak`, and saves from older
   versions of the game still load.
-- **Options**: Escape pauses with a game menu (resume, options, save, main menu, quit); the
+- **Options**: Escape pauses with a game menu (resume, options, save, change household, main
+  menu, quit); the
   options set master, music, effects, voice and ambient levels, aging and life span (short
   to epic), free will, shadows and the frame-rate counter, kept in `settings.json`.
 

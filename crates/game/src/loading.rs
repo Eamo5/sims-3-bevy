@@ -178,12 +178,20 @@ fn start_loading(
     selected: Res<SelectedWorld>,
     pending: Option<Res<crate::home::PendingHousehold>>,
     save: Option<Res<crate::save::PendingLoad>>,
+    carry: Option<Res<crate::household::CarryOver>>,
 ) {
     let members: Vec<crate::sim::Sim> = pending.as_ref().map(|p| p.members.clone()).unwrap_or_default();
     let playing: Option<u64> = pending.as_ref().and_then(|p| p.premade.as_ref()).map(|h| h.id);
-    let known: Option<Vec<crate::sim::Sim>> = save.as_ref().map(|s| s.0.known_sims());
-    // The town as the save left it.
-    let story: crate::story::TownStory = save.as_ref().map(|s| s.0.town.clone()).unwrap_or_default();
+    // (A town family taking over from another household knows those of theirs they knew.)
+    let known: Option<Vec<crate::sim::Sim>> = save
+        .as_ref()
+        .map(|s| s.0.known_sims())
+        .or_else(|| carry.as_ref().filter(|c| !c.known.is_empty()).map(|c| c.known.iter().map(crate::save::SaveGame::sim).collect()));
+    // The town as the save (or the game changed over from) left it, and the households played
+    // before, living their lives about town.
+    let story: crate::story::TownStory = save.as_ref().map(|s| s.0.town.clone()).or_else(|| carry.as_ref().map(|c| c.town.clone())).unwrap_or_default();
+    let dormant: Vec<crate::save::SaveGame> = save.as_ref().map(|s| s.0.dormant.clone()).or_else(|| carry.as_ref().map(|c| c.dormant.clone())).unwrap_or_default();
+    let former = crate::household::about_town(&dormant);
     commands.spawn((Camera2d, DespawnOnExit(AppState::Loading)));
     commands
         .spawn((
@@ -259,10 +267,13 @@ fn start_loading(
         set_status("Dressing your Sims…");
         let cas = crate::simbody::CasData::from_baked(&baked);
         // The town's own Sims stroll past and come to visit.
-        let town: Vec<crate::sim::Sim> = premades
-            .as_ref()
-            .map(|p| crate::premade::TownPremades(p.clone()).others(playing).into_iter().map(crate::premade::to_sim).filter_map(|s| story.apply(s)).collect())
-            .unwrap_or_default();
+        // (Those of households played before first: they're about town as they were left.)
+        let gone = crate::household::Dormant(dormant).member_ids();
+        let mut town: Vec<crate::sim::Sim> = former;
+        if let Some(p) = &premades {
+            let premades = crate::premade::TownPremades(p.clone());
+            town.extend(premades.others(playing).into_iter().filter(|s| !gone.contains(&s.id)).map(crate::premade::to_sim).filter_map(|s| story.apply(s)));
+        }
         let sims = crate::simbody::prepare_sims(&baked, &cas, &members, known.as_deref(), &town);
         let info = WorldInfo {
             lot_names: world.lots.iter().map(|l| l.display_name.clone()).collect(),

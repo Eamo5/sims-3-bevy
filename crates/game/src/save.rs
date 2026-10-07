@@ -24,6 +24,7 @@ impl Plugin for SavePlugin {
         app.init_resource::<RemovedLotObjects>()
             .init_resource::<SaveSlot>()
             .add_message::<SaveRequest>()
+            .add_message::<SnapshotRequest>()
             .add_systems(OnEnter(crate::AppState::Loading), new_game_slot)
             .add_systems(Update, resume_saved_lot.run_if(in_state(PlayMode::ChooseLot)))
             .add_systems(Update, (apply_loaded_game, save_game).run_if(in_state(PlayMode::Live)));
@@ -238,6 +239,9 @@ pub struct SaveGame {
     /// Leftovers in the fridge (servings, by recipe).
     #[serde(default)]
     pub leftovers: Vec<String>,
+    /// The town's other households played before, as they were left (to play again).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dormant: Vec<SaveGame>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -308,7 +312,7 @@ fn saved_outfit(o: &OutfitChoice) -> Vec<Option<(u32, u32, u64)>> {
 }
 
 impl SaveGame {
-    fn sim(s: &SavedSim) -> Sim {
+    pub fn sim(s: &SavedSim) -> Sim {
         let c = |v: [f32; 3]| Color::srgb(v[0], v[1], v[2]);
         let o = |i: usize| s.outfit.get(i).copied().flatten();
         let other = |n: usize| crate::sim::Clothes { top: o(9 + n * 4), bottom: o(10 + n * 4), full: o(11 + n * 4), shoes: o(12 + n * 4) };
@@ -374,6 +378,14 @@ pub struct Bought;
 #[derive(Message)]
 pub struct SaveRequest;
 
+/// The game as it stands wanted, without saving it (changing household starts from it).
+#[derive(Message)]
+pub struct SnapshotRequest;
+
+/// The game as it stood when asked for by a `SnapshotRequest`.
+#[derive(Resource)]
+pub struct Snapshot(pub SaveGame);
+
 /// The game as last saved (moving house starts from it).
 #[derive(Resource, Clone)]
 pub struct LastSave(pub SaveGame);
@@ -383,9 +395,10 @@ pub struct LastSave(pub SaveGame);
 #[derive(Resource, Default, Clone)]
 pub struct SaveSlot(pub Option<PathBuf>);
 
-/// A new game (not one loaded) starts with no file of its own.
-fn new_game_slot(pending: Option<Res<PendingLoad>>, mut slot: ResMut<SaveSlot>) {
-    if pending.is_none() {
+/// A new game (not one loaded, nor one going on with another household) starts with no file
+/// of its own.
+fn new_game_slot(pending: Option<Res<PendingLoad>>, carry: Option<Res<crate::household::CarryOver>>, mut slot: ResMut<SaveSlot>) {
+    if pending.is_none() && carry.is_none() {
         slot.0 = None;
     }
 }
@@ -472,7 +485,7 @@ fn status_name(s: RelStatus) -> &'static str {
     }
 }
 
-fn status_from(s: &str) -> RelStatus {
+pub(crate) fn status_from(s: &str) -> RelStatus {
     match s {
         "Partner" => RelStatus::Partner,
         "Engaged" => RelStatus::Engaged,
@@ -500,7 +513,7 @@ fn saved_object(o: &GameObject, tf: &Transform, design: Option<&crate::objects::
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn save_game(
     mut commands: Commands,
-    mut requests: MessageReader<SaveRequest>,
+    (mut requests, mut snapshots, dormant): (MessageReader<SaveRequest>, MessageReader<SnapshotRequest>, Res<crate::household::Dormant>),
     clock: Res<GameClock>,
     world: Res<CurrentWorld>,
     household: Option<Res<Household>>,
@@ -566,7 +579,9 @@ fn save_game(
         Res<crate::terrain_paint::Sculpted>,
     ),
 ) {
-    if requests.read().count() == 0 {
+    let write = requests.read().count() > 0;
+    let snapshot = snapshots.read().count() > 0;
+    if !write && !snapshot {
         return;
     }
     let Some(hh) = household else { return };
@@ -669,7 +684,14 @@ fn save_game(
             .map(|(g, tf)| SavedGrave { position: tf.translation.to_array(), rotation: tf.rotation.to_array(), cause: g.cause.clone(), sim: saved_look(&g.sim) })
             .collect(),
         leftovers: leftovers.0.clone(),
+        dormant: dormant.kept(&sims.iter().filter(|q| q.9).map(|q| q.1.id).collect::<Vec<_>>()),
     };
+    if snapshot {
+        commands.insert_resource(Snapshot(game.clone()));
+    }
+    if !write {
+        return;
+    }
     let dir = saves_dir();
     let _ = std::fs::create_dir_all(&dir);
     let path = slot.0.clone().unwrap_or_else(|| free_save_path(&dir, &game));
@@ -857,6 +879,7 @@ fn apply_loaded_game(
     commands.insert_resource(crate::fishbowl::PendingBowls(game.fishbowls.clone()));
     commands.insert_resource(game.collection.clone());
     commands.insert_resource(crate::meals::Leftovers(game.leftovers.clone()));
+    commands.insert_resource(crate::household::Dormant(game.dormant.clone()));
     // The household's dead, back in their graves.
     if let Some(entry) = data.0.catalog.iter().find(|c| c.instance_name == "UrnstoneHuman") {
         for g in &game.graves {

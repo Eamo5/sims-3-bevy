@@ -30,6 +30,8 @@ pub enum Question {
     LifetimeWish { sim: Entity, wishes: Vec<usize> },
     /// Which lifetime reward to buy (reward traits' names; answers past them close).
     Reward { sim: Entity, rewards: Vec<String> },
+    /// Which household to play (answers past them keep the one being played).
+    Household(Vec<crate::household::Choice>),
 }
 
 impl Question {
@@ -37,6 +39,7 @@ impl Question {
     pub fn sim(&self) -> Option<Entity> {
         match self {
             Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } => Some(*sim),
+            Question::Household(_) => None,
         }
     }
 }

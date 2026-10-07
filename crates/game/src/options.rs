@@ -460,6 +460,7 @@ enum GameMenuButton {
     Resume,
     Options,
     Save,
+    Household,
     MainMenu,
     Quit,
 }
@@ -531,6 +532,7 @@ pub fn toggle_game_menu(commands: &mut Commands, menu: &mut GameMenu, mut clock:
                     ("Resume", GameMenuButton::Resume),
                     ("Options", GameMenuButton::Options),
                     ("Save Game", GameMenuButton::Save),
+                    ("Change Household", GameMenuButton::Household),
                     ("Main Menu", GameMenuButton::MainMenu),
                     ("Quit Game", GameMenuButton::Quit),
                 ] {
@@ -566,7 +568,7 @@ fn game_menu_buttons(
     mut panel: ResMut<OptionsPanel>,
     settings: Res<Settings>,
     mut clock: Option<ResMut<crate::clock::GameClock>>,
-    mut save: MessageWriter<crate::save::SaveRequest>,
+    (mut save, mut household): (MessageWriter<crate::save::SaveRequest>, MessageWriter<crate::household::ChooseHousehold>),
     (mut next, mut exit): (ResMut<NextState<AppState>>, MessageWriter<AppExit>),
 ) {
     for (i, b) in &q {
@@ -587,6 +589,10 @@ fn game_menu_buttons(
             GameMenuButton::Save => {
                 crate::save::request_save(&mut save);
                 close(&mut commands, &mut menu);
+            }
+            GameMenuButton::Household => {
+                close(&mut commands, &mut menu);
+                household.write(crate::household::ChooseHousehold);
             }
             GameMenuButton::MainMenu => {
                 close(&mut commands, &mut menu);

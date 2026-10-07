@@ -26,7 +26,10 @@ impl Plugin for BuildingPlugin {
             (follow_selected_floor, view_level_keys, building_visibility, stream_nearby_lots, lamps_at_night, cut_openings)
                 .chain()
                 .run_if(in_state(PlayMode::Live)),
-        );
+        )
+        // (The lots shown went with the game: a game loaded after it, or a household changed to,
+        // shows its own.)
+        .add_systems(OnExit(crate::AppState::InGame), |mut nearby: ResMut<NearbyLots>| *nearby = NearbyLots::default());
     }
 }
 
