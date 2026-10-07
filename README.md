@@ -119,7 +119,9 @@ installation is unreachable.
   Cleaner (cleaning up twice as fast), Multi-Tasker (more done at work, homework in half the
   time), High Roller (bigger royalties), Vacationer (a missed day at work goes unnoticed),
   Legendary Host (every party a hit), Long Distance Friend (friendships never drift), Fertility
-  Treatment (a baby likelier), and a new lifetime wish; and the reward objects, which go into the Sim's inventory to place on the
+  Treatment (a baby likelier), a new lifetime wish, and a Mid-Life Crisis (all their traits
+  chosen again, by the game's trait pictures; Escape thinks better of it, and the lifetime
+  happiness comes back); and the reward objects, which go into the Sim's inventory to place on the
   lot: the Food Replicator (a plate of something at the push of a button, eaten at the table),
   the Body Sculptor (an hour inside to come out fitter, slimmer or fuller) and the Moodlet
   Manager (set a mood: flirty, inspired, pumped, having fun, well rested), the Teleporter

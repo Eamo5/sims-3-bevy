@@ -134,7 +134,7 @@ impl Wishes {
 }
 
 /// The lifetime rewards offered: the game's reward traits whose effects are carried out here.
-pub const REWARDS: [&str; 27] = [
+pub const REWARDS: [&str; 28] = [
     "SteelBladder",
     "PermaClean",
     "HardlyHungry",
@@ -157,6 +157,7 @@ pub const REWARDS: [&str; 27] = [
     "LongDistanceFriend",
     "FertilityTreatment",
     "ChangeLifetimeWish",
+    "MidLifeCrisis",
     "FoodReplicator",
     "BodySculptor",
     "MoodModifier",
@@ -271,6 +272,8 @@ fn buy_rewards(
             crate::inventory::give(&mut commands, *e, crate::inventory::ItemKind::Reward, object.to_string(), t.name.clone(), 0, 0, 1);
             notes.push(format!("The {} is in {}'s inventory, to place on the lot.", t.name, sim.first));
             w.rewards.push(r.clone());
+        } else if r == "MidLifeCrisis" {
+            commands.insert_resource(crate::midlife::TraitPicker::open(*e, &sim.traits, t.points));
         } else if r == "ChangeLifetimeWish" {
             crate::lifetime::ask_lifetime_wish(&mut questions, Some(&ui.data), *e, sim);
             commands.entity(*e).remove::<crate::lifetime::LifetimeWish>().insert(crate::lifetime::ChoosingLifetimeWish);
@@ -444,6 +447,10 @@ mod tests {
         for r in REWARDS {
             let t = data.traits.iter().find(|t| t.hex == r);
             assert!(t.is_some_and(|t| t.points > 0 && !t.name.is_empty()), "{r}: {:?}", t.map(|t| (&t.name, t.points)));
+        }
+        // (Those not yet offered, with `--nocapture`.)
+        for t in data.traits.iter().filter(|t| t.points > 0 && !REWARDS.contains(&t.hex.as_str())) {
+            println!("not offered: {} ({}, {})", t.hex, t.name, t.points);
         }
     }
 }
