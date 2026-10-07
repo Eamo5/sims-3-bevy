@@ -103,11 +103,31 @@ impl ActionClip {
     }
 }
 
+/// Something carried in the arms while walking (a dish to the sink): the game's carry clip,
+/// which holds the arms (and the prop) over whatever the legs are doing.
+#[derive(Component, Clone, Copy)]
+pub struct Carrying(pub &'static str);
+
+impl Carrying {
+    /// Whether the carry shows over this Sim's animation now: walking, or standing about
+    /// (not while using something, which has its own animation).
+    pub fn shows(pose: Pose, acting: bool) -> bool {
+        pose == Pose::Walk || !acting
+    }
+}
+
+/// The bones a carry clip moves: the shoulders, arms, hands and fingers.
+fn arm_bone(name: &str) -> bool {
+    ["Clavicle", "UpperArm", "Bicep", "Forearm", "Wrist", "Hand", "Index", "_Mid", "Pinky", "Ring", "Thumb", "Shoulder"].iter().any(|k| name.contains(k))
+}
+
 #[derive(Component, Default)]
 pub struct ClipPlayer {
     pub name: String,
     pub clip: Option<Arc<Clip>>,
     pub time: f32,
+    /// How far through its carry clip (when carrying something).
+    pub carry_time: f32,
     /// The script being played, and how far through its start and steps it is.
     script: Option<ActionClip>,
     step: usize,
@@ -210,12 +230,13 @@ pub fn drive_skeletons(
     clock: Res<GameClock>,
     data: Res<Baked>,
     mut lib: ResMut<ClipLibrary>,
-    mut sims: Query<(Entity, &Sim, &SimAnim, &Skeleton, Option<&ActionClip>, &mut ClipPlayer, Has<crate::little::Carried>, Option<&crate::little::ToddlerSkills>)>,
+    mut sims: Query<(Entity, &Sim, &SimAnim, &Skeleton, Option<&ActionClip>, &mut ClipPlayer, Has<crate::little::Carried>, Option<&crate::little::ToddlerSkills>, Option<&Carrying>)>,
     mut joints: Query<&mut Transform, Without<Sim>>,
     mut cues: MessageWriter<crate::sound::ClipCue>,
+    mut arms: Local<HashMap<String, Arc<Vec<bool>>>>,
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed];
-    for (entity, sim, anim, skel, action, mut player, carried, toddler) in &mut sims {
+    for (entity, sim, anim, skel, action, mut player, carried, toddler, carrying) in &mut sims {
         let child = sim.age == crate::sim::Age::Child;
         let script = match action {
             Some(a) if anim.pose != Pose::Walk => a.clone(),
@@ -253,6 +274,19 @@ pub fn drive_skeletons(
         player.time += dt;
         player.blend = (player.blend - dt / 0.25).max(0.0);
         let Some(clip) = player.clip.clone() else { continue };
+        // A carry: its clip over the arms (looping on its own time).
+        let carry = carrying.filter(|_| Carrying::shows(anim.pose, action.is_some())).and_then(|c| lib.get(&data, c.0));
+        let carry_t = match &carry {
+            Some(c) => {
+                player.carry_time += dt;
+                if c.duration > 0.0 { player.carry_time % c.duration } else { 0.0 }
+            }
+            None => {
+                player.carry_time = 0.0;
+                0.0
+            }
+        };
+        let arm = carry.as_ref().map(|_| arms.entry(skel.rig.name.clone()).or_insert_with(|| Arc::new(skel.rig.bones.iter().map(|b| arm_bone(&b.name)).collect())).clone());
         // Sound cues passed this frame (walk clips loop, so count whole cycles).
         if dt > 0.0 && clip.duration > 0.0 && !clip.sounds.is_empty() {
             let d = clip.duration;
@@ -289,6 +323,17 @@ pub fn drive_skeletons(
                 }
                 if let Some(r) = sample_track_quat(&track.rotation, t) {
                     target.rotation = shape.map_or(r, |s| s.apply_rotation(r));
+                }
+            }
+            if let (Some(c), Some(arm)) = (&carry, &arm)
+                && arm.get(i).copied().unwrap_or(false)
+                && let Some(track) = c.tracks.get(&bone.hash)
+            {
+                if let Some(p) = sample_track_vec(&track.translation, carry_t) {
+                    target.translation = p;
+                }
+                if let Some(r) = sample_track_quat(&track.rotation, carry_t) {
+                    target.rotation = r;
                 }
             }
             if i == 0 {

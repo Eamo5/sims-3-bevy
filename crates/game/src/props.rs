@@ -84,7 +84,16 @@ fn hold_props(
     mut lib: ResMut<ClipLibrary>,
     mut assets: ResMut<ObjectAssets>,
     (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
-    mut sims: Query<(Entity, &ClipPlayer, &Skeleton, Option<&mut HeldProps>, &crate::interact::ActionQueue, Has<crate::anim::ActionClip>)>,
+    mut sims: Query<(
+        Entity,
+        &ClipPlayer,
+        &Skeleton,
+        Option<&mut HeldProps>,
+        &crate::interact::ActionQueue,
+        Has<crate::anim::ActionClip>,
+        Option<&crate::anim::Carrying>,
+        &crate::sim::SimAnim,
+    )>,
     (mut props, mut shown): (Query<&mut Transform, With<Prop>>, Query<&mut Visibility, (With<Prop>, Without<crate::interact::GameObject>)>),
     mut placed: Query<(&crate::interact::GameObject, &mut Visibility), Without<Prop>>,
     mut objects: Local<Option<HashMap<String, Key>>>,
@@ -94,12 +103,18 @@ fn hold_props(
     let objects = objects.get_or_insert_with(|| {
         data.0.catalog.iter().filter(|c| PROPS.iter().any(|(_, o, ..)| *o == c.instance_name)).map(|c| (c.instance_name.clone(), c.objd)).collect()
     });
-    for (sim, player, skel, held, queue, acting) in &mut sims {
+    for (sim, player, skel, held, queue, acting, carrying, anim) in &mut sims {
+        // (Something carried: the carry clip's props, at its time.)
+        let carry = carrying.filter(|_| crate::anim::Carrying::shows(anim.pose, acting)).map(|c| c.0);
+        let (clip_of, time_of) = match carry {
+            Some(c) => (c.to_string(), player.carry_time),
+            None => (player.name.clone(), player.time),
+        };
         // The props this clip has clips for.
         let want = companions
-            .entry(player.name.clone())
+            .entry(clip_of.clone())
             .or_insert_with(|| {
-                let Some(stem) = player.name.strip_suffix("_x") else { return Vec::new() };
+                let Some(stem) = clip_of.strip_suffix("_x") else { return Vec::new() };
                 PROPS
                     .iter()
                     .enumerate()
@@ -145,7 +160,7 @@ fn hold_props(
         // clips that don't move them, like reading between page turns), or that went with a
         // rebuilt body.
         held.0.retain(|(i, e, _)| {
-            let keep = (acting || want.iter().any(|(w, _)| w == i)) && props.contains(*e);
+            let keep = ((acting && carry.is_none()) || want.iter().any(|(w, _)| w == i)) && props.contains(*e);
             if !keep {
                 commands.entity(*e).try_despawn();
             }
@@ -175,9 +190,9 @@ fn hold_props(
             // Placed in the slot as the prop's clip has it.
             // (At the Sim's clip's time, held at its end when it's the shorter: the goggles put
             // on stay on.)
-            let sim_len = lib.get(&data, &player.name).map_or(f32::MAX, |c| c.duration);
+            let sim_len = lib.get(&data, &clip_of).map_or(f32::MAX, |c| c.duration);
             let Some(clip) = lib.get(&data, clip_name) else { continue };
-            let t = player.time.min(sim_len).min(clip.duration);
+            let t = if carry.is_some() { time_of % clip.duration.max(0.01) } else { time_of.min(sim_len).min(clip.duration) };
             // (Moved to another slot as the clip says: goggles from the hand to the face. Not
             // shown while the clip has it elsewhere than on the Sim: a toy still on the floor.)
             let parent = clip.parents.iter().rev().find(|p| p.time <= t + 1e-3);

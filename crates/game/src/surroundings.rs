@@ -16,7 +16,7 @@ pub struct SurroundingsPlugin;
 
 impl Plugin for SurroundingsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spoil_food, trash_cans, discard, wash_up, surroundings).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (spoil_food, trash_cans, discard, wash_up, put_down_dishes, surroundings).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -131,6 +131,24 @@ fn wash_up(
         let Some(def) = crate::interact::interactions_for(kind).iter().position(|d| d.special == crate::interact::Special::WashDishes) else { continue };
         let name = crate::interact::interactions_for(kind)[def].name;
         queue.0.push_front(crate::interact::Action::new(name, crate::interact::ActionKind::Object { target, def }, true));
+        // (The dish in hand on the way.)
+        commands.entity(e).insert(crate::anim::Carrying(DISH_CARRY));
+    }
+}
+
+/// The game's walk with a dinner plate held out.
+const DISH_CARRY: &str = "a2o_plateDinner_carry_x";
+
+/// A dish carried to be washed is put down once it's being washed (or the washing's given up).
+fn put_down_dishes(mut commands: Commands, sims: Query<(Entity, &crate::anim::Carrying, &crate::interact::ActionQueue, Has<crate::anim::ActionClip>, &crate::sim::SimAnim)>) {
+    for (e, c, queue, acting, anim) in &sims {
+        if c.0 != DISH_CARRY {
+            continue;
+        }
+        let washing = queue.0.front().is_some_and(|a| matches!(a.kind, crate::interact::ActionKind::Object { .. }) && (a.label == "Wash Dishes" || a.label == "Load Dishes"));
+        if !washing || (acting && anim.pose != crate::sim::Pose::Walk) {
+            commands.entity(e).remove::<crate::anim::Carrying>();
+        }
     }
 }
 
