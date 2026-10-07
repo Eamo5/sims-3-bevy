@@ -687,13 +687,20 @@ pub fn move_in(
             life.write(crate::life::LifeEvent::new(e, crate::life::LifeEventKind::MovedIn));
         }
     }
-    // A couple of neighbours drop by to say hello.
+    // A couple of neighbours drop by to say hello (at the front door, a house that has one).
+    let front_door = building.as_ref().and_then(|b| b.front_door(exit.xz()));
     for (k, (s, model)) in neighbors.into_iter().enumerate() {
         let p = to_world(-3.0 + k as f32 * 6.0, -(lot.depth as f32) * 0.5 + 1.0);
         let name = s.full_name();
         let e = spawn_sim_full(&mut commands, &mut sctx, s, p, model);
+        let mut queue = ActionQueue::default();
+        if let (true, Some((door, door_e))) = (fresh, front_door) {
+            // (Side by side on the step.)
+            let at = door + Vec2::new(k as f32 * 0.8 - 0.4, 0.0);
+            crate::doorbell::come_to_door(&mut commands, e, &mut queue, at, door_e.unwrap_or(e));
+        }
         commands.entity(e).insert((
-            ActionQueue::default(),
+            queue,
             AutonomyTimer(rng.random_range(1.0..4.0)),
             Skills::default(),
             Visitor { leave_at: 18.0 * 60.0 + k as f64 * 40.0 },
