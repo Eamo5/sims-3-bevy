@@ -374,6 +374,19 @@ pub struct Clip {
     pub tracks: HashMap<u32, Track>,
     /// Sound cues from the clip's event table, in time order.
     pub sounds: Vec<ClipSound>,
+    /// Its parent events, in time order: what the clip's actor (a prop) hangs from, when.
+    #[serde(default)]
+    pub parents: Vec<ClipParent>,
+}
+
+/// A clip's parent event: from `time`, actor `child` (FNV-32 of its name: `vrGoggles`) hangs
+/// from slot `slot` (FNV-32: `b__R_Hand_slot`, `b__Glasses_slot`) of actor `parent` (`x`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ClipParent {
+    pub time: f32,
+    pub child: u32,
+    pub parent: u32,
+    pub slot: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -391,6 +404,42 @@ pub struct ClipSound {
     pub time: f32,
     pub name: String,
     pub action: SoundAction,
+}
+
+/// The parent events of a CLIP resource's event table (kind 1: the child actor, the parent
+/// actor and its slot, then a transform), in time order.
+pub fn clip_parents(res: &[u8]) -> Vec<ClipParent> {
+    let mut out = Vec::new();
+    let Ok(rel) = u32_at(res, 0x18) else { return out };
+    let start = 0x18 + rel as usize;
+    if res.get(start..start + 4) != Some(b"=CE=") {
+        return out;
+    }
+    let count = u32_at(res, start + 8).unwrap_or(0) as usize;
+    let end = (start + 20 + u32_at(res, start + 12).unwrap_or(0) as usize + 64).min(res.len());
+    let mut o = start + 20;
+    let mut found = 0;
+    while o + 28 <= end && found < count {
+        let kind = u16_at(res, o).unwrap_or(0);
+        let a = u32_at(res, o + 12).unwrap_or(0);
+        let b = u32_at(res, o + 16).unwrap_or(0);
+        if !(1..=40).contains(&kind) || a != 0xBF80_0000 || b != 0xBF80_0000 {
+            o += 4;
+            continue;
+        }
+        found += 1;
+        let time = f32_at(res, o + 8).unwrap_or(0.0);
+        let len = u32_at(res, o + 24).unwrap_or(0) as usize;
+        let payload = o + 28 + ((len + 1 + 3) & !3);
+        if kind == 1
+            && let (Ok(child), Ok(parent), Ok(slot)) = (u32_at(res, payload), u32_at(res, payload + 4), u32_at(res, payload + 8))
+        {
+            out.push(ClipParent { time, child, parent, slot });
+        }
+        o = payload;
+    }
+    out.sort_by(|a, b| a.time.total_cmp(&b.time));
+    out
 }
 
 /// Splits a script event like `play_sound_a_chp__cheap___a_norm__normal___a_exp__expensive`
@@ -439,6 +488,7 @@ pub fn clip_sounds(res: &[u8]) -> Vec<ClipSound> {
         let name = cstr(res, o + 28);
         let payload = o + 28 + ((len + 1 + 3) & !3);
         match kind {
+            1 => {}
             3 => {
                 let sound = cstr(res, payload);
                 let sound = if sound.is_empty() { name } else { sound };
@@ -599,7 +649,7 @@ impl Clip {
                 }
             }
         }
-        Ok(Self { name, duration: ticks as f32 * dt, tracks, sounds: clip_sounds(res) })
+        Ok(Self { name, duration: ticks as f32 * dt, tracks, sounds: clip_sounds(res), parents: clip_parents(res) })
     }
 }
 

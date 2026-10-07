@@ -251,7 +251,13 @@ pub fn drive_skeletons(
                 }
             }
         }
-        let t = if clip.duration > 0.0 { player.time % clip.duration } else { 0.0 };
+        // (Walks cycle; any other clip holds its last pose until the next one takes over,
+        // rather than flicking back to its first for a frame.)
+        let t = match (clip.duration > 0.0, cycles) {
+            (false, _) => 0.0,
+            (true, true) => player.time.min(clip.duration),
+            (true, false) => player.time % clip.duration,
+        };
         for (i, bone) in skel.rig.bones.iter().enumerate() {
             let Ok(mut tf) = joints.get_mut(skel.joints[i]) else { continue };
             let bind = skel.bind[i];

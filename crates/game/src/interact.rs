@@ -104,6 +104,10 @@ pub enum ObjectKind {
     TrashCan,
     /// A fish bowl: a fish from a Sim's inventory swims in it.
     FishBowl,
+    /// A games console.
+    VideoGame,
+    /// The SimLife Goggles: virtual reality.
+    VrGoggles,
     Other,
 }
 
@@ -114,6 +118,10 @@ impl ObjectKind {
         let has = |k: &str| s.contains(k);
         if has("crib") {
             Self::Crib
+        } else if has("electronics.videogamesystem") {
+            Self::VideoGame
+        } else if has("electronics.vrgoggles") {
+            Self::VrGoggles
         } else if has("barbeque") {
             Self::Grill
         } else if has("hotbeveragemachine") {
@@ -222,7 +230,7 @@ impl ObjectKind {
             Self::BedDouble | Self::BedSingle => "Beds",
             Self::Toilet | Self::Shower | Self::Bathtub | Self::Sink => "Plumbing",
             Self::Sofa | Self::Chair | Self::Stool => "Seating",
-            Self::Tv | Self::Computer | Self::Stereo => "Electronics",
+            Self::Tv | Self::Computer | Self::Stereo | Self::VideoGame | Self::VrGoggles => "Electronics",
             Self::Bookshelf | Self::Mirror | Self::Easel | Self::Guitar | Self::Treadmill | Self::Chess | Self::Telescope | Self::Foosball => {
                 "Hobbies"
             }
@@ -562,6 +570,8 @@ static HOTTUB: [InteractionDef; 1] = [InteractionDef {
 static DOLLHOUSE: [InteractionDef; 1] = [def("Play with Dollhouse", 45.0, [0.0, 0.0, -3.0, 8.0, 0.0, 85.0], Pose::Use)];
 static JUNGLEGYM: [InteractionDef; 1] = [def("Play on Jungle Gym", 40.0, [0.0, 0.0, -8.0, 0.0, -8.0, 95.0], Pose::Use)];
 static FOOSBALL: [InteractionDef; 1] = [def("Play Foosball", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 65.0], Pose::Use)];
+static VIDEOGAME: [InteractionDef; 1] = [def("Play Video Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 70.0], Pose::Use)];
+static VRGOGGLES: [InteractionDef; 1] = [def("Explore Virtual Worlds", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 95.0], Pose::Use)];
 static STEREO: [InteractionDef; 1] = [def("Dance", 45.0, [0.0, 0.0, -6.0, 0.0, -6.0, 70.0], Pose::Dance)];
 static BOOKSHELF: [InteractionDef; 1] =
     [InteractionDef { skill: Some("Logic"), ..def("Read a Book", 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Stand) }];
@@ -648,6 +658,21 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Play with Dollhouse" => A::new(Some("c2o_dollhouse_play_start"), &["c2o_dollhouse_play_loop"]),
         "Play on Jungle Gym" => A::new(Some("c2o_JungleGymTower_climbUp"), &["c2o_JungleGymTower_loop", "c2o_JungleGymTower_slideDown"]),
         "Play Foosball" => A::new(None, &["a2o_foosballTable_play"]),
+        "Play Video Games" => A::new(
+            Some("a2o_videoGame_sitFloor_start_x"),
+            &[
+                "a2o_videoGame_sitFloor_play1_x",
+                "a2o_videoGame_sitFloor_play2_x",
+                "a2o_videoGame_sitFloor_play3_x",
+                "a2o_videoGame_sitFloor_play4_x",
+                "a2o_videoGame_sitFloor_play_excited_x",
+                "a2o_videoGame_sitFloor_play_bang_x",
+            ],
+        ),
+        "Explore Virtual Worlds" => A::new(
+            Some("a2o_Vrgoggles_put_on_x"),
+            &["a2o_Vrgoggles_adventure_action_x", "a2o_Vrgoggles_adventure_fantasy_x", "a2o_Vrgoggles_adventure_space_x"],
+        ),
         "Play with Toys" => A::new(Some("p2o_toybox_playIn_start"), &["p2o_toybox_playIn_breathe", "p2o_toybox_playIn_playWithToy", "p2o_toybox_playIn_peekOut"]),
         "Play Xylophone" => A::new(Some("p2o_toyXylophone_play_start"), &["p2o_toyXylophone_play_loop"]),
         "Play with Peg Box" => A::new(Some("p2o_toyPegBox_play_start"), &["p2o_toyPegBox_play_loopBreathe", "p2o_toyPegBox_play_loopLook", "p2o_toyPegBox_play_insertPeg"]),
@@ -728,8 +753,8 @@ impl ObjectKind {
         match age {
             Age::Baby => false,
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair),
-            // (Children can't cook.)
-            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace),
+            // (Children can't cook, and the goggles are for teens and up.)
+            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::VrGoggles),
             _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::DollHouse | K::JungleGym),
         }
     }
@@ -785,6 +810,8 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::DollHouse => &DOLLHOUSE,
         ObjectKind::JungleGym => &JUNGLEGYM,
         ObjectKind::Foosball => &FOOSBALL,
+        ObjectKind::VideoGame => &VIDEOGAME,
+        ObjectKind::VrGoggles => &VRGOGGLES,
         _ => &[],
     }
 }

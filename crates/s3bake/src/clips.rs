@@ -225,6 +225,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "c2o_dollhouse_play_",
     "c2o_JungleGym",
     "a2o_foosballTable_play",
+    "a2o_videoGame_sitFloor_",
+    "c2o_videoGame_sitFloor_",
+    "a2o_Vrgoggles_",
     "a2b_crib_pullOut",
     "a2b_babyBottle_feed",
     "a2b_changeDiaper",
@@ -261,6 +264,9 @@ pub const PROP_ACTORS: &[&str] = &[
     "bag",
     "phone",
     "phone1",
+    "VGcontroller",
+    "VGcontroller2",
+    "vrGoggles",
 ];
 
 /// Whether a clip should be baked.

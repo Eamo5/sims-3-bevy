@@ -45,6 +45,9 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("bag", "AccessoryBurglarBag", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("phone", "PhoneCell", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("phone1", "PhoneCell", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("VGcontroller", "VideoGameSystemController", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("VGcontroller2", "VideoGameSystemController", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("vrGoggles", "VRGoggles", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
 ];
 
 /// The clip-actor suffixes that are props (for the clip bake).
@@ -52,10 +55,10 @@ pub fn prop_actor(suffix: &str) -> bool {
     PROPS.iter().any(|(a, ..)| a.eq_ignore_ascii_case(suffix))
 }
 
-/// The props a Sim is holding: which one and its entity, and the object put away while its
-/// copy is in hand (the guitar played from where it stood).
+/// The props a Sim is holding: which one, its entity and the slot (rig bone) it hangs from, and
+/// the object put away while its copy is in hand (the guitar played from where it stood).
 #[derive(Component, Default)]
-struct HeldProps(Vec<(usize, Entity)>, Option<Entity>);
+struct HeldProps(Vec<(usize, Entity, usize)>, Option<Entity>);
 
 /// A prop in a Sim's hand.
 #[derive(Component)]
@@ -129,7 +132,7 @@ fn hold_props(
         // Put away what the action no longer uses (props stay in hand through the action's
         // clips that don't move them, like reading between page turns), or that went with a
         // rebuilt body.
-        held.0.retain(|(i, e)| {
+        held.0.retain(|(i, e, _)| {
             let keep = (acting || want.iter().any(|(w, _)| w == i)) && props.contains(*e);
             if !keep {
                 commands.entity(*e).try_despawn();
@@ -138,8 +141,8 @@ fn hold_props(
         });
         for (i, clip_name) in &want {
             let (_, object, slot, bind, nudge) = PROPS[*i];
-            let entity = match held.0.iter().find(|(h, _)| h == i) {
-                Some((_, e)) => *e,
+            let entity = match held.0.iter().find(|(h, ..)| h == i) {
+                Some((_, e, _)) => *e,
                 None => {
                     let Some(bone) = skel.rig.bones.iter().position(|b| b.name.eq_ignore_ascii_case(slot)) else { continue };
                     let Some(objd) = objects.get(object) else { continue };
@@ -152,13 +155,25 @@ fn hold_props(
                     let model = crate::objects::spawn_parts(&mut commands, &parts, Transform::from_translation(-Vec3::from(bind)));
                     let e = commands.spawn((Transform::default(), Visibility::default(), Prop)).add_child(model).id();
                     commands.entity(skel.joints[bone]).add_child(e);
-                    held.0.push((*i, e));
+                    held.0.push((*i, e, bone));
                     continue;
                 }
             };
             // Placed in the slot as the prop's clip has it.
+            // (At the Sim's clip's time, held at its end when it's the shorter: the goggles put
+            // on stay on.)
+            let sim_len = lib.get(&data, &player.name).map_or(f32::MAX, |c| c.duration);
             let Some(clip) = lib.get(&data, clip_name) else { continue };
-            let t = if clip.duration > 0.0 { player.time % clip.duration } else { 0.0 };
+            let t = player.time.min(sim_len).min(clip.duration);
+            // (Moved to another slot as the clip says: goggles from the hand to the face.)
+            if let Some(p) = clip.parents.iter().rev().find(|p| p.time <= t + 1e-3)
+                && let Some(bone) = skel.rig.bones.iter().position(|b| s3pkg::fnv32(&b.name) == p.slot)
+                && let Some(h) = held.0.iter_mut().find(|(h, ..)| h == i)
+                && h.2 != bone
+            {
+                h.2 = bone;
+                commands.entity(skel.joints[bone]).add_child(entity);
+            }
             let Some(track) = clip.tracks.get(&TRANSFORM_BONE) else { continue };
             if let Ok(mut tf) = props.get_mut(entity) {
                 if let Some(p) = crate::anim::sample_track_vec(&track.translation, t) {
