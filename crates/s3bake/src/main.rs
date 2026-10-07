@@ -253,6 +253,12 @@ fn main() {
         for (k, l) in w.lots.iter().enumerate().filter(|(_, l)| l.info.internal_name.contains(want.as_str())) {
             let Some(b) = w.buildings.iter().find(|b| b.lot as usize == k) else { continue };
             println!("{} levels {:?} {}x{}", l.info.internal_name, b.levels, b.width, b.depth);
+            for f in &b.fences {
+                let len = ((f.a[0] - f.b[0]).powi(2) + (f.a[1] - f.b[1]).powi(2)).sqrt();
+                if len > 1.5 || std::env::var("FENCES").is_ok() {
+                    println!("fence {:?} -> {:?} level {} model {:?} (length {len:.2})", f.a, f.b, f.level, f.model);
+                }
+            }
             // The ground's height relative to the ground floor (+ above it: tenths of a metre).
             println!("ground - storey 1 (dm):");
             for z in (20..=44).step_by(2) {

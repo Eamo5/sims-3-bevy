@@ -119,9 +119,13 @@ pub fn lot_stairs(pkg: &Package, lot: u64) -> Vec<StairBaked> {
         let (Ok(style), Ok(_), Ok(dir)) = (r.u16(), r.u64(), r.u32()) else { break };
         let (Ok(x1), Ok(z1), Ok(top)) = (r.f32(), r.f32(), r.u32()) else { break };
         let (Ok(x2), Ok(z2), Ok(bottom)) = (r.f32(), r.f32(), r.u32()) else { break };
-        let Ok(rails) = r.u32() else { break };
-        if r.skip(rails.min(64) as usize * 14).is_err() {
-            break;
+        let Ok(n_rails) = r.u32() else { break };
+        let mut rails = Vec::new();
+        for _ in 0..n_rails.min(64) {
+            let (Ok(_), Ok(cral), Ok(x), Ok(z)) = (r.u32(), r.u16(), r.f32(), r.f32()) else { break };
+            if let Some(k) = refs.get(&cral) {
+                rails.push(StairRail { at: [x, z], style: key_of(k), rail: None, start: None, post: None });
+            }
         }
         let Some(k) = refs.get(&style) else { continue };
         let lo = |a: f32, b: f32| a.min(b).max(0.0).round() as u16;
@@ -136,9 +140,61 @@ pub fn lot_stairs(pkg: &Package, lot: u64) -> Vec<StairBaked> {
             flight: None,
             start: None,
             side: None,
+            rails,
         });
     }
     out
+}
+
+/// A style's (CSTR, CRAL: the same layout) VPXY models with their bounds: the TGI list sits at
+/// the offset in its second word + 8, counted.
+fn style_models(pkgs: &s3pkg::PackageSet, style: &s3pkg::ResourceKey) -> Vec<(Key, [f32; 3], [f32; 3])> {
+    let Some(d) = pkgs.read(style).or_else(|| pkgs.read_ti(style.t, style.i)) else { return Vec::new() };
+    let u32_at = |o: usize| d.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
+    let Some(at) = u32_at(4).map(|o| o as usize + 8) else { return Vec::new() };
+    let n = u32_at(at).unwrap_or(0).min(32) as usize;
+    let mut out = Vec::new();
+    for i in 0..n {
+        let o = at + 4 + i * 16;
+        let (Some(t), Some(g), Some(lo), Some(hi)) = (u32_at(o), u32_at(o + 4), u32_at(o + 8), u32_at(o + 12)) else { break };
+        if t != 0x736884F1 {
+            continue;
+        }
+        let vk = s3pkg::ResourceKey::new(t, g, (hi as u64) << 32 | lo as u64);
+        let Some(v) = pkgs.read(&vk).or_else(|| pkgs.read_ti(vk.t, vk.i)) else { continue };
+        let Some(mk) = s3formats::model::vpxy_models(&v).into_iter().next() else { continue };
+        let meshes = s3formats::model::load_model(pkgs, &mk).unwrap_or_default();
+        if meshes.is_empty() {
+            continue;
+        }
+        let (mut lo3, mut hi3) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for m in &meshes {
+            for a in 0..3 {
+                lo3[a] = lo3[a].min(m.bounds_min[a]);
+                hi3[a] = hi3[a].max(m.bounds_max[a]);
+            }
+        }
+        out.push((key_of(&mk), lo3, hi3));
+    }
+    out
+}
+
+/// A railing style's (CRAL 0x04C58103) pieces: a tile's sloped rail, the short first rail, and
+/// the post (told apart by shape).
+pub fn rail_pieces(pkgs: &s3pkg::PackageSet, cral: &s3pkg::ResourceKey) -> (Option<Key>, Option<Key>, Option<Key>) {
+    let (mut rail, mut start, mut post) = (None, None, None);
+    for (k, lo, hi) in style_models(pkgs, cral) {
+        let (len, wide) = (hi[0] - lo[0], hi[2] - lo[2]);
+        let slot = if len < 0.2 && wide < 0.2 {
+            &mut post
+        } else if len < 0.5 {
+            &mut start
+        } else {
+            &mut rail
+        };
+        slot.get_or_insert(k);
+    }
+    (rail, start, post)
 }
 
 /// A stair style's (CSTR 0x049CA4CD) pieces: the models of the VPXYs it names (its TGI list is

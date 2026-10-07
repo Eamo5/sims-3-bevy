@@ -35,8 +35,10 @@ installation is unreachable.
   its cloud noise, the sun's halo, the moon and the night's stars, coloured through the day.
 - **Houses**: every lot's real walls (with door and window openings) and floors in the very
   wallpapers, sidings, tiles, carpets and paving the builders chose — the game's texture
-  recipes (complates) re-rendered from each lot's designs — plus foundations, stairs and the
-  house's own furniture; nearby lots are shown in full detail with
+  recipes (complates) re-rendered from each lot's designs — plus foundations (as tall as the
+  lot makes them: the Goths' manor stands high on its slope), staircases built from the game's
+  own stair pieces and railings (as wide as the builders made them), and the house's own
+  furniture; the ground never shows through a floor; nearby lots are shown in full detail with
   the game's roofs, distant ones as the game's pre-rendered imposters.
 - **Sims**: Create-a-Sim from real CAS parts (browsed as the game's own style pictures), with
   favourites (a food from the game's recipes, a music, a colour, each picked by the game's own

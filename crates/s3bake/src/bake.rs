@@ -756,6 +756,9 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
     for l in &world.lots {
         for s in crate::building::lot_stairs(&pkg, l.id) {
             stair_styles.entry(s.style).or_insert_with(|| crate::building::stair_pieces(pkgs, &rkey(s.style)));
+            for r in &s.rails {
+                stair_styles.entry(r.style).or_insert_with(|| crate::building::rail_pieces(pkgs, &rkey(r.style)));
+            }
         }
     }
     let stair_models = stair_styles.values().flat_map(|(a, b, c)| [*a, *b, *c]).flatten();
@@ -821,6 +824,11 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         for s in &mut b.stairs {
             if let Some(&(flight, start, side)) = stair_styles.get(&s.style) {
                 (s.flight, s.start, s.side) = (flight, start, side);
+            }
+            for r in &mut s.rails {
+                if let Some(&(rail, start, post)) = stair_styles.get(&r.style) {
+                    (r.rail, r.start, r.post) = (rail, start, post);
+                }
             }
         }
     }

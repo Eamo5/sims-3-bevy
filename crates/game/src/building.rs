@@ -1586,6 +1586,23 @@ pub fn spawn_building(
             let off = across * (sgn * width as f32 * 0.5);
             pieces.extend((0..run).filter_map(|k| s.side.map(|p| (p, bottom + d * k as f32 + off, y0 + rise * k as f32))));
         }
+        // Railings: up the side they're on (a tile's sloped rail at a time), with a post at
+        // the foot.
+        let mut posts: Vec<(Key, Vec2, f32)> = Vec::new();
+        for r in &s.rails {
+            let sgn = if (Vec2::from(r.at) - middle).dot(across) < 0.0 { -1.0 } else { 1.0 };
+            let off = across * (sgn * width as f32 * 0.5);
+            pieces.extend((0..run).filter_map(|k| r.rail.map(|p| (p, bottom + d * k as f32 + off, y0 + rise * k as f32))));
+            pieces.extend(r.start.map(|p| (p, bottom + off, y0)));
+            posts.extend(r.post.map(|p| (p, bottom + off, y0)));
+        }
+        for (key, at, y) in posts {
+            let parts = assets.model(ctx, key);
+            if !parts.is_empty() {
+                let e = spawn_parts(commands, &parts, Transform { translation: active.world(at.x, at.y, y), rotation, scale: Vec3::ONE });
+                place(commands, e, neighbor, s.bottom);
+            }
+        }
         for (key, at, y) in pieces {
             let parts = assets.model(ctx, key);
             if parts.is_empty() {

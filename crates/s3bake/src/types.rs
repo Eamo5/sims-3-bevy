@@ -10,7 +10,7 @@ pub const BAKE_VERSION: u32 = 4;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
 pub const CAS_VERSION: u32 = 9;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 37;
+pub const WORLD_VERSION: u32 = 38;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -366,6 +366,20 @@ pub struct StairBaked {
     pub flight: Option<Key>,
     pub start: Option<Key>,
     pub side: Option<Key>,
+    /// Its railings: which side (a point on it, lot-local) and the railing style's pieces.
+    #[serde(default)]
+    pub rails: Vec<StairRail>,
+}
+
+/// A staircase's railing on one side: a point of that side (lot-local), its style (CRAL), and
+/// the style's pieces: a tile's sloped rail along +X, the short first one, and a post.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct StairRail {
+    pub at: [f32; 2],
+    pub style: Key,
+    pub rail: Option<Key>,
+    pub start: Option<Key>,
+    pub post: Option<Key>,
 }
 
 impl StairBaked {
