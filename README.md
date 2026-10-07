@@ -157,7 +157,10 @@ installation is unreachable.
   prop from slot to slot: the SimLife Goggles go from the hand onto the face).
 - **Games**: the Maxoid Game Simulator, sitting on the floor with the game's controller in hand
   (children too), and the SimLife Goggles, put on to explore virtual worlds (action, fantasy
-  and space adventures, teens and up), with the game's animations; both are great fun.
+  and space adventures, teens and up), with the game's animations; both are great fun. Teddy
+  bears and the little toys (a boat, a rocket, a pony, a robot, a dragon...) are played with by
+  children (sitting with the toy in their hands) and toddlers (hugging it), with the game's
+  clips for each.
 - **Thought and speech balloons**: the game's own balloon art and balloon table. Sims think about
   needs running low, new moodlets and their traits, dream while asleep, and take turns showing
   what they're talking about (small talk about the weather, their work or interests; insults,

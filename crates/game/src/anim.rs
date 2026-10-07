@@ -229,6 +229,7 @@ pub fn drive_skeletons(
                     player.blend = 1.0;
                 }
                 player.clip = lib.get(&data, &name);
+                debug!("{} plays {name}", sim.first);
                 player.name = name;
                 player.time = 0.0;
                 from_time = -1e-3;

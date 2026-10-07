@@ -427,6 +427,8 @@ pub fn spawn_sim_full(
             })),
             Transform::from_xyz(0.0, 2.15, 0.0).with_scale(Vec3::splat(0.22)),
             Visibility::Hidden,
+            // (The game's plumbob casts no shadow.)
+            bevy::light::NotShadowCaster,
         ))
         .id();
     commands.entity(entity).add_child(plumbob).insert(PlumbobRef(plumbob));
@@ -511,6 +513,8 @@ pub fn spawn_sim(
             })),
             Transform::from_xyz(0.0, 2.15, 0.0).with_scale(Vec3::splat(0.22)),
             Visibility::Hidden,
+            // (The game's plumbob casts no shadow.)
+            bevy::light::NotShadowCaster,
         ))
         .id();
     commands.entity(root).add_children(&[torso, head, legs[0], legs[1], arms[0], arms[1]]);

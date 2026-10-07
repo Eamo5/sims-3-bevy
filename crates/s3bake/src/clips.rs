@@ -228,6 +228,11 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_videoGame_sitFloor_",
     "c2o_videoGame_sitFloor_",
     "a2o_Vrgoggles_",
+    "a2o_stuffedAnimal_play_loop",
+    "c2o_stuffedAnimal_play_loop",
+    "p2o_stuffedAnimal_play_loop",
+    "c2o_stuffedAnimal_play_start_normal",
+    "p2o_stuffedAnimal_play_start_normal",
     "a2b_crib_pullOut",
     "a2b_babyBottle_feed",
     "a2b_changeDiaper",
@@ -267,6 +272,7 @@ pub const PROP_ACTORS: &[&str] = &[
     "VGcontroller",
     "VGcontroller2",
     "vrGoggles",
+    "stuffedAnimal",
 ];
 
 /// Whether a clip should be baked.

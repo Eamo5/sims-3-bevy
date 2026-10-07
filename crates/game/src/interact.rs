@@ -108,6 +108,8 @@ pub enum ObjectKind {
     VideoGame,
     /// The SimLife Goggles: virtual reality.
     VrGoggles,
+    /// A teddy bear or one of the little toys (a toy boat, a pony, a robot...).
+    StuffedToy,
     Other,
 }
 
@@ -122,6 +124,10 @@ impl ObjectKind {
             Self::VideoGame
         } else if has("electronics.vrgoggles") {
             Self::VrGoggles
+        } else if has("miscellaneous.stuffedanimal")
+            || ["boat", "rocket", "pony", "car", "rabbit", "sheep", "dragon", "lochness", "yeti", "robot", "alligator"].iter().any(|t| s.ends_with(&format!("objects.toys.{t}")))
+        {
+            Self::StuffedToy
         } else if has("barbeque") {
             Self::Grill
         } else if has("hotbeveragemachine") {
@@ -234,7 +240,7 @@ impl ObjectKind {
             Self::Bookshelf | Self::Mirror | Self::Easel | Self::Guitar | Self::Treadmill | Self::Chess | Self::Telescope | Self::Foosball => {
                 "Hobbies"
             }
-            Self::SwingSet | Self::JungleGym | Self::DollHouse => "Kids",
+            Self::SwingSet | Self::JungleGym | Self::DollHouse | Self::StuffedToy => "Kids",
             Self::HotTub => "Plumbing",
             Self::Dresser => "Surfaces",
             Self::Table => "Surfaces",
@@ -571,6 +577,7 @@ static DOLLHOUSE: [InteractionDef; 1] = [def("Play with Dollhouse", 45.0, [0.0, 
 static JUNGLEGYM: [InteractionDef; 1] = [def("Play on Jungle Gym", 40.0, [0.0, 0.0, -8.0, 0.0, -8.0, 95.0], Pose::Use)];
 static FOOSBALL: [InteractionDef; 1] = [def("Play Foosball", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 65.0], Pose::Use)];
 static VIDEOGAME: [InteractionDef; 1] = [def("Play Video Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 70.0], Pose::Use)];
+static STUFFED_TOY: [InteractionDef; 1] = [def("Play with Toy", 30.0, [0.0, 0.0, -2.0, 6.0, 0.0, 75.0], Pose::Use)];
 static VRGOGGLES: [InteractionDef; 1] = [def("Explore Virtual Worlds", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 95.0], Pose::Use)];
 static STEREO: [InteractionDef; 1] = [def("Dance", 45.0, [0.0, 0.0, -6.0, 0.0, -6.0, 70.0], Pose::Dance)];
 static BOOKSHELF: [InteractionDef; 1] =
@@ -669,6 +676,11 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
                 "a2o_videoGame_sitFloor_play_bang_x",
             ],
         ),
+        // (Children's: grown-ups play with toys only with a little one.)
+        "Play with Toy" => A::new(
+            Some("a2o_stuffedAnimal_play_start_normal_x"),
+            &["a2o_stuffedAnimal_play_loop1_x", "a2o_stuffedAnimal_play_loop2_x", "a2o_stuffedAnimal_play_loop3_x"],
+        ),
         "Explore Virtual Worlds" => A::new(
             Some("a2o_Vrgoggles_put_on_x"),
             &["a2o_Vrgoggles_adventure_action_x", "a2o_Vrgoggles_adventure_fantasy_x", "a2o_Vrgoggles_adventure_space_x"],
@@ -752,10 +764,10 @@ impl ObjectKind {
         use ObjectKind as K;
         match age {
             Age::Baby => false,
-            Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair),
+            Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy),
             // (Children can't cook, and the goggles are for teens and up.)
             Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::VrGoggles),
-            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::DollHouse | K::JungleGym),
+            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::DollHouse | K::JungleGym | K::StuffedToy),
         }
     }
 }
@@ -812,6 +824,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Foosball => &FOOSBALL,
         ObjectKind::VideoGame => &VIDEOGAME,
         ObjectKind::VrGoggles => &VRGOGGLES,
+        ObjectKind::StuffedToy => &STUFFED_TOY,
         _ => &[],
     }
 }
@@ -1396,7 +1409,15 @@ fn run_actions(
                                         commands.entity(me).insert(crate::meals::MealRequest::PlateAt(*target));
                                     }
                                     *decay = DecayScale(d.decay);
-                                    if let Some(c) = interaction_clip(d.name, obj.kind) {
+                                    // (Toddlers have their own way with a toy.)
+                                    let toddler_toy = (sim.age == Age::Toddler && obj.kind == ObjectKind::StuffedToy)
+                                        .then(|| {
+                                            crate::anim::ActionClip::new(
+                                                Some("p2o_stuffedAnimal_play_start_normal_x"),
+                                                &["p2o_stuffedAnimal_play_loop1_x", "p2o_stuffedAnimal_play_loop2_x", "p2o_stuffedAnimal_play_loop3_x"],
+                                            )
+                                        });
+                                    if let Some(c) = toddler_toy.or_else(|| interaction_clip(d.name, obj.kind)) {
                                         commands.entity(me).insert(c);
                                     }
                                     let face = otf.rotation * Quat::from_rotation_y(std::f32::consts::PI);

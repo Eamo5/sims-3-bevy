@@ -48,7 +48,12 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("VGcontroller", "VideoGameSystemController", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("VGcontroller2", "VideoGameSystemController", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("vrGoggles", "VRGoggles", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    // (Whichever stuffed animal or toy is being played with.)
+    ("stuffedAnimal", ANY, "b__R_carry_slot", [0.0; 3], [0.0; 3]),
 ];
+
+/// A prop that's the object being used itself, whatever it is.
+const ANY: &str = "*";
 
 /// The clip-actor suffixes that are props (for the clip bake).
 pub fn prop_actor(suffix: &str) -> bool {
@@ -73,7 +78,7 @@ fn hold_props(
     mut assets: ResMut<ObjectAssets>,
     (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut sims: Query<(Entity, &ClipPlayer, &Skeleton, Option<&mut HeldProps>, &crate::interact::ActionQueue, Has<crate::anim::ActionClip>)>,
-    mut props: Query<&mut Transform, With<Prop>>,
+    (mut props, mut shown): (Query<&mut Transform, With<Prop>>, Query<&mut Visibility, (With<Prop>, Without<crate::interact::GameObject>)>),
     mut placed: Query<(&crate::interact::GameObject, &mut Visibility), Without<Prop>>,
     mut objects: Local<Option<HashMap<String, Key>>>,
     mut companions: Local<HashMap<String, Vec<(usize, String)>>>,
@@ -114,7 +119,7 @@ fn hold_props(
             _ => None,
         });
         let in_hand = target.filter(|t| {
-            placed.get(*t).is_ok_and(|(o, _)| want.iter().any(|(i, _)| objects.get(PROPS[*i].1) == Some(&o.objd)))
+            placed.get(*t).is_ok_and(|(o, _)| want.iter().any(|(i, _)| PROPS[*i].1 == ANY || objects.get(PROPS[*i].1) == Some(&o.objd)))
         });
         if held.1 != in_hand {
             if let Some(old) = held.1
@@ -145,9 +150,10 @@ fn hold_props(
                 Some((_, e, _)) => *e,
                 None => {
                     let Some(bone) = skel.rig.bones.iter().position(|b| b.name.eq_ignore_ascii_case(slot)) else { continue };
-                    let Some(objd) = objects.get(object) else { continue };
+                    let objd = if object == ANY { in_hand.and_then(|t| placed.get(t).ok()).map(|(o, _)| o.objd) } else { objects.get(object).copied() };
+                    let Some(objd) = objd else { continue };
                     let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
-                    let parts = assets.object(&mut ctx, *objd);
+                    let parts = assets.object(&mut ctx, objd);
                     if parts.is_empty() {
                         continue;
                     }
@@ -165,8 +171,14 @@ fn hold_props(
             let sim_len = lib.get(&data, &player.name).map_or(f32::MAX, |c| c.duration);
             let Some(clip) = lib.get(&data, clip_name) else { continue };
             let t = player.time.min(sim_len).min(clip.duration);
-            // (Moved to another slot as the clip says: goggles from the hand to the face.)
-            if let Some(p) = clip.parents.iter().rev().find(|p| p.time <= t + 1e-3)
+            // (Moved to another slot as the clip says: goggles from the hand to the face. Not
+            // shown while the clip has it elsewhere than on the Sim: a toy still on the floor.)
+            let parent = clip.parents.iter().rev().find(|p| p.time <= t + 1e-3);
+            if let Ok(mut v) = shown.get_mut(entity) {
+                let on_sim = parent.is_none_or(|p| p.parent == SIM_ACTOR);
+                v.set_if_neq(if on_sim { Visibility::Inherited } else { Visibility::Hidden });
+            }
+            if let Some(p) = parent.filter(|p| p.parent == SIM_ACTOR)
                 && let Some(bone) = skel.rig.bones.iter().position(|b| s3pkg::fnv32(&b.name) == p.slot)
                 && let Some(h) = held.0.iter_mut().find(|(h, ..)| h == i)
                 && h.2 != bone
@@ -186,6 +198,9 @@ fn hold_props(
         }
     }
 }
+
+/// fnv32("x"): the Sim in an object clip.
+const SIM_ACTOR: u32 = 0x050C5D67;
 
 /// fnv32("transformBone"): a prop's root in its clips.
 const TRANSFORM_BONE: u32 = 0xCD68F001;
