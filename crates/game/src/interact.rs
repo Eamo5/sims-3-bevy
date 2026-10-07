@@ -786,7 +786,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Read the Paper" => A::new(Some("a2o_newspaper_read_standing_start_x"), &["a2o_newspaper_read_standing_loop"]),
         "Eat" if kind == ObjectKind::Stool => A::new(Some("a2o_eat_barStoolIn_fork_start_x"), &["a2o_eat_barStoolIn_fork_neat_x"]),
         // (The fridge door opened, something taken out and the door shut again.)
-        "Have Quick Meal" | "Microwave Dinner" => A::steps("a2o_fridge_openDoor_x", FRIDGE_STEPS, &["a2o_eat_stand_fork_neat", "a2o_eat_stand_hand_neat"]),
+        "Have Quick Meal" => A::steps("a2o_fridge_openDoor_x", FRIDGE_STEPS, &["a2o_plateDinner_carry_x"]),
+        "Microwave Dinner" => A::steps("a2o_fridge_openDoor_x", FRIDGE_STEPS, &["a2o_eat_stand_fork_neat", "a2o_eat_stand_hand_neat"]),
         "Grab a Snack" => A::steps("a2o_fridge_openDoor_x", FRIDGE_STEPS, &["a2o_eat_stand_hand_neat"]),
         "Bake Birthday Cake" => A::steps("a2o_fridge_openDoor_x", FRIDGE_STEPS, &["a2o_cuttingBoard_chop_loopMedSkill_x"]),
         "Grow Up" => A::new(None, &["a2o_birthdayCake_blowOut_counter_x"]),
@@ -1846,6 +1847,8 @@ fn run_actions(
                                     Special::SellPainting => crate::paintings::CANVAS_MINUTES[crate::paintings::canvas(plan, skills.level("Painting")) as usize],
                                     // (Only taking the book down, or picking the paper up: they're read elsewhere.)
                                     Special::GetBook | Special::GetPaper => 2.0,
+                                    // (A quick meal is only taken out at the fridge: it's eaten at the table.)
+                                    Special::Cook => 6.0,
                                     // (Less time at the stove once the food's been prepared.)
                                     Special::ServeMeal if prepped.contains(me) && d.minutes > 30.0 => d.minutes - 15.0,
                                     // (Twice as quick for a Speedy Cleaner; homework too for a Multi-Tasker.)
@@ -2076,7 +2079,10 @@ fn run_actions(
                                                 }
                                             }
                                         }
-                                        Special::Cook | Special::None => {}
+                                        Special::Cook => {
+                                            commands.entity(me).insert(crate::meals::MealRequest::Quick);
+                                        }
+                                        Special::None => {}
                                     }
                                 }
                             } else {

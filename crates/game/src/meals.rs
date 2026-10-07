@@ -293,6 +293,8 @@ fn set_food(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetC
 pub enum MealRequest {
     /// Finished cooking at this stove.
     Serve(Entity),
+    /// A quick meal out of the fridge, to eat at the table.
+    Quick,
     /// Baked a birthday cake (at this fridge).
     Cake(Entity),
     /// Took a serving from this platter.
@@ -539,6 +541,27 @@ fn meal_requests(
                         leftovers.0.drain(..n);
                     }
                     commands.entity(platter).try_despawn();
+                }
+            }
+            MealRequest::Quick => {
+                // (Something simple of what they know, for the time of day.)
+                let pick = recipes.as_ref().and_then(|d| {
+                    let mut options = cookable(d, sim, skills.level("Cooking"), known, meal_time(clock.hour_f()).0);
+                    options.sort_by_key(|&i| d.recipes[i].level);
+                    options.truncate(3);
+                    options.choose(&mut rand::rng()).copied()
+                });
+                match pick {
+                    Some(i) => commands.entity(me).insert(Plateful(i)),
+                    None => commands.entity(me).remove::<Plateful>(),
+                };
+                commands.entity(me).insert(crate::anim::Carrying(crate::surroundings::DISH_CARRY));
+                match dining_seat(&objects, tf.translation, &taken) {
+                    Some((chair, _)) => {
+                        taken.push(chair);
+                        queue.0.push_front(Action::new("Eat", ActionKind::Object { target: chair, def: CHAIR_EAT }, true));
+                    }
+                    None => queue.0.push_front(Action::new("Eat", ActionKind::EatHere, true)),
                 }
             }
             MealRequest::Replicated => {

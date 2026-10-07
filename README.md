@@ -163,7 +163,8 @@ installation is unreachable.
   a pizza: within the hour the delivery, in the game's pizza uniform, carries the pizza box in
   to the kitchen counter. What's left of a meal goes in the fridge once it's been out a while
   (neat Sims see to it first, slobs never), to be had another time ("Have Leftovers": a plate
-  of it at the table); the fridge keeps a dozen servings, and they're kept in saves.
+  of it at the table); the fridge keeps a dozen servings, and they're kept in saves. A quick
+  meal is a plate of something simple taken out of the fridge and carried to the table.
 - **Recipes** from the game's recipe list: the stove offers "Cook Breakfast/Lunch/Dinner ›"
   and "Cook Dessert ›" with the recipes the Sim knows for that time of day (Mac and Cheese and
   Waffles to start; Goopy Carbonara, Spaghetti, Key Lime Pie, Lobster Thermidor... as Cooking
