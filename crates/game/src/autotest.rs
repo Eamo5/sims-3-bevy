@@ -162,6 +162,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
             .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, show_designs, walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, strand_swimmers.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -946,6 +947,20 @@ fn diving_board(
         c.pitch = 0.35;
         c.distance = 8.0;
         c.height_offset = (pos.y - world.data.heightmap.sample(pos.x, pos.z)).max(0.0) + 0.5;
+    }
+}
+
+/// STRAND=1: once someone's swimming, the pool's ladders are taken away (to see them drown).
+fn strand_swimmers(mut commands: Commands, mut done: Local<bool>, swimmers: Query<(), With<crate::swim::Swimming>>, ladders: Query<(Entity, &crate::interact::GameObject)>) {
+    if *done || std::env::var("STRAND").is_err() || swimmers.is_empty() {
+        return;
+    }
+    *done = true;
+    for (e, o) in &ladders {
+        if matches!(o.kind, crate::interact::ObjectKind::PoolLadder | crate::interact::ObjectKind::DivingBoard) {
+            info!("strand test: the {} is gone", o.name);
+            commands.entity(e).despawn();
+        }
     }
 }
 

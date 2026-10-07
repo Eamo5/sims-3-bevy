@@ -78,7 +78,13 @@ pub struct Swimming {
     water_y: f32,
     target: Vec2,
     exit: Vec3,
+    /// Since when they've had no way out (the ladders gone): they tire, and drown.
+    stranded: Option<f64>,
 }
+
+/// How long a swimmer with no way out lasts (game minutes), if their energy doesn't give out
+/// first.
+const STRANDED_MINUTES: f64 = 240.0;
 
 /// The pool a ladder stands at (only that one, of all a lot's pools): its tiles' centres in the
 /// world and its water height.
@@ -111,11 +117,16 @@ fn swim(
     mut commands: Commands,
     delta: Res<crate::clock::SimDelta>,
     world: Res<CurrentWorld>,
-    mut sims: Query<(Entity, &ActionQueue, &mut Transform, Option<&mut Swimming>, &crate::anim::ClipPlayer), With<Sim>>,
+    mut sims: Query<
+        (Entity, &Sim, &mut ActionQueue, &mut Transform, Option<&mut Swimming>, &crate::anim::ClipPlayer, &mut crate::sim::Motives),
+        Without<crate::death::Dying>,
+    >,
     ladders: Query<(&GameObject, &Transform), Without<Sim>>,
+    clock: Res<crate::clock::GameClock>,
+    mut notes: ResMut<crate::interact::Notifications>,
 ) {
     let mut rng = rand::rng();
-    for (e, queue, mut tf, swimming, player) in &mut sims {
+    for (e, sim, mut queue, mut tf, swimming, player, mut motives) in &mut sims {
         // Swimming now: the front action is a swim, under way.
         let swim_from = queue.0.front().and_then(|a| match (&a.kind, a.phase) {
             (ActionKind::Object { target, def }, Phase::Running(_)) => {
@@ -141,7 +152,7 @@ fn swim(
                 let target = tiles[rng.random_range(0..tiles.len())];
                 // (Into swimwear for the swim.)
                 commands.entity(e).insert((
-                    Swimming { tiles, water_y, target, exit },
+                    Swimming { tiles, water_y, target, exit, stranded: None },
                     ActionClip::new(None, &["a_swim_cycle_x"]),
                     crate::simbody::Wearing(crate::simbody::OutfitKind::Swimwear),
                     crate::aging::NeedsNewBody,
@@ -163,7 +174,39 @@ fn swim(
                     tf.translation = Vec3::new(p.x, s.water_y - SWIM_DROP, p.y);
                 }
             }
-            (None, Some(s)) => {
+            (None, Some(mut s)) => {
+                // With the ladders gone there's no way out: they swim on, tiring, until they drown.
+                let way_out = ladders.iter().any(|(o, t)| {
+                    matches!(o.kind, crate::interact::ObjectKind::PoolLadder | crate::interact::ObjectKind::DivingBoard)
+                        && s.tiles.iter().any(|p| p.distance(t.translation.xz()) < 2.5)
+                });
+                if !way_out {
+                    let since = *s.stranded.get_or_insert_with(|| {
+                        notes.push(format!("{} can't get out of the pool!", sim.first));
+                        clock.minutes
+                    });
+                    queue.0.clear();
+                    motives.add(crate::sim::ENERGY, -60.0 * delta.0 / 60.0);
+                    motives.add(crate::sim::FUN, -20.0 * delta.0 / 60.0);
+                    if clock.minutes - since > STRANDED_MINUTES || motives.0[crate::sim::ENERGY] <= -95.0 {
+                        commands.entity(e).insert(crate::death::Dying::drowned(s.exit));
+                        continue;
+                    }
+                    let here = tf.translation.xz();
+                    if here.distance(s.target) < 0.6 {
+                        s.target = s.tiles[rng.random_range(0..s.tiles.len())];
+                    }
+                    let to = s.target - here;
+                    let step = (SWIM_SPEED * 0.6 * delta.0).min(to.length());
+                    if to.length_squared() > 1e-6 {
+                        let dir = to.normalize();
+                        let p = here + dir * step;
+                        tf.rotation = tf.rotation.slerp(Quat::from_rotation_y(dir.x.atan2(dir.y)), (delta.0 * 2.0).min(1.0));
+                        tf.translation = Vec3::new(p.x, s.water_y - SWIM_DROP, p.y);
+                    }
+                    commands.entity(e).insert(ActionClip::new(None, &["a_swim_cycle_x"]));
+                    continue;
+                }
                 // Out of the water by the ladder.
                 tf.translation = s.exit;
                 commands

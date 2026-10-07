@@ -3,8 +3,9 @@
 //! he waits), and with a wave of the scythe raises a tombstone where they fell (`a_death_create`)
 //! before vanishing. The family mourns at the tombstone, which stays on the lot.
 //!
-//! Sims die of old age, in fires, of hunger (a day and a half starving) and of electrocution
-//! (a second shock while still singed from the first), each with the game's own last moments.
+//! Sims die of old age, in fires, of hunger (a day and a half starving), of electrocution
+//! (a second shock while still singed from the first) and by drowning (left in a pool with no
+//! way out), each with the game's own last moments.
 
 use bevy::prelude::*;
 
@@ -34,11 +35,13 @@ pub struct Dying {
     pub cause: &'static str,
     /// Their last moments.
     clip: &'static [&'static str],
+    /// Where their tombstone goes, when not where they fell (beside the pool they drowned in).
+    grave_at: Option<Vec3>,
 }
 
 impl Dying {
     pub fn new() -> Self {
-        Self { t: 0.0, stage: 0, reaper: None, cause: "peacefully of old age", clip: &["e_die_oldAge_x"] }
+        Self { t: 0.0, stage: 0, reaper: None, cause: "peacefully of old age", clip: &["e_die_oldAge_x"], grave_at: None }
     }
 
     pub fn in_fire() -> Self {
@@ -51,6 +54,11 @@ impl Dying {
 
     pub fn electrocuted() -> Self {
         Self { cause: "of electrocution", clip: &["a_die_electrocution_x"], ..Self::new() }
+    }
+
+    /// Drowned in a pool: the tombstone at its side (`edge`).
+    pub fn drowned(edge: Vec3) -> Self {
+        Self { cause: "by drowning", clip: &["a_die_drowning_x", "a_die_drowning_loop_x"], grave_at: Some(edge), ..Self::new() }
     }
 }
 
@@ -195,7 +203,7 @@ fn reap(
             3 if d.t >= TOMBSTONE_AT => {
                 let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
                 if let Some(entry) = data.0.catalog.iter().find(|c| c.instance_name == "UrnstoneHuman")
-                    && let Some(stone) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, entry.objd, tf.translation, tf.rotation)
+                    && let Some(stone) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, entry.objd, d.grave_at.unwrap_or(tf.translation), tf.rotation)
                 {
                     let label = format!("{}'s Tombstone", sim.full_name());
                     commands.entity(stone.entity).insert(crate::ghosts::Grave { sim: sim.clone(), cause: d.cause.to_string() });
