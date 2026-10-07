@@ -53,7 +53,7 @@ pub fn note_contact(clock: Res<crate::clock::GameClock>, mut events: MessageRead
 pub fn fade_relationships(
     clock: Res<crate::clock::GameClock>,
     mut last_hour: Local<i64>,
-    mut q: Query<(Entity, &crate::sim::Sim, &mut Relationships, Has<crate::sim::HouseholdMember>)>,
+    mut q: Query<(Entity, &crate::sim::Sim, &mut Relationships, Has<crate::sim::HouseholdMember>, Option<&crate::wishes::Wishes>)>,
     family: Res<crate::family::Genealogy>,
 ) {
     let hour = (clock.minutes / 60.0) as i64;
@@ -63,7 +63,11 @@ pub fn fade_relationships(
     *last_hour = hour;
     let household: std::collections::HashSet<Entity> = q.iter().filter(|x| x.3).map(|x| x.0).collect();
     let ids: HashMap<Entity, u64> = q.iter().map(|x| (x.0, x.1.id)).collect();
-    for (_, sim, mut rels, member) in &mut q {
+    for (_, sim, mut rels, member, wishes) in &mut q {
+        // (A Long Distance Friend's friends never drift.)
+        if crate::wishes::has(wishes, "LongDistanceFriend") {
+            continue;
+        }
         for (other, r) in rels.0.iter_mut() {
             if r.last <= 0.0 {
                 r.last = clock.minutes;

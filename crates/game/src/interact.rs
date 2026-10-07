@@ -1196,7 +1196,7 @@ fn parties(
     hosts: Query<(&Sim, &Relationships)>,
     away: Query<(Entity, &Sim, Has<crate::town::Townie>), (Or<(With<OffLot>, With<crate::town::Townie>)>, Without<Invited>, Without<HouseholdMember>)>,
     present: Query<Entity, (With<Visitor>, Without<GoingHome>)>,
-    mut members: Query<(&Sim, &mut crate::life::Moodlets, &Motives), With<HouseholdMember>>,
+    mut members: Query<(&Sim, &mut crate::life::Moodlets, &Motives, Option<&crate::wishes::Wishes>), With<HouseholdMember>>,
     mut guests: Query<(&mut Visitor, &mut crate::life::Moodlets, &Motives, &Sim), Without<HouseholdMember>>,
     mut notes: ResMut<Notifications>,
     mut events: MessageReader<LifeEvent>,
@@ -1264,7 +1264,9 @@ fn parties(
     debug!("party over: {} chats, {n} guests here, fun+social {:.0}", party.chats, if n > 0.0 { score / n } else { 0.0 });
     // A party is a hit when people talked (each social counts for both Sims in it).
     let great = n > 0.0 && (party.chats as f32 / 2.0 >= (n * 1.5f32).max(3.0) || score / n > 40.0);
-    for (sim, mut m, _) in &mut members {
+    // (A Legendary Host's parties always are.)
+    let great = great || members.iter().any(|(.., w)| crate::wishes::has(w, "LegendaryHost"));
+    for (sim, mut m, ..) in &mut members {
         if !sim.age.is_little() {
             m.add(if great { crate::life::MoodletKind::GreatParty } else { crate::life::MoodletKind::LameParty }, clock.minutes);
         }
@@ -1699,6 +1701,9 @@ fn run_actions(
                                 // (A painting takes as long as its canvas.)
                                 let minutes = match d.special {
                                     Special::SellPainting => crate::paintings::CANVAS_MINUTES[crate::paintings::canvas(plan, skills.level("Painting")) as usize],
+                                    // (Twice as quick for a Speedy Cleaner; homework too for a Multi-Tasker.)
+                                    Special::CleanUp | Special::EmptyTrash if crate::wishes::has(wishes, "SpeedyCleaner") => d.minutes * 0.5,
+                                    Special::Homework if crate::wishes::has(wishes, "MultiTasker") => d.minutes * 0.5,
                                     _ => d.minutes,
                                 };
                                 if elapsed >= minutes || full {

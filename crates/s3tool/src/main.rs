@@ -1786,6 +1786,15 @@ fn main() {
         println!("{} relationships: {states:?}", p.relationships.len());
         return;
     }
+    if args[1] == "strkey" {
+        // strkey <root> <key>...: the English text of string keys (fnv64 of the lowercase key).
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let strings = s3formats::stbl::load_english(&set);
+        for k in &args[3..] {
+            println!("{k}: {}", strings.get(&s3pkg::fnv64(&k.to_ascii_lowercase())).cloned().unwrap_or_default());
+        }
+        return;
+    }
     if args[1] == "strfind" {
         // strfind <root> <text>...: string-table keys whose text equals one of the texts.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);

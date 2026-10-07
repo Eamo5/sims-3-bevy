@@ -607,6 +607,8 @@ fn work_schedule(
             let gain = (moody + (skill - want) * 3.0 + 8.0) * crate::life::work_rate(&sim.traits);
             // (Working hard gets them noticed faster; taking it easy, the other way.)
             let gain = if gain > 0.0 { gain * job.tone.performance() } else { gain / job.tone.performance().max(0.5) };
+            // (A Multi-Tasker gets more done.)
+            let gain = if gain > 0.0 && crate::wishes::has(wishes, "MultiTasker") { gain * 1.5 } else { gain };
             job.performance = (job.performance + gain).clamp(-100.0, 100.0);
             // Studying the career's skill on the job.
             if job.tone == WorkTone::Study {
@@ -677,6 +679,11 @@ fn work_schedule(
         // A missed shift costs performance.
         if workday && h > info.start + 2.0 && h < info.start + 3.0 && job.last_day != Some(day) {
             job.last_day = Some(day);
+            // (Nobody at work notices a Vacationer's day off.)
+            if crate::wishes::has(wishes, "Vacationer") {
+                notes.push(format!("{} took the day off work. Nobody noticed.", sim.first));
+                continue;
+            }
             job.performance = (job.performance - 35.0).max(-100.0);
             notes.push(format!("{} missed work today! Their boss is not pleased.", sim.first));
             continue;

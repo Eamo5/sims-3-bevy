@@ -113,16 +113,17 @@ fn conceive(
     mut commands: Commands,
     mut events: MessageReader<Conceive>,
     clock: Res<GameClock>,
-    sims: Query<(&Sim, Has<Pregnancy>)>,
+    sims: Query<(&Sim, Has<Pregnancy>, Option<&crate::wishes::Wishes>)>,
     mut play: MessageWriter<PlaySound>,
 ) {
     for ev in events.read() {
-        let (Ok((a, a_preg)), Ok((b, b_preg))) = (sims.get(ev.a), sims.get(ev.b)) else { continue };
+        let (Ok((a, a_preg, aw)), Ok((b, b_preg, bw))) = (sims.get(ev.a), sims.get(ev.b)) else { continue };
         if a.female == b.female || a_preg || b_preg {
             continue;
         }
-        // Not every try succeeds.
-        if !rand::rng().random_bool(0.6) {
+        // Not every try succeeds (most do, with a Fertility Treatment).
+        let chance = if crate::wishes::has(aw, "FertilityTreatment") || crate::wishes::has(bw, "FertilityTreatment") { 0.9 } else { 0.6 };
+        if !rand::rng().random_bool(chance) {
             info!("conceive: {} and {} tried for a baby, no luck this time", a.first, b.first);
             continue;
         }

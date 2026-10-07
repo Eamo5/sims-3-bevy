@@ -134,7 +134,7 @@ impl Wishes {
 }
 
 /// The lifetime rewards offered: the game's reward traits whose effects are carried out here.
-pub const REWARDS: [&str; 18] = [
+pub const REWARDS: [&str; 25] = [
     "SteelBladder",
     "PermaClean",
     "HardlyHungry",
@@ -149,6 +149,13 @@ pub const REWARDS: [&str; 18] = [
     "ComplimentaryEntertainment",
     "BookshopBargainer",
     "Haggler",
+    "SpeedyCleaner",
+    "MultiTasker",
+    "HighRoller",
+    "Vacationer",
+    "LegendaryHost",
+    "LongDistanceFriend",
+    "FertilityTreatment",
     "ChangeLifetimeWish",
     "FoodReplicator",
     "BodySculptor",
@@ -412,6 +419,23 @@ fn fulfil_wishes(
                     notes.push(format!("{} fulfilled a wish: {t}!", sim.first));
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every lifetime reward offered is one of the game's, with its cost (needs the bake:
+    /// `SIMS3_CACHE=<baked> cargo test -p sims3 rewards_are_the_games -- --ignored`).
+    #[test]
+    #[ignore]
+    fn rewards_are_the_games() {
+        let data = s3bake::gamedata::load_gamedata(&s3bake::default_root()).expect("gamedata");
+        for r in REWARDS {
+            let t = data.traits.iter().find(|t| t.hex == r);
+            assert!(t.is_some_and(|t| t.points > 0 && !t.name.is_empty()), "{r}: {:?}", t.map(|t| (&t.name, t.points)));
         }
     }
 }

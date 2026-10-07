@@ -297,7 +297,7 @@ fn pay_royalties(
     clock: Res<GameClock>,
     ui: Option<Res<crate::icons::GameUi>>,
     mut household: Option<ResMut<Household>>,
-    mut authors: Query<(&Sim, &mut Author), With<HouseholdMember>>,
+    mut authors: Query<(&Sim, &mut Author, Option<&crate::wishes::Wishes>), With<HouseholdMember>>,
     mut notes: ResMut<Notifications>,
 ) {
     let data = ui.as_ref().map(|u| &*u.data);
@@ -305,11 +305,13 @@ fn pay_royalties(
         return;
     }
     let day = clock.day();
-    for (sim, mut a) in &mut authors {
+    for (sim, mut a, wishes) in &mut authors {
+        // (Bigger checks for a High Roller.)
+        let factor = if crate::wishes::has(wishes, "HighRoller") { 1.5 } else { 1.0 };
         let mut paid = 0;
         let mut titles = Vec::new();
         for b in a.books.iter_mut().filter(|b| b.payments_left > 0 && b.next_pay <= day) {
-            paid += b.royalty;
+            paid += (b.royalty as f32 * factor).round() as i64;
             b.payments_left -= 1;
             b.next_pay = day + 7;
             titles.push(format!("“{}”", b.title));
