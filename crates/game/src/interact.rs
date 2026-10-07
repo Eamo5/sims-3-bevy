@@ -1019,6 +1019,14 @@ impl Action {
 #[derive(Component, Default)]
 pub struct ActionQueue(pub VecDeque<Action>);
 
+/// Objects a Sim couldn't find a way to lately (and when): left alone by their autonomy for a
+/// while, rather than tried again and again.
+#[derive(Component, Default)]
+pub struct RouteFailed(pub Vec<(Entity, f64)>);
+
+/// How long a Sim leaves an object they couldn't reach (game minutes).
+const ROUTE_FAIL_MINUTES: f64 = 120.0;
+
 impl ActionQueue {
     /// Queues a player-chosen action, dropping autonomous ones first like the original.
     pub fn push_player(&mut self, a: Action) {
@@ -1500,6 +1508,19 @@ fn run_actions(
                                 commands.entity(me).insert(crate::balloons::BalloonRequest::thought("t_balloon_routefail"));
                                 if !action.autonomous {
                                     notes.push(format!("{} can't find a way to get there.", sim.first));
+                                }
+                                // (Not tried again for a while.)
+                                if let ActionKind::Object { target, .. } = action.kind {
+                                    let now = clock.minutes;
+                                    commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| {
+                                        if e.get::<RouteFailed>().is_none() {
+                                            e.insert(RouteFailed::default());
+                                        }
+                                        if let Some(mut r) = e.get_mut::<RouteFailed>() {
+                                            r.0.retain(|(_, t)| now - t < ROUTE_FAIL_MINUTES);
+                                            r.0.push((target, now));
+                                        }
+                                    });
                                 }
                             }
                             finished = true;
@@ -2384,12 +2405,13 @@ fn autonomy(
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>,
     hh: Option<Res<Household>>,
     (broken, plant_q, lit_q, hw_q): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>, Query<(), With<crate::fireplace::Lit>>, Query<(), With<crate::rabbitholes::Homework>>),
-    (party_on, trash_q, served_q, leftovers, sprinkling): (
+    (party_on, trash_q, served_q, leftovers, sprinkling, route_failed): (
         Option<Res<Party>>,
         Query<&crate::surroundings::TrashFill>,
         Query<&crate::surroundings::ServedAt>,
         Res<crate::meals::Leftovers>,
         Query<(), With<crate::gardening::Sprinkling>>,
+        Query<&RouteFailed>,
     ),
     (called, repairmen): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>),
     friends_away: Query<(Entity, &Sim), (With<OffLot>, Without<Invited>)>,
@@ -2490,6 +2512,10 @@ fn autonomy(
                     continue;
                 }
                 if d.special == Special::PlayInSprinkler && !sprinkling.contains(oe) {
+                    continue;
+                }
+                // (Not what they couldn't get to just now.)
+                if route_failed.get(me).is_ok_and(|f| f.0.iter().any(|(x, t)| *x == oe && clock.minutes - t < ROUTE_FAIL_MINUTES)) {
                     continue;
                 }
                 if matches!(d.special, Special::ServeMeal | Special::CleanUp | Special::PayBills) && (meal_out && d.special == Special::ServeMeal || !household.contains(me)) {
