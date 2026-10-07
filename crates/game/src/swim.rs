@@ -1,6 +1,6 @@
-//! Swimming: from a pool's ladder a Sim gets into the water and swims about the pool (the
-//! game's swim cycle, head and shoulders above the water) until the swim is over, then climbs
-//! back out by the ladder.
+//! Swimming: from a pool's ladder a Sim gets into the water (or dives in off the diving board,
+//! with one of the game's dives) and swims about the pool (the game's swim cycle, head and
+//! shoulders above the water) until the swim is over, then climbs back out.
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -111,11 +111,11 @@ fn swim(
     mut commands: Commands,
     delta: Res<crate::clock::SimDelta>,
     world: Res<CurrentWorld>,
-    mut sims: Query<(Entity, &ActionQueue, &mut Transform, Option<&mut Swimming>), With<Sim>>,
+    mut sims: Query<(Entity, &ActionQueue, &mut Transform, Option<&mut Swimming>, &crate::anim::ClipPlayer), With<Sim>>,
     ladders: Query<(&GameObject, &Transform), Without<Sim>>,
 ) {
     let mut rng = rand::rng();
-    for (e, queue, mut tf, swimming) in &mut sims {
+    for (e, queue, mut tf, swimming, player) in &mut sims {
         // Swimming now: the front action is a swim, under way.
         let swim_from = queue.0.front().and_then(|a| match (&a.kind, a.phase) {
             (ActionKind::Object { target, def }, Phase::Running(_)) => {
@@ -126,7 +126,14 @@ fn swim(
         });
         match (swim_from, swimming) {
             (Some(ladder), None) => {
-                let Ok((_, ltf)) = ladders.get(ladder) else { continue };
+                let Ok((lo, ltf)) = ladders.get(ladder) else { continue };
+                // (Off the diving board: in once the dive is done.)
+                let dived = player.name.contains("divingBoard_")
+                    && !player.name.contains("getIn")
+                    && player.clip.as_ref().is_some_and(|c| player.time >= c.duration * 0.8);
+                if lo.kind == crate::interact::ObjectKind::DivingBoard && !dived {
+                    continue;
+                }
                 let Some((tiles, water_y)) = pool_at(&world.data, ltf.translation) else { continue };
                 let Some(&first) = tiles.iter().min_by(|a, b| a.distance(ltf.translation.xz()).total_cmp(&b.distance(ltf.translation.xz()))) else { continue };
                 let exit = tf.translation;

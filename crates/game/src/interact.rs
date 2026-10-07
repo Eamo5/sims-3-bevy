@@ -112,6 +112,8 @@ pub enum ObjectKind {
     StuffedToy,
     /// A garden sprinkler.
     Sprinkler,
+    /// A pool's diving board: Sims dive in for a swim.
+    DivingBoard,
     Other,
 }
 
@@ -132,6 +134,8 @@ impl ObjectKind {
             Self::StuffedToy
         } else if has("environment.sprinkler") {
             Self::Sprinkler
+        } else if has("pools.divingboard") {
+            Self::DivingBoard
         } else if has("barbeque") {
             Self::Grill
         } else if has("hotbeveragemachine") {
@@ -246,6 +250,7 @@ impl ObjectKind {
             }
             Self::SwingSet | Self::JungleGym | Self::DollHouse | Self::StuffedToy => "Kids",
             Self::Sprinkler => "Outdoors",
+            Self::DivingBoard => "Outdoors",
             Self::HotTub => "Plumbing",
             Self::Dresser => "Surfaces",
             Self::Table => "Surfaces",
@@ -593,6 +598,12 @@ static SPRINKLER: [InteractionDef; 3] = [
     // (Only while it's running.)
     InteractionDef { special: Special::PlayInSprinkler, ..def("Play in Sprinkler", 30.0, [0.0, 0.0, -6.0, 0.0, 0.0, 110.0], Pose::Use) },
 ];
+/// (A swim, begun with a dive.)
+static DIVING_BOARD: [InteractionDef; 1] = [InteractionDef {
+    special: Special::Swim,
+    on_object: true,
+    ..def("Dive In", 60.0, [0.0, 0.0, -10.0, 0.0, 15.0, 70.0], Pose::Use)
+}];
 static STUFFED_TOY: [InteractionDef; 1] = [def("Play with Toy", 30.0, [0.0, 0.0, -2.0, 6.0, 0.0, 75.0], Pose::Use)];
 static VRGOGGLES: [InteractionDef; 1] = [def("Explore Virtual Worlds", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 95.0], Pose::Use)];
 static STEREO: [InteractionDef; 1] = [def("Dance", 45.0, [0.0, 0.0, -6.0, 0.0, -6.0, 70.0], Pose::Dance)];
@@ -693,6 +704,10 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
             ],
         ),
         // (Children's: grown-ups play with toys only with a little one.)
+        "Dive In" => A::new(
+            Some("a2o_divingBoard_getIn_x"),
+            &["a2o_divingBoard_dive_x", "a2o_divingBoard_diveBasic_x", "a2o_divingBoard_diveBeginner_x", "a2o_divingBoard_cannonBall_x"],
+        ),
         "Play in Sprinkler" => A::new(
             Some("a2o_sprinklerGarden_playWith_start_x"),
             &[
@@ -853,6 +868,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::VrGoggles => &VRGOGGLES,
         ObjectKind::StuffedToy => &STUFFED_TOY,
         ObjectKind::Sprinkler => &SPRINKLER,
+        ObjectKind::DivingBoard => &DIVING_BOARD,
         _ => &[],
     }
 }

@@ -161,7 +161,7 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, show_designs, walls_hook, hang_paintings, buy_close).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, show_designs, walls_hook, hang_paintings, buy_close, diving_board).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -880,6 +880,56 @@ fn hang_paintings(
         && let Some((objd, design)) = crate::paintings::object(pd, &items[3])
     {
         commands.insert_resource(crate::buy::HoldRequest { objd, design: Some(design), item: items[3].clone(), from: me });
+    }
+}
+
+/// DIVE=1: a diving board on the lot's pool's edge, a couple of metres from its ladder, with the
+/// camera on it.
+#[allow(clippy::too_many_arguments)]
+fn diving_board(
+    mut commands: Commands,
+    mut done: Local<bool>,
+    time: Res<Time>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+    ladders: Query<(&Transform, &crate::interact::GameObject)>,
+    mut cam: Query<&mut SimsCamera>,
+    world: Res<crate::loading::CurrentWorld>,
+    (data, catalog, mut assets): (Res<crate::baked::Baked>, Res<crate::loading::Catalog>, ResMut<crate::objects::ObjectAssets>),
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+) {
+    if std::env::var("DIVE").is_err() || *done || time.elapsed_secs() < 5.0 {
+        return;
+    }
+    let Some(b) = building else { return };
+    *done = true;
+    // (Near its ladder, or else by one of the pool's tiles.)
+    let near = match ladders.iter().find(|(_, o)| o.kind == crate::interact::ObjectKind::PoolLadder) {
+        Some((ltf, _)) => ltf.translation + ltf.rotation * Vec3::X * 2.5,
+        None => {
+            let Some(t) = b.data.pool.first() else {
+                warn!("dive test: no pool");
+                return;
+            };
+            b.world(t.x as f32 + 0.5, t.z as f32 + 0.5, b.levels.first().copied().unwrap_or(0.0))
+        }
+    };
+    let Some(objd) = data.0.catalog.iter().find(|c| c.instance_name == "DivingBoardClassic").map(|c| c.objd) else { return };
+    let Some((pos, rot)) = crate::build::snap_to_pool(&b, near) else {
+        warn!("dive test: nowhere on the pool's edge");
+        return;
+    };
+    let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+    if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, rot, None) {
+        commands.entity(o.entity).insert(crate::save::Bought);
+        info!("dive test: a diving board at {pos:.1?}");
+    }
+    if let Ok(mut c) = cam.single_mut() {
+        let fwd = rot * Vec3::Z;
+        c.look_at(pos + fwd * 1.5);
+        c.yaw = (fwd.x + fwd.z * 0.9).atan2(fwd.z - fwd.x * 0.9) + std::f32::consts::PI;
+        c.pitch = 0.35;
+        c.distance = 8.0;
+        c.height_offset = (pos.y - world.data.heightmap.sample(pos.x, pos.z)).max(0.0) + 0.5;
     }
 }
 
