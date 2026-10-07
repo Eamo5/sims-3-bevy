@@ -1,4 +1,5 @@
-//! Town life: townies strolling along the sidewalk past the household's lot during the day.
+//! Town life: townies strolling along the sidewalk past the household's lot during the day, and
+//! now and then (mornings and evenings most) jogging past in their athletic wear.
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -36,20 +37,20 @@ fn stroll(
     mut commands: Commands,
     clock: Res<GameClock>,
     sidewalk: Option<Res<Sidewalk>>,
-    mut townies: Query<(Entity, &mut Townie, &mut Transform, &mut Visibility, &mut Floor, &mut SimAnim, Option<&PathFollow>)>,
+    mut townies: Query<(Entity, &mut Townie, &mut Transform, &mut Visibility, &mut Floor, &mut SimAnim, Option<&PathFollow>, &crate::sim::Sim, Option<&crate::simbody::Wearing>)>,
 ) {
     let Some(walk) = sidewalk else { return };
     let mut rng = rand::rng();
     let hour = clock.hour_f();
     let daytime = (7.5..21.0).contains(&hour);
-    for (e, mut t, mut tf, mut vis, mut floor, mut anim, path) in &mut townies {
+    for (e, mut t, mut tf, mut vis, mut floor, mut anim, path, sim, wearing) in &mut townies {
         if t.walking {
             if path.is_none_or(|p| p.done) {
                 t.walking = false;
                 t.next_walk = clock.minutes + rng.random_range(40.0..160.0);
                 *vis = Visibility::Hidden;
                 anim.pose = Pose::Stand;
-                commands.entity(e).remove::<PathFollow>();
+                commands.entity(e).remove::<(PathFollow, crate::jog::Jogging)>();
             }
             continue;
         }
@@ -68,6 +69,20 @@ fn stroll(
         t.walking = true;
         let mut pf = PathFollow::new(vec![Waypoint { p: end, level: 1, climb: None }]);
         pf.speed = rng.random_range(1.2..1.7);
+        // (Some jog past instead, in their athletic wear: more of them mornings and evenings.)
+        let jog_hours = (7.0..10.0).contains(&hour) || (17.0..20.0).contains(&hour);
+        let jogging = crate::jog::can_jog(sim) && rng.random_bool(if jog_hours { 0.35 } else { 0.1 });
+        let athletic = wearing.is_some_and(|w| w.0 == crate::simbody::OutfitKind::Athletic);
+        debug!("{} {} past", sim.full_name(), if jogging { "jogs" } else { "walks" });
+        if jogging {
+            pf.speed = rng.random_range(2.7..3.3);
+            commands.entity(e).insert(crate::jog::Jogging::new(start, clock.minutes));
+            if !athletic {
+                commands.entity(e).insert((crate::simbody::Wearing(crate::simbody::OutfitKind::Athletic), crate::aging::NeedsNewBody));
+            }
+        } else if athletic {
+            commands.entity(e).remove::<crate::simbody::Wearing>().insert(crate::aging::NeedsNewBody);
+        }
         commands.entity(e).insert(pf);
     }
 }

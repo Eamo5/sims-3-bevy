@@ -2889,6 +2889,20 @@ fn autonomy(
                 }
             }
         }
+        // An athletic Sim goes jogging now and then (by day, at home, with the energy for it).
+        if household.contains(me)
+            && my_lot.is_none()
+            && crate::jog::can_jog(sim)
+            && sim.traits.contains(&crate::life::Trait::Athletic)
+            && (7.0..20.0).contains(&clock.hour_f())
+            && motives.0[ENERGY] > 10.0
+            && motives.0[HYGIENE] > 0.0
+        {
+            let score = (12.0 + urgency(FUN) * 30.0) * rng.random_range(0.85..1.15);
+            if best.as_ref().is_none_or(|b| score > b.0) {
+                best = Some((score, Action::new("Go Jogging", ActionKind::Jog { home: Vec2::ZERO }, true)));
+            }
+        }
         let social_need = if sim.traits.contains(&crate::life::Trait::Loner) { 0.0 } else { 30.0 };
         let social_need = if sim.traits.contains(&crate::life::Trait::PartyAnimal) || sim.traits.contains(&crate::life::Trait::Friendly) { 50.0 } else { social_need };
         // A little one in need comes first for the grown-ups.

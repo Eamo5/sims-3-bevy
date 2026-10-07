@@ -278,8 +278,10 @@ installation is unreachable.
 - **Jogging**: clicking the selected Sim offers "Go Jogging": out to the street in athletic
   wear and up and down its sidewalk at a jog (the game's jogging clip) for an hour, or until
   they're worn out, then home (and usually to the shower). It trains Athletic, builds fitness,
-  and counts the game's six kilometres an hour towards the Marathon Runner challenge. The
-  sidewalk the town's passers-by and joggers use runs beside the street nearest the lot.
+  and counts the game's six kilometres an hour towards the Marathon Runner challenge. Athletic
+  Sims go jogging on their own by day, and some of the town's passers-by jog past in their
+  athletic wear (most of them mornings and evenings). The sidewalk they all use runs beside
+  the street nearest the lot.
 - **Water effects**: fountains gush and fill their basins, showers spray from the head and taps
   run while someone's at them, each from the object's own effect slot (the game's RSLT slots).
   TVs show a programme on the screen (at the TV's screen slot) while anyone's watching, its
