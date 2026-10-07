@@ -741,7 +741,7 @@ fn world_click(
             Res<crate::appliances::Alarm>,
         ),
     ),
-    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family): (
+    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -750,6 +750,7 @@ fn world_click(
         Query<&crate::inventory::Inventory>,
         Query<&crate::upgrades::Upgrades>,
         Res<crate::family::Genealogy>,
+        Query<&crate::doorbell::AtTheDoor>,
     ),
 ) {
     if buy.is_some_and(|b| b.active) {
@@ -807,6 +808,7 @@ fn world_click(
                         crate::social::SocialEffect::TeachWalk => !toddler_q.get(t).is_ok_and(|k| k.walks()),
                         crate::social::SocialEffect::TeachTalk => !toddler_q.get(t).is_ok_and(|k| k.talks()),
                         crate::social::SocialEffect::HelpHomework => hw_q.contains(t),
+                        crate::social::SocialEffect::Greet => door_q.get(t).is_ok_and(|d| d.since.is_some()) && members_q.contains(actor),
                         _ => true,
                     })
                     .map(|(i, s)| (s.name.to_string(), ActionKind::Social { target: t, social: i }))

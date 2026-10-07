@@ -981,6 +981,7 @@ pub fn social_clips(name: &str, little: Option<Age>) -> &'static [&'static str] 
         "Compliment Appearance" => &["a2a_soc_Neutral_Compliment_Amorous"],
         "Hug" => &["a2a_soc_friendly_hug_accept", "a2a_soc_Neutral_FriendlyHug_Friendly_Neutral"],
         "High Five" => &["a2a_soc_neutral_highFive_friendly_neutral"],
+        "Greet" => &["a2a_soc_Neutral_Greet_Friendly_Friendly", "a2a_soc_neutral_greet"],
         "Tickle" => &["a2a_soc_neutral_probe_tickle"],
         "Flirt" => &["a2a_soc_Neutral_Flirt_Neutral_Neutral", "a2a_soc_Neutral_Flirt_Amorous_Amorous"],
         "Hold Hands" => &["a2a_soc_Amorous_HoldHands_Affectionate_Amorous"],
@@ -1292,8 +1293,9 @@ fn comings_and_goings(
     mut joining: Query<(Entity, &mut Sim, &JoinHousehold)>,
     mut leaving: Query<(Entity, &mut ActionQueue, &Transform), (With<GoingHome>, Without<OffLot>)>,
     mut visitors: Query<(Entity, &Visitor), (Without<GoingHome>, Without<OffLot>, Without<HouseholdMember>)>,
-    mut arriving: Query<(Entity, &Invited, &mut Transform), Without<GoingHome>>,
+    mut arriving: Query<(Entity, &Invited, &mut Transform, Option<&mut ActionQueue>), Without<GoingHome>>,
     (town, mut household, mut notes, members): (Option<Res<crate::premade::TownPremades>>, Option<ResMut<Household>>, ResMut<Notifications>, Query<(), With<HouseholdMember>>),
+    (building, party): (Option<Res<crate::building::ActiveBuilding>>, (Option<Res<PartyPlan>>, Option<Res<Party>>)),
 ) {
     for (e, mut sim, j) in &mut joining {
         if let Some(l) = &j.last_name {
@@ -1329,12 +1331,17 @@ fn comings_and_goings(
             queue.0.push_back(Action::new("Go Home", ActionKind::GoHere(exit.0, 1), true));
         }
     }
-    for (e, inv, mut tf) in &mut arriving {
+    for (e, inv, mut tf, queue) in &mut arriving {
         if clock.minutes >= inv.arrive_at {
             tf.translation = Vec3::new(exit.0.x, world.data.heightmap.sample(exit.0.x, exit.0.y), exit.0.y);
             let day_end = (clock.minutes / 1440.0).floor() * 1440.0 + 22.0 * 60.0;
             let leave_at = day_end.max(clock.minutes + 240.0);
             commands.entity(e).remove::<(Invited, OffLot)>().insert((Visibility::Inherited, Visitor { leave_at }));
+            // To the front door, to ring and be let in (a party's guests come straight in).
+            let partying = party.0.is_some() || party.1.is_some();
+            if let (Some(mut queue), Some((door, door_e)), false) = (queue, building.as_ref().and_then(|b| b.front_door(exit.0)), partying) {
+                crate::doorbell::come_to_door(&mut commands, e, &mut queue, door, door_e.unwrap_or(e));
+            }
         }
     }
 }
@@ -2329,6 +2336,10 @@ fn run_actions(
                                             let e = skills.0.entry("Logic").or_insert(0.0);
                                             *e = (*e + minutes / 60.0 * 0.3 / (1.0 + *e * 0.25)).min(10.0);
                                         }
+                                        SocialEffect::Greet => {
+                                            notes.push(format!("{} let {tname} in.", sim.first));
+                                            commands.entity(*target).remove::<crate::doorbell::AtTheDoor>();
+                                        }
                                         SocialEffect::CheerUp | SocialEffect::BackRub => {
                                             let now = clock.minutes;
                                             let kind = if s.effect == SocialEffect::BackRub { crate::life::MoodletKind::Comfy } else { crate::life::MoodletKind::GoodConversation };
@@ -2734,6 +2745,7 @@ fn autonomy(
     ),
     (called, repairmen): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>),
     friends_away: Query<(Entity, &Sim), (With<OffLot>, Without<Invited>)>,
+    callers: Query<(Entity, &crate::doorbell::AtTheDoor)>,
 ) {
     if delta.0 <= 0.0 {
         return;
@@ -2745,8 +2757,21 @@ fn autonomy(
     let meal_out = objects.iter().any(|(_, o, ..)| o.kind == ObjectKind::Meal);
     let bills_due = hh.is_some_and(|h| !h.bills.is_empty());
     let mut rng = rand::rng();
+    // Callers at the door, and who's already going to let them in.
+    let greet = crate::social::social_index("Greet");
+    let mut greeted: Vec<Entity> = sims
+        .iter()
+        .flat_map(|s| s.3.0.iter().filter_map(|a| match a.kind {
+            ActionKind::Social { target, social } if Some(social) == greet => Some(target),
+            _ => None,
+        }))
+        .collect();
     for (me, tf, motives, mut queue, mut timer, rels, job, sim, partner, on_lot) in &mut sims {
         let my_lot = on_lot.map(|l| l.0);
+        // (A caller at the door waits there to be let in.)
+        if callers.contains(me) {
+            continue;
+        }
         timer.0 -= delta.0;
         // (Someone else's social partner waits for them to finish.)
         if timer.0 > 0.0 || !queue.0.is_empty() || sim.age == Age::Baby || partner {
@@ -2901,6 +2926,14 @@ fn autonomy(
                     best = Some((score, Action::new(d.name, ActionKind::Object { target: oe, def: di }, true)));
                 }
             }
+        }
+        // Someone at the door is let in by whoever of the household is free (one of them).
+        if household.contains(me) && my_lot.is_none() && sim.age.is_grown() && sim.age != Age::Child
+            && let Some(social) = greet
+            && let Some((caller, _)) = callers.iter().find(|(c, d)| d.since.is_some() && !greeted.contains(c))
+        {
+            greeted.push(caller);
+            best = Some((80.0, Action::new("Greet", ActionKind::Social { target: caller, social }, true)));
         }
         // An athletic Sim goes jogging now and then (by day, at home, with the energy for it).
         if household.contains(me)

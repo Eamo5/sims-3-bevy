@@ -224,6 +224,27 @@ impl ActiveBuilding {
         let l = self.local(p);
         self.floor_kinds.get(&(level, l.x.floor() as i32, l.y.floor() as i32)).copied()
     }
+
+    /// The front door for someone coming from `from` (world): of the ground floor's doors from
+    /// a room to the outdoors, the nearest; where a caller stands outside it (world), and the
+    /// door itself.
+    pub fn front_door(&self, from: Vec2) -> Option<(Vec2, Option<Entity>)> {
+        let indoors = |p: Vec2| self.room_at(1, self.world(p.x, p.y, 0.0)).is_some_and(|k| !matches!(k, ROOM_PORCH | ROOM_OUTSIDE));
+        let from = self.local(Vec3::new(from.x, 0.0, from.y));
+        self.holes
+            .iter()
+            .filter(|(_, h)| h.door && h.level.max(1) == 1)
+            .filter_map(|(e, h)| {
+                let (a, b) = (h.wall_point + h.fwd * 0.8, h.wall_point - h.fwd * 0.8);
+                match (indoors(a), indoors(b)) {
+                    (false, true) => Some((a, *e)),
+                    (true, false) => Some((b, *e)),
+                    _ => None,
+                }
+            })
+            .min_by(|p, q| p.0.distance(from).total_cmp(&q.0.distance(from)))
+            .map(|(p, e)| (self.world(p.x, p.y, 0.0).xz(), e))
+    }
 }
 
 /// Height a Sim stands at: the house's ground floor when inside it, else the terrain.

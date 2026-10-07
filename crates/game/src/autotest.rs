@@ -246,7 +246,7 @@ impl Plugin for AutoTestPlugin {
                   mut sel: Query<(&mut crate::interact::ActionQueue, &Transform, Option<&crate::visit::OnLot>, &mut crate::interact::Skills), With<crate::sim::Selected>>,
                   objects: Query<(Entity, &crate::interact::GameObject, &Transform, Option<&crate::visit::LotObject>)>,
                   mut commands: Commands,
-                  named: Query<(Entity, &crate::sim::Sim)>| {
+                  named: Query<(Entity, &crate::sim::Sim, Has<crate::sim::HouseholdMember>, Has<crate::interact::OffLot>)>| {
                     let Some(first) = &args.use_kind else { return };
                     let Ok((mut q, tf, on, mut skills)) = sel.single_mut() else { return };
                     // THEN_USE=<Kind>:<interaction>: once that's done, this.
@@ -286,7 +286,7 @@ impl Plugin for AutoTestPlugin {
                     }
                     // (`--use Help:<first name>`: they have homework, and are helped with it.)
                     if let Some(who) = want.strip_prefix("Help:")
-                        && let Some((t, _)) = named.iter().find(|(_, s)| s.first.eq_ignore_ascii_case(who))
+                        && let Some((t, ..)) = named.iter().find(|(_, s, ..)| s.first.eq_ignore_ascii_case(who))
                         && let Some(i) = crate::social::SOCIALS.iter().position(|s| s.effect == crate::social::SocialEffect::HelpHomework)
                     {
                         *done = true;
@@ -294,6 +294,16 @@ impl Plugin for AutoTestPlugin {
                         commands.entity(t).insert(crate::rabbitholes::Homework);
                         q.0.clear();
                         q.push_player(crate::interact::Action::new("Help with Homework", crate::interact::ActionKind::Social { target: t, social: i }, false));
+                        return;
+                    }
+                    // (`--use Invite`: someone they know, away at home, is invited over.)
+                    if want.eq_ignore_ascii_case("invite") {
+                        if let Some((t, s, ..)) = named.iter().find(|(_, _, member, away)| !member && *away) {
+                            info!("use test: inviting {} over", s.full_name());
+                            q.0.clear();
+                            q.push_player(crate::interact::Action::new("Invite Over", crate::interact::ActionKind::Invite { target: t }, false));
+                            *done = true;
+                        }
                         return;
                     }
                     // (`--use Jog`: out jogging.)

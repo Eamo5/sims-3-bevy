@@ -221,17 +221,19 @@ installation is unreachable.
   by the athletic and the brave, the loser embarrassed) for those who don't get on. On the
   phone (the game's cell phone in hand, with its dialling and chatting animations) Sims chat
   with friends who aren't about — half an hour's talk, good for Social and the friendship on
-  both sides (lonely Sims at home alone call a friend by themselves) — or invite them over,
+  both sides (lonely Sims at home alone call a friend by themselves) — or invite them over
+  (they come up to the front door and ring the bell, the game's ring, and wait there until
+  someone of the household goes to greet them and let them in; left two hours, they go home),
   order pizza and call the services. Friendships fade after three days without seeing or
   speaking to each other (good friends more slowly; spouses, partners and family stay close),
   and grudges soften.
-- **Families grow**: couples can try for a baby; pregnancy brings morning sickness, then
-  the game's pregnant waddle once she's showing (and no running), then a baby in a crib (the game's swaddled baby model). Grown-ups feed, change, cuddle and settle
-  babies (cradled in their arms) and pick up, read to and put toddlers to bed; toddlers
-  crawl about until a grown-up has taught them to walk (three lessons, with the game's
-  kneel-and-hold-hands animation; talking is taught the same way, and both show on the
-  toddler's Skills tab), play with toy boxes, xylophones and peg boxes, nap in cribs and cry
-  when neglected.
+- **Families grow**: couples can try for a baby; pregnancy brings morning sickness, then the
+  game's pregnant waddle once she's showing (and no running), then a baby in a crib (the
+  game's swaddled baby model). Grown-ups feed, change, cuddle and settle babies (cradled in
+  their arms) and pick up, read to and put toddlers to bed; toddlers crawl about until a
+  grown-up has taught them to walk (three lessons, with the game's kneel-and-hold-hands
+  animation; talking is taught the same way, and both show on the toddler's Skills tab), play
+  with toy boxes, xylophones and peg boxes, nap in cribs and cry when neglected.
 - **Town families**: every world's premade households (the Goths, Landgraabs, Altos, …) with
   their names, bios, family portraits, traits, careers, skills, marriages and homes — play one
   of them, or meet them around town.
