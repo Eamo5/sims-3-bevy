@@ -420,6 +420,8 @@ fn meal_requests(
                         });
                     }
                 }
+                // (The plate carried to the table.)
+                commands.entity(me).insert(crate::anim::Carrying(crate::surroundings::DISH_CARRY));
                 match dining_seat(&objects, tf.translation, &taken) {
                     Some((chair, at)) => {
                         info!("{} takes a plate to the table at {:.1?}", sim.first, at);

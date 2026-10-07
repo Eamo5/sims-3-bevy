@@ -413,6 +413,8 @@ pub enum Special {
     SetMood,
     /// A cleared dish washed up at the sink or put in the dishwasher.
     WashDishes,
+    /// The trash bag from an indoor can put out in the one outdoors.
+    DropTrash,
     /// A garden sprinkler turned on (it runs a couple of hours) or off.
     SprinklerOn,
     SprinklerOff,
@@ -563,8 +565,12 @@ static GRILL: [InteractionDef; 1] = [InteractionDef {
 }];
 /// A cup of coffee: a lift for the tired, and a trip to the bathroom later.
 static HOT_BEVERAGE: [InteractionDef; 1] = [def("Make Hot Beverage", 15.0, [24.0, -48.0, 80.0, 0.0, 0.0, 20.0], Pose::Use)];
-static TRASH: [InteractionDef; 1] =
-    [InteractionDef { special: Special::EmptyTrash, ..def("Empty Trash", 6.0, [0.0, 0.0, 0.0, 0.0, -6.0, 0.0], Pose::Use) }];
+static TRASH: [InteractionDef; 2] =
+    [
+        InteractionDef { special: Special::EmptyTrash, ..def("Empty Trash", 6.0, [0.0, 0.0, 0.0, 0.0, -6.0, 0.0], Pose::Use) },
+        // (Where the bag goes, outdoors: never on the menu.)
+        InteractionDef { autonomous: false, special: Special::DropTrash, ..def("Throw Out Trash", 3.0, N, Pose::Use) },
+    ];
 static FISHBOWL: [InteractionDef; 2] = [
     InteractionDef { autonomous: false, special: Special::PlaceFish, ..def("Place Fish", 2.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::TakeFish, ..def("Take Fish", 2.0, N, Pose::Use) },
@@ -776,6 +782,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Empty Trash" if kind == ObjectKind::TrashCompactor => A::new(None, &["a2o_trashCompactor_takeOut_x"]),
         "Empty Trash" => A::new(None, &["a2o_trashCan_empty_pullout_x"]),
         "Load Dishes" => A::new(None, &["a2o_dishwasher_use_x"]),
+        "Throw Out Trash" => A::new(None, &["a2o_trashPile_drop_outdoors_x"]),
         "Wash Dishes" => A::new(Some("a2o_sink_dishes_scrub_start_x"), &["a2o_sink_dishes_scrub_loop1_x", "a2o_sink_dishes_scrub_loop2_x"]),
         "Clean Up" => A::steps("a2o_plateDinner_pickUp_table_part1_x", &["a2o_plateDinner_pickUp_table_part2_x"], &["a2o_plateDinner_carry_x"]),
         "Make Hot Beverage" => A::new(Some("a2o_hotBeverageMachine_fill"), &["a2o_hotBeverageMachine_drink_loopSip_standing", "a2o_hotBeverageMachine_drink_loopLongSip_standing"]),
@@ -1805,7 +1812,7 @@ fn run_actions(
                                     }
                                     match d.special {
                                         // (Getting out of the pool is the swim module's.)
-                                        Special::FindJob | Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport | Special::WashDishes => {}
+                                        Special::FindJob | Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport | Special::WashDishes | Special::DropTrash => {}
                                         Special::Homework => {
                                             notes.push(format!("{} finished their homework.", sim.first));
                                             commands.entity(me).remove::<crate::rabbitholes::Homework>().queue_silenced(|mut e: EntityWorldMut| {
@@ -1948,6 +1955,8 @@ fn run_actions(
                                         }
                                         Special::EmptyTrash => {
                                             commands.entity(*target).insert(crate::surroundings::TrashFill(0));
+                                            // (The bag to the can outdoors.)
+                                            commands.entity(me).insert(crate::surroundings::TakeOutTrash(*target));
                                         }
                                         Special::ReadPaper => {
                                             commands.entity(*target).try_despawn();

@@ -868,7 +868,7 @@ fn world_click(
                     continue;
                 }
                 // (Dishes are washed up when cleared away, not from the menu.)
-                if d.special == Special::WashDishes {
+                if matches!(d.special, Special::WashDishes | Special::DropTrash) {
                     continue;
                 }
                 if d.special == Special::WriteNovel {

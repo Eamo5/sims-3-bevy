@@ -257,6 +257,8 @@ impl Plugin for AutoTestPlugin {
                     let (want, named) = want.split_once(':').map_or((want.as_str(), None), |(k, n)| (k, Some(n)));
                     let best = objects
                         .iter()
+                        // (USE_NAME=<part of its name>: that one of them.)
+                        .filter(|(_, o, _, _)| std::env::var("USE_NAME").map_or(true, |n| o.name.to_ascii_lowercase().contains(&n.to_ascii_lowercase())))
                         .filter(|(_, o, _, l)| format!("{:?}", o.kind).to_ascii_lowercase() == want && l.map(|l| l.0) == lot)
                         .min_by(|a, b| a.2.translation.distance(tf.translation).total_cmp(&b.2.translation.distance(tf.translation)));
                     if let Some((e, o, ..)) = best

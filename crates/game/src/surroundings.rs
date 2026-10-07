@@ -16,7 +16,7 @@ pub struct SurroundingsPlugin;
 
 impl Plugin for SurroundingsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spoil_food, trash_cans, discard, wash_up, put_down_dishes, surroundings).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (spoil_food, trash_cans, discard, wash_up, take_out_trash, put_down_carried, surroundings).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -136,19 +136,55 @@ fn wash_up(
     }
 }
 
-/// The game's walk with a dinner plate held out.
-const DISH_CARRY: &str = "a2o_plateDinner_carry_x";
+/// The game's walks with a dinner plate held out, and with a trash bag.
+pub const DISH_CARRY: &str = "a2o_plateDinner_carry_x";
+const TRASH_CARRY: &str = "a2o_trashPile_carry_x";
 
-/// A dish carried to be washed is put down once it's being washed (or the washing's given up).
-fn put_down_dishes(mut commands: Commands, sims: Query<(Entity, &crate::anim::Carrying, &crate::interact::ActionQueue, Has<crate::anim::ActionClip>, &crate::sim::SimAnim)>) {
+/// What's carried is put down once it's where it was going (being washed, eaten, thrown out),
+/// or once that's given up.
+fn put_down_carried(mut commands: Commands, sims: Query<(Entity, &crate::anim::Carrying, &crate::interact::ActionQueue, Has<crate::anim::ActionClip>, &crate::sim::SimAnim)>) {
     for (e, c, queue, acting, anim) in &sims {
-        if c.0 != DISH_CARRY {
-            continue;
-        }
-        let washing = queue.0.front().is_some_and(|a| matches!(a.kind, crate::interact::ActionKind::Object { .. }) && (a.label == "Wash Dishes" || a.label == "Load Dishes"));
-        if !washing || (acting && anim.pose != crate::sim::Pose::Walk) {
+        let goes_to: &[&str] = match c.0 {
+            DISH_CARRY => &["Wash Dishes", "Load Dishes", "Eat"],
+            TRASH_CARRY => &["Throw Out Trash"],
+            _ => continue,
+        };
+        let going = queue.0.front().is_some_and(|a| goes_to.contains(&a.label.as_str()));
+        if !going || (acting && anim.pose != crate::sim::Pose::Walk) {
             commands.entity(e).remove::<crate::anim::Carrying>();
         }
+    }
+}
+
+/// An indoor trash can just emptied: its bag to take out.
+#[derive(Component)]
+pub struct TakeOutTrash(pub Entity);
+
+/// The bag from an indoor trash can is carried out to the nearest one outdoors (with none,
+/// it's gone with the emptying).
+fn take_out_trash(
+    mut commands: Commands,
+    mut sims: Query<(Entity, &Transform, &TakeOutTrash, &mut crate::interact::ActionQueue)>,
+    cans: Query<(Entity, &GameObject, &Transform), Without<crate::interact::Broken>>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+) {
+    for (e, tf, from, mut queue) in &mut sims {
+        commands.entity(e).remove::<TakeOutTrash>();
+        let Some(b) = building.as_ref() else { continue };
+        let indoors = |p: Vec3| b.is_indoors(p);
+        if cans.get(from.0).is_ok_and(|(_, _, t)| !indoors(t.translation)) {
+            continue;
+        }
+        let Some((can, ..)) = cans
+            .iter()
+            .filter(|(_, o, t)| o.kind == ObjectKind::TrashCan && !indoors(t.translation) && t.translation.distance(tf.translation) < 60.0)
+            .min_by(|a, b| a.2.translation.distance(tf.translation).total_cmp(&b.2.translation.distance(tf.translation)))
+        else {
+            continue;
+        };
+        let Some(def) = crate::interact::interactions_for(ObjectKind::TrashCan).iter().position(|d| d.special == crate::interact::Special::DropTrash) else { continue };
+        queue.0.push_front(crate::interact::Action::new("Throw Out Trash", crate::interact::ActionKind::Object { target: can, def }, true));
+        commands.entity(e).insert(crate::anim::Carrying(TRASH_CARRY));
     }
 }
 

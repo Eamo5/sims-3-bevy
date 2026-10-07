@@ -335,8 +335,10 @@ installation is unreachable.
   hours) and a full trash can give nearby household Sims the game's *Dirty Surroundings*,
   then *Filthy Surroundings*, moodlets. A dish cleared away (picked up with the game's
   animation) has its scraps in the nearest trash can and goes in the dishwasher, if there's
-  one working, or is scrubbed at the sink; once full, someone has to *Empty Trash* (neat Sims
-  see to it, slobs never do), pulling out the bag. A trash compactor holds three times as
+  one working, or is scrubbed at the sink, carried there in hand (the game's carry animation
+  over the arms while the legs walk); plates taken from a platter are carried to the table the
+  same way. Once full, someone has to *Empty Trash* (neat Sims see to it, slobs never do),
+  pulling out the bag, and an indoor can's bag is carried out to the trash can outdoors. A trash compactor holds three times as
   much. Dishwashers break now and then, and are repaired with the game's animations.
 - **Fish bowls**: a fish from a Sim's inventory (fish now come in the game's qualities, a
   master angler often landing a perfect one) put in a bowl swims there, its own model
