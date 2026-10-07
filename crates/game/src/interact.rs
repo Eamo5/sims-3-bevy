@@ -774,6 +774,16 @@ static CHESS: [InteractionDef; 2] = [
 /// Taking something out of the fridge, after opening it.
 const FRIDGE_STEPS: &[&str] = &["a2o_fridge_takeFoodOut_plateDinner_x", "a2o_fridge_closeDoor_x"];
 
+/// Sitting down into a seat and getting up out of it (and how long getting up takes): a chair's
+/// or sofa's, or a bar stool's.
+fn seat_clips(kind: ObjectKind) -> Option<(&'static str, &'static str, f32)> {
+    match kind {
+        ObjectKind::Chair | ObjectKind::Sofa => Some(("a2o_chairDining_getIn_x", "a2o_chairDining_getOut_x", 1.6)),
+        ObjectKind::Stool => Some(("a2o_barstool_getIn_N_x", "a2o_barstool_getOut_N_x", 1.3)),
+        _ => None,
+    }
+}
+
 /// The animation played while performing an interaction: start clip, then loop variants.
 pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::ActionClip> {
     use crate::anim::ActionClip as A;
@@ -1126,7 +1136,7 @@ pub enum ActionKind {
     Teleport { pad: Entity, lot: usize },
     /// An interaction's ending played where the Sim is (out of bed, the book closed), then up
     /// to where they stand.
-    Outro { clips: &'static [&'static str], secs: f32, stand_at: Option<Vec2>, target: Entity },
+    Outro { clips: &'static [&'static str], then: Option<&'static str>, secs: f32, stand_at: Option<Vec2>, target: Entity },
     /// Drive home from the community lot.
     GoHomeFromLot,
 }
@@ -1165,6 +1175,12 @@ pub struct RouteFailed(pub Vec<(Entity, f64)>);
 const ROUTE_FAIL_MINUTES: f64 = 120.0;
 
 impl ActionQueue {
+    /// What the Sim is about, looking past an ending still playing (out of bed, the book
+    /// closed) to the action it ends or the one after.
+    pub fn current(&self) -> Option<&Action> {
+        self.0.iter().find(|a| !matches!(a.kind, ActionKind::Outro { .. }))
+    }
+
     /// Queues a player-chosen action, dropping autonomous ones first like the original.
     pub fn push_player(&mut self, a: Action) {
         for q in self.0.iter_mut() {
@@ -1529,7 +1545,7 @@ fn run_actions(
         };
         let mut finished = false;
         let mut stand_up_at: Option<Vec2> = None;
-        let mut outro: Option<(&'static [&'static str], f32, Entity)> = None;
+        let mut outro: Option<(&'static [&'static str], Option<&'static str>, f32, Entity)> = None;
 
         // Cancellation
         if action.cancel {
@@ -1701,7 +1717,11 @@ fn run_actions(
                                                 &["p2o_stuffedAnimal_play_loop1_x", "p2o_stuffedAnimal_play_loop2_x", "p2o_stuffedAnimal_play_loop3_x"],
                                             )
                                         });
-                                    if let Some(c) = toddler_toy.or_else(|| interaction_clip(d.name, obj.kind)) {
+                                    // (Into the seat first.)
+                                    let seat_in = (d.on_object && d.pose == Pose::Sit).then(|| seat_clips(obj.kind)).flatten().map(|(into, ..)| into);
+                                    let clip = toddler_toy.or_else(|| interaction_clip(d.name, obj.kind)).or_else(|| seat_in.map(|_| crate::anim::ActionClip::new(None, crate::anim::SIT_LOOPS)));
+                                    if let Some(mut c) = clip {
+                                        c.before = c.before.or(seat_in);
                                         commands.entity(me).insert(c);
                                     }
                                     let face = otf.rotation * Quat::from_rotation_y(std::f32::consts::PI);
@@ -1919,7 +1939,13 @@ fn run_actions(
                                         stand_up_at = Some(obj.use_point(otf));
                                     }
                                     // (Its ending, played before they're up and away.)
-                                    outro = interaction_clip(d.name, obj.kind).filter(|c| !c.end.is_empty()).map(|c| (c.end, c.end_secs, *target));
+                                    // (Then up out of the seat.)
+                                    let up = (d.on_object && d.pose == Pose::Sit).then(|| seat_clips(obj.kind)).flatten().map(|(_, out, secs)| (out, secs));
+                                    outro = match (interaction_clip(d.name, obj.kind).filter(|c| !c.end.is_empty()), up) {
+                                        (Some(c), up) => Some((c.end, up.map(|u| u.0), c.end_secs + up.map_or(0.0, |u| u.1), *target)),
+                                        (None, Some((out, secs))) => Some((&[], Some(out), secs, *target)),
+                                        (None, None) => None,
+                                    };
                                     match d.special {
                                         // (Getting out of the pool is the swim module's.)
                                         Special::FindJob | Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport | Special::WashDishes | Special::DropTrash | Special::ReadBook | Special::WatchTv => {}
@@ -2515,9 +2541,14 @@ fn run_actions(
             commands.entity(me).remove::<PathFollow>();
             match outro {
                 // (Still where they were, their interaction's ending plays; then they're up.)
-                Some((clips, secs, target)) => {
-                    queue.0.push_front(Action::new("Finish Up", ActionKind::Outro { clips, secs, stand_at: stand_up_at, target }, true));
-                    commands.entity(me).insert(crate::anim::ActionClip::steps(clips[0], &clips[1..], &[]));
+                Some((clips, then, secs, target)) => {
+                    queue.0.push_front(Action::new("Finish Up", ActionKind::Outro { clips, then, secs, stand_at: stand_up_at, target }, true));
+                    let mut c = match clips.split_first() {
+                        Some((first, rest)) => crate::anim::ActionClip::steps(first, rest, &[]),
+                        None => crate::anim::ActionClip::new(None, &[]),
+                    };
+                    c.after = then;
+                    commands.entity(me).insert(c);
                 }
                 None => {
                     anim.pose = Pose::Stand;

@@ -92,18 +92,25 @@ pub struct ActionClip {
     /// and how long that takes (seconds).
     pub end: &'static [&'static str],
     pub end_secs: f32,
+    /// A clip before the start (sitting down in the chair first), and one after the steps
+    /// (getting up out of it at the end).
+    pub before: Option<&'static str>,
+    pub after: Option<&'static str>,
 }
+
+/// Sitting about: a living chair's breathing and crossed legs.
+pub const SIT_LOOPS: &[&str] = &["a2o_chairLiving_sit_breathe_loop_x", "a2o_chairLiving_sit_crossedLeg_front_loop_x"];
 
 impl ActionClip {
     pub const fn new(start: Option<&'static str>, loops: &'static [&'static str]) -> Self {
-        Self { start, steps: &[], loops, side: None, end: &[], end_secs: 0.0 }
+        Self { start, steps: &[], loops, side: None, end: &[], end_secs: 0.0, before: None, after: None }
     }
     /// A start clip, steps after it in order, then loops.
     pub const fn steps(start: &'static str, steps: &'static [&'static str], loops: &'static [&'static str]) -> Self {
-        Self { start: Some(start), steps, loops, side: None, end: &[], end_secs: 0.0 }
+        Self { start: Some(start), steps, loops, side: None, end: &[], end_secs: 0.0, before: None, after: None }
     }
     pub const fn social(loops: &'static [&'static str], side: char) -> Self {
-        Self { start: None, steps: &[], loops, side: Some(side), end: &[], end_secs: 0.0 }
+        Self { start: None, steps: &[], loops, side: Some(side), end: &[], end_secs: 0.0, before: None, after: None }
     }
     /// With the clips it ends with (and their length).
     pub const fn ending(mut self, end: &'static [&'static str], secs: f32) -> Self {
@@ -202,7 +209,7 @@ fn little_script(pose: Pose, age: crate::sim::Age, walks: bool) -> ActionClip {
 fn pose_script(pose: Pose, female: bool, child: bool) -> ActionClip {
     const STAND: &[&str] = &["a_idle_neutral_loop_"];
     const TALK: &[&str] = &["a_idle_friendly_loop_"];
-    const SIT: &[&str] = &["a2o_chairLiving_sit_breathe_loop_x", "a2o_chairLiving_sit_crossedLeg_front_loop_x"];
+    const SIT: &[&str] = SIT_LOOPS;
     const LIE: &[&str] = &["a2o_bed_sleep_back"];
     const DANCE: &[&str] = &["a_dance_beg_", "a_dance_med_"];
     const RUN: &[&str] = &["a2o_treadmill_jog_loop"];
@@ -220,7 +227,7 @@ fn pose_script(pose: Pose, female: bool, child: bool) -> ActionClip {
 /// Picks the next clip of a script, and the step after it: the start clip and the steps once
 /// each, in order, then a random loop variant.
 fn next_clip(lib: &mut ClipLibrary, data: &Baked, script: &ActionClip, child: bool, mut step: usize) -> (Option<String>, usize) {
-    let sequence: Vec<&'static str> = script.start.into_iter().chain(script.steps.iter().copied()).collect();
+    let sequence: Vec<&'static str> = script.before.into_iter().chain(script.start).chain(script.steps.iter().copied()).chain(script.after).collect();
     while let Some(s) = sequence.get(step) {
         step += 1;
         if let Some(n) = lib.variants(data, s, script.side, child).first() {

@@ -195,7 +195,7 @@ fn watch_somewhere(
 /// Done watching (or off to something else), the Sim's TV is theirs no longer.
 fn stop_watching(mut commands: Commands, sims: Query<(Entity, &crate::interact::ActionQueue), With<WatchingTv>>) {
     for (e, queue) in &sims {
-        if !queue.0.front().is_some_and(|a| a.label == "Watch the TV") {
+        if !queue.current().is_some_and(|a| a.label == "Watch the TV") {
             commands.entity(e).remove::<WatchingTv>();
         }
     }
@@ -240,8 +240,8 @@ fn read_paper_somewhere(
 /// A paper carried off and not read after all is put back where it lay.
 fn drop_unread_paper(mut commands: Commands, sims: Query<(Entity, &PaperInHand, &crate::interact::ActionQueue)>) {
     for (e, paper, queue) in &sims {
-        if !queue.0.front().is_some_and(|a| a.label == "Read the Paper") {
-            commands.entity(paper.0).insert(Visibility::Inherited);
+        if !queue.current().is_some_and(|a| a.label == "Read the Paper") {
+            commands.entity(paper.0).try_insert(Visibility::Inherited);
             commands.entity(e).remove::<PaperInHand>();
         }
     }
@@ -300,7 +300,7 @@ fn put_down_carried(mut commands: Commands, sims: Query<(Entity, &crate::anim::C
             crate::meals::PLATTER_CARRY => &["Set Down Meal"],
             _ => continue,
         };
-        let going = queue.0.front().is_some_and(|a| goes_to.contains(&a.label.as_str()));
+        let going = queue.current().is_some_and(|a| goes_to.contains(&a.label.as_str()));
         if !going || (acting && anim.pose != crate::sim::Pose::Walk) {
             commands.entity(e).remove::<crate::anim::Carrying>();
         }

@@ -55,7 +55,7 @@ fn take_out_dinner(mut commands: Commands, mut sims: Query<(Entity, &MicrowaveDo
 /// A meal carried off and not set down after all (the cook called away) is served anyway.
 fn serve_if_interrupted(mut commands: Commands, sims: Query<(Entity, &ServingFrom, &ActionQueue), Without<MealRequest>>) {
     for (e, from, queue) in &sims {
-        if !queue.0.front().is_some_and(|a| a.label == "Set Down Meal") {
+        if !queue.current().is_some_and(|a| a.label == "Set Down Meal") {
             commands.entity(e).insert(MealRequest::Serve(from.0));
         }
     }
@@ -120,7 +120,7 @@ fn cook_prep(
 /// Once the cooking's done (or given up), the next meal is prepared afresh.
 fn cook_prep_done(mut commands: Commands, sims: Query<(Entity, &ActionQueue), With<CookPrepped>>) {
     for (e, queue) in &sims {
-        if !queue.0.front().is_some_and(|a| matches!(a.label.as_str(), "Get Ingredients" | "Prepare Food" | "Cook Dinner")) {
+        if !queue.current().is_some_and(|a| matches!(a.label.as_str(), "Get Ingredients" | "Prepare Food" | "Cook Dinner")) {
             commands.entity(e).remove::<CookPrepped>();
         }
     }
