@@ -113,7 +113,10 @@ installation is unreachable.
   Hungry, Fast Learner, Fast Metabolism, Professional Slacker, Opportunistic (bigger
   opportunity rewards), Attractive, Extra Creative (paintings and books earn more), Super
   Green Thumb, Discount Diner, Complimentary Entertainment, Bookshop Bargainer, Haggler, and a
-  new lifetime wish.
+  new lifetime wish; and the reward objects, which go into the Sim's inventory to place on the
+  lot: the Food Replicator (a plate of something at the push of a button, eaten at the table),
+  the Body Sculptor (an hour inside to come out fitter, slimmer or fuller) and the Moodlet
+  Manager (set a mood: flirty, inspired, pumped, having fun, well rested).
 - **Opportunities** from the game's own tables: by day, Sims are offered ones that suit their
   career or skills in the game's dialog (its icon, name, description and reward); taken-on
   opportunities are listed in the Opportunities panel (O) with their deadlines and are done

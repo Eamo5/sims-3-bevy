@@ -899,6 +899,18 @@ fn world_click(
                     }
                     continue;
                 }
+                // The body sculptor's shapes and the moodlet manager's moods: submenus.
+                if matches!(d.special, Special::Sculpt | Special::SetMood) {
+                    let defs = crate::interact::interactions_for(obj.kind);
+                    if defs.iter().position(|x| x.special == d.special) == Some(i) {
+                        let list: Vec<(String, ActionKind)> =
+                            defs.iter().enumerate().filter(|(_, x)| x.special == d.special).map(|(j, x)| (x.name.to_string(), ActionKind::Object { target: t, def: j })).collect();
+                        let title = if d.special == Special::Sculpt { "Sculpt" } else { "Set Mood" };
+                        options.push((format!("{title} ›"), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((title.to_string(), list));
+                    }
+                    continue;
+                }
                 // The canvas to paint on.
                 if d.special == Special::SellPainting {
                     let list: Vec<(String, ActionKind)> =

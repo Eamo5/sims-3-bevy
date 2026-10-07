@@ -116,6 +116,10 @@ pub enum ObjectKind {
     DivingBoard,
     /// A bar: drinks made at it.
     Bar,
+    /// Lifetime rewards: a plate of food at the push of a button, a new shape, a new mood.
+    FoodReplicator,
+    BodySculptor,
+    MoodletManager,
     Other,
 }
 
@@ -140,6 +144,12 @@ impl ObjectKind {
             Self::DivingBoard
         } else if has("objects.counters.bar") && !has("+") {
             Self::Bar
+        } else if has("rewards.foodreplicator") {
+            Self::FoodReplicator
+        } else if has("rewards.bodysculptor") {
+            Self::BodySculptor
+        } else if has("rewards.moodmodifier") {
+            Self::MoodletManager
         } else if has("barbeque") {
             Self::Grill
         } else if has("hotbeveragemachine") {
@@ -256,6 +266,7 @@ impl ObjectKind {
             Self::Sprinkler => "Outdoors",
             Self::DivingBoard => "Outdoors",
             Self::Bar => "Surfaces",
+            Self::FoodReplicator | Self::BodySculptor | Self::MoodletManager => "Misc",
             Self::HotTub => "Plumbing",
             Self::Dresser => "Surfaces",
             Self::Table => "Surfaces",
@@ -366,6 +377,12 @@ pub enum Special {
     None,
     /// Their looks changed at a mirror (hair, facial hair, glasses, make-up).
     ChangeAppearance,
+    /// A plate of food from the food replicator.
+    ReplicateFood,
+    /// A new shape from the body sculptor (fitter, slimmer or fuller, by the interaction).
+    Sculpt,
+    /// A mood from the moodlet manager (by the interaction).
+    SetMood,
     /// A garden sprinkler turned on (it runs a couple of hours) or off.
     SprinklerOn,
     SprinklerOff,
@@ -605,6 +622,22 @@ static SPRINKLER: [InteractionDef; 3] = [
     // (Only while it's running.)
     InteractionDef { special: Special::PlayInSprinkler, ..def("Play in Sprinkler", 30.0, [0.0, 0.0, -6.0, 0.0, 0.0, 110.0], Pose::Use) },
 ];
+static FOOD_REPLICATOR: [InteractionDef; 1] =
+    [InteractionDef { special: Special::ReplicateFood, ..def("Replicate Food", 3.0, [6000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) }];
+/// (A new shape, the sculptor at work for an hour.)
+static BODY_SCULPTOR: [InteractionDef; 3] = [
+    InteractionDef { autonomous: false, special: Special::Sculpt, ..def("Sculpt Fitter", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 10.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::Sculpt, ..def("Sculpt Slimmer", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 10.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::Sculpt, ..def("Sculpt Fuller", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 10.0], Pose::Use) },
+];
+/// (The moods it sets.)
+static MOODLET_MANAGER: [InteractionDef; 5] = [
+    InteractionDef { autonomous: false, special: Special::SetMood, ..def("Feel Flirty", 2.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::SetMood, ..def("Feel Inspired", 2.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::SetMood, ..def("Feel Pumped", 2.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::SetMood, ..def("Feel Like Having Fun", 2.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::SetMood, ..def("Feel Well Rested", 2.0, N, Pose::Use) },
+];
 /// (Made, then drunk standing at the bar: a juice or smoothie, cheering and a little filling.)
 static BAR: [InteractionDef; 1] = [def("Make a Drink", 25.0, [40.0, -30.0, 10.0, 0.0, 0.0, 45.0], Pose::Use)];
 /// (A swim, begun with a dive.)
@@ -712,6 +745,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
             ],
         ),
         // (Children's: grown-ups play with toys only with a little one.)
+        "Replicate Food" => A::new(None, &["a2o_lifetimeReward_foodReplicator_pushButton_x"]),
+        "Sculpt Fitter" | "Sculpt Slimmer" | "Sculpt Fuller" => A::steps("a2o_bodySculptor_openDoor_x", &["a2o_bodySculptor_getIn_x", "a2o_bodySculptor_closeDoor_x"], &["a2o_bodySculptor_working_x"]),
         "Make a Drink" => A::steps(
             "a2o_bar_makeDrink_start_x",
             &["a2o_bar_makeDrink_pour_x", "a2o_bar_makeDrink_blend_x", "a2o_bar_makeDrink_stop_x"],
@@ -883,6 +918,9 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Sprinkler => &SPRINKLER,
         ObjectKind::DivingBoard => &DIVING_BOARD,
         ObjectKind::Bar => &BAR,
+        ObjectKind::FoodReplicator => &FOOD_REPLICATOR,
+        ObjectKind::BodySculptor => &BODY_SCULPTOR,
+        ObjectKind::MoodletManager => &MOODLET_MANAGER,
         _ => &[],
     }
 }
@@ -1743,6 +1781,35 @@ fn run_actions(
                                         }
                                         Special::ChangeAppearance => {
                                             commands.insert_resource(crate::planner::OutfitPlanner::looks(me));
+                                        }
+                                        Special::ReplicateFood => {
+                                            commands.entity(me).insert(crate::meals::MealRequest::Replicated);
+                                            notes.push(format!("{} replicated a meal.", sim.first));
+                                        }
+                                        Special::Sculpt => {
+                                            let (weight, fit) = match d.name {
+                                                "Sculpt Fitter" => (-0.15, 0.5),
+                                                "Sculpt Slimmer" => (-0.5, 0.0),
+                                                _ => (0.5, 0.0),
+                                            };
+                                            commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| crate::aging::reshape(&mut e, weight, fit));
+                                            notes.push(format!("{} has a new shape, courtesy of the Body Sculptor.", sim.first));
+                                        }
+                                        Special::SetMood => {
+                                            use crate::life::MoodletKind as M;
+                                            let mood = match d.name {
+                                                "Feel Flirty" => M::Flirty,
+                                                "Feel Inspired" => M::Inspired,
+                                                "Feel Pumped" => M::Pumped,
+                                                "Feel Like Having Fun" => M::HavingFun,
+                                                _ => M::WellRested,
+                                            };
+                                            commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| {
+                                                let now = e.world().resource::<crate::clock::GameClock>().minutes;
+                                                if let Some(mut m) = e.get_mut::<crate::life::Moodlets>() {
+                                                    m.add(mood, now);
+                                                }
+                                            });
                                         }
                                         Special::ServeMeal => {
                                             // A poor cook may set the stove on fire instead.

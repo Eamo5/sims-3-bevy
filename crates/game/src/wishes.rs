@@ -134,7 +134,7 @@ impl Wishes {
 }
 
 /// The lifetime rewards offered: the game's reward traits whose effects are carried out here.
-pub const REWARDS: [&str; 15] = [
+pub const REWARDS: [&str; 18] = [
     "SteelBladder",
     "PermaClean",
     "HardlyHungry",
@@ -150,7 +150,14 @@ pub const REWARDS: [&str; 15] = [
     "BookshopBargainer",
     "Haggler",
     "ChangeLifetimeWish",
+    "FoodReplicator",
+    "BodySculptor",
+    "MoodModifier",
 ];
+
+/// The rewards that are objects: the reward, and the catalogue object it is (given to the Sim
+/// to place on their lot).
+pub const REWARD_OBJECTS: [(&str, &str); 3] = [("FoodReplicator", "FoodReplicator"), ("BodySculptor", "BodySculptor"), ("MoodModifier", "MoodletManager")];
 
 /// Whether a Sim has a lifetime reward.
 pub fn has(w: Option<&Wishes>, r: &str) -> bool {
@@ -243,8 +250,13 @@ fn buy_rewards(
         }
         w.points -= t.points;
         notes.push(format!("{} gained the {} lifetime reward!", sim.first, t.name));
-        // A new lifetime wish is chosen there and then; the rest last.
-        if r == "ChangeLifetimeWish" {
+        // A new lifetime wish is chosen there and then; an object's theirs to place; the
+        // rest last.
+        if let Some((_, object)) = REWARD_OBJECTS.iter().find(|(x, _)| x == r) {
+            crate::inventory::give(&mut commands, *e, crate::inventory::ItemKind::Reward, object.to_string(), t.name.clone(), 0, 0, 1);
+            notes.push(format!("The {} is in {}'s inventory, to place on the lot.", t.name, sim.first));
+            w.rewards.push(r.clone());
+        } else if r == "ChangeLifetimeWish" {
             crate::lifetime::ask_lifetime_wish(&mut questions, Some(&ui.data), *e, sim);
             commands.entity(*e).remove::<crate::lifetime::LifetimeWish>().insert(crate::lifetime::ChoosingLifetimeWish);
         } else {

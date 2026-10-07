@@ -30,6 +30,8 @@ pub enum ItemKind {
     Insect,
     /// A painting the Sim painted.
     Painting,
+    /// A lifetime reward object, to place on the lot.
+    Reward,
 }
 
 /// Items of one kind (and, for produce, one quality).
@@ -208,15 +210,22 @@ pub fn draw_tab(
     p.spawn(text(line, 13.0, Color::WHITE));
     if let Some(s) = chosen.and_then(|i| stacks.get(i)) {
         p.spawn(Node { column_gap: Val::Px(6.0), ..default() }).with_children(|row| {
-            let mut buttons = vec![(ItemButton::SellOne, format!("Sell (§{})", s.each()))];
-            if s.count > 1 {
-                buttons.push((ItemButton::SellAll, format!("Sell All (§{})", s.worth)));
+            let mut buttons = Vec::new();
+            // (Rewards aren't sold.)
+            if s.kind != ItemKind::Reward {
+                buttons.push((ItemButton::SellOne, format!("Sell (§{})", s.each())));
+                if s.count > 1 {
+                    buttons.push((ItemButton::SellAll, format!("Sell All (§{})", s.worth)));
+                }
             }
             if s.kind == ItemKind::Produce && !sim.age.is_little() {
                 buttons.push((ItemButton::Eat, "Eat".to_string()));
             }
             if s.kind == ItemKind::Painting {
                 buttons.push((ItemButton::Hang, "Hang on a Wall".to_string()));
+            }
+            if s.kind == ItemKind::Reward {
+                buttons.push((ItemButton::Hang, "Place on the Lot".to_string()));
             }
             for (b, label) in buttons {
                 row.spawn((
@@ -283,11 +292,16 @@ fn inventory_buttons(
                 queue.push_player(Action::new(format!("Eat {}", s.name), ActionKind::EatItem { key: s.key.clone(), quality: s.quality }, false));
             }
             ItemButton::Hang => {
-                // Out of the inventory and up to the walls, in Buy mode (back if it isn't hung).
-                let Some((objd, design)) = baked.as_ref().and_then(|b| crate::paintings::object(&b.0.paintings, &s)) else { continue };
+                // Out of the inventory and up to the walls (or onto the lot), in Buy mode (back if
+                // it isn't put down).
+                let object = baked.as_ref().and_then(|b| match s.kind {
+                    ItemKind::Reward => b.0.catalog.iter().find(|c| c.instance_name == s.key).map(|c| (c.objd, None)),
+                    _ => crate::paintings::object(&b.0.paintings, &s).map(|(o, d)| (o, Some(d))),
+                });
+                let Some((objd, design)) = object else { continue };
                 let Some(each) = inv.take_one(k) else { continue };
                 let item = Stack { count: 1, worth: each, ..s.clone() };
-                commands.insert_resource(crate::buy::HoldRequest { objd, design: Some(design), item, from: me });
+                commands.insert_resource(crate::buy::HoldRequest { objd, design, item, from: me });
                 chosen.0 = None;
             }
         }

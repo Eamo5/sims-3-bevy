@@ -393,6 +393,11 @@ fn tab_content(
                     return crate::paintings::image(&mut pictures, &mut images, &baked.as_ref()?.0, s).map(|(h, r)| (h, Some(r)));
                 }
                 let ui = ui.as_deref_mut()?;
+                // (A reward: its catalogue picture.)
+                if s.kind == crate::inventory::ItemKind::Reward {
+                    let objd = baked.as_ref()?.0.catalog.iter().find(|c| c.instance_name == s.key)?.objd;
+                    return ui.icon(&mut images, &s3bake::gamedata::thumb_name(objd.2)).map(|h| (h, None));
+                }
                 if s.kind == crate::inventory::ItemKind::Produce {
                     let model = ui.data.plants.iter().find(|p| p.produce == s.key)?.produce_model?;
                     return Some((thumbs.get(&mut images, model), None));

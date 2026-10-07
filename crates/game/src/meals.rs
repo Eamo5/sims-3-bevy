@@ -218,6 +218,8 @@ pub enum MealRequest {
     PutAway(Entity),
     /// Took a plate of leftovers from the fridge.
     FromFridge,
+    /// The food replicator made them a plate of something.
+    Replicated,
     /// Sat down to eat at this dining chair.
     PlateAt(Entity),
     /// Finished eating at the table.
@@ -442,6 +444,25 @@ fn meal_requests(
                         leftovers.0.drain(..n);
                     }
                     commands.entity(platter).try_despawn();
+                }
+            }
+            MealRequest::Replicated => {
+                // (Any dish there is, but those made of what's only found.)
+                use rand::seq::IndexedRandom;
+                let pick = recipes.as_ref().and_then(|d| {
+                    let ok: Vec<usize> = (0..d.recipes.len()).filter(|&i| !d.recipes[i].ingredients.iter().any(|x| RARE.contains(&x.as_str()))).collect();
+                    ok.choose(&mut rand::rng()).copied()
+                });
+                match pick {
+                    Some(i) => commands.entity(me).insert(Plateful(i)),
+                    None => commands.entity(me).remove::<Plateful>(),
+                };
+                match dining_seat(&objects, tf.translation, &taken) {
+                    Some((chair, _)) => {
+                        taken.push(chair);
+                        queue.0.push_front(Action::new("Eat", ActionKind::Object { target: chair, def: CHAIR_EAT }, true));
+                    }
+                    None => queue.0.push_front(Action::new("Eat", ActionKind::EatHere, true)),
                 }
             }
             MealRequest::FromFridge => {
