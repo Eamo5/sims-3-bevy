@@ -529,7 +529,11 @@ pub fn move_in(
     let mut furniture_value = 0;
     // An empty lot gets an empty building to build on.
     let empty = crate::building::empty_building(lot_index, &lot, world.data.heightmap.sample(center.x, center.z));
-    let building = Some(crate::building::spawn_building(&mut commands, &mut assets, &mut ctx, &catalog, house.unwrap_or(&empty), &lot, None, false));
+    let mut building = Some(crate::building::spawn_building(&mut commands, &mut assets, &mut ctx, &catalog, house.unwrap_or(&empty), &lot, None, false));
+    // (Staircases built where the house has none of its own are in the town's usual style.)
+    if let Some(b) = building.as_mut().filter(|b| b.stair_style.is_none()) {
+        b.stair_style = crate::building::town_stair_style(&world.data);
+    }
     let to_world = |x: f32, z: f32| {
         let p = center + rot * Vec3::new(x, 0.0, z);
         Vec3::new(p.x, crate::building::walk_height(&world.data, building.as_ref(), p), p.z)

@@ -121,6 +121,9 @@ pub struct ActiveBuilding {
     roof_entity: Option<Entity>,
     /// The roof pattern on the household's rooms.
     pub roof_texture: Key,
+    /// The stair style the household's staircases are built in (the house's own, or one of the
+    /// town's): its pieces and railings.
+    pub stair_style: Option<StairBaked>,
     /// The building of the community lot the household is out at (for its floors).
     pub away: Option<Box<ActiveBuilding>>,
 }
@@ -1404,6 +1407,56 @@ fn respawn_roofs(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut O
     b.roof_entity = Some(commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(mat), BuiltRoof, Visibility::Hidden, DespawnOnExit(AppState::InGame))).id());
 }
 
+/// The stair style most of the town's houses have (for staircases built on a lot whose house
+/// has none of its own).
+pub fn town_stair_style(world: &crate::loading::WorldInfo) -> Option<StairBaked> {
+    let mut count: HashMap<Key, (usize, usize)> = HashMap::new();
+    let mut lots: Vec<&usize> = world.buildings.keys().collect();
+    lots.sort();
+    let all: Vec<&StairBaked> = lots.into_iter().flat_map(|l| world.buildings[l].stairs.iter()).filter(|s| s.flight.is_some()).collect();
+    for (i, s) in all.iter().enumerate() {
+        count.entry(s.style).or_insert((0, i)).0 += 1;
+    }
+    let (style, _) = count.into_iter().max_by_key(|(k, (n, first))| (*n, std::cmp::Reverse(*first), std::cmp::Reverse(*k)))?;
+    // (One with its railings, if any have them.)
+    all.into_iter().filter(|s| s.style == style).max_by_key(|s| s.rails.iter().filter(|r| r.rail.is_some()).count()).cloned()
+}
+
+/// A staircase's pieces as the game puts them together, in `style`: a flight per tile in each
+/// lane (each a tile's rise further up), a first step, the side panels, and the railings up the
+/// sides given (-1 or 1 across the climb) a tile's sloped rail at a time with a post at the
+/// foot. Each with where it goes (lot-local), its height and whether it's stretched to the
+/// staircase's rise (the posts aren't).
+struct StairPieces {
+    pieces: Vec<(Key, Vec2, f32, bool)>,
+    rotation: Quat,
+    scale: Vec3,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stair_pieces(style: &StairBaked, rails: &[(f32, &StairRail)], bottom: Vec2, d: Vec2, run: u16, width: u16, y0: f32, y1: f32, lot_rot: Quat) -> StairPieces {
+    let across = Vec2::new(-d.y, d.x);
+    let rise = (y1 - y0) / run.max(1) as f32;
+    let up = |k: u16| (d * k as f32, y0 + rise * k as f32);
+    let mut pieces = Vec::new();
+    for lane in 0..width {
+        let off = across * (lane as f32 + 0.5 - width as f32 * 0.5);
+        pieces.extend((0..run).filter_map(|k| style.flight.map(|f| (f, bottom + up(k).0 + off, up(k).1, true))));
+        pieces.extend(style.start.map(|p| (p, bottom + off, y0, true)));
+    }
+    for sgn in [-1.0f32, 1.0] {
+        let off = across * (sgn * width as f32 * 0.5);
+        pieces.extend((0..run).filter_map(|k| style.side.map(|p| (p, bottom + up(k).0 + off, up(k).1, true))));
+    }
+    for &(sgn, r) in rails {
+        let off = across * (sgn * width as f32 * 0.5);
+        pieces.extend((0..run).filter_map(|k| r.rail.map(|p| (p, bottom + up(k).0 + off, up(k).1, true))));
+        pieces.extend(r.start.map(|p| (p, bottom + off, y0, true)));
+        pieces.extend(r.post.map(|p| (p, bottom + off, y0, false)));
+    }
+    StairPieces { pieces, rotation: lot_rot * Quat::from_rotation_y((-d.y).atan2(d.x)), scale: Vec3::new(1.0, rise / 0.75, 1.0) }
+}
+
 /// Spawns the household's staircases and links the floors they join.
 fn respawn_stairs(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut ObjectAssets, ctx: &mut AssetCtx) {
     for e in b.stair_entities.drain(..) {
@@ -1415,10 +1468,29 @@ fn respawn_stairs(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut 
         let (bottom, d) = s.bottom();
         let run = STAIR_RUN as f32;
         let (Some(&y0), Some(&y1)) = (b.levels.get(s.level as usize), b.levels.get(s.level as usize + 1)) else { continue };
-        let e = commands
-            .spawn((Mesh3d(ctx.meshes.add(stair_mesh(b, bottom, d, run, y0, y1))), MeshMaterial3d(mat.clone()), BuildingPiece { level: s.level }, DespawnOnExit(AppState::InGame)))
-            .id();
-        b.stair_entities.push(e);
+        // In the stair style's pieces (with its railing up both sides); steps made here with no
+        // style to hand.
+        let built = b.stair_style.as_ref().map(|style| {
+            let rails: Vec<(f32, &StairRail)> = style.rails.first().map(|r| vec![(-1.0, r), (1.0, r)]).unwrap_or_default();
+            stair_pieces(style, &rails, bottom, d, STAIR_RUN as u16, 1, y0, y1, b.rot)
+        });
+        let mut spawned = Vec::new();
+        if let Some(p) = built {
+            for (key, at, y, stretched) in p.pieces {
+                let parts = assets.model(ctx, key);
+                if !parts.is_empty() {
+                    let scale = if stretched { p.scale } else { Vec3::ONE };
+                    spawned.push(spawn_parts(commands, &parts, Transform { translation: b.world(at.x, at.y, y), rotation: p.rotation, scale }));
+                }
+            }
+        }
+        if spawned.is_empty() {
+            spawned.push(commands.spawn((Mesh3d(ctx.meshes.add(stair_mesh(b, bottom, d, run, y0, y1))), MeshMaterial3d(mat.clone()))).id());
+        }
+        for e in spawned {
+            commands.entity(e).insert((BuildingPiece { level: s.level }, DespawnOnExit(AppState::InGame)));
+            b.stair_entities.push(e);
+        }
         let bw = |q: Vec2| b.world(q.x, q.y, 0.0).xz();
         links.push(StairLink { level: s.level, upper: s.level + 1, bottom: bw(bottom - d * 0.45), top: bw(bottom + d * (run + 0.45)), y0, y1 });
     }
@@ -1467,6 +1539,7 @@ pub fn spawn_building(
         built_stairs: Vec::new(),
         had_house: b.is_house(),
         roof_texture: ROOF_DEFAULT,
+        stair_style: b.stairs.iter().find(|s| s.flight.is_some()).cloned(),
         away: None,
         wall_entities: HashMap::new(),
         floor_entities: Vec::new(),
@@ -1576,42 +1649,15 @@ pub fn spawn_building(
         let across = Vec2::new(-d.y, d.x);
         let middle = (Vec2::new(s.min[0] as f32, s.min[1] as f32) + Vec2::new(s.max[0] as f32, s.max[1] as f32)) * 0.5;
         let bottom = middle - d * (run as f32 * 0.5);
-        let rise = (y1 - y0) / run as f32;
-        let rotation = active.rot * Quat::from_rotation_y((-d.y).atan2(d.x));
-        let scale = Vec3::new(1.0, rise / 0.75, 1.0);
-        let mut pieces: Vec<(Key, Vec2, f32)> = Vec::new();
-        for lane in 0..width {
-            let off = across * (lane as f32 + 0.5 - width as f32 * 0.5);
-            pieces.extend((0..run).filter_map(|k| s.flight.map(|f| (f, bottom + d * k as f32 + off, y0 + rise * k as f32))));
-            pieces.extend(s.start.map(|p| (p, bottom + off, y0)));
-        }
-        for sgn in [-1.0f32, 1.0] {
-            let off = across * (sgn * width as f32 * 0.5);
-            pieces.extend((0..run).filter_map(|k| s.side.map(|p| (p, bottom + d * k as f32 + off, y0 + rise * k as f32))));
-        }
-        // Railings: up the side they're on (a tile's sloped rail at a time), with a post at
-        // the foot.
-        let mut posts: Vec<(Key, Vec2, f32)> = Vec::new();
-        for r in &s.rails {
-            let sgn = if (Vec2::from(r.at) - middle).dot(across) < 0.0 { -1.0 } else { 1.0 };
-            let off = across * (sgn * width as f32 * 0.5);
-            pieces.extend((0..run).filter_map(|k| r.rail.map(|p| (p, bottom + d * k as f32 + off, y0 + rise * k as f32))));
-            pieces.extend(r.start.map(|p| (p, bottom + off, y0)));
-            posts.extend(r.post.map(|p| (p, bottom + off, y0)));
-        }
-        for (key, at, y) in posts {
-            let parts = assets.model(ctx, key);
-            if !parts.is_empty() {
-                let e = spawn_parts(commands, &parts, Transform { translation: active.world(at.x, at.y, y), rotation, scale: Vec3::ONE });
-                place(commands, e, neighbor, s.bottom);
-            }
-        }
-        for (key, at, y) in pieces {
+        // (Railings up the side they're on.)
+        let rails: Vec<(f32, &StairRail)> = s.rails.iter().map(|r| (if (Vec2::from(r.at) - middle).dot(across) < 0.0 { -1.0 } else { 1.0 }, r)).collect();
+        let p = stair_pieces(s, &rails, bottom, d, run, width, y0, y1, active.rot);
+        for (key, at, y, stretched) in p.pieces {
             let parts = assets.model(ctx, key);
             if parts.is_empty() {
                 continue;
             }
-            let e = spawn_parts(commands, &parts, Transform { translation: active.world(at.x, at.y, y), rotation, scale });
+            let e = spawn_parts(commands, &parts, Transform { translation: active.world(at.x, at.y, y), rotation: p.rotation, scale: if stretched { p.scale } else { Vec3::ONE } });
             place(commands, e, neighbor, s.bottom);
         }
         if s.bottom >= 1 && neighbor.is_none() {
