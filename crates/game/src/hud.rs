@@ -899,6 +899,18 @@ fn world_click(
                     }
                     continue;
                 }
+                // The Teleporter: the lots it goes to.
+                if d.special == Special::Teleport {
+                    let list: Vec<(String, ActionKind)> = (0..world.data.lots.len())
+                        .filter(|&l| crate::visit::visitable(&world.data, l))
+                        .map(|l| (crate::visit::place_name(&world.data, l), ActionKind::Teleport { pad: t, lot: l }))
+                        .collect();
+                    if !list.is_empty() {
+                        options.push(("Teleport To ›".to_string(), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push(("Teleport To".to_string(), list));
+                    }
+                    continue;
+                }
                 // The body sculptor's shapes and the moodlet manager's moods: submenus.
                 if matches!(d.special, Special::Sculpt | Special::SetMood) {
                     let defs = crate::interact::interactions_for(obj.kind);

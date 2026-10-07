@@ -116,6 +116,8 @@ pub enum ObjectKind {
     DivingBoard,
     /// A bar: drinks made at it.
     Bar,
+    /// The Teleporter (a lifetime reward): to a community lot at once.
+    Teleporter,
     /// Lifetime rewards: a plate of food at the push of a button, a new shape, a new mood.
     FoodReplicator,
     BodySculptor,
@@ -144,6 +146,8 @@ impl ObjectKind {
             Self::DivingBoard
         } else if has("objects.counters.bar") && !has("+") {
             Self::Bar
+        } else if has("rewards.teleporter") {
+            Self::Teleporter
         } else if has("rewards.foodreplicator") {
             Self::FoodReplicator
         } else if has("rewards.bodysculptor") {
@@ -266,7 +270,7 @@ impl ObjectKind {
             Self::Sprinkler => "Outdoors",
             Self::DivingBoard => "Outdoors",
             Self::Bar => "Surfaces",
-            Self::FoodReplicator | Self::BodySculptor | Self::MoodletManager => "Misc",
+            Self::FoodReplicator | Self::BodySculptor | Self::MoodletManager | Self::Teleporter => "Misc",
             Self::HotTub => "Plumbing",
             Self::Dresser => "Surfaces",
             Self::Table => "Surfaces",
@@ -379,6 +383,8 @@ pub enum Special {
     ChangeAppearance,
     /// A plate of food from the food replicator.
     ReplicateFood,
+    /// Off to a lot by the Teleporter (the menu's `ActionKind::Teleport`).
+    Teleport,
     /// A new shape from the body sculptor (fitter, slimmer or fuller, by the interaction).
     Sculpt,
     /// A mood from the moodlet manager (by the interaction).
@@ -622,6 +628,8 @@ static SPRINKLER: [InteractionDef; 3] = [
     // (Only while it's running.)
     InteractionDef { special: Special::PlayInSprinkler, ..def("Play in Sprinkler", 30.0, [0.0, 0.0, -6.0, 0.0, 0.0, 110.0], Pose::Use) },
 ];
+/// (Its menu lists the lots: `ActionKind::Teleport`.)
+static TELEPORTER: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::Teleport, ..def("Teleport", 1.0, N, Pose::Use) }];
 static FOOD_REPLICATOR: [InteractionDef; 1] =
     [InteractionDef { special: Special::ReplicateFood, ..def("Replicate Food", 3.0, [6000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) }];
 /// (A new shape, the sculptor at work for an hour.)
@@ -919,6 +927,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::DivingBoard => &DIVING_BOARD,
         ObjectKind::Bar => &BAR,
         ObjectKind::FoodReplicator => &FOOD_REPLICATOR,
+        ObjectKind::Teleporter => &TELEPORTER,
         ObjectKind::BodySculptor => &BODY_SCULPTOR,
         ObjectKind::MoodletManager => &MOODLET_MANAGER,
         _ => &[],
@@ -979,6 +988,8 @@ pub enum ActionKind {
     ThrowParty,
     /// Drive to a community lot and spend time there.
     GoToLot { lot: usize },
+    /// Off to a community lot by the Teleporter (from its pad).
+    Teleport { pad: Entity, lot: usize },
     /// Drive home from the community lot.
     GoHomeFromLot,
 }
@@ -1409,7 +1420,9 @@ fn run_actions(
                         // (Kneeling beside the spot.)
                         ActionKind::PlantSeed { at, level, .. } => Some((*at + Vec2::new(0.0, 0.7), *level)),
                         ActionKind::GoToWork | ActionKind::Visit { .. } | ActionKind::GoToLot { .. } | ActionKind::GoHomeFromLot => way_out.map(|p| (p, 1)),
-                        ActionKind::JoinCareer { target, .. } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
+                        ActionKind::JoinCareer { target, .. } | ActionKind::Teleport { pad: target, .. } => {
+                            objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0)))
+                        }
                         ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
                         ActionKind::Invite { .. }
                         | ActionKind::PhoneChat { .. }
@@ -1638,6 +1651,10 @@ fn run_actions(
                                 crate::visit::drive_to(&mut commands, &clock, me, sim, *lot, crate::visit::place_name(&world.data, *lot), &mut notes);
                                 finished = true;
                             }
+                            ActionKind::Teleport { lot, .. } => {
+                                crate::visit::teleport_to(&mut commands, &clock, me, sim, *lot, crate::visit::place_name(&world.data, *lot), &mut notes);
+                                finished = true;
+                            }
                             ActionKind::GoHomeFromLot => {
                                 if let Some(v) = away {
                                     crate::visit::drive_home(&mut commands, &clock, me, v.lot, crate::visit::place_name(&world.data, v.lot));
@@ -1721,7 +1738,7 @@ fn run_actions(
                                     }
                                     match d.special {
                                         // (Getting out of the pool is the swim module's.)
-                                        Special::FindJob | Special::Swim | Special::WriteNovel | Special::PlayInSprinkler => {}
+                                        Special::FindJob | Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport => {}
                                         Special::Homework => {
                                             notes.push(format!("{} finished their homework.", sim.first));
                                             commands.entity(me).remove::<crate::rabbitholes::Homework>().queue_silenced(|mut e: EntityWorldMut| {

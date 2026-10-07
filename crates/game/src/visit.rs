@@ -102,6 +102,15 @@ pub fn drive_to(commands: &mut Commands, clock: &GameClock, e: Entity, sim: &Sim
     ));
 }
 
+/// Teleports to a community lot from the Teleporter's pad: there at once, no drive.
+pub fn teleport_to(commands: &mut Commands, clock: &GameClock, e: Entity, sim: &Sim, lot: usize, place: String, notes: &mut Notifications) {
+    notes.push(format!("{} teleported to {place}.", sim.first));
+    commands
+        .entity(e)
+        .remove::<OnLot>()
+        .insert((AtRabbitHole { lot, activity: &DRIVE, inside_from: clock.minutes, until: f64::MAX, place }, Trip(lot), Visibility::Hidden));
+}
+
 /// Drives home from a community lot (from its way out).
 pub fn drive_home(commands: &mut Commands, clock: &GameClock, e: Entity, lot: usize, place: String) {
     commands

@@ -2017,6 +2017,18 @@ fn auto_action(
         *done = true;
         return;
     }
+    // "Teleport": off from the Teleporter to the first lot there is to visit.
+    if name == "Teleport" {
+        let pad = objects.iter().find(|(_, o)| o.kind == crate::interact::ObjectKind::Teleporter).map(|(e, _)| e);
+        let lot = (0..world.data.lots.len()).find(|&l| crate::visit::visitable(&world.data, l));
+        if let (Some(pad), Some(lot)) = (pad, lot) {
+            info!("teleport test: to {}", crate::visit::place_name(&world.data, lot));
+            q.0.clear();
+            q.push_player(crate::interact::Action::new("Teleport", crate::interact::ActionKind::Teleport { pad, lot }, false));
+            *done = true;
+        }
+        return;
+    }
     // ("Paint: Large Canvas": on that canvas.)
     let canvas = name.strip_prefix("Paint: ").and_then(|c| crate::paintings::CANVASES.iter().position(|x| x.eq_ignore_ascii_case(c)));
     let def_name = if canvas.is_some() { "Paint" } else { name.as_str() };
