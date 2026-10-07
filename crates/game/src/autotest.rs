@@ -464,14 +464,16 @@ fn wear_uniform(mut commands: Commands, sel: Query<Entity, With<crate::sim::Sele
         *done = true;
         commands.entity(e).insert(crate::simbody::ChangeIntoPlan(k));
     }
-    // PLAN_OUTFIT=1: the selected Sim's wardrobe opens.
-    if std::env::var("PLAN_OUTFIT").is_ok()
+    // PLAN_OUTFIT=1: the selected Sim's wardrobe opens (PLAN_OUTFIT=<outfit>: on that outfit).
+    if let Ok(v) = std::env::var("PLAN_OUTFIT")
         && let Ok(e) = sel.single()
         && time.elapsed_secs() > 6.0
         && !*done
     {
         *done = true;
-        commands.insert_resource(crate::planner::OutfitPlanner::open(e));
+        let kind = crate::simbody::OutfitKind::CHOICES.into_iter().find(|k| k.label().eq_ignore_ascii_case(&v)).unwrap_or_default();
+        let p = crate::planner::OutfitPlanner::open_on(&mut commands, e, kind);
+        commands.insert_resource(p);
     }
     let Ok(v) = std::env::var("UNIFORM") else { return };
     if *done || time.elapsed_secs() < 4.0 {

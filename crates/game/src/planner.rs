@@ -1,6 +1,7 @@
-//! Plan Outfit, as at the game's dressers: the Sim's everyday look chosen piece by piece from
-//! the wardrobe for their age and gender (hair, tops, bottoms, outfits and shoes, pictured by
-//! the game's Create-a-Sim thumbnails), the Sim dressing in each as it's picked.
+//! Plan Outfit, as at the game's dressers: the Sim's outfits (everyday, formal, sleepwear,
+//! athletic and swimwear) chosen piece by piece from the wardrobe for their age and gender
+//! (hair, tops, bottoms, outfits and shoes, pictured by the game's Create-a-Sim thumbnails), the
+//! Sim dressing in each as it's picked.
 
 use bevy::prelude::*;
 use s3bake::Key;
@@ -29,6 +30,8 @@ const PAGE: usize = 18;
 #[derive(Resource)]
 pub struct OutfitPlanner {
     pub sim: Entity,
+    /// The outfit being planned.
+    wear: crate::simbody::OutfitKind,
     tab: u32,
     page: usize,
     root: Option<Entity>,
@@ -37,13 +40,20 @@ pub struct OutfitPlanner {
 
 impl OutfitPlanner {
     pub fn open(sim: Entity) -> Self {
-        Self { sim, tab: CT_TOP, page: 0, root: None, dirty: true }
+        Self { sim, wear: crate::simbody::OutfitKind::Everyday, tab: CT_TOP, page: 0, root: None, dirty: true }
+    }
+
+    /// Open on one of their outfits (they put it on).
+    pub fn open_on(commands: &mut Commands, sim: Entity, kind: crate::simbody::OutfitKind) -> Self {
+        dress(commands, sim, kind);
+        Self { wear: kind, ..Self::open(sim) }
     }
 }
 
 #[derive(Component, Clone, Copy)]
 enum PlanButton {
     Tab(u32),
+    Wear(crate::simbody::OutfitKind),
     Pick(Key),
     Page(i32),
     Done,
@@ -79,6 +89,12 @@ fn planner_buttons(
                 p.page = 0;
                 p.dirty = true;
             }
+            PlanButton::Wear(k) => {
+                p.wear = k;
+                p.page = 0;
+                p.dirty = true;
+                dress(&mut commands, p.sim, k);
+            }
             PlanButton::Page(d) => {
                 p.page = (p.page as i32 + d).max(0) as usize;
                 p.dirty = true;
@@ -95,31 +111,29 @@ fn planner_buttons(
                 let o = &mut sim.outfit;
                 match p.tab {
                     CT_HAIR => o.hair = Some(key),
-                    CT_TOP => {
-                        o.top = Some(key);
-                        o.full = None;
-                    }
-                    CT_BOTTOM => {
-                        o.bottom = Some(key);
-                        o.full = None;
-                    }
-                    CT_BODY => {
-                        o.full = Some(key);
-                        o.top = None;
-                        o.bottom = None;
-                    }
-                    _ => o.shoes = Some(key),
+                    t => o.wear(p.wear, t, key),
                 }
-                // Into their everyday clothes, as now planned.
-                commands
-                    .entity(p.sim)
-                    .remove::<(crate::simbody::Wearing, crate::simbody::ChangedInto)>()
-                    .insert(crate::aging::NeedsNewBody);
+                // Into the outfit, as now planned.
+                dress(&mut commands, p.sim, p.wear);
                 play.write(crate::sound::PlaySound::ui("ui_primary_button"));
                 p.dirty = true;
             }
         }
     }
+}
+
+/// Puts a Sim in an outfit (kept on until it's time for another).
+fn dress(commands: &mut Commands, sim: Entity, kind: crate::simbody::OutfitKind) {
+    let mut e = commands.entity(sim);
+    match kind {
+        crate::simbody::OutfitKind::Everyday => {
+            e.remove::<(crate::simbody::Wearing, crate::simbody::ChangedInto)>();
+        }
+        k => {
+            e.insert((crate::simbody::Wearing(k), crate::simbody::ChangedInto));
+        }
+    }
+    e.insert(crate::aging::NeedsNewBody);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -140,18 +154,19 @@ fn planner_ui(
         commands.entity(r).despawn();
     }
     let Ok(sim) = sims.get(p.sim) else { return };
-    let list = crate::cas::parts_for(&cas, sim, p.tab, crate::simbody::OutfitKind::Everyday);
+    let wear = p.wear;
+    let list = crate::cas::parts_for(&cas, sim, p.tab, if p.tab == CT_HAIR { crate::simbody::OutfitKind::Everyday } else { wear });
     let pages = list.len().div_ceil(PAGE).max(1);
     p.page = p.page.min(pages - 1);
     // What they're wearing of this kind.
     let worn = {
-        let o = &sim.outfit;
+        let c = sim.outfit.clothes(wear);
         match p.tab {
-            CT_HAIR => o.hair,
-            CT_TOP => o.top,
-            CT_BOTTOM => o.bottom,
-            CT_BODY => o.full,
-            _ => o.shoes,
+            CT_HAIR => sim.outfit.hair,
+            CT_TOP => c.top,
+            CT_BOTTOM => c.bottom,
+            CT_BODY => c.full,
+            _ => c.shoes,
         }
     };
     let (tab, page) = (p.tab, p.page);
@@ -177,6 +192,32 @@ fn planner_ui(
         ))
         .with_children(|c| {
             c.spawn(text(format!("Plan Outfit — {}", sim.first), 18.0, Color::WHITE));
+            // The outfit being planned.
+            c.spawn(Node { column_gap: Val::Px(6.0), ..default() }).with_children(|row| {
+                for k in [
+                    crate::simbody::OutfitKind::Everyday,
+                    crate::simbody::OutfitKind::Formal,
+                    crate::simbody::OutfitKind::Sleepwear,
+                    crate::simbody::OutfitKind::Athletic,
+                    crate::simbody::OutfitKind::Swimwear,
+                ] {
+                    row.spawn((
+                        Button,
+                        PlanButton::Wear(k),
+                        Node {
+                            padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+                            border: UiRect::all(Val::Px(if k == wear { 2.0 } else { 0.0 })),
+                            border_radius: BorderRadius::all(Val::Px(8.0)),
+                            ..default()
+                        },
+                        BorderColor::all(PLUMBOB_GREEN),
+                        BackgroundColor(BTN_NORMAL),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((text(k.label(), 14.0, Color::WHITE), Pickable::IGNORE));
+                    });
+                }
+            });
             c.spawn(Node { column_gap: Val::Px(6.0), ..default() }).with_children(|row| {
                 for (t, name) in TABS {
                     row.spawn((

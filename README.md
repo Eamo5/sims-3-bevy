@@ -365,7 +365,8 @@ installation is unreachable.
 - **Changing clothes**: a dresser's *Change Into ›* puts a Sim in their everyday, formal (the
   wardrobe's suits, tuxedos and cocktail dresses among them), sleep, athletic or swim wear,
   or their career's uniform, kept on until it's time for something else; *Plan Outfit*
-  opens the wardrobe for their age and gender (hair, tops, bottoms, outfits and shoes, the
+  opens the wardrobe for their age and gender, for any of their outfits (everyday, formal,
+  sleepwear, athletic, swimwear: they put it on to plan it; hair, tops, bottoms, outfits and shoes, the
   base game's first, pictured by the game's Create-a-Sim thumbnails), the Sim dressing in
   each piece as it's picked.
 - **Blinking**: Sims blink every few seconds (the rig's eyelid bones closing over the eyes on
