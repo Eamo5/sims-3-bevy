@@ -1411,6 +1411,38 @@ fn main() {
         }
         return;
     }
+    if args[1] == "splitlevels" {
+        // splitlevels <world file>: lots whose floors on one grid level stand at more than one
+        // storey's height (a room on a foundation beside rooms without one), with the heights.
+        use s3formats::lotdesign as ld;
+        let w = Package::open(&args[2]).unwrap();
+        for e in w.of_type(0xD063545B) {
+            let Ok(l) = s3formats::world::LotInfo::parse(e.key.i, &w.read(e).unwrap()) else { continue };
+            let Some(t) = s3formats::lot::LotTerrain::load(&w, l.id) else { continue };
+            let Some(gdata) = w.find(&s3pkg::ResourceKey::new(ld::T_GRID, ld::G_FLOOR_GRID, l.id)).and_then(|e| w.read(e).ok()) else { continue };
+            let Ok(grid) = ld::Grid::parse(&gdata) else { continue };
+            let mut found = Vec::new();
+            for gl in 0..(grid.levels as usize).min(t.levels.len()) {
+                let mut bands = std::collections::BTreeMap::new();
+                for x in 0..grid.width {
+                    for z in 0..grid.depth {
+                        if grid.quad(gl as u32, x, z).is_some_and(|q| q.iter().any(|v| *v != 0)) {
+                            let h = t.at(gl, x as usize, z as usize);
+                            *bands.entry((h * 4.0).round() as i32).or_insert(0) += 1;
+                        }
+                    }
+                }
+                let storeys: std::collections::BTreeSet<i32> = bands.keys().map(|k| ((*k as f32 / 4.0 + 1.75) / 3.0).floor() as i32).collect();
+                if storeys.len() > 1 {
+                    found.push(format!("grid {gl}: {:?}", bands.iter().map(|(k, n)| (*k as f32 / 4.0, *n)).collect::<Vec<_>>()));
+                }
+            }
+            if !found.is_empty() {
+                println!("{} {:016X}: {}", l.internal_name, l.id, found.join("; "));
+            }
+        }
+        return;
+    }
     if args[1] == "lotterrain" {
         // lotterrain <world file> <lot id hex> <x> <z>: the lot's level heights (relative to the
         // lot) at a vertex and their ranges, and the lot's corner height.

@@ -10,7 +10,7 @@ pub const BAKE_VERSION: u32 = 4;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
 pub const CAS_VERSION: u32 = 9;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 39;
+pub const WORLD_VERSION: u32 = 40;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -283,6 +283,10 @@ pub struct WallBaked {
     /// The covering of the left and right side: an index into `LotBuildingBaked::covers`
     /// (`NO_COVER` = none, styled by room kind).
     pub cover: [u16; 2],
+    /// Where it stands, when not on its storey's floor (a room on a foundation beside rooms
+    /// without one).
+    #[serde(default)]
+    pub y: Option<f32>,
 }
 
 pub const NO_COVER: u16 = u16::MAX;
@@ -301,6 +305,9 @@ pub struct FloorBaked {
     pub region: u16,
     /// Covering of each triangle (index into `LotBuildingBaked::covers`).
     pub cover: [u16; 4],
+    /// Its height, when not its storey's (a room on a foundation beside rooms without one).
+    #[serde(default)]
+    pub y: Option<f32>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -334,6 +341,10 @@ pub struct LotBuildingBaked {
     pub floors: Vec<FloorBaked>,
     /// Foundation outline edges (lot-local).
     pub foundation: Vec<([f32; 2], [f32; 2])>,
+    /// How high each foundation edge comes up, where not all to the ground floor (a room on a
+    /// foundation beside rooms without one).
+    #[serde(default)]
+    pub foundation_top: Vec<f32>,
     pub objects: Vec<LotObjectBaked>,
     /// Texture keys of the lot's wall and floor coverings.
     pub covers: Vec<Key>,

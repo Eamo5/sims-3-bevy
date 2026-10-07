@@ -93,6 +93,9 @@ pub struct ActiveBuilding {
     pub extent: f32,
     pub stairs: Vec<StairLink>,
     floor_cells: HashMap<(u8, i32, i32), u8>,
+    /// Floor tiles' own heights, where not their storey's (a room on a foundation beside
+    /// rooms without one).
+    floor_heights: HashMap<(u8, i32, i32), f32>,
     /// Room kind (`ROOM_*`) of each floor tile.
     floor_kinds: HashMap<(u8, i32, i32), u8>,
     far: Option<bool>,
@@ -163,12 +166,13 @@ impl ActiveBuilding {
     /// Refreshes the floor lookups after the floors changed.
     fn reindex(&mut self) {
         self.floor_cells = self.data.floors.iter().map(|f| ((f.level, f.x as i32, f.z as i32), f.mask)).collect();
+        self.floor_heights = self.data.floors.iter().filter_map(|f| Some(((f.level, f.x as i32, f.z as i32), f.y?))).collect();
         self.floor_kinds = self.data.floors.iter().map(|f| ((f.level, f.x as i32, f.z as i32), f.kind)).collect();
     }
 
     /// Doors and windows set in the wall section from `p` to `q` on `level`.
     pub fn openings_on(&self, level: u8, p: Vec2, q: Vec2) -> Vec<Entity> {
-        let w = WallBaked { a: p.into(), b: q.into(), level, left: ROOM_OUTSIDE, right: ROOM_OUTSIDE, cover: [NO_COVER; 2] };
+        let w = WallBaked { a: p.into(), b: q.into(), level, left: ROOM_OUTSIDE, right: ROOM_OUTSIDE, cover: [NO_COVER; 2], y: None };
         self.holes.iter().filter(|(_, h)| h.cuts(&w)).filter_map(|(e, _)| *e).collect()
     }
 
@@ -181,7 +185,7 @@ impl ActiveBuilding {
         let start = self.local(at) - fwd * 0.5 - dir * (n as f32 * 0.5);
         (0..n).any(|k| {
             let p = start + dir * k as f32;
-            let w = WallBaked { a: p.into(), b: (p + dir).into(), level: self.view_level, left: ROOM_OUTSIDE, right: ROOM_OUTSIDE, cover: [NO_COVER; 2] };
+            let w = WallBaked { a: p.into(), b: (p + dir).into(), level: self.view_level, left: ROOM_OUTSIDE, right: ROOM_OUTSIDE, cover: [NO_COVER; 2], y: None };
             self.holes.iter().any(|(_, h)| h.cuts(&w))
         })
     }
@@ -211,7 +215,7 @@ impl ActiveBuilding {
         } else {
             3
         };
-        (mask & (1 << t) != 0).then(|| self.levels[level as usize])
+        (mask & (1 << t) != 0).then(|| self.floor_heights.get(&(level, x as i32, z as i32)).copied().unwrap_or(self.levels[level as usize]))
     }
 
     /// Room kind (`ROOM_*`) of the floor at `p` on `level`, if the house has floor there.
@@ -479,8 +483,8 @@ pub fn spawn_floors(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mu
     let cover_key = |i: u16| (i != s3bake::types::NO_COVER).then(|| b.covers.get(i as usize).copied()).flatten();
     let mut floor_bufs: HashMap<(u8, Key), MeshBuf> = HashMap::new();
     for f in &b.floors {
-        // (Ground-level paving sits just above the terrain.)
-        let y = level_y(f.level) + if f.level == 0 { 0.03 } else { 0.012 };
+        // (Ground-level paving sits just above the terrain; a tile may stand at its own height.)
+        let y = f.y.unwrap_or(level_y(f.level)) + if f.level == 0 { 0.03 } else { 0.012 };
         let (x, z) = (f.x as f32, f.z as f32);
         let c = Vec2::new(x + 0.5, z + 0.5);
         let corners = [Vec2::new(x, z), Vec2::new(x + 1.0, z), Vec2::new(x + 1.0, z + 1.0), Vec2::new(x, z + 1.0)];
@@ -905,7 +909,7 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
                 let top = b.levels[b.levels.len() - 1];
                 b.levels.push(top + s3bake::building::LEVEL_HEIGHT);
             }
-            b.walls.push(WallBaked { a, b: end, level, left: ROOM_OUTSIDE, right: ROOM_OUTSIDE, cover: [NO_COVER; 2] });
+            b.walls.push(WallBaked { a, b: end, level, left: ROOM_OUTSIDE, right: ROOM_OUTSIDE, cover: [NO_COVER; 2], y: None });
         }
         PaintOp::RemoveWall { wall } => {
             if let Some(w) = b.walls.get_mut(wall as usize) {
@@ -931,6 +935,7 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
                 kind: if region > 0 { ROOM_LIVING } else { ROOM_OUTSIDE },
                 region,
                 cover: [NO_COVER; 4],
+                y: None,
             }),
         },
         PaintOp::RemoveFloor { level, x, z } => b.floors.retain(|f| !(f.level == level && f.x == x && f.z == z)),
@@ -956,7 +961,7 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
         }
         PaintOp::AddPool { x, z } => {
             if !b.pool.iter().any(|f| f.x == x && f.z == z) {
-                b.pool.push(FloorBaked { level: 0, x, z, mask: 0xF, kind: ROOM_OUTSIDE, region: 0, cover: [NO_COVER; 4] });
+                b.pool.push(FloorBaked { level: 0, x, z, mask: 0xF, kind: ROOM_OUTSIDE, region: 0, cover: [NO_COVER; 4], y: None });
             }
             if b.pool_depth == 0.0 {
                 b.pool_depth = POOL_DEPTH;
@@ -1087,6 +1092,7 @@ pub fn empty_building(lot_index: usize, lot: &LotInfo, ground: f32) -> LotBuildi
         walls: Vec::new(),
         floors: Vec::new(),
         foundation: Vec::new(),
+        foundation_top: Vec::new(),
         objects: Vec::new(),
         covers: Vec::new(),
         ground: Vec::new(),
@@ -1117,7 +1123,7 @@ fn spawn_wall(
     let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);
     let cover_key = |i: u16| (i != s3bake::types::NO_COVER).then(|| b.covers.get(i as usize).copied()).flatten();
     let level = w.level.max(1);
-    let y0 = level_y(level);
+    let y0 = w.y.unwrap_or(level_y(level));
     let (a, bb) = (Vec2::from(w.a), Vec2::from(w.b));
     let seg = bb - a;
     let len = seg.length();
@@ -1515,6 +1521,7 @@ pub fn spawn_building(
     let rot = Quat::from_rotation_y(lot.rotation);
     let top_level = b.levels.len().saturating_sub(2).max(1) as u8;
     let floor_cells = b.floors.iter().map(|f| ((f.level, f.x as i32, f.z as i32), f.mask)).collect();
+    let floor_heights = b.floors.iter().filter_map(|f| Some(((f.level, f.x as i32, f.z as i32), f.y?))).collect();
     let floor_kinds = b.floors.iter().map(|f| ((f.level, f.x as i32, f.z as i32), f.kind)).collect();
     let mut active = ActiveBuilding {
         lot: b.lot as usize,
@@ -1527,6 +1534,7 @@ pub fn spawn_building(
         extent: b.width.max(b.depth) as f32 * 0.5,
         stairs: Vec::new(),
         floor_cells,
+        floor_heights,
         floor_kinds,
         far: None,
         data: b.clone(),
@@ -1731,7 +1739,7 @@ pub fn spawn_building(
     let heights: &[(usize, f32)] = if visit { &[(0, WALL_H), (1, CUT_H)] } else { &[(0, WALL_H)] };
     for (wall_index, w) in b.walls.iter().enumerate() {
         let level = w.level.max(1);
-        let y0 = level_y(level);
+        let y0 = w.y.unwrap_or(level_y(level));
         let (a, bb) = (Vec2::from(w.a), Vec2::from(w.b));
         let seg = bb - a;
         let len = seg.length();
@@ -1805,8 +1813,10 @@ pub fn spawn_building(
     if !b.foundation.is_empty() {
         let mut buf = MeshBuf::default();
         let (g, top) = (level_y(0) - 0.6, level_y(1));
-        for (a, bb) in &b.foundation {
+        for (i, (a, bb)) in b.foundation.iter().enumerate() {
             let (a, bb) = (Vec2::from(*a), Vec2::from(*bb));
+            // (Each up to the floor it holds up.)
+            let top = b.foundation_top.get(i).copied().unwrap_or(top);
             let len = (bb - a).length();
             if len < 1e-3 {
                 continue;

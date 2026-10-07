@@ -667,6 +667,18 @@ boundaries enclose: fenced yards aren't floored). With a foundation, level `g` h
 paving around it; without, the ground floor and the paving share level `g`. Pool floors are
 the tiles on level `g - 1`, and walls on graph level 0 of such lots are the pool's sides. The
 wall graphs number storeys the same way on every lot (graph level 1 = ground floor).
+
+**Foundations are per column, not per lot** [VERIFIED on the Koffis', Wainwrights', Goths' and
+Landgraabs' lots]. A house can have a room on a foundation beside rooms without one: the
+foundation room's floor is on grid level `g+1` (0.75 m up), while the rooms beside it have their
+ground floor on level `g` and their *second* storey on level `g+1` (3 m up). So one grid level
+mixes storeys (Koffi level 2: 24 tiles at 0.75, 211 at 3.0; Wainwright level 1: 18 at 0.75,
+240 at 3.0). Take each tile's storey as its grid level above `g`, plus one, less one where its
+column is on a foundation: level `g+1` there is 0.3–2.4 m above level `g` (the Goths' manor is
+1.64 m up on its slope), not a storey's 3 m. Read the heights at the tile's own (lowest-index)
+vertex: vertices on the border between such rooms can only hold one height. Floors above the
+walls' storeys (roof terraces, the Koffis' open-air top floor) are storeys too.
+`s3tool splitlevels <world>` lists the lots whose grid levels mix storeys.
 ```
 ```
 | group | grid | bytes/cell | Goth lot sample | guess |
