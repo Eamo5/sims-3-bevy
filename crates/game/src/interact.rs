@@ -2504,3 +2504,26 @@ fn pay_bills(
         notes.push(format!("The repo man came for the unpaid bills (§{overdue}) and took: {}.", names.join(", ")));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The buyable base-game objects nothing can be done with, by script class (a list to work
+    /// from: `cargo test -p sims3 unused_objects -- --ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn unused_objects() {
+        let catalog: Vec<s3bake::CatalogEntry> = s3bake::read_value(&s3bake::default_root().global_dir().join("catalog.bin")).unwrap();
+        let mut by_class: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        for c in catalog.iter().filter(|c| c.price > 0 && c.objd.1 == 0) {
+            let kind = ObjectKind::from_script(&c.script, &c.instance_name);
+            if interactions_for(kind).is_empty() && !c.script.contains("Decorations") && !c.script.contains("Lighting") {
+                by_class.entry(c.script.rsplit('.').take(2).collect::<Vec<_>>().join(" < ")).or_default().push(c.instance_name.clone());
+            }
+        }
+        for (class, names) in &by_class {
+            println!("{class}: {} ({})", names.len(), names.iter().take(4).cloned().collect::<Vec<_>>().join(", "));
+        }
+    }
+}
