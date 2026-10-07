@@ -2340,6 +2340,26 @@ fn ui_flow(
         }
         (66, AppState::CreateHousehold, _) if since > 1.5 => {
             shot(&mut commands, "2t_tops");
+            *stage = (90, now);
+        }
+        // The outfit worn, in another of its colourways (on the tab of what's worn).
+        (90, AppState::CreateHousehold, _) if since > 0.5 => {
+            if !cas.iter().any(|(_, a)| matches!(a, crate::home::CasAction::Colourway(_)))
+                && let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::Tab(crate::cas::CasTab::Outfits)))
+            {
+                *i = Interaction::Pressed;
+            }
+            *stage = (92, now);
+        }
+        (92, AppState::CreateHousehold, _) if since > 1.5 => {
+            shot(&mut commands, "2c_colours");
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::Colourway(n) if *n > 0)) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (91, now);
+        }
+        (91, AppState::CreateHousehold, _) if since > 2.0 => {
+            shot(&mut commands, "2c_colourway");
             *stage = (86, now);
         }
         // Dressing the formal wear: its tops, and the third of them worn.

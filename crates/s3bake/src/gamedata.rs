@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 56;
+pub const GAMEDATA_VERSION: u32 = 57;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1142,6 +1142,71 @@ fn bake_outfits(root: &BakeRoot, pkgs: &PackageSet, careers: &[CareerInfo]) -> R
     write_value(&g.join("outfits.bin"), &outfits).map_err(|e| e.to_string())
 }
 
+/// Texture-store type of the wardrobe's colourways: `(T_CAS_PRESET, preset, the part's
+/// instance)` (preset 0, the part's own, is its default layer).
+pub const T_CAS_PRESET: u32 = 0x0CA5_9E70;
+
+/// A wardrobe part's colourways (the game's presets for it, as Create a Sim's swatches show
+/// them): each preset's swatch colour (its average), none for one that wouldn't render.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct CasColourways {
+    pub part: crate::types::Key,
+    pub swatches: Vec<Option<[f32; 3]>>,
+}
+
+/// The average colour of a clothing layer where it's drawn (alpha over a half).
+fn swatch_colour(img: &s3formats::dds::Rgba) -> Option<[f32; 3]> {
+    let (mut sum, mut n) = ([0f64; 3], 0usize);
+    for px in img.data.chunks_exact(4).step_by(3) {
+        if px[3] > 128 {
+            for c in 0..3 {
+                sum[c] += px[c] as f64;
+            }
+            n += 1;
+        }
+    }
+    (n > 16).then(|| sum.map(|s| (s / n as f64 / 255.0) as f32))
+}
+
+/// The colourways of the wardrobe's clothes and shoes (`cas_presets.bin`): every preset of each
+/// part rendered (at 256), the others than its own written to the texture store, with each
+/// one's swatch colour.
+fn bake_cas_colourways(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, String> {
+    use crate::types::{CasBaked, CasPartInfo, Key};
+    use s3formats::sim::{CT_BODY, CT_BOTTOM, CT_SHOES, CT_TOP, CasPart};
+    let g = root.global_dir();
+    let mut cas: CasBaked = read_value(&g.join("cas.bin")).map_err(|e| format!("cas.bin: {e}"))?;
+    cas.parts.extend(read_value::<Vec<CasPartInfo>>(&g.join("wardrobe.bin")).unwrap_or_default());
+    let mut parts: Vec<Key> = cas.parts.iter().filter(|p| p.baked && matches!(p.clothing_type, CT_TOP | CT_BOTTOM | CT_BODY | CT_SHOES)).map(|p| p.key).collect();
+    parts.sort();
+    parts.dedup();
+    let ways: Vec<Option<CasColourways>> = crate::bake::par_map(&parts, |&key| {
+        let c = CasPart::parse(&pkgs.read(&s3pkg::ResourceKey::new(key.0, key.1, key.2))?).ok()?;
+        if c.presets.len() < 2 {
+            return None;
+        }
+        let swatches = c
+            .presets
+            .iter()
+            .take(8)
+            .enumerate()
+            .map(|(i, xml)| {
+                let img = s3formats::complate::render_preset(pkgs, xml, 256, true)?;
+                let tex: Key = (T_CAS_PRESET, i as u32, key.2);
+                if i > 0 && !root.tex_path(tex).exists() {
+                    let _ = std::fs::write(root.tex_path(tex), crate::ddsw::encode_dds(&img));
+                }
+                swatch_colour(&img)
+            })
+            .collect();
+        Some(CasColourways { part: key, swatches })
+    });
+    let ways: Vec<CasColourways> = ways.into_iter().flatten().filter(|w| w.swatches.iter().filter(|s| s.is_some()).count() > 1).collect();
+    let n = ways.len();
+    write_value(&g.join("cas_presets.bin"), &ways).map_err(|e| e.to_string())?;
+    Ok(n)
+}
+
 /// The catalogue's fences (`fences.pack` holds their pieces).
 fn bake_fence_styles(root: &BakeRoot, pkgs: &PackageSet, strings: &HashMap<u64, String>) -> Result<Vec<FenceStyle>, String> {
     let mut keys: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(0x0418FE2A).copied().collect();
@@ -1637,6 +1702,9 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     }
     progress("Converting: career outfits…");
     bake_outfits(root, pkgs, &out.careers)?;
+    progress("Converting: clothes' colourways…");
+    let ways = bake_cas_colourways(root, pkgs)?;
+    progress(&format!("Converting: colourways for {ways} clothes…"));
     let faces = bake_face_bones(root, pkgs)?;
     progress(&format!("Converting: face shapes ({faces} slider bones)…"));
     let eyes = bake_eye_colors(root, pkgs)?;

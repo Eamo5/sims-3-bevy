@@ -106,6 +106,8 @@ pub enum CasAction {
     Wear(usize),
     /// Favourite food (0), music (1) or colour (2): entry `i` of its list.
     Favorite(u8, usize),
+    /// The worn item of the tab's type in colourway `i` (the game's presets for it).
+    Colourway(u8),
     Done,
 }
 
@@ -424,6 +426,19 @@ fn cas_actions(
                             CT_HAIR => o.hair = Some(*key),
                             _ => o.wear(scene.wear, t, *key),
                         }
+                    }
+                }
+            }
+            CasAction::Colourway(i) => {
+                if let Some(t) = scene.tab.clothing_type().filter(|t| *t != CT_HAIR)
+                    && let Some(key) = worn(&scene, &pending.members[k], t)
+                {
+                    let o = &mut pending.members[k].outfit;
+                    // (The item worn is kept, in its new colours.)
+                    o.wear(scene.wear, t, key);
+                    o.designs.retain(|(p, _)| *p != key);
+                    if i > 0 {
+                        o.designs.push((key, i));
                     }
                 }
             }
@@ -1170,6 +1185,32 @@ fn rebuild_ui(
                         row.spawn(text(format!("{} / {}", page + 1, pages), 15.0, Color::WHITE));
                         button(row, "Next >", CasAction::Page(1), Val::Px(110.0), false, 15.0);
                     });
+                    // The worn item's colourways (the game's presets for it), as swatches.
+                    if let Some(ways) = current.filter(|_| t != CT_HAIR).and_then(|k| scene.cas.colourways.get(&k).map(|w| (k, w.clone()))) {
+                        let (key, ways) = ways;
+                        let on = sim.outfit.designs.iter().find(|(p, _)| *p == key).map_or(0, |d| d.1);
+                        p.spawn(text("Colors", 16.0, Color::WHITE));
+                        p.spawn(Node { column_gap: Val::Px(8.0), flex_wrap: FlexWrap::Wrap, ..default() }).with_children(|row| {
+                            for (i, sw) in ways.iter().enumerate() {
+                                let Some([r, g, b]) = *sw else { continue };
+                                let chosen = i as u8 == on;
+                                row.spawn((
+                                    Button,
+                                    Swatch,
+                                    CasAction::Colourway(i as u8),
+                                    Node {
+                                        width: Val::Px(40.0),
+                                        height: Val::Px(40.0),
+                                        border: UiRect::all(Val::Px(if chosen { 4.0 } else { 1.0 })),
+                                        border_radius: BorderRadius::all(Val::Px(20.0)),
+                                        ..default()
+                                    },
+                                    BorderColor::all(if chosen { PLUMBOB_GREEN } else { Color::WHITE }),
+                                    BackgroundColor(Color::srgb(r, g, b)),
+                                ));
+                            }
+                        });
+                    }
                 }
             }
         });

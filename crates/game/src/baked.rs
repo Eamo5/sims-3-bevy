@@ -25,6 +25,8 @@ pub struct BakedData {
     pub cas_pack: PackReader,
     /// The careers' uniforms, and the meshes of their parts the wardrobe doesn't have.
     pub outfits: Vec<s3bake::OutfitInfo>,
+    /// The wardrobe's colourways (each part's presets' swatch colours).
+    pub colourways: Vec<s3bake::gamedata::CasColourways>,
     /// The face sliders' bone adjustments by age-and-sex prefix.
     pub face_bones: Vec<s3bake::gamedata::FaceBones>,
     /// The eye colour overlay (the iris) and Create a Sim's eye colours.
@@ -58,6 +60,7 @@ impl BakedData {
         cas.parts.extend(s3bake::read_value::<Vec<s3bake::CasPartInfo>>(&g.join("wardrobe.bin")).unwrap_or_default());
         let cas_pack = PackReader::open(&g.join("cas.pack")).map_err(|e| format!("cas pack: {e}"))?;
         let outfits = s3bake::read_value(&g.join("outfits.bin")).unwrap_or_default();
+        let colourways = s3bake::read_value(&g.join("cas_presets.bin")).unwrap_or_default();
         let face_bones = s3bake::read_value(&g.join("face_bones.bin")).unwrap_or_default();
         let eye_colors = s3bake::read_value(&g.join("eye_colors.bin")).unwrap_or_default();
         let mut designs: HashMap<Key, s3bake::gamedata::ObjectDesigns> =
@@ -91,6 +94,7 @@ impl BakedData {
             cas,
             cas_pack,
             outfits,
+            colourways,
             outfit_pack,
             clips,
             clip_names,

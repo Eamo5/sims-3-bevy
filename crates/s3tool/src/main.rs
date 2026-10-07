@@ -1411,6 +1411,37 @@ fn main() {
         }
         return;
     }
+    if args[1] == "caspresets" {
+        // caspresets <root> [name part]: the base game's everyday clothes and hair (not hidden),
+        // how many presets (colourways) they have, and how long a few take to render.
+        use s3formats::sim::{CasPart, CAT_HIDDEN, CT_BODY, CT_BOTTOM, CT_HAIR, CT_SHOES, CT_TOP};
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let want = args.get(3).map(|s| s.to_ascii_lowercase()).unwrap_or_default();
+        let mut parts = 0;
+        let mut presets = 0;
+        let mut hist = std::collections::BTreeMap::new();
+        let mut sample: Vec<(String, String)> = Vec::new();
+        for k in set.keys_of_type(s3pkg::types::CASP).copied().collect::<Vec<_>>() {
+            let Some(c) = set.read(&k).and_then(|d| CasPart::parse(&d).ok()) else { continue };
+            let human = matches!((c.age_gender >> 8) & 0xF, 0 | 1) && c.age_gender & 0x7E != 0;
+            if !human || c.category & CAT_HIDDEN != 0 || k.g != 0 || !matches!(c.clothing_type, CT_TOP | CT_BOTTOM | CT_BODY | CT_SHOES | CT_HAIR) || !c.name.to_ascii_lowercase().contains(&want) {
+                continue;
+            }
+            parts += 1;
+            presets += c.presets.len();
+            *hist.entry(c.presets.len()).or_insert(0) += 1;
+            if sample.len() < 6 && c.presets.len() > 1 {
+                sample.push((c.name.clone(), c.presets[1].clone()));
+            }
+        }
+        println!("{parts} parts, {presets} presets; by count {hist:?}");
+        for (name, p) in &sample {
+            let t0 = std::time::Instant::now();
+            let img = s3formats::complate::render_preset(&set, p, 256, true);
+            println!("{name}: rendered {:?} in {:?}", img.map(|i| (i.width, i.height)), t0.elapsed());
+        }
+        return;
+    }
     if args[1] == "splitlevels" {
         // splitlevels <world file>: lots whose floors on one grid level stand at more than one
         // storey's height (a room on a foundation beside rooms without one), with the heights.

@@ -179,6 +179,8 @@ pub struct OutfitChoice {
     pub eyeshadow: Option<s3bake::Key>,
     /// The clothes chosen for their other outfits (in `OTHER_OUTFITS`' order).
     pub other: [Clothes; 4],
+    /// The colourway chosen for a part (by its key: the game's preset; none, its own).
+    pub designs: Vec<(s3bake::Key, u8)>,
 }
 
 /// Clothes chosen for one of a Sim's outfits (none chosen: as their look gives them).

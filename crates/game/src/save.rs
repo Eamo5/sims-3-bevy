@@ -118,6 +118,9 @@ pub struct SavedSim {
     /// Their skill journal: what they've done with their skills, and the challenges earned.
     #[serde(default, skip_serializing_if = "crate::journal::SkillJournal::is_empty")]
     pub journal: crate::journal::SkillJournal,
+    /// The colourways chosen for their clothes (part, preset).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub designs: Vec<((u32, u32, u64), u8)>,
 }
 
 /// A lifetime wish (by the game's check for it), and what's counted towards it.
@@ -307,6 +310,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         pension: None,
         favorites: Some(sim.favorites.clone()),
         journal: Default::default(),
+        designs: sim.outfit.designs.clone(),
     }
 }
 
@@ -339,6 +343,7 @@ impl SaveGame {
                 lipstick: o(7),
                 eyeshadow: o(8),
                 other: [other(0), other(1), other(2), other(3)],
+                designs: s.designs.clone(),
             },
             first: s.first.clone(),
             last: s.last.clone(),
@@ -662,6 +667,7 @@ fn save_game(
             pension: pension.copied(),
             favorites: Some(sim.favorites.clone()),
             journal: journal.cloned().unwrap_or_default(),
+            designs: sim.outfit.designs.clone(),
         });
     }
     let game = SaveGame {
