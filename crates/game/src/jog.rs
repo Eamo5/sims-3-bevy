@@ -117,6 +117,7 @@ fn jog(
         };
         let mut pf = PathFollow::new(waypoints);
         pf.speed = JOG_SPEED;
+        pf.run_far = false;
         commands.entity(e).insert(pf);
     }
 }

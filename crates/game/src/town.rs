@@ -69,6 +69,7 @@ fn stroll(
         t.walking = true;
         let mut pf = PathFollow::new(vec![Waypoint { p: end, level: 1, climb: None }]);
         pf.speed = rng.random_range(1.2..1.7);
+        pf.run_far = false;
         // (Some jog past instead, in their athletic wear: more of them mornings and evenings.)
         let jog_hours = (7.0..10.0).contains(&hour) || (17.0..20.0).contains(&hour);
         let jogging = crate::jog::can_jog(sim) && rng.random_bool(if jog_hours { 0.35 } else { 0.1 });

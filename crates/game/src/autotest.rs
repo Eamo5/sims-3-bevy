@@ -274,6 +274,14 @@ impl Plugin for AutoTestPlugin {
                     if args.action.as_deref().is_some_and(|a| a.starts_with("Visit:")) && on.is_none() {
                         return;
                     }
+                    // (`--use Go:<x>,<z>`: a walk there, on the ground.)
+                    if let Some((x, z)) = want.strip_prefix("Go:").and_then(|v| v.split_once(',')).and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) {
+                        *done = true;
+                        info!("use test: Go Here {x},{z}");
+                        q.0.clear();
+                        q.push_player(crate::interact::Action::new("Go Here", crate::interact::ActionKind::GoHere(Vec2::new(x, z), 1), false));
+                        return;
+                    }
                     // (`--use Jog`: out jogging.)
                     if want.eq_ignore_ascii_case("jog") {
                         *done = true;

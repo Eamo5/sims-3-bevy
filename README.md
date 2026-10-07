@@ -281,7 +281,8 @@ installation is unreachable.
   and counts the game's six kilometres an hour towards the Marathon Runner challenge. Athletic
   Sims go jogging on their own by day, and some of the town's passers-by jog past in their
   athletic wear (most of them mornings and evenings). The sidewalk they all use runs beside
-  the street nearest the lot.
+  the street nearest the lot. And as in the game, a teen or grown-up with a long way to go
+  (over 22 m, on the level) runs it, slowing to a walk as they get there.
 - **Water effects**: fountains gush and fill their basins, showers spray from the head and taps
   run while someone's at them, each from the object's own effect slot (the game's RSLT slots).
   TVs show a programme on the screen (at the TV's screen slot) while anyone's watching, its

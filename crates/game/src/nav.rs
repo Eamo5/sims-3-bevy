@@ -430,13 +430,21 @@ pub struct PathFollow {
     pub speed: f32,
     pub done: bool,
     seg_start: Option<Vec2>,
+    /// Whether a long way is run (as the game's Sims do), and whether it's being run now.
+    pub run_far: bool,
+    pub running: bool,
 }
 
 impl PathFollow {
     pub fn new(waypoints: Vec<Waypoint>) -> Self {
-        Self { waypoints, speed: 1.45, done: false, seg_start: None }
+        Self { waypoints, speed: 1.45, done: false, seg_start: None, run_far: true, running: false }
     }
 }
+
+/// A walk longer than this (metres) is run, until it's nearly done; and how much faster.
+const RUN_FROM: f32 = 22.0;
+const RUN_UNTIL: f32 = 5.0;
+const RUN_FACTOR: f32 = 2.1;
 
 /// Standing height on a floor at a point: the house floor or the terrain.
 pub fn floor_height(world: &crate::loading::WorldInfo, building: Option<&crate::building::ActiveBuilding>, level: u8, p: Vec3) -> f32 {
@@ -451,18 +459,23 @@ fn follow_paths(
     clock: Res<GameClock>,
     world: Res<CurrentWorld>,
     building: Option<Res<crate::building::ActiveBuilding>>,
-    mut q: Query<(&mut Transform, &mut PathFollow, &mut SimAnim, &mut Floor), Without<crate::portraits::Staged>>,
+    mut q: Query<(&mut Transform, &mut PathFollow, &mut SimAnim, &mut Floor, Option<&crate::sim::Sim>), Without<crate::portraits::Staged>>,
 ) {
     let rate = SPEED_RATES[clock.speed];
     let dt = time.delta_secs().min(0.1) * rate;
-    for (mut tf, mut pf, mut anim, mut floor) in &mut q {
+    for (mut tf, mut pf, mut anim, mut floor, sim) in &mut q {
         if pf.done {
             continue;
         }
         if dt <= 0.0 {
             continue;
         }
-        let mut budget = pf.speed * dt;
+        // A long way (on the level) is run by teens and grown-ups, until they're nearly there.
+        let here = Vec2::new(tf.translation.x, tf.translation.z);
+        let left: f32 = pf.waypoints.iter().scan(here, |at, w| Some(std::mem::replace(at, w.p).distance(w.p))).sum();
+        let can_run = pf.run_far && sim.is_some_and(|s| !s.age.is_little() && s.age != crate::sim::Age::Child) && pf.waypoints.first().is_some_and(|w| w.climb.is_none());
+        pf.running = can_run && left > if pf.running { RUN_UNTIL } else { RUN_FROM };
+        let mut budget = pf.speed * if pf.running { RUN_FACTOR } else { 1.0 } * dt;
         let mut climbing = None;
         while budget > 0.0 {
             let Some(&target) = pf.waypoints.first() else {
