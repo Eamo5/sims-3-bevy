@@ -1594,15 +1594,18 @@ fn run_actions(
                                             // One of the game's pictures, for their canvas, skill and traits.
                                             let lvl = skills.level("Painting");
                                             let size = crate::paintings::canvas(plan, lvl);
-                                            let p = crate::paintings::paint(
-                                                baked.as_ref().map(|b| &b.0.paintings),
-                                                size,
-                                                lvl,
-                                                &sim.traits,
-                                                sim.age == Age::Child,
-                                                crate::wishes::has(wishes, "ExtraCreative"),
-                                                &mut rand::rng(),
-                                            );
+                                            // (The one on the easel, decided as they started.)
+                                            let p = plan.and_then(|p| p.painted.clone()).unwrap_or_else(|| {
+                                                crate::paintings::paint(
+                                                    baked.as_ref().map(|b| &b.0.paintings),
+                                                    size,
+                                                    lvl,
+                                                    &sim.traits,
+                                                    sim.age == Age::Child,
+                                                    crate::wishes::has(wishes, "ExtraCreative"),
+                                                    &mut rand::rng(),
+                                                )
+                                            });
                                             commands.entity(me).remove::<crate::paintings::PaintPlan>();
                                             // Into their inventory, to sell, keep or hang.
                                             crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Painting, p.key, p.name.to_string(), 0, p.worth, 1);

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 51;
+pub const GAMEDATA_VERSION: u32 = 53;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -684,6 +684,43 @@ pub struct PaintingsBaked {
     pub canvases: Vec<CanvasInfo>,
     /// The texture of the canvas's painted face (the picture stands in for it, as a design).
     pub face: crate::types::Key,
+    /// Where each easel holds the canvas being painted.
+    pub easels: Vec<EaselSlots>,
+}
+
+/// Where an easel holds a canvas (its rig's canvas slots, in its model space): the small one,
+/// and the medium and large ones. (Translation, and rotation as x, y, z, w.)
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct EaselSlots {
+    pub objd: crate::types::Key,
+    pub small: ([f32; 3], [f32; 4]),
+    pub large: ([f32; 3], [f32; 4]),
+}
+
+/// A rig bone's place in the rig's (the object's model) space: its parents' transforms
+/// composed with its own.
+fn bone_transform(rig: &s3formats::sim::Rig, i: usize) -> ([f32; 3], [f32; 4]) {
+    let qmul = |a: [f32; 4], b: [f32; 4]| {
+        [
+            a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+            a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+            a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+            a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+        ]
+    };
+    let rotate = |q: [f32; 4], v: [f32; 3]| {
+        let p = qmul(qmul(q, [v[0], v[1], v[2], 0.0]), [-q[0], -q[1], -q[2], q[3]]);
+        [p[0], p[1], p[2]]
+    };
+    let b = &rig.bones[i];
+    match usize::try_from(b.parent).ok().filter(|&p| p < rig.bones.len() && p != i) {
+        Some(p) => {
+            let (pp, pr) = bone_transform(rig, p);
+            let d = rotate(pr, b.position);
+            ([pp[0] + d[0], pp[1] + d[1], pp[2] + d[2]], qmul(pr, b.rotation))
+        }
+        None => (b.position, b.rotation),
+    }
 }
 
 /// The texture of a painting picture.
@@ -781,6 +818,28 @@ fn bake_paintings(root: &BakeRoot, pkgs: &PackageSet, table: Option<String>) -> 
                 out.canvases.push(CanvasInfo { objd, model, uv });
             }
             pack.finish().map_err(|e| e.to_string())?;
+        }
+    }
+    // The easels' canvas slots (their rigs' `_cntm_…Painting` bones).
+    for c in catalog.iter().filter(|c| c.script.contains("HobbiesSkills") && c.script.contains("Easel") && !c.script.contains("Canvas")) {
+        // (OBJD → OBJK → its VPXY, which names the rig.)
+        let rig = pkgs
+            .read(&crate::types::rkey(c.objd))
+            .and_then(|d| s3formats::object::objd_objk(pkgs, &d))
+            .and_then(|o| o.model_key)
+            .and_then(|k| pkgs.read(&k).or_else(|| pkgs.read_ti(k.t, k.i)))
+            .and_then(|v| s3formats::model::vpxy_keys(&v).into_iter().find(|k| k.t == 0x8EAF13DE))
+            .and_then(|k| pkgs.read(&k).or_else(|| pkgs.read_ti(k.t, k.i)))
+            .and_then(|d| s3formats::sim::Rig::parse(&d).ok());
+        let Some(rig) = rig else { continue };
+        let slot = |want: &dyn Fn(&str) -> bool| {
+            rig.bones.iter().position(|b| {
+                let n = b.name.to_ascii_lowercase();
+                n.starts_with("_cntm_") && n.contains("painting") && want(&n)
+            })
+        };
+        if let (Some(s), Some(l)) = (slot(&|n| n.contains("small")), slot(&|n| n.contains("large") || n.contains("med"))) {
+            out.easels.push(EaselSlots { objd: c.objd, small: bone_transform(&rig, s), large: bone_transform(&rig, l) });
         }
     }
     let n = out.paintings.len();

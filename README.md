@@ -306,7 +306,9 @@ installation is unreachable.
   worth more), and what a Sim paints is one of the game's own pictures, from the Painting
   skill's picture table: chosen by their skill, in their traits' version of it (an evil Sim's,
   a gloomy one's, a virtuoso's) and now and then a brilliant painting or a masterpiece at higher
-  skill. Finished paintings go in their inventory with their picture; *Hang on a Wall* holds
+  skill. While they paint, the canvas stands on the easel's ledge for its size, the game's
+  work-in-progress strokes and then the picture. Finished paintings go in their inventory with
+  their picture; *Hang on a Wall* holds
   one up in Buy mode to hang on any straight wall (not over a window or door), where it's the
   game's canvas at its size with the picture on it. Hung paintings can be moved or sold (for
   what they're worth), go back to the inventory if not put up, and are kept in saves.
@@ -424,5 +426,5 @@ Format notes are in `docs/formats/`.
 and `--ui-flow <dir>` clicks through the menus saving a screenshot of each screen.
 `--do "Paint: Large Canvas"` paints on that canvas; `PAINTINGS=<level>` paints six (three into
 the inventory, three hung on the nearest walls, the camera on them), `PAINTINGS=look` puts the
-camera on a hung painting, `PAINTINGS_BUY=1` holds one up in Buy mode and `BUY_CLOSE_AT=<s>`
+camera on a hung painting (`PAINTINGS=easel`: on the easel), `PAINTINGS_BUY=1` holds one up in Buy mode and `BUY_CLOSE_AT=<s>`
 closes Buy mode then, logging the inventory.

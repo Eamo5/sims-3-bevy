@@ -1092,7 +1092,7 @@ fn pie_buttons(
         }
         // The canvas chosen.
         if let Some(c) = label.strip_prefix("Paint: ").and_then(|n| crate::paintings::CANVASES.iter().position(|c| *c == n)) {
-            commands.entity(a).insert(crate::paintings::PaintPlan(c as u8));
+            commands.entity(a).insert(crate::paintings::PaintPlan::new(c as u8));
         }
         // A book in the genre chosen.
         if let Some(g) = label.strip_prefix("Write: ").and_then(|n| crate::writing::GENRES.iter().position(|g| g.name == n)) {

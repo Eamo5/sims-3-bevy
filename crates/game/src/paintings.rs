@@ -3,7 +3,8 @@
 //! table by the canvas, their skill and their traits (an evil Sim's version of it, a gloomy
 //! one's), now and then a brilliant painting or a masterpiece. Finished paintings go in the
 //! painter's inventory, pictured, to sell or to hang on a wall (Buy mode holds them up to it;
-//! hung, they can be moved or sold like the furniture).
+//! hung, they can be moved or sold like the furniture). While a Sim paints, the canvas stands on
+//! the easel, blank at first and then with the picture coming.
 
 use std::collections::HashMap;
 
@@ -13,14 +14,16 @@ use rand::seq::IndexedRandom;
 use s3bake::Key;
 use s3bake::gamedata::{PaintingInfo, PaintingsBaked};
 
+use crate::interact::{ActionKind, ActionQueue, GameObject, Phase, Skills, Special};
 use crate::inventory::Stack;
 use crate::life::Trait;
+use crate::objects::{AssetCtx, ObjectAssets, spawn_parts};
 
 pub struct PaintingsPlugin;
 
 impl Plugin for PaintingsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PaintingImages>();
+        app.init_resource::<PaintingImages>().add_systems(Update, easel_canvases.run_if(in_state(crate::PlayMode::Live)));
     }
 }
 
@@ -30,9 +33,19 @@ pub const CANVASES: [&str; 3] = ["Small Canvas", "Medium Canvas", "Large Canvas"
 pub const CANVAS_MINUTES: [f32; 3] = [90.0, 150.0, 240.0];
 const CANVAS_WORTH: [f32; 3] = [1.0, 1.6, 2.5];
 
-/// The canvas a Sim's been asked to paint on (the pie menu's choice).
-#[derive(Component, Clone, Copy)]
-pub struct PaintPlan(pub u8);
+/// The canvas a Sim's been asked to paint on (the pie menu's choice), and what they're painting
+/// on it once they've started.
+#[derive(Component, Clone)]
+pub struct PaintPlan {
+    pub size: u8,
+    pub painted: Option<Painted>,
+}
+
+impl PaintPlan {
+    pub fn new(size: u8) -> Self {
+        Self { size, painted: None }
+    }
+}
 
 /// A painting hung on a wall: the inventory item it is (its picture, name and worth).
 #[derive(Component, Clone, Debug)]
@@ -41,7 +54,7 @@ pub struct Hung(pub Stack);
 /// The canvas a Sim paints on: the one asked for, else (painting of their own accord) a small
 /// one while they're learning and a medium one after.
 pub fn canvas(plan: Option<&PaintPlan>, level: u32) -> u8 {
-    plan.map_or(if level < 4 { 0 } else { 1 }, |p| p.0.min(2))
+    plan.map_or(if level < 4 { 0 } else { 1 }, |p| p.size.min(2))
 }
 
 /// The table's trait column for a trait with versions of the pictures (`Grumpy` Sims paint
@@ -62,6 +75,7 @@ fn trait_column(t: Trait) -> Option<&'static str> {
 }
 
 /// A finished painting.
+#[derive(Clone)]
 pub struct Painted {
     /// The inventory item's key (its canvas and picture) and name.
     pub key: String,
@@ -126,10 +140,8 @@ pub fn paint(data: Option<&PaintingsBaked>, size: u8, level: u32, traits: &[Trai
 /// A painting's canvas and picture. (Paintings from before they had pictures: a medium one of
 /// their quality, the same each time.)
 pub fn picture(data: &PaintingsBaked, s: &Stack) -> Option<(u8, String)> {
-    if let Some(rest) = s.key.strip_prefix("painting:") {
-        let (size, rest) = rest.split_once(':')?;
-        let name = rest.split('#').next()?;
-        return Some((size.parse::<u8>().ok()?.min(2), name.to_string()));
+    if let Some(p) = key_picture(&s.key) {
+        return Some(p);
     }
     let (kind, level) = match s.name.as_str() {
         "Masterpiece" => (3, 10),
@@ -140,6 +152,80 @@ pub fn picture(data: &PaintingsBaked, s: &Stack) -> Option<(u8, String)> {
     let pool: Vec<&PaintingInfo> = data.paintings.iter().filter(|p| p.size == 1 && p.kind == kind && (kind != 0 || (p.min..=p.max).contains(&level))).collect();
     let p = pool.get((s3pkg::fnv64(&s.key) % pool.len().max(1) as u64) as usize)?;
     Some((1, p.name.clone()))
+}
+
+/// The canvas and picture a painting's key names (`painting:<size>:<picture>#<n>`).
+fn key_picture(key: &str) -> Option<(u8, String)> {
+    let (size, rest) = key.strip_prefix("painting:")?.split_once(':')?;
+    let name = rest.split('#').next()?;
+    Some((size.parse::<u8>().ok()?.min(2), name.to_string()))
+}
+
+/// The canvas on an easel while a Sim paints there.
+#[derive(Component)]
+pub struct EaselCanvas {
+    painter: Entity,
+    /// Whether the picture's showing yet.
+    shown: bool,
+}
+
+/// While a Sim paints, the canvas stands on the easel: blank to begin with, their picture once
+/// a third of the way through. (What they paint is decided as they start.)
+#[allow(clippy::type_complexity)]
+fn easel_canvases(
+    mut commands: Commands,
+    mut painters: Query<(Entity, &crate::sim::Sim, &ActionQueue, &Skills, Option<&mut PaintPlan>, Option<&crate::wishes::Wishes>)>,
+    objects: Query<&GameObject>,
+    canvases: Query<(Entity, &EaselCanvas)>,
+    baked: Option<Res<crate::baked::Baked>>,
+    mut assets: ResMut<ObjectAssets>,
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+) {
+    let Some(baked) = baked else { return };
+    let data = &baked.0.paintings;
+    // (Painter, easel, canvas, picture, whether it's showing.)
+    let mut painting: Vec<(Entity, Entity, u8, Option<Key>, bool)> = Vec::new();
+    for (me, sim, queue, skills, plan, wishes) in &mut painters {
+        let Some(a) = queue.0.front() else { continue };
+        let (ActionKind::Object { target, def }, Phase::Running(elapsed)) = (&a.kind, &a.phase) else { continue };
+        let Ok(obj) = objects.get(*target) else { continue };
+        if crate::interact::interactions_for(obj.kind).get(*def).is_none_or(|d| d.special != Special::SellPainting) {
+            continue;
+        }
+        let level = skills.level("Painting");
+        let size = canvas(plan.as_deref(), level);
+        let mut chosen = || paint(Some(data), size, level, &sim.traits, sim.age == crate::sim::Age::Child, crate::wishes::has(wishes, "ExtraCreative"), &mut rand::rng());
+        let painted = match plan {
+            Some(mut p) => p.painted.get_or_insert_with(chosen).clone(),
+            None => {
+                let p = chosen();
+                commands.entity(me).insert(PaintPlan { size, painted: Some(p.clone()) });
+                p
+            }
+        };
+        let design = key_picture(&painted.key).map(|(_, pic)| s3bake::gamedata::painting_texture(&pic));
+        painting.push((me, *target, size, design, *elapsed >= CANVAS_MINUTES[size as usize] / 3.0));
+    }
+    // The canvases of those who've stopped go (and one's put up afresh as the picture comes).
+    for (e, c) in &canvases {
+        if !painting.iter().any(|p| p.0 == c.painter && p.4 == c.shown) {
+            commands.entity(e).despawn();
+        }
+    }
+    for (me, easel, size, design, shown) in painting {
+        if canvases.iter().any(|(_, c)| c.painter == me && c.shown == shown) {
+            continue;
+        }
+        let Some(c) = data.canvases.get(size as usize) else { continue };
+        let mut ctx = AssetCtx { baked: &baked.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+        let parts = assets.object_design(&mut ctx, c.objd, design.filter(|_| shown));
+        // (On the easel's ledge for its size.)
+        let slot = objects.get(easel).ok().and_then(|o| data.easels.iter().find(|s| s.objd == o.objd)).map(|s| if size == 0 { s.small } else { s.large });
+        let at = slot.map_or(Transform::IDENTITY, |(p, r)| Transform::from_translation(Vec3::from(p)).with_rotation(Quat::from_array(r)));
+        let e = spawn_parts(&mut commands, &parts, at);
+        commands.entity(e).insert(EaselCanvas { painter: me, shown });
+        commands.entity(easel).add_child(e);
+    }
 }
 
 /// A painting's catalogue object (its canvas) and the design that is its picture.

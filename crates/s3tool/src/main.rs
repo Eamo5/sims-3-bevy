@@ -450,6 +450,33 @@ fn main() {
         println!("tris: {:?}", &m.indices[..m.indices.len().min(30)]);
         return;
     }
+    if args[1] == "slots" {
+        // slots <root> <objd instance hex>: an object's routing, container and effect slots.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let k = s3pkg::ResourceKey::new(types::OBJD, 0, parse_hex(&args[3]));
+        let objd = set.read(&k).expect("no OBJD");
+        let objk = s3formats::object::objd_objk(&set, &objd).expect("no OBJK");
+        for k in s3formats::object::objd_keys(&objd).unwrap_or_default() {
+            println!("OBJD refers to {k}");
+            if k.t == types::OBJK
+                && let Some(d) = set.read(&k).or_else(|| set.read_ti(k.t, k.i))
+            {
+                for t in s3formats::model::tgi_table_at(&d, 4).unwrap_or_default() {
+                    println!("  OBJK refers to {t}");
+                }
+            }
+        }
+        let mk = objk.model_key.expect("no model");
+        let v = set.read(&mk).or_else(|| set.read_ti(mk.t, mk.i)).expect("no VPXY");
+        let rk = s3formats::model::vpxy_keys(&v).into_iter().find(|k| k.t == s3formats::model::T_RSLT).expect("no RSLT");
+        let s = set.read(&rk).or_else(|| set.read_ti(rk.t, rk.i)).and_then(|d| s3formats::model::parse_rslt(&d)).expect("RSLT");
+        for (kind, list) in [("routing", &s.routing), ("container", &s.containers), ("effect", &s.effects)] {
+            for x in list {
+                println!("{kind:9} name {:08X} bone {:08X} pos {:?} rot {:?}", x.name, x.bone, x.pos, x.rot);
+            }
+        }
+        return;
+    }
     if args[1] == "objmats" {
         // objmats <root> <objd instance hex>: each mesh's shader and material parameters.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);

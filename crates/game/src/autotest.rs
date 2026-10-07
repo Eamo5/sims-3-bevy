@@ -762,7 +762,7 @@ fn show_designs(
 /// PAINTINGS=<Painting level>: the selected Sim paints a painting on each canvas at that level
 /// (into their inventory), and three more hang on the nearest long wall, with the camera on
 /// them (PAINTINGS_BUY=1: and buy mode holding the first from the inventory). PAINTINGS=look:
-/// the camera on the first painting already hanging.
+/// the camera on the first painting already hanging; PAINTINGS=easel: on the lot's easel.
 #[allow(clippy::too_many_arguments)]
 fn hang_paintings(
     mut commands: Commands,
@@ -774,6 +774,8 @@ fn hang_paintings(
     (data, catalog, mut assets): (Res<crate::baked::Baked>, Res<crate::loading::Catalog>, ResMut<crate::objects::ObjectAssets>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     hung: Query<(&Transform, &crate::paintings::Hung)>,
+    easels: Query<(&Transform, &crate::interact::GameObject)>,
+    world: Res<crate::loading::CurrentWorld>,
 ) {
     use crate::inventory::{ItemKind, Stack};
     let Ok(v) = std::env::var("PAINTINGS") else { return };
@@ -788,6 +790,20 @@ fn hang_paintings(
         c.distance = 5.0;
         c.height_offset = 2.6;
     };
+    if v == "easel" {
+        if let (Some((tf, _)), Ok(mut c)) = (easels.iter().find(|(_, o)| o.kind == crate::interact::ObjectKind::Easel), cam.single_mut()) {
+            *done = true;
+            let fwd = tf.rotation * Vec3::Z;
+            c.look_at(tf.translation + Vec3::Y * 1.0);
+            c.yaw = (fwd.x + fwd.z * 0.6).atan2(fwd.z - fwd.x * 0.6);
+            c.pitch = 0.3;
+            c.distance = 4.5;
+            // (Upstairs, maybe: the camera's height is over the ground.)
+            c.height_offset = tf.translation.y - world.data.heightmap.sample(tf.translation.x, tf.translation.z) + 1.3;
+            info!("paintings test: easel at {:.1?}", tf.translation);
+        }
+        return;
+    }
     if v == "look" {
         *done = true;
         info!("paintings test: {} hanging: {:?}", hung.iter().count(), hung.iter().map(|(_, h)| &h.0.key).collect::<Vec<_>>());
@@ -1950,7 +1966,7 @@ fn auto_action(
     for (e, o) in &objects {
         if let Some(i) = crate::interact::interactions_for(o.kind).iter().position(|d| d.name.eq_ignore_ascii_case(def_name)) {
             if let (Some(c), Ok(me)) = (canvas, sel_e.single()) {
-                commands.entity(me).insert(crate::paintings::PaintPlan(c as u8));
+                commands.entity(me).insert(crate::paintings::PaintPlan::new(c as u8));
             }
             q.0.clear();
             q.push_player(crate::interact::Action::new(name.clone(), crate::interact::ActionKind::Object { target: e, def: i }, false));

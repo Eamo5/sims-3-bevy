@@ -136,6 +136,11 @@ FNV-32 aren't simple words; smallest face to largest is small, medium, large). T
 diffuse texture is `easelPainting_reveal1`, which the picture stands in for, and its UVs take
 only part of the picture's texture (small 0–0.78 × 0–1, medium 0–0.65 × 0–1, large
 0–1 × 0.18–1). The tuning `Easel` has the canvases' painting times (180, 300 and 480 minutes).
+On an easel the canvas hangs from the easel rig's container bones (the rig is in its VPXY's
+TGI list, not its OBJK's): `_cntm_0_smallPainting` and `_cntm_0_largeAndMedPainting` (base
+easel: (0, −0.28, 0.68) and (0, −0.09, 0.64), tilted back 11°); the RSLT's container slots are
+the same transforms, named by hash. While a canvas is unfinished its face shows
+`easelPainting_reveal1`, a work-in-progress smear.
 
 ### Career branches
 
