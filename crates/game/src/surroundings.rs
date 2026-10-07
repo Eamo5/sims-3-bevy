@@ -16,7 +16,7 @@ pub struct SurroundingsPlugin;
 
 impl Plugin for SurroundingsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spoil_food, trash_cans, discard, wash_up, take_out_trash, read_somewhere, read_paper_somewhere, drop_unread_paper, put_down_carried, surroundings).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (spoil_food, trash_cans, discard, wash_up, take_out_trash, read_somewhere, read_paper_somewhere, drop_unread_paper, watch_somewhere, stop_watching, put_down_carried, surroundings).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -141,6 +141,65 @@ pub const DISH_CARRY: &str = "a2o_plateDinner_carry_x";
 const TRASH_CARRY: &str = "a2o_trashPile_carry_x";
 const BOOK_CARRY: &str = "a2o_book_carry_x";
 const PAPER_CARRY: &str = "a2o_newspaper_carry_x";
+
+/// A TV just turned on: where to watch it from.
+#[derive(Component)]
+pub struct WatchFrom(pub Entity);
+
+/// The TV a Sim is watching from a seat (it stays on for them).
+#[derive(Component)]
+pub struct WatchingTv(pub Entity);
+
+/// Turned on, the TV is watched from the nearest free sofa or chair facing it (a few metres
+/// off); with none, standing before it.
+#[allow(clippy::type_complexity)]
+fn watch_somewhere(
+    mut commands: Commands,
+    mut sims: Query<(Entity, &WatchFrom, &mut crate::interact::ActionQueue)>,
+    seats: Query<(Entity, &GameObject, &Transform, &crate::interact::UsedBy), Without<crate::interact::Broken>>,
+) {
+    for (e, from, mut queue) in &mut sims {
+        commands.entity(e).remove::<WatchFrom>();
+        let Ok((_, _, ttf, _)) = seats.get(from.0) else { continue };
+        let tv = ttf.translation;
+        let watch = |kind: ObjectKind| crate::interact::interactions_for(kind).iter().position(|d| d.special == crate::interact::Special::WatchTv);
+        let seat = seats
+            .iter()
+            .filter(|(_, o, t, used)| {
+                let to_tv = (tv - t.translation).with_y(0.0);
+                let ahead = (t.rotation * Vec3::Z).with_y(0.0).normalize_or_zero();
+                matches!(o.kind, ObjectKind::Sofa | ObjectKind::Chair)
+                    && used.0.is_none()
+                    && (t.translation.y - tv.y).abs() < 1.5
+                    && (1.2..6.0).contains(&to_tv.length())
+                    && to_tv.normalize_or_zero().dot(ahead) > 0.7
+            })
+            .min_by(|a, b| {
+                let far = |t: &Transform, o: &GameObject| t.translation.distance(tv) + if o.kind == ObjectKind::Sofa { 0.0 } else { 1.5 };
+                far(a.2, a.1).total_cmp(&far(b.2, b.1))
+            });
+        match seat.and_then(|(s, o, ..)| Some((s, watch(o.kind)?))) {
+            Some((s, def)) => {
+                queue.0.push_front(crate::interact::Action::new("Watch the TV", crate::interact::ActionKind::Object { target: s, def }, true));
+                commands.entity(e).insert(WatchingTv(from.0));
+            }
+            None => {
+                if let Some(def) = watch(ObjectKind::Tv) {
+                    queue.0.push_front(crate::interact::Action::new("Watch the TV", crate::interact::ActionKind::Object { target: from.0, def }, true));
+                }
+            }
+        }
+    }
+}
+
+/// Done watching (or off to something else), the Sim's TV is theirs no longer.
+fn stop_watching(mut commands: Commands, sims: Query<(Entity, &crate::interact::ActionQueue), With<WatchingTv>>) {
+    for (e, queue) in &sims {
+        if !queue.0.front().is_some_and(|a| a.label == "Watch the TV") {
+            commands.entity(e).remove::<WatchingTv>();
+        }
+    }
+}
 
 /// The newspaper picked up (hidden where it lay until it's read).
 #[derive(Component)]

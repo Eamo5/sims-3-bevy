@@ -428,6 +428,10 @@ pub enum Special {
     PlaceMeal,
     /// A dinner put in the microwave to heat (then taken out, and eaten at the table).
     Microwave,
+    /// The TV turned on, to watch from a seat facing it (or standing, with none free).
+    TurnOnTv,
+    /// The TV watched (from a seat, or standing before it).
+    WatchTv,
     /// A garden sprinkler turned on (it runs a couple of hours) or off.
     SprinklerOn,
     SprinklerOff,
@@ -641,16 +645,17 @@ static CANDLE: [InteractionDef; 2] = [
 ];
 /// (Loaded with the dishes cleared away: never on the menu.)
 static DISHWASHER: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::WashDishes, ..def("Load Dishes", 3.0, N, Pose::Use) }];
-static SOFA: [InteractionDef; 4] = [
+static SOFA: [InteractionDef; 5] = [
     InteractionDef { on_object: true, ..def("Sit", 40.0, [0.0, 0.0, 5.0, 0.0, 0.0, 10.0], Pose::Sit) },
     InteractionDef { on_object: true, decay: SLEEP_DECAY, ..def("Nap", 60.0, [0.0, 0.0, 18.0, 0.0, 0.0, 0.0], Pose::Lie) },
     READ_SEATED,
     READ_PAPER_SEATED,
+    WATCH_TV_SEATED,
 ];
 /// (A book from the shelf, read sitting down: never on the menu.)
 const READ_SEATED: InteractionDef =
     InteractionDef { on_object: true, autonomous: false, skill: Some("Logic"), special: Special::ReadBook, ..def("Read Book", 60.0, [0.0, 0.0, 4.0, 0.0, 0.0, 30.0], Pose::Sit) };
-static CHAIR: [InteractionDef; 5] = [
+static CHAIR: [InteractionDef; 6] = [
     InteractionDef { on_object: true, autonomous: false, ..def("Sit", 30.0, [0.0, 0.0, 4.0, 0.0, 0.0, 4.0], Pose::Sit) },
     InteractionDef {
         on_object: true,
@@ -661,13 +666,19 @@ static CHAIR: [InteractionDef; 5] = [
     InteractionDef { on_object: true, special: Special::Homework, ..def("Do Homework", 45.0, [0.0, 0.0, -2.0, 0.0, 0.0, -6.0], Pose::Sit) },
     READ_SEATED,
     READ_PAPER_SEATED,
+    WATCH_TV_SEATED,
 ];
 /// The dining chair's "Eat" (not offered in its menu).
 pub const CHAIR_EAT: usize = 1;
-static TV: [InteractionDef; 2] = [
-    def("Watch TV", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 55.0], Pose::Stand),
+static TV: [InteractionDef; 3] = [
+    InteractionDef { special: Special::TurnOnTv, ..def("Watch TV", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 55.0], Pose::Stand) },
     def("Watch Cooking Channel", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 35.0], Pose::Stand),
+    // (Watched standing when there's no seat facing it free: never on the menu.)
+    WATCH_TV,
 ];
+/// (The TV watched: from a seat facing it, or standing.)
+const WATCH_TV: InteractionDef = InteractionDef { autonomous: false, special: Special::WatchTv, ..def("Watch the TV", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 55.0], Pose::Stand) };
+const WATCH_TV_SEATED: InteractionDef = InteractionDef { on_object: true, pose: Pose::Sit, per_hour: [0.0, 0.0, 3.0, 0.0, 0.0, 55.0], ..WATCH_TV };
 static COMPUTER: [InteractionDef; 4] = [
     def("Play Computer Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 60.0], Pose::Use),
     InteractionDef { autonomous: false, skill: Some("Writing"), special: Special::WriteNovel, ..def("Write Novel", 120.0, [0.0, 0.0, -4.0, 0.0, 0.0, 10.0], Pose::Use) },
@@ -811,7 +822,23 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Nap" => A::new(Some("a2o_bed_nap_start_x"), &["a2o_bed_nap_loop_breathe_x"]),
         "Relax" => A::new(Some("a2o_bed_relax_getin_start_x"), &["a2o_bed_relax_loop"]),
         "Sit" => A::new(None, &["a2o_chairLiving_sit_breathe_loop_x", "a2o_chairLiving_sit_crossedLeg_front_loop_x"]),
-        "Watch TV" | "Watch Cooking Channel" => A::new(None, &["a2o_tv_watch_idle1_standing", "a2o_tv_watch_idle2_standing", "a2o_tv_watch_idle3_standing", "a2o_tv_watch_active_standing"]),
+        "Watch TV" if kind == ObjectKind::Tv => A::new(None, &["a2o_tv_watch_turnOnOff_standing_x"]),
+        "Watch the TV" if kind == ObjectKind::Sofa => A::new(
+            None,
+            &["a2o_tv_watch_idle1_seated", "a2o_tv_watch_idle2_seated", "a2o_tv_watch_idle3_seated", "a2o_tv_watch_idle4_seated", "a2o_tv_watch_active_seated"],
+        ),
+        "Watch the TV" if matches!(kind, ObjectKind::Chair | ObjectKind::Stool) => A::new(
+            None,
+            &[
+                "a2o_tv_watch_idle1_livingChairSeated",
+                "a2o_tv_watch_idle2_livingChairSeated",
+                "a2o_tv_watch_idle3_livingChairSeated",
+                "a2o_tv_watch_active_livingChairSeated",
+            ],
+        ),
+        "Watch the TV" | "Watch Cooking Channel" => {
+            A::new(None, &["a2o_tv_watch_idle1_standing", "a2o_tv_watch_idle2_standing", "a2o_tv_watch_idle3_standing", "a2o_tv_watch_active_standing"])
+        }
         "Play Computer Games" => A::new(None, &["a2o_computer_game_loop1_x", "a2o_computer_game_loop2_x"]),
         "Write Novel" | "Find a Job" | "Quit Job" => A::new(None, &["a2o_computer_chess_type_loop_x"]),
         "Dance" => A::new(None, &["a_dance_beg_", "a_dance_med_"]),
@@ -1856,6 +1883,8 @@ fn run_actions(
                                     Special::GetBook | Special::GetPaper => 2.0,
                                     // (A quick meal is only taken out at the fridge: it's eaten at the table.)
                                     Special::Cook if d.name == "Have Quick Meal" => 6.0,
+                                    // (Only turning it on: it's watched from a seat.)
+                                    Special::TurnOnTv => 1.0,
                                     // (Less time at the stove once the food's been prepared.)
                                     Special::ServeMeal if prepped.contains(me) && d.minutes > 30.0 => d.minutes - 15.0,
                                     // (Twice as quick for a Speedy Cleaner; homework too for a Multi-Tasker.)
@@ -1878,7 +1907,7 @@ fn run_actions(
                                     }
                                     match d.special {
                                         // (Getting out of the pool is the swim module's.)
-                                        Special::FindJob | Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport | Special::WashDishes | Special::DropTrash | Special::ReadBook => {}
+                                        Special::FindJob | Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport | Special::WashDishes | Special::DropTrash | Special::ReadBook | Special::WatchTv => {}
                                         Special::GetBook => {
                                             commands.entity(me).insert(crate::surroundings::ReadSomewhere(*target));
                                         }
@@ -2088,6 +2117,9 @@ fn run_actions(
                                         }
                                         Special::Cook => {
                                             commands.entity(me).insert(crate::meals::MealRequest::Quick);
+                                        }
+                                        Special::TurnOnTv => {
+                                            commands.entity(me).insert(crate::surroundings::WatchFrom(*target));
                                         }
                                         Special::Microwave => {
                                             commands.entity(me).insert(crate::meals::MicrowaveDone(*target));

@@ -122,7 +122,7 @@ fn tv_screens(
     mut commands: Commands,
     time: Res<Time>,
     mut tvs: Query<(Entity, &mut TvScreen, &UsedBy)>,
-    watchers: Query<&crate::interact::ActionQueue>,
+    watchers: Query<(&crate::interact::ActionQueue, Option<&crate::surroundings::WatchingTv>)>,
     mut pictures: Query<(&mut TvPicture, &mut MeshMaterial3d<StandardMaterial>)>,
     mut lights: Query<&mut PointLight>,
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
@@ -132,10 +132,11 @@ fn tv_screens(
     let now = time.elapsed_secs();
     let mut rng = rand::rng();
     // (Several can watch at once without any of them having the set to themselves.)
+    // (Or from a seat facing it.)
     let watched: std::collections::HashSet<Entity> = watchers
         .iter()
-        .filter_map(|q| match q.0.front().map(|a| (&a.kind, a.phase)) {
-            Some((crate::interact::ActionKind::Object { target, .. }, crate::interact::Phase::Running(_))) => Some(*target),
+        .filter_map(|(q, seated)| match q.0.front().map(|a| (&a.kind, a.phase)) {
+            Some((crate::interact::ActionKind::Object { target, .. }, crate::interact::Phase::Running(_))) => Some(seated.map_or(*target, |w| w.0)),
             _ => None,
         })
         .collect();

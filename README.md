@@ -266,6 +266,9 @@ installation is unreachable.
   open and shut), carries the tray to the nearest counter and chops them there, then takes the
   frying pan to the stove, each with the game's animations and props; the meal cooked, the
   platter is carried to the nearest counter or table and set down, and dinner is served.
+- **Television**: *Watch TV* turns the set on, then the Sim sits down on a sofa or chair facing
+  it to watch (the game's seated and armchair TV animations; standing when there's no seat), the
+  screen flickering with pictures as long as someone watches.
 - **Reading**: *Read a Book* at a bookshelf takes a book down (the game's animation), carries it
   to the nearest free sofa or chair and reads it sitting there, turning the pages (standing at
   the shelf when there's no seat free). The morning paper is picked up off the ground and carried
