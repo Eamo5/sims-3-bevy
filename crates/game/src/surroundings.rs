@@ -16,14 +16,22 @@ pub struct SurroundingsPlugin;
 
 impl Plugin for SurroundingsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spoil_food, trash_cans, discard, surroundings).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (spoil_food, trash_cans, discard, wash_up, surroundings).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
 /// How long food keeps once served (game minutes).
 const SPOIL_MINUTES: f64 = 8.0 * 60.0;
-/// How many loads of scraps a trash can holds.
+/// How many loads of scraps a trash can holds (a trash compactor, three times as many).
 pub const TRASH_CAPACITY: u8 = 5;
+
+pub fn trash_capacity(kind: ObjectKind) -> u8 {
+    if kind == ObjectKind::TrashCompactor { TRASH_CAPACITY * 3 } else { TRASH_CAPACITY }
+}
+
+/// A dish just cleared away, to be taken to the dishwasher or washed up at the sink.
+#[derive(Component)]
+pub struct WashUp;
 /// How near (metres, on the same floor) mess counts against a Sim's surroundings.
 const NEAR: f32 = 5.0;
 
@@ -70,7 +78,7 @@ fn spoil_food(
 /// Every trash can keeps count of what's in it.
 fn trash_cans(mut commands: Commands, cans: Query<(Entity, &GameObject), Without<TrashFill>>) {
     for (e, o) in &cans {
-        if o.kind == ObjectKind::TrashCan {
+        if matches!(o.kind, ObjectKind::TrashCan | ObjectKind::TrashCompactor) {
             commands.entity(e).insert(TrashFill(0));
         }
     }
@@ -87,12 +95,42 @@ fn discard(
         let Some((obj, _, mut fill)) = cans.iter_mut().min_by(|a, b| a.1.translation.distance(tf.translation).total_cmp(&b.1.translation.distance(tf.translation))) else {
             continue;
         };
-        if fill.0 < TRASH_CAPACITY {
+        let cap = trash_capacity(obj.kind);
+        if fill.0 < cap {
             fill.0 += 1;
-            if fill.0 == TRASH_CAPACITY {
+            if fill.0 == cap {
                 notes.push(format!("The {} is full. Someone should empty it.", obj.name.to_lowercase()));
             }
         }
+    }
+}
+
+/// A dish cleared away goes in the nearest working dishwasher, or is washed up at the
+/// nearest sink (with neither about, the scraps in the trash are the end of it).
+#[allow(clippy::type_complexity)]
+fn wash_up(
+    mut commands: Commands,
+    mut sims: Query<(Entity, &Transform, &mut crate::interact::ActionQueue), With<WashUp>>,
+    objects: Query<(Entity, &GameObject, &Transform, &crate::interact::UsedBy), Without<crate::interact::Broken>>,
+) {
+    for (e, tf, mut queue) in &mut sims {
+        commands.entity(e).remove::<WashUp>();
+        // (The nearest about the lot, sooner on the same floor.)
+        let far = |p: Vec3| p.distance(tf.translation) + if (p.y - tf.translation.y).abs() > 2.0 { 15.0 } else { 0.0 };
+        let near = |kind: ObjectKind| {
+            objects
+                .iter()
+                .filter(|(_, o, otf, used)| o.kind == kind && used.0.is_none_or(|u| u == e) && otf.translation.distance(tf.translation) < 60.0)
+                .min_by(|a, b| far(a.2.translation).total_cmp(&far(b.2.translation)))
+                .map(|(o, ..)| (o, kind))
+        };
+        let Some((target, kind)) = near(ObjectKind::Dishwasher).or_else(|| near(ObjectKind::Sink)) else {
+            debug!("no dishwasher or sink near {:.1?} to wash up at", tf.translation);
+            continue;
+        };
+        let Some(def) = crate::interact::interactions_for(kind).iter().position(|d| d.special == crate::interact::Special::WashDishes) else { continue };
+        let name = crate::interact::interactions_for(kind)[def].name;
+        queue.0.push_front(crate::interact::Action::new(name, crate::interact::ActionKind::Object { target, def }, true));
     }
 }
 
@@ -116,7 +154,7 @@ fn surroundings(
             let w = match o.kind {
                 ObjectKind::DirtyDishes if spoiled => 3,
                 ObjectKind::DirtyDishes => 1,
-                ObjectKind::TrashCan if fill.is_some_and(|f| f.0 >= TRASH_CAPACITY) => 3,
+                ObjectKind::TrashCan | ObjectKind::TrashCompactor if fill.is_some_and(|f| f.0 >= trash_capacity(o.kind)) => 3,
                 _ => return None,
             };
             Some((tf.translation, w))

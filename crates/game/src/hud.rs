@@ -867,6 +867,10 @@ fn world_click(
                 if d.special == Special::EmptyTrash && !trash_q.get(t).is_ok_and(|f| f.0 > 0) {
                     continue;
                 }
+                // (Dishes are washed up when cleared away, not from the menu.)
+                if d.special == Special::WashDishes {
+                    continue;
+                }
                 if d.special == Special::WriteNovel {
                     // Carry on with the book under way, or start one in a genre they can write.
                     let Ok((author, skills, _)) = writers.get(actor) else { continue };

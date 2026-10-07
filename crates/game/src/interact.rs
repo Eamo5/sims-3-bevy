@@ -116,6 +116,10 @@ pub enum ObjectKind {
     DivingBoard,
     /// A bar: drinks made at it.
     Bar,
+    /// A dishwasher: the dishes cleared go in it (quicker than washing up at the sink).
+    Dishwasher,
+    /// A trash compactor: a trash can that holds three times as much.
+    TrashCompactor,
     /// The Teleporter (a lifetime reward): to a community lot at once.
     Teleporter,
     /// The Collection Helper (a lifetime reward): collectibles shown in Map View.
@@ -148,6 +152,10 @@ impl ObjectKind {
             Self::DivingBoard
         } else if has("objects.counters.bar") && !has("+") {
             Self::Bar
+        } else if has("appliances.dishwasher") {
+            Self::Dishwasher
+        } else if has("miscellaneous.trashcompactor") {
+            Self::TrashCompactor
         } else if has("rewards.collectionhelper") {
             Self::CollectionHelper
         } else if has("rewards.teleporter") {
@@ -261,7 +269,8 @@ impl ObjectKind {
         match self {
             Self::Fridge | Self::Stove | Self::Microwave | Self::Grill | Self::HotBeverage => "Appliances",
             Self::AlarmClock => "Electronics",
-            Self::TrashCan => "Misc",
+            Self::TrashCan | Self::TrashCompactor => "Misc",
+            Self::Dishwasher => "Appliances",
             Self::FishBowl => "Decor",
             Self::BedDouble | Self::BedSingle => "Beds",
             Self::Toilet | Self::Shower | Self::Bathtub | Self::Sink => "Plumbing",
@@ -334,7 +343,8 @@ pub struct Broken;
 /// How likely an object is to break when used (per use).
 fn break_chance(kind: ObjectKind, price: i32) -> f64 {
     let base = match kind {
-        ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::Sink => 0.04,
+        ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::Sink | ObjectKind::Dishwasher => 0.04,
+        ObjectKind::TrashCompactor => 0.02,
         ObjectKind::Toilet => 0.05,
         ObjectKind::Tv | ObjectKind::Computer | ObjectKind::Stereo => 0.03,
         _ => 0.0,
@@ -354,6 +364,10 @@ pub fn repair_of(kind: ObjectKind) -> (&'static str, crate::anim::ActionClip) {
             A::new(Some("a2o_bathtub_repair_start_x"), &["a2o_bathtub_repair_loopTightenLeft_x", "a2o_bathtub_repair_loopTightenRight_x", "a2o_bathtub_repair_loopWhackFaucet_x"]),
         ),
         ObjectKind::Sink => ("Repair", A::new(Some("a2o_sink_repair_start_x"), &["a2o_sink_repair_loop1_x", "a2o_sink_repair_loop2_x"])),
+        ObjectKind::Dishwasher => (
+            "Repair",
+            A::new(Some("a2o_dishwasher_repair_start_kneel_x"), &["a2o_dishwasher_repair_loopTinker_x", "a2o_dishwasher_repair_loopInspect_x"]),
+        ),
         ObjectKind::Tv => ("Repair", A::new(Some("a2o_tv_repair_start_x"), &["a2o_tv_repair_loop1_x", "a2o_tv_repair_loop2_x"])),
         ObjectKind::Computer => ("Repair", A::new(Some("a2o_computer_repair_start_x"), &["a2o_computer_repair_loop1_x", "a2o_computer_repair_loop2_x"])),
         ObjectKind::Stereo => ("Repair", A::new(Some("a2o_stereo_repair_start_x"), &["a2o_stereo_repair_loop1_x", "a2o_stereo_repair_loop2_x"])),
@@ -393,6 +407,8 @@ pub enum Special {
     Sculpt,
     /// A mood from the moodlet manager (by the interaction).
     SetMood,
+    /// A cleared dish washed up at the sink or put in the dishwasher.
+    WashDishes,
     /// A garden sprinkler turned on (it runs a couple of hours) or off.
     SprinklerOn,
     SprinklerOff,
@@ -574,7 +590,13 @@ static BATHTUB: [InteractionDef; 1] = [InteractionDef {
     on_object: true,
     ..def("Take Bath", 50.0, [0.0, 0.0, 6.0, 0.0, 260.0, 40.0], Pose::Lie)
 }];
-static SINK: [InteractionDef; 1] = [def("Wash Hands", 6.0, [0.0, 0.0, 0.0, 0.0, 160.0, 0.0], Pose::Use)];
+static SINK: [InteractionDef; 2] = [
+    def("Wash Hands", 6.0, [0.0, 0.0, 0.0, 0.0, 160.0, 0.0], Pose::Use),
+    // (Where a dish cleared away is taken without a dishwasher: never on the menu.)
+    InteractionDef { autonomous: false, special: Special::WashDishes, ..def("Wash Dishes", 8.0, N, Pose::Use) },
+];
+/// (Loaded with the dishes cleared away: never on the menu.)
+static DISHWASHER: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::WashDishes, ..def("Load Dishes", 3.0, N, Pose::Use) }];
 static SOFA: [InteractionDef; 2] = [
     InteractionDef { on_object: true, ..def("Sit", 40.0, [0.0, 0.0, 5.0, 0.0, 0.0, 10.0], Pose::Sit) },
     InteractionDef { on_object: true, decay: SLEEP_DECAY, ..def("Nap", 60.0, [0.0, 0.0, 18.0, 0.0, 0.0, 0.0], Pose::Lie) },
@@ -737,7 +759,11 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Nap in Crib" => A::new(Some("p2o_crib_sleep_start_y"), &["p2o_crib_sleep_loop_y"]),
         "Change Clothes" | "Change Into" | "New Everyday Outfit" | "Plan Outfit" => A::new(Some("a2o_dresser_use_open"), &["a2o_dresser_use_close"]),
         "Grill" => A::new(Some("a2o_bbq_grill_start"), &["a2o_bbq_grill_loopBreathe", "a2o_bbq_grill_loopPokeLeft", "a2o_bbq_grill_loopPokeRight", "a2o_bbq_grill_loopExpert"]),
+        "Empty Trash" if kind == ObjectKind::TrashCompactor => A::new(None, &["a2o_trashCompactor_takeOut_x"]),
         "Empty Trash" => A::new(None, &["a2o_trashCan_empty_pullout_x"]),
+        "Load Dishes" => A::new(None, &["a2o_dishwasher_use_x"]),
+        "Wash Dishes" => A::new(Some("a2o_sink_dishes_scrub_start_x"), &["a2o_sink_dishes_scrub_loop1_x", "a2o_sink_dishes_scrub_loop2_x"]),
+        "Clean Up" => A::steps("a2o_plateDinner_pickUp_table_part1_x", &["a2o_plateDinner_pickUp_table_part2_x"], &["a2o_plateDinner_carry_x"]),
         "Make Hot Beverage" => A::new(Some("a2o_hotBeverageMachine_fill"), &["a2o_hotBeverageMachine_drink_loopSip_standing", "a2o_hotBeverageMachine_drink_loopLongSip_standing"]),
         "Stargaze" => A::new(Some("a2o_telescope_start"), &["a2o_telescope_look_loop", "a2o_telescope_look_breathe", "a2o_telescope_react_wonderment"]),
         "Swing" => A::new(Some("a2o_swingset_getIn"), &["a2o_swingset_swing"]),
@@ -916,7 +942,8 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Grill => &GRILL,
         ObjectKind::HotBeverage => &HOT_BEVERAGE,
         ObjectKind::AlarmClock => &ALARM,
-        ObjectKind::TrashCan => &TRASH,
+        ObjectKind::TrashCan | ObjectKind::TrashCompactor => &TRASH,
+        ObjectKind::Dishwasher => &DISHWASHER,
         ObjectKind::FishBowl => &FISHBOWL,
         ObjectKind::Telescope => &TELESCOPE,
         ObjectKind::SwingSet => &SWINGSET,
@@ -1763,7 +1790,7 @@ fn run_actions(
                                     }
                                     match d.special {
                                         // (Getting out of the pool is the swim module's.)
-                                        Special::FindJob | Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport => {}
+                                        Special::FindJob | Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport | Special::WashDishes => {}
                                         Special::Homework => {
                                             notes.push(format!("{} finished their homework.", sim.first));
                                             commands.entity(me).remove::<crate::rabbitholes::Homework>().queue_silenced(|mut e: EntityWorldMut| {
@@ -1895,7 +1922,8 @@ fn run_actions(
                                         }
                                         Special::CleanUp => {
                                             commands.entity(*target).try_despawn();
-                                            commands.entity(me).insert(crate::surroundings::Discarded);
+                                            // (Scraps in the trash; the dish to the dishwasher or sink.)
+                                            commands.entity(me).insert((crate::surroundings::Discarded, crate::surroundings::WashUp));
                                         }
                                         Special::PlaceFish => {
                                             commands.entity(me).insert(crate::fishbowl::BowlRequest::Place(*target));
@@ -2564,7 +2592,7 @@ fn autonomy(
                     score = if bills_due { 25.0 } else { 0.0 };
                 }
                 // A full trash can is a chore like dishes; an emptier one isn't.
-                if d.special == Special::EmptyTrash && !trash_q.get(oe).is_ok_and(|f| f.0 >= crate::surroundings::TRASH_CAPACITY) {
+                if d.special == Special::EmptyTrash && !trash_q.get(oe).is_ok_and(|f| f.0 >= crate::surroundings::trash_capacity(obj.kind)) {
                     continue;
                 }
                 if d.special == Special::PutAway {

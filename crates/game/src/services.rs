@@ -242,14 +242,14 @@ fn maid(
     // The nearest mess she hasn't seen to: dishes and spoiled food, then the trash.
     let chore = |o: &GameObject, fill: Option<&crate::surroundings::TrashFill>| match o.kind {
         ObjectKind::DirtyDishes => Some("Clean Up"),
-        ObjectKind::TrashCan if fill.is_some_and(|f| f.0 > 0) => Some("Empty Trash"),
+        ObjectKind::TrashCan | ObjectKind::TrashCompactor if fill.is_some_and(|f| f.0 > 0) => Some("Empty Trash"),
         _ => None,
     };
     let next = mess
         .iter()
         .filter(|(e, o, _, used, fill)| chore(o, *fill).is_some() && used.0.is_none_or(|u| u == me) && !m.tried.contains(e))
         .min_by(|a, b| {
-            let rank = |o: &GameObject| (o.kind == ObjectKind::TrashCan) as u8;
+            let rank = |o: &GameObject| matches!(o.kind, ObjectKind::TrashCan | ObjectKind::TrashCompactor) as u8;
             (rank(a.1), a.2.translation.distance(tf.translation)).partial_cmp(&(rank(b.1), b.2.translation.distance(tf.translation))).unwrap_or(std::cmp::Ordering::Equal)
         })
         .and_then(|(e, o, _, _, fill)| {

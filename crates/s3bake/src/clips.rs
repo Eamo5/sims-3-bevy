@@ -249,6 +249,14 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_trashCan_empty",
     "c2o_trashCan_empty",
     "a2o_hotBeverageMachine_drink_loop",
+    "a2o_dishwasher_use",
+    "a2o_dishwasher_repair_start_kneel",
+    "a2o_dishwasher_repair_loopInspect",
+    "a2o_sink_dishes_scrub",
+    "a2o_trashCompactor_takeOut",
+    "c2o_trashCompactor_takeOut",
+    "a2o_plateDinner_pickUp_table",
+    "a2o_plateDinner_carry",
     "a2b_crib_pullOut",
     "a2b_babyBottle_feed",
     "a2b_changeDiaper",
@@ -293,6 +301,9 @@ pub const PROP_ACTORS: &[&str] = &[
     "blender",
     "glassBar01",
     "glassBar",
+    "plate",
+    "trashbag",
+    "wrench",
 ];
 
 /// Whether a clip should be baked.

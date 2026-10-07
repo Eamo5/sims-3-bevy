@@ -326,8 +326,11 @@ installation is unreachable.
   the schoolchildren an hour before the bus, and stays set in saves.
 - **Dirty surroundings**: dirty dishes left about, food left out until it spoils (eight
   hours) and a full trash can give nearby household Sims the game's *Dirty Surroundings*,
-  then *Filthy Surroundings*, moodlets. Clearing dishes away fills the nearest trash can;
-  once full, someone has to *Empty Trash* (neat Sims see to it, slobs never do).
+  then *Filthy Surroundings*, moodlets. A dish cleared away (picked up with the game's
+  animation) has its scraps in the nearest trash can and goes in the dishwasher, if there's
+  one working, or is scrubbed at the sink; once full, someone has to *Empty Trash* (neat Sims
+  see to it, slobs never do), pulling out the bag. A trash compactor holds three times as
+  much. Dishwashers break now and then, and are repaired with the game's animations.
 - **Fish bowls**: a fish from a Sim's inventory (fish now come in the game's qualities, a
   master angler often landing a perfect one) put in a bowl swims there, its own model
   turning slowly in the glass, and can be taken out again; bowls are kept in saves, and

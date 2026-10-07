@@ -563,10 +563,12 @@ fn give_items(
     }
 }
 
-/// MESS=<n>: n dirty plates set down around the selected Sim (who then stays put).
+/// MESS=<n>: n dirty plates set down around the selected Sim (who then stays put, unless told
+/// to `--use` something: `--use "Dirty Dishes:Clean Up"`).
 #[allow(clippy::too_many_arguments)]
 fn make_mess(
     mut commands: Commands,
+    args: Res<AutoArgs>,
     mut sel: Query<(&Transform, &mut crate::interact::ActionQueue), With<crate::sim::Selected>>,
     (data, catalog, mut assets): (Res<crate::baked::Baked>, Res<crate::loading::Catalog>, ResMut<crate::objects::ObjectAssets>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
@@ -575,7 +577,9 @@ fn make_mess(
 ) {
     let Some(n) = std::env::var("MESS").ok().and_then(|v| v.parse::<usize>().ok()) else { return };
     let Ok((tf, mut queue)) = sel.single_mut() else { return };
-    queue.0.clear();
+    if args.use_kind.is_none() || !*done {
+        queue.0.clear();
+    }
     if *done || time.elapsed_secs() < 6.0 {
         return;
     }
