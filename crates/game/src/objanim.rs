@@ -152,7 +152,7 @@ fn animate_objects(
     animated.clear();
     for (player, queue) in &sims {
         let Some(target) = queue.0.front().and_then(|a| match a.kind {
-            ActionKind::Object { target, .. } | ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } => Some(target),
+            ActionKind::Object { target, .. } | ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } | ActionKind::Outro { target, .. } => Some(target),
             _ => None,
         }) else {
             continue;

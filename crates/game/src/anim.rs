@@ -88,18 +88,28 @@ pub struct ActionClip {
     pub steps: &'static [&'static str],
     pub loops: &'static [&'static str],
     pub side: Option<char>,
+    /// How it ends, played once the interaction's done (getting out of bed, closing the book),
+    /// and how long that takes (seconds).
+    pub end: &'static [&'static str],
+    pub end_secs: f32,
 }
 
 impl ActionClip {
     pub const fn new(start: Option<&'static str>, loops: &'static [&'static str]) -> Self {
-        Self { start, steps: &[], loops, side: None }
+        Self { start, steps: &[], loops, side: None, end: &[], end_secs: 0.0 }
     }
     /// A start clip, steps after it in order, then loops.
     pub const fn steps(start: &'static str, steps: &'static [&'static str], loops: &'static [&'static str]) -> Self {
-        Self { start: Some(start), steps, loops, side: None }
+        Self { start: Some(start), steps, loops, side: None, end: &[], end_secs: 0.0 }
     }
     pub const fn social(loops: &'static [&'static str], side: char) -> Self {
-        Self { start: None, steps: &[], loops, side: Some(side) }
+        Self { start: None, steps: &[], loops, side: Some(side), end: &[], end_secs: 0.0 }
+    }
+    /// With the clips it ends with (and their length).
+    pub const fn ending(mut self, end: &'static [&'static str], secs: f32) -> Self {
+        self.end = end;
+        self.end_secs = secs;
+        self
     }
 }
 
@@ -134,6 +144,15 @@ pub struct ClipPlayer {
     /// Pose before the last clip change, faded out over a short blend.
     from: Vec<Transform>,
     blend: f32,
+}
+
+impl ClipPlayer {
+    /// The body rebuilt (a change of clothes, say): the clip plays on where it was, only the
+    /// cross-fade from the old skeleton's pose is dropped.
+    pub fn rebuilt(&mut self) {
+        self.from.clear();
+        self.blend = 0.0;
+    }
 }
 
 pub fn sample_track_vec(keys: &[(f32, [f32; 3])], t: f32) -> Option<Vec3> {

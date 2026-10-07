@@ -295,6 +295,12 @@ fn rebuild_bodies(
             textures: &mut textures,
         };
         crate::simbody::spawn_sim_model(&mut commands, e, model, &mut ctx);
-        commands.entity(e).insert(crate::anim::ClipPlayer::default());
+        // (The animation carries on: getting into bed in sleepwear doesn't start over.)
+        commands.entity(e).queue_silenced(|mut e: EntityWorldMut| match e.get_mut::<crate::anim::ClipPlayer>() {
+            Some(mut p) => p.rebuilt(),
+            None => {
+                e.insert(crate::anim::ClipPlayer::default());
+            }
+        });
     }
 }

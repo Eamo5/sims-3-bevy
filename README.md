@@ -177,6 +177,9 @@ installation is unreachable.
 - **Props in hand**: the game's own plates, forks, books and guitars, held as its animation
   clips place them (each Sim clip's companion prop clips, and their parent events moving a
   prop from slot to slot: the SimLife Goggles go from the hand onto the face).
+- **Endings**: interactions end the way the game's do before the Sim moves on: getting out of
+  bed (the cover thrown back), stepping out of the shower, closing the book, folding the paper,
+  the last of the washing-up, the knife set down.
 - **Objects that move**: objects with moving parts are skinned to their own rigs, and play
   their half of the Sim's animation in step with it: the fridge door swings open, food comes
   out, and the door shuts again; shower doors, dresser drawers, swings and the rest likewise.

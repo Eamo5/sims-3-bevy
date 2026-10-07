@@ -779,7 +779,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
     use crate::anim::ActionClip as A;
     Some(match name {
         "Nap" if kind == ObjectKind::Sofa => A::new(Some("a2o_sofa_sit_trans_nap_x"), &["a2o_sofa_nap_loop1_x"]),
-        "Eat" if kind == ObjectKind::Chair => A::new(Some("a2o_eat_diningIn_fork_start_x"), &["a2o_eat_diningIn_fork_neat_x"]),
+        "Eat" if kind == ObjectKind::Chair => A::new(Some("a2o_eat_diningIn_fork_start_x"), &["a2o_eat_diningIn_fork_neat_x"]).ending(&["a2o_eat_diningIn_fork_stop_x"], 0.9),
         "Do Homework" => A::new(Some("a2o_homework_table_start_x"), &["a2o_homework_table_write_x", "a2o_homework_table_read_x", "a2o_homework_table_think_x", "a2o_homework_table_erase_x"]),
         "Pay Bills" => A::new(None, &["a2o_mailbox_getMail_x"]),
         "Water" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_wateringCan_start_x"), &["a2o_gardening_wateringCan_waterPlants_x"]),
@@ -798,10 +798,10 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         }
         "Read" if kind == ObjectKind::Newspaper => A::steps("a2o_newspaper_pickUp_floor_part1_x", &["a2o_newspaper_pickUp_floor_part2_x"], &["a2o_newspaper_carry_x"]),
         "Read the Paper" if matches!(kind, ObjectKind::Sofa | ObjectKind::Chair | ObjectKind::Stool) => {
-            A::new(Some("a2o_newspaper_read_seated_start_x"), &["a2o_newspaper_read_seated_loop"])
+            A::new(Some("a2o_newspaper_read_seated_start_x"), &["a2o_newspaper_read_seated_loop"]).ending(&["a2o_newspaper_read_seated_stop_x"], 3.0)
         }
-        "Read the Paper" => A::new(Some("a2o_newspaper_read_standing_start_x"), &["a2o_newspaper_read_standing_loop"]),
-        "Eat" if kind == ObjectKind::Stool => A::new(Some("a2o_eat_barStoolIn_fork_start_x"), &["a2o_eat_barStoolIn_fork_neat_x"]),
+        "Read the Paper" => A::new(Some("a2o_newspaper_read_standing_start_x"), &["a2o_newspaper_read_standing_loop"]).ending(&["a2o_newspaper_read_standing_stop_x"], 3.0),
+        "Eat" if kind == ObjectKind::Stool => A::new(Some("a2o_eat_barStoolIn_fork_start_x"), &["a2o_eat_barStoolIn_fork_neat_x"]).ending(&["a2o_eat_barStoolIn_fork_stop_x"], 0.9),
         // (The fridge door opened, something taken out and the door shut again.)
         "Have Quick Meal" => A::steps("a2o_fridge_openDoor_x", FRIDGE_STEPS, &["a2o_plateDinner_carry_x"]),
         "Microwave Dinner" => A::new(Some("a2o_microwave_put_x"), &["a2o_microwave_check_loop_x"]),
@@ -814,11 +814,11 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
             &["a2o_stove_fryingPan_idle_x", "a2o_stove_fryingPan_spatula_flip_x", "a2o_stove_fryingPan_spatula_poke_x"],
         ),
         "Use Toilet" => A::new(Some("a2o_toilet_useStanding_start_x"), &["a2o_toilet_useStanding_loop_x"]),
-        "Take Shower" => A::new(Some("a2o_shower_takeShower_getIn_x"), &["a2o_shower_takeShower_loop"]),
+        "Take Shower" => A::new(Some("a2o_shower_takeShower_getIn_x"), &["a2o_shower_takeShower_loop"]).ending(&["a2o_shower_takeShower_getOut_x"], 2.4),
         "Take Bath" => A::new(None, &["a2o_bathtub_relax_loop"]),
-        "Wash Hands" => A::new(Some("a2o_sink_washhands_start_x"), &["a2o_sink_washhands_scrubHands_x", "a2o_sink_washhands_rinseHands_x"]),
+        "Wash Hands" => A::new(Some("a2o_sink_washhands_start_x"), &["a2o_sink_washhands_scrubHands_x", "a2o_sink_washhands_rinseHands_x"]).ending(&["a2o_sink_washhands_stop_x"], 2.6),
         // (Only the plain loop: the toss-and-turn ones are authored from beside the bed.)
-        "Sleep" => A::new(Some("a2o_bed_getIn_made_x"), &["a2o_bed_sleep_back_loop_x"]),
+        "Sleep" => A::new(Some("a2o_bed_getIn_made_x"), &["a2o_bed_sleep_back_loop_x"]).ending(&["a2o_bed_getout_start_x", "a2o_bed_getout_stop_x"], 7.3),
         "Nap" => A::new(Some("a2o_bed_nap_start_x"), &["a2o_bed_nap_loop_breathe_x"]),
         "Relax" => A::new(Some("a2o_bed_relax_getin_start_x"), &["a2o_bed_relax_loop"]),
         "Sit" => A::new(None, &["a2o_chairLiving_sit_breathe_loop_x", "a2o_chairLiving_sit_crossedLeg_front_loop_x"]),
@@ -845,11 +845,12 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Read a Book" => A::new(None, &["a2o_bookshelf_getBook_Carry_x"]),
         "Get Ingredients" => A::steps("a2o_fridge_openDoor_x", &["a2o_fridge_takeFoodOut_foodTray_x", "a2o_fridge_closeDoor_x"], &["a2o_foodTray_carry_x"]),
         "Set Down Meal" => A::new(None, &["a2o_carryObject_putDown_counter_x"]),
-        "Prepare Food" => A::new(Some("a2o_cuttingBoard_start_fromCarry_x"), &["a2o_cuttingBoard_chop_loopMedSkill_x", "a2o_cuttingBoard_chop_loopLowSkill_x"]),
+        "Prepare Food" => A::new(Some("a2o_cuttingBoard_start_fromCarry_x"), &["a2o_cuttingBoard_chop_loopMedSkill_x", "a2o_cuttingBoard_chop_loopLowSkill_x"]).ending(&["a2o_cuttingBoard_chop_stop_x"], 0.7),
         "Read Book" if matches!(kind, ObjectKind::Sofa | ObjectKind::Chair | ObjectKind::Stool) => {
             A::new(Some("a2o_book_readBook_sitting_fromCarry_start_x"), &["a2o_book_readBook_sitting_loopRead_x", "a2o_book_readBook_sitting_loopTurnPage_x"])
+                .ending(&["a2o_book_readBook_sitting_fromCarry_stop_x"], 0.9)
         }
-        "Read Book" => A::new(Some("a2o_book_readBook_standing_fromCarry_start_x"), &["a2o_book_readBook_standing_loop"]),
+        "Read Book" => A::new(Some("a2o_book_readBook_standing_fromCarry_start_x"), &["a2o_book_readBook_standing_loop"]).ending(&["a2o_book_readBook_standing_fromCarry_stop_x"], 0.8),
         "Practice Speech" | "Change Appearance" => A::new(None, &["a2o_mirror_full_checkSelfOut_loop"]),
         "Paint" => A::new(Some("a2o_painting_start_x"), &["a2o_painting_loopMed", "a2o_painting_loopLarge", "a2o_painting_consider"]),
         "Play Guitar" => A::new(None, &["a2o_guitar_play_med_loop", "a2o_guitar_play_high_loop", "a2o_guitar_play_low_loop"]),
@@ -862,7 +863,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Empty Trash" => A::new(None, &["a2o_trashCan_empty_pullout_x"]),
         "Load Dishes" => A::new(None, &["a2o_dishwasher_use_x"]),
         "Throw Out Trash" => A::new(None, &["a2o_trashPile_drop_outdoors_x"]),
-        "Wash Dishes" => A::new(Some("a2o_sink_dishes_scrub_start_x"), &["a2o_sink_dishes_scrub_loop1_x", "a2o_sink_dishes_scrub_loop2_x"]),
+        "Wash Dishes" => A::new(Some("a2o_sink_dishes_scrub_start_x"), &["a2o_sink_dishes_scrub_loop1_x", "a2o_sink_dishes_scrub_loop2_x"]).ending(&["a2o_sink_dishes_scrub_stop_x"], 3.5),
         "Clean Up" => A::steps("a2o_plateDinner_pickUp_table_part1_x", &["a2o_plateDinner_pickUp_table_part2_x"], &["a2o_plateDinner_carry_x"]),
         "Make Hot Beverage" => A::new(Some("a2o_hotBeverageMachine_fill"), &["a2o_hotBeverageMachine_drink_loopSip_standing", "a2o_hotBeverageMachine_drink_loopLongSip_standing"]),
         "Stargaze" => A::new(Some("a2o_telescope_start"), &["a2o_telescope_look_loop", "a2o_telescope_look_breathe", "a2o_telescope_react_wonderment"]),
@@ -1123,6 +1124,9 @@ pub enum ActionKind {
     GoToLot { lot: usize },
     /// Off to a community lot by the Teleporter (from its pad).
     Teleport { pad: Entity, lot: usize },
+    /// An interaction's ending played where the Sim is (out of bed, the book closed), then up
+    /// to where they stand.
+    Outro { clips: &'static [&'static str], secs: f32, stand_at: Option<Vec2>, target: Entity },
     /// Drive home from the community lot.
     GoHomeFromLot,
 }
@@ -1525,9 +1529,13 @@ fn run_actions(
         };
         let mut finished = false;
         let mut stand_up_at: Option<Vec2> = None;
+        let mut outro: Option<(&'static [&'static str], f32, Entity)> = None;
 
         // Cancellation
         if action.cancel {
+            if let ActionKind::Outro { stand_at, .. } = action.kind {
+                stand_up_at = stand_at;
+            }
             if let ActionKind::Object { target, .. } | ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } = action.kind
                 && let Ok((obj, otf, mut used, _)) = objects.get_mut(target)
             {
@@ -1599,6 +1607,10 @@ fn run_actions(
                             continue;
                         }
                         ActionKind::BuyReward(_) => None,
+                        ActionKind::Outro { .. } => {
+                            action.phase = Phase::Running(0.0);
+                            continue;
+                        }
                         ActionKind::EatHere => {
                             action.phase = Phase::Running(0.0);
                             anim.pose = Pose::Use;
@@ -1770,6 +1782,7 @@ fn run_actions(
                             | ActionKind::BuyReward(_)
                             | ActionKind::EatHere
                             | ActionKind::EatItem { .. }
+                            | ActionKind::Outro { .. }
                             | ActionKind::OrderPizza
                             | ActionKind::Adopt { .. }
                             | ActionKind::MoveHouse
@@ -1905,6 +1918,8 @@ fn run_actions(
                                     if d.on_object {
                                         stand_up_at = Some(obj.use_point(otf));
                                     }
+                                    // (Its ending, played before they're up and away.)
+                                    outro = interaction_clip(d.name, obj.kind).filter(|c| !c.end.is_empty()).map(|c| (c.end, c.end_secs, *target));
                                     match d.special {
                                         // (Getting out of the pool is the swim module's.)
                                         Special::FindJob | Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport | Special::WashDishes | Special::DropTrash | Special::ReadBook | Special::WatchTv => {}
@@ -2453,6 +2468,12 @@ fn run_actions(
                                 life.write(LifeEvent::new(me, LifeEventKind::NewJob));
                             }
                         }
+                        ActionKind::Outro { secs, stand_at, .. } => {
+                            if elapsed >= *secs {
+                                finished = true;
+                                stand_up_at = *stand_at;
+                            }
+                        }
                         ActionKind::EatHere => {
                             motives.add(HUNGER, MEAL_PER_HOUR * dt / 60.0);
                             if elapsed >= MEAL_MINUTES * 0.8 {
@@ -2491,11 +2512,20 @@ fn run_actions(
             }
             queue.0.pop_front();
             *decay = DecayScale::default();
-            anim.pose = Pose::Stand;
-            anim.seat_height = 0.0;
             commands.entity(me).remove::<PathFollow>();
-            if let Some(p) = stand_up_at {
-                tf.translation = Vec3::new(p.x, ground(floor.0, p.x, p.y), p.y);
+            match outro {
+                // (Still where they were, their interaction's ending plays; then they're up.)
+                Some((clips, secs, target)) => {
+                    queue.0.push_front(Action::new("Finish Up", ActionKind::Outro { clips, secs, stand_at: stand_up_at, target }, true));
+                    commands.entity(me).insert(crate::anim::ActionClip::steps(clips[0], &clips[1..], &[]));
+                }
+                None => {
+                    anim.pose = Pose::Stand;
+                    anim.seat_height = 0.0;
+                    if let Some(p) = stand_up_at {
+                        tf.translation = Vec3::new(p.x, ground(floor.0, p.x, p.y), p.y);
+                    }
+                }
             }
         }
     }
