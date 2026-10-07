@@ -47,23 +47,26 @@ installation is unreachable.
   outfits (everyday, formal, sleepwear, athletic and swimwear: the wardrobe's clothes of each
   kind, the Sim shown dressed in the one being chosen, and worn when they change into it; kept
   in saves), each item in any of the game's colourways for it (its presets, rendered from
-  their patterns and colours: the swatch row under the styles, as the game's; kept in saves),
-  skin tones, hair colours and animation clips, and what the household's Sims are to each
-  other (roommates, spouses, partners, siblings, parent and child, as fits their ages: they
-  start married, family or at least friends, and in the family tree); the game's three Simlish
-  voices to choose from (each heard as it's picked; taking a trait, the Sim says the game's
-  line for it; the town's Sims keep their own); a Face tab with the game's eye colours (its
-  iris drawn in the colour, as the game does; babies get a parent's eyes) and its beards (full
-  ones drawn as hair is; goatees, chinstraps and the like painted onto the face; all in the
-  Sim's hair colour), glasses, lipsticks and eye shadows (town Sims wear them now and then
-  too). Every Sim's face has its own shape, as the game's face sliders make them: jaw, chin,
-  mouth, eyes, brows, nose, cheeks and head leaning one way or the other (the game's own bone
-  adjustments per age and sex), with the game's body-shape morphs (weight and fitness sliders;
-  town Sims keep their builds, working out firms Sims up); needs, moods, skills, careers,
-  relationships, autonomy, social interactions; children, teens, adults and elders who grow up
-  and grow old (birthdays, new traits, passing away). A birthday cake baked at the fridge
-  (§20) lets someone grow up there and then: they blow out the candles with the game's
-  animation, the household cheers, and the cake is cut for everyone.
+  their patterns and colours: the swatch row under the styles, as the game's; kept in saves)
+  and, in Create a Style, with any colour of the palette on each of its colour channels (the
+  item rendered afresh from its pattern with those colours, from the installed game, in the
+  background; kept in saves), skin tones, hair colours and animation clips, and what the
+  household's Sims are to each other (roommates, spouses, partners, siblings, parent and
+  child, as fits their ages: they start married, family or at least friends, and in the family
+  tree); the game's three Simlish voices to choose from (each heard as it's picked; taking a
+  trait, the Sim says the game's line for it; the town's Sims keep their own); a Face tab with
+  the game's eye colours (its iris drawn in the colour, as the game does; babies get a
+  parent's eyes) and its beards (full ones drawn as hair is; goatees, chinstraps and the like
+  painted onto the face; all in the Sim's hair colour), glasses, lipsticks and eye shadows
+  (town Sims wear them now and then too). Every Sim's face has its own shape, as the game's
+  face sliders make them: jaw, chin, mouth, eyes, brows, nose, cheeks and head leaning one way
+  or the other (the game's own bone adjustments per age and sex), with the game's body-shape
+  morphs (weight and fitness sliders; town Sims keep their builds, working out firms Sims up);
+  needs, moods, skills, careers, relationships, autonomy, social interactions; children,
+  teens, adults and elders who grow up and grow old (birthdays, new traits, passing away). A
+  birthday cake baked at the fridge (§20) lets someone grow up there and then: they blow out
+  the candles with the game's animation, the household cheers, and the cake is cut for
+  everyone.
 - **Gardening** from the game's plant and produce tables: households start with a few seeds
   and buy more at the grocery store (rarer ones as their skill grows); seeds are planted
   anywhere outdoors on the home lot in the game's garden soil and grow (the game's bush, vine
