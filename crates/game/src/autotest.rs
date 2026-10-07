@@ -189,6 +189,27 @@ impl Plugin for AutoTestPlugin {
                             }
                         });
                     }
+                    // JOURNAL_SKILL=<skill>: that skill's journal open in the Skills tab;
+                    // JOURNAL_GIVE=<tally>=<n>,...: the selected Sim's journal with those
+                    // tallies (once).
+                    if let Some(skill) = std::env::var("JOURNAL_SKILL").ok().and_then(|s| crate::save::SKILLS.iter().find(|k| k.eq_ignore_ascii_case(&s)).copied()) {
+                        commands.queue(move |w: &mut World| {
+                            if w.resource::<crate::simpanel::OpenJournal>().0 != Some(skill) {
+                                w.resource_mut::<crate::simpanel::OpenJournal>().0 = Some(skill);
+                            }
+                        });
+                    }
+                    if let Ok(v) = std::env::var("JOURNAL_GIVE") {
+                        commands.queue(move |w: &mut World| {
+                            let mut q = w.query_filtered::<(Entity, Option<&crate::journal::SkillJournal>), With<crate::sim::Selected>>();
+                            let Some((e, None)) = q.iter(w).next().map(|(e, j)| (e, j.cloned())) else { return };
+                            let mut j = crate::journal::SkillJournal::default();
+                            for (k, n) in v.split(',').filter_map(|p| p.split_once('=')) {
+                                j.tally.insert(k.trim().to_string(), n.trim().parse().unwrap_or(0.0));
+                            }
+                            w.entity_mut(e).insert(j);
+                        });
+                    }
                     // BUYTAB=<category>: buy mode open on that tab.
                     if let Ok(t) = std::env::var("BUYTAB")
                         && time.elapsed_secs() > 6.0

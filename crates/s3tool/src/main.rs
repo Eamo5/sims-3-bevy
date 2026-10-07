@@ -1958,6 +1958,18 @@ fn main() {
         }
         return;
     }
+    if args[1] == "strgrep" {
+        // strgrep <root> <text>: string-table entries whose text contains the text (any case).
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let strings = s3formats::stbl::load_english(&set);
+        let want = args[3].to_ascii_lowercase();
+        let mut hits: Vec<(&u64, &String)> = strings.iter().filter(|(_, v)| v.to_ascii_lowercase().contains(&want)).collect();
+        hits.sort_by(|a, b| a.1.cmp(b.1));
+        for (k, v) in hits {
+            println!("{k:016X}  {}", v.replace(['\n', '\r'], " / "));
+        }
+        return;
+    }
     if args[1] == "strfind" {
         // strfind <root> <text>...: string-table keys whose text equals one of the texts.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);

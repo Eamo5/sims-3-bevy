@@ -1508,6 +1508,7 @@ fn run_actions(
         Query<(), With<crate::meals::CookPrepped>>,
         Query<&crate::meals::ServingFrom>,
     ),
+    (mut did, journals): (MessageWriter<crate::journal::Did>, Query<&crate::journal::SkillJournal>),
 ) {
     let Some(grid) = grid else { return };
     let dt = delta.0;
@@ -1777,6 +1778,10 @@ fn run_actions(
                                     if s.cat != crate::social::SocialCat::Mean && crate::wishes::has(wishes, "Attractive") {
                                         p = (p + 0.12).min(0.98);
                                     }
+                                    // (A Comedian's jokes rarely fall flat.)
+                                    if s.name == "Tell Joke" && crate::journal::earned(journals.get(me).ok(), "Comedian") {
+                                        p = p.max(0.97);
+                                    }
                                     if !rand::rng().random_bool(p as f64) {
                                         if !action.autonomous {
                                             notes.push(format!("{} rejected {}'s attempt to {}.", tsim.first, sim.first, s.name.to_lowercase()));
@@ -1888,10 +1893,24 @@ fn run_actions(
                                     if i == ENERGY && d.until_full == Some(ENERGY) {
                                         gain *= crate::life::sleep_rate(&sim.traits);
                                     }
+                                    // (A Fitness Nut's cardio doesn't tire them.)
+                                    if i == ENERGY && gain < 0.0 && d.pose == Pose::Exercise && crate::journal::earned(journals.get(me).ok(), "Fitness Nut") {
+                                        gain = 0.0;
+                                    }
                                     gain = crate::upgrades::boost(obj.kind, upgraded.get(*target).ok(), i, gain);
                                     motives.add(i, gain * dt / 60.0);
                                 }
                                 // Working out builds fitness and burns off weight.
+                                // (Kept in their skill journal.)
+                                match (d.pose, d.name) {
+                                    (Pose::Exercise, _) => {
+                                        did.write(crate::journal::Did::count(me, crate::journal::Stat::CardioHours, dt as f64 / 60.0));
+                                    }
+                                    (_, "Play Guitar") => {
+                                        did.write(crate::journal::Did::count(me, crate::journal::Stat::GuitarHours, dt as f64 / 60.0));
+                                    }
+                                    _ => {}
+                                }
                                 if d.pose == Pose::Exercise {
                                     let h = dt / 60.0;
                                     // (Faster for a Fast Metabolism.)
@@ -1929,6 +1948,11 @@ fn run_actions(
                                     finished = true;
                                     life.write(LifeEvent::new(me, LifeEventKind::Finished { activity: d.name, completed: true }));
                                     used.0 = None;
+                                    // A night at the telescope may find something new up there.
+                                    if d.name == "Stargaze" && rand::rng().random_bool((0.2 + skills.level("Logic") as f64 * 0.06).min(0.8)) {
+                                        did.write(crate::journal::Did::count(me, crate::journal::Stat::StarsFound, 1.0));
+                                        notes.push(format!("{} discovered {} through the telescope!", sim.first, crate::journal::celestial_find(&mut rand::rng())));
+                                    }
                                     let unbreakable = upgraded.get(*target).is_ok_and(|u| u.has(crate::upgrades::Upgrade::Unbreakable));
                                     if !unbreakable && rand::rng().random_bool(break_chance(obj.kind, obj.price)) {
                                         commands.entity(*target).insert(Broken);
@@ -2001,6 +2025,18 @@ fn run_actions(
                                                 )
                                             });
                                             commands.entity(me).remove::<crate::paintings::PaintPlan>();
+                                            // (A Master Painter's sell for double.)
+                                            let p = if crate::journal::earned(journals.get(me).ok(), "Master Painter") { crate::paintings::Painted { worth: p.worth * 2, ..p } } else { p };
+                                            did.write(crate::journal::Did::count(me, crate::journal::Stat::Paintings, 1.0));
+                                            match p.name {
+                                                "Brilliant Painting" => {
+                                                    did.write(crate::journal::Did::count(me, crate::journal::Stat::BrilliantPaintings, 1.0));
+                                                }
+                                                "Masterpiece" => {
+                                                    did.write(crate::journal::Did::count(me, crate::journal::Stat::Masterpieces, 1.0));
+                                                }
+                                                _ => {}
+                                            }
                                             // Into their inventory, to sell, keep or hang.
                                             crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Painting, p.key, p.name.to_string(), 0, p.worth, 1);
                                             notes.push(format!("{} finished a painting ({}, worth §{}). It's in their inventory.", sim.first, p.name.to_lowercase(), p.worth));
@@ -2190,6 +2226,9 @@ fn run_actions(
                                 anim.pose = if s.name.contains("Dance") { Pose::Dance } else { Pose::Talk };
                                 if elapsed >= s.minutes {
                                     finished = true;
+                                    if s.name == "Tell Joke" {
+                                        did.write(crate::journal::Did::count(me, crate::journal::Stat::Jokes, 1.0));
+                                    }
                                     life.write(LifeEvent::new(me, LifeEventKind::Socialized { other: *target, social: s.name }));
                                     life.write(LifeEvent::new(*target, LifeEventKind::Socialized { other: me, social: s.name }));
                                     let rel = rels.get(*target);
@@ -2319,7 +2358,8 @@ fn run_actions(
                                 // Electronics can shock the unskilled; a second shock while
                                 // still singed stops their heart.
                                 let electric = objects.get(*target).is_ok_and(|(o, ..)| matches!(o.kind, ObjectKind::Tv | ObjectKind::Computer | ObjectKind::Stereo));
-                                let shocked = electric && rand::rng().random_bool(((0.35 - handy * 0.04) as f64).clamp(0.0, 1.0));
+                                let journal = journals.get(me).ok();
+                                let shocked = electric && !crate::journal::earned(journal, "Electrician") && rand::rng().random_bool(((0.35 - handy * 0.04) as f64).clamp(0.0, 1.0));
                                 if let Ok((o, _, mut used, _)) = objects.get_mut(*target) {
                                     used.0 = None;
                                     if shocked {
@@ -2328,6 +2368,17 @@ fn run_actions(
                                     } else {
                                         commands.entity(*target).remove::<Broken>();
                                         notes.push(format!("{} fixed {}.", sim.first, the(&o.name)));
+                                        let plumbing = matches!(o.kind, ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::Sink | ObjectKind::Dishwasher | ObjectKind::Toilet);
+                                        if electric {
+                                            did.write(crate::journal::Did::count(me, crate::journal::Stat::ElectricalRepairs, 1.0));
+                                        } else if plumbing {
+                                            did.write(crate::journal::Did::count(me, crate::journal::Stat::PlumbingRepairs, 1.0));
+                                            // (Fixed by a Plumber, it never breaks again.)
+                                            if crate::journal::earned(journal, "Plumber") {
+                                                let had = upgraded.get(*target).map_or(0, |u| u.0);
+                                                commands.entity(*target).insert(crate::upgrades::Upgrades(had | crate::upgrades::Upgrade::Unbreakable.bit()));
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -2346,7 +2397,7 @@ fn run_actions(
                             if elapsed >= minutes {
                                 finished = true;
                                 let electric = objects.get(*target).is_ok_and(|(o, ..)| matches!(o.kind, ObjectKind::Tv | ObjectKind::Computer | ObjectKind::Stereo));
-                                let shocked = electric && rand::rng().random_bool(((0.25 - handy * 0.03) as f64).clamp(0.0, 1.0));
+                                let shocked = electric && !crate::journal::earned(journals.get(me).ok(), "Electrician") && rand::rng().random_bool(((0.25 - handy * 0.03) as f64).clamp(0.0, 1.0));
                                 if let Ok((o, _, mut used, _)) = objects.get_mut(*target) {
                                     used.0 = None;
                                     let name = crate::upgrades::Upgrade::from_bit(*bit).and_then(|u| u.name(o.kind)).unwrap_or("upgrade");
@@ -2357,6 +2408,7 @@ fn run_actions(
                                         let had = upgraded.get(*target).map_or(0, |u| u.0);
                                         commands.entity(*target).insert(crate::upgrades::Upgrades(had | *bit));
                                         notes.push(format!("{} upgraded {}: {name}.", sim.first, the(&o.name)));
+                                        did.write(crate::journal::Did::kind(me, crate::journal::Kinds::Upgrades, format!("{name} ({:?})", o.kind)));
                                     }
                                 }
                             }

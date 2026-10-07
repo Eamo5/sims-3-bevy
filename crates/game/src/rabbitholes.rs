@@ -190,14 +190,24 @@ fn outings(
     world: Res<CurrentWorld>,
     mut notes: ResMut<Notifications>,
     mut life: MessageWriter<LifeEvent>,
-    mut q: Query<(Entity, &Sim, &AtRabbitHole, &mut Motives, &mut Skills, &mut Transform, Option<&mut SchoolGrades>, &mut crate::nav::Floor)>,
+    mut q: Query<(Entity, &Sim, &AtRabbitHole, &mut Motives, &mut Skills, &mut Transform, Option<&mut SchoolGrades>, &mut crate::nav::Floor, Option<&crate::journal::SkillJournal>)>,
     mut household: Option<ResMut<Household>>,
+    mut did: MessageWriter<crate::journal::Did>,
 ) {
     let dt = delta.0;
-    for (e, sim, at, mut motives, mut skills, mut tf, grades, mut floor) in &mut q {
+    for (e, sim, at, mut motives, mut skills, mut tf, grades, mut floor, journal) in &mut q {
         if clock.minutes >= at.inside_from && clock.minutes < at.until - DRIVE_MINUTES {
+            // (Strength training at the gym, kept in their journal; a Body Builder isn't tired by it.)
+            let strength = at.activity.name == "Work Out";
+            let builder = strength && crate::journal::earned(journal, "Body Builder");
             for i in 0..6 {
+                if builder && i == crate::sim::ENERGY && at.activity.per_hour[i] < 0.0 {
+                    continue;
+                }
                 motives.add(i, at.activity.per_hour[i] * dt / 60.0);
+            }
+            if strength {
+                did.write(crate::journal::Did::count(e, crate::journal::Stat::StrengthHours, dt as f64 / 60.0));
             }
             if let Some(sk) = at.activity.skill {
                 let v = skills.0.entry(sk).or_insert(0.0);
@@ -241,6 +251,7 @@ fn outings(
                 let fish = ["minnows", "anchovies", "goldfish", "perch", "rainbow trout", "salmon", "tuna", "swordfish", "lobster", "angelfish"];
                 let best = fish[(level as usize + rng.random_range(0..3)).min(fish.len() - 1)];
                 let worth: i64 = (0..caught).map(|_| rng.random_range(5..15) + level as i64 * 6).sum();
+                did.write(crate::journal::Did::count(e, crate::journal::Stat::Fish, caught as f64));
                 if let Some(h) = household.as_deref_mut() {
                     h.funds += worth;
                 }

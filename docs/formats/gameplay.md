@@ -218,3 +218,36 @@ result is the plain DLL (`MZ…`). s3pi's `ScriptResource` wrapper does the same
 property is a reader over the plain DLL); `cache/s3sa_extract.ps1` calls it through PowerShell
 reflection to write the DLLs out. The assemblies' string heaps are the quickest way to find
 resource names the code uses, such as the balloon icon names above.
+
+### Constants in the scripts
+
+Much of the game's tuning isn't in the tuning tables but in the scripts' static fields
+(`[Tunable]` fields whose defaults no XML overrides): the skill challenges' thresholds, for
+one. They're set in each class's static constructor as a constant load followed by `stsfld`
+(`ldc.r4 200` / `stsfld Athletic::kHoursStrengthForBodyBuilder`). Loading a plain DLL with
+`Assembly.LoadFile` and reading `Type.TypeInitializer.GetMethodBody().GetILAsByteArray()`
+gives that IL without running it; walking it with `OpCodes` (operand sizes from each
+`OperandType`) and resolving the `stsfld` token with `Module.ResolveField` pairs each field
+with the constant before it (`cache/il_statics.ps1 <dll> <type> [field filter]` does this; ask
+for a type by its exact name, since enumerating every type in `Sims3GameplaySystems` can
+overflow PowerShell's stack). The skill challenges, from `Sims3.Gameplay.Skills.*`:
+
+| Skill | Field | Value |
+|---|---|---|
+| Athletic | `kHoursStrengthForBodyBuilder`, `kHoursCardioForFitnessNut` | 200, 200 (hours) |
+| Athletic | `kDistanceJoggedForMarathonRunner` (`kDistanceJoggedPerHourOfRunning` 6) | 100 |
+| Charisma | `kNumberOfFriendsForSuperFriendly`, `kNumberOfBestFriendForBBF`, `kNumberOfJokesForComedian` | 30, 15, 2 |
+| Charisma | `kNumberTraitsForPersonable`, `kNumberOfKnownSimsForCelebrity` | 60, 50 |
+| Cooking | `kRecipesMadeForStarChef`, `kRecipesMadeForWorldClassChef`, `kRecipesLearnedForMenuMaven` | 50, 100, 28 |
+| Fishing | `kNumberOfFishForCommercialFisherman`, `kUniqueFishesForIcthyologist` | 150, 20 |
+| Gardening | `kNumberHarvestablesForMasterFarmer`, `kNumberPerfectHarvestablesForBotanicalBoss` | 1000, 100 |
+| Handiness | `kElectricalObjectsForLifetimeOpp`, `kPlumbingObjectsForLifetimeOpp`, `kUniqueUpgradesForLifetimeOpp` | 50, 50, 10 |
+| Logic (`LogicSkill`) | `kNumDiscoveriesForCelestialExplorer`, `kNumHoursForTeacherExtraordinaire` | 30, 20 |
+| Painting (`PaintingSkill`) | `kNumPaintingsNeededForBrushmaster`, `kNumBrilliantNeededForProficientPainter`, `kNumMasterpiecesNeededForMasterPainter` | 10, 10, 10 |
+| Writing | `kNumWritingsForProlificAuthor`, `kMoneyMadeForSpeedWriter`, `kNumWritingsofGenreForNovelist` | 100, 10000, 10 |
+| Guitar (`BandSkill`) | `kMoneyMadeForLifetimeOpp`, `kVenuesPlayedForLifetimeOpp` | 10000, 10 |
+
+The challenges' names, journal descriptions ("Plumbers have repaired at least {0.Number}
+plumbing objects…") and completion notices ("…to complete the Plumber Skill Challenge!") are
+in the string tables; `s3tool strgrep <install> <text>` finds string-table entries containing
+a text.

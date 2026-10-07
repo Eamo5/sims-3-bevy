@@ -444,6 +444,7 @@ fn collect_requests(
     mut collection: ResMut<Collection>,
     mut notes: ResMut<Notifications>,
     mut life: MessageWriter<crate::life::LifeEvent>,
+    mut did: MessageWriter<crate::journal::Did>,
 ) {
     let Some(ui) = ui else { return };
     let mut rng = rand::rng();
@@ -514,6 +515,8 @@ fn collect_requests(
                     let name = if word == "Normal" { c.name.clone() } else { format!("{word} {}", c.name) };
                     collection.add(&c.key);
                     give(&mut commands, e, ItemKind::Fish, c.key.clone(), name.clone(), tier as u8, value, 1);
+                    did.write(crate::journal::Did::count(e, crate::journal::Stat::Fish, 1.0));
+                    did.write(crate::journal::Did::kind(e, crate::journal::Kinds::FishTypes, c.key.clone()));
                     caught.push((name, value));
                 }
                 if caught.is_empty() {

@@ -1,5 +1,6 @@
 //! The Sim panel's tabs, as the game's: Needs (the bars), Skills (every skill learned, with its
-//! level and progress to the next), Career (the job, its hours and pay, the performance meter
+//! level and progress to the next; clicked, its skill journal: what they've done with it and
+//! its skill challenges), Career (the job, its hours and pay, the performance meter
 //! and the next promotion), Simology (traits with what they mean, lifetime happiness and the
 //! rewards bought with it) and Inventory (what they carry).
 
@@ -16,7 +17,9 @@ pub struct SimPanelPlugin;
 
 impl Plugin for SimPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<SimTab>().add_systems(Update, (tab_buttons, tone_buttons, tab_layout, tab_content).chain().run_if(in_state(PlayMode::Live)));
+        app.init_resource::<SimTab>()
+            .init_resource::<OpenJournal>()
+            .add_systems(Update, (tab_buttons, tone_buttons, journal_buttons, tab_layout, tab_content).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -116,6 +119,22 @@ fn tone_buttons(q: Query<(&Interaction, &ToneButton), Changed<Interaction>>, mut
     }
 }
 
+/// The skill whose journal is open in the Skills tab.
+#[derive(Resource, Default)]
+pub struct OpenJournal(pub Option<&'static str>);
+
+/// A skill in the Skills tab: clicked, its journal opens (or closes).
+#[derive(Component)]
+struct JournalButton(&'static str);
+
+fn journal_buttons(q: Query<(&Interaction, &JournalButton), Changed<Interaction>>, mut open: ResMut<OpenJournal>) {
+    for (i, b) in &q {
+        if *i == Interaction::Pressed {
+            open.0 = if open.0 == Some(b.0) { None } else { Some(b.0) };
+        }
+    }
+}
+
 fn tab_layout(tab: Res<SimTab>, mut needs: Query<&mut Node, (With<NeedsOnly>, Without<TabContent>)>, mut content: Query<&mut Node, (With<TabContent>, Without<NeedsOnly>)>) {
     if !tab.is_changed() {
         return;
@@ -167,6 +186,7 @@ fn tab_content(
             Option<&crate::chess::ChessRecord>,
             Option<&crate::inventory::Inventory>,
             Option<&crate::little::ToddlerSkills>,
+            (Option<&crate::journal::SkillJournal>, &crate::social::Relationships, Option<&crate::meals::KnownRecipes>),
         ),
         With<Selected>,
     >,
@@ -179,13 +199,34 @@ fn tab_content(
         ResMut<crate::thumbs::ModelThumbs>,
         ResMut<crate::paintings::PaintingImages>,
     ),
+    open: Res<OpenJournal>,
 ) {
-    let (Ok(root), Ok((e, sim, skills, job, at_work, wishes, ltw, author, chess, inv, toddler))) = (content.single(), sel.single()) else { return };
+    let (Ok(root), Ok((e, sim, skills, job, at_work, wishes, ltw, author, chess, inv, toddler, (journal, rels, recipes)))) = (content.single(), sel.single()) else { return };
+    // The open journal: its statistics and challenges (name, description, earned, progress).
+    let measures = crate::journal::Measures {
+        journal,
+        rels,
+        cooking: skills.level("Cooking"),
+        recipes,
+        chess,
+        author,
+        data: ui.as_deref().map(|u| &*u.data),
+    };
+    let journal_page: Option<(Vec<(String, String)>, Vec<(String, String, bool, f64, f64)>)> = open.0.map(|skill| {
+        let stats = crate::journal::statistics(skill).iter().map(|(label, m)| (label.to_string(), crate::journal::shown(*m, measures.value(*m)))).collect();
+        let challenges = crate::journal::CHALLENGES
+            .iter()
+            .filter(|c| c.skill == skill)
+            .map(|c| (c.name.to_string(), c.description(), crate::journal::earned(journal, c.name), measures.value(c.measure), c.need))
+            .collect();
+        (stats, challenges)
+    });
     // What's on show, to redraw only when it changes.
     let key = match *tab {
         SimTab::Needs => "needs".to_string(),
         SimTab::Skills => format!(
-            "{e:?} {:?} {:?}",
+            "{e:?} {:?} {:?} {:?}",
+            journal_page.as_ref().map(|(s, c)| (open.0, s.clone(), c.iter().map(|x| (x.2, (x.3 * 10.0) as i64)).collect::<Vec<_>>())),
             skills.0.iter().map(|(k, v)| (*k, (*v * 20.0) as i32)).collect::<Vec<_>>(),
             (author.map(|a| (a.books.len(), a.weekly_royalties(), a.draft.as_ref().map(|d| (d.pages / d.length * 50.0) as i32))), chess.map(|c| (c.wins, c.losses)), toddler.map(|t| ((t.walk * 100.0) as i32, (t.talk * 100.0) as i32)))
         ),
@@ -240,7 +281,20 @@ fn tab_content(
                 let max = info.as_ref().map_or(10, |i| i.max_level.max(1));
                 let level = (*v as u32).min(max);
                 let into = if level >= max { 1.0 } else { v.fract() };
-                p.spawn(Node { column_gap: Val::Px(8.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
+                let opened = open.0 == Some(*name);
+                p.spawn((
+                    Button,
+                    JournalButton(name),
+                    Node {
+                        column_gap: Val::Px(8.0),
+                        align_items: AlignItems::Center,
+                        padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(6.0)),
+                        ..default()
+                    },
+                    BackgroundColor(if opened { Color::srgba(0.1, 0.3, 0.6, 0.6) } else { Color::NONE }),
+                ))
+                .with_children(|row| {
                     if let Some(Some(h)) = icons.get(k) {
                         row.spawn(crate::icons::icon_bundle(h.clone(), 26.0));
                     }
@@ -248,6 +302,41 @@ fn tab_content(
                     row.spawn((text(format!("{level}/{max}"), 13.0, Color::srgb(1.0, 0.9, 0.5)), Node { width: Val::Px(42.0), ..default() }));
                     meter(row, into, 130.0, Color::srgb(0.35, 0.8, 1.0));
                 });
+                // Its journal, when open.
+                if let (true, Some((stats, challenges))) = (opened, journal_page.as_ref()) {
+                    p.spawn((
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(3.0),
+                            margin: UiRect::left(Val::Px(12.0)),
+                            padding: UiRect::all(Val::Px(6.0)),
+                            border_radius: BorderRadius::all(Val::Px(6.0)),
+                            max_width: Val::Px(440.0),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.25)),
+                    ))
+                    .with_children(|j| {
+                        j.spawn(text(format!("{} Skill Journal", info.as_ref().map_or(*name, |i| i.name.as_str())), 14.0, Color::srgb(0.75, 0.85, 1.0)));
+                        for (label, value) in stats {
+                            j.spawn(text(format!("{label}: {value}"), 12.0, Color::WHITE));
+                        }
+                        if !challenges.is_empty() {
+                            j.spawn(text("Skill Challenges", 13.0, Color::srgb(0.75, 0.85, 1.0)));
+                        }
+                        for (cname, desc, done, have, need) in challenges {
+                            j.spawn(Node { column_gap: Val::Px(8.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
+                                row.spawn(text(cname.clone(), 13.0, if *done { Color::srgb(1.0, 0.9, 0.5) } else { Color::WHITE }));
+                                if *done {
+                                    row.spawn(text("Earned", 12.0, PLUMBOB_GREEN));
+                                } else {
+                                    meter(row, (*have / need.max(1.0)) as f32, 90.0, Color::srgb(0.35, 0.8, 1.0));
+                                }
+                            });
+                            j.spawn(text(desc.clone(), 11.0, Color::srgb(0.8, 0.85, 0.95)));
+                        }
+                    });
+                }
             }
             // Their ranked chess record.
             if let Some(c) = chess {

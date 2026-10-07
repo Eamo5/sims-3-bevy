@@ -102,6 +102,20 @@ installation is unreachable.
   Sim against an opponent of their rank (stronger each rank), won by Logic and a little luck;
   wins lift them from Unranked through Apprentice, Tenderfoot, Journeyman and Instructor to
   Grand Master. The record shows under Logic in the Skills tab and is saved.
+- **Skill journals**: clicking a skill in the Skills tab opens its journal, with what the Sim
+  has done with it (hours of strength training and cardio, friends and best friends, jokes
+  that landed, dishes prepared and recipes known, fish caught and kinds of fish, harvests,
+  repairs, upgrades, discoveries through the telescope, paintings, books and royalties) and
+  the game's skill challenges: Body Builder, Fitness Nut, Super Friendly, Everybody's Best
+  Friend, Comedian, Star Chef, World-Class Chef, Menu Maven, Commercial Fisherman, Amateur
+  Ichthyologist, Master Farmer, Botanical Boss, Electrician, Plumber, Tinkerer, Celestial
+  Explorer, Chess Grand Master, Brushmaster, Proficient Painter, Master Painter, Prolific
+  Writer, Speed Writer and Specialist Writer, with the scripts' own thresholds (200 hours,
+  150 fish, 50 repairs…) and the game's texts. Earning one brings the game's notice and,
+  where there's something to change, its reward: Fitness Nuts aren't tired by cardio nor Body
+  Builders by the gym, Super Friendly Sims' friendships never fade, Comedians' jokes land,
+  Electricians are never shocked, Plumbers' repairs never break again, and Master Painters'
+  paintings are worth double. Kept in saves.
 - **Lifetime wishes**, the base game's own (CEO of a Mega-Corporation, Leader of the Free
   World, Become a Master Thief, Rock Star, Swimming in Cash, Super Popular, Heartbreaker,
   Master of the Arts, Renaissance Sim, Professional Author, The Culinary Librarian, The

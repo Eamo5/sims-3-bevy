@@ -228,6 +228,7 @@ fn garden_requests(
     (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut notes: ResMut<Notifications>,
     mut life: MessageWriter<crate::life::LifeEvent>,
+    mut did: MessageWriter<crate::journal::Did>,
 ) {
     let Some(ui) = ui else { return };
     let mut rng = rand::rng();
@@ -254,6 +255,7 @@ fn garden_requests(
                 let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
                 if plant_at(&mut commands, &mut assets, &mut ctx, &catalog, info, state, at, rng.random_range(0.0..6.28)).is_some() {
                     notes.push(format!("{} planted a {}.", sim.first, info.name.to_lowercase()));
+                    did.write(crate::journal::Did::kind(me, crate::journal::Kinds::PlantTypes, info.name.clone()));
                     learn(sim, me, &mut skills, &mut notes, &mut life, info.skill_plant);
                 }
             }
@@ -287,6 +289,10 @@ fn garden_requests(
                 crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Produce, info.produce.clone(), format!("{word} {}", info.produce), tier as u8, each, picked);
                 learn(sim, me, &mut skills, &mut notes, &mut life, info.skill_harvest);
                 notes.push(format!("{} harvested {picked} {word} {} (worth §{}).", sim.first, plural(&info.produce, picked), each * picked as i64));
+                did.write(crate::journal::Did::count(me, crate::journal::Stat::Harvested, picked as f64));
+                if word == "Perfect" {
+                    did.write(crate::journal::Did::count(me, crate::journal::Stat::PerfectHarvested, picked as f64));
+                }
                 if word == "Perfect" && !garden.perfect.contains(&info.produce) {
                     garden.perfect.push(info.produce.clone());
                     notes.push(format!("{} grew perfect {} for the first time!", sim.first, plural(&info.produce, 2)));

@@ -431,6 +431,7 @@ fn meal_requests(
     (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut notes: ResMut<Notifications>,
     (ui, clock, mut funds, mut leftovers): (Option<Res<crate::icons::GameUi>>, Res<crate::clock::GameClock>, Option<ResMut<crate::interact::Household>>, ResMut<Leftovers>),
+    mut did: MessageWriter<crate::journal::Did>,
 ) {
     let recipes = ui.as_ref().map(|u| u.data.clone());
     let recipe = |i: usize| recipes.as_ref().and_then(|d| d.recipes.get(i));
@@ -472,6 +473,7 @@ fn meal_requests(
                 let r = dish.and_then(recipe);
                 let label = r.map_or("Group Meal".to_string(), |r| r.name.clone());
                 let Some(platter) = spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, PLATTER, ObjectKind::Meal, "Group Meal", at, yaw) else { continue };
+                did.write(crate::journal::Did::count(me, crate::journal::Stat::Dishes, 1.0));
                 // (Hot dogs and burgers have no platter of their own: a plate of them.)
                 set_food(&mut commands, &mut assets, &mut ctx, platter, None, r.and_then(|r| r.group.or(r.single)));
                 commands.entity(platter).insert(Meal { servings });

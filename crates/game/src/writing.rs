@@ -297,15 +297,16 @@ fn pay_royalties(
     clock: Res<GameClock>,
     ui: Option<Res<crate::icons::GameUi>>,
     mut household: Option<ResMut<Household>>,
-    mut authors: Query<(&Sim, &mut Author, Option<&crate::wishes::Wishes>), With<HouseholdMember>>,
+    mut authors: Query<(Entity, &Sim, &mut Author, Option<&crate::wishes::Wishes>), With<HouseholdMember>>,
     mut notes: ResMut<Notifications>,
+    mut did: MessageWriter<crate::journal::Did>,
 ) {
     let data = ui.as_ref().map(|u| &*u.data);
     if clock.hour_f() < tune(data, "kRoyaltyPayHour", 12.0) {
         return;
     }
     let day = clock.day();
-    for (sim, mut a, wishes) in &mut authors {
+    for (e, sim, mut a, wishes) in &mut authors {
         // (Bigger checks for a High Roller.)
         let factor = if crate::wishes::has(wishes, "HighRoller") { 1.5 } else { 1.0 };
         let mut paid = 0;
@@ -321,6 +322,7 @@ fn pay_royalties(
                 h.funds += paid;
             }
             notes.push(format!("{} received §{paid} in royalties for {}.", sim.first, titles.join(", ")));
+            did.write(crate::journal::Did::count(e, crate::journal::Stat::Royalties, paid as f64));
         }
     }
 }
