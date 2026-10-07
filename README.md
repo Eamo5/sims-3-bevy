@@ -171,18 +171,20 @@ installation is unreachable.
   heart. A swimmer whose pool's ladders are taken away can't get out: they swim on, tiring,
   and drown (the game's drowning animation; the tombstone at the pool's side). Each death has
   the game's own last moments, and its ghost its own colour.
-- **Meals**: cooking serves a group meal on the game's serving platter (on the nearest counter),
-  with a serving for everyone at home; Sims grab a plate and sit down at a dining table or
-  counter stool to eat (the game's sit-down and bar-stool eating animations, plate on the
-  table, fork in hand), or eat standing when every seat is taken, and leave dirty dishes that
-  neat Sims clear away. Guests eat but don't cook, children don't use the stove. Or phone for
-  a pizza: within the hour the delivery, in the game's pizza uniform, carries the pizza box in
-  to the kitchen counter. What's left of a meal goes in the fridge once it's been out a while
-  (neat Sims see to it first, slobs never), to be had another time ("Have Leftovers": a plate
-  of it at the table); the fridge keeps a dozen servings, and they're kept in saves. A quick
-  meal is a plate of something simple taken out of the fridge and carried to the table; a
-  microwave dinner is put in (its door swinging open), checked on while it heats, taken out
-  and carried to the table the same way.
+- **Meals**: cooking serves a group meal on the game's serving platter (on the nearest
+  counter), with a serving for everyone at home, and the cook calls the household to it (the
+  game's wave over): whoever's hungry and not busy with something they were told to do comes
+  for a plate. Sims grab a plate and sit down at a dining table or counter stool to eat (the
+  game's sit-down and bar-stool eating animations, plate on the table, fork in hand), or eat
+  standing when every seat is taken, and leave dirty dishes that neat Sims clear away. Guests
+  eat but don't cook, children don't use the stove. Or phone for a pizza: within the hour the
+  delivery, in the game's pizza uniform, carries the pizza box in to the kitchen counter.
+  What's left of a meal goes in the fridge once it's been out a while (neat Sims see to it
+  first, slobs never), to be had another time ("Have Leftovers": a plate of it at the table);
+  the fridge keeps a dozen servings, and they're kept in saves. A quick meal is a plate of
+  something simple taken out of the fridge and carried to the table; a microwave dinner is put
+  in (its door swinging open), checked on while it heats, taken out and carried to the table
+  the same way.
 - **Recipes** from the game's recipe list: the stove offers "Cook Breakfast/Lunch/Dinner ›"
   and "Cook Dessert ›" with the recipes the Sim knows for that time of day (Mac and Cheese and
   Waffles to start; Goopy Carbonara, Spaghetti, Key Lime Pie, Lobster Thermidor... as Cooking

@@ -25,7 +25,7 @@ impl Plugin for MealsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Leftovers>()
             .add_systems(OnEnter(crate::AppState::InGame), |mut l: ResMut<Leftovers>| l.0.clear())
-            .add_systems(Update, (cook_prep, cook_prep_done, serve_if_interrupted, take_out_dinner, meal_requests, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (cook_prep, cook_prep_done, serve_if_interrupted, take_out_dinner, meal_requests, come_to_meal, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -49,6 +49,50 @@ fn take_out_dinner(mut commands: Commands, mut sims: Query<(Entity, &MicrowaveDo
         if let Some(def) = crate::interact::interactions_for(ObjectKind::Microwave).iter().position(|d| d.name == "Take Out Dinner") {
             queue.0.push_front(Action::new("Take Out Dinner", ActionKind::Object { target: m.0, def }, true));
         }
+    }
+}
+
+/// A group meal just served: the household is called to it.
+#[derive(Resource)]
+pub struct MealCall {
+    pub platter: Entity,
+    pub cook: Entity,
+    pub meal: String,
+}
+
+/// Called to a meal, the household comes to eat: whoever's hungry and not busy with something
+/// they were told to do drops what they're doing for a plate, while there are servings.
+#[allow(clippy::type_complexity)]
+fn come_to_meal(
+    mut commands: Commands,
+    call: Option<Res<MealCall>>,
+    mut sims: Query<
+        (Entity, &Sim, &crate::sim::Motives, &mut ActionQueue),
+        (With<HouseholdMember>, Without<crate::interact::AtWork>, Without<crate::interact::OffLot>, Without<crate::rabbitholes::AtRabbitHole>),
+    >,
+    meals: Query<&Meal>,
+    mut notes: ResMut<Notifications>,
+) {
+    let Some(c) = call else { return };
+    commands.remove_resource::<MealCall>();
+    let Ok(m) = meals.get(c.platter) else { return };
+    // (The cook has one.)
+    let mut left = m.servings.saturating_sub(1);
+    let mut coming = Vec::new();
+    for (e, sim, motives, mut queue) in &mut sims {
+        if left == 0 || e == c.cook || sim.age.is_little() || motives.0[crate::sim::HUNGER] > 70.0 || queue.0.iter().any(|a| !a.autonomous) {
+            continue;
+        }
+        for a in queue.0.iter_mut() {
+            a.cancel = true;
+        }
+        queue.0.push_back(Action::new("Grab a Plate", ActionKind::Object { target: c.platter, def: 0 }, true));
+        coming.push(sim.first.clone());
+        left -= 1;
+    }
+    if !coming.is_empty() {
+        let cook = sims.get(c.cook).map(|s| s.1.first.clone()).unwrap_or_default();
+        notes.push(format!("{cook} called everyone to {}: {} {} coming.", c.meal, coming.join(" and "), if coming.len() == 1 { "is" } else { "are" }));
     }
 }
 
@@ -498,8 +542,15 @@ fn meal_requests(
                     Some(r) => format!("{} made {} for {servings}. {dish_word} is served!", sim.first, r.name),
                     None => format!("{} made {} for {servings}. {dish_word} is served!", sim.first, dish_word.to_lowercase()),
                 });
-                // The cook eats too.
+                // The cook eats too; first, with more than their own, calling everyone to it (the
+                // game's wave over).
                 queue.0.push_front(Action::new("Grab a Plate", ActionKind::Object { target: platter, def: 0 }, true));
+                if servings > 1 && household.contains(me) {
+                    const CALL: &[&str] = &["a_soc_callOver_x"];
+                    queue.0.push_front(Action::new("Call to Meal", ActionKind::Outro { clips: CALL, then: None, secs: 2.5, stand_at: None, target: platter }, true));
+                    commands.entity(me).insert(crate::anim::ActionClip::new(Some(CALL[0]), &[]));
+                    commands.insert_resource(MealCall { platter, cook: me, meal: dish_word.to_lowercase() });
+                }
             }
             MealRequest::Cake(fridge) => {
                 // On the nearest counter or table, candles lit.

@@ -11,6 +11,7 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a_male_walk",
     "a_male_jog",
     "a_female_walk_pregnant",
+    "a_soc_callOver_x",
     "a_idle_neutral_",
     "a_idle_friendly_",
     "a_idle_wipeSweat",
