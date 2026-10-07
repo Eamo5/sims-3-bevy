@@ -41,6 +41,7 @@ pub enum Stat {
     Royalties,
     StarsFound,
     GuitarHours,
+    KmJogged,
 }
 
 impl Stat {
@@ -61,6 +62,7 @@ impl Stat {
             Stat::Royalties => "royalties",
             Stat::StarsFound => "stars_found",
             Stat::GuitarHours => "guitar_hours",
+            Stat::KmJogged => "km_jogged",
         }
     }
 }
@@ -198,6 +200,14 @@ pub static CHALLENGES: &[Challenge] = &[
         Measure::Stat(Stat::CardioHours),
         "Fitness Nuts have spent {0} hours focusing on cardio workouts. All that time experiencing the burn means they are no longer fatigued after cardio workouts.",
         "has dedicated enough hours to cardio exercise to complete the Fitness Nut Skill Challenge!",
+    ),
+    ch(
+        "Athletic",
+        "Marathon Runner",
+        100.0,
+        Measure::Stat(Stat::KmJogged),
+        "Marathon Runners must run at least {0} kilometers before they earn the title. However, accomplishing this incredible feat guarantees them a longer, healthier life.",
+        "has run far enough to complete Marathon Runner Skill Challenge!",
     ),
     ch(
         "Charisma",
@@ -375,7 +385,11 @@ pub static CHALLENGES: &[Challenge] = &[
 /// A skill journal's statistics: what's counted for a skill, by name.
 pub fn statistics(skill: &str) -> &'static [(&'static str, Measure)] {
     match skill {
-        "Athletic" => &[("Hours of strength training", Measure::Stat(Stat::StrengthHours)), ("Hours of cardio", Measure::Stat(Stat::CardioHours))],
+        "Athletic" => &[
+            ("Hours of strength training", Measure::Stat(Stat::StrengthHours)),
+            ("Hours of cardio", Measure::Stat(Stat::CardioHours)),
+            ("Kilometers jogged", Measure::Stat(Stat::KmJogged)),
+        ],
         "Charisma" => &[("Friends", Measure::Friends), ("Best friends", Measure::BestFriends), ("Successful jokes", Measure::Stat(Stat::Jokes))],
         "Cooking" => &[("Dishes prepared", Measure::Stat(Stat::Dishes)), ("Recipes known", Measure::RecipesKnown)],
         "Fishing" => &[("Fish caught", Measure::Stat(Stat::Fish)), ("Types of fish caught", Measure::Kinds(Kinds::FishTypes))],
@@ -431,7 +445,7 @@ impl Measures<'_> {
 pub fn shown(m: Measure, v: f64) -> String {
     match m {
         Measure::Stat(Stat::Royalties) => format!("§{}", crate::lifetime::group(v as i64)),
-        Measure::Stat(Stat::StrengthHours | Stat::CardioHours | Stat::GuitarHours) => format!("{v:.1}"),
+        Measure::Stat(Stat::StrengthHours | Stat::CardioHours | Stat::GuitarHours | Stat::KmJogged) => format!("{v:.1}"),
         Measure::ChessRank => crate::chess::RANKS[(v as usize).min(crate::chess::RANKS.len() - 1)].to_string(),
         _ => format!("{}", v as i64),
     }

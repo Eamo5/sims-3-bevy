@@ -272,6 +272,34 @@ fn lot_buttons(
     }
 }
 
+/// How far a sidewalk runs from the middle of its road.
+const SIDEWALK_OFFSET: f32 = 5.0;
+
+/// The sidewalk of the road nearest `near` (within 40 m), on `near`'s side of it: the road's
+/// point closest by, its direction there, and `half_length` each way.
+fn street_sidewalk(curves: &[[[f32; 2]; 4]], near: Vec2, half_length: f32) -> Option<crate::town::Sidewalk> {
+    let at = |c: &[[f32; 2]; 4], t: f32| {
+        let p = c.map(Vec2::from);
+        let u = 1.0 - t;
+        p[0] * u * u * u + p[1] * 3.0 * u * u * t + p[2] * 3.0 * u * t * t + p[3] * t * t * t
+    };
+    let (c, t, d) = curves
+        .iter()
+        .flat_map(|c| (0..=32).map(move |i| (c, i as f32 / 32.0)))
+        .map(|(c, t)| (c, t, at(c, t).distance(near)))
+        .min_by(|a, b| a.2.total_cmp(&b.2))?;
+    if d > 40.0 {
+        return None;
+    }
+    let p = at(c, t);
+    let along = (at(c, (t + 0.02).min(1.0)) - at(c, (t - 0.02).max(0.0))).normalize_or_zero();
+    if along == Vec2::ZERO {
+        return None;
+    }
+    let side = if along.perp_dot(near - p) >= 0.0 { along.perp() } else { -along.perp() };
+    Some(crate::town::Sidewalk { center: p + side * SIDEWALK_OFFSET, along, half_length })
+}
+
 /// `--lot <name>` / `--world` automation: pick a lot and move in immediately.
 fn auto_move_in(
     args: Res<crate::autotest::AutoArgs>,
@@ -586,10 +614,13 @@ pub fn move_in(
     });
     let exit = to_world(0.0, -(lot.depth as f32) * 0.5 - 2.0);
     commands.insert_resource(LotExit(Vec2::new(exit.x, exit.z)));
-    // The sidewalk along the street in front of the lot.
+    // The sidewalk along the street in front of the lot: beside the nearest road (or, with none
+    // near, along the lot's front edge).
     let walk_center = to_world(0.0, -(lot.depth as f32) * 0.5 - 2.5);
     let along = (rot * Vec3::X).xz().normalize_or(Vec2::X);
-    commands.insert_resource(crate::town::Sidewalk { center: walk_center.xz(), along, half_length: lot.width as f32 * 0.5 + 25.0 });
+    let sidewalk = street_sidewalk(&world.data.road_curves, exit.xz(), lot.width as f32 * 0.5 + 25.0)
+        .unwrap_or(crate::town::Sidewalk { center: walk_center.xz(), along, half_length: lot.width as f32 * 0.5 + 25.0 });
+    commands.insert_resource(sidewalk);
     commands.insert_resource(NavGrid::new(
         Vec2::new(center.x, center.z),
         lot.width.max(lot.depth) as f32 * 0.5 + 14.0,

@@ -256,15 +256,17 @@ pub fn drive_skeletons(
     clock: Res<GameClock>,
     data: Res<Baked>,
     mut lib: ResMut<ClipLibrary>,
-    mut sims: Query<(Entity, &Sim, &SimAnim, &Skeleton, Option<&ActionClip>, &mut ClipPlayer, Has<crate::little::Carried>, Option<&crate::little::ToddlerSkills>, Option<&Carrying>)>,
+    mut sims: Query<(Entity, &Sim, &SimAnim, &Skeleton, Option<&ActionClip>, &mut ClipPlayer, Has<crate::little::Carried>, Option<&crate::little::ToddlerSkills>, Option<&Carrying>, Has<crate::jog::Jogging>)>,
     mut joints: Query<&mut Transform, Without<Sim>>,
     mut cues: MessageWriter<crate::sound::ClipCue>,
     mut arms: Local<HashMap<String, Arc<Vec<bool>>>>,
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed];
-    for (entity, sim, anim, skel, action, mut player, carried, toddler, carrying) in &mut sims {
+    for (entity, sim, anim, skel, action, mut player, carried, toddler, carrying, jogging) in &mut sims {
         let child = sim.age == crate::sim::Age::Child;
         let script = match action {
+            // (Jogging: the game's jog, for everyone.)
+            _ if jogging && anim.pose == Pose::Walk => ActionClip::new(None, &["a_male_jog"]),
             Some(a) if anim.pose != Pose::Walk => a.clone(),
             _ if sim.age.is_little() => little_script(anim.pose, sim.age, toddler.is_some_and(|t| t.walks())),
             _ => pose_script(anim.pose, sim.female, child),

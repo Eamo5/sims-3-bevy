@@ -9,6 +9,7 @@ pub const CLIP_PREFIXES: &[&str] = &[
     // Walks and idles.
     "a_female_walk",
     "a_male_walk",
+    "a_male_jog",
     "a_idle_neutral_",
     "a_idle_friendly_",
     "a_idle_wipeSweat",

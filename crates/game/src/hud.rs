@@ -776,7 +776,17 @@ fn world_click(
 
     if let Some(t) = target {
         if let Ok((sim, member, is_sel)) = sims.get(t) {
+            // Clicking themselves: what they can do on their own.
             if is_sel {
+                let mut options = Vec::new();
+                if crate::jog::can_jog(sim) && on_lot.get(actor).is_err() {
+                    options.push(("Go Jogging".to_string(), ActionKind::Jog { home: Vec2::ZERO }));
+                }
+                if !options.is_empty() {
+                    pie.submenus.clear();
+                    pie.at = cursor;
+                    open_pie(&mut commands, &mut pie, cursor, &sim.full_name(), actor, options);
+                }
                 return;
             }
             let mut options = Vec::new();

@@ -274,6 +274,14 @@ impl Plugin for AutoTestPlugin {
                     if args.action.as_deref().is_some_and(|a| a.starts_with("Visit:")) && on.is_none() {
                         return;
                     }
+                    // (`--use Jog`: out jogging.)
+                    if want.eq_ignore_ascii_case("jog") {
+                        *done = true;
+                        info!("use test: Go Jogging");
+                        q.0.clear();
+                        q.push_player(crate::interact::Action::new("Go Jogging", crate::interact::ActionKind::Jog { home: Vec2::ZERO }, false));
+                        return;
+                    }
                     let lot = on.map(|l| l.0);
                     let want = want.to_ascii_lowercase();
                     let (want, named) = want.split_once(':').map_or((want.as_str(), None), |(k, n)| (k, Some(n)));

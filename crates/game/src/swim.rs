@@ -19,7 +19,7 @@ impl Plugin for SwimPlugin {
     }
 }
 
-/// To bed in pyjamas, a workout in athletic wear, and dressed again after; off to work in
+/// To bed in pyjamas, a workout or a jog in athletic wear, and dressed again after; off to work in
 /// the career's uniform (still worn home, until it's time for something else).
 #[allow(clippy::type_complexity)]
 fn pyjamas(
@@ -33,6 +33,7 @@ fn pyjamas(
         let uniform = job.and_then(|j| j.uniform(sim)).is_some_and(|u| cas.as_ref().is_some_and(|c| c.outfits.contains_key(u)));
         let want = queue.0.front().and_then(|a| match (&a.kind, a.phase) {
             (ActionKind::GoToWork, _) if uniform => Some(OutfitKind::Career),
+            (ActionKind::Jog { .. }, Phase::Running(_)) => Some(OutfitKind::Athletic),
             (ActionKind::Object { target, def }, Phase::Running(_)) => {
                 let o = beds.get(*target).ok()?;
                 let d = interactions_for(o.kind).get(*def)?;

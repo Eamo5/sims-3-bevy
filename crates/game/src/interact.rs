@@ -1093,6 +1093,9 @@ pub enum ActionKind {
     Social { target: Entity, social: usize },
     GoHere(Vec2, u8),
     GoToWork,
+    /// Out jogging along the street, then back to where they set out from (`home`, filled in
+    /// as they go).
+    Jog { home: Vec2 },
     /// Apply for a career at the computer.
     JoinCareer { target: Entity, track: usize },
     /// Phone someone and invite them over.
@@ -1592,7 +1595,7 @@ fn run_actions(
                         ActionKind::GoHere(p, l) => Some((*p, *l)),
                         // (Kneeling beside the spot.)
                         ActionKind::PlantSeed { at, level, .. } => Some((*at + Vec2::new(0.0, 0.7), *level)),
-                        ActionKind::GoToWork | ActionKind::Visit { .. } | ActionKind::GoToLot { .. } | ActionKind::GoHomeFromLot => way_out.map(|p| (p, 1)),
+                        ActionKind::GoToWork | ActionKind::Visit { .. } | ActionKind::GoToLot { .. } | ActionKind::GoHomeFromLot | ActionKind::Jog { .. } => way_out.map(|p| (p, 1)),
                         ActionKind::JoinCareer { target, .. } | ActionKind::Teleport { pad: target, .. } => {
                             objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0)))
                         }
@@ -1642,6 +1645,10 @@ fn run_actions(
                         }
                     };
                     let from = Vec2::new(tf.translation.x, tf.translation.z);
+                    // (A jog comes back to where it set out from.)
+                    if let ActionKind::Jog { home } = &mut action.kind {
+                        *home = from;
+                    }
                     // A chair pushed in at a table is reached from behind or beside it.
                     let alternatives: Vec<Vec2> = match &action.kind {
                         ActionKind::Object { target, .. } => objects
@@ -1845,6 +1852,10 @@ fn run_actions(
                                     crate::careers::leave_for_work(&mut commands, &clock, me, sim, j, &mut notes);
                                 }
                                 finished = true;
+                            }
+                            // (Off along the street: the jog takes it from here.)
+                            ActionKind::Jog { home } => {
+                                commands.entity(me).insert(crate::jog::Jogging::new(*home, clock.minutes));
                             }
                             ActionKind::GoToLot { lot } => {
                                 crate::visit::drive_to(&mut commands, &clock, me, sim, *lot, crate::visit::place_name(&world.data, *lot), &mut notes);
@@ -2574,6 +2585,8 @@ fn run_actions(
                                 });
                             }
                         }
+                        // (Out on the street, the jog runs itself: `jog`.)
+                        ActionKind::Jog { .. } => {}
                         _ => finished = true,
                     }
                 }
