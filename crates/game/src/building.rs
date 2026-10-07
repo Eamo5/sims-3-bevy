@@ -2102,7 +2102,7 @@ fn stream_nearby_lots(
             .buildings
             .keys()
             .copied()
-            .chain(dormant.0.iter().map(|d| d.lot_index))
+            .chain(dormant.0.iter().filter(|d| !d.homeless).map(|d| d.lot_index))
             .filter(|i| *i < world.data.lots.len() && Some(*i) != active_lot && Some(*i) != visited_lot && !nearby.spawned.contains_key(i))
             .map(|i| (i, lot_center(i).xz().distance(cam.focus.xz())))
             .filter(|(_, d)| *d < NEARBY_IN)
@@ -2111,7 +2111,7 @@ fn stream_nearby_lots(
             let root = commands.spawn((Transform::IDENTITY, Visibility::default(), DespawnOnExit(AppState::InGame))).id();
             let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
             let script = |k: Key| data.0.catalog.iter().find(|c| c.objd == k).map(|c| c.script.clone()).unwrap_or_default();
-            let left = dormant.0.iter().find(|d| d.lot_index == i).and_then(|d| dormant_building(&world.data, i, d, script));
+            let left = dormant.0.iter().find(|d| d.lot_index == i && !d.homeless).and_then(|d| dormant_building(&world.data, i, d, script));
             if let Some(b) = left.as_ref().or(world.data.buildings.get(&i)) {
                 spawn_building(&mut commands, &mut assets, &mut ctx, &catalog, b, &world.data.lots[i], Some(root), false);
             }

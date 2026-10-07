@@ -246,6 +246,9 @@ pub struct SaveGame {
     /// The town's other households played before, as they were left (to play again).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dormant: Vec<SaveGame>,
+    /// (A household played before:) evicted in Edit Town, in the household bin with no home.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub homeless: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -697,6 +700,7 @@ fn save_game(
             .collect(),
         leftovers: leftovers.0.clone(),
         dormant: dormant.kept(&sims.iter().filter(|q| q.9).map(|q| q.1.id).collect::<Vec<_>>()),
+        homeless: false,
     };
     if snapshot {
         commands.insert_resource(Snapshot(game.clone()));

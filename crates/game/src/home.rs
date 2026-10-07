@@ -67,13 +67,46 @@ pub struct MoveInButton;
 #[derive(Resource, Default)]
 pub struct ChosenLot(pub Option<usize>);
 
+/// Who lives where, as the lot chooser sees it: the town's families, those played before, and
+/// (moving house) the household itself.
+fn lots_lived_in(
+    world: &CurrentWorld,
+    town: Option<&crate::premade::TownPremades>,
+    story: &crate::story::TownStory,
+    dormant: &crate::household::Dormant,
+    moving: Option<(&Moving, Option<&Household>)>,
+) -> std::collections::HashMap<usize, String> {
+    let active = moving.and_then(|(_, h)| h.map(|h| h.lot_index));
+    crate::edittown::occupants(&world.data, town.map(|t| &*t.0), story, &dormant.0, active)
+        .into_iter()
+        .map(|(i, o)| {
+            let name = match o {
+                crate::edittown::Occupant::Active => moving.map_or(String::new(), |m| m.0 .0.household.clone()),
+                crate::edittown::Occupant::Played(k) => dormant.0.get(k).map_or(String::new(), |d| d.household.clone()),
+                crate::edittown::Occupant::Town(id) => town.and_then(|t| t.0.households.iter().find(|h| h.id == id)).map_or(String::new(), |h| h.name.clone()),
+            };
+            (i, name)
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
 fn spawn_lot_chooser(
     mut commands: Commands,
     world: Res<CurrentWorld>,
     mut cam: Query<&mut SimsCamera>,
     data: Res<Baked>,
     mut images: ResMut<Assets<Image>>,
+    (town, story, dormant, moving, household): (
+        Option<Res<crate::premade::TownPremades>>,
+        Res<crate::story::TownStory>,
+        Res<crate::household::Dormant>,
+        Option<Res<Moving>>,
+        Option<Res<Household>>,
+    ),
 ) {
+    // (Homes lived in are taken.)
+    let lived_in = lots_lived_in(&world, town.as_deref(), &story, &dormant, moving.as_deref().map(|m| (m, household.as_deref())));
     commands.insert_resource(ChosenLot(None));
     if let Ok(mut c) = cam.single_mut() {
         c.distance = 420.0;
@@ -145,6 +178,10 @@ fn spawn_lot_chooser(
                         format!("{what} · {floors} floor{}", if floors > 1 { "s" } else { "" })
                     }
                     None => "Empty lot".to_string(),
+                };
+                let kind = match lived_in.get(&i) {
+                    Some(who) => format!("{kind} · home of the {who} household"),
+                    None => kind,
                 };
                 p.spawn((
                     Button,
@@ -219,6 +256,13 @@ fn lot_buttons(
     mut next: ResMut<NextState<PlayMode>>,
     mut commands: Commands,
     (moving, worlds, catalog, mut app, slot): (Option<Res<Moving>>, Res<crate::data::WorldList>, Res<Catalog>, ResMut<NextState<AppState>>, Res<crate::save::SaveSlot>),
+    (town, story, dormant, household, mut notes): (
+        Option<Res<crate::premade::TownPremades>>,
+        Res<crate::story::TownStory>,
+        Res<crate::household::Dormant>,
+        Option<Res<Household>>,
+        ResMut<Notifications>,
+    ),
 ) {
     for (i, b) in &q {
         if *i == Interaction::Pressed {
@@ -235,6 +279,12 @@ fn lot_buttons(
         if *i == Interaction::Pressed
             && let Some(l) = chosen.0
         {
+            // (Not into someone else's home: evict them in Edit Town first.)
+            let lived_in = lots_lived_in(&world, town.as_deref(), &story, &dormant, moving.as_deref().map(|m| (m, household.as_deref())));
+            if let Some(who) = lived_in.get(&l) {
+                notes.push(format!("That's the {who} household's home. (In Edit Town they can be moved out.)"));
+                continue;
+            }
             // Moving house: the save, rewritten for the new home, is loaded there.
             if let Some(m) = &moving {
                 let mut g = m.0.clone();
@@ -337,6 +387,7 @@ fn auto_move_in(
 fn premade_move_in(
     pending: Option<Res<PendingHousehold>>,
     world: Res<CurrentWorld>,
+    story: Res<crate::story::TownStory>,
     loading_save: Option<Res<crate::save::PendingLoad>>,
     mut commands: Commands,
     mut next: ResMut<NextState<PlayMode>>,
@@ -347,7 +398,9 @@ fn premade_move_in(
     if loading_save.is_some() || moving.is_some() {
         return;
     }
-    if let Some(i) = world.data.lots.iter().position(|l| l.id == h.lot_id) {
+    // (Their home: the world's, or where they've moved since.)
+    let home = story.home_of(h);
+    if let Some(i) = world.data.lots.iter().position(|l| Some(l.id) == home) {
         commands.insert_resource(crate::premade::PremadeChoice(h.clone()));
         commands.insert_resource(MoveInRequest(i));
         next.set(PlayMode::Live);

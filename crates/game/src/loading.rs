@@ -268,9 +268,11 @@ fn start_loading(
         let cas = crate::simbody::CasData::from_baked(&baked);
         // The town's own Sims stroll past and come to visit.
         // (Those of households played before first: they're about town as they were left.)
-        let gone = crate::household::Dormant(dormant).member_ids();
+        let mut gone = crate::household::Dormant(dormant).member_ids();
         let mut town: Vec<crate::sim::Sim> = former;
         if let Some(p) = &premades {
+            // (Nor the families in the household bin: they're not in town.)
+            gone.extend(p.households.iter().filter(|h| Some(h.id) != playing && story.evicted(h)).flat_map(|h| h.members.iter().map(|m| m.id)));
             let premades = crate::premade::TownPremades(p.clone());
             town.extend(premades.others(playing).into_iter().filter(|s| !gone.contains(&s.id)).map(crate::premade::to_sim).filter_map(|s| story.apply(s)));
         }

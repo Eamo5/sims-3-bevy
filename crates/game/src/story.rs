@@ -37,6 +37,10 @@ pub struct TownStory {
     pub born: Vec<Newborn>,
     /// The latest happenings, newest last.
     pub news: Vec<String>,
+    /// Where the town's families live, where it isn't the world's home for them (by household
+    /// id: the lot's id, or none for the household bin). Set in Edit Town.
+    #[serde(default)]
+    pub homes: BTreeMap<u64, Option<u64>>,
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
@@ -63,6 +67,20 @@ pub struct Newborn {
 }
 
 impl TownStory {
+    /// Whether a town family has been evicted to the household bin. (The world's households
+    /// with no home are its townies, out and about: not in the bin.)
+    pub fn evicted(&self, h: &s3bake::HouseholdBaked) -> bool {
+        self.homes.get(&h.id) == Some(&None)
+    }
+
+    /// Where a town family lives now (the lot's id; none: no home, a townie or evicted).
+    pub fn home_of(&self, h: &s3bake::HouseholdBaked) -> Option<u64> {
+        match self.homes.get(&h.id) {
+            Some(l) => *l,
+            None => (h.lot_id != 0).then_some(h.lot_id),
+        }
+    }
+
     /// One of the world's Sims as the town has them now (older, perhaps); none if they've
     /// passed away.
     pub fn apply(&self, mut s: Sim) -> Option<Sim> {

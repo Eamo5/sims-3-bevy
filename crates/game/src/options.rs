@@ -462,6 +462,7 @@ enum GameMenuButton {
     Save,
     SaveAs,
     Household,
+    EditTown,
     MainMenu,
     Quit,
 }
@@ -535,6 +536,7 @@ pub fn toggle_game_menu(commands: &mut Commands, menu: &mut GameMenu, mut clock:
                     ("Save Game", GameMenuButton::Save),
                     ("Save as New Game", GameMenuButton::SaveAs),
                     ("Change Household", GameMenuButton::Household),
+                    ("Edit Town", GameMenuButton::EditTown),
                     ("Main Menu", GameMenuButton::MainMenu),
                     ("Quit Game", GameMenuButton::Quit),
                 ] {
@@ -600,6 +602,12 @@ fn game_menu_buttons(
             GameMenuButton::Household => {
                 close(&mut commands, &mut menu);
                 household.write(crate::household::ChooseHousehold);
+            }
+            GameMenuButton::EditTown => {
+                close(&mut commands, &mut menu);
+                commands.queue(|w: &mut World| {
+                    w.write_message(crate::edittown::OpenEditTown);
+                });
             }
             GameMenuButton::MainMenu => {
                 close(&mut commands, &mut menu);

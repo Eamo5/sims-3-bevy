@@ -346,6 +346,13 @@ installation is unreachable.
   (the town's story leaves them as they were); their homes stand as they left them, with the
   walls and floors they built and painted and the furniture they bought (and not what they
   sold). Changing doesn't save the game by itself.
+- **Edit Town** (game menu): the town from above with every lot outlined (your home gold,
+  homes green, empty homes white, community lots blue) and a list of every lot with who lives
+  there. Pick a lot to play its household, or evict them to the household bin (a household
+  played before has its furniture sold for four-fifths of its price; the house stands); pick
+  an empty home to move a family from the bin into it. Where everyone lives is kept with the
+  town's story in the save, and the lot chooser (a new game, moving house) won't move anyone
+  into a home already lived in.
 - **Story progression**: the rest of the town lives on. Each morning the world's other Sims
   grow older (elders passing away in time), single grown-ups pair off and couples marry,
   married couples have babies, and grown-ups find jobs and are promoted. The household hears

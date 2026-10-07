@@ -86,7 +86,7 @@ pub struct ChooseHousehold;
 
 /// A change of household under way, waiting for the game as it stands.
 #[derive(Resource)]
-struct Switching(Choice);
+pub struct Switching(pub Choice);
 
 /// A town family moving in, and what goes on from the game before: the time, the town's story
 /// and family tree, the households played before, and those of their Sims the family knows.
@@ -181,9 +181,10 @@ fn the_town_as_it_is(mut commands: Commands, save: Option<Res<crate::save::Pendi
     dormant.0 = d;
 }
 
-/// The Sims of the households played before who are about town (the grown-ups).
+/// The Sims of the households played before who are about town (the grown-ups; not those in the
+/// household bin).
 pub fn about_town(dormant: &[SaveGame]) -> Vec<Sim> {
-    dormant.iter().flat_map(|d| d.members()).filter(|s| matches!(s.age, Age::YoungAdult | Age::Adult | Age::Elder)).collect()
+    dormant.iter().filter(|d| !d.homeless).flat_map(|d| d.members()).filter(|s| matches!(s.age, Age::YoungAdult | Age::Adult | Age::Elder)).collect()
 }
 
 /// The households that can be played instead of this one: those played before (but not one
@@ -201,7 +202,8 @@ fn offered(
     let money = |n: i64| format!("§{}", crate::lifetime::group(n));
     let mut out = Vec::new();
     for (i, d) in dormant.iter().enumerate() {
-        if d.lot_index == hh.lot_index {
+        // (Not one in the household bin: moved into a home first, in Edit Town.)
+        if d.lot_index == hh.lot_index || d.homeless {
             continue;
         }
         let names: Vec<String> = d.sims.iter().filter(|s| s.member).map(|s| s.first.clone()).collect();
@@ -212,9 +214,11 @@ fn offered(
     }
     let Some(town) = town else { return out };
     let gone = member_ids(dormant);
-    let taken: Vec<usize> = dormant.iter().map(|d| d.lot_index).chain([hh.lot_index]).collect();
-    for h in town.playable() {
-        let lot = world.lots.iter().position(|l| l.id == h.lot_id);
+    let taken: Vec<usize> = dormant.iter().filter(|d| !d.homeless).map(|d| d.lot_index).chain([hh.lot_index]).collect();
+    // (Where they live now: a family evicted is in the bin.)
+    for h in town.households.iter() {
+        let Some(home) = story.home_of(h) else { continue };
+        let lot = world.lots.iter().position(|l| l.id == home);
         let living: Vec<String> = h
             .members
             .iter()
