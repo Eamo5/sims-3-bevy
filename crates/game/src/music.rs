@@ -16,7 +16,7 @@ impl Plugin for MusicPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MusicLibrary>()
             .add_systems(OnEnter(AppState::InGame), load_music)
-            .add_systems(Update, (stereo_music, stereo_volume).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (stereo_music, stereo_volume, favorite_music).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -38,9 +38,9 @@ fn load_music(mut lib: ResMut<MusicLibrary>, mut sources: ResMut<Assets<AudioSou
     info!("music: {} tracks", lib.0.len());
 }
 
-/// Music playing for a stereo.
+/// Music playing for a stereo, and its kind (a favourite music: `classical`, `custom`).
 #[derive(Component)]
-struct StereoMusic(Entity);
+struct StereoMusic(Entity, String);
 
 #[allow(clippy::too_many_arguments)]
 fn stereo_music(
@@ -74,11 +74,13 @@ fn stereo_music(
         let mut rng = rand::rng();
         let stations: Vec<&str> = sounds.as_ref().map_or(vec![], |s| s3bake::sounds::STATIONS.iter().copied().filter(|n| s.def(n).is_some()).collect());
         let custom = !lib.0.is_empty() && rng.random_range(0..=stations.len()) == 0;
+        let mut genre = "custom".to_string();
         let track = match (custom, stations.choose(&mut rng), sounds.as_ref()) {
             (false, Some(station), Some(s)) => {
                 let def = s.def(station).unwrap();
                 let id = *def.samples.choose(&mut rng).unwrap();
                 info!("music: the stereo plays {station}");
+                genre = station.trim_start_matches("stereo_").to_string();
                 s.sample(id, &mut cache, &mut sources)
             }
             _ => lib.0.choose(&mut rng).cloned(),
@@ -87,9 +89,31 @@ fn stereo_music(
         commands.spawn((
             AudioPlayer::new(track),
             PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume * level)),
-            StereoMusic(stereo),
+            StereoMusic(stereo, genre),
             DespawnOnExit(AppState::InGame),
         ));
+    }
+}
+
+/// Sims near a stereo playing their favourite music enjoy it.
+fn favorite_music(
+    clock: Res<crate::clock::GameClock>,
+    playing: Query<&StereoMusic>,
+    stereos: Query<&GlobalTransform>,
+    mut sims: Query<(&crate::sim::Sim, &GlobalTransform, &mut crate::life::Moodlets)>,
+    mut last: Local<f64>,
+) {
+    if clock.minutes - *last < 10.0 {
+        return;
+    }
+    *last = clock.minutes;
+    for m in &playing {
+        let Ok(at) = stereos.get(m.0) else { continue };
+        for (sim, tf, mut moods) in &mut sims {
+            if sim.favorites.music == m.1 && tf.translation().distance(at.translation()) < 8.0 && !moods.has(crate::life::MoodletKind::EnjoyingMusic) {
+                moods.add(crate::life::MoodletKind::EnjoyingMusic, clock.minutes);
+            }
+        }
     }
 }
 

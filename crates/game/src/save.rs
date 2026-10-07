@@ -110,6 +110,9 @@ pub struct SavedSim {
     /// A retired Sim's pension.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pension: Option<crate::careers::Pension>,
+    /// Their favourite food, music and colour (saves from before favourites: by their look).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub favorites: Option<crate::sim::Favorites>,
 }
 
 /// A lifetime wish (by the game's check for it), and what's counted towards it.
@@ -291,6 +294,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         eyes: Some(rgb(sim.eyes)),
         voice: Some(sim.voice),
         pension: None,
+        favorites: Some(sim.favorites.clone()),
     }
 }
 
@@ -311,6 +315,7 @@ impl SaveGame {
         Sim {
             id: s.id,
             look: s.look,
+            favorites: s.favorites.clone().unwrap_or_else(|| crate::sim::Favorites::by_look(s.look)),
             outfit: OutfitChoice {
                 hair: o(0),
                 top: o(1),
@@ -626,6 +631,7 @@ fn save_game(
             eyes: Some(rgb(sim.eyes)),
             voice: Some(sim.voice),
             pension: pension.copied(),
+            favorites: Some(sim.favorites.clone()),
         });
     }
     let game = SaveGame {
@@ -961,6 +967,11 @@ mod tests {
         let mut old = saved.clone();
         old.outfit.truncate(9);
         assert_eq!(SaveGame::sim(&old).outfit.other, [crate::sim::Clothes::default(); 4]);
+        // Favourites kept; from before them, the same ones each time by the Sim's look.
+        assert_eq!(back.favorites, sim.favorites);
+        old.favorites = None;
+        assert_eq!(SaveGame::sim(&old).favorites, SaveGame::sim(&old).favorites);
+        assert!(crate::sim::FAVORITE_FOODS.contains(&SaveGame::sim(&old).favorites.food.as_str()));
     }
 
     #[test]

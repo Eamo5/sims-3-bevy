@@ -104,6 +104,8 @@ pub enum CasAction {
     FacePart(u32, usize),
     /// Dress the outfit `i` of `WEAR` (everyday, formal...).
     Wear(usize),
+    /// Favourite food (0), music (1) or colour (2): entry `i` of its list.
+    Favorite(u8, usize),
     Done,
 }
 
@@ -424,6 +426,15 @@ fn cas_actions(
                         }
                     }
                 }
+            }
+            CasAction::Favorite(kind, i) => {
+                let f = &mut pending.members[k].favorites;
+                match kind {
+                    0 => f.food = crate::sim::FAVORITE_FOODS[i.min(crate::sim::FAVORITE_FOODS.len() - 1)].to_string(),
+                    1 => f.music = crate::sim::FAVORITE_MUSIC[i.min(crate::sim::FAVORITE_MUSIC.len() - 1)].to_string(),
+                    _ => f.color = crate::sim::FAVORITE_COLORS[i.min(crate::sim::FAVORITE_COLORS.len() - 1)].to_string(),
+                }
+                model = false;
             }
             CasAction::Wear(i) => {
                 scene.wear = WEAR[i.min(WEAR.len() - 1)];
@@ -911,6 +922,54 @@ fn rebuild_ui(
                             None => {
                                 p.spawn(text("Pick the dream of this Sim's life: these suit their traits.", 13.0, Color::srgb(0.75, 0.85, 1.0)));
                             }
+                        }
+                    }
+                    // Favourites: food, music and colour, by the game's pictures.
+                    if !sim.age.is_little() {
+                        let data = ui.as_ref().map(|u| u.data.clone());
+                        let food_name = |key: &str| data.as_ref().and_then(|d| d.recipes.iter().find(|r| r.key == key).map(|r| r.name.clone())).unwrap_or_else(|| key.to_string());
+                        let f = &sim.favorites;
+                        p.spawn(text(
+                            format!("Favorites: {} · {} · {}", food_name(&f.food), crate::sim::Favorites::music_name(&f.music), crate::sim::Favorites::color_name(&f.color)),
+                            20.0,
+                            Color::WHITE,
+                        ));
+                        let rows: [(u8, &str, Vec<(String, String)>, &str); 3] = [
+                            (0, "food", crate::sim::FAVORITE_FOODS.iter().map(|k| (k.to_string(), food_name(k))).collect(), f.food.as_str()),
+                            (1, "music", crate::sim::FAVORITE_MUSIC.iter().map(|m| (m.to_string(), crate::sim::Favorites::music_name(m).to_string())).collect(), f.music.as_str()),
+                            (2, "color", crate::sim::FAVORITE_COLORS.iter().map(|c| (c.to_string(), crate::sim::Favorites::color_name(c).to_string())).collect(), f.color.as_str()),
+                        ];
+                        for (kind, pic, list, now) in rows {
+                            p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(3.0), row_gap: Val::Px(3.0), ..default() }).with_children(|grid| {
+                                for (i, (key, name)) in list.iter().enumerate() {
+                                    let on = key == now;
+                                    let icon = ui.as_deref_mut().and_then(|u| u.icon(&mut images, &crate::sim::Favorites::icon(pic, key)));
+                                    grid.spawn((
+                                        Button,
+                                        CasAction::Favorite(kind, i),
+                                        Node {
+                                            width: Val::Px(34.0),
+                                            height: Val::Px(34.0),
+                                            border: UiRect::all(Val::Px(if on { 3.0 } else { 0.0 })),
+                                            border_radius: BorderRadius::all(Val::Px(6.0)),
+                                            justify_content: JustifyContent::Center,
+                                            align_items: AlignItems::Center,
+                                            ..default()
+                                        },
+                                        BorderColor::all(PLUMBOB_GREEN),
+                                        BackgroundColor(if on { Color::srgb(0.22, 0.55, 0.22) } else { BTN_NORMAL }),
+                                        crate::icons::Tooltip(name.clone()),
+                                    ))
+                                    .with_children(|b| match icon {
+                                        Some(h) => {
+                                            b.spawn((ImageNode::new(h), Node { width: Val::Px(28.0), height: Val::Px(28.0), ..default() }, Pickable::IGNORE));
+                                        }
+                                        None => {
+                                            b.spawn((text(name.chars().take(2).collect::<String>(), 11.0, Color::WHITE), Pickable::IGNORE));
+                                        }
+                                    });
+                                }
+                            });
                         }
                     }
                     let slots = crate::life::trait_slots(sim.age);

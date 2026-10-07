@@ -498,6 +498,20 @@ fn meal_requests(
             }
             MealRequest::Ate => {
                 info!("{} finished eating", sim.first);
+                // (Their favourite food: an amazing meal.)
+                if let Some(r) = plateful.and_then(|p| recipes.as_ref().and_then(|d| d.recipes.get(p.0)))
+                    && r.key == sim.favorites.food
+                {
+                    let name = r.name.clone();
+                    commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| {
+                        let now = e.world().resource::<crate::clock::GameClock>().minutes;
+                        if let Some(mut m) = e.get_mut::<crate::life::Moodlets>() {
+                            m.add(crate::life::MoodletKind::AmazingMeal, now);
+                        }
+                        let first = e.get::<Sim>().map(|s| s.first.clone()).unwrap_or_default();
+                        e.world_scope(|w| w.resource_mut::<crate::interact::Notifications>().push(format!("{first} loves {name}: their favourite!")));
+                    });
+                }
                 if let Some(p) = eating {
                     commands.entity(me).remove::<EatingPlate>();
                     commands.entity(p.0).insert(UsedBy(None));
@@ -546,5 +560,16 @@ fn release_plates(mut commands: Commands, sims: Query<(Entity, &ActionQueue, &Ea
             commands.entity(plate.0).try_insert(UsedBy(None));
             commands.entity(me).remove::<EatingPlate>();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The baked recipes' keys (`SIMS3_CACHE=<baked> cargo test -p sims3 list_recipes -- --ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn list_recipes() {
+        let data = s3bake::gamedata::load_gamedata(&s3bake::default_root()).expect("gamedata");
+        println!("{}", data.recipes.iter().map(|r| r.key.clone()).collect::<Vec<_>>().join(" "));
     }
 }

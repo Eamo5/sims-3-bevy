@@ -354,6 +354,28 @@ fn tab_content(
                     });
                 });
             }
+            // Their favourites.
+            if let Some(ui) = ui.as_deref_mut()
+                && !sim.age.is_little()
+            {
+                let f = &sim.favorites;
+                let food = ui.data.recipes.iter().find(|r| r.key == f.food).map_or(f.food.clone(), |r| r.name.clone());
+                let items = [
+                    (crate::sim::Favorites::icon("food", &f.food), food),
+                    (crate::sim::Favorites::icon("music", &f.music), crate::sim::Favorites::music_name(&f.music).to_string()),
+                    (crate::sim::Favorites::icon("color", &f.color), crate::sim::Favorites::color_name(&f.color).to_string()),
+                ];
+                let icons: Vec<Option<Handle<Image>>> = items.iter().map(|(i, _)| ui.icon(&mut images, i)).collect();
+                p.spawn(Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
+                    row.spawn(text("Favorites:", 12.0, Color::srgb(1.0, 0.9, 0.5)));
+                    for ((_, name), icon) in items.iter().zip(icons) {
+                        if let Some(h) = icon {
+                            row.spawn(crate::icons::icon_bundle(h, 22.0));
+                        }
+                        row.spawn(text(name.clone(), 12.0, Color::WHITE));
+                    }
+                });
+            }
             if let Some(ui) = ui.as_deref_mut() {
                 for t in &sim.traits {
                     let info = ui.trait_info(*t);

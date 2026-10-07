@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 53;
+pub const GAMEDATA_VERSION: u32 = 54;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1888,6 +1888,16 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         wanted.insert(w.icon.clone());
     }
     wanted.extend(EXTRA_ICONS.iter().map(|s| s.to_string()));
+    // Create a Sim's favourites: a picture of each food (by recipe), music and colour.
+    for r in &out.recipes {
+        wanted.insert(format!("cas_favorites_food_i_{}_r2", r.key.to_ascii_lowercase()));
+    }
+    for m in FAVORITE_MUSIC {
+        wanted.insert(format!("cas_favorites_music_i_{m}_r2"));
+    }
+    for c in FAVORITE_COLORS {
+        wanted.insert(format!("cas_favorites_color_i_{c}_r2"));
+    }
     wanted.remove("");
     let g = root.global_dir();
     std::fs::create_dir_all(&g).map_err(|e| e.to_string())?;
@@ -2053,6 +2063,14 @@ pub const SPECIAL_PICKERS: &[&str] = &[
 ];
 
 /// Interface pieces the game draws directly (not named by the tables).
+/// The favourites Create a Sim offers besides foods (which are the recipes): music, and
+/// colours (as the game's pictures name them).
+pub const FAVORITE_MUSIC: [&str; 10] = ["classical", "custom", "electronica", "indie", "kids", "latin", "pop", "rockabilly", "roots", "soul"];
+pub const FAVORITE_COLORS: [&str; 20] = [
+    "aqua", "black", "blue", "green", "grey", "hotpink", "irishgreen", "lilac", "lime", "orange", "pink", "purple", "red", "seafoam", "spiceberry", "spicebrown",
+    "turquoise", "violet", "white", "yellow",
+];
+
 const EXTRA_ICONS: &[&str] = &[
     "hud_icon_plumbob_r2",
     "hud_icon_plumbobGlow_r2",

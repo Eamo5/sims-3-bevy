@@ -79,6 +79,89 @@ pub struct Sim {
     /// Body shape: weight from thin (-1) to heavy (1), and fitness (0..1).
     pub weight: f32,
     pub fitness: f32,
+    pub favorites: Favorites,
+}
+
+/// What a Sim likes best, as Create a Sim has it: a food (a recipe's key), a music (one of
+/// `FAVORITE_MUSIC`) and a colour (one of `FAVORITE_COLORS`).
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Favorites {
+    pub food: String,
+    pub music: String,
+    pub color: String,
+}
+
+pub use s3bake::gamedata::{FAVORITE_COLORS, FAVORITE_MUSIC};
+
+/// The base game's recipes that can be favourites (those with a favourite's picture).
+pub const FAVORITE_FOODS: [&str; 35] = [
+    "MacAndCheese", "AutumnSalad", "BellagianWaffles", "PeanutButterAndJelly", "Pancakes", "Ratatouille", "HotDog", "TofuDog", "GrilledCheese",
+    "FriedPeanutButterBanana", "GoopyCarbonara", "FishAndChips", "VegetarianFishAndChips", "Cookies", "Spaghetti", "SpaghettiWithVeggiSauce", "RollSushi",
+    "VeggiRolls", "FruitParfait", "Cheesesteak", "CheeseTofuSteak", "StewSurprise", "Hamburger", "Veggieburger", "Cobbler", "KeyLimePie", "TriTipSteak",
+    "TriTipTofuSteak", "GrilledSalmon", "VegetarianGrilledSalmon", "FrenchToast", "DimSum", "VegetarianDimSum", "LobsterThermador",
+    "VegetarianLobsterThermador",
+];
+
+impl Favorites {
+    pub fn random(rng: &mut impl Rng) -> Self {
+        Self {
+            food: FAVORITE_FOODS[rng.random_range(0..FAVORITE_FOODS.len())].to_string(),
+            music: FAVORITE_MUSIC[rng.random_range(0..FAVORITE_MUSIC.len())].to_string(),
+            color: FAVORITE_COLORS[rng.random_range(0..FAVORITE_COLORS.len())].to_string(),
+        }
+    }
+
+    /// The same each time for a look (Sims from before favourites, and the town's).
+    pub fn by_look(look: u64) -> Self {
+        Self::random(&mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(look ^ 0xFA70_0D5))
+    }
+
+    /// The game's picture of a favourite: `food`, `music` or `color`.
+    pub fn icon(kind: &str, name: &str) -> String {
+        format!("cas_favorites_{kind}_i_{}_r2", name.to_ascii_lowercase())
+    }
+
+    /// A music's name.
+    pub fn music_name(m: &str) -> &'static str {
+        match m {
+            "classical" => "Classical",
+            "custom" => "My Music",
+            "electronica" => "Electronica",
+            "indie" => "Indie",
+            "kids" => "Kids",
+            "latin" => "Latin",
+            "pop" => "Pop",
+            "rockabilly" => "Rockabilly",
+            "roots" => "Roots",
+            _ => "Soul",
+        }
+    }
+
+    /// A colour's name.
+    pub fn color_name(c: &str) -> &'static str {
+        match c {
+            "aqua" => "Aqua",
+            "black" => "Black",
+            "blue" => "Blue",
+            "green" => "Green",
+            "grey" => "Grey",
+            "hotpink" => "Hot Pink",
+            "irishgreen" => "Irish Green",
+            "lilac" => "Lilac",
+            "lime" => "Lime",
+            "orange" => "Orange",
+            "pink" => "Pink",
+            "purple" => "Purple",
+            "red" => "Red",
+            "seafoam" => "Sea Foam",
+            "spiceberry" => "Spiceberry",
+            "spicebrown" => "Spice Brown",
+            "turquoise" => "Turquoise",
+            "violet" => "Violet",
+            "white" => "White",
+            _ => "Yellow",
+        }
+    }
 }
 
 /// CAS parts chosen for a Sim (baked part keys).
@@ -367,6 +450,7 @@ pub fn random_sim(rng: &mut impl Rng, last: &str, female: Option<bool>, age: Age
         female,
         age,
         traits: crate::life::random_traits(rng, age),
+        favorites: Favorites::random(rng),
         skin: Color::srgb(sr, sg, sb),
         hair: Color::srgb(hr, hg, hb),
         top: Color::hsl(hue, 0.55, 0.5),

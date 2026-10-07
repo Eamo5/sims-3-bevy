@@ -39,6 +39,9 @@ installation is unreachable.
   house's own furniture; nearby lots are shown in full detail with
   the game's roofs, distant ones as the game's pre-rendered imposters.
 - **Sims**: Create-a-Sim from real CAS parts (browsed as the game's own style pictures), with
+  favourites (a food from the game's recipes, a music, a colour, each picked by the game's own
+  pictures; a favourite meal is an amazing one, and their favourite music playing nearby is
+  enjoyed; shown on the Simology tab and kept in saves),
   clothes chosen for each of the game's outfits (everyday, formal, sleepwear, athletic and
   swimwear: the wardrobe's clothes of each kind, the Sim shown dressed in the one being
   chosen, and worn when they change into it; kept in saves), skin
