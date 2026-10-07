@@ -484,10 +484,9 @@ installation is unreachable.
   temporary file first and keeps the one it replaces as `.json.bak`, and saves from older
   versions of the game still load.
 - **Options**: Escape pauses with a game menu (resume, options, save, save as a new game (in a
-  file of its own, never over another), change household, main
-  menu, quit); the
-  options set master, music, effects, voice and ambient levels, aging and life span (short
-  to epic), free will, shadows and the frame-rate counter, kept in `settings.json`.
+  file of its own, never over another), change household, main menu, quit); the options set
+  master, music, effects, voice and ambient levels, aging and life span (short to epic), free
+  will, shadows and the frame-rate counter, kept in `settings.json`.
 
 ## Controls
 
