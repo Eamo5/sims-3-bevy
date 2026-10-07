@@ -137,6 +137,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "c2o_book_carry_x",
     "c2o_book_carry_book",
     "a2o_bookshelf_getBook_Carry",
+    "a2o_newspaper_pickUp_floor",
+    "a2o_newspaper_carry_x",
+    "a2o_newspaper_carry_newspaper",
     "c2o_bookshelf_getBook_Carry",
     "a2o_mirror_full_checkSelfOut",
     "a2o_painting_start",
@@ -316,6 +319,8 @@ pub const PROP_ACTORS: &[&str] = &[
     "glassBar01",
     "glassBar",
     "plate",
+    "newspaper",
+    "newspaperRolled",
     "trashbag",
     "wrench",
 ];

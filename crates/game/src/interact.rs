@@ -419,6 +419,8 @@ pub enum Special {
     GetBook,
     /// A book read (in a seat, or at the shelf).
     ReadBook,
+    /// The paper picked up, to read in a seat (or where it lay, with none free).
+    GetPaper,
     /// A garden sprinkler turned on (it runs a couple of hours) or off.
     SprinklerOn,
     SprinklerOff,
@@ -538,10 +540,15 @@ static MEAL: [InteractionDef; 2] = [
     InteractionDef { special: Special::PutAway, ..def("Put Away Leftovers", 3.0, N, Pose::Use) },
 ];
 static MAILBOX: [InteractionDef; 1] = [InteractionDef { special: Special::PayBills, ..def("Pay Bills", 3.0, N, Pose::Use) }];
-static NEWSPAPER: [InteractionDef; 2] = [
-    InteractionDef { special: Special::ReadPaper, ..def("Read", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 45.0], Pose::Use) },
+static NEWSPAPER: [InteractionDef; 3] = [
+    InteractionDef { special: Special::GetPaper, ..def("Read", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 45.0], Pose::Use) },
     InteractionDef { special: Special::FindJob, ..def("Look for a Job", 10.0, N, Pose::Use) },
+    // (Read where it lay when there's no seat free: never on the menu.)
+    READ_PAPER,
 ];
+/// (The paper read: in a seat, or standing.)
+const READ_PAPER: InteractionDef = InteractionDef { autonomous: false, special: Special::ReadPaper, ..def("Read the Paper", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 45.0], Pose::Use) };
+const READ_PAPER_SEATED: InteractionDef = InteractionDef { on_object: true, pose: Pose::Sit, ..READ_PAPER };
 static GARDEN: [InteractionDef; 3] = [
     InteractionDef { special: Special::Water, skill: Some("Gardening"), ..def("Water", 12.0, [0.0, 0.0, 0.0, 0.0, -3.0, 4.0], Pose::Use) },
     InteractionDef { special: Special::Weed, skill: Some("Gardening"), ..def("Weed", 15.0, [0.0, 0.0, 0.0, 0.0, -8.0, 2.0], Pose::Use) },
@@ -616,15 +623,16 @@ static CANDLE: [InteractionDef; 2] = [
 ];
 /// (Loaded with the dishes cleared away: never on the menu.)
 static DISHWASHER: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::WashDishes, ..def("Load Dishes", 3.0, N, Pose::Use) }];
-static SOFA: [InteractionDef; 3] = [
+static SOFA: [InteractionDef; 4] = [
     InteractionDef { on_object: true, ..def("Sit", 40.0, [0.0, 0.0, 5.0, 0.0, 0.0, 10.0], Pose::Sit) },
     InteractionDef { on_object: true, decay: SLEEP_DECAY, ..def("Nap", 60.0, [0.0, 0.0, 18.0, 0.0, 0.0, 0.0], Pose::Lie) },
     READ_SEATED,
+    READ_PAPER_SEATED,
 ];
 /// (A book from the shelf, read sitting down: never on the menu.)
 const READ_SEATED: InteractionDef =
     InteractionDef { on_object: true, autonomous: false, skill: Some("Logic"), special: Special::ReadBook, ..def("Read Book", 60.0, [0.0, 0.0, 4.0, 0.0, 0.0, 30.0], Pose::Sit) };
-static CHAIR: [InteractionDef; 4] = [
+static CHAIR: [InteractionDef; 5] = [
     InteractionDef { on_object: true, autonomous: false, ..def("Sit", 30.0, [0.0, 0.0, 4.0, 0.0, 0.0, 4.0], Pose::Sit) },
     InteractionDef {
         on_object: true,
@@ -634,6 +642,7 @@ static CHAIR: [InteractionDef; 4] = [
     },
     InteractionDef { on_object: true, special: Special::Homework, ..def("Do Homework", 45.0, [0.0, 0.0, -2.0, 0.0, 0.0, -6.0], Pose::Sit) },
     READ_SEATED,
+    READ_PAPER_SEATED,
 ];
 /// The dining chair's "Eat" (not offered in its menu).
 pub const CHAIR_EAT: usize = 1;
@@ -758,7 +767,11 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Fish" if kind == ObjectKind::FishingSpot => {
             A::new(Some("a2o_fishHereWith_cast_normal_x"), &["a2o_fishHereWith_idle1_x", "a2o_fishHereWith_idle2_x", "a2o_fishHereWith_idle3_x"])
         }
-        "Read" if kind == ObjectKind::Newspaper => A::new(Some("a2o_newspaper_read_standing_start_x"), &["a2o_newspaper_read_standing_loop"]),
+        "Read" if kind == ObjectKind::Newspaper => A::steps("a2o_newspaper_pickUp_floor_part1_x", &["a2o_newspaper_pickUp_floor_part2_x"], &["a2o_newspaper_carry_x"]),
+        "Read the Paper" if matches!(kind, ObjectKind::Sofa | ObjectKind::Chair | ObjectKind::Stool) => {
+            A::new(Some("a2o_newspaper_read_seated_start_x"), &["a2o_newspaper_read_seated_loop"])
+        }
+        "Read the Paper" => A::new(Some("a2o_newspaper_read_standing_start_x"), &["a2o_newspaper_read_standing_loop"]),
         "Eat" if kind == ObjectKind::Stool => A::new(Some("a2o_eat_barStoolIn_fork_start_x"), &["a2o_eat_barStoolIn_fork_neat_x"]),
         // (The fridge door opened, something taken out and the door shut again.)
         "Have Quick Meal" | "Microwave Dinner" => A::steps("a2o_fridge_openDoor_x", FRIDGE_STEPS, &["a2o_eat_stand_fork_neat", "a2o_eat_stand_hand_neat"]),
@@ -1416,7 +1429,12 @@ fn run_actions(
     mut life: MessageWriter<LifeEvent>,
     people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
     mut conceive: MessageWriter<crate::little::Conceive>,
-    (mut fire, upgraded, baked): (MessageWriter<crate::fire::StartFire>, Query<&crate::upgrades::Upgrades>, Option<Res<crate::baked::Baked>>),
+    (mut fire, upgraded, baked, paper_in_hand): (
+        MessageWriter<crate::fire::StartFire>,
+        Query<&crate::upgrades::Upgrades>,
+        Option<Res<crate::baked::Baked>>,
+        Query<&crate::surroundings::PaperInHand>,
+    ),
 ) {
     let Some(grid) = grid else { return };
     let dt = delta.0;
@@ -1808,8 +1826,8 @@ fn run_actions(
                                 // (A painting takes as long as its canvas.)
                                 let minutes = match d.special {
                                     Special::SellPainting => crate::paintings::CANVAS_MINUTES[crate::paintings::canvas(plan, skills.level("Painting")) as usize],
-                                    // (Only taking the book down: it's read elsewhere.)
-                                    Special::GetBook => 2.0,
+                                    // (Only taking the book down, or picking the paper up: they're read elsewhere.)
+                                    Special::GetBook | Special::GetPaper => 2.0,
                                     // (Twice as quick for a Speedy Cleaner; homework too for a Multi-Tasker.)
                                     Special::CleanUp | Special::EmptyTrash if crate::wishes::has(wishes, "SpeedyCleaner") => d.minutes * 0.5,
                                     Special::Homework if crate::wishes::has(wishes, "MultiTasker") => d.minutes * 0.5,
@@ -1833,6 +1851,10 @@ fn run_actions(
                                         Special::FindJob | Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport | Special::WashDishes | Special::DropTrash | Special::ReadBook => {}
                                         Special::GetBook => {
                                             commands.entity(me).insert(crate::surroundings::ReadSomewhere(*target));
+                                        }
+                                        Special::GetPaper => {
+                                            commands.entity(*target).insert(Visibility::Hidden);
+                                            commands.entity(me).insert(crate::surroundings::PaperInHand(*target));
                                         }
                                         Special::Homework => {
                                             notes.push(format!("{} finished their homework.", sim.first));
@@ -1980,8 +2002,10 @@ fn run_actions(
                                             commands.entity(me).insert(crate::surroundings::TakeOutTrash(*target));
                                         }
                                         Special::ReadPaper => {
-                                            commands.entity(*target).try_despawn();
-                                            commands.entity(me).insert(crate::story::ReadTheNews);
+                                            // (The paper read: its own, or the one carried to the seat.)
+                                            let paper = paper_in_hand.get(me).ok().map_or(*target, |p| p.0);
+                                            commands.entity(paper).try_despawn();
+                                            commands.entity(me).remove::<crate::surroundings::PaperInHand>().insert(crate::story::ReadTheNews);
                                         }
                                         Special::Water => {
                                             commands.entity(me).insert(crate::gardening::GardenRequest::Water(*target));

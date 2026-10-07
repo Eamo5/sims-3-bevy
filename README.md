@@ -261,7 +261,8 @@ installation is unreachable.
   the beaches), and ground-level paving follows the ground.
 - **Reading**: *Read a Book* at a bookshelf takes a book down (the game's animation), carries it
   to the nearest free sofa or chair and reads it sitting there, turning the pages (standing at
-  the shelf when there's no seat free).
+  the shelf when there's no seat free). The morning paper is picked up off the ground and carried
+  to a seat to be read the same way (or read standing where it lay).
 - **Fireplaces**: Sims light a fire with the game's animations; it burns a few hours, flames
   dancing in the hearth and a flickering warm light on the room, and they warm their hands by
   it or put it out. Now and then a spark catches the floor in front. Candles are lit and blown

@@ -16,7 +16,7 @@ pub struct SurroundingsPlugin;
 
 impl Plugin for SurroundingsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spoil_food, trash_cans, discard, wash_up, take_out_trash, read_somewhere, put_down_carried, surroundings).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (spoil_food, trash_cans, discard, wash_up, take_out_trash, read_somewhere, read_paper_somewhere, drop_unread_paper, put_down_carried, surroundings).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -140,6 +140,53 @@ fn wash_up(
 pub const DISH_CARRY: &str = "a2o_plateDinner_carry_x";
 const TRASH_CARRY: &str = "a2o_trashPile_carry_x";
 const BOOK_CARRY: &str = "a2o_book_carry_x";
+const PAPER_CARRY: &str = "a2o_newspaper_carry_x";
+
+/// The newspaper picked up (hidden where it lay until it's read).
+#[derive(Component)]
+pub struct PaperInHand(pub Entity);
+
+/// The paper picked up is carried to the nearest free sofa or chair and read sitting down;
+/// with none free, it's read standing where it lay.
+#[allow(clippy::type_complexity)]
+fn read_paper_somewhere(
+    mut commands: Commands,
+    mut sims: Query<(Entity, &Transform, &PaperInHand, &mut crate::interact::ActionQueue), Added<PaperInHand>>,
+    seats: Query<(Entity, &GameObject, &Transform, &crate::interact::UsedBy), Without<crate::interact::Broken>>,
+) {
+    for (e, tf, paper, mut queue) in &mut sims {
+        let read = |kind: ObjectKind| crate::interact::interactions_for(kind).iter().position(|d| d.special == crate::interact::Special::ReadPaper);
+        let seat = seats
+            .iter()
+            .filter(|(_, o, t, used)| {
+                matches!(o.kind, ObjectKind::Sofa | ObjectKind::Chair) && used.0.is_none() && (t.translation.y - tf.translation.y).abs() < 1.5 && t.translation.distance(tf.translation) < 30.0
+            })
+            .min_by(|a, b| a.2.translation.distance(tf.translation).total_cmp(&b.2.translation.distance(tf.translation)));
+        match seat.and_then(|(s, o, ..)| Some((s, read(o.kind)?))) {
+            Some((s, def)) => {
+                queue.0.push_front(crate::interact::Action::new("Read the Paper", crate::interact::ActionKind::Object { target: s, def }, true));
+                commands.entity(e).insert(crate::anim::Carrying(PAPER_CARRY));
+            }
+            None => {
+                commands.entity(paper.0).insert(Visibility::Inherited);
+                commands.entity(e).remove::<PaperInHand>();
+                if let Some(def) = read(ObjectKind::Newspaper) {
+                    queue.0.push_front(crate::interact::Action::new("Read the Paper", crate::interact::ActionKind::Object { target: paper.0, def }, true));
+                }
+            }
+        }
+    }
+}
+
+/// A paper carried off and not read after all is put back where it lay.
+fn drop_unread_paper(mut commands: Commands, sims: Query<(Entity, &PaperInHand, &crate::interact::ActionQueue)>) {
+    for (e, paper, queue) in &sims {
+        if !queue.0.front().is_some_and(|a| a.label == "Read the Paper") {
+            commands.entity(paper.0).insert(Visibility::Inherited);
+            commands.entity(e).remove::<PaperInHand>();
+        }
+    }
+}
 
 /// A book just taken from a shelf: where to read it.
 #[derive(Component)]
@@ -188,6 +235,7 @@ fn put_down_carried(mut commands: Commands, sims: Query<(Entity, &crate::anim::C
             DISH_CARRY => &["Wash Dishes", "Load Dishes", "Eat"],
             TRASH_CARRY => &["Throw Out Trash"],
             BOOK_CARRY => &["Read Book"],
+            PAPER_CARRY => &["Read the Paper"],
             _ => continue,
         };
         let going = queue.0.front().is_some_and(|a| goes_to.contains(&a.label.as_str()));
