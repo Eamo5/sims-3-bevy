@@ -2624,6 +2624,32 @@ fn pay_bills(
 mod tests {
     use super::*;
 
+    /// Every clip the catalogue's objects' interactions play is baked (needs the bake:
+    /// `SIMS3_CACHE=<baked> cargo test -p sims3 interaction_clips_baked -- --ignored`).
+    #[test]
+    #[ignore]
+    fn interaction_clips_baked() {
+        let g = s3bake::default_root().global_dir();
+        let catalog: Vec<s3bake::CatalogEntry> = s3bake::read_value(&g.join("catalog.bin")).unwrap();
+        let names: Vec<String> = s3bake::read_value::<Vec<String>>(&g.join("clip_names.bin")).unwrap().iter().map(|n| n.to_ascii_lowercase()).collect();
+        let mut missing = std::collections::BTreeSet::new();
+        for c in &catalog {
+            let kind = ObjectKind::from_script(&c.script, &c.instance_name);
+            for d in interactions_for(kind) {
+                let Some(clip) = interaction_clip(d.name, kind) else { continue };
+                for p in clip.start.iter().chain(clip.steps).chain(clip.loops) {
+                    // (A grown-up's clip named only for its child version is fine.)
+                    let child = p.strip_prefix("a2o_").map(|r| format!("c2o_{r}"));
+                    let found = |p: &str| names.iter().any(|n| n.starts_with(&p.to_ascii_lowercase()));
+                    if !found(p) && !child.is_some_and(|c| found(&c)) {
+                        missing.insert(format!("{} ({:?}): {p}", d.name, kind));
+                    }
+                }
+            }
+        }
+        assert!(missing.is_empty(), "clips not baked: {missing:#?}");
+    }
+
     /// The buyable base-game objects nothing can be done with, by script class (a list to work
     /// from: `cargo test -p sims3 unused_objects -- --ignored --nocapture`).
     #[test]
