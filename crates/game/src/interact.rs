@@ -2235,7 +2235,9 @@ fn run_actions(
                                 }
                                 social_fx.push((*target, me, s.social_per_hour * dt / 60.0, s.fun_per_hour * dt / 60.0, f, r));
                                 anim.pose = if s.name.contains("Dance") { Pose::Dance } else { Pose::Talk };
-                                if elapsed >= s.minutes {
+                                // (A Teacher Extraordinaire gets through homework twice as fast.)
+                                let minutes = if s.effect == SocialEffect::HelpHomework && crate::journal::earned(journals.get(me).ok(), "Teacher Extraordinaire") { s.minutes * 0.5 } else { s.minutes };
+                                if elapsed >= minutes {
                                     finished = true;
                                     if s.name == "Tell Joke" {
                                         did.write(crate::journal::Did::count(me, crate::journal::Stat::Jokes, 1.0));
@@ -2315,6 +2317,17 @@ fn run_actions(
                                         }
                                         SocialEffect::DeclareNemesis => {
                                             notes.push(format!("{} declared {} their nemesis!", sim.first, tname));
+                                        }
+                                        SocialEffect::HelpHomework => {
+                                            notes.push(format!("{} helped {tname} with their homework.", sim.first));
+                                            commands.entity(*target).remove::<crate::rabbitholes::Homework>().queue_silenced(|mut e: EntityWorldMut| {
+                                                if let Some(mut g) = e.get_mut::<crate::rabbitholes::SchoolGrades>() {
+                                                    g.0 = (g.0 + 9.0).min(100.0);
+                                                }
+                                            });
+                                            did.write(crate::journal::Did::count(me, crate::journal::Stat::TutoringHours, minutes as f64 / 60.0));
+                                            let e = skills.0.entry("Logic").or_insert(0.0);
+                                            *e = (*e + minutes / 60.0 * 0.3 / (1.0 + *e * 0.25)).min(10.0);
                                         }
                                         SocialEffect::CheerUp | SocialEffect::BackRub => {
                                             let now = clock.minutes;

@@ -244,7 +244,9 @@ impl Plugin for AutoTestPlugin {
                   mut done: Local<bool>,
                   time: Res<Time>,
                   mut sel: Query<(&mut crate::interact::ActionQueue, &Transform, Option<&crate::visit::OnLot>, &mut crate::interact::Skills), With<crate::sim::Selected>>,
-                  objects: Query<(Entity, &crate::interact::GameObject, &Transform, Option<&crate::visit::LotObject>)>| {
+                  objects: Query<(Entity, &crate::interact::GameObject, &Transform, Option<&crate::visit::LotObject>)>,
+                  mut commands: Commands,
+                  named: Query<(Entity, &crate::sim::Sim)>| {
                     let Some(first) = &args.use_kind else { return };
                     let Ok((mut q, tf, on, mut skills)) = sel.single_mut() else { return };
                     // THEN_USE=<Kind>:<interaction>: once that's done, this.
@@ -280,6 +282,18 @@ impl Plugin for AutoTestPlugin {
                         info!("use test: Go Here {x},{z}");
                         q.0.clear();
                         q.push_player(crate::interact::Action::new("Go Here", crate::interact::ActionKind::GoHere(Vec2::new(x, z), 1), false));
+                        return;
+                    }
+                    // (`--use Help:<first name>`: they have homework, and are helped with it.)
+                    if let Some(who) = want.strip_prefix("Help:")
+                        && let Some((t, _)) = named.iter().find(|(_, s)| s.first.eq_ignore_ascii_case(who))
+                        && let Some(i) = crate::social::SOCIALS.iter().position(|s| s.effect == crate::social::SocialEffect::HelpHomework)
+                    {
+                        *done = true;
+                        info!("use test: Help with Homework ({who})");
+                        commands.entity(t).insert(crate::rabbitholes::Homework);
+                        q.0.clear();
+                        q.push_player(crate::interact::Action::new("Help with Homework", crate::interact::ActionKind::Social { target: t, social: i }, false));
                         return;
                     }
                     // (`--use Jog`: out jogging.)

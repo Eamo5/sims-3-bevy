@@ -106,10 +106,10 @@ installation is unreachable.
   has done with it (hours of strength training and cardio, friends and best friends, jokes
   that landed, dishes prepared and recipes known, fish caught and kinds of fish, harvests,
   repairs, upgrades, discoveries through the telescope, paintings, books and royalties) and
-  the game's skill challenges: Body Builder, Fitness Nut, Super Friendly, Everybody's Best
+  the game's skill challenges: Body Builder, Fitness Nut, Marathon Runner, Super Friendly, Everybody's Best
   Friend, Comedian, Star Chef, World-Class Chef, Menu Maven, Commercial Fisherman, Amateur
   Ichthyologist, Master Farmer, Botanical Boss, Electrician, Plumber, Tinkerer, Celestial
-  Explorer, Chess Grand Master, Brushmaster, Proficient Painter, Master Painter, Prolific
+  Explorer, Teacher Extraordinaire, Chess Grand Master, Brushmaster, Proficient Painter, Master Painter, Prolific
   Writer, Speed Writer and Specialist Writer, with the scripts' own thresholds (200 hours,
   150 fish, 50 repairs…) and the game's texts. Earning one brings the game's notice and,
   where there's something to change, its reward: Fitness Nuts aren't tired by cardio nor Body
@@ -307,7 +307,10 @@ installation is unreachable.
   out too: a little flame and a soft flickering light for a few hours.
 - **Homework**: children and teens come home from school (Monday to Thursday) with homework,
   and sit down at a table to do it (the game's homework animations; sooner for bookworms and
-  geniuses); done, it lifts their grades; left undone, it drags them down.
+  geniuses); done, it lifts their grades; left undone, it drags them down. A teen or grown-up
+  can Help with Homework (a Friendly social, offered while there's homework): it's done, with
+  better grades, the helper learns a little Logic, and the hours count towards Teacher
+  Extraordinaire (whose teachers get through it twice as fast).
 - **Dates**: Sims ask each other on dates; for a few hours the date keeps them company
   (flirting, chatting, complimenting), and it ends a Great Date or a Bad Date (the game's
   moodlets) by how much closer they've grown and how they feel.

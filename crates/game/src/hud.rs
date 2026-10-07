@@ -801,10 +801,12 @@ fn world_click(
                     .iter()
                     .enumerate()
                     .filter(|(_, s)| s.cat == cat && crate::social::available(s, &rel, actor_sim, sim, target_member, family.kin(actor_sim.id, sim.id).is_some()))
-                    // (Nothing more to teach a toddler who's learned it.)
+                    // (Nothing more to teach a toddler who's learned it; homework helped with only
+                    // when there's some.)
                     .filter(|(_, s)| match s.effect {
                         crate::social::SocialEffect::TeachWalk => !toddler_q.get(t).is_ok_and(|k| k.walks()),
                         crate::social::SocialEffect::TeachTalk => !toddler_q.get(t).is_ok_and(|k| k.talks()),
+                        crate::social::SocialEffect::HelpHomework => hw_q.contains(t),
                         _ => true,
                     })
                     .map(|(i, s)| (s.name.to_string(), ActionKind::Social { target: t, social: i }))

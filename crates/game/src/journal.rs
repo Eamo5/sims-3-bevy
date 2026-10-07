@@ -42,6 +42,7 @@ pub enum Stat {
     StarsFound,
     GuitarHours,
     KmJogged,
+    TutoringHours,
 }
 
 impl Stat {
@@ -63,6 +64,7 @@ impl Stat {
             Stat::StarsFound => "stars_found",
             Stat::GuitarHours => "guitar_hours",
             Stat::KmJogged => "km_jogged",
+            Stat::TutoringHours => "tutoring_hours",
         }
     }
 }
@@ -323,6 +325,14 @@ pub static CHALLENGES: &[Challenge] = &[
     ),
     ch(
         "Logic",
+        "Teacher Extraordinaire",
+        20.0,
+        Measure::Stat(Stat::TutoringHours),
+        "Teacher Extraordinaires have spent at least {0} hours tutoring children and students. Because of this, they are much more effective when tutoring others.",
+        "has spent enough hours tutoring others to complete the Teacher Extraordinaire Skill Challenge!",
+    ),
+    ch(
+        "Logic",
         "Chess Grand Master",
         5.0,
         Measure::ChessRank,
@@ -404,7 +414,7 @@ pub fn statistics(skill: &str) -> &'static [(&'static str, Measure)] {
             ("Plumbing objects repaired", Measure::Stat(Stat::PlumbingRepairs)),
             ("Different upgrades made", Measure::Kinds(Kinds::Upgrades)),
         ],
-        "Logic" => &[("Celestial bodies discovered", Measure::Stat(Stat::StarsFound)), ("Chess rank", Measure::ChessRank)],
+        "Logic" => &[("Celestial bodies discovered", Measure::Stat(Stat::StarsFound)), ("Hours tutoring", Measure::Stat(Stat::TutoringHours)), ("Chess rank", Measure::ChessRank)],
         "Painting" => &[("Paintings", Measure::Stat(Stat::Paintings)), ("Brilliant paintings", Measure::Stat(Stat::BrilliantPaintings)), ("Masterpieces", Measure::Stat(Stat::Masterpieces))],
         "Writing" => &[("Books written", Measure::BooksWritten), ("Royalties earned", Measure::Stat(Stat::Royalties)), ("Most in one genre", Measure::OneGenre)],
         _ => &[],
@@ -445,7 +455,7 @@ impl Measures<'_> {
 pub fn shown(m: Measure, v: f64) -> String {
     match m {
         Measure::Stat(Stat::Royalties) => format!("§{}", crate::lifetime::group(v as i64)),
-        Measure::Stat(Stat::StrengthHours | Stat::CardioHours | Stat::GuitarHours | Stat::KmJogged) => format!("{v:.1}"),
+        Measure::Stat(Stat::StrengthHours | Stat::CardioHours | Stat::GuitarHours | Stat::KmJogged | Stat::TutoringHours) => format!("{v:.1}"),
         Measure::ChessRank => crate::chess::RANKS[(v as usize).min(crate::chess::RANKS.len() - 1)].to_string(),
         _ => format!("{}", v as i64),
     }

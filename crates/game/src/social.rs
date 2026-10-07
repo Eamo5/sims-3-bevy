@@ -207,6 +207,8 @@ pub enum SocialEffect {
     CheerUp,
     /// A massage that leaves the other Sim comfortable.
     BackRub,
+    /// Helping a child or teen through their homework (it's done, and done well).
+    HelpHomework,
 }
 
 pub struct SocialDef {
@@ -246,8 +248,9 @@ const fn sd(name: &'static str, cat: SocialCat, minutes: f32, social: f32, fun: 
 }
 
 use SocialCat::*;
-pub static SOCIALS: [SocialDef; 51] = [
+pub static SOCIALS: [SocialDef; 52] = [
     SocialDef { autonomous: true, ..sd("Chat", Friendly, 25.0, 110.0, 10.0, 8.0, 0.0) },
+    SocialDef { effect: SocialEffect::HelpHomework, ..sd("Help with Homework", Friendly, 40.0, 60.0, -10.0, 5.0, 0.0) },
     SocialDef { autonomous: true, ..sd("Get to Know", Friendly, 15.0, 100.0, 5.0, 9.0, 0.0) },
     sd("Compliment", Friendly, 8.0, 80.0, 0.0, 7.0, 0.0),
     SocialDef { min_friendship: 15.0, autonomous: true, ..sd("Talk About Hobbies", Friendly, 20.0, 110.0, 15.0, 9.0, 0.0) },
@@ -348,6 +351,8 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
         SocialEffect::BreakUp => matches!(rel.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married),
         SocialEffect::MoveIn => !target_in_household && (rel.friendship >= 40.0 || rel.status != RelStatus::None),
         SocialEffect::AskToLeave => !target_in_household,
+        // (A teen or grown-up helps a child or teen; whether there's homework is for the menu.)
+        SocialEffect::HelpHomework => actor.age != Age::Child && matches!(target.age, Age::Child | Age::Teen),
         SocialEffect::WooHoo => matches!(rel.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married) || rel.romance >= 80.0,
         _ => true,
     }
