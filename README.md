@@ -302,6 +302,8 @@ installation is unreachable.
   reeling animations, rod in hand, catching what each spot holds by Fishing skill. Finds go in
   the finder's inventory, and the Collection Journal (J) shows everything found and still to
   find, how many the household holds, and sells them all.
+- **Bars**: *Make a Drink* at any of the catalogue's bars: the Sim pours from the blender,
+  blends, serves and sips, with the game's animations and props.
 - **Grills, coffee makers and alarm clocks** from the catalogue: a grill's *Grill ›* menu
   cooks the game's grilled recipes the Sim knows (hot dogs, tofu dogs, burgers, veggie
   burgers, grilled salmon, tri-tip) with the barbecue animations and serves them like a

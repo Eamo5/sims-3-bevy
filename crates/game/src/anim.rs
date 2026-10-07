@@ -78,22 +78,28 @@ impl ClipLibrary {
     }
 }
 
-/// The animation of the current interaction: an optional start clip played once, then loop
-/// clips (random variants of the given name prefixes). `side` picks the Sim's half of a
-/// two-Sim social (`_x` for the one starting it, `_y` for the other).
+/// The animation of the current interaction: an optional start clip played once (and then
+/// any steps, once each in order: making a drink, pour, blend, stop), then loop clips (random
+/// variants of the given name prefixes). `side` picks the Sim's half of a two-Sim social (`_x`
+/// for the one starting it, `_y` for the other).
 #[derive(Component, Clone, PartialEq, Debug)]
 pub struct ActionClip {
     pub start: Option<&'static str>,
+    pub steps: &'static [&'static str],
     pub loops: &'static [&'static str],
     pub side: Option<char>,
 }
 
 impl ActionClip {
     pub const fn new(start: Option<&'static str>, loops: &'static [&'static str]) -> Self {
-        Self { start, loops, side: None }
+        Self { start, steps: &[], loops, side: None }
+    }
+    /// A start clip, steps after it in order, then loops.
+    pub const fn steps(start: &'static str, steps: &'static [&'static str], loops: &'static [&'static str]) -> Self {
+        Self { start: Some(start), steps, loops, side: None }
     }
     pub const fn social(loops: &'static [&'static str], side: char) -> Self {
-        Self { start: None, loops, side: Some(side) }
+        Self { start: None, steps: &[], loops, side: Some(side) }
     }
 }
 
@@ -102,9 +108,9 @@ pub struct ClipPlayer {
     pub name: String,
     pub clip: Option<Arc<Clip>>,
     pub time: f32,
-    /// The script being played, and whether its start clip is done.
+    /// The script being played, and how far through its start and steps it is.
     script: Option<ActionClip>,
-    started: bool,
+    step: usize,
     /// Pose before the last clip change, faded out over a short blend.
     from: Vec<Transform>,
     blend: f32,
@@ -172,13 +178,21 @@ fn pose_script(pose: Pose, female: bool, child: bool) -> ActionClip {
     }
 }
 
-/// Picks the next clip of a script: the start clip once, then a random loop variant.
-fn next_clip(lib: &mut ClipLibrary, data: &Baked, script: &ActionClip, child: bool, started: bool) -> Option<String> {
-    if !started && let Some(s) = script.start {
+/// Picks the next clip of a script, and the step after it: the start clip and the steps once
+/// each, in order, then a random loop variant.
+fn next_clip(lib: &mut ClipLibrary, data: &Baked, script: &ActionClip, child: bool, mut step: usize) -> (Option<String>, usize) {
+    let sequence: Vec<&'static str> = script.start.into_iter().chain(script.steps.iter().copied()).collect();
+    while let Some(s) = sequence.get(step) {
+        step += 1;
         if let Some(n) = lib.variants(data, s, script.side, child).first() {
-            return Some(n.clone());
+            return (Some(n.clone()), step);
         }
     }
+    (next_loop(lib, data, script, child), step)
+}
+
+/// A random loop variant of a script.
+fn next_loop(lib: &mut ClipLibrary, data: &Baked, script: &ActionClip, child: bool) -> Option<String> {
     let mut all: Vec<String> = Vec::new();
     for p in script.loops {
         all.extend(lib.variants(data, p, script.side, child).iter().cloned());
@@ -215,14 +229,14 @@ pub fn drive_skeletons(
         let mut from_time = player.time;
         if changed || (ended && cycles) {
             if changed {
-                player.started = false;
+                player.step = 0;
                 // Sounds the old animation left looping stop with it.
                 cues.write(crate::sound::ClipCue { sim: entity, name: String::new(), action: s3formats::sim::SoundAction::StopLoop });
             }
-            // The start clip plays once; after that, loop variants.
-            let play_start = !player.started && script.start.is_some();
-            player.started = true;
-            if let Some(name) = next_clip(&mut lib, &data, &script, child, !play_start) {
+            // The start clip (and steps) play once; after that, loop variants.
+            let (next, step) = next_clip(&mut lib, &data, &script, child, player.step);
+            player.step = step;
+            if let Some(name) = next {
                 if name != player.name || changed {
                     // Snapshot the current pose for a cross-fade.
                     player.from = skel.joints.iter().map(|j| joints.get(*j).copied().unwrap_or_default()).collect();

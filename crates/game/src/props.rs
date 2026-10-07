@@ -48,6 +48,10 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("VGcontroller", "VideoGameSystemController", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("VGcontroller2", "VideoGameSystemController", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("vrGoggles", "VRGoggles", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("coffeeCup", "CoffeeCup", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("blender", "BlenderBar", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("glassBar01", "GlassBar", "b__L_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("glassBar", "GlassBar", "b__L_Hand_slot", [0.0; 3], [0.0; 3]),
     // (Whichever stuffed animal or toy is being played with.)
     ("stuffedAnimal", ANY, "b__R_carry_slot", [0.0; 3], [0.0; 3]),
 ];

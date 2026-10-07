@@ -114,6 +114,8 @@ pub enum ObjectKind {
     Sprinkler,
     /// A pool's diving board: Sims dive in for a swim.
     DivingBoard,
+    /// A bar: drinks made at it.
+    Bar,
     Other,
 }
 
@@ -136,6 +138,8 @@ impl ObjectKind {
             Self::Sprinkler
         } else if has("pools.divingboard") {
             Self::DivingBoard
+        } else if has("objects.counters.bar") && !has("+") {
+            Self::Bar
         } else if has("barbeque") {
             Self::Grill
         } else if has("hotbeveragemachine") {
@@ -251,6 +255,7 @@ impl ObjectKind {
             Self::SwingSet | Self::JungleGym | Self::DollHouse | Self::StuffedToy => "Kids",
             Self::Sprinkler => "Outdoors",
             Self::DivingBoard => "Outdoors",
+            Self::Bar => "Surfaces",
             Self::HotTub => "Plumbing",
             Self::Dresser => "Surfaces",
             Self::Table => "Surfaces",
@@ -598,6 +603,8 @@ static SPRINKLER: [InteractionDef; 3] = [
     // (Only while it's running.)
     InteractionDef { special: Special::PlayInSprinkler, ..def("Play in Sprinkler", 30.0, [0.0, 0.0, -6.0, 0.0, 0.0, 110.0], Pose::Use) },
 ];
+/// (Made, then drunk standing at the bar: a juice or smoothie, cheering and a little filling.)
+static BAR: [InteractionDef; 1] = [def("Make a Drink", 25.0, [40.0, -30.0, 10.0, 0.0, 0.0, 45.0], Pose::Use)];
 /// (A swim, begun with a dive.)
 static DIVING_BOARD: [InteractionDef; 1] = [InteractionDef {
     special: Special::Swim,
@@ -656,7 +663,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Eat" if kind == ObjectKind::Stool => A::new(Some("a2o_eat_barStoolIn_fork_start_x"), &["a2o_eat_barStoolIn_fork_neat_x"]),
         "Have Quick Meal" | "Microwave Dinner" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_eat_stand_fork_neat", "a2o_eat_stand_hand_neat"]),
         "Grab a Snack" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_eat_stand_hand_neat"]),
-        "Bake Birthday Cake" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_cook_counter_chop_x"]),
+        "Bake Birthday Cake" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_cuttingBoard_chop_loopMedSkill_x"]),
         "Grow Up" => A::new(None, &["a2o_birthdayCake_blowOut_counter_x"]),
         "Cook Dinner" => A::new(
             Some("a2o_stove_fryingPan_start_fromNeutral_x"),
@@ -704,6 +711,11 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
             ],
         ),
         // (Children's: grown-ups play with toys only with a little one.)
+        "Make a Drink" => A::steps(
+            "a2o_bar_makeDrink_start_x",
+            &["a2o_bar_makeDrink_pour_x", "a2o_bar_makeDrink_blend_x", "a2o_bar_makeDrink_stop_x"],
+            &["a2o_hotBeverageMachine_drink_loopSip_standing", "a2o_hotBeverageMachine_drink_loopLongSip_standing"],
+        ),
         "Dive In" => A::new(
             Some("a2o_divingBoard_getIn_x"),
             &["a2o_divingBoard_dive_x", "a2o_divingBoard_diveBasic_x", "a2o_divingBoard_diveBeginner_x", "a2o_divingBoard_cannonBall_x"],
@@ -869,6 +881,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::StuffedToy => &STUFFED_TOY,
         ObjectKind::Sprinkler => &SPRINKLER,
         ObjectKind::DivingBoard => &DIVING_BOARD,
+        ObjectKind::Bar => &BAR,
         _ => &[],
     }
 }

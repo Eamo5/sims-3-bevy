@@ -237,6 +237,15 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "c2o_sprinklerGarden_playWith_",
     "a2o_divingBoard_",
     "c2o_divingBoard_",
+    "a2o_bar_makeDrink_",
+    "a2o_hotBeverageMachine_fill",
+    "a2o_bbq_grill_",
+    "a2o_cuttingBoard_chop_",
+    "a2o_homework_table_",
+    "c2o_homework_table_",
+    "a2o_trashCan_empty",
+    "c2o_trashCan_empty",
+    "a2o_hotBeverageMachine_drink_loop",
     "a2b_crib_pullOut",
     "a2b_babyBottle_feed",
     "a2b_changeDiaper",
@@ -277,6 +286,10 @@ pub const PROP_ACTORS: &[&str] = &[
     "VGcontroller2",
     "vrGoggles",
     "stuffedAnimal",
+    "coffeeCup",
+    "blender",
+    "glassBar01",
+    "glassBar",
 ];
 
 /// Whether a clip should be baked.
