@@ -63,7 +63,9 @@ pub struct SavedSim {
     pub relationships: Vec<SavedRel>,
     #[serde(default)]
     pub lifetime_happiness: u32,
-    /// Chosen hair, top, bottom, outfit and shoes, then beard, glasses, lipstick and eye shadow.
+    /// Chosen hair, top, bottom, outfit and shoes, then beard, glasses, lipstick and eye shadow,
+    /// then the top, bottom, outfit and shoes of their formal wear, sleepwear, athletic wear and
+    /// swimwear (saves from before those could be chosen stop at the eye shadow).
     #[serde(default)]
     pub outfit: Vec<Option<(u32, u32, u64)>>,
     #[serde(default)]
@@ -273,7 +275,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         job: None,
         relationships: Vec::new(),
         lifetime_happiness: 0,
-        outfit: vec![sim.outfit.hair, sim.outfit.top, sim.outfit.bottom, sim.outfit.full, sim.outfit.shoes, sim.outfit.beard, sim.outfit.glasses, sim.outfit.lipstick, sim.outfit.eyeshadow],
+        outfit: saved_outfit(&sim.outfit),
         rewards: Vec::new(),
         aging: None,
         pregnancy: None,
@@ -292,14 +294,35 @@ fn saved_look(sim: &Sim) -> SavedSim {
     }
 }
 
+/// A Sim's chosen parts as saved (the other outfits' only when any were chosen, as before).
+fn saved_outfit(o: &OutfitChoice) -> Vec<Option<(u32, u32, u64)>> {
+    let mut v = vec![o.hair, o.top, o.bottom, o.full, o.shoes, o.beard, o.glasses, o.lipstick, o.eyeshadow];
+    if o.other.iter().any(|c| *c != crate::sim::Clothes::default()) {
+        v.extend(o.other.iter().flat_map(|c| [c.top, c.bottom, c.full, c.shoes]));
+    }
+    v
+}
+
 impl SaveGame {
     fn sim(s: &SavedSim) -> Sim {
         let c = |v: [f32; 3]| Color::srgb(v[0], v[1], v[2]);
         let o = |i: usize| s.outfit.get(i).copied().flatten();
+        let other = |n: usize| crate::sim::Clothes { top: o(9 + n * 4), bottom: o(10 + n * 4), full: o(11 + n * 4), shoes: o(12 + n * 4) };
         Sim {
             id: s.id,
             look: s.look,
-            outfit: OutfitChoice { hair: o(0), top: o(1), bottom: o(2), full: o(3), shoes: o(4), beard: o(5), glasses: o(6), lipstick: o(7), eyeshadow: o(8) },
+            outfit: OutfitChoice {
+                hair: o(0),
+                top: o(1),
+                bottom: o(2),
+                full: o(3),
+                shoes: o(4),
+                beard: o(5),
+                glasses: o(6),
+                lipstick: o(7),
+                eyeshadow: o(8),
+                other: [other(0), other(1), other(2), other(3)],
+            },
             first: s.first.clone(),
             last: s.last.clone(),
             female: s.female,
@@ -587,7 +610,7 @@ fn save_game(
                 })
                 .collect(),
             lifetime_happiness: wishes.map_or(0, |w| w.points),
-            outfit: vec![sim.outfit.hair, sim.outfit.top, sim.outfit.bottom, sim.outfit.full, sim.outfit.shoes, sim.outfit.beard, sim.outfit.glasses, sim.outfit.lipstick, sim.outfit.eyeshadow],
+            outfit: saved_outfit(&sim.outfit),
             rewards: wishes.map(|w| w.rewards.clone()).unwrap_or_default(),
             aging: aging.map(|a| (a.days, a.elder_span)),
             pregnancy: pregnancy.map(|p| (p.since, p.other_parent.and_then(|o| ids.get(&o).copied()), p.stage)),
@@ -919,6 +942,25 @@ mod tests {
         let o = SavedObject { item: Some(item), ..old };
         let back: SavedObject = serde_json::from_str(&serde_json::to_string(&o).unwrap()).unwrap();
         assert!(back.item.is_some_and(|i| i.key == "painting:1:3_2_Medium#7" && i.worth == 210));
+    }
+
+    #[test]
+    fn other_outfits_saved_and_old_saves_load() {
+        let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(3);
+        let mut sim = random_sim(&mut rng, "Test", Some(true), Age::Adult);
+        // (Nothing chosen beyond the everyday look: saved as before.)
+        assert_eq!(saved_outfit(&sim.outfit).len(), 9);
+        sim.outfit.wear(crate::simbody::OutfitKind::Formal, s3formats::sim::CT_BODY, (1, 0, 7));
+        sim.outfit.wear(crate::simbody::OutfitKind::Swimwear, s3formats::sim::CT_SHOES, (1, 0, 9));
+        let saved = saved_look(&sim);
+        assert_eq!(saved.outfit.len(), 25);
+        let back = SaveGame::sim(&serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap());
+        assert_eq!(back.outfit, sim.outfit);
+        assert_eq!(back.outfit.clothes(crate::simbody::OutfitKind::Formal).full, Some((1, 0, 7)));
+        // An old save's nine: the other outfits as their look gives them.
+        let mut old = saved.clone();
+        old.outfit.truncate(9);
+        assert_eq!(SaveGame::sim(&old).outfit.other, [crate::sim::Clothes::default(); 4]);
     }
 
     #[test]

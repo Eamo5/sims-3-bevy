@@ -94,11 +94,68 @@ pub struct OutfitChoice {
     pub glasses: Option<s3bake::Key>,
     pub lipstick: Option<s3bake::Key>,
     pub eyeshadow: Option<s3bake::Key>,
+    /// The clothes chosen for their other outfits (in `OTHER_OUTFITS`' order).
+    pub other: [Clothes; 4],
 }
+
+/// Clothes chosen for one of a Sim's outfits (none chosen: as their look gives them).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Clothes {
+    pub top: Option<s3bake::Key>,
+    pub bottom: Option<s3bake::Key>,
+    pub full: Option<s3bake::Key>,
+    pub shoes: Option<s3bake::Key>,
+}
+
+/// The outfits besides their everyday clothes that can be chosen, as the game's Create a Sim
+/// has them.
+pub const OTHER_OUTFITS: [crate::simbody::OutfitKind; 4] =
+    [crate::simbody::OutfitKind::Formal, crate::simbody::OutfitKind::Sleepwear, crate::simbody::OutfitKind::Athletic, crate::simbody::OutfitKind::Swimwear];
 
 impl OutfitChoice {
     /// A face choice of nothing at all.
     pub const NONE: s3bake::Key = (0, 0, 0);
+
+    /// The clothes chosen for an outfit.
+    pub fn clothes(&self, kind: crate::simbody::OutfitKind) -> Clothes {
+        match OTHER_OUTFITS.iter().position(|k| *k == kind) {
+            Some(i) => self.other[i],
+            None => Clothes { top: self.top, bottom: self.bottom, full: self.full, shoes: self.shoes },
+        }
+    }
+
+    /// Chooses a piece of clothing for an outfit (a top or bottom in place of an all-in-one,
+    /// and the other way round).
+    pub fn wear(&mut self, kind: crate::simbody::OutfitKind, t: u32, key: s3bake::Key) {
+        use s3formats::sim::{CT_BODY, CT_BOTTOM, CT_SHOES, CT_TOP};
+        let mut c = self.clothes(kind);
+        match t {
+            CT_TOP => {
+                c.top = Some(key);
+                c.full = None;
+            }
+            CT_BOTTOM => {
+                c.bottom = Some(key);
+                c.full = None;
+            }
+            CT_BODY => {
+                c.full = Some(key);
+                c.top = None;
+                c.bottom = None;
+            }
+            CT_SHOES => c.shoes = Some(key),
+            _ => return,
+        }
+        match OTHER_OUTFITS.iter().position(|k| *k == kind) {
+            Some(i) => self.other[i] = c,
+            None => {
+                self.top = c.top;
+                self.bottom = c.bottom;
+                self.full = c.full;
+                self.shoes = c.shoes;
+            }
+        }
+    }
 }
 
 impl Sim {

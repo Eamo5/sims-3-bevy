@@ -140,7 +140,7 @@ fn planner_ui(
         commands.entity(r).despawn();
     }
     let Ok(sim) = sims.get(p.sim) else { return };
-    let list = crate::cas::parts_for(&cas, sim, p.tab);
+    let list = crate::cas::parts_for(&cas, sim, p.tab, crate::simbody::OutfitKind::Everyday);
     let pages = list.len().div_ceil(PAGE).max(1);
     p.page = p.page.min(pages - 1);
     // What they're wearing of this kind.

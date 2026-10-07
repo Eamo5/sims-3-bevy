@@ -2089,6 +2089,42 @@ fn ui_flow(
         }
         (66, AppState::CreateHousehold, _) if since > 1.5 => {
             shot(&mut commands, "2t_tops");
+            *stage = (86, now);
+        }
+        // Dressing the formal wear: its tops, and the third of them worn.
+        (86, AppState::CreateHousehold, _) if since > 1.0 => {
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == crate::home::CasAction::Wear(1)) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (80, now);
+        }
+        (80, AppState::CreateHousehold, _) if since > 1.5 => {
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == crate::home::CasAction::Pick(2)) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (81, now);
+        }
+        (81, AppState::CreateHousehold, _) if since > 1.5 => {
+            shot(&mut commands, "2f_formal");
+            *stage = (84, now);
+        }
+        (84, AppState::CreateHousehold, _) if since > 1.0 => {
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == crate::home::CasAction::Wear(4)) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (82, now);
+        }
+        (82, AppState::CreateHousehold, _) if since > 1.5 => {
+            shot(&mut commands, "2s_swimwear");
+            *stage = (85, now);
+        }
+        (85, AppState::CreateHousehold, _) if since > 1.0 => {
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == crate::home::CasAction::Wear(0)) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (83, now);
+        }
+        (83, AppState::CreateHousehold, _) if since > 0.8 => {
             // The second Sim's face: a beard, glasses and green eyes.
             if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::Select(1))) {
                 *i = Interaction::Pressed;

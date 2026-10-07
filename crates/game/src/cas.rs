@@ -102,11 +102,22 @@ pub enum CasAction {
     Tie(usize, usize),
     /// A face part of this clothing type: entry `i` of its list (`usize::MAX`: none).
     FacePart(u32, usize),
+    /// Dress the outfit `i` of `WEAR` (everyday, formal...).
+    Wear(usize),
     Done,
 }
 
 /// Styles per page (picture tiles).
 const PAGE: usize = 20;
+
+/// The outfits Create a Sim dresses, as the game's.
+const WEAR: [crate::simbody::OutfitKind; 5] = [
+    crate::simbody::OutfitKind::Everyday,
+    crate::simbody::OutfitKind::Formal,
+    crate::simbody::OutfitKind::Sleepwear,
+    crate::simbody::OutfitKind::Athletic,
+    crate::simbody::OutfitKind::Swimwear,
+];
 
 #[derive(Resource)]
 struct CasScene {
@@ -126,6 +137,8 @@ struct CasScene {
     /// How far the editing panel is scrolled down.
     scroll: f32,
     portrait: Option<Handle<Image>>,
+    /// The outfit being dressed (and shown).
+    wear: crate::simbody::OutfitKind,
 }
 
 #[derive(Component)]
@@ -174,6 +187,7 @@ fn setup_cas(
         browsing: false,
         portrait: None,
         scroll: 0.0,
+        wear: crate::simbody::OutfitKind::Everyday,
     });
     // The stage: camera, lights, pedestal.
     // (Ambient light belongs to the camera: alone it would bring a camera of its own, and the
@@ -228,18 +242,23 @@ fn age_bits(a: Age) -> u32 {
     }
 }
 
-/// CAS parts of a type that fit the Sim, sorted by name.
-pub(crate) fn parts_for(cas: &CasData, sim: &Sim, t: u32) -> Vec<(Key, String)> {
+/// CAS parts of a type that fit the Sim (clothes for an outfit), sorted by name.
+pub(crate) fn parts_for(cas: &CasData, sim: &Sim, t: u32, kind: crate::simbody::OutfitKind) -> Vec<(Key, String)> {
     let age = age_bits(sim.age);
     let gender = if sim.female { s3formats::sim::GENDER_FEMALE } else { s3formats::sim::GENDER_MALE };
     let mut v: Vec<(Key, String)> = cas
         .parts
         .iter()
         .filter(|p| p.baked && p.clothing_type == t && p.age_gender & age != 0 && p.age_gender & gender != 0 && !crate::simbody::is_uniform(&p.name))
-        // Clothes for every day (the swimwear, sleepwear and gym clothes are worn for those).
+        // Clothes for the outfit (every day: not the swimwear that's everyday wear too).
         .filter(|p| {
             !matches!(t, CT_TOP | CT_BOTTOM | CT_BODY | CT_SHOES)
-                || (p.category & s3formats::sim::CAT_EVERYDAY != 0 && p.category & s3formats::sim::CAT_SWIM == 0)
+                || match kind {
+                    crate::simbody::OutfitKind::Everyday | crate::simbody::OutfitKind::Career => {
+                        p.category & s3formats::sim::CAT_EVERYDAY != 0 && p.category & s3formats::sim::CAT_SWIM == 0
+                    }
+                    k => p.category & k.category() != 0,
+                }
         })
         .map(|p| (p.key, pretty_part(&p.name)))
         .collect();
@@ -273,7 +292,7 @@ fn pretty_part(name: &str) -> String {
 
 /// The part of a type the Sim is wearing now.
 fn worn(scene: &CasScene, sim: &Sim, t: u32) -> Option<Key> {
-    let outfit = crate::simbody::pick_outfit(&scene.cas, sim, &mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look));
+    let outfit = crate::simbody::pick_outfit_for(&scene.cas, sim, &mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look), scene.wear);
     match t {
         CT_HAIR => outfit.hair.map(|p| p.key),
         _ => outfit.body.iter().find(|p| p.clothing_type == t).map(|p| p.key),
@@ -396,28 +415,19 @@ fn cas_actions(
             }
             CasAction::Pick(i) => {
                 if let Some(t) = scene.tab.clothing_type() {
-                    let list = parts_for(&scene.cas, &pending.members[k], t);
+                    let list = parts_for(&scene.cas, &pending.members[k], t, scene.wear);
                     if let Some((key, _)) = list.get(scene.page * PAGE + i) {
                         let o = &mut pending.members[k].outfit;
                         match t {
                             CT_HAIR => o.hair = Some(*key),
-                            CT_TOP => {
-                                o.top = Some(*key);
-                                o.full = None;
-                            }
-                            CT_BOTTOM => {
-                                o.bottom = Some(*key);
-                                o.full = None;
-                            }
-                            CT_BODY => {
-                                o.full = Some(*key);
-                                o.top = None;
-                                o.bottom = None;
-                            }
-                            _ => o.shoes = Some(*key),
+                            _ => o.wear(scene.wear, t, *key),
                         }
                     }
                 }
+            }
+            CasAction::Wear(i) => {
+                scene.wear = WEAR[i.min(WEAR.len() - 1)];
+                scene.page = 0;
             }
             CasAction::Trait(i) => {
                 // Toggle trait i: remove it, or add it if there's a free slot and it fits.
@@ -464,7 +474,7 @@ fn cas_actions(
                 scene.selected = 0;
             }
             CasAction::FacePart(t, i) => {
-                let list = parts_for(&scene.cas, &pending.members[k], t);
+                let list = parts_for(&scene.cas, &pending.members[k], t, crate::simbody::OutfitKind::Everyday);
                 let key = if i == usize::MAX { Some(crate::sim::OutfitChoice::NONE) } else { list.get(i).map(|p| p.0) };
                 let o = &mut pending.members[k].outfit;
                 match t {
@@ -524,7 +534,8 @@ fn rebuild_model(
         commands.entity(m).despawn();
     }
     let Some(sim) = pending.members.get(scene.selected).cloned() else { return };
-    let outfit = crate::simbody::pick_outfit(&scene.cas, &sim, &mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look));
+    // (In the outfit being dressed.)
+    let outfit = crate::simbody::pick_outfit_for(&scene.cas, &sim, &mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look), scene.wear);
     let Some(model) = crate::simbody::build_sim_model(&scene.baked, &scene.cas, &sim, &outfit, crate::simbody::tone_of(&sim)) else {
         warn!("CAS: couldn't build a body for {}", sim.first);
         return;
@@ -990,7 +1001,7 @@ fn rebuild_ui(
                         }
                     });
                     for (t, title, current) in sections {
-                        let list = parts_for(&scene.cas, &sim, t);
+                        let list = parts_for(&scene.cas, &sim, t, crate::simbody::OutfitKind::Everyday);
                         p.spawn(text(title, 16.0, Color::WHITE));
                         p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(5.0), row_gap: Val::Px(5.0), ..default() }).with_children(|grid| {
                             let none = current == Some(crate::sim::OutfitChoice::NONE);
@@ -1025,7 +1036,15 @@ fn rebuild_ui(
                 }
                 tab => {
                     let t = tab.clothing_type().unwrap();
-                    let list = parts_for(&scene.cas, &sim, t);
+                    // Clothes are chosen for each outfit: everyday, formal, sleepwear, athletic, swimwear.
+                    if t != CT_HAIR {
+                        p.spawn(Node { column_gap: Val::Px(6.0), ..default() }).with_children(|row| {
+                            for (i, k) in WEAR.iter().enumerate() {
+                                button(row, k.label().to_string(), CasAction::Wear(i), Val::Px(92.0), *k == scene.wear, 13.0);
+                            }
+                        });
+                    }
+                    let list = parts_for(&scene.cas, &sim, t, if t == CT_HAIR { crate::simbody::OutfitKind::Everyday } else { scene.wear });
                     let current = worn(&scene, &sim, t);
                     let pages = list.len().div_ceil(PAGE).max(1);
                     let page = scene.page.min(pages - 1);

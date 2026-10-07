@@ -187,6 +187,17 @@ impl OutfitKind {
             Self::Career => "Career",
         }
     }
+
+    /// The CAS parts' category flag for clothes of this outfit.
+    pub fn category(self) -> u32 {
+        match self {
+            Self::Everyday | Self::Career => s3formats::sim::CAT_EVERYDAY,
+            Self::Swimwear => s3formats::sim::CAT_SWIM,
+            Self::Sleepwear => s3formats::sim::CAT_SLEEP,
+            Self::Athletic => s3formats::sim::CAT_ATHLETIC,
+            Self::Formal => s3formats::sim::CAT_FORMAL,
+        }
+    }
 }
 
 /// The outfit a Sim chose to change into at a dresser: kept on until it's time for another.
@@ -256,14 +267,7 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
         return pick_outfit_for(cas, sim, rng, OutfitKind::Everyday);
     }
     let swim = kind != OutfitKind::Everyday;
-    let cat = match kind {
-        OutfitKind::Everyday => s3formats::sim::CAT_EVERYDAY,
-        OutfitKind::Swimwear => s3formats::sim::CAT_SWIM,
-        OutfitKind::Sleepwear => s3formats::sim::CAT_SLEEP,
-        OutfitKind::Athletic => s3formats::sim::CAT_ATHLETIC,
-        OutfitKind::Formal => s3formats::sim::CAT_FORMAL,
-        OutfitKind::Career => s3formats::sim::CAT_EVERYDAY,
-    };
+    let cat = kind.category();
     let age = age_bits(sim.age);
     let gender = if sim.female { GENDER_FEMALE } else { GENDER_MALE };
     let fits = |e: &&CasPartInfo| e.baked && e.age_gender & age != 0 && e.age_gender & gender != 0;
@@ -352,11 +356,9 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
     let random_top = tops.choose(rng).map(|f| (*f).clone());
     let random_bottom = bottoms.choose(rng).map(|f| (*f).clone());
     let random_shoes = of_type(CT_SHOES).choose(rng).map(|f| (*f).clone());
-    let (ct, cb, cf) = if swim {
-        (None, None, None)
-    } else {
-        (chosen(sim.outfit.top, CT_TOP), chosen(sim.outfit.bottom, CT_BOTTOM), chosen(sim.outfit.full, CT_BODY))
-    };
+    // (The clothes chosen for the outfit in Create a Sim or at a dresser.)
+    let picked = sim.outfit.clothes(kind);
+    let (ct, cb, cf) = (chosen(picked.top, CT_TOP), chosen(picked.bottom, CT_BOTTOM), chosen(picked.full, CT_BODY));
     // (Swimming, men wear trunks and a bare chest, women a swimsuit or a two-piece; pyjamas
     // are mostly all-in-ones.)
     let use_full = match kind {
@@ -379,7 +381,7 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
         body.extend(random_bottom);
         body.extend(random_top);
     }
-    body.extend(if swim { random_shoes } else { chosen(sim.outfit.shoes, CT_SHOES).or(random_shoes) });
+    body.extend(chosen(picked.shoes, CT_SHOES).or(random_shoes));
     // (Glasses come off for a swim.)
     let glasses = glasses.filter(|_| kind != OutfitKind::Swimwear);
     let face_layers = [lipstick, eyeshadow].into_iter().flatten().filter_map(|p| p.layer).collect();

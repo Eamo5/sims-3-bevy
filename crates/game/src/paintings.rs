@@ -281,6 +281,7 @@ mod tests {
             ],
             canvases: vec![CanvasInfo::default(); 3],
             face: (0, 0, 0),
+            easels: Vec::new(),
         }
     }
 
