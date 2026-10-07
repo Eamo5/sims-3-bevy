@@ -442,6 +442,15 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     // indoors where walls enclose them, porches and paving elsewhere.
     let mut floors = Vec::new();
     let floor_palette = read(ld::T_FLOOR_PALETTE, ld::G_FLOOR_PALETTE).and_then(|d| ld::parse_floor_palette(&d).ok()).unwrap_or_default();
+    // (A pool's tiles, on the level below the ground: the ground's outdoor tiles over them are
+    // its water's surface, not paving.)
+    let pool_below: std::collections::HashSet<(u32, u32)> = match (ground_index, floor_grid.as_ref()) {
+        (1.., Some(g)) => (0..g.width.min(w + 1))
+            .flat_map(|x| (0..g.depth.min(d + 1)).map(move |z| (x, z)))
+            .filter(|&(x, z)| g.quad(ground_index - 1, x, z).is_some_and(|q| q.iter().any(|v| *v != 0)))
+            .collect(),
+        _ => Default::default(),
+    };
     let mut floor_cover = |gl: u32, x: u32, z: u32| -> [u16; 4] {
         let Some(q) = floor_grid.as_ref().and_then(|g| g.quad(gl, x, z)) else { return [NO_COVER; 4] };
         q.map(|id| match floor_palette.get(&(id as u32)) {
@@ -484,8 +493,8 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
                 _ => (ROOM_PORCH, 0),
             };
             let cover = floor_cover(gl, x, z);
-            // (A tile with no covering outdoors is no floor at all.)
-            if kind == ROOM_PORCH && floor_grid.is_some() && cover.iter().all(|&c| c == NO_COVER) {
+            // (A tile with no covering outdoors is no floor at all; nor one over a pool.)
+            if kind == ROOM_PORCH && floor_grid.is_some() && (cover.iter().all(|&c| c == NO_COVER) || (gl == ground_index && pool_below.contains(&(x, z)))) {
                 continue;
             }
             // (Its own height only where it isn't the storey's.)
@@ -498,7 +507,7 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     // foundation (elsewhere the ground level is the ground floor's, done above).
     for &(x, z, mask, _, gl) in storeys.get(&0).into_iter().flatten() {
         let cover = floor_cover(gl, x, z);
-        if cover.iter().all(|&c| c == NO_COVER) {
+        if cover.iter().all(|&c| c == NO_COVER) || pool_below.contains(&(x, z)) {
             continue;
         }
         floors.push(FloorBaked { level: 0, x: x as u16, z: z as u16, mask, kind: ROOM_PORCH, region: 0, cover, y: None });
