@@ -1992,6 +1992,54 @@ const NEARBY_OUT: f32 = 95.0;
 const ROOF_DISTANCE: f32 = 42.0;
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+/// A household played before's home as they left it: the lot's house (or, on a lot that had
+/// none, nothing) with their building and painting done, the furniture they bought, and none
+/// they sold. (`script` names a catalogue object's script, for doors and windows.)
+pub fn dormant_building(world: &crate::loading::WorldInfo, lot: usize, game: &crate::save::SaveGame, script: impl Fn(Key) -> String) -> Option<LotBuildingBaked> {
+    let l = world.lots.get(lot)?;
+    let center = crate::home::lot_center(l);
+    let mut b = world.buildings.get(&lot).cloned().unwrap_or_else(|| empty_building(lot, l, world.heightmap.sample(center.x, center.z)));
+    for op in &game.paint {
+        apply_paint(&mut b, op);
+    }
+    b.objects.retain(|o| !game.removed.iter().any(|r| r.objd == o.objd && Vec3::from(r.position).distance(Vec3::from(o.position)) < 0.1));
+    let (s, c) = l.rotation.sin_cos();
+    // (On a lot the world left empty, the starter furniture they moved in with, less what they
+    // sold.)
+    if !world.buildings.get(&lot).is_some_and(|b| b.is_house()) {
+        for (objd, p, q) in crate::home::starter_furniture(l, &world.heightmap) {
+            if game.removed.iter().any(|r| r.objd == objd && Vec3::from(r.position).xz().distance(p.xz()) < 0.1) {
+                continue;
+            }
+            let (dx, dz) = (p.x - l.corner[0], p.z - l.corner[2]);
+            b.objects.push(s3bake::types::LotObjectBaked {
+                objd,
+                position: p.to_array(),
+                rotation: q.to_array(),
+                script: script(objd),
+                level: 1,
+                local: [dx * c - dz * s, dx * s + dz * c],
+                design: None,
+            });
+        }
+    }
+    for o in &game.bought {
+        let p = o.position;
+        let (dx, dz) = (p[0] - l.corner[0], p[2] - l.corner[2]);
+        let level = b.levels.iter().enumerate().skip(1).filter(|(_, y)| p[1] >= **y - 0.3).map(|(i, _)| i as u8).last().unwrap_or(0);
+        b.objects.push(s3bake::types::LotObjectBaked {
+            objd: o.objd,
+            position: p,
+            rotation: o.rotation,
+            script: script(o.objd),
+            level,
+            local: [dx * c - dz * s, dx * s + dz * c],
+            design: o.design_texture(),
+        });
+    }
+    Some(b)
+}
+
 fn stream_nearby_lots(
     mut commands: Commands,
     mut nearby: ResMut<NearbyLots>,
@@ -2005,6 +2053,7 @@ fn stream_nearby_lots(
     imposters: Query<(Entity, &LotImposter)>,
     mut layers: Query<(&ImposterLayer, &ChildOf, &mut Visibility)>,
     visited: Option<Res<crate::visit::VisitedLot>>,
+    dormant: Res<crate::household::Dormant>,
 ) {
     let Ok(cam) = cams.single() else { return };
     let active_lot = active.as_ref().map(|a| a.lot);
@@ -2025,19 +2074,26 @@ fn stream_nearby_lots(
     }
     // Bring in the nearest lot not yet shown (one per frame).
     if zoomed_in {
+        // (The households played before's homes too, as they left them: on an empty lot, what
+        // they built.)
         let next = world
             .data
             .buildings
             .keys()
             .copied()
-            .filter(|i| Some(*i) != active_lot && Some(*i) != visited_lot && !nearby.spawned.contains_key(i))
+            .chain(dormant.0.iter().map(|d| d.lot_index))
+            .filter(|i| *i < world.data.lots.len() && Some(*i) != active_lot && Some(*i) != visited_lot && !nearby.spawned.contains_key(i))
             .map(|i| (i, lot_center(i).xz().distance(cam.focus.xz())))
             .filter(|(_, d)| *d < NEARBY_IN)
             .min_by(|a, b| a.1.total_cmp(&b.1));
         if let Some((i, _)) = next {
             let root = commands.spawn((Transform::IDENTITY, Visibility::default(), DespawnOnExit(AppState::InGame))).id();
             let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-            spawn_building(&mut commands, &mut assets, &mut ctx, &catalog, &world.data.buildings[&i], &world.data.lots[i], Some(root), false);
+            let script = |k: Key| data.0.catalog.iter().find(|c| c.objd == k).map(|c| c.script.clone()).unwrap_or_default();
+            let left = dormant.0.iter().find(|d| d.lot_index == i).and_then(|d| dormant_building(&world.data, i, d, script));
+            if let Some(b) = left.as_ref().or(world.data.buildings.get(&i)) {
+                spawn_building(&mut commands, &mut assets, &mut ctx, &catalog, b, &world.data.lots[i], Some(root), false);
+            }
             nearby.spawned.insert(i, root);
         }
     }

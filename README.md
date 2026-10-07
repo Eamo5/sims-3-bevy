@@ -339,7 +339,9 @@ installation is unreachable.
   same town, with the town's story and family tree as they stand. A household played before
   picks up where it was left; a town family moves into their own home. Who knew whom goes
   across both ways, and the families played before are about town while another is played
-  (the town's story leaves them as they were). Changing doesn't save the game by itself.
+  (the town's story leaves them as they were); their homes stand as they left them, with the
+  walls and floors they built and painted and the furniture they bought (and not what they
+  sold). Changing doesn't save the game by itself.
 - **Story progression**: the rest of the town lives on. Each morning the world's other Sims
   grow older (elders passing away in time), single grown-ups pair off and couples marry,
   married couples have babies, and grown-ups find jobs and are promoted. The household hears

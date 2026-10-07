@@ -2571,18 +2571,28 @@ fn auto_save(
 
 /// SWITCH_EVERY=<secs>: the household is changed (as by the pause menu's Change Household) that
 /// long after each one moves in, ANSWER=<n> choosing which; SWITCH_SAVE=1 saves a few seconds
-/// after each one moves in.
+/// after each one moves in; CAM_LOT=<lot name part> looks at that lot once each has moved in.
 fn auto_switch(
     time: Res<Time>,
     household: Option<Res<crate::interact::Household>>,
     mut since: Local<Option<(String, f32, bool, bool)>>,
     mut ask: MessageWriter<crate::household::ChooseHousehold>,
     mut save: MessageWriter<crate::save::SaveRequest>,
+    (world, mut cams): (Res<crate::loading::CurrentWorld>, Query<&mut crate::camera::SimsCamera>),
 ) {
     let Some(every) = std::env::var("SWITCH_EVERY").ok().and_then(|v| v.parse::<f32>().ok()) else { return };
     let Some(h) = household else { return };
     if since.as_ref().is_none_or(|s| s.0 != h.name) {
         *since = Some((h.name.clone(), time.elapsed_secs(), false, false));
+    }
+    if let Ok(want) = std::env::var("CAM_LOT")
+        && since.as_ref().is_some_and(|s| time.elapsed_secs() - s.1 > 3.0 && time.elapsed_secs() - s.1 < 3.5)
+        && let Some(i) = world.data.lots.iter().position(|l| l.internal_name.to_ascii_lowercase().contains(&want.to_ascii_lowercase()))
+        && let Ok(mut c) = cams.single_mut()
+    {
+        c.look_at(crate::home::lot_center(&world.data.lots[i]));
+        c.distance = 34.0;
+        c.pitch = 0.7;
     }
     let Some((_, t0, saved, asked)) = since.as_mut() else { return };
     let t = time.elapsed_secs() - *t0;

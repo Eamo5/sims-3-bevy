@@ -407,6 +407,21 @@ fn draw_home_lot(mut gizmos: Gizmos, world: Res<CurrentWorld>, household: Option
 pub struct MoveInRequest(pub usize);
 
 /// Starter furniture: (OBJD instance, local x, local z, yaw degrees). Local origin = lot centre.
+/// The starter furniture an empty lot is moved into with (as `move_in` sets it out): each
+/// piece's key, where it stands (on the ground; the computer on its desk) and its turn.
+pub fn starter_furniture(lot: &LotInfo, hm: &s3formats::world::Heightmap) -> Vec<(Key, Vec3, Quat)> {
+    let rot = Quat::from_rotation_y(lot.rotation);
+    let center = lot_center(lot);
+    STARTER
+        .iter()
+        .map(|&(inst, x, z, yaw)| {
+            let p = center + rot * Vec3::new(x, 0.0, z);
+            let desk = if inst == 0x369 { 0.75 } else { 0.0 };
+            ((s3pkg::types::OBJD, 0, inst), Vec3::new(p.x, hm.sample(p.x, p.z) + desk, p.z), Quat::from_rotation_y(lot.rotation + yaw.to_radians()))
+        })
+        .collect()
+}
+
 const STARTER: [(u64, f32, f32, f32); 22] = [
     (0x5BE, -6.6, -3.2, 0.0),   // fridge
     (0x919, -5.4, -3.2, 0.0),   // stove
