@@ -236,7 +236,10 @@ impl NavGrid {
                 if self.is_blocked(nx, nz) {
                     continue;
                 }
-                if dx != 0 && dz != 0 && (self.is_blocked(x, nz) || self.is_blocked(nx, z)) {
+                // (A diagonal step squeezes between two blocked cells only never: a wall drawn
+                // diagonally across the grid, cells touching at their corners, can't be crossed,
+                // but a corridor along it can be walked.)
+                if dx != 0 && dz != 0 && self.is_blocked(x, nz) && self.is_blocked(nx, z) {
                     continue;
                 }
                 let cost = if dx != 0 && dz != 0 { std::f32::consts::SQRT_2 } else { 1.0 };
@@ -249,11 +252,20 @@ impl NavGrid {
                 }
             }
         }
-        if !found {
-            return None;
-        }
-        let mut cells = vec![idx(goal.0, goal.1)];
-        let mut cur = idx(goal.0, goal.1);
+        // (A goal shut in, say a use point in a corner of furniture set at an angle to the grid:
+        // the nearest place close to it that could be reached instead.)
+        let end = if found {
+            idx(goal.0, goal.1)
+        } else {
+            (0..n)
+                .filter(|&i| g[i].is_finite())
+                .map(|i| (i, self.center_of(i % self.w, i / self.w).distance(to)))
+                .filter(|(_, d)| *d < 1.5)
+                .min_by(|a, b| a.1.total_cmp(&b.1))?
+                .0
+        };
+        let mut cells = vec![end];
+        let mut cur = end;
         while came[cur] != usize::MAX {
             cur = came[cur];
             cells.push(cur);

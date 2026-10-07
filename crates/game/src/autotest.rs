@@ -161,7 +161,7 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, show_designs, walls_hook, hang_paintings, buy_close, diving_board).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, show_designs, walls_hook, hang_paintings, buy_close, diving_board, route_debug).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -935,6 +935,56 @@ fn diving_board(
         c.pitch = 0.35;
         c.distance = 8.0;
         c.height_offset = (pos.y - world.data.heightmap.sample(pos.x, pos.z)).max(0.0) + 0.5;
+    }
+}
+
+/// ROUTE_DEBUG=<object kind>: on a community lot, each such object's use point, whether its
+/// grid cell is free and whether there's a way to it from the lot's way in (logged once).
+fn route_debug(
+    mut done: Local<bool>,
+    visited: Option<Res<crate::visit::VisitedLot>>,
+    objects: Query<(&crate::interact::GameObject, &Transform), With<crate::visit::LotObject>>,
+) {
+    let Ok(kind) = std::env::var("ROUTE_DEBUG") else { return };
+    let Some(v) = visited else { return };
+    if *done || v.grid.dirty {
+        return;
+    }
+    *done = true;
+    for (o, tf) in objects.iter().filter(|(o, _)| format!("{:?}", o.kind).eq_ignore_ascii_case(&kind)) {
+        let p = o.use_point(tf);
+        let cell = v.grid.cell_of(p);
+        let free = cell.is_some_and(|(x, z)| !v.grid.is_blocked(x, z));
+        let path = v.grid.find_path(v.exit, p).map(|w| w.len());
+        // (How much free ground is joined to the use point, and how far it goes.)
+        let g = &v.grid;
+        let mut seen = std::collections::HashSet::new();
+        let mut open: Vec<(usize, usize)> = cell.into_iter().collect();
+        let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+        while let Some((x, z)) = open.pop() {
+            if seen.len() > 5000 || !seen.insert((x, z)) || g.is_blocked(x, z) {
+                continue;
+            }
+            let c = g.center_of(x, z);
+            (lo, hi) = (lo.min(c), hi.max(c));
+            for (dx, dz) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let (nx, nz) = (x as i32 + dx, z as i32 + dz);
+                if nx >= 0 && nz >= 0 && (nx as usize) < g.w && (nz as usize) < g.h {
+                    open.push((nx as usize, nz as usize));
+                }
+            }
+        }
+        info!("route debug: {} at {:.1?}, use point {p:.1?}: cell free {free}, path {path:?}, {} cells joined, {lo:.1?}..{hi:.1?}", o.name, tf.translation, seen.len());
+        // (The grid round it: # blocked, . free, U the use point, O the object.)
+        if let Some((ux, uz)) = cell {
+            let oc = g.cell_of(tf.translation.xz());
+            for z in uz.saturating_sub(8)..(uz + 9).min(g.h) {
+                let row: String = (ux.saturating_sub(12)..(ux + 13).min(g.w))
+                    .map(|x| if (x, z) == (ux, uz) { 'U' } else if Some((x, z)) == oc { 'O' } else if g.is_blocked(x, z) { '#' } else { '.' })
+                    .collect();
+                info!("route debug: {row}");
+            }
+        }
     }
 }
 
