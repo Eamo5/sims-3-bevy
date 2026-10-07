@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 57;
+pub const GAMEDATA_VERSION: u32 = 58;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1152,6 +1152,10 @@ pub const T_CAS_PRESET: u32 = 0x0CA5_9E70;
 pub struct CasColourways {
     pub part: crate::types::Key,
     pub swatches: Vec<Option<[f32; 3]>>,
+    /// Each preset's solid colour channels (A to D as 0 to 3) and their colours: what Create a
+    /// Style changes.
+    #[serde(default)]
+    pub channels: Vec<Vec<(u8, [f32; 3])>>,
 }
 
 /// The average colour of a clothing layer where it's drawn (alpha over a half).
@@ -1182,9 +1186,10 @@ fn bake_cas_colourways(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, Stri
     parts.dedup();
     let ways: Vec<Option<CasColourways>> = crate::bake::par_map(&parts, |&key| {
         let c = CasPart::parse(&pkgs.read(&s3pkg::ResourceKey::new(key.0, key.1, key.2))?).ok()?;
-        if c.presets.len() < 2 {
+        if c.presets.is_empty() {
             return None;
         }
+        let channels = c.presets.iter().take(8).map(|xml| s3formats::complate::solid_channels(xml)).collect();
         let swatches = c
             .presets
             .iter()
@@ -1199,9 +1204,11 @@ fn bake_cas_colourways(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, Stri
                 swatch_colour(&img)
             })
             .collect();
-        Some(CasColourways { part: key, swatches })
+        Some(CasColourways { part: key, swatches, channels })
     });
-    let ways: Vec<CasColourways> = ways.into_iter().flatten().filter(|w| w.swatches.iter().filter(|s| s.is_some()).count() > 1).collect();
+    // (Those with colourways to choose, or colours to change.)
+    let ways: Vec<CasColourways> =
+        ways.into_iter().flatten().filter(|w| w.swatches.iter().filter(|s| s.is_some()).count() > 1 || w.channels.iter().any(|c| !c.is_empty())).collect();
     let n = ways.len();
     write_value(&g.join("cas_presets.bin"), &ways).map_err(|e| e.to_string())?;
     Ok(n)

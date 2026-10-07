@@ -94,7 +94,7 @@ pub struct CasData {
     pub eye_overlay: Option<Key>,
     /// The clothes' colourways: each part's presets' swatch colours (none: one that's not
     /// offered).
-    pub colourways: Arc<HashMap<Key, Vec<Option<[f32; 3]>>>>,
+    pub colourways: Arc<HashMap<Key, s3bake::gamedata::CasColourways>>,
 }
 
 impl CasData {
@@ -110,13 +110,13 @@ impl CasData {
             outfits: Arc::new(b.outfits.iter().map(|o| (o.name.clone(), o.clone())).collect()),
             face_bones: Arc::new(b.face_bones.iter().map(|f| (f.prefix.clone(), f.sliders.clone())).collect()),
             eye_overlay: b.eye_colors.overlay.filter(|k| b.texture_bytes(k).is_some()),
-            colourways: Arc::new(b.colourways.iter().map(|w| (w.part, w.swatches.clone())).collect()),
+            colourways: Arc::new(b.colourways.iter().map(|w| (w.part, w.clone())).collect()),
         }
     }
 
     /// The layer of `part` in colourway `i` (its own for 0, or for one that isn't offered).
     pub fn colourway_layer(&self, part: &CasPartInfo, i: u8) -> Option<Key> {
-        if i == 0 || !self.colourways.get(&part.key).is_some_and(|w| w.get(i as usize).is_some_and(|s| s.is_some())) {
+        if i == 0 || !self.colourways.get(&part.key).is_some_and(|w| w.swatches.get(i as usize).is_some_and(|s| s.is_some())) {
             return part.layer;
         }
         Some((s3bake::gamedata::T_CAS_PRESET, i as u32, part.key.2))
@@ -394,10 +394,13 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
         body.extend(random_top);
     }
     body.extend(chosen(picked.shoes, CT_SHOES).or(random_shoes));
-    // (Each in the colourway chosen for it.)
+    // (Each in the colourway chosen for it, or the style made for it in Create a Style.)
     for p in body.iter_mut() {
         if let Some(&(_, i)) = sim.outfit.designs.iter().find(|(k, _)| *k == p.key) {
             p.layer = cas.colourway_layer(p, i);
+        }
+        if let Some(s) = sim.outfit.styles.iter().find(|s| s.part == p.key).filter(|s| s.ready()) {
+            p.layer = Some(s.texture());
         }
     }
     // (Glasses come off for a swim.)

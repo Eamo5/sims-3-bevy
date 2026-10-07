@@ -2360,6 +2360,21 @@ fn ui_flow(
         }
         (91, AppState::CreateHousehold, _) if since > 2.0 => {
             shot(&mut commands, "2c_colourway");
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == crate::home::CasAction::Styling) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (93, now);
+        }
+        // Create a Style: the first channel red.
+        (93, AppState::CreateHousehold, _) if since > 1.0 => {
+            shot(&mut commands, "2c_style_panel");
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == crate::home::CasAction::StyleColour(0, 6)) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (94, now);
+        }
+        (94, AppState::CreateHousehold, _) if since > 5.0 => {
+            shot(&mut commands, "2c_styled");
             *stage = (86, now);
         }
         // Dressing the formal wear: its tops, and the third of them worn.

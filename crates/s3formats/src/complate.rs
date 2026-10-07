@@ -391,3 +391,62 @@ pub fn render_preset(pkgs: &PackageSet, xml: &str, max: usize, layer: bool) -> O
     c.layer_mode = layer;
     Some(c.run(&t, w, h))
 }
+
+/// The pattern channels of a CAS preset (A to D, as 0 to 3) that are enabled and a solid colour,
+/// with that colour (linear 0..1, as the preset has it): what Create a Style changes.
+pub fn solid_channels(xml: &str) -> Vec<(u8, [f32; 3])> {
+    let lower = xml.to_ascii_lowercase();
+    (0..4u8)
+        .filter_map(|ch| {
+            let v = format!("pattern {}", (b'a' + ch) as char);
+            if !lower.contains(&format!("key=\"{v} enabled\" value=\"true\"")) {
+                return None;
+            }
+            let start = lower.find(&format!("variable=\"{v}\""))?;
+            let end = start + lower[start..].find("</pattern>")?;
+            let block = &xml[start..end];
+            if !block.contains("solidColor") && !lower[start..end].contains("solidcolor") {
+                return None;
+            }
+            let at = block.find("key=\"Color\" value=\"")? + "key=\"Color\" value=\"".len();
+            let vals: Vec<f32> = block[at..].split('"').next()?.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+            (vals.len() >= 3).then(|| (ch, [vals[0], vals[1], vals[2]]))
+        })
+        .collect()
+}
+
+/// A CAS preset with the colours of some of its solid channels changed (see `solid_channels`).
+pub fn with_colours(xml: &str, colours: &[(u8, [f32; 3])]) -> String {
+    let mut out = xml.to_string();
+    for &(ch, [r, g, b]) in colours {
+        let lower = out.to_ascii_lowercase();
+        let v = format!("variable=\"pattern {}\"", (b'a' + ch) as char);
+        let Some(start) = lower.find(&v) else { continue };
+        let Some(len) = lower[start..].find("</pattern>") else { continue };
+        let block = &out[start..start + len];
+        let Some(at) = block.find("key=\"Color\" value=\"") else { continue };
+        let vstart = start + at + "key=\"Color\" value=\"".len();
+        let Some(vlen) = out[vstart..].find('"') else { continue };
+        out.replace_range(vstart..vstart + vlen, &format!("{r:.7},{g:.7},{b:.7},1.0"));
+    }
+    out
+}
+
+#[cfg(test)]
+mod style_tests {
+    use super::*;
+
+    const XML: &str = r#"<preset><complate name="CasRgbMask"><value key="Pattern A Enabled" value="true" /><value key="Pattern B Enabled" value="true" /><value key="Pattern C Enabled" value="False" /><pattern name="solidColor_1" variable="Pattern A"><value key="Color" value="0.4196078,0.4078431,0.3921569,1.0" /><value key="filename" value="Materials\Miscellaneous\solidColor_1" /></pattern><pattern name="solidColor_1" variable="Pattern B"><value key="Color" value="0.2745098,0.2196078,0.2117647,1.0" /><value key="filename" value="Materials\Miscellaneous\solidColor_1" /></pattern><pattern name="solidColor_1" variable="Pattern C"><value key="Color" value="0.2,0.2,0.2,1.0" /></pattern></complate></preset>"#;
+
+    #[test]
+    fn channels_read_and_recoloured() {
+        let ch = solid_channels(XML);
+        assert_eq!(ch.len(), 2);
+        assert_eq!(ch[0].0, 0);
+        assert!((ch[1].1[0] - 0.2745098).abs() < 1e-6);
+        let x = with_colours(XML, &[(1, [1.0, 0.0, 0.5])]);
+        let again = solid_channels(&x);
+        assert_eq!(again[0].1, ch[0].1);
+        assert_eq!(again[1].1, [1.0, 0.0, 0.5]);
+    }
+}

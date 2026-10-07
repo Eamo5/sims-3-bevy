@@ -1435,6 +1435,12 @@ fn main() {
             }
         }
         println!("{parts} parts, {presets} presets; by count {hist:?}");
+        if std::env::var("SHOW").is_ok()
+            && let Some((name, p)) = sample.first()
+        {
+            println!("--- {name} preset 1:
+{p}");
+        }
         for (name, p) in &sample {
             let t0 = std::time::Instant::now();
             let img = s3formats::complate::render_preset(&set, p, 256, true);

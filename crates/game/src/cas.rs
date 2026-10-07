@@ -108,6 +108,10 @@ pub enum CasAction {
     Favorite(u8, usize),
     /// The worn item of the tab's type in colourway `i` (the game's presets for it).
     Colourway(u8),
+    /// Create a Style for the worn item: open or close it, and a channel's colour (of the
+    /// palette).
+    Styling,
+    StyleColour(u8, u8),
     Done,
 }
 
@@ -143,6 +147,8 @@ struct CasScene {
     portrait: Option<Handle<Image>>,
     /// The outfit being dressed (and shown).
     wear: crate::simbody::OutfitKind,
+    /// Create a Style open.
+    styling: bool,
 }
 
 #[derive(Component)]
@@ -192,6 +198,7 @@ fn setup_cas(
         portrait: None,
         scroll: 0.0,
         wear: crate::simbody::OutfitKind::Everyday,
+        styling: false,
     });
     // The stage: camera, lights, pedestal.
     // (Ambient light belongs to the camera: alone it would bring a camera of its own, and the
@@ -313,8 +320,18 @@ fn cas_actions(
     mut images: ResMut<Assets<Image>>,
     mut chosen: ResMut<crate::lifetime::ChosenLifetimeWishes>,
     (mut play, sounds): (MessageWriter<crate::sound::PlaySound>, Option<Res<crate::sound::Sounds>>),
+    (mut renders, install, mut ready): (ResMut<crate::style::StyleRenders>, Option<Res<crate::data::InstallPath>>, MessageReader<crate::style::StyleReady>),
 ) {
     let Some(mut scene) = scene else { return };
+    // A style made in Create a Style, rendered: worn.
+    for r in ready.read() {
+        if let Some(sim) = pending.members.iter_mut().find(|s| s.id == r.style_sim()) {
+            sim.outfit.styles.retain(|s| s.part != r.style.part);
+            sim.outfit.styles.push(r.style.clone());
+            scene.dirty_model = true;
+            scene.dirty_ui = true;
+        }
+    }
     let mut rng = rand::rng();
     for (i, action) in &q {
         if *i != Interaction::Pressed {
@@ -429,6 +446,28 @@ fn cas_actions(
                     }
                 }
             }
+            CasAction::Styling => {
+                scene.styling = !scene.styling;
+                model = false;
+            }
+            CasAction::StyleColour(ch, idx) => {
+                model = false;
+                if let Some(t) = scene.tab.clothing_type().filter(|t| *t != CT_HAIR)
+                    && let Some(key) = worn(&scene, &pending.members[k], t)
+                    && let Some(&colour) = crate::style::PALETTE.get(idx as usize)
+                    && let Some(install) = install.as_ref()
+                {
+                    let sim = &mut pending.members[k];
+                    sim.outfit.wear(scene.wear, t, key);
+                    let preset = sim.outfit.designs.iter().find(|(p, _)| *p == key).map_or(0, |d| d.1);
+                    // (On top of the style already made from this colourway, if any.)
+                    let mut colours = sim.outfit.styles.iter().find(|s| s.part == key && s.preset == preset).map(|s| s.colours.clone()).unwrap_or_default();
+                    colours.retain(|(c, _)| *c != ch);
+                    colours.push((ch, colour));
+                    colours.sort_by_key(|c| c.0);
+                    renders.request(sim.id, crate::style::CustomStyle { part: key, preset, colours }, install.0.clone());
+                }
+            }
             CasAction::Colourway(i) => {
                 if let Some(t) = scene.tab.clothing_type().filter(|t| *t != CT_HAIR)
                     && let Some(key) = worn(&scene, &pending.members[k], t)
@@ -437,6 +476,8 @@ fn cas_actions(
                     // (The item worn is kept, in its new colours.)
                     o.wear(scene.wear, t, key);
                     o.designs.retain(|(p, _)| *p != key);
+                    // (A colourway chosen takes the place of a style made.)
+                    o.styles.retain(|s| s.part != key);
                     if i > 0 {
                         o.designs.push((key, i));
                     }
@@ -710,6 +751,7 @@ fn rebuild_ui(
     mut images: ResMut<Assets<Image>>,
     mut had_icons: Local<bool>,
     chosen: Res<crate::lifetime::ChosenLifetimeWishes>,
+    renders: Res<crate::style::StyleRenders>,
 ) {
     let Some(mut scene) = scene else { return };
     // (Redrawn once more when the game's icons become available.)
@@ -1189,9 +1231,11 @@ fn rebuild_ui(
                     if let Some(ways) = current.filter(|_| t != CT_HAIR).and_then(|k| scene.cas.colourways.get(&k).map(|w| (k, w.clone()))) {
                         let (key, ways) = ways;
                         let on = sim.outfit.designs.iter().find(|(p, _)| *p == key).map_or(0, |d| d.1);
+                        let styled = sim.outfit.styles.iter().find(|s| s.part == key && s.preset == on).cloned();
+                        if ways.swatches.iter().filter(|s| s.is_some()).count() > 1 {
                         p.spawn(text("Colors", 16.0, Color::WHITE));
                         p.spawn(Node { column_gap: Val::Px(8.0), flex_wrap: FlexWrap::Wrap, ..default() }).with_children(|row| {
-                            for (i, sw) in ways.iter().enumerate() {
+                            for (i, sw) in ways.swatches.iter().enumerate() {
                                 let Some([r, g, b]) = *sw else { continue };
                                 let chosen = i as u8 == on;
                                 row.spawn((
@@ -1210,6 +1254,41 @@ fn rebuild_ui(
                                 ));
                             }
                         });
+                        }
+                        // Create a Style: each of the colourway's colour channels, any colour of
+                        // the palette.
+                        let channels = ways.channels.get(on as usize).cloned().unwrap_or_default();
+                        if !channels.is_empty() {
+                            button(p, if scene.styling { "Close Create a Style" } else { "Create a Style" }, CasAction::Styling, Val::Px(220.0), scene.styling, 15.0);
+                        }
+                        if scene.styling && !channels.is_empty() {
+                            if renders.busy() {
+                                p.spawn(text("Restyling…", 14.0, Color::srgb(1.0, 0.9, 0.5)));
+                            }
+                            for (ch, own) in channels {
+                                let now = styled.as_ref().and_then(|s| s.colours.iter().find(|c| c.0 == ch)).map_or(own, |c| c.1);
+                                p.spawn(Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
+                                    row.spawn((text(format!("Color {}", (b'A' + ch) as char), 14.0, Color::WHITE), Node { width: Val::Px(64.0), ..default() }));
+                                    row.spawn((
+                                        Node { width: Val::Px(30.0), height: Val::Px(30.0), border: UiRect::all(Val::Px(2.0)), border_radius: BorderRadius::all(Val::Px(6.0)), ..default() },
+                                        BorderColor::all(Color::WHITE),
+                                        BackgroundColor(Color::srgb(now[0], now[1], now[2])),
+                                    ));
+                                });
+                                p.spawn(Node { column_gap: Val::Px(3.0), row_gap: Val::Px(3.0), flex_wrap: FlexWrap::Wrap, max_width: Val::Px(400.0), ..default() }).with_children(|row| {
+                                    for (i, [r, g, b]) in crate::style::PALETTE.iter().enumerate() {
+                                        row.spawn((
+                                            Button,
+                                            Swatch,
+                                            CasAction::StyleColour(ch, i as u8),
+                                            Node { width: Val::Px(22.0), height: Val::Px(22.0), border: UiRect::all(Val::Px(1.0)), border_radius: BorderRadius::all(Val::Px(4.0)), ..default() },
+                                            BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.5)),
+                                            BackgroundColor(Color::srgb(*r, *g, *b)),
+                                        ));
+                                    }
+                                });
+                            }
+                        }
                     }
                 }
             }
