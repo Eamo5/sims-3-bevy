@@ -464,13 +464,18 @@ fn wear_uniform(mut commands: Commands, sel: Query<Entity, With<crate::sim::Sele
         *done = true;
         commands.entity(e).insert(crate::simbody::ChangeIntoPlan(k));
     }
-    // PLAN_OUTFIT=1: the selected Sim's wardrobe opens (PLAN_OUTFIT=<outfit>: on that outfit).
+    // PLAN_OUTFIT=1: the selected Sim's wardrobe opens (PLAN_OUTFIT=<outfit>: on that outfit;
+    // PLAN_OUTFIT=looks: Change Appearance, as at a mirror).
     if let Ok(v) = std::env::var("PLAN_OUTFIT")
         && let Ok(e) = sel.single()
         && time.elapsed_secs() > 6.0
         && !*done
     {
         *done = true;
+        if v.eq_ignore_ascii_case("looks") {
+            commands.insert_resource(crate::planner::OutfitPlanner::looks(e));
+            return;
+        }
         let kind = crate::simbody::OutfitKind::CHOICES.into_iter().find(|k| k.label().eq_ignore_ascii_case(&v)).unwrap_or_default();
         let p = crate::planner::OutfitPlanner::open_on(&mut commands, e, kind);
         commands.insert_resource(p);

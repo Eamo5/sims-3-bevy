@@ -364,6 +364,8 @@ pub struct RepairmanVisit {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Special {
     None,
+    /// Their looks changed at a mirror (hair, facial hair, glasses, make-up).
+    ChangeAppearance,
     /// A garden sprinkler turned on (it runs a couple of hours) or off.
     SprinklerOn,
     SprinklerOff,
@@ -616,11 +618,10 @@ static VRGOGGLES: [InteractionDef; 1] = [def("Explore Virtual Worlds", 60.0, [0.
 static STEREO: [InteractionDef; 1] = [def("Dance", 45.0, [0.0, 0.0, -6.0, 0.0, -6.0, 70.0], Pose::Dance)];
 static BOOKSHELF: [InteractionDef; 1] =
     [InteractionDef { skill: Some("Logic"), ..def("Read a Book", 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Stand) }];
-static MIRROR: [InteractionDef; 1] = [InteractionDef {
-    autonomous: false,
-    skill: Some("Charisma"),
-    ..def("Practice Speech", 40.0, [0.0, 0.0, -2.0, 6.0, 0.0, 10.0], Pose::Talk)
-}];
+static MIRROR: [InteractionDef; 2] = [
+    InteractionDef { autonomous: false, skill: Some("Charisma"), ..def("Practice Speech", 40.0, [0.0, 0.0, -2.0, 6.0, 0.0, 10.0], Pose::Talk) },
+    InteractionDef { autonomous: false, special: Special::ChangeAppearance, ..def("Change Appearance", 2.0, N, Pose::Use) },
+];
 static EASEL: [InteractionDef; 1] = [InteractionDef {
     skill: Some("Painting"),
     special: Special::SellPainting,
@@ -683,7 +684,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Write Novel" | "Find a Job" | "Quit Job" => A::new(None, &["a2o_computer_chess_type_loop_x"]),
         "Dance" => A::new(None, &["a_dance_beg_", "a_dance_med_"]),
         "Read a Book" => A::new(Some("a2o_book_readBook_standing_inInventory_start_x"), &["a2o_book_readBook_standing_loop"]),
-        "Practice Speech" => A::new(None, &["a2o_mirror_full_checkSelfOut_loop"]),
+        "Practice Speech" | "Change Appearance" => A::new(None, &["a2o_mirror_full_checkSelfOut_loop"]),
         "Paint" => A::new(Some("a2o_painting_start_x"), &["a2o_painting_loopMed", "a2o_painting_loopLarge", "a2o_painting_consider"]),
         "Play Guitar" => A::new(None, &["a2o_guitar_play_med_loop", "a2o_guitar_play_high_loop", "a2o_guitar_play_low_loop"]),
         "Work Out" => A::new(Some("a2o_treadmill_jog_start_x"), &["a2o_treadmill_jog_loop"]),
@@ -1739,6 +1740,9 @@ fn run_actions(
                                         }
                                         Special::PlanOutfit => {
                                             commands.insert_resource(crate::planner::OutfitPlanner::open(me));
+                                        }
+                                        Special::ChangeAppearance => {
+                                            commands.insert_resource(crate::planner::OutfitPlanner::looks(me));
                                         }
                                         Special::ServeMeal => {
                                             // A poor cook may set the stove on fire instead.

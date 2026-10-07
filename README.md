@@ -381,7 +381,8 @@ installation is unreachable.
   opens the wardrobe for their age and gender, for any of their outfits (everyday, formal,
   sleepwear, athletic, swimwear: they put it on to plan it; hair, tops, bottoms, outfits and shoes, the
   base game's first, pictured by the game's Create-a-Sim thumbnails), the Sim dressing in
-  each piece as it's picked.
+  each piece as it's picked. A mirror's *Change Appearance* does the same for their looks:
+  hairstyle and hair colour, facial hair, glasses, lipstick and eye shadow.
 - **Blinking**: Sims blink every few seconds (the rig's eyelid bones closing over the eyes on
   top of whatever they're doing), and sleep with their eyes shut.
 - **Looking at each other**: in conversation a Sim's head turns towards the other's face on
