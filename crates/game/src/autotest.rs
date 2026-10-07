@@ -1785,6 +1785,14 @@ fn auto_action(
         }
         return;
     }
+    // "Pregnant": the selected Sim (a grown woman) is visibly expecting, a day and a half along.
+    if name == "Pregnant" {
+        if let Ok((e, _)) = members.iter().find(|(e, s)| s.female && s.age.is_grown() && s.age != crate::sim::Age::Child && sel.contains(*e)).ok_or(()) {
+            commands.entity(e).insert(crate::little::Pregnancy { since: clock.minutes - 1.5 * 1440.0, other_parent: None, stage: 2 });
+        }
+        *done = true;
+        return;
+    }
     // "Baby": a grown woman of the household is about to give birth.
     if name == "Baby" {
         if let Some((e, _)) = members.iter().find(|(_, s)| s.female && s.age.is_grown() && s.age != crate::sim::Age::Child) {

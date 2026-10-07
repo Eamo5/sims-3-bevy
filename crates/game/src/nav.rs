@@ -459,11 +459,11 @@ fn follow_paths(
     clock: Res<GameClock>,
     world: Res<CurrentWorld>,
     building: Option<Res<crate::building::ActiveBuilding>>,
-    mut q: Query<(&mut Transform, &mut PathFollow, &mut SimAnim, &mut Floor, Option<&crate::sim::Sim>), Without<crate::portraits::Staged>>,
+    mut q: Query<(&mut Transform, &mut PathFollow, &mut SimAnim, &mut Floor, Option<&crate::sim::Sim>, Option<&crate::little::Pregnancy>), Without<crate::portraits::Staged>>,
 ) {
     let rate = SPEED_RATES[clock.speed];
     let dt = time.delta_secs().min(0.1) * rate;
-    for (mut tf, mut pf, mut anim, mut floor, sim) in &mut q {
+    for (mut tf, mut pf, mut anim, mut floor, sim, pregnancy) in &mut q {
         if pf.done {
             continue;
         }
@@ -473,7 +473,11 @@ fn follow_paths(
         // A long way (on the level) is run by teens and grown-ups, until they're nearly there.
         let here = Vec2::new(tf.translation.x, tf.translation.z);
         let left: f32 = pf.waypoints.iter().scan(here, |at, w| Some(std::mem::replace(at, w.p).distance(w.p))).sum();
-        let can_run = pf.run_far && sim.is_some_and(|s| !s.age.is_little() && s.age != crate::sim::Age::Child) && pf.waypoints.first().is_some_and(|w| w.climb.is_none());
+        // (Not heavily pregnant.)
+        let can_run = pf.run_far
+            && sim.is_some_and(|s| !s.age.is_little() && s.age != crate::sim::Age::Child)
+            && !pregnancy.is_some_and(|p| p.stage >= 2)
+            && pf.waypoints.first().is_some_and(|w| w.climb.is_none());
         pf.running = can_run && left > if pf.running { RUN_UNTIL } else { RUN_FROM };
         let mut budget = pf.speed * if pf.running { RUN_FACTOR } else { 1.0 } * dt;
         let mut climbing = None;

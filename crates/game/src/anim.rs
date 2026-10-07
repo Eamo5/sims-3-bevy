@@ -268,18 +268,21 @@ pub fn drive_skeletons(
         Option<&Carrying>,
         Has<crate::jog::Jogging>,
         Option<&crate::nav::PathFollow>,
+        Option<&crate::little::Pregnancy>,
     )>,
     mut joints: Query<&mut Transform, Without<Sim>>,
     mut cues: MessageWriter<crate::sound::ClipCue>,
     mut arms: Local<HashMap<String, Arc<Vec<bool>>>>,
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed];
-    for (entity, sim, anim, skel, action, mut player, carried, toddler, carrying, jogging, path) in &mut sims {
+    for (entity, sim, anim, skel, action, mut player, carried, toddler, carrying, jogging, path, pregnancy) in &mut sims {
         let child = sim.age == crate::sim::Age::Child;
         let running = path.is_some_and(|p| p.running);
         let script = match action {
             // (Jogging, or running a long way: the game's jog, for everyone.)
             _ if (jogging || running) && anim.pose == Pose::Walk => ActionClip::new(None, &["a_male_jog"]),
+            // (Heavily pregnant, the game's waddle.)
+            _ if anim.pose == Pose::Walk && sim.female && pregnancy.is_some_and(|p| p.stage >= 2) => ActionClip::new(None, &["a_female_walk_pregnant"]),
             Some(a) if anim.pose != Pose::Walk => a.clone(),
             _ if sim.age.is_little() => little_script(anim.pose, sim.age, toddler.is_some_and(|t| t.walks())),
             _ => pose_script(anim.pose, sim.female, child),

@@ -223,8 +223,8 @@ installation is unreachable.
   order pizza and call the services. Friendships fade after three days without seeing or
   speaking to each other (good friends more slowly; spouses, partners and family stay close),
   and grudges soften.
-- **Families grow**: couples can try for a baby; pregnancy brings morning sickness, then a
-  baby in a crib (the game's swaddled baby model). Grown-ups feed, change, cuddle and settle
+- **Families grow**: couples can try for a baby; pregnancy brings morning sickness, then
+  the game's pregnant waddle once she's showing (and no running), then a baby in a crib (the game's swaddled baby model). Grown-ups feed, change, cuddle and settle
   babies (cradled in their arms) and pick up, read to and put toddlers to bed; toddlers
   crawl about until a grown-up has taught them to walk (three lessons, with the game's
   kneel-and-hold-hands animation; talking is taught the same way, and both show on the

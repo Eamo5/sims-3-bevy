@@ -273,8 +273,9 @@ fn take_portraits(
                 let e = shot.sim;
                 let aim = sims.get(e).ok().and_then(|(sim, _, tf, skel, _)| {
                     let head = skel.rig.bones.iter().position(|b| b.name == "b__Head__").and_then(|i| joints.get(skel.joints[i]).ok())?;
-                    // (Babies are pictured lying in their cribs.)
-                    let face = facing(skel, &joints, head.translation(), tf.rotation()).or((sim.age == Age::Baby).then(|| tf.rotation()))?;
+                    // (Babies are pictured lying in their cribs, and toddlers crawling about
+                    // facing the way they go.)
+                    let face = facing(skel, &joints, head.translation(), tf.rotation()).or(sim.age.is_little().then(|| tf.rotation()))?;
                     Some((sim.age.is_little(), head.translation(), face))
                 });
                 let img = portraits.images.contains_key(&e).then(|| portraits.spare(&mut images, e));
@@ -284,7 +285,8 @@ fn take_portraits(
                     Some((age, root_y)) => {
                         let tall = match age {
                             Age::Baby => 0.0,
-                            Age::Toddler => 0.5,
+                            // (A toddler who can't walk yet crawls, head low.)
+                            Age::Toddler => 0.25,
                             Age::Child => 0.95,
                             _ => 1.35,
                         };
@@ -342,8 +344,9 @@ fn take_portraits(
             Some(at) if shot.frame < at.saturating_add(4) || now - shot.aimed_at < hold => {
                 let aim = sims.get(shot.sim).ok().and_then(|(sim, _, tf, skel, _)| {
                     let head = skel.rig.bones.iter().position(|b| b.name == "b__Head__").and_then(|i| joints.get(skel.joints[i]).ok())?;
-                    // (Babies are pictured lying in their cribs.)
-                    let face = facing(skel, &joints, head.translation(), tf.rotation()).or((sim.age == Age::Baby).then(|| tf.rotation()))?;
+                    // (Babies are pictured lying in their cribs, and toddlers crawling about
+                    // facing the way they go.)
+                    let face = facing(skel, &joints, head.translation(), tf.rotation()).or(sim.age.is_little().then(|| tf.rotation()))?;
                     Some((sim.age.is_little(), head.translation(), face))
                 });
                 if let Some((little, head, rot)) = aim {
@@ -372,7 +375,7 @@ fn take_portraits(
                 // as high as it was put (a Sim can turn to something, or set off, mid-shot).
                 let good = sims.get(shot.sim).ok().and_then(|(sim, _, tf, skel, _)| {
                     let head = skel.rig.bones.iter().position(|b| b.name == "b__Head__").and_then(|i| joints.get(skel.joints[i]).ok())?.translation();
-                    let rot = facing(skel, &joints, head, tf.rotation()).or((sim.age == Age::Baby).then(|| tf.rotation()))?;
+                    let rot = facing(skel, &joints, head, tf.rotation()).or(sim.age.is_little().then(|| tf.rotation()))?;
                     let (eye, ..) = eye_for(head, rot, sim.age.is_little());
                     let ok = cam_tf.translation.distance(eye) < 0.22;
                     if !ok {
