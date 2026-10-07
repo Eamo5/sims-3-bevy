@@ -1423,6 +1423,18 @@ fn main() {
             let (lo, hi) = t.levels[l].iter().fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(*v), b.max(*v)));
             println!("level {l}: at ({x},{z}) {:.3}, range {lo:.3}..{hi:.3}", t.at(l, x, z));
         }
+        // (And the water table: there, its range, and a map of where it's above each level.)
+        if let Some(wt) = &t.water {
+            let (lo, hi) = wt.iter().fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(*v), b.max(*v)));
+            println!("water: at ({x},{z}) {:.3}, range {lo:.3}..{hi:.3}", wt[x * t.nz + z]);
+            if std::env::var("WATERMAP").is_ok() {
+                let l: usize = std::env::var("WATERMAP").unwrap().parse().unwrap_or(1);
+                for zz in 0..t.nz {
+                    let row: String = (0..t.nx).map(|xx| if wt[xx * t.nz + zz] > t.at(l, xx, zz) + 0.01 { '~' } else { '.' }).collect();
+                    println!("{row}");
+                }
+            }
+        }
         return;
     }
     if args[1] == "stairs" {

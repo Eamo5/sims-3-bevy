@@ -1841,13 +1841,15 @@ pub fn spawn_building(
     }
     if neighbor.is_none() {
         info!(
-            "house: {} floors, {} objects ({} without a model); levels {:?}, {} foundation edges, ground grid {}",
+            "house: {} floors, {} objects ({} without a model); levels {:?}, {} foundation edges, ground grid {} ({}x{})",
             top_level,
             b.objects.len(),
             missing.len(),
             b.levels,
             b.foundation.len(),
-            b.ground.len()
+            b.ground.len(),
+            b.width,
+            b.depth
         );
     }
     active.view_level = 1;

@@ -849,6 +849,9 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
 
     let mut heightmap = world.heightmap.clone();
     let ponds = crate::ponds::carve_ponds(&pkg, &world.lots, &mut heightmap);
+    // (The lots' ground as it lies, before pools are dug into it and the terrain is kept under
+    // floors: what paving, pool edges and the ground round a pool follow.)
+    let lot_ground = heightmap.clone();
     // Pools are let into the ground: the terrain is open over them, and dug down under them
     // (for the water's depth and to keep Sims out).
     let mut terrain_holes = Vec::new();
@@ -920,7 +923,7 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         let ground: Vec<f32> = (0..nx * nz)
             .map(|k| {
                 let (x, z) = ((k / nz) as f32, (k % nz) as f32);
-                heightmap.sample(l.corner[0] + x * c + z * s, l.corner[2] - x * s + z * c)
+                lot_ground.sample(l.corner[0] + x * c + z * s, l.corner[2] - x * s + z * c)
             })
             .collect();
         // (Only worth keeping where the ground isn't flat at the lot's own height.)

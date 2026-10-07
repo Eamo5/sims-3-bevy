@@ -9,6 +9,8 @@ fn main() {
     let mut worlds = Vec::new();
     let mut all = false;
     let mut force = false;
+    // (--rebake-world: the worlds named baked again, nothing else.)
+    let mut rebake_world = false;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -22,6 +24,7 @@ fn main() {
             }
             "--all-worlds" => all = true,
             "--force" => force = true,
+            "--rebake-world" => rebake_world = true,
             _ => {}
         }
         i += 1;
@@ -693,7 +696,7 @@ fn main() {
             Ok(()) => {}
             Err(e) => eprintln!("{name}: premade households failed: {e}"),
         }
-        if !force && root.world_ready(&name) {
+        if !force && !rebake_world && root.world_ready(&name) {
             println!("{name}: already baked");
             continue;
         }
