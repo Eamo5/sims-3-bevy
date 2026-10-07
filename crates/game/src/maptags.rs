@@ -7,14 +7,14 @@ use bevy::prelude::*;
 
 use crate::PlayMode;
 use crate::camera::SimsCamera;
-use crate::interact::{ActionKind, Household};
+use crate::interact::{ActionKind, Household, ObjectKind};
 use crate::loading::CurrentWorld;
 
 pub struct MapTagsPlugin;
 
 impl Plugin for MapTagsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spawn_tags, place_tags, tag_clicks).chain().run_if(in_state(PlayMode::Live)))
+        app.add_systems(Update, (spawn_tags, collectible_tags, place_tags, tag_clicks).chain().run_if(in_state(PlayMode::Live)))
             .add_systems(OnExit(PlayMode::Live), |mut c: Commands, q: Query<Entity, With<MapTag>>| {
                 for e in &q {
                     c.entity(e).despawn();
@@ -31,6 +31,92 @@ const SIZE: f32 = 40.0;
 struct MapTag {
     lot: usize,
     at: Vec3,
+}
+
+/// A collectible's tag (shown by the Collection Helper): the gem, metal or space rock lying on
+/// the lot being visited, or where they turn up on another lot (its rock spawner).
+#[derive(Component)]
+enum CollectibleTag {
+    Find(Entity),
+    Spawner(usize),
+}
+
+/// With a Collection Helper at home, the collectibles about town are tagged in Map View: those
+/// lying on the lot being visited (a click sends the Sim to collect one), and where they turn
+/// up on other lots (a click goes there); without one, they're not.
+#[allow(clippy::too_many_arguments)]
+fn collectible_tags(
+    mut commands: Commands,
+    objects: Query<(Entity, &crate::interact::GameObject, &Transform)>,
+    tags: Query<(Entity, &CollectibleTag)>,
+    ui: Option<ResMut<crate::icons::GameUi>>,
+    mut images: ResMut<Assets<Image>>,
+    (world, visited): (Res<CurrentWorld>, Option<Res<crate::visit::VisitedLot>>),
+    time: Res<Time>,
+    mut last: Local<f32>,
+) {
+    let Some(mut ui) = ui else { return };
+    if time.elapsed_secs() - *last < 1.0 {
+        return;
+    }
+    *last = time.elapsed_secs();
+    let helper = objects.iter().any(|(_, o, _)| o.kind == ObjectKind::CollectionHelper);
+    let here = visited.as_ref().map(|v| v.lot);
+    for (e, t) in &tags {
+        let gone = match t {
+            CollectibleTag::Find(f) => !objects.contains(*f),
+            CollectibleTag::Spawner(lot) => Some(*lot) == here,
+        };
+        if !helper || gone {
+            commands.entity(e).despawn();
+        }
+    }
+    if !helper {
+        return;
+    }
+    let (Some(base), glyph) = (ui.icon(&mut images, "hud_icon_maptagbase_r2"), ui.icon(&mut images, "maptag_collectible")) else { return };
+    let mut new: Vec<(CollectibleTag, Vec3, String)> = objects
+        .iter()
+        .filter(|(e, o, _)| o.kind == ObjectKind::Collectible && !tags.iter().any(|(_, t)| matches!(t, CollectibleTag::Find(f) if f == e)))
+        .map(|(e, o, tf)| (CollectibleTag::Find(e), tf.translation + Vec3::Y * 3.0, o.name.clone()))
+        .collect();
+    // Other lots: where their rock spawners leave gems, metals and space rocks.
+    for (&lot, b) in &world.data.buildings {
+        if Some(lot) == here || tags.iter().any(|(_, t)| matches!(t, CollectibleTag::Spawner(l) if *l == lot)) {
+            continue;
+        }
+        let spawners = b.objects.iter().filter(|o| {
+            let class = o.script.rsplit('.').next().unwrap_or("");
+            class.starts_with("RockGemMetalSpawner") && ui.data.spawners.iter().any(|s| s.class == class)
+        });
+        let name = world.data.lot_names.get(lot).map_or("", |s| s.as_str());
+        for o in spawners {
+            new.push((CollectibleTag::Spawner(lot), Vec3::from(o.position) + Vec3::Y * 3.0, format!("Gems and metals turn up here ({name})")));
+        }
+    }
+    for (tag, at, name) in new {
+        commands
+            .spawn((
+                MapTag { lot: usize::MAX, at },
+                tag,
+                Button,
+                Node { position_type: PositionType::Absolute, width: Val::Px(SIZE * 0.7), height: Val::Px(SIZE * 0.7), display: Display::None, ..default() },
+                ImageNode { color: Color::srgb(1.0, 0.8, 0.25), ..ImageNode::new(base.clone()) },
+                crate::icons::Tooltip(name),
+                crate::hud::BlocksWorld,
+                GlobalZIndex(-10),
+                DespawnOnExit(PlayMode::Live),
+            ))
+            .with_children(|t| {
+                if let Some(g) = glyph.clone() {
+                    t.spawn((
+                        ImageNode::new(g),
+                        Node { position_type: PositionType::Absolute, left: Val::Percent(22.0), top: Val::Percent(20.0), width: Val::Percent(56.0), height: Val::Percent(56.0), ..default() },
+                        Pickable::IGNORE,
+                    ));
+                }
+            });
+    }
 }
 
 /// The venue glyph of a community lot, from its name (as the rabbit holes are told apart).
@@ -147,7 +233,8 @@ fn place_tags(cams: Query<(&Camera, &GlobalTransform, &SimsCamera)>, mut tags: Q
 #[allow(clippy::too_many_arguments)]
 fn tag_clicks(
     mut commands: Commands,
-    tags: Query<(&Interaction, &MapTag), Changed<Interaction>>,
+    tags: Query<(&Interaction, &MapTag, Option<&CollectibleTag>), Changed<Interaction>>,
+    mut queues: Query<&mut crate::interact::ActionQueue, With<crate::sim::Selected>>,
     world: Res<CurrentWorld>,
     selected: Query<Entity, With<crate::sim::Selected>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
@@ -155,8 +242,21 @@ fn tag_clicks(
     mut cam: Query<&mut SimsCamera>,
     (ui, opps, clock): (Option<Res<crate::icons::GameUi>>, Query<Option<&crate::opportunities::SimOpportunities>, With<crate::sim::Selected>>, Res<crate::clock::GameClock>),
 ) {
-    for (i, tag) in &tags {
+    for (i, tag, collectible) in &tags {
         if *i != Interaction::Pressed {
+            continue;
+        }
+        // A collectible: off to collect it (or to the lot where they turn up).
+        if let Some(c) = collectible {
+            let def = crate::interact::interactions_for(ObjectKind::Collectible).iter().position(|d| d.name == "Collect");
+            let Ok(mut q) = queues.single_mut() else { continue };
+            match (c, def) {
+                (CollectibleTag::Find(f), Some(def)) => q.push_player(crate::interact::Action::new("Collect", ActionKind::Object { target: *f, def }, false)),
+                (CollectibleTag::Spawner(lot), _) if crate::visit::visitable(&world.data, *lot) => {
+                    q.push_player(crate::interact::Action::new("Visit", ActionKind::GoToLot { lot: *lot }, false))
+                }
+                _ => {}
+            }
             continue;
         }
         let Some(lot) = world.data.lots.get(tag.lot) else { continue };

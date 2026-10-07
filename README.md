@@ -122,8 +122,10 @@ installation is unreachable.
   Treatment (a baby likelier), and a new lifetime wish; and the reward objects, which go into the Sim's inventory to place on the
   lot: the Food Replicator (a plate of something at the push of a button, eaten at the table),
   the Body Sculptor (an hour inside to come out fitter, slimmer or fuller) and the Moodlet
-  Manager (set a mood: flirty, inspired, pumped, having fun, well rested), and the Teleporter
-  (*Teleport To ›* any lot there is to visit: there at once, no drive).
+  Manager (set a mood: flirty, inspired, pumped, having fun, well rested), the Teleporter
+  (*Teleport To ›* any lot there is to visit: there at once, no drive), and the Collection
+  Helper (gold gem tags in Map View on the gems, metals and space rocks lying about the lot
+  being visited, a click to collect one, and where they turn up on other lots, a click to go).
 - **Opportunities** from the game's own tables: by day, Sims are offered ones that suit their
   career or skills in the game's dialog (its icon, name, description and reward); taken-on
   opportunities are listed in the Opportunities panel (O) with their deadlines and are done

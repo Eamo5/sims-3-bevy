@@ -118,6 +118,8 @@ pub enum ObjectKind {
     Bar,
     /// The Teleporter (a lifetime reward): to a community lot at once.
     Teleporter,
+    /// The Collection Helper (a lifetime reward): collectibles shown in Map View.
+    CollectionHelper,
     /// Lifetime rewards: a plate of food at the push of a button, a new shape, a new mood.
     FoodReplicator,
     BodySculptor,
@@ -146,6 +148,8 @@ impl ObjectKind {
             Self::DivingBoard
         } else if has("objects.counters.bar") && !has("+") {
             Self::Bar
+        } else if has("rewards.collectionhelper") {
+            Self::CollectionHelper
         } else if has("rewards.teleporter") {
             Self::Teleporter
         } else if has("rewards.foodreplicator") {
@@ -270,7 +274,7 @@ impl ObjectKind {
             Self::Sprinkler => "Outdoors",
             Self::DivingBoard => "Outdoors",
             Self::Bar => "Surfaces",
-            Self::FoodReplicator | Self::BodySculptor | Self::MoodletManager | Self::Teleporter => "Misc",
+            Self::FoodReplicator | Self::BodySculptor | Self::MoodletManager | Self::Teleporter | Self::CollectionHelper => "Misc",
             Self::HotTub => "Plumbing",
             Self::Dresser => "Surfaces",
             Self::Table => "Surfaces",

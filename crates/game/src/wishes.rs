@@ -134,7 +134,7 @@ impl Wishes {
 }
 
 /// The lifetime rewards offered: the game's reward traits whose effects are carried out here.
-pub const REWARDS: [&str; 26] = [
+pub const REWARDS: [&str; 27] = [
     "SteelBladder",
     "PermaClean",
     "HardlyHungry",
@@ -161,12 +161,18 @@ pub const REWARDS: [&str; 26] = [
     "BodySculptor",
     "MoodModifier",
     "Teleporter",
+    "CollectionHelper",
 ];
 
 /// The rewards that are objects: the reward, and the catalogue object it is (given to the Sim
 /// to place on their lot).
-pub const REWARD_OBJECTS: [(&str, &str); 4] =
-    [("FoodReplicator", "FoodReplicator"), ("BodySculptor", "BodySculptor"), ("MoodModifier", "MoodletManager"), ("Teleporter", "Teleporter")];
+pub const REWARD_OBJECTS: [(&str, &str); 5] = [
+    ("FoodReplicator", "FoodReplicator"),
+    ("BodySculptor", "BodySculptor"),
+    ("MoodModifier", "MoodletManager"),
+    ("Teleporter", "Teleporter"),
+    ("CollectionHelper", "CollectionHelper"),
+];
 
 /// Whether a Sim has a lifetime reward.
 pub fn has(w: Option<&Wishes>, r: &str) -> bool {

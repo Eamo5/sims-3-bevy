@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 54;
+pub const GAMEDATA_VERSION: u32 = 55;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -2023,6 +2023,7 @@ pub const BALLOON_FRAMES: &[&str] = &[
 /// Venue glyphs in `ATLAS_MapTagColors_00` (pixel rectangles x0, y0, x1, y1).
 const MAP_TAG_GLYPHS: &[(&str, [usize; 4])] = &[
     ("home_active", [395, 512, 435, 547]),
+    ("collectible", [232, 242, 262, 262]),
     ("home", [457, 461, 485, 486]),
     ("lot_empty", [344, 406, 373, 432]),
     ("gym", [64, 424, 93, 445]),
