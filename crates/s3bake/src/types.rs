@@ -10,7 +10,7 @@ pub const BAKE_VERSION: u32 = 4;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
 pub const CAS_VERSION: u32 = 9;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 35;
+pub const WORLD_VERSION: u32 = 36;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -346,6 +346,44 @@ pub struct LotBuildingBaked {
     pub pool_depth: f32,
     /// Fence and railing runs (and posts) about the lot.
     pub fences: Vec<FenceBaked>,
+    /// The staircases, as the game builds them from their styles' pieces.
+    #[serde(default)]
+    pub stairs: Vec<StairBaked>,
+}
+
+/// A staircase: the tiles it covers (lot-local, `min..max`), which way it climbs (`dir`: 0 −X,
+/// 2 +Z, 4 +X, 6 −Z, as the game's ×45°), the levels it joins, and its style's piece models: a
+/// flight (a tile's run of steps along +X, 0.75 m up, a tile wide), the first step, and the
+/// side panel along a tile.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct StairBaked {
+    pub style: Key,
+    pub min: [u16; 2],
+    pub max: [u16; 2],
+    pub dir: u8,
+    pub bottom: u8,
+    pub top: u8,
+    pub flight: Option<Key>,
+    pub start: Option<Key>,
+    pub side: Option<Key>,
+}
+
+impl StairBaked {
+    /// The climb direction (lot-local).
+    pub fn climb(&self) -> [f32; 2] {
+        match self.dir & 7 {
+            0 | 1 => [-1.0, 0.0],
+            2 | 3 => [0.0, 1.0],
+            4 | 5 => [1.0, 0.0],
+            _ => [0.0, -1.0],
+        }
+    }
+
+    /// How many tiles it runs, and how many wide.
+    pub fn run_width(&self) -> (u16, u16) {
+        let (dx, dz) = (self.max[0] - self.min[0], self.max[1] - self.min[1]);
+        if self.climb()[0] != 0.0 { (dx, dz) } else { (dz, dx) }
+    }
 }
 
 /// A run of fence from `a` to `b` (lot-local, a tile or a diagonal long), or a post (`a == b`),

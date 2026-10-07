@@ -751,8 +751,22 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
     // Fences and railings (their pieces' models go in with the world's).
     let mut fence_styles = HashMap::new();
     let mut fences: Vec<Vec<FenceBaked>> = world.lots.iter().map(|l| crate::fences::bake_fences(&pkg, pkgs, l, &mut fence_styles)).collect();
-    let mut model_keys: Vec<Key> =
-        instances.iter().map(|i| i.model).chain(fences.iter().flatten().map(|f| f.model)).collect::<HashSet<_>>().into_iter().collect();
+    // Staircases: their styles' pieces (the game builds the steps from them).
+    let mut stair_styles: HashMap<Key, (Option<Key>, Option<Key>, Option<Key>)> = HashMap::new();
+    for l in &world.lots {
+        for s in crate::building::lot_stairs(&pkg, l.id) {
+            stair_styles.entry(s.style).or_insert_with(|| crate::building::stair_pieces(pkgs, &rkey(s.style)));
+        }
+    }
+    let stair_models = stair_styles.values().flat_map(|(a, b, c)| [*a, *b, *c]).flatten();
+    let mut model_keys: Vec<Key> = instances
+        .iter()
+        .map(|i| i.model)
+        .chain(fences.iter().flatten().map(|f| f.model))
+        .chain(stair_models)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
     model_keys.sort();
     let (_, tex) = write_models(&wdir.join("models.pack"), pkgs, &model_keys, &format!("Converting {name}"), progress)?;
     bake_textures(root, pkgs, &tex, OBJECT_TEX_MAX, &format!("Converting {name}"), progress);
@@ -803,6 +817,11 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
     for b in &mut buildings {
         if let Some(f) = fences.get_mut(b.lot as usize) {
             b.fences = std::mem::take(f);
+        }
+        for s in &mut b.stairs {
+            if let Some(&(flight, start, side)) = stair_styles.get(&s.style) {
+                (s.flight, s.start, s.side) = (flight, start, side);
+            }
         }
     }
     let styles: Vec<(Key, bool)> = BUILD_STYLES.iter().map(|k| (*k, false)).collect();

@@ -105,6 +105,84 @@ fn along_segment(p: [f32; 2], q: [f32; 2], r: [f32; 2]) -> Option<f32> {
     ((-0.01..=1.01).contains(&t) && cx * cx + cz * cz < 1e-4).then_some(t.clamp(0.0, 1.0))
 }
 
+/// The lot's staircases (0x04A09283: `u32 version, u32 n`, then per staircase `u32 ?, u16 REFS
+/// index of its CSTR style, u64 guid, u32 dir, f32 x1, z1, u32 top level, f32 x2, z2, u32 bottom
+/// level, u32 n railings × (u32, u16 CRAL, f32 x, z)`); their pieces are filled in later.
+pub fn lot_stairs(pkg: &Package, lot: u64) -> Vec<StairBaked> {
+    let read = |t: u32, g: u32| pkg.find(&s3pkg::ResourceKey::new(t, g, lot)).and_then(|e| pkg.read(e).ok());
+    let (Some(d), Some(refs)) = (read(0x04A09283, 0), read(0x05ED1226, 0).and_then(|r| s3formats::objn::parse_refs(&r).ok())) else { return Vec::new() };
+    let mut r = s3formats::util::Reader::new(&d);
+    let mut out = Vec::new();
+    let (Ok(_), Ok(n)) = (r.u32(), r.u32()) else { return out };
+    for _ in 0..n.min(256) {
+        let Ok(_) = r.u32() else { break };
+        let (Ok(style), Ok(_), Ok(dir)) = (r.u16(), r.u64(), r.u32()) else { break };
+        let (Ok(x1), Ok(z1), Ok(top)) = (r.f32(), r.f32(), r.u32()) else { break };
+        let (Ok(x2), Ok(z2), Ok(bottom)) = (r.f32(), r.f32(), r.u32()) else { break };
+        let Ok(rails) = r.u32() else { break };
+        if r.skip(rails.min(64) as usize * 14).is_err() {
+            break;
+        }
+        let Some(k) = refs.get(&style) else { continue };
+        let lo = |a: f32, b: f32| a.min(b).max(0.0).round() as u16;
+        let hi = |a: f32, b: f32| a.max(b).max(0.0).round() as u16;
+        out.push(StairBaked {
+            style: key_of(k),
+            min: [lo(x1, x2), lo(z1, z2)],
+            max: [hi(x1, x2), hi(z1, z2)],
+            dir: dir as u8,
+            bottom: bottom.min(32) as u8,
+            top: top.min(32) as u8,
+            flight: None,
+            start: None,
+            side: None,
+        });
+    }
+    out
+}
+
+/// A stair style's (CSTR 0x049CA4CD) pieces: the models of the VPXYs it names (its TGI list is
+/// at the offset in its second word, counted), told apart by shape: the side panel is thin, the
+/// first step short, the flight a tile's run.
+pub fn stair_pieces(pkgs: &s3pkg::PackageSet, cstr: &s3pkg::ResourceKey) -> (Option<Key>, Option<Key>, Option<Key>) {
+    let Some(d) = pkgs.read(cstr).or_else(|| pkgs.read_ti(cstr.t, cstr.i)) else { return (None, None, None) };
+    let u32_at = |o: usize| d.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
+    let Some(at) = u32_at(4).map(|o| o as usize + 8) else { return (None, None, None) };
+    let n = u32_at(at).unwrap_or(0).min(32) as usize;
+    let (mut flight, mut start, mut side) = (None, None, None);
+    for i in 0..n {
+        let o = at + 4 + i * 16;
+        let (Some(t), Some(g), Some(lo), Some(hi)) = (u32_at(o), u32_at(o + 4), u32_at(o + 8), u32_at(o + 12)) else { break };
+        if t != 0x736884F1 {
+            continue;
+        }
+        let vk = s3pkg::ResourceKey::new(t, g, (hi as u64) << 32 | lo as u64);
+        let Some(v) = pkgs.read(&vk).or_else(|| pkgs.read_ti(vk.t, vk.i)) else { continue };
+        let Some(mk) = s3formats::model::vpxy_models(&v).into_iter().next() else { continue };
+        let meshes = s3formats::model::load_model(pkgs, &mk).unwrap_or_default();
+        let (mut lo3, mut hi3) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for m in &meshes {
+            for a in 0..3 {
+                lo3[a] = lo3[a].min(m.bounds_min[a]);
+                hi3[a] = hi3[a].max(m.bounds_max[a]);
+            }
+        }
+        if meshes.is_empty() {
+            continue;
+        }
+        let (len, wide) = (hi3[0] - lo3[0], hi3[2] - lo3[2]);
+        let slot = if wide < 0.4 {
+            &mut side
+        } else if len < 0.6 {
+            &mut start
+        } else {
+            &mut flight
+        };
+        slot.get_or_insert(key_of(&mk));
+    }
+    (flight, start, side)
+}
+
 pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[PlacedObject], hm: &s3formats::world::Heightmap) -> Option<(LotBuildingBaked, Vec<CoverJob>)> {
     let data = LotBuildData::load(pkg, lot.id).unwrap_or_default();
     let read = |t: u32, g: u32| pkg.find(&s3pkg::ResourceKey::new(t, g, lot.id)).and_then(|e| pkg.read(e).ok());
@@ -456,6 +534,7 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     let jobs = std::mem::take(&mut covers.jobs);
     Some((
         LotBuildingBaked {
+            stairs: lot_stairs(pkg, lot.id),
             lot: lot_index as u32,
             width: w,
             depth: d,

@@ -1381,6 +1381,77 @@ fn main() {
         }
         return;
     }
+    if args[1] == "vpxy" {
+        // vpxy <root> <type:group:instance hex>...: each VPXY's references, and its models'
+        // meshes with bounds, vertex counts and diffuse textures.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        for a in &args[3..] {
+            let p: Vec<&str> = a.split(':').collect();
+            let k = s3pkg::ResourceKey::new(parse_hex(p[0]) as u32, parse_hex(p[1]) as u32, parse_hex(p[2]));
+            let Some(v) = set.read(&k).or_else(|| set.read_ti(k.t, k.i)) else { println!("{k}: missing"); continue };
+            println!("{k}:");
+            for r in s3formats::model::vpxy_keys(&v) {
+                println!("  refers to {r}");
+            }
+            for mk in s3formats::model::vpxy_models(&v) {
+                println!("  model {mk}");
+                for m in s3formats::model::load_model(&set, &mk).unwrap_or_default() {
+                    println!(
+                        "    mesh {:08X} verts {} tris {} bounds {:?}..{:?} tex {:?} joints {}",
+                        m.name_hash,
+                        m.positions.len(),
+                        m.indices.len() / 3,
+                        m.bounds_min,
+                        m.bounds_max,
+                        m.material.texture(s3formats::model::P_DIFFUSE_MAP),
+                        m.joints.len()
+                    );
+                }
+            }
+        }
+        return;
+    }
+    if args[1] == "stairs" {
+        // stairs <root> <world file> <lot id hex>: the lot's staircases (0x04A09283), and each
+        // stair style (CSTR 0x049CA4CD) they use, dumped with its TGI references.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let w = Package::open(&args[3]).unwrap();
+        let lot = parse_hex(&args[4]);
+        let rd = |t: u32, g: u32| w.find(&s3pkg::ResourceKey::new(t, g, lot)).and_then(|e| w.read(e).ok());
+        let refs = s3formats::objn::parse_refs(&rd(0x05ED1226, 0).unwrap_or_default()).unwrap_or_default();
+        let Some(d) = rd(0x04A09283, 0) else { println!("no stairs"); return };
+        let mut r = s3formats::util::Reader::new(&d);
+        let ver = r.u32().unwrap();
+        let n = r.u32().unwrap();
+        println!("stairs v{ver}: {n}");
+        let mut styles = std::collections::BTreeSet::new();
+        for _ in 0..n {
+            let unk = r.u32().unwrap();
+            let style = r.u16().unwrap();
+            let guid = r.u64().unwrap();
+            let dir = r.u32().unwrap();
+            let (x1, z1, l1) = (r.f32().unwrap(), r.f32().unwrap(), r.u32().unwrap());
+            let (x2, z2, l2) = (r.f32().unwrap(), r.f32().unwrap(), r.u32().unwrap());
+            let nr = r.u32().unwrap();
+            let mut rails = Vec::new();
+            for _ in 0..nr {
+                let (_, rr, x, z) = (r.u32().unwrap(), r.u16().unwrap(), r.f32().unwrap(), r.f32().unwrap());
+                rails.push((refs.get(&rr).copied(), x, z));
+            }
+            println!("  {unk} style r{style} {:?} guid {guid:016X} dir {dir} top ({x1},{z1}) L{l1} bottom ({x2},{z2}) L{l2} rails {rails:?}", refs.get(&style));
+            if let Some(k) = refs.get(&style) {
+                styles.insert(*k);
+            }
+        }
+        for k in styles {
+            let Some(d) = set.read(&k) else { println!("{k}: missing"); continue };
+            println!("{k}: {} bytes", d.len());
+            for (i, c) in d.chunks(16).enumerate().take(24) {
+                println!("  {:04X} {}", i * 16, c.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" "));
+            }
+        }
+        return;
+    }
     if args[1] == "floormap" {
         // floormap <world file> <lot id hex>: each floor-grid level as a map (a letter per
         // palette id, '.' for none), and the wall levels.

@@ -710,6 +710,14 @@ n × {
 }
 ```
 
+[Verified, this project] (x1,z1) and (x2,z2) are opposite corners of the tiles the staircase
+covers; `direction` is the climb: 0 −X, 2 +Z, 4 +X, 6 −Z (×45°), so the side along it is the
+run (4 tiles a storey, 1 for foundation steps) and the other its width (often 2). The levels are
+the house's storeys (0 = the ground). A CSTR style (0x049CA4CD) holds, at the offset in its
+second word + 8, a counted TGI list: three VPXYs (a flight: one tile's steps along +X rising
+0.75 m, ~1.08 m wide; the first step; a thin side panel a tile long), a CRAL railing, CWAL
+patterns and a CFEN. The game lays a flight per tile per lane, each a tile's rise higher.
+
 ### 9.6 Wall/floor compositor 0x0563919E  [WIKI]
 
 ```
