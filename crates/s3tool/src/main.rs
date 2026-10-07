@@ -1381,6 +1381,49 @@ fn main() {
         }
         return;
     }
+    if args[1] == "floormap" {
+        // floormap <world file> <lot id hex>: each floor-grid level as a map (a letter per
+        // palette id, '.' for none), and the wall levels.
+        use s3formats::lotdesign as ld;
+        let w = Package::open(&args[2]).unwrap();
+        let lot = parse_hex(&args[3]);
+        let rd = |t: u32, g: u32| w.find(&s3pkg::ResourceKey::new(t, g, lot)).and_then(|e| w.read(e).ok());
+        let d = rd(ld::T_GRID, ld::G_FLOOR_GRID).expect("no floor grid");
+        let g = ld::Grid::parse(&d).expect("grid");
+        let pal = rd(ld::T_FLOOR_PALETTE, ld::G_FLOOR_PALETTE).and_then(|d| ld::parse_floor_palette(&d).ok()).unwrap_or_default();
+        println!("grid {}x{}x{}, palette {} ids", g.width, g.depth, g.levels, pal.len());
+        let mut missing = std::collections::BTreeMap::<u16, usize>::new();
+        for l in 0..g.levels {
+            println!("level {l}:");
+            for z in 0..g.depth {
+                let row: String = (0..g.width)
+                    .map(|x| match g.quad(l, x, z) {
+                        Some(q) if q.iter().any(|v| *v != 0) => {
+                            let v = q.iter().copied().find(|v| *v != 0).unwrap_or(0);
+                            if pal.contains_key(&(v as u32)) {
+                                (b'A' + (v % 26) as u8) as char
+                            } else {
+                                *missing.entry(v).or_default() += 1;
+                                '?'
+                            }
+                        }
+                        _ => '.',
+                    })
+                    .collect();
+                if row.chars().any(|c| c != '.') {
+                    println!("{z:3} {row}");
+                }
+            }
+        }
+        println!("ids not in the palette: {missing:?}");
+        let refs = s3formats::objn::parse_refs(&rd(0x05ED1226, 0).unwrap_or_default()).unwrap_or_default();
+        let mut ids: Vec<_> = pal.iter().collect();
+        ids.sort();
+        for (id, (cwal, comp)) in ids {
+            println!("  id {id} ({}) cwal r{cwal} {:?} comp r{comp} {:?}", (b'A' + (*id % 26) as u8) as char, refs.get(cwal), refs.get(comp));
+        }
+        return;
+    }
     if args[1] == "lotfloors" {
         // lotfloors <root> <world file> <lot id hex>: the floor grids' values and the palettes'
         // pattern kinds.

@@ -245,6 +245,41 @@ fn main() {
         }
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--floors") {
+        // --floors <world> <lot name part>: the baked floor tiles of each level as a map (a letter
+        // per room kind: P porch, O outside, others indoors), and the levels' heights.
+        let w: s3bake::WorldBaked = s3bake::read_value(&root.world_dir(&args[i + 1]).join("world.bin")).expect("world");
+        let want = &args[i + 2];
+        for (k, l) in w.lots.iter().enumerate().filter(|(_, l)| l.info.internal_name.contains(want.as_str())) {
+            let Some(b) = w.buildings.iter().find(|b| b.lot as usize == k) else { continue };
+            println!("{} levels {:?} {}x{}", l.info.internal_name, b.levels, b.width, b.depth);
+            // The ground's height relative to the ground floor (+ above it: tenths of a metre).
+            println!("ground - storey 1 (dm):");
+            for z in (20..=44).step_by(2) {
+                let row: Vec<String> = (12..=46).step_by(2).map(|x| b.ground_at(x as f32 + 0.5, z as f32 + 0.5).map_or("  ?".into(), |g| format!("{:3.0}", (g - b.levels[1]) * 10.0))).collect();
+                println!("{z:3} {}", row.join(""));
+            }
+            let top = b.floors.iter().map(|f| f.level).max().unwrap_or(0);
+            for level in 0..=top {
+                println!("level {level}:");
+                for z in 0..=b.depth as u16 {
+                    let row: String = (0..=b.width as u16)
+                        .map(|x| match b.floors.iter().find(|f| f.level == level && f.x == x && f.z == z) {
+                            Some(f) if f.kind == s3bake::ROOM_PORCH => 'P',
+                            Some(f) if f.kind == s3bake::ROOM_OUTSIDE => 'O',
+                            Some(f) if f.cover.iter().all(|c| *c == s3bake::types::NO_COVER) => '#',
+                            Some(f) => (b'a' + f.kind % 26) as char,
+                            None => '.',
+                        })
+                        .collect();
+                    if row.chars().any(|c| c != '.') {
+                        println!("{z:3} {row}");
+                    }
+                }
+            }
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--lots") {
         let w: s3bake::WorldBaked = s3bake::read_value(&root.world_dir(&args[i + 1]).join("world.bin")).expect("world");
         for (k, l) in w.lots.iter().enumerate() {

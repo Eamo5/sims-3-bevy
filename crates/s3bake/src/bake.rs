@@ -852,6 +852,39 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
     terrain_holes.sort();
     terrain_holes.dedup();
 
+    // The ground never shows through a house: under its ground floor the terrain is kept just
+    // below the floor (lots on a slope rise above a foundation's floor in places, as under the
+    // Goths' kitchen).
+    for b in &buildings {
+        let Some(l) = world.lots.get(b.lot as usize) else { continue };
+        let Some(&floor_y) = b.levels.get(1) else { continue };
+        let tiles: HashSet<(i32, i32)> = b.floors.iter().filter(|f| f.level == 1).map(|f| (f.x as i32, f.z as i32)).collect();
+        if tiles.is_empty() {
+            continue;
+        }
+        let (s, c) = l.rotation.sin_cos();
+        // World → lot-local (the inverse of the lot's rotation about its corner).
+        let to_local = |wx: f32, wz: f32| {
+            let (dx, dz) = (wx - l.corner[0], wz - l.corner[2]);
+            (dx * c - dz * s, dx * s + dz * c)
+        };
+        let reach = (l.width.max(l.depth) as f32 + 2.0) * 1.5;
+        let (x0, x1) = ((l.corner[0] - reach).floor().max(0.0) as usize, ((l.corner[0] + reach).ceil() as usize).min(heightmap.width - 1));
+        let (z0, z1) = ((l.corner[2] - reach).floor().max(0.0) as usize, ((l.corner[2] + reach).ceil() as usize).min(heightmap.height - 1));
+        let top = ((floor_y - 0.06) / heightmap.scale).floor().clamp(0.0, 65535.0) as u16;
+        for pz in z0..=z1 {
+            for px in x0..=x1 {
+                let (lx, lz) = to_local(px as f32, pz as f32);
+                // (A point touching a floor tile: its terrain cells could poke through it.)
+                let under = [(-0.5, -0.5), (0.5, -0.5), (-0.5, 0.5), (0.5, 0.5)].iter().any(|(u, v)| tiles.contains(&((lx + u).floor() as i32, (lz + v).floor() as i32)));
+                let k = pz * heightmap.width + px;
+                if under && heightmap.data[k] > top {
+                    heightmap.data[k] = top;
+                }
+            }
+        }
+    }
+
     // Paving on a lot follows its ground (where it dips, the paving goes down with it).
     for b in &mut buildings {
         let Some(l) = world.lots.get(b.lot as usize) else { continue };
