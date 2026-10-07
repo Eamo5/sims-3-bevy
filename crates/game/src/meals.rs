@@ -25,7 +25,7 @@ impl Plugin for MealsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Leftovers>()
             .add_systems(OnEnter(crate::AppState::InGame), |mut l: ResMut<Leftovers>| l.0.clear())
-            .add_systems(Update, (cook_prep, cook_prep_done, serve_if_interrupted, meal_requests, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (cook_prep, cook_prep_done, serve_if_interrupted, take_out_dinner, meal_requests, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -37,6 +37,20 @@ pub const PLATTER_CARRY: &str = "a2o_carryObject_carry_x";
 /// A cook carrying the meal from this stove to set it down (then it's served).
 #[derive(Component)]
 pub struct ServingFrom(pub Entity);
+
+/// A dinner heated in this microwave: to take out.
+#[derive(Component)]
+pub struct MicrowaveDone(pub Entity);
+
+/// Heated, the dinner is taken out of the microwave (then eaten at the table).
+fn take_out_dinner(mut commands: Commands, mut sims: Query<(Entity, &MicrowaveDone, &mut ActionQueue)>) {
+    for (e, m, mut queue) in &mut sims {
+        commands.entity(e).remove::<MicrowaveDone>();
+        if let Some(def) = crate::interact::interactions_for(ObjectKind::Microwave).iter().position(|d| d.name == "Take Out Dinner") {
+            queue.0.push_front(Action::new("Take Out Dinner", ActionKind::Object { target: m.0, def }, true));
+        }
+    }
+}
 
 /// A meal carried off and not set down after all (the cook called away) is served anyway.
 fn serve_if_interrupted(mut commands: Commands, sims: Query<(Entity, &ServingFrom, &ActionQueue), Without<MealRequest>>) {

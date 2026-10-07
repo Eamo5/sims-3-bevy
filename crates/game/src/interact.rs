@@ -426,6 +426,8 @@ pub enum Special {
     PrepFood,
     /// The cooked meal carried from the stove and set down on a counter or table.
     PlaceMeal,
+    /// A dinner put in the microwave to heat (then taken out, and eaten at the table).
+    Microwave,
     /// A garden sprinkler turned on (it runs a couple of hours) or off.
     SprinklerOn,
     SprinklerOff,
@@ -603,7 +605,11 @@ static DISHES: [InteractionDef; 1] = [InteractionDef { special: Special::CleanUp
 /// How a plate of food fills hunger, per hour, and how long it takes to eat.
 const MEAL_PER_HOUR: f32 = 320.0;
 const MEAL_MINUTES: f32 = 25.0;
-static MICROWAVE: [InteractionDef; 1] = [def("Microwave Dinner", 20.0, [150.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use)];
+static MICROWAVE: [InteractionDef; 2] = [
+    InteractionDef { special: Special::Microwave, ..def("Microwave Dinner", 15.0, [150.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) },
+    // (Once it's heated: never on the menu.)
+    InteractionDef { autonomous: false, special: Special::Cook, ..def("Take Out Dinner", 2.0, N, Pose::Use) },
+];
 static BED: [InteractionDef; 3] = [
     InteractionDef {
         until_full: Some(ENERGY),
@@ -787,7 +793,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Eat" if kind == ObjectKind::Stool => A::new(Some("a2o_eat_barStoolIn_fork_start_x"), &["a2o_eat_barStoolIn_fork_neat_x"]),
         // (The fridge door opened, something taken out and the door shut again.)
         "Have Quick Meal" => A::steps("a2o_fridge_openDoor_x", FRIDGE_STEPS, &["a2o_plateDinner_carry_x"]),
-        "Microwave Dinner" => A::steps("a2o_fridge_openDoor_x", FRIDGE_STEPS, &["a2o_eat_stand_fork_neat", "a2o_eat_stand_hand_neat"]),
+        "Microwave Dinner" => A::new(Some("a2o_microwave_put_x"), &["a2o_microwave_check_loop_x"]),
+        "Take Out Dinner" => A::new(None, &["a2o_microwave_get_x"]),
         "Grab a Snack" => A::steps("a2o_fridge_openDoor_x", FRIDGE_STEPS, &["a2o_eat_stand_hand_neat"]),
         "Bake Birthday Cake" => A::steps("a2o_fridge_openDoor_x", FRIDGE_STEPS, &["a2o_cuttingBoard_chop_loopMedSkill_x"]),
         "Grow Up" => A::new(None, &["a2o_birthdayCake_blowOut_counter_x"]),
@@ -1848,7 +1855,7 @@ fn run_actions(
                                     // (Only taking the book down, or picking the paper up: they're read elsewhere.)
                                     Special::GetBook | Special::GetPaper => 2.0,
                                     // (A quick meal is only taken out at the fridge: it's eaten at the table.)
-                                    Special::Cook => 6.0,
+                                    Special::Cook if d.name == "Have Quick Meal" => 6.0,
                                     // (Less time at the stove once the food's been prepared.)
                                     Special::ServeMeal if prepped.contains(me) && d.minutes > 30.0 => d.minutes - 15.0,
                                     // (Twice as quick for a Speedy Cleaner; homework too for a Multi-Tasker.)
@@ -2081,6 +2088,9 @@ fn run_actions(
                                         }
                                         Special::Cook => {
                                             commands.entity(me).insert(crate::meals::MealRequest::Quick);
+                                        }
+                                        Special::Microwave => {
+                                            commands.entity(me).insert(crate::meals::MicrowaveDone(*target));
                                         }
                                         Special::None => {}
                                     }
