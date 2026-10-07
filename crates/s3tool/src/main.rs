@@ -1411,6 +1411,20 @@ fn main() {
         }
         return;
     }
+    if args[1] == "lotterrain" {
+        // lotterrain <world file> <lot id hex> <x> <z>: the lot's level heights (relative to the
+        // lot) at a vertex and their ranges, and the lot's corner height.
+        let w = Package::open(&args[2]).unwrap();
+        let lot = parse_hex(&args[3]);
+        let (x, z): (usize, usize) = (args[4].parse().unwrap(), args[5].parse().unwrap());
+        let t = s3formats::lot::LotTerrain::load(&w, lot).expect("terrain");
+        println!("{}x{} vertices, {} levels", t.nx, t.nz, t.levels.len());
+        for l in 0..t.levels.len() {
+            let (lo, hi) = t.levels[l].iter().fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(*v), b.max(*v)));
+            println!("level {l}: at ({x},{z}) {:.3}, range {lo:.3}..{hi:.3}", t.at(l, x, z));
+        }
+        return;
+    }
     if args[1] == "stairs" {
         // stairs <root> <world file> <lot id hex>: the lot's staircases (0x04A09283), and each
         // stair style (CSTR 0x049CA4CD) they use, dumped with its TGI references.

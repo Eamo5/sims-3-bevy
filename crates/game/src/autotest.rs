@@ -161,7 +161,7 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, show_designs, walls_hook, hang_paintings, buy_close, diving_board, route_debug).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, show_designs, walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -944,6 +944,42 @@ fn diving_board(
         c.pitch = 0.35;
         c.distance = 8.0;
         c.height_offset = (pos.y - world.data.heightmap.sample(pos.x, pos.z)).max(0.0) + 0.5;
+    }
+}
+
+/// NEAR_DEBUG=<x>,<y>,<z>,<r>: every mesh drawn within `r` of that world point (by its bounds'
+/// centre), with what it belongs to (logged once, after the house is up).
+#[allow(clippy::type_complexity)]
+fn near_debug(
+    mut done: Local<bool>,
+    time: Res<Time>,
+    meshes: Res<Assets<Mesh>>,
+    q: Query<(Entity, &Mesh3d, &GlobalTransform, &InheritedVisibility, Option<&ChildOf>)>,
+    names: Query<(Option<&crate::interact::GameObject>, Has<crate::building::BuildingPiece>, Has<crate::building::WallFace>, Has<crate::building::FloorMesh>)>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+) {
+    let Some(v) = std::env::var("NEAR_DEBUG").ok().map(|s| s.split(',').filter_map(|x| x.parse::<f32>().ok()).collect::<Vec<_>>()).filter(|v| v.len() == 4) else { return };
+    if *done || time.elapsed_secs() < 12.0 {
+        return;
+    }
+    *done = true;
+    info!("near: house levels {:?}", building.as_ref().map(|b| b.levels.clone()));
+    let (at, r) = (Vec3::new(v[0], v[1], v[2]), v[3]);
+    for (e, m, tf, vis, parent) in &q {
+        let Some(aabb) = meshes.get(&m.0).and_then(|m| bevy::camera::primitives::MeshAabb::compute_aabb(m)) else { continue };
+        let c = tf.transform_point(Vec3::from(aabb.center));
+        if c.distance(at) > r {
+            continue;
+        }
+        let who = |x: Entity| names.get(x).ok().map(|(o, piece, face, floor)| format!("{:?} piece {piece} face {face} floor {floor}", o.map(|o| o.name.clone())));
+        info!(
+            "near: {e:?} centre {c:.2} half {:.2?} visible {} self [{}] parent {:?} [{}]",
+            Vec3::from(aabb.half_extents),
+            vis.get(),
+            who(e).unwrap_or_default(),
+            parent.map(|p| p.parent()),
+            parent.and_then(|p| who(p.parent())).unwrap_or_default()
+        );
     }
 }
 

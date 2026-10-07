@@ -223,6 +223,37 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     for l in 1..=top_level + 1 {
         levels.push(base + (l - 1) as f32 * LEVEL_HEIGHT);
     }
+    // Each storey's floor where the lot's own level heights put it (under its floor tiles):
+    // most foundations are 0.75 m up, but a house on a slope may stand higher (the Goths' manor
+    // is 1.64 m above its lot), and the furniture is placed at the true height.
+    if let (Some(t), Some(grid)) = (terrain.as_ref(), read(ld::T_GRID, ld::G_FLOOR_GRID).as_deref().and_then(|d| ld::Grid::parse(d).ok())) {
+        for l in 1..levels.len() {
+            let gl = if has_foundation { ground_index as usize + l } else { ground_index as usize + l - 1 };
+            if gl >= t.levels.len() || gl as u32 >= grid.levels {
+                continue;
+            }
+            let mut hs: Vec<f32> = Vec::new();
+            for x in 0..grid.width.min(w + 1) {
+                for z in 0..grid.depth.min(d + 1) {
+                    if grid.quad(gl as u32, x, z).is_some_and(|q| q.iter().any(|v| *v != 0)) {
+                        hs.push(t.at(gl, x as usize, z as usize));
+                    }
+                }
+            }
+            if hs.len() < 4 {
+                continue;
+            }
+            hs.sort_by(f32::total_cmp);
+            let h = ground + hs[hs.len() / 2];
+            // (Only where it's a storey's sensible height above the one below.)
+            if h > levels[l - 1] + 0.3 && (l < 2 || (h - levels[l - 1] - LEVEL_HEIGHT).abs() < 0.6) {
+                let shift = h - levels[l];
+                for v in &mut levels[l..] {
+                    *v += shift;
+                }
+            }
+        }
+    }
 
     // World <-> lot-local transform: world = corner + rotY(rotation) * (x, 0, z).
     let (s, c) = lot.rotation.sin_cos();

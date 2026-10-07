@@ -457,7 +457,10 @@ pub fn spawn_game_object_design(
     // (A sprinkler's model holds the dome of its spray: it stands where its solid parts are.)
     let solid: Vec<_> = parts.iter().filter(|p| kind != ObjectKind::Sprinkler || p.mode == 0).cloned().collect();
     let (mn, mx) = parts_bounds(if solid.is_empty() { &parts } else { &solid })?;
-    let tf = Transform::from_translation(pos).with_rotation(rotation);
+    // (Rugs and other flat things lie just over the floor, which is drawn a whisker above its
+    // level.)
+    let lift = if mx.y - mn.y < 0.03 { 0.02 } else { 0.0 };
+    let tf = Transform::from_translation(pos + Vec3::Y * lift).with_rotation(rotation);
     let e = spawn_parts(commands, &parts, tf);
     let center = Vec2::new((mn.x + mx.x) * 0.5, (mn.z + mx.z) * 0.5);
     let half = Vec2::new((mx.x - mn.x) * 0.5, (mx.z - mn.z) * 0.5);
