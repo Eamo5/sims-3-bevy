@@ -251,6 +251,7 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "c2o_trashCan_empty",
     "a2o_hotBeverageMachine_drink_loop",
     "a2o_dishwasher_use",
+    "a2o_object_genericSwipe",
     "a2o_dishwasher_repair_start_kneel",
     "a2o_dishwasher_repair_loopInspect",
     "a2o_sink_dishes_scrub",

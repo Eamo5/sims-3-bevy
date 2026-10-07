@@ -118,6 +118,8 @@ pub enum ObjectKind {
     Bar,
     /// A dishwasher: the dishes cleared go in it (quicker than washing up at the sink).
     Dishwasher,
+    /// A candle: lit, it burns a few hours with a little flame and a warm light.
+    Candle,
     /// A trash compactor: a trash can that holds three times as much.
     TrashCompactor,
     /// The Teleporter (a lifetime reward): to a community lot at once.
@@ -204,6 +206,8 @@ impl ObjectKind {
             Self::PoolLadder
         } else if has("objects.fireplaces.") {
             Self::Fireplace
+        } else if has("miscellaneous.candle") {
+            Self::Candle
         } else if has("urnstone") {
             Self::Tombstone
         } else if has("mailbox") {
@@ -269,7 +273,7 @@ impl ObjectKind {
         match self {
             Self::Fridge | Self::Stove | Self::Microwave | Self::Grill | Self::HotBeverage => "Appliances",
             Self::AlarmClock => "Electronics",
-            Self::TrashCan | Self::TrashCompactor => "Misc",
+            Self::TrashCan | Self::TrashCompactor | Self::Candle => "Misc",
             Self::Dishwasher => "Appliances",
             Self::FishBowl => "Decor",
             Self::BedDouble | Self::BedSingle => "Beds",
@@ -595,6 +599,11 @@ static SINK: [InteractionDef; 2] = [
     // (Where a dish cleared away is taken without a dishwasher: never on the menu.)
     InteractionDef { autonomous: false, special: Special::WashDishes, ..def("Wash Dishes", 8.0, N, Pose::Use) },
 ];
+/// (A flame lit and blown out: the fireplace's, smaller.)
+static CANDLE: [InteractionDef; 2] = [
+    InteractionDef { autonomous: false, special: Special::LightFire, ..def("Light Candle", 1.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::PutOutFire, ..def("Blow Out", 1.0, N, Pose::Use) },
+];
 /// (Loaded with the dishes cleared away: never on the menu.)
 static DISHWASHER: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::WashDishes, ..def("Load Dishes", 3.0, N, Pose::Use) }];
 static SOFA: [InteractionDef; 2] = [
@@ -723,6 +732,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Collect" if kind == ObjectKind::Collectible => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_harvestlow_x"]),
         "Swim" => A::new(Some("a2o_ladder_climbDown_L_x"), &["a_swim_cycle_x"]),
         "Light Fire" => A::new(None, &["a2o_fireplace_light_start_x"]),
+        "Light Candle" | "Blow Out" => A::new(None, &["a2o_object_genericSwipe_x"]),
         "Put Out Fire" => A::new(None, &["a2o_fireplace_putOut_x"]),
         "Warm Hands" => A::new(Some("a2o_fireplace_warmHands_start_x"), &["a2o_fireplace_warmHands_x"]),
         "Catch" if kind == ObjectKind::Butterfly => A::new(None, &["a2o_butterfly_catch_x"]),
@@ -924,6 +934,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::FishingSpot => &FISHING_SPOT,
         ObjectKind::Butterfly | ObjectKind::Beetle => &INSECT,
         ObjectKind::Fireplace => &FIREPLACE,
+        ObjectKind::Candle => &CANDLE,
         ObjectKind::PoolLadder => &POOL_LADDER,
         ObjectKind::BirthdayCake => &CAKE,
         ObjectKind::Mailbox => &MAILBOX,
@@ -2526,7 +2537,7 @@ fn autonomy(
                 }
                 // Guests don't cook or do the chores.
                 // A fireplace is lit when cold, and warmed by when lit.
-                if obj.kind == ObjectKind::Fireplace && (d.special == Special::LightFire) == lit_q.contains(oe) {
+                if matches!(obj.kind, ObjectKind::Fireplace | ObjectKind::Candle) && (d.special == Special::LightFire) == lit_q.contains(oe) {
                     continue;
                 }
                 // Homework is for those who have some.

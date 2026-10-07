@@ -1,6 +1,6 @@
 //! Fireplaces: Sims light a fire (it burns a few hours, flames dancing in the hearth and a warm
 //! flickering light on the room), warm their hands by it, and put it out. Now and then a spark
-//! catches the floor in front.
+//! catches the floor in front. Candles likewise: one small flame, a soft light, no sparks.
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -33,12 +33,17 @@ pub enum FireplaceRequest {
     PutOut(Entity),
 }
 
-/// How long a fire burns (game minutes).
+/// How long a fire burns (game minutes), and a candle.
 const BURN_MINUTES: f64 = 300.0;
+const CANDLE_MINUTES: f64 = 240.0;
 
 /// The hearth's flames and light.
 #[derive(Component)]
 struct HearthLight;
+
+/// A candle's light.
+#[derive(Component)]
+struct CandleLight;
 
 #[derive(Default)]
 struct Looks {
@@ -78,10 +83,33 @@ fn requests(
                     })
                     .clone();
                 // The hearth: the fireplace's effect slot, else low down in the middle of the
-                // firebox, a little in from the front.
+                // firebox, a little in from the front. (A candle's wick: its slot, else its top.)
+                let candle = o.kind == crate::interact::ObjectKind::Candle;
                 let slot = ui.as_ref().and_then(|ui| ui.data.fx_slots.iter().find(|(k, _)| *k == o.objd)).and_then(|(_, s)| s.first().copied());
-                let at = slot.map_or(Vec3::new(o.center.x, 0.08, o.center.y + o.half.y * 0.15), |s| Vec3::from(s) - Vec3::Y * 0.12);
+                let at = match (candle, slot) {
+                    (true, Some(s)) => Vec3::from(s),
+                    (true, None) => Vec3::new(o.center.x, o.height + 0.02, o.center.y),
+                    (false, s) => s.map_or(Vec3::new(o.center.x, 0.08, o.center.y + o.half.y * 0.15), |s| Vec3::from(s) - Vec3::Y * 0.12),
+                };
                 let mut rng = rand::rng();
+                if candle {
+                    let flames = commands
+                        .spawn((Transform::from_translation(at), Visibility::default(), DespawnOnExit(AppState::InGame), ChildOf(e)))
+                        .with_children(|f| {
+                            let size = Vec2::new(0.035, 0.07);
+                            let offset = Vec3::Y * 0.03;
+                            f.spawn((Mesh3d(quad.clone()), MeshMaterial3d(mat.clone()), Transform::from_translation(offset), crate::fire::Flame::new(size, rng.random_range(0.0..6.0), offset)));
+                            f.spawn((
+                                PointLight { color: Color::srgb(1.0, 0.65, 0.32), intensity: 2_500.0, range: 3.5, shadow_maps_enabled: false, ..default() },
+                                Transform::from_xyz(0.0, 0.1, 0.0),
+                                CandleLight,
+                            ));
+                        })
+                        .id();
+                    // (No sparks from a candle.)
+                    commands.entity(e).insert(Lit { until: clock.minutes + CANDLE_MINUTES, flames, next_spark: f64::MAX });
+                    continue;
+                }
                 let flames = commands
                     .spawn((Transform::from_translation(at), Visibility::default(), DespawnOnExit(AppState::InGame), ChildOf(e)))
                     .with_children(|f| {
@@ -137,9 +165,12 @@ fn burn(
 }
 
 /// The hearth's light flickers.
-fn glow(time: Res<Time>, mut lights: Query<&mut PointLight, With<HearthLight>>) {
+fn glow(time: Res<Time>, mut lights: Query<&mut PointLight, With<HearthLight>>, mut candles: Query<&mut PointLight, (With<CandleLight>, Without<HearthLight>)>) {
     let t = time.elapsed_secs();
     for mut l in &mut lights {
         l.intensity = 26_000.0 + 9_000.0 * ((t * 11.0).sin() * 0.5 + (t * 27.0).sin() * 0.5);
+    }
+    for mut l in &mut candles {
+        l.intensity = 2_300.0 + 400.0 * ((t * 13.0).sin() * 0.5 + (t * 31.0).sin() * 0.5);
     }
 }

@@ -831,7 +831,7 @@ fn world_click(
                     continue;
                 }
                 // A fireplace offers lighting when cold, the rest when lit.
-                if obj.kind == ObjectKind::Fireplace && (d.special == Special::LightFire) == lit_q.contains(t) {
+                if matches!(obj.kind, ObjectKind::Fireplace | ObjectKind::Candle) && (d.special == Special::LightFire) == lit_q.contains(t) {
                     continue;
                 }
                 if d.special == Special::Homework && !hw_q.contains(actor) {
