@@ -38,6 +38,8 @@ pub struct BakedData {
     pub clips: Option<PackReader>,
     /// Names of the baked clips (for picking variants).
     pub clip_names: Vec<String>,
+    /// Models with moving parts: their rigs and skinning (by MODL key).
+    pub skins: Option<PackReader>,
 }
 
 impl BakedData {
@@ -75,6 +77,7 @@ impl BakedData {
         let outfit_pack = PackReader::open(&g.join("outfits.pack")).ok();
         let clips = PackReader::open(&g.join("clips.pack")).ok();
         let clip_names: Vec<String> = s3bake::read_value(&g.join("clip_names.bin")).unwrap_or_default();
+        let skins = PackReader::open(&g.join("skins.pack")).ok();
         Ok(Self {
             root,
             catalog,
@@ -96,7 +99,13 @@ impl BakedData {
             designs,
             paintings,
             canvas_models,
+            skins,
         })
+    }
+
+    /// A model's rig and skinning, when it has moving parts.
+    pub fn skin(&self, k: &Key) -> Option<s3bake::gamedata::ObjectSkin> {
+        self.skins.as_ref().and_then(|p| p.get(k))
     }
 
     pub fn model(&self, k: &Key) -> Option<BakedModel> {

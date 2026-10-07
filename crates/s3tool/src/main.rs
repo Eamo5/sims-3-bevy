@@ -477,6 +477,41 @@ fn main() {
         }
         return;
     }
+    if args[1] == "skin" {
+        // skin <root> <objd instance hex>: each mesh's joints and blend data, and the rig.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let k = s3pkg::ResourceKey::new(types::OBJD, 0, parse_hex(&args[3]));
+        let objd = set.read(&k).expect("no OBJD");
+        let objk = s3formats::object::objd_objk(&set, &objd).expect("no OBJK");
+        let mk = objk.model_key.expect("no model");
+        let v = set.read(&mk).or_else(|| set.read_ti(mk.t, mk.i)).expect("no VPXY");
+        let rig = s3formats::model::vpxy_keys(&v)
+            .into_iter()
+            .find(|k| k.t == 0x8EAF13DE)
+            .and_then(|k| set.read(&k).or_else(|| set.read_ti(k.t, k.i)))
+            .and_then(|d| s3formats::sim::Rig::parse(&d).ok());
+        let name = |h: u32| rig.as_ref().and_then(|r| r.bones.iter().find(|b| s3pkg::fnv32(&b.name) == h).map(|b| b.name.clone())).unwrap_or(format!("{h:08X}"));
+        if let Some(r) = &rig {
+            for (i, b) in r.bones.iter().enumerate() {
+                println!("bone [{i}] {} <- {} pos {:?} rot {:?}", b.name, b.parent, b.position, b.rotation);
+            }
+        }
+        for mk in s3formats::object::object_models(&set, &k) {
+            println!("model {mk}");
+            for m in s3formats::model::load_model(&set, &mk).unwrap_or_default() {
+                println!("  mesh {:08X} verts {} joints {:?}", m.name_hash, m.positions.len(), m.joints.iter().map(|j| name(*j)).collect::<Vec<_>>());
+                let mut hist: std::collections::BTreeMap<[u8; 4], usize> = Default::default();
+                for b in &m.blend_indices {
+                    *hist.entry(*b).or_default() += 1;
+                }
+                println!("    indices {:?}", hist.iter().take(12).collect::<Vec<_>>());
+                for (i, (b, w)) in m.blend_indices.iter().zip(&m.blend_weights).enumerate().step_by((m.blend_indices.len() / 6).max(1)).take(6) {
+                    println!("    v{i} {:?} {b:?} {w:?}", m.positions[i]);
+                }
+            }
+        }
+        return;
+    }
     if args[1] == "objmats" {
         // objmats <root> <objd instance hex>: each mesh's shader and material parameters.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);

@@ -236,6 +236,22 @@ f32 inverseBindPose[boneCount][3][4]   // 3 rows x 4 columns, row-major; column 
 s3pi maps the 12 floats `m00 m01 m02 m03 m10 ... m23` to Right=(m00,m10,m20), Up=(m01,m11,m21),
 Back=(m02,m12,m22), Translate=(m03,m13,m23). SKIN chunks occur only on skinned/animated objects (doors, cars, some furniture) [inferred].
 
+### 3.3 Objects with moving parts in practice [verified, this project]
+
+- An MLOD mesh's `jointReferences` (after the skin-controller reference) are FNV-32 hashes of
+  rig bone names; VRTF usage 3 (BlendIndex, 4 bytes) indexes that list, usage 4 (BlendWeight,
+  ColorUByte4 stored B,G,R,A like the normals, or UByte4N) weights them. The value fridge's
+  door mesh is skinned to `_bind_0_door_W`, the cabinet to `transformBone`, rigidly (one bone
+  per vertex at weight 255).
+- The rig is the VPXY's 0x8EAF13DE entry (the same RIG format as a Sim's). Inverse bind poses
+  can be rebuilt from the rig's own rest pose (bones composed from the root); the SKIN chunk
+  isn't needed.
+- The object's animation is the `<sim clip stem>_<object actor>` clip of the Sim's clip
+  (`a2o_fridge_openDoor_x` → `a2o_fridge_openDoor_fridge`: one track on `_bind_0_door_W`,
+  rotating it ~100° about Y). Played in step with the Sim's clip; tracks are local to the bone's
+  parent, as for Sims. Shower doors, dresser drawers, the mailbox flag, trash can lids, swing
+  seats, toy box lids and beds' covers have them.
+
 ---
 
 ## 4. Vertex and index data: VRTF, VBUF, swizzle info, IBUF

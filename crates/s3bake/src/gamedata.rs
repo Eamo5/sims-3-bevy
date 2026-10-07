@@ -4,7 +4,7 @@
 //! them. The icons (PNG, `0x2F7D0004`, instance = fnv64 of the lowercase name) are copied to
 //! `icons.pack` as they are.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use s3pkg::{Package, PackageSet};
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 55;
+pub const GAMEDATA_VERSION: u32 = 56;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -733,6 +733,92 @@ pub const CANVAS_GROUP: u32 = 0x0CA4_7A50;
 
 /// The Painting skill's picture table and the pictures, and the canvas model at each size
 /// (one model for all three, its geometry states the sizes).
+/// A catalogue model with parts that move (a fridge's door, a swing's seat): its rig, and how
+/// its meshes are skinned to it (in `skins.pack`, by MODL key).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct ObjectSkin {
+    /// The rig's bones: FNV-32 of the name (as the clips' tracks name them), parent (-1 for
+    /// none) and bind pose relative to it (translation; rotation x, y, z, w).
+    pub bones: Vec<(u32, i16, [f32; 3], [f32; 4])>,
+    /// Each skinned mesh of the model, in model order.
+    pub meshes: Vec<SkinMesh>,
+}
+
+/// A mesh's skinning: its vertex count and first vertex (to find its baked part), and each
+/// vertex's four rig bones (indices into `ObjectSkin::bones`) and weights (in 255ths).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SkinMesh {
+    pub verts: u32,
+    pub first: [f32; 3],
+    pub bones: Vec<[u16; 4]>,
+    pub weights: Vec<[u8; 4]>,
+}
+
+/// An object's rig (OBJD → OBJK → its VPXY, which names the rig).
+fn object_rig(pkgs: &PackageSet, objd: crate::types::Key) -> Option<s3formats::sim::Rig> {
+    pkgs.read(&crate::types::rkey(objd))
+        .and_then(|d| s3formats::object::objd_objk(pkgs, &d))
+        .and_then(|o| o.model_key)
+        .and_then(|k| pkgs.read(&k).or_else(|| pkgs.read_ti(k.t, k.i)))
+        .and_then(|v| s3formats::model::vpxy_keys(&v).into_iter().find(|k| k.t == 0x8EAF13DE))
+        .and_then(|k| pkgs.read(&k).or_else(|| pkgs.read_ti(k.t, k.i)))
+        .and_then(|d| s3formats::sim::Rig::parse(&d).ok())
+}
+
+/// The catalogue's models with moving parts (meshes skinned to more than the object's root
+/// bones), with their rigs, for the object animations the clips play: `skins.pack`.
+fn bake_object_skins(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, String> {
+    let g = root.global_dir();
+    let catalog: Vec<crate::types::CatalogEntry> = read_value(&g.join("catalog.bin")).map_err(|e| format!("catalog.bin: {e}"))?;
+    let fixed = ["transformBone", "b__ROOT__", "offsetBone"].map(s3pkg::fnv32);
+    let mut done: HashSet<crate::types::Key> = HashSet::new();
+    let mut n = 0;
+    let mut pack = PackWriter::create(&g.join("skins.pack")).map_err(|e| e.to_string())?;
+    for c in &catalog {
+        if c.models.iter().all(|m| done.contains(m)) {
+            continue;
+        }
+        let Some(rig) = object_rig(pkgs, c.objd) else { continue };
+        if rig.bones.len() < 2 {
+            continue;
+        }
+        let hashes: Vec<u32> = rig.bones.iter().map(|b| s3pkg::fnv32(&b.name)).collect();
+        for &modl in &c.models {
+            if !done.insert(modl) {
+                continue;
+            }
+            let meshes = s3formats::model::load_model(pkgs, &crate::types::rkey(modl)).unwrap_or_default();
+            let mut moves = false;
+            let mut out = ObjectSkin {
+                bones: rig.bones.iter().zip(&hashes).map(|(b, h)| (*h, b.parent.clamp(-1, i16::MAX as i32) as i16, b.position, b.rotation)).collect(),
+                meshes: Vec::new(),
+            };
+            for m in meshes.iter().filter(|m| !m.blend_indices.is_empty() && !m.positions.is_empty()) {
+                // (Each of the mesh's joints as a rig bone: the root when the rig hasn't it.)
+                let joints: Vec<u16> = m.joints.iter().map(|j| hashes.iter().position(|h| h == j).unwrap_or(0) as u16).collect();
+                let mut bones = Vec::with_capacity(m.blend_indices.len());
+                let mut weights = Vec::with_capacity(m.blend_indices.len());
+                for (ix, w) in m.blend_indices.iter().zip(&m.blend_weights) {
+                    let b = ix.map(|i| joints.get(i as usize).copied().unwrap_or(0));
+                    let w = w.map(|x| (x.clamp(0.0, 1.0) * 255.0).round() as u8);
+                    if b.iter().zip(&w).any(|(b, w)| *w > 0 && !fixed.contains(&hashes[*b as usize])) {
+                        moves = true;
+                    }
+                    bones.push(b);
+                    weights.push(w);
+                }
+                out.meshes.push(SkinMesh { verts: m.positions.len() as u32, first: m.positions[0], bones, weights });
+            }
+            if moves {
+                pack.add(modl, &out).map_err(|e| e.to_string())?;
+                n += 1;
+            }
+        }
+    }
+    pack.finish().map_err(|e| e.to_string())?;
+    Ok(n)
+}
+
 fn bake_paintings(root: &BakeRoot, pkgs: &PackageSet, table: Option<String>) -> Result<usize, String> {
     let g = root.global_dir();
     let mut out = PaintingsBaked::default();
@@ -1560,6 +1646,8 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     progress(&format!("Converting: designs for {designs} objects…"));
     let paintings = bake_paintings(root, pkgs, xml("PaintingSkillDB"))?;
     progress(&format!("Converting: {paintings} paintings…"));
+    let skins = bake_object_skins(root, pkgs)?;
+    progress(&format!("Converting: {skins} objects with moving parts…"));
     progress("Converting: fences…");
     out.fences = bake_fence_styles(root, pkgs, &strings)?;
     // Catalogue models with alternative geometry states, drawn in their fullest (the objects'

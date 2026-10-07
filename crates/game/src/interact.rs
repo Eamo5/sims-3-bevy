@@ -706,6 +706,9 @@ static CHESS: [InteractionDef; 2] = [
     InteractionDef { autonomous: false, skill: Some("Logic"), special: Special::ChessMatch, ..def("Play a Ranked Match", 60.0, [0.0, 0.0, -2.0, 10.0, 0.0, 35.0], Pose::Use) },
 ];
 
+/// Taking something out of the fridge, after opening it.
+const FRIDGE_STEPS: &[&str] = &["a2o_fridge_takeFoodOut_plateDinner_x", "a2o_fridge_closeDoor_x"];
+
 /// The animation played while performing an interaction: start clip, then loop variants.
 pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::ActionClip> {
     use crate::anim::ActionClip as A;
@@ -729,9 +732,10 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         }
         "Read" if kind == ObjectKind::Newspaper => A::new(Some("a2o_newspaper_read_standing_start_x"), &["a2o_newspaper_read_standing_loop"]),
         "Eat" if kind == ObjectKind::Stool => A::new(Some("a2o_eat_barStoolIn_fork_start_x"), &["a2o_eat_barStoolIn_fork_neat_x"]),
-        "Have Quick Meal" | "Microwave Dinner" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_eat_stand_fork_neat", "a2o_eat_stand_hand_neat"]),
-        "Grab a Snack" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_eat_stand_hand_neat"]),
-        "Bake Birthday Cake" => A::new(Some("a2o_fridge_openDoor_x"), &["a2o_cuttingBoard_chop_loopMedSkill_x"]),
+        // (The fridge door opened, something taken out and the door shut again.)
+        "Have Quick Meal" | "Microwave Dinner" => A::steps("a2o_fridge_openDoor_x", FRIDGE_STEPS, &["a2o_eat_stand_fork_neat", "a2o_eat_stand_hand_neat"]),
+        "Grab a Snack" => A::steps("a2o_fridge_openDoor_x", FRIDGE_STEPS, &["a2o_eat_stand_hand_neat"]),
+        "Bake Birthday Cake" => A::steps("a2o_fridge_openDoor_x", FRIDGE_STEPS, &["a2o_cuttingBoard_chop_loopMedSkill_x"]),
         "Grow Up" => A::new(None, &["a2o_birthdayCake_blowOut_counter_x"]),
         "Cook Dinner" => A::new(
             Some("a2o_stove_fryingPan_start_fromNeutral_x"),

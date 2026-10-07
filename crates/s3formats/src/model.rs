@@ -258,6 +258,11 @@ pub struct MeshData {
     /// Geometry states (FNV-32 of the state's name, like a dish's `full`, `half` and `empty`),
     /// each its own run of the index buffer over the same vertices.
     pub states: Vec<(u32, Vec<u32>)>,
+    /// The rig bones the mesh is skinned to (FNV-32 of their names; a fridge's door bone), and
+    /// each vertex's four bones (indices into `joints`) and weights; empty when unskinned.
+    pub joints: Vec<u32>,
+    pub blend_indices: Vec<[u8; 4]>,
+    pub blend_weights: Vec<[f32; 4]>,
 }
 
 fn color_ubyte4_vec(e: &[u8]) -> [f32; 3] {
@@ -295,9 +300,10 @@ pub fn decode_mlod(rcol: &Rcol, mlod: &[u8]) -> R<Vec<MeshData>> {
         let bmax = r.vec3()?;
         // Skin controller, joints, scale offset, then the geometry states.
         let mut states_raw: Vec<(u32, usize, usize)> = Vec::new();
+        let mut joint_refs: Vec<u32> = Vec::new();
         let _skin = r.u32();
         if let Ok(joints) = r.u32()
-            && r.skip(joints as usize * 4).is_ok()
+            && (0..joints.min(256)).all(|_| r.u32().map(|j| joint_refs.push(j)).is_ok())
             && r.u32().is_ok()
             && let Ok(n) = r.u32()
         {
@@ -334,8 +340,10 @@ pub fn decode_mlod(rcol: &Rcol, mlod: &[u8]) -> R<Vec<MeshData>> {
             name_hash,
             bounds_min: bmin,
             bounds_max: bmax,
+            joints: joint_refs,
             ..Default::default()
         };
+        let skinned = !m.joints.is_empty() && vrtf.elems.iter().any(|e| e.usage == 3);
         m.positions.reserve(vertex_count);
         let mut has_normal = false;
         let mut has_uv = false;
@@ -347,6 +355,8 @@ pub fn decode_mlod(rcol: &Rcol, mlod: &[u8]) -> R<Vec<MeshData>> {
             let mut uv = [0.0f32; 2];
             let mut uv1 = None;
             let mut uv0_zw = None;
+            let mut bones = [0u8; 4];
+            let mut weights = [1.0f32, 0.0, 0.0, 0.0];
             for e in &vrtf.elems {
                 let o = e.offset as usize;
                 let b = &vert[o.min(vert.len())..];
@@ -399,8 +409,23 @@ pub fn decode_mlod(rcol: &Rcol, mlod: &[u8]) -> R<Vec<MeshData>> {
                             uv1 = Some(t);
                         }
                     }
+                    // Blend indices (UByte4) and weights (ColorUByte4, stored BGRA like the
+                    // normals; or UByte4N; or floats).
+                    3 if b.len() >= 4 => bones = [b[0], b[1], b[2], b[3]],
+                    4 => {
+                        weights = match e.format {
+                            5 if b.len() >= 4 => [b[2] as f32 / 255.0, b[1] as f32 / 255.0, b[0] as f32 / 255.0, b[3] as f32 / 255.0],
+                            8 | 4 if b.len() >= 4 => [b[0] as f32 / 255.0, b[1] as f32 / 255.0, b[2] as f32 / 255.0, b[3] as f32 / 255.0],
+                            3 if b.len() >= 16 => [f32_at(0), f32_at(1), f32_at(2), f32_at(3)],
+                            _ => weights,
+                        }
+                    }
                     _ => {}
                 }
+            }
+            if skinned {
+                m.blend_indices.push(bones);
+                m.blend_weights.push(weights);
             }
             let l = (nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2]).sqrt();
             if l > 1e-6 {

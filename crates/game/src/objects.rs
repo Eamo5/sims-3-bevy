@@ -22,6 +22,8 @@ pub struct ModelPart {
     pub tex: Option<Key>,
     pub mode: u8,
     pub unlit: bool,
+    /// The model whose rig it's skinned to, when it has moving parts (`objanim`).
+    pub rig: Option<Key>,
 }
 
 /// A catalogue object in a design: the texture drawn from it, in place of the object's own
@@ -125,12 +127,15 @@ impl ObjectAssets {
 
     pub fn ingest_model(&mut self, ctx: &mut AssetCtx, key: Key, cpu: Vec<CpuPart>) -> Vec<ModelPart> {
         let mut parts = Vec::new();
-        for p in cpu {
+        let skin = ctx.baked.skin(&key);
+        for mut p in cpu {
             // Lot imposters cut out railings, fences, shrubs and window frames with their
             // atlas's alpha.
             let mode = if p.layer != 0 { p.mode.max(1) } else { p.mode };
             let material = self.material_for_key(ctx, p.tex, mode, p.unlit);
-            parts.push(ModelPart { mesh: ctx.meshes.add(p.mesh), material, bounds: p.bounds, layer: p.layer, tex: p.tex, mode, unlit: p.unlit });
+            // A moving part: skinned to the model's rig (its mesh found by its vertices).
+            let rig = skin.as_ref().is_some_and(|s| skin_part(&mut p.mesh, s)).then_some(key);
+            parts.push(ModelPart { mesh: ctx.meshes.add(p.mesh), material, bounds: p.bounds, layer: p.layer, tex: p.tex, mode, unlit: p.unlit, rig });
         }
         self.models.insert(key, parts.clone());
         parts
@@ -226,6 +231,25 @@ impl ObjectAssets {
     }
 }
 
+/// Gives a mesh its skinning from a model's (the mesh with its vertex count and first vertex):
+/// each vertex's rig bones and weights. Whether it had any.
+fn skin_part(mesh: &mut Mesh, skin: &s3bake::gamedata::ObjectSkin) -> bool {
+    let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { return false };
+    let Some(first) = pos.first().copied() else { return false };
+    let Some(s) = skin.meshes.iter().find(|m| m.verts as usize == pos.len() && Vec3::from(m.first).distance(Vec3::from(first)) < 1e-5) else { return false };
+    let weights: Vec<[f32; 4]> = s
+        .weights
+        .iter()
+        .map(|w| {
+            let sum: f32 = w.iter().map(|x| *x as f32).sum();
+            if sum <= 0.0 { [1.0, 0.0, 0.0, 0.0] } else { w.map(|x| x as f32 / sum) }
+        })
+        .collect();
+    mesh.insert_attribute(Mesh::ATTRIBUTE_JOINT_INDEX, bevy::mesh::VertexAttributeValues::Uint16x4(s.bones.clone()));
+    mesh.insert_attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT, weights);
+    true
+}
+
 /// Spawns an object's meshes as children of a new entity.
 pub fn spawn_parts(commands: &mut Commands, parts: &[ModelPart], transform: Transform) -> Entity {
     commands
@@ -233,6 +257,9 @@ pub fn spawn_parts(commands: &mut Commands, parts: &[ModelPart], transform: Tran
         .with_children(|c| {
             for p in parts {
                 let mut e = c.spawn((Mesh3d(p.mesh.clone()), MeshMaterial3d(p.material.clone())));
+                if let Some(rig) = p.rig {
+                    e.insert(crate::objanim::SkinPart(rig));
+                }
                 if p.layer != 0 {
                     e.insert(ImposterLayer(p.layer));
                 }

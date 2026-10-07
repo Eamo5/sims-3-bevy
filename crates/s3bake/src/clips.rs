@@ -21,6 +21,7 @@ pub const CLIP_PREFIXES: &[&str] = &[
     // Kitchen.
     "a2o_fridge_openDoor",
     "a2o_fridge_closeDoor",
+    "a2o_fridge_takeFoodOut_plateDinner",
     "a2o_fridge_cookSomthing",
     "a2o_stove_fryingPan_start_fromNeutral",
     "a2o_stove_fryingPan_idle",
@@ -308,8 +309,12 @@ pub const PROP_ACTORS: &[&str] = &[
 
 /// Whether a clip should be baked.
 pub fn wanted(name: &str) -> bool {
+    // (The Sim's side, a prop's, or the object's own: `a2o_fridge_openDoor_fridge` swings its
+    // door as the Sim opens it.)
     let actor_side = |n: &str| {
-        n.ends_with("_x") || n.ends_with("_y") || n.rsplit_once('_').is_some_and(|(_, a)| PROP_ACTORS.iter().any(|p| p.eq_ignore_ascii_case(a)))
+        n.ends_with("_x")
+            || n.ends_with("_y")
+            || n.rsplit_once('_').is_some_and(|(_, a)| PROP_ACTORS.iter().any(|p| p.eq_ignore_ascii_case(a)) || n.split('_').nth(1).is_some_and(|o| o.eq_ignore_ascii_case(a)))
     };
     CLIP_PREFIXES.iter().any(|p| {
         if !name.starts_with(p) {
