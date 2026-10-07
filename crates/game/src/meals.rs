@@ -25,13 +25,38 @@ impl Plugin for MealsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Leftovers>()
             .add_systems(OnEnter(crate::AppState::InGame), |mut l: ResMut<Leftovers>| l.0.clear())
-            .add_systems(Update, (cook_prep, cook_prep_done, meal_requests, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (cook_prep, cook_prep_done, serve_if_interrupted, meal_requests, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
 /// The game's walks with the ingredients' tray, and with the frying pan.
 pub const FOOD_CARRY: &str = "a2o_foodTray_carry_x";
 pub const PAN_CARRY: &str = "a2o_fryingPan_carry_x";
+pub const PLATTER_CARRY: &str = "a2o_carryObject_carry_x";
+
+/// A cook carrying the meal from this stove to set it down (then it's served).
+#[derive(Component)]
+pub struct ServingFrom(pub Entity);
+
+/// A meal carried off and not set down after all (the cook called away) is served anyway.
+fn serve_if_interrupted(mut commands: Commands, sims: Query<(Entity, &ServingFrom, &ActionQueue), Without<MealRequest>>) {
+    for (e, from, queue) in &sims {
+        if !queue.0.front().is_some_and(|a| a.label == "Set Down Meal") {
+            commands.entity(e).insert(MealRequest::Serve(from.0));
+        }
+    }
+}
+
+/// A counter or table near a point (the one the meal is set down on).
+fn surface_entity_near(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, at: Vec3, within: f32) -> Option<Entity> {
+    objects
+        .iter()
+        .filter(|(_, o, _, _)| o.kind == ObjectKind::Table)
+        .map(|(e, o, tf, _)| (e, o.world_center(tf).with_y(tf.translation.y).distance(at.with_y(tf.translation.y))))
+        .filter(|(_, d)| *d < within)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(e, _)| e)
+}
 
 /// A cook whose meal is being prepared (ingredients from the fridge, chopped at a counter) on
 /// the way to the stove.
@@ -380,7 +405,7 @@ fn meal_requests(
         &mut ActionQueue,
         &Sim,
         Option<&EatingPlate>,
-        (Option<&MealPlan>, Option<&Plateful>, &crate::interact::Skills, Option<&KnownRecipes>),
+        (Option<&MealPlan>, Option<&Plateful>, &crate::interact::Skills, Option<&KnownRecipes>, Option<&ServingFrom>),
     )>,
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy)>,
     mut meals: Query<(&mut Meal, Option<&Dish>, Option<&DishFood>)>,
@@ -394,12 +419,22 @@ fn meal_requests(
     let recipes = ui.as_ref().map(|u| u.data.clone());
     let recipe = |i: usize| recipes.as_ref().and_then(|d| d.recipes.get(i));
     let mut taken: Vec<Entity> = Vec::new();
-    for (me, req, tf, mut queue, sim, eating, (plan, plateful, skills, known)) in &mut sims {
+    for (me, req, tf, mut queue, sim, eating, (plan, plateful, skills, known, serving)) in &mut sims {
         commands.entity(me).remove::<MealRequest>();
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
         match *req {
             MealRequest::Serve(stove) => {
                 let Ok((_, s, stf, _)) = objects.get(stove) else { continue };
+                // (First carried from the stove to the counter or table it's served on.)
+                if serving.is_none()
+                    && let Some(surface) = surface_entity_near(&objects, s.world_center(stf), 6.0)
+                    && let Some(def) = crate::interact::interactions_for(ObjectKind::Table).iter().position(|d| d.special == Special::PlaceMeal)
+                {
+                    commands.entity(me).insert((ServingFrom(stove), crate::anim::Carrying(PLATTER_CARRY)));
+                    queue.0.push_front(Action::new("Set Down Meal", ActionKind::Object { target: surface, def }, true));
+                    continue;
+                }
+                commands.entity(me).remove::<ServingFrom>();
                 let at = surface_near(&objects, s.world_center(stf), 6.0).unwrap_or(Vec3::new(s.world_center(stf).x, stf.translation.y + s.height, s.world_center(stf).z));
                 let servings = household.iter().filter(|h| h.age != Age::Baby).count().clamp(2, 8) as u8;
                 let yaw = stf.rotation.to_euler(EulerRot::YXZ).0;

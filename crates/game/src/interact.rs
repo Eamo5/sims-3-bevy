@@ -424,6 +424,8 @@ pub enum Special {
     /// Before cooking: the ingredients from the fridge, and chopped at a counter.
     GetIngredients,
     PrepFood,
+    /// The cooked meal carried from the stove and set down on a counter or table.
+    PlaceMeal,
     /// A garden sprinkler turned on (it runs a couple of hours) or off.
     SprinklerOn,
     SprinklerOff,
@@ -532,8 +534,10 @@ static FRIDGE: [InteractionDef; 5] = [
     InteractionDef { autonomous: false, special: Special::GetIngredients, ..def("Get Ingredients", 6.0, N, Pose::Use) },
 ];
 /// (A counter, where the ingredients are chopped before cooking: never on the menu.)
-static COUNTER: [InteractionDef; 1] =
-    [InteractionDef { autonomous: false, skill: Some("Cooking"), special: Special::PrepFood, ..def("Prepare Food", 15.0, [0.0, 0.0, 0.0, 0.0, -2.0, 4.0], Pose::Use) }];
+static COUNTER: [InteractionDef; 2] = [
+    InteractionDef { autonomous: false, skill: Some("Cooking"), special: Special::PrepFood, ..def("Prepare Food", 15.0, [0.0, 0.0, 0.0, 0.0, -2.0, 4.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::PlaceMeal, ..def("Set Down Meal", 2.0, N, Pose::Use) },
+];
 static CAKE: [InteractionDef; 1] =
     [InteractionDef { autonomous: false, special: Special::BlowOutCandles, ..def("Grow Up", 3.0, [0.0, 0.0, 0.0, 10.0, 0.0, 20.0], Pose::Use) }];
 // (Cooking and grabbing a plate don't feed by themselves: the hunger figures are what they lead
@@ -805,6 +809,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Dance" => A::new(None, &["a_dance_beg_", "a_dance_med_"]),
         "Read a Book" => A::new(None, &["a2o_bookshelf_getBook_Carry_x"]),
         "Get Ingredients" => A::steps("a2o_fridge_openDoor_x", &["a2o_fridge_takeFoodOut_foodTray_x", "a2o_fridge_closeDoor_x"], &["a2o_foodTray_carry_x"]),
+        "Set Down Meal" => A::new(None, &["a2o_carryObject_putDown_counter_x"]),
         "Prepare Food" => A::new(Some("a2o_cuttingBoard_start_fromCarry_x"), &["a2o_cuttingBoard_chop_loopMedSkill_x", "a2o_cuttingBoard_chop_loopLowSkill_x"]),
         "Read Book" if matches!(kind, ObjectKind::Sofa | ObjectKind::Chair | ObjectKind::Stool) => {
             A::new(Some("a2o_book_readBook_sitting_fromCarry_start_x"), &["a2o_book_readBook_sitting_loopRead_x", "a2o_book_readBook_sitting_loopTurnPage_x"])
@@ -1440,12 +1445,13 @@ fn run_actions(
     mut life: MessageWriter<LifeEvent>,
     people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
     mut conceive: MessageWriter<crate::little::Conceive>,
-    (mut fire, upgraded, baked, paper_in_hand, prepped): (
+    (mut fire, upgraded, baked, paper_in_hand, prepped, serving_from): (
         MessageWriter<crate::fire::StartFire>,
         Query<&crate::upgrades::Upgrades>,
         Option<Res<crate::baked::Baked>>,
         Query<&crate::surroundings::PaperInHand>,
         Query<(), With<crate::meals::CookPrepped>>,
+        Query<&crate::meals::ServingFrom>,
     ),
 ) {
     let Some(grid) = grid else { return };
@@ -1871,6 +1877,11 @@ fn run_actions(
                                         }
                                         Special::PrepFood => {
                                             commands.entity(me).insert(crate::anim::Carrying(crate::meals::PAN_CARRY));
+                                        }
+                                        Special::PlaceMeal => {
+                                            if let Ok(s) = serving_from.get(me) {
+                                                commands.entity(me).insert(crate::meals::MealRequest::Serve(s.0));
+                                            }
                                         }
                                         Special::GetPaper => {
                                             commands.entity(*target).insert(Visibility::Hidden);

@@ -261,7 +261,8 @@ installation is unreachable.
   the beaches), and ground-level paving follows the ground.
 - **Cooking dinner**: the cook first fetches the ingredients from the fridge (its door swinging
   open and shut), carries the tray to the nearest counter and chops them there, then takes the
-  frying pan to the stove, each with the game's animations and props.
+  frying pan to the stove, each with the game's animations and props; the meal cooked, the
+  platter is carried to the nearest counter or table and set down, and dinner is served.
 - **Reading**: *Read a Book* at a bookshelf takes a book down (the game's animation), carries it
   to the nearest free sofa or chair and reads it sitting there, turning the pages (standing at
   the shelf when there's no seat free). The morning paper is picked up off the ground and carried
