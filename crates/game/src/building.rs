@@ -2094,6 +2094,16 @@ fn stream_nearby_lots(
             if let Some(b) = left.as_ref().or(world.data.buildings.get(&i)) {
                 spawn_building(&mut commands, &mut assets, &mut ctx, &catalog, b, &world.data.lots[i], Some(root), false);
             }
+            // (On a lot the world left empty, the wooden deck they moved in on, as `move_in`
+            // lays it.)
+            if left.is_some() && !world.data.buildings.get(&i).is_some_and(|b| b.is_house()) {
+                let l = &world.data.lots[i];
+                let c = crate::home::lot_center(l);
+                let deck = ctx.meshes.add(Cuboid::new(17.0, 0.12, 14.0));
+                let mat = ctx.materials.add(StandardMaterial { base_color: Color::srgb(0.55, 0.40, 0.26), perceptual_roughness: 0.8, ..default() });
+                let at = Vec3::new(c.x, world.data.heightmap.sample(c.x, c.z) - 0.055, c.z);
+                commands.spawn((Mesh3d(deck), MeshMaterial3d(mat), Transform::from_translation(at).with_rotation(Quat::from_rotation_y(l.rotation)), ChildOf(root)));
+            }
             nearby.spawned.insert(i, root);
         }
     }

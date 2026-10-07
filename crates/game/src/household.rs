@@ -222,8 +222,8 @@ fn offered(
             .filter_map(|m| story.apply(crate::premade::to_sim(m)))
             .map(|s| s.first)
             .collect();
+        // (Not by name: a household of their own may share a town family's surname.)
         if h.name.to_ascii_lowercase().contains("ghost")
-            || h.name == hh.name
             || living.is_empty()
             || h.members.iter().any(|m| mine.contains(&m.id) || gone.contains(&m.id))
             || lot.is_none_or(|l| taken.contains(&l))
