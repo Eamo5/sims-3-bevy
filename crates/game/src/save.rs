@@ -25,6 +25,7 @@ impl Plugin for SavePlugin {
             .init_resource::<SaveSlot>()
             .add_message::<SaveRequest>()
             .add_message::<SnapshotRequest>()
+            .add_message::<SaveAsRequest>()
             .add_systems(OnEnter(crate::AppState::Loading), new_game_slot)
             .add_systems(Update, resume_saved_lot.run_if(in_state(PlayMode::ChooseLot)))
             .add_systems(Update, (apply_loaded_game, save_game).run_if(in_state(PlayMode::Live)));
@@ -382,6 +383,10 @@ pub struct Bought;
 #[derive(Message)]
 pub struct SaveRequest;
 
+/// A save into a new file of the game's own (one no other save has), where it goes on saving.
+#[derive(Message)]
+pub struct SaveAsRequest;
+
 /// The game as it stands wanted, without saving it (changing household starts from it).
 #[derive(Message)]
 pub struct SnapshotRequest;
@@ -517,7 +522,7 @@ fn saved_object(o: &GameObject, tf: &Transform, design: Option<&crate::objects::
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn save_game(
     mut commands: Commands,
-    (mut requests, mut snapshots, dormant): (MessageReader<SaveRequest>, MessageReader<SnapshotRequest>, Res<crate::household::Dormant>),
+    (mut requests, mut snapshots, mut save_as, dormant): (MessageReader<SaveRequest>, MessageReader<SnapshotRequest>, MessageReader<SaveAsRequest>, Res<crate::household::Dormant>),
     clock: Res<GameClock>,
     world: Res<CurrentWorld>,
     household: Option<Res<Household>>,
@@ -584,7 +589,8 @@ fn save_game(
         Res<crate::terrain_paint::Sculpted>,
     ),
 ) {
-    let write = requests.read().count() > 0;
+    let new_file = save_as.read().count() > 0;
+    let write = requests.read().count() > 0 || new_file;
     let snapshot = snapshots.read().count() > 0;
     if !write && !snapshot {
         return;
@@ -700,7 +706,7 @@ fn save_game(
     }
     let dir = saves_dir();
     let _ = std::fs::create_dir_all(&dir);
-    let path = slot.0.clone().unwrap_or_else(|| free_save_path(&dir, &game));
+    let path = slot.0.clone().filter(|_| !new_file).unwrap_or_else(|| free_save_path(&dir, &game));
     match serde_json::to_vec_pretty(&game).map_err(|e| e.to_string()).and_then(|d| write_save(&path, &d).map_err(|e| e.to_string())) {
         Ok(()) => {
             slot.0 = Some(path);

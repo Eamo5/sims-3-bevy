@@ -2540,12 +2540,24 @@ fn auto_view_level(
     }
 }
 
-fn auto_save(args: Res<AutoArgs>, time: Res<Time>, mut since: Local<Option<f32>>, mut done: Local<bool>, mut w: MessageWriter<crate::save::SaveRequest>) {
+/// `--save-at <secs>`: the game saved then (SAVE_AS=1: as a new game, in a file of its own).
+fn auto_save(
+    args: Res<AutoArgs>,
+    time: Res<Time>,
+    mut since: Local<Option<f32>>,
+    mut done: Local<bool>,
+    mut w: MessageWriter<crate::save::SaveRequest>,
+    mut save_as: MessageWriter<crate::save::SaveAsRequest>,
+) {
     let Some(at) = args.save_at else { return };
     let start = *since.get_or_insert(time.elapsed_secs());
     if !*done && time.elapsed_secs() - start >= at {
         *done = true;
-        crate::save::request_save(&mut w);
+        if std::env::var("SAVE_AS").is_ok() {
+            save_as.write(crate::save::SaveAsRequest);
+        } else {
+            crate::save::request_save(&mut w);
+        }
     }
 }
 

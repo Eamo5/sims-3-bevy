@@ -460,6 +460,7 @@ enum GameMenuButton {
     Resume,
     Options,
     Save,
+    SaveAs,
     Household,
     MainMenu,
     Quit,
@@ -532,6 +533,7 @@ pub fn toggle_game_menu(commands: &mut Commands, menu: &mut GameMenu, mut clock:
                     ("Resume", GameMenuButton::Resume),
                     ("Options", GameMenuButton::Options),
                     ("Save Game", GameMenuButton::Save),
+                    ("Save as New Game", GameMenuButton::SaveAs),
                     ("Change Household", GameMenuButton::Household),
                     ("Main Menu", GameMenuButton::MainMenu),
                     ("Quit Game", GameMenuButton::Quit),
@@ -568,7 +570,7 @@ fn game_menu_buttons(
     mut panel: ResMut<OptionsPanel>,
     settings: Res<Settings>,
     mut clock: Option<ResMut<crate::clock::GameClock>>,
-    (mut save, mut household): (MessageWriter<crate::save::SaveRequest>, MessageWriter<crate::household::ChooseHousehold>),
+    (mut save, mut household, mut save_as): (MessageWriter<crate::save::SaveRequest>, MessageWriter<crate::household::ChooseHousehold>, MessageWriter<crate::save::SaveAsRequest>),
     (mut next, mut exit): (ResMut<NextState<AppState>>, MessageWriter<AppExit>),
 ) {
     for (i, b) in &q {
@@ -588,6 +590,11 @@ fn game_menu_buttons(
             GameMenuButton::Options => open_options(&mut commands, &mut panel, &settings),
             GameMenuButton::Save => {
                 crate::save::request_save(&mut save);
+                close(&mut commands, &mut menu);
+            }
+            // (Into a file of its own, which no other save has: the game goes on saving there.)
+            GameMenuButton::SaveAs => {
+                save_as.write(crate::save::SaveAsRequest);
                 close(&mut commands, &mut menu);
             }
             GameMenuButton::Household => {
