@@ -415,6 +415,10 @@ pub enum Special {
     WashDishes,
     /// The trash bag from an indoor can put out in the one outdoors.
     DropTrash,
+    /// A book taken from the shelf, to read in a comfy seat (or standing, with none free).
+    GetBook,
+    /// A book read (in a seat, or at the shelf).
+    ReadBook,
     /// A garden sprinkler turned on (it runs a couple of hours) or off.
     SprinklerOn,
     SprinklerOff,
@@ -612,11 +616,15 @@ static CANDLE: [InteractionDef; 2] = [
 ];
 /// (Loaded with the dishes cleared away: never on the menu.)
 static DISHWASHER: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::WashDishes, ..def("Load Dishes", 3.0, N, Pose::Use) }];
-static SOFA: [InteractionDef; 2] = [
+static SOFA: [InteractionDef; 3] = [
     InteractionDef { on_object: true, ..def("Sit", 40.0, [0.0, 0.0, 5.0, 0.0, 0.0, 10.0], Pose::Sit) },
     InteractionDef { on_object: true, decay: SLEEP_DECAY, ..def("Nap", 60.0, [0.0, 0.0, 18.0, 0.0, 0.0, 0.0], Pose::Lie) },
+    READ_SEATED,
 ];
-static CHAIR: [InteractionDef; 3] = [
+/// (A book from the shelf, read sitting down: never on the menu.)
+const READ_SEATED: InteractionDef =
+    InteractionDef { on_object: true, autonomous: false, skill: Some("Logic"), special: Special::ReadBook, ..def("Read Book", 60.0, [0.0, 0.0, 4.0, 0.0, 0.0, 30.0], Pose::Sit) };
+static CHAIR: [InteractionDef; 4] = [
     InteractionDef { on_object: true, autonomous: false, ..def("Sit", 30.0, [0.0, 0.0, 4.0, 0.0, 0.0, 4.0], Pose::Sit) },
     InteractionDef {
         on_object: true,
@@ -625,6 +633,7 @@ static CHAIR: [InteractionDef; 3] = [
         ..def("Eat", MEAL_MINUTES, [MEAL_PER_HOUR, -4.0, 0.0, 20.0, -4.0, 6.0], Pose::Sit)
     },
     InteractionDef { on_object: true, special: Special::Homework, ..def("Do Homework", 45.0, [0.0, 0.0, -2.0, 0.0, 0.0, -6.0], Pose::Sit) },
+    READ_SEATED,
 ];
 /// The dining chair's "Eat" (not offered in its menu).
 pub const CHAIR_EAT: usize = 1;
@@ -698,8 +707,11 @@ static DIVING_BOARD: [InteractionDef; 1] = [InteractionDef {
 static STUFFED_TOY: [InteractionDef; 1] = [def("Play with Toy", 30.0, [0.0, 0.0, -2.0, 6.0, 0.0, 75.0], Pose::Use)];
 static VRGOGGLES: [InteractionDef; 1] = [def("Explore Virtual Worlds", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 95.0], Pose::Use)];
 static STEREO: [InteractionDef; 1] = [def("Dance", 45.0, [0.0, 0.0, -6.0, 0.0, -6.0, 70.0], Pose::Dance)];
-static BOOKSHELF: [InteractionDef; 1] =
-    [InteractionDef { skill: Some("Logic"), ..def("Read a Book", 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Stand) }];
+/// (A book taken down to read in a seat; read standing there when no seat is free.)
+static BOOKSHELF: [InteractionDef; 2] = [
+    InteractionDef { skill: Some("Logic"), special: Special::GetBook, ..def("Read a Book", 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Stand) },
+    InteractionDef { autonomous: false, skill: Some("Logic"), special: Special::ReadBook, ..def("Read Book", 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Stand) },
+];
 static MIRROR: [InteractionDef; 2] = [
     InteractionDef { autonomous: false, skill: Some("Charisma"), ..def("Practice Speech", 40.0, [0.0, 0.0, -2.0, 6.0, 0.0, 10.0], Pose::Talk) },
     InteractionDef { autonomous: false, special: Special::ChangeAppearance, ..def("Change Appearance", 2.0, N, Pose::Use) },
@@ -770,7 +782,11 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Play Computer Games" => A::new(None, &["a2o_computer_game_loop1_x", "a2o_computer_game_loop2_x"]),
         "Write Novel" | "Find a Job" | "Quit Job" => A::new(None, &["a2o_computer_chess_type_loop_x"]),
         "Dance" => A::new(None, &["a_dance_beg_", "a_dance_med_"]),
-        "Read a Book" => A::new(Some("a2o_book_readBook_standing_inInventory_start_x"), &["a2o_book_readBook_standing_loop"]),
+        "Read a Book" => A::new(None, &["a2o_bookshelf_getBook_Carry_x"]),
+        "Read Book" if matches!(kind, ObjectKind::Sofa | ObjectKind::Chair | ObjectKind::Stool) => {
+            A::new(Some("a2o_book_readBook_sitting_fromCarry_start_x"), &["a2o_book_readBook_sitting_loopRead_x", "a2o_book_readBook_sitting_loopTurnPage_x"])
+        }
+        "Read Book" => A::new(Some("a2o_book_readBook_standing_fromCarry_start_x"), &["a2o_book_readBook_standing_loop"]),
         "Practice Speech" | "Change Appearance" => A::new(None, &["a2o_mirror_full_checkSelfOut_loop"]),
         "Paint" => A::new(Some("a2o_painting_start_x"), &["a2o_painting_loopMed", "a2o_painting_loopLarge", "a2o_painting_consider"]),
         "Play Guitar" => A::new(None, &["a2o_guitar_play_med_loop", "a2o_guitar_play_high_loop", "a2o_guitar_play_low_loop"]),
@@ -1792,6 +1808,8 @@ fn run_actions(
                                 // (A painting takes as long as its canvas.)
                                 let minutes = match d.special {
                                     Special::SellPainting => crate::paintings::CANVAS_MINUTES[crate::paintings::canvas(plan, skills.level("Painting")) as usize],
+                                    // (Only taking the book down: it's read elsewhere.)
+                                    Special::GetBook => 2.0,
                                     // (Twice as quick for a Speedy Cleaner; homework too for a Multi-Tasker.)
                                     Special::CleanUp | Special::EmptyTrash if crate::wishes::has(wishes, "SpeedyCleaner") => d.minutes * 0.5,
                                     Special::Homework if crate::wishes::has(wishes, "MultiTasker") => d.minutes * 0.5,
@@ -1812,7 +1830,10 @@ fn run_actions(
                                     }
                                     match d.special {
                                         // (Getting out of the pool is the swim module's.)
-                                        Special::FindJob | Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport | Special::WashDishes | Special::DropTrash => {}
+                                        Special::FindJob | Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport | Special::WashDishes | Special::DropTrash | Special::ReadBook => {}
+                                        Special::GetBook => {
+                                            commands.entity(me).insert(crate::surroundings::ReadSomewhere(*target));
+                                        }
                                         Special::Homework => {
                                             notes.push(format!("{} finished their homework.", sim.first));
                                             commands.entity(me).remove::<crate::rabbitholes::Homework>().queue_silenced(|mut e: EntityWorldMut| {

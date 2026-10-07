@@ -259,6 +259,9 @@ installation is unreachable.
 - **Lots' own ground**: lots keep their sculpted ground; its dips are carved back into the
   flattened world (Central Park's sunken plaza with the fountain basin set into it, hollows on
   the beaches), and ground-level paving follows the ground.
+- **Reading**: *Read a Book* at a bookshelf takes a book down (the game's animation), carries it
+  to the nearest free sofa or chair and reads it sitting there, turning the pages (standing at
+  the shelf when there's no seat free).
 - **Fireplaces**: Sims light a fire with the game's animations; it burns a few hours, flames
   dancing in the hearth and a flickering warm light on the room, and they warm their hands by
   it or put it out. Now and then a spark catches the floor in front. Candles are lit and blown

@@ -16,7 +16,7 @@ pub struct SurroundingsPlugin;
 
 impl Plugin for SurroundingsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spoil_food, trash_cans, discard, wash_up, take_out_trash, put_down_carried, surroundings).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (spoil_food, trash_cans, discard, wash_up, take_out_trash, read_somewhere, put_down_carried, surroundings).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -139,6 +139,46 @@ fn wash_up(
 /// The game's walks with a dinner plate held out, and with a trash bag.
 pub const DISH_CARRY: &str = "a2o_plateDinner_carry_x";
 const TRASH_CARRY: &str = "a2o_trashPile_carry_x";
+const BOOK_CARRY: &str = "a2o_book_carry_x";
+
+/// A book just taken from a shelf: where to read it.
+#[derive(Component)]
+pub struct ReadSomewhere(pub Entity);
+
+/// A book taken from the shelf is carried to the nearest free sofa or chair (on the same floor)
+/// and read sitting down; with none free, it's read standing at the shelf.
+#[allow(clippy::type_complexity)]
+fn read_somewhere(
+    mut commands: Commands,
+    mut sims: Query<(Entity, &Transform, &ReadSomewhere, &mut crate::interact::ActionQueue)>,
+    seats: Query<(Entity, &GameObject, &Transform, &crate::interact::UsedBy), Without<crate::interact::Broken>>,
+) {
+    for (e, tf, shelf, mut queue) in &mut sims {
+        commands.entity(e).remove::<ReadSomewhere>();
+        let read = |kind: ObjectKind| crate::interact::interactions_for(kind).iter().position(|d| d.special == crate::interact::Special::ReadBook);
+        // (Sofas sooner than chairs.)
+        let seat = seats
+            .iter()
+            .filter(|(_, o, t, used)| {
+                matches!(o.kind, ObjectKind::Sofa | ObjectKind::Chair) && used.0.is_none() && (t.translation.y - tf.translation.y).abs() < 1.5 && t.translation.distance(tf.translation) < 15.0
+            })
+            .min_by(|a, b| {
+                let far = |(_, o, t, _): &(Entity, &GameObject, &Transform, &crate::interact::UsedBy)| t.translation.distance(tf.translation) + if o.kind == ObjectKind::Sofa { 0.0 } else { 4.0 };
+                far(a).total_cmp(&far(b))
+            });
+        match seat.and_then(|(s, o, ..)| Some((s, read(o.kind)?))) {
+            Some((s, def)) => {
+                queue.0.push_front(crate::interact::Action::new("Read Book", crate::interact::ActionKind::Object { target: s, def }, true));
+                commands.entity(e).insert(crate::anim::Carrying(BOOK_CARRY));
+            }
+            None => {
+                if let Some(def) = read(ObjectKind::Bookshelf) {
+                    queue.0.push_front(crate::interact::Action::new("Read Book", crate::interact::ActionKind::Object { target: shelf.0, def }, true));
+                }
+            }
+        }
+    }
+}
 
 /// What's carried is put down once it's where it was going (being washed, eaten, thrown out),
 /// or once that's given up.
@@ -147,6 +187,7 @@ fn put_down_carried(mut commands: Commands, sims: Query<(Entity, &crate::anim::C
         let goes_to: &[&str] = match c.0 {
             DISH_CARRY => &["Wash Dishes", "Load Dishes", "Eat"],
             TRASH_CARRY => &["Throw Out Trash"],
+            BOOK_CARRY => &["Read Book"],
             _ => continue,
         };
         let going = queue.0.front().is_some_and(|a| goes_to.contains(&a.label.as_str()));
