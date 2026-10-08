@@ -257,7 +257,10 @@ fn grow_up_now(
 #[allow(clippy::too_many_arguments)]
 fn rebuild_bodies(
     mut commands: Commands,
-    sims: Query<(Entity, &Sim, &Children, Option<&crate::simbody::Wearing>, Option<&crate::careers::Job>, Option<&crate::simbody::ServiceUniform>), With<NeedsNewBody>>,
+    sims: Query<
+        (Entity, &Sim, &Children, Option<&crate::simbody::Wearing>, Option<&crate::careers::Job>, Option<&crate::simbody::ServiceUniform>, Has<crate::supernatural::WolfForm>),
+        With<NeedsNewBody>,
+    >,
     parts: Query<(), With<crate::simbody::SimModelPart>>,
     data: Option<Res<crate::baked::Baked>>,
     cas: Option<Res<crate::simbody::CasData>>,
@@ -269,16 +272,19 @@ fn rebuild_bodies(
     ),
 ) {
     let (Some(data), Some(cas)) = (data, cas) else { return };
-    for (e, sim, children, wearing, job, service) in &sims {
+    for (e, sim, children, wearing, job, service, wolf) in &sims {
         commands.entity(e).remove::<NeedsNewBody>();
         let kind = wearing.map_or(crate::simbody::OutfitKind::Everyday, |w| w.0);
         let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look);
         let uniform = job.and_then(|j| j.uniform(sim)).filter(|_| kind == crate::simbody::OutfitKind::Career);
-        let outfit = match (service, uniform.and_then(|u| crate::simbody::uniform(&cas, sim, u, &mut rng.clone()))) {
+        let mut outfit = match (service, uniform.and_then(|u| crate::simbody::uniform(&cas, sim, u, &mut rng.clone()))) {
             (Some(s), _) => crate::simbody::service_outfit(&cas, sim, *s, &mut rng),
             (None, Some(o)) => o,
             (None, None) => crate::simbody::pick_outfit_for(&cas, sim, &mut rng, kind),
         };
+        if wolf {
+            crate::supernatural::wolf_outfit(&cas, sim, &mut outfit);
+        }
         debug!("{} dressed ({kind:?}): {:?}, hair {:?}", sim.first, outfit.body.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), outfit.hair.as_ref().map(|h| h.name.as_str()));
         let Some(model) = crate::simbody::build_sim_model(&data.0, &cas, sim, &outfit, crate::simbody::tone_of(sim)) else { continue };
         for c in children.iter() {

@@ -357,6 +357,19 @@ installation is unreachable.
   together (kneeling to stroke a cat, which looks up at them), for the Sim's fun and social.
   Grown-ups can adopt a pet by phone (a cat, kitten, dog, puppy, little dog, horse or foal, for
   its fee): one of the game's breeds of its kind comes home with a name of its own.
+- **Supernaturals**, from the Supernatural pack (and Late Night's vampires): vampires,
+  werewolves, witches, fairies and zombies, chosen in Create a Sim's Life State row and kept in
+  saves. Moonlight Falls' families come as the pack has them, a third of them supernatural (the
+  Hoppcrafts are werewolves), and some of its townies. Vampires are pale
+  with red eyes, drink plasma juice from the fridge rather than eat, dash when they run and
+  feel the daytime sun (Too Much Sun) out of doors; zombies are grey-green and shamble and
+  groan. The moon waxes and wanes over the game's eight-day lunar cycle (shown on the clock),
+  and under the full moon werewolves turn, with the pack's transformation, into their wolf
+  form (its shaggy hair and beard, darker and furrier, amber-eyed, prowling and sniffing about)
+  and howl at it, turning back at dawn. Fairies wear the game's glowing wings on their backs,
+  fluttering. Each kind has its own socials, with the pack's animations: a vampire's hypnotic
+  gaze and talk of plasma, fairies' frolics, tricks and bragging about their wings, werewolves'
+  sparring, and witches' charms and curses cast with the wand.
 - **Water effects**: fountains gush and fill their basins, showers spray from the head and taps
   run while someone's at them, each from the object's own effect slot (the game's RSLT slots).
   TVs show a programme on the screen (at the TV's screen slot) while anyone's watching, its

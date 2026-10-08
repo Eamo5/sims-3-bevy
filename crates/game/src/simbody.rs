@@ -144,6 +144,11 @@ impl CasData {
     }
 }
 
+/// A Sim's age as the CAS parts' age flag.
+pub fn age_flag(a: Age) -> u32 {
+    age_bits(a)
+}
+
 fn age_bits(a: Age) -> u32 {
     match a {
         Age::Baby => AGE_BABY,
@@ -171,6 +176,8 @@ pub struct Outfit {
     pub beard: Option<CasPartInfo>,
     /// Layers over the face beyond its own and the brows' (a burglar's mask).
     pub face_layers: Vec<Key>,
+    /// A werewolf in their wolf form (darker, furrier, amber-eyed).
+    pub wolf: bool,
 }
 
 /// Which of a Sim's outfits they have on.
@@ -582,7 +589,10 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
     }?;
     let age = age_bits(sim.age);
     let gender = if sim.female { GENDER_FEMALE } else { GENDER_MALE };
-    let tint = cas.tint(tone_t);
+    // (Supernaturals: a vampire's pallor, a zombie's grey-green, a werewolf's fur; their eyes.)
+    let (occult_tint, occult_eyes) = crate::supernatural::occult_look(sim.occult, outfit.wolf);
+    let tint = cas.tint(tone_t) * occult_tint;
+    let eye_colour = occult_eyes.unwrap_or(sim.eyes);
     let mut parts = Vec::new();
     let mut tex_keys: Vec<Key> = Vec::new();
     // Face layers made at load in a colour: (source, copy, colour).
@@ -617,7 +627,7 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
                 SHADER_SIM_EYES => {
                     let tex = match (m.texture, cas.eye_overlay) {
                         (Some(src), Some(_)) => {
-                            let coloured = eye_tint_key(src, sim.eyes);
+                            let coloured = eye_tint_key(src, eye_colour);
                             eye_tints.push((src, coloured));
                             Some(coloured)
                         }
@@ -694,7 +704,7 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
     eye_tints.dedup();
     let iris = cas.eye_overlay.and_then(|k| baked.texture_bytes(&k));
     for (src, coloured) in eye_tints {
-        if let Some(img) = iris.as_deref().zip(baked.texture_bytes(&src)).and_then(|(iris, eyes)| coloured_eyes(&eyes, iris, sim.eyes)) {
+        if let Some(img) = iris.as_deref().zip(baked.texture_bytes(&src)).and_then(|(iris, eyes)| coloured_eyes(&eyes, iris, eye_colour)) {
             textures.push((coloured, img));
         }
     }

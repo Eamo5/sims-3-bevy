@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 65;
+pub const GAMEDATA_VERSION: u32 = 66;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -2175,6 +2175,8 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     // Icons: everything these tables name, plus interface pieces used directly.
     progress("Converting: interface icons…");
     let mut wanted: BTreeSet<String> = BTreeSet::new();
+    // (The fairies' wings, as the Supernatural pack's Create a Sim pictures them.)
+    wanted.extend((1..=12).map(|i| format!("FairyWings{i:02}")));
     for b in &out.buffs {
         wanted.insert(b.icon.clone());
     }

@@ -83,6 +83,36 @@ pub struct Sim {
     /// Face shape: where they are on each of the game's face sliders (`FACE_SLIDERS`' pairs,
     /// -1 to 1); none, as their look has it.
     pub face: Vec<f32>,
+    /// Supernatural (the Supernatural pack's life states, and Late Night's vampires).
+    pub occult: Option<Occult>,
+}
+
+/// A Sim's life state, other than human.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, serde::Serialize, serde::Deserialize)]
+pub enum Occult {
+    Vampire,
+    Werewolf,
+    Witch,
+    Fairy,
+    Zombie,
+}
+
+impl Occult {
+    pub const ALL: [Occult; 5] = [Occult::Vampire, Occult::Werewolf, Occult::Witch, Occult::Fairy, Occult::Zombie];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Occult::Vampire => "Vampire",
+            Occult::Werewolf => "Werewolf",
+            Occult::Witch => "Witch",
+            Occult::Fairy => "Fairy",
+            Occult::Zombie => "Zombie",
+        }
+    }
+
+    pub fn from_name(n: &str) -> Option<Occult> {
+        Occult::ALL.into_iter().find(|o| o.name().eq_ignore_ascii_case(n))
+    }
 }
 
 /// What a Sim likes best, as Create a Sim has it: a food (a recipe's key), a music (one of
@@ -464,6 +494,7 @@ pub fn random_sim(rng: &mut impl Rng, last: &str, female: Option<bool>, age: Age
         traits: crate::life::random_traits(rng, age),
         favorites: Favorites::random(rng),
         face: Vec::new(),
+        occult: None,
         skin: Color::srgb(sr, sg, sb),
         hair: Color::srgb(hr, hg, hb),
         top: Color::hsl(hue, 0.55, 0.5),

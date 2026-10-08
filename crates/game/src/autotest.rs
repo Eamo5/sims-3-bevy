@@ -396,6 +396,13 @@ impl Plugin for AutoTestPlugin {
                         if let Some(d) = std::env::var("FOLLOW_DIST").ok().and_then(|d| d.parse::<f32>().ok()) {
                             c.distance = d;
                         }
+                        // (FOLLOW_YAW / FOLLOW_PITCH: from which way, how steeply.)
+                        if let Some(y) = std::env::var("FOLLOW_YAW").ok().and_then(|d| d.parse::<f32>().ok()) {
+                            c.yaw = y;
+                        }
+                        if let Some(p) = std::env::var("FOLLOW_PITCH").ok().and_then(|d| d.parse::<f32>().ok()) {
+                            c.pitch = p;
+                        }
                         info!(
                             "follow: at {:.1},{:.1},{:.1} on lot {:?} doing {:?}",
                             tf.translation.x,

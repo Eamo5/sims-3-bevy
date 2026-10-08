@@ -504,10 +504,13 @@ pub enum MoodletKind {
     GettingWarm,
     SweatingProfusely,
     Soaked,
+    // Supernaturals.
+    TooMuchSun,
+    Werewolf,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 54] = {
+    pub const ALL: [MoodletKind; 56] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -515,7 +518,7 @@ impl MoodletKind {
             Inspired, Embarrassed, PassedOut, Uncomfortable, Promoted, Demoted, Fired, NewJob, Annoyed, Flirty, FirstKiss,
             InLove, Heartbroken, JustMarried, NewHome, Birthday, WishFulfilled, Nauseous, Pregnant, NewBaby, GreatParty,
             LameParty, AwesomeParty, Scared, GreatDate, BadDate, Singed, DirtySurroundings, FilthySurroundings, GettingChilly,
-            TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked,
+            TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf,
         ]
     };
 
@@ -594,6 +597,8 @@ impl MoodletKind {
             GettingWarm => md("Getting Warm", "A little heat never hurts!", 0, 0.0),
             SweatingProfusely => md("Sweating Profusely", "Whoof! It is a sauna right now!", -10, 0.0),
             Soaked => md("Soaked", "Being soaked is never really comfortable.", -5, 2.0),
+            TooMuchSun => md("Too Much Sun", "The sun is draining this vampire.", -20, 0.0),
+            Werewolf => md("Werewolf", "The full moon has brought out the beast within.", 15, 0.0),
         }
     }
 
@@ -660,6 +665,8 @@ impl MoodletKind {
             GettingWarm => ("GettingWarm", true),
             SweatingProfusely => ("SweatingProfusely", true),
             Soaked => ("Soaked", true),
+            TooMuchSun => ("TooMuchSun", true),
+            Werewolf => ("Werewolf", true),
         }
     }
 }

@@ -54,6 +54,9 @@ pub struct PremadeSim {
     /// `CASAgeGenderFlags` species: 0 or 1 a person, 2 a horse, 3 a cat, 4 a dog, 5 a little dog.
     #[serde(default)]
     pub species: u32,
+    /// Their life state (`Vampire`, `Werewolf`, `Witch`, `Fairy`, `Zombie`), if supernatural.
+    #[serde(default)]
+    pub occult: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -259,6 +262,7 @@ fn read_sim(
         age: flags & 0x7F,
         female: flags & FEMALE != 0,
         species: (flags >> 8) & 0xF,
+        occult: None,
         traits,
         skin_tone: key(get("mSkinToneKey")),
         skin_shade: get("mSkinToneIndex").and_then(|v| v.as_f32()).unwrap_or(0.5),

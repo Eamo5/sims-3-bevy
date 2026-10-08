@@ -549,6 +549,8 @@ pub enum Special {
     /// A bath with bubble bath, or with the rubber duck: offered while there's one about.
     BubbleBath,
     Ducky,
+    /// Only for vampires.
+    VampireOnly,
     /// Gone once it's done (a snowman knocked down, a leaf pile raked up).
     Clear,
 }
@@ -599,7 +601,9 @@ const fn def(name: &'static str, minutes: f32, per_hour: [f32; 6], pose: Pose) -
     }
 }
 
-static FRIDGE: [InteractionDef; 5] = [
+static FRIDGE: [InteractionDef; 6] = [
+    // (Vampires: a pack of plasma juice, instead of food.)
+    InteractionDef { special: Special::VampireOnly, ..def("Drink Plasma Juice", 6.0, [900.0, -4.0, 0.0, 0.0, 0.0, 10.0], Pose::Use) },
     InteractionDef { special: Special::Cook, ..def("Have Quick Meal", 30.0, [130.0, -6.0, 0.0, 0.0, -4.0, 4.0], Pose::Use) },
     // (What it leads to: a plate of a proper meal, eaten at the table.)
     InteractionDef { special: Special::Leftovers, ..def("Have Leftovers", 3.0, [5000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) },
@@ -888,6 +892,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Collect" if kind == ObjectKind::Collectible => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_harvestlow_x"]),
         "Swim" => A::new(Some("a2o_ladder_climbDown_L_x"), &["a_swim_cycle_x"]),
         "Destroy Snowman" => A::new(None, &["a2o_snowman_destroy_x"]),
+        "Drink Plasma Juice" => A::new(None, &["a2o_vampires_drinkPotion"]),
         "Destroy Snow Angel" => A::new(Some("a2o_snowAngel_destroy_start_x"), &["a2o_snowAngel_destroy_loopKick_x", "a2o_snowAngel_destroy_loopStomp_x"]).ending(&["a2o_snowAngel_destroy_stop_x"], 2.7),
         "Play in Leaves" => A::new(Some("a2o_leafPile_playIn_start_x"), &["a2o_leafPile_playIn_loopKick_x", "a2o_leafPile_playIn_loopThrow_x", "a2o_leafPile_playIn_loopThrowInAir_x"])
             .ending(&["a2o_leafPile_playIn_stop_x"], 1.5),
@@ -1047,6 +1052,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
 /// The clip a care social opens with (picking a toddler up, opening the book).
 pub fn social_start(name: &str, little: Option<Age>) -> Option<&'static str> {
     match (name, little) {
+        ("Frolic", _) => Some("a2a_soc_fairy_frolic_start"),
+        ("Cast Charm Spell" | "Cast Curse", _) => Some("a2a_magicWand_castSpell_lowSkill_start"),
         ("Play With" | "Cuddle" | "Change Diaper" | "Put to Bed", Some(Age::Toddler)) => Some("a2p_pickUp"),
         ("Read to", Some(Age::Toddler)) => Some("a2p_book_readWith_start"),
         ("Teach to Walk", _) => Some("a2p_teachToWalk_start_kneelDown"),
@@ -1068,6 +1075,14 @@ pub fn social_clips(name: &str, little: Option<Age>) -> &'static [&'static str] 
         "Read to" => &["a2p_book_readWith_loop"],
         "Teach to Walk" => &["a2p_teachToWalk_loopBreathe", "a2p_teachToWalk_firstSteps"],
         "Tell Funny Story" => &["a2a_soc_Neutral_TellFunnyStory_Funny_Friendly"],
+        "Hypnotic Gaze" => &["a2a_soc_vampire_hypnoticGaze_success"],
+        "Talk About the Joy of Plasma" => &["a2a_soc_vampire_talkAboutJoyOfPlasma_accept"],
+        "Frolic" => &["a2a_soc_fairy_frolic_loop"],
+        "Play Fairy Trick" => &["a2a_fairy_playTrick_hotHead"],
+        "Brag About Wings" => &["a2a_soc_fairy_bragAboutWings_accept", "a2a_soc_fairy_talkAboutFlightExperience_accept"],
+        "Practice Fighting" => &["a2a_soc_werewolf_practiceFighting_accept"],
+        // (The wand out, the spell cast, and it takes.)
+        "Cast Charm Spell" | "Cast Curse" => &["a2a_magicWand_castSpell_lowSkill_loop", "a2a_magicWand_castSpell_lowSkill_success"],
         // (The one throws, the other catches: soft, hard, wimpy and showing off.)
         "Play Catch" => &["a2a_soc_playCatch_throwSoft", "a2a_soc_playCatch_throwHard", "a2a_soc_playCatch_throwWimpy", "a2a_soc_playCatch_throwHighSkill"],
         "Tell Dramatic Story" => &["a2a_soc_Neutral_TellDramaticStory_Impressive_Neutral"],
@@ -2419,7 +2434,7 @@ fn run_actions(
                                         Special::Microwave => {
                                             commands.entity(me).insert(crate::meals::MicrowaveDone(*target));
                                         }
-                                        Special::None | Special::BubbleBath | Special::Ducky => {}
+                                        Special::None | Special::BubbleBath | Special::Ducky | Special::VampireOnly => {}
                                         Special::Clear => {
                                             commands.entity(*target).try_despawn();
                                         }
@@ -3084,6 +3099,10 @@ fn autonomy(
                 }
                 // (A bubble bath with bubble bath in the house.)
                 if d.special.needs().is_some_and(|k| !objects.iter().any(|(_, o, ..)| o.kind == k)) {
+                    continue;
+                }
+                // (Plasma for vampires, and vampires drink it rather than eat.)
+                if (d.special == Special::VampireOnly) != (sim.occult == Some(crate::sim::Occult::Vampire)) && (d.special == Special::VampireOnly || d.per_hour[0] > 50.0) {
                     continue;
                 }
                 // Homework is for those who have some.

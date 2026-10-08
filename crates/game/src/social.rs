@@ -231,6 +231,8 @@ pub struct SocialDef {
     pub effect: SocialEffect,
     /// What a care social does for the little one's needs, per hour.
     pub care: [f32; 6],
+    /// Only for a Sim of this life state (a vampire's hypnotic gaze, a witch's spells).
+    pub needs: Option<crate::sim::Occult>,
 }
 
 const fn sd(name: &'static str, cat: SocialCat, minutes: f32, social: f32, fun: f32, friendship: f32, romance: f32) -> SocialDef {
@@ -248,11 +250,18 @@ const fn sd(name: &'static str, cat: SocialCat, minutes: f32, social: f32, fun: 
         autonomous: false,
         effect: SocialEffect::None,
         care: [0.0; 6],
+        needs: None,
     }
 }
 
+const fn occult(o: crate::sim::Occult, def: SocialDef) -> SocialDef {
+    SocialDef { needs: Some(o), ..def }
+}
+
+use crate::sim::Occult as O;
+
 use SocialCat::*;
-pub static SOCIALS: [SocialDef; 54] = [
+pub static SOCIALS: [SocialDef; 62] = [
     SocialDef { autonomous: true, ..sd("Chat", Friendly, 25.0, 110.0, 10.0, 8.0, 0.0) },
     SocialDef { effect: SocialEffect::Greet, ..sd("Greet", Friendly, 3.0, 80.0, 5.0, 4.0, 0.0) },
     SocialDef { effect: SocialEffect::HelpHomework, ..sd("Help with Homework", Friendly, 40.0, 60.0, -10.0, 5.0, 0.0) },
@@ -309,6 +318,15 @@ pub static SOCIALS: [SocialDef; 54] = [
     SocialDef { min_romance: 50.0, ..sd("Leap Into Arms", Romantic, 5.0, 140.0, 40.0, 4.0, 10.0) },
     SocialDef { effect: SocialEffect::Kiss, min_romance: 60.0, ..sd("Dip Kiss", Romantic, 6.0, 150.0, 30.0, 4.0, 12.0) },
     SocialDef { effect: SocialEffect::PlayCatch, ..sd("Play Catch", Funny, 30.0, 60.0, 120.0, 6.0, 0.0) },
+    // The Supernatural pack's (and Late Night's): each for its own kind.
+    occult(O::Vampire, sd("Hypnotic Gaze", Romantic, 6.0, 100.0, 30.0, 4.0, 8.0)),
+    occult(O::Vampire, sd("Talk About the Joy of Plasma", Friendly, 15.0, 100.0, 20.0, 6.0, 0.0)),
+    occult(O::Fairy, sd("Frolic", Funny, 20.0, 110.0, 120.0, 8.0, 0.0)),
+    occult(O::Fairy, sd("Play Fairy Trick", Mean, 6.0, 30.0, 60.0, -6.0, 0.0)),
+    occult(O::Fairy, sd("Brag About Wings", Friendly, 8.0, 80.0, 20.0, 3.0, 0.0)),
+    occult(O::Werewolf, sd("Practice Fighting", Funny, 15.0, 90.0, 90.0, 6.0, 0.0)),
+    occult(O::Witch, sd("Cast Charm Spell", Friendly, 8.0, 80.0, 40.0, 15.0, 4.0)),
+    occult(O::Witch, sd("Cast Curse", Mean, 8.0, 20.0, 30.0, -15.0, -5.0)),
 ];
 
 /// How far apart the two Sims stand for a social: a few metres to play catch, else close
@@ -325,6 +343,9 @@ pub fn social_index(name: &str) -> Option<usize> {
 /// they're family (no romance between relatives).
 pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim, target_in_household: bool, kin: bool) -> bool {
     if rel.friendship < def.min_friendship || rel.romance < def.min_romance || rel.friendship > def.max_friendship {
+        return false;
+    }
+    if def.needs.is_some_and(|o| actor.occult != Some(o)) {
         return false;
     }
     if kin && (def.cat == SocialCat::Romantic || matches!(def.effect, SocialEffect::WooHoo | SocialEffect::TryForBaby | SocialEffect::Propose | SocialEffect::Marry | SocialEffect::GoSteady)) {

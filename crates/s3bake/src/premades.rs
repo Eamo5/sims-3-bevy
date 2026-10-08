@@ -12,7 +12,7 @@ use crate::ddsw::encode_dds;
 use crate::pack::{read_value, write_value};
 use crate::types::Key;
 
-pub const PREMADES_VERSION: u32 = 3;
+pub const PREMADES_VERSION: u32 = 5;
 /// Household portraits in the world file (by household id).
 pub const T_HOUSEHOLD_PORTRAIT: u32 = 0x6B6D837E;
 
@@ -122,6 +122,30 @@ pub fn bake_premades(root: &BakeRoot, pkg: &Package, world: &str, strings: &Hash
             members,
             pets,
         });
+    }
+    // Moonlight Falls is the Supernatural pack's town: the game fills it with vampires,
+    // werewolves, witches and fairies as it runs (its world file has none). A third of its
+    // families are one kind or another, all of them alike, and one townie in four (the kinds
+    // dealt round in turn, so there are some of each).
+    if world == "Moonlight Falls" {
+        const KINDS: [&str; 4] = ["Vampire", "Werewolf", "Witch", "Fairy"];
+        let mut next = 0;
+        for h in &mut households {
+            let townies = h.lot_id == 0;
+            let family = s3pkg::fnv64(&h.name.to_ascii_lowercase());
+            let kind = KINDS[next % KINDS.len()];
+            if !townies && family % 3 == 0 {
+                next += 1;
+            }
+            for m in &mut h.members {
+                if townies && (m.id.rotate_left(29) ^ 0x51ED_270B) % 4 == 0 {
+                    m.occult = Some(KINDS[next % KINDS.len()].to_string());
+                    next += 1;
+                } else if !townies && family % 3 == 0 {
+                    m.occult = Some(kind.to_string());
+                }
+            }
+        }
     }
     let n = households.len();
     let baked = PremadesBaked { version: PREMADES_VERSION, households, relationships: premades.relationships };

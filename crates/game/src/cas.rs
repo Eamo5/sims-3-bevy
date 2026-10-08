@@ -84,6 +84,8 @@ pub enum CasAction {
     EyeColor(usize),
     /// Voice `i` (of the three).
     Voice(u8),
+    /// Their life state: human (none) or one of the supernaturals (`sim::Occult::ALL`).
+    LifeState(Option<usize>),
     Tab(CasTab),
     /// Wear entry `i` of the current tab's list.
     Pick(usize),
@@ -472,6 +474,9 @@ fn cas_actions(
             CasAction::EyeColor(i) => {
                 let (r, g, b) = crate::sim::EYES[i.min(crate::sim::EYES.len() - 1)];
                 pending.members[k].eyes = Color::srgb(r, g, b);
+            }
+            CasAction::LifeState(o) => {
+                pending.members[k].occult = o.and_then(|i| crate::sim::Occult::ALL.get(i).copied());
             }
             CasAction::Voice(v) => {
                 // The new voice, heard (a line of them checking themselves out).
@@ -965,6 +970,16 @@ fn rebuild_ui(
                                 button(row, ">", up, Val::Px(36.0), false, 16.0);
                             });
                         }
+                    }
+                    // Their life state, as the Supernatural pack's Create a Sim has it.
+                    if !sim.age.is_little() {
+                        p.spawn(text("Life State", 16.0, Color::WHITE));
+                        p.spawn(Node { column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), flex_wrap: FlexWrap::Wrap, ..default() }).with_children(|row| {
+                            button(row, "Human", CasAction::LifeState(None), Val::Px(84.0), sim.occult.is_none(), 13.0);
+                            for (i, o) in crate::sim::Occult::ALL.iter().enumerate() {
+                                button(row, o.name(), CasAction::LifeState(Some(i)), Val::Px(84.0), sim.occult == Some(*o), 13.0);
+                            }
+                        });
                     }
                     // The three voices, each heard when chosen.
                     p.spawn(text("Voice", 16.0, Color::WHITE));

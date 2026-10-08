@@ -842,6 +842,13 @@ fn world_click(
                 if crate::jog::can_jog(sim) && on_lot.get(actor).is_err() {
                     options.push(("Go Jogging".to_string(), ActionKind::Jog { home: Vec2::ZERO }));
                 }
+                // (A werewolf under the full moon howls at it.)
+                if sim.occult == Some(crate::sim::Occult::Werewolf) && crate::supernatural::full_moon_night(opp_q.2.minutes) {
+                    options.push((
+                        "Howl at the Moon".to_string(),
+                        ActionKind::Outro { clips: &["a_werewolf_howlAtMoon_success"], then: None, secs: 6.0, stand_at: None, target: actor },
+                    ));
+                }
                 if !options.is_empty() {
                     pie.submenus.clear();
                     pie.at = cursor;
@@ -916,6 +923,9 @@ fn world_click(
                 }
                 // (A bubble bath with bubble bath in the house, a play with the duck with one.)
                 if d.special.needs().is_some_and(|k| !objects.iter().any(|o| o.kind == k)) {
+                    continue;
+                }
+                if d.special == Special::VampireOnly && actor_sim.occult != Some(crate::sim::Occult::Vampire) {
                     continue;
                 }
                 if d.special == Special::Homework && !hw_q.contains(actor) {
@@ -1444,18 +1454,19 @@ fn update_clock_panel(
             t.0 = s;
         }
     }
-    // (As the game's: the season and its day, the temperature, the weather.)
+    // (As the game's: the season and its day, the temperature, the weather, and the moon.)
     if let Ok(mut t) = season.single_mut() {
         let s = if world.is_some_and(|w| crate::weather::vacation(&w.0.name)) || weather.temperature.is_nan() {
             String::new()
         } else {
             format!(
-                "{} {}/{} · {:.0}°F · {}",
+                "{} {}/{} · {:.0}°F · {} · {}",
                 weather.season(clock.day()).name(),
                 weather.season_day(clock.day()),
                 weather.season_days,
                 weather.temperature,
-                weather.describe()
+                weather.describe(),
+                crate::supernatural::moon_name(clock.minutes)
             )
         };
         if t.0 != s {

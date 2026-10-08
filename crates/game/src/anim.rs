@@ -269,16 +269,25 @@ pub fn drive_skeletons(
         Has<crate::jog::Jogging>,
         Option<&crate::nav::PathFollow>,
         Option<&crate::little::Pregnancy>,
+        Has<crate::supernatural::WolfForm>,
     )>,
     mut joints: Query<&mut Transform, Without<Sim>>,
     mut cues: MessageWriter<crate::sound::ClipCue>,
     mut arms: Local<HashMap<String, Arc<Vec<bool>>>>,
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed];
-    for (entity, sim, anim, skel, action, mut player, carried, toddler, carrying, jogging, path, pregnancy) in &mut sims {
+    for (entity, sim, anim, skel, action, mut player, carried, toddler, carrying, jogging, path, pregnancy, wolf) in &mut sims {
+        use crate::sim::Occult;
+        let fast = matches!(path.filter(|p| !p.done).map(|p| p.now), Some(crate::nav::WalkStyle::Run | crate::nav::WalkStyle::FastRun | crate::nav::WalkStyle::FastJog));
         let child = sim.age == crate::sim::Age::Child;
         let style = path.filter(|p| !p.done).map_or(crate::nav::WalkStyle::Walk, |p| p.now);
         let script = match action {
+            // (Supernaturals: a werewolf's prowl, a zombie's shamble, a vampire's dash.)
+            _ if anim.pose == Pose::Walk && wolf => ActionClip::new(None, if fast { &["a_werewolf_run"] } else { &["a_werewolf_walk"] }),
+            _ if anim.pose == Pose::Walk && sim.occult == Some(Occult::Zombie) => ActionClip::new(None, &["a_zombie_walk"]),
+            _ if anim.pose == Pose::Walk && fast && sim.occult == Some(Occult::Vampire) => ActionClip::new(None, &["a_vampires_run"]),
+            _ if matches!(anim.pose, Pose::Stand) && action.is_none() && wolf => ActionClip::new(None, &["a_werewolf_idle_", "a_werewolf_idleSniff"]),
+            _ if matches!(anim.pose, Pose::Stand) && action.is_none() && sim.occult == Some(Occult::Zombie) => ActionClip::new(None, &["a_zombie_idle", "a_zombie_graaains_loop"]),
             // (Jogging: the game's jog, for everyone.)
             _ if jogging && anim.pose == Pose::Walk => ActionClip::new(None, &["a_male_jog"]),
             // (The route's walk style: hurrying, jogging, running.)
