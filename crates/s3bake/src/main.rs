@@ -30,6 +30,34 @@ fn main() {
         i += 1;
     }
     let root = s3bake::default_root();
+    if let Some(i) = args.iter().position(|a| a == "--lotfloors") {
+        // --lotfloors <world> <lot name filter>: a baked lot building's levels, and its floor
+        // tiles per storey (kind, region and height ranges).
+        let w: s3bake::WorldBaked = s3bake::read_value(&root.world_dir(&args[i + 1]).join("world.bin")).expect("world");
+        for b in &w.buildings {
+            let Some(l) = w.lots.get(b.lot as usize).map(|l| &l.info).filter(|l| l.internal_name.contains(&args[i + 2])) else { continue };
+            println!("{} levels {:?} walls by level {:?}", l.internal_name, b.levels, {
+                let mut m = std::collections::BTreeMap::<u8, usize>::new();
+                for wl in &b.walls {
+                    *m.entry(wl.level).or_default() += 1;
+                }
+                m
+            });
+            let mut by: std::collections::BTreeMap<(u8, u8), (usize, f32, f32, std::collections::BTreeSet<u16>)> = std::collections::BTreeMap::new();
+            for f in &b.floors {
+                let e = by.entry((f.level, f.kind)).or_insert((0, f32::MAX, f32::MIN, Default::default()));
+                e.0 += 1;
+                let y = f.y.unwrap_or(f32::NAN);
+                e.1 = e.1.min(y);
+                e.2 = e.2.max(y);
+                e.3.insert(f.region);
+            }
+            for ((lv, k), (n, lo, hi, regions)) in by {
+                println!("  storey {lv} kind {k}: {n} tiles, y {lo:.2}..{hi:.2}, regions {regions:?}");
+            }
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--near") {
         // --near <world> <x> <z> <r>: world instances (and their catalogue objects) near a point.
         let w: s3bake::WorldBaked = s3bake::read_value(&root.world_dir(&args[i + 1]).join("world.bin")).expect("world");

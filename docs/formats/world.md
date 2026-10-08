@@ -685,7 +685,10 @@ ground floor on level `g` and their *second* storey on level `g+1` (3 m up). So 
 mixes storeys (Koffi level 2: 24 tiles at 0.75, 211 at 3.0; Wainwright level 1: 18 at 0.75,
 240 at 3.0). Take each tile's storey as its grid level above `g`, plus one, less one where its
 column is on a foundation: level `g+1` there is 0.3–2.4 m above level `g` (the Goths' manor is
-1.64 m up on its slope), not a storey's 3 m. Read the heights at the tile's own (lowest-index)
+1.64 m up on its slope), not a storey's 3 m; or, where the ground falls away more than that
+under a floor on `g+1`, level `g+1` is 0.3–2.4 m over the lot's own level (Twinbrook's stilted
+houses over the swamp: the Bulls' floor is 0.75 m up on brick piers over ground 2–3 m lower;
+without this its floors counted a storey up and the ground floor showed none). Read the heights at the tile's own (lowest-index)
 vertex: vertices on the border between such rooms can only hold one height. Floors above the
 walls' storeys (roof terraces, the Koffis' open-air top floor) are storeys too.
 `s3tool splitlevels <world>` lists the lots whose grid levels mix storeys.

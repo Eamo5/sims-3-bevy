@@ -294,8 +294,14 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
         match terrain.as_ref() {
             Some(t) => {
                 let gi = ground_index as usize;
-                let on_foundation =
-                    |x: u32, z: u32| t.levels.get(gi + 1).is_some() && (0.3..2.4).contains(&(t.at(gi + 1, x as usize, z as usize) - t.at(gi, x as usize, z as usize)));
+                // (A foundation's height over the ground there; or, where the ground falls away
+                // under a floor, a stilted house's (Twinbrook's), over the lot's own level.)
+                let on_foundation = |x: u32, z: u32| {
+                    t.levels.get(gi + 1).is_some() && {
+                        let (up, here) = (t.at(gi + 1, x as usize, z as usize), t.at(gi, x as usize, z as usize));
+                        (0.3..2.4).contains(&(up - here)) || (up - here >= 2.4 && (0.3..2.4).contains(&up) && mask_at(gi as u32 + 1, x, z).is_some())
+                    }
+                };
                 for gl in ground_index..g.levels.min(t.levels.len() as u32) {
                     for x in 0..g.width.min(w + 1) {
                         for z in 0..g.depth.min(d + 1) {
