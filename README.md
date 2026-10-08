@@ -61,7 +61,9 @@ installation is unreachable.
   painted onto the face; all in the Sim's hair colour), glasses, lipsticks and eye shadows
   (town Sims wear them now and then too). Every Sim's face has its own shape, as the game's
   face sliders make them: jaw, chin, mouth, eyes, brows, nose, cheeks and head leaning one way
-  or the other (the game's own bone adjustments per age and sex), with the game's body-shape
+  or the other (the game's own bone adjustments per age and sex), sculpted on the Face tab
+  slider by slider, part by part (head, eyes, nose, mouth; the camera closes in on the face),
+  kept in saves, and handed down (a baby's face somewhere between their parents'), with the game's body-shape
   morphs (weight and fitness sliders; town Sims keep their builds, working out firms Sims up);
   needs, moods, skills, careers, relationships, autonomy, social interactions; children,
   teens, adults and elders who grow up and grow old (birthdays, new traits, passing away). A

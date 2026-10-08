@@ -97,6 +97,9 @@ pub struct SavedSim {
     /// Ranked chess: wins, losses and rank.
     #[serde(default)]
     pub chess: Option<crate::chess::ChessRecord>,
+    /// Their face shape, as sculpted in Create a Sim or inherited (none: as their look has it).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub face: Vec<f32>,
     /// What they carry.
     #[serde(default)]
     pub inventory: crate::inventory::Inventory,
@@ -315,6 +318,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         journal: Default::default(),
         designs: sim.outfit.designs.clone(),
         styles: sim.outfit.styles.clone(),
+        face: sim.face.clone(),
     }
 }
 
@@ -336,6 +340,7 @@ impl SaveGame {
             id: s.id,
             look: s.look,
             favorites: s.favorites.clone().unwrap_or_else(|| crate::sim::Favorites::by_look(s.look)),
+            face: s.face.clone(),
             outfit: OutfitChoice {
                 hair: o(0),
                 top: o(1),
@@ -674,6 +679,7 @@ fn save_game(
             journal: journal.cloned().unwrap_or_default(),
             designs: sim.outfit.designs.clone(),
             styles: sim.outfit.styles.clone(),
+            face: sim.face.clone(),
         });
     }
     let game = SaveGame {

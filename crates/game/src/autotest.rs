@@ -2468,6 +2468,22 @@ fn ui_flow(
         }
         (62, AppState::CreateHousehold, _) if since > 2.0 => {
             shot(&mut commands, "2f_face");
+            *stage = (95, now);
+        }
+        // Sculpting the face: a wider jaw, then a bigger nose, a slider step a moment.
+        (95..=99, AppState::CreateHousehold, _) if since > 0.4 => {
+            let want = match stage.0 {
+                95 | 96 => crate::home::CasAction::FaceSlider(0, 1),
+                97 => crate::home::CasAction::FaceArea(2),
+                _ => crate::home::CasAction::FaceSlider(10, 1),
+            };
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == want) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (stage.0 + 1, now);
+        }
+        (100, AppState::CreateHousehold, _) if since > 2.0 => {
+            shot(&mut commands, "2g_sculpted");
             // With --family, browse the town's families first.
             let want = if args.family.is_some() { crate::home::CasAction::Families } else { crate::home::CasAction::Done };
             if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == want) {

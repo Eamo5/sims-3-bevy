@@ -91,6 +91,7 @@ pub fn to_sim(p: &PremadeSim) -> Sim {
         age,
         traits,
         favorites: crate::sim::Favorites::by_look(look),
+        face: Vec::new(),
         skin: skin_of(p.skin_shade),
         hair: p.hair_color.map(argb).unwrap_or(Color::srgb(0.3, 0.2, 0.1)),
         // (The town's Sims' eye colours are in their outfits, which the install doesn't have.)

@@ -484,6 +484,26 @@ impl BoneShape {
     }
 }
 
+/// Where a Sim is on each of the game's face sliders (-1 to 1, `FACE_SLIDERS`' pairs): as
+/// sculpted or inherited, or else as their look has it (anywhere along each slider's range, as
+/// Create a Sim's randomising does).
+pub fn face_sliders(sim: &Sim) -> Vec<f32> {
+    let n = s3bake::gamedata::FACE_SLIDERS.len();
+    if sim.face.len() == n {
+        return sim.face.clone();
+    }
+    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look ^ 0xFACE_B0E5);
+    (0..n).map(|_| rng.random_range(-1.0f32..1.0)).collect()
+}
+
+/// A baby's face, from their parents': on each slider somewhere between theirs, give or take a
+/// little (as the game's genetics blend them).
+pub fn inherited_face(mother: &Sim, father: Option<&Sim>, rng: &mut impl Rng) -> Vec<f32> {
+    let m = face_sliders(mother);
+    let f = father.map_or_else(|| m.clone(), face_sliders);
+    m.iter().zip(&f).map(|(a, b)| (a + (b - a) * rng.random_range(0.0f32..1.0) + rng.random_range(-0.15f32..0.15)).clamp(-1.0, 1.0)).collect()
+}
+
 /// A Sim's face shape, by their look: on each of the game's face sliders (in opposing pairs,
 /// as Create a Sim's are) they lean one way or the other, some a lot, most a little.
 pub fn face_shape(cas: &CasData, sim: &Sim) -> HashMap<u32, BoneShape> {
@@ -499,10 +519,7 @@ pub fn face_shape(cas: &CasData, sim: &Sim) -> HashMap<u32, BoneShape> {
     };
     // (NO_FACE_SHAPE=1, for comparisons: every face as the game models it.)
     let Some(sliders) = cas.face_bones.get(prefix).filter(|_| std::env::var("NO_FACE_SHAPE").is_err()) else { return out };
-    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look ^ 0xFACE_B0E5);
-    for pair in 0..s3bake::gamedata::FACE_SLIDERS.len() {
-        // (Anywhere along the slider's range, as Create a Sim's randomising does.)
-        let w: f32 = rng.random_range(-1.0..1.0);
+    for (pair, w) in face_sliders(sim).into_iter().enumerate() {
         let slider = if w >= 0.0 { pair * 2 } else { pair * 2 + 1 };
         let Some((_, bones)) = sliders.iter().find(|(i, _)| *i as usize == slider) else { continue };
         for b in bones {

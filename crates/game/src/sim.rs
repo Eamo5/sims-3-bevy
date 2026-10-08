@@ -80,6 +80,9 @@ pub struct Sim {
     pub weight: f32,
     pub fitness: f32,
     pub favorites: Favorites,
+    /// Face shape: where they are on each of the game's face sliders (`FACE_SLIDERS`' pairs,
+    /// -1 to 1); none, as their look has it.
+    pub face: Vec<f32>,
 }
 
 /// What a Sim likes best, as Create a Sim has it: a food (a recipe's key), a music (one of
@@ -455,6 +458,7 @@ pub fn random_sim(rng: &mut impl Rng, last: &str, female: Option<bool>, age: Age
         age,
         traits: crate::life::random_traits(rng, age),
         favorites: Favorites::random(rng),
+        face: Vec::new(),
         skin: Color::srgb(sr, sg, sb),
         hair: Color::srgb(hr, hg, hb),
         top: Color::hsl(hue, 0.55, 0.5),

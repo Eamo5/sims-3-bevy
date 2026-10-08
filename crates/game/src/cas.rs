@@ -24,7 +24,7 @@ impl Plugin for CasPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::CreateHousehold), setup_cas).add_systems(
             Update,
-            (cas_actions, rebuild_ui, rebuild_model, turn_model, cas_button_visuals, scroll_panel).chain().run_if(in_state(AppState::CreateHousehold)),
+            (cas_actions, rebuild_ui, rebuild_model, turn_model, cas_button_visuals, scroll_panel, frame_camera).chain().run_if(in_state(AppState::CreateHousehold)),
         );
     }
 }
@@ -112,8 +112,32 @@ pub enum CasAction {
     /// palette).
     Styling,
     StyleColour(u8, u8),
+    /// Sculpting the face: a part (head, eyes, nose, mouth), a slider moved one way or the
+    /// other, or the face made afresh.
+    FaceArea(u8),
+    FaceSlider(u8, i8),
+    RandomFace,
     Done,
 }
+
+/// The face sliders by part of the face, as Create a Sim groups them: each slider's pair (in
+/// `FACE_SLIDERS`), name and ends (its second end first).
+const FACE_AREAS: [(&str, &[(usize, &str, &str, &str)]); 4] = [
+    (
+        "Head",
+        &[
+            (16, "Head Width", "Narrow", "Wide"),
+            (0, "Jaw Width", "Narrow", "Wide"),
+            (1, "Chin Size", "Small", "Large"),
+            (2, "Chin Height", "Low", "High"),
+            (14, "Cheekbones", "Low", "High"),
+            (15, "Cheeks", "Hollow", "Full"),
+        ],
+    ),
+    ("Eyes", &[(6, "Eye Size", "Small", "Large"), (7, "Eye Spacing", "Close", "Apart"), (8, "Eye Height", "Low", "High"), (9, "Brows", "Low", "High")]),
+    ("Nose", &[(10, "Nose Size", "Small", "Large"), (11, "Nose Width", "Narrow", "Wide"), (12, "Nose Tilt", "Down", "Up"), (13, "Nose Tip", "Small", "Large")]),
+    ("Mouth", &[(3, "Mouth Width", "Narrow", "Wide"), (4, "Lips", "In", "Out"), (5, "Mouth Height", "Low", "High")]),
+];
 
 /// Styles per page (picture tiles).
 const PAGE: usize = 20;
@@ -149,10 +173,42 @@ struct CasScene {
     wear: crate::simbody::OutfitKind,
     /// Create a Style open.
     styling: bool,
+    /// The part of the face being sculpted (`FACE_AREAS`).
+    face_area: u8,
 }
 
 #[derive(Component)]
 struct CasModel;
+
+/// Create a Sim's camera: on the whole Sim, or close on their face on the Face tab.
+#[derive(Component)]
+struct CasCamera;
+
+/// The camera eased towards its framing for the tab: the face (at the Sim's head height for
+/// their age) on the Face tab, else the whole Sim.
+fn frame_camera(scene: Option<Res<CasScene>>, pending: Res<PendingHousehold>, time: Res<Time>, mut cam: Query<&mut Transform, With<CasCamera>>) {
+    let (Some(scene), Ok(mut tf)) = (scene, cam.single_mut()) else { return };
+    let (eye, at) = match pending.members.get(scene.selected).filter(|_| scene.tab == CasTab::Face && !scene.browsing) {
+        Some(sim) => {
+            let head = match sim.age {
+                Age::Baby => 0.35,
+                Age::Toddler => 0.68,
+                Age::Child => 1.08,
+                Age::Teen => 1.52,
+                _ => 1.6,
+            };
+            (Vec3::new(0.06, head + 0.02, 1.1), Vec3::new(0.06, head - 0.02, 0.0))
+        }
+        None => (Vec3::new(-0.35, 1.05, 3.1), Vec3::new(-0.35, 0.92, 0.0)),
+    };
+    let want = Transform::from_translation(eye).looking_at(at, Vec3::Y);
+    let k = (time.delta_secs() * 6.0).min(1.0);
+    if tf.translation.distance(want.translation) < 1e-3 {
+        return;
+    }
+    tf.translation = tf.translation.lerp(want.translation, k);
+    tf.rotation = tf.rotation.slerp(want.rotation, k);
+}
 
 fn setup_cas(
     mut commands: Commands,
@@ -199,12 +255,14 @@ fn setup_cas(
         scroll: 0.0,
         wear: crate::simbody::OutfitKind::Everyday,
         styling: false,
+        face_area: 0,
     });
     // The stage: camera, lights, pedestal.
     // (Ambient light belongs to the camera: alone it would bring a camera of its own, and the
     // interface would be laid out for that one.)
     commands.spawn((
         Camera3d::default(),
+        CasCamera,
         Transform::from_xyz(-0.35, 1.05, 3.1).looking_at(Vec3::new(-0.35, 0.92, 0.0), Vec3::Y),
         AmbientLight { color: Color::srgb(0.85, 0.9, 1.0), brightness: 900.0, ..default() },
         DespawnOnExit(AppState::CreateHousehold),
@@ -524,6 +582,23 @@ fn cas_actions(
             CasAction::Fitness(d) => {
                 let s = &mut pending.members[k];
                 s.fitness = (s.fitness + d as f32 * 0.1).clamp(0.0, 1.0);
+            }
+            CasAction::FaceArea(a) => {
+                scene.face_area = a;
+                model = false;
+            }
+            CasAction::FaceSlider(i, d) => {
+                // (From the face they have, sculpted.)
+                let s = &mut pending.members[k];
+                let mut f = crate::simbody::face_sliders(s);
+                if let Some(v) = f.get_mut(i as usize) {
+                    *v = (*v + d as f32 * 0.2).clamp(-1.0, 1.0);
+                }
+                s.face = f;
+            }
+            CasAction::RandomFace => {
+                let s = &mut pending.members[k];
+                s.face = (0..s3bake::gamedata::FACE_SLIDERS.len()).map(|_| rand::Rng::random_range(&mut rng, -1.0f32..1.0)).collect();
             }
             CasAction::Families => {
                 scene.browsing = !scene.browsing;
@@ -1093,6 +1168,29 @@ fn rebuild_ui(
                     .filter(|s| s.2)
                     .map(|(t, n, _, c)| (t, n, c))
                     .collect();
+                    // The face's shape, part by part, on the game's sliders.
+                    if sim.age != Age::Baby {
+                        p.spawn(text("Face Shape", 16.0, Color::WHITE));
+                        p.spawn(Node { column_gap: Val::Px(6.0), flex_wrap: FlexWrap::Wrap, row_gap: Val::Px(6.0), ..default() }).with_children(|row| {
+                            for (i, (name, _)) in FACE_AREAS.iter().enumerate() {
+                                button(row, *name, CasAction::FaceArea(i as u8), Val::Px(78.0), scene.face_area as usize == i, 14.0);
+                            }
+                            button(row, "Random", CasAction::RandomFace, Val::Px(78.0), false, 14.0);
+                        });
+                        let face = crate::simbody::face_sliders(&sim);
+                        for &(i, label, lo, hi) in FACE_AREAS[(scene.face_area as usize).min(FACE_AREAS.len() - 1)].1 {
+                            let n = (face.get(i).copied().unwrap_or(0.0) * 5.0).round() as i32;
+                            let bar: String = (0..11).map(|j| if j == n + 5 { '●' } else { '·' }).collect();
+                            p.spawn(Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
+                                row.spawn((text(label, 14.0, Color::WHITE), Node { width: Val::Px(104.0), ..default() }));
+                                button(row, "<", CasAction::FaceSlider(i as u8, -1), Val::Px(32.0), false, 15.0);
+                                row.spawn((text(lo, 12.0, Color::srgb(0.75, 0.85, 1.0)), Node { width: Val::Px(50.0), justify_content: JustifyContent::End, ..default() }));
+                                row.spawn(text(bar, 15.0, Color::srgb(1.0, 0.95, 0.7)));
+                                row.spawn((text(hi, 12.0, Color::srgb(0.75, 0.85, 1.0)), Node { width: Val::Px(44.0), ..default() }));
+                                button(row, ">", CasAction::FaceSlider(i as u8, 1), Val::Px(32.0), false, 15.0);
+                            });
+                        }
+                    }
                     // The eye colour, as swatches (shown as the iris looks: the colour's doubled
                     // over its shading).
                     p.spawn(text("Eye Color", 16.0, Color::WHITE));
