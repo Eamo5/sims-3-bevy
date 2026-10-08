@@ -23,9 +23,16 @@ impl Plugin for BuyPlugin {
             .add_systems(OnEnter(PlayMode::Live), |mut b: ResMut<BuyMode>| *b = BuyMode::default())
             .add_systems(
                 Update,
-                (toggle_buy, buy_panel, buy_buttons, buy_visuals, buy_pick, placement, paint).chain().run_if(in_state(PlayMode::Live)),
+                (toggle_buy, buy_panel, buy_buttons, buy_visuals, buy_pick, eyedrop, placement, paint, |mut buy: ResMut<BuyMode>| {
+                    // (The eyedropper's click is spent by the end of its frame.)
+                    if buy.eyedropped {
+                        buy.eyedropped = false;
+                    }
+                })
+                    .chain()
+                    .run_if(in_state(PlayMode::Live)),
             )
-            .add_systems(Update, (scripted_style, scripted_cover).run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (scripted_style, scripted_cover, scripted_eyedrop).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -101,6 +108,11 @@ pub struct BuyMode {
     /// style made for it (none: its first swatch).
     cover: Option<Key>,
     cover_style: Option<crate::style::CoverStyle>,
+    /// The eyedropper in hand: the next object, wall or floor clicked is taken up again (a new
+    /// one of the object in its design, or the covering to paint with).
+    pub eyedropper: bool,
+    /// The click that took something up with the eyedropper (not to put it down too).
+    eyedropped: bool,
 }
 
 #[derive(Component)]
@@ -109,6 +121,10 @@ struct BuyPanel;
 /// An existing object the player clicked in buy mode, to be picked up next frame.
 #[derive(Resource)]
 struct PickupRequest(Entity);
+
+/// An object clicked with the eyedropper: a new one of it, in its design, taken up next frame.
+#[derive(Resource)]
+struct EyedropRequest(Entity);
 
 #[allow(clippy::too_many_arguments)]
 fn buy_pick(
@@ -142,8 +158,87 @@ fn buy_pick(
     let filter = |e: Entity| root_of(e).is_some();
     let hits = ray_cast.cast_ray(ray, &MeshRayCastSettings::default().with_filter(&filter));
     if let Some(root) = hits.first().and_then(|(e, _)| root_of(*e)) {
-        commands.insert_resource(PickupRequest(root));
+        if buy.eyedropper {
+            commands.insert_resource(EyedropRequest(root));
+        } else {
+            commands.insert_resource(PickupRequest(root));
+        }
+    } else if buy.eyedropper {
+        commands.insert_resource(EyedropCover(ray));
     }
+}
+
+/// A wall or floor clicked with the eyedropper (the ray through the pointer), for its covering.
+#[derive(Resource)]
+struct EyedropCover(Ray3d);
+
+/// The eyedropper's catch: a new one of the object clicked, in its design, in hand (bought when
+/// it's put down); or the covering of the wall side or floor clicked, to paint with.
+#[allow(clippy::too_many_arguments)]
+fn eyedrop(
+    mut commands: Commands,
+    mut buy: ResMut<BuyMode>,
+    (object, cover): (Option<Res<EyedropRequest>>, Option<Res<EyedropCover>>),
+    objects: Query<(&GameObject, Option<&crate::objects::Design>)>,
+    (data, catalog, ui, world, building): (Res<Baked>, Res<Catalog>, Option<Res<crate::icons::GameUi>>, Res<CurrentWorld>, Option<Res<crate::building::ActiveBuilding>>),
+    mut assets: ResMut<ObjectAssets>,
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    (mut notes, mut play): (ResMut<Notifications>, MessageWriter<crate::sound::PlaySound>),
+) {
+    if let Some(req) = object {
+        commands.remove_resource::<EyedropRequest>();
+        let Ok((obj, design)) = objects.get(req.0) else { return };
+        if catalog.by_key(&obj.objd).is_none_or(|e| e.price <= 0) {
+            notes.push(format!("The {} isn't for sale.", obj.name));
+            return;
+        }
+        let design = design.map(|d| d.0);
+        let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+        let parts = assets.object_design(&mut ctx, obj.objd, design);
+        let ghost = spawn_parts(&mut commands, &parts, Transform::from_xyz(0.0, -1000.0, 0.0));
+        commands.entity(ghost).insert(DespawnOnExit(AppState::InGame));
+        buy.eyedropper = false;
+        buy.eyedropped = true;
+        buy.placing = Some(Placing::new(obj.objd, ghost, false, design));
+        buy.dirty = true;
+        play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
+        return;
+    }
+    let Some(req) = cover else { return };
+    commands.remove_resource::<EyedropCover>();
+    let (Some(b), Some(ui)) = (building.as_deref(), ui) else { return };
+    let ray = req.0;
+    let cover_key = |i: u16| (i != s3bake::types::NO_COVER).then(|| b.data.covers.get(i as usize).copied()).flatten();
+    // (A wall side under the pointer, else the floor.)
+    let found = pick_wall(ray, b)
+        .and_then(|(w, side)| b.data.walls.get(w as usize).and_then(|w| cover_key(w.cover[side as usize])).map(|k| (k, false)))
+        .or_else(|| {
+            let (p, level) = crate::hud::floor_hit(ray, &world, Some(b))?;
+            let l = b.local(p);
+            let tile = b.data.floors.iter().find(|f| f.level == level && f.x as f32 == l.x.floor() && f.z as f32 == l.y.floor())?;
+            cover_key(tile.cover[0]).map(|k| (k, true))
+        });
+    let Some((key, floor)) = found else {
+        notes.push("Nothing to take up there.");
+        return;
+    };
+    // (Painted at the price of the catalogue pattern it is, or else the cheapest of its kind.)
+    let Some(i) = ui
+        .data
+        .patterns
+        .iter()
+        .position(|p| p.floor == floor && (p.texture == key || p.swatches.contains(&key)))
+        .or_else(|| ui.data.patterns.iter().enumerate().filter(|(_, p)| p.floor == floor).min_by_key(|(_, p)| p.price).map(|(i, _)| i))
+    else {
+        return;
+    };
+    buy.eyedropper = false;
+    buy.eyedropped = true;
+    buy.painting = Some(i);
+    buy.cover = Some(key);
+    buy.category = if floor { FLOORS_TAB } else { WALLPAPER_TAB };
+    buy.dirty = true;
+    play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
 }
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
 enum BuyButton {
@@ -162,6 +257,8 @@ enum BuyButton {
     StyleColour(u8, u8),
     /// A swatch of the wallpaper or floor in hand.
     CoverSwatch(u8),
+    /// The eyedropper.
+    Eyedropper,
     /// A terrain paint (or the eraser), or a brush size (index into `BRUSHES`).
     Terrain(u8),
     Brush(usize),
@@ -202,6 +299,55 @@ fn scripted_style(time: Res<Time>, buy: Res<BuyMode>, mut buttons: Query<(&BuyBu
 /// COVER_STYLE=1 (tests): the wallpaper tab opened (10 seconds in), a pattern with colour presets
 /// picked, its second swatch, Create a Style, and its first channel made blue, a step every two
 /// seconds.
+/// EYEDROP=object|floor (tests): 10 seconds in, Buy mode open and the eyedropper used on the
+/// nearest object for sale to the selected Sim, or on the floor in the middle of the house; what
+/// it took up is logged two seconds later.
+fn scripted_eyedrop(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut buy: ResMut<BuyMode>,
+    sel: Query<&Transform, With<crate::sim::Selected>>,
+    objects: Query<(Entity, &GameObject, &Transform)>,
+    catalog: Res<Catalog>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+    mut step: Local<u8>,
+) {
+    let Ok(want) = std::env::var("EYEDROP") else { return };
+    let t = time.elapsed_secs();
+    match *step {
+        0 if t > 10.0 => {
+            let Ok(me) = sel.single() else { return };
+            buy.show(0);
+            buy.eyedropper = true;
+            if want == "floor" {
+                let at = building.as_ref().map_or(me.translation, |b| b.center);
+                let ray = Ray3d::new(at + Vec3::Y * 2.5, Dir3::NEG_Y);
+                commands.insert_resource(EyedropCover(ray));
+            } else if let Some((e, o, _)) = objects
+                .iter()
+                .filter(|(_, o, _)| catalog.by_key(&o.objd).is_some_and(|c| c.price > 0))
+                .min_by(|a, b| a.2.translation.distance(me.translation).total_cmp(&b.2.translation.distance(me.translation)))
+            {
+                info!("eyedrop test: taking up the {}", o.name);
+                commands.insert_resource(EyedropRequest(e));
+            }
+            *step = 1;
+        }
+        1 if t > 12.0 => {
+            info!(
+                "eyedrop test: in hand {:?} (design {:?}), painting {:?} in {:?}, eyedropper {}",
+                buy.placing.as_ref().map(|p| p.objd),
+                buy.placing.as_ref().and_then(|p| p.design),
+                buy.painting,
+                buy.cover,
+                buy.eyedropper
+            );
+            *step = 2;
+        }
+        _ => {}
+    }
+}
+
 fn scripted_cover(time: Res<Time>, mut buy: ResMut<BuyMode>, ui: Option<Res<crate::icons::GameUi>>, mut buttons: Query<(&BuyButton, &mut Interaction)>, mut step: Local<u8>) {
     if std::env::var("COVER_STYLE").is_err() {
         return;
@@ -248,6 +394,7 @@ impl BuyMode {
     /// Puts down the tool, pattern or object in hand.
     pub fn drop_tools(&mut self, commands: &mut Commands) {
         self.painting = None;
+        self.eyedropper = false;
         self.tool = None;
         if let Some(p) = self.placing.take() {
             commands.entity(p.ghost).despawn();
@@ -372,6 +519,7 @@ fn buy_panel(
         p.spawn(Node { column_gap: Val::Px(6.0), flex_wrap: FlexWrap::Wrap, row_gap: Val::Px(6.0), ..default() }).with_children(|row| {
             button(row, if buy.active { "Exit Buy Mode (B)".into() } else { "Buy Mode (B)".into() }, BuyButton::Toggle, Val::Px(150.0), 32.0, buy.active);
             if buy.active {
+                button(row, "Eyedropper".into(), BuyButton::Eyedropper, Val::Auto, 32.0, buy.eyedropper);
                 for (i, c) in CATEGORIES.iter().enumerate() {
                     button(row, c.to_string(), BuyButton::Category(i), Val::Auto, 32.0, i == buy.category);
                 }
@@ -864,6 +1012,13 @@ fn buy_buttons(
                 buy.styling = !buy.styling;
                 buy.dirty = true;
             }
+            BuyButton::Eyedropper => {
+                let on = !buy.eyedropper;
+                buy.drop_tools(&mut commands);
+                buy.eyedropper = on;
+                buy.dirty = true;
+                play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
+            }
             BuyButton::CoverSwatch(s) => {
                 let Some(pat) = buy.painting.and_then(|i| ui.as_ref()?.data.patterns.get(i)) else { continue };
                 buy.cover = pat.swatches.get(*s as usize).copied();
@@ -993,7 +1148,7 @@ fn paint(
         buy.dirty = true;
         return;
     }
-    if !mouse.just_pressed(MouseButton::Left) || over_ui.0 {
+    if !mouse.just_pressed(MouseButton::Left) || over_ui.0 || std::mem::take(&mut buy.eyedropped) {
         return;
     }
     let (Some(ui), Some(b)) = (ui, building.as_deref_mut()) else { return };
@@ -1250,7 +1405,7 @@ fn placement(
         }
         return;
     }
-    if mouse.just_pressed(MouseButton::Left) && !over_ui.0 && ground.is_some() {
+    if mouse.just_pressed(MouseButton::Left) && !over_ui.0 && ground.is_some() && !std::mem::take(&mut buy.eyedropped) {
         let funds = household.as_ref().map(|h| h.funds).unwrap_or(0);
         if !owned && funds < price {
             notes.push("You can't afford that.");

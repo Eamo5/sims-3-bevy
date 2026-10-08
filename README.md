@@ -255,7 +255,9 @@ installation is unreachable.
   roses; picked from swatches while it's in hand, and kept in saves) or, in Create a Style,
   any colour of the palette on each of its colour channels (solid colours, and fabric, wood
   and the like shifted to the colour as the game's colour wheel does, keeping the grain;
-  rendered afresh from the installed game in the background); paintings, mirrors and
+  rendered afresh from the installed game in the background); the eyedropper takes up a new
+  one of any object clicked in its design (the town's own furniture too), or the covering of
+  a wall side or floor to paint with; paintings, mirrors and
   wall lamps hang on the wall under the pointer, and go with it when it's cut away; the
   town's houses are furnished in the very designs their builders chose (each placed object's own, drawn from
   the lot data: quilts, cribs, counter tops and upholstery as they were),
