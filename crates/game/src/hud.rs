@@ -32,8 +32,13 @@ fn take_screenshot(
     household: Option<Res<Household>>,
     clock: Res<crate::clock::GameClock>,
     mut notes: ResMut<Notifications>,
+    snapshot: Option<Res<crate::livehud::Snapshot>>,
 ) {
-    if !(keys.just_pressed(KeyCode::PrintScreen) || keys.just_pressed(KeyCode::F12)) {
+    let puck = snapshot.is_some();
+    if puck {
+        commands.remove_resource::<crate::livehud::Snapshot>();
+    }
+    if !(puck || keys.just_pressed(KeyCode::PrintScreen) || keys.just_pressed(KeyCode::F12)) {
         return;
     }
     let dir = screenshots_dir();
@@ -129,8 +134,9 @@ struct WishesPanel;
 /// An offered wish button (index into `Wishes::offered`).
 #[derive(Component)]
 struct WishButton(usize);
+/// Opens the lifetime rewards (the game's "Lifetime happiness" tab).
 #[derive(Component)]
-struct RewardsButton;
+pub struct RewardsButton;
 #[derive(Component)]
 struct NeedsDetail;
 #[derive(Component)]
@@ -206,8 +212,19 @@ fn panel(node: Node) -> impl Bundle {
     )
 }
 
-fn spawn_hud(mut commands: Commands) {
+fn spawn_hud(mut commands: Commands, ui: Option<Res<crate::layout::UiAssets>>) {
     commands.insert_resource(PointerOverUi::default());
+    // (With the game's own HUD up, its panels stand in for these: see `livehud`.)
+    let old = !crate::livehud::active(ui.as_deref());
+    if old {
+        spawn_old_panels(&mut commands);
+    }
+    spawn_common(&mut commands, old);
+}
+
+/// The Sim's panel, wishes and moodlets, the clock bar and the household's buttons, for when
+/// the game's interface isn't to hand.
+fn spawn_old_panels(commands: &mut Commands) {
     // Bottom-left column: the Sim's panel, with wishes and moodlets stacked above it.
     let left_column = commands
         .spawn((
@@ -489,6 +506,10 @@ fn spawn_hud(mut commands: Commands) {
             });
         });
 
+}
+
+/// The action queue, notifications, frame rate and help line.
+fn spawn_common(commands: &mut Commands, old: bool) {
     // Action queue (top-left)
     commands.spawn((
         DespawnOnExit(AppState::InGame),
@@ -502,19 +523,21 @@ fn spawn_hud(mut commands: Commands) {
         },
     ));
 
-    // Household members (right)
-    commands.spawn((
-        DespawnOnExit(AppState::InGame),
-        MembersPanel,
-        Node {
-            position_type: PositionType::Absolute,
-            right: Val::Px(12.0),
-            bottom: Val::Px(12.0),
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(6.0),
-            ..default()
-        },
-    ));
+    // Household members (right; the game's HUD has its skewer)
+    if old {
+        commands.spawn((
+            DespawnOnExit(AppState::InGame),
+            MembersPanel,
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(12.0),
+                bottom: Val::Px(12.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.0),
+                ..default()
+            },
+        ));
+    }
 
     // Notifications (top-right)
     commands.spawn((
@@ -539,7 +562,10 @@ fn spawn_hud(mut commands: Commands) {
         Node { position_type: PositionType::Absolute, top: Val::Px(6.0), left: Val::Percent(48.0), ..default() },
     ));
 
-    // Help line (top, fading once play has started)
+    // Help line (top, fading once play has started; the game's own HUD has its tooltips)
+    if !old {
+        return;
+    }
     commands.spawn((
         DespawnOnExit(AppState::InGame),
         HelpLine,
@@ -841,6 +867,10 @@ fn world_click(
                 let mut options = Vec::new();
                 if crate::jog::can_jog(sim) && on_lot.get(actor).is_err() {
                     options.push(("Go Jogging".to_string(), ActionKind::Jog { home: Vec2::ZERO }));
+                }
+                // (Their cell phone, as the game's: calls, services, adopting, moving.)
+                if !sim.age.is_little() {
+                    options.push((PHONE_LABEL.to_string(), ActionKind::EatHere));
                 }
                 // (A werewolf under the full moon howls at it.)
                 if sim.occult == Some(crate::sim::Occult::Werewolf) && crate::supernatural::full_moon_night(opp_q.2.minutes) {
@@ -1186,6 +1216,10 @@ fn pie_buttons(
     let actor = pie.actor;
     close_pie(&mut commands, &mut pie);
     if let ActionKind::BuyReward(_) = kind {
+        return;
+    }
+    if label == PHONE_LABEL {
+        commands.insert_resource(OpenPhone);
         return;
     }
     let _ = (&mut wishes, &mut notes);
@@ -1877,6 +1911,9 @@ fn update_trait_icons(
         }
     });
 }
+
+/// The selected Sim's own menu's way to their cell phone.
+const PHONE_LABEL: &str = "Phone ›";
 
 /// The phone: call people the selected Sim knows and invite them over.
 #[allow(clippy::type_complexity)]

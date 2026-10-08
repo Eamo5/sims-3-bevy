@@ -15,6 +15,7 @@ pub mod premades;
 pub mod pets;
 pub mod sounds;
 pub mod types;
+pub mod ui;
 
 pub use bake::{BakeRoot, bake_clips, bake_global, bake_music, bake_world, clips_ready};
 pub use pack::{PackReader, read_value};
@@ -23,6 +24,7 @@ pub use premades::{HouseholdBaked, PremadesBaked, ensure_premades, load_premades
 pub use pets::{PetsBaked, bake_pets, load_pets, pets_ready};
 pub use sounds::{SoundBank, SoundDef, bake_sounds, sounds_ready};
 pub use types::*;
+pub use ui::{UiBaked, bake_ui, load_ui, ui_ready};
 
 /// Default location of the cache: `SIMS3_CACHE`, or `baked/` in the working directory.
 pub fn default_root() -> BakeRoot {

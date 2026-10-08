@@ -439,6 +439,24 @@ fn put_back(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetC
     }
 }
 
+/// The puck's mode buttons: live (`None`), buy (`Some(false)`) or build (`Some(true)`) mode.
+pub fn enter_mode(buy: &mut BuyMode, mode: Option<bool>, commands: &mut Commands, clock: &mut crate::clock::GameClock) {
+    match mode {
+        None => {
+            if buy.active {
+                set_active(buy, false, commands, clock);
+            }
+        }
+        Some(build) => {
+            if !buy.active {
+                set_active(buy, true, commands, clock);
+            }
+            // (Build mode opens on the walls and floors tools, as the game's.)
+            buy.show(if build { WALLPAPER_TAB + 2 } else { 0 });
+        }
+    }
+}
+
 fn set_active(buy: &mut BuyMode, on: bool, commands: &mut Commands, clock: &mut crate::clock::GameClock) {
     buy.active = on;
     buy.drop_tools(commands);

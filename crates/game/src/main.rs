@@ -33,6 +33,8 @@ mod inventory;
 mod life;
 mod little;
 mod loading;
+mod layout;
+mod livehud;
 mod lookat;
 mod mail;
 mod maptags;
@@ -155,14 +157,14 @@ fn main() {
         .add_plugins((options::OptionsPlugin, icons::IconsPlugin, balloons::BalloonsPlugin, portraits::PortraitsPlugin, relations::RelationsPlugin, props::PropsPlugin, meals::MealsPlugin, death::DeathPlugin, mail::MailPlugin, sky::SkyPlugin, maptags::MapTagsPlugin, opportunities::OpportunitiesPlugin, gardening::GardeningPlugin, build::BuildPlugin, visit::VisitPlugin))
         .add_plugins((collecting::CollectingPlugin, traffic::TrafficPlugin, fire::FirePlugin, burglar::BurglarPlugin, simpanel::SimPanelPlugin, ghosts::GhostsPlugin, water::WaterPlugin, services::ServicesPlugin, fireplace::FireplacePlugin, effects::EffectsPlugin, swim::SwimPlugin, dates::DatesPlugin, dialog::DialogPlugin, lifetime::LifetimePlugin))
         .add_plugins((writing::WritingPlugin, story::StoryPlugin, chess::ChessPlugin, blink::BlinkPlugin, inventory::InventoryPlugin, thumbs::ThumbsPlugin, appliances::AppliancesPlugin, surroundings::SurroundingsPlugin, planner::PlannerPlugin, fishbowl::FishBowlPlugin, lookat::LookAtPlugin, upgrades::UpgradesPlugin, family::FamilyPlugin, terrain_paint::TerrainPaintPlugin, paintings::PaintingsPlugin))
-        .add_plugins((midlife::MidLifePlugin, objanim::ObjectAnimPlugin, household::HouseholdPlugin, journal::JournalPlugin, jog::JogPlugin, doorbell::DoorbellPlugin, edittown::EditTownPlugin, style::StylePlugin, weather::WeatherPlugin, seasonal::SeasonalPlugin, pets::PetsPlugin, supernatural::SupernaturalPlugin))
+        .add_plugins((midlife::MidLifePlugin, objanim::ObjectAnimPlugin, household::HouseholdPlugin, journal::JournalPlugin, jog::JogPlugin, doorbell::DoorbellPlugin, edittown::EditTownPlugin, style::StylePlugin, weather::WeatherPlugin, seasonal::SeasonalPlugin, pets::PetsPlugin, supernatural::SupernaturalPlugin, layout::LayoutPlugin, livehud::LiveHudPlugin))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)
         .run();
 }
 
 /// Uses a system UI font with full Unicode punctuation (§, —, ·) when available.
-fn load_ui_font(mut fonts: ResMut<Assets<Font>>) {
+pub(crate) fn load_ui_font(mut fonts: ResMut<Assets<Font>>) {
     for path in ["C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/arial.ttf"] {
         if let Ok(bytes) = std::fs::read(path) {
             let _ = fonts.insert(&Handle::<Font>::default(), Font::from_bytes(bytes));

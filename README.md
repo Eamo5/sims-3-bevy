@@ -592,6 +592,22 @@ installation is unreachable.
 - **Pie menus** in the game's style: pale bubbles with dark writing, blue under the pointer,
   in a ring round the acting Sim's portrait (what was clicked named beneath it), with
   submenus (›) for long lists.
+- **The game's own HUD**: the live-mode interface is the game's, drawn from its own layouts
+  (`UI.package`'s window trees, pictures and fonts: every caption in its Helvetica Rounded),
+  and driven as its own interface code drives it: the puck at the bottom left (live, buy and
+  build; the camera's orbit, zoom, tilt and views; walls up, cutaway or down; floors; the
+  household's funds; the snapshot and options buttons), the Sim display (the selected Sim's
+  bust; the clock's pause, play, fast and faster buttons with the day and time, the season
+  and weather on hover; the mood meter filled and coloured by the game's own thirds and
+  tuning, glowing in the band that earns lifetime happiness; the moodlets in the game's
+  green, red or grey cells with their time left, scrolled three by two; the offered wish
+  in its staging area, paged and clicked to promise, the four promised wishes in their slots
+  and the lifetime wish in its frame), the skewer of the household's faces up the left, each
+  ringed in its mood's colour (click to select, again to go to them), and the info panels
+  under their tabs (the motives' bars filled and coloured as the game's: green, fading to
+  amber and red as a need runs low; Relationships, Opportunities and the lifetime rewards
+  open their windows). Buttons light up, press and grey out with the game's own pictures.
+  The Sim's own menu has their phone.
 - **Interface**: the game's own icons and words — moodlets (name, description, time left),
   traits (Create-a-Sim and the Sim's panel) and wishes — read from the game's tuning tables
   (`GameplayData.package`) and string tables, with tooltips on hover. Sims' portraits are
@@ -639,7 +655,7 @@ installation is unreachable.
 | `s3tool` | Inspection tools used while reverse-engineering formats |
 | `game` | The game (`sims3`) |
 
-Format notes are in `docs/formats/`.
+Format notes are in `docs/formats/` (the interface's layouts in `ui.md`).
 
 ## Testing switches
 

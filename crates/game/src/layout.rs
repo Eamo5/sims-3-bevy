@@ -1,0 +1,467 @@
+//! The game's own interface layouts (baked by `s3bake::ui` from `UI.package`), put on screen
+//! with Bevy UI: each window where its layout proc places it, drawing its images (stretched,
+//! at their own size or nine-sliced; buttons by state: normal, highlighted, pressed, disabled,
+//! selected), its caption in the game's fonts and text styles, its tooltip, and its children
+//! (which the game lists front to back).
+//! Game code finds windows by their control ids to fill them in and hear their clicks.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use bevy::asset::RenderAssetUsages;
+use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::text::LineHeight;
+use bevy::ui::FocusPolicy;
+use s3bake::ui::{ANCHOR_BOTTOM, ANCHOR_LEFT, ANCHOR_RIGHT, ANCHOR_TOP, TextStyle, UiBaked, UiDrawable, UiPlace, UiWindow, WIN_CLIP, WIN_ENABLED, WIN_IGNORE_MOUSE};
+
+pub struct LayoutPlugin;
+
+impl Plugin for LayoutPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, open_ui.after(crate::load_ui_font)).add_systems(Update, (open_ui_when_baked, button_states));
+    }
+}
+
+/// The baked layouts, text styles, and the pictures and fonts they use (decoded once).
+#[derive(Resource)]
+pub struct UiAssets {
+    data: Arc<UiBaked>,
+    by_id: HashMap<u64, usize>,
+    styles: HashMap<u32, TextStyle>,
+    pack: s3bake::PackReader,
+    images: HashMap<u64, Option<(Handle<Image>, Vec2)>>,
+    fonts: HashMap<u64, Handle<Font>>,
+}
+
+/// The default style's font (Helvetica Rounded) as the font of all text, as the game's.
+fn open(fonts: &mut Assets<Font>) -> Option<UiAssets> {
+    let root = s3bake::default_root();
+    if !s3bake::ui_ready(&root) {
+        return None;
+    }
+    let data = s3bake::load_ui(&root)?;
+    let pack = s3bake::PackReader::open(&root.global_dir().join("ui.pack")).ok()?;
+    let by_id = data.layouts.iter().enumerate().map(|(i, l)| (l.0, i)).collect();
+    let styles: HashMap<u32, TextStyle> = data.styles.iter().cloned().collect();
+    let ui = UiAssets { data: Arc::new(data), by_id, styles, pack, images: HashMap::new(), fonts: HashMap::new() };
+    if let Some(bytes) = ui.styles.get(&0).and_then(|s| ui.pack.get::<Vec<u8>>(&(s3bake::ui::T_FONT, 0, s.font))) {
+        let _ = fonts.insert(&Handle::<Font>::default(), Font::from_bytes(bytes));
+    }
+    Some(ui)
+}
+
+fn open_ui(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
+    if let Some(ui) = open(&mut fonts) {
+        commands.insert_resource(ui);
+    }
+}
+
+/// (On a first run the interface is converted while the town loads.)
+fn open_ui_when_baked(mut commands: Commands, ui: Option<Res<UiAssets>>, mut fonts: ResMut<Assets<Font>>, state: Res<State<crate::AppState>>, mut tried: Local<bool>) {
+    if ui.is_some() || *tried || *state.get() != crate::AppState::InGame {
+        return;
+    }
+    *tried = true;
+    if let Some(ui) = open(&mut fonts) {
+        commands.insert_resource(ui);
+    }
+}
+
+/// A window of a layout on screen, by its control id.
+#[derive(Component)]
+pub struct UiWin(pub u32);
+
+/// A button drawn by state: its pictures (normal, disabled, highlighted, pressed, then the same
+/// selected), the picture node, and an icon's tint per state.
+#[derive(Component)]
+pub struct UiButton {
+    images: [Option<Handle<Image>>; 8],
+    picture: Option<Entity>,
+    icon: Option<(Entity, [Color; 8])>,
+    /// Shown as selected (a toggled mode, the current speed).
+    pub selected: bool,
+    pub disabled: bool,
+}
+
+/// A window's (first) picture node, whose image game code can change (a portrait in the bust,
+/// the household's faces on the skewer).
+#[derive(Component, Clone, Copy)]
+pub struct UiPicture(pub Entity);
+
+impl UiButton {
+    /// The icon picture of an icon button (whose image game code sets: a tab's career icon).
+    pub fn icon(&self) -> Option<Entity> {
+        self.icon.map(|i| i.0)
+    }
+}
+
+/// A layout put on screen: its root, and its windows (and their texts) by control id.
+#[derive(Default, Clone)]
+pub struct Spawned {
+    pub root: Option<Entity>,
+    ids: HashMap<u32, Entity>,
+    texts: HashMap<u32, Entity>,
+    comments: Vec<(String, Entity)>,
+    /// Every window with an id, and its parent (ids repeat in item templates: each skewer slot
+    /// has its thumbnail as 1 and its button as 3).
+    all: Vec<(u32, Entity)>,
+    parents: HashMap<Entity, Entity>,
+    text_of: HashMap<Entity, Entity>,
+}
+
+impl Spawned {
+    /// The window with a control id.
+    pub fn id(&self, id: u32) -> Option<Entity> {
+        self.ids.get(&id).copied()
+    }
+    /// The text of the window with a control id.
+    pub fn text(&self, id: u32) -> Option<Entity> {
+        self.texts.get(&id).copied()
+    }
+    /// The (first) window the designers commented so (for windows without an id).
+    pub fn comment(&self, c: &str) -> Option<Entity> {
+        self.comments.iter().find(|(n, _)| n == c).map(|(_, e)| *e)
+    }
+    /// The window with a control id under another (an item's own child).
+    pub fn within(&self, ancestor: Entity, id: u32) -> Option<Entity> {
+        self.all.iter().filter(|(i, _)| *i == id).map(|(_, e)| *e).find(|e| {
+            let mut at = *e;
+            for _ in 0..32 {
+                match self.parents.get(&at) {
+                    Some(&p) if p == ancestor => return true,
+                    Some(&p) => at = p,
+                    None => return false,
+                }
+            }
+            false
+        })
+    }
+    /// A window's text (the window being a `Text` or a captioned button).
+    pub fn text_of(&self, window: Entity) -> Option<Entity> {
+        self.text_of.get(&window).copied()
+    }
+}
+
+pub fn color(argb: u32) -> Color {
+    Color::srgba_u8((argb >> 16) as u8, (argb >> 8) as u8, argb as u8, (argb >> 24) as u8)
+}
+
+impl UiAssets {
+    /// A layout by its name (as the game's code loads it: `HUDSimDisplay`).
+    pub fn layout(&self, name: &str) -> Option<&UiWindow> {
+        self.by_id.get(&s3pkg::fnv64(name)).and_then(|&i| self.data.layouts[i].1.first()).map(|w| &w.1)
+    }
+
+    /// One of a layout's exported windows (`GetWindowByExportID`).
+    pub fn export(&self, name: &str, id: u32) -> Option<&UiWindow> {
+        self.by_id.get(&s3pkg::fnv64(name)).and_then(|&i| self.data.layouts[i].1.iter().find(|w| w.0 == id)).map(|w| &w.1)
+    }
+
+    /// An interface picture and its size.
+    pub fn image(&mut self, images: &mut Assets<Image>, key: u64) -> Option<(Handle<Image>, Vec2)> {
+        if key == 0 {
+            return None;
+        }
+        if let Some(h) = self.images.get(&key) {
+            return h.clone();
+        }
+        let img = self.pack.get::<Vec<u8>>(&(s3bake::ui::T_IMAGE, 0, key)).and_then(|png| s3bake::gamedata::decode_icon(&png)).map(|(w, h, px)| {
+            let img = Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, px, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD);
+            (images.add(img), Vec2::new(w as f32, h as f32))
+        });
+        self.images.insert(key, img.clone());
+        img
+    }
+
+    /// The font and size of a text style (`TextFont` of a window; 0 the default).
+    pub fn text_font(&mut self, fonts: &mut Assets<Font>, style: u32) -> (TextFont, LineHeight) {
+        let st = self.styles.get(&style).or_else(|| self.styles.get(&0)).cloned().unwrap_or_default();
+        let handle = match self.fonts.get(&st.font) {
+            Some(h) => Some(h.clone()),
+            None => self.pack.get::<Vec<u8>>(&(s3bake::ui::T_FONT, 0, st.font)).map(|b| {
+                let h = fonts.add(Font::from_bytes(b));
+                self.fonts.insert(st.font, h.clone());
+                h
+            }),
+        };
+        let mut f = TextFont::from_font_size(st.size.max(6.0));
+        if let Some(h) = handle {
+            f.font = h.into();
+        }
+        (f, LineHeight::Px(st.line.max(st.size)))
+    }
+
+    /// Puts a layout on screen (its root at the top level, placed against the window).
+    pub fn spawn(&mut self, commands: &mut Commands, images: &mut Assets<Image>, fonts: &mut Assets<Font>, name: &str) -> Option<Spawned> {
+        let data = self.data.clone();
+        let w = data.layouts.get(*self.by_id.get(&s3pkg::fnv64(name))?).and_then(|l| l.1.first()).map(|w| &w.1)?;
+        let mut out = Spawned::default();
+        let root = self.spawn_window(commands, images, fonts, w, None, &mut out);
+        out.root = Some(root);
+        Some(out)
+    }
+
+    /// Puts a window (and what's under it) under a parent: a layout's item template, as a
+    /// moodlet's grid cell or a queued interaction.
+    pub fn spawn_under(&mut self, commands: &mut Commands, images: &mut Assets<Image>, fonts: &mut Assets<Font>, w: &UiWindow, parent: Entity) -> Spawned {
+        let mut out = Spawned::default();
+        let root = self.spawn_window(commands, images, fonts, w, Some(parent), &mut out);
+        out.root = Some(root);
+        out
+    }
+
+    /// The data of a layout window, to spawn copies of (cloned out of the shared data).
+    pub fn template(&self, layout: &str, comment: &str) -> Option<UiWindow> {
+        self.layout(layout)?.find_comment(comment).cloned()
+    }
+
+    fn spawn_window(&mut self, commands: &mut Commands, images: &mut Assets<Image>, fonts: &mut Assets<Font>, w: &UiWindow, parent: Option<Entity>, out: &mut Spawned) -> Entity {
+        let mut node = place(w);
+        if w.flags & WIN_CLIP != 0 {
+            node.overflow = Overflow::clip();
+        }
+        let vis = if w.visible() { Visibility::Inherited } else { Visibility::Hidden };
+        let e = commands.spawn((node, vis, UiWin(w.id))).id();
+        if let Some(p) = parent {
+            commands.entity(e).insert(ChildOf(p));
+        }
+        if !w.comment.is_empty() {
+            commands.entity(e).insert(Name::new(w.comment.clone()));
+            out.comments.push((w.comment.clone(), e));
+        }
+        if w.id != 0 {
+            out.ids.insert(w.id, e);
+            out.all.push((w.id, e));
+        }
+        if let Some(p) = parent {
+            out.parents.insert(e, p);
+        }
+        let size = Vec2::new(w.area[2] - w.area[0], w.area[3] - w.area[1]);
+        let shade = color(w.shade);
+        let is_button = w.cls.contains("Button");
+        let mut button: Option<UiButton> = is_button.then(|| UiButton { images: Default::default(), picture: None, icon: None, selected: false, disabled: w.flags & WIN_ENABLED == 0 });
+        match &w.drawable {
+            Some(d) => self.drawable(commands, images, d, e, size, shade, button.as_mut()),
+            None if w.fill >> 24 != 0 && !is_button && w.cls != "Text" => {
+                commands.entity(e).insert(BackgroundColor(color(w.fill)));
+            }
+            None => {}
+        }
+        // (Clicks: buttons take them; panels that draw something keep them from the world.)
+        let ignore = w.flags & WIN_IGNORE_MOUSE != 0;
+        if let Some(b) = button {
+            commands.entity(e).insert((Button, b, FocusPolicy::Block));
+        } else if w.drawable.is_some() && !ignore && w.visible() {
+            commands.entity(e).insert((Interaction::default(), FocusPolicy::Block, crate::hud::BlocksWorld));
+        } else {
+            commands.entity(e).insert(Pickable::IGNORE);
+        }
+        if is_button {
+            commands.entity(e).insert(crate::hud::BlocksWorld);
+        }
+        if !w.tooltip.is_empty() && !w.tooltip.contains('/') && !w.tooltip.contains(':') {
+            if !is_button && w.drawable.is_none() {
+                commands.entity(e).insert(Interaction::default());
+            }
+            commands.entity(e).insert(crate::icons::Tooltip(w.tooltip.clone()));
+        }
+        if w.cls == "Text" || (is_button && !w.caption.is_empty()) {
+            let caption = if w.caption.contains('/') && w.caption.contains(':') { String::new() } else { w.caption.clone() };
+            let t = self.spawn_text(commands, fonts, w, &caption, e);
+            out.texts.insert(w.id, t);
+            out.text_of.insert(e, t);
+        }
+        // (The game's windows list their children front to back: the first is drawn on top.)
+        for c in w.children.iter().rev() {
+            self.spawn_window(commands, images, fonts, c, Some(e), out);
+        }
+        e
+    }
+
+    /// A text filling its window, aligned as the window says.
+    fn spawn_text(&mut self, commands: &mut Commands, fonts: &mut Assets<Font>, w: &UiWindow, caption: &str, parent: Entity) -> Entity {
+        let (font, line) = self.text_font(fonts, w.font);
+        let (justify, align_x) = match w.halign {
+            1 | 4 => (Justify::Center, JustifyContent::Center),
+            2 => (Justify::Right, JustifyContent::FlexEnd),
+            _ => (Justify::Left, JustifyContent::FlexStart),
+        };
+        let align_y = match w.valign {
+            1 | 3 => AlignItems::Center,
+            2 => AlignItems::FlexEnd,
+            _ => AlignItems::FlexStart,
+        };
+        let col = w.colors.first().copied().map_or(Color::BLACK, color);
+        let holder = commands
+            .spawn((
+                Node { position_type: PositionType::Absolute, left: Val::Px(0.0), right: Val::Px(0.0), top: Val::Px(0.0), bottom: Val::Px(0.0), justify_content: align_x, align_items: align_y, ..default() },
+                Pickable::IGNORE,
+                ChildOf(parent),
+            ))
+            .id();
+        let wrap = if w.wrap == 0 { LineBreak::NoWrap } else { LineBreak::WordBoundary };
+        commands.spawn((Text::new(caption), font, line, TextColor(col), TextLayout::new(justify, wrap), Pickable::IGNORE, ChildOf(holder))).id()
+    }
+
+    /// A drawable as picture nodes under its window.
+    #[allow(clippy::too_many_arguments)]
+    fn drawable(&mut self, commands: &mut Commands, images: &mut Assets<Image>, d: &UiDrawable, parent: Entity, size: Vec2, shade: Color, button: Option<&mut UiButton>) {
+        match d {
+            UiDrawable::Std { images: keys, scale, borders, .. } => {
+                let pics: Vec<Option<(Handle<Image>, Vec2)>> = keys.iter().map(|k| self.image(images, *k)).collect();
+                let Some((first, isize)) = pics.iter().flatten().next().cloned() else { return };
+                let mode = match scale {
+                    2 => NodeImageMode::Sliced(TextureSlicer {
+                        border: BorderRect { min_inset: Vec2::new(borders[0] * isize.x, borders[1] * isize.y), max_inset: Vec2::new(borders[2] * isize.x, borders[3] * isize.y) },
+                        center_scale_mode: SliceScaleMode::Stretch,
+                        sides_scale_mode: SliceScaleMode::Stretch,
+                        max_corner_scale: 1.0,
+                    }),
+                    _ => NodeImageMode::Stretch,
+                };
+                let node = if *scale == 1 { centred(isize, size) } else { fill() };
+                let pic = commands.spawn((node, ImageNode { image: first, color: shade, image_mode: mode, ..default() }, Pickable::IGNORE, ChildOf(parent))).id();
+                commands.entity(parent).insert_if_new(UiPicture(pic));
+                if let Some(b) = button {
+                    for (i, p) in pics.into_iter().enumerate() {
+                        b.images[i] = p.map(|p| p.0);
+                    }
+                    b.picture = Some(pic);
+                }
+            }
+            UiDrawable::Image { image, flags, halign, valign, scale, colors, .. } => {
+                let Some((h, isize)) = self.image(images, *image) else { return };
+                // (Fitted to the window keeping its shape, or at its own size; aligned.)
+                let s = if flags & 1 != 0 { (size.x / isize.x).min(size.y / isize.y) * scale } else { *scale };
+                let dim = isize * s;
+                let x = match halign {
+                    1 => 0.0,
+                    2 => size.x - dim.x,
+                    3 => (size.x - dim.x) * 0.5,
+                    _ => 0.0,
+                };
+                let y = match valign {
+                    1 => 0.0,
+                    2 => size.y - dim.y,
+                    3 => (size.y - dim.y) * 0.5,
+                    _ => 0.0,
+                };
+                let node = if *halign == 0 && *valign == 0 && *flags == 0 {
+                    fill()
+                } else {
+                    Node { position_type: PositionType::Absolute, left: Val::Px(x), top: Val::Px(y), width: Val::Px(dim.x), height: Val::Px(dim.y), ..default() }
+                };
+                let tint = colors.first().copied().map_or(shade, color);
+                let pic = commands.spawn((node, ImageNode { image: h, color: tint, image_mode: NodeImageMode::Stretch, ..default() }, Pickable::IGNORE, ChildOf(parent))).id();
+                commands.entity(parent).insert_if_new(UiPicture(pic));
+                if let Some(b) = button
+                    && colors.len() >= 8
+                {
+                    let mut c = [Color::WHITE; 8];
+                    for (i, v) in colors.iter().take(8).enumerate() {
+                        c[i] = color(*v);
+                    }
+                    b.icon = Some((pic, c));
+                }
+            }
+            UiDrawable::Multi(list) => {
+                let mut button = button;
+                for d in list {
+                    self.drawable(commands, images, d, parent, size, shade, button.as_deref_mut());
+                }
+            }
+        }
+    }
+}
+
+fn fill() -> Node {
+    Node { position_type: PositionType::Absolute, left: Val::Px(0.0), right: Val::Px(0.0), top: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }
+}
+
+/// A picture at its own size, centred in the window.
+fn centred(isize: Vec2, size: Vec2) -> Node {
+    Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(((size.x - isize.x) * 0.5).round()),
+        top: Val::Px(((size.y - isize.y) * 0.5).round()),
+        width: Val::Px(isize.x),
+        height: Val::Px(isize.y),
+        ..default()
+    }
+}
+
+/// Where a window goes in its parent, by its layout proc (see [`UiPlace`]).
+fn place(w: &UiWindow) -> Node {
+    let [x1, y1, x2, y2] = w.area;
+    let mut n = Node { position_type: PositionType::Absolute, ..default() };
+    let (wd, ht) = (Val::Px(x2 - x1), Val::Px(y2 - y1));
+    match w.place {
+        UiPlace::Fixed => {
+            (n.left, n.top, n.width, n.height) = (Val::Px(x1), Val::Px(y1), wd, ht);
+        }
+        UiPlace::Simple(a) => {
+            match (a & ANCHOR_LEFT != 0, a & ANCHOR_RIGHT != 0) {
+                (true, true) => (n.left, n.right) = (Val::Px(x1), Val::Px(-x2)),
+                (false, true) => (n.right, n.width) = (Val::Px(-x2), wd),
+                _ => (n.left, n.width) = (Val::Px(x1), wd),
+            }
+            match (a & ANCHOR_TOP != 0, a & ANCHOR_BOTTOM != 0) {
+                (true, true) => (n.top, n.bottom) = (Val::Px(y1), Val::Px(-y2)),
+                (false, true) => (n.bottom, n.height) = (Val::Px(-y2), ht),
+                _ => (n.top, n.height) = (Val::Px(y1), ht),
+            }
+        }
+        UiPlace::Hud(a, [dw, dh]) => {
+            match (a & ANCHOR_LEFT != 0, a & ANCHOR_RIGHT != 0) {
+                (true, true) => (n.left, n.right) = (Val::Px(x1), Val::Px(dw - x2)),
+                (false, true) => (n.right, n.width) = (Val::Px(dw - x2), wd),
+                _ => (n.left, n.width) = (Val::Px(x1), wd),
+            }
+            match (a & ANCHOR_TOP != 0, a & ANCHOR_BOTTOM != 0) {
+                (true, true) => (n.top, n.bottom) = (Val::Px(y1), Val::Px(dh - y2)),
+                (false, true) => (n.bottom, n.height) = (Val::Px(dh - y2), ht),
+                _ => (n.top, n.height) = (Val::Px(y1), ht),
+            }
+        }
+        UiPlace::Center(v) => {
+            n.left = Val::Percent(50.0);
+            n.margin.left = Val::Px(-(x2 - x1) * 0.5);
+            n.top = Val::Percent(v * 100.0);
+            n.margin.top = Val::Px(-(y2 - y1) * v);
+            (n.width, n.height) = (wd, ht);
+        }
+    }
+    n
+}
+
+/// Buttons show their state's picture (and tint their icon), as the game's.
+fn button_states(mut buttons: Query<(&Interaction, &UiButton), Or<(Changed<Interaction>, Changed<UiButton>)>>, mut pics: Query<&mut ImageNode>) {
+    for (i, b) in &mut buttons {
+        let base = if b.disabled {
+            1
+        } else {
+            match i {
+                Interaction::Pressed => 3,
+                Interaction::Hovered => 2,
+                Interaction::None => 0,
+            }
+        };
+        let state = base + if b.selected { 4 } else { 0 };
+        if let Some(p) = b.picture
+            && let Ok(mut img) = pics.get_mut(p)
+        {
+            let pick = b.images[state].clone().or_else(|| b.images[base].clone()).or_else(|| b.images[0].clone());
+            if let Some(h) = pick
+                && img.image != h
+            {
+                img.image = h;
+            }
+        }
+        if let Some((icon, colors)) = b.icon
+            && let Ok(mut img) = pics.get_mut(icon)
+        {
+            img.color = colors[state];
+        }
+    }
+}

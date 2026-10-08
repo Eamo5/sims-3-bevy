@@ -229,7 +229,8 @@ fn start_loading(
         let need_clips = !s3bake::clips_ready(&root);
         let need_sounds = !s3bake::sounds_ready(&root);
         let need_gamedata = !s3bake::gamedata_ready(&root);
-        if need_global || need_world || need_clips || need_sounds || need_gamedata {
+        let need_ui = !s3bake::ui_ready(&root);
+        if need_global || need_world || need_clips || need_sounds || need_gamedata || need_ui {
             // One-time conversion of the installed game into GPU-ready assets.
             set_status("First run: reading the installed game (this conversion happens once)…");
             let mut pkgs = s3pkg::install::open_install(&root_path, |_| true);
@@ -248,6 +249,9 @@ fn start_loading(
             }
             if need_gamedata {
                 s3bake::bake_gamedata(&root, &pkgs, &root_path, &set_status)?;
+            }
+            if need_ui {
+                s3bake::bake_ui(&root, &pkgs, &root_path, &set_status)?;
             }
             if need_world {
                 pkgs.add(s3pkg::Package::open(&world_path).map_err(|e| e.to_string())?);

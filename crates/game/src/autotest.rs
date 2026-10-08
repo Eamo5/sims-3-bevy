@@ -421,7 +421,8 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_load.run_if(in_state(AppState::MainMenu)))
             .add_systems(PreUpdate, ui_flow.after(bevy::ui::UiSystems::Focus))
             .add_systems(PreUpdate, auto_move_house.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::ChooseLot)))
-            .add_systems(OnEnter(AppState::InGame), showroom);
+            .add_systems(OnEnter(AppState::InGame), showroom)
+            .add_systems(Update, show_layouts.run_if(in_state(crate::PlayMode::Live)));
     }
 }
 
@@ -2774,5 +2775,31 @@ fn auto_load(args: Res<AutoArgs>, worlds: Res<WorldList>, mut commands: Commands
         && crate::save::begin_load(&mut commands, &worlds, g, Some(p))
     {
         next.set(AppState::Loading);
+    }
+}
+
+/// SHOW_LAYOUTS=<name,name...>: the game's interface layouts put on screen as they are (to see
+/// the layout engine draw them).
+fn show_layouts(
+    mut commands: Commands,
+    ui: Option<ResMut<crate::layout::UiAssets>>,
+    (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
+    mut done: Local<bool>,
+) {
+    let (Ok(v), Some(mut ui)) = (std::env::var("SHOW_LAYOUTS"), ui) else { return };
+    if *done {
+        return;
+    }
+    *done = true;
+    for name in v.split(',') {
+        match ui.spawn(&mut commands, &mut images, &mut fonts, name.trim()) {
+            Some(s) => {
+                if let Some(r) = s.root {
+                    commands.entity(r).insert((DespawnOnExit(AppState::InGame), GlobalZIndex(50)));
+                }
+                info!("SHOW_LAYOUTS: {name}");
+            }
+            None => warn!("SHOW_LAYOUTS: no layout {name}"),
+        }
     }
 }

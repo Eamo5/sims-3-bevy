@@ -407,7 +407,7 @@ fn premade_move_in(
     }
 }
 
-fn lot_corners(lot: &LotInfo) -> [Vec3; 4] {
+pub fn lot_corners(lot: &LotInfo) -> [Vec3; 4] {
     let rot = Quat::from_rotation_y(lot.rotation);
     let c = Vec3::from(lot.corner);
     let (w, d) = (lot.width as f32, lot.depth as f32);
