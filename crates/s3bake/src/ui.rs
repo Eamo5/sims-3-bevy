@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackWriter, read_value, write_value};
 
-pub const UI_VERSION: u32 = 5;
+pub const UI_VERSION: u32 = 6;
 pub const T_LAYOUT: u32 = 0x025C95B6;
 pub const T_FONT: u32 = 0x062E9EE0;
 pub const T_IMAGE: u32 = 0x2F7D0004;
@@ -37,7 +37,8 @@ pub const ANCHOR_RIGHT: u8 = 8;
 pub struct UiBaked {
     pub version: u32,
     /// Every layout, by instance: its exported windows by export id (the first is the main
-    /// one; item templates export several, as a moodlet's positive, negative and neutral cells).
+    /// one; item templates export several, as a moodlet's positive, negative and neutral cells,
+    /// and nested windows can be exports too).
     pub layouts: Vec<(u64, Vec<(u32, UiWindow)>)>,
     /// The English text styles by id (a window's `TextFont`; 0 the default).
     pub styles: Vec<(u32, TextStyle)>,
@@ -219,8 +220,22 @@ pub fn bake_ui(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::path::Pat
         let Ok(d) = pkg.read(e) else { continue };
         let s = String::from_utf8_lossy(&d);
         let Some(doc) = parse_xml(&s) else { continue };
-        let exports: Vec<(u32, UiWindow)> =
-            doc.children.iter().filter(|c| c.name == "object").filter_map(|o| Some((o.attr("id").map_or(1, num), window(o)?))).collect();
+        // (Exports can be nested windows too: a notification's foregrounds and backgrounds.)
+        let mut exports: Vec<(u32, UiWindow)> = Vec::new();
+        fn exported(n: &XNode, top: bool, out: &mut Vec<(u32, UiWindow)>) {
+            if n.name == "object"
+                && (top || n.attr("id").is_some())
+                && let Some(w) = window(n)
+            {
+                out.push((n.attr("id").map_or(1, num), w));
+            }
+            for c in &n.children {
+                exported(c, false, out);
+            }
+        }
+        for o in doc.children.iter().filter(|c| c.name == "object") {
+            exported(o, true, &mut exports);
+        }
         if !exports.is_empty() {
             out.layouts.push((e.key.i, exports));
         }

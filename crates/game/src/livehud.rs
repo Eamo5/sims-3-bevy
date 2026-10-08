@@ -19,7 +19,7 @@ impl Plugin for LiveHudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InfoPanel>().add_systems(OnEnter(PlayMode::Live), spawn_live_hud).add_systems(
             Update,
-            (time_control, puck, mood_meter, motives_panel, bust, skewer, navigation, show_in_modes, moodlets, wishes, skills_panel, skill_journal_buttons).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<LiveHud>),
+            (time_control, puck, mood_meter, motives_panel, bust, skewer, navigation, show_in_modes, moodlets, wishes, skills_panel, skill_journal_buttons, interaction_queue, notifications).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<LiveHud>),
         );
     }
 }
@@ -134,6 +134,7 @@ pub struct LiveHud {
     pub(crate) simology: Spawned,
     pub(crate) career: Spawned,
     pub(crate) inventory: Spawned,
+    pub(crate) queue: Spawned,
     /// The mood meter's full height and its halfway and bonus markers (fractions up it).
     mood_full: f32,
     mood_markers: (f32, f32),
@@ -158,7 +159,7 @@ fn spawn_live_hud(
         return;
     }
     if let Some(old) = old {
-        for s in [&old.display, &old.puck, &old.skewer, &old.nav, &old.motives, &old.skills, &old.simology, &old.career, &old.inventory] {
+        for s in [&old.display, &old.puck, &old.skewer, &old.nav, &old.motives, &old.skills, &old.simology, &old.career, &old.inventory, &old.queue] {
             if let Some(r) = s.root {
                 commands.entity(r).try_despawn();
             }
@@ -180,6 +181,7 @@ fn spawn_live_hud(
     let simology = spawn("HUDSimologyPanel");
     let career = spawn("HUDCareerPanel");
     let inventory = spawn("HUDInventoryPanel");
+    let queue = spawn("HUDInteractionQueue");
     // (Its collection journal works the journal's own button.)
     if let Some(j) = inventory.id(0x0d9b_da80) {
         commands.entity(j).insert(crate::collecting::JournalButton);
@@ -240,7 +242,7 @@ fn spawn_live_hud(
     let mref = ui.layout("HUDMotives").and_then(|w| w.find(MOTIVE_REFERENCE)).map(|w| w.area).unwrap_or([0.0, 0.0, 88.0, 14.0]);
     // (The motives panel open to start with; INFO_PANEL=<tab> for tests.)
     *panel = std::env::var("INFO_PANEL").ok().and_then(|v| InfoPanel::TABS.into_iter().find(|t| format!("{t:?}").eq_ignore_ascii_case(&v))).unwrap_or(InfoPanel::Motives);
-    commands.insert_resource(LiveHud { display, puck, skewer, nav, motives, skills, simology, career, inventory, mood_full: full, mood_markers: markers, motive_width: mref[2] - mref[0] });
+    commands.insert_resource(LiveHud { display, puck, skewer, nav, motives, skills, simology, career, inventory, queue, mood_full: full, mood_markers: markers, motive_width: mref[2] - mref[0] });
 }
 
 /// A colour from hue, saturation and value (the tuning's colours are HSV).
@@ -737,7 +739,7 @@ fn show_in_modes(hud: Res<LiveHud>, buy: Res<crate::buy::BuyMode>, mut vis: Quer
         return;
     }
     let live = !buy.active;
-    for r in [hud.display.root, hud.skewer.root, hud.nav.root] {
+    for r in [hud.display.root, hud.skewer.root, hud.nav.root, hud.queue.root] {
         set_visible(&mut vis, r, live);
     }
     set_visible(&mut vis, hud.motives.root, live && *panel == InfoPanel::Motives);
@@ -1062,6 +1064,275 @@ fn skill_journal_buttons(q: Query<(&Interaction, &SkillJournalButton), Changed<I
     for (i, b) in &q {
         if *i == Interaction::Pressed {
             open.0 = if open.0 == Some(b.0) { None } else { Some(b.0) };
+        }
+    }
+}
+
+const QUEUE_BUTTON: u32 = 0x04f6_7d00;
+const QUEUE_ICON: u32 = 0x04f6_7d08;
+const QUEUE_CANCEL: u32 = 0x04f6_7d05;
+const QUEUE_PROGRESS: u32 = 0x04f6_7e00;
+const QUEUE_PROGRESS_CLIP: u32 = 0x04f6_7e01;
+/// The queue's item width and gap, heights (with a progress bar), top, and the progress bar's
+/// full width (`InteractionQueueItem`).
+const QUEUE_ITEM_WIDTH: f32 = 65.0;
+const QUEUE_ITEM_GAP: f32 = 3.0;
+const QUEUE_ITEM_HEIGHT: f32 = 65.0;
+const QUEUE_ITEM_PROGRESS_HEIGHT: f32 = 77.0;
+const QUEUE_ITEM_TOP: f32 = 5.0;
+const QUEUE_PROGRESS_WIDTH: f32 = 49.0;
+
+/// A queued action's button (its place in the queue).
+#[derive(Component)]
+struct QueueItem(usize, Option<Entity>, Option<Entity>);
+
+/// What a queued action shows: an object's catalogue picture, or a Sim's face.
+#[derive(Clone, PartialEq, Debug)]
+enum QueuePicture {
+    Object(s3bake::Key),
+    Sim(Entity),
+}
+
+/// How far along a running action is (0..1), when it can tell.
+fn progress(a: &crate::interact::Action, objects: &Query<&crate::interact::GameObject>, motives: Option<&Motives>) -> Option<f32> {
+    let crate::interact::Phase::Running(t) = a.phase else { return None };
+    let crate::interact::ActionKind::Object { target, def } = &a.kind else { return None };
+    let obj = objects.get(*target).ok()?;
+    let d = crate::interact::interactions_for(obj.kind).get(*def)?;
+    match d.until_full {
+        Some(i) => motives.map(|m| (m.0[i] + 100.0) / 200.0),
+        None if d.minutes > 0.0 => Some(t / d.minutes),
+        None => None,
+    }
+}
+
+/// The interaction queue (top left): an item per queued action, the one under way first with
+/// its progress, each with what it's done with (the object's picture, the other Sim's face);
+/// pointed at, the cancel cross; clicked, cancelled.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn interaction_queue(
+    mut commands: Commands,
+    hud: Res<LiveHud>,
+    ui: Option<ResMut<UiAssets>>,
+    (mut assets, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
+    mut sel: Query<(Entity, &mut crate::interact::ActionQueue, Option<&Motives>), With<Selected>>,
+    objects: Query<&crate::interact::GameObject>,
+    sims: Query<(), With<Sim>>,
+    (mut game_ui, mut portraits): (Option<ResMut<crate::icons::GameUi>>, ResMut<crate::portraits::Portraits>),
+    items: Query<(&Interaction, &QueueItem)>,
+    clicks: Query<(&Interaction, &QueueItem), Changed<Interaction>>,
+    (mut vis, mut nodes): (Query<&mut Visibility>, Query<&mut Node>),
+    mut state: Local<(Option<Entity>, Vec<(String, Option<QueuePicture>, bool)>)>,
+) {
+    let (Some(mut ui), Some(root)) = (ui, hud.queue.root) else { return };
+    let Ok((me, mut queue, motives)) = sel.single_mut() else { return };
+    // A click cancels.
+    for (i, q) in &clicks {
+        if *i == Interaction::Pressed
+            && let Some(a) = queue.0.iter_mut().filter(|a| !a.cancel).nth(q.0)
+        {
+            a.cancel = true;
+        }
+    }
+    let shown: Vec<&crate::interact::Action> = queue.0.iter().filter(|a| !a.cancel).collect();
+    let sig: Vec<(String, Option<QueuePicture>, bool)> = shown
+        .iter()
+        .enumerate()
+        .map(|(i, a)| {
+            let pic = match &a.kind {
+                crate::interact::ActionKind::Object { target, .. } | crate::interact::ActionKind::Repair { target } | crate::interact::ActionKind::Upgrade { target, .. } => {
+                    objects.get(*target).ok().map(|o| QueuePicture::Object(o.objd))
+                }
+                crate::interact::ActionKind::Social { target, .. } | crate::interact::ActionKind::PhoneChat { target } | crate::interact::ActionKind::Invite { target } if sims.contains(*target) => {
+                    Some(QueuePicture::Sim(*target))
+                }
+                _ => None,
+            };
+            (a.label.clone(), pic, i == 0 && progress(a, &objects, motives).is_some())
+        })
+        .collect();
+    // The progress of the action under way, every frame.
+    let head = shown.first().and_then(|a| progress(a, &objects, motives));
+    // (The cancel cross while pointed at.)
+    for (i, q) in &items {
+        set_visible(&mut vis, q.1, *i != Interaction::None);
+        if q.0 == 0
+            && let (Some(clip), Some(f)) = (q.2, head)
+            && let Ok(mut n) = nodes.get_mut(clip)
+        {
+            let w = Val::Px((f.clamp(0.0, 1.0) * QUEUE_PROGRESS_WIDTH).round());
+            if n.width != w {
+                n.width = w;
+            }
+        }
+    }
+    if state.1 == sig && state.0.is_some_and(|h| vis.contains(h)) {
+        return;
+    }
+    state.1 = sig.clone();
+    let holder = match state.0.filter(|h| vis.contains(*h)) {
+        Some(h) => {
+            commands.entity(h).despawn_children();
+            h
+        }
+        None => {
+            let h = commands
+                .spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Visibility::Inherited, Pickable::IGNORE, ChildOf(root)))
+                .id();
+            state.0 = Some(h);
+            h
+        }
+    };
+    let Some(template) = ui.export("HUDInteractionQueueItem", 1).cloned() else { return };
+    let mut x = 0.0;
+    for (i, (label, pic, with_progress)) in sig.into_iter().enumerate() {
+        let h = if with_progress { QUEUE_ITEM_PROGRESS_HEIGHT } else { QUEUE_ITEM_HEIGHT };
+        let mut item = template.clone();
+        item.area = [x, QUEUE_ITEM_TOP, x + QUEUE_ITEM_WIDTH, QUEUE_ITEM_TOP + h];
+        if let Some(b) = item.children.iter_mut().find(|c| c.id == QUEUE_BUTTON) {
+            b.area = [0.0, 0.0, QUEUE_ITEM_WIDTH, h];
+        }
+        x += QUEUE_ITEM_WIDTH + QUEUE_ITEM_GAP;
+        let s = ui.spawn_under(&mut commands, &mut assets, &mut fonts, &item, holder);
+        let picture = match pic {
+            Some(QueuePicture::Object(objd)) => game_ui.as_deref_mut().and_then(|g| g.icon(&mut assets, &s3bake::gamedata::thumb_name(objd.2))).map(|h| (h, None)),
+            Some(QueuePicture::Sim(e)) => Some((portraits.portrait(&mut assets, e), Some(e))),
+            // (What a Sim does by themselves: their own face.)
+            None => Some((portraits.portrait(&mut assets, me), Some(me))),
+        };
+        if let (Some(w), Some((h, of))) = (s.id(QUEUE_ICON), picture) {
+            commands.entity(w).despawn_children();
+            commands.entity(w).with_children(|c| {
+                let mut img = c.spawn((ImageNode::new(h), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
+                if let Some(e) = of {
+                    img.insert(crate::portraits::PortraitOf(e));
+                }
+            });
+        }
+        if let Some(p) = s.id(QUEUE_PROGRESS) {
+            commands.entity(p).insert(if with_progress { Visibility::Inherited } else { Visibility::Hidden });
+        }
+        if let Some(b) = s.id(QUEUE_BUTTON) {
+            commands.entity(b).insert((QueueItem(i, s.id(QUEUE_CANCEL), s.id(QUEUE_PROGRESS_CLIP)), crate::icons::Tooltip(format!("{label}\nClick to cancel."))));
+        }
+    }
+}
+
+/// A notification's pieces (`NotificationManager`'s exports): backgrounds for a Sim's words
+/// and the system's, the one-thumbnail foreground.
+const NOTE_SPEECH: u32 = 2;
+const NOTE_SYSTEM: u32 = 3;
+const NOTE_ONE_THUMB: u32 = 5;
+const NOTE_TEXT: u32 = 2;
+const NOTE_THUMB: u32 = 6;
+const NOTE_BLUE: u32 = 0x41;
+const NOTE_THUMB_FRAME: u32 = 0x05;
+const NOTE_NO_MASK: u32 = 0x15;
+const NOTE_CLOSE: u32 = 0x14;
+/// The card's width and least height, and the room its thumbnail takes on the left.
+const NOTE_WIDTH: f32 = 285.0;
+const NOTE_HEIGHT: f32 = 55.0;
+const NOTE_THUMB_ROOM: f32 = 34.0;
+
+/// A notification's close button.
+#[derive(Component)]
+struct NoteClose(String);
+
+/// The notifications (top right), in the game's own cards: a Sim's words with their face on
+/// the left (the speech background), the game's own news without (the system one); closed
+/// with their cross, or in time.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn notifications(
+    mut commands: Commands,
+    ui: Option<ResMut<UiAssets>>,
+    (mut assets, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
+    mut notes: ResMut<crate::interact::Notifications>,
+    people: Query<(Entity, &Sim, Has<HouseholdMember>)>,
+    mut portraits: ResMut<crate::portraits::Portraits>,
+    closes: Query<(&Interaction, &NoteClose), Changed<Interaction>>,
+    mut vis: Query<&mut Visibility>,
+    mut state: Local<(Option<Entity>, Vec<String>)>,
+    mut play: MessageWriter<crate::sound::PlaySound>,
+    hud: Res<LiveHud>,
+) {
+    let Some(mut ui) = ui else { return };
+    for (i, c) in &closes {
+        if *i == Interaction::Pressed {
+            notes.0.retain(|n| n.0 != c.0);
+        }
+    }
+    let msgs: Vec<String> = notes.0.iter().map(|n| n.0.clone()).collect();
+    if state.1 == msgs && state.0.is_some_and(|h| vis.contains(h)) {
+        return;
+    }
+    // (A new one is heard.)
+    if msgs.iter().any(|m| !state.1.contains(m)) {
+        play.write(crate::sound::PlaySound::ui("ui_text_notification_open"));
+    }
+    state.1 = msgs.clone();
+    let holder = match state.0.filter(|h| vis.contains(*h)) {
+        Some(h) => {
+            commands.entity(h).despawn_children();
+            h
+        }
+        None => {
+            let h = commands
+                .spawn((
+                    Node { position_type: PositionType::Absolute, right: Val::Px(14.0), top: Val::Px(14.0), width: Val::Px(NOTE_WIDTH + NOTE_THUMB_ROOM), flex_direction: FlexDirection::Column, row_gap: Val::Px(12.0), ..default() },
+                    Visibility::Inherited,
+                    Pickable::IGNORE,
+                    GlobalZIndex(6),
+                    DespawnOnExit(crate::AppState::InGame),
+                ))
+                .id();
+            state.0 = Some(h);
+            h
+        }
+    };
+    let _ = &hud;
+    for msg in msgs.iter().rev().take(6) {
+        // Like the game's, a notice about a Sim carries their picture: the household's Sim (or
+        // else anyone about) the notice begins with.
+        let starts = |s: &Sim| msg.starts_with(&format!("{} ", s.first)) || msg.starts_with(&format!("{}'", s.first)) || msg.starts_with(&s.full_name());
+        let about = people.iter().filter(|(_, s, _)| !s.first.is_empty() && starts(s)).max_by_key(|(_, _, member)| *member).map(|(e, ..)| e);
+        let (Some(mut bg), Some(mut fg)) = (ui.export("NotificationManager", if about.is_some() { NOTE_SPEECH } else { NOTE_SYSTEM }).cloned(), ui.export("NotificationManager", NOTE_ONE_THUMB).cloned()) else { continue };
+        // (Taller for longer words: about 44 characters a line.)
+        let lines = (msg.chars().count() as f32 / 44.0).ceil().max(2.0);
+        let h = (lines * 14.0 + 16.0).max(NOTE_HEIGHT);
+        bg.area = [NOTE_THUMB_ROOM, 0.0, NOTE_THUMB_ROOM + NOTE_WIDTH, h];
+        fg.area = [NOTE_THUMB_ROOM, 0.0, NOTE_THUMB_ROOM + NOTE_WIDTH, h];
+        bg.flags |= s3bake::ui::WIN_VISIBLE;
+        fg.flags |= s3bake::ui::WIN_VISIBLE;
+        let card = commands.spawn((Node { width: Val::Px(NOTE_WIDTH + NOTE_THUMB_ROOM), height: Val::Px(h), ..default() }, Visibility::Inherited, Pickable::IGNORE, ChildOf(holder))).id();
+        let b = ui.spawn_under(&mut commands, &mut assets, &mut fonts, &bg, card);
+        let f = ui.spawn_under(&mut commands, &mut assets, &mut fonts, &fg, card);
+        if let Some(t) = f.text(NOTE_TEXT) {
+            commands.entity(t).insert(Text::new(msg.clone()));
+        }
+        if let Some(blue) = b.id(NOTE_BLUE) {
+            commands.entity(blue).insert(Visibility::Inherited);
+        }
+        if let Some(c) = b.id(NOTE_CLOSE) {
+            commands.entity(c).insert(NoteClose(msg.clone()));
+        }
+        match (about, b.id(NOTE_THUMB)) {
+            (Some(e), Some(t)) => {
+                let h = portraits.portrait(&mut assets, e);
+                commands.entity(t).despawn_children();
+                commands.entity(t).with_children(|c| {
+                    c.spawn((ImageNode::new(h), crate::portraits::PortraitOf(e), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
+                });
+            }
+            (None, Some(t)) => {
+                // (The game's own news: no face, nor its frame.)
+                for w in [Some(t), b.id(NOTE_THUMB_FRAME), b.id(NOTE_NO_MASK)].into_iter().flatten() {
+                    commands.entity(w).insert(Visibility::Hidden);
+                }
+            }
+            _ => {}
+        }
+        for r in [b.root, f.root].into_iter().flatten() {
+            commands.entity(r).insert(crate::hud::BlocksWorld);
         }
     }
 }

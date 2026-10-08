@@ -510,18 +510,20 @@ fn spawn_old_panels(commands: &mut Commands) {
 
 /// The action queue, notifications, frame rate and help line.
 fn spawn_common(commands: &mut Commands, old: bool) {
-    // Action queue (top-left)
-    commands.spawn((
-        DespawnOnExit(AppState::InGame),
-        QueuePanel,
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(12.0),
-            top: Val::Px(12.0),
-            column_gap: Val::Px(6.0),
-            ..default()
-        },
-    ));
+    // Action queue (top-left; the game's HUD has its own)
+    if old {
+        commands.spawn((
+            DespawnOnExit(AppState::InGame),
+            QueuePanel,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(12.0),
+                top: Val::Px(12.0),
+                column_gap: Val::Px(6.0),
+                ..default()
+            },
+        ));
+    }
 
     // Household members (right; the game's HUD has its skewer)
     if old {
@@ -539,8 +541,9 @@ fn spawn_common(commands: &mut Commands, old: bool) {
         ));
     }
 
-    // Notifications (top-right)
-    commands.spawn((
+    // Notifications (top-right; the game's HUD has its own cards)
+    if old {
+        commands.spawn((
         DespawnOnExit(AppState::InGame),
         NotesPanel,
         Node {
@@ -552,7 +555,8 @@ fn spawn_common(commands: &mut Commands, old: bool) {
             row_gap: Val::Px(6.0),
             ..default()
         },
-    ));
+        ));
+    }
 
     // Frame rate (top centre)
     commands.spawn((
