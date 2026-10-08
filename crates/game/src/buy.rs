@@ -1582,7 +1582,7 @@ fn placement(
     let problem = tfs.get(ghost).ok().and_then(|tf| {
         let b = building.as_deref()?;
         let bounds = bounds?;
-        placement_problem(b, tf, bounds, ladder, opening.is_some() || wall_hung)
+        placement_problem(b, tf, bounds, floor.map_or(b.view_level, |(_, level)| level), ladder, opening.is_some() || wall_hung)
     });
     if !over_ui.0 && let (Ok(tf), Some(bounds)) = (tfs.get(ghost), bounds) {
         let afford = owned || household.as_ref().is_some_and(|h| h.funds >= price);
@@ -1696,20 +1696,20 @@ fn footprint(tf: &Transform, (min, max): (Vec3, Vec3)) -> [Vec3; 4] {
     [(min.x, min.z), (max.x, min.z), (max.x, max.z), (min.x, max.z)].map(|(x, z)| tf.transform_point(Vec3::new(x, 0.0, z)))
 }
 
-fn placement_problem(b: &crate::building::ActiveBuilding, tf: &Transform, bounds: (Vec3, Vec3), ladder: bool, wall: bool) -> Option<&'static str> {
+fn placement_problem(b: &crate::building::ActiveBuilding, tf: &Transform, bounds: (Vec3, Vec3), level: u8, ladder: bool, wall: bool) -> Option<&'static str> {
     let corners = footprint(tf, bounds);
     let size = Vec2::new(b.data.width as f32, b.data.depth as f32);
     if corners.iter().any(|p| { let l = b.local(*p); l.cmplt(Vec2::splat(-0.01)).any() || l.cmpgt(size + 0.01).any() }) {
         return Some("Place objects inside your home lot.");
     }
     if !wall && !ladder {
-        let level = b.view_level;
-        if level > 1 && corners.iter().chain(std::iter::once(&tf.translation)).any(|p| b.floor_y(level, p.lerp(tf.translation, 0.001)).is_none()) {
+        let local = corners.map(|p| b.local(p));
+        if level > 1 && !footprint_supported(&local, |p| b.floor_y(level, b.world(p.x, p.y, 0.0)).is_some()) {
             return Some("The whole object needs a floor underneath it.");
         }
-        if level == 1 && corners.iter().chain(std::iter::once(&tf.translation)).any(|p| {
-            let l = b.local(*p);
-            b.data.pool.iter().any(|f| f.x as f32 == l.x.floor() && f.z as f32 == l.y.floor())
+        if level == 1 && b.data.pool.iter().any(|f| {
+            let p = Vec2::new(f.x as f32, f.z as f32);
+            convex_overlap(&local, &[p, p + Vec2::X, p + Vec2::ONE, p + Vec2::Y])
         }) {
             return Some("That object can't be placed in a swimming pool.");
         }
@@ -1717,9 +1717,74 @@ fn placement_problem(b: &crate::building::ActiveBuilding, tf: &Transform, bounds
     None
 }
 
+/// Positive-area overlap; touching a tile edge is legal. Axes from both polygons
+/// are needed for furniture rotated relative to the lot and triangular floor tiles.
+fn convex_overlap(a: &[Vec2], b: &[Vec2]) -> bool {
+    for polygon in [a, b] {
+        for i in 0..polygon.len() {
+            let axis = (polygon[(i + 1) % polygon.len()] - polygon[i]).perp().normalize_or_zero();
+            if axis == Vec2::ZERO {
+                continue;
+            }
+            let interval = |points: &[Vec2]| points.iter().map(|p| p.dot(axis)).fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), x| (lo.min(x), hi.max(x)));
+            let (al, ah) = interval(a);
+            let (bl, bh) = interval(b);
+            if ah.min(bh) - al.max(bl) <= 0.0001 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Check every floor triangle touched by the footprint, including holes between
+/// its corners. Floor masks divide each tile into four triangles meeting at its centre.
+fn footprint_supported(corners: &[Vec2; 4], has_floor: impl Fn(Vec2) -> bool) -> bool {
+    let min = corners.iter().copied().fold(Vec2::splat(f32::INFINITY), Vec2::min);
+    let max = corners.iter().copied().fold(Vec2::splat(f32::NEG_INFINITY), Vec2::max);
+    for x in min.x.floor() as i32..max.x.ceil() as i32 {
+        for z in min.y.floor() as i32..max.y.ceil() as i32 {
+            let p = Vec2::new(x as f32, z as f32);
+            let edges = [p, p + Vec2::X, p + Vec2::ONE, p + Vec2::Y];
+            let centre = p + Vec2::splat(0.5);
+            for i in 0..4 {
+                let triangle = [edges[i], edges[(i + 1) % 4], centre];
+                if convex_overlap(corners, &triangle) && !has_floor((triangle[0] + triangle[1] + triangle[2]) / 3.0) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn furniture_cannot_bridge_an_interior_floor_hole() {
+        let corners = [Vec2::ZERO, Vec2::new(4.0, 0.0), Vec2::splat(4.0), Vec2::new(0.0, 4.0)];
+        assert!(!footprint_supported(&corners, |p| !(p.x.floor() == 1.0 && p.y.floor() == 2.0)));
+        assert!(footprint_supported(&corners, |p| p.x >= 0.0 && p.x < 4.0 && p.y >= 0.0 && p.y < 4.0));
+    }
+
+    #[test]
+    fn footprint_respects_diagonal_floor_masks_and_edge_contact() {
+        let supported = [Vec2::new(0.35, 0.05), Vec2::new(0.65, 0.05), Vec2::new(0.65, 0.2), Vec2::new(0.35, 0.2)];
+        let north = |p: Vec2| p.y < p.x && p.y < 1.0 - p.x;
+        assert!(footprint_supported(&supported, north));
+        let crossing = supported.map(|p| p + Vec2::new(0.0, 0.4));
+        assert!(!footprint_supported(&crossing, north));
+        let tile = [Vec2::ZERO, Vec2::X, Vec2::ONE, Vec2::Y];
+        assert!(!convex_overlap(&tile, &tile.map(|p| p + Vec2::X)));
+        assert!(convex_overlap(&tile, &tile.map(|p| p + Vec2::new(0.9, 0.0))));
+        let rotated = tile.map(|p| Vec2::new(p.x - p.y, p.x + p.y) * 0.7);
+        assert!(convex_overlap(&tile, &rotated));
+        // A long object can cross a pool tile without any of its corners being in it.
+        let bridge = [Vec2::new(-2.0, 0.2), Vec2::new(3.0, 0.2), Vec2::new(3.0, 0.4), Vec2::new(-2.0, 0.4)];
+        assert!(convex_overlap(&tile, &bridge));
+    }
 
     fn controls() -> App {
         let mut app = App::new();
