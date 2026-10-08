@@ -380,7 +380,8 @@ installation is unreachable.
   later.
 - **Fire**: a poor (or clumsy) cook can set the stove alight; the flames flicker and light
   the room, spread to what's beside them and ruin it, and Sims nearby panic with the game's
-  fire animations. Anyone caught in the flames burns: they may stop, drop and roll, or die
+  fire animations. Anyone caught in the flames burns, in flames head to foot, dashing about in
+  a panic (the game's on-fire run) between bouts of flailing: they may stop, drop and roll, or die
   (the Grim Reaper comes). A smoke alarm calls the fire department at once (otherwise someone
   phones a little later), and a firefighter in uniform arrives by fire truck to put out each
   fire with the extinguisher.

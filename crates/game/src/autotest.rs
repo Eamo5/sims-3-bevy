@@ -1916,6 +1916,18 @@ fn auto_action(
         *done = true;
         return;
     }
+    // "Burn": the selected Sim catches fire.
+    if name == "Burn" {
+        commands.queue(|w: &mut World| {
+            let now = w.resource::<crate::clock::GameClock>().minutes;
+            let mut q = w.query_filtered::<Entity, With<crate::sim::Selected>>();
+            if let Some(e) = q.iter(w).next() {
+                w.entity_mut(e).insert(crate::fire::OnFire::caught(now));
+            }
+        });
+        *done = true;
+        return;
+    }
     // "Fire": the stove catches fire.
     if name == "Fire" {
         if let Some((e, _)) = objects.iter().find(|(_, o)| o.kind == crate::interact::ObjectKind::Stove) {

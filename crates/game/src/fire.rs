@@ -20,8 +20,9 @@ pub struct FirePlugin;
 impl Plugin for FirePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FireDepartment>()
+            .init_resource::<FireLooks>()
             .add_message::<StartFire>()
-            .add_systems(Update, (start_fires, spread, panic, burning, call_firefighters, firefighting, flicker).chain().run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, (start_fires, spread, panic, burning, run_about, sim_flames, call_firefighters, firefighting, flicker).chain().run_if(in_state(PlayMode::Live)))
             .add_systems(OnEnter(PlayMode::Live), |mut d: ResMut<FireDepartment>| *d = FireDepartment::default());
     }
 }
@@ -45,6 +46,15 @@ pub struct Fire {
 pub struct OnFire {
     since: f64,
     next: f64,
+    /// When they next dash off (game minutes).
+    dash: f64,
+}
+
+impl OnFire {
+    /// Catching fire now: burning, and the game's panic in the flames.
+    pub fn caught(now: f64) -> (Self, ActionClip) {
+        (Self { since: now, next: now + 5.0, dash: now + 1.0 }, ActionClip::new(Some("a_fire_onFire_panic_start_x"), &["a_fire_onFire_panic_loop1_x", "a_fire_onFire_panic_loop2_x"]))
+    }
 }
 
 /// A Sim panicking at a fire.
@@ -124,33 +134,17 @@ impl Flame {
 }
 
 /// The fires' looks, made once.
-#[derive(Default)]
+#[derive(Resource, Default)]
 struct FireLooks {
     quad: Option<Handle<Mesh>>,
     mat: Option<Handle<StandardMaterial>>,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn start_fires(
-    mut commands: Commands,
-    mut starts: MessageReader<StartFire>,
-    clock: Res<GameClock>,
-    fires: Query<&Transform, With<Fire>>,
-    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
-    mut looks: Local<FireLooks>,
-    mut notes: ResMut<Notifications>,
-    mut play: MessageWriter<crate::sound::PlaySound>,
-) {
-    for s in starts.read() {
-        if fires.iter().count() >= MAX_FIRES || fires.iter().any(|f| f.translation.distance(s.at) < 0.6) {
-            continue;
-        }
-        if fires.is_empty() {
-            notes.push("Fire! Something's caught fire!");
-            play.write(crate::sound::PlaySound::ui("ui_text_notification_open"));
-        }
-        let quad = looks.quad.get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0))).clone();
-        let mat = looks
+impl FireLooks {
+    /// A flame's quad and its fiery material.
+    fn get(&mut self, meshes: &mut Assets<Mesh>, images: &mut Assets<Image>, mats: &mut Assets<StandardMaterial>) -> (Handle<Mesh>, Handle<StandardMaterial>) {
+        let quad = self.quad.get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0))).clone();
+        let mat = self
             .mat
             .get_or_insert_with(|| {
                 mats.add(StandardMaterial {
@@ -164,6 +158,69 @@ fn start_fires(
                 })
             })
             .clone();
+        (quad, mat)
+    }
+}
+
+/// Flames on a burning Sim, kept with them (and gone with the fire).
+#[derive(Component)]
+struct SimFlames(Entity);
+
+/// A burning Sim is in flames, head to foot, their light flickering about them.
+fn sim_flames(
+    mut commands: Commands,
+    burning: Query<(Entity, &Transform), (With<OnFire>, Without<SimFlames>)>,
+    caught: Query<Entity, Added<OnFire>>,
+    mut flames: Query<(Entity, &SimFlames, &mut Transform)>,
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    mut looks: ResMut<FireLooks>,
+) {
+    for (e, owner, mut tf) in &mut flames {
+        match burning.get(owner.0) {
+            Ok((_, at)) => tf.translation = at.translation,
+            Err(_) => commands.entity(e).despawn(),
+        }
+    }
+    for sim in &caught {
+        let Ok((_, at)) = burning.get(sim) else { continue };
+        let (quad, mat) = looks.get(&mut meshes, &mut images, &mut mats);
+        let mut rng = rand::rng();
+        commands
+            .spawn((Transform::from_translation(at.translation), Visibility::default(), SimFlames(sim), DespawnOnExit(AppState::InGame)))
+            .with_children(|f| {
+                for k in 0..6 {
+                    let size = Vec2::new(rng.random_range(0.3..0.5), rng.random_range(0.5..0.9));
+                    let offset = Vec3::new(rng.random_range(-0.15..0.15), rng.random_range(0.1..0.9), rng.random_range(-0.15..0.15));
+                    f.spawn((Mesh3d(quad.clone()), MeshMaterial3d(mat.clone()), Transform::from_translation(offset), Flame { size, phase: k as f32 * 1.3 + rng.random_range(0.0..3.0), offset }));
+                }
+                f.spawn((
+                    PointLight { color: Color::srgb(1.0, 0.55, 0.2), intensity: 30_000.0, range: 5.0, shadow_maps_enabled: false, ..default() },
+                    Transform::from_xyz(0.0, 1.0, 0.0),
+                ));
+            });
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn start_fires(
+    mut commands: Commands,
+    mut starts: MessageReader<StartFire>,
+    clock: Res<GameClock>,
+    fires: Query<&Transform, With<Fire>>,
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    mut looks: ResMut<FireLooks>,
+    mut notes: ResMut<Notifications>,
+    mut play: MessageWriter<crate::sound::PlaySound>,
+) {
+    for s in starts.read() {
+        if fires.iter().count() >= MAX_FIRES || fires.iter().any(|f| f.translation.distance(s.at) < 0.6) {
+            continue;
+        }
+        if fires.is_empty() {
+            notes.push("Fire! Something's caught fire!");
+            play.write(crate::sound::PlaySound::ui("ui_text_notification_open"));
+        }
+        let (quad, mat) = looks.get(&mut meshes, &mut images, &mut mats);
         let mut rng = rand::rng();
         commands
             .spawn((
@@ -263,7 +320,7 @@ fn panic(
             commands
                 .entity(e)
                 .remove::<(Panicking, crate::nav::PathFollow)>()
-                .insert((OnFire { since: clock.minutes, next: clock.minutes + 5.0 }, ActionClip::new(Some("a_fire_onFire_panic_start_x"), &["a_fire_onFire_panic_loop1_x", "a_fire_onFire_panic_loop2_x"])));
+                .insert(OnFire::caught(clock.minutes));
             continue;
         }
         if burning {
@@ -295,6 +352,37 @@ fn burning(mut commands: Commands, clock: Res<GameClock>, mut q: Query<(Entity, 
             notes.push(format!("{} stopped, dropped and rolled, and put the flames out!", sim.first));
         } else if clock.minutes - f.since > 30.0 {
             commands.entity(e).remove::<(OnFire, Panicking)>().insert(crate::death::Dying::in_fire());
+        }
+    }
+}
+
+/// A burning Sim runs about in a panic, a few metres this way and that (the game's on-fire run,
+/// `WalkStyle.OnFire`), flailing a moment between dashes.
+fn run_about(
+    mut commands: Commands,
+    clock: Res<GameClock>,
+    grid: Option<Res<crate::nav::NavGrid>>,
+    upper: Option<Res<crate::nav::UpperFloors>>,
+    mut burning: Query<(Entity, &Transform, &crate::nav::Floor, &mut OnFire, Option<&crate::nav::PathFollow>)>,
+) {
+    let Some(grid) = grid else { return };
+    let mut rng = rand::rng();
+    for (e, tf, floor, mut f, path) in &mut burning {
+        match path {
+            Some(p) if !p.done => continue,
+            Some(_) => {
+                commands.entity(e).remove::<crate::nav::PathFollow>();
+                f.dash = clock.minutes + rng.random_range(1.0..3.0);
+                continue;
+            }
+            None if clock.minutes < f.dash => continue,
+            None => {}
+        }
+        f.dash = clock.minutes + 1.0;
+        let a = rng.random_range(0.0..std::f32::consts::TAU);
+        let to = tf.translation.xz() + Vec2::from_angle(a) * rng.random_range(3.0..7.0);
+        if let Some(wp) = crate::nav::plan_route(&grid, upper.as_deref(), tf.translation.xz(), floor.0, to, floor.0) {
+            commands.entity(e).insert(crate::nav::PathFollow::new(wp).with_style(crate::nav::WalkStyle::OnFire));
         }
     }
 }
