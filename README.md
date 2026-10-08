@@ -351,7 +351,10 @@ installation is unreachable.
   premade households' pets come home with them (Appaloosa Plains' cats, dogs and horses: the
   Lionhearts' four cats, the Johnsons' two horses...), each in a breed of its kind, and potter
   about the lot (the horses out of doors, swishing their tails and pawing the ground), kept in
-  saves.
+  saves. Clicking a pet offers what the pack has Sims do with it (pet it, let it sniff a hand,
+  praise it, hug it, feed it a treat, scold it; rub a horse's neck): the Sim walks up to it,
+  the pet stops and turns to them, and the two play their sides of the game's animation
+  together (kneeling to stroke a cat, which looks up at them), for the Sim's fun and social.
 - **Water effects**: fountains gush and fill their basins, showers spray from the head and taps
   run while someone's at them, each from the object's own effect slot (the game's RSLT slots).
   TVs show a programme on the screen (at the TV's screen slot) while anyone's watching, its

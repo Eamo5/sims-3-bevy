@@ -1261,6 +1261,8 @@ pub enum ActionKind {
     PlantSeed { at: Vec2, level: u8, plant: usize },
     /// Something done out on the ground (Seasons: a snowman, a snow angel, catching snowflakes).
     Outdoor { at: Vec2, level: u8, what: crate::seasonal::Outdoor },
+    /// A social with a pet (`pets::PET_SOCIALS`): where the pet was, its kind.
+    PetSocial { target: Entity, social: usize, at: Vec2, kind: &'static str },
     /// Phone round to throw a party.
     ThrowParty,
     /// Drive to a community lot and spend time there.
@@ -1732,6 +1734,11 @@ fn run_actions(
                         // (Kneeling beside the spot.)
                         ActionKind::PlantSeed { at, level, .. } => Some((*at + Vec2::new(0.0, 0.7), *level)),
                         ActionKind::Outdoor { at, level, what } => Some((what.stand(*at), *level)),
+                        // (Standing before the pet, as far off as the game's jig has them.)
+                        ActionKind::PetSocial { at, kind, .. } => {
+                            let mine = Vec2::new(tf.translation.x, tf.translation.z);
+                            Some((*at + (mine - *at).normalize_or(Vec2::X) * crate::pets::social_distance(kind), 1))
+                        }
                         ActionKind::GoToWork | ActionKind::Visit { .. } | ActionKind::GoToLot { .. } | ActionKind::GoHomeFromLot | ActionKind::Jog { .. } => way_out.map(|p| (p, 1)),
                         ActionKind::JoinCareer { target, .. } | ActionKind::Teleport { pad: target, .. } => {
                             objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0)))
@@ -1977,6 +1984,19 @@ fn run_actions(
                                 tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
                                 anim.pose = Pose::Use;
                                 commands.entity(me).insert(crate::anim::ActionClip::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_plantSeeds_x"]));
+                            }
+                            ActionKind::PetSocial { at, social, kind, .. } => {
+                                let to = *at - Vec2::new(tf.translation.x, tf.translation.z);
+                                tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
+                                anim.pose = Pose::Talk;
+                                let s = &crate::pets::PET_SOCIALS[*social];
+                                match baked.as_deref().and_then(|b| s.clip_for(b, sim.age == Age::Child, kind, 'x')) {
+                                    Some(c) => {
+                                        let clips: &'static [&'static str] = Box::leak(Box::new([c]));
+                                        commands.entity(me).insert(crate::anim::ActionClip::new(None, clips));
+                                    }
+                                    None => finished = true,
+                                }
                             }
                             ActionKind::Outdoor { at, what, .. } => {
                                 // (Facing the snowman being built; facing away, to lie back in the snow.)
@@ -2547,6 +2567,14 @@ fn run_actions(
                                         _ => {}
                                     }
                                 }
+                            }
+                        }
+                        ActionKind::PetSocial { social, .. } => {
+                            let s = &crate::pets::PET_SOCIALS[*social];
+                            motives.add(FUN, s.fun * dt / 60.0);
+                            motives.add(SOCIAL, s.social * dt / 60.0);
+                            if elapsed >= s.minutes {
+                                finished = true;
                             }
                         }
                         ActionKind::Outdoor { what, .. } => {

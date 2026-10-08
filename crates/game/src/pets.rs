@@ -25,8 +25,11 @@ impl Plugin for PetsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PetData>()
             .init_resource::<PendingPets>()
-            .add_systems(Update, (load_pet_data, spawn_strays, spawn_household_pets, strays, home_pets, animate_pets).chain().run_if(in_state(PlayMode::Live)))
-            .add_systems(Update, pet_cam.run_if(in_state(PlayMode::Live)));
+            .add_systems(
+                Update,
+                (load_pet_data, spawn_strays, spawn_household_pets, social_partners, strays, home_pets, animate_pets).chain().run_if(in_state(PlayMode::Live)),
+            )
+            .add_systems(Update, (pet_cam, pet_do).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -73,6 +76,109 @@ impl Pet {
             "al" => 0.75,
             "ah" | "ch" => 1.0,
             _ => 0.3,
+        }
+    }
+}
+
+/// What a Sim can do with a pet (the Pets pack's socials): its name, its animation (both sides:
+/// `a2ac_soc_neutral_<clip>_x` the Sim, `…_y` the cat), the kinds it's for, how long it takes
+/// (minutes) and the Sim's fun and social from it (an hour).
+pub struct PetSocial {
+    pub name: &'static str,
+    clip: &'static str,
+    kinds: &'static [&'static str],
+    pub minutes: f32,
+    pub fun: f32,
+    pub social: f32,
+}
+
+const ALL: &[&str] = &["ac", "cc", "ad", "cd", "al", "cl", "ah", "ch"];
+const GROWN: &[&str] = &["ac", "ad", "al", "ah"];
+
+pub static PET_SOCIALS: [PetSocial; 7] = [
+    PetSocial { name: "Pet", clip: "petFloor_friendly_neutral", kinds: ALL, minutes: 8.0, fun: 40.0, social: 70.0 },
+    PetSocial { name: "Let Sniff Hand", clip: "letSniffHand_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: 10.0, social: 40.0 },
+    PetSocial { name: "Praise", clip: "praise_friendly_neutral", kinds: GROWN, minutes: 4.0, fun: 15.0, social: 50.0 },
+    PetSocial { name: "Give Hug", clip: "giveLoveHug_friendly_neutral", kinds: &["ac", "ad", "al"], minutes: 5.0, fun: 30.0, social: 80.0 },
+    PetSocial { name: "Feed Treat", clip: "feedTreat_friendly_neutral", kinds: GROWN, minutes: 5.0, fun: 20.0, social: 40.0 },
+    PetSocial { name: "Rub Neck", clip: "rubNeck_friendly_neutral", kinds: &["ah"], minutes: 8.0, fun: 30.0, social: 60.0 },
+    PetSocial { name: "Scold", clip: "scold_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: -10.0, social: 10.0 },
+];
+
+impl PetSocial {
+    pub fn suits(&self, kind: &str) -> bool {
+        self.kinds.contains(&kind)
+    }
+
+    /// Its animation for a Sim (a child's, where there is one) with a pet of this kind, the Sim's
+    /// side ('x') or the pet's ('y'), if the game has it (interned: animations are named for
+    /// good).
+    pub fn clip_for(&self, data: &Baked, child: bool, kind: &str, side: char) -> Option<&'static str> {
+        let want = |who: char| format!("{who}2{kind}_soc_neutral_{}_{side}", self.clip);
+        let has = |n: &str| data.0.clip_names.iter().any(|c| c.eq_ignore_ascii_case(n));
+        let name = [if child { Some(want('c')) } else { None }, Some(want('a'))].into_iter().flatten().find(|n| has(n))?;
+        Some(intern(name))
+    }
+}
+
+/// A name kept for good (animation names are few, and asked for again and again).
+fn intern(s: String) -> &'static str {
+    static NAMES: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+    let mut names = NAMES.lock().unwrap();
+    if let Some(n) = names.iter().find(|n| **n == s) {
+        return n;
+    }
+    let n: &'static str = Box::leak(s.into_boxed_str());
+    names.push(n);
+    n
+}
+
+/// How far from a pet a Sim stands for a social with it (the game's jigs: further for horses).
+pub fn social_distance(kind: &str) -> f32 {
+    match kind {
+        "ah" | "ch" => 1.25,
+        "ad" | "cd" => 0.8,
+        _ => 0.7,
+    }
+}
+
+/// A pet a Sim is seeing to: it stays put (and faces them, playing its side, once they're there).
+#[derive(Component)]
+pub struct PetBusy;
+
+/// Pets being seen to stop what they're doing and wait; once the Sim's there, they turn to them
+/// and play their side of it. Free again when it's over.
+fn social_partners(
+    mut commands: Commands,
+    data: Res<Baked>,
+    sims: Query<(&crate::interact::ActionQueue, &Transform, &crate::sim::Sim), Without<Pet>>,
+    mut pets: Query<(Entity, &Pet, &mut Transform, &mut PetAnim, Has<PetBusy>)>,
+) {
+    let mut seen: Vec<Entity> = Vec::new();
+    for (q, stf, sim) in &sims {
+        let Some(a) = q.0.front() else { continue };
+        let crate::interact::ActionKind::PetSocial { target, social, .. } = a.kind else { continue };
+        let Ok((e, pet, mut tf, mut anim, busy)) = pets.get_mut(target) else { continue };
+        seen.push(e);
+        if !busy {
+            commands.entity(e).insert(PetBusy);
+        }
+        match a.phase {
+            crate::interact::Phase::Running(_) => {
+                let to = stf.translation.xz() - tf.translation.xz();
+                tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
+                let child = sim.age == crate::sim::Age::Child;
+                if let Some(c) = PET_SOCIALS.get(social).and_then(|s| s.clip_for(&data, child, &pet.kind, 'y')) {
+                    anim.play(c.to_string());
+                }
+            }
+            _ => anim.play(format!("{}_idle_stand_breathe_x", pet.kind)),
+        }
+    }
+    for (e, pet, _, mut anim, busy) in &mut pets {
+        if busy && !seen.contains(&e) {
+            commands.entity(e).remove::<PetBusy>();
+            anim.play(format!("{}_idle_stand_breathe_x", pet.kind));
         }
     }
 }
@@ -234,6 +340,26 @@ fn animate_pets(
     }
 }
 
+/// `PET_DO=<pet name>:<social>` (tests): the selected Sim does that with the pet, once it's home.
+fn pet_do(
+    mut sel: Query<&mut crate::interact::ActionQueue, With<crate::sim::Selected>>,
+    pets: Query<(Entity, &Pet, &GlobalTransform), With<HomePet>>,
+    time: Res<Time>,
+    mut done: Local<bool>,
+) {
+    let Some((who, what)) = std::env::var("PET_DO").ok().and_then(|v| v.split_once(':').map(|(a, b)| (a.to_string(), b.to_string()))) else { return };
+    if *done || time.elapsed_secs() < 6.0 {
+        return;
+    }
+    let (Ok(mut q), Some((e, pet, tf))) = (sel.single_mut(), pets.iter().find(|(_, p, _)| p.name.eq_ignore_ascii_case(&who))) else { return };
+    let Some(i) = PET_SOCIALS.iter().position(|s| s.name.eq_ignore_ascii_case(&what)) else { return };
+    let kind: &'static str = ["ac", "cc", "ad", "cd", "al", "cl", "ah", "ch"].into_iter().find(|k| *k == pet.kind).unwrap_or("ac");
+    *done = true;
+    info!("pet test: {} with {}", what, pet.name);
+    q.0.clear();
+    q.push_player(crate::interact::Action::new(PET_SOCIALS[i].name, crate::interact::ActionKind::PetSocial { target: e, social: i, at: tf.translation().xz(), kind }, false));
+}
+
 /// `PET_CAM=<n or name>` (tests): the camera on the nth pet (or the one by that name),
 /// `PET_DIST` away.
 fn pet_cam(pets: Query<(&GlobalTransform, &Pet)>, mut cams: Query<&mut crate::camera::SimsCamera>) {
@@ -344,7 +470,7 @@ fn home_pets(
     world: Res<crate::loading::CurrentWorld>,
     building: Option<Res<crate::building::ActiveBuilding>>,
     household: Option<Res<crate::interact::Household>>,
-    mut q: Query<(&Pet, &mut HomePet, &mut Transform, &mut PetAnim)>,
+    mut q: Query<(&Pet, &mut HomePet, &mut Transform, &mut PetAnim), Without<PetBusy>>,
 ) {
     let Some(grid) = grid else { return };
     let lot = household.as_ref().and_then(|h| world.data.lots.get(h.lot_index));
@@ -486,7 +612,7 @@ fn strays(
     clock: Res<GameClock>,
     world: Res<crate::loading::CurrentWorld>,
     sidewalk: Option<Res<crate::town::Sidewalk>>,
-    mut q: Query<(&Pet, &mut Stray, &mut Transform, &mut PetAnim)>,
+    mut q: Query<(&Pet, &mut Stray, &mut Transform, &mut PetAnim), Without<PetBusy>>,
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed].min(3.0);
     let mut rng = rand::rng();

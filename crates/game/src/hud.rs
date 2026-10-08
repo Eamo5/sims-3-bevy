@@ -782,7 +782,7 @@ fn world_click(
             Res<crate::appliances::Alarm>,
         ),
     ),
-    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q): (
+    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -792,6 +792,7 @@ fn world_click(
         Query<&crate::upgrades::Upgrades>,
         Res<crate::family::Genealogy>,
         Query<&crate::doorbell::AtTheDoor>,
+        Query<(&crate::pets::Pet, &GlobalTransform)>,
     ),
 ) {
     if buy.is_some_and(|b| b.active) {
@@ -811,11 +812,28 @@ fn world_click(
     close_pie(&mut commands, &mut pie);
     let Ok((actor, rels, actor_sim)) = selected.single() else { return };
 
-    let is_target = |e: Entity| sims.contains(e) || objects.contains(e);
+    let is_target = |e: Entity| sims.contains(e) || objects.contains(e) || pets_q.contains(e);
     let filter = |e: Entity| ancestor_with(e, &parents, is_target).is_some();
     let hits = ray_cast.cast_ray(ray, &MeshRayCastSettings::default().with_filter(&filter));
     let target = hits.first().and_then(|(e, _)| ancestor_with(*e, &parents, is_target));
 
+    // A pet: what can be done with it.
+    if let Some((t, (pet, ptf))) = target.and_then(|t| pets_q.get(t).ok().map(|p| (t, p)))
+        && !actor_sim.age.is_little()
+    {
+        let kind: &'static str = ["ac", "cc", "ad", "cd", "al", "cl", "ah", "ch"].into_iter().find(|k| *k == pet.kind).unwrap_or("ac");
+        let at = Vec2::new(ptf.translation().x, ptf.translation().z);
+        let options: Vec<(String, ActionKind)> = crate::pets::PET_SOCIALS
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.suits(kind))
+            .map(|(i, s)| (s.name.to_string(), ActionKind::PetSocial { target: t, social: i, at, kind }))
+            .collect();
+        pie.submenus.clear();
+        pie.at = cursor;
+        open_pie(&mut commands, &mut pie, cursor, &format!("{} ({})", pet.name, pet.species()), actor, options);
+        return;
+    }
     if let Some(t) = target {
         if let Ok((sim, member, is_sel)) = sims.get(t) {
             // Clicking themselves: what they can do on their own.

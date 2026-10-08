@@ -142,6 +142,19 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "ch_run_x",
     "ch_idle_",
     "ch_sleep_loop",
+    // Sims with pets: petting, letting them sniff a hand, praise, hugs, treats, rubbing a
+    // horse's neck, scolding (both sides).
+    "a2ac_soc_neutral_",
+    "a2cc_soc_neutral_",
+    "a2ad_soc_neutral_",
+    "a2cd_soc_neutral_",
+    "a2al_soc_neutral_",
+    "a2ah_soc_neutral_",
+    "a2ch_soc_neutral_",
+    "c2ac_soc_neutral_",
+    "c2ad_soc_neutral_",
+    "c2al_soc_neutral_",
+    "c2ah_soc_neutral_",
     // Seasons: snowmen, snow angels, catching snowflakes and raindrops, leaf piles.
     "a2o_snowman_build",
     "c2o_snowman_build",
@@ -454,6 +467,7 @@ pub const PROP_ACTORS: &[&str] = &[
     "baseball",
     "rake",
     "snowBallAccessory",
+    "treat",
 ];
 
 /// Whether a clip should be baked.
