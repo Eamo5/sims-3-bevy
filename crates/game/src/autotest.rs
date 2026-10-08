@@ -310,6 +310,21 @@ impl Plugin for AutoTestPlugin {
                         }
                         return;
                     }
+                    // (`--use Outdoor:<snowman|angel|catch>`: that, a couple of metres off.)
+                    if let Some(w) = want.strip_prefix("Outdoor:") {
+                        let what = match w {
+                            "snowman" => crate::seasonal::Outdoor::Snowman,
+                            "angel" => crate::seasonal::Outdoor::SnowAngel,
+                            "rain" => crate::seasonal::Outdoor::CatchRain,
+                            _ => crate::seasonal::Outdoor::CatchSnow,
+                        };
+                        *done = true;
+                        info!("use test: {}", what.label());
+                        q.0.clear();
+                        let at = tf.translation + Vec3::new(2.0, 0.0, 2.0);
+                        q.push_player(crate::interact::Action::new(what.label(), crate::interact::ActionKind::Outdoor { at: Vec2::new(at.x, at.z), level: 1, what }, false));
+                        return;
+                    }
                     // (`--use Jog`: out jogging.)
                     if want.eq_ignore_ascii_case("jog") {
                         *done = true;

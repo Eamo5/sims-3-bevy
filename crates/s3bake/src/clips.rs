@@ -105,6 +105,25 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_bathtub_ducky",
     "c2o_bathtub_ducky",
     "a2a_soc_playCatch_throw",
+    // Seasons: snowmen, snow angels, catching snowflakes and raindrops, leaf piles.
+    "a2o_snowman_build",
+    "c2o_snowman_build",
+    "a2o_snowman_destroy",
+    "c2o_snowman_destroy",
+    "a2o_snowAngel_make",
+    "c2o_snowAngel_make",
+    "a2o_snowAngel_destroy",
+    "c2o_snowAngel_destroy",
+    "a_idle_catchSnow",
+    "c_idle_catchSnow",
+    "a_idle_catchRain",
+    "c_idle_catchRain",
+    "a2o_leafPile_playIn",
+    "c2o_leafPile_playIn",
+    "a2o_leafPile_jumpCannonBall",
+    "c2o_leafPile_jumpCannonBall",
+    "a2o_leafPile_rake",
+    "c2o_leafPile_rake",
     // Catching butterflies and beetles.
     "a2o_butterfly_catch",
     "a2o_beetle_catch",
@@ -396,6 +415,8 @@ pub const PROP_ACTORS: &[&str] = &[
     "hamburger",
     "ducky",
     "baseball",
+    "rake",
+    "snowBallAccessory",
 ];
 
 /// Whether a clip should be baked.

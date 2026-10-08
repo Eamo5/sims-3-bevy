@@ -147,6 +147,10 @@ pub enum ObjectKind {
     RubberDucky,
     /// A football or a baseball: catch played with it.
     Ball,
+    /// Seasons: a snowman, a snow angel, a pile of fall leaves.
+    Snowman,
+    SnowAngel,
+    LeafPile,
     Other,
 }
 
@@ -177,6 +181,12 @@ impl ObjectKind {
             Self::TrashCan
         } else if has("toys.football") || has("toys.baseball") {
             Self::Ball
+        } else if has("environment.snowman") {
+            Self::Snowman
+        } else if has("environment.snowangel") {
+            Self::SnowAngel
+        } else if has("environment.leafpile") {
+            Self::LeafPile
         } else if has("electronics.videogamesystem") {
             Self::VideoGame
         } else if has("electronics.vrgoggles") {
@@ -327,6 +337,7 @@ impl ObjectKind {
             Self::FoodReplicator | Self::BodySculptor | Self::MoodletManager | Self::Teleporter | Self::CollectionHelper => "Misc",
             Self::Urinal | Self::BubbleBath | Self::RubberDucky => "Plumbing",
             Self::ToyOven | Self::Ball => "Kids",
+            Self::Snowman | Self::SnowAngel | Self::LeafPile => "Outdoors",
             Self::FirePit | Self::PicnicBasket => "Outdoors",
             Self::Buffet => "Surfaces",
             Self::Phone => "Electronics",
@@ -538,6 +549,8 @@ pub enum Special {
     /// A bath with bubble bath, or with the rubber duck: offered while there's one about.
     BubbleBath,
     Ducky,
+    /// Gone once it's done (a snowman knocked down, a leaf pile raked up).
+    Clear,
 }
 
 impl Special {
@@ -750,6 +763,14 @@ static CRIB: [InteractionDef; 1] = [InteractionDef {
     ..def("Nap in Crib", 180.0, [0.0, 0.0, 140.0, 0.0, 0.0, 0.0], Pose::Lie)
 }];
 static TOYBOX: [InteractionDef; 1] = [def("Play with Toys", 40.0, [0.0, 0.0, -4.0, 30.0, 0.0, 140.0], Pose::Use)];
+static SNOWMAN: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::Clear, ..def("Destroy Snowman", 9.0, [0.0, 0.0, -4.0, 0.0, 0.0, 40.0], Pose::Use) }];
+static SNOW_ANGEL: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::Clear, ..def("Destroy Snow Angel", 6.0, [0.0, 0.0, -2.0, 0.0, 0.0, 30.0], Pose::Use) }];
+/// (Raked up, the pile's gone.)
+static LEAF_PILE: [InteractionDef; 3] = [
+    def("Play in Leaves", 20.0, [0.0, 0.0, -6.0, 0.0, -10.0, 110.0], Pose::Use),
+    def("Jump In", 6.0, [0.0, 0.0, -4.0, 0.0, -10.0, 140.0], Pose::Use),
+    InteractionDef { special: Special::Clear, ..def("Rake Up", 15.0, [0.0, 0.0, -6.0, 0.0, -6.0, -4.0], Pose::Use) },
+];
 static URINAL: [InteractionDef; 1] = [InteractionDef { until_full: Some(BLADDER), ..def("Use Urinal", 10.0, [0.0, 1100.0, 0.0, 0.0, -10.0, 0.0], Pose::Use) }];
 static TOY_OVEN: [InteractionDef; 1] = [def("Play with Toy Oven", 40.0, [0.0, 0.0, -4.0, 6.0, 0.0, 110.0], Pose::Use)];
 /// (Lit as a fireplace is, its fire burning a few hours.)
@@ -866,6 +887,12 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Harvest" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_bendover_start_x"), &["a2o_gardening_bendover_harvestmed_x"]),
         "Collect" if kind == ObjectKind::Collectible => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_harvestlow_x"]),
         "Swim" => A::new(Some("a2o_ladder_climbDown_L_x"), &["a_swim_cycle_x"]),
+        "Destroy Snowman" => A::new(None, &["a2o_snowman_destroy_x"]),
+        "Destroy Snow Angel" => A::new(Some("a2o_snowAngel_destroy_start_x"), &["a2o_snowAngel_destroy_loopKick_x", "a2o_snowAngel_destroy_loopStomp_x"]).ending(&["a2o_snowAngel_destroy_stop_x"], 2.7),
+        "Play in Leaves" => A::new(Some("a2o_leafPile_playIn_start_x"), &["a2o_leafPile_playIn_loopKick_x", "a2o_leafPile_playIn_loopThrow_x", "a2o_leafPile_playIn_loopThrowInAir_x"])
+            .ending(&["a2o_leafPile_playIn_stop_x"], 1.5),
+        "Jump In" if kind == ObjectKind::LeafPile => A::new(None, &["a2o_leafPile_jumpCannonBall_x"]),
+        "Rake Up" => A::new(Some("a2o_leafPile_rake_start_x"), &["a2o_leafPile_rake_loop_x"]).ending(&["a2o_leafPile_rake_stop_x"], 1.5),
         "Light Fire" if kind == ObjectKind::FirePit => A::new(None, &["a2o_firePit_light_start_x"]),
         "Put Out Fire" if kind == ObjectKind::FirePit => A::new(None, &["a2o_firePit_putOut_x"]),
         "Warm Hands" if kind == ObjectKind::FirePit => {
@@ -1172,6 +1199,9 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::FirePit => &FIRE_PIT,
         ObjectKind::Buffet => &BUFFET,
         ObjectKind::PicnicBasket => &PICNIC,
+        ObjectKind::Snowman => &SNOWMAN,
+        ObjectKind::SnowAngel => &SNOW_ANGEL,
+        ObjectKind::LeafPile => &LEAF_PILE,
         _ => &[],
     }
 }
@@ -1229,6 +1259,8 @@ pub enum ActionKind {
     MotiveFail(u8),
     /// Plant a seed here.
     PlantSeed { at: Vec2, level: u8, plant: usize },
+    /// Something done out on the ground (Seasons: a snowman, a snow angel, catching snowflakes).
+    Outdoor { at: Vec2, level: u8, what: crate::seasonal::Outdoor },
     /// Phone round to throw a party.
     ThrowParty,
     /// Drive to a community lot and spend time there.
@@ -1699,6 +1731,7 @@ fn run_actions(
                         ActionKind::GoHere(p, l) => Some((*p, *l)),
                         // (Kneeling beside the spot.)
                         ActionKind::PlantSeed { at, level, .. } => Some((*at + Vec2::new(0.0, 0.7), *level)),
+                        ActionKind::Outdoor { at, level, what } => Some((what.stand(*at), *level)),
                         ActionKind::GoToWork | ActionKind::Visit { .. } | ActionKind::GoToLot { .. } | ActionKind::GoHomeFromLot | ActionKind::Jog { .. } => way_out.map(|p| (p, 1)),
                         ActionKind::JoinCareer { target, .. } | ActionKind::Teleport { pad: target, .. } => {
                             objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0)))
@@ -1944,6 +1977,19 @@ fn run_actions(
                                 tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
                                 anim.pose = Pose::Use;
                                 commands.entity(me).insert(crate::anim::ActionClip::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_plantSeeds_x"]));
+                            }
+                            ActionKind::Outdoor { at, what, .. } => {
+                                // (Facing the snowman being built; facing away, to lie back in the snow.)
+                                let to = *at - Vec2::new(tf.translation.x, tf.translation.z);
+                                if to.length() > 0.2 {
+                                    tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
+                                }
+                                anim.pose = Pose::Use;
+                                commands.entity(me).insert(what.clip());
+                                if *what == crate::seasonal::Outdoor::Snowman {
+                                    let y = ground(floor.0, at.x, at.y);
+                                    commands.entity(me).insert(crate::seasonal::OutdoorEvent::Begun { what: *what, at: Vec3::new(at.x, y, at.y), minutes: what.minutes() });
+                                }
                             }
                             ActionKind::Invite { .. }
                             | ActionKind::PhoneChat { .. }
@@ -2350,6 +2396,9 @@ fn run_actions(
                                             commands.entity(me).insert(crate::meals::MicrowaveDone(*target));
                                         }
                                         Special::None | Special::BubbleBath | Special::Ducky => {}
+                                        Special::Clear => {
+                                            commands.entity(*target).try_despawn();
+                                        }
                                     }
                                 }
                             } else {
@@ -2497,6 +2546,19 @@ fn run_actions(
                                         }
                                         _ => {}
                                     }
+                                }
+                            }
+                        }
+                        ActionKind::Outdoor { what, .. } => {
+                            motives.add(FUN, what.fun() * dt / 60.0);
+                            if elapsed >= what.minutes() {
+                                finished = true;
+                                let p = tf.translation;
+                                commands.entity(me).insert(crate::seasonal::OutdoorEvent::Done { what: *what, at: p, facing: tf.rotation, child: sim.age.is_little() || sim.age == Age::Child });
+                                // (Then up out of the snow.)
+                                let c = what.clip();
+                                if !c.end.is_empty() {
+                                    outro = Some((c.end, None, c.end_secs, Entity::PLACEHOLDER));
                                 }
                             }
                         }

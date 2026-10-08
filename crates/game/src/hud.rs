@@ -755,7 +755,7 @@ fn world_click(
     mut ray_cast: MeshRayCast,
     parents: Query<&ChildOf>,
     sims: Query<(&Sim, Has<HouseholdMember>, Has<Selected>)>,
-    (objects, broken_q, lit_q, hw_q, trash_q, leftovers, sprinkling): (
+    (objects, broken_q, lit_q, hw_q, trash_q, leftovers, sprinkling, weather): (
         Query<&GameObject>,
         Query<(), With<crate::interact::Broken>>,
         Query<(), With<crate::fireplace::Lit>>,
@@ -763,6 +763,7 @@ fn world_click(
         Query<&crate::surroundings::TrashFill>,
         Res<crate::meals::Leftovers>,
         Query<(), With<crate::gardening::Sprinkling>>,
+        Res<crate::weather::Weather>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
     members_q: Query<(), With<HouseholdMember>>,
@@ -1121,6 +1122,12 @@ fn world_click(
                 if let (Some(g), Some(ui)) = (opp_q.5.as_ref(), opp_q.0.as_ref()) {
                     options.extend(crate::gardening::plant_options(g, &ui.data, Vec2::new(p.x, p.z), level));
                 }
+            }
+        }
+        // Seasons: out in the snow, a snowman or a snow angel; in snow or rain, catching it.
+        if !actor_sim.age.is_little() && level <= 1 && !crate::weather::sheltered(building.as_deref(), p) {
+            for what in crate::seasonal::Outdoor::options(&weather, opp_q.2.minutes) {
+                options.push((what.label().to_string(), ActionKind::Outdoor { at: Vec2::new(p.x, p.z), level, what }));
             }
         }
         // Out on a community lot: home again.

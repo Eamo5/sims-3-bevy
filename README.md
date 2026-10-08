@@ -334,7 +334,13 @@ installation is unreachable.
   long enough they're Soaked; in rain and hail they leave what's out in it alone. Out in the
   cold (below 50°F) they put on the pack's outerwear (coats, parkas, snow pants, boots,
   snowsuits; an Outerwear outfit chosen in Create a Sim and kept in saves) and take it off
-  again indoors, and the townies walking by wrap up too. The season
+  again indoors, and the townies walking by wrap up too. Out in the snow (from the ground's pie
+  menu) Sims build snowmen, rolling and patting their three balls and giving them a face as
+  the snowman grows, and lie back to make snow angels, both melting away with the snow (and
+  knocked down or stomped out, if they like); out in snow or rain they catch flakes or drops
+  on their tongues; and through fall leaf piles gather on the home lot every ten to twelve
+  hours, to play in, jump into and rake up. All with the pack's own objects and animations.
+  The season
   and the weather are kept in saves; the World Adventures destinations have none.
 - **Water effects**: fountains gush and fill their basins, showers spray from the head and taps
   run while someone's at them, each from the object's own effect slot (the game's RSLT slots).
