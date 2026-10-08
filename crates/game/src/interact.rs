@@ -1499,7 +1499,7 @@ fn run_actions(
             Option<&mut PathFollow>,
             Option<&mut Job>,
             &Floor,
-            (Option<&crate::wishes::Wishes>, Option<&crate::paintings::PaintPlan>),
+            (Option<&crate::wishes::Wishes>, Option<&crate::paintings::PaintPlan>, Option<&crate::life::Moodlets>, Option<&crate::little::Pregnancy>),
             Option<&crate::opportunities::SimOpportunities>,
             Option<&crate::visit::OnLot>,
         ),
@@ -1540,7 +1540,7 @@ fn run_actions(
     // Relationship changes to apply to both Sims: (a, b, status, kissed)
     let mut status_fx: Vec<(Entity, Entity, Option<RelStatus>, bool)> = Vec::new();
 
-    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, mut job, floor, (wishes, plan), opps, on_lot) in &mut sims {
+    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, mut job, floor, (wishes, plan, moodlets, pregnancy), opps, on_lot) in &mut sims {
         // Out on a community lot: its walk grid and way out.
         let away = on_lot.and_then(|o| visited.as_deref().filter(|v| v.lot == o.0));
         let (my_grid, my_upper): (&NavGrid, Option<&UpperFloors>) = match away {
@@ -1678,7 +1678,30 @@ fn run_actions(
                     });
                     match routed {
                         Some(wp) => {
-                            commands.entity(me).insert(PathFollow::new(wp));
+                            // Gone in the game's walk style for the way.
+                            let to = wp.last().map_or(from, |w| w.p);
+                            let at = |p: Vec2| Vec3::new(p.x, 0.0, p.y);
+                            let indoors = |p: Vec2| building.as_deref().is_some_and(|b| b.is_indoors(at(p)));
+                            let lot = |p: Vec2| crate::rabbitholes::lot_at(&world.data.lots, at(p));
+                            let sense = crate::nav::RouteSense {
+                                distance: PathFollow::length_from(&wp, from),
+                                autonomous: action.autonomous,
+                                to_object: !matches!(action.kind, ActionKind::GoHere(..)),
+                                same_lot: lot(from) == lot(to),
+                                indoors: indoors(from) && indoors(to),
+                                age: sim.age,
+                                athletic: skills.level("Athletic"),
+                                fatigued: moodlets.is_some_and(|m| m.has(crate::life::MoodletKind::Fatigued)),
+                                pregnant: pregnancy.is_some_and(|p| p.stage >= 2),
+                            };
+                            let mut style = crate::nav::walk_style(&sense, rand::random::<f32>());
+                            // (WALK_STYLE=<style>: the player's routes so, for a test.)
+                            if !action.autonomous && let Ok(s) = std::env::var("WALK_STYLE") {
+                                use crate::nav::WalkStyle::*;
+                                style = [Walk, FastWalk, FastJog, Run, FastRun, Jog, OnFire].into_iter().find(|w| format!("{w:?}").eq_ignore_ascii_case(&s)).unwrap_or(style);
+                            }
+                            debug!("{} goes {:?} ({:.0} m)", sim.first, style, sense.distance);
+                            commands.entity(me).insert(PathFollow::new(wp).with_style(style));
                             action.phase = Phase::Routing;
                             if let ActionKind::Object { target, .. } | ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } = action.kind
                                 && let Ok((_, _, mut used, _)) = objects.get_mut(target)

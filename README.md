@@ -291,8 +291,15 @@ installation is unreachable.
   and counts the game's six kilometres an hour towards the Marathon Runner challenge. Athletic
   Sims go jogging on their own by day, and some of the town's passers-by jog past in their
   athletic wear (most of them mornings and evenings). The sidewalk they all use runs beside
-  the street nearest the lot. And as in the game, a teen or grown-up with a long way to go
-  (over 22 m, on the level) runs it, slowing to a walk as they get there.
+  the street nearest the lot.
+- **Walk styles**: each way a Sim goes is gone in the game's walk style for it, by the game's
+  own rules: about their business on their own lot they walk; sent across it, they hurry (the
+  fast walk) the long ways; elsewhere the further the faster, from a walk to a fast walk, a
+  fast jog and a run (10, 15 and 30 m on; a child's 5, 10 and 20, an elder's 15, 25 and 45),
+  going of their own accord by chance up to that. Children walk or run, the fatigued don't
+  jog, the athletic (skill 5) run flat out, and the heavily pregnant waddle. Each style is the
+  game's clip, played in step with the Sim's pace so their feet stay planted (the paces
+  measured from the clips themselves: a walk 1.8 m/s, a run 5.7).
 - **Water effects**: fountains gush and fill their basins, showers spray from the head and taps
   run while someone's at them, each from the object's own effect slot (the game's RSLT slots).
   TVs show a programme on the screen (at the TV's screen slot) while anyone's watching, its

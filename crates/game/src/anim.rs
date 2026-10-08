@@ -277,10 +277,12 @@ pub fn drive_skeletons(
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed];
     for (entity, sim, anim, skel, action, mut player, carried, toddler, carrying, jogging, path, pregnancy) in &mut sims {
         let child = sim.age == crate::sim::Age::Child;
-        let running = path.is_some_and(|p| p.running);
+        let style = path.filter(|p| !p.done).map_or(crate::nav::WalkStyle::Walk, |p| p.now);
         let script = match action {
-            // (Jogging, or running a long way: the game's jog, for everyone.)
-            _ if (jogging || running) && anim.pose == Pose::Walk => ActionClip::new(None, &["a_male_jog"]),
+            // (Jogging: the game's jog, for everyone.)
+            _ if jogging && anim.pose == Pose::Walk => ActionClip::new(None, &["a_male_jog"]),
+            // (The route's walk style: hurrying, jogging, running.)
+            _ if anim.pose == Pose::Walk && !sim.age.is_little() && let Some(clip) = style.clip(child, sim.female) => ActionClip::new(None, clip),
             // (Heavily pregnant, the game's waddle.)
             _ if anim.pose == Pose::Walk && sim.female && pregnancy.is_some_and(|p| p.stage >= 2) => ActionClip::new(None, &["a_female_walk_pregnant"]),
             Some(a) if anim.pose != Pose::Walk => a.clone(),
@@ -315,7 +317,12 @@ pub fn drive_skeletons(
             }
             player.script = Some(script);
         }
-        player.time += dt;
+        // (A walk cycle in step with the Sim's pace, so their feet stay planted.)
+        let step = match (anim.pose, path.filter(|p| !p.done && p.pace > 0.0), crate::nav::cycle_speed(&player.name)) {
+            (Pose::Walk, Some(p), Some(cycle)) => (p.pace / cycle).clamp(0.5, 2.0),
+            _ => 1.0,
+        };
+        player.time += dt * step;
         player.blend = (player.blend - dt / 0.25).max(0.0);
         let Some(clip) = player.clip.clone() else { continue };
         // A carry: its clip over the arms (looping on its own time).

@@ -68,15 +68,15 @@ fn stroll(
         *vis = Visibility::Inherited;
         t.walking = true;
         let mut pf = PathFollow::new(vec![Waypoint { p: end, level: 1, climb: None }]);
-        pf.speed = rng.random_range(1.2..1.7);
-        pf.run_far = false;
+        pf.speed = rng.random_range(1.4..1.9);
         // (Some jog past instead, in their athletic wear: more of them mornings and evenings.)
         let jog_hours = (7.0..10.0).contains(&hour) || (17.0..20.0).contains(&hour);
         let jogging = crate::jog::can_jog(sim) && rng.random_bool(if jog_hours { 0.35 } else { 0.1 });
         let athletic = wearing.is_some_and(|w| w.0 == crate::simbody::OutfitKind::Athletic);
         debug!("{} {} past", sim.full_name(), if jogging { "jogs" } else { "walks" });
         if jogging {
-            pf.speed = rng.random_range(2.7..3.3);
+            pf.style = crate::nav::WalkStyle::Jog;
+            pf.speed = rng.random_range(2.2..2.7);
             commands.entity(e).insert(crate::jog::Jogging::new(start, clock.minutes));
             if !athletic {
                 commands.entity(e).insert((crate::simbody::Wearing(crate::simbody::OutfitKind::Athletic), crate::aging::NeedsNewBody));

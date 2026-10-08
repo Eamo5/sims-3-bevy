@@ -247,6 +247,39 @@ overflow PowerShell's stack). The skill challenges, from `Sims3.Gameplay.Skills.
 | Writing | `kNumWritingsForProlificAuthor`, `kMoneyMadeForSpeedWriter`, `kNumWritingsofGenreForNovelist` | 100, 10000, 10 |
 | Guitar (`BandSkill`) | `kMoneyMadeForLifetimeOpp`, `kVenuesPlayedForLifetimeOpp` | 10000, 10 |
 
+### Walk styles
+
+`Sims3.Gameplay.Routing.SimWalkStyleRules` picks each route's `Sim.WalkStyle` (`AutoSelect` 0,
+`Walk` 1, `FastWalk` 2, `FastJog` 3, `Run` 4, `Jog` 5, `OnFire` 6, `Pregnant` 7, …, `FastRun`
+15, `ElderWalk` 18). Its arrays are set in the static constructor by `InitializeArray` from
+`<PrivateImplementationDetails>` blobs, which `RuntimeHelpers.InitializeArray` into a fresh
+`float[]` reads back (`cache/il_dump.ps1 <dll> <type> <method>` prints a method's IL with its
+tokens resolved):
+
+| Field | Value |
+|---|---|
+| `kWalkStyleAdultDistanceThresholds` | 10, 15, 30 (m) |
+| `kWalkStyleChildDistanceThresholds` | 5, 10, 20 |
+| `kWalkStyleElderDistanceThresholds` | 15, 25, 45 |
+| `kAutonomousWalkStyleWeights` | 0.3, 0.25, 0.2, 0.15, 0.1 |
+| `Athletic.kAthleticSkillForFastRun` | 5 |
+
+`ComputeDistanceAdjustedWalkStyle` counts the thresholds the route's length passes: `Walk` +
+that many (to `Run`). Autonomous routes on one lot are walked; elsewhere a style is drawn by
+the weights up to that one (`RandomWeightedWalkStyle`). Player-directed routes take it, clamped
+to `FastWalk` on one lot when going to an object, or to a spot indoors from indoors. Children
+take `Walk` or `Run`; with the `Fatigued` buff `Jog`/`FastJog` become `FastWalk`; a `Run` with
+Athletic 5 or more is `FastRun`; `AdrenalineRush` runs; carrying a child walks; an elder's walk
+is `ElderWalk` (no human clip of its own).
+
+The locomotion clips are cycles in place (the root doesn't travel). Their ground speed is how
+fast a planted foot moves backwards: forward kinematics over the cycle, the foot within 1 cm of
+its lowest (`s3tool clipspeed <install> <rig> <clips…>`): `a_male_walk` 1.82 m/s,
+`a_female_walk` 1.7, `a_male_walk_fast` 2.56, `a_male_jog` 2.4, `a_male_fastjog` 3.3,
+`a_male_run`/`a_female_run` 5.7, `a_male_run_fast` 7.1–8, `a_male_run_onFire` 6.4,
+`c_walk` 1.25, `c_run` 3.7. The cycles are 0.87 s (walks), 0.67 (fast walk), 0.73 (jog), 0.7
+(fast jog), 0.63 (runs) and 0.47 (fast run).
+
 The challenges' names, journal descriptions ("Plumbers have repaired at least {0.Number}
 plumbing objects…") and completion notices ("…to complete the Plumber Skill Challenge!") are
 in the string tables; `s3tool strgrep <install> <text>` finds string-table entries containing

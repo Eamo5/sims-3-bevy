@@ -527,6 +527,31 @@ fn main() {
         }
         return;
     }
+    if args[1] == "grepres" {
+        // grepres <root> <text> [type hex]: resources of any (or that) type holding the text, as
+        // ASCII or UTF-16; the first few of each type, and counts.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let want = args[3].as_bytes().to_vec();
+        let wide: Vec<u8> = args[3].encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
+        let only = args.get(4).map(|t| u32::from_str_radix(t, 16).unwrap());
+        let mut hits = std::collections::BTreeMap::<u32, usize>::new();
+        let types: std::collections::BTreeSet<u32> = set.keys().map(|k| k.t).filter(|t| only.is_none_or(|o| o == *t) && *t != types::CLIP).collect();
+        for t in types {
+            for k in set.keys_of_type(t).copied().collect::<Vec<_>>() {
+                let Some(d) = set.read(&k) else { continue };
+                let at = d.windows(want.len()).position(|w| w == want.as_slice()).or_else(|| d.windows(wide.len()).position(|w| w == wide.as_slice()));
+                if let Some(at) = at {
+                    let n = hits.entry(t).or_default();
+                    if *n < 4 {
+                        println!("{k} @ {at}");
+                    }
+                    *n += 1;
+                }
+            }
+        }
+        println!("{hits:X?}");
+        return;
+    }
     if args[1] == "xmlfind" {
         // xmlfind <root> <text> [outdir]: XML resources (0x0333406C) containing the text, with
         // their names; with an outdir, writes them there. EXTRA=<package> adds a package.
@@ -754,6 +779,89 @@ fn main() {
                 let parent = rig.bones.get(b.parent as usize).map_or("-", |p| p.name.as_str());
                 println!("[{i}] {} <- {parent} pos {:?} rot {:?}", b.name, b.position, b.rotation);
             }
+        }
+        return;
+    }
+    if args[1] == "clipspeed" {
+        // clipspeed <root> <rig name> <clip name>...: an in-place locomotion cycle's ground speed,
+        // from its feet: how fast each moves backwards while planted (at its lowest).
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let rig = s3formats::sim::Rig::parse(&set.read_ti(0x8EAF13DE, s3pkg::fnv64(&args[3])).expect("rig")).expect("rig parse");
+        let mut by_name = std::collections::HashMap::new();
+        for k in set.keys_of_type(types::CLIP).copied().collect::<Vec<_>>() {
+            if let Some(n) = set.read(&k).and_then(|d| s3formats::sim::clip_name(&d)) {
+                by_name.insert(n.to_ascii_lowercase(), k);
+            }
+        }
+        fn qmul(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+            let [ax, ay, az, aw] = a;
+            let [bx, by, bz, bw] = b;
+            [aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx, aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz]
+        }
+        fn qrot(q: [f32; 4], v: [f32; 3]) -> [f32; 3] {
+            let p = qmul(qmul(q, [v[0], v[1], v[2], 0.0]), [-q[0], -q[1], -q[2], q[3]]);
+            [p[0], p[1], p[2]]
+        }
+        fn at<const N: usize>(keys: &[(f32, [f32; N])], t: f32) -> Option<[f32; N]> {
+            let i = keys.iter().position(|k| k.0 > t).unwrap_or(keys.len());
+            if i == 0 || i == keys.len() {
+                return keys.get(i.min(keys.len().saturating_sub(1))).map(|k| k.1);
+            }
+            let (a, b) = (keys[i - 1], keys[i]);
+            let f = ((t - a.0) / (b.0 - a.0).max(1e-6)).clamp(0.0, 1.0);
+            let mut o = [0.0; N];
+            for j in 0..N {
+                o[j] = a.1[j] + (b.1[j] - a.1[j]) * f;
+            }
+            Some(o)
+        }
+        let feet: Vec<usize> = rig.bones.iter().enumerate().filter(|(_, b)| std::env::var("FEET").map_or(b.name == "b__L_Foot__" || b.name == "b__R_Foot__", |f| f.split(',').any(|x| x == b.name))).map(|(i, _)| i).collect();
+        for name in &args[4..] {
+            let Some(d) = by_name.get(&name.to_ascii_lowercase()).and_then(|k| set.read(k)) else { println!("{name}: missing"); continue };
+            let Ok(c) = s3formats::sim::Clip::parse(&d) else { println!("{name}: unparsed"); continue };
+            let n = 240;
+            // Each foot's world position through the cycle.
+            let mut paths = vec![Vec::new(); feet.len()];
+            for s in 0..n {
+                let t = c.duration * s as f32 / n as f32;
+                let mut world: Vec<([f32; 3], [f32; 4])> = Vec::with_capacity(rig.bones.len());
+                for b in &rig.bones {
+                    let tr = c.tracks.get(&b.hash);
+                    let lp = tr.and_then(|x| at(&x.translation, t)).unwrap_or(b.position);
+                    let mut lr = tr.and_then(|x| at(&x.rotation, t)).unwrap_or(b.rotation);
+                    let l = (lr.iter().map(|x| x * x).sum::<f32>()).sqrt().max(1e-6);
+                    lr.iter_mut().for_each(|x| *x /= l);
+                    let w = match world.get(b.parent.max(0) as usize).filter(|_| b.parent >= 0) {
+                        Some(&(pp, pr)) => {
+                            let o = qrot(pr, lp);
+                            ([pp[0] + o[0], pp[1] + o[1], pp[2] + o[2]], qmul(pr, lr))
+                        }
+                        None => (lp, lr),
+                    };
+                    world.push(w);
+                }
+                for (j, &f) in feet.iter().enumerate() {
+                    paths[j].push(world[f].0);
+                }
+            }
+            let dt = c.duration / n as f32;
+            let mut speeds = Vec::new();
+            for p in &paths {
+                let low = p.iter().map(|x| x[1]).fold(f32::MAX, f32::min);
+                // (Planted: within 2 cm of its lowest; its backward speed then, along the walk.)
+                for s in 0..n {
+                    let (a, b) = (p[s], p[(s + 1) % n]);
+                    let tol = std::env::var("TOL").ok().and_then(|v| v.parse().ok()).unwrap_or(0.02f32);
+                    if a[1] < low + tol && b[1] < low + tol {
+                        speeds.push(((a[2] - b[2]) / dt, (a[0] - b[0]) / dt));
+                    }
+                }
+            }
+            speeds.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let mid = speeds.get(speeds.len() / 2).copied().unwrap_or_default();
+            let mean = speeds.iter().map(|s| s.0).sum::<f32>() / speeds.len().max(1) as f32;
+            let range = paths.first().map_or(0.0, |p| p.iter().map(|x| x[2]).fold(f32::MIN, f32::max) - p.iter().map(|x| x[2]).fold(f32::MAX, f32::min));
+            println!("{name}: cycle {:.3}s, planted speed z median {:.2} mean {:.2} (x {:.2}) m/s over {} samples; foot range {range:.2} m", c.duration, mid.0, mean, mid.1, speeds.len());
         }
         return;
     }

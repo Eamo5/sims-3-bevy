@@ -427,24 +427,179 @@ fn rebuild_upper_floors(
 #[derive(Component, Default)]
 pub struct PathFollow {
     pub waypoints: Vec<Waypoint>,
+    /// Metres a second (none: the walk style's own pace).
     pub speed: f32,
     pub done: bool,
     seg_start: Option<Vec2>,
-    /// Whether a long way is run (as the game's Sims do), and whether it's being run now.
-    pub run_far: bool,
-    pub running: bool,
+    /// How the way is gone (the game's walk style for it), and how it's being gone just now
+    /// (stairs are walked) at what pace: what the Sim's legs keep up with.
+    pub style: WalkStyle,
+    pub now: WalkStyle,
+    pub pace: f32,
 }
 
 impl PathFollow {
     pub fn new(waypoints: Vec<Waypoint>) -> Self {
-        Self { waypoints, speed: 1.45, done: false, seg_start: None, run_far: true, running: false }
+        Self { waypoints, ..default() }
+    }
+
+    pub fn with_style(mut self, style: WalkStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// The whole way's length from `from`.
+    pub fn length_from(waypoints: &[Waypoint], from: Vec2) -> f32 {
+        waypoints.iter().scan(from, |at, w| Some(std::mem::replace(at, w.p).distance(w.p))).sum()
     }
 }
 
-/// A walk longer than this (metres) is run, until it's nearly done; and how much faster.
-const RUN_FROM: f32 = 22.0;
-const RUN_UNTIL: f32 = 5.0;
-const RUN_FACTOR: f32 = 2.1;
+/// How a Sim goes along a route: the game's walk styles (`Sim.WalkStyle`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WalkStyle {
+    #[default]
+    Walk,
+    FastWalk,
+    FastJog,
+    Run,
+    /// (Running, for the athletic.)
+    FastRun,
+    Jog,
+    OnFire,
+}
+
+impl WalkStyle {
+    /// Ground speed, metres a second: its clip's own (the feet planted as they go, measured
+    /// from the game's cycles).
+    pub fn speed(self, child: bool, female: bool) -> f32 {
+        use WalkStyle::*;
+        match (self, child) {
+            (Walk, true) => 1.25,
+            (_, true) => 3.7,
+            (Walk, false) if female => 1.7,
+            (Walk, false) => 1.8,
+            (FastWalk, _) => 2.55,
+            (FastJog, _) => 3.3,
+            (Run, _) => 5.7,
+            (FastRun, _) => 7.3,
+            (Jog, _) => 2.4,
+            (OnFire, _) => 6.4,
+        }
+    }
+
+    /// The game's clip for it (none: the Sim's own walk).
+    pub fn clip(self, child: bool, female: bool) -> Option<&'static [&'static str]> {
+        use WalkStyle::*;
+        Some(match (self, child) {
+            (Walk, _) => return None,
+            (_, true) => &["c_run"],
+            (FastWalk, _) => &["a_male_walk_fast"],
+            (FastJog, _) => &["a_male_fastjog"],
+            (Run, _) if female => &["a_female_run"],
+            (Run, _) => &["a_male_run"],
+            (FastRun, _) => &["a_male_run_fast"],
+            (Jog, _) => &["a_male_jog"],
+            (OnFire, _) => &["a_male_run_onFire"],
+        })
+    }
+}
+
+/// The ground speed of a walk cycle (metres a second, feet planted), for playing it in step with
+/// the Sim's pace.
+pub fn cycle_speed(clip: &str) -> Option<f32> {
+    const CYCLES: [(&str, f32); 12] = [
+        ("a_male_walk", 1.82),
+        ("a_female_walk", 1.7),
+        ("a_female_walk_pregnant", 1.73),
+        ("a_male_walk_fast", 2.56),
+        ("a_male_fastjog", 3.3),
+        ("a_male_jog", 2.4),
+        ("a_male_run", 5.7),
+        ("a_female_run", 5.7),
+        ("a_male_run_fast", 7.3),
+        ("a_male_run_onFire", 6.4),
+        ("c_walk", 1.25),
+        ("c_run", 3.7),
+    ];
+    CYCLES.iter().find(|(n, _)| n.eq_ignore_ascii_case(clip)).map(|c| c.1)
+}
+
+/// What a route's walk style turns on.
+pub struct RouteSense {
+    pub distance: f32,
+    /// Gone autonomously (not at the player's word).
+    pub autonomous: bool,
+    /// To an object (not a spot on the ground).
+    pub to_object: bool,
+    /// Both ends on the same lot, and both indoors.
+    pub same_lot: bool,
+    pub indoors: bool,
+    pub age: crate::sim::Age,
+    pub athletic: u32,
+    pub fatigued: bool,
+    /// Big with child: they walk.
+    pub pregnant: bool,
+}
+
+/// The game's distances (metres) beyond which a route is fast-walked, fast-jogged and run: a
+/// child's, an elder's and everyone else's (SimWalkStyleRules' distance thresholds).
+const CHILD_THRESHOLDS: [f32; 3] = [5.0, 10.0, 20.0];
+const ELDER_THRESHOLDS: [f32; 3] = [15.0, 25.0, 45.0];
+const THRESHOLDS: [f32; 3] = [10.0, 15.0, 30.0];
+/// How likely a Sim going somewhere off the lot of their own accord walks, fast-walks,
+/// fast-jogs or runs, up to what the distance allows (`kAutonomousWalkStyleWeights`).
+const AUTONOMOUS_WEIGHTS: [f32; 4] = [0.3, 0.25, 0.2, 0.15];
+/// Athletic skill from which a run is the fast run (`Athletic.kAthleticSkillForFastRun`).
+const ATHLETIC_FOR_FAST_RUN: u32 = 5;
+
+/// A route's walk style, by the game's rules (`SimWalkStyleRules`): on their own lot Sims
+/// going about their business walk, and at the player's word hurry (fast-walk) the long ways;
+/// elsewhere, the further the faster, up to a run (going of their own accord, by chance up to
+/// that). Children walk or run; the fatigued don't jog; the athletic run fast. `roll` is a
+/// chance, 0 to 1.
+pub fn walk_style(r: &RouteSense, roll: f32) -> WalkStyle {
+    use WalkStyle::*;
+    const LADDER: [WalkStyle; 4] = [Walk, FastWalk, FastJog, Run];
+    if r.pregnant || r.age.is_little() {
+        return Walk;
+    }
+    let thresholds = match r.age {
+        crate::sim::Age::Child => CHILD_THRESHOLDS,
+        crate::sim::Age::Elder => ELDER_THRESHOLDS,
+        _ => THRESHOLDS,
+    };
+    let far = thresholds.iter().take_while(|t| r.distance > **t).count();
+    let step = if r.autonomous {
+        if r.same_lot {
+            0
+        } else {
+            let weights = &AUTONOMOUS_WEIGHTS[..=far];
+            let mut left = roll * weights.iter().sum::<f32>();
+            weights
+                .iter()
+                .position(|w| {
+                    left -= w;
+                    left <= 0.0
+                })
+                .unwrap_or(far)
+        }
+    } else if r.same_lot && (r.to_object || r.indoors) {
+        far.min(1)
+    } else {
+        far
+    };
+    let mut style = LADDER[step];
+    if r.age == crate::sim::Age::Child && style != Walk {
+        style = Run;
+    }
+    if r.fatigued && matches!(style, FastJog | Jog) {
+        style = FastWalk;
+    }
+    if style == Run && r.athletic >= ATHLETIC_FOR_FAST_RUN {
+        style = FastRun;
+    }
+    style
+}
 
 /// Standing height on a floor at a point: the house floor or the terrain.
 pub fn floor_height(world: &crate::loading::WorldInfo, building: Option<&crate::building::ActiveBuilding>, level: u8, p: Vec3) -> f32 {
@@ -470,16 +625,12 @@ fn follow_paths(
         if dt <= 0.0 {
             continue;
         }
-        // A long way (on the level) is run by teens and grown-ups, until they're nearly there.
-        let here = Vec2::new(tf.translation.x, tf.translation.z);
-        let left: f32 = pf.waypoints.iter().scan(here, |at, w| Some(std::mem::replace(at, w.p).distance(w.p))).sum();
-        // (Not heavily pregnant.)
-        let can_run = pf.run_far
-            && sim.is_some_and(|s| !s.age.is_little() && s.age != crate::sim::Age::Child)
-            && !pregnancy.is_some_and(|p| p.stage >= 2)
-            && pf.waypoints.first().is_some_and(|w| w.climb.is_none());
-        pf.running = can_run && left > if pf.running { RUN_UNTIL } else { RUN_FROM };
-        let mut budget = pf.speed * if pf.running { RUN_FACTOR } else { 1.0 } * dt;
+        // In the route's walk style, at its pace (stairs walked; heavily pregnant, a walk).
+        let stepping = pf.waypoints.first().is_some_and(|w| w.climb.is_some()) || pregnancy.is_some_and(|p| p.stage >= 2);
+        pf.now = if stepping { WalkStyle::Walk } else { pf.style };
+        let (child, female) = sim.map_or((false, false), |s| (s.age == crate::sim::Age::Child, s.female));
+        pf.pace = if pf.speed > 0.0 && pf.now == pf.style { pf.speed } else { pf.now.speed(child, female) };
+        let mut budget = pf.pace * dt;
         let mut climbing = None;
         while budget > 0.0 {
             let Some(&target) = pf.waypoints.first() else {
@@ -516,5 +667,40 @@ fn follow_paths(
         }
         tf.translation.y = climbing.unwrap_or_else(|| floor_height(&world.data, building.as_deref(), floor.0, tf.translation));
         anim.pose = if pf.done { Pose::Stand } else { Pose::Walk };
+    }
+}
+
+#[cfg(test)]
+mod walk_style_tests {
+    use super::*;
+    use crate::sim::Age;
+
+    fn sense(distance: f32, autonomous: bool, same_lot: bool) -> RouteSense {
+        RouteSense { distance, autonomous, to_object: true, same_lot, indoors: false, age: Age::YoungAdult, athletic: 0, fatigued: false, pregnant: false }
+    }
+
+    #[test]
+    fn the_games_rules() {
+        use WalkStyle::*;
+        // On their own lot, going about their business: a walk, however far.
+        assert_eq!(walk_style(&sense(40.0, true, true), 0.99), Walk);
+        // At the player's word on the lot: a hurry, no more.
+        assert_eq!(walk_style(&sense(8.0, false, true), 0.5), Walk);
+        assert_eq!(walk_style(&sense(40.0, false, true), 0.5), FastWalk);
+        // Off the lot: the further the faster.
+        assert_eq!(walk_style(&sense(12.0, false, false), 0.5), FastWalk);
+        assert_eq!(walk_style(&sense(20.0, false, false), 0.5), FastJog);
+        assert_eq!(walk_style(&sense(40.0, false, false), 0.5), Run);
+        // (Of their own accord, by chance up to that.)
+        assert_eq!(walk_style(&sense(40.0, true, false), 0.0), Walk);
+        assert_eq!(walk_style(&sense(40.0, true, false), 1.0), Run);
+        assert_eq!(walk_style(&sense(5.0, true, false), 1.0), Walk);
+        // Children walk or run; the athletic run fast; the fatigued don't jog.
+        assert_eq!(walk_style(&RouteSense { age: Age::Child, ..sense(12.0, false, false) }, 0.5), Run);
+        assert_eq!(walk_style(&RouteSense { athletic: 5, ..sense(40.0, false, false) }, 0.5), FastRun);
+        assert_eq!(walk_style(&RouteSense { fatigued: true, ..sense(20.0, false, false) }, 0.5), FastWalk);
+        assert_eq!(walk_style(&RouteSense { pregnant: true, ..sense(40.0, false, false) }, 0.5), Walk);
+        // Elders take further to hurry.
+        assert_eq!(walk_style(&RouteSense { age: Age::Elder, ..sense(20.0, false, false) }, 0.5), FastWalk);
     }
 }

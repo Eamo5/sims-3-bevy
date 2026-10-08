@@ -276,8 +276,10 @@ impl Plugin for AutoTestPlugin {
                     if args.action.as_deref().is_some_and(|a| a.starts_with("Visit:")) && on.is_none() {
                         return;
                     }
-                    // (`--use Go:<x>,<z>`: a walk there, on the ground.)
-                    if let Some((x, z)) = want.strip_prefix("Go:").and_then(|v| v.split_once(',')).and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) {
+                    // (`--use Go:<x>,<z>`: a walk there, on the ground; `GoBy:<dx>,<dz>`, that far from
+                    // where they stand.)
+                    let by = want.starts_with("GoBy:").then(|| Vec2::new(tf.translation.x, tf.translation.z)).unwrap_or_default();
+                    if let Some((x, z)) = want.strip_prefix("Go:").or_else(|| want.strip_prefix("GoBy:")).and_then(|v| v.split_once(',')).and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()? + by.x, z.trim().parse::<f32>().ok()? + by.y))) {
                         *done = true;
                         info!("use test: Go Here {x},{z}");
                         q.0.clear();

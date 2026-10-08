@@ -35,8 +35,7 @@ impl Jogging {
     }
 }
 
-/// Jogging pace (metres a second, as walking's 1.45), and how long a jog lasts (game minutes).
-const JOG_SPEED: f32 = 3.0;
+/// How long a jog lasts (game minutes; at the game's jogging pace).
 const JOG_MINUTES: f64 = 60.0;
 /// The game's kilometres of running an hour (`kDistanceJoggedPerHourOfRunning`).
 pub const KM_PER_HOUR: f64 = 6.0;
@@ -115,9 +114,6 @@ fn jog(
             w.push(p(ends[(j.leg % 2) as usize]));
             w
         };
-        let mut pf = PathFollow::new(waypoints);
-        pf.speed = JOG_SPEED;
-        pf.run_far = false;
-        commands.entity(e).insert(pf);
+        commands.entity(e).insert(PathFollow::new(waypoints).with_style(crate::nav::WalkStyle::Jog));
     }
 }

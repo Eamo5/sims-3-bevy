@@ -11,6 +11,11 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a_male_walk",
     "a_male_jog",
     "a_female_walk_pregnant",
+    // (The game's walk styles: fast walk, fast jog, run, fast run, on fire.)
+    "a_male_fastjog",
+    "a_male_run",
+    "a_female_run",
+    "c_run",
     "a_soc_callOver_x",
     "a2o_door_ringBell_x",
     "a2a_soc_Neutral_Greet_Friendly_Friendly",
