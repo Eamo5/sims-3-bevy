@@ -113,8 +113,9 @@ fn as_submenu(k: &ActionKind) -> Option<usize> {
     }
 }
 
+/// A pie menu option (its place in `PieMenu::options`).
 #[derive(Component)]
-struct PieOption(usize);
+pub struct PieOption(pub usize);
 
 #[derive(Component)]
 struct NeedsName;
@@ -642,6 +643,8 @@ pub fn open_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &st
     }
     let n = options.len();
     let radius = 90.0 + n as f32 * 10.0;
+    // (In the game's own bubbles when its interface is to hand: see `piemenu`.)
+    let game_look = crate::piemenu::GAME_PIE.load(std::sync::atomic::Ordering::Relaxed) && n <= crate::piemenu::MAX_ITEMS;
     let root = commands
         .spawn((
             DespawnOnExit(AppState::InGame),
@@ -683,7 +686,7 @@ pub fn open_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &st
                     b.spawn((text(title, 13.0, Color::WHITE), Pickable::IGNORE));
                 });
             });
-            for (i, (label, _)) in options.iter().enumerate() {
+            for (i, (label, _)) in options.iter().enumerate().filter(|_| !game_look) {
                 let a = -std::f32::consts::FRAC_PI_2 + i as f32 / n as f32 * std::f32::consts::TAU;
                 let (x, y) = (a.cos() * radius, a.sin() * radius * 0.8);
                 p.spawn((
@@ -712,6 +715,9 @@ pub fn open_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &st
             }
         })
         .id();
+    if game_look {
+        commands.entity(root).insert(crate::piemenu::PieRequest(options.iter().map(|o| o.0.clone()).collect()));
+    }
     pie.root = Some(root);
     pie.actor = Some(actor);
     pie.options = options;

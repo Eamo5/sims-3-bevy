@@ -212,6 +212,11 @@ impl UiAssets {
         self.by_id.get(&s3pkg::fnv64(name)).and_then(|&i| self.data.layouts[i].1.first()).map(|w| &w.1)
     }
 
+    /// A window by control id anywhere in a layout (any of its exports).
+    pub fn find(&self, name: &str, id: u32) -> Option<&UiWindow> {
+        self.by_id.get(&s3pkg::fnv64(name)).and_then(|&i| self.data.layouts[i].1.iter().find_map(|w| w.1.find(id)))
+    }
+
     /// One of a layout's exported windows (`GetWindowByExportID`).
     pub fn export(&self, name: &str, id: u32) -> Option<&UiWindow> {
         self.by_id.get(&s3pkg::fnv64(name)).and_then(|&i| self.data.layouts[i].1.iter().find(|w| w.0 == id)).map(|w| &w.1)
