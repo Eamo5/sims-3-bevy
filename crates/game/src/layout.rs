@@ -19,7 +19,7 @@ pub struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, open_ui.after(crate::load_ui_font)).add_systems(Update, (open_ui_when_baked, button_states));
+        app.add_systems(Startup, open_ui.after(crate::load_ui_font)).add_systems(Update, (open_ui_when_baked, set_icons, button_states, fill_bars));
     }
 }
 
@@ -89,6 +89,62 @@ pub struct UiButton {
 #[derive(Component, Clone, Copy)]
 pub struct UiPicture(pub Entity);
 
+/// A fill bar (`FillBarController`): game code sets `value` (0..1) and the bar's clip window
+/// follows, from the start, the end or the middle (below it in its second colour).
+#[derive(Component)]
+pub struct UiFillBar {
+    pub value: f32,
+    direction: u8,
+    colors: (Color, Color),
+    size: Vec2,
+    clip: Entity,
+    fill: Option<Entity>,
+}
+
+const FILL_CLIP: u32 = 0x000f_bc02;
+const FILL_FILL: u32 = 0x000f_bc01;
+
+fn fill_bars(bars: Query<&UiFillBar, Changed<UiFillBar>>, mut nodes: Query<&mut Node>, pictures: Query<&UiPicture>, mut images: Query<&mut ImageNode>) {
+    for b in &bars {
+        let vertical = b.size.y > b.size.x;
+        let full = if vertical { b.size.y } else { b.size.x };
+        let v = b.value.clamp(0.0, 1.0) * full;
+        let (start, len, below) = match b.direction {
+            2 => (full - v, v, false),
+            1 if v > full / 2.0 => (full / 2.0, v - full / 2.0, false),
+            1 => (v, full / 2.0 - v, true),
+            _ => (0.0, v, false),
+        };
+        if let Ok(mut n) = nodes.get_mut(b.clip) {
+            if vertical {
+                (n.top, n.height) = (Val::Px(start.round()), Val::Px(len.round()));
+            } else {
+                (n.left, n.width) = (Val::Px(start.round()), Val::Px(len.round()));
+            }
+        }
+        if let Some(p) = b.fill.and_then(|f| pictures.get(f).ok())
+            && let Ok(mut img) = images.get_mut(p.0)
+        {
+            img.color = if below { b.colors.1 } else { b.colors.0 };
+        }
+    }
+}
+
+/// A picture for an icon button's icon (set once the button is there).
+#[derive(Component)]
+pub struct SetIcon(pub Handle<Image>);
+
+fn set_icons(mut commands: Commands, q: Query<(Entity, &UiButton, &SetIcon)>, mut pics: Query<&mut ImageNode>) {
+    for (e, b, s) in &q {
+        if let Some(i) = b.icon()
+            && let Ok(mut img) = pics.get_mut(i)
+        {
+            img.image = s.0.clone();
+        }
+        commands.entity(e).remove::<SetIcon>();
+    }
+}
+
 impl UiButton {
     /// The icon picture of an icon button (whose image game code sets: a tab's career icon).
     pub fn icon(&self) -> Option<Entity> {
@@ -142,6 +198,9 @@ impl Spawned {
         self.text_of.get(&window).copied()
     }
 }
+
+/// The custom controls that load a layout of their own name into themselves (`PreInit`).
+const EMBEDDED: [&str; 5] = ["BubbleMeter", "MoodBar", "RelationshipBar", "DifficultyMeter", "ChallengeProgressMeter"];
 
 pub fn color(argb: u32) -> Color {
     Color::srgba_u8((argb >> 16) as u8, (argb >> 8) as u8, argb as u8, (argb >> 24) as u8)
@@ -243,8 +302,10 @@ impl UiAssets {
         let mut button: Option<UiButton> = is_button.then(|| UiButton { images: Default::default(), picture: None, icon: None, selected: false, disabled: w.flags & WIN_ENABLED == 0 });
         match &w.drawable {
             Some(d) => self.drawable(commands, images, d, e, size, shade, button.as_mut()),
-            None if w.fill >> 24 != 0 && !is_button && w.cls != "Text" => {
-                commands.entity(e).insert(BackgroundColor(color(w.fill)));
+            // (A plain fill, modulated by the shade as the game's.)
+            None if w.fill >> 24 != 0 && w.shade >> 24 != 0 && !is_button && w.cls != "Text" => {
+                let (f, sh) = (color(w.fill).to_srgba(), shade.to_srgba());
+                commands.entity(e).insert(BackgroundColor(Color::srgba(f.red * sh.red, f.green * sh.green, f.blue * sh.blue, f.alpha * sh.alpha)));
             }
             None => {}
         }
@@ -276,18 +337,33 @@ impl UiAssets {
         for c in w.children.iter().rev() {
             self.spawn_window(commands, images, fonts, c, Some(e), out);
         }
+        if let (Some((direction, main, second)), Some(clip)) = (w.fill_bar, out.within(e, FILL_CLIP)) {
+            commands.entity(e).insert(UiFillBar { value: 0.0, direction, colors: (color(main), color(second)), size, clip, fill: out.within(e, FILL_FILL) });
+        }
+        // (Custom controls bring their own layout in as their child: a bubble meter's bubbles.)
+        if EMBEDDED.contains(&w.cls.as_str()) {
+            let data = self.data.clone();
+            if let Some(inner) = self.by_id.get(&s3pkg::fnv64(&w.cls)).and_then(|&i| data.layouts[i].1.first()) {
+                self.spawn_window(commands, images, fonts, &inner.1, Some(e), out);
+            }
+        }
         e
     }
 
     /// A text filling its window, aligned as the window says.
     fn spawn_text(&mut self, commands: &mut Commands, fonts: &mut Assets<Font>, w: &UiWindow, caption: &str, parent: Entity) -> Entity {
         let (font, line) = self.text_font(fonts, w.font);
+        // (A text's alignment: across 0 left, 1 centre, 2 right, 4 justified (paragraphs);
+        // down 0 top, 1 middle, 2 bottom, 3 middle. Buttons' captions sit in the middle.)
+        let button = w.cls.contains("Button");
         let (justify, align_x) = match w.halign {
-            1 | 4 => (Justify::Center, JustifyContent::Center),
+            _ if button => (Justify::Center, JustifyContent::Center),
+            1 => (Justify::Center, JustifyContent::Center),
             2 => (Justify::Right, JustifyContent::FlexEnd),
             _ => (Justify::Left, JustifyContent::FlexStart),
         };
         let align_y = match w.valign {
+            _ if button => AlignItems::Center,
             1 | 3 => AlignItems::Center,
             2 => AlignItems::FlexEnd,
             _ => AlignItems::FlexStart,

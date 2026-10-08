@@ -112,10 +112,62 @@ pub fn give(commands: &mut Commands, sim: Entity, kind: ItemKind, key: String, n
 #[derive(Resource, Default)]
 pub struct Chosen(pub Option<usize>);
 
+/// An action on the chosen stack asked for from its pie menu (the game's inventory panel).
+#[derive(Resource)]
+pub struct DoItem(pub ItemButton);
+
+/// A stack's picture: a painting's own, a reward's or find's catalogue picture, produce's model.
+pub fn stack_picture(
+    s: &Stack,
+    ui: Option<&mut crate::icons::GameUi>,
+    pictures: &mut crate::paintings::PaintingImages,
+    images: &mut Assets<Image>,
+    baked: Option<&crate::baked::Baked>,
+    thumbs: &mut crate::thumbs::ModelThumbs,
+) -> Option<(Handle<Image>, Option<Rect>)> {
+    if s.kind == ItemKind::Painting {
+        return crate::paintings::image(pictures, images, &baked?.0, s).map(|(h, r)| (h, Some(r)));
+    }
+    let ui = ui?;
+    if s.kind == ItemKind::Reward {
+        let objd = baked?.0.catalog.iter().find(|c| c.instance_name == s.key)?.objd;
+        return ui.icon(images, &s3bake::gamedata::thumb_name(objd.2)).map(|h| (h, None));
+    }
+    if s.kind == ItemKind::Produce {
+        let model = ui.data.plants.iter().find(|p| p.produce == s.key)?.produce_model?;
+        return Some((thumbs.get(images, model), None));
+    }
+    let model = ui.data.collectibles.iter().find(|c| c.key == s.key)?.model.clone();
+    let objd = baked?.0.catalog.iter().find(|c| c.instance_name.eq_ignore_ascii_case(&model))?.objd;
+    ui.icon(images, &s3bake::gamedata::thumb_name(objd.2)).map(|h| (h, None))
+}
+
+/// What can be done with a stack (its pie menu): selling one or all, eating produce, hanging a
+/// painting, placing a reward.
+pub fn stack_actions(sim: &Sim, s: &Stack) -> Vec<(String, ItemButton)> {
+    let mut out = Vec::new();
+    if s.kind != ItemKind::Reward {
+        out.push((format!("Sell (§{})", s.each()), ItemButton::SellOne));
+        if s.count > 1 {
+            out.push((format!("Sell All (§{})", s.worth), ItemButton::SellAll));
+        }
+    }
+    if s.kind == ItemKind::Produce && !sim.age.is_little() {
+        out.push((format!("Eat {}", s.name), ItemButton::Eat));
+    }
+    if s.kind == ItemKind::Painting {
+        out.push(("Hang on a Wall".to_string(), ItemButton::Hang));
+    }
+    if s.kind == ItemKind::Reward {
+        out.push(("Place on the Lot".to_string(), ItemButton::Hang));
+    }
+    out
+}
+
 #[derive(Component)]
 pub struct ItemTile(usize);
 
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ItemButton {
     SellOne,
     SellAll,
@@ -255,6 +307,7 @@ fn inventory_buttons(
     mut notes: ResMut<Notifications>,
     mut play: MessageWriter<crate::sound::PlaySound>,
     selected: Query<Entity, Changed<Selected>>,
+    asked: Option<Res<DoItem>>,
 ) {
     // (A different Sim: nothing picked.)
     if !selected.is_empty() {
@@ -265,11 +318,20 @@ fn inventory_buttons(
             chosen.0 = if chosen.0 == Some(t.0) { None } else { Some(t.0) };
         }
     }
-    for (i, b, mut bg) in &mut buttons {
-        bg.0 = if *i == Interaction::Hovered { BTN_HOVER } else { BTN_NORMAL };
-        if *i != Interaction::Pressed {
-            continue;
-        }
+    // (Asked for from the stack's pie menu.)
+    let from_pie = asked.map(|a| a.0);
+    if from_pie.is_some() {
+        commands.remove_resource::<DoItem>();
+    }
+    let pressed: Vec<ItemButton> = buttons
+        .iter_mut()
+        .filter_map(|(i, b, mut bg)| {
+            bg.0 = if *i == Interaction::Hovered { BTN_HOVER } else { BTN_NORMAL };
+            (*i == Interaction::Pressed).then_some(*b)
+        })
+        .chain(from_pie)
+        .collect();
+    for b in &pressed {
         let (Ok((me, sim, mut inv, mut queue)), Some(k)) = (sel.single_mut(), chosen.0) else { continue };
         let Some(s) = inv.0.get(k).cloned() else { continue };
         match b {

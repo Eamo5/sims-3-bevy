@@ -19,7 +19,7 @@ impl Plugin for LiveHudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InfoPanel>().add_systems(OnEnter(PlayMode::Live), spawn_live_hud).add_systems(
             Update,
-            (time_control, puck, mood_meter, motives_panel, bust, skewer, navigation, show_in_modes, moodlets, wishes).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<LiveHud>),
+            (time_control, puck, mood_meter, motives_panel, bust, skewer, navigation, show_in_modes, moodlets, wishes, skills_panel, skill_journal_buttons).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<LiveHud>),
         );
     }
 }
@@ -77,6 +77,19 @@ const WISH_LIFETIME: u32 = 0x06f5_b807;
 /// The promised wishes' slots: north-west, north-east, south-west, south-east.
 const WISH_SLOT: u32 = 0x06f5_b810;
 const WISH_ICON: u32 = 1;
+const SKILLS_SCROLL: u32 = 0x2fa5_1a02;
+const SKILLS_SCROLLING: u32 = 0x2fa5_1a04;
+const SKILLS_NONE: u32 = 0x2fa5_1a05;
+const SKILLS_NONE_TODDLER: u32 = 0x2fa5_1a08;
+const SKILLS_NONE_BABY: u32 = 0x2fa5_1a0a;
+/// A skill entry's (`HUDSmallSkillEntry`) icon, bubble meter, journal button, tooltip area.
+const SKILL_ICON: u32 = 0x064a_80a0;
+const SKILL_BUBBLES: u32 = 0x064a_80af;
+const SKILL_JOURNAL: u32 = 0x064a_80a9;
+const SKILL_TOOLTIP_MASK: u32 = 0x064a_80b0;
+const SKILL_ENTRY_HEIGHT: f32 = 30.0;
+/// A bubble meter's first bubble (`BubbleMeter.ControlIDs`); in each, 2 lit and 3 unlit.
+const BUBBLE_FIRST: u32 = 0x000b_0101;
 /// A wish's second picture (whom it's about), unused here.
 const WISH_ICON_2: u32 = 2;
 
@@ -112,11 +125,15 @@ impl InfoPanel {
 /// The HUD's layouts on screen.
 #[derive(Resource)]
 pub struct LiveHud {
-    display: Spawned,
-    puck: Spawned,
-    skewer: Spawned,
-    nav: Spawned,
-    motives: Spawned,
+    pub(crate) display: Spawned,
+    pub(crate) puck: Spawned,
+    pub(crate) skewer: Spawned,
+    pub(crate) nav: Spawned,
+    pub(crate) motives: Spawned,
+    pub(crate) skills: Spawned,
+    pub(crate) simology: Spawned,
+    pub(crate) career: Spawned,
+    pub(crate) inventory: Spawned,
     /// The mood meter's full height and its halfway and bonus markers (fractions up it).
     mood_full: f32,
     mood_markers: (f32, f32),
@@ -141,7 +158,7 @@ fn spawn_live_hud(
         return;
     }
     if let Some(old) = old {
-        for s in [&old.display, &old.puck, &old.skewer, &old.nav, &old.motives] {
+        for s in [&old.display, &old.puck, &old.skewer, &old.nav, &old.motives, &old.skills, &old.simology, &old.career, &old.inventory] {
             if let Some(r) = s.root {
                 commands.entity(r).try_despawn();
             }
@@ -159,6 +176,18 @@ fn spawn_live_hud(
     let skewer = spawn("HUDSkewer");
     let nav = spawn("HUDNavigation");
     let motives = spawn("HUDMotives");
+    let skills = spawn("HUDSkillsPanel");
+    let simology = spawn("HUDSimologyPanel");
+    let career = spawn("HUDCareerPanel");
+    let inventory = spawn("HUDInventoryPanel");
+    // (Its collection journal works the journal's own button.)
+    if let Some(j) = inventory.id(0x0d9b_da80) {
+        commands.entity(j).insert(crate::collecting::JournalButton);
+    }
+    // (Its scroll window takes the wheel.)
+    if let Some(sc) = skills.id(SKILLS_SCROLL) {
+        commands.entity(sc).remove::<Pickable>().insert((Interaction::default(), crate::hud::BlocksWorld));
+    }
     // (The navigation's root is shown; its background and tabs come and go with the panels.)
     if let Some(r) = nav.root {
         commands.entity(r).insert(Visibility::Inherited);
@@ -211,7 +240,7 @@ fn spawn_live_hud(
     let mref = ui.layout("HUDMotives").and_then(|w| w.find(MOTIVE_REFERENCE)).map(|w| w.area).unwrap_or([0.0, 0.0, 88.0, 14.0]);
     // (The motives panel open to start with; INFO_PANEL=<tab> for tests.)
     *panel = std::env::var("INFO_PANEL").ok().and_then(|v| InfoPanel::TABS.into_iter().find(|t| format!("{t:?}").eq_ignore_ascii_case(&v))).unwrap_or(InfoPanel::Motives);
-    commands.insert_resource(LiveHud { display, puck, skewer, nav, motives, mood_full: full, mood_markers: markers, motive_width: mref[2] - mref[0] });
+    commands.insert_resource(LiveHud { display, puck, skewer, nav, motives, skills, simology, career, inventory, mood_full: full, mood_markers: markers, motive_width: mref[2] - mref[0] });
 }
 
 /// A colour from hue, saturation and value (the tuning's colours are HSV).
@@ -291,7 +320,7 @@ fn set_shade(images: &mut Query<&mut ImageNode>, pictures: &Query<&UiPicture>, w
     }
 }
 
-fn set_text(texts: &mut Query<&mut Text>, e: Option<Entity>, s: &str) {
+pub(crate) fn set_text(texts: &mut Query<&mut Text>, e: Option<Entity>, s: &str) {
     if let Some(e) = e
         && let Ok(mut t) = texts.get_mut(e)
         && t.0 != s
@@ -300,7 +329,7 @@ fn set_text(texts: &mut Query<&mut Text>, e: Option<Entity>, s: &str) {
     }
 }
 
-fn set_visible(vis: &mut Query<&mut Visibility>, e: Option<Entity>, on: bool) {
+pub(crate) fn set_visible(vis: &mut Query<&mut Visibility>, e: Option<Entity>, on: bool) {
     if let Some(e) = e
         && let Ok(mut v) = vis.get_mut(e)
     {
@@ -311,7 +340,7 @@ fn set_visible(vis: &mut Query<&mut Visibility>, e: Option<Entity>, on: bool) {
     }
 }
 
-fn pressed(q: &Query<(Entity, &Interaction), Changed<Interaction>>, e: Option<Entity>) -> bool {
+pub(crate) fn pressed(q: &Query<(Entity, &Interaction), Changed<Interaction>>, e: Option<Entity>) -> bool {
     e.is_some_and(|e| q.get(e).is_ok_and(|(_, i)| *i == Interaction::Pressed))
 }
 
@@ -640,6 +669,7 @@ fn navigation(
     mut panel: ResMut<InfoPanel>,
     mut tab: ResMut<crate::simpanel::SimTab>,
     keys: Res<ButtonInput<KeyCode>>,
+    (journal, mut only_journal): (Res<crate::simpanel::OpenJournal>, ResMut<crate::simpanel::JournalOnly>),
 ) {
     let d = &hud.display;
     if pressed(&clicks, d.id(EXPAND)) {
@@ -659,11 +689,18 @@ fn navigation(
             *panel = t;
         }
     }
+    // (The skills are in the game's panel; a skill's journal, opened from it, still shows in
+    // the tab's own content.)
+    let journal_open = *panel == InfoPanel::Skills && journal.0.is_some();
+    if only_journal.0 != journal_open {
+        only_journal.0 = journal_open;
+    }
     let want_tab = match *panel {
-        InfoPanel::Skills => Some(crate::simpanel::SimTab::Skills),
-        InfoPanel::Career => Some(crate::simpanel::SimTab::Career),
-        InfoPanel::Simology => Some(crate::simpanel::SimTab::Simology),
-        InfoPanel::Inventory => Some(crate::simpanel::SimTab::Inventory),
+        InfoPanel::Skills if journal_open => Some(crate::simpanel::SimTab::Skills),
+        InfoPanel::Skills => Some(crate::simpanel::SimTab::Needs),
+        InfoPanel::Career => Some(crate::simpanel::SimTab::Needs),
+        InfoPanel::Simology => Some(crate::simpanel::SimTab::Needs),
+        InfoPanel::Inventory => Some(crate::simpanel::SimTab::Needs),
         _ => Some(crate::simpanel::SimTab::Needs),
     };
     if let Some(t) = want_tab
@@ -674,6 +711,10 @@ fn navigation(
     let open = *panel != InfoPanel::None;
     set_visible(&mut vis, hud.nav.id(NAV_BACKGROUND), open);
     set_visible(&mut vis, hud.motives.root, *panel == InfoPanel::Motives);
+    set_visible(&mut vis, hud.skills.root, *panel == InfoPanel::Skills);
+    set_visible(&mut vis, hud.simology.root, *panel == InfoPanel::Simology);
+    set_visible(&mut vis, hud.career.root, *panel == InfoPanel::Career);
+    set_visible(&mut vis, hud.inventory.root, *panel == InfoPanel::Inventory);
     for (i, t) in InfoPanel::TABS.iter().enumerate() {
         if let Some(e) = hud.nav.id(NAV_TAB + 1 + i as u32)
             && let Ok(mut b) = buttons.get_mut(e)
@@ -700,6 +741,10 @@ fn show_in_modes(hud: Res<LiveHud>, buy: Res<crate::buy::BuyMode>, mut vis: Quer
         set_visible(&mut vis, r, live);
     }
     set_visible(&mut vis, hud.motives.root, live && *panel == InfoPanel::Motives);
+    set_visible(&mut vis, hud.skills.root, live && *panel == InfoPanel::Skills);
+    set_visible(&mut vis, hud.simology.root, live && *panel == InfoPanel::Simology);
+    set_visible(&mut vis, hud.career.root, live && *panel == InfoPanel::Career);
+    set_visible(&mut vis, hud.inventory.root, live && *panel == InfoPanel::Inventory);
 }
 
 fn set_image(images: &mut Query<&mut ImageNode>, pictures: &Query<&UiPicture>, window: Option<Entity>, h: Option<Handle<Image>>) {
@@ -902,5 +947,121 @@ fn wishes(
         set_image(&mut images, &pictures, d.within(lt, WISH_ICON), h);
         let tip = format!("Lifetime Wish: {}\n{}\n{} (+{} lifetime happiness)", def.name, def.describe(Some(&data)), l.status, crate::lifetime::group(def.points(Some(&data)) as i64));
         set_tooltip(&mut commands, &mut tips, Some(lt), tip);
+    }
+}
+
+/// A skill's journal button in the skills panel.
+#[derive(Component)]
+struct SkillJournalButton(&'static str);
+
+/// The skills panel: an entry per skill learned (the game's `HUDSmallSkillEntry`: its icon,
+/// its level in bubbles, its journal button), highest first, scrolled with the wheel; or the
+/// game's words when there are none.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn skills_panel(
+    mut commands: Commands,
+    hud: Res<LiveHud>,
+    ui: Option<ResMut<UiAssets>>,
+    (mut assets, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
+    sel: Query<(&Sim, &crate::interact::Skills), With<Selected>>,
+    mut game_ui: Option<ResMut<crate::icons::GameUi>>,
+    mut vis: Query<&mut Visibility>,
+    mut nodes: Query<&mut Node>,
+    mut state: Local<(Option<Entity>, Vec<(&'static str, i32)>, bool, f32)>,
+    (mut wheel, hovered): (MessageReader<bevy::input::mouse::MouseWheel>, Query<&Interaction>),
+    panel: Res<InfoPanel>,
+) {
+    let (Some(mut ui), Some(scroll)) = (ui, hud.skills.id(SKILLS_SCROLLING)) else { return };
+    let Ok((sim, skills)) = sel.single() else { return };
+    let mut list: Vec<(&'static str, f32)> = skills.0.iter().filter(|(_, v)| **v > 0.01).map(|(k, v)| (*k, *v)).collect();
+    list.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(b.0)));
+    // (The words for having none, by age.)
+    let little = matches!(sim.age, crate::sim::Age::Baby | crate::sim::Age::Toddler);
+    set_visible(&mut vis, hud.skills.id(SKILLS_NONE), list.is_empty() && !little);
+    set_visible(&mut vis, hud.skills.id(SKILLS_NONE_TODDLER), list.is_empty() && sim.age == crate::sim::Age::Toddler);
+    set_visible(&mut vis, hud.skills.id(SKILLS_NONE_BABY), list.is_empty() && sim.age == crate::sim::Age::Baby);
+    // Scrolling with the wheel over the panel, an entry at a time.
+    let over = hud.skills.id(SKILLS_SCROLL).is_some_and(|e| hovered.get(e).is_ok_and(|i| *i != Interaction::None));
+    let rows = list.len() as f32;
+    for w in wheel.read() {
+        if over && *panel == InfoPanel::Skills {
+            state.3 = (state.3 - w.y.signum()).clamp(0.0, (rows - 4.0).max(0.0));
+        }
+    }
+    if let Some(h) = state.0
+        && let Ok(mut n) = nodes.get_mut(h)
+    {
+        let top = Val::Px(-state.3 * SKILL_ENTRY_HEIGHT);
+        if n.top != top {
+            n.top = top;
+        }
+    }
+    let key: Vec<(&'static str, i32)> = list.iter().map(|(k, v)| (*k, (*v * 20.0) as i32)).collect();
+    let holder_ok = state.0.is_some_and(|h| vis.contains(h));
+    if holder_ok && state.1 == key && state.2 == game_ui.is_some() {
+        return;
+    }
+    let holder = match state.0.filter(|_| holder_ok) {
+        Some(h) => {
+            commands.entity(h).despawn_children();
+            h
+        }
+        None => commands
+            .spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), ..default() }, Visibility::Inherited, Pickable::IGNORE, ChildOf(scroll)))
+            .id(),
+    };
+    *state = (Some(holder), key, game_ui.is_some(), state.3.min((rows - 4.0).max(0.0)));
+    let Some(template) = ui.layout("HUDSmallSkillEntry").cloned() else { return };
+    for (i, (name, v)) in list.iter().enumerate() {
+        let info = game_ui.as_deref().and_then(|g| g.data.skill(name).cloned());
+        let max = info.as_ref().map_or(10, |i| i.max_level.max(1));
+        let level = (*v as u32).min(max);
+        let mut entry = template.clone();
+        let (w, h) = (entry.area[2] - entry.area[0], entry.area[3] - entry.area[1]);
+        let y = i as f32 * SKILL_ENTRY_HEIGHT;
+        entry.area = [0.0, y, w, y + h];
+        let s = ui.spawn_under(&mut commands, &mut assets, &mut fonts, &entry, holder);
+        // Its icon, in the panel's navy.
+        let icon = info.as_ref().and_then(|i| game_ui.as_deref_mut().and_then(|g| g.icon(&mut assets, &i.icon)));
+        if let (Some(win), Some(h)) = (s.id(SKILL_ICON), icon) {
+            let tint = ui.layout("HUDSmallSkillEntry").and_then(|l| l.find(SKILL_ICON)).map_or(Color::WHITE, |w| crate::layout::color(w.shade));
+            commands.entity(win).despawn_children();
+            commands.entity(win).with_children(|c| {
+                c.spawn((ImageNode { image: h, color: tint, ..default() }, Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
+            });
+        }
+        // Its level in bubbles (a bubble a level, ten to the meter; five-level skills fill
+        // two bubbles a level, as the game's step).
+        if let Some(meter) = s.id(SKILL_BUBBLES) {
+            let step = (max / 10).max(1);
+            let filled = (level / step) as usize;
+            let fill = if max < 10 { (level * (10 / max.max(1))) as usize } else { filled };
+            for b in 0..10u32 {
+                let Some(bubble) = s.within(meter, BUBBLE_FIRST + b) else { continue };
+                for (id, on) in [(2, (b as usize) < fill), (3, (b as usize) >= fill), (4, false), (5, false)] {
+                    if let Some(e) = s.within(bubble, id) {
+                        commands.entity(e).insert(if on { Visibility::Inherited } else { Visibility::Hidden });
+                    }
+                }
+            }
+        }
+        if let Some(j) = s.id(SKILL_JOURNAL) {
+            commands.entity(j).insert(SkillJournalButton(name));
+        }
+        let into = if level >= max { String::from("Mastered!") } else { format!("{:.0}% of the way to level {}", v.fract() * 100.0, level + 1) };
+        let desc = info.as_ref().map(|i| i.desc.replace("{0.SimFirstName}", &sim.first)).unwrap_or_default();
+        let tip = format!("{} — level {level} of {max}\n{into}\n{desc}", info.as_ref().map_or(*name, |i| i.name.as_str()));
+        if let Some(m) = s.id(SKILL_TOOLTIP_MASK) {
+            commands.entity(m).remove::<Pickable>().insert((Interaction::default(), crate::icons::Tooltip(tip)));
+        }
+    }
+}
+
+/// A skill's journal button opens its journal (or closes it).
+fn skill_journal_buttons(q: Query<(&Interaction, &SkillJournalButton), Changed<Interaction>>, mut open: ResMut<crate::simpanel::OpenJournal>) {
+    for (i, b) in &q {
+        if *i == Interaction::Pressed {
+            open.0 = if open.0 == Some(b.0) { None } else { Some(b.0) };
+        }
     }
 }

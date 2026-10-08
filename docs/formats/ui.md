@@ -78,7 +78,9 @@ size-control window grows up from the meter's foot.
 ### Text
 
 `Text`: `Caption`, `TextFont` (a style id), `TextColor`, `HorizontalAlign` (0 left, 1 centre,
-2 right; 4 seen too), `VerticalAlign` (0 top, 1 middle, 2 bottom, 3 middle), `WordWrap`.
+2 right, 4 justified: paragraphs) and `VerticalAlign` (0 top, 1 middle, 2 bottom, 3 middle),
+unlike the images' 1/2/3 (judged from the layouts: the motives' names, wider than their bars,
+are 1; the managed code doesn't name them), `WordWrap` (0 none, 4 on, 5 inherit).
 Buttons: `CaptionColors` × 8, `CaptionHAlign`, `CaptionVAlign`.
 
 Styles (`TextFont`) are the style sheet's: `Name(0xid) : Parent { font-family; font-size: 8pt;

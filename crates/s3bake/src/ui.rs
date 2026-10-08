@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackWriter, read_value, write_value};
 
-pub const UI_VERSION: u32 = 3;
+pub const UI_VERSION: u32 = 5;
 pub const T_LAYOUT: u32 = 0x025C95B6;
 pub const T_FONT: u32 = 0x062E9EE0;
 pub const T_IMAGE: u32 = 0x2F7D0004;
@@ -101,7 +101,8 @@ pub struct UiWindow {
     pub font: u32,
     /// The text colour (per state, for buttons).
     pub colors: Vec<u32>,
-    /// Text alignment (0 left/top, 1 centre, 2 right/bottom).
+    /// Text alignment: across 0 left, 1 centre, 2 right, 4 justified; down 0 top, 1 middle,
+    /// 2 bottom, 3 middle.
     pub halign: u8,
     pub valign: u8,
     pub wrap: u32,
@@ -113,6 +114,9 @@ pub struct UiWindow {
     pub button_group: u32,
     /// An `ItemGrid`'s cells.
     pub grid: Option<UiGrid>,
+    /// A `FillBarController`'s fill: direction (0 from the start, 1 from the middle, 2 from the
+    /// end), and its colour (and its colour below the middle).
+    pub fill_bar: Option<(u8, u32, u32)>,
     pub children: Vec<UiWindow>,
 }
 
@@ -178,6 +182,21 @@ impl UiWindow {
     }
 }
 
+/// Pictures the interface's code loads by name (`ResourceKey.CreatePNGKey`), at fnv64 of the
+/// name: the life stages' icons (the Simology panel's age bar).
+pub const NAMED_IMAGES: &[&str] = &[
+    "cas_basics_i_age_baby_r2",
+    "cas_basics_i_age_toddler_r2",
+    "cas_basics_i_age_child_r2",
+    "cas_basics_i_age_teen_r2",
+    "cas_basics_i_age_yadult_r2",
+    "cas_basics_i_age_adult_r2",
+    "cas_basics_i_age_elderly_r2",
+];
+
+/// The zodiac signs (`sign_<sign>_sm`).
+pub const ZODIAC: [&str; 12] = ["Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo", "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces"];
+
 pub fn ui_ready(root: &BakeRoot) -> bool {
     let g = root.global_dir();
     g.join("ui.pack").exists() && read_value::<u32>(&g.join("ui.version")).is_ok_and(|v| v == UI_VERSION)
@@ -238,8 +257,11 @@ pub fn bake_ui(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::path::Pat
         let font = pick_font(&fonts, &st.family, st.italic).unwrap_or(0);
         out.styles.push((id, TextStyle { name: st.name, font, size: st.size, line: st.line }));
     }
-    // Every image the layouts draw.
-    let mut images = BTreeSet::new();
+    // Every image the layouts draw, and those the interface's code loads by name.
+    let mut images: BTreeSet<u64> = NAMED_IMAGES.iter().map(|n| s3pkg::fnv64(n)).collect();
+    for z in ZODIAC {
+        images.insert(s3pkg::fnv64(&format!("sign_{z}_sm")));
+    }
     for (_, list) in &out.layouts {
         for (_, w) in list {
             w.images(&mut images);
@@ -312,6 +334,9 @@ fn window(o: &XNode) -> Option<UiWindow> {
             columns: val("VisibleCols").map_or(0, num),
             rows: val("VisibleRows").map_or(0, num),
         });
+    }
+    if w.cls == "FillBarController" {
+        w.fill_bar = Some((val("FillDirection").map_or(0, num) as u8, val("MainColor").map_or(0xffff_ffff, num), val("SecondaryColor").map_or(0xffff_ffff, num)));
     }
     if let Some(procs) = props("WinProcs") {
         for p in procs.children.iter().filter(|c| c.name == "object") {

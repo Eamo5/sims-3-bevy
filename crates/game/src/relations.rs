@@ -40,9 +40,9 @@ pub struct RelationsPanel {
     tree_shown: Vec<u64>,
 }
 
-/// The panel's Family Tree button.
+/// The panel's Family Tree button (and the Simology panel's).
 #[derive(Component)]
-struct TreeButton;
+pub struct TreeButton;
 
 #[derive(Component)]
 struct RelationRow(Entity);

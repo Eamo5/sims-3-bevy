@@ -604,10 +604,18 @@ installation is unreachable.
   in its staging area, paged and clicked to promise, the four promised wishes in their slots
   and the lifetime wish in its frame), the skewer of the household's faces up the left, each
   ringed in its mood's colour (click to select, again to go to them), and the info panels
-  under their tabs (the motives' bars filled and coloured as the game's: green, fading to
-  amber and red as a need runs low; Relationships, Opportunities and the lifetime rewards
-  open their windows). Buttons light up, press and grey out with the game's own pictures.
-  The Sim's own menu has their phone.
+  under their tabs: the motives' bars filled and coloured as the game's (green, fading to
+  amber and red as a need runs low); Skills (each skill's icon and its level in the game's
+  bubbles, its journal a click away; the wheel scrolls); Simology (the name, the age bar from
+  this life stage's icon to the next's with the days left on hover, the traits with their
+  icons and meanings, the favourite food, music and colour, the family tree button); Career
+  (the job's icon and title, its pay, hours and working days, the time till work, the
+  performance meter up or down from the middle; school and its grade for children and teens;
+  at work, its button chooses how they work); Inventory (the stacks in the game's cells with
+  their pictures and counts, each clicked for its menu: sell one or all, eat, hang, place;
+  the cell phone opens the phone, the green book the collection journal). Relationships,
+  Opportunities and the lifetime rewards open their windows. Buttons light up, press and grey
+  out with the game's own pictures. The Sim's own menu has their phone too.
 - **Interface**: the game's own icons and words — moodlets (name, description, time left),
   traits (Create-a-Sim and the Sim's panel) and wishes — read from the game's tuning tables
   (`GameplayData.package`) and string tables, with tooltips on hover. Sims' portraits are

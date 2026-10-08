@@ -1498,6 +1498,8 @@ use crate::social::RelStatus;
 
 #[derive(Clone, Debug)]
 pub enum ActionKind {
+    /// An inventory stack's action chosen from its pie menu (never queued).
+    InventoryItem(crate::inventory::ItemButton),
     Object { target: Entity, def: usize },
     Social { target: Entity, social: usize },
     GoHere(Vec2, u8),
@@ -2054,7 +2056,7 @@ fn run_actions(
                             commands.entity(me).insert(clip);
                             continue;
                         }
-                        ActionKind::BuyReward(_) => None,
+                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(_) => None,
                         ActionKind::Outro { .. } => {
                             action.phase = Phase::Running(0.0);
                             continue;
@@ -2306,6 +2308,7 @@ fn run_actions(
                             | ActionKind::PhoneChat { .. }
                             | ActionKind::Retire
                             | ActionKind::BuyReward(_)
+                            | ActionKind::InventoryItem(_)
                             | ActionKind::EatHere
                             | ActionKind::EatItem { .. }
                             | ActionKind::Outro { .. }

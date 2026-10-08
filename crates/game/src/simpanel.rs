@@ -19,6 +19,7 @@ impl Plugin for SimPanelPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SimTab>()
             .init_resource::<OpenJournal>()
+            .init_resource::<JournalOnly>()
             .add_systems(Update, (tab_buttons, tone_buttons, journal_buttons, tab_layout, tab_content).chain().run_if(in_state(PlayMode::Live)));
     }
 }
@@ -123,6 +124,11 @@ fn tone_buttons(q: Query<(&Interaction, &ToneButton), Changed<Interaction>>, mut
 #[derive(Resource, Default)]
 pub struct OpenJournal(pub Option<&'static str>);
 
+/// Only the open skill's journal in the Skills tab (the skills themselves being in the game's
+/// skills panel).
+#[derive(Resource, Default)]
+pub struct JournalOnly(pub bool);
+
 /// A skill in the Skills tab: clicked, its journal opens (or closes).
 #[derive(Component)]
 struct JournalButton(&'static str);
@@ -200,6 +206,7 @@ fn tab_content(
         ResMut<crate::paintings::PaintingImages>,
     ),
     open: Res<OpenJournal>,
+    only_journal: Res<JournalOnly>,
 ) {
     let (Ok(root), Ok((e, sim, skills, job, at_work, wishes, ltw, author, chess, inv, toddler, (journal, rels, recipes)))) = (content.single(), sel.single()) else { return };
     // The open journal: its statistics and challenges (name, description, earned, progress).
@@ -225,7 +232,8 @@ fn tab_content(
     let key = match *tab {
         SimTab::Needs => "needs".to_string(),
         SimTab::Skills => format!(
-            "{e:?} {:?} {:?} {:?}",
+            "{e:?} {} {:?} {:?} {:?}",
+            only_journal.0,
             journal_page.as_ref().map(|(s, c)| (open.0, s.clone(), c.iter().map(|x| (x.2, (x.3 * 10.0) as i64)).collect::<Vec<_>>())),
             skills.0.iter().map(|(k, v)| (*k, (*v * 20.0) as i32)).collect::<Vec<_>>(),
             (author.map(|a| (a.books.len(), a.weekly_royalties(), a.draft.as_ref().map(|d| (d.pages / d.length * 50.0) as i32))), chess.map(|c| (c.wins, c.losses)), toddler.map(|t| ((t.walk * 100.0) as i32, (t.talk * 100.0) as i32)))
@@ -247,6 +255,10 @@ fn tab_content(
         SimTab::Skills => {
             let mut list: Vec<(&'static str, f32)> = skills.0.iter().filter(|(_, v)| **v > 0.01).map(|(k, v)| (*k, *v)).collect();
             list.sort_by(|a, b| b.1.total_cmp(&a.1));
+            // (Just the open journal: the skills are in the game's panel.)
+            if only_journal.0 {
+                list.retain(|(k, _)| open.0 == Some(*k));
+            }
             // A toddler's walking and talking, learned from grown-ups.
             if sim.age == crate::sim::Age::Toddler {
                 let t = toddler.copied().unwrap_or_default();
@@ -498,25 +510,7 @@ fn tab_content(
         SimTab::Inventory => {
             // Finds and fish are pictured by their catalogue objects, produce by its model.
             let mut ui = ui;
-            let picture = |s: &crate::inventory::Stack| -> Option<(Handle<Image>, Option<Rect>)> {
-                // (A painting: its picture.)
-                if s.kind == crate::inventory::ItemKind::Painting {
-                    return crate::paintings::image(&mut pictures, &mut images, &baked.as_ref()?.0, s).map(|(h, r)| (h, Some(r)));
-                }
-                let ui = ui.as_deref_mut()?;
-                // (A reward: its catalogue picture.)
-                if s.kind == crate::inventory::ItemKind::Reward {
-                    let objd = baked.as_ref()?.0.catalog.iter().find(|c| c.instance_name == s.key)?.objd;
-                    return ui.icon(&mut images, &s3bake::gamedata::thumb_name(objd.2)).map(|h| (h, None));
-                }
-                if s.kind == crate::inventory::ItemKind::Produce {
-                    let model = ui.data.plants.iter().find(|p| p.produce == s.key)?.produce_model?;
-                    return Some((thumbs.get(&mut images, model), None));
-                }
-                let model = ui.data.collectibles.iter().find(|c| c.key == s.key)?.model.clone();
-                let objd = baked.as_ref()?.0.catalog.iter().find(|c| c.instance_name.eq_ignore_ascii_case(&model))?.objd;
-                ui.icon(&mut images, &s3bake::gamedata::thumb_name(objd.2)).map(|h| (h, None))
-            };
+            let picture = |s: &crate::inventory::Stack| crate::inventory::stack_picture(s, ui.as_deref_mut(), &mut pictures, &mut images, baked.as_deref(), &mut thumbs);
             crate::inventory::draw_tab(p, sim, inv, chosen.0, picture);
         }
         SimTab::Needs => {}

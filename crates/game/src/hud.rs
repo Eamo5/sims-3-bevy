@@ -1204,6 +1204,7 @@ fn pie_buttons(
     selected: Query<Entity, With<Selected>>,
     (mut wishes, mut notes): (Query<(&Sim, &mut crate::wishes::Wishes), With<Selected>>, ResMut<Notifications>),
     (ui_data, inventories): (Option<Res<crate::icons::GameUi>>, Query<&crate::inventory::Inventory>),
+    mut jobs: Query<&mut crate::careers::Job>,
 ) {
     let mut chosen = None;
     for (i, opt) in &q {
@@ -1220,6 +1221,21 @@ fn pie_buttons(
     }
     if label == PHONE_LABEL {
         commands.insert_resource(OpenPhone);
+        return;
+    }
+    // (An inventory stack's actions: see `hudpanels::inventory_panel`.)
+    if let ActionKind::InventoryItem(b) = kind {
+        commands.insert_resource(crate::inventory::DoItem(b));
+        return;
+    }
+    // (How a Sim at work works.)
+    if let Some(t) = label.strip_prefix(crate::hudpanels::TONE_PREFIX)
+        && let Some(mut j) = actor.and_then(|a| jobs.get_mut(a).ok())
+    {
+        let skill = j.career().skill;
+        if let Some(tone) = crate::careers::WorkTone::ALL.into_iter().find(|w| t.trim_end_matches(" ✓") == w.label(skill)) {
+            j.tone = tone;
+        }
         return;
     }
     let _ = (&mut wishes, &mut notes);
