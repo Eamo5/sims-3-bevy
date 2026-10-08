@@ -477,9 +477,7 @@ pub fn solid_channels(xml: &str) -> Vec<(u8, [f32; 3])> {
             if let Some((base, shift)) = hsv_of(block) {
                 return Some((ch, shifted(base, shift)));
             }
-            if !lower[start..end].contains("solidcolor") {
-                return None;
-            }
+            // (A solid colour, or a pattern its colour tints.)
             let vals = floats(xml_value(block, "Color")?);
             (vals.len() >= 3).then(|| (ch, [vals[0], vals[1], vals[2]]))
         })

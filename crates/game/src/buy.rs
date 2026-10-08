@@ -25,7 +25,7 @@ impl Plugin for BuyPlugin {
                 Update,
                 (toggle_buy, buy_panel, buy_buttons, buy_visuals, buy_pick, placement, paint).chain().run_if(in_state(PlayMode::Live)),
             )
-            .add_systems(Update, scripted_style.run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (scripted_style, scripted_cover).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -97,6 +97,10 @@ pub struct BuyMode {
     /// Create a Style open for the object in hand, and the style it's in (if one's been made).
     styling: bool,
     style: Option<crate::style::ObjectStyle>,
+    /// What the wallpaper or floor being painted with is painted in: one of its swatches, or a
+    /// style made for it (none: its first swatch).
+    cover: Option<Key>,
+    cover_style: Option<crate::style::CoverStyle>,
 }
 
 #[derive(Component)]
@@ -156,6 +160,8 @@ enum BuyButton {
     /// palette).
     Styling,
     StyleColour(u8, u8),
+    /// A swatch of the wallpaper or floor in hand.
+    CoverSwatch(u8),
     /// A terrain paint (or the eraser), or a brush size (index into `BRUSHES`).
     Terrain(u8),
     Brush(usize),
@@ -191,6 +197,41 @@ fn scripted_style(time: Res<Time>, buy: Res<BuyMode>, mut buttons: Query<(&BuyBu
         *step += 1;
         info!("object style test: pressed {want:?}");
     }
+}
+
+/// COVER_STYLE=1 (tests): the wallpaper tab opened (10 seconds in), a pattern with colour presets
+/// picked, its second swatch, Create a Style, and its first channel made blue, a step every two
+/// seconds.
+fn scripted_cover(time: Res<Time>, mut buy: ResMut<BuyMode>, ui: Option<Res<crate::icons::GameUi>>, mut buttons: Query<(&BuyButton, &mut Interaction)>, mut step: Local<u8>) {
+    if std::env::var("COVER_STYLE").is_err() {
+        return;
+    }
+    let t = time.elapsed_secs();
+    if t < 10.0 + *step as f32 * 2.0 {
+        return;
+    }
+    if *step == 0 {
+        buy.show(WALLPAPER_TAB);
+        *step = 1;
+        return;
+    }
+    let Some(ui) = ui else { return };
+    let want = match *step {
+        1 => buttons.iter().find_map(|(b, _)| match b {
+            BuyButton::Pattern(i) if ui.data.patterns.get(*i).is_some_and(|p| p.swatches.len() > 2 && p.channels.get(1).is_some_and(|c| !c.is_empty())) => Some(*b),
+            _ => None,
+        }),
+        2 => Some(BuyButton::CoverSwatch(1)),
+        3 => Some(BuyButton::Styling),
+        4 => Some(BuyButton::StyleColour(buy.painting.and_then(|i| ui.data.patterns.get(i)).and_then(|p| p.channels.get(1)?.first().map(|c| c.0)).unwrap_or(0), 12)),
+        _ => None,
+    };
+    let Some(want) = want else { return };
+    if let Some((_, mut i)) = buttons.iter_mut().find(|(b, _)| **b == want) {
+        *i = Interaction::Pressed;
+        info!("cover style test: pressed {want:?}");
+    }
+    *step += 1;
 }
 
 /// Index of the wallpaper tab (the floors, construction, doors and windows tabs follow).
@@ -574,6 +615,79 @@ fn buy_panel(
                 row.spawn(text(format!("Page {} / {} · {} patterns · {how} · right-click to stop", page + 1, pages, items.len()), 13.0, Color::WHITE));
                 button(row, "Next >".into(), BuyButton::Next, Val::Px(80.0), 28.0, false);
             });
+            // The pattern in hand: its swatches (the game's colour presets), and Create a Style.
+            let Some(pat) = buy.painting.and_then(|i| ui.data.patterns.get(i)) else { return };
+            let current = buy.cover.unwrap_or(pat.texture);
+            let swatch = buy.cover_style.as_ref().filter(|s| s.cwal == pat.cwal).map(|s| s.swatch as usize).or_else(|| pat.swatches.iter().position(|k| *k == current)).unwrap_or(0);
+            let channels = pat.channels.get(swatch).cloned().unwrap_or_default();
+            if pat.swatches.len() < 2 && channels.is_empty() {
+                return;
+            }
+            p.spawn(Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
+                row.spawn(text(format!("{} · Colors", pat.name), 13.0, Color::WHITE));
+                if !channels.is_empty() {
+                    button(row, if buy.styling { "Close Create a Style".into() } else { "Create a Style".into() }, BuyButton::Styling, Val::Px(150.0), 28.0, buy.styling);
+                }
+                for (s, key) in pat.swatches.iter().enumerate() {
+                    let tex = assets.texture(&mut ctx, *key);
+                    let chosen = *key == current;
+                    row.spawn((
+                        Button,
+                        BuyButton::CoverSwatch(s as u8),
+                        Node {
+                            width: Val::Px(if floor { 36.0 } else { 22.0 }),
+                            height: Val::Px(36.0),
+                            border: UiRect::all(Val::Px(if chosen { 3.0 } else { 1.0 })),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            ..default()
+                        },
+                        BorderColor::all(if chosen { PLUMBOB_GREEN } else { Color::WHITE }),
+                        BackgroundColor(BTN_NORMAL),
+                    ))
+                    .with_children(|b| {
+                        if let Some(t) = tex {
+                            b.spawn((ImageNode::new(t), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
+                        }
+                    });
+                }
+                // (The style made, shown as what's painted with now.)
+                if buy.cover_style.as_ref().is_some_and(|s| s.cwal == pat.cwal)
+                    && let Some(t) = assets.texture(&mut ctx, current)
+                {
+                    row.spawn((
+                        Node { width: Val::Px(if floor { 36.0 } else { 22.0 }), height: Val::Px(36.0), border: UiRect::all(Val::Px(3.0)), border_radius: BorderRadius::all(Val::Px(4.0)), ..default() },
+                        BorderColor::all(PLUMBOB_GREEN),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((ImageNode::new(t), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
+                    });
+                }
+            });
+            if buy.styling && !channels.is_empty() {
+                if renders.busy() {
+                    p.spawn(text("Restyling…", 13.0, Color::srgb(1.0, 0.9, 0.5)));
+                }
+                for (ch, own) in channels {
+                    let now = buy.cover_style.as_ref().filter(|s| s.cwal == pat.cwal && s.swatch as usize == swatch).and_then(|s| s.colours.iter().find(|c| c.0 == ch)).map_or(own, |c| c.1);
+                    p.spawn(Node { column_gap: Val::Px(3.0), align_items: AlignItems::Center, flex_wrap: FlexWrap::Wrap, ..default() }).with_children(|row| {
+                        row.spawn((text(format!("Color {}", (b'A' + ch) as char), 13.0, Color::WHITE), Node { width: Val::Px(58.0), ..default() }));
+                        row.spawn((
+                            Node { width: Val::Px(24.0), height: Val::Px(24.0), border: UiRect::all(Val::Px(2.0)), border_radius: BorderRadius::all(Val::Px(4.0)), margin: UiRect::right(Val::Px(8.0)), ..default() },
+                            BorderColor::all(Color::WHITE),
+                            BackgroundColor(Color::srgb(now[0], now[1], now[2])),
+                        ));
+                        for (i, [r, g, b]) in crate::style::PALETTE.iter().enumerate() {
+                            row.spawn((
+                                Button,
+                                BuyButton::StyleColour(ch, i as u8),
+                                Node { width: Val::Px(20.0), height: Val::Px(20.0), border: UiRect::all(Val::Px(1.0)), border_radius: BorderRadius::all(Val::Px(4.0)), ..default() },
+                                BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.5)),
+                                BackgroundColor(Color::srgb(*r, *g, *b)),
+                            ));
+                        }
+                    });
+                }
+            }
             return;
         }
         // The object in hand's designs (the game's colour and pattern presets for it).
@@ -707,7 +821,14 @@ fn buy_buttons(
     mut play: MessageWriter<crate::sound::PlaySound>,
     ghost_tf: Query<&Transform>,
     (mut renders, install, mut styled): (ResMut<crate::style::StyleRenders>, Option<Res<crate::data::InstallPath>>, MessageReader<crate::style::ObjectStyleReady>),
+    (ui, mut covered): (Option<Res<crate::icons::GameUi>>, MessageReader<crate::style::CoverStyleReady>),
 ) {
+    // A wall or floor style rendered: painted with from now on.
+    for r in covered.read() {
+        buy.cover = Some(r.0.texture());
+        buy.cover_style = Some(r.0.clone());
+        buy.dirty = true;
+    }
     // A style made in Create a Style, rendered: the object in hand in it.
     for r in styled.read() {
         let Some(p) = buy.placing.as_mut().filter(|p| p.objd == r.0.objd) else { continue };
@@ -741,6 +862,23 @@ fn buy_buttons(
             }
             BuyButton::Styling => {
                 buy.styling = !buy.styling;
+                buy.dirty = true;
+            }
+            BuyButton::CoverSwatch(s) => {
+                let Some(pat) = buy.painting.and_then(|i| ui.as_ref()?.data.patterns.get(i)) else { continue };
+                buy.cover = pat.swatches.get(*s as usize).copied();
+                buy.cover_style = None;
+                buy.dirty = true;
+            }
+            // (Create a Style for the wallpaper or floor in hand.)
+            BuyButton::StyleColour(ch, idx) if buy.painting.is_some() => {
+                let (Some(pat), Some(&colour), Some(path)) = (buy.painting.and_then(|i| ui.as_ref()?.data.patterns.get(i)), crate::style::PALETTE.get(*idx as usize), install.as_ref()) else { continue };
+                let swatch = buy.cover_style.as_ref().filter(|s| s.cwal == pat.cwal).map(|s| s.swatch).or_else(|| pat.swatches.iter().position(|k| Some(*k) == buy.cover).map(|i| i as u8)).unwrap_or(0);
+                let mut colours = buy.cover_style.as_ref().filter(|s| s.cwal == pat.cwal && s.swatch == swatch).map(|s| s.colours.clone()).unwrap_or_default();
+                colours.retain(|(c, _)| c != ch);
+                colours.push((*ch, colour));
+                colours.sort_by_key(|c| c.0);
+                renders.request_cover(crate::style::CoverStyle { cwal: pat.cwal, swatch, floor: pat.floor, colours }, path.0.clone());
                 buy.dirty = true;
             }
             BuyButton::StyleColour(ch, idx) => {
@@ -811,6 +949,8 @@ fn buy_buttons(
             BuyButton::Pattern(i) => {
                 buy.drop_tools(&mut commands);
                 buy.painting = Some(*i);
+                buy.cover = None;
+                buy.cover_style = None;
             }
             BuyButton::Item(key) => {
                 buy.drop_tools(&mut commands);
@@ -857,7 +997,11 @@ fn paint(
         return;
     }
     let (Some(ui), Some(b)) = (ui, building.as_deref_mut()) else { return };
-    let Some(pat) = ui.data.patterns.get(i).cloned() else { return };
+    let Some(mut pat) = ui.data.patterns.get(i).cloned() else { return };
+    // (In the swatch or style chosen for it.)
+    if let Some(k) = buy.cover {
+        pat.texture = k;
+    }
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
     let Ok((camera, cam_tf)) = cams.single() else { return };

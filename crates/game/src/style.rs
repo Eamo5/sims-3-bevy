@@ -91,6 +91,28 @@ impl ObjectStyle {
     }
 }
 
+/// Texture-store type of the styles made for walls and floors in Build mode's Create a Style.
+pub const T_COVER_STYLE: u32 = 0x0C0E_5171;
+
+/// A wall or floor pattern's own style: one of its swatches with some of its channels' colours
+/// changed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CoverStyle {
+    pub cwal: u64,
+    pub swatch: u8,
+    pub floor: bool,
+    pub colours: Vec<(u8, [f32; 3])>,
+}
+
+impl CoverStyle {
+    /// Where its rendering is kept in the texture store (walls and floors painted in it are
+    /// saved by this key).
+    pub fn texture(&self) -> s3bake::Key {
+        let desc = format!("{:X}|{}|{:?}", self.cwal, self.swatch, self.colours.iter().map(|(c, v)| (c, v.map(|x| (x * 255.0).round() as u8))).collect::<Vec<_>>());
+        (T_COVER_STYLE, if self.floor { 4 } else { 3 }, s3pkg::fnv64(&desc))
+    }
+}
+
 /// The installed game's packages, opened the first time a style is rendered.
 static INSTALL: OnceLock<Option<Arc<s3pkg::PackageSet>>> = OnceLock::new();
 
@@ -108,11 +130,42 @@ fn install(path: &std::path::Path) -> Option<&'static Arc<s3pkg::PackageSet>> {
 pub struct StyleRenders {
     tasks: Vec<(u64, CustomStyle, Task<bool>)>,
     objects: Vec<(ObjectStyle, Task<bool>)>,
+    covers: Vec<(CoverStyle, Task<bool>)>,
 }
 
 impl StyleRenders {
     pub fn busy(&self) -> bool {
-        !self.tasks.is_empty() || !self.objects.is_empty()
+        !self.tasks.is_empty() || !self.objects.is_empty() || !self.covers.is_empty()
+    }
+
+    /// Renders a wall or floor pattern's `style` (as its swatches are drawn): done, it's
+    /// announced as a `CoverStyleReady`.
+    pub fn request_cover(&mut self, style: CoverStyle, path: std::path::PathBuf) {
+        let s = style.clone();
+        let task = AsyncComputeTaskPool::get().spawn(async move {
+            let Some(pkgs) = install(&path) else { return false };
+            let Some(p) = pkgs.read_ti(s3formats::catalog::T_CWAL, s.cwal).and_then(|d| s3formats::catalog::WallFloorPattern::parse(&d).ok()) else { return false };
+            // (The swatch: the pattern's presets as offered, the same ones skipped.)
+            let mut seen: Vec<String> = Vec::new();
+            let Some(m) = p
+                .materials
+                .iter()
+                .filter(|m| {
+                    let sig = format!("{:?}", m.complate.blocks);
+                    let new = !seen.contains(&sig);
+                    seen.push(sig);
+                    new
+                })
+                .nth(s.swatch as usize)
+            else {
+                return false;
+            };
+            let c = m.complate.with_colours(&s.colours);
+            let (w, h) = if s.floor { (256, 256) } else { (256, 512) };
+            let Some(img) = s3formats::complate::render(pkgs, &c, &m.keys, w, h) else { return false };
+            std::fs::write(s3bake::default_root().tex_path(s.texture()), s3bake::ddsw::encode_dds(&img)).is_ok()
+        });
+        self.covers.push((style, task));
     }
 
     /// Renders an object's `style` (at `size`, as its designs are drawn): done, it's announced
@@ -166,8 +219,25 @@ impl StyleReady {
 #[derive(Message)]
 pub struct ObjectStyleReady(pub ObjectStyle);
 
+/// A wall or floor pattern's style rendered, to paint with.
+#[derive(Message)]
+pub struct CoverStyleReady(pub CoverStyle);
+
 /// Renders finished are announced (or, failed, dropped with a word in the log).
-pub fn poll_styles(mut renders: ResMut<StyleRenders>, mut ready: MessageWriter<StyleReady>, mut objects: MessageWriter<ObjectStyleReady>) {
+pub fn poll_styles(mut renders: ResMut<StyleRenders>, mut ready: MessageWriter<StyleReady>, mut objects: MessageWriter<ObjectStyleReady>, mut covers: MessageWriter<CoverStyleReady>) {
+    let mut i = 0;
+    while i < renders.covers.len() {
+        let Some(ok) = block_on(poll_once(&mut renders.covers[i].1)) else {
+            i += 1;
+            continue;
+        };
+        let (style, _) = renders.covers.remove(i);
+        if ok {
+            covers.write(CoverStyleReady(style));
+        } else {
+            warn!("Create a Style: couldn't render the pattern {:X}", style.cwal);
+        }
+    }
     let mut i = 0;
     while i < renders.objects.len() {
         let Some(ok) = block_on(poll_once(&mut renders.objects[i].1)) else {
@@ -200,6 +270,6 @@ pub struct StylePlugin;
 
 impl Plugin for StylePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<StyleRenders>().add_message::<StyleReady>().add_message::<ObjectStyleReady>().add_systems(Update, poll_styles);
+        app.init_resource::<StyleRenders>().add_message::<StyleReady>().add_message::<ObjectStyleReady>().add_message::<CoverStyleReady>().add_systems(Update, poll_styles);
     }
 }

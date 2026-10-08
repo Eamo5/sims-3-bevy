@@ -261,8 +261,11 @@ installation is unreachable.
   something by themselves think of it in a balloon with its picture.
 - **Build mode painting**: the catalogue's wallpapers and floor coverings (every base-game
   pattern with its name and price, swatched from its texture recipe) on Wallpaper and Floors
-  tabs; click a wall to paper that side, or a floor to cover the whole room. Repainting is
-  charged, sounds like the game's build tools, and is kept in saves.
+  tabs; click a wall to paper that side, or a floor to cover the whole room. Each comes in
+  the game's colour presets for it (swatches under the patterns) and, in Create a Style, with
+  any colour of the palette on each of its colour channels (solid colours, tinted patterns,
+  and woods and fabrics shifted to the colour keeping their grain). Repainting is charged,
+  sounds like the game's build tools, and is kept in saves.
 - **Out on the town**: Sims drive to the parks, the library, the gym, the beach and the
   other community lots (from the lot's pie menu or its map tag) and use what's there: chess
   tables, computers, bookshelves, swings, grills, restrooms. Each lot gets its own walk grid

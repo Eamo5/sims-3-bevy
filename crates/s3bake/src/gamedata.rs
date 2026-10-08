@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 60;
+pub const GAMEDATA_VERSION: u32 = 61;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -186,7 +186,19 @@ pub struct PatternInfo {
     pub floor: bool,
     /// Its rendered texture in the texture store.
     pub texture: crate::types::Key,
+    /// The catalogue pattern (CWAL instance); its swatches (the game's colour presets for it,
+    /// each rendered: the first is `texture`), and each swatch's colour channels for Create a
+    /// Style.
+    #[serde(default)]
+    pub cwal: u64,
+    #[serde(default)]
+    pub swatches: Vec<crate::types::Key>,
+    #[serde(default)]
+    pub channels: Vec<Vec<(u8, [f32; 3])>>,
 }
+
+/// How many of a wall or floor pattern's colour presets are offered as swatches.
+const PATTERN_SWATCHES: usize = 8;
 
 /// One choice in a balloon list: an icon, or another list to draw from (`refkey`), or one of the
 /// game's special pickers (an icon name like "GetSpeechBalloonImageForChat").
@@ -1439,14 +1451,33 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 return None;
             }
             let texture = (crate::types::T_COVER, if floor { 4 } else { 3 }, k.i);
-            let path = root.tex_path(texture);
-            if !path.exists() {
-                let m = p.materials.first()?;
-                let (w, h) = if floor { (256, 256) } else { (256, 512) };
-                let img = s3formats::complate::render(pkgs, &m.complate, &m.keys, w, h)?;
-                std::fs::write(&path, crate::ddsw::encode_dds(&img)).ok()?;
+            let (w, h) = if floor { (256, 256) } else { (256, 512) };
+            // Its colour presets, each drawn once (the first under the pattern's own key; some
+            // patterns list the same preset twice).
+            let mut seen: Vec<String> = Vec::new();
+            let mut swatches = Vec::new();
+            let mut channels = Vec::new();
+            for (i, m) in p.materials.iter().enumerate() {
+                let sig = format!("{:?}", m.complate.blocks);
+                if seen.contains(&sig) || swatches.len() >= PATTERN_SWATCHES {
+                    continue;
+                }
+                seen.push(sig);
+                let key = if i == 0 { texture } else { (crate::types::T_COVER, (if floor { 4 } else { 3 }) | (i as u32) << 8, k.i) };
+                let path = root.tex_path(key);
+                if !path.exists() {
+                    let Some(img) = s3formats::complate::render(pkgs, &m.complate, &m.keys, w, h) else { continue };
+                    if std::fs::write(&path, crate::ddsw::encode_dds(&img)).is_err() {
+                        continue;
+                    }
+                }
+                swatches.push(key);
+                channels.push(m.complate.solid_channels());
             }
-            Some(PatternInfo { name, price: p.price.round() as i32, floor, texture })
+            if swatches.first() != Some(&texture) {
+                return None;
+            }
+            Some(PatternInfo { name, price: p.price.round() as i32, floor, texture, cwal: k.i, swatches, channels })
         })
         .into_iter()
         .flatten()

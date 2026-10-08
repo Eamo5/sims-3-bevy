@@ -282,9 +282,7 @@ impl Complate {
                 if let Some((base, shift)) = b.hsv() {
                     return Some((ch, crate::complate::shifted(base, shift)));
                 }
-                if !b.name.to_ascii_lowercase().contains("solidcolor") {
-                    return None;
-                }
+                // (A solid colour, or a pattern its colour tints.)
                 let colour = b.overrides.iter().find(|(k, _)| k.eq_ignore_ascii_case("Color")).and_then(|(_, v)| colour_of(v))?;
                 Some((ch, colour))
             })
@@ -376,11 +374,13 @@ mod style_tests {
     fn object_channels_recoloured() {
         let block = |pat: &str, name: &str, c: u32| Complate { name: name.into(), pattern: pat.into(), overrides: vec![("Color".into(), CValue::Argb(c))], ..Default::default() };
         let c = Complate { blocks: vec![block("Pattern A", "solidColor_1", 0xFF80_4020), block("Pattern B", "woodOak", 0xFF00_0000), block("Pattern C", "solidColor_1", 0xFFFF_FFFF)], ..Default::default() };
+        // (A pattern its colour tints counts as well as a solid colour.)
         let ch = c.solid_channels();
-        assert_eq!(ch.iter().map(|x| x.0).collect::<Vec<_>>(), vec![0, 2]);
+        assert_eq!(ch.iter().map(|x| x.0).collect::<Vec<_>>(), vec![0, 1, 2]);
         let d = c.with_colours(&[(0, [1.0, 0.0, 0.0])]);
         assert_eq!(d.solid_channels()[0].1, [1.0, 0.0, 0.0]);
-        assert_eq!(d.solid_channels()[1].1, [1.0, 1.0, 1.0]);
+        assert_eq!(d.solid_channels()[1].1, [0.0, 0.0, 0.0]);
+        assert_eq!(d.solid_channels()[2].1, [1.0, 1.0, 1.0]);
     }
 }
 
