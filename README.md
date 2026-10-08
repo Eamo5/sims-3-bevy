@@ -371,8 +371,9 @@ installation is unreachable.
   homes green, empty homes white, community lots blue) and a list of every lot with who lives
   there. Pick a lot to play its household, or evict them to the household bin (a household
   played before has its furniture sold for four-fifths of its price; the house stands); pick
-  an empty home to move a family from the bin into it. Where everyone lives is kept with the
-  town's story in the save, and the lot chooser (a new game, moving house) won't move anyone
+  an empty home to move a family from the bin into it. A house no one lives in can be
+  bulldozed (the lot left empty, to move onto and build on). Where everyone lives, and what's
+  been bulldozed, is kept with the town's story in the save, and the lot chooser (a new game, moving house) won't move anyone
   into a home already lived in.
 - **Story progression**: the rest of the town lives on. Each morning the world's other Sims
   grow older (elders passing away in time), single grown-ups pair off and couples marry,

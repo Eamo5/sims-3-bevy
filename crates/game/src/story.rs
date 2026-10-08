@@ -41,6 +41,9 @@ pub struct TownStory {
     /// id: the lot's id, or none for the household bin). Set in Edit Town.
     #[serde(default)]
     pub homes: BTreeMap<u64, Option<u64>>,
+    /// The lots whose houses were bulldozed in Edit Town (by lot id): empty lots now.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub bulldozed: std::collections::BTreeSet<u64>,
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]

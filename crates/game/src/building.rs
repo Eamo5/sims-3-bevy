@@ -23,7 +23,7 @@ impl Plugin for BuildingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NearbyLots>().init_resource::<WallMode>().add_message::<PoolChanged>().add_systems(
             Update,
-            (follow_selected_floor, view_level_keys, building_visibility, stream_nearby_lots, lamps_at_night, cut_openings)
+            (follow_selected_floor, view_level_keys, building_visibility, bulldozed_lots, stream_nearby_lots, lamps_at_night, cut_openings)
                 .chain()
                 .run_if(in_state(PlayMode::Live)),
         )
@@ -2075,6 +2075,39 @@ fn building_visibility(
 #[derive(Resource, Default)]
 pub struct NearbyLots {
     spawned: HashMap<usize, Entity>,
+}
+
+/// Lots bulldozed in Edit Town (the town's story keeps them) stand empty: the world's data loses
+/// their houses (so everything takes them for empty lots, to move onto and build on), and the
+/// pictures and detailed houses drawn for them go.
+pub fn bulldozed_lots(
+    mut commands: Commands,
+    story: Res<crate::story::TownStory>,
+    mut world: ResMut<crate::loading::CurrentWorld>,
+    mut nearby: ResMut<NearbyLots>,
+    imposters: Query<(Entity, &crate::world::LotImposter)>,
+) {
+    if story.bulldozed.is_empty() {
+        return;
+    }
+    let gone: Vec<usize> = world.data.lots.iter().enumerate().filter(|(_, l)| story.bulldozed.contains(&l.id)).map(|(i, _)| i).collect();
+    if gone.iter().any(|i| world.data.buildings.contains_key(i)) {
+        let mut w = (*world.data).clone();
+        for i in &gone {
+            w.buildings.remove(i);
+        }
+        world.data = std::sync::Arc::new(w);
+    }
+    for (e, imp) in &imposters {
+        if gone.contains(&imp.0) {
+            commands.entity(e).despawn();
+        }
+    }
+    for i in &gone {
+        if let Some(e) = nearby.spawned.remove(i) {
+            commands.entity(e).despawn();
+        }
+    }
 }
 
 const NEARBY_IN: f32 = 70.0;

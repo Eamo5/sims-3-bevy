@@ -142,6 +142,8 @@ enum EditAction {
     Play(Occupant),
     Evict(Occupant),
     MoveIn(Binned, usize),
+    /// The house on an empty lot torn down, the lot left empty.
+    Bulldoze(usize),
     Done,
 }
 
@@ -206,6 +208,10 @@ fn show_edit_town(
     data: Res<crate::baked::Baked>,
     mut images: ResMut<Assets<Image>>,
 ) {
+    // (Shown afresh when the town changes under it: a house bulldozed.)
+    if world.is_changed() && edit.open {
+        edit.dirty = true;
+    }
     if !edit.dirty {
         return;
     }
@@ -305,6 +311,10 @@ fn show_edit_town(
                             }
                         }
                         None if world.data.lots[i].is_residential() && !world.data.buildings.get(&i).is_some_and(|b| b.is_penthouse()) => {
+                            // (A house no one lives in can be torn down.)
+                            if world.data.buildings.get(&i).is_some_and(|b| b.is_house()) {
+                                button(c, "Bulldoze Lot".into(), EditAction::Bulldoze(i), Color::srgb(1.0, 0.6, 0.55));
+                            }
                             c.spawn(text(if binned.is_empty() { "No one lives here. (The household bin is empty.)" } else { "No one lives here. Move in:" }, 14.0, Color::WHITE));
                             for b in &binned {
                                 let o = match *b {
@@ -391,7 +401,7 @@ fn edit_town_buttons(
     mut clock: ResMut<crate::clock::GameClock>,
     mut cams: Query<&mut crate::camera::SimsCamera>,
     mut notes: ResMut<Notifications>,
-    mut snapshot: MessageWriter<crate::save::SnapshotRequest>,
+    (mut snapshot, mut play): (MessageWriter<crate::save::SnapshotRequest>, MessageWriter<crate::sound::PlaySound>),
 ) {
     let Some(&action) = q.iter().find(|(i, _)| **i == Interaction::Pressed).map(|(_, a)| a) else { return };
     let town_name = |id: u64| town.as_ref().and_then(|t| t.0.households.iter().find(|h| h.id == id)).map_or(String::new(), |h| h.name.clone());
@@ -454,6 +464,13 @@ fn edit_town_buttons(
                 }
                 Occupant::Active => return,
             }
+            edit.dirty = true;
+        }
+        EditAction::Bulldoze(lot) => {
+            let l = &world.data.lots[lot];
+            story.bulldozed.insert(l.id);
+            notes.push(format!("The house on {} was bulldozed: it's an empty lot now.", lot_name(lot)));
+            play.write(crate::sound::PlaySound::ui("ui_build_sledgehammer"));
             edit.dirty = true;
         }
         EditAction::MoveIn(b, lot) => {
@@ -528,6 +545,7 @@ fn scripted(
             ("select", EditAction::Select(l)) => lot_named(arg, *l),
             ("evict", EditAction::Evict(_)) | ("play", EditAction::Play(_)) | ("done", EditAction::Done) => true,
             ("movein", EditAction::MoveIn(b, _)) => household_named(arg, *b),
+            ("bulldoze", EditAction::Bulldoze(_)) => true,
             _ => false,
         };
         if hit {
