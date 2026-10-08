@@ -2077,36 +2077,129 @@ pub struct NearbyLots {
     spawned: HashMap<usize, Entity>,
 }
 
-/// Lots bulldozed in Edit Town (the town's story keeps them) stand empty: the world's data loses
-/// their houses (so everything takes them for empty lots, to move onto and build on), and the
-/// pictures and detailed houses drawn for them go.
+/// A house of the town's put down on another lot of the same size (Edit Town's Place a House):
+/// the same building, turned and raised to the new lot's place.
+pub fn relocated(src: &LotBuildingBaked, from: &LotInfo, to: &LotInfo, to_index: usize) -> LotBuildingBaked {
+    let dy = to.corner[1] - from.corner[1];
+    let mut b = src.clone();
+    b.lot = to_index as u32;
+    for l in &mut b.levels {
+        *l += dy;
+    }
+    for f in b.floors.iter_mut().chain(b.pool.iter_mut()) {
+        if let Some(y) = &mut f.y {
+            *y += dy;
+        }
+    }
+    for w in &mut b.walls {
+        if let Some(y) = &mut w.y {
+            *y += dy;
+        }
+    }
+    for t in b.foundation_top.iter_mut().chain(b.ground.iter_mut()) {
+        *t += dy;
+    }
+    let (corner, rot) = (Vec3::from(to.corner), Quat::from_rotation_y(to.rotation));
+    let turn = Quat::from_rotation_y(to.rotation - from.rotation);
+    for o in &mut b.objects {
+        let p = corner + rot * Vec3::new(o.local[0], 0.0, o.local[1]);
+        o.position = [p.x, o.position[1] + dy, p.z];
+        o.rotation = (turn * Quat::from_array(o.rotation)).normalize().to_array();
+    }
+    b
+}
+
+/// Edit Town's changes to the town (the town's story keeps them): houses put down on empty lots
+/// stand there, and lots bulldozed stand empty. The world's data takes them (so everything
+/// takes the lots as they are now, to move onto and build on), and the pictures and detailed
+/// houses drawn for the lots as they were go.
 pub fn bulldozed_lots(
     mut commands: Commands,
     story: Res<crate::story::TownStory>,
     mut world: ResMut<crate::loading::CurrentWorld>,
     mut nearby: ResMut<NearbyLots>,
     imposters: Query<(Entity, &crate::world::LotImposter)>,
+    // (The world as this last left it, and each edited lot's state applied to it: a world loaded
+    // afresh has none applied.)
+    mut applied: Local<(usize, HashMap<u64, Option<u64>>, HashMap<u64, Option<String>>)>,
+    (data, mut assets): (Res<crate::baked::Baked>, ResMut<ObjectAssets>),
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
 ) {
-    if story.bulldozed.is_empty() {
-        return;
+    if std::sync::Arc::as_ptr(&world.data) as usize != applied.0 {
+        applied.1.clear();
+        applied.2.clear();
     }
-    let gone: Vec<usize> = world.data.lots.iter().enumerate().filter(|(_, l)| story.bulldozed.contains(&l.id)).map(|(i, _)| i).collect();
-    if gone.iter().any(|i| world.data.buildings.contains_key(i)) {
+    // (Lots whose type was changed: renamed as what they are now.)
+    let retyped: Vec<(u64, Option<String>)> = story.lot_types.iter().filter(|(l, k)| applied.2.get(*l) != Some(*k)).map(|(l, k)| (*l, k.clone())).collect();
+    if !retyped.is_empty() {
         let mut w = (*world.data).clone();
-        for i in &gone {
-            w.buildings.remove(i);
+        for (id, kind) in &retyped {
+            if let Some(l) = w.lots.iter_mut().find(|l| l.id == *id) {
+                crate::story::retype(l, kind.as_deref());
+            }
+            applied.2.insert(*id, kind.clone());
         }
         world.data = std::sync::Arc::new(w);
+        applied.0 = std::sync::Arc::as_ptr(&world.data) as usize;
     }
+    // Each lot edited: a copy of another lot's house on it, or else (bulldozed) nothing.
+    let wanted: Vec<(u64, Option<u64>)> = story
+        .placed
+        .iter()
+        .map(|(to, from)| (*to, Some(*from)))
+        .chain(story.bulldozed.iter().filter(|l| !story.placed.contains_key(l)).map(|l| (*l, None)))
+        .filter(|(l, w)| applied.1.get(l) != Some(w))
+        .collect();
+    if wanted.is_empty() {
+        return;
+    }
+    let index = |id: u64| world.data.lots.iter().position(|l| l.id == id);
+    // (Copies made from the town's houses as they stood before this round of changes.)
+    let before = world.data.clone();
+    let mut w = (*world.data).clone();
+    let mut changed = Vec::new();
+    let mut pictures = Vec::new();
+    for (lot, from) in &wanted {
+        let Some(to) = index(*lot) else { continue };
+        match from.and_then(index) {
+            Some(f) => {
+                let Some(src) = before.buildings.get(&f).filter(|b| b.is_house()) else { continue };
+                w.buildings.insert(to, relocated(src, &before.lots[f], &before.lots[to], to));
+                pictures.push((to, f));
+            }
+            None => {
+                w.buildings.remove(&to);
+            }
+        }
+        changed.push(to);
+        applied.1.insert(*lot, *from);
+    }
+    world.data = std::sync::Arc::new(w);
+    applied.0 = std::sync::Arc::as_ptr(&world.data) as usize;
+    // (The pictures and detailed houses drawn for the lots as they were go.)
     for (e, imp) in &imposters {
-        if gone.contains(&imp.0) {
+        if changed.contains(&imp.0) {
             commands.entity(e).despawn();
         }
     }
-    for i in &gone {
+    for i in &changed {
         if let Some(e) = nearby.spawned.remove(i) {
             commands.entity(e).despawn();
         }
+    }
+    // (A house put down takes its picture with it: the roof the detailed house is drawn under,
+    // and what's seen of it from afar.)
+    let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+    for (to, from) in pictures {
+        let key = (s3pkg::types::MODL, 0x00B0_C507, before.lots[from].id);
+        let parts = assets.model(&mut ctx, key);
+        if parts.is_empty() {
+            continue;
+        }
+        let l = &before.lots[to];
+        let tf = Transform::from_translation(Vec3::from(l.corner)).with_rotation(Quat::from_rotation_y(l.rotation));
+        let e = spawn_parts(&mut commands, &parts, tf);
+        commands.entity(e).insert((crate::world::LotImposter(to), DespawnOnExit(crate::AppState::InGame)));
     }
 }
 

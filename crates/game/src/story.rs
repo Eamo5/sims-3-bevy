@@ -44,6 +44,47 @@ pub struct TownStory {
     /// The lots whose houses were bulldozed in Edit Town (by lot id): empty lots now.
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub bulldozed: std::collections::BTreeSet<u64>,
+    /// Houses put down on empty lots in Edit Town: the lot (by id), and the lot whose house is a
+    /// copy of it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub placed: BTreeMap<u64, u64>,
+    /// Lots whose type was changed in Edit Town (by lot id): residential (none), or the community
+    /// venue they are (one of `COMMUNITY_TYPES`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub lot_types: BTreeMap<u64, Option<String>>,
+}
+
+/// The kinds of community lot a lot can be made in Edit Town (as the game's Change Lot Type):
+/// each name, and the word in a lot's name the town goes by for what's done there.
+pub const COMMUNITY_TYPES: [(&str, &str); 7] = [
+    ("Park", "park"),
+    ("Gym", "gym"),
+    ("Library", "library"),
+    ("Pool", "pool"),
+    ("Art Gallery", "museum"),
+    ("Beach", "beach"),
+    ("Fishing Spot", "fishing"),
+];
+
+/// A lot made residential, or the community venue `kind` (Edit Town's Change Lot Type): its name
+/// and the record's keys say so, as the world's own lots' do.
+pub fn retype(lot: &mut s3bake::LotInfo, kind: Option<&str>) {
+    lot.string_keys.retain(|k| !k.contains("HouseName"));
+    // (Away with anything in the name that says what it was.)
+    let bare: String = lot
+        .internal_name
+        .split('_')
+        .filter(|p| {
+            let p = p.to_ascii_lowercase();
+            !(p == "res" || p == "com" || p.contains("empty") || p.contains("residential") || COMMUNITY_TYPES.iter().any(|(_, k)| p.contains(k)))
+        })
+        .collect::<Vec<_>>()
+        .join("_");
+    let bare = bare.replace("Empty", "").replace("empty", "");
+    lot.internal_name = match kind.and_then(|k| COMMUNITY_TYPES.iter().find(|(n, _)| *n == k)) {
+        Some((_, word)) => format!("Com_{word}_{bare}"),
+        None => format!("Res_{bare}"),
+    };
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
@@ -364,4 +405,34 @@ fn read_the_news(mut commands: Commands, story: Res<TownStory>, sims: Query<(Ent
 fn track(name: &str) -> Option<&'static crate::careers::CareerTrack> {
     let all = crate::careers::careers();
     all.iter().find(|c| c.name == name).or_else(|| crate::premade::career_of(name).and_then(|i| all.get(i)))
+}
+
+#[cfg(test)]
+mod lot_type_tests {
+    use super::*;
+
+    fn lot(name: &str, keys: &[&str]) -> s3bake::LotInfo {
+        s3bake::LotInfo { id: 1, internal_name: name.into(), corner: [0.0; 3], rotation: 0.0, width: 30, depth: 40, string_keys: keys.iter().map(|k| k.to_string()).collect() }
+    }
+
+    #[test]
+    fn retyped_lots_read_as_their_new_type() {
+        // A house made a park: no longer residential, and a park to the town's venues.
+        let mut l = lot("15MaywSubNoSim", &["World/SV/HouseName:Capitola"]);
+        assert!(l.is_residential());
+        retype(&mut l, Some("Park"));
+        assert!(!l.is_residential());
+        assert!(!crate::rabbitholes::activities(&l).is_empty());
+        // An empty lot made a gym, then back to a home.
+        let mut e = lot("55WatrLLnPviewEmpty", &[]);
+        retype(&mut e, Some("Gym"));
+        assert!(!e.is_residential() && e.internal_name.to_ascii_lowercase().contains("gym"), "{}", e.internal_name);
+        retype(&mut e, None);
+        assert!(e.is_residential() && !e.internal_name.to_ascii_lowercase().contains("gym"), "{}", e.internal_name);
+        // A park made a home.
+        let mut p = lot("Com_suburbanPark_30x30", &[]);
+        retype(&mut p, None);
+        assert!(p.is_residential(), "{}", p.internal_name);
+        assert!(crate::rabbitholes::activities(&p).is_empty(), "{}", p.internal_name);
+    }
 }

@@ -39,6 +39,10 @@ pub struct EditTown {
     dirty: bool,
     speed: usize,
     camera: Option<(Vec3, f32, f32, f32)>,
+    /// The town's houses offered for the empty lot picked.
+    picking_house: bool,
+    /// The lot types offered for the lot picked.
+    picking_type: bool,
 }
 
 impl EditTown {
@@ -144,6 +148,13 @@ enum EditAction {
     MoveIn(Binned, usize),
     /// The house on an empty lot torn down, the lot left empty.
     Bulldoze(usize),
+    /// The town's houses offered for an empty lot, and one of them put down on it (a copy of
+    /// the house on the second lot).
+    PickHouse,
+    Place(usize, usize),
+    /// The lot types offered, and the lot made one (residential, or a kind of community lot).
+    PickType,
+    Retype(usize, Option<usize>),
     Done,
 }
 
@@ -298,6 +309,27 @@ fn show_edit_town(
                             t.spawn(text(lot_kind(&world.data, i), 13.0, Color::srgb(0.75, 0.85, 1.0)));
                         });
                     });
+                    // (A lot no one lives in, without a rabbit hole of the town's careers, can be made
+                    // residential or a kind of community lot.)
+                    let rabbit_hole = world.data.buildings.get(&i).is_some_and(|b| b.objects.iter().any(|o| o.script.contains("RabbitHole")));
+                    if !occupied.contains_key(&i) && !rabbit_hole && !world.data.buildings.get(&i).is_some_and(|b| b.is_penthouse()) {
+                        button(c, if edit.picking_type { "Change Lot Type ‹".into() } else { "Change Lot Type ›".into() }, EditAction::PickType, Color::srgb(0.85, 0.85, 1.0));
+                        if edit.picking_type {
+                            c.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|r| {
+                                if !world.data.lots[i].is_residential() {
+                                    button(r, "Residential".into(), EditAction::Retype(i, None), Color::WHITE);
+                                }
+                                let now = crate::rabbitholes::lot_title(&world.data.lots[i], "");
+                                for (k, (name, word)) in crate::story::COMMUNITY_TYPES.iter().enumerate() {
+                                    let same = !world.data.lots[i].is_residential() && world.data.lots[i].internal_name.to_ascii_lowercase().contains(word);
+                                    if !same {
+                                        button(r, (*name).into(), EditAction::Retype(i, Some(k)), Color::WHITE);
+                                    }
+                                }
+                                let _ = now;
+                            });
+                        }
+                    }
                     match occupied.get(&i).copied() {
                         Some(o) => {
                             let w = who(o, household.as_deref(), &names, &dormant.0, town, &story);
@@ -311,9 +343,27 @@ fn show_edit_town(
                             }
                         }
                         None if world.data.lots[i].is_residential() && !world.data.buildings.get(&i).is_some_and(|b| b.is_penthouse()) => {
-                            // (A house no one lives in can be torn down.)
+                            // (A house no one lives in can be torn down; an empty lot can have one
+                            // of the town's houses put down on it, of those on lots its size.)
                             if world.data.buildings.get(&i).is_some_and(|b| b.is_house()) {
                                 button(c, "Bulldoze Lot".into(), EditAction::Bulldoze(i), Color::srgb(1.0, 0.6, 0.55));
+                            } else {
+                                button(c, if edit.picking_house { "Place a House ‹".into() } else { "Place a House ›".into() }, EditAction::PickHouse, Color::srgb(0.7, 0.9, 1.0));
+                                if edit.picking_house {
+                                    let l = &world.data.lots[i];
+                                    let houses: Vec<usize> = (0..world.data.lots.len())
+                                        .filter(|&j| j != i && world.data.lots[j].is_residential())
+                                        .filter(|&j| world.data.lots[j].width == l.width && world.data.lots[j].depth == l.depth)
+                                        .filter(|j| world.data.buildings.get(j).is_some_and(|b| b.is_house() && !b.is_penthouse()))
+                                        .collect();
+                                    if houses.is_empty() {
+                                        c.spawn(text(format!("No house in town stands on a {}x{} lot.", l.width, l.depth), 13.0, Color::WHITE));
+                                    }
+                                    for j in houses {
+                                        let name = world.data.lot_names.get(j).cloned().unwrap_or_else(|| world.data.lots[j].internal_name.clone());
+                                        button(c, format!("{name} · {}", lot_kind(&world.data, j)), EditAction::Place(i, j), Color::WHITE);
+                                    }
+                                }
                             }
                             c.spawn(text(if binned.is_empty() { "No one lives here. (The household bin is empty.)" } else { "No one lives here. Move in:" }, 14.0, Color::WHITE));
                             for b in &binned {
@@ -420,6 +470,8 @@ fn edit_town_buttons(
     match action {
         EditAction::Select(i) => {
             edit.selected = Some(i);
+            edit.picking_house = false;
+            edit.picking_type = false;
             edit.dirty = true;
             if let Ok(mut c) = cams.single_mut() {
                 let l = &world.data.lots[i];
@@ -466,8 +518,37 @@ fn edit_town_buttons(
             }
             edit.dirty = true;
         }
+        EditAction::PickHouse => {
+            edit.picking_house = !edit.picking_house;
+            edit.dirty = true;
+        }
+        EditAction::PickType => {
+            edit.picking_type = !edit.picking_type;
+            edit.dirty = true;
+        }
+        EditAction::Retype(lot, kind) => {
+            let l = &world.data.lots[lot];
+            let kind = kind.and_then(|k| crate::story::COMMUNITY_TYPES.get(k)).map(|(n, _)| n.to_string());
+            notes.push(match &kind {
+                Some(k) => format!("{} is a community lot now: a {k}.", lot_name(lot)),
+                None => format!("{} is a residential lot now.", lot_name(lot)),
+            });
+            story.lot_types.insert(l.id, kind);
+            play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
+            edit.picking_type = false;
+            edit.dirty = true;
+        }
+        EditAction::Place(to, from) => {
+            let (t, f) = (world.data.lots[to].id, world.data.lots[from].id);
+            story.placed.insert(t, f);
+            notes.push(format!("A copy of {} was put down on {}.", lot_name(from), lot_name(to)));
+            play.write(crate::sound::PlaySound::ui("ui_build_door_plop"));
+            edit.picking_house = false;
+            edit.dirty = true;
+        }
         EditAction::Bulldoze(lot) => {
             let l = &world.data.lots[lot];
+            story.placed.remove(&l.id);
             story.bulldozed.insert(l.id);
             notes.push(format!("The house on {} was bulldozed: it's an empty lot now.", lot_name(lot)));
             play.write(crate::sound::PlaySound::ui("ui_build_sledgehammer"));
@@ -545,7 +626,13 @@ fn scripted(
             ("select", EditAction::Select(l)) => lot_named(arg, *l),
             ("evict", EditAction::Evict(_)) | ("play", EditAction::Play(_)) | ("done", EditAction::Done) => true,
             ("movein", EditAction::MoveIn(b, _)) => household_named(arg, *b),
-            ("bulldoze", EditAction::Bulldoze(_)) => true,
+            ("bulldoze", EditAction::Bulldoze(_)) | ("pickhouse", EditAction::PickHouse) => true,
+            ("place", EditAction::Place(_, from)) => lot_named(arg, *from),
+            ("picktype", EditAction::PickType) => true,
+            ("retype", EditAction::Retype(_, k)) => match k {
+                None => arg.eq_ignore_ascii_case("residential"),
+                Some(k) => crate::story::COMMUNITY_TYPES.get(*k).is_some_and(|(n, _)| n.eq_ignore_ascii_case(arg)),
+            },
             _ => false,
         };
         if hit {

@@ -167,13 +167,20 @@ fn venue_glyph(internal: &str) -> &'static str {
 #[allow(clippy::too_many_arguments)]
 fn spawn_tags(
     mut commands: Commands,
-    existing: Query<(), With<MapTag>>,
+    existing: Query<Entity, With<MapTag>>,
     world: Res<CurrentWorld>,
     household: Option<Res<Household>>,
     ui: Option<ResMut<crate::icons::GameUi>>,
     mut images: ResMut<Assets<Image>>,
 ) {
     let Some(mut ui) = ui else { return };
+    // (The town changed (a lot's type, say): its tags made afresh.)
+    if world.is_changed() && !existing.is_empty() {
+        for e in &existing {
+            commands.entity(e).despawn();
+        }
+        return;
+    }
     if !existing.is_empty() {
         return;
     }
