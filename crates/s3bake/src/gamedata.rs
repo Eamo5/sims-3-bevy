@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 61;
+pub const GAMEDATA_VERSION: u32 = 62;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -625,7 +625,17 @@ fn bake_object_designs(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, Stri
     let catalog: Vec<crate::types::CatalogEntry> = read_value(&g.join("catalog.bin")).map_err(|e| format!("catalog.bin: {e}"))?;
     let models = PackReader::open(&g.join("models.pack")).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(root.textures_dir()).ok();
-    let buyable: Vec<&crate::types::CatalogEntry> = catalog.iter().filter(|c| c.price >= 0).collect();
+    // (Every catalogue object, sold or not: the towns' lots use variants the catalogue doesn't
+    // sell, in designs of their own.)
+    let buyable: Vec<&crate::types::CatalogEntry> = catalog.iter().collect();
+    // (DESIGN_DEBUG=<instance>: why an object has no designs.)
+    if let Some(i) = std::env::var("DESIGN_DEBUG").ok().and_then(|v| v.parse::<u64>().ok()) {
+        for c in catalog.iter().filter(|c| c.objd.2 == i) {
+            let o = pkgs.read(&crate::types::rkey(c.objd)).and_then(|d| s3formats::object::parse_objd(&d).ok());
+            let txtcs: Vec<_> = c.models.iter().filter_map(|m| models.get::<crate::types::BakedModel>(m)).flat_map(|m| m.parts.into_iter().map(|p| p.texture)).collect();
+            eprintln!("design debug {}: price {} presets {:?} part textures {txtcs:?}", c.instance_name, c.price, o.map(|o| o.presets.len()));
+        }
+    }
     let out: Vec<ObjectDesigns> = crate::bake::par_map(&buyable, |c| {
         let o = s3formats::object::parse_objd(&pkgs.read(&crate::types::rkey(c.objd))?).ok()?;
         if o.presets.is_empty() {
