@@ -422,6 +422,15 @@ oak desks, marble columns, blue-and-white patio chairs), so every design is draw
 the catalogue's designs, a placed object's has an extra `daeFilePath` and fewer decimals.
 [VERIFIED]
 
+Fences: a lot's `0x913381F2` holds its fence posts (`u32 level, f32 x, f32 z, u16 REFS index` of
+the fence's CFEN), at its ends and corners and every few metres along it (not at every tile).
+The runs are edges of the wall graph `0x312E7545:0x002E7B1E` (the room-boundary graph
+`0x002E7B1C` with every fence besides, a garden's too) that aren't walls (`0x002E7B1A`): an edge
+is fenced where a post stands within three steps along its line on both sides, in the style of
+the post at either end (else the nearest before it). [VERIFIED by eye on the Frio, Goth,
+Landgraab and Bachelor lots: privacy fences right round, a garden's edging, brick walls with
+iron railings]
+
 Sunset Valley totals: 10,119 objects; 406 tree objects carrying 5,596 tree instances; script classes
 include windows/doors/stairs/street lights/mailboxes/parking spaces/rabbit holes.
 

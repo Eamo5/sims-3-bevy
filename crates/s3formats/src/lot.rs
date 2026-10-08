@@ -13,6 +13,9 @@ pub const T_ROOFS: u32 = 0x11E32896;
 pub const G_WALLS: u32 = 0x002E7B1A;
 /// Group of the graph holding every room boundary (walls, fences, foundation and floor edges).
 pub const G_ROOMS: u32 = 0x002E7B1C;
+/// Group of the graph holding the room boundaries and every fence besides (those that close
+/// off no room too: a garden's).
+pub const G_FENCES: u32 = 0x002E7B1E;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GraphVertex {

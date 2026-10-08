@@ -1867,6 +1867,23 @@ fn main() {
         }
         return;
     }
+    if args[1] == "wallgraph" {
+        // wallgraph <world> <lot id hex> <group hex>: a lot's wall-graph edges (lot tiles).
+        let w = Package::open(&args[2]).unwrap();
+        let lot = parse_hex(&args[3]);
+        let g = parse_hex(&args[4]) as u32;
+        let Some(d) = w.find(&s3pkg::ResourceKey::new(s3formats::lot::T_WALL_GRAPH, g, lot)).and_then(|e| w.read(e).ok()) else { println!("none"); return };
+        match s3formats::lot::WallGraph::parse(&d) {
+            Ok(gr) => {
+                println!("{}x{}, {} vertices, {} edges", gr.width, gr.depth, gr.vertices.len(), gr.edges.len());
+                for (a, b, level, e) in gr.segments() {
+                    println!("{a:?}-{b:?} level {level} rooms {}|{}", e.left, e.right);
+                }
+            }
+            Err(e) => println!("parse failed: {e:?}"),
+        }
+        return;
+    }
     if args[1] == "lotwalls" {
         // lotwalls <root> <world file> <lot id hex>: each wall-side channel resolved through its
         // palette and the lot's REFS table.

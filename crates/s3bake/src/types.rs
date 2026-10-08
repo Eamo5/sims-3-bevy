@@ -10,7 +10,7 @@ pub const BAKE_VERSION: u32 = 4;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
 pub const CAS_VERSION: u32 = 9;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 42;
+pub const WORLD_VERSION: u32 = 43;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);

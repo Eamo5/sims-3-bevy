@@ -1,7 +1,10 @@
 //! Fences and railings. A lot keeps its fence posts (`0x913381F2`: `u32 version, u32 count`,
-//! then `u32 level, f32 x, f32 z, u16 REFS index` of the fence's CFEN); the runs between them
-//! are edges of the lot's room graph. A CFEN (`0x0418FE2A`) names its pieces' models (VPXYs):
-//! a straight run (0..1 m along +X), a diagonal one (0..1.414 m) and, for some, a post.
+//! then `u32 level, f32 x, f32 z, u16 REFS index` of the fence's CFEN): at its ends and corners
+//! and every few metres along it. The runs between them are edges of the lot's fence graph
+//! (the wall graph `0x002E7B1E`: the room boundaries and every fence besides) that aren't
+//! walls: an edge is a fence where a post stands within three steps along its line on both
+//! sides. A CFEN (`0x0418FE2A`) names its pieces' models (VPXYs): a straight run (0..1 m
+//! along +X), a diagonal one (0..1.414 m) and, for some, a post.
 
 use std::collections::{HashMap, HashSet};
 
@@ -105,32 +108,76 @@ pub fn bake_fences(pkg: &Package, pkgs: &PackageSet, lot: &LotInfo, cache: &mut 
         let Some(k) = refs.get(&ri).copied() else { return Pieces::default() };
         *cache.entry(k).or_insert_with(|| pieces(pkgs, &k))
     };
-    // Runs: the room graph's edges in unit steps, wherever both ends are posts.
-    let rooms = LotBuildData::load(pkg, lot.id).map(|b| b.rooms).unwrap_or_default();
-    let mut out = Vec::new();
-    let mut done = HashSet::new();
-    for (a, b, level, _) in rooms.segments() {
-        let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
-        let steps = dx.abs().max(dz.abs()).round() as i32;
-        if steps == 0 || (dx.abs() > 0.01 && dz.abs() > 0.01 && (dx.abs() - dz.abs()).abs() > 0.01) {
-            continue;
-        }
-        let (sx, sz) = ((dx / steps as f32).round() as i32, (dz / steps as f32).round() as i32);
-        let (ax, az) = (a[0].round() as i32, a[1].round() as i32);
-        for s in 0..steps {
-            let p = (ax + sx * s, az + sz * s);
-            let q = (p.0 + sx, p.1 + sz);
-            let (Some(&ri), Some(_)) = (posts.get(&(p.0, p.1, level)), posts.get(&(q.0, q.1, level))) else { continue };
-            let key = if p < q { (p, q, level) } else { (q, p, level) };
-            if !done.insert(key) {
+    // Runs: the fence graph's edges (in unit steps) that aren't walls, with a post along the
+    // line within three steps on both sides.
+    let build = LotBuildData::load(pkg, lot.id);
+    let graph = pkg
+        .find(&ResourceKey::new(s3formats::lot::T_WALL_GRAPH, s3formats::lot::G_FENCES, lot.id))
+        .and_then(|e| pkg.read(e).ok())
+        .and_then(|d| s3formats::lot::WallGraph::parse(&d).ok())
+        .or_else(|| build.as_ref().map(|b| b.rooms.clone()))
+        .unwrap_or_default();
+    type P = (i32, i32);
+    let unit_steps = |g: &s3formats::lot::WallGraph| -> Vec<(P, P, u32)> {
+        let mut v = Vec::new();
+        for (a, b, level, _) in g.segments() {
+            let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
+            let steps = dx.abs().max(dz.abs()).round() as i32;
+            if steps == 0 || (dx.abs() > 0.01 && dz.abs() > 0.01 && (dx.abs() - dz.abs()).abs() > 0.01) {
                 continue;
             }
-            let pc = style(ri);
-            let model = if sx != 0 && sz != 0 { pc.diagonal } else { pc.straight };
-            if let Some(model) = model {
-                out.push(FenceBaked { a: [p.0 as f32, p.1 as f32], b: [q.0 as f32, q.1 as f32], level: level as u8, model });
+            let (sx, sz) = ((dx / steps as f32).round() as i32, (dz / steps as f32).round() as i32);
+            let (ax, az) = (a[0].round() as i32, a[1].round() as i32);
+            for s in 0..steps {
+                let p = (ax + sx * s, az + sz * s);
+                v.push((p, (p.0 + sx, p.1 + sz), level));
             }
         }
+        v
+    };
+    let norm = |p: P, q: P, level: u32| if p < q { (p, q, level) } else { (q, p, level) };
+    let walls: HashSet<(P, P, u32)> = build.as_ref().map(|b| unit_steps(&b.walls)).unwrap_or_default().into_iter().map(|(p, q, l)| norm(p, q, l)).collect();
+    let edges: HashSet<(P, P, u32)> = unit_steps(&graph).into_iter().map(|(p, q, l)| norm(p, q, l)).filter(|e| !walls.contains(e)).collect();
+    // (The post along the line from `p` (itself, or up to three steps on, by fence edges).)
+    let post_along = |p: P, d: P, level: u32| -> Option<u16> {
+        let mut at = p;
+        for _ in 0..=3 {
+            if let Some(&ri) = posts.get(&(at.0, at.1, level)) {
+                return Some(ri);
+            }
+            let next = (at.0 + d.0, at.1 + d.1);
+            if !edges.contains(&norm(at, next, level)) {
+                return None;
+            }
+            at = next;
+        }
+        None
+    };
+    let mut out = Vec::new();
+    let mut found: Vec<&(P, P, u32)> = edges.iter().collect();
+    found.sort();
+    for &&(p, q, level) in &found {
+        let d = (q.0 - p.0, q.1 - p.1);
+        let (Some(rp), Some(_)) = (post_along(p, (-d.0, -d.1), level), post_along(q, d, level)) else { continue };
+        // (Its style: the post's at either end, else the one before it's.)
+        let ri = posts.get(&(p.0, p.1, level)).or(posts.get(&(q.0, q.1, level))).copied().unwrap_or(rp);
+        let pc = style(ri);
+        let model = if d.0 != 0 && d.1 != 0 { pc.diagonal } else { pc.straight };
+        if let Some(model) = model {
+            out.push(FenceBaked { a: [p.0 as f32, p.1 as f32], b: [q.0 as f32, q.1 as f32], level: level as u8, model });
+        }
+    }
+    // (FENCE_DEBUG=<lot internal name>: the posts, their pieces, and the runs found.)
+    if std::env::var("FENCE_DEBUG").is_ok_and(|n| lot.internal_name.contains(&n)) {
+        let mut styles: Vec<u16> = posts.values().copied().collect();
+        styles.sort();
+        styles.dedup();
+        for ri in styles {
+            let pc = style(ri);
+            let n = posts.values().filter(|r| **r == ri).count();
+            eprintln!("fence style {ri} ({:?}): {n} posts, straight {:?} diagonal {:?} post {:?}", refs.get(&ri), pc.straight, pc.diagonal, pc.post);
+        }
+        eprintln!("runs {} of {} fence-graph steps", out.len(), edges.len());
     }
     // Posts, for fences that have them.
     for (&(x, z, level), &ri) in &posts {
