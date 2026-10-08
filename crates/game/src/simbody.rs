@@ -184,11 +184,13 @@ pub enum OutfitKind {
     Athletic,
     /// Their career's uniform.
     Career,
+    /// Coats and boots for the cold (Seasons).
+    Outerwear,
 }
 
 impl OutfitKind {
     /// The outfits a dresser offers to change into.
-    pub const CHOICES: [OutfitKind; 6] = [Self::Everyday, Self::Formal, Self::Sleepwear, Self::Athletic, Self::Swimwear, Self::Career];
+    pub const CHOICES: [OutfitKind; 7] = [Self::Everyday, Self::Formal, Self::Sleepwear, Self::Athletic, Self::Swimwear, Self::Outerwear, Self::Career];
     pub fn label(self) -> &'static str {
         match self {
             Self::Everyday => "Everyday",
@@ -197,6 +199,7 @@ impl OutfitKind {
             Self::Sleepwear => "Sleepwear",
             Self::Athletic => "Athletic",
             Self::Career => "Career",
+            Self::Outerwear => "Outerwear",
         }
     }
 
@@ -208,6 +211,7 @@ impl OutfitKind {
             Self::Sleepwear => s3formats::sim::CAT_SLEEP,
             Self::Athletic => s3formats::sim::CAT_ATHLETIC,
             Self::Formal => s3formats::sim::CAT_FORMAL,
+            Self::Outerwear => s3formats::sim::CAT_OUTERWEAR,
         }
     }
 }
@@ -292,7 +296,11 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
             && !(clothes && kind == OutfitKind::Everyday && e.category & s3formats::sim::CAT_SWIM != 0)
     };
     let of_type = |t: u32| {
-        let all: Vec<&CasPartInfo> = cas.parts.iter().filter(|e| e.clothing_type == t).filter(fits).filter(worn).collect();
+        let mut all: Vec<&CasPartInfo> = cas.parts.iter().filter(|e| e.clothing_type == t).filter(fits).filter(worn).collect();
+        // (A coat over everyday trousers, when there are no snow pants for them.)
+        if kind == OutfitKind::Outerwear && all.is_empty() && matches!(t, CT_TOP | CT_BOTTOM | CT_SHOES) {
+            all = cas.parts.iter().filter(|e| e.clothing_type == t).filter(fits).filter(|e| !is_uniform(&e.name) && e.category & s3formats::sim::CAT_EVERYDAY != 0).collect();
+        }
         if !swim {
             return all;
         }
@@ -380,6 +388,8 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
         OutfitKind::Athletic => !fulls.is_empty() && rng.random_bool(0.3),
         // (Suits and dresses as often as separates.)
         OutfitKind::Formal => !fulls.is_empty() && rng.random_bool(0.5),
+        // (Snowsuits now and then; mostly a coat.)
+        OutfitKind::Outerwear => !fulls.is_empty() && rng.random_bool(0.25),
         OutfitKind::Career => use_full,
     };
     if let Some(f) = cf {

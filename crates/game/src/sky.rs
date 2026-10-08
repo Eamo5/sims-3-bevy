@@ -167,7 +167,7 @@ fn update_sky(
     if let Some(mut f) = fog_q {
         f.color = horizon;
         // (Thicker in fog, rain and snow: the far end drawn in, in step with how far one sees.)
-        let end = 1.0 / (1.0 / 2600.0 + (1.0 / 240.0 - 1.0 / 2600.0) * fog);
+        let end = 1.0 / (1.0 / 2600.0 + (1.0 / 130.0 - 1.0 / 2600.0) * fog);
         f.falloff = FogFalloff::Linear { start: end * 0.27 * (1.0 - fog * 0.8), end };
     }
 }

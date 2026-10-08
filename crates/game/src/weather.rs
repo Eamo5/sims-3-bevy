@@ -518,7 +518,7 @@ fn simulate(
     }
     let want = match w.kind {
         k if k.falls() => 1.0,
-        WeatherKind::Fog => 0.75,
+        WeatherKind::Fog => 0.92,
         _ => w.cloud_target,
     };
     let rate = 0.6 * dh;

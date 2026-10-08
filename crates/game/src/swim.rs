@@ -20,16 +20,19 @@ impl Plugin for SwimPlugin {
 }
 
 /// To bed in pyjamas, a workout or a jog in athletic wear, and dressed again after; off to work in
-/// the career's uniform (still worn home, until it's time for something else).
+/// the career's uniform (still worn home, until it's time for something else); out in the cold
+/// (below 50°F, the game's `kTemperatureToConsiderCold`) in outerwear, and out of it indoors.
 #[allow(clippy::type_complexity)]
 fn pyjamas(
     mut commands: Commands,
-    sims: Query<(Entity, &Sim, &ActionQueue, Option<&crate::simbody::Wearing>, Option<&crate::careers::Job>, Has<crate::simbody::ChangedInto>), With<crate::sim::HouseholdMember>>,
+    sims: Query<(Entity, &Sim, &ActionQueue, Option<&crate::simbody::Wearing>, Option<&crate::careers::Job>, Has<crate::simbody::ChangedInto>, &Transform), With<crate::sim::HouseholdMember>>,
     beds: Query<&GameObject>,
     cas: Option<Res<crate::simbody::CasData>>,
+    (weather, building): (Res<crate::weather::Weather>, Option<Res<crate::building::ActiveBuilding>>),
 ) {
     use crate::simbody::{OutfitKind, Wearing};
-    for (e, sim, queue, wearing, job, chosen) in &sims {
+    let cold = weather.temperature < COLD;
+    for (e, sim, queue, wearing, job, chosen, tf) in &sims {
         let uniform = job.and_then(|j| j.uniform(sim)).is_some_and(|u| cas.as_ref().is_some_and(|c| c.outfits.contains_key(u)));
         let want = queue.0.front().and_then(|a| match (&a.kind, a.phase) {
             (ActionKind::GoToWork, _) if uniform => Some(OutfitKind::Career),
@@ -47,6 +50,8 @@ fn pyjamas(
             }
             _ => None,
         });
+        // (Babies and toddlers are carried in and out as they are.)
+        let want = want.or_else(|| (cold && !sim.age.is_little() && !crate::weather::sheltered(building.as_deref(), tf.translation)).then_some(OutfitKind::Outerwear));
         let has = wearing.map(|w| w.0);
         // (Swimwear is the swim's to change; the uniform stays on after work, and an outfit
         // chosen at the dresser until it's time for another.)
@@ -64,6 +69,9 @@ fn pyjamas(
         }
     }
 }
+
+/// Below this (°F) it's cold out: coats on.
+const COLD: f32 = 50.0;
 
 /// How far below the water a swimmer is held: the game's swim cycle swims level with its root,
 /// the head a little above it, so this keeps the head at the surface and the body just under.

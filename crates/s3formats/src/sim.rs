@@ -219,6 +219,8 @@ pub const CAT_FORMAL: u32 = 0x4;
 pub const CAT_SLEEP: u32 = 0x8;
 pub const CAT_SWIM: u32 = 0x10;
 pub const CAT_ATHLETIC: u32 = 0x20;
+/// Seasons' coats, snow pants and boots.
+pub const CAT_OUTERWEAR: u32 = 0x40000;
 pub const CAT_VALID_RANDOM: u32 = 0x200000;
 pub const CAT_HIDDEN: u32 = 0x1000000;
 

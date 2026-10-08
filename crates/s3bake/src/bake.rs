@@ -313,7 +313,7 @@ pub fn cas_bake_wanted(name: &str, ct: u32, age_gender: u32, category: u32) -> b
         CT_FACE => name.ends_with("Face"),
         CT_SCALP => name.ends_with("Scalp"),
         CT_HAIR | CT_BODY | CT_TOP | CT_BOTTOM | CT_SHOES => {
-            category & CAT_EVERYDAY != 0
+            category & (CAT_EVERYDAY | s3formats::sim::CAT_OUTERWEAR) != 0
                 && category & CAT_VALID_RANDOM != 0
                 && category & 0x400000 == 0
                 && !name.contains("Nude")

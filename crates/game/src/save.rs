@@ -358,7 +358,7 @@ impl SaveGame {
                 glasses: o(6),
                 lipstick: o(7),
                 eyeshadow: o(8),
-                other: [other(0), other(1), other(2), other(3)],
+                other: [other(0), other(1), other(2), other(3), other(4)],
                 designs: s.designs.clone(),
                 styles: s.styles.clone(),
             },
@@ -1045,14 +1045,20 @@ mod tests {
         sim.outfit.wear(crate::simbody::OutfitKind::Formal, s3formats::sim::CT_BODY, (1, 0, 7));
         sim.outfit.wear(crate::simbody::OutfitKind::Swimwear, s3formats::sim::CT_SHOES, (1, 0, 9));
         let saved = saved_look(&sim);
-        assert_eq!(saved.outfit.len(), 25);
+        assert_eq!(saved.outfit.len(), 29);
         let back = SaveGame::sim(&serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap());
         assert_eq!(back.outfit, sim.outfit);
         assert_eq!(back.outfit.clothes(crate::simbody::OutfitKind::Formal).full, Some((1, 0, 7)));
+        // (A save from before outerwear: its four other outfits, outerwear as their look gives it.)
+        let mut four = saved.clone();
+        four.outfit.truncate(25);
+        let four = SaveGame::sim(&four);
+        assert_eq!(four.outfit.clothes(crate::simbody::OutfitKind::Formal).full, Some((1, 0, 7)));
+        assert_eq!(four.outfit.clothes(crate::simbody::OutfitKind::Outerwear), crate::sim::Clothes::default());
         // An old save's nine: the other outfits as their look gives them.
         let mut old = saved.clone();
         old.outfit.truncate(9);
-        assert_eq!(SaveGame::sim(&old).outfit.other, [crate::sim::Clothes::default(); 4]);
+        assert_eq!(SaveGame::sim(&old).outfit.other, [crate::sim::Clothes::default(); 5]);
         // Favourites kept; from before them, the same ones each time by the Sim's look.
         assert_eq!(back.favorites, sim.favorites);
         old.favorites = None;

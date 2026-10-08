@@ -331,7 +331,10 @@ installation is unreachable.
   palms stay green), and frost over in the snow. Sims feel it: out of doors their temperature
   heads for the world's (indoors back to comfortable), with the game's Getting Chilly, Teeth
   Chattering, Frostbitten, Getting Warm and Sweating Profusely moodlets, and out in the rain
-  long enough they're Soaked; in rain and hail they leave what's out in it alone. The season
+  long enough they're Soaked; in rain and hail they leave what's out in it alone. Out in the
+  cold (below 50°F) they put on the pack's outerwear (coats, parkas, snow pants, boots,
+  snowsuits; an Outerwear outfit chosen in Create a Sim and kept in saves) and take it off
+  again indoors, and the townies walking by wrap up too. The season
   and the weather are kept in saves; the World Adventures destinations have none.
 - **Water effects**: fountains gush and fill their basins, showers spray from the head and taps
   run while someone's at them, each from the object's own effect slot (the game's RSLT slots).

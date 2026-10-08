@@ -38,6 +38,7 @@ fn stroll(
     clock: Res<GameClock>,
     sidewalk: Option<Res<Sidewalk>>,
     mut townies: Query<(Entity, &mut Townie, &mut Transform, &mut Visibility, &mut Floor, &mut SimAnim, Option<&PathFollow>, &crate::sim::Sim, Option<&crate::simbody::Wearing>)>,
+    weather: Res<crate::weather::Weather>,
 ) {
     let Some(walk) = sidewalk else { return };
     let mut rng = rand::rng();
@@ -73,6 +74,9 @@ fn stroll(
         let jog_hours = (7.0..10.0).contains(&hour) || (17.0..20.0).contains(&hour);
         let jogging = crate::jog::can_jog(sim) && rng.random_bool(if jog_hours { 0.35 } else { 0.1 });
         let athletic = wearing.is_some_and(|w| w.0 == crate::simbody::OutfitKind::Athletic);
+        // (Wrapped up against the cold.)
+        let coat = weather.temperature < 50.0 && !jogging;
+        let wearing_coat = wearing.is_some_and(|w| w.0 == crate::simbody::OutfitKind::Outerwear);
         debug!("{} {} past", sim.full_name(), if jogging { "jogs" } else { "walks" });
         if jogging {
             pf.style = crate::nav::WalkStyle::Jog;
@@ -81,7 +85,9 @@ fn stroll(
             if !athletic {
                 commands.entity(e).insert((crate::simbody::Wearing(crate::simbody::OutfitKind::Athletic), crate::aging::NeedsNewBody));
             }
-        } else if athletic {
+        } else if coat && !wearing_coat {
+            commands.entity(e).insert((crate::simbody::Wearing(crate::simbody::OutfitKind::Outerwear), crate::aging::NeedsNewBody));
+        } else if (athletic || wearing_coat) && !coat {
             commands.entity(e).remove::<crate::simbody::Wearing>().insert(crate::aging::NeedsNewBody);
         }
         commands.entity(e).insert(pf);

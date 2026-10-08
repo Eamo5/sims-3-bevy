@@ -181,7 +181,7 @@ pub struct OutfitChoice {
     pub lipstick: Option<s3bake::Key>,
     pub eyeshadow: Option<s3bake::Key>,
     /// The clothes chosen for their other outfits (in `OTHER_OUTFITS`' order).
-    pub other: [Clothes; 4],
+    pub other: [Clothes; 5],
     /// The colourway chosen for a part (by its key: the game's preset; none, its own).
     pub designs: Vec<(s3bake::Key, u8)>,
     /// Styles made for parts in Create a Style.
@@ -199,8 +199,13 @@ pub struct Clothes {
 
 /// The outfits besides their everyday clothes that can be chosen, as the game's Create a Sim
 /// has them.
-pub const OTHER_OUTFITS: [crate::simbody::OutfitKind; 4] =
-    [crate::simbody::OutfitKind::Formal, crate::simbody::OutfitKind::Sleepwear, crate::simbody::OutfitKind::Athletic, crate::simbody::OutfitKind::Swimwear];
+pub const OTHER_OUTFITS: [crate::simbody::OutfitKind; 5] = [
+    crate::simbody::OutfitKind::Formal,
+    crate::simbody::OutfitKind::Sleepwear,
+    crate::simbody::OutfitKind::Athletic,
+    crate::simbody::OutfitKind::Swimwear,
+    crate::simbody::OutfitKind::Outerwear,
+];
 
 impl OutfitChoice {
     /// A face choice of nothing at all.

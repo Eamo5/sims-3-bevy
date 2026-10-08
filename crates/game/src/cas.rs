@@ -143,12 +143,13 @@ const FACE_AREAS: [(&str, &[(usize, &str, &str, &str)]); 4] = [
 const PAGE: usize = 20;
 
 /// The outfits Create a Sim dresses, as the game's.
-const WEAR: [crate::simbody::OutfitKind; 5] = [
+const WEAR: [crate::simbody::OutfitKind; 6] = [
     crate::simbody::OutfitKind::Everyday,
     crate::simbody::OutfitKind::Formal,
     crate::simbody::OutfitKind::Sleepwear,
     crate::simbody::OutfitKind::Athletic,
     crate::simbody::OutfitKind::Swimwear,
+    crate::simbody::OutfitKind::Outerwear,
 ];
 
 #[derive(Resource)]
