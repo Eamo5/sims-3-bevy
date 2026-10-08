@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 58;
+pub const GAMEDATA_VERSION: u32 = 60;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -598,6 +598,12 @@ pub struct ObjectDesigns {
     pub objd: crate::types::Key,
     pub count: u8,
     pub texture: crate::types::Key,
+    /// Each design's solid colour channels (A to D as 0 to 3) and their colours (what Create a
+    /// Style changes), and the size designs are drawn at.
+    #[serde(default)]
+    pub channels: Vec<Vec<(u8, [f32; 3])>>,
+    #[serde(default)]
+    pub size: (u16, u16),
 }
 
 /// Every buyable object's designs, each drawn from its complate into the texture store (objects
@@ -642,7 +648,8 @@ fn bake_object_designs(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, Stri
             }
             count = i as u8 + 1;
         }
-        Some(ObjectDesigns { objd: c.objd, count, texture })
+        let channels = o.presets.iter().take(16).map(|p| p.complate.solid_channels()).collect();
+        Some(ObjectDesigns { objd: c.objd, count, texture, channels, size: (w as u16, h as u16) })
     })
     .into_iter()
     .flatten()

@@ -267,3 +267,146 @@ impl WallFloorPattern {
         Ok(Self { materials, name, pattern_type, keys, name_guid, price, in_catalog: status & 1 != 0 })
     }
 }
+
+impl Complate {
+    /// Its pattern channels (A to D, as 0 to 3) that are a solid colour, with that colour: what
+    /// Create a Style changes on an object.
+    pub fn solid_channels(&self) -> Vec<(u8, [f32; 3])> {
+        let mut out: Vec<(u8, [f32; 3])> = self
+            .blocks
+            .iter()
+            .filter_map(|b| {
+                let p = b.pattern.to_ascii_lowercase();
+                let ch = p.strip_prefix("pattern ")?.bytes().next()?.checked_sub(b'a').filter(|c| *c < 4)?;
+                // (A patterned material's main colour: its base as its shift leaves it.)
+                if let Some((base, shift)) = b.hsv() {
+                    return Some((ch, crate::complate::shifted(base, shift)));
+                }
+                if !b.name.to_ascii_lowercase().contains("solidcolor") {
+                    return None;
+                }
+                let colour = b.overrides.iter().find(|(k, _)| k.eq_ignore_ascii_case("Color")).and_then(|(_, v)| colour_of(v))?;
+                Some((ch, colour))
+            })
+            .collect();
+        out.sort_by_key(|c| c.0);
+        out.dedup_by_key(|c| c.0);
+        out
+    }
+
+    /// The complate with the colours of some of its solid channels changed.
+    pub fn with_colours(&self, colours: &[(u8, [f32; 3])]) -> Complate {
+        let mut c = self.clone();
+        for b in c.blocks.iter_mut() {
+            let p = b.pattern.to_ascii_lowercase();
+            let Some(ch) = p.strip_prefix("pattern ").and_then(|s| s.bytes().next()).and_then(|x| x.checked_sub(b'a')) else { continue };
+            let Some(&(_, [r, g, bl])) = colours.iter().find(|(x, _)| *x == ch) else { continue };
+            // (A patterned material: its shift set to bring its main colour out so.)
+            if let Some((base, _)) = b.hsv() {
+                let [dh, ds, dv] = crate::complate::shift_for(base, [r, g, bl]);
+                for (k, v) in b.overrides.iter_mut() {
+                    let new = |x: f32, v: &CValue| match v {
+                        CValue::Float(_) => CValue::Float(x),
+                        _ => CValue::Str(format!("{x:.4}")),
+                    };
+                    match k.as_str() {
+                        "HSVShift Bg" => *v = if matches!(v, CValue::Xyz(_)) { CValue::Xyz([dh, ds, dv]) } else { CValue::Str(format!("{dh:.4},{ds:.4},{dv:.4}")) },
+                        "H Bg" => *v = new(dh, v),
+                        "S Bg" => *v = new(ds, v),
+                        "V Bg" => *v = new(dv, v),
+                        _ => {}
+                    }
+                }
+                continue;
+            }
+            let argb = 0xFF00_0000 | ((r.clamp(0.0, 1.0) * 255.0).round() as u32) << 16 | ((g.clamp(0.0, 1.0) * 255.0).round() as u32) << 8 | (bl.clamp(0.0, 1.0) * 255.0).round() as u32;
+            for (k, v) in b.overrides.iter_mut() {
+                if k.eq_ignore_ascii_case("Color") {
+                    *v = CValue::Argb(argb);
+                }
+            }
+        }
+        c
+    }
+}
+
+impl Complate {
+    /// A patterned block's base hue, saturation and value, and the shift on them.
+    fn hsv(&self) -> Option<([f32; 3], [f32; 3])> {
+        let get = |k: &str| self.overrides.iter().find(|(x, _)| x == k).map(|(_, v)| v);
+        let one = |k: &str| match get(k)? {
+            CValue::Float(x) => Some(*x),
+            CValue::Str(s) => s.trim().parse().ok(),
+            _ => None,
+        };
+        let base = [one("Base H Bg")?, one("Base S Bg")?, one("Base V Bg")?];
+        let shift = match get("HSVShift Bg")? {
+            CValue::Xyz(x) => *x,
+            CValue::Str(s) => {
+                let p: Vec<f32> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                if p.len() < 3 {
+                    return None;
+                }
+                [p[0], p[1], p[2]]
+            }
+            _ => return None,
+        };
+        Some((base, shift))
+    }
+}
+
+/// A colour value as 0..1 RGB.
+fn colour_of(v: &CValue) -> Option<[f32; 3]> {
+    match v {
+        CValue::Argb(c) => Some([((c >> 16) & 255) as f32 / 255.0, ((c >> 8) & 255) as f32 / 255.0, (c & 255) as f32 / 255.0]),
+        CValue::Str(s) => {
+            let p: Vec<f32> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            (p.len() >= 3).then(|| [p[0], p[1], p[2]])
+        }
+        CValue::Xyz(x) => Some(*x),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod style_tests {
+    use super::*;
+
+    #[test]
+    fn object_channels_recoloured() {
+        let block = |pat: &str, name: &str, c: u32| Complate { name: name.into(), pattern: pat.into(), overrides: vec![("Color".into(), CValue::Argb(c))], ..Default::default() };
+        let c = Complate { blocks: vec![block("Pattern A", "solidColor_1", 0xFF80_4020), block("Pattern B", "woodOak", 0xFF00_0000), block("Pattern C", "solidColor_1", 0xFFFF_FFFF)], ..Default::default() };
+        let ch = c.solid_channels();
+        assert_eq!(ch.iter().map(|x| x.0).collect::<Vec<_>>(), vec![0, 2]);
+        let d = c.with_colours(&[(0, [1.0, 0.0, 0.0])]);
+        assert_eq!(d.solid_channels()[0].1, [1.0, 0.0, 0.0]);
+        assert_eq!(d.solid_channels()[1].1, [1.0, 1.0, 1.0]);
+    }
+}
+
+#[cfg(test)]
+mod hsv_tests {
+    use super::*;
+
+    #[test]
+    fn patterned_channels_recoloured() {
+        let leather = Complate {
+            name: "leatherSuedeMed01".into(),
+            pattern: "Pattern A".into(),
+            overrides: vec![
+                ("Base H Bg".into(), CValue::Float(0.0969697)),
+                ("Base S Bg".into(), CValue::Float(1.0)),
+                ("Base V Bg".into(), CValue::Float(0.8627451)),
+                ("HSVShift Bg".into(), CValue::Xyz([0.4557, -0.8173, -0.0471])),
+                ("H Bg".into(), CValue::Float(0.4557)),
+                ("S Bg".into(), CValue::Str("-0.8173".into())),
+            ],
+            ..Default::default()
+        };
+        let c = Complate { blocks: vec![leather], ..Default::default() };
+        assert_eq!(c.solid_channels().len(), 1);
+        let red = c.with_colours(&[(0, [0.8, 0.1, 0.1])]);
+        let [r, g, b] = red.solid_channels()[0].1;
+        assert!((r - 0.8).abs() < 0.01 && (g - 0.1).abs() < 0.01 && (b - 0.1).abs() < 0.01, "{r} {g} {b}");
+    }
+}

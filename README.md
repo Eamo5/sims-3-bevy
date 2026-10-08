@@ -48,9 +48,10 @@ installation is unreachable.
   kind, the Sim shown dressed in the one being chosen, and worn when they change into it; kept
   in saves), each item in any of the game's colourways for it (its presets, rendered from
   their patterns and colours: the swatch row under the styles, as the game's; kept in saves)
-  and, in Create a Style, with any colour of the palette on each of its colour channels (the
-  item rendered afresh from its pattern with those colours, from the installed game, in the
-  background; kept in saves), skin tones, hair colours and animation clips, and what the
+  and, in Create a Style, with any colour of the palette on each of its colour channels
+  (solid colours and patterned fabrics alike; the picker in place of the list, as the game's;
+  the item rendered afresh from its pattern with those colours, from the installed game, in
+  the background; kept in saves), skin tones, hair colours and animation clips, and what the
   household's Sims are to each other (roommates, spouses, partners, siblings, parent and
   child, as fits their ages: they start married, family or at least friends, and in the family
   tree); the game's three Simlish voices to choose from (each heard as it's picked; taking a
@@ -246,10 +247,12 @@ installation is unreachable.
   gnomes, sprinklers, picnic tables and trees under Electronics, Outdoors and Misc), each in
   any of the game's designs for it (the catalogue's colour and pattern presets, drawn from
   their texture recipes: the country couch in blue dots, green stripes, red plaid, cowhide or
-  roses; picked from swatches while it's in hand, and kept in saves; paintings, mirrors and
-  wall lamps hang on the wall under the pointer, and go with it when it's cut away); the
-  town's houses are
-  furnished in the very designs their builders chose (each placed object's own, drawn from
+  roses; picked from swatches while it's in hand, and kept in saves) or, in Create a Style,
+  any colour of the palette on each of its colour channels (solid colours, and fabric, wood
+  and the like shifted to the colour as the game's colour wheel does, keeping the grain;
+  rendered afresh from the installed game in the background); paintings, mirrors and
+  wall lamps hang on the wall under the pointer, and go with it when it's cut away; the
+  town's houses are furnished in the very designs their builders chose (each placed object's own, drawn from
   the lot data: quilts, cribs, counter tops and upholstery as they were),
   multi-storey navigation by stairs, walls up, cut away or down (the HUD's walls button or
   Home), day/night with lamps and street lights. Sims deciding on

@@ -24,7 +24,8 @@ impl Plugin for BuyPlugin {
             .add_systems(
                 Update,
                 (toggle_buy, buy_panel, buy_buttons, buy_visuals, buy_pick, placement, paint).chain().run_if(in_state(PlayMode::Live)),
-            );
+            )
+            .add_systems(Update, scripted_style.run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -93,6 +94,9 @@ pub struct BuyMode {
     /// Things being moved that were put down unplaced (Buy mode closed with them in hand), to
     /// go back where they came from.
     returning: Vec<Placing>,
+    /// Create a Style open for the object in hand, and the style it's in (if one's been made).
+    styling: bool,
+    style: Option<crate::style::ObjectStyle>,
 }
 
 #[derive(Component)]
@@ -137,7 +141,7 @@ fn buy_pick(
         commands.insert_resource(PickupRequest(root));
     }
 }
-#[derive(Component)]
+#[derive(Component, Clone, Copy, PartialEq, Debug)]
 enum BuyButton {
     Toggle,
     Category(usize),
@@ -148,6 +152,10 @@ enum BuyButton {
     Fence(usize),
     /// A design for the object in hand.
     Design(u8),
+    /// Create a Style for the object in hand: open or close it, and a channel's colour (of the
+    /// palette).
+    Styling,
+    StyleColour(u8, u8),
     /// A terrain paint (or the eraser), or a brush size (index into `BRUSHES`).
     Terrain(u8),
     Brush(usize),
@@ -163,6 +171,25 @@ impl BuyMode {
         self.category = category;
         self.page = 0;
         self.dirty = true;
+    }
+}
+
+/// OBJ_STYLE=1 (tests): with an object in hand, Create a Style opened (from 12 seconds in) and
+/// its first channel made red (two seconds later).
+fn scripted_style(time: Res<Time>, buy: Res<BuyMode>, mut buttons: Query<(&BuyButton, &mut Interaction)>, mut step: Local<u8>) {
+    if std::env::var("OBJ_STYLE").is_err() || buy.placing.is_none() {
+        return;
+    }
+    let want = match (*step, time.elapsed_secs()) {
+        (0, t) if t > 12.0 => BuyButton::Styling,
+        (1, t) if t > 14.0 => BuyButton::StyleColour(0, 6),
+        (2, t) if t > 20.0 => BuyButton::Styling,
+        _ => return,
+    };
+    if let Some((_, mut i)) = buttons.iter_mut().find(|(b, _)| **b == want) {
+        *i = Interaction::Pressed;
+        *step += 1;
+        info!("object style test: pressed {want:?}");
     }
 }
 
@@ -268,6 +295,7 @@ fn buy_panel(
     (data, mut assets, mut thumbs): (Res<Baked>, ResMut<ObjectAssets>, ResMut<crate::thumbs::ModelThumbs>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     swatches: Res<crate::terrain_paint::Swatches>,
+    renders: Res<crate::style::StyleRenders>,
 ) {
     if !*spawned_toggle {
         *spawned_toggle = true;
@@ -552,10 +580,17 @@ fn buy_panel(
         if let Some(pl) = &buy.placing {
             let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
             let n = ObjectAssets::design_count(&ctx, pl.objd);
-            if n > 1 {
+            // (A row for its designs, or for Create a Style when it has colours to change.)
+            let restylable = data.0.designs.get(&pl.objd).is_some_and(|d| d.channels.iter().any(|c| !c.is_empty()));
+            if n > 1 || restylable {
                 let name = catalog.by_key(&pl.objd).map(|e| e.name.clone()).unwrap_or_default();
                 p.spawn(Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
                     row.spawn(text(format!("{name} · Design"), 14.0, Color::WHITE));
+                    // (Create a Style, where its design has colour channels to change.)
+                    let design = buy.style.as_ref().filter(|s| s.objd == pl.objd).map(|s| s.design).or_else(|| pl.design.filter(|k| k.0 == s3bake::gamedata::T_DESIGN).map(|k| k.1 as u8)).unwrap_or(0);
+                    if data.0.designs.get(&pl.objd).is_some_and(|d| d.channels.get(design as usize).is_some_and(|c| !c.is_empty())) {
+                        button(row, if buy.styling { "Close Create a Style".into() } else { "Create a Style".into() }, BuyButton::Styling, Val::Px(150.0), 28.0, buy.styling);
+                    }
                     for d in 0..n {
                         let tex = assets.texture(&mut ctx, crate::objects::design_texture(pl.objd, d));
                         let chosen = pl.design == Some(crate::objects::design_texture(pl.objd, d));
@@ -580,6 +615,34 @@ fn buy_panel(
                         });
                     }
                 });
+            }
+            // Create a Style: each of the design's colour channels, any colour of the palette.
+            let design = buy.style.as_ref().filter(|s| s.objd == pl.objd).map(|s| s.design).or_else(|| pl.design.filter(|k| k.0 == s3bake::gamedata::T_DESIGN).map(|k| k.1 as u8)).unwrap_or(0);
+            let channels = data.0.designs.get(&pl.objd).and_then(|d| d.channels.get(design as usize).cloned()).unwrap_or_default();
+            if buy.styling && !channels.is_empty() {
+                if renders.busy() {
+                    p.spawn(text("Restyling…", 13.0, Color::srgb(1.0, 0.9, 0.5)));
+                }
+                for (ch, own) in channels {
+                    let now = buy.style.as_ref().filter(|s| s.objd == pl.objd && s.design == design).and_then(|s| s.colours.iter().find(|c| c.0 == ch)).map_or(own, |c| c.1);
+                    p.spawn(Node { column_gap: Val::Px(3.0), align_items: AlignItems::Center, flex_wrap: FlexWrap::Wrap, ..default() }).with_children(|row| {
+                        row.spawn((text(format!("Color {}", (b'A' + ch) as char), 13.0, Color::WHITE), Node { width: Val::Px(58.0), ..default() }));
+                        row.spawn((
+                            Node { width: Val::Px(24.0), height: Val::Px(24.0), border: UiRect::all(Val::Px(2.0)), border_radius: BorderRadius::all(Val::Px(4.0)), margin: UiRect::right(Val::Px(8.0)), ..default() },
+                            BorderColor::all(Color::WHITE),
+                            BackgroundColor(Color::srgb(now[0], now[1], now[2])),
+                        ));
+                        for (i, [r, g, b]) in crate::style::PALETTE.iter().enumerate() {
+                            row.spawn((
+                                Button,
+                                BuyButton::StyleColour(ch, i as u8),
+                                Node { width: Val::Px(20.0), height: Val::Px(20.0), border: UiRect::all(Val::Px(1.0)), border_radius: BorderRadius::all(Val::Px(4.0)), ..default() },
+                                BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.5)),
+                                BackgroundColor(Color::srgb(*r, *g, *b)),
+                            ));
+                        }
+                    });
+                }
             }
         }
         let items = match buy.category {
@@ -643,7 +706,22 @@ fn buy_buttons(
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut play: MessageWriter<crate::sound::PlaySound>,
     ghost_tf: Query<&Transform>,
+    (mut renders, install, mut styled): (ResMut<crate::style::StyleRenders>, Option<Res<crate::data::InstallPath>>, MessageReader<crate::style::ObjectStyleReady>),
 ) {
+    // A style made in Create a Style, rendered: the object in hand in it.
+    for r in styled.read() {
+        let Some(p) = buy.placing.as_mut().filter(|p| p.objd == r.0.objd) else { continue };
+        let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+        let design = r.0.texture();
+        let parts = assets.object_design(&mut ctx, p.objd, Some(design));
+        let at = ghost_tf.get(p.ghost).copied().unwrap_or_default();
+        commands.entity(p.ghost).despawn();
+        p.ghost = spawn_parts(&mut commands, &parts, at);
+        commands.entity(p.ghost).insert(DespawnOnExit(AppState::InGame));
+        p.design = Some(design);
+        buy.style = Some(r.0.clone());
+        buy.dirty = true;
+    }
     for (i, b) in &q {
         if *i != Interaction::Pressed {
             continue;
@@ -661,6 +739,22 @@ fn buy_buttons(
             BuyButton::Roof(i) => {
                 buy.roof_pick = Some(*i);
             }
+            BuyButton::Styling => {
+                buy.styling = !buy.styling;
+                buy.dirty = true;
+            }
+            BuyButton::StyleColour(ch, idx) => {
+                let (Some(p), Some(&colour), Some(path)) = (buy.placing.as_ref(), crate::style::PALETTE.get(*idx as usize), install.as_ref()) else { continue };
+                let Some(info) = data.0.designs.get(&p.objd) else { continue };
+                let design = buy.style.as_ref().filter(|s| s.objd == p.objd).map(|s| s.design).or_else(|| p.design.filter(|k| k.0 == s3bake::gamedata::T_DESIGN).map(|k| k.1 as u8)).unwrap_or(0);
+                // (On top of the style already made from this design, if any.)
+                let mut colours = buy.style.as_ref().filter(|s| s.objd == p.objd && s.design == design).map(|s| s.colours.clone()).unwrap_or_default();
+                colours.retain(|(c, _)| c != ch);
+                colours.push((*ch, colour));
+                colours.sort_by_key(|c| c.0);
+                renders.request_object(crate::style::ObjectStyle { objd: p.objd, design, colours }, info.size, path.0.clone());
+                buy.dirty = true;
+            }
             BuyButton::Design(d) => {
                 // The object in hand, in that design.
                 let Some(p) = buy.placing.as_mut() else { continue };
@@ -672,6 +766,7 @@ fn buy_buttons(
                 p.ghost = spawn_parts(&mut commands, &parts, at);
                 commands.entity(p.ghost).insert(DespawnOnExit(AppState::InGame));
                 p.design = Some(design);
+                buy.style = None;
                 buy.dirty = true;
                 play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
             }
@@ -843,8 +938,12 @@ fn pick_wall(ray: Ray3d, b: &crate::building::ActiveBuilding) -> Option<(u32, u8
     best.map(|(_, w, s)| (w, s))
 }
 
-fn buy_visuals(mut q: Query<(&Interaction, &mut BackgroundColor), With<BuyButton>>) {
-    for (i, mut bg) in &mut q {
+fn buy_visuals(mut q: Query<(&Interaction, &mut BackgroundColor, &BuyButton)>) {
+    for (i, mut bg, b) in &mut q {
+        // (The palette's swatches keep their colours.)
+        if matches!(b, BuyButton::StyleColour(..)) {
+            continue;
+        }
         bg.0 = match i {
             Interaction::Pressed => BTN_PRESS,
             Interaction::Hovered => BTN_HOVER,

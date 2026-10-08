@@ -3,7 +3,9 @@
 //! colour of the palette; the item is then rendered afresh from its preset with those colours
 //! (the game's patterns through the compositor, from the installed game, opened the first time
 //! it's needed) into the texture store, and worn so. The styles made are kept with the Sim's
-//! outfit and in saves.
+//! outfit and in saves. Buy mode's is the same for an object in hand: its design's channels
+//! recoloured (a patterned material's shifted to the colour, keeping its grain), rendered into
+//! the texture store and placed in it, the placed object saved with that design.
 
 use std::sync::{Arc, OnceLock};
 
@@ -69,18 +71,65 @@ pub const PALETTE: [[f32; 3]; 30] = [
     [0.95, 0.9, 0.75],
 ];
 
+/// Texture-store type of the styles made for objects in Buy mode's Create a Style.
+pub const T_OBJ_STYLE: u32 = 0x0B1E_5171;
+
+/// An object's own style: one of its designs with some of its channels' colours changed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObjectStyle {
+    pub objd: s3bake::Key,
+    pub design: u8,
+    pub colours: Vec<(u8, [f32; 3])>,
+}
+
+impl ObjectStyle {
+    /// Where its rendering is kept in the texture store (a placed object's design is saved by
+    /// this key).
+    pub fn texture(&self) -> s3bake::Key {
+        let desc = format!("{:?}|{}|{:?}", self.objd, self.design, self.colours.iter().map(|(c, v)| (c, v.map(|x| (x * 255.0).round() as u8))).collect::<Vec<_>>());
+        (T_OBJ_STYLE, 0, s3pkg::fnv64(&desc))
+    }
+}
+
 /// The installed game's packages, opened the first time a style is rendered.
 static INSTALL: OnceLock<Option<Arc<s3pkg::PackageSet>>> = OnceLock::new();
+
+fn install(path: &std::path::Path) -> Option<&'static Arc<s3pkg::PackageSet>> {
+    INSTALL
+        .get_or_init(|| {
+            let set = s3pkg::install::open_install(path, |_| true);
+            (set.len() > 0).then(|| Arc::new(set))
+        })
+        .as_ref()
+}
 
 /// Styles being rendered, for whom (by Sim id).
 #[derive(Resource, Default)]
 pub struct StyleRenders {
     tasks: Vec<(u64, CustomStyle, Task<bool>)>,
+    objects: Vec<(ObjectStyle, Task<bool>)>,
 }
 
 impl StyleRenders {
     pub fn busy(&self) -> bool {
-        !self.tasks.is_empty()
+        !self.tasks.is_empty() || !self.objects.is_empty()
+    }
+
+    /// Renders an object's `style` (at `size`, as its designs are drawn): done, it's announced
+    /// as an `ObjectStyleReady`.
+    pub fn request_object(&mut self, style: ObjectStyle, size: (u16, u16), path: std::path::PathBuf) {
+        let s = style.clone();
+        let task = AsyncComputeTaskPool::get().spawn(async move {
+            let Some(pkgs) = install(&path) else { return false };
+            let key = s3pkg::ResourceKey::new(s.objd.0, s.objd.1, s.objd.2);
+            let Some(o) = pkgs.read(&key).and_then(|d| s3formats::object::parse_objd(&d).ok()) else { return false };
+            let Some(p) = o.presets.get(s.design as usize) else { return false };
+            let c = p.complate.with_colours(&s.colours);
+            let (w, h) = (size.0.max(16) as usize, size.1.max(16) as usize);
+            let Some(img) = s3formats::complate::render(pkgs, &c, &p.keys, w, h) else { return false };
+            std::fs::write(s3bake::default_root().tex_path(s.texture()), s3bake::ddsw::encode_dds(&img)).is_ok()
+        });
+        self.objects.push((style, task));
     }
 
     /// Renders `style` for the Sim `sim` (from the game at `install`): done, it's announced as a
@@ -88,12 +137,7 @@ impl StyleRenders {
     pub fn request(&mut self, sim: u64, style: CustomStyle, install: std::path::PathBuf) {
         let s = style.clone();
         let task = AsyncComputeTaskPool::get().spawn(async move {
-            let Some(pkgs) = INSTALL.get_or_init(|| {
-                let set = s3pkg::install::open_install(&install, |_| true);
-                (set.len() > 0).then(|| Arc::new(set))
-            }) else {
-                return false;
-            };
+            let Some(pkgs) = self::install(&install) else { return false };
             let key = s3pkg::ResourceKey::new(s.part.0, s.part.1, s.part.2);
             let Some(c) = pkgs.read(&key).and_then(|d| s3formats::sim::CasPart::parse(&d).ok()) else { return false };
             let Some(xml) = c.presets.get(s.preset as usize) else { return false };
@@ -118,8 +162,25 @@ impl StyleReady {
     }
 }
 
+/// An object's style rendered, for the object in hand to be in.
+#[derive(Message)]
+pub struct ObjectStyleReady(pub ObjectStyle);
+
 /// Renders finished are announced (or, failed, dropped with a word in the log).
-pub fn poll_styles(mut renders: ResMut<StyleRenders>, mut ready: MessageWriter<StyleReady>) {
+pub fn poll_styles(mut renders: ResMut<StyleRenders>, mut ready: MessageWriter<StyleReady>, mut objects: MessageWriter<ObjectStyleReady>) {
+    let mut i = 0;
+    while i < renders.objects.len() {
+        let Some(ok) = block_on(poll_once(&mut renders.objects[i].1)) else {
+            i += 1;
+            continue;
+        };
+        let (style, _) = renders.objects.remove(i);
+        if ok {
+            objects.write(ObjectStyleReady(style));
+        } else {
+            warn!("Create a Style: couldn't render the object {:?}", style.objd);
+        }
+    }
     let mut i = 0;
     while i < renders.tasks.len() {
         let Some(ok) = block_on(poll_once(&mut renders.tasks[i].2)) else {
@@ -139,6 +200,6 @@ pub struct StylePlugin;
 
 impl Plugin for StylePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<StyleRenders>().add_message::<StyleReady>().add_systems(Update, poll_styles);
+        app.init_resource::<StyleRenders>().add_message::<StyleReady>().add_message::<ObjectStyleReady>().add_systems(Update, poll_styles);
     }
 }

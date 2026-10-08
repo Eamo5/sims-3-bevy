@@ -161,7 +161,7 @@ impl Plugin for AutoTestPlugin {
         app.insert_resource(args)
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, show_designs, walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, (show_designs, show_style), walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, strand_swimmers.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
@@ -800,7 +800,7 @@ fn show_designs(
     let Some(entry) = catalog.by_key(&objd) else { return };
     let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
     let n = crate::objects::ObjectAssets::design_count(&ctx, objd);
-    info!("designs test: {} has {n} designs", entry.name);
+    info!("designs test: {} has {n} designs; channels {:?}", entry.name, data.0.designs.get(&objd).map(|d| d.channels.clone()));
     let width = crate::objects::parts_bounds(&assets.object(&mut ctx, objd)).map_or(1.0, |(a, b)| (b.x - a.x).max(b.z - a.z) + 0.4);
     let ahead = (tf.rotation * Vec3::Z).with_y(0.0).normalize_or(Vec3::Z);
     let side = Vec3::new(ahead.z, 0.0, -ahead.x);
@@ -838,6 +838,29 @@ fn show_designs(
         b.show(0);
         b.placing = Some(crate::buy::Placing::new(objd, ghost, false, Some(crate::objects::design_texture(objd, 1))));
     });
+}
+
+/// OBJ_STYLE=1 (with DESIGNS): the style made for the object in hand, once rendered, also put
+/// down in front of the row of its designs (the one in hand follows the pointer, under the
+/// panel).
+#[allow(clippy::too_many_arguments)]
+fn show_style(
+    mut commands: Commands,
+    mut ready: MessageReader<crate::style::ObjectStyleReady>,
+    sel: Query<&Transform, With<crate::sim::Selected>>,
+    (data, catalog, mut assets): (Res<crate::baked::Baked>, Res<crate::loading::Catalog>, ResMut<crate::objects::ObjectAssets>),
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+) {
+    for r in ready.read() {
+        if std::env::var("OBJ_STYLE").is_err() {
+            continue;
+        }
+        let Ok(tf) = sel.single() else { continue };
+        let ahead = (tf.rotation * Vec3::Z).with_y(0.0).normalize_or(Vec3::Z);
+        let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+        let put = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, r.0.objd, tf.translation + ahead * 1.0, Quat::from_rotation_arc(Vec3::Z, -ahead), Some(r.0.texture()));
+        info!("object style test: {:?} put down in its style ({})", r.0.colours, put.is_some());
+    }
 }
 
 /// PAINTINGS=<Painting level>: the selected Sim paints a painting on each canvas at that level

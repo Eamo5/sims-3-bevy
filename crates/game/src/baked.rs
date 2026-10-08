@@ -74,7 +74,7 @@ impl BakedData {
                 if let Some(&i) = catalog_index.get(&c.objd) {
                     catalog[i].models = vec![c.model];
                 }
-                designs.insert(c.objd, s3bake::gamedata::ObjectDesigns { objd: c.objd, count: 0, texture: paintings.face });
+                designs.insert(c.objd, s3bake::gamedata::ObjectDesigns { objd: c.objd, count: 0, texture: paintings.face, ..Default::default() });
             }
         }
         let outfit_pack = PackReader::open(&g.join("outfits.pack")).ok();

@@ -1189,44 +1189,52 @@ fn rebuild_ui(
                             }
                         });
                     }
-                    p.spawn(text(format!("{} · {} styles", tab.name(), list.len()), 20.0, Color::WHITE));
-                    // The game's pictures of each style (names on hover).
-                    p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|grid| {
-                        for (i, (key, name)) in list.iter().enumerate().skip(page * PAGE).take(PAGE) {
-                            let action = CasAction::Pick(i - page * PAGE);
-                            let chosen = Some(*key) == current;
-                            let thumb = ui.as_deref_mut().and_then(|u| u.icon(&mut images, &s3bake::gamedata::cas_thumb_name(key.2)));
-                            let Some(thumb) = thumb else {
-                                button(grid, name.clone(), action, Val::Px(96.0), chosen, 12.0);
-                                continue;
-                            };
-                            let mut e = grid.spawn((
-                                Button,
-                                action,
-                                Node {
-                                    width: Val::Px(96.0),
-                                    height: Val::Px(96.0),
-                                    border: UiRect::all(Val::Px(if chosen { 3.0 } else { 0.0 })),
-                                    border_radius: BorderRadius::all(Val::Px(8.0)),
-                                    ..default()
-                                },
-                                BorderColor::all(PLUMBOB_GREEN),
-                                BackgroundColor(if chosen { Color::srgb(0.22, 0.55, 0.22) } else { BTN_NORMAL }),
-                                crate::icons::Tooltip(name.clone()),
-                            ));
-                            if chosen {
-                                e.insert(Selectedness);
+                    // (Create a Style open on the worn item: its colour picker in place of the list.)
+                    let styling_now = scene.styling
+                        && current.filter(|_| t != CT_HAIR).and_then(|k| scene.cas.colourways.get(&k).map(|w| (k, w))).is_some_and(|(k, w)| {
+                            let on = sim.outfit.designs.iter().find(|(p, _)| *p == k).map_or(0, |d| d.1);
+                            w.channels.get(on as usize).is_some_and(|c| !c.is_empty())
+                        });
+                    if !styling_now {
+                        p.spawn(text(format!("{} · {} styles", tab.name(), list.len()), 20.0, Color::WHITE));
+                        // The game's pictures of each style (names on hover).
+                        p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|grid| {
+                            for (i, (key, name)) in list.iter().enumerate().skip(page * PAGE).take(PAGE) {
+                                let action = CasAction::Pick(i - page * PAGE);
+                                let chosen = Some(*key) == current;
+                                let thumb = ui.as_deref_mut().and_then(|u| u.icon(&mut images, &s3bake::gamedata::cas_thumb_name(key.2)));
+                                let Some(thumb) = thumb else {
+                                    button(grid, name.clone(), action, Val::Px(96.0), chosen, 12.0);
+                                    continue;
+                                };
+                                let mut e = grid.spawn((
+                                    Button,
+                                    action,
+                                    Node {
+                                        width: Val::Px(96.0),
+                                        height: Val::Px(96.0),
+                                        border: UiRect::all(Val::Px(if chosen { 3.0 } else { 0.0 })),
+                                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                                        ..default()
+                                    },
+                                    BorderColor::all(PLUMBOB_GREEN),
+                                    BackgroundColor(if chosen { Color::srgb(0.22, 0.55, 0.22) } else { BTN_NORMAL }),
+                                    crate::icons::Tooltip(name.clone()),
+                                ));
+                                if chosen {
+                                    e.insert(Selectedness);
+                                }
+                                e.with_children(|b| {
+                                    b.spawn((ImageNode::new(thumb), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
+                                });
                             }
-                            e.with_children(|b| {
-                                b.spawn((ImageNode::new(thumb), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
-                            });
-                        }
-                    });
-                    p.spawn(Node { column_gap: Val::Px(8.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
-                        button(row, "< Prev", CasAction::Page(-1), Val::Px(110.0), false, 15.0);
-                        row.spawn(text(format!("{} / {}", page + 1, pages), 15.0, Color::WHITE));
-                        button(row, "Next >", CasAction::Page(1), Val::Px(110.0), false, 15.0);
-                    });
+                        });
+                        p.spawn(Node { column_gap: Val::Px(8.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
+                            button(row, "< Prev", CasAction::Page(-1), Val::Px(110.0), false, 15.0);
+                            row.spawn(text(format!("{} / {}", page + 1, pages), 15.0, Color::WHITE));
+                            button(row, "Next >", CasAction::Page(1), Val::Px(110.0), false, 15.0);
+                        });
+                    }
                     // The worn item's colourways (the game's presets for it), as swatches.
                     if let Some(ways) = current.filter(|_| t != CT_HAIR).and_then(|k| scene.cas.colourways.get(&k).map(|w| (k, w.clone()))) {
                         let (key, ways) = ways;

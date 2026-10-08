@@ -392,8 +392,77 @@ pub fn render_preset(pkgs: &PackageSet, xml: &str, max: usize, layer: bool) -> O
     Some(c.run(&t, w, h))
 }
 
-/// The pattern channels of a CAS preset (A to D, as 0 to 3) that are enabled and a solid colour,
-/// with that colour (linear 0..1, as the preset has it): what Create a Style changes.
+/// RGB (0..1) as hue, saturation and value (0..1).
+pub fn rgb_to_hsv([r, g, b]: [f32; 3]) -> [f32; 3] {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let d = max - min;
+    let h = if d <= 1e-6 {
+        0.0
+    } else if max == r {
+        ((g - b) / d).rem_euclid(6.0) / 6.0
+    } else if max == g {
+        ((b - r) / d + 2.0) / 6.0
+    } else {
+        ((r - g) / d + 4.0) / 6.0
+    };
+    [h, if max <= 1e-6 { 0.0 } else { d / max }, max]
+}
+
+/// Hue, saturation and value (0..1; hue wraps) as RGB.
+pub fn hsv_to_rgb([h, s, v]: [f32; 3]) -> [f32; 3] {
+    let (s, v) = (s.clamp(0.0, 1.0), v.clamp(0.0, 1.0));
+    let h6 = h.rem_euclid(1.0) * 6.0;
+    let i = h6.floor();
+    let f = h6 - i;
+    let (p, q, t) = (v * (1.0 - s), v * (1.0 - s * f), v * (1.0 - s * (1.0 - f)));
+    match i as i32 % 6 {
+        0 => [v, t, p],
+        1 => [q, v, p],
+        2 => [p, v, t],
+        3 => [p, q, v],
+        4 => [t, p, v],
+        _ => [v, p, q],
+    }
+}
+
+/// A pattern's main colour from its base hue, saturation and value and the shift its preset
+/// puts on them (the way patterned materials take their colours).
+pub fn shifted(base: [f32; 3], shift: [f32; 3]) -> [f32; 3] {
+    hsv_to_rgb([base[0] + shift[0], base[1] + shift[1], base[2] + shift[2]])
+}
+
+/// The shift that makes a pattern of `base` hue, saturation and value come out `colour`.
+pub fn shift_for(base: [f32; 3], colour: [f32; 3]) -> [f32; 3] {
+    let t = rgb_to_hsv(colour);
+    // (The hue the shorter way round.)
+    let mut dh = t[0] - base[0];
+    if dh > 0.5 {
+        dh -= 1.0;
+    } else if dh < -0.5 {
+        dh += 1.0;
+    }
+    [dh, t[1] - base[1], t[2] - base[2]]
+}
+
+/// The value of `key` in a pattern block of preset XML.
+fn xml_value<'a>(block: &'a str, key: &str) -> Option<&'a str> {
+    let pat = format!("key=\"{key}\" value=\"");
+    let at = block.find(&pat)? + pat.len();
+    block[at..].split('"').next()
+}
+
+/// A pattern block's base hue, saturation and value, and its shift (patterned materials).
+fn hsv_of(block: &str) -> Option<([f32; 3], [f32; 3])> {
+    let one = |k: &str| xml_value(block, k).and_then(|v| v.trim().parse::<f32>().ok());
+    let base = [one("Base H Bg")?, one("Base S Bg")?, one("Base V Bg")?];
+    let shift = floats(xml_value(block, "HSVShift Bg")?);
+    (shift.len() >= 3).then(|| (base, [shift[0], shift[1], shift[2]]))
+}
+
+/// The pattern channels of a CAS preset (A to D, as 0 to 3) that are enabled and have a colour
+/// to change: a solid colour's, or a patterned material's main colour (its base hue, saturation
+/// and value as its shift leaves them). What Create a Style changes.
 pub fn solid_channels(xml: &str) -> Vec<(u8, [f32; 3])> {
     let lower = xml.to_ascii_lowercase();
     (0..4u8)
@@ -405,11 +474,13 @@ pub fn solid_channels(xml: &str) -> Vec<(u8, [f32; 3])> {
             let start = lower.find(&format!("variable=\"{v}\""))?;
             let end = start + lower[start..].find("</pattern>")?;
             let block = &xml[start..end];
-            if !block.contains("solidColor") && !lower[start..end].contains("solidcolor") {
+            if let Some((base, shift)) = hsv_of(block) {
+                return Some((ch, shifted(base, shift)));
+            }
+            if !lower[start..end].contains("solidcolor") {
                 return None;
             }
-            let at = block.find("key=\"Color\" value=\"")? + "key=\"Color\" value=\"".len();
-            let vals: Vec<f32> = block[at..].split('"').next()?.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+            let vals = floats(xml_value(block, "Color")?);
             (vals.len() >= 3).then(|| (ch, [vals[0], vals[1], vals[2]]))
         })
         .collect()
@@ -423,11 +494,24 @@ pub fn with_colours(xml: &str, colours: &[(u8, [f32; 3])]) -> String {
         let v = format!("variable=\"pattern {}\"", (b'a' + ch) as char);
         let Some(start) = lower.find(&v) else { continue };
         let Some(len) = lower[start..].find("</pattern>") else { continue };
-        let block = &out[start..start + len];
-        let Some(at) = block.find("key=\"Color\" value=\"") else { continue };
-        let vstart = start + at + "key=\"Color\" value=\"".len();
-        let Some(vlen) = out[vstart..].find('"') else { continue };
-        out.replace_range(vstart..vstart + vlen, &format!("{r:.7},{g:.7},{b:.7},1.0"));
+        let block = out[start..start + len].to_string();
+        // (A patterned material: its shift set to bring its main colour out so.)
+        let new_values: Vec<(&str, String)> = match hsv_of(&block) {
+            Some((base, _)) => {
+                let [dh, ds, dv] = shift_for(base, [r, g, b]);
+                vec![("HSVShift Bg", format!("{dh:.4},{ds:.4},{dv:.4}")), ("H Bg", format!("{dh:.4}")), ("S Bg", format!("{ds:.4}")), ("V Bg", format!("{dv:.4}"))]
+            }
+            None => vec![("Color", format!("{r:.7},{g:.7},{b:.7},1.0"))],
+        };
+        for (key, value) in new_values {
+            let pat = format!("key=\"{key}\" value=\"");
+            // (The block's end afresh: values change length.)
+            let Some(len) = out.to_ascii_lowercase()[start..].find("</pattern>") else { continue };
+            let Some(at) = out[start..start + len].find(&pat) else { continue };
+            let vstart = start + at + pat.len();
+            let Some(vlen) = out[vstart..].find('"') else { continue };
+            out.replace_range(vstart..vstart + vlen, &value);
+        }
     }
     out
 }
@@ -448,5 +532,18 @@ mod style_tests {
         let again = solid_channels(&x);
         assert_eq!(again[0].1, ch[0].1);
         assert_eq!(again[1].1, [1.0, 0.0, 0.5]);
+    }
+
+    const DENIM: &str = r#"<preset><complate name="CasRgbMask"><value key="Pattern A Enabled" value="true" /><pattern name="denimRough" variable="Pattern A"><value key="Base H Bg" value="0.6" /><value key="Base S Bg" value="0.7" /><value key="Base V Bg" value="0.5" /><value key="HSVShift Bg" value="-0.0345,-0.4571,-0.2700" /><value key="H Bg" value="-0.0345" /><value key="S Bg" value="-0.4571" /><value key="V Bg" value="-0.27" /><value key="rgbmask" value="denim_mask" /></pattern></complate></preset>"#;
+
+    #[test]
+    fn patterned_channels_recoloured() {
+        let ch = solid_channels(DENIM);
+        assert_eq!(ch.len(), 1);
+        let x = with_colours(DENIM, &[(0, [0.8, 0.1, 0.1])]);
+        let [r, g, b] = solid_channels(&x)[0].1;
+        assert!((r - 0.8).abs() < 0.01 && (g - 0.1).abs() < 0.01 && (b - 0.1).abs() < 0.01, "{r} {g} {b}");
+        // (The pattern's other values left as they were.)
+        assert!(x.contains("denim_mask") && x.contains(r#"key="Base H Bg" value="0.6""#));
     }
 }
