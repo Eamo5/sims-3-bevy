@@ -303,9 +303,14 @@ The animation state holds record types not decoded here (0x19 in Sunset Valley; 
 rotation, model, design) comes before it, and the script after it: on an unknown record, the
 script component is found by its name (`u32, u32 length 8..256, "Sims3..."`) before the next
 object's header, and the object read on from there. Failing that, an object is resynchronised on
-the first header after its own (never skipping the next object). With both, `s3tool objnstats
-<world>` counts every object of China, Egypt, France, Twinbrook and Bridgeport, 10,514 of Sunset
-Valley's 10,522, and about 99% of the later worlds'. [VERIFIED]
+the first header after its own (never skipping the next object). What follows the script (the
+physics to audio components) isn't needed to place an object and is read as far as it goes: a
+Sim standing in a later world (`Sims3.Gameplay.Actors.Sim`, whose SACS block is longer) is kept
+but dropped at load, for the town's people come from its households. A script that won't read
+where the animation state left off is found by its name too. With all this `s3tool objnstats
+<world>` counts every placed object of every installed world; Oasis Landing's three short are
+entries of a world-builder helper's 67 KB property blob (ending in an `NOBJ` table), not placed
+objects. [VERIFIED]
 
 ### 6.1 Header  [VERIFIED]
 

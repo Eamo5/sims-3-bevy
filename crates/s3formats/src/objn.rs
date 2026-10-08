@@ -281,97 +281,130 @@ fn parse_object(r: &mut Reader, refs: &HashMap<u16, ResourceKey>, tail: usize) -
             r.skip(9 + 24 + tail)?;
         }
     }
-    if has(C_ANIMATION) {
-        let anim_start = r.pos;
-        r.u16()?;
-        if r.u8()? != 0 && skip_anim(r).is_err() {
-            // (An animation record of a kind not known here, which later packs add: on to the
-            // script, found by its name, for everything else about the object was read before.)
-            if !has(C_SCRIPT) {
-                return Err(Eof);
-            }
-            let d = r.data;
-            let u = |p: usize| d.get(p..p + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()) as usize);
-            // (Within this object: before the next one begins.)
-            let end = scan_header(d, anim_start, 16384).unwrap_or((anim_start + 16384).min(d.len().saturating_sub(16)));
-            let found = (anim_start..end).find(|&p| u(p + 4).is_some_and(|ln| (8..=256).contains(&ln)) && d.get(p + 8..p + 14) == Some(b"Sims3.".as_slice()));
-            r.pos = found.ok_or(Eof)?;
-        }
-    }
-    if has(C_SCRIPT) {
+    // Everything that places the object has been read by now. (What can't be read of the rest
+    // doesn't cost the object: it's kept, and whoever reads on finds the next object's header.)
+    let script_from = r.pos;
+    // (The script component, found by its name, within this object: before the next begins.)
+    let data = r.data;
+    let find_script = |from: usize| {
+        let d = data;
+        let u = |p: usize| d.get(p..p + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()) as usize);
+        let end = scan_header(d, from, 16384).unwrap_or((from + 16384).min(d.len().saturating_sub(16)));
+        (from..end).find(|&p| u(p + 4).is_some_and(|ln| (8..=256).contains(&ln)) && d.get(p + 8..p + 14) == Some(b"Sims3.".as_slice()))
+    };
+    let read_script = |r: &mut Reader| -> R<String> {
         r.u32()?;
         let ln = r.u32()? as usize;
         if ln > 512 {
             return Err(Eof);
         }
-        o.script = Some(String::from_utf8_lossy(r.bytes(ln)?).into_owned());
+        let s = String::from_utf8_lossy(r.bytes(ln)?).into_owned();
         r.u8()?;
         r.u32()?;
         r.u32()?;
-    }
-    if has(C_PHYSICS) {
-        r.u8()?;
-    }
-    if has(C_TREE) {
-        o.speedtree = resolve(r.u16()?);
-        r.u32()?;
-        let c = r.u32()? as usize;
-        if c > 100_000 {
-            return Err(Eof);
-        }
-        for _ in 0..c {
-            let mut m = [0f32; 16];
-            for v in &mut m {
-                *v = r.f32()?;
+        Ok(s)
+    };
+    if has(C_ANIMATION) {
+        let anim = (|| -> R<()> {
+            r.u16()?;
+            if r.u8()? != 0 {
+                skip_anim(r)?;
             }
-            let scale = r.f32()?;
-            o.trees.push(TreeInstance { matrix: m, scale });
+            Ok(())
+        })();
+        // (An animation record of a kind not known here, which later packs add: on to the
+        // script, found by its name.)
+        if anim.is_err() {
+            match find_script(script_from).filter(|_| has(C_SCRIPT)) {
+                Some(p) => r.pos = p,
+                None => return Ok(o),
+            }
         }
     }
-    if has(C_EFFECT) {
-        r.u16()?;
-        r.u16()?;
-        r.u8()?;
-        let ln = r.u8()? as usize;
-        r.skip(ln)?;
+    if has(C_SCRIPT) {
+        let at = r.pos;
+        match read_script(r) {
+            Ok(s) => o.script = Some(s),
+            Err(_) => {
+                // (Where the animation state was misread: the script by its name.)
+                let Some(p) = find_script(script_from).filter(|&p| p != at) else { return Ok(o) };
+                r.pos = p;
+                match read_script(r) {
+                    Ok(s) => o.script = Some(s),
+                    Err(_) => return Ok(o),
+                }
+            }
+        }
     }
-    if has(C_SIM) {
-        r.skip(4)?;
-    }
-    if has(C_STEERING) {
-        r.skip(5)?;
-    }
-    if has(C_SACS) {
-        r.u16()?;
-        r.u8()?;
-        let c = r.u8()? as usize;
-        r.skip(c * 4)?;
-    }
-    if has(C_SLOT) {
-        r.u16()?;
-    }
-    if has(C_LIGHTING) {
-        r.u16()?;
-        r.skip(16)?;
-    }
-    if has(C_VISUALSTATE) {
-        r.skip(6)?;
-        r.i32()?;
-    }
-    if has(C_FOOTPRINT) {
-        r.u8()?;
-        r.u16()?;
-        let c = r.u32()? as usize;
-        r.skip(c * 4)?;
-        r.u16()?;
-        let c = r.u32()? as usize;
-        r.skip(c * 4)?;
-        r.u8()?;
-        r.f32()?;
-    }
-    if has(C_AUDIO) {
-        r.skip(20)?;
-    }
+    // (What follows the script isn't needed to place the object, and later packs lengthen some
+    // of it (a Sim's SACS block): read as far as it goes, the object kept either way.)
+    let rest = |r: &mut Reader, o: &mut PlacedObject| -> R<()> {
+        if has(C_PHYSICS) {
+            r.u8()?;
+        }
+        if has(C_TREE) {
+            o.speedtree = resolve(r.u16()?);
+            r.u32()?;
+            let c = r.u32()? as usize;
+            if c > 100_000 {
+                return Err(Eof);
+            }
+            for _ in 0..c {
+                let mut m = [0f32; 16];
+                for v in &mut m {
+                    *v = r.f32()?;
+                }
+                let scale = r.f32()?;
+                o.trees.push(TreeInstance { matrix: m, scale });
+            }
+        }
+        if has(C_EFFECT) {
+            r.u16()?;
+            r.u16()?;
+            r.u8()?;
+            let ln = r.u8()? as usize;
+            r.skip(ln)?;
+        }
+        if has(C_SIM) {
+            r.skip(4)?;
+        }
+        if has(C_STEERING) {
+            r.skip(5)?;
+        }
+        if has(C_SACS) {
+            r.u16()?;
+            r.u8()?;
+            let c = r.u8()? as usize;
+            r.skip(c * 4)?;
+        }
+        if has(C_SLOT) {
+            r.u16()?;
+        }
+        if has(C_LIGHTING) {
+            r.u16()?;
+            r.skip(16)?;
+        }
+        if has(C_VISUALSTATE) {
+            r.skip(6)?;
+            r.i32()?;
+        }
+        if has(C_FOOTPRINT) {
+            r.u8()?;
+            r.u16()?;
+            let c = r.u32()? as usize;
+            r.skip(c * 4)?;
+            r.u16()?;
+            let c = r.u32()? as usize;
+            r.skip(c * 4)?;
+            r.u8()?;
+            r.f32()?;
+        }
+        if has(C_AUDIO) {
+            r.skip(20)?;
+        }
+        Ok(())
+    };
+    let _ = rest(r, &mut o);
     Ok(o)
 }
 
@@ -383,7 +416,10 @@ pub fn load_world_objects(pkg: &s3pkg::Package) -> HashMap<u64, Vec<PlacedObject
         let Some(re) = pkg.find(&refs_key) else { continue };
         let (Ok(rd), Ok(od)) = (pkg.read(re), pkg.read(e)) else { continue };
         let Ok(refs) = parse_refs(&rd) else { continue };
-        if let Ok(objs) = parse_objn(&od, &refs) {
+        if let Ok(mut objs) = parse_objn(&od, &refs) {
+            // (Sims standing in the world as the world builders left them: the town's people
+            // are made from the households, not from these.)
+            objs.retain(|o| o.script.as_deref() != Some("Sims3.Gameplay.Actors.Sim"));
             out.insert(e.key.i, objs);
         }
     }
