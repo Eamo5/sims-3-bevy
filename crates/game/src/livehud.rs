@@ -411,23 +411,43 @@ fn puck(
     mut texts: Query<&mut Text>,
     mut vis: Query<&mut Visibility>,
     (household, mut buy, mut clock): (Option<Res<crate::interact::Household>>, ResMut<crate::buy::BuyMode>, ResMut<crate::clock::GameClock>),
-    (mut walls, building, mut cam): (ResMut<crate::building::WallMode>, Option<ResMut<crate::building::ActiveBuilding>>, Query<&mut crate::camera::SimsCamera>),
+    (mut walls, mut building, mut cam): (ResMut<crate::building::WallMode>, Option<ResMut<crate::building::ActiveBuilding>>, Query<&mut crate::camera::SimsCamera>),
     (mut menu, selected): (ResMut<crate::options::GameMenu>, Query<&Transform, With<Selected>>),
     world: Res<crate::loading::CurrentWorld>,
+    buy_hud: Option<Res<crate::buyhud::BuyHud>>,
 ) {
-    let p = &hud.puck;
+    // (Buy mode's layout has its own copy of the puck, worked the same.)
+    let buy_puck = buy_hud.map(|b| b.puck.clone());
+    for p in std::iter::once(&hud.puck).chain(buy_puck.as_ref()) {
+        puck_one(p, &mut commands, &clicks, &mut buttons, &mut texts, &mut vis, (household.as_deref(), &mut buy, &mut clock), (&mut walls, building.as_deref_mut(), &mut cam), (&mut menu, &selected), &world);
+    }
+}
+
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn puck_one(
+    p: &Spawned,
+    commands: &mut Commands,
+    clicks: &Query<(Entity, &Interaction), Changed<Interaction>>,
+    buttons: &mut Query<&mut UiButton>,
+    texts: &mut Query<&mut Text>,
+    vis: &mut Query<&mut Visibility>,
+    (household, buy, clock): (Option<&crate::interact::Household>, &mut crate::buy::BuyMode, &mut crate::clock::GameClock),
+    (walls, building, cam): (&mut crate::building::WallMode, Option<&mut crate::building::ActiveBuilding>, &mut Query<&mut crate::camera::SimsCamera>),
+    (menu, selected): (&mut crate::options::GameMenu, &Query<&Transform, With<Selected>>),
+    world: &crate::loading::CurrentWorld,
+) {
     if let Some(h) = &household {
-        set_text(&mut texts, p.text(PUCK_FUNDS), &format!("§{}", crate::lifetime::group(h.funds)));
+        set_text(texts, p.text(PUCK_FUNDS), &format!("§{}", crate::lifetime::group(h.funds)));
     }
     // Modes.
     if pressed(&clicks, p.id(PUCK_LIVE)) {
-        crate::buy::enter_mode(&mut buy, None, &mut commands, &mut clock);
+        crate::buy::enter_mode(buy, None, commands, clock);
     }
     if pressed(&clicks, p.id(PUCK_BUY)) {
-        crate::buy::enter_mode(&mut buy, Some(false), &mut commands, &mut clock);
+        crate::buy::enter_mode(buy, Some(false), commands, clock);
     }
     if pressed(&clicks, p.id(PUCK_BUILD)) {
-        crate::buy::enter_mode(&mut buy, Some(true), &mut commands, &mut clock);
+        crate::buy::enter_mode(buy, Some(true), commands, clock);
     }
     let mode = if !buy.active { 0 } else if buy.category >= crate::buy::WALLPAPER_TAB { 2 } else { 1 };
     for (id, m) in [(PUCK_LIVE, 0), (PUCK_BUY, 1), (PUCK_BUILD, 2)] {
@@ -443,10 +463,10 @@ fn puck(
         *walls = walls.next();
     }
     for (i, m) in [crate::building::WallMode::Up, crate::building::WallMode::Cutaway, crate::building::WallMode::Down].into_iter().enumerate() {
-        set_visible(&mut vis, p.id(PUCK_WALLS_UP + i as u32), *walls == m);
+        set_visible(vis, p.id(PUCK_WALLS_UP + i as u32), *walls == m);
     }
     // Floors.
-    if let Some(mut b) = building {
+    if let Some(b) = building {
         for (id, step) in [(PUCK_LEVEL_UP, 1i8), (PUCK_LEVEL_DOWN, -1)] {
             if pressed(&clicks, p.id(id)) {
                 b.view_level = (b.view_level as i8 + step).clamp(1, b.top_level.max(1) as i8) as u8;
@@ -493,7 +513,7 @@ fn puck(
         }
     }
     if pressed(&clicks, p.id(PUCK_OPTIONS)) {
-        crate::options::toggle_game_menu(&mut commands, &mut menu, Some(&mut clock));
+        crate::options::toggle_game_menu(commands, menu, Some(clock));
     }
     if pressed(&clicks, p.id(PUCK_SNAPSHOT)) {
         commands.insert_resource(Snapshot);

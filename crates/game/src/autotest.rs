@@ -164,6 +164,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, (show_designs, show_style), walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, strand_swimmers.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, press_key.after(bevy::input::InputSystems).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(PreUpdate, buy_pick.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -478,14 +479,42 @@ fn auto_pick_world(
     }
 }
 
-/// PRESS_KEY=<F12|PrintScreen|Escape>@<seconds>: that key pressed then (and let go a moment later).
+/// BUY_PICK=<n>@<seconds>: the n-th object of buy mode's catalogue (along the rows) clicked then.
+fn buy_pick(time: Res<Time>, mut q: Query<(&crate::buy::BuyButton, &mut Interaction, &bevy::ui::UiGlobalTransform)>, mut done: Local<bool>) {
+    let Some((n, at)) = std::env::var("BUY_PICK").ok().and_then(|v| v.split_once('@').and_then(|(n, t)| Some((n.parse::<usize>().ok()?, t.parse::<f32>().unwrap_or(10.0))))) else { return };
+    if *done || time.elapsed_secs() < at {
+        return;
+    }
+    let mut cells: Vec<(Vec2, Mut<Interaction>)> = q.iter_mut().filter(|(b, ..)| matches!(b, crate::buy::BuyButton::Item(_))).map(|(_, i, t)| (t.translation, i)).collect();
+    cells.sort_by(|a, b| a.0.y.total_cmp(&b.0.y).then(a.0.x.total_cmp(&b.0.x)));
+    let rows: Vec<f32> = cells.iter().map(|c| c.0.y.round()).collect();
+    let mut order: Vec<usize> = (0..cells.len()).collect();
+    order.sort_by(|a, b| rows[*a].total_cmp(&rows[*b]).then(cells[*a].0.x.total_cmp(&cells[*b].0.x)));
+    if let Some(&k) = order.get(n) {
+        *cells[k].1 = Interaction::Pressed;
+        info!("autotest: catalogue object {n} picked");
+        *done = true;
+    }
+}
+
+/// PRESS_KEY=<key>@<seconds>: that key pressed then (and let go a moment later): F1–F12,
+/// PrintScreen, PageUp, PageDown, Escape, Home, a letter or a digit.
 fn press_key(time: Res<Time>, mut keys: ResMut<ButtonInput<KeyCode>>, mut done: Local<u8>) {
     let Some((k, at)) = std::env::var("PRESS_KEY").ok().and_then(|v| v.split_once('@').map(|(k, t)| (k.to_string(), t.parse::<f32>().unwrap_or(10.0)))) else { return };
+    const F: [KeyCode; 12] = [KeyCode::F1, KeyCode::F2, KeyCode::F3, KeyCode::F4, KeyCode::F5, KeyCode::F6, KeyCode::F7, KeyCode::F8, KeyCode::F9, KeyCode::F10, KeyCode::F11, KeyCode::F12];
+    const LETTERS: [KeyCode; 26] = [
+        KeyCode::KeyA, KeyCode::KeyB, KeyCode::KeyC, KeyCode::KeyD, KeyCode::KeyE, KeyCode::KeyF, KeyCode::KeyG, KeyCode::KeyH, KeyCode::KeyI, KeyCode::KeyJ, KeyCode::KeyK, KeyCode::KeyL, KeyCode::KeyM,
+        KeyCode::KeyN, KeyCode::KeyO, KeyCode::KeyP, KeyCode::KeyQ, KeyCode::KeyR, KeyCode::KeyS, KeyCode::KeyT, KeyCode::KeyU, KeyCode::KeyV, KeyCode::KeyW, KeyCode::KeyX, KeyCode::KeyY, KeyCode::KeyZ,
+    ];
+    const DIGITS: [KeyCode; 10] = [KeyCode::Digit0, KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4, KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8, KeyCode::Digit9];
     let key = match k.as_str() {
-        "F12" => KeyCode::F12,
         "PrintScreen" => KeyCode::PrintScreen,
         "PageUp" => KeyCode::PageUp,
         "PageDown" => KeyCode::PageDown,
+        "Home" => KeyCode::Home,
+        f if f.starts_with('F') && f.len() > 1 => f[1..].parse::<usize>().ok().and_then(|n| F.get(n.wrapping_sub(1)).copied()).unwrap_or(KeyCode::Escape),
+        c if c.len() == 1 && c.as_bytes()[0].is_ascii_alphabetic() => LETTERS[(c.as_bytes()[0].to_ascii_uppercase() - b'A') as usize],
+        d if d.len() == 1 && d.as_bytes()[0].is_ascii_digit() => DIGITS[(d.as_bytes()[0] - b'0') as usize],
         _ => KeyCode::Escape,
     };
     match *done {

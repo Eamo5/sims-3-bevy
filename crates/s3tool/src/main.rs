@@ -460,6 +460,39 @@ fn main() {
         println!("tris: {:?}", &m.indices[..m.indices.len().min(30)]);
         return;
     }
+    if args[1] == "uibuy" {
+        // uibuy: the baked buy catalogue (categories, subcategories, rooms) and how many objects
+        // each holds.
+        let ui = s3bake::load_ui(&s3bake::default_root()).expect("ui.bin");
+        for c in &ui.buy.categories {
+            let n = ui.buy_flags.iter().filter(|(_, f)| f.in_category(c.bit)).count();
+            println!("{} '{}' bit {} image {:016X}: {n} objects", c.name, c.label, c.bit, c.image);
+            for sub in &c.subs {
+                let n = ui.buy_flags.iter().filter(|(_, f)| f.in_category(c.bit) && f.in_sub(sub.bit)).count();
+                println!("    {} '{}' bit {}: {n}", sub.name, sub.label, sub.bit);
+            }
+        }
+        println!("by category: {:?}", ui.buy.by_category);
+        for r in &ui.buy.rooms {
+            println!("room {} '{}' bit {} buttons {}", r.name, r.label, r.bit, r.buttons.len());
+        }
+        return;
+    }
+    if args[1] == "objdbuy" {
+        // objdbuy <root> <instance name>...: the OBJDs' buy-mode category flags.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let want: Vec<String> = args[3..].iter().map(|a| a.to_ascii_lowercase()).collect();
+        for k in set.keys_of_type(types::OBJD).copied().collect::<Vec<_>>() {
+            let Some(d) = set.read(&k) else { continue };
+            let Ok(o) = s3formats::object::parse_objd(&d) else { continue };
+            if want.contains(&o.instance_name.to_ascii_lowercase()) {
+                let bits = |v: u64| (0..64).filter(|b| v & (1u64 << b) != 0).collect::<Vec<_>>();
+                let f = o.buy;
+                println!("{k} {} v{:#x}: room {:?} function {:?} sub {:?} sub2 {:?} room-sub {:?} build {:?} sort {}", o.instance_name, o.version, bits(f.room as u64), bits(f.function as u64), bits(f.function_sub), bits(f.function_sub2), bits(f.room_sub), bits(f.build as u64), f.sort);
+            }
+        }
+        return;
+    }
     if args[1] == "bakedobj" {
         // bakedobj <instance name>: the baked catalogue entry, and each of its models' parts in
         // the cache (from the default cache, `SIMS3_CACHE`).

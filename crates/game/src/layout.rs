@@ -19,7 +19,7 @@ pub struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, open_ui.after(crate::load_ui_font)).add_systems(Update, (open_ui_when_baked, set_icons, button_states, fill_bars));
+        app.add_systems(Startup, open_ui.after(crate::load_ui_font)).add_systems(Update, (open_ui_when_baked, set_icons, select_marked.before(button_states), button_states, fill_bars));
     }
 }
 
@@ -181,21 +181,45 @@ impl Spawned {
     }
     /// The window with a control id under another (an item's own child).
     pub fn within(&self, ancestor: Entity, id: u32) -> Option<Entity> {
-        self.all.iter().filter(|(i, _)| *i == id).map(|(_, e)| *e).find(|e| {
-            let mut at = *e;
-            for _ in 0..32 {
-                match self.parents.get(&at) {
-                    Some(&p) if p == ancestor => return true,
-                    Some(&p) => at = p,
-                    None => return false,
-                }
-            }
-            false
-        })
+        self.all.iter().filter(|(i, _)| *i == id).map(|(_, e)| *e).find(|e| self.is_within(*e, ancestor))
     }
     /// A window's text (the window being a `Text` or a captioned button).
     pub fn text_of(&self, window: Entity) -> Option<Entity> {
         self.text_of.get(&window).copied()
+    }
+    /// The (first) window commented so under another.
+    pub fn comment_within(&self, ancestor: Entity, c: &str) -> Option<Entity> {
+        self.comments.iter().filter(|(n, _)| n == c).map(|(_, e)| *e).find(|e| self.is_within(*e, ancestor))
+    }
+    fn is_within(&self, e: Entity, ancestor: Entity) -> bool {
+        let mut at = e;
+        for _ in 0..32 {
+            match self.parents.get(&at) {
+                Some(&p) if p == ancestor => return true,
+                Some(&p) => at = p,
+                None => return false,
+            }
+        }
+        false
+    }
+    /// The same windows under other ids (a layout with its own copy of another's controls:
+    /// buy mode's puck is the HUD's, under ids of its own).
+    pub fn renamed(&self, f: impl Fn(u32) -> u32) -> Spawned {
+        let mut s = self.clone();
+        s.ids = self.ids.iter().map(|(k, v)| (f(*k), *v)).collect();
+        s.texts = self.texts.iter().map(|(k, v)| (f(*k), *v)).collect();
+        s.all = self.all.iter().map(|(k, v)| (f(*k), *v)).collect();
+        s
+    }
+}
+
+/// Lights a button as soon as it's spawned (a chosen tab or cell).
+#[derive(Component)]
+pub struct Selected;
+
+fn select_marked(mut q: Query<&mut UiButton, Added<Selected>>) {
+    for mut b in &mut q {
+        b.selected = true;
     }
 }
 
@@ -215,6 +239,11 @@ impl UiAssets {
     /// A window by control id anywhere in a layout (any of its exports).
     pub fn find(&self, name: &str, id: u32) -> Option<&UiWindow> {
         self.by_id.get(&s3pkg::fnv64(name)).and_then(|&i| self.data.layouts[i].1.iter().find_map(|w| w.1.find(id)))
+    }
+
+    /// Everything baked from the interface (buy mode's catalogue, each object's place in it).
+    pub fn baked(&self) -> &std::sync::Arc<UiBaked> {
+        &self.data
     }
 
     /// One of a layout's exported windows (`GetWindowByExportID`).

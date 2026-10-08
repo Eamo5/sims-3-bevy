@@ -12,11 +12,12 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackWriter, read_value, write_value};
 
-pub const UI_VERSION: u32 = 6;
+pub const UI_VERSION: u32 = 8;
 pub const T_LAYOUT: u32 = 0x025C95B6;
 pub const T_FONT: u32 = 0x062E9EE0;
 pub const T_IMAGE: u32 = 0x2F7D0004;
 const T_STYLES: u32 = 0x025C90A6;
+const T_XML: u32 = 0x0333406C;
 
 /// Window flags: shown.
 pub const WIN_VISIBLE: u32 = 0x1;
@@ -42,6 +43,11 @@ pub struct UiBaked {
     pub layouts: Vec<(u64, Vec<(u32, UiWindow)>)>,
     /// The English text styles by id (a window's `TextFont`; 0 the default).
     pub styles: Vec<(u32, TextStyle)>,
+    /// Buy mode's catalogue, and where each catalogue object goes in it (by OBJD key).
+    pub buy: BuyCatalogBaked,
+    pub buy_flags: Vec<(crate::types::Key, ObjBuy)>,
+    /// The catalogue objects' descriptions (by OBJD key; those that have one).
+    pub descriptions: Vec<(crate::types::Key, String)>,
 }
 
 /// A text style: its font (instance in `ui.pack`), size and line spacing in pixels.
@@ -127,6 +133,9 @@ pub struct UiGrid {
     pub cell: [f32; 2],
     /// Left, top, right, bottom.
     pub padding: [f32; 4],
+    /// Each cell's own padding (left, top, right, bottom: a cell's step is its size plus its
+    /// padding's width and height).
+    pub cell_padding: [f32; 4],
     pub columns: u32,
     pub rows: u32,
 }
@@ -277,6 +286,24 @@ pub fn bake_ui(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::path::Pat
     for z in ZODIAC {
         images.insert(s3pkg::fnv64(&format!("sign_{z}_sm")));
     }
+    // Buy mode's catalogue (its icons with the rest), and each catalogue object's place in it.
+    if let Some(xml) = pkg.find(&s3pkg::ResourceKey::new(T_XML, 0, s3pkg::fnv64("BuyCatalog"))).and_then(|e| pkg.read(e).ok()) {
+        out.buy = buy_catalog(&String::from_utf8_lossy(&xml), &strings, &mut images);
+    }
+    let catalog: Vec<crate::types::CatalogEntry> = read_value(&g.join("catalog.bin")).unwrap_or_default();
+    let objs = crate::bake::par_map(&catalog, |c| {
+        let d = pkgs.read(&crate::types::rkey(c.objd))?;
+        let o = s3formats::object::parse_objd(&d).ok()?;
+        let f = o.buy;
+        let desc = if c.price > 0 { strings.get(&o.desc_guid).cloned().unwrap_or_default() } else { String::new() };
+        Some((c.objd, ObjBuy { room: f.room, function: f.function, sub: f.function_sub, sub2: f.function_sub2, room_sub: f.room_sub, sort: f.sort }, desc))
+    });
+    for (k, f, desc) in objs.into_iter().flatten() {
+        out.buy_flags.push((k, f));
+        if !desc.is_empty() {
+            out.descriptions.push((k, desc));
+        }
+    }
     for (_, list) in &out.layouts {
         for (_, w) in list {
             w.images(&mut images);
@@ -342,10 +369,11 @@ fn window(o: &XNode) -> Option<UiWindow> {
     }
     if w.cls == "ItemGrid" {
         let floats = |n: &str| -> Vec<f32> { val(n).unwrap_or_default().split(',').filter_map(|x| x.trim().parse().ok()).collect() };
-        let (cell, pad) = (floats("CellArea"), floats("GridPadding"));
+        let (cell, pad, cell_pad) = (floats("CellArea"), floats("GridPadding"), floats("CellPadding"));
         w.grid = Some(UiGrid {
             cell: [cell.first().copied().unwrap_or(0.0), cell.get(1).copied().unwrap_or(0.0)],
             padding: [0, 1, 2, 3].map(|i| pad.get(i).copied().unwrap_or(0.0)),
+            cell_padding: [0, 1, 2, 3].map(|i| cell_pad.get(i).copied().unwrap_or(0.0)),
             columns: val("VisibleCols").map_or(0, num),
             rows: val("VisibleRows").map_or(0, num),
         });
@@ -693,4 +721,123 @@ mod tests {
         assert!((s[1].1.size - 8.0 * 4.0 / 3.0).abs() < 1e-4);
         assert_eq!(s[1].1.line, 14.0);
     }
+}
+
+// ---- The buy catalogue ----
+
+/// Buy mode's catalogue (`BuyCatalog`, XML in UI.package): its categories and their
+/// subcategories (each a bit of the objects' function flags, with an icon), the categories the
+/// by-function catalogue shows, and the rooms (a bit of the objects' room flags) with their
+/// buttons.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct BuyCatalogBaked {
+    pub categories: Vec<BuyCategory>,
+    pub by_category: Vec<String>,
+    pub rooms: Vec<BuyRoom>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct BuyCategory {
+    pub name: String,
+    pub label: String,
+    /// The bit of the objects' `functionCategoryFlags`.
+    pub bit: u8,
+    /// Its icon (an interface picture, fnv64 of its name).
+    pub image: u64,
+    pub subs: Vec<BuySub>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct BuySub {
+    pub name: String,
+    pub label: String,
+    /// The bit of the objects' function subcategory flags (64 and up in the second set).
+    pub bit: u8,
+    pub image: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct BuyRoom {
+    pub name: String,
+    pub label: String,
+    /// The bit of the objects' `roomCategoryFlags`.
+    pub bit: u8,
+    pub image: u64,
+    /// The room picture's buttons: their window ids and the room subcategory bits they show.
+    pub buttons: Vec<(String, String, u32, Vec<u8>)>,
+}
+
+/// An object's buy-mode categories (its OBJD's flags; see `s3formats::object::BuyFlags`).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ObjBuy {
+    pub room: u32,
+    pub function: u32,
+    pub sub: u64,
+    pub sub2: u64,
+    pub room_sub: u64,
+    pub sort: u32,
+}
+
+impl ObjBuy {
+    /// Whether it's in a function subcategory (by its bit).
+    pub fn in_sub(&self, bit: u8) -> bool {
+        if bit < 64 { self.sub & (1u64 << bit) != 0 } else { self.sub2 & (1u64 << (bit - 64).min(63)) != 0 }
+    }
+    pub fn in_category(&self, bit: u8) -> bool {
+        bit < 32 && self.function & (1u32 << bit) != 0
+    }
+    pub fn in_room(&self, bit: u8) -> bool {
+        bit < 32 && self.room & (1u32 << bit) != 0
+    }
+}
+
+fn buy_catalog(xml: &str, strings: &HashMap<u64, String>, images: &mut BTreeSet<u64>) -> BuyCatalogBaked {
+    let mut out = BuyCatalogBaked::default();
+    let Some(doc) = parse_xml(xml) else { return out };
+    let label = |n: &XNode| -> String {
+        let key = n.attr("localizedName").unwrap_or_default();
+        strings.get(&s3pkg::fnv64(key)).cloned().unwrap_or_else(|| key.rsplit(':').next().unwrap_or(key).to_string())
+    };
+    let mut image = |n: &XNode| -> u64 {
+        match n.attr("image").filter(|s| !s.is_empty()) {
+            Some(i) => {
+                let k = s3pkg::fnv64(i);
+                images.insert(k);
+                k
+            }
+            None => 0,
+        }
+    };
+    let bit = |n: &XNode, a: &str| n.attr(a).and_then(|v| v.trim().parse::<u8>().ok()).unwrap_or(0);
+    for cats in doc.children.iter().filter(|c| c.name == "Categories") {
+        for c in cats.children.iter().filter(|c| c.name == "Category") {
+            let subs = c.children.iter().filter(|s| s.name == "SubCategory").map(|s| BuySub { name: s.attr("name").unwrap_or_default().to_string(), label: label(s), bit: bit(s, "flagBit"), image: image(s) }).collect();
+            out.categories.push(BuyCategory { name: c.attr("name").unwrap_or_default().to_string(), label: label(c), bit: bit(c, "flagBit"), image: image(c), subs });
+        }
+    }
+    for cats in doc.children.iter().filter(|c| c.name == "Catalogs") {
+        for c in cats.children.iter().filter(|c| c.name == "Catalog") {
+            image(c);
+            match c.attr("type") {
+                Some("byCategory") => out.by_category = c.children.iter().filter(|i| i.name == "IncludedCategory").filter_map(|i| i.attr("name")).map(str::to_string).collect(),
+                Some("byRoom") => {
+                    for r in c.children.iter().filter(|r| r.name == "Room") {
+                        let buttons = r
+                            .children
+                            .iter()
+                            .filter(|b| b.name == "RoomButton")
+                            .map(|b| {
+                                let id = b.attr("buttonId").and_then(|v| u32::from_str_radix(v.trim().trim_start_matches("0x"), 16).ok()).unwrap_or(0);
+                                let bits = b.attr("flagBits").unwrap_or_default().split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                                (b.attr("name").unwrap_or_default().to_string(), label(b), id, bits)
+                            })
+                            .collect();
+                        out.rooms.push(BuyRoom { name: r.attr("name").unwrap_or_default().to_string(), label: label(r), bit: bit(r, "flagBit"), image: image(r), buttons });
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    out
 }

@@ -144,9 +144,49 @@ pub struct ObjdInfo {
     pub show_in_catalog: bool,
     pub objk_index: u32,
     pub keys: Vec<ResourceKey>,
+    /// Where buy mode lists it: by room (`roomCategoryFlags`, `roomSubCategoryFlags`) and by
+    /// function (`functionCategoryFlags`, its subcategories in two 64-bit sets), and its place
+    /// in the list (`uiSortPriority`). Zero when the record ends early.
+    pub buy: BuyFlags,
     /// The object's designs (the catalogue's colour and pattern presets): each a complate with
     /// the resources it refers to. The first is the default.
     pub presets: Vec<crate::catalog::PatternMaterial>,
+}
+
+/// An object's buy-mode categories (see [`ObjdInfo::buy`]).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct BuyFlags {
+    pub room: u32,
+    pub function: u32,
+    pub function_sub: u64,
+    pub function_sub2: u64,
+    pub room_sub: u64,
+    pub build: u32,
+    pub sort: u32,
+}
+
+/// The OBJD fields after the OBJK index, up to the buy categories.
+fn buy_flags(r: &mut Reader, version: u32, sort: u32) -> R<BuyFlags> {
+    r.u32()?; // object type flags
+    if version >= 0x1A {
+        r.u32()?;
+    }
+    r.u32()?; // wall placement
+    r.u32()?; // movement
+    r.u32()?; // wall cutout tiles per level
+    r.u32()?; // levels
+    let cutouts = r.u8()? as usize;
+    r.skip(cutouts * 24)?;
+    r.u8()?; // script enabled
+    r.u32()?; // diagonal OBJD
+    r.u32()?; // ambience
+    let room = r.u32()?;
+    let function = r.u32()?;
+    let function_sub = r.u64()?;
+    let function_sub2 = if version >= 0x1C { r.u64()? } else { 0 };
+    let room_sub = r.u64()?;
+    let build = r.u32()?;
+    Ok(BuyFlags { room, function, function_sub, function_sub2, room_sub, build, sort })
 }
 
 pub fn parse_objd(d: &[u8]) -> R<ObjdInfo> {
@@ -197,7 +237,7 @@ pub fn parse_objd(d: &[u8]) -> R<ObjdInfo> {
     let _fire = r.u32()?;
     let _steal = r.u8()?;
     let _repo = r.u8()?;
-    let _sort = r.u32()?;
+    let sort = r.u32()?;
     if common_version >= 0x0D {
         r.u8()?;
         if common_version >= 0x0E {
@@ -208,6 +248,7 @@ pub fn parse_objd(d: &[u8]) -> R<ObjdInfo> {
         }
     }
     let objk_index = r.u32()?;
+    let buy = buy_flags(&mut r, version, sort).unwrap_or(BuyFlags { sort, ..Default::default() });
     Ok(ObjdInfo {
         version,
         instance_name,
@@ -220,5 +261,6 @@ pub fn parse_objd(d: &[u8]) -> R<ObjdInfo> {
         objk_index,
         keys,
         presets,
+        buy,
     })
 }

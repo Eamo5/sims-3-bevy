@@ -79,6 +79,9 @@ pub struct HoldRequest {
 #[derive(Resource, Default)]
 pub struct BuyMode {
     pub active: bool,
+    /// The game's own buy catalogue is showing (`buyhud`): this panel keeps only the object
+    /// in hand's designs.
+    pub game_look: bool,
     pub category: usize,
     pub page: usize,
     pub placing: Option<Placing>,
@@ -113,6 +116,8 @@ pub struct BuyMode {
     pub eyedropper: bool,
     /// The click that took something up with the eyedropper (not to put it down too).
     eyedropped: bool,
+    /// The sledgehammer in hand: what's clicked is sold.
+    pub selling: bool,
 }
 
 #[derive(Component)]
@@ -241,7 +246,7 @@ fn eyedrop(
     play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
 }
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
-enum BuyButton {
+pub enum BuyButton {
     Toggle,
     Category(usize),
     Item(Key),
@@ -391,10 +396,16 @@ pub const FENCES_TAB: usize = WALLPAPER_TAB + 6;
 pub const TERRAIN_TAB: usize = WALLPAPER_TAB + 7;
 
 impl BuyMode {
+    /// Whether Create a Style is open.
+    pub fn styling(&self) -> bool {
+        self.styling
+    }
+
     /// Puts down the tool, pattern or object in hand.
     pub fn drop_tools(&mut self, commands: &mut Commands) {
         self.painting = None;
         self.eyedropper = false;
+        self.selling = false;
         self.tool = None;
         if let Some(p) = self.placing.take() {
             commands.entity(p.ghost).despawn();
@@ -514,6 +525,12 @@ fn buy_panel(
     for p in &panel {
         commands.entity(p).despawn();
     }
+    // (The game's own catalogue is up, with the object in hand's designs: only Create a Style
+    // here, above it.)
+    let game_look = buy.game_look && buy.active && buy.category < WALLPAPER_TAB;
+    if game_look && !(buy.styling && buy.placing.is_some()) {
+        return;
+    }
     let root = commands
         .spawn((
             BuyPanel,
@@ -533,8 +550,20 @@ fn buy_panel(
             Interaction::default(),
         ))
         .id();
+    if game_look {
+        commands.entity(root).insert(Node {
+            border_radius: BorderRadius::all(Val::Px(12.0)),
+            position_type: PositionType::Absolute,
+            left: Val::Px(330.0),
+            bottom: Val::Px(176.0),
+            padding: UiRect::all(Val::Px(10.0)),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            ..default()
+        });
+    }
     commands.entity(root).with_children(|p| {
-        p.spawn(Node { column_gap: Val::Px(6.0), flex_wrap: FlexWrap::Wrap, row_gap: Val::Px(6.0), ..default() }).with_children(|row| {
+        p.spawn(Node { column_gap: Val::Px(6.0), flex_wrap: FlexWrap::Wrap, row_gap: Val::Px(6.0), display: if game_look { Display::None } else { Display::Flex }, ..default() }).with_children(|row| {
             button(row, if buy.active { "Exit Buy Mode (B)".into() } else { "Buy Mode (B)".into() }, BuyButton::Toggle, Val::Px(150.0), 32.0, buy.active);
             if buy.active {
                 button(row, "Eyedropper".into(), BuyButton::Eyedropper, Val::Auto, 32.0, buy.eyedropper);
@@ -862,7 +891,7 @@ fn buy_panel(
             let n = ObjectAssets::design_count(&ctx, pl.objd);
             // (A row for its designs, or for Create a Style when it has colours to change.)
             let restylable = data.0.designs.get(&pl.objd).is_some_and(|d| d.channels.iter().any(|c| !c.is_empty()));
-            if n > 1 || restylable {
+            if (n > 1 || restylable) && !game_look {
                 let name = catalog.by_key(&pl.objd).map(|e| e.name.clone()).unwrap_or_default();
                 p.spawn(Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
                     row.spawn(text(format!("{name} · Design"), 14.0, Color::WHITE));
@@ -924,6 +953,9 @@ fn buy_panel(
                     });
                 }
             }
+        }
+        if game_look {
+            return;
         }
         let items = match buy.category {
             DOORS_TAB => catalog.openings(true),
@@ -1399,7 +1431,8 @@ fn placement(
     let price = catalog.by_key(&objd).map(|e| e.price).unwrap_or(0) as i64;
     // (A painting sells for what it's worth.)
     let price = placing.item.as_ref().map_or(price, |i| i.worth);
-    if (keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace)) && owned {
+    // (Sold: with the Delete key, or picked up with the sledgehammer.)
+    if (keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace) || buy.selling) && owned {
         commands.entity(ghost).despawn();
         buy.placing = None;
         buy.dirty = true;
