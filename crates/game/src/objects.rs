@@ -93,11 +93,34 @@ pub struct CpuPart {
     pub layer: u8,
 }
 
+/// How far flat parts lying on the floor (rugs, a bowling lane's boards) are raised: just over
+/// the floor, which is drawn a whisker above its level.
+const FLAT_LIFT: f32 = 0.035;
+
 pub fn cpu_model(model: BakedModel) -> Vec<CpuPart> {
     model
         .parts
         .into_iter()
-        .map(|p| {
+        .map(|mut p| {
+            // (Flat at the object's foot, or facing up at it, as a bowling lane's boards: lifted
+            // in the mesh itself, so the object stays where it's put.)
+            if p.layer == 0 && p.bmin[1] > -0.1 && p.bmin[1] < 0.03 {
+                let flat = p.bmax[1] - p.bmin[1] < 0.03 && p.bmin[1] > -0.02;
+                let mut lifted = false;
+                for (v, n) in p.positions.iter_mut().zip(&p.normals) {
+                    if flat || (v[1].abs() < 0.006 && n[1] > 0.9) {
+                        v[1] += FLAT_LIFT;
+                        lifted = true;
+                    }
+                }
+                if lifted {
+                    p.bmax[1] = p.bmax[1].max(p.bmin[1] + FLAT_LIFT);
+                    if flat {
+                        p.bmin[1] += FLAT_LIFT;
+                        p.bmax[1] = p.bmax[1].max(p.bmin[1]);
+                    }
+                }
+            }
             let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
             mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, p.positions);
             mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, p.normals);
@@ -236,7 +259,9 @@ impl ObjectAssets {
 fn skin_part(mesh: &mut Mesh, skin: &s3bake::gamedata::ObjectSkin) -> bool {
     let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { return false };
     let Some(first) = pos.first().copied() else { return false };
-    let Some(s) = skin.meshes.iter().find(|m| m.verts as usize == pos.len() && Vec3::from(m.first).distance(Vec3::from(first)) < 1e-5) else { return false };
+    // (A flat part may have been lifted over the floor.)
+    let same = |a: Vec3, b: Vec3| a.distance(b) < 1e-5 || (a + Vec3::Y * FLAT_LIFT).distance(b) < 1e-5;
+    let Some(s) = skin.meshes.iter().find(|m| m.verts as usize == pos.len() && same(Vec3::from(m.first), Vec3::from(first))) else { return false };
     let weights: Vec<[f32; 4]> = s
         .weights
         .iter()

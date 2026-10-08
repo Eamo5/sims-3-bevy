@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 66;
+pub const GAMEDATA_VERSION: u32 = 67;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -247,6 +247,9 @@ pub struct GameDataBaked {
     /// Each object's effect slots (model space): where showers spray, fountains gush and
     /// fires burn.
     pub fx_slots: Vec<(crate::types::Key, Vec<[f32; 3]>)>,
+    /// Each object's routing slots (model space): where Sims stand to use it, by slot number,
+    /// and the way they face.
+    pub route_slots: Vec<(crate::types::Key, Vec<(u8, [f32; 3], [f32; 3])>)>,
     pub lifetime_wishes: Vec<LifetimeWishInfo>,
     /// The Writing skill's tuning (`kLengthRomanceMin`, `kRoyaltyRomanceMax`, `kRateBasePPM`,
     /// `kQualityLevel5ChanceHit`...).
@@ -1355,6 +1358,13 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     .into_iter()
     .flatten()
     .collect();
+    out.route_slots = crate::bake::par_map(&objds, |k| {
+        let r = s3formats::object::object_route_slots(pkgs, k);
+        (!r.is_empty()).then(|| (crate::types::key_of(k), r))
+    })
+    .into_iter()
+    .flatten()
+    .collect();
     // Buffs: rows without a SKU belong to the base game.
     // (The packs' buffs too, as Seasons' Getting Chilly or Soaked, when the base game hasn't one
     // by that name.)
@@ -1396,7 +1406,9 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     if let Some(skills) = xml("Skills") {
         for f in records(&skills, "SkillList") {
             let hex = get(&f, "Hex");
-            if hex.is_empty() || f.get("CodeVersion").is_some_and(|s| s != "BaseGame") {
+            // (The packs' skills that show in the skills panel too: Late Night's piano and
+            // drums, Into the Future's laser harp...)
+            if hex.is_empty() || (f.get("CodeVersion").is_some_and(|s| s != "BaseGame") && get(&f, "IconKey").is_empty()) {
                 continue;
             }
             out.skills.push(SkillInfo {

@@ -254,13 +254,18 @@ fn main() {
         return;
     }
     if args[1] == "objbounds" {
-        // objbounds <root> <objd instance hex>: model bounds of an object's meshes.
+        // objbounds <root> <objd instance hex> [group hex]: model bounds of an object's meshes.
         let root = std::path::Path::new(&args[2]);
         let set = s3pkg::install::open_install(root, |_| true);
-        let k = s3pkg::ResourceKey::new(types::OBJD, 0, parse_hex(&args[3]));
+        let group = args.get(4).map_or(0, |g| parse_hex(g) as u32);
+        let k = s3pkg::ResourceKey::new(types::OBJD, group, parse_hex(&args[3]));
         for mk in s3formats::object::object_models(&set, &k) {
             for m in s3formats::model::load_model(&set, &mk).unwrap_or_default() {
-                println!("{mk} mesh {:08X} verts {} bounds {:?}..{:?}", m.name_hash, m.positions.len(), m.bounds_min, m.bounds_max);
+                // (And the vertices' own extent: the baker drops meshes whose bounds disagree.)
+                let (lo, hi) = m.positions.iter().fold(([f32::MAX; 3], [f32::MIN; 3]), |(lo, hi), p| {
+                    ([lo[0].min(p[0]), lo[1].min(p[1]), lo[2].min(p[2])], [hi[0].max(p[0]), hi[1].max(p[1]), hi[2].max(p[2])])
+                });
+                println!("{mk} mesh {:08X} verts {} bounds {:?}..{:?} vertices {lo:?}..{hi:?}", m.name_hash, m.positions.len(), m.bounds_min, m.bounds_max);
             }
         }
         return;
@@ -455,10 +460,53 @@ fn main() {
         println!("tris: {:?}", &m.indices[..m.indices.len().min(30)]);
         return;
     }
+    if args[1] == "bakedobj" {
+        // bakedobj <instance name>: the baked catalogue entry, and each of its models' parts in
+        // the cache (from the default cache, `SIMS3_CACHE`).
+        let root = s3bake::default_root();
+        let g = root.global_dir();
+        let catalog: Vec<s3bake::CatalogEntry> = s3bake::read_value(&g.join("catalog.bin")).expect("catalog.bin");
+        let packs: Vec<(&str, Option<s3bake::PackReader>)> = ["states.pack", "models.pack", "food.pack", "produce.pack", "fences.pack", "canvases.pack"]
+            .into_iter()
+            .map(|n| (n, s3bake::PackReader::open(&g.join(n)).ok()))
+            .collect();
+        let skins = s3bake::PackReader::open(&g.join("skins.pack")).ok();
+        let want = args[2].to_ascii_lowercase();
+        for c in catalog.iter().filter(|c| c.instance_name.to_ascii_lowercase() == want) {
+            println!("{:08X}:{:08X}:{:016X} {} §{} {} models {}", c.objd.0, c.objd.1, c.objd.2, c.name, c.price, c.script, c.models.len());
+            for m in &c.models {
+                let skin = skins.as_ref().and_then(|p| p.get::<s3bake::gamedata::ObjectSkin>(m));
+                let skinned = skin.as_ref().map(|s| s.bones.len());
+                if let Some(s) = &skin {
+                    for (i, b) in s.bones.iter().enumerate() {
+                        println!("  bone {i} {:08X} parent {} at {:?} rot {:?}", b.0, b.1, b.2, b.3);
+                    }
+                    for sm in &s.meshes {
+                        let max = sm.bones.iter().flatten().max();
+                        let zero = sm.weights.iter().filter(|w| w.iter().all(|x| *x == 0)).count();
+                        println!("  skin mesh {} verts first {:?}: max bone {max:?}, {zero} unweighted", sm.verts, sm.first);
+                    }
+                }
+                let found = packs.iter().find_map(|(n, p)| p.as_ref().and_then(|p| p.get::<s3bake::BakedModel>(m)).map(|b| (*n, b)));
+                match found {
+                    Some((n, b)) => {
+                        println!("  model {:08X}:{:08X}:{:016X} in {n}: {} parts, rig bones {skinned:?}", m.0, m.1, m.2, b.parts.len());
+                        for p in &b.parts {
+                            println!("    {} verts {} tris tex {:?} mode {} bounds {:?}..{:?}", p.positions.len(), p.indices.len() / 3, p.texture.map(|t| format!("{:016X}", t.2)), p.mode, p.bmin, p.bmax);
+                        }
+                    }
+                    None => println!("  model {:08X}:{:08X}:{:016X}: not in the cache", m.0, m.1, m.2),
+                }
+            }
+        }
+        return;
+    }
     if args[1] == "slots" {
-        // slots <root> <objd instance hex>: an object's routing, container and effect slots.
+        // slots <root> <objd instance hex> [group hex]: an object's routing, container and effect
+        // slots.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
-        let k = s3pkg::ResourceKey::new(types::OBJD, 0, parse_hex(&args[3]));
+        let group = args.get(4).map_or(0, |g| parse_hex(g) as u32);
+        let k = s3pkg::ResourceKey::new(types::OBJD, group, parse_hex(&args[3]));
         let objd = set.read(&k).expect("no OBJD");
         let objk = s3formats::object::objd_objk(&set, &objd).expect("no OBJK");
         for k in s3formats::object::objd_keys(&objd).unwrap_or_default() {

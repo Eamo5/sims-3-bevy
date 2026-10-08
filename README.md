@@ -495,6 +495,16 @@ installation is unreachable.
   football or baseball about lets two Sims *Play Catch* a few metres apart, throwing it soft,
   hard, wimpy or showing off; and a house phone on the wall or a table opens the phone's
   menu. All with the game's own animations and props.
+- **The packs' games and instruments**: pool tables (the cue fetched from the rack, shots
+  round the table as the balls roll), dartboards, bowling lanes (the ball fetched from the
+  return, bowled, and the pins' fall watched, in turn), karaoke machines with the microphone,
+  the arcade cabinets, the claw machine, Whack-a-Gnome, skee-ball, horseshoe pits,
+  shuffleboard, the mechanical bull, trampolines and sandboxes; and Late Night's grand piano
+  and keyboard and drum kit (sticks in hand) and Into the Future's laser harp, each building
+  its skill (Piano, Drums, Laser Harp, shown with the game's icons). Sims use each from the
+  spot the game's own routing slots put them (the piano bench's side, the bowling lane's
+  end, the pool table's edge), so the game's animations line up with the object, whose own
+  half of each animation plays with them; a jukebox plays music to dance to.
 - **Dirty surroundings**: dirty dishes left about, food left out until it spoils (eight
   hours) and a full trash can give nearby household Sims the game's *Dirty Surroundings*,
   then *Filthy Surroundings*, moodlets. A dish cleared away (picked up with the game's

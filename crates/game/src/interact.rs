@@ -18,12 +18,38 @@ pub struct InteractPlugin;
 
 impl Plugin for InteractPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Notifications>().add_systems(
-            Update,
-            (comings_and_goings, off_lot_idle, autonomy, run_actions, motive_warnings, pay_bills, parties, crate::social::note_contact, crate::social::fade_relationships)
-                .chain()
-                .run_if(in_state(PlayMode::Live)),
-        );
+        app.init_resource::<Notifications>()
+            .add_systems(
+                Update,
+                (comings_and_goings, off_lot_idle, autonomy, run_actions, motive_warnings, pay_bills, parties, crate::social::note_contact, crate::social::fade_relationships)
+                    .chain()
+                    .run_if(in_state(PlayMode::Live)),
+            )
+            .add_systems(Update, route_objects.run_if(in_state(crate::AppState::InGame)));
+    }
+}
+
+/// An object looked at for its routing slot.
+#[derive(Component)]
+struct Routed;
+
+/// Objects whose clips are played from one of their routing slots get it (the game's data,
+/// once it's in).
+fn route_objects(
+    mut commands: Commands,
+    ui: Option<Res<crate::icons::GameUi>>,
+    mut objects: Query<(Entity, &mut GameObject), Without<Routed>>,
+    mut slots: Local<Option<std::collections::HashMap<s3bake::Key, Vec<(u8, [f32; 3], [f32; 3])>>>>,
+) {
+    let Some(ui) = ui else { return };
+    let slots = slots.get_or_insert_with(|| ui.data.route_slots.iter().cloned().collect());
+    for (e, mut o) in &mut objects {
+        commands.entity(e).insert(Routed);
+        let Some(n) = o.kind.route_slot() else { continue };
+        if let Some((_, p, f)) = slots.get(&o.objd).and_then(|s| s.iter().find(|s| s.0 == n)) {
+            o.route = Some((Vec2::new(p[0], p[2]), Vec2::new(f[0], f[2]).normalize_or(Vec2::Y)));
+            debug!("{} used from its routing slot {n}: {:?}", o.name, o.route);
+        }
     }
 }
 
@@ -151,6 +177,27 @@ pub enum ObjectKind {
     Snowman,
     SnowAngel,
     LeafPile,
+    /// The packs' games: a pool table, a dartboard, a bowling lane, a karaoke machine, the
+    /// arcade machines, the claw machine, Whack-a-Gnome, skee-ball, a horseshoe pit,
+    /// shuffleboard, the mechanical bull, a trampoline and a sandbox.
+    PoolTable,
+    Dartboard,
+    BowlingLane,
+    Karaoke,
+    ArcadeMachine,
+    ClawMachine,
+    WhackAGnome,
+    SkeeBall,
+    Horseshoes,
+    Shuffleboard,
+    MechanicalBull,
+    Trampoline,
+    Sandbox,
+    /// The packs' instruments: a grand piano, a keyboard, a drum kit, the laser harp.
+    Piano,
+    Keyboard,
+    Drums,
+    LaserHarp,
     Other,
 }
 
@@ -161,6 +208,43 @@ impl ObjectKind {
         let has = |k: &str| s.contains(k);
         if has("crib") {
             Self::Crib
+        } else if has("hobbiesskills.pooltable") {
+            Self::PoolTable
+        } else if has("hobbiesskills.dartboard") || has("hobbiesskills.expensivedartboard") {
+            Self::Dartboard
+        } else if has("hobbiesskills.bowlinglane") {
+            Self::BowlingLane
+        } else if has("entertainment.karaokemachine") {
+            Self::Karaoke
+        } else if has("hobbiesskills.arcademachine") {
+            Self::ArcadeMachine
+        } else if has("hobbiesskills.arcadeclawmachine") {
+            Self::ClawMachine
+        } else if has("hobbiesskills.whackasupernatural") {
+            Self::WhackAGnome
+        } else if has("electronics.skeeball") {
+            Self::SkeeBall
+        } else if has("hobbiesskills.horseshoecourt") {
+            Self::Horseshoes
+        } else if has("hobbiesskills.shuffleboard") {
+            Self::Shuffleboard
+        } else if has("entertainment.mechanicalbull") {
+            Self::MechanicalBull
+        } else if has("hobbiesskills.trampoline") {
+            Self::Trampoline
+        } else if has("environment.sandbox") {
+            Self::Sandbox
+        } else if has("hobbiesskills.grandpiano") {
+            Self::Piano
+        } else if has("hobbiesskills.keyboard") {
+            Self::Keyboard
+        } else if has("hobbiesskills.drums") {
+            Self::Drums
+        } else if has("hobbiesskills.laserharp") {
+            Self::LaserHarp
+        } else if has("electronics.jukebox") {
+            // (A jukebox plays music to dance to, as a stereo does.)
+            Self::Stereo
         } else if has("urinal") {
             Self::Urinal
         } else if has("toys.toyoven") {
@@ -336,7 +420,23 @@ impl ObjectKind {
             Self::Bar => "Surfaces",
             Self::FoodReplicator | Self::BodySculptor | Self::MoodletManager | Self::Teleporter | Self::CollectionHelper => "Misc",
             Self::Urinal | Self::BubbleBath | Self::RubberDucky => "Plumbing",
-            Self::ToyOven | Self::Ball => "Kids",
+            Self::ToyOven | Self::Ball | Self::Sandbox => "Kids",
+            Self::PoolTable
+            | Self::Dartboard
+            | Self::BowlingLane
+            | Self::Karaoke
+            | Self::ArcadeMachine
+            | Self::ClawMachine
+            | Self::WhackAGnome
+            | Self::SkeeBall
+            | Self::Horseshoes
+            | Self::Shuffleboard
+            | Self::MechanicalBull
+            | Self::Trampoline
+            | Self::Piano
+            | Self::Keyboard
+            | Self::Drums
+            | Self::LaserHarp => "Hobbies",
             Self::Snowman | Self::SnowAngel | Self::LeafPile => "Outdoors",
             Self::FirePit | Self::PicnicBasket => "Outdoors",
             Self::Buffet => "Surfaces",
@@ -364,11 +464,47 @@ pub struct GameObject {
     pub center: Vec2,
     pub half: Vec2,
     pub height: f32,
+    /// The routing slot Sims use it from (model space), and the way they face there: the
+    /// game's clips for it are played from that spot (a piano's bench side, the bowling
+    /// lane's end).
+    pub route: Option<(Vec2, Vec2)>,
+}
+
+impl ObjectKind {
+    /// The routing slot (`routingSlot_N`) this kind's clips are played from, if they need one.
+    pub fn route_slot(self) -> Option<u8> {
+        use ObjectKind as K;
+        matches!(
+            self,
+            K::PoolTable
+                | K::Dartboard
+                | K::BowlingLane
+                | K::Karaoke
+                | K::ArcadeMachine
+                | K::ClawMachine
+                | K::WhackAGnome
+                | K::SkeeBall
+                | K::Horseshoes
+                | K::Shuffleboard
+                | K::MechanicalBull
+                | K::Trampoline
+                | K::Sandbox
+                | K::Piano
+                | K::Keyboard
+                | K::Drums
+                | K::LaserHarp
+        )
+        .then_some(0)
+    }
 }
 
 impl GameObject {
-    /// Where a sim stands to use the object (in front, along local +Z).
+    /// Where a sim stands to use the object (its routing slot, or in front, along local +Z).
     pub fn use_point(&self, tf: &Transform) -> Vec2 {
+        if let Some((p, _)) = self.route {
+            let w = tf.transform_point(Vec3::new(p.x, 0.0, p.y));
+            return Vec2::new(w.x, w.z);
+        }
         // (A pool ladder faces into the water: Sims stand behind it, on the side.)
         let ahead = if self.kind == ObjectKind::PoolLadder { -(self.half.y + 0.45) } else { self.half.y + 0.45 };
         let local = Vec3::new(self.center.x, 0.0, self.center.y + ahead);
@@ -803,6 +939,23 @@ static HOTTUB: [InteractionDef; 1] = [InteractionDef {
 static DOLLHOUSE: [InteractionDef; 1] = [def("Play with Dollhouse", 45.0, [0.0, 0.0, -3.0, 8.0, 0.0, 85.0], Pose::Use)];
 static JUNGLEGYM: [InteractionDef; 1] = [def("Play on Jungle Gym", 40.0, [0.0, 0.0, -8.0, 0.0, -8.0, 95.0], Pose::Use)];
 static FOOSBALL: [InteractionDef; 1] = [def("Play Foosball", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 65.0], Pose::Use)];
+static POOL_TABLE: [InteractionDef; 1] = [def("Play Pool", 45.0, [0.0, 0.0, -3.0, 0.0, 0.0, 60.0], Pose::Use)];
+static DARTBOARD: [InteractionDef; 1] = [def("Throw Darts", 30.0, [0.0, 0.0, -3.0, 0.0, 0.0, 55.0], Pose::Use)];
+static BOWLING: [InteractionDef; 1] = [def("Bowl", 45.0, [0.0, 0.0, -6.0, 0.0, -4.0, 75.0], Pose::Use)];
+static KARAOKE: [InteractionDef; 1] = [def("Sing Karaoke", 30.0, [0.0, 0.0, -4.0, 6.0, 0.0, 60.0], Pose::Use)];
+static ARCADE: [InteractionDef; 1] = [def("Play Arcade Game", 40.0, [0.0, 0.0, -3.0, 0.0, 0.0, 70.0], Pose::Use)];
+static CLAW: [InteractionDef; 1] = [def("Play Claw Machine", 15.0, [0.0, 0.0, -2.0, 0.0, 0.0, 60.0], Pose::Use)];
+static WHACK: [InteractionDef; 1] = [def("Play Whack-a-Gnome", 20.0, [0.0, 0.0, -4.0, 0.0, 0.0, 70.0], Pose::Use)];
+static SKEEBALL: [InteractionDef; 1] = [def("Play Skee-Ball", 25.0, [0.0, 0.0, -3.0, 0.0, 0.0, 65.0], Pose::Use)];
+static HORSESHOES: [InteractionDef; 1] = [def("Practice Horseshoes", 30.0, [0.0, 0.0, -4.0, 0.0, -3.0, 55.0], Pose::Use)];
+static SHUFFLEBOARD: [InteractionDef; 1] = [def("Practice Shuffleboard", 30.0, [0.0, 0.0, -3.0, 0.0, 0.0, 55.0], Pose::Use)];
+static MECH_BULL: [InteractionDef; 1] = [InteractionDef { skill: Some("Athletic"), ..def("Ride Mechanical Bull", 15.0, [0.0, 0.0, -10.0, 0.0, -8.0, 90.0], Pose::Use) }];
+static TRAMPOLINE: [InteractionDef; 1] = [InteractionDef { skill: Some("Athletic"), ..def("Jump on Trampoline", 30.0, [0.0, 0.0, -10.0, 0.0, -8.0, 90.0], Pose::Use) }];
+static SANDBOX: [InteractionDef; 1] = [def("Play in Sandbox", 40.0, [0.0, 0.0, -4.0, 0.0, -10.0, 90.0], Pose::Use)];
+static PIANO: [InteractionDef; 1] = [InteractionDef { skill: Some("Piano"), ..def("Play Piano", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 45.0], Pose::Use) }];
+static KEYBOARD: [InteractionDef; 1] = [InteractionDef { skill: Some("Piano"), ..def("Play Keyboard", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 45.0], Pose::Use) }];
+static DRUMS: [InteractionDef; 1] = [InteractionDef { skill: Some("Drums"), ..def("Play Drums", 60.0, [0.0, 0.0, -5.0, 0.0, -2.0, 50.0], Pose::Use) }];
+static LASER_HARP: [InteractionDef; 1] = [InteractionDef { skill: Some("LaserHarp"), ..def("Play Laser Harp", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 50.0], Pose::Use) }];
 static VIDEOGAME: [InteractionDef; 1] = [def("Play Video Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 70.0], Pose::Use)];
 static SPRINKLER: [InteractionDef; 3] = [
     InteractionDef { autonomous: false, special: Special::SprinklerOn, ..def("Turn On", 2.0, N, Pose::Use) },
@@ -999,6 +1152,102 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Play with Dollhouse" => A::new(Some("c2o_dollhouse_play_start"), &["c2o_dollhouse_play_loop"]),
         "Play on Jungle Gym" => A::new(Some("c2o_JungleGymTower_climbUp"), &["c2o_JungleGymTower_loop", "c2o_JungleGymTower_slideDown"]),
         "Play Foosball" => A::new(None, &["a2o_foosballTable_play"]),
+        // (The cue fetched from the rack, then shots round the table, the balls rolling.)
+        "Play Pool" => A::new(
+            Some("a2o_poolTable_play8_p1_getCue_x"),
+            &["a2o_poolTable_play8_p1_make1_x", "a2o_poolTable_play8_p1_make2_x", "a2o_poolTable_play8_p1_make5_x", "a2o_poolTable_play8_p1_make6_x", "a2o_poolTable_play8_p1_miss1_x"],
+        ),
+        "Throw Darts" => A::new(Some("a2o_dartboard_throw_start_x"), &["a2o_dartboard_throw_practice_loop1_x", "a2o_dartboard_throw_practice_loop2_x", "a2o_dartboard_throw_normal_x"]),
+        // (The ball fetched from the return, bowled, and the pins' fall seen: in turn.)
+        "Bowl" => A::new(
+            None,
+            &[
+                "a2o_bowlingLane_getBall_x",
+                "a2o_bowlingLane_lowSkillThrow_throw1_x",
+                "a2o_bowlingLane_endGood_x",
+                "a2o_bowlingLane_getBall_x",
+                "a2o_bowlingLane_lowSkillThrow_throw2_x",
+                "a2o_bowlingLane_endStrike_x",
+                "a2o_bowlingLane_getBall_x",
+                "a2o_bowlingLane_throw_slow_x",
+                "a2o_bowlingLane_endBad_x",
+            ],
+        )
+        .in_order(),
+        "Sing Karaoke" => A::new(
+            Some("a2o_karaoke_singSolo_start_x"),
+            &[
+                "a2o_karaoke_singSolo_loop01_med_x",
+                "a2o_karaoke_singSolo_loop02_med_x",
+                "a2o_karaoke_singSolo_loop03_med_x",
+                "a2o_karaoke_singSolo_loop04_med_x",
+                "a2o_karaoke_singSolo_loop01_high_x",
+                "a2o_karaoke_singSolo_loop02_high_x",
+            ],
+        )
+        .ending(&["a2o_karaoke_singSolo_stop_x"], 0.9),
+        "Play Arcade Game" => A::new(Some("a2o_arcadeMachine_start_x"), &["a2o_arcadeMachine_loop1_x", "a2o_arcadeMachine_loop2_x", "a2o_arcadeMachine_loop3_x", "a2o_arcadeMachine_loop4_x"])
+            .ending(&["a2o_arcadeMachine_stop_x"], 1.3),
+        "Play Claw Machine" => A::new(Some("a2o_arcadeClawMachine_start_x"), &["a2o_arcadeClawMachine_lose_01_x", "a2o_arcadeClawMachine_lose_02_x", "a2o_arcadeClawMachine_win_01_x"]),
+        "Play Whack-a-Gnome" => A::new(
+            Some("a2o_arcadeWhackAGnome_start_x"),
+            &["a2o_arcadeWhackAGnome_skillLow1_x", "a2o_arcadeWhackAGnome_skillLow2_x", "a2o_arcadeWhackAGnome_skillMed1_x", "a2o_arcadeWhackAGnome_skillMed2_x"],
+        )
+        .ending(&["a2o_arcadeWhackAGnome_stop_x"], 1.37),
+        "Play Skee-Ball" => A::new(
+            Some("a2o_skeeBall_play_start_x"),
+            &[
+                "a2o_skeeBall_play_make1_x",
+                "a2o_skeeBall_play_make2_x",
+                "a2o_skeeBall_play_make3_x",
+                "a2o_skeeBall_play_make4_x",
+                "a2o_skeeBall_play_make5_x",
+                "a2o_skeeBall_play_make6_x",
+                "a2o_skeeBall_play_make7_x",
+                "a2o_skeeBall_play_miss_x",
+            ],
+        ),
+        "Practice Horseshoes" => A::new(
+            Some("a2o_horseshoeCourt_start_x"),
+            &[
+                "a2o_horseshoeCourt_loopPractice_x",
+                "a2o_horseshoeCourt_throwNormal_01_x",
+                "a2o_horseshoeCourt_throwNormal_02_x",
+                "a2o_horseshoeCourt_throwNormal_03_x",
+                "a2o_horseshoeCourt_throwWringer_01_x",
+                "a2o_horseshoeCourt_throwFail_01_x",
+            ],
+        )
+        .ending(&["a2o_horseshoeCourt_stop_x"], 1.53),
+        "Practice Shuffleboard" => A::new(Some("a2o_shuffleboard_shoot_start_x"), &["a2o_shuffleboard_shoot_practice_loop1_x", "a2o_shuffleboard_shoot_practice_loop2_x", "a2o_shuffleboard_shoot_x"]),
+        // (Up into the saddle, the bull started slow, and off with a flourish at the end.)
+        "Ride Mechanical Bull" => A::steps(
+            "a2o_mechanicalBull_ride_getOn_x",
+            &["a2o_mechanicalBull_ride_low_start_x"],
+            &["a2o_mechanicalBull_ride_low_loop1_x", "a2o_mechanicalBull_ride_low_loop2_x", "a2o_mechanicalBull_ride_low_loop3_x"],
+        )
+        .ending(&["a2o_mechanicalBull_ride_low_stop_x", "a2o_mechanicalBull_dismount_success_x"], 5.6),
+        "Jump on Trampoline" => A::new(
+            Some("a2o_trampoline_start_x"),
+            &["a2o_trampoline_bounce_normal_loop1_x", "a2o_trampoline_bounce_normal_loop2_x", "a2o_trampoline_bounce_highSkill_loop1_x"],
+        )
+        .ending(&["a2o_trampoline_stop_x"], 3.57),
+        "Play in Sandbox" => A::new(Some("a2o_sandbox_play_start_x"), &["a2o_sandbox_play_loop1_x", "a2o_sandbox_play_loop2_x", "a2o_sandbox_play_loop3_x", "a2o_sandbox_play_find_x"])
+            .ending(&["a2o_sandbox_play_stop_x"], 1.27),
+        // (Onto the bench and off again.)
+        "Play Piano" => A::new(
+            Some("a2o_piano_play_start_x"),
+            &["a2o_piano_play_med_loop1_x", "a2o_piano_play_med_loop2_x", "a2o_piano_play_high_loop1_x", "a2o_piano_play_low_loop1_x"],
+        )
+        .ending(&["a2o_piano_play_stop_x"], 2.6),
+        "Play Keyboard" => A::new(None, &["a2o_keyboard_play_med_loop1_x", "a2o_keyboard_play_med_loop2_x", "a2o_keyboard_play_high_loop1_x", "a2o_keyboard_play_low_loop1_x"]),
+        "Play Drums" => A::new(Some("a2o_drum_play_start_x"), &["a2o_drum_play_med_loop1_x", "a2o_drum_play_med_loop2_x", "a2o_drum_play_high_loop1_x", "a2o_drum_play_low_loop1_x"])
+            .ending(&["a2o_drum_play_stop_x"], 2.63),
+        "Play Laser Harp" => A::new(
+            Some("a2o_laserHarp_start_x"),
+            &["a2o_laserHarp_play_loopMed1_x", "a2o_laserHarp_play_loopMed2_x", "a2o_laserHarp_play_loopHigh1_x", "a2o_laserHarp_play_loopLow1_x"],
+        )
+        .ending(&["a2o_laserHarp_stop_x"], 1.97),
         "Play Video Games" => A::new(
             Some("a2o_videoGame_sitFloor_start_x"),
             &[
@@ -1198,6 +1447,23 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::DollHouse => &DOLLHOUSE,
         ObjectKind::JungleGym => &JUNGLEGYM,
         ObjectKind::Foosball => &FOOSBALL,
+        ObjectKind::PoolTable => &POOL_TABLE,
+        ObjectKind::Dartboard => &DARTBOARD,
+        ObjectKind::BowlingLane => &BOWLING,
+        ObjectKind::Karaoke => &KARAOKE,
+        ObjectKind::ArcadeMachine => &ARCADE,
+        ObjectKind::ClawMachine => &CLAW,
+        ObjectKind::WhackAGnome => &WHACK,
+        ObjectKind::SkeeBall => &SKEEBALL,
+        ObjectKind::Horseshoes => &HORSESHOES,
+        ObjectKind::Shuffleboard => &SHUFFLEBOARD,
+        ObjectKind::MechanicalBull => &MECH_BULL,
+        ObjectKind::Trampoline => &TRAMPOLINE,
+        ObjectKind::Sandbox => &SANDBOX,
+        ObjectKind::Piano => &PIANO,
+        ObjectKind::Keyboard => &KEYBOARD,
+        ObjectKind::Drums => &DRUMS,
+        ObjectKind::LaserHarp => &LASER_HARP,
         ObjectKind::VideoGame => &VIDEOGAME,
         ObjectKind::VrGoggles => &VRGOGGLES,
         ObjectKind::StuffedToy => &STUFFED_TOY,
@@ -1950,6 +2216,13 @@ fn run_actions(
                                         }
                                         anim.seat_height = obj.seat_height();
                                         debug!("{} on the {}: centre {:?} half {:?}, object at {:?} turned {:?}", d.name, obj.name, obj.center, obj.half, otf.translation, otf.rotation.to_euler(EulerRot::YXZ).0);
+                                    } else if let Some((p, f)) = obj.route {
+                                        // (At the routing slot, facing its way: the game's clips
+                                        // are played from there.)
+                                        let w = otf.transform_point(Vec3::new(p.x, 0.0, p.y));
+                                        tf.translation = Vec3::new(w.x, tf.translation.y, w.z);
+                                        tf.rotation = otf.rotation * Quat::from_rotation_y(f.x.atan2(f.y));
+                                        anim.seat_height = 0.0;
                                     } else {
                                         tf.rotation = face;
                                         anim.seat_height = 0.0;
@@ -3404,13 +3677,15 @@ mod tests {
     }
 
     /// The buyable base-game objects nothing can be done with, by script class (a list to work
-    /// from: `cargo test -p sims3 unused_objects -- --ignored --nocapture`).
+    /// from: `cargo test -p sims3 unused_objects -- --ignored --nocapture`; `ALL_PACKS=1`, the
+    /// packs' too).
     #[test]
     #[ignore]
     fn unused_objects() {
         let catalog: Vec<s3bake::CatalogEntry> = s3bake::read_value(&s3bake::default_root().global_dir().join("catalog.bin")).unwrap();
         let mut by_class: std::collections::BTreeMap<String, Vec<String>> = Default::default();
-        for c in catalog.iter().filter(|c| c.price > 0 && c.objd.1 == 0) {
+        let all = std::env::var("ALL_PACKS").is_ok();
+        for c in catalog.iter().filter(|c| c.price > 0 && (all || c.objd.1 == 0)) {
             let kind = ObjectKind::from_script(&c.script, &c.instance_name);
             // (A ball, bubble bath, the rubber duck and a house phone are used through something
             // else: catch, the bath, the phone's menu.)

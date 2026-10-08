@@ -93,6 +93,28 @@ pub fn object_fx_slots(pkgs: &PackageSet, objd_key: &ResourceKey) -> Vec<[f32; 3
     pkgs.read(&rk).or_else(|| pkgs.read_ti(rk.t, rk.i)).and_then(|d| crate::model::parse_rslt(&d)).map(|s| s.effects.iter().map(|e| e.pos).collect()).unwrap_or_default()
 }
 
+/// An object's routing slots (`routingSlot_N`, model space): where a Sim stands to use it, by
+/// slot number, and the way they face there.
+pub fn object_route_slots(pkgs: &PackageSet, objd_key: &ResourceKey) -> Vec<(u8, [f32; 3], [f32; 3])> {
+    let Some(objd) = pkgs.read(objd_key) else { return Vec::new() };
+    let Some(objk) = objd_objk(pkgs, &objd) else { return Vec::new() };
+    let Some(mk) = objk.model_key.filter(|k| k.t == types::VPXY) else { return Vec::new() };
+    let Some(v) = pkgs.read(&mk).or_else(|| pkgs.read_ti(mk.t, mk.i)) else { return Vec::new() };
+    let Some(rk) = crate::model::vpxy_keys(&v).into_iter().find(|k| k.t == crate::model::T_RSLT) else { return Vec::new() };
+    let Some(slots) = pkgs.read(&rk).or_else(|| pkgs.read_ti(rk.t, rk.i)).and_then(|d| crate::model::parse_rslt(&d)) else { return Vec::new() };
+    let mut out: Vec<(u8, [f32; 3], [f32; 3])> = slots
+        .routing
+        .iter()
+        .filter_map(|s| {
+            let n = (0..32u8).find(|i| s3pkg::fnv32(&format!("routingslot_{i}")) == s.name)?;
+            // (The slot's facing: its rotation's third column.)
+            Some((n, s.pos, [s.rot[0][2], s.rot[1][2], s.rot[2][2]]))
+        })
+        .collect();
+    out.sort_by_key(|s| s.0);
+    out
+}
+
 /// Reads a .NET-style 7-bit length prefixed UTF-16BE string (STR7).
 fn str7(r: &mut Reader) -> R<String> {
     let mut n = 0usize;

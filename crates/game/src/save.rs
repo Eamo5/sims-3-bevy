@@ -537,7 +537,7 @@ pub(crate) fn status_from(s: &str) -> RelStatus {
     }
 }
 
-pub const SKILLS: [&str; 10] = ["Athletic", "Charisma", "Cooking", "Fishing", "Gardening", "Guitar", "Handiness", "Logic", "Painting", "Writing"];
+pub const SKILLS: [&str; 13] = ["Athletic", "Charisma", "Cooking", "Fishing", "Gardening", "Guitar", "Handiness", "Logic", "Painting", "Writing", "Piano", "Drums", "LaserHarp"];
 
 fn saved_object(o: &GameObject, tf: &Transform, design: Option<&crate::objects::Design>, hung: Option<&crate::paintings::Hung>) -> SavedObject {
     let key = design.map(|d| d.0);

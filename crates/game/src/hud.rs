@@ -1459,14 +1459,16 @@ fn update_clock_panel(
         let s = if world.is_some_and(|w| crate::weather::vacation(&w.0.name)) || weather.temperature.is_nan() {
             String::new()
         } else {
+            // (The moon while it's up.)
+            let h = clock.hour_f();
+            let moon = if !(6.0..18.0).contains(&h) { format!(" · {}", crate::supernatural::moon_name(clock.minutes)) } else { String::new() };
             format!(
-                "{} {}/{} · {:.0}°F · {} · {}",
+                "{} {}/{} · {:.0}°F · {}{moon}",
                 weather.season(clock.day()).name(),
                 weather.season_day(clock.day()),
                 weather.season_days,
                 weather.temperature,
                 weather.describe(),
-                crate::supernatural::moon_name(clock.minutes)
             )
         };
         if t.0 != s {

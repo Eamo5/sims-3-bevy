@@ -96,6 +96,8 @@ pub struct ActionClip {
     /// (getting up out of it at the end).
     pub before: Option<&'static str>,
     pub after: Option<&'static str>,
+    /// The loops played in turn rather than at random (a ball fetched, bowled, the pins seen).
+    pub in_order: bool,
 }
 
 /// Sitting about: a living chair's breathing and crossed legs.
@@ -103,14 +105,19 @@ pub const SIT_LOOPS: &[&str] = &["a2o_chairLiving_sit_breathe_loop_x", "a2o_chai
 
 impl ActionClip {
     pub const fn new(start: Option<&'static str>, loops: &'static [&'static str]) -> Self {
-        Self { start, steps: &[], loops, side: None, end: &[], end_secs: 0.0, before: None, after: None }
+        Self { start, steps: &[], loops, side: None, end: &[], end_secs: 0.0, before: None, after: None, in_order: false }
     }
     /// A start clip, steps after it in order, then loops.
     pub const fn steps(start: &'static str, steps: &'static [&'static str], loops: &'static [&'static str]) -> Self {
-        Self { start: Some(start), steps, loops, side: None, end: &[], end_secs: 0.0, before: None, after: None }
+        Self { start: Some(start), steps, loops, side: None, end: &[], end_secs: 0.0, before: None, after: None, in_order: false }
     }
     pub const fn social(loops: &'static [&'static str], side: char) -> Self {
-        Self { start: None, steps: &[], loops, side: Some(side), end: &[], end_secs: 0.0, before: None, after: None }
+        Self { start: None, steps: &[], loops, side: Some(side), end: &[], end_secs: 0.0, before: None, after: None, in_order: false }
+    }
+    /// With its loops played in turn.
+    pub const fn in_order(mut self) -> Self {
+        self.in_order = true;
+        self
     }
     /// With the clips it ends with (and their length).
     pub const fn ending(mut self, end: &'static [&'static str], secs: f32) -> Self {
@@ -233,6 +240,10 @@ fn next_clip(lib: &mut ClipLibrary, data: &Baked, script: &ActionClip, child: bo
         if let Some(n) = lib.variants(data, s, script.side, child).first() {
             return (Some(n.clone()), step);
         }
+    }
+    if script.in_order && !script.loops.is_empty() {
+        let s = script.loops[(step - sequence.len()) % script.loops.len()];
+        return (lib.variants(data, s, script.side, child).first().cloned(), step + 1);
     }
     (next_loop(lib, data, script, child), step)
 }

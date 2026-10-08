@@ -155,6 +155,43 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "c2ad_soc_neutral_",
     "c2al_soc_neutral_",
     "c2ah_soc_neutral_",
+    // The packs' games and instruments: pool, darts, bowling, karaoke, the arcade machines,
+    // skee-ball, horseshoes, shuffleboard, the mechanical bull, trampolines, sandboxes, the
+    // piano and keyboard, drums and the laser harp.
+    "a2o_poolTable_play8_p1_",
+    "a2o_poolTable_play8_idle_",
+    "a2o_poolTable_play8_transOutIdle",
+    "a2o_dartboard_throw_",
+    "a2o_bowlingLane_getBall",
+    "a2o_bowlingLane_lowSkillThrow_throw",
+    "a2o_bowlingLane_throw_slow",
+    "a2o_bowlingLane_end",
+    "a2o_karaoke_singSolo",
+    "c2o_karaoke_singSolo",
+    "a2o_arcadeMachine_",
+    "c2o_arcadeMachine_",
+    "a2o_arcadeClawMachine_",
+    "c2o_arcadeClawMachine_",
+    "a2o_arcadeWhackAGnome_",
+    "c2o_arcadeWhackAGnome_",
+    "a2o_skeeBall_",
+    "c2o_skeeBall_",
+    "a2o_horseshoeCourt_",
+    "a2o_shuffleboard_shoot",
+    "a2o_mechanicalBull_ride_",
+    "a2o_mechanicalBull_dismount_success",
+    "a2o_trampoline_",
+    "c2o_trampoline_",
+    "a2o_piano_play_",
+    "c2o_piano_play_",
+    "a2o_keyboard_play_",
+    "c2o_keyboard_play_",
+    "a2o_drum_play_",
+    "c2o_drum_play_",
+    "a2o_laserHarp_",
+    "c2o_laserHarp_",
+    "a2o_sandbox_play_",
+    "c2o_sandbox_play_",
     // Supernaturals: werewolves' and zombies' walks and idles, werewolves turning and howling,
     // vampires' runs and the sun, plasma, and their socials and spells.
     "a_werewolf_walk",
@@ -494,7 +531,20 @@ pub const PROP_ACTORS: &[&str] = &[
     "snowBallAccessory",
     "treat",
     "wand",
+    "cue",
+    "mic",
+    "dartInHand",
+    "bowlingBall",
+    "drumStick",
+    "drumStick1",
+    "horseShoe",
+    "puckInHand",
+    "arcadeWhackAGnomeMallet",
 ];
+
+/// Objects' own halves of clips whose actor isn't named for the object (the pool table's
+/// `_pool`, the drum kit's `_drumKit`).
+pub const OBJECT_ACTORS: &[&str] = &["pool", "arcadeClaw", "bull", "drumKit"];
 
 /// Whether a clip should be baked.
 pub fn wanted(name: &str) -> bool {
@@ -503,7 +553,9 @@ pub fn wanted(name: &str) -> bool {
     let actor_side = |n: &str| {
         n.ends_with("_x")
             || n.ends_with("_y")
-            || n.rsplit_once('_').is_some_and(|(_, a)| PROP_ACTORS.iter().any(|p| p.eq_ignore_ascii_case(a)) || n.split('_').nth(1).is_some_and(|o| o.eq_ignore_ascii_case(a)))
+            || n.rsplit_once('_').is_some_and(|(_, a)| {
+                PROP_ACTORS.iter().chain(OBJECT_ACTORS).any(|p| p.eq_ignore_ascii_case(a)) || n.split('_').nth(1).is_some_and(|o| o.eq_ignore_ascii_case(a))
+            })
     };
     CLIP_PREFIXES.iter().any(|p| {
         if !name.starts_with(p) {

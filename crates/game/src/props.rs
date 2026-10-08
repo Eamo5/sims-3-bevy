@@ -77,6 +77,16 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("snowBallAccessory", "accessorySnowBall", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("treat", "accessoryDogTreat", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("wand", "magicWandClassic", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    // (The packs' games and instruments.)
+    ("cue", "PoolCue", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("mic", "accessoryMic", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("dartInHand", "dartboardDart", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("bowlingBall", "bowlingBall", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("drumStick", "drumstick", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("drumStick1", "drumstick", "b__L_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("horseShoe", "accessoryHorseshoe", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("puckInHand", "shuffleboardPuck", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("arcadeWhackAGnomeMallet", "arcadeWhackAGnomeMallet", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     // (Whichever stuffed animal or toy is being played with.)
     ("stuffedAnimal", ANY, "b__R_carry_slot", [0.0; 3], [0.0; 3]),
 ];

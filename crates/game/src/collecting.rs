@@ -200,6 +200,7 @@ fn lot_finds(
                             center: Vec2::ZERO,
                             half: Vec2::splat(0.3),
                             height: 0.1,
+                            route: None,
                         },
                         UsedBy::default(),
                         FishingSpot { class },
