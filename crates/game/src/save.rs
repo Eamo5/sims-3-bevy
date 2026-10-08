@@ -258,6 +258,10 @@ pub struct SaveGame {
     /// (A household played before:) evicted in Edit Town, in the household bin with no home.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub homeless: bool,
+    /// Saved with the starter deck raised over the ground (older saves kept what stood on an
+    /// empty lot's deck at the ground's height: lifted onto it when loaded).
+    #[serde(default)]
+    pub deck: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -719,6 +723,7 @@ fn save_game(
         leftovers: leftovers.0.clone(),
         dormant: dormant.kept(&sims.iter().filter(|q| q.9).map(|q| q.1.id).collect::<Vec<_>>()),
         homeless: false,
+        deck: true,
     };
     if snapshot {
         commands.insert_resource(Snapshot(game.clone()));
@@ -775,7 +780,7 @@ fn apply_loaded_game(
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     (mut building, mut faces): (Option<ResMut<crate::building::ActiveBuilding>>, Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>),
     mut grid: Option<ResMut<crate::nav::NavGrid>>,
-    mut notes: ResMut<Notifications>,
+    (mut notes, world): (ResMut<Notifications>, Res<crate::loading::CurrentWorld>),
 ) {
     let Some(p) = pending else { return };
     if household.is_none() || sims.is_empty() {
@@ -793,7 +798,10 @@ fn apply_loaded_game(
     for s in &game.sims {
         let Some(&e) = by_id.get(&s.id) else { continue };
         let Ok((_, _, mut tf, mut floor, mut motives, mut skills, mut moodlets, mut rels)) = sims.get_mut(e) else { continue };
-        tf.translation = Vec3::from(s.position);
+        tf.translation = match building.as_deref() {
+            Some(b) if !game.deck && s.floor <= 1 => crate::building::onto_deck(b, &world.data.heightmap, Vec3::from(s.position)),
+            _ => Vec3::from(s.position),
+        };
         tf.rotation = Quat::from_rotation_y(s.yaw);
         floor.0 = s.floor.max(1);
         motives.0 = s.motives;
@@ -886,14 +894,26 @@ fn apply_loaded_game(
         }
     }
     // Furniture: take away what was sold, put back what was bought.
+    // (By where it stood on the ground: the starter deck's furniture stands higher than it did
+    // in older saves.)
     for r in &game.removed {
         if let Some((e, _, _)) = objects
             .iter()
-            .find(|(_, o, tf)| o.objd == r.objd && tf.translation.distance(Vec3::from(r.position)) < 0.1)
+            .find(|(_, o, tf)| o.objd == r.objd && tf.translation.xz().distance(Vec3::from(r.position).xz()) < 0.1 && (tf.translation.y - r.position[1]).abs() < 3.0)
         {
             commands.entity(e).despawn();
         }
     }
+    // (A copy of the building as it stands, for lifting old positions onto the deck.)
+    let deck = building.as_deref().filter(|b| !game.deck && !b.data.is_house()).map(|b| (b.corner, b.rot, b.data.clone(), b.levels.clone()));
+    let lift = |p: Vec3| match &deck {
+        Some((corner, rot, data, levels)) => {
+            let l = rot.inverse() * (p - *corner);
+            let on = data.floors.iter().any(|f| f.level == 1 && f.x as i32 == l.x.floor() as i32 && f.z as i32 == l.z.floor() as i32);
+            if on { p + Vec3::Y * (levels.get(1).copied().unwrap_or(p.y) - world.data.heightmap.sample(p.x, p.z)).max(0.0) } else { p }
+        }
+        None => p,
+    };
     removed.0 = game.removed.clone();
     let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
     // The walls and floors as the household left them.
@@ -922,7 +942,7 @@ fn apply_loaded_game(
         for g in &game.graves {
             let sim = SaveGame::sim(&g.sim);
             let label = format!("{}'s Tombstone", sim.full_name());
-            if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, entry.objd, Vec3::from(g.position), Quat::from_array(g.rotation)) {
+            if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, entry.objd, lift(Vec3::from(g.position)), Quat::from_array(g.rotation)) {
                 commands.entity(o.entity).insert(crate::ghosts::Grave { sim, cause: g.cause.clone() }).queue_silenced(move |mut w: EntityWorldMut| {
                     if let Some(mut obj) = w.get_mut::<GameObject>() {
                         obj.name = label;
@@ -933,7 +953,7 @@ fn apply_loaded_game(
     }
     for b in &game.bought {
         let rot = Quat::from_array(b.rotation);
-        if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, b.objd, Vec3::from(b.position), rot, b.design_texture()) {
+        if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, b.objd, lift(Vec3::from(b.position)), rot, b.design_texture()) {
             commands.entity(o.entity).insert(Bought);
             if let Some(item) = &b.item {
                 commands.entity(o.entity).insert(crate::paintings::Hung(item.clone()));

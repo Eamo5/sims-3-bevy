@@ -1867,6 +1867,15 @@ fn main() {
         }
         return;
     }
+    if args[1] == "patterns" {
+        // patterns [filter]: the baked catalogue wallpapers and floors (name, price, texture).
+        let g = s3bake::gamedata::load_gamedata(&s3bake::default_root()).expect("game data baked");
+        let f = args.get(2).map(|s| s.to_ascii_lowercase()).unwrap_or_default();
+        for p in g.patterns.iter().filter(|p| p.name.to_ascii_lowercase().contains(&f)) {
+            println!("{} {} §{} {:?} cwal {:X} swatches {:?}", if p.floor { "floor" } else { "wall" }, p.name, p.price, p.texture, p.cwal, p.swatches);
+        }
+        return;
+    }
     if args[1] == "wallgraph" {
         // wallgraph <world> <lot id hex> <group hex>: a lot's wall-graph edges (lot tiles).
         let w = Package::open(&args[2]).unwrap();

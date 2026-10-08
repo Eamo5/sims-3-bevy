@@ -465,12 +465,14 @@ pub struct MoveInRequest(pub usize);
 pub fn starter_furniture(lot: &LotInfo, hm: &s3formats::world::Heightmap) -> Vec<(Key, Vec3, Quat)> {
     let rot = Quat::from_rotation_y(lot.rotation);
     let center = lot_center(lot);
+    // (On the deck.)
+    let (top, _) = crate::building::deck_heights(lot, hm);
     STARTER
         .iter()
         .map(|&(inst, x, z, yaw)| {
             let p = center + rot * Vec3::new(x, 0.0, z);
             let desk = if inst == 0x369 { 0.75 } else { 0.0 };
-            ((s3pkg::types::OBJD, 0, inst), Vec3::new(p.x, hm.sample(p.x, p.z) + desk, p.z), Quat::from_rotation_y(lot.rotation + yaw.to_radians()))
+            ((s3pkg::types::OBJD, 0, inst), Vec3::new(p.x, top + desk, p.z), Quat::from_rotation_y(lot.rotation + yaw.to_radians()))
         })
         .collect()
 }
@@ -628,8 +630,8 @@ pub fn move_in(
 
     let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
     let mut furniture_value = 0;
-    // An empty lot gets an empty building to build on.
-    let empty = crate::building::empty_building(lot_index, &lot, world.data.heightmap.sample(center.x, center.z));
+    // An empty lot gets an empty building to build on: the wooden deck they move in on.
+    let empty = crate::building::deck_building(lot_index, &lot, &world.data.heightmap);
     let mut building = Some(crate::building::spawn_building(&mut commands, &mut assets, &mut ctx, &catalog, house.unwrap_or(&empty), &lot, None, false));
     // (Staircases built where the house has none of its own are in the town's usual style.)
     if let Some(b) = building.as_mut().filter(|b| b.stair_style.is_none()) {
@@ -662,15 +664,6 @@ pub fn move_in(
                 }
             }
         }
-        // A wooden deck under the open-plan home.
-        let deck = meshes.add(Cuboid::new(17.0, 0.12, 14.0));
-        let deck_mat = mats.add(StandardMaterial { base_color: Color::srgb(0.55, 0.40, 0.26), perceptual_roughness: 0.8, ..default() });
-        commands.spawn((
-            Mesh3d(deck),
-            MeshMaterial3d(deck_mat),
-            Transform::from_translation(to_world(0.0, 0.0) - Vec3::Y * 0.055).with_rotation(rot),
-            DespawnOnExit(AppState::InGame),
-        ));
     }
     let dc = building.as_ref().map(|b| Vec3::new(b.center.x, b.levels[1], b.center.z)).unwrap_or_else(|| to_world(0.0, 0.0));
     // Sims arrive at the front of the lot (by the road) when there's a house in the way.

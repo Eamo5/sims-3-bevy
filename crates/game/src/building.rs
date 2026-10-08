@@ -790,11 +790,12 @@ pub fn rooms(b: &LotBuildingBaked, level: u8) -> Vec<u16> {
     out
 }
 
-/// Floor for the rooms on `level` that have none yet (as the game lays when walls close a room).
+/// Floor for the rooms on `level` that have none yet (as the game lays when walls close a room),
+/// and the outdoor floor they close in (a deck's) made theirs.
 pub fn room_floors(b: &LotBuildingBaked, level: u8) -> Vec<PaintOp> {
     let rooms = rooms(b, level);
     let w = b.width as usize;
-    let have: HashSet<(u16, u16)> = b.floors.iter().filter(|f| f.level == level).map(|f| (f.x, f.z)).collect();
+    let have: HashSet<(u16, u16)> = b.floors.iter().filter(|f| f.level == level && f.region > 0).map(|f| (f.x, f.z)).collect();
     let base = b.floors.iter().map(|f| f.region).max().unwrap_or(0);
     let mut ops = Vec::new();
     for (i, &room) in rooms.iter().enumerate() {
@@ -947,7 +948,14 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
             }
         }
         PaintOp::AddFloor { level, x, z, region } => match b.floors.iter_mut().find(|f| f.level == level && f.x == x && f.z == z) {
-            Some(f) => f.mask = 0xF,
+            // (An outdoor floor walls now close in, a deck's say: the room's.)
+            Some(f) => {
+                f.mask = 0xF;
+                if region > 0 && f.region == 0 {
+                    f.region = region;
+                    f.kind = ROOM_LIVING;
+                }
+            }
             None => b.floors.push(FloorBaked {
                 level,
                 x,
@@ -1104,6 +1112,68 @@ fn spawn_fences(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut As
 }
 
 /// The building data of a lot with no house yet: nothing on it, its ground floor at `ground`.
+/// The wooden deck a family moving onto an empty lot starts out on: the catalogue's Rustic
+/// Wooden Planks in their weathered brown (its second swatch, as Build mode lays it).
+pub const DECK_COVER: Key = (s3bake::types::T_COVER, 4 | 1 << 8, 0xEAEE_86E8_4CBD_73D4);
+
+/// The starter deck's tiles on a lot (lot-local: first x, z and one past the last), under the
+/// starter furniture's open-plan home in the middle of the lot.
+pub fn deck_tiles(lot: &LotInfo) -> (u32, u32, u32, u32) {
+    let (w, d) = (18.min(lot.width), 14.min(lot.depth));
+    let (x0, z0) = ((lot.width - w) / 2, (lot.depth - d) / 2);
+    (x0, z0, x0 + w, z0 + d)
+}
+
+/// How high the starter deck stands (a little over the highest ground under it, so the ground
+/// never comes through), and the lowest ground under it (its foundation goes down to that).
+pub fn deck_heights(lot: &LotInfo, hm: &s3formats::world::Heightmap) -> (f32, f32) {
+    let (x0, z0, x1, z1) = deck_tiles(lot);
+    let rot = Quat::from_rotation_y(lot.rotation);
+    let corner = Vec3::from(lot.corner);
+    let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+    for x in x0..=x1 {
+        for z in z0..=z1 {
+            let p = corner + rot * Vec3::new(x as f32, 0.0, z as f32);
+            let h = hm.sample(p.x, p.z);
+            lo = lo.min(h);
+            hi = hi.max(h);
+        }
+    }
+    (hi + 0.12, lo)
+}
+
+/// An empty lot with the starter deck laid: its wooden floor tiles (outdoors: painted a tile at a
+/// time, as the game's decks are), on a foundation down to the ground.
+pub fn deck_building(lot_index: usize, lot: &LotInfo, hm: &s3formats::world::Heightmap) -> LotBuildingBaked {
+    let (top, low) = deck_heights(lot, hm);
+    let mut b = empty_building(lot_index, lot, top);
+    b.levels = vec![low, top];
+    b.covers = vec![DECK_COVER];
+    let (x0, z0, x1, z1) = deck_tiles(lot);
+    for x in x0..x1 {
+        for z in z0..z1 {
+            b.floors.push(s3bake::types::FloorBaked { level: 1, x: x as u16, z: z as u16, mask: 0xF, kind: s3bake::ROOM_PORCH, region: 0, cover: [0; 4], y: None });
+        }
+    }
+    // (Its sides, facing out.)
+    let c = |x: u32, z: u32| [x as f32, z as f32];
+    b.foundation = vec![(c(x0, z0), c(x0, z1)), (c(x0, z1), c(x1, z1)), (c(x1, z1), c(x1, z0)), (c(x1, z0), c(x0, z0))];
+    b
+}
+
+/// A position saved before the starter deck was raised (on the ground under it, or on
+/// something standing there), lifted onto the deck: by how far the deck stands over the ground
+/// there. Elsewhere, or on a house, as it was.
+pub fn onto_deck(b: &ActiveBuilding, hm: &s3formats::world::Heightmap, p: Vec3) -> Vec3 {
+    if b.data.is_house() {
+        return p;
+    }
+    match b.floor_y(1, p) {
+        Some(top) => p + Vec3::Y * (top - hm.sample(p.x, p.z)).max(0.0),
+        None => p,
+    }
+}
+
 pub fn empty_building(lot_index: usize, lot: &LotInfo, ground: f32) -> LotBuildingBaked {
     LotBuildingBaked {
         lot: lot_index as u32,
@@ -2019,11 +2089,25 @@ const ROOF_DISTANCE: f32 = 42.0;
 pub fn dormant_building(world: &crate::loading::WorldInfo, lot: usize, game: &crate::save::SaveGame, script: impl Fn(Key) -> String) -> Option<LotBuildingBaked> {
     let l = world.lots.get(lot)?;
     let center = crate::home::lot_center(l);
-    let mut b = world.buildings.get(&lot).cloned().unwrap_or_else(|| empty_building(lot, l, world.heightmap.sample(center.x, center.z)));
+    let _ = center;
+    let mut b = world.buildings.get(&lot).filter(|b| b.is_house()).cloned().unwrap_or_else(|| deck_building(lot, l, &world.heightmap));
     for op in &game.paint {
         apply_paint(&mut b, op);
     }
     b.objects.retain(|o| !game.removed.iter().any(|r| r.objd == o.objd && Vec3::from(r.position).distance(Vec3::from(o.position)) < 0.1));
+    // (Saved before the deck was raised: what was on it, lifted onto it.)
+    let (deck_top, _) = deck_heights(l, &world.heightmap);
+    let (dx0, dz0, dx1, dz1) = deck_tiles(l);
+    let house = b.is_house();
+    let lift = |p: [f32; 3]| -> [f32; 3] {
+        if game.deck || house {
+            return p;
+        }
+        let rot = Quat::from_rotation_y(l.rotation);
+        let local = rot.inverse() * (Vec3::from(p) - Vec3::from(l.corner));
+        let on = local.x >= dx0 as f32 && local.x <= dx1 as f32 && local.z >= dz0 as f32 && local.z <= dz1 as f32;
+        if on { [p[0], p[1] + (deck_top - world.heightmap.sample(p[0], p[2])).max(0.0), p[2]] } else { p }
+    };
     let (s, c) = l.rotation.sin_cos();
     // (On a lot the world left empty, the starter furniture they moved in with, less what they
     // sold.)
@@ -2045,7 +2129,7 @@ pub fn dormant_building(world: &crate::loading::WorldInfo, lot: usize, game: &cr
         }
     }
     for o in &game.bought {
-        let p = o.position;
+        let p = lift(o.position);
         let (dx, dz) = (p[0] - l.corner[0], p[2] - l.corner[2]);
         let level = b.levels.iter().enumerate().skip(1).filter(|(_, y)| p[1] >= **y - 0.3).map(|(i, _)| i as u8).last().unwrap_or(0);
         b.objects.push(s3bake::types::LotObjectBaked {
@@ -2114,16 +2198,6 @@ fn stream_nearby_lots(
             let left = dormant.0.iter().find(|d| d.lot_index == i && !d.homeless).and_then(|d| dormant_building(&world.data, i, d, script));
             if let Some(b) = left.as_ref().or(world.data.buildings.get(&i)) {
                 spawn_building(&mut commands, &mut assets, &mut ctx, &catalog, b, &world.data.lots[i], Some(root), false);
-            }
-            // (On a lot the world left empty, the wooden deck they moved in on, as `move_in`
-            // lays it.)
-            if left.is_some() && !world.data.buildings.get(&i).is_some_and(|b| b.is_house()) {
-                let l = &world.data.lots[i];
-                let c = crate::home::lot_center(l);
-                let deck = ctx.meshes.add(Cuboid::new(17.0, 0.12, 14.0));
-                let mat = ctx.materials.add(StandardMaterial { base_color: Color::srgb(0.55, 0.40, 0.26), perceptual_roughness: 0.8, ..default() });
-                let at = Vec3::new(c.x, world.data.heightmap.sample(c.x, c.z) - 0.055, c.z);
-                commands.spawn((Mesh3d(deck), MeshMaterial3d(mat), Transform::from_translation(at).with_rotation(Quat::from_rotation_y(l.rotation)), ChildOf(root)));
             }
             nearby.spawned.insert(i, root);
         }
