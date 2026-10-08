@@ -51,6 +51,9 @@ pub struct PremadeSim {
     pub career: Option<(String, i32)>,
     pub skills: Vec<(String, i32)>,
     pub favourite_color: Option<u32>,
+    /// `CASAgeGenderFlags` species: 0 or 1 a person, 2 a horse, 3 a cat, 4 a dog, 5 a little dog.
+    #[serde(default)]
+    pub species: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -62,6 +65,9 @@ pub struct PremadeHousehold {
     pub lot_id: u64,
     pub funds: i64,
     pub members: Vec<PremadeSim>,
+    /// The household's pets (the Pets pack's `mPetSimDescriptions`).
+    #[serde(default)]
+    pub pets: Vec<PremadeSim>,
 }
 
 /// A relationship between two premade Sims.
@@ -143,6 +149,13 @@ pub fn read(objs: &ObjStream) -> Premades {
                 members.push(s);
             }
         }
+        let pets: Vec<PremadeSim> = members_obj
+            .and_then(|m| objs.field_ref(m, "mPetSimDescriptions"))
+            .map(|l| objs.elements(l))
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|sid| read_sim(objs, sid, &ids, &genealogy_sim, &string))
+            .collect();
         if members.is_empty() {
             continue;
         }
@@ -153,6 +166,7 @@ pub fn read(objs: &ObjStream) -> Premades {
             lot_id: get("mLotId").and_then(|v| v.as_int()).unwrap_or(0) as u64,
             funds: get("mFamilyFunds").and_then(|v| v.as_int()).unwrap_or(0),
             members,
+            pets,
         });
     }
     let mut relationships = Vec::new();
@@ -244,6 +258,7 @@ fn read_sim(
         bio: string(get("mBio").and_then(|v| v.as_ref())),
         age: flags & 0x7F,
         female: flags & FEMALE != 0,
+        species: (flags >> 8) & 0xF,
         traits,
         skin_tone: key(get("mSkinToneKey")),
         skin_shade: get("mSkinToneIndex").and_then(|v| v.as_f32()).unwrap_or(0.5),

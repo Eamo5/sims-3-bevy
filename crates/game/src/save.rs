@@ -255,6 +255,9 @@ pub struct SaveGame {
     /// The season and the weather (`None` in saves from before there was weather).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weather: Option<crate::weather::Weather>,
+    /// The household's pets.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pets: Vec<crate::pets::SavedPet>,
     /// The town's other households played before, as they were left (to play again).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dormant: Vec<SaveGame>,
@@ -598,12 +601,14 @@ fn save_game(
     ),
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
-    (story, alarm, bowls, leftovers, weather): (
+    (story, alarm, bowls, leftovers, weather, pets, pet_data): (
         Res<crate::story::TownStory>,
         Res<crate::appliances::Alarm>,
         Query<(&crate::fishbowl::BowlFish, &Transform), Without<crate::visit::LotObject>>,
         Res<crate::meals::Leftovers>,
         Res<crate::weather::Weather>,
+        Query<(&crate::pets::Pet, &crate::pets::HomePet, &Transform)>,
+        Res<crate::pets::PetData>,
     ),
     (mut slot, maid, mail_due, upgraded, family, strokes, sculpted): (
         ResMut<SaveSlot>,
@@ -726,6 +731,7 @@ fn save_game(
             .collect(),
         leftovers: leftovers.0.clone(),
         weather: Some(weather.clone()),
+        pets: crate::pets::saved(&pets, pet_data.0.as_deref()),
         dormant: dormant.kept(&sims.iter().filter(|q| q.9).map(|q| q.1.id).collect::<Vec<_>>()),
         homeless: false,
         deck: true,
@@ -942,6 +948,7 @@ fn apply_loaded_game(
     commands.insert_resource(game.collection.clone());
     commands.insert_resource(crate::meals::Leftovers(game.leftovers.clone()));
     commands.insert_resource(game.weather.clone().unwrap_or_default());
+    commands.insert_resource(crate::pets::PendingPets(game.pets.clone()));
     commands.insert_resource(crate::household::Dormant(game.dormant.clone()));
     // The household's dead, back in their graves.
     if let Some(entry) = data.0.catalog.iter().find(|c| c.instance_name == "UrnstoneHuman") {

@@ -12,7 +12,7 @@ use crate::ddsw::encode_dds;
 use crate::pack::{read_value, write_value};
 use crate::types::Key;
 
-pub const PREMADES_VERSION: u32 = 2;
+pub const PREMADES_VERSION: u32 = 3;
 /// Household portraits in the world file (by household id).
 pub const T_HOUSEHOLD_PORTRAIT: u32 = 0x6B6D837E;
 
@@ -28,6 +28,9 @@ pub struct HouseholdBaked {
     pub portrait: Option<Key>,
     /// Sims with their names and descriptions resolved.
     pub members: Vec<PremadeSim>,
+    /// Their pets, likewise.
+    #[serde(default)]
+    pub pets: Vec<PremadeSim>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -97,16 +100,18 @@ pub fn bake_premades(root: &BakeRoot, pkg: &Package, world: &str, strings: &Hash
                 Some(portrait_key)
             })
         };
-        let members = h
-            .members
-            .into_iter()
-            .map(|mut s| {
-                s.first_name = tr(&s.first_name);
-                s.last_name = tr(&s.last_name);
-                s.bio = if s.bio.is_empty() { String::new() } else { strings.get(&s3pkg::fnv64(&s.bio)).cloned().unwrap_or_default() };
-                s
-            })
-            .collect();
+        let named = |list: Vec<PremadeSim>| -> Vec<PremadeSim> {
+            list.into_iter()
+                .map(|mut s| {
+                    s.first_name = tr(&s.first_name);
+                    s.last_name = tr(&s.last_name);
+                    s.bio = if s.bio.is_empty() { String::new() } else { strings.get(&s3pkg::fnv64(&s.bio)).cloned().unwrap_or_default() };
+                    s
+                })
+                .collect()
+        };
+        let members = named(h.members);
+        let pets = named(h.pets);
         households.push(HouseholdBaked {
             id: h.id,
             name: tr(&h.name),
@@ -115,6 +120,7 @@ pub fn bake_premades(root: &BakeRoot, pkg: &Package, world: &str, strings: &Hash
             funds: h.funds,
             portrait,
             members,
+            pets,
         });
     }
     let n = households.len();

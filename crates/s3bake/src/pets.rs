@@ -12,7 +12,7 @@ use crate::pack::{read_value, write_value};
 use crate::types::{Key, SkinMesh};
 
 /// Bumped when the baked pets change.
-pub const PETS_VERSION: u32 = 2;
+pub const PETS_VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PetsBaked {
@@ -221,6 +221,17 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, progress: crate::bak
         }
         let coat = coat_key(k.i);
         let _ = std::fs::write(root.tex_path(coat), crate::ddsw::encode_dds(&img));
+        // (PET_PNG=<dir>: each coat as a picture too, to look at.)
+        if let Ok(dir) = std::env::var("PET_PNG") {
+            let path = std::path::Path::new(&dir).join(format!("{kind}_{:016X}.png", k.i));
+            if let Ok(f) = std::fs::File::create(path) {
+                let mut enc = png::Encoder::new(std::io::BufWriter::new(f), COAT_SIZE as u32, COAT_SIZE as u32);
+                enc.set_color(png::ColorType::Rgba);
+                if let Ok(mut w) = enc.write_header() {
+                    let _ = w.write_image_data(&img.data);
+                }
+            }
+        }
         Some(PetBreed { outfit: k.i, kind, age: o.age, gender: o.gender, coat, tail: part(PT_TAIL), ears: part(PT_EARS), mane: part(PT_MANE) })
     })
     .into_iter()

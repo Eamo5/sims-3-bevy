@@ -347,7 +347,11 @@ installation is unreachable.
   painted from the breed's colours and markings through their masks over the fur's shading,
   with its tail, ears or mane), moving with the pack's own animations: walking, standing
   about looking round, sitting, lying down, asleep. A stray cat and dog wander the sidewalk in
-  front of the lot by day, stopping to sit or lie about, and curl up asleep at night.
+  front of the lot by day, stopping to sit or lie about, and curl up asleep at night. The
+  premade households' pets come home with them (Appaloosa Plains' cats, dogs and horses: the
+  Lionhearts' four cats, the Johnsons' two horses...), each in a breed of its kind, and potter
+  about the lot (the horses out of doors, swishing their tails and pawing the ground), kept in
+  saves.
 - **Water effects**: fountains gush and fill their basins, showers spray from the head and taps
   run while someone's at them, each from the object's own effect slot (the game's RSLT slots).
   TVs show a programme on the screen (at the TV's screen slot) while anyone's watching, its

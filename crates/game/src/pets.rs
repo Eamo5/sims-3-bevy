@@ -24,7 +24,8 @@ pub struct PetsPlugin;
 impl Plugin for PetsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PetData>()
-            .add_systems(Update, (load_pet_data, spawn_strays, strays, animate_pets).chain().run_if(in_state(PlayMode::Live)))
+            .init_resource::<PendingPets>()
+            .add_systems(Update, (load_pet_data, spawn_strays, spawn_household_pets, strays, home_pets, animate_pets).chain().run_if(in_state(PlayMode::Live)))
             .add_systems(Update, pet_cam.run_if(in_state(PlayMode::Live)));
     }
 }
@@ -233,12 +234,203 @@ fn animate_pets(
     }
 }
 
-/// `PET_CAM=<n>` (tests): the camera on the nth pet, `PET_DIST` away.
-fn pet_cam(pets: Query<&GlobalTransform, With<Pet>>, mut cams: Query<&mut crate::camera::SimsCamera>) {
-    let Some(n) = std::env::var("PET_CAM").ok().and_then(|v| v.parse::<usize>().ok()) else { return };
-    let (Some(p), Ok(mut c)) = (pets.iter().nth(n), cams.single_mut()) else { return };
+/// `PET_CAM=<n or name>` (tests): the camera on the nth pet (or the one by that name),
+/// `PET_DIST` away.
+fn pet_cam(pets: Query<(&GlobalTransform, &Pet)>, mut cams: Query<&mut crate::camera::SimsCamera>) {
+    let Ok(v) = std::env::var("PET_CAM") else { return };
+    let p = match v.parse::<usize>() {
+        Ok(n) => pets.iter().nth(n),
+        Err(_) => pets.iter().find(|(_, p)| p.name.eq_ignore_ascii_case(&v)),
+    };
+    let (Some((p, _)), Ok(mut c)) = (p, cams.single_mut()) else { return };
     c.look_at(p.translation());
     c.distance = std::env::var("PET_DIST").ok().and_then(|v| v.parse().ok()).unwrap_or(4.0);
+}
+
+/// A household's pet, as kept in saves: who it is, what kind, its breed (by the game's outfit
+/// for it) and where it was.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct SavedPet {
+    pub id: u64,
+    pub name: String,
+    pub kind: String,
+    pub outfit: u64,
+    #[serde(default)]
+    pub position: Option<[f32; 3]>,
+}
+
+/// Pets to put on the home lot once it's ready (a premade household's, or a save's).
+#[derive(Resource, Default)]
+pub struct PendingPets(pub Vec<SavedPet>);
+
+/// The kind of pet a premade one is: its species and whether it's young.
+fn kind_of(species: u32, age: u32) -> Option<&'static str> {
+    let young = age & 0x07 != 0;
+    Some(match (species, young) {
+        (3, false) => "ac",
+        (3, true) => "cc",
+        (4, false) => "ad",
+        (4, true) => "cd",
+        (5, false) => "al",
+        (5, true) => "cl",
+        (2, false) => "ah",
+        (2, true) => "ch",
+        _ => return None,
+    })
+}
+
+impl SavedPet {
+    /// A premade household's pet: one of the game's breeds of its kind, the same each time (its
+    /// own coat isn't in the install).
+    pub fn premade(p: &s3formats::premade::PremadeSim, data: &PetsBaked) -> Option<SavedPet> {
+        let kind = kind_of(p.species, p.age)?;
+        // (Little puppies wear puppies' breeds: their bodies are the same.)
+        let wears = if kind == "cl" && !data.breeds.iter().any(|b| b.kind == "cl") { "cd" } else { kind };
+        let breeds: Vec<&s3bake::pets::PetBreed> = data.breeds.iter().filter(|b| b.kind == wears).collect();
+        let b = breeds.get((p.id % breeds.len().max(1) as u64) as usize)?;
+        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None })
+    }
+}
+
+/// A household's pet, at home on the lot.
+#[derive(Component)]
+pub struct HomePet {
+    pub id: u64,
+    path: Vec<Vec2>,
+    until: f64,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_household_pets(
+    mut commands: Commands,
+    pets: Res<PetData>,
+    mut pending: ResMut<PendingPets>,
+    grid: Option<Res<crate::nav::NavGrid>>,
+    exit: Option<Res<crate::interact::LotExit>>,
+    world: Res<crate::loading::CurrentWorld>,
+    data: Res<Baked>,
+    mut assets: ResMut<ObjectAssets>,
+    (mut meshes, mut images, mut materials, mut bindposes): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>, ResMut<Assets<SkinnedMeshInverseBindposes>>),
+) {
+    if pending.0.is_empty() {
+        return;
+    }
+    let (Some(p), Some(grid)) = (pets.0.as_ref(), grid) else { return };
+    let mut rng = rand::rng();
+    let near = exit.map_or(grid.center_of(grid.w / 2, grid.h / 2), |e| e.0);
+    for pet in std::mem::take(&mut pending.0) {
+        let Some(breed) = p.breeds.iter().position(|b| b.outfit == pet.outfit) else { continue };
+        // (Where it was, else somewhere free in the yard by the front.)
+        let at = pet.position.map(|q| Vec2::new(q[0], q[2])).filter(|q| grid.cell_of(*q).is_some()).unwrap_or_else(|| {
+            let q = near + Vec2::new(rng.random_range(-3.0..3.0), rng.random_range(-3.0..3.0));
+            grid.nearest_free(q).map_or(q, |(x, z)| grid.center_of(x, z))
+        });
+        let y = pet.position.map_or_else(|| world.data.heightmap.sample(at.x, at.y), |q| q[1]);
+        let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+        if let Some(e) = spawn_pet(&mut commands, p, breed, pet.name.clone(), Vec3::new(at.x, y, at.y), rng.random_range(0.0..6.28), &mut ctx, &mut assets, &mut bindposes) {
+            commands.entity(e).insert(HomePet { id: pet.id, path: Vec::new(), until: 0.0 });
+            info!("pet {} the {} ({}) is home", pet.name, p.breeds[breed].kind, pet.outfit);
+        }
+    }
+}
+
+/// A household's pets potter about the lot: off somewhere (by the lot's walk grid), then a
+/// while standing about, sitting or lying down, and asleep at night.
+#[allow(clippy::too_many_arguments)]
+fn home_pets(
+    time: Res<Time>,
+    clock: Res<GameClock>,
+    grid: Option<Res<crate::nav::NavGrid>>,
+    world: Res<crate::loading::CurrentWorld>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+    household: Option<Res<crate::interact::Household>>,
+    mut q: Query<(&Pet, &mut HomePet, &mut Transform, &mut PetAnim)>,
+) {
+    let Some(grid) = grid else { return };
+    let lot = household.as_ref().and_then(|h| world.data.lots.get(h.lot_index));
+    let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed].min(3.0);
+    let mut rng = rand::rng();
+    let night = !(6.0..21.0).contains(&clock.hour_f());
+    for (pet, mut h, mut tf, mut anim) in &mut q {
+        let here = Vec2::new(tf.translation.x, tf.translation.z);
+        if let Some(&next) = h.path.first() {
+            let d = next - here;
+            let step = pet.walk_speed() * dt;
+            if d.length() <= step.max(0.05) {
+                h.path.remove(0);
+                if h.path.is_empty() {
+                    h.until = clock.minutes + rng.random_range(10.0..60.0) as f64;
+                    anim.play(idle_clip(&pet.kind, night, &mut rng));
+                }
+            } else {
+                let p = here + d.normalize() * step;
+                let y = crate::nav::floor_height(&world.data, building.as_deref(), 1, Vec3::new(p.x, tf.translation.y, p.y));
+                tf.translation = Vec3::new(p.x, y, p.y);
+                tf.rotation = Quat::from_rotation_y(d.x.atan2(d.y));
+                anim.play(format!("{}_walk_x", pet.kind));
+            }
+            continue;
+        }
+        if clock.minutes < h.until || night {
+            if anim.clip.is_empty() || (night && !anim.clip.contains("sleep") && !pet.kind.ends_with('h')) {
+                anim.play(idle_clip(&pet.kind, night, &mut rng));
+            }
+            continue;
+        }
+        // Somewhere else on the lot (never off it, into the street).
+        let to = match lot {
+            Some(l) => {
+                let (x, z) = (rng.random_range(1.0..(l.width as f32 - 1.0).max(1.5)), rng.random_range(1.0..(l.depth as f32 - 1.0).max(1.5)));
+                let (s, c) = l.rotation.sin_cos();
+                let p = Vec3::from(l.corner) + Vec3::new(x * c + z * s, 0.0, -x * s + z * c);
+                Vec2::new(p.x, p.z)
+            }
+            None => here + Vec2::new(rng.random_range(-8.0..8.0), rng.random_range(-8.0..8.0)),
+        };
+        // (Horses keep out of the house.)
+        let horse = pet.kind.ends_with('h');
+        let indoors = |p: Vec2| building.as_deref().is_some_and(|b| b.is_indoors(Vec3::new(p.x, 0.0, p.y)));
+        if let Some((x, z)) = grid.nearest_free(to).filter(|(x, z)| !(horse && indoors(grid.center_of(*x, *z))))
+            && let Some(path) = grid.find_path(here, grid.center_of(x, z)).filter(|p| !horse || !p.iter().any(|q| indoors(*q)))
+        {
+            h.path = path;
+        } else {
+            h.until = clock.minutes + 10.0;
+        }
+    }
+}
+
+/// Something to do while stopped: standing about, looking round, sitting, lying down; asleep at
+/// night.
+fn idle_clip(kind: &str, night: bool, rng: &mut impl Rng) -> String {
+    // (Horses stand: swishing their tails, flicking their ears, pawing the ground, dozing on
+    // their feet at night.)
+    if kind == "ah" || kind == "ch" {
+        let options = if night {
+            vec!["idle_stand_breathe_x", "idle_stand_yawn_x"]
+        } else {
+            vec!["idle_stand_breathe_x", "idle_stand_breatheSwishTail_x", "idle_stand_lookAround_x", "idle_stand_earFlickL_x", "idle_stand_pawAtFloor_x", "idle_stand_sniffAround_x", "idle_stand_snort_x"]
+        };
+        return format!("{kind}_{}", options.choose(rng).copied().unwrap_or("idle_stand_breathe_x"));
+    }
+    if night {
+        return format!("{kind}_sleep_loop1_x");
+    }
+    let options = [
+        format!("{kind}_idle_stand_breathe_x"),
+        format!("{kind}_idle_stand_lookAround_x"),
+        format!("{kind}_idle_sit_breathe_x"),
+        if kind == "ac" || kind == "cc" { format!("{kind}_idle_layDown_breathe_x") } else { format!("{kind}_idle_laydown_breathe_x") },
+    ];
+    options.choose(rng).cloned().unwrap_or_default()
+}
+
+/// The household's pets, for the save.
+pub fn saved(pets: &Query<(&Pet, &HomePet, &Transform)>, data: Option<&PetsBaked>) -> Vec<SavedPet> {
+    let Some(data) = data else { return Vec::new() };
+    pets.iter()
+        .filter_map(|(p, h, tf)| Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()) }))
+        .collect()
 }
 
 /// A stray: wandering about near where it turned up.
@@ -309,19 +501,7 @@ fn strays(
                     s.target = None;
                     s.until = clock.minutes + rng.random_range(8.0..40.0) as f64;
                     // (Something to do while it's stopped.)
-                    let k = &pet.kind;
-                    let idle = if night {
-                        format!("{k}_sleep_loop1_x")
-                    } else {
-                        let options = [
-                            format!("{k}_idle_stand_breathe_x"),
-                            format!("{k}_idle_stand_lookAround_x"),
-                            format!("{k}_idle_sit_breathe_x"),
-                            if k == "ac" { "ac_idle_layDown_breathe_x".to_string() } else { format!("{k}_idle_laydown_breathe_x") },
-                        ];
-                        options.choose(&mut rng).cloned().unwrap_or_default()
-                    };
-                    anim.play(idle);
+                    anim.play(idle_clip(&pet.kind, night, &mut rng));
                 } else {
                     let p = here + d.normalize() * step;
                     tf.translation = Vec3::new(p.x, world.data.heightmap.sample(p.x, p.y), p.y);

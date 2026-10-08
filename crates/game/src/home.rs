@@ -674,6 +674,14 @@ pub fn move_in(
     let pending = pending.map(|p| p.clone()).unwrap_or_else(PendingHousehold::random);
     let starting_funds = if house.is_some() { 20000 - furniture_value as i64 / 4 } else { 20000 - furniture_value as i64 / 2 };
     let starting_funds = pending.premade.as_ref().map_or(starting_funds.max(5000), |h| h.funds.max(0));
+    // (A premade household's pets come home with it.)
+    if let Some(h) = pending.premade.as_ref().filter(|h| !h.pets.is_empty())
+        && let Some(data) = s3bake::load_pets(&s3bake::default_root())
+    {
+        let pets: Vec<crate::pets::SavedPet> = h.pets.iter().filter_map(|p| crate::pets::SavedPet::premade(p, &data)).collect();
+        info!("{} of the household's {} pets come home", pets.len(), h.pets.len());
+        commands.insert_resource(crate::pets::PendingPets(pets));
+    }
     commands.insert_resource(Household {
         name: pending.last_name.clone(),
         funds: starting_funds,

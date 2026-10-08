@@ -2229,6 +2229,9 @@ fn main() {
         let p = s3formats::premade::read(&objs);
         for h in &p.households {
             println!("{} ({}) lot {:016X} funds {}", tr(&h.name), h.members.len(), h.lot_id, h.funds);
+            for p in &h.pets {
+                println!("   pet {} species {} age {:x}", tr(&p.first_name), p.species, p.age);
+            }
             for s in &h.members {
                 println!(
                     "   {} {} age {:x} {} traits {:?} skin {:?}/{:.2} hair {:08X?} body f{:.2} t{:.2} fit{:.2} partner {:?} spouse {:?} parents {:?} career {:?} skills {:?}",
