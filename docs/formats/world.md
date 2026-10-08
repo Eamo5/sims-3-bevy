@@ -298,6 +298,15 @@ tail and then the 4-byte one, and take the one after which the next object's hea
 within 8 bytes (then keep it for the rest of the resource). Before this, 219 of the Pinkertons'
 223 objects failed to parse (their house stood bare: no doors, windows or furniture). [VERIFIED]
 
+The animation state holds record types not decoded here (0x19 in Sunset Valley; 0x075E3ECB and
+0x075E4C89 in later worlds). Everything that matters about an object (catalogue entry, position,
+rotation, model, design) comes before it, and the script after it: on an unknown record, the
+script component is found by its name (`u32, u32 length 8..256, "Sims3..."`) before the next
+object's header, and the object read on from there. Failing that, an object is resynchronised on
+the first header after its own (never skipping the next object). With both, `s3tool objnstats
+<world>` counts every object of China, Egypt, France, Twinbrook and Bridgeport, 10,514 of Sunset
+Valley's 10,522, and about 99% of the later worlds'. [VERIFIED]
+
 ### 6.1 Header  [VERIFIED]
 
 ```

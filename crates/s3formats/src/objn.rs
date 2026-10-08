@@ -171,31 +171,17 @@ pub fn parse_objn(d: &[u8], refs: &HashMap<u16, ResourceKey>) -> R<Vec<PlacedObj
             r.pos = end;
             continue;
         }
-        match parse_object(&mut r, refs, tail) {
-            Ok(o) => {
-                out.push(o);
-                // Later packs append fields some objects don't have: resynchronise on the next header.
-                if i + 1 < count
-                    && !header_ok(d, r.pos)
-                    && let Some(p) = scan_header(d, r.pos.saturating_sub(8), 256)
-                {
-                    r.pos = p;
-                }
-            }
-            Err(e) => {
-                if std::env::var("OBJN_DEBUG").is_ok_and(|v| v == d.len().to_string()) {
-                    eprintln!("objn: object {i} at {start} failed ({e:?}), resyncing");
-                }
-                match scan_header(d, start + 16, 1 << 16) {
-                    Some(p) => r.pos = p,
-                    None => {
-                        if std::env::var("OBJN_DEBUG").is_ok_and(|v| v == d.len().to_string()) {
-                            eprintln!("objn: no header after {start}: stopping at {i} of {count}");
-                        }
-                        break;
-                    }
-                }
-            }
+        // (Otherwise what can be read of it, and on from the next object's header: the first
+        // after this one's own.)
+        if let Ok(o) = parse_object(&mut Reader::at(d, start), refs, tail) {
+            out.push(o);
+        }
+        if i + 1 >= count {
+            break;
+        }
+        match scan_header(d, start + 16, 1 << 18) {
+            Some(p) => r.pos = p,
+            None => break,
         }
     }
     Ok(out)
@@ -296,9 +282,20 @@ fn parse_object(r: &mut Reader, refs: &HashMap<u16, ResourceKey>, tail: usize) -
         }
     }
     if has(C_ANIMATION) {
+        let anim_start = r.pos;
         r.u16()?;
-        if r.u8()? != 0 {
-            skip_anim(r)?;
+        if r.u8()? != 0 && skip_anim(r).is_err() {
+            // (An animation record of a kind not known here, which later packs add: on to the
+            // script, found by its name, for everything else about the object was read before.)
+            if !has(C_SCRIPT) {
+                return Err(Eof);
+            }
+            let d = r.data;
+            let u = |p: usize| d.get(p..p + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()) as usize);
+            // (Within this object: before the next one begins.)
+            let end = scan_header(d, anim_start, 16384).unwrap_or((anim_start + 16384).min(d.len().saturating_sub(16)));
+            let found = (anim_start..end).find(|&p| u(p + 4).is_some_and(|ln| (8..=256).contains(&ln)) && d.get(p + 8..p + 14) == Some(b"Sims3.".as_slice()));
+            r.pos = found.ok_or(Eof)?;
         }
     }
     if has(C_SCRIPT) {

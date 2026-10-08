@@ -1867,6 +1867,34 @@ fn main() {
         }
         return;
     }
+    if args[1] == "objnstats" {
+        // objnstats <world>...: per world, the objects its OBJN resources hold (by their headers'
+        // counts) and how many parse.
+        for path in &args[2..] {
+            let w = Package::open(path).unwrap();
+            let (mut declared, mut parsed, mut worst) = (0usize, 0usize, (0usize, 0usize, 0u64));
+            for e in w.of_type(s3formats::objn::T_OBJN) {
+                let Ok(d) = w.read(e) else { continue };
+                let count = d.get(..).and_then(|_| {
+                    // (The header's object count: after the two dependency tables.)
+                    let u = |o: usize| d.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()) as usize);
+                    let n = u(12)?;
+                    let o = 16 + n * 12 + 8;
+                    let n2 = u(o)?;
+                    u(o + 4 + n2 * 12 + 16 + 16)
+                }).unwrap_or(0);
+                let refs = w.find(&s3pkg::ResourceKey::new(0x05ED1226, s3formats::objn::REFS_GROUP_OBJN, e.key.i)).and_then(|r| w.read(r).ok()).and_then(|r| s3formats::objn::parse_refs(&r).ok()).unwrap_or_default();
+                let got = s3formats::objn::parse_objn(&d, &refs).map(|v| v.len()).unwrap_or(0);
+                declared += count;
+                parsed += got;
+                if count.saturating_sub(got) > worst.0.saturating_sub(worst.1) {
+                    worst = (count, got, e.key.i);
+                }
+            }
+            println!("{}: {parsed} of {declared} objects parse; worst OBJN {:016X}: {} of {}", std::path::Path::new(path).file_stem().unwrap().to_string_lossy(), worst.2, worst.1, worst.0);
+        }
+        return;
+    }
     if args[1] == "patterns" {
         // patterns [filter]: the baked catalogue wallpapers and floors (name, price, texture).
         let g = s3bake::gamedata::load_gamedata(&s3bake::default_root()).expect("game data baked");
