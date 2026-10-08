@@ -544,6 +544,7 @@ installation is unreachable.
 | R | Relationships panel |
 | O | Opportunities panel |
 | Esc | Game menu: pause, options, save, quit |
+| Print Screen or F12 | Screenshot (into a Screenshots folder beside the saves, or `SIMS3_SCREENSHOTS`) |
 
 ## Layout
 

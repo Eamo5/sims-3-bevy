@@ -163,6 +163,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
             .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, (show_designs, show_style), walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, strand_swimmers.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(PreUpdate, press_key.after(bevy::input::InputSystems).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -450,6 +451,27 @@ fn auto_pick_world(
         next.set(AppState::Loading);
     } else {
         warn!("--world {name}: no such world");
+    }
+}
+
+/// PRESS_KEY=<F12|PrintScreen|Escape>@<seconds>: that key pressed then (and let go a moment later).
+fn press_key(time: Res<Time>, mut keys: ResMut<ButtonInput<KeyCode>>, mut done: Local<u8>) {
+    let Some((k, at)) = std::env::var("PRESS_KEY").ok().and_then(|v| v.split_once('@').map(|(k, t)| (k.to_string(), t.parse::<f32>().unwrap_or(10.0)))) else { return };
+    let key = match k.as_str() {
+        "F12" => KeyCode::F12,
+        "PrintScreen" => KeyCode::PrintScreen,
+        _ => KeyCode::Escape,
+    };
+    match *done {
+        0 if time.elapsed_secs() > at => {
+            keys.press(key);
+            *done = 1;
+        }
+        1 => {
+            keys.release(key);
+            *done = 2;
+        }
+        _ => {}
     }
 }
 

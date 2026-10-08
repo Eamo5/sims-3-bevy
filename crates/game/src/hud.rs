@@ -16,11 +16,44 @@ use crate::{AppState, PlayMode};
 
 pub struct HudPlugin;
 
+/// Where screenshots go: `SIMS3_SCREENSHOTS`, or a Screenshots folder beside the saves.
+pub fn screenshots_dir() -> std::path::PathBuf {
+    std::env::var_os("SIMS3_SCREENSHOTS").map(std::path::PathBuf::from).unwrap_or_else(|| {
+        let saves = crate::save::saves_dir();
+        saves.parent().map_or_else(|| std::path::PathBuf::from("Screenshots"), |p| p.join("Screenshots"))
+    })
+}
+
+/// Print Screen (or F12) takes a picture of the game, as the game's camera button does, into
+/// the Screenshots folder (named for the household and the moment).
+fn take_screenshot(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    household: Option<Res<Household>>,
+    clock: Res<crate::clock::GameClock>,
+    mut notes: ResMut<Notifications>,
+) {
+    if !(keys.just_pressed(KeyCode::PrintScreen) || keys.just_pressed(KeyCode::F12)) {
+        return;
+    }
+    let dir = screenshots_dir();
+    if std::fs::create_dir_all(&dir).is_err() {
+        notes.push("Couldn't make the Screenshots folder.");
+        return;
+    }
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let m = clock.minutes as i64;
+    let who = household.as_ref().map_or("Sims", |h| h.name.as_str());
+    let path = dir.join(format!("{who} - day {} {:02}{:02} - {stamp}.png", m / 1440 + 1, (m / 60) % 24, m % 60));
+    commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(path.clone()));
+    notes.push(format!("Screenshot saved: {}", path.display()));
+}
+
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PieMenu>()
             .add_systems(OnEnter(PlayMode::Live), spawn_hud)
-            .add_systems(Update, (floor_controls, update_moodlets_panel, phone_button, save_button, update_wishes_panel, wish_buttons, fade_help).run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, (floor_controls, update_moodlets_panel, phone_button, save_button, update_wishes_panel, wish_buttons, fade_help, take_screenshot).run_if(in_state(PlayMode::Live)))
             .add_systems(
                 Update,
                 (
