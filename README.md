@@ -632,7 +632,8 @@ installation is unreachable.
   Objects snap to quarter tiles on the lot's own grid, on the floor in view, with a green or
   red placement outline; objects must fit inside the lot, upper-floor furniture needs floor
   underneath (including diagonal tiles and interior gaps), and ordinary furniture cannot
-  overlap a pool. Placement checks use the floor actually hit by the pointer. Moving furniture keeps the original
+  overlap a pool or straddle a wall. Hold Alt for free positioning between grid points.
+  Placement checks use the floor actually hit by the pointer. Moving furniture keeps the original
   object, with its upgrades, breakage, contents, lights and animated parts; cancelling puts it
   back intact.
 - **Interface**: the game's own icons and words — moodlets (name, description, time left),

@@ -1571,11 +1571,11 @@ fn placement(
         } else if let Some((p, level)) = floor {
             // Quarter tiles in the lot's coordinate system, including rotated lots.
             let p = match building.as_deref() {
-                Some(b) => {
+                Some(b) if !keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]) => {
                     let l = snap_local(b.rot, b.corner, p);
                     b.world(l.x, l.y, 0.0)
                 }
-                None => p,
+                _ => p,
             };
             tf.translation = p.with_y(crate::nav::floor_height(&world.data, building.as_deref(), level, p));
             tf.rotation = Quat::from_rotation_y(buy.yaw);
@@ -1667,7 +1667,9 @@ fn placement(
                 crate::save::note_removed(&mut removed, obj, tf);
             }
             restore_source(&mut commands, buy.placing.as_ref().unwrap());
-            commands.entity(source).insert(Transform::from_translation(pos).with_rotation(rot));
+            // Moving a placed object must also keep any authored model scale.
+            let scale = objects.get(source).map_or(Vec3::ONE, |(_, tf, ..)| tf.scale);
+            commands.entity(source).insert(Transform::from_translation(pos).with_rotation(rot).with_scale(scale));
             let parts = assets.object_design(&mut ctx, objd, design);
             crate::objects::restyle_parts(&mut commands, source, &parts);
             match design {
@@ -1720,6 +1722,12 @@ fn placement_problem(b: &crate::building::ActiveBuilding, tf: &Transform, bounds
     }
     if !wall && !ladder {
         let local = corners.map(|p| b.local(p));
+        // Flat floor decorations may lie beneath a wall; furniture may not straddle it.
+        if bounds.1.y - bounds.0.y > 0.08 && b.data.walls.iter().any(|w| {
+            w.level.max(1) == level && wall_overlaps_footprint(&local, Vec2::from(w.a), Vec2::from(w.b))
+        }) {
+            return Some("There's a wall in the way.");
+        }
         if level > 1 && !footprint_supported(&local, |p| b.floor_y(level, b.world(p.x, p.y, 0.0)).is_some()) {
             return Some("The whole object needs a floor underneath it.");
         }
@@ -1731,6 +1739,16 @@ fn placement_problem(b: &crate::building::ActiveBuilding, tf: &Transform, bounds
         }
     }
     None
+}
+
+fn wall_overlaps_footprint(corners: &[Vec2; 4], a: Vec2, b: Vec2) -> bool {
+    let along = b - a;
+    if along.length_squared() < 0.0001 {
+        return false;
+    }
+    // Match a narrow solid wall, rather than its infinitely thin centre line.
+    let side = along.normalize().perp() * 0.03;
+    convex_overlap(corners, &[a - side, b - side, b + side, a + side])
 }
 
 /// Positive-area overlap; touching a tile edge is legal. Axes from both polygons
@@ -1777,6 +1795,17 @@ fn footprint_supported(corners: &[Vec2; 4], has_floor: impl Fn(Vec2) -> bool) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn furniture_cannot_cross_straight_or_diagonal_walls() {
+        let footprint = [Vec2::ZERO, Vec2::X, Vec2::ONE, Vec2::Y];
+        assert!(wall_overlaps_footprint(&footprint, Vec2::new(-1.0, 0.5), Vec2::new(2.0, 0.5)));
+        assert!(wall_overlaps_footprint(&footprint, Vec2::splat(-1.0), Vec2::splat(2.0)));
+        assert!(!wall_overlaps_footprint(&footprint, Vec2::new(-1.0, 1.1), Vec2::new(2.0, 1.1)));
+        assert!(!wall_overlaps_footprint(&footprint, Vec2::ZERO, Vec2::ZERO));
+        // The infinite extension of a wall is not an obstacle past its endpoint.
+        assert!(!wall_overlaps_footprint(&footprint, Vec2::new(2.0, 0.5), Vec2::new(3.0, 0.5)));
+    }
 
     #[test]
     fn selecting_current_mode_keeps_tools_and_category() {

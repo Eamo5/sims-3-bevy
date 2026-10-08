@@ -167,7 +167,8 @@ impl Plugin for AutoTestPlugin {
             .add_systems(PreUpdate, buy_pick.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, ui_click.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, pointer_script.after(bevy::input::InputSystems).before(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
-            .add_systems(Update, buy_move_test.run_if(in_state(crate::PlayMode::Live)))
+            // Observe furniture after gameplay's deferred restore/despawn commands apply.
+            .add_systems(PostUpdate, buy_move_test.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
