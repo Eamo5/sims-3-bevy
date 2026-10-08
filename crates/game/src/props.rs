@@ -64,6 +64,15 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("cookingKnife", "KnifeLarge", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("newspaperRolled", "NewspaperRolled", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("wrench", "Wrench", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("firePitSkewer", "FirePitSkewer", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("fireplaceLighter", "AccessoryFireplaceLighter", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("poker", "AccessoryFireplacePoker", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("mixingBowl", "mixingBowlChild", "b__L_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("spoon", "spoonChild", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("platePaper", "PlatePaper", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("hamburger", "FoodEatHamburger", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("ducky", "RubberDucky", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("baseball", "BaseBall", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     // (Whichever stuffed animal or toy is being played with.)
     ("stuffedAnimal", ANY, "b__R_carry_slot", [0.0; 3], [0.0; 3]),
 ];

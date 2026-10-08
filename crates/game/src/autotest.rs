@@ -253,6 +253,7 @@ impl Plugin for AutoTestPlugin {
                     // THEN_USE=<Kind>:<interaction>: once that's done, this.
                     let mut want = first.clone();
                     if *done
+                        && q.0.is_empty()
                         && let Ok(then) = std::env::var("THEN_USE")
                         && let Some(kind) = then.split(':').next()
                         && objects.iter().any(|(_, o, _, _)| format!("{:?}", o.kind).eq_ignore_ascii_case(kind))
@@ -1778,15 +1779,17 @@ fn auto_place(
     }
     let Ok(tf) = sel.single() else { return };
     *done = true;
-    let want = want.to_ascii_lowercase();
-    let Some(e) = catalog.entries.iter().filter(|e| e.price > 0 && format!("{:?}", e.kind).to_ascii_lowercase() == want).min_by_key(|e| e.price) else {
-        warn!("--place {want}: nothing in the catalog");
-        return;
-    };
-    let pos = tf.translation + tf.rotation * Vec3::new(0.0, 0.0, 2.0);
-    let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
-    crate::home::spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, e.key, pos, 0.0);
-    info!("placed {} for the test", e.name);
+    // (Several, comma-separated: side by side.)
+    for (i, want) in want.to_ascii_lowercase().split(',').enumerate() {
+        let Some(e) = catalog.entries.iter().filter(|e| e.price > 0 && format!("{:?}", e.kind).to_ascii_lowercase() == want).min_by_key(|e| e.price) else {
+            warn!("--place {want}: nothing in the catalog");
+            continue;
+        };
+        let pos = tf.translation + tf.rotation * Vec3::new(i as f32 * 2.0, 0.0, 2.0);
+        let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+        crate::home::spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, e.key, pos, 0.0);
+        info!("placed {} for the test", e.name);
+    }
 }
 
 /// `--do <interaction>`: the selected sim performs this interaction on the first object offering it.

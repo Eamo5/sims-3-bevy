@@ -130,6 +130,23 @@ pub enum ObjectKind {
     FoodReplicator,
     BodySculptor,
     MoodletManager,
+    /// A urinal (for men and boys).
+    Urinal,
+    /// A child's toy oven, to bake pretend cakes in.
+    ToyOven,
+    /// An outdoor fire pit: lit, hands warmed by it and marshmallows roasted over it.
+    FirePit,
+    /// A buffet table: a plate of food served from it.
+    Buffet,
+    /// A picnic basket: a picnic out of it.
+    PicnicBasket,
+    /// A house phone, on the wall or a table: the phone's menu.
+    Phone,
+    /// Bubble bath, and a rubber duck: baths with them, while they're about the house.
+    BubbleBath,
+    RubberDucky,
+    /// A football or a baseball: catch played with it.
+    Ball,
     Other,
 }
 
@@ -140,6 +157,26 @@ impl ObjectKind {
         let has = |k: &str| s.contains(k);
         if has("crib") {
             Self::Crib
+        } else if has("urinal") {
+            Self::Urinal
+        } else if has("toys.toyoven") {
+            Self::ToyOven
+        } else if has("firepit") && !has("+") {
+            Self::FirePit
+        } else if has("buffettable") {
+            Self::Buffet
+        } else if has("cookingobjects.picnicbasket") {
+            Self::PicnicBasket
+        } else if (has("electronics.phonetable") || has("electronics.phonewall")) && !has("handset") {
+            Self::Phone
+        } else if has("miscellaneous.bubblebath") {
+            Self::BubbleBath
+        } else if has("miscellaneous.rubberducky") {
+            Self::RubberDucky
+        } else if has("miscellaneous.recyclebin") {
+            Self::TrashCan
+        } else if has("toys.football") || has("toys.baseball") {
+            Self::Ball
         } else if has("electronics.videogamesystem") {
             Self::VideoGame
         } else if has("electronics.vrgoggles") {
@@ -288,6 +325,11 @@ impl ObjectKind {
             Self::DivingBoard => "Outdoors",
             Self::Bar => "Surfaces",
             Self::FoodReplicator | Self::BodySculptor | Self::MoodletManager | Self::Teleporter | Self::CollectionHelper => "Misc",
+            Self::Urinal | Self::BubbleBath | Self::RubberDucky => "Plumbing",
+            Self::ToyOven | Self::Ball => "Kids",
+            Self::FirePit | Self::PicnicBasket => "Outdoors",
+            Self::Buffet => "Surfaces",
+            Self::Phone => "Electronics",
             Self::HotTub => "Plumbing",
             Self::Dresser => "Surfaces",
             Self::Table => "Surfaces",
@@ -493,6 +535,20 @@ pub enum Special {
     BlowOutCandles,
     /// Write (a page at a time) the book under way.
     WriteNovel,
+    /// A bath with bubble bath, or with the rubber duck: offered while there's one about.
+    BubbleBath,
+    Ducky,
+}
+
+impl Special {
+    /// What has to be about the house for this to be offered (bubble bath for a bubble bath).
+    pub fn needs(self) -> Option<ObjectKind> {
+        match self {
+            Special::BubbleBath => Some(ObjectKind::BubbleBath),
+            Special::Ducky => Some(ObjectKind::RubberDucky),
+            _ => None,
+        }
+    }
 }
 
 pub struct InteractionDef {
@@ -628,11 +684,13 @@ static TOILET: [InteractionDef; 1] =
     [InteractionDef { until_full: Some(BLADDER), on_object: true, ..def("Use Toilet", 15.0, [0.0, 900.0, 0.0, 0.0, -10.0, 0.0], Pose::Sit) }];
 static SHOWER: [InteractionDef; 1] =
     [InteractionDef { until_full: Some(HYGIENE), ..def("Take Shower", 30.0, [0.0, 0.0, 0.0, 0.0, 400.0, 10.0], Pose::Use) }];
-static BATHTUB: [InteractionDef; 1] = [InteractionDef {
-    until_full: Some(HYGIENE),
-    on_object: true,
-    ..def("Take Bath", 50.0, [0.0, 0.0, 6.0, 0.0, 260.0, 40.0], Pose::Lie)
-}];
+static BATHTUB: [InteractionDef; 3] = [
+    InteractionDef { until_full: Some(HYGIENE), on_object: true, ..def("Take Bath", 50.0, [0.0, 0.0, 6.0, 0.0, 260.0, 40.0], Pose::Lie) },
+    // (With bubble bath in the house: a longer soak, and more fun.)
+    InteractionDef { until_full: Some(HYGIENE), on_object: true, special: Special::BubbleBath, ..def("Take Bubble Bath", 60.0, [0.0, 0.0, 10.0, 0.0, 300.0, 70.0], Pose::Lie) },
+    // (With a rubber duck in the house.)
+    InteractionDef { on_object: true, special: Special::Ducky, ..def("Play with Rubber Ducky", 30.0, [0.0, 0.0, 4.0, 0.0, 160.0, 100.0], Pose::Lie) },
+];
 static SINK: [InteractionDef; 2] = [
     def("Wash Hands", 6.0, [0.0, 0.0, 0.0, 0.0, 160.0, 0.0], Pose::Use),
     // (Where a dish cleared away is taken without a dishwasher: never on the menu.)
@@ -692,6 +750,17 @@ static CRIB: [InteractionDef; 1] = [InteractionDef {
     ..def("Nap in Crib", 180.0, [0.0, 0.0, 140.0, 0.0, 0.0, 0.0], Pose::Lie)
 }];
 static TOYBOX: [InteractionDef; 1] = [def("Play with Toys", 40.0, [0.0, 0.0, -4.0, 30.0, 0.0, 140.0], Pose::Use)];
+static URINAL: [InteractionDef; 1] = [InteractionDef { until_full: Some(BLADDER), ..def("Use Urinal", 10.0, [0.0, 1100.0, 0.0, 0.0, -10.0, 0.0], Pose::Use) }];
+static TOY_OVEN: [InteractionDef; 1] = [def("Play with Toy Oven", 40.0, [0.0, 0.0, -4.0, 6.0, 0.0, 110.0], Pose::Use)];
+/// (Lit as a fireplace is, its fire burning a few hours.)
+static FIRE_PIT: [InteractionDef; 4] = [
+    InteractionDef { special: Special::LightFire, ..def("Light Fire", 6.0, [0.0, 0.0, 0.0, 0.0, 0.0, 4.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::PutOutFire, ..def("Put Out Fire", 7.0, [0.0; 6], Pose::Use) },
+    def("Warm Hands", 20.0, [0.0, 0.0, 4.0, 0.0, 0.0, 16.0], Pose::Use),
+    def("Roast Marshmallows", 25.0, [110.0, 0.0, 0.0, 0.0, -4.0, 45.0], Pose::Use),
+];
+static BUFFET: [InteractionDef; 1] = [def("Have a Plate", 15.0, [220.0, 0.0, 0.0, 8.0, 0.0, 6.0], Pose::Use)];
+static PICNIC: [InteractionDef; 1] = [def("Have a Picnic", 30.0, [150.0, 0.0, 0.0, 10.0, 0.0, 25.0], Pose::Use)];
 static XYLOPHONE: [InteractionDef; 1] = [def("Play Xylophone", 40.0, [0.0, 0.0, -4.0, 20.0, 0.0, 130.0], Pose::Use)];
 static PEGBOX: [InteractionDef; 1] = [def("Play with Peg Box", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 120.0], Pose::Use)];
 static POTTY: [InteractionDef; 1] = [InteractionDef { until_full: Some(BLADDER), ..def("Use Potty", 10.0, [0.0, 600.0, 0.0, 0.0, -20.0, 0.0], Pose::Sit) }];
@@ -797,6 +866,22 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Harvest" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_bendover_start_x"), &["a2o_gardening_bendover_harvestmed_x"]),
         "Collect" if kind == ObjectKind::Collectible => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_harvestlow_x"]),
         "Swim" => A::new(Some("a2o_ladder_climbDown_L_x"), &["a_swim_cycle_x"]),
+        "Light Fire" if kind == ObjectKind::FirePit => A::new(None, &["a2o_firePit_light_start_x"]),
+        "Put Out Fire" if kind == ObjectKind::FirePit => A::new(None, &["a2o_firePit_putOut_x"]),
+        "Warm Hands" if kind == ObjectKind::FirePit => {
+            A::new(Some("a2o_firePit_warmHands_start_x"), &["a2o_firePit_warmHandsLoop1_x", "a2o_firePit_warmHandsLoop2_x"]).ending(&["a2o_firePit_warmHands_stop_x"], 2.4)
+        }
+        // (Roasted on the skewer, then eaten off it.)
+        "Roast Marshmallows" => A::new(Some("a2o_firePit_roast_start_x"), &["a2o_firePit_roast_loop1_x", "a2o_firePit_roast_loop2_x"])
+            .ending(&["a2o_firePit_roast_stop_x", "a2o_firePit_roast_eat_start_x", "a2o_firePit_roast_eat_loop_x", "a2o_firePit_roast_eat_stop_x"], 9.4),
+        "Use Urinal" => A::new(None, &["a2o_urinal_useStanding_whistle_loop_x", "a2o_urinal_useStanding_fart_loop_x"]).ending(&["a2o_urinal_flush_x"], 2.0),
+        "Play with Toy Oven" => A::new(Some("c2o_easyBakeOven_prep_start_x"), &["c2o_easyBakeOven_prep_loop_x"]).ending(&["c2o_easyBakeOven_prep_stopFinished_x"], 1.5),
+        // (Served from the table, eaten standing.)
+        "Have a Plate" => A::steps("a2o_buffetTable_serve_x", &[], &["a2o_eat_stand_fork_neat_x"]),
+        "Have a Picnic" => A::steps("a2o_picnicBasket_getPlate_part1_x", &["a2o_picnicBasket_eat_start_x"], &["a2o_picnicBasket_eat_x"]).ending(&["a2o_picnicBasket_eat_stop_finished_x"], 0.7),
+        "Take Bubble Bath" => A::new(None, &["a2o_bathtub_relax_loop"]),
+        "Play with Rubber Ducky" => A::new(Some("a2o_bathtub_ducky_start_x"), &["a2o_bathtub_ducky_loop1_x", "a2o_bathtub_ducky_loop2_x", "a2o_bathtub_ducky_loop3_x"])
+            .ending(&["a2o_bathtub_ducky_stop_x"], 2.3),
         "Light Fire" => A::new(None, &["a2o_fireplace_light_start_x"]),
         "Light Candle" | "Blow Out" => A::new(None, &["a2o_object_genericSwipe_x"]),
         "Put Out Fire" => A::new(None, &["a2o_fireplace_putOut_x"]),
@@ -956,6 +1041,8 @@ pub fn social_clips(name: &str, little: Option<Age>) -> &'static [&'static str] 
         "Read to" => &["a2p_book_readWith_loop"],
         "Teach to Walk" => &["a2p_teachToWalk_loopBreathe", "a2p_teachToWalk_firstSteps"],
         "Tell Funny Story" => &["a2a_soc_Neutral_TellFunnyStory_Funny_Friendly"],
+        // (The one throws, the other catches: soft, hard, wimpy and showing off.)
+        "Play Catch" => &["a2a_soc_playCatch_throwSoft", "a2a_soc_playCatch_throwHard", "a2a_soc_playCatch_throwWimpy", "a2a_soc_playCatch_throwHighSkill"],
         "Tell Dramatic Story" => &["a2a_soc_Neutral_TellDramaticStory_Impressive_Neutral"],
         "Brag" => &["a2a_soc_Neutral_BoastAbout_Impressive_Friendly"],
         "Goof Around" => &["a2a_soc_Neutral_GoofAround_Funny_Neutral"],
@@ -1005,10 +1092,15 @@ impl ObjectKind {
         match age {
             Age::Baby => false,
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy),
-            // (Children can't cook, and the goggles are for teens and up.)
-            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::VrGoggles),
-            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::DollHouse | K::JungleGym | K::StuffedToy),
+            // (Children can't cook or light fires, and the goggles are for teens and up.)
+            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles),
+            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::DollHouse | K::JungleGym | K::StuffedToy | K::ToyOven),
         }
+    }
+
+    /// Whether this Sim can use it: as their age allows, and urinals are for men and boys.
+    pub fn suits(self, sim: &crate::sim::Sim) -> bool {
+        self.usable_by(sim.age) && !(self == Self::Urinal && sim.female)
     }
 }
 
@@ -1075,6 +1167,11 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::BodySculptor => &BODY_SCULPTOR,
         ObjectKind::MoodletManager => &MOODLET_MANAGER,
         ObjectKind::Table => &COUNTER,
+        ObjectKind::Urinal => &URINAL,
+        ObjectKind::ToyOven => &TOY_OVEN,
+        ObjectKind::FirePit => &FIRE_PIT,
+        ObjectKind::Buffet => &BUFFET,
+        ObjectKind::PicnicBasket => &PICNIC,
         _ => &[],
     }
 }
@@ -1594,10 +1691,10 @@ fn run_actions(
                             }
                             Err(_) => None,
                         },
-                        ActionKind::Social { target, .. } => positions.get(target).map(|(p, l)| {
+                        ActionKind::Social { target, social } => positions.get(target).map(|(p, l)| {
                             let mine = Vec2::new(tf.translation.x, tf.translation.z);
                             let theirs = Vec2::new(p.x, p.z);
-                            (theirs + (mine - theirs).normalize_or(Vec2::X) * 0.9, *l)
+                            (theirs + (mine - theirs).normalize_or(Vec2::X) * crate::social::apart(&SOCIALS[*social]), *l)
                         }),
                         ActionKind::GoHere(p, l) => Some((*p, *l)),
                         // (Kneeling beside the spot.)
@@ -1784,7 +1881,17 @@ fn run_actions(
                                             tf.translation = Vec3::new(p.x, otf.translation.y, p.z);
                                             tf.rotation = otf.rotation * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
                                         }
+                                        if obj.kind == ObjectKind::Bathtub {
+                                            // The bath's clips are played from the tub's side, the
+                                            // Sim's hips a metre to the left of their root and
+                                            // 0.77 m behind it, back to the taps: rooted there so
+                                            // they sit in the tub.
+                                            let hips = Vec2::new(obj.center.x, obj.center.y - obj.half.y + 0.5);
+                                            let p = otf.transform_point(Vec3::new(hips.x + 1.0, 0.0, hips.y + 0.77));
+                                            tf.translation = Vec3::new(p.x, otf.translation.y, p.z);
+                                        }
                                         anim.seat_height = obj.seat_height();
+                                        debug!("{} on the {}: centre {:?} half {:?}, object at {:?} turned {:?}", d.name, obj.name, obj.center, obj.half, otf.translation, otf.rotation.to_euler(EulerRot::YXZ).0);
                                     } else {
                                         tf.rotation = face;
                                         anim.seat_height = 0.0;
@@ -2242,7 +2349,7 @@ fn run_actions(
                                         Special::Microwave => {
                                             commands.entity(me).insert(crate::meals::MicrowaveDone(*target));
                                         }
-                                        Special::None => {}
+                                        Special::None | Special::BubbleBath | Special::Ducky => {}
                                     }
                                 }
                             } else {
@@ -2251,7 +2358,7 @@ fn run_actions(
                         }
                         ActionKind::Social { target, social } => {
                             let s = &SOCIALS[*social];
-                            let close = positions.get(target).is_some_and(|p| p.0.distance(tf.translation) < 2.5);
+                            let close = positions.get(target).is_some_and(|p| p.0.distance(tf.translation) < crate::social::apart(s) + 1.6);
                             if !close {
                                 action.phase = Phase::Start;
                             } else {
@@ -2826,7 +2933,7 @@ fn autonomy(
             if used.0.is_some_and(|u| u != me) || obj_lot.map(|l| l.0) != my_lot {
                 continue;
             }
-            if !obj.kind.usable_by(sim.age) {
+            if !obj.kind.suits(sim) {
                 continue;
             }
             // Visitors to the family's home don't sleep in its beds or bathe there.
@@ -2857,7 +2964,11 @@ fn autonomy(
                 }
                 // Guests don't cook or do the chores.
                 // A fireplace is lit when cold, and warmed by when lit.
-                if matches!(obj.kind, ObjectKind::Fireplace | ObjectKind::Candle) && (d.special == Special::LightFire) == lit_q.contains(oe) {
+                if matches!(obj.kind, ObjectKind::Fireplace | ObjectKind::FirePit | ObjectKind::Candle) && (d.special == Special::LightFire) == lit_q.contains(oe) {
+                    continue;
+                }
+                // (A bubble bath with bubble bath in the house.)
+                if d.special.needs().is_some_and(|k| !objects.iter().any(|(_, o, ..)| o.kind == k)) {
                     continue;
                 }
                 // Homework is for those who have some.
@@ -3167,7 +3278,10 @@ mod tests {
         let mut by_class: std::collections::BTreeMap<String, Vec<String>> = Default::default();
         for c in catalog.iter().filter(|c| c.price > 0 && c.objd.1 == 0) {
             let kind = ObjectKind::from_script(&c.script, &c.instance_name);
-            if interactions_for(kind).is_empty() && !c.script.contains("Decorations") && !c.script.contains("Lighting") {
+            // (A ball, bubble bath, the rubber duck and a house phone are used through something
+            // else: catch, the bath, the phone's menu.)
+            let elsewhere = matches!(kind, ObjectKind::Ball | ObjectKind::BubbleBath | ObjectKind::RubberDucky | ObjectKind::Phone);
+            if interactions_for(kind).is_empty() && !elsewhere && !c.script.contains("Decorations") && !c.script.contains("Lighting") {
                 by_class.entry(c.script.rsplit('.').take(2).collect::<Vec<_>>().join(" < ")).or_default().push(c.instance_name.clone());
             }
         }

@@ -429,6 +429,16 @@ installation is unreachable.
   group meal; a hot-beverage maker brews a cup for energy (and a trip to the bathroom
   later); a set alarm clock wakes the household's workers an hour before their shift and
   the schoolchildren an hour before the bus, and stays set in saves.
+- **Fire pits, picnics, toys and the rest of the catalogue**: a fire pit is lit with the
+  lighter (flames in its bowl, a glow on the ground about it), hands are warmed by it and
+  marshmallows roasted on the skewer and eaten off it, and it's put out with the poker; a
+  picnic basket gives a picnic on the ground off paper plates; a buffet table serves a plate
+  of food; children bake pretend cakes in the toy oven, bowl and spoon in hand; men and boys
+  use the urinal (whistling); recycling bins take the trash; a bath can be a bubble bath
+  (with bubble bath in the house) or a play with the rubber duck (with one about); a
+  football or baseball about lets two Sims *Play Catch* a few metres apart, throwing it soft,
+  hard, wimpy or showing off; and a house phone on the wall or a table opens the phone's
+  menu. All with the game's own animations and props.
 - **Dirty surroundings**: dirty dishes left about, food left out until it spoils (eight
   hours) and a full trash can give nearby household Sims the game's *Dirty Surroundings*,
   then *Filthy Surroundings*, moodlets. A dish cleared away (picked up with the game's

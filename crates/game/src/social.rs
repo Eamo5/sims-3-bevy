@@ -184,6 +184,8 @@ impl SocialCat {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SocialEffect {
     None,
+    /// Throwing a ball back and forth, a few metres apart (with a ball about).
+    PlayCatch,
     Kiss,
     GoSteady,
     Propose,
@@ -250,7 +252,7 @@ const fn sd(name: &'static str, cat: SocialCat, minutes: f32, social: f32, fun: 
 }
 
 use SocialCat::*;
-pub static SOCIALS: [SocialDef; 53] = [
+pub static SOCIALS: [SocialDef; 54] = [
     SocialDef { autonomous: true, ..sd("Chat", Friendly, 25.0, 110.0, 10.0, 8.0, 0.0) },
     SocialDef { effect: SocialEffect::Greet, ..sd("Greet", Friendly, 3.0, 80.0, 5.0, 4.0, 0.0) },
     SocialDef { effect: SocialEffect::HelpHomework, ..sd("Help with Homework", Friendly, 40.0, 60.0, -10.0, 5.0, 0.0) },
@@ -306,7 +308,14 @@ pub static SOCIALS: [SocialDef; 53] = [
     SocialDef { effect: SocialEffect::BackRub, min_friendship: 30.0, ..sd("Give Back Rub", Romantic, 12.0, 120.0, 40.0, 6.0, 6.0) },
     SocialDef { min_romance: 50.0, ..sd("Leap Into Arms", Romantic, 5.0, 140.0, 40.0, 4.0, 10.0) },
     SocialDef { effect: SocialEffect::Kiss, min_romance: 60.0, ..sd("Dip Kiss", Romantic, 6.0, 150.0, 30.0, 4.0, 12.0) },
+    SocialDef { effect: SocialEffect::PlayCatch, ..sd("Play Catch", Funny, 30.0, 60.0, 120.0, 6.0, 0.0) },
 ];
+
+/// How far apart the two Sims stand for a social: a few metres to play catch, else close
+/// enough to talk.
+pub fn apart(def: &SocialDef) -> f32 {
+    if def.effect == SocialEffect::PlayCatch { 3.6 } else { 0.9 }
+}
 
 pub fn social_index(name: &str) -> Option<usize> {
     SOCIALS.iter().position(|s| s.name == name)

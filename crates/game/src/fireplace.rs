@@ -85,10 +85,14 @@ fn requests(
                 // The hearth: the fireplace's effect slot, else low down in the middle of the
                 // firebox, a little in from the front. (A candle's wick: its slot, else its top.)
                 let candle = o.kind == crate::interact::ObjectKind::Candle;
+                // (A fire pit's fire in its bowl.)
+                let pit = o.kind == crate::interact::ObjectKind::FirePit;
                 let slot = ui.as_ref().and_then(|ui| ui.data.fx_slots.iter().find(|(k, _)| *k == o.objd)).and_then(|(_, s)| s.first().copied());
                 let at = match (candle, slot) {
                     (true, Some(s)) => Vec3::from(s),
                     (true, None) => Vec3::new(o.center.x, o.height + 0.02, o.center.y),
+                    // (Its effect slot can be down at its foot, under the logs: up on them then.)
+                    (false, s) if pit => s.map(Vec3::from).filter(|s| s.y > 0.15).unwrap_or(Vec3::new(o.center.x, o.height * 0.55, o.center.y)),
                     (false, s) => s.map_or(Vec3::new(o.center.x, 0.08, o.center.y + o.half.y * 0.15), |s| Vec3::from(s) - Vec3::Y * 0.12),
                 };
                 let mut rng = rand::rng();
@@ -120,7 +124,7 @@ fn requests(
                         }
                         f.spawn((
                             PointLight { color: Color::srgb(1.0, 0.58, 0.25), intensity: 30_000.0, range: 7.0, shadow_maps_enabled: false, ..default() },
-                            Transform::from_xyz(0.0, 0.4, 0.35),
+                            Transform::from_xyz(0.0, 0.4, if pit { 0.0 } else { 0.35 }),
                             HearthLight,
                         ));
                     })

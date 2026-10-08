@@ -787,6 +787,20 @@ fn main() {
         }
         return;
     }
+    if args[1] == "clipdur" {
+        // clipdur <root> <filter>: the length of each clip whose name has the filter in it.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let f = args[3].to_ascii_lowercase();
+        for k in set.keys_of_type(types::CLIP).copied().collect::<Vec<_>>() {
+            let Some(d) = set.read(&k) else { continue };
+            let Some(name) = s3formats::sim::clip_name(&d).filter(|n| n.to_ascii_lowercase().contains(&f)) else { continue };
+            match s3formats::sim::Clip::parse(&d) {
+                Ok(c) => println!("{name} {:.2}s", c.duration),
+                Err(_) => println!("{name} unparsed"),
+            }
+        }
+        return;
+    }
     if args[1] == "clipspeed" {
         // clipspeed <root> <rig name> <clip name>...: an in-place locomotion cycle's ground speed,
         // from its feet: how fast each moves backwards while planted (at its lowest).

@@ -842,6 +842,8 @@ fn world_click(
                         crate::social::SocialEffect::TeachTalk => !toddler_q.get(t).is_ok_and(|k| k.talks()),
                         crate::social::SocialEffect::HelpHomework => hw_q.contains(t),
                         crate::social::SocialEffect::Greet => door_q.get(t).is_ok_and(|d| d.since.is_some()) && members_q.contains(actor),
+                        // (Catch with a ball about.)
+                        crate::social::SocialEffect::PlayCatch => objects.iter().any(|o| o.kind == ObjectKind::Ball),
                         _ => true,
                     })
                     .map(|(i, s)| (s.name.to_string(), ActionKind::Social { target: t, social: i }))
@@ -870,7 +872,12 @@ fn world_click(
                 open_pie(&mut commands, &mut pie, cursor, &format!("{} (broken)", obj.name), actor, options);
                 return;
             }
-            let usable = if obj.kind.usable_by(actor_sim.age) { interactions_for(obj.kind) } else { &[] };
+            // A house phone: the phone's menu.
+            if obj.kind == ObjectKind::Phone {
+                commands.insert_resource(OpenPhone);
+                return;
+            }
+            let usable = if obj.kind.suits(actor_sim) { interactions_for(obj.kind) } else { &[] };
             let plant = opp_q.3.get(t).ok();
             pie.submenus.clear();
             for (i, d) in usable.iter().enumerate() {
@@ -878,7 +885,11 @@ fn world_click(
                     continue;
                 }
                 // A fireplace offers lighting when cold, the rest when lit.
-                if matches!(obj.kind, ObjectKind::Fireplace | ObjectKind::Candle) && (d.special == Special::LightFire) == lit_q.contains(t) {
+                if matches!(obj.kind, ObjectKind::Fireplace | ObjectKind::FirePit | ObjectKind::Candle) && (d.special == Special::LightFire) == lit_q.contains(t) {
+                    continue;
+                }
+                // (A bubble bath with bubble bath in the house, a play with the duck with one.)
+                if d.special.needs().is_some_and(|k| !objects.iter().any(|o| o.kind == k)) {
                     continue;
                 }
                 if d.special == Special::Homework && !hw_q.contains(actor) {
@@ -1805,9 +1816,14 @@ fn update_trait_icons(
 
 /// The phone: call people the selected Sim knows and invite them over.
 #[allow(clippy::type_complexity)]
+/// The phone's menu asked for from a house phone (clicked in the world).
+#[derive(Resource)]
+pub struct OpenPhone;
+
 fn phone_button(
     mut commands: Commands,
     buttons: Query<&Interaction, (Changed<Interaction>, With<PhoneButton>)>,
+    asked: Option<Res<OpenPhone>>,
     selected: Query<(Entity, &Relationships, &Sim, Has<crate::careers::Job>), With<Selected>>,
     away: Query<(Entity, &Sim), (With<crate::interact::OffLot>, Without<crate::interact::Invited>)>,
     windows: Query<&Window, With<PrimaryWindow>>,
@@ -1816,7 +1832,9 @@ fn phone_button(
     objects: Query<&GameObject>,
     maid: Res<crate::services::MaidService>,
 ) {
-    if !buttons.iter().any(|i| *i == Interaction::Pressed) {
+    if asked.is_some() {
+        commands.remove_resource::<OpenPhone>();
+    } else if !buttons.iter().any(|i| *i == Interaction::Pressed) {
         return;
     }
     let Ok((actor, rels, me, has_job)) = selected.single() else { return };
