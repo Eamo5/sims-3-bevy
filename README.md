@@ -589,9 +589,14 @@ installation is unreachable.
   top of whatever they're doing), and sleep with their eyes shut.
 - **Looking at each other**: in conversation a Sim's head turns towards the other's face on
   top of their animation, within a natural reach, easing round.
-- **Pie menus** in the game's style: pale bubbles with dark writing, blue under the pointer,
-  in a ring round the acting Sim's portrait (what was clicked named beneath it), with
-  submenus (›) for long lists.
+- **Pie menus** in the game's own bubbles (its `HUDPieMenu` layout): the first option at the
+  top and the rest round clockwise, each in the bubble whose place is nearest (its tail or
+  groove towards the middle) widened to its words, lit under the pointer with the game's own
+  pictures and colours; the acting Sim's face in the middle (what was clicked named beneath
+  it), with submenus (›) for long lists. The interaction queue at the top left and the
+  notices at the top right are the game's own too: each queued action in its frame with the
+  object's picture or the other Sim's face, the running one's progress bar, a cross to cancel;
+  each notice a speech card with the Sim's face or a system card, closed with its cross.
 - **The game's own HUD**: the live-mode interface is the game's, drawn from its own layouts
   (`UI.package`'s window trees, pictures and fonts: every caption in its Helvetica Rounded),
   and driven as its own interface code drives it: the puck at the bottom left (live, buy and
