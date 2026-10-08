@@ -1926,6 +1926,13 @@ fn phone_button(
             .collect();
         options.push(("Adopt a Child ›".to_string(), submenu_kind(pie.submenus.len())));
         pie.submenus.push(("Adopt".to_string(), list));
+        // (And a pet, from the Pets pack's adoption: each kind for its fee.)
+        let pets: Vec<(String, ActionKind)> = ["ac", "cc", "ad", "cd", "al", "ah", "ch"]
+            .into_iter()
+            .map(|k| (format!("{} (§{})", crate::pets::kind_name(k), crate::pets::adoption_fee(k)), ActionKind::AdoptPet { kind: k }))
+            .collect();
+        options.push(("Adopt a Pet ›".to_string(), submenu_kind(pie.submenus.len())));
+        pie.submenus.push(("Adopt a Pet".to_string(), pets));
         options.push(("Move to a New Home".to_string(), ActionKind::MoveHouse));
     }
     // An elder with a job can retire, on a pension.

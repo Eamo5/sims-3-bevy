@@ -1985,6 +1985,15 @@ fn auto_action(
         *done = true;
         return;
     }
+    // "AdoptPet:<kind>": the selected Sim phones to adopt a pet (`ac`, `ad`, `ah`...).
+    if let Some(k) = name.strip_prefix("AdoptPet:") {
+        let kind: &'static str = ["ac", "cc", "ad", "cd", "al", "ah", "ch"].into_iter().find(|x| *x == k).unwrap_or("ac");
+        if let Ok(mut q) = sel.single_mut() {
+            *done = true;
+            q.push_player(crate::interact::Action::new("Adopt a Pet", crate::interact::ActionKind::AdoptPet { kind }, false));
+        }
+        return;
+    }
     // "Adopt:<0|1|2>": the selected Sim phones to adopt a baby, toddler or child (a girl).
     if let Some(a) = name.strip_prefix("Adopt:").and_then(|a| a.parse::<u8>().ok()) {
         if let Ok(mut q) = sel.single_mut() {

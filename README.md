@@ -355,6 +355,8 @@ installation is unreachable.
   praise it, hug it, feed it a treat, scold it; rub a horse's neck): the Sim walks up to it,
   the pet stops and turns to them, and the two play their sides of the game's animation
   together (kneeling to stroke a cat, which looks up at them), for the Sim's fun and social.
+  Grown-ups can adopt a pet by phone (a cat, kitten, dog, puppy, little dog, horse or foal, for
+  its fee): one of the game's breeds of its kind comes home with a name of its own.
 - **Water effects**: fountains gush and fill their basins, showers spray from the head and taps
   run while someone's at them, each from the object's own effect slot (the game's RSLT slots).
   TVs show a programme on the screen (at the TV's screen slot) while anyone's watching, its

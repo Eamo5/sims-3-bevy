@@ -1261,6 +1261,8 @@ pub enum ActionKind {
     PlantSeed { at: Vec2, level: u8, plant: usize },
     /// Something done out on the ground (Seasons: a snowman, a snow angel, catching snowflakes).
     Outdoor { at: Vec2, level: u8, what: crate::seasonal::Outdoor },
+    /// A pet adopted by phone (its kind: `ac` a cat, `cd` a puppy, `ah` a horse...).
+    AdoptPet { kind: &'static str },
     /// A social with a pet (`pets::PET_SOCIALS`): where the pet was, its kind.
     PetSocial { target: Entity, social: usize, at: Vec2, kind: &'static str },
     /// Phone round to throw a party.
@@ -1749,6 +1751,7 @@ fn run_actions(
                         | ActionKind::Retire
                         | ActionKind::OrderPizza
                         | ActionKind::Adopt { .. }
+                        | ActionKind::AdoptPet { .. }
                         | ActionKind::MoveHouse
                         | ActionKind::CallRepairman
                         | ActionKind::HireMaid(_)
@@ -2020,6 +2023,7 @@ fn run_actions(
                             | ActionKind::Outro { .. }
                             | ActionKind::OrderPizza
                             | ActionKind::Adopt { .. }
+                            | ActionKind::AdoptPet { .. }
                             | ActionKind::MoveHouse
                             | ActionKind::CallRepairman
                             | ActionKind::HireMaid(_)
@@ -2731,6 +2735,21 @@ fn run_actions(
                                     sim.first,
                                     crate::services::adoptee(age, *female)
                                 ));
+                            }
+                        }
+                        ActionKind::AdoptPet { kind } => {
+                            if elapsed >= 5.0 {
+                                finished = true;
+                                let fee = crate::pets::adoption_fee(kind);
+                                match household.as_deref_mut() {
+                                    Some(h) if h.funds >= fee => {
+                                        h.funds -= fee;
+                                        let name = crate::pets::random_pet_name(&mut rand::rng());
+                                        commands.insert_resource(crate::pets::AdoptPetOrder { kind, name: name.clone() });
+                                        notes.push(format!("{} adopted {name}, a {} (§{fee}), who's on the way home.", sim.first, crate::pets::kind_name(kind).to_lowercase()));
+                                    }
+                                    _ => notes.push(format!("There isn't enough money to adopt (§{fee}).")),
+                                }
                             }
                         }
                         ActionKind::OrderPizza => {

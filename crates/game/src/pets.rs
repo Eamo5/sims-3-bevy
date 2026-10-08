@@ -29,7 +29,7 @@ impl Plugin for PetsPlugin {
                 Update,
                 (load_pet_data, spawn_strays, spawn_household_pets, social_partners, strays, home_pets, animate_pets).chain().run_if(in_state(PlayMode::Live)),
             )
-            .add_systems(Update, (pet_cam, pet_do).run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (pet_cam, pet_do, adopted_pets).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -388,6 +388,60 @@ pub struct SavedPet {
 /// Pets to put on the home lot once it's ready (a premade household's, or a save's).
 #[derive(Resource, Default)]
 pub struct PendingPets(pub Vec<SavedPet>);
+
+/// A pet adopted by phone, to come home.
+#[derive(Resource, Clone)]
+pub struct AdoptPetOrder {
+    pub kind: &'static str,
+    pub name: String,
+}
+
+/// What a kind of pet is called.
+pub fn kind_name(kind: &str) -> &'static str {
+    match kind {
+        "ac" => "Cat",
+        "cc" => "Kitten",
+        "ad" => "Dog",
+        "cd" => "Puppy",
+        "al" => "Little Dog",
+        "cl" => "Little Puppy",
+        "ah" => "Horse",
+        "ch" => "Foal",
+        _ => "Pet",
+    }
+}
+
+/// What adopting one costs (horses dear).
+pub fn adoption_fee(kind: &str) -> i64 {
+    match kind {
+        "ah" => 2500,
+        "ch" => 1500,
+        "ad" | "al" => 400,
+        "cd" | "cl" => 350,
+        _ => 300,
+    }
+}
+
+/// A name for a new pet.
+pub fn random_pet_name(rng: &mut impl Rng) -> String {
+    const NAMES: [&str; 40] = [
+        "Biscuit", "Whiskers", "Patches", "Pepper", "Mittens", "Shadow", "Buttons", "Ginger", "Pumpkin", "Oreo", "Socks", "Muffin", "Cocoa", "Pickles",
+        "Noodle", "Sprinkles", "Maple", "Bramble", "Tinker", "Juniper", "Clover", "Domino", "Waffles", "Rusty", "Scout", "Duke", "Daisy", "Bandit", "Pippin",
+        "Thistle", "Comet", "Hazel", "Midnight", "Sunny", "Bubbles", "Chester", "Rosie", "Barley", "Captain", "Truffle",
+    ];
+    NAMES.choose(rng).copied().unwrap_or("Biscuit").to_string()
+}
+
+/// A pet adopted by phone comes home: one of the game's breeds of its kind, by the lot's front.
+fn adopted_pets(mut commands: Commands, order: Option<Res<AdoptPetOrder>>, pets: Res<PetData>, mut pending: ResMut<PendingPets>) {
+    let (Some(o), Some(data)) = (order, pets.0.as_ref()) else { return };
+    commands.remove_resource::<AdoptPetOrder>();
+    let mut rng = rand::rng();
+    let wears = if o.kind == "cl" { "cd" } else { o.kind };
+    let breeds: Vec<&s3bake::pets::PetBreed> = data.breeds.iter().filter(|b| b.kind == wears).collect();
+    let Some(b) = breeds.choose(&mut rng) else { return };
+    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None });
+}
 
 /// The kind of pet a premade one is: its species and whether it's young.
 fn kind_of(species: u32, age: u32) -> Option<&'static str> {
