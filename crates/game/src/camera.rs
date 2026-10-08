@@ -106,6 +106,7 @@ fn camera_control(
     world: Res<CurrentWorld>,
     mut q: Query<(&mut SimsCamera, &mut Transform)>,
     over_ui: Option<Res<crate::hud::PointerOverUi>>,
+    buy: Res<crate::buy::BuyMode>,
 ) {
     let Ok((mut cam, mut tf)) = q.single_mut() else { return };
     let dt = time.delta_secs();
@@ -133,7 +134,7 @@ fn camera_control(
     if keys.pressed(KeyCode::KeyQ) {
         cam.yaw += dt * 1.6;
     }
-    if keys.pressed(KeyCode::KeyE) {
+    if keys.pressed(KeyCode::KeyE) && !buy.active {
         cam.yaw -= dt * 1.6;
     }
     if keys.pressed(KeyCode::KeyT) {

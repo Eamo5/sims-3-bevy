@@ -485,6 +485,17 @@ pub(crate) fn toggle_buy(
         let on = !buy.active;
         set_active(&mut buy, on, &mut commands, &mut clock);
     }
+    if buy.active {
+        if keys.just_pressed(KeyCode::KeyH) {
+            buy.drop_tools(&mut commands);
+        } else if keys.just_pressed(KeyCode::KeyE) {
+            buy.drop_tools(&mut commands);
+            buy.eyedropper = true;
+        } else if keys.just_pressed(KeyCode::KeyK) {
+            buy.drop_tools(&mut commands);
+            buy.selling = true;
+        }
+    }
     if buy.active && (keys.just_pressed(KeyCode::Escape) || mouse.just_pressed(MouseButton::Right)) {
         let holding = buy.placing.is_some() || buy.painting.is_some() || buy.tool.is_some() || buy.eyedropper || buy.selling;
         if holding {
@@ -529,6 +540,11 @@ pub fn enter_mode(buy: &mut BuyMode, mode: Option<bool>, commands: &mut Commands
             }
         }
         Some(build) => {
+            // Selecting the current mode is idempotent: keep its tool, category and
+            // furniture in hand, just as clicking the already-selected puck button does.
+            if buy.active && (buy.category >= WALLPAPER_TAB) == build {
+                return;
+            }
             if !buy.active {
                 set_active(buy, true, commands, clock);
             }
@@ -1761,6 +1777,41 @@ fn footprint_supported(corners: &[Vec2; 4], has_floor: impl Fn(Vec2) -> bool) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selecting_current_mode_keeps_tools_and_category() {
+        let mut app = controls();
+        key(&mut app, KeyCode::F2);
+        app.world_mut().resource_mut::<BuyMode>().category = 4;
+        key(&mut app, KeyCode::KeyK);
+        key(&mut app, KeyCode::F2);
+        let buy = app.world().resource::<BuyMode>();
+        assert!(buy.selling);
+        assert_eq!(buy.category, 4);
+        key(&mut app, KeyCode::F3);
+        assert!(!app.world().resource::<BuyMode>().selling);
+        app.world_mut().resource_mut::<BuyMode>().category = FLOORS_TAB;
+        key(&mut app, KeyCode::F3);
+        assert_eq!(app.world().resource::<BuyMode>().category, FLOORS_TAB);
+    }
+
+    #[test]
+    fn tool_shortcuts_are_exclusive_and_only_work_while_shopping() {
+        let mut app = controls();
+        key(&mut app, KeyCode::KeyE);
+        assert!(!app.world().resource::<BuyMode>().eyedropper);
+        key(&mut app, KeyCode::F2);
+        key(&mut app, KeyCode::KeyE);
+        assert!(app.world().resource::<BuyMode>().eyedropper);
+        key(&mut app, KeyCode::KeyK);
+        let buy = app.world().resource::<BuyMode>();
+        assert!(buy.selling);
+        assert!(!buy.eyedropper);
+        key(&mut app, KeyCode::KeyH);
+        let buy = app.world().resource::<BuyMode>();
+        assert!(!buy.selling && !buy.eyedropper);
+        assert!(buy.active);
+    }
 
     #[test]
     fn furniture_cannot_bridge_an_interior_floor_hole() {

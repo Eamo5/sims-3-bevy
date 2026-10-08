@@ -676,6 +676,7 @@ gameplay; and systematic side-by-side visual and interaction checks against the 
 | 1 / 2 / 3 | Game speed |
 | F1 / F2 / F3 | Select Live / Buy / Build mode |
 | B | Toggle Buy mode (, and . rotate, Delete sells; Esc cancels the tool, then leaves) |
+| H / E / K in Buy or Build | Hand / eyedropper / sledgehammer |
 | R | Relationships panel |
 | O | Opportunities panel |
 | Esc | Game menu: pause, options, save, quit |
