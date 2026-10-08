@@ -28,7 +28,7 @@ pub(crate) struct CatalogueControls;
 impl Plugin for BuyHudPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(PlayMode::Live), spawn_buy_hud.after(crate::buy::reset_buy_mode))
-            .add_systems(Update, (show, catalogue_controls.in_set(CatalogueControls), tools, fill_catalogue, preview_panel).chain().after(crate::hud::pointer_over_ui).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<BuyHud>));
+            .add_systems(Update, (show, catalogue_controls.in_set(CatalogueControls), tools, fill_catalogue, preview_panel).chain().after(crate::hud::pointer_over_ui).before(crate::buyhistory::update).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<BuyHud>));
     }
 }
 
@@ -213,7 +213,12 @@ fn spawn_buy_hud(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut imag
             commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
         }
     }
-    // (No store, collections, filters, undo, blueprints or lot value here; the panels for
+    for (id, tip) in [(UNDO, "Undo (Ctrl+Z)"), (REDO, "Redo (Ctrl+Y)")] {
+        if let Some(e) = s.id(id) {
+            commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
+        }
+    }
+    // (No store, collections, filters, blueprints or lot value here; the panels for
     // things other than the catalogue stay away.)
     for id in SHOP_MODE.into_iter().chain([HOUSE_COST, PREVIEW_SCENE, PREVIEW_MOODLET, PREVIEW_BUFF]).chain(PREVIEW_BUTTONS) {
         if let Some(e) = s.id(id) {
@@ -294,6 +299,10 @@ fn catalogue_controls(
     let Some(ui) = ui else { return };
     let cat = &ui.baked().buy;
     let h = &mut *hud;
+    if buy.styling() && h.expanded {
+        h.expanded = false;
+        h.dirty = true;
+    }
     if let Some(bar) = h.grids[h.by_room as usize].id(SCROLLBAR).and_then(|e| scrollbars.get(e).ok())
         && h.scroll != bar.value
     {
@@ -349,7 +358,7 @@ fn catalogue_controls(
         }
     }
     let k = h.by_room as usize;
-    if pressed(&clicks, h.grids[k].id(EXPAND)) && h.grids[k].id(EXPAND).and_then(|e| buttons.get(e).ok()).is_some_and(|b| !b.disabled) {
+    if !buy.styling() && pressed(&clicks, h.grids[k].id(EXPAND)) && h.grids[k].id(EXPAND).and_then(|e| buttons.get(e).ok()).is_some_and(|b| !b.disabled) {
         h.expanded = !h.expanded;
         h.scroll = 0;
         h.dirty = true;
@@ -383,11 +392,18 @@ fn listed<'a>(catalog: &'a Catalog, flags: &HashMap<Key, ObjBuy>, keep: impl Fn(
 
 /// The tools: hand, sledgehammer (sells what's clicked), eyedropper and design tool (`buy`'s), lit
 /// for the one in hand; those without a use here greyed.
-fn tools(hud: Res<BuyHud>, mut commands: Commands, mut buy: ResMut<BuyMode>, clock: Res<crate::clock::GameClock>, clicks: Query<(Entity, &Interaction), Changed<Interaction>>, mut buttons: Query<&mut UiButton>) {
+fn tools(hud: Res<BuyHud>, mut commands: Commands, mut buy: ResMut<BuyMode>, clock: Res<crate::clock::GameClock>, clicks: Query<(Entity, &Interaction), Changed<Interaction>>, mut buttons: Query<&mut UiButton>, mut history: ResMut<crate::buyhistory::BuyHistory>) {
     if !showing(&buy) {
         return;
     }
     let s = &hud.s;
+    let holding_owned = buy.placing.as_ref().is_some_and(|p| p.owned);
+    if !holding_owned && pressed(&clicks, s.id(UNDO)) && history.can_undo() {
+        history.request = Some(crate::buyhistory::Request::Undo);
+    }
+    if !holding_owned && pressed(&clicks, s.id(REDO)) && history.can_redo() {
+        history.request = Some(crate::buyhistory::Request::Redo);
+    }
     if pressed(&clicks, s.id(TOOL_HAND)) {
         buy.drop_tools(&mut commands);
     }
@@ -407,9 +423,9 @@ fn tools(hud: Res<BuyHud>, mut commands: Commands, mut buy: ResMut<BuyMode>, clo
         (TOOL_HAND, !buy.selling && !buy.eyedropper && !styling, false),
         (TOOL_SELL, buy.selling, false),
         (TOOL_CLONE, buy.eyedropper, false),
-        (TOOL_DESIGN, styling, buy.placing.is_none()),
-        (UNDO, false, true),
-        (REDO, false, true),
+        (TOOL_DESIGN, styling, false),
+        (UNDO, false, holding_owned || !history.can_undo()),
+        (REDO, false, holding_owned || !history.can_redo()),
         (DAY_NIGHT, !(6.0..20.0).contains(&buy.lighting_hour(clock.hour_f())), false),
         (INDOOR_GRID, !buy.hide_grid, false),
         (BLUEPRINT, false, true),
@@ -792,7 +808,9 @@ fn preview_panel(
     // (Away while the pointer's out in the world putting it down, back when it's over the
     // panels again, as the game's.)
     let panel = h.s.id(PREVIEW);
-    set_visible(&mut vis, panel, what.is_some() && over_ui.0);
+    // Create a Style owns its preset row; the catalogue preview must not cover its controls.
+    let preview_visible = over_ui.0 && !buy.styling();
+    set_visible(&mut vis, panel, what.is_some() && preview_visible);
     let grid = h.s.id(PREVIEW_PRESETS);
     let presets_over = windows.single().ok().is_some_and(|w| over_window(grid, &areas, w));
     let up = pressed(&clicks, grid.and_then(|g| h.s.within(g, SCROLL_UP)));
@@ -822,7 +840,7 @@ fn preview_panel(
         set_visible(&mut vis, panel, false);
         return;
     };
-    set_visible(&mut vis, panel, over_ui.0);
+    set_visible(&mut vis, panel, preview_visible);
     let price = entry.price.max(0) as i64;
     let afford = household.as_ref().is_none_or(|hh| hh.funds >= price) || buy.placing.as_ref().is_some_and(|p| p.owned);
     let desc = h.descriptions.get(&objd).cloned().unwrap_or_default();

@@ -119,7 +119,7 @@ fn camera_control(
     if wheel != 0.0 && !over_ui.is_some_and(|p| p.0) {
         cam.distance = (cam.distance * (1.0 - wheel * 0.12)).clamp(3.0, 900.0);
     }
-    if keys.pressed(KeyCode::KeyZ) || keys.pressed(KeyCode::Equal) {
+    if (keys.pressed(KeyCode::KeyZ) && !keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight])) || keys.pressed(KeyCode::Equal) {
         cam.distance = (cam.distance * (1.0 - dt * 1.5)).max(3.0);
     }
     if keys.pressed(KeyCode::KeyX) || keys.pressed(KeyCode::Minus) {

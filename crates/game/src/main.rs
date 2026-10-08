@@ -8,6 +8,7 @@ mod build;
 mod burglar;
 mod building;
 mod buy;
+mod buyhistory;
 mod camera;
 mod careers;
 mod cas;

@@ -28,7 +28,7 @@ impl Plugin for SavePlugin {
             .add_message::<SaveAsRequest>()
             .add_systems(OnEnter(crate::AppState::Loading), new_game_slot)
             .add_systems(Update, resume_saved_lot.run_if(in_state(PlayMode::ChooseLot)))
-            .add_systems(Update, (apply_loaded_game, save_game).run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (apply_loaded_game, save_game.after(crate::buyhistory::update)).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -602,14 +602,14 @@ fn save_game(
     (bought, exit, graves): (
         Query<(&GameObject, &Transform, Option<&crate::objects::Design>, Option<&crate::paintings::Hung>), With<Bought>>,
         Option<Res<crate::interact::LotExit>>,
-        Query<(&crate::ghosts::Grave, &Transform)>,
+        Query<(&crate::ghosts::Grave, &Transform), Without<crate::buyhistory::HistoryHidden>>,
     ),
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
     (story, alarm, bowls, leftovers, weather, pets, pet_data): (
         Res<crate::story::TownStory>,
         Res<crate::appliances::Alarm>,
-        Query<(&crate::fishbowl::BowlFish, &Transform), Without<crate::visit::LotObject>>,
+        Query<(&crate::fishbowl::BowlFish, &Transform), (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>,
         Res<crate::meals::Leftovers>,
         Res<crate::weather::Weather>,
         Query<(&crate::pets::Pet, &crate::pets::HomePet, &Transform)>,

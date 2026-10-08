@@ -20,6 +20,7 @@ pub struct BuyPlugin;
 impl Plugin for BuyPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BuyMode>()
+            .init_resource::<crate::buyhistory::BuyHistory>()
             .add_systems(OnEnter(PlayMode::Live), reset_buy_mode)
             .add_systems(PreUpdate, toggle_buy.after(bevy::input::InputSystems).run_if(in_state(PlayMode::Live)))
             .add_systems(
@@ -31,10 +32,13 @@ impl Plugin for BuyPlugin {
                     }
                 })
                     .chain()
+                    .before(crate::buyhistory::update)
                     .after(crate::hud::pointer_over_ui)
                     .run_if(in_state(PlayMode::Live)),
             )
             .add_systems(Update, lot_grid.run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, crate::buyhistory::update.run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, crate::buyhistory::settle_purchases.after(crate::buyhistory::update).run_if(in_state(PlayMode::Live)))
             .add_systems(Update, (scripted_style, scripted_cover, scripted_eyedrop).run_if(in_state(PlayMode::Live)));
     }
 }
@@ -68,12 +72,14 @@ pub struct Placing {
     /// A piece of the lot's furniture stays alive while it is moved. Keeping its entity
     /// preserves upgrades, breakage, contents, animated parts and Sims' references to it.
     source: Option<(Entity, Option<crate::nav::Obstacle>)>,
+    /// The design tool previews at the original location and commits without a placement click.
+    pub edit_in_place: bool,
 }
 
 impl Placing {
     /// Something from the catalogue (or the lot) in hand.
     pub fn new(objd: Key, ghost: Entity, owned: bool, design: Option<Key>) -> Self {
-        Self { objd, ghost, owned, design, item: None, origin: None, from: None, source: None }
+        Self { objd, ghost, owned, design, item: None, origin: None, from: None, source: None, edit_in_place: false }
     }
 }
 
@@ -117,10 +123,12 @@ pub struct BuyMode {
     /// Create a Style open for the object in hand, and the style it's in (if one's been made).
     styling: bool,
     style: Option<crate::style::ObjectStyle>,
+    pending_style: Option<crate::style::ObjectStyle>,
     /// What the wallpaper or floor being painted with is painted in: one of its swatches, or a
     /// style made for it (none: its first swatch).
     cover: Option<Key>,
     cover_style: Option<crate::style::CoverStyle>,
+    pending_cover: Option<crate::style::CoverStyle>,
     /// The eyedropper in hand: the next object, wall or floor clicked is taken up again (a new
     /// one of the object in its design, or the covering to paint with).
     pub eyedropper: bool,
@@ -134,6 +142,9 @@ pub struct BuyMode {
     pub preview_hour: Option<f32>,
     /// The grid is shown in Buy/Build mode until the player hides it.
     pub hide_grid: bool,
+    /// Waiting for an existing object to edit with Create a Style.
+    pub design_tool: bool,
+    apply_design: bool,
 }
 
 #[derive(Component)]
@@ -144,6 +155,7 @@ struct BuyPanel;
 pub struct HeldObject;
 
 fn hold_source(commands: &mut Commands, source: Entity) {
+    crate::buyhistory::remember_pickup(commands, source);
     commands.entity(source).insert((HeldObject, Visibility::Hidden)).remove::<crate::nav::Obstacle>();
 }
 
@@ -294,6 +306,8 @@ pub enum BuyButton {
     /// Create a Style for the object in hand: open or close it, and a channel's colour (of the
     /// palette).
     Styling,
+    ApplyDesign,
+    CancelDesign,
     StyleColour(u8, u8),
     /// A swatch of the wallpaper or floor in hand.
     CoverSwatch(u8),
@@ -442,7 +456,17 @@ pub const TERRAIN_TAB: usize = WALLPAPER_TAB + 7;
 impl BuyMode {
     /// Whether Create a Style is open.
     pub fn styling(&self) -> bool {
-        self.styling
+        self.styling || self.design_tool
+    }
+
+    fn select_design_tool(&mut self, commands: &mut Commands) {
+        if self.placing.is_some() || self.painting.is_some() {
+            self.styling = self.placing.as_ref().is_some_and(|p| p.edit_in_place) || !self.styling;
+        } else {
+            self.drop_tools(commands);
+            self.design_tool = true;
+        }
+        self.dirty = true;
     }
 
     /// Puts down the tool, pattern or object in hand.
@@ -452,6 +476,10 @@ impl BuyMode {
         self.selling = false;
         self.styling = false;
         self.style = None;
+        self.pending_style = None;
+        self.pending_cover = None;
+        self.design_tool = false;
+        self.apply_design = false;
         self.tool = None;
         if let Some(p) = self.placing.take() {
             commands.entity(p.ghost).despawn();
@@ -471,8 +499,9 @@ pub(crate) fn toggle_buy(
     mut clock: ResMut<crate::clock::GameClock>,
     hold: Option<Res<HoldRequest>>,
     menu: Res<crate::options::GameMenu>,
+    modal: Query<(), With<crate::dialog::Modal>>,
 ) {
-    if menu.is_open() {
+    if menu.is_open() || !modal.is_empty() {
         return;
     }
     if keys.just_pressed(KeyCode::F1) {
@@ -494,10 +523,12 @@ pub(crate) fn toggle_buy(
         } else if keys.just_pressed(KeyCode::KeyK) {
             buy.drop_tools(&mut commands);
             buy.selling = true;
+        } else if keys.just_pressed(KeyCode::KeyR) {
+            buy.select_design_tool(&mut commands);
         }
     }
     if buy.active && (keys.just_pressed(KeyCode::Escape) || mouse.just_pressed(MouseButton::Right)) {
-        let holding = buy.placing.is_some() || buy.painting.is_some() || buy.tool.is_some() || buy.eyedropper || buy.selling;
+        let holding = buy.placing.is_some() || buy.painting.is_some() || buy.tool.is_some() || buy.eyedropper || buy.selling || buy.design_tool;
         if holding {
             buy.drop_tools(&mut commands);
         } else if keys.just_pressed(KeyCode::Escape) {
@@ -655,6 +686,7 @@ fn buy_panel(
     let root = commands
         .spawn((
             BuyPanel,
+            GlobalZIndex(6),
             DespawnOnExit(AppState::InGame),
             Node {
                 border_radius: BorderRadius::all(Val::Px(12.0)),
@@ -671,11 +703,15 @@ fn buy_panel(
             Interaction::default(),
         ))
         .id();
+    if buy.active {
+        commands.entity(root).insert(crate::hud::BlocksWorld);
+    }
     if game_look {
         commands.entity(root).insert(Node {
             border_radius: BorderRadius::all(Val::Px(12.0)),
             position_type: PositionType::Absolute,
             left: Val::Px(330.0),
+            right: Val::Px(20.0),
             bottom: Val::Px(176.0),
             padding: UiRect::all(Val::Px(10.0)),
             flex_direction: FlexDirection::Column,
@@ -1008,17 +1044,25 @@ fn buy_panel(
         }
         // The object in hand's designs (the game's colour and pattern presets for it).
         if let Some(pl) = &buy.placing {
+            if pl.edit_in_place {
+                let name = catalog.by_key(&pl.objd).map_or("Object", |entry| entry.name.as_str());
+                p.spawn(Node { column_gap: Val::Px(8.0), row_gap: Val::Px(4.0), flex_wrap: FlexWrap::Wrap, align_items: AlignItems::Center, ..default() }).with_children(|row| {
+                    row.spawn(text(format!("Create a Style · {name}"), 14.0, Color::WHITE));
+                    button(row, "Apply (Enter)".into(), BuyButton::ApplyDesign, Val::Px(120.0), 28.0, true);
+                    button(row, "Cancel (Esc)".into(), BuyButton::CancelDesign, Val::Px(120.0), 28.0, false);
+                });
+            }
             let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
             let n = ObjectAssets::design_count(&ctx, pl.objd);
             // (A row for its designs, or for Create a Style when it has colours to change.)
             let restylable = data.0.designs.get(&pl.objd).is_some_and(|d| d.channels.iter().any(|c| !c.is_empty()));
-            if (n > 1 || restylable) && !game_look {
+            if n > 1 || restylable {
                 let name = catalog.by_key(&pl.objd).map(|e| e.name.clone()).unwrap_or_default();
-                p.spawn(Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
+                p.spawn(Node { column_gap: Val::Px(6.0), row_gap: Val::Px(4.0), flex_wrap: FlexWrap::Wrap, align_items: AlignItems::Center, ..default() }).with_children(|row| {
                     row.spawn(text(format!("{name} · Design"), 14.0, Color::WHITE));
                     // (Create a Style, where its design has colour channels to change.)
                     let design = buy.style.as_ref().filter(|s| s.objd == pl.objd).map(|s| s.design).or_else(|| pl.design.filter(|k| k.0 == s3bake::gamedata::T_DESIGN).map(|k| k.1 as u8)).unwrap_or(0);
-                    if data.0.designs.get(&pl.objd).is_some_and(|d| d.channels.get(design as usize).is_some_and(|c| !c.is_empty())) {
+                    if !pl.edit_in_place && data.0.designs.get(&pl.objd).is_some_and(|d| d.channels.get(design as usize).is_some_and(|c| !c.is_empty())) {
                         button(row, if buy.styling { "Close Create a Style".into() } else { "Create a Style".into() }, BuyButton::Styling, Val::Px(150.0), 28.0, buy.styling);
                     }
                     for d in 0..n {
@@ -1141,15 +1185,20 @@ fn buy_buttons(
     ghost_tf: Query<&Transform>,
     (mut renders, install, mut styled): (ResMut<crate::style::StyleRenders>, Option<Res<crate::data::InstallPath>>, MessageReader<crate::style::ObjectStyleReady>),
     (ui, mut covered): (Option<Res<crate::icons::GameUi>>, MessageReader<crate::style::CoverStyleReady>),
+    mut notes: ResMut<Notifications>,
 ) {
     // A wall or floor style rendered: painted with from now on.
     for r in covered.read() {
+        if buy.pending_cover.as_ref() != Some(&r.0) { continue; }
+        buy.pending_cover = None;
         buy.cover = Some(r.0.texture());
         buy.cover_style = Some(r.0.clone());
         buy.dirty = true;
     }
     // A style made in Create a Style, rendered: the object in hand in it.
     for r in styled.read() {
+        if buy.pending_style.as_ref() != Some(&r.0) { continue; }
+        buy.pending_style = None;
         let Some(p) = buy.placing.as_mut().filter(|p| p.objd == r.0.objd) else { continue };
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
         let design = r.0.texture();
@@ -1161,6 +1210,12 @@ fn buy_buttons(
         p.design = Some(design);
         buy.style = Some(r.0.clone());
         buy.dirty = true;
+    }
+    if !renders.busy() && (buy.pending_style.is_some() || buy.pending_cover.is_some()) {
+        buy.pending_style = None;
+        buy.pending_cover = None;
+        buy.dirty = true;
+        notes.push("That style couldn't be rendered. The previous design is still selected.");
     }
     for (i, b) in &q {
         if *i != Interaction::Pressed {
@@ -1180,11 +1235,13 @@ fn buy_buttons(
                 buy.roof_pick = Some(*i);
             }
             BuyButton::Styling => {
-                if buy.placing.is_none() && buy.painting.is_none() {
-                    continue;
-                }
-                buy.styling = !buy.styling;
-                buy.dirty = true;
+                buy.select_design_tool(&mut commands);
+            }
+            BuyButton::ApplyDesign => {
+                if !renders.busy() && buy.pending_style.is_none() { buy.apply_design = true; }
+            }
+            BuyButton::CancelDesign => {
+                buy.drop_tools(&mut commands);
             }
             BuyButton::Eyedropper => {
                 let on = !buy.eyedropper;
@@ -1197,29 +1254,36 @@ fn buy_buttons(
                 let Some(pat) = buy.painting.and_then(|i| ui.as_ref()?.data.patterns.get(i)) else { continue };
                 buy.cover = pat.swatches.get(*s as usize).copied();
                 buy.cover_style = None;
+                buy.pending_cover = None;
                 buy.dirty = true;
             }
             // (Create a Style for the wallpaper or floor in hand.)
             BuyButton::StyleColour(ch, idx) if buy.painting.is_some() => {
                 let (Some(pat), Some(&colour), Some(path)) = (buy.painting.and_then(|i| ui.as_ref()?.data.patterns.get(i)), crate::style::PALETTE.get(*idx as usize), install.as_ref()) else { continue };
-                let swatch = buy.cover_style.as_ref().filter(|s| s.cwal == pat.cwal).map(|s| s.swatch).or_else(|| pat.swatches.iter().position(|k| Some(*k) == buy.cover).map(|i| i as u8)).unwrap_or(0);
-                let mut colours = buy.cover_style.as_ref().filter(|s| s.cwal == pat.cwal && s.swatch == swatch).map(|s| s.colours.clone()).unwrap_or_default();
+                let current = buy.pending_cover.as_ref().or(buy.cover_style.as_ref());
+                let swatch = current.filter(|s| s.cwal == pat.cwal).map(|s| s.swatch).or_else(|| pat.swatches.iter().position(|k| Some(*k) == buy.cover).map(|i| i as u8)).unwrap_or(0);
+                let mut colours = current.filter(|s| s.cwal == pat.cwal && s.swatch == swatch).map(|s| s.colours.clone()).unwrap_or_default();
                 colours.retain(|(c, _)| c != ch);
                 colours.push((*ch, colour));
                 colours.sort_by_key(|c| c.0);
-                renders.request_cover(crate::style::CoverStyle { cwal: pat.cwal, swatch, floor: pat.floor, colours }, path.0.clone());
+                let style = crate::style::CoverStyle { cwal: pat.cwal, swatch, floor: pat.floor, colours };
+                renders.request_cover(style.clone(), path.0.clone());
+                buy.pending_cover = Some(style);
                 buy.dirty = true;
             }
             BuyButton::StyleColour(ch, idx) => {
                 let (Some(p), Some(&colour), Some(path)) = (buy.placing.as_ref(), crate::style::PALETTE.get(*idx as usize), install.as_ref()) else { continue };
                 let Some(info) = data.0.designs.get(&p.objd) else { continue };
-                let design = buy.style.as_ref().filter(|s| s.objd == p.objd).map(|s| s.design).or_else(|| p.design.filter(|k| k.0 == s3bake::gamedata::T_DESIGN).map(|k| k.1 as u8)).unwrap_or(0);
+                let current = buy.pending_style.as_ref().or(buy.style.as_ref());
+                let design = current.filter(|s| s.objd == p.objd).map(|s| s.design).or_else(|| p.design.filter(|k| k.0 == s3bake::gamedata::T_DESIGN).map(|k| k.1 as u8)).unwrap_or(0);
                 // (On top of the style already made from this design, if any.)
-                let mut colours = buy.style.as_ref().filter(|s| s.objd == p.objd && s.design == design).map(|s| s.colours.clone()).unwrap_or_default();
+                let mut colours = current.filter(|s| s.objd == p.objd && s.design == design).map(|s| s.colours.clone()).unwrap_or_default();
                 colours.retain(|(c, _)| c != ch);
                 colours.push((*ch, colour));
                 colours.sort_by_key(|c| c.0);
-                renders.request_object(crate::style::ObjectStyle { objd: p.objd, design, colours }, info.size, path.0.clone());
+                let style = crate::style::ObjectStyle { objd: p.objd, design, colours };
+                renders.request_object(style.clone(), info.size, path.0.clone());
+                buy.pending_style = Some(style);
                 buy.dirty = true;
             }
             BuyButton::Design(d) => {
@@ -1234,6 +1298,7 @@ fn buy_buttons(
                 commands.entity(p.ghost).insert(DespawnOnExit(AppState::InGame));
                 p.design = Some(design);
                 buy.style = None;
+                buy.pending_style = None;
                 buy.dirty = true;
                 play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
             }
@@ -1441,13 +1506,13 @@ fn placement(
         Option<ResMut<crate::building::LotPaint>>,
         MessageWriter<crate::sound::PlaySound>,
     ),
-    (selected, mut life): (Query<Entity, With<crate::sim::Selected>>, MessageWriter<crate::life::LifeEvent>),
+    selected: Query<Entity, With<crate::sim::Selected>>,
     mut grid: Option<ResMut<NavGrid>>,
     (pickup, hold): (Option<Res<PickupRequest>>, Option<Res<HoldRequest>>),
     objects: Query<(&GameObject, &Transform, Option<&crate::objects::Design>, Option<&crate::paintings::Hung>, Option<&crate::interact::UsedBy>, Option<&crate::nav::Obstacle>)>,
     (bought_q, mut removed): (Query<(), With<crate::save::Bought>>, ResMut<crate::save::RemovedLotObjects>),
     mut tfs: Query<&mut Transform, Without<GameObject>>,
-    (mut faces, mut gizmos): (Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>, Gizmos),
+    (mut faces, mut gizmos, renders, menu, modal): (Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>, Gizmos, Res<crate::style::StyleRenders>, Res<crate::options::GameMenu>, Query<(), With<crate::dialog::Modal>>),
 ) {
     // What was being moved when Buy mode closed goes back.
     for p in std::mem::take(&mut buy.returning) {
@@ -1457,7 +1522,7 @@ fn placement(
             g.dirty = true;
         }
     }
-    if !buy.active {
+    if !buy.active || menu.is_open() || !modal.is_empty() {
         return;
     }
     // (Something else in hand when a painting's to be hung: it's put down first.)
@@ -1492,11 +1557,20 @@ fn placement(
                 }
                 let design = design.map(|d| d.0);
                 let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+                let edit_in_place = buy.design_tool;
+                if edit_in_place && ObjectAssets::design_count(&ctx, obj.objd) < 2
+                    && !data.0.designs.get(&obj.objd).is_some_and(|d| d.channels.iter().any(|c| !c.is_empty()))
+                {
+                    notes.push("That object has no editable designs.");
+                    return;
+                }
                 let parts = assets.object_design(&mut ctx, obj.objd, design);
                 let ghost = spawn_parts(&mut commands, &parts, *tf);
                 commands.entity(ghost).insert(DespawnOnExit(AppState::InGame));
                 buy.yaw = tf.rotation.to_euler(EulerRot::YXZ).0;
-                buy.placing = Some(Placing { item: hung.map(|h| h.0.clone()), origin: Some(*tf), source: Some((req.0, obstacle.copied())), ..Placing::new(obj.objd, ghost, true, design) });
+                buy.placing = Some(Placing { item: hung.map(|h| h.0.clone()), origin: Some(*tf), source: Some((req.0, obstacle.copied())), edit_in_place, ..Placing::new(obj.objd, ghost, true, design) });
+                buy.design_tool = false;
+                buy.styling = edit_in_place;
                 buy.dirty = true;
                 hold_source(&mut commands, req.0);
                 if let Some(g) = grid.as_mut() {
@@ -1512,14 +1586,48 @@ fn placement(
     let objd = placing.objd;
     let owned = placing.owned;
     let design = placing.design;
+    if placing.edit_in_place {
+        if !renders.busy() && buy.pending_style.is_none() && (buy.apply_design || keys.just_pressed(KeyCode::Enter)) {
+            if let Some((source, _)) = placing.source {
+                let removed_before = removed.0.clone();
+                restore_source(&mut commands, placing);
+                if let Ok((obj, tf, original_design, ..)) = objects.get(source)
+                    && original_design.map(|d| d.0) != design
+                {
+                    if !bought_q.contains(source) {
+                        crate::save::note_removed(&mut removed, obj, tf);
+                    }
+                    let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+                    let parts = assets.object_design(&mut ctx, objd, design);
+                    crate::objects::restyle_parts(&mut commands, source, &parts);
+                    commands.entity(source).insert(crate::save::Bought);
+                    if let Some(design) = design {
+                        commands.entity(source).insert(crate::objects::Design(design));
+                    } else {
+                        commands.entity(source).remove::<crate::objects::Design>();
+                    }
+                    crate::buyhistory::record(&mut commands, source, true, 0, removed_before);
+                }
+            }
+            commands.entity(ghost).despawn();
+            buy.placing = None;
+            buy.styling = false;
+            buy.apply_design = false;
+            buy.dirty = true;
+            if let Some(g) = grid.as_mut() { g.dirty = true; }
+        }
+        return;
+    }
     let price = placing.item.as_ref().map_or_else(|| catalog.by_key(&objd).map_or(0, |e| e.price.max(0) as i64), |i| i.worth);
     // Selling and cancelling do not need a cursor in the window.
     if (keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace) || buy.selling) && owned {
+        let removed_before = removed.0.clone();
+        let source = placing.source.map(|(e, _)| e);
         if let Some((source, _)) = placing.source {
             if !bought_q.contains(source) && let Ok((obj, tf, ..)) = objects.get(source) {
                 crate::save::note_removed(&mut removed, obj, tf);
             }
-            commands.entity(source).despawn();
+            crate::buyhistory::park(&mut commands, source);
         }
         commands.entity(ghost).despawn();
         buy.placing = None;
@@ -1531,6 +1639,11 @@ fn placement(
             g.dirty = true;
         }
         notes.push(format!("Sold for §{price}."));
+        if let Some(source) = source {
+            crate::buyhistory::record(&mut commands, source, true, price, removed_before);
+        } else {
+            crate::buyhistory::discard(&mut commands);
+        }
         return;
     }
     let Ok(window) = windows.single() else { return };
@@ -1661,6 +1774,7 @@ fn placement(
             play.write(crate::sound::PlaySound::ui("ui_build_door_plop"));
         }
         let source = buy.placing.as_ref().and_then(|p| p.source.map(|s| s.0));
+        let removed_before = removed.0.clone();
         let level = building.as_ref().map_or(1, |b| b.level_at(pos.y));
         let placed = if let Some(source) = source {
             if !bought_q.contains(source) && let Ok((obj, tf, ..)) = objects.get(source) {
@@ -1689,16 +1803,23 @@ fn placement(
             if !owned && let Some(h) = household.as_mut() {
                 h.funds -= price;
                 if let Ok(s) = selected.single() {
-                    life.write(crate::life::LifeEvent::new(s, crate::life::LifeEventKind::Bought { price: price as i32 }));
+                    commands.entity(entity).insert(crate::buyhistory::PendingPurchase { sim: s, price: price as i32 });
                 }
             }
             if let Some(g) = grid.as_mut() {
                 g.dirty = true;
             }
             if owned {
+                if source.is_some() {
+                    crate::buyhistory::record(&mut commands, entity, true, 0, removed_before);
+                } else {
+                    crate::buyhistory::discard(&mut commands);
+                }
                 commands.entity(ghost).despawn();
                 buy.placing = None;
                 buy.dirty = true;
+            } else {
+                crate::buyhistory::record(&mut commands, entity, false, -price, removed_before);
             }
         }
     }
@@ -1840,6 +1961,37 @@ mod tests {
         let buy = app.world().resource::<BuyMode>();
         assert!(!buy.selling && !buy.eyedropper);
         assert!(buy.active);
+    }
+
+    #[test]
+    fn design_tool_selection_cancels_without_leaving_buy_mode() {
+        let mut app = controls();
+        key(&mut app, KeyCode::F2);
+        key(&mut app, KeyCode::KeyR);
+        assert!(app.world().resource::<BuyMode>().design_tool);
+        assert!(app.world().resource::<BuyMode>().styling());
+        key(&mut app, KeyCode::F2);
+        assert!(app.world().resource::<BuyMode>().design_tool);
+        key(&mut app, KeyCode::Escape);
+        let buy = app.world().resource::<BuyMode>();
+        assert!(buy.active);
+        assert!(!buy.design_tool);
+    }
+
+    #[test]
+    fn cancelling_style_edit_discards_in_flight_render_requests() {
+        let mut app = controls();
+        key(&mut app, KeyCode::F2);
+        let ghost = app.world_mut().spawn_empty().id();
+        let mut buy = app.world_mut().resource_mut::<BuyMode>();
+        buy.placing = Some(Placing::new((1, 2, 3), ghost, false, None));
+        buy.pending_style = Some(crate::style::ObjectStyle { objd: (1, 2, 3), design: 0, colours: vec![(0, [1.0, 0.0, 0.0])] });
+        buy.pending_cover = Some(crate::style::CoverStyle { cwal: 1, swatch: 0, floor: false, colours: Vec::new() });
+        key(&mut app, KeyCode::Escape);
+        let buy = app.world().resource::<BuyMode>();
+        assert!(buy.pending_style.is_none() && buy.pending_cover.is_none());
+        assert!(buy.placing.is_none());
+        assert!(app.world().get_entity(ghost).is_err());
     }
 
     #[test]

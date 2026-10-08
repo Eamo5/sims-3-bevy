@@ -153,7 +153,7 @@ fn restore_bowls(
 }
 
 /// The kinds of perfect fish in bowls on the home lot.
-fn census(bowls: Query<&BowlFish, Without<crate::visit::LotObject>>, mut perfect: ResMut<PerfectFish>) {
+fn census(bowls: Query<&BowlFish, (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>, mut perfect: ResMut<PerfectFish>) {
     let mut kinds: Vec<&str> = bowls.iter().filter(|b| b.fish.quality >= PERFECT).map(|b| b.fish.key.as_str()).collect();
     kinds.sort_unstable();
     kinds.dedup();
@@ -163,6 +163,31 @@ fn census(bowls: Query<&BowlFish, Without<crate::visit::LotObject>>, mut perfect
 }
 
 /// The bowls' fish, for saving.
-pub fn saved(bowls: &Query<(&BowlFish, &Transform), Without<crate::visit::LotObject>>) -> Vec<SavedBowl> {
+pub fn saved(bowls: &Query<(&BowlFish, &Transform), (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>) -> Vec<SavedBowl> {
     bowls.iter().map(|(b, tf)| SavedBowl { at: tf.translation.to_array(), fish: b.fish.clone() }).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn undoable_sales_do_not_count_or_save_the_sold_fish() {
+        let mut app = App::new();
+        app.init_resource::<PerfectFish>().add_systems(Update, census);
+        let bowl = |key: &str| BowlFish {
+            fish: Stack { kind: ItemKind::Fish, key: key.into(), name: key.into(), quality: PERFECT, count: 1, worth: 100 },
+            model: None,
+        };
+        app.world_mut().spawn((bowl("salmon"), Transform::default()));
+        let sold = app.world_mut().spawn((bowl("trout"), Transform::default(), crate::buyhistory::HistoryHidden)).id();
+        app.update();
+        assert_eq!(app.world().resource::<PerfectFish>().0, 1);
+        let mut query = bevy::ecs::system::SystemState::<Query<(&BowlFish, &Transform), (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>>::new(app.world_mut());
+        assert_eq!(saved(&query.get(app.world()).unwrap()).len(), 1);
+        app.world_mut().entity_mut(sold).remove::<crate::buyhistory::HistoryHidden>();
+        app.update();
+        assert_eq!(app.world().resource::<PerfectFish>().0, 2);
+        assert_eq!(saved(&query.get(app.world()).unwrap()).len(), 2);
+    }
 }

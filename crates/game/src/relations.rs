@@ -55,8 +55,9 @@ fn toggle_panel(
     buttons: Query<&Interaction, (Changed<Interaction>, With<RelationsButton>)>,
     keys: Res<ButtonInput<KeyCode>>,
     mut panel: ResMut<RelationsPanel>,
+    buy: Res<crate::buy::BuyMode>,
 ) {
-    let pressed = buttons.iter().any(|i| *i == Interaction::Pressed) || keys.just_pressed(KeyCode::KeyR);
+    let pressed = buttons.iter().any(|i| *i == Interaction::Pressed) || keys.just_pressed(KeyCode::KeyR) && !buy.active;
     if pressed {
         panel.open = !panel.open;
         panel.shown.clear();

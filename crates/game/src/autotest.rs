@@ -169,6 +169,8 @@ impl Plugin for AutoTestPlugin {
             .add_systems(PreUpdate, pointer_script.after(bevy::input::InputSystems).before(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             // Observe furniture after gameplay's deferred restore/despawn commands apply.
             .add_systems(PostUpdate, buy_move_test.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(PostUpdate, buy_history_test.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(PostUpdate, buy_design_test.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -579,21 +581,168 @@ fn buy_move_test(
     }
 }
 
+/// BUY_HISTORY_TEST=1: sell an upgraded, broken object and reverse/reapply the transaction.
+/// Verifies the real placement system and history schedule, including money and save records.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn buy_history_test(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut buy: ResMut<crate::buy::BuyMode>,
+    mut history: ResMut<crate::buyhistory::BuyHistory>,
+    household: Option<Res<crate::interact::Household>>,
+    removed: Res<crate::save::RemovedLotObjects>,
+    objects: Query<(Entity, &crate::interact::GameObject, &Transform, Option<&crate::interact::UsedBy>, Option<&crate::nav::Floor>)>,
+    state: Query<(Has<crate::interact::Broken>, Option<&crate::upgrades::Upgrades>, Has<crate::buyhistory::HistoryHidden>)>,
+    mut probe: Local<Option<(Entity, Vec3, i64, i64, usize)>>,
+    mut stage: Local<u8>,
+) {
+    let Ok(mode) = std::env::var("BUY_HISTORY_TEST") else { return };
+    let Some(household) = household else { return };
+    if *stage == 0 && buy.active && time.elapsed_secs() > 6.0 {
+        if let Some((entity, object, tf, ..)) = objects.iter().find(|(_, o, _, used, floor)| {
+            o.price > 0 && floor.is_none_or(|f| f.0 <= 1) && used.is_none_or(|u| u.0.is_none())
+        }) {
+            *probe = Some((entity, tf.translation, household.funds, object.price as i64, removed.0.len()));
+            commands.entity(entity).insert((crate::upgrades::Upgrades(3), crate::interact::Broken));
+            commands.insert_resource(crate::buy::PickupRequest(entity));
+            buy.selling = true;
+            *stage = 1;
+        }
+    } else if let Some((entity, position, funds, price, removed_count)) = *probe {
+        let (broken, upgrades, hidden) = state.get(entity).expect("undoable sales retain the original entity");
+        match *stage {
+            1 | 3 if hidden && buy.placing.is_none() => {
+                assert!(objects.get(entity).is_err(), "sold furniture is absent from gameplay and saves");
+                assert_eq!(household.funds, funds + price);
+                assert!(history.can_undo());
+                if mode == "1" { history.request = Some(crate::buyhistory::Request::Undo); }
+                *stage += 1;
+            }
+            2 | 4 if !hidden && buy.placing.is_none() => {
+                let (_, _, tf, ..) = objects.get(entity).expect("undo returns furniture to play");
+                assert_eq!(tf.translation, position);
+                assert!(broken);
+                assert_eq!(upgrades.map(|u| u.0), Some(3));
+                assert_eq!(household.funds, funds);
+                assert_eq!(removed.0.len(), removed_count);
+                assert!(history.can_redo());
+                if *stage == 2 && mode == "1" {
+                    history.request = Some(crate::buyhistory::Request::Redo);
+                } else if *stage == 4 {
+                    info!("autotest: buy history PASS — sale/undo/redo/undo retain entity, upgrades, breakage, funds and save records");
+                }
+                *stage += 1;
+            }
+            _ => {}
+        }
+    }
+    if time.elapsed_secs() > 11.0 {
+        assert_eq!(*stage, 5, "the buy history probe must complete");
+    }
+}
+
+/// BUY_DESIGN_TEST=apply|cancel: restyle existing furniture without changing its transform,
+/// then check cancellation or undo/redo through the real BuyButton handlers.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn buy_design_test(
+    mut commands: Commands,
+    time: Res<Time>,
+    data: Res<crate::baked::Baked>,
+    mut buy: ResMut<crate::buy::BuyMode>,
+    mut history: ResMut<crate::buyhistory::BuyHistory>,
+    household: Option<Res<crate::interact::Household>>,
+    objects: Query<(Entity, &crate::interact::GameObject, &Transform, Option<&crate::objects::Design>, Option<&crate::interact::UsedBy>, Option<&crate::nav::Floor>)>,
+    transforms: Query<&Transform>,
+    mut probe: Local<Option<(Entity, Transform, Option<s3bake::Key>, s3bake::Key, i64)>>,
+    mut stage: Local<u8>,
+    mut trigger: Local<Option<Entity>>,
+) {
+    let Ok(mode) = std::env::var("BUY_DESIGN_TEST") else { return };
+    let Some(household) = household else { return };
+    if *stage == 0 && buy.active && time.elapsed_secs() > 6.0 {
+        if let Some((entity, object, tf, design, ..)) = objects.iter().find(|(_, o, _, _, used, floor)| {
+            data.0.designs.get(&o.objd).is_some_and(|d| d.count > 1)
+                && floor.is_none_or(|f| f.0 <= 1) && used.is_none_or(|u| u.0.is_none())
+        }) {
+            let original = design.map(|d| d.0);
+            let index = if original == Some(crate::objects::design_texture(object.objd, 1)) { 0 } else { 1 };
+            *probe = Some((entity, *tf, original, crate::objects::design_texture(object.objd, index), household.funds));
+            buy.design_tool = true;
+            commands.insert_resource(crate::buy::PickupRequest(entity));
+            *stage = 1;
+        }
+    } else if let Some((entity, original_tf, original_design, chosen, funds)) = *probe {
+        let (_, _, tf, design, ..) = objects.get(entity).expect("restyling retains the original object");
+        assert_eq!(*tf, original_tf, "restyling must not move, rotate or resize furniture");
+        assert_eq!(household.funds, funds);
+        match *stage {
+            1 if buy.placing.as_ref().is_some_and(|p| p.edit_in_place) => {
+                *trigger = Some(commands.spawn((crate::buy::BuyButton::Design(chosen.1 as u8), Interaction::Pressed)).id());
+                *stage = 2;
+            }
+            2 if buy.placing.as_ref().is_some_and(|p| p.design == Some(chosen)) => {
+                let placing = buy.placing.as_ref().unwrap();
+                assert_eq!(*transforms.get(placing.ghost).unwrap(), original_tf, "the design preview stays in place");
+                assert_eq!(design.map(|d| d.0), original_design, "preview must be cancellable");
+                if let Some(e) = trigger.take() { commands.entity(e).despawn(); }
+                if mode == "preview" {
+                    *stage = 6;
+                    return;
+                }
+                let action = if mode == "cancel" { crate::buy::BuyButton::CancelDesign } else { crate::buy::BuyButton::ApplyDesign };
+                *trigger = Some(commands.spawn((action, Interaction::Pressed)).id());
+                *stage = 3;
+            }
+            3 if buy.placing.is_none() => {
+                if let Some(e) = trigger.take() { commands.entity(e).despawn(); }
+                if mode == "cancel" {
+                    assert_eq!(design.map(|d| d.0), original_design);
+                    assert!(!history.can_undo(), "cancelling must not create a transaction");
+                    *stage = 6;
+                    info!("autotest: in-place design cancellation PASS");
+                } else {
+                    assert_eq!(design.map(|d| d.0), Some(chosen));
+                    history.request = Some(crate::buyhistory::Request::Undo);
+                    *stage = 4;
+                }
+            }
+            4 if design.map(|d| d.0) == original_design => {
+                history.request = Some(crate::buyhistory::Request::Redo);
+                *stage = 5;
+            }
+            5 if design.map(|d| d.0) == Some(chosen) => {
+                *stage = 6;
+                info!("autotest: in-place design apply/undo/redo PASS");
+            }
+            _ => {}
+        }
+    }
+    if time.elapsed_secs() > 11.0 { assert_eq!(*stage, 6, "the design probe must complete"); }
+}
+
 /// PRESS_KEY=<key>@<seconds>;...: keys pressed in order (and let go a moment later): F1–F12,
 /// PrintScreen, PageUp, PageDown, Escape, Home, a letter or a digit.
-fn press_key(time: Res<Time>, mut keys: ResMut<ButtonInput<KeyCode>>, mut done: Local<u8>) {
-    let Some((k, at)) = std::env::var("PRESS_KEY").ok().and_then(|v| v.split(';').nth(*done as usize / 2).and_then(|s| s.split_once('@')).map(|(k, t)| (k.to_string(), t.parse::<f32>().unwrap_or(10.0)))) else { return };
+fn press_key(time: Res<Time>, mut keys: ResMut<ButtonInput<KeyCode>>, mut done: Local<usize>) {
+    let Some((chord, at)) = std::env::var("PRESS_KEY").ok().and_then(|v| v.split(';').nth(*done / 2).and_then(|s| s.split_once('@')).map(|(k, t)| (k.to_string(), t.parse::<f32>().unwrap_or(10.0)))) else { return };
+    let mut parts: Vec<&str> = chord.split('+').map(str::trim).collect();
+    let k = parts.pop().unwrap_or("");
+    let modifiers: Vec<KeyCode> = parts.into_iter().filter_map(|p| match p {
+        "Ctrl" => Some(KeyCode::ControlLeft), "Shift" => Some(KeyCode::ShiftLeft), "Alt" => Some(KeyCode::AltLeft), _ => None,
+    }).collect();
     const F: [KeyCode; 12] = [KeyCode::F1, KeyCode::F2, KeyCode::F3, KeyCode::F4, KeyCode::F5, KeyCode::F6, KeyCode::F7, KeyCode::F8, KeyCode::F9, KeyCode::F10, KeyCode::F11, KeyCode::F12];
     const LETTERS: [KeyCode; 26] = [
         KeyCode::KeyA, KeyCode::KeyB, KeyCode::KeyC, KeyCode::KeyD, KeyCode::KeyE, KeyCode::KeyF, KeyCode::KeyG, KeyCode::KeyH, KeyCode::KeyI, KeyCode::KeyJ, KeyCode::KeyK, KeyCode::KeyL, KeyCode::KeyM,
         KeyCode::KeyN, KeyCode::KeyO, KeyCode::KeyP, KeyCode::KeyQ, KeyCode::KeyR, KeyCode::KeyS, KeyCode::KeyT, KeyCode::KeyU, KeyCode::KeyV, KeyCode::KeyW, KeyCode::KeyX, KeyCode::KeyY, KeyCode::KeyZ,
     ];
     const DIGITS: [KeyCode; 10] = [KeyCode::Digit0, KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4, KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8, KeyCode::Digit9];
-    let key = match k.as_str() {
+    let key = match k {
         "PrintScreen" => KeyCode::PrintScreen,
         "PageUp" => KeyCode::PageUp,
         "PageDown" => KeyCode::PageDown,
         "Home" => KeyCode::Home,
+        "Delete" => KeyCode::Delete,
+        "Backspace" => KeyCode::Backspace,
+        "Enter" => KeyCode::Enter,
         f if f.starts_with('F') && f.len() > 1 => f[1..].parse::<usize>().ok().and_then(|n| F.get(n.wrapping_sub(1)).copied()).unwrap_or(KeyCode::Escape),
         c if c.len() == 1 && c.as_bytes()[0].is_ascii_alphabetic() => LETTERS[(c.as_bytes()[0].to_ascii_uppercase() - b'A') as usize],
         d if d.len() == 1 && d.as_bytes()[0].is_ascii_digit() => DIGITS[(d.as_bytes()[0] - b'0') as usize],
@@ -601,11 +750,13 @@ fn press_key(time: Res<Time>, mut keys: ResMut<ButtonInput<KeyCode>>, mut done: 
     };
     match *done % 2 {
         0 if time.elapsed_secs() > at => {
+            for modifier in &modifiers { keys.press(*modifier); }
             keys.press(key);
             *done += 1;
         }
         1 => {
             keys.release(key);
+            for modifier in &modifiers { keys.release(*modifier); }
             *done += 1;
         }
         _ => {}
