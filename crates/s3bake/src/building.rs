@@ -109,14 +109,24 @@ fn along_segment(p: [f32; 2], q: [f32; 2], r: [f32; 2]) -> Option<f32> {
 /// index of its CSTR style, u64 guid, u32 dir, f32 x1, z1, u32 top level, f32 x2, z2, u32 bottom
 /// level, u32 n railings × (u32, u16 CRAL, f32 x, z)`); their pieces are filled in later.
 pub fn lot_stairs(pkg: &Package, lot: u64) -> Vec<StairBaked> {
+    lot_stairs_with_ids(pkg, lot).into_iter().map(|(_, s)| s).collect()
+}
+
+/// A lot's staircases, each with the id of its stair object. (Version 6, from later packs: four
+/// style references (the first the stairs'), and four bytes more after the railings.)
+pub fn lot_stairs_with_ids(pkg: &Package, lot: u64) -> Vec<(u64, StairBaked)> {
     let read = |t: u32, g: u32| pkg.find(&s3pkg::ResourceKey::new(t, g, lot)).and_then(|e| pkg.read(e).ok());
     let (Some(d), Some(refs)) = (read(0x04A09283, 0), read(0x05ED1226, 0).and_then(|r| s3formats::objn::parse_refs(&r).ok())) else { return Vec::new() };
     let mut r = s3formats::util::Reader::new(&d);
     let mut out = Vec::new();
-    let (Ok(_), Ok(n)) = (r.u32(), r.u32()) else { return out };
+    let (Ok(version), Ok(n)) = (r.u32(), r.u32()) else { return out };
     for _ in 0..n.min(256) {
         let Ok(_) = r.u32() else { break };
-        let (Ok(style), Ok(_), Ok(dir)) = (r.u16(), r.u64(), r.u32()) else { break };
+        let Ok(style) = r.u16() else { break };
+        if version >= 6 && r.skip(6).is_err() {
+            break;
+        }
+        let (Ok(guid), Ok(dir)) = (r.u64(), r.u32()) else { break };
         let (Ok(x1), Ok(z1), Ok(top)) = (r.f32(), r.f32(), r.u32()) else { break };
         let (Ok(x2), Ok(z2), Ok(bottom)) = (r.f32(), r.f32(), r.u32()) else { break };
         let Ok(n_rails) = r.u32() else { break };
@@ -127,10 +137,13 @@ pub fn lot_stairs(pkg: &Package, lot: u64) -> Vec<StairBaked> {
                 rails.push(StairRail { at: [x, z], style: key_of(k), rail: None, start: None, post: None });
             }
         }
+        if version >= 6 && r.u32().is_err() {
+            break;
+        }
         let Some(k) = refs.get(&style) else { continue };
         let lo = |a: f32, b: f32| a.min(b).max(0.0).round() as u16;
         let hi = |a: f32, b: f32| a.max(b).max(0.0).round() as u16;
-        out.push(StairBaked {
+        out.push((guid, StairBaked {
             style: key_of(k),
             min: [lo(x1, x2), lo(z1, z2)],
             max: [hi(x1, x2), hi(z1, z2)],
@@ -141,7 +154,7 @@ pub fn lot_stairs(pkg: &Package, lot: u64) -> Vec<StairBaked> {
             start: None,
             side: None,
             rails,
-        });
+        }));
     }
     out
 }
@@ -335,6 +348,7 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
         let l = levels[levels.len() - 1];
         levels.push(l + LEVEL_HEIGHT);
     }
+    let has_elevator = objects.iter().any(|o| o.script.as_deref().is_some_and(|s| s.contains("Elevator")));
     // Each storey's floor where its tiles are (the middle of their heights): most foundations
     // are 0.75 m up, but a house on a slope may stand higher (the Goths' manor is 1.64 m above
     // its lot), a ground floor without one is on the ground, and the furniture is placed at
@@ -346,8 +360,11 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
         }
         hs.sort_by(f32::total_cmp);
         let h = hs[hs.len() / 2];
-        // (Only where it's a storey's sensible height above the one below.)
-        let sensible = if l == 1 { h > levels[0] - 0.1 } else { h > levels[l - 1] + 0.3 && (h - levels[l - 1] - LEVEL_HEIGHT).abs() < 0.6 };
+        // (Only where it's a storey's sensible height above the one below; or, on a lot with an
+        // elevator, a floor at the top of a tower (Bridgeport's rooftop clubs and penthouses:
+        // the storeys between are the tower's, not built), reached by the elevator.)
+        let tower_top = l >= 2 && has_elevator && h > levels[l - 1] + LEVEL_HEIGHT * 2.0;
+        let sensible = tower_top || if l == 1 { h > levels[0] - 0.1 } else { h > levels[l - 1] + 0.3 && (h - levels[l - 1] - LEVEL_HEIGHT).abs() < 0.6 };
         if sensible {
             let shift = h - levels[l];
             for v in &mut levels[l..] {
@@ -370,6 +387,8 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     let by_guid: HashMap<u64, &PlacedObject> = objects.iter().map(|o| (o.guid, o)).collect();
     let mut sibling_count: HashMap<u64, usize> = HashMap::new();
     let mut objs = Vec::new();
+    // (Each stair object's storey, by its id.)
+    let mut stair_levels: HashMap<u64, u32> = HashMap::new();
     for o in objects {
         let (Some(cat), Some(mut p)) = (o.catalog, o.position) else { continue };
         // Trees on the lot are drawn with the world's trees.
@@ -417,6 +436,9 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
         let on_tile = (tx >= 0.0 && tz >= 0.0).then(|| (0..=top_level + 1).rev().find(|s| tile_y.get(&(*s, tx as u32, tz as u32)).is_some_and(|y| p[1] >= y - 0.3))).flatten();
         let by_height = levels.iter().enumerate().skip(1).filter(|(_, y)| p[1] >= **y - 0.3).map(|(s, _)| s as u32).last().unwrap_or(0);
         let mut level = on_tile.unwrap_or(by_height) as u8;
+        if o.script.as_deref().is_some_and(|s| s.ends_with(".Stairs")) {
+            stair_levels.insert(o.guid, level as u32);
+        }
         // Ceiling lights hang from the floor above but light (and belong to) the room below.
         if level > 1 && o.script.as_deref().unwrap_or("").contains("LightingCeiling") {
             level -= 1;
@@ -693,7 +715,20 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     let jobs = std::mem::take(&mut covers.jobs);
     Some((
         LotBuildingBaked {
-            stairs: lot_stairs(pkg, lot.id),
+            stairs: {
+                // (Each staircase from the storey its stair object stands on, where the record's
+                // levels don't count the storeys as the house does: a tower's rooftop floors.)
+                let mut v = lot_stairs_with_ids(pkg, lot.id);
+                for (guid, s) in &mut v {
+                    let far_up = |l: u32| has_elevator && levels.get(l as usize).zip(levels.get(s.bottom as usize)).is_some_and(|(a, b)| a - b > LEVEL_HEIGHT * 2.0);
+                    if let Some(o) = stair_levels.get(guid).copied().filter(|l| *l as u8 != s.bottom && far_up(*l)) {
+                        let span = s.top.saturating_sub(s.bottom).max(1);
+                        s.bottom = o as u8;
+                        s.top = o as u8 + span;
+                    }
+                }
+                v.into_iter().map(|(_, s)| s).collect()
+            },
             lot: lot_index as u32,
             width: w,
             depth: d,

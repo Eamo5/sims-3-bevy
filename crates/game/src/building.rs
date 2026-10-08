@@ -23,7 +23,7 @@ impl Plugin for BuildingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NearbyLots>().init_resource::<WallMode>().add_message::<PoolChanged>().add_systems(
             Update,
-            (follow_selected_floor, view_level_keys, building_visibility, bulldozed_lots, stream_nearby_lots, lamps_at_night, cut_openings)
+            (follow_selected_floor, view_level_keys, camera_to_floor, building_visibility, shell_visibility, visit_floors, bulldozed_lots, stream_nearby_lots, lamps_at_night, cut_openings)
                 .chain()
                 .run_if(in_state(PlayMode::Live)),
         )
@@ -467,10 +467,42 @@ pub fn is_opening(script: &str) -> Option<bool> {
 fn place(commands: &mut Commands, e: Entity, root: Option<Entity>, level: u8) {
     match root {
         Some(r) => {
-            commands.entity(e).insert(ChildOf(r));
+            commands.entity(e).insert((ChildOf(r), PieceLevel(level)));
         }
         None => {
             commands.entity(e).insert((BuildingPiece { level }, DespawnOnExit(AppState::InGame)));
+        }
+    }
+}
+
+/// The storey a piece of a lot drawn beside the house (one visited, or nearby) belongs to.
+#[derive(Component)]
+pub struct PieceLevel(pub u8);
+
+/// On a visit, the floors above the one the selected Sim is on (and what's on them) are hidden
+/// when the camera comes in close, as at home: a rooftop terrace shows under the roof above it.
+pub fn visit_floors(
+    visited: Option<Res<crate::visit::VisitedLot>>,
+    cams: Query<&SimsCamera>,
+    selected: Query<(&Floor, &crate::visit::OnLot), With<crate::sim::Selected>>,
+    mut pieces: Query<(&PieceLevel, &ChildOf, &mut Visibility)>,
+    mut objects: Query<(&crate::visit::LotObject, &Floor, &mut Visibility), Without<PieceLevel>>,
+) {
+    let Some(v) = visited else { return };
+    let Ok(cam) = cams.single() else { return };
+    let here = selected.iter().find(|(_, o)| o.0 == v.lot).map(|(f, _)| f.0);
+    let top = match here {
+        Some(f) if cam.distance <= ROOF_DISTANCE => f,
+        _ => u8::MAX,
+    };
+    for (l, parent, mut vis) in &mut pieces {
+        if parent.parent() == v.root() {
+            vis.set_if_neq(if l.0 > top { Visibility::Hidden } else { Visibility::Inherited });
+        }
+    }
+    for (o, f, mut vis) in &mut objects {
+        if o.0 == v.lot {
+            vis.set_if_neq(if f.0 > top { Visibility::Hidden } else { Visibility::Inherited });
         }
     }
 }
@@ -1759,7 +1791,7 @@ pub fn spawn_building(
             let e = spawn_parts(commands, &parts, Transform { translation: active.world(at.x, at.y, y), rotation: p.rotation, scale: if stretched { p.scale } else { Vec3::ONE } });
             place(commands, e, neighbor, s.bottom);
         }
-        if s.bottom >= 1 && neighbor.is_none() {
+        if s.bottom >= 1 && (neighbor.is_none() || visit) {
             let top = bottom + d * run as f32;
             links.push((s.bottom, s.top, bottom - d * 0.45, top + d * 0.45, y0, y1));
         }
@@ -1795,14 +1827,14 @@ pub fn spawn_building(
         let top = bottom + d * run;
         let e = commands.spawn((Mesh3d(ctx.meshes.add(stair_mesh(&active, bottom, d, run, y0, y1))), MeshMaterial3d(stair_mat.clone()))).id();
         place(commands, e, neighbor, if storey { lower } else { 0 });
-        if storey && neighbor.is_none() {
+        if storey && (neighbor.is_none() || visit) {
             let bw = |q: Vec2| active.world(q.x, q.y, 0.0).xz();
             active.stairs.push(StairLink { level: lower, upper: upper_level, bottom: bw(bottom - d * 0.45), top: bw(top + d * 0.45), y0, y1 });
         }
     }
 
     // Elevators: one per floor, stacked; Sims ride between the floors they stop at.
-    if neighbor.is_none() {
+    if neighbor.is_none() || visit {
         let mut shafts: HashMap<(i32, i32), Vec<(u8, Vec2)>> = HashMap::new();
         for o in b.objects.iter().filter(|o| o.script.to_ascii_lowercase().contains("elevator")) {
             let q = Quat::from_xyzw(o.rotation[0], o.rotation[1], o.rotation[2], o.rotation[3]).normalize();
@@ -1971,6 +2003,46 @@ fn follow_selected_floor(
     }
 }
 
+/// The camera looks at the floor being viewed (as the game's does): over the house, raised to
+/// that floor's height above the ground (a rooftop penthouse's tens of metres up); elsewhere, at
+/// the ground.
+fn camera_to_floor(
+    building: Option<Res<ActiveBuilding>>,
+    world: Res<crate::loading::CurrentWorld>,
+    mut cams: Query<&mut SimsCamera>,
+    selected: Query<&Floor, (With<crate::sim::Selected>, With<crate::visit::OnLot>)>,
+    mut raised: Local<bool>,
+) {
+    let Ok(mut cam) = cams.single_mut() else { return };
+    let over = |b: &ActiveBuilding| {
+        let l = b.local(cam.focus);
+        l.x > -4.0 && l.y > -4.0 && l.x < b.data.width as f32 + 4.0 && l.y < b.data.depth as f32 + 4.0
+    };
+    let ground = world.data.heightmap.sample(cam.focus.x, cam.focus.z);
+    // (Over the house the floor viewed; over a lot being visited, the selected Sim's floor there.)
+    let want = building.as_deref().map_or(0.0, |b| {
+        if over(b) {
+            (b.levels.get(b.view_level as usize).copied().unwrap_or(0.0) - ground).max(0.0)
+        } else if let Some(a) = b.away.as_deref().filter(|a| over(a)) {
+            let level = selected.iter().next().map_or(1, |f| f.0);
+            (a.levels.get(level as usize).copied().unwrap_or(0.0) - ground).max(0.0)
+        } else {
+            0.0
+        }
+    });
+    // (Only a floor well above the ground lifts it: a house's own storeys are seen as they are;
+    // and it's let down again only if raised here.)
+    if want > 6.0 {
+        if (cam.height_offset - want).abs() > 0.01 {
+            cam.height_offset = want;
+        }
+        *raised = true;
+    } else if *raised {
+        cam.height_offset = 0.0;
+        *raised = false;
+    }
+}
+
 /// PageUp / PageDown move the floor being viewed.
 fn view_level_keys(keys: Res<ButtonInput<KeyCode>>, building: Option<ResMut<ActiveBuilding>>, buy: Option<Res<crate::buy::BuyMode>>) {
     let Some(mut b) = building else { return };
@@ -1992,6 +2064,20 @@ fn view_level_keys(keys: Res<ButtonInput<KeyCode>>, building: Option<ResMut<Acti
 /// Shows the detailed house near the camera (with upper floors hidden and the front walls cut
 /// away) and the game's imposter from afar.
 #[allow(clippy::type_complexity)]
+/// A building shell round the rooms of a lot (Bridgeport's apartments and storefronts): seen
+/// from outside as the building it is, and taken away, as walls and roof are, when the camera
+/// comes in close to the lot, so what's inside shows (unless walls are kept up).
+#[derive(Component)]
+pub struct Shell;
+
+fn shell_visibility(walls: Res<WallMode>, cams: Query<&SimsCamera>, mut shells: Query<(&GlobalTransform, &mut Visibility), With<Shell>>) {
+    let Ok(cam) = cams.single() else { return };
+    for (tf, mut vis) in &mut shells {
+        let close = cam.distance <= ROOF_DISTANCE && cam.focus.xz().distance(tf.translation().xz()) < 40.0;
+        vis.set_if_neq(if close && *walls != WallMode::Up { Visibility::Hidden } else { Visibility::Inherited });
+    }
+}
+
 fn building_visibility(
     (building, walls): (Option<ResMut<ActiveBuilding>>, Res<WallMode>),
     cams: Query<(&SimsCamera, &GlobalTransform)>,

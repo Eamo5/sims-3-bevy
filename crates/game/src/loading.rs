@@ -45,6 +45,9 @@ pub struct CatalogEntry {
     pub opening: Option<bool>,
     /// Its buy-mode tab.
     pub category: &'static str,
+    /// A building shell (Bridgeport's apartment buildings and storefronts): one large object
+    /// round the rooms inside it.
+    pub shell: bool,
 }
 
 /// The buy-mode tab of a catalogue object: by what it does, else by the game's own grouping of
@@ -94,6 +97,7 @@ impl Catalog {
                 kind: crate::interact::ObjectKind::from_script(&c.script, &c.instance_name),
                 opening: crate::building::is_opening(&c.script),
                 category: buy_category(crate::interact::ObjectKind::from_script(&c.script, &c.instance_name), &c.script),
+                shell: c.script.contains(".Shells."),
             })
             .collect();
         let index = entries.iter().enumerate().map(|(i, e)| (e.key, i)).collect();

@@ -575,6 +575,9 @@ pub fn spawn_game_object_design(
     if let Some(d) = design {
         commands.entity(e).insert(crate::objects::Design(d));
     }
+    if entry.is_some_and(|c| c.shell) {
+        commands.entity(e).insert(crate::building::Shell);
+    }
     // Small decorations don't block walking.
     if half.x * half.y > 0.04 && mx.y > 0.25 && !matches!(kind, ObjectKind::Light) {
         commands.entity(e).insert(Obstacle { half, center_offset: center });

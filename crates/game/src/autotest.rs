@@ -460,6 +460,8 @@ fn press_key(time: Res<Time>, mut keys: ResMut<ButtonInput<KeyCode>>, mut done: 
     let key = match k.as_str() {
         "F12" => KeyCode::F12,
         "PrintScreen" => KeyCode::PrintScreen,
+        "PageUp" => KeyCode::PageUp,
+        "PageDown" => KeyCode::PageDown,
         _ => KeyCode::Escape,
     };
     match *done {

@@ -59,6 +59,8 @@ pub struct LotObject(pub usize);
 pub struct VisitedLot {
     pub lot: usize,
     pub grid: NavGrid,
+    /// The visited building's upper floors, walked and reached by its stairs and elevators.
+    pub upper: crate::nav::UpperFloors,
     /// Where Sims arrive and leave from, by the road.
     pub exit: Vec2,
     root: Entity,
@@ -135,17 +137,9 @@ fn open_lot(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetC
             let q = Quat::from_xyzw(o.rotation[0], o.rotation[1], o.rotation[2], o.rotation[3]);
             let q = if q.length_squared() < 1e-6 { Quat::IDENTITY } else { q.normalize() };
             let pos = Vec3::from(o.position);
-            // Upstairs is out of reach: shown only.
-            if o.level > 1 {
-                let parts = assets.object_design(ctx, o.objd, o.design);
-                if !parts.is_empty() {
-                    let e = spawn_parts(commands, &parts, Transform::from_translation(pos).with_rotation(q));
-                    commands.entity(e).insert(ChildOf(root));
-                }
-                continue;
-            }
+            // (Each on its floor: upstairs is reached by the stairs and elevators.)
             let Some(s) = crate::home::spawn_game_object_design(commands, assets, ctx, catalog, o.objd, pos, q, o.design) else { continue };
-            commands.entity(s.entity).insert((LotObject(lot), Floor(1)));
+            commands.entity(s.entity).insert((LotObject(lot), Floor(o.level.max(1))));
             if crate::building::is_opening(&o.script).is_some() || o.script.contains("Column") {
                 commands.entity(s.entity).remove::<Obstacle>();
             }
@@ -154,7 +148,7 @@ fn open_lot(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetC
     }
     let center = crate::home::lot_center(l);
     let grid = NavGrid::new(center.xz(), l.width.max(l.depth) as f32 * 0.5 + 8.0);
-    (VisitedLot { lot, grid, exit: lot_exit(l), root, objects, empty_since: None, settle: 3, next_guest: 0.0 }, shown)
+    (VisitedLot { lot, grid, upper: Default::default(), exit: lot_exit(l), root, objects, empty_since: None, settle: 3, next_guest: 0.0 }, shown)
 }
 
 /// Sims reaching a community lot: the lot opens (only one at a time; anyone at another heads
@@ -208,6 +202,13 @@ fn arrivals(
             c.distance = c.distance.min(30.0);
         }
         notes.push(format!("{} arrived at {}.", sim.first, at.place));
+    }
+}
+
+impl VisitedLot {
+    /// What the lot's building is drawn under.
+    pub fn root(&self) -> Entity {
+        self.root
     }
 }
 
@@ -309,7 +310,12 @@ fn walls_down(cams: Query<&SimsCamera>, mut walls: Query<(&crate::building::Visi
 }
 
 /// The lot's walk grid, once its furniture has settled in place.
-fn rebuild_lot_grid(world: Res<CurrentWorld>, visited: Option<ResMut<VisitedLot>>, obstacles: Query<(&GlobalTransform, &Obstacle, Option<&Floor>)>) {
+fn rebuild_lot_grid(
+    world: Res<CurrentWorld>,
+    visited: Option<ResMut<VisitedLot>>,
+    obstacles: Query<(&GlobalTransform, &Obstacle, Option<&Floor>)>,
+    building: Option<Res<ActiveBuilding>>,
+) {
     let Some(mut v) = visited else { return };
     if v.settle > 0 {
         v.settle -= 1;
@@ -318,5 +324,15 @@ fn rebuild_lot_grid(world: Res<CurrentWorld>, visited: Option<ResMut<VisitedLot>
     if v.grid.dirty {
         v.grid.dirty = false;
         crate::nav::fill_grid(&mut v.grid, &world.data, &obstacles);
+        // (And its upper floors, from the building shown for it.)
+        if let Some(a) = building.as_deref().and_then(|b| b.away.as_deref()) {
+            crate::nav::rebuild_upper(a, &mut v.upper, &obstacles);
+            debug!(
+                "visit {}: upper floors {:?}, links {:?}",
+                v.lot,
+                v.upper.grids.iter().map(|(l, g)| (*l, g.blocked.iter().filter(|b| !**b).count())).collect::<Vec<_>>(),
+                v.upper.stairs.iter().map(|s| (s.level, s.upper, s.bottom, s.top, s.y0, s.y1)).collect::<Vec<_>>()
+            );
+        }
     }
 }

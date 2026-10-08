@@ -52,6 +52,22 @@ fn main() {
                 e.2 = e.2.max(y);
                 e.3.insert(f.region);
             }
+            let mut objs = std::collections::BTreeMap::<u8, usize>::new();
+            for o in &b.objects {
+                *objs.entry(o.level).or_default() += 1;
+            }
+            println!("  objects by level {objs:?} penthouse {} house {} furnished {}", b.is_penthouse(), b.is_house(), b.is_furnished());
+            let lifts: Vec<(u8, f32)> = b.objects.iter().filter(|o| o.script.contains("Elevator")).map(|o| (o.level, o.position[1])).collect();
+            if !lifts.is_empty() {
+                println!("  elevators {lifts:?}");
+            }
+            for s in &b.stairs {
+                println!("  stairs {:?}-{:?} dir {} levels {}->{} flight {:?}", s.min, s.max, s.dir, s.bottom, s.top, s.flight.is_some());
+            }
+            let stair_objs: Vec<(u8, f32, String)> = b.objects.iter().filter(|o| o.script.contains("Stair")).map(|o| (o.level, o.position[1], o.script.rsplit('.').next().unwrap_or("").to_string())).collect();
+            if !stair_objs.is_empty() {
+                println!("  stair objects {stair_objs:?}");
+            }
             for ((lv, k), (n, lo, hi, regions)) in by {
                 println!("  storey {lv} kind {k}: {n} tiles, y {lo:.2}..{hi:.2}, regions {regions:?}");
             }

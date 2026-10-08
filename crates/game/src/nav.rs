@@ -383,7 +383,7 @@ fn mark_obstacle(grid: &mut NavGrid, gt: &GlobalTransform, ob: &Obstacle) {
 }
 
 /// Builds the walk grids of the upper floors: cells with floor, minus walls and furniture there.
-fn rebuild_upper(b: &crate::building::ActiveBuilding, upper: &mut UpperFloors, obstacles: &Query<(&GlobalTransform, &Obstacle, Option<&Floor>)>) {
+pub fn rebuild_upper(b: &crate::building::ActiveBuilding, upper: &mut UpperFloors, obstacles: &Query<(&GlobalTransform, &Obstacle, Option<&Floor>)>) {
     upper.grids.clear();
     upper.stairs = b.stairs.clone();
     for level in 2..=b.top_level {
@@ -604,7 +604,14 @@ pub fn walk_style(r: &RouteSense, roll: f32) -> WalkStyle {
 /// Standing height on a floor at a point: the house floor or the terrain.
 pub fn floor_height(world: &crate::loading::WorldInfo, building: Option<&crate::building::ActiveBuilding>, level: u8, p: Vec3) -> f32 {
     match building {
-        Some(b) if level > 1 => b.floor_y(level, p).unwrap_or_else(|| b.levels.get(level as usize).copied().unwrap_or(p.y)),
+        // (The house's floor, or the floor of the lot being visited.)
+        Some(b) if level > 1 => b
+            .floor_y(level, p)
+            .or_else(|| b.away.as_deref().and_then(|a| a.floor_y(level, p)))
+            .unwrap_or_else(|| match b.away.as_deref().filter(|a| a.local(p).cmpge(Vec2::ZERO).all() && a.local(p).cmple(Vec2::new(a.data.width as f32, a.data.depth as f32)).all()) {
+                Some(a) => a.levels.get(level as usize).copied().unwrap_or(p.y),
+                None => b.levels.get(level as usize).copied().unwrap_or(p.y),
+            }),
         _ => crate::building::walk_height(world, building, p),
     }
 }

@@ -1544,7 +1544,7 @@ fn run_actions(
         // Out on a community lot: its walk grid and way out.
         let away = on_lot.and_then(|o| visited.as_deref().filter(|v| v.lot == o.0));
         let (my_grid, my_upper): (&NavGrid, Option<&UpperFloors>) = match away {
-            Some(v) => (&v.grid, None),
+            Some(v) => (&v.grid, Some(&v.upper)),
             None => (&grid, upper.as_deref()),
         };
         let way_out = away.map(|v| v.exit).or_else(|| exit.as_ref().map(|e| e.0));

@@ -104,8 +104,13 @@ pub fn lot_title(lot: &LotInfo, display: &str) -> String {
     if !display.is_empty() && display != lot.internal_name {
         return display.split(" — ").next().unwrap_or(display).to_string();
     }
-    let raw = lot.internal_name.trim_start_matches("Com_").trim_start_matches("com_");
-    let raw = raw.split('_').next().unwrap_or(raw);
+    // (The name's first word that says what it is: past "Com_", "RH_", "Shell_" and the like,
+    // whatever their case.)
+    let raw = lot
+        .internal_name
+        .split('_')
+        .find(|p| !p.is_empty() && !["com", "res", "rh", "shell", "bb"].contains(&p.to_ascii_lowercase().as_str()))
+        .unwrap_or(&lot.internal_name);
     let mut out = String::new();
     for (i, ch) in raw.chars().enumerate() {
         if i > 0 && ch.is_uppercase() {

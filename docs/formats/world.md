@@ -453,6 +453,17 @@ the post at either end (else the nearest before it). [VERIFIED by eye on the Fri
 Landgraab and Bachelor lots: privacy fences right round, a garden's edging, brick walls with
 iron railings]
 
+Bridgeport (EP3) towers: a rooftop club or penthouse is a storey whose floor stands at the top
+of a tower (the Celebrity Club's storey 2 is 57 m above its ground floor), reached by an
+elevator object on each floor; take a storey's height from its floor tiles even that far up
+when the lot has an elevator. Staircases there come in a version 6 record (`0x04A09283`): four
+u16 style references where version 3 has one (the first is the stairs' CSTR), and a u32 more
+after the railings; their bottom/top levels don't count the tower's storeys, so take the
+bottom from the stair object's own storey (the record's id is the object's). Apartments and
+storefronts stand inside building-shell objects (`Sims3.Gameplay.Objects.Shells.*`, e.g.
+`ShellBldngCivicSml20x32x24Var1B`), cut away in close-up as walls are. [VERIFIED on the
+Celebrity Club: elevator to the rooftop at 91.8 m, stairs up to 94.8 m]
+
 Sunset Valley totals: 10,119 objects; 406 tree objects carrying 5,596 tree instances; script classes
 include windows/doors/stairs/street lights/mailboxes/parking spaces/rabbit holes.
 

@@ -274,9 +274,13 @@ installation is unreachable.
 - **Out on the town**: Sims drive to the parks, the library, the gym, the beach and the
   other community lots (from the lot's pie menu or its map tag) and use what's there: chess
   tables, computers, bookshelves, swings, grills, restrooms. Each lot gets its own walk grid
-  and floors, its walls come down as the camera moves in, Sims on it keep to it in their own
-  choices, townies turn up during the day to use the place too (and to meet), and "Go Home"
-  drives them back while the household carries on at home.
+  and floors, upstairs as well (reached by its stairs and elevators: Bridgeport's rooftop
+  clubs at the top of their towers, the camera rising with the Sim and the floors above
+  them out of the way), its walls come down as the camera moves in, Sims on it keep to it in
+  their own choices, townies turn up during the day to use the place too (and to meet), and
+  "Go Home" drives them back while the household carries on at home. Bridgeport's
+  apartments and storefronts stand inside building shells, taken away like walls and roof
+  when the camera comes in close.
 - **Sim panel tabs**, as the game's: Needs; Skills (each skill learned with its icon, level
   and progress to the next); Career (the job and level, hours, days and pay, the performance
   meter and the next promotion, and how they go about their work: normally, working hard —
