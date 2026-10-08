@@ -22,10 +22,13 @@ use crate::{AppState, PlayMode};
 
 pub struct BuyHudPlugin;
 
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct CatalogueControls;
+
 impl Plugin for BuyHudPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(PlayMode::Live), spawn_buy_hud)
-            .add_systems(Update, (show, catalogue_controls, tools, fill_catalogue, preview_panel).chain().run_if(in_state(PlayMode::Live)).run_if(resource_exists::<BuyHud>));
+        app.add_systems(OnEnter(PlayMode::Live), spawn_buy_hud.after(crate::buy::reset_buy_mode))
+            .add_systems(Update, (show, catalogue_controls.in_set(CatalogueControls), tools, fill_catalogue, preview_panel).chain().after(crate::hud::pointer_over_ui).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<BuyHud>));
     }
 }
 
@@ -83,6 +86,9 @@ const PREVIEW_BUFF: u32 = 0x06e2_336d;
 /// and the backgrounds shown closed (0x30x) and open (0x20x).
 const ITEM_GRID: u32 = 0x0a5f_e43c;
 const EXPAND: u32 = 0x0a65_20dd;
+const SCROLL_UP: u32 = 0x0600_0000;
+const SCROLL_DOWN: u32 = 0x0600_0001;
+const SCROLLBAR: u32 = 0x0600_0002;
 const GRID_CLOSED: [u32; 2] = [0x301, 0x302];
 const GRID_OPEN: [u32; 2] = [0x201, 0x202];
 /// A catalogue cell's thumbnail (`BuyCatalogItem`, `CatalogPreviewPresetItem`).
@@ -253,12 +259,12 @@ fn showing(buy: &BuyMode) -> bool {
 }
 
 /// In buy mode the layout comes up in place of the HUD's puck.
-fn show(hud: Res<BuyHud>, live: Option<Res<LiveHud>>, buy: Res<BuyMode>, mut vis: Query<&mut Visibility>, mut was: Local<Option<bool>>) {
+fn show(hud: Res<BuyHud>, live: Option<Res<LiveHud>>, buy: Res<BuyMode>, mut vis: Query<&mut Visibility>, mut was: Local<Option<(Option<Entity>, bool)>>) {
     let on = showing(&buy);
-    if *was == Some(on) {
+    if *was == Some((hud.s.root, on)) {
         return;
     }
-    *was = Some(on);
+    *was = Some((hud.s.root, on));
     set_visible(&mut vis, hud.s.root, on);
     if let Some(l) = live {
         set_visible(&mut vis, l.puck.root, !on);
@@ -274,7 +280,10 @@ fn catalogue_controls(
     ui: Option<Res<UiAssets>>,
     clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
     (tabs, picks): (Query<(&Interaction, &Tab), Changed<Interaction>>, Query<(&Interaction, &RoomPick), Changed<Interaction>>),
-    hovered: Query<&Interaction>,
+    areas: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform, &InheritedVisibility)>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    scrollbars: Query<&crate::layout::UiScrollBar>,
+    buttons: Query<&UiButton>,
     mut wheel: MessageReader<MouseWheel>,
     mut play: MessageWriter<crate::sound::PlaySound>,
 ) {
@@ -285,6 +294,12 @@ fn catalogue_controls(
     let Some(ui) = ui else { return };
     let cat = &ui.baked().buy;
     let h = &mut *hud;
+    if let Some(bar) = h.grids[h.by_room as usize].id(SCROLLBAR).and_then(|e| scrollbars.get(e).ok())
+        && h.scroll != bar.value
+    {
+        h.scroll = bar.value;
+        h.dirty = true;
+    }
     let mut click = |h: &mut BuyHud| {
         h.scroll = 0;
         h.dirty = true;
@@ -334,17 +349,21 @@ fn catalogue_controls(
         }
     }
     let k = h.by_room as usize;
-    if pressed(&clicks, h.grids[k].id(EXPAND)) {
+    if pressed(&clicks, h.grids[k].id(EXPAND)) && h.grids[k].id(EXPAND).and_then(|e| buttons.get(e).ok()).is_some_and(|b| !b.disabled) {
         h.expanded = !h.expanded;
         h.scroll = 0;
         h.dirty = true;
     }
-    // A row at a time with the wheel over the grid.
-    let over = h.grids[k].id(ITEM_GRID).and_then(|g| hovered.get(g).ok()).is_some_and(|i| *i != Interaction::None);
-    if over && scrolled != 0.0 {
+    // Hit the whole grid, including its thumbnails: a child under the pointer can swallow
+    // the grid window's Interaction. Both its arrows and the wheel move one row at a time.
+    let grid = h.grids[k].id(ITEM_GRID);
+    let over = windows.single().ok().is_some_and(|w| over_window(grid, &areas, w));
+    let up = pressed(&clicks, grid.and_then(|g| h.grids[k].within(g, SCROLL_UP)));
+    let down = pressed(&clicks, grid.and_then(|g| h.grids[k].within(g, SCROLL_DOWN)));
+    if up || down || over && scrolled != 0.0 {
         let rows = h.count.div_ceil(h.columns.max(1));
         let most = rows.saturating_sub(h.rows);
-        let to = if scrolled > 0.0 { h.scroll.saturating_sub(1) } else { (h.scroll + 1).min(most) };
+        let to = if up || over && scrolled > 0.0 { h.scroll.saturating_sub(1) } else { (h.scroll + 1).min(most) };
         if to != h.scroll {
             h.scroll = to;
             h.dirty = true;
@@ -357,13 +376,14 @@ fn catalogue_controls(
 fn listed<'a>(catalog: &'a Catalog, flags: &HashMap<Key, ObjBuy>, keep: impl Fn(&ObjBuy) -> bool) -> Vec<&'a CatalogEntry> {
     let mut v: Vec<&CatalogEntry> = catalog.entries.iter().filter(|e| e.price > 0 && e.opening.is_none() && !e.shell && !e.name.is_empty() && flags.get(&e.key).is_some_and(&keep)).collect();
     v.sort_by(|a, b| a.price.cmp(&b.price).then(a.name.cmp(&b.name)));
-    v.dedup_by(|a, b| a.name == b.name);
+    let mut names = std::collections::HashSet::new();
+    v.retain(|e| names.insert(e.name.as_str()));
     v
 }
 
 /// The tools: hand, sledgehammer (sells what's clicked), eyedropper and design tool (`buy`'s), lit
 /// for the one in hand; those without a use here greyed.
-fn tools(hud: Res<BuyHud>, mut commands: Commands, mut buy: ResMut<BuyMode>, clicks: Query<(Entity, &Interaction), Changed<Interaction>>, mut buttons: Query<&mut UiButton>) {
+fn tools(hud: Res<BuyHud>, mut commands: Commands, mut buy: ResMut<BuyMode>, clock: Res<crate::clock::GameClock>, clicks: Query<(Entity, &Interaction), Changed<Interaction>>, mut buttons: Query<&mut UiButton>) {
     if !showing(&buy) {
         return;
     }
@@ -376,6 +396,12 @@ fn tools(hud: Res<BuyHud>, mut commands: Commands, mut buy: ResMut<BuyMode>, cli
         buy.drop_tools(&mut commands);
         buy.selling = on;
     }
+    if pressed(&clicks, s.id(DAY_NIGHT)) {
+        buy.toggle_lighting(clock.hour_f());
+    }
+    if pressed(&clicks, s.id(INDOOR_GRID)) {
+        buy.hide_grid = !buy.hide_grid;
+    }
     let styling = buy.styling();
     let lit = [
         (TOOL_HAND, !buy.selling && !buy.eyedropper && !styling, false),
@@ -384,8 +410,8 @@ fn tools(hud: Res<BuyHud>, mut commands: Commands, mut buy: ResMut<BuyMode>, cli
         (TOOL_DESIGN, styling, buy.placing.is_none()),
         (UNDO, false, true),
         (REDO, false, true),
-        (DAY_NIGHT, false, true),
-        (INDOOR_GRID, false, true),
+        (DAY_NIGHT, !(6.0..20.0).contains(&buy.lighting_hour(clock.hour_f())), false),
+        (INDOOR_GRID, !buy.hide_grid, false),
         (BLUEPRINT, false, true),
         (FAMILY_INVENTORY, false, true),
         (COLLECTIONS, false, true),
@@ -419,6 +445,7 @@ fn fill_catalogue(
     (catalog, mut game_ui): (Res<Catalog>, Option<ResMut<crate::icons::GameUi>>),
     windows: Query<&Window, With<PrimaryWindow>>,
     (mut vis, mut nodes, mut buttons): (Query<&mut Visibility>, Query<&mut Node>, Query<&mut UiButton>),
+    mut scrollbars: Query<&mut crate::layout::UiScrollBar>,
     mut held: Local<Option<Key>>,
 ) {
     if !showing(&buy) {
@@ -603,6 +630,7 @@ fn fill_catalogue(
         && let Ok(mut n) = nodes.get_mut(e)
     {
         n.width = Val::Px(width);
+        n.overflow = Overflow::visible();
     }
     // Expanded: up to six rows, growing upwards.
     let item_rows = count.div_ceil(columns);
@@ -612,6 +640,30 @@ fn fill_catalogue(
     h.count = count;
     h.scroll = h.scroll.min(item_rows.saturating_sub(rows));
     let gs = &h.grids[k];
+    // The custom grid's host is clipped in its source layout. Expanded rows deliberately
+    // extend above it; only the actual item grid clips thumbnails to its visible rows.
+    if let Some(e) = h.s.id(if h.by_room { GRID_BY_ROOM } else { GRID_BY_FUNCTION })
+        && let Ok(mut node) = nodes.get_mut(e)
+    {
+        node.overflow = Overflow::visible();
+    }
+    if !h.by_room && let Some(e) = h.s.id(TABS_BY_FUNCTION) && let Ok(mut node) = nodes.get_mut(e) {
+        node.top = Val::Px(tab_area[1] - (rows - CLOSED_ROWS) as f32 * step.y);
+    }
+    let scrollbar = gs.id(SCROLLBAR);
+    set_visible(&mut vis, scrollbar, item_rows > rows);
+    if let Some(e) = scrollbar {
+        if let Ok(mut bar) = scrollbars.get_mut(e) {
+            bar.value = h.scroll;
+            bar.total = item_rows;
+            bar.visible = rows;
+        }
+        if let Ok(mut node) = nodes.get_mut(e) {
+            node.top = Val::Px(1.0);
+            node.bottom = Val::Px(2.0);
+            node.height = Val::Auto;
+        }
+    }
     if let Some(root) = gs.root
         && let Ok(mut n) = nodes.get_mut(root)
     {
@@ -636,6 +688,14 @@ fn fill_catalogue(
     let Some(grid) = gs.id(ITEM_GRID) else { return };
     if let Ok(mut n) = nodes.get_mut(grid) {
         n.overflow = Overflow::clip();
+    }
+    for (id, disabled) in [(SCROLL_UP, h.scroll == 0), (SCROLL_DOWN, h.scroll >= item_rows.saturating_sub(rows))] {
+        if let Some(e) = gs.within(grid, id)
+            && let Ok(mut b) = buttons.get_mut(e)
+            && b.disabled != disabled
+        {
+            b.disabled = disabled;
+        }
     }
     let holder = holder(&mut commands, grid, &mut h.cells, &vis);
     let Some(template) = ui.layout("BuyCatalogItem").cloned() else { return };
@@ -694,6 +754,17 @@ fn lines(s: &str, width: f32, char_width: f32) -> f32 {
     s.split('\n').map(|p| p.chars().count().div_ceil(per).max(1)).sum::<usize>() as f32
 }
 
+/// Tests the pointer against a visible window in physical UI coordinates. This works when
+/// its children own hover, and when the OS scales the window for a high-DPI display.
+fn over_window(e: Option<Entity>, areas: &Query<(&ComputedNode, &bevy::ui::UiGlobalTransform, &InheritedVisibility)>, window: &Window) -> bool {
+    let Some((node, tf, vis)) = e.and_then(|e| areas.get(e).ok()) else { return false };
+    if !vis.get() {
+        return false;
+    }
+    let Some(p) = window.physical_cursor_position().and_then(|p| tf.try_inverse().map(|i| i.transform_point2(p))) else { return false };
+    p.abs().cmple(node.size() * 0.5).all()
+}
+
 /// The preview panel over the catalogue for the object in hand: its picture, name, price (red
 /// when it can't be afforded), description, and its designs (the one it's in lit), sized to
 /// what it shows as `SetWorkingProduct` sizes it.
@@ -707,9 +778,13 @@ fn preview_panel(
     (catalog, household, mut game_ui): (Res<Catalog>, Option<Res<crate::interact::Household>>, Option<ResMut<crate::icons::GameUi>>),
     (data, mut assets, mut meshes, mut mats): (Res<crate::baked::Baked>, ResMut<crate::objects::ObjectAssets>, ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>),
     (mut vis, mut nodes, mut texts, mut colors): (Query<&mut Visibility>, Query<&mut Node>, Query<&mut Text>, Query<&mut TextColor>),
-    hovered: Query<&Interaction>,
+    areas: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform, &InheritedVisibility)>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
+    mut buttons: Query<&mut UiButton>,
     mut wheel: MessageReader<MouseWheel>,
     over_ui: Res<crate::hud::PointerOverUi>,
+    mut last_funds: Local<Option<i64>>,
 ) {
     let scrolled: f32 = wheel.read().map(|w| w.y.signum()).sum();
     let what = buy.placing.as_ref().filter(|_| showing(&buy)).map(|p| (p.objd, p.design));
@@ -717,21 +792,26 @@ fn preview_panel(
     // (Away while the pointer's out in the world putting it down, back when it's over the
     // panels again, as the game's.)
     let panel = h.s.id(PREVIEW);
-    if what.is_some() && h.previewing == what {
-        set_visible(&mut vis, panel, over_ui.0);
-    }
-    let presets_over = h.s.id(PREVIEW_PRESETS).and_then(|g| hovered.get(g).ok()).is_some_and(|i| *i != Interaction::None);
+    set_visible(&mut vis, panel, what.is_some() && over_ui.0);
+    let grid = h.s.id(PREVIEW_PRESETS);
+    let presets_over = windows.single().ok().is_some_and(|w| over_window(grid, &areas, w));
+    let up = pressed(&clicks, grid.and_then(|g| h.s.within(g, SCROLL_UP)));
+    let down = pressed(&clicks, grid.and_then(|g| h.s.within(g, SCROLL_DOWN)));
     let mut rescroll = false;
-    if presets_over && scrolled != 0.0 {
+    if up || down || presets_over && scrolled != 0.0 {
         let n = what.map_or(0, |(k, _)| {
             let ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
             crate::objects::ObjectAssets::design_count(&ctx, k) as usize
         });
-        let to = if scrolled > 0.0 { h.preset_scroll.saturating_sub(1) } else { (h.preset_scroll + 1).min(n.saturating_sub(4)) };
+        let columns = ui.as_ref().and_then(|u| u.find("Buy", PREVIEW_PRESETS)?.grid).map_or(4, |g| g.columns.max(1) as usize);
+        let to = if up || presets_over && scrolled > 0.0 { h.preset_scroll.saturating_sub(1) } else { (h.preset_scroll + 1).min(n.saturating_sub(columns)) };
         rescroll = to != h.preset_scroll;
         h.preset_scroll = to;
     }
-    if h.previewing == what && !rescroll {
+    let funds = household.as_ref().map(|h| h.funds);
+    let funds_changed = *last_funds != funds;
+    *last_funds = funds;
+    if h.previewing == what && !rescroll && !funds_changed {
         return;
     }
     if h.previewing.map(|p| p.0) != what.map(|p| p.0) {
@@ -742,7 +822,7 @@ fn preview_panel(
         set_visible(&mut vis, panel, false);
         return;
     };
-    set_visible(&mut vis, panel, true);
+    set_visible(&mut vis, panel, over_ui.0);
     let price = entry.price.max(0) as i64;
     let afford = household.as_ref().is_none_or(|hh| hh.funds >= price) || buy.placing.as_ref().is_some_and(|p| p.owned);
     let desc = h.descriptions.get(&objd).cloned().unwrap_or_default();
@@ -783,6 +863,16 @@ fn preview_panel(
         set_visible(&mut vis, h.s.id(PREVIEW_GRID_HOLDER), true);
         set_visible(&mut vis, h.s.id(PREVIEW_PATTERNS), false);
         if let (Some(gr), Some(g), Some(template)) = (grid, ui.find("Buy", PREVIEW_PRESETS).and_then(|w| w.grid), ui.layout("CatalogPreviewPresetItem").cloned()) {
+            let columns = g.columns.max(1) as usize;
+            h.preset_scroll = h.preset_scroll.min((n as usize).saturating_sub(columns));
+            for (id, disabled) in [(SCROLL_UP, h.preset_scroll == 0), (SCROLL_DOWN, h.preset_scroll + columns >= n as usize)] {
+                if let Some(e) = h.s.within(gr, id)
+                    && let Ok(mut b) = buttons.get_mut(e)
+                    && b.disabled != disabled
+                {
+                    b.disabled = disabled;
+                }
+            }
             if let Ok(mut node) = nodes.get_mut(gr) {
                 node.overflow = Overflow::clip();
             }

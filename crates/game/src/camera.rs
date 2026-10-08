@@ -14,7 +14,7 @@ pub struct CameraPlugin;
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::InGame), spawn_camera)
-            .add_systems(Update, camera_control.run_if(in_state(AppState::InGame)));
+            .add_systems(Update, camera_control.after(crate::hud::pointer_over_ui).run_if(in_state(AppState::InGame)));
     }
 }
 
@@ -105,6 +105,7 @@ fn camera_control(
     scroll: Res<AccumulatedMouseScroll>,
     world: Res<CurrentWorld>,
     mut q: Query<(&mut SimsCamera, &mut Transform)>,
+    over_ui: Option<Res<crate::hud::PointerOverUi>>,
 ) {
     let Ok((mut cam, mut tf)) = q.single_mut() else { return };
     let dt = time.delta_secs();
@@ -114,7 +115,7 @@ fn camera_control(
         MouseScrollUnit::Line => scroll.delta.y,
         MouseScrollUnit::Pixel => scroll.delta.y / 40.0,
     };
-    if wheel != 0.0 {
+    if wheel != 0.0 && !over_ui.is_some_and(|p| p.0) {
         cam.distance = (cam.distance * (1.0 - wheel * 0.12)).clamp(3.0, 900.0);
     }
     if keys.pressed(KeyCode::KeyZ) || keys.pressed(KeyCode::Equal) {
@@ -135,10 +136,10 @@ fn camera_control(
     if keys.pressed(KeyCode::KeyE) {
         cam.yaw -= dt * 1.6;
     }
-    if keys.pressed(KeyCode::PageUp) {
+    if keys.pressed(KeyCode::KeyT) {
         cam.pitch = (cam.pitch + dt).min(1.5);
     }
-    if keys.pressed(KeyCode::PageDown) {
+    if keys.pressed(KeyCode::KeyG) {
         cam.pitch = (cam.pitch - dt).max(0.12);
     }
 

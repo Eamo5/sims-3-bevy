@@ -13,13 +13,14 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::text::LineHeight;
 use bevy::ui::FocusPolicy;
-use s3bake::ui::{ANCHOR_BOTTOM, ANCHOR_LEFT, ANCHOR_RIGHT, ANCHOR_TOP, TextStyle, UiBaked, UiDrawable, UiPlace, UiWindow, WIN_CLIP, WIN_ENABLED, WIN_IGNORE_MOUSE};
+use s3bake::ui::{ANCHOR_BOTTOM, ANCHOR_LEFT, ANCHOR_RIGHT, ANCHOR_TOP, TextStyle, UiBaked, UiDrawable, UiPlace, UiWindow, WIN_CLIP, WIN_ENABLED, WIN_IGNORE_MOUSE, WIN_VISIBLE};
 
 pub struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, open_ui.after(crate::load_ui_font)).add_systems(Update, (open_ui_when_baked, set_icons, select_marked.before(button_states), button_states, fill_bars));
+        app.add_systems(Startup, open_ui.after(crate::load_ui_font)).add_systems(Update, (open_ui_when_baked, set_icons, select_marked.before(button_states), button_states, fill_bars))
+            .add_systems(Update, scrollbars.before(crate::buyhud::CatalogueControls));
     }
 }
 
@@ -88,6 +89,97 @@ pub struct UiButton {
 /// the household's faces on the skewer).
 #[derive(Component, Clone, Copy)]
 pub struct UiPicture(pub Entity);
+
+/// A skinned scrollbar. Its controller supplies the total and visible rows (or columns),
+/// and reads `value` after the arrows, track or thumb have been used.
+#[derive(Component)]
+pub struct UiScrollBar {
+    pub value: usize,
+    pub total: usize,
+    pub visible: usize,
+    vertical: bool,
+    min_thumb: f32,
+    thumb: Entity,
+    up: Entity,
+    down: Entity,
+    grab: Option<f32>,
+}
+
+fn scroll_geometry(length: f32, arrow: f32, total: usize, visible: usize, minimum: f32, value: usize) -> (f32, f32, f32) {
+    let track = (length - arrow * 2.0).max(0.0);
+    let thumb = (track * visible as f32 / total.max(1) as f32).max(minimum).min(track);
+    let travel = track - thumb;
+    let start = arrow + travel * value.min(total.saturating_sub(visible)) as f32 / total.saturating_sub(visible).max(1) as f32;
+    (start, thumb, travel)
+}
+
+#[allow(clippy::type_complexity)]
+fn scrollbars(
+    mut bars: Query<(Entity, &mut UiScrollBar, &ComputedNode, &bevy::ui::UiGlobalTransform, &InheritedVisibility)>,
+    interactions: Query<&Interaction>,
+    clicks: Query<&Interaction, Changed<Interaction>>,
+    mut nodes: Query<&mut Node>,
+    mut buttons: Query<&mut UiButton>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+) {
+    let Ok(window) = windows.single() else { return };
+    for (e, mut bar, computed, tf, visibility) in &mut bars {
+        if !visibility.get() {
+            bar.grab = None;
+            continue;
+        }
+        let size = computed.size();
+        let length = if bar.vertical { size.y } else { size.x };
+        let arrow = if bar.vertical { size.x } else { size.y };
+        let maximum = bar.total.saturating_sub(bar.visible);
+        bar.value = bar.value.min(maximum);
+        if clicks.get(bar.up).is_ok_and(|i| *i == Interaction::Pressed) {
+            bar.value = bar.value.saturating_sub(1);
+        }
+        if clicks.get(bar.down).is_ok_and(|i| *i == Interaction::Pressed) {
+            bar.value = (bar.value + 1).min(maximum);
+        }
+        let minimum = bar.min_thumb / computed.inverse_scale_factor();
+        let (start, thumb, travel) = scroll_geometry(length, arrow, bar.total, bar.visible, minimum, bar.value);
+        let point = window.physical_cursor_position().and_then(|p| tf.try_inverse().map(|i| i.transform_point2(p) + size * 0.5));
+        if let Some(p) = point {
+            let along = if bar.vertical { p.y } else { p.x };
+            let over = interactions.get(e).is_ok_and(|i| *i != Interaction::None) || interactions.get(bar.thumb).is_ok_and(|i| *i != Interaction::None);
+            if mouse.just_pressed(MouseButton::Left) && over && along >= arrow && along <= length - arrow {
+                if (start..=start + thumb).contains(&along) {
+                    bar.grab = Some(along - start);
+                } else if along < start {
+                    bar.value = bar.value.saturating_sub(bar.visible.max(1));
+                } else {
+                    bar.value = (bar.value + bar.visible.max(1)).min(maximum);
+                }
+            }
+            if mouse.pressed(MouseButton::Left) && let Some(grab) = bar.grab && travel > 0.0 {
+                bar.value = (((along - arrow - grab) / travel).clamp(0.0, 1.0) * maximum as f32).round() as usize;
+            }
+        }
+        if !mouse.pressed(MouseButton::Left) {
+            bar.grab = None;
+        }
+        let (start, thumb, _) = scroll_geometry(length, arrow, bar.total, bar.visible, minimum, bar.value);
+        let scale = computed.inverse_scale_factor();
+        if let Ok(mut n) = nodes.get_mut(bar.thumb) {
+            if bar.vertical {
+                n.top = Val::Px(start * scale);
+                n.height = Val::Px(thumb * scale);
+            } else {
+                n.left = Val::Px(start * scale);
+                n.width = Val::Px(thumb * scale);
+            }
+        }
+        for (e, disabled) in [(bar.up, bar.value == 0), (bar.down, bar.value == maximum), (bar.thumb, maximum == 0)] {
+            if let Ok(mut b) = buttons.get_mut(e) && b.disabled != disabled {
+                b.disabled = disabled;
+            }
+        }
+    }
+}
 
 /// A fill bar (`FillBarController`): game code sets `value` (0..1) and the bar's clip window
 /// follows, from the start, the end or the middle (below it in its second colour).
@@ -371,6 +463,24 @@ impl UiAssets {
         for c in w.children.iter().rev() {
             self.spawn_window(commands, images, fonts, c, Some(e), out);
         }
+        if let Some((vertical, minimum, parts)) = &w.scrollbar {
+            let width = size.x.max(1.0);
+            let height = size.y.max(1.0);
+            let arrow = if *vertical { width } else { height };
+            let child = |id: u32, drawable: Option<UiDrawable>, area: [f32; 4], place: UiPlace, button: bool| UiWindow {
+                id, cls: if button { "Button" } else { "Window" }.into(), flags: WIN_VISIBLE | WIN_ENABLED, shade: w.shade, drawable, area, place, ..default()
+            };
+            let skin = |i: usize| parts.get(i).cloned().flatten();
+            let track = child(0, skin(4), if *vertical { [0.0, arrow, 0.0, -arrow] } else { [arrow, 0.0, -arrow, 0.0] }, UiPlace::Simple(15), false);
+            self.spawn_window(commands, images, fonts, &track, Some(e), out);
+            let thumb = child(0, skin(3), if *vertical { [0.0, arrow, width, arrow + minimum] } else { [arrow, 0.0, arrow + minimum, height] }, UiPlace::Fixed, true);
+            let thumb = self.spawn_window(commands, images, fonts, &thumb, Some(e), out);
+            let up = child(0x0600_0000, skin(1), [0.0, 0.0, if *vertical { width } else { arrow }, if *vertical { arrow } else { height }], UiPlace::Fixed, true);
+            let up = self.spawn_window(commands, images, fonts, &up, Some(e), out);
+            let down = child(0x0600_0001, skin(6), if *vertical { [0.0, -arrow, width, 0.0] } else { [-arrow, 0.0, 0.0, height] }, UiPlace::Simple(if *vertical { 6 } else { 9 }), true);
+            let down = self.spawn_window(commands, images, fonts, &down, Some(e), out);
+            commands.entity(e).remove::<Pickable>().insert((Interaction::default(), crate::hud::BlocksWorld, UiScrollBar { value: 0, total: 0, visible: 1, vertical: *vertical, min_thumb: *minimum, thumb, up, down, grab: None }));
+        }
         if let (Some((direction, main, second)), Some(clip)) = (w.fill_bar, out.within(e, FILL_CLIP)) {
             commands.entity(e).insert(UiFillBar { value: 0.0, direction, colors: (color(main), color(second)), size, clip, fill: out.within(e, FILL_FILL) });
         }
@@ -573,5 +683,23 @@ fn button_states(mut buttons: Query<(&Interaction, &UiButton), Or<(Changed<Inter
         {
             img.color = colors[state];
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scroll_thumb_tracks_rows_and_stays_in_the_track() {
+        let (top, size, travel) = scroll_geometry(200.0, 16.0, 20, 4, 30.0, 0);
+        assert_eq!(top, 16.0);
+        assert!((size - 33.6).abs() < 0.001);
+        let (bottom, same_size, same_travel) = scroll_geometry(200.0, 16.0, 20, 4, 30.0, 16);
+        assert_eq!(size, same_size);
+        assert_eq!(travel, same_travel);
+        assert!((bottom + size - 184.0).abs() < 0.001);
+        assert_eq!(scroll_geometry(200.0, 16.0, 20, 4, 30.0, 100), (bottom, size, travel));
+        assert_eq!(scroll_geometry(20.0, 16.0, 0, 4, 30.0, 0), (16.0, 0.0, 0.0));
     }
 }

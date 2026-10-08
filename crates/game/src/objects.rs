@@ -297,6 +297,18 @@ pub fn spawn_parts(commands: &mut Commands, parts: &[ModelPart], transform: Tran
         .id()
 }
 
+/// Recolour the object's mesh children in place. Its rig, lights and contents remain attached.
+pub fn restyle_parts(commands: &mut Commands, root: Entity, parts: &[ModelPart]) {
+    let materials: Vec<_> = parts.iter().map(|p| p.material.clone()).collect();
+    commands.queue(move |world: &mut World| {
+        let children: Vec<Entity> = world.get::<Children>(root).map(|c| c.iter().collect()).unwrap_or_default();
+        let meshes: Vec<Entity> = children.into_iter().filter(|e| world.get::<Mesh3d>(*e).is_some()).collect();
+        for (e, material) in meshes.into_iter().zip(materials) {
+            world.entity_mut(e).insert(MeshMaterial3d(material));
+        }
+    });
+}
+
 /// Combined local-space bounds of a set of parts.
 pub fn parts_bounds(parts: &[ModelPart]) -> Option<(Vec3, Vec3)> {
     let mut it = parts.iter();

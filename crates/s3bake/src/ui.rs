@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackWriter, read_value, write_value};
 
-pub const UI_VERSION: u32 = 8;
+pub const UI_VERSION: u32 = 9;
 pub const T_LAYOUT: u32 = 0x025C95B6;
 pub const T_FONT: u32 = 0x062E9EE0;
 pub const T_IMAGE: u32 = 0x2F7D0004;
@@ -124,6 +124,9 @@ pub struct UiWindow {
     /// A `FillBarController`'s fill: direction (0 from the start, 1 from the middle, 2 from the
     /// end), and its colour (and its colour below the middle).
     pub fill_bar: Option<(u8, u32, u32)>,
+    /// A scrollbar's orientation, minimum thumb size and seven skin pieces. Empty pieces
+    /// retain their positions in the original `ScrollbarMultiDrawable`.
+    pub scrollbar: Option<(bool, f32, Vec<Option<UiDrawable>>)>,
     pub children: Vec<UiWindow>,
 }
 
@@ -185,6 +188,11 @@ impl UiWindow {
         }
         if let Some(d) = &self.drawable {
             of(d, out);
+        }
+        if let Some((_, _, parts)) = &self.scrollbar {
+            for d in parts.iter().flatten() {
+                of(d, out);
+            }
         }
         for c in &self.children {
             c.images(out);
@@ -380,6 +388,11 @@ fn window(o: &XNode) -> Option<UiWindow> {
     }
     if w.cls == "FillBarController" {
         w.fill_bar = Some((val("FillDirection").map_or(0, num) as u8, val("MainColor").map_or(0xffff_ffff, num), val("SecondaryColor").map_or(0xffff_ffff, num)));
+    }
+    if w.cls == "VerticalScrollbar" || w.cls == "HorizontalScrollbar" {
+        if let Some(parts) = props("ScrollbarDrawable").and_then(|p| p.child("object")).and_then(|o| o.children.iter().find(|p| p.attr("name") == Some("Drawables"))) {
+            w.scrollbar = Some((w.cls == "VerticalScrollbar", val("MinThumbSize").and_then(|v| v.parse().ok()).unwrap_or(16.0), parts.children.iter().map(drawable).collect()));
+        }
     }
     if let Some(procs) = props("WinProcs") {
         for p in procs.children.iter().filter(|c| c.name == "object") {
@@ -692,6 +705,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn buy_flags_keep_expansion_subcategories_and_reject_invalid_bits() {
+        let f = ObjBuy { function: 1 << 31, room: 1 << 3, sub: 1 << 63, sub2: 1 | 1 << 63, ..Default::default() };
+        assert!(f.in_category(31));
+        assert!(!f.in_category(32));
+        assert!(f.in_room(3));
+        assert!(!f.in_room(32));
+        assert!(f.in_sub(63));
+        assert!(f.in_sub(64));
+        assert!(f.in_sub(127));
+        assert!(!f.in_sub(65));
+        assert!(!f.in_sub(128));
+        assert!(!f.in_sub(255));
+    }
+
+    #[test]
+    fn reads_scrollbar_skins_without_collapsing_empty_pieces() {
+        let xml = r#"<object cls="VerticalScrollbar"><prop name="Area" value="0,0,16,200"/><prop name="MinThumbSize" value="30"/><prop name="ScrollbarDrawable"><object cls="ScrollbarMultiDrawable"><prop name="Drawables"><value type="object"/><object cls="StdDrawable"><prop name="Image"><value key="2f7d0004:00000000:0000000000000001"/></prop></object><value type="object"/><object cls="StdDrawable"><prop name="Image"><value key="2f7d0004:00000000:0000000000000002"/></prop></object></prop></object></prop></object>"#;
+        let w = window(&parse_xml(xml).unwrap()).unwrap();
+        let (vertical, minimum, parts) = w.scrollbar.as_ref().unwrap();
+        assert!(*vertical);
+        assert_eq!(*minimum, 30.0);
+        assert_eq!(parts.len(), 4);
+        assert!(parts[0].is_none());
+        assert!(parts[1].is_some());
+        assert!(parts[2].is_none());
+        assert!(parts[3].is_some());
+        let mut images = BTreeSet::new();
+        w.images(&mut images);
+        assert!(images.contains(&1));
+        assert!(images.contains(&2));
+    }
+
+    #[test]
     fn reads_a_window() {
         let x = r#"<?xml version="1.0"?><graph class="Layout"><object cls="Window" clsid="0x4ec1b8d8">
             <prop name="WindowFlags" type="uint32" value="0x00002013" />
@@ -781,7 +827,7 @@ pub struct ObjBuy {
 impl ObjBuy {
     /// Whether it's in a function subcategory (by its bit).
     pub fn in_sub(&self, bit: u8) -> bool {
-        if bit < 64 { self.sub & (1u64 << bit) != 0 } else { self.sub2 & (1u64 << (bit - 64).min(63)) != 0 }
+        if bit < 64 { self.sub & (1u64 << bit) != 0 } else { bit < 128 && self.sub2 & (1u64 << (bit - 64)) != 0 }
     }
     pub fn in_category(&self, bit: u8) -> bool {
         bit < 32 && self.function & (1u32 << bit) != 0

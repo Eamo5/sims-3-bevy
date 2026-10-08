@@ -126,11 +126,12 @@ fn update_sky(
     sun: Query<&GlobalTransform, With<DirectionalLight>>,
     mut mats: ResMut<Assets<SkyMaterial>>,
     mut now: ResMut<SkyNow>,
+    buy: Res<crate::buy::BuyMode>,
 ) {
     let Ok((dome, mut tf)) = dome.single_mut() else { return };
     let Ok((cam_tf, fog_q)) = cam.single_mut() else { return };
     tf.translation = cam_tf.translation();
-    let h = clock.as_ref().map_or(12.0, |c| c.hour_f());
+    let h = buy.lighting_hour(clock.as_ref().map_or(12.0, |c| c.hour_f()));
     let minutes = clock.as_ref().map_or(0.0, |c| c.minutes);
     let (rise, set) = weather.as_ref().map_or((6.0, 20.0), |w| w.daylight(minutes));
     let elev = crate::clock::sun_elevation_in(h, rise, set);

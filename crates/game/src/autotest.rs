@@ -163,8 +163,11 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
             .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, (show_designs, show_style), walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, strand_swimmers.run_if(in_state(crate::PlayMode::Live)))
-            .add_systems(PreUpdate, press_key.after(bevy::input::InputSystems).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(PreUpdate, press_key.after(bevy::input::InputSystems).before(crate::buy::toggle_buy).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, buy_pick.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(PreUpdate, ui_click.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(PreUpdate, pointer_script.after(bevy::input::InputSystems).before(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, buy_move_test.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -497,10 +500,88 @@ fn buy_pick(time: Res<Time>, mut q: Query<(&crate::buy::BuyButton, &mut Interact
     }
 }
 
-/// PRESS_KEY=<key>@<seconds>: that key pressed then (and let go a moment later): F1–F12,
+/// UI_CLICK=<hex control id>@<seconds>;...: click visible original-layout controls in order.
+fn ui_click(time: Res<Time>, mut controls: Query<(&crate::layout::UiWin, &InheritedVisibility, &mut Interaction)>, mut step: Local<usize>) {
+    let Some((id, at)) = std::env::var("UI_CLICK").ok().and_then(|v| v.split(';').nth(*step).and_then(|s| s.split_once('@')).and_then(|(id, at)| Some((u32::from_str_radix(id.trim().trim_start_matches("0x"), 16).ok()?, at.parse::<f32>().ok()?)))) else { return };
+    if time.elapsed_secs() < at {
+        return;
+    }
+    if let Some((_, _, mut interaction)) = controls.iter_mut().find(|(w, v, _)| w.0 == id && v.get()) {
+        *interaction = Interaction::Pressed;
+        info!("autotest: UI control {id:08X} clicked");
+        *step += 1;
+    }
+}
+
+/// CLICK_AT=<x,y>@<seconds>;...: window-relative clicks through the real input path.
+/// CURSOR_AT uses the same format to move the pointer without clicking.
+fn pointer_script(time: Res<Time>, mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>, mut mouse: ResMut<ButtonInput<MouseButton>>, mut step: Local<usize>, mut release: Local<bool>) {
+    if *release {
+        mouse.release(MouseButton::Left);
+        *release = false;
+        *step += 1;
+        return;
+    }
+    let script = std::env::var("CLICK_AT").ok().map(|s| (s, true)).or_else(|| std::env::var("CURSOR_AT").ok().map(|s| (s, false)));
+    let Some((script, click)) = script else { return };
+    let Some((xy, at)) = script.split(';').nth(*step).and_then(|s| s.split_once('@')) else { return };
+    let Some((x, y)) = xy.split_once(',').and_then(|(x, y)| Some((x.parse::<f32>().ok()?, y.parse::<f32>().ok()?))) else { return };
+    if time.elapsed_secs() < at.parse::<f32>().unwrap_or(10.0) {
+        return;
+    }
+    let Ok(mut window) = windows.single_mut() else { return };
+    window.set_cursor_position(Some(Vec2::new(x, y)));
+    if click {
+        mouse.press(MouseButton::Left);
+        *release = true;
+    } else {
+        *step += 1;
+    }
+    info!("autotest: pointer at {x},{y} (click {click})");
+}
+
+/// BUY_MOVE_TEST=move|cancel: pick up furniture with upgrades and breakage, then assert that a
+/// CLICK_AT placement (or Escape cancellation) retains its identity and its gameplay state.
+#[allow(clippy::type_complexity)]
+fn buy_move_test(
+    mut commands: Commands,
+    time: Res<Time>,
+    buy: Res<crate::buy::BuyMode>,
+    objects: Query<(Entity, &crate::interact::GameObject, &Transform, Option<&crate::upgrades::Upgrades>, Has<crate::interact::Broken>, Has<crate::buy::HeldObject>, Option<&crate::interact::UsedBy>, Option<&crate::nav::Floor>)>,
+    mut picked: Local<Option<(Entity, Vec3)>>,
+    mut stage: Local<u8>,
+) {
+    let Ok(expect) = std::env::var("BUY_MOVE_TEST") else { return };
+    if *stage == 0 && buy.active && time.elapsed_secs() > 6.0 {
+        if let Some((e, _, tf, ..)) = objects.iter().filter(|(_, o, _, _, _, _, used, floor)| o.price > 0 && floor.is_none_or(|f| f.0 <= 1) && used.is_none_or(|u| u.0.is_none())).min_by_key(|(_, o, ..)| !matches!(o.kind, crate::interact::ObjectKind::Tv | crate::interact::ObjectKind::Shower | crate::interact::ObjectKind::Computer | crate::interact::ObjectKind::Sink)) {
+            *picked = Some((e, tf.translation));
+            commands.entity(e).insert((crate::upgrades::Upgrades(3), crate::interact::Broken));
+            commands.insert_resource(crate::buy::PickupRequest(e));
+            *stage = 1;
+            info!("autotest: move probe picked {e:?}");
+        }
+    } else if *stage == 1 && let Some((e, _)) = *picked && objects.get(e).is_ok_and(|(_, _, _, _, _, held, ..)| held) {
+        *stage = 2;
+    } else if *stage == 2 && buy.placing.is_none() && time.elapsed_secs() > 9.0 {
+        let (e, before) = picked.unwrap();
+        let (_, _, tf, upgrades, broken, held, ..) = objects.get(e).expect("moving furniture must retain its original entity");
+        assert!(!held, "the original object must be returned to play");
+        assert!(broken, "moving must preserve breakage");
+        assert_eq!(upgrades.map(|u| u.0), Some(3), "moving must preserve upgrades");
+        let moved = tf.translation.distance(before) > 0.1;
+        assert_eq!(moved, expect == "move", "move/cancel outcome");
+        info!("autotest: move probe PASS — entity, upgrades and breakage retained; moved {moved}");
+        *stage = 3;
+    }
+    if time.elapsed_secs() > 11.0 {
+        assert_eq!(*stage, 3, "the move probe must complete, rather than silently skipping");
+    }
+}
+
+/// PRESS_KEY=<key>@<seconds>;...: keys pressed in order (and let go a moment later): F1–F12,
 /// PrintScreen, PageUp, PageDown, Escape, Home, a letter or a digit.
 fn press_key(time: Res<Time>, mut keys: ResMut<ButtonInput<KeyCode>>, mut done: Local<u8>) {
-    let Some((k, at)) = std::env::var("PRESS_KEY").ok().and_then(|v| v.split_once('@').map(|(k, t)| (k.to_string(), t.parse::<f32>().unwrap_or(10.0)))) else { return };
+    let Some((k, at)) = std::env::var("PRESS_KEY").ok().and_then(|v| v.split(';').nth(*done as usize / 2).and_then(|s| s.split_once('@')).map(|(k, t)| (k.to_string(), t.parse::<f32>().unwrap_or(10.0)))) else { return };
     const F: [KeyCode; 12] = [KeyCode::F1, KeyCode::F2, KeyCode::F3, KeyCode::F4, KeyCode::F5, KeyCode::F6, KeyCode::F7, KeyCode::F8, KeyCode::F9, KeyCode::F10, KeyCode::F11, KeyCode::F12];
     const LETTERS: [KeyCode; 26] = [
         KeyCode::KeyA, KeyCode::KeyB, KeyCode::KeyC, KeyCode::KeyD, KeyCode::KeyE, KeyCode::KeyF, KeyCode::KeyG, KeyCode::KeyH, KeyCode::KeyI, KeyCode::KeyJ, KeyCode::KeyK, KeyCode::KeyL, KeyCode::KeyM,
@@ -517,14 +598,14 @@ fn press_key(time: Res<Time>, mut keys: ResMut<ButtonInput<KeyCode>>, mut done: 
         d if d.len() == 1 && d.as_bytes()[0].is_ascii_digit() => DIGITS[(d.as_bytes()[0] - b'0') as usize],
         _ => KeyCode::Escape,
     };
-    match *done {
+    match *done % 2 {
         0 if time.elapsed_secs() > at => {
             keys.press(key);
-            *done = 1;
+            *done += 1;
         }
         1 => {
             keys.release(key);
-            *done = 2;
+            *done += 1;
         }
         _ => {}
     }

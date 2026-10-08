@@ -325,9 +325,16 @@ pub fn drive_skeletons(
             player.step = step;
             if let Some(name) = next {
                 if name != player.name || changed {
-                    // Snapshot the current pose for a cross-fade.
-                    player.from = skel.joints.iter().map(|j| joints.get(*j).copied().unwrap_or_default()).collect();
-                    player.blend = 1.0;
+                    // There is no previous animated pose on spawn. Start straight in the
+                    // first clip; a cross-fade from the bind pose would freeze a paused
+                    // game's newly loaded Sims in a T-pose until time was resumed.
+                    if player.clip.is_some() {
+                        player.from = skel.joints.iter().map(|j| joints.get(*j).copied().unwrap_or_default()).collect();
+                        player.blend = 1.0;
+                    } else {
+                        player.from.clear();
+                        player.blend = 0.0;
+                    }
                 }
                 player.clip = lib.get(&data, &name);
                 debug!("{} plays {name}", sim.first);

@@ -621,6 +621,19 @@ installation is unreachable.
   the cell phone opens the phone, the green book the collection journal). Relationships,
   Opportunities and the lifetime rewards open their windows. Buttons light up, press and grey
   out with the game's own pictures. The Sim's own menu has their phone too.
+- **The game's own Buy Mode catalogue**: its function categories and subcategories, and its
+  room pictures with clickable furniture groups, from `BuyCatalog` and each object's OBJD
+  flags. The original catalogue cells expand upwards, scroll with the wheel, and use the
+  game's skinned scrollbar (arrows, paging and draggable thumb). The preview shows an object's
+  picture, name, price, description and design swatches; unaffordable prices are red. The
+  day/night button previews the lighting without changing game time, and the grid button
+  shows or hides the home lot's rotated tile grid. Shopping stays paused and restores the
+  previous speed on return to Live Mode, including a game that was already paused.
+  Objects snap to quarter tiles on the lot's own grid, on the floor in view, with a green or
+  red placement outline; objects must fit inside the lot, upper-floor furniture needs floor
+  underneath, and ordinary furniture cannot go in a pool. Moving furniture keeps the original
+  object, with its upgrades, breakage, contents, lights and animated parts; cancelling puts it
+  back intact.
 - **Interface**: the game's own icons and words — moodlets (name, description, time left),
   traits (Create-a-Sim and the Sim's panel) and wishes — read from the game's tuning tables
   (`GameplayData.package`) and string tables, with tooltips on hover. Sims' portraits are
@@ -638,6 +651,13 @@ installation is unreachable.
   master, music, effects, voice and ambient levels, aging and life span (short to epic), free
   will, shadows and the frame-rate counter, kept in `settings.json`.
 
+## Parity status
+
+Full parity is still a work in progress. Remaining milestones include the original-layout
+Build Mode, Create-a-Sim and main-menu interfaces; Buy/Build undo and redo; household furniture
+inventory; complete object placement and routing compatibility; the rest of the expansions'
+gameplay; and systematic side-by-side visual and interaction checks against the original.
+
 ## Controls
 
 | Input | Action |
@@ -646,13 +666,15 @@ installation is unreachable.
 | Left-click ground | Go here |
 | WASD / arrow keys (Shift = faster) | Pan |
 | Q / E | Rotate |
+| T / G | Tilt the camera up / down |
 | Mouse wheel, Z / X, = / − | Zoom |
 | Page Up / Page Down | View the floor above / below |
 | Tab | Next Sim |
 | C | Centre the camera on the selected Sim |
 | Space | Pause |
 | 1 / 2 / 3 | Game speed |
-| B or F2 | Buy mode (, and . rotate, Delete sells, Esc leaves) |
+| F1 / F2 / F3 | Select Live / Buy / Build mode |
+| B | Toggle Buy mode (, and . rotate, Delete sells; Esc cancels the tool, then leaves) |
 | R | Relationships panel |
 | O | Opportunities panel |
 | Esc | Game menu: pause, options, save, quit |
@@ -679,3 +701,11 @@ and `--ui-flow <dir>` clicks through the menus saving a screenshot of each scree
 the inventory, three hung on the nearest walls, the camera on them), `PAINTINGS=look` puts the
 camera on a hung painting (`PAINTINGS=easel`: on the easel), `PAINTINGS_BUY=1` holds one up in Buy mode and `BUY_CLOSE_AT=<s>`
 closes Buy mode then, logging the inventory. `DIVE=1` puts a diving board on the lot's pool.
+
+`PRESS_KEY=F2@5;F3@7;F1@9` presses a sequence of keys at the given seconds;
+`UI_CLICK=05b706c0@6;05b706d0@7` clicks visible original-layout controls (hex control ids).
+`CLICK_AT=1000,450@8` clicks at window-relative coordinates (`CURSOR_AT` moves without clicking).
+`BUY_MOVE_TEST=move` or `cancel` checks that a piece of furniture keeps its identity, upgrades
+and breakage after a scripted placement or cancellation.
+`s3tool uiwindow <layout>` inspects a baked window tree; `s3tool uilayout <UI.package> <layout>`
+prints its source XML, and `s3tool uibuy` lists the catalogue's categories and object counts.

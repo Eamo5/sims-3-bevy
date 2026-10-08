@@ -85,7 +85,10 @@ fn reset_clock(mut clock: ResMut<GameClock>) {
     *clock = GameClock::default();
 }
 
-fn speed_keys(keys: Res<ButtonInput<KeyCode>>, mut clock: ResMut<GameClock>) {
+fn speed_keys(keys: Res<ButtonInput<KeyCode>>, mut clock: ResMut<GameClock>, buy: Res<crate::buy::BuyMode>, menu: Res<crate::options::GameMenu>) {
+    if buy.active || menu.is_open() {
+        return;
+    }
     if keys.just_pressed(KeyCode::KeyP) || keys.just_pressed(KeyCode::Digit0) || keys.just_pressed(KeyCode::Space) {
         clock.toggle_pause();
     }
@@ -100,10 +103,10 @@ fn speed_keys(keys: Res<ButtonInput<KeyCode>>, mut clock: ResMut<GameClock>) {
     }
 }
 
-fn advance_clock(time: Res<Time>, mut clock: ResMut<GameClock>, mut delta: ResMut<SimDelta>, modal: Query<(), With<crate::dialog::Modal>>) {
+fn advance_clock(time: Res<Time>, mut clock: ResMut<GameClock>, mut delta: ResMut<SimDelta>, modal: Query<(), With<crate::dialog::Modal>>, buy: Res<crate::buy::BuyMode>, menu: Res<crate::options::GameMenu>) {
     // Normal speed: one game minute per real second, like the original (and the game stands
     // still while a question's waiting for an answer).
-    let rate = if modal.is_empty() { SPEED_RATES[clock.speed] } else { 0.0 };
+    let rate = if modal.is_empty() && !buy.active && !menu.is_open() { SPEED_RATES[clock.speed] } else { 0.0 };
     let dt = time.delta_secs().min(0.1) * rate;
     clock.minutes += dt as f64;
     delta.0 = dt;
@@ -136,8 +139,9 @@ fn day_night(
     weather: Option<Res<crate::weather::Weather>>,
     lightning: Option<Res<crate::weather_fx::Lightning>>,
     time: Res<Time>,
+    buy: Res<crate::buy::BuyMode>,
 ) {
-    let h = clock.hour_f();
+    let h = buy.lighting_hour(clock.hour_f());
     // Sun angle: rises at 6:00, sets at 20:00 (in summer: later and earlier in the other
     // seasons).
     let (rise, set) = weather.as_ref().map_or((6.0, 20.0), |w| w.daylight(clock.minutes));
@@ -168,4 +172,36 @@ fn day_night(
     let sky_night = Color::srgb(0.03, 0.05, 0.12);
     let sky_dusk = Color::srgb(0.85, 0.55, 0.40);
     clear.0 = sky_night.mix(&sky_day, day).mix(&sky_dusk, twilight * 0.5);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shopping_blocks_speed_keys_and_simulation_even_if_speed_was_changed() {
+        let mut app = App::new();
+        let mut time = Time::<()>::default();
+        time.advance_by(std::time::Duration::from_secs_f32(0.1));
+        app.insert_resource(time)
+            .init_resource::<GameClock>()
+            .init_resource::<SimDelta>()
+            .init_resource::<crate::options::GameMenu>()
+            .init_resource::<crate::buy::BuyMode>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_systems(Update, (speed_keys, advance_clock).chain());
+        app.world_mut().resource_mut::<crate::buy::BuyMode>().active = true;
+        let minutes = app.world().resource::<GameClock>().minutes;
+        app.world_mut().resource_mut::<GameClock>().set_speed(2);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Digit3);
+        app.update();
+        assert_eq!(app.world().resource::<GameClock>().speed, 2);
+        assert_eq!(app.world().resource::<GameClock>().minutes, minutes);
+        assert_eq!(app.world().resource::<SimDelta>().0, 0.0);
+        app.world_mut().resource_mut::<crate::buy::BuyMode>().active = false;
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().reset_all();
+        app.update();
+        assert!(app.world().resource::<GameClock>().minutes > minutes);
+        assert!(app.world().resource::<SimDelta>().0 > 0.0);
+    }
 }

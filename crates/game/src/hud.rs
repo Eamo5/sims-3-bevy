@@ -601,7 +601,7 @@ fn fade_help(mut commands: Commands, time: Res<Time>, mut since: Local<Option<f3
     }
 }
 
-fn pointer_over_ui(mut over: ResMut<PointerOverUi>, q: Query<&Interaction, Or<(With<BlocksWorld>, With<Button>)>>) {
+pub(crate) fn pointer_over_ui(mut over: ResMut<PointerOverUi>, q: Query<&Interaction, Or<(With<BlocksWorld>, With<Button>)>>) {
     over.0 = q.iter().any(|i| *i != Interaction::None);
 }
 
@@ -1307,9 +1307,11 @@ fn hud_buttons(
     selected: Query<Entity, With<Selected>>,
     positions: Query<&Transform, With<Sim>>,
     mut cam: Query<&mut SimsCamera>,
+    buy: Res<crate::buy::BuyMode>,
+    menu: Res<crate::options::GameMenu>,
 ) {
     for (i, s) in &speed {
-        if *i == Interaction::Pressed {
+        if *i == Interaction::Pressed && !buy.active && !menu.is_open() {
             clock.set_speed(s.0);
         }
     }

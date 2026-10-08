@@ -7,7 +7,7 @@ fn parse_hex(s: &str) -> u64 {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() < 3 {
+    if args.len() < 2 || args.len() < 3 && args[1] != "uibuy" {
         eprintln!("usage: s3tool <types|list|dump|hex|dumpall> <package> [...]");
         return;
     }
@@ -476,6 +476,33 @@ fn main() {
         for r in &ui.buy.rooms {
             println!("room {} '{}' bit {} buttons {}", r.name, r.label, r.bit, r.buttons.len());
         }
+        return;
+    }
+    if args[1] == "uiwindow" {
+        // uiwindow <layout>: inspect a baked layout's control ids, bounds and scrolling grids.
+        let ui = s3bake::load_ui(&s3bake::default_root()).expect("ui.bin");
+        fn print_window(w: &s3bake::ui::UiWindow, depth: usize) {
+            println!("{}{:08X} {} {:?} {:?} {}", "  ".repeat(depth), w.id, w.cls, w.area, w.place, w.comment);
+            if let Some(grid) = w.grid {
+                println!("{}grid {grid:?}", "  ".repeat(depth + 1));
+            }
+            for c in &w.children {
+                print_window(c, depth + 1);
+            }
+        }
+        if let Some((_, exports)) = ui.layouts.iter().find(|(id, _)| *id == s3pkg::fnv64(&args[2])) {
+            for (_, w) in exports {
+                print_window(w, 0);
+            }
+        }
+        return;
+    }
+    if args[1] == "uilayout" {
+        // uilayout <UI.package> <layout>: the source XML, for controls not yet baked.
+        let pkg = Package::open(&args[2]).expect("UI.package");
+        let key = s3pkg::ResourceKey::new(s3bake::ui::T_LAYOUT, 0, s3pkg::fnv64(&args[3]));
+        let xml = pkg.find(&key).and_then(|e| pkg.read(e).ok()).expect("layout");
+        println!("{}", String::from_utf8_lossy(&xml));
         return;
     }
     if args[1] == "objdbuy" {

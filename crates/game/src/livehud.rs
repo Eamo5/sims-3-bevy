@@ -357,20 +357,23 @@ fn time_control(
     modal: Query<(), With<crate::dialog::Modal>>,
     (weather, world): (Res<crate::weather::Weather>, Option<Res<crate::data::SelectedWorld>>),
     mut tips: Query<&mut crate::icons::Tooltip>,
+    buy: Res<crate::buy::BuyMode>,
+    menu: Res<crate::options::GameMenu>,
 ) {
     let d = &hud.display;
     for i in 0..4 {
-        if pressed(&clicks, d.id(TIME_BASE + 1 + i)) {
+        if pressed(&clicks, d.id(TIME_BASE + 1 + i)) && !buy.active && !menu.is_open() && modal.is_empty() {
             clock.set_speed(i as usize);
         }
     }
     // (Paused while a question waits for an answer.)
-    let now = if modal.is_empty() { clock.speed } else { 0 };
+    let locked = !modal.is_empty() || buy.active || menu.is_open();
+    let now = if locked { 0 } else { clock.speed };
     for i in 0..5u32 {
         if let Some(e) = d.id(TIME_BASE + 1 + i)
             && let Ok(mut b) = buttons.get_mut(e)
         {
-            let (sel, dis) = (i < 4 && i as usize == now, i == 4);
+            let (sel, dis) = (i < 4 && i as usize == now, i == 4 || locked);
             if b.selected != sel || b.disabled != dis {
                 b.selected = sel;
                 b.disabled = dis;

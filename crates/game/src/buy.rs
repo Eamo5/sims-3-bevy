@@ -20,18 +20,21 @@ pub struct BuyPlugin;
 impl Plugin for BuyPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BuyMode>()
-            .add_systems(OnEnter(PlayMode::Live), |mut b: ResMut<BuyMode>| *b = BuyMode::default())
+            .add_systems(OnEnter(PlayMode::Live), reset_buy_mode)
+            .add_systems(PreUpdate, toggle_buy.after(bevy::input::InputSystems).run_if(in_state(PlayMode::Live)))
             .add_systems(
                 Update,
-                (toggle_buy, buy_panel, buy_buttons, buy_visuals, buy_pick, eyedrop, placement, paint, |mut buy: ResMut<BuyMode>| {
+                (buy_panel, buy_buttons, buy_visuals, buy_pick, eyedrop, placement, paint, |mut buy: ResMut<BuyMode>| {
                     // (The eyedropper's click is spent by the end of its frame.)
                     if buy.eyedropped {
                         buy.eyedropped = false;
                     }
                 })
                     .chain()
+                    .after(crate::hud::pointer_over_ui)
                     .run_if(in_state(PlayMode::Live)),
             )
+            .add_systems(Update, lot_grid.run_if(in_state(PlayMode::Live)))
             .add_systems(Update, (scripted_style, scripted_cover, scripted_eyedrop).run_if(in_state(PlayMode::Live)));
     }
 }
@@ -44,6 +47,10 @@ pub const PAINT_TABS: [&str; 8] = ["Wallpaper", "Floors", "Walls & Floors", "Doo
 const PAGE: usize = 24;
 /// Objects per page (thumbnail tiles).
 const OBJECT_PAGE: usize = 30;
+
+pub(crate) fn reset_buy_mode(mut buy: ResMut<BuyMode>) {
+    *buy = BuyMode::default();
+}
 
 pub struct Placing {
     pub objd: Key,
@@ -58,12 +65,15 @@ pub struct Placing {
     /// came out of: where it goes back to if it isn't put down.
     pub origin: Option<Transform>,
     pub from: Option<Entity>,
+    /// A piece of the lot's furniture stays alive while it is moved. Keeping its entity
+    /// preserves upgrades, breakage, contents, animated parts and Sims' references to it.
+    source: Option<(Entity, Option<crate::nav::Obstacle>)>,
 }
 
 impl Placing {
     /// Something from the catalogue (or the lot) in hand.
     pub fn new(objd: Key, ghost: Entity, owned: bool, design: Option<Key>) -> Self {
-        Self { objd, ghost, owned, design, item: None, origin: None, from: None }
+        Self { objd, ghost, owned, design, item: None, origin: None, from: None, source: None }
     }
 }
 
@@ -118,14 +128,39 @@ pub struct BuyMode {
     eyedropped: bool,
     /// The sledgehammer in hand: what's clicked is sold.
     pub selling: bool,
+    /// The live-mode speed to return to, including a game already paused by the player.
+    resume_speed: Option<usize>,
+    /// A lighting preview only: the simulation's date and time stay where they are.
+    pub preview_hour: Option<f32>,
+    /// The grid is shown in Buy/Build mode until the player hides it.
+    pub hide_grid: bool,
 }
 
 #[derive(Component)]
 struct BuyPanel;
 
+/// Furniture hidden while its preview is in hand. Building visibility leaves it hidden.
+#[derive(Component)]
+pub struct HeldObject;
+
+fn hold_source(commands: &mut Commands, source: Entity) {
+    commands.entity(source).insert((HeldObject, Visibility::Hidden)).remove::<crate::nav::Obstacle>();
+}
+
+/// Resumes the same object, with every gameplay component and child still attached.
+fn restore_source(commands: &mut Commands, p: &Placing) -> Option<Entity> {
+    let (e, obstacle) = p.source?;
+    let mut entity = commands.entity(e);
+    entity.remove::<HeldObject>().insert(Visibility::Inherited);
+    if let Some(obstacle) = obstacle {
+        entity.insert(obstacle);
+    }
+    Some(e)
+}
+
 /// An existing object the player clicked in buy mode, to be picked up next frame.
 #[derive(Resource)]
-struct PickupRequest(Entity);
+pub(crate) struct PickupRequest(pub Entity);
 
 /// An object clicked with the eyedropper: a new one of it, in its design, taken up next frame.
 #[derive(Resource)]
@@ -273,6 +308,15 @@ pub enum BuyButton {
 }
 
 impl BuyMode {
+    /// Time used by the sky and lights, without changing appointments, seasons or needs.
+    pub fn lighting_hour(&self, hour: f32) -> f32 {
+        if self.active { self.preview_hour.unwrap_or(hour) } else { hour }
+    }
+
+    pub fn toggle_lighting(&mut self, hour: f32) {
+        self.preview_hour = Some(if (6.0..20.0).contains(&self.lighting_hour(hour)) { 0.0 } else { 12.0 });
+    }
+
     /// Opens buy/build mode on a category (the paint tabs follow the buy categories).
     pub fn show(&mut self, category: usize) {
         self.active = true;
@@ -406,6 +450,8 @@ impl BuyMode {
         self.painting = None;
         self.eyedropper = false;
         self.selling = false;
+        self.styling = false;
+        self.style = None;
         self.tool = None;
         if let Some(p) = self.placing.take() {
             commands.entity(p.ghost).despawn();
@@ -417,16 +463,37 @@ impl BuyMode {
     }
 }
 
-fn toggle_buy(
-    keys: Res<ButtonInput<KeyCode>>,
+pub(crate) fn toggle_buy(
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
     mut buy: ResMut<BuyMode>,
     mut commands: Commands,
     mut clock: ResMut<crate::clock::GameClock>,
     hold: Option<Res<HoldRequest>>,
+    menu: Res<crate::options::GameMenu>,
 ) {
-    if keys.just_pressed(KeyCode::KeyB) || keys.just_pressed(KeyCode::F2) {
+    if menu.is_open() {
+        return;
+    }
+    if keys.just_pressed(KeyCode::F1) {
+        enter_mode(&mut buy, None, &mut commands, &mut clock);
+    } else if keys.just_pressed(KeyCode::F2) {
+        enter_mode(&mut buy, Some(false), &mut commands, &mut clock);
+    } else if keys.just_pressed(KeyCode::F3) {
+        enter_mode(&mut buy, Some(true), &mut commands, &mut clock);
+    } else if keys.just_pressed(KeyCode::KeyB) {
         let on = !buy.active;
         set_active(&mut buy, on, &mut commands, &mut clock);
+    }
+    if buy.active && (keys.just_pressed(KeyCode::Escape) || mouse.just_pressed(MouseButton::Right)) {
+        let holding = buy.placing.is_some() || buy.painting.is_some() || buy.tool.is_some() || buy.eyedropper || buy.selling;
+        if holding {
+            buy.drop_tools(&mut commands);
+        } else if keys.just_pressed(KeyCode::Escape) {
+            enter_mode(&mut buy, None, &mut commands, &mut clock);
+        }
+        // Escape's job is done: don't also open the game menu or dismiss another window.
+        keys.clear_just_pressed(KeyCode::Escape);
     }
     // Something from an inventory to put down: Buy mode, on the decorations.
     if hold.is_some() && !buy.active {
@@ -437,6 +504,9 @@ fn toggle_buy(
 
 /// Puts something being moved back: in the inventory it came out of, or where it stood.
 fn put_back(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetCtx, catalog: &Catalog, p: &Placing) {
+    if restore_source(commands, p).is_some() {
+        return;
+    }
     if let (Some(sim), Some(item)) = (p.from, &p.item) {
         crate::inventory::give(commands, sim, item.kind, item.key.clone(), item.name.clone(), item.quality, item.each(), item.count);
         return;
@@ -462,6 +532,7 @@ pub fn enter_mode(buy: &mut BuyMode, mode: Option<bool>, commands: &mut Commands
             if !buy.active {
                 set_active(buy, true, commands, clock);
             }
+            buy.drop_tools(commands);
             // (Build mode opens on the walls and floors tools, as the game's.)
             buy.show(if build { WALLPAPER_TAB + 2 } else { 0 });
         }
@@ -469,13 +540,47 @@ pub fn enter_mode(buy: &mut BuyMode, mode: Option<bool>, commands: &mut Commands
 }
 
 fn set_active(buy: &mut BuyMode, on: bool, commands: &mut Commands, clock: &mut crate::clock::GameClock) {
+    if on == buy.active {
+        return;
+    }
     buy.active = on;
     buy.drop_tools(commands);
     // Time stops while shopping, like the original.
     if on {
+        buy.resume_speed = Some(clock.speed);
         clock.set_speed(0);
-    } else if clock.speed == 0 {
-        clock.set_speed(1);
+    } else {
+        clock.set_speed(buy.resume_speed.take().unwrap_or(0));
+        buy.preview_hour = None;
+    }
+}
+
+/// The lot's tile grid follows its rotation, its sculpted ground and the floor being viewed.
+fn lot_grid(buy: Res<BuyMode>, building: Option<Res<crate::building::ActiveBuilding>>, world: Res<CurrentWorld>, mut gizmos: Gizmos) {
+    if !buy.active || buy.hide_grid {
+        return;
+    }
+    let Some(b) = building else { return };
+    let level = b.view_level;
+    let point = |x: f32, z: f32| {
+        let p = b.world(x, z, 0.0);
+        let y = b.floor_y(level, p).or_else(|| (level == 1).then(|| crate::building::walk_height(&world.data, Some(&b), p)))?;
+        Some(p.with_y(y + 0.045))
+    };
+    let color = Color::srgba(1.0, 1.0, 1.0, 0.22);
+    for x in 0..=b.data.width {
+        for z in 0..b.data.depth {
+            if let (Some(a), Some(c)) = (point(x as f32 + 0.001, z as f32 + 0.001), point(x as f32 + 0.001, z as f32 + 0.999)) {
+                gizmos.line(a, c, color);
+            }
+        }
+    }
+    for z in 0..=b.data.depth {
+        for x in 0..b.data.width {
+            if let (Some(a), Some(c)) = (point(x as f32 + 0.001, z as f32 + 0.001), point(x as f32 + 0.999, z as f32 + 0.001)) {
+                gizmos.line(a, c, color);
+            }
+        }
     }
 }
 
@@ -1059,6 +1164,9 @@ fn buy_buttons(
                 buy.roof_pick = Some(*i);
             }
             BuyButton::Styling => {
+                if buy.placing.is_none() && buy.painting.is_none() {
+                    continue;
+                }
                 buy.styling = !buy.styling;
                 buy.dirty = true;
             }
@@ -1320,10 +1428,10 @@ fn placement(
     (selected, mut life): (Query<Entity, With<crate::sim::Selected>>, MessageWriter<crate::life::LifeEvent>),
     mut grid: Option<ResMut<NavGrid>>,
     (pickup, hold): (Option<Res<PickupRequest>>, Option<Res<HoldRequest>>),
-    objects: Query<(&GameObject, &Transform, Option<&crate::objects::Design>, Option<&crate::paintings::Hung>)>,
+    objects: Query<(&GameObject, &Transform, Option<&crate::objects::Design>, Option<&crate::paintings::Hung>, Option<&crate::interact::UsedBy>, Option<&crate::nav::Obstacle>)>,
     (bought_q, mut removed): (Query<(), With<crate::save::Bought>>, ResMut<crate::save::RemovedLotObjects>),
     mut tfs: Query<&mut Transform, Without<GameObject>>,
-    mut faces: Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
+    (mut faces, mut gizmos): (Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>, Gizmos),
 ) {
     // What was being moved when Buy mode closed goes back.
     for p in std::mem::take(&mut buy.returning) {
@@ -1361,9 +1469,10 @@ fn placement(
         }
         if let Some(req) = pickup {
             commands.remove_resource::<PickupRequest>();
-            if let Ok((obj, tf, design, hung)) = objects.get(req.0) {
-                if !bought_q.contains(req.0) {
-                    crate::save::note_removed(&mut removed, obj, tf);
+            if let Ok((obj, tf, design, hung, used, obstacle)) = objects.get(req.0) {
+                if used.is_some_and(|u| u.0.is_some()) {
+                    notes.push("That object is being used.");
+                    return;
                 }
                 let design = design.map(|d| d.0);
                 let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
@@ -1371,9 +1480,9 @@ fn placement(
                 let ghost = spawn_parts(&mut commands, &parts, *tf);
                 commands.entity(ghost).insert(DespawnOnExit(AppState::InGame));
                 buy.yaw = tf.rotation.to_euler(EulerRot::YXZ).0;
-                buy.placing = Some(Placing { item: hung.map(|h| h.0.clone()), origin: Some(*tf), ..Placing::new(obj.objd, ghost, true, design) });
+                buy.placing = Some(Placing { item: hung.map(|h| h.0.clone()), origin: Some(*tf), source: Some((req.0, obstacle.copied())), ..Placing::new(obj.objd, ghost, true, design) });
                 buy.dirty = true;
-                commands.entity(req.0).despawn();
+                hold_source(&mut commands, req.0);
                 if let Some(g) = grid.as_mut() {
                     g.dirty = true;
                 }
@@ -1382,17 +1491,39 @@ fn placement(
         return;
     }
 
-    let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
-    let Ok((camera, cam_tf)) = cams.single() else { return };
-    let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else { return };
-
     let placing = buy.placing.as_ref().unwrap();
     let ghost = placing.ghost;
     let objd = placing.objd;
     let owned = placing.owned;
     let design = placing.design;
+    let price = placing.item.as_ref().map_or_else(|| catalog.by_key(&objd).map_or(0, |e| e.price.max(0) as i64), |i| i.worth);
+    // Selling and cancelling do not need a cursor in the window.
+    if (keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace) || buy.selling) && owned {
+        if let Some((source, _)) = placing.source {
+            if !bought_q.contains(source) && let Ok((obj, tf, ..)) = objects.get(source) {
+                crate::save::note_removed(&mut removed, obj, tf);
+            }
+            commands.entity(source).despawn();
+        }
+        commands.entity(ghost).despawn();
+        buy.placing = None;
+        buy.dirty = true;
+        if let Some(h) = household.as_mut() {
+            h.funds += price;
+        }
+        if let Some(g) = grid.as_mut() {
+            g.dirty = true;
+        }
+        notes.push(format!("Sold for §{price}."));
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    let Ok((camera, cam_tf)) = cams.single() else { return };
+    let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else { return };
+
     let ground = ground_hit(ray, &world);
+    let floor = crate::hud::floor_hit(ray, &world, building.as_deref());
     // Doors and windows go into the wall under the pointer; paintings, mirrors and wall lamps
     // hang on it (their models hang behind their middle, on the tile's wall, off the floor).
     let opening = catalog.by_key(&objd).and_then(|e| e.opening);
@@ -1421,26 +1552,18 @@ fn placement(
         } else if let Some((pos, rot)) = on_edge {
             tf.translation = pos;
             tf.rotation = rot;
-        } else if let Some(p) = ground {
-            let snap = |v: f32| (v * 4.0).round() / 4.0;
-            let (x, z) = (snap(p.x), snap(p.z));
-            tf.translation = Vec3::new(x, crate::building::walk_height(&world.data, building.as_deref(), Vec3::new(x, 0.0, z)), z);
+        } else if let Some((p, level)) = floor {
+            // Quarter tiles in the lot's coordinate system, including rotated lots.
+            let p = match building.as_deref() {
+                Some(b) => {
+                    let l = snap_local(b.rot, b.corner, p);
+                    b.world(l.x, l.y, 0.0)
+                }
+                None => p,
+            };
+            tf.translation = p.with_y(crate::nav::floor_height(&world.data, building.as_deref(), level, p));
             tf.rotation = Quat::from_rotation_y(buy.yaw);
         }
-    }
-    let price = catalog.by_key(&objd).map(|e| e.price).unwrap_or(0) as i64;
-    // (A painting sells for what it's worth.)
-    let price = placing.item.as_ref().map_or(price, |i| i.worth);
-    // (Sold: with the Delete key, or picked up with the sledgehammer.)
-    if (keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace) || buy.selling) && owned {
-        commands.entity(ghost).despawn();
-        buy.placing = None;
-        buy.dirty = true;
-        if let Some(h) = household.as_mut() {
-            h.funds += price;
-        }
-        notes.push(format!("Sold for §{price}."));
-        return;
     }
     if mouse.just_pressed(MouseButton::Right) || keys.just_pressed(KeyCode::Escape) {
         // Put it back where it was (or in the inventory it came from).
@@ -1456,10 +1579,33 @@ fn placement(
         }
         return;
     }
-    if mouse.just_pressed(MouseButton::Left) && !over_ui.0 && ground.is_some() && !std::mem::take(&mut buy.eyedropped) {
+    let problem = tfs.get(ghost).ok().and_then(|tf| {
+        let b = building.as_deref()?;
+        let bounds = bounds?;
+        placement_problem(b, tf, bounds, ladder, opening.is_some() || wall_hung)
+    });
+    if !over_ui.0 && let (Ok(tf), Some(bounds)) = (tfs.get(ghost), bounds) {
+        let afford = owned || household.as_ref().is_some_and(|h| h.funds >= price);
+        let valid = afford && problem.is_none() && (!wall_hung && opening.is_none() || in_wall.is_some()) && (!ladder || on_edge.is_some());
+        let color = if valid { Color::srgb(0.35, 1.0, 0.15) } else { Color::srgb(1.0, 0.15, 0.1) };
+        let corners = footprint(tf, bounds);
+        for i in 0..4 {
+            gizmos.line(corners[i].with_y(tf.translation.y + 0.07), corners[(i + 1) % 4].with_y(tf.translation.y + 0.07), color);
+        }
+        let center = tf.translation + tf.rotation * Vec3::new((bounds.0.x + bounds.1.x) * 0.5, 0.07, bounds.1.z);
+        let tip = center + tf.rotation * Vec3::Z * 0.4;
+        gizmos.line(center, tip, color);
+        gizmos.line(tip, tip + tf.rotation * Vec3::new(-0.15, 0.0, -0.15), color);
+        gizmos.line(tip, tip + tf.rotation * Vec3::new(0.15, 0.0, -0.15), color);
+    }
+    if mouse.just_pressed(MouseButton::Left) && !over_ui.0 && floor.is_some() && !std::mem::take(&mut buy.eyedropped) {
         let funds = household.as_ref().map(|h| h.funds).unwrap_or(0);
         if !owned && funds < price {
             notes.push("You can't afford that.");
+            return;
+        }
+        if let Some(problem) = problem {
+            notes.push(problem);
             return;
         }
         if opening.is_some() && in_wall.is_none() {
@@ -1498,10 +1644,29 @@ fn placement(
         if opening.is_some() {
             play.write(crate::sound::PlaySound::ui("ui_build_door_plop"));
         }
-        if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, rot, design) {
-            commands.entity(o.entity).insert(crate::save::Bought);
+        let source = buy.placing.as_ref().and_then(|p| p.source.map(|s| s.0));
+        let level = building.as_ref().map_or(1, |b| b.level_at(pos.y));
+        let placed = if let Some(source) = source {
+            if !bought_q.contains(source) && let Ok((obj, tf, ..)) = objects.get(source) {
+                crate::save::note_removed(&mut removed, obj, tf);
+            }
+            restore_source(&mut commands, buy.placing.as_ref().unwrap());
+            commands.entity(source).insert(Transform::from_translation(pos).with_rotation(rot));
+            let parts = assets.object_design(&mut ctx, objd, design);
+            crate::objects::restyle_parts(&mut commands, source, &parts);
+            match design {
+                Some(key) => { commands.entity(source).insert(crate::objects::Design(key)); }
+                None => { commands.entity(source).remove::<crate::objects::Design>(); }
+            }
+            Some(source)
+        } else {
+            crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, rot, design).map(|o| o.entity)
+        };
+        if let Some(entity) = placed {
+            commands.entity(entity).insert((crate::nav::Floor(level), crate::building::BuildingPiece { level }));
+            commands.entity(entity).insert(crate::save::Bought);
             if let Some(item) = buy.placing.as_ref().and_then(|p| p.item.clone()) {
-                commands.entity(o.entity).insert(crate::paintings::Hung(item));
+                commands.entity(entity).insert(crate::paintings::Hung(item));
             }
             if !owned && let Some(h) = household.as_mut() {
                 h.funds -= price;
@@ -1520,4 +1685,142 @@ fn placement(
         }
     }
     let _ = ObjectKind::Other;
+}
+
+fn snap_local(rot: Quat, corner: Vec3, p: Vec3) -> Vec2 {
+    let l = rot.inverse() * (p - corner);
+    Vec2::new((l.x * 4.0).round() / 4.0, (l.z * 4.0).round() / 4.0)
+}
+
+fn footprint(tf: &Transform, (min, max): (Vec3, Vec3)) -> [Vec3; 4] {
+    [(min.x, min.z), (max.x, min.z), (max.x, max.z), (min.x, max.z)].map(|(x, z)| tf.transform_point(Vec3::new(x, 0.0, z)))
+}
+
+fn placement_problem(b: &crate::building::ActiveBuilding, tf: &Transform, bounds: (Vec3, Vec3), ladder: bool, wall: bool) -> Option<&'static str> {
+    let corners = footprint(tf, bounds);
+    let size = Vec2::new(b.data.width as f32, b.data.depth as f32);
+    if corners.iter().any(|p| { let l = b.local(*p); l.cmplt(Vec2::splat(-0.01)).any() || l.cmpgt(size + 0.01).any() }) {
+        return Some("Place objects inside your home lot.");
+    }
+    if !wall && !ladder {
+        let level = b.view_level;
+        if level > 1 && corners.iter().chain(std::iter::once(&tf.translation)).any(|p| b.floor_y(level, p.lerp(tf.translation, 0.001)).is_none()) {
+            return Some("The whole object needs a floor underneath it.");
+        }
+        if level == 1 && corners.iter().chain(std::iter::once(&tf.translation)).any(|p| {
+            let l = b.local(*p);
+            b.data.pool.iter().any(|f| f.x as f32 == l.x.floor() && f.z as f32 == l.y.floor())
+        }) {
+            return Some("That object can't be placed in a swimming pool.");
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn controls() -> App {
+        let mut app = App::new();
+        app.init_resource::<BuyMode>()
+            .init_resource::<crate::clock::GameClock>()
+            .init_resource::<crate::options::GameMenu>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .add_systems(Update, toggle_buy);
+        app
+    }
+
+    fn key(app: &mut App, code: KeyCode) {
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().reset_all();
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(code);
+        app.update();
+    }
+
+    #[test]
+    fn mode_keys_select_and_restore_every_live_speed() {
+        for speed in 0..4 {
+            let mut app = controls();
+            app.world_mut().resource_mut::<crate::clock::GameClock>().set_speed(speed);
+            key(&mut app, KeyCode::F2);
+            assert!(app.world().resource::<BuyMode>().active);
+            assert_eq!(app.world().resource::<crate::clock::GameClock>().speed, 0);
+            key(&mut app, KeyCode::F2);
+            assert!(app.world().resource::<BuyMode>().active, "F2 must select, not toggle");
+            key(&mut app, KeyCode::F3);
+            assert_eq!(app.world().resource::<BuyMode>().category, BUILD_TAB);
+            key(&mut app, KeyCode::F1);
+            assert!(!app.world().resource::<BuyMode>().active);
+            assert_eq!(app.world().resource::<crate::clock::GameClock>().speed, speed);
+        }
+    }
+
+    #[test]
+    fn escape_cancels_the_tool_then_leaves_buy_mode() {
+        let mut app = controls();
+        key(&mut app, KeyCode::F2);
+        app.world_mut().resource_mut::<BuyMode>().selling = true;
+        key(&mut app, KeyCode::Escape);
+        assert!(app.world().resource::<BuyMode>().active);
+        assert!(!app.world().resource::<BuyMode>().selling);
+        assert!(!app.world().resource::<ButtonInput<KeyCode>>().just_pressed(KeyCode::Escape));
+        key(&mut app, KeyCode::Escape);
+        assert!(!app.world().resource::<BuyMode>().active);
+    }
+
+    #[test]
+    fn lighting_preview_is_reset_on_return_to_live_mode() {
+        let mut app = controls();
+        let minutes = app.world().resource::<crate::clock::GameClock>().minutes;
+        key(&mut app, KeyCode::F2);
+        let mut buy = app.world_mut().resource_mut::<BuyMode>();
+        buy.toggle_lighting(8.0);
+        assert_eq!(buy.lighting_hour(8.0), 0.0);
+        buy.toggle_lighting(8.0);
+        assert_eq!(buy.lighting_hour(8.0), 12.0);
+        key(&mut app, KeyCode::F1);
+        assert_eq!(app.world().resource::<BuyMode>().lighting_hour(8.0), 8.0);
+        assert_eq!(app.world().resource::<crate::clock::GameClock>().minutes, minutes);
+    }
+
+    #[test]
+    fn cancelling_a_move_preserves_the_original_entity_and_its_gameplay_state() {
+        let mut world = World::new();
+        let obstacle = crate::nav::Obstacle { half: Vec2::ONE, center_offset: Vec2::ZERO };
+        let source = world.spawn((Transform::from_xyz(10.0, 2.0, 5.0), Visibility::Inherited, obstacle, crate::upgrades::Upgrades(3), crate::interact::Broken, crate::surroundings::TrashFill(4))).id();
+        let child = world.spawn(ChildOf(source)).id();
+        let ghost = world.spawn_empty().id();
+        let p = Placing { source: Some((source, Some(obstacle))), ..Placing::new((0, 0, 1), ghost, true, None) };
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        hold_source(&mut Commands::new(&mut queue, &world), source);
+        queue.apply(&mut world);
+        assert!(world.get::<HeldObject>(source).is_some());
+        assert!(world.get::<crate::nav::Obstacle>(source).is_none());
+        assert_eq!(*world.get::<Visibility>(source).unwrap(), Visibility::Hidden);
+        assert_eq!(restore_source(&mut Commands::new(&mut queue, &world), &p), Some(source));
+        queue.apply(&mut world);
+        assert!(world.get::<HeldObject>(source).is_none());
+        assert_eq!(world.get::<crate::nav::Obstacle>(source).unwrap().half, Vec2::ONE);
+        assert_eq!(world.get::<crate::upgrades::Upgrades>(source).unwrap().0, 3);
+        assert!(world.get::<crate::interact::Broken>(source).is_some());
+        assert_eq!(world.get::<crate::surroundings::TrashFill>(source).unwrap().0, 4);
+        assert_eq!(world.get::<ChildOf>(child).unwrap().parent(), source);
+        assert_eq!(world.get::<Transform>(source).unwrap().translation, Vec3::new(10.0, 2.0, 5.0));
+    }
+
+    #[test]
+    fn placement_snaps_to_quarter_tiles_on_a_rotated_lot() {
+        let corner = Vec3::new(50.0, 3.0, 70.0);
+        let rot = Quat::from_rotation_y(0.7);
+        let p = corner + rot * Vec3::new(3.14, 0.0, 4.61);
+        assert!(snap_local(rot, corner, p).distance(Vec2::new(3.25, 4.5)) < 0.001);
+        let tf = Transform::from_translation(corner).with_rotation(rot);
+        let points = footprint(&tf, (Vec3::new(-1.0, 0.0, -2.0), Vec3::new(1.0, 2.0, 2.0)));
+        for p in points {
+            let l = rot.inverse() * (p - corner);
+            assert!((l.x.abs() - 1.0).abs() < 0.001);
+            assert!((l.z.abs() - 2.0).abs() < 0.001);
+        }
+    }
 }

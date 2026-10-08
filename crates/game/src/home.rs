@@ -577,6 +577,17 @@ pub fn spawn_game_object_design(
     if entry.is_some_and(|c| c.shell) {
         commands.entity(e).insert(crate::building::Shell);
     }
+    let script = ctx.baked.catalog_entry(&objd).map_or("", |c| c.script.as_str()).to_ascii_lowercase();
+    if kind == ObjectKind::Light || script.contains(".lighting.") || script.contains("lightfloorlamp") || script.contains("lightwalllamp") || script.contains("lighttablelamp") {
+        let height = if script.contains("ceiling") { mn.y.max(-1.2) } else { mx.y * 0.8 };
+        commands.spawn((
+            crate::building::LotLamp,
+            PointLight { intensity: 0.0, range: 9.0, radius: 0.1, color: Color::srgb(1.0, 0.85, 0.62), shadow_maps_enabled: false, ..default() },
+            Transform::from_xyz(0.0, height, 0.0),
+            Visibility::Hidden,
+            ChildOf(e),
+        ));
+    }
     // Small decorations don't block walking.
     if half.x * half.y > 0.04 && mx.y > 0.25 && !matches!(kind, ObjectKind::Light) {
         commands.entity(e).insert(Obstacle { half, center_offset: center });

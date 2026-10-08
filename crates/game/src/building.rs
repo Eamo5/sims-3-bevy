@@ -264,13 +264,29 @@ pub struct BuildingPiece {
 #[derive(Component)]
 pub struct LotLamp;
 
-fn lamps_at_night(night: Res<crate::clock::Night>, mut lamps: Query<(&mut PointLight, &mut Visibility), With<LotLamp>>) {
-    if !night.is_changed() {
-        return;
-    }
-    for (mut light, mut vis) in &mut lamps {
+fn lamps_at_night(night: Res<crate::clock::Night>, mut lamps: Query<(&mut PointLight, &mut Visibility, Ref<LotLamp>)>) {
+    for (mut light, mut vis, lamp) in &mut lamps {
+        if !night.is_changed() && !lamp.is_added() {
+            continue;
+        }
         light.intensity = 90_000.0 * night.0;
         vis.set_if_neq(if night.0 > 0.02 { Visibility::Inherited } else { Visibility::Hidden });
+    }
+}
+
+#[cfg(test)]
+mod lamp_tests {
+    use super::*;
+
+    #[test]
+    fn a_new_lamp_lights_up_without_waiting_for_the_time_of_day_to_change() {
+        let mut app = App::new();
+        app.insert_resource(crate::clock::Night(1.0)).add_systems(Update, lamps_at_night);
+        app.update();
+        let e = app.world_mut().spawn((LotLamp, PointLight { intensity: 0.0, ..default() }, Visibility::Hidden)).id();
+        app.update();
+        assert_eq!(app.world().get::<PointLight>(e).unwrap().intensity, 90_000.0);
+        assert_eq!(*app.world().get::<Visibility>(e).unwrap(), Visibility::Inherited);
     }
 }
 
@@ -889,7 +905,7 @@ fn cut_openings(
     (catalog, data): (Res<Catalog>, Res<crate::baked::Baked>),
     mut assets: ResMut<ObjectAssets>,
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
-    added: Query<(Entity, &crate::interact::GameObject, &Transform), Added<crate::interact::GameObject>>,
+    added: Query<(Entity, &crate::interact::GameObject, &Transform), (Or<(Added<crate::interact::GameObject>, Changed<Transform>)>, Without<crate::buy::HeldObject>, Without<crate::visit::LotObject>)>,
     mut removed: RemovedComponents<crate::interact::GameObject>,
     mut grid: Option<ResMut<crate::nav::NavGrid>>,
 ) {
@@ -906,9 +922,15 @@ fn cut_openings(
     }
     let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
     for (e, obj, tf) in &added {
-        if b.holes.iter().any(|(he, _)| *he == Some(e)) {
+        let local = b.local(tf.translation);
+        if local.cmplt(Vec2::ZERO).any() || local.cmpgt(Vec2::new(b.data.width as f32, b.data.depth as f32)).any() {
             continue;
         }
+        // A retained object has moved: close its previous opening before cutting the new one.
+        for (_, h) in b.holes.iter().filter(|(he, _)| *he == Some(e)) {
+            changed.extend(walls_cut(&b, h));
+        }
+        b.holes.retain(|(he, _)| *he != Some(e));
         let Some(bounds) = parts_bounds(&assets.object(&mut ctx, obj.objd)) else { continue };
         let level = b.level_at(tf.translation.y);
         let Some(door) = catalog.by_key(&obj.objd).and_then(|c| c.opening) else {
@@ -1736,20 +1758,6 @@ pub fn spawn_building(
                 continue;
             };
             commands.entity(spawned.entity).insert((BuildingPiece { level: o.level }, Floor(o.level.max(1))));
-            let lower = o.script.to_ascii_lowercase();
-            if lower.contains(".lighting.") || lower.contains("lightfloorlamp") || lower.contains("lightwalllamp") || lower.contains("lighttablelamp") {
-                // Ceiling lights shine from just under the ceiling; lamps from their shade.
-                let h = parts_bounds(&assets.object(ctx, o.objd)).map_or(1.5, |(mn, mx)| if lower.contains("ceiling") { mn.y.max(-1.2) } else { mx.y * 0.8 });
-                let lamp = commands
-                    .spawn((
-                        LotLamp,
-                        PointLight { intensity: 0.0, range: 9.0, radius: 0.1, color: Color::srgb(1.0, 0.85, 0.62), shadow_maps_enabled: false, ..default() },
-                        Transform::from_xyz(0.0, h, 0.0),
-                        Visibility::Hidden,
-                    ))
-                    .id();
-                commands.entity(spawned.entity).add_child(lamp);
-            }
             if opening.is_some() || o.script.contains("Stairs") || o.script.contains("Column") {
                 commands.entity(spawned.entity).remove::<Obstacle>();
             }
@@ -2081,7 +2089,7 @@ fn shell_visibility(walls: Res<WallMode>, cams: Query<&SimsCamera>, mut shells: 
 fn building_visibility(
     (building, walls): (Option<ResMut<ActiveBuilding>>, Res<WallMode>),
     cams: Query<(&SimsCamera, &GlobalTransform)>,
-    mut pieces: Query<(&BuildingPiece, Option<&WallObject>, &mut Visibility, Has<crate::traffic::CarOut>), (Without<LotImposter>, Without<crate::world::Tree>)>,
+    mut pieces: Query<(&BuildingPiece, Option<&WallObject>, &mut Visibility, Has<crate::traffic::CarOut>), (Without<LotImposter>, Without<crate::world::Tree>, Without<crate::buy::HeldObject>)>,
     mut imposters: Query<(&LotImposter, &mut Visibility), (Without<BuildingPiece>, Without<crate::world::Tree>)>,
     mut faces: Query<(&mut WallFace, &mut Mesh3d, &mut Visibility), (Without<BuildingPiece>, Without<LotImposter>, Without<crate::world::Tree>)>,
     mut trees: Query<(&GlobalTransform, &mut Visibility), (With<crate::world::Tree>, Without<BuildingPiece>, Without<LotImposter>)>,

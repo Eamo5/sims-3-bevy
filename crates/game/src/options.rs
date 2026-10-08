@@ -28,7 +28,7 @@ impl Plugin for OptionsPlugin {
                 ),
             )
             // Before the HUD and buy mode handle Escape (closing pie menus, leaving buy mode).
-            .add_systems(PreUpdate, game_menu_key.after(bevy::input::InputSystems).run_if(in_state(AppState::InGame)))
+            .add_systems(PreUpdate, game_menu_key.after(bevy::input::InputSystems).before(crate::buy::toggle_buy).run_if(in_state(AppState::InGame)))
             .add_systems(OnExit(AppState::InGame), close_game_menu);
     }
 }
@@ -453,6 +453,12 @@ pub struct GameMenu {
     root: Option<Entity>,
     /// Game speed to restore when the menu closes.
     speed: usize,
+}
+
+impl GameMenu {
+    pub fn is_open(&self) -> bool {
+        self.root.is_some()
+    }
 }
 
 #[derive(Component, Clone, Copy)]
