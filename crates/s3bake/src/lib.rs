@@ -12,6 +12,7 @@ pub mod pack;
 pub mod fences;
 pub mod ponds;
 pub mod premades;
+pub mod pets;
 pub mod sounds;
 pub mod types;
 
@@ -19,6 +20,7 @@ pub use bake::{BakeRoot, bake_clips, bake_global, bake_music, bake_world, clips_
 pub use pack::{PackReader, read_value};
 pub use gamedata::{GameDataBaked, Icons, bake_gamedata, gamedata_ready, load_gamedata};
 pub use premades::{HouseholdBaked, PremadesBaked, ensure_premades, load_premades};
+pub use pets::{PetsBaked, bake_pets, load_pets, pets_ready};
 pub use sounds::{SoundBank, SoundDef, bake_sounds, sounds_ready};
 pub use types::*;
 

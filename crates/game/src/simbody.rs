@@ -558,7 +558,7 @@ fn shaped(mut m: SkinMesh, sim: &Sim) -> SkinMesh {
     m
 }
 
-fn skin_mesh(m: SkinMesh) -> Mesh {
+pub(crate) fn skin_mesh(m: SkinMesh) -> Mesh {
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, m.positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, m.normals);

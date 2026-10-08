@@ -241,7 +241,7 @@ fn bake_covers(root: &BakeRoot, pkgs: &PackageSet, jobs: Vec<crate::building::Co
     });
 }
 
-fn bake_textures(root: &BakeRoot, pkgs: &PackageSet, keys: &[(Key, bool)], max: u32, label: &str, progress: Progress) -> usize {
+pub(crate) fn bake_textures(root: &BakeRoot, pkgs: &PackageSet, keys: &[(Key, bool)], max: u32, label: &str, progress: Progress) -> usize {
     std::fs::create_dir_all(root.textures_dir()).ok();
     let todo: Vec<(Key, bool)> = keys.iter().copied().filter(|(k, _)| !root.tex_path(*k).exists()).collect();
     let done = std::sync::atomic::AtomicUsize::new(0);
@@ -444,7 +444,7 @@ pub fn bake_clips(root: &BakeRoot, pkgs: &PackageSet, progress: Progress) -> Res
 }
 
 /// Bumped when the baked clip layout changes.
-pub const CLIPS_VERSION: u32 = 53;
+pub const CLIPS_VERSION: u32 = 54;
 
 pub fn clips_ready(root: &BakeRoot) -> bool {
     let g = root.global_dir();

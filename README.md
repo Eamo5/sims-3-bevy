@@ -342,6 +342,12 @@ installation is unreachable.
   hours, to play in, jump into and rake up. All with the pack's own objects and animations.
   The season
   and the weather are kept in saves; the World Adventures destinations have none.
+- **Pets**, from the Pets pack: cats, dogs, little dogs and horses (and their young) in the
+  game's own bodies on their own skeletons, each in one of the game's 233 breeds (its coat
+  painted from the breed's colours and markings through their masks over the fur's shading,
+  with its tail, ears or mane), moving with the pack's own animations: walking, standing
+  about looking round, sitting, lying down, asleep. A stray cat and dog wander the sidewalk in
+  front of the lot by day, stopping to sit or lie about, and curl up asleep at night.
 - **Water effects**: fountains gush and fill their basins, showers spray from the head and taps
   run while someone's at them, each from the object's own effect slot (the game's RSLT slots).
   TVs show a programme on the screen (at the TV's screen slot) while anyone's watching, its

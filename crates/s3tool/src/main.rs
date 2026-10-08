@@ -725,16 +725,18 @@ fn main() {
                                 println!("    preset {p}");
                             }
                         }
-                        for g in geoms.iter().take(3) {
+                        for g in geoms.iter().take(if std::env::var("ALLGEOMS").is_ok() { 99 } else { 3 }) {
                             match s3formats::sim::Geom::parse(&set.read(g).or_else(|| set.read_ti(g.t, g.i)).unwrap_or_default()) {
                                 Ok(geo) => println!(
-                                    "    geom {g}: verts={} tris={} bones={} shader={:08X} params={} diffuse={:?}",
+                                    "    geom {g}: verts={} tris={} bones={} shader={:08X} params={} diffuse={:?}{}",
                                     geo.positions.len(),
                                     geo.indices.len() / 3,
                                     geo.bone_hashes.len(),
                                     geo.shader,
                                     geo.params.len(),
-                                    geo.params.get(&s3formats::model::P_DIFFUSE_MAP)
+                                    geo.params.get(&s3formats::model::P_DIFFUSE_MAP),
+                                    // (ALLGEOMS: their parameters' names too.)
+                                    if std::env::var("ALLGEOMS").is_ok() { format!(" {:08X?}", geo.params.keys().collect::<Vec<_>>()) } else { String::new() }
                                 ),
                                 Err(e) => println!("    geom {g}: ERR {e}"),
                             }
@@ -1066,6 +1068,36 @@ fn main() {
                     println!("{path} in {:?}", t0.elapsed());
                 }
             }
+        }
+        return;
+    }
+    if args[1] == "simos" {
+        // simos <root> <group hex>: the outfits (SIMO) of a group, by name, with their parts and
+        // the colours their presets give (pets' breeds are in 48000000).
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let group = u32::from_str_radix(&args[3], 16).unwrap();
+        let mut names = std::collections::HashMap::new();
+        for k in set.keys_of_type(0x0166038C).copied().collect::<Vec<_>>() {
+            if let Some(d) = set.read(&k) {
+                names.extend(s3formats::audio::parse_name_map(&d));
+            }
+        }
+        let casp_name = |k: &s3pkg::ResourceKey| set.read(k).and_then(|d| s3formats::sim::CasPart::parse(&d).ok()).map(|c| c.name).unwrap_or_default();
+        for k in set.keys_of_type(s3formats::sim::T_OUTFIT).copied().filter(|k| k.g == group).collect::<Vec<_>>() {
+            let Some(o) = set.read(&k).and_then(|d| s3formats::sim::SimOutfit::parse(&d).ok()) else { continue };
+            let name = names.get(&k.i).cloned().unwrap_or_default();
+            let parts: Vec<String> = o
+                .parts
+                .iter()
+                .map(|p| {
+                    let colors: Vec<&str> = (1..=4)
+                        .filter(|i| p.preset.contains(&format!("key=\"Color{i} Enabled\" value=\"true\"")) || p.preset.contains(&format!("key=\"Color{i} Enabled\" value=\"True\"")))
+                        .filter_map(|i| p.preset.split(&format!("key=\"Color{i}\" value=\"")).nth(1)?.split('"').next())
+                        .collect();
+                    format!("{}{}", casp_name(&p.casp), if colors.is_empty() { String::new() } else { format!("[{}]", colors.join(" ")) })
+                })
+                .collect();
+            println!("{k} {name} age {:x} gender {:x}: {}", o.age, o.gender, parts.join(", "));
         }
         return;
     }

@@ -741,6 +741,12 @@ cover {:?}", g.seasons.temperature, g.seasons.freeze_melt, g.seasons.cover);
             Err(e) => eprintln!("sounds failed: {e}"),
         }
     }
+    if force || !s3bake::pets_ready(&root) {
+        match s3bake::bake_pets(&root, &pkgs, &progress) {
+            Ok(n) => println!("pets: {n} textures"),
+            Err(e) => eprintln!("pets failed: {e}"),
+        }
+    }
     let available = s3pkg::install::discover_worlds(&data);
     for path in available {
         let name = path.file_stem().unwrap().to_string_lossy().into_owned();
