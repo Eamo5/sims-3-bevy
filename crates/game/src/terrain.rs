@@ -43,7 +43,8 @@ pub struct TerrainExt {
     /// Average linear colour of each paint layer (rgb).
     #[uniform(109)]
     pub layer_avg: [Vec4; 16],
-    /// x: darkness (0 day .. 1 night) for the street-light glow.
+    /// x: darkness (0 day .. 1 night) for the street-light glow; y: snow on the ground, z: how
+    /// wet it is, w: frost (0..1).
     #[uniform(110)]
     pub night: Vec4,
     /// Ground painted in build mode: r the paint layer (index / 15), g how much
@@ -57,13 +58,18 @@ pub struct TerrainExt {
 #[derive(Resource)]
 pub struct TerrainMaterialHandle(pub Handle<TerrainMaterial>);
 
-fn terrain_night(night: Res<crate::clock::Night>, handle: Option<Res<TerrainMaterialHandle>>, mut mats: ResMut<Assets<TerrainMaterial>>) {
+/// The terrain's darkness (for the street lights' glow) and the seasons' ground cover: snow,
+/// wetness, frost.
+fn terrain_night(night: Res<crate::clock::Night>, weather: Option<Res<crate::weather::Weather>>, handle: Option<Res<TerrainMaterialHandle>>, mut mats: ResMut<Assets<TerrainMaterial>>) {
     let Some(h) = handle else { return };
-    if !night.is_changed() {
+    let cover = weather.as_ref().map_or(Vec3::ZERO, |w| Vec3::new(w.snow, w.wet, w.frost) / 100.0);
+    let want = Vec4::new(night.0, cover.x, cover.y, cover.z);
+    let Some(m) = mats.get(&h.0) else { return };
+    if (m.extension.night - want).abs().max_element() < 0.004 {
         return;
     }
     if let Some(mut m) = mats.get_mut(&h.0) {
-        m.extension.night = Vec4::new(night.0, 0.0, 0.0, 0.0);
+        m.extension.night = want;
     }
 }
 

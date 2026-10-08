@@ -104,6 +104,25 @@ fn fragment(
     if (paint_w > 0.002) {
         col = mix(col, paint_col / paint_w * shade, clamp(paint_w, 0.0, 1.0));
     }
+    // The seasons: frost, then snow, settling on the level ground first (thin snow on the
+    // texture's lighter bits, so it's patchy until it's deep); and the ground darker and
+    // glossier while wet.
+    let snow = terrain_night.y;
+    let frost = terrain_night.w;
+    let wet = terrain_night.z;
+    var covered = 0.0;
+    if (snow > 0.001 || frost > 0.001) {
+        let level = smoothstep(0.55, 0.9, in.world_normal.y);
+        let detail = dot(col, vec3<f32>(0.3, 0.59, 0.11)) / max(dot(avg, vec3<f32>(0.3, 0.59, 0.11)), 0.02);
+        col = mix(col, vec3<f32>(0.78, 0.82, 0.88), frost * 0.35 * level);
+        covered = clamp(snow * 3.0 - 0.25 + (detail - 1.0) * 0.9, 0.0, 1.0) * level;
+        col = mix(col, vec3<f32>(0.86, 0.89, 0.95) * (0.94 + 0.06 * detail), covered);
+    }
+    if (wet > 0.001) {
+        let w = wet * (1.0 - covered);
+        col = col * (1.0 - 0.38 * w);
+        pbr_input.material.perceptual_roughness = mix(pbr_input.material.perceptual_roughness, 0.28, w);
+    }
     pbr_input.material.base_color = vec4<f32>(col, 1.0);
     if ((flags & 2u) != 0u && terrain_night.x > 0.01) {
         // Pools of street light baked into the world's light map.

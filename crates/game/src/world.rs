@@ -22,6 +22,7 @@ pub struct WorldPlugin;
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "shaders/tree.wgsl");
+        embedded_asset!(app, "shaders/tree_frag.wgsl");
         app.add_plugins(MaterialPlugin::<TreeMaterial>::default()).add_systems(OnEnter(AppState::InGame), spawn_world_content);
     }
 }
@@ -42,6 +43,8 @@ pub struct TreeBillboard {
     pub views: [Vec4; 16],
     /// x: how many views, y: the atlas's width / height, z: the tree's height.
     pub params: Vec4,
+    /// x: fall colour, y: leaves gone, z: snow (0..1), w: 1 for an evergreen (`weather`).
+    pub season: Vec4,
 }
 
 impl MaterialExtension for TreeExt {
@@ -51,6 +54,21 @@ impl MaterialExtension for TreeExt {
     fn prepass_vertex_shader() -> ShaderRef {
         "embedded://sims3/shaders/tree.wgsl".into()
     }
+    fn fragment_shader() -> ShaderRef {
+        "embedded://sims3/shaders/tree_frag.wgsl".into()
+    }
+}
+
+/// Whether a tree keeps its leaves through winter: the conifers and palms, by the species its
+/// billboard is named after (or, without a name, a slender tree).
+fn evergreen(k: &TreeKindBaked) -> bool {
+    let n = k.name.to_ascii_lowercase();
+    if n.is_empty() {
+        return k.radius < k.height * 0.3;
+    }
+    ["pine", "fir", "spruce", "cedar", "cypress", "redwood", "sequoia", "conifer", "evergreen", "juniper", "yew", "hemlock", "palm", "cactus", "joshua", "bamboo", "larch"]
+        .iter()
+        .any(|s| n.contains(s))
 }
 
 /// The quad a 360° billboard is drawn on (the shader places and sizes it), and the room it
@@ -207,7 +225,10 @@ fn spawn_world_content(
             for (v, r) in views.iter_mut().zip(&k.views) {
                 *v = Vec4::from(*r);
             }
-            let billboard = TreeBillboard { views, params: Vec4::new(k.views.len().min(16) as f32, k.atlas_aspect, k.height.max(0.3), 0.0) };
+            let evergreen = evergreen(&k);
+            debug!("tree {}: {}", k.name, if evergreen { "evergreen" } else { "deciduous" });
+            let billboard =
+                TreeBillboard { views, params: Vec4::new(k.views.len().min(16) as f32, k.atlas_aspect, k.height.max(0.3), 0.0), season: Vec4::new(0.0, 0.0, 0.0, evergreen as u8 as f32) };
             let (mesh, aabb) = billboard_quad(&k);
             billboards.insert(k.kind, (meshes.add(mesh), tree_mats.add(TreeMaterial { base, extension: TreeExt { billboard } }), aabb));
             continue;

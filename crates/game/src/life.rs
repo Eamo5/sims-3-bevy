@@ -497,17 +497,25 @@ pub enum MoodletKind {
     Singed,
     DirtySurroundings,
     FilthySurroundings,
+    // The seasons: a Sim's temperature, and rain.
+    GettingChilly,
+    TeethChattering,
+    Frostbitten,
+    GettingWarm,
+    SweatingProfusely,
+    Soaked,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 48] = {
+    pub const ALL: [MoodletKind; 54] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
             GoodMeal, AmazingMeal, HavingFun, GoodConversation, EnjoyingMusic, EnjoyingAGoodBook, Pumped, Fatigued,
             Inspired, Embarrassed, PassedOut, Uncomfortable, Promoted, Demoted, Fired, NewJob, Annoyed, Flirty, FirstKiss,
             InLove, Heartbroken, JustMarried, NewHome, Birthday, WishFulfilled, Nauseous, Pregnant, NewBaby, GreatParty,
-            LameParty, AwesomeParty, Scared, GreatDate, BadDate, Singed, DirtySurroundings, FilthySurroundings,
+            LameParty, AwesomeParty, Scared, GreatDate, BadDate, Singed, DirtySurroundings, FilthySurroundings, GettingChilly,
+            TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked,
         ]
     };
 
@@ -580,6 +588,12 @@ impl MoodletKind {
             DirtySurroundings => md("Dirty Surroundings", "Dirty dishes, garbage and spoiled food are never a kind sight to the eyes, or nose...", -15, 0.0),
             FilthySurroundings => md("Filthy Surroundings", "The grime and muck is really starting to pile high.", -30, 0.0),
             WishFulfilled => md("Wish Fulfilled", "Dreams come true!", 10, 4.0),
+            GettingChilly => md("Getting Chilly", "The air has a bit of a bite to it!", 0, 0.0),
+            TeethChattering => md("Teeth Chattering", "So cold the teeth won't stop chattering.", -10, 0.0),
+            Frostbitten => md("Frostbitten", "Brrrr!! It is now officially too cold.", -10, 3.0),
+            GettingWarm => md("Getting Warm", "A little heat never hurts!", 0, 0.0),
+            SweatingProfusely => md("Sweating Profusely", "Whoof! It is a sauna right now!", -10, 0.0),
+            Soaked => md("Soaked", "Being soaked is never really comfortable.", -5, 2.0),
         }
     }
 
@@ -640,6 +654,12 @@ impl MoodletKind {
             Singed => ("SingedElectricity", true),
             DirtySurroundings => ("DirtySurroundings", true),
             FilthySurroundings => ("FilthySurroundings", true),
+            GettingChilly => ("GettingChilly", true),
+            TeethChattering => ("TeethChattering", true),
+            Frostbitten => ("Frostbitten", true),
+            GettingWarm => ("GettingWarm", true),
+            SweatingProfusely => ("SweatingProfusely", true),
+            Soaked => ("Soaked", true),
         }
     }
 }

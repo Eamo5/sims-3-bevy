@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::{BakeRoot, Progress, par_map};
 use crate::pack::{PackReader, PackWriter, write_value};
 
-pub const SOUNDS_VERSION: u32 = 6;
+pub const SOUNDS_VERSION: u32 = 7;
 
 /// Sample file formats in `sounds.pack`.
 pub const FORMAT_MP3: u8 = 0;
@@ -149,6 +149,38 @@ pub const EXTRA_SOUNDS: &[&str] = &[
     "amb_dogs_nite",
     "amb_birds_ocean",
     "amb_ocean_oneshot",
+    // The seasons' ambience.
+    "amb_summer_birds_morn",
+    "amb_summer_birds_midday",
+    "amb_summer_birds_dusk",
+    "amb_summer_insects_night",
+    "amb_fall_birds_morn",
+    "amb_fall_birds_midday",
+    "amb_fall_birds_dusk",
+    "amb_fall_owl_night",
+    "amb_winter_birds_morn",
+    "amb_winter_birds_midday",
+    "amb_winter_birds_dusk",
+    "amb_winter_owl_night",
+    "amb_spring_birds_morn",
+    "amb_spring_birds_midday",
+    "amb_spring_birds_dusk",
+    "amb_spring_insects_night",
+    // Weather.
+    "rain_light_lp",
+    "rain_medium_lp",
+    "rain_heavy_lp",
+    "snow_light_lp",
+    "snow_medium_lp",
+    "snow_heavy_lp",
+    "hail_lp",
+    "wind_light_lp",
+    "wind_medium_lp",
+    "wind_heavy_lp",
+    "thunder_near",
+    "thunder_medium",
+    "thunder_far",
+    "fx_lightning_strike",
     // Phone.
     "phone_ring_cela",
     "phone_ring_cela_ui",

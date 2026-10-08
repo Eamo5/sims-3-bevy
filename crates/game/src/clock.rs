@@ -112,25 +112,40 @@ fn advance_clock(time: Res<Time>, mut clock: ResMut<GameClock>, mut delta: ResMu
 /// The sun's height (-1..1, 0 at the horizon): up at 6:00, highest at 13:00, down at 20:00, as
 /// the game's summer days.
 pub fn sun_elevation(h: f32) -> f32 {
+    sun_elevation_in(h, 6.0, 20.0)
+}
+
+/// The sun's height with sunrise and sunset at these hours (the seasons move them).
+pub fn sun_elevation_in(h: f32, rise: f32, set: f32) -> f32 {
     let h = h.rem_euclid(24.0);
-    if (6.0..20.0).contains(&h) { ((h - 6.0) / 14.0 * std::f32::consts::PI).sin() } else { -((h - 20.0).rem_euclid(24.0) / 10.0 * std::f32::consts::PI).sin() }
+    let day = (set - rise).clamp(1.0, 23.0);
+    if (rise..set).contains(&h) { ((h - rise) / day * std::f32::consts::PI).sin() } else { -((h - set).rem_euclid(24.0) / (24.0 - day) * std::f32::consts::PI).sin() }
 }
 
 /// How dark it is: 0 in daylight, 1 at night (smooth through dusk and dawn).
 #[derive(Resource, Default, Clone, Copy)]
 pub struct Night(pub f32);
 
+#[allow(clippy::too_many_arguments)]
 fn day_night(
     clock: Res<GameClock>,
     mut night: ResMut<Night>,
     mut sun: Query<(&mut Transform, &mut DirectionalLight)>,
     mut ambient: Query<&mut AmbientLight>,
     mut clear: ResMut<ClearColor>,
+    weather: Option<Res<crate::weather::Weather>>,
+    lightning: Option<Res<crate::weather_fx::Lightning>>,
+    time: Res<Time>,
 ) {
     let h = clock.hour_f();
-    // Sun angle: rises at 6:00, sets at 20:00.
-    let t = (h - 6.0) / 14.0;
-    let elev = sun_elevation(h);
+    // Sun angle: rises at 6:00, sets at 20:00 (in summer: later and earlier in the other
+    // seasons).
+    let (rise, set) = weather.as_ref().map_or((6.0, 20.0), |w| w.daylight(clock.minutes));
+    let t = (h - rise) / (set - rise);
+    let elev = sun_elevation_in(h, rise, set);
+    // (Under cloud the sun's light is dimmed; lightning lights everything up for a moment.)
+    let overcast = weather.as_ref().map_or(0.0, |w| w.overcast());
+    let flash = lightning.map_or(0.0, |l| l.flash(time.elapsed_secs()));
     let day = elev.clamp(0.0, 1.0);
     let dark = (1.0 - (elev + 0.08) / 0.3).clamp(0.0, 1.0);
     if (night.0 - dark).abs() > 0.002 {
@@ -142,12 +157,12 @@ fn day_night(
         let pitch = -(elev.max(0.08)) * 1.2;
         tf.rotation = Quat::from_euler(EulerRot::YXZ, azimuth, pitch, 0.0);
         // (Evenings stay light until the sun is nearly down.)
-        light.illuminance = 400.0 + 9500.0 * day.powf(0.6);
+        light.illuminance = (400.0 + 9500.0 * day.powf(0.6)) * (1.0 - 0.72 * overcast) + flash * 30000.0;
         light.color = Color::srgb(1.0, 0.85 + 0.12 * day, 0.70 + 0.25 * day).mix(&Color::srgb(1.0, 0.6, 0.35), twilight * 0.6);
     }
     for mut a in &mut ambient {
-        a.brightness = 180.0 + 650.0 * day.powf(0.6);
-        a.color = Color::srgb(0.55, 0.62, 0.95).mix(&Color::srgb(0.85, 0.88, 1.0), day);
+        a.brightness = (180.0 + 650.0 * day.powf(0.6)) * (1.0 - 0.25 * overcast) + flash * 3000.0;
+        a.color = Color::srgb(0.55, 0.62, 0.95).mix(&Color::srgb(0.85, 0.88, 1.0), day).mix(&Color::srgb(0.8, 0.82, 0.85), overcast * 0.7);
     }
     let sky_day = Color::srgb(0.53, 0.70, 0.90);
     let sky_night = Color::srgb(0.03, 0.05, 0.12);

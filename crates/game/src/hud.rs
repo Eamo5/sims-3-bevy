@@ -137,6 +137,10 @@ struct NeedsDetail;
 struct MotiveBar(usize);
 #[derive(Component)]
 struct ClockText;
+
+/// The season, the temperature and the weather, under the clock.
+#[derive(Component)]
+struct SeasonText;
 #[derive(Component)]
 struct FundsText;
 #[derive(Component)]
@@ -416,7 +420,10 @@ fn spawn_hud(mut commands: Commands) {
                 .with_children(|b| {
                     b.spawn(text("Save", 15.0, Color::WHITE));
                 });
-                p.spawn((text("", 18.0, Color::WHITE), ClockText, Node { width: Val::Px(182.0), ..default() }));
+                p.spawn(Node { flex_direction: FlexDirection::Column, width: Val::Px(182.0), ..default() }).with_children(|c| {
+                    c.spawn((text("", 18.0, Color::WHITE), ClockText));
+                    c.spawn((text("", 12.0, Color::srgb(0.8, 0.88, 1.0)), SeasonText));
+                });
                 for (i, label) in ["II", ">", ">>", ">>>"].iter().enumerate() {
                     p.spawn((
                         Button,
@@ -1402,11 +1409,30 @@ fn update_needs_panel(
 fn update_clock_panel(
     clock: Res<GameClock>,
     household: Option<Res<Household>>,
-    mut t: Query<&mut Text, (With<ClockText>, Without<FundsText>)>,
-    mut f: Query<&mut Text, (With<FundsText>, Without<ClockText>)>,
+    mut t: Query<&mut Text, (With<ClockText>, Without<FundsText>, Without<SeasonText>)>,
+    mut f: Query<&mut Text, (With<FundsText>, Without<ClockText>, Without<SeasonText>)>,
+    (mut season, weather, world): (Query<&mut Text, (With<SeasonText>, Without<ClockText>, Without<FundsText>)>, Res<crate::weather::Weather>, Option<Res<crate::data::SelectedWorld>>),
 ) {
     if let Ok(mut t) = t.single_mut() {
         let s = format!("{} {}", clock.weekday_name(), clock.time_string());
+        if t.0 != s {
+            t.0 = s;
+        }
+    }
+    // (As the game's: the season and its day, the temperature, the weather.)
+    if let Ok(mut t) = season.single_mut() {
+        let s = if world.is_some_and(|w| crate::weather::vacation(&w.0.name)) || weather.temperature.is_nan() {
+            String::new()
+        } else {
+            format!(
+                "{} {}/{} · {:.0}°F · {}",
+                weather.season(clock.day()).name(),
+                weather.season_day(clock.day()),
+                weather.season_days,
+                weather.temperature,
+                weather.describe()
+            )
+        };
         if t.0 != s {
             t.0 = s;
         }

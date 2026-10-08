@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 62;
+pub const GAMEDATA_VERSION: u32 = 65;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -254,6 +254,39 @@ pub struct GameDataBaked {
     /// Titles for the books Sims write, by genre (`Fiction`, `SciFi`, `Romance`...).
     pub book_titles: Vec<(String, Vec<String>)>,
     pub recipes: Vec<RecipeInfo>,
+    /// The Seasons tuning (`Seasons` table and SeasonsManager's managers).
+    pub seasons: SeasonsTuning,
+}
+
+/// The seasons' weather, from the game's `Seasons` table: temperatures through the day, how
+/// quickly snow melts or freezes, and each kind of weather's chances; plus the ground cover
+/// tuning (`SeasonsManager+TerrainCoverManager`). Seasons are `Summer`, `Fall`, `Winter`,
+/// `Spring`.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SeasonsTuning {
+    /// Each season's temperatures (°F), morning, noon, evening and night, each {min, max}.
+    pub temperature: Vec<(String, [[f32; 2]; 4])>,
+    /// {temperature (°F), rate per hour}: negative freezes (ponds), positive melts (snow).
+    pub freeze_melt: Vec<[f32; 2]>,
+    pub weather: Vec<WeatherProfile>,
+    /// `TerrainCoverManager` values (`kSnowAccumulationTime`, `kRainDryTime`...).
+    pub cover: HashMap<String, Vec<f32>>,
+}
+
+/// A kind of weather in a season: `Sunny`, `Rain`, `Snow`, `Fog`, `Hail`.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct WeatherProfile {
+    pub kind: String,
+    pub season: String,
+    pub weight: f32,
+    /// How long it lasts (hours).
+    pub min_length: f32,
+    pub max_length: f32,
+    /// The temperatures it comes at (°F).
+    pub min_temp: f32,
+    pub max_temp: f32,
+    /// Light, moderate and heavy (precipitation).
+    pub intensity: [f32; 3],
 }
 
 /// Meal times a recipe is cooked for (`RecipeInfo::meals`).
@@ -1323,9 +1356,14 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     .flatten()
     .collect();
     // Buffs: rows without a SKU belong to the base game.
-    for f in records(&xml("Buffs").ok_or("no Buffs table")?, "BuffList") {
+    // (The packs' buffs too, as Seasons' Getting Chilly or Soaked, when the base game hasn't one
+    // by that name.)
+    let buff_rows = records(&xml("Buffs").ok_or("no Buffs table")?, "BuffList");
+    let base = |f: &HashMap<String, String>| f.get("SKU").is_none_or(|s| s == "BaseGame" || s == "None");
+    let base_hex: std::collections::HashSet<String> = buff_rows.iter().filter(|f| base(f)).filter_map(|f| f.get("Hex").cloned()).collect();
+    for f in buff_rows {
         let hex = get(&f, "Hex");
-        if hex.is_empty() || f.get("SKU").is_some_and(|s| s != "BaseGame") {
+        if hex.is_empty() || (!base(&f) && base_hex.contains(&hex)) || out.buffs.iter().any(|b| b.hex == hex) {
             continue;
         }
         let name_key = get(&f, "BuffName");
@@ -2073,6 +2111,64 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 let weight = f.get("Weight").and_then(|w| w.parse().ok()).unwrap_or(1.0);
                 table.entry(current.clone()).or_default().push(BalloonEntry { icon, refkey, axis, weight });
             }
+        }
+    }
+
+    // Seasons: the weather's tuning table (its first row of each kind holds the defaults).
+    if let Some(x) = xml("Seasons") {
+        let n = |f: &HashMap<String, String>, k: &str, d: f32| f.get(k).and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(d);
+        for f in records(&x, "Temperature").into_iter().filter(|f| f.get("Season").is_some_and(|s| !s.is_empty())) {
+            let pair = |p: &str| [n(&f, &format!("{p}Min"), 0.0), n(&f, &format!("{p}Max"), 0.0)];
+            out.seasons.temperature.push((get(&f, "Season"), [pair("Morning"), pair("Noon"), pair("Evening"), pair("Night")]));
+        }
+        // (Its rows hold a field of the row's own name: read as pairs.)
+        // (Each field's text and where it ends; the first row's are empty.)
+        let field = |s: &str, tag: &str| -> Option<(Option<f32>, usize)> {
+            let a = s.find(&format!("<{tag}>"))? + tag.len() + 2;
+            let b = a + s[a..].find('<')?;
+            Some((s[a..b].trim().parse().ok(), b))
+        };
+        let mut rest = x.split_once("<FreezeMeltRate>").map_or("", |(_, r)| r);
+        while let Some((t, at)) = field(rest, "Temperature") {
+            rest = &rest[at..];
+            let Some((r, at)) = field(rest, "FreezeMeltRate") else { break };
+            rest = &rest[at..];
+            if let (Some(t), Some(r)) = (t, r) {
+                out.seasons.freeze_melt.push([t, r]);
+            }
+        }
+        for kind in ["Sunny", "Rain", "Snow", "Fog", "Hail"] {
+            let rows = records(&x, &format!("{kind}Tuning"));
+            let Some(def) = rows.iter().find(|f| f.get("Season").is_none_or(|s| s.is_empty())).cloned() else { continue };
+            let v = |f: &HashMap<String, String>, k: &str| f.get(k).filter(|s| !s.trim().is_empty()).or(def.get(k)).and_then(|s| s.trim().parse::<f32>().ok()).unwrap_or(0.0);
+            for f in rows.iter().filter(|f| f.get("Season").is_some_and(|s| !s.is_empty())) {
+                out.seasons.weather.push(WeatherProfile {
+                    kind: kind.to_string(),
+                    season: get(f, "Season"),
+                    weight: v(f, "Weight"),
+                    min_length: v(f, "MinLength"),
+                    max_length: v(f, "MaxLength"),
+                    min_temp: if f.contains_key("MinTemp") || def.contains_key("MinTemp") { v(f, "MinTemp") } else { -1000.0 },
+                    max_temp: if f.contains_key("MaxTemp") || def.contains_key("MaxTemp") { v(f, "MaxTemp") } else { 1000.0 },
+                    intensity: [v(f, "LightWeight"), v(f, "ModerateWeight"), v(f, "HeavyWeight")],
+                });
+            }
+        }
+    }
+    if let Some(x) = xml("SeasonsManager+TerrainCoverManager") {
+        // (`<kRainDryTime value="4">`.)
+        let mut rest = x.as_str();
+        while let Some(a) = rest.find("<k") {
+            let tag = &rest[a + 1..];
+            let Some(sp) = tag.find(' ') else { break };
+            let name = &tag[..sp];
+            if let Some(v) = tag[sp..].strip_prefix(" value=\"").and_then(|r| r.split('"').next()) {
+                let vals: Vec<f32> = v.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+                if !vals.is_empty() {
+                    out.seasons.cover.insert(name.to_string(), vals);
+                }
+            }
+            rest = &tag[sp..];
         }
     }
 

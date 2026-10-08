@@ -41,6 +41,12 @@ fn fragment(
         a = op;
     }
 #endif
+    // (The seasons: z snow on the road, w how wet.)
+    c = mix(c, vec3<f32>(0.84, 0.87, 0.92), clamp(road_params.z * 1.6 - 0.4, 0.0, 0.85));
+    c = c * (1.0 - 0.35 * road_params.w);
+    if (road_params.w > 0.001) {
+        pbr_input.material.perceptual_roughness = mix(pbr_input.material.perceptual_roughness, 0.25, road_params.w);
+    }
     pbr_input.material.base_color = vec4<f32>(c, a);
 
 #ifdef PREPASS_PIPELINE

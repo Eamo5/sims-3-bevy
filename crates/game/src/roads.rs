@@ -20,7 +20,7 @@ pub type RoadMaterial = ExtendedMaterial<StandardMaterial, RoadExt>;
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
 pub struct RoadExt {
-    /// x: overlay present, y: opacity present.
+    /// x: overlay present, y: opacity present, z: snow on it, w: how wet (the weather's).
     #[uniform(100)]
     pub params: Vec4,
     #[texture(101)]

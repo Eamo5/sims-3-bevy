@@ -10,7 +10,7 @@ pub const BAKE_VERSION: u32 = 4;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
 pub const CAS_VERSION: u32 = 9;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 49;
+pub const WORLD_VERSION: u32 = 50;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -186,6 +186,8 @@ pub struct TreeKindBaked {
     pub atlas_aspect: f32,
     pub height: f32,
     pub radius: f32,
+    /// Its billboard's name (`treeBirchLarge_composite_billboards_d`): the species.
+    pub name: String,
 }
 
 /// One road / sidewalk / intersection mesh, already in world space.

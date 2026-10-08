@@ -566,6 +566,17 @@ fn main() {
         // The baked moodlets, traits and skills.
         let g = s3bake::load_gamedata(&s3bake::default_root()).expect("no gameplay data");
         println!("{} buffs, {} traits, {} skills", g.buffs.len(), g.traits.len(), g.skills.len());
+        if std::env::var("SEASONS").is_ok() {
+            println!("temperatures {:?}
+freeze/melt {:?}
+cover {:?}", g.seasons.temperature, g.seasons.freeze_melt, g.seasons.cover);
+            for w in &g.seasons.weather {
+                println!("{w:?}");
+            }
+            for b in g.buffs.iter().filter(|b| ["GettingChilly", "TeethChattering", "SweatingProfusely", "GettingWarm", "Soaked", "Frostbitten"].contains(&b.hex.as_str())) {
+                println!("{b:?}");
+            }
+        }
         // The build catalogue's fences.
         println!("{} fences", g.fences.len());
         for f in &g.fences {

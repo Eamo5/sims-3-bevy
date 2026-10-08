@@ -314,6 +314,25 @@ installation is unreachable.
   jog, the athletic (skill 5) run flat out, and the heavily pregnant waddle. Each style is the
   game's clip, played in step with the Sim's pace so their feet stay planted (the paces
   measured from the clips themselves: a walk 1.8 m/s, a run 5.7).
+- **Seasons and weather**, from the Seasons pack's own tuning (its `Seasons` table and
+  SeasonsManager's managers): summer, fall, winter and spring come round a week each, the days
+  shorter away from summer (the sun up later and down earlier), with the season, its day, the
+  temperature and the weather under the clock. Temperatures run between the season's lows and
+  highs for the morning, noon, evening and night, warmer or cooler from day to day. The
+  weather comes by its chances in the season among the temperatures it comes at: sun, rain,
+  snow, fog and hail for their hours, rain and snow light, moderate or heavy. Clouds gather
+  and the light dims under them; rain streaks down round the camera, snowflakes drift and
+  hail pelts; fog closes in; heavy rain brings lightning, the sky flashing and the game's
+  thunder after, sooner the nearer the strike; and the game's rain, snow, hail and wind loops
+  play, with the seasons' own birdsong when it's dry. Rain wets the ground and the roads
+  (darker, glossier) and melts snow, which settles when it snows (frost first, the ground
+  white as it deepens) and melts as it warms, all at the game's rates. Trees turn orange, gold
+  and red in fall and drop their leaves, bare through winter until spring (the conifers and
+  palms stay green), and frost over in the snow. Sims feel it: out of doors their temperature
+  heads for the world's (indoors back to comfortable), with the game's Getting Chilly, Teeth
+  Chattering, Frostbitten, Getting Warm and Sweating Profusely moodlets, and out in the rain
+  long enough they're Soaked; in rain and hail they leave what's out in it alone. The season
+  and the weather are kept in saves; the World Adventures destinations have none.
 - **Water effects**: fountains gush and fill their basins, showers spray from the head and taps
   run while someone's at them, each from the object's own effect slot (the game's RSLT slots).
   TVs show a programme on the screen (at the TV's screen slot) while anyone's watching, its

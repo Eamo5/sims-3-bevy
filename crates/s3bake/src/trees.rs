@@ -208,6 +208,7 @@ pub fn bake_tree_kinds(pkgs: &PackageSet, kinds: &[u64]) -> (Vec<TreeKindBaked>,
             atlas_aspect: img.width as f32 / img.height.max(1) as f32,
             height: mx[1] - mn[1].min(0.0),
             radius: ((mx[0] - mn[0]).max(mx[2] - mn[2])) * 0.5,
+            name: bb_name.clone(),
         });
     }
     (out, textures)

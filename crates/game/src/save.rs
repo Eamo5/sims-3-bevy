@@ -252,6 +252,9 @@ pub struct SaveGame {
     /// Leftovers in the fridge (servings, by recipe).
     #[serde(default)]
     pub leftovers: Vec<String>,
+    /// The season and the weather (`None` in saves from before there was weather).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weather: Option<crate::weather::Weather>,
     /// The town's other households played before, as they were left (to play again).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dormant: Vec<SaveGame>,
@@ -595,11 +598,12 @@ fn save_game(
     ),
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
-    (story, alarm, bowls, leftovers): (
+    (story, alarm, bowls, leftovers, weather): (
         Res<crate::story::TownStory>,
         Res<crate::appliances::Alarm>,
         Query<(&crate::fishbowl::BowlFish, &Transform), Without<crate::visit::LotObject>>,
         Res<crate::meals::Leftovers>,
+        Res<crate::weather::Weather>,
     ),
     (mut slot, maid, mail_due, upgraded, family, strokes, sculpted): (
         ResMut<SaveSlot>,
@@ -721,6 +725,7 @@ fn save_game(
             .map(|(g, tf)| SavedGrave { position: tf.translation.to_array(), rotation: tf.rotation.to_array(), cause: g.cause.clone(), sim: saved_look(&g.sim) })
             .collect(),
         leftovers: leftovers.0.clone(),
+        weather: Some(weather.clone()),
         dormant: dormant.kept(&sims.iter().filter(|q| q.9).map(|q| q.1.id).collect::<Vec<_>>()),
         homeless: false,
         deck: true,
@@ -936,6 +941,7 @@ fn apply_loaded_game(
     commands.insert_resource(crate::fishbowl::PendingBowls(game.fishbowls.clone()));
     commands.insert_resource(game.collection.clone());
     commands.insert_resource(crate::meals::Leftovers(game.leftovers.clone()));
+    commands.insert_resource(game.weather.clone().unwrap_or_default());
     commands.insert_resource(crate::household::Dormant(game.dormant.clone()));
     // The household's dead, back in their graves.
     if let Some(entry) = data.0.catalog.iter().find(|c| c.instance_name == "UrnstoneHuman") {

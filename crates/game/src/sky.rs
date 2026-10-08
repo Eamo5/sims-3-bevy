@@ -115,11 +115,12 @@ fn spawn_sky(
     ));
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn update_sky(
     time: Res<Time>,
     clock: Option<Res<crate::clock::GameClock>>,
     night: Option<Res<crate::clock::Night>>,
+    (weather, lightning): (Option<Res<crate::weather::Weather>>, Option<Res<crate::weather_fx::Lightning>>),
     mut dome: Query<(&SkyDome, &mut Transform), Without<SimsCamera>>,
     mut cam: Query<(&GlobalTransform, Option<&mut DistanceFog>), With<SimsCamera>>,
     sun: Query<&GlobalTransform, With<DirectionalLight>>,
@@ -127,10 +128,16 @@ fn update_sky(
     mut now: ResMut<SkyNow>,
 ) {
     let Ok((dome, mut tf)) = dome.single_mut() else { return };
-    let Ok((cam_tf, fog)) = cam.single_mut() else { return };
+    let Ok((cam_tf, fog_q)) = cam.single_mut() else { return };
     tf.translation = cam_tf.translation();
     let h = clock.as_ref().map_or(12.0, |c| c.hour_f());
-    let elev = crate::clock::sun_elevation(h);
+    let minutes = clock.as_ref().map_or(0.0, |c| c.minutes);
+    let (rise, set) = weather.as_ref().map_or((6.0, 20.0), |w| w.daylight(minutes));
+    let elev = crate::clock::sun_elevation_in(h, rise, set);
+    let overcast = weather.as_ref().map_or(0.0, |w| w.overcast());
+    let clouds = weather.as_ref().map_or(0.3, |w| w.clouds);
+    let fog = weather.as_ref().map_or(0.0, |w| w.fog(minutes));
+    let flash = lightning.map_or(0.0, |l| l.flash(time.elapsed_secs()));
     let day = elev.clamp(0.0, 1.0);
     let dark = night.map_or(0.0, |n| n.0);
     let twilight = (1.0 - (elev.abs() * 3.5).min(1.0)).max(0.0);
@@ -142,18 +149,25 @@ fn update_sky(
     let zenith = mix(mix(Color::srgb(0.02, 0.03, 0.08), Color::srgb(0.24, 0.45, 0.82), day), Color::srgb(0.30, 0.32, 0.55), twilight * 0.6);
     let horizon = mix(mix(Color::srgb(0.06, 0.08, 0.15), Color::srgb(0.70, 0.82, 0.95), day), Color::srgb(0.98, 0.62, 0.42), twilight * 0.8);
     let sun_color = mix(Color::srgb(1.0, 0.96, 0.85), Color::srgb(1.0, 0.55, 0.30), twilight);
+    // Overcast: a grey sky (lit up by lightning), the sun lost behind it.
+    let grey = mix(Color::srgb(0.04, 0.045, 0.06), Color::srgb(0.55, 0.58, 0.62), day + twilight * 0.3);
+    let zenith = mix(mix(zenith, grey, overcast * 0.85), Color::srgb(0.75, 0.78, 0.9), flash * 0.8);
+    let horizon = mix(mix(horizon, grey.mix(&Color::WHITE, 0.08), overcast.max(fog) * 0.85), Color::srgb(0.8, 0.82, 0.92), flash * 0.6);
     now.0 = SkyParams {
         sun: to_sun.extend(day),
         zenith: lin(zenith),
         horizon: lin(horizon),
-        sun_color: lin(sun_color).truncate().extend(twilight),
-        params: Vec4::new(time.elapsed_secs(), dark, 0.45, 0.0),
+        sun_color: (lin(sun_color).truncate() * (1.0 - 0.85 * overcast)).extend(twilight),
+        params: Vec4::new(time.elapsed_secs(), dark, 0.25 + clouds * 1.4, overcast),
     };
     if let Some(mut m) = mats.get_mut(&dome.0) {
         m.extension.sky = now.0;
     }
     // Distant things fade into the horizon.
-    if let Some(mut f) = fog {
+    if let Some(mut f) = fog_q {
         f.color = horizon;
+        // (Thicker in fog, rain and snow: the far end drawn in, in step with how far one sees.)
+        let end = 1.0 / (1.0 / 2600.0 + (1.0 / 240.0 - 1.0 / 2600.0) * fog);
+        f.falloff = FogFalloff::Linear { start: end * 0.27 * (1.0 - fog * 0.8), end };
     }
 }

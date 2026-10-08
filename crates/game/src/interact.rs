@@ -2876,10 +2876,13 @@ fn autonomy(
     (called, repairmen): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>),
     friends_away: Query<(Entity, &Sim), (With<OffLot>, Without<Invited>)>,
     callers: Query<(Entity, &crate::doorbell::AtTheDoor)>,
+    (weather, building): (Res<crate::weather::Weather>, Option<Res<crate::building::ActiveBuilding>>),
 ) {
     if delta.0 <= 0.0 {
         return;
     }
+    // (In rain or hail, what's out in it is left alone: `kRainHailObjectAutonomyScoringMultiplier`.)
+    let rained_on = weather.raining() && weather.falling(clock.minutes) > 0.2;
     // (The repairman's been called: repairs are left to him.)
     let repairman = called.is_some() || !repairmen.is_empty();
     let others: Vec<(Entity, Vec3, Age, [f32; 6], Option<usize>)> = sims.iter().map(|s| (s.0, s.1.translation, s.7.age, s.2.0, s.9.map(|l| l.0))).collect();
@@ -2934,6 +2937,9 @@ fn autonomy(
                 continue;
             }
             if !obj.kind.suits(sim) {
+                continue;
+            }
+            if rained_on && !crate::weather::sheltered(building.as_deref(), otf.translation) {
                 continue;
             }
             // Visitors to the family's home don't sleep in its beds or bathe there.

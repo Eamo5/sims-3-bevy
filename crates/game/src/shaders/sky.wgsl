@@ -86,7 +86,8 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
         + textureSample(cloud_tex, cloud_samp, p * 2.7 + vec2<f32>(-t * 0.0008, t * 0.0011)).r * 0.35;
     let cover = sky.params.z;
     let c = smoothstep(0.42 - cover * 0.2, 0.62 - cover * 0.1, n) * smoothstep(0.0, 0.12, dir.y);
-    let lit = mix(vec3<f32>(0.10, 0.11, 0.16), mix(sky.horizon.rgb * 1.1, vec3<f32>(1.0, 0.99, 0.97), day), 1.0 - night);
+    // (Grey and heavy under an overcast sky.)
+    let lit = mix(vec3<f32>(0.10, 0.11, 0.16), mix(sky.horizon.rgb * 1.1, vec3<f32>(1.0, 0.99, 0.97), day), 1.0 - night) * (1.0 - 0.4 * sky.params.w);
     let sunlit = sky.sun_color.rgb * pow(sd, 4.0) * 0.4 * (1.0 - night);
     col = mix(col, lit + sunlit, c * 0.85);
 

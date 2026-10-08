@@ -19,6 +19,8 @@ struct TreeBillboard {
     views: array<vec4<f32>, 16>,
     // x: how many views, y: the atlas's width / height, z: the tree's height (metres).
     params: vec4<f32>,
+    // (The seasons, for the fragment shader.)
+    season: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> tree: TreeBillboard;

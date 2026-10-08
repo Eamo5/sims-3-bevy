@@ -517,6 +517,7 @@ fn ambience(
     mut play: MessageWriter<PlaySound>,
     sounds: Res<Sounds>,
     cams: Query<&SimsCamera>,
+    weather: Option<Res<crate::weather::Weather>>,
 ) {
     amb.next -= time.delta_secs();
     if amb.next > 0.0 {
@@ -528,11 +529,28 @@ fn ambience(
     // Quieter when zoomed far out.
     let zoom = (1.0 - (cam.distance - 20.0) / 120.0).clamp(0.2, 1.0);
     let h = clock.hour_f();
-    let choices: &[&str] = match h {
-        h if (6.0..9.0).contains(&h) => &["amb_birds_allday", "amb_world_bird_day"],
-        h if (9.0..17.0).contains(&h) => &["amb_birds_midday", "amb_birds_allday", "amb_dogs_day"],
-        h if (17.0..20.5).contains(&h) => &["amb_birds_dusk", "amb_birds_allday"],
-        _ => &["amb_insects_nite", "amb_insects_nite", "amb_owl_nite", "amb_dogs_nite"],
+    // (The birds keep quiet in rain and snow.)
+    if weather.as_ref().is_some_and(|w| w.falling(clock.minutes) > 0.2) {
+        return;
+    }
+    use crate::weather::Season as S;
+    let choices: &[&str] = match (weather.as_ref().map_or(S::Summer, |w| w.season(clock.day())), h) {
+        (S::Fall, h) if (6.0..9.0).contains(&h) => &["amb_fall_birds_morn", "amb_birds_allday"],
+        (S::Fall, h) if (9.0..17.0).contains(&h) => &["amb_fall_birds_midday", "amb_dogs_day"],
+        (S::Fall, h) if (17.0..20.5).contains(&h) => &["amb_fall_birds_dusk"],
+        (S::Fall, _) => &["amb_fall_owl_night", "amb_insects_nite", "amb_dogs_nite"],
+        (S::Winter, h) if (6.0..9.0).contains(&h) => &["amb_winter_birds_morn"],
+        (S::Winter, h) if (9.0..17.0).contains(&h) => &["amb_winter_birds_midday", "amb_dogs_day"],
+        (S::Winter, h) if (17.0..20.5).contains(&h) => &["amb_winter_birds_dusk"],
+        (S::Winter, _) => &["amb_winter_owl_night", "amb_dogs_nite"],
+        (S::Spring, h) if (6.0..9.0).contains(&h) => &["amb_spring_birds_morn", "amb_world_bird_day"],
+        (S::Spring, h) if (9.0..17.0).contains(&h) => &["amb_spring_birds_midday", "amb_birds_allday", "amb_dogs_day"],
+        (S::Spring, h) if (17.0..20.5).contains(&h) => &["amb_spring_birds_dusk", "amb_birds_allday"],
+        (S::Spring, _) => &["amb_spring_insects_night", "amb_owl_nite", "amb_dogs_nite"],
+        (_, h) if (6.0..9.0).contains(&h) => &["amb_birds_allday", "amb_world_bird_day", "amb_summer_birds_morn"],
+        (_, h) if (9.0..17.0).contains(&h) => &["amb_birds_midday", "amb_birds_allday", "amb_dogs_day", "amb_summer_birds_midday"],
+        (_, h) if (17.0..20.5).contains(&h) => &["amb_birds_dusk", "amb_birds_allday", "amb_summer_birds_dusk"],
+        _ => &["amb_insects_nite", "amb_insects_nite", "amb_owl_nite", "amb_dogs_nite", "amb_summer_insects_night"],
     };
     let Some(name) = choices.iter().copied().filter(|n| sounds.def(n).is_some()).collect::<Vec<_>>().choose(&mut rng).copied() else { return };
     if let Some(&id) = sounds.def(name).and_then(|d| d.samples.first()) {
