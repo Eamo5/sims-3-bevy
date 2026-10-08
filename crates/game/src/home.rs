@@ -544,9 +544,14 @@ pub fn spawn_game_object_design(
     rotation: Quat,
     design: Option<Key>,
 ) -> Option<SpawnedObject> {
+    let asked = design;
     let design = design.filter(|d| assets.design_applies(ctx, objd, *d));
     let parts = assets.object_design(ctx, objd, design);
     let entry = catalog.by_key(&objd);
+    // (DESIGN_LOG=1: each object put down, the design asked for and the one drawn.)
+    if std::env::var("DESIGN_LOG").is_ok() {
+        info!("DESIGN_LOG {} {:?} asked {:?} designs-known {} design {:?}", entry.map_or("?", |e| e.name.as_str()), objd, asked, ctx.baked.designs.contains_key(&objd), design);
+    }
     let (name, price, kind) = entry
         .map(|e| (e.name.clone(), e.price, e.kind))
         .unwrap_or_else(|| ("Object".into(), 0, ObjectKind::Other));

@@ -414,12 +414,13 @@ u32 len, u16 0x42, u32 TGI offset, u32 TGI size, complate, TGI list, u32`, the c
 blocks). Rendered at the size of the object's composited (TXTC) diffuse, a design stands in for
 that texture on every mesh using it; the shipped TXTC is one of them (not always the first: the
 country couch ships its third, red plaid). Placed objects keep their own design inline in the
-model component (above): in Sunset Valley 7,277 of 10,483 objects have one, but most of the
-world's props name a legacy placeholder (`Pattern A = OLD\defaultWood`, flat colours); those
-keep their shipped texture here [GUESS: what the game itself draws for them is unchecked], and
-only the other designs are drawn (580 different ones in SV, about 2,500 in Twinbrook or
-Bridgeport). Compared with the catalogue's designs, a placed object's has an extra
-`daeFilePath` and fewer decimals. [VERIFIED apart from the placeholders]
+model component (above): in Sunset Valley 7,277 of 10,483 objects have one. Most name a legacy
+pattern at the top (`Pattern A = OLD\defaultWood`), but that's only a name: each pattern's block
+carries the pattern it's drawn with (its file, colours, tiling), and drawn they come out as their
+builders chose (on the Landgraabs' lot 391 of 441 designs name one, and none draws flat: mission
+oak desks, marble columns, blue-and-white patio chairs), so every design is drawn. Compared with
+the catalogue's designs, a placed object's has an extra `daeFilePath` and fewer decimals.
+[VERIFIED]
 
 Sunset Valley totals: 10,119 objects; 406 tree objects carrying 5,596 tree instances; script classes
 include windows/doors/stairs/street lights/mailboxes/parking spaces/rabbit holes.

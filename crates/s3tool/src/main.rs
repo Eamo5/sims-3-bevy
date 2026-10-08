@@ -409,6 +409,11 @@ fn main() {
             if let (Some(set), Some((c, keys))) = (&install, &o.design) {
                 let blocks: Vec<String> = c.blocks.iter().map(|b| format!("{} ({})", b.name, b.pattern)).collect();
                 println!("    design {} xml {:?} keys {} blocks {blocks:?}", c.name, keys.get(c.xml as usize).map(|k| k.to_string()), keys.len());
+                // (CANON=1: the design as compared, and whether it names a legacy pattern.)
+                if std::env::var("CANON").is_ok() {
+                    let canon = c.canonical(keys);
+                    println!("    canon old={} {}", canon.contains("=OLD\\"), canon.chars().take(600).collect::<String>());
+                }
                 if let Ok(dir) = std::env::var("DESIGN_PNG")
                     && let Some(img) = s3formats::complate::render(set, c, keys, 256, 256)
                 {

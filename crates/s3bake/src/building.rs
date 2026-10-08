@@ -415,16 +415,13 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
         if level > 1 && o.script.as_deref().unwrap_or("").contains("LightingCeiling") {
             level -= 1;
         }
-        // Its own design, drawn with the walls' and floors' (the legacy placeholders some
-        // objects still name, "OLD\defaultWood", aren't real designs: those keep their own).
-        let design = o.design.as_ref().and_then(|(c, keys)| {
+        // Its own design, drawn with the walls' and floors'. (Many name a legacy pattern,
+        // "OLD\defaultWood", but carry the patterns they're drawn with all the same.)
+        let design = o.design.as_ref().map(|(c, keys)| {
             let canon = c.canonical(keys);
-            if canon.contains("=OLD\\") {
-                return None;
-            }
             let key = (crate::types::T_LOT_DESIGN, 0, s3pkg::fnv64(&canon));
             covers.jobs.push(CoverJob { key, floor: true, source: CoverSource::Design { complate: c.clone(), keys: keys.clone() } });
-            Some(key)
+            key
         });
         objs.push(LotObjectBaked {
             objd: key_of(&cat),
