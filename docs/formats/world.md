@@ -290,6 +290,14 @@ Positions are world space. Parser below consumes 133/134 Sunset Valley OBJN exac
 object section (10,119 objects); the one failure is a GlobalLayer object with the `Sim` component
 whose animation state uses a record type (0x19) we did not decode.
 
+Worlds saved by later versions of the game (Appaloosa Plains, EP5; same header version 0x14 and
+object version 10) differ in two places: the model component's visual-state block ends in 4 bytes
+rather than 3 (`9 + 24 + 4`: its six floats are the object's bounds), and each object record has
+4 more bytes after the audio component. Nothing in the headers tells them apart: try the 3-byte
+tail and then the 4-byte one, and take the one after which the next object's header follows
+within 8 bytes (then keep it for the rest of the resource). Before this, 219 of the Pinkertons'
+223 objects failed to parse (their house stood bare: no doors, windows or furniture). [VERIFIED]
+
 ### 6.1 Header  [VERIFIED]
 
 ```

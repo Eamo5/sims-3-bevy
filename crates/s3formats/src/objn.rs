@@ -150,9 +150,28 @@ pub fn parse_objn(d: &[u8], refs: &HashMap<u16, ResourceKey>) -> R<Vec<PlacedObj
     let _len = r.u32()?;
     let count = r.u32()? as usize;
     let mut out = Vec::with_capacity(count);
+    // (Worlds saved by later versions of the game have a byte more at the end of the model's
+    // visual state, and a few after the object: whichever way the world has it, found as the way
+    // an object ends where the next begins (or just short of it), and kept to.)
+    let mut tail = 3;
     for i in 0..count {
         let start = r.pos;
-        match parse_object(&mut r, refs) {
+        let fits = |t: usize| {
+            let mut rr = Reader::at(d, start);
+            let o = parse_object(&mut rr, refs, t).ok()?;
+            if i + 1 >= count {
+                return Some((o, rr.pos));
+            }
+            let next = (rr.pos..=rr.pos + 8).find(|&p| header_ok(d, p))?;
+            Some((o, next))
+        };
+        let other = if tail == 3 { 4 } else { 3 };
+        if let Some((o, end)) = fits(tail).or_else(|| fits(other).inspect(|_| tail = other)) {
+            out.push(o);
+            r.pos = end;
+            continue;
+        }
+        match parse_object(&mut r, refs, tail) {
             Ok(o) => {
                 out.push(o);
                 // Later packs append fields some objects don't have: resynchronise on the next header.
@@ -163,10 +182,20 @@ pub fn parse_objn(d: &[u8], refs: &HashMap<u16, ResourceKey>) -> R<Vec<PlacedObj
                     r.pos = p;
                 }
             }
-            Err(_) => match scan_header(d, start + 16, 1 << 16) {
-                Some(p) => r.pos = p,
-                None => break,
-            },
+            Err(e) => {
+                if std::env::var("OBJN_DEBUG").is_ok_and(|v| v == d.len().to_string()) {
+                    eprintln!("objn: object {i} at {start} failed ({e:?}), resyncing");
+                }
+                match scan_header(d, start + 16, 1 << 16) {
+                    Some(p) => r.pos = p,
+                    None => {
+                        if std::env::var("OBJN_DEBUG").is_ok_and(|v| v == d.len().to_string()) {
+                            eprintln!("objn: no header after {start}: stopping at {i} of {count}");
+                        }
+                        break;
+                    }
+                }
+            }
         }
     }
     Ok(out)
@@ -191,7 +220,7 @@ fn scan_header(d: &[u8], from: usize, window: usize) -> Option<usize> {
     (from..(from + window).min(d.len().saturating_sub(16))).find(|&p| header_ok(d, p))
 }
 
-fn parse_object(r: &mut Reader, refs: &HashMap<u16, ResourceKey>) -> R<PlacedObject> {
+fn parse_object(r: &mut Reader, refs: &HashMap<u16, ResourceKey>, tail: usize) -> R<PlacedObject> {
     let resolve = |i: u16| refs.get(&i).copied().filter(|k| k.t != 0 || k.i != 0);
     let mut o = PlacedObject { rotation: [0.0, 0.0, 0.0, 1.0], ..Default::default() };
     o.guid = r.u64()?;
@@ -263,7 +292,7 @@ fn parse_object(r: &mut Reader, refs: &HashMap<u16, ResourceKey>) -> R<PlacedObj
             }
         }
         if has(C_VISUALSTATE) {
-            r.skip(9 + 24 + 3)?;
+            r.skip(9 + 24 + tail)?;
         }
     }
     if has(C_ANIMATION) {
