@@ -121,13 +121,17 @@ pub fn draw(mut commands: Commands, mut catalog: ResMut<BuildCatalog>, hud: Res<
     mut assets: ResMut<crate::objects::ObjectAssets>,
     (mut meshes, mut images, mut mats, mut fonts): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>, ResMut<Assets<Font>>),
     windows: Query<&Window, With<PrimaryWindow>>, mut nodes: Query<&mut Node>, mut visibility: Query<&mut Visibility>,
-    mut buttons: Query<&mut UiButton>, mut bars: Query<&mut UiScrollBar>) {
+    mut buttons: Query<&mut UiButton>, mut bars: Query<&mut UiScrollBar>, panels: Query<Entity, With<crate::buy::BuyPanel>>) {
     if !showing(&buy) { return; }
     let (Some(mut ui), Some(game_ui), Ok(window)) = (ui, game_ui, windows.single()) else { return };
     for (id, fill) in [(0x324, false), (0x326, true), (0x344, false), (0x345, true)] {
         if let Some(e) = hud.puck.id(id) && let Ok(mut b) = buttons.get_mut(e) { b.selected = buy.cover_fill == fill; }
     }
     let c = &mut *catalog;
+    // Keep the colour presets above both the material tabs and any expanded rows.
+    for panel in &panels {
+        if let Ok(mut n) = nodes.get_mut(panel) { n.bottom = Val::Px(210.0 + c.rows.saturating_sub(2) as f32 * 54.0); }
+    }
     let signature = (buy.category, c.scroll, c.expanded, buy.painting, window.width() as u32, c.filter);
     if c.shown == Some(signature) { return; }
     let k = (buy.category == FLOORS_TAB) as usize;

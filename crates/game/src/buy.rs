@@ -151,7 +151,7 @@ pub struct BuyMode {
 }
 
 #[derive(Component)]
-struct BuyPanel;
+pub(crate) struct BuyPanel;
 
 /// Furniture hidden while its preview is in hand. Building visibility leaves it hidden.
 #[derive(Component)]
@@ -722,7 +722,7 @@ fn buy_panel(
             position_type: PositionType::Absolute,
             left: Val::Px(330.0),
             right: Val::Px(20.0),
-            bottom: Val::Px(176.0),
+            bottom: Val::Px(if native_covers { 210.0 } else { 176.0 }),
             padding: UiRect::all(Val::Px(10.0)),
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(8.0),
