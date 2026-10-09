@@ -34,6 +34,26 @@ pub struct Activity {
     pub close: f32,
 }
 
+impl Activity {
+    fn apply_needs(&self, motives: &mut Motives, minutes: f32, wishes: Option<&crate::wishes::Wishes>, body_builder: bool) {
+        for i in 0..6 {
+            if i == BLADDER && crate::wishes::has(wishes, "SteelBladder") {
+                motives.0[i] = 100.0;
+                continue;
+            }
+            let mut rate = self.per_hour[i];
+            if body_builder && i == ENERGY && rate < 0.0 { continue; }
+            // The visit replaces ordinary hunger/bladder decay while off lot. Rewards
+            // still apply to those losses, but must not reduce a meal's benefits or
+            // prevent getting dirty from exercise.
+            if rate < 0.0 && matches!(i, HUNGER | BLADDER) {
+                rate *= crate::wishes::reward_decay(wishes, i);
+            }
+            motives.add(i, rate * minutes / 60.0);
+        }
+    }
+}
+
 pub const fn act(name: &'static str, minutes: f32, cost: i64, per_hour: [f32; 6], skill: Option<&'static str>) -> Activity {
     Activity { name, minutes, cost, per_hour, skill, open: 0.0, close: 24.0 }
 }
@@ -155,6 +175,29 @@ impl AtRabbitHole {
 mod visit_time_tests {
     use super::*;
 
+    #[test]
+    fn visit_rewards_reduce_decay_without_weakening_meals_or_preventing_exercise_grime() {
+        let wishes = crate::wishes::Wishes::restored(0,
+            vec!["SteelBladder".into(), "HardlyHungry".into(), "PermaClean".into()], 0.0);
+        let mut ordinary = Motives([50.0; 6]);
+        let mut rewarded = ordinary.clone();
+        GYM[0].apply_needs(&mut ordinary, 60.0, None, false);
+        GYM[0].apply_needs(&mut rewarded, 60.0, Some(&wishes), false);
+        assert_eq!(ordinary.0[BLADDER], 45.0);
+        assert_eq!(rewarded.0[BLADDER], 100.0);
+        assert_eq!(ordinary.0[HUNGER], 42.0);
+        assert_eq!(rewarded.0[HUNGER], 48.0);
+        assert_eq!(rewarded.0[HYGIENE], ordinary.0[HYGIENE]);
+        assert_eq!(rewarded.0[HYGIENE], 30.0);
+        let mut meal = Motives([0.0; 6]);
+        EATERY[0].apply_needs(&mut meal, 30.0, Some(&wishes), false);
+        assert_eq!(meal.0[HUNGER], 75.0, "Hardly Hungry must not reduce food satisfaction");
+        let mut builder = Motives([50.0; 6]);
+        GYM[0].apply_needs(&mut builder, 60.0, Some(&wishes), true);
+        assert_eq!(builder.0[ENERGY], 50.0);
+        assert_eq!(builder.0[HUNGER], rewarded.0[HUNGER]);
+    }
+
     fn visit() -> AtRabbitHole {
         AtRabbitHole { lot: 0, activity: &GYM[0], inside_from: 25.0, until: 170.0, place: "Gym".into() }
     }
@@ -273,12 +316,7 @@ fn outings(
             // (Strength training at the gym, kept in their journal; a Body Builder isn't tired by it.)
             let strength = at.activity.name == "Work Out";
             let builder = strength && crate::journal::earned(journal, "Body Builder");
-            for i in 0..6 {
-                if builder && i == crate::sim::ENERGY && at.activity.per_hour[i] < 0.0 {
-                    continue;
-                }
-                motives.add(i, at.activity.per_hour[i] * dt / 60.0);
-            }
+            at.activity.apply_needs(&mut motives, dt, wishes, builder);
             if strength {
                 did.write(crate::journal::Did::count(e, crate::journal::Stat::StrengthHours, dt as f64 / 60.0));
             }
