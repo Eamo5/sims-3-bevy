@@ -62,7 +62,8 @@ fn seed_quality() -> f32 {
 
 fn planted_quality(level: f32, wishes: Option<&crate::wishes::Wishes>) -> f32 {
     // Super Green Thumb improves the plant at planting, not the picker at harvest.
-    (seed_quality() + level * 0.02 + if crate::wishes::has(wishes, "SuperGreenThumb") { 0.1 } else { 0.0 }).clamp(0.0, 1.0)
+    // TraitTuning.kSuperGreenThumbPlantQualityMultiplier = 1.15.
+    ((seed_quality() + level * 0.02) * if crate::wishes::has(wishes, "SuperGreenThumb") { 1.15 } else { 1.0 }).clamp(0.0, 1.0)
 }
 
 /// A planted garden plant.
@@ -115,7 +116,8 @@ mod harvest_tests {
         for level in 0..=10 {
             let normal = planted_quality(level as f32, None);
             let better = planted_quality(level as f32, Some(&wishes));
-            assert_eq!(quality_tier(better), quality_tier(normal) + 1);
+            assert!(better > normal);
+            assert!(quality_tier(better) >= quality_tier(normal));
             let mut p = plant();
             p.quality = better;
             let mut restored: GrowingPlant = serde_json::from_slice(&serde_json::to_vec(&p).unwrap()).unwrap();

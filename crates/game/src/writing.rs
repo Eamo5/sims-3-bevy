@@ -308,7 +308,7 @@ fn pay_royalties(
     let day = clock.day();
     for (e, sim, mut a, wishes) in &mut authors {
         // (Bigger checks for a High Roller.)
-        let factor = if crate::wishes::has(wishes, "HighRoller") { 1.5 } else { 1.0 };
+        let factor = if crate::wishes::has(wishes, "HighRoller") { 1.33333 } else { 1.0 };
         let mut paid = 0;
         let mut titles = Vec::new();
         for b in a.books.iter_mut().filter(|b| b.payments_left > 0 && b.next_pay <= day) {

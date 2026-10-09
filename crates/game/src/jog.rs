@@ -81,7 +81,7 @@ fn jog(
                 notes.push(format!("{} reached level {} in Athletic!", sim.first, *v as u32));
                 life.write(LifeEvent::new(e, LifeEventKind::SkillUp { skill: "Athletic", level: *v as u32 }));
             }
-            let burn = if crate::wishes::has(wishes, "FastMetabolism") { 2.0 } else { 1.0 };
+            let burn = if crate::wishes::has(wishes, "FastMetabolism") { 1.25 } else { 1.0 };
             commands.entity(e).queue_silenced(move |mut w: EntityWorldMut| crate::aging::reshape(&mut w, -0.03 * h * burn, 0.05 * h));
             did.write(crate::journal::Did::count(e, crate::journal::Stat::KmJogged, KM_PER_HOUR * h as f64));
             did.write(crate::journal::Did::count(e, crate::journal::Stat::CardioHours, h as f64));

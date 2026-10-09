@@ -608,7 +608,7 @@ fn work_schedule(
             // (Working hard gets them noticed faster; taking it easy, the other way.)
             let gain = if gain > 0.0 { gain * job.tone.performance() } else { gain / job.tone.performance().max(0.5) };
             // (A Multi-Tasker gets more done.)
-            let gain = if gain > 0.0 && crate::wishes::has(wishes, "MultiTasker") { gain * 1.5 } else { gain };
+            let gain = gain + if crate::wishes::has(wishes, "MultiTasker") { 3.0 } else { 0.0 };
             job.performance = (job.performance + gain).clamp(-100.0, 100.0);
             // Studying the career's skill on the job.
             if job.tone == WorkTone::Study {
@@ -679,13 +679,15 @@ fn work_schedule(
         // A missed shift costs performance.
         if workday && h > info.start + 2.0 && h < info.start + 3.0 && job.last_day != Some(day) {
             job.last_day = Some(day);
-            // (Nobody at work notices a Vacationer's day off.)
-            if crate::wishes::has(wishes, "Vacationer") {
-                notes.push(format!("{} took the day off work. Nobody noticed.", sim.first));
-                continue;
-            }
-            job.performance = (job.performance - 35.0).max(-100.0);
-            notes.push(format!("{} missed work today! Their boss is not pleased.", sim.first));
+            // TraitTuning reduces a Vacationer's missed-shift penalty to 20%.
+            let vacationer = crate::wishes::has(wishes, "Vacationer");
+            let penalty = 35.0 * if vacationer { 0.2 } else { 1.0 };
+            job.performance = (job.performance - penalty).max(-100.0);
+            notes.push(if vacationer {
+                format!("{} took the day off work. Vacationer softened the performance penalty.", sim.first)
+            } else {
+                format!("{} missed work today! Their boss is not pleased.", sim.first)
+            });
             continue;
         }
         let going = queue.0.iter().any(|a| matches!(a.kind, ActionKind::GoToWork));

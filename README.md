@@ -138,14 +138,14 @@ installation is unreachable.
   costs in its dialog (icon, name and description): Steel Bladder (bladder stays full), Dirt
   Defiant and Hardly Hungry (hygiene and hunger decay at one quarter speed), Fast Learner
   (+15% learning, including gardening, repairs/upgrades, career study and rabbit-hole lessons),
-  Fast Metabolism, Professional Slacker, No Bills Ever (new household bills stop while a
+  Fast Metabolism (+25% body-shape change), Professional Slacker, No Bills Ever (new household bills stop while a
   reward owner belongs to the household), Opportunistic (bigger
   opportunity rewards), Attractive, Extra Creative (paintings and books earn more), Super
-  Green Thumb (improves plant quality at planting, retained in saves), Discount Diner,
+  Green Thumb (1.15× plant quality at planting, retained in saves), Discount Diner,
   Complimentary Entertainment, Bookshop Bargainer (25% book discount), Haggler (15% shop
   discount, additive with Bookshop Bargainer), Speedy
-  Cleaner (cleaning up twice as fast), Multi-Tasker (more done at work, homework in half the
-  time), High Roller (bigger royalties), Vacationer (a missed day at work goes unnoticed),
+  Cleaner (3× cleaning rate), Multi-Tasker (+3 work performance, 1.5× homework rate),
+  High Roller (1.33333× royalties), Vacationer (20% of the normal missed-work penalty),
   Legendary Host (every party a hit), Long Distance Friend (friendships never drift), Fertility
   Treatment (a baby likelier), a new lifetime wish, and a Mid-Life Crisis (all their traits
   chosen again, by the game's trait pictures; Escape thinks better of it, and the lifetime

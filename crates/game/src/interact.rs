@@ -2427,7 +2427,7 @@ fn run_actions(
                                 if d.pose == Pose::Exercise {
                                     let h = dt / 60.0;
                                     // (Faster for a Fast Metabolism.)
-                                    let burn = if crate::wishes::has(wishes, "FastMetabolism") { 2.0 } else { 1.0 };
+                                    let burn = if crate::wishes::has(wishes, "FastMetabolism") { 1.25 } else { 1.0 };
                                     commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| crate::aging::reshape(&mut e, -0.03 * h * burn, 0.05 * h));
                                 }
                                 if let Some(sk) = d.skill {
@@ -2453,8 +2453,8 @@ fn run_actions(
                                     // (Less time at the stove once the food's been prepared.)
                                     Special::ServeMeal if prepped.contains(me) && d.minutes > 30.0 => d.minutes - 15.0,
                                     // (Twice as quick for a Speedy Cleaner; homework too for a Multi-Tasker.)
-                                    Special::CleanUp | Special::EmptyTrash if crate::wishes::has(wishes, "SpeedyCleaner") => d.minutes * 0.5,
-                                    Special::Homework if crate::wishes::has(wishes, "MultiTasker") => d.minutes * 0.5,
+                                    Special::CleanUp | Special::EmptyTrash if crate::wishes::has(wishes, "SpeedyCleaner") => d.minutes / 3.0,
+                                    Special::Homework if crate::wishes::has(wishes, "MultiTasker") => d.minutes / 1.5,
                                     _ => d.minutes,
                                 };
                                 if elapsed >= minutes || full {
