@@ -566,13 +566,13 @@ struct BuildHistoryProbe {
 fn build_history_test(
     time: Res<Time>, mut buy: ResMut<crate::buy::BuyMode>,
     building: Option<Res<crate::building::ActiveBuilding>>, household: Option<Res<crate::interact::Household>>,
-    log: Option<Res<crate::building::LotPaint>>, mut mouse: ResMut<ButtonInput<MouseButton>>,
+    log: Option<Res<crate::building::LotPaint>>, (mut mouse, mut keys): (ResMut<ButtonInput<MouseButton>>, ResMut<ButtonInput<KeyCode>>),
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     camera: Query<(&Camera, &GlobalTransform), With<SimsCamera>>,
     mut controls: Query<(&crate::layout::UiWin, &InheritedVisibility, &mut Interaction)>,
     objects: Query<(Entity, &Transform, &crate::interact::GameObject, Option<&crate::upgrades::Upgrades>, Has<crate::interact::Broken>)>,
     removed: Res<crate::save::RemovedLotObjects>,
-    (strokes, sculpted, world, paint_map, images): (Res<crate::terrain_paint::Strokes>, Res<crate::terrain_paint::Sculpted>, Res<crate::loading::CurrentWorld>, Option<Res<crate::terrain_paint::PaintMap>>, Res<Assets<Image>>),
+    (strokes, sculpted, world, paint_map, images, ui): (Res<crate::terrain_paint::Strokes>, Res<crate::terrain_paint::Sculpted>, Res<crate::loading::CurrentWorld>, Option<Res<crate::terrain_paint::PaintMap>>, Res<Assets<Image>>, Option<Res<crate::icons::GameUi>>),
     mut probe: Local<BuildHistoryProbe>,
 ) {
     let Ok(mode) = std::env::var("BUILD_HISTORY_TEST") else { return };
@@ -600,7 +600,13 @@ fn build_history_test(
     match probe.stage {
         0 => {
             assert!(buy.active && buy.category >= crate::buy::WALLPAPER_TAB);
-            let (start, end, tool) = if mode == "demolish" {
+            let (start, end, tool) = if mode.starts_with("floor") {
+                let tile = b.data.floors.iter().find(|f| f.level == b.view_level && f.mask == 0xF
+                    && project(Vec2::new(f.x as f32 + 0.5, f.z as f32 + 0.5)).is_some()
+                    && (mode != "floor-room" || crate::covering::floors(&b.data, f.level, Vec2::new(f.x as f32 + 0.5, f.z as f32 + 0.5), (0, 0, 0), true).len() > 1)).expect("visible floor to cover");
+                let at = Vec2::new(tile.x as f32 + 0.5, tile.z as f32 + 0.5);
+                (at, at, crate::build::BuildTool::Floor)
+            } else if mode == "demolish" {
                 let wall = b.data.walls.iter().find(|w| w.level.max(1) == b.view_level
                     && Vec2::from(w.a).distance(Vec2::from(w.b)) >= 1.0
                     && !b.openings_on(w.level, Vec2::from(w.a), Vec2::from(w.b)).is_empty()
@@ -628,12 +634,21 @@ fn build_history_test(
             let start = project(start).unwrap();
             buy.tool = Some(tool);
             buy.show(crate::buy::BUILD_TAB);
+            if mode.starts_with("floor") {
+                let ui = ui.as_ref().expect("original covering catalogue");
+                let pattern = ui.data.patterns.iter().position(|p| p.floor && !b.data.covers.contains(&p.texture)).expect("new floor design");
+                buy.tool = None;
+                buy.painting = Some(pattern);
+                buy.show(crate::buy::FLOORS_TAB);
+                if mode == "floor-room" { keys.press(KeyCode::ShiftLeft); }
+            }
             window.set_cursor_position(Some(start));
         }
         1 => mouse.press(MouseButton::Left),
         2 => window.set_cursor_position(Some(probe.end)),
         3 => mouse.release(MouseButton::Left),
         4 => {
+            keys.release(KeyCode::ShiftLeft);
             probe.after = fingerprint();
             probe.paint_after = paint();
             probe.paid = h.funds;
@@ -642,6 +657,12 @@ fn build_history_test(
             assert_ne!(probe.before, probe.after, "the construction drag must modify the lot");
             if mode != "terrain" && mode != "sculpt" {
                 assert_ne!(probe.paint_before, probe.paint_after, "construction must be recorded for saving");
+            }
+            if mode.starts_with("floor") {
+                let before: Vec<crate::building::PaintOp> = serde_json::from_str(&probe.paint_before).unwrap();
+                let after: Vec<crate::building::PaintOp> = serde_json::from_str(&probe.paint_after).unwrap();
+                if mode == "floor" { assert_eq!(after.len() - before.len(), 1, "normal click covers one tile"); }
+                else { assert!(after.len() - before.len() > 1, "Shift covers the enclosed room"); }
             }
             let (_, _, mut i) = controls.iter_mut().find(|(id, v, _)| id.0 == 0x2e2 && v.get()).expect("original Undo button");
             *i = Interaction::Pressed;

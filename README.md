@@ -266,7 +266,9 @@ installation is unreachable.
   something by themselves think of it in a balloon with its picture.
 - **Build mode painting**: the catalogue's wallpapers and floor coverings (every base-game
   pattern with its name and price, swatched from its texture recipe) on Wallpaper and Floors
-  tabs; click a wall to paper that side, or a floor to cover the whole room. Each comes in
+  tabs; click a wall side or one floor tile, or Shift-click to cover its room. Room fills follow
+  current wall boundaries, including diagonal partitions, and leave the other side untouched.
+  Identical coverings are skipped; prices reflect only the changed surface area. Each comes in
   the game's colour presets for it (swatches under the patterns) and, in Create a Style, with
   any colour of the palette on each of its colour channels (solid colours, tinted patterns,
   and woods and fabrics shifted to the colour keeping their grain). Repainting is charged,
@@ -737,6 +739,8 @@ verifies original Build navigation and mode switching; capture after 15 seconds.
 and `--view-level 1`, performs a real drag then clicks the original Undo/Redo buttons. It checks
 building data, furniture identity, funds, save records, terrain heights and paint-map pixels;
 capture after 11 seconds.
+`BUILD_HISTORY_TEST=floor` and `floor-room` additionally verify single-tile and Shift-room
+covering, including undo/redo through the original Build buttons.
 `BUY_MOVE_TEST=move` or `cancel` checks that a piece of furniture keeps its identity, upgrades
 and breakage after a scripted placement or cancellation.
 `s3tool uiwindow <layout>` inspects a baked window tree; `s3tool uilayout <UI.package> <layout>`

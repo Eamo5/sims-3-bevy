@@ -967,7 +967,7 @@ fn buy_panel(
             });
             p.spawn(Node { column_gap: Val::Px(8.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
                 button(row, "< Prev".into(), BuyButton::Prev, Val::Px(80.0), 28.0, false);
-                let how = if floor { "click a floor to cover the room" } else { "click a wall to paper that side" };
+                let how = if floor { "click a tile · Shift: fill room" } else { "click a wall side · Shift: fill room" };
                 row.spawn(text(format!("Page {} / {} · {} patterns · {how} · right-click to stop", page + 1, pages, items.len()), 13.0, Color::WHITE));
                 button(row, "Next >".into(), BuyButton::Next, Val::Px(80.0), 28.0, false);
             });
@@ -1406,27 +1406,21 @@ fn paint(
     let Some(cursor) = window.cursor_position() else { return };
     let Ok((camera, cam_tf)) = cams.single() else { return };
     let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else { return };
-    let mut ops = Vec::new();
-    if pat.floor {
-        // The room under the pointer (a single tile outdoors).
+    let fill = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    let ops = if pat.floor {
+        // Normal click covers one tile; Shift follows the room's current wall boundaries.
         let Some((p, level)) = crate::hud::floor_hit(ray, &world, Some(b)) else { return };
         let l = b.local(p);
-        let (x, z) = (l.x.floor(), l.y.floor());
-        if x < 0.0 || z < 0.0 {
-            return;
-        }
-        let Some(tile) = b.data.floors.iter().find(|f| f.level == level && f.x == x as u16 && f.z == z as u16).copied() else { return };
-        for f in b.data.floors.iter().filter(|f| f.level == tile.level && if tile.region == 0 { f.x == tile.x && f.z == tile.z } else { f.region == tile.region }) {
-            ops.push(crate::building::PaintOp::Floor { level: f.level, x: f.x, z: f.z, texture: pat.texture });
-        }
+        if std::env::var_os("BUILD_HISTORY_TEST").is_some() { info!("autotest: floor covering at {l:?}, level {level}, room fill {fill}"); }
+        crate::covering::floors(&b.data, level, l, pat.texture, fill)
     } else {
         let Some((wall, side)) = pick_wall(ray, b) else { return };
-        ops.push(crate::building::PaintOp::Wall { wall, side, texture: pat.texture });
-    }
+        crate::covering::walls(&b.data, wall, side, pat.texture, fill)
+    };
     if ops.is_empty() {
         return;
     }
-    let cost = pat.price as i64 * ops.len() as i64;
+    let cost = crate::covering::cost(&b.data, &ops, pat.price.max(0) as u32);
     if household.as_ref().is_some_and(|h| h.funds < cost) {
         notes.push("You can't afford that.");
         return;

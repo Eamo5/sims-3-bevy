@@ -590,6 +590,8 @@ pub fn spawn_floors(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mu
 pub enum PaintOp {
     Wall { wall: u32, side: u8, texture: Key },
     Floor { level: u8, x: u16, z: u16, texture: Key },
+    /// Selected floor triangles, for covering rooms divided by diagonal walls.
+    FloorTriangles { level: u8, x: u16, z: u16, mask: u8, texture: Key },
     /// A wall section built (added to the end of the walls).
     AddWall { a: [f32; 2], b: [f32; 2], level: u8 },
     /// A wall knocked down (left in the list with no length, so the others keep their indices).
@@ -716,7 +718,7 @@ pub fn repaint(
                 }
                 walls_changed.extend(b.built.get(&wall));
             }
-            PaintOp::Floor { .. } | PaintOp::AddFloor { .. } | PaintOp::RemoveFloor { .. } => floors_changed = true,
+            PaintOp::Floor { .. } | PaintOp::FloorTriangles { .. } | PaintOp::AddFloor { .. } | PaintOp::RemoveFloor { .. } => floors_changed = true,
             PaintOp::AddWall { .. } => {
                 b.built.insert(last);
                 walls_changed.insert(last);
@@ -1038,6 +1040,12 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
             let i = index(b, texture);
             if let Some(f) = b.floors.iter_mut().find(|f| f.level == level && f.x == x && f.z == z) {
                 f.cover = [i; 4];
+            }
+        }
+        PaintOp::FloorTriangles { level, x, z, mask, texture } => {
+            let i = index(b, texture);
+            if let Some(f) = b.floors.iter_mut().find(|f| f.level == level && f.x == x && f.z == z) {
+                for t in 0..4 { if f.mask & mask & (1 << t) != 0 { f.cover[t] = i; } }
             }
         }
         PaintOp::AddWall { a, b: end, level } => {
