@@ -109,7 +109,7 @@ fn serve_if_interrupted(mut commands: Commands, sims: Query<(Entity, &ServingFro
 fn surface_entity_near(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, at: Vec3, within: f32) -> Option<Entity> {
     objects
         .iter()
-        .filter(|(_, o, _, _)| o.kind == ObjectKind::Table)
+        .filter(|(_, o, tf, _)| o.kind == ObjectKind::Table && (tf.translation.y - at.y).abs() < 1.5)
         .map(|(e, o, tf, _)| (e, o.world_center(tf).with_y(tf.translation.y).distance(at.with_y(tf.translation.y))))
         .filter(|(_, d)| *d < within)
         .min_by(|a, b| a.1.total_cmp(&b.1))
@@ -502,7 +502,7 @@ pub const PLATE: &str = "Plate";
 fn surface_near(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, at: Vec3, within: f32) -> Option<Vec3> {
     objects
         .iter()
-        .filter(|(_, o, _, _)| o.kind == ObjectKind::Table)
+        .filter(|(_, o, tf, _)| o.kind == ObjectKind::Table && (tf.translation.y - at.y).abs() < 1.5)
         .map(|(_, o, tf, _)| {
             let c = o.world_center(tf);
             (Vec3::new(c.x, tf.translation.y + o.height, c.z), c.with_y(tf.translation.y).distance(at.with_y(tf.translation.y)))
@@ -838,7 +838,8 @@ fn dining_seat_for(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, 
         .filter_map(|(_, t, ttf, _)| {
             let c = t.world_center(ttf);
             let d = front.with_y(0.0).distance(c.with_y(0.0));
-            (d < t.half.max_element() + 0.35).then_some((ttf.translation.y + t.height, d))
+            let top = ttf.translation.y + t.height;
+            (d < t.half.max_element() + 0.35 && (top - tf.translation.y - 0.7).abs() < 0.35).then_some((top, d))
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))?
         .0;
@@ -859,6 +860,28 @@ fn release_plates(mut commands: Commands, sims: Query<(Entity, &ActionQueue, &Ea
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn meals_and_seated_plates_use_reachable_surface_heights() {
+        let mut world = World::new();
+        let object = |kind, height| GameObject { kind, name: "Fixture".into(), objd: (0, 0, 0), price: 0,
+            center: Vec2::ZERO, half: Vec2::splat(0.5), height, route: None };
+        world.spawn((object(ObjectKind::Table, 0.75), Transform::from_xyz(0.0, 0.0, 0.55), UsedBy(None)));
+        let upper = world.spawn((object(ObjectKind::Table, 0.75), Transform::from_xyz(0.0, 3.0, 0.7), UsedBy(None))).id();
+        let chair = world.spawn((object(ObjectKind::Chair, 1.0), Transform::from_xyz(0.0, 3.0, 0.0), UsedBy(None))).id();
+        let mut state = bevy::ecs::system::SystemState::<Query<(Entity, &GameObject, &Transform, &UsedBy)>>::new(&mut world);
+        {
+            let objects = state.get(&world).unwrap();
+            assert_eq!(surface_entity_near(&objects, Vec3::new(0.0, 3.0, 0.55), 6.0), Some(upper));
+            assert_eq!(surface_near(&objects, Vec3::new(0.0, 3.0, 0.55), 6.0).unwrap().y, 3.75);
+            assert_eq!(dining_seat_for(&objects, chair).unwrap().1.y, 3.75);
+        }
+        world.despawn(upper);
+        let objects = state.get(&world).unwrap();
+        assert!(surface_near(&objects, Vec3::new(0.0, 3.0, 0.55), 6.0).is_none());
+        assert!(surface_entity_near(&objects, Vec3::new(0.0, 3.0, 0.55), 6.0).is_none());
+        assert!(dining_seat_for(&objects, chair).is_none(), "a downstairs table is not within reach of an upstairs chair");
+    }
 
     #[test]
     fn meal_menu_obeys_original_hours_and_weekend_brunch() {
