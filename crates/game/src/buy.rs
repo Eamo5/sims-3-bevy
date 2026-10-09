@@ -1379,6 +1379,20 @@ fn buy_buttons(
 pub(crate) struct CoverQuote {
     pub cost: i64,
     pub affordable: bool,
+    pub reused_targets: bool,
+}
+
+#[derive(Default)]
+struct CoverPreviewCache {
+    // Target surface, texture, fill mode, and geometry resource revisions.
+    key: Option<(CoverTarget, Key, bool, u32, u32)>,
+    ops: Vec<crate::building::PaintOp>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CoverTarget {
+    Floor { level: u8, cell: (i32, i32, u8), ground: bool },
+    Wall { wall: u32, side: u8 },
 }
 
 /// Preview and apply one surface or an enclosed room's covering.
@@ -1402,6 +1416,7 @@ fn paint(
     removed: Res<crate::save::RemovedLotObjects>,
     mut gizmos: Gizmos,
     mut quote: Query<(&mut CoverQuote, &mut Text, &mut TextColor, &mut Node, &mut Visibility)>,
+    mut preview: Local<CoverPreviewCache>,
 ) {
     if let Ok((_, _, _, _, mut visible)) = quote.single_mut() { *visible = Visibility::Hidden; }
     if menu.is_open() || !modal.is_empty() { return; }
@@ -1414,36 +1429,43 @@ fn paint(
     if over_ui.0 || std::mem::take(&mut buy.eyedropped) {
         return;
     }
+    let revision = building.as_ref().map_or(0, |b| b.last_changed().get());
     let (Some(ui), Some(b)) = (ui, building.as_deref()) else { return };
-    let Some(mut pat) = ui.data.patterns.get(i).cloned() else { return };
+    let Some(pat) = ui.data.patterns.get(i) else { return };
     // (In the swatch or style chosen for it.)
-    if let Some(k) = buy.cover {
-        pat.texture = k;
-    }
+    let texture = buy.cover.unwrap_or(pat.texture);
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
     let Ok((camera, cam_tf)) = cams.single() else { return };
     let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else { return };
     let fill = buy.cover_fill || keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-    let ops = if pat.floor {
-        // Normal click covers one tile; Shift follows the room's current wall boundaries.
+    let (target, at) = if pat.floor {
         let Some((p, level)) = crate::hud::floor_hit(ray, &world, Some(b)) else { return };
-        let l = b.local(p);
-        if mouse.just_pressed(MouseButton::Left) && std::env::var_os("BUILD_HISTORY_TEST").is_some() { info!("autotest: floor covering at {l:?}, level {level}, room fill {fill}"); }
-        let ground = b.view_level <= 1 && !b.data.floors.iter().any(|f| f.level == 1 && f.x as f32 == l.x.floor() && f.z as f32 == l.y.floor());
-        if ground {
-            crate::covering::pave_room(&b.data, l, pat.texture, fill, |at| [Vec2::ZERO, Vec2::X, Vec2::ONE, Vec2::Y].map(|offset| {
-                let p = b.world(at.x + offset.x, at.y + offset.y, 0.0);
-                world.data.heightmap.sample(p.x, p.z)
-            }))
-        } else {
-            crate::covering::floors(&b.data, level, l, pat.texture, fill)
-        }
+        let at = b.local(p);
+        let cell = crate::covering::triangle(at);
+        let ground = b.view_level <= 1 && !b.data.floors.iter().any(|f| f.level == 1 && f.x as i32 == cell.0 && f.z as i32 == cell.1);
+        (CoverTarget::Floor { level, cell, ground }, at)
     } else {
         let Some((wall, side)) = pick_wall(ray, b) else { return };
-        crate::covering::walls(&b.data, wall, side, pat.texture, fill)
+        (CoverTarget::Wall { wall, side }, Vec2::ZERO)
     };
-    let cost = crate::covering::cost(&b.data, &ops, pat.price.max(0) as u32);
+    let key = (target, texture, fill, revision, world.last_changed().get());
+    let reused_targets = preview.key == Some(key);
+    if !reused_targets {
+        preview.ops = match target {
+            CoverTarget::Floor { ground: true, .. } => {
+                crate::covering::pave_room(&b.data, at, texture, fill, |at| [Vec2::ZERO, Vec2::X, Vec2::ONE, Vec2::Y].map(|offset| {
+                    let p = b.world(at.x + offset.x, at.y + offset.y, 0.0);
+                    world.data.heightmap.sample(p.x, p.z)
+                }))
+            },
+            CoverTarget::Floor { level, .. } => crate::covering::floors(&b.data, level, at, texture, fill),
+            CoverTarget::Wall { wall, side } => crate::covering::walls(&b.data, wall, side, texture, fill),
+        };
+        preview.key = Some(key);
+    }
+    let ops = &preview.ops;
+    let cost = crate::covering::cost(&b.data, ops, pat.price.max(0) as u32);
     let affordable = household.as_ref().is_none_or(|h| h.funds >= cost);
     let color = if affordable { Color::WHITE } else { Color::srgb(1.0, 0.3, 0.2) };
     let label = if ops.is_empty() { "No change · §0".to_string() } else { format!("§{cost}") };
@@ -1451,6 +1473,7 @@ fn paint(
     if let Ok((mut value, mut caption, mut tint, mut node, mut visible)) = quote.single_mut() {
         value.cost = cost;
         value.affordable = affordable;
+        value.reused_targets = reused_targets;
         if caption.0 != label { caption.0 = label; }
         if tint.0 != color { tint.0 = color; }
         if node.left != Val::Px(at.x) || node.top != Val::Px(at.y) {
@@ -1459,19 +1482,20 @@ fn paint(
         }
         *visible = Visibility::Inherited;
     } else {
-        commands.spawn((CoverQuote { cost, affordable }, text(label, 15.0, color),
+        commands.spawn((CoverQuote { cost, affordable, reused_targets }, text(label, 15.0, color),
             Node { position_type: PositionType::Absolute, left: Val::Px(at.x), top: Val::Px(at.y),
                 padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)), border_radius: BorderRadius::all(Val::Px(6.0)), ..default() },
             BackgroundColor(Color::srgba(0.04, 0.09, 0.18, 0.9)), GlobalZIndex(20), Pickable::IGNORE,
             DespawnOnExit(PlayMode::Live)));
     }
-    crate::covering::preview(&mut gizmos, b, &ops, affordable);
+    crate::covering::preview(&mut gizmos, b, ops, affordable);
     if ops.is_empty() { return; }
     if !mouse.just_pressed(MouseButton::Left) { return; }
     if household.as_ref().is_some_and(|h| h.funds < cost) {
         notes.push("You can't afford that.");
         return;
     }
+    let ops = preview.ops.clone();
     let Some(b) = building.as_deref_mut() else { return };
     let before = crate::building::BuildingSnapshot::capture(b, log.as_deref());
     if let Some(h) = household.as_mut() {

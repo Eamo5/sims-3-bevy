@@ -688,6 +688,7 @@ fn build_history_test(
                 assert_ne!(*visibility, Visibility::Hidden);
                 assert_eq!(quote.affordable, mode != "floor-poor");
                 assert!(quote.cost > 0);
+                assert!(quote.reused_targets, "stationary hover must reuse its room targets");
                 probe.quote_cost = quote.cost;
             }
             mouse.press(MouseButton::Left);

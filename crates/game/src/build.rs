@@ -551,7 +551,7 @@ fn build_tool(
     }
     let tool = buy.tool.filter(|_| buy.active);
     let cursor = windows.single().ok().and_then(|w| w.cursor_position());
-    let (Some(tool), Some(b), Some(cursor)) = (tool, building.as_deref_mut(), cursor) else {
+    let Some((tool, b, cursor)) = tool.zip(cursor).and_then(|(tool, cursor)| building.as_deref_mut().map(|b| (tool, b, cursor))) else {
         drag.start = None;
         for (e, ..) in &label {
             commands.entity(e).despawn();

@@ -423,7 +423,7 @@ fn puck(
     let buy_puck = buy_hud.map(|b| b.puck.clone());
     let build_puck = build_hud.map(|b| b.puck.clone());
     for p in std::iter::once(&hud.puck).chain(buy_puck.as_ref()).chain(build_puck.as_ref()) {
-        puck_one(p, &mut commands, &clicks, &mut buttons, &mut texts, &mut vis, (household.as_deref(), &mut buy, &mut clock), (&mut walls, building.as_deref_mut(), &mut cam), (&mut menu, &selected), &world);
+        puck_one(p, &mut commands, &clicks, &mut buttons, &mut texts, &mut vis, (household.as_deref(), &mut buy, &mut clock), (&mut walls, building.as_mut(), &mut cam), (&mut menu, &selected), &world);
     }
 }
 
@@ -436,7 +436,7 @@ fn puck_one(
     texts: &mut Query<&mut Text>,
     vis: &mut Query<&mut Visibility>,
     (household, buy, clock): (Option<&crate::interact::Household>, &mut crate::buy::BuyMode, &mut crate::clock::GameClock),
-    (walls, building, cam): (&mut crate::building::WallMode, Option<&mut crate::building::ActiveBuilding>, &mut Query<&mut crate::camera::SimsCamera>),
+    (walls, building, cam): (&mut crate::building::WallMode, Option<&mut ResMut<crate::building::ActiveBuilding>>, &mut Query<&mut crate::camera::SimsCamera>),
     (menu, selected): (&mut crate::options::GameMenu, &Query<&Transform, With<Selected>>),
     world: &crate::loading::CurrentWorld,
 ) {

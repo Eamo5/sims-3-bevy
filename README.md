@@ -282,6 +282,8 @@ installation is unreachable.
   the lot nor its funds/save history.
   A cursor-side price quote shows the exact charge before clicking, or “No change · §0” for
   identical coverings; unaffordable quotes are red and cannot alter the lot.
+  Hover targeting is cached per surface and refreshed after geometry, terrain, texture or
+  fill-mode changes, avoiding repeated room searches while the pointer stays on a surface.
 - **Out on the town**: Sims drive to the parks, the library, the gym, the beach and the
   other community lots (from the lot's pie menu or its map tag) and use what's there: chess
   tables, computers, bookshelves, swings, grills, restrooms. Each lot gets its own walk grid

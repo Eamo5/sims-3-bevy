@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use s3bake::{Key, LotBuildingBaked};
 use crate::building::PaintOp;
 
-fn triangle(p: Vec2) -> (i32, i32, u8) {
+pub(crate) fn triangle(p: Vec2) -> (i32, i32, u8) {
     let tile = p.floor();
     let d = p - tile - Vec2::splat(0.5);
     let t = if d.y.abs() > d.x.abs() { if d.y < 0.0 { 0 } else { 2 } } else if d.x > 0.0 { 1 } else { 3 };
