@@ -465,7 +465,7 @@ fn inventory_panel(
         if *i == Interaction::Pressed
             && let Some(st) = stacks.get(c.0)
         {
-            chosen.0 = Some(c.0);
+            chosen.select(c.0, st);
             let options = crate::inventory::stack_actions(sim, st)
                 .into_iter()
                 .map(|(label, b)| {

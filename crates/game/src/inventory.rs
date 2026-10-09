@@ -116,7 +116,26 @@ pub fn give(commands: &mut Commands, sim: Entity, kind: ItemKind, key: String, n
 
 /// The stack picked on the Inventory tab.
 #[derive(Resource, Default)]
-pub struct Chosen(pub Option<usize>);
+pub struct Chosen(pub Option<usize>, Option<(ItemKind, String, u8)>);
+
+impl Chosen {
+    pub fn select(&mut self, index: usize, stack: &Stack) {
+        self.0 = Some(index);
+        self.1 = Some((stack.kind, stack.key.clone(), stack.quality));
+    }
+
+    fn clear(&mut self) {
+        self.0 = None;
+        self.1 = None;
+    }
+
+    fn reconcile(&mut self, inventory: &Inventory) {
+        if let Some((kind, key, quality)) = &self.1 {
+            self.0 = inventory.0.iter().position(|s| s.kind == *kind && s.key == *key && s.quality == *quality);
+            if self.0.is_none() { self.1 = None; }
+        }
+    }
+}
 
 /// An action on the chosen stack asked for from its pie menu (the game's inventory panel).
 #[derive(Resource)]
@@ -317,11 +336,16 @@ fn inventory_buttons(
 ) {
     // (A different Sim: nothing picked.)
     if !selected.is_empty() {
-        chosen.0 = None;
+        chosen.clear();
     }
+    if let Ok((_, _, inv, _)) = sel.single() { chosen.reconcile(inv); }
     for (i, t) in &tiles {
         if *i == Interaction::Pressed {
-            chosen.0 = if chosen.0 == Some(t.0) { None } else { Some(t.0) };
+            if chosen.0 == Some(t.0) {
+                chosen.clear();
+            } else if let Ok((_, _, inv, _)) = sel.single() && let Some(stack) = inv.0.get(t.0) {
+                chosen.select(t.0, stack);
+            }
         }
     }
     // (Asked for from the stack's pie menu.)
@@ -352,9 +376,7 @@ fn inventory_buttons(
                 }
                 notes.push(format!("{} sold {} for §{got}.", sim.first, if n > 1 { format!("{n} × {}", s.name) } else { s.name.clone() }));
                 play.write(crate::sound::PlaySound::ui("ui_object_sell"));
-                if inv.0.get(k).is_none_or(|x| x.key != s.key || x.quality != s.quality) {
-                    chosen.0 = None;
-                }
+                chosen.reconcile(&inv);
             }
             ItemButton::Eat => {
                 queue.push_player(Action::new(format!("Eat {}", s.name), ActionKind::EatItem { key: s.key.clone(), quality: s.quality }, false));
@@ -370,7 +392,7 @@ fn inventory_buttons(
                 let Some(each) = inv.take_one(k) else { continue };
                 let item = Stack { count: 1, worth: each, ..s.clone() };
                 commands.insert_resource(crate::buy::HoldRequest { objd, design, item, from: me });
-                chosen.0 = None;
+                chosen.clear();
             }
         }
     }
@@ -379,6 +401,25 @@ fn inventory_buttons(
 #[cfg(test)]
 mod button_tests {
     use super::*;
+
+    #[test]
+    fn selected_stack_follows_removals_and_never_switches_to_its_neighbor() {
+        let mut inv = Inventory::default();
+        inv.add(ItemKind::Produce, "Tomato", "Tomato", 3, 10);
+        inv.add(ItemKind::Produce, "Apple", "Apple", 3, 20);
+        inv.add(ItemKind::Produce, "Apple", "Perfect Apple", 9, 80);
+        let mut chosen = Chosen::default();
+        chosen.select(1, &inv.0[1]);
+        inv.consume_produce("Tomato", 3);
+        chosen.reconcile(&inv);
+        assert_eq!(chosen.0, Some(0), "the selected apple moved to row zero");
+        inv.consume_produce("Apple", 3);
+        chosen.reconcile(&inv);
+        assert_eq!(chosen.0, None, "the perfect apple must not silently replace the eaten normal apple");
+        inv.add(ItemKind::Produce, "Apple", "Apple", 3, 20);
+        chosen.reconcile(&inv);
+        assert_eq!(chosen.0, None, "a later replacement must not revive stale selection");
+    }
 
     #[test]
     fn eating_consumes_only_the_requested_produce_and_rejects_exhausted_requests() {
@@ -409,7 +450,8 @@ mod button_tests {
         for _ in 0..3 { inv.add(ItemKind::Produce, "Tomato", "Tomato", 3, 10); }
         let me = app.world_mut().spawn((sim, Selected, inv, ActionQueue::default())).id();
         app.update();
-        app.world_mut().resource_mut::<Chosen>().0 = Some(0);
+        let stack = app.world().get::<Inventory>(me).unwrap().0[0].clone();
+        app.world_mut().resource_mut::<Chosen>().select(0, &stack);
         let button = app.world_mut().spawn((Interaction::Pressed, ItemButton::SellOne, BackgroundColor(BTN_NORMAL))).id();
         app.update();
         for _ in 0..5 { app.update(); }
