@@ -551,17 +551,19 @@ fn ui_click(time: Res<Time<InputTimeline>>, mut controls: Query<(&crate::layout:
     }
 }
 
-/// WALL_SNAP_TEST=1 verifies placement on both sides of the loaded lot's straight walls.
+/// WALL_SNAP_TEST=1 verifies placement on both sides of the loaded lot's axis/diagonal walls.
 fn wall_snap_test(time: Res<Time<InputTimeline>>, building: Option<Res<crate::building::ActiveBuilding>>, mut done: Local<bool>,
     objects: Query<(Entity, &crate::interact::GameObject, &Transform)>, catalog: Res<crate::loading::Catalog>) {
     if std::env::var_os("WALL_SNAP_TEST").is_none() || *done || time.elapsed_secs() < 6.0 { return; }
     let Some(b) = building else { return };
     let mut checked = 0;
     let mut raised = 0;
+    let mut diagonal = 0;
     for w in b.data.walls.iter().filter(|w| w.level.max(1) == b.view_level) {
         let (a, c) = (Vec2::from(w.a), Vec2::from(w.b));
         let d = c - a;
-        if d.length() < 0.99 || d.x.abs() > 0.01 && d.y.abs() > 0.01 { continue; }
+        let is_diagonal = d.x.abs() > 0.01 && d.y.abs() > 0.01;
+        if d.length() < 0.99 || is_diagonal && (d.x.abs() - d.y.abs()).abs() > 0.01 { continue; }
         let y = w.y.unwrap_or(b.levels[b.view_level as usize]);
         for side in [-1.0, 1.0] {
             let p = (a + c) * 0.5 + d.normalize().perp() * (0.4 * side);
@@ -574,6 +576,7 @@ fn wall_snap_test(time: Res<Time<InputTimeline>>, building: Option<Res<crate::bu
             let facing = b.rot.inverse() * (rot * Vec3::Z);
             assert!(facing.xz().dot(d.normalize().perp() * side) > 0.99);
             checked += 1;
+            if is_diagonal { diagonal += 1; }
             if w.y.is_some_and(|h| (h - b.levels[b.view_level as usize]).abs() > 0.01) { raised += 1; }
         }
     }
@@ -585,7 +588,7 @@ fn wall_snap_test(time: Res<Time<InputTimeline>>, building: Option<Res<crate::bu
                 && !b.opening_behind_except(tf.translation, tf.rotation, tiles, Some(*entity))
         }).count();
     assert!(own_slots > 0, "new openings must be blocked while retained originals can return to their own slots");
-    info!("autotest: wall snapping PASS — {checked} transformed wall-side placements, {raised} authored height offsets, {own_slots} occupied/self-excluded opening slots");
+    info!("autotest: wall snapping PASS — {checked} transformed wall-side placements, {diagonal} diagonal, {raised} authored height offsets, {own_slots} occupied/self-excluded opening slots");
     *done = true;
 }
 

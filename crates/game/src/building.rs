@@ -185,7 +185,9 @@ impl ActiveBuilding {
     /// Ignore the retained source entity when moving an existing opening.
     pub fn opening_behind_except(&self, at: Vec3, rot: Quat, tiles: u32, source: Option<Entity>) -> bool {
         let fwd = self.local_dir(rot * Vec3::Z);
-        let dir = fwd.perp();
+        let along = fwd.perp();
+        // Width is measured in grid sections, including sqrt(2)-long diagonal sections.
+        let dir = along / along.abs().max_element().max(1e-6);
         let n = tiles.max(1);
         let start = self.local(at) - fwd * 0.5 - dir * (n as f32 * 0.5);
         (0..n).any(|k| {

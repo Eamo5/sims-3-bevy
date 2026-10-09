@@ -291,6 +291,8 @@ installation is unreachable.
   holes expose lower visible floors instead of selecting an empty storey plane.
   Existing door/window slots reject overlapping openings in both preview and placement;
   moving an opening ignores its own retained source so it can return to the same slot.
+  Doors, windows and wall decorations snap to 45-degree walls as well as axis-aligned walls,
+  with diagonal grid-section widths, facing and occupancy checks.
 - **Out on the town**: Sims drive to the parks, the library, the gym, the beach and the
   other community lots (from the lot's pie menu or its map tag) and use what's there: chess
   tables, computers, bookshelves, swings, grills, restrooms. Each lot gets its own walk grid
@@ -770,7 +772,7 @@ These covering probes also verify that hover quotes match the charge and preview
 and funds untouched. `BUILD_HISTORY_TEST=floor-poor` checks rejection with insufficient funds.
 `BUILD_HISTORY_TEST=wall` and `wall-room` cover single-side and Shift-room wallpaper selection,
 quoted charges, zero-cost repeated designs, and exact undo/redo through the original controls.
-`WALL_SNAP_TEST=1` checks both sides of the loaded lot's straight walls for correct placement
+`WALL_SNAP_TEST=1` checks both sides of the loaded lot's axis-aligned and diagonal walls for correct placement
 height, half-tile offset and facing, plus occupied versus self-excluded opening slots;
 capture after 9 seconds.
 `BUILD_HISTORY_TEST=pave` checks laying new outdoor flooring and reversing it; paving follows

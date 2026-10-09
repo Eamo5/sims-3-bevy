@@ -257,7 +257,7 @@ fn snap_wall_local(data: &LotBuildingBaked, level: u8, floor_y: f32, ray: Ray3d,
             continue;
         }
         let along = (c - a) / len;
-        if along.x.abs() > 0.01 && along.y.abs() > 0.01 {
+        if along.x.abs() > 0.01 && along.y.abs() > 0.01 && (along.x.abs() - along.y.abs()).abs() > 0.01 {
             continue;
         }
         let s = (lp - a).dot(along);
@@ -270,12 +270,14 @@ fn snap_wall_local(data: &LotBuildingBaked, level: u8, floor_y: f32, ray: Ray3d,
         }
     }
     let (_, a, along, lp, y) = best?;
-    let axis = if along.x.abs() > 0.5 { 0 } else { 1 };
-    let dir = if axis == 0 { Vec2::X } else { Vec2::Y };
+    // One grid segment: unit length on an axis, sqrt(2) along a diagonal.
+    let dir = if along.x.abs() < 0.01 { Vec2::Y }
+        else if along.y.abs() < 0.01 { Vec2::X }
+        else { Vec2::new(1.0, (along.y / along.x).signum()) };
     // Its middle on a tile's middle (odd widths) or a grid point (even), on the wall's line.
-    let mut mid = a + along * (lp - a).dot(along);
-    mid[axis] = if tiles % 2 == 1 { mid[axis].floor() + 0.5 } else { mid[axis].round() };
-    mid[1 - axis] = mid[1 - axis].round();
+    let step = (lp - a).dot(dir) / dir.length_squared();
+    let step = if tiles % 2 == 1 { step.floor() + 0.5 } else { step.round() };
+    let mid = a + dir * step;
     let mut sim = data.clone();
     let mut ops = Vec::new();
     for k in 0..tiles {
@@ -285,7 +287,7 @@ fn snap_wall_local(data: &LotBuildingBaked, level: u8, floor_y: f32, ray: Ray3d,
         if (sim.walls[wall].y.unwrap_or(floor_y) - y).abs() > 0.01 { return None; }
         isolate(&mut sim, level, p, q, &mut ops);
     }
-    let n = dir.perp();
+    let n = dir.perp().normalize();
     let fwd = if (lp - mid).dot(n) >= 0.0 { n } else { -n };
     let at = mid + fwd * 0.5;
     Some((Vec3::new(at.x, y, at.y), fwd, ops))
@@ -299,6 +301,36 @@ mod wall_placement_tests {
         LotBuildingBaked { lot: 0, width: 8, depth: 8, levels: vec![0.0, 0.0], walls: Vec::new(), floors: Vec::new(),
             foundation: Vec::new(), foundation_top: Vec::new(), objects: Vec::new(), covers: Vec::new(), ground: Vec::new(), pool: Vec::new(),
             pool_depth: 0.0, fences: Vec::new(), stairs: Vec::new() }
+    }
+
+    #[test]
+    fn diagonal_openings_snap_to_grid_segments_from_both_sides() {
+        for slope in [-1.0, 1.0] {
+            let mut data = lot();
+            let a = Vec2::new(1.0, if slope > 0.0 { 1.0 } else { 5.0 });
+            let dir = Vec2::new(1.0, slope);
+            crate::building::apply_paint(&mut data, &PaintOp::AddWall { a: a.into(), b: (a + dir * 4.0).into(), level: 1 });
+            data.walls[0].y = Some(0.75);
+            for side in [-1.0, 1.0] {
+                let center = a + dir * 1.5;
+                let normal = dir.perp().normalize() * side;
+                let pointer = center + normal * 0.3;
+                let ray = Ray3d::new(Vec3::new(pointer.x, 5.0, pointer.y), Dir3::NEG_Y);
+                let (at, facing, ops) = snap_wall_local(&data, 1, 0.0, ray, 1).unwrap();
+                assert!(at.xz().distance(center + normal * 0.5) < 0.001);
+                assert_eq!(at.y, 0.75);
+                assert!(facing.dot(normal) > 0.999);
+                let mut split = data.clone();
+                for op in ops { crate::building::apply_paint(&mut split, &op); }
+                assert!(wall_along(&split, 1, center - dir * 0.5, center + dir * 0.5).is_some());
+                assert!(split.walls.iter().all(|w| w.y == Some(0.75)));
+            }
+            let center = a + dir * 2.0;
+            let pointer = center + dir.perp().normalize() * 0.3;
+            let ray = Ray3d::new(Vec3::new(pointer.x, 5.0, pointer.y), Dir3::NEG_Y);
+            let (at, _, _) = snap_wall_local(&data, 1, 0.0, ray, 2).unwrap();
+            assert!(at.xz().distance(center + dir.perp().normalize() * 0.5) < 0.001);
+        }
     }
 
     #[test]
