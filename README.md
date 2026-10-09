@@ -141,7 +141,8 @@ installation is unreachable.
   Fast Metabolism, Professional Slacker, No Bills Ever (new household bills stop while a
   reward owner belongs to the household), Opportunistic (bigger
   opportunity rewards), Attractive, Extra Creative (paintings and books earn more), Super
-  Green Thumb, Discount Diner, Complimentary Entertainment, Bookshop Bargainer, Haggler, Speedy
+  Green Thumb (improves plant quality at planting, retained in saves), Discount Diner,
+  Complimentary Entertainment, Bookshop Bargainer, Haggler, Speedy
   Cleaner (cleaning up twice as fast), Multi-Tasker (more done at work, homework in half the
   time), High Roller (bigger royalties), Vacationer (a missed day at work goes unnoticed),
   Legendary Host (every party a hit), Long Distance Friend (friendships never drift), Fertility

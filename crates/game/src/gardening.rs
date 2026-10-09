@@ -60,6 +60,11 @@ fn seed_quality() -> f32 {
     0.35
 }
 
+fn planted_quality(level: f32, wishes: Option<&crate::wishes::Wishes>) -> f32 {
+    // Super Green Thumb improves the plant at planting, not the picker at harvest.
+    (seed_quality() + level * 0.02 + if crate::wishes::has(wishes, "SuperGreenThumb") { 0.1 } else { 0.0 }).clamp(0.0, 1.0)
+}
+
 /// A planted garden plant.
 #[derive(Component, Clone, Debug, Serialize, Deserialize)]
 pub struct GrowingPlant {
@@ -102,6 +107,22 @@ mod harvest_tests {
     fn plant() -> GrowingPlant {
         GrowingPlant { plant: 0, growth: 1.0, water: 70.0, weedy: false,
             ready: 3, harvests_left: 2, next_ready: 0.0, quality: 0.55, care: 0.5 }
+    }
+
+    #[test]
+    fn super_green_thumb_improves_the_saved_plant_not_its_harvester() {
+        let wishes = crate::wishes::Wishes::restored(0, vec!["SuperGreenThumb".into()], 0.0);
+        for level in 0..=10 {
+            let normal = planted_quality(level as f32, None);
+            let better = planted_quality(level as f32, Some(&wishes));
+            assert_eq!(quality_tier(better), quality_tier(normal) + 1);
+            let mut p = plant();
+            p.quality = better;
+            let mut restored: GrowingPlant = serde_json::from_slice(&serde_json::to_vec(&p).unwrap()).unwrap();
+            assert_eq!(restored.quality, better);
+            assert_eq!(restored.harvest(100.0), Some(3));
+            assert_eq!(restored.quality, better, "harvesting must neither remove nor reapply the planting reward");
+        }
     }
 
     #[test]
@@ -323,7 +344,7 @@ fn garden_requests(
                     ready: 0,
                     harvests_left: info.lifetime.max(1),
                     next_ready: 0.0,
-                    quality: seed_quality() + level * 0.02,
+                    quality: planted_quality(level, wishes),
                     care: level / 10.0,
                 };
                 let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
@@ -353,8 +374,8 @@ fn garden_requests(
                 let Ok((mut p, soil)) = plants.get_mut(e) else { continue };
                 let Some(info) = ui.data.plants.get(p.plant) else { continue };
                 let Some(picked) = p.harvest(clock.minutes) else { continue };
-                // The plant's quality, give or take (a Super Green Thumb's a step finer).
-                let q = p.quality + rng.random_range(-0.075..0.075) + if crate::wishes::has(wishes, "SuperGreenThumb") { 0.1 } else { 0.0 };
+                // The plant's quality, give or take; planting rewards already belong to it.
+                let q = p.quality + rng.random_range(-0.075..0.075);
                 let tier = quality_tier(q);
                 let (word, multiplier) = QUALITIES[tier];
                 // Into their inventory, to sell or eat.
