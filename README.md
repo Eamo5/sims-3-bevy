@@ -277,6 +277,9 @@ installation is unreachable.
   the previous ground and funds, and saved paving retains its corner heights.
   Shift-click or the room-fill button also lays paving throughout a bare enclosed room,
   respecting diagonal walls and pools. Outside an enclosure it still affects only one tile.
+  Hover outlines show the wall sides or floor triangles that will change, following paving
+  slopes; green means affordable and red means insufficient funds. Previewing changes neither
+  the lot nor its funds/save history.
 - **Out on the town**: Sims drive to the parks, the library, the gym, the beach and the
   other community lots (from the lot's pie menu or its map tag) and use what's there: chess
   tables, computers, bookshelves, swings, grills, restrooms. Each lot gets its own walk grid

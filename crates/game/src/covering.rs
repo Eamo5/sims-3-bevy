@@ -142,9 +142,69 @@ pub fn cost(b: &LotBuildingBaked, ops: &[PaintOp], price: u32) -> i64 {
     (units * price as f32).ceil() as i64
 }
 
+/// Boundary segments of changed floor triangles, without internal spokes.
+fn tile_edges(mask: u8) -> Vec<(Vec2, Vec2)> {
+    let corners = [Vec2::ZERO, Vec2::X, Vec2::ONE, Vec2::Y];
+    let mut edges = Vec::new();
+    for t in 0..4 {
+        if mask & (1 << t) == 0 { continue; }
+        edges.push((corners[t], corners[(t + 1) % 4]));
+        if mask & (1 << ((t + 3) % 4)) == 0 { edges.push((Vec2::splat(0.5), corners[t])); }
+        if mask & (1 << ((t + 1) % 4)) == 0 { edges.push((corners[(t + 1) % 4], Vec2::splat(0.5))); }
+    }
+    edges
+}
+
+pub fn preview(gizmos: &mut Gizmos, b: &crate::building::ActiveBuilding, ops: &[PaintOp], affordable: bool) {
+    let color = if affordable { Color::srgb(0.35, 1.0, 0.15) } else { Color::srgb(1.0, 0.15, 0.1) };
+    for op in ops {
+        let (x, z, mask, heights) = match *op {
+            PaintOp::FloorTriangles { level, x, z, mask, .. } => {
+                let y = b.data.floors.iter().find(|f| f.level == level && f.x == x && f.z == z).and_then(|f| f.y)
+                    .unwrap_or_else(|| b.levels.get(level as usize).copied().unwrap_or(0.0));
+                let heights = [Vec2::ZERO, Vec2::X, Vec2::ONE, Vec2::Y].map(|p| {
+                    if level == 0 { b.data.ground_at(x as f32 + p.x, z as f32 + p.y).unwrap_or(y) } else { y }
+                });
+                (x, z, mask, heights)
+            }
+            PaintOp::Pave { x, z, mask, heights, .. } => (x, z, mask, heights),
+            PaintOp::Wall { wall, side, .. } => {
+                let Some(w) = b.data.walls.get(wall as usize) else { continue };
+                let level = w.level.max(1) as usize;
+                let y = b.levels.get(level).copied().unwrap_or(0.0);
+                let top = b.levels.get(level + 1).copied().unwrap_or(y + 3.0);
+                let (a, c) = (Vec2::from(w.a), Vec2::from(w.b));
+                let offset = (c - a).normalize_or_zero().perp() * if side == 0 { 0.025 } else { -0.025 };
+                let (a, c) = (a + offset, c + offset);
+                let points = [b.world(a.x, a.y, y + 0.04), b.world(c.x, c.y, y + 0.04), b.world(c.x, c.y, top - 0.04), b.world(a.x, a.y, top - 0.04)];
+                for i in 0..4 { gizmos.line(points[i], points[(i + 1) % 4], color); }
+                continue;
+            }
+            _ => continue,
+        };
+        let point = |p: Vec2| {
+            let near = heights[0] + (heights[1] - heights[0]) * p.x;
+            let far = heights[3] + (heights[2] - heights[3]) * p.x;
+            b.world(x as f32 + p.x, z as f32 + p.y, near + (far - near) * p.y + 0.05)
+        };
+        for (a, c) in tile_edges(mask) { gizmos.line(point(a), point(c), color); }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_outlines_only_changed_triangle_boundaries() {
+        assert!(tile_edges(0).is_empty());
+        assert_eq!(tile_edges(1).len(), 3);
+        assert_eq!(tile_edges(3).len(), 4);
+        let full = tile_edges(15);
+        assert_eq!(full.len(), 4);
+        assert!(full.iter().all(|(a, b)| *a != Vec2::splat(0.5) && *b != Vec2::splat(0.5)));
+        assert_eq!(tile_edges(5).len(), 6, "opposite changed triangles remain separate");
+    }
 
     fn house() -> LotBuildingBaked {
         let mut b = LotBuildingBaked { lot: 0, width: 5, depth: 5, levels: vec![0.0, 0.0], walls: Vec::new(), floors: Vec::new(),

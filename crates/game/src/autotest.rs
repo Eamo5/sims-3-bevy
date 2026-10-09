@@ -676,7 +676,14 @@ fn build_history_test(
             }
             window.set_cursor_position(Some(start));
         }
-        1 => mouse.press(MouseButton::Left),
+        1 => {
+            if mode.starts_with("floor") || mode == "pave" {
+                assert_eq!(fingerprint(), probe.before, "hover preview must not change the lot");
+                assert_eq!(paint(), probe.paint_before, "hover preview must not add saved operations");
+                assert_eq!(h.funds, probe.funds, "hover preview must not charge money");
+            }
+            mouse.press(MouseButton::Left);
+        }
         2 => window.set_cursor_position(Some(probe.end)),
         3 => mouse.release(MouseButton::Left),
         4 => {

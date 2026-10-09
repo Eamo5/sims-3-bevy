@@ -1393,6 +1393,7 @@ fn paint(
         MessageWriter<crate::sound::PlaySound>,
     ),
     removed: Res<crate::save::RemovedLotObjects>,
+    mut gizmos: Gizmos,
 ) {
     if menu.is_open() || !modal.is_empty() { return; }
     let Some(i) = buy.painting.filter(|_| buy.active) else { return };
@@ -1401,10 +1402,10 @@ fn paint(
         buy.dirty = true;
         return;
     }
-    if !mouse.just_pressed(MouseButton::Left) || over_ui.0 || std::mem::take(&mut buy.eyedropped) {
+    if over_ui.0 || std::mem::take(&mut buy.eyedropped) {
         return;
     }
-    let (Some(ui), Some(b)) = (ui, building.as_deref_mut()) else { return };
+    let (Some(ui), Some(b)) = (ui, building.as_deref()) else { return };
     let Some(mut pat) = ui.data.patterns.get(i).cloned() else { return };
     // (In the swatch or style chosen for it.)
     if let Some(k) = buy.cover {
@@ -1419,7 +1420,7 @@ fn paint(
         // Normal click covers one tile; Shift follows the room's current wall boundaries.
         let Some((p, level)) = crate::hud::floor_hit(ray, &world, Some(b)) else { return };
         let l = b.local(p);
-        if std::env::var_os("BUILD_HISTORY_TEST").is_some() { info!("autotest: floor covering at {l:?}, level {level}, room fill {fill}"); }
+        if mouse.just_pressed(MouseButton::Left) && std::env::var_os("BUILD_HISTORY_TEST").is_some() { info!("autotest: floor covering at {l:?}, level {level}, room fill {fill}"); }
         let ground = b.view_level <= 1 && !b.data.floors.iter().any(|f| f.level == 1 && f.x as f32 == l.x.floor() && f.z as f32 == l.y.floor());
         if ground {
             crate::covering::pave_room(&b.data, l, pat.texture, fill, |at| [Vec2::ZERO, Vec2::X, Vec2::ONE, Vec2::Y].map(|offset| {
@@ -1437,10 +1438,13 @@ fn paint(
         return;
     }
     let cost = crate::covering::cost(&b.data, &ops, pat.price.max(0) as u32);
+    crate::covering::preview(&mut gizmos, b, &ops, household.as_ref().is_none_or(|h| h.funds >= cost));
+    if !mouse.just_pressed(MouseButton::Left) { return; }
     if household.as_ref().is_some_and(|h| h.funds < cost) {
         notes.push("You can't afford that.");
         return;
     }
+    let Some(b) = building.as_deref_mut() else { return };
     let before = crate::building::BuildingSnapshot::capture(b, log.as_deref());
     if let Some(h) = household.as_mut() {
         h.funds -= cost;
