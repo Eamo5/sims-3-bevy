@@ -377,6 +377,18 @@ pub struct Meal {
     pub servings: u8,
 }
 
+impl Meal {
+    fn take_serving(&mut self) -> bool {
+        let Some(left) = self.servings.checked_sub(1) else { return false };
+        self.servings = left;
+        true
+    }
+
+    fn take_remaining(&mut self) -> u8 {
+        std::mem::take(&mut self.servings)
+    }
+}
+
 /// How many servings of leftovers the fridge keeps.
 const MAX_LEFTOVERS: usize = 12;
 
@@ -565,7 +577,7 @@ fn meal_requests(
             }
             MealRequest::Grabbed(platter) => {
                 if let Ok((mut m, dish, food)) = meals.get_mut(platter) {
-                    m.servings = m.servings.saturating_sub(1);
+                    if !m.take_serving() { continue; }
                     match dish {
                         Some(d) => commands.entity(me).insert(Plateful(d.0)),
                         None => commands.entity(me).remove::<Plateful>(),
@@ -581,7 +593,7 @@ fn meal_requests(
                             }
                         });
                     }
-                }
+                } else { continue; }
                 // (The plate carried to the table.)
                 commands.entity(me).insert(crate::anim::Carrying(crate::surroundings::DISH_CARRY));
                 match dining_seat(&objects, tf.translation, &taken) {
@@ -598,9 +610,11 @@ fn meal_requests(
             }
             MealRequest::PutAway(platter) => {
                 // What's left goes in the fridge; the platter with it.
-                if let Ok((m, dish, _)) = meals.get_mut(platter) {
+                if let Ok((mut m, dish, _)) = meals.get_mut(platter) {
+                    // Empty immediately: entity removal is deferred until after all requests.
+                    let servings = m.take_remaining();
                     if let Some(r) = dish.and_then(|d| recipe(d.0)) {
-                        for _ in 0..m.servings {
+                        for _ in 0..servings {
                             leftovers.0.push(r.key.clone());
                         }
                         // (The fridge holds a dozen; the oldest go out.)
@@ -750,6 +764,25 @@ fn release_plates(mut commands: Commands, sims: Query<(Entity, &ActionQueue, &Ea
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn competing_meal_requests_cannot_duplicate_servings() {
+        // Two Sims reach the last plate before deferred entity cleanup has run.
+        let mut meal = Meal { servings: 1 };
+        assert!(meal.take_serving());
+        assert!(!meal.take_serving());
+        assert_eq!(meal.take_remaining(), 0);
+
+        // Putting away a platter must claim its servings before the next request.
+        let mut meal = Meal { servings: 4 };
+        assert!(meal.take_serving());
+        assert_eq!(meal.take_remaining(), 3);
+        assert_eq!(meal.take_remaining(), 0);
+        assert!(!meal.take_serving());
+        assert_eq!(meal.servings, 0);
+    }
+
     /// The baked recipes' keys (`SIMS3_CACHE=<baked> cargo test -p sims3 list_recipes -- --ignored --nocapture`).
     #[test]
     #[ignore]
