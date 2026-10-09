@@ -774,6 +774,9 @@ restoration. Capture after 32 seconds.
 `GIVE=Tomato/3*2` with `EAT=check` verifies a produce item is consumed before eating
 finishes, then cancels the action and checks that the snack stays consumed. Run at speed 1
 and capture after 22 seconds; the log reports `inventory eating PASS`.
+`HALF_MEAL_TEST=1` creates a platter using an original recipe, reduces it to four servings,
+and verifies its full mesh is replaced by the half-depleted mesh exactly once. Capture after
+12 seconds; the log reports `half platter PASS`.
 `CLICK_AT=1000,450@8` clicks at window-relative coordinates (`CURSOR_AT` moves without clicking).
 `BUY_HISTORY_TEST=1` verifies selling, undoing and redoing furniture transactions in the running
 game. Use `BUY_HISTORY_TEST=buttons` with `UI_CLICK=05ac150d@7;05ac150e@8;05ac150d@9` to verify

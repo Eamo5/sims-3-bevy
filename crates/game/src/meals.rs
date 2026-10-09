@@ -25,7 +25,7 @@ impl Plugin for MealsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Leftovers>()
             .add_systems(OnEnter(crate::AppState::InGame), |mut l: ResMut<Leftovers>| l.0.clear())
-            .add_systems(Update, (cook_prep, cook_prep_done, serve_if_interrupted, take_out_dinner, meal_requests, update_platters, come_to_meal, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (cook_prep, cook_prep_done, serve_if_interrupted, take_out_dinner, meal_requests, update_platters, probe_platters, come_to_meal, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -426,6 +426,60 @@ fn update_platters(
             set_food(&mut commands, &mut assets, &mut ctx, entity, food, Some(half));
             commands.entity(entity).insert(HalfPlatter);
         }
+    }
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn probe_platters(
+    mut commands: Commands,
+    time: Res<Time<crate::autotest::InputTimeline>>,
+    ui: Option<Res<crate::icons::GameUi>>,
+    data: Res<Baked>, catalog: Res<Catalog>, mut assets: ResMut<ObjectAssets>,
+    mut meshes: ResMut<Assets<Mesh>>, mut images: ResMut<Assets<Image>>, mut materials: ResMut<Assets<StandardMaterial>>,
+    tables: Query<(&GameObject, &Transform)>,
+    mut plates: Query<(&mut Meal, &DishFood, Has<HalfPlatter>)>,
+    entities: Query<Entity>,
+    mut state: Local<(u8, Option<Entity>, Option<Entity>)>,
+) {
+    if std::env::var_os("HALF_MEAL_TEST").is_none() || state.0 == 4 || time.elapsed_secs() < 6.0 { return; }
+    let Some(ui) = ui else { return };
+    match state.0 {
+        0 => {
+            let (i, recipe) = ui.data.recipes.iter().enumerate().find(|(_, r)| r.group.is_some() && r.group_half.is_some() && r.group != r.group_half).expect("original recipe with distinct half model");
+            let (table, tf) = tables.iter().find(|(o, _)| o.kind == ObjectKind::Table).expect("fixture dining surface");
+            let at = table.world_center(tf).with_y(tf.translation.y + table.height);
+            let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+            let plate = spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, PLATTER, ObjectKind::Meal, "Platter probe", at, 0.0).expect("platter model");
+            set_food(&mut commands, &mut assets, &mut ctx, plate, None, recipe.group);
+            commands.entity(plate).insert((Meal { servings: GROUP_MEAL_SERVINGS }, Dish(i)));
+            state.1 = Some(plate);
+            state.0 = 1;
+        }
+        1 => {
+            let (mut meal, food, half) = plates.get_mut(state.1.unwrap()).expect("full platter rendered");
+            assert!(!half);
+            assert!(entities.contains(food.0));
+            state.2 = Some(food.0);
+            meal.servings = 4;
+            state.0 = 2;
+        }
+        2 => {
+            let (_, food, half) = plates.get(state.1.unwrap()).unwrap();
+            assert!(half, "four servings must select half-depleted geometry");
+            assert_ne!(Some(food.0), state.2);
+            assert!(!entities.contains(state.2.unwrap()), "old food mesh must be removed");
+            assert!(entities.contains(food.0), "half-depleted mesh must exist");
+            state.2 = Some(food.0);
+            state.0 = 3;
+        }
+        3 => {
+            let (_, food, half) = plates.get(state.1.unwrap()).unwrap();
+            assert!(half);
+            assert_eq!(Some(food.0), state.2, "unchanged serving count must retain its mesh");
+            info!("autotest: half platter PASS — original full/half models rendered, old mesh removed, replacement retained");
+            state.0 = 4;
+        }
+        _ => unreachable!(),
     }
 }
 
