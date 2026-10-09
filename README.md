@@ -286,6 +286,8 @@ installation is unreachable.
   fill-mode changes, avoiding repeated room searches while the pointer stays on a surface.
   The covering eyedropper samples the exact triangle of diagonal flooring, supports outdoor
   paving, and chooses the nearer covered floor or wall instead of always preferring a wall.
+  Newly rendered custom coverings keep a style recipe beside their cached texture. Sampling
+  them restores the source pattern's price, preset and editable colours, including after reload.
   Wallpaper picking and outlines follow each wall's authored foundation/split-level elevation.
   Wall-mounted objects also snap at that elevation; multi-tile objects cannot bridge wall
   sections with different base heights.

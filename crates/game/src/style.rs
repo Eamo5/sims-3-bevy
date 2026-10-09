@@ -96,7 +96,7 @@ pub const T_COVER_STYLE: u32 = 0x0C0E_5171;
 
 /// A wall or floor pattern's own style: one of its swatches with some of its channels' colours
 /// changed.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CoverStyle {
     pub cwal: u64,
     pub swatch: u8,
@@ -110,6 +110,41 @@ impl CoverStyle {
     pub fn texture(&self) -> s3bake::Key {
         let desc = format!("{:X}|{}|{:?}", self.cwal, self.swatch, self.colours.iter().map(|(c, v)| (c, v.map(|x| (x * 255.0).round() as u8))).collect::<Vec<_>>());
         (T_COVER_STYLE, if self.floor { 4 } else { 3 }, s3pkg::fnv64(&desc))
+    }
+
+    /// Recipes travel with cached textures so sampling a saved custom covering restores its
+    /// source catalogue pattern, preset and editable channels, rather than only its pixels.
+    pub fn from_texture(key: s3bake::Key) -> Option<Self> {
+        if key.0 != T_COVER_STYLE { return None; }
+        let bytes = std::fs::read(s3bake::default_root().tex_path(key).with_extension("style.json")).ok()?;
+        Self::decode_recipe(key, &bytes)
+    }
+
+    fn decode_recipe(key: s3bake::Key, bytes: &[u8]) -> Option<Self> {
+        let style: Self = serde_json::from_slice(bytes).ok()?;
+        (style.texture() == key && style.colours.iter().all(|(channel, rgb)| *channel < 4 && rgb.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)))).then_some(style)
+    }
+}
+
+#[cfg(test)]
+mod cover_recipe_tests {
+    use super::*;
+
+    #[test]
+    fn recipes_restore_source_preset_and_channels_only_for_their_own_texture() {
+        let style = CoverStyle { cwal: 0x12345678, swatch: 2, floor: true, colours: vec![(0, [0.25, 0.5, 0.75]), (3, [1.0, 0.0, 0.0])] };
+        let bytes = serde_json::to_vec(&style).unwrap();
+        assert_eq!(CoverStyle::decode_recipe(style.texture(), &bytes), Some(style.clone()));
+        let mut other = style.clone();
+        other.cwal += 1;
+        assert!(CoverStyle::decode_recipe(other.texture(), &bytes).is_none());
+        other = style.clone();
+        other.floor = false;
+        assert!(CoverStyle::decode_recipe(other.texture(), &bytes).is_none());
+        assert!(CoverStyle::decode_recipe(style.texture(), b"incomplete").is_none());
+        let mut invalid = style;
+        invalid.colours[0].1[0] = 2.0;
+        assert!(CoverStyle::decode_recipe(invalid.texture(), &serde_json::to_vec(&invalid).unwrap()).is_none());
     }
 }
 
@@ -163,7 +198,10 @@ impl StyleRenders {
             let c = m.complate.with_colours(&s.colours);
             let (w, h) = if s.floor { (256, 256) } else { (256, 512) };
             let Some(img) = s3formats::complate::render(pkgs, &c, &m.keys, w, h) else { return false };
-            std::fs::write(s3bake::default_root().tex_path(s.texture()), s3bake::ddsw::encode_dds(&img)).is_ok()
+            let path = s3bake::default_root().tex_path(s.texture());
+            let Ok(recipe) = serde_json::to_vec(&s) else { return false };
+            std::fs::write(&path, s3bake::ddsw::encode_dds(&img)).is_ok()
+                && std::fs::write(path.with_extension("style.json"), recipe).is_ok()
         });
         self.covers.push((style, task));
     }

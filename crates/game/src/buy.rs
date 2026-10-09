@@ -274,13 +274,9 @@ fn eyedrop(
         notes.push("Nothing to take up there.");
         return;
     };
-    // (Painted at the price of the catalogue pattern it is, or else the cheapest of its kind.)
-    let Some(i) = ui
-        .data
-        .patterns
-        .iter()
-        .position(|p| p.floor == floor && (p.texture == key || p.swatches.contains(&key)))
-        .or_else(|| ui.data.patterns.iter().enumerate().filter(|(_, p)| p.floor == floor).min_by_key(|(_, p)| p.price).map(|(i, _)| i))
+    let style = crate::style::CoverStyle::from_texture(key).filter(|s| s.floor == floor);
+    // Preserve a custom covering's source pattern and price when its recipe is available.
+    let Some(i) = sampled_pattern(&ui.data.patterns, key, floor, style.as_ref())
     else {
         return;
     };
@@ -288,9 +284,16 @@ fn eyedrop(
     buy.eyedropped = true;
     buy.painting = Some(i);
     buy.cover = Some(key);
+    buy.cover_style = style;
     buy.category = if floor { FLOORS_TAB } else { WALLPAPER_TAB };
     buy.dirty = true;
     play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
+}
+
+fn sampled_pattern(patterns: &[s3bake::gamedata::PatternInfo], key: Key, floor: bool, style: Option<&crate::style::CoverStyle>) -> Option<usize> {
+    patterns.iter().position(|p| p.floor == floor && (p.texture == key || p.swatches.contains(&key)
+        || style.is_some_and(|s| s.floor == floor && s.cwal == p.cwal)))
+        .or_else(|| patterns.iter().enumerate().filter(|(_, p)| p.floor == floor).min_by_key(|(_, p)| p.price).map(|(i, _)| i))
 }
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
 pub enum BuyButton {
@@ -429,12 +432,22 @@ fn scripted_eyedrop(
     }
 }
 
-fn scripted_cover(time: Res<Time>, mut buy: ResMut<BuyMode>, ui: Option<Res<crate::icons::GameUi>>, mut buttons: Query<(&BuyButton, &mut Interaction)>, mut step: Local<u8>) {
+fn scripted_cover(time: Res<Time<crate::autotest::InputTimeline>>, mut buy: ResMut<BuyMode>, ui: Option<Res<crate::icons::GameUi>>, mut buttons: Query<(&BuyButton, &mut Interaction)>, mut step: Local<u8>) {
     if std::env::var("COVER_STYLE").is_err() {
         return;
     }
     let t = time.elapsed_secs();
     if t < 10.0 + *step as f32 * 2.0 {
+        return;
+    }
+    if *step == 5 {
+        if let Some(style) = buy.cover_style.as_ref().filter(|s| buy.cover == Some(s.texture())) {
+            assert_eq!(crate::style::CoverStyle::from_texture(style.texture()).as_ref(), Some(style));
+            info!("autotest: covering recipe persistence PASS — source pattern, preset and colour channels restored from the texture cache");
+            *step = 6;
+        } else {
+            assert!(t < 30.0, "custom covering render must finish");
+        }
         return;
     }
     if *step == 0 {
@@ -2009,6 +2022,21 @@ fn footprint_supported(corners: &[Vec2; 4], has_floor: impl Fn(Vec2) -> bool) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_cover_sampling_preserves_source_price_instead_of_cheapest_pattern() {
+        let pattern = |cwal, price| s3bake::gamedata::PatternInfo {
+            name: format!("Pattern {cwal}"), cwal, price, floor: true, sort_flags: 0,
+            texture: (1, 4, cwal), swatches: vec![(1, 4, cwal)], channels: Vec::new(),
+        };
+        let patterns = [pattern(10, 2), pattern(20, 75)];
+        let style = crate::style::CoverStyle { cwal: 20, floor: true, swatch: 0, colours: vec![(0, [0.2, 0.4, 0.6])] };
+        let i = sampled_pattern(&patterns, style.texture(), true, Some(&style)).unwrap();
+        assert_eq!(patterns[i].price, 75);
+        assert_eq!(sampled_pattern(&patterns, patterns[1].texture, true, None), Some(1));
+        assert_eq!(sampled_pattern(&patterns, style.texture(), false, Some(&style)), None);
+        assert_eq!(sampled_pattern(&patterns, (0, 0, 123), true, None), Some(0), "legacy textures retain the existing fallback");
+    }
 
     #[test]
     fn furniture_requires_continuous_support_at_its_placement_height() {
