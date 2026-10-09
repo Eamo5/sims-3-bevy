@@ -1615,6 +1615,24 @@ fn main() {
         println!("{} refs by type {by_type:08X?}", v.len());
         return;
     }
+    if args[1] == "cwal-categories" {
+        // cwal-categories <root>: audit parsed pattern kinds/categories across installed packs.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let mut counts = std::collections::BTreeMap::new();
+        let mut failed = 0;
+        let mut total = 0;
+        for key in set.keys_of_type(s3formats::catalog::T_CWAL) {
+            total += 1;
+            match set.read(key).and_then(|d| s3formats::catalog::WallFloorPattern::parse(&d).ok()) {
+                Some(p) => *counts.entry((p.pattern_type, p.sort_flags)).or_insert(0usize) += 1,
+                None => { failed += 1; eprintln!("CWAL parse failed: {key:?}"); }
+            }
+        }
+        for ((kind, flags), count) in counts { println!("type {kind}, categories {flags:#05x}: {count}"); }
+        println!("CWAL audit: {} parsed, {failed} failed, {total} total", total - failed);
+        assert!(total > 0 && failed == 0, "installed covering resources must parse");
+        return;
+    }
     if args[1] == "cwal" {
         // cwal <root> <instance hex> [material] [out.png] [w] [h]: a wall/floor pattern's
         // materials, optionally rendered.

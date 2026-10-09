@@ -142,6 +142,8 @@ pub struct WallFloorPattern {
     pub name: String,
     /// `PATTERN_FLOOR` or `PATTERN_WALL`.
     pub pattern_type: u32,
+    /// CWAL wall/floor catalogue category bitmask (semantics depend on pattern_type).
+    pub sort_flags: u32,
     pub keys: Vec<ResourceKey>,
     /// String-table key of the display name, the price, and whether the catalogue shows it.
     pub name_guid: u64,
@@ -152,10 +154,10 @@ pub struct WallFloorPattern {
 fn cstring(r: &mut Reader) -> R<String> {
     let b = r.u8()?;
     if b & 0x80 != 0 {
-        let n = (b & 0x7F) as usize;
+        let n = if b & 0x40 != 0 { r.u8()? as usize } else { (b & 0x3F) as usize };
         return Ok(String::from_utf8_lossy(r.bytes(n)?).into_owned());
     }
-    let i = if b == 0x40 { 0x40 + r.u8()? as usize } else { b as usize };
+    let i = if b & 0x40 != 0 { (b & 0x3F) as usize + r.u8()? as usize } else { b as usize };
     Ok(STRINGS.get(i).copied().unwrap_or("").to_string())
 }
 
@@ -226,7 +228,8 @@ impl WallFloorPattern {
         }
         let mut materials = Vec::with_capacity(nm);
         for _ in 0..nm {
-            let _kind = r.u8()?;
+            let kind = r.u8()?;
+            if kind != 1 { r.u32()?; }
             let len = r.u32()? as usize;
             let end = r.pos + len;
             let _unknown = r.u16()?;
@@ -242,7 +245,7 @@ impl WallFloorPattern {
             materials.push(PatternMaterial { complate: c, keys });
         }
         // Catalogue common block.
-        let _cver = r.u32()?;
+        let cver = r.u32()?;
         let name_guid = r.u64()?;
         r.u64()?;
         let utf16be = |r: &mut Reader| -> R<String> {
@@ -261,10 +264,15 @@ impl WallFloorPattern {
         r.u8()?;
         r.u8()?;
         r.u32()?; // sort priority
-        let pattern_type = r.u32().unwrap_or(0);
+        if cver >= 0x0d { r.u8()?; } // placeable on roof
+        if cver >= 0x0e { r.u8()?; } // visible in worldbuilder
+        if cver >= 0x0f { r.u32()?; } // product name
+        let pattern_type = r.u32()?;
+        r.u32()?; // material VPXY index
+        let sort_flags = r.u32()?;
         r.pos = tgi_pos;
         let keys = tgi_list(&mut r).unwrap_or_default();
-        Ok(Self { materials, name, pattern_type, keys, name_guid, price, in_catalog: status & 1 != 0 })
+        Ok(Self { materials, name, pattern_type, sort_flags, keys, name_guid, price, in_catalog: status & 1 != 0 })
     }
 }
 
@@ -369,6 +377,58 @@ fn colour_of(v: &CValue) -> Option<[f32; 3]> {
 #[cfg(test)]
 mod style_tests {
     use super::*;
+
+    #[test]
+    fn compact_strings_support_long_literals_and_extended_table_indices() {
+        let literal = "x".repeat(90);
+        let mut bytes = vec![0xc0, literal.len() as u8];
+        bytes.extend(literal.as_bytes());
+        bytes.push(0x83);
+        bytes.extend(b"end");
+        let mut r = Reader::new(&bytes);
+        assert_eq!(cstring(&mut r).unwrap(), literal);
+        assert_eq!(cstring(&mut r).unwrap(), "end", "long literal must leave the next field aligned");
+        assert_eq!(cstring(&mut Reader::new(&[0x41, 4])).unwrap(), STRINGS[5]);
+        assert!(cstring(&mut Reader::new(&[0xc0, 90, b'x'])).is_err());
+    }
+
+    #[test]
+    fn covering_categories_follow_versioned_common_fields() {
+        for version in 0x0cu32..=0x0f {
+            let mut d = Vec::new();
+            d.extend(1u32.to_le_bytes()); // resource version
+            d.extend([0u8; 8]); // key-table offset and size, patched below
+            d.extend(0u32.to_le_bytes()); // materials
+            d.extend(version.to_le_bytes());
+            d.extend(123u64.to_le_bytes()); // localized name
+            d.extend(0u64.to_le_bytes()); // description
+            d.extend([0u8; 2]); // empty strings
+            d.extend(7.0f32.to_le_bytes());
+            d.extend([0u8; 8]); // niceness and crap score
+            d.push(1); // visible
+            d.extend([0u8; 8]); // thumbnail
+            d.push(0);
+            d.extend([0u8; 8]); // environment and fire
+            d.extend([0u8; 2]); // stealable and repossessable
+            d.extend(9u32.to_le_bytes()); // UI sort index
+            if version >= 0x0d { d.push(1); }
+            if version >= 0x0e { d.push(1); }
+            if version >= 0x0f { d.extend(0xabcdef01u32.to_le_bytes()); }
+            d.extend(PATTERN_FLOOR.to_le_bytes());
+            d.extend(5u32.to_le_bytes()); // VPXY index
+            d.extend(0x104u32.to_le_bytes()); // wood and carpet categories
+            let table = d.len();
+            d[4..8].copy_from_slice(&((table - 8) as u32).to_le_bytes());
+            d.extend(0u32.to_le_bytes()); // no keys
+            let p = WallFloorPattern::parse(&d).unwrap();
+            assert_eq!(p.pattern_type, PATTERN_FLOOR, "common version {version}");
+            assert_eq!(p.sort_flags, 0x104);
+            assert_eq!(p.name_guid, 123);
+            assert_eq!(p.price, 7.0);
+            assert!(p.in_catalog);
+            assert!(WallFloorPattern::parse(&d[..table - 1]).is_err(), "truncated category must not be accepted");
+        }
+    }
 
     #[test]
     fn object_channels_recoloured() {
