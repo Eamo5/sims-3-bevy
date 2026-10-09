@@ -139,7 +139,7 @@ impl Chosen {
 
 /// An action on the chosen stack asked for from its pie menu (the game's inventory panel).
 #[derive(Resource)]
-pub struct DoItem(pub ItemButton);
+pub struct DoItem(pub ItemButton, pub Entity, pub Stack);
 
 /// A stack's picture: a painting's own, a reward's or find's catalogue picture, produce's model.
 pub fn stack_picture(
@@ -349,20 +349,26 @@ fn inventory_buttons(
         }
     }
     // (Asked for from the stack's pie menu.)
-    let from_pie = asked.map(|a| a.0);
+    let from_pie = asked.map(|a| (a.0, Some((a.1, a.2.clone()))));
     if from_pie.is_some() {
         commands.remove_resource::<DoItem>();
     }
-    let pressed: Vec<ItemButton> = buttons
+    let pressed: Vec<(ItemButton, Option<(Entity, Stack)>)> = buttons
         .iter_mut()
         .filter_map(|(i, b, mut bg)| {
             bg.0 = if *i == Interaction::Hovered { BTN_HOVER } else { BTN_NORMAL };
-            (*i == Interaction::Pressed).then_some(*b)
+            (*i == Interaction::Pressed).then_some((*b, None))
         })
         .chain(from_pie)
         .collect();
-    for b in &pressed {
-        let (Ok((me, sim, mut inv, mut queue)), Some(k)) = (sel.single_mut(), chosen.0) else { continue };
+    for (b, target) in &pressed {
+        let Ok((me, sim, mut inv, mut queue)) = sel.single_mut() else { continue };
+        let k = match target {
+            Some((owner, stack)) if *owner == me => inv.0.iter().position(|s| s.kind == stack.kind && s.key == stack.key && s.quality == stack.quality),
+            Some(_) => None,
+            None => chosen.0,
+        };
+        let Some(k) = k else { continue };
         let Some(s) = inv.0.get(k).cloned() else { continue };
         match b {
             ItemButton::SellOne | ItemButton::SellAll => {
@@ -464,6 +470,22 @@ mod button_tests {
         app.update();
         assert_eq!(app.world().get::<Inventory>(me).unwrap().0[0].count, 1);
         assert_eq!(app.world().resource::<Household>().funds, 120);
+        // A pie command keeps its original target even if another stack is selected.
+        app.world_mut().get_mut::<Inventory>(me).unwrap().add(ItemKind::Produce, "Apple", "Apple", 3, 25);
+        let apple = app.world().get::<Inventory>(me).unwrap().0[1].clone();
+        app.world_mut().resource_mut::<Chosen>().select(1, &apple);
+        app.world_mut().insert_resource(DoItem(ItemButton::SellOne, me, stack));
+        app.update();
+        let inv = app.world().get::<Inventory>(me).unwrap();
+        assert_eq!(inv.0.len(), 1);
+        assert_eq!(inv.0[0].key, "Apple");
+        assert_eq!(app.world().resource::<Household>().funds, 130);
+        assert_eq!(app.world().resource::<Chosen>().0, Some(0));
+        let other_sim = app.world_mut().spawn_empty().id();
+        app.world_mut().insert_resource(DoItem(ItemButton::SellAll, other_sim, apple));
+        app.update();
+        assert_eq!(app.world().get::<Inventory>(me).unwrap().0.len(), 1, "another Sim's stale menu must not sell the selected Sim's items");
+        assert_eq!(app.world().resource::<Household>().funds, 130);
     }
 }
 

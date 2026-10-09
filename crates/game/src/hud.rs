@@ -1267,8 +1267,8 @@ fn pie_buttons(
         return;
     }
     // (An inventory stack's actions: see `hudpanels::inventory_panel`.)
-    if let ActionKind::InventoryItem(b) = kind {
-        commands.insert_resource(crate::inventory::DoItem(b));
+    if let ActionKind::InventoryItem(b, owner, stack) = kind {
+        commands.insert_resource(crate::inventory::DoItem(b, owner, stack));
         return;
     }
     // (How a Sim at work works.)

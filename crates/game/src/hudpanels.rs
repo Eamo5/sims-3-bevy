@@ -471,7 +471,7 @@ fn inventory_panel(
                 .map(|(label, b)| {
                     let kind = match b {
                         crate::inventory::ItemButton::Eat => crate::interact::ActionKind::EatItem { key: st.key.clone(), quality: st.quality },
-                        b => crate::interact::ActionKind::InventoryItem(b),
+                        b => crate::interact::ActionKind::InventoryItem(b, me, st.clone()),
                     };
                     (label, kind)
                 })
