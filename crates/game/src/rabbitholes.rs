@@ -184,6 +184,33 @@ mod visit_time_tests {
             assert_eq!(total, 120.0, "tick size {step}");
         }
     }
+
+    #[test]
+    fn paid_visit_cancellation_cannot_generate_upfront_income() {
+        let mut world = World::new();
+        let me = world.spawn_empty().id();
+        let sim = random_sim(&mut rand::rng(), "Test", Some(false), Age::Adult);
+        let clock = GameClock::default();
+        let mut notes = Notifications::default();
+        let mut household = Household { name: "Test".into(), funds: 1000, lot_index: 0, last_bill_day: 0, bills: Vec::new() };
+        let mut state = bevy::ecs::system::SystemState::<Commands>::new(&mut world);
+        for _ in 0..3 {
+            {
+                let mut commands = state.get_mut(&mut world).unwrap();
+                assert!(head_out(&mut commands, &clock, me, &sim, 0, &SCIENCE[0], "Science Lab".into(), Some(&mut household), &mut notes, 1.0));
+            }
+            state.apply(&mut world);
+            assert!(world.get::<AtRabbitHole>(me).is_some());
+            assert_eq!(household.funds, 1000, "starting paid work must not grant its completion stipend");
+            world.entity_mut(me).remove::<AtRabbitHole>();
+        }
+        {
+            let mut commands = state.get_mut(&mut world).unwrap();
+            assert!(head_out(&mut commands, &clock, me, &sim, 0, &SHOW[0], "Theater".into(), Some(&mut household), &mut notes, 0.5));
+        }
+        state.apply(&mut world);
+        assert_eq!(household.funds, 975, "discounted admission is still charged before entry");
+    }
 }
 
 /// Called when a Sim reaches the lot exit on the way to a rabbit hole.
@@ -217,10 +244,6 @@ pub fn head_out(
             notes.push(format!("{} can't afford to {} (§{cost}).", sim.first, activity.name.to_lowercase()));
             return false;
         }
-        h.funds -= cost;
-    } else if cost < 0
-        && let Some(h) = household
-    {
         h.funds -= cost;
     }
     let inside_from = clock.minutes + DRIVE_MINUTES;
@@ -270,6 +293,13 @@ fn outings(
             }
         }
         if clock.minutes >= at.until {
+            // Paid work earns its stipend only after the visit finishes. Admission
+            // discounts affect fees, not earnings; cancelling a visit cannot mint money.
+            if at.activity.cost < 0 && let Some(h) = household.as_deref_mut() {
+                let earned = at.activity.cost.saturating_neg();
+                h.funds += earned;
+                notes.push(format!("{} earned §{earned} at {}.", sim.first, at.place));
+            }
             // Back at the lot's edge, on the ground (whichever floor they left from: the bus
             // takes children from wherever they are).
             if let Some(x) = &exit {
