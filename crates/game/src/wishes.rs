@@ -192,7 +192,8 @@ pub fn reward_decay(w: Option<&Wishes>, motive: usize) -> f32 {
 }
 
 pub fn reward_skill_rate(w: Option<&Wishes>) -> f32 {
-    if has(w, "FastLearner") { 1.25 } else { 1.0 }
+    // TraitTuning.kFastLearnerSkillGainMod = 0.15.
+    if has(w, "FastLearner") { 1.15 } else { 1.0 }
 }
 
 /// What a Sim pays for a rabbit hole's activity: nothing at restaurants for a Discount
@@ -201,21 +202,17 @@ pub fn price_factor(w: Option<&Wishes>, activity: &str) -> f32 {
     match activity {
         "Eat a Meal" | "Have a Drink with Friends" if has(w, "DiscountDiner") => 0.0,
         "See a Show" if has(w, "ComplimentaryEntertainment") => 0.0,
-        "Buy Seeds" if has(w, "Haggler") => 0.75,
+        "Buy Seeds" if has(w, "Haggler") => 0.85,
         _ => 1.0,
     }
 }
 
 /// What a recipe book costs a Sim (Bookshop Bargainers and Hagglers pay less).
 pub fn book_price(w: Option<&Wishes>, price: i32) -> i64 {
-    let mut p = price as f32;
-    if has(w, "BookshopBargainer") {
-        p *= 0.5;
-    }
-    if has(w, "Haggler") {
-        p *= 0.75;
-    }
-    p.round() as i64
+    // TraitTuning's sale-percent additions stack, rather than multiplying prices.
+    let discount = if has(w, "BookshopBargainer") { 25 } else { 0 }
+        + if has(w, "Haggler") { 15 } else { 0 };
+    (price.max(0) as f64 * (100 - discount) as f64 / 100.0).round() as i64
 }
 
 /// Asks the player which lifetime reward to buy (those offered and not yet bought).
@@ -438,6 +435,20 @@ fn fulfil_wishes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reward_discounts_match_installed_tuning_and_stack_additively() {
+        let book = Wishes::restored(0, vec!["BookshopBargainer".into()], 0.0);
+        let haggler = Wishes::restored(0, vec!["Haggler".into()], 0.0);
+        let both = Wishes::restored(0, vec!["BookshopBargainer".into(), "Haggler".into()], 0.0);
+        assert_eq!(book_price(None, 100), 100);
+        assert_eq!(book_price(Some(&book), 100), 75);
+        assert_eq!(book_price(Some(&haggler), 100), 85);
+        assert_eq!(book_price(Some(&both), 100), 60);
+        assert_eq!(book_price(Some(&both), 31), 19);
+        assert_eq!(price_factor(Some(&both), "Buy Seeds"), 0.85);
+        assert_eq!(price_factor(Some(&book), "Buy Seeds"), 1.0);
+    }
 
     /// Every lifetime reward offered is one of the game's, with its cost (needs the bake:
     /// `SIMS3_CACHE=<baked> cargo test -p sims3 rewards_are_the_games -- --ignored`).

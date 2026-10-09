@@ -137,12 +137,13 @@ installation is unreachable.
 - **Lifetime rewards**: the game's reward traits, bought with lifetime happiness at their
   costs in its dialog (icon, name and description): Steel Bladder (bladder stays full), Dirt
   Defiant and Hardly Hungry (hygiene and hunger decay at one quarter speed), Fast Learner
-  (including gardening, repairs/upgrades, career study and rabbit-hole lessons),
+  (+15% learning, including gardening, repairs/upgrades, career study and rabbit-hole lessons),
   Fast Metabolism, Professional Slacker, No Bills Ever (new household bills stop while a
   reward owner belongs to the household), Opportunistic (bigger
   opportunity rewards), Attractive, Extra Creative (paintings and books earn more), Super
   Green Thumb (improves plant quality at planting, retained in saves), Discount Diner,
-  Complimentary Entertainment, Bookshop Bargainer, Haggler, Speedy
+  Complimentary Entertainment, Bookshop Bargainer (25% book discount), Haggler (15% shop
+  discount, additive with Bookshop Bargainer), Speedy
   Cleaner (cleaning up twice as fast), Multi-Tasker (more done at work, homework in half the
   time), High Roller (bigger royalties), Vacationer (a missed day at work goes unnoticed),
   Legendary Host (every party a hit), Long Distance Friend (friendships never drift), Fertility

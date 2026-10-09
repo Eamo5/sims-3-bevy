@@ -164,8 +164,8 @@ mod harvest_tests {
         let mut notes = Notifications::default();
         let mut ordinary = Skills::default();
         let mut rewarded = Skills::default();
-        ordinary.0.insert("Gardening", 0.4);
-        rewarded.0.insert("Gardening", 0.4);
+        ordinary.0.insert("Gardening", 0.45);
+        rewarded.0.insert("Gardening", 0.45);
         learn(&sim, me, &mut ordinary, &mut notes, &mut writer, 325.0, None);
         assert_eq!(ordinary.level("Gardening"), 0);
         assert!(notes.0.is_empty());
