@@ -734,6 +734,8 @@ closes Buy mode then, logging the inventory. `DIVE=1` puts a diving board on the
 
 `PRESS_KEY=F2@5;F3@7;F1@9` presses a sequence of keys at the given seconds;
 `UI_CLICK=05b706c0@6;05b706d0@7` clicks visible original-layout controls (hex control ids).
+Build/Buy input scripts and their regression probes count seconds from entering Live Mode;
+loading and cache conversion time do not consume their scheduled delays.
 `CLICK_AT=1000,450@8` clicks at window-relative coordinates (`CURSOR_AT` moves without clicking).
 `BUY_HISTORY_TEST=1` verifies selling, undoing and redoing furniture transactions in the running
 game. Use `BUY_HISTORY_TEST=buttons` with `UI_CLICK=05ac150d@7;05ac150e@8;05ac150d@9` to verify

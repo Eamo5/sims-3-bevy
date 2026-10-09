@@ -202,7 +202,7 @@ pub fn draw(mut commands: Commands, mut catalog: ResMut<BuildCatalog>, hud: Res<
 }
 
 /// BUILD_CATALOG_TEST=1 exercises the actual expand button, scrollbar and pattern cells.
-pub fn probe(time: Res<Time>, catalog: Res<BuildCatalog>, buy: Res<BuyMode>,
+pub fn probe(time: Res<Time<crate::autotest::InputTimeline>>, catalog: Res<BuildCatalog>, buy: Res<BuyMode>,
     hud: Res<crate::buildhud::BuildHud>,
     live: Option<Res<crate::livehud::LiveHud>>, visibility: Query<&InheritedVisibility>,
     game_ui: Res<crate::icons::GameUi>, categories: Query<(Entity, &Category, &InheritedVisibility)>,

@@ -152,6 +152,35 @@ impl AutoArgs {
 
 pub struct AutoTestPlugin;
 
+/// Input scripts and their assertions share time since entering Live Mode, not load time.
+#[derive(Default)]
+pub struct InputTimeline;
+
+fn tick_input_timeline(time: Res<Time>, mut timeline: ResMut<Time<InputTimeline>>) {
+    timeline.advance_by(time.delta());
+}
+
+#[cfg(test)]
+mod timeline_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn loading_time_does_not_advance_live_input_scripts() {
+        let mut app = App::new();
+        app.init_resource::<Time>().init_resource::<Time<InputTimeline>>()
+            .add_systems(Update, tick_input_timeline);
+        // The application has spent two minutes loading before Live systems begin.
+        app.world_mut().resource_mut::<Time>().advance_by(Duration::from_secs(120));
+        app.world_mut().resource_mut::<Time>().advance_by(Duration::from_millis(16));
+        app.update();
+        assert_eq!(app.world().resource::<Time<InputTimeline>>().elapsed(), Duration::from_millis(16));
+        app.world_mut().resource_mut::<Time>().advance_by(Duration::from_secs(5));
+        app.update();
+        assert_eq!(app.world().resource::<Time<InputTimeline>>().elapsed(), Duration::from_millis(5016));
+    }
+}
+
 impl Plugin for AutoTestPlugin {
     fn build(&self, app: &mut App) {
         let args = AutoArgs::from_env();
@@ -159,6 +188,9 @@ impl Plugin for AutoTestPlugin {
             app.insert_resource(CameraStart(Vec3::new(c[0], 0.0, c[1])));
         }
         app.insert_resource(args)
+            .init_resource::<Time<InputTimeline>>()
+            .add_systems(OnEnter(crate::PlayMode::Live), |mut time: ResMut<Time<InputTimeline>>| { *time = Time::default(); })
+            .add_systems(First, tick_input_timeline.after(bevy::time::TimeSystems).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
             .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, (show_designs, show_style), walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
@@ -488,7 +520,7 @@ fn auto_pick_world(
 }
 
 /// BUY_PICK=<n>@<seconds>: the n-th object of buy mode's catalogue (along the rows) clicked then.
-fn buy_pick(time: Res<Time>, mut q: Query<(&crate::buy::BuyButton, &mut Interaction, &bevy::ui::UiGlobalTransform)>, mut done: Local<bool>) {
+fn buy_pick(time: Res<Time<InputTimeline>>, mut q: Query<(&crate::buy::BuyButton, &mut Interaction, &bevy::ui::UiGlobalTransform)>, mut done: Local<bool>) {
     let Some((n, at)) = std::env::var("BUY_PICK").ok().and_then(|v| v.split_once('@').and_then(|(n, t)| Some((n.parse::<usize>().ok()?, t.parse::<f32>().unwrap_or(10.0))))) else { return };
     if *done || time.elapsed_secs() < at {
         return;
@@ -506,7 +538,7 @@ fn buy_pick(time: Res<Time>, mut q: Query<(&crate::buy::BuyButton, &mut Interact
 }
 
 /// UI_CLICK=<hex control id>@<seconds>;...: click visible original-layout controls in order.
-fn ui_click(time: Res<Time>, mut controls: Query<(&crate::layout::UiWin, &InheritedVisibility, &mut Interaction)>, mut step: Local<usize>) {
+fn ui_click(time: Res<Time<InputTimeline>>, mut controls: Query<(&crate::layout::UiWin, &InheritedVisibility, &mut Interaction)>, mut step: Local<usize>) {
     let Some((id, at)) = std::env::var("UI_CLICK").ok().and_then(|v| v.split(';').nth(*step).and_then(|s| s.split_once('@')).and_then(|(id, at)| Some((u32::from_str_radix(id.trim().trim_start_matches("0x"), 16).ok()?, at.parse::<f32>().ok()?)))) else { return };
     if time.elapsed_secs() < at {
         return;
@@ -520,7 +552,7 @@ fn ui_click(time: Res<Time>, mut controls: Query<(&crate::layout::UiWin, &Inheri
 
 /// BUILD_NAV_TEST=1 checks the documented UI_CLICK sequence against actual tool and HUD state.
 fn build_navigation_test(
-    time: Res<Time>, buy: Res<crate::buy::BuyMode>,
+    time: Res<Time<InputTimeline>>, buy: Res<crate::buy::BuyMode>,
     hud: Option<Res<crate::buildhud::BuildHud>>, visibility: Query<&InheritedVisibility>,
     mut step: Local<usize>,
 ) {
@@ -564,7 +596,7 @@ struct BuildHistoryProbe {
 /// undo/redo clicks, checking exact construction data, funds and replayable save operations.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn build_history_test(
-    time: Res<Time>, mut buy: ResMut<crate::buy::BuyMode>,
+    time: Res<Time<InputTimeline>>, mut buy: ResMut<crate::buy::BuyMode>,
     building: Option<Res<crate::building::ActiveBuilding>>, household: Option<Res<crate::interact::Household>>,
     log: Option<Res<crate::building::LotPaint>>, (mut mouse, mut keys): (ResMut<ButtonInput<MouseButton>>, ResMut<ButtonInput<KeyCode>>),
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
@@ -691,7 +723,7 @@ fn build_history_test(
 
 /// CLICK_AT=<x,y>@<seconds>;...: window-relative clicks through the real input path.
 /// CURSOR_AT uses the same format to move the pointer without clicking.
-fn pointer_script(time: Res<Time>, mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>, mut mouse: ResMut<ButtonInput<MouseButton>>, mut step: Local<usize>, mut release: Local<bool>) {
+fn pointer_script(time: Res<Time<InputTimeline>>, mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>, mut mouse: ResMut<ButtonInput<MouseButton>>, mut step: Local<usize>, mut release: Local<bool>) {
     if *release {
         mouse.release(MouseButton::Left);
         *release = false;
@@ -721,7 +753,7 @@ fn pointer_script(time: Res<Time>, mut windows: Query<&mut Window, With<bevy::wi
 #[allow(clippy::type_complexity)]
 fn buy_move_test(
     mut commands: Commands,
-    time: Res<Time>,
+    time: Res<Time<InputTimeline>>,
     buy: Res<crate::buy::BuyMode>,
     objects: Query<(Entity, &crate::interact::GameObject, &Transform, Option<&crate::upgrades::Upgrades>, Has<crate::interact::Broken>, Has<crate::buy::HeldObject>, Option<&crate::interact::UsedBy>, Option<&crate::nav::Floor>)>,
     mut picked: Local<Option<(Entity, Vec3)>>,
@@ -759,7 +791,7 @@ fn buy_move_test(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn buy_history_test(
     mut commands: Commands,
-    time: Res<Time>,
+    time: Res<Time<InputTimeline>>,
     mut buy: ResMut<crate::buy::BuyMode>,
     mut history: ResMut<crate::buyhistory::BuyHistory>,
     household: Option<Res<crate::interact::Household>>,
@@ -819,7 +851,7 @@ fn buy_history_test(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn buy_design_test(
     mut commands: Commands,
-    time: Res<Time>,
+    time: Res<Time<InputTimeline>>,
     data: Res<crate::baked::Baked>,
     mut buy: ResMut<crate::buy::BuyMode>,
     mut history: ResMut<crate::buyhistory::BuyHistory>,
@@ -895,7 +927,7 @@ fn buy_design_test(
 
 /// PRESS_KEY=<key>@<seconds>;...: keys pressed in order (and let go a moment later): F1–F12,
 /// PrintScreen, PageUp, PageDown, Escape, Home, a letter or a digit.
-fn press_key(time: Res<Time>, mut keys: ResMut<ButtonInput<KeyCode>>, mut done: Local<usize>) {
+fn press_key(time: Res<Time<InputTimeline>>, mut keys: ResMut<ButtonInput<KeyCode>>, mut done: Local<usize>) {
     let Some((chord, at)) = std::env::var("PRESS_KEY").ok().and_then(|v| v.split(';').nth(*done / 2).and_then(|s| s.split_once('@')).map(|(k, t)| (k.to_string(), t.parse::<f32>().unwrap_or(10.0)))) else { return };
     let mut parts: Vec<&str> = chord.split('+').map(str::trim).collect();
     let k = parts.pop().unwrap_or("");
