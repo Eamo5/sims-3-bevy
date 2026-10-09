@@ -171,8 +171,8 @@ pub fn preview(gizmos: &mut Gizmos, b: &crate::building::ActiveBuilding, ops: &[
             PaintOp::Wall { wall, side, .. } => {
                 let Some(w) = b.data.walls.get(wall as usize) else { continue };
                 let level = w.level.max(1) as usize;
-                let y = b.levels.get(level).copied().unwrap_or(0.0);
-                let top = b.levels.get(level + 1).copied().unwrap_or(y + 3.0);
+                let y = w.y.unwrap_or_else(|| b.levels.get(level).copied().unwrap_or(0.0));
+                let top = y + s3bake::building::LEVEL_HEIGHT;
                 let (a, c) = (Vec2::from(w.a), Vec2::from(w.b));
                 let offset = (c - a).normalize_or_zero().perp() * if side == 0 { 0.025 } else { -0.025 };
                 let (a, c) = (a + offset, c + offset);

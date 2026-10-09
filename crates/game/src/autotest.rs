@@ -634,7 +634,15 @@ fn build_history_test(
     match probe.stage {
         0 => {
             assert!(buy.active && buy.category >= crate::buy::WALLPAPER_TAB);
-            let (start, end, tool) = if mode.starts_with("floor") {
+            let wall_screen = mode.starts_with("wall").then(|| b.data.walls.iter().filter(|w| w.level.max(1) == b.view_level).find_map(|w| {
+                let at = (Vec2::from(w.a) + Vec2::from(w.b)) * 0.5;
+                let y = w.y.unwrap_or(b.levels[b.view_level as usize]) + 1.5;
+                camera.world_to_viewport(camera_tf, b.world(at.x, at.y, y)).ok()
+                    .filter(|p| p.x > 420.0 && p.x < window.width() * 0.70 && p.y > 100.0 && p.y < window.height() - 400.0)
+            }).expect("visible wall covering target"));
+            let (start, end, tool) = if wall_screen.is_some() {
+                (Vec2::ZERO, Vec2::ZERO, crate::build::BuildTool::Wall)
+            } else if mode.starts_with("floor") {
                 let tile = b.data.floors.iter().find(|f| f.level == b.view_level && f.mask == 0xF
                     && project(Vec2::new(f.x as f32 + 0.5, f.z as f32 + 0.5)).is_some()
                     && (mode != "floor-room" || crate::covering::floors(&b.data, f.level, Vec2::new(f.x as f32 + 0.5, f.z as f32 + 0.5), (0, 0, 0), true).len() > 1)).expect("visible floor to cover");
@@ -665,22 +673,23 @@ fn build_history_test(
             probe.funds = h.funds;
             probe.objects_before = object_state();
             probe.removed_before = serde_json::to_string(&removed.0).unwrap();
-            probe.end = project(end).unwrap();
-            let start = project(start).unwrap();
+            probe.end = wall_screen.or_else(|| project(end)).unwrap();
+            let start = wall_screen.or_else(|| project(start)).unwrap();
             buy.tool = Some(tool);
             buy.show(crate::buy::BUILD_TAB);
-            if mode.starts_with("floor") || mode == "pave" {
+            if mode.starts_with("floor") || mode.starts_with("wall") || mode == "pave" {
                 let ui = ui.as_ref().expect("original covering catalogue");
-                let pattern = ui.data.patterns.iter().position(|p| p.floor && !b.data.covers.contains(&p.texture)).expect("new floor design");
+                let floor = !mode.starts_with("wall");
+                let pattern = ui.data.patterns.iter().position(|p| p.floor == floor && !b.data.covers.contains(&p.texture)).expect("new covering design");
                 buy.tool = None;
                 buy.painting = Some(pattern);
-                buy.show(crate::buy::FLOORS_TAB);
-                if mode == "floor-room" { keys.press(KeyCode::ShiftLeft); }
+                buy.show(if floor { crate::buy::FLOORS_TAB } else { crate::buy::WALLPAPER_TAB });
+                if mode.ends_with("-room") { keys.press(KeyCode::ShiftLeft); }
             }
             window.set_cursor_position(Some(start));
         }
         1 => {
-            if mode.starts_with("floor") || mode == "pave" {
+            if mode.starts_with("floor") || mode.starts_with("wall") || mode == "pave" {
                 assert_eq!(fingerprint(), probe.before, "hover preview must not change the lot");
                 assert_eq!(paint(), probe.paint_before, "hover preview must not add saved operations");
                 assert_eq!(h.funds, probe.funds, "hover preview must not charge money");
@@ -708,7 +717,7 @@ fn build_history_test(
             probe.after = fingerprint();
             probe.paint_after = paint();
             probe.paid = h.funds;
-            if mode == "floor" || mode == "floor-room" {
+            if mode == "floor" || mode == "floor-room" || mode.starts_with("wall") {
                 let (quote, visible) = quotes.single().unwrap();
                 assert_ne!(*visible, Visibility::Hidden);
                 assert_eq!(quote.cost, 0, "repainting the selected design has a zero quote");
@@ -719,11 +728,11 @@ fn build_history_test(
             if mode != "terrain" && mode != "sculpt" {
                 assert_ne!(probe.paint_before, probe.paint_after, "construction must be recorded for saving");
             }
-            if mode.starts_with("floor") || mode == "pave" {
+            if mode.starts_with("floor") || mode.starts_with("wall") || mode == "pave" {
                 assert_eq!(probe.funds - probe.paid, probe.quote_cost, "charged price must match the hover quote");
                 let before: Vec<crate::building::PaintOp> = serde_json::from_str(&probe.paint_before).unwrap();
                 let after: Vec<crate::building::PaintOp> = serde_json::from_str(&probe.paint_after).unwrap();
-                if mode == "floor" || mode == "pave" { assert_eq!(after.len() - before.len(), 1, "normal click covers one tile"); }
+                if mode == "floor" || mode == "pave" || mode == "wall" { assert_eq!(after.len() - before.len(), 1, "normal click covers one surface"); }
                 else { assert!(after.len() - before.len() > 1, "Shift covers the enclosed room"); }
             }
             let (_, _, mut i) = controls.iter_mut().find(|(id, v, _)| id.0 == 0x2e2 && v.get()).expect("original Undo button");

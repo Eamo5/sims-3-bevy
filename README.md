@@ -284,6 +284,7 @@ installation is unreachable.
   identical coverings; unaffordable quotes are red and cannot alter the lot.
   Hover targeting is cached per surface and refreshed after geometry, terrain, texture or
   fill-mode changes, avoiding repeated room searches while the pointer stays on a surface.
+  Wallpaper picking and outlines follow each wall's authored foundation/split-level elevation.
 - **Out on the town**: Sims drive to the parks, the library, the gym, the beach and the
   other community lots (from the lot's pie menu or its map tag) and use what's there: chess
   tables, computers, bookshelves, swings, grills, restrooms. Each lot gets its own walk grid
@@ -761,6 +762,8 @@ capture after 11 seconds.
 covering, including undo/redo through the original Build buttons.
 These covering probes also verify that hover quotes match the charge and previews leave saves
 and funds untouched. `BUILD_HISTORY_TEST=floor-poor` checks rejection with insufficient funds.
+`BUILD_HISTORY_TEST=wall` and `wall-room` cover single-side and Shift-room wallpaper selection,
+quoted charges, zero-cost repeated designs, and exact undo/redo through the original controls.
 `BUILD_HISTORY_TEST=pave` checks laying new outdoor flooring and reversing it; paving follows
 the current terrain (including sculpted slopes), respects pools and lot bounds, and saves its heights.
 `BUILD_CATALOG_TEST=1`, with `PRESS_KEY=F3@5` and `UI_CLICK=1012@6` (floor) or `1003@6`

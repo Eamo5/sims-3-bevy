@@ -1520,34 +1520,34 @@ fn pick_wall(ray: Ray3d, b: &crate::building::ActiveBuilding) -> Option<(u32, u8
         if level > b.view_level {
             continue;
         }
-        let y0 = b.levels.get(level as usize).copied().unwrap_or(0.0);
+        let y0 = w.y.unwrap_or_else(|| b.levels.get(level as usize).copied().unwrap_or(0.0));
         let (la, lb) = (Vec2::from(w.a), Vec2::from(w.b));
         let len = (lb - la).length();
         if len < 1e-3 {
             continue;
         }
-        let along = (lb - la) / len;
-        let n = b.rot * Vec3::new(-along.y, 0.0, along.x);
         let a = b.world(la.x, la.y, y0);
         let c = b.world(lb.x, lb.y, y0);
-        let denom = ray.direction.dot(n);
-        if denom.abs() < 1e-4 {
-            continue;
+        if let Some((t, side)) = wall_ray_hit(ray, a, c) && best.is_none_or(|b| t < b.0) {
+            best = Some((t, i as u32, side));
         }
-        let t = (a - ray.origin).dot(n) / denom;
-        if t <= 0.0 || best.is_some_and(|b| t >= b.0) {
-            continue;
-        }
-        let p = ray.origin + *ray.direction * t;
-        let dir = (c - a).with_y(0.0);
-        let s = (p - a).with_y(0.0).dot(dir) / dir.length_squared();
-        if !(0.0..=1.0).contains(&s) || p.y < y0 || p.y > y0 + 3.0 {
-            continue;
-        }
-        let side = if (ray.origin - a).dot(n) > 0.0 { 0 } else { 1 };
-        best = Some((t, i as u32, side));
     }
     best.map(|(_, w, s)| (w, s))
+}
+
+/// Hit the actual rendered full-height wall, including an authored foundation offset.
+fn wall_ray_hit(ray: Ray3d, a: Vec3, c: Vec3) -> Option<(f32, u8)> {
+    let dir = (c - a).with_y(0.0);
+    if dir.length_squared() < 1e-6 { return None; }
+    let n = Vec3::new(-dir.z, 0.0, dir.x).normalize();
+    let denom = ray.direction.dot(n);
+    if denom.abs() < 1e-4 { return None; }
+    let t = (a - ray.origin).dot(n) / denom;
+    if t <= 0.0 { return None; }
+    let p = ray.origin + *ray.direction * t;
+    let s = (p - a).with_y(0.0).dot(dir) / dir.length_squared();
+    if !(0.0..=1.0).contains(&s) || p.y < a.y || p.y > a.y + s3bake::building::LEVEL_HEIGHT { return None; }
+    Some((t, if (ray.origin - a).dot(n) > 0.0 { 0 } else { 1 }))
 }
 
 fn buy_visuals(mut q: Query<(&Interaction, &mut BackgroundColor, &BuyButton)>) {
@@ -1986,6 +1986,24 @@ fn footprint_supported(corners: &[Vec2; 4], has_floor: impl Fn(Vec2) -> bool) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn covering_rays_follow_wall_elevation_and_both_sides() {
+        let (a, c) = (Vec3::new(0.0, 1.25, 0.0), Vec3::new(2.0, 1.25, 0.0));
+        let ray = |y, z| Ray3d::new(Vec3::new(1.0, y, z), if z > 0.0 { Dir3::NEG_Z } else { Dir3::Z });
+        assert!(wall_ray_hit(ray(1.0, 2.0), a, c).is_none(), "space below a raised wall is not wallpaper");
+        assert_eq!(wall_ray_hit(ray(4.0, 2.0), a, c), Some((2.0, 0)), "raised wall top remains selectable");
+        assert_eq!(wall_ray_hit(ray(4.0, -2.0), a, c), Some((2.0, 1)));
+        assert!(wall_ray_hit(ray(4.5, 2.0), a, c).is_none());
+        assert!(wall_ray_hit(Ray3d::new(Vec3::new(3.0, 2.0, 2.0), Dir3::NEG_Z), a, c).is_none());
+        let rotation = Quat::from_rotation_y(0.7);
+        let r = ray(2.0, 2.0);
+        let transformed = Ray3d::new(rotation * r.origin, Dir3::new(rotation * *r.direction).unwrap());
+        let (distance, side) = wall_ray_hit(transformed, rotation * a, rotation * c).unwrap();
+        assert!((distance - 2.0).abs() < 0.0001);
+        assert_eq!(side, 0);
+        assert!(wall_ray_hit(ray(2.0, 2.0), a, a).is_none());
+    }
 
     #[test]
     fn furniture_cannot_cross_straight_or_diagonal_walls() {
