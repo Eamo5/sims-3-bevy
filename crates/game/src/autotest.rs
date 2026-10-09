@@ -616,7 +616,7 @@ fn build_history_test(
                 let at = (2..b.data.depth as i32 - 4).flat_map(|z| (2..b.data.width as i32 - 4).map(move |x| IVec2::new(x, z)))
                     .find(|p| (0..=3).all(|z| (0..=3).all(|x| !b.data.floors.iter().chain(&b.data.pool).any(|f| f.x as i32 == p.x + x && f.z as i32 == p.y + z)))
                         && project(p.as_vec2()).is_some() && project(p.as_vec2() + Vec2::splat(2.0)).is_some()).expect("visible empty construction area");
-                let offset = if mode == "pool" { Vec2::splat(0.2) } else { Vec2::ZERO };
+                let offset = if mode == "pool" || mode == "pave" { Vec2::splat(0.2) } else { Vec2::ZERO };
                 (at.as_vec2() + offset, at.as_vec2() + Vec2::splat(2.0) + offset,
                     match mode.as_str() {
                         "pool" => crate::build::BuildTool::Pool,
@@ -634,7 +634,7 @@ fn build_history_test(
             let start = project(start).unwrap();
             buy.tool = Some(tool);
             buy.show(crate::buy::BUILD_TAB);
-            if mode.starts_with("floor") {
+            if mode.starts_with("floor") || mode == "pave" {
                 let ui = ui.as_ref().expect("original covering catalogue");
                 let pattern = ui.data.patterns.iter().position(|p| p.floor && !b.data.covers.contains(&p.texture)).expect("new floor design");
                 buy.tool = None;
@@ -658,10 +658,10 @@ fn build_history_test(
             if mode != "terrain" && mode != "sculpt" {
                 assert_ne!(probe.paint_before, probe.paint_after, "construction must be recorded for saving");
             }
-            if mode.starts_with("floor") {
+            if mode.starts_with("floor") || mode == "pave" {
                 let before: Vec<crate::building::PaintOp> = serde_json::from_str(&probe.paint_before).unwrap();
                 let after: Vec<crate::building::PaintOp> = serde_json::from_str(&probe.paint_after).unwrap();
-                if mode == "floor" { assert_eq!(after.len() - before.len(), 1, "normal click covers one tile"); }
+                if mode == "floor" || mode == "pave" { assert_eq!(after.len() - before.len(), 1, "normal click covers one tile"); }
                 else { assert!(after.len() - before.len() > 1, "Shift covers the enclosed room"); }
             }
             let (_, _, mut i) = controls.iter_mut().find(|(id, v, _)| id.0 == 0x2e2 && v.get()).expect("original Undo button");

@@ -1412,7 +1412,17 @@ fn paint(
         let Some((p, level)) = crate::hud::floor_hit(ray, &world, Some(b)) else { return };
         let l = b.local(p);
         if std::env::var_os("BUILD_HISTORY_TEST").is_some() { info!("autotest: floor covering at {l:?}, level {level}, room fill {fill}"); }
-        crate::covering::floors(&b.data, level, l, pat.texture, fill)
+        let ground = b.view_level <= 1 && !b.data.floors.iter().any(|f| f.level == 1 && f.x as f32 == l.x.floor() && f.z as f32 == l.y.floor());
+        if ground {
+            let at = l.floor();
+            let heights = [Vec2::ZERO, Vec2::X, Vec2::ONE, Vec2::Y].map(|offset| {
+                let p = b.world(at.x + offset.x, at.y + offset.y, 0.0);
+                world.data.heightmap.sample(p.x, p.z)
+            });
+            crate::covering::paving(&b.data, l, pat.texture, heights)
+        } else {
+            crate::covering::floors(&b.data, level, l, pat.texture, fill)
+        }
     } else {
         let Some((wall, side)) = pick_wall(ray, b) else { return };
         crate::covering::walls(&b.data, wall, side, pat.texture, fill)

@@ -272,7 +272,9 @@ installation is unreachable.
   the game's colour presets for it (swatches under the patterns) and, in Create a Style, with
   any colour of the palette on each of its colour channels (solid colours, tinted patterns,
   and woods and fabrics shifted to the colour keeping their grain). Repainting is charged,
-  sounds like the game's build tools, and is kept in saves.
+  sounds like the game's build tools, and is kept in saves. Clicking bare ground with a floor
+  pattern lays paving that follows the current terrain, including sculpted slopes; undo restores
+  the previous ground and funds, and saved paving retains its corner heights.
 - **Out on the town**: Sims drive to the parks, the library, the gym, the beach and the
   other community lots (from the lot's pie menu or its map tag) and use what's there: chess
   tables, computers, bookshelves, swings, grills, restrooms. Each lot gets its own walk grid
@@ -741,6 +743,8 @@ building data, furniture identity, funds, save records, terrain heights and pain
 capture after 11 seconds.
 `BUILD_HISTORY_TEST=floor` and `floor-room` additionally verify single-tile and Shift-room
 covering, including undo/redo through the original Build buttons.
+`BUILD_HISTORY_TEST=pave` checks laying new outdoor flooring and reversing it; paving follows
+the current terrain (including sculpted slopes), respects pools and lot bounds, and saves its heights.
 `BUY_MOVE_TEST=move` or `cancel` checks that a piece of furniture keeps its identity, upgrades
 and breakage after a scripted placement or cancellation.
 `s3tool uiwindow <layout>` inspects a baked window tree; `s3tool uilayout <UI.package> <layout>`

@@ -75,6 +75,7 @@ fn room(b: &LotBuildingBaked, level: u8, at: Vec2) -> Room {
 pub fn floors(b: &LotBuildingBaked, level: u8, at: Vec2, texture: Key, fill: bool) -> Vec<PaintOp> {
     let room = room(b, level, at);
     let (x, z, _) = triangle(at);
+    let level = if level == 1 && !b.floors.iter().any(|f| f.level == 1 && f.x as i32 == x && f.z as i32 == z) { 0 } else { level };
     let fill = fill && !room.outdoors;
     b.floors.iter().filter(|f| f.level == level && (fill || f.x as i32 == x && f.z as i32 == z)).filter_map(|f| {
         let mask = room.masks.get(&(f.x as i32, f.z as i32)).copied().unwrap_or(0) & f.mask;
@@ -83,6 +84,23 @@ pub fn floors(b: &LotBuildingBaked, level: u8, at: Vec2, texture: Key, fill: boo
         });
         (mask != 0).then_some(PaintOp::FloorTriangles { level, x: f.x, z: f.z, mask, texture })
     }).collect()
+}
+
+pub fn paving(b: &LotBuildingBaked, at: Vec2, texture: Key, heights: [f32; 4]) -> Vec<PaintOp> {
+    let (x, z, _) = triangle(at);
+    if x < 0 || z < 0 || x >= b.width as i32 || z >= b.depth as i32
+        || b.pool.iter().any(|f| f.x as i32 == x && f.z as i32 == z)
+        || b.floors.iter().any(|f| f.level == 1 && f.x as i32 == x && f.z as i32 == z)
+    { return Vec::new(); }
+    let room = room(b, 1, at);
+    let tile = b.floors.iter().find(|f| f.level == 0 && f.x as i32 == x && f.z as i32 == z);
+    let mask = room.masks.get(&(x, z)).copied().unwrap_or(0);
+    let changed = (0..4).fold(0, |changed, t| {
+        let already = tile.is_some_and(|f| f.mask & (1 << t) != 0 && b.covers.get(f.cover[t] as usize) == Some(&texture));
+        if mask & (1 << t) != 0 && !already { changed | (1 << t) } else { changed }
+    });
+    if changed == 0 { return Vec::new(); }
+    vec![PaintOp::Pave { x: x as u16, z: z as u16, mask: changed, texture, heights }]
 }
 
 pub fn walls(b: &LotBuildingBaked, wall: u32, side: u8, texture: Key, fill: bool) -> Vec<PaintOp> {
@@ -105,7 +123,7 @@ pub fn walls(b: &LotBuildingBaked, wall: u32, side: u8, texture: Key, fill: bool
 /// Charge for changed surface area, not for triangles already in the chosen design.
 pub fn cost(b: &LotBuildingBaked, ops: &[PaintOp], price: u32) -> i64 {
     let units: f32 = ops.iter().map(|op| match *op {
-        PaintOp::FloorTriangles { mask, .. } => mask.count_ones() as f32 * 0.25,
+        PaintOp::FloorTriangles { mask, .. } | PaintOp::Pave { mask, .. } => mask.count_ones() as f32 * 0.25,
         PaintOp::Wall { wall, .. } => b.walls.get(wall as usize).map_or(0.0, |w| (Vec2::from(w.b) - Vec2::from(w.a)).abs().max_element()),
         _ => 0.0,
     }).sum();
@@ -172,5 +190,38 @@ mod tests {
         assert!(walls(&b, 0, 0, texture, true).is_empty());
         assert_eq!(b.walls[0].cover[1], s3bake::NO_COVER);
         assert_eq!(b.walls[4].cover, [s3bake::NO_COVER; 2]);
+    }
+
+    #[test]
+    fn paving_follows_current_terrain_and_replays_from_a_saved_operation() {
+        let mut b = house();
+        b.floors.clear();
+        let mut reloaded = b.clone();
+        let heights = [4.0, 4.5, 5.0, 4.5];
+        let texture = (1, 2, 3);
+        let ops = paving(&b, Vec2::splat(0.4), texture, heights);
+        assert_eq!(ops.len(), 1);
+        assert_eq!(cost(&b, &ops, 8), 8);
+        let saved = serde_json::to_string(&ops).unwrap();
+        for op in &ops { crate::building::apply_paint(&mut b, op); }
+        let restored: Vec<PaintOp> = serde_json::from_str(&saved).unwrap();
+        for op in &restored { crate::building::apply_paint(&mut reloaded, op); }
+        assert_eq!(serde_json::to_string(&b).unwrap(), serde_json::to_string(&reloaded).unwrap());
+        assert_eq!(b.floors[0].level, 0);
+        assert_eq!(b.ground_at(0.0, 0.0), Some(4.0));
+        assert_eq!(b.ground_at(0.5, 0.5), Some(4.5));
+        assert!(paving(&b, Vec2::splat(0.4), texture, heights).is_empty());
+    }
+
+    #[test]
+    fn paving_cannot_cross_lot_boundaries_pools_or_existing_house_floors() {
+        let mut b = house();
+        let texture = (1, 2, 3);
+        assert!(paving(&b, Vec2::splat(1.5), texture, [0.0; 4]).is_empty());
+        b.floors.clear();
+        crate::building::apply_paint(&mut b, &PaintOp::AddPool { x: 0, z: 0 });
+        assert!(paving(&b, Vec2::splat(0.5), texture, [0.0; 4]).is_empty());
+        assert!(paving(&b, Vec2::splat(-0.1), texture, [0.0; 4]).is_empty());
+        assert!(paving(&b, Vec2::splat(5.1), texture, [0.0; 4]).is_empty());
     }
 }
