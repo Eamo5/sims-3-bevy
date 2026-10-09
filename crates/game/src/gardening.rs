@@ -81,6 +81,56 @@ pub struct GrowingPlant {
     pub care: f32,
 }
 
+impl GrowingPlant {
+    /// Commit a crop only once. Queued interactions can finish after another Sim has
+    /// already harvested this plant, so the menu's readiness check is not sufficient.
+    fn harvest(&mut self, now: f64) -> Option<u32> {
+        if self.ready == 0 || self.harvests_left == 0 {
+            return None;
+        }
+        let picked = self.ready;
+        self.ready = 0;
+        self.next_ready = now + CROP_MINUTES;
+        self.harvests_left -= 1;
+        Some(picked)
+    }
+}
+#[cfg(test)]
+mod harvest_tests {
+    use super::*;
+
+    fn plant() -> GrowingPlant {
+        GrowingPlant { plant: 0, growth: 1.0, water: 70.0, weedy: false,
+            ready: 3, harvests_left: 2, next_ready: 0.0, quality: 0.55, care: 0.5 }
+    }
+
+    #[test]
+    fn competing_harvests_consume_one_crop_and_one_lifetime_use() {
+        let mut p = plant();
+        assert!(offers(&p, crate::interact::Special::Harvest));
+        assert_eq!(p.harvest(100.0), Some(3));
+        assert_eq!(p.harvests_left, 1);
+        assert_eq!(p.next_ready, 100.0 + CROP_MINUTES);
+        assert!(!offers(&p, crate::interact::Special::Harvest));
+        let saved = serde_json::to_value(&p).unwrap();
+        assert_eq!(p.harvest(200.0), None);
+        assert_eq!(serde_json::to_value(&p).unwrap(), saved, "a stale request must not delay the next crop or age the plant");
+        p.ready = 4;
+        assert_eq!(p.harvest(3000.0), Some(4));
+        assert_eq!(p.harvests_left, 0);
+    }
+
+    #[test]
+    fn exhausted_plants_cannot_yield_even_with_stale_ready_produce() {
+        let mut p = plant();
+        p.harvests_left = 0;
+        let saved = serde_json::to_value(&p).unwrap();
+        assert!(!offers(&p, crate::interact::Special::Harvest));
+        assert_eq!(p.harvest(100.0), None);
+        assert_eq!(serde_json::to_value(&p).unwrap(), saved);
+    }
+}
+
 /// A plant in a saved game (where it stands, and how it's doing).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SavedPlant {
@@ -139,7 +189,7 @@ pub fn offers(p: &GrowingPlant, special: crate::interact::Special) -> bool {
     match special {
         S::Water => p.water < 85.0,
         S::Weed => p.weedy,
-        S::Harvest => p.ready > 0,
+        S::Harvest => p.ready > 0 && p.harvests_left > 0,
         _ => true,
     }
 }
@@ -193,8 +243,8 @@ fn plant_at(
     at: Vec3,
     yaw: f32,
 ) -> Option<Entity> {
-    let soil = spawn_named(commands, assets, ctx, catalog, "GardenSoil", ObjectKind::Decoration, "Garden Soil".into(), at, yaw);
     let e = spawn_named(commands, assets, ctx, catalog, &info.model, ObjectKind::GardenPlant, info.name.clone(), at, yaw)?;
+    let soil = spawn_named(commands, assets, ctx, catalog, "GardenSoil", ObjectKind::Decoration, "Garden Soil".into(), at, yaw);
     commands.entity(e).insert((state.clone(), Transform::from_translation(at).with_rotation(Quat::from_rotation_y(yaw)).with_scale(Vec3::splat(scale(state.growth)))));
     if let Some(s) = soil {
         commands.entity(e).insert(PlantSoil(s));
@@ -239,7 +289,6 @@ fn garden_requests(
             GardenRequest::Plant { at, plant } => {
                 let Some(info) = ui.data.plants.get(plant) else { continue };
                 let Some(n) = garden.seeds.get_mut(&plant).filter(|n| **n > 0) else { continue };
-                *n -= 1;
                 // (Better gardeners plant better seeds.)
                 let state = GrowingPlant {
                     plant,
@@ -254,6 +303,7 @@ fn garden_requests(
                 };
                 let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
                 if plant_at(&mut commands, &mut assets, &mut ctx, &catalog, info, state, at, rng.random_range(0.0..6.28)).is_some() {
+                    *n -= 1;
                     notes.push(format!("{} planted a {}.", sim.first, info.name.to_lowercase()));
                     did.write(crate::journal::Did::kind(me, crate::journal::Kinds::PlantTypes, info.name.clone()));
                     learn(sim, me, &mut skills, &mut notes, &mut life, info.skill_plant);
@@ -268,6 +318,7 @@ fn garden_requests(
             }
             GardenRequest::Weed(e) => {
                 if let Ok((mut p, _)) = plants.get_mut(e) {
+                    if !p.weedy { continue; }
                     p.weedy = false;
                     p.care = level / 10.0;
                     learn(sim, me, &mut skills, &mut notes, &mut life, 40.0);
@@ -276,10 +327,7 @@ fn garden_requests(
             GardenRequest::Harvest(e) => {
                 let Ok((mut p, soil)) = plants.get_mut(e) else { continue };
                 let Some(info) = ui.data.plants.get(p.plant) else { continue };
-                let picked = p.ready;
-                p.ready = 0;
-                p.next_ready = clock.minutes + CROP_MINUTES;
-                p.harvests_left = p.harvests_left.saturating_sub(1);
+                let Some(picked) = p.harvest(clock.minutes) else { continue };
                 // The plant's quality, give or take (a Super Green Thumb's a step finer).
                 let q = p.quality + rng.random_range(-0.075..0.075) + if crate::wishes::has(wishes, "SuperGreenThumb") { 0.1 } else { 0.0 };
                 let tier = quality_tier(q);

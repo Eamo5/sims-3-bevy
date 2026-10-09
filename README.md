@@ -75,7 +75,8 @@ installation is unreachable.
   anywhere outdoors on the home lot in the game's garden soil and grow (the game's bush, vine
   or tree) while kept watered and weeded, then bear tomatoes, apples, onions, garlic... to
   harvest into the gardener's inventory, to sell or eat. Planting, watering (with the watering can), weeding and harvesting use
-  the game's gardening animations and teach Gardening; green-thumbed Sims tend their plants
+  the game's gardening animations and teach Gardening. Stale harvest/weeding requests grant
+  no duplicate rewards; failed plant creation retains the seed. Green-thumbed Sims tend their plants
   on their own. Each plant has the game's quality, Horrifying to Perfect: it improves while
   watered and weeded (faster for a skilled gardener) and suffers when neglected, and its
   produce sells at the game's multiplier for its quality (up to four times for Perfect). A
