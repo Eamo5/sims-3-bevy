@@ -108,7 +108,8 @@ impl Trait {
         }
     }
 
-    pub const ALL: [Trait; 65] = [
+    /// Selectable human traits. LazyPet is retained in the enum only for old saves.
+    pub const ALL: [Trait; 64] = [
         Trait::Absentminded,
         Trait::Ambitious,
         Trait::Angler,
@@ -148,7 +149,6 @@ impl Trait {
         Trait::Inappropriate,
         Trait::Insane,
         Trait::Kleptomaniac,
-        Trait::Lazy,
         Trait::LightSleeper,
         Trait::Loner,
         Trait::Loser,
@@ -247,6 +247,9 @@ impl Trait {
     }
 
     pub fn from_name(n: &str) -> Option<Trait> {
+        // Early saves could assign the pet-only trait to humans. Preserve those saves
+        // without offering that trait to new Sims or in the human trait picker.
+        if n == "Lazy" { return Some(Trait::Lazy); }
         Trait::ALL.into_iter().find(|t| t.name() == n)
     }
 
