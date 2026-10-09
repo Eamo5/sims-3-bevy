@@ -232,17 +232,25 @@ pub fn snap_to_pool(b: &ActiveBuilding, p: Vec3) -> Option<(Vec3, Quat)> {
 pub fn snap_to_wall(b: &ActiveBuilding, ray: Ray3d, tiles: u32) -> Option<(Vec3, Quat, Vec<PaintOp>)> {
     let level = b.view_level;
     let y = *b.levels.get(level as usize)?;
+    let local = b.local(ray.origin);
+    let ray = Ray3d::new(Vec3::new(local.x, ray.origin.y, local.y), Dir3::new(b.rot.inverse() * *ray.direction).ok()?);
+    let (at, fwd, ops) = snap_wall_local(&b.data, level, y, ray, tiles)?;
+    let f3 = b.rot * Vec3::new(fwd.x, 0.0, fwd.y);
+    Some((b.world(at.x, at.z, at.y), Quat::from_rotation_y(f3.x.atan2(f3.z)), ops))
+}
+
+fn snap_wall_local(data: &LotBuildingBaked, level: u8, floor_y: f32, ray: Ray3d, tiles: u32) -> Option<(Vec3, Vec2, Vec<PaintOp>)> {
+    if tiles == 0 { return None; }
     if ray.direction.y.abs() < 1e-4 {
         return None;
     }
-    let t = (y - ray.origin.y) / ray.direction.y;
-    if t <= 0.0 {
-        return None;
-    }
-    let lp = b.local(ray.origin + *ray.direction * t);
     // The nearest straight wall along the grid.
-    let mut best: Option<(f32, Vec2, Vec2)> = None;
-    for w in b.data.walls.iter().filter(|w| w.level.max(1) == level) {
+    let mut best: Option<(f32, Vec2, Vec2, Vec2, f32)> = None;
+    for w in data.walls.iter().filter(|w| w.level.max(1) == level) {
+        let y = w.y.unwrap_or(floor_y);
+        let t = (y - ray.origin.y) / ray.direction.y;
+        if t <= 0.0 { continue; }
+        let lp = (ray.origin + *ray.direction * t).xz();
         let (a, c) = (Vec2::from(w.a), Vec2::from(w.b));
         let len = a.distance(c);
         if len < 0.5 {
@@ -258,29 +266,71 @@ pub fn snap_to_wall(b: &ActiveBuilding, ray: Ray3d, tiles: u32) -> Option<(Vec3,
         }
         let dist = (lp - a - along * s).length();
         if dist < 1.2 && best.is_none_or(|bb| dist < bb.0) {
-            best = Some((dist, a, along));
+            best = Some((dist, a, along, lp, y));
         }
     }
-    let (_, a, along) = best?;
+    let (_, a, along, lp, y) = best?;
     let axis = if along.x.abs() > 0.5 { 0 } else { 1 };
     let dir = if axis == 0 { Vec2::X } else { Vec2::Y };
     // Its middle on a tile's middle (odd widths) or a grid point (even), on the wall's line.
     let mut mid = a + along * (lp - a).dot(along);
     mid[axis] = if tiles % 2 == 1 { mid[axis].floor() + 0.5 } else { mid[axis].round() };
     mid[1 - axis] = mid[1 - axis].round();
-    let mut sim = b.data.clone();
+    let mut sim = data.clone();
     let mut ops = Vec::new();
     for k in 0..tiles {
         let p = mid - dir * (tiles as f32 * 0.5) + dir * k as f32;
         let q = p + dir;
-        wall_along(&sim, level, p, q)?;
+        let wall = wall_along(&sim, level, p, q)?;
+        if (sim.walls[wall].y.unwrap_or(floor_y) - y).abs() > 0.01 { return None; }
         isolate(&mut sim, level, p, q, &mut ops);
     }
     let n = dir.perp();
     let fwd = if (lp - mid).dot(n) >= 0.0 { n } else { -n };
     let at = mid + fwd * 0.5;
-    let f3 = b.rot * Vec3::new(fwd.x, 0.0, fwd.y);
-    Some((b.world(at.x, at.y, y), Quat::from_rotation_y(f3.x.atan2(f3.z)), ops))
+    Some((Vec3::new(at.x, y, at.y), fwd, ops))
+}
+
+#[cfg(test)]
+mod wall_placement_tests {
+    use super::*;
+
+    fn lot() -> LotBuildingBaked {
+        LotBuildingBaked { lot: 0, width: 8, depth: 8, levels: vec![0.0, 0.0], walls: Vec::new(), floors: Vec::new(),
+            foundation: Vec::new(), foundation_top: Vec::new(), objects: Vec::new(), covers: Vec::new(), ground: Vec::new(), pool: Vec::new(),
+            pool_depth: 0.0, fences: Vec::new(), stairs: Vec::new() }
+    }
+
+    #[test]
+    fn raised_wall_placement_uses_its_own_plane_and_preserves_split_heights() {
+        let mut data = lot();
+        crate::building::apply_paint(&mut data, &PaintOp::AddWall { a: [1.0, 2.0], b: [5.0, 2.0], level: 1 });
+        data.walls[0].y = Some(1.25);
+        let ray = Ray3d::new(Vec3::new(2.5, 5.0, 2.4), Dir3::NEG_Y);
+        let (at, facing, ops) = snap_wall_local(&data, 1, 0.0, ray, 1).unwrap();
+        assert_eq!(at, Vec3::new(2.5, 1.25, 2.5));
+        assert_eq!(facing, Vec2::Y);
+        assert!(!ops.is_empty());
+        for op in ops { crate::building::apply_paint(&mut data, &op); }
+        assert!(data.walls.iter().all(|w| w.y == Some(1.25)));
+        assert!(snap_wall_local(&data, 2, 3.0, ray, 1).is_none());
+        assert!(snap_wall_local(&data, 1, 0.0, ray, 0).is_none());
+        let below = Ray3d::new(Vec3::new(2.5, 1.0, 2.4), Dir3::NEG_Y);
+        assert!(snap_wall_local(&data, 1, 0.0, below, 1).is_none());
+    }
+
+    #[test]
+    fn wide_opening_cannot_bridge_wall_elevation_changes() {
+        let mut data = lot();
+        for (a, b) in [([1.0, 2.0], [2.0, 2.0]), ([2.0, 2.0], [3.0, 2.0])] {
+            crate::building::apply_paint(&mut data, &PaintOp::AddWall { a, b, level: 1 });
+        }
+        data.walls[0].y = Some(1.25);
+        let ray = Ray3d::new(Vec3::new(2.0, 5.0, 2.4), Dir3::NEG_Y);
+        assert!(snap_wall_local(&data, 1, 0.0, ray, 2).is_none());
+        data.walls[1].y = Some(1.25);
+        assert_eq!(snap_wall_local(&data, 1, 0.0, ray, 2).unwrap().0.y, 1.25);
+    }
 }
 
 /// The wall sections a drag with the wall, room or sledgehammer tool goes along.

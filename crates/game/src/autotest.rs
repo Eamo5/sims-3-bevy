@@ -204,6 +204,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(PostUpdate, buy_history_test.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PostUpdate, buy_design_test.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PostUpdate, build_navigation_test.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, wall_snap_test.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, build_history_test.after(bevy::input::InputSystems).after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
@@ -548,6 +549,36 @@ fn ui_click(time: Res<Time<InputTimeline>>, mut controls: Query<(&crate::layout:
         info!("autotest: UI control {id:08X} clicked");
         *step += 1;
     }
+}
+
+/// WALL_SNAP_TEST=1 verifies placement on both sides of the loaded lot's straight walls.
+fn wall_snap_test(time: Res<Time<InputTimeline>>, building: Option<Res<crate::building::ActiveBuilding>>, mut done: Local<bool>) {
+    if std::env::var_os("WALL_SNAP_TEST").is_none() || *done || time.elapsed_secs() < 6.0 { return; }
+    let Some(b) = building else { return };
+    let mut checked = 0;
+    let mut raised = 0;
+    for w in b.data.walls.iter().filter(|w| w.level.max(1) == b.view_level) {
+        let (a, c) = (Vec2::from(w.a), Vec2::from(w.b));
+        let d = c - a;
+        if d.length() < 0.99 || d.x.abs() > 0.01 && d.y.abs() > 0.01 { continue; }
+        let y = w.y.unwrap_or(b.levels[b.view_level as usize]);
+        for side in [-1.0, 1.0] {
+            let p = (a + c) * 0.5 + d.normalize().perp() * (0.4 * side);
+            let ray = Ray3d::new(b.world(p.x, p.y, y + 10.0), Dir3::NEG_Y);
+            let Some((at, rot, _)) = crate::build::snap_to_wall(&b, ray, 1) else { continue };
+            assert!((at.y - y).abs() < 0.01, "wall snap follows its authored elevation");
+            let local = b.local(at);
+            let side_offset = (local - a).dot(d.normalize().perp());
+            assert!((side_offset - 0.5 * side).abs() < 0.01, "wall snap keeps the pointer's side on a rotated lot");
+            let facing = b.rot.inverse() * (rot * Vec3::Z);
+            assert!(facing.xz().dot(d.normalize().perp() * side) > 0.99);
+            checked += 1;
+            if w.y.is_some_and(|h| (h - b.levels[b.view_level as usize]).abs() > 0.01) { raised += 1; }
+        }
+    }
+    assert!(checked > 0, "the runtime fixture must exercise placed walls");
+    info!("autotest: wall snapping PASS — {checked} transformed wall-side placements, {raised} authored height offsets");
+    *done = true;
 }
 
 /// BUILD_NAV_TEST=1 checks the documented UI_CLICK sequence against actual tool and HUD state.
