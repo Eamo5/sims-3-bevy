@@ -1371,7 +1371,7 @@ fn buy_buttons(
 fn paint(
     mut commands: Commands,
     mut buy: ResMut<BuyMode>,
-    (keys, mouse, over_ui): (Res<ButtonInput<KeyCode>>, Res<ButtonInput<MouseButton>>, Res<PointerOverUi>),
+    (keys, mouse, over_ui, menu, modal): (Res<ButtonInput<KeyCode>>, Res<ButtonInput<MouseButton>>, Res<PointerOverUi>, Res<crate::options::GameMenu>, Query<(), With<crate::dialog::Modal>>),
     (windows, cams): (Query<&Window, With<PrimaryWindow>>, Query<(&Camera, &GlobalTransform), With<SimsCamera>>),
     (world, data, ui): (Res<CurrentWorld>, Res<Baked>, Option<Res<crate::icons::GameUi>>),
     mut building: Option<ResMut<crate::building::ActiveBuilding>>,
@@ -1385,6 +1385,7 @@ fn paint(
         MessageWriter<crate::sound::PlaySound>,
     ),
 ) {
+    if menu.is_open() || !modal.is_empty() { return; }
     let Some(i) = buy.painting.filter(|_| buy.active) else { return };
     if mouse.just_pressed(MouseButton::Right) || keys.just_pressed(KeyCode::Escape) {
         buy.painting = None;

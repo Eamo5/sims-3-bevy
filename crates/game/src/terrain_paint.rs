@@ -132,7 +132,7 @@ pub fn apply(data: &mut [u8], size: u32, world_size: f32, s: &Stroke) {
 #[allow(clippy::too_many_arguments)]
 fn paint_tool(
     buy: Res<BuyMode>,
-    (mouse, over_ui): (Res<ButtonInput<MouseButton>>, Res<PointerOverUi>),
+    (mouse, over_ui, menu, modal): (Res<ButtonInput<MouseButton>>, Res<PointerOverUi>, Res<crate::options::GameMenu>, Query<(), With<crate::dialog::Modal>>),
     (windows, cams): (Query<&Window, With<PrimaryWindow>>, Query<(&Camera, &GlobalTransform), With<SimsCamera>>),
     building: Option<Res<crate::building::ActiveBuilding>>,
     world: Res<crate::loading::CurrentWorld>,
@@ -140,7 +140,7 @@ fn paint_tool(
     mut gizmos: Gizmos,
     mut play: MessageWriter<crate::sound::PlaySound>,
 ) {
-    let painting = buy.active && buy.tool == Some(crate::build::BuildTool::Terrain);
+    let painting = buy.active && buy.tool == Some(crate::build::BuildTool::Terrain) && !menu.is_open() && modal.is_empty();
     let cursor = windows.single().ok().and_then(|w| w.cursor_position());
     let (true, Some(b), Some(cursor), Ok((camera, cam_tf))) = (painting, building, cursor, cams.single()) else {
         strokes.last = None;
@@ -253,7 +253,7 @@ const SCULPT_RANGE: (f32, f32) = (-3.0, 4.0);
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn sculpt_tool(
     buy: Res<BuyMode>,
-    (mouse, over_ui, time): (Res<ButtonInput<MouseButton>>, Res<PointerOverUi>, Res<Time>),
+    (mouse, over_ui, time, menu, modal): (Res<ButtonInput<MouseButton>>, Res<PointerOverUi>, Res<Time>, Res<crate::options::GameMenu>, Query<(), With<crate::dialog::Modal>>),
     (windows, cams): (Query<&Window, With<PrimaryWindow>>, Query<(&Camera, &GlobalTransform), With<SimsCamera>>),
     building: Option<Res<crate::building::ActiveBuilding>>,
     mut world: ResMut<crate::loading::CurrentWorld>,
@@ -268,6 +268,10 @@ fn sculpt_tool(
     mut gizmos: Gizmos,
     mut test: ResMut<SculptAt>,
 ) {
+    if menu.is_open() || !modal.is_empty() {
+        sculpted.flatten_to = None;
+        return;
+    }
     let held_at = test.0.as_mut().filter(|t| t.1 > 0).map(|t| {
         t.1 -= 1;
         t.0

@@ -19,7 +19,7 @@ pub struct BuildPlugin;
 
 impl Plugin for BuildPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, build_tool.run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, build_tool.after(crate::hud::pointer_over_ui).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -88,6 +88,47 @@ impl BuildTool {
 struct Drag {
     start: Option<IVec2>,
     stair_dir: u8,
+    context: Option<(BuildTool, u8)>,
+}
+
+impl Drag {
+    /// A drag belongs to the tool and floor where it began, never a later selection.
+    fn sync(&mut self, context: Option<(BuildTool, u8)>, cancel: bool) {
+        if cancel || self.context != context { self.start = None; }
+        self.context = context;
+    }
+}
+
+#[cfg(test)]
+mod drag_tests {
+    use super::*;
+
+    #[test]
+    fn changing_floor_or_tool_abandons_the_previous_construction_drag() {
+        let mut drag = Drag::default();
+        drag.sync(Some((BuildTool::Room, 0)), false);
+        drag.start = Some(IVec2::new(4, 5));
+        drag.sync(Some((BuildTool::Room, 0)), false);
+        assert_eq!(drag.start, Some(IVec2::new(4, 5)));
+        drag.sync(Some((BuildTool::Room, 1)), false);
+        assert!(drag.start.is_none());
+        drag.start = Some(IVec2::new(2, 3));
+        drag.sync(Some((BuildTool::Sledgehammer, 1)), false);
+        assert!(drag.start.is_none());
+    }
+
+    #[test]
+    fn interruption_cannot_resume_a_drag_on_mouse_release() {
+        let context = Some((BuildTool::Pool, 0));
+        let mut drag = Drag { start: Some(IVec2::ONE), context, stair_dir: 2 };
+        drag.sync(context, true);
+        drag.sync(context, false);
+        assert!(drag.start.is_none());
+        assert_eq!(drag.stair_dir, 2);
+        drag.start = Some(IVec2::ZERO);
+        drag.sync(None, false);
+        assert!(drag.start.is_none());
+    }
 }
 
 /// The price of what's being dragged out, next to the pointer.
@@ -449,7 +490,7 @@ pub fn plan(b: &ActiveBuilding, tool: BuildTool, removing: bool, level: u8, star
 fn build_tool(
     mut commands: Commands,
     mut buy: ResMut<BuyMode>,
-    (keys, mouse, over_ui): (Res<ButtonInput<KeyCode>>, Res<ButtonInput<MouseButton>>, Res<PointerOverUi>),
+    (keys, mouse, over_ui, menu, modal): (Res<ButtonInput<KeyCode>>, Res<ButtonInput<MouseButton>>, Res<PointerOverUi>, Res<crate::options::GameMenu>, Query<(), With<crate::dialog::Modal>>),
     (windows, cams): (Query<&Window, With<PrimaryWindow>>, Query<(&Camera, &GlobalTransform), With<SimsCamera>>),
     mut building: Option<ResMut<ActiveBuilding>>,
     (data, mut assets): (Res<Baked>, ResMut<ObjectAssets>),
@@ -471,6 +512,20 @@ fn build_tool(
         Option<Res<crate::icons::GameUi>>,
     ),
 ) {
+    let blocked = menu.is_open() || !modal.is_empty();
+    let cancel = blocked || keys.just_pressed(KeyCode::Escape) || mouse.just_pressed(MouseButton::Right)
+        || over_ui.0 && mouse.just_released(MouseButton::Left);
+    let context = buy.tool.filter(|_| buy.active).zip(building.as_ref().map(|b| b.view_level));
+    let interrupted = cancel || drag.context != context;
+    drag.sync(context, cancel);
+    if interrupted {
+        for (e, ..) in &label { commands.entity(e).despawn(); }
+    }
+    if blocked || !buy.active {
+        buy.roof_pick = None;
+        return;
+    }
+    if interrupted { return; }
     // A roof pattern chosen on the Roofs tab.
     if let Some(i) = buy.roof_pick.take()
         && let (Some(b), Some(r)) = (building.as_deref_mut(), ui.as_ref().and_then(|u| u.data.roofs.get(i)))
@@ -494,11 +549,6 @@ fn build_tool(
         }
         return;
     };
-    if keys.just_pressed(KeyCode::Escape) {
-        buy.drop_tools(&mut commands);
-        drag.start = None;
-        return;
-    }
     // (The terrain brush is the terrain paint module's.)
     if matches!(tool, BuildTool::Terrain | BuildTool::Sculpt) {
         drag.start = None;
