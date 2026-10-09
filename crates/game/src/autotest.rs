@@ -552,7 +552,8 @@ fn ui_click(time: Res<Time<InputTimeline>>, mut controls: Query<(&crate::layout:
 }
 
 /// WALL_SNAP_TEST=1 verifies placement on both sides of the loaded lot's straight walls.
-fn wall_snap_test(time: Res<Time<InputTimeline>>, building: Option<Res<crate::building::ActiveBuilding>>, mut done: Local<bool>) {
+fn wall_snap_test(time: Res<Time<InputTimeline>>, building: Option<Res<crate::building::ActiveBuilding>>, mut done: Local<bool>,
+    objects: Query<(Entity, &crate::interact::GameObject, &Transform)>, catalog: Res<crate::loading::Catalog>) {
     if std::env::var_os("WALL_SNAP_TEST").is_none() || *done || time.elapsed_secs() < 6.0 { return; }
     let Some(b) = building else { return };
     let mut checked = 0;
@@ -577,7 +578,14 @@ fn wall_snap_test(time: Res<Time<InputTimeline>>, building: Option<Res<crate::bu
         }
     }
     assert!(checked > 0, "the runtime fixture must exercise placed walls");
-    info!("autotest: wall snapping PASS — {checked} transformed wall-side placements, {raised} authored height offsets");
+    let own_slots = objects.iter().filter(|(_, obj, _)| catalog.by_key(&obj.objd).is_some_and(|c| c.opening.is_some()))
+        .filter(|(entity, obj, tf)| {
+            let tiles = (obj.half.x * 2.0).round().max(1.0) as u32;
+            b.opening_behind(tf.translation, tf.rotation, tiles)
+                && !b.opening_behind_except(tf.translation, tf.rotation, tiles, Some(*entity))
+        }).count();
+    assert!(own_slots > 0, "new openings must be blocked while retained originals can return to their own slots");
+    info!("autotest: wall snapping PASS — {checked} transformed wall-side placements, {raised} authored height offsets, {own_slots} occupied/self-excluded opening slots");
     *done = true;
 }
 

@@ -179,6 +179,11 @@ impl ActiveBuilding {
     /// Whether a door or window is in the wall behind something hung on it, `tiles` wide (as
     /// `build::snap_to_wall` puts it: at `at`, facing out of the wall).
     pub fn opening_behind(&self, at: Vec3, rot: Quat, tiles: u32) -> bool {
+        self.opening_behind_except(at, rot, tiles, None)
+    }
+
+    /// Ignore the retained source entity when moving an existing opening.
+    pub fn opening_behind_except(&self, at: Vec3, rot: Quat, tiles: u32, source: Option<Entity>) -> bool {
         let fwd = self.local_dir(rot * Vec3::Z);
         let dir = fwd.perp();
         let n = tiles.max(1);
@@ -186,7 +191,7 @@ impl ActiveBuilding {
         (0..n).any(|k| {
             let p = start + dir * k as f32;
             let w = WallBaked { a: p.into(), b: (p + dir).into(), level: self.view_level, left: ROOM_OUTSIDE, right: ROOM_OUTSIDE, cover: [NO_COVER; 2], y: None };
-            self.holes.iter().any(|(_, h)| h.cuts(&w))
+            self.holes.iter().any(|(e, h)| (source.is_none() || *e != source) && h.cuts(&w))
         })
     }
 

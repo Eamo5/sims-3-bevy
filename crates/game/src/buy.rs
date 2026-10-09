@@ -1791,8 +1791,8 @@ fn placement(
             Some("Doors and windows go into a straight wall, on the floor in view.")
         } else if wall_hung && in_wall.is_none() {
             Some("Paintings, mirrors and wall lamps go on a straight wall, on the floor in view.")
-        } else if wall_hung && in_wall.as_ref().zip(building.as_deref()).is_some_and(|((p, r, _), b)| {
-            b.opening_behind(*p, *r, bounds.map_or(1, |(mn, mx)| ((mx.x - mn.x).round() as u32).max(1)))
+        } else if (wall_hung || opening.is_some()) && in_wall.as_ref().zip(building.as_deref()).is_some_and(|((p, r, _), b)| {
+            b.opening_behind_except(*p, *r, bounds.map_or(1, |(mn, mx)| ((mx.x - mn.x).round() as u32).max(1)), buy.placing.as_ref().and_then(|p| p.source.map(|s| s.0)))
         }) {
             Some("There's a window or door in the way.")
         } else if ladder && on_edge.is_none() {
