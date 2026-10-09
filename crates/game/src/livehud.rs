@@ -417,11 +417,12 @@ fn puck(
     (mut walls, mut building, mut cam): (ResMut<crate::building::WallMode>, Option<ResMut<crate::building::ActiveBuilding>>, Query<&mut crate::camera::SimsCamera>),
     (mut menu, selected): (ResMut<crate::options::GameMenu>, Query<&Transform, With<Selected>>),
     world: Res<crate::loading::CurrentWorld>,
-    buy_hud: Option<Res<crate::buyhud::BuyHud>>,
+    (buy_hud, build_hud): (Option<Res<crate::buyhud::BuyHud>>, Option<Res<crate::buildhud::BuildHud>>),
 ) {
     // (Buy mode's layout has its own copy of the puck, worked the same.)
     let buy_puck = buy_hud.map(|b| b.puck.clone());
-    for p in std::iter::once(&hud.puck).chain(buy_puck.as_ref()) {
+    let build_puck = build_hud.map(|b| b.puck.clone());
+    for p in std::iter::once(&hud.puck).chain(buy_puck.as_ref()).chain(build_puck.as_ref()) {
         puck_one(p, &mut commands, &clicks, &mut buttons, &mut texts, &mut vis, (household.as_deref(), &mut buy, &mut clock), (&mut walls, building.as_deref_mut(), &mut cam), (&mut menu, &selected), &world);
     }
 }

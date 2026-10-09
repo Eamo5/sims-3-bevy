@@ -264,7 +264,7 @@ fn showing(buy: &BuyMode) -> bool {
 }
 
 /// In buy mode the layout comes up in place of the HUD's puck.
-fn show(hud: Res<BuyHud>, live: Option<Res<LiveHud>>, buy: Res<BuyMode>, mut vis: Query<&mut Visibility>, mut was: Local<Option<(Option<Entity>, bool)>>) {
+pub(crate) fn show(hud: Res<BuyHud>, live: Option<Res<LiveHud>>, buy: Res<BuyMode>, mut vis: Query<&mut Visibility>, mut was: Local<Option<(Option<Entity>, bool)>>) {
     let on = showing(&buy);
     if *was == Some((hud.s.root, on)) {
         return;

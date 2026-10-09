@@ -643,6 +643,10 @@ installation is unreachable.
   Purchase wishes settle on return to Live Mode, for purchases the household actually kept.
   The Design Tool (R in Buy/Build) edits an existing object's presets and colours in place:
   Apply/Enter commits, Cancel/Escape restores the original, and Buy Mode undo reverses the edit.
+- **Build Mode navigation**: the original house diagram opens walls, wallpaper, floors, doors,
+  windows, roofs, fences, stairs, pools and terrain tools. The original puck provides mode,
+  camera, floor, wall-view, lighting and grid controls. Wall/room and rectangular-pool tools
+  use their original panels and Back button; catalogue browsers appear above the navigation.
 - **Interface**: the game's own icons and words — moodlets (name, description, time left),
   traits (Create-a-Sim and the Sim's panel) and wishes — read from the game's tuning tables
   (`GameplayData.package`) and string tables, with tooltips on hover. Sims' portraits are
@@ -723,6 +727,9 @@ the HUD controls, or `BUY_HISTORY_TEST=keys` with `PRESS_KEY=F2@5;Ctrl+Z@7;Ctrl+
 to verify keyboard shortcuts. Both check funds, save records, identity, upgrades and breakage.
 `BUY_DESIGN_TEST=apply` verifies in-place design changes and undo/redo;
 `BUY_DESIGN_TEST=cancel` verifies cancellation (`preview` leaves the editor open for screenshots).
+`BUILD_NAV_TEST=1` with `PRESS_KEY=F3@5` and
+`UI_CLICK=1002@6;302@7;06e89130@8;1013@9;06e89130@10;1003@11;8ffffa04@12;8feffa03@13`
+verifies original Build navigation and mode switching; capture after 15 seconds.
 `BUY_MOVE_TEST=move` or `cancel` checks that a piece of furniture keeps its identity, upgrades
 and breakage after a scripted placement or cancellation.
 `s3tool uiwindow <layout>` inspects a baked window tree; `s3tool uilayout <UI.package> <layout>`

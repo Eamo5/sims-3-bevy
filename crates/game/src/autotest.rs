@@ -171,6 +171,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(PostUpdate, buy_move_test.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PostUpdate, buy_history_test.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PostUpdate, buy_design_test.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(PostUpdate, build_navigation_test.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -514,6 +515,32 @@ fn ui_click(time: Res<Time>, mut controls: Query<(&crate::layout::UiWin, &Inheri
         info!("autotest: UI control {id:08X} clicked");
         *step += 1;
     }
+}
+
+/// BUILD_NAV_TEST=1 checks the documented UI_CLICK sequence against actual tool and HUD state.
+fn build_navigation_test(
+    time: Res<Time>, buy: Res<crate::buy::BuyMode>,
+    hud: Option<Res<crate::buildhud::BuildHud>>, visibility: Query<&InheritedVisibility>,
+    mut step: Local<usize>,
+) {
+    if std::env::var_os("BUILD_NAV_TEST").is_none() || *step >= 8 { return; }
+    if time.elapsed_secs() < 6.5 + *step as f32 { return; }
+    use crate::buy::{BUILD_TAB, WALLPAPER_TAB};
+    use crate::build::BuildTool;
+    match *step {
+        0 => assert_eq!(buy.tool, Some(BuildTool::Wall)),
+        1 => assert_eq!(buy.tool, Some(BuildTool::Room)),
+        2 | 4 => { assert_eq!(buy.category, BUILD_TAB); assert!(buy.tool.is_none()); }
+        3 => assert_eq!(buy.tool, Some(BuildTool::Pool)),
+        5 => assert_eq!(buy.category, WALLPAPER_TAB),
+        6 => assert!(!buy.active, "the original Build puck must return to Live"),
+        7 => assert!(buy.active && buy.category < WALLPAPER_TAB, "the Live puck must enter Buy"),
+        _ => unreachable!(),
+    }
+    let root = hud.as_ref().and_then(|h| h.puck.root).expect("original Build HUD exists");
+    assert_eq!(visibility.get(root).unwrap().get(), *step < 6);
+    *step += 1;
+    if *step == 8 { info!("autotest: Build navigation PASS — wall, room, Back, pool, wallpaper, Live and Buy"); }
 }
 
 /// CLICK_AT=<x,y>@<seconds>;...: window-relative clicks through the real input path.

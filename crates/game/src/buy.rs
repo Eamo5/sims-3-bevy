@@ -98,6 +98,7 @@ pub struct BuyMode {
     /// The game's own buy catalogue is showing (`buyhud`): this panel keeps only the object
     /// in hand's designs.
     pub game_look: bool,
+    pub build_look: bool,
     pub category: usize,
     pub page: usize,
     pub placing: Option<Placing>,
@@ -679,7 +680,10 @@ fn buy_panel(
     }
     // (The game's own catalogue is up, with the object in hand's designs: only Create a Style
     // here, above it.)
-    let game_look = buy.game_look && buy.active && buy.category < WALLPAPER_TAB;
+    let editing_style = buy.styling && buy.placing.is_some();
+    let build_look = buy.build_look && buy.active && buy.category >= WALLPAPER_TAB;
+    let game_look = buy.game_look && buy.active && (buy.category < WALLPAPER_TAB || editing_style);
+    if crate::buildhud::native_panel(&buy) { return; }
     if game_look && !(buy.styling && buy.placing.is_some()) {
         return;
     }
@@ -706,7 +710,7 @@ fn buy_panel(
     if buy.active {
         commands.entity(root).insert(crate::hud::BlocksWorld);
     }
-    if game_look {
+    if game_look || build_look {
         commands.entity(root).insert(Node {
             border_radius: BorderRadius::all(Val::Px(12.0)),
             position_type: PositionType::Absolute,
@@ -720,7 +724,7 @@ fn buy_panel(
         });
     }
     commands.entity(root).with_children(|p| {
-        p.spawn(Node { column_gap: Val::Px(6.0), flex_wrap: FlexWrap::Wrap, row_gap: Val::Px(6.0), display: if game_look { Display::None } else { Display::Flex }, ..default() }).with_children(|row| {
+        p.spawn(Node { column_gap: Val::Px(6.0), flex_wrap: FlexWrap::Wrap, row_gap: Val::Px(6.0), display: if game_look || build_look { Display::None } else { Display::Flex }, ..default() }).with_children(|row| {
             button(row, if buy.active { "Exit Buy Mode (B)".into() } else { "Buy Mode (B)".into() }, BuyButton::Toggle, Val::Px(150.0), 32.0, buy.active);
             if buy.active {
                 button(row, "Eyedropper".into(), BuyButton::Eyedropper, Val::Auto, 32.0, buy.eyedropper);
@@ -739,7 +743,7 @@ fn buy_panel(
             return;
         }
         // Roof patterns: one click puts it on the household's roofs.
-        if buy.category == ROOFS_TAB {
+        if buy.category == ROOFS_TAB && !editing_style {
             let Some(ui) = ui.as_deref() else { return };
             let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
             p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|grid| {
@@ -776,7 +780,7 @@ fn buy_panel(
             return;
         }
         // Terrain paints: the world's own, then the eraser, and the brush's size.
-        if buy.category == TERRAIN_TAB {
+        if buy.category == TERRAIN_TAB && !editing_style {
             let brush = if buy.brush > 0.0 { buy.brush } else { crate::terrain_paint::BRUSHES[1].0 };
             let painting = buy.tool == Some(crate::build::BuildTool::Terrain);
             p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|grid| {
@@ -865,7 +869,7 @@ fn buy_panel(
             return;
         }
         // Fences: pick one, then drag it out along the grid.
-        if buy.category == FENCES_TAB {
+        if buy.category == FENCES_TAB && !editing_style {
             let Some(ui) = ui.as_deref_mut() else { return };
             let fences = ui.data.fences.clone();
             p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|grid| {
@@ -906,7 +910,7 @@ fn buy_panel(
             return;
         }
         // The construction tools.
-        if buy.category == BUILD_TAB {
+        if buy.category == BUILD_TAB && !editing_style {
             p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|grid| {
                 for t in crate::build::BuildTool::ALL {
                     button(grid, t.label(), BuyButton::Tool(t), Val::Px(190.0), 42.0, buy.tool == Some(t));
@@ -920,7 +924,7 @@ fn buy_panel(
             return;
         }
         // Wallpaper and floors: swatches of the catalogue's patterns.
-        if buy.category == WALLPAPER_TAB || buy.category == FLOORS_TAB {
+        if (buy.category == WALLPAPER_TAB || buy.category == FLOORS_TAB) && !editing_style {
             let floor = buy.category == FLOORS_TAB;
             let Some(ui) = ui.as_deref() else { return };
             let items: Vec<(usize, &s3bake::gamedata::PatternInfo)> = ui.data.patterns.iter().enumerate().filter(|(_, p)| p.floor == floor).collect();
