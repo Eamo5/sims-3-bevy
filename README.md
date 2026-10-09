@@ -182,7 +182,8 @@ installation is unreachable.
   heart. A swimmer whose pool's ladders are taken away can't get out: they swim on, tiring,
   and drown (the game's drowning animation; the tombstone at the pool's side). Each death has
   the game's own last moments, and its ghost its own colour.
-- **Meals**: cooking serves a group meal on the game's serving platter (on the nearest
+- **Meals**: cooking serves eight portions, matching the installed game's group-meal tuning,
+  on the game's serving platter (on the nearest
   counter), with a serving for everyone at home, and the cook calls the household to it (the
   game's wave over): whoever's hungry and not busy with something they were told to do comes
   for a plate. Sims grab a plate and sit down at a dining table or counter stool to eat (the

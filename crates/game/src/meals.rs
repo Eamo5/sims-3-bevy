@@ -379,6 +379,9 @@ pub enum MealRequest {
     AteStanding,
 }
 
+/// `Food_0xa1104c038b529738.xml`: kNumServingsForGroupMeal.
+const GROUP_MEAL_SERVINGS: u8 = 8;
+
 /// A group meal's servings left.
 #[derive(Component)]
 pub struct Meal {
@@ -517,7 +520,7 @@ fn meal_requests(
                 }
                 commands.entity(me).remove::<ServingFrom>();
                 let at = surface_near(&objects, s.world_center(stf), 6.0).unwrap_or(Vec3::new(s.world_center(stf).x, stf.translation.y + s.height, s.world_center(stf).z));
-                let servings = household.iter().filter(|h| h.age != Age::Baby).count().clamp(2, 8) as u8;
+                let servings = GROUP_MEAL_SERVINGS;
                 let yaw = stf.rotation.to_euler(EulerRot::YXZ).0;
                 // The recipe chosen, or the best they know for the time of day.
                 let (meal, word) = meal_time(clock.hour_f());
