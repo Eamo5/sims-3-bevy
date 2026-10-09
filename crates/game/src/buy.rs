@@ -1919,8 +1919,8 @@ fn placement_problem(b: &crate::building::ActiveBuilding, tf: &Transform, bounds
         }) {
             return Some("There's a wall in the way.");
         }
-        if level > 1 && !footprint_supported(&local, |p| b.floor_y(level, b.world(p.x, p.y, 0.0)).is_some()) {
-            return Some("The whole object needs a floor underneath it.");
+        if level > 1 && !footprint_at_height(&local, tf.translation.y, |p| b.floor_y(level, b.world(p.x, p.y, 0.0))) {
+            return Some("The whole object needs a floor at the same height underneath it.");
         }
         if level == 1 && b.data.pool.iter().any(|f| {
             let p = Vec2::new(f.x as f32, f.z as f32);
@@ -1964,6 +1964,10 @@ fn convex_overlap(a: &[Vec2], b: &[Vec2]) -> bool {
 
 /// Check every floor triangle touched by the footprint, including holes between
 /// its corners. Floor masks divide each tile into four triangles meeting at its centre.
+fn footprint_at_height(corners: &[Vec2; 4], height: f32, floor: impl Fn(Vec2) -> Option<f32>) -> bool {
+    footprint_supported(corners, |p| floor(p).is_some_and(|y| (y - height).abs() < 0.05))
+}
+
 fn footprint_supported(corners: &[Vec2; 4], has_floor: impl Fn(Vec2) -> bool) -> bool {
     let min = corners.iter().copied().fold(Vec2::splat(f32::INFINITY), Vec2::min);
     let max = corners.iter().copied().fold(Vec2::splat(f32::NEG_INFINITY), Vec2::max);
@@ -1986,6 +1990,21 @@ fn footprint_supported(corners: &[Vec2; 4], has_floor: impl Fn(Vec2) -> bool) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn furniture_requires_continuous_support_at_its_placement_height() {
+        let corners = [Vec2::ZERO, Vec2::new(3.0, 0.0), Vec2::new(3.0, 1.0), Vec2::Y];
+        assert!(footprint_at_height(&corners, 4.0, |_| Some(4.0)));
+        assert!(!footprint_at_height(&corners, 4.0, |p| Some(if (1.0..2.0).contains(&p.x) { 3.0 } else { 4.0 })),
+            "equal-height corners must not hide a depressed middle tile");
+        assert!(!footprint_at_height(&corners, 4.0, |p| if (1.0..2.0).contains(&p.x) { None } else { Some(4.0) }));
+        let tile = [Vec2::ZERO, Vec2::X, Vec2::ONE, Vec2::Y];
+        assert!(footprint_at_height(&tile, 4.0, |p| Some(if p.x < 1.0 { 4.0 } else { 3.0 })),
+            "touching an adjacent lower tile does not overlap it");
+        let shifted = tile.map(|p| p + Vec2::new(0.1, 0.0));
+        assert!(!footprint_at_height(&shifted, 4.0, |p| Some(if p.x < 1.0 { 4.0 } else { 3.0 })));
+        assert!(footprint_at_height(&tile, 4.0, |_| Some(4.0001)), "ignore floating-point height noise");
+    }
 
     #[test]
     fn covering_rays_follow_wall_elevation_and_both_sides() {

@@ -289,6 +289,8 @@ installation is unreachable.
   sections with different base heights.
   Floor picking uses the nearest occupied tile elevation, including raised/split-level tiles;
   holes expose lower visible floors instead of selecting an empty storey plane.
+  Upstairs furniture requires support at its placement height across the entire footprint,
+  including interior tiles; it cannot bridge holes or lower sections of a split-level floor.
   Existing door/window slots reject overlapping openings in both preview and placement;
   moving an opening ignores its own retained source so it can return to the same slot.
   Doors, windows and wall decorations snap to 45-degree walls as well as axis-aligned walls,
