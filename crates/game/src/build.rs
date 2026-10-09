@@ -19,7 +19,7 @@ pub struct BuildPlugin;
 
 impl Plugin for BuildPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, build_tool.after(crate::hud::pointer_over_ui).run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, build_tool.after(crate::hud::pointer_over_ui).before(crate::buyhistory::update).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -299,10 +299,11 @@ pub fn sell_openings(
     removed: &mut crate::save::RemovedLotObjects,
     mut household: Option<&mut Household>,
     notes: &mut Notifications,
-) {
+) -> Vec<Entity> {
     let mut gone: Vec<Entity> = edges.iter().flat_map(|(p, q)| b.openings_on(level, p.as_vec2(), q.as_vec2())).collect();
     gone.sort();
     gone.dedup();
+    let mut sold = Vec::new();
     for e in gone {
         let Ok((obj, tf, bought)) = objects.get(e) else { continue };
         if !bought {
@@ -312,8 +313,11 @@ pub fn sell_openings(
             h.funds += obj.price as i64;
         }
         notes.push(format!("{} was sold for §{}.", obj.name, obj.price));
-        commands.entity(e).despawn();
+        crate::buyhistory::remember_pickup(commands, e);
+        crate::buyhistory::park(commands, e);
+        sold.push(e);
     }
+    sold
 }
 
 /// A staircase on `level` from tile `at` climbing along `dir`: its ops (opening the stairwell
@@ -517,6 +521,9 @@ fn build_tool(
         || over_ui.0 && mouse.just_released(MouseButton::Left);
     let context = buy.tool.filter(|_| buy.active).zip(building.as_ref().map(|b| b.view_level));
     let interrupted = cancel || drag.context != context;
+    if std::env::var_os("BUILD_HISTORY_TEST").is_some() && (mouse.just_pressed(MouseButton::Left) || mouse.just_released(MouseButton::Left)) {
+        info!("autotest: build input context {context:?}, start {:?}, UI {}, interrupted {interrupted}, pressed {}, released {}", drag.start, over_ui.0, mouse.just_pressed(MouseButton::Left), mouse.just_released(MouseButton::Left));
+    }
     drag.sync(context, cancel);
     if interrupted {
         for (e, ..) in &label { commands.entity(e).despawn(); }
@@ -531,8 +538,10 @@ fn build_tool(
         && let (Some(b), Some(r)) = (building.as_deref_mut(), ui.as_ref().and_then(|u| u.data.roofs.get(i)))
     {
         let ops = vec![PaintOp::Roof { texture: r.tile }];
+        let before = crate::building::BuildingSnapshot::capture(b, log.as_deref());
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
         crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces);
+        crate::buyhistory::record_construction(&mut commands, before, b, &ops, 0, removed.0.clone(), Vec::new());
         match log.as_mut() {
             Some(l) => l.0.extend(ops),
             None => commands.insert_resource(crate::building::LotPaint(ops)),
@@ -630,11 +639,13 @@ fn build_tool(
             notes.push("You can't afford that.");
             return;
         }
+        let before = crate::building::BuildingSnapshot::capture(b, log.as_deref());
         if let Some(h) = household.as_mut() {
             h.funds -= cost;
         }
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
         crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces);
+        crate::buyhistory::record_construction(&mut commands, before, b, &ops, -cost, removed.0.clone(), Vec::new());
         match log.as_mut() {
             Some(l) => l.0.extend(ops),
             None => commands.insert_resource(crate::building::LotPaint(ops)),
@@ -744,14 +755,19 @@ fn build_tool(
         notes.push("You can't afford that.");
         return;
     }
+    let before = crate::building::BuildingSnapshot::capture(b, log.as_deref());
+    let removed_before = removed.0.clone();
+    let funds_before = household.as_ref().map_or(0, |h| h.funds);
     if let Some(h) = household.as_mut() {
         h.funds -= cost;
     }
-    if removing && !tiles && tool != BuildTool::Fence {
-        sell_openings(&mut commands, b, level, &edges(tool, start, cur), &objects, &mut removed, household.as_deref_mut(), &mut notes);
-    }
+    let sold = if removing && !tiles && tool != BuildTool::Fence {
+        sell_openings(&mut commands, b, level, &edges(tool, start, cur), &objects, &mut removed, household.as_deref_mut(), &mut notes)
+    } else { Vec::new() };
+    let funds = household.as_ref().map_or(0, |h| h.funds - funds_before);
     let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
     crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces);
+    crate::buyhistory::record_construction(&mut commands, before, b, &ops, funds, removed_before, sold);
     match log.as_mut() {
         Some(l) => l.0.extend(ops),
         None => commands.insert_resource(crate::building::LotPaint(ops)),

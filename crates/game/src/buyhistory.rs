@@ -4,8 +4,10 @@
 use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
+use bevy::ecs::system::RunSystemOnce;
 
-use crate::buy::{BuyMode, HeldObject, WALLPAPER_TAB};
+use crate::buy::{BuyMode, HeldObject};
+use crate::building::{ActiveBuilding, BuildingSnapshot, LotPaint};
 use crate::interact::{GameObject, Household, Notifications};
 use crate::nav::{Floor, Obstacle};
 use crate::save::{Bought, RemovedLotObjects, SavedObject};
@@ -78,10 +80,16 @@ impl Snapshot {
     }
 }
 
-struct Transaction {
+struct ObjectChange {
     entity: Entity,
     before: Option<Snapshot>,
     after: Option<Snapshot>,
+}
+
+struct Transaction {
+    objects: Vec<ObjectChange>,
+    building: Option<(BuildingSnapshot, BuildingSnapshot)>,
+    terrain: Option<crate::terrain_paint::TerrainEdit>,
     /// Signed amount added to the household's funds by the original operation.
     funds: i64,
     removed_before: Vec<SavedObject>,
@@ -121,24 +129,52 @@ pub fn park(commands: &mut Commands, entity: Entity) {
 
 /// Call after the placement/sale commands, so the after-image includes floor and design changes.
 pub fn record(commands: &mut Commands, entity: Entity, existing: bool, funds: i64, removed_before: Vec<SavedObject>) {
+    record_with_building(commands, entity, existing, funds, removed_before, None);
+}
+
+pub fn record_with_building(commands: &mut Commands, entity: Entity, existing: bool, funds: i64, removed_before: Vec<SavedObject>, building_before: Option<BuildingSnapshot>) {
     commands.queue(move |world: &mut World| {
+        finish_terrain(world);
         let after = Snapshot::capture(world, entity);
         let removed_after = world.resource::<RemovedLotObjects>().0.clone();
-        let enabled = world.resource::<BuyMode>().active && world.resource::<BuyMode>().category < WALLPAPER_TAB;
+        let enabled = world.resource::<BuyMode>().active;
+        let building = building_before.map(|before| {
+            let after = BuildingSnapshot::capture(world.resource::<ActiveBuilding>(), world.get_resource::<LotPaint>());
+            (before, after)
+        });
         let mut history = world.resource_mut::<BuyHistory>();
         let before = existing.then(|| history.picked.remove(&entity)).flatten();
         if enabled && (!existing || before.is_some()) {
             history.redo.clear();
-            history.undo.push(Transaction { entity, before, after, funds, removed_before, removed_after });
+            history.undo.push(Transaction { objects: vec![ObjectChange { entity, before, after }], building, terrain: None, funds, removed_before, removed_after });
             if history.undo.len() > 100 { history.undo.remove(0); }
         }
         collect_unused(world, false);
     });
 }
 
+/// One construction gesture, including any doors/windows sold by a demolition.
+pub fn record_construction(
+    commands: &mut Commands, before: BuildingSnapshot, b: &ActiveBuilding, ops: &[crate::building::PaintOp],
+    funds: i64, removed_before: Vec<SavedObject>, sold: Vec<Entity>,
+) {
+    let mut after = BuildingSnapshot::capture(b, Some(&before.paint));
+    after.paint.0.extend_from_slice(ops);
+    commands.queue(move |world: &mut World| {
+        finish_terrain(world);
+        let removed_after = world.resource::<RemovedLotObjects>().0.clone();
+        let mut history = world.resource_mut::<BuyHistory>();
+        let objects = sold.into_iter().map(|entity| ObjectChange { entity, before: history.picked.remove(&entity), after: None }).collect();
+        history.redo.clear();
+        history.undo.push(Transaction { objects, building: Some((before, after)), terrain: None, funds, removed_before, removed_after });
+        if history.undo.len() > 100 { history.undo.remove(0); }
+        collect_unused(world, false);
+    });
+}
+
 fn collect_unused(world: &mut World, all: bool) {
     let history = world.resource::<BuyHistory>();
-    let keep: HashSet<Entity> = if all { HashSet::new() } else { history.undo.iter().chain(&history.redo).map(|t| t.entity).collect() };
+    let keep: HashSet<Entity> = if all { HashSet::new() } else { history.undo.iter().chain(&history.redo).flat_map(|t| t.objects.iter().map(|o| o.entity)).collect() };
     let garbage: Vec<Entity> = world.query_filtered::<Entity, With<HistoryHidden>>().iter(world).filter(|e| !keep.contains(e)).collect();
     for entity in garbage { world.despawn(entity); }
 }
@@ -149,11 +185,13 @@ fn apply(world: &mut World, request: Request) {
         match request { Request::Undo => history.undo.pop(), Request::Redo => history.redo.pop() }
     };
     let Some(transaction) = transaction else { return };
-    let (snapshot, funds, removed) = match request {
-        Request::Undo => (&transaction.before, -transaction.funds, &transaction.removed_before),
-        Request::Redo => (&transaction.after, transaction.funds, &transaction.removed_after),
+    let (funds, removed) = match request {
+        Request::Undo => (-transaction.funds, &transaction.removed_before),
+        Request::Redo => (transaction.funds, &transaction.removed_after),
     };
-    if world.get_entity(transaction.entity).is_err() {
+    if transaction.objects.iter().any(|o| world.get_entity(o.entity).is_err())
+        || transaction.building.is_some() && !world.contains_resource::<ActiveBuilding>()
+    {
         clear(world);
         return;
     }
@@ -163,14 +201,24 @@ fn apply(world: &mut World, request: Request) {
         match request { Request::Undo => history.undo.push(transaction), Request::Redo => history.redo.push(transaction) }
         return;
     }
-    match snapshot {
-        Some(snapshot) => snapshot.restore(world, transaction.entity),
-        None => {
-            world.entity_mut(transaction.entity).remove::<(GameObject, Obstacle)>().insert((HistoryHidden, HeldObject, Visibility::Hidden));
+    for object in &transaction.objects {
+        let snapshot = match request { Request::Undo => &object.before, Request::Redo => &object.after };
+        match snapshot {
+            Some(snapshot) => snapshot.restore(world, object.entity),
+            None => {
+                world.entity_mut(object.entity).remove::<(GameObject, Obstacle)>().insert((HistoryHidden, HeldObject, Visibility::Hidden));
+            }
         }
     }
+    if let Some((before, after)) = &transaction.building {
+        let snapshot = match request { Request::Undo => before, Request::Redo => after };
+        world.run_system_once_with(crate::building::restore_history, snapshot.clone()).expect("construction history resources");
+    }
+    if let Some(terrain) = &transaction.terrain {
+        world.run_system_once_with(crate::terrain_paint::restore_history, (terrain.clone(), matches!(request, Request::Undo))).expect("terrain history resources");
+    }
     world.resource_mut::<Household>().funds += funds;
-    world.resource_mut::<RemovedLotObjects>().0 = removed.clone();
+    if transaction.terrain.is_none() { world.resource_mut::<RemovedLotObjects>().0 = removed.clone(); }
     if let Some(mut grid) = world.get_resource_mut::<crate::nav::NavGrid>() { grid.dirty = true; }
     let mut history = world.resource_mut::<BuyHistory>();
     match request { Request::Undo => history.redo.push(transaction), Request::Redo => history.undo.push(transaction) }
@@ -185,11 +233,30 @@ pub fn discard(commands: &mut Commands) {
     commands.queue(clear);
 }
 
-/// Runs after placement and the original HUD's buttons. Construction starts a new history
-/// boundary: its wall/floor/terrain operations are not furniture transactions.
+fn finish_terrain(world: &mut World) {
+    if !world.contains_resource::<crate::terrain_paint::TerrainHistory>() { return; }
+    world.resource_scope(|world, mut pending: Mut<crate::terrain_paint::TerrainHistory>| {
+        if let Some(edit) = pending.take_edit(world.resource::<crate::terrain_paint::Strokes>(), world.resource::<crate::terrain_paint::Sculpted>()) {
+            let mut history = world.resource_mut::<BuyHistory>();
+            history.redo.clear();
+            history.undo.push(Transaction { objects: Vec::new(), building: None, terrain: Some(edit), funds: 0, removed_before: Vec::new(), removed_after: Vec::new() });
+            if history.undo.len() > 100 { history.undo.remove(0); }
+        }
+    });
+}
+
+/// Runs after editing and both original HUDs. Buy and Build share one chronological history.
 pub fn update(world: &mut World) {
+    let active = world.resource::<BuyMode>().active;
+    let brush = matches!(world.resource::<BuyMode>().tool, Some(crate::build::BuildTool::Terrain | crate::build::BuildTool::Sculpt));
+    let held = world.get_resource::<ButtonInput<MouseButton>>().is_some_and(|m| m.pressed(MouseButton::Left));
+    // Finish a held brush on release, a tool change, or leaving shopping.
+    if !active || !brush || !held {
+        finish_terrain(world);
+        collect_unused(world, false);
+    }
     let buy = world.resource::<BuyMode>();
-    if !buy.active || buy.category >= WALLPAPER_TAB {
+    if !active {
         clear(world);
         return;
     }
@@ -205,7 +272,7 @@ pub fn update(world: &mut World) {
         Some(Request::Undo)
     } else { None };
     let request = world.resource_mut::<BuyHistory>().request.take().or(keyboard);
-    if blocked || holding_owned { return; }
+    if blocked || holding_owned || brush && held { return; }
     if let Some(request) = request {
         let history = world.resource::<BuyHistory>();
         if !match request { Request::Undo => history.can_undo(), Request::Redo => history.can_redo() } { return; }
@@ -248,6 +315,25 @@ mod tests {
     fn record_now(world: &mut World, entity: Entity, existing: bool, funds: i64, removed: Vec<SavedObject>) {
         record(&mut world.commands(), entity, existing, funds, removed);
         world.flush();
+    }
+
+    #[test]
+    fn furniture_history_survives_switching_between_buy_and_build() {
+        let mut world = world();
+        let entity = object(&mut world, true);
+        record_now(&mut world, entity, false, -100, Vec::new());
+        world.resource_mut::<BuyMode>().show(crate::buy::BUILD_TAB);
+        update(&mut world);
+        assert!(world.resource::<BuyHistory>().can_undo());
+        world.resource_mut::<BuyHistory>().request = Some(Request::Undo);
+        update(&mut world);
+        assert_eq!(world.resource::<Household>().funds, 1000);
+        assert!(world.get::<HistoryHidden>(entity).is_some());
+        world.resource_mut::<BuyMode>().show(0);
+        world.resource_mut::<BuyHistory>().request = Some(Request::Redo);
+        update(&mut world);
+        assert_eq!(world.resource::<Household>().funds, 900);
+        assert!(world.get::<GameObject>(entity).is_some());
     }
 
     #[test]

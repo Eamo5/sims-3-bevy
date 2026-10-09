@@ -636,10 +636,13 @@ installation is unreachable.
   Placement checks use the floor actually hit by the pointer. Moving furniture keeps the original
   object, with its upgrades, breakage, contents, lights and animated parts; cancelling puts it
   back intact.
-  Buy Mode's undo/redo buttons (Ctrl+Z / Ctrl+Y, or Ctrl+Shift+Z) reverse furniture purchases,
-  moves, design changes made while moving, and sales, restoring the original objects and funds.
-  Up to 100 transactions are retained during shopping; returning to Live or entering Build
-  starts a fresh history. Put down or cancel an owned object before reversing a transaction.
+  Buy and Build Mode's undo/redo buttons (Ctrl+Z / Ctrl+Y, or Ctrl+Shift+Z) share a history for
+  furniture purchases, moves, designs and sales; walls, rooms, floors, stairs, fences, pools,
+  wallpaper and roof patterns; and terrain painting/sculpting. Each held terrain brush is one
+  edit. Undo restores funds, save records and original furniture entities, including doors and
+  windows sold during demolition. Up to 100 transactions are retained across Buy/Build switches;
+  returning to Live starts a fresh history. Finish a brush stroke or put down/cancel an owned
+  object before reversing a transaction.
   Purchase wishes settle on return to Live Mode, for purchases the household actually kept.
   The Design Tool (R in Buy/Build) edits an existing object's presets and colours in place:
   Apply/Enter commits, Cancel/Escape restores the original, and Buy Mode undo reverses the edit.
@@ -667,7 +670,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-Build Mode, Create-a-Sim and main-menu interfaces; construction undo and redo; household furniture
+complete Build Mode, Create-a-Sim and main-menu interfaces; household furniture
 inventory; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
@@ -690,7 +693,7 @@ gameplay; and systematic side-by-side visual and interaction checks against the 
 | B | Toggle Buy mode (, and . rotate, Delete sells; Esc cancels the tool, then leaves) |
 | H / E / K in Buy or Build | Hand / eyedropper / sledgehammer |
 | R in Buy or Build | Create a Style for an existing object; Enter applies, Esc cancels |
-| Ctrl+Z / Ctrl+Y in Buy | Undo / redo furniture changes (Ctrl+Shift+Z also redoes) |
+| Ctrl+Z / Ctrl+Y in Buy or Build | Undo / redo edits (Ctrl+Shift+Z also redoes) |
 | R | Relationships panel |
 | O | Opportunities panel |
 | Esc | Game menu: pause, options, save, quit |
@@ -730,6 +733,10 @@ to verify keyboard shortcuts. Both check funds, save records, identity, upgrades
 `BUILD_NAV_TEST=1` with `PRESS_KEY=F3@5` and
 `UI_CLICK=1002@6;302@7;06e89130@8;1013@9;06e89130@10;1003@11;8ffffa04@12;8feffa03@13`
 verifies original Build navigation and mode switching; capture after 15 seconds.
+`BUILD_HISTORY_TEST=room`, `pool`, `demolish`, `terrain` or `sculpt`, with `PRESS_KEY=F3@5`
+and `--view-level 1`, performs a real drag then clicks the original Undo/Redo buttons. It checks
+building data, furniture identity, funds, save records, terrain heights and paint-map pixels;
+capture after 11 seconds.
 `BUY_MOVE_TEST=move` or `cancel` checks that a piece of furniture keeps its identity, upgrades
 and breakage after a scripted placement or cancellation.
 `s3tool uiwindow <layout>` inspects a baked window tree; `s3tool uilayout <UI.package> <layout>`

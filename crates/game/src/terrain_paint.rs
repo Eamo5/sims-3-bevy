@@ -28,8 +28,10 @@ impl Plugin for TerrainPaintPlugin {
             .add_systems(OnEnter(AppState::Loading), |mut s: ResMut<Strokes>| *s = Strokes::default())
             .init_resource::<Sculpted>()
             .init_resource::<SculptAt>()
+            .init_resource::<TerrainHistory>()
+            .add_systems(OnEnter(AppState::Loading), |mut h: ResMut<TerrainHistory>| *h = TerrainHistory::default())
             .add_systems(OnEnter(AppState::Loading), |mut s: ResMut<Sculpted>| *s = Sculpted::default())
-            .add_systems(Update, (paint_tool, flush, sculpt_tool, restore_heights).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (paint_tool, flush, sculpt_tool, restore_heights).chain().after(crate::hud::pointer_over_ui).before(crate::buyhistory::update).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -52,6 +54,63 @@ pub struct Stroke {
     pub z: f32,
     pub radius: f32,
     pub layer: u8,
+}
+
+/// A held brush is one history entry, regardless of how many dabs or height ticks it makes.
+#[derive(Resource, Default)]
+pub struct TerrainHistory {
+    paint: Option<Vec<Stroke>>,
+    heights: std::collections::HashMap<(u32, u32), (u16, Option<u16>)>,
+}
+
+#[derive(Clone)]
+pub struct TerrainEdit {
+    paint: Option<(Vec<Stroke>, Vec<Stroke>)>,
+    heights: Vec<((u32, u32), u16, Option<u16>, u16)>,
+}
+
+impl TerrainHistory {
+    pub fn take_edit(&mut self, strokes: &Strokes, sculpted: &Sculpted) -> Option<TerrainEdit> {
+        let paint = self.paint.take().map(|before| (before, strokes.saved())).filter(|(before, after)| before != after);
+        let heights = self.heights.drain().filter_map(|(at, (before, saved))| {
+            let after = *sculpted.heights.get(&at)?;
+            (before != after || saved != Some(after)).then_some((at, before, saved, after))
+        }).collect::<Vec<_>>();
+        (paint.is_some() || !heights.is_empty()).then_some(TerrainEdit { paint, heights })
+    }
+}
+
+pub fn restore_history(
+    In((edit, undo)): In<(TerrainEdit, bool)>, mut strokes: ResMut<Strokes>, mut sculpted: ResMut<Sculpted>,
+    map: Option<Res<PaintMap>>, mut images: ResMut<Assets<Image>>, mut world: ResMut<crate::loading::CurrentWorld>,
+    chunks: Query<(&crate::terrain::TerrainChunk, &Mesh3d)>, mut meshes: ResMut<Assets<Mesh>>,
+    holes: Option<Res<crate::terrain::TerrainHoles>>, mut grid: Option<ResMut<crate::nav::NavGrid>>,
+) {
+    if let Some((before, after)) = edit.paint {
+        let selected = if undo { before } else { after };
+        strokes.restore(&selected);
+        strokes.last = None;
+        if let Some(map) = map && let Some(mut image) = images.get_mut(&map.image) && let Some(pixels) = image.data.as_mut() {
+            pixels.fill(0);
+            for stroke in &selected { apply(pixels, map.size, map.world_size, stroke); }
+            strokes.all = selected;
+            strokes.pending.clear();
+        }
+    }
+    if edit.heights.is_empty() { return; }
+    let hm = &mut std::sync::Arc::make_mut(&mut world.data).heightmap;
+    let mut cells = Vec::new();
+    for ((x, z), before, saved, after) in edit.heights {
+        hm.data[z as usize * hm.width + x as usize] = if undo { before } else { after };
+        if undo && saved.is_none() { sculpted.heights.remove(&(x, z)); }
+        else { sculpted.heights.insert((x, z), if undo { saved.unwrap() } else { after }); }
+        let (x, z) = (x as i64, z as i64);
+        cells.extend([(x - 1, z - 1), (x, z - 1), (x - 1, z), (x, z)]);
+    }
+    sculpted.flatten_to = None;
+    let empty = std::collections::HashSet::new();
+    crate::terrain::rebuild_chunks(&cells, hm, &chunks, &mut meshes, holes.as_ref().map_or(&empty, |h| &h.0));
+    if let Some(grid) = grid.as_mut() { grid.dirty = true; }
 }
 
 /// The eraser.
@@ -139,6 +198,7 @@ fn paint_tool(
     mut strokes: ResMut<Strokes>,
     mut gizmos: Gizmos,
     mut play: MessageWriter<crate::sound::PlaySound>,
+    mut history: ResMut<TerrainHistory>,
 ) {
     let painting = buy.active && buy.tool == Some(crate::build::BuildTool::Terrain) && !menu.is_open() && modal.is_empty();
     let cursor = windows.single().ok().and_then(|w| w.cursor_position());
@@ -173,6 +233,7 @@ fn paint_tool(
     }
     strokes.last = Some(at);
     let layer = buy.terrain;
+    history.paint.get_or_insert_with(|| strokes.saved());
     strokes.pending.push(Stroke { x: at.x, z: at.y, radius: r, layer });
 }
 
@@ -267,6 +328,7 @@ fn sculpt_tool(
     objects: Query<(&crate::interact::GameObject, &Transform), Without<crate::visit::LotObject>>,
     mut gizmos: Gizmos,
     mut test: ResMut<SculptAt>,
+    mut history: ResMut<TerrainHistory>,
 ) {
     if menu.is_open() || !modal.is_empty() {
         sculpted.flatten_to = None;
@@ -351,6 +413,11 @@ fn sculpt_tool(
     }
     let mut cells = Vec::new();
     for (x, z, v) in changes {
+        if hm.data[z as usize * hm.width + x as usize] == v { continue; }
+        if buy.active {
+            history.heights.entry((x as u32, z as u32)).or_insert_with(||
+                (hm.data[z as usize * hm.width + x as usize], sculpted.heights.get(&(x as u32, z as u32)).copied()));
+        }
         hm.data[z as usize * hm.width + x as usize] = v;
         sculpted.heights.insert((x as u32, z as u32), v);
         cells.extend([(x - 1, z - 1), (x, z - 1), (x - 1, z), (x, z)]);
@@ -401,6 +468,41 @@ fn restore_heights(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terrain_gesture_groups_dabs_and_retains_original_height_and_save_state() {
+        let original = Stroke { x: 4.0, z: 5.0, radius: 2.0, layer: 1 };
+        let dab = Stroke { x: 6.0, ..original };
+        let strokes = Strokes { all: vec![original, dab], pending: vec![Stroke { x: 7.0, ..dab }], ..default() };
+        let mut sculpted = Sculpted::default();
+        sculpted.heights.insert((4, 5), 140);
+        let mut history = TerrainHistory { paint: Some(vec![original]), ..default() };
+        history.heights.insert((4, 5), (100, None));
+        history.heights.entry((4, 5)).or_insert((120, Some(120)));
+        let edit = history.take_edit(&strokes, &sculpted).unwrap();
+        assert_eq!(edit.paint.unwrap(), (vec![original], strokes.saved()));
+        assert_eq!(edit.heights, vec![((4, 5), 100, None, 140)]);
+        assert!(history.take_edit(&strokes, &sculpted).is_none());
+    }
+
+    #[test]
+    fn unchanged_terrain_gesture_does_not_create_history() {
+        let mut history = TerrainHistory { paint: Some(Vec::new()), ..default() };
+        history.heights.insert((2, 3), (100, Some(100)));
+        let mut sculpted = Sculpted::default();
+        sculpted.heights.insert((2, 3), 100);
+        assert!(history.take_edit(&Strokes::default(), &sculpted).is_none());
+    }
+
+    #[test]
+    fn returning_to_the_original_height_still_restores_its_unsaved_state() {
+        let mut history = TerrainHistory::default();
+        history.heights.insert((2, 3), (100, None));
+        let mut sculpted = Sculpted::default();
+        sculpted.heights.insert((2, 3), 100);
+        let edit = history.take_edit(&Strokes::default(), &sculpted).unwrap();
+        assert_eq!(edit.heights, vec![((2, 3), 100, None, 100)]);
+    }
 
     #[test]
     fn paint_and_erase() {

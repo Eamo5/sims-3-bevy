@@ -172,6 +172,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(PostUpdate, buy_history_test.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PostUpdate, buy_design_test.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PostUpdate, build_navigation_test.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(PreUpdate, build_history_test.after(bevy::input::InputSystems).after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
@@ -541,6 +542,130 @@ fn build_navigation_test(
     assert_eq!(visibility.get(root).unwrap().get(), *step < 6);
     *step += 1;
     if *step == 8 { info!("autotest: Build navigation PASS — wall, room, Back, pool, wallpaper, Live and Buy"); }
+}
+
+#[derive(Default)]
+struct BuildHistoryProbe {
+    stage: u8,
+    end: Vec2,
+    before: String,
+    after: String,
+    funds: i64,
+    paid: i64,
+    paint_before: String,
+    paint_after: String,
+    objects_before: String,
+    objects_after: String,
+    removed_before: String,
+    removed_after: String,
+}
+
+/// BUILD_HISTORY_TEST=room|pool|demolish|terrain|sculpt: real drags followed by original HUD
+/// undo/redo clicks, checking exact construction data, funds and replayable save operations.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn build_history_test(
+    time: Res<Time>, mut buy: ResMut<crate::buy::BuyMode>,
+    building: Option<Res<crate::building::ActiveBuilding>>, household: Option<Res<crate::interact::Household>>,
+    log: Option<Res<crate::building::LotPaint>>, mut mouse: ResMut<ButtonInput<MouseButton>>,
+    mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+    camera: Query<(&Camera, &GlobalTransform), With<SimsCamera>>,
+    mut controls: Query<(&crate::layout::UiWin, &InheritedVisibility, &mut Interaction)>,
+    objects: Query<(Entity, &Transform, &crate::interact::GameObject, Option<&crate::upgrades::Upgrades>, Has<crate::interact::Broken>)>,
+    removed: Res<crate::save::RemovedLotObjects>,
+    (strokes, sculpted, world, paint_map, images): (Res<crate::terrain_paint::Strokes>, Res<crate::terrain_paint::Sculpted>, Res<crate::loading::CurrentWorld>, Option<Res<crate::terrain_paint::PaintMap>>, Res<Assets<Image>>),
+    mut probe: Local<BuildHistoryProbe>,
+) {
+    let Ok(mode) = std::env::var("BUILD_HISTORY_TEST") else { return };
+    if probe.stage >= 7 || time.elapsed_secs() < 6.0 + probe.stage as f32 * 0.5 { return; }
+    let (Some(b), Some(h), Ok((camera, camera_tf)), Ok(mut window)) = (building, household, camera.single(), windows.single_mut()) else { return };
+    let fingerprint = || {
+        let mut built: Vec<_> = b.built.iter().copied().collect();
+        built.sort_unstable();
+        use std::hash::{Hash, Hasher};
+        let mut heights = std::collections::hash_map::DefaultHasher::new();
+        world.data.heightmap.data.hash(&mut heights);
+        let mut pixels = std::collections::hash_map::DefaultHasher::new();
+        if let Some(image) = paint_map.as_ref().and_then(|map| images.get(&map.image)) { image.data.hash(&mut pixels); }
+        serde_json::to_string(&(&b.data, format!("{:?}", b.built_stairs), b.roof_texture, built,
+            strokes.saved(), sculpted.saved(), heights.finish(), pixels.finish())).unwrap()
+    };
+    let paint = || serde_json::to_string(&log.as_ref().map(|l| l.0.as_slice()).unwrap_or_default()).unwrap();
+    let object_state = || {
+        let mut values = objects.iter().map(|(e, tf, o, upgrades, broken)| format!("{e:?}|{tf:?}|{:?}|{:?}|{broken}", o.objd, upgrades.map(|u| u.0))).collect::<Vec<_>>();
+        values.sort();
+        values.join("\n")
+    };
+    let project = |at: Vec2| camera.world_to_viewport(camera_tf, b.world(at.x, at.y, b.levels[b.view_level as usize])).ok()
+        .filter(|p| p.x > 420.0 && p.x < window.width() * 0.70 && p.y > 100.0 && p.y < window.height() - 400.0);
+    match probe.stage {
+        0 => {
+            assert!(buy.active && buy.category >= crate::buy::WALLPAPER_TAB);
+            let (start, end, tool) = if mode == "demolish" {
+                let wall = b.data.walls.iter().find(|w| w.level.max(1) == b.view_level
+                    && Vec2::from(w.a).distance(Vec2::from(w.b)) >= 1.0
+                    && !b.openings_on(w.level, Vec2::from(w.a), Vec2::from(w.b)).is_empty()
+                    && project(Vec2::from(w.a)).is_some() && project(Vec2::from(w.b)).is_some()).expect("visible wall with a door/window");
+                (Vec2::from(wall.a), Vec2::from(wall.b), crate::build::BuildTool::Sledgehammer)
+            } else {
+                let at = (2..b.data.depth as i32 - 4).flat_map(|z| (2..b.data.width as i32 - 4).map(move |x| IVec2::new(x, z)))
+                    .find(|p| (0..=3).all(|z| (0..=3).all(|x| !b.data.floors.iter().chain(&b.data.pool).any(|f| f.x as i32 == p.x + x && f.z as i32 == p.y + z)))
+                        && project(p.as_vec2()).is_some() && project(p.as_vec2() + Vec2::splat(2.0)).is_some()).expect("visible empty construction area");
+                let offset = if mode == "pool" { Vec2::splat(0.2) } else { Vec2::ZERO };
+                (at.as_vec2() + offset, at.as_vec2() + Vec2::splat(2.0) + offset,
+                    match mode.as_str() {
+                        "pool" => crate::build::BuildTool::Pool,
+                        "terrain" => crate::build::BuildTool::Terrain,
+                        "sculpt" => crate::build::BuildTool::Sculpt,
+                        _ => crate::build::BuildTool::Room,
+                    })
+            };
+            probe.before = fingerprint();
+            probe.paint_before = paint();
+            probe.funds = h.funds;
+            probe.objects_before = object_state();
+            probe.removed_before = serde_json::to_string(&removed.0).unwrap();
+            probe.end = project(end).unwrap();
+            let start = project(start).unwrap();
+            buy.tool = Some(tool);
+            buy.show(crate::buy::BUILD_TAB);
+            window.set_cursor_position(Some(start));
+        }
+        1 => mouse.press(MouseButton::Left),
+        2 => window.set_cursor_position(Some(probe.end)),
+        3 => mouse.release(MouseButton::Left),
+        4 => {
+            probe.after = fingerprint();
+            probe.paint_after = paint();
+            probe.paid = h.funds;
+            probe.objects_after = object_state();
+            probe.removed_after = serde_json::to_string(&removed.0).unwrap();
+            assert_ne!(probe.before, probe.after, "the construction drag must modify the lot");
+            if mode != "terrain" && mode != "sculpt" {
+                assert_ne!(probe.paint_before, probe.paint_after, "construction must be recorded for saving");
+            }
+            let (_, _, mut i) = controls.iter_mut().find(|(id, v, _)| id.0 == 0x2e2 && v.get()).expect("original Undo button");
+            *i = Interaction::Pressed;
+        }
+        5 => {
+            assert_eq!(fingerprint(), probe.before, "undo restores exact building data");
+            assert_eq!(paint(), probe.paint_before, "undo restores saved construction operations");
+            assert_eq!(h.funds, probe.funds);
+            assert_eq!(object_state(), probe.objects_before, "undo restores the original door/window entities and state");
+            assert_eq!(serde_json::to_string(&removed.0).unwrap(), probe.removed_before);
+            let (_, _, mut i) = controls.iter_mut().find(|(id, v, _)| id.0 == 0x2e3 && v.get()).expect("original Redo button");
+            *i = Interaction::Pressed;
+        }
+        6 => {
+            assert_eq!(fingerprint(), probe.after, "redo reapplies exact building data");
+            assert_eq!(paint(), probe.paint_after);
+            assert_eq!(h.funds, probe.paid);
+            assert_eq!(object_state(), probe.objects_after);
+            assert_eq!(serde_json::to_string(&removed.0).unwrap(), probe.removed_after);
+            info!("autotest: construction history {mode} PASS — real drag, original buttons, building data, funds and save replay");
+        }
+        _ => unreachable!(),
+    }
+    probe.stage += 1;
 }
 
 /// CLICK_AT=<x,y>@<seconds>;...: window-relative clicks through the real input path.

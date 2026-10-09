@@ -1384,6 +1384,7 @@ fn paint(
         Option<ResMut<crate::building::LotPaint>>,
         MessageWriter<crate::sound::PlaySound>,
     ),
+    removed: Res<crate::save::RemovedLotObjects>,
 ) {
     if menu.is_open() || !modal.is_empty() { return; }
     let Some(i) = buy.painting.filter(|_| buy.active) else { return };
@@ -1430,11 +1431,13 @@ fn paint(
         notes.push("You can't afford that.");
         return;
     }
+    let before = crate::building::BuildingSnapshot::capture(b, log.as_deref());
     if let Some(h) = household.as_mut() {
         h.funds -= cost;
     }
     let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
     crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces);
+    crate::buyhistory::record_construction(&mut commands, before, b, &ops, -cost, removed.0.clone(), Vec::new());
     match log.as_mut() {
         Some(l) => l.0.extend(ops),
         None => commands.insert_resource(crate::building::LotPaint(ops)),
@@ -1766,9 +1769,11 @@ fn placement(
         let (pos, rot) = (tf.translation, tf.rotation);
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
         // A door needs its own wall sections: cut them free of any longer wall first.
+        let mut building_before = None;
         if let (Some((_, _, ops)), Some(b)) = (in_wall, building.as_deref_mut())
             && !ops.is_empty()
         {
+            building_before = Some(crate::building::BuildingSnapshot::capture(b, log.as_deref()));
             crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces);
             match log.as_mut() {
                 Some(l) => l.0.extend(ops),
@@ -1816,7 +1821,7 @@ fn placement(
             }
             if owned {
                 if source.is_some() {
-                    crate::buyhistory::record(&mut commands, entity, true, 0, removed_before);
+                    crate::buyhistory::record_with_building(&mut commands, entity, true, 0, removed_before, building_before);
                 } else {
                     crate::buyhistory::discard(&mut commands);
                 }
@@ -1824,7 +1829,7 @@ fn placement(
                 buy.placing = None;
                 buy.dirty = true;
             } else {
-                crate::buyhistory::record(&mut commands, entity, false, -price, removed_before);
+                crate::buyhistory::record_with_building(&mut commands, entity, false, -price, removed_before, building_before);
             }
         }
     }

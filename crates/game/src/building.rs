@@ -624,6 +624,66 @@ pub struct PoolChanged;
 #[derive(Resource, Default, Clone)]
 pub struct LotPaint(pub Vec<PaintOp>);
 
+/// Logical construction state, independent of the render entities regenerated on undo.
+#[derive(Clone)]
+pub struct BuildingSnapshot {
+    data: LotBuildingBaked,
+    built: HashSet<u32>,
+    stairs: Vec<BuiltStairs>,
+    roof: Key,
+    levels: Vec<f32>,
+    top_level: u8,
+    center: Vec3,
+    pub paint: LotPaint,
+}
+
+impl BuildingSnapshot {
+    pub fn capture(b: &ActiveBuilding, paint: Option<&LotPaint>) -> Self {
+        Self {
+            data: b.data.clone(), built: b.built.clone(), stairs: b.built_stairs.clone(),
+            roof: b.roof_texture, levels: b.levels.clone(), top_level: b.top_level,
+            center: b.center, paint: paint.cloned().unwrap_or_default(),
+        }
+    }
+}
+
+/// Redraw restored construction and refresh navigation, floor visibility and pool terrain cuts.
+pub fn restore_history(
+    In(snapshot): In<BuildingSnapshot>, mut commands: Commands, mut building: ResMut<ActiveBuilding>,
+    data: Res<crate::baked::Baked>, mut assets: ResMut<ObjectAssets>,
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    mut grid: Option<ResMut<crate::nav::NavGrid>>,
+) {
+    let b = &mut *building;
+    // Include vanished wall indices so their old meshes are removed as well.
+    let walls = (0..b.data.walls.len().max(snapshot.data.walls.len()) as u32).collect();
+    b.data = snapshot.data;
+    b.built = snapshot.built;
+    b.built_stairs = snapshot.stairs;
+    b.roof_texture = snapshot.roof;
+    b.levels = snapshot.levels;
+    b.top_level = snapshot.top_level;
+    b.view_level = b.view_level.min(b.top_level);
+    b.center = snapshot.center;
+    b.always_detailed = true;
+    b.far = None;
+    b.reindex();
+    let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+    respawn_walls(&mut commands, b, &mut assets, &mut ctx, &walls);
+    respawn_stairs(&mut commands, b, &mut assets, &mut ctx);
+    respawn_roofs(&mut commands, b, &mut assets, &mut ctx);
+    for e in b.floor_entities.drain(..).chain(b.pool_entities.drain(..)).chain(b.fence_entities.drain(..)) {
+        commands.entity(e).try_despawn();
+    }
+    let data = b.data.clone();
+    b.floor_entities = spawn_floors(&mut commands, &mut assets, &mut ctx, &data, b, None);
+    b.pool_entities = spawn_pool(&mut commands, &mut assets, &mut ctx, &data, b, None);
+    b.fence_entities = spawn_fences(&mut commands, &mut assets, &mut ctx, &data, b, None);
+    commands.insert_resource(snapshot.paint);
+    commands.queue(|world: &mut World| { world.write_message(PoolChanged); });
+    if let Some(grid) = grid.as_mut() { grid.dirty = true; }
+}
+
 /// Repaints and rebuilds the active house: applies the operations to its data and redraws the
 /// walls painted, built or knocked down and, if any floor changed, the floors.
 #[allow(clippy::too_many_arguments)]

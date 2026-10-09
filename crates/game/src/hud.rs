@@ -601,8 +601,8 @@ fn fade_help(mut commands: Commands, time: Res<Time>, mut since: Local<Option<f3
     }
 }
 
-pub(crate) fn pointer_over_ui(mut over: ResMut<PointerOverUi>, q: Query<&Interaction, Or<(With<BlocksWorld>, With<Button>)>>) {
-    over.0 = q.iter().any(|i| *i != Interaction::None);
+pub(crate) fn pointer_over_ui(mut over: ResMut<PointerOverUi>, q: Query<(&Interaction, &InheritedVisibility), Or<(With<BlocksWorld>, With<Button>)>>) {
+    over.0 = q.iter().any(|(i, v)| v.get() && *i != Interaction::None);
 }
 
 fn close_pie(commands: &mut Commands, pie: &mut PieMenu) {

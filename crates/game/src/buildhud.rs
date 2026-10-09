@@ -37,7 +37,7 @@ const LIGHT: u32 = 0x2e8;
 const GRID: u32 = 0x2e9;
 
 #[derive(Component, Clone, Copy)]
-enum Action { Home, Tool(BuildTool), Category(usize), Hand, Lighting, Grid }
+enum Action { Home, Tool(BuildTool), Category(usize), Hand, Lighting, Grid, Undo, Redo }
 
 fn home_action(id: u32) -> Option<Action> {
     Some(match id {
@@ -101,6 +101,7 @@ fn spawn(
     for (id, action) in [
         (BACK, Action::Home), (HAND, Action::Hand), (HAMMER, Action::Tool(BuildTool::Sledgehammer)),
         (LIGHT, Action::Lighting), (GRID, Action::Grid),
+        (0x2e2, Action::Undo), (0x2e3, Action::Redo),
         (0x301, Action::Tool(BuildTool::Wall)), (0x302, Action::Tool(BuildTool::Room)),
         (0x321a, Action::Tool(BuildTool::Wall)), (0x321b, Action::Category(WALLPAPER_TAB)),
         (0x06ee_34a0, Action::Tool(BuildTool::Pool)), (0x06ee_34af, Action::Tool(BuildTool::Pool)),
@@ -111,7 +112,10 @@ fn spawn(
     for (id, button) in [(CLONE, BuyButton::Eyedropper), (DESIGN, BuyButton::Styling)] {
         if let Some(e) = s.id(id) { commands.entity(e).insert(button); }
     }
-    for id in [0x2e2, 0x2e3, 0x2ea, 0x2ef, 0x2f1, 0x304, 0x305, 0x06ee_34a2, 0x0a67_d7f0] {
+    for (id, tooltip) in [(0x2e2, "Undo (Ctrl+Z)"), (0x2e3, "Redo (Ctrl+Y)")] {
+        if let Some(e) = s.id(id) { commands.entity(e).insert(crate::icons::Tooltip(tooltip.into())); }
+    }
+    for id in [0x2ea, 0x2ef, 0x2f1, 0x304, 0x305, 0x06ee_34a2, 0x0a67_d7f0] {
         if let Some(e) = s.id(id) { commands.entity(e).insert(Unavailable); }
     }
     // Hide fountain/curved-pool alternatives inside the rectangular-pool panel.
@@ -130,6 +134,7 @@ struct Unavailable;
 fn controls(
     mut commands: Commands, mut buy: ResMut<BuyMode>, clock: Res<crate::clock::GameClock>,
     actions: Query<(&Interaction, &Action), Changed<Interaction>>,
+    mut history: ResMut<crate::buyhistory::BuyHistory>,
 ) {
     if !buy.active || buy.category < WALLPAPER_TAB { return; }
     for (interaction, action) in &actions {
@@ -141,6 +146,8 @@ fn controls(
             Action::Hand => buy.drop_tools(&mut commands),
             Action::Lighting => buy.toggle_lighting(clock.hour_f()),
             Action::Grid => buy.hide_grid = !buy.hide_grid,
+            Action::Undo => history.request = Some(crate::buyhistory::Request::Undo),
+            Action::Redo => history.request = Some(crate::buyhistory::Request::Redo),
         }
     }
 }
@@ -148,6 +155,7 @@ fn controls(
 fn show(
     hud: Res<BuildHud>, live: Option<Res<LiveHud>>, buy: Res<BuyMode>, clock: Res<crate::clock::GameClock>,
     mut visibility: Query<&mut Visibility>, mut buttons: Query<(&mut UiButton, Has<Unavailable>)>,
+    history: Res<crate::buyhistory::BuyHistory>,
 ) {
     let on = buy.active && buy.category >= WALLPAPER_TAB;
     let s = &hud.puck;
@@ -169,6 +177,12 @@ fn show(
     }
     for (mut button, unavailable) in &mut buttons {
         if unavailable && !button.disabled { button.disabled = true; }
+    }
+    let holding = buy.placing.as_ref().is_some_and(|p| p.owned);
+    for (id, enabled) in [(0x2e2, history.can_undo()), (0x2e3, history.can_redo())] {
+        if let Some(e) = s.id(id) && let Ok((mut button, _)) = buttons.get_mut(e) {
+            button.disabled = holding || !enabled;
+        }
     }
     for (id, selected) in [
         (HAND, buy.tool.is_none() && !buy.eyedropper && !buy.styling()), (HAMMER, buy.tool == Some(BuildTool::Sledgehammer)),
@@ -212,7 +226,7 @@ mod tests {
     #[test]
     fn diagram_buttons_select_tools_and_back_returns_home() {
         let mut app = App::new();
-        app.init_resource::<BuyMode>().init_resource::<crate::clock::GameClock>().add_systems(Update, controls);
+        app.init_resource::<BuyMode>().init_resource::<crate::clock::GameClock>().init_resource::<crate::buyhistory::BuyHistory>().add_systems(Update, controls);
         app.world_mut().resource_mut::<BuyMode>().show(BUILD_TAB);
         let button = app.world_mut().spawn((Interaction::Pressed, home_action(0x1013).unwrap())).id();
         app.update();
