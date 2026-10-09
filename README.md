@@ -288,6 +288,8 @@ installation is unreachable.
   paving, and chooses the nearer covered floor or wall instead of always preferring a wall.
   Newly rendered custom coverings keep a style recipe beside their cached texture. Sampling
   them restores the source pattern's price, preset and editable colours, including after reload.
+  Custom furniture textures likewise retain their preset and colour recipe when picked up,
+  sampled with the eyedropper or retrieved from inventory, so further edits start from that design.
   Wallpaper picking and outlines follow each wall's authored foundation/split-level elevation.
   Wall-mounted objects also snap at that elevation; multi-tile objects cannot bridge wall
   sections with different base heights.
@@ -758,6 +760,9 @@ closes Buy mode then, logging the inventory. `DIVE=1` puts a diving board on the
 `UI_CLICK=05b706c0@6;05b706d0@7` clicks visible original-layout controls (hex control ids).
 Build/Buy input scripts and their regression probes count seconds from entering Live Mode;
 loading and cache conversion time do not consume their scheduled delays.
+`OBJ_STYLE=1` with `PRESS_KEY=F2@5` and `BUY_PICK=0@6` renders a custom furniture design,
+checks its cached recipe, and samples the placed object to verify editable preset/channel
+restoration. Capture after 32 seconds.
 `CLICK_AT=1000,450@8` clicks at window-relative coordinates (`CURSOR_AT` moves without clicking).
 `BUY_HISTORY_TEST=1` verifies selling, undoing and redoing furniture transactions in the running
 game. Use `BUY_HISTORY_TEST=buttons` with `UI_CLICK=05ac150d@7;05ac150e@8;05ac150d@9` to verify

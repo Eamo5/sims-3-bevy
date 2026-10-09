@@ -255,6 +255,7 @@ fn eyedrop(
         buy.eyedropper = false;
         buy.eyedropped = true;
         buy.placing = Some(Placing::new(obj.objd, ghost, false, design));
+        buy.style = design.and_then(crate::style::ObjectStyle::from_texture).filter(|s| s.objd == obj.objd);
         buy.dirty = true;
         play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
         return;
@@ -345,9 +346,35 @@ impl BuyMode {
 
 /// OBJ_STYLE=1 (tests): with an object in hand, Create a Style opened (from 12 seconds in) and
 /// its first channel made red (two seconds later).
-fn scripted_style(time: Res<Time>, buy: Res<BuyMode>, mut buttons: Query<(&BuyButton, &mut Interaction)>, mut step: Local<u8>) {
+fn scripted_style(time: Res<Time<crate::autotest::InputTimeline>>, mut buy: ResMut<BuyMode>, mut buttons: Query<(&BuyButton, &mut Interaction)>, mut step: Local<u8>,
+    mut commands: Commands, objects: Query<(Entity, &GameObject, &crate::objects::Design)>, mut expected: Local<Option<crate::style::ObjectStyle>>) {
     if std::env::var("OBJ_STYLE").is_err() || buy.placing.is_none() {
         return;
+    }
+    if *step == 3 && time.elapsed_secs() > 22.0 {
+        let style = buy.style.clone().expect("rendered object style");
+        let (e, _, _) = objects.iter().find(|(_, o, d)| o.objd == style.objd && d.0 == style.texture()).expect("styled object placed by automation");
+        *expected = Some(style);
+        buy.drop_tools(&mut commands);
+        commands.insert_resource(EyedropRequest(e));
+        *step = 4;
+        return;
+    }
+    if *step == 4 && time.elapsed_secs() > 24.0 {
+        assert_eq!(buy.style.as_ref(), expected.as_ref());
+        assert_eq!(buy.placing.as_ref().and_then(|p| p.design), expected.as_ref().map(|s| s.texture()));
+        info!("autotest: object style eyedropper PASS — sampled furniture restores editable preset and channels");
+        *step = 5;
+        return;
+    }
+    if *step == 2 && time.elapsed_secs() > 20.0 {
+        if let Some(style) = buy.style.as_ref().filter(|s| buy.placing.as_ref().is_some_and(|p| p.design == Some(s.texture()))) {
+            assert_eq!(crate::style::ObjectStyle::from_texture(style.texture()).as_ref(), Some(style));
+            info!("autotest: object recipe persistence PASS — source object, preset and channels restored from the texture cache");
+        } else {
+            assert!(time.elapsed_secs() < 30.0, "object style render must finish");
+            return;
+        }
     }
     let want = match (*step, time.elapsed_secs()) {
         (0, t) if t > 12.0 => BuyButton::Styling,
@@ -1651,6 +1678,7 @@ fn placement(
             let ghost = spawn_parts(&mut commands, &parts, Transform::from_xyz(0.0, -1000.0, 0.0));
             commands.entity(ghost).insert(DespawnOnExit(AppState::InGame));
             buy.placing = Some(Placing { item: Some(h.item.clone()), from: Some(h.from), ..Placing::new(h.objd, ghost, true, h.design) });
+            buy.style = h.design.and_then(crate::style::ObjectStyle::from_texture).filter(|s| s.objd == h.objd);
             buy.dirty = true;
             return;
         }
@@ -1675,6 +1703,7 @@ fn placement(
                 commands.entity(ghost).insert(DespawnOnExit(AppState::InGame));
                 buy.yaw = tf.rotation.to_euler(EulerRot::YXZ).0;
                 buy.placing = Some(Placing { item: hung.map(|h| h.0.clone()), origin: Some(*tf), source: Some((req.0, obstacle.copied())), edit_in_place, ..Placing::new(obj.objd, ghost, true, design) });
+                buy.style = design.and_then(crate::style::ObjectStyle::from_texture).filter(|s| s.objd == obj.objd);
                 buy.design_tool = false;
                 buy.styling = edit_in_place;
                 buy.dirty = true;

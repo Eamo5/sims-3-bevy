@@ -75,7 +75,7 @@ pub const PALETTE: [[f32; 3]; 30] = [
 pub const T_OBJ_STYLE: u32 = 0x0B1E_5171;
 
 /// An object's own style: one of its designs with some of its channels' colours changed.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ObjectStyle {
     pub objd: s3bake::Key,
     pub design: u8,
@@ -88,6 +88,17 @@ impl ObjectStyle {
     pub fn texture(&self) -> s3bake::Key {
         let desc = format!("{:?}|{}|{:?}", self.objd, self.design, self.colours.iter().map(|(c, v)| (c, v.map(|x| (x * 255.0).round() as u8))).collect::<Vec<_>>());
         (T_OBJ_STYLE, 0, s3pkg::fnv64(&desc))
+    }
+
+    pub fn from_texture(key: s3bake::Key) -> Option<Self> {
+        if key.0 != T_OBJ_STYLE { return None; }
+        let bytes = std::fs::read(s3bake::default_root().tex_path(key).with_extension("style.json")).ok()?;
+        Self::decode_recipe(key, &bytes)
+    }
+
+    fn decode_recipe(key: s3bake::Key, bytes: &[u8]) -> Option<Self> {
+        let style: Self = serde_json::from_slice(bytes).ok()?;
+        (style.texture() == key && style.colours.iter().all(|(channel, rgb)| *channel < 4 && rgb.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)))).then_some(style)
     }
 }
 
@@ -129,6 +140,22 @@ impl CoverStyle {
 #[cfg(test)]
 mod cover_recipe_tests {
     use super::*;
+
+    #[test]
+    fn object_recipes_keep_nondefault_presets_and_reject_mismatched_textures() {
+        let style = ObjectStyle { objd: (1, 2, 3), design: 2, colours: vec![(1, [0.1, 0.4, 0.8])] };
+        let bytes = serde_json::to_vec(&style).unwrap();
+        assert_eq!(ObjectStyle::decode_recipe(style.texture(), &bytes), Some(style.clone()));
+        let mut other = style.clone();
+        other.design = 0;
+        assert!(ObjectStyle::decode_recipe(other.texture(), &bytes).is_none());
+        other = style.clone();
+        other.objd.2 += 1;
+        assert!(ObjectStyle::decode_recipe(other.texture(), &bytes).is_none());
+        other.colours[0].0 = 4;
+        assert!(ObjectStyle::decode_recipe(other.texture(), &serde_json::to_vec(&other).unwrap()).is_none());
+        assert!(ObjectStyle::decode_recipe(style.texture(), b"incomplete").is_none());
+    }
 
     #[test]
     fn recipes_restore_source_preset_and_channels_only_for_their_own_texture() {
@@ -218,7 +245,10 @@ impl StyleRenders {
             let c = p.complate.with_colours(&s.colours);
             let (w, h) = (size.0.max(16) as usize, size.1.max(16) as usize);
             let Some(img) = s3formats::complate::render(pkgs, &c, &p.keys, w, h) else { return false };
-            std::fs::write(s3bake::default_root().tex_path(s.texture()), s3bake::ddsw::encode_dds(&img)).is_ok()
+            let path = s3bake::default_root().tex_path(s.texture());
+            let Ok(recipe) = serde_json::to_vec(&s) else { return false };
+            std::fs::write(&path, s3bake::ddsw::encode_dds(&img)).is_ok()
+                && std::fs::write(path.with_extension("style.json"), recipe).is_ok()
         });
         self.objects.push((style, task));
     }
