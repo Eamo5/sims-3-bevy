@@ -1169,20 +1169,42 @@ fn wear_uniform(mut commands: Commands, sel: Query<Entity, With<crate::sim::Sele
 /// GIVE=<item>,...: puts things in the selected Sim's inventory: a collectible's key
 /// (`Ruby`, `Minnow`) or `<produce>/<quality 0-9>`, each with an optional `*<count>`.
 /// EAT=1: then they eat the first produce.
+/// EAT=check: verify consumption at the start, then cancel and verify it stays consumed.
 fn give_items(
     mut commands: Commands,
     mut sel: Query<(Entity, &mut crate::interact::ActionQueue, Option<&crate::inventory::Inventory>), With<crate::sim::Selected>>,
     ui: Option<Res<crate::icons::GameUi>>,
     mut done: Local<u8>,
-    time: Res<Time>,
+    time: Res<Time<InputTimeline>>,
+    mut expected: Local<Option<(String, u8, u32)>>,
 ) {
     let Ok(v) = std::env::var("GIVE") else { return };
     let (Ok((e, mut queue, inv)), Some(ui)) = (sel.single_mut(), ui) else { return };
+    if std::env::var("EAT").as_deref() == Ok("check") && *done >= 2 && *done < 4 {
+        let (key, quality, original) = expected.as_ref().expect("produce check target");
+        let remaining = inv.map_or(0, |i| i.0.iter().filter(|s| s.kind == crate::inventory::ItemKind::Produce && s.key == *key && s.quality == *quality).map(|s| s.count).sum::<u32>());
+        if *done == 2 {
+            if let Some(action) = queue.0.front_mut()
+                && matches!(action.kind, crate::interact::ActionKind::EatItem { .. })
+                && matches!(action.phase, crate::interact::Phase::Running(_))
+            {
+                assert_eq!(remaining, original - 1, "produce must be consumed before eating completes");
+                action.cancel = true;
+                *done = 3;
+            }
+        } else if !queue.0.iter().any(|a| matches!(a.kind, crate::interact::ActionKind::EatItem { .. })) {
+            assert_eq!(remaining, original - 1, "cancelling eating must not refund consumed food");
+            info!("autotest: inventory eating PASS — consumed before completion and retained consumption after cancellation");
+            *done = 4;
+        }
+        assert!(*done == 4 || time.elapsed_secs() < 20.0, "inventory eating probe must finish");
+    }
     if *done == 1
         && std::env::var("EAT").is_ok()
         && let Some(s) = inv.and_then(|i| i.0.iter().find(|s| s.kind == crate::inventory::ItemKind::Produce))
     {
         *done = 2;
+        *expected = Some((s.key.clone(), s.quality, s.count));
         info!("eating {} (have {})", s.name, s.count);
         queue.push_player(crate::interact::Action::new(format!("Eat {}", s.name), crate::interact::ActionKind::EatItem { key: s.key.clone(), quality: s.quality }, false));
     }
