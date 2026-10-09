@@ -264,15 +264,12 @@ fn eyedrop(
     let (Some(b), Some(ui)) = (building.as_deref(), ui) else { return };
     let ray = req.0;
     let cover_key = |i: u16| (i != s3bake::types::NO_COVER).then(|| b.data.covers.get(i as usize).copied()).flatten();
-    // (A wall side under the pointer, else the floor.)
-    let found = pick_wall(ray, b)
-        .and_then(|(w, side)| b.data.walls.get(w as usize).and_then(|w| cover_key(w.cover[side as usize])).map(|k| (k, false)))
-        .or_else(|| {
-            let (p, level) = crate::hud::floor_hit(ray, &world, Some(b))?;
-            let l = b.local(p);
-            let tile = b.data.floors.iter().find(|f| f.level == level && f.x as f32 == l.x.floor() && f.z as f32 == l.y.floor())?;
-            cover_key(tile.cover[0]).map(|k| (k, true))
-        });
+    let wall = pick_wall_hit(ray, b)
+        .and_then(|(distance, w, side)| b.data.walls.get(w as usize).and_then(|w| cover_key(w.cover[side as usize])).map(|k| (distance, k, false)));
+    let floor = crate::hud::floor_hit(ray, &world, Some(b)).and_then(|(p, level)| {
+        crate::covering::floor_texture(&b.data, level, b.local(p)).map(|k| (p.distance(ray.origin), k, true))
+    });
+    let found = wall.into_iter().chain(floor).min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, key, floor)| (key, floor));
     let Some((key, floor)) = found else {
         notes.push("Nothing to take up there.");
         return;
@@ -370,13 +367,14 @@ fn scripted_style(time: Res<Time>, buy: Res<BuyMode>, mut buttons: Query<(&BuyBu
 /// it took up is logged two seconds later.
 fn scripted_eyedrop(
     mut commands: Commands,
-    time: Res<Time>,
+    time: Res<Time<crate::autotest::InputTimeline>>,
     mut buy: ResMut<BuyMode>,
     sel: Query<&Transform, With<crate::sim::Selected>>,
     objects: Query<(Entity, &GameObject, &Transform)>,
     catalog: Res<Catalog>,
     building: Option<Res<crate::building::ActiveBuilding>>,
     mut step: Local<u8>,
+    mut expected: Local<Option<Key>>,
 ) {
     let Ok(want) = std::env::var("EYEDROP") else { return };
     let t = time.elapsed_secs();
@@ -386,8 +384,19 @@ fn scripted_eyedrop(
             buy.show(0);
             buy.eyedropper = true;
             if want == "floor" {
-                let at = building.as_ref().map_or(me.translation, |b| b.center);
-                let ray = Ray3d::new(at + Vec3::Y * 2.5, Dir3::NEG_Y);
+                let b = building.as_ref().expect("eyedropper test lot");
+                let (at, key) = b.data.floors.iter().filter(|f| f.level == b.view_level).find_map(|f| {
+                    [3usize, 2, 1, 0].into_iter().find_map(|t| {
+                        if f.mask & (1 << t) == 0 { return None; }
+                        let offset = [Vec2::new(0.5, 0.2), Vec2::new(0.8, 0.5), Vec2::new(0.5, 0.8), Vec2::new(0.2, 0.5)][t];
+                        let local = Vec2::new(f.x as f32, f.z as f32) + offset;
+                        let key = crate::covering::floor_texture(&b.data, f.level, local)?;
+                        let y = f.y.unwrap_or(b.levels[f.level as usize]);
+                        Some((b.world(local.x, local.y, y), key))
+                    })
+                }).expect("floor triangle with a covering");
+                *expected = Some(key);
+                let ray = Ray3d::new(at + Vec3::Y * 0.1, Dir3::NEG_Y);
                 commands.insert_resource(EyedropCover(ray));
             } else if let Some((e, o, _)) = objects
                 .iter()
@@ -400,6 +409,12 @@ fn scripted_eyedrop(
             *step = 1;
         }
         1 if t > 12.0 => {
+            if let Some(expected) = *expected {
+                assert_eq!(buy.cover, Some(expected), "eyedropper must preserve the exact floor triangle design");
+                assert_eq!(buy.category, FLOORS_TAB);
+                assert!(!buy.eyedropper);
+                info!("autotest: floor eyedropper PASS — exact triangle covering selected in the floor catalogue");
+            }
             info!(
                 "eyedrop test: in hand {:?} (design {:?}), painting {:?} in {:?}, eyedropper {}",
                 buy.placing.as_ref().map(|p| p.objd),
@@ -1514,6 +1529,10 @@ fn paint(
 /// The nearest wall the ray meets on the floors in view, and which side faces the ray (0 = the
 /// wall's left / +normal side).
 fn pick_wall(ray: Ray3d, b: &crate::building::ActiveBuilding) -> Option<(u32, u8)> {
+    pick_wall_hit(ray, b).map(|(_, wall, side)| (wall, side))
+}
+
+fn pick_wall_hit(ray: Ray3d, b: &crate::building::ActiveBuilding) -> Option<(f32, u32, u8)> {
     let mut best: Option<(f32, u32, u8)> = None;
     for (i, w) in b.data.walls.iter().enumerate() {
         let level = w.level.max(1);
@@ -1532,7 +1551,7 @@ fn pick_wall(ray: Ray3d, b: &crate::building::ActiveBuilding) -> Option<(u32, u8
             best = Some((t, i as u32, side));
         }
     }
-    best.map(|(_, w, s)| (w, s))
+    best
 }
 
 /// Hit the actual rendered full-height wall, including an authored foundation offset.

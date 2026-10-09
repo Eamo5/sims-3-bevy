@@ -86,6 +86,17 @@ pub fn floors(b: &LotBuildingBaked, level: u8, at: Vec2, texture: Key, fill: boo
     }).collect()
 }
 
+/// The covering on the precise floor triangle under the pointer, including outdoor paving.
+pub fn floor_texture(b: &LotBuildingBaked, level: u8, at: Vec2) -> Option<Key> {
+    let (x, z, t) = triangle(at);
+    let tile = [Some(level), (level == 1).then_some(0)].into_iter().flatten().find_map(|level| {
+        b.floors.iter().find(|f| f.level == level && f.x as i32 == x && f.z as i32 == z && f.mask & (1 << t) != 0)
+    })?;
+    let cover = tile.cover[t as usize];
+    if cover == s3bake::NO_COVER { return None; }
+    b.covers.get(cover as usize).copied()
+}
+
 #[cfg(test)]
 fn paving(b: &LotBuildingBaked, at: Vec2, texture: Key, heights: [f32; 4]) -> Vec<PaintOp> {
     pave_room(b, at, texture, false, |_| heights)
@@ -194,6 +205,24 @@ pub fn preview(gizmos: &mut Gizmos, b: &crate::building::ActiveBuilding, ops: &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eyedropper_samples_each_triangle_and_outdoor_paving() {
+        let mut b = house();
+        b.floors.retain(|f| f.x == 1 && f.z == 1);
+        b.covers = (0..4).map(|i| (1, 2, i)).collect();
+        b.floors[0].cover = [0, 1, 2, 3];
+        for t in 0..4 {
+            assert_eq!(floor_texture(&b, 1, center(1, 1, t)), Some((1, 2, t as u64)));
+        }
+        b.floors[0].level = 0;
+        assert_eq!(floor_texture(&b, 1, center(1, 1, 2)), Some((1, 2, 2)));
+        assert_eq!(floor_texture(&b, 2, center(1, 1, 2)), None, "do not sample ground through an upper storey");
+        b.floors[0].mask = 3;
+        assert_eq!(floor_texture(&b, 1, center(1, 1, 2)), None, "missing triangles have no covering");
+        b.floors[0].cover[0] = s3bake::NO_COVER;
+        assert_eq!(floor_texture(&b, 1, center(1, 1, 0)), None);
+    }
 
     #[test]
     fn preview_outlines_only_changed_triangle_boundaries() {

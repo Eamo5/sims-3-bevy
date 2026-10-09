@@ -284,6 +284,8 @@ installation is unreachable.
   identical coverings; unaffordable quotes are red and cannot alter the lot.
   Hover targeting is cached per surface and refreshed after geometry, terrain, texture or
   fill-mode changes, avoiding repeated room searches while the pointer stays on a surface.
+  The covering eyedropper samples the exact triangle of diagonal flooring, supports outdoor
+  paving, and chooses the nearer covered floor or wall instead of always preferring a wall.
   Wallpaper picking and outlines follow each wall's authored foundation/split-level elevation.
   Wall-mounted objects also snap at that elevation; multi-tile objects cannot bridge wall
   sections with different base heights.
