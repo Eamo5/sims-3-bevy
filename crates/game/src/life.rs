@@ -270,42 +270,38 @@ impl Trait {
         }
     }
 
-    /// Traits that can't be held together.
+    /// Traits sharing a SetNumbers exclusion group in the installed Traits.xml.
     fn conflicts(self, other: Trait) -> bool {
         use Trait::*;
         let pairs = [
-            (Neat, Slob),
+            (Artistic, CantStandArt),
+            (Athletic, CouchPotato),
+            (Brave, Coward),
+            (Brave, Loser),
+            (CantStandArt, EasilyImpressed),
+            (Charismatic, Loser),
+            (Childish, DislikesChildren),
+            (CommitmentIssues, HopelessRomantic),
+            (ComputerWhiz, Technophobe),
+            (CouchPotato, Technophobe),
+            (Coward, Daredevil),
+            (DislikesChildren, FamilyOriented),
+            (EasilyImpressed, Snob),
+            (Evil, Good),
+            (Excitable, Grumpy),
             (Flirty, Unflirty),
-            (Loner, PartyAnimal),
-            (Loner, Friendly),
-            (Good, MeanSpirited),
             (Friendly, MeanSpirited),
+            (GoodSenseOfHumor, NoSenseOfHumor),
+            (Grumpy, HotHeaded),
+            (HatesTheOutdoors, LovesTheOutdoors),
+            (HeavySleeper, LightSleeper),
+            (Loner, PartyAnimal),
+            (Lucky, Unlucky),
+            (Neat, Slob),
+            // Retain the historical constraints only for old saves containing Lazy.
             (Lazy, Athletic),
             (Lazy, Workaholic),
             (Lazy, Ambitious),
-            (HeavySleeper, LightSleeper),
-            (Technophobe, ComputerWhiz),
-            (Grumpy, Excitable),
-            (Grumpy, GoodSenseOfHumor),
-            (HopelessRomantic, Unflirty),
-            (Frugal, Snob),
-            (Brave, Coward),
-            (Good, Evil),
-            (Friendly, Evil),
-            (Lucky, Unlucky),
-            (LovesTheOutdoors, HatesTheOutdoors),
-            (GoodSenseOfHumor, NoSenseOfHumor),
-            (Artistic, CantStandArt),
-            (Virtuoso, CantStandArt),
-            (CommitmentIssues, FamilyOriented),
-            (DislikesChildren, FamilyOriented),
-            (Daredevil, Coward),
-            (Loser, Ambitious),
-            (Neat, Kleptomaniac),
-            (Snob, Loser),
-            (Inappropriate, Snob),
-            (Excitable, OverEmotional),
-            (NeverNude, Inappropriate),
         ];
         pairs.iter().any(|&(a, b)| (a == self && b == other) || (a == other && b == self))
     }
@@ -350,6 +346,26 @@ pub fn next_trait(current: Option<Trait>, others: &[Trait], age: Age) -> Option<
 mod trait_age_tests {
     use super::*;
     use rand::SeedableRng;
+
+    #[test]
+    fn original_trait_conflicts_are_symmetric_and_allow_unrelated_personalities() {
+        use Trait::*;
+        for (a, b) in [(Friendly, Evil), (Excitable, OverEmotional), (Frugal, Snob), (Neat, Kleptomaniac), (Loner, Friendly)] {
+            assert!(a.compatible(&[b]), "original game permits {a:?} + {b:?}");
+        }
+        for (a, b) in [(Athletic, CouchPotato), (Childish, DislikesChildren), (CommitmentIssues, HopelessRomantic), (Grumpy, HotHeaded)] {
+            assert!(!a.compatible(&[b]), "original exclusion group for {a:?} + {b:?}");
+        }
+        let mut pairs = 0;
+        for (i, a) in Trait::ALL.iter().enumerate() {
+            assert!(!a.compatible(&[*a]));
+            for b in &Trait::ALL[i + 1..] {
+                assert_eq!(a.compatible(&[*b]), b.compatible(&[*a]));
+                if a.conflicts(*b) { pairs += 1; }
+            }
+        }
+        assert_eq!(pairs, 24);
+    }
 
     #[test]
     fn original_age_groups_and_random_traits_remain_valid() {
