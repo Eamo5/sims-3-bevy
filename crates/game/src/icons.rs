@@ -104,13 +104,16 @@ pub fn icon_bundle(h: Handle<Image>, size: f32) -> impl Bundle {
 
 fn tooltips(
     mut commands: Commands,
-    hovered: Query<(&Interaction, &Tooltip)>,
+    hovered: Query<(&Interaction, &Tooltip, Option<&InheritedVisibility>, Option<&ComputedNode>)>,
     boxes: Query<Entity, With<TooltipBox>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut shown: Local<Option<String>>,
 ) {
-    let want = hovered.iter().find(|(i, _)| **i == Interaction::Hovered).map(|(_, t)| t.0.clone());
-    let cursor = windows.single().ok().and_then(|w| w.cursor_position().map(|c| (c, w.width(), w.height())));
+    let cursor = windows.single().ok().filter(|w| w.focused).and_then(|w| w.cursor_position().map(|c| (c, w.width(), w.height())));
+    let want = cursor.and_then(|_| hovered.iter()
+        .find(|(i, _, visible, layout)| **i == Interaction::Hovered && visible.is_none_or(|v| v.get())
+            && layout.is_none_or(|n| n.size().x > 0.0 && n.size().y > 0.0))
+        .map(|(_, t, _, _)| t.0.clone()));
     if want == *shown {
         // Follow the pointer.
         if let (Some((c, w, h)), Ok(b)) = (cursor, boxes.single()) {
@@ -135,6 +138,50 @@ fn tooltips(
         .with_children(|b| {
             b.spawn((text(t, 14.0, Color::WHITE), Pickable::IGNORE));
         });
+}
+
+#[cfg(test)]
+mod tooltip_tests {
+    use super::*;
+
+    fn count(app: &mut App) -> usize {
+        let world = app.world_mut();
+        world.query_filtered::<Entity, With<TooltipBox>>().iter(world).count()
+    }
+
+    #[test]
+    fn stale_hover_hides_on_pointer_exit_and_reappears_on_return() {
+        let mut app = App::new();
+        app.add_systems(Update, tooltips);
+        let mut window = Window::default();
+        window.focused = true;
+        window.set_cursor_position(Some(Vec2::new(100.0, 100.0)));
+        let win = app.world_mut().spawn((window, PrimaryWindow)).id();
+        let control = app.world_mut().spawn((Interaction::Hovered, Tooltip("Test".into()), InheritedVisibility::VISIBLE)).id();
+        app.update();
+        assert_eq!(count(&mut app), 1);
+        app.world_mut().get_mut::<Window>(win).unwrap().set_cursor_position(None);
+        app.update();
+        assert_eq!(count(&mut app), 0, "stale hovered state must not leave a tooltip behind");
+        app.world_mut().get_mut::<Window>(win).unwrap().set_cursor_position(Some(Vec2::new(100.0, 100.0)));
+        app.update();
+        assert_eq!(count(&mut app), 1);
+        app.world_mut().entity_mut(control).insert(InheritedVisibility::HIDDEN);
+        app.update();
+        assert_eq!(count(&mut app), 0);
+        app.world_mut().entity_mut(control).insert(InheritedVisibility::VISIBLE);
+        app.update();
+        assert_eq!(count(&mut app), 1);
+        app.world_mut().entity_mut(control).insert(ComputedNode::default());
+        app.update();
+        assert_eq!(count(&mut app), 0, "collapsed layout must not show stale tooltips");
+        app.world_mut().entity_mut(control).remove::<ComputedNode>();
+        app.update();
+        assert_eq!(count(&mut app), 1);
+        app.world_mut().get_mut::<Window>(win).unwrap().focused = false;
+        app.update();
+        assert_eq!(count(&mut app), 0);
+    }
 }
 
 /// A tooltip's box near the pointer, kept on screen.
