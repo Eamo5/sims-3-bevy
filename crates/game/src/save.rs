@@ -255,7 +255,7 @@ pub struct SaveGame {
     /// Leftovers in the fridge (servings, by recipe).
     #[serde(default)]
     pub leftovers: Vec<String>,
-    /// Cooked group meals still on the lot, with their remaining servings.
+    /// Meals still on the lot, including pizza and cut cakes, with remaining servings.
     #[serde(default)]
     pub meals: Vec<crate::meals::SavedMeal>,
     /// The season and the weather (`None` in saves from before there was weather).
@@ -568,7 +568,7 @@ fn save_game(
         Option<Res<crate::gardening::Garden>>,
         Query<(&crate::gardening::GrowingPlant, &Transform)>,
         Res<crate::collecting::Collection>,
-        Query<(&crate::meals::Meal, &crate::meals::Dish, &Transform)>,
+        Query<(&crate::meals::Meal, Option<&crate::meals::Dish>, &crate::interact::GameObject, &Transform)>,
     ),
     sims: Query<
         (
