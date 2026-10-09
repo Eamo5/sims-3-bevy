@@ -105,7 +105,7 @@ pub fn icon_bundle(h: Handle<Image>, size: f32) -> impl Bundle {
 fn tooltips(
     mut commands: Commands,
     hovered: Query<(&Interaction, &Tooltip, Option<&InheritedVisibility>, Option<&ComputedNode>)>,
-    boxes: Query<Entity, With<TooltipBox>>,
+    boxes: Query<(Entity, &ComputedNode), With<TooltipBox>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut shown: Local<Option<String>>,
 ) {
@@ -116,12 +116,12 @@ fn tooltips(
         .map(|(_, t, _, _)| t.0.clone()));
     if want == *shown {
         // Follow the pointer.
-        if let (Some((c, w, h)), Ok(b)) = (cursor, boxes.single()) {
-            commands.entity(b).insert(place(c, w, h));
+        if let (Some((c, w, h)), Ok((b, node))) = (cursor, boxes.single()) {
+            commands.entity(b).insert(place(c, w, h, node.size() * node.inverse_scale_factor()));
         }
         return;
     }
-    for b in &boxes {
+    for (b, _) in &boxes {
         commands.entity(b).despawn();
     }
     *shown = want.clone();
@@ -131,7 +131,7 @@ fn tooltips(
             TooltipBox,
             GlobalZIndex(100),
             Pickable::IGNORE,
-            place(c, w, h),
+            place(c, w, h, Vec2::new(320.0, 120.0)),
             BackgroundColor(Color::srgba(0.04, 0.10, 0.20, 0.96)),
             BorderColor::all(Color::srgba(0.5, 0.75, 1.0, 0.8)),
         ))
@@ -147,6 +147,23 @@ mod tooltip_tests {
     fn count(app: &mut App) -> usize {
         let world = app.world_mut();
         world.query_filtered::<Entity, With<TooltipBox>>().iter(world).count()
+    }
+
+    #[test]
+    fn measured_tooltips_fit_near_every_window_edge() {
+        for window in [Vec2::new(800.0, 600.0), Vec2::new(360.0, 640.0)] {
+            for size in [Vec2::new(120.0, 40.0), Vec2::new(320.0, 280.0)] {
+                for cursor in [Vec2::ZERO, window, window * 0.5, Vec2::new(window.x - 1.0, 10.0), Vec2::new(10.0, window.y - 1.0)] {
+                    let p = tooltip_position(cursor, window, size);
+                    assert!(p.x >= 8.0 && p.y >= 8.0);
+                    assert!(p.x + size.x <= window.x - 8.0);
+                    assert!(p.y + size.y <= window.y - 8.0);
+                }
+            }
+        }
+        let p = tooltip_position(Vec2::new(400.0, 400.0), Vec2::new(800.0, 600.0), Vec2::new(320.0, 280.0));
+        assert!(p.y + 280.0 < 400.0, "tall tooltip should flip above the pointer");
+        assert_eq!(place(Vec2::ZERO, 240.0, 400.0, Vec2::ZERO).max_width, Val::Px(224.0));
     }
 
     #[test]
@@ -185,25 +202,27 @@ mod tooltip_tests {
 }
 
 /// A tooltip's box near the pointer, kept on screen.
-fn place(c: Vec2, w: f32, h: f32) -> Node {
-    let (x, y) = (c.x + 16.0, c.y + 18.0);
-    let mut n = Node {
+fn place(c: Vec2, w: f32, h: f32, size: Vec2) -> Node {
+    let position = tooltip_position(c, Vec2::new(w, h), size);
+    Node {
         position_type: PositionType::Absolute,
-        max_width: Val::Px(320.0),
+        left: Val::Px(position.x),
+        top: Val::Px(position.y),
+        max_width: Val::Px(320.0_f32.min((w - 16.0).max(0.0))),
         padding: UiRect::all(Val::Px(8.0)),
         border: UiRect::all(Val::Px(1.0)),
         border_radius: BorderRadius::all(Val::Px(6.0)),
         ..default()
+    }
+}
+
+fn tooltip_position(cursor: Vec2, window: Vec2, size: Vec2) -> Vec2 {
+    let after = cursor + Vec2::new(16.0, 18.0);
+    let before = cursor - size - Vec2::splat(12.0);
+    let axis = |after: f32, before: f32, extent: f32, bound: f32| {
+        let max = (bound - extent - 8.0).max(0.0);
+        let position = if after + extent + 8.0 <= bound { after } else { before };
+        position.clamp(8.0_f32.min(max), max)
     };
-    if x > w - 330.0 {
-        n.right = Val::Px((w - c.x + 12.0).max(0.0));
-    } else {
-        n.left = Val::Px(x);
-    }
-    if y > h - 120.0 {
-        n.bottom = Val::Px((h - c.y + 12.0).max(0.0));
-    } else {
-        n.top = Val::Px(y);
-    }
-    n
+    Vec2::new(axis(after.x, before.x, size.x, window.x), axis(after.y, before.y, size.y, window.y))
 }
