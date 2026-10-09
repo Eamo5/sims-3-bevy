@@ -37,6 +37,7 @@ impl Plugin for OptionsPlugin {
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Lifespan {
     Short,
+    Medium,
     #[default]
     Normal,
     Long,
@@ -44,23 +45,51 @@ pub enum Lifespan {
 }
 
 impl Lifespan {
-    const ALL: [Lifespan; 4] = [Lifespan::Short, Lifespan::Normal, Lifespan::Long, Lifespan::Epic];
+    const ALL: [Lifespan; 5] = [Lifespan::Short, Lifespan::Medium, Lifespan::Normal, Lifespan::Long, Lifespan::Epic];
     fn name(self) -> &'static str {
         match self {
             Lifespan::Short => "Short (25 days)",
+            Lifespan::Medium => "Medium (50 days)",
             Lifespan::Normal => "Normal (90 days)",
             Lifespan::Long => "Long (190 days)",
             Lifespan::Epic => "Epic (960 days)",
         }
     }
-    /// How much longer than normal each life stage lasts.
+    /// AgingManager's days per aging year, relative to Normal's seven.
     pub fn factor(self) -> f32 {
         match self {
-            Lifespan::Short => 25.0 / 90.0,
+            Lifespan::Short => 2.0 / 7.0,
+            Lifespan::Medium => 4.0 / 7.0,
             Lifespan::Normal => 1.0,
-            Lifespan::Long => 190.0 / 90.0,
-            Lifespan::Epic => 960.0 / 90.0,
+            Lifespan::Long => 15.0 / 7.0,
+            Lifespan::Epic => 75.0 / 7.0,
         }
+    }
+}
+
+#[cfg(test)]
+mod lifespan_tests {
+    use super::*;
+
+    #[test]
+    fn lifespan_controls_include_medium_and_preserve_saved_presets() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.lifespan, Lifespan::Normal);
+        Opt::Lifespan.step(&mut settings, -1);
+        assert_eq!(settings.lifespan, Lifespan::Medium);
+        assert_eq!(Opt::Lifespan.value(&settings), "Medium (50 days)");
+        Opt::Lifespan.step(&mut settings, -1);
+        assert_eq!(settings.lifespan, Lifespan::Short);
+        Opt::Lifespan.step(&mut settings, -1);
+        assert_eq!(settings.lifespan, Lifespan::Epic);
+        for (preset, teen_days) in [(Lifespan::Short, 4.0), (Lifespan::Medium, 8.0), (Lifespan::Normal, 14.0), (Lifespan::Long, 30.0), (Lifespan::Epic, 150.0)] {
+            settings.lifespan = preset;
+            let restored: Settings = serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
+            assert_eq!(restored.lifespan, preset);
+            let duration = crate::aging::stage_days(crate::sim::Age::Teen) * restored.lifespan.factor();
+            assert!((duration - teen_days).abs() < 0.0001);
+        }
+        assert_eq!(serde_json::from_str::<Lifespan>("\"Normal\"").unwrap(), Lifespan::Normal);
     }
 }
 
@@ -259,7 +288,7 @@ impl Opt {
             Opt::Shadows => s.shadows = !s.shadows,
             Opt::ShowFps => s.show_fps = !s.show_fps,
             Opt::Lifespan => {
-                let i = Lifespan::ALL.iter().position(|l| *l == s.lifespan).unwrap_or(1);
+                let i = Lifespan::ALL.iter().position(|l| *l == s.lifespan).unwrap_or(2);
                 s.lifespan = Lifespan::ALL[cycle(i, Lifespan::ALL.len())];
             }
             Opt::FreeWill => {
