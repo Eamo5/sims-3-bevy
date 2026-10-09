@@ -19,13 +19,15 @@ const BAR: u32 = 0x0600_0002;
 pub struct BuildCatalog {
     grids: [Spawned; 2],
     cells: [Option<Entity>; 2],
+    tabs: [Option<Entity>; 2],
+    filter: u32,
     category: usize,
     scroll: usize,
     columns: usize,
     rows: usize,
     count: usize,
     expanded: bool,
-    shown: Option<(usize, usize, bool, Option<usize>, u32)>,
+    shown: Option<(usize, usize, bool, Option<usize>, u32, u32)>,
 }
 
 pub fn showing(buy: &BuyMode) -> bool {
@@ -46,21 +48,11 @@ pub fn spawn(mut commands: Commands, hud: Option<Res<crate::buildhud::BuildHud>>
         if let Some(grid) = grids[k].id(GRID) {
             commands.entity(grid).remove::<Pickable>().insert((Interaction::default(), crate::hud::BlocksWorld));
         }
-        // Pattern category metadata is not baked yet; show the original All tab.
+        // TabControl is a runtime template; replace designer placeholders below.
         if let Some(tabs) = ui.find("Build", TABS[k]) {
             for tab in &tabs.children {
                 if let Some(e) = hud.puck.id(tab.id) {
                     commands.entity(e).insert(Visibility::Hidden);
-                }
-            }
-        }
-        if let (Some(parent), Some(mut tab)) = (hud.puck.id(TABS[k]), ui.layout("TabControl").cloned()) {
-            tab.area = [1.0, 1.0, 45.0, 52.0];
-            let spawned = ui.spawn_under(&mut commands, &mut images, &mut fonts, &tab, parent);
-            if let Some(root) = spawned.root {
-                commands.entity(root).insert((crate::layout::Selected, crate::icons::Tooltip("All".into())));
-                if let Some((image, _)) = ui.image(&mut images, s3pkg::fnv64("glb_i_all_r2")) {
-                    commands.entity(root).insert(crate::layout::SetIcon(image));
                 }
             }
         }
@@ -74,15 +66,27 @@ pub fn spawn(mut commands: Commands, hud: Option<Res<crate::buildhud::BuildHud>>
         if let Some(e) = hud.puck.id(id) { commands.entity(e).insert(Visibility::Hidden); }
     }
     buy.native_covers = true;
-    commands.insert_resource(BuildCatalog { grids, cells: [None, None], category: usize::MAX, scroll: 0, columns: 1, rows: 2, count: 0, expanded: false, shown: None });
+    commands.insert_resource(BuildCatalog { grids, cells: [None, None], tabs: [None, None], filter: 0, category: usize::MAX, scroll: 0, columns: 1, rows: 2, count: 0, expanded: false, shown: None });
 }
 
 #[derive(Component)]
 pub struct Fill(bool);
 
+#[derive(Component)]
+pub struct Category(u32);
+
+fn categories(floor: bool) -> [(u32, u32); 10] {
+    if floor {
+        [(0x3409, 0), (0x3401, 4), (0x3402, 128), (0x3403, 256), (0x3404, 64), (0x3405, 16), (0x3406, 8), (0x3407, 32), (0x340a, 512), (0x3408, 2)]
+    } else {
+        [(0x320b, 0), (0x3204, 8), (0x3203, 256), (0x3201, 128), (0x3202, 16), (0x3205, 4), (0x3206, 32), (0x3207, 64), (0x320c, 512), (0x320a, 2)]
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn controls(mut catalog: ResMut<BuildCatalog>, mut buy: ResMut<BuyMode>,
     clicks: Query<(Entity, &Interaction), Changed<Interaction>>, fill: Query<(&Interaction, &Fill), Changed<Interaction>>,
+    categories: Query<(&Interaction, &Category), Changed<Interaction>>,
     bars: Query<&UiScrollBar>, windows: Query<&Window, With<PrimaryWindow>>,
     areas: Query<(&ComputedNode, &UiGlobalTransform, &InheritedVisibility)>, mut wheel: MessageReader<MouseWheel>) {
     let delta: f32 = wheel.read().map(|w| w.y).sum();
@@ -94,7 +98,11 @@ pub fn controls(mut catalog: ResMut<BuildCatalog>, mut buy: ResMut<BuyMode>,
         c.category = buy.category;
         c.scroll = 0;
         c.expanded = false;
+        c.filter = 0;
         reset = true;
+    }
+    for (i, category) in &categories {
+        if *i == Interaction::Pressed { c.filter = category.0; c.scroll = 0; reset = true; }
     }
     for (i, fill) in &fill { if *i == Interaction::Pressed { buy.cover_fill = fill.0; } }
     let k = (buy.category == FLOORS_TAB) as usize;
@@ -120,10 +128,10 @@ pub fn draw(mut commands: Commands, mut catalog: ResMut<BuildCatalog>, hud: Res<
         if let Some(e) = hud.puck.id(id) && let Ok(mut b) = buttons.get_mut(e) { b.selected = buy.cover_fill == fill; }
     }
     let c = &mut *catalog;
-    let signature = (buy.category, c.scroll, c.expanded, buy.painting, window.width() as u32);
+    let signature = (buy.category, c.scroll, c.expanded, buy.painting, window.width() as u32, c.filter);
     if c.shown == Some(signature) { return; }
     let k = (buy.category == FLOORS_TAB) as usize;
-    let items: Vec<_> = game_ui.data.patterns.iter().enumerate().filter(|(_, p)| p.floor == (k == 1)).collect();
+    let items: Vec<_> = game_ui.data.patterns.iter().enumerate().filter(|(_, p)| p.floor == (k == 1) && (c.filter == 0 || p.sort_flags & c.filter != 0)).collect();
     let Some(grid_window) = ui.find("BuildExpandableCatalogGrid", GRID).cloned() else { return };
     let g = grid_window.grid.unwrap_or_default();
     let step = Vec2::new(g.cell[0] + g.cell_padding[2] - g.cell_padding[0], g.cell[1] + g.cell_padding[3] - g.cell_padding[1]);
@@ -141,6 +149,22 @@ pub fn draw(mut commands: Commands, mut catalog: ResMut<BuildCatalog>, hud: Res<
     if let Some(e) = hud.puck.id(HOSTS[k]) && let Ok(mut n) = nodes.get_mut(e) { n.overflow = Overflow::visible(); }
     set_visible(&mut visibility, hud.puck.id(TABS[k]), true);
     if let Some(e) = hud.puck.id(TABS[k]) && let Ok(mut n) = nodes.get_mut(e) { n.top = Val::Px(-32.0 - lift); n.overflow = Overflow::visible(); }
+    if let (Some(parent), Some(template)) = (hud.puck.id(TABS[k]), ui.layout("TabControl").cloned()) {
+        let holder = crate::buyhud::holder(&mut commands, parent, &mut c.tabs[k], &visibility);
+        let step = ((width - left - 80.0 - 44.0) / 9.0).clamp(12.0, 36.0);
+        for (i, (id, mask)) in categories(k == 1).into_iter().enumerate().rev() {
+            let Some(source) = ui.find("Build", id).cloned() else { continue };
+            let mut tab = template.clone();
+            let x = i as f32 * step;
+            tab.area = [x + 1.0, 1.0, x + 44.0, 52.0];
+            let spawned = ui.spawn_under(&mut commands, &mut images, &mut fonts, &tab, holder);
+            if let Some(root) = spawned.root {
+                commands.entity(root).insert((Category(mask), crate::icons::Tooltip(source.tooltip)));
+                if mask == c.filter { commands.entity(root).insert((crate::layout::Selected, ZIndex(1))); }
+                if let Some((icon, _)) = ui.image(&mut images, source.icon) { commands.entity(root).insert(crate::layout::SetIcon(icon)); }
+            }
+        }
+    }
     let grid = &c.grids[k];
     if let Some(root) = grid.root && let Ok(mut n) = nodes.get_mut(root) { n.top = Val::Px(-lift); }
     for (id, on) in [(0x301, c.rows == 2), (0x302, c.rows == 2), (0x201, c.rows > 2), (0x202, c.rows > 2), (BAR, total > c.rows)] {
@@ -170,16 +194,17 @@ pub fn draw(mut commands: Commands, mut catalog: ResMut<BuildCatalog>, hud: Res<
             crate::hudpanels::picture(&mut commands, thumb, texture, Color::WHITE);
         }
     }
-    c.shown = Some((buy.category, c.scroll, c.expanded, buy.painting, window.width() as u32));
+    c.shown = Some((buy.category, c.scroll, c.expanded, buy.painting, window.width() as u32, c.filter));
 }
 
 /// BUILD_CATALOG_TEST=1 exercises the actual expand button, scrollbar and pattern cells.
 pub fn probe(time: Res<Time>, catalog: Res<BuildCatalog>, buy: Res<BuyMode>,
     hud: Res<crate::buildhud::BuildHud>,
     live: Option<Res<crate::livehud::LiveHud>>, visibility: Query<&InheritedVisibility>,
+    game_ui: Res<crate::icons::GameUi>, categories: Query<(Entity, &Category, &InheritedVisibility)>,
     mut interactions: Query<&mut Interaction>, mut bars: Query<&mut UiScrollBar>,
     cells: Query<(Entity, &BuyButton, &InheritedVisibility)>, mut stage: Local<u8>, mut selected: Local<Option<usize>>) {
-    if std::env::var_os("BUILD_CATALOG_TEST").is_none() || *stage >= 6 || time.elapsed_secs() < 7.0 + *stage as f32 * 0.5 { return; }
+    if std::env::var_os("BUILD_CATALOG_TEST").is_none() || *stage >= 8 || time.elapsed_secs() < 7.0 + *stage as f32 * 0.5 { return; }
     assert!(showing(&buy));
     if let Some(live) = live {
         for root in [live.motives.root, live.skills.root, live.simology.root, live.career.root, live.inventory.root].into_iter().flatten() {
@@ -218,7 +243,27 @@ pub fn probe(time: Res<Time>, catalog: Res<BuildCatalog>, buy: Res<BuyMode>,
         }
         5 => {
             assert!(!buy.cover_fill);
-            info!("autotest: native Build catalogue PASS — expandable rows, skinned scrollbar, pattern selection and surface/room tools");
+            let mask = if k == 1 { 256 } else { 8 };
+            let (e, _, _) = categories.iter().find(|(_, c, v)| c.0 == mask && v.get()).expect("original material category tab");
+            *interactions.get_mut(e).unwrap() = Interaction::Pressed;
+        }
+        6 => {
+            let mask = if k == 1 { 256 } else { 8 };
+            assert_eq!(catalog.filter, mask);
+            assert_eq!(catalog.scroll, 0);
+            let expected = game_ui.data.patterns.iter().filter(|p| p.floor == (k == 1) && p.sort_flags & mask != 0).count();
+            assert!(expected > 0);
+            assert_eq!(catalog.count, expected);
+            for (_, button, visible) in &cells {
+                if let BuyButton::Pattern(i) = button && visible.get() { assert_ne!(game_ui.data.patterns[*i].sort_flags & mask, 0); }
+            }
+            let (e, _, _) = categories.iter().find(|(_, c, v)| c.0 == 0 && v.get()).unwrap();
+            *interactions.get_mut(e).unwrap() = Interaction::Pressed;
+        }
+        7 => {
+            assert_eq!(catalog.filter, 0);
+            assert_eq!(catalog.count, game_ui.data.patterns.iter().filter(|p| p.floor == (k == 1)).count());
+            info!("autotest: native Build catalogue PASS — expansion, scrolling, pattern selection, room tools and material category/All filtering");
         }
         _ => unreachable!(),
     }

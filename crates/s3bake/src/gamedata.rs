@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 67;
+pub const GAMEDATA_VERSION: u32 = 68;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -184,6 +184,9 @@ pub struct PatternInfo {
     pub name: String,
     pub price: i32,
     pub floor: bool,
+    /// Original CWAL material-category flags, interpreted separately for floors and walls.
+    #[serde(default)]
+    pub sort_flags: u32,
     /// Its rendered texture in the texture store.
     pub texture: crate::types::Key,
     /// The catalogue pattern (CWAL instance); its swatches (the game's colour presets for it,
@@ -1537,7 +1540,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             if swatches.first() != Some(&texture) {
                 return None;
             }
-            Some(PatternInfo { name, price: p.price.round() as i32, floor, texture, cwal: k.i, swatches, channels })
+            Some(PatternInfo { name, price: p.price.round() as i32, floor, sort_flags: p.sort_flags, texture, cwal: k.i, swatches, channels })
         })
         .into_iter()
         .flatten()

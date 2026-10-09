@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackWriter, read_value, write_value};
 
-pub const UI_VERSION: u32 = 9;
+pub const UI_VERSION: u32 = 10;
 pub const T_LAYOUT: u32 = 0x025C95B6;
 pub const T_FONT: u32 = 0x062E9EE0;
 pub const T_IMAGE: u32 = 0x2F7D0004;
@@ -119,6 +119,7 @@ pub struct UiWindow {
     pub place: UiPlace,
     pub button_type: u32,
     pub button_group: u32,
+    pub icon: u64,
     /// An `ItemGrid`'s cells.
     pub grid: Option<UiGrid>,
     /// A `FillBarController`'s fill: direction (0 from the start, 1 from the middle, 2 from the
@@ -175,6 +176,7 @@ impl UiWindow {
         }
     }
     fn images(&self, out: &mut BTreeSet<u64>) {
+        if self.icon != 0 { out.insert(self.icon); }
         fn of(d: &UiDrawable, out: &mut BTreeSet<u64>) {
             match d {
                 UiDrawable::Std { images, glow, .. } => out.extend(images.iter().chain([glow]).copied().filter(|i| *i != 0)),
@@ -370,6 +372,7 @@ fn window(o: &XNode) -> Option<UiWindow> {
     w.wrap = val("WordWrap").or(val("CaptionWrap")).map_or(0, num);
     w.button_type = val("ButtonType").map_or(0, num);
     w.button_group = val("ButtonGroupID").map_or(0, num);
+    w.icon = props("Icon").and_then(|p| p.attr("key")).map_or(0, image_key);
     for name in ["FillDrawable", "ButtonDrawable"] {
         if let Some(d) = props(name).and_then(|p| p.child("object")).and_then(drawable) {
             w.drawable = Some(d);
