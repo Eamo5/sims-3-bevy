@@ -455,9 +455,10 @@ fn cas_actions(
                 };
                 s.outfit = OutfitChoice::default();
                 let slots = crate::life::trait_slots(s.age);
+                s.traits.retain(|t| t.allowed_at(s.age));
                 s.traits.truncate(slots);
                 while s.traits.len() < slots {
-                    match crate::life::next_trait(None, &s.traits) {
+                    match crate::life::next_trait(None, &s.traits, s.age) {
                         Some(t) => s.traits.push(t),
                         None => break,
                     }
@@ -566,7 +567,7 @@ fn cas_actions(
                 let t = crate::life::Trait::ALL[i];
                 if let Some(pos) = s.traits.iter().position(|x| *x == t) {
                     s.traits.remove(pos);
-                } else if s.traits.len() < crate::life::trait_slots(s.age) && t.compatible(&s.traits) {
+                } else if s.traits.len() < crate::life::trait_slots(s.age) && t.allowed_at(s.age) && t.compatible(&s.traits) {
                     s.traits.push(t);
                     // The Sim says something in character, where the game has a line for it.
                     if let Some(stem) = trait_line(t)
@@ -1125,6 +1126,7 @@ fn rebuild_ui(
                     p.spawn(text("Click to add or remove. Traits that clash with chosen ones are dimmed.", 13.0, Color::srgb(0.75, 0.85, 1.0)));
                     p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(4.0), row_gap: Val::Px(4.0), ..default() }).with_children(|grid| {
                         for (i, t) in crate::life::Trait::ALL.iter().enumerate() {
+                            if !t.allowed_at(sim.age) { continue; }
                             let chosen = sim.traits.contains(t);
                             let ok = chosen || (sim.traits.len() < slots && t.compatible(&sim.traits));
                             // The game's icon and description, when converted.

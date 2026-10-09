@@ -253,6 +253,23 @@ impl Trait {
         Trait::ALL.into_iter().find(|t| t.name() == n)
     }
 
+    /// Human age restrictions from Traits.xml's AgeSpeciesVisible column.
+    pub fn allowed_at(self, age: Age) -> bool {
+        use Trait::*;
+        match self {
+            Lazy => false,
+            Charismatic | Childish | CommitmentIssues | DislikesChildren | Flirty | GreatKisser
+            | GreenThumb | Handy | HopelessRomantic | NaturalCook | Schmoozer | Unflirty => {
+                matches!(age, Age::Teen | Age::YoungAdult | Age::Adult | Age::Elder)
+            }
+            Absentminded | Artistic | Athletic | Brave | Clumsy | CouchPotato | EasilyImpressed
+            | Evil | Excitable | Friendly | Genius | Good | Grumpy | HatesTheOutdoors
+            | HeavySleeper | Insane | LightSleeper | Loner | LovesTheOutdoors | Neurotic
+            | Slob | Virtuoso => true,
+            _ => !age.is_little(),
+        }
+    }
+
     /// Traits that can't be held together.
     fn conflicts(self, other: Trait) -> bool {
         use Trait::*;
@@ -316,7 +333,7 @@ pub fn random_traits(rng: &mut impl Rng, age: Age) -> Vec<Trait> {
         if out.len() >= trait_slots(age) {
             break;
         }
-        if t.compatible(&out) {
+        if t.allowed_at(age) && t.compatible(&out) {
             out.push(t);
         }
     }
@@ -324,9 +341,40 @@ pub fn random_traits(rng: &mut impl Rng, age: Age) -> Vec<Trait> {
 }
 
 /// The next trait after `current` (in list order) that fits with the others.
-pub fn next_trait(current: Option<Trait>, others: &[Trait]) -> Option<Trait> {
+pub fn next_trait(current: Option<Trait>, others: &[Trait], age: Age) -> Option<Trait> {
     let start = current.and_then(|c| Trait::ALL.iter().position(|t| *t == c)).map_or(0, |i| i + 1);
-    (0..Trait::ALL.len()).map(|k| Trait::ALL[(start + k) % Trait::ALL.len()]).find(|t| t.compatible(others))
+    (0..Trait::ALL.len()).map(|k| Trait::ALL[(start + k) % Trait::ALL.len()]).find(|t| t.allowed_at(age) && t.compatible(others))
+}
+
+#[cfg(test)]
+mod trait_age_tests {
+    use super::*;
+    use rand::SeedableRng;
+
+    #[test]
+    fn original_age_groups_and_random_traits_remain_valid() {
+        assert_eq!(Trait::ALL.iter().filter(|t| t.allowed_at(Age::Baby)).count(), 22);
+        assert_eq!(Trait::ALL.iter().filter(|t| t.allowed_at(Age::Child)).count(), 52);
+        assert_eq!(Trait::ALL.iter().filter(|t| t.allowed_at(Age::Teen)).count(), 64);
+        assert_eq!(Trait::from_name("Lazy"), Some(Trait::Lazy));
+        let mut rng = rand::rngs::StdRng::seed_from_u64(123);
+        for age in [Age::Baby, Age::Toddler, Age::Child, Age::Teen, Age::YoungAdult, Age::Adult, Age::Elder] {
+            for _ in 0..64 {
+                let traits = random_traits(&mut rng, age);
+                assert_eq!(traits.len(), trait_slots(age));
+                for (i, t) in traits.iter().enumerate() {
+                    assert!(t.allowed_at(age));
+                    assert!(t.compatible(&traits[..i]));
+                }
+            }
+            let mut picked = Vec::new();
+            for _ in 0..trait_slots(age) {
+                let t = next_trait(None, &picked, age).expect("enough compatible age-appropriate traits");
+                assert!(t.allowed_at(age));
+                picked.push(t);
+            }
+        }
+    }
 }
 
 /// Skill learning speed.

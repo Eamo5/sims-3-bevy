@@ -84,7 +84,7 @@ fn picker_buttons(
                 let t = Trait::ALL[i];
                 if let Some(pos) = p.traits.iter().position(|x| *x == t) {
                     p.traits.remove(pos);
-                } else if p.traits.len() < crate::life::trait_slots(sim.age) && t.compatible(&p.traits) {
+                } else if p.traits.len() < crate::life::trait_slots(sim.age) && t.allowed_at(sim.age) && t.compatible(&p.traits) {
                     p.traits.push(t);
                 }
                 play.write(crate::sound::PlaySound::ui("ui_primary_button"));
@@ -151,6 +151,7 @@ fn picker_ui(
             c.spawn(text(format!("Traits · {} of {slots}. Click to add or remove; Escape to keep the old ones.", traits.len()), 13.0, Color::srgb(0.75, 0.85, 1.0)));
             c.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(4.0), row_gap: Val::Px(4.0), ..default() }).with_children(|grid| {
                 for (i, t) in Trait::ALL.iter().enumerate() {
+                    if !t.allowed_at(sim.age) { continue; }
                     let chosen = traits.contains(t);
                     let ok = chosen || (traits.len() < slots && t.compatible(&traits));
                     let info = ui.as_deref().and_then(|u| u.trait_info(*t));

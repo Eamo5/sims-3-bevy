@@ -211,7 +211,7 @@ fn grow_up(
     let slots = crate::life::trait_slots(age);
     let mut gained = None;
     while sim.traits.len() < slots {
-        let options: Vec<Trait> = Trait::ALL.into_iter().filter(|t| !sim.traits.contains(t) && t.compatible(&sim.traits)).collect();
+        let options: Vec<Trait> = Trait::ALL.into_iter().filter(|t| t.allowed_at(sim.age) && !sim.traits.contains(t) && t.compatible(&sim.traits)).collect();
         let Some(&t) = options.choose(rng) else { break };
         sim.traits.push(t);
         gained = Some(t);

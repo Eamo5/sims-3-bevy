@@ -41,6 +41,8 @@ installation is unreachable.
   furniture; the ground never shows through a floor; nearby lots are shown in full detail with
   the game's roofs, distant ones as the game's pre-rendered imposters.
 - **Sims**: Create-a-Sim from real CAS parts (browsed as the game's own style pictures), with
+  human traits restricted to the original age groups in CAS, random generation, birthdays
+  and Mid-Life Crisis; changing to a younger age replaces traits no longer available. With
   favourites (a food from the game's recipes, a music, a colour, each picked by the game's own
   pictures; a favourite meal is an amazing one, and their favourite music playing nearby is
   enjoyed; shown on the Simology tab and kept in saves), clothes chosen for each of the game's
