@@ -586,21 +586,13 @@ fn surface_near(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, at:
 /// A free dining chair (a chair with a table in front of it) near the Sim, and the point on the
 /// table where their plate goes.
 fn dining_seat(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, near: Vec3, taken: &[Entity]) -> Option<(Entity, Vec3)> {
-    let tables: Vec<(Vec3, f32, Vec2)> =
-        objects.iter().filter(|(_, o, _, _)| o.kind == ObjectKind::Table).map(|(_, o, tf, _)| (o.world_center(tf), tf.translation.y + o.height, o.half)).collect();
     objects
         .iter()
         .filter(|(e, o, _, used)| matches!(o.kind, ObjectKind::Chair | ObjectKind::Stool) && used.0.is_none() && !taken.contains(e))
         .filter_map(|(e, o, tf, _)| {
             let seat = o.world_center(tf);
-            let ahead = (tf.rotation * Vec3::Z).with_y(0.0).normalize_or(Vec3::Z);
-            let front = seat + ahead * 0.55;
-            // A table top within reach in front of the seat, at table height.
-            let (_, top, _) = tables.iter().find(|(c, top, half)| {
-                let d = front.with_y(0.0).distance(c.with_y(0.0));
-                d < half.max_element() + 0.35 && (top - tf.translation.y - 0.7).abs() < 0.35
-            })?;
-            Some((e, Vec3::new(front.x, *top, front.z), seat.distance(near)))
+            let (_, plate) = dining_seat_for(objects, e)?;
+            Some((e, plate, seat.distance(near)))
         })
         .min_by(|a, b| a.2.total_cmp(&b.2))
         .map(|(e, p, _)| (e, p))
@@ -924,12 +916,20 @@ fn dining_seat_for(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, 
         .filter_map(|(_, t, ttf, _)| {
             let c = t.world_center(ttf);
             let d = front.with_y(0.0).distance(c.with_y(0.0));
-            let top = ttf.translation.y + t.height;
-            (d < t.half.max_element() + 0.35 && (top - tf.translation.y - 0.7).abs() < 0.35).then_some((top, d))
+            dining_table_top(t, ttf, front, tf.translation.y).map(|top| (top, d))
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))?
         .0;
     Some((chair, Vec3::new(front.x, top, front.z)))
+}
+
+fn dining_table_top(table: &GameObject, tf: &Transform, front: Vec3, chair_base: f32) -> Option<f32> {
+    let local = tf.compute_affine().inverse().transform_point3(front).xz() - table.center;
+    // Allow a small reach beyond the edge, but never use the long dimension as a
+    // radius: rectangular and rotated tables must actually be in front of the chair.
+    if local.x.abs() > table.half.x + 0.15 || local.y.abs() > table.half.y + 0.15 { return None; }
+    let top = tf.transform_point(Vec3::new(table.center.x, table.height, table.center.y)).y;
+    ((top - chair_base - 0.7).abs() < 0.35).then_some(top)
 }
 
 /// A Sim who stopped eating early leaves their plate to be cleared.
@@ -946,6 +946,20 @@ fn release_plates(mut commands: Commands, sims: Query<(Entity, &ActionQueue, &Ea
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dining_reach_uses_rotated_table_bounds_instead_of_longest_radius() {
+        let table = GameObject { kind: ObjectKind::Table, name: "Long table".into(), objd: (0, 0, 0), price: 0,
+            center: Vec2::new(0.3, -0.2), half: Vec2::new(1.5, 0.4), height: 0.75, route: None };
+        for yaw in [0.0, std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_4, -std::f32::consts::FRAC_PI_4] {
+            let tf = Transform::from_xyz(2.0, 3.0, 4.0).with_rotation(Quat::from_rotation_y(yaw));
+            let over = tf.transform_point(Vec3::new(1.3, 0.0, -0.2));
+            assert_eq!(dining_table_top(&table, &tf, over, 3.0), Some(3.75));
+            let beside = tf.transform_point(Vec3::new(0.3, 0.0, 0.8));
+            assert!(dining_table_top(&table, &tf, beside, 3.0).is_none(), "empty space beside the narrow edge is not tabletop (yaw {yaw})");
+            assert!(dining_table_top(&table, &tf, over, 0.0).is_none());
+        }
+    }
 
     #[test]
     fn saved_platters_preserve_recipe_identity_servings_and_transform() {
