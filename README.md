@@ -134,8 +134,9 @@ installation is unreachable.
   20,000 to 35,000 lifetime happiness. Kept in saves. A townie marrying in brings their share
   of their family's funds (marry a Landgraab, an Alto or a Goth to start on Gold Digger).
 - **Lifetime rewards**: the game's reward traits, bought with lifetime happiness at their
-  costs in its dialog (icon, name and description): Steel Bladder, Dirt Defiant, Hardly
-  Hungry, Fast Learner, Fast Metabolism, Professional Slacker, Opportunistic (bigger
+  costs in its dialog (icon, name and description): Steel Bladder (bladder stays full), Dirt
+  Defiant and Hardly Hungry (hygiene and hunger decay at one quarter speed), Fast Learner,
+  Fast Metabolism, Professional Slacker, Opportunistic (bigger
   opportunity rewards), Attractive, Extra Creative (paintings and books earn more), Super
   Green Thumb, Discount Diner, Complimentary Entertainment, Bookshop Bargainer, Haggler, Speedy
   Cleaner (cleaning up twice as fast), Multi-Tasker (more done at work, homework in half the

@@ -662,6 +662,11 @@ fn decay_motives(
         return;
     }
     for (mut m, scale, sim, wishes, at_work, away) in &mut q {
+        // Steel Bladder keeps this need satisfied, including when restored from a save
+        // with a low bladder value or when the Sim is away at work.
+        if crate::wishes::has(wishes, "SteelBladder") {
+            m.0[BLADDER] = 100.0;
+        }
         for i in 0..6 {
             // (At work, school or out in town, lunch and the bathrooms are there: what the place
             // does to their hunger and bladder is its own.)
@@ -671,6 +676,37 @@ fn decay_motives(
             let d = DECAY_PER_HOUR[i] * scale.0[i] * crate::life::decay_rate(&sim.traits, i) * crate::wishes::reward_decay(wishes, i) * hours;
             m.add(i, d);
         }
+    }
+}
+
+#[cfg(test)]
+mod reward_motive_tests {
+    use super::*;
+
+    #[test]
+    fn lifetime_rewards_apply_to_normal_decay_and_restored_low_needs() {
+        let mut app = App::new();
+        app.insert_resource(SimDelta(60.0)).add_systems(Update, decay_motives);
+        let mut sim = random_sim(&mut rand::thread_rng(), "Test", Some(false), Age::Adult);
+        sim.traits.clear();
+        let plain = app.world_mut().spawn((sim.clone(), Motives([50.0; 6]), DecayScale::default())).id();
+        let rewarded = app.world_mut().spawn((sim, Motives([50.0; 6]), DecayScale::default(),
+            crate::wishes::Wishes::restored(0, vec!["SteelBladder".into(), "PermaClean".into(), "HardlyHungry".into()], 0.0))).id();
+        app.update();
+        let normal = &app.world().get::<Motives>(plain).unwrap().0;
+        let rewards = &app.world().get::<Motives>(rewarded).unwrap().0;
+        for i in 0..6 {
+            assert_eq!(normal[i], 50.0 + DECAY_PER_HOUR[i]);
+            let expected = match i {
+                BLADDER => 100.0,
+                HYGIENE => 50.0 + DECAY_PER_HOUR[i] * 0.25,
+                HUNGER => 50.0 + DECAY_PER_HOUR[i] * 0.25,
+                _ => normal[i],
+            };
+            assert_eq!(rewards[i], expected, "motive {i}");
+        }
+        app.update();
+        assert_eq!(app.world().get::<Motives>(rewarded).unwrap().0[BLADDER], 100.0);
     }
 }
 
