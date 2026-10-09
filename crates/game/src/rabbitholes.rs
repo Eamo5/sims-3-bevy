@@ -141,6 +141,51 @@ pub struct AtRabbitHole {
 
 const DRIVE_MINUTES: f64 = 25.0;
 
+impl AtRabbitHole {
+    /// The overlap of this simulation tick with the visit, excluding both drives.
+    fn inside_minutes(&self, now: f64, delta: f32) -> f32 {
+        if delta <= 0.0 { return 0.0; }
+        let start = (now - delta as f64).max(self.inside_from);
+        let end = now.min(self.until - DRIVE_MINUTES);
+        (end - start).max(0.0) as f32
+    }
+}
+
+#[cfg(test)]
+mod visit_time_tests {
+    use super::*;
+
+    fn visit() -> AtRabbitHole {
+        AtRabbitHole { lot: 0, activity: &GYM[0], inside_from: 25.0, until: 170.0, place: "Gym".into() }
+    }
+
+    #[test]
+    fn arrival_departure_and_paused_ticks_exclude_driving() {
+        let at = visit();
+        assert_eq!(at.inside_minutes(20.0, 10.0), 0.0);
+        assert_eq!(at.inside_minutes(30.0, 10.0), 5.0);
+        assert_eq!(at.inside_minutes(145.0, 10.0), 10.0);
+        assert_eq!(at.inside_minutes(150.0, 10.0), 5.0);
+        assert_eq!(at.inside_minutes(170.0, 10.0), 0.0);
+        assert_eq!(at.inside_minutes(50.0, 0.0), 0.0);
+        assert_eq!(at.inside_minutes(50.0, -1.0), 0.0);
+    }
+
+    #[test]
+    fn full_visit_time_is_identical_across_simulation_speeds() {
+        let at = visit();
+        for step in [0.25, 1.0, 7.0, 30.0, 200.0] {
+            let mut now = 0.0;
+            let mut total = 0.0;
+            while now < 200.0 {
+                now += step;
+                total += at.inside_minutes(now, step as f32);
+            }
+            assert_eq!(total, 120.0, "tick size {step}");
+        }
+    }
+}
+
 /// Called when a Sim reaches the lot exit on the way to a rabbit hole.
 pub fn head_out(
     commands: &mut Commands,
@@ -199,9 +244,9 @@ fn outings(
     mut household: Option<ResMut<Household>>,
     mut did: MessageWriter<crate::journal::Did>,
 ) {
-    let dt = delta.0;
     for (e, sim, at, mut motives, mut skills, mut tf, grades, mut floor, journal, wishes) in &mut q {
-        if clock.minutes >= at.inside_from && clock.minutes < at.until - DRIVE_MINUTES {
+        let dt = at.inside_minutes(clock.minutes, delta.0);
+        if dt > 0.0 {
             // (Strength training at the gym, kept in their journal; a Body Builder isn't tired by it.)
             let strength = at.activity.name == "Work Out";
             let builder = strength && crate::journal::earned(journal, "Body Builder");
