@@ -138,7 +138,8 @@ installation is unreachable.
   costs in its dialog (icon, name and description): Steel Bladder (bladder stays full), Dirt
   Defiant and Hardly Hungry (hygiene and hunger decay at one quarter speed), Fast Learner
   (including gardening, repairs/upgrades, career study and rabbit-hole lessons),
-  Fast Metabolism, Professional Slacker, Opportunistic (bigger
+  Fast Metabolism, Professional Slacker, No Bills Ever (new household bills stop while a
+  reward owner belongs to the household), Opportunistic (bigger
   opportunity rewards), Attractive, Extra Creative (paintings and books earn more), Super
   Green Thumb, Discount Diner, Complimentary Entertainment, Bookshop Bargainer, Haggler, Speedy
   Cleaner (cleaning up twice as fast), Multi-Tasker (more done at work, homework in half the

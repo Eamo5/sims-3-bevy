@@ -3606,6 +3606,7 @@ fn pay_bills(
     household: Option<ResMut<Household>>,
     mut notes: ResMut<Notifications>,
     objects: Query<(Entity, &GameObject)>,
+    rewards: Query<&crate::wishes::Wishes, With<HouseholdMember>>,
 ) {
     let Some(mut h) = household else { return };
     let day = clock.day();
@@ -3616,14 +3617,16 @@ fn pay_bills(
         if day == 0 {
             return;
         }
-        let value: i64 = objects.iter().map(|(_, o)| o.price as i64).sum();
-        let bill = 60 + value / 60;
-        if mailbox {
-            // (The mail carrier brings them.)
-            commands.insert_resource(crate::services::MailDue(Bill { amount: bill, day }));
-        } else {
-            h.funds -= bill;
-            notes.push(format!("The bills arrived: §{bill} was paid automatically."));
+        if !rewards.iter().any(|w| w.has_reward("NoBillsEver")) {
+            let value: i64 = objects.iter().map(|(_, o)| o.price as i64).sum();
+            let bill = 60 + value / 60;
+            if mailbox {
+                // (The mail carrier brings them.)
+                commands.insert_resource(crate::services::MailDue(Bill { amount: bill, day }));
+            } else {
+                h.funds -= bill;
+                notes.push(format!("The bills arrived: §{bill} was paid automatically."));
+            }
         }
     }
     // Three days late: the repo man takes things worth what's owed.
@@ -3652,6 +3655,37 @@ fn pay_bills(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_bills_ever_exempts_the_household_but_not_visitors() {
+        for mailbox in [false, true] {
+            let mut app = App::new();
+            let mut clock = GameClock::default();
+            clock.minutes = 3.0 * 1440.0 + 9.0 * 60.0;
+            app.insert_resource(clock)
+                .insert_resource(Household { name: "Test".into(), funds: 1000, lot_index: 0, last_bill_day: 0, bills: Vec::new() })
+                .init_resource::<Notifications>()
+                .add_systems(Update, pay_bills);
+            if mailbox {
+                app.world_mut().spawn(GameObject { kind: ObjectKind::Mailbox, name: "Mailbox".into(), objd: (0, 0, 0), price: 0,
+                    center: Vec2::ZERO, half: Vec2::ONE, height: 1.0, route: None });
+            }
+            let owner = app.world_mut().spawn((HouseholdMember,
+                crate::wishes::Wishes::restored(0, vec!["NoBillsEver".into()], 0.0))).id();
+            app.update();
+            assert_eq!(app.world().resource::<Household>().funds, 1000);
+            assert_eq!(app.world().resource::<Household>().last_bill_day, 3);
+            assert!(!app.world().contains_resource::<crate::services::MailDue>());
+            // Once the owner moves out, their reward no longer exempts this household.
+            app.world_mut().entity_mut(owner).remove::<HouseholdMember>();
+            app.world_mut().resource_mut::<GameClock>().minutes = 7.0 * 1440.0 + 9.0 * 60.0;
+            app.update();
+            assert_eq!(app.world().contains_resource::<crate::services::MailDue>(), mailbox);
+            assert_eq!(app.world().resource::<Household>().funds, if mailbox { 1000 } else { 940 });
+            app.update();
+            assert_eq!(app.world().resource::<Household>().funds, if mailbox { 1000 } else { 940 }, "only one bill per scheduled day");
+        }
+    }
 
     /// Every clip the catalogue's objects' interactions play is baked (needs the bake:
     /// `SIMS3_CACHE=<baked> cargo test -p sims3 interaction_clips_baked -- --ignored`).

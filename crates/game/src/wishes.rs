@@ -134,7 +134,7 @@ impl Wishes {
 }
 
 /// The lifetime rewards offered: the game's reward traits whose effects are carried out here.
-pub const REWARDS: [&str; 28] = [
+pub const REWARDS: [&str; 29] = [
     "SteelBladder",
     "PermaClean",
     "HardlyHungry",
@@ -163,6 +163,7 @@ pub const REWARDS: [&str; 28] = [
     "MoodModifier",
     "Teleporter",
     "CollectionHelper",
+    "NoBillsEver",
 ];
 
 /// The rewards that are objects: the reward, and the catalogue object it is (given to the Sim
