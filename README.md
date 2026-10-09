@@ -184,6 +184,7 @@ installation is unreachable.
   the game's own last moments, and its ghost its own colour.
 - **Meals**: cooking serves eight portions, matching the installed game's group-meal tuning,
   and platters switch to the recipe's original half-depleted model at four servings when available,
+  with cooked platters' recipes, remaining servings and positions retained in saves,
   with trait-aware post-meal cleanup that preserves queued player commands. Favorite-food
   satisfaction applies to both seated and standing meals. Menus follow the original hours:
   breakfast from 1am, lunch from 11am, dinner from 5pm and weekend brunch from 9am–3pm.
@@ -778,6 +779,9 @@ and capture after 22 seconds; the log reports `inventory eating PASS`.
 `HALF_MEAL_TEST=1` creates a platter using an original recipe, reduces it to four servings,
 and verifies its full mesh is replaced by the half-depleted mesh exactly once. Capture after
 12 seconds; the log reports `half platter PASS`.
+Run that probe with `--save-at 9` and an isolated `SIMS3_SAVES` directory, then use
+`HALF_MEAL_TEST=restore --load 0` (the variable set in the environment) to check restored
+servings and half-depleted geometry; the log reports `saved platter PASS`.
 `CLICK_AT=1000,450@8` clicks at window-relative coordinates (`CURSOR_AT` moves without clicking).
 `BUY_HISTORY_TEST=1` verifies selling, undoing and redoing furniture transactions in the running
 game. Use `BUY_HISTORY_TEST=buttons` with `UI_CLICK=05ac150d@7;05ac150e@8;05ac150d@9` to verify

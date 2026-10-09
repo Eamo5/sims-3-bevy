@@ -25,7 +25,7 @@ impl Plugin for MealsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Leftovers>()
             .add_systems(OnEnter(crate::AppState::InGame), |mut l: ResMut<Leftovers>| l.0.clear())
-            .add_systems(Update, (cook_prep, cook_prep_done, serve_if_interrupted, take_out_dinner, meal_requests, update_platters, probe_platters, come_to_meal, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (restore_meals, cook_prep, cook_prep_done, serve_if_interrupted, take_out_dinner, meal_requests, update_platters, probe_platters, come_to_meal, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -391,6 +391,47 @@ pub struct Meal {
     pub servings: u8,
 }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct SavedMeal {
+    pub recipe: String,
+    pub servings: u8,
+    pub position: [f32; 3],
+    pub yaw: f32,
+}
+
+#[derive(Resource)]
+pub struct PendingMeals(pub Vec<SavedMeal>);
+
+pub fn saved_meals(meals: &Query<(&Meal, &Dish, &Transform)>, data: &s3bake::GameDataBaked) -> Vec<SavedMeal> {
+    meals.iter().filter_map(|(meal, dish, tf)| {
+        let recipe = data.recipes.get(dish.0)?;
+        (meal.servings > 0).then(|| SavedMeal { recipe: recipe.key.clone(), servings: meal.servings,
+            position: tf.translation.to_array(), yaw: tf.rotation.to_euler(EulerRot::YXZ).0 })
+    }).collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn restore_meals(
+    mut commands: Commands, pending: Option<Res<PendingMeals>>, ui: Option<Res<crate::icons::GameUi>>,
+    data: Res<Baked>, catalog: Res<Catalog>, mut assets: ResMut<ObjectAssets>,
+    mut meshes: ResMut<Assets<Mesh>>, mut images: ResMut<Assets<Image>>, mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let (Some(pending), Some(ui)) = (pending, ui) else { return };
+    let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+    for saved in &pending.0 {
+        if saved.servings == 0 { continue; }
+        let Some((i, recipe)) = ui.data.recipes.iter().enumerate().find(|(_, r)| r.key == saved.recipe) else { continue };
+        let Some(plate) = spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, PLATTER, ObjectKind::Meal, "Group Meal", Vec3::from(saved.position), saved.yaw) else { continue };
+        set_food(&mut commands, &mut assets, &mut ctx, plate, None, recipe.group.or(recipe.single));
+        commands.entity(plate).insert((Meal { servings: saved.servings }, Dish(i)));
+        let name = recipe.name.clone();
+        commands.entity(plate).queue_silenced(move |mut e: EntityWorldMut| {
+            if let Some(mut object) = e.get_mut::<GameObject>() { object.name = name; }
+        });
+    }
+    commands.remove_resource::<PendingMeals>();
+}
+
 impl Meal {
     fn take_serving(&mut self) -> bool {
         let Some(left) = self.servings.checked_sub(1) else { return false };
@@ -443,6 +484,14 @@ fn probe_platters(
 ) {
     if std::env::var_os("HALF_MEAL_TEST").is_none() || state.0 == 4 || time.elapsed_secs() < 6.0 { return; }
     let Some(ui) = ui else { return };
+    if std::env::var("HALF_MEAL_TEST").as_deref() == Ok("restore") {
+        let (meal, food, half) = plates.iter().find(|(meal, _, _)| meal.servings == 4).expect("saved four-serving platter restored");
+        assert_eq!(meal.servings, 4);
+        assert!(half && entities.contains(food.0), "restored meal must retain half-depleted geometry");
+        info!("autotest: saved platter PASS — remaining servings and half-depleted food mesh restored");
+        state.0 = 4;
+        return;
+    }
     match state.0 {
         0 => {
             let (i, recipe) = ui.data.recipes.iter().enumerate().find(|(_, r)| r.group.is_some() && r.group_half.is_some() && r.group != r.group_half).expect("original recipe with distinct half model");
@@ -875,6 +924,23 @@ fn release_plates(mut commands: Commands, sims: Query<(Entity, &ActionQueue, &Ea
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_platters_preserve_recipe_identity_servings_and_transform() {
+        let mut data = s3bake::GameDataBaked::default();
+        data.recipes.push(s3bake::gamedata::RecipeInfo { key: "Pancakes".into(), ..default() });
+        let mut world = World::new();
+        world.spawn((Meal { servings: 4 }, Dish(0), Transform::from_xyz(1.0, 3.75, 2.0).with_rotation(Quat::from_rotation_y(0.5))));
+        world.spawn((Meal { servings: 0 }, Dish(0), Transform::default()));
+        let mut state = bevy::ecs::system::SystemState::<Query<(&Meal, &Dish, &Transform)>>::new(&mut world);
+        let saved = saved_meals(&state.get(&world).unwrap(), &data);
+        let restored: Vec<SavedMeal> = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+        assert_eq!(restored.len(), 1, "empty platters must not restore edible meals");
+        assert_eq!(restored[0].recipe, "Pancakes");
+        assert_eq!(restored[0].servings, 4);
+        assert_eq!(restored[0].position, [1.0, 3.75, 2.0]);
+        assert!((restored[0].yaw - 0.5).abs() < 0.0001);
+    }
 
     #[test]
     fn post_meal_cleanup_respects_traits_chance_and_player_commands() {

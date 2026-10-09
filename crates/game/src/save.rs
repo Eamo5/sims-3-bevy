@@ -255,6 +255,9 @@ pub struct SaveGame {
     /// Leftovers in the fridge (servings, by recipe).
     #[serde(default)]
     pub leftovers: Vec<String>,
+    /// Cooked group meals still on the lot, with their remaining servings.
+    #[serde(default)]
+    pub meals: Vec<crate::meals::SavedMeal>,
     /// The season and the weather (`None` in saves from before there was weather).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weather: Option<crate::weather::Weather>,
@@ -559,12 +562,13 @@ fn save_game(
     clock: Res<GameClock>,
     world: Res<CurrentWorld>,
     household: Option<Res<Household>>,
-    (removed, paint, garden, plants, collection): (
+    (removed, paint, garden, plants, collection, meals): (
         Res<RemovedLotObjects>,
         Option<Res<crate::building::LotPaint>>,
         Option<Res<crate::gardening::Garden>>,
         Query<(&crate::gardening::GrowingPlant, &Transform)>,
         Res<crate::collecting::Collection>,
+        Query<(&crate::meals::Meal, &crate::meals::Dish, &Transform)>,
     ),
     sims: Query<
         (
@@ -736,6 +740,7 @@ fn save_game(
             .map(|(g, tf)| SavedGrave { position: tf.translation.to_array(), rotation: tf.rotation.to_array(), cause: g.cause.clone(), sim: saved_look(&g.sim) })
             .collect(),
         leftovers: leftovers.0.clone(),
+        meals: ui.as_deref().map(|u| crate::meals::saved_meals(&meals, &u.data)).unwrap_or_default(),
         weather: Some(weather.clone()),
         pets: crate::pets::saved(&pets, pet_data.0.as_deref()),
         dormant: dormant.kept(&sims.iter().filter(|q| q.9).map(|q| q.1.id).collect::<Vec<_>>()),
@@ -953,6 +958,7 @@ fn apply_loaded_game(
     commands.insert_resource(crate::fishbowl::PendingBowls(game.fishbowls.clone()));
     commands.insert_resource(game.collection.clone());
     commands.insert_resource(crate::meals::Leftovers(game.leftovers.clone()));
+    commands.insert_resource(crate::meals::PendingMeals(game.meals.clone()));
     commands.insert_resource(game.weather.clone().unwrap_or_default());
     commands.insert_resource(crate::pets::PendingPets(game.pets.clone()));
     commands.insert_resource(crate::household::Dormant(game.dormant.clone()));
