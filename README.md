@@ -786,6 +786,8 @@ Run that probe with `--save-at 9` and an isolated `SIMS3_SAVES` directory, then 
 `HALF_MEAL_TEST=restore --load 0` (the variable set in the environment) to check restored
 servings and half-depleted geometry, plus a pizza's source model and remaining slices;
 the log reports `saved platter PASS`.
+`MEAL_BUDGET_TEST=1` checks cooking and birthday-cake requests with an empty household
+budget: neither may create food or debt. Capture after 12 seconds for `meal budget PASS`.
 `CLICK_AT=1000,450@8` clicks at window-relative coordinates (`CURSOR_AT` moves without clicking).
 `BUY_HISTORY_TEST=1` verifies selling, undoing and redoing furniture transactions in the running
 game. Use `BUY_HISTORY_TEST=buttons` with `UI_CLICK=05ac150d@7;05ac150e@8;05ac150d@9` to verify

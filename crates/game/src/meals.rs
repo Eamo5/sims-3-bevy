@@ -25,7 +25,7 @@ impl Plugin for MealsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Leftovers>()
             .add_systems(OnEnter(crate::AppState::InGame), |mut l: ResMut<Leftovers>| l.0.clear())
-            .add_systems(Update, (restore_meals, cook_prep, cook_prep_done, serve_if_interrupted, take_out_dinner, meal_requests, update_platters, update_eating_plates, probe_platters, come_to_meal, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (restore_meals, cook_prep, cook_prep_done, serve_if_interrupted, take_out_dinner, meal_requests, update_platters, update_eating_plates, probe_platters, probe_meal_budget, come_to_meal, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -608,6 +608,44 @@ fn probe_platters(
     }
 }
 
+fn probe_meal_budget(
+    mut commands: Commands, time: Res<Time<crate::autotest::InputTimeline>>,
+    ui: Option<Res<crate::icons::GameUi>>, funds: Option<ResMut<crate::interact::Household>>,
+    objects: Query<(Entity, &GameObject)>, mut selected: Query<(Entity, &mut ActionQueue), With<crate::sim::Selected>>,
+    notes: Res<Notifications>, mut state: Local<(u8, usize)>,
+) {
+    if std::env::var_os("MEAL_BUDGET_TEST").is_none() || state.0 == 3 || time.elapsed_secs() < 6.0 { return; }
+    let (Some(ui), Some(mut funds), Ok((sim, mut queue))) = (ui, funds, selected.single_mut()) else { return };
+    let count = objects.iter().filter(|(_, o)| matches!(o.kind, ObjectKind::Meal | ObjectKind::BirthdayCake)).count();
+    match state.0 {
+        0 => {
+            funds.funds = 0;
+            queue.0.clear();
+            let stove = objects.iter().find(|(_, o)| o.kind == ObjectKind::Stove).expect("fixture stove").0;
+            let recipe = ui.data.recipes.iter().position(|r| r.cost > 0).expect("paid recipe");
+            commands.entity(sim).insert((MealPlan(recipe), ServingFrom(stove), MealRequest::Serve(stove)));
+            state.1 = count;
+            state.0 = 1;
+        }
+        1 => {
+            assert_eq!(funds.funds, 0);
+            assert_eq!(count, state.1, "unaffordable cooking must not create food");
+            assert!(notes.0.iter().any(|(n, _)| n.contains("can't afford the ingredients")));
+            let fridge = objects.iter().find(|(_, o)| o.kind == ObjectKind::Fridge).expect("fixture fridge").0;
+            commands.entity(sim).insert(MealRequest::Cake(fridge));
+            state.0 = 2;
+        }
+        2 => {
+            assert_eq!(funds.funds, 0);
+            assert_eq!(count, state.1, "unaffordable cake must not be created");
+            assert!(notes.0.iter().any(|(n, _)| n.contains("can't afford a birthday cake")));
+            info!("autotest: meal budget PASS — cooking and cakes reject insufficient funds without spawning food or creating debt");
+            state.0 = 3;
+        }
+        _ => unreachable!(),
+    }
+}
+
 /// How many servings of leftovers the fridge keeps.
 const MAX_LEFTOVERS: usize = 12;
 
@@ -754,6 +792,11 @@ fn meal_requests(
                 commands.entity(me).remove::<MealPlan>();
                 let r = dish.and_then(recipe);
                 let label = r.map_or("Group Meal".to_string(), |r| r.name.clone());
+                let cost = r.map_or(0, |r| (r.cost as i64).max(0));
+                if cost > 0 && funds.as_ref().is_none_or(|h| h.funds < cost) {
+                    notes.push(format!("{} can't afford the ingredients for {label} (§{cost}).", sim.first));
+                    continue;
+                }
                 let Some(platter) = spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, PLATTER, ObjectKind::Meal, "Group Meal", at, yaw) else { continue };
                 did.write(crate::journal::Did::count(me, crate::journal::Stat::Dishes, 1.0));
                 // (Hot dogs and burgers have no platter of their own: a plate of them.)
@@ -771,8 +814,8 @@ fn meal_requests(
                     commands.entity(platter).insert(Dish(d));
                 }
                 // The ingredients.
-                if let (Some(r), Some(h)) = (r, funds.as_mut()) {
-                    h.funds -= r.cost as i64;
+                if let Some(h) = funds.as_mut() {
+                    h.funds -= cost;
                 }
                 info!("meal served at {at:.1?}: {label}");
                 let dish_word = if r.is_some_and(|r| r.meals == s3bake::gamedata::MEAL_DESSERT) { "Dessert" } else { word };
@@ -793,6 +836,10 @@ fn meal_requests(
             MealRequest::Cake(fridge) => {
                 // On the nearest counter or table, candles lit.
                 let Ok((_, f, ftf, _)) = objects.get(fridge) else { continue };
+                if funds.as_ref().is_none_or(|h| h.funds < CAKE_PRICE) {
+                    notes.push(format!("{} can't afford a birthday cake (§{CAKE_PRICE}).", sim.first));
+                    continue;
+                }
                 let at = surface_near(&objects, f.world_center(ftf), 8.0).unwrap_or(tf.translation + tf.rotation * Vec3::new(0.0, 0.0, 0.6));
                 if spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, "FoodBirthdayCake", ObjectKind::BirthdayCake, "Birthday Cake", at, 0.0).is_some() {
                     if let Some(h) = funds.as_mut() {
