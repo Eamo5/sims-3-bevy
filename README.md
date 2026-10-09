@@ -287,6 +287,8 @@ installation is unreachable.
   Wallpaper picking and outlines follow each wall's authored foundation/split-level elevation.
   Wall-mounted objects also snap at that elevation; multi-tile objects cannot bridge wall
   sections with different base heights.
+  Floor picking uses the nearest occupied tile elevation, including raised/split-level tiles;
+  holes expose lower visible floors instead of selecting an empty storey plane.
   Existing door/window slots reject overlapping openings in both preview and placement;
   moving an opening ignores its own retained source so it can return to the same slot.
 - **Out on the town**: Sims drive to the parks, the library, the gym, the beach and the

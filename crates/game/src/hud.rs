@@ -737,21 +737,54 @@ fn ancestor_with<F: Fn(Entity) -> bool>(mut e: Entity, parents: &Query<&ChildOf>
 /// Where a click lands: on a house floor (the viewed one first, then those below) or the ground.
 pub fn floor_hit(ray: Ray3d, world: &CurrentWorld, building: Option<&crate::building::ActiveBuilding>) -> Option<(Vec3, u8)> {
     if let Some(b) = building {
-        for level in (1..=b.view_level).rev() {
-            let y = b.levels[level as usize];
-            if ray.direction.y.abs() < 1e-4 {
-                break;
-            }
-            let t = (y - ray.origin.y) / ray.direction.y;
-            if t > 0.0 {
-                let p = ray.origin + *ray.direction * t;
-                if b.floor_y(level, p).is_some() {
-                    return Some((p, level));
-                }
-            }
+        let planes = b.data.floors.iter().filter(|f| f.level > 0 && f.level <= b.view_level).filter_map(|f| {
+            Some((f.level, f.y.or_else(|| b.levels.get(f.level as usize).copied())?))
+        });
+        if let Some(hit) = floor_plane_hit(ray, planes, |level, p| b.floor_y(level, p).is_some_and(|y| (p.y - y).abs() < 0.01)) {
+            return Some(hit);
         }
     }
     ground_hit(ray, world).map(|p| (p, 1))
+}
+
+/// Test each distinct rendered floor elevation, retaining the nearest occupied intersection.
+fn floor_plane_hit(ray: Ray3d, planes: impl IntoIterator<Item = (u8, f32)>, contains: impl Fn(u8, Vec3) -> bool) -> Option<(Vec3, u8)> {
+    if ray.direction.y.abs() < 1e-4 { return None; }
+    let mut seen = std::collections::HashSet::new();
+    let mut best: Option<(f32, Vec3, u8)> = None;
+    for (level, y) in planes {
+        if !y.is_finite() || !seen.insert((level, y.to_bits())) { continue; }
+        let t = (y - ray.origin.y) / ray.direction.y;
+        if t <= 0.0 || best.is_some_and(|(distance, _, _)| t >= distance) { continue; }
+        let p = ray.origin + *ray.direction * t;
+        if contains(level, p) { best = Some((t, p, level)); }
+    }
+    best.map(|(_, p, level)| (p, level))
+}
+
+#[cfg(test)]
+mod floor_picking_tests {
+    use super::*;
+
+    #[test]
+    fn slanted_ray_selects_actual_raised_tile_not_default_storey_plane() {
+        let ray = Ray3d::new(Vec3::new(0.0, 4.0, 0.5), Dir3::new(Vec3::new(1.0, -1.0, 0.0)).unwrap());
+        let hit = floor_plane_hit(ray, [(1, 0.0), (1, 2.0)], |_, p| (1.5..2.5).contains(&p.x) && (p.y - 2.0).abs() < 0.01).unwrap();
+        assert!((hit.0.x - 2.0).abs() < 0.001);
+        assert_eq!(hit.0.y, 2.0);
+        assert_eq!(hit.1, 1);
+    }
+
+    #[test]
+    fn nearest_occupied_floor_wins_and_holes_reveal_lower_floors() {
+        let ray = Ray3d::new(Vec3::new(0.5, 8.0, 0.5), Dir3::NEG_Y);
+        let planes = [(1, 0.0), (2, 3.0), (2, 3.0), (3, 6.0)];
+        assert_eq!(floor_plane_hit(ray, planes, |_, _| true).unwrap().1, 3);
+        assert_eq!(floor_plane_hit(ray, planes, |level, _| level < 3).unwrap().1, 2);
+        assert!(floor_plane_hit(ray, planes, |_, _| false).is_none());
+        assert!(floor_plane_hit(Ray3d::new(ray.origin, Dir3::Y), planes, |_, _| true).is_none());
+        assert!(floor_plane_hit(Ray3d::new(ray.origin, Dir3::X), planes, |_, _| true).is_none());
+    }
 }
 
 pub fn ground_hit(ray: Ray3d, world: &CurrentWorld) -> Option<Vec3> {
