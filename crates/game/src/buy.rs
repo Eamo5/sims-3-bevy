@@ -1422,12 +1422,10 @@ fn paint(
         if std::env::var_os("BUILD_HISTORY_TEST").is_some() { info!("autotest: floor covering at {l:?}, level {level}, room fill {fill}"); }
         let ground = b.view_level <= 1 && !b.data.floors.iter().any(|f| f.level == 1 && f.x as f32 == l.x.floor() && f.z as f32 == l.y.floor());
         if ground {
-            let at = l.floor();
-            let heights = [Vec2::ZERO, Vec2::X, Vec2::ONE, Vec2::Y].map(|offset| {
+            crate::covering::pave_room(&b.data, l, pat.texture, fill, |at| [Vec2::ZERO, Vec2::X, Vec2::ONE, Vec2::Y].map(|offset| {
                 let p = b.world(at.x + offset.x, at.y + offset.y, 0.0);
                 world.data.heightmap.sample(p.x, p.z)
-            });
-            crate::covering::paving(&b.data, l, pat.texture, heights)
+            }))
         } else {
             crate::covering::floors(&b.data, level, l, pat.texture, fill)
         }

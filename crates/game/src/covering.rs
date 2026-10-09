@@ -86,21 +86,33 @@ pub fn floors(b: &LotBuildingBaked, level: u8, at: Vec2, texture: Key, fill: boo
     }).collect()
 }
 
-pub fn paving(b: &LotBuildingBaked, at: Vec2, texture: Key, heights: [f32; 4]) -> Vec<PaintOp> {
-    let (x, z, _) = triangle(at);
+#[cfg(test)]
+fn paving(b: &LotBuildingBaked, at: Vec2, texture: Key, heights: [f32; 4]) -> Vec<PaintOp> {
+    pave_room(b, at, texture, false, |_| heights)
+}
+
+/// Fill only a bounded enclosure. Outside it, even the room tool affects one tile.
+pub fn pave_room(b: &LotBuildingBaked, at: Vec2, texture: Key, fill: bool, heights: impl Fn(Vec2) -> [f32; 4]) -> Vec<PaintOp> {
+    let room = room(b, 1, at);
+    let start = triangle(at);
+    let fill = fill && !room.outdoors;
+    let mut cells: Vec<_> = room.masks.into_iter().filter(|((x, z), _)| fill || (*x, *z) == (start.0, start.1)).collect();
+    cells.sort_by_key(|((x, z), _)| (*z, *x));
+    cells.into_iter().filter_map(|((x, z), mask)| pave_tile(b, x, z, mask, texture, &heights)).collect()
+}
+
+fn pave_tile(b: &LotBuildingBaked, x: i32, z: i32, mask: u8, texture: Key, heights: &impl Fn(Vec2) -> [f32; 4]) -> Option<PaintOp> {
     if x < 0 || z < 0 || x >= b.width as i32 || z >= b.depth as i32
         || b.pool.iter().any(|f| f.x as i32 == x && f.z as i32 == z)
         || b.floors.iter().any(|f| f.level == 1 && f.x as i32 == x && f.z as i32 == z)
-    { return Vec::new(); }
-    let room = room(b, 1, at);
+    { return None; }
     let tile = b.floors.iter().find(|f| f.level == 0 && f.x as i32 == x && f.z as i32 == z);
-    let mask = room.masks.get(&(x, z)).copied().unwrap_or(0);
     let changed = (0..4).fold(0, |changed, t| {
         let already = tile.is_some_and(|f| f.mask & (1 << t) != 0 && b.covers.get(f.cover[t] as usize) == Some(&texture));
         if mask & (1 << t) != 0 && !already { changed | (1 << t) } else { changed }
     });
-    if changed == 0 { return Vec::new(); }
-    vec![PaintOp::Pave { x: x as u16, z: z as u16, mask: changed, texture, heights }]
+    if changed == 0 { return None; }
+    Some(PaintOp::Pave { x: x as u16, z: z as u16, mask: changed, texture, heights: heights(Vec2::new(x as f32, z as f32)) })
 }
 
 pub fn walls(b: &LotBuildingBaked, wall: u32, side: u8, texture: Key, fill: bool) -> Vec<PaintOp> {
@@ -145,6 +157,37 @@ mod tests {
             crate::building::apply_paint(&mut b, &PaintOp::AddFloor { level: 1, x, z, region: 99 });
         }}
         b
+    }
+
+    #[test]
+    fn bare_room_fill_samples_each_tile_and_skips_existing_designs() {
+        let mut b = house();
+        b.floors.clear();
+        let texture = (1, 2, 3);
+        let heights = |at: Vec2| [at.x, at.x + 1.0, at.x + 1.0, at.x];
+        let ops = pave_room(&b, Vec2::splat(1.5), texture, true, heights);
+        assert_eq!(ops.len(), 4);
+        assert_eq!(cost(&b, &ops, 8), 32);
+        for op in &ops { crate::building::apply_paint(&mut b, op); }
+        assert_eq!(b.ground_at(1.0, 1.0), Some(1.0));
+        assert_eq!(b.ground_at(3.0, 3.0), Some(3.0));
+        assert!(pave_room(&b, Vec2::splat(1.5), texture, true, heights).is_empty());
+        assert_eq!(pave_room(&b, Vec2::splat(0.5), texture, true, heights).len(), 1);
+    }
+
+    #[test]
+    fn bare_room_fill_respects_diagonals_and_pool_cells() {
+        let mut b = house();
+        b.floors.clear();
+        crate::building::apply_paint(&mut b, &PaintOp::AddWall { a: [1.0, 1.0], b: [3.0, 3.0], level: 1 });
+        let ops = pave_room(&b, Vec2::new(1.8, 1.2), (1, 2, 3), true, |_| [0.0; 4]);
+        assert_eq!(ops.len(), 3);
+        assert_eq!(cost(&b, &ops, 8), 16);
+        assert!(ops.iter().any(|op| matches!(op, PaintOp::Pave { x: 1, z: 1, mask: 3, .. })));
+        crate::building::apply_paint(&mut b, &PaintOp::AddPool { x: 2, z: 1 });
+        let ops = pave_room(&b, Vec2::new(1.8, 1.2), (1, 2, 3), true, |_| [0.0; 4]);
+        assert_eq!(cost(&b, &ops, 8), 8);
+        assert!(!ops.iter().any(|op| matches!(op, PaintOp::Pave { x: 2, z: 1, .. })));
     }
 
     #[test]

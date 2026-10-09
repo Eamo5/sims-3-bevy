@@ -275,6 +275,8 @@ installation is unreachable.
   sounds like the game's build tools, and is kept in saves. Clicking bare ground with a floor
   pattern lays paving that follows the current terrain, including sculpted slopes; undo restores
   the previous ground and funds, and saved paving retains its corner heights.
+  Shift-click or the room-fill button also lays paving throughout a bare enclosed room,
+  respecting diagonal walls and pools. Outside an enclosure it still affects only one tile.
 - **Out on the town**: Sims drive to the parks, the library, the gym, the beach and the
   other community lots (from the lot's pie menu or its map tag) and use what's there: chess
   tables, computers, bookshelves, swings, grills, restrooms. Each lot gets its own walk grid
