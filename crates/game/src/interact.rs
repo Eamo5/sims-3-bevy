@@ -2897,7 +2897,7 @@ fn run_actions(
                             let minutes = 90.0 / (1.0 + handy * 0.35);
                             let e = skills.0.entry("Handiness").or_insert(0.0);
                             let before = *e as u32;
-                            *e = (*e + dt / 60.0 * 0.5 * crate::life::skill_rate(&sim.traits, "Handiness") / (1.0 + *e * 0.25)).min(10.0);
+                            *e = (*e + dt / 60.0 * 0.5 * crate::life::skill_rate(&sim.traits, "Handiness") * crate::wishes::reward_skill_rate(wishes) / (1.0 + *e * 0.25)).min(10.0);
                             if *e as u32 > before {
                                 notes.push(format!("{} reached level {} in Handiness!", sim.first, *e as u32));
                                 life.write(LifeEvent::new(me, LifeEventKind::SkillUp { skill: "Handiness", level: *e as u32 }));
@@ -2938,7 +2938,7 @@ fn run_actions(
                             let minutes = crate::upgrades::Upgrade::MINUTES / (1.0 + handy * 0.35);
                             let e = skills.0.entry("Handiness").or_insert(0.0);
                             let before = *e as u32;
-                            *e = (*e + dt / 60.0 * 0.6 * crate::life::skill_rate(&sim.traits, "Handiness") / (1.0 + *e * 0.25)).min(10.0);
+                            *e = (*e + dt / 60.0 * 0.6 * crate::life::skill_rate(&sim.traits, "Handiness") * crate::wishes::reward_skill_rate(wishes) / (1.0 + *e * 0.25)).min(10.0);
                             if *e as u32 > before {
                                 notes.push(format!("{} reached level {} in Handiness!", sim.first, *e as u32));
                                 life.write(LifeEvent::new(me, LifeEventKind::SkillUp { skill: "Handiness", level: *e as u32 }));

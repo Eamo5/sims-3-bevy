@@ -136,7 +136,8 @@ installation is unreachable.
   of their family's funds (marry a Landgraab, an Alto or a Goth to start on Gold Digger).
 - **Lifetime rewards**: the game's reward traits, bought with lifetime happiness at their
   costs in its dialog (icon, name and description): Steel Bladder (bladder stays full), Dirt
-  Defiant and Hardly Hungry (hygiene and hunger decay at one quarter speed), Fast Learner,
+  Defiant and Hardly Hungry (hygiene and hunger decay at one quarter speed), Fast Learner
+  (including gardening, repairs/upgrades, career study and rabbit-hole lessons),
   Fast Metabolism, Professional Slacker, Opportunistic (bigger
   opportunity rewards), Attractive, Extra Creative (paintings and books earn more), Super
   Green Thumb, Discount Diner, Complimentary Entertainment, Bookshop Bargainer, Haggler, Speedy

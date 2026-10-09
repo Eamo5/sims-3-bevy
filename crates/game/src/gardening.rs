@@ -129,6 +129,31 @@ mod harvest_tests {
         assert_eq!(p.harvest(100.0), None);
         assert_eq!(serde_json::to_value(&p).unwrap(), saved);
     }
+
+    #[test]
+    fn fast_learner_gardening_crosses_levels_and_still_caps_at_ten() {
+        let mut world = World::new();
+        world.init_resource::<Messages<crate::life::LifeEvent>>();
+        let me = world.spawn_empty().id();
+        let mut state = bevy::ecs::system::SystemState::<MessageWriter<crate::life::LifeEvent>>::new(&mut world);
+        let mut writer = state.get_mut(&mut world).unwrap();
+        let mut sim = crate::sim::random_sim(&mut rand::rng(), "Test", Some(false), crate::sim::Age::Adult);
+        sim.traits.clear();
+        let wishes = crate::wishes::Wishes::restored(0, vec!["FastLearner".into()], 0.0);
+        let mut notes = Notifications::default();
+        let mut ordinary = Skills::default();
+        let mut rewarded = Skills::default();
+        ordinary.0.insert("Gardening", 0.4);
+        rewarded.0.insert("Gardening", 0.4);
+        learn(&sim, me, &mut ordinary, &mut notes, &mut writer, 325.0, None);
+        assert_eq!(ordinary.level("Gardening"), 0);
+        assert!(notes.0.is_empty());
+        learn(&sim, me, &mut rewarded, &mut notes, &mut writer, 325.0, Some(&wishes));
+        assert_eq!(rewarded.level("Gardening"), 1);
+        assert_eq!(notes.0.len(), 1, "reward-driven level crossing must notify");
+        learn(&sim, me, &mut rewarded, &mut notes, &mut writer, 65000.0, Some(&wishes));
+        assert_eq!(rewarded.0["Gardening"], 10.0);
+    }
 }
 
 /// A plant in a saved game (where it stands, and how it's doing).
@@ -306,14 +331,14 @@ fn garden_requests(
                     *n -= 1;
                     notes.push(format!("{} planted a {}.", sim.first, info.name.to_lowercase()));
                     did.write(crate::journal::Did::kind(me, crate::journal::Kinds::PlantTypes, info.name.clone()));
-                    learn(sim, me, &mut skills, &mut notes, &mut life, info.skill_plant);
+                    learn(sim, me, &mut skills, &mut notes, &mut life, info.skill_plant, wishes);
                 }
             }
             GardenRequest::Water(e) => {
                 if let Ok((mut p, _)) = plants.get_mut(e) {
                     p.water = 100.0;
                     p.care = level / 10.0;
-                    learn(sim, me, &mut skills, &mut notes, &mut life, 25.0);
+                    learn(sim, me, &mut skills, &mut notes, &mut life, 25.0, wishes);
                 }
             }
             GardenRequest::Weed(e) => {
@@ -321,7 +346,7 @@ fn garden_requests(
                     if !p.weedy { continue; }
                     p.weedy = false;
                     p.care = level / 10.0;
-                    learn(sim, me, &mut skills, &mut notes, &mut life, 40.0);
+                    learn(sim, me, &mut skills, &mut notes, &mut life, 40.0, wishes);
                 }
             }
             GardenRequest::Harvest(e) => {
@@ -335,7 +360,7 @@ fn garden_requests(
                 // Into their inventory, to sell or eat.
                 let each = (info.price as f32 * multiplier).round() as i64;
                 crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Produce, info.produce.clone(), format!("{word} {}", info.produce), tier as u8, each, picked);
-                learn(sim, me, &mut skills, &mut notes, &mut life, info.skill_harvest);
+                learn(sim, me, &mut skills, &mut notes, &mut life, info.skill_harvest, wishes);
                 notes.push(format!("{} harvested {picked} {word} {} (worth §{}).", sim.first, plural(&info.produce, picked), each * picked as i64));
                 did.write(crate::journal::Did::count(me, crate::journal::Stat::Harvested, picked as f64));
                 if word == "Perfect" {
@@ -375,10 +400,10 @@ fn garden_requests(
 }
 
 /// Gardening skill from the table's points.
-fn learn(sim: &Sim, me: Entity, skills: &mut Skills, notes: &mut Notifications, life: &mut MessageWriter<crate::life::LifeEvent>, points: f32) {
+fn learn(sim: &Sim, me: Entity, skills: &mut Skills, notes: &mut Notifications, life: &mut MessageWriter<crate::life::LifeEvent>, points: f32, wishes: Option<&crate::wishes::Wishes>) {
     let v = skills.0.entry("Gardening").or_insert(0.0);
     let before = *v as u32;
-    *v = (*v + skill_gain(points) * crate::life::skill_rate(&sim.traits, "Gardening")).min(10.0);
+    *v = (*v + skill_gain(points) * crate::life::skill_rate(&sim.traits, "Gardening") * crate::wishes::reward_skill_rate(wishes)).min(10.0);
     if *v as u32 > before {
         notes.push(format!("{} reached level {} in Gardening!", sim.first, *v as u32));
         life.write(crate::life::LifeEvent::new(me, crate::life::LifeEventKind::SkillUp { skill: "Gardening", level: *v as u32 }));
