@@ -203,6 +203,17 @@ struct Plateful(usize);
 #[derive(Component, Clone, Default, Debug)]
 pub struct KnownRecipes(pub Vec<String>);
 
+impl KnownRecipes {
+    /// Returns whether a new recipe was bought; an unaffordable purchase changes nothing.
+    fn purchase(&mut self, funds: &mut i64, key: &str, price: i64) -> Result<bool, ()> {
+        if self.0.iter().any(|r| r == key) { return Ok(false); }
+        if price < 0 || *funds < price { return Err(()); }
+        *funds -= price;
+        self.0.push(key.to_string());
+        Ok(true)
+    }
+}
+
 /// Buying a recipe book at the bookstore, and reading it there.
 pub static BUY_RECIPE: crate::rabbitholes::Activity = crate::rabbitholes::Activity {
     name: "Buy a Recipe Book",
@@ -252,17 +263,14 @@ fn learn_recipes(
         commands.entity(e).remove::<(BuyingRecipe, RecipeBookBought)>();
         let Some(r) = ui.as_ref().and_then(|u| u.data.recipes.get(buying.0)) else { continue };
         let price = crate::wishes::book_price(wishes, r.book_price);
-        if let Some(h) = household.as_mut() {
-            h.funds -= price;
-        }
-        match known {
-            Some(mut k) => {
-                if !k.0.contains(&r.key) {
-                    k.0.push(r.key.clone());
-                }
-            }
-            None => {
-                commands.entity(e).insert(KnownRecipes(vec![r.key.clone()]));
+        let Some(h) = household.as_mut() else { continue };
+        let mut updated = known.as_deref().cloned().unwrap_or_default();
+        match updated.purchase(&mut h.funds, &r.key, price) {
+            Ok(true) => { commands.entity(e).insert(updated); }
+            Ok(false) => continue,
+            Err(()) => {
+                notes.push(format!("{} can't afford the recipe book for {} (§{price}).", sim.first, r.name));
+                continue;
             }
         }
         notes.push(format!("{} bought a recipe book for §{price} and learned to make {}.", sim.first, r.name));
@@ -765,6 +773,22 @@ fn release_plates(mut commands: Commands, sims: Query<(Entity, &ActionQueue, &Ea
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recipe_purchases_are_affordable_and_only_charge_once() {
+        let mut known = KnownRecipes::default();
+        let mut funds = 100;
+        assert_eq!(known.purchase(&mut funds, "Ratatouille", 150), Err(()));
+        assert_eq!(funds, 100);
+        assert!(known.0.is_empty());
+        assert_eq!(known.purchase(&mut funds, "Ratatouille", 100), Ok(true));
+        assert_eq!(funds, 0);
+        assert_eq!(known.purchase(&mut funds, "Ratatouille", 100), Ok(false));
+        assert_eq!(known.0, ["Ratatouille"]);
+        assert_eq!(funds, 0);
+        assert_eq!(known.purchase(&mut funds, "Cookies", 1), Err(()));
+        assert_eq!(known.0.len(), 1);
+    }
 
     #[test]
     fn competing_meal_requests_cannot_duplicate_servings() {
