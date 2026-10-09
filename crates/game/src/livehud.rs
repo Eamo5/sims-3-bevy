@@ -19,7 +19,7 @@ impl Plugin for LiveHudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InfoPanel>().add_systems(OnEnter(PlayMode::Live), spawn_live_hud).add_systems(
             Update,
-            (time_control, puck, mood_meter, motives_panel, bust, skewer, navigation, show_in_modes, moodlets, wishes, skills_panel, skill_journal_buttons, interaction_queue, notifications).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<LiveHud>),
+            (time_control, puck, mood_meter, motives_panel, bust, skewer, navigation, show_in_modes.after(navigation), moodlets, wishes, skills_panel, skill_journal_buttons, interaction_queue, notifications).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<LiveHud>),
         );
     }
 }
@@ -696,7 +696,9 @@ fn navigation(
     mut tab: ResMut<crate::simpanel::SimTab>,
     keys: Res<ButtonInput<KeyCode>>,
     (journal, mut only_journal): (Res<crate::simpanel::OpenJournal>, ResMut<crate::simpanel::JournalOnly>),
+    buy: Res<crate::buy::BuyMode>,
 ) {
+    if buy.active { return; }
     let d = &hud.display;
     if pressed(&clicks, d.id(EXPAND)) {
         *panel = if *panel == InfoPanel::None { InfoPanel::Motives } else { InfoPanel::None };

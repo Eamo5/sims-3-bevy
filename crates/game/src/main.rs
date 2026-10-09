@@ -6,6 +6,7 @@ mod baked;
 mod balloons;
 mod build;
 mod buildhud;
+mod buildcatalog;
 mod covering;
 mod burglar;
 mod building;

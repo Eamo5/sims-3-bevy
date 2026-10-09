@@ -736,7 +736,7 @@ fn fill_catalogue(
 }
 
 /// A holder for fresh children under a window (cleared).
-fn holder(commands: &mut Commands, parent: Entity, slot: &mut Option<Entity>, vis: &Query<&mut Visibility>) -> Entity {
+pub(crate) fn holder(commands: &mut Commands, parent: Entity, slot: &mut Option<Entity>, vis: &Query<&mut Visibility>) -> Entity {
     match slot.filter(|h| vis.contains(*h)) {
         Some(h) => {
             commands.entity(h).despawn_children();
@@ -772,7 +772,7 @@ fn lines(s: &str, width: f32, char_width: f32) -> f32 {
 
 /// Tests the pointer against a visible window in physical UI coordinates. This works when
 /// its children own hover, and when the OS scales the window for a high-DPI display.
-fn over_window(e: Option<Entity>, areas: &Query<(&ComputedNode, &bevy::ui::UiGlobalTransform, &InheritedVisibility)>, window: &Window) -> bool {
+pub(crate) fn over_window(e: Option<Entity>, areas: &Query<(&ComputedNode, &bevy::ui::UiGlobalTransform, &InheritedVisibility)>, window: &Window) -> bool {
     let Some((node, tf, vis)) = e.and_then(|e| areas.get(e).ok()) else { return false };
     if !vis.get() {
         return false;

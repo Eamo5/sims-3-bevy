@@ -654,6 +654,10 @@ installation is unreachable.
   windows, roofs, fences, stairs, pools and terrain tools. The original puck provides mode,
   camera, floor, wall-view, lighting and grid controls. Wall/room and rectangular-pool tools
   use their original panels and Back button; catalogue browsers appear above the navigation.
+  Floor and wallpaper catalogues use the original Build panels and expandable thumbnail grids,
+  with wheel/skinned-scrollbar navigation and single-surface/room-fill buttons. Pattern names
+  and prices appear on hover; selecting one retains its colour presets and Create a Style.
+  These two catalogues currently expose All; material-category filters remain to be baked.
 - **Interface**: the game's own icons and words — moodlets (name, description, time left),
   traits (Create-a-Sim and the Sim's panel) and wishes — read from the game's tuning tables
   (`GameplayData.package`) and string tables, with tooltips on hover. Sims' portraits are
@@ -745,6 +749,9 @@ capture after 11 seconds.
 covering, including undo/redo through the original Build buttons.
 `BUILD_HISTORY_TEST=pave` checks laying new outdoor flooring and reversing it; paving follows
 the current terrain (including sculpted slopes), respects pools and lot bounds, and saves its heights.
+`BUILD_CATALOG_TEST=1`, with `PRESS_KEY=F3@5` and `UI_CLICK=1012@6` (floor) or `1003@6`
+(wallpaper), checks native catalogue expansion, scrollbar movement, pattern selection, surface/
+room tools and hidden Live panels. Capture after 11 seconds.
 `BUY_MOVE_TEST=move` or `cancel` checks that a piece of furniture keeps its identity, upgrades
 and breakage after a scripted placement or cancellation.
 `s3tool uiwindow <layout>` inspects a baked window tree; `s3tool uilayout <UI.package> <layout>`

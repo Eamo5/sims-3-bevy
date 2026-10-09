@@ -99,6 +99,8 @@ pub struct BuyMode {
     /// in hand's designs.
     pub game_look: bool,
     pub build_look: bool,
+    pub native_covers: bool,
+    pub cover_fill: bool,
     pub category: usize,
     pub page: usize,
     pub placing: Option<Placing>,
@@ -682,6 +684,10 @@ fn buy_panel(
     // here, above it.)
     let editing_style = buy.styling && buy.placing.is_some();
     let build_look = buy.build_look && buy.active && buy.category >= WALLPAPER_TAB;
+    let native_covers = crate::buildcatalog::showing(&buy);
+    if native_covers && !buy.painting.and_then(|i| ui.as_ref()?.data.patterns.get(i))
+        .is_some_and(|p| p.swatches.len() > 1 || p.channels.iter().any(|c| !c.is_empty()))
+    { return; }
     let game_look = buy.game_look && buy.active && (buy.category < WALLPAPER_TAB || editing_style);
     if crate::buildhud::native_panel(&buy) { return; }
     if game_look && !(buy.styling && buy.placing.is_some()) {
@@ -931,6 +937,7 @@ fn buy_panel(
             let pages = items.len().div_ceil(PAGE).max(1);
             let page = buy.page.min(pages - 1);
             let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+            if !native_covers {
             p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|grid| {
                 for (i, pat) in items.iter().skip(page * PAGE).take(PAGE) {
                     let tex = assets.texture(&mut ctx, pat.texture);
@@ -971,6 +978,7 @@ fn buy_panel(
                 row.spawn(text(format!("Page {} / {} · {} patterns · {how} · right-click to stop", page + 1, pages, items.len()), 13.0, Color::WHITE));
                 button(row, "Next >".into(), BuyButton::Next, Val::Px(80.0), 28.0, false);
             });
+            }
             // The pattern in hand: its swatches (the game's colour presets), and Create a Style.
             let Some(pat) = buy.painting.and_then(|i| ui.data.patterns.get(i)) else { return };
             let current = buy.cover.unwrap_or(pat.texture);
@@ -1406,7 +1414,7 @@ fn paint(
     let Some(cursor) = window.cursor_position() else { return };
     let Ok((camera, cam_tf)) = cams.single() else { return };
     let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else { return };
-    let fill = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    let fill = buy.cover_fill || keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
     let ops = if pat.floor {
         // Normal click covers one tile; Shift follows the room's current wall boundaries.
         let Some((p, level)) = crate::hud::floor_hit(ray, &world, Some(b)) else { return };

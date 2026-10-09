@@ -13,9 +13,12 @@ pub struct BuildHudPlugin;
 
 impl Plugin for BuildHudPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(PlayMode::Live), spawn.after(crate::buy::reset_buy_mode))
+        app.add_systems(OnEnter(PlayMode::Live), (spawn, crate::buildcatalog::spawn).chain().after(crate::buy::reset_buy_mode))
             .add_systems(Update, (controls, show).chain().after(crate::buyhud::show).before(crate::buyhistory::update)
-                .run_if(in_state(PlayMode::Live)).run_if(resource_exists::<BuildHud>));
+                .run_if(in_state(PlayMode::Live)).run_if(resource_exists::<BuildHud>))
+            .add_systems(Update, (crate::buildcatalog::controls, crate::buildcatalog::draw).chain().after(show).before(crate::buyhistory::update)
+                .run_if(in_state(PlayMode::Live)).run_if(resource_exists::<crate::buildcatalog::BuildCatalog>))
+            .add_systems(PreUpdate, crate::buildcatalog::probe.after(bevy::ui::UiSystems::Focus).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<crate::buildcatalog::BuildCatalog>));
     }
 }
 
@@ -104,6 +107,7 @@ fn spawn(
         (0x2e2, Action::Undo), (0x2e3, Action::Redo),
         (0x301, Action::Tool(BuildTool::Wall)), (0x302, Action::Tool(BuildTool::Room)),
         (0x321a, Action::Tool(BuildTool::Wall)), (0x321b, Action::Category(WALLPAPER_TAB)),
+        (0x321c, Action::Tool(BuildTool::Wall)), (0x321d, Action::Category(WALLPAPER_TAB)),
         (0x06ee_34a0, Action::Tool(BuildTool::Pool)), (0x06ee_34af, Action::Tool(BuildTool::Pool)),
     ] {
         let e = if matches!(id, 0x301 | 0x302) { s.id(WALLS).and_then(|p| s.within(p, id)) } else { s.id(id) };
@@ -167,9 +171,12 @@ fn show(
     if !on { return; }
     let wall = buy.category == BUILD_TAB && matches!(buy.tool, Some(BuildTool::Wall | BuildTool::Room | BuildTool::Sledgehammer));
     let pool = buy.category == BUILD_TAB && buy.tool == Some(BuildTool::Pool);
-    set_visible(&mut visibility, s.id(HOME), !wall && !pool);
-    set_visible(&mut visibility, s.id(MIDDLE), wall || pool);
-    set_visible(&mut visibility, s.id(BACK), wall || pool);
+    let covers = crate::buildcatalog::showing(&buy);
+    set_visible(&mut visibility, s.id(HOME), !wall && !pool && !covers);
+    set_visible(&mut visibility, s.id(MIDDLE), wall || pool || covers);
+    set_visible(&mut visibility, s.id(BACK), wall || pool || covers);
+    set_visible(&mut visibility, s.id(0x320), covers && buy.category == WALLPAPER_TAB);
+    set_visible(&mut visibility, s.id(0x340), covers && buy.category == FLOORS_TAB);
     set_visible(&mut visibility, s.id(WALLS), wall);
     set_visible(&mut visibility, s.id(POOL), pool);
     for id in [0x06ee_34af, 0x06ee_34a2, 0x06ee_34a0, 0x0a67_d7f0, 0x06ee_34a9, 0x06ee_34be] {
