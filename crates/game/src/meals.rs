@@ -25,7 +25,7 @@ impl Plugin for MealsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Leftovers>()
             .add_systems(OnEnter(crate::AppState::InGame), |mut l: ResMut<Leftovers>| l.0.clear())
-            .add_systems(Update, (restore_meals, cook_prep, cook_prep_done, serve_if_interrupted, take_out_dinner, meal_requests, update_platters, probe_platters, come_to_meal, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (restore_meals, cook_prep, cook_prep_done, serve_if_interrupted, take_out_dinner, meal_requests, update_platters, update_eating_plates, probe_platters, come_to_meal, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -463,6 +463,38 @@ impl Meal {
 #[derive(Component)]
 struct HalfPlatter;
 
+#[derive(Component)]
+struct HalfPlate;
+
+fn half_eaten(queue: &ActionQueue) -> bool {
+    let Some(action) = queue.0.front() else { return false };
+    if action.cancel || !matches!(action.kind, ActionKind::Object { def, .. } if def == CHAIR_EAT) { return false; }
+    let crate::interact::Phase::Running(elapsed) = action.phase else { return false };
+    let duration = crate::interact::interactions_for(ObjectKind::Chair)[CHAIR_EAT].minutes;
+    // Food tuning: a full serving has 15 bites; the half-full model starts at 7 left.
+    elapsed >= duration * (8.0 / 15.0)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_eating_plates(
+    mut commands: Commands, ui: Option<Res<crate::icons::GameUi>>,
+    diners: Query<(&EatingPlate, &Plateful, &ActionQueue)>,
+    plates: Query<&DishFood, Without<HalfPlate>>,
+    data: Res<Baked>, mut assets: ResMut<ObjectAssets>,
+    mut meshes: ResMut<Assets<Mesh>>, mut images: ResMut<Assets<Image>>, mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let Some(ui) = ui else { return };
+    let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+    for (plate, dish, queue) in &diners {
+        if !half_eaten(queue) { continue; }
+        let Ok(food) = plates.get(plate.0) else { continue };
+        if let Some(half) = ui.data.recipes.get(dish.0).and_then(|r| r.single_half) {
+            set_food(&mut commands, &mut assets, &mut ctx, plate.0, Some(food), Some(half));
+            commands.entity(plate.0).insert(HalfPlate);
+        }
+    }
+}
+
 /// Update once after all plate requests, so simultaneous diners cannot queue conflicting
 /// replacements for the same food child. Food tuning uses four remaining servings.
 fn update_platters(
@@ -498,6 +530,7 @@ fn probe_platters(
     generic: Query<(&GameObject, &Meal), Without<DishFood>>,
     entities: Query<Entity>,
     mut state: Local<(u8, Option<Entity>, Option<Entity>)>,
+    (mut single, single_food, mut queues): (Local<Option<(Entity, Entity, Entity)>>, Query<(&DishFood, Has<HalfPlate>)>, Query<&mut ActionQueue>),
 ) {
     if std::env::var_os("HALF_MEAL_TEST").is_none() || state.0 == 4 || time.elapsed_secs() < 6.0 { return; }
     let Some(ui) = ui else { return };
@@ -514,7 +547,7 @@ fn probe_platters(
     }
     match state.0 {
         0 => {
-            let (i, recipe) = ui.data.recipes.iter().enumerate().find(|(_, r)| r.group.is_some() && r.group_half.is_some() && r.group != r.group_half).expect("original recipe with distinct half model");
+            let (i, recipe) = ui.data.recipes.iter().enumerate().find(|(_, r)| r.group.is_some() && r.group_half.is_some() && r.group != r.group_half && r.single.is_some() && r.single_half.is_some() && r.single != r.single_half).expect("original recipe with distinct half models");
             let (table, tf) = tables.iter().find(|(o, _)| o.kind == ObjectKind::Table).expect("fixture dining surface");
             let at = table.world_center(tf).with_y(tf.translation.y + table.height);
             let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
@@ -523,6 +556,14 @@ fn probe_platters(
             commands.entity(plate).insert((Meal { servings: GROUP_MEAL_SERVINGS }, Dish(i)));
             let pizza = spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, "FoodPizza", ObjectKind::Meal, "Pizza", at + Vec3::X * 0.5, 0.0).expect("pizza model");
             commands.entity(pizza).insert(Meal { servings: 3 });
+            let dish = spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, PLATE, ObjectKind::DirtyDishes, "Plate probe", at - Vec3::X * 0.5, 0.0).expect("individual plate model");
+            set_food(&mut commands, &mut assets, &mut ctx, dish, None, recipe.single);
+            let mut queue = ActionQueue::default();
+            let mut action = Action::new("Eat", ActionKind::Object { target: dish, def: CHAIR_EAT }, true);
+            action.phase = crate::interact::Phase::Running(0.0);
+            queue.0.push_back(action);
+            let diner = commands.spawn((EatingPlate(dish), Plateful(i), queue)).id();
+            *single = Some((diner, dish, Entity::PLACEHOLDER));
             state.1 = Some(plate);
             state.0 = 1;
         }
@@ -532,6 +573,11 @@ fn probe_platters(
             assert!(entities.contains(food.0));
             state.2 = Some(food.0);
             meal.servings = 4;
+            let (diner, dish, _) = single.unwrap();
+            let (food, half) = single_food.get(dish).expect("full individual plate rendered");
+            assert!(!half);
+            *single = Some((diner, dish, food.0));
+            queues.get_mut(diner).unwrap().0[0].phase = crate::interact::Phase::Running(15.0);
             state.0 = 2;
         }
         2 => {
@@ -541,13 +587,21 @@ fn probe_platters(
             assert!(!entities.contains(state.2.unwrap()), "old food mesh must be removed");
             assert!(entities.contains(food.0), "half-depleted mesh must exist");
             state.2 = Some(food.0);
+            let (diner, dish, old) = single.unwrap();
+            let (food, half) = single_food.get(dish).unwrap();
+            assert!(half && entities.contains(food.0));
+            assert_ne!(food.0, old);
+            assert!(!entities.contains(old));
+            *single = Some((diner, dish, food.0));
             state.0 = 3;
         }
         3 => {
             let (_, food, half) = plates.get(state.1.unwrap()).unwrap();
             assert!(half);
             assert_eq!(Some(food.0), state.2, "unchanged serving count must retain its mesh");
-            info!("autotest: half platter PASS — original full/half models rendered, old mesh removed, replacement retained");
+            let (_, dish, expected) = single.unwrap();
+            assert_eq!(single_food.get(dish).unwrap().0.0, expected);
+            info!("autotest: half platter PASS — group and individual full/half models rendered, old meshes removed, replacements retained");
             state.0 = 4;
         }
         _ => unreachable!(),
@@ -946,6 +1000,24 @@ fn release_plates(mut commands: Commands, sims: Query<(Entity, &ActionQueue, &Ea
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn half_eaten_visual_starts_at_the_original_remaining_bite_threshold() {
+        let mut world = World::new();
+        let chair = world.spawn_empty().id();
+        let mut queue = ActionQueue::default();
+        let mut action = Action::new("Eat", ActionKind::Object { target: chair, def: CHAIR_EAT }, true);
+        let threshold = crate::interact::interactions_for(ObjectKind::Chair)[CHAIR_EAT].minutes * 8.0 / 15.0;
+        action.phase = crate::interact::Phase::Running(threshold - 0.01);
+        queue.0.push_back(action);
+        assert!(!half_eaten(&queue));
+        queue.0[0].phase = crate::interact::Phase::Running(threshold + 0.01);
+        assert!(half_eaten(&queue));
+        queue.0[0].cancel = true;
+        assert!(!half_eaten(&queue));
+        queue.0.clear();
+        assert!(!half_eaten(&queue));
+    }
 
     #[test]
     fn dining_reach_uses_rotated_table_bounds_instead_of_longest_radius() {
