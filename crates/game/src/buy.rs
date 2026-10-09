@@ -1730,10 +1730,24 @@ fn placement(
         let b = building.as_deref()?;
         let bounds = bounds?;
         placement_problem(b, tf, bounds, floor.map_or(b.view_level, |(_, level)| level), ladder, opening.is_some() || wall_hung)
+    }).or_else(|| {
+        if opening.is_some() && in_wall.is_none() {
+            Some("Doors and windows go into a straight wall, on the floor in view.")
+        } else if wall_hung && in_wall.is_none() {
+            Some("Paintings, mirrors and wall lamps go on a straight wall, on the floor in view.")
+        } else if wall_hung && in_wall.as_ref().zip(building.as_deref()).is_some_and(|((p, r, _), b)| {
+            b.opening_behind(*p, *r, bounds.map_or(1, |(mn, mx)| ((mx.x - mn.x).round() as u32).max(1)))
+        }) {
+            Some("There's a window or door in the way.")
+        } else if ladder && on_edge.is_none() {
+            Some("Pool ladders go on the edge of a pool.")
+        } else {
+            None
+        }
     });
     if !over_ui.0 && let (Ok(tf), Some(bounds)) = (tfs.get(ghost), bounds) {
         let afford = owned || household.as_ref().is_some_and(|h| h.funds >= price);
-        let valid = afford && problem.is_none() && (!wall_hung && opening.is_none() || in_wall.is_some()) && (!ladder || on_edge.is_some());
+        let valid = afford && problem.is_none() && floor.is_some();
         let color = if valid { Color::srgb(0.35, 1.0, 0.15) } else { Color::srgb(1.0, 0.15, 0.1) };
         let corners = footprint(tf, bounds);
         for i in 0..4 {
@@ -1753,26 +1767,6 @@ fn placement(
         }
         if let Some(problem) = problem {
             notes.push(problem);
-            return;
-        }
-        if opening.is_some() && in_wall.is_none() {
-            notes.push("Doors and windows go into a straight wall, on the floor in view.");
-            return;
-        }
-        if wall_hung && in_wall.is_none() {
-            notes.push("Paintings, mirrors and wall lamps go on a straight wall, on the floor in view.");
-            return;
-        }
-        // (Not over a window or a door.)
-        if wall_hung
-            && let (Some((p, r, _)), Some(b)) = (&in_wall, building.as_deref())
-            && b.opening_behind(*p, *r, bounds.map_or(1, |(mn, mx)| ((mx.x - mn.x).round() as u32).max(1)))
-        {
-            notes.push("There's a window or door in the way.");
-            return;
-        }
-        if ladder && on_edge.is_none() {
-            notes.push("Pool ladders go on the edge of a pool.");
             return;
         }
         let Ok(tf) = tfs.get(ghost) else { return };
