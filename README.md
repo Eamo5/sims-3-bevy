@@ -184,9 +184,10 @@ installation is unreachable.
   the game's own last moments, and its ghost its own colour.
 - **Meals**: cooking serves eight portions, matching the installed game's group-meal tuning,
   and platters switch to the recipe's original half-depleted model at four servings when available,
-  with breakfast from 1am, lunch from 11am, dinner from 5pm and weekend brunch from 9am–3pm,
-  on the game's serving platter (on the nearest
-  counter), with a serving for everyone at home, and the cook calls the household to it (the
+  with trait-aware post-meal cleanup that preserves queued player commands. Favorite-food
+  satisfaction applies to both seated and standing meals. Menus follow the original hours:
+  breakfast from 1am, lunch from 11am, dinner from 5pm and weekend brunch from 9am–3pm.
+  The meal goes on the game's serving platter on the nearest counter, and the cook calls the household to it (the
   game's wave over): whoever's hungry and not busy with something they were told to do comes
   for a plate. Sims grab a plate and sit down at a dining table or counter stool to eat (the
   game's sit-down and bar-stool eating animations, plate on the table, fork in hand), or eat

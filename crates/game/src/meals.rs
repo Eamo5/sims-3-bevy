@@ -589,6 +589,21 @@ fn meal_requests(
     for (me, req, tf, mut queue, sim, eating, (plan, plateful, skills, known, serving)) in &mut sims {
         commands.entity(me).remove::<MealRequest>();
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+        // A favourite meal is satisfying whether eaten at a table or standing up.
+        if matches!(req, MealRequest::Ate | MealRequest::AteStanding)
+            && let Some(r) = plateful.and_then(|p| recipe(p.0))
+            && r.key == sim.favorites.food
+        {
+            let name = r.name.clone();
+            commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| {
+                let now = e.world().resource::<crate::clock::GameClock>().minutes;
+                if let Some(mut m) = e.get_mut::<crate::life::Moodlets>() {
+                    m.add(crate::life::MoodletKind::AmazingMeal, now);
+                }
+                let first = e.get::<Sim>().map(|s| s.first.clone()).unwrap_or_default();
+                e.world_scope(|w| w.resource_mut::<crate::interact::Notifications>().push(format!("{first} loves {name}: their favourite!")));
+            });
+        }
         match *req {
             MealRequest::Serve(stove) => {
                 let Ok((_, s, stf, _)) = objects.get(stove) else { continue };
@@ -791,26 +806,13 @@ fn meal_requests(
             }
             MealRequest::Ate => {
                 info!("{} finished eating", sim.first);
-                // (Their favourite food: an amazing meal.)
-                if let Some(r) = plateful.and_then(|p| recipes.as_ref().and_then(|d| d.recipes.get(p.0)))
-                    && r.key == sim.favorites.food
-                {
-                    let name = r.name.clone();
-                    commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| {
-                        let now = e.world().resource::<crate::clock::GameClock>().minutes;
-                        if let Some(mut m) = e.get_mut::<crate::life::Moodlets>() {
-                            m.add(crate::life::MoodletKind::AmazingMeal, now);
-                        }
-                        let first = e.get::<Sim>().map(|s| s.first.clone()).unwrap_or_default();
-                        e.world_scope(|w| w.resource_mut::<crate::interact::Notifications>().push(format!("{first} loves {name}: their favourite!")));
-                    });
-                }
                 if let Some(p) = eating {
                     commands.entity(me).remove::<EatingPlate>();
                     commands.entity(p.0).insert(UsedBy(None));
                     // The plate, eaten clean.
                     let empty = plateful.and_then(|p| recipe(p.0)).and_then(|r| r.single_empty);
                     set_food(&mut commands, &mut assets, &mut ctx, p.0, foods.get(p.0).ok(), empty);
+                    queue_cleanup(sim, &mut queue, p.0, rand::random());
                 }
                 commands.entity(me).remove::<Plateful>();
             }
@@ -819,10 +821,23 @@ fn meal_requests(
                 let at = surface_near(&objects, tf.translation, 4.0).unwrap_or(tf.translation + tf.rotation * Vec3::new(0.3, 0.0, 0.4));
                 if let Some(plate) = spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, PLATE, ObjectKind::DirtyDishes, "Dirty Dishes", at, 0.0) {
                     set_food(&mut commands, &mut assets, &mut ctx, plate, None, plateful.and_then(|p| recipe(p.0)).and_then(|r| r.single_empty));
+                    queue_cleanup(sim, &mut queue, plate, rand::random());
                 }
                 commands.entity(me).remove::<Plateful>();
             }
         }
+    }
+}
+
+/// Food tuning's cleanup chance, with trait behavior and player queue precedence.
+fn queue_cleanup(sim: &Sim, queue: &mut ActionQueue, plate: Entity, roll: f32) {
+    use crate::life::Trait;
+    if sim.traits.contains(&Trait::Slob)
+        || (!sim.traits.contains(&Trait::Neat) && roll >= 0.5)
+        || queue.0.iter().any(|a| !a.autonomous || !matches!(a.kind, ActionKind::Outro { .. }))
+    { return; }
+    if let Some(def) = crate::interact::interactions_for(ObjectKind::DirtyDishes).iter().position(|d| d.special == Special::CleanUp) {
+        queue.0.push_back(Action::new("Clean Up", ActionKind::Object { target: plate, def }, true));
     }
 }
 
@@ -860,6 +875,32 @@ fn release_plates(mut commands: Commands, sims: Query<(Entity, &ActionQueue, &Ea
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn post_meal_cleanup_respects_traits_chance_and_player_commands() {
+        let mut world = World::new();
+        let plate = world.spawn_empty().id();
+        let mut sim = crate::sim::random_sim(&mut rand::rng(), "Test", Some(false), Age::Adult);
+        sim.traits.clear();
+        let mut queue = ActionQueue::default();
+        queue_cleanup(&sim, &mut queue, plate, 0.5);
+        assert!(queue.0.is_empty());
+        queue_cleanup(&sim, &mut queue, plate, 0.49);
+        assert_eq!(queue.0.len(), 1);
+        assert!(matches!(queue.0[0].kind, ActionKind::Object { target, .. } if target == plate));
+        queue.0.clear();
+        sim.traits = vec![crate::life::Trait::Slob];
+        queue_cleanup(&sim, &mut queue, plate, 0.0);
+        assert!(queue.0.is_empty());
+        sim.traits = vec![crate::life::Trait::Neat];
+        queue_cleanup(&sim, &mut queue, plate, 0.99);
+        assert_eq!(queue.0.len(), 1);
+        queue.0.clear();
+        queue.0.push_back(Action::new("Player action", ActionKind::EatHere, false));
+        queue_cleanup(&sim, &mut queue, plate, 0.0);
+        assert_eq!(queue.0.len(), 1);
+        assert_eq!(queue.0[0].label, "Player action");
+    }
 
     #[test]
     fn meals_and_seated_plates_use_reachable_surface_heights() {
