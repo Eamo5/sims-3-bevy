@@ -183,6 +183,7 @@ installation is unreachable.
   and drown (the game's drowning animation; the tombstone at the pool's side). Each death has
   the game's own last moments, and its ghost its own colour.
 - **Meals**: cooking serves eight portions, matching the installed game's group-meal tuning,
+  with breakfast from 1am, lunch from 11am, dinner from 5pm and weekend brunch from 9am–3pm,
   on the game's serving platter (on the nearest
   counter), with a serving for everyone at home, and the cook calls the household to it (the
   game's wave over): whoever's hungry and not busy with something they were told to do comes

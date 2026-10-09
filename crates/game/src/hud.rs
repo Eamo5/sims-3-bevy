@@ -1111,7 +1111,7 @@ fn world_click(
                     && let (Ok((_, skills, known)), Some(ui)) = (writers.get(actor), opp_q.0.as_ref())
                 {
                     // The recipes they know for the time of day, and desserts.
-                    let (meal, word) = crate::meals::meal_time(opp_q.2.hour_f());
+                    let (meal, word) = crate::meals::meal_time(opp_q.2.hour_f(), opp_q.2.weekday());
                     for (label, m) in [(word, meal), ("Dessert", s3bake::gamedata::MEAL_DESSERT)] {
                         let list: Vec<(String, ActionKind)> = crate::meals::cookable(&ui.data, actor_sim, skills.level("Cooking"), known, m)
                             .into_iter()

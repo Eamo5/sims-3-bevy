@@ -309,13 +309,16 @@ fn cut_cakes(
 /// Ingredients only found, never bought.
 const RARE: [&str; 4] = ["Lifefruit", "Deathfish", "Flame Fruit", "Ingredient"];
 
-/// The meal of the hour (`MEAL_*`) and its name.
-pub fn meal_time(hour: f32) -> (u8, &'static str) {
+/// The meal of the hour (`MEAL_*`) and its name, from the installed Food tuning.
+/// Weekdays are Monday=0 through Sunday=6, as in GameClock.
+pub fn meal_time(hour: f32, weekday: usize) -> (u8, &'static str) {
     use s3bake::gamedata::{MEAL_BREAKFAST, MEAL_BRUNCH, MEAL_DINNER, MEAL_LUNCH};
-    if (4.0..10.5).contains(&hour) {
-        (MEAL_BREAKFAST | MEAL_BRUNCH, "Breakfast")
-    } else if (10.5..15.0).contains(&hour) {
-        (MEAL_LUNCH | MEAL_BRUNCH, "Lunch")
+    if weekday >= 5 && (9.0..15.0).contains(&hour) {
+        (MEAL_BRUNCH, "Brunch")
+    } else if (1.0..11.0).contains(&hour) {
+        (MEAL_BREAKFAST, "Breakfast")
+    } else if (11.0..17.0).contains(&hour) {
+        (MEAL_LUNCH, "Lunch")
     } else {
         (MEAL_DINNER, "Dinner")
     }
@@ -523,7 +526,7 @@ fn meal_requests(
                 let servings = GROUP_MEAL_SERVINGS;
                 let yaw = stf.rotation.to_euler(EulerRot::YXZ).0;
                 // The recipe chosen, or the best they know for the time of day.
-                let (meal, word) = meal_time(clock.hour_f());
+                let (meal, word) = meal_time(clock.hour_f(), clock.weekday());
                 let grill = s.kind == ObjectKind::Grill;
                 let dish = plan.map(|p| p.0).or_else(|| {
                     let d = recipes.as_ref()?;
@@ -638,7 +641,7 @@ fn meal_requests(
             MealRequest::Quick => {
                 // (Something simple of what they know, for the time of day.)
                 let pick = recipes.as_ref().and_then(|d| {
-                    let mut options = cookable(d, sim, skills.level("Cooking"), known, meal_time(clock.hour_f()).0);
+                    let mut options = cookable(d, sim, skills.level("Cooking"), known, meal_time(clock.hour_f(), clock.weekday()).0);
                     options.sort_by_key(|&i| d.recipes[i].level);
                     options.truncate(3);
                     options.choose(&mut rand::rng()).copied()
@@ -776,6 +779,29 @@ fn release_plates(mut commands: Commands, sims: Query<(Entity, &ActionQueue, &Ea
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn meal_menu_obeys_original_hours_and_weekend_brunch() {
+        use s3bake::gamedata::{MEAL_BREAKFAST, MEAL_BRUNCH, MEAL_DINNER, MEAL_LUNCH};
+        for day in 0..7 {
+            assert_eq!(meal_time(0.99, day), (MEAL_DINNER, "Dinner"));
+            assert_eq!(meal_time(1.0, day), (MEAL_BREAKFAST, "Breakfast"));
+            assert_eq!(meal_time(8.99, day), (MEAL_BREAKFAST, "Breakfast"));
+            assert_eq!(meal_time(15.0, day), (MEAL_LUNCH, "Lunch"));
+            assert_eq!(meal_time(16.99, day), (MEAL_LUNCH, "Lunch"));
+            assert_eq!(meal_time(17.0, day), (MEAL_DINNER, "Dinner"));
+            if day >= 5 {
+                assert_eq!(meal_time(9.0, day), (MEAL_BRUNCH, "Brunch"));
+                assert_eq!(meal_time(11.0, day), (MEAL_BRUNCH, "Brunch"));
+                assert_eq!(meal_time(14.99, day), (MEAL_BRUNCH, "Brunch"));
+            } else {
+                assert_eq!(meal_time(9.0, day), (MEAL_BREAKFAST, "Breakfast"));
+                assert_eq!(meal_time(10.99, day), (MEAL_BREAKFAST, "Breakfast"));
+                assert_eq!(meal_time(11.0, day), (MEAL_LUNCH, "Lunch"));
+                assert_eq!(meal_time(14.99, day), (MEAL_LUNCH, "Lunch"));
+            }
+        }
+    }
 
     #[test]
     fn recipe_purchases_are_affordable_and_only_charge_once() {
