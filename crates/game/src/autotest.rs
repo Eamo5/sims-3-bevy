@@ -584,6 +584,7 @@ struct BuildHistoryProbe {
     after: String,
     funds: i64,
     paid: i64,
+    quote_cost: i64,
     paint_before: String,
     paint_after: String,
     objects_before: String,
@@ -597,7 +598,7 @@ struct BuildHistoryProbe {
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn build_history_test(
     time: Res<Time<InputTimeline>>, mut buy: ResMut<crate::buy::BuyMode>,
-    building: Option<Res<crate::building::ActiveBuilding>>, household: Option<Res<crate::interact::Household>>,
+    building: Option<Res<crate::building::ActiveBuilding>>, household: Option<ResMut<crate::interact::Household>>,
     log: Option<Res<crate::building::LotPaint>>, (mut mouse, mut keys): (ResMut<ButtonInput<MouseButton>>, ResMut<ButtonInput<KeyCode>>),
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     camera: Query<(&Camera, &GlobalTransform), With<SimsCamera>>,
@@ -606,10 +607,11 @@ fn build_history_test(
     removed: Res<crate::save::RemovedLotObjects>,
     (strokes, sculpted, world, paint_map, images, ui): (Res<crate::terrain_paint::Strokes>, Res<crate::terrain_paint::Sculpted>, Res<crate::loading::CurrentWorld>, Option<Res<crate::terrain_paint::PaintMap>>, Res<Assets<Image>>, Option<Res<crate::icons::GameUi>>),
     mut probe: Local<BuildHistoryProbe>,
+    quotes: Query<(&crate::buy::CoverQuote, &Visibility)>,
 ) {
     let Ok(mode) = std::env::var("BUILD_HISTORY_TEST") else { return };
     if probe.stage >= 7 || time.elapsed_secs() < 6.0 + probe.stage as f32 * 0.5 { return; }
-    let (Some(b), Some(h), Ok((camera, camera_tf)), Ok(mut window)) = (building, household, camera.single(), windows.single_mut()) else { return };
+    let (Some(b), Some(mut h), Ok((camera, camera_tf)), Ok(mut window)) = (building, household, camera.single(), windows.single_mut()) else { return };
     let fingerprint = || {
         let mut built: Vec<_> = b.built.iter().copied().collect();
         built.sort_unstable();
@@ -657,6 +659,7 @@ fn build_history_test(
                         _ => crate::build::BuildTool::Room,
                     })
             };
+            if mode == "floor-poor" { h.funds = 0; }
             probe.before = fingerprint();
             probe.paint_before = paint();
             probe.funds = h.funds;
@@ -681,6 +684,11 @@ fn build_history_test(
                 assert_eq!(fingerprint(), probe.before, "hover preview must not change the lot");
                 assert_eq!(paint(), probe.paint_before, "hover preview must not add saved operations");
                 assert_eq!(h.funds, probe.funds, "hover preview must not charge money");
+                let (quote, visibility) = quotes.single().expect("covering price preview");
+                assert_ne!(*visibility, Visibility::Hidden);
+                assert_eq!(quote.affordable, mode != "floor-poor");
+                assert!(quote.cost > 0);
+                probe.quote_cost = quote.cost;
             }
             mouse.press(MouseButton::Left);
         }
@@ -688,9 +696,22 @@ fn build_history_test(
         3 => mouse.release(MouseButton::Left),
         4 => {
             keys.release(KeyCode::ShiftLeft);
+            if mode == "floor-poor" {
+                assert_eq!(fingerprint(), probe.before, "unaffordable click must not change surfaces");
+                assert_eq!(paint(), probe.paint_before, "unaffordable click must not add save operations");
+                assert_eq!(h.funds, 0);
+                info!("autotest: covering affordability PASS — positive quote, insufficient funds and rejected click preserve the lot");
+                probe.stage = 7;
+                return;
+            }
             probe.after = fingerprint();
             probe.paint_after = paint();
             probe.paid = h.funds;
+            if mode == "floor" || mode == "floor-room" {
+                let (quote, visible) = quotes.single().unwrap();
+                assert_ne!(*visible, Visibility::Hidden);
+                assert_eq!(quote.cost, 0, "repainting the selected design has a zero quote");
+            }
             probe.objects_after = object_state();
             probe.removed_after = serde_json::to_string(&removed.0).unwrap();
             assert_ne!(probe.before, probe.after, "the construction drag must modify the lot");
@@ -698,6 +719,7 @@ fn build_history_test(
                 assert_ne!(probe.paint_before, probe.paint_after, "construction must be recorded for saving");
             }
             if mode.starts_with("floor") || mode == "pave" {
+                assert_eq!(probe.funds - probe.paid, probe.quote_cost, "charged price must match the hover quote");
                 let before: Vec<crate::building::PaintOp> = serde_json::from_str(&probe.paint_before).unwrap();
                 let after: Vec<crate::building::PaintOp> = serde_json::from_str(&probe.paint_after).unwrap();
                 if mode == "floor" || mode == "pave" { assert_eq!(after.len() - before.len(), 1, "normal click covers one tile"); }

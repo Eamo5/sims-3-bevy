@@ -1374,8 +1374,15 @@ fn buy_buttons(
     }
 }
 
-/// Painting: a click on a wall papers that side; a click on a floor covers its room.
-#[allow(clippy::too_many_arguments)]
+/// Non-interactive price preview, shared with the covering regression probes.
+#[derive(Component)]
+pub(crate) struct CoverQuote {
+    pub cost: i64,
+    pub affordable: bool,
+}
+
+/// Preview and apply one surface or an enclosed room's covering.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn paint(
     mut commands: Commands,
     mut buy: ResMut<BuyMode>,
@@ -1394,7 +1401,9 @@ fn paint(
     ),
     removed: Res<crate::save::RemovedLotObjects>,
     mut gizmos: Gizmos,
+    mut quote: Query<(&mut CoverQuote, &mut Text, &mut TextColor, &mut Node, &mut Visibility)>,
 ) {
+    if let Ok((_, _, _, _, mut visible)) = quote.single_mut() { *visible = Visibility::Hidden; }
     if menu.is_open() || !modal.is_empty() { return; }
     let Some(i) = buy.painting.filter(|_| buy.active) else { return };
     if mouse.just_pressed(MouseButton::Right) || keys.just_pressed(KeyCode::Escape) {
@@ -1434,11 +1443,30 @@ fn paint(
         let Some((wall, side)) = pick_wall(ray, b) else { return };
         crate::covering::walls(&b.data, wall, side, pat.texture, fill)
     };
-    if ops.is_empty() {
-        return;
-    }
     let cost = crate::covering::cost(&b.data, &ops, pat.price.max(0) as u32);
-    crate::covering::preview(&mut gizmos, b, &ops, household.as_ref().is_none_or(|h| h.funds >= cost));
+    let affordable = household.as_ref().is_none_or(|h| h.funds >= cost);
+    let color = if affordable { Color::WHITE } else { Color::srgb(1.0, 0.3, 0.2) };
+    let label = if ops.is_empty() { "No change · §0".to_string() } else { format!("§{cost}") };
+    let at = Vec2::new((cursor.x + 20.0).min((window.width() - 160.0).max(0.0)), (cursor.y + 24.0).min((window.height() - 40.0).max(0.0)));
+    if let Ok((mut value, mut caption, mut tint, mut node, mut visible)) = quote.single_mut() {
+        value.cost = cost;
+        value.affordable = affordable;
+        if caption.0 != label { caption.0 = label; }
+        if tint.0 != color { tint.0 = color; }
+        if node.left != Val::Px(at.x) || node.top != Val::Px(at.y) {
+            node.left = Val::Px(at.x);
+            node.top = Val::Px(at.y);
+        }
+        *visible = Visibility::Inherited;
+    } else {
+        commands.spawn((CoverQuote { cost, affordable }, text(label, 15.0, color),
+            Node { position_type: PositionType::Absolute, left: Val::Px(at.x), top: Val::Px(at.y),
+                padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)), border_radius: BorderRadius::all(Val::Px(6.0)), ..default() },
+            BackgroundColor(Color::srgba(0.04, 0.09, 0.18, 0.9)), GlobalZIndex(20), Pickable::IGNORE,
+            DespawnOnExit(PlayMode::Live)));
+    }
+    crate::covering::preview(&mut gizmos, b, &ops, affordable);
+    if ops.is_empty() { return; }
     if !mouse.just_pressed(MouseButton::Left) { return; }
     if household.as_ref().is_some_and(|h| h.funds < cost) {
         notes.push("You can't afford that.");
