@@ -30,14 +30,40 @@ pub struct Aging {
 
 impl Default for Aging {
     fn default() -> Self {
-        Self { days: 0.0, elder_span: rand::rng().random_range(14.0..22.0) }
+        Self { days: 0.0, elder_span: normal_elder_span(&mut rand::rng()) }
+    }
+}
+
+/// AgingManager: 2.428 aging years × 7 days, then a 14% daily chance on Normal.
+/// Pre-sampling the daily rolls keeps the eventual span stable through save/reload.
+fn normal_elder_span(rng: &mut impl Rng) -> f32 {
+    let mut days = 17.0;
+    while !rng.random_bool(0.14) { days += 1.0; }
+    days
+}
+
+#[cfg(test)]
+mod lifespan_tests {
+    use super::*;
+    use rand::SeedableRng;
+
+    #[test]
+    fn normal_elder_lifetimes_have_the_tuned_minimum_and_daily_mortality_tail() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(83);
+        let spans: Vec<f32> = (0..10000).map(|_| normal_elder_span(&mut rng)).collect();
+        assert!(spans.iter().all(|s| *s >= 17.0));
+        assert!(spans.iter().any(|s| *s > 35.0), "elders may outlive the former fixed upper bound");
+        let mean = spans.iter().sum::<f32>() / spans.len() as f32;
+        assert!((mean - (17.0 + 0.86 / 0.14)).abs() < 0.3, "mean span {mean}");
+        let at_minimum = spans.iter().filter(|s| **s == 17.0).count() as f32 / spans.len() as f32;
+        assert!((at_minimum - 0.14).abs() < 0.015, "minimum-age mortality {at_minimum}");
     }
 }
 
 /// Days in each life stage (the game's normal lifespan).
 pub fn stage_days(age: Age) -> f32 {
     match age {
-        Age::Baby => 2.0,
+        Age::Baby => 3.0,
         Age::Toddler => 7.0,
         Age::Child => 7.0,
         Age::Teen => 14.0,
@@ -131,11 +157,12 @@ fn daily_aging(
             for (e, sim, aging, _, _) in &mut sims {
                 if aging.is_none() {
                     let mut a = Aging::default();
-                    let span = if sim.age == Age::Elder { a.elder_span } else { stage_days(sim.age) };
-                    a.days = rng.random_range(0.0..span * 0.5).floor();
+                    let span = if sim.age == Age::Elder { 17.0 } else { stage_days(sim.age) };
+                    // AgingManager.kPercentCasOffset = 28.
+                    a.days = rng.random_range(0.0..span * 0.28).floor();
                     // Testing: everyone's birthday is at the next midnight.
                     if std::env::var_os("SIMS3_AGE_SOON").is_some() {
-                        a.days = span - 1.0;
+                        a.days = if sim.age == Age::Elder { a.elder_span - 1.0 } else { span - 1.0 };
                     }
                     commands.entity(e).insert(a);
                 }
