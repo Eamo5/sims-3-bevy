@@ -1934,7 +1934,7 @@ fn run_actions(
         Query<(), With<crate::meals::CookPrepped>>,
         Query<&crate::meals::ServingFrom>,
     ),
-    (mut did, journals): (MessageWriter<crate::journal::Did>, Query<&crate::journal::SkillJournal>),
+    (mut did, journals, mut inventories): (MessageWriter<crate::journal::Did>, Query<&crate::journal::SkillJournal>, Query<&mut crate::inventory::Inventory>),
 ) {
     let Some(grid) = grid else { return };
     let dt = delta.0;
@@ -2067,11 +2067,15 @@ fn run_actions(
                             commands.entity(me).insert(crate::anim::ActionClip::new(Some("a2o_eat_stand_fork_start_x"), &["a2o_eat_stand_fork_neat_x"]));
                             continue;
                         }
-                        ActionKind::EatItem { .. } => {
-                            action.phase = Phase::Running(0.0);
-                            anim.pose = Pose::Use;
-                            commands.entity(me).insert(crate::anim::ActionClip::new(None, &["a2o_eat_stand_hand_neat"]));
-                            continue;
+                        ActionKind::EatItem { key, quality } => {
+                            if inventories.get_mut(me).is_ok_and(|mut inv| inv.consume_produce(key, *quality)) {
+                                action.phase = Phase::Running(0.0);
+                                anim.pose = Pose::Use;
+                                commands.entity(me).insert(crate::anim::ActionClip::new(None, &["a2o_eat_stand_hand_neat"]));
+                                continue;
+                            }
+                            notes.push(format!("{} no longer has that produce to eat.", sim.first));
+                            None
                         }
                     };
                     let from = Vec2::new(tf.translation.x, tf.translation.z);
@@ -3124,19 +3128,11 @@ fn run_actions(
                                 commands.entity(me).insert(crate::meals::MealRequest::AteStanding);
                             }
                         }
-                        ActionKind::EatItem { key, quality } => {
+                        ActionKind::EatItem { quality, .. } => {
                             // A snack's worth, a little more for finer produce.
                             motives.add(HUNGER, (150.0 + *quality as f32 * 12.0) * dt / 60.0);
                             if elapsed >= PRODUCE_MINUTES {
                                 finished = true;
-                                let (key, quality) = (key.clone(), *quality);
-                                commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| {
-                                    if let Some(mut inv) = e.get_mut::<crate::inventory::Inventory>()
-                                        && let Some(i) = inv.0.iter().position(|s| s.kind == crate::inventory::ItemKind::Produce && s.key == key && s.quality == quality)
-                                    {
-                                        inv.take_one(i);
-                                    }
-                                });
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`.)

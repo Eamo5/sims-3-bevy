@@ -83,6 +83,12 @@ impl Inventory {
         Some(v)
     }
 
+    /// Reserve a snack before eating begins, so cancelling cannot reuse the same food.
+    pub fn consume_produce(&mut self, key: &str, quality: u8) -> bool {
+        let Some(i) = self.0.iter().position(|s| s.kind == ItemKind::Produce && s.key == key && s.quality == quality && s.count > 0) else { return false };
+        self.take_one(i).is_some()
+    }
+
     /// How many of a collectible they hold.
     pub fn held(&self, key: &str) -> u32 {
         self.0.iter().filter(|s| matches!(s.kind, ItemKind::Fish | ItemKind::Find | ItemKind::Insect) && s.key == key).map(|s| s.count).sum()
@@ -373,6 +379,22 @@ fn inventory_buttons(
 #[cfg(test)]
 mod button_tests {
     use super::*;
+
+    #[test]
+    fn eating_consumes_only_the_requested_produce_and_rejects_exhausted_requests() {
+        let mut inv = Inventory::default();
+        inv.add(ItemKind::Produce, "Tomato", "Normal Tomato", 3, 10);
+        inv.add(ItemKind::Produce, "Tomato", "Perfect Tomato", 9, 40);
+        inv.add(ItemKind::Find, "Tomato", "Unrelated item", 3, 100);
+        assert!(inv.consume_produce("Tomato", 3));
+        assert!(!inv.consume_produce("Tomato", 3), "a second queued snack cannot use an exhausted stack or unrelated item");
+        assert_eq!(inv.0.len(), 2);
+        assert_eq!(inv.0[0].quality, 9);
+        assert_eq!(inv.0[0].worth, 40);
+        assert_eq!(inv.0[1].kind, ItemKind::Find);
+        assert!(inv.consume_produce("Tomato", 9));
+        assert_eq!(inv.0.len(), 1);
+    }
 
     #[test]
     fn holding_sell_one_sells_only_once_until_released_and_pressed_again() {
