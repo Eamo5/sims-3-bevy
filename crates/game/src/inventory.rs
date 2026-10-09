@@ -300,7 +300,7 @@ fn inventory_buttons(
     mut commands: Commands,
     baked: Option<Res<crate::baked::Baked>>,
     tiles: Query<(&Interaction, &ItemTile), Changed<Interaction>>,
-    mut buttons: Query<(&Interaction, &ItemButton, &mut BackgroundColor)>,
+    mut buttons: Query<(&Interaction, &ItemButton, &mut BackgroundColor), Changed<Interaction>>,
     mut chosen: ResMut<Chosen>,
     mut sel: Query<(Entity, &Sim, &mut Inventory, &mut ActionQueue), With<Selected>>,
     mut household: Option<ResMut<Household>>,
@@ -367,6 +367,39 @@ fn inventory_buttons(
                 chosen.0 = None;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod button_tests {
+    use super::*;
+
+    #[test]
+    fn holding_sell_one_sells_only_once_until_released_and_pressed_again() {
+        let mut app = App::new();
+        app.init_resource::<Chosen>()
+            .init_resource::<Notifications>()
+            .add_message::<crate::sound::PlaySound>()
+            .insert_resource(Household { name: "Test".into(), funds: 100, lot_index: 0, last_bill_day: 0, bills: Vec::new() })
+            .add_systems(Update, inventory_buttons);
+        let sim = crate::sim::random_sim(&mut rand::rng(), "Test", Some(false), crate::sim::Age::Adult);
+        let mut inv = Inventory::default();
+        for _ in 0..3 { inv.add(ItemKind::Produce, "Tomato", "Tomato", 3, 10); }
+        let me = app.world_mut().spawn((sim, Selected, inv, ActionQueue::default())).id();
+        app.update();
+        app.world_mut().resource_mut::<Chosen>().0 = Some(0);
+        let button = app.world_mut().spawn((Interaction::Pressed, ItemButton::SellOne, BackgroundColor(BTN_NORMAL))).id();
+        app.update();
+        for _ in 0..5 { app.update(); }
+        assert_eq!(app.world().get::<Inventory>(me).unwrap().0[0].count, 2);
+        assert_eq!(app.world().resource::<Household>().funds, 110);
+        assert_eq!(app.world().resource::<Notifications>().0.len(), 1);
+        *app.world_mut().get_mut::<Interaction>(button).unwrap() = Interaction::Hovered;
+        app.update();
+        *app.world_mut().get_mut::<Interaction>(button).unwrap() = Interaction::Pressed;
+        app.update();
+        assert_eq!(app.world().get::<Inventory>(me).unwrap().0[0].count, 1);
+        assert_eq!(app.world().resource::<Household>().funds, 120);
     }
 }
 
