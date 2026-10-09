@@ -183,6 +183,7 @@ installation is unreachable.
   and drown (the game's drowning animation; the tombstone at the pool's side). Each death has
   the game's own last moments, and its ghost its own colour.
 - **Meals**: cooking serves eight portions, matching the installed game's group-meal tuning,
+  and platters switch to the recipe's original half-depleted model at four servings when available,
   with breakfast from 1am, lunch from 11am, dinner from 5pm and weekend brunch from 9am–3pm,
   on the game's serving platter (on the nearest
   counter), with a serving for everyone at home, and the cook calls the household to it (the

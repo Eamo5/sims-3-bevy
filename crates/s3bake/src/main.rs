@@ -661,8 +661,8 @@ cover {:?}", g.seasons.temperature, g.seasons.freeze_melt, g.seasons.cover);
         println!("writing: {} values; book titles: {:?}", g.writing.len(), g.book_titles.iter().map(|(g, t)| (g.as_str(), t.len(), t.first())).collect::<Vec<_>>());
         for r in &g.recipes {
             println!(
-                "recipe {} {:?} lvl {} auto {} meals {:05b} veg {} §{} {:?} group {:?} single {:?} empty {:?}/{:?}",
-                r.key, r.name, r.level, r.auto, r.meals, r.vegetarian, r.cost, r.ingredients, r.group, r.single, r.group_empty, r.single_empty
+                "recipe {} {:?} lvl {} auto {} meals {:05b} veg {} §{} {:?} group {:?} half {:?} single {:?} empty {:?}/{:?}",
+                r.key, r.name, r.level, r.auto, r.meals, r.vegetarian, r.cost, r.ingredients, r.group, r.group_half, r.single, r.group_empty, r.single_empty
             );
         }
         for w in &g.lifetime_wishes {

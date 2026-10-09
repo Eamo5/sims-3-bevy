@@ -205,10 +205,11 @@ pub fn draw(mut commands: Commands, mut catalog: ResMut<BuildCatalog>, hud: Res<
 pub fn probe(time: Res<Time<crate::autotest::InputTimeline>>, catalog: Res<BuildCatalog>, buy: Res<BuyMode>,
     hud: Res<crate::buildhud::BuildHud>,
     live: Option<Res<crate::livehud::LiveHud>>, visibility: Query<&InheritedVisibility>,
-    game_ui: Res<crate::icons::GameUi>, categories: Query<(Entity, &Category, &InheritedVisibility)>,
+    game_ui: Option<Res<crate::icons::GameUi>>, categories: Query<(Entity, &Category, &InheritedVisibility)>,
     mut interactions: Query<&mut Interaction>, mut bars: Query<&mut UiScrollBar>,
     cells: Query<(Entity, &BuyButton, &InheritedVisibility)>, mut stage: Local<u8>, mut selected: Local<Option<usize>>) {
     if std::env::var_os("BUILD_CATALOG_TEST").is_none() || *stage >= 8 || time.elapsed_secs() < 7.0 + *stage as f32 * 0.5 { return; }
+    let Some(game_ui) = game_ui else { return };
     assert!(showing(&buy));
     if let Some(live) = live {
         for root in [live.motives.root, live.skills.root, live.simology.root, live.career.root, live.inventory.root].into_iter().flatten() {

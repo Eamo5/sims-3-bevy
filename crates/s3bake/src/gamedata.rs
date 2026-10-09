@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 68;
+pub const GAMEDATA_VERSION: u32 = 69;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -318,9 +318,10 @@ pub struct RecipeInfo {
     /// What it costs at a restaurant.
     pub cost: i32,
     pub ingredients: Vec<String>,
-    /// The serving dish full and emptied, and a plateful and the empty plate: models in
+    /// The serving dish full, half-full and emptied, and a plateful and the empty plate: models in
     /// `food.pack` (each key's group is its geometry state's hash).
     pub group: Option<crate::types::Key>,
+    pub group_half: Option<crate::types::Key>,
     pub group_empty: Option<crate::types::Key>,
     /// What its recipe book costs at the bookstore (0: there's none).
     pub book_price: i32,
@@ -1772,6 +1773,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 cost: num(&f, "RegisterCost") as i32,
                 ingredients: ["Ingredient_1", "Ingredient_2", "Ingredient_3"].iter().map(|i| get(&f, i)).filter(|i| !i.is_empty()).collect(),
                 group: model_of(&get(&f, "Group_Full")),
+                group_half: model_of(&get(&f, "Group_Half")),
                 group_empty: model_of(&get(&f, "Group_Empty")),
                 single: model_of(&get(&f, "Single_Full")),
                 single_empty: model_of(&get(&f, "Single_Empty")),

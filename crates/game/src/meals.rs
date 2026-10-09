@@ -25,7 +25,7 @@ impl Plugin for MealsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Leftovers>()
             .add_systems(OnEnter(crate::AppState::InGame), |mut l: ResMut<Leftovers>| l.0.clear())
-            .add_systems(Update, (cook_prep, cook_prep_done, serve_if_interrupted, take_out_dinner, meal_requests, come_to_meal, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (cook_prep, cook_prep_done, serve_if_interrupted, take_out_dinner, meal_requests, update_platters, come_to_meal, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -400,6 +400,32 @@ impl Meal {
 
     fn take_remaining(&mut self) -> u8 {
         std::mem::take(&mut self.servings)
+    }
+}
+
+#[derive(Component)]
+struct HalfPlatter;
+
+/// Update once after all plate requests, so simultaneous diners cannot queue conflicting
+/// replacements for the same food child. Food tuning uses four remaining servings.
+fn update_platters(
+    mut commands: Commands,
+    ui: Option<Res<crate::icons::GameUi>>,
+    plates: Query<(Entity, &Meal, &Dish, Option<&DishFood>), (Changed<Meal>, Without<HalfPlatter>)>,
+    data: Res<Baked>,
+    mut assets: ResMut<ObjectAssets>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let Some(ui) = ui else { return };
+    let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+    for (entity, meal, dish, food) in &plates {
+        if !(1..=4).contains(&meal.servings) { continue; }
+        if let Some(half) = ui.data.recipes.get(dish.0).and_then(|r| r.group_half) {
+            set_food(&mut commands, &mut assets, &mut ctx, entity, food, Some(half));
+            commands.entity(entity).insert(HalfPlatter);
+        }
     }
 }
 
