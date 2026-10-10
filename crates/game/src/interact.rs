@@ -874,7 +874,7 @@ static CHAIR: [InteractionDef; 6] = [
         special: Special::EatMeal,
         ..def("Eat", MEAL_MINUTES, [MEAL_PER_HOUR, -4.0, 0.0, 20.0, -4.0, 6.0], Pose::Sit)
     },
-    InteractionDef { on_object: true, special: Special::Homework, ..def("Do Homework", 45.0, [0.0, 0.0, -2.0, 0.0, 0.0, -6.0], Pose::Sit) },
+    InteractionDef { on_object: true, special: Special::Homework, ..def("Do Homework", 100.0 / crate::rabbitholes::HOMEWORK_BASE_RATE, [0.0, 0.0, -2.0, 0.0, 0.0, -6.0], Pose::Sit) },
     READ_SEATED,
     READ_PAPER_SEATED,
     WATCH_TV_SEATED,
@@ -2452,9 +2452,9 @@ fn run_actions(
                                     Special::TurnOnTv => 1.0,
                                     // (Less time at the stove once the food's been prepared.)
                                     Special::ServeMeal if prepped.contains(me) && d.minutes > 30.0 => d.minutes - 15.0,
-                                    // (Twice as quick for a Speedy Cleaner; homework too for a Multi-Tasker.)
+                                    // Original reward and trait completion rates.
                                     Special::CleanUp | Special::EmptyTrash if crate::wishes::has(wishes, "SpeedyCleaner") => d.minutes / 3.0,
-                                    Special::Homework if crate::wishes::has(wishes, "MultiTasker") => d.minutes / 1.5,
+                                    Special::Homework => crate::rabbitholes::homework_minutes(&sim.traits, crate::wishes::has(wishes, "MultiTasker")),
                                     _ => d.minutes,
                                 };
                                 if elapsed >= minutes || full {

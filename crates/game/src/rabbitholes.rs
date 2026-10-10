@@ -389,6 +389,19 @@ fn outings(
 #[derive(Component)]
 pub struct Homework;
 
+pub const HOMEWORK_BASE_RATE: f32 = 0.556;
+
+/// Homework.xml base completion percentage per minute, with additive trait tuning.
+pub fn homework_minutes(traits: &[crate::life::Trait], multitasker: bool) -> f32 {
+    use crate::life::Trait;
+    let mut rate = HOMEWORK_BASE_RATE;
+    if traits.contains(&Trait::Bookworm) { rate += 0.278; }
+    if traits.contains(&Trait::Workaholic) { rate += 0.278; }
+    if traits.contains(&Trait::Perfectionist) { rate -= 0.15; }
+    if multitasker { rate *= 1.5; }
+    100.0 / rate
+}
+
 /// Claim an assignment in the exclusive command phase before granting any rewards.
 /// Queued self-study and helpers can finish in the same update; only one succeeds.
 pub fn complete_homework(world: &mut World, student: Entity, helper: Option<Entity>, minutes: f32) -> bool {
@@ -475,6 +488,19 @@ mod school_grade_tests {
 mod school_schedule_tests {
     use super::*;
     use rand::SeedableRng;
+
+    #[test]
+    fn homework_completion_uses_additive_trait_rates_and_multitasker() {
+        use crate::life::Trait::*;
+        for (traits, rate) in [
+            (vec![], 0.556), (vec![Bookworm], 0.834), (vec![Workaholic], 0.834),
+            (vec![Perfectionist], 0.406), (vec![Bookworm, Workaholic], 1.112),
+            (vec![Bookworm, Workaholic, Perfectionist], 0.962),
+        ] {
+            assert!((homework_minutes(&traits, false) - 100.0 / rate).abs() < 0.001);
+            assert!((homework_minutes(&traits, true) * 1.5 - homework_minutes(&traits, false)).abs() < 0.001);
+        }
+    }
 
     #[test]
     fn homework_and_tutoring_rewards_require_a_unique_live_assignment() {

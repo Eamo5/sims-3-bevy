@@ -439,8 +439,9 @@ installation is unreachable.
   it or put it out. Now and then a spark catches the floor in front. Candles are lit and blown
   out too: a little flame and a soft flickering light for a few hours.
 - **Homework**: children and teens come home from school (Monday to Friday) with homework,
-  and sit down at a table to do it (the game's homework animations; sooner for bookworms and
-  geniuses); done, it lifts their grades; left undone, it drags them down. A teen or grown-up
+   and sit down at a table to do it (the game's homework animations and base completion rate;
+   faster for Bookworms, Workaholics and Multi-Taskers, slower for Perfectionists); done, it
+   lifts their grades; left undone, it drags them down. A teen or grown-up
   can Help with Homework (a Friendly social, offered while there's homework): it's done, with
   better grades, the helper learns a little Logic, and the hours count towards Teacher
    Extraordinaire (whose teachers get through it twice as fast). Grades and unfinished homework
