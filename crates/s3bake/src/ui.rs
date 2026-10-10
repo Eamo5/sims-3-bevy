@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackWriter, read_value, write_value};
 
-pub const UI_VERSION: u32 = 16;
+pub const UI_VERSION: u32 = 17;
 pub const T_LAYOUT: u32 = 0x025C95B6;
 pub const T_FONT: u32 = 0x062E9EE0;
 pub const T_IMAGE: u32 = 0x2F7D0004;
@@ -457,7 +457,7 @@ fn window(o: &XNode) -> Option<UiWindow> {
     w.button_group = val("ButtonGroupID").map_or(0, num);
     w.align = val("Alignment").map_or(0, num) as u8;
     w.icon = props("Icon").and_then(|p| p.attr("key")).map_or(0, image_key);
-    for name in ["FillDrawable", "ButtonDrawable", "SliderDrawable", "ComboBoxDrawable"] {
+    for name in ["FillDrawable", "ButtonDrawable", "SliderDrawable", "ComboBoxDrawable", "DialogDrawable"] {
         if let Some(d) = props(name).and_then(|p| p.child("object")).and_then(drawable) {
             w.drawable = Some(d);
         }

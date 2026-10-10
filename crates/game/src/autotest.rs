@@ -201,6 +201,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, load_shot.run_if(in_state(AppState::Loading)))
             .add_systems(Update, game_popup.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, options_dialog)
+            .add_systems(Update, give_skill.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, ui_click.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, ui_right_click.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, pointer_script.after(bevy::input::InputSystems).before(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
@@ -524,6 +525,19 @@ fn auto_pick_world(
         next.set(AppState::Loading);
     } else {
         warn!("--world {name}: no such world");
+    }
+}
+
+/// GIVE_SKILL=<skill>:<level>: the selected Sim is that good at it from the start.
+fn give_skill(mut sel: Query<&mut crate::interact::Skills, With<crate::sim::Selected>>, mut done: Local<bool>) {
+    let Some((name, level)) = std::env::var("GIVE_SKILL").ok().and_then(|v| v.split_once(':').map(|(s, l)| (s.to_string(), l.parse::<f32>().unwrap_or(0.0)))) else { return };
+    if *done {
+        return;
+    }
+    if let (Ok(mut skills), Some(n)) = (sel.single_mut(), crate::save::SKILLS.iter().find(|n| n.eq_ignore_ascii_case(&name))) {
+        let v = skills.0.entry(n).or_insert(0.0);
+        *v = v.max(level);
+        *done = true;
     }
 }
 

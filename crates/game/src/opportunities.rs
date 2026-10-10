@@ -273,6 +273,13 @@ fn offer_opportunities(
     board.dialog = Some((root, sim_e, index));
 }
 
+impl OpportunityBoard {
+    /// The offer on show: its dialog, the Sim, the opportunity (index into the game data's).
+    pub fn offer(&self) -> Option<(Entity, Entity, usize)> {
+        self.dialog
+    }
+}
+
 /// Asks for an opportunity to be offered now (tests).
 #[derive(Resource)]
 pub struct ForceOffer;
@@ -285,8 +292,10 @@ pub struct AutoAccept;
 #[derive(Resource)]
 pub struct AutoDecline;
 
+/// The offer's Accept (true) or Decline button (the game's dialog's OK and cancel too: see
+/// `gamedialogs`).
 #[derive(Component)]
-struct OppButton(bool);
+pub struct OppButton(pub bool);
 
 #[allow(clippy::too_many_arguments)]
 fn dialog_buttons(
