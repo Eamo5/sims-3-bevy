@@ -87,6 +87,8 @@ pub struct SavedSim {
     #[serde(default)]
     pub homework_progress: f32,
     #[serde(default)]
+    pub body_temperature: crate::weather::BodyTemperature,
+    #[serde(default)]
     pub happiness_fraction: f64,
     #[serde(default)]
     pub offered_wishes: Vec<crate::wishes::Wish>,
@@ -372,6 +374,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         homework: false,
         homework_progress: 0.0,
         happiness_fraction: 0.0,
+        body_temperature: default(),
         offered_wishes: Vec::new(),
         promised_wishes: Vec::new(),
         next_wish_offer: None,
@@ -660,7 +663,7 @@ fn save_game(
                 Option<&crate::journal::SkillJournal>,
                 Option<&crate::rabbitholes::SchoolGrades>,
                 Option<&crate::rabbitholes::Homework>,
-                Option<&crate::rabbitholes::AtRabbitHole>,
+                (Option<&crate::rabbitholes::AtRabbitHole>, Option<&crate::weather::BodyTemperature>),
             ),
         ),
         (Without<crate::town::Townie>, Without<crate::visit::LotGuest>, Without<crate::services::ServiceNpc>),
@@ -701,7 +704,7 @@ fn save_game(
     let Some(hh) = household else { return };
     let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).collect();
     let mut saved = Vec::new();
-    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, rabbit)) in &sims {
+    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature))) in &sims {
         // Out on a community lot: saved as back at home (the lot isn't kept).
         let (position, level) = match (out, exit.as_ref()) {
             (true, Some(x)) => ([x.0.x, world.data.heightmap.sample(x.0.x, x.0.y), x.0.y], 1),
@@ -745,6 +748,7 @@ fn save_game(
                 .collect(),
             lifetime_happiness: wishes.map_or(0, |w| w.points),
             happiness_fraction: wishes.map_or(0.0, |w| w.mood_fraction),
+            body_temperature: temperature.copied().unwrap_or_default(),
             offered_wishes: wishes.map(|w| w.offered.clone()).unwrap_or_default(),
             promised_wishes: wishes.map(|w| w.promised.clone()).unwrap_or_default(),
             next_wish_offer: wishes.map(|w| w.next_offer),
@@ -950,6 +954,7 @@ pub(crate) fn apply_loaded_game(
             ec.insert(crate::aging::Aging { days, elder_span, elder_risk: s.elder_risk });
         }
         restore_school(&mut ec, s);
+        ec.insert(s.body_temperature);
         if let Some(a) = &s.author {
             ec.insert(a.clone());
         }
@@ -1126,6 +1131,21 @@ pub fn request_save(w: &mut MessageWriter<SaveRequest>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn weather_exposure_survives_save_and_legacy_saves_start_comfortable() {
+        let mut rng = rand::rng();
+        let mut saved = saved_look(&random_sim(&mut rng, "Weather", Some(true), Age::Adult));
+        saved.body_temperature = crate::weather::BodyTemperature { value: -94.75, in_rain: 49.5 };
+        let mut json = serde_json::to_value(&saved).unwrap();
+        let restored: SavedSim = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(restored.body_temperature.value, -94.75);
+        assert_eq!(restored.body_temperature.in_rain, 49.5);
+        json.as_object_mut().unwrap().remove("body_temperature");
+        let legacy: SavedSim = serde_json::from_value(json).unwrap();
+        assert_eq!(legacy.body_temperature.value, 0.0);
+        assert_eq!(legacy.body_temperature.in_rain, 0.0);
+    }
 
     #[test]
     fn broken_objects_restore_after_spawn_without_breaking_neighbours_or_repaired_objects() {

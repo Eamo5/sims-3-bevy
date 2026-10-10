@@ -263,7 +263,7 @@ pub fn sheltered(building: Option<&crate::building::ActiveBuilding>, p: Vec3) ->
 
 /// A Sim's temperature (`SimTemperature`, -100 freezing .. 100 baking; 0 comfortable), and how
 /// long they've been out in the rain.
-#[derive(Component, Default, Clone, Copy, Debug)]
+#[derive(Component, Default, Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BodyTemperature {
     pub value: f32,
     pub in_rain: f32,
