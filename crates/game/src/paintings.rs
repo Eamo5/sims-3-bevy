@@ -95,10 +95,18 @@ pub struct Painted {
 /// skilled now and then, and are worth more.
 #[allow(clippy::too_many_arguments)]
 pub fn paint(data: Option<&PaintingsBaked>, size: u8, level: u32, traits: &[Trait], child: bool, extra_creative: bool, proficient: bool, rng: &mut impl Rng) -> Painted {
-    // PaintingSkill's base chances, with TraitTuning's additive bonuses.
+    // Quality benefits are exclusive: Proficient Painter takes precedence over
+    // Extra Creative, which takes precedence over Perfectionist.
     let perfectionist = traits.contains(&Trait::Perfectionist);
-    let brilliant = if proficient { 40 } else { 20 } + if perfectionist { 20 } else { 0 } + if extra_creative { 25 } else { 0 };
-    let masterpiece = if proficient { 35 } else { 10 } + if perfectionist { 15 } else { 0 } + if extra_creative { 15 } else { 0 };
+    let (brilliant, masterpiece) = if proficient {
+        (40, 35)
+    } else if extra_creative {
+        (20 + 25, 10 + 15)
+    } else if perfectionist {
+        (20 + 20, 10 + 15)
+    } else {
+        (20, 10)
+    };
     let quality = if level >= 9 && rng.random_bool(masterpiece as f64 / 100.0) {
         3
     } else if level >= 6 && rng.random_bool(brilliant as f64 / 100.0) {
@@ -295,11 +303,11 @@ mod tests {
             (vec![], false, false, 0.20, 0.10),
             (vec![Trait::Perfectionist], false, false, 0.40, 0.25),
             (vec![], true, false, 0.45, 0.25),
-            (vec![Trait::Perfectionist], true, false, 0.65, 0.40),
+            (vec![Trait::Perfectionist], true, false, 0.45, 0.25),
             (vec![], false, true, 0.40, 0.35),
-            (vec![Trait::Perfectionist], false, true, 0.60, 0.50),
-            (vec![], true, true, 0.65, 0.50),
-            (vec![Trait::Perfectionist], true, true, 0.85, 0.65),
+            (vec![Trait::Perfectionist], false, true, 0.40, 0.35),
+            (vec![], true, true, 0.40, 0.35),
+            (vec![Trait::Perfectionist], true, true, 0.40, 0.35),
         ] {
             let mut rng = rand::rngs::StdRng::seed_from_u64(718);
             for _ in 0..100 {
@@ -320,6 +328,28 @@ mod tests {
                 let expected_brilliant = (1.0 - expected_masterpiece) * brilliant;
                 assert!((masterpiece_count as f64 / 20_000.0 - expected_masterpiece).abs() < 0.015);
                 assert!((brilliant_count as f64 / 20_000.0 - expected_brilliant).abs() < 0.015);
+            }
+        }
+    }
+
+    #[test]
+    fn higher_priority_quality_benefits_override_lower_ones() {
+        use rand::SeedableRng;
+        for proficient in [false, true] {
+            let mut first = rand::rngs::StdRng::seed_from_u64(944);
+            let mut second = first.clone();
+            for _ in 0..1000 {
+                // Extra Creative masks Perfectionist; Proficient Painter masks both.
+                let baseline = paint(None, 0, 10, &[], false, !proficient, proficient, &mut first);
+                let combined = paint(None, 0, 10, &[Trait::Perfectionist], false, true, proficient, &mut second);
+                assert_eq!(baseline.name, combined.name, "lower-priority bonuses must not improve the quality roll");
+                assert_eq!(baseline.key, combined.key);
+                if !proficient {
+                    assert_eq!(baseline.worth, combined.worth);
+                } else {
+                    // Extra Creative's separate price bonus still applies.
+                    assert!(combined.worth > baseline.worth);
+                }
             }
         }
     }
