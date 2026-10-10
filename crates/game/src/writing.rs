@@ -128,6 +128,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn royalty_reward_applies_once_and_extra_creative_does_not_increase_payments() {
+        for (rewards, expected) in [
+            (vec![], 300),
+            (vec!["ExtraCreative".into()], 300),
+            (vec!["HighRoller".into()], 400),
+            (vec!["ExtraCreative".into(), "HighRoller".into()], 400),
+        ] {
+            let mut app = App::new();
+            app.init_resource::<GameClock>().init_resource::<Notifications>()
+                .add_message::<crate::journal::Did>()
+                .insert_resource(Household { name: "Author".into(), funds: 0, lot_index: 0, last_bill_day: 0, bills: vec![] })
+                .add_systems(Update, pay_royalties);
+            app.world_mut().resource_mut::<GameClock>().minutes = 6.0 * 1440.0 + 720.0;
+            let e = app.world_mut().spawn((
+                crate::sim::random_sim(&mut rand::rng(), "Author", Some(true), Age::Adult),
+                HouseholdMember,
+                crate::wishes::Wishes::restored(0, rewards, 0.0),
+                Author { draft: None, books: vec![Book { title: "Novel".into(), genre: "Fiction".into(), quality: Quality::Success, royalty: 300, payments_left: 6, next_pay: 6 }] },
+            )).id();
+            app.update();
+            app.update();
+            assert_eq!(app.world().resource::<Household>().funds, expected);
+            let book = &app.world().get::<Author>(e).unwrap().books[0];
+            assert_eq!(book.royalty, 300, "the reward adjusts payments, not the stored base royalty");
+            assert_eq!(book.payments_left, 5);
+        }
+    }
+
+    #[test]
     fn prolific_and_genre_quality_bonuses_use_completed_books_and_survive_reload() {
         let book = |genre: &str| Book { title: "Novel".into(), genre: genre.into(), quality: Quality::Success, royalty: 100, payments_left: 0, next_pay: 6 };
         let mut author = Author { draft: None, books: vec![book("Fiction"); 4] };
@@ -388,13 +417,13 @@ fn write_pages(
     delta: Res<SimDelta>,
     ui: Option<Res<crate::icons::GameUi>>,
     mut household: Option<ResMut<Household>>,
-    mut writers: Query<(Entity, &Sim, &mut ActionQueue, &Skills, Option<&mut Author>, Option<&NovelPlan>, Option<&crate::wishes::Wishes>, Option<&crate::journal::SkillJournal>), With<HouseholdMember>>,
+    mut writers: Query<(Entity, &Sim, &mut ActionQueue, &Skills, Option<&mut Author>, Option<&NovelPlan>, Option<&crate::journal::SkillJournal>), With<HouseholdMember>>,
     objects: Query<(&GameObject, &crate::interact::UsedBy), (Without<crate::interact::Broken>, Without<crate::buyhistory::HistoryHidden>, Without<crate::buy::HeldObject>)>,
     mut notes: ResMut<Notifications>,
 ) {
     let data = ui.as_ref().map(|u| &*u.data);
     let mut rng = rand::rng();
-    for (e, sim, mut queue, skills, author, plan, wishes, journal) in &mut writers {
+    for (e, sim, mut queue, skills, author, plan, journal) in &mut writers {
         let Some(front) = queue.0.front_mut() else { continue };
         if front.cancel { continue; }
         let (ActionKind::Object { target, def }, Phase::Running(_)) = (&front.kind, &front.phase) else { continue };
@@ -440,11 +469,7 @@ fn write_pages(
         }
         if d.pages >= d.length {
             let d = author.draft.take().unwrap_or_else(|| start_draft(&GENRES[0], &Author::default(), data, &mut rng));
-            let mut book = publish(&d, sim, skills, &author, clock.minutes, data, &mut rng);
-            // The Extra Creative's work sells better.
-            if crate::wishes::has(wishes, "ExtraCreative") {
-                book.royalty = book.royalty * 3 / 2;
-            }
+            let book = publish(&d, sim, skills, &author, clock.minutes, data, &mut rng);
             let g = GENRES[genre_index(&book.genre).unwrap_or(0)].name;
             notes.push(format!(
                 "{} finished writing “{}”, a {g} book. It's {}! Royalties of §{} will come in each week, {} times.",
