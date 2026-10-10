@@ -348,6 +348,32 @@ mod trait_age_tests {
     use rand::SeedableRng;
 
     #[test]
+    fn reading_and_tv_continuations_keep_trait_fun_modifiers() {
+        use crate::interact::{ObjectKind, Special, interactions_for};
+        let mut reading = 0;
+        let mut watching = 0;
+        for kind in [ObjectKind::Bookshelf, ObjectKind::Tv, ObjectKind::Chair, ObjectKind::Sofa] {
+            for interaction in interactions_for(kind) {
+                match interaction.special {
+                    Special::ReadBook => {
+                        reading += 1;
+                        assert_eq!(activity_affinity(&[Trait::Bookworm], interaction.name), 2.0, "{kind:?}");
+                        assert_eq!(activity_affinity(&[Trait::CouchPotato], interaction.name), 1.0);
+                    }
+                    Special::WatchTv => {
+                        watching += 1;
+                        assert_eq!(activity_affinity(&[Trait::CouchPotato], interaction.name), 2.0, "{kind:?}");
+                        assert_eq!(activity_affinity(&[Trait::Technophobe], interaction.name), 0.3, "{kind:?}");
+                        assert_eq!(activity_affinity(&[Trait::Bookworm], interaction.name), 1.0);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(reading >= 3 && watching >= 3, "cover both seated and standing continuations");
+    }
+
+    #[test]
     fn original_trait_learning_multipliers_are_skill_specific() {
         use Trait::*;
         for (t, skill, expected) in [
@@ -460,6 +486,13 @@ pub fn decay_rate(traits: &[Trait], motive: usize) -> f32 {
 
 /// How much an activity's fun (and the wish to do it) is scaled by personality.
 pub fn activity_affinity(traits: &[Trait], activity: &str) -> f32 {
+    // Seated/standing continuation interactions retain the original activity's
+    // personality effects after the book or TV has been selected.
+    let activity = match activity {
+        "Read Book" => "Read a Book",
+        "Watch the TV" => "Watch TV",
+        activity => activity,
+    };
     let mut r = 1.0;
     for t in traits {
         r *= match (t, activity) {
@@ -964,7 +997,7 @@ fn life_events(
                 "Have Quick Meal" | "Microwave Dinner" if *completed => ml.add(K::GoodMeal, now),
                 "Sit" => ml.add(K::Comfy, now),
                 "Dance" => ml.add(K::EnjoyingMusic, now),
-                "Read a Book" if has(Trait::Bookworm) => ml.add(K::EnjoyingAGoodBook, now),
+                "Read a Book" | "Read Book" if has(Trait::Bookworm) => ml.add(K::EnjoyingAGoodBook, now),
                 "Work Out" => {
                     if has(Trait::Athletic) {
                         ml.add(K::Pumped, now)
