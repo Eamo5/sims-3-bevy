@@ -671,7 +671,12 @@ installation is unreachable.
   and ambience's volumes on the game's plumbob sliders, each with its Mute box); Game Options
   (free will off, low or high; aging on or off; the lifespan, short to epic, with the Sim days
   a life lasts and each life stage's days); Graphics (lighting and shadows); OK keeps the
-  changes, Cancel drops them, Restore Defaults puts a page back.
+  changes, Cancel drops them, Restore Defaults puts a page back. The game's own dialogs ask
+  its questions: an opportunity offered (the Sim's face, the opportunity and "for <Sim>", its
+  description on the game's card, objective and reward, OK or cancel), a teen's lifetime
+  wish (the wishes' icons along the chooser's slots, the chosen one's name and what it asks),
+  and the lifetime rewards shop (the game's table of rewards with their icons and costs, those
+  out of reach shaded, the points to spend, Purchase and Close).
 - **The game's own HUD**: the live-mode interface is the game's, drawn from its own layouts
   (`UI.package`'s window trees, pictures and fonts: every caption in its Helvetica Rounded),
   and driven as its own interface code drives it: the puck at the bottom left (live, buy and

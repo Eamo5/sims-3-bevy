@@ -77,6 +77,11 @@ pub struct Questions {
 }
 
 impl Questions {
+    /// The plain dialog of the question on show.
+    pub fn shown(&self) -> Option<Entity> {
+        self.shown
+    }
+
     pub fn ask(&mut self, a: Ask) {
         // The same question isn't asked twice.
         if !self.queue.iter().any(|q| q.about == a.about) {
@@ -92,8 +97,10 @@ pub struct Answered {
     pub answer: usize,
 }
 
+/// A button that gives an answer (an index into the question's answers): the plain dialog's,
+/// and the game's own dialogs' (see `gamedialogs`).
 #[derive(Component)]
-struct AnswerButton(usize);
+pub struct AnswerButton(pub usize);
 
 /// The answers, which scroll when there are many.
 #[derive(Component)]

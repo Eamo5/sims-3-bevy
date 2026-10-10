@@ -202,6 +202,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, game_popup.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, options_dialog)
             .add_systems(Update, give_skill.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, ask_question_hook.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, ui_click.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, ui_right_click.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, pointer_script.after(bevy::input::InputSystems).before(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
@@ -526,6 +527,31 @@ fn auto_pick_world(
     } else {
         warn!("--world {name}: no such world");
     }
+}
+
+/// ASK=<Reward|LifetimeWish>@<seconds>: that question put to the selected Sim then (the
+/// reward shop with 25,000 lifetime happiness to spend).
+fn ask_question_hook(
+    time: Res<Time>,
+    mut questions: ResMut<crate::dialog::Questions>,
+    ui: Option<Res<crate::icons::GameUi>>,
+    mut sel: Query<(Entity, &crate::sim::Sim, Option<&mut crate::wishes::Wishes>), With<crate::sim::Selected>>,
+    mut done: Local<bool>,
+) {
+    let Some((what, at)) = std::env::var("ASK").ok().and_then(|v| v.split_once('@').map(|(w, t)| (w.to_string(), t.parse::<f32>().unwrap_or(6.0)))) else { return };
+    if *done || time.elapsed_secs() < at {
+        return;
+    }
+    let (Some(ui), Ok((e, sim, w))) = (ui, sel.single_mut()) else { return };
+    match what.as_str() {
+        "Reward" => {
+            let Some(mut w) = w else { return };
+            w.points = w.points.max(25_000);
+            crate::wishes::ask_reward(&mut questions, &ui.data, e, sim, &w);
+        }
+        _ => crate::lifetime::ask_lifetime_wish(&mut questions, Some(&ui.data), e, sim),
+    }
+    *done = true;
 }
 
 /// GIVE_SKILL=<skill>:<level>: the selected Sim is that good at it from the start.
