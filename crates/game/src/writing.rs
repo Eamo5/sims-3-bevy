@@ -123,6 +123,64 @@ impl Author {
 #[derive(Component)]
 pub struct NovelPlan(pub usize);
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn perfectionist_page_rate_scales_skill_and_bookworm_bonuses() {
+        let mut rng = rand::rng();
+        let mut sim = crate::sim::random_sim(&mut rng, "Author", Some(true), Age::Adult);
+        for level in [0.0, 5.0, 10.0] {
+            let skills = Skills([("Writing", level)].into_iter().collect());
+            for bookworm in [false, true] {
+                sim.traits = if bookworm { vec![Trait::Bookworm] } else { vec![] };
+                let normal = pages_per_minute(&sim, &skills, None);
+                sim.traits.push(Trait::Perfectionist);
+                assert!((pages_per_minute(&sim, &skills, None) - normal * 0.8).abs() < 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn slower_writing_delays_partial_work_payment_until_pages_are_written() {
+        use crate::interact::{Action, ObjectKind};
+        let mut app = App::new();
+        app.init_resource::<GameClock>().init_resource::<Notifications>()
+            .insert_resource(SimDelta(180.0))
+            .insert_resource(Household { name: "Authors".into(), funds: 0, lot_index: 0, last_bill_day: 0, bills: vec![] })
+            .add_systems(Update, write_pages);
+        let computer = app.world_mut().spawn(GameObject {
+            kind: ObjectKind::Computer, name: "Computer".into(), objd: (0, 0, 0), price: 0,
+            center: Vec2::ZERO, half: Vec2::ONE, height: 1.0, route: None,
+        }).id();
+        let def = interactions_for(ObjectKind::Computer).iter().position(|d| d.special == Special::WriteNovel).unwrap();
+        let mut action = Action::new("Write Novel", ActionKind::Object { target: computer, def }, false);
+        action.phase = Phase::Running(0.0);
+        let mut queue = ActionQueue::default();
+        queue.0.push_back(action);
+        let mut sim = crate::sim::random_sim(&mut rand::rng(), "Author", Some(true), Age::Adult);
+        sim.traits = vec![Trait::Perfectionist];
+        let writer = app.world_mut().spawn((sim, HouseholdMember, queue, Skills::default(), Author {
+            draft: Some(Draft { genre: "Fiction".into(), title: "A Careful Novel".into(), pages: 0.0, length: 100.0, sent: 0 }), books: vec![],
+        })).id();
+        app.update();
+        let draft = app.world().get::<Author>(writer).unwrap().draft.as_ref().unwrap();
+        assert!((draft.pages - 17.28).abs() < 0.001);
+        assert_eq!(draft.sent, 0);
+        assert_eq!(app.world().resource::<Household>().funds, 0);
+        app.world_mut().resource_mut::<SimDelta>().0 = 30.0;
+        app.update();
+        let draft = app.world().get::<Author>(writer).unwrap().draft.as_ref().unwrap();
+        assert!((draft.pages - 20.16).abs() < 0.001);
+        assert_eq!(draft.sent, 1);
+        assert_eq!(app.world().resource::<Household>().funds, 10);
+        app.world_mut().resource_mut::<SimDelta>().0 = 0.0;
+        app.update();
+        assert_eq!(app.world().resource::<Household>().funds, 10, "partial work must not pay twice");
+    }
+}
+
 /// A Writing tuning value.
 fn tune(data: Option<&s3bake::GameDataBaked>, key: &str, default: f32) -> f32 {
     data.and_then(|d| d.writing.get(key).copied()).unwrap_or(default)
@@ -155,9 +213,11 @@ pub fn unlocked(g: &Genre, sim: &Sim, skills: &Skills, author: Option<&Author>, 
 /// Pages a minute: the base rate, more for bookworms and with skill.
 fn pages_per_minute(sim: &Sim, skills: &Skills, data: Option<&s3bake::GameDataBaked>) -> f32 {
     let level = skills.level("Writing") as f32;
-    tune(data, "kRateBasePPM", 0.12)
+    let rate = tune(data, "kRateBasePPM", 0.12)
         + if sim.traits.contains(&Trait::Bookworm) { tune(data, "kRateBookWormBonusPPM", 0.03) } else { 0.0 }
-        + tune(data, "kRateMaxWritingSkillPPM", 0.25) * level / 10.0
+        + tune(data, "kRateMaxWritingSkillPPM", 0.25) * level / 10.0;
+    // TraitTuning.kPerfectionistTraitWritingPagesSlowerPerMinuteMultiplier.
+    rate * if sim.traits.contains(&Trait::Perfectionist) { 0.8 } else { 1.0 }
 }
 
 fn start_draft(g: &Genre, author: &Author, data: Option<&s3bake::GameDataBaked>, rng: &mut impl Rng) -> Draft {
