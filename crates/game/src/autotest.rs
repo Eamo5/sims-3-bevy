@@ -1861,11 +1861,12 @@ fn ask_question(
         })
     {
         action.recipe_choice = Some(r);
+        action.label = format!("Cook: {}", ui.data.recipes[r].name);
         let kind = action.kind.clone();
         if let Ok(next) = std::env::var("RECIPE_NEXT")
             && let Some(recipe) = ui.data.recipes.iter().position(|r| r.key == next)
         {
-            let mut next = crate::interact::Action::new("Cook Dinner", kind, false);
+            let mut next = crate::interact::Action::new(format!("Cook: {}", ui.data.recipes[recipe].name), kind, false);
             next.recipe_choice = Some(recipe);
             queue.push_player(next);
         }

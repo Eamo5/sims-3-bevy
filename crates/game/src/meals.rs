@@ -132,14 +132,16 @@ fn cook_prep(
 ) {
     for (e, tf, mut queue) in &mut sims {
         let Some(front) = queue.0.front_mut() else { continue };
-        if front.label != "Cook Dinner" || !matches!(front.phase, crate::interact::Phase::Start | crate::interact::Phase::Routing) || front.cancel {
+        if !matches!(front.phase, crate::interact::Phase::Start | crate::interact::Phase::Routing) || front.cancel {
+            continue;
+        }
+        let ActionKind::Object { target: stove, def } = front.kind else { continue };
+        let Ok((_, obj, stf, _)) = objects.get(stove) else { continue };
+        if obj.kind != ObjectKind::Stove || crate::interact::interactions_for(obj.kind).get(def).is_none_or(|d| d.special != Special::ServeMeal) {
             continue;
         }
         // (Not on its way to the stove yet: there's the fridge and a counter first.)
         front.phase = crate::interact::Phase::Start;
-        let front = queue.0.front().unwrap();
-        let ActionKind::Object { target: stove, .. } = front.kind else { continue };
-        let Ok((_, _, stf, _)) = objects.get(stove) else { continue };
         commands.entity(e).insert(CookPrepped);
         let near = |want: &dyn Fn(&GameObject) -> bool| {
             objects
@@ -162,9 +164,13 @@ fn cook_prep(
 }
 
 /// Once the cooking's done (or given up), the next meal is prepared afresh.
-fn cook_prep_done(mut commands: Commands, sims: Query<(Entity, &ActionQueue), With<CookPrepped>>) {
+fn cook_prep_done(mut commands: Commands, sims: Query<(Entity, &ActionQueue), With<CookPrepped>>, objects: Query<&GameObject>) {
     for (e, queue) in &sims {
-        if !queue.current().is_some_and(|a| matches!(a.label.as_str(), "Get Ingredients" | "Prepare Food" | "Cook Dinner")) {
+        if !queue.current().is_some_and(|a| {
+            let ActionKind::Object { target, def } = a.kind else { return false };
+            !a.cancel && objects.get(target).ok().and_then(|o| crate::interact::interactions_for(o.kind).get(def))
+                .is_some_and(|d| matches!(d.special, Special::GetIngredients | Special::PrepFood | Special::ServeMeal))
+        }) {
             commands.entity(e).remove::<CookPrepped>();
         }
     }
@@ -1065,6 +1071,28 @@ mod tests {
         assert!(!half_eaten(&queue));
         queue.0.clear();
         assert!(!half_eaten(&queue));
+    }
+
+    #[test]
+    fn named_recipe_keeps_preparation_until_cancelled_or_target_disappears() {
+        let mut app = App::new();
+        app.add_systems(Update, cook_prep_done);
+        let stove = app.world_mut().spawn(GameObject { kind: ObjectKind::Stove, name: "Stove".into(), objd: (0, 0, 0), price: 0,
+            center: Vec2::ZERO, half: Vec2::ONE, height: 1.0, route: None }).id();
+        let def = crate::interact::interactions_for(ObjectKind::Stove).iter().position(|d| d.special == Special::ServeMeal).unwrap();
+        let mut queue = ActionQueue::default();
+        queue.push_player(Action::new("Cook: Pancakes", ActionKind::Object { target: stove, def }, false));
+        let sim = app.world_mut().spawn((CookPrepped, queue)).id();
+        app.update();
+        assert!(app.world().get::<CookPrepped>(sim).is_some(), "a named recipe must not repeatedly restart ingredient preparation");
+        app.world_mut().get_mut::<ActionQueue>(sim).unwrap().0[0].cancel = true;
+        app.update();
+        assert!(app.world().get::<CookPrepped>(sim).is_none());
+        app.world_mut().get_mut::<ActionQueue>(sim).unwrap().0[0].cancel = false;
+        app.world_mut().entity_mut(sim).insert(CookPrepped);
+        app.world_mut().despawn(stove);
+        app.update();
+        assert!(app.world().get::<CookPrepped>(sim).is_none());
     }
 
     #[test]
