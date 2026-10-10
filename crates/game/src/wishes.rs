@@ -216,7 +216,7 @@ mod mood_happiness_tests {
 }
 
 /// The lifetime rewards offered: the game's reward traits whose effects are carried out here.
-pub const REWARDS: [&str; 29] = [
+pub const REWARDS: [&str; 31] = [
     "SteelBladder",
     "PermaClean",
     "HardlyHungry",
@@ -246,6 +246,8 @@ pub const REWARDS: [&str; 29] = [
     "Teleporter",
     "CollectionHelper",
     "NoBillsEver",
+    "ImmuneToCold",
+    "ImmuneToHeat",
 ];
 
 /// The rewards that are objects: the reward, and the catalogue object it is (given to the Sim
@@ -299,7 +301,7 @@ pub fn book_price(w: Option<&Wishes>, price: i32) -> i64 {
 
 /// Asks the player which lifetime reward to buy (those offered and not yet bought).
 pub fn ask_reward(questions: &mut crate::dialog::Questions, data: &s3bake::GameDataBaked, e: Entity, sim: &Sim, w: &Wishes) {
-    let rewards: Vec<String> = REWARDS.iter().filter(|r| !w.has_reward(r)).map(|r| r.to_string()).collect();
+    let rewards: Vec<String> = REWARDS.iter().filter(|r| !w.has_reward(r) && reward_age_allowed(r, sim.age)).map(|r| r.to_string()).collect();
     let mut answers: Vec<crate::dialog::Answer> = rewards
         .iter()
         .map(|r| {
@@ -326,6 +328,10 @@ pub fn ask_reward(questions: &mut crate::dialog::Questions, data: &s3bake::GameD
     });
 }
 
+fn reward_age_allowed(reward: &str, age: crate::sim::Age) -> bool {
+    !matches!(reward, "ImmuneToCold" | "ImmuneToHeat") || !age.is_little()
+}
+
 /// A lifetime reward chosen: bought, if there's lifetime happiness enough.
 fn buy_rewards(
     mut commands: Commands,
@@ -339,6 +345,7 @@ fn buy_rewards(
     for a in answers.read() {
         let crate::dialog::Question::Reward { sim: e, rewards } = &a.about else { continue };
         let (Ok((sim, mut w)), Some(r)) = (sims.get_mut(*e), rewards.get(a.answer)) else { continue };
+        if !reward_age_allowed(r, sim.age) { continue; }
         let Some(t) = ui.data.traits.iter().find(|t| t.hex == *r) else { continue };
         if w.points < t.points {
             notes.push(format!("{} needs {} more lifetime happiness for {}.", sim.first, crate::lifetime::group((t.points - w.points) as i64), t.name));
@@ -640,6 +647,11 @@ mod tests {
         for r in REWARDS {
             let t = data.traits.iter().find(|t| t.hex == r);
             assert!(t.is_some_and(|t| t.points > 0 && !t.name.is_empty()), "{r}: {:?}", t.map(|t| (&t.name, t.points)));
+            if matches!(r, "ImmuneToCold" | "ImmuneToHeat") {
+                assert_eq!(t.unwrap().points, 10_000);
+                for age in [Age::Baby, Age::Toddler] { assert!(!reward_age_allowed(r, age)); }
+                for age in [Age::Child, Age::Teen, Age::YoungAdult, Age::Adult, Age::Elder] { assert!(reward_age_allowed(r, age)); }
+            }
         }
         // (Those not yet offered, with `--nocapture`.)
         for t in data.traits.iter().filter(|t| t.points > 0 && !REWARDS.contains(&t.hex.as_str())) {

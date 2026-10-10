@@ -311,7 +311,7 @@ pub(crate) fn sim_temperatures(
     w: Res<Weather>,
     building: Option<Res<crate::building::ActiveBuilding>>,
     mut sims: Query<
-        (Entity, &Transform, &mut crate::life::Moodlets, Option<&mut BodyTemperature>, Has<crate::swim::Swimming>, Option<&crate::simbody::Wearing>),
+        (Entity, &Transform, &mut crate::life::Moodlets, Option<&mut BodyTemperature>, Has<crate::swim::Swimming>, Option<&crate::simbody::Wearing>, Option<&crate::wishes::Wishes>),
         (With<crate::sim::Sim>, Without<crate::interact::OffLot>, Without<crate::rabbitholes::AtRabbitHole>, Without<crate::careers::AtWork>),
     >,
 ) {
@@ -322,7 +322,7 @@ pub(crate) fn sim_temperatures(
     use crate::life::MoodletKind as M;
     let world = ((w.temperature - NEUTRAL_TEMP) * SIM_DEGREES).clamp(-100.0, 100.0);
     let raining = w.raining() && w.falling(clock.minutes) > 0.1;
-    for (e, tf, mut moodlets, t, swimming, wearing) in &mut sims {
+    for (e, tf, mut moodlets, t, swimming, wearing, wishes) in &mut sims {
         let Some(mut t) = t else {
             commands.entity(e).insert(BodyTemperature::default());
             continue;
@@ -330,12 +330,19 @@ pub(crate) fn sim_temperatures(
         let outdoors = !sheltered(building.as_deref(), tf.translation);
         let outfit = wearing.map_or(crate::simbody::OutfitKind::Everyday, |w| w.0);
         t.value = temperature_step(t.value, world, outdoors, outfit, dh);
+        let cold_immune = crate::wishes::has(wishes, "ImmuneToCold");
+        let heat_immune = crate::wishes::has(wishes, "ImmuneToHeat");
+        if cold_immune {
+            t.value = t.value.max(-60.0);
+            moodlets.remove(M::Frostbitten);
+        }
+        if heat_immune { t.value = t.value.min(60.0); }
         let v = t.value;
-        moodlets.set_while(M::TeethChattering, v <= -71.0);
-        moodlets.set_while(M::GettingChilly, v > -71.0 && v <= -31.0);
-        moodlets.set_while(M::GettingWarm, (30.0..71.0).contains(&v));
-        moodlets.set_while(M::SweatingProfusely, v >= 71.0);
-        if v <= FROSTBITE && !moodlets.has(M::Frostbitten) {
+        moodlets.set_while(M::TeethChattering, !cold_immune && v <= -71.0);
+        moodlets.set_while(M::GettingChilly, !cold_immune && v > -71.0 && v <= -31.0);
+        moodlets.set_while(M::GettingWarm, !heat_immune && (30.0..71.0).contains(&v));
+        moodlets.set_while(M::SweatingProfusely, !heat_immune && v >= 71.0);
+        if !cold_immune && v <= FROSTBITE && !moodlets.has(M::Frostbitten) {
             moodlets.add(M::Frostbitten, clock.minutes);
         }
         // (Swimmers are wet anyway.)
@@ -637,6 +644,42 @@ mod tests {
             assert!(exposed.has(M::Frostbitten));
             assert!(!exposed.has(M::GettingChilly));
         }
+    }
+
+    #[test]
+    fn temperature_rewards_cap_exposure_and_suppress_only_their_own_moodlets() {
+        use crate::life::{MoodletKind as M, Moodlets};
+        let mut app = App::new();
+        app.init_resource::<GameClock>()
+            .insert_resource(crate::clock::SimDelta(60.0))
+            .insert_resource(Weather { temperature: 0.0, ..default() })
+            .add_systems(Update, sim_temperatures);
+        let mut rng = rand::rng();
+        let mut spawn = |reward: &str| {
+            let mut moodlets = Moodlets::default();
+            moodlets.add(M::Frostbitten, 480.0);
+            app.world_mut().spawn((
+                crate::sim::random_sim(&mut rng, "Immune", Some(true), crate::sim::Age::Adult),
+                Transform::default(), moodlets,
+                BodyTemperature { value: -95.0, in_rain: 0.0 },
+                crate::wishes::Wishes::restored(0, vec![reward.into()], 480.0),
+            )).id()
+        };
+        let cold = spawn("ImmuneToCold");
+        let heat = spawn("ImmuneToHeat");
+        app.update();
+        assert_eq!(app.world().get::<BodyTemperature>(cold).unwrap().value, -60.0);
+        for kind in [M::Frostbitten, M::TeethChattering, M::GettingChilly] {
+            assert!(!app.world().get::<Moodlets>(cold).unwrap().has(kind));
+        }
+        assert!(app.world().get::<Moodlets>(heat).unwrap().has(M::Frostbitten), "heat immunity does not protect against cold");
+        app.world_mut().resource_mut::<Weather>().temperature = 100.0;
+        for e in [cold, heat] { app.world_mut().get_mut::<BodyTemperature>(e).unwrap().value = 95.0; }
+        app.update();
+        assert_eq!(app.world().get::<BodyTemperature>(heat).unwrap().value, 60.0);
+        assert!(!app.world().get::<Moodlets>(heat).unwrap().has(M::GettingWarm));
+        assert!(!app.world().get::<Moodlets>(heat).unwrap().has(M::SweatingProfusely));
+        assert!(app.world().get::<Moodlets>(cold).unwrap().has(M::SweatingProfusely), "cold immunity does not protect against heat");
     }
 
     fn tuning() -> s3bake::gamedata::SeasonsTuning {
