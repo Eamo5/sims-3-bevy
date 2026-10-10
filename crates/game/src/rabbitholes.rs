@@ -399,15 +399,40 @@ impl Default for SchoolGrades {
 }
 
 impl SchoolGrades {
+    /// Saves store a normalized 0–100 score; the original school performance bar
+    /// and tuning use -100–100, just like career performance.
+    pub fn performance(self) -> f32 {
+        (self.0 - 50.0) * 2.0
+    }
+
     pub fn letter(self) -> &'static str {
-        match self.0 {
-            g if g >= 90.0 => "A+",
-            g if g >= 75.0 => "A",
-            g if g >= 60.0 => "B",
-            g if g >= 45.0 => "C",
-            g if g >= 30.0 => "D",
+        // SchoolElementary and SchoolHigh share these GradeThreshold values.
+        match self.performance() {
+            g if g >= 90.0 => "A",
+            g if g >= 30.0 => "B",
+            g if g >= -30.0 => "C",
+            g if g >= -90.0 => "D",
             _ => "F",
         }
+    }
+}
+
+#[cfg(test)]
+mod school_grade_tests {
+    use super::SchoolGrades;
+
+    #[test]
+    fn original_school_thresholds_match_the_displayed_performance() {
+        for (score, performance, letter) in [
+            (100.0, 100.0, "A"), (95.0, 90.0, "A"), (94.5, 89.0, "B"),
+            (65.0, 30.0, "B"), (64.5, 29.0, "C"), (35.0, -30.0, "C"),
+            (34.5, -31.0, "D"), (5.0, -90.0, "D"), (4.5, -91.0, "F"), (0.0, -100.0, "F"),
+        ] {
+            let grade = SchoolGrades(score);
+            assert_eq!(grade.performance(), performance);
+            assert_eq!(grade.letter(), letter, "performance {performance}");
+        }
+        assert_eq!(SchoolGrades::default().letter(), "C");
     }
 }
 

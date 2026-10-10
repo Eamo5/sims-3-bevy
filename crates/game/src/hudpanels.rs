@@ -364,7 +364,7 @@ fn career_panel(
         None => {
             let g = grades.copied().unwrap_or_default();
             let name = if sim.age == Age::Child { "Elementary School" } else { "High School" };
-            (name.to_string(), String::new(), 8.0, 15.0, 0b0001_1111, (g.0 - 50.0) * 2.0)
+            (name.to_string(), String::new(), 8.0, 15.0, 0b0001_1111, g.performance())
         }
     };
     set_text(&mut texts, s.text(CAREER_TITLE), &title);
