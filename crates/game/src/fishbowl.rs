@@ -77,44 +77,78 @@ fn swim(time: Res<Time>, mut q: Query<&mut Transform, With<BowlSwimmer>>) {
     }
 }
 
+/// Reserve the exact fish before any model or bowl state is created.
+fn take_fish(inv: &mut Inventory, key: &str, quality: u8) -> Option<Stack> {
+    let i = inv.0.iter().position(|s| s.kind == ItemKind::Fish && s.key == key && s.quality == quality && s.count > 0)?;
+    let mut fish = inv.0[i].clone();
+    fish.worth = inv.take_one(i)?;
+    fish.count = 1;
+    Some(fish)
+}
+
+#[cfg(test)]
+mod transfer_tests {
+    use super::*;
+
+    #[test]
+    fn fish_reservation_is_immediate_exact_and_preserves_total_value() {
+        let mut inv = Inventory(vec![Stack { kind: ItemKind::Fish, key: "Goldfish".into(), name: "Perfect Goldfish".into(), quality: 9, count: 2, worth: 101 }]);
+        assert!(take_fish(&mut inv, "Goldfish", 8).is_none());
+        assert!(take_fish(&mut inv, "Minnow", 9).is_none());
+        assert_eq!(inv.0[0].count, 2);
+        let first = take_fish(&mut inv, "Goldfish", 9).unwrap();
+        assert_eq!(first.count, 1);
+        assert_eq!(inv.0[0].count, 1);
+        assert_eq!(first.worth + inv.0[0].worth, 101);
+        let second = take_fish(&mut inv, "Goldfish", 9).unwrap();
+        assert!(inv.0.is_empty());
+        assert_eq!(first.worth + second.worth, 101);
+        assert!(take_fish(&mut inv, "Goldfish", 9).is_none(), "another request cannot reuse a reserved fish");
+    }
+
+    #[test]
+    fn empty_or_nonfish_stacks_cannot_create_a_bowl_fish() {
+        for (kind, count) in [(ItemKind::Fish, 0), (ItemKind::Produce, 1)] {
+            let mut inv = Inventory(vec![Stack { kind, key: "Goldfish".into(), name: "Invalid".into(), quality: 9, count, worth: 20 }]);
+            assert!(take_fish(&mut inv, "Goldfish", 9).is_none());
+            assert_eq!(inv.0[0].count, count);
+            assert_eq!(inv.0[0].worth, 20);
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn bowl_requests(
     mut commands: Commands,
-    sims: Query<(Entity, &Sim, &BowlRequest, Option<&FishPlan>, Option<&Inventory>)>,
+    mut sims: Query<(Entity, &Sim, &BowlRequest, Option<&FishPlan>, Option<&mut Inventory>)>,
     mut bowls: Query<(&GameObject, Option<&mut BowlFish>)>,
     (data, ui, mut assets): (Option<Res<crate::baked::Baked>>, Option<Res<crate::icons::GameUi>>, ResMut<crate::objects::ObjectAssets>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut notes: ResMut<Notifications>,
 ) {
     let (Some(data), Some(ui)) = (data, ui) else { return };
-    for (e, sim, req, plan, inv) in &sims {
+    let mut transferred = std::collections::HashSet::new();
+    for (e, sim, req, plan, inv) in &mut sims {
         commands.entity(e).remove::<(BowlRequest, FishPlan)>();
+        let bowl = match *req { BowlRequest::Place(bowl) | BowlRequest::Take(bowl) => bowl };
+        if transferred.contains(&bowl) { continue; }
         match *req {
             BowlRequest::Place(bowl) => {
-                let (Ok((obj, held)), Some(FishPlan(key, quality)), Some(inv)) = (bowls.get_mut(bowl), plan, inv) else { continue };
-                if held.is_some() {
+                let (Ok((obj, held)), Some(FishPlan(key, quality)), Some(mut inv)) = (bowls.get_mut(bowl), plan, inv) else { continue };
+                if obj.kind != ObjectKind::FishBowl || held.is_some() {
                     continue;
                 }
-                let Some(i) = inv.0.iter().position(|s| s.kind == ItemKind::Fish && s.key == *key && s.quality == *quality) else { continue };
-                let mut fish = inv.0[i].clone();
-                fish.worth = fish.each();
-                fish.count = 1;
-                // (One out of their inventory.)
-                let (k, q) = (key.clone(), *quality);
-                commands.entity(e).queue_silenced(move |mut w: EntityWorldMut| {
-                    if let Some(mut inv) = w.get_mut::<Inventory>()
-                        && let Some(i) = inv.0.iter().position(|s| s.kind == ItemKind::Fish && s.key == k && s.quality == q)
-                    {
-                        inv.take_one(i);
-                    }
-                });
+                let Some(fish) = take_fish(&mut inv, key, *quality) else { continue };
+                transferred.insert(bowl);
                 let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
                 let model = spawn_fish(&mut commands, bowl, obj, &fish, &data, &ui, &mut assets, &mut ctx);
                 notes.push(format!("{} put {} {} in the fish bowl.", sim.first, if fish.name.starts_with(['A', 'E', 'I', 'O', 'U']) { "an" } else { "a" }, fish.name));
                 commands.entity(bowl).insert(BowlFish { fish, model });
             }
             BowlRequest::Take(bowl) => {
-                let Ok((_, Some(held))) = bowls.get(bowl) else { continue };
+                let Ok((obj, Some(held))) = bowls.get(bowl) else { continue };
+                if obj.kind != ObjectKind::FishBowl { continue; }
+                transferred.insert(bowl);
                 let fish = held.fish.clone();
                 if let Some(m) = held.model {
                     commands.entity(m).try_despawn();
