@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackWriter, read_value, write_value};
 
-pub const UI_VERSION: u32 = 20;
+pub const UI_VERSION: u32 = 21;
 pub const T_LAYOUT: u32 = 0x025C95B6;
 pub const T_FONT: u32 = 0x062E9EE0;
 pub const T_IMAGE: u32 = 0x2F7D0004;
@@ -406,10 +406,33 @@ pub fn bake_ui(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::path::Pat
     }
     progress("Converting: the wardrobe's pictures…");
     n += bake_cas_thumbs(&g, pkgs, install_root, &mut pack)?;
+    progress("Converting: Create a Sim's room…");
+    bake_cas_room(root, pkgs)?;
     pack.finish().map_err(|e| e.to_string())?;
     write_value(&g.join("ui.bin"), &out).map_err(|e| e.to_string())?;
     write_value(&g.join("ui.version"), &UI_VERSION).map_err(|e| e.to_string())?;
     Ok(n)
+}
+
+/// Create a Sim's room (`CreateObjectOutOfWorld("CASRoom")`: the dressing room the Sims are made
+/// in, its model's `CASRoom` geometry state, not the robots' or the pets'), as `casroom.bin` in
+/// the global cache, its textures in the texture store.
+pub const CAS_ROOM_MODEL: (u32, u32, u64) = (0x0166_1233, 1, 0x0000_0000_00B9_A8A1);
+
+fn bake_cas_room(root: &BakeRoot, pkgs: &PackageSet) -> Result<(), String> {
+    let (t, g, i) = CAS_ROOM_MODEL;
+    let model = crate::bake::bake_model_state(pkgs, &s3pkg::ResourceKey::new(t, g, i), Some(s3pkg::fnv32("CASRoom")));
+    for p in &model.parts {
+        if let Some(tex) = p.texture {
+            let path = root.tex_path(tex);
+            if !path.exists()
+                && let Some(dds) = crate::bake::bake_texture(pkgs, tex, 1024, false)
+            {
+                std::fs::write(&path, dds).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    write_value(&root.global_dir().join("casroom.bin"), &model).map_err(|e| e.to_string())
 }
 
 /// The name a picture of a CAS part's colourway is kept under (its preset's place in the part's

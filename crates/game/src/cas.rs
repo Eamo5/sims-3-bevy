@@ -305,6 +305,7 @@ fn setup_cas(
     selected_world: Option<Res<crate::data::SelectedWorld>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    (mut images, mut objects): (ResMut<Assets<Image>>, ResMut<crate::objects::ObjectAssets>),
 ) {
     if pending.is_none() {
         commands.insert_resource(PendingHousehold::random());
@@ -328,7 +329,7 @@ fn setup_cas(
         s3bake::load_premades(&root, &stem).filter(|p| p.playable().next().is_some()).map(Arc::new)
     });
     commands.insert_resource(CasScene {
-        baked,
+        baked: baked.clone(),
         cas,
         selected: 0,
         tab: CasTab::Basics,
@@ -361,6 +362,17 @@ fn setup_cas(
         Transform::from_xyz(2.0, 4.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
         DespawnOnExit(AppState::CreateHousehold),
     ));
+    // The game's own room (its dressing room, as the interface's bake keeps it), the Sim where
+    // the game stands them; else a pedestal on a plain floor.
+    let room: Option<s3bake::types::BakedModel> = s3bake::read_value(&s3bake::default_root().global_dir().join("casroom.bin")).ok().filter(|m: &s3bake::types::BakedModel| !m.parts.is_empty());
+    if let Some(room) = room {
+        let (t, g, i) = s3bake::ui::CAS_ROOM_MODEL;
+        let mut ctx = crate::objects::AssetCtx { baked: &baked, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+        let parts = objects.ingest_model(&mut ctx, (t, g, i), crate::objects::cpu_model(room));
+        let e = crate::objects::spawn_parts(&mut commands, &parts, Transform::IDENTITY);
+        commands.entity(e).insert(DespawnOnExit(AppState::CreateHousehold));
+        return;
+    }
     commands.spawn((
         Mesh3d(meshes.add(Cylinder::new(0.75, 0.08))),
         MeshMaterial3d(mats.add(StandardMaterial { base_color: Color::srgb(0.85, 0.88, 0.92), perceptual_roughness: 0.4, ..default() })),

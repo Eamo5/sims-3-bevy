@@ -44,6 +44,41 @@ fn main() {
         }
         return;
     }
+    if args[1] == "modelstates" {
+        // modelstates <root> <MODL type:group:instance> [state names...]: each mesh's geometry
+        // states (by FNV-32; named where one of the names given hashes to it).
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let p: Vec<&str> = args[3].split(':').collect();
+        let k = s3pkg::ResourceKey::new(parse_hex(p[0]) as u32, parse_hex(p[1]) as u32, parse_hex(p[2]));
+        let names: Vec<(u32, &String)> = args[4..].iter().map(|n| (s3pkg::fnv32(n), n)).collect();
+        for m in s3formats::model::load_model(&set, &k).unwrap_or_default() {
+            let st: Vec<String> = m.states.iter().map(|(h, ix)| format!("{}/{}", names.iter().find(|n| n.0 == *h).map_or(format!("{h:08X}"), |n| n.1.clone()), ix.len() / 3)).collect();
+            println!("mesh {:08X} tris {} states {:?}", m.name_hash, m.indices.len() / 3, st);
+        }
+        return;
+    }
+    if args[1] == "objbyname" {
+        // objbyname <root> <name>...: the OBJD made by that name (as `CreateObjectOutOfWorld`),
+        // and its models' meshes.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        for name in &args[3..] {
+            for n in [name.clone(), name.to_ascii_lowercase()] {
+                let i = s3pkg::fnv64(&n);
+                let keys: Vec<_> = set.keys_of_type(types::OBJD).filter(|k| k.i == i).copied().collect();
+                println!("{n}: fnv64 {i:016X}: {} OBJD", keys.len());
+                for k in keys {
+                    for mk in s3formats::object::object_models(&set, &k) {
+                        let meshes = s3formats::model::load_model(&set, &mk).unwrap_or_default();
+                        println!("  {k} model {mk}: {} meshes", meshes.len());
+                        for m in &meshes {
+                            println!("    mesh {:08X} shader {:08X} verts {} bounds {:?}..{:?} diffuse {:?}", m.name_hash, m.material.shader, m.positions.len(), m.bounds_min, m.bounds_max, m.material.texture(s3formats::model::P_DIFFUSE_MAP));
+                        }
+                    }
+                }
+            }
+        }
+        return;
+    }
     if args[1] == "presetids" {
         // presetids <root> <instance hex>...: a CAS part's presets' ids.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
