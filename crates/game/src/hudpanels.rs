@@ -53,6 +53,40 @@ fn age_icon(age: Age) -> &'static str {
     }
 }
 
+fn age_tooltip(age: Age, span: f32, lived: f32, settings: &crate::options::Settings) -> String {
+    if !settings.aging {
+        return "Aging is disabled.".into();
+    }
+    match crate::aging::next_age(age) {
+        Some(next) if span.is_finite() => {
+            let left = ((span - lived).max(0.0) * settings.lifespan.factor()).ceil() as u32;
+            format!("{left} day{} until {}", if left == 1 { "" } else { "s" }, age_name(next))
+        }
+        _ => "Elder — the age bar does not predict the end of a Sim's life.".into(),
+    }
+}
+
+#[cfg(test)]
+mod age_tooltip_tests {
+    use super::*;
+    use crate::options::{Lifespan, Settings};
+
+    #[test]
+    fn countdown_uses_sim_days_and_respects_disabled_aging() {
+        let mut settings = Settings::default();
+        for (preset, days) in [(Lifespan::Short, 4), (Lifespan::Medium, 8), (Lifespan::Normal, 14), (Lifespan::Long, 30), (Lifespan::Epic, 150)] {
+            settings.lifespan = preset;
+            assert!(age_tooltip(Age::Teen, 14.0, 0.0, &settings).starts_with(&format!("{days} days until ")));
+        }
+        settings.lifespan = Lifespan::Normal;
+        assert!(age_tooltip(Age::Teen, 14.0, 13.0, &settings).starts_with("1 day until "));
+        assert!(age_tooltip(Age::Teen, 14.0, 15.0, &settings).starts_with("0 days until "));
+        assert!(!age_tooltip(Age::Elder, 17.0, 30.0, &settings).contains("until"));
+        settings.aging = false;
+        assert_eq!(age_tooltip(Age::Teen, 14.0, 13.0, &settings), "Aging is disabled.");
+    }
+}
+
 fn age_name(age: Age) -> &'static str {
     match age {
         Age::Baby => "Baby",
@@ -117,6 +151,7 @@ fn simology_panel(
     mut relations: ResMut<crate::relations::RelationsPanel>,
     mut state: Local<(Option<Entity>, Option<Entity>, String)>,
     panel: Res<InfoPanel>,
+    settings: Res<crate::options::Settings>,
 ) {
     let s: &Spawned = &hud.simology;
     let (Some(mut ui), Ok((e, sim, aging))) = (ui, sel.single()) else { return };
@@ -154,7 +189,7 @@ fn simology_panel(
     let next = crate::aging::next_age(sim.age);
     set_visible(&mut vis, s.id(AGE_NEXT), next.is_some());
     // What changes rarely is redrawn on change.
-    let key = format!("{e:?} {:?} {:?} {:?} {} {}", sim.age, sim.traits, (&sim.favorites.food, &sim.favorites.music, &sim.favorites.color), (lived * 4.0) as i32, game_ui.is_some());
+    let key = format!("{e:?} {:?} {:?} {:?} {} {} {:?} {}", sim.age, sim.traits, (&sim.favorites.food, &sim.favorites.music, &sim.favorites.color), lived.to_bits(), game_ui.is_some(), settings.lifespan, settings.aging);
     if state.2 == key && state.0.is_some_and(|h| vis.contains(h)) {
         return;
     }
@@ -168,12 +203,7 @@ fn simology_panel(
         tip(&mut commands, win, age_name(age).to_string());
     }
     if let Some(bar) = s.id(AGE_BAR) {
-        let left = (span - lived).max(0.0).ceil() as i32;
-        let t = match next {
-            Some(n) if span.is_finite() => format!("{left} day{} until {}", if left == 1 { "" } else { "s" }, age_name(n)),
-            _ => format!("{} has many years ahead.", sim.first),
-        };
-        tip(&mut commands, bar, t);
+        tip(&mut commands, bar, age_tooltip(sim.age, span, lived, &settings));
     }
     // The traits, a line each: the trait's small icon and its name, its meaning on hover.
     let Some(gu) = game_ui.as_deref_mut() else { return };
