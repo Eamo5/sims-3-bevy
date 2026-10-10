@@ -2390,6 +2390,7 @@ fn auto_place(
     mut assets: ResMut<crate::objects::ObjectAssets>,
     (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut commands: Commands,
+    building: Option<Res<crate::building::ActiveBuilding>>,
 ) {
     let Some(want) = &args.place else { return };
     if *done {
@@ -2405,8 +2406,11 @@ fn auto_place(
         };
         let pos = tf.translation + tf.rotation * Vec3::new(i as f32 * 2.0, 0.0, 2.0);
         let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
-        crate::home::spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, e.key, pos, 0.0);
-        info!("placed {} for the test", e.name);
+        if let Some(object) = crate::home::spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, e.key, pos, 0.0) {
+            let level = building.as_ref().map_or(1, |b| b.level_at(pos.y));
+            commands.entity(object.entity).insert((crate::save::Bought, crate::nav::Floor(level), crate::building::BuildingPiece { level }));
+            info!("placed {} for the test", e.name);
+        }
     }
 }
 
