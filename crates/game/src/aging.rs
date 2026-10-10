@@ -53,6 +53,37 @@ mod lifespan_tests {
     use rand::SeedableRng;
 
     #[test]
+    fn cake_and_midnight_together_only_advance_one_life_stage() {
+        let mut app = App::new();
+        app.init_resource::<GameClock>()
+            .init_resource::<crate::options::Settings>()
+            .init_resource::<Notifications>()
+            .add_message::<LifeEvent>()
+            .add_message::<PlaySound>()
+            .add_systems(Update, (daily_aging, grow_up_now).chain());
+        let mut rng = rand::rngs::StdRng::seed_from_u64(4);
+        let sim = crate::sim::random_sim(&mut rng, "Birthday", Some(false), Age::Child);
+        let e = app.world_mut().spawn((sim, HouseholdMember, Moodlets::default(), Aging {
+            days: stage_days(Age::Child) - 1.0,
+            ..default()
+        })).id();
+        app.update(); // Initialize the daily clock before crossing midnight.
+        app.world_mut().entity_mut(e).insert(GrowUpNow);
+        app.world_mut().resource_mut::<GameClock>().minutes = 1440.0;
+        app.update();
+        assert_eq!(app.world().get::<Sim>(e).unwrap().age, Age::Teen);
+        assert_eq!(app.world().get::<Aging>(e).unwrap().days, 0.0);
+        assert!(app.world().get::<GrowUpNow>(e).is_none());
+        app.update();
+        assert_eq!(app.world().get::<Sim>(e).unwrap().age, Age::Teen);
+        // A later, independent cake still works without waiting for midnight.
+        app.world_mut().entity_mut(e).insert(GrowUpNow);
+        app.update();
+        assert_eq!(app.world().get::<Sim>(e).unwrap().age, Age::YoungAdult);
+        assert!(app.world().get::<GrowUpNow>(e).is_none());
+    }
+
+    #[test]
     fn fractional_aging_reaches_birthdays_without_an_extra_day() {
         use crate::options::Lifespan;
         for (preset, teen_days) in [(Lifespan::Short, 4), (Lifespan::Medium, 8), (Lifespan::Normal, 14), (Lifespan::Long, 30), (Lifespan::Epic, 150)] {
@@ -288,6 +319,9 @@ fn grow_up(
     rng: &mut impl rand::Rng,
 ) {
     let Some(age) = next_age(sim.age) else { return };
+    // A midnight birthday can coincide with finishing the cake interaction.
+    // Both paths fulfill the same pending age-up, rather than skipping a stage.
+    commands.entity(e).remove::<GrowUpNow>();
     sim.age = age;
     aging.days = 0.0;
     // School is over for young adults.
