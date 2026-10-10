@@ -865,7 +865,7 @@ static SOFA: [InteractionDef; 5] = [
 ];
 /// (A book from the shelf, read sitting down: never on the menu.)
 const READ_SEATED: InteractionDef =
-    InteractionDef { on_object: true, autonomous: false, skill: Some("Logic"), special: Special::ReadBook, ..def("Read Book", 60.0, [0.0, 0.0, 4.0, 0.0, 0.0, 30.0], Pose::Sit) };
+    InteractionDef { on_object: true, autonomous: false, special: Special::ReadBook, ..def("Read Book", 60.0, [0.0, 0.0, 4.0, 0.0, 0.0, 30.0], Pose::Sit) };
 static CHAIR: [InteractionDef; 6] = [
     InteractionDef { on_object: true, autonomous: false, ..def("Sit", 30.0, [0.0, 0.0, 4.0, 0.0, 0.0, 4.0], Pose::Sit) },
     InteractionDef {
@@ -995,8 +995,8 @@ static VRGOGGLES: [InteractionDef; 1] = [def("Explore Virtual Worlds", 60.0, [0.
 static STEREO: [InteractionDef; 1] = [def("Dance", 45.0, [0.0, 0.0, -6.0, 0.0, -6.0, 70.0], Pose::Dance)];
 /// (A book taken down to read in a seat; read standing there when no seat is free.)
 static BOOKSHELF: [InteractionDef; 2] = [
-    InteractionDef { skill: Some("Logic"), special: Special::GetBook, ..def("Read a Book", 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Stand) },
-    InteractionDef { autonomous: false, skill: Some("Logic"), special: Special::ReadBook, ..def("Read Book", 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Stand) },
+    InteractionDef { special: Special::GetBook, ..def("Read a Book", 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Stand) },
+    InteractionDef { autonomous: false, special: Special::ReadBook, ..def("Read Book", 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Stand) },
 ];
 static MIRROR: [InteractionDef; 2] = [
     InteractionDef { autonomous: false, skill: Some("Charisma"), ..def("Practice Speech", 40.0, [0.0, 0.0, -2.0, 6.0, 0.0, 10.0], Pose::Talk) },
