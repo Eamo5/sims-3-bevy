@@ -1930,7 +1930,7 @@ fn run_actions(
     mut life: MessageWriter<LifeEvent>,
     people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
     mut conceive: MessageWriter<crate::little::Conceive>,
-    (mut fire, upgraded, baked, paper_in_hand, prepped, serving_from, broken): (
+    (mut fire, upgraded, baked, paper_in_hand, prepped, serving_from, broken, unavailable): (
         MessageWriter<crate::fire::StartFire>,
         Query<&crate::upgrades::Upgrades>,
         Option<Res<crate::baked::Baked>>,
@@ -1938,6 +1938,7 @@ fn run_actions(
         Query<(), With<crate::meals::CookPrepped>>,
         Query<&crate::meals::ServingFrom>,
         Query<(), With<Broken>>,
+        Query<(), Or<(With<crate::buy::HeldObject>, With<crate::buyhistory::HistoryHidden>)>>,
     ),
     (mut did, journals, mut inventories): (MessageWriter<crate::journal::Did>, Query<&crate::journal::SkillJournal>, Query<&mut crate::inventory::Inventory>),
 ) {
@@ -1980,13 +1981,20 @@ fn run_actions(
         let mut stand_up_at: Option<Vec2> = None;
         let mut outro: Option<(&'static [&'static str], Option<&'static str>, f32, Entity)> = None;
 
+        if let ActionKind::Object { target, def } = action.kind {
+            let valid = !unavailable.contains(target) && objects.get(target).is_ok_and(|(obj, _, used, _)| {
+                object_action_available(me, obj.kind, def, used.0, broken.contains(target), action.phase)
+            });
+            if !valid { action.cancel = true; }
+        }
+
         let maintenance = match action.kind {
             ActionKind::Repair { target } => Some((target, None)),
             ActionKind::Upgrade { target, bit } => Some((target, Some(bit))),
             _ => None,
         };
         if let Some((target, bit)) = maintenance {
-            let valid = objects.get(target).is_ok_and(|(obj, _, used, _)| {
+            let valid = !unavailable.contains(target) && objects.get(target).is_ok_and(|(obj, _, used, _)| {
                 maintenance_available(me, obj.kind, used.0, broken.contains(target), upgraded.get(target).ok(), bit)
             });
             if !valid { action.cancel = true; }
@@ -3270,6 +3278,11 @@ fn run_actions(
 }
 
 /// Revalidate maintenance on every action tick, including object reservations.
+fn object_action_available(actor: Entity, kind: ObjectKind, def: usize, owner: Option<Entity>, broken: bool, phase: Phase) -> bool {
+    !broken && interactions_for(kind).get(def).is_some()
+        && if matches!(phase, Phase::Running(_)) { owner == Some(actor) } else { owner.is_none_or(|e| e == actor) }
+}
+
 fn maintenance_available(actor: Entity, kind: ObjectKind, owner: Option<Entity>, broken: bool, upgrades: Option<&crate::upgrades::Upgrades>, bit: Option<u8>) -> bool {
     if owner.is_some_and(|e| e != actor) { return false; }
     match bit {
@@ -3291,6 +3304,22 @@ fn maintenance_minutes(base: f32, handiness: f32, traits: &[crate::life::Trait],
 #[cfg(test)]
 mod maintenance_tests {
     use super::*;
+
+    #[test]
+    fn object_actions_revalidate_definition_condition_and_reservation_before_work() {
+        let mut world = World::new();
+        let actor = world.spawn_empty().id();
+        let other = world.spawn_empty().id();
+        let def = interactions_for(ObjectKind::Computer).iter().position(|d| d.special == Special::WriteNovel).unwrap();
+        assert!(object_action_available(actor, ObjectKind::Computer, def, None, false, Phase::Start));
+        for phase in [Phase::Start, Phase::Routing, Phase::Running(300.0)] {
+            assert!(object_action_available(actor, ObjectKind::Computer, def, Some(actor), false, phase));
+            assert!(!object_action_available(actor, ObjectKind::Computer, def, Some(other), false, phase));
+            assert!(!object_action_available(actor, ObjectKind::Computer, def, Some(actor), true, phase));
+            assert!(!object_action_available(actor, ObjectKind::Computer, usize::MAX, Some(actor), false, phase));
+        }
+        assert!(!object_action_available(actor, ObjectKind::Computer, def, None, false, Phase::Running(300.0)), "lost reservation must stop skill and motive gains as well as novel pages");
+    }
 
     #[test]
     fn maintenance_rejects_stale_work_and_other_sims_reservations() {
