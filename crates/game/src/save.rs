@@ -791,7 +791,7 @@ fn resume_saved_lot(
 
 /// Once the household is in, restores everything the save remembers.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
-fn apply_loaded_game(
+pub(crate) fn apply_loaded_game(
     mut commands: Commands,
     pending: Option<Res<PendingLoad>>,
     mut clock: ResMut<GameClock>,
@@ -814,6 +814,8 @@ fn apply_loaded_game(
     }
     let game = &p.0;
     clock.minutes = game.minutes;
+    // A restored date is not a midnight tick, even when loading within a session.
+    commands.insert_resource(crate::aging::AgingDay::default());
     if let Some(h) = household.as_mut() {
         h.funds = game.funds;
         h.last_bill_day = game.last_bill_day;

@@ -17,7 +17,9 @@ pub struct AgingPlugin;
 
 impl Plugin for AgingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (daily_aging, grow_up_now, rebuild_bodies).chain().run_if(in_state(PlayMode::Live)));
+        app.init_resource::<AgingDay>()
+            .add_systems(OnEnter(crate::AppState::Loading), reset_aging_day)
+            .add_systems(Update, (daily_aging, grow_up_now, rebuild_bodies).chain().after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -34,6 +36,13 @@ impl Default for Aging {
     fn default() -> Self {
         Self { days: 0.0, elder_span: 17.0, elder_risk: Some(-rand::rng().random::<f64>().max(f64::MIN_POSITIVE).ln()) }
     }
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct AgingDay(Option<u32>);
+
+fn reset_aging_day(mut day: ResMut<AgingDay>) {
+    day.0 = None;
 }
 
 impl Aging {
@@ -53,9 +62,39 @@ mod lifespan_tests {
     use rand::SeedableRng;
 
     #[test]
+    fn loading_a_different_date_does_not_age_the_restored_household() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.init_resource::<GameClock>()
+            .init_resource::<AgingDay>()
+            .init_resource::<crate::options::Settings>()
+            .init_resource::<Notifications>()
+            .add_message::<LifeEvent>()
+            .add_message::<PlaySound>()
+            .add_systems(Update, daily_aging);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+        let sim = crate::sim::random_sim(&mut rng, "Reload", Some(false), Age::Child);
+        let e = app.world_mut().spawn((sim, HouseholdMember, Moodlets::default(), Aging { days: 6.0, ..default() })).id();
+        app.world_mut().resource_mut::<GameClock>().minutes = 14400.0;
+        app.update();
+        for loaded_day in [3.0, 20.0] {
+            app.world_mut().run_system_once(reset_aging_day).unwrap();
+            app.world_mut().resource_mut::<GameClock>().minutes = loaded_day * 1440.0;
+            app.update();
+            assert_eq!(app.world().get::<Aging>(e).unwrap().days, 6.0);
+            assert_eq!(app.world().get::<Sim>(e).unwrap().age, Age::Child);
+        }
+        app.world_mut().resource_mut::<GameClock>().minutes += 1440.0;
+        app.update();
+        assert_eq!(app.world().get::<Sim>(e).unwrap().age, Age::Teen, "the next actual midnight still ages the Sim");
+        assert_eq!(app.world().get::<Aging>(e).unwrap().days, 0.0);
+    }
+
+    #[test]
     fn cake_and_midnight_together_only_advance_one_life_stage() {
         let mut app = App::new();
         app.init_resource::<GameClock>()
+            .init_resource::<AgingDay>()
             .init_resource::<crate::options::Settings>()
             .init_resource::<Notifications>()
             .add_message::<LifeEvent>()
@@ -230,15 +269,15 @@ fn daily_aging(
     mut commands: Commands,
     clock: Res<GameClock>,
     settings: Res<crate::options::Settings>,
-    mut last_day: Local<Option<u32>>,
+    mut last_day: ResMut<AgingDay>,
     mut sims: Query<(Entity, &mut Sim, Option<&mut Aging>, &mut Moodlets, Has<Selected>, Option<&crate::journal::SkillJournal>), (With<HouseholdMember>, Without<crate::death::Dying>)>,
     mut life: MessageWriter<LifeEvent>,
     mut play: MessageWriter<PlaySound>,
     mut notes: ResMut<Notifications>,
 ) {
     let day = clock.day();
-    let first = last_day.is_none();
-    if last_day.replace(day) == Some(day) || first {
+    let first = last_day.0.is_none();
+    if last_day.0.replace(day) == Some(day) || first {
         // Sims who just arrived start their stage at a random point, like the town's.
         if first {
             let mut rng = rand::rng();
