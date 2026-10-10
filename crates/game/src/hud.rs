@@ -1308,11 +1308,9 @@ fn pie_buttons(
             commands.entity(a).insert(crate::meals::MealPlan(r));
         }
         // The fish chosen for a bowl.
-        if let Some(n) = label.strip_prefix("Place Fish: ")
-            && let Some(s) = inventories.get(a).ok().and_then(|inv| inv.0.iter().find(|s| s.kind == crate::inventory::ItemKind::Fish && s.name == n))
-        {
-            commands.entity(a).insert(crate::fishbowl::FishPlan(s.key.clone(), s.quality));
-        }
+        let fish_choice = label.strip_prefix("Place Fish: ")
+            .and_then(|n| inventories.get(a).ok().and_then(|inv| inv.0.iter().find(|s| s.kind == crate::inventory::ItemKind::Fish && s.name == n)))
+            .map(|s| (s.key.clone(), s.quality));
         let outfit_choice = label.strip_prefix("Change Into: ").and_then(|n| crate::simbody::OutfitKind::CHOICES.into_iter().find(|k| k.label() == n));
         let canvas_choice = label.strip_prefix("Paint: ").and_then(|n| crate::paintings::CANVASES.iter().position(|c| *c == n)).map(|c| c as u8);
         // Keep the genre with its action: later queued choices must not replace
@@ -1322,6 +1320,7 @@ fn pie_buttons(
         action.novel_genre = novel_genre;
         action.outfit_choice = outfit_choice;
         action.canvas_choice = canvas_choice;
+        action.fish_choice = fish_choice;
         queue.push_player(action);
     }
 }

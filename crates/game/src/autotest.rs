@@ -1233,6 +1233,13 @@ fn give_items(
         info!("eating {} (have {})", s.name, s.count);
         queue.push_player(crate::interact::Action::new(format!("Eat {}", s.name), crate::interact::ActionKind::EatItem { key: s.key.clone(), quality: s.quality }, false));
     }
+    if std::env::var("BOWL").is_ok() && *done == 1
+        && let Some((key, quality, _)) = expected.as_ref()
+        && let Some(action) = queue.0.iter_mut().find(|a| a.label == "Place Fish" && !a.cancel)
+    {
+        action.fish_choice = Some((key.clone(), *quality));
+        *done = 2;
+    }
     if *done > 0 || time.elapsed_secs() < 6.0 {
         return;
     }
@@ -1248,7 +1255,7 @@ fn give_items(
             let word = crate::gardening::QUALITIES[q].0;
             crate::inventory::give(&mut commands, e, ItemKind::Fish, c.key.clone(), format!("{word} {}", c.name), q as u8, c.max_price as i64, n);
             if std::env::var("BOWL").is_ok() {
-                commands.entity(e).insert(crate::fishbowl::FishPlan(c.key.clone(), q as u8));
+                *expected = Some((c.key.clone(), q as u8, n));
             }
             continue;
         }

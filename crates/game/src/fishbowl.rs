@@ -27,14 +27,10 @@ pub struct BowlFish {
     model: Option<Entity>,
 }
 
-/// The fish a Sim means to put in a bowl (its key and quality in their inventory).
-#[derive(Component, Clone)]
-pub struct FishPlan(pub String, pub u8);
-
 /// A Sim at a bowl: put a fish in, or take it out.
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone)]
 pub enum BowlRequest {
-    Place(Entity),
+    Place { bowl: Entity, key: String, quality: u8 },
     Take(Entity),
 }
 
@@ -120,7 +116,7 @@ mod transfer_tests {
 #[allow(clippy::too_many_arguments)]
 fn bowl_requests(
     mut commands: Commands,
-    mut sims: Query<(Entity, &Sim, &BowlRequest, Option<&FishPlan>, Option<&mut Inventory>)>,
+    mut sims: Query<(Entity, &Sim, &BowlRequest, Option<&mut Inventory>)>,
     mut bowls: Query<(&GameObject, Option<&mut BowlFish>)>,
     (data, ui, mut assets): (Option<Res<crate::baked::Baked>>, Option<Res<crate::icons::GameUi>>, ResMut<crate::objects::ObjectAssets>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
@@ -128,13 +124,13 @@ fn bowl_requests(
 ) {
     let (Some(data), Some(ui)) = (data, ui) else { return };
     let mut transferred = std::collections::HashSet::new();
-    for (e, sim, req, plan, inv) in &mut sims {
-        commands.entity(e).remove::<(BowlRequest, FishPlan)>();
-        let bowl = match *req { BowlRequest::Place(bowl) | BowlRequest::Take(bowl) => bowl };
+    for (e, sim, req, inv) in &mut sims {
+        commands.entity(e).remove::<BowlRequest>();
+        let bowl = match req { BowlRequest::Place { bowl, .. } | BowlRequest::Take(bowl) => *bowl };
         if transferred.contains(&bowl) { continue; }
-        match *req {
-            BowlRequest::Place(bowl) => {
-                let (Ok((obj, held)), Some(FishPlan(key, quality)), Some(mut inv)) = (bowls.get_mut(bowl), plan, inv) else { continue };
+        match req {
+            BowlRequest::Place { key, quality, .. } => {
+                let (Ok((obj, held)), Some(mut inv)) = (bowls.get_mut(bowl), inv) else { continue };
                 if obj.kind != ObjectKind::FishBowl || held.is_some() {
                     continue;
                 }
@@ -145,7 +141,7 @@ fn bowl_requests(
                 notes.push(format!("{} put {} {} in the fish bowl.", sim.first, if fish.name.starts_with(['A', 'E', 'I', 'O', 'U']) { "an" } else { "a" }, fish.name));
                 commands.entity(bowl).insert(BowlFish { fish, model });
             }
-            BowlRequest::Take(bowl) => {
+            BowlRequest::Take(_) => {
                 let Ok((obj, Some(held))) = bowls.get(bowl) else { continue };
                 if obj.kind != ObjectKind::FishBowl { continue; }
                 transferred.insert(bowl);

@@ -638,7 +638,7 @@ pub enum Special {
     ToggleAlarm,
     /// Empty a full trash can.
     EmptyTrash,
-    /// Put a fish (the one planned: `FishPlan`) in a bowl, or take it out.
+    /// Put the fish selected for this action in a bowl, or take it out.
     PlaceFish,
     TakeFish,
     /// Cook a group meal and serve it on a platter.
@@ -1583,11 +1583,12 @@ pub struct Action {
     pub novel_genre: Option<usize>,
     pub outfit_choice: Option<crate::simbody::OutfitKind>,
     pub canvas_choice: Option<u8>,
+    pub fish_choice: Option<(String, u8)>,
 }
 
 impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
-        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None }
+        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, fish_choice: None }
     }
 }
 
@@ -2694,7 +2695,9 @@ pub(crate) fn run_actions(
                                             commands.entity(me).insert((crate::surroundings::Discarded, crate::surroundings::WashUp));
                                         }
                                         Special::PlaceFish => {
-                                            commands.entity(me).insert(crate::fishbowl::BowlRequest::Place(*target));
+                                            if let Some((key, quality)) = action.fish_choice.take() {
+                                                commands.entity(me).insert(crate::fishbowl::BowlRequest::Place { bowl: *target, key, quality });
+                                            }
                                         }
                                         Special::TakeFish => {
                                             commands.entity(me).insert(crate::fishbowl::BowlRequest::Take(*target));
@@ -3309,6 +3312,28 @@ fn maintenance_minutes(base: f32, handiness: f32, traits: &[crate::life::Trait],
 #[cfg(test)]
 mod maintenance_tests {
     use super::*;
+
+    #[test]
+    fn cancelled_and_rejected_fish_choices_do_not_replace_earlier_choices() {
+        let mut world = World::new();
+        let target = world.spawn_empty().id();
+        let place = |key: &str, quality| {
+            let mut action = Action::new("Place Fish", ActionKind::Object { target, def: 0 }, false);
+            action.fish_choice = Some((key.to_string(), quality));
+            action
+        };
+        let mut queue = ActionQueue::default();
+        queue.push_player(place("Minnow", 9));
+        queue.push_player(place("Goldfish", 3));
+        queue.0.pop_back();
+        for _ in 1..8 {
+            queue.push_player(Action::new("Wait", ActionKind::Object { target, def: 0 }, false));
+        }
+        queue.push_player(place("Salmon", 5));
+        assert_eq!(queue.0.len(), 8);
+        assert_eq!(queue.0.front_mut().unwrap().fish_choice.take(), Some(("Minnow".into(), 9)));
+        assert!(queue.0.iter().all(|a| a.fish_choice.is_none()));
+    }
 
     #[test]
     fn queued_canvas_sizes_are_consumed_independently() {
