@@ -150,6 +150,13 @@ impl Wishes {
             self.promised.push(w);
         }
     }
+
+    pub fn dismiss(&mut self, promised: bool, index: usize) -> bool {
+        let list = if promised { &mut self.promised } else { &mut self.offered };
+        if index >= list.len() { return false; }
+        list.remove(index);
+        true
+    }
     pub fn has_reward(&self, r: &str) -> bool {
         self.rewards.iter().any(|x| x == r)
     }
@@ -510,6 +517,27 @@ fn fulfil_wishes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dismissing_a_promise_frees_a_slot_without_awarding_or_spending_points() {
+        let wish = |name: &str| Wish { kind: WishKind::Activity(name.into()), points: 100 };
+        let mut w = Wishes {
+            promised: vec![wish("Paint"), wish("Read a Book"), wish("Play Chess"), wish("Work Out")],
+            offered: vec![wish("Dance"), wish("Watch TV")],
+            points: 900,
+            ..default()
+        };
+        w.promise(0);
+        assert_eq!(w.offered.len(), 2, "a full panel cannot accept another promise");
+        assert!(w.dismiss(true, 1));
+        w.promise(0);
+        assert_eq!(w.promised.len(), 4);
+        assert_eq!(w.promised[3].kind, WishKind::Activity("Dance".into()));
+        assert!(w.dismiss(false, 0));
+        assert!(!w.dismiss(false, 0), "stale or empty slots are harmless");
+        assert!(!w.dismiss(true, 4));
+        assert_eq!(w.points, 900);
+    }
 
     #[test]
     fn only_completed_promised_wishes_award_happiness() {

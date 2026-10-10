@@ -922,8 +922,11 @@ fn wishes(
     pictures: Query<&UiPicture>,
     mut tips: Query<&mut crate::icons::Tooltip>,
     mut page: Local<usize>,
+    mut selected: Local<Option<u64>>,
+    (mouse, hovered): (Res<ButtonInput<MouseButton>>, Query<&Interaction>),
 ) {
     let Ok((sim, mut w, ltw)) = sel.single_mut() else { return };
+    if selected.replace(sim.id) != Some(sim.id) { *page = 0; }
     let d = &hud.display;
     let n = w.offered.len();
     if pressed(&clicks, d.id(WISH_PAGE_LEFT)) && n > 0 {
@@ -938,6 +941,16 @@ fn wishes(
     if pressed(&clicks, d.id(WISH_STAGING)) && *page < n && w.promised.len() < 4 {
         w.promise(*page);
     }
+    if mouse.just_pressed(MouseButton::Right) {
+        let over = |id| d.id(id).is_some_and(|e| hovered.get(e).is_ok_and(|i| *i != Interaction::None));
+        if over(WISH_STAGING) {
+            w.dismiss(false, *page);
+        } else if let Some(slot) = (0..4).find(|slot| over(WISH_SLOT + *slot)) {
+            w.dismiss(true, slot as usize);
+        }
+    }
+    let n = w.offered.len();
+    *page = (*page).min(n.saturating_sub(1));
     let mut icon = |x: &crate::wishes::Wish| -> Option<Handle<Image>> {
         let gu = game_ui.as_deref_mut()?;
         let name = x.icon(&gu.data.clone());
@@ -953,7 +966,8 @@ fn wishes(
     if let (Some(st), Some(x)) = (staging, &shown) {
         set_image(&mut images, &pictures, d.within(st, WISH_ICON), icon(x));
         let more = if n > 1 { format!(" ({} of {n})", *page + 1) } else { String::new() };
-        set_tooltip(&mut commands, &mut tips, Some(st), format!("{} (+{}){more}\nClick to promise this wish.", x.text(), x.reward_points(&sim.traits)));
+        let action = if w.promised.len() < 4 { "Click to promise. Right-click to dismiss." } else { "All four wish slots are full. Right-click to dismiss." };
+        set_tooltip(&mut commands, &mut tips, Some(st), format!("{} (+{}){more}\n{action}", x.text(), x.reward_points(&sim.traits)));
     }
     // The promised wishes.
     for slot in 0..4 {
@@ -962,7 +976,7 @@ fn wishes(
         set_visible(&mut vis, b, x.is_some());
         if let (Some(b), Some(x)) = (b, x) {
             set_image(&mut images, &pictures, d.within(b, WISH_ICON), icon(&x));
-            set_tooltip(&mut commands, &mut tips, Some(b), format!("Promised: {} (+{})", x.text(), x.reward_points(&sim.traits)));
+            set_tooltip(&mut commands, &mut tips, Some(b), format!("Promised: {} (+{})\nRight-click to dismiss.", x.text(), x.reward_points(&sim.traits)));
         }
     }
     // The lifetime wish.
