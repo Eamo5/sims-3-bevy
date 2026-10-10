@@ -384,6 +384,36 @@ pub struct SimBody {
 #[derive(Component)]
 pub struct PlumbobRef(pub Entity);
 
+#[derive(Component)]
+struct PlumbobTint {
+    from: Color,
+    target: Color,
+    elapsed: f32,
+}
+
+impl Default for PlumbobTint {
+    fn default() -> Self {
+        let green = plumbob_color(0.0);
+        Self { from: green, target: green, elapsed: 0.5 }
+    }
+}
+
+impl PlumbobTint {
+    fn color(&self) -> Color {
+        self.from.mix(&self.target, (self.elapsed / 0.5).clamp(0.0, 1.0))
+    }
+
+    fn update(&mut self, target: Color, seconds: f32) -> Color {
+        if self.target != target {
+            self.from = self.color();
+            self.target = target;
+            self.elapsed = 0.0;
+        }
+        self.elapsed = (self.elapsed + seconds.max(0.0)).min(0.5);
+        self.color()
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct SimAssets {
     pub limb: Handle<Mesh>,
@@ -548,6 +578,7 @@ pub fn spawn_sim_full(
     let plumbob = commands
         .spawn((
             Mesh3d(ctx.assets.plumbob.clone()),
+            PlumbobTint::default(),
             MeshMaterial3d(ctx.render.mats.add(StandardMaterial {
                 base_color: Color::srgb(0.2, 0.95, 0.2),
                 emissive: LinearRgba::rgb(0.1, 0.9, 0.1),
@@ -634,6 +665,7 @@ pub fn spawn_sim(
     let plumbob = commands
         .spawn((
             Mesh3d(assets.plumbob.clone()),
+            PlumbobTint::default(),
             MeshMaterial3d(mats.add(StandardMaterial {
                 base_color: Color::srgb(0.2, 0.95, 0.2),
                 emissive: LinearRgba::rgb(0.1, 0.9, 0.1),
@@ -800,19 +832,54 @@ pub fn mood_color(mood: f32) -> Color {
     }
 }
 
+#[cfg(test)]
+mod plumbob_tests {
+    use super::*;
+
+    #[test]
+    fn original_mood_bands_and_half_second_transitions() {
+        for (mood, rgb) in [(-100.0, [1.0, 0.0, 0.0]), (-50.0, [1.0, 0.45, 0.0]), (-30.0, [1.0, 0.64, 0.0]), (-10.0, [0.0, 1.0, 0.0]), (0.0, [0.0, 1.0, 0.0])] {
+            assert_eq!(plumbob_color(mood), Color::srgb(rgb[0], rgb[1], rgb[2]));
+        }
+        let mut tint = PlumbobTint::default();
+        let red = plumbob_color(-100.0);
+        let green = plumbob_color(0.0);
+        let halfway = tint.update(red, 0.25);
+        assert_eq!(halfway, green.mix(&red, 0.5));
+        assert_eq!(tint.update(red, 0.25), red);
+        // A new mood midway through a transition begins at the displayed colour.
+        let halfway = tint.update(green, 0.25);
+        assert_eq!(tint.update(red, 0.0), halfway);
+        assert_eq!(tint.update(red, 1.0), red);
+    }
+}
+
+/// MoodManager's four plumbob colours use raw mood, not the UI's scaled level.
+fn plumbob_color(mood: f32) -> Color {
+    if mood < -50.0 {
+        Color::srgb(1.0, 0.0, 0.0)
+    } else if mood < -30.0 {
+        Color::srgb(1.0, 0.45, 0.0)
+    } else if mood < -10.0 {
+        Color::srgb(1.0, 0.64, 0.0)
+    } else {
+        Color::srgb(0.0, 1.0, 0.0)
+    }
+}
+
 fn update_plumbobs(
     time: Res<Time>,
     sims: Query<(&PlumbobRef, &crate::life::Mood, Has<Selected>)>,
-    mut q: Query<(&mut Transform, &mut Visibility, &MeshMaterial3d<StandardMaterial>)>,
+    mut q: Query<(&mut Transform, &mut Visibility, &MeshMaterial3d<StandardMaterial>, &mut PlumbobTint)>,
     mut mats: ResMut<Assets<StandardMaterial>>,
 ) {
     for (plumbob, mood, selected) in &sims {
-        if let Ok((mut tf, mut vis, mat)) = q.get_mut(plumbob.0) {
+        if let Ok((mut tf, mut vis, mat, mut tint)) = q.get_mut(plumbob.0) {
             *vis = if selected { Visibility::Inherited } else { Visibility::Hidden };
             tf.rotation = Quat::from_rotation_y(time.elapsed_secs() * 1.5);
             tf.translation.y = 2.15 + (time.elapsed_secs() * 2.0).sin() * 0.03;
-            if selected && let Some(mut m) = mats.get_mut(&mat.0) {
-                let c = mood_color(mood.level());
+            let c = tint.update(plumbob_color(mood.0), time.delta_secs());
+            if let Some(mut m) = mats.get_mut(&mat.0) {
                 m.base_color = c;
                 m.emissive = c.to_linear() * 0.8;
             }
