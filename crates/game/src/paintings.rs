@@ -30,8 +30,13 @@ impl Plugin for PaintingsPlugin {
 /// The canvases, how long a painting on each takes (minutes) and how its worth goes with its
 /// size.
 pub const CANVASES: [&str; 3] = ["Small Canvas", "Medium Canvas", "Large Canvas"];
-pub const CANVAS_MINUTES: [f32; 3] = [90.0, 150.0, 240.0];
+pub const CANVAS_MINUTES: [f32; 3] = [180.0, 300.0, 480.0];
 const CANVAS_WORTH: [f32; 3] = [1.0, 1.6, 2.5];
+
+/// Easel's canvas times and kDabbleModifier for children.
+pub fn painting_minutes(size: u8, child: bool) -> f32 {
+    CANVAS_MINUTES[size.min(2) as usize] * if child { 1.5 } else { 1.0 }
+}
 
 /// The canvas a Sim's been asked to paint on (the pie menu's choice), and what they're painting
 /// on it once they've started.
@@ -204,7 +209,7 @@ fn easel_canvases(
             }
         };
         let design = key_picture(&painted.key).map(|(_, pic)| s3bake::gamedata::painting_texture(&pic));
-        painting.push((me, *target, size, design, *elapsed >= CANVAS_MINUTES[size as usize] / 3.0));
+        painting.push((me, *target, size, design, *elapsed >= painting_minutes(size, sim.age == crate::sim::Age::Child) / 3.0));
     }
     // The canvases of those who've stopped go (and one's put up afresh as the picture comes).
     for (e, c) in &canvases {
