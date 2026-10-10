@@ -98,6 +98,23 @@ pub struct Painted {
     pub key: String,
     pub name: &'static str,
     pub worth: i64,
+    /// Unrounded skill, quality and random value, before experience/reward modifiers.
+    base_worth: f32,
+}
+
+pub fn canvas_stat(size: u8) -> crate::journal::Stat {
+    [crate::journal::Stat::SmallPaintings, crate::journal::Stat::MediumPaintings, crate::journal::Stat::LargePaintings][size.min(2) as usize]
+}
+
+/// (Base × Master Painter + same-size painting experience) × Extra Creative.
+/// Calculate before the journal records this completed canvas, and round only once.
+pub fn finish_value(mut painting: Painted, size: u8, journal: Option<&crate::journal::SkillJournal>, extra_creative: bool) -> Painted {
+    let nth = journal.map_or(0.0, |j| j.get(canvas_stat(size))) + 1.0;
+    let experience = nth * [2.0, 4.0, 6.0][size.min(2) as usize];
+    let mastery = if crate::journal::earned(journal, "Master Painter") { 1.3 } else { 1.0 };
+    let creative = if extra_creative { 1.5 } else { 1.0 };
+    painting.worth = ((painting.base_worth as f64 * mastery + experience) * creative).round() as i64;
+    painting
 }
 
 /// What a Sim paints on a canvas: a picture for their skill (a child's a dabble), in their
@@ -130,7 +147,8 @@ pub fn paint(data: Option<&PaintingsBaked>, size: u8, level: u32, traits: &[Trai
         (_, 0..=2) => "Amateur Painting",
         _ => "Fine Painting",
     };
-    let mut worth = base_value(size, level, quality, rng.random_range(0.75..=1.25));
+    let base_worth = base_value(size, level, quality, rng.random_range(0.75..=1.25));
+    let mut worth = base_worth;
     if extra_creative {
         worth *= 1.5;
     }
@@ -159,7 +177,7 @@ pub fn paint(data: Option<&PaintingsBaked>, size: u8, level: u32, traits: &[Trai
         Some(pic) => format!("painting:{size}:{pic}#{}", rng.random::<u32>()),
         None => format!("painting#{}", rng.random::<u32>()),
     };
-    Painted { key, name, worth: worth.round() as i64 }
+    Painted { key, name, worth: worth.round() as i64, base_worth }
 }
 
 /// A painting's canvas and picture. (Paintings from before they had pictures: a medium one of
@@ -286,6 +304,26 @@ pub fn image(cache: &mut PaintingImages, images: &mut Assets<Image>, baked: &cra
 mod tests {
     use super::*;
     use s3bake::gamedata::CanvasInfo;
+
+    #[test]
+    fn painting_experience_is_per_canvas_and_price_modifiers_round_only_at_the_end() {
+        let painting = || Painted { key: "test".into(), name: "Fine Painting", worth: 100, base_worth: 100.25 };
+        let journal = crate::journal::SkillJournal {
+            tally: [("small_paintings".into(), 2.0), ("medium_paintings".into(), 5.0), ("large_paintings".into(), 9.0)].into_iter().collect(),
+            earned: vec!["Master Painter".into()], ..default()
+        };
+        let restored = serde_json::from_str(&serde_json::to_string(&journal).unwrap()).unwrap();
+        assert_eq!(finish_value(painting(), 0, None, false).worth, 102);
+        assert_eq!(finish_value(painting(), 1, None, false).worth, 104);
+        assert_eq!(finish_value(painting(), 2, None, false).worth, 106);
+        assert_eq!(finish_value(painting(), 0, Some(&restored), true).worth, 204);
+        assert_eq!(finish_value(painting(), 1, Some(&restored), true).worth, 231);
+        assert_eq!(finish_value(painting(), 2, Some(&restored), true).worth, 285);
+        // Rounding the base or applying Master Painter to the experience bonus
+        // would change this result. Extra Creative applies to the entire sum.
+        let fractional = Painted { base_worth: 1.49, ..painting() };
+        assert_eq!(finish_value(fractional, 0, Some(&restored), true).worth, 12);
+    }
 
     #[test]
     fn canvas_prices_use_original_skill_tables_and_quality_multipliers() {

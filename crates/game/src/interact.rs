@@ -2564,9 +2564,9 @@ fn run_actions(
                                                 )
                                             });
                                             commands.entity(me).remove::<crate::paintings::PaintPlan>();
-                                            // A Master Painter's paintings gain the original 30% value bonus.
-                                            let p = if crate::journal::earned(journals.get(me).ok(), "Master Painter") { crate::paintings::Painted { worth: (p.worth as f64 * 1.3).round() as i64, ..p } } else { p };
+                                            let p = crate::paintings::finish_value(p, size, journals.get(me).ok(), crate::wishes::has(wishes, "ExtraCreative"));
                                             did.write(crate::journal::Did::count(me, crate::journal::Stat::Paintings, 1.0));
+                                            did.write(crate::journal::Did::count(me, crate::paintings::canvas_stat(size), 1.0));
                                             match p.name {
                                                 "Brilliant Painting" => {
                                                     did.write(crate::journal::Did::count(me, crate::journal::Stat::BrilliantPaintings, 1.0));
