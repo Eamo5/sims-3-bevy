@@ -10,7 +10,7 @@ use bevy::light::{NotShadowCaster, NotShadowReceiver};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
-use bevy::render::render_resource::{AsBindGroup, ShaderType};
+use bevy::render::render_resource::{AsBindGroup, ShaderType, Extent3d, TextureDimension, TextureFormat};
 use bevy::shader::ShaderRef;
 use rand::Rng;
 use rand::seq::IndexedRandom;
@@ -29,12 +29,18 @@ pub struct PrecipParams {
     pub params: Vec4,
     /// x: the box's size, y: drop size scale, z: daylight.
     pub look: Vec4,
+    pub home_to_local: Mat4,
+    pub away_to_local: Mat4,
+    /// xy: home lot dimensions, zw: visited lot dimensions.
+    pub shelter_size: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
 pub struct PrecipExt {
     #[uniform(100)]
     pub precip: PrecipParams,
+    #[texture(101, dimension = "2d_array", sample_type = "float", filterable = false)]
+    pub shelter: Handle<Image>,
 }
 
 impl MaterialExtension for PrecipExt {
@@ -83,6 +89,75 @@ struct Precipitation(Handle<PrecipMaterial>);
 /// Drops in the box.
 const DROPS: usize = 9000;
 
+/// Each tile stores the highest shelter ceiling for its four floor triangles.
+/// The two array layers are the home and visited lots, each in its own local space.
+fn shelter_map(building: Option<&crate::building::ActiveBuilding>) -> (Image, Mat4, Mat4, Vec4) {
+    let lots = [building, building.and_then(|b| b.away.as_deref())];
+    let width = lots.iter().flatten().map(|b| b.data.width).max().unwrap_or(1).max(1);
+    let depth = lots.iter().flatten().map(|b| b.data.depth).max().unwrap_or(1).max(1);
+    let mut pixels = vec![[-1.0e6f32; 4]; (width * depth * 2) as usize];
+    let mut transforms = [Mat4::IDENTITY; 2];
+    let mut sizes = Vec4::ZERO;
+    for (layer, lot) in lots.into_iter().enumerate() {
+        let Some(b) = lot else { continue };
+        transforms[layer] = Mat4::from_rotation_translation(b.rot, b.corner).inverse();
+        sizes[layer * 2] = b.data.width as f32;
+        sizes[layer * 2 + 1] = b.data.depth as f32;
+        for floor in &b.data.floors {
+            if floor.kind == s3bake::ROOM_OUTSIDE || floor.kind == s3bake::ROOM_PORCH || floor.x as u32 >= width || floor.z as u32 >= depth { continue; }
+            for triangle in 0..4 {
+                if floor.mask & (1 << triangle) == 0 { continue; }
+                let offset = [Vec2::NEG_Y, Vec2::X, Vec2::Y, Vec2::NEG_X][triangle] / 3.0;
+                let p = b.world(floor.x as f32 + 0.5 + offset.x, floor.z as f32 + 0.5 + offset.y, 0.0);
+                let Some(y) = b.floor_y(floor.level, p) else { continue };
+                let index = layer * (width * depth) as usize + floor.z as usize * width as usize + floor.x as usize;
+                pixels[index][triangle] = pixels[index][triangle].max(y + s3bake::building::LEVEL_HEIGHT);
+            }
+        }
+    }
+    let bytes = pixels.iter().flat_map(|p| p.iter().flat_map(|v| v.to_le_bytes())).collect();
+    let image = Image::new(Extent3d { width, height: depth, depth_or_array_layers: 2 }, TextureDimension::D2, bytes, TextureFormat::Rgba32Float, RenderAssetUsages::default());
+    (image, transforms[0], transforms[1], sizes)
+}
+
+/// PRECIP_SHELTER_TEST=1 audits the uploaded mask against the live room queries.
+fn verify_shelter(image: &Image, b: &crate::building::ActiveBuilding, params: PrecipParams) {
+    let bytes = image.data.as_ref().expect("CPU shelter texture retained");
+    let width = image.texture_descriptor.size.width as usize;
+    let depth = image.texture_descriptor.size.height as usize;
+    let mut indoors = 0;
+    let mut outdoors = 0;
+    for (layer, lot) in [Some(b), b.away.as_deref()].into_iter().enumerate() {
+        let Some(lot) = lot else { continue };
+        let transform = if layer == 0 { params.home_to_local } else { params.away_to_local };
+        for z in 0..lot.data.depth {
+            for x in 0..lot.data.width {
+                for triangle in 0..4 {
+                    let offset = [Vec2::NEG_Y, Vec2::X, Vec2::Y, Vec2::NEG_X][triangle] / 3.0;
+                    let local = Vec2::new(x as f32 + 0.5, z as f32 + 0.5) + offset;
+                    let world = lot.world(local.x, local.y, 0.0);
+                    assert!(transform.transform_point3(world).xz().distance(local) < 0.001, "rotated lot maps into the shelter texture");
+                    let at = ((layer * width * depth + z as usize * width + x as usize) * 4 + triangle) * 4;
+                    let ceiling = f32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+                    let mut enclosed = false;
+                    for level in 0..lot.levels.len() {
+                        if lot.room_at(level as u8, world).is_some_and(|k| k != s3bake::ROOM_OUTSIDE && k != s3bake::ROOM_PORCH) {
+                            enclosed = true;
+                            assert!(ceiling >= lot.floor_y(level as u8, world).unwrap() + s3bake::building::LEVEL_HEIGHT - 0.001);
+                        }
+                    }
+                    if enclosed { indoors += 1; } else {
+                        outdoors += 1;
+                        assert!(ceiling < -100000.0, "open-air triangles must allow precipitation");
+                    }
+                }
+            }
+        }
+    }
+    assert!(indoors > 0 && outdoors > 0);
+    info!("precipitation shelter PASS: {indoors} indoor and {outdoors} outdoor triangles, rotated lot coordinates checked");
+}
+
 fn drop_mesh() -> Mesh {
     let mut rng = rand::rng();
     let (mut pos, mut nrm, mut uv, mut idx) = (Vec::with_capacity(DROPS * 4), Vec::with_capacity(DROPS * 4), Vec::with_capacity(DROPS * 4), Vec::with_capacity(DROPS * 6));
@@ -115,12 +190,16 @@ fn precipitation(
     mut fx: Query<(&Precipitation, &mut Visibility)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<PrecipMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+    mut verified: Local<bool>,
 ) {
     let (Some(clock), Some(w)) = (clock, weather) else { return };
     let Ok((p, mut vis)) = fx.single_mut() else {
+        let (shelter, home_to_local, away_to_local, shelter_size) = shelter_map(building.as_deref());
         let mat = mats.add(PrecipMaterial {
             base: StandardMaterial { unlit: true, alpha_mode: AlphaMode::Blend, cull_mode: None, double_sided: true, fog_enabled: false, ..default() },
-            extension: PrecipExt { precip: PrecipParams::default() },
+            extension: PrecipExt { precip: PrecipParams { home_to_local, away_to_local, shelter_size, ..default() }, shelter: images.add(shelter) },
         });
         commands.spawn((
             Precipitation(mat.clone()),
@@ -136,6 +215,24 @@ fn precipitation(
         return;
     };
     let Ok(cam) = cams.single() else { return };
+    if let Some(mut m) = mats.get_mut(&p.0) {
+        let missing = building.is_none() && m.extension.precip.shelter_size != Vec4::ZERO;
+        if missing || building.as_ref().is_some_and(|b| b.is_changed()) {
+            let (image, home, away, sizes) = shelter_map(building.as_deref());
+            if let Some(mut existing) = images.get_mut(&m.extension.shelter) { *existing = image; }
+            m.extension.precip.home_to_local = home;
+            m.extension.precip.away_to_local = away;
+            m.extension.precip.shelter_size = sizes;
+        }
+        if !*verified && std::env::var_os("PRECIP_SHELTER_TEST").is_some()
+            && let Some(b) = building.as_deref()
+            && let Some(image) = images.get(&m.extension.shelter)
+            && !b.data.floors.is_empty()
+        {
+            verify_shelter(image, b, m.extension.precip);
+            *verified = true;
+        }
+    }
     let falling = w.falling(clock.minutes);
     vis.set_if_neq(if falling > 0.01 { Visibility::Inherited } else { Visibility::Hidden });
     if falling <= 0.01 {
@@ -158,6 +255,7 @@ fn precipitation(
             centre: (cam.focus + Vec3::Y * size * 0.12).extend(time.elapsed_secs()),
             params: Vec4::new(kind, falling, wind, wind * 0.4),
             look: Vec4::new(size, (size / 40.0).max(1.0), 1.0 - night.map_or(0.0, |n| n.0), 0.0),
+            ..m.extension.precip
         };
     }
 }

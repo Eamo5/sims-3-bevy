@@ -370,7 +370,9 @@ installation is unreachable.
   weather comes by its chances in the season among the temperatures it comes at: sun, rain,
   snow, fog and hail for their hours, rain and snow light, moderate or heavy. Clouds gather
   and the light dims under them; rain streaks down round the camera, snowflakes drift and
-  hail pelts; fog closes in; heavy rain brings lightning, the sky flashing and the game's
+  hail pelts; precipitation is clipped below indoor ceilings using triangle-aware shelter
+  masks for the home and visited lot, including rotated buildings and raised floors.
+  Fog closes in; heavy rain brings lightning, the sky flashing and the game's
   thunder after, sooner the nearer the strike; and the game's rain, snow, hail and wind loops
   play, with the seasons' own birdsong when it's dry. Rain wets the ground and the roads
   (darker, glossier) and melts snow, which settles when it snows (frost first, the ground

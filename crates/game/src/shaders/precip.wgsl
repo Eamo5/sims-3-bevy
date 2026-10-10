@@ -16,9 +16,27 @@ struct Precip {
     params: vec4<f32>,
     // x: the box's size (m), y: drop size scale, z: light (0 night .. 1 day), w: unused
     look: vec4<f32>,
+    home_to_local: mat4x4<f32>,
+    away_to_local: mat4x4<f32>,
+    shelter_size: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> precip: Precip;
+@group(#{MATERIAL_BIND_GROUP}) @binding(101) var shelter: texture_2d_array<f32>;
+
+fn under_shelter(world: vec3<f32>, transform: mat4x4<f32>, size: vec2<f32>, layer: i32) -> bool {
+    let p = (transform * vec4<f32>(world, 1.0)).xz;
+    if (any(p < vec2<f32>(0.0)) || any(p >= size)) { return false; }
+    let d = fract(p) - vec2<f32>(0.5);
+    var triangle = 3u;
+    if (abs(d.y) > abs(d.x)) {
+        triangle = select(2u, 0u, d.y < 0.0);
+    } else if (d.x > 0.0) {
+        triangle = 1u;
+    }
+    let ceilings = textureLoad(shelter, vec2<i32>(floor(p)), layer, 0);
+    return world.y < ceilings[triangle];
+}
 
 @vertex
 fn vertex(v: Vertex) -> VertexOutput {
@@ -76,6 +94,10 @@ fn vertex(v: Vertex) -> VertexOutput {
 
 @fragment
 fn fragment(in: VertexOutput) -> FragmentOutput {
+    if (under_shelter(in.world_position.xyz, precip.home_to_local, precip.shelter_size.xy, 0)
+        || under_shelter(in.world_position.xyz, precip.away_to_local, precip.shelter_size.zw, 1)) {
+        discard;
+    }
     var out: FragmentOutput;
     let kind = precip.params.x;
     let fade = in.world_normal.x;
