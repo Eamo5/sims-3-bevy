@@ -254,6 +254,33 @@ impl UiButton {
     }
 }
 
+/// A string of the game's in a Sim's gender: its `{MA.x}` / `{M0.x}` words for a male, `{FA.x}` /
+/// `{F0.x}` for a female, the other's dropped.
+pub fn gendered(text: &str, female: bool) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find('{') {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i..];
+        let Some(j) = tail.find('}') else {
+            out.push_str(tail);
+            return out;
+        };
+        let token = &tail[1..j];
+        match token.split_once('.') {
+            Some((g, word)) if g.len() == 2 && (g.starts_with('M') || g.starts_with('F')) => {
+                if g.starts_with('F') == female {
+                    out.push_str(word);
+                }
+            }
+            _ => out.push_str(&tail[..=j]),
+        }
+        rest = &tail[j + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Changes every window with this id under a layout window (a template, before it's spawned).
 pub fn edit_windows(w: &mut UiWindow, id: u32, f: &mut impl FnMut(&mut UiWindow)) {
     if w.id == id {

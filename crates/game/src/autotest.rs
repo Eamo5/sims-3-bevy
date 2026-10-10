@@ -3339,10 +3339,26 @@ fn ui_flow(
         }
         (100, AppState::CreateHousehold, _) if since > 2.0 => {
             shot(&mut commands, "2g_sculpted");
+            // (The game's family screen, as Accept puts it up for a household.)
+            crate::casfamily::OPEN.store(true, std::sync::atomic::Ordering::Relaxed);
+            *stage = (207, now);
+        }
+        (207, AppState::CreateHousehold, _) if since > 1.5 => {
+            shot(&mut commands, "2r_relationships");
+            *stage = (209, now);
+        }
+        (209, AppState::CreateHousehold, _) if since > 0.5 => {
+            crate::casfamily::TEST_DIALOG.store(true, std::sync::atomic::Ordering::Relaxed);
+            *stage = (208, now);
+        }
+        (208, AppState::CreateHousehold, _) if since > 1.5 => {
+            shot(&mut commands, "2r_add_relationship");
             // With --family, browse the town's families first.
             let want = if args.family.is_some() { crate::home::CasAction::Families } else { crate::home::CasAction::Done };
             if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == want) {
                 *i = Interaction::Pressed;
+            } else {
+                ask_cas(&mut commands, &[want]);
             }
             if args.family.is_some() {
                 *stage = (20, now);

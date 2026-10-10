@@ -145,6 +145,9 @@ pub enum CasAction {
     /// A face slider (of `gamedata::FACE_SLIDERS`) set to a value (-1 to 1), from the game's
     /// face panels.
     SetFaceSlider(u8, f32),
+    /// What member `i` is to member `j` (`family::Tie::ALL[t]`; roommates: nothing), from the
+    /// game's family screen.
+    SetTie(usize, usize, u8),
 }
 
 /// The face sliders by part of the face, as Create a Sim groups them: each slider's pair (in
@@ -730,6 +733,15 @@ fn cas_actions(
                     *v = (*v + d as f32 * 0.2).clamp(-1.0, 1.0);
                 }
                 s.face = f;
+            }
+            CasAction::SetTie(i, j, t) => {
+                let (Some(a), Some(b)) = (pending.members.get(i).map(|m| m.id), pending.members.get(j).map(|m| m.id)) else { continue };
+                pending.ties.retain(|(x, y, _)| (*x, *y) != (a, b) && (*x, *y) != (b, a));
+                let tie = crate::family::Tie::ALL[t as usize % crate::family::Tie::ALL.len()];
+                if tie != crate::family::Tie::Roommates {
+                    pending.ties.push((a, b, tie));
+                }
+                model = false;
             }
             CasAction::SetFaceSlider(i, v) => {
                 let s = &mut pending.members[k];

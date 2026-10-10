@@ -110,7 +110,6 @@ fn spawn_cas_frame(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut im
     }
     // The buttons that work CAS actions as they are.
     for (s, id, action, tip) in [
-        (&puck, ACCEPT, CasAction::Done, "Accept"),
         (&puck, ADD_SIM, CasAction::Add, "Add a Sim"),
         (&sheet, SHEET_BASICS, CasAction::Tab(CasTab::Basics), "Basics"),
         (&sheet, SHEET_HAIR, CasAction::Tab(CasTab::Hair), "Hair"),
@@ -123,7 +122,7 @@ fn spawn_cas_frame(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut im
             commands.entity(e).insert((action, crate::icons::Tooltip(tip.into())));
         }
     }
-    for (id, tip) in [(CANCEL, "Cancel"), (MORE, "More"), (OPTIONS, "Options"), (ROTATE_LEFT, "Rotate"), (ROTATE_RIGHT, "Rotate")] {
+    for (id, tip) in [(ACCEPT, "Accept"), (CANCEL, "Cancel"), (MORE, "More"), (OPTIONS, "Options"), (ROTATE_LEFT, "Rotate"), (ROTATE_RIGHT, "Rotate")] {
         if let Some(e) = puck.id(id) {
             commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
         }
@@ -240,12 +239,21 @@ fn puck_buttons(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     (mut options, settings): (ResMut<crate::options::OptionsPanel>, Res<crate::options::Settings>),
     mut actions: MessageWriter<crate::cas::CasActionRequest>,
-    families: Res<crate::cas::CasFamilies>,
+    (families, pending): (Res<crate::cas::CasFamilies>, Res<PendingHousehold>),
 ) {
     let (Some(f), Some(mut ui)) = (frame, ui) else { return };
     let pressed = |id: u32| crate::livehud::pressed(&clicks, f.puck.id(id));
     if pressed(CANCEL) {
         next.set(AppState::MainMenu);
+    }
+    // Accepted: a household of more than one says first what they are to each other (the
+    // game's family screen); a town family's are as the town has them.
+    if pressed(ACCEPT) {
+        if pending.members.len() > 1 && pending.premade.is_none() {
+            crate::casfamily::OPEN.store(true, Ordering::Relaxed);
+        } else {
+            actions.write(crate::cas::CasActionRequest(CasAction::Done));
+        }
     }
     if pressed(ROTATE_LEFT) {
         turn.0 += std::f32::consts::FRAC_PI_4;
