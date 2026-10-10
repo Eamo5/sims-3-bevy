@@ -299,6 +299,25 @@ mod tests {
         app.update();
         assert_eq!(app.world().get::<Author>(writer).unwrap().draft.as_ref().unwrap().pages, pages);
         assert_eq!(app.world().resource::<Household>().funds, 10);
+        // Resume on another computer, crossing the remaining partial milestones
+        // and the final page in one simulation update.
+        let replacement = app.world_mut().spawn((GameObject {
+            kind: ObjectKind::Computer, name: "Replacement".into(), objd: (0, 0, 0), price: 0,
+            center: Vec2::ZERO, half: Vec2::ONE, height: 1.0, route: None,
+        }, crate::interact::UsedBy(Some(writer)))).id();
+        app.world_mut().get_mut::<ActionQueue>(writer).unwrap().0.front_mut().unwrap().kind = ActionKind::Object { target: replacement, def };
+        app.world_mut().resource_mut::<SimDelta>().0 = 3000.0;
+        let household = app.world_mut().remove_resource::<Household>().unwrap();
+        app.update();
+        assert_eq!(app.world().get::<Author>(writer).unwrap().draft.as_ref().unwrap().pages, pages, "do not consume payable work before household restoration");
+        app.insert_resource(household);
+        app.update();
+        assert!(app.world().get::<Author>(writer).unwrap().draft.is_none());
+        assert_eq!(app.world().get::<Author>(writer).unwrap().books.len(), 1);
+        assert_eq!(app.world().resource::<Household>().funds, 40, "completion must still pay the 40%, 60%, and 80% milestones");
+        app.update();
+        assert_eq!(app.world().resource::<Household>().funds, 40);
+        assert_eq!(app.world().get::<Author>(writer).unwrap().books.len(), 1);
     }
 }
 
@@ -416,11 +435,12 @@ fn write_pages(
     clock: Res<GameClock>,
     delta: Res<SimDelta>,
     ui: Option<Res<crate::icons::GameUi>>,
-    mut household: Option<ResMut<Household>>,
+    household: Option<ResMut<Household>>,
     mut writers: Query<(Entity, &Sim, &mut ActionQueue, &Skills, Option<&mut Author>, Option<&NovelPlan>, Option<&crate::journal::SkillJournal>), With<HouseholdMember>>,
     objects: Query<(&GameObject, &crate::interact::UsedBy), (Without<crate::interact::Broken>, Without<crate::buyhistory::HistoryHidden>, Without<crate::buy::HeldObject>)>,
     mut notes: ResMut<Notifications>,
 ) {
+    let Some(mut household) = household else { return };
     let data = ui.as_ref().map(|u| &*u.data);
     let mut rng = rand::rng();
     for (e, sim, mut queue, skills, author, plan, journal) in &mut writers {
@@ -458,14 +478,15 @@ fn write_pages(
         d.pages = (d.pages + ppm * delta.0).min(d.length);
         // Partial work goes in every fifth of the way, at so much a page.
         let every = tune(data, "kPartialWorkSubmitEveryXPercent", 20.0) / 100.0;
-        let fifths = ((d.pages / d.length) / every).floor() as u32;
-        if fifths > d.sent && d.pages < d.length {
+        // Completion can cross an unpaid partial milestone in the same update.
+        // Settle all milestones strictly before the final page before publishing.
+        let partials = ((1.0 / every).ceil() as u32).saturating_sub(1);
+        let fifths = (((d.pages / d.length) / every).floor() as u32).min(partials);
+        if fifths > d.sent {
             let pages = (fifths - d.sent) as f32 * every * d.length;
             d.sent = fifths;
             let pay = (pages * tune(data, &format!("kPartialWorkPageValue{level}"), 0.5)).round() as i64;
-            if let Some(h) = household.as_mut() {
-                h.funds += pay;
-            }
+            household.funds += pay;
         }
         if d.pages >= d.length {
             let d = author.draft.take().unwrap_or_else(|| start_draft(&GENRES[0], &Author::default(), data, &mut rng));
