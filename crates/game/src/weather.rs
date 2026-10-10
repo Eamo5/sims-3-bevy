@@ -282,6 +282,23 @@ const FROSTBITE: f32 = -95.0;
 /// `kDelayBeforeSoakedBuffFromRain`: minutes out in light, moderate, heavy rain.
 const SOAKED_AFTER: [f32; 3] = [60.0, 55.0, 50.0];
 
+/// SimTemperature's clothing protection and exposure multipliers. Indoor recovery
+/// stays at its own rate; clothing only accelerates exposure towards outdoor extremes.
+fn temperature_step(value: f32, world: f32, outdoors: bool, outfit: crate::simbody::OutfitKind, hours: f32) -> f32 {
+    use crate::simbody::OutfitKind as O;
+    let (target, mut rate) = if outdoors { (world, RATE_OUTDOORS) } else { (0.0, RATE_INDOORS) };
+    if outdoors {
+        if outfit == O::Outerwear && world > 30.0 && target > value {
+            rate *= 3.0;
+        } else if matches!(outfit, O::Swimwear | O::Sleepwear) && world < -30.0 && target < value {
+            rate *= 3.0;
+        }
+    }
+    let step = rate * hours.max(0.0);
+    let next = value + (target - value).clamp(-step, step);
+    if outfit == O::Outerwear { next.max(-60.0) } else { next }
+}
+
 /// Sims feel the weather: out of doors their temperature heads for the world's, indoors back
 /// to comfortable, giving the game's Temperature motive buffs (Teeth Chattering from -71, Getting
 /// Chilly from -31, Getting Warm from 30, Sweating Profusely from 71, Frostbitten at -95); and
@@ -294,7 +311,7 @@ fn sim_temperatures(
     w: Res<Weather>,
     building: Option<Res<crate::building::ActiveBuilding>>,
     mut sims: Query<
-        (Entity, &Transform, &mut crate::life::Moodlets, Option<&mut BodyTemperature>, Has<crate::swim::Swimming>),
+        (Entity, &Transform, &mut crate::life::Moodlets, Option<&mut BodyTemperature>, Has<crate::swim::Swimming>, Option<&crate::simbody::Wearing>),
         (With<crate::sim::Sim>, Without<crate::interact::OffLot>, Without<crate::rabbitholes::AtRabbitHole>, Without<crate::careers::AtWork>),
     >,
 ) {
@@ -305,18 +322,17 @@ fn sim_temperatures(
     use crate::life::MoodletKind as M;
     let world = ((w.temperature - NEUTRAL_TEMP) * SIM_DEGREES).clamp(-100.0, 100.0);
     let raining = w.raining() && w.falling(clock.minutes) > 0.1;
-    for (e, tf, mut moodlets, t, swimming) in &mut sims {
+    for (e, tf, mut moodlets, t, swimming, wearing) in &mut sims {
         let Some(mut t) = t else {
             commands.entity(e).insert(BodyTemperature::default());
             continue;
         };
         let outdoors = !sheltered(building.as_deref(), tf.translation);
-        let (target, rate) = if outdoors { (world, RATE_OUTDOORS) } else { (0.0, RATE_INDOORS) };
-        let step = rate * dh;
-        t.value += (target - t.value).clamp(-step, step);
+        let outfit = wearing.map_or(crate::simbody::OutfitKind::Everyday, |w| w.0);
+        t.value = temperature_step(t.value, world, outdoors, outfit, dh);
         let v = t.value;
         moodlets.set_while(M::TeethChattering, v <= -71.0);
-        moodlets.set_while(M::GettingChilly, (-71.0..=-31.0).contains(&v));
+        moodlets.set_while(M::GettingChilly, v > -71.0 && v <= -31.0);
         moodlets.set_while(M::GettingWarm, (30.0..71.0).contains(&v));
         moodlets.set_while(M::SweatingProfusely, v >= 71.0);
         if v <= FROSTBITE && !moodlets.has(M::Frostbitten) {
@@ -568,6 +584,60 @@ fn simulate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clothing_protects_from_cold_and_accelerates_outdoor_exposure() {
+        use crate::simbody::OutfitKind as O;
+        assert_eq!(temperature_step(-55.0, -100.0, true, O::Outerwear, 1.0), -60.0);
+        assert_eq!(temperature_step(-60.0, -100.0, true, O::Outerwear, 10.0), -60.0);
+        assert_eq!(temperature_step(0.0, -100.0, true, O::Everyday, 1.0), -10.0);
+        for outfit in [O::Swimwear, O::Sleepwear] {
+            assert_eq!(temperature_step(0.0, -100.0, true, outfit, 1.0), -30.0);
+            assert_eq!(temperature_step(0.0, -30.0, true, outfit, 1.0), -10.0);
+            assert_eq!(temperature_step(-90.0, -40.0, true, outfit, 1.0), -80.0, "warming is not accelerated by insufficient clothing");
+        }
+        assert_eq!(temperature_step(0.0, 100.0, true, O::Outerwear, 1.0), 30.0);
+        assert_eq!(temperature_step(0.0, 30.0, true, O::Outerwear, 1.0), 10.0);
+        assert_eq!(temperature_step(90.0, 40.0, true, O::Outerwear, 1.0), 80.0, "coat multiplier must not accelerate cooling");
+        assert_eq!(temperature_step(-50.0, -100.0, false, O::Outerwear, 1.0), -10.0);
+        assert_eq!(temperature_step(50.0, 100.0, false, O::Outerwear, 1.0), 10.0);
+        assert_eq!(temperature_step(25.0, 40.0, true, O::Outerwear, 1.0), 40.0, "never overshoot the ambient target");
+    }
+
+    #[test]
+    fn winter_coat_prevents_frostbite_in_the_temperature_system() {
+        use crate::life::{MoodletKind as M, Moodlets};
+        use crate::simbody::{OutfitKind, Wearing};
+        let mut app = App::new();
+        app.init_resource::<GameClock>()
+            .insert_resource(crate::clock::SimDelta(60.0))
+            .insert_resource(Weather { temperature: 0.0, ..default() })
+            .add_systems(Update, sim_temperatures);
+        let mut rng = rand::rng();
+        let mut spawn = |outfit| app.world_mut().spawn((
+            crate::sim::random_sim(&mut rng, "Winter", Some(true), crate::sim::Age::Adult),
+            Transform::default(), Moodlets::default(), Wearing(outfit),
+            BodyTemperature { value: -55.0, in_rain: 0.0 },
+        )).id();
+        let coat = spawn(OutfitKind::Outerwear);
+        let everyday = spawn(OutfitKind::Everyday);
+        let swimsuit = spawn(OutfitKind::Swimwear);
+        app.update();
+        assert_eq!(app.world().get::<BodyTemperature>(coat).unwrap().value, -60.0);
+        assert_eq!(app.world().get::<BodyTemperature>(everyday).unwrap().value, -65.0);
+        assert_eq!(app.world().get::<BodyTemperature>(swimsuit).unwrap().value, -85.0);
+        for _ in 0..4 { app.update(); }
+        let protected = app.world().get::<Moodlets>(coat).unwrap();
+        assert!(protected.has(M::GettingChilly));
+        assert!(!protected.has(M::TeethChattering));
+        assert!(!protected.has(M::Frostbitten));
+        for e in [everyday, swimsuit] {
+            let exposed = app.world().get::<Moodlets>(e).unwrap();
+            assert!(exposed.has(M::TeethChattering));
+            assert!(exposed.has(M::Frostbitten));
+            assert!(!exposed.has(M::GettingChilly));
+        }
+    }
 
     fn tuning() -> s3bake::gamedata::SeasonsTuning {
         let row = |a: f32, b: f32| [a, b];
