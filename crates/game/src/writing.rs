@@ -128,6 +128,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn prolific_and_genre_quality_bonuses_use_completed_books_and_survive_reload() {
+        let book = |genre: &str| Book { title: "Novel".into(), genre: genre.into(), quality: Quality::Success, royalty: 100, payments_left: 0, next_pay: 6 };
+        let mut author = Author { draft: None, books: vec![book("Fiction"); 4] };
+        let before = quality_chances(5, "Fiction", &author, None);
+        author.books.push(book("Fiction"));
+        let specialized = quality_chances(5, "Fiction", &author, None);
+        assert_eq!(specialized.1 - before.1, 21.5, "20-point hit bonus plus one book of practice");
+        assert_eq!(specialized.2 - before.2, 6.5, "5-point bestseller bonus plus practice");
+        assert_eq!(quality_chances(5, "Romance", &author, None), (10.0, 10.0, 5.0), "specialization must not leak into another genre");
+        for i in 5..19 { author.books.push(book(&format!("Genre{i}"))); }
+        assert_eq!(quality_chances(5, "Romance", &author, None), (10.0, 10.0, 5.0));
+        author.books.push(book("Humor"));
+        assert_eq!(quality_chances(5, "Romance", &author, None), (10.0, 25.0, 25.0));
+        let restored: Author = serde_json::from_str(&serde_json::to_string(&author).unwrap()).unwrap();
+        let both = quality_chances(5, "Fiction", &restored, None);
+        assert_eq!(both.1 - specialized.1, 15.0);
+        assert_eq!(both.2 - specialized.2, 20.0);
+        assert_eq!(both.0, specialized.0, "quality bonuses do not modify the flop threshold");
+    }
+
+    #[test]
     fn royalties_begin_next_sunday_noon_after_publication() {
         assert_eq!(next_royalty_day(0.0, 12.0), 6);
         assert_eq!(next_royalty_day(6.0 * 1440.0 + 719.0, 12.0), 6);
@@ -303,15 +324,30 @@ fn start_draft(g: &Genre, author: &Author, data: Option<&s3bake::GameDataBaked>,
     Draft { genre: g.key.to_string(), title, pages: 0.0, length: rng.random_range(lo..=hi.max(lo)).round(), sent: 0 }
 }
 
+/// Percentage rolls from Writing tuning. Specialization applies only to the
+/// genre being written, while prolific authors benefit across all genres.
+fn quality_chances(level: u32, genre: &str, author: &Author, data: Option<&s3bake::GameDataBaked>) -> (f32, f32, f32) {
+    let level = level.clamp(1, 10);
+    let t = |k: String, d: f32| tune(data, &k, d);
+    let practice = (author.written(genre) as f32 * t("kQualityPercentChangePerHiddenSkillPoint".into(), 1.5)).min(t("kQualityMaxPercentChangeForHiddenSkill".into(), 60.0));
+    let flop = (t(format!("kQualityLevel{level}ChanceFlop"), 10.0) - practice).max(0.0);
+    let mut hit = t(format!("kQualityLevel{level}ChanceHit"), 10.0) + practice;
+    let mut best = t(format!("kQualityLevel{level}ChanceBestSeller"), 5.0) + practice;
+    if author.books.len() as f32 >= tune(data, "kNumWritingsForProlificAuthor", 20.0) {
+        hit += tune(data, "kQualityProlificAuthorHitBonus", 15.0);
+        best += tune(data, "kQualityProlificAuthorBestSellerBonus", 20.0);
+    }
+    if author.written(genre) as f32 >= tune(data, "kNumWritingsofGenreForNovelist", 5.0) {
+        hit += tune(data, "kQualityNovelistHitBonus", 20.0);
+        best += tune(data, "kQualityNovelistBestSellerBonus", 5.0);
+    }
+    (flop, hit, best)
+}
+
 /// How a finished book does, and what it earns each week.
 fn publish(d: &Draft, sim: &Sim, skills: &Skills, author: &Author, minutes: f64, data: Option<&s3bake::GameDataBaked>, rng: &mut impl Rng) -> Book {
-    let level = skills.level("Writing").clamp(1, 10);
     let t = |k: String, d: f32| tune(data, &k, d);
-    // Chances (percent) by skill level; books written in the genre make good ones likelier.
-    let practice = (author.written(&d.genre) as f32 * t("kQualityPercentChangePerHiddenSkillPoint".into(), 1.5)).min(t("kQualityMaxPercentChangeForHiddenSkill".into(), 60.0));
-    let flop = (t(format!("kQualityLevel{level}ChanceFlop"), 10.0) - practice).max(0.0);
-    let hit = t(format!("kQualityLevel{level}ChanceHit"), 10.0) + practice;
-    let best = t(format!("kQualityLevel{level}ChanceBestSeller"), 5.0) + practice;
+    let (flop, hit, best) = quality_chances(skills.level("Writing"), &d.genre, author, data);
     let r = rng.random_range(0.0..100.0);
     let quality = if r < best {
         Quality::BestSeller
