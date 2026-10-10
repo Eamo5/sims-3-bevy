@@ -913,7 +913,7 @@ fn moodlets(
 fn wishes(
     mut commands: Commands,
     hud: Res<LiveHud>,
-    mut sel: Query<(&mut crate::wishes::Wishes, Option<&crate::lifetime::LifetimeWish>), With<Selected>>,
+    mut sel: Query<(&Sim, &mut crate::wishes::Wishes, Option<&crate::lifetime::LifetimeWish>), With<Selected>>,
     mut game_ui: Option<ResMut<crate::icons::GameUi>>,
     mut assets: ResMut<Assets<Image>>,
     clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
@@ -923,7 +923,7 @@ fn wishes(
     mut tips: Query<&mut crate::icons::Tooltip>,
     mut page: Local<usize>,
 ) {
-    let Ok((mut w, ltw)) = sel.single_mut() else { return };
+    let Ok((sim, mut w, ltw)) = sel.single_mut() else { return };
     let d = &hud.display;
     let n = w.offered.len();
     if pressed(&clicks, d.id(WISH_PAGE_LEFT)) && n > 0 {
@@ -953,7 +953,7 @@ fn wishes(
     if let (Some(st), Some(x)) = (staging, &shown) {
         set_image(&mut images, &pictures, d.within(st, WISH_ICON), icon(x));
         let more = if n > 1 { format!(" ({} of {n})", *page + 1) } else { String::new() };
-        set_tooltip(&mut commands, &mut tips, Some(st), format!("{} (+{}){more}\nClick to promise this wish.", x.text(), x.points));
+        set_tooltip(&mut commands, &mut tips, Some(st), format!("{} (+{}){more}\nClick to promise this wish.", x.text(), x.reward_points(&sim.traits)));
     }
     // The promised wishes.
     for slot in 0..4 {
@@ -962,7 +962,7 @@ fn wishes(
         set_visible(&mut vis, b, x.is_some());
         if let (Some(b), Some(x)) = (b, x) {
             set_image(&mut images, &pictures, d.within(b, WISH_ICON), icon(&x));
-            set_tooltip(&mut commands, &mut tips, Some(b), format!("Promised: {} (+{})", x.text(), x.points));
+            set_tooltip(&mut commands, &mut tips, Some(b), format!("Promised: {} (+{})", x.text(), x.reward_points(&sim.traits)));
         }
     }
     // The lifetime wish.

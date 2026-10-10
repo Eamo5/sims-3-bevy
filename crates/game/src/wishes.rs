@@ -43,6 +43,15 @@ pub struct Wish {
 }
 
 impl Wish {
+    /// TraitTuning.kAmbitiousTraitLifetimeHappinessMultiplier = 1.15.
+    pub fn reward_points(&self, traits: &[Trait]) -> u32 {
+        if traits.contains(&Trait::Ambitious) {
+            ((self.points as u64 * 115 / 100).min(u32::MAX as u64)) as u32
+        } else {
+            self.points
+        }
+    }
+
     /// The game's icon for the wish.
     pub fn icon(&self, data: &s3bake::GameDataBaked) -> String {
         let s = |n: &str| n.to_string();
@@ -477,7 +486,7 @@ fn fulfil_wishes(
         for (promised, list) in [(true, &mut w.promised), (false, &mut w.offered)] {
             list.retain(|x| {
                 if matches(&x.kind) {
-                    let pts = if promised { x.points } else { 0 };
+                    let pts = if promised { x.reward_points(&sim.traits) } else { 0 };
                     gained += pts;
                     done.push((x.text(), promised));
                     false
@@ -508,7 +517,8 @@ mod tests {
         app.init_resource::<GameClock>().init_resource::<Notifications>()
             .add_message::<LifeEvent>().add_systems(Update, fulfil_wishes);
         let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(91);
-        let sim = crate::sim::random_sim(&mut rng, "Promise", Some(false), Age::Adult);
+        let mut sim = crate::sim::random_sim(&mut rng, "Promise", Some(false), Age::Adult);
+        sim.traits = vec![Trait::Ambitious];
         let e = app.world_mut().spawn((sim, Wishes {
             offered: vec![Wish { kind: WishKind::Activity("Paint".into()), points: 250 }],
             promised: vec![Wish { kind: WishKind::Activity("Play Chess".into()), points: 150 }],
@@ -526,7 +536,7 @@ mod tests {
         app.world_mut().write_message(LifeEvent::new(e, LifeEventKind::Finished { activity: "Play Chess", completed: true }));
         app.update();
         assert!(app.world().get::<Wishes>(e).unwrap().promised.is_empty());
-        assert_eq!(app.world().get::<Wishes>(e).unwrap().points, 150);
+        assert_eq!(app.world().get::<Wishes>(e).unwrap().points, 172);
         assert!(app.world().get::<Moodlets>(e).unwrap().0.iter().any(|m| m.kind == MoodletKind::WishFulfilled));
     }
 
@@ -544,7 +554,8 @@ mod tests {
         app.init_resource::<GameClock>().init_resource::<Notifications>()
             .add_message::<LifeEvent>().add_systems(Update, fulfil_wishes);
         let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(90);
-        let sim = crate::sim::random_sim(&mut rng, "Wishes", Some(false), Age::Adult);
+        let mut sim = crate::sim::random_sim(&mut rng, "Wishes", Some(false), Age::Adult);
+        sim.traits.clear();
         let e = app.world_mut().spawn((sim, Wishes { promised: restored, ..default() }, Moodlets::default(), crate::social::Relationships::default())).id();
         for _ in 0..2 {
             app.world_mut().write_message(LifeEvent::new(e, LifeEventKind::SkillUp { skill: "Logic", level: 3 }));

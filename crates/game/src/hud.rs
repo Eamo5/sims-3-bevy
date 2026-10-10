@@ -2073,17 +2073,18 @@ fn save_button(
 fn update_wishes_panel(
     mut commands: Commands,
     panel: Query<Entity, With<WishesPanel>>,
-    sel: Query<(&crate::wishes::Wishes, Option<&crate::lifetime::LifetimeWish>), With<Selected>>,
+    sel: Query<(&Sim, &crate::wishes::Wishes, Option<&crate::lifetime::LifetimeWish>), With<Selected>>,
     mut ui: Option<ResMut<crate::icons::GameUi>>,
     mut images: ResMut<Assets<Image>>,
     mut last: Local<Vec<String>>,
 ) {
     let Ok(p) = panel.single() else { return };
-    let Ok((w, ltw)) = sel.single() else { return };
+    let Ok((sim, w, ltw)) = sel.single() else { return };
     let mut sig: Vec<String> = w.promised.iter().map(|x| format!("P{}", x.text())).collect();
     sig.push(ltw.map_or(String::new(), |l| format!("L{} {}", l.wish, l.status)));
     sig.extend(w.offered.iter().map(|x| format!("O{}", x.text())));
     sig.push(w.points.to_string());
+    sig.push(sim.traits.contains(&crate::life::Trait::Ambitious).to_string());
     sig.push(ui.is_some().to_string());
     if *last == sig {
         return;
@@ -2154,7 +2155,7 @@ fn update_wishes_panel(
             });
         }
         for (x, h) in w.promised.iter().zip(promised_icons) {
-            let tip = crate::icons::Tooltip(format!("Promised: {} (+{})", x.text(), x.points));
+            let tip = crate::icons::Tooltip(format!("Promised: {} (+{})", x.text(), x.reward_points(&sim.traits)));
             match h {
                 Some(h) => {
                     c.spawn((tile(true), Interaction::default(), BlocksWorld, tip)).with_children(|b| {
@@ -2167,13 +2168,13 @@ fn update_wishes_panel(
                         BackgroundColor(Color::srgba(0.55, 0.42, 0.08, 0.95)),
                     ))
                     .with_children(|b| {
-                        b.spawn(text(format!("Promised: {} +{}", x.text(), x.points), 13.0, Color::WHITE));
+                        b.spawn(text(format!("Promised: {} +{}", x.text(), x.reward_points(&sim.traits)), 13.0, Color::WHITE));
                     });
                 }
             }
         }
         for (i, (x, h)) in w.offered.iter().zip(offered_icons).enumerate() {
-            let tip = crate::icons::Tooltip(format!("{} (+{})\nClick to promise this wish.", x.text(), x.points));
+            let tip = crate::icons::Tooltip(format!("{} (+{})\nClick to promise this wish.", x.text(), x.reward_points(&sim.traits)));
             match h {
                 Some(h) => {
                     c.spawn((Button, WishButton(i), tile(false), tip)).with_children(|b| {
@@ -2189,7 +2190,7 @@ fn update_wishes_panel(
                         BackgroundColor(BTN_NORMAL),
                     ))
                     .with_children(|b| {
-                        b.spawn(text(format!("{} +{}", x.text(), x.points), 13.0, Color::srgb(0.85, 0.9, 1.0)));
+                        b.spawn(text(format!("{} +{}", x.text(), x.reward_points(&sim.traits)), 13.0, Color::srgb(0.85, 0.9, 1.0)));
                     });
                 }
             }
