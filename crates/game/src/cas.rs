@@ -22,10 +22,15 @@ pub struct CasPlugin;
 
 impl Plugin for CasPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::CreateHousehold), setup_cas).add_systems(
-            Update,
-            (cas_actions, rebuild_ui, rebuild_model, turn_model, cas_button_visuals, scroll_panel, frame_camera).chain().run_if(in_state(AppState::CreateHousehold)),
-        );
+        app.init_resource::<CasSelected>()
+            .init_resource::<CasTurn>()
+            .init_resource::<CasFamilies>()
+            .add_message::<CasActionRequest>()
+            .add_systems(OnEnter(AppState::CreateHousehold), setup_cas)
+            .add_systems(
+                Update,
+                (cas_actions, mirror_state, rebuild_ui, rebuild_model, turn_model, cas_button_visuals, scroll_panel, frame_camera).chain().run_if(in_state(AppState::CreateHousehold)),
+            );
     }
 }
 
@@ -182,6 +187,44 @@ struct CasScene {
 
 #[derive(Component)]
 struct CasModel;
+
+/// The Sim being made and the tab open (for the game's own frame: see `caslook`).
+#[derive(Resource, Default)]
+pub struct CasSelected(pub usize, pub CasTab);
+
+impl Default for CasTab {
+    fn default() -> Self {
+        CasTab::Basics
+    }
+}
+
+/// A turn of the Sim asked for by the puck's buttons.
+#[derive(Resource, Default)]
+pub struct CasTurn(pub f32);
+
+/// Whether the town's families can be played from here.
+#[derive(Resource, Default)]
+pub struct CasFamilies(pub bool);
+
+/// A CAS action asked for other than by a button press (the game's popup menus).
+#[derive(Message, Clone, Copy)]
+pub struct CasActionRequest(pub CasAction);
+
+fn mirror_state(scene: Option<ResMut<CasScene>>, mut sel: ResMut<CasSelected>, mut fam: ResMut<CasFamilies>, mut framed: Local<bool>) {
+    let Some(mut s) = scene else { return };
+    // (The game's frame just up: the plain household panel goes.)
+    let game_frame = crate::caslook::GAME_CAS.load(std::sync::atomic::Ordering::Relaxed);
+    if game_frame != *framed {
+        *framed = game_frame;
+        s.dirty_ui = true;
+    }
+    if sel.0 != s.selected || sel.1 != s.tab {
+        *sel = CasSelected(s.selected, s.tab);
+    }
+    if fam.0 != s.families.is_some() {
+        fam.0 = s.families.is_some();
+    }
+}
 
 /// Create a Sim's camera: on the whole Sim, or close on their face on the Face tab.
 #[derive(Component)]
@@ -382,6 +425,7 @@ fn cas_actions(
     mut chosen: ResMut<crate::lifetime::ChosenLifetimeWishes>,
     (mut play, sounds): (MessageWriter<crate::sound::PlaySound>, Option<Res<crate::sound::Sounds>>),
     (mut renders, install, mut ready): (ResMut<crate::style::StyleRenders>, Option<Res<crate::data::InstallPath>>, MessageReader<crate::style::StyleReady>),
+    mut requests: MessageReader<CasActionRequest>,
 ) {
     let Some(mut scene) = scene else { return };
     // A style made in Create a Style, rendered: worn.
@@ -394,10 +438,10 @@ fn cas_actions(
         }
     }
     let mut rng = rand::rng();
-    for (i, action) in &q {
-        if *i != Interaction::Pressed {
-            continue;
-        }
+    // (Buttons pressed, and actions asked for by the game's menus.)
+    let asked: Vec<CasAction> = q.iter().filter(|(i, _)| **i == Interaction::Pressed).map(|(_, a)| *a).chain(requests.read().map(|r| r.0)).collect();
+    for action in asked {
+        let action = &action;
         let k = scene.selected.min(pending.members.len().saturating_sub(1));
         let last = pending.last_name.clone();
         let mut model = true;
@@ -721,8 +765,14 @@ fn turn_model(
     time: Res<Time>,
     windows: Query<&Window>,
     mut q: Query<&mut Transform, With<CasModel>>,
+    mut turn: ResMut<CasTurn>,
 ) {
     let Some(mut scene) = scene else { return };
+    // (The puck's turn buttons.)
+    if turn.0 != 0.0 {
+        scene.yaw += turn.0;
+        turn.0 = 0.0;
+    }
     let over_model = windows.single().ok().and_then(|w| w.cursor_position().map(|c| c.x > w.width() * 0.32 && c.x < w.width() * 0.62)).unwrap_or(false);
     if mouse.pressed(MouseButton::Left) && over_model {
         scene.yaw += motion.delta.x * 0.01;
@@ -854,8 +904,10 @@ fn rebuild_ui(
     let root = commands
         .spawn((Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, DespawnOnExit(AppState::CreateHousehold)))
         .id();
-    // Household (left)
+    // Household (left; the game's own puck and character sheet instead, where they're up)
+    let game_frame = crate::caslook::GAME_CAS.load(std::sync::atomic::Ordering::Relaxed);
     commands.entity(root).with_children(|r| {
+        if !game_frame {
         r.spawn((panel_node(Some(16.0), None, 300.0), panel_bg)).with_children(|p| {
             p.spawn(text("Create a Sim", 30.0, Color::WHITE));
             p.spawn(text(format!("The {} Household", pending.last_name), 20.0, PLUMBOB_GREEN));
@@ -885,11 +937,12 @@ fn rebuild_ui(
             let done = if pending.premade.is_some() { format!("Play the {}s", pending.last_name) } else { "Done".to_string() };
             button(p, done, CasAction::Done, Val::Percent(100.0), false, 22.0);
         });
-        // Name plate (bottom centre)
+        }
+        // Name plate (bottom centre; above the game's puck where it's up)
         r.spawn((
             Node {
                 position_type: PositionType::Absolute,
-                bottom: Val::Px(24.0),
+                bottom: Val::Px(if game_frame { 170.0 } else { 24.0 }),
                 left: Val::Px(330.0),
                 right: Val::Px(470.0),
                 flex_direction: FlexDirection::Column,
@@ -942,7 +995,12 @@ fn rebuild_ui(
         // Editing panel (right), scrolled where it was.
         r.spawn((panel_node(None, Some(16.0), 440.0), panel_bg, CasScroll, RelativeCursorPosition::default(), ScrollPosition(Vec2::new(0.0, scene.scroll)))).with_children(|p| {
             p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|tabs| {
+                // (With the game's character sheet, only the clothing's own kinds here.)
+                let clothing = |t: CasTab| matches!(t, CasTab::Tops | CasTab::Bottoms | CasTab::Outfits | CasTab::Shoes);
                 for t in CasTab::ALL {
+                    if game_frame && !(clothing(t) && clothing(scene.tab)) {
+                        continue;
+                    }
                     button(tabs, t.name(), CasAction::Tab(t), Val::Auto, t == scene.tab, 15.0);
                 }
             });
