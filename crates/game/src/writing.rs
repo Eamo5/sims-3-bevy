@@ -210,6 +210,7 @@ mod tests {
         let writer = app.world_mut().spawn((sim, HouseholdMember, queue, Skills::default(), Author {
             draft: Some(Draft { genre: "Fiction".into(), title: "A Careful Novel".into(), pages: 0.0, length: 100.0, sent: 0 }), books: vec![],
         })).id();
+        app.world_mut().entity_mut(computer).insert(crate::interact::UsedBy(Some(writer)));
         app.update();
         let draft = app.world().get::<Author>(writer).unwrap().draft.as_ref().unwrap();
         assert!((draft.pages - 17.28).abs() < 0.001);
@@ -224,6 +225,28 @@ mod tests {
         app.world_mut().resource_mut::<SimDelta>().0 = 0.0;
         app.update();
         assert_eq!(app.world().resource::<Household>().funds, 10, "partial work must not pay twice");
+        // Stale running actions must not earn pages or trigger another payment.
+        let pages = app.world().get::<Author>(writer).unwrap().draft.as_ref().unwrap().pages;
+        app.world_mut().resource_mut::<SimDelta>().0 = 300.0;
+        app.world_mut().get_mut::<ActionQueue>(writer).unwrap().0.front_mut().unwrap().cancel = true;
+        app.update();
+        assert_eq!(app.world().get::<Author>(writer).unwrap().draft.as_ref().unwrap().pages, pages);
+        app.world_mut().get_mut::<ActionQueue>(writer).unwrap().0.front_mut().unwrap().cancel = false;
+        app.world_mut().entity_mut(computer).insert(crate::interact::Broken);
+        app.update();
+        assert_eq!(app.world().get::<Author>(writer).unwrap().draft.as_ref().unwrap().pages, pages);
+        app.world_mut().entity_mut(computer).remove::<crate::interact::Broken>();
+        app.world_mut().get_mut::<crate::interact::UsedBy>(computer).unwrap().0 = None;
+        app.update();
+        assert_eq!(app.world().get::<Author>(writer).unwrap().draft.as_ref().unwrap().pages, pages);
+        let other = app.world_mut().spawn_empty().id();
+        app.world_mut().get_mut::<crate::interact::UsedBy>(computer).unwrap().0 = Some(other);
+        app.update();
+        assert_eq!(app.world().get::<Author>(writer).unwrap().draft.as_ref().unwrap().pages, pages);
+        app.world_mut().entity_mut(computer).despawn();
+        app.update();
+        assert_eq!(app.world().get::<Author>(writer).unwrap().draft.as_ref().unwrap().pages, pages);
+        assert_eq!(app.world().resource::<Household>().funds, 10);
     }
 }
 
@@ -327,15 +350,17 @@ fn write_pages(
     ui: Option<Res<crate::icons::GameUi>>,
     mut household: Option<ResMut<Household>>,
     mut writers: Query<(Entity, &Sim, &mut ActionQueue, &Skills, Option<&mut Author>, Option<&NovelPlan>, Option<&crate::wishes::Wishes>), With<HouseholdMember>>,
-    objects: Query<&GameObject>,
+    objects: Query<(&GameObject, &crate::interact::UsedBy), (Without<crate::interact::Broken>, Without<crate::buyhistory::HistoryHidden>, Without<crate::buy::HeldObject>)>,
     mut notes: ResMut<Notifications>,
 ) {
     let data = ui.as_ref().map(|u| &*u.data);
     let mut rng = rand::rng();
     for (e, sim, mut queue, skills, author, plan, wishes) in &mut writers {
         let Some(front) = queue.0.front_mut() else { continue };
+        if front.cancel { continue; }
         let (ActionKind::Object { target, def }, Phase::Running(_)) = (&front.kind, &front.phase) else { continue };
-        let writing = objects.get(*target).ok().and_then(|o| interactions_for(o.kind).get(*def)).is_some_and(|d| d.special == Special::WriteNovel);
+        let writing = objects.get(*target).ok().filter(|(_, used)| used.0 == Some(e))
+            .and_then(|(o, _)| interactions_for(o.kind).get(*def)).is_some_and(|d| d.special == Special::WriteNovel);
         if !writing {
             continue;
         }
