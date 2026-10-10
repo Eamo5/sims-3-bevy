@@ -198,6 +198,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(PreUpdate, press_key.after(bevy::input::InputSystems).before(crate::buy::toggle_buy).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, buy_pick.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, know_people.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, load_shot.run_if(in_state(AppState::Loading)))
             .add_systems(PreUpdate, ui_click.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, ui_right_click.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, pointer_script.after(bevy::input::InputSystems).before(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
@@ -521,6 +522,16 @@ fn auto_pick_world(
         next.set(AppState::Loading);
     } else {
         warn!("--world {name}: no such world");
+    }
+}
+
+/// LOAD_SHOT=<path>@<seconds>: a screenshot that long into loading a town.
+fn load_shot(mut commands: Commands, time: Res<Time>, mut start: Local<Option<f32>>, mut done: Local<bool>) {
+    let Some((path, at)) = std::env::var("LOAD_SHOT").ok().and_then(|v| v.rsplit_once('@').map(|(p, t)| (p.to_string(), t.parse::<f32>().unwrap_or(3.0)))) else { return };
+    let s = *start.get_or_insert(time.elapsed_secs());
+    if !*done && time.elapsed_secs() - s > at {
+        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+        *done = true;
     }
 }
 

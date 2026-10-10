@@ -173,10 +173,15 @@ struct LoadTask {
     progress: Arc<Mutex<String>>,
 }
 
+/// The loading status's words (what's being converted on a first run).
 #[derive(Component)]
-struct ProgressText;
+pub struct ProgressText;
 
-fn start_loading(
+/// The plain loading screen (put away when the game's own is up: see `loadscreen`).
+#[derive(Component)]
+pub struct OldLoading;
+
+pub fn start_loading(
     mut commands: Commands,
     install: Res<InstallPath>,
     selected: Res<SelectedWorld>,
@@ -210,6 +215,7 @@ fn start_loading(
                 ..default()
             },
             BackgroundColor(Color::srgb(0.05, 0.16, 0.30)),
+            OldLoading,
         ))
         .with_children(|p| {
             p.spawn(text(format!("Loading {}…", selected.0.name), 48.0, Color::WHITE));
@@ -307,8 +313,14 @@ fn poll_loading(
     selected: Res<SelectedWorld>,
     mut text_q: Query<&mut Text, With<ProgressText>>,
     mut next: ResMut<NextState<AppState>>,
+    (time, mut since): (Res<Time>, Local<Option<f32>>),
 ) {
     let Some(mut task) = task else { return };
+    // (Test hook: LOAD_HOLD=<seconds> keeps the loading screen up at least that long.)
+    let start = *since.get_or_insert(time.elapsed_secs());
+    if std::env::var("LOAD_HOLD").ok().and_then(|v| v.parse::<f32>().ok()).is_some_and(|h| time.elapsed_secs() - start < h) {
+        return;
+    }
     if let Ok(mut t) = text_q.single_mut() {
         let s = task.progress.lock().unwrap().clone();
         if t.0 != s {

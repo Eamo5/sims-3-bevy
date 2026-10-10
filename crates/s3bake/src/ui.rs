@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackWriter, read_value, write_value};
 
-pub const UI_VERSION: u32 = 12;
+pub const UI_VERSION: u32 = 13;
 pub const T_LAYOUT: u32 = 0x025C95B6;
 pub const T_FONT: u32 = 0x062E9EE0;
 pub const T_IMAGE: u32 = 0x2F7D0004;
@@ -48,6 +48,9 @@ pub struct UiBaked {
     pub buy_flags: Vec<(crate::types::Key, ObjBuy)>,
     /// The catalogue objects' descriptions (by OBJD key; those that have one).
     pub descriptions: Vec<(crate::types::Key, String)>,
+    /// The loading screen's game tips (`GameTips` and the packs' `GameTipsEP<n>`, those whose
+    /// words are installed).
+    pub tips: Vec<String>,
 }
 
 /// A text style: its font (instance in `ui.pack`), size and line spacing in pixels.
@@ -243,6 +246,18 @@ pub const NAMED_IMAGES: &[&str] = &[
     "opp_generic_skill",
     "opp_generic",
     "glb_i_all_r2",
+    // The towns' loading pictures (`LoadingScreenController`).
+    "world_loading_twinbrook",
+    "world_loading_bridgeport",
+    "ep5_world_loading_screen",
+    "world_loading_EP6World",
+    "world_loading_EP7World",
+    "ep10_world_loading_screen",
+    "world_loading_university",
+    "world_loading_future",
+    "world_loading_beijing",
+    "world_loading_paris",
+    "world_loading_cairo",
 ];
 
 /// The zodiac signs (`sign_<sign>_sm`).
@@ -327,6 +342,14 @@ pub fn bake_ui(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::path::Pat
     for z in ZODIAC {
         images.insert(s3pkg::fnv64(&format!("sign_{z}_sm")));
     }
+    // The game tips.
+    for name in std::iter::once("GameTips".to_string()).chain((1..=11).map(|n| format!("GameTipsEP{n}"))) {
+        let Some(xml) = pkg.find(&s3pkg::ResourceKey::new(T_XML, 0, s3pkg::fnv64(&name))).and_then(|e| pkg.read(e).ok()) else { continue };
+        let Some(doc) = parse_xml(&String::from_utf8_lossy(&xml)) else { continue };
+        let mut tips = Vec::new();
+        collect_tips(&doc, &mut tips);
+        out.tips.extend(tips.iter().filter_map(|k| strings.get(&s3pkg::fnv64(k)).cloned()));
+    }
     // Buy mode's catalogue (its icons with the rest), and each catalogue object's place in it.
     if let Some(xml) = pkg.find(&s3pkg::ResourceKey::new(T_XML, 0, s3pkg::fnv64("BuyCatalog"))).and_then(|e| pkg.read(e).ok()) {
         out.buy = buy_catalog(&String::from_utf8_lossy(&xml), &strings, &mut images);
@@ -364,6 +387,17 @@ pub fn bake_ui(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::path::Pat
     write_value(&g.join("ui.bin"), &out).map_err(|e| e.to_string())?;
     write_value(&g.join("ui.version"), &UI_VERSION).map_err(|e| e.to_string())?;
     Ok(n)
+}
+
+fn collect_tips(n: &XNode, out: &mut Vec<String>) {
+    if n.name == "Tip"
+        && let Some(k) = n.attr("localizedName")
+    {
+        out.push(k.to_string());
+    }
+    for c in &n.children {
+        collect_tips(c, out);
+    }
 }
 
 // ---- Layouts ----

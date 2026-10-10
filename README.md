@@ -659,7 +659,11 @@ installation is unreachable.
   the game's drop-down list of the home towns installed (the newest pack's chosen first, as
   the game does), each with its own picture and description read from its world file; Play
   Now. The round button opens the game's popup menu: Options and Quit. A newer interface
-  layout than the one converted is converted again while the menu waits.
+  layout than the one converted is converted again while the menu waits. Loading a town shows
+  the game's loading screen: the town's own loading picture (Twinbrook's, Bridgeport's...),
+  "Welcome to" the town or the saved household's name, the game's tips (its own and the
+  packs') changing every ten seconds, and the green load bar; a first run's conversion is
+  written under it.
 - **The game's own HUD**: the live-mode interface is the game's, drawn from its own layouts
   (`UI.package`'s window trees, pictures and fonts: every caption in its Helvetica Rounded),
   and driven as its own interface code drives it: the puck at the bottom left (live, buy and

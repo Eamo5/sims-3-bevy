@@ -520,7 +520,12 @@ fn set_caption(commands: &mut Commands, ui: &mut UiAssets, fonts: &mut Assets<Fo
 
 /// A save's own picture, if one was taken when it was saved (`<save>.png`).
 fn save_thumbnail(images: &mut Assets<Image>, save: &std::path::Path) -> Option<Handle<Image>> {
-    let png = std::fs::read(save.with_extension("png")).ok()?;
+    picture_file(images, &save.with_extension("png"))
+}
+
+/// A PNG on disk as a picture.
+pub fn picture_file(images: &mut Assets<Image>, path: &std::path::Path) -> Option<Handle<Image>> {
+    let png = std::fs::read(path).ok()?;
     let im = Image::from_buffer(&png, ImageType::Extension("png"), CompressedImageFormats::NONE, true, ImageSampler::default(), RenderAssetUsages::RENDER_WORLD).ok()?;
     Some(images.add(im))
 }
