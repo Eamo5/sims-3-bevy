@@ -288,7 +288,7 @@ fn read_somewhere(
 
 /// What's carried is put down once it's where it was going (being washed, eaten, thrown out),
 /// or once that's given up.
-fn put_down_carried(mut commands: Commands, sims: Query<(Entity, &crate::anim::Carrying, &crate::interact::ActionQueue, Has<crate::anim::ActionClip>, &crate::sim::SimAnim)>) {
+fn put_down_carried(mut commands: Commands, sims: Query<(Entity, &crate::anim::Carrying, &crate::interact::ActionQueue, Has<crate::anim::ActionClip>, &crate::sim::SimAnim)>, objects: Query<&GameObject>) {
     for (e, c, queue, acting, anim) in &sims {
         let goes_to: &[&str] = match c.0 {
             DISH_CARRY => &["Wash Dishes", "Load Dishes", "Eat"],
@@ -300,10 +300,49 @@ fn put_down_carried(mut commands: Commands, sims: Query<(Entity, &crate::anim::C
             crate::meals::PLATTER_CARRY => &["Set Down Meal"],
             _ => continue,
         };
-        let going = queue.current().is_some_and(|a| goes_to.contains(&a.label.as_str()));
+        let going = queue.current().is_some_and(|a| {
+            if a.cancel || a.completed { return false; }
+            if c.0 == crate::meals::PAN_CARRY {
+                let crate::interact::ActionKind::Object { target, def } = a.kind else { return false };
+                return objects.get(target).ok().and_then(|o| crate::interact::interactions_for(o.kind).get(def))
+                    .is_some_and(|d| d.special == crate::interact::Special::ServeMeal);
+            }
+            goes_to.contains(&a.label.as_str())
+        });
         if !going || (acting && anim.pose != crate::sim::Pose::Walk) {
             commands.entity(e).remove::<crate::anim::Carrying>();
         }
+    }
+}
+
+#[cfg(test)]
+mod carry_tests {
+    use super::*;
+    use crate::interact::{Action, ActionKind, ActionQueue, Phase, Special, interactions_for};
+
+    #[test]
+    fn named_recipe_carries_pan_until_cancelled_or_stove_disappears() {
+        let mut app = App::new();
+        app.add_systems(Update, put_down_carried);
+        let stove = app.world_mut().spawn(GameObject { kind: ObjectKind::Stove, name: "Stove".into(), objd: (0, 0, 0), price: 0,
+            center: Vec2::ZERO, half: Vec2::ONE, height: 1.0, route: None }).id();
+        let def = interactions_for(ObjectKind::Stove).iter().position(|d| d.special == Special::ServeMeal).unwrap();
+        let mut action = Action::new("Cook: Pancakes", ActionKind::Object { target: stove, def }, false);
+        action.phase = Phase::Routing;
+        let mut queue = ActionQueue::default();
+        queue.push_player(action);
+        let sim = app.world_mut().spawn((queue, crate::anim::Carrying(crate::meals::PAN_CARRY),
+            crate::sim::SimAnim { pose: crate::sim::Pose::Walk, ..default() })).id();
+        app.update();
+        assert!(app.world().get::<crate::anim::Carrying>(sim).is_some());
+        app.world_mut().get_mut::<ActionQueue>(sim).unwrap().0[0].cancel = true;
+        app.update();
+        assert!(app.world().get::<crate::anim::Carrying>(sim).is_none());
+        app.world_mut().get_mut::<ActionQueue>(sim).unwrap().0[0].cancel = false;
+        app.world_mut().entity_mut(sim).insert(crate::anim::Carrying(crate::meals::PAN_CARRY));
+        app.world_mut().despawn(stove);
+        app.update();
+        assert!(app.world().get::<crate::anim::Carrying>(sim).is_none());
     }
 }
 
