@@ -1584,11 +1584,12 @@ pub struct Action {
     pub outfit_choice: Option<crate::simbody::OutfitKind>,
     pub canvas_choice: Option<u8>,
     pub fish_choice: Option<(String, u8)>,
+    pub recipe_choice: Option<usize>,
 }
 
 impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
-        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, fish_choice: None }
+        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, fish_choice: None, recipe_choice: None }
     }
 }
 
@@ -2661,6 +2662,11 @@ pub(crate) fn run_actions(
                                                 fire.write(crate::fire::StartFire { at: otf.translation + Vec3::Y * obj.height * 0.85, level: of.map_or(1, |f| f.0) });
                                                 notes.push(format!("{} set the stove on fire!", sim.first));
                                             } else {
+                                                if let Some(recipe) = action.recipe_choice.take() {
+                                                    commands.entity(me).insert(crate::meals::MealPlan(recipe));
+                                                } else {
+                                                    commands.entity(me).remove::<crate::meals::MealPlan>();
+                                                }
                                                 commands.entity(me).insert(crate::meals::MealRequest::Serve(*target));
                                             }
                                         }

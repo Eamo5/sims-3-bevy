@@ -1301,12 +1301,8 @@ fn pie_buttons(
     if let Some(a) = actor
         && let Ok(mut queue) = queues.get_mut(a)
     {
-        // The recipe chosen.
-        if let (Some(n), Some(ui)) = (label.strip_prefix("Cook: ").or_else(|| label.strip_prefix("Grill: ")), ui_data.as_ref())
-            && let Some(r) = ui.data.recipes.iter().position(|r| r.name == n)
-        {
-            commands.entity(a).insert(crate::meals::MealPlan(r));
-        }
+        let recipe_choice = label.strip_prefix("Cook: ").or_else(|| label.strip_prefix("Grill: "))
+            .and_then(|n| ui_data.as_ref().and_then(|ui| ui.data.recipes.iter().position(|r| r.name == n)));
         // The fish chosen for a bowl.
         let fish_choice = label.strip_prefix("Place Fish: ")
             .and_then(|n| inventories.get(a).ok().and_then(|inv| inv.0.iter().find(|s| s.kind == crate::inventory::ItemKind::Fish && s.name == n)))
@@ -1321,6 +1317,7 @@ fn pie_buttons(
         action.outfit_choice = outfit_choice;
         action.canvas_choice = canvas_choice;
         action.fish_choice = fish_choice;
+        action.recipe_choice = recipe_choice;
         queue.push_player(action);
     }
 }

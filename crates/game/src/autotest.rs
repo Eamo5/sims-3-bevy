@@ -1843,14 +1843,33 @@ fn ask_question(
     ui: Option<Res<crate::icons::GameUi>>,
     sel: Query<(Entity, &crate::sim::Sim), With<crate::sim::Selected>>,
     mut wishes: Query<&mut crate::wishes::Wishes>,
+    mut queues: Query<&mut crate::interact::ActionQueue>,
+    objects: Query<&crate::interact::GameObject>,
+    mut recipe_done: Local<bool>,
 ) {
     // RECIPE=<key>: the selected Sim's next meal is that recipe.
+    // RECIPE_NEXT=<key>: queue another recipe before the first finishes.
     if let (Ok(key), Some(ui)) = (std::env::var("RECIPE"), ui.as_ref())
         && let Ok((e, _)) = sel.single()
-        && !*done
+        && !*recipe_done
         && let Some(r) = ui.data.recipes.iter().position(|r| r.key == key)
+        && let Ok(mut queue) = queues.get_mut(e)
+        && let Some(action) = queue.0.iter_mut().find(|a| {
+            let crate::interact::ActionKind::Object { target, def } = a.kind else { return false };
+            !a.cancel && objects.get(target).ok().and_then(|o| crate::interact::interactions_for(o.kind).get(def))
+                .is_some_and(|d| d.special == crate::interact::Special::ServeMeal)
+        })
     {
-        commands.entity(e).insert(crate::meals::MealPlan(r));
+        action.recipe_choice = Some(r);
+        let kind = action.kind.clone();
+        if let Ok(next) = std::env::var("RECIPE_NEXT")
+            && let Some(recipe) = ui.data.recipes.iter().position(|r| r.key == next)
+        {
+            let mut next = crate::interact::Action::new("Cook Dinner", kind, false);
+            next.recipe_choice = Some(recipe);
+            queue.push_player(next);
+        }
+        *recipe_done = true;
     }
     // LTW=<name>: the selected Sim's lifetime wish.
     if let Ok(name) = std::env::var("LTW")

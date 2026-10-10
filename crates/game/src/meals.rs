@@ -187,7 +187,8 @@ pub fn pizza_spot(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, c
     surface_near(objects, near, 12.0)
 }
 
-/// What's being cooked: a recipe (index into the game's recipes).
+/// The finished recipe awaiting serving (index into the game's recipes).
+/// Choices for queued cooking actions live on `Action::recipe_choice`.
 #[derive(Component)]
 pub struct MealPlan(pub usize);
 
