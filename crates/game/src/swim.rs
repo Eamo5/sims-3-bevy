@@ -15,7 +15,7 @@ pub struct SwimPlugin;
 
 impl Plugin for SwimPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (swim, pyjamas).run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (swim, pyjamas).after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)));
     }
 }
 

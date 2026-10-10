@@ -181,7 +181,7 @@ pub struct Outfit {
 }
 
 /// Which of a Sim's outfits they have on.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub enum OutfitKind {
     #[default]
     Everyday,

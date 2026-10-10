@@ -74,6 +74,10 @@ pub struct SavedSim {
     #[serde(default)]
     pub outfit: Vec<Option<(u32, u32, u64)>>,
     #[serde(default)]
+    pub wearing: Option<crate::simbody::OutfitKind>,
+    #[serde(default)]
+    pub outfit_chosen: bool,
+    #[serde(default)]
     pub rewards: Vec<String>,
     /// Days into the current life stage, and how long old age lasts.
     #[serde(default)]
@@ -367,6 +371,8 @@ fn saved_look(sim: &Sim) -> SavedSim {
         relationships: Vec::new(),
         lifetime_happiness: 0,
         outfit: saved_outfit(&sim.outfit),
+        wearing: None,
+        outfit_chosen: false,
         rewards: Vec::new(),
         aging: None,
         elder_risk: None,
@@ -663,7 +669,7 @@ fn save_game(
                 Option<&crate::journal::SkillJournal>,
                 Option<&crate::rabbitholes::SchoolGrades>,
                 Option<&crate::rabbitholes::Homework>,
-                (Option<&crate::rabbitholes::AtRabbitHole>, Option<&crate::weather::BodyTemperature>),
+                (Option<&crate::rabbitholes::AtRabbitHole>, Option<&crate::weather::BodyTemperature>, Option<&crate::simbody::Wearing>, Has<crate::simbody::ChangedInto>),
             ),
         ),
         (Without<crate::town::Townie>, Without<crate::visit::LotGuest>, Without<crate::services::ServiceNpc>),
@@ -704,7 +710,7 @@ fn save_game(
     let Some(hh) = household else { return };
     let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).collect();
     let mut saved = Vec::new();
-    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature))) in &sims {
+    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen))) in &sims {
         // Out on a community lot: saved as back at home (the lot isn't kept).
         let (position, level) = match (out, exit.as_ref()) {
             (true, Some(x)) => ([x.0.x, world.data.heightmap.sample(x.0.x, x.0.y), x.0.y], 1),
@@ -753,6 +759,8 @@ fn save_game(
             promised_wishes: wishes.map(|w| w.promised.clone()).unwrap_or_default(),
             next_wish_offer: wishes.map(|w| w.next_offer),
             outfit: saved_outfit(&sim.outfit),
+            wearing: wearing.map(|w| w.0),
+            outfit_chosen,
             rewards: wishes.map(|w| w.rewards.clone()).unwrap_or_default(),
             aging: aging.map(|a| (a.days, a.elder_span)),
             elder_risk: aging.and_then(|a| a.elder_risk),
@@ -862,6 +870,17 @@ fn resume_saved_lot(
     next.set(PlayMode::Live);
 }
 
+fn restore_clothing(ec: &mut EntityCommands, saved: &SavedSim) {
+    ec.remove::<(crate::simbody::Wearing, crate::simbody::ChangedInto)>();
+    if let Some(outfit) = saved.wearing {
+        ec.insert(crate::simbody::Wearing(outfit));
+    }
+    if saved.outfit_chosen {
+        ec.insert(crate::simbody::ChangedInto);
+    }
+    ec.insert(crate::aging::NeedsNewBody);
+}
+
 /// Restore school progress, including absence of homework or student status.
 fn restore_school(ec: &mut EntityCommands, saved: &SavedSim) {
     // Explicit removal also handles a restored student whose homework was completed.
@@ -958,6 +977,7 @@ pub(crate) fn apply_loaded_game(
             ec.insert(crate::aging::Aging { days, elder_span, elder_risk: s.elder_risk });
         }
         restore_school(&mut ec, s);
+        restore_clothing(&mut ec, s);
         ec.insert(s.body_temperature);
         if let Some(a) = &s.author {
             ec.insert(a.clone());
@@ -1135,6 +1155,38 @@ pub fn request_save(w: &mut MessageWriter<SaveRequest>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worn_outfit_and_dresser_choice_restore_and_legacy_saves_clear_them() {
+        use crate::simbody::{ChangedInto, OutfitKind, Wearing};
+        let mut rng = rand::rng();
+        let mut saved = saved_look(&random_sim(&mut rng, "Clothing", Some(true), Age::Adult));
+        let mut world = World::new();
+        let e = world.spawn_empty().id();
+        let apply = |world: &mut World, saved: &SavedSim| {
+            let mut queue = bevy::ecs::world::CommandQueue::default();
+            restore_clothing(&mut Commands::new(&mut queue, world).entity(e), saved);
+            queue.apply(world);
+        };
+        for outfit in OutfitKind::CHOICES {
+            for chosen in [false, true] {
+                saved.wearing = Some(outfit);
+                saved.outfit_chosen = chosen;
+                let restored: SavedSim = serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
+                apply(&mut world, &restored);
+                assert_eq!(world.get::<Wearing>(e).unwrap().0, outfit);
+                assert_eq!(world.get::<ChangedInto>(e).is_some(), chosen);
+                assert!(world.get::<crate::aging::NeedsNewBody>(e).is_some());
+            }
+        }
+        let mut json = serde_json::to_value(&saved).unwrap();
+        json.as_object_mut().unwrap().remove("wearing");
+        json.as_object_mut().unwrap().remove("outfit_chosen");
+        let legacy: SavedSim = serde_json::from_value(json).unwrap();
+        apply(&mut world, &legacy);
+        assert!(world.get::<Wearing>(e).is_none());
+        assert!(world.get::<ChangedInto>(e).is_none());
+    }
 
     #[test]
     fn weather_exposure_survives_save_and_legacy_saves_start_comfortable() {
