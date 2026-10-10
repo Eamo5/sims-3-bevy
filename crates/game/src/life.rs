@@ -348,6 +348,22 @@ mod trait_age_tests {
     use rand::SeedableRng;
 
     #[test]
+    fn original_trait_learning_multipliers_are_skill_specific() {
+        use Trait::*;
+        for (t, skill, expected) in [
+            (Artistic, "Painting", 1.25), (Artistic, "Guitar", 1.1), (Artistic, "Writing", 1.1),
+            (Virtuoso, "Guitar", 1.25), (Genius, "Logic", 1.3), (NaturalCook, "Cooking", 1.3),
+            (Athletic, "Athletic", 1.2), (Charismatic, "Charisma", 1.25),
+            (GreenThumb, "Gardening", 1.25), (Handy, "Handiness", 1.25),
+        ] {
+            assert_eq!(skill_rate(&[t], skill), expected, "{t:?}: {skill}");
+            assert_eq!(skill_rate(&[t], "Fishing"), 1.0);
+        }
+        assert!((skill_rate(&[Artistic, Virtuoso], "Guitar") - 1.375).abs() < 0.0001);
+        assert_eq!(skill_rate(&[GreenThumb, Handy], "Gardening"), 1.25);
+    }
+
+    #[test]
     fn mood_learning_rates_follow_original_negative_and_super_mood_bands() {
         for (mood, expected) in [(-200.0, 0.25), (-100.0, 0.25), (-50.0, 0.625), (0.0, 1.0), (25.0, 1.0), (50.0, 1.0), (100.0, 1.5), (150.0, 2.0), (200.0, 2.0)] {
             assert!((Mood(mood).skill_rate() - expected).abs() < 0.0001, "mood {mood}");
@@ -403,18 +419,21 @@ mod trait_age_tests {
     }
 }
 
-/// Skill learning speed.
+/// Skill learning speed, using TraitTuning's skill-specific multipliers.
 pub fn skill_rate(traits: &[Trait], skill: &str) -> f32 {
     let mut r = 1.0;
     for t in traits {
         r *= match (t, skill) {
-            (Trait::Artistic, "Painting" | "Guitar") => 1.5,
-            (Trait::Virtuoso, "Guitar") => 1.5,
+            (Trait::Artistic, "Painting") => 1.25,
+            (Trait::Artistic, "Guitar" | "Writing") => 1.1,
+            (Trait::Virtuoso, "Guitar") => 1.25,
             (Trait::Bookworm, "Writing") => 1.5,
-            (Trait::Genius, "Logic") => 1.5,
-            (Trait::NaturalCook, "Cooking") => 1.5,
-            (Trait::Athletic, "Athletic") => 1.5,
-            (Trait::Charismatic, "Charisma") => 1.5,
+            (Trait::Genius, "Logic" | "Chess" | "Hacking" | "Mooch") => 1.3,
+            (Trait::NaturalCook, "Cooking") => 1.3,
+            (Trait::Athletic, "Athletic") => 1.2,
+            (Trait::Charismatic, "Charisma") => 1.25,
+            (Trait::GreenThumb, "Gardening") => 1.25,
+            (Trait::Handy, "Handiness") => 1.25,
             (Trait::Lazy, _) => 0.85,
             _ => 1.0,
         };
