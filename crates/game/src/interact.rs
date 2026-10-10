@@ -890,11 +890,12 @@ static TV: [InteractionDef; 3] = [
 /// (The TV watched: from a seat facing it, or standing.)
 const WATCH_TV: InteractionDef = InteractionDef { autonomous: false, special: Special::WatchTv, ..def("Watch the TV", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 55.0], Pose::Stand) };
 const WATCH_TV_SEATED: InteractionDef = InteractionDef { on_object: true, pose: Pose::Sit, per_hour: [0.0, 0.0, 3.0, 0.0, 0.0, 55.0], ..WATCH_TV };
-static COMPUTER: [InteractionDef; 4] = [
+static COMPUTER: [InteractionDef; 5] = [
     def("Play Computer Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 60.0], Pose::Use),
     InteractionDef { autonomous: false, skill: Some("Writing"), special: Special::WriteNovel, ..def("Write Novel", 120.0, [0.0, 0.0, -4.0, 0.0, 0.0, 10.0], Pose::Use) },
     InteractionDef { autonomous: false, special: Special::FindJob, ..def("Find a Job", 20.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::QuitJob, ..def("Quit Job", 5.0, N, Pose::Use) },
+    InteractionDef { skill: Some("Logic"), ..def("Play Chess", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 40.0], Pose::Use) },
 ];
 static CRIB: [InteractionDef; 1] = [InteractionDef {
     until_full: Some(ENERGY),
@@ -1120,6 +1121,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
             A::new(None, &["a2o_tv_watch_idle1_standing", "a2o_tv_watch_idle2_standing", "a2o_tv_watch_idle3_standing", "a2o_tv_watch_active_standing"])
         }
         "Play Computer Games" => A::new(None, &["a2o_computer_game_loop1_x", "a2o_computer_game_loop2_x"]),
+        "Play Chess" if kind == ObjectKind::Computer => A::new(None, &["a2o_computer_chess_type_loop_x"]),
         "Write Novel" | "Find a Job" | "Quit Job" => A::new(None, &["a2o_computer_chess_type_loop_x"]),
         "Dance" => A::new(None, &["a_dance_beg_", "a_dance_med_"]),
         "Read a Book" => A::new(None, &["a2o_bookshelf_getBook_Carry_x"]),
@@ -2434,7 +2436,8 @@ fn run_actions(
                                     commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| crate::aging::reshape(&mut e, -0.03 * h * burn, 0.05 * h));
                                 }
                                 if let Some(sk) = d.skill {
-                                    let rate = crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) * mood_learning;
+                                    let computer_chess = if obj.kind == ObjectKind::Computer && d.name == "Play Chess" && sim.traits.contains(&crate::life::Trait::ComputerWhiz) { 1.1 } else { 1.0 };
+                                    let rate = crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) * mood_learning * computer_chess;
                                     let e = skills.0.entry(sk).or_insert(0.0);
                                     let before = *e as u32;
                                     *e = (*e + dt / 60.0 * 0.6 * rate / (1.0 + *e * 0.25)).min(10.0);
@@ -3255,6 +3258,16 @@ fn maintenance_minutes(base: f32, handiness: f32, traits: &[crate::life::Trait],
 #[cfg(test)]
 mod maintenance_tests {
     use super::*;
+
+    #[test]
+    fn computer_chess_teaches_logic_with_keyboard_not_table_animations() {
+        let chess = interactions_for(ObjectKind::Computer).iter().find(|d| d.name == "Play Chess").unwrap();
+        assert_eq!(chess.skill, Some("Logic"));
+        let computer = interaction_clip(chess.name, ObjectKind::Computer).unwrap();
+        assert_eq!(computer.loops, &["a2o_computer_chess_type_loop_x"]);
+        let table = interaction_clip("Play Chess", ObjectKind::Chess).unwrap();
+        assert!(table.loops.iter().all(|s| s.contains("chessTable")));
+    }
 
     #[test]
     fn computer_whiz_stacks_with_handiness_without_speeding_up_other_objects() {
