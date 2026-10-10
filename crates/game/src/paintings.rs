@@ -23,7 +23,7 @@ pub struct PaintingsPlugin;
 
 impl Plugin for PaintingsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PaintingImages>().add_systems(Update, easel_canvases.run_if(in_state(crate::PlayMode::Live)));
+        app.init_resource::<PaintingImages>().add_systems(Update, easel_canvases.before(crate::interact::run_actions).run_if(in_state(crate::PlayMode::Live)));
     }
 }
 
@@ -56,12 +56,6 @@ pub fn painting_minutes(size: u8, journal: Option<&crate::journal::SkillJournal>
 pub struct PaintPlan {
     pub size: u8,
     pub painted: Option<Painted>,
-}
-
-impl PaintPlan {
-    pub fn new(size: u8) -> Self {
-        Self { size, painted: None }
-    }
 }
 
 /// A painting hung on a wall: the inventory item it is (its picture, name and worth).
@@ -217,7 +211,7 @@ pub struct EaselCanvas {
 #[allow(clippy::type_complexity)]
 fn easel_canvases(
     mut commands: Commands,
-    mut painters: Query<(Entity, &crate::sim::Sim, &ActionQueue, &Skills, Option<&mut PaintPlan>, Option<&crate::wishes::Wishes>, Option<&crate::journal::SkillJournal>)>,
+    mut painters: Query<(Entity, &crate::sim::Sim, &mut ActionQueue, &Skills, Option<&mut PaintPlan>, Option<&crate::wishes::Wishes>, Option<&crate::journal::SkillJournal>)>,
     objects: Query<&GameObject>,
     canvases: Query<(Entity, &EaselCanvas)>,
     baked: Option<Res<crate::baked::Baked>>,
@@ -228,26 +222,33 @@ fn easel_canvases(
     let data = &baked.0.paintings;
     // (Painter, easel, canvas, picture, whether it's showing.)
     let mut painting: Vec<(Entity, Entity, u8, Option<Key>, bool)> = Vec::new();
-    for (me, sim, queue, skills, plan, wishes, journal) in &mut painters {
-        let Some(a) = queue.0.front() else { continue };
-        let (ActionKind::Object { target, def }, Phase::Running(elapsed)) = (&a.kind, &a.phase) else { continue };
-        let Ok(obj) = objects.get(*target) else { continue };
+    for (me, sim, mut queue, skills, plan, wishes, journal) in &mut painters {
+        let Some(a) = queue.0.front_mut() else { continue };
+        if a.cancel || a.completed { continue; }
+        let (ActionKind::Object { target, def }, Phase::Running(elapsed)) = (&a.kind, a.phase) else { continue };
+        let target = *target;
+        let Ok(obj) = objects.get(target) else { continue };
         if crate::interact::interactions_for(obj.kind).get(*def).is_none_or(|d| d.special != Special::SellPainting) {
             continue;
         }
         let level = skills.level("Painting");
-        let size = canvas(plan.as_deref(), level);
+        let requested = a.canvas_choice.take();
+        let size = requested.map_or_else(|| canvas(plan.as_deref(), level), |size| size.min(2));
         let chosen = || paint(Some(data), size, level, &sim.traits, sim.age == crate::sim::Age::Child, crate::wishes::has(wishes, "ExtraCreative"), crate::journal::earned(journal, "Proficient Painter"), &mut rand::rng());
-        let painted = match plan {
+        let painted = if requested.is_some() {
+            let p = chosen();
+            commands.entity(me).insert(PaintPlan { size, painted: Some(p.clone()) });
+            p
+        } else { match plan {
             Some(mut p) => p.painted.get_or_insert_with(chosen).clone(),
             None => {
                 let p = chosen();
                 commands.entity(me).insert(PaintPlan { size, painted: Some(p.clone()) });
                 p
             }
-        };
+        } };
         let design = key_picture(&painted.key).map(|(_, pic)| s3bake::gamedata::painting_texture(&pic));
-        painting.push((me, *target, size, design, *elapsed >= painting_minutes(size, journal) / 3.0));
+        painting.push((me, target, size, design, elapsed >= painting_minutes(size, journal) / 3.0));
     }
     // The canvases of those who've stopped go (and one's put up afresh as the picture comes).
     for (e, c) in &canvases {

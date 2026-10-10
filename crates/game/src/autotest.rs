@@ -2907,11 +2907,10 @@ fn auto_action(
     let def_name = if canvas.is_some() { "Paint" } else { name.as_str() };
     for (e, o) in &objects {
         if let Some(i) = crate::interact::interactions_for(o.kind).iter().position(|d| d.name.eq_ignore_ascii_case(def_name)) {
-            if let (Some(c), Ok(me)) = (canvas, sel_e.single()) {
-                commands.entity(me).insert(crate::paintings::PaintPlan::new(c as u8));
-            }
             q.0.clear();
-            q.push_player(crate::interact::Action::new(name.clone(), crate::interact::ActionKind::Object { target: e, def: i }, false));
+            let mut action = crate::interact::Action::new(name.clone(), crate::interact::ActionKind::Object { target: e, def: i }, false);
+            action.canvas_choice = canvas.map(|c| c as u8);
+            q.push_player(action);
             *done = true;
             return;
         }

@@ -1582,11 +1582,12 @@ pub struct Action {
     /// Genre selected for this queued writing action, consumed when it starts writing.
     pub novel_genre: Option<usize>,
     pub outfit_choice: Option<crate::simbody::OutfitKind>,
+    pub canvas_choice: Option<u8>,
 }
 
 impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
-        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None }
+        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None }
     }
 }
 
@@ -1899,7 +1900,7 @@ pub struct LotExit(pub Vec2);
 // Systems
 
 #[allow(clippy::type_complexity)]
-fn run_actions(
+pub(crate) fn run_actions(
     mut commands: Commands,
     delta: Res<SimDelta>,
     clock: Res<GameClock>,
@@ -3308,6 +3309,25 @@ fn maintenance_minutes(base: f32, handiness: f32, traits: &[crate::life::Trait],
 #[cfg(test)]
 mod maintenance_tests {
     use super::*;
+
+    #[test]
+    fn queued_canvas_sizes_are_consumed_independently() {
+        let mut world = World::new();
+        let target = world.spawn_empty().id();
+        let mut queue = ActionQueue::default();
+        for size in [0, 2, 1] {
+            let mut action = Action::new("Paint", ActionKind::Object { target, def: 0 }, false);
+            action.canvas_choice = Some(size);
+            queue.push_player(action);
+        }
+        assert_eq!(queue.0.front_mut().unwrap().canvas_choice.take(), Some(0));
+        assert_eq!(queue.0[1].canvas_choice, Some(2));
+        assert_eq!(queue.0[2].canvas_choice, Some(1));
+        queue.0.remove(1); // Cancel the large canvas before it starts.
+        queue.0.pop_front();
+        assert_eq!(queue.0.front_mut().unwrap().canvas_choice.take(), Some(1));
+        assert_eq!(queue.0.front().unwrap().canvas_choice, None);
+    }
 
     #[test]
     fn queued_outfit_choices_remain_independent_when_later_choices_are_cancelled_or_rejected() {
