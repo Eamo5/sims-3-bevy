@@ -389,6 +389,40 @@ fn outings(
 #[derive(Component)]
 pub struct Homework;
 
+/// Claim an assignment in the exclusive command phase before granting any rewards.
+/// Queued self-study and helpers can finish in the same update; only one succeeds.
+pub fn complete_homework(world: &mut World, student: Entity, helper: Option<Entity>, minutes: f32) -> bool {
+    let Some(sim) = world.get::<Sim>(student) else { return false };
+    if !matches!(sim.age, Age::Child | Age::Teen) || world.get::<Homework>(student).is_none() {
+        return false;
+    }
+    let student_name = sim.first.clone();
+    let helper_name = match helper {
+        Some(e) => {
+            let Some(sim) = world.get::<Sim>(e) else { return false };
+            if e == student || matches!(sim.age, Age::Baby | Age::Toddler | Age::Child) { return false; }
+            Some(sim.first.clone())
+        }
+        None => None,
+    };
+    world.entity_mut(student).remove::<Homework>();
+    if let Some(mut grade) = world.get_mut::<SchoolGrades>(student) {
+        grade.0 = (grade.0 + if helper.is_some() { 9.0 } else { 6.0 }).min(100.0);
+    }
+    let message = if let (Some(helper), Some(name)) = (helper, helper_name) {
+        world.write_message(crate::journal::Did::count(helper, crate::journal::Stat::TutoringHours, minutes as f64 / 60.0));
+        if let Some(mut skills) = world.get_mut::<Skills>(helper) {
+            let logic = skills.0.entry("Logic").or_insert(0.0);
+            *logic = (*logic + minutes / 60.0 * 0.3 / (1.0 + *logic * 0.25)).min(10.0);
+        }
+        format!("{name} helped {student_name} with their homework.")
+    } else {
+        format!("{student_name} finished their homework.")
+    };
+    world.resource_mut::<Notifications>().push(message);
+    true
+}
+
 /// A student's school performance, normalized to 0..100 (A at the top).
 #[derive(Component, Clone, Copy)]
 pub struct SchoolGrades(pub f32);
@@ -441,6 +475,38 @@ mod school_grade_tests {
 mod school_schedule_tests {
     use super::*;
     use rand::SeedableRng;
+
+    #[test]
+    fn homework_and_tutoring_rewards_require_a_unique_live_assignment() {
+        let mut app = App::new();
+        app.init_resource::<Notifications>().add_message::<crate::journal::Did>();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(45);
+        let student = app.world_mut().spawn((
+            crate::sim::random_sim(&mut rng, "Student", Some(false), Age::Child),
+            Homework, SchoolGrades(55.0),
+        )).id();
+        let helper = app.world_mut().spawn((
+            crate::sim::random_sim(&mut rng, "Helper", Some(false), Age::Adult), Skills::default(),
+        )).id();
+        let world = app.world_mut();
+        assert!(complete_homework(world, student, None, 0.0));
+        assert!(!complete_homework(world, student, Some(helper), 60.0));
+        assert_eq!(world.get::<SchoolGrades>(student).unwrap().0, 61.0);
+        assert_eq!(world.get::<Skills>(helper).unwrap().0.get("Logic"), None);
+        assert_eq!(world.resource::<Messages<crate::journal::Did>>().len(), 0);
+        world.entity_mut(student).insert(Homework);
+        assert!(complete_homework(world, student, Some(helper), 60.0));
+        assert!(!complete_homework(world, student, None, 0.0));
+        assert!(!complete_homework(world, student, Some(helper), 60.0));
+        assert_eq!(world.get::<SchoolGrades>(student).unwrap().0, 70.0);
+        assert_eq!(world.get::<Skills>(helper).unwrap().0.get("Logic"), Some(&0.3));
+        assert_eq!(world.resource::<Messages<crate::journal::Did>>().len(), 1);
+        world.entity_mut(student).insert(Homework);
+        world.get_mut::<Sim>(student).unwrap().age = Age::YoungAdult;
+        assert!(!complete_homework(world, student, Some(helper), 60.0));
+        world.despawn(student);
+        assert!(!complete_homework(world, student, None, 0.0));
+    }
 
     #[test]
     fn bus_classroom_hours_and_weekends_follow_student_age() {

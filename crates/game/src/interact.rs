@@ -2505,11 +2505,8 @@ fn run_actions(
                                             commands.entity(me).insert(crate::surroundings::PaperInHand(*target));
                                         }
                                         Special::Homework => {
-                                            notes.push(format!("{} finished their homework.", sim.first));
-                                            commands.entity(me).remove::<crate::rabbitholes::Homework>().queue_silenced(|mut e: EntityWorldMut| {
-                                                if let Some(mut g) = e.get_mut::<crate::rabbitholes::SchoolGrades>() {
-                                                    g.0 = (g.0 + 6.0).min(100.0);
-                                                }
+                                            commands.queue(move |world: &mut World| {
+                                                crate::rabbitholes::complete_homework(world, me, None, 0.0);
                                             });
                                         }
                                         Special::QuitJob => {
@@ -2824,15 +2821,10 @@ fn run_actions(
                                             notes.push(format!("{} declared {} their nemesis!", sim.first, tname));
                                         }
                                         SocialEffect::HelpHomework => {
-                                            notes.push(format!("{} helped {tname} with their homework.", sim.first));
-                                            commands.entity(*target).remove::<crate::rabbitholes::Homework>().queue_silenced(|mut e: EntityWorldMut| {
-                                                if let Some(mut g) = e.get_mut::<crate::rabbitholes::SchoolGrades>() {
-                                                    g.0 = (g.0 + 9.0).min(100.0);
-                                                }
+                                            let student = *target;
+                                            commands.queue(move |world: &mut World| {
+                                                crate::rabbitholes::complete_homework(world, student, Some(me), minutes);
                                             });
-                                            did.write(crate::journal::Did::count(me, crate::journal::Stat::TutoringHours, minutes as f64 / 60.0));
-                                            let e = skills.0.entry("Logic").or_insert(0.0);
-                                            *e = (*e + minutes / 60.0 * 0.3 / (1.0 + *e * 0.25)).min(10.0);
                                         }
                                         SocialEffect::Greet => {
                                             notes.push(format!("{} let {tname} in.", sim.first));
