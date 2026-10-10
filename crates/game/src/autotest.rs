@@ -198,6 +198,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(PreUpdate, press_key.after(bevy::input::InputSystems).before(crate::buy::toggle_buy).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, buy_pick.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, ui_click.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(PreUpdate, ui_right_click.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, pointer_script.after(bevy::input::InputSystems).before(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             // Observe furniture after gameplay's deferred restore/despawn commands apply.
             .add_systems(PostUpdate, buy_move_test.run_if(in_state(crate::PlayMode::Live)))
@@ -548,6 +549,28 @@ fn ui_click(time: Res<Time<InputTimeline>>, mut controls: Query<(&crate::layout:
         *interaction = Interaction::Pressed;
         info!("autotest: UI control {id:08X} clicked");
         *step += 1;
+    }
+}
+
+/// UI_RIGHT_CLICK=<hex control id>@<seconds>;...: exercise right-click HUD actions.
+fn ui_right_click(
+    time: Res<Time<InputTimeline>>,
+    mut controls: Query<(&crate::layout::UiWin, &InheritedVisibility, &mut Interaction)>,
+    mut mouse: ResMut<ButtonInput<MouseButton>>,
+    mut state: Local<(usize, bool)>,
+) {
+    if state.1 {
+        mouse.release(MouseButton::Right);
+        state.1 = false;
+    }
+    let Some((id, at)) = std::env::var("UI_RIGHT_CLICK").ok().and_then(|v| v.split(';').nth(state.0).and_then(|s| s.split_once('@')).and_then(|(id, at)| Some((u32::from_str_radix(id.trim().trim_start_matches("0x"), 16).ok()?, at.parse::<f32>().ok()?)))) else { return };
+    if time.elapsed_secs() < at { return; }
+    if let Some((_, _, mut interaction)) = controls.iter_mut().find(|(w, v, _)| w.0 == id && v.get()) {
+        *interaction = Interaction::Hovered;
+        mouse.press(MouseButton::Right);
+        state.0 += 1;
+        state.1 = true;
+        info!("autotest: UI control {id:08X} right-clicked");
     }
 }
 
