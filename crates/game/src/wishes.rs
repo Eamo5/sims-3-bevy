@@ -332,6 +332,20 @@ fn reward_age_allowed(reward: &str, age: crate::sim::Age) -> bool {
     !matches!(reward, "ImmuneToCold" | "ImmuneToHeat") || !age.is_little()
 }
 
+/// Revalidate dialog choices against current state before spending happiness.
+/// Permanent rewards and reward objects are recorded atomically with payment;
+/// the two choice-based rewards remain available for another purchase later.
+fn purchase_reward(w: &mut Wishes, reward: &str, age: crate::sim::Age, cost: u32) -> bool {
+    if !REWARDS.contains(&reward) || w.has_reward(reward) || !reward_age_allowed(reward, age) || w.points < cost {
+        return false;
+    }
+    w.points -= cost;
+    if !matches!(reward, "MidLifeCrisis" | "ChangeLifetimeWish") {
+        w.rewards.push(reward.to_string());
+    }
+    true
+}
+
 /// A lifetime reward chosen: bought, if there's lifetime happiness enough.
 fn buy_rewards(
     mut commands: Commands,
@@ -345,27 +359,24 @@ fn buy_rewards(
     for a in answers.read() {
         let crate::dialog::Question::Reward { sim: e, rewards } = &a.about else { continue };
         let (Ok((sim, mut w)), Some(r)) = (sims.get_mut(*e), rewards.get(a.answer)) else { continue };
-        if !reward_age_allowed(r, sim.age) { continue; }
+        if !REWARDS.contains(&r.as_str()) || w.has_reward(r) || !reward_age_allowed(r, sim.age) { continue; }
         let Some(t) = ui.data.traits.iter().find(|t| t.hex == *r) else { continue };
         if w.points < t.points {
             notes.push(format!("{} needs {} more lifetime happiness for {}.", sim.first, crate::lifetime::group((t.points - w.points) as i64), t.name));
             continue;
         }
-        w.points -= t.points;
+        if !purchase_reward(&mut w, r, sim.age, t.points) { continue; }
         notes.push(format!("{} gained the {} lifetime reward!", sim.first, t.name));
         // A new lifetime wish is chosen there and then; an object's theirs to place; the
         // rest last.
         if let Some((_, object)) = REWARD_OBJECTS.iter().find(|(x, _)| x == r) {
             crate::inventory::give(&mut commands, *e, crate::inventory::ItemKind::Reward, object.to_string(), t.name.clone(), 0, 0, 1);
             notes.push(format!("The {} is in {}'s inventory, to place on the lot.", t.name, sim.first));
-            w.rewards.push(r.clone());
         } else if r == "MidLifeCrisis" {
             commands.insert_resource(crate::midlife::TraitPicker::open(*e, &sim.traits, t.points));
         } else if r == "ChangeLifetimeWish" {
             crate::lifetime::ask_lifetime_wish(&mut questions, Some(&ui.data), *e, sim);
             commands.entity(*e).remove::<crate::lifetime::LifetimeWish>().insert(crate::lifetime::ChoosingLifetimeWish);
-        } else {
-            w.rewards.push(r.clone());
         }
     }
 }
@@ -636,6 +647,27 @@ mod tests {
         assert_eq!(book_price(Some(&both), 31), 19);
         assert_eq!(price_factor(Some(&both), "Buy Seeds"), 0.85);
         assert_eq!(price_factor(Some(&book), "Buy Seeds"), 1.0);
+    }
+
+    #[test]
+    fn stale_reward_answers_cannot_charge_twice_or_bypass_current_eligibility() {
+        for reward in ["ImmuneToCold", "SteelBladder", "FoodReplicator"] {
+            let mut w = Wishes::restored(30_000, Vec::new(), 0.0);
+            assert!(purchase_reward(&mut w, reward, Age::Adult, 10_000));
+            assert_eq!(w.points, 20_000);
+            assert!(!purchase_reward(&mut w, reward, Age::Adult, 10_000));
+            assert_eq!(w.points, 20_000, "stale answer must not spend more points");
+            assert_eq!(w.rewards, vec![reward.to_string()]);
+        }
+        let mut w = Wishes::restored(10_000, Vec::new(), 0.0);
+        assert!(!purchase_reward(&mut w, "ImmuneToHeat", Age::Toddler, 10_000));
+        assert!(!purchase_reward(&mut w, "UnknownReward", Age::Adult, 1));
+        assert_eq!(w.points, 10_000);
+        assert!(w.rewards.is_empty());
+        assert!(purchase_reward(&mut w, "ImmuneToCold", Age::Child, 10_000));
+        assert!(!purchase_reward(&mut w, "ImmuneToHeat", Age::Child, 10_000), "another purchase may have spent the dialog's original balance");
+        assert_eq!(w.points, 0);
+        assert_eq!(w.rewards, vec!["ImmuneToCold"]);
     }
 
     /// Every lifetime reward offered is one of the game's, with its cost (needs the bake:
