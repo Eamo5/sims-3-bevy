@@ -2408,6 +2408,10 @@ fn run_actions(
                                     } else if i == FUN && affinity < 0.5 {
                                         gain -= 20.0;
                                     }
+                                    // TraitTuning.kWorkaholicTraitHomeworkFunPerHour.
+                                    if i == FUN && d.special == Special::Homework && sim.traits.contains(&crate::life::Trait::Workaholic) {
+                                        gain = 20.0;
+                                    }
                                     if i == ENERGY && d.until_full == Some(ENERGY) {
                                         gain *= crate::life::sleep_rate(&sim.traits);
                                     }

@@ -468,7 +468,7 @@ pub fn activity_affinity(traits: &[Trait], activity: &str) -> f32 {
             (Trait::Athletic, "Work Out") => 2.0,
             (Trait::Lazy, "Work Out") => 0.3,
             (Trait::Lazy, "Nap" | "Relax" | "Watch TV") => 1.5,
-            (Trait::ComputerWhiz, "Play Computer Games" | "Write Novel") => 1.6,
+            (Trait::ComputerWhiz, "Play Computer Games") => 1.5,
             (Trait::Technophobe, "Play Computer Games" | "Write Novel" | "Watch TV") => 0.3,
             (Trait::Artistic, "Paint" | "Play Guitar") => 1.6,
             (Trait::Virtuoso, "Play Guitar") => 2.0,
