@@ -2564,8 +2564,8 @@ fn run_actions(
                                                 )
                                             });
                                             commands.entity(me).remove::<crate::paintings::PaintPlan>();
-                                            // (A Master Painter's sell for double.)
-                                            let p = if crate::journal::earned(journals.get(me).ok(), "Master Painter") { crate::paintings::Painted { worth: p.worth * 2, ..p } } else { p };
+                                            // A Master Painter's paintings gain the original 30% value bonus.
+                                            let p = if crate::journal::earned(journals.get(me).ok(), "Master Painter") { crate::paintings::Painted { worth: (p.worth as f64 * 1.3).round() as i64, ..p } } else { p };
                                             did.write(crate::journal::Did::count(me, crate::journal::Stat::Paintings, 1.0));
                                             match p.name {
                                                 "Brilliant Painting" => {

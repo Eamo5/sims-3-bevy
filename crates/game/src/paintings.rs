@@ -31,7 +31,17 @@ impl Plugin for PaintingsPlugin {
 /// size.
 pub const CANVASES: [&str; 3] = ["Small Canvas", "Medium Canvas", "Large Canvas"];
 pub const CANVAS_MINUTES: [f32; 3] = [180.0, 300.0, 480.0];
-const CANVAS_WORTH: [f32; 3] = [1.0, 1.6, 2.5];
+/// EaselCanvasSmall/Medium/Large.kTuningCanvas.ValuePerSkillLevel.
+const CANVAS_VALUES: [[f32; 11]; 3] = [
+    [1.0, 3.0, 8.0, 12.0, 21.0, 30.0, 55.0, 100.0, 145.0, 200.0, 280.0],
+    [10.0, 15.0, 25.0, 40.0, 75.0, 110.0, 150.0, 225.0, 310.0, 400.0, 525.0],
+    [30.0, 50.0, 80.0, 110.0, 150.0, 220.0, 300.0, 425.0, 600.0, 750.0, 1000.0],
+];
+
+fn base_value(size: u8, level: u32, quality: u8, random: f32) -> f32 {
+    let quality = match quality { 3 => 1.5, 2 => 1.25, _ => 1.0 };
+    CANVAS_VALUES[size.min(2) as usize][level.min(10) as usize] * random * quality
+}
 
 /// Easel's canvas times and kDabbleModifier for children; Brushmasters take half as long.
 pub fn painting_minutes(size: u8, child: bool, journal: Option<&crate::journal::SkillJournal>) -> f32 {
@@ -120,12 +130,7 @@ pub fn paint(data: Option<&PaintingsBaked>, size: u8, level: u32, traits: &[Trai
         (_, 0..=2) => "Amateur Painting",
         _ => "Fine Painting",
     };
-    let mut worth = (15 + level as i64 * level as i64 * 12 + rng.random_range(0..20)) as f32 * CANVAS_WORTH[size.min(2) as usize];
-    worth *= match quality {
-        3 => 3.0,
-        2 => 1.5,
-        _ => 1.0,
-    };
+    let mut worth = base_value(size, level, quality, rng.random_range(0.75..=1.25));
     if extra_creative {
         worth *= 1.5;
     }
@@ -281,6 +286,25 @@ pub fn image(cache: &mut PaintingImages, images: &mut Assets<Image>, baked: &cra
 mod tests {
     use super::*;
     use s3bake::gamedata::CanvasInfo;
+
+    #[test]
+    fn canvas_prices_use_original_skill_tables_and_quality_multipliers() {
+        assert_eq!(base_value(0, 0, 0, 1.0), 1.0);
+        assert_eq!(base_value(1, 5, 0, 1.0), 110.0);
+        assert_eq!(base_value(2, 10, 0, 1.0), 1000.0);
+        assert_eq!(base_value(0, 10, 2, 1.0), 350.0);
+        assert_eq!(base_value(1, 10, 3, 1.0), 787.5);
+        assert_eq!(base_value(2, 10, 3, 0.75), 1125.0);
+        assert_eq!(base_value(2, 10, 3, 1.25), 1875.0);
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(102);
+        for (size, lo, hi) in [(0, 23, 38), (1, 83, 138), (2, 165, 275)] {
+            for _ in 0..100 {
+                let p = paint(None, size, 5, &[], false, false, false, &mut rng);
+                assert!((lo..=hi).contains(&p.worth), "canvas {size}: {}", p.worth);
+            }
+        }
+    }
 
     #[test]
     fn brushmaster_duration_uses_the_earned_challenge_after_reload() {
