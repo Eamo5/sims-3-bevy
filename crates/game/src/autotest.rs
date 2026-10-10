@@ -3230,12 +3230,18 @@ fn ui_flow(
             shot(&mut commands, "2c_colours");
             if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::Colourway(n) if *n > 0)) {
                 *i = Interaction::Pressed;
+            } else {
+                // (The game's clothing rows: the worn item's second colourway.)
+                ask_cas(&mut commands, &[crate::home::CasAction::Colourway(1)]);
             }
             *stage = (91, now);
         }
         (91, AppState::CreateHousehold, _) if since > 2.0 => {
             shot(&mut commands, "2c_colourway");
-            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == crate::home::CasAction::Styling) {
+            if crate::casstyle::STYLE_UP.load(std::sync::atomic::Ordering::Relaxed) {
+                // (The game's Create a Style, on the top worn.)
+                ask_cas(&mut commands, &[crate::home::CasAction::Tab(crate::cas::CasTab::Tops), crate::home::CasAction::Styling]);
+            } else if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == crate::home::CasAction::Styling) {
                 *i = Interaction::Pressed;
             }
             *stage = (93, now);
@@ -3245,11 +3251,18 @@ fn ui_flow(
             shot(&mut commands, "2c_style_panel");
             if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == crate::home::CasAction::StyleColour(0, 6)) {
                 *i = Interaction::Pressed;
+            } else {
+                // (The game's Create a Style: the first channel red, as its palette asks.)
+                ask_cas(&mut commands, &[crate::home::CasAction::StyleRgb(0, crate::style::PALETTE[6])]);
             }
             *stage = (94, now);
         }
         (94, AppState::CreateHousehold, _) if since > 5.0 => {
             shot(&mut commands, "2c_styled");
+            // (Kept: Create a Style closed with OK.)
+            if crate::casstyle::STYLE_UP.load(std::sync::atomic::Ordering::Relaxed) {
+                ask_cas(&mut commands, &[crate::home::CasAction::Styling]);
+            }
             *stage = (86, now);
         }
         // Dressing the formal wear: its tops, and the third of them worn.

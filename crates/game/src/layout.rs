@@ -367,7 +367,7 @@ fn select_marked(mut q: Query<&mut UiButton, Added<Selected>>) {
 }
 
 /// The custom controls that load a layout of their own name into themselves (`PreInit`).
-const EMBEDDED: [&str; 5] = ["BubbleMeter", "MoodBar", "RelationshipBar", "DifficultyMeter", "ChallengeProgressMeter"];
+const EMBEDDED: [&str; 6] = ["BubbleMeter", "MoodBar", "RelationshipBar", "DifficultyMeter", "ChallengeProgressMeter", "ColorPicker"];
 
 pub fn color(argb: u32) -> Color {
     Color::srgba_u8((argb >> 16) as u8, (argb >> 8) as u8, argb as u8, (argb >> 24) as u8)

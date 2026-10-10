@@ -149,6 +149,10 @@ pub enum CasAction {
     /// What member `i` is to member `j` (`family::Tie::ALL[t]`; roommates: nothing), from the
     /// game's family screen.
     SetTie(usize, usize, u8),
+    /// Create a Style: a channel's colour (red, green, blue: 0 to 1), from the game's colour
+    /// picker; and the style dropped, the item as it was before Create a Style opened.
+    StyleRgb(u8, [f32; 3]),
+    StyleCancel,
 }
 
 /// The face sliders by part of the face, as Create a Sim groups them: each slider's pair (in
@@ -209,8 +213,9 @@ pub(crate) struct CasScene {
     portrait: Option<Handle<Image>>,
     /// The outfit being dressed (and shown).
     pub(crate) wear: crate::simbody::OutfitKind,
-    /// Create a Style open.
+    /// Create a Style open, and what the Sim wore when it opened.
     styling: bool,
+    style_undo: Option<(u64, Vec<crate::style::CustomStyle>, Vec<(Key, u8)>)>,
     /// The part of the face being sculpted (`FACE_AREAS`).
     pub(crate) face_area: u8,
 }
@@ -349,6 +354,7 @@ fn setup_cas(
         scroll: 0.0,
         wear: crate::simbody::OutfitKind::Everyday,
         styling: false,
+        style_undo: None,
         face_area: 0,
     });
     // The stage: camera, lights, pedestal.
@@ -674,13 +680,30 @@ fn cas_actions(
             }
             CasAction::Styling => {
                 scene.styling = !scene.styling;
+                // (What the Sim wore before, for Create a Style's Cancel.)
+                let s = &pending.members[k];
+                scene.style_undo = scene.styling.then(|| (s.id, s.outfit.styles.clone(), s.outfit.designs.clone()));
                 model = false;
             }
-            CasAction::StyleColour(ch, idx) => {
+            CasAction::StyleCancel => {
+                if let Some((who, styles, designs)) = scene.style_undo.take()
+                    && let Some(sim) = pending.members.iter_mut().find(|s| s.id == who)
+                {
+                    sim.outfit.styles = styles;
+                    sim.outfit.designs = designs;
+                }
+                scene.styling = false;
+            }
+            CasAction::StyleColour(..) | CasAction::StyleRgb(..) => {
                 model = false;
+                let (ch, colour) = match *action {
+                    CasAction::StyleColour(ch, idx) => (ch, crate::style::PALETTE.get(idx as usize).copied()),
+                    CasAction::StyleRgb(ch, c) => (ch, Some(c)),
+                    _ => continue,
+                };
                 if let Some(t) = scene.tab.clothing_type().filter(|t| *t != CT_HAIR)
                     && let Some(key) = worn(&scene, &pending.members[k], t)
-                    && let Some(&colour) = crate::style::PALETTE.get(idx as usize)
+                    && let Some(colour) = colour
                     && let Some(install) = install.as_ref()
                 {
                     let sim = &mut pending.members[k];
