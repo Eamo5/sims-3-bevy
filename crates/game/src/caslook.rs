@@ -122,7 +122,7 @@ fn spawn_cas_frame(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut im
             commands.entity(e).insert((action, crate::icons::Tooltip(tip.into())));
         }
     }
-    for (id, tip) in [(ACCEPT, "Accept"), (CANCEL, "Cancel"), (MORE, "More"), (OPTIONS, "Options"), (ROTATE_LEFT, "Rotate"), (ROTATE_RIGHT, "Rotate")] {
+    for (id, tip) in [(ACCEPT, "Accept"), (CANCEL, "Cancel"), (MORE, "More"), (OPTIONS, "Options"), (ROTATE_LEFT, "Rotate"), (ROTATE_RIGHT, "Rotate"), (ZOOM_IN, "Zoom In"), (ZOOM_OUT, "Zoom Out")] {
         if let Some(e) = puck.id(id) {
             commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
         }
@@ -239,7 +239,7 @@ fn puck_buttons(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     (mut options, settings): (ResMut<crate::options::OptionsPanel>, Res<crate::options::Settings>),
     mut actions: MessageWriter<crate::cas::CasActionRequest>,
-    (families, pending): (Res<crate::cas::CasFamilies>, Res<PendingHousehold>),
+    (families, pending, mut zoom): (Res<crate::cas::CasFamilies>, Res<PendingHousehold>, ResMut<crate::cas::CasZoom>),
 ) {
     let (Some(f), Some(mut ui)) = (frame, ui) else { return };
     let pressed = |id: u32| crate::livehud::pressed(&clicks, f.puck.id(id));
@@ -261,7 +261,13 @@ fn puck_buttons(
     if pressed(ROTATE_RIGHT) {
         turn.0 -= std::f32::consts::FRAC_PI_4;
     }
-    let _ = (ZOOM_IN, ZOOM_OUT);
+    // The camera in close on their head, or out on all of them.
+    if pressed(ZOOM_IN) {
+        zoom.0 = Some(true);
+    }
+    if pressed(ZOOM_OUT) {
+        zoom.0 = Some(false);
+    }
     let at = windows.single().ok().and_then(|w| w.cursor_position()).unwrap_or(Vec2::new(900.0, 700.0));
     if pressed(MORE) {
         let mut items = vec!["Remove Sim".to_string(), "New Family".to_string()];

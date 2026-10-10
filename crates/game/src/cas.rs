@@ -23,6 +23,7 @@ pub struct CasPlugin;
 impl Plugin for CasPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CasSelected>()
+            .init_resource::<CasZoom>()
             .init_resource::<CasTurn>()
             .init_resource::<CasFamilies>()
             .add_message::<CasActionRequest>()
@@ -227,6 +228,11 @@ impl Default for CasTab {
     }
 }
 
+/// The camera close on the Sim's head (true) or on all of them (false), as the puck's zoom
+/// buttons ask; none: as the tab has it (the face and hair close).
+#[derive(Resource, Default)]
+pub struct CasZoom(pub Option<bool>);
+
 /// A turn of the Sim asked for by the puck's buttons.
 #[derive(Resource, Default)]
 pub struct CasTurn(pub f32);
@@ -261,9 +267,17 @@ struct CasCamera;
 
 /// The camera eased towards its framing for the tab: the face (at the Sim's head height for
 /// their age) on the Face tab, else the whole Sim.
-fn frame_camera(scene: Option<Res<CasScene>>, pending: Res<PendingHousehold>, time: Res<Time>, mut cam: Query<&mut Transform, With<CasCamera>>) {
+fn frame_camera(scene: Option<Res<CasScene>>, pending: Res<PendingHousehold>, time: Res<Time>, mut cam: Query<&mut Transform, With<CasCamera>>, mut zoom: ResMut<CasZoom>, mut last_tab: Local<Option<CasTab>>) {
     let (Some(scene), Ok(mut tf)) = (scene, cam.single_mut()) else { return };
-    let (eye, at) = match pending.members.get(scene.selected).filter(|_| scene.tab == CasTab::Face && !scene.browsing) {
+    // (Another tab: the camera as it has it.)
+    if *last_tab != Some(scene.tab) {
+        *last_tab = Some(scene.tab);
+        zoom.0 = None;
+    }
+    let close = zoom.0.unwrap_or(matches!(scene.tab, CasTab::Face | CasTab::Hair));
+    // (The hair's a little further back than the face's, to see it all.)
+    let back = if scene.tab == CasTab::Hair && zoom.0.is_none() { 1.6 } else { 1.1 };
+    let (eye, at) = match pending.members.get(scene.selected).filter(|_| close && !scene.browsing) {
         Some(sim) => {
             let head = match sim.age {
                 Age::Baby => 0.35,
@@ -272,7 +286,7 @@ fn frame_camera(scene: Option<Res<CasScene>>, pending: Res<PendingHousehold>, ti
                 Age::Teen => 1.52,
                 _ => 1.6,
             };
-            (Vec3::new(0.06, head + 0.02, 1.1), Vec3::new(0.06, head - 0.02, 0.0))
+            (Vec3::new(0.06, head + 0.02, back), Vec3::new(0.06, head - 0.02, 0.0))
         }
         None => (Vec3::new(-0.35, 1.05, 3.1), Vec3::new(-0.35, 0.92, 0.0)),
     };
