@@ -287,7 +287,22 @@ fn puck_buttons(
 /// Which Create a Sim tabs the game's own panels draw (the plain editing panel stands aside for
 /// them).
 pub fn game_panel(tab: CasTab) -> bool {
-    GAME_CAS.load(Ordering::Relaxed) && BASICS_UP.load(Ordering::Relaxed) && tab == CasTab::Basics
+    GAME_CAS.load(Ordering::Relaxed)
+        && match tab {
+            CasTab::Basics => BASICS_UP.load(Ordering::Relaxed),
+            CasTab::Hair => crate::cashair::HAIR_UP.load(Ordering::Relaxed),
+            _ => false,
+        }
+}
+
+/// Sets a window's shade (found by id anywhere under a layout window).
+pub(crate) fn shade_window(w: &mut s3bake::ui::UiWindow, id: u32, argb: u32) {
+    if w.id == id {
+        w.shade = argb;
+    }
+    for c in &mut w.children {
+        shade_window(c, id, argb);
+    }
 }
 
 static BASICS_UP: AtomicBool = AtomicBool::new(false);

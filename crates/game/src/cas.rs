@@ -134,6 +134,8 @@ pub enum CasAction {
     SetWeight(f32),
     SetFitness(f32),
     Refresh,
+    /// Wear entry `i` of the list of parts of this clothing type (for the game's item grids).
+    PickPart(u32, usize),
 }
 
 /// The face sliders by part of the face, as Create a Sim groups them: each slider's pair (in
@@ -169,9 +171,9 @@ const WEAR: [crate::simbody::OutfitKind; 6] = [
 ];
 
 #[derive(Resource)]
-struct CasScene {
+pub(crate) struct CasScene {
     baked: Arc<BakedData>,
-    cas: CasData,
+    pub(crate) cas: CasData,
     selected: usize,
     tab: CasTab,
     page: usize,
@@ -415,7 +417,7 @@ fn pretty_part(name: &str) -> String {
 }
 
 /// The part of a type the Sim is wearing now.
-fn worn(scene: &CasScene, sim: &Sim, t: u32) -> Option<Key> {
+pub(crate) fn worn(scene: &CasScene, sim: &Sim, t: u32) -> Option<Key> {
     let outfit = crate::simbody::pick_outfit_for(&scene.cas, sim, &mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look), scene.wear);
     match t {
         CT_HAIR => outfit.hair.map(|p| p.key),
@@ -587,6 +589,16 @@ fn cas_actions(
                             CT_HAIR => o.hair = Some(*key),
                             _ => o.wear(scene.wear, t, *key),
                         }
+                    }
+                }
+            }
+            CasAction::PickPart(t, i) => {
+                let list = parts_for(&scene.cas, &pending.members[k], t, if t == CT_HAIR { crate::simbody::OutfitKind::Everyday } else { scene.wear });
+                if let Some((key, _)) = list.get(i) {
+                    let o = &mut pending.members[k].outfit;
+                    match t {
+                        CT_HAIR => o.hair = Some(*key),
+                        _ => o.wear(scene.wear, t, *key),
                     }
                 }
             }

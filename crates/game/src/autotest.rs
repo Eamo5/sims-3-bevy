@@ -3169,6 +3169,12 @@ fn ui_flow(
         }
         (65, AppState::CreateHousehold, _) if since > 1.5 => {
             shot(&mut commands, "2h_hair");
+            // (Another style and colour, as the game's hair panel's cells ask.)
+            ask_cas(&mut commands, &[crate::home::CasAction::PickPart(s3formats::sim::CT_HAIR, 4), crate::home::CasAction::HairColor(0)]);
+            *stage = (200, now);
+        }
+        (200, AppState::CreateHousehold, _) if since > 2.0 => {
+            shot(&mut commands, "2h_hair_picked");
             *stage = (67, now);
         }
         (67, AppState::CreateHousehold, _) if since > 0.5 => {
