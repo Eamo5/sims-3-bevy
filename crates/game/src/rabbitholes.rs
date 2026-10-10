@@ -436,6 +436,48 @@ mod school_grade_tests {
     }
 }
 
+#[cfg(test)]
+mod school_schedule_tests {
+    use super::*;
+    use rand::SeedableRng;
+
+    #[test]
+    fn bus_classroom_hours_and_weekends_follow_student_age() {
+        for (age, end, classroom_minutes) in [(Age::Child, 15.0, 360.0), (Age::Teen, 14.0, 300.0)] {
+            let mut app = App::new();
+            app.init_resource::<GameClock>().init_resource::<Notifications>().add_systems(Update, school_bus);
+            let mut rng = rand::rngs::StdRng::seed_from_u64(33);
+            let sim = crate::sim::random_sim(&mut rng, "School", Some(false), age);
+            let e = app.world_mut().spawn((sim, HouseholdMember, ActionQueue::default())).id();
+            app.world_mut().resource_mut::<GameClock>().minutes = 7.5 * 60.0;
+            app.update();
+            assert!(app.world().get::<AtRabbitHole>(e).is_none(), "no 7:15 departure");
+            app.world_mut().resource_mut::<GameClock>().minutes = 8.0 * 60.0;
+            app.update();
+            let at = app.world().get::<AtRabbitHole>(e).unwrap();
+            assert_eq!(at.inside_from, 9.0 * 60.0);
+            assert_eq!(at.until, end * 60.0 + DRIVE_MINUTES);
+            assert_eq!(at.inside_minutes(8.5 * 60.0, 60.0), 0.0);
+            assert_eq!(at.inside_minutes(at.until, 1000.0), classroom_minutes);
+            app.world_mut().entity_mut(e).remove::<AtRabbitHole>();
+            app.update();
+            assert!(app.world().get::<AtRabbitHole>(e).is_none(), "only one bus per day");
+            app.world_mut().resource_mut::<GameClock>().minutes = 5.0 * 1440.0 + 8.0 * 60.0;
+            app.update();
+            assert!(app.world().get::<AtRabbitHole>(e).is_none(), "no Saturday classes");
+            app.world_mut().resource_mut::<GameClock>().minutes = 7.0 * 1440.0 + 8.0 * 60.0;
+            app.update();
+            assert!(app.world().get::<AtRabbitHole>(e).is_some(), "classes resume Monday");
+        }
+    }
+}
+
+/// Careers.xml: ElementaryStudent starts at 9 for six hours; HighSchoolStudent
+/// starts at 9 for five hours. Commute time is separate from classroom time.
+pub fn school_hours(age: Age) -> (f32, f32) {
+    (9.0, if age == Age::Teen { 14.0 } else { 15.0 })
+}
+
 /// Children catch the school bus on weekday mornings and come home mid-afternoon.
 #[allow(clippy::type_complexity)]
 fn school_bus(
@@ -454,7 +496,8 @@ fn school_bus(
         if grades.is_none() {
             commands.entity(e).insert(SchoolGrades::default());
         }
-        if away.is_some() || clock.weekday() >= 5 || !(7.25..9.0).contains(&h) || last_day.get(&e) == Some(&day) {
+        let (start, end) = school_hours(sim.age);
+        if away.is_some() || clock.weekday() >= 5 || !(start - 1.0..start).contains(&h) || last_day.get(&e) == Some(&day) {
             continue;
         }
         last_day.insert(e, day);
@@ -470,10 +513,11 @@ fn school_bus(
             notes.push(format!("{} didn't do their homework.", sim.first));
         }
         let day_start = (clock.minutes / 1440.0).floor() * 1440.0;
-        let until = day_start + 15.0 * 60.0 + DRIVE_MINUTES;
+        let until = day_start + end as f64 * 60.0 + DRIVE_MINUTES;
+        let inside_from = (clock.minutes + DRIVE_MINUTES).max(day_start + start as f64 * 60.0);
         notes.push(format!("{} caught the school bus.", sim.first));
         commands.entity(e).insert((
-            AtRabbitHole { lot: usize::MAX, activity: &SCHOOL, inside_from: clock.minutes + DRIVE_MINUTES, until, place: "school".into() },
+            AtRabbitHole { lot: usize::MAX, activity: &SCHOOL, inside_from, until, place: "school".into() },
             Visibility::Hidden,
         ));
     }
