@@ -139,6 +139,9 @@ pub enum CasAction {
     /// Wear entry `i` of the list of clothes of this type in the outfit being dressed, in its
     /// colourway `d` (for the game's clothing rows).
     WearDesign(u32, usize, u8),
+    /// New traits, or new favourites, at random (the character panel's dice).
+    RandomTraits,
+    RandomFavorites,
 }
 
 /// The face sliders by part of the face, as Create a Sim groups them: each slider's pair (in
@@ -610,6 +613,15 @@ fn cas_actions(
                         _ => o.wear(scene.wear, t, *key),
                     }
                 }
+            }
+            CasAction::RandomTraits => {
+                let s = &mut pending.members[k];
+                s.traits = crate::life::random_traits(&mut rng, s.age);
+                model = false;
+            }
+            CasAction::RandomFavorites => {
+                pending.members[k].favorites = crate::sim::Favorites::random(&mut rng);
+                model = false;
             }
             CasAction::WearDesign(t, i, d) => {
                 let list = parts_for(&scene.cas, &pending.members[k], t, scene.wear);

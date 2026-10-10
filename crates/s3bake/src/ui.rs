@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackWriter, read_value, write_value};
 
-pub const UI_VERSION: u32 = 19;
+pub const UI_VERSION: u32 = 20;
 pub const T_LAYOUT: u32 = 0x025C95B6;
 pub const T_FONT: u32 = 0x062E9EE0;
 pub const T_IMAGE: u32 = 0x2F7D0004;
@@ -276,6 +276,9 @@ pub const NAMED_IMAGES: &[&str] = &[
     "world_loading_beijing",
     "world_loading_paris",
     "world_loading_cairo",
+    // The traits picker's rows (`TraitsPickerDialog`).
+    "cas_traits_row_lighter_r2",
+    "cas_traits_row_darker_r2",
 ];
 
 /// The zodiac signs (`sign_<sign>_sm`).

@@ -182,7 +182,7 @@ fn skewer(
         if k == sel {
             commands.entity(r).insert(crate::layout::Selected);
         }
-        if let Some((h, _)) = ui.image(&mut images, s3pkg::fnv64(s3bake::ui::NAMED_IMAGES[age_icon(m.age) as usize])) {
+        if let Some((h, _)) = ui.image(&mut images, s3pkg::fnv64(AGE_ICONS[age_icon(m.age) as usize])) {
             commands.entity(r).insert(SetIcon(h));
         }
         f.sims.push(r);
@@ -193,8 +193,11 @@ fn skewer(
     }
 }
 
-/// Which of the age pictures (`NAMED_IMAGES`, baby to elder) is a Sim's.
-fn age_icon(a: crate::sim::Age) -> u8 {
+/// The ages' pictures, baby to elder (`CASPuck`'s, baked by name).
+pub(crate) const AGE_ICONS: [&str; 7] = ["cas_basics_i_age_baby_r2", "cas_basics_i_age_toddler_r2", "cas_basics_i_age_child_r2", "cas_basics_i_age_teen_r2", "cas_basics_i_age_yadult_r2", "cas_basics_i_age_adult_r2", "cas_basics_i_age_elderly_r2"];
+
+/// Which of the age pictures (`AGE_ICONS`) is a Sim's.
+pub(crate) fn age_icon(a: crate::sim::Age) -> u8 {
     use crate::sim::Age;
     match a {
         Age::Baby => 0,
@@ -292,6 +295,7 @@ pub fn game_panel(tab: CasTab) -> bool {
             CasTab::Basics => BASICS_UP.load(Ordering::Relaxed),
             CasTab::Hair => crate::cashair::HAIR_UP.load(Ordering::Relaxed),
             CasTab::Tops | CasTab::Bottoms | CasTab::Outfits | CasTab::Shoes => crate::casclothing::CLOTHING_UP.load(Ordering::Relaxed),
+            CasTab::Traits => crate::caschar::CHARACTER_UP.load(Ordering::Relaxed),
             _ => false,
         }
 }

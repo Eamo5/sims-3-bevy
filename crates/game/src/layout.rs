@@ -599,7 +599,15 @@ impl UiAssets {
             2 => AlignItems::FlexEnd,
             _ => AlignItems::FlexStart,
         };
+        // (A text's colour is modulated by its window's shade, as the game draws it: white
+        // words in a blue-shaded window are blue.)
         let col = w.colors.first().copied().map_or(Color::BLACK, color);
+        let col = if w.cls == "Text" && w.shade >> 24 == 0xff && w.shade != 0xffff_ffff {
+            let (c, s) = (col.to_srgba(), color(w.shade).to_srgba());
+            Color::srgba(c.red * s.red, c.green * s.green, c.blue * s.blue, c.alpha)
+        } else {
+            col
+        };
         let holder = commands
             .spawn((
                 Node { position_type: PositionType::Absolute, left: Val::Px(if check { self.check_width(w) + 6.0 } else { 0.0 }), right: Val::Px(0.0), top: Val::Px(0.0), bottom: Val::Px(0.0), justify_content: align_x, align_items: align_y, ..default() },

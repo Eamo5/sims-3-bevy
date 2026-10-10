@@ -3154,11 +3154,35 @@ fn ui_flow(
             // Pick the second lifetime wish on offer.
             if let Some((mut i, _)) = cas.iter_mut().filter(|(_, a)| matches!(a, crate::home::CasAction::LifetimeWish(_))).nth(1) {
                 *i = Interaction::Pressed;
+            } else {
+                // (The game's character panel: a wish as its slots ask.)
+                ask_cas(&mut commands, &[crate::home::CasAction::LifetimeWish(3)]);
             }
             *stage = (69, now);
         }
         (69, AppState::CreateHousehold, _) if since > 1.0 => {
             shot(&mut commands, "2b_lifetime_wish");
+            *stage = (204, now);
+        }
+        // The traits picker, then the favourites (the game's character panel's).
+        (204, AppState::CreateHousehold, _) if since > 0.5 => {
+            crate::caschar::TEST_STEP.store(1, std::sync::atomic::Ordering::Relaxed);
+            *stage = (202, now);
+        }
+        (202, AppState::CreateHousehold, _) if since > 1.5 => {
+            shot(&mut commands, "2p_traits_picker");
+            *stage = (205, now);
+        }
+        (205, AppState::CreateHousehold, _) if since > 0.5 => {
+            crate::caschar::TEST_STEP.store(2, std::sync::atomic::Ordering::Relaxed);
+            *stage = (203, now);
+        }
+        (203, AppState::CreateHousehold, _) if since > 1.5 => {
+            shot(&mut commands, "2v_favorites");
+            *stage = (206, now);
+        }
+        (206, AppState::CreateHousehold, _) if since > 0.5 => {
+            crate::caschar::TEST_STEP.store(3, std::sync::atomic::Ordering::Relaxed);
             *stage = (68, now);
         }
         (68, AppState::CreateHousehold, _) if since > 0.5 => {
