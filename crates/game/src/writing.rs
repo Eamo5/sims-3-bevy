@@ -119,10 +119,6 @@ impl Author {
     }
 }
 
-/// The genre picked for the next book.
-#[derive(Component)]
-pub struct NovelPlan(pub usize);
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,6 +253,9 @@ mod tests {
         action.phase = Phase::Running(0.0);
         let mut queue = ActionQueue::default();
         queue.0.push_back(action);
+        let mut next_book = Action::new("Write: Non-Fiction", ActionKind::Object { target: computer, def }, false);
+        next_book.novel_genre = Some(1);
+        queue.0.push_back(next_book);
         let mut sim = crate::sim::random_sim(&mut rand::rng(), "Author", Some(true), Age::Adult);
         sim.traits = vec![Trait::Perfectionist];
         let writer = app.world_mut().spawn((sim, HouseholdMember, queue, Skills::default(), Author {
@@ -266,6 +265,9 @@ mod tests {
         app.update();
         let draft = app.world().get::<Author>(writer).unwrap().draft.as_ref().unwrap();
         assert!((draft.pages - 17.28).abs() < 0.001);
+        assert_eq!(draft.title, "A Careful Novel", "a queued genre must not replace the current draft");
+        assert_eq!(draft.genre, "Fiction");
+        assert_eq!(app.world().get::<ActionQueue>(writer).unwrap().0[1].novel_genre, Some(1));
         assert_eq!(draft.sent, 0);
         assert_eq!(app.world().resource::<Household>().funds, 0);
         app.world_mut().resource_mut::<SimDelta>().0 = 30.0;
@@ -321,6 +323,22 @@ mod tests {
         app.update();
         assert_eq!(app.world().resource::<Household>().funds, 40);
         assert_eq!(app.world().get::<Author>(writer).unwrap().books.len(), 1);
+        {
+            let mut queue = app.world_mut().get_mut::<ActionQueue>(writer).unwrap();
+            queue.0.pop_front();
+            let next = queue.0.front_mut().unwrap();
+            next.kind = ActionKind::Object { target: replacement, def };
+            next.phase = Phase::Running(0.0);
+        }
+        app.world_mut().resource_mut::<SimDelta>().0 = 0.0;
+        app.update();
+        let draft = app.world().get::<Author>(writer).unwrap().draft.as_ref().unwrap();
+        assert_eq!(draft.genre, "NonFiction");
+        assert_eq!(draft.pages, 0.0);
+        let title = draft.title.clone();
+        app.update();
+        assert_eq!(app.world().get::<Author>(writer).unwrap().draft.as_ref().unwrap().title, title, "consume the genre only once");
+        assert_eq!(app.world().get::<ActionQueue>(writer).unwrap().0.front().unwrap().novel_genre, None);
     }
 }
 
@@ -439,14 +457,14 @@ fn write_pages(
     delta: Res<SimDelta>,
     ui: Option<Res<crate::icons::GameUi>>,
     household: Option<ResMut<Household>>,
-    mut writers: Query<(Entity, &Sim, &mut ActionQueue, &Skills, Option<&mut Author>, Option<&NovelPlan>, Option<&crate::journal::SkillJournal>), With<HouseholdMember>>,
+    mut writers: Query<(Entity, &Sim, &mut ActionQueue, &Skills, Option<&mut Author>, Option<&crate::journal::SkillJournal>), With<HouseholdMember>>,
     objects: Query<(&GameObject, &crate::interact::UsedBy), (Without<crate::interact::Broken>, Without<crate::buyhistory::HistoryHidden>, Without<crate::buy::HeldObject>)>,
     mut notes: ResMut<Notifications>,
 ) {
     let Some(mut household) = household else { return };
     let data = ui.as_ref().map(|u| &*u.data);
     let mut rng = rand::rng();
-    for (e, sim, mut queue, skills, author, plan, journal) in &mut writers {
+    for (e, sim, mut queue, skills, author, journal) in &mut writers {
         let Some(front) = queue.0.front_mut() else { continue };
         if front.cancel || front.completed { continue; }
         let (ActionKind::Object { target, def }, Phase::Running(_)) = (&front.kind, &front.phase) else { continue };
@@ -460,9 +478,8 @@ fn write_pages(
             continue;
         };
         // A new book, in the genre chosen (or Fiction), setting aside any under way.
-        if let Some(p) = plan {
-            commands.entity(e).remove::<NovelPlan>();
-            let g = &GENRES[p.0.min(GENRES.len() - 1)];
+        if let Some(genre) = front.novel_genre.take() {
+            let g = &GENRES[genre.min(GENRES.len() - 1)];
             if let Some(old) = author.draft.take() {
                 notes.push(format!("{} set aside “{}” to start something new.", sim.first, old.title));
             }

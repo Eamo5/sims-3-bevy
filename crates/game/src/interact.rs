@@ -1579,11 +1579,13 @@ pub struct Action {
     pub cancel: bool,
     /// An activity managed by another system (such as novel writing) finished its work.
     pub completed: bool,
+    /// Genre selected for this queued writing action, consumed when it starts writing.
+    pub novel_genre: Option<usize>,
 }
 
 impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
-        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false }
+        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None }
     }
 }
 

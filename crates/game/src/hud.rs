@@ -1321,11 +1321,12 @@ fn pie_buttons(
         if let Some(c) = label.strip_prefix("Paint: ").and_then(|n| crate::paintings::CANVASES.iter().position(|c| *c == n)) {
             commands.entity(a).insert(crate::paintings::PaintPlan::new(c as u8));
         }
-        // A book in the genre chosen.
-        if let Some(g) = label.strip_prefix("Write: ").and_then(|n| crate::writing::GENRES.iter().position(|g| g.name == n)) {
-            commands.entity(a).insert(crate::writing::NovelPlan(g));
-        }
-        queue.push_player(Action::new(label, kind, false));
+        // Keep the genre with its action: later queued choices must not replace
+        // the draft currently being written or survive cancellation of that choice.
+        let novel_genre = label.strip_prefix("Write: ").and_then(|n| crate::writing::GENRES.iter().position(|g| g.name == n));
+        let mut action = Action::new(label, kind, false);
+        action.novel_genre = novel_genre;
+        queue.push_player(action);
     }
 }
 
