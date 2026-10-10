@@ -254,6 +254,16 @@ impl UiButton {
     }
 }
 
+/// Changes every window with this id under a layout window (a template, before it's spawned).
+pub fn edit_windows(w: &mut UiWindow, id: u32, f: &mut impl FnMut(&mut UiWindow)) {
+    if w.id == id {
+        f(w);
+    }
+    for c in &mut w.children {
+        edit_windows(c, id, f);
+    }
+}
+
 /// A layout put on screen: its root, and its windows (and their texts) by control id.
 #[derive(Default, Clone)]
 pub struct Spawned {

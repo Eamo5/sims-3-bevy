@@ -291,6 +291,7 @@ pub fn game_panel(tab: CasTab) -> bool {
         && match tab {
             CasTab::Basics => BASICS_UP.load(Ordering::Relaxed),
             CasTab::Hair => crate::cashair::HAIR_UP.load(Ordering::Relaxed),
+            CasTab::Tops | CasTab::Bottoms | CasTab::Outfits | CasTab::Shoes => crate::casclothing::CLOTHING_UP.load(Ordering::Relaxed),
             _ => false,
         }
 }

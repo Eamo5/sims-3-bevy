@@ -234,6 +234,8 @@ pub struct CasPart {
     pub vpxy: Vec<ResourceKey>,
     pub diffuse: Vec<ResourceKey>,
     pub presets: Vec<String>,
+    /// Each preset's id (what the game's thumbnails of it are filed under).
+    pub preset_ids: Vec<u32>,
     pub keys: Vec<ResourceKey>,
     /// Body-shape blends (BBLN): fat, fit, thin, special.
     pub blends: [Option<ResourceKey>; 4],
@@ -274,11 +276,12 @@ impl CasPart {
         }
         let npresets = r.u32()? as usize;
         let mut presets = Vec::new();
+        let mut preset_ids = Vec::new();
         for _ in 0..npresets.min(64) {
             let chars = r.i32()?.max(0) as usize;
             let b = r.bytes(chars * 2)?;
             presets.push(String::from_utf16_lossy(&b.chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect::<Vec<_>>()));
-            r.u32()?;
+            preset_ids.push(r.u32()?);
         }
         let name = str7_be(&mut r)?;
         let _sort = r.f32()?;
@@ -318,7 +321,7 @@ impl CasPart {
                 diffuse.push(*k);
             }
         }
-        Ok(Self { name, clothing_type, data_type, age_gender, category, vpxy, diffuse, presets, keys, blends })
+        Ok(Self { name, clothing_type, data_type, age_gender, category, vpxy, diffuse, presets, preset_ids, keys, blends })
     }
 
     /// GEOM keys for LOD 0 from the part's first VPXY.

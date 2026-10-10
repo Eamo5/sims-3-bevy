@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackWriter, read_value, write_value};
 
-pub const UI_VERSION: u32 = 17;
+pub const UI_VERSION: u32 = 19;
 pub const T_LAYOUT: u32 = 0x025C95B6;
 pub const T_FONT: u32 = 0x062E9EE0;
 pub const T_IMAGE: u32 = 0x2F7D0004;
@@ -401,9 +401,65 @@ pub fn bake_ui(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::path::Pat
             n += 1;
         }
     }
+    progress("Converting: the wardrobe's pictures…");
+    n += bake_cas_thumbs(&g, pkgs, install_root, &mut pack)?;
     pack.finish().map_err(|e| e.to_string())?;
     write_value(&g.join("ui.bin"), &out).map_err(|e| e.to_string())?;
     write_value(&g.join("ui.version"), &UI_VERSION).map_err(|e| e.to_string())?;
+    Ok(n)
+}
+
+/// The name a picture of a CAS part's colourway is kept under (its preset's place in the part's
+/// list: see [`bake_cas_thumbs`]).
+pub fn cas_preset_thumb(instance: u64, preset: usize) -> u64 {
+    s3pkg::fnv64(&format!("casthumb_{instance:016x}_{preset}"))
+}
+
+/// Create a Sim's clothes (tops, bottoms, outfits, shoes and accessories), a picture of each of
+/// their colourways: the game's thumbnails (`CasThumbnails.package`, 128 pixels), filed by the
+/// preset's id (the part's own look by 0; a pack's with the pack in the group's top byte), kept
+/// by the preset's place in the part's list.
+fn bake_cas_thumbs(g: &std::path::Path, pkgs: &PackageSet, install_root: &std::path::Path, pack: &mut PackWriter) -> Result<usize, String> {
+    use s3formats::sim::{CT_BODY, CT_BOTTOM, CT_SHOES, CT_TOP, CasPart};
+    const T_CAS_THUMB: u32 = 0x626F60CD;
+    let mut infos: Vec<crate::types::CasPartInfo> = read_value::<crate::types::CasBaked>(&g.join("cas.bin")).map(|c| c.parts).unwrap_or_default();
+    infos.extend(read_value::<Vec<crate::types::CasPartInfo>>(&g.join("wardrobe.bin")).unwrap_or_default());
+    let mut parts: Vec<crate::types::Key> = infos.iter().filter(|p| p.baked && (matches!(p.clothing_type, CT_TOP | CT_BOTTOM | CT_BODY | CT_SHOES) || (8..=15).contains(&p.clothing_type) || p.clothing_type >= 23)).map(|p| p.key).collect();
+    parts.sort();
+    parts.dedup();
+    let ids: HashMap<u64, Vec<u32>> = crate::bake::par_map(&parts, |k| {
+        let c = CasPart::parse(&pkgs.read(&s3pkg::ResourceKey::new(k.0, k.1, k.2))?).ok()?;
+        Some((k.2, c.preset_ids))
+    })
+    .into_iter()
+    .flatten()
+    .collect();
+    // (The base game's thumbnails, then each pack's.)
+    let mut dirs = vec![install_root.join("Thumbnails")];
+    if let Ok(rd) = std::fs::read_dir(install_root) {
+        let mut packs: Vec<std::path::PathBuf> = rd.flatten().map(|e| e.path().join("Thumbnails")).filter(|p| p.is_dir()).collect();
+        packs.sort();
+        dirs.extend(packs);
+    }
+    let thumbs: Vec<Package> = dirs.iter().filter_map(|d| Package::open(d.join("CasThumbnails.package")).ok()).collect();
+    let mut found: HashMap<(u64, u32), (usize, &s3pkg::IndexEntry)> = HashMap::new();
+    for (n, tp) in thumbs.iter().enumerate() {
+        for e in tp.of_type(T_CAS_THUMB) {
+            if ids.contains_key(&e.key.i) {
+                found.entry((e.key.i, e.key.g & 0x00FF_FFFF)).or_insert((n, e));
+            }
+        }
+    }
+    let mut n = 0;
+    for (inst, list) in &ids {
+        for (i, id) in list.iter().enumerate().take(8) {
+            let Some((p, e)) = found.get(&(*inst, *id)).or_else(|| if i == 0 { found.get(&(*inst, 0)) } else { None }) else { continue };
+            if let Ok(png) = thumbs[*p].read(e) {
+                pack.add((T_IMAGE, 0, cas_preset_thumb(*inst, i)), &png).map_err(|e| e.to_string())?;
+                n += 1;
+            }
+        }
+    }
     Ok(n)
 }
 

@@ -44,6 +44,19 @@ fn main() {
         }
         return;
     }
+    if args[1] == "presetids" {
+        // presetids <root> <instance hex>...: a CAS part's presets' ids.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        for a in &args[3..] {
+            let i = u64::from_str_radix(a.trim_start_matches("0x"), 16).expect("hex instance");
+            let Some(d) = set.read_ti(0x034AEECB, i) else { println!("{a}: not found"); continue };
+            match s3formats::sim::CasPart::parse(&d) {
+                Ok(c) => println!("{a}: {} type {} presets {} ids {:?}", c.name, c.clothing_type, c.presets.len(), c.preset_ids),
+                Err(e) => println!("{a}: {e:?}"),
+            }
+        }
+        return;
+    }
     if args[1] == "roofs" {
         // roofs <root>: the build catalogue's roof patterns (0xF1EDBD86) and their textures.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);

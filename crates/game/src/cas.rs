@@ -61,7 +61,7 @@ impl CasTab {
             CasTab::Traits => "Traits",
         }
     }
-    fn clothing_type(self) -> Option<u32> {
+    pub(crate) fn clothing_type(self) -> Option<u32> {
         match self {
             CasTab::Hair => Some(CT_HAIR),
             CasTab::Tops => Some(CT_TOP),
@@ -136,6 +136,9 @@ pub enum CasAction {
     Refresh,
     /// Wear entry `i` of the list of parts of this clothing type (for the game's item grids).
     PickPart(u32, usize),
+    /// Wear entry `i` of the list of clothes of this type in the outfit being dressed, in its
+    /// colourway `d` (for the game's clothing rows).
+    WearDesign(u32, usize, u8),
 }
 
 /// The face sliders by part of the face, as Create a Sim groups them: each slider's pair (in
@@ -161,6 +164,12 @@ const FACE_AREAS: [(&str, &[(usize, &str, &str, &str)]); 4] = [
 const PAGE: usize = 20;
 
 /// The outfits Create a Sim dresses, as the game's.
+/// The outfit `n` of those dressed in Create a Sim (everyday, formal, sleepwear, athletic,
+/// swimwear, outerwear).
+pub(crate) fn wear_kind(n: usize) -> crate::simbody::OutfitKind {
+    WEAR[n.min(WEAR.len() - 1)]
+}
+
 const WEAR: [crate::simbody::OutfitKind; 6] = [
     crate::simbody::OutfitKind::Everyday,
     crate::simbody::OutfitKind::Formal,
@@ -189,7 +198,7 @@ pub(crate) struct CasScene {
     scroll: f32,
     portrait: Option<Handle<Image>>,
     /// The outfit being dressed (and shown).
-    wear: crate::simbody::OutfitKind,
+    pub(crate) wear: crate::simbody::OutfitKind,
     /// Create a Style open.
     styling: bool,
     /// The part of the face being sculpted (`FACE_AREAS`).
@@ -599,6 +608,19 @@ fn cas_actions(
                     match t {
                         CT_HAIR => o.hair = Some(*key),
                         _ => o.wear(scene.wear, t, *key),
+                    }
+                }
+            }
+            CasAction::WearDesign(t, i, d) => {
+                let list = parts_for(&scene.cas, &pending.members[k], t, scene.wear);
+                if let Some((key, _)) = list.get(i) {
+                    let o = &mut pending.members[k].outfit;
+                    o.wear(scene.wear, t, *key);
+                    o.designs.retain(|(p, _)| p != key);
+                    // (A colourway chosen takes the place of a style made.)
+                    o.styles.retain(|s| s.part != *key);
+                    if d > 0 {
+                        o.designs.push((*key, d));
                     }
                 }
             }

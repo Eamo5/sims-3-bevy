@@ -3185,6 +3185,12 @@ fn ui_flow(
         }
         (66, AppState::CreateHousehold, _) if since > 1.5 => {
             shot(&mut commands, "2t_tops");
+            // (The second top in its second colourway, as the game's clothing rows ask.)
+            ask_cas(&mut commands, &[crate::home::CasAction::WearDesign(s3formats::sim::CT_TOP, 1, 1)]);
+            *stage = (201, now);
+        }
+        (201, AppState::CreateHousehold, _) if since > 2.0 => {
+            shot(&mut commands, "2t_tops_picked");
             *stage = (90, now);
         }
         // The outfit worn, in another of its colourways (on the tab of what's worn).
