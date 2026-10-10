@@ -245,8 +245,12 @@ pub struct CasFamilies(pub bool);
 #[derive(Message, Clone, Copy)]
 pub struct CasActionRequest(pub CasAction);
 
+/// Create a Style open (the game's clothing panel stands aside for it).
+pub static STYLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn mirror_state(scene: Option<ResMut<CasScene>>, mut sel: ResMut<CasSelected>, mut fam: ResMut<CasFamilies>, mut framed: Local<(bool, bool)>) {
     let Some(mut s) = scene else { return };
+    STYLING.store(s.styling, std::sync::atomic::Ordering::Relaxed);
     // (The game's frame or one of its panels just up: the plain ones go.)
     let game = (crate::caslook::GAME_CAS.load(std::sync::atomic::Ordering::Relaxed), crate::caslook::game_panel(s.tab));
     if game != *framed {

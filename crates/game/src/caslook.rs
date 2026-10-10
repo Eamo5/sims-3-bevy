@@ -308,7 +308,7 @@ pub fn game_panel(tab: CasTab) -> bool {
         && match tab {
             CasTab::Basics => BASICS_UP.load(Ordering::Relaxed),
             CasTab::Hair => crate::cashair::HAIR_UP.load(Ordering::Relaxed),
-            CasTab::Tops | CasTab::Bottoms | CasTab::Outfits | CasTab::Shoes => crate::casclothing::CLOTHING_UP.load(Ordering::Relaxed),
+            CasTab::Tops | CasTab::Bottoms | CasTab::Outfits | CasTab::Shoes => crate::casclothing::CLOTHING_UP.load(Ordering::Relaxed) && !crate::cas::STYLING.load(Ordering::Relaxed),
             CasTab::Traits => crate::caschar::CHARACTER_UP.load(Ordering::Relaxed),
             CasTab::Face => crate::casface::FACE_UP.load(Ordering::Relaxed),
             _ => false,

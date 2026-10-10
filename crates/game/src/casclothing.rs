@@ -43,9 +43,10 @@ const WHOLE: u32 = 0x05db_cf14;
 const SHOES: u32 = 0x05db_cf13;
 const KINDS: [(u32, CasTab, &str); 4] = [(TOPS, CasTab::Tops, "Tops"), (BOTTOMS, CasTab::Bottoms, "Bottoms"), (WHOLE, CasTab::Outfits, "Outfits"), (SHOES, CasTab::Shoes, "Shoes")];
 const GRID: u32 = 0x05db_cf21;
-/// What this game hasn't: the content filter, saving, deleting and sharing designs, and Create
-/// a Style's button (it's in the plain panel).
-const NOT_HERE: [u32; 6] = [0x05db_cf19, 0x05db_b904, 0x05db_b905, 0x05db_cf17, 0x05db_cf1a, 0x05db_cf16];
+/// What this game hasn't: the content filter, saving, deleting and sharing designs.
+const NOT_HERE: [u32; 5] = [0x05db_cf19, 0x05db_b904, 0x05db_b905, 0x05db_cf17, 0x05db_cf16];
+/// Create a Style for the item worn.
+const DESIGN: u32 = 0x05db_cf1a;
 // `CASClothingRow`'s: its arrows, and its five cells (the first and last out of view, in the
 // game's carousel), each with its thumbnail.
 const LEFT_ARROW: u32 = 0x32;
@@ -138,6 +139,9 @@ fn spawn_clothing(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut ima
             commands.entity(e).insert((CasAction::Tab(tab), crate::icons::Tooltip(tip.into())));
         }
     }
+    if let Some(e) = category.id(DESIGN) {
+        commands.entity(e).insert((CasAction::Styling, crate::icons::Tooltip("Create a Style".into())));
+    }
     // The rows' scroll bar: the item grid's own, down the right of the rows.
     let mut bar = None;
     if let (Some(grid), Some(mut w)) = (category.id(GRID), ui.find("ItemGrid", GRID_SCROLLBAR).cloned()) {
@@ -171,7 +175,7 @@ fn clothing_panel(
     let (Some(mut c), Some(mut ui), Some(scene)) = (clothing, ui, scene) else { return };
     let c = &mut *c;
     let tab = selected.1;
-    let on = matches!(tab, CasTab::Tops | CasTab::Bottoms | CasTab::Outfits | CasTab::Shoes);
+    let on = matches!(tab, CasTab::Tops | CasTab::Bottoms | CasTab::Outfits | CasTab::Shoes) && !crate::cas::STYLING.load(Ordering::Relaxed);
     crate::livehud::set_visible(&mut vis, c.outfits.root, on);
     crate::livehud::set_visible(&mut vis, c.category.root, on);
     if !on {
