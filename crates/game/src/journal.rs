@@ -342,7 +342,7 @@ pub static CHALLENGES: &[Challenge] = &[
     ch(
         "Painting",
         "Brushmaster",
-        10.0,
+        30.0,
         Measure::Stat(Stat::Paintings),
         "Brushmasters have painted at least {0} paintings, and as a result, paint much faster than normal painters.",
         "has painted enough paintings to complete the Brushmaster Skill Challenge!",
@@ -350,7 +350,7 @@ pub static CHALLENGES: &[Challenge] = &[
     ch(
         "Painting",
         "Proficient Painter",
-        10.0,
+        6.0,
         Measure::Stat(Stat::BrilliantPaintings),
         "Proficient Painters have proven their worth by painting at least {0} brilliant paintings. They tend to paint far more brilliant paintings and masterpieces than less proficient Sims.",
         "has painted enough brilliant paintings to complete the Proficient Painter Skill Challenge!",
@@ -358,7 +358,7 @@ pub static CHALLENGES: &[Challenge] = &[
     ch(
         "Painting",
         "Master Painter",
-        10.0,
+        5.0,
         Measure::Stat(Stat::Masterpieces),
         "Master Painters have painted at least {0} masterpieces. Every painting they sell is worth oodles more than the work of normal artists.",
         "has painted enough masterpieces to complete the Master Painter Skill Challenge!",
@@ -537,6 +537,35 @@ fn earn_challenges(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn painting_challenges_award_at_original_thresholds_and_survive_reload() {
+        let mut app = App::new();
+        app.init_resource::<Time>().init_resource::<Notifications>().add_systems(Update, earn_challenges);
+        let sim = crate::sim::random_sim(&mut rand::rng(), "Painter", Some(true), crate::sim::Age::Adult);
+        let mut journal = SkillJournal::default();
+        for (stat, n) in [(Stat::Paintings, 29.0), (Stat::BrilliantPaintings, 5.0), (Stat::Masterpieces, 4.0)] {
+            journal.add(&Deed::Count(stat, n));
+        }
+        let e = app.world_mut().spawn((sim, HouseholdMember, journal, Relationships::default(), Skills::default())).id();
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
+        app.update();
+        for name in ["Brushmaster", "Proficient Painter", "Master Painter"] {
+            assert!(!app.world().get::<SkillJournal>(e).unwrap().has(name));
+        }
+        for stat in [Stat::Paintings, Stat::BrilliantPaintings, Stat::Masterpieces] {
+            app.world_mut().get_mut::<SkillJournal>(e).unwrap().add(&Deed::Count(stat, 1.0));
+        }
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
+        app.update();
+        let restored: SkillJournal = serde_json::from_str(&serde_json::to_string(app.world().get::<SkillJournal>(e).unwrap()).unwrap()).unwrap();
+        app.world_mut().entity_mut(e).insert(restored);
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
+        app.update();
+        for name in ["Brushmaster", "Proficient Painter", "Master Painter"] {
+            assert_eq!(app.world().get::<SkillJournal>(e).unwrap().earned.iter().filter(|n| *n == name).count(), 1);
+        }
+    }
 
     #[test]
     fn tallies_and_kinds() {
