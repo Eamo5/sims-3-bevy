@@ -128,6 +128,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn royalties_begin_next_sunday_noon_after_publication() {
+        assert_eq!(next_royalty_day(0.0, 12.0), 6);
+        assert_eq!(next_royalty_day(6.0 * 1440.0 + 719.0, 12.0), 6);
+        assert_eq!(next_royalty_day(6.0 * 1440.0 + 720.0, 12.0), 13);
+        assert_eq!(next_royalty_day(7.0 * 1440.0, 12.0), 13);
+    }
+
+    #[test]
+    fn royalty_payments_keep_sunday_schedule_across_reload_and_missed_weeks() {
+        let mut app = App::new();
+        app.init_resource::<GameClock>().init_resource::<Notifications>()
+            .add_message::<crate::journal::Did>().add_systems(Update, pay_royalties);
+        let author = Author { draft: None, books: vec![Book {
+            title: "Sunday Book".into(), genre: "Fiction".into(), quality: Quality::Success,
+            royalty: 100, payments_left: 6, next_pay: 0, // Legacy weekday is normalized.
+        }] };
+        let sim = crate::sim::random_sim(&mut rand::rng(), "Writer", Some(true), Age::Adult);
+        let e = app.world_mut().spawn((sim, HouseholdMember, author)).id();
+        app.world_mut().resource_mut::<GameClock>().minutes = 6.0 * 1440.0 + 720.0;
+        app.update();
+        assert_eq!(app.world().get::<Author>(e).unwrap().books[0].payments_left, 6, "no household means no payment consumed");
+        app.insert_resource(Household { name: "Authors".into(), funds: 0, lot_index: 0, last_bill_day: 0, bills: vec![] });
+        app.world_mut().resource_mut::<GameClock>().minutes -= 1.0;
+        app.update();
+        assert_eq!(app.world().resource::<Household>().funds, 0);
+        app.world_mut().resource_mut::<GameClock>().minutes += 1.0;
+        app.update();
+        assert_eq!(app.world().resource::<Household>().funds, 100);
+        let restored: Author = serde_json::from_str(&serde_json::to_string(app.world().get::<Author>(e).unwrap()).unwrap()).unwrap();
+        app.world_mut().entity_mut(e).insert(restored);
+        app.update();
+        assert_eq!(app.world().resource::<Household>().funds, 100, "reload must not repeat a paid installment");
+        // Monday morning after two more due Sundays: collect both, retaining cadence.
+        app.world_mut().resource_mut::<GameClock>().minutes = 21.0 * 1440.0 + 480.0;
+        app.update();
+        assert_eq!(app.world().resource::<Household>().funds, 300);
+        let book = &app.world().get::<Author>(e).unwrap().books[0];
+        assert_eq!((book.payments_left, book.next_pay), (3, 27));
+        app.world_mut().resource_mut::<GameClock>().minutes = 100.0 * 1440.0;
+        app.update();
+        app.update();
+        assert_eq!(app.world().resource::<Household>().funds, 600, "exactly six installments total");
+        assert_eq!(app.world().get::<Author>(e).unwrap().books[0].payments_left, 0);
+    }
+
+    #[test]
     fn perfectionist_page_rate_scales_skill_and_bookworm_bonuses() {
         let mut rng = rand::rng();
         let mut sim = crate::sim::random_sim(&mut rng, "Author", Some(true), Age::Adult);
@@ -232,7 +278,7 @@ fn start_draft(g: &Genre, author: &Author, data: Option<&s3bake::GameDataBaked>,
 }
 
 /// How a finished book does, and what it earns each week.
-fn publish(d: &Draft, sim: &Sim, skills: &Skills, author: &Author, day: u32, data: Option<&s3bake::GameDataBaked>, rng: &mut impl Rng) -> Book {
+fn publish(d: &Draft, sim: &Sim, skills: &Skills, author: &Author, minutes: f64, data: Option<&s3bake::GameDataBaked>, rng: &mut impl Rng) -> Book {
     let level = skills.level("Writing").clamp(1, 10);
     let t = |k: String, d: f32| tune(data, &k, d);
     // Chances (percent) by skill level; books written in the genre make good ones likelier.
@@ -268,7 +314,7 @@ fn publish(d: &Draft, sim: &Sim, skills: &Skills, author: &Author, day: u32, dat
         quality,
         royalty: (base * skill * hidden * traits * reception).round() as i64,
         payments_left: t("kRoyaltyLength".into(), 6.0) as u32,
-        next_pay: day,
+        next_pay: next_royalty_day(minutes, tune(data, "kRoyaltyPayHour", 12.0)),
     }
 }
 
@@ -330,7 +376,7 @@ fn write_pages(
         }
         if d.pages >= d.length {
             let d = author.draft.take().unwrap_or_else(|| start_draft(&GENRES[0], &Author::default(), data, &mut rng));
-            let mut book = publish(&d, sim, skills, &author, clock.day(), data, &mut rng);
+            let mut book = publish(&d, sim, skills, &author, clock.minutes, data, &mut rng);
             // The Extra Creative's work sells better.
             if crate::wishes::has(wishes, "ExtraCreative") {
                 book.royalty = book.royalty * 3 / 2;
@@ -352,35 +398,45 @@ fn write_pages(
     }
 }
 
-/// Royalties: at noon, once a week for each book still paying.
+/// The next Sunday payment strictly after publication (day zero is Monday).
+fn next_royalty_day(minutes: f64, hour: f32) -> u32 {
+    let day = (minutes / 1440.0).floor() as u32;
+    let sunday = day + (6 - day % 7);
+    if minutes >= sunday as f64 * 1440.0 + hour as f64 * 60.0 { sunday + 7 } else { sunday }
+}
+
+/// Royalties: Sunday at noon, once a week for each book still paying.
 fn pay_royalties(
     clock: Res<GameClock>,
     ui: Option<Res<crate::icons::GameUi>>,
-    mut household: Option<ResMut<Household>>,
+    household: Option<ResMut<Household>>,
     mut authors: Query<(Entity, &Sim, &mut Author, Option<&crate::wishes::Wishes>), With<HouseholdMember>>,
     mut notes: ResMut<Notifications>,
     mut did: MessageWriter<crate::journal::Did>,
 ) {
     let data = ui.as_ref().map(|u| &*u.data);
-    if clock.hour_f() < tune(data, "kRoyaltyPayHour", 12.0) {
-        return;
-    }
-    let day = clock.day();
+    let Some(mut household) = household else { return };
+    let pay_hour = tune(data, "kRoyaltyPayHour", 12.0) as f64;
     for (e, sim, mut a, wishes) in &mut authors {
         // (Bigger checks for a High Roller.)
         let factor = if crate::wishes::has(wishes, "HighRoller") { 1.33333 } else { 1.0 };
         let mut paid = 0;
         let mut titles = Vec::new();
-        for b in a.books.iter_mut().filter(|b| b.payments_left > 0 && b.next_pay <= day) {
-            paid += (b.royalty as f32 * factor).round() as i64;
-            b.payments_left -= 1;
-            b.next_pay = day + 7;
-            titles.push(format!("“{}”", b.title));
+        for b in a.books.iter_mut().filter(|b| b.payments_left > 0) {
+            // Older saves used the publication weekday. Keep unpaid installments,
+            // but align their next deadline to the following Sunday.
+            b.next_pay += 6 - b.next_pay % 7;
+            let mut installments = 0;
+            while b.payments_left > 0 && clock.minutes >= b.next_pay as f64 * 1440.0 + pay_hour * 60.0 {
+                paid += (b.royalty as f32 * factor).round() as i64;
+                b.payments_left -= 1;
+                b.next_pay += 7;
+                installments += 1;
+            }
+            if installments > 0 { titles.push(format!("“{}”", b.title)); }
         }
         if paid > 0 {
-            if let Some(h) = household.as_mut() {
-                h.funds += paid;
-            }
+            household.funds += paid;
             notes.push(format!("{} received §{paid} in royalties for {}.", sim.first, titles.join(", ")));
             did.write(crate::journal::Did::count(e, crate::journal::Stat::Royalties, paid as f64));
         }
