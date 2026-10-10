@@ -231,12 +231,17 @@ fn fill_bars(bars: Query<&UiFillBar, Changed<UiFillBar>>, mut nodes: Query<&mut 
 #[derive(Component)]
 pub struct SetIcon(pub Handle<Image>);
 
-fn set_icons(mut commands: Commands, q: Query<(Entity, &UiButton, &SetIcon)>, mut pics: Query<&mut ImageNode>) {
+fn set_icons(mut commands: Commands, q: Query<(Entity, &UiButton, &SetIcon)>, mut pics: Query<(&mut ImageNode, Option<&mut Visibility>)>) {
     for (e, b, s) in &q {
         if let Some(i) = b.icon()
-            && let Ok(mut img) = pics.get_mut(i)
+            && let Ok((mut img, vis)) = pics.get_mut(i)
         {
             img.image = s.0.clone();
+            if let Some(mut v) = vis
+                && *v == Visibility::Hidden
+            {
+                *v = Visibility::Inherited;
+            }
         }
         commands.entity(e).remove::<SetIcon>();
     }
@@ -623,7 +628,17 @@ impl UiAssets {
                 }
             }
             UiDrawable::Image { image, flags, halign, valign, scale, colors, .. } => {
-                let Some((h, isize)) = self.image(images, *image) else { return };
+                let Some((h, isize)) = self.image(images, *image) else {
+                    // (An empty picture on a button: its icon, which game code sets (see `SetIcon`).)
+                    if *image == 0
+                        && let Some(b) = button
+                        && b.icon.is_none()
+                    {
+                        let pic = commands.spawn((fill(), ImageNode::default(), Visibility::Hidden, Pickable::IGNORE, ChildOf(parent))).id();
+                        b.icon = Some((pic, [Color::WHITE; 8]));
+                    }
+                    return;
+                };
                 // (Fitted to the window keeping its shape, or at its own size; aligned.)
                 let s = if flags & 1 != 0 { (size.x / isize.x).min(size.y / isize.y) * scale } else { *scale };
                 let dim = isize * s;

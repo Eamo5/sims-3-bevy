@@ -3048,6 +3048,16 @@ fn auto_action(
 /// `--ui-flow <dir>`: clicks through the real menus (world → household → lot → move in),
 /// saving a screenshot of each screen, then exits after a while in live mode.
 #[allow(clippy::too_many_arguments)]
+/// CAS actions asked for as the game's panels ask (no buttons of their own to press).
+fn ask_cas(commands: &mut Commands, actions: &[crate::home::CasAction]) {
+    let actions = actions.to_vec();
+    commands.queue(move |w: &mut World| {
+        for a in actions {
+            w.write_message(crate::cas::CasActionRequest(a));
+        }
+    });
+}
+
 fn ui_flow(
     args: Res<AutoArgs>,
     time: Res<Time>,
@@ -3114,6 +3124,9 @@ fn ui_flow(
         (40..=44, AppState::CreateHousehold, _) if since > 0.3 => {
             if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == crate::home::CasAction::Weight(1)) {
                 *i = Interaction::Pressed;
+            } else if stage.0 == 40 {
+                // (The game's Basics panel: its sliders' heaviest and darkest.)
+                ask_cas(&mut commands, &[crate::home::CasAction::SetWeight(1.0), crate::home::CasAction::SetSkin(1.0)]);
             }
             advance(&mut stage);
         }
@@ -3124,6 +3137,8 @@ fn ui_flow(
         (46..=55, AppState::CreateHousehold, _) if since > 0.3 => {
             if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == crate::home::CasAction::Weight(-1)) {
                 *i = Interaction::Pressed;
+            } else if stage.0 == 46 {
+                ask_cas(&mut commands, &[crate::home::CasAction::SetWeight(-1.0), crate::home::CasAction::SetSkin(0.5)]);
             }
             advance(&mut stage);
         }

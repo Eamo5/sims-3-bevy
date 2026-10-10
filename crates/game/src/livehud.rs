@@ -1300,7 +1300,7 @@ fn notifications(
     people: Query<(Entity, &Sim, Has<HouseholdMember>)>,
     mut portraits: ResMut<crate::portraits::Portraits>,
     closes: Query<(&Interaction, &NoteClose), Changed<Interaction>>,
-    mut vis: Query<&mut Visibility>,
+    vis: Query<&mut Visibility>,
     mut state: Local<(Option<Entity>, Vec<String>)>,
     mut play: MessageWriter<crate::sound::PlaySound>,
     hud: Res<LiveHud>,

@@ -85,7 +85,6 @@ pub struct CasData {
     pub toddler_rig: Option<Arc<Rig>>,
     pub baby_rig: Option<Arc<Rig>>,
     pub tone_textures: Arc<Vec<(u32, u32, Key)>>,
-    pub ramp: Arc<Vec<[f32; 3]>>,
     /// The careers' uniforms by name.
     pub outfits: Arc<HashMap<String, s3bake::OutfitInfo>>,
     /// The face sliders' bone adjustments by age-and-sex prefix ("am", "tf", "cu"...).
@@ -106,7 +105,6 @@ impl CasData {
             toddler_rig: b.cas.toddler_rig.clone().map(Arc::new),
             baby_rig: b.cas.baby_rig.clone().map(Arc::new),
             tone_textures: Arc::new(b.cas.tone.textures.clone()),
-            ramp: Arc::new(b.cas.tone.ramp.clone()),
             outfits: Arc::new(b.outfits.iter().map(|o| (o.name.clone(), o.clone())).collect()),
             face_bones: Arc::new(b.face_bones.iter().map(|f| (f.prefix.clone(), f.sliders.clone())).collect()),
             eye_overlay: b.eye_colors.overlay.filter(|k| b.texture_bytes(k).is_some()),
@@ -126,21 +124,15 @@ impl CasData {
         self.tone_textures.iter().find(|(ag, t, _)| ag & age != 0 && ag & gender != 0 && t & kind != 0).map(|x| x.2)
     }
 
-    /// Skin tint for a position on the tone ramp (mostly darkening, little hue shift).
+    /// Skin tint for a position along the skin tones (0 the lightest, which the skin texture
+    /// is, to 1 the darkest): the tone over the lightest, made linear as the shader multiplies.
     fn tint(&self, t: f32) -> Vec3 {
-        if self.ramp.len() < 2 {
-            return Vec3::ONE;
-        }
-        let at = |t: f32| {
-            let f = t.clamp(0.0, 1.0) * (self.ramp.len() - 1) as f32;
-            let i = f.floor() as usize;
-            let j = (i + 1).min(self.ramp.len() - 1);
-            Vec3::from(self.ramp[i]).lerp(Vec3::from(self.ramp[j]), f - i as f32)
-        };
-        let base = at(0.0).max(Vec3::splat(0.01));
-        let f = at(t) / base;
-        let avg = (f.x + f.y + f.z) / 3.0;
-        Vec3::splat(avg) + (f - Vec3::splat(avg)) * 0.3
+        let tones = crate::sim::SKINS;
+        let f = t.clamp(0.0, 1.0) * (tones.len() - 1) as f32;
+        let i = (f.floor() as usize).min(tones.len() - 2);
+        let (a, b) = (Vec3::from(tones[i]), Vec3::from(tones[i + 1]));
+        let c = a.lerp(b, f - i as f32) / Vec3::from(tones[0]);
+        c.powf(2.2).min(Vec3::ONE)
     }
 }
 
@@ -1030,11 +1022,22 @@ pub struct PreparedSims {
     pub townies: Vec<(Sim, Option<SimModelCpu>)>,
 }
 
-/// Maps the stand-in skin colour presets onto the game's skin-tone ramp.
+/// Where a Sim's skin colour lies along the skin tones (0 lightest, 1 darkest).
 pub fn tone_of(sim: &Sim) -> f32 {
-    let l = sim.skin.to_srgba();
-    let lum = 0.3 * l.red + 0.59 * l.green + 0.11 * l.blue;
-    ((0.85 - lum) / 0.55).clamp(0.0, 1.0)
+    let s = sim.skin.to_srgba();
+    let tones = crate::sim::SKINS;
+    // (By brightness, between the tones it lies between.)
+    let lum = |r: f32, g: f32, b: f32| 0.3 * r + 0.59 * g + 0.11 * b;
+    let l = lum(s.red, s.green, s.blue);
+    let ls: Vec<f32> = tones.iter().map(|t| lum(t.0, t.1, t.2)).collect();
+    for i in 0..ls.len() - 1 {
+        let (a, b) = (ls[i], ls[i + 1]);
+        if l <= a && l >= b {
+            let f = if (a - b).abs() > 1e-6 { (a - l) / (a - b) } else { 0.0 };
+            return (i as f32 + f) / (ls.len() - 1) as f32;
+        }
+    }
+    if l > ls[0] { 0.0 } else { 1.0 }
 }
 
 /// Builds bodies for the household, the visiting neighbours (`known`, from a save, or two new

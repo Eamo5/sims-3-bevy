@@ -108,7 +108,6 @@ fn opportunity_dialog(
     }
     // The words.
     let word = |key: &str, plain: &str| ui.localize(key).unwrap_or_else(|| plain.to_string());
-    let place = crate::opportunities::venue_word(&o.rabbit_hole);
     let mut reward = Vec::new();
     if o.money > 0 {
         reward.push(format!("§{}", crate::lifetime::group(o.money)));

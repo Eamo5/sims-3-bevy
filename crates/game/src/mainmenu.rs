@@ -305,7 +305,7 @@ fn menu_controls(
     (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
     (clicks, saves_q, towns_q, hovered): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &SaveCell), Changed<Interaction>>, Query<(&Interaction, &TownCell), Changed<Interaction>>, Query<&Interaction>),
     (mut vis, mut texts, mut buttons): (Query<&mut Visibility>, Query<&mut Text>, Query<&mut UiButton>),
-    (worlds, mut next, mut exit): (Res<WorldList>, ResMut<NextState<AppState>>, MessageWriter<AppExit>),
+    mut exit: MessageWriter<AppExit>,
     (mut choices, mut options, settings, mut wheel): (MessageReader<crate::popupmenu::PopupChoice>, ResMut<crate::options::OptionsPanel>, Res<crate::options::Settings>, MessageReader<MouseWheel>),
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut play: MessageWriter<crate::sound::PlaySound>,

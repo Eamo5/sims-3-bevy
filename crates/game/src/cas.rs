@@ -125,6 +125,15 @@ pub enum CasAction {
     FaceSlider(u8, i8),
     RandomFace,
     Done,
+    /// Set straight from the game's Basics panel (see `caslook`): an age, female or not, the
+    /// skin tone along the game's ramp (0 lightest to 1 darkest), weight (-1 thin to 1 heavy),
+    /// fitness (0 to 1); and a redraw after the names are typed.
+    SetAge(Age),
+    SetFemale(bool),
+    SetSkin(f32),
+    SetWeight(f32),
+    SetFitness(f32),
+    Refresh,
 }
 
 /// The face sliders by part of the face, as Create a Sim groups them: each slider's pair (in
@@ -210,12 +219,12 @@ pub struct CasFamilies(pub bool);
 #[derive(Message, Clone, Copy)]
 pub struct CasActionRequest(pub CasAction);
 
-fn mirror_state(scene: Option<ResMut<CasScene>>, mut sel: ResMut<CasSelected>, mut fam: ResMut<CasFamilies>, mut framed: Local<bool>) {
+fn mirror_state(scene: Option<ResMut<CasScene>>, mut sel: ResMut<CasSelected>, mut fam: ResMut<CasFamilies>, mut framed: Local<(bool, bool)>) {
     let Some(mut s) = scene else { return };
-    // (The game's frame just up: the plain household panel goes.)
-    let game_frame = crate::caslook::GAME_CAS.load(std::sync::atomic::Ordering::Relaxed);
-    if game_frame != *framed {
-        *framed = game_frame;
+    // (The game's frame or one of its panels just up: the plain ones go.)
+    let game = (crate::caslook::GAME_CAS.load(std::sync::atomic::Ordering::Relaxed), crate::caslook::game_panel(s.tab));
+    if game != *framed {
+        *framed = game;
         s.dirty_ui = true;
     }
     if sel.0 != s.selected || sel.1 != s.tab {
@@ -487,15 +496,16 @@ fn cas_actions(
                 let fresh = random_sim(&mut rng, &last, Some(s.female), s.age);
                 s.first = fresh.first;
             }
-            CasAction::Age => {
+            CasAction::Age | CasAction::SetAge(_) => {
                 let s = &mut pending.members[k];
-                s.age = match s.age {
-                    Age::Baby | Age::Toddler => Age::Child,
-                    Age::Child => Age::Teen,
-                    Age::Teen => Age::YoungAdult,
-                    Age::YoungAdult => Age::Adult,
-                    Age::Adult => Age::Elder,
-                    Age::Elder => Age::Toddler,
+                s.age = match (*action, s.age) {
+                    (CasAction::SetAge(a), _) => a,
+                    (_, Age::Baby | Age::Toddler) => Age::Child,
+                    (_, Age::Child) => Age::Teen,
+                    (_, Age::Teen) => Age::YoungAdult,
+                    (_, Age::YoungAdult) => Age::Adult,
+                    (_, Age::Adult) => Age::Elder,
+                    (_, Age::Elder) => Age::Toddler,
                 };
                 s.outfit = OutfitChoice::default();
                 let slots = crate::life::trait_slots(s.age);
@@ -507,6 +517,31 @@ fn cas_actions(
                         None => break,
                     }
                 }
+            }
+            CasAction::SetFemale(f) => {
+                if pending.members[k].female != f {
+                    let s = &mut pending.members[k];
+                    s.female = f;
+                    s.outfit = OutfitChoice::default();
+                    let fresh = random_sim(&mut rng, &last, Some(f), s.age);
+                    s.first = fresh.first;
+                }
+            }
+            CasAction::SetSkin(t) => {
+                // (Along the skin tones, light to dark.)
+                let x = t.clamp(0.0, 1.0) * (SKINS.len() - 1) as f32;
+                let (i, f) = (x.floor() as usize, x.fract());
+                let (a, b) = (SKINS[i.min(SKINS.len() - 1)], SKINS[(i + 1).min(SKINS.len() - 1)]);
+                pending.members[k].skin = Color::srgb(a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f, a.2 + (b.2 - a.2) * f);
+            }
+            CasAction::SetWeight(w) => {
+                pending.members[k].weight = w.clamp(-1.0, 1.0);
+            }
+            CasAction::SetFitness(f) => {
+                pending.members[k].fitness = f.clamp(0.0, 1.0);
+            }
+            CasAction::Refresh => {
+                model = false;
             }
             CasAction::Skin(i) => {
                 let (r, g, b) = SKINS[i.min(SKINS.len() - 1)];
@@ -788,7 +823,7 @@ fn turn_model(
     }
 }
 
-fn cas_button_visuals(mut q: Query<(&Interaction, &mut BackgroundColor, &CasAction, Option<&Selectedness>, Has<Dimmed>), (Changed<Interaction>, Without<Swatch>)>) {
+fn cas_button_visuals(mut q: Query<(&Interaction, &mut BackgroundColor, &CasAction, Option<&Selectedness>, Has<Dimmed>), (Changed<Interaction>, Without<Swatch>, Without<crate::layout::UiButton>)>) {
     for (i, mut bg, _, sel, dimmed) in &mut q {
         bg.0 = match i {
             Interaction::Pressed => BTN_PRESS,
@@ -990,6 +1025,10 @@ fn rebuild_ui(
                     button(p, label, CasAction::Family(i), Val::Percent(100.0), current == Some(h.id), 15.0);
                 }
             });
+            return;
+        }
+        // (The game's own panel for this tab, where it's up: see `caslook`.)
+        if crate::caslook::game_panel(scene.tab) {
             return;
         }
         // Editing panel (right), scrolled where it was.
