@@ -31,6 +31,9 @@ impl Plugin for CasClothingPlugin {
 /// Whether the game's clothing panels are up (see `caslook::game_panel`).
 pub static CLOTHING_UP: AtomicBool = AtomicBool::new(false);
 
+/// For the UI flow (`autotest`): the accessories shown.
+pub static TEST_ACCESSORIES: AtomicBool = AtomicBool::new(false);
+
 // `CASClothing`'s windows: the outfits' buttons (in `cas::WEAR`'s order) and its close button.
 const OUTFITS: [u32; 6] = [0x05db_c502, 0x05db_c503, 0x05db_c504, 0x05db_c506, 0x05db_c505, 0x05db_c507];
 const CAREER: u32 = 0x05db_c509;
@@ -43,6 +46,8 @@ const WHOLE: u32 = 0x05db_cf14;
 const SHOES: u32 = 0x05db_cf13;
 const KINDS: [(u32, CasTab, &str); 4] = [(TOPS, CasTab::Tops, "Tops"), (BOTTOMS, CasTab::Bottoms, "Bottoms"), (WHOLE, CasTab::Outfits, "Outfits"), (SHOES, CasTab::Shoes, "Shoes")];
 const GRID: u32 = 0x05db_cf21;
+/// Accessories (glasses, here), after the kinds of clothes.
+const ACCESSORIES: u32 = 0x05db_cf90;
 /// What this game hasn't: the content filter, saving, deleting and sharing designs.
 const NOT_HERE: [u32; 5] = [0x05db_cf19, 0x05db_b904, 0x05db_b905, 0x05db_cf17, 0x05db_cf16];
 /// Create a Style for the item worn.
@@ -69,6 +74,8 @@ pub struct CasClothing {
     scroll: usize,
     /// How far each item's row is turned (by its place in the list).
     turned: HashMap<usize, usize>,
+    /// Accessories shown rather than the tab's clothes.
+    accessories: bool,
     shown: Option<Shown>,
 }
 
@@ -83,6 +90,7 @@ struct Shown {
     scroll: usize,
     turned: Vec<(usize, usize)>,
     icons: bool,
+    accessories: bool,
 }
 
 /// A colourway's cell: the item's place in the list, and the colourway.
@@ -102,9 +110,10 @@ fn spawn_clothing(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut ima
     // The kinds of clothes along the top, centred as `CASClothingCategory` lays out those it
     // has (42 across, 3 overlapping).
     let Some(mut cat) = ui.layout("CASClothingCategory").cloned() else { return };
-    let n = KINDS.len() as f32;
+    let ids: Vec<u32> = KINDS.iter().map(|k| k.0).chain([ACCESSORIES]).collect();
+    let n = ids.len() as f32;
     let start = 159.0 - n * 0.5 * 42.0 - (n - 1.0) * 0.5 * -3.0;
-    for (i, (id, _, _)) in KINDS.iter().enumerate() {
+    for (i, id) in ids.iter().enumerate() {
         edit_windows(&mut cat, *id, &mut |w| {
             let x = start + i as f32 * 39.0;
             w.area = [x, w.area[1], x + 42.0, w.area[3]];
@@ -139,6 +148,9 @@ fn spawn_clothing(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut ima
             commands.entity(e).insert((CasAction::Tab(tab), crate::icons::Tooltip(tip.into())));
         }
     }
+    if let Some(e) = category.id(ACCESSORIES) {
+        commands.entity(e).insert(crate::icons::Tooltip("Accessories".into()));
+    }
     if let Some(e) = category.id(DESIGN) {
         commands.entity(e).insert((CasAction::Styling, crate::icons::Tooltip("Create a Style".into())));
     }
@@ -152,7 +164,7 @@ fn spawn_clothing(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut ima
         commands.entity(grid).insert(bevy::ui::RelativeCursorPosition::default());
     }
     CLOTHING_UP.store(true, Ordering::Relaxed);
-    commands.insert_resource(CasClothing { outfits, category, rows: None, bar, scroll: 0, turned: HashMap::new(), shown: None });
+    commands.insert_resource(CasClothing { outfits, category, rows: None, bar, scroll: 0, turned: HashMap::new(), accessories: false, shown: None });
 }
 
 /// Shown on the clothes' tabs: the outfit and kind lit, the items for the Sim in that outfit,
@@ -167,7 +179,7 @@ fn clothing_panel(
     selected: Res<crate::cas::CasSelected>,
     scene: Option<Res<crate::cas::CasScene>>,
     (mut vis, mut buttons, mut bars, mut texts): (Query<&mut Visibility>, Query<&mut UiButton>, Query<&mut UiScrollBar>, Query<&mut Text>),
-    (cells, arrows, over): (Query<(&Interaction, &DesignCell), Changed<Interaction>>, Query<(&Interaction, &RowArrow), Changed<Interaction>>, Query<&bevy::ui::RelativeCursorPosition>),
+    (cells, arrows, over, clicks): (Query<(&Interaction, &DesignCell), Changed<Interaction>>, Query<(&Interaction, &RowArrow), Changed<Interaction>>, Query<&bevy::ui::RelativeCursorPosition>, Query<(Entity, &Interaction), Changed<Interaction>>),
     wheel: Res<bevy::input::mouse::AccumulatedMouseScroll>,
     mut actions: MessageWriter<crate::cas::CasActionRequest>,
     mut gu: Option<ResMut<crate::icons::GameUi>>,
@@ -183,8 +195,17 @@ fn clothing_panel(
     }
     let k = selected.0.min(pending.members.len().saturating_sub(1));
     let Some(sim) = pending.members.get(k) else { return };
-    let Some(t) = tab.clothing_type() else { return };
-    let wear = scene.wear;
+    let Some(tab_type) = tab.clothing_type() else { return };
+    // Accessories: their button; the kinds' put the tab's clothes back.
+    if crate::livehud::pressed(&clicks, c.category.id(ACCESSORIES)) || TEST_ACCESSORIES.swap(false, Ordering::Relaxed) {
+        c.accessories = true;
+    }
+    if KINDS.iter().any(|(id, _, _)| crate::livehud::pressed(&clicks, c.category.id(*id))) {
+        c.accessories = false;
+    }
+    let accessories = c.accessories && !sim.age.is_little();
+    let t = if accessories { s3formats::sim::CT_GLASSES } else { tab_type };
+    let wear = if accessories { OutfitKind::Everyday } else { scene.wear };
     // The outfit and the kind lit.
     for (n, id) in OUTFITS.iter().enumerate() {
         let lit = crate::cas::wear_kind(n) == wear;
@@ -194,20 +215,28 @@ fn clothing_panel(
             b.selected = lit;
         }
     }
-    for (id, kind, _) in KINDS {
+    for (id, lit) in KINDS.iter().map(|(id, kind, _)| (*id, *kind == tab && !accessories)).chain([(ACCESSORIES, accessories)]) {
         if let Some(mut b) = c.category.id(id).and_then(|e| buttons.get_mut(e).ok())
-            && b.selected != (kind == tab)
+            && b.selected != lit
         {
-            b.selected = kind == tab;
-        }
-    }
-    // Clicks: a colourway worn; a row turned.
-    for (i, d) in &cells {
-        if *i == Interaction::Pressed {
-            actions.write(crate::cas::CasActionRequest(CasAction::WearDesign(t, d.0, d.1)));
+            b.selected = lit;
         }
     }
     let list = crate::cas::parts_for(&scene.cas, sim, t, wear);
+    // The accessory worn (none chosen: none).
+    let worn_accessory = sim.outfit.glasses.filter(|g| *g != crate::sim::OutfitChoice::NONE);
+    // Clicks: a colourway worn (an accessory worn taken off); a row turned.
+    for (i, d) in &cells {
+        if *i == Interaction::Pressed {
+            let action = if accessories {
+                let off = list.get(d.0).is_some_and(|(key, _)| Some(*key) == worn_accessory);
+                CasAction::FacePart(t, if off { usize::MAX } else { d.0 })
+            } else {
+                CasAction::WearDesign(t, d.0, d.1)
+            };
+            actions.write(crate::cas::CasActionRequest(action));
+        }
+    }
     let designs = |key: &s3bake::Key| scene.cas.colourways.get(key).map_or(1, |w| w.swatches.len().clamp(1, 8));
     for (i, a) in &arrows {
         if *i == Interaction::Pressed
@@ -238,10 +267,10 @@ fn clothing_panel(
             }
         }
     }
-    let worn = crate::cas::worn(&scene, sim, t).map(|key| (key, sim.outfit.designs.iter().find(|(p, _)| *p == key).map_or(0, |d| d.1)));
+    let worn = if accessories { worn_accessory.map(|k| (k, 0)) } else { crate::cas::worn(&scene, sim, t).map(|key| (key, sim.outfit.designs.iter().find(|(p, _)| *p == key).map_or(0, |d| d.1))) };
     // (Opened, for another Sim, outfit or kind: the item worn scrolled to, its row turned to
     // its colourway.)
-    let fresh = c.shown.as_ref().is_none_or(|s| (s.sim, s.tab, s.wear) != (k, tab, wear));
+    let fresh = c.shown.as_ref().is_none_or(|s| (s.sim, s.tab, s.wear, s.accessories) != (k, tab, wear, accessories));
     if fresh {
         c.turned.clear();
         if let Some((key, d)) = worn
@@ -261,7 +290,7 @@ fn clothing_panel(
     c.scroll = c.scroll.min(most);
     let mut turned: Vec<(usize, usize)> = c.turned.iter().map(|(a, b)| (*a, *b)).collect();
     turned.sort();
-    let want = Shown { sim: k, female: sim.female, age: sim.age, tab, wear, worn, scroll: c.scroll, turned, icons: gu.is_some() };
+    let want = Shown { sim: k, female: sim.female, age: sim.age, tab, wear, worn, scroll: c.scroll, turned, icons: gu.is_some(), accessories };
     if c.shown.as_ref() == Some(&want) {
         return;
     }

@@ -3215,6 +3215,11 @@ fn ui_flow(
         }
         (201, AppState::CreateHousehold, _) if since > 2.0 => {
             shot(&mut commands, "2t_tops_picked");
+            crate::casclothing::TEST_ACCESSORIES.store(true, std::sync::atomic::Ordering::Relaxed);
+            *stage = (218, now);
+        }
+        (218, AppState::CreateHousehold, _) if since > 1.5 => {
+            shot(&mut commands, "2t_accessories");
             *stage = (90, now);
         }
         // The outfit worn, in another of its colourways (on the tab of what's worn).
