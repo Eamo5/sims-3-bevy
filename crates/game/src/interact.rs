@@ -2466,7 +2466,7 @@ fn run_actions(
                                 let full = d.until_full.is_some_and(|m| motives.0[m] >= 98.0);
                                 // (A painting takes as long as its canvas.)
                                 let minutes = match d.special {
-                                    Special::SellPainting => crate::paintings::painting_minutes(crate::paintings::canvas(plan, skills.level("Painting")), sim.age == Age::Child, journals.get(me).ok()),
+                                    Special::SellPainting => crate::paintings::painting_minutes(crate::paintings::canvas(plan, skills.level("Painting")), journals.get(me).ok()),
                                     // (Only taking the book down, or picking the paper up: they're read elsewhere.)
                                     Special::GetBook | Special::GetPaper => 2.0,
                                     // (A quick meal is only taken out at the fridge: it's eaten at the table.)
