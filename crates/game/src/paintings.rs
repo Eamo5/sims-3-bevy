@@ -92,9 +92,13 @@ pub struct Painted {
 /// traits' version of it if it has one; brilliant paintings and masterpieces come to the
 /// skilled now and then, and are worth more.
 pub fn paint(data: Option<&PaintingsBaked>, size: u8, level: u32, traits: &[Trait], child: bool, extra_creative: bool, rng: &mut impl Rng) -> Painted {
-    let quality = if level >= 9 && rng.random_bool(0.12) {
+    // PaintingSkill's base chances, with TraitTuning's additive bonuses.
+    let perfectionist = traits.contains(&Trait::Perfectionist);
+    let brilliant = 20 + if perfectionist { 20 } else { 0 } + if extra_creative { 25 } else { 0 };
+    let masterpiece = 10 + if perfectionist { 15 } else { 0 } + if extra_creative { 15 } else { 0 };
+    let quality = if level >= 9 && rng.random_bool(masterpiece as f64 / 100.0) {
         3
-    } else if level >= 6 && rng.random_bool(0.08 + (level - 6) as f64 * 0.04) {
+    } else if level >= 6 && rng.random_bool(brilliant as f64 / 100.0) {
         2
     } else {
         0
@@ -266,6 +270,38 @@ pub fn image(cache: &mut PaintingImages, images: &mut Assets<Image>, baked: &cra
 mod tests {
     use super::*;
     use s3bake::gamedata::CanvasInfo;
+
+    #[test]
+    fn original_quality_rolls_apply_trait_bonuses_without_bypassing_skill_gates() {
+        use rand::SeedableRng;
+        for (traits, extra, brilliant, masterpiece) in [
+            (vec![], false, 0.20, 0.10),
+            (vec![Trait::Perfectionist], false, 0.40, 0.25),
+            (vec![], true, 0.45, 0.25),
+            (vec![Trait::Perfectionist], true, 0.65, 0.40),
+        ] {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(718);
+            for _ in 0..100 {
+                let p = paint(None, 0, 5, &traits, false, extra, &mut rng);
+                assert_eq!(p.name, "Fine Painting");
+            }
+            for level in [6, 8, 9, 10] {
+                let mut brilliant_count = 0;
+                let mut masterpiece_count = 0;
+                for _ in 0..20_000 {
+                    match paint(None, 0, level, &traits, false, extra, &mut rng).name {
+                        "Brilliant Painting" => brilliant_count += 1,
+                        "Masterpiece" => masterpiece_count += 1,
+                        _ => {}
+                    }
+                }
+                let expected_masterpiece = if level >= 9 { masterpiece } else { 0.0 };
+                let expected_brilliant = (1.0 - expected_masterpiece) * brilliant;
+                assert!((masterpiece_count as f64 / 20_000.0 - expected_masterpiece).abs() < 0.015);
+                assert!((brilliant_count as f64 / 20_000.0 - expected_brilliant).abs() < 0.015);
+            }
+        }
+    }
 
     fn table() -> PaintingsBaked {
         let p = |size, name: &str, min, max, kind, traits: &[(&str, &str)]| PaintingInfo {
