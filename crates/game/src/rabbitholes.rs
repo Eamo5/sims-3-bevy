@@ -86,7 +86,7 @@ static SCIENCE: [Activity; 1] = [act("Volunteer as a Test Subject", 120.0, -80, 
 static HOSPITAL: [Activity; 1] = [act("Get a Checkup", 60.0, 40, [-4.0, -4.0, 5.0, 5.0, 5.0, -5.0], None)];
 static SHOPS: [Activity; 1] = [act("Browse the Shelves", 60.0, 0, [-4.0, -4.0, -2.0, 15.0, 0.0, 25.0], Some("Writing"))];
 // (With lunch at school.)
-pub static SCHOOL: Activity = act("School", 0.0, 0, [-6.0, -3.0, -6.0, 25.0, -6.0, -8.0], Some("Logic"));
+pub static SCHOOL: Activity = act("School", 0.0, 0, [-6.0, -3.0, -6.0, 25.0, -6.0, -8.0], None);
 
 /// The rabbit-hole activities a community lot offers, from its name.
 pub fn activities(lot: &LotInfo) -> &'static [Activity] {
@@ -349,8 +349,9 @@ fn outings(
                     let mood_ok = motives.0.iter().all(|m| *m > -40.0);
                     g.0 = (g.0 + if mood_ok { 8.0 } else { -12.0 }).clamp(0.0, 100.0);
                 }
-                // With homework for tomorrow (on school nights).
-                if clock.weekday() < 4 {
+                // Friday's assignment is due Monday, not omitted for the weekend.
+                // A student who aged out of school during the visit gets no new work.
+                if matches!(sim.age, Age::Child | Age::Teen) {
                     commands.entity(e).insert(Homework);
                     notes.push(format!("{} is home from school, with homework.", sim.first));
                 } else {
@@ -388,7 +389,7 @@ fn outings(
 #[derive(Component)]
 pub struct Homework;
 
-/// A child's school performance, 0..100 (A+ at the top).
+/// A student's school performance, normalized to 0..100 (A at the top).
 #[derive(Component, Clone, Copy)]
 pub struct SchoolGrades(pub f32);
 

@@ -438,7 +438,7 @@ installation is unreachable.
   dancing in the hearth and a flickering warm light on the room, and they warm their hands by
   it or put it out. Now and then a spark catches the floor in front. Candles are lit and blown
   out too: a little flame and a soft flickering light for a few hours.
-- **Homework**: children and teens come home from school (Monday to Thursday) with homework,
+- **Homework**: children and teens come home from school (Monday to Friday) with homework,
   and sit down at a table to do it (the game's homework animations; sooner for bookworms and
   geniuses); done, it lifts their grades; left undone, it drags them down. A teen or grown-up
   can Help with Homework (a Friendly social, offered while there's homework): it's done, with
