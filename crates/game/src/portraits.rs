@@ -40,8 +40,8 @@ fn into_studio(commands: &mut Commands, children: &Query<&Children>, parts: &Que
     }
 }
 const SIZE: u32 = 128;
-/// The portraits' backdrop: the game's soft blue, lighter towards the top.
-const BACKDROP: Color = Color::srgb(0.56, 0.72, 0.88);
+/// The portraits' backdrop card (put away: the Sims are pictured cut out): the game's soft blue,
+/// lighter towards the top.
 const BACKDROP_TOP: [u8; 3] = [206, 226, 244];
 const BACKDROP_BOTTOM: [u8; 3] = [112, 150, 196];
 
@@ -84,12 +84,11 @@ impl Portraits {
     }
 }
 
-/// A picture to take (the backdrop's colour until it's taken).
+/// A picture to take (clear until it's taken: the Sim is cut out, as the game's thumbnails
+/// are, over whatever frame shows them).
 fn blank(images: &mut Assets<Image>) -> Handle<Image> {
     let mut img = Image::new_target_texture(SIZE, SIZE, TextureFormat::Rgba8Unorm, Some(TextureFormat::Rgba8UnormSrgb));
-    let c = BACKDROP.to_srgba();
-    let px = [(c.red * 255.0) as u8, (c.green * 255.0) as u8, (c.blue * 255.0) as u8, 255];
-    img.data = Some(px.iter().copied().cycle().take((SIZE * SIZE * 4) as usize).collect());
+    img.data = Some(vec![0; (SIZE * SIZE * 4) as usize]);
     images.add(img)
 }
 
@@ -159,12 +158,14 @@ fn spawn_studio(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut ma
         Transform::default(),
         RenderLayers::layer(STUDIO_LAYER),
         bevy::light::NotShadowCaster,
+        // (Put away: the Sims are pictured cut out.)
+        Visibility::Hidden,
         DespawnOnExit(AppState::InGame),
     ));
     commands.spawn((
         StudioCamera,
         Camera3d::default(),
-        Camera { order: -5, is_active: false, clear_color: ClearColorConfig::Custom(BACKDROP), ..default() },
+        Camera { order: -5, is_active: false, clear_color: ClearColorConfig::Custom(Color::NONE), ..default() },
         Projection::Perspective(PerspectiveProjection { fov: 24f32.to_radians(), near: 0.08, far: 1.0, ..default() }),
         AmbientLight { color: Color::srgb(0.9, 0.93, 1.0), brightness: 1500.0, ..default() },
         // (The studio only: the world's walls and furniture never get in the way, and its sun
