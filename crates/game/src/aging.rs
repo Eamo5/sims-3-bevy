@@ -143,7 +143,7 @@ mod lifespan_tests {
         app.update();
         assert_eq!(app.world().get::<Sim>(e).unwrap().age, Age::Teen);
         // A later, independent cake still works without waiting for midnight.
-        app.world_mut().entity_mut(e).insert((GrowUpNow, crate::rabbitholes::SchoolGrades(83.0), crate::rabbitholes::Homework));
+        app.world_mut().entity_mut(e).insert((GrowUpNow, crate::rabbitholes::SchoolGrades(83.0), crate::rabbitholes::Homework::default()));
         app.update();
         assert_eq!(app.world().get::<Sim>(e).unwrap().age, Age::YoungAdult);
         assert!(app.world().get::<GrowUpNow>(e).is_none());

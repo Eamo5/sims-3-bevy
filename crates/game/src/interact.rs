@@ -1915,7 +1915,7 @@ fn run_actions(
             Option<&mut PathFollow>,
             Option<&mut Job>,
             &Floor,
-            (Option<&crate::wishes::Wishes>, Option<&crate::paintings::PaintPlan>, Option<&crate::life::Moodlets>, Option<&crate::little::Pregnancy>),
+            (Option<&crate::wishes::Wishes>, Option<&crate::paintings::PaintPlan>, Option<&crate::life::Moodlets>, Option<&crate::little::Pregnancy>, Option<&mut crate::rabbitholes::Homework>),
             Option<&crate::opportunities::SimOpportunities>,
             Option<&crate::visit::OnLot>,
         ),
@@ -1956,7 +1956,7 @@ fn run_actions(
     // Relationship changes to apply to both Sims: (a, b, status, kissed)
     let mut status_fx: Vec<(Entity, Entity, Option<RelStatus>, bool)> = Vec::new();
 
-    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, mut job, floor, (wishes, plan, moodlets, pregnancy), opps, on_lot) in &mut sims {
+    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, mut job, floor, (wishes, plan, moodlets, pregnancy, mut homework), opps, on_lot) in &mut sims {
         // Out on a community lot: its walk grid and way out.
         let away = on_lot.and_then(|o| visited.as_deref().filter(|v| v.lot == o.0));
         let (my_grid, my_upper): (&NavGrid, Option<&UpperFloors>) = match away {
@@ -2457,7 +2457,12 @@ fn run_actions(
                                     Special::Homework => crate::rabbitholes::homework_minutes(&sim.traits, crate::wishes::has(wishes, "MultiTasker")),
                                     _ => d.minutes,
                                 };
-                                if elapsed >= minutes || full {
+                                let complete = if d.special == Special::Homework {
+                                    homework.as_mut().is_none_or(|assignment| assignment.advance(dt, minutes))
+                                } else {
+                                    elapsed >= minutes || full
+                                };
+                                if complete {
                                     finished = true;
                                     life.write(LifeEvent::new(me, LifeEventKind::Finished { activity: d.name, completed: true }));
                                     used.0 = None;

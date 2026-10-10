@@ -352,7 +352,7 @@ fn outings(
                 // Friday's assignment is due Monday, not omitted for the weekend.
                 // A student who aged out of school during the visit gets no new work.
                 if matches!(sim.age, Age::Child | Age::Teen) {
-                    commands.entity(e).insert(Homework);
+                    commands.entity(e).insert(Homework::default());
                     notes.push(format!("{} is home from school, with homework.", sim.first));
                 } else {
                     notes.push(format!("{} is home from school.", sim.first));
@@ -386,8 +386,18 @@ fn outings(
 }
 
 /// Homework from today's school, not yet done.
-#[derive(Component)]
-pub struct Homework;
+#[derive(Component, Default)]
+pub struct Homework(pub f32);
+
+impl Homework {
+    /// Progress belongs to the assignment, so ending an interaction never resets it.
+    pub fn advance(&mut self, minutes: f32, duration: f32) -> bool {
+        if minutes > 0.0 && duration > 0.0 {
+            self.0 = (self.0 + 100.0 * minutes / duration).clamp(0.0, 100.0);
+        }
+        self.0 >= 100.0
+    }
+}
 
 pub const HOMEWORK_BASE_RATE: f32 = 0.556;
 
@@ -490,6 +500,23 @@ mod school_schedule_tests {
     use rand::SeedableRng;
 
     #[test]
+    fn homework_progress_resumes_and_uses_the_current_completion_rate() {
+        let mut assignment = Homework::default();
+        let duration = homework_minutes(&[], false);
+        assert!(!assignment.advance(duration / 4.0, duration));
+        assert!((assignment.0 - 25.0).abs() < 0.001);
+        // Pausing/cancelling contributes no time; resuming keeps the same assignment.
+        assert!(!assignment.advance(0.0, duration));
+        assert!(!assignment.advance(-10.0, duration));
+        assert!((assignment.0 - 25.0).abs() < 0.001);
+        let accelerated = homework_minutes(&[], true);
+        assert!(!assignment.advance(accelerated / 4.0, accelerated));
+        assert!((assignment.0 - 50.0).abs() < 0.001);
+        assert!(assignment.advance(accelerated, accelerated));
+        assert_eq!(assignment.0, 100.0);
+    }
+
+    #[test]
     fn homework_completion_uses_additive_trait_rates_and_multitasker() {
         use crate::life::Trait::*;
         for (traits, rate) in [
@@ -509,7 +536,7 @@ mod school_schedule_tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(45);
         let student = app.world_mut().spawn((
             crate::sim::random_sim(&mut rng, "Student", Some(false), Age::Child),
-            Homework, SchoolGrades(55.0),
+            Homework::default(), SchoolGrades(55.0),
         )).id();
         let helper = app.world_mut().spawn((
             crate::sim::random_sim(&mut rng, "Helper", Some(false), Age::Adult), Skills::default(),
@@ -520,14 +547,14 @@ mod school_schedule_tests {
         assert_eq!(world.get::<SchoolGrades>(student).unwrap().0, 61.0);
         assert_eq!(world.get::<Skills>(helper).unwrap().0.get("Logic"), None);
         assert_eq!(world.resource::<Messages<crate::journal::Did>>().len(), 0);
-        world.entity_mut(student).insert(Homework);
+        world.entity_mut(student).insert(Homework::default());
         assert!(complete_homework(world, student, Some(helper), 60.0));
         assert!(!complete_homework(world, student, None, 0.0));
         assert!(!complete_homework(world, student, Some(helper), 60.0));
         assert_eq!(world.get::<SchoolGrades>(student).unwrap().0, 70.0);
         assert_eq!(world.get::<Skills>(helper).unwrap().0.get("Logic"), Some(&0.3));
         assert_eq!(world.resource::<Messages<crate::journal::Did>>().len(), 1);
-        world.entity_mut(student).insert(Homework);
+        world.entity_mut(student).insert(Homework::default());
         world.get_mut::<Sim>(student).unwrap().age = Age::YoungAdult;
         assert!(!complete_homework(world, student, Some(helper), 60.0));
         world.despawn(student);

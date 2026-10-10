@@ -337,7 +337,7 @@ impl Plugin for AutoTestPlugin {
                     {
                         *done = true;
                         info!("use test: Help with Homework ({who})");
-                        commands.entity(t).insert(crate::rabbitholes::Homework);
+                        commands.entity(t).insert(crate::rabbitholes::Homework::default());
                         q.0.clear();
                         q.push_player(crate::interact::Action::new("Help with Homework", crate::interact::ActionKind::Social { target: t, social: i }, false));
                         return;

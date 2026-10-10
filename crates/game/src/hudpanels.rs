@@ -309,7 +309,7 @@ fn career_panel(
     hud: Res<LiveHud>,
     ui: Option<ResMut<UiAssets>>,
     mut assets: ResMut<Assets<Image>>,
-    sel: Query<(Entity, &Sim, Option<&crate::careers::Job>, Has<crate::careers::AtWork>, Option<&crate::rabbitholes::SchoolGrades>), With<Selected>>,
+    sel: Query<(Entity, &Sim, Option<&crate::careers::Job>, Has<crate::careers::AtWork>, Option<&crate::rabbitholes::SchoolGrades>, Option<&crate::rabbitholes::Homework>), With<Selected>>,
     mut game_ui: Option<ResMut<crate::icons::GameUi>>,
     (mut vis, mut texts, mut bars): (Query<&mut Visibility>, Query<&mut Text>, Query<&mut crate::layout::UiFillBar>),
     clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
@@ -318,7 +318,7 @@ fn career_panel(
     panel: Res<InfoPanel>,
 ) {
     let s: &Spawned = &hud.career;
-    let (Some(mut ui), Ok((e, sim, job, at_work, grades))) = (ui, sel.single()) else { return };
+    let (Some(mut ui), Ok((e, sim, job, at_work, grades, homework))) = (ui, sel.single()) else { return };
     if *panel != InfoPanel::Career {
         return;
     }
@@ -420,7 +420,7 @@ fn career_panel(
     // The button: off to work (or, there, how to work).
     set_visible(&mut vis, s.id(CAREER_GO), job.is_some() && at_work);
     // What changes rarely is set on change: the icon and the tooltips.
-    let key = format!("{e:?} {:?} {:?} {school} {}", job.map(|j| (j.track, j.level, j.branch, j.tone)), (performance / 5.0) as i32, game_ui.is_some());
+    let key = format!("{e:?} {:?} {:?} {school} {} {:?}", job.map(|j| (j.track, j.level, j.branch, j.tone)), (performance / 5.0) as i32, game_ui.is_some(), homework.map(|h| h.0 as u32));
     if *state == key {
         return;
     }
@@ -438,7 +438,7 @@ fn career_panel(
                 let next = j.levels().get(j.level + 1).map_or("the top of the career".to_string(), |n| n.title.to_string());
                 format!("Performance: {:+.0}\nRaise it with {} skill and a good mood at work, towards {next}.\nWorking: {}", j.performance, j.career().skill, j.tone.label(j.career().skill))
             }
-            None => format!("Grade: {}\nDoing homework raises it.", grades.copied().unwrap_or_default().letter()),
+            None => format!("Grade: {}\n{}", grades.copied().unwrap_or_default().letter(), homework.map_or_else(|| "No unfinished homework.".into(), |h| format!("Homework: {}% complete", h.0 as u32))),
         };
         tip(&mut commands, m, t);
     }

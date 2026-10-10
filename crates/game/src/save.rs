@@ -81,6 +81,8 @@ pub struct SavedSim {
     pub school_grade: Option<f32>,
     #[serde(default)]
     pub homework: bool,
+    #[serde(default)]
+    pub homework_progress: f32,
     /// Classroom start and home arrival for a school day currently in progress.
     #[serde(default)]
     pub school_visit: Option<(f64, f64)>,
@@ -329,6 +331,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         elder_risk: None,
         school_grade: None,
         homework: false,
+        homework_progress: 0.0,
         school_visit: None,
         pregnancy: None,
         shape: Some((sim.weight, sim.fitness)),
@@ -613,7 +616,7 @@ fn save_game(
                 Option<&crate::careers::Pension>,
                 Option<&crate::journal::SkillJournal>,
                 Option<&crate::rabbitholes::SchoolGrades>,
-                Has<crate::rabbitholes::Homework>,
+                Option<&crate::rabbitholes::Homework>,
                 Option<&crate::rabbitholes::AtRabbitHole>,
             ),
         ),
@@ -702,7 +705,8 @@ fn save_game(
             aging: aging.map(|a| (a.days, a.elder_span)),
             elder_risk: aging.and_then(|a| a.elder_risk),
             school_grade: school.map(|g| g.0),
-            homework,
+            homework: homework.is_some(),
+            homework_progress: homework.map_or(0.0, |h| h.0),
             school_visit: rabbit.filter(|r| std::ptr::eq(r.activity, &crate::rabbitholes::SCHOOL)).map(|r| (r.inside_from, r.until)),
             pregnancy: pregnancy.map(|p| (p.since, p.other_parent.and_then(|o| ids.get(&o).copied()), p.stage)),
             shape: Some((sim.weight, sim.fitness)),
@@ -815,7 +819,7 @@ fn restore_school(ec: &mut EntityCommands, saved: &SavedSim) {
             ec.insert(crate::rabbitholes::SchoolGrades(grade.clamp(0.0, 100.0)));
         }
         if saved.homework {
-            ec.insert(crate::rabbitholes::Homework);
+            ec.insert(crate::rabbitholes::Homework(saved.homework_progress.clamp(0.0, 100.0)));
         }
         if let Some((inside_from, until)) = saved.school_visit {
             ec.insert((crate::rabbitholes::AtRabbitHole {
@@ -1075,6 +1079,7 @@ mod tests {
         saved.school_grade = Some(83.0);
         saved.homework = true;
         saved.school_visit = Some((540.0, 865.0));
+        saved.homework_progress = 42.5;
         let mut saved: SavedSim = serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
         let mut world = World::new();
         let e = world.spawn_empty().id();
@@ -1086,6 +1091,7 @@ mod tests {
         apply(&mut world, &saved);
         assert_eq!(world.get::<SchoolGrades>(e).unwrap().0, 83.0);
         assert!(world.get::<Homework>(e).is_some());
+        assert_eq!(world.get::<Homework>(e).unwrap().0, 42.5);
         let visit = world.get::<crate::rabbitholes::AtRabbitHole>(e).unwrap();
         assert!(std::ptr::eq(visit.activity, &crate::rabbitholes::SCHOOL));
         assert_eq!((visit.inside_from, visit.until), (540.0, 865.0));
@@ -1105,10 +1111,12 @@ mod tests {
         let mut old = serde_json::to_value(&saved).unwrap();
         old.as_object_mut().unwrap().remove("school_grade");
         old.as_object_mut().unwrap().remove("homework");
+        old.as_object_mut().unwrap().remove("homework_progress");
         old.as_object_mut().unwrap().remove("school_visit");
         let old: SavedSim = serde_json::from_value(old).unwrap();
         assert_eq!(old.school_grade, None);
         assert!(!old.homework);
+        assert_eq!(old.homework_progress, 0.0);
         assert_eq!(old.school_visit, None);
     }
 
