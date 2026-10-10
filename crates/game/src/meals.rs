@@ -411,16 +411,21 @@ pub struct SavedMeal {
     /// Absolute Sim time, so loading does not refresh food left out.
     #[serde(default)]
     pub served_at: Option<f64>,
+    #[serde(default)]
+    pub spoiled: bool,
 }
 
 #[derive(Resource)]
 pub struct PendingMeals(pub Vec<SavedMeal>);
 
-pub fn saved_meals(meals: &Query<(&Meal, Option<&Dish>, &GameObject, &Transform, Option<&crate::surroundings::ServedAt>)>, data: &s3bake::GameDataBaked) -> Vec<SavedMeal> {
-    meals.iter().filter_map(|(meal, dish, object, tf, served)| {
+pub type SavableMeals<'w, 's> = Query<'w, 's, (Option<&'static Meal>, Option<&'static Dish>, &'static GameObject, &'static Transform, Option<&'static crate::surroundings::ServedAt>, Has<crate::surroundings::Spoiled>), Or<(With<Meal>, With<crate::surroundings::Spoiled>)>>;
+
+pub fn saved_meals(meals: &SavableMeals, data: &s3bake::GameDataBaked) -> Vec<SavedMeal> {
+    meals.iter().filter_map(|(meal, dish, object, tf, served, spoiled)| {
         let recipe = dish.and_then(|d| data.recipes.get(d.0));
-        (meal.servings > 0).then(|| SavedMeal { recipe: recipe.map_or_else(String::new, |r| r.key.clone()), object: Some(object.objd), name: object.name.clone(), servings: meal.servings,
-            position: tf.translation.to_array(), yaw: tf.rotation.to_euler(EulerRot::YXZ).0, served_at: served.map(|s| s.0) })
+        let servings = meal.map_or(0, |m| m.servings);
+        (servings > 0 || spoiled).then(|| SavedMeal { recipe: recipe.map_or_else(String::new, |r| r.key.clone()), object: Some(object.objd), name: object.name.clone(), servings,
+            position: tf.translation.to_array(), yaw: tf.rotation.to_euler(EulerRot::YXZ).0, served_at: served.map(|s| s.0), spoiled })
     }).collect()
 }
 
@@ -433,7 +438,7 @@ fn restore_meals(
     let (Some(pending), Some(ui)) = (pending, ui) else { return };
     let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
     for saved in &pending.0 {
-        if saved.servings == 0 { continue; }
+        if saved.servings == 0 && !saved.spoiled { continue; }
         let recipe = ui.data.recipes.iter().enumerate().find(|(_, r)| r.key == saved.recipe);
         let plate = if let Some(objd) = saved.object {
             let Some(spawned) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, objd, Vec3::from(saved.position), Quat::from_rotation_y(saved.yaw)) else { continue };
@@ -449,13 +454,18 @@ fn restore_meals(
             set_food(&mut commands, &mut assets, &mut ctx, plate, None, recipe.group.or(recipe.single));
             commands.entity(plate).insert(Dish(i));
         }
-        commands.entity(plate).insert(Meal { servings: saved.servings });
+        if saved.spoiled {
+            commands.entity(plate).insert(crate::surroundings::Spoiled);
+        } else {
+            commands.entity(plate).insert(Meal { servings: saved.servings });
+        }
         if let Some(at) = saved.served_at.filter(|at| at.is_finite()) {
             commands.entity(plate).insert(crate::surroundings::ServedAt(at));
         }
         let name = if saved.name.is_empty() { recipe.map_or_else(|| "Group Meal".into(), |(_, r)| r.name.clone()) } else { saved.name.clone() };
+        let kind = if saved.spoiled { ObjectKind::DirtyDishes } else { ObjectKind::Meal };
         commands.entity(plate).queue_silenced(move |mut e: EntityWorldMut| {
-            if let Some(mut object) = e.get_mut::<GameObject>() { object.name = name; object.kind = ObjectKind::Meal; }
+            if let Some(mut object) = e.get_mut::<GameObject>() { object.name = name; object.kind = kind; }
         });
     }
     commands.remove_resource::<PendingMeals>();
@@ -1125,11 +1135,16 @@ mod tests {
         world.spawn((Meal { servings: 4 }, Dish(0), object("Pancakes", (1, 2, 3)), Transform::from_xyz(1.0, 3.75, 2.0).with_rotation(Quat::from_rotation_y(0.5)), crate::surroundings::ServedAt(1234.567)));
         world.spawn((Meal { servings: 0 }, Dish(0), object("Empty", (1, 2, 3)), Transform::default()));
         world.spawn((Meal { servings: 3 }, object("Pizza", (4, 5, 6)), Transform::default()));
-        let mut state = bevy::ecs::system::SystemState::<Query<(&Meal, Option<&Dish>, &GameObject, &Transform, Option<&crate::surroundings::ServedAt>)>>::new(&mut world);
+        world.spawn((crate::surroundings::Spoiled, Dish(0), object("Spoiled Food", (7, 8, 9)), Transform::default(), crate::surroundings::ServedAt(10.0)));
+        let mut state = bevy::ecs::system::SystemState::<SavableMeals>::new(&mut world);
         let saved = saved_meals(&state.get(&world).unwrap(), &data);
         let restored: Vec<SavedMeal> = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
-        assert_eq!(restored.len(), 2, "empty platters must not restore edible meals");
-        let pancakes = restored.iter().find(|m| m.recipe == "Pancakes").unwrap();
+        assert_eq!(restored.len(), 3, "empty platters are omitted, but spoiled food remains");
+        let spoiled = restored.iter().find(|m| m.spoiled).unwrap();
+        assert_eq!(spoiled.servings, 0);
+        assert_eq!(spoiled.served_at, Some(10.0));
+        assert_eq!(spoiled.object, Some((7, 8, 9)));
+        let pancakes = restored.iter().find(|m| m.recipe == "Pancakes" && !m.spoiled).unwrap();
         assert_eq!(pancakes.servings, 4);
         assert_eq!(pancakes.served_at, Some(1234.567));
         assert_eq!(pancakes.position, [1.0, 3.75, 2.0]);
@@ -1142,6 +1157,7 @@ mod tests {
         let old: SavedMeal = serde_json::from_str(r#"{"recipe":"Pancakes","servings":4,"position":[1,2,3],"yaw":0}"#).unwrap();
         assert!(old.object.is_none() && old.name.is_empty(), "older meal saves retain their default serving platter");
         assert_eq!(old.served_at, None);
+        assert!(!old.spoiled);
     }
 
     #[test]

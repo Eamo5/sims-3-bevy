@@ -636,7 +636,7 @@ fn save_game(
         Option<Res<crate::gardening::Garden>>,
         Query<(&crate::gardening::GrowingPlant, &Transform)>,
         Res<crate::collecting::Collection>,
-        Query<(&crate::meals::Meal, Option<&crate::meals::Dish>, &crate::interact::GameObject, &Transform, Option<&crate::surroundings::ServedAt>)>,
+        crate::meals::SavableMeals,
     ),
     sims: Query<
         (
