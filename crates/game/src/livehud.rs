@@ -522,7 +522,12 @@ fn puck_one(
         }
     }
     if pressed(&clicks, p.id(PUCK_OPTIONS)) {
-        crate::options::toggle_game_menu(commands, menu, Some(clock));
+        // (The game's own popup menu where it's to hand: see `gamepopup`.)
+        if crate::gamepopup::GAME_POPUP.load(std::sync::atomic::Ordering::Relaxed) {
+            commands.insert_resource(crate::gamepopup::OpenGamePopup);
+        } else {
+            crate::options::toggle_game_menu(commands, menu, Some(clock));
+        }
     }
     if pressed(&clicks, p.id(PUCK_SNAPSHOT)) {
         commands.insert_resource(Snapshot);
