@@ -630,7 +630,7 @@ pub enum Special {
     QuitJob,
     SellPainting,
     Cook,
-    /// Change into another of the Sim's outfits (the one planned: `ChangeIntoPlan`).
+    /// Change into the outfit selected for this queued action.
     ChangeClothes,
     /// Choose the everyday outfit piece by piece.
     PlanOutfit,
@@ -1581,11 +1581,12 @@ pub struct Action {
     pub completed: bool,
     /// Genre selected for this queued writing action, consumed when it starts writing.
     pub novel_genre: Option<usize>,
+    pub outfit_choice: Option<crate::simbody::OutfitKind>,
 }
 
 impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
-        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None }
+        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None }
     }
 }
 
@@ -2596,9 +2597,10 @@ fn run_actions(
                                         }
                                         Special::ChangeClothes => {
                                             // Into the outfit chosen, kept on until it's time for another.
-                                            commands.entity(me).queue_silenced(|mut e: EntityWorldMut| {
-                                                use crate::simbody::{ChangeIntoPlan, ChangedInto, OutfitKind, Wearing};
-                                                let Some(ChangeIntoPlan(kind)) = e.take::<ChangeIntoPlan>() else { return };
+                                            let outfit = action.outfit_choice.take();
+                                            commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| {
+                                                use crate::simbody::{ChangedInto, OutfitKind, Wearing};
+                                                let Some(kind) = outfit else { return };
                                                 if kind == OutfitKind::Everyday {
                                                     e.remove::<(Wearing, ChangedInto)>();
                                                 } else {
@@ -3306,6 +3308,30 @@ fn maintenance_minutes(base: f32, handiness: f32, traits: &[crate::life::Trait],
 #[cfg(test)]
 mod maintenance_tests {
     use super::*;
+
+    #[test]
+    fn queued_outfit_choices_remain_independent_when_later_choices_are_cancelled_or_rejected() {
+        use crate::simbody::OutfitKind;
+        let target = World::new().spawn_empty().id();
+        let mut queue = ActionQueue::default();
+        for outfit in [OutfitKind::Formal, OutfitKind::Swimwear] {
+            let mut action = Action::new("Change Into", ActionKind::Object { target, def: 0 }, false);
+            action.outfit_choice = Some(outfit);
+            queue.push_player(action);
+        }
+        assert_eq!(queue.0[0].outfit_choice, Some(OutfitKind::Formal));
+        assert_eq!(queue.0[1].outfit_choice, Some(OutfitKind::Swimwear));
+        queue.0.pop_back(); // Cancel the later choice.
+        for _ in 1..8 {
+            queue.push_player(Action::new("Wait", ActionKind::Object { target, def: 0 }, false));
+        }
+        let mut rejected = Action::new("Change Into", ActionKind::Object { target, def: 0 }, false);
+        rejected.outfit_choice = Some(OutfitKind::Outerwear);
+        queue.push_player(rejected);
+        assert_eq!(queue.0.len(), 8);
+        assert_eq!(queue.0.front_mut().unwrap().outfit_choice.take(), Some(OutfitKind::Formal));
+        assert!(queue.0.iter().all(|a| a.outfit_choice.is_none()), "cancelled/rejected choices must not leak into another action");
+    }
 
     #[test]
     fn object_actions_revalidate_definition_condition_and_reservation_before_work() {

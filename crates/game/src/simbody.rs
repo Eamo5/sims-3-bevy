@@ -227,10 +227,6 @@ impl OutfitKind {
 #[derive(Component)]
 pub struct ChangedInto;
 
-/// The outfit a Sim is going to the dresser to change into.
-#[derive(Component)]
-pub struct ChangeIntoPlan(pub OutfitKind);
-
 /// Wearing something other than everyday clothes (for a swim, for bed).
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Wearing(pub OutfitKind);

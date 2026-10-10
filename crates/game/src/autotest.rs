@@ -1141,14 +1141,16 @@ fn auto_move_house(
 /// UNIFORM=<career>:<level>: the selected Sim takes that job (level from 1) and puts its
 /// uniform on. CHANGE_INTO=<outfit>: the outfit they'll change into at a dresser (with
 /// `--use "Dresser:Change Into"`).
-fn wear_uniform(mut commands: Commands, sel: Query<Entity, With<crate::sim::Selected>>, sims: Query<&crate::sim::Sim>, mut done: Local<bool>, time: Res<Time>) {
+fn wear_uniform(mut commands: Commands, sel: Query<Entity, With<crate::sim::Selected>>, sims: Query<&crate::sim::Sim>, mut queues: Query<&mut crate::interact::ActionQueue>, mut done: Local<bool>, time: Res<Time>) {
     if let Some(k) = std::env::var("CHANGE_INTO").ok().and_then(|n| crate::simbody::OutfitKind::CHOICES.into_iter().find(|k| k.label().eq_ignore_ascii_case(&n)))
         && let Ok(e) = sel.single()
         && !*done
         && time.elapsed_secs() > 6.0
+        && let Ok(mut queue) = queues.get_mut(e)
+        && let Some(action) = queue.0.iter_mut().find(|a| a.label == "Change Into" && !a.cancel)
     {
         *done = true;
-        commands.entity(e).insert(crate::simbody::ChangeIntoPlan(k));
+        action.outfit_choice = Some(k);
     }
     // PLAN_OUTFIT=1: the selected Sim's wardrobe opens (PLAN_OUTFIT=<outfit>: on that outfit;
     // PLAN_OUTFIT=looks: Change Appearance, as at a mirror; PLAN_OUTFIT=traits: a Mid-Life

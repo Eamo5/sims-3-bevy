@@ -1313,10 +1313,7 @@ fn pie_buttons(
         {
             commands.entity(a).insert(crate::fishbowl::FishPlan(s.key.clone(), s.quality));
         }
-        // The outfit chosen.
-        if let Some(k) = label.strip_prefix("Change Into: ").and_then(|n| crate::simbody::OutfitKind::CHOICES.into_iter().find(|k| k.label() == n)) {
-            commands.entity(a).insert(crate::simbody::ChangeIntoPlan(k));
-        }
+        let outfit_choice = label.strip_prefix("Change Into: ").and_then(|n| crate::simbody::OutfitKind::CHOICES.into_iter().find(|k| k.label() == n));
         // The canvas chosen.
         if let Some(c) = label.strip_prefix("Paint: ").and_then(|n| crate::paintings::CANVASES.iter().position(|c| *c == n)) {
             commands.entity(a).insert(crate::paintings::PaintPlan::new(c as u8));
@@ -1326,6 +1323,7 @@ fn pie_buttons(
         let novel_genre = label.strip_prefix("Write: ").and_then(|n| crate::writing::GENRES.iter().position(|g| g.name == n));
         let mut action = Action::new(label, kind, false);
         action.novel_genre = novel_genre;
+        action.outfit_choice = outfit_choice;
         queue.push_player(action);
     }
 }
