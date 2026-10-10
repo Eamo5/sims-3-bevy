@@ -677,6 +677,23 @@ installation is unreachable.
   wish (the wishes' icons along the chooser's slots, the chosen one's name and what it asks),
   and the lifetime rewards shop (the game's table of rewards with their icons and costs, those
   out of reach shaded, the points to spend, Purchase and Close).
+- **The game's own Create a Sim**: the Sim stands in the game's own dressing room (its CAS room
+  model: the window and its view, curtains, the dressing mirror, the plant and the rug on the
+  wooden floor), framed by the game's puck (turn and zoom, the household's Sims along the
+  skewer by their ages' figures, Add a Sim, the "…" menu, cancel and accept) and its character
+  sheet (Basics, Hair, Face, Clothing, Personality, Randomize), each opening the game's panel:
+  Basics (names typed in place, the random-name dice, gender, the supernatural type menu, age
+  buttons, the skin tone slider over a ramp of the tones, weight and fitness); Hair (the
+  styles in the game's item cells three across, scrolled to the one worn, with the item
+  grid's scroll bar; the hair colours' swatches; facial hair for grown men); Face (head and
+  ears, eyes, nose and mouth, each with the game's picture of it, the hotspots of its parts and
+  their sliders; the eyes' colours; eye shadow and lipstick); Clothing (the outfits down the
+  side, tops, bottoms, outfits and shoes across the top, a row for each item with the game's
+  own picture of each of its colourways, turned by the row's arrows); and Personality (the
+  traits in their sockets and the game's traits picker by its groups, the six lifetime wishes
+  that suit them, favourite food, music and colour from the game's grids, the three voices).
+  A household of more than one is accepted through the game's Sims and Relationships screen:
+  the family tree, and a Sim dragged onto another asks what they are to each other.
 - **The game's own HUD**: the live-mode interface is the game's, drawn from its own layouts
   (`UI.package`'s window trees, pictures and fonts: every caption in its Helvetica Rounded),
   and driven as its own interface code drives it: the puck at the bottom left (live, buy and
@@ -766,7 +783,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-complete Build Mode, Create-a-Sim and main-menu interfaces; household furniture
+complete Build Mode interface; Create a Sim's pets, genetics and colour picker; household furniture
 inventory; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
