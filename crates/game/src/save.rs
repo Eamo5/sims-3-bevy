@@ -22,11 +22,14 @@ pub struct SavePlugin;
 impl Plugin for SavePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RemovedLotObjects>()
+            .init_resource::<PendingBroken>()
             .init_resource::<SaveSlot>()
             .add_message::<SaveRequest>()
             .add_message::<SnapshotRequest>()
             .add_message::<SaveAsRequest>()
             .add_systems(OnEnter(crate::AppState::Loading), new_game_slot)
+            .add_systems(OnEnter(crate::AppState::Loading), |mut pending: ResMut<PendingBroken>| { *pending = PendingBroken::default(); })
+            .add_systems(Update, restore_broken.after(apply_loaded_game).run_if(in_state(PlayMode::Live)))
             .add_systems(Update, resume_saved_lot.run_if(in_state(PlayMode::ChooseLot)))
             .add_systems(Update, (apply_loaded_game, save_game.after(crate::buyhistory::update)).run_if(in_state(PlayMode::Live)));
     }
@@ -213,7 +216,35 @@ impl SavedObject {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SavedBroken {
+    pub objd: (u32, u32, u64),
+    pub position: [f32; 3],
+}
+
+#[derive(Resource, Default)]
+struct PendingBroken(Vec<SavedBroken>, Option<f32>);
+
+fn restore_broken(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut pending: ResMut<PendingBroken>,
+    objects: Query<(Entity, &GameObject, &Transform), (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>,
+) {
+    if pending.0.is_empty() { return; }
+    let started = *pending.1.get_or_insert(time.elapsed_secs());
+    pending.0.retain(|saved| {
+        if let Some((e, ..)) = objects.iter().find(|(_, o, tf)| o.objd == saved.objd && tf.translation.distance(Vec3::from(saved.position)) < 0.2) {
+            commands.entity(e).insert(crate::interact::Broken);
+            false
+        } else { true }
+    });
+    if time.elapsed_secs() - started > 10.0 { pending.0.clear(); }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SaveGame {
+    #[serde(default)]
+    pub broken_objects: Vec<SavedBroken>,
     pub version: u32,
     pub world: String,
     pub lot_index: usize,
@@ -650,7 +681,7 @@ fn save_game(
         Query<(&crate::pets::Pet, &crate::pets::HomePet, &Transform)>,
         Res<crate::pets::PetData>,
     ),
-    (mut slot, maid, mail_due, upgraded, family, strokes, sculpted): (
+    (mut slot, maid, mail_due, upgraded, family, strokes, sculpted, broken): (
         ResMut<SaveSlot>,
         Res<crate::services::MaidService>,
         Option<Res<crate::services::MailDue>>,
@@ -658,6 +689,7 @@ fn save_game(
         Res<crate::family::Genealogy>,
         Res<crate::terrain_paint::Strokes>,
         Res<crate::terrain_paint::Sculpted>,
+        Query<(&GameObject, &Transform), (With<crate::interact::Broken>, Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>,
     ),
 ) {
     let new_file = save_as.read().count() > 0;
@@ -746,6 +778,7 @@ fn save_game(
         });
     }
     let game = SaveGame {
+        broken_objects: broken.iter().map(|(o, tf)| SavedBroken { objd: o.objd, position: tf.translation.to_array() }).collect(),
         version: SAVE_VERSION,
         world: world.name.clone(),
         lot_index: hh.lot_index,
@@ -874,6 +907,7 @@ pub(crate) fn apply_loaded_game(
     }
     let game = &p.0;
     clock.minutes = game.minutes;
+    commands.insert_resource(PendingBroken(game.broken_objects.clone(), None));
     // A restored date is not a midnight tick, even when loading within a session.
     commands.insert_resource(crate::aging::AgingDay::default());
     if let Some(h) = household.as_mut() {
@@ -1092,6 +1126,26 @@ pub fn request_save(w: &mut MessageWriter<SaveRequest>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn broken_objects_restore_after_spawn_without_breaking_neighbours_or_repaired_objects() {
+        let saved = SavedBroken { objd: (1, 2, 3), position: [4.0, 0.0, 8.0] };
+        let saved: SavedBroken = serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+        let mut app = App::new();
+        app.init_resource::<Time>().insert_resource(PendingBroken(vec![saved], None)).add_systems(Update, restore_broken);
+        app.update();
+        assert_eq!(app.world().resource::<PendingBroken>().0.len(), 1, "wait for bought furniture to spawn");
+        let obj = GameObject { kind: crate::interact::ObjectKind::Computer, name: "Computer".into(), objd: (1, 2, 3), price: 100, center: Vec2::ZERO, half: Vec2::ONE, height: 1.0, route: None };
+        let neighbour = app.world_mut().spawn((obj.clone(), Transform::from_xyz(5.0, 0.0, 8.0))).id();
+        let target = app.world_mut().spawn((obj, Transform::from_xyz(4.0, 0.0, 8.0))).id();
+        app.update();
+        assert!(app.world().get::<crate::interact::Broken>(target).is_some());
+        assert!(app.world().get::<crate::interact::Broken>(neighbour).is_none());
+        assert!(app.world().resource::<PendingBroken>().0.is_empty());
+        app.world_mut().entity_mut(target).remove::<crate::interact::Broken>();
+        app.update();
+        assert!(app.world().get::<crate::interact::Broken>(target).is_none(), "restoration must not replay after a repair");
+    }
 
     #[test]
     fn saved_sim_keeps_wish_order_rewards_and_offer_deadline() {
