@@ -665,7 +665,13 @@ installation is unreachable.
   the game's loading screen: the town's own loading picture (Twinbrook's, Bridgeport's...),
   "Welcome to" the town or the saved household's name, the game's tips (its own and the
   packs') changing every ten seconds, and the green load bar; a first run's conversion is
-  written under it.
+  written under it. Options (from the menu or the puck's "…" button, which opens the game's
+  popup menu: Save, Save As, Edit Town, Options, Quit to Main Menu, Save and Quit, Quit) is
+  the game's Options dialog: its tabs with their icons; Sound (the voices', effects', music's
+  and ambience's volumes on the game's plumbob sliders, each with its Mute box); Game Options
+  (free will off, low or high; aging on or off; the lifespan, short to epic, with the Sim days
+  a life lasts and each life stage's days); Graphics (lighting and shadows); OK keeps the
+  changes, Cancel drops them, Restore Defaults puts a page back.
 - **The game's own HUD**: the live-mode interface is the game's, drawn from its own layouts
   (`UI.package`'s window trees, pictures and fonts: every caption in its Helvetica Rounded),
   and driven as its own interface code drives it: the puck at the bottom left (live, buy and

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackWriter, read_value, write_value};
 
-pub const UI_VERSION: u32 = 13;
+pub const UI_VERSION: u32 = 16;
 pub const T_LAYOUT: u32 = 0x025C95B6;
 pub const T_FONT: u32 = 0x062E9EE0;
 pub const T_IMAGE: u32 = 0x2F7D0004;
@@ -122,12 +122,18 @@ pub struct UiWindow {
     pub place: UiPlace,
     pub button_type: u32,
     pub button_group: u32,
+    /// A button's picture's place (`Alignment`: 1 at its left, as a check box's box).
+    pub align: u8,
     pub icon: u64,
     /// An `ItemGrid`'s cells.
     pub grid: Option<UiGrid>,
     /// A `FillBarController`'s fill: direction (0 from the start, 1 from the middle, 2 from the
     /// end), and its colour (and its colour below the middle).
     pub fill_bar: Option<(u8, u32, u32)>,
+    /// A slider's least, most and starting value, and its orientation.
+    pub slider: Option<[f32; 4]>,
+    /// A combo box's drop-down.
+    pub combo: Option<UiCombo>,
     /// A scrollbar's orientation, minimum thumb size and seven skin pieces. Empty pieces
     /// retain their positions in the original `ScrollbarMultiDrawable`.
     pub scrollbar: Option<(bool, f32, Vec<Option<UiDrawable>>)>,
@@ -145,6 +151,15 @@ pub struct UiGrid {
     pub cell_padding: [f32; 4],
     pub columns: u32,
     pub rows: u32,
+}
+
+/// A combo box's drop-down: its background picture, its words' colours (normal, background,
+/// highlighted, highlight background...), and how far below the box it drops.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct UiCombo {
+    pub pulldown: Option<UiDrawable>,
+    pub colors: Vec<u32>,
+    pub offset: f32,
 }
 
 impl UiWindow {
@@ -192,6 +207,9 @@ impl UiWindow {
             }
         }
         if let Some(d) = &self.drawable {
+            of(d, out);
+        }
+        if let Some(d) = self.combo.as_ref().and_then(|c| c.pulldown.as_ref()) {
             of(d, out);
         }
         if let Some((_, _, parts)) = &self.scrollbar {
@@ -437,8 +455,9 @@ fn window(o: &XNode) -> Option<UiWindow> {
     w.wrap = val("WordWrap").or(val("CaptionWrap")).or(val("Wrap Mode")).map_or(0, num);
     w.button_type = val("ButtonType").map_or(0, num);
     w.button_group = val("ButtonGroupID").map_or(0, num);
+    w.align = val("Alignment").map_or(0, num) as u8;
     w.icon = props("Icon").and_then(|p| p.attr("key")).map_or(0, image_key);
-    for name in ["FillDrawable", "ButtonDrawable"] {
+    for name in ["FillDrawable", "ButtonDrawable", "SliderDrawable", "ComboBoxDrawable"] {
         if let Some(d) = props(name).and_then(|p| p.child("object")).and_then(drawable) {
             w.drawable = Some(d);
         }
@@ -452,6 +471,19 @@ fn window(o: &XNode) -> Option<UiWindow> {
             cell_padding: [0, 1, 2, 3].map(|i| cell_pad.get(i).copied().unwrap_or(0.0)),
             columns: val("VisibleCols").map_or(0, num),
             rows: val("VisibleRows").map_or(0, num),
+        });
+    }
+    // A slider's range and value (`Slider`: whole steps from its least to its most), its
+    // orientation (1 across); a combo box's drop-down picture and colours (`Sims3ComboBox`).
+    if w.cls == "Slider" {
+        let f = |n: &str| val(n).and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(0.0);
+        w.slider = Some([f("MinValue"), f("MaxValue"), f("Value"), f("Orientation")]);
+    }
+    if w.cls.ends_with("ComboBox") {
+        w.combo = Some(UiCombo {
+            pulldown: props("PullDownBackgroundDrawable").and_then(|p| p.child("object")).and_then(drawable),
+            colors: props("Colors").map(|p| p.children.iter().filter(|v| v.name == "value").map(|v| num(&v.text)).collect()).unwrap_or_default(),
+            offset: val("PulldownVerticalOffset").and_then(|v| v.trim().parse().ok()).unwrap_or(0.0),
         });
     }
     if w.cls == "FillBarController" {
@@ -511,7 +543,7 @@ fn drawable(o: &XNode) -> Option<UiDrawable> {
             scale: val("Scale").and_then(|v| v.parse().ok()).unwrap_or(1.0),
             colors: prop("StateColors").map(|p| p.children.iter().filter(|v| v.name == "value").map(|v| num(&v.text)).collect()).unwrap_or_default(),
         }),
-        "IconButtonMultiDrawable" => {
+        "IconButtonMultiDrawable" | "SliderMultiDrawable" | "ComboBoxMultiDrawable" | "ScrollbarMultiDrawable" => {
             let list = prop("Drawables")?;
             Some(UiDrawable::Multi(list.children.iter().filter(|c| c.name == "object").filter_map(drawable).collect()))
         }

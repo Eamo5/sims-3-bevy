@@ -45,7 +45,7 @@ pub enum Lifespan {
 }
 
 impl Lifespan {
-    const ALL: [Lifespan; 5] = [Lifespan::Short, Lifespan::Medium, Lifespan::Normal, Lifespan::Long, Lifespan::Epic];
+    pub const ALL: [Lifespan; 5] = [Lifespan::Short, Lifespan::Medium, Lifespan::Normal, Lifespan::Long, Lifespan::Epic];
     fn name(self) -> &'static str {
         match self {
             Lifespan::Short => "Short (25 days)",
@@ -137,6 +137,8 @@ pub struct Settings {
     pub free_will: FreeWill,
     pub shadows: bool,
     pub show_fps: bool,
+    /// The voices, effects, music and ambience muted (the game's Mute boxes).
+    pub muted: [bool; 4],
 }
 
 impl Default for Settings {
@@ -152,6 +154,7 @@ impl Default for Settings {
             free_will: FreeWill::Normal,
             shadows: true,
             show_fps: true,
+            muted: [false; 4],
         }
     }
 }
@@ -188,7 +191,7 @@ impl Settings {
         std::fs::read(Self::path()).ok().and_then(|d| serde_json::from_slice(&d).ok()).unwrap_or_default()
     }
 
-    fn save(&self) {
+    pub(crate) fn save(&self) {
         if let Ok(d) = serde_json::to_vec_pretty(self) {
             let _ = std::fs::write(Self::path(), d);
         }
@@ -196,6 +199,15 @@ impl Settings {
 
     /// Loudness of a channel (with the master level).
     pub fn gain(&self, ch: Channel) -> f32 {
+        let muted = match ch {
+            Channel::Voices => self.muted[0],
+            Channel::Effects => self.muted[1],
+            Channel::Music => self.muted[2],
+            Channel::Ambience => self.muted[3],
+        };
+        if muted {
+            return 0.0;
+        }
         self.master
             * match ch {
                 Channel::Effects => self.effects,
@@ -362,6 +374,11 @@ fn small_button(p: &mut ChildSpawnerCommands, label: &str, action: OptionButton,
 
 /// Opens the options panel over whatever is on screen.
 pub fn open_options(commands: &mut Commands, panel: &mut OptionsPanel, settings: &Settings) {
+    // (The game's own Options dialog where it's to hand: see `optionsdialog`.)
+    if crate::optionsdialog::GAME_OPTIONS.load(std::sync::atomic::Ordering::Relaxed) {
+        commands.insert_resource(crate::optionsdialog::OpenOptionsDialog);
+        return;
+    }
     if panel.root.is_some() {
         return;
     }

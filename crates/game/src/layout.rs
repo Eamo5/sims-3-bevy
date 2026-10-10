@@ -19,7 +19,8 @@ pub struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, open_ui.after(crate::load_ui_font)).add_systems(Update, (open_ui_when_baked, set_icons, select_marked.before(button_states), button_states, fill_bars))
+        app.add_systems(Update, (sliders, combos))
+            .add_systems(Startup, open_ui.after(crate::load_ui_font)).add_systems(Update, (open_ui_when_baked, set_icons, select_marked.before(button_states), button_states, fill_bars))
             .add_systems(Update, scrollbars.before(crate::buyhud::CatalogueControls));
     }
 }
@@ -450,10 +451,31 @@ impl UiAssets {
         }
         let size = Vec2::new(w.area[2] - w.area[0], w.area[3] - w.area[1]);
         let shade = color(w.shade);
-        let is_button = w.cls.contains("Button");
+        let is_button = w.cls.contains("Button") || w.combo.is_some();
         let mut button: Option<UiButton> = is_button.then(|| UiButton { images: Default::default(), picture: None, icon: None, selected: false, disabled: w.flags & WIN_ENABLED == 0 });
         match &w.drawable {
-            Some(d) => self.drawable(commands, images, d, e, size, shade, button.as_mut()),
+            // (A slider's thumb (the first: the game's plumbob) where its value puts it over its
+            // track (the second): see `sliders`.)
+            Some(UiDrawable::Multi(list)) if w.slider.is_some() && list.len() >= 2 => {
+                self.drawable(commands, images, &list[1], e, size, shade, None);
+                if let UiDrawable::Std { images: keys, .. } = &list[0]
+                    && let Some((h, isize)) = self.image(images, keys[0])
+                {
+                    let [min, max, value, orientation] = w.slider.unwrap_or_default();
+                    let thumb = commands.spawn((Node { position_type: PositionType::Absolute, width: Val::Px(isize.x), height: Val::Px(isize.y), ..default() }, ImageNode::new(h), Pickable::IGNORE, ChildOf(e))).id();
+                    commands.entity(e).insert((UiSlider { min, max, value, thumb, thumb_size: isize, vertical: orientation == 0.0, grab: false }, Interaction::default(), FocusPolicy::Block, crate::hud::BlocksWorld));
+                }
+            }
+            Some(d) => {
+                self.drawable(commands, images, d, e, size, shade, button.as_mut());
+                // (A check box's box at its left, the middle of its height.)
+                if w.align == 1
+                    && let (Some(pic), UiDrawable::Std { scale: 1, images: keys, .. }) = (button.as_ref().and_then(|b| b.picture), d)
+                    && let Some((_, isize)) = self.image(images, keys[0])
+                {
+                    commands.entity(pic).insert(Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(((size.y - isize.y) * 0.5).round()), width: Val::Px(isize.x), height: Val::Px(isize.y), ..default() });
+                }
+            }
             // (A plain fill, modulated by the shade as the game's.)
             None if w.fill >> 24 != 0 && w.shade >> 24 != 0 && !is_button && w.cls != "Text" => {
                 let (f, sh) = (color(w.fill).to_srgba(), shade.to_srgba());
@@ -511,6 +533,16 @@ impl UiAssets {
             commands.entity(e).insert(UiFillBar { value: 0.0, direction, colors: (color(main), color(second)), size, clip, fill: out.within(e, FILL_FILL) });
         }
         // (Custom controls bring their own layout in as their child: a bubble meter's bubbles.)
+        // (A combo box shows its choice in its own words: see `combos`.)
+        if let Some(c) = &w.combo {
+            let (font, line) = self.text_font(fonts, w.font);
+            let col = color(c.colors.first().copied().unwrap_or(0xff00_2d74));
+            let holder = commands
+                .spawn((Node { position_type: PositionType::Absolute, left: Val::Px(8.0), right: Val::Px(24.0), top: Val::Px(0.0), bottom: Val::Px(0.0), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE, ChildOf(e)))
+                .id();
+            let text = commands.spawn((Text::new(""), font, line, TextColor(col), TextLayout::new(Justify::Left, LineBreak::NoWrap), Pickable::IGNORE, ChildOf(holder))).id();
+            commands.entity(e).insert(UiCombo { items: Vec::new(), selected: 0, open: false, text, list: None, combo: c.clone(), font: w.font, shown: None });
+        }
         if EMBEDDED.contains(&w.cls.as_str()) {
             let data = self.data.clone();
             if let Some(inner) = self.by_id.get(&s3pkg::fnv64(&w.cls)).and_then(|&i| data.layouts[i].1.first()) {
@@ -520,13 +552,25 @@ impl UiAssets {
         e
     }
 
+    /// A check box's box's width (its picture's).
+    fn check_width(&mut self, w: &UiWindow) -> f32 {
+        match &w.drawable {
+            // (Its picture's already loaded: the window's drawn before its words.)
+            Some(UiDrawable::Std { images: keys, .. }) => self.images.get(&keys[0]).and_then(|i| i.as_ref()).map_or(0.0, |(_, s)| s.x),
+            _ => 0.0,
+        }
+    }
+
     /// A text filling its window, aligned as the window says.
     fn spawn_text(&mut self, commands: &mut Commands, fonts: &mut Assets<Font>, w: &UiWindow, caption: &str, parent: Entity) -> Entity {
         let (font, line) = self.text_font(fonts, w.font);
         // (A text's alignment: across 0 left, 1 centre, 2 right, 4 justified (paragraphs);
         // down 0 top, 1 middle, 2 bottom, 3 middle. Buttons' captions sit in the middle.)
         let button = w.cls.contains("Button");
+        // (A check box's words start after its box, at its left.)
+        let check = button && w.align == 1 && w.halign == 0 && matches!(&w.drawable, Some(UiDrawable::Std { scale: 1, .. }));
         let (justify, align_x) = match w.halign {
+            _ if check => (Justify::Left, JustifyContent::FlexStart),
             _ if button => (Justify::Center, JustifyContent::Center),
             1 => (Justify::Center, JustifyContent::Center),
             2 => (Justify::Right, JustifyContent::FlexEnd),
@@ -543,7 +587,7 @@ impl UiAssets {
         let col = w.colors.first().copied().map_or(Color::BLACK, color);
         let holder = commands
             .spawn((
-                Node { position_type: PositionType::Absolute, left: Val::Px(0.0), right: Val::Px(0.0), top: Val::Px(0.0), bottom: Val::Px(0.0), justify_content: align_x, align_items: align_y, ..default() },
+                Node { position_type: PositionType::Absolute, left: Val::Px(if check { self.check_width(w) + 6.0 } else { 0.0 }), right: Val::Px(0.0), top: Val::Px(0.0), bottom: Val::Px(0.0), justify_content: align_x, align_items: align_y, ..default() },
                 Pickable::IGNORE,
                 ChildOf(parent),
             ))
@@ -711,6 +755,169 @@ fn button_states(mut buttons: Query<(&Interaction, &UiButton), Or<(Changed<Inter
         {
             img.color = colors[state];
         }
+    }
+}
+
+/// A slider (`Slider`): its range and value (whole steps), its thumb. Dragged or clicked
+/// along, it takes the value under the pointer; game code reads and sets `value`.
+#[derive(Component)]
+pub struct UiSlider {
+    pub min: f32,
+    pub max: f32,
+    pub value: f32,
+    thumb: Entity,
+    thumb_size: Vec2,
+    vertical: bool,
+    grab: bool,
+}
+
+fn sliders(
+    mut q: Query<(&mut UiSlider, Option<&Interaction>, &ComputedNode, &bevy::ui::UiGlobalTransform, &InheritedVisibility)>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut nodes: Query<&mut Node>,
+) {
+    let Ok(window) = windows.single() else { return };
+    for (mut s, i, computed, tf, vis) in &mut q {
+        if !vis.get() {
+            continue;
+        }
+        let scale = computed.inverse_scale_factor();
+        let size = computed.size() * scale;
+        let (length, thumb) = if s.vertical { (size.y, s.thumb_size.y) } else { (size.x, s.thumb_size.x) };
+        let travel = (length - thumb).max(1.0);
+        if i == Some(&Interaction::Pressed) && mouse.just_pressed(MouseButton::Left) {
+            s.grab = true;
+        }
+        if !mouse.pressed(MouseButton::Left) {
+            s.grab = false;
+        }
+        if s.grab
+            && let Some(p) = window.physical_cursor_position().and_then(|p| tf.try_inverse().map(|t| (t.transform_point2(p) + computed.size() * 0.5) * scale))
+        {
+            let along = if s.vertical { length - p.y } else { p.x };
+            let f = ((along - thumb * 0.5) / travel).clamp(0.0, 1.0);
+            let v = (s.min + f * (s.max - s.min)).round();
+            if v != s.value {
+                s.value = v;
+            }
+        }
+        let f = if s.max > s.min { ((s.value - s.min) / (s.max - s.min)).clamp(0.0, 1.0) } else { 0.0 };
+        if let Ok(mut n) = nodes.get_mut(s.thumb) {
+            let (left, top) = if s.vertical { ((size.x - s.thumb_size.x) * 0.5, (1.0 - f) * travel) } else { (f * travel, (size.y - s.thumb_size.y) * 0.5) };
+            let want = (Val::Px(left.round()), Val::Px(top.round()));
+            if (n.left, n.top) != want {
+                (n.left, n.top) = want;
+            }
+        }
+    }
+}
+
+/// A combo box (`Sims3ComboBox`): its choices (set by game code), the one chosen, and its
+/// drop-down list (the game's pull-down picture, a row a choice, lit under the pointer).
+#[derive(Component)]
+pub struct UiCombo {
+    pub items: Vec<String>,
+    pub selected: usize,
+    pub open: bool,
+    text: Entity,
+    list: Option<Entity>,
+    combo: s3bake::ui::UiCombo,
+    font: u32,
+    shown: Option<(Vec<String>, usize, bool)>,
+}
+
+/// One of a combo box's choices in its list.
+#[derive(Component)]
+struct ComboRow(Entity, usize);
+
+/// A combo box's rows' height.
+const COMBO_ROW: f32 = 22.0;
+
+#[allow(clippy::type_complexity)]
+fn combos(
+    mut commands: Commands,
+    clicks: Query<(Entity, &Interaction), (Changed<Interaction>, With<UiCombo>)>,
+    mut all: Query<(Entity, &mut UiCombo)>,
+    rows: Query<(&Interaction, &ComboRow), Changed<Interaction>>,
+    mut hover: Query<(&Interaction, &ComboRow, &mut BackgroundColor)>,
+    mut texts: Query<&mut Text>,
+    ui: Option<ResMut<UiAssets>>,
+    (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
+    mut play: MessageWriter<crate::sound::PlaySound>,
+) {
+    // A click on the box opens or closes its list.
+    for (e, i) in &clicks {
+        if *i == Interaction::Pressed
+            && let Ok((_, mut c)) = all.get_mut(e)
+            && !c.items.is_empty()
+        {
+            c.open = !c.open;
+            play.write(crate::sound::PlaySound::ui("ui_tertiary_button"));
+        }
+    }
+    // A choice taken from the list.
+    for (i, r) in &rows {
+        if *i == Interaction::Pressed
+            && let Ok((_, mut c)) = all.get_mut(r.0)
+        {
+            c.selected = r.1;
+            c.open = false;
+        }
+    }
+    for (i, r, mut bg) in &mut hover {
+        let lit = *i != Interaction::None;
+        if let Ok((_, c)) = all.get(r.0) {
+            let want = if lit { color(c.combo.colors.get(3).copied().unwrap_or(0xbf52_77b5)) } else { Color::NONE };
+            if bg.0 != want {
+                bg.0 = want;
+            }
+        }
+    }
+    let Some(mut ui) = ui else { return };
+    for (e, mut c) in &mut all {
+        let want = (c.items.clone(), c.selected, c.open);
+        if c.shown.as_ref() == Some(&want) {
+            continue;
+        }
+        c.shown = Some(want);
+        if let Ok(mut t) = texts.get_mut(c.text) {
+            let s = c.items.get(c.selected).cloned().unwrap_or_default();
+            if t.0 != s {
+                t.0 = s;
+            }
+        }
+        if let Some(l) = c.list.take() {
+            commands.entity(l).try_despawn();
+        }
+        if !c.open {
+            continue;
+        }
+        // The list, under the box.
+        let h = c.items.len() as f32 * COMBO_ROW + 8.0;
+        let list = commands
+            .spawn((
+                Node { position_type: PositionType::Absolute, left: Val::Px(0.0), right: Val::Px(0.0), top: Val::Percent(100.0), margin: UiRect::top(Val::Px(c.combo.offset)), height: Val::Px(h), padding: UiRect::all(Val::Px(4.0)), flex_direction: FlexDirection::Column, ..default() },
+                GlobalZIndex(60),
+                Interaction::default(),
+                FocusPolicy::Block,
+                crate::hud::BlocksWorld,
+                ChildOf(e),
+            ))
+            .id();
+        if let Some(d) = c.combo.pulldown.clone() {
+            ui.drawable(&mut commands, &mut images, &d, list, Vec2::new(0.0, h), Color::WHITE, None);
+        }
+        let (font, line) = ui.text_font(&mut fonts, c.font);
+        let colors = c.combo.colors.clone();
+        for (k, item) in c.items.iter().enumerate() {
+            let row = commands
+                .spawn((Node { height: Val::Px(COMBO_ROW), padding: UiRect::left(Val::Px(6.0)), align_items: AlignItems::Center, ..default() }, Button, BackgroundColor(Color::NONE), ComboRow(e, k), ChildOf(list)))
+                .id();
+            let col = color(if k == c.selected { colors.get(2).copied().unwrap_or(0xffff_ffff) } else { colors.first().copied().unwrap_or(0xff00_2d74) });
+            commands.spawn((Text::new(item.clone()), font.clone(), line, TextColor(col), Pickable::IGNORE, ChildOf(row)));
+        }
+        c.list = Some(list);
     }
 }
 

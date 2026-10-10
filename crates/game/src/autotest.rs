@@ -200,6 +200,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, know_people.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, load_shot.run_if(in_state(AppState::Loading)))
             .add_systems(Update, game_popup.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, options_dialog)
             .add_systems(PreUpdate, ui_click.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, ui_right_click.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, pointer_script.after(bevy::input::InputSystems).before(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
@@ -523,6 +524,15 @@ fn auto_pick_world(
         next.set(AppState::Loading);
     } else {
         warn!("--world {name}: no such world");
+    }
+}
+
+/// OPTIONS_DIALOG=<seconds>: the Options dialog opened then.
+fn options_dialog(mut commands: Commands, time: Res<Time>, mut done: Local<bool>) {
+    let Some(at) = std::env::var("OPTIONS_DIALOG").ok().and_then(|v| v.parse::<f32>().ok()) else { return };
+    if !*done && time.elapsed_secs() > at {
+        commands.insert_resource(crate::optionsdialog::OpenOptionsDialog);
+        *done = true;
     }
 }
 
