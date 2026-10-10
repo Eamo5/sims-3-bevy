@@ -2900,7 +2900,7 @@ fn run_actions(
                         }
                         ActionKind::Repair { target } => {
                             let handy = skills.level("Handiness") as f32 + if sim.traits.contains(&crate::life::Trait::Handy) { 3.0 } else { 0.0 };
-                            let minutes = 90.0 / (1.0 + handy * 0.35);
+                            let minutes = maintenance_minutes(90.0, handy, &sim.traits, objects.get(*target).ok().map(|(o, ..)| o.kind), false);
                             let e = skills.0.entry("Handiness").or_insert(0.0);
                             let before = *e as u32;
                             *e = (*e + dt / 60.0 * 0.5 * crate::life::skill_rate(&sim.traits, "Handiness") * crate::wishes::reward_skill_rate(wishes) * mood_learning / (1.0 + *e * 0.25)).min(10.0);
@@ -2941,7 +2941,7 @@ fn run_actions(
                         }
                         ActionKind::Upgrade { target, bit } => {
                             let handy = skills.level("Handiness") as f32 + if sim.traits.contains(&crate::life::Trait::Handy) { 3.0 } else { 0.0 };
-                            let minutes = crate::upgrades::Upgrade::MINUTES / (1.0 + handy * 0.35);
+                            let minutes = maintenance_minutes(crate::upgrades::Upgrade::MINUTES, handy, &sim.traits, objects.get(*target).ok().map(|(o, ..)| o.kind), true);
                             let e = skills.0.entry("Handiness").or_insert(0.0);
                             let before = *e as u32;
                             *e = (*e + dt / 60.0 * 0.6 * crate::life::skill_rate(&sim.traits, "Handiness") * crate::wishes::reward_skill_rate(wishes) * mood_learning / (1.0 + *e * 0.25)).min(10.0);
@@ -3238,6 +3238,34 @@ fn run_actions(
                 if let Some(p) = positions.get(&actor) {
                     let to = Vec2::new(p.0.x - tf.translation.x, p.0.z - tf.translation.z);
                     tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
+                }
+            }
+        }
+    }
+}
+
+/// Computer Whiz's TraitTuning duration modifiers apply only to computer work.
+fn maintenance_minutes(base: f32, handiness: f32, traits: &[crate::life::Trait], kind: Option<ObjectKind>, upgrade: bool) -> f32 {
+    let trait_time = if kind == Some(ObjectKind::Computer) && traits.contains(&crate::life::Trait::ComputerWhiz) {
+        if upgrade { 0.75 } else { 0.4 }
+    } else { 1.0 };
+    base / (1.0 + handiness * 0.35) * trait_time
+}
+
+#[cfg(test)]
+mod maintenance_tests {
+    use super::*;
+
+    #[test]
+    fn computer_whiz_stacks_with_handiness_without_speeding_up_other_objects() {
+        for handiness in [0.0, 5.0, 10.0] {
+            for upgrade in [false, true] {
+                let plain = maintenance_minutes(90.0, handiness, &[], Some(ObjectKind::Computer), upgrade);
+                let traits = [crate::life::Trait::ComputerWhiz];
+                let skilled = maintenance_minutes(90.0, handiness, &traits, Some(ObjectKind::Computer), upgrade);
+                assert!((skilled / plain - if upgrade { 0.75 } else { 0.4 }).abs() < 0.0001);
+                for kind in [Some(ObjectKind::Tv), Some(ObjectKind::Stereo), Some(ObjectKind::Sink), None] {
+                    assert_eq!(maintenance_minutes(90.0, handiness, &traits, kind, upgrade), plain);
                 }
             }
         }
