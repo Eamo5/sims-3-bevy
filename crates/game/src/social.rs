@@ -33,6 +33,7 @@ pub struct Relationship {
 
 /// Days without seeing or speaking to each other before a relationship starts to fade.
 pub const FADE_AFTER_DAYS: f64 = 3.0;
+pub const FRIEND_THRESHOLD: f32 = 15.0;
 
 /// Keeps track of when Sims last spent time together (a social in person or on the phone).
 pub fn note_contact(clock: Res<crate::clock::GameClock>, mut events: MessageReader<crate::life::LifeEvent>, mut rels: Query<&mut Relationships>) {
@@ -116,7 +117,7 @@ impl Relationship {
         let friend = match self.friendship {
             v if v < -60.0 => "Enemy",
             v if v < -20.0 => "Disliked",
-            v if v < 15.0 => "Acquaintance",
+            v if v < FRIEND_THRESHOLD => "Acquaintance",
             v if v < 40.0 => "Friend",
             v if v < 75.0 => "Good Friend",
             _ => "Best Friend",
@@ -145,10 +146,13 @@ impl Relationships {
     pub fn entry(&mut self, e: Entity) -> &mut Relationship {
         self.0.entry(e).or_default()
     }
-    pub fn add(&mut self, e: Entity, friendship: f32, romance: f32) {
+    /// Returns true only when this change establishes a friendship.
+    pub fn add(&mut self, e: Entity, friendship: f32, romance: f32) -> bool {
         let r = self.entry(e);
+        let was_friend = r.friendship >= FRIEND_THRESHOLD;
         r.friendship = (r.friendship + friendship).clamp(-100.0, 100.0);
         r.romance = (r.romance + romance).clamp(-100.0, 100.0);
+        !was_friend && r.friendship >= FRIEND_THRESHOLD
     }
     /// The Sim's current partner, fiancé(e) or spouse.
     pub fn partner(&self) -> Option<(Entity, RelStatus)> {

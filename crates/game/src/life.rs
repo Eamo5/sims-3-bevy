@@ -838,6 +838,7 @@ pub enum LifeEventKind {
     Finished { activity: &'static str, completed: bool },
     /// A social interaction with someone finished.
     Socialized { other: Entity, social: &'static str },
+    MadeFriend { other: Entity },
     Promoted,
     Demoted,
     Fired,
@@ -979,7 +980,7 @@ fn life_events(
             LifeEventKind::BrokeUp => ml.add(K::Heartbroken, now),
             LifeEventKind::MovedIn => ml.add(K::NewHome, now),
             LifeEventKind::Birthday => ml.add(K::Birthday, now),
-            LifeEventKind::SkillUp { .. } | LifeEventKind::Bought { .. } => {}
+            LifeEventKind::SkillUp { .. } | LifeEventKind::Bought { .. } | LifeEventKind::MadeFriend { .. } => {}
         }
     }
 }

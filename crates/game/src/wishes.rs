@@ -465,19 +465,16 @@ fn offer_wishes(
 fn fulfil_wishes(
     clock: Res<GameClock>,
     mut events: MessageReader<LifeEvent>,
-    mut sims: Query<(&Sim, &mut Wishes, &mut Moodlets, &crate::social::Relationships)>,
+    mut sims: Query<(&Sim, &mut Wishes, &mut Moodlets)>,
     mut notes: ResMut<Notifications>,
 ) {
     for ev in events.read() {
-        let Ok((sim, mut w, mut moodlets, rels)) = sims.get_mut(ev.sim) else { continue };
+        let Ok((sim, mut w, mut moodlets)) = sims.get_mut(ev.sim) else { continue };
         let matches = |k: &WishKind| match (&ev.kind, k) {
             (LifeEventKind::SkillUp { skill, level }, WishKind::Skill { skill: s, level: l }) => *skill == s && level >= l,
             (LifeEventKind::Finished { activity, completed: true }, WishKind::Activity(a)) => *activity == a,
             (LifeEventKind::Socialized { social, .. }, WishKind::Social(s)) => *social == s,
-            (LifeEventKind::Socialized { other, .. }, WishKind::MakeFriend) => {
-                let f = rels.friendship(*other);
-                (15.0..30.0).contains(&f)
-            }
+            (LifeEventKind::MadeFriend { .. }, WishKind::MakeFriend) => true,
             (LifeEventKind::FirstKiss, WishKind::FirstKiss) => true,
             (LifeEventKind::StartedDating, WishKind::GoSteady) => true,
             (LifeEventKind::Engaged, WishKind::GetEngaged) => true,
@@ -517,6 +514,32 @@ fn fulfil_wishes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn make_friend_requires_a_new_friendship_not_chatting_with_existing_friends() {
+        let mut app = App::new();
+        app.init_resource::<GameClock>().init_resource::<Notifications>()
+            .add_message::<LifeEvent>().add_systems(Update, fulfil_wishes);
+        let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(92);
+        let mut sim = crate::sim::random_sim(&mut rng, "Friend", Some(false), Age::Adult);
+        sim.traits.clear();
+        let other = app.world_mut().spawn_empty().id();
+        let mut rels = crate::social::Relationships::default();
+        assert!(rels.add(other, 20.0, 0.0));
+        assert!(!rels.add(other, 5.0, 0.0));
+        let e = app.world_mut().spawn((sim, Wishes {
+            promised: vec![Wish { kind: WishKind::MakeFriend, points: 400 }], ..default()
+        }, Moodlets::default(), rels)).id();
+        app.world_mut().write_message(LifeEvent::new(e, LifeEventKind::Socialized { other, social: "Chat" }));
+        app.update();
+        assert_eq!(app.world().get::<Wishes>(e).unwrap().points, 0);
+        let newcomer = app.world_mut().spawn_empty().id();
+        assert!(app.world_mut().get_mut::<crate::social::Relationships>(e).unwrap().add(newcomer, 45.0, 0.0));
+        app.world_mut().write_message(LifeEvent::new(e, LifeEventKind::MadeFriend { other: newcomer }));
+        app.update();
+        assert_eq!(app.world().get::<Wishes>(e).unwrap().points, 400);
+        assert!(app.world().get::<Wishes>(e).unwrap().promised.is_empty());
+    }
 
     #[test]
     fn dismissing_a_promise_frees_a_slot_without_awarding_or_spending_points() {

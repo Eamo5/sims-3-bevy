@@ -2269,7 +2269,9 @@ fn run_actions(
                                             notes.push(format!("{} rejected {}'s attempt to {}.", tsim.first, sim.first, s.name.to_lowercase()));
                                         }
                                         let (f, r) = if s.cat == crate::social::SocialCat::Romantic { (-4.0, -8.0) } else { (-5.0, 0.0) };
-                                        rels.add(*target, f, r);
+                                        if rels.add(*target, f, r) {
+                                            life.write(LifeEvent::new(me, LifeEventKind::MadeFriend { other: *target }));
+                                        }
                                         social_fx.push((*target, me, 0.0, 0.0, f, r));
                                         life.write(LifeEvent::new(me, LifeEventKind::Socialized { other: *target, social: "Argue" }));
                                         finished = true;
@@ -2737,7 +2739,9 @@ fn run_actions(
                                 motives.add(FUN, s.fun_per_hour * dt / 60.0);
                                 let k = dt / s.minutes * crate::life::social_affinity(&sim.traits, s.name);
                                 let (f, r) = (s.friendship * k, s.romance * k);
-                                rels.add(*target, f, r);
+                                if rels.add(*target, f, r) {
+                                    life.write(LifeEvent::new(me, LifeEventKind::MadeFriend { other: *target }));
+                                }
                                 if s.cat == crate::social::SocialCat::Care {
                                     care_fx.push((*target, s.care.map(|v| v * dt / 60.0)));
                                 }
@@ -3079,7 +3083,9 @@ fn run_actions(
                             motives.add(SOCIAL, s);
                             motives.add(FUN, f);
                             let df = PHONE_CHAT_FRIENDSHIP * dt / PHONE_CHAT_MINUTES * crate::life::social_affinity(&sim.traits, "Chat");
-                            rels.add(*target, df, 0.0);
+                            if rels.add(*target, df, 0.0) {
+                                life.write(LifeEvent::new(me, LifeEventKind::MadeFriend { other: *target }));
+                            }
                             social_fx.push((*target, me, s, f, df, 0.0));
                             if elapsed >= PHONE_CHAT_MINUTES {
                                 finished = true;
@@ -3223,7 +3229,9 @@ fn run_actions(
         if let Ok((_, tsim, queue, mut tf, mut motives, _, mut anim, _, mut rels, path, _, _, _, _, _)) = sims.get_mut(target) {
             motives.add(SOCIAL, social);
             motives.add(FUN, fun);
-            rels.add(actor, friendship, romance);
+            if rels.add(actor, friendship, romance) {
+                life.write(LifeEvent::new(target, LifeEventKind::MadeFriend { other: actor }));
+            }
             // (A baby in someone's arms is placed by the carry slot.)
             if queue.0.is_empty() && path.is_none() && tsim.age != Age::Baby {
                 anim.pose = Pose::Talk;
