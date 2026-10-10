@@ -17,7 +17,7 @@ pub struct WishesPlugin;
 
 impl Plugin for WishesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (offer_wishes, fulfil_wishes, buy_rewards).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (offer_wishes, mood_happiness, fulfil_wishes, buy_rewards).chain().after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -101,12 +101,25 @@ pub struct Wishes {
     pub offered: Vec<Wish>,
     pub promised: Vec<Wish>,
     pub points: u32,
+    /// Unspent fractional passive happiness, preserved across saves.
+    pub mood_fraction: f64,
     /// Lifetime rewards bought (their reward traits' names: `SteelBladder`).
     pub rewards: Vec<String>,
     next_offer: f64,
 }
 
 impl Wishes {
+    /// MoodManager: .3 points per minute at full mood (50), plus .007 per
+    /// mood point above it, up to the super-mood cap of 150.
+    fn accrue_mood(&mut self, mood: f32, minutes: f32) {
+        if mood < 50.0 || minutes <= 0.0 { return; }
+        let rate = 0.3 + 0.007 * (mood.min(150.0) as f64 - 50.0);
+        self.mood_fraction += minutes as f64 * rate;
+        let whole = (self.mood_fraction + 1e-9).floor() as u32;
+        self.points = self.points.saturating_add(whole);
+        self.mood_fraction = (self.mood_fraction - whole as f64).max(0.0);
+    }
+
     pub fn restored(points: u32, rewards: Vec<String>, now: f64) -> Self {
         // (Saves from before kept the rewards' display names.)
         let rewards = rewards
@@ -130,6 +143,59 @@ impl Wishes {
     }
     pub fn has_reward(&self, r: &str) -> bool {
         self.rewards.iter().any(|x| x == r)
+    }
+}
+
+fn mood_happiness(
+    delta: Res<crate::clock::SimDelta>,
+    mut sims: Query<(&crate::life::Mood, &mut Wishes), (With<HouseholdMember>, Without<crate::death::Dying>)>,
+) {
+    for (mood, mut wishes) in &mut sims {
+        wishes.accrue_mood(mood.0, delta.0);
+    }
+}
+
+#[cfg(test)]
+mod mood_happiness_tests {
+    use super::*;
+
+    #[test]
+    fn passive_happiness_only_accrues_for_living_household_sims_while_time_runs() {
+        let mut app = App::new();
+        app.insert_resource(crate::clock::SimDelta(60.0)).add_systems(Update, mood_happiness);
+        let active = app.world_mut().spawn((HouseholdMember, crate::life::Mood(100.0), Wishes::default())).id();
+        let visitor = app.world_mut().spawn((crate::life::Mood(100.0), Wishes::default())).id();
+        let dying = app.world_mut().spawn((HouseholdMember, crate::life::Mood(100.0), Wishes::default(), crate::death::Dying::new())).id();
+        app.update();
+        assert_eq!(app.world().get::<Wishes>(active).unwrap().points, 39);
+        assert_eq!(app.world().get::<Wishes>(visitor).unwrap().points, 0);
+        assert_eq!(app.world().get::<Wishes>(dying).unwrap().points, 0);
+        app.world_mut().resource_mut::<crate::clock::SimDelta>().0 = 0.0;
+        app.update();
+        assert_eq!(app.world().get::<Wishes>(active).unwrap().points, 39);
+    }
+
+    #[test]
+    fn passive_happiness_uses_tuned_rate_and_retains_fractional_minutes() {
+        for (mood, expected) in [(49.0, 0), (50.0, 18), (100.0, 39), (150.0, 60), (200.0, 60)] {
+            let mut wishes = Wishes::default();
+            wishes.accrue_mood(mood, 60.0);
+            assert_eq!(wishes.points, expected);
+        }
+        let mut wishes = Wishes::default();
+        for _ in 0..600 { wishes.accrue_mood(100.0, 0.1); }
+        assert_eq!(wishes.points, 39);
+        let mut wishes = Wishes::default();
+        wishes.accrue_mood(50.0, 1.0);
+        assert_eq!(wishes.points, 0);
+        let fraction = wishes.mood_fraction;
+        wishes.accrue_mood(100.0, 0.0);
+        wishes.accrue_mood(-100.0, 10.0);
+        assert_eq!(wishes.mood_fraction, fraction, "pauses and poor mood do not discard earned fractions");
+        let mut restored = Wishes::restored(wishes.points, vec![], 0.0);
+        restored.mood_fraction = serde_json::from_str(&serde_json::to_string(&fraction).unwrap()).unwrap();
+        restored.accrue_mood(50.0, 9.0);
+        assert_eq!(restored.points, 3);
     }
 }
 

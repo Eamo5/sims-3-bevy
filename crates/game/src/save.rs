@@ -83,6 +83,8 @@ pub struct SavedSim {
     pub homework: bool,
     #[serde(default)]
     pub homework_progress: f32,
+    #[serde(default)]
+    pub happiness_fraction: f64,
     /// Classroom start and home arrival for a school day currently in progress.
     #[serde(default)]
     pub school_visit: Option<(f64, f64)>,
@@ -332,6 +334,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         school_grade: None,
         homework: false,
         homework_progress: 0.0,
+        happiness_fraction: 0.0,
         school_visit: None,
         pregnancy: None,
         shape: Some((sim.weight, sim.fitness)),
@@ -700,6 +703,7 @@ fn save_game(
                 })
                 .collect(),
             lifetime_happiness: wishes.map_or(0, |w| w.points),
+            happiness_fraction: wishes.map_or(0.0, |w| w.mood_fraction),
             outfit: saved_outfit(&sim.outfit),
             rewards: wishes.map(|w| w.rewards.clone()).unwrap_or_default(),
             aging: aging.map(|a| (a.days, a.elder_span)),
@@ -950,11 +954,13 @@ pub(crate) fn apply_loaded_game(
         }
         if s.member {
             ec.insert(HouseholdMember).remove::<(Visitor, OffLot)>();
-            ec.insert(crate::wishes::Wishes::restored(
+            let mut wishes = crate::wishes::Wishes::restored(
                 s.lifetime_happiness,
                 s.rewards.clone(),
                 game.minutes,
-            ));
+            );
+            wishes.mood_fraction = s.happiness_fraction.clamp(0.0, 1.0);
+            ec.insert(wishes);
         } else if s.whereabouts == "visiting" {
             ec.insert(Visitor { leave_at: game.minutes + 180.0 });
         } else {
@@ -1080,7 +1086,9 @@ mod tests {
         saved.homework = true;
         saved.school_visit = Some((540.0, 865.0));
         saved.homework_progress = 42.5;
+        saved.happiness_fraction = 0.625;
         let mut saved: SavedSim = serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+        assert_eq!(saved.happiness_fraction, 0.625);
         let mut world = World::new();
         let e = world.spawn_empty().id();
         let apply = |world: &mut World, saved: &SavedSim| {
@@ -1112,11 +1120,13 @@ mod tests {
         old.as_object_mut().unwrap().remove("school_grade");
         old.as_object_mut().unwrap().remove("homework");
         old.as_object_mut().unwrap().remove("homework_progress");
+        old.as_object_mut().unwrap().remove("happiness_fraction");
         old.as_object_mut().unwrap().remove("school_visit");
         let old: SavedSim = serde_json::from_value(old).unwrap();
         assert_eq!(old.school_grade, None);
         assert!(!old.homework);
         assert_eq!(old.homework_progress, 0.0);
+        assert_eq!(old.happiness_fraction, 0.0);
         assert_eq!(old.school_visit, None);
     }
 
