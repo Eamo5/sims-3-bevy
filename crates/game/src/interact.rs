@@ -1928,13 +1928,14 @@ fn run_actions(
     mut life: MessageWriter<LifeEvent>,
     people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
     mut conceive: MessageWriter<crate::little::Conceive>,
-    (mut fire, upgraded, baked, paper_in_hand, prepped, serving_from): (
+    (mut fire, upgraded, baked, paper_in_hand, prepped, serving_from, broken): (
         MessageWriter<crate::fire::StartFire>,
         Query<&crate::upgrades::Upgrades>,
         Option<Res<crate::baked::Baked>>,
         Query<&crate::surroundings::PaperInHand>,
         Query<(), With<crate::meals::CookPrepped>>,
         Query<&crate::meals::ServingFrom>,
+        Query<(), With<Broken>>,
     ),
     (mut did, journals, mut inventories): (MessageWriter<crate::journal::Did>, Query<&crate::journal::SkillJournal>, Query<&mut crate::inventory::Inventory>),
 ) {
@@ -1976,6 +1977,18 @@ fn run_actions(
         let mut finished = false;
         let mut stand_up_at: Option<Vec2> = None;
         let mut outro: Option<(&'static [&'static str], Option<&'static str>, f32, Entity)> = None;
+
+        let maintenance = match action.kind {
+            ActionKind::Repair { target } => Some((target, None)),
+            ActionKind::Upgrade { target, bit } => Some((target, Some(bit))),
+            _ => None,
+        };
+        if let Some((target, bit)) = maintenance {
+            let valid = objects.get(target).is_ok_and(|(obj, _, used, _)| {
+                maintenance_available(me, obj.kind, used.0, broken.contains(target), upgraded.get(target).ok(), bit)
+            });
+            if !valid { action.cancel = true; }
+        }
 
         // Cancellation
         if action.cancel {
@@ -3251,6 +3264,17 @@ fn run_actions(
     }
 }
 
+/// Revalidate maintenance on every action tick, including object reservations.
+fn maintenance_available(actor: Entity, kind: ObjectKind, owner: Option<Entity>, broken: bool, upgrades: Option<&crate::upgrades::Upgrades>, bit: Option<u8>) -> bool {
+    if owner.is_some_and(|e| e != actor) { return false; }
+    match bit {
+        None => broken,
+        Some(bit) => crate::upgrades::Upgrade::from_bit(bit).is_some_and(|u| {
+            !broken && u.name(kind).is_some() && !upgrades.is_some_and(|installed| installed.has(u))
+        }),
+    }
+}
+
 /// Computer Whiz's TraitTuning duration modifiers apply only to computer work.
 fn maintenance_minutes(base: f32, handiness: f32, traits: &[crate::life::Trait], kind: Option<ObjectKind>, upgrade: bool) -> f32 {
     let trait_time = if kind == Some(ObjectKind::Computer) && traits.contains(&crate::life::Trait::ComputerWhiz) {
@@ -3262,6 +3286,25 @@ fn maintenance_minutes(base: f32, handiness: f32, traits: &[crate::life::Trait],
 #[cfg(test)]
 mod maintenance_tests {
     use super::*;
+
+    #[test]
+    fn maintenance_rejects_stale_work_and_other_sims_reservations() {
+        let mut world = World::new();
+        let actor = world.spawn_empty().id();
+        let other = world.spawn_empty().id();
+        use crate::upgrades::{Upgrade, Upgrades};
+        let bit = Upgrade::Improved.bit();
+        assert!(maintenance_available(actor, ObjectKind::Computer, None, true, None, None));
+        assert!(maintenance_available(actor, ObjectKind::Computer, Some(actor), true, None, None));
+        assert!(!maintenance_available(actor, ObjectKind::Computer, Some(other), true, None, None));
+        assert!(!maintenance_available(actor, ObjectKind::Computer, Some(actor), false, None, None));
+        assert!(maintenance_available(actor, ObjectKind::Computer, Some(actor), false, None, Some(bit)));
+        assert!(!maintenance_available(actor, ObjectKind::Computer, Some(other), false, None, Some(bit)));
+        assert!(!maintenance_available(actor, ObjectKind::Computer, None, false, Some(&Upgrades(bit)), Some(bit)));
+        assert!(!maintenance_available(actor, ObjectKind::Computer, None, true, None, Some(bit)));
+        assert!(!maintenance_available(actor, ObjectKind::Computer, None, false, None, Some(255)));
+        assert!(!maintenance_available(actor, ObjectKind::Chair, None, false, None, Some(bit)));
+    }
 
     #[test]
     fn computer_chess_teaches_logic_with_keyboard_not_table_animations() {
