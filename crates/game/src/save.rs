@@ -85,6 +85,12 @@ pub struct SavedSim {
     pub homework_progress: f32,
     #[serde(default)]
     pub happiness_fraction: f64,
+    #[serde(default)]
+    pub offered_wishes: Vec<crate::wishes::Wish>,
+    #[serde(default)]
+    pub promised_wishes: Vec<crate::wishes::Wish>,
+    #[serde(default)]
+    pub next_wish_offer: Option<f64>,
     /// Classroom start and home arrival for a school day currently in progress.
     #[serde(default)]
     pub school_visit: Option<(f64, f64)>,
@@ -335,6 +341,9 @@ fn saved_look(sim: &Sim) -> SavedSim {
         homework: false,
         homework_progress: 0.0,
         happiness_fraction: 0.0,
+        offered_wishes: Vec::new(),
+        promised_wishes: Vec::new(),
+        next_wish_offer: None,
         school_visit: None,
         pregnancy: None,
         shape: Some((sim.weight, sim.fitness)),
@@ -704,6 +713,9 @@ fn save_game(
                 .collect(),
             lifetime_happiness: wishes.map_or(0, |w| w.points),
             happiness_fraction: wishes.map_or(0.0, |w| w.mood_fraction),
+            offered_wishes: wishes.map(|w| w.offered.clone()).unwrap_or_default(),
+            promised_wishes: wishes.map(|w| w.promised.clone()).unwrap_or_default(),
+            next_wish_offer: wishes.map(|w| w.next_offer),
             outfit: saved_outfit(&sim.outfit),
             rewards: wishes.map(|w| w.rewards.clone()).unwrap_or_default(),
             aging: aging.map(|a| (a.days, a.elder_span)),
@@ -952,15 +964,20 @@ pub(crate) fn apply_loaded_game(
                 ec.remove::<crate::careers::Job>();
             }
         }
-        if s.member {
-            ec.insert(HouseholdMember).remove::<(Visitor, OffLot)>();
+        if s.member || s.next_wish_offer.is_some() {
             let mut wishes = crate::wishes::Wishes::restored(
                 s.lifetime_happiness,
                 s.rewards.clone(),
                 game.minutes,
             );
             wishes.mood_fraction = s.happiness_fraction.clamp(0.0, 1.0);
+            wishes.offered = s.offered_wishes.clone();
+            wishes.promised = s.promised_wishes.clone();
+            wishes.next_offer = s.next_wish_offer.unwrap_or(game.minutes);
             ec.insert(wishes);
+        }
+        if s.member {
+            ec.insert(HouseholdMember).remove::<(Visitor, OffLot)>();
         } else if s.whereabouts == "visiting" {
             ec.insert(Visitor { leave_at: game.minutes + 180.0 });
         } else {
@@ -1075,6 +1092,25 @@ pub fn request_save(w: &mut MessageWriter<SaveRequest>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_sim_keeps_wish_order_rewards_and_offer_deadline() {
+        use crate::wishes::{Wish, WishKind};
+        let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(18);
+        let mut saved = saved_look(&random_sim(&mut rng, "Wishes", Some(true), Age::Adult));
+        saved.offered_wishes = vec![Wish { kind: WishKind::Social("Chat".into()), points: 100 }];
+        saved.promised_wishes = vec![Wish { kind: WishKind::MakeFriend, points: 400 }, Wish { kind: WishKind::Activity("Paint".into()), points: 250 }];
+        saved.next_wish_offer = Some(1777.0);
+        let mut json = serde_json::to_value(&saved).unwrap();
+        let restored: SavedSim = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(restored.offered_wishes, saved.offered_wishes);
+        assert_eq!(restored.promised_wishes, saved.promised_wishes);
+        assert_eq!(restored.next_wish_offer, Some(1777.0));
+        for field in ["offered_wishes", "promised_wishes", "next_wish_offer"] { json.as_object_mut().unwrap().remove(field); }
+        let old: SavedSim = serde_json::from_value(json).unwrap();
+        assert!(old.offered_wishes.is_empty() && old.promised_wishes.is_empty());
+        assert_eq!(old.next_wish_offer, None);
+    }
 
     #[test]
     fn school_progress_survives_serialization_and_restores_component_presence() {

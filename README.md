@@ -660,6 +660,7 @@ installation is unreachable.
   tuning, glowing in the band that earns lifetime happiness; the moodlets in the game's
   green, red or grey cells with their time left, scrolled three by two; the offered wish
   in its staging area, paged and clicked to promise, the four promised wishes in their slots
+  (offered and promised wishes, their rewards and the next-offer timer survive saves)
   and the lifetime wish in its frame), the skewer of the household's faces up the left, each
   ringed in its mood's colour (click to select, again to go to them), and the info panels
   under their tabs: the motives' bars filled and coloured as the game's (green, fading to

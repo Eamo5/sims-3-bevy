@@ -21,11 +21,11 @@ impl Plugin for WishesPlugin {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WishKind {
-    Skill { skill: &'static str, level: u32 },
-    Activity(&'static str),
-    Social(&'static str),
+    Skill { skill: String, level: u32 },
+    Activity(String),
+    Social(String),
     MakeFriend,
     FirstKiss,
     GoSteady,
@@ -36,7 +36,7 @@ pub enum WishKind {
     BuySomething { min_price: i32 },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Wish {
     pub kind: WishKind,
     pub points: u32,
@@ -48,7 +48,7 @@ impl Wish {
         let s = |n: &str| n.to_string();
         match &self.kind {
             WishKind::Skill { skill, .. } => data.skill(skill).map(|k| k.wish_icon.clone()).unwrap_or_default(),
-            WishKind::Activity(a) => s(match *a {
+            WishKind::Activity(a) => s(match a.as_str() {
                 "Watch TV" => "w_tv",
                 "Read a Book" => "w_book",
                 "Play Chess" => "w_chess",
@@ -61,7 +61,7 @@ impl Wish {
                 "Play Computer Games" => "W_computer",
                 _ => "",
             }),
-            WishKind::Social(n) => s(match *n {
+            WishKind::Social(n) => s(match n.as_str() {
                 "Tell Joke" => "w_joke_around",
                 "Flirt" => "w_first_kiss",
                 "Try for Baby" => "moodlet_theBabyIsComing",
@@ -105,7 +105,7 @@ pub struct Wishes {
     pub mood_fraction: f64,
     /// Lifetime rewards bought (their reward traits' names: `SteelBladder`).
     pub rewards: Vec<String>,
-    next_offer: f64,
+    pub(crate) next_offer: f64,
 }
 
 impl Wishes {
@@ -354,7 +354,7 @@ fn candidates(sim: &Sim, skills: &Skills, has_job: bool, romance: Option<crate::
     let mut skill = |name: &'static str, weight: f32| {
         let next = skills.level(name) + 1;
         if next <= 10 {
-            out.push((WishKind::Skill { skill: name, level: next }, 150 + next * 75, weight));
+            out.push((WishKind::Skill { skill: name.into(), level: next }, 150 + next * 75, weight));
         }
     };
     skill("Cooking", if has(Trait::NaturalCook) { 3.0 } else { 1.0 });
@@ -364,7 +364,7 @@ fn candidates(sim: &Sim, skills: &Skills, has_job: bool, romance: Option<crate::
     skill("Writing", if has(Trait::Bookworm) { 3.0 } else { 0.5 });
     skill("Athletic", if has(Trait::Athletic) { 3.0 } else { 0.6 });
     skill("Charisma", if has(Trait::Charismatic) { 3.0 } else { 0.5 });
-    let mut act = |a: &'static str, pts: u32, w: f32| out.push((WishKind::Activity(a), pts, w));
+    let mut act = |a: &'static str, pts: u32, w: f32| out.push((WishKind::Activity(a.into()), pts, w));
     act("Watch TV", 100, if has(Trait::CouchPotato) { 3.0 } else { 0.6 });
     act("Read a Book", 150, if has(Trait::Bookworm) { 3.0 } else { 0.6 });
     act("Play Chess", 150, if has(Trait::Genius) { 2.5 } else { 0.5 });
@@ -376,12 +376,12 @@ fn candidates(sim: &Sim, skills: &Skills, has_job: bool, romance: Option<crate::
     act("Play Guitar", 200, if has(Trait::Virtuoso) { 3.0 } else { 0.4 });
     act("Play Computer Games", 100, if has(Trait::ComputerWhiz) { 3.0 } else { 0.5 });
     let social_w = if has(Trait::Friendly) || has(Trait::PartyAnimal) { 2.5 } else if has(Trait::Loner) { 0.2 } else { 1.0 };
-    out.push((WishKind::Social("Chat"), 100, social_w));
-    out.push((WishKind::Social("Tell Joke"), 150, if has(Trait::GoodSenseOfHumor) { 3.0 } else { 0.6 }));
+    out.push((WishKind::Social("Chat".into()), 100, social_w));
+    out.push((WishKind::Social("Tell Joke".into()), 150, if has(Trait::GoodSenseOfHumor) { 3.0 } else { 0.6 }));
     out.push((WishKind::MakeFriend, 400, social_w));
     if sim.age != Age::Child {
         let romantic = if has(Trait::HopelessRomantic) || has(Trait::Flirty) { 3.0 } else if has(Trait::Unflirty) { 0.1 } else { 0.8 };
-        out.push((WishKind::Social("Flirt"), 150, romantic));
+        out.push((WishKind::Social("Flirt".into()), 150, romantic));
         if !kissed {
             out.push((WishKind::FirstKiss, 500, romantic));
         }
@@ -396,7 +396,7 @@ fn candidates(sim: &Sim, skills: &Skills, has_job: bool, romance: Option<crate::
             && sim.age != Age::Elder
         {
             let w = if has(Trait::FamilyOriented) { 2.5 } else if has(Trait::DislikesChildren) { 0.0 } else { 0.4 };
-            out.push((WishKind::Social("Try for Baby"), 1000, w));
+            out.push((WishKind::Social("Try for Baby".into()), 1000, w));
         }
         if has_job {
             out.push((WishKind::Promotion, 1000, if has(Trait::Ambitious) || has(Trait::Workaholic) { 3.0 } else { 0.8 }));
@@ -455,9 +455,9 @@ fn fulfil_wishes(
     for ev in events.read() {
         let Ok((sim, mut w, mut moodlets, rels)) = sims.get_mut(ev.sim) else { continue };
         let matches = |k: &WishKind| match (&ev.kind, k) {
-            (LifeEventKind::SkillUp { skill, level }, WishKind::Skill { skill: s, level: l }) => skill == s && level >= l,
-            (LifeEventKind::Finished { activity, .. }, WishKind::Activity(a)) => activity == a,
-            (LifeEventKind::Socialized { social, .. }, WishKind::Social(s)) => social == s,
+            (LifeEventKind::SkillUp { skill, level }, WishKind::Skill { skill: s, level: l }) => *skill == s && level >= l,
+            (LifeEventKind::Finished { activity, .. }, WishKind::Activity(a)) => *activity == a,
+            (LifeEventKind::Socialized { social, .. }, WishKind::Social(s)) => *social == s,
             (LifeEventKind::Socialized { other, .. }, WishKind::MakeFriend) => {
                 let f = rels.friendship(*other);
                 (15.0..30.0).contains(&f)
@@ -501,6 +501,31 @@ fn fulfil_wishes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deserialized_promised_wishes_still_fulfil_once() {
+        let original = vec![
+            Wish { kind: WishKind::Skill { skill: "Logic".into(), level: 3 }, points: 375 },
+            Wish { kind: WishKind::Activity("Play Chess".into()), points: 150 },
+            Wish { kind: WishKind::Social("Chat".into()), points: 100 },
+            Wish { kind: WishKind::BuySomething { min_price: 500 }, points: 300 },
+        ];
+        let restored: Vec<Wish> = serde_json::from_str(&serde_json::to_string(&original).unwrap()).unwrap();
+        assert_eq!(restored, original);
+        let mut app = App::new();
+        app.init_resource::<GameClock>().init_resource::<Notifications>()
+            .add_message::<LifeEvent>().add_systems(Update, fulfil_wishes);
+        let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(90);
+        let sim = crate::sim::random_sim(&mut rng, "Wishes", Some(false), Age::Adult);
+        let e = app.world_mut().spawn((sim, Wishes { promised: restored, ..default() }, Moodlets::default(), crate::social::Relationships::default())).id();
+        for _ in 0..2 {
+            app.world_mut().write_message(LifeEvent::new(e, LifeEventKind::SkillUp { skill: "Logic", level: 3 }));
+            app.update();
+        }
+        let wishes = app.world().get::<Wishes>(e).unwrap();
+        assert_eq!(wishes.points, 375);
+        assert_eq!(wishes.promised, original[1..]);
+    }
 
     #[test]
     fn reward_discounts_match_installed_tuning_and_stack_additively() {
