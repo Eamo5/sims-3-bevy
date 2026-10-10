@@ -394,7 +394,7 @@ fn take_portraits(
                         portraits.spare.insert(shot.sim, old);
                     }
                 } else if first {
-                    // (A first picture is staged again straight away.)
+                    // (A first picture is retried straight away.)
                     portraits.queue.push_back(shot.sim);
                 } else {
                     // (The old picture stays up meanwhile.)
@@ -421,9 +421,10 @@ fn take_portraits(
         // A Sim's first picture is taken wherever they are (staged if away); retakes wait until
         // they're in view, standing or walking about.
         // (Someone on their way to a community lot is pictured when they get there.)
-        // A first picture is always staged (nothing in the way, the same light for everyone).
+        // The studio render layer already isolates visible Sims from the world.
+        // Only an away Sim needs staging; moving a visible Sim interrupts live play.
         let first = portraits.retake.get(&e).is_none();
-        let away = first && !driving;
+        let away = first && !vis.get() && !driving;
         // (Retakes in view wait for them to stand still: the camera can't keep up with a Sim
         // on the move, least of all at speed.)
         let upright = if first { anim.pose != Pose::Lie } else { matches!(anim.pose, Pose::Stand | Pose::Talk) && !walking } || sim.age == Age::Baby;
@@ -439,7 +440,7 @@ fn take_portraits(
             portraits.queue.push_back(e);
             continue;
         }
-        let staged = (first || !vis.get()).then(|| (*tf, *visibility));
+        let staged = (!vis.get()).then(|| (*tf, *visibility));
         if let Some((tf, _)) = staged {
             commands.entity(e).insert((Transform { translation: tf.translation - Vec3::Y * UNDERGROUND, ..tf }, Visibility::Visible, Staged));
         }
