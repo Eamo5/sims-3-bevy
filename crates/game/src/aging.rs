@@ -19,7 +19,7 @@ impl Plugin for AgingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AgingDay>()
             .add_systems(OnEnter(crate::AppState::Loading), reset_aging_day)
-            .add_systems(Update, (daily_aging, grow_up_now, rebuild_bodies).chain().after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (initialize_aging, daily_aging, grow_up_now, rebuild_bodies).chain().after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -60,6 +60,33 @@ impl Aging {
 mod lifespan_tests {
     use super::*;
     use rand::SeedableRng;
+
+    #[test]
+    fn late_household_arrivals_get_age_state_without_overwriting_existing_ages() {
+        let mut app = App::new();
+        app.add_systems(Update, initialize_aging);
+        app.update(); // The initial world update has already happened.
+        let mut rng = rand::rngs::StdRng::seed_from_u64(12);
+        let newcomer = app.world_mut().spawn((
+            crate::sim::random_sim(&mut rng, "Arrival", Some(false), Age::Adult),
+            HouseholdMember,
+        )).id();
+        let saved = app.world_mut().spawn((
+            crate::sim::random_sim(&mut rng, "Saved", Some(false), Age::Elder),
+            HouseholdMember,
+            Aging { days: 27.0, elder_span: 17.0, elder_risk: Some(0.5) },
+        )).id();
+        app.update();
+        let arrival = *app.world().get::<Aging>(newcomer).expect("initialize on arrival, not next midnight");
+        assert!(arrival.days >= 0.0 && arrival.days < stage_days(Age::Adult) * 0.28);
+        assert!(arrival.elder_risk.is_some());
+        app.update();
+        assert_eq!(app.world().get::<Aging>(newcomer).unwrap().days, arrival.days);
+        assert_eq!(app.world().get::<Aging>(newcomer).unwrap().elder_risk, arrival.elder_risk);
+        let restored = app.world().get::<Aging>(saved).unwrap();
+        assert_eq!(restored.days, 27.0);
+        assert_eq!(restored.elder_risk, Some(0.5));
+    }
 
     #[test]
     fn loading_a_different_date_does_not_age_the_restored_household() {
@@ -263,6 +290,25 @@ pub fn reshape(e: &mut EntityWorldMut, weight: f32, fitness: f32) {
     e.insert(ShapeDrift(drift));
 }
 
+/// Initialize arrivals throughout a session, not just on the world's first frame.
+fn initialize_aging(
+    mut commands: Commands,
+    sims: Query<(Entity, &Sim), (With<HouseholdMember>, Without<Aging>, Without<crate::death::Dying>)>,
+) {
+    let mut rng = rand::rng();
+    for (e, sim) in &sims {
+        let mut a = Aging::default();
+        let span = if sim.age == Age::Elder { 17.0 } else { stage_days(sim.age) };
+        // AgingManager.kPercentCasOffset = 28.
+        a.days = rng.random_range(0.0..span * 0.28).floor();
+        if std::env::var_os("SIMS3_AGE_SOON").is_some() {
+            a.days = if sim.age == Age::Elder { a.elder_span - 1.0 } else { span - 1.0 };
+            if sim.age == Age::Elder { a.elder_risk = Some(0.0); }
+        }
+        commands.entity(e).insert(a);
+    }
+}
+
 /// Ages the household once a day, at midnight.
 #[allow(clippy::too_many_arguments)]
 fn daily_aging(
@@ -278,24 +324,6 @@ fn daily_aging(
     let day = clock.day();
     let first = last_day.0.is_none();
     if last_day.0.replace(day) == Some(day) || first {
-        // Sims who just arrived start their stage at a random point, like the town's.
-        if first {
-            let mut rng = rand::rng();
-            for (e, sim, aging, _, _, _) in &mut sims {
-                if aging.is_none() {
-                    let mut a = Aging::default();
-                    let span = if sim.age == Age::Elder { 17.0 } else { stage_days(sim.age) };
-                    // AgingManager.kPercentCasOffset = 28.
-                    a.days = rng.random_range(0.0..span * 0.28).floor();
-                    // Testing: everyone's birthday is at the next midnight.
-                    if std::env::var_os("SIMS3_AGE_SOON").is_some() {
-                        a.days = if sim.age == Age::Elder { a.elder_span - 1.0 } else { span - 1.0 };
-                        if sim.age == Age::Elder { a.elder_risk = Some(0.0); }
-                    }
-                    commands.entity(e).insert(a);
-                }
-            }
-        }
         return;
     }
     if !settings.aging {
