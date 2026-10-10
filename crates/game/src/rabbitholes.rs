@@ -17,7 +17,7 @@ pub struct RabbitHolePlugin;
 
 impl Plugin for RabbitHolePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (school_bus, outings).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (school_bus, outings).chain().after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)));
     }
 }
 
