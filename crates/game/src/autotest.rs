@@ -209,6 +209,8 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, wall_snap_test.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, build_history_test.after(bevy::input::InputSystems).after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_screenshot.run_if(in_state(AppState::InGame)))
+            // (With no town to load, the main menu's picture.)
+            .add_systems(Update, auto_screenshot.run_if(in_state(AppState::MainMenu)).run_if(|a: Res<AutoArgs>| a.world.is_none() && a.load.is_none()))
             .add_systems(Update, portrait_cam.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_action.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_place.run_if(in_state(crate::PlayMode::Live)))
@@ -2995,6 +2997,7 @@ fn ui_flow(
         Option<ResMut<crate::clock::GameClock>>,
     ),
     mut buy: ResMut<crate::buy::BuyMode>,
+    mut main_menu: Option<ResMut<crate::mainmenu::MainMenuUi>>,
 ) {
     let Some(dir) = &args.ui_flow else { return };
     let now = time.elapsed_secs();
@@ -3024,8 +3027,13 @@ fn ui_flow(
         (1, AppState::MainMenu, _) if since > 0.5 => {
             if let Some((mut i, _)) = menu.iter_mut().find(|(_, a)| matches!(a, crate::menu::MenuAction::PlayWorld(0))) {
                 *i = Interaction::Pressed;
+                advance(&mut stage);
+            } else if let Some(m) = main_menu.as_deref_mut() {
+                // (The game's own menu: the first town chosen, then its Play Now.)
+                crate::mainmenu::choose_world(m, 0);
+            } else {
+                advance(&mut stage);
             }
-            advance(&mut stage);
         }
         (2, AppState::CreateHousehold, _) if since > 1.5 => {
             shot(&mut commands, "2_household");

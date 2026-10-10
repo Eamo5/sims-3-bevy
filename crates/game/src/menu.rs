@@ -14,7 +14,7 @@ impl Plugin for MenuPlugin {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub enum MenuAction {
     PlayWorld(usize),
     LoadSave(usize),
@@ -34,7 +34,7 @@ pub const BTN_PRESS: Color = Color::srgba(0.30, 0.65, 0.20, 1.0);
 pub const PLUMBOB_GREEN: Color = Color::srgb(0.35, 0.85, 0.25);
 
 pub fn button_visuals(
-    mut q: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<Button>)>,
+    mut q: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<Button>, Without<crate::layout::UiButton>)>,
 ) {
     for (i, mut bg) in &mut q {
         bg.0 = match i {
@@ -65,6 +65,7 @@ fn spawn_menu(mut commands: Commands, worlds: Res<WorldList>, install: Res<Insta
                 ..default()
             },
             BackgroundColor(Color::srgb(0.05, 0.16, 0.30)),
+            crate::mainmenu::OldMenu,
         ))
         .id();
 

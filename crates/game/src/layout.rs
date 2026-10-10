@@ -38,7 +38,7 @@ pub struct UiAssets {
 }
 
 /// The default style's font (Helvetica Rounded) as the font of all text, as the game's.
-fn open(fonts: &mut Assets<Font>) -> Option<UiAssets> {
+pub(crate) fn open(fonts: &mut Assets<Font>) -> Option<UiAssets> {
     let root = s3bake::default_root();
     if !s3bake::ui_ready(&root) {
         return None;
@@ -283,6 +283,10 @@ impl Spawned {
     pub fn text_of(&self, window: Entity) -> Option<Entity> {
         self.text_of.get(&window).copied()
     }
+    /// Every window with a control id (ids repeat in a layout's copies of a piece).
+    pub fn all_with(&self, id: u32) -> Vec<Entity> {
+        self.all.iter().filter(|(i, _)| *i == id).map(|(_, e)| *e).collect()
+    }
     /// The (first) window commented so under another.
     pub fn comment_within(&self, ancestor: Entity, c: &str) -> Option<Entity> {
         self.comments.iter().filter(|(n, _)| n == c).map(|(_, e)| *e).find(|e| self.is_within(*e, ancestor))
@@ -342,6 +346,11 @@ impl UiAssets {
         self.strings.get(&s3pkg::fnv64(key)).cloned()
     }
 
+    /// The game's words for a text key's hash (a world file's name and description).
+    pub fn localize_key(&self, key: u64) -> Option<String> {
+        self.strings.get(&key).cloned()
+    }
+
     /// Everything baked from the interface (buy mode's catalogue, each object's place in it).
     pub fn baked(&self) -> &std::sync::Arc<UiBaked> {
         &self.data
@@ -394,6 +403,14 @@ impl UiAssets {
         let root = self.spawn_window(commands, images, fonts, w, None, &mut out);
         out.root = Some(root);
         Some(out)
+    }
+
+    /// Puts a (changed copy of a) layout's window on screen on its own.
+    pub fn spawn_root(&mut self, commands: &mut Commands, images: &mut Assets<Image>, fonts: &mut Assets<Font>, w: &UiWindow) -> Spawned {
+        let mut out = Spawned::default();
+        let root = self.spawn_window(commands, images, fonts, w, None, &mut out);
+        out.root = Some(root);
+        out
     }
 
     /// Puts a window (and what's under it) under a parent: a layout's item template, as a
@@ -462,7 +479,7 @@ impl UiAssets {
             }
             commands.entity(e).insert(crate::icons::Tooltip(w.tooltip.clone()));
         }
-        if w.cls == "Text" || (is_button && !w.caption.is_empty()) {
+        if w.cls == "Text" || w.cls == "TextEdit" || (is_button && !w.caption.is_empty()) {
             let caption = if w.caption.contains('/') && w.caption.contains(':') { String::new() } else { w.caption.clone() };
             let t = self.spawn_text(commands, fonts, w, &caption, e);
             out.texts.insert(w.id, t);
@@ -517,6 +534,8 @@ impl UiAssets {
         };
         let align_y = match w.valign {
             _ if button => AlignItems::Center,
+            // (A text box's words start at its top.)
+            _ if w.cls == "TextEdit" => AlignItems::FlexStart,
             1 | 3 => AlignItems::Center,
             2 => AlignItems::FlexEnd,
             _ => AlignItems::FlexStart,

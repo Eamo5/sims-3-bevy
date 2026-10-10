@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackWriter, read_value, write_value};
 
-pub const UI_VERSION: u32 = 11;
+pub const UI_VERSION: u32 = 12;
 pub const T_LAYOUT: u32 = 0x025C95B6;
 pub const T_FONT: u32 = 0x062E9EE0;
 pub const T_IMAGE: u32 = 0x2F7D0004;
@@ -395,12 +395,12 @@ fn window(o: &XNode) -> Option<UiWindow> {
     // (A text's one colour; a button's caption colour per state.)
     if let Some(c) = val("TextColor") {
         w.colors = vec![num(c)];
-    } else if let Some(p) = props("CaptionColors") {
+    } else if let Some(p) = props("CaptionColors").or(props("Text Colors")) {
         w.colors = p.children.iter().filter(|v| v.name == "value").map(|v| num(&v.text)).collect();
     }
     w.halign = val("HorizontalAlign").or(val("CaptionHAlign")).map_or(0, num) as u8;
     w.valign = val("VerticalAlign").or(val("CaptionVAlign")).map_or(0, num) as u8;
-    w.wrap = val("WordWrap").or(val("CaptionWrap")).map_or(0, num);
+    w.wrap = val("WordWrap").or(val("CaptionWrap")).or(val("Wrap Mode")).map_or(0, num);
     w.button_type = val("ButtonType").map_or(0, num);
     w.button_group = val("ButtonGroupID").map_or(0, num);
     w.icon = props("Icon").and_then(|p| p.attr("key")).map_or(0, image_key);

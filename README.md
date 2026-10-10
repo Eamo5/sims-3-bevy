@@ -652,6 +652,14 @@ installation is unreachable.
   notices at the top right are the game's own too: each queued action in its frame with the
   object's picture or the other Sim's face, the running one's progress bar, a cross to cancel;
   each notice a speech card with the Sim's face or a system card, closed with its cross.
+- **The game's own main menu**: the game's `GameEntryMainMenu` over its picture of town (cropped
+  to cover any screen shape), with the logo. With saved games: the saves along a strip in
+  the game's frames (arrows and the wheel to scroll), the newest chosen; the chosen save's
+  name, household, game time and date; Play Now. New Game (or no saves yet): the town from
+  the game's drop-down list of the home towns installed (the newest pack's chosen first, as
+  the game does), each with its own picture and description read from its world file; Play
+  Now. The round button opens the game's popup menu: Options and Quit. A newer interface
+  layout than the one converted is converted again while the menu waits.
 - **The game's own HUD**: the live-mode interface is the game's, drawn from its own layouts
   (`UI.package`'s window trees, pictures and fonts: every caption in its Helvetica Rounded),
   and driven as its own interface code drives it: the puck at the bottom left (live, buy and
