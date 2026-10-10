@@ -314,6 +314,9 @@ mod tests {
         app.update();
         assert!(app.world().get::<Author>(writer).unwrap().draft.is_none());
         assert_eq!(app.world().get::<Author>(writer).unwrap().books.len(), 1);
+        let finished = app.world().get::<ActionQueue>(writer).unwrap().0.front().unwrap();
+        assert!(finished.completed, "publication is successful completion");
+        assert!(!finished.cancel, "successful publication must not be reported as cancellation");
         assert_eq!(app.world().resource::<Household>().funds, 40, "completion must still pay the 40%, 60%, and 80% milestones");
         app.update();
         assert_eq!(app.world().resource::<Household>().funds, 40);
@@ -445,7 +448,7 @@ fn write_pages(
     let mut rng = rand::rng();
     for (e, sim, mut queue, skills, author, plan, journal) in &mut writers {
         let Some(front) = queue.0.front_mut() else { continue };
-        if front.cancel { continue; }
+        if front.cancel || front.completed { continue; }
         let (ActionKind::Object { target, def }, Phase::Running(_)) = (&front.kind, &front.phase) else { continue };
         let writing = objects.get(*target).ok().filter(|(_, used)| used.0 == Some(e))
             .and_then(|(o, _)| interactions_for(o.kind).get(*def)).is_some_and(|d| d.special == Special::WriteNovel);
@@ -502,7 +505,7 @@ fn write_pages(
             ));
             author.books.push(book);
             if let Some(f) = queue.0.front_mut() {
-                f.cancel = true;
+                f.completed = true;
             }
         }
     }

@@ -1577,11 +1577,13 @@ pub struct Action {
     pub phase: Phase,
     pub autonomous: bool,
     pub cancel: bool,
+    /// An activity managed by another system (such as novel writing) finished its work.
+    pub completed: bool,
 }
 
 impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
-        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false }
+        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false }
     }
 }
 
@@ -2480,7 +2482,9 @@ fn run_actions(
                                     Special::Homework => crate::rabbitholes::homework_minutes(&sim.traits, crate::wishes::has(wishes, "MultiTasker")),
                                     _ => d.minutes,
                                 };
-                                let complete = if d.special == Special::Homework {
+                                let complete = if d.special == Special::WriteNovel {
+                                    action.completed
+                                } else if d.special == Special::Homework {
                                     homework.as_mut().is_none_or(|assignment| assignment.advance(dt, minutes))
                                 } else {
                                     elapsed >= minutes || full
