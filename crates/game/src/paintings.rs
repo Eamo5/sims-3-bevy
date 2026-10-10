@@ -91,11 +91,12 @@ pub struct Painted {
 /// What a Sim paints on a canvas: a picture for their skill (a child's a dabble), in their
 /// traits' version of it if it has one; brilliant paintings and masterpieces come to the
 /// skilled now and then, and are worth more.
-pub fn paint(data: Option<&PaintingsBaked>, size: u8, level: u32, traits: &[Trait], child: bool, extra_creative: bool, rng: &mut impl Rng) -> Painted {
+#[allow(clippy::too_many_arguments)]
+pub fn paint(data: Option<&PaintingsBaked>, size: u8, level: u32, traits: &[Trait], child: bool, extra_creative: bool, proficient: bool, rng: &mut impl Rng) -> Painted {
     // PaintingSkill's base chances, with TraitTuning's additive bonuses.
     let perfectionist = traits.contains(&Trait::Perfectionist);
-    let brilliant = 20 + if perfectionist { 20 } else { 0 } + if extra_creative { 25 } else { 0 };
-    let masterpiece = 10 + if perfectionist { 15 } else { 0 } + if extra_creative { 15 } else { 0 };
+    let brilliant = if proficient { 40 } else { 20 } + if perfectionist { 20 } else { 0 } + if extra_creative { 25 } else { 0 };
+    let masterpiece = if proficient { 35 } else { 10 } + if perfectionist { 15 } else { 0 } + if extra_creative { 15 } else { 0 };
     let quality = if level >= 9 && rng.random_bool(masterpiece as f64 / 100.0) {
         3
     } else if level >= 6 && rng.random_bool(brilliant as f64 / 100.0) {
@@ -183,7 +184,7 @@ pub struct EaselCanvas {
 #[allow(clippy::type_complexity)]
 fn easel_canvases(
     mut commands: Commands,
-    mut painters: Query<(Entity, &crate::sim::Sim, &ActionQueue, &Skills, Option<&mut PaintPlan>, Option<&crate::wishes::Wishes>)>,
+    mut painters: Query<(Entity, &crate::sim::Sim, &ActionQueue, &Skills, Option<&mut PaintPlan>, Option<&crate::wishes::Wishes>, Option<&crate::journal::SkillJournal>)>,
     objects: Query<&GameObject>,
     canvases: Query<(Entity, &EaselCanvas)>,
     baked: Option<Res<crate::baked::Baked>>,
@@ -194,7 +195,7 @@ fn easel_canvases(
     let data = &baked.0.paintings;
     // (Painter, easel, canvas, picture, whether it's showing.)
     let mut painting: Vec<(Entity, Entity, u8, Option<Key>, bool)> = Vec::new();
-    for (me, sim, queue, skills, plan, wishes) in &mut painters {
+    for (me, sim, queue, skills, plan, wishes, journal) in &mut painters {
         let Some(a) = queue.0.front() else { continue };
         let (ActionKind::Object { target, def }, Phase::Running(elapsed)) = (&a.kind, &a.phase) else { continue };
         let Ok(obj) = objects.get(*target) else { continue };
@@ -203,7 +204,7 @@ fn easel_canvases(
         }
         let level = skills.level("Painting");
         let size = canvas(plan.as_deref(), level);
-        let chosen = || paint(Some(data), size, level, &sim.traits, sim.age == crate::sim::Age::Child, crate::wishes::has(wishes, "ExtraCreative"), &mut rand::rng());
+        let chosen = || paint(Some(data), size, level, &sim.traits, sim.age == crate::sim::Age::Child, crate::wishes::has(wishes, "ExtraCreative"), crate::journal::earned(journal, "Proficient Painter"), &mut rand::rng());
         let painted = match plan {
             Some(mut p) => p.painted.get_or_insert_with(chosen).clone(),
             None => {
@@ -274,22 +275,26 @@ mod tests {
     #[test]
     fn original_quality_rolls_apply_trait_bonuses_without_bypassing_skill_gates() {
         use rand::SeedableRng;
-        for (traits, extra, brilliant, masterpiece) in [
-            (vec![], false, 0.20, 0.10),
-            (vec![Trait::Perfectionist], false, 0.40, 0.25),
-            (vec![], true, 0.45, 0.25),
-            (vec![Trait::Perfectionist], true, 0.65, 0.40),
+        for (traits, extra, proficient, brilliant, masterpiece) in [
+            (vec![], false, false, 0.20, 0.10),
+            (vec![Trait::Perfectionist], false, false, 0.40, 0.25),
+            (vec![], true, false, 0.45, 0.25),
+            (vec![Trait::Perfectionist], true, false, 0.65, 0.40),
+            (vec![], false, true, 0.40, 0.35),
+            (vec![Trait::Perfectionist], false, true, 0.60, 0.50),
+            (vec![], true, true, 0.65, 0.50),
+            (vec![Trait::Perfectionist], true, true, 0.85, 0.65),
         ] {
             let mut rng = rand::rngs::StdRng::seed_from_u64(718);
             for _ in 0..100 {
-                let p = paint(None, 0, 5, &traits, false, extra, &mut rng);
+                let p = paint(None, 0, 5, &traits, false, extra, proficient, &mut rng);
                 assert_eq!(p.name, "Fine Painting");
             }
             for level in [6, 8, 9, 10] {
                 let mut brilliant_count = 0;
                 let mut masterpiece_count = 0;
                 for _ in 0..20_000 {
-                    match paint(None, 0, level, &traits, false, extra, &mut rng).name {
+                    match paint(None, 0, level, &traits, false, extra, proficient, &mut rng).name {
                         "Brilliant Painting" => brilliant_count += 1,
                         "Masterpiece" => masterpiece_count += 1,
                         _ => {}
@@ -331,16 +336,16 @@ mod tests {
         let d = table();
         let mut rng = rand::rng();
         for _ in 0..50 {
-            let p = paint(Some(&d), 0, 5, &[], false, false, &mut rng);
+            let p = paint(Some(&d), 0, 5, &[], false, false, false, &mut rng);
             assert!(p.key.starts_with("painting:0:5_1_Small#"), "{}", p.key);
             let s = Stack { kind: crate::inventory::ItemKind::Painting, key: p.key, name: p.name.into(), quality: 0, count: 1, worth: p.worth };
             assert_eq!(picture(&d, &s), Some((0, "5_1_Small".to_string())));
         }
         // An evil beginner paints the evil version mostly, never another level's.
-        let evil = (0..200).filter(|_| paint(Some(&d), 0, 0, &[Trait::Evil], false, false, &mut rng).key.contains("0_1_Small_Evil#")).count();
+        let evil = (0..200).filter(|_| paint(Some(&d), 0, 0, &[Trait::Evil], false, false, false, &mut rng).key.contains("0_1_Small_Evil#")).count();
         assert!(evil > 100, "{evil}");
         // Without the table: a painting all the same.
-        assert!(paint(None, 2, 3, &[], false, false, &mut rng).key.starts_with("painting#"));
+        assert!(paint(None, 2, 3, &[], false, false, false, &mut rng).key.starts_with("painting#"));
     }
 
     #[test]

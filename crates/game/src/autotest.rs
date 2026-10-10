@@ -1568,7 +1568,7 @@ fn hang_paintings(
     let items: Vec<Stack> = [0u8, 1, 2, 2, 1, 0]
         .into_iter()
         .map(|size| {
-            let p = crate::paintings::paint(Some(pd), size, level, &sim.traits, false, false, &mut rng);
+            let p = crate::paintings::paint(Some(pd), size, level, &sim.traits, false, false, false, &mut rng);
             info!("painted {} ({}, §{})", p.key, p.name, p.worth);
             Stack { kind: ItemKind::Painting, key: p.key, name: p.name.into(), quality: 0, count: 1, worth: p.worth }
         })

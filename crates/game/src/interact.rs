@@ -2559,6 +2559,7 @@ fn run_actions(
                                                     &sim.traits,
                                                     sim.age == Age::Child,
                                                     crate::wishes::has(wishes, "ExtraCreative"),
+                                                    crate::journal::earned(journals.get(me).ok(), "Proficient Painter"),
                                                     &mut rand::rng(),
                                                 )
                                             });
