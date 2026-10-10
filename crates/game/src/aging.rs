@@ -143,10 +143,12 @@ mod lifespan_tests {
         app.update();
         assert_eq!(app.world().get::<Sim>(e).unwrap().age, Age::Teen);
         // A later, independent cake still works without waiting for midnight.
-        app.world_mut().entity_mut(e).insert(GrowUpNow);
+        app.world_mut().entity_mut(e).insert((GrowUpNow, crate::rabbitholes::SchoolGrades(83.0), crate::rabbitholes::Homework));
         app.update();
         assert_eq!(app.world().get::<Sim>(e).unwrap().age, Age::YoungAdult);
         assert!(app.world().get::<GrowUpNow>(e).is_none());
+        assert!(app.world().get::<crate::rabbitholes::SchoolGrades>(e).is_none());
+        assert!(app.world().get::<crate::rabbitholes::Homework>(e).is_none());
     }
 
     #[test]
@@ -393,7 +395,7 @@ fn grow_up(
     aging.days = 0.0;
     // School is over for young adults.
     if age == Age::YoungAdult {
-        commands.entity(e).remove::<crate::rabbitholes::SchoolGrades>();
+        commands.entity(e).remove::<(crate::rabbitholes::SchoolGrades, crate::rabbitholes::Homework)>();
     }
     // A new trait slot opens for teens and young adults.
     let slots = crate::life::trait_slots(age);

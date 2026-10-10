@@ -443,7 +443,8 @@ installation is unreachable.
   geniuses); done, it lifts their grades; left undone, it drags them down. A teen or grown-up
   can Help with Homework (a Friendly social, offered while there's homework): it's done, with
   better grades, the helper learns a little Logic, and the hours count towards Teacher
-  Extraordinaire (whose teachers get through it twice as fast).
+   Extraordinaire (whose teachers get through it twice as fast). Grades and unfinished homework
+   survive saves; becoming a young adult clears school grades and remaining homework.
 - **Dates**: Sims ask each other on dates; for a few hours the date keeps them company
   (flirting, chatting, complimenting), and it ends a Great Date or a Bad Date (the game's
   moodlets) by how much closer they've grown and how they feel.

@@ -77,6 +77,10 @@ pub struct SavedSim {
     pub aging: Option<(f32, f32)>,
     #[serde(default)]
     pub elder_risk: Option<f64>,
+    #[serde(default)]
+    pub school_grade: Option<f32>,
+    #[serde(default)]
+    pub homework: bool,
     /// Pregnant since (game minutes), with the other parent's id and the stage shown so far.
     #[serde(default)]
     pub pregnancy: Option<(f64, Option<u64>, u8)>,
@@ -320,6 +324,8 @@ fn saved_look(sim: &Sim) -> SavedSim {
         rewards: Vec::new(),
         aging: None,
         elder_risk: None,
+        school_grade: None,
+        homework: false,
         pregnancy: None,
         shape: Some((sim.weight, sim.fitness)),
         opportunities: Vec::new(),
@@ -602,6 +608,8 @@ fn save_game(
                 Option<&crate::little::ToddlerSkills>,
                 Option<&crate::careers::Pension>,
                 Option<&crate::journal::SkillJournal>,
+                Option<&crate::rabbitholes::SchoolGrades>,
+                Has<crate::rabbitholes::Homework>,
             ),
         ),
         (Without<crate::town::Townie>, Without<crate::visit::LotGuest>, Without<crate::services::ServiceNpc>),
@@ -641,7 +649,7 @@ fn save_game(
     let Some(hh) = household else { return };
     let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).collect();
     let mut saved = Vec::new();
-    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal)) in &sims {
+    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework)) in &sims {
         // Out on a community lot: saved as back at home (the lot isn't kept).
         let (position, level) = match (out, exit.as_ref()) {
             (true, Some(x)) => ([x.0.x, world.data.heightmap.sample(x.0.x, x.0.y), x.0.y], 1),
@@ -688,6 +696,8 @@ fn save_game(
             rewards: wishes.map(|w| w.rewards.clone()).unwrap_or_default(),
             aging: aging.map(|a| (a.days, a.elder_span)),
             elder_risk: aging.and_then(|a| a.elder_risk),
+            school_grade: school.map(|g| g.0),
+            homework,
             pregnancy: pregnancy.map(|p| (p.since, p.other_parent.and_then(|o| ids.get(&o).copied()), p.stage)),
             shape: Some((sim.weight, sim.fitness)),
             opportunities: opps.map(|o| o.active.iter().filter_map(|a| Some((guid(a.index)?, a.deadline))).collect()).unwrap_or_default(),
@@ -789,6 +799,20 @@ fn resume_saved_lot(
     next.set(PlayMode::Live);
 }
 
+/// Restore school progress, including absence of homework or student status.
+fn restore_school(ec: &mut EntityCommands, saved: &SavedSim) {
+    // Explicit removal also handles a restored student whose homework was completed.
+    ec.remove::<(crate::rabbitholes::SchoolGrades, crate::rabbitholes::Homework)>();
+    if matches!(age_from_name(&saved.age), Age::Child | Age::Teen) {
+        if let Some(grade) = saved.school_grade {
+            ec.insert(crate::rabbitholes::SchoolGrades(grade.clamp(0.0, 100.0)));
+        }
+        if saved.homework {
+            ec.insert(crate::rabbitholes::Homework);
+        }
+    }
+}
+
 /// Once the household is in, restores everything the save remembers.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(crate) fn apply_loaded_game(
@@ -855,6 +879,7 @@ pub(crate) fn apply_loaded_game(
         if let Some((days, elder_span)) = s.aging {
             ec.insert(crate::aging::Aging { days, elder_span, elder_risk: s.elder_risk });
         }
+        restore_school(&mut ec, s);
         if let Some(a) = &s.author {
             ec.insert(a.clone());
         }
@@ -1024,6 +1049,42 @@ pub fn request_save(w: &mut MessageWriter<SaveRequest>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn school_progress_survives_serialization_and_restores_component_presence() {
+        use crate::rabbitholes::{Homework, SchoolGrades};
+        let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(8);
+        let sim = random_sim(&mut rng, "Student", Some(true), Age::Teen);
+        let mut saved = saved_look(&sim);
+        saved.school_grade = Some(83.0);
+        saved.homework = true;
+        let mut saved: SavedSim = serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+        let mut world = World::new();
+        let e = world.spawn_empty().id();
+        let apply = |world: &mut World, saved: &SavedSim| {
+            let mut queue = bevy::ecs::world::CommandQueue::default();
+            restore_school(&mut Commands::new(&mut queue, world).entity(e), saved);
+            queue.apply(world);
+        };
+        apply(&mut world, &saved);
+        assert_eq!(world.get::<SchoolGrades>(e).unwrap().0, 83.0);
+        assert!(world.get::<Homework>(e).is_some());
+        saved.homework = false;
+        apply(&mut world, &saved);
+        assert!(world.get::<Homework>(e).is_none());
+        assert_eq!(world.get::<SchoolGrades>(e).unwrap().0, 83.0);
+        saved.homework = true;
+        saved.age = "YoungAdult".into();
+        apply(&mut world, &saved);
+        assert!(world.get::<SchoolGrades>(e).is_none());
+        assert!(world.get::<Homework>(e).is_none());
+        let mut old = serde_json::to_value(&saved).unwrap();
+        old.as_object_mut().unwrap().remove("school_grade");
+        old.as_object_mut().unwrap().remove("homework");
+        let old: SavedSim = serde_json::from_value(old).unwrap();
+        assert_eq!(old.school_grade, None);
+        assert!(!old.homework);
+    }
 
     fn close(a: Color, b: Color) -> bool {
         let (a, b) = (a.to_srgba(), b.to_srgba());
