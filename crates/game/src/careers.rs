@@ -615,7 +615,7 @@ fn work_schedule(
                 let sk = job.career().skill;
                 let v = skills.0.entry(sk).or_insert(0.0);
                 let before = *v as u32;
-                *v = (*v + job.hours() * 0.12 * crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) / (1.0 + *v * 0.25)).min(10.0);
+                *v = (*v + job.hours() * 0.12 * crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) * mood.skill_rate() / (1.0 + *v * 0.25)).min(10.0);
                 if *v as u32 > before && member {
                     notes.push(format!("{} reached level {} in {}!", sim.first, *v as u32, sk));
                     life.write(LifeEvent::new(e, LifeEventKind::SkillUp { skill: sk, level: *v as u32 }));

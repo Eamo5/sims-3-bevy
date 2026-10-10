@@ -52,13 +52,13 @@ fn jog(
     delta: Res<SimDelta>,
     sidewalk: Option<Res<crate::town::Sidewalk>>,
     exit: Option<Res<LotExit>>,
-    mut sims: Query<(Entity, &Sim, &mut Jogging, &mut ActionQueue, Option<&PathFollow>, &mut Motives, &mut Skills, Option<&crate::journal::SkillJournal>, Option<&crate::wishes::Wishes>)>,
+    mut sims: Query<(Entity, &Sim, &mut Jogging, &mut ActionQueue, Option<&PathFollow>, &mut Motives, &mut Skills, Option<&crate::journal::SkillJournal>, Option<&crate::wishes::Wishes>, Option<&crate::life::Mood>)>,
     mut did: MessageWriter<crate::journal::Did>,
     mut life: MessageWriter<LifeEvent>,
     mut notes: ResMut<Notifications>,
 ) {
     let dt = delta.0;
-    for (e, sim, mut j, mut queue, path, mut motives, mut skills, journal, wishes) in &mut sims {
+    for (e, sim, mut j, mut queue, path, mut motives, mut skills, journal, wishes, mood) in &mut sims {
         // Off to something else (or told to stop): no longer jogging.
         if !matches!(queue.current().map(|a| &a.kind), Some(ActionKind::Jog { .. })) {
             commands.entity(e).remove::<(Jogging, PathFollow)>();
@@ -73,7 +73,7 @@ fn jog(
             }
             motives.add(HYGIENE, -30.0 * h);
             motives.add(FUN, crate::life::activity_affinity(&sim.traits, "Work Out") * 10.0 * h);
-            let rate = crate::life::skill_rate(&sim.traits, "Athletic") * crate::wishes::reward_skill_rate(wishes);
+            let rate = crate::life::skill_rate(&sim.traits, "Athletic") * crate::wishes::reward_skill_rate(wishes) * mood.map_or(1.0, |m| m.skill_rate());
             let v = skills.0.entry("Athletic").or_insert(0.0);
             let before = *v as u32;
             *v = (*v + h * 0.6 * rate / (1.0 + *v * 0.25)).min(10.0);

@@ -306,11 +306,11 @@ fn outings(
     world: Res<CurrentWorld>,
     mut notes: ResMut<Notifications>,
     mut life: MessageWriter<LifeEvent>,
-    mut q: Query<(Entity, &Sim, &AtRabbitHole, &mut Motives, &mut Skills, &mut Transform, Option<&mut SchoolGrades>, &mut crate::nav::Floor, Option<&crate::journal::SkillJournal>, Option<&crate::wishes::Wishes>)>,
+    mut q: Query<(Entity, &Sim, &AtRabbitHole, &mut Motives, &mut Skills, &mut Transform, Option<&mut SchoolGrades>, &mut crate::nav::Floor, Option<&crate::journal::SkillJournal>, Option<&crate::wishes::Wishes>, Option<&crate::life::Mood>)>,
     mut household: Option<ResMut<Household>>,
     mut did: MessageWriter<crate::journal::Did>,
 ) {
-    for (e, sim, at, mut motives, mut skills, mut tf, grades, mut floor, journal, wishes) in &mut q {
+    for (e, sim, at, mut motives, mut skills, mut tf, grades, mut floor, journal, wishes, mood) in &mut q {
         let dt = at.inside_minutes(clock.minutes, delta.0);
         if dt > 0.0 {
             // (Strength training at the gym, kept in their journal; a Body Builder isn't tired by it.)
@@ -323,7 +323,7 @@ fn outings(
             if let Some(sk) = at.activity.skill {
                 let v = skills.0.entry(sk).or_insert(0.0);
                 let before = *v as u32;
-                *v = (*v + dt / 60.0 * 0.35 * crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) / (1.0 + *v * 0.25)).min(10.0);
+                *v = (*v + dt / 60.0 * 0.35 * crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) * mood.map_or(1.0, |m| m.skill_rate()) / (1.0 + *v * 0.25)).min(10.0);
                 if *v as u32 > before {
                     notes.push(format!("{} reached level {} in {}!", sim.first, *v as u32, sk));
                     life.write(LifeEvent::new(e, LifeEventKind::SkillUp { skill: sk, level: *v as u32 }));

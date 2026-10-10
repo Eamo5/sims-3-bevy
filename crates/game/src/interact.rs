@@ -1957,6 +1957,7 @@ fn run_actions(
     let mut status_fx: Vec<(Entity, Entity, Option<RelStatus>, bool)> = Vec::new();
 
     for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, mut job, floor, (wishes, plan, moodlets, pregnancy, mut homework), opps, on_lot) in &mut sims {
+        let mood_learning = who.get(&me).map_or(1.0, |(_, mood, _, _)| mood.skill_rate());
         // Out on a community lot: its walk grid and way out.
         let away = on_lot.and_then(|o| visited.as_deref().filter(|v| v.lot == o.0));
         let (my_grid, my_upper): (&NavGrid, Option<&UpperFloors>) = match away {
@@ -2431,7 +2432,7 @@ fn run_actions(
                                     commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| crate::aging::reshape(&mut e, -0.03 * h * burn, 0.05 * h));
                                 }
                                 if let Some(sk) = d.skill {
-                                    let rate = crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes);
+                                    let rate = crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) * mood_learning;
                                     let e = skills.0.entry(sk).or_insert(0.0);
                                     let before = *e as u32;
                                     *e = (*e + dt / 60.0 * 0.6 * rate / (1.0 + *e * 0.25)).min(10.0);
@@ -2898,7 +2899,7 @@ fn run_actions(
                             let minutes = 90.0 / (1.0 + handy * 0.35);
                             let e = skills.0.entry("Handiness").or_insert(0.0);
                             let before = *e as u32;
-                            *e = (*e + dt / 60.0 * 0.5 * crate::life::skill_rate(&sim.traits, "Handiness") * crate::wishes::reward_skill_rate(wishes) / (1.0 + *e * 0.25)).min(10.0);
+                            *e = (*e + dt / 60.0 * 0.5 * crate::life::skill_rate(&sim.traits, "Handiness") * crate::wishes::reward_skill_rate(wishes) * mood_learning / (1.0 + *e * 0.25)).min(10.0);
                             if *e as u32 > before {
                                 notes.push(format!("{} reached level {} in Handiness!", sim.first, *e as u32));
                                 life.write(LifeEvent::new(me, LifeEventKind::SkillUp { skill: "Handiness", level: *e as u32 }));
@@ -2939,7 +2940,7 @@ fn run_actions(
                             let minutes = crate::upgrades::Upgrade::MINUTES / (1.0 + handy * 0.35);
                             let e = skills.0.entry("Handiness").or_insert(0.0);
                             let before = *e as u32;
-                            *e = (*e + dt / 60.0 * 0.6 * crate::life::skill_rate(&sim.traits, "Handiness") * crate::wishes::reward_skill_rate(wishes) / (1.0 + *e * 0.25)).min(10.0);
+                            *e = (*e + dt / 60.0 * 0.6 * crate::life::skill_rate(&sim.traits, "Handiness") * crate::wishes::reward_skill_rate(wishes) * mood_learning / (1.0 + *e * 0.25)).min(10.0);
                             if *e as u32 > before {
                                 notes.push(format!("{} reached level {} in Handiness!", sim.first, *e as u32));
                                 life.write(LifeEvent::new(me, LifeEventKind::SkillUp { skill: "Handiness", level: *e as u32 }));

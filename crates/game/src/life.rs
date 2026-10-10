@@ -348,6 +348,16 @@ mod trait_age_tests {
     use rand::SeedableRng;
 
     #[test]
+    fn mood_learning_rates_follow_original_negative_and_super_mood_bands() {
+        for (mood, expected) in [(-200.0, 0.25), (-100.0, 0.25), (-50.0, 0.625), (0.0, 1.0), (25.0, 1.0), (50.0, 1.0), (100.0, 1.5), (150.0, 2.0), (200.0, 2.0)] {
+            assert!((Mood(mood).skill_rate() - expected).abs() < 0.0001, "mood {mood}");
+        }
+        let reward = crate::wishes::Wishes::restored(0, vec!["FastLearner".into()], 0.0);
+        let rate = Mood(100.0).skill_rate() * crate::wishes::reward_skill_rate(Some(&reward));
+        assert!((rate - 1.725).abs() < 0.0001, "mood and lifetime learning bonuses stack");
+    }
+
+    #[test]
     fn original_trait_conflicts_are_symmetric_and_allow_unrelated_personalities() {
         use Trait::*;
         for (a, b) in [(Friendly, Evil), (Excitable, OverEmotional), (Frugal, Snob), (Neat, Kleptomaniac), (Loner, Friendly)] {
@@ -789,6 +799,16 @@ impl Moodlets {
 pub struct Mood(pub f32);
 
 impl Mood {
+    /// MoodManager's learning modifiers: -.75% per negative mood point,
+    /// +1% per point in the super-mood band (50..150).
+    pub fn skill_rate(self) -> f32 {
+        if self.0 < 0.0 {
+            1.0 + self.0.max(-100.0) * 0.0075
+        } else {
+            1.0 + (self.0.clamp(50.0, 150.0) - 50.0) * 0.01
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self.0 {
             m if m >= 60.0 => "Very Happy",

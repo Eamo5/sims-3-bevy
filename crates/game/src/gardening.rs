@@ -317,7 +317,7 @@ fn skill_gain(points: f32) -> f32 {
 #[allow(clippy::type_complexity)]
 fn garden_requests(
     mut commands: Commands,
-    mut sims: Query<(Entity, &Sim, &GardenRequest, &mut Skills, Option<&crate::wishes::Wishes>)>,
+    mut sims: Query<(Entity, &Sim, &GardenRequest, &mut Skills, Option<&crate::wishes::Wishes>, Option<&crate::life::Mood>)>,
     mut plants: Query<(&mut GrowingPlant, Option<&PlantSoil>)>,
     mut garden: ResMut<Garden>,
     ui: Option<Res<crate::icons::GameUi>>,
@@ -330,7 +330,8 @@ fn garden_requests(
 ) {
     let Some(ui) = ui else { return };
     let mut rng = rand::rng();
-    for (me, sim, req, mut skills, wishes) in &mut sims {
+    for (me, sim, req, mut skills, wishes, mood) in &mut sims {
+        let mood_rate = mood.map_or(1.0, |m| m.skill_rate());
         commands.entity(me).remove::<GardenRequest>();
         let level = skills.level("Gardening") as f32;
         match *req {
@@ -354,14 +355,14 @@ fn garden_requests(
                     *n -= 1;
                     notes.push(format!("{} planted a {}.", sim.first, info.name.to_lowercase()));
                     did.write(crate::journal::Did::kind(me, crate::journal::Kinds::PlantTypes, info.name.clone()));
-                    learn(sim, me, &mut skills, &mut notes, &mut life, info.skill_plant, wishes);
+                    learn(sim, me, &mut skills, &mut notes, &mut life, info.skill_plant * mood_rate, wishes);
                 }
             }
             GardenRequest::Water(e) => {
                 if let Ok((mut p, _)) = plants.get_mut(e) {
                     p.water = 100.0;
                     p.care = level / 10.0;
-                    learn(sim, me, &mut skills, &mut notes, &mut life, 25.0, wishes);
+                    learn(sim, me, &mut skills, &mut notes, &mut life, 25.0 * mood_rate, wishes);
                 }
             }
             GardenRequest::Weed(e) => {
@@ -369,7 +370,7 @@ fn garden_requests(
                     if !p.weedy { continue; }
                     p.weedy = false;
                     p.care = level / 10.0;
-                    learn(sim, me, &mut skills, &mut notes, &mut life, 40.0, wishes);
+                    learn(sim, me, &mut skills, &mut notes, &mut life, 40.0 * mood_rate, wishes);
                 }
             }
             GardenRequest::Harvest(e) => {
@@ -383,7 +384,7 @@ fn garden_requests(
                 // Into their inventory, to sell or eat.
                 let each = (info.price as f32 * multiplier).round() as i64;
                 crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Produce, info.produce.clone(), format!("{word} {}", info.produce), tier as u8, each, picked);
-                learn(sim, me, &mut skills, &mut notes, &mut life, info.skill_harvest, wishes);
+                learn(sim, me, &mut skills, &mut notes, &mut life, info.skill_harvest * mood_rate, wishes);
                 notes.push(format!("{} harvested {picked} {word} {} (worth §{}).", sim.first, plural(&info.produce, picked), each * picked as i64));
                 did.write(crate::journal::Did::count(me, crate::journal::Stat::Harvested, picked as f64));
                 if word == "Perfect" {
