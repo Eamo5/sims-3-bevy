@@ -456,7 +456,7 @@ fn fulfil_wishes(
         let Ok((sim, mut w, mut moodlets, rels)) = sims.get_mut(ev.sim) else { continue };
         let matches = |k: &WishKind| match (&ev.kind, k) {
             (LifeEventKind::SkillUp { skill, level }, WishKind::Skill { skill: s, level: l }) => *skill == s && level >= l,
-            (LifeEventKind::Finished { activity, .. }, WishKind::Activity(a)) => *activity == a,
+            (LifeEventKind::Finished { activity, completed: true }, WishKind::Activity(a)) => *activity == a,
             (LifeEventKind::Socialized { social, .. }, WishKind::Social(s)) => *social == s,
             (LifeEventKind::Socialized { other, .. }, WishKind::MakeFriend) => {
                 let f = rels.friendship(*other);
@@ -477,7 +477,7 @@ fn fulfil_wishes(
         for (promised, list) in [(true, &mut w.promised), (false, &mut w.offered)] {
             list.retain(|x| {
                 if matches(&x.kind) {
-                    let pts = if promised { x.points } else { x.points / 2 };
+                    let pts = if promised { x.points } else { 0 };
                     gained += pts;
                     done.push((x.text(), promised));
                     false
@@ -501,6 +501,34 @@ fn fulfil_wishes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_completed_promised_wishes_award_happiness() {
+        let mut app = App::new();
+        app.init_resource::<GameClock>().init_resource::<Notifications>()
+            .add_message::<LifeEvent>().add_systems(Update, fulfil_wishes);
+        let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(91);
+        let sim = crate::sim::random_sim(&mut rng, "Promise", Some(false), Age::Adult);
+        let e = app.world_mut().spawn((sim, Wishes {
+            offered: vec![Wish { kind: WishKind::Activity("Paint".into()), points: 250 }],
+            promised: vec![Wish { kind: WishKind::Activity("Play Chess".into()), points: 150 }],
+            ..default()
+        }, Moodlets::default(), crate::social::Relationships::default())).id();
+        app.world_mut().write_message(LifeEvent::new(e, LifeEventKind::Finished { activity: "Play Chess", completed: false }));
+        app.update();
+        assert_eq!(app.world().get::<Wishes>(e).unwrap().promised.len(), 1);
+        assert_eq!(app.world().get::<Wishes>(e).unwrap().points, 0);
+        app.world_mut().write_message(LifeEvent::new(e, LifeEventKind::Finished { activity: "Paint", completed: true }));
+        app.update();
+        assert!(app.world().get::<Wishes>(e).unwrap().offered.is_empty());
+        assert_eq!(app.world().get::<Wishes>(e).unwrap().points, 0);
+        assert!(app.world().get::<Moodlets>(e).unwrap().0.is_empty(), "unpromised offers do not grant the fulfilled-wish moodlet");
+        app.world_mut().write_message(LifeEvent::new(e, LifeEventKind::Finished { activity: "Play Chess", completed: true }));
+        app.update();
+        assert!(app.world().get::<Wishes>(e).unwrap().promised.is_empty());
+        assert_eq!(app.world().get::<Wishes>(e).unwrap().points, 150);
+        assert!(app.world().get::<Moodlets>(e).unwrap().0.iter().any(|m| m.kind == MoodletKind::WishFulfilled));
+    }
 
     #[test]
     fn deserialized_promised_wishes_still_fulfil_once() {
