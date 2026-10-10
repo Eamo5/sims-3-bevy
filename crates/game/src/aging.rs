@@ -53,6 +53,21 @@ mod lifespan_tests {
     use rand::SeedableRng;
 
     #[test]
+    fn fractional_aging_reaches_birthdays_without_an_extra_day() {
+        use crate::options::Lifespan;
+        for (preset, teen_days) in [(Lifespan::Short, 4), (Lifespan::Medium, 8), (Lifespan::Normal, 14), (Lifespan::Long, 30), (Lifespan::Epic, 150)] {
+            let factor = preset.factor();
+            let mut lived = 0.0;
+            for day in 0..=teen_days {
+                assert_eq!(remaining_days(stage_days(Age::Teen), lived, factor), teen_days - day, "{preset:?}, day {day}");
+                lived += 1.0 / factor;
+            }
+        }
+        assert_eq!(remaining_days(14.0, 13.5, 1.0), 1, "a real fractional day must not be rounded down");
+        assert_eq!(remaining_days(14.0, 16.0, 1.0), 0);
+    }
+
+    #[test]
     fn elder_survival_respects_minimum_preset_changes_and_persisted_risk() {
         use crate::options::Lifespan;
         let mut age = Aging { days: 16.0, elder_span: 17.0, elder_risk: Some(0.8) };
@@ -93,6 +108,13 @@ mod lifespan_tests {
         let at_minimum = spans.iter().filter(|s| **s == 17.0).count() as f32 / spans.len() as f32;
         assert!((at_minimum - 0.14).abs() < 0.015, "minimum-age mortality {at_minimum}");
     }
+}
+
+/// Whole simulation days remaining. Aging stores normal-lifespan days as f32;
+/// repeated fractional increments can drift just below a birthday boundary.
+/// Ignore less than 0.001 simulation days (under two minutes) of numeric drift.
+pub fn remaining_days(span: f32, lived: f32, factor: f32) -> u32 {
+    (((span as f64 - lived as f64) * factor as f64 - 0.001).max(0.0).ceil()) as u32
 }
 
 /// Days in each life stage (the game's normal lifespan).
@@ -230,8 +252,9 @@ fn daily_aging(
             continue;
         }
         survivors.push(e);
-        if aging.days < stage_days(sim.age) {
-            if aging.days + per_day >= stage_days(sim.age) {
+        let remaining = remaining_days(stage_days(sim.age), aging.days, settings.lifespan.factor());
+        if remaining > 0 {
+            if remaining == 1 {
                 notes.push(format!("{} will be {} tomorrow!", sim.first, age_word(next_age(sim.age).unwrap_or(sim.age))));
             }
             continue;

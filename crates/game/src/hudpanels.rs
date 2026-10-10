@@ -59,7 +59,7 @@ fn age_tooltip(age: Age, span: f32, lived: f32, settings: &crate::options::Setti
     }
     match crate::aging::next_age(age) {
         Some(next) if span.is_finite() => {
-            let left = ((span - lived).max(0.0) * settings.lifespan.factor()).ceil() as u32;
+            let left = crate::aging::remaining_days(span, lived, settings.lifespan.factor());
             format!("{left} day{} until {}", if left == 1 { "" } else { "s" }, age_name(next))
         }
         _ => "Elder — the age bar does not predict the end of a Sim's life.".into(),
