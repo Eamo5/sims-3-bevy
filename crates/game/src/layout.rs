@@ -804,6 +804,13 @@ pub struct UiSlider {
     grab: bool,
 }
 
+impl UiSlider {
+    /// Being dragged by its plumbob.
+    pub fn is_grabbed(&self) -> bool {
+        self.grab
+    }
+}
+
 fn sliders(
     mut q: Query<(&mut UiSlider, Option<&Interaction>, &ComputedNode, &bevy::ui::UiGlobalTransform, &InheritedVisibility)>,
     mouse: Res<ButtonInput<MouseButton>>,

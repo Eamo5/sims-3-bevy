@@ -142,6 +142,9 @@ pub enum CasAction {
     /// New traits, or new favourites, at random (the character panel's dice).
     RandomTraits,
     RandomFavorites,
+    /// A face slider (of `gamedata::FACE_SLIDERS`) set to a value (-1 to 1), from the game's
+    /// face panels.
+    SetFaceSlider(u8, f32),
 }
 
 /// The face sliders by part of the face, as Create a Sim groups them: each slider's pair (in
@@ -205,7 +208,7 @@ pub(crate) struct CasScene {
     /// Create a Style open.
     styling: bool,
     /// The part of the face being sculpted (`FACE_AREAS`).
-    face_area: u8,
+    pub(crate) face_area: u8,
 }
 
 #[derive(Component)]
@@ -728,6 +731,14 @@ fn cas_actions(
                 }
                 s.face = f;
             }
+            CasAction::SetFaceSlider(i, v) => {
+                let s = &mut pending.members[k];
+                let mut f = crate::simbody::face_sliders(s);
+                if let Some(x) = f.get_mut(i as usize) {
+                    *x = v.clamp(-1.0, 1.0);
+                }
+                s.face = f;
+            }
             CasAction::RandomFace => {
                 let s = &mut pending.members[k];
                 s.face = (0..s3bake::gamedata::FACE_SLIDERS.len()).map(|_| rand::Rng::random_range(&mut rng, -1.0f32..1.0)).collect();
@@ -1019,7 +1030,8 @@ fn rebuild_ui(
             button(p, done, CasAction::Done, Val::Percent(100.0), false, 22.0);
         });
         }
-        // Name plate (bottom centre; above the game's puck where it's up)
+        // Name plate (bottom centre; none in the game's own frame, whose Basics name the Sim)
+        if !game_frame {
         r.spawn((
             Node {
                 position_type: PositionType::Absolute,
@@ -1042,6 +1054,7 @@ fn rebuild_ui(
             ));
             n.spawn(text("Drag or use Q / E to turn", 12.0, Color::srgba(1.0, 1.0, 1.0, 0.6)));
         });
+        }
         // The town's families (right, while browsing)
         if scene.browsing && let Some(fam) = scene.families.clone() {
             r.spawn((panel_node(None, Some(16.0), 440.0), panel_bg)).with_children(|p| {

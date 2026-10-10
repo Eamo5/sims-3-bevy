@@ -3313,6 +3313,9 @@ fn ui_flow(
         (58, AppState::CreateHousehold, _) if since > 1.0 => {
             if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::EyeColor(3))) {
                 *i = Interaction::Pressed;
+            } else {
+                // (The game's face panels: the eyes, as their colour swatches ask.)
+                ask_cas(&mut commands, &[crate::home::CasAction::FaceArea(1), crate::home::CasAction::EyeColor(3)]);
             }
             *stage = (62, now);
         }
@@ -3329,6 +3332,8 @@ fn ui_flow(
             };
             if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| **a == want) {
                 *i = Interaction::Pressed;
+            } else {
+                ask_cas(&mut commands, &[want]);
             }
             *stage = (stage.0 + 1, now);
         }
