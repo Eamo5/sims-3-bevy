@@ -408,16 +408,19 @@ pub struct SavedMeal {
     pub servings: u8,
     pub position: [f32; 3],
     pub yaw: f32,
+    /// Absolute Sim time, so loading does not refresh food left out.
+    #[serde(default)]
+    pub served_at: Option<f64>,
 }
 
 #[derive(Resource)]
 pub struct PendingMeals(pub Vec<SavedMeal>);
 
-pub fn saved_meals(meals: &Query<(&Meal, Option<&Dish>, &GameObject, &Transform)>, data: &s3bake::GameDataBaked) -> Vec<SavedMeal> {
-    meals.iter().filter_map(|(meal, dish, object, tf)| {
+pub fn saved_meals(meals: &Query<(&Meal, Option<&Dish>, &GameObject, &Transform, Option<&crate::surroundings::ServedAt>)>, data: &s3bake::GameDataBaked) -> Vec<SavedMeal> {
+    meals.iter().filter_map(|(meal, dish, object, tf, served)| {
         let recipe = dish.and_then(|d| data.recipes.get(d.0));
         (meal.servings > 0).then(|| SavedMeal { recipe: recipe.map_or_else(String::new, |r| r.key.clone()), object: Some(object.objd), name: object.name.clone(), servings: meal.servings,
-            position: tf.translation.to_array(), yaw: tf.rotation.to_euler(EulerRot::YXZ).0 })
+            position: tf.translation.to_array(), yaw: tf.rotation.to_euler(EulerRot::YXZ).0, served_at: served.map(|s| s.0) })
     }).collect()
 }
 
@@ -447,6 +450,9 @@ fn restore_meals(
             commands.entity(plate).insert(Dish(i));
         }
         commands.entity(plate).insert(Meal { servings: saved.servings });
+        if let Some(at) = saved.served_at.filter(|at| at.is_finite()) {
+            commands.entity(plate).insert(crate::surroundings::ServedAt(at));
+        }
         let name = if saved.name.is_empty() { recipe.map_or_else(|| "Group Meal".into(), |(_, r)| r.name.clone()) } else { saved.name.clone() };
         commands.entity(plate).queue_silenced(move |mut e: EntityWorldMut| {
             if let Some(mut object) = e.get_mut::<GameObject>() { object.name = name; object.kind = ObjectKind::Meal; }
@@ -1116,23 +1122,26 @@ mod tests {
         let mut world = World::new();
         let object = |name: &str, key| GameObject { kind: ObjectKind::Meal, name: name.into(), objd: key, price: 0,
             center: Vec2::ZERO, half: Vec2::splat(0.3), height: 0.1, route: None };
-        world.spawn((Meal { servings: 4 }, Dish(0), object("Pancakes", (1, 2, 3)), Transform::from_xyz(1.0, 3.75, 2.0).with_rotation(Quat::from_rotation_y(0.5))));
+        world.spawn((Meal { servings: 4 }, Dish(0), object("Pancakes", (1, 2, 3)), Transform::from_xyz(1.0, 3.75, 2.0).with_rotation(Quat::from_rotation_y(0.5)), crate::surroundings::ServedAt(1234.567)));
         world.spawn((Meal { servings: 0 }, Dish(0), object("Empty", (1, 2, 3)), Transform::default()));
         world.spawn((Meal { servings: 3 }, object("Pizza", (4, 5, 6)), Transform::default()));
-        let mut state = bevy::ecs::system::SystemState::<Query<(&Meal, Option<&Dish>, &GameObject, &Transform)>>::new(&mut world);
+        let mut state = bevy::ecs::system::SystemState::<Query<(&Meal, Option<&Dish>, &GameObject, &Transform, Option<&crate::surroundings::ServedAt>)>>::new(&mut world);
         let saved = saved_meals(&state.get(&world).unwrap(), &data);
         let restored: Vec<SavedMeal> = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
         assert_eq!(restored.len(), 2, "empty platters must not restore edible meals");
         let pancakes = restored.iter().find(|m| m.recipe == "Pancakes").unwrap();
         assert_eq!(pancakes.servings, 4);
+        assert_eq!(pancakes.served_at, Some(1234.567));
         assert_eq!(pancakes.position, [1.0, 3.75, 2.0]);
         assert!((pancakes.yaw - 0.5).abs() < 0.0001);
         let pizza = restored.iter().find(|m| m.name == "Pizza").unwrap();
         assert_eq!(pizza.object, Some((4, 5, 6)));
         assert_eq!(pizza.servings, 3);
+        assert_eq!(pizza.served_at, None);
         assert!(pizza.recipe.is_empty());
         let old: SavedMeal = serde_json::from_str(r#"{"recipe":"Pancakes","servings":4,"position":[1,2,3],"yaw":0}"#).unwrap();
         assert!(old.object.is_none() && old.name.is_empty(), "older meal saves retain their default serving platter");
+        assert_eq!(old.served_at, None);
     }
 
     #[test]
