@@ -31,7 +31,7 @@ impl Plugin for SavePlugin {
             .add_systems(OnEnter(crate::AppState::Loading), |mut pending: ResMut<PendingBroken>| { *pending = PendingBroken::default(); })
             .add_systems(Update, restore_broken.after(apply_loaded_game).run_if(in_state(PlayMode::Live)))
             .add_systems(Update, resume_saved_lot.run_if(in_state(PlayMode::ChooseLot)))
-            .add_systems(Update, (apply_loaded_game, save_game.after(crate::buyhistory::update)).run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (apply_loaded_game.after(crate::clock::advance_clock), save_game.after(crate::buyhistory::update)).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -892,6 +892,7 @@ pub(crate) fn apply_loaded_game(
     mut commands: Commands,
     pending: Option<Res<PendingLoad>>,
     mut clock: ResMut<GameClock>,
+    mut delta: ResMut<crate::clock::SimDelta>,
     mut household: Option<ResMut<Household>>,
     mut removed: ResMut<RemovedLotObjects>,
     mut sims: Query<
@@ -911,6 +912,9 @@ pub(crate) fn apply_loaded_game(
     }
     let game = &p.0;
     clock.minutes = game.minutes;
+    // The clock was replaced, so this frame's pre-load elapsed time must not
+    // advance restored temperature, recovery timers, or other simulation state.
+    delta.0 = 0.0;
     commands.insert_resource(PendingBroken(game.broken_objects.clone(), None));
     // A restored date is not a midnight tick, even when loading within a session.
     commands.insert_resource(crate::aging::AgingDay::default());

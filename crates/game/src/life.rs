@@ -16,7 +16,7 @@ impl Plugin for LifePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<LifeEvent>().add_systems(
             Update,
-            (need_moodlets, need_failures, life_events, expire_and_sum).chain().run_if(in_state(PlayMode::Live)),
+            (need_moodlets, need_failures, life_events, expire_and_sum.after(crate::weather::sim_temperatures)).chain().run_if(in_state(PlayMode::Live)),
         );
     }
 }
@@ -1004,10 +1004,20 @@ fn life_events(
     }
 }
 
-fn expire_and_sum(clock: Res<GameClock>, delta: Res<SimDelta>, mut q: Query<(&mut Moodlets, &mut Mood, Option<&crate::wishes::Wishes>)>) {
-    let _ = delta;
-    for (mut ml, mut mood, wishes) in &mut q {
+fn expire_and_sum(clock: Res<GameClock>, delta: Res<SimDelta>, mut q: Query<(&mut Moodlets, &mut Mood, Option<&crate::wishes::Wishes>, Option<&crate::weather::BodyTemperature>)>) {
+    for (mut ml, mut mood, wishes, temperature) in &mut q {
         let now = clock.minutes;
+        if let Some(t) = temperature {
+            // SimTemperature: pause below the -60 unpause threshold; above -1,
+            // subtract another 60 minutes per hour on top of normal expiration.
+            if let Some(m) = ml.0.iter_mut().find(|m| m.kind == MoodletKind::Frostbitten) {
+                if t.value <= -60.0 {
+                    m.until += delta.0.max(0.0) as f64;
+                } else if t.value > -1.0 {
+                    m.until -= delta.0.max(0.0) as f64;
+                }
+            }
+        }
         if ml.0.iter().any(|m| m.until <= now) {
             ml.0.retain(|m| m.until > now);
         }
@@ -1018,6 +1028,48 @@ fn expire_and_sum(clock: Res<GameClock>, delta: Res<SimDelta>, mut q: Query<(&mu
         if (mood.0 - v).abs() > 0.01 {
             mood.0 = v;
         }
+    }
+}
+
+#[cfg(test)]
+mod temperature_moodlet_tests {
+    use super::*;
+
+    #[test]
+    fn frostbite_timer_pauses_in_cold_and_recovers_faster_when_warm() {
+        let mut app = App::new();
+        app.init_resource::<GameClock>()
+            .insert_resource(SimDelta(30.0))
+            .add_systems(Update, expire_and_sum);
+        let start = app.world().resource::<GameClock>().minutes;
+        let mut ml = Moodlets::default();
+        ml.add(MoodletKind::Frostbitten, start);
+        let e = app.world_mut().spawn((ml, Mood::default(), crate::weather::BodyTemperature { value: -60.0, in_rain: 0.0 })).id();
+        // Four hours of cold must not consume any of the three-hour recovery timer.
+        for _ in 0..8 {
+            app.world_mut().resource_mut::<GameClock>().minutes += 30.0;
+            app.update();
+        }
+        let remaining = |app: &App| app.world().get::<Moodlets>(e).unwrap().0[0].until - app.world().resource::<GameClock>().minutes;
+        assert_eq!(remaining(&app), 180.0);
+        // At exactly -1 normal recovery applies.
+        app.world_mut().get_mut::<crate::weather::BodyTemperature>(e).unwrap().value = -1.0;
+        app.world_mut().resource_mut::<GameClock>().minutes += 30.0;
+        app.update();
+        assert_eq!(remaining(&app), 150.0);
+        app.world_mut().get_mut::<crate::weather::BodyTemperature>(e).unwrap().value = 0.0;
+        app.world_mut().resource_mut::<SimDelta>().0 = 0.0;
+        app.update();
+        assert_eq!(remaining(&app), 150.0, "paused simulation must not recover frostbite");
+        app.world_mut().resource_mut::<SimDelta>().0 = 30.0;
+        for expected in [90.0, 30.0] {
+            app.world_mut().resource_mut::<GameClock>().minutes += 30.0;
+            app.update();
+            assert_eq!(remaining(&app), expected);
+        }
+        app.world_mut().resource_mut::<GameClock>().minutes += 30.0;
+        app.update();
+        assert!(!app.world().get::<Moodlets>(e).unwrap().has(MoodletKind::Frostbitten));
     }
 }
 

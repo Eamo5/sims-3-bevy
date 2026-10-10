@@ -22,7 +22,7 @@ impl Plugin for WeatherPlugin {
         app.init_resource::<Weather>()
             .add_message::<Thunder>()
             .add_plugins(crate::weather_fx::WeatherFxPlugin)
-            .add_systems(Update, (simulate, sim_temperatures).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (simulate, sim_temperatures).chain().after(crate::clock::advance_clock).after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -304,7 +304,7 @@ fn temperature_step(value: f32, world: f32, outdoors: bool, outfit: crate::simbo
 /// Chilly from -31, Getting Warm from 30, Sweating Profusely from 71, Frostbitten at -95); and
 /// out in the rain long enough they're Soaked.
 #[allow(clippy::type_complexity)]
-fn sim_temperatures(
+pub(crate) fn sim_temperatures(
     mut commands: Commands,
     delta: Res<crate::clock::SimDelta>,
     clock: Res<GameClock>,

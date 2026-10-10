@@ -103,7 +103,7 @@ fn speed_keys(keys: Res<ButtonInput<KeyCode>>, mut clock: ResMut<GameClock>, buy
     }
 }
 
-fn advance_clock(time: Res<Time>, mut clock: ResMut<GameClock>, mut delta: ResMut<SimDelta>, modal: Query<(), With<crate::dialog::Modal>>, buy: Res<crate::buy::BuyMode>, menu: Res<crate::options::GameMenu>) {
+pub(crate) fn advance_clock(time: Res<Time>, mut clock: ResMut<GameClock>, mut delta: ResMut<SimDelta>, modal: Query<(), With<crate::dialog::Modal>>, buy: Res<crate::buy::BuyMode>, menu: Res<crate::options::GameMenu>) {
     // Normal speed: one game minute per real second, like the original (and the game stands
     // still while a question's waiting for an answer).
     let rate = if modal.is_empty() && !buy.active && !menu.is_open() { SPEED_RATES[clock.speed] } else { 0.0 };
