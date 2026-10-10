@@ -429,7 +429,7 @@ fn refresh(
                 commands.entity(r).insert(crate::layout::Selected);
             }
             let town = m.towns.iter().find(|t| t.name.eq_ignore_ascii_case(&game.world)).and_then(|t| t.picture.clone());
-            picture(commands, c.id(ITEM_THUMB), save_thumbnail(images, &m.saves[k].0).or(town));
+            picture(commands, c.id(ITEM_THUMB), save_thumbnail(images, &m.saves[k].0, "png").or(town));
             set_hidden(commands, c.id(ITEM_NAME));
             if let Some(e) = c.id(TOWN_BASE) {
                 commands.entity(e).insert(Visibility::Inherited);
@@ -447,7 +447,7 @@ fn refresh(
         let mins = g.minutes.rem_euclid(1440.0);
         set_text(texts, m.s.text(SAVED_TIME), &crate::interact::hour_label((mins / 60.0) as f32));
         let town = m.towns.iter().find(|t| t.name.eq_ignore_ascii_case(&g.world)).and_then(|t| t.picture.clone());
-        picture(commands, m.s.id(SAVED_THUMB), save_thumbnail(images, path).or(town));
+        picture(commands, m.s.id(SAVED_THUMB), save_thumbnail(images, path, "family.png").or(town));
     }
     // A new game: the town chosen, its picture and description; its list.
     let (thumb, desc) = if has_saves { (SAVED_NEW_THUMB, SAVED_NEW_DESC) } else { (NEW_ONLY_THUMB, NEW_ONLY_DESC) };
@@ -518,9 +518,10 @@ fn set_caption(commands: &mut Commands, ui: &mut UiAssets, fonts: &mut Assets<Fo
     captions.push((b, t));
 }
 
-/// A save's own picture, if one was taken when it was saved (`<save>.png`).
-fn save_thumbnail(images: &mut Assets<Image>, save: &std::path::Path) -> Option<Handle<Image>> {
-    picture_file(images, &save.with_extension("png"))
+/// A save's own picture, if one was taken when it was saved (`<save>.png` its lot,
+/// `<save>.family.png` its family: see `savepics`).
+fn save_thumbnail(images: &mut Assets<Image>, save: &std::path::Path, ext: &str) -> Option<Handle<Image>> {
+    picture_file(images, &save.with_extension(ext))
 }
 
 /// A PNG on disk as a picture.

@@ -655,7 +655,9 @@ installation is unreachable.
 - **The game's own main menu**: the game's `GameEntryMainMenu` over its picture of town (cropped
   to cover any screen shape), with the logo. With saved games: the saves along a strip in
   the game's frames (arrows and the wheel to scroll), the newest chosen; the chosen save's
-  name, household, game time and date; Play Now. New Game (or no saves yet): the town from
+  name, household, game time and date; Play Now. Each save keeps its own pictures, taken as
+  it's saved (the lot as the player was looking at it, and the family's faces side by side),
+  shown on the strip, beside the save and on its loading screen. New Game (or no saves yet): the town from
   the game's drop-down list of the home towns installed (the newest pack's chosen first, as
   the game does), each with its own picture and description read from its world file; Play
   Now. The round button opens the game's popup menu: Options and Quit. A newer interface
