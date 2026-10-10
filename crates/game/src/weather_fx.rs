@@ -155,7 +155,7 @@ fn verify_shelter(image: &Image, b: &crate::building::ActiveBuilding, params: Pr
         }
     }
     assert!(indoors > 0 && outdoors > 0);
-    info!("precipitation shelter PASS: {indoors} indoor and {outdoors} outdoor triangles, rotated lot coordinates checked");
+    info!("precipitation shelter PASS: {indoors} indoor and {outdoors} outdoor triangles, rotated lot coordinates checked; home={}, visited={:?}", b.lot, b.away.as_ref().map(|a| a.lot));
 }
 
 fn drop_mesh() -> Mesh {
@@ -192,7 +192,7 @@ fn precipitation(
     mut mats: ResMut<Assets<PrecipMaterial>>,
     mut images: ResMut<Assets<Image>>,
     building: Option<Res<crate::building::ActiveBuilding>>,
-    mut verified: Local<bool>,
+    mut verified: Local<Option<(usize, Option<usize>)>>,
 ) {
     let (Some(clock), Some(w)) = (clock, weather) else { return };
     let Ok((p, mut vis)) = fx.single_mut() else {
@@ -224,13 +224,14 @@ fn precipitation(
             m.extension.precip.away_to_local = away;
             m.extension.precip.shelter_size = sizes;
         }
-        if !*verified && std::env::var_os("PRECIP_SHELTER_TEST").is_some()
+        if std::env::var_os("PRECIP_SHELTER_TEST").is_some()
             && let Some(b) = building.as_deref()
+            && *verified != Some((b.lot, b.away.as_ref().map(|a| a.lot)))
             && let Some(image) = images.get(&m.extension.shelter)
             && !b.data.floors.is_empty()
         {
             verify_shelter(image, b, m.extension.precip);
-            *verified = true;
+            *verified = Some((b.lot, b.away.as_ref().map(|a| a.lot)));
         }
     }
     let falling = w.falling(clock.minutes);
