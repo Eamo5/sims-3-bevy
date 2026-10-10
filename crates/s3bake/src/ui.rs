@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackWriter, read_value, write_value};
 
-pub const UI_VERSION: u32 = 10;
+pub const UI_VERSION: u32 = 11;
 pub const T_LAYOUT: u32 = 0x025C95B6;
 pub const T_FONT: u32 = 0x062E9EE0;
 pub const T_IMAGE: u32 = 0x2F7D0004;
@@ -212,6 +212,37 @@ pub const NAMED_IMAGES: &[&str] = &[
     "cas_basics_i_age_yadult_r2",
     "cas_basics_i_age_adult_r2",
     "cas_basics_i_age_elderly_r2",
+    // The relationships panel's states (`GetLTRRelationshipImageKey`), the empty opportunity
+    // slots (`mPlaceholderOppIcons`), the catalogue's All tab.
+    "relationships_state_stranger",
+    "relationships_state_aquaintance",
+    "relationships_state_disliked",
+    "relationships_state_friend_distant",
+    "relationships_state_friend",
+    "relationships_state_friend_good",
+    "relationships_state_friend_best",
+    "relationships_state_friend_old",
+    "relationships_state_friend_bff",
+    "relationships_state_date",
+    "relationships_state_ex_spouse",
+    "relationships_state_ex_romance",
+    "relationships_state_enemy",
+    "relationships_state_enemy_old",
+    "relationships_state_partners",
+    "relationships_state_fiancee",
+    "relationships_state_spouse",
+    "relationships_state_stranger_pet",
+    "relationships_state_aquaintance_pet",
+    "relationships_state_friend_pet",
+    "relationships_state_friend_best_pet",
+    "relationships_state_friend_bff_pet",
+    "relationships_state_disliked_pet",
+    "relationships_state_enemy_pet",
+    "relationships_state_mate_pet",
+    "opp_generic_career",
+    "opp_generic_skill",
+    "opp_generic",
+    "glb_i_all_r2",
 ];
 
 /// The zodiac signs (`sign_<sign>_sm`).

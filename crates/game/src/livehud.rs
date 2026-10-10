@@ -194,9 +194,14 @@ fn spawn_live_hud(
     if let Some(r) = nav.root {
         commands.entity(r).insert(Visibility::Inherited);
     }
-    // (The tabs with windows of their own work their existing buttons.)
+    // (The tabs with windows of their own work their existing buttons, unless the game's own
+    // panels for them are here: see `infopanels`.)
+    let own_panels = ["HUDRelationshipsPanel", "HUDOpportunitiesPanel", "HUDRewardTraitsPanel"].iter().all(|n| ui.layout(n).is_some());
     for (i, t) in InfoPanel::TABS.iter().enumerate() {
         let Some(e) = nav.id(NAV_TAB + 1 + i as u32) else { continue };
+        if own_panels {
+            break;
+        }
         match t {
             InfoPanel::Relationships => {
                 commands.entity(e).insert(crate::relations::RelationsButton);
@@ -707,7 +712,7 @@ fn navigation(
         if pressed(&clicks, hud.nav.id(NAV_TAB + 1 + i as u32)) {
             // (Relationships, opportunities and the rewards open their own windows, through
             // the buttons' marker components.)
-            let own_window = matches!(t, InfoPanel::Relationships | InfoPanel::Opportunities | InfoPanel::RewardTraits);
+            let own_window = matches!(t, InfoPanel::Relationships | InfoPanel::Opportunities | InfoPanel::RewardTraits) && !crate::infopanels::GAME_PANELS.load(std::sync::atomic::Ordering::Relaxed);
             *panel = if *panel == *t || own_window { InfoPanel::None } else { *t };
         }
     }

@@ -675,9 +675,15 @@ installation is unreachable.
   performance meter up or down from the middle; school and its grade for children and teens;
   at work, its button chooses how they work); Inventory (the stacks in the game's cells with
   their pictures and counts, each clicked for its menu: sell one or all, eat, hang, place;
-  the cell phone opens the phone, the green book the collection journal). Relationships,
-  Opportunities and the lifetime rewards open their windows. Buttons light up, press and grey
-  out with the game's own pictures. The Sim's own menu has their phone too.
+  the cell phone opens the phone, the green book the collection journal); Relationships (a
+  card for everyone the Sim knows: their portrait, the relationship bar out from the middle,
+  the state's icon from stranger to spouse, a relative's, co-worker's or visitor's mark; the
+  last one talked to first; all, family, friends, co-workers or visitors; sideways with the
+  wheel, a click takes the camera to them); Opportunities (the career, skill and special
+  slots with their icons or the game's empty-slot pictures and words, the chosen one's task,
+  time left and description; a right click cancels one); Lifetime Rewards (the happiness to
+  spend, the rewards bought with their icons and meanings, and the button to buy more).
+  Buttons light up, press and grey out with the game's own pictures. The Sim's own menu has their phone too.
 - **The game's own Buy Mode catalogue**: its function categories and subcategories, and its
   room pictures with clickable furniture groups, from `BuyCatalog` and each object's OBJD
   flags. The original catalogue cells expand upwards, scroll with the wheel, and use the

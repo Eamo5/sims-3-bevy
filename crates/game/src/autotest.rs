@@ -197,6 +197,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, strand_swimmers.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, press_key.after(bevy::input::InputSystems).before(crate::buy::toggle_buy).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, buy_pick.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, know_people.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, ui_click.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, ui_right_click.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, pointer_script.after(bevy::input::InputSystems).before(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
@@ -519,6 +520,29 @@ fn auto_pick_world(
     } else {
         warn!("--world {name}: no such world");
     }
+}
+
+/// KNOW=<n>: after a few seconds the selected Sim knows n of the Sims about, from enemies to a
+/// spouse (to see the relationships panel full).
+fn know_people(time: Res<Time>, mut sel: Query<(Entity, &mut crate::sim::Relationships), With<crate::sim::Selected>>, others: Query<Entity, (With<crate::sim::Sim>, Without<crate::sim::Selected>)>, mut done: Local<bool>) {
+    let Some(n) = std::env::var("KNOW").ok().and_then(|v| v.parse::<usize>().ok()) else { return };
+    if *done || time.elapsed_secs() < 6.0 {
+        return;
+    }
+    let Ok((me, mut rels)) = sel.single_mut() else { return };
+    let mut people: Vec<Entity> = others.iter().filter(|e| *e != me).collect();
+    people.sort();
+    let k = people.len().min(n).max(1);
+    for (i, e) in people.into_iter().take(n).enumerate() {
+        let r = rels.entry(e);
+        r.friendship = -80.0 + 175.0 * i as f32 / (k - 1).max(1) as f32;
+        if i + 1 == k {
+            r.romance = 80.0;
+            r.status = crate::social::RelStatus::Married;
+        }
+    }
+    info!("autotest: the selected Sim knows {k}");
+    *done = true;
 }
 
 /// BUY_PICK=<n>@<seconds>: the n-th object of buy mode's catalogue (along the rows) clicked then.

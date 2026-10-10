@@ -57,6 +57,10 @@ fn toggle_panel(
     mut panel: ResMut<RelationsPanel>,
     buy: Res<crate::buy::BuyMode>,
 ) {
+    // (The game's own panel is up instead: see `infopanels`.)
+    if crate::infopanels::GAME_PANELS.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
     let pressed = buttons.iter().any(|i| *i == Interaction::Pressed) || keys.just_pressed(KeyCode::KeyR) && !buy.active;
     if pressed {
         panel.open = !panel.open;

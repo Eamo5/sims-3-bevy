@@ -28,6 +28,8 @@ impl Plugin for LayoutPlugin {
 #[derive(Resource)]
 pub struct UiAssets {
     data: Arc<UiBaked>,
+    /// The game's English text by key (`LocalizeString`).
+    strings: Arc<HashMap<u64, String>>,
     by_id: HashMap<u64, usize>,
     styles: HashMap<u32, TextStyle>,
     pack: s3bake::PackReader,
@@ -45,7 +47,9 @@ fn open(fonts: &mut Assets<Font>) -> Option<UiAssets> {
     let pack = s3bake::PackReader::open(&root.global_dir().join("ui.pack")).ok()?;
     let by_id = data.layouts.iter().enumerate().map(|(i, l)| (l.0, i)).collect();
     let styles: HashMap<u32, TextStyle> = data.styles.iter().cloned().collect();
-    let ui = UiAssets { data: Arc::new(data), by_id, styles, pack, images: HashMap::new(), fonts: HashMap::new() };
+    // (The game's text, for the words its code looks up by key.)
+    let strings: HashMap<u64, String> = s3bake::read_value(&root.global_dir().join("strings.bin")).unwrap_or_default();
+    let ui = UiAssets { data: Arc::new(data), by_id, styles, pack, images: HashMap::new(), fonts: HashMap::new(), strings: Arc::new(strings) };
     if let Some(bytes) = ui.styles.get(&0).and_then(|s| ui.pack.get::<Vec<u8>>(&(s3bake::ui::T_FONT, 0, s.font))) {
         let _ = fonts.insert(&Handle::<Font>::default(), Font::from_bytes(bytes));
     }
@@ -331,6 +335,11 @@ impl UiAssets {
     /// A window by control id anywhere in a layout (any of its exports).
     pub fn find(&self, name: &str, id: u32) -> Option<&UiWindow> {
         self.by_id.get(&s3pkg::fnv64(name)).and_then(|&i| self.data.layouts[i].1.iter().find_map(|w| w.1.find(id)))
+    }
+
+    /// The game's words for a text key (`Ui/Caption/...:Name`).
+    pub fn localize(&self, key: &str) -> Option<String> {
+        self.strings.get(&s3pkg::fnv64(key)).cloned()
     }
 
     /// Everything baked from the interface (buy mode's catalogue, each object's place in it).

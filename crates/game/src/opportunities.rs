@@ -123,7 +123,7 @@ pub fn lot_types(world: &crate::loading::WorldInfo, lot: usize) -> Vec<&'static 
 }
 
 /// Fills in an opportunity text's placeholders.
-fn fill(s: &str, o: &OpportunityInfo, place: &str) -> String {
+pub(crate) fn fill(s: &str, o: &OpportunityInfo, place: &str) -> String {
     s.replace("{10.Money}", &format!("§{}", o.money)).replace("{9.Number}", &o.skill_min.max(1).to_string()).replace("{RabbitHoleName}", if place.is_empty() { "the venue" } else { place })
 }
 
@@ -406,6 +406,10 @@ fn toggle_panel(
     keys: Res<ButtonInput<KeyCode>>,
     mut board: ResMut<OpportunityBoard>,
 ) {
+    // (The game's own panel is up instead: see `infopanels`.)
+    if crate::infopanels::GAME_PANELS.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
     if buttons.iter().any(|i| *i == Interaction::Pressed) || keys.just_pressed(KeyCode::KeyO) {
         board.panel_open = !board.panel_open;
         board.shown.clear();
