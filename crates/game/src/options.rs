@@ -65,6 +65,17 @@ impl Lifespan {
             Lifespan::Epic => 75.0 / 7.0,
         }
     }
+
+    /// AgingManager's daily elder mortality after the minimum elder stage.
+    pub fn elder_mortality(self) -> f64 {
+        match self {
+            Self::Short => 0.30,
+            Self::Medium => 0.20,
+            Self::Normal => 0.14,
+            Self::Long => 0.06,
+            Self::Epic => 0.03,
+        }
+    }
 }
 
 #[cfg(test)]

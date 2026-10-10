@@ -717,7 +717,9 @@ installation is unreachable.
   file of its own, never over another), change household, main menu, quit); the options set
   master, music, effects, voice and ambient levels, aging and life span (Short, Medium,
   Normal, Long and Epic, using the original stage-length scaling), free
-  will, shadows and the frame-rate counter, kept in `settings.json`.
+  will, and the original per-preset elder mortality rates (reduced for Marathon Runners,
+  with survival progress retained across saves). Other controls include
+  shadows and the frame-rate counter, kept in `settings.json`.
 
 ## Parity status
 

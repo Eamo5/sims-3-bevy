@@ -75,6 +75,8 @@ pub struct SavedSim {
     /// Days into the current life stage, and how long old age lasts.
     #[serde(default)]
     pub aging: Option<(f32, f32)>,
+    #[serde(default)]
+    pub elder_risk: Option<f64>,
     /// Pregnant since (game minutes), with the other parent's id and the stage shown so far.
     #[serde(default)]
     pub pregnancy: Option<(f64, Option<u64>, u8)>,
@@ -317,6 +319,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         outfit: saved_outfit(&sim.outfit),
         rewards: Vec::new(),
         aging: None,
+        elder_risk: None,
         pregnancy: None,
         shape: Some((sim.weight, sim.fitness)),
         opportunities: Vec::new(),
@@ -684,6 +687,7 @@ fn save_game(
             outfit: saved_outfit(&sim.outfit),
             rewards: wishes.map(|w| w.rewards.clone()).unwrap_or_default(),
             aging: aging.map(|a| (a.days, a.elder_span)),
+            elder_risk: aging.and_then(|a| a.elder_risk),
             pregnancy: pregnancy.map(|p| (p.since, p.other_parent.and_then(|o| ids.get(&o).copied()), p.stage)),
             shape: Some((sim.weight, sim.fitness)),
             opportunities: opps.map(|o| o.active.iter().filter_map(|a| Some((guid(a.index)?, a.deadline))).collect()).unwrap_or_default(),
@@ -847,7 +851,7 @@ fn apply_loaded_game(
         }
         let mut ec = commands.entity(e);
         if let Some((days, elder_span)) = s.aging {
-            ec.insert(crate::aging::Aging { days, elder_span });
+            ec.insert(crate::aging::Aging { days, elder_span, elder_risk: s.elder_risk });
         }
         if let Some(a) = &s.author {
             ec.insert(a.clone());

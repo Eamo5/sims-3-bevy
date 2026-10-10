@@ -21,25 +21,30 @@ impl Plugin for AgingPlugin {
     }
 }
 
-/// Days lived in the current life stage, and how long this Sim's old age lasts.
+/// Days lived in the current stage and persistent old-age survival state.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Aging {
     pub days: f32,
     pub elder_span: f32,
+    /// Remaining exponential survival threshold. None preserves legacy fixed-span saves.
+    pub elder_risk: Option<f64>,
 }
 
 impl Default for Aging {
     fn default() -> Self {
-        Self { days: 0.0, elder_span: normal_elder_span(&mut rand::rng()) }
+        Self { days: 0.0, elder_span: 17.0, elder_risk: Some(-rand::rng().random::<f64>().max(f64::MIN_POSITIVE).ln()) }
     }
 }
 
-/// AgingManager: 2.428 aging years × 7 days, then a 14% daily chance on Normal.
-/// Pre-sampling the daily rolls keeps the eventual span stable through save/reload.
-fn normal_elder_span(rng: &mut impl Rng) -> f32 {
-    let mut days = 17.0;
-    while !rng.random_bool(0.14) { days += 1.0; }
-    days
+impl Aging {
+    /// Accumulating daily survival probabilities preserves the configured hazard even
+    /// when the lifespan changes, without re-rolling the Sim's fate on save/reload.
+    fn old_age_today(&mut self, probability: f64) -> bool {
+        let Some(risk) = self.elder_risk.as_mut() else { return self.days >= self.elder_span };
+        if self.days < 17.0 { return false; }
+        *risk += (1.0 - probability).ln();
+        *risk <= 0.0
+    }
 }
 
 #[cfg(test)]
@@ -48,9 +53,39 @@ mod lifespan_tests {
     use rand::SeedableRng;
 
     #[test]
+    fn elder_survival_respects_minimum_preset_changes_and_persisted_risk() {
+        use crate::options::Lifespan;
+        let mut age = Aging { days: 16.0, elder_span: 17.0, elder_risk: Some(0.8) };
+        assert!(!age.old_age_today(Lifespan::Short.elder_mortality()));
+        assert_eq!(age.elder_risk, Some(0.8), "no mortality before the minimum elder stage");
+        age.days = 17.0;
+        for preset in [Lifespan::Epic, Lifespan::Long, Lifespan::Normal, Lifespan::Medium, Lifespan::Short] {
+            let saved = serde_json::to_string(&(age.days, age.elder_span, age.elder_risk)).unwrap();
+            let (days, elder_span, elder_risk) = serde_json::from_str(&saved).unwrap();
+            let mut restored = Aging { days, elder_span, elder_risk };
+            assert_eq!(age.old_age_today(preset.elder_mortality()), restored.old_age_today(preset.elder_mortality()));
+            assert_eq!(age.elder_risk, restored.elder_risk);
+        }
+        let death_day = |factor| {
+            let mut a = Aging { days: 17.0, elder_span: 17.0, elder_risk: Some(0.8) };
+            while !a.old_age_today(Lifespan::Normal.elder_mortality() * factor) { a.days += 1.0; }
+            a.days
+        };
+        assert!(death_day(0.75) > death_day(1.0), "Marathon Runner reduces daily mortality");
+        let mut legacy = Aging { days: 20.0, elder_span: 21.0, elder_risk: None };
+        assert!(!legacy.old_age_today(0.30));
+        legacy.days = 21.0;
+        assert!(legacy.old_age_today(0.03), "old fixed-lifespan saves remain compatible");
+    }
+
+    #[test]
     fn normal_elder_lifetimes_have_the_tuned_minimum_and_daily_mortality_tail() {
         let mut rng = rand::rngs::StdRng::seed_from_u64(83);
-        let spans: Vec<f32> = (0..10000).map(|_| normal_elder_span(&mut rng)).collect();
+        let spans: Vec<f32> = (0..10000).map(|_| {
+            let mut age = Aging { days: 17.0, elder_span: 17.0, elder_risk: Some(-rng.random::<f64>().max(f64::MIN_POSITIVE).ln()) };
+            while !age.old_age_today(0.14) { age.days += 1.0; }
+            age.days
+        }).collect();
         assert!(spans.iter().all(|s| *s >= 17.0));
         assert!(spans.iter().any(|s| *s > 35.0), "elders may outlive the former fixed upper bound");
         let mean = spans.iter().sum::<f32>() / spans.len() as f32;
@@ -143,7 +178,7 @@ fn daily_aging(
     clock: Res<GameClock>,
     settings: Res<crate::options::Settings>,
     mut last_day: Local<Option<u32>>,
-    mut sims: Query<(Entity, &mut Sim, Option<&mut Aging>, &mut Moodlets, Has<Selected>), (With<HouseholdMember>, Without<crate::death::Dying>)>,
+    mut sims: Query<(Entity, &mut Sim, Option<&mut Aging>, &mut Moodlets, Has<Selected>, Option<&crate::journal::SkillJournal>), (With<HouseholdMember>, Without<crate::death::Dying>)>,
     mut life: MessageWriter<LifeEvent>,
     mut play: MessageWriter<PlaySound>,
     mut notes: ResMut<Notifications>,
@@ -154,7 +189,7 @@ fn daily_aging(
         // Sims who just arrived start their stage at a random point, like the town's.
         if first {
             let mut rng = rand::rng();
-            for (e, sim, aging, _, _) in &mut sims {
+            for (e, sim, aging, _, _, _) in &mut sims {
                 if aging.is_none() {
                     let mut a = Aging::default();
                     let span = if sim.age == Age::Elder { 17.0 } else { stage_days(sim.age) };
@@ -163,6 +198,7 @@ fn daily_aging(
                     // Testing: everyone's birthday is at the next midnight.
                     if std::env::var_os("SIMS3_AGE_SOON").is_some() {
                         a.days = if sim.age == Age::Elder { a.elder_span - 1.0 } else { span - 1.0 };
+                        if sim.age == Age::Elder { a.elder_risk = Some(0.0); }
                     }
                     commands.entity(e).insert(a);
                 }
@@ -178,14 +214,15 @@ fn daily_aging(
     let mut rng = rand::rng();
     let mut died: Vec<(Entity, String, bool)> = Vec::new();
     let mut survivors: Vec<Entity> = Vec::new();
-    for (e, mut sim, aging, mut moodlets, selected) in &mut sims {
+    for (e, mut sim, aging, mut moodlets, selected, journal) in &mut sims {
         let Some(mut aging) = aging else {
             commands.entity(e).insert(Aging::default());
             continue;
         };
         aging.days += per_day;
         if sim.age == Age::Elder {
-            if aging.days >= aging.elder_span {
+            let probability = settings.lifespan.elder_mortality() * if crate::journal::earned(journal, "Marathon Runner") { 0.75 } else { 1.0 };
+            if aging.old_age_today(probability) {
                 died.push((e, sim.full_name(), selected));
             } else {
                 survivors.push(e);
@@ -206,7 +243,7 @@ fn daily_aging(
         play.write(PlaySound::ui("sting_death").with_volume(0.7));
         commands.entity(e).insert(crate::death::Dying::new());
         for &s in &survivors {
-            if let Ok((_, _, _, mut m, _)) = sims.get_mut(s) {
+            if let Ok((_, _, _, mut m, _, _)) = sims.get_mut(s) {
                 m.add(MoodletKind::Heartbroken, clock.minutes);
             }
         }
