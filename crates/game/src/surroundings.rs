@@ -16,7 +16,7 @@ pub struct SurroundingsPlugin;
 
 impl Plugin for SurroundingsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spoil_food, trash_cans, discard, wash_up, take_out_trash, read_somewhere, read_paper_somewhere, drop_unread_paper, watch_somewhere, stop_watching, put_down_carried, surroundings).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (spoil_food, trash_cans, discard, wash_up, take_out_trash, read_somewhere, read_paper_somewhere, drop_unread_paper, watch_somewhere, stop_watching.before(crate::interact::run_actions), put_down_carried, surroundings).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -193,9 +193,24 @@ fn watch_somewhere(
 }
 
 /// Done watching (or off to something else), the Sim's TV is theirs no longer.
-fn stop_watching(mut commands: Commands, sims: Query<(Entity, &crate::interact::ActionQueue), With<WatchingTv>>) {
-    for (e, queue) in &sims {
-        if !queue.current().is_some_and(|a| a.label == "Watch the TV") {
+fn stop_watching(
+    mut commands: Commands,
+    mut sims: Query<(Entity, &mut crate::interact::ActionQueue, &WatchingTv)>,
+    objects: Query<&GameObject>,
+    unavailable: Query<(), Or<(With<crate::interact::Broken>, With<crate::buy::HeldObject>, With<crate::buyhistory::HistoryHidden>)>>,
+) {
+    for (e, mut queue, watching) in &mut sims {
+        let active = queue.0.front_mut().is_some_and(|a| {
+            let crate::interact::ActionKind::Object { target, def } = a.kind else { return false };
+            if a.cancel || a.completed || !objects.get(target).ok().and_then(|o| crate::interact::interactions_for(o.kind).get(def))
+                .is_some_and(|d| d.special == crate::interact::Special::WatchTv) { return false; }
+            if unavailable.contains(watching.0) || !objects.get(watching.0).is_ok_and(|o| o.kind == ObjectKind::Tv) {
+                a.cancel = true;
+                return false;
+            }
+            true
+        });
+        if !active {
             commands.entity(e).remove::<WatchingTv>();
         }
     }
@@ -319,6 +334,37 @@ fn put_down_carried(mut commands: Commands, sims: Query<(Entity, &crate::anim::C
 mod carry_tests {
     use super::*;
     use crate::interact::{Action, ActionKind, ActionQueue, Phase, Special, interactions_for};
+
+    #[test]
+    fn seated_viewing_stops_when_television_is_deleted_broken_or_removed_from_play() {
+        for failure in 0..5 {
+            let mut app = App::new();
+            app.add_systems(Update, stop_watching);
+            let object = |kind| GameObject { kind, name: "Test".into(), objd: (0, 0, 0), price: 0,
+                center: Vec2::ZERO, half: Vec2::ONE, height: 1.0, route: None };
+            let tv = app.world_mut().spawn(object(ObjectKind::Tv)).id();
+            let chair = app.world_mut().spawn(object(ObjectKind::Chair)).id();
+            let def = interactions_for(ObjectKind::Chair).iter().position(|d| d.special == Special::WatchTv).unwrap();
+            let mut action = Action::new("Watch the TV", ActionKind::Object { target: chair, def }, false);
+            action.phase = Phase::Running(10.0);
+            let mut queue = ActionQueue::default();
+            queue.push_player(action);
+            let sim = app.world_mut().spawn((queue, WatchingTv(tv))).id();
+            app.update();
+            assert!(!app.world().get::<ActionQueue>(sim).unwrap().0[0].cancel);
+            assert!(app.world().get::<WatchingTv>(sim).is_some());
+            match failure {
+                0 => { app.world_mut().despawn(tv); }
+                1 => { app.world_mut().entity_mut(tv).insert(crate::interact::Broken); }
+                2 => { app.world_mut().entity_mut(tv).insert(crate::buy::HeldObject); }
+                3 => { app.world_mut().entity_mut(tv).insert(crate::buyhistory::HistoryHidden); }
+                _ => { app.world_mut().get_mut::<GameObject>(tv).unwrap().kind = ObjectKind::Stereo; }
+            }
+            app.update();
+            assert!(app.world().get::<ActionQueue>(sim).unwrap().0[0].cancel, "failure {failure}");
+            assert!(app.world().get::<WatchingTv>(sim).is_none());
+        }
+    }
 
     #[test]
     fn named_recipe_carries_pan_until_cancelled_or_stove_disappears() {
