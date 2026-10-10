@@ -669,7 +669,7 @@ fn save_game(
                 Option<&crate::journal::SkillJournal>,
                 Option<&crate::rabbitholes::SchoolGrades>,
                 Option<&crate::rabbitholes::Homework>,
-                (Option<&crate::rabbitholes::AtRabbitHole>, Option<&crate::weather::BodyTemperature>, Option<&crate::simbody::Wearing>, Has<crate::simbody::ChangedInto>),
+                (Option<&crate::rabbitholes::AtRabbitHole>, Option<&crate::weather::BodyTemperature>, Option<&crate::simbody::Wearing>, Has<crate::simbody::ChangedInto>, Option<&crate::portraits::Staged>),
             ),
         ),
         (Without<crate::town::Townie>, Without<crate::visit::LotGuest>, Without<crate::services::ServiceNpc>),
@@ -710,7 +710,11 @@ fn save_game(
     let Some(hh) = household else { return };
     let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).collect();
     let mut saved = Vec::new();
-    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen))) in &sims {
+    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged))) in &sims {
+        if let Some(s) = staged {
+            debug!("saving {} during portrait: scene {:?}, gameplay {:?}", sim.first, tf.translation, s.original.translation);
+        }
+        let tf = staged.map_or(tf, |s| &s.original);
         // Out on a community lot: saved as back at home (the lot isn't kept).
         let (position, level) = match (out, exit.as_ref()) {
             (true, Some(x)) => ([x.0.x, world.data.heightmap.sample(x.0.x, x.0.y), x.0.y], 1),

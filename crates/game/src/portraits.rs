@@ -95,7 +95,10 @@ fn blank(images: &mut Assets<Image>) -> Handle<Image> {
 
 /// A Sim brought under the world for their picture (nothing else moves them meanwhile).
 #[derive(Component)]
-pub struct Staged;
+pub struct Staged {
+    /// Gameplay position and orientation, before the temporary portrait staging.
+    pub original: Transform,
+}
 
 /// An image showing a Sim's portrait, kept to the latest picture.
 #[derive(Component)]
@@ -442,7 +445,8 @@ fn take_portraits(
         }
         let staged = (!vis.get()).then(|| (*tf, *visibility));
         if let Some((tf, _)) = staged {
-            commands.entity(e).insert((Transform { translation: tf.translation - Vec3::Y * UNDERGROUND, ..tf }, Visibility::Visible, Staged));
+            debug!("staging portrait of {}: world position {:?}", sim.first, tf.translation);
+            commands.entity(e).insert((Transform { translation: tf.translation - Vec3::Y * UNDERGROUND, ..tf }, Visibility::Visible, Staged { original: tf }));
         }
         portraits.busy = Some(Shot { sim: e, frame: 0, aimed_at: 0.0, staged, aimed: None });
         break;
