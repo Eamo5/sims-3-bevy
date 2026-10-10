@@ -181,9 +181,11 @@ mod tests {
             let skills = Skills([("Writing", level)].into_iter().collect());
             for bookworm in [false, true] {
                 sim.traits = if bookworm { vec![Trait::Bookworm] } else { vec![] };
-                let normal = pages_per_minute(&sim, &skills, None);
+                let normal = pages_per_minute(&sim, &skills, None, None);
                 sim.traits.push(Trait::Perfectionist);
-                assert!((pages_per_minute(&sim, &skills, None) - normal * 0.8).abs() < 1e-6);
+                assert!((pages_per_minute(&sim, &skills, None, None) - normal * 0.8).abs() < 1e-6);
+                let journal = crate::journal::SkillJournal { earned: vec!["Speed Writer".into()], ..default() };
+                assert!((pages_per_minute(&sim, &skills, None, Some(&journal)) - normal * 0.8 * 1.4).abs() < 1e-6);
             }
         }
     }
@@ -280,13 +282,14 @@ pub fn unlocked(g: &Genre, sim: &Sim, skills: &Skills, author: Option<&Author>, 
 }
 
 /// Pages a minute: the base rate, more for bookworms and with skill.
-fn pages_per_minute(sim: &Sim, skills: &Skills, data: Option<&s3bake::GameDataBaked>) -> f32 {
+fn pages_per_minute(sim: &Sim, skills: &Skills, data: Option<&s3bake::GameDataBaked>, journal: Option<&crate::journal::SkillJournal>) -> f32 {
     let level = skills.level("Writing") as f32;
     let rate = tune(data, "kRateBasePPM", 0.12)
         + if sim.traits.contains(&Trait::Bookworm) { tune(data, "kRateBookWormBonusPPM", 0.03) } else { 0.0 }
         + tune(data, "kRateMaxWritingSkillPPM", 0.25) * level / 10.0;
     // TraitTuning.kPerfectionistTraitWritingPagesSlowerPerMinuteMultiplier.
     rate * if sim.traits.contains(&Trait::Perfectionist) { 0.8 } else { 1.0 }
+        * if crate::journal::earned(journal, "Speed Writer") { tune(data, "kRateSpeedWriterMultiplier", 1.4) } else { 1.0 }
 }
 
 fn start_draft(g: &Genre, author: &Author, data: Option<&s3bake::GameDataBaked>, rng: &mut impl Rng) -> Draft {
@@ -349,13 +352,13 @@ fn write_pages(
     delta: Res<SimDelta>,
     ui: Option<Res<crate::icons::GameUi>>,
     mut household: Option<ResMut<Household>>,
-    mut writers: Query<(Entity, &Sim, &mut ActionQueue, &Skills, Option<&mut Author>, Option<&NovelPlan>, Option<&crate::wishes::Wishes>), With<HouseholdMember>>,
+    mut writers: Query<(Entity, &Sim, &mut ActionQueue, &Skills, Option<&mut Author>, Option<&NovelPlan>, Option<&crate::wishes::Wishes>, Option<&crate::journal::SkillJournal>), With<HouseholdMember>>,
     objects: Query<(&GameObject, &crate::interact::UsedBy), (Without<crate::interact::Broken>, Without<crate::buyhistory::HistoryHidden>, Without<crate::buy::HeldObject>)>,
     mut notes: ResMut<Notifications>,
 ) {
     let data = ui.as_ref().map(|u| &*u.data);
     let mut rng = rand::rng();
-    for (e, sim, mut queue, skills, author, plan, wishes) in &mut writers {
+    for (e, sim, mut queue, skills, author, plan, wishes, journal) in &mut writers {
         let Some(front) = queue.0.front_mut() else { continue };
         if front.cancel { continue; }
         let (ActionKind::Object { target, def }, Phase::Running(_)) = (&front.kind, &front.phase) else { continue };
@@ -384,7 +387,7 @@ fn write_pages(
             notes.push(format!("{} started writing a Fiction book: “{}”.", sim.first, d.title));
             author.draft = Some(d);
         }
-        let ppm = pages_per_minute(sim, skills, data);
+        let ppm = pages_per_minute(sim, skills, data, journal);
         let level = skills.level("Writing").clamp(1, 10);
         let Some(d) = author.draft.as_mut() else { continue };
         d.pages = (d.pages + ppm * delta.0).min(d.length);

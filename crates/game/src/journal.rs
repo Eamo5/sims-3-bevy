@@ -372,7 +372,7 @@ pub static CHALLENGES: &[Challenge] = &[
     ch(
         "Writing",
         "Prolific Writer",
-        100.0,
+        20.0,
         Measure::BooksWritten,
         "Prolific Writers have written at least {0} books in their career. They are so well known that they tend to write far more hits and best-sellers than their counterparts.",
         "has written enough books to complete the Prolific Writer Skill Challenge!",
@@ -382,7 +382,7 @@ pub static CHALLENGES: &[Challenge] = &[
         ..ch(
             "Writing",
             "Speed Writer",
-            10000.0,
+            30000.0,
             Measure::Stat(Stat::Royalties),
             "Speed Writers are so prolific that they've earned {0} in royalties. Speed Writers write more quickly than normal writers.",
             "has earned enough royalties to complete the Speed Writer Skill Challenge!",
@@ -391,7 +391,7 @@ pub static CHALLENGES: &[Challenge] = &[
     ch(
         "Writing",
         "Specialist Writer",
-        10.0,
+        5.0,
         Measure::OneGenre,
         "Specialist Writers have written at least {0} novels in a single genre, and know it inside out.",
         "has written enough novels in a single genre to complete the Specialist Writer Skill Challenge!",
@@ -543,6 +543,31 @@ fn earn_challenges(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writing_challenges_use_original_book_genre_and_royalty_thresholds() {
+        use crate::writing::{Author, Book, Quality};
+        let mut app = App::new();
+        app.init_resource::<Time>().init_resource::<Notifications>().add_systems(Update, earn_challenges);
+        let sim = crate::sim::random_sim(&mut rand::rng(), "Writer", Some(true), crate::sim::Age::Adult);
+        let book = |genre: String| Book { title: "Novel".into(), genre, quality: Quality::Success, royalty: 100, payments_left: 6, next_pay: 6 };
+        let books = (0..19).map(|i| book(if i < 4 { "Fiction".into() } else { format!("Genre{i}") })).collect();
+        let mut journal = SkillJournal::default();
+        journal.add(&Deed::Count(Stat::Royalties, 29_999.0));
+        let e = app.world_mut().spawn((sim, HouseholdMember, journal, Relationships::default(), Skills::default(), Author { draft: None, books })).id();
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
+        app.update();
+        for name in ["Prolific Writer", "Specialist Writer", "Speed Writer"] {
+            assert!(!app.world().get::<SkillJournal>(e).unwrap().has(name));
+        }
+        app.world_mut().get_mut::<Author>(e).unwrap().books.push(book("Fiction".into()));
+        app.world_mut().get_mut::<SkillJournal>(e).unwrap().add(&Deed::Count(Stat::Royalties, 1.0));
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
+        app.update();
+        for name in ["Prolific Writer", "Specialist Writer", "Speed Writer"] {
+            assert!(app.world().get::<SkillJournal>(e).unwrap().has(name));
+        }
+    }
 
     #[test]
     fn painting_challenges_award_at_original_thresholds_and_survive_reload() {
