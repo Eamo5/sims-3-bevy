@@ -33,9 +33,11 @@ pub const CANVASES: [&str; 3] = ["Small Canvas", "Medium Canvas", "Large Canvas"
 pub const CANVAS_MINUTES: [f32; 3] = [180.0, 300.0, 480.0];
 const CANVAS_WORTH: [f32; 3] = [1.0, 1.6, 2.5];
 
-/// Easel's canvas times and kDabbleModifier for children.
-pub fn painting_minutes(size: u8, child: bool) -> f32 {
-    CANVAS_MINUTES[size.min(2) as usize] * if child { 1.5 } else { 1.0 }
+/// Easel's canvas times and kDabbleModifier for children; Brushmasters take half as long.
+pub fn painting_minutes(size: u8, child: bool, journal: Option<&crate::journal::SkillJournal>) -> f32 {
+    CANVAS_MINUTES[size.min(2) as usize]
+        * if child { 1.5 } else { 1.0 }
+        * if crate::journal::earned(journal, "Brushmaster") { 0.5 } else { 1.0 }
 }
 
 /// The canvas a Sim's been asked to paint on (the pie menu's choice), and what they're painting
@@ -214,7 +216,7 @@ fn easel_canvases(
             }
         };
         let design = key_picture(&painted.key).map(|(_, pic)| s3bake::gamedata::painting_texture(&pic));
-        painting.push((me, *target, size, design, *elapsed >= painting_minutes(size, sim.age == crate::sim::Age::Child) / 3.0));
+        painting.push((me, *target, size, design, *elapsed >= painting_minutes(size, sim.age == crate::sim::Age::Child, journal) / 3.0));
     }
     // The canvases of those who've stopped go (and one's put up afresh as the picture comes).
     for (e, c) in &canvases {
@@ -271,6 +273,20 @@ pub fn image(cache: &mut PaintingImages, images: &mut Assets<Image>, baked: &cra
 mod tests {
     use super::*;
     use s3bake::gamedata::CanvasInfo;
+
+    #[test]
+    fn brushmaster_duration_uses_the_earned_challenge_after_reload() {
+        let journal = crate::journal::SkillJournal { earned: vec!["Brushmaster".into()], ..default() };
+        let restored = serde_json::from_str(&serde_json::to_string(&journal).unwrap()).unwrap();
+        for (size, adult, child) in [(0, 180.0, 270.0), (1, 300.0, 450.0), (2, 480.0, 720.0)] {
+            assert_eq!(painting_minutes(size, false, None), adult);
+            assert_eq!(painting_minutes(size, true, None), child);
+            assert_eq!(painting_minutes(size, false, Some(&restored)), adult / 2.0);
+            assert_eq!(painting_minutes(size, true, Some(&restored)), child / 2.0);
+        }
+        let other = crate::journal::SkillJournal { earned: vec!["Proficient Painter".into(), "Master Painter".into()], ..default() };
+        assert_eq!(painting_minutes(0, false, Some(&other)), 180.0, "quality and value challenges do not accelerate painting");
+    }
 
     #[test]
     fn original_quality_rolls_apply_trait_bonuses_without_bypassing_skill_gates() {
