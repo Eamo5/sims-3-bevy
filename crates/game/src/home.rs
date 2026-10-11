@@ -653,8 +653,9 @@ pub fn spawn_game_object_design(
             ChildOf(e),
         ));
     }
-    // Small decorations don't block walking.
-    if half.x * half.y > 0.04 && mx.y > 0.25 && !matches!(kind, ObjectKind::Light) {
+    // Small decorations don't block walking, nor what hangs on a wall (paintings, mirrors) or in
+    // it over a window or a door (curtains).
+    if half.x * half.y > 0.04 && mx.y > 0.25 && !matches!(kind, ObjectKind::Light) && !script.contains(".curtain") && !crate::building::hangs_on_wall((mn, mx)) {
         commands.entity(e).insert(Obstacle { half, center_offset: center });
     }
     Some(SpawnedObject { entity: e })

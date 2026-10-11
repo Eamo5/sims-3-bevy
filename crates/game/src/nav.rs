@@ -165,6 +165,35 @@ impl NavGrid {
         !self.dirty && !self.settling
     }
 
+    /// (Debugging) the grid as it would be without its barriers.
+    pub fn without_barriers(&self) -> NavGrid {
+        NavGrid {
+            origin: self.origin,
+            w: self.w,
+            h: self.h,
+            blocked: self.blocked.clone(),
+            dirty: false,
+            settling: false,
+            barriers: Vec::new(),
+            near: vec![Vec::new(); self.w * self.h],
+        }
+    }
+
+    /// (Debugging) the barriers the straight way from `a` to `b` crosses.
+    pub fn barriers_crossed(&self, a: Vec2, b: Vec2) -> Vec<[Vec2; 2]> {
+        let mut out: Vec<[Vec2; 2]> = Vec::new();
+        self.cells_on(a, b, |i| {
+            for &id in &self.near[i] {
+                let [c, d] = self.barriers[id as usize];
+                if segments_touch(a, b, c, d) && !out.contains(&[c, d]) {
+                    out.push([c, d]);
+                }
+            }
+            false
+        });
+        out
+    }
+
     /// How many barriers it has.
     pub fn barrier_count(&self) -> usize {
         self.barriers.len()
@@ -442,12 +471,18 @@ impl PartialOrd for Node {
 }
 
 /// Marks steep slopes, water and the obstacles on the ground floor as unwalkable.
-pub fn fill_grid(grid: &mut NavGrid, world: &crate::loading::WorldInfo, obstacles: &Obstacles) {
+pub fn fill_grid(grid: &mut NavGrid, world: &crate::loading::WorldInfo, obstacles: &Obstacles, building: Option<&crate::building::ActiveBuilding>) {
     let hm = &world.heightmap;
     let (w, h) = (grid.w, grid.h);
     for z in 0..h {
         for x in 0..w {
             let c = grid.center_of(x, z);
+            // (A ground floor's tile is walked on whatever ground lies under it: a hillside under
+            // a house standing out over it, as Cormorant's.)
+            if building.is_some_and(|b| b.floor_y(1, Vec3::new(c.x, 0.0, c.y)).is_some()) {
+                grid.blocked[z * w + x] = false;
+                continue;
+            }
             let y = hm.sample(c.x, c.y);
             let slope = (hm.sample(c.x + 0.5, c.y) - hm.sample(c.x - 0.5, c.y))
                 .abs()
@@ -488,7 +523,7 @@ fn rebuild_grid(
     if let (Some(b), Some(u)) = (building.as_deref(), upper.as_deref_mut()) {
         rebuild_upper(b, u, &obstacles);
     }
-    fill_grid(&mut grid, &world.data, &obstacles);
+    fill_grid(&mut grid, &world.data, &obstacles, building.as_deref());
 }
 
 /// Marks the cells under an obstacle's footprint as blocked (and a barrier's line as one).

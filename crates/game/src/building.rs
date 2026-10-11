@@ -197,6 +197,32 @@ impl ActiveBuilding {
         })
     }
 
+    /// (Debugging) the doors on storey `level`: each doorway's middle (lot-local) and the way
+    /// through it.
+    pub fn doorways(&self, level: u8) -> Vec<(Vec2, Vec2)> {
+        self.holes.iter().filter(|(_, h)| h.door && h.level.max(1) == level).map(|(_, h)| (h.wall_point + h.right * ((h.x0 + h.x1) * 0.5), h.fwd)).collect()
+    }
+
+    /// (Debugging) the walls on storey `level` within `r` of lot point `p`, each with the
+    /// openings through it, and the openings there.
+    pub fn openings_report(&self, p: Vec2, level: u8, r: f32) -> Vec<String> {
+        let mut out = Vec::new();
+        for (i, w) in self.data.walls.iter().enumerate() {
+            let mid = (Vec2::from(w.a) + Vec2::from(w.b)) * 0.5;
+            if w.level.max(1) != level || mid.distance(p) > r {
+                continue;
+            }
+            let (spans, door) = openings(&self.holes, w);
+            out.push(format!("wall {i} {:?}-{:?} y {:?}: openings {spans:?} door {door}", w.a, w.b, w.y));
+        }
+        for (e, h) in &self.holes {
+            if h.wall_point.distance(p) <= r {
+                out.push(format!("hole {e:?} at {} level {} fwd {} x {:.2}..{:.2} door {}", h.wall_point, h.level, h.fwd, h.x0, h.x1, h.door));
+            }
+        }
+        out
+    }
+
     /// Lot-local direction of a world rotation's axis.
     fn local_dir(&self, v: Vec3) -> Vec2 {
         let l = self.rot.inverse() * v;

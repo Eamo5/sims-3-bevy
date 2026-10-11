@@ -2175,7 +2175,7 @@ pub(crate) fn run_actions(
                         }
                         None => {
                             if dest.is_some() {
-                                debug!("{} can't route to {:?}", sim.first, dest);
+                                debug!("{} can't route from {from} on floor {} to {:?}", sim.first, floor.0, dest);
                                 commands.entity(me).insert(crate::balloons::BalloonRequest::thought("t_balloon_routefail"));
                                 if !action.autonomous {
                                     notes.push(format!("{} can't find a way to get there.", sim.first));

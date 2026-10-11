@@ -223,6 +223,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_build.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_fence.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_gate_route.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, auto_reach.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_balloon.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(
                 Update,
@@ -2394,7 +2395,52 @@ fn auto_gate_route(
     building: Option<Res<crate::building::ActiveBuilding>>,
     grid: Option<Res<crate::nav::NavGrid>>,
     upper: Option<Res<crate::nav::UpperFloors>>,
+    (obstacles, names): (Query<(Entity, &GlobalTransform, &crate::nav::Obstacle, Option<&crate::nav::Floor>, Has<crate::nav::Barrier>)>, Query<&crate::interact::GameObject>),
 ) {
+    // NAV_MAP=<x>,<z>,<floor>,<radius> (lot-local): the walls and openings round that point, and
+    // the floor's walk grid there ('#' blocked, '+' a cell with a barrier through it).
+    if let Ok(v) = std::env::var("NAV_MAP") {
+        if *done || time.elapsed_secs() < 9.0 {
+            return;
+        }
+        let (Some(b), Some(grid)) = (building.as_deref(), grid.as_deref()) else { return };
+        *done = true;
+        let n: Vec<f32> = v.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+        if n.len() < 4 {
+            return;
+        }
+        let (p, level, r) = (Vec2::new(n[0], n[1]), n[2] as u8, n[3]);
+        for line in b.openings_report(p, level, r) {
+            info!("nav map: {line}");
+        }
+        for (e, gt, ob, floor, barrier) in &obstacles {
+            let l = b.local(gt.translation());
+            if floor.map_or(1, |f| f.0) == level && l.distance(p) < r + ob.half.length() {
+                info!("nav map: obstacle {e:?} {} at {l} half {} offset {} barrier {barrier}", names.get(e).map_or("-".to_string(), |o| o.name.clone()), ob.half, ob.center_offset);
+            }
+        }
+        let g = if level <= 1 { Some(grid) } else { upper.as_deref().and_then(|u| u.grids.get(&level)) };
+        if let Some(g) = g {
+            // (Rows along the lot's z, a character a quarter metre.)
+            for zi in 0..=(r * 8.0) as i32 {
+                let z = p.y - r + zi as f32 * 0.25;
+                let row: String = (0..=(r * 8.0) as i32)
+                    .map(|xi| {
+                        let x = p.x - r + xi as f32 * 0.25;
+                        let w = b.world(x, z, 0.0).xz();
+                        match g.cell_of(w) {
+                            Some((cx, cz)) if g.is_blocked(cx, cz) => '#',
+                            Some(_) if g.crosses(w, w + Vec2::new(0.01, 0.0)) || g.crosses(w, w + Vec2::new(0.0, 0.01)) => '+',
+                            Some(_) => '.',
+                            None => ' ',
+                        }
+                    })
+                    .collect();
+                info!("nav map {z:6.2} {row}");
+            }
+        }
+        return;
+    }
     // NAV_CHECK=<x0>,<z0>,<x1>,<z1> (lot-local): the way between those two points, and how much
     // longer it is than the straight line (a wall or fence between them should make it so).
     // NAV_CHECK=<x0>,<z0>,<floor>,<x1>,<z1>,<floor>: between floors, by the stairs (each stair
@@ -2475,6 +2521,70 @@ fn auto_gate_route(
             info!("gate route: {len:.1} m from one side of the gate to the other ({} through it; {} barriers, crossing {})", if len < 4.5 { "straight" } else { "not" }, grid.barrier_count(), grid.crosses(from, to));
         }
         None => info!("gate route: no way from one side of the gate to the other"),
+    }
+}
+
+/// NAV_REACH=1 (tests), ten seconds in: whether each object on the lot can be walked to from
+/// the lot's way off it (shut-in rooms, walls or furniture across a doorway), the ones that
+/// can't logged with where they stand.
+#[allow(clippy::type_complexity)]
+fn auto_reach(
+    time: Res<Time>,
+    mut done: Local<bool>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+    (grid, upper, exit): (Option<Res<crate::nav::NavGrid>>, Option<Res<crate::nav::UpperFloors>>, Option<Res<crate::interact::LotExit>>),
+    objects: Query<(&crate::interact::GameObject, &Transform, Option<&crate::nav::Floor>)>,
+) {
+    if std::env::var("NAV_REACH").is_err() || *done || time.elapsed_secs() < 10.0 {
+        return;
+    }
+    let (Some(b), Some(grid), Some(exit)) = (building.as_deref(), grid.as_deref(), exit) else { return };
+    if !grid.ready() || upper.as_deref().is_some_and(|u| !u.ready()) {
+        return;
+    }
+    *done = true;
+    let size = Vec2::new(b.data.width as f32, b.data.depth as f32);
+    let (mut ok, mut bad) = (0, 0);
+    for (o, tf, floor) in &objects {
+        let l = b.local(tf.translation);
+        if l.cmplt(Vec2::ZERO).any() || l.cmpgt(size).any() || o.price <= 0 || o.name.to_ascii_lowercase().contains("window") || o.kind == crate::interact::ObjectKind::Light {
+            continue;
+        }
+        let level = floor.map_or(1, |f| f.0);
+        let to = o.use_point(tf);
+        if crate::nav::plan_route(grid, upper.as_deref(), exit.0, 1, to, level).is_some() {
+            ok += 1;
+        } else {
+            bad += 1;
+            info!("nav reach: can't reach {} on floor {level} at lot {l} (use point {})", o.name, b.local(Vec3::new(to.x, 0.0, to.y)));
+            // (On the ground floor: the barriers a way would cross without them.)
+            if level <= 1
+                && let Some(path) = grid.without_barriers().find_path(exit.0, to)
+            {
+                let mut crossed = Vec::new();
+                for w in std::iter::once(exit.0).chain(path.iter().copied()).collect::<Vec<_>>().windows(2) {
+                    for [c, d] in grid.barriers_crossed(w[0], w[1]) {
+                        crossed.push(format!("{}-{}", b.local(Vec3::new(c.x, 0.0, c.y)), b.local(Vec3::new(d.x, 0.0, d.y))));
+                    }
+                }
+                info!("nav reach:   without barriers it'd cross {crossed:?}");
+            }
+        }
+    }
+    info!("nav reach: {ok} objects reached, {bad} not");
+    // The ground floor's doors walked to from the way in, on either side: one reached and not
+    // the other is a door shut to walking (what's in the way said).
+    if bad > 0 {
+        for (mid, fwd) in b.doorways(1) {
+            let side = |s: f32| b.world(mid.x + fwd.x * 0.6 * s, mid.y + fwd.y * 0.6 * s, 0.0).xz();
+            let (a, c) = (side(1.0), side(-1.0));
+            let (ra, rc) = (grid.find_path(exit.0, a).is_some_and(|p| p.last().is_some_and(|q| q.distance(a) < 0.6)), grid.find_path(exit.0, c).is_some_and(|p| p.last().is_some_and(|q| q.distance(c) < 0.6)));
+            if ra != rc {
+                let blocked = |p: Vec2| grid.cell_of(p).is_some_and(|(x, z)| grid.is_blocked(x, z));
+                let crossed: Vec<String> = grid.barriers_crossed(a, c).iter().map(|[p, q]| format!("{}-{}", b.local(Vec3::new(p.x, 0.0, p.y)), b.local(Vec3::new(q.x, 0.0, q.y)))).collect();
+                info!("nav reach: door at lot {mid} reached on one side only (cells blocked: {} / {}), barriers across it {crossed:?}", blocked(a), blocked(c));
+            }
+        }
     }
 }
 
