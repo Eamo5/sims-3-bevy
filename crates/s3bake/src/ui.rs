@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackWriter, read_value, write_value};
 
-pub const UI_VERSION: u32 = 21;
+pub const UI_VERSION: u32 = 22;
 pub const T_LAYOUT: u32 = 0x025C95B6;
 pub const T_FONT: u32 = 0x062E9EE0;
 pub const T_IMAGE: u32 = 0x2F7D0004;
@@ -381,7 +381,7 @@ pub fn bake_ui(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::path::Pat
         let o = s3formats::object::parse_objd(&d).ok()?;
         let f = o.buy;
         let desc = if c.price > 0 { strings.get(&o.desc_guid).cloned().unwrap_or_default() } else { String::new() };
-        Some((c.objd, ObjBuy { room: f.room, function: f.function, sub: f.function_sub, sub2: f.function_sub2, room_sub: f.room_sub, sort: f.sort }, desc))
+        Some((c.objd, ObjBuy { room: f.room, function: f.function, sub: f.function_sub, sub2: f.function_sub2, room_sub: f.room_sub, sort: f.sort, build: f.build }, desc))
     });
     for (k, f, desc) in objs.into_iter().flatten() {
         out.buy_flags.push((k, f));
@@ -1004,6 +1004,10 @@ pub struct ObjBuy {
     pub sub2: u64,
     pub room_sub: u64,
     pub sort: u32,
+    /// Build mode's categories (`buildCategoryFlags`): 0x2 doors, 0x4 windows, 0x8 gates, 0x10
+    /// columns, 0x20 rabbit holes, 0x100 arches, 0x200 flowers, 0x400 shrubs, 0x800 trees, 0x2000
+    /// rocks (read off the catalogue's objects: the enum is the engine's).
+    pub build: u32,
 }
 
 impl ObjBuy {

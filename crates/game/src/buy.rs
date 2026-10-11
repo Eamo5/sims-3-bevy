@@ -583,6 +583,10 @@ pub const WINDOWS_TAB: usize = WALLPAPER_TAB + 4;
 pub const ROOFS_TAB: usize = WALLPAPER_TAB + 5;
 pub const FENCES_TAB: usize = WALLPAPER_TAB + 6;
 pub const TERRAIN_TAB: usize = WALLPAPER_TAB + 7;
+/// Build mode's object catalogues in the game's own look (`buildobjects`): construction (doors,
+/// windows, arches, columns, fireplaces) and gardening (trees, shrubs, flowers, rocks).
+pub const CONSTRUCTION_TAB: usize = WALLPAPER_TAB + PAINT_TABS.len();
+pub const GARDENING_TAB: usize = CONSTRUCTION_TAB + 1;
 
 impl BuyMode {
     /// Whether Create a Style is open.
@@ -823,6 +827,7 @@ fn buy_panel(
     { return; }
     let game_look = buy.game_look && buy.active && (buy.category < WALLPAPER_TAB || editing_style);
     if crate::buildhud::native_panel(&buy) { return; }
+    if crate::buildobjects::showing(&buy) && !editing_style { return; }
     if game_look && !(buy.styling && buy.placing.is_some()) {
         return;
     }
@@ -1316,7 +1321,7 @@ fn buy_panel(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn buy_buttons(
+pub(crate) fn buy_buttons(
     mut commands: Commands,
     q: Query<(&Interaction, &BuyButton), Changed<Interaction>>,
     mut buy: ResMut<BuyMode>,

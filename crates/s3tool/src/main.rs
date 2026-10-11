@@ -553,6 +553,28 @@ fn main() {
         println!("{}", String::from_utf8_lossy(&xml));
         return;
     }
+    if args[1] == "buildbits" {
+        // buildbits <root>: for each bit of the OBJDs' build category flags, how many catalogue
+        // objects carry it and a few of their instance names.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let mut by_bit: BTreeMap<u32, Vec<String>> = BTreeMap::new();
+        for k in set.keys_of_type(types::OBJD).copied().collect::<Vec<_>>() {
+            let Some(d) = set.read(&k) else { continue };
+            let Ok(o) = s3formats::object::parse_objd(&d) else { continue };
+            if !o.show_in_catalog {
+                continue;
+            }
+            for b in 0..32 {
+                if o.buy.build & (1 << b) != 0 {
+                    by_bit.entry(b).or_default().push(o.instance_name.clone());
+                }
+            }
+        }
+        for (b, names) in &by_bit {
+            println!("bit {b} (0x{:x}): {} e.g. {:?}", 1u32 << b, names.len(), names.iter().step_by((names.len() / 8).max(1)).take(8).collect::<Vec<_>>());
+        }
+        return;
+    }
     if args[1] == "objdbuy" {
         // objdbuy <root> <instance name>...: the OBJDs' buy-mode category flags.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);

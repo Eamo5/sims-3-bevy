@@ -40,15 +40,25 @@ const LIGHT: u32 = 0x2e8;
 const GRID: u32 = 0x2e9;
 
 #[derive(Component, Clone, Copy)]
-enum Action { Home, Tool(BuildTool), Category(usize), Hand, Lighting, Grid, Undo, Redo }
+enum Action { Home, Tool(BuildTool), Category(usize), Objects(crate::buildobjects::ObjTab), Hand, Lighting, Grid, Undo, Redo }
 
 fn home_action(id: u32) -> Option<Action> {
+    use crate::buildobjects::ObjTab;
     Some(match id {
         0x1002 => Action::Tool(BuildTool::Wall),
         0x1003 => Action::Category(WALLPAPER_TAB),
         0x1012 => Action::Category(FLOORS_TAB),
-        0x1005 => Action::Category(DOORS_TAB),
-        0x1014 => Action::Category(WINDOWS_TAB),
+        // (Doors, windows, arches, columns and fireplaces: the game's construction catalogue;
+        // trees, shrubs, flowers and rocks its gardening catalogue.)
+        0x1005 => Action::Objects(ObjTab::Doors),
+        0x1014 => Action::Objects(ObjTab::Windows),
+        0x1015 => Action::Objects(ObjTab::Arches),
+        0x1007 => Action::Objects(ObjTab::Columns),
+        0x1000 => Action::Objects(ObjTab::Fireplaces),
+        0x1001 => Action::Objects(ObjTab::Trees),
+        0x100c => Action::Objects(ObjTab::Shrubs),
+        0x100a => Action::Objects(ObjTab::Flowers),
+        0x100e => Action::Objects(ObjTab::Rocks),
         0x1009 => Action::Category(ROOFS_TAB),
         0x100f => Action::Category(FENCES_TAB),
         0x1008 => Action::Tool(BuildTool::Stairs),
@@ -139,6 +149,7 @@ fn controls(
     mut commands: Commands, mut buy: ResMut<BuyMode>, clock: Res<crate::clock::GameClock>,
     actions: Query<(&Interaction, &Action), Changed<Interaction>>,
     mut history: ResMut<crate::buyhistory::BuyHistory>,
+    mut objects: Option<ResMut<crate::buildobjects::BuildObjects>>,
 ) {
     if !buy.active || buy.category < WALLPAPER_TAB { return; }
     for (interaction, action) in &actions {
@@ -147,6 +158,17 @@ fn controls(
             Action::Home => { buy.drop_tools(&mut commands); buy.show(BUILD_TAB); }
             Action::Tool(tool) => { buy.drop_tools(&mut commands); buy.show(BUILD_TAB); buy.tool = Some(tool); }
             Action::Category(category) => { buy.drop_tools(&mut commands); buy.show(category); }
+            Action::Objects(tab) => {
+                buy.drop_tools(&mut commands);
+                match objects.as_deref_mut() {
+                    Some(o) => {
+                        o.choose(tab);
+                        buy.show(tab.catalogue());
+                    }
+                    // (Without the game's catalogues: the plain one's doors and windows.)
+                    None => buy.show(if tab == crate::buildobjects::ObjTab::Windows { WINDOWS_TAB } else { DOORS_TAB }),
+                }
+            }
             Action::Hand => buy.drop_tools(&mut commands),
             Action::Lighting => buy.toggle_lighting(clock.hour_f()),
             Action::Grid => buy.hide_grid = !buy.hide_grid,
@@ -171,10 +193,12 @@ fn show(
     if !on { return; }
     let wall = buy.category == BUILD_TAB && matches!(buy.tool, Some(BuildTool::Wall | BuildTool::Room | BuildTool::Sledgehammer));
     let pool = buy.category == BUILD_TAB && buy.tool == Some(BuildTool::Pool);
-    let covers = crate::buildcatalog::showing(&buy);
+    let covers = crate::buildcatalog::showing(&buy) || crate::buildobjects::showing(&buy);
     set_visible(&mut visibility, s.id(HOME), !wall && !pool && !covers);
     set_visible(&mut visibility, s.id(MIDDLE), wall || pool || covers);
     set_visible(&mut visibility, s.id(BACK), wall || pool || covers);
+    set_visible(&mut visibility, s.id(0x390), crate::buildobjects::showing(&buy) && buy.category == crate::buy::CONSTRUCTION_TAB);
+    set_visible(&mut visibility, s.id(0x3a0), crate::buildobjects::showing(&buy) && buy.category == crate::buy::GARDENING_TAB);
     set_visible(&mut visibility, s.id(0x320), covers && buy.category == WALLPAPER_TAB);
     set_visible(&mut visibility, s.id(0x340), covers && buy.category == FLOORS_TAB);
     set_visible(&mut visibility, s.id(WALLS), wall);
@@ -226,7 +250,8 @@ mod tests {
         buy.show(WALLPAPER_TAB);
         assert!(!native_panel(&buy));
         assert!(matches!(home_action(0x1013), Some(Action::Tool(BuildTool::Pool))));
-        assert!(matches!(home_action(0x1005), Some(Action::Category(DOORS_TAB))));
+        assert!(matches!(home_action(0x1005), Some(Action::Objects(crate::buildobjects::ObjTab::Doors))));
+        assert!(matches!(home_action(0x1001), Some(Action::Objects(crate::buildobjects::ObjTab::Trees))));
         assert!(home_action(0x1016).is_none());
     }
 
