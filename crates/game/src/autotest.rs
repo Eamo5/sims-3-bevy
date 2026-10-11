@@ -2575,14 +2575,23 @@ fn auto_reach(
     // The ground floor's doors walked to from the way in, on either side: one reached and not
     // the other is a door shut to walking (what's in the way said).
     if bad > 0 {
-        for (mid, fwd) in b.doorways(1) {
-            let side = |s: f32| b.world(mid.x + fwd.x * 0.6 * s, mid.y + fwd.y * 0.6 * s, 0.0).xz();
-            let (a, c) = (side(1.0), side(-1.0));
-            let (ra, rc) = (grid.find_path(exit.0, a).is_some_and(|p| p.last().is_some_and(|q| q.distance(a) < 0.6)), grid.find_path(exit.0, c).is_some_and(|p| p.last().is_some_and(|q| q.distance(c) < 0.6)));
-            if ra != rc {
-                let blocked = |p: Vec2| grid.cell_of(p).is_some_and(|(x, z)| grid.is_blocked(x, z));
-                let crossed: Vec<String> = grid.barriers_crossed(a, c).iter().map(|[p, q]| format!("{}-{}", b.local(Vec3::new(p.x, 0.0, p.y)), b.local(Vec3::new(q.x, 0.0, q.y)))).collect();
-                info!("nav reach: door at lot {mid} reached on one side only (cells blocked: {} / {}), barriers across it {crossed:?}", blocked(a), blocked(c));
+        for level in 1..=b.top_level {
+            let Some(g) = (if level <= 1 { Some(grid) } else { upper.as_deref().and_then(|u| u.grids.get(&level)) }) else { continue };
+            for (mid, fwd) in b.doorways(level) {
+                let side = |s: f32| b.world(mid.x + fwd.x * 0.6 * s, mid.y + fwd.y * 0.6 * s, 0.0).xz();
+                let (a, c) = (side(1.0), side(-1.0));
+                let reached = |p: Vec2| crate::nav::plan_route(grid, upper.as_deref(), exit.0, 1, p, level).is_some_and(|w| w.last().is_some_and(|q| q.p.distance(p) < 0.6));
+                let (ra, rc) = (reached(a), reached(c));
+                if ra != rc {
+                    let blocked = |p: Vec2| g.cell_of(p).is_some_and(|(x, z)| g.is_blocked(x, z));
+                    let crossed: Vec<String> = g.barriers_crossed(a, c).iter().map(|[p, q]| format!("{}-{}", b.local(Vec3::new(p.x, 0.0, p.y)), b.local(Vec3::new(q.x, 0.0, q.y)))).collect();
+                    info!("nav reach: door on floor {level} at lot {mid} reached on one side only (cells blocked: {} / {}), barriers across it {crossed:?}", blocked(a), blocked(c));
+                    for (o, tf, floor) in &objects {
+                        if floor.map_or(1, |f| f.0) == level && b.local(tf.translation).distance(mid) < 1.6 {
+                            info!("nav reach:   by it: {} at {} (half {}, centre {})", o.name, b.local(tf.translation), o.half, o.center);
+                        }
+                    }
+                }
             }
         }
     }

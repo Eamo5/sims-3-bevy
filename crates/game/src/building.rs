@@ -477,7 +477,18 @@ impl Hole {
     fn cuts(&self, w: &s3bake::types::WallBaked) -> bool {
         let (a, b) = (Vec2::from(w.a), Vec2::from(w.b));
         let len = (b - a).length();
-        if len < 1e-3 || self.level.max(1) != w.level.max(1) || ((b - a) / len).dot(self.right).abs() < 0.9 {
+        if len < 1e-3 || self.level.max(1) != w.level.max(1) {
+            return false;
+        }
+        let along = (b - a) / len;
+        // (An opening square to the grid with a diagonal model, set in a diagonal wall (a
+        // Bridgeport loft's two-tile door): the wall's sections along its middle, as many as
+        // its width covers.)
+        if along.x.abs() > 0.1 && along.y.abs() > 0.1 && (self.right.x.abs() < 0.1 || self.right.y.abs() < 0.1) {
+            let m = (a + b) * 0.5 - (self.wall_point + self.right * ((self.x0 + self.x1) * 0.5));
+            return m.dot(along.perp()).abs() < 0.3 && m.dot(along).abs() < (self.x1 - self.x0) * 0.5 * std::f32::consts::SQRT_2;
+        }
+        if along.dot(self.right).abs() < 0.9 {
             return false;
         }
         let d = (a + b) * 0.5 - self.wall_point;
