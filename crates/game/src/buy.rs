@@ -1678,7 +1678,7 @@ fn pick_wall(ray: Ray3d, b: &crate::building::ActiveBuilding) -> Option<(u32, u8
 fn pick_wall_hit(ray: Ray3d, b: &crate::building::ActiveBuilding) -> Option<(f32, u32, u8)> {
     let mut best: Option<(f32, u32, u8)> = None;
     for (i, w) in b.data.walls.iter().enumerate() {
-        let level = w.level.max(1);
+        let level = w.storey();
         if level > b.view_level {
             continue;
         }
@@ -2110,7 +2110,7 @@ fn placement_problem(b: &crate::building::ActiveBuilding, tf: &Transform, bounds
         let local = corners.map(|p| b.local(p));
         // Flat floor decorations may lie beneath a wall; furniture may not straddle it.
         if bounds.1.y - bounds.0.y > 0.08 && b.data.walls.iter().any(|w| {
-            w.level.max(1) == level && wall_overlaps_footprint(&local, Vec2::from(w.a), Vec2::from(w.b))
+            w.storey() == level && wall_overlaps_footprint(&local, Vec2::from(w.a), Vec2::from(w.b))
         }) {
             return Some("There's a wall in the way.");
         }

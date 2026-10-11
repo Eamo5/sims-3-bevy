@@ -96,7 +96,8 @@ impl AutoArgs {
                 "--family" => a.family = next,
                 "--select" => a.select = next,
                 "--ui-flow" => a.ui_flow = next,
-                "--view-level" => a.view_level = next.and_then(|s| s.parse().ok()),
+                // (0: the selected Sim's; "basement": a basement's storey.)
+                "--view-level" => a.view_level = next.and_then(|s| if s == "basement" { Some(BASEMENT_VIEW) } else { s.parse().ok() }),
                 "--speed" => a.speed = next.and_then(|s| s.parse().ok()),
                 "--hour" => a.hour = next.and_then(|s| s.parse().ok()),
                 "--save-at" => a.save_at = next.and_then(|s| s.parse().ok()),
@@ -2423,6 +2424,9 @@ fn auto_gate_route(
         for line in b.openings_report(p, level, r) {
             info!("nav map: {line}");
         }
+        for f in b.data.floors.iter().filter(|f| (Vec2::new(f.x as f32 + 0.5, f.z as f32 + 0.5) - p).length() < r.min(1.5)) {
+            info!("nav map: floor level {} at ({}, {}) mask {:#x} kind {} y {:?} cover {:?} ground {:?}", f.level, f.x, f.z, f.mask, f.kind, f.y, f.cover, b.data.ground_at(f.x as f32 + 0.5, f.z as f32 + 0.5));
+        }
         for (e, gt, ob, floor, barrier) in &obstacles {
             let l = b.local(gt.translation());
             if floor.map_or(1, |f| f.0) == level && l.distance(p) < r + ob.half.length() {
@@ -3837,6 +3841,9 @@ fn auto_speed(mut commands: Commands, args: Res<AutoArgs>, mut clock: ResMut<cra
 }
 
 /// `--view-level <n>` once, or `--view-level 0`: keep viewing the selected Sim's floor.
+/// `--view-level basement`.
+const BASEMENT_VIEW: u8 = 254;
+
 fn auto_view_level(
     args: Res<AutoArgs>,
     building: Option<ResMut<crate::building::ActiveBuilding>>,
@@ -3853,7 +3860,7 @@ fn auto_view_level(
             }
         }
         (Some(l), Some(mut b)) if !*done => {
-            b.view_level = l.clamp(1, b.top_level);
+            b.view_level = if l == BASEMENT_VIEW { b.data.lowest_storey() } else { l.clamp(1, b.top_level) };
             *done = true;
         }
         _ => {}

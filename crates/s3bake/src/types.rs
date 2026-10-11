@@ -10,7 +10,7 @@ pub const BAKE_VERSION: u32 = 4;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
 pub const CAS_VERSION: u32 = 10;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 56;
+pub const WORLD_VERSION: u32 = 57;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -291,6 +291,13 @@ pub struct WallBaked {
     pub y: Option<f32>,
 }
 
+impl WallBaked {
+    /// Its storey: a basement's (0, with its own height) or one from the ground floor (1) up.
+    pub fn storey(&self) -> u8 {
+        if self.level == 0 && self.y.is_some() { 0 } else { self.level.max(1) }
+    }
+}
+
 pub const NO_COVER: u16 = u16::MAX;
 
 /// Texture type of the lot's wall and floor coverings rendered at bake time.
@@ -362,7 +369,15 @@ pub struct LotBuildingBaked {
     /// The staircases, as the game builds them from their styles' pieces.
     #[serde(default)]
     pub stairs: Vec<StairBaked>,
+    /// A basement's floor height: its walls and floors are storey 0, each at its own height
+    /// (`y`), under the ground (the ground's paving is storey 0 too, with no height of its own).
+    #[serde(default)]
+    pub basement: Option<f32>,
 }
+
+/// A staircase's lower level when it's below the ground (the record's -1), before the bake
+/// puts it in a basement's storey.
+pub const BELOW_GROUND: u8 = 255;
 
 /// A staircase: the tiles it covers (lot-local, `min..max`), which way it climbs (`dir`: 0 −X,
 /// 2 +Z, 4 +X, 6 −Z, as the game's ×45°), the levels it joins, and its style's piece models: a
@@ -424,6 +439,38 @@ pub struct FenceBaked {
 }
 
 impl LotBuildingBaked {
+    /// Whether a height is down in the basement (the house has one, and it's well below the
+    /// ground).
+    pub fn below_ground(&self, y: f32) -> bool {
+        self.basement.is_some() && y < self.levels[0] - 1.0
+    }
+
+    /// The storey an object stands on: the basement's (0), else from the ground floor (1) up.
+    pub fn object_storey(&self, o: &LotObjectBaked) -> u8 {
+        if self.below_ground(o.position[1]) { 0 } else { o.level.max(1) }
+    }
+
+    /// A basement's tiles the ground over is left open for (to look into it): those under a
+    /// whole tile of the ground floor, but for any beside a basement tile left shut (under the
+    /// garden or the paving, or part of a tile), whose dug edge would show under a deck's or
+    /// porch's edge.
+    pub fn basement_open(&self) -> std::collections::HashSet<(u16, u16)> {
+        let over: std::collections::HashSet<(u16, u16)> = self.floors.iter().filter(|f| f.level == 1 && f.mask == 0xF).map(|f| (f.x, f.z)).collect();
+        let below: std::collections::HashSet<(u16, u16)> = self.floors.iter().filter(|f| f.level == 0 && f.y.is_some()).map(|f| (f.x, f.z)).collect();
+        let shut = |x: i32, z: i32| x >= 0 && z >= 0 && below.contains(&(x as u16, z as u16)) && !over.contains(&(x as u16, z as u16));
+        below
+            .iter()
+            .copied()
+            .filter(|t| over.contains(t))
+            .filter(|&(x, z)| ![(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|(dx, dz)| shut(x as i32 + dx, z as i32 + dz)))
+            .collect()
+    }
+
+    /// The lowest storey: the basement's, or the ground floor.
+    pub fn lowest_storey(&self) -> u8 {
+        if self.basement.is_some() { 0 } else { 1 }
+    }
+
     /// The ground's height at a lot-local point (paving follows it), if the lot keeps one.
     pub fn ground_at(&self, x: f32, z: f32) -> Option<f32> {
         if self.ground.is_empty() {

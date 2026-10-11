@@ -1397,7 +1397,7 @@ fn floor_controls(
     };
     for (i, f) in &buttons {
         if *i == Interaction::Pressed {
-            b.view_level = (b.view_level as i8 + f.0).clamp(1, b.top_level as i8) as u8;
+            b.view_level = (b.view_level as i8 + f.0).clamp(b.data.lowest_storey() as i8, b.top_level as i8) as u8;
         }
     }
     for mut n in &mut controls {

@@ -56,7 +56,8 @@ fn main() {
             for o in &b.objects {
                 *objs.entry(o.level).or_default() += 1;
             }
-            println!("  objects by level {objs:?} penthouse {} house {} furnished {}; pool {} tiles, {:.2} m deep", b.is_penthouse(), b.is_house(), b.is_furnished(), b.pool.len(), b.pool_depth);
+            let holes = w.terrain_holes.iter().filter(|c| ((c[0] as f32 - l.corner[0]).powi(2) + (c[1] as f32 - l.corner[2]).powi(2)).sqrt() < (l.width + l.depth) as f32 * 1.5).count();
+            println!("  objects by level {objs:?} penthouse {} house {} furnished {}; pool {} tiles, {:.2} m deep; basement {:?}; {holes} terrain cells open near", b.is_penthouse(), b.is_house(), b.is_furnished(), b.pool.len(), b.pool_depth, b.basement);
             let lifts: Vec<(u8, f32)> = b.objects.iter().filter(|o| o.script.contains("Elevator")).map(|o| (o.level, o.position[1])).collect();
             if !lifts.is_empty() {
                 println!("  elevators {lifts:?}");
@@ -311,6 +312,32 @@ fn main() {
             for z in (20..=44).step_by(2) {
                 let row: Vec<String> = (12..=46).step_by(2).map(|x| b.ground_at(x as f32 + 0.5, z as f32 + 0.5).map_or("  ?".into(), |g| format!("{:3.0}", (g - b.levels[1]) * 10.0))).collect();
                 println!("{z:3} {}", row.join(""));
+            }
+            // (A basement: '#' its tiles opened to look into, 'x' those under a whole ground-floor
+            // tile left shut (a raised deck's), 'b' under part of one, 'o' under none; 'p' paved.)
+            if b.basement.is_some() {
+                println!("basement:");
+                for z in 0..=b.depth as u16 {
+                    let row: String = (0..=b.width as u16)
+                        .map(|x| {
+                            let under = b.floors.iter().any(|f| f.level == 0 && f.y.is_some() && f.x == x && f.z == z);
+                            let up = b.floors.iter().find(|f| f.level == 1 && f.x == x && f.z == z);
+                            let paved = b.floors.iter().any(|f| f.level == 0 && f.y.is_none() && f.x == x && f.z == z);
+                            let open = b.basement_open().contains(&(x, z));
+                            match (under, up) {
+                                (false, _) => '.',
+                                (true, _) if open => '#',
+                                (true, Some(f)) if f.mask == 0xF => 'x',
+                                (true, Some(_)) => 'b',
+                                (true, None) if paved => 'p',
+                                (true, None) => 'o',
+                            }
+                        })
+                        .collect();
+                    if row.chars().any(|c| c != '.') {
+                        println!("{z:3} {row}");
+                    }
+                }
             }
             let top = b.floors.iter().map(|f| f.level).max().unwrap_or(0);
             for level in 0..=top {

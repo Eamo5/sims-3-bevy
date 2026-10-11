@@ -200,7 +200,7 @@ fn wall_along(b: &LotBuildingBaked, level: u8, p: Vec2, q: Vec2) -> Option<usize
     };
     b.walls.iter().position(|w| {
         let (a, c) = (Vec2::from(w.a), Vec2::from(w.b));
-        w.level.max(1) == level && a.distance(c) > 1e-3 && on(a, c, p) && on(a, c, q)
+        w.storey() == level && a.distance(c) > 1e-3 && on(a, c, p) && on(a, c, q)
     })
 }
 
@@ -276,7 +276,7 @@ fn snap_wall_local(data: &LotBuildingBaked, level: u8, floor_y: f32, ray: Ray3d,
     }
     // The nearest straight wall along the grid.
     let mut best: Option<(f32, Vec2, Vec2, Vec2, f32)> = None;
-    for w in data.walls.iter().filter(|w| w.level.max(1) == level) {
+    for w in data.walls.iter().filter(|w| w.storey() == level) {
         let y = w.y.unwrap_or(floor_y);
         let t = (y - ray.origin.y) / ray.direction.y;
         if t <= 0.0 { continue; }
@@ -393,7 +393,7 @@ mod wall_placement_tests {
     fn lot() -> LotBuildingBaked {
         LotBuildingBaked { lot: 0, width: 8, depth: 8, levels: vec![0.0, 0.0], walls: Vec::new(), floors: Vec::new(),
             foundation: Vec::new(), foundation_top: Vec::new(), objects: Vec::new(), covers: Vec::new(), ground: Vec::new(), pool: Vec::new(),
-            pool_depth: 0.0, fences: Vec::new(), stairs: Vec::new() }
+            pool_depth: 0.0, fences: Vec::new(), stairs: Vec::new(), basement: None }
     }
 
     #[test]

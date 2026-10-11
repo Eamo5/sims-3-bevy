@@ -152,8 +152,11 @@ impl ActiveBuilding {
         self.rot * Vec3::new(x, 0.0, z)
     }
 
-    /// The floor (1 = ground) a height is on.
+    /// The floor (1 = ground, 0 = a basement) a height is on.
     pub fn level_at(&self, y: f32) -> u8 {
+        if self.data.below_ground(y) {
+            return 0;
+        }
         let mut level = 1;
         for (l, h) in self.levels.iter().enumerate().skip(1) {
             if y > h - 0.3 {
@@ -165,7 +168,7 @@ impl ActiveBuilding {
 
     /// Refreshes the floor lookups after the floors changed.
     fn reindex(&mut self) {
-        self.floor_cells = self.data.floors.iter().map(|f| ((f.level, f.x as i32, f.z as i32), f.mask)).collect();
+        self.floor_cells = self.data.floors.iter().filter(|f| f.level > 0 || f.y.is_some()).map(|f| ((f.level, f.x as i32, f.z as i32), f.mask)).collect();
         self.floor_heights = self.data.floors.iter().filter_map(|f| Some(((f.level, f.x as i32, f.z as i32), f.y?))).collect();
         self.floor_kinds = self.data.floors.iter().map(|f| ((f.level, f.x as i32, f.z as i32), f.kind)).collect();
     }
@@ -200,7 +203,7 @@ impl ActiveBuilding {
     /// (Debugging) the doors on storey `level`: each doorway's middle (lot-local) and the way
     /// through it.
     pub fn doorways(&self, level: u8) -> Vec<(Vec2, Vec2)> {
-        self.holes.iter().filter(|(_, h)| h.door && h.level.max(1) == level).map(|(_, h)| (h.wall_point + h.right * ((h.x0 + h.x1) * 0.5), h.fwd)).collect()
+        self.holes.iter().filter(|(_, h)| h.door && h.level == level).map(|(_, h)| (h.wall_point + h.right * ((h.x0 + h.x1) * 0.5), h.fwd)).collect()
     }
 
     /// (Debugging) the doors and windows that cut no wall: (lot point, facing, door, level).
@@ -214,7 +217,7 @@ impl ActiveBuilding {
         let mut out = Vec::new();
         for (i, w) in self.data.walls.iter().enumerate() {
             let mid = (Vec2::from(w.a) + Vec2::from(w.b)) * 0.5;
-            if w.level.max(1) != level || mid.distance(p) > r {
+            if w.storey() != level || mid.distance(p) > r {
                 continue;
             }
             let (spans, door) = openings(&self.holes, w);
@@ -482,7 +485,7 @@ impl Hole {
     fn cuts(&self, w: &s3bake::types::WallBaked) -> bool {
         let (a, b) = (Vec2::from(w.a), Vec2::from(w.b));
         let len = (b - a).length();
-        if len < 1e-3 || self.level.max(1) != w.level.max(1) {
+        if len < 1e-3 || self.level != w.storey() {
             return false;
         }
         let along = (b - a) / len;
@@ -525,6 +528,17 @@ pub fn is_opening(script: &str) -> Option<bool> {
     } else {
         None
     }
+}
+
+/// How high a basement's wall goes: up to the ground floor where that's over it beside the
+/// wall, else up to the ground (a basement out under the garden or the paving).
+fn basement_wall_top(b: &LotBuildingBaked, w: &s3bake::types::WallBaked) -> f32 {
+    let (a, c) = (Vec2::from(w.a), Vec2::from(w.b));
+    let mid = (a + c) * 0.5;
+    let n = (c - a).normalize_or_zero().perp() * 0.3;
+    let ground_floor = b.levels.get(1).copied().unwrap_or(b.levels[0]);
+    let covered = [mid + n, mid - n].iter().any(|p| p.x >= 0.0 && p.y >= 0.0 && b.floors.iter().any(|f| f.level == 1 && f.x == p.x as u16 && f.z == p.y as u16));
+    if covered { ground_floor } else { b.ground_at(mid.x, mid.y).unwrap_or(b.levels[0]).min(ground_floor) }
 }
 
 /// Whether a door is a gate, set into a fence (`…Objects.Door.Fence<Style>_Gate…`).
@@ -619,9 +633,9 @@ pub fn spawn_floors(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mu
             let buf = floor_bufs.entry((f.level, cover_key(f.cover[t]).unwrap_or_else(|| floor_style(f.kind)))).or_default();
             let (p1, p2) = (corners[t], corners[(t + 1) % 4]);
             let pts = [c, p1, p2];
-            // (Paving on the ground follows it.)
+            // (Paving on the ground follows it; a basement's floor is flat.)
             let at = |p: Vec2| match f.level {
-                0 => b.ground_at(p.x, p.y).map_or(y, |g| g + 0.03),
+                0 if f.y.is_none() => b.ground_at(p.x, p.y).map_or(y, |g| g + 0.03),
                 _ => y,
             };
             buf.tri(pts.map(|p| active.world(p.x, p.y, at(p))), pts.map(|p| [p.x, p.y]), Vec3::Y);
@@ -886,7 +900,7 @@ pub fn rooms(b: &LotBuildingBaked, level: u8) -> Vec<u16> {
     // Walled grid edges: along x on line z (`hz`), and along z on line x (`vt`).
     let mut hz = vec![false; w * (d + 1)];
     let mut vt = vec![false; (w + 1) * d];
-    for wall in b.walls.iter().filter(|wl| wl.level.max(1) == level) {
+    for wall in b.walls.iter().filter(|wl| wl.storey() == level) {
         let (a, c) = (Vec2::from(wall.a), Vec2::from(wall.b));
         if a.distance(c) < 0.5 {
             continue;
@@ -977,7 +991,7 @@ pub fn room_floors(b: &LotBuildingBaked, level: u8) -> Vec<PaintOp> {
 /// Faces the sides of the household's own walls into the rooms they close off (or the
 /// outdoors); returns the walls whose sides changed.
 fn restyle(b: &mut ActiveBuilding) -> Vec<u32> {
-    let levels: BTreeSet<u8> = b.built.iter().filter_map(|&i| b.data.walls.get(i as usize)).map(|w| w.level.max(1)).collect();
+    let levels: BTreeSet<u8> = b.built.iter().filter_map(|&i| b.data.walls.get(i as usize)).map(|w| w.storey()).collect();
     let rooms: HashMap<u8, Vec<u16>> = levels.into_iter().map(|l| (l, rooms(&b.data, l))).collect();
     let (w, d) = (b.data.width as i32, b.data.depth as i32);
     let mut changed = Vec::new();
@@ -990,7 +1004,7 @@ fn restyle(b: &mut ActiveBuilding) -> Vec<u32> {
         if len < 1e-3 {
             continue;
         }
-        let level = wall.level.max(1);
+        let level = wall.storey();
         let n = Vec2::new(-(c.y - a.y), c.x - a.x) / len;
         let mid = (a + c) * 0.5;
         let kind_at = |p: Vec2| {
@@ -1397,6 +1411,7 @@ pub fn empty_building(lot_index: usize, lot: &LotInfo, ground: f32) -> LotBuildi
         pool_depth: 0.0,
         fences: Vec::new(),
         stairs: Vec::new(),
+        basement: None,
     }
 }
 
@@ -1419,8 +1434,9 @@ fn spawn_wall(
     let b = &active.data;
     let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);
     let cover_key = |i: u16| (i != s3bake::types::NO_COVER).then(|| b.covers.get(i as usize).copied()).flatten();
-    let level = w.level.max(1);
+    let level = w.storey();
     let y0 = w.y.unwrap_or(level_y(level));
+    let full_h = if level == 0 { (basement_wall_top(b, w) - y0).max(1.0) } else { WALL_H };
     let (a, bb) = (Vec2::from(w.a), Vec2::from(w.b));
     let seg = bb - a;
     let len = seg.length();
@@ -1442,7 +1458,7 @@ fn spawn_wall(
         .id();
     for (side_index, (side, kind, cover)) in [(1.0f32, w.left, w.cover[0]), (-1.0, w.right, w.cover[1])].into_iter().enumerate() {
         let mut meshes = [MeshBuf::default(), MeshBuf::default()];
-        for (mi, top) in [(0usize, WALL_H), (1, CUT_H)] {
+        for (mi, top) in [(0usize, full_h), (1, CUT_H)] {
             for (s0, s1) in wall_spans(&seg_holes, top) {
                 let off = half * side;
                 let p = [to3(pa, s0) + off, to3(pb, s0) + off, to3(pb, s1) + off, to3(pa, s1) + off];
@@ -1469,7 +1485,7 @@ fn spawn_wall(
     }
     // Wall tops: caps over every span, for both heights.
     let mut caps = [MeshBuf::default(), MeshBuf::default()];
-    for (mi, top) in [(0usize, WALL_H), (1, CUT_H)] {
+    for (mi, top) in [(0usize, full_h), (1, CUT_H)] {
         for (_, s1) in wall_spans(&seg_holes, top) {
             let p = [to3(pa, s1) + half, to3(pb, s1) + half, to3(pb, s1) - half, to3(pa, s1) - half];
             caps[mi].quad(p, [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], Vec3::Y);
@@ -1671,7 +1687,7 @@ fn respawn_roofs(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut O
             // The rooms on either side of the household's walls.
             let mut s = HashSet::new();
             for &i in &b.built {
-                let Some(wl) = b.data.walls.get(i as usize).filter(|wl| wl.level.max(1) == level) else { continue };
+                let Some(wl) = b.data.walls.get(i as usize).filter(|wl| wl.storey() == level) else { continue };
                 let (a, c) = (Vec2::from(wl.a), Vec2::from(wl.b));
                 if a.distance(c) < 1e-3 {
                     continue;
@@ -1818,7 +1834,7 @@ pub fn spawn_building(
     let corner = Vec3::from(lot.corner);
     let rot = Quat::from_rotation_y(lot.rotation);
     let top_level = b.levels.len().saturating_sub(2).max(1) as u8;
-    let floor_cells = b.floors.iter().map(|f| ((f.level, f.x as i32, f.z as i32), f.mask)).collect();
+    let floor_cells = b.floors.iter().filter(|f| f.level > 0 || f.y.is_some()).map(|f| ((f.level, f.x as i32, f.z as i32), f.mask)).collect();
     let floor_heights = b.floors.iter().filter_map(|f| Some(((f.level, f.x as i32, f.z as i32), f.y?))).collect();
     let floor_kinds = b.floors.iter().map(|f| ((f.level, f.x as i32, f.z as i32), f.kind)).collect();
     let mut active = ActiveBuilding {
@@ -1910,14 +1926,14 @@ pub fn spawn_building(
                 missing.push(o.script.rsplit('.').next().unwrap_or("").to_string());
                 continue;
             };
-            commands.entity(spawned.entity).insert((BuildingPiece { level: o.level }, Floor(o.level.max(1))));
+            commands.entity(spawned.entity).insert((BuildingPiece { level: if b.below_ground(o.position[1]) { 0 } else { o.level } }, Floor(b.object_storey(o))));
             if opening.is_some() || o.script.contains("Stairs") || o.script.contains("Column") {
                 commands.entity(spawned.entity).remove::<Obstacle>();
             }
             spawned.entity
         };
         if let (Some(door), Some(bounds)) = (opening, parts_bounds(&assets.object(ctx, o.objd))) {
-            let hole = Hole::new(Vec2::from(o.local), active.local_dir(q * Vec3::Z), active.local_dir(q * Vec3::X), bounds, door, o.level);
+            let hole = Hole::new(Vec2::from(o.local), active.local_dir(q * Vec3::Z), active.local_dir(q * Vec3::X), bounds, door, b.object_storey(o));
             let wp = hole.wall_point;
             // (Gates stand in fences, never cut away.)
             if neighbor.is_none() && !is_gate(&o.script) {
@@ -1941,7 +1957,9 @@ pub fn spawn_building(
         // (From the floors at either end where they stand at their own heights (a split-level's,
         // a hillside's), or up from the ground where it is.)
         let tile_y = |level: u8, p: Vec2| active.floor_heights.get(&(level, p.x.floor() as i32, p.y.floor() as i32)).copied();
-        let y0 = if s.bottom == 0 { b.ground_at(bottom.x, bottom.y).unwrap_or(level_y(0)) } else { tile_y(s.bottom, bottom - d * 0.5).unwrap_or(level_y(s.bottom)) };
+        let y0 = tile_y(s.bottom, bottom - d * 0.5)
+            .or_else(|| (s.bottom == 0).then(|| b.basement.or_else(|| b.ground_at(bottom.x, bottom.y))).flatten())
+            .unwrap_or(level_y(s.bottom));
         let y1 = tile_y(s.top, bottom + d * (run as f32 + 0.5)).unwrap_or(level_y(s.top));
         if run == 0 || width == 0 || y1 - y0 < 0.1 {
             continue;
@@ -1957,7 +1975,7 @@ pub fn spawn_building(
             let e = spawn_parts(commands, &parts, Transform { translation: active.world(at.x, at.y, y), rotation: p.rotation, scale: if stretched { p.scale } else { Vec3::ONE } });
             place(commands, e, neighbor, s.bottom);
         }
-        if s.bottom >= 1 && (neighbor.is_none() || visit) {
+        if (s.bottom >= 1 || b.basement.is_some()) && (neighbor.is_none() || visit) {
             let top = bottom + d * run as f32;
             links.push((s.bottom, s.top, bottom - d * 0.45, top + d * 0.45, y0, y1));
         }
@@ -2007,7 +2025,7 @@ pub fn spawn_building(
             let f = rot.inverse() * (q * Vec3::Z);
             let door = Vec2::from(o.local) + Vec2::new(f.x, f.z).normalize_or_zero() * 0.9;
             let key = ((o.local[0] * 2.0).round() as i32, (o.local[1] * 2.0).round() as i32);
-            shafts.entry(key).or_default().push((o.level.max(1), door));
+            shafts.entry(key).or_default().push((b.object_storey(o), door));
         }
         for mut stops in shafts.into_values() {
             stops.sort_by_key(|s| s.0);
@@ -2027,8 +2045,9 @@ pub fn spawn_building(
     let mut merged_caps = [MeshBuf::default(), MeshBuf::default()];
     let heights: &[(usize, f32)] = if visit { &[(0, WALL_H), (1, CUT_H)] } else { &[(0, WALL_H)] };
     for (wall_index, w) in b.walls.iter().enumerate() {
-        let level = w.level.max(1);
+        let level = w.storey();
         let y0 = w.y.unwrap_or(level_y(level));
+        let full_h = if level == 0 { (basement_wall_top(b, w) - y0).max(1.0) } else { WALL_H };
         let (a, bb) = (Vec2::from(w.a), Vec2::from(w.b));
         let seg = bb - a;
         let len = seg.length();
@@ -2046,6 +2065,7 @@ pub fn spawn_building(
         let ulen = len + WALL_T;
         if neighbor.is_some() {
             for &(hi, top) in heights {
+                let top = if hi == 0 { full_h } else { top };
                 for (side, kind, cover) in [(1.0f32, w.left, w.cover[0]), (-1.0, w.right, w.cover[1])] {
                     let buf = merged[hi].entry(cover_key(cover).unwrap_or_else(|| wall_style(kind, exterior))).or_default();
                     for (s0, s1) in wall_spans(&seg_holes, top) {
@@ -2163,7 +2183,7 @@ fn follow_selected_floor(
 ) {
     let Some(mut b) = building else { return };
     if let Some(f) = sims.iter().next() {
-        let l = f.0.clamp(1, b.top_level);
+        let l = f.0.clamp(b.data.lowest_storey(), b.top_level);
         if b.view_level != l {
             b.view_level = l;
         }
@@ -2223,7 +2243,8 @@ fn view_level_keys(keys: Res<ButtonInput<KeyCode>>, building: Option<ResMut<Acti
             b.levels.push(h);
         }
     }
-    if keys.just_pressed(KeyCode::PageDown) && b.view_level > 1 {
+    // (A basement's storey 0 is looked into, not built on.)
+    if keys.just_pressed(KeyCode::PageDown) && b.view_level > if building_up { 1 } else { b.data.lowest_storey() } {
         b.view_level -= 1;
     }
 }

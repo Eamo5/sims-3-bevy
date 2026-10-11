@@ -149,7 +149,7 @@ pub fn lot_stairs_with_ids(pkg: &Package, lot: u64) -> Vec<(u64, StairBaked)> {
             min: [lo(x1, x2), lo(z1, z2)],
             max: [hi(x1, x2), hi(z1, z2)],
             dir: dir as u8,
-            bottom: bottom.min(32) as u8,
+            bottom: if bottom == u32::MAX { BELOW_GROUND } else { bottom.min(32) as u8 },
             top: top.min(32) as u8,
             flight: None,
             start: None,
@@ -576,10 +576,11 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     let mut floors = Vec::new();
     let floor_palette = read(ld::T_FLOOR_PALETTE, ld::G_FLOOR_PALETTE).and_then(|d| ld::parse_floor_palette(&d).ok()).unwrap_or_default();
     // (A basement's tiles, on the level below the ground inside walls there: a pool has none.)
-    let basement: std::collections::HashSet<(u32, u32)> = {
+    let basement_cells: Vec<s3formats::lot::FloorCell> = {
         let edges: Vec<([f32; 2], [f32; 2])> = data.walls.segments().filter(|s| s.2 as i32 == -1).map(|s| (s.0, s.1)).collect();
-        if edges.is_empty() { Default::default() } else { enclosed_floor(&edges, w, d).iter().map(|c| (c.x, c.z)).collect() }
+        if edges.is_empty() { Vec::new() } else { enclosed_floor(&edges, w, d) }
     };
+    let basement: std::collections::HashSet<(u32, u32)> = basement_cells.iter().map(|c| (c.x, c.z)).collect();
     // (A pool's tiles, on the level below the ground: the ground's outdoor tiles over them are
     // its water's surface, not paving.)
     let pool_below: std::collections::HashSet<(u32, u32)> = match (ground_index, floor_grid.as_ref()) {
@@ -676,8 +677,49 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
         _ => (Vec::new(), 0.0),
     };
 
-    // Walls with the kind of room on each side (outdoors when no indoor floor is there).
-    let floor_at: HashMap<(u8, u16, u16), (u8, u8)> = floors.iter().map(|f| ((f.level, f.x, f.z), (f.mask, f.kind))).collect();
+    // A basement: the level below the ground inside its walls, storey 0 (each tile at its own
+    // height, as the ground's paving has none), the rooms' kinds by their furniture; and its
+    // floor's height.
+    let mut basement_y = None;
+    if let (1.., Some(g), Some(t)) = (ground_index, floor_grid.as_ref(), terrain.as_ref()) {
+        let below = ground_index - 1;
+        let mut kinds: HashMap<u32, u8> = HashMap::new();
+        let region_of: HashMap<(u32, u32), u32> = basement_cells.iter().map(|c| ((c.x, c.z), c.region)).collect();
+        for o in objs.iter().filter(|o| o.level == 0 && o.position[1] < ground - 1.0) {
+            let (x, z) = (o.local[0].floor(), o.local[1].floor());
+            if x >= 0.0 && z >= 0.0
+                && let (Some(&region), Some(k)) = (region_of.get(&(x as u32, z as u32)), room_kind_of(&o.script))
+            {
+                let e = kinds.entry(region).or_insert(k);
+                *e = (*e).min(k);
+            }
+        }
+        let mut hs = Vec::new();
+        for c in &basement_cells {
+            let Some(q) = g.quad(below, c.x, c.z) else { continue };
+            let mask = (0..4).filter(|&k| q[k] != 0).fold(0u8, |m, k| m | (1 << k)) & c.mask;
+            if mask == 0 {
+                continue;
+            }
+            let cover = q.map(|id| match floor_palette.get(&(id as u32)) {
+                Some(&(cwal, comp)) if id != 0 => covers.pick(Some(comp), Some(cwal), true),
+                _ => NO_COVER,
+            });
+            let y = ground + t.at(below as usize, c.x as usize, c.z as usize);
+            hs.push(y);
+            let kind = kinds.get(&c.region).copied().unwrap_or(ROOM_LIVING);
+            floors.push(FloorBaked { level: 0, x: c.x as u16, z: c.z as u16, mask, kind, region: c.region as u16, cover, y: Some(y) });
+        }
+        if !hs.is_empty() {
+            hs.sort_by(f32::total_cmp);
+            basement_y = Some(hs[hs.len() / 2]);
+        }
+    }
+
+    // Walls with the kind of room on each side (outdoors when no indoor floor is there). (On
+    // storey 0, the basement's floors, not the ground's paving.)
+    let floor_at: HashMap<(u8, u16, u16), (u8, u8)> = floors.iter().filter(|f| f.level > 0 || f.y.is_some()).map(|f| ((f.level, f.x, f.z), (f.mask, f.kind))).collect();
+    let basement_floor_y: HashMap<(u16, u16), f32> = floors.iter().filter(|f| f.level == 0).filter_map(|f| Some(((f.x, f.z), f.y?))).collect();
     let has_floor = |level: u32, p: [f32; 2]| -> bool {
         p[0] >= 0.0 && p[1] >= 0.0 && floor_at.contains_key(&(level as u8, p[0].floor() as u16, p[1].floor() as u16))
     };
@@ -729,8 +771,13 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     let (design_palette, pattern_palette) = (palette(ld::G_WALL_DESIGN_PALETTE), palette(ld::G_WALL_PATTERN_PALETTE));
     let cover_edges: Vec<([f32; 2], [f32; 2], u32, u32)> = cover_graph.segments().map(|(a, b, l, e)| (a, b, l, e.id)).collect();
     for (a, b, grid_level, e) in data.walls.segments() {
-        // (Walls below the ground are a pool's or a basement's.)
-        let Some(level) = wall_storey(grid_level, a, b) else { continue };
+        // (Walls below the ground are a basement's, storey 0, or a pool's, not drawn.)
+        let level = if grid_level == u32::MAX && basement_y.is_some() {
+            0
+        } else {
+            let Some(level) = wall_storey(grid_level, a, b) else { continue };
+            level
+        };
         let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
         let len = (dx * dx + dz * dz).sqrt();
         if len < 1e-3 {
@@ -755,6 +802,17 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
             }
         };
         let (left, right) = (kind(1.0, room_plus), kind(-1.0, room_minus));
+        // (A basement's walls stand on its floor beside them.)
+        let wall_y = (level == 0)
+            .then(|| {
+                [side(1.0), side(-1.0)]
+                    .iter()
+                    .filter(|p| p[0] >= 0.0 && p[1] >= 0.0)
+                    .filter_map(|p| basement_floor_y.get(&(p[0].floor() as u16, p[1].floor() as u16)).copied())
+                    .reduce(f32::min)
+                    .or(basement_y)
+            })
+            .flatten();
         // The covering edges on this wall, in order along it. Side A of a covering edge is
         // its left (by the wall graph's rooms, taken in the edge's direction).
         let mut pieces: Vec<(f32, f32, [u16; 2])> = Vec::new();
@@ -781,21 +839,21 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
         pieces.sort_by(|x, y| x.0.total_cmp(&y.0));
         let at = |t: f32| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
         if pieces.is_empty() {
-            walls.push(WallBaked { a, b, level: level as u8, left, right, cover: [NO_COVER; 2], y: None });
+            walls.push(WallBaked { a, b, level: level as u8, left, right, cover: [NO_COVER; 2], y: wall_y });
         } else {
             // Gaps between covering edges keep the wall uncovered there.
             let mut t = 0.0f32;
             for (t0, t1, cover) in pieces {
                 if t0 > t + 0.01 {
-                    walls.push(WallBaked { a: at(t), b: at(t0), level: level as u8, left, right, cover: [NO_COVER; 2], y: None });
+                    walls.push(WallBaked { a: at(t), b: at(t0), level: level as u8, left, right, cover: [NO_COVER; 2], y: wall_y });
                 }
                 if t1 > t0.max(t) + 0.01 {
-                    walls.push(WallBaked { a: at(t0.max(t)), b: at(t1), level: level as u8, left, right, cover, y: None });
+                    walls.push(WallBaked { a: at(t0.max(t)), b: at(t1), level: level as u8, left, right, cover, y: wall_y });
                 }
                 t = t.max(t1);
             }
             if t < 0.99 {
-                walls.push(WallBaked { a: at(t), b, level: level as u8, left, right, cover: [NO_COVER; 2], y: None });
+                walls.push(WallBaked { a: at(t), b, level: level as u8, left, right, cover: [NO_COVER; 2], y: wall_y });
             }
         }
     }
@@ -813,8 +871,8 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
             })
             .collect()
     };
-    for wb in &mut walls {
-        let level = wb.level.max(1) as u32;
+    for wb in walls.iter_mut().filter(|w| w.level > 0) {
+        let level = wb.level as u32;
         if let Some(y) = beside(level, wb.a, wb.b).into_iter().reduce(f32::min).filter(|y| (y - levels[level as usize]).abs() > 0.05) {
             wb.y = Some(y);
         }
@@ -877,11 +935,18 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
                 for (guid, s) in &mut v {
                     // (The record's levels count as the walls' do: on their storeys, by the
                     // floors at either end; from the ground (level 0) only onto the ground floor.)
-                    if s.top > s.bottom {
-                        let d = s.climb();
-                        let half = s.run_width().0 as f32 * 0.5 + 0.5;
-                        let mid = ((s.min[0] + s.max[0]) as f32 * 0.5, (s.min[1] + s.max[1]) as f32 * 0.5);
-                        let end = |k: f32| (mid.0 + d[0] * k, mid.1 + d[1] * k);
+                    let d = s.climb();
+                    let half = s.run_width().0 as f32 * 0.5 + 0.5;
+                    let mid = ((s.min[0] + s.max[0]) as f32 * 0.5, (s.min[1] + s.max[1]) as f32 * 0.5);
+                    let end = |k: f32| (mid.0 + d[0] * k, mid.1 + d[1] * k);
+                    // (Up from a basement, its storey 0.)
+                    if s.bottom == BELOW_GROUND {
+                        if basement_y.is_some()
+                            && let Some(top) = level_storey(s.top as u32, &[end(half)])
+                        {
+                            (s.bottom, s.top) = (0, top as u8);
+                        }
+                    } else if s.top > s.bottom {
                         if let Some(top) = level_storey(s.top as u32, &[end(half)]) {
                             let bottom = if s.bottom == 0 { (top > 1) as u32 } else { level_storey(s.bottom as u32, &[end(-half)]).unwrap_or(s.bottom as u32) };
                             if top > bottom {
@@ -896,7 +961,8 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
                         s.top = o as u8 + span;
                     }
                 }
-                v.into_iter().map(|(_, s)| s).collect()
+                // (Those from below the ground with no basement drawn, a pool's, go.)
+                v.into_iter().map(|(_, s)| s).filter(|s| s.bottom != BELOW_GROUND).collect()
             },
             lot: lot_index as u32,
             width: w,
@@ -912,6 +978,7 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
             pool,
             pool_depth,
             fences,
+            basement: basement_y,
         },
         jobs,
     ))

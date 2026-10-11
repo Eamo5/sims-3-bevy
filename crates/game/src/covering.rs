@@ -40,7 +40,7 @@ impl Room {
 
 fn room(b: &LotBuildingBaked, level: u8, at: Vec2) -> Room {
     let mut walls: HashMap<(i32, i32), Vec<(Vec2, Vec2)>> = HashMap::new();
-    for wall in b.walls.iter().filter(|w| w.level.max(1) == level && w.a != w.b) {
+    for wall in b.walls.iter().filter(|w| w.storey() == level && w.a != w.b) {
         let (a, c) = (Vec2::from(wall.a), Vec2::from(wall.b));
         let (lo, hi) = (a.min(c).floor().as_ivec2(), a.max(c).floor().as_ivec2());
         for z in (lo.y - 1).max(0)..=hi.y.min(b.depth as i32 - 1) {
@@ -132,8 +132,8 @@ pub fn walls(b: &LotBuildingBaked, wall: u32, side: u8, texture: Key, fill: bool
         let (a, c) = (Vec2::from(w.a), Vec2::from(w.b));
         (a + c) * 0.5 + (c - a).normalize_or_zero().perp() * if side == 0 { 0.12 } else { -0.12 }
     };
-    let room = fill.then(|| room(b, target.level.max(1), sample(target, side)));
-    b.walls.iter().enumerate().filter(|(_, w)| w.a != w.b && w.level.max(1) == target.level.max(1)).flat_map(|(i, w)| {
+    let room = fill.then(|| room(b, target.storey(), sample(target, side)));
+    b.walls.iter().enumerate().filter(|(_, w)| w.a != w.b && w.storey() == target.storey()).flat_map(|(i, w)| {
         let room = &room;
         (0..2).filter_map(move |s| {
             let selected = room.as_ref().map_or(i as u32 == wall && s == side, |r| r.contains(sample(w, s)));
@@ -181,7 +181,7 @@ pub fn preview(gizmos: &mut Gizmos, b: &crate::building::ActiveBuilding, ops: &[
             PaintOp::Pave { x, z, mask, heights, .. } => (x, z, mask, heights),
             PaintOp::Wall { wall, side, .. } => {
                 let Some(w) = b.data.walls.get(wall as usize) else { continue };
-                let level = w.level.max(1) as usize;
+                let level = w.storey() as usize;
                 let y = w.y.unwrap_or_else(|| b.levels.get(level).copied().unwrap_or(0.0));
                 let top = y + s3bake::building::LEVEL_HEIGHT;
                 let (a, c) = (Vec2::from(w.a), Vec2::from(w.b));
@@ -238,7 +238,7 @@ mod tests {
     fn house() -> LotBuildingBaked {
         let mut b = LotBuildingBaked { lot: 0, width: 5, depth: 5, levels: vec![0.0, 0.0], walls: Vec::new(), floors: Vec::new(),
             foundation: Vec::new(), foundation_top: Vec::new(), objects: Vec::new(), covers: Vec::new(), ground: Vec::new(), pool: Vec::new(),
-            pool_depth: 0.0, fences: Vec::new(), stairs: Vec::new() };
+            pool_depth: 0.0, fences: Vec::new(), stairs: Vec::new(), basement: None };
         for (a, c) in [([1.0, 1.0], [3.0, 1.0]), ([3.0, 1.0], [3.0, 3.0]), ([3.0, 3.0], [1.0, 3.0]), ([1.0, 3.0], [1.0, 1.0])] {
             crate::building::apply_paint(&mut b, &PaintOp::AddWall { a, b: c, level: 1 });
         }

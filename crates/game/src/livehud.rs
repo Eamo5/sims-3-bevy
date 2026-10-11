@@ -478,10 +478,10 @@ fn puck_one(
     if let Some(b) = building {
         for (id, step) in [(PUCK_LEVEL_UP, 1i8), (PUCK_LEVEL_DOWN, -1)] {
             if pressed(&clicks, p.id(id)) {
-                b.view_level = (b.view_level as i8 + step).clamp(1, b.top_level.max(1) as i8) as u8;
+                b.view_level = (b.view_level as i8 + step).clamp(b.data.lowest_storey() as i8, b.top_level.max(1) as i8) as u8;
             }
         }
-        for (id, ok) in [(PUCK_LEVEL_UP, b.view_level < b.top_level), (PUCK_LEVEL_DOWN, b.view_level > 1)] {
+        for (id, ok) in [(PUCK_LEVEL_UP, b.view_level < b.top_level), (PUCK_LEVEL_DOWN, b.view_level > b.data.lowest_storey())] {
             if let Some(e) = p.id(id)
                 && let Ok(mut btn) = buttons.get_mut(e)
                 && btn.disabled == ok

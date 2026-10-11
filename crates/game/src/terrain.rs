@@ -161,11 +161,12 @@ pub struct PoolCollar(pub usize);
 const COLLAR: i32 = 2;
 
 pub fn collar_mesh(hm: &Heightmap, lot: &s3bake::LotInfo, b: &s3bake::LotBuildingBaked) -> Option<Mesh> {
-    let pool = &b.pool;
-    if pool.is_empty() {
+    // (Round a pool, and a basement open under the ground floor over it.)
+    let tiles: std::collections::HashSet<(i32, i32)> =
+        b.pool.iter().map(|f| (f.x as i32, f.z as i32)).chain(b.basement_open().into_iter().map(|(x, z)| (x as i32, z as i32))).collect();
+    if tiles.is_empty() {
         return None;
     }
-    let tiles: std::collections::HashSet<(i32, i32)> = pool.iter().map(|f| (f.x as i32, f.z as i32)).collect();
     let (s, c) = lot.rotation.sin_cos();
     let to_world = |x: f32, z: f32| (lot.corner[0] + x * c + z * s, lot.corner[2] - x * s + z * c);
     let wsize = (hm.width - 1) as f32;
@@ -190,7 +191,8 @@ pub fn collar_mesh(hm: &Heightmap, lot: &s3bake::LotInfo, b: &s3bake::LotBuildin
                 let (wx, wz) = to_world(lx, lz);
                 // (The lot's own ground, a whisker above the terrain it covers: the heights
                 // round a pool are dug down a little past its edge.)
-                pos.push([wx, b.ground_at(lx, lz).unwrap_or(b.levels[0]) + 0.03, wz]);
+                // (Under the paving laid on the ground, 3 cm up.)
+                pos.push([wx, b.ground_at(lx, lz).unwrap_or(b.levels[0]) + 0.015, wz]);
                 nrm.push(hm.normal(wx.round() as i64, wz.round() as i64));
                 uv.push([wx / wsize, wz / wsize]);
             }
@@ -354,7 +356,7 @@ pub fn build_terrain(world: &WorldBaked) -> TerrainBuild {
         collars: world
             .buildings
             .iter()
-            .filter(|b| !b.pool.is_empty())
+            .filter(|b| !b.pool.is_empty() || b.basement.is_some())
             .filter_map(|b| Some((b.lot as usize, collar_mesh(hm, &world.lots.get(b.lot as usize)?.info, b)?)))
             .collect(),
     }
@@ -462,6 +464,18 @@ fn dig_pools(
             }
         }
     }
+    // (And a basement's under the ground floor over it, open to look into, as the bake left them.)
+    let open = b.data.basement_open();
+    let mut basement = std::collections::HashSet::new();
+    let mut basement_y = f32::MAX;
+    for f in b.data.floors.iter().filter(|f| f.level == 0 && f.y.is_some() && open.contains(&(f.x, f.z))) {
+        basement_y = basement_y.min(f.y.unwrap_or(f32::MAX));
+        for (u, v) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75), (0.5, 0.5)] {
+            let (wx, wz) = to_world(f.x as f32 + u, f.z as f32 + v);
+            basement.insert((wx.floor() as i64, wz.floor() as i64));
+        }
+    }
+    now.extend(basement.iter().copied());
     let inside = |(x, z): (i64, i64)| {
         let (wx, wz) = (x as f32 + 0.5 - lot.corner[0], z as f32 + 0.5 - lot.corner[2]);
         let (lx, lz) = (wx * c - wz * s, wx * s + wz * c);
@@ -488,8 +502,9 @@ fn dig_pools(
             if px < 0 || pz < 0 || px as usize >= hm.width || pz as usize >= hm.height {
                 continue;
             }
-            let pool = [(px - 1, pz - 1), (px, pz - 1), (px - 1, pz), (px, pz)].iter().all(|c| now.contains(c));
-            let y = if pool { floor_y } else { ground };
+            let around = [(px - 1, pz - 1), (px, pz - 1), (px - 1, pz), (px, pz)];
+            let pool = around.iter().all(|c| now.contains(c));
+            let y = if pool && around.iter().all(|c| basement.contains(c)) { basement_y - 0.05 } else if pool { floor_y } else { ground };
             hm.data[pz as usize * hm.width + px as usize] = (y / hm.scale).round().clamp(0.0, 65535.0) as u16;
         }
     }

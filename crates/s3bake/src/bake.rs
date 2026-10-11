@@ -901,6 +901,37 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         }
         terrain_holes.extend(cells);
     }
+    // A basement is open to the sky under the ground floor over it (the ground floor's own
+    // floor covering it until it's looked into), the ground dug down to its floor.
+    for b in buildings.iter().filter(|b| b.basement.is_some()) {
+        let Some(l) = world.lots.get(b.lot as usize) else { continue };
+        let (s, c) = l.rotation.sin_cos();
+        let to_world = |x: f32, z: f32| (l.corner[0] + x * c + z * s, l.corner[2] - x * s + z * c);
+        let open = b.basement_open();
+        let mut cells = HashSet::new();
+        let mut lowest = f32::MAX;
+        for f in b.floors.iter().filter(|f| f.level == 0 && f.y.is_some() && open.contains(&(f.x, f.z))) {
+            let Some(y) = f.y else { continue };
+            lowest = lowest.min(y);
+            for (u, v) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75), (0.5, 0.5)] {
+                let (wx, wz) = to_world(f.x as f32 + u, f.z as f32 + v);
+                cells.insert([wx.floor() as i32, wz.floor() as i32]);
+            }
+        }
+        if cells.is_empty() {
+            continue;
+        }
+        for &[x, z] in &cells {
+            for (px, pz) in [(x, z), (x + 1, z), (x, z + 1), (x + 1, z + 1)] {
+                let around = [[px - 1, pz - 1], [px, pz - 1], [px - 1, pz], [px, pz]];
+                if around.iter().all(|c| cells.contains(c)) && px >= 0 && pz >= 0 && (px as usize) < heightmap.width && (pz as usize) < heightmap.height {
+                    let k = pz as usize * heightmap.width + px as usize;
+                    heightmap.data[k] = ((lowest - 0.05) / heightmap.scale).round().clamp(0.0, 65535.0) as u16;
+                }
+            }
+        }
+        terrain_holes.extend(cells);
+    }
     terrain_holes.sort();
     terrain_holes.dedup();
 

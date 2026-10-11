@@ -83,7 +83,9 @@ pub struct Waypoint {
 
 /// Plans a walk from one floor to another, using stairs to change floors.
 pub fn plan_route(ground: &NavGrid, upper: Option<&UpperFloors>, from: Vec2, from_level: u8, to: Vec2, to_level: u8) -> Option<Vec<Waypoint>> {
-    plan_route_depth(ground, upper, from, from_level.max(1), to, to_level.max(1), 0)
+    // (Storey 0 is a basement's, where there's one; otherwise the ground's, the ground floor's.)
+    let storey = |l: u8| if l == 0 && upper.is_some_and(|u| u.grids.contains_key(&0)) { 0 } else { l.max(1) };
+    plan_route_depth(ground, upper, from, storey(from_level), to, storey(to_level), 0)
 }
 
 fn plan_route_depth(
@@ -95,7 +97,7 @@ fn plan_route_depth(
     to_level: u8,
     depth: usize,
 ) -> Option<Vec<Waypoint>> {
-    let grid_of = |l: u8| if l <= 1 { Some(ground) } else { upper.and_then(|u| u.grids.get(&l)) };
+    let grid_of = |l: u8| if l == 1 { Some(ground) } else { upper.and_then(|u| u.grids.get(&l)) };
     if from_level == to_level {
         let pts = grid_of(from_level)?.find_path(from, to)?;
         return Some(pts.into_iter().map(|p| Waypoint { p, level: from_level, climb: None }).collect());
@@ -517,7 +519,7 @@ pub fn fill_grid(grid: &mut NavGrid, world: &crate::loading::WorldInfo, obstacle
     }
     grid.clear_barriers();
     for (gt, ob, floor, barrier) in obstacles {
-        if floor.is_some_and(|f| f.0 > 1) {
+        if floor.is_some_and(|f| f.0 != 1) {
             continue;
         }
         mark_obstacle(grid, gt, ob, barrier);
@@ -589,7 +591,8 @@ pub fn rebuild_upper(b: &crate::building::ActiveBuilding, upper: &mut UpperFloor
     upper.made = true;
     upper.grids.clear();
     upper.stairs = b.stairs.clone();
-    for level in 2..=b.top_level {
+    // (The upper floors, and a basement.)
+    for level in (b.data.basement.is_some().then_some(0).into_iter()).chain(2..=b.top_level) {
         let mut g = NavGrid::new(b.center.xz(), b.extent + 2.0);
         g.dirty = false;
         for z in 0..g.h {
@@ -808,7 +811,7 @@ pub fn walk_style(r: &RouteSense, roll: f32) -> WalkStyle {
 pub fn floor_height(world: &crate::loading::WorldInfo, building: Option<&crate::building::ActiveBuilding>, level: u8, p: Vec3) -> f32 {
     match building {
         // (The house's floor, or the floor of the lot being visited.)
-        Some(b) if level > 1 => b
+        Some(b) if level > 1 || (level == 0 && b.data.basement.is_some()) => b
             .floor_y(level, p)
             .or_else(|| b.away.as_deref().and_then(|a| a.floor_y(level, p)))
             .unwrap_or_else(|| match b.away.as_deref().filter(|a| a.local(p).cmpge(Vec2::ZERO).all() && a.local(p).cmple(Vec2::new(a.data.width as f32, a.data.depth as f32)).all()) {

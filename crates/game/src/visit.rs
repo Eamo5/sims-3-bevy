@@ -139,7 +139,7 @@ fn open_lot(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetC
             let pos = Vec3::from(o.position);
             // (Each on its floor: upstairs is reached by the stairs and elevators.)
             let Some(s) = crate::home::spawn_game_object_design(commands, assets, ctx, catalog, o.objd, pos, q, o.design) else { continue };
-            commands.entity(s.entity).insert((LotObject(lot), Floor(o.level.max(1))));
+            commands.entity(s.entity).insert((LotObject(lot), Floor(b.object_storey(o))));
             if crate::building::is_opening(&o.script).is_some() || o.script.contains("Column") {
                 commands.entity(s.entity).remove::<Obstacle>();
             }
