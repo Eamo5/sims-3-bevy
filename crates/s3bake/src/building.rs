@@ -987,6 +987,13 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
                     let half = s.run_width().0 as f32 * 0.5 + 0.5;
                     let mid = ((s.min[0] + s.max[0]) as f32 * 0.5, (s.min[1] + s.max[1]) as f32 * 0.5);
                     let end = |k: f32| (mid.0 + d[0] * k, mid.1 + d[1] * k);
+                    if std::env::var("STOREYDEBUG").is_ok_and(|n| lot.internal_name.contains(&n)) {
+                        let at = |k: f32| {
+                            let p = end(k);
+                            (0..8u32).filter_map(|gl| tile_storey.get(&(gl, p.0.floor() as u32, p.1.floor() as u32)).map(|s| (gl, *s))).collect::<Vec<_>>()
+                        };
+                        eprintln!("{} stairs {:?}-{:?} raw {}->{}: bottom end {:?} (grid, storey), top end {:?}", lot.internal_name, s.min, s.max, s.bottom, s.top, at(-half), at(half));
+                    }
                     // (Up from a basement, its storey 0.)
                     if s.bottom == BELOW_GROUND {
                         if basement_y.is_some()
