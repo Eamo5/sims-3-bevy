@@ -20,6 +20,7 @@ impl Plugin for EditTownPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EditTown>()
             .add_message::<OpenEditTown>()
+            .add_message::<EditRequest>()
             .add_systems(Update, (scripted, open_edit_town, edit_town_buttons, show_edit_town, button_visuals, draw_town_lots).chain().run_if(in_state(PlayMode::Live)))
             .add_systems(OnExit(crate::AppState::InGame), |mut e: ResMut<EditTown>| *e = EditTown::default());
     }
@@ -28,6 +29,14 @@ impl Plugin for EditTownPlugin {
 /// Asked for from the game menu.
 #[derive(Message)]
 pub struct OpenEditTown;
+
+/// Something done in Edit Town without the plain panel's buttons (the game's own Edit Town).
+#[derive(Message)]
+pub(crate) struct EditRequest(pub(crate) EditAction);
+
+/// The plain panel (the game's own Edit Town stands in for it: see `edittownui`).
+#[derive(Component)]
+pub(crate) struct EditTownPanel;
 
 /// Edit Town while it's open: its panel, the lot picked, and the game's speed and camera to go
 /// back to.
@@ -48,6 +57,11 @@ pub struct EditTown {
 impl EditTown {
     pub fn is_open(&self) -> bool {
         self.open
+    }
+
+    /// The lot picked.
+    pub(crate) fn selected(&self) -> Option<usize> {
+        self.selected
     }
 }
 
@@ -125,7 +139,7 @@ pub fn bin(town: Option<&s3bake::PremadesBaked>, story: &crate::story::TownStory
 }
 
 /// A lot's description: a home (and how big), an empty lot, or a community lot and what's there.
-fn lot_kind(world: &crate::loading::WorldInfo, i: usize) -> String {
+pub(crate) fn lot_kind(world: &crate::loading::WorldInfo, i: usize) -> String {
     let l = &world.lots[i];
     if !l.is_residential() {
         let name = world.lot_names.get(i).map_or("", |s| s.as_str());
@@ -140,8 +154,8 @@ fn lot_kind(world: &crate::loading::WorldInfo, i: usize) -> String {
     }
 }
 
-#[derive(Component, Clone, Copy)]
-enum EditAction {
+#[derive(Component, Clone, Copy, Debug)]
+pub(crate) enum EditAction {
     Select(usize),
     Play(Occupant),
     Evict(Occupant),
@@ -179,13 +193,13 @@ fn open_edit_town(mut asked: MessageReader<OpenEditTown>, mut edit: ResMut<EditT
 }
 
 /// The name of a household, with who's in it and their money.
-struct Who {
-    name: String,
-    detail: String,
+pub(crate) struct Who {
+    pub(crate) name: String,
+    pub(crate) detail: String,
 }
 
 #[allow(clippy::too_many_arguments)]
-fn who(o: Occupant, household: Option<&Household>, members: &[String], dormant: &[SaveGame], town: Option<&s3bake::PremadesBaked>, story: &crate::story::TownStory) -> Who {
+pub(crate) fn who(o: Occupant, household: Option<&Household>, members: &[String], dormant: &[SaveGame], town: Option<&s3bake::PremadesBaked>, story: &crate::story::TownStory) -> Who {
     let money = |n: i64| format!("§{}", crate::lifetime::group(n.max(0)));
     match o {
         Occupant::Active => Who {
@@ -259,6 +273,7 @@ fn show_edit_town(
     let selected = edit.selected;
     let root = commands
         .spawn((
+            EditTownPanel,
             crate::hud::BlocksWorld,
             Interaction::default(),
             GlobalZIndex(30),
@@ -451,9 +466,10 @@ fn edit_town_buttons(
     mut clock: ResMut<crate::clock::GameClock>,
     mut cams: Query<&mut crate::camera::SimsCamera>,
     mut notes: ResMut<Notifications>,
-    (mut snapshot, mut play): (MessageWriter<crate::save::SnapshotRequest>, MessageWriter<crate::sound::PlaySound>),
+    (mut snapshot, mut play, mut requests): (MessageWriter<crate::save::SnapshotRequest>, MessageWriter<crate::sound::PlaySound>, MessageReader<EditRequest>),
 ) {
-    let Some(&action) = q.iter().find(|(i, _)| **i == Interaction::Pressed).map(|(_, a)| a) else { return };
+    let asked = requests.read().last().map(|r| r.0);
+    let Some(action) = q.iter().find(|(i, _)| **i == Interaction::Pressed).map(|(_, a)| *a).or(asked) else { return };
     let town_name = |id: u64| town.as_ref().and_then(|t| t.0.households.iter().find(|h| h.id == id)).map_or(String::new(), |h| h.name.clone());
     let lot_name = |i: usize| world.data.lot_names.get(i).cloned().unwrap_or_default();
     let close = |edit: &mut EditTown, clock: &mut crate::clock::GameClock, cams: &mut Query<&mut crate::camera::SimsCamera>| {
@@ -583,9 +599,11 @@ fn edit_town_buttons(
 
 /// EDIT_TOWN=<step>;<step>...: Edit Town worked through by its own buttons, a step every three
 /// seconds from ten seconds in (tests): `open`, `select:<lot name part>`, `evict`, `play`,
-/// `movein:<household name part>`, `done`.
+/// `movein:<household name part>`, `done`; and in the game's Edit Town, `shot:<name>` (a
+/// screenshot into EDIT_TOWN_SHOTS), `press:<window id, hex>` and `cell:<n>` (the bin's).
 #[allow(clippy::too_many_arguments)]
 fn scripted(
+    mut commands: Commands,
     time: Res<Time>,
     mut step: Local<(usize, f32)>,
     mut open: MessageWriter<OpenEditTown>,
@@ -619,6 +637,32 @@ fn scripted(
     if verb == "open" {
         open.write(OpenEditTown);
         return;
+    }
+    match verb {
+        "shot" => {
+            let dir = std::env::var("EDIT_TOWN_SHOTS").unwrap_or_else(|_| ".".into());
+            let _ = std::fs::create_dir_all(&dir);
+            let path = format!("{dir}/{arg}.png");
+            commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(path));
+            return;
+        }
+        "press" => {
+            let id = u32::from_str_radix(arg.trim_start_matches("0x"), 16).unwrap_or(0);
+            commands.queue(move |w: &mut World| crate::edittownui::test_press(w, id));
+            return;
+        }
+        "lot" => {
+            if let Some(l) = (0..world.data.lots.len()).find(|&i| lot_named(arg, i)) {
+                commands.queue(move |w: &mut World| crate::edittownui::test_lot(w, l));
+            }
+            return;
+        }
+        "cell" => {
+            let n: usize = arg.parse().unwrap_or(0);
+            commands.queue(move |w: &mut World| crate::edittownui::test_cell(w, n));
+            return;
+        }
+        _ => {}
     }
     let _ = edit.is_open();
     for (a, mut i) in &mut buttons {

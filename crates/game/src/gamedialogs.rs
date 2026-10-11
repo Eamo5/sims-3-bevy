@@ -189,7 +189,7 @@ fn set_area(w: &mut s3bake::ui::UiWindow, id: u32, area: [f32; 4]) {
 
 /// A layout's dialog put up on its own, in the middle of the screen (as `ModalDialog` centres
 /// its window), above the game.
-fn spawn_dialog(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>, name: &str) -> Option<crate::layout::Spawned> {
+pub(crate) fn spawn_dialog(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>, name: &str) -> Option<crate::layout::Spawned> {
     let mut dialog = ui.layout(name)?.clone();
     let (w, h) = (dialog.area[2] - dialog.area[0], dialog.area[3] - dialog.area[1]);
     dialog.area = [0.0, 0.0, w, h];

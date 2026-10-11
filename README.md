@@ -702,6 +702,14 @@ installation is unreachable.
   unfurnished at their prices (the unfurnished house keeps only its doors, windows, stairs and
   fireplaces), the household's funds (the game's §20,000 and more by each Sim's age) and Purchase,
   greyed when it's out of reach; the price comes out of the funds on moving in.
+- **The game's own Edit Town**: the game's Edit Town puck (Return to Game, turning the town,
+  options, the select and bulldoze tools), its library bin along the bottom (the household bin, and
+  the town's houses to put a copy of on an empty lot, in the game's bin cells), lots picked on the
+  map putting up the game's info panel (the family portrait, name, funds and story; the lot's
+  picture, name, size and description; Evict, Switch To, Change Lot Type, or Place for what's in
+  the bin), and the game's own dialogs to confirm: Confirm Household Eviction, "Are you sure you
+  want to change your active household?", the bulldoze warning, and Change Lot Type's residential
+  or community choice with its kinds of community lot.
 - **The game's own HUD**: the live-mode interface is the game's, drawn from its own layouts
   (`UI.package`'s window trees, pictures and fonts: every caption in its Helvetica Rounded),
   and driven as its own interface code drives it: the puck at the bottom left (live, buy and

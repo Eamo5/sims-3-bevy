@@ -769,12 +769,18 @@ fn navigation(
     }
 }
 
-/// In buy and build mode the Sim display, skewer and panels make way (the puck stays).
-fn show_in_modes(hud: Res<LiveHud>, buy: Res<crate::buy::BuyMode>, mut vis: Query<&mut Visibility>, panel: Res<InfoPanel>) {
-    if !buy.is_changed() && !panel.is_changed() {
+/// In buy and build mode the Sim display, skewer and panels make way (the puck stays); in the
+/// game's Edit Town, the puck too.
+fn show_in_modes(hud: Res<LiveHud>, buy: Res<crate::buy::BuyMode>, mut vis: Query<&mut Visibility>, panel: Res<InfoPanel>, edit: Res<crate::edittown::EditTown>, mut was_editing: Local<bool>) {
+    let editing = edit.is_open() && crate::edittownui::GAME_EDIT_TOWN.load(std::sync::atomic::Ordering::Relaxed);
+    if !buy.is_changed() && !panel.is_changed() && editing == *was_editing {
         return;
     }
-    let live = !buy.active;
+    if editing != *was_editing {
+        set_visible(&mut vis, hud.puck.root, !editing);
+    }
+    *was_editing = editing;
+    let live = !buy.active && !editing;
     for r in [hud.display.root, hud.skewer.root, hud.nav.root, hud.queue.root] {
         set_visible(&mut vis, r, live);
     }

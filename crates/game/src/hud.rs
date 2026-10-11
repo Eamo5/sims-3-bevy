@@ -838,7 +838,7 @@ fn world_click(
     members_q: Query<(), With<HouseholdMember>>,
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
-    buy: Option<Res<crate::buy::BuyMode>>,
+    (buy, edit_town): (Option<Res<crate::buy::BuyMode>>, Res<crate::edittown::EditTown>),
     (building, opp_q): (
         Option<Res<crate::building::ActiveBuilding>>,
         (
@@ -864,7 +864,8 @@ fn world_click(
         Query<(&crate::pets::Pet, &GlobalTransform)>,
     ),
 ) {
-    if buy.is_some_and(|b| b.active) {
+    // (Not in buy mode, nor in Edit Town: a click there picks lots.)
+    if buy.is_some_and(|b| b.active) || edit_town.is_open() {
         return;
     }
     if mouse.just_pressed(MouseButton::Right) {
