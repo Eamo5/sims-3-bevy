@@ -572,7 +572,11 @@ fn journal_panel(
     ui: Option<Res<crate::icons::GameUi>>,
     inventories: Query<&Inventory, With<crate::sim::HouseholdMember>>,
 ) {
-    if !panel.open {
+    // (The game's own dialog stands in for it: see `colljournal`.)
+    if !panel.open || crate::colljournal::GAME_JOURNAL.load(std::sync::atomic::Ordering::Relaxed) {
+        if let Some(r) = panel.root.take() {
+            commands.entity(r).despawn();
+        }
         return;
     }
     let Some(ui) = ui else { return };

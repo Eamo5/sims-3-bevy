@@ -530,8 +530,10 @@ installation is unreachable.
   crouch to collect them, catch the butterflies flitting about by day and the beetles in the
   grass (each kind in its colour, caught with the game's catching animations), and fish at the lots' fishing spots with the game's casting and
   reeling animations, rod in hand, catching what each spot holds by Fishing skill. Finds go in
-  the finder's inventory, and the Collection Journal (J) shows everything found and still to
-  find, how many the household holds, and sells them all.
+  the finder's inventory, and the Collection Journal (J) is the game's own dialog: its
+  statistics, metals, gems, insects and fish tabs, and the game's table of each kind's finds
+  (picture and name, greyed until found; rarity; how many the household holds; what one
+  fetches).
 - **Bars**: *Make a Drink* at any of the catalogue's bars: the Sim pours from the blender,
   blends, serves and sips, with the game's animations and props.
 - **Grills, coffee makers and alarm clocks** from the catalogue: a grill's *Grill ›* menu
