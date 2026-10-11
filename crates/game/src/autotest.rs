@@ -2567,7 +2567,8 @@ fn auto_reach(
     let (mut ok, mut bad) = (0, 0);
     for (o, tf, floor) in &objects {
         let l = b.local(tf.translation);
-        if l.cmplt(Vec2::ZERO).any() || l.cmpgt(size).any() || o.price <= 0 || o.name.to_ascii_lowercase().contains("window") || o.kind == crate::interact::ObjectKind::Light {
+        // (Only what Sims use: not decorations, windows or lights.)
+        if l.cmplt(Vec2::ZERO).any() || l.cmpgt(size).any() || o.price <= 0 || matches!(o.kind, crate::interact::ObjectKind::Other | crate::interact::ObjectKind::Light) {
             continue;
         }
         let level = floor.map_or(1, |f| f.0);
@@ -2823,7 +2824,7 @@ fn auto_place(
         let pos = tf.translation + tf.rotation * Vec3::new(i as f32 * 2.0, 0.0, 2.0);
         let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
         if let Some(object) = crate::home::spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, e.key, pos, 0.0) {
-            let level = building.as_ref().map_or(1, |b| b.level_at(pos.y));
+            let level = building.as_ref().map_or(1, |b| b.level_at_point(pos));
             commands.entity(object.entity).insert((crate::save::Bought, crate::nav::Floor(level), crate::building::BuildingPiece { level }));
             info!("placed {} for the test", e.name);
         }

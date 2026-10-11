@@ -10,7 +10,7 @@ pub const BAKE_VERSION: u32 = 4;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
 pub const CAS_VERSION: u32 = 10;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 58;
+pub const WORLD_VERSION: u32 = 59;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -439,15 +439,19 @@ pub struct FenceBaked {
 }
 
 impl LotBuildingBaked {
-    /// Whether a height is down in the basement (the house has one, and it's well below the
-    /// ground).
-    pub fn below_ground(&self, y: f32) -> bool {
-        self.basement.is_some() && y < self.levels[0] - 1.0
+    /// Whether a point (lot-local, with its height) is down in the basement: well below the
+    /// ground, over one of its floor tiles (not in a pool, as a pool's ladder is).
+    pub fn in_basement(&self, local: [f32; 2], y: f32) -> bool {
+        self.basement.is_some()
+            && y < self.levels[0] - 1.0
+            && local[0] >= 0.0
+            && local[1] >= 0.0
+            && self.floors.iter().any(|f| f.level == 0 && f.y.is_some() && f.x == local[0] as u16 && f.z == local[1] as u16)
     }
 
     /// The storey an object stands on: the basement's (0), else from the ground floor (1) up.
     pub fn object_storey(&self, o: &LotObjectBaked) -> u8 {
-        if self.below_ground(o.position[1]) { 0 } else { o.level.max(1) }
+        if self.in_basement(o.local, o.position[1]) { 0 } else { o.level.max(1) }
     }
 
     /// A basement's tiles the ground over is left open for (to look into it): those under a

@@ -2040,7 +2040,7 @@ fn placement(
         }
         let source = buy.placing.as_ref().and_then(|p| p.source.map(|s| s.0));
         let removed_before = removed.0.clone();
-        let level = building.as_ref().map_or(1, |b| b.level_at(pos.y));
+        let level = building.as_ref().map_or(1, |b| b.level_at_point(pos));
         let placed = if let Some(source) = source {
             if !bought_q.contains(source) && let Ok((obj, tf, ..)) = objects.get(source) {
                 crate::save::note_removed(&mut removed, obj, tf);

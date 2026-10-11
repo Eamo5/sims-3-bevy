@@ -152,11 +152,8 @@ impl ActiveBuilding {
         self.rot * Vec3::new(x, 0.0, z)
     }
 
-    /// The floor (1 = ground, 0 = a basement) a height is on.
+    /// The floor (1 = ground) a height is on.
     pub fn level_at(&self, y: f32) -> u8 {
-        if self.data.below_ground(y) {
-            return 0;
-        }
         let mut level = 1;
         for (l, h) in self.levels.iter().enumerate().skip(1) {
             if y > h - 0.3 {
@@ -164,6 +161,13 @@ impl ActiveBuilding {
             }
         }
         level
+    }
+
+    /// The floor a point is on: a basement's (0) when it's down on one of its tiles, else by its
+    /// height (1 = ground).
+    pub fn level_at_point(&self, p: Vec3) -> u8 {
+        let l = self.local(p);
+        if self.data.in_basement([l.x, l.y], p.y) { 0 } else { self.level_at(p.y) }
     }
 
     /// Refreshes the floor lookups after the floors changed.
@@ -1064,7 +1068,7 @@ pub(crate) fn cut_openings(
         }
         b.holes.retain(|(he, _)| *he != Some(e));
         let Some(bounds) = parts_bounds(&assets.object(&mut ctx, obj.objd)) else { continue };
-        let level = b.level_at(tf.translation.y);
+        let level = b.level_at_point(tf.translation);
         let Some(door) = catalog.by_key(&obj.objd).and_then(|c| c.opening) else {
             // Paintings, mirrors and wall lamps hang on the wall behind them: cut away with it.
             if hangs_on_wall(bounds) {
@@ -1925,7 +1929,7 @@ pub fn spawn_building(
                 missing.push(o.script.rsplit('.').next().unwrap_or("").to_string());
                 continue;
             };
-            commands.entity(spawned.entity).insert((BuildingPiece { level: if b.below_ground(o.position[1]) { 0 } else { o.level } }, Floor(b.object_storey(o))));
+            commands.entity(spawned.entity).insert((BuildingPiece { level: if b.in_basement(o.local, o.position[1]) { 0 } else { o.level } }, Floor(b.object_storey(o))));
             if opening.is_some() || o.script.contains("Stairs") || o.script.contains("Column") {
                 commands.entity(spawned.entity).remove::<Obstacle>();
             }

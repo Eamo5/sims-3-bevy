@@ -576,9 +576,19 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     let mut floors = Vec::new();
     let floor_palette = read(ld::T_FLOOR_PALETTE, ld::G_FLOOR_PALETTE).and_then(|d| ld::parse_floor_palette(&d).ok()).unwrap_or_default();
     // (A basement's tiles, on the level below the ground inside walls there: a pool has none.)
+    // (The later packs' pools are walled at level -1 as basements are, and both have the game's
+    // pool helper: a walled region is a basement where something stands in it that isn't a
+    // pool's (a ladder, a light), a pool where nothing does.)
     let basement_cells: Vec<s3formats::lot::FloorCell> = {
         let edges: Vec<([f32; 2], [f32; 2])> = data.walls.segments().filter(|s| s.2 as i32 == -1).map(|s| (s.0, s.1)).collect();
-        if edges.is_empty() { Vec::new() } else { enclosed_floor(&edges, w, d) }
+        let cells = if edges.is_empty() { Vec::new() } else { enclosed_floor(&edges, w, d) };
+        let region_of: HashMap<(u32, u32), u32> = cells.iter().map(|c| ((c.x, c.z), c.region)).collect();
+        let furnished: std::collections::HashSet<u32> = objs
+            .iter()
+            .filter(|o| o.position[1] < ground - 1.0 && !o.script.contains(".Pools.") && !o.script.contains("Pool"))
+            .filter_map(|o| (o.local[0] >= 0.0 && o.local[1] >= 0.0).then(|| region_of.get(&(o.local[0] as u32, o.local[1] as u32)).copied()).flatten())
+            .collect();
+        cells.into_iter().filter(|c| furnished.contains(&c.region)).collect()
     };
     let basement: std::collections::HashSet<(u32, u32)> = basement_cells.iter().map(|c| (c.x, c.z)).collect();
     // (A pool's tiles, on the level below the ground: the ground's outdoor tiles over them are
