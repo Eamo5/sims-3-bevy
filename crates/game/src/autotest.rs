@@ -222,6 +222,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_paint.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_build.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_fence.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, auto_gate_route.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_balloon.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(
                 Update,
@@ -2382,6 +2383,57 @@ fn auto_fence(
         let mid = b.world((n[0] + n[2]) as f32 * 0.5, (n[1] + n[3]) as f32 * 0.5, 0.0);
         c.focus = Vec3::new(mid.x, c.focus.y, mid.z);
         c.distance = d.parse().unwrap_or(14.0);
+    }
+}
+
+/// FENCE_GATE (tests), a few seconds after the gate's in: the way from a metre and a half before
+/// the gate to as far beyond it, through it (as long as the straight line) or round the fence.
+fn auto_gate_route(time: Res<Time>, mut done: Local<bool>, building: Option<Res<crate::building::ActiveBuilding>>, grid: Option<Res<crate::nav::NavGrid>>) {
+    // NAV_CHECK=<x0>,<z0>,<x1>,<z1> (lot-local): the way between those two points, and how much
+    // longer it is than the straight line (a wall or fence between them should make it so).
+    if let Ok(v) = std::env::var("NAV_CHECK") {
+        if *done || time.elapsed_secs() < 9.0 {
+            return;
+        }
+        let (Some(b), Some(grid)) = (building.as_deref(), grid.as_deref()) else { return };
+        *done = true;
+        let n: Vec<f32> = v.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+        if n.len() < 4 {
+            return;
+        }
+        let (from, to) = (b.world(n[0], n[1], 0.0).xz(), b.world(n[2], n[3], 0.0).xz());
+        match grid.find_path(from, to) {
+            Some(path) => {
+                let len: f32 = std::iter::once(from).chain(path.iter().copied()).collect::<Vec<_>>().windows(2).map(|w| w[0].distance(w[1])).sum();
+                info!("nav check: {len:.1} m for {:.1} m straight", from.distance(to));
+            }
+            None => info!("nav check: no way"),
+        }
+        return;
+    }
+    let Ok(g) = std::env::var("FENCE_GATE") else { return };
+    if *done || time.elapsed_secs() < 9.0 {
+        return;
+    }
+    let (Some(b), Some(grid)) = (building, grid) else { return };
+    *done = true;
+    let n: Vec<f32> = g.split(',').take(2).filter_map(|s| s.trim().parse().ok()).collect();
+    let Ok(f) = std::env::var("FENCE") else { return };
+    let line: Vec<f32> = f.split(',').take(4).filter_map(|s| s.trim().parse().ok()).collect();
+    if n.len() < 2 || line.len() < 4 {
+        return;
+    }
+    // (Across the fence's line at the gate.)
+    let along = Vec2::new(line[2] - line[0], line[3] - line[1]).normalize_or_zero();
+    let on = Vec2::new(line[0], line[1]) + along * (Vec2::new(n[0], n[1]) - Vec2::new(line[0], line[1])).dot(along);
+    let across = along.perp();
+    let (from, to) = (b.world(on.x - across.x * 1.5, on.y - across.y * 1.5, 0.0).xz(), b.world(on.x + across.x * 1.5, on.y + across.y * 1.5, 0.0).xz());
+    match grid.find_path(from, to) {
+        Some(path) => {
+            let len: f32 = std::iter::once(from).chain(path.iter().copied()).collect::<Vec<_>>().windows(2).map(|w| w[0].distance(w[1])).sum();
+            info!("gate route: {len:.1} m from one side of the gate to the other ({} through it; {} barriers, crossing {})", if len < 4.5 { "straight" } else { "not" }, grid.barrier_count(), grid.crosses(from, to));
+        }
+        None => info!("gate route: no way from one side of the gate to the other"),
     }
 }
 

@@ -313,7 +313,7 @@ fn walls_down(cams: Query<&SimsCamera>, mut walls: Query<(&crate::building::Visi
 fn rebuild_lot_grid(
     world: Res<CurrentWorld>,
     visited: Option<ResMut<VisitedLot>>,
-    obstacles: Query<(&GlobalTransform, &Obstacle, Option<&Floor>)>,
+    obstacles: crate::nav::Obstacles,
     building: Option<Res<ActiveBuilding>>,
 ) {
     let Some(mut v) = visited else { return };

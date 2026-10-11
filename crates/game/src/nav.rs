@@ -14,7 +14,8 @@ pub struct NavPlugin;
 
 impl Plugin for NavPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (rebuild_upper_floors, rebuild_grid, follow_paths).chain().run_if(in_state(PlayMode::Live)));
+        // (After doors and gates open their ways through, and with them in place.)
+        app.add_systems(Update, (rebuild_upper_floors, rebuild_grid, follow_paths).chain().after(crate::building::cut_openings).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -26,6 +27,15 @@ pub struct Obstacle {
     pub half: Vec2,
     pub center_offset: Vec2,
 }
+
+/// A thin obstacle (a wall, a fence run) that can't be walked across: besides the cells it
+/// covers, every step and every straight stretch of a way is checked against its line, so it
+/// holds however it lies on the grid (a wall on a cell boundary covers no cell's middle).
+#[derive(Component, Clone, Copy)]
+pub struct Barrier;
+
+/// The obstacles a walk grid is made from.
+pub type Obstacles<'w, 's> = Query<'w, 's, (&'static GlobalTransform, &'static Obstacle, Option<&'static Floor>, Has<Barrier>)>;
 
 /// Which floor of the house something is on: 1 = the ground floor and the yard.
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
@@ -119,6 +129,12 @@ pub struct NavGrid {
     pub h: usize,
     pub blocked: Vec<bool>,
     pub dirty: bool,
+    /// Marked dirty last frame: remade this one, once what changed then (spawned or despawned
+    /// by commands) is in place.
+    settling: bool,
+    /// The barriers' lines, and each cell's barriers (those whose line may pass through it).
+    barriers: Vec<[Vec2; 2]>,
+    near: Vec<Vec<u32>>,
 }
 
 impl NavGrid {
@@ -130,6 +146,92 @@ impl NavGrid {
             h: n,
             blocked: vec![false; n * n],
             dirty: true,
+            settling: false,
+            barriers: Vec::new(),
+            near: vec![Vec::new(); n * n],
+        }
+    }
+
+    /// How many barriers it has.
+    pub fn barrier_count(&self) -> usize {
+        self.barriers.len()
+    }
+
+    /// No barriers (the grid being made afresh).
+    fn clear_barriers(&mut self) {
+        self.barriers.clear();
+        for v in &mut self.near {
+            v.clear();
+        }
+    }
+
+    /// A barrier along `a`-`b`: listed in every cell its line's bounds touch.
+    pub fn add_barrier(&mut self, a: Vec2, b: Vec2) {
+        let id = self.barriers.len() as u32;
+        self.barriers.push([a, b]);
+        let (lo, hi) = (a.min(b) - Vec2::splat(0.02), a.max(b) + Vec2::splat(0.02));
+        let cell = |p: Vec2| ((p - self.origin) / CELL).floor();
+        let (c0, c1) = (cell(lo).max(Vec2::ZERO), cell(hi).min(Vec2::new(self.w as f32 - 1.0, self.h as f32 - 1.0)));
+        if c0.x > c1.x || c0.y > c1.y {
+            return;
+        }
+        for z in c0.y as usize..=c1.y as usize {
+            for x in c0.x as usize..=c1.x as usize {
+                self.near[z * self.w + x].push(id);
+            }
+        }
+    }
+
+    /// Whether the straight way from `a` to `b` crosses (or touches) a barrier: the barriers of
+    /// every cell it passes through, checked against it.
+    pub fn crosses(&self, a: Vec2, b: Vec2) -> bool {
+        if self.barriers.is_empty() {
+            return false;
+        }
+        let mut seen: Vec<u32> = Vec::new();
+        let mut hit = false;
+        self.cells_on(a, b, |i| {
+            for &id in &self.near[i] {
+                if !seen.contains(&id) {
+                    seen.push(id);
+                    let [c, d] = self.barriers[id as usize];
+                    if segments_touch(a, b, c, d) {
+                        hit = true;
+                        return true;
+                    }
+                }
+            }
+            false
+        });
+        hit
+    }
+
+    /// Every cell the segment from `a` to `b` passes through, in order (a grid walk that misses
+    /// none), until `f` says stop.
+    fn cells_on(&self, a: Vec2, b: Vec2, mut f: impl FnMut(usize) -> bool) {
+        let (pa, pb) = ((a - self.origin) / CELL, (b - self.origin) / CELL);
+        let (mut x, mut z) = (pa.x.floor() as i64, pa.y.floor() as i64);
+        let (ex, ez) = (pb.x.floor() as i64, pb.y.floor() as i64);
+        let d = pb - pa;
+        let (sx, sz) = (d.x.signum() as i64, d.y.signum() as i64);
+        let delta = |v: f32| if v.abs() < 1e-9 { f32::INFINITY } else { 1.0 / v.abs() };
+        let (tdx, tdz) = (delta(d.x), delta(d.y));
+        let first = |p: f32, c: i64, v: f32| if v > 0.0 { (c as f32 + 1.0 - p) / v } else if v < 0.0 { (p - c as f32) / -v } else { f32::INFINITY };
+        let (mut tx, mut tz) = (first(pa.x, x, d.x), first(pa.y, z, d.y));
+        for _ in 0..(self.w + self.h + 4) {
+            if x >= 0 && z >= 0 && (x as usize) < self.w && (z as usize) < self.h && f(z as usize * self.w + x as usize) {
+                return;
+            }
+            if (x, z) == (ex, ez) {
+                return;
+            }
+            if tx < tz {
+                x += sx;
+                tx += tdx;
+            } else {
+                z += sz;
+                tz += tdz;
+            }
         }
     }
 
@@ -193,7 +295,7 @@ impl NavGrid {
     fn line_clear(&self, a: Vec2, b: Vec2) -> bool {
         let d = b - a;
         let steps = (d.length() / (CELL * 0.35)).ceil().max(1.0) as usize;
-        (0..=steps).all(|i| self.walkable_pt(a + d * (i as f32 / steps as f32)))
+        (0..=steps).all(|i| self.walkable_pt(a + d * (i as f32 / steps as f32))) && !self.crosses(a, b)
     }
 
     /// A* from `from` to `to`; returns smoothed waypoints (excluding the start).
@@ -240,6 +342,10 @@ impl NavGrid {
                 // diagonally across the grid, cells touching at their corners, can't be crossed,
                 // but a corridor along it can be walked.)
                 if dx != 0 && dz != 0 && self.is_blocked(x, nz) && self.is_blocked(nx, z) {
+                    continue;
+                }
+                // (Nor across a wall or a fence.)
+                if self.crosses(self.center_of(x, z), self.center_of(nx, nz)) {
                     continue;
                 }
                 let cost = if dx != 0 && dz != 0 { std::f32::consts::SQRT_2 } else { 1.0 };
@@ -292,6 +398,19 @@ impl NavGrid {
     }
 }
 
+/// Whether segments `a`-`b` and `c`-`d` cross or touch.
+fn segments_touch(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> bool {
+    const E: f32 = 1e-5;
+    let (d1, d2) = ((d - c).perp_dot(a - c), (d - c).perp_dot(b - c));
+    let (d3, d4) = ((b - a).perp_dot(c - a), (b - a).perp_dot(d - a));
+    if ((d1 > E && d2 < -E) || (d1 < -E && d2 > E)) && ((d3 > E && d4 < -E) || (d3 < -E && d4 > E)) {
+        return true;
+    }
+    // (Touching: an end on the other segment.)
+    let on = |p: Vec2, q: Vec2, r: Vec2, o: f32| o.abs() <= E && r.x >= p.x.min(q.x) - E && r.x <= p.x.max(q.x) + E && r.y >= p.y.min(q.y) - E && r.y <= p.y.max(q.y) + E;
+    on(c, d, a, d1) || on(c, d, b, d2) || on(a, b, c, d3) || on(a, b, d, d4)
+}
+
 #[derive(Copy, Clone, PartialEq)]
 struct Node {
     f: f32,
@@ -310,7 +429,7 @@ impl PartialOrd for Node {
 }
 
 /// Marks steep slopes, water and the obstacles on the ground floor as unwalkable.
-pub fn fill_grid(grid: &mut NavGrid, world: &crate::loading::WorldInfo, obstacles: &Query<(&GlobalTransform, &Obstacle, Option<&Floor>)>) {
+pub fn fill_grid(grid: &mut NavGrid, world: &crate::loading::WorldInfo, obstacles: &Obstacles) {
     let hm = &world.heightmap;
     let (w, h) = (grid.w, grid.h);
     for z in 0..h {
@@ -324,11 +443,12 @@ pub fn fill_grid(grid: &mut NavGrid, world: &crate::loading::WorldInfo, obstacle
             grid.blocked[z * w + x] = y < world.sea_level + 0.2 || pond || slope > 0.9;
         }
     }
-    for (gt, ob, floor) in obstacles {
+    grid.clear_barriers();
+    for (gt, ob, floor, barrier) in obstacles {
         if floor.is_some_and(|f| f.0 > 1) {
             continue;
         }
-        mark_obstacle(grid, gt, ob);
+        mark_obstacle(grid, gt, ob, barrier);
     }
 }
 
@@ -336,23 +456,30 @@ pub fn fill_grid(grid: &mut NavGrid, world: &crate::loading::WorldInfo, obstacle
 fn rebuild_grid(
     grid: Option<ResMut<NavGrid>>,
     world: Res<CurrentWorld>,
-    obstacles: Query<(&GlobalTransform, &Obstacle, Option<&Floor>)>,
+    obstacles: Obstacles,
     building: Option<Res<crate::building::ActiveBuilding>>,
     mut upper: Option<ResMut<UpperFloors>>,
 ) {
     let Some(mut grid) = grid else { return };
-    if !grid.dirty {
+    // (A frame after it's marked dirty: a wall, fence or object put in or taken out then is
+    // spawned or gone by now.)
+    if grid.dirty {
+        grid.dirty = false;
+        grid.settling = true;
         return;
     }
-    grid.dirty = false;
+    if !grid.settling {
+        return;
+    }
+    grid.settling = false;
     if let (Some(b), Some(u)) = (building.as_deref(), upper.as_deref_mut()) {
         rebuild_upper(b, u, &obstacles);
     }
     fill_grid(&mut grid, &world.data, &obstacles);
 }
 
-/// Marks the cells under an obstacle's footprint as blocked.
-fn mark_obstacle(grid: &mut NavGrid, gt: &GlobalTransform, ob: &Obstacle) {
+/// Marks the cells under an obstacle's footprint as blocked (and a barrier's line as one).
+fn mark_obstacle(grid: &mut NavGrid, gt: &GlobalTransform, ob: &Obstacle, barrier: bool) {
     let (w, h) = (grid.w, grid.h);
     {
         let tf = gt.compute_transform();
@@ -363,6 +490,9 @@ fn mark_obstacle(grid: &mut NavGrid, gt: &GlobalTransform, ob: &Obstacle) {
         let rz = tf.rotation * Vec3::Z;
         let az = if Vec2::new(rz.x, rz.z).dot(az) < 0.0 { -az } else { az };
         let center = Vec2::new(tf.translation.x, tf.translation.z) + ax * ob.center_offset.x + az * ob.center_offset.y;
+        if barrier {
+            grid.add_barrier(center - ax * ob.half.x, center + ax * ob.half.x);
+        }
         let r = ob.half.length() + CELL;
         let (Some((x0, z0)), Some((x1, z1))) = (
             grid.cell_of((center - Vec2::splat(r)).max(grid.origin)),
@@ -383,7 +513,7 @@ fn mark_obstacle(grid: &mut NavGrid, gt: &GlobalTransform, ob: &Obstacle) {
 }
 
 /// Builds the walk grids of the upper floors: cells with floor, minus walls and furniture there.
-pub fn rebuild_upper(b: &crate::building::ActiveBuilding, upper: &mut UpperFloors, obstacles: &Query<(&GlobalTransform, &Obstacle, Option<&Floor>)>) {
+pub fn rebuild_upper(b: &crate::building::ActiveBuilding, upper: &mut UpperFloors, obstacles: &Obstacles) {
     upper.grids.clear();
     upper.stairs = b.stairs.clone();
     for level in 2..=b.top_level {
@@ -395,9 +525,9 @@ pub fn rebuild_upper(b: &crate::building::ActiveBuilding, upper: &mut UpperFloor
                 g.blocked[z * g.w + x] = b.floor_y(level, Vec3::new(c.x, 0.0, c.y)).is_none();
             }
         }
-        for (gt, ob, floor) in obstacles {
+        for (gt, ob, floor, barrier) in obstacles {
             if floor.is_some_and(|f| f.0 == level) {
-                mark_obstacle(&mut g, gt, ob);
+                mark_obstacle(&mut g, gt, ob, barrier);
             }
         }
         upper.grids.insert(level, g);
@@ -709,5 +839,37 @@ mod walk_style_tests {
         assert_eq!(walk_style(&RouteSense { pregnant: true, ..sense(40.0, false, false) }, 0.5), Walk);
         // Elders take further to hurry.
         assert_eq!(walk_style(&RouteSense { age: Age::Elder, ..sense(20.0, false, false) }, 0.5), FastWalk);
+    }
+}
+
+#[cfg(test)]
+mod barrier_tests {
+    use super::*;
+
+    fn length(from: Vec2, path: &[Vec2]) -> f32 {
+        std::iter::once(from).chain(path.iter().copied()).collect::<Vec<_>>().windows(2).map(|w| w[0].distance(w[1])).sum()
+    }
+
+    #[test]
+    fn walls_on_cell_boundaries_are_walked_round() {
+        // (A wall along x = 0 from z = -3 to 3: on the boundary between cells, covering no
+        // cell's middle.)
+        let mut g = NavGrid::new(Vec2::ZERO, 8.0);
+        g.add_barrier(Vec2::new(0.0, -3.0), Vec2::new(0.0, 3.0));
+        let (from, to) = (Vec2::new(-1.0, 0.1), Vec2::new(1.0, 0.1));
+        assert!(g.crosses(from, to));
+        let path = g.find_path(from, to).unwrap();
+        assert!(length(from, &path) > 6.0, "round the wall's end, not through it: {path:?}");
+        // A gap in it (a doorway) is walked through.
+        let mut g = NavGrid::new(Vec2::ZERO, 8.0);
+        g.add_barrier(Vec2::new(0.0, -3.0), Vec2::new(0.0, -0.5));
+        g.add_barrier(Vec2::new(0.0, 0.5), Vec2::new(0.0, 3.0));
+        let path = g.find_path(from, to).unwrap();
+        assert!(length(from, &path) < 2.5, "{path:?}");
+        // Two walls meeting at a corner leave no way through it diagonally.
+        let mut g = NavGrid::new(Vec2::ZERO, 8.0);
+        g.add_barrier(Vec2::new(0.0, 0.0), Vec2::new(0.0, 3.0));
+        g.add_barrier(Vec2::new(0.0, 0.0), Vec2::new(3.0, 0.0));
+        assert!(g.crosses(Vec2::new(-0.25, -0.25), Vec2::new(0.25, 0.25)));
     }
 }

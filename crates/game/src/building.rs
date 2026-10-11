@@ -976,7 +976,7 @@ fn restyle(b: &mut ActiveBuilding) -> Vec<u32> {
 /// Doors and windows placed in the house cut their openings into the walls behind them (and
 /// close them up again when they're moved or sold).
 #[allow(clippy::too_many_arguments)]
-fn cut_openings(
+pub(crate) fn cut_openings(
     mut commands: Commands,
     building: Option<ResMut<ActiveBuilding>>,
     (catalog, data): (Res<Catalog>, Res<crate::baked::Baked>),
@@ -1022,6 +1022,10 @@ fn cut_openings(
         changed.extend(walls_cut(&b, &hole));
         let mid = b.world(hole.wall_point.x, hole.wall_point.y, tf.translation.y);
         commands.entity(e).remove::<Obstacle>().insert((BuildingPiece { level }, Floor(level)));
+        // (The way through it opens, wall or no: a gate cuts none.)
+        if let Some(g) = grid.as_mut() {
+            g.dirty = true;
+        }
         // (Gates stand in fences, never cut away.)
         if !catalog.by_key(&obj.objd).is_some_and(|c| c.gate) {
             commands.entity(e).insert(WallObject { mid });
@@ -1264,7 +1268,7 @@ fn spawn_fences(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut As
         // (A run is a barrier along its length, on its own floor.)
         if d.length_squared() > 1e-6 {
             let len = d.length();
-            commands.entity(e).insert((crate::nav::Obstacle { half: Vec2::new(len * 0.5, 0.06), center_offset: Vec2::new(len * 0.5, 0.0) }, crate::nav::Floor(f.level.max(1))));
+            commands.entity(e).insert((crate::nav::Obstacle { half: Vec2::new(len * 0.5, 0.06), center_offset: Vec2::new(len * 0.5, 0.0) }, crate::nav::Barrier, crate::nav::Floor(f.level.max(1))));
         }
         out.push(e);
     }
@@ -1451,6 +1455,7 @@ fn spawn_wall(
                 .spawn((
                     Transform::from_translation(mid).with_rotation(Quat::from_rotation_y((-dir.z).atan2(dir.x))),
                     Obstacle { half: Vec2::new(len * 0.5 + 0.02, 0.08), center_offset: Vec2::ZERO },
+                    crate::nav::Barrier,
                     Floor(level),
                     DespawnOnExit(AppState::InGame),
                 ))
@@ -2020,6 +2025,7 @@ pub fn spawn_building(
                 commands.spawn((
                     Transform::from_translation(mid).with_rotation(Quat::from_rotation_y((-dir.z).atan2(dir.x))),
                     Obstacle { half: Vec2::new(len * 0.5 + 0.02, 0.08), center_offset: Vec2::ZERO },
+                    crate::nav::Barrier,
                     Floor(1),
                     ChildOf(neighbor.unwrap()),
                 ));
