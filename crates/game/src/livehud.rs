@@ -729,7 +729,7 @@ fn navigation(
     }
     // (The skills are in the game's panel; a skill's journal, opened from it, still shows in
     // the tab's own content.)
-    let journal_open = *panel == InfoPanel::Skills && journal.0.is_some();
+    let journal_open = *panel == InfoPanel::Skills && journal.0.is_some() && !crate::skilljournal::GAME_JOURNAL.load(std::sync::atomic::Ordering::Relaxed);
     if only_journal.0 != journal_open {
         only_journal.0 = journal_open;
     }
