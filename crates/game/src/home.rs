@@ -67,9 +67,67 @@ pub struct MoveInButton;
 #[derive(Resource, Default)]
 pub struct ChosenLot(pub Option<usize>);
 
+/// Move In asked for without the plain chooser's button (the game's Play, or a test): the
+/// household moves into the chosen lot.
+#[derive(Resource)]
+pub struct MoveInNow;
+
+/// The plain lot chooser's panel (the game's own Play Flow stands in for it: see `playflow`).
+#[derive(Component)]
+pub struct LotChooserPanel;
+
+/// The home bought in the game's purchase dialog: which lot, furnished or not, for how much.
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct PurchaseTerms {
+    pub lot: usize,
+    pub furnished: bool,
+    pub price: i64,
+}
+
+/// What stays in a house sold unfurnished (`StaysAfterEvict`): its doors, windows and arches,
+/// stairs, lifts and the markers the world needs.
+pub(crate) fn stays_unfurnished(script: &str) -> bool {
+    let s = script.to_ascii_lowercase();
+    crate::building::is_opening(script).is_some() || ["stairs", "elevator", "spawner", "fireplace"].iter().any(|k| s.contains(k))
+}
+
+/// A lot's price, unfurnished and furnished (the game's `GetUnfurnishedCost` and `Cost`): its
+/// land by area, the house's walls, floors, pool, stairs and fences, and its objects at their
+/// catalogue prices (only those that stay, unfurnished).
+pub(crate) fn lot_prices(world: &crate::loading::WorldInfo, lot: usize, catalog: &Catalog) -> (i64, i64) {
+    let Some(l) = world.lots.get(lot) else { return (0, 0) };
+    let land = (l.width * l.depth) as i64 * 2;
+    let Some(b) = world.buildings.get(&lot) else { return (land, land) };
+    let shell = b.walls.len() as i64 * 70 + b.floors.len() as i64 * 5 + b.pool.len() as i64 * 40 + b.stairs.len() as i64 * 400 + b.fences.len() as i64 * 15;
+    let (mut kept, mut all) = (0i64, 0i64);
+    for o in &b.objects {
+        let v = catalog.by_key(&o.objd).map_or(0, |e| e.price.max(0) as i64);
+        all += v;
+        if stays_unfurnished(&o.script) {
+            kept += v;
+        }
+    }
+    (land + shell + kept, land + shell + all)
+}
+
+/// A new household's funds, as the game's `GetHouseholdStartingFunds` gives them: §20,000 for
+/// the first grown-up, and for each Sim more by their age.
+pub(crate) fn starting_funds(members: &[crate::sim::Sim]) -> i64 {
+    use crate::sim::Age;
+    members.iter().fold(15_000, |n, s| {
+        n + match s.age {
+            Age::Baby => 500,
+            Age::Toddler => 1_000,
+            Age::Child => 2_000,
+            Age::Teen => 3_000,
+            _ => 5_000,
+        }
+    })
+}
+
 /// Who lives where, as the lot chooser sees it: the town's families, those played before, and
 /// (moving house) the household itself.
-fn lots_lived_in(
+pub(crate) fn lots_lived_in(
     world: &CurrentWorld,
     town: Option<&crate::premade::TownPremades>,
     story: &crate::story::TownStory,
@@ -128,6 +186,7 @@ fn spawn_lot_chooser(
     commands
         .spawn((
             DespawnOnExit(PlayMode::ChooseLot),
+            LotChooserPanel,
             Node {
                 border_radius: BorderRadius::all(Val::Px(12.0)),
                 position_type: PositionType::Absolute,
@@ -256,6 +315,7 @@ fn lot_buttons(
     mut next: ResMut<NextState<PlayMode>>,
     mut commands: Commands,
     (moving, worlds, catalog, mut app, slot): (Option<Res<Moving>>, Res<crate::data::WorldList>, Res<Catalog>, ResMut<NextState<AppState>>, Res<crate::save::SaveSlot>),
+    (terms, now): (Option<Res<PurchaseTerms>>, Option<Res<MoveInNow>>),
     (town, story, dormant, household, mut notes): (
         Option<Res<crate::premade::TownPremades>>,
         Res<crate::story::TownStory>,
@@ -275,10 +335,12 @@ fn lot_buttons(
             }
         }
     }
-    for i in &move_in {
-        if *i == Interaction::Pressed
-            && let Some(l) = chosen.0
-        {
+    // (Hidden nodes' interactions are reset, so the game's Play asks with `MoveInNow`.)
+    if now.is_some() {
+        commands.remove_resource::<MoveInNow>();
+    }
+    for go in move_in.iter().map(|i| *i == Interaction::Pressed).chain(now.map(|_| true)) {
+        if go && let Some(l) = chosen.0 {
             // (Not into someone else's home: evict them in Edit Town first.)
             let lived_in = lots_lived_in(&world, town.as_deref(), &story, &dormant, moving.as_deref().map(|m| (m, household.as_deref())));
             if let Some(who) = lived_in.get(&l) {
@@ -294,6 +356,10 @@ fn lot_buttons(
                 // walls, garden and graves stay behind.
                 let refund: i64 = g.bought.iter().filter_map(|o| catalog.by_key(&o.objd)).map(|e| e.price.max(0) as i64 * 4 / 5).sum();
                 g.funds += refund;
+                // (The new home, bought in the game's purchase dialog.)
+                if let Some(t) = terms.as_deref().filter(|t| t.lot == l) {
+                    g.funds -= t.price;
+                }
                 g.bought.clear();
                 g.removed.clear();
                 g.paint.clear();
@@ -617,12 +683,20 @@ pub fn move_in(
         ResMut<Assets<crate::simbody::SimSkinMaterial>>,
         ResMut<crate::simbody::SimTextures>,
     ),
-    (mut life, loading_save): (MessageWriter<crate::life::LifeEvent>, Option<Res<crate::save::PendingLoad>>),
+    (mut life, loading_save, terms): (MessageWriter<crate::life::LifeEvent>, Option<Res<crate::save::PendingLoad>>, Option<Res<PurchaseTerms>>),
 ) {
     let Some(req) = request else { return };
     let fresh = loading_save.is_none();
     let lot_index = req.0;
-    let house = world.data.buildings.get(&lot_index).filter(|b| b.is_house());
+    // (Bought in the game's purchase dialog: unfurnished, only what stays in a house sold so.)
+    let terms = terms.as_deref().copied().filter(|t| t.lot == lot_index);
+    commands.remove_resource::<PurchaseTerms>();
+    let bare = world.data.buildings.get(&lot_index).filter(|b| b.is_house() && terms.is_some_and(|t| !t.furnished)).map(|b| {
+        let mut c = b.clone();
+        c.objects.retain(|o| stays_unfurnished(&o.script));
+        c
+    });
+    let house = bare.as_ref().or(world.data.buildings.get(&lot_index).filter(|b| b.is_house()));
     // A pre-built house keeps its imposter for the distant view; an empty lot loses it.
     if house.is_none() {
         for (e, imp) in &imposters {
@@ -682,8 +756,13 @@ pub fn move_in(
     // Sims arrive at the front of the lot (by the road) when there's a house in the way.
     let arrive_z = if house.is_some() { -(lot.depth as f32) * 0.5 + 2.0 } else { 0.9 };
     let pending = pending.map(|p| p.clone()).unwrap_or_else(PendingHousehold::random);
-    let starting_funds = if house.is_some() { 20000 - furniture_value as i64 / 4 } else { 20000 - furniture_value as i64 / 2 };
-    let starting_funds = pending.premade.as_ref().map_or(starting_funds.max(5000), |h| h.funds.max(0));
+    // (A home bought in the game's dialog: the game's starting funds less its price.)
+    let starting_funds = match terms {
+        Some(t) => starting_funds(&pending.members) - t.price,
+        None if house.is_some() => 20000 - furniture_value as i64 / 4,
+        None => 20000 - furniture_value as i64 / 2,
+    };
+    let starting_funds = pending.premade.as_ref().map_or(if terms.is_some() { starting_funds.max(0) } else { starting_funds.max(5000) }, |h| h.funds.max(0));
     // (A premade household's pets come home with it.)
     if let Some(h) = pending.premade.as_ref().filter(|h| !h.pets.is_empty())
         && let Some(data) = s3bake::load_pets(&s3bake::default_root())

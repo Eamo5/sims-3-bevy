@@ -694,6 +694,14 @@ installation is unreachable.
   that suit them, favourite food, music and colour from the game's grids, the three voices).
   A household of more than one is accepted through the game's Sims and Relationships screen:
   the family tree, and a Sim dragged onto another asks what they are to each other.
+- **The game's own Play Flow**: a new household chooses its home as in the game: the speech
+  bubble's instructions ("Choose a place to live!", then "Let's play!" with Play, Cancel back to
+  Create a Sim or to choosing again), the play flow puck (turn the town, options), the bin of the
+  homes for sale with each lot's picture, and a click on one (or on its lot on the map) putting up
+  the game's Purchase Lot dialog: its picture, name, size and description, furnished or
+  unfurnished at their prices (the unfurnished house keeps only its doors, windows, stairs and
+  fireplaces), the household's funds (the game's §20,000 and more by each Sim's age) and Purchase,
+  greyed when it's out of reach; the price comes out of the funds on moving in.
 - **The game's own HUD**: the live-mode interface is the game's, drawn from its own layouts
   (`UI.package`'s window trees, pictures and fonts: every caption in its Helvetica Rounded),
   and driven as its own interface code drives it: the puck at the bottom left (live, buy and

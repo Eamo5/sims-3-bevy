@@ -1225,7 +1225,7 @@ fn auto_move_house(
     moving: Option<Res<crate::home::Moving>>,
     world: Res<crate::loading::CurrentWorld>,
     mut chosen: ResMut<crate::home::ChosenLot>,
-    mut button: Query<&mut Interaction, With<crate::home::MoveInButton>>,
+    mut commands: Commands,
     time: Res<Time>,
     mut since: Local<Option<f32>>,
 ) {
@@ -1237,9 +1237,7 @@ fn auto_move_house(
     let want = want.to_ascii_lowercase();
     let Some(l) = world.data.lot_names.iter().position(|n| n.to_ascii_lowercase().contains(&want)) else { return };
     chosen.0 = Some(l);
-    if let Ok(mut i) = button.single_mut() {
-        *i = Interaction::Pressed;
-    }
+    commands.insert_resource(crate::home::MoveInNow);
 }
 
 /// HUNGRY=<first name>: that Sim's hunger stays at the bottom.
@@ -3422,17 +3420,68 @@ fn ui_flow(
             {
                 info!("ui flow lot {h}: {:016X} {} {:?}", l.id, l.internal_name, l.string_keys);
             }
-            if let Some((mut i, _)) = lots.iter_mut().find(|(_, b)| house.is_none_or(|h| b.0 == h)) {
+            // (In the game's play flow: a house they can afford, from the bin of homes.)
+            if crate::playflow::GAME_FLOW.load(std::sync::atomic::Ordering::Relaxed) {
+                *stage = (242, now);
+                return;
+            } else if let Some((mut i, _)) = lots.iter_mut().find(|(_, b)| house.is_none_or(|h| b.0 == h)) {
                 *i = Interaction::Pressed;
             }
             advance(&mut stage);
         }
         (6, AppState::InGame, Some(crate::PlayMode::ChooseLot)) if since > 2.0 => {
             shot(&mut commands, "5_lot_selected");
+            // (The game's purchase dialog: Purchase, then Play.)
+            if crate::playflow::GAME_FLOW.load(std::sync::atomic::Ordering::Relaxed) {
+                *stage = (240, now);
+                return;
+            }
             if let Ok(mut i) = move_in.single_mut() {
                 *i = Interaction::Pressed;
             }
             advance(&mut stage);
+        }
+        // (Bought, given up, bought again; then Play. PLAYFLOW_BACK: given up, then back to CAS.)
+        (242, AppState::InGame, Some(crate::PlayMode::ChooseLot)) if since > 0.5 => {
+            commands.queue(crate::playflow::test_pick);
+            *stage = (6, now);
+        }
+        (240, AppState::InGame, Some(crate::PlayMode::ChooseLot)) if since > 0.5 => {
+            commands.queue(|w: &mut World| crate::playflow::press(w, crate::playflow::Press::Purchase));
+            *stage = (95, now);
+        }
+        (95, AppState::InGame, Some(crate::PlayMode::ChooseLot)) if since > 1.5 => {
+            shot(&mut commands, "5b_purchased");
+            *stage = (241, now);
+        }
+        (241, AppState::InGame, Some(crate::PlayMode::ChooseLot)) if since > 0.5 => {
+            commands.queue(|w: &mut World| crate::playflow::press(w, crate::playflow::Press::Cancel));
+            *stage = (96, now);
+        }
+        (96, AppState::InGame, Some(crate::PlayMode::ChooseLot)) if since > 1.0 => {
+            shot(&mut commands, "5c_unbought");
+            if std::env::var("PLAYFLOW_BACK").is_ok() {
+                commands.queue(|w: &mut World| crate::playflow::press(w, crate::playflow::Press::Cancel));
+                *stage = (251, now);
+                return;
+            }
+            commands.queue(crate::playflow::test_pick);
+            *stage = (97, now);
+        }
+        (97, AppState::InGame, Some(crate::PlayMode::ChooseLot)) if since > 1.0 => {
+            commands.queue(|w: &mut World| crate::playflow::press(w, crate::playflow::Press::Purchase));
+            *stage = (98, now);
+        }
+        (98, AppState::InGame, Some(crate::PlayMode::ChooseLot)) if since > 1.0 => {
+            commands.queue(|w: &mut World| crate::playflow::press(w, crate::playflow::Press::Play));
+            *stage = (7, now);
+        }
+        (251, AppState::CreateHousehold, _) if since > 4.0 => {
+            shot(&mut commands, "5d_back_to_cas");
+            *stage = (252, now);
+        }
+        (252, AppState::CreateHousehold, _) if since > 1.0 => {
+            exit.write(AppExit::Success);
         }
         (7, AppState::InGame, Some(crate::PlayMode::Live)) if since > 10.0 => {
             shot(&mut commands, "6_live");
