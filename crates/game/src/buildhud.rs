@@ -71,7 +71,7 @@ fn home_action(id: u32) -> Option<Action> {
 pub fn native_panel(buy: &BuyMode) -> bool {
     buy.build_look && buy.active && buy.category == BUILD_TAB
         && !(buy.styling() && buy.placing.is_some())
-        && matches!(buy.tool, None | Some(BuildTool::Wall | BuildTool::Room | BuildTool::Pool | BuildTool::Sledgehammer))
+        && matches!(buy.tool, None | Some(BuildTool::Wall | BuildTool::Room | BuildTool::DiagonalRoom | BuildTool::Pool | BuildTool::Sledgehammer))
 }
 
 fn spawn(
@@ -115,12 +115,12 @@ fn spawn(
         (BACK, Action::Home), (HAND, Action::Hand), (HAMMER, Action::Tool(BuildTool::Sledgehammer)),
         (LIGHT, Action::Lighting), (GRID, Action::Grid),
         (0x2e2, Action::Undo), (0x2e3, Action::Redo),
-        (0x301, Action::Tool(BuildTool::Wall)), (0x302, Action::Tool(BuildTool::Room)),
+        (0x301, Action::Tool(BuildTool::Wall)), (0x302, Action::Tool(BuildTool::Room)), (0x304, Action::Tool(BuildTool::DiagonalRoom)),
         (0x321a, Action::Tool(BuildTool::Wall)), (0x321b, Action::Category(WALLPAPER_TAB)),
         (0x321c, Action::Tool(BuildTool::Wall)), (0x321d, Action::Category(WALLPAPER_TAB)),
         (0x06ee_34a0, Action::Tool(BuildTool::Pool)), (0x06ee_34af, Action::Tool(BuildTool::Pool)),
     ] {
-        let e = if matches!(id, 0x301 | 0x302) { s.id(WALLS).and_then(|p| s.within(p, id)) } else { s.id(id) };
+        let e = if matches!(id, 0x301 | 0x302 | 0x304) { s.id(WALLS).and_then(|p| s.within(p, id)) } else { s.id(id) };
         if let Some(e) = e { commands.entity(e).insert(action); }
     }
     for (id, button) in [(CLONE, BuyButton::Eyedropper), (DESIGN, BuyButton::Styling)] {
@@ -129,7 +129,7 @@ fn spawn(
     for (id, tooltip) in [(0x2e2, "Undo (Ctrl+Z)"), (0x2e3, "Redo (Ctrl+Y)")] {
         if let Some(e) = s.id(id) { commands.entity(e).insert(crate::icons::Tooltip(tooltip.into())); }
     }
-    for id in [0x2ea, 0x2ef, 0x2f1, 0x304, 0x305, 0x06ee_34a2, 0x0a67_d7f0] {
+    for id in [0x2ea, 0x2ef, 0x2f1, 0x305, 0x06ee_34a2, 0x0a67_d7f0] {
         if let Some(e) = s.id(id) { commands.entity(e).insert(Unavailable); }
     }
     // Hide fountain/curved-pool alternatives inside the rectangular-pool panel.
@@ -191,7 +191,7 @@ fn show(
         if on || !buy.active { set_visible(&mut visibility, live.puck.root, !on); }
     }
     if !on { return; }
-    let wall = buy.category == BUILD_TAB && matches!(buy.tool, Some(BuildTool::Wall | BuildTool::Room | BuildTool::Sledgehammer));
+    let wall = buy.category == BUILD_TAB && matches!(buy.tool, Some(BuildTool::Wall | BuildTool::Room | BuildTool::DiagonalRoom | BuildTool::Sledgehammer));
     let pool = buy.category == BUILD_TAB && buy.tool == Some(BuildTool::Pool);
     let covers = crate::buildcatalog::showing(&buy) || crate::buildobjects::showing(&buy);
     set_visible(&mut visibility, s.id(HOME), !wall && !pool && !covers);
@@ -222,7 +222,7 @@ fn show(
     ] {
         if let Some(e) = s.id(id) && let Ok((mut button, _)) = buttons.get_mut(e) { button.selected = selected; }
     }
-    for (id, tool) in [(0x301, BuildTool::Wall), (0x302, BuildTool::Room)] {
+    for (id, tool) in [(0x301, BuildTool::Wall), (0x302, BuildTool::Room), (0x304, BuildTool::DiagonalRoom)] {
         if let Some(e) = s.id(WALLS).and_then(|p| s.within(p, id))
             && let Ok((mut button, _)) = buttons.get_mut(e)
         {

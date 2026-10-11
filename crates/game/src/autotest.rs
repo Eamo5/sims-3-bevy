@@ -2406,7 +2406,9 @@ fn auto_build(
             *stage = 3;
         }
         0 if time.elapsed_secs() - t0 > 3.0 => {
-            let (ops, cost) = crate::build::plan(b, crate::build::BuildTool::Room, false, b.view_level, IVec2::new(x, z), IVec2::new(x + w, z + d));
+            // (BUILD_DIAGONAL=1: the Diagonal Room tool's diamond, dragged the same way.)
+            let tool = if std::env::var("BUILD_DIAGONAL").is_ok() { crate::build::BuildTool::DiagonalRoom } else { crate::build::BuildTool::Room };
+            let (ops, cost) = crate::build::plan(b, tool, false, b.view_level, IVec2::new(x, z), IVec2::new(x + w, z + d));
             let c = b.world(x as f32 + w as f32 * 0.5, z as f32 + d as f32 * 0.5, 0.0);
             info!("build test: room {}x{} at {:.1},{:.1} — {} ops, §{cost}", w, d, c.x, c.z, ops.len());
             apply(&mut commands, &mut assets, b, &mut ctx, ops);

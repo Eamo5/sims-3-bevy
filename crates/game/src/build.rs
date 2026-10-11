@@ -35,6 +35,8 @@ pub const POOL_PRICE: i64 = 40;
 pub enum BuildTool {
     Wall,
     Room,
+    /// A room turned 45°: its four walls diagonal (the game's Diagonal Room tool).
+    DiagonalRoom,
     Floor,
     Stairs,
     Sledgehammer,
@@ -55,6 +57,7 @@ impl BuildTool {
         match self {
             BuildTool::Wall => format!("Wall Tool\n§{WALL_PRICE} a section"),
             BuildTool::Room => format!("Room Tool\n§{WALL_PRICE} a section"),
+            BuildTool::DiagonalRoom => format!("Diagonal Room Tool\n§{WALL_PRICE} a section"),
             BuildTool::Floor => format!("Floor Tiles\n§{FLOOR_PRICE} a tile"),
             BuildTool::Stairs => format!("Staircase\n§{STAIRS_PRICE}"),
             BuildTool::Sledgehammer => "Sledgehammer\nknock down walls".to_string(),
@@ -69,6 +72,7 @@ impl BuildTool {
         match self {
             BuildTool::Wall => "Drag along the grid to build a wall; Ctrl+drag knocks one down. Closing off a room lays its floor.",
             BuildTool::Room => "Drag out a rectangle to build a room's four walls; Ctrl+drag knocks them down.",
+            BuildTool::DiagonalRoom => "Drag out a diamond to build a room's four diagonal walls; Ctrl+drag knocks them down.",
             BuildTool::Floor => "Drag out a rectangle of floor tiles; Ctrl+drag takes them up.",
             BuildTool::Stairs => "Click to put in a staircase up to the next floor (its landing gets a floor); , and . turn it; Ctrl+click takes one away.",
             BuildTool::Sledgehammer => "Drag along a wall to knock it down.",
@@ -102,6 +106,18 @@ impl Drag {
 #[cfg(test)]
 mod drag_tests {
     use super::*;
+
+    #[test]
+    fn diagonal_rooms_are_diamonds() {
+        let e = edges(BuildTool::DiagonalRoom, IVec2::new(0, 0), IVec2::new(4, 0));
+        // (Two tiles along each diagonal: eight diagonal sections, closed.)
+        assert_eq!(e.len(), 8);
+        assert!(e.iter().all(|(p, q)| (*q - *p).abs() == IVec2::ONE));
+        assert_eq!(e.first().unwrap().0, e.last().unwrap().1);
+        // (An odd drag snaps to the nearest diamond.)
+        let odd = edges(BuildTool::DiagonalRoom, IVec2::new(0, 0), IVec2::new(3, 2));
+        assert!(odd.iter().all(|(p, q)| (*q - *p).abs() == IVec2::ONE));
+    }
 
     #[test]
     fn changing_floor_or_tool_abandons_the_previous_construction_drag() {
@@ -159,6 +175,20 @@ fn room(a: IVec2, b: IVec2) -> Vec<(IVec2, IVec2)> {
     }
     let (c1, c3) = (IVec2::new(b.x, a.y), IVec2::new(a.x, b.y));
     [line(a, c1), line(c1, b), line(b, c3), line(c3, a)].concat()
+}
+
+/// The edges round the diamond (a rectangle turned 45°) dragged from `a` towards `b`: its sides
+/// diagonal, its far corner the grid point nearest `b` that such a diamond can reach.
+fn diagonal_room(a: IVec2, b: IVec2) -> Vec<(IVec2, IVec2)> {
+    let d = b - a;
+    // Along (1, 1) by `p`, then along (1, -1) by `q`.
+    let p = (d.x + d.y).div_euclid(2);
+    let q = d.x - p;
+    let (c1, far, c3) = (a + IVec2::splat(p), a + IVec2::new(p + q, p - q), a + IVec2::new(q, -q));
+    if p == 0 || q == 0 {
+        return line(a, far);
+    }
+    [line(a, c1), line(c1, far), line(far, c3), line(c3, a)].concat()
 }
 
 /// The wall on `level` that runs along the whole of the edge from `p` to `q`, if any.
@@ -367,7 +397,11 @@ mod wall_placement_tests {
 
 /// The wall sections a drag with the wall, room or sledgehammer tool goes along.
 pub fn edges(tool: BuildTool, start: IVec2, cur: IVec2) -> Vec<(IVec2, IVec2)> {
-    if tool == BuildTool::Room { room(start, cur) } else { line(start, cur) }
+    match tool {
+        BuildTool::Room => room(start, cur),
+        BuildTool::DiagonalRoom => diagonal_room(start, cur),
+        _ => line(start, cur),
+    }
 }
 
 /// Doors and windows in wall sections being knocked down go back to the household (sold).
