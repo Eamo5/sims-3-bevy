@@ -203,6 +203,11 @@ impl ActiveBuilding {
         self.holes.iter().filter(|(_, h)| h.door && h.level.max(1) == level).map(|(_, h)| (h.wall_point + h.right * ((h.x0 + h.x1) * 0.5), h.fwd)).collect()
     }
 
+    /// (Debugging) the doors and windows that cut no wall: (lot point, facing, door, level).
+    pub fn openings_in_no_wall(&self) -> Vec<(Vec2, Vec2, bool, u8)> {
+        self.holes.iter().filter(|(_, h)| !self.data.walls.iter().any(|w| h.cuts(w))).map(|(_, h)| (h.wall_point, h.fwd, h.door, h.level)).collect()
+    }
+
     /// (Debugging) the walls on storey `level` within `r` of lot point `p`, each with the
     /// openings through it, and the openings there.
     pub fn openings_report(&self, p: Vec2, level: u8, r: f32) -> Vec<String> {

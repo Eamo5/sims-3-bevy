@@ -194,6 +194,30 @@ impl NavGrid {
         out
     }
 
+    /// (Debugging) the cells that can be walked to from `p`.
+    pub fn reachable_from(&self, p: Vec2) -> Vec<bool> {
+        let mut seen = vec![false; self.w * self.h];
+        let Some(start) = self.nearest_free(p) else { return seen };
+        let mut todo = vec![start];
+        seen[start.1 * self.w + start.0] = true;
+        while let Some((x, z)) = todo.pop() {
+            for (dx, dz) in [(-1i64, 0i64), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                let (nx, nz) = (x as i64 + dx, z as i64 + dz);
+                if nx < 0 || nz < 0 || nx >= self.w as i64 || nz >= self.h as i64 {
+                    continue;
+                }
+                let (nx, nz) = (nx as usize, nz as usize);
+                let i = nz * self.w + nx;
+                if seen[i] || self.is_blocked(nx, nz) || (dx != 0 && dz != 0 && self.is_blocked(x, nz) && self.is_blocked(nx, z)) || self.crosses(self.center_of(x, z), self.center_of(nx, nz)) {
+                    continue;
+                }
+                seen[i] = true;
+                todo.push((nx, nz));
+            }
+        }
+        seen
+    }
+
     /// How many barriers it has.
     pub fn barrier_count(&self) -> usize {
         self.barriers.len()

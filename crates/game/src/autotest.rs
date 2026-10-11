@@ -2395,6 +2395,8 @@ fn auto_gate_route(
     building: Option<Res<crate::building::ActiveBuilding>>,
     grid: Option<Res<crate::nav::NavGrid>>,
     upper: Option<Res<crate::nav::UpperFloors>>,
+    exit: Option<Res<crate::interact::LotExit>>,
+    mut cams: Query<&mut SimsCamera>,
     (obstacles, names): (Query<(Entity, &GlobalTransform, &crate::nav::Obstacle, Option<&crate::nav::Floor>, Has<crate::nav::Barrier>)>, Query<&crate::interact::GameObject>),
 ) {
     // NAV_MAP=<x>,<z>,<floor>,<radius> (lot-local): the walls and openings round that point, and
@@ -2410,6 +2412,14 @@ fn auto_gate_route(
             return;
         }
         let (p, level, r) = (Vec2::new(n[0], n[1]), n[2] as u8, n[3]);
+        // (NAV_MAP_CAM=<distance>: the camera on the point.)
+        if let Some(d) = std::env::var("NAV_MAP_CAM").ok().and_then(|v| v.parse::<f32>().ok())
+            && let Ok(mut c) = cams.single_mut()
+        {
+            let at = b.world(p.x, p.y, b.levels.get(level as usize).copied().unwrap_or(0.0));
+            c.focus = at;
+            c.distance = d;
+        }
         for line in b.openings_report(p, level, r) {
             info!("nav map: {line}");
         }
@@ -2420,6 +2430,8 @@ fn auto_gate_route(
             }
         }
         let g = if level <= 1 { Some(grid) } else { upper.as_deref().and_then(|u| u.grids.get(&level)) };
+        // (On the ground floor, 'o': a cell reached from the way off the lot.)
+        let reach = (level <= 1).then(|| exit.as_deref().map(|e| grid.reachable_from(e.0))).flatten();
         if let Some(g) = g {
             // (Rows along the lot's z, a character a quarter metre.)
             for zi in 0..=(r * 8.0) as i32 {
@@ -2431,6 +2443,7 @@ fn auto_gate_route(
                         match g.cell_of(w) {
                             Some((cx, cz)) if g.is_blocked(cx, cz) => '#',
                             Some(_) if g.crosses(w, w + Vec2::new(0.01, 0.0)) || g.crosses(w, w + Vec2::new(0.0, 0.01)) => '+',
+                            Some((cx, cz)) if reach.as_ref().is_some_and(|r| r[cz * g.w + cx]) => 'o',
                             Some(_) => '.',
                             None => ' ',
                         }
@@ -2572,6 +2585,9 @@ fn auto_reach(
         }
     }
     info!("nav reach: {ok} objects reached, {bad} not");
+    for (p, fwd, door, level) in b.openings_in_no_wall() {
+        info!("nav reach: {} on floor {level} at lot {p} facing {fwd} is in no wall", if door { "door" } else { "window" });
+    }
     // The ground floor's doors walked to from the way in, on either side: one reached and not
     // the other is a door shut to walking (what's in the way said).
     if bad > 0 {
