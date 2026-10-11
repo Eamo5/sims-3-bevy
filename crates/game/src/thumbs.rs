@@ -128,11 +128,13 @@ fn take_thumbs(
         Subject::Object(k) => assets.object(&mut ctx, k),
     };
     let Some((lo, hi)) = crate::objects::parts_bounds(&parts) else { return };
+    // (Doors', arches' and gates' rigged parts at rest, without their bones.)
+    let still: Vec<Handle<Mesh>> = parts.iter().map(|p| if p.rig.is_some() { assets.still(&mut meshes, &p.mesh) } else { p.mesh.clone() }).collect();
     let root = commands
         .spawn((Transform::from_translation(STAGE), Visibility::default()))
         .with_children(|c| {
-            for p in &parts {
-                c.spawn((Mesh3d(p.mesh.clone()), MeshMaterial3d(p.material.clone()), RenderLayers::layer(THUMB_LAYER)));
+            for (p, mesh) in parts.iter().zip(still) {
+                c.spawn((Mesh3d(mesh), MeshMaterial3d(p.material.clone()), RenderLayers::layer(THUMB_LAYER)));
             }
         })
         .id();

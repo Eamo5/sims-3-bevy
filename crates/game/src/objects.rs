@@ -50,6 +50,8 @@ pub struct ObjectAssets {
     designed: HashMap<(Key, Key), Vec<ModelPart>>,
     textures: HashMap<Key, Option<Handle<Image>>>,
     materials: HashMap<(Option<Key>, u8, bool), Handle<StandardMaterial>>,
+    /// Skinned meshes' copies without their skinning (see [`ObjectAssets::still`]).
+    still: HashMap<AssetId<Mesh>, Handle<Mesh>>,
 }
 
 pub struct AssetCtx<'a> {
@@ -293,6 +295,25 @@ impl ObjectAssets {
 
     pub fn has_garden(&self) -> bool {
         !self.garden.is_empty()
+    }
+
+    /// A mesh to draw without a skeleton: a skinned part's, its copy without bones and weights
+    /// (at rest it's the same shape), else itself. A mesh with bones drawn without its skin
+    /// fails the GPU's validation, which ends the game.
+    pub fn still(&mut self, meshes: &mut Assets<Mesh>, mesh: &Handle<Mesh>) -> Handle<Mesh> {
+        if let Some(h) = self.still.get(&mesh.id()) {
+            return h.clone();
+        }
+        let Some(m) = meshes.get(mesh) else { return mesh.clone() };
+        if m.attribute(Mesh::ATTRIBUTE_JOINT_INDEX).is_none() && m.attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT).is_none() {
+            return mesh.clone();
+        }
+        let mut copy = m.clone();
+        copy.remove_attribute(Mesh::ATTRIBUTE_JOINT_INDEX);
+        copy.remove_attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT);
+        let h = meshes.add(copy);
+        self.still.insert(mesh.id(), h.clone());
+        h
     }
 }
 

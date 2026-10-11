@@ -86,15 +86,18 @@ fn attach_skins(
     data: Option<Res<Baked>>,
     mut rigs: ResMut<Rigs>,
     mut bindposes: ResMut<Assets<SkinnedMeshInverseBindposes>>,
-    parts: Query<(Entity, &SkinPart, &ChildOf), Without<SkinnedMesh>>,
+    parts: Query<(Entity, &SkinPart, &ChildOf, &Mesh3d), Without<SkinnedMesh>>,
     roots: Query<&ObjectRig>,
+    (mut assets, mut meshes): (ResMut<crate::objects::ObjectAssets>, ResMut<Assets<Mesh>>),
 ) {
     let Some(data) = data else { return };
     let mut made: HashMap<(Entity, Key), Vec<Entity>> = HashMap::new();
-    for (e, part, parent) in &parts {
+    for (e, part, parent, mesh) in &parts {
         let root = parent.parent();
         let Some(rig) = rigs.0.entry(part.0).or_insert_with(|| load_rig(&data, part.0, &mut bindposes)).clone() else {
-            commands.entity(e).remove::<SkinPart>();
+            // (No rig to move it: drawn still, without its bones.)
+            let still = assets.still(&mut meshes, &mesh.0);
+            commands.entity(e).remove::<SkinPart>().insert(Mesh3d(still));
             continue;
         };
         let existing = roots.get(root).ok().and_then(|r| r.rigs.iter().find(|x| x.model == part.0)).map(|x| x.bones.clone());
