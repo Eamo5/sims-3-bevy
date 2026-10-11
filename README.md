@@ -710,6 +710,12 @@ installation is unreachable.
   the bin), and the game's own dialogs to confirm: Confirm Household Eviction, "Are you sure you
   want to change your active household?", the bulldoze warning, and Change Lot Type's residential
   or community choice with its kinds of community lot.
+- **Family inventory**: in Buy mode an object picked up off the lot goes into the household's
+  family inventory by the game's Family Inventory button (or a click on its grid); the button
+  shows the inventory in place of the catalogue, in the game's cells, each object taken out to
+  put down free (back in if it isn't), with Sell All. It's kept with the game and goes along when
+  the household moves or another is played, and Edit Town's Move Out With Home packs a household's
+  furniture into it.
 - **The game's own HUD**: the live-mode interface is the game's, drawn from its own layouts
   (`UI.package`'s window trees, pictures and fonts: every caption in its Helvetica Rounded),
   and driven as its own interface code drives it: the puck at the bottom left (live, buy and
@@ -799,8 +805,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-complete Build Mode interface; Create a Sim's pets, genetics and colour picker; household furniture
-inventory; complete object placement and routing compatibility; the rest of the expansions'
+complete Build Mode interface; Create a Sim's pets, genetics and colour picker; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
 ## Controls

@@ -28,7 +28,7 @@ pub(crate) struct CatalogueControls;
 impl Plugin for BuyHudPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(PlayMode::Live), spawn_buy_hud.after(crate::buy::reset_buy_mode))
-            .add_systems(Update, (show, catalogue_controls.in_set(CatalogueControls), tools, fill_catalogue, preview_panel).chain().after(crate::hud::pointer_over_ui).before(crate::buyhistory::update).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<BuyHud>));
+            .add_systems(Update, (show, catalogue_controls.in_set(CatalogueControls), tools, inventory_controls, fill_catalogue, preview_panel).chain().after(crate::hud::pointer_over_ui).before(crate::buyhistory::update).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<BuyHud>));
     }
 }
 
@@ -60,6 +60,13 @@ const PAGE_ONE_END: u32 = 0x06e8_e6db;
 const WIN_BY_ROOM: u32 = 0x2000;
 const WIN_BY_FUNCTION: u32 = 0x2001;
 const WIN_ROOM_EMPTY: u32 = 0x2003;
+/// The family inventory's window, its grid, Sell All (and Sell One, for dragging), and its words
+/// when it's empty.
+const WIN_INVENTORY: u32 = 0x2002;
+const GRID_INVENTORY: u32 = 0x2103;
+const INVENTORY_SELL_ALL: u32 = 0x070f_40e1;
+const INVENTORY_SELL_ONE: u32 = 0x070f_40e2;
+const INVENTORY_WORDS: u32 = 0x070f_40e0;
 const ROOM_EMPTY_WIDTH: u32 = 0x2400;
 const GRID_BY_ROOM: u32 = 0x2101;
 const GRID_BY_FUNCTION: u32 = 0x2102;
@@ -113,8 +120,13 @@ pub struct BuyHud {
     s: Spawned,
     /// Its puck under the HUD puck's ids (the puck system works both).
     pub(crate) puck: Spawned,
-    /// The catalogue grids' own layouts (by function, by room).
+    /// The catalogue grids' own layouts (by function, by room), and the family inventory's.
     grids: [Spawned; 2],
+    inventory_grid: Spawned,
+    /// The family inventory showing in place of the catalogue, its cells and its first row.
+    inventory: bool,
+    inventory_cells: Option<Entity>,
+    inventory_scroll: usize,
     flags: HashMap<Key, ObjBuy>,
     descriptions: HashMap<Key, String>,
     by_room: bool,
@@ -183,6 +195,29 @@ fn spawn_buy_hud(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut imag
             }
         }
     }
+    let mut inventory_grid = Spawned::default();
+    if let (Some(e), Some(mut w)) = (s.id(GRID_INVENTORY), ui.layout("BuyExpandableCatalogGrid").cloned()) {
+        w.area = [0.0; 4];
+        w.place = UiPlace::Simple(15);
+        inventory_grid = ui.spawn_under(&mut commands, &mut images, &mut fonts, &w, e);
+        if let Some(g) = inventory_grid.id(ITEM_GRID) {
+            commands.entity(g).remove::<Pickable>().insert((Interaction::default(), crate::hud::BlocksWorld));
+        }
+        // (Two rows, not expanding.)
+        for id in [EXPAND, SCROLLBAR] {
+            if let Some(x) = inventory_grid.id(id) {
+                commands.entity(x).insert(Visibility::Hidden);
+            }
+        }
+    }
+    for (id, tip) in [(FAMILY_INVENTORY, "Family Inventory"), (INVENTORY_SELL_ALL, "Sell All")] {
+        if let Some(e) = s.id(id) {
+            commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
+        }
+    }
+    if let Some(e) = s.id(INVENTORY_SELL_ONE) {
+        commands.entity(e).insert(Visibility::Hidden);
+    }
     let baked = ui.baked();
     let flags = baked.buy_flags.iter().copied().collect();
     let descriptions = baked.descriptions.iter().cloned().collect();
@@ -234,6 +269,10 @@ fn spawn_buy_hud(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut imag
         s,
         puck,
         grids,
+        inventory_grid,
+        inventory: false,
+        inventory_cells: None,
+        inventory_scroll: 0,
         flags,
         descriptions,
         by_room: false,
@@ -314,12 +353,15 @@ fn catalogue_controls(
         h.dirty = true;
         play.write(crate::sound::PlaySound::ui("ui_tertiary_button"));
     };
-    if pressed(&clicks, h.s.id(BY_FUNCTION)) && h.by_room {
+    // (By function or by room: the catalogue back in place of the family inventory.)
+    if pressed(&clicks, h.s.id(BY_FUNCTION)) && (h.by_room || h.inventory) {
         h.by_room = false;
+        h.inventory = false;
         click(h);
     }
-    if pressed(&clicks, h.s.id(BY_ROOM)) && !h.by_room {
+    if pressed(&clicks, h.s.id(BY_ROOM)) && (!h.by_room || h.inventory) {
         h.by_room = true;
+        h.inventory = false;
         click(h);
     }
     if pressed(&clicks, h.s.id(TOGGLE_PAGE)) {
@@ -429,12 +471,12 @@ fn tools(hud: Res<BuyHud>, mut commands: Commands, mut buy: ResMut<BuyMode>, clo
         (DAY_NIGHT, !(6.0..20.0).contains(&buy.lighting_hour(clock.hour_f())), false),
         (INDOOR_GRID, !buy.hide_grid, false),
         (BLUEPRINT, false, true),
-        (FAMILY_INVENTORY, false, true),
+        (FAMILY_INVENTORY, hud.inventory, false),
         (COLLECTIONS, false, true),
         (FILTERS[0], false, true),
         (FILTERS[1], false, true),
-        (BY_ROOM, hud.by_room, false),
-        (BY_FUNCTION, !hud.by_room, false),
+        (BY_ROOM, hud.by_room && !hud.inventory, false),
+        (BY_FUNCTION, !hud.by_room && !hud.inventory, false),
         (TOGGLE_PAGE, hud.page_two, false),
     ];
     for (id, on, off) in lit {
@@ -444,6 +486,152 @@ fn tools(hud: Res<BuyHud>, mut commands: Commands, mut buy: ResMut<BuyMode>, clo
         {
             b.selected = on;
             b.disabled = off;
+        }
+    }
+}
+
+/// (For the tests: the family inventory shown.)
+pub(crate) fn show_inventory(w: &mut World) {
+    if let Some(mut h) = w.get_resource_mut::<BuyHud>() {
+        h.inventory = true;
+        h.dirty = true;
+    }
+}
+
+/// The family inventory's button and window: an object in hand goes in (by the button, or a
+/// click on the inventory's grid); otherwise the button shows the inventory in place of the
+/// catalogue (or the catalogue again). Sell All sells everything in it; the wheel scrolls it.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn inventory_controls(
+    mut hud: ResMut<BuyHud>,
+    mut buy: ResMut<BuyMode>,
+    clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
+    (mut family, catalog, mut household): (ResMut<crate::familyinv::FamilyInventory>, Res<Catalog>, Option<ResMut<crate::interact::Household>>),
+    areas: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform, &InheritedVisibility)>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut wheel: MessageReader<MouseWheel>,
+    (mut notes, mut play): (ResMut<crate::interact::Notifications>, MessageWriter<crate::sound::PlaySound>),
+) {
+    let scrolled: f32 = wheel.read().map(|w| if w.unit == bevy::input::mouse::MouseScrollUnit::Line { w.y } else { w.y / 40.0 }).sum();
+    if !showing(&buy) {
+        return;
+    }
+    let h = &mut *hud;
+    let holding_owned = buy.placing.as_ref().is_some_and(|p| p.owned && !p.edit_in_place);
+    let grid = h.inventory_grid.id(ITEM_GRID);
+    if pressed(&clicks, h.s.id(FAMILY_INVENTORY)) {
+        if holding_owned {
+            buy.store = true;
+            h.inventory = true;
+        } else {
+            h.inventory = !h.inventory;
+            play.write(crate::sound::PlaySound::ui("ui_tertiary_button"));
+        }
+        h.inventory_scroll = 0;
+        h.dirty = true;
+    }
+    if !h.inventory {
+        return;
+    }
+    if holding_owned && pressed(&clicks, grid) {
+        buy.store = true;
+    }
+    if pressed(&clicks, h.s.id(INVENTORY_SELL_ALL)) && !family.0.is_empty() {
+        let total: i64 = family.0.iter().map(|o| crate::familyinv::worth(o, &catalog)).sum();
+        let n = family.0.len();
+        family.0.clear();
+        if let Some(hh) = household.as_mut() {
+            hh.funds += total;
+        }
+        notes.push(format!("Sold {n} object{} from the family inventory for §{}.", if n == 1 { "" } else { "s" }, crate::lifetime::group(total)));
+        play.write(crate::sound::PlaySound::ui("ui_object_sell"));
+        h.dirty = true;
+    }
+    let over = windows.single().ok().is_some_and(|w| over_window(grid, &areas, w));
+    let up = pressed(&clicks, grid.and_then(|g| h.inventory_grid.within(g, SCROLL_UP)));
+    let down = pressed(&clicks, grid.and_then(|g| h.inventory_grid.within(g, SCROLL_DOWN)));
+    if up || down || over && scrolled != 0.0 {
+        let rows = family.0.len().div_ceil(h.columns.max(1));
+        let most = rows.saturating_sub(CLOSED_ROWS);
+        let to = if up || over && scrolled > 0.0 { h.inventory_scroll.saturating_sub(1) } else { (h.inventory_scroll + 1).min(most) };
+        if to != h.inventory_scroll {
+            h.inventory_scroll = to;
+            h.dirty = true;
+        }
+    }
+}
+
+/// The family inventory in place of the catalogue: its objects in the game's cells (each taken
+/// out by a click, to put down free), its words when it's empty, Sell All lit when there's
+/// something to sell.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn fill_inventory(
+    commands: &mut Commands,
+    h: &mut BuyHud,
+    ui: &mut UiAssets,
+    (images, fonts): (&mut Assets<Image>, &mut Assets<Font>),
+    (catalog, mut game_ui): (&Catalog, Option<&mut crate::icons::GameUi>),
+    family: &crate::familyinv::FamilyInventory,
+    (vis, nodes, buttons): (&mut Query<&mut Visibility>, &mut Query<&mut Node>, &mut Query<&mut UiButton>),
+) {
+    for (id, on) in [(WIN_INVENTORY, true), (WIN_BY_FUNCTION, false), (WIN_BY_ROOM, false), (WIN_ROOM_EMPTY, false), (CATEGORY_PANEL, false), (TABS_BY_FUNCTION, false), (TABS_BY_ROOM, false), (TOGGLE_PAGE, false)] {
+        set_visible(vis, h.s.id(id), on);
+    }
+    if let Some(words) = h.s.text(INVENTORY_WORDS) {
+        let w = ui.localize("Ui/Caption/Buy/Inventory:InstructionText").unwrap_or_else(|| "Click an object on the lot, then the Family Inventory button, to put it here.".into());
+        commands.entity(words).insert(Text::new(w));
+    }
+    set_visible(vis, h.s.id(INVENTORY_WORDS), family.0.is_empty());
+    if let Some(e) = h.s.id(INVENTORY_SELL_ALL)
+        && let Ok(mut b) = buttons.get_mut(e)
+        && b.disabled != family.0.is_empty()
+    {
+        b.disabled = family.0.is_empty();
+    }
+    let grid_win = ui.find("BuyExpandableCatalogGrid", ITEM_GRID).cloned();
+    let g = grid_win.as_ref().and_then(|w| w.grid).unwrap_or_default();
+    let step = Vec2::new(g.cell[0] + g.cell_padding[2] - g.cell_padding[0], g.cell[1] + g.cell_padding[3] - g.cell_padding[1]).max(Vec2::ONE);
+    let width = ui.find("Buy", WIN_INVENTORY).zip(ui.find("Buy", GRID_INVENTORY)).map_or(440.0, |(w, gw)| (w.area[2] - w.area[0]) - gw.area[0] + gw.area[2]);
+    let columns = (((width - g.padding[0]) / step.x).floor() as usize).max(1);
+    h.columns = columns;
+    let rows = family.0.len().div_ceil(columns);
+    h.inventory_scroll = h.inventory_scroll.min(rows.saturating_sub(CLOSED_ROWS));
+    let gs = &h.inventory_grid;
+    for id in GRID_CLOSED {
+        set_visible(vis, gs.id(id), true);
+    }
+    for id in GRID_OPEN {
+        set_visible(vis, gs.id(id), false);
+    }
+    let Some(grid) = gs.id(ITEM_GRID) else { return };
+    if let Ok(mut n) = nodes.get_mut(grid) {
+        n.overflow = Overflow::clip();
+    }
+    for (id, disabled) in [(SCROLL_UP, h.inventory_scroll == 0), (SCROLL_DOWN, h.inventory_scroll >= rows.saturating_sub(CLOSED_ROWS))] {
+        if let Some(e) = gs.within(grid, id)
+            && let Ok(mut b) = buttons.get_mut(e)
+            && b.disabled != disabled
+        {
+            b.disabled = disabled;
+        }
+    }
+    let holder = holder(commands, grid, &mut h.inventory_cells, vis);
+    let Some(template) = ui.layout("BuyCatalogItem").cloned() else { return };
+    for (i, o) in family.0.iter().enumerate().skip(h.inventory_scroll * columns).take(CLOSED_ROWS * columns) {
+        let n = i - h.inventory_scroll * columns;
+        let (col, row) = ((n % columns) as f32, (n / columns) as f32);
+        let (x, y) = (g.padding[0] + col * step.x, g.padding[1] + row * step.y);
+        let mut w = template.clone();
+        w.cls = "Button".to_string();
+        w.area = [x, y, x + step.x, y + g.cell[1]];
+        let c = ui.spawn_under(commands, images, fonts, &w, holder);
+        let Some(r) = c.root else { continue };
+        let name = o.item.as_ref().map(|i| i.name.clone()).or_else(|| catalog.by_key(&o.objd).map(|e| e.name.clone())).unwrap_or_default();
+        let tip = format!("{name}\nSells for §{}", crate::lifetime::group(crate::familyinv::worth(o, catalog)));
+        commands.entity(r).insert((BuyButton::Inventory(i), crate::icons::Tooltip(tip)));
+        let thumb = game_ui.as_deref_mut().and_then(|gu| gu.icon(images, &s3bake::gamedata::thumb_name(o.objd.2)));
+        if let (Some(t), Some(win)) = (thumb, c.id(CELL_THUMB)) {
+            crate::hudpanels::picture(commands, win, t, Color::WHITE);
         }
     }
 }
@@ -463,11 +651,15 @@ fn fill_catalogue(
     (mut vis, mut nodes, mut buttons): (Query<&mut Visibility>, Query<&mut Node>, Query<&mut UiButton>),
     mut scrollbars: Query<&mut crate::layout::UiScrollBar>,
     mut held: Local<Option<Key>>,
+    family: Res<crate::familyinv::FamilyInventory>,
 ) {
     if !showing(&buy) {
         return;
     }
     let (Some(mut ui), Ok(window)) = (ui, windows.single()) else { return };
+    if family.is_changed() {
+        hud.dirty = true;
+    }
     // (Laid out again for another screen width, and lit for the object in hand.)
     let screen = window.width();
     let in_hand = buy.placing.as_ref().map(|p| p.objd);
@@ -480,9 +672,14 @@ fn fill_catalogue(
     }
     hud.dirty = false;
     hud.width = screen;
+    let h = &mut *hud;
+    if h.inventory {
+        fill_inventory(&mut commands, h, &mut ui, (&mut images, &mut fonts), (&catalog, game_ui.as_deref_mut()), &family, (&mut vis, &mut nodes, &mut buttons));
+        return;
+    }
+    set_visible(&mut vis, h.s.id(WIN_INVENTORY), false);
     let data = ui.baked().clone();
     let cat = &data.buy;
-    let h = &mut *hud;
     let k = h.by_room as usize;
     // By function or by room.
     for (id, on) in [

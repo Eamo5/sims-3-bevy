@@ -39,7 +39,8 @@ impl Plugin for BuyPlugin {
             .add_systems(Update, lot_grid.run_if(in_state(PlayMode::Live)))
             .add_systems(Update, crate::buyhistory::update.run_if(in_state(PlayMode::Live)))
             .add_systems(Update, crate::buyhistory::settle_purchases.after(crate::buyhistory::update).run_if(in_state(PlayMode::Live)))
-            .add_systems(Update, (scripted_style, scripted_cover, scripted_eyedrop).run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (scripted_style, scripted_cover, scripted_eyedrop).run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, scripted_family_inventory.before(buy_buttons).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -74,12 +75,14 @@ pub struct Placing {
     source: Option<(Entity, Option<crate::nav::Obstacle>)>,
     /// The design tool previews at the original location and commits without a placement click.
     pub edit_in_place: bool,
+    /// Taken out of the family inventory: what goes back in if it isn't put down.
+    pub stored: Option<crate::save::SavedObject>,
 }
 
 impl Placing {
     /// Something from the catalogue (or the lot) in hand.
     pub fn new(objd: Key, ghost: Entity, owned: bool, design: Option<Key>) -> Self {
-        Self { objd, ghost, owned, design, item: None, origin: None, from: None, source: None, edit_in_place: false }
+        Self { objd, ghost, owned, design, item: None, origin: None, from: None, source: None, edit_in_place: false, stored: None }
     }
 }
 
@@ -148,6 +151,8 @@ pub struct BuyMode {
     /// Waiting for an existing object to edit with Create a Style.
     pub design_tool: bool,
     apply_design: bool,
+    /// The object in hand to go into the family inventory (its button pressed, or its grid).
+    pub store: bool,
 }
 
 #[derive(Component)]
@@ -323,6 +328,8 @@ pub enum BuyButton {
     Sculpt(u8),
     Prev,
     Next,
+    /// An object in the family inventory (by its place there), taken out to put down.
+    Inventory(usize),
 }
 
 impl BuyMode {
@@ -342,6 +349,72 @@ impl BuyMode {
         self.page = 0;
         self.dirty = true;
     }
+}
+
+/// FAMILY_INV=1 (tests): Buy mode opened (12 seconds in), an object of the lot picked up and put
+/// in the family inventory, the inventory shown, the object taken out again, and put back by
+/// leaving it in hand (two seconds a step; screenshots into FAMILY_INV_SHOTS).
+#[allow(clippy::too_many_arguments)]
+fn scripted_family_inventory(
+    mut commands: Commands,
+    time: Res<Time<crate::autotest::InputTimeline>>,
+    mut buy: ResMut<BuyMode>,
+    mut clock: ResMut<crate::clock::GameClock>,
+    mut buttons: Query<(&BuyButton, &mut Interaction)>,
+    objects: Query<(Entity, &GameObject, &Transform), Without<crate::buyhistory::HistoryHidden>>,
+    (catalog, household, family): (Res<Catalog>, Option<Res<Household>>, Res<crate::familyinv::FamilyInventory>),
+    world: Res<CurrentWorld>,
+    mut step: Local<u8>,
+) {
+    if std::env::var("FAMILY_INV").is_err() {
+        return;
+    }
+    let shot = |commands: &mut Commands, name: &str| {
+        let dir = std::env::var("FAMILY_INV_SHOTS").unwrap_or_else(|_| ".".into());
+        let _ = std::fs::create_dir_all(&dir);
+        commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(format!("{dir}/{name}.png")));
+    };
+    let t = time.elapsed_secs();
+    match *step {
+        0 if t > 12.0 => enter_mode(&mut buy, Some(false), &mut commands, &mut clock),
+        1 if t > 14.0 => {
+            // (A chair or the like, on the home lot: something the catalogue sells.)
+            let home = household.as_ref().map(|h| h.lot_index);
+            let pick = objects.iter().find(|(_, o, tf)| {
+                catalog.by_key(&o.objd).is_some_and(|e| e.price > 0 && e.opening.is_none() && !e.shell)
+                    && home.is_some_and(|h| crate::rabbitholes::lot_at(&world.data.lots, tf.translation) == Some(h))
+            });
+            let Some((e, o, _)) = pick else { return };
+            info!("family inventory test: picking up {}", o.name);
+            commands.insert_resource(PickupRequest(e));
+        }
+        2 if t > 16.0 => {
+            buy.store = true;
+            commands.queue(crate::buyhud::show_inventory);
+        }
+        3 if t > 18.0 => {
+            info!("family inventory test: {} in the inventory", family.0.len());
+            shot(&mut commands, "fi1_inventory");
+        }
+        4 if t > 20.0 => {
+            let Some((_, mut i)) = buttons.iter_mut().find(|(b, _)| matches!(b, BuyButton::Inventory(0))) else { return };
+            *i = Interaction::Pressed;
+        }
+        5 if t > 22.0 => {
+            info!("family inventory test: in hand {:?}, {} left in the inventory", buy.placing.as_ref().map(|p| p.stored.is_some()), family.0.len());
+            shot(&mut commands, "fi2_taken_out");
+            buy.drop_tools(&mut commands);
+        }
+        6 if t > 24.0 => {
+            info!("family inventory test: {} in the inventory after putting it back", family.0.len());
+            if family.0.len() == 1 {
+                info!("autotest: family inventory PASS - stored, taken out, put back");
+            }
+            shot(&mut commands, "fi3_back");
+        }
+        _ => return,
+    }
+    *step += 1;
 }
 
 /// OBJ_STYLE=1 (tests): with an object in hand, Create a Style opened (from 12 seconds in) and
@@ -604,6 +677,11 @@ pub(crate) fn toggle_buy(
 
 /// Puts something being moved back: in the inventory it came out of, or where it stood.
 fn put_back(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetCtx, catalog: &Catalog, p: &Placing) {
+    // (Out of the family inventory: back in.)
+    if let Some(o) = p.stored.clone() {
+        commands.queue(move |w: &mut World| w.resource_mut::<crate::familyinv::FamilyInventory>().0.push(o));
+        return;
+    }
     if restore_source(commands, p).is_some() {
         return;
     }
@@ -1251,7 +1329,7 @@ fn buy_buttons(
     mut play: MessageWriter<crate::sound::PlaySound>,
     ghost_tf: Query<&Transform>,
     (mut renders, install, mut styled): (ResMut<crate::style::StyleRenders>, Option<Res<crate::data::InstallPath>>, MessageReader<crate::style::ObjectStyleReady>),
-    (ui, mut covered): (Option<Res<crate::icons::GameUi>>, MessageReader<crate::style::CoverStyleReady>),
+    (ui, mut covered, mut family): (Option<Res<crate::icons::GameUi>>, MessageReader<crate::style::CoverStyleReady>, ResMut<crate::familyinv::FamilyInventory>),
     mut notes: ResMut<Notifications>,
 ) {
     // A wall or floor style rendered: painted with from now on.
@@ -1423,6 +1501,26 @@ fn buy_buttons(
                 let ghost = spawn_parts(&mut commands, &parts, Transform::from_xyz(0.0, -1000.0, 0.0));
                 commands.entity(ghost).insert(DespawnOnExit(AppState::InGame));
                 buy.placing = Some(Placing::new(*key, ghost, false, None));
+                buy.dirty = true;
+            }
+            BuyButton::Inventory(i) => {
+                // (Taken out of the family inventory: owned, so put down free.)
+                if *i >= family.0.len() {
+                    continue;
+                }
+                buy.drop_tools(&mut commands);
+                let o = family.0.remove(*i);
+                let design = o.design_texture();
+                let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+                let parts = assets.object_design(&mut ctx, o.objd, design);
+                if parts.is_empty() {
+                    family.0.insert(*i, o);
+                    continue;
+                }
+                let ghost = spawn_parts(&mut commands, &parts, Transform::from_xyz(0.0, -1000.0, 0.0));
+                commands.entity(ghost).insert(DespawnOnExit(AppState::InGame));
+                buy.style = design.and_then(crate::style::ObjectStyle::from_texture).filter(|s| s.objd == o.objd);
+                buy.placing = Some(Placing { item: o.item.clone(), stored: Some(o.clone()), ..Placing::new(o.objd, ghost, true, design) });
                 buy.dirty = true;
             }
         }
@@ -1641,7 +1739,7 @@ fn placement(
     ),
     selected: Query<Entity, With<crate::sim::Selected>>,
     mut grid: Option<ResMut<NavGrid>>,
-    (pickup, hold): (Option<Res<PickupRequest>>, Option<Res<HoldRequest>>),
+    (pickup, hold, mut family): (Option<Res<PickupRequest>>, Option<Res<HoldRequest>>, ResMut<crate::familyinv::FamilyInventory>),
     objects: Query<(&GameObject, &Transform, Option<&crate::objects::Design>, Option<&crate::paintings::Hung>, Option<&crate::interact::UsedBy>, Option<&crate::nav::Obstacle>)>,
     (bought_q, mut removed): (Query<(), With<crate::save::Bought>>, ResMut<crate::save::RemovedLotObjects>),
     mut tfs: Query<&mut Transform, Without<GameObject>>,
@@ -1753,6 +1851,28 @@ fn placement(
         }
         return;
     }
+    // Into the family inventory: off the lot (or out of a Sim's hands), kept to put down later.
+    if std::mem::take(&mut buy.store) && owned {
+        let placing = buy.placing.take().unwrap();
+        if let Some((source, _)) = placing.source {
+            if !bought_q.contains(source) && let Ok((obj, tf, ..)) = objects.get(source) {
+                crate::save::note_removed(&mut removed, obj, tf);
+            }
+            crate::buyhistory::park(&mut commands, source);
+        }
+        family.0.push(crate::familyinv::stored(objd, design, placing.item.clone()));
+        commands.entity(ghost).despawn();
+        buy.dirty = true;
+        if let Some(g) = grid.as_mut() {
+            g.dirty = true;
+        }
+        // (What's gone into the inventory can't be undone back onto the lot.)
+        crate::buyhistory::discard(&mut commands);
+        play.write(crate::sound::PlaySound::ui("ui_tertiary_button"));
+        notes.push("Put in the family inventory.");
+        return;
+    }
+    let placing = buy.placing.as_ref().unwrap();
     let price = placing.item.as_ref().map_or_else(|| catalog.by_key(&objd).map_or(0, |e| e.price.max(0) as i64), |i| i.worth);
     // Selling and cancelling do not need a cursor in the window.
     if (keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace) || buy.selling) && owned {

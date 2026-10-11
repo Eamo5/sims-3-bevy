@@ -350,7 +350,7 @@ fn edit_town_ui(
             && let Some(o) = occupant
         {
             let name = household_info(o, household.as_deref(), &members, &dormant.0, town_ref, &story, &mut portraits, &mut images).name;
-            g.dialog = evict_dialog(&mut commands, &mut ui, &mut images, &mut fonts, &name, &lot_name_of(focus, &world.data)).map(|s| (s, Confirm::Evict(o)));
+            g.dialog = evict_dialog(&mut commands, &mut ui, &mut images, &mut fonts, &name, &lot_name_of(focus, &world.data), matches!(o, Occupant::Played(_))).map(|s| (s, Confirm::Evict(o)));
         } else if pressed(info, SWITCH_TO)
             && let Some(o) = occupant
         {
@@ -373,7 +373,9 @@ fn edit_town_ui(
         match confirm {
             Confirm::Evict(o) => {
                 if pressed(&s, EVICT_SELL) {
-                    done = Some(Some(EditAction::Evict(o)));
+                    done = Some(Some(EditAction::Evict(o, false)));
+                } else if pressed(&s, EVICT_TAKE) {
+                    done = Some(Some(EditAction::Evict(o, true)));
                 } else if pressed(&s, EVICT_CANCEL) {
                     done = Some(None);
                 }
@@ -431,7 +433,7 @@ fn edit_town_ui(
             g.dialog = None;
             if let Some(a) = action {
                 requests.write(EditRequest(a));
-                if matches!(a, EditAction::Evict(_)) {
+                if matches!(a, EditAction::Evict(..)) {
                     g.changes = g.changes.wrapping_add(1);
                 }
             }
@@ -887,17 +889,22 @@ fn ask(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, f
     Some(s)
 }
 
-/// The game's evict dialog: the household and the lot, Move Out (their furniture sold) or Cancel.
-fn evict_dialog(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>, household: &str, lot: &str) -> Option<Spawned> {
+/// The game's evict dialog: the household and the lot, Move Out (their furniture sold), Move Out
+/// With Home (packed in their family inventory: for a household played before, whose furniture
+/// it is) or Cancel.
+fn evict_dialog(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>, household: &str, lot: &str, can_pack: bool) -> Option<Spawned> {
     let s = crate::gamedialogs::spawn_dialog(commands, ui, images, fonts, "EditTownConfirmEvict")?;
     for (id, t) in [(EVICT_HOUSEHOLD, household), (EVICT_LOT, lot)] {
         if let Some(x) = s.text(id) {
             commands.entity(x).insert(Text::new(t.to_string()));
         }
     }
-    // (Taking the furniture along isn't kept: the house stands as it is.)
     if let Some(e) = s.id(EVICT_TAKE) {
-        commands.entity(e).insert(Visibility::Hidden);
+        if can_pack {
+            commands.entity(e).insert(crate::icons::Tooltip("Move out, their furniture packed in their family inventory".into()));
+        } else {
+            commands.entity(e).insert(Visibility::Hidden);
+        }
     }
     if let Some(e) = s.id(EVICT_SELL) {
         commands.entity(e).insert(crate::icons::Tooltip("Move out, their furniture sold for four-fifths of what it cost".into()));

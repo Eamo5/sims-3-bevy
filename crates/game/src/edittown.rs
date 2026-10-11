@@ -158,7 +158,9 @@ pub(crate) fn lot_kind(world: &crate::loading::WorldInfo, i: usize) -> String {
 pub(crate) enum EditAction {
     Select(usize),
     Play(Occupant),
-    Evict(Occupant),
+    /// Moved out to the household bin: a household played before has its furniture sold, or
+    /// packed into its family inventory (`true`, the game's Move Out With Home).
+    Evict(Occupant, bool),
     MoveIn(Binned, usize),
     /// The house on an empty lot torn down, the lot left empty.
     Bulldoze(usize),
@@ -353,7 +355,7 @@ fn show_edit_town(
                             if o != Occupant::Active {
                                 c.spawn(Node { column_gap: Val::Px(8.0), ..default() }).with_children(|r| {
                                     button(r, "Play This Household".into(), EditAction::Play(o), PLUMBOB_GREEN);
-                                    button(r, "Evict".into(), EditAction::Evict(o), Color::srgb(1.0, 0.75, 0.6));
+                                    button(r, "Evict".into(), EditAction::Evict(o, false), Color::srgb(1.0, 0.75, 0.6));
                                 });
                             }
                         }
@@ -507,7 +509,7 @@ fn edit_town_buttons(
             commands.insert_resource(crate::household::Switching(choice));
             snapshot.write(crate::save::SnapshotRequest);
         }
-        EditAction::Evict(o) => {
+        EditAction::Evict(o, keep) => {
             let at = edit.selected.map(lot_name).unwrap_or_default();
             match o {
                 Occupant::Town(id) => {
@@ -516,9 +518,13 @@ fn edit_town_buttons(
                 }
                 Occupant::Played(i) => {
                     let Some(d) = dormant.0.get_mut(i) else { return };
-                    // (Their furniture sold, the house left as it stands.)
-                    let refund: i64 = d.bought.iter().filter_map(|o| catalog.by_key(&o.objd)).map(|e| e.price.max(0) as i64 * 4 / 5).sum();
+                    // (Their furniture sold, or packed to take along; the house left as it stands.)
+                    let refund: i64 = if keep { 0 } else { d.bought.iter().filter_map(|o| catalog.by_key(&o.objd)).map(|e| e.price.max(0) as i64 * 4 / 5).sum() };
                     d.funds += refund;
+                    if keep {
+                        let packed: Vec<crate::save::SavedObject> = d.bought.iter().map(|o| crate::familyinv::stored(o.objd, o.design_texture(), o.item.clone())).collect();
+                        d.family_inventory.extend(packed);
+                    }
                     for v in [&mut d.bought, &mut d.removed] {
                         v.clear();
                     }
@@ -528,7 +534,11 @@ fn edit_town_buttons(
                     d.plants.clear();
                     d.graves.clear();
                     d.homeless = true;
-                    notes.push(format!("The {} household moved out of {at} (their furniture sold for §{refund}): they're in the household bin.", d.household));
+                    notes.push(if keep {
+                        format!("The {} household moved out of {at}, their furniture packed in their family inventory: they're in the household bin.", d.household)
+                    } else {
+                        format!("The {} household moved out of {at} (their furniture sold for §{refund}): they're in the household bin.", d.household)
+                    });
                 }
                 Occupant::Active => return,
             }
@@ -668,7 +678,7 @@ fn scripted(
     for (a, mut i) in &mut buttons {
         let hit = match (verb, a) {
             ("select", EditAction::Select(l)) => lot_named(arg, *l),
-            ("evict", EditAction::Evict(_)) | ("play", EditAction::Play(_)) | ("done", EditAction::Done) => true,
+            ("evict", EditAction::Evict(..)) | ("play", EditAction::Play(_)) | ("done", EditAction::Done) => true,
             ("movein", EditAction::MoveIn(b, _)) => household_named(arg, *b),
             ("bulldoze", EditAction::Bulldoze(_)) | ("pickhouse", EditAction::PickHouse) => true,
             ("place", EditAction::Place(_, from)) => lot_named(arg, *from),

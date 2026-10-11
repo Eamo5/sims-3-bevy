@@ -330,6 +330,9 @@ pub struct SaveGame {
     /// empty lot's deck at the ground's height: lifted onto it when loaded).
     #[serde(default)]
     pub deck: bool,
+    /// The family inventory: furniture owned, not set out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub family_inventory: Vec<SavedObject>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -690,7 +693,7 @@ fn save_game(
         Query<(&crate::pets::Pet, &crate::pets::HomePet, &Transform)>,
         Res<crate::pets::PetData>,
     ),
-    (mut slot, maid, mail_due, upgraded, family, strokes, sculpted, broken): (
+    (mut slot, maid, mail_due, upgraded, family, strokes, sculpted, broken, family_inventory): (
         ResMut<SaveSlot>,
         Res<crate::services::MaidService>,
         Option<Res<crate::services::MailDue>>,
@@ -699,6 +702,7 @@ fn save_game(
         Res<crate::terrain_paint::Strokes>,
         Res<crate::terrain_paint::Sculpted>,
         Query<(&GameObject, &Transform), (With<crate::interact::Broken>, Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>,
+        Res<crate::familyinv::FamilyInventory>,
     ),
 ) {
     let new_file = save_as.read().count() > 0;
@@ -835,6 +839,7 @@ fn save_game(
         dormant: dormant.kept(&sims.iter().filter(|q| q.9).map(|q| q.1.id).collect::<Vec<_>>()),
         homeless: false,
         deck: true,
+        family_inventory: family_inventory.0.clone(),
     };
     if snapshot {
         commands.insert_resource(Snapshot(game.clone()));
@@ -1117,6 +1122,7 @@ pub(crate) fn apply_loaded_game(
             }
         }
     }
+    commands.insert_resource(crate::familyinv::FamilyInventory(game.family_inventory.clone()));
     for b in &game.bought {
         let rot = Quat::from_array(b.rotation);
         if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, b.objd, lift(Vec3::from(b.position)), rot, b.design_texture()) {
