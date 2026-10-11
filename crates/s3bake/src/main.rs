@@ -56,7 +56,7 @@ fn main() {
             for o in &b.objects {
                 *objs.entry(o.level).or_default() += 1;
             }
-            println!("  objects by level {objs:?} penthouse {} house {} furnished {}", b.is_penthouse(), b.is_house(), b.is_furnished());
+            println!("  objects by level {objs:?} penthouse {} house {} furnished {}; pool {} tiles, {:.2} m deep", b.is_penthouse(), b.is_house(), b.is_furnished(), b.pool.len(), b.pool_depth);
             let lifts: Vec<(u8, f32)> = b.objects.iter().filter(|o| o.script.contains("Elevator")).map(|o| (o.level, o.position[1])).collect();
             if !lifts.is_empty() {
                 println!("  elevators {lifts:?}");

@@ -575,12 +575,17 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     // indoors where walls enclose them, porches and paving elsewhere.
     let mut floors = Vec::new();
     let floor_palette = read(ld::T_FLOOR_PALETTE, ld::G_FLOOR_PALETTE).and_then(|d| ld::parse_floor_palette(&d).ok()).unwrap_or_default();
+    // (A basement's tiles, on the level below the ground inside walls there: a pool has none.)
+    let basement: std::collections::HashSet<(u32, u32)> = {
+        let edges: Vec<([f32; 2], [f32; 2])> = data.walls.segments().filter(|s| s.2 as i32 == -1).map(|s| (s.0, s.1)).collect();
+        if edges.is_empty() { Default::default() } else { enclosed_floor(&edges, w, d).iter().map(|c| (c.x, c.z)).collect() }
+    };
     // (A pool's tiles, on the level below the ground: the ground's outdoor tiles over them are
     // its water's surface, not paving.)
     let pool_below: std::collections::HashSet<(u32, u32)> = match (ground_index, floor_grid.as_ref()) {
         (1.., Some(g)) => (0..g.width.min(w + 1))
             .flat_map(|x| (0..g.depth.min(d + 1)).map(move |z| (x, z)))
-            .filter(|&(x, z)| g.quad(ground_index - 1, x, z).is_some_and(|q| q.iter().any(|v| *v != 0)))
+            .filter(|&(x, z)| g.quad(ground_index - 1, x, z).is_some_and(|q| q.iter().any(|v| *v != 0)) && !basement.contains(&(x, z)))
             .collect(),
         _ => Default::default(),
     };
@@ -655,7 +660,7 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
                 for z in 0..g.depth.min(d + 1) {
                     let Some(q) = g.quad(below, x, z) else { continue };
                     let mask = (0..4).filter(|&t| q[t] != 0).fold(0u8, |m, t| m | (1 << t));
-                    if mask == 0 {
+                    if mask == 0 || basement.contains(&(x, z)) {
                         continue;
                     }
                     let cover = q.map(|id| match floor_palette.get(&(id as u32)) {
