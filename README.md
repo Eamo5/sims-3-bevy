@@ -463,9 +463,12 @@ installation is unreachable.
 - **Families**: who is whose parent, from the town's premade families and the household's
   births and adoptions (kept in saves). The Relationships panel names family ("Son · Good
   Friend", "Grandmother", "Cousin") and partners as the game does (Wife, Boyfriend, Fiancée),
-  and relatives, out to cousins, can't romance one another. Its Family Tree button shows the
-  selected Sim's grandparents, parents, brothers and sisters and spouse, children and
-  grandchildren, with their portraits (or initials, for those not about).
+  and relatives, out to cousins, can't romance one another. The Simology panel's Family Tree
+  button puts up the game's own family tree dialog: the Sim's grandparents and parents above
+  (each couple over their child), brothers and sisters beside them and their spouse at their
+  side, children and grandchildren below, in the game's thumbs with their portraits and the
+  game's connecting lines, the ellipsis on those with more family out of view; a click on
+  anyone puts them at the middle.
 - **Maid**: hired by phone (§15 an hour, kept in saves), she comes every morning at nine in the
   game's maid service car and French maid's uniform, clears away the dirty dishes and spoiled
   food, empties the trash cans and goes. The service Sims wear the game's own uniforms (never

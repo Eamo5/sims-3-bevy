@@ -155,9 +155,13 @@ fn simology_panel(
 ) {
     let s: &Spawned = &hud.simology;
     let (Some(mut ui), Ok((e, sim, aging))) = (ui, sel.single()) else { return };
-    // (The family tree, beside the relationships.)
+    // The family tree: the game's own dialog (or the plain one, beside the relationships).
     if pressed(&clicks, s.id(FAMILY_TREE)) {
-        relations.open = true;
+        if crate::familytree::available(&ui) {
+            commands.insert_resource(crate::familytree::OpenFamilyTree(sim.id));
+        } else {
+            relations.open = true;
+        }
     }
     if *panel != InfoPanel::Simology {
         return;
