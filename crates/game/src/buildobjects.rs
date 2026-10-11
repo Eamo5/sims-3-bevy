@@ -337,6 +337,7 @@ fn draw(
     (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
     windows: Query<&Window, With<PrimaryWindow>>,
     (mut nodes, mut visibility, mut buttons, mut bars): (Query<&mut Node>, Query<&mut Visibility>, Query<&mut UiButton>, Query<&mut UiScrollBar>),
+    mut thumbs: ResMut<crate::thumbs::ModelThumbs>,
 ) {
     if !showing(&buy) {
         return;
@@ -451,7 +452,7 @@ fn draw(
         if in_hand == Some(item.key) {
             commands.entity(root).insert(crate::layout::Selected);
         }
-        let thumb = game_ui.as_deref_mut().and_then(|gu| gu.icon(&mut images, &s3bake::gamedata::thumb_name(item.key.2)));
+        let thumb = crate::thumbs::catalogue_thumb(game_ui.as_deref_mut(), &mut thumbs, &mut images, item.key);
         if let (Some(t), Some(win)) = (thumb, cell.id(CELL_THUMB)) {
             crate::hudpanels::picture(&mut commands, win, t, Color::WHITE);
         }

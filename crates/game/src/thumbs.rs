@@ -33,11 +33,19 @@ const SIZE: u32 = 96;
 const STAGE: Vec3 = Vec3::new(0.0, -900.0, 0.0);
 const FOV: f32 = 30.0;
 
+/// What a picture is of: one model, or a whole catalogue object (its models, or a tree's
+/// billboards), pictured as the catalogue pictures it.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum Subject {
+    Model(Key),
+    Object(Key),
+}
+
 /// Each model's picture, and those still to take.
 #[derive(Resource, Default)]
 pub struct ModelThumbs {
-    images: HashMap<Key, Handle<Image>>,
-    queue: VecDeque<Key>,
+    images: HashMap<Subject, Handle<Image>>,
+    queue: VecDeque<Subject>,
     /// The model on stage and how many frames it's been there.
     busy: Option<(Entity, u8)>,
 }
@@ -45,16 +53,30 @@ pub struct ModelThumbs {
 impl ModelThumbs {
     /// A model's picture (clear until it's been taken).
     pub fn get(&mut self, images: &mut Assets<Image>, model: Key) -> Handle<Image> {
-        if let Some(h) = self.images.get(&model) {
+        self.picture(images, Subject::Model(model))
+    }
+
+    /// A catalogue object's picture, for those the game ships none for (it draws them itself).
+    pub fn object(&mut self, images: &mut Assets<Image>, objd: Key) -> Handle<Image> {
+        self.picture(images, Subject::Object(objd))
+    }
+
+    fn picture(&mut self, images: &mut Assets<Image>, subject: Subject) -> Handle<Image> {
+        if let Some(h) = self.images.get(&subject) {
             return h.clone();
         }
         let mut img = Image::new_target_texture(SIZE, SIZE, TextureFormat::Rgba8Unorm, Some(TextureFormat::Rgba8UnormSrgb));
         img.data = Some(vec![0; (SIZE * SIZE * 4) as usize]);
         let h = images.add(img);
-        self.images.insert(model, h.clone());
-        self.queue.push_back(model);
+        self.images.insert(subject, h.clone());
+        self.queue.push_back(subject);
         h
     }
+}
+
+/// A catalogue object's picture: the game's thumbnail, or else one drawn here.
+pub fn catalogue_thumb(game_ui: Option<&mut crate::icons::GameUi>, thumbs: &mut ModelThumbs, images: &mut Assets<Image>, objd: Key) -> Option<Handle<Image>> {
+    game_ui.and_then(|gu| gu.icon(images, &s3bake::gamedata::thumb_name(objd.2))).or_else(|| Some(thumbs.object(images, objd)))
 }
 
 #[derive(Component)]
@@ -98,10 +120,13 @@ fn take_thumbs(
         thumbs.busy = None;
         camera.is_active = false;
     }
-    let Some(key) = thumbs.queue.pop_front() else { return };
-    let Some(img) = thumbs.images.get(&key).cloned() else { return };
+    let Some(subject) = thumbs.queue.pop_front() else { return };
+    let Some(img) = thumbs.images.get(&subject).cloned() else { return };
     let mut ctx = AssetCtx { baked: &baked.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-    let parts = assets.model(&mut ctx, key);
+    let parts = match subject {
+        Subject::Model(k) => assets.model(&mut ctx, k),
+        Subject::Object(k) => assets.object(&mut ctx, k),
+    };
     let Some((lo, hi)) = crate::objects::parts_bounds(&parts) else { return };
     let root = commands
         .spawn((Transform::from_translation(STAGE), Visibility::default()))
@@ -111,11 +136,16 @@ fn take_thumbs(
             }
         })
         .id();
-    // From above and in front, far enough for the whole model to fill the picture.
+    // From above and in front, far enough for the whole model to fill the picture (a catalogue
+    // object from its front left, as the catalogue's pictures are).
     let center = STAGE + (lo + hi) * 0.5;
     let radius = ((hi - lo) * 0.5).length().max(0.02);
     let dist = radius / (FOV.to_radians() * 0.5).sin() * 1.02;
-    let eye = center + Vec3::new(0.0, 0.75, 1.0).normalize() * dist;
+    let from = match subject {
+        Subject::Model(_) => Vec3::new(0.0, 0.75, 1.0),
+        Subject::Object(_) => Vec3::new(-0.55, 0.6, 1.0),
+    };
+    let eye = center + from.normalize() * dist;
     *cam_tf = Transform::from_translation(eye).looking_at(center, Vec3::Y);
     commands.entity(cam_e).insert((
         RenderTarget::Image(img.into()),

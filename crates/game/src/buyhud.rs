@@ -570,7 +570,7 @@ fn fill_inventory(
     h: &mut BuyHud,
     ui: &mut UiAssets,
     (images, fonts): (&mut Assets<Image>, &mut Assets<Font>),
-    (catalog, mut game_ui): (&Catalog, Option<&mut crate::icons::GameUi>),
+    (catalog, mut game_ui, thumbs): (&Catalog, Option<&mut crate::icons::GameUi>, &mut crate::thumbs::ModelThumbs),
     family: &crate::familyinv::FamilyInventory,
     (vis, nodes, buttons): (&mut Query<&mut Visibility>, &mut Query<&mut Node>, &mut Query<&mut UiButton>),
 ) {
@@ -629,7 +629,7 @@ fn fill_inventory(
         let name = o.item.as_ref().map(|i| i.name.clone()).or_else(|| catalog.by_key(&o.objd).map(|e| e.name.clone())).unwrap_or_default();
         let tip = format!("{name}\nSells for §{}", crate::lifetime::group(crate::familyinv::worth(o, catalog)));
         commands.entity(r).insert((BuyButton::Inventory(i), crate::icons::Tooltip(tip)));
-        let thumb = game_ui.as_deref_mut().and_then(|gu| gu.icon(images, &s3bake::gamedata::thumb_name(o.objd.2)));
+        let thumb = crate::thumbs::catalogue_thumb(game_ui.as_deref_mut(), thumbs, images, o.objd);
         if let (Some(t), Some(win)) = (thumb, c.id(CELL_THUMB)) {
             crate::hudpanels::picture(commands, win, t, Color::WHITE);
         }
@@ -651,7 +651,7 @@ fn fill_catalogue(
     (mut vis, mut nodes, mut buttons): (Query<&mut Visibility>, Query<&mut Node>, Query<&mut UiButton>),
     mut scrollbars: Query<&mut crate::layout::UiScrollBar>,
     mut held: Local<Option<Key>>,
-    family: Res<crate::familyinv::FamilyInventory>,
+    (family, mut thumbs): (Res<crate::familyinv::FamilyInventory>, ResMut<crate::thumbs::ModelThumbs>),
 ) {
     if !showing(&buy) {
         return;
@@ -674,7 +674,7 @@ fn fill_catalogue(
     hud.width = screen;
     let h = &mut *hud;
     if h.inventory {
-        fill_inventory(&mut commands, h, &mut ui, (&mut images, &mut fonts), (&catalog, game_ui.as_deref_mut()), &family, (&mut vis, &mut nodes, &mut buttons));
+        fill_inventory(&mut commands, h, &mut ui, (&mut images, &mut fonts), (&catalog, game_ui.as_deref_mut(), &mut thumbs), &family, (&mut vis, &mut nodes, &mut buttons));
         return;
     }
     set_visible(&mut vis, h.s.id(WIN_INVENTORY), false);
@@ -925,7 +925,7 @@ fn fill_catalogue(
         if in_hand == Some(item.key) {
             commands.entity(r).insert(crate::layout::Selected);
         }
-        let thumb = game_ui.as_deref_mut().and_then(|gu| gu.icon(&mut images, &s3bake::gamedata::thumb_name(item.key.2)));
+        let thumb = crate::thumbs::catalogue_thumb(game_ui.as_deref_mut(), &mut thumbs, &mut images, item.key);
         if let (Some(t), Some(win)) = (thumb, c.id(CELL_THUMB)) {
             crate::hudpanels::picture(&mut commands, win, t, Color::WHITE);
         }

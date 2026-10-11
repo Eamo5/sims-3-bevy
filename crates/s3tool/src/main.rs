@@ -553,6 +553,37 @@ fn main() {
         println!("{}", String::from_utf8_lossy(&xml));
         return;
     }
+    if args[1] == "missingthumbs" {
+        // missingthumbs <install root>: buyable catalogue objects without a baked thumbnail, and
+        // for some, every thumbnail resource in the install's Thumbnails packages with the same
+        // instance (any type or group).
+        let root = s3bake::default_root();
+        let icons = s3bake::Icons::open(&root).expect("icons.pack");
+        let catalog: Vec<s3bake::CatalogEntry> = s3bake::read_value(&root.global_dir().join("catalog.bin")).expect("catalog.bin");
+        let missing: Vec<&s3bake::CatalogEntry> = catalog.iter().filter(|c| c.price > 0 && icons.png(&s3bake::gamedata::thumb_name(c.objd.2)).is_none()).collect();
+        println!("{} of {} buyable objects have no thumbnail", missing.len(), catalog.iter().filter(|c| c.price > 0).count());
+        let mut groups = BTreeMap::<u32, usize>::new();
+        for c in &missing {
+            *groups.entry(c.objd.1).or_default() += 1;
+        }
+        println!("by OBJD group: {:?}", groups.iter().map(|(g, n)| format!("{g:08X}:{n}")).collect::<Vec<_>>());
+        let install = std::path::Path::new(&args[2]);
+        let mut pkgs = Vec::new();
+        for d in std::fs::read_dir(install).unwrap().flatten() {
+            let t = d.path().join("Thumbnails").join("AllThumbnails.package");
+            if let Ok(p) = Package::open(&t) {
+                pkgs.push((t, p));
+            }
+        }
+        if let Ok(p) = Package::open(install.join("Thumbnails").join("AllThumbnails.package")) {
+            pkgs.push((install.join("Thumbnails"), p));
+        }
+        for c in missing.iter().take(12) {
+            let hits: Vec<String> = pkgs.iter().flat_map(|(n, p)| p.entries.iter().filter(|e| e.key.i == c.objd.2).map(move |e| format!("{} {}", n.parent().and_then(|x| x.parent()).and_then(|x| x.file_name()).map(|x| x.to_string_lossy().into_owned()).unwrap_or_default(), e.key))).collect();
+            println!("{} {:08X}:{:016X} ({}): {:?}", c.name, c.objd.1, c.objd.2, c.instance_name, hits);
+        }
+        return;
+    }
     if args[1] == "objkkeys" {
         // objkkeys <root> <instance name>: an OBJD's keys and its OBJK's keys.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
