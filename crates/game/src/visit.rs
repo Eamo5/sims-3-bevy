@@ -324,6 +324,8 @@ fn rebuild_lot_grid(
     if v.grid.dirty {
         v.grid.dirty = false;
         crate::nav::fill_grid(&mut v.grid, &world.data, &obstacles);
+        // (A lot without upper floors has none to wait for.)
+        v.upper.made = true;
         // (And its upper floors, from the building shown for it.)
         if let Some(a) = building.as_deref().and_then(|b| b.away.as_deref()) {
             crate::nav::rebuild_upper(a, &mut v.upper, &obstacles);

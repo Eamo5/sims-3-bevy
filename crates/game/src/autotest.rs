@@ -2388,9 +2388,50 @@ fn auto_fence(
 
 /// FENCE_GATE (tests), a few seconds after the gate's in: the way from a metre and a half before
 /// the gate to as far beyond it, through it (as long as the straight line) or round the fence.
-fn auto_gate_route(time: Res<Time>, mut done: Local<bool>, building: Option<Res<crate::building::ActiveBuilding>>, grid: Option<Res<crate::nav::NavGrid>>) {
+fn auto_gate_route(
+    time: Res<Time>,
+    mut done: Local<bool>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+    grid: Option<Res<crate::nav::NavGrid>>,
+    upper: Option<Res<crate::nav::UpperFloors>>,
+) {
     // NAV_CHECK=<x0>,<z0>,<x1>,<z1> (lot-local): the way between those two points, and how much
     // longer it is than the straight line (a wall or fence between them should make it so).
+    // NAV_CHECK=<x0>,<z0>,<floor>,<x1>,<z1>,<floor>: between floors, by the stairs (each stair
+    // link's ends checked on their floors' grids).
+    if let Ok(v) = std::env::var("NAV_CHECK")
+        && v.split(',').count() == 6
+    {
+        if *done || time.elapsed_secs() < 9.0 {
+            return;
+        }
+        let (Some(b), Some(grid), Some(upper)) = (building.as_deref(), grid.as_deref(), upper.as_deref()) else { return };
+        *done = true;
+        let n: Vec<f32> = v.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+        let (from, to) = (b.world(n[0], n[1], 0.0).xz(), b.world(n[3], n[4], 0.0).xz());
+        let (l0, l1) = (n[2] as u8, n[5] as u8);
+        let grid_of = |l: u8| if l <= 1 { Some(grid) } else { upper.grids.get(&l) };
+        for s in &upper.stairs {
+            let (bl, tl) = (grid_of(s.level), grid_of(s.upper));
+            let free = |g: Option<&crate::nav::NavGrid>, p: Vec2| g.and_then(|g| g.cell_of(p).map(|(x, z)| !g.is_blocked(x, z)));
+            info!(
+                "nav check: stairs {}->{} bottom {:?} free {:?}, top {:?} free {:?}; from start {:?}, to goal {:?}",
+                s.level,
+                s.upper,
+                b.local(Vec3::new(s.bottom.x, 0.0, s.bottom.y)),
+                free(bl, s.bottom),
+                b.local(Vec3::new(s.top.x, 0.0, s.top.y)),
+                free(tl, s.top),
+                bl.filter(|_| s.level == l0).and_then(|g| g.find_path(from, s.bottom)).map(|p| p.len()),
+                tl.filter(|_| s.upper == l1).and_then(|g| g.find_path(s.top, to)).map(|p| p.len()),
+            );
+        }
+        match crate::nav::plan_route(grid, Some(upper), from, l0, to, l1) {
+            Some(w) => info!("nav check: {} waypoints from floor {l0} to {l1}", w.len()),
+            None => info!("nav check: no way from floor {l0} to {l1}"),
+        }
+        return;
+    }
     if let Ok(v) = std::env::var("NAV_CHECK") {
         if *done || time.elapsed_secs() < 9.0 {
             return;

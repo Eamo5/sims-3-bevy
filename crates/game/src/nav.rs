@@ -63,6 +63,14 @@ pub struct StairLink {
 pub struct UpperFloors {
     pub grids: HashMap<u8, NavGrid>,
     pub stairs: Vec<StairLink>,
+    /// Made at least once (the house's upper floors' grids are there).
+    pub made: bool,
+}
+
+impl UpperFloors {
+    pub fn ready(&self) -> bool {
+        self.made
+    }
 }
 
 /// A point along a route, on a floor; `climb` = reached by stairs from height y0 to y1.
@@ -150,6 +158,11 @@ impl NavGrid {
             barriers: Vec::new(),
             near: vec![Vec::new(); n * n],
         }
+    }
+
+    /// Whether it's made (not waiting to be remade after a change).
+    pub fn ready(&self) -> bool {
+        !self.dirty && !self.settling
     }
 
     /// How many barriers it has.
@@ -514,6 +527,7 @@ fn mark_obstacle(grid: &mut NavGrid, gt: &GlobalTransform, ob: &Obstacle, barrie
 
 /// Builds the walk grids of the upper floors: cells with floor, minus walls and furniture there.
 pub fn rebuild_upper(b: &crate::building::ActiveBuilding, upper: &mut UpperFloors, obstacles: &Obstacles) {
+    upper.made = true;
     upper.grids.clear();
     upper.stairs = b.stairs.clone();
     for level in 2..=b.top_level {

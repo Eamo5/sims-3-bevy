@@ -2027,6 +2027,11 @@ pub(crate) fn run_actions(
         if !finished {
             match action.phase {
                 Phase::Start => {
+                    // (While the walk grids are being made afresh, a way is planned a frame on,
+                    // not given up for one that's still to be there.)
+                    if !my_grid.ready() || my_upper.is_some_and(|u| !u.ready()) {
+                        continue;
+                    }
                     let dest: Option<(Vec2, u8)> = match &action.kind {
                         ActionKind::Object { target, def } => match objects.get(*target) {
                             Ok((obj, otf, used, of)) => {
