@@ -25,7 +25,8 @@ impl Plugin for InteractPlugin {
                     .chain()
                     .run_if(in_state(PlayMode::Live)),
             )
-            .add_systems(Update, route_objects.run_if(in_state(crate::AppState::InGame)));
+            .add_systems(Update, route_objects.run_if(in_state(crate::AppState::InGame)))
+            .add_systems(Update, wear_new_objects.run_if(in_state(crate::AppState::InGame)));
     }
 }
 
@@ -533,17 +534,53 @@ pub struct UsedBy(pub Option<Entity>);
 #[derive(Component)]
 pub struct Broken;
 
-/// How likely an object is to break when used (per use).
-fn break_chance(kind: ObjectKind, price: i32) -> f64 {
+/// An object's wear, as the game's `RepairableComponent` keeps it: how often it has broken
+/// (each break makes the next likelier), and until when (game minutes) it can't break: a day
+/// after it's put in the world (bought, or the lot loaded) or repaired (`HoursUnbreakable`).
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Wear {
+    pub breaks: u32,
+    pub sturdy_until: f64,
+}
+
+/// How long an object can't break after it's new or repaired (game minutes).
+pub const STURDY_MINUTES: f64 = 24.0 * 60.0;
+
+/// Every object put in the world starts out sturdy for a day.
+fn wear_new_objects(mut commands: Commands, clock: Res<GameClock>, added: Query<Entity, (Added<GameObject>, Without<Wear>)>) {
+    for e in &added {
+        commands.entity(e).insert(Wear { breaks: 0, sturdy_until: clock.minutes + STURDY_MINUTES });
+    }
+}
+
+/// How likely an object is to break when used (per use): the game's 5% (less for what's
+/// built better), a point more for each time it has broken before.
+fn break_chance(kind: ObjectKind, price: i32, breaks: u32) -> f64 {
     let base = match kind {
-        ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::Sink | ObjectKind::Dishwasher => 0.04,
+        ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::Sink | ObjectKind::Dishwasher | ObjectKind::Toilet => 0.05,
         ObjectKind::TrashCompactor => 0.02,
-        ObjectKind::Toilet => 0.05,
         ObjectKind::Tv | ObjectKind::Computer | ObjectKind::Stereo => 0.03,
         _ => 0.0,
     };
+    if base == 0.0 {
+        return 0.0;
+    }
     // (Better things last longer.)
-    base * if price >= 1000 { 0.4 } else if price >= 500 { 0.7 } else { 1.0 }
+    let quality = if price >= 1000 { 0.4 } else if price >= 500 { 0.7 } else { 1.0 };
+    ((base + 0.01 * breaks as f64) * quality).min(1.0)
+}
+
+#[cfg(test)]
+mod wear_tests {
+    use super::*;
+
+    #[test]
+    fn breaking_gets_likelier_and_better_things_last() {
+        assert_eq!(break_chance(ObjectKind::Toilet, 300, 0), 0.05);
+        assert!((break_chance(ObjectKind::Toilet, 300, 3) - 0.08).abs() < 1e-9);
+        assert!(break_chance(ObjectKind::Shower, 1500, 0) < break_chance(ObjectKind::Shower, 300, 0));
+        assert_eq!(break_chance(ObjectKind::Other, 300, 9), 0.0);
+    }
 }
 
 /// What fixing an object is called, and the game's animation for it.
@@ -1946,7 +1983,7 @@ pub(crate) fn run_actions(
         Query<(), With<Broken>>,
         Query<(), Or<(With<crate::buy::HeldObject>, With<crate::buyhistory::HistoryHidden>)>>,
     ),
-    (mut did, journals, mut inventories): (MessageWriter<crate::journal::Did>, Query<&crate::journal::SkillJournal>, Query<&mut crate::inventory::Inventory>),
+    (mut did, journals, mut inventories, mut wear): (MessageWriter<crate::journal::Did>, Query<&crate::journal::SkillJournal>, Query<&mut crate::inventory::Inventory>, Query<&mut Wear>),
 ) {
     let Some(grid) = grid else { return };
     let dt = delta.0;
@@ -2519,7 +2556,15 @@ pub(crate) fn run_actions(
                                         notes.push(format!("{} discovered {} through the telescope!", sim.first, crate::journal::celestial_find(&mut rand::rng())));
                                     }
                                     let unbreakable = upgraded.get(*target).is_ok_and(|u| u.has(crate::upgrades::Upgrade::Unbreakable));
-                                    if !unbreakable && rand::rng().random_bool(break_chance(obj.kind, obj.price)) {
+                                    // (Not within a day of being new or repaired.)
+                                    let worn = wear.get(*target).ok().copied().filter(|w| clock.minutes >= w.sturdy_until);
+                                    if !unbreakable
+                                        && let Some(w) = worn
+                                        && rand::rng().random_bool(break_chance(obj.kind, obj.price, w.breaks))
+                                    {
+                                        if let Ok(mut w) = wear.get_mut(*target) {
+                                            w.breaks += 1;
+                                        }
                                         commands.entity(*target).insert(Broken);
                                         let what = if obj.kind == ObjectKind::Toilet { "is clogged" } else { "broke" };
                                         notes.push(format!("Oh no! {} {what}. Repair it, or call the repairman.", upper_first(&the(&obj.name))));
@@ -2976,6 +3021,9 @@ pub(crate) fn run_actions(
                                         notes.push(format!("{} was electrocuted trying to fix {}!", sim.first, the(&o.name)));
                                     } else {
                                         commands.entity(*target).remove::<Broken>();
+                                        if let Ok(mut w) = wear.get_mut(*target) {
+                                            w.sturdy_until = clock.minutes + STURDY_MINUTES;
+                                        }
                                         notes.push(format!("{} fixed {}.", sim.first, the(&o.name)));
                                         let plumbing = matches!(o.kind, ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::Sink | ObjectKind::Dishwasher | ObjectKind::Toilet);
                                         if electric {
