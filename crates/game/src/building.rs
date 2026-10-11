@@ -200,8 +200,7 @@ impl ActiveBuilding {
         })
     }
 
-    /// (Debugging) the doors on storey `level`: each doorway's middle (lot-local) and the way
-    /// through it.
+    /// The doors on storey `level`: each doorway's middle (lot-local) and the way through it.
     pub fn doorways(&self, level: u8) -> Vec<(Vec2, Vec2)> {
         self.holes.iter().filter(|(_, h)| h.door && h.level == level).map(|(_, h)| (h.wall_point + h.right * ((h.x0 + h.x1) * 0.5), h.fwd)).collect()
     }

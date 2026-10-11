@@ -2437,12 +2437,15 @@ fn auto_gate_route(
         // (On the ground floor, 'o': a cell reached from the way off the lot.)
         let reach = (level <= 1).then(|| exit.as_deref().map(|e| grid.reachable_from(e.0))).flatten();
         if let Some(g) = g {
-            // (Rows along the lot's z, a character a quarter metre.)
-            for zi in 0..=(r * 8.0) as i32 {
-                let z = p.y - r + zi as f32 * 0.25;
-                let row: String = (0..=(r * 8.0) as i32)
+            // (Rows along the lot's z, a character a quarter metre; NAV_MAP_STEP=<metres> for
+            // coarser.)
+            let step = std::env::var("NAV_MAP_STEP").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.25);
+            let n = (r * 2.0 / step) as i32;
+            for zi in 0..=n {
+                let z = p.y - r + zi as f32 * step;
+                let row: String = (0..=n)
                     .map(|xi| {
-                        let x = p.x - r + xi as f32 * 0.25;
+                        let x = p.x - r + xi as f32 * step;
                         let w = b.world(x, z, 0.0).xz();
                         match g.cell_of(w) {
                             Some((cx, cz)) if g.is_blocked(cx, cz) => '#',
@@ -2589,6 +2592,19 @@ fn auto_reach(
         }
     }
     info!("nav reach: {ok} objects reached, {bad} not");
+    if bad > 0 {
+        let reached = grid.reachable_from(exit.0);
+        let n = reached.iter().filter(|r| **r).count();
+        let blocked = grid.blocked.iter().filter(|b| **b).count();
+        let at = |p: Vec2| grid.cell_of(p).map(|(x, z)| (grid.is_blocked(x, z), reached[z * grid.w + x]));
+        info!(
+            "nav reach: the way in at lot {} (free, reached: {:?}); {n} cells reached of {} ({blocked} blocked); the lot's middle {:?}",
+            b.local(Vec3::new(exit.0.x, 0.0, exit.0.y)),
+            at(exit.0),
+            grid.w * grid.h,
+            at(b.world(b.data.width as f32 * 0.5, b.data.depth as f32 * 0.5, 0.0).xz())
+        );
+    }
     for (p, fwd, door, level) in b.openings_in_no_wall() {
         info!("nav reach: {} on floor {level} at lot {p} facing {fwd} is in no wall", if door { "door" } else { "window" });
     }

@@ -15,7 +15,7 @@ pub struct NavPlugin;
 impl Plugin for NavPlugin {
     fn build(&self, app: &mut App) {
         // (After doors and gates open their ways through, and with them in place.)
-        app.add_systems(Update, (rebuild_upper_floors, rebuild_grid, follow_paths).chain().after(crate::building::cut_openings).run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (rebuild_upper_floors, rebuild_grid, settle_lot_exit, follow_paths).chain().after(crate::building::cut_openings).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -607,6 +607,65 @@ pub fn rebuild_upper(b: &crate::building::ActiveBuilding, upper: &mut UpperFloor
             }
         }
         upper.grids.insert(level, g);
+    }
+}
+
+/// The way onto the lot, made sure of once its walk grid is made: the middle of its front edge
+/// unless the house's doors can't be walked to from there (a lot on a platform walled round
+/// but for its walkway, as Oasis Landing's are), when it's the point off the lot nearest that
+/// a ground-floor door can be walked to from.
+fn settle_lot_exit(
+    grid: Option<Res<NavGrid>>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+    exit: Option<ResMut<crate::interact::LotExit>>,
+    mut settled: Local<Option<usize>>,
+) {
+    let (Some(grid), Some(b), Some(mut exit)) = (grid, building, exit) else { return };
+    if *settled == Some(b.lot) || !grid.ready() {
+        return;
+    }
+    *settled = Some(b.lot);
+    let doors: Vec<Vec2> = b
+        .doorways(1)
+        .into_iter()
+        .flat_map(|(mid, fwd)| [mid + fwd * 0.6, mid - fwd * 0.6])
+        .map(|p| b.world(p.x, p.y, 0.0).xz())
+        .filter(|p| grid.cell_of(*p).is_some_and(|(x, z)| !grid.is_blocked(x, z)))
+        .collect();
+    if doors.is_empty() {
+        return;
+    }
+    let from_exit = grid.reachable_from(exit.0);
+    let reached = |r: &[bool], p: Vec2| grid.cell_of(p).is_some_and(|(x, z)| r[z * grid.w + x]);
+    if doors.iter().any(|d| reached(&from_exit, *d)) {
+        return;
+    }
+    let (w, d) = (b.data.width as f32, b.data.depth as f32);
+    let off_lot = |p: Vec2| {
+        let l = b.local(Vec3::new(p.x, 0.0, p.y));
+        l.x < -0.5 || l.y < -0.5 || l.x > w + 0.5 || l.y > d + 0.5
+    };
+    let mut best: Option<(f32, Vec2)> = None;
+    for door in &doors {
+        let from_door = grid.reachable_from(*door);
+        for z in 0..grid.h {
+            for x in 0..grid.w {
+                let c = grid.center_of(x, z);
+                if from_door[z * grid.w + x] && off_lot(c) {
+                    let dist = c.distance(exit.0);
+                    if best.is_none_or(|(bd, _)| dist < bd) {
+                        best = Some((dist, c));
+                    }
+                }
+            }
+        }
+        if best.is_some() {
+            break;
+        }
+    }
+    if let Some((_, p)) = best {
+        info!("the way onto the lot moved to {} (lot-local), where the house can be reached", b.local(Vec3::new(p.x, 0.0, p.y)));
+        exit.0 = p;
     }
 }
 
