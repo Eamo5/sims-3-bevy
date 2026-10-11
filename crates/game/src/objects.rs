@@ -42,6 +42,9 @@ pub struct ImposterLayer(pub u8);
 
 #[derive(Resource, Default)]
 pub struct ObjectAssets {
+    /// The catalogue's SpeedTree objects (trees, shrubs, flowers), drawn from their species'
+    /// billboards (see `set_garden`).
+    garden: HashMap<Key, s3bake::TreeKindBaked>,
     models: HashMap<Key, Vec<ModelPart>>,
     objects: HashMap<Key, Vec<ModelPart>>,
     designed: HashMap<(Key, Key), Vec<ModelPart>>,
@@ -249,8 +252,47 @@ impl ObjectAssets {
         for m in models {
             parts.extend(self.model(ctx, m));
         }
+        // (A tree, shrub or flower: its species' pictures, crossed.)
+        if parts.is_empty()
+            && let Some(k) = self.garden.get(&objd).cloned()
+            && let Some(tex) = self.texture(ctx, k.billboard)
+        {
+            let material = ctx.materials.add(StandardMaterial {
+                base_color_texture: Some(tex),
+                alpha_mode: AlphaMode::Mask(0.45),
+                double_sided: true,
+                cull_mode: None,
+                perceptual_roughness: 0.95,
+                reflectance: 0.1,
+                ..default()
+            });
+            // (It takes up the ground at its trunk or stem, as the game's: a tile at most.)
+            let r = (k.radius * 0.25).clamp(0.2, 0.5);
+            parts.push(ModelPart {
+                mesh: ctx.meshes.add(crate::world::tree_mesh(&k)),
+                material,
+                bounds: (Vec3::new(-r, 0.0, -r), Vec3::new(r, k.height.max(0.3), r)),
+                layer: 0,
+                tex: None,
+                mode: 0,
+                unlit: false,
+                rig: None,
+            });
+        }
         self.objects.insert(objd, parts.clone());
         parts
+    }
+
+    /// The catalogue's SpeedTree objects and their species (from the game data).
+    pub fn set_garden(&mut self, garden: &[(Key, s3bake::TreeKindBaked)]) {
+        for (k, kind) in garden {
+            self.objects.remove(k);
+            self.garden.insert(*k, kind.clone());
+        }
+    }
+
+    pub fn has_garden(&self) -> bool {
+        !self.garden.is_empty()
     }
 }
 

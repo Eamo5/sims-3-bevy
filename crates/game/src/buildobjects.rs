@@ -31,6 +31,7 @@ impl Plugin for BuildObjectsPlugin {
                     .run_if(in_state(crate::PlayMode::Live))
                     .run_if(resource_exists::<BuildObjects>),
             )
+            .add_systems(Update, garden_models.run_if(in_state(crate::AppState::InGame)))
             .add_systems(Update, scripted.before(controls).before(crate::buy::buy_buttons).run_if(in_state(crate::PlayMode::Live)).run_if(resource_exists::<BuildObjects>));
     }
 }
@@ -46,6 +47,7 @@ fn scripted(
     mut clock: ResMut<crate::clock::GameClock>,
     mut objects: ResMut<BuildObjects>,
     mut cells: Query<(&BuyButton, &mut Interaction, &InheritedVisibility)>,
+    (placed, catalog): (Query<&crate::interact::GameObject, With<crate::save::Bought>>, Res<Catalog>),
     mut step: Local<u8>,
 ) {
     if std::env::var("BUILD_OBJECTS").is_err() {
@@ -89,9 +91,29 @@ fn scripted(
             info!("build objects test: in hand {:?}", buy.placing.as_ref().map(|p| p.objd));
             shot(&mut commands, "bo3_in_hand");
         }
+        // (CLICK_AT puts it down, at about 24 seconds.)
+        8 if t > 27.0 => {
+            let planted = placed.iter().filter(|o| catalog.by_key(&o.objd).is_some_and(|e| e.name.to_ascii_lowercase().contains("tree"))).count();
+            info!("build objects test: {planted} trees bought on the lot");
+            crate::buy::enter_mode(&mut buy, None, &mut commands, &mut clock);
+            shot(&mut commands, "bo4_planted");
+        }
         _ => return,
     }
     *step += 1;
+}
+
+/// The catalogue's trees, shrubs and flowers drawn from their species' billboards, once the game
+/// data is in (see `ObjectAssets::set_garden`).
+fn garden_models(game_ui: Option<Res<crate::icons::GameUi>>, mut assets: ResMut<crate::objects::ObjectAssets>) {
+    if assets.has_garden() {
+        return;
+    }
+    if let Some(gu) = game_ui
+        && !gu.data.garden.is_empty()
+    {
+        assets.set_garden(&gu.data.garden);
+    }
 }
 
 /// A tab of the two catalogues.

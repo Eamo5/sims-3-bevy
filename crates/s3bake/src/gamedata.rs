@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 72;
+pub const GAMEDATA_VERSION: u32 = 73;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -262,6 +262,9 @@ pub struct GameDataBaked {
     pub recipes: Vec<RecipeInfo>,
     /// The Seasons tuning (`Seasons` table and SeasonsManager's managers).
     pub seasons: SeasonsTuning,
+    /// The catalogue's trees, shrubs and flowers drawn by SpeedTree (no models of their own):
+    /// each OBJD with its species' billboard, to plant in Build mode.
+    pub garden: Vec<(crate::types::Key, crate::types::TreeKindBaked)>,
 }
 
 /// The seasons' weather, from the game's `Seasons` table: temperatures through the day, how
@@ -1325,6 +1328,32 @@ fn bake_fence_styles(root: &BakeRoot, pkgs: &PackageSet, strings: &HashMap<u64, 
     Ok(styles)
 }
 
+/// The catalogue's SpeedTree objects (trees, shrubs, flowers: their OBJK's model is a
+/// SpeedTree), each with its species' billboard baked.
+fn bake_garden(root: &BakeRoot, pkgs: &PackageSet) -> Vec<(crate::types::Key, crate::types::TreeKindBaked)> {
+    const T_SPEEDTREE: u32 = 0x00B552EA;
+    let catalog: Vec<crate::types::CatalogEntry> = read_value(&root.global_dir().join("catalog.bin")).unwrap_or_default();
+    let found: Vec<(crate::types::Key, u64)> = crate::bake::par_map(&catalog, |c| {
+        if c.price <= 0 || !c.models.is_empty() {
+            return None;
+        }
+        let d = pkgs.read(&crate::types::rkey(c.objd))?;
+        let objk = s3formats::object::objd_objk(pkgs, &d)?;
+        let m = objk.model_key.filter(|k| k.t == T_SPEEDTREE)?;
+        Some((c.objd, m.i))
+    })
+    .into_iter()
+    .flatten()
+    .collect();
+    let mut kinds: Vec<u64> = found.iter().map(|f| f.1).collect();
+    kinds.sort();
+    kinds.dedup();
+    let (baked, textures) = crate::trees::bake_tree_kinds(pkgs, &kinds);
+    crate::bake::bake_textures(root, pkgs, &textures, 512, "Converting: garden", &|_| {});
+    let by_kind: HashMap<u64, crate::types::TreeKindBaked> = baked.into_iter().map(|k| (k.kind, k)).collect();
+    found.into_iter().filter_map(|(objd, kind)| Some((objd, by_kind.get(&kind)?.clone()))).collect()
+}
+
 pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::path::Path, progress: &dyn Fn(&str)) -> Result<usize, String> {
     progress("Converting: moodlets, traits and skills…");
     let path = install_root.join("Game").join("Bin").join("Gameplay").join("GameplayData.package");
@@ -1830,6 +1859,8 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     progress(&format!("Converting: {skins} objects with moving parts…"));
     progress("Converting: fences…");
     out.fences = bake_fence_styles(root, pkgs, &strings)?;
+    progress("Converting: garden trees and flowers…");
+    out.garden = bake_garden(root, pkgs);
     // Catalogue models with alternative geometry states, drawn in their fullest (the objects'
     // models pack has every state at once: a chess table's every game piled on its board).
     progress("Converting: object states…");

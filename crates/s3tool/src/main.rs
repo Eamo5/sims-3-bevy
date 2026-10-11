@@ -553,6 +553,57 @@ fn main() {
         println!("{}", String::from_utf8_lossy(&xml));
         return;
     }
+    if args[1] == "objkkeys" {
+        // objkkeys <root> <instance name>: an OBJD's keys and its OBJK's keys.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let want = args[3].to_ascii_lowercase();
+        for k in set.keys_of_type(types::OBJD).copied().collect::<Vec<_>>() {
+            let Some(d) = set.read(&k) else { continue };
+            let Ok(o) = s3formats::object::parse_objd(&d) else { continue };
+            if o.instance_name.to_ascii_lowercase() != want {
+                continue;
+            }
+            println!("OBJD {k}: keys {:?}", o.keys.iter().map(|x| x.to_string()).collect::<Vec<_>>());
+            if let Some(ok) = o.keys.iter().find(|x| x.t == types::OBJK)
+                && let Some(od) = set.read(ok).or_else(|| set.read_ti(ok.t, ok.i))
+            {
+                println!("OBJK {ok}: {} bytes", od.len());
+                if let Ok(objk) = s3formats::object::parse_objk(&od) {
+                    println!("  {objk:?}");
+                }
+            }
+        }
+        return;
+    }
+    if args[1] == "gardenmodels" {
+        // gardenmodels <root>: of the catalogue's gardening objects (flowers, shrubs, trees,
+        // rocks), how many have models baked, and the SpeedTree resources of those that don't.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let catalog: Vec<s3bake::CatalogEntry> = s3bake::read_value(&s3bake::default_root().global_dir().join("catalog.bin")).expect("catalog.bin");
+        let by_key: std::collections::HashMap<s3bake::Key, &s3bake::CatalogEntry> = catalog.iter().map(|c| (c.objd, c)).collect();
+        let mut tally = BTreeMap::<(u32, bool, bool), usize>::new();
+        let mut examples = BTreeMap::<(u32, bool, bool), Vec<String>>::new();
+        for k in set.keys_of_type(types::OBJD).copied().collect::<Vec<_>>() {
+            let Some(d) = set.read(&k) else { continue };
+            let Ok(o) = s3formats::object::parse_objd(&d) else { continue };
+            if !o.show_in_catalog {
+                continue;
+            }
+            for bit in [0x200u32, 0x400, 0x800, 0x2000] {
+                if o.buy.build & bit == 0 {
+                    continue;
+                }
+                let models = by_key.get(&(k.t, k.g, k.i)).is_some_and(|c| !c.models.is_empty());
+                let speedtree = o.keys.iter().any(|x| x.t == 0x00B552EA);
+                *tally.entry((bit, models, speedtree)).or_default() += 1;
+                examples.entry((bit, models, speedtree)).or_default().push(o.instance_name.clone());
+            }
+        }
+        for (k, n) in &tally {
+            println!("bit {:#x} models {} speedtree {}: {n} e.g. {:?}", k.0, k.1, k.2, examples[k].iter().take(4).collect::<Vec<_>>());
+        }
+        return;
+    }
     if args[1] == "buildbits" {
         // buildbits <root>: for each bit of the OBJDs' build category flags, how many catalogue
         // objects carry it and a few of their instance names.

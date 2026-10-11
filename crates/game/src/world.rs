@@ -132,7 +132,7 @@ pub fn build_world(baked: &BakedData, world: &WorldBaked) -> WorldBuild {
 
 /// Crossed billboards of a SpeedTree species: two of its pictures at right angles (three for
 /// wide crowns), standing on the ground, sized from the tree's own dimensions.
-fn tree_mesh(k: &TreeKindBaked) -> Mesh {
+pub(crate) fn tree_mesh(k: &TreeKindBaked) -> Mesh {
     let (mut pos, mut nrm, mut uv, mut idx) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let quads = if k.views.len() >= 3 { 3 } else { 2 };
     for q in 0..quads {

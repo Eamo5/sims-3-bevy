@@ -781,7 +781,11 @@ installation is unreachable.
   with wheel/skinned-scrollbar navigation and single-surface/room-fill buttons. Pattern names
   and prices appear on hover; selecting one retains its colour presets and Create a Style.
   Original material tabs filter by the catalogue's own category flags (wood, tile, paint,
-  wallpaper and the other wall/floor groups), with All restoring the complete list.
+  wallpaper and the other wall/floor groups), with All restoring the complete list. The
+  diagram's doors, windows, arches, columns and fireplaces open the game's Construction
+  catalogue, and its trees, shrubs, flowers and rocks the Gardening catalogue (their tabs and
+  expanding grids, sorted by the objects' own build categories); trees, shrubs and flowers are
+  planted from their species' billboards, bought, moved and sold like any object.
 - **Interface**: the game's own icons and words — moodlets (name, description, time left),
   traits (Create-a-Sim and the Sim's panel) and wishes — read from the game's tuning tables
   (`GameplayData.package`) and string tables, with tooltips on hover. Sims' portraits are
