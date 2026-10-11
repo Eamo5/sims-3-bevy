@@ -332,6 +332,11 @@ fn main() {
             out += &format!("R {} {} {} {} {} {} {}
 ", r.a[0], r.a[1], r.b[0], r.b[1], r.level, r.slope, r.style);
         }
+        // (The rooms graph's edges: "E x0 z0 x1 z1 level".)
+        for (a, bb, l, _) in b.rooms.segments() {
+            out += &format!("E {} {} {} {} {l}
+", a[0], a[1], bb[0], bb[1]);
+        }
         let levels: std::collections::BTreeSet<u32> = b.rooms.vertices.values().map(|v| v.level).collect();
         for &lv in &levels {
             let edges: Vec<([f32; 2], [f32; 2])> = b.rooms.segments().filter(|s| s.2 == lv || (lv == 1 && s.2 == 0)).map(|s| (s.0, s.1)).collect();

@@ -746,8 +746,43 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
         let len = (dx * dx + dz * dz).sqrt().max(1e-6);
         [-dz / len, dx / len]
     };
+    // A foundation's sides, in the wall graph of the later packs' lots (its level-0 edges, the
+    // rooms graph's foundation outline, with no floor beside them on their own level): drawn
+    // as the foundation, not as walls (they'd stand round its decks and porches, doorless).
+    let unit_edges = |a: [f32; 2], b: [f32; 2]| -> Vec<((i32, i32), (i32, i32))> {
+        let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
+        let steps = dx.abs().max(dz.abs()).round() as i32;
+        let (sx, sz) = if steps == 0 { (0, 0) } else { ((dx / steps as f32).round() as i32, (dz / steps as f32).round() as i32) };
+        let (ax, az) = (a[0].round() as i32, a[1].round() as i32);
+        (0..steps)
+            .map(|s| {
+                let (p, q) = ((ax + sx * s, az + sz * s), (ax + sx * (s + 1), az + sz * (s + 1)));
+                if p < q { (p, q) } else { (q, p) }
+            })
+            .collect()
+    };
+    let foundation_edges: std::collections::HashSet<((i32, i32), (i32, i32))> = data.rooms.segments().filter(|s| s.2 == 0).flat_map(|s| unit_edges(s.0, s.1)).collect();
+    let foundation_side = |grid_level: u32, a: [f32; 2], b: [f32; 2]| -> bool {
+        if grid_level != 0 || foundation_edges.is_empty() {
+            return false;
+        }
+        let edges = unit_edges(a, b);
+        if edges.is_empty() || !edges.iter().all(|e| foundation_edges.contains(e)) {
+            return false;
+        }
+        let n = normal_of(a, b);
+        let mid = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
+        let floored = |s: f32| {
+            let p = [mid[0] + n[0] * 0.3 * s, mid[1] + n[1] * 0.3 * s];
+            p[0] >= 0.0 && p[1] >= 0.0 && floor_grid.as_ref().is_some_and(|g| g.quad(ground_index, p[0] as u32, p[1] as u32).is_some_and(|q| q.iter().any(|v| *v != 0)))
+        };
+        !floored(1.0) && !floored(-1.0)
+    };
     let mut agree = 0i32;
     for (a, b, level, e) in data.walls.segments() {
+        if foundation_side(level, a, b) {
+            continue;
+        }
         if (e.left == 0) == (e.right == 0) {
             continue;
         }
@@ -772,6 +807,9 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     let cover_edges: Vec<([f32; 2], [f32; 2], u32, u32)> = cover_graph.segments().map(|(a, b, l, e)| (a, b, l, e.id)).collect();
     for (a, b, grid_level, e) in data.walls.segments() {
         // (Walls below the ground are a basement's, storey 0, or a pool's, not drawn.)
+        if foundation_side(grid_level, a, b) {
+            continue;
+        }
         let level = if grid_level == u32::MAX && basement_y.is_some() {
             0
         } else {
