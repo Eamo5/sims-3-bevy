@@ -1,6 +1,8 @@
 //! The Mid-Life Crisis lifetime reward: a Sim rethinks their life, choosing their traits all
-//! over again (the game's trait pictures, those clashing with chosen ones dimmed). Done keeps
-//! the new ones; Escape keeps the old, and the lifetime happiness spent comes back.
+//! over again in the game's traits picker (`traitpicker`; a plain one without the game's
+//! interface). Accept keeps the new ones; Cancel (or Escape) keeps the old, and the lifetime
+//! happiness spent comes back. A child or teen's birthday puts the picker up too, for the new
+//! trait their age brings (their others kept).
 
 use bevy::prelude::*;
 
@@ -14,7 +16,7 @@ pub struct MidLifePlugin;
 
 impl Plugin for MidLifePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (picker_buttons, picker_ui).chain().run_if(in_state(PlayMode::Live)))
+        app.add_systems(Update, (game_picker, picker_buttons, picker_ui).chain().run_if(in_state(PlayMode::Live)))
             .add_systems(OnExit(PlayMode::Live), |mut commands: Commands| commands.remove_resource::<TraitPicker>());
     }
 }
@@ -28,11 +30,97 @@ pub struct TraitPicker {
     cost: u32,
     root: Option<Entity>,
     dirty: bool,
+    /// The traits that stay (a birthday's: the Sim's others), and the game's picker when it's up.
+    locked: Vec<Trait>,
+    birthday: bool,
+    game: Option<crate::traitpicker::Picker>,
 }
 
 impl TraitPicker {
     pub fn open(sim: Entity, traits: &[Trait], cost: u32) -> Self {
-        Self { sim, traits: traits.to_vec(), cost, root: None, dirty: true }
+        Self { sim, traits: traits.to_vec(), cost, root: None, dirty: true, locked: Vec::new(), birthday: false, game: None }
+    }
+
+    /// A birthday's new trait chosen: `traits` with the new one (drawn at random already), the
+    /// others kept.
+    pub fn birthday(sim: Entity, traits: &[Trait], new: Trait) -> Self {
+        Self { locked: traits.iter().copied().filter(|t| *t != new).collect(), birthday: true, ..Self::open(sim, traits, 0) }
+    }
+}
+
+/// The game's traits picker, when its interface is to hand: Accept keeps what's chosen, Cancel
+/// the traits as they were (a mid-life crisis's happiness back).
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn game_picker(
+    mut commands: Commands,
+    picker: Option<ResMut<TraitPicker>>,
+    ui: Option<ResMut<crate::layout::UiAssets>>,
+    (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
+    mut sims: Query<(&mut Sim, Option<&mut crate::wishes::Wishes>)>,
+    (mut buttons, mut bars): (Query<&mut crate::layout::UiButton>, Query<&mut crate::layout::UiScrollBar>),
+    (clicks, rows, over): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &crate::traitpicker::TraitRow), Changed<Interaction>>, Query<&bevy::ui::RelativeCursorPosition>),
+    wheel: Res<bevy::input::mouse::AccumulatedMouseScroll>,
+    time: Res<Time>,
+    (mut notes, mut play, mut gu): (ResMut<crate::interact::Notifications>, MessageWriter<crate::sound::PlaySound>, Option<ResMut<crate::icons::GameUi>>),
+) {
+    let (Some(mut p), Some(mut ui)) = (picker, ui) else { return };
+    if !crate::traitpicker::available(&ui) {
+        return;
+    }
+    // (The plain one stands aside.)
+    p.dirty = false;
+    if let Some(r) = p.root.take() {
+        commands.entity(r).despawn();
+    }
+    let Ok((sim, _)) = sims.get(p.sim) else {
+        commands.remove_resource::<TraitPicker>();
+        return;
+    };
+    if p.game.is_none() {
+        let (name, age, traits, locked) = (sim.full_name(), sim.age, p.traits.clone(), p.locked.clone());
+        p.game = crate::traitpicker::open(&mut commands, &mut ui, &mut images, &mut fonts, &name, age, &traits, &locked, None, (GlobalZIndex(22), DespawnOnExit(AppState::InGame)));
+        return;
+    }
+    let Some(g) = p.game.as_mut() else { return };
+    let outcome = crate::traitpicker::update(g, &mut commands, &mut ui, (&mut images, &mut fonts), (&clicks, &rows, &over), (&wheel, time.elapsed_secs()), (&mut buttons, &mut bars), &mut play, gu.as_deref_mut());
+    let done = match outcome {
+        crate::traitpicker::Outcome::Open => return,
+        crate::traitpicker::Outcome::Accepted(list) => {
+            if let Ok((mut sim, _)) = sims.get_mut(p.sim) {
+                let birthday = p.birthday;
+                let gained: Vec<&str> = list.iter().filter(|t| !sim.traits.contains(t)).map(|t| t.name()).collect();
+                sim.traits = list.clone();
+                if birthday {
+                    if !gained.is_empty() {
+                        notes.push(format!("{} has become {} instead.", sim.first, gained.join(" and ")));
+                    }
+                } else {
+                    let names: Vec<&str> = list.iter().map(|t| t.name()).collect();
+                    let said = match names.split_last() {
+                        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+                        Some((last, _)) => last.to_string(),
+                        None => "with no traits at all".to_string(),
+                    };
+                    notes.push(format!("{} came out of a mid-life crisis: {said}.", sim.first));
+                }
+            }
+            true
+        }
+        crate::traitpicker::Outcome::Cancelled => {
+            if !p.birthday
+                && let Ok((sim, Some(mut w))) = sims.get_mut(p.sim)
+            {
+                w.points += p.cost;
+                notes.push(format!("{} thought better of a mid-life crisis.", sim.first));
+            }
+            true
+        }
+    };
+    if done {
+        if let Some(g) = p.game.take() {
+            g.close(&mut commands);
+        }
+        commands.remove_resource::<TraitPicker>();
     }
 }
 
@@ -57,6 +145,9 @@ fn picker_buttons(
     mut play: MessageWriter<crate::sound::PlaySound>,
 ) {
     let Some(mut p) = picker else { return };
+    if p.game.is_some() {
+        return;
+    }
     let close = |commands: &mut Commands, p: &TraitPicker| {
         if let Some(r) = p.root {
             commands.entity(r).despawn();
@@ -116,7 +207,7 @@ fn picker_ui(
     mut images: ResMut<Assets<Image>>,
 ) {
     let Some(mut p) = picker else { return };
-    if !p.dirty {
+    if !p.dirty || p.game.is_some() {
         return;
     }
     p.dirty = false;

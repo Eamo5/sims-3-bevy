@@ -414,6 +414,11 @@ fn grow_up(
         Some(t) => format!("Happy birthday! {} is now {} and has become {}.", sim.first, age_word(age), t.name()),
         None => format!("Happy birthday! {} is now {}.", sim.first, age_word(age)),
     });
+    // (The household's own, as those growing up are: the new trait theirs to choose, in the
+    // game's traits picker.)
+    if let Some(t) = gained {
+        commands.insert_resource(crate::midlife::TraitPicker::birthday(e, &sim.traits, t));
+    }
     commands.entity(e).insert(NeedsNewBody);
 }
 

@@ -43,7 +43,9 @@ installation is unreachable.
 - **Sims**: Create-a-Sim from real CAS parts (browsed as the game's own style pictures), with
   human traits restricted to the original age groups in CAS, random generation, birthdays
   and Mid-Life Crisis, with conflicts taken from the original exclusion groups; changing to
-  a younger age replaces traits no longer available. With
+  a younger age replaces traits no longer available. The game's own traits picker serves Create
+  a Sim, the Mid-Life Crisis reward (every trait chosen again) and a child's or teen's birthday
+  (the trait their new age brings chosen, their others kept). With
   favourites (a food from the game's recipes, a music, a colour, each picked by the game's own
   pictures; a favourite meal is an amazing one, and their favourite music playing nearby is
   enjoyed; shown on the Simology tab and kept in saves), clothes chosen for each of the game's

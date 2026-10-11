@@ -70,6 +70,7 @@ mod casstyle;
 mod casgenetics;
 mod colljournal;
 mod familytree;
+mod traitpicker;
 mod skilljournal;
 mod playflow;
 mod edittownui;
