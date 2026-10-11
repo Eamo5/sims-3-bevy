@@ -2025,6 +2025,63 @@ fn main() {
         }
         return;
     }
+    if args[1] == "lotwalldesigns" {
+        // lotwalldesigns <root> <world file> <lot id hex> <outdir>: the lot's own wall designs
+        // (channel 0x00DD33E4), how many wall sides each covers, their recipes and overrides, and
+        // each rendered to a PNG.
+        use s3formats::lotdesign as ld;
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let w = Package::open(&args[3]).unwrap();
+        let lot = parse_hex(&args[4]);
+        let out = std::path::Path::new(&args[5]);
+        std::fs::create_dir_all(out).unwrap();
+        let rd = |t: u32, g: u32| w.find(&s3pkg::ResourceKey::new(t, g, lot)).and_then(|e| w.read(e).ok());
+        let refs = s3formats::objn::parse_refs(&rd(0x05ED1226, 0).unwrap()).unwrap_or_default();
+        let designs = ld::parse_designs(&rd(ld::T_DESIGNS, 0).unwrap_or_default());
+        let sides = ld::parse_wall_sides(&rd(ld::T_WALL_SIDES, ld::G_WALL_DESIGNS).unwrap_or_default()).unwrap_or_default();
+        let pal = ld::parse_palette(&rd(ld::T_PALETTE, ld::G_WALL_DESIGN_PALETTE).unwrap_or_default()).unwrap_or_default();
+        let mut used = BTreeMap::<u32, usize>::new();
+        for s in &sides {
+            for id in [s.a, s.b].into_iter().flatten() {
+                *used.entry(id).or_default() += 1;
+            }
+        }
+        println!("{} designs, {} wall sides, {} palette entries", designs.len(), sides.len(), pal.len());
+        for (id, n) in used {
+            let Some(r) = pal.get(&id) else {
+                println!("palette {id}: not in palette ({n} sides)");
+                continue;
+            };
+            let Some(d) = designs.get(r) else {
+                println!("palette {id} -> r{r}: no design ({n} sides)");
+                continue;
+            };
+            let keys: Vec<s3pkg::ResourceKey> = d.refs.iter().map(|x| refs.get(x).copied().unwrap_or(s3pkg::ResourceKey::new(0, 0, 0))).collect();
+            fn show(c: &s3formats::catalog::Complate, keys: &[s3pkg::ResourceKey], depth: usize) {
+                let pad = "  ".repeat(depth);
+                println!("{pad}{} [{}] xml {:?}", c.name, c.pattern, keys.get(c.xml as usize));
+                for (k, v) in &c.overrides {
+                    println!("{pad}  {k} = {}", v.text());
+                }
+                for b in &c.blocks {
+                    show(b, keys, depth + 1);
+                }
+            }
+            println!("palette {id} -> r{r} ({n} sides):");
+            show(&d.complate, &keys, 1);
+            if let Some(img) = s3formats::complate::render(&set, &d.complate, &keys, 256, 256) {
+                let n = (img.data.len() / 4) as f32;
+                let mean = |c: usize| img.data.chunks(4).map(|p| p[c] as f32).sum::<f32>() / n;
+                println!("  render mean rgb {:.0} {:.0} {:.0}", mean(0), mean(1), mean(2));
+                let f = std::fs::File::create(out.join(format!("wall_{id}.png"))).unwrap();
+                let mut enc = png::Encoder::new(std::io::BufWriter::new(f), img.width as u32, img.height as u32);
+                enc.set_color(png::ColorType::Rgba);
+                enc.set_depth(png::BitDepth::Eight);
+                enc.write_header().unwrap().write_image_data(&img.data).unwrap();
+            }
+        }
+        return;
+    }
     if args[1] == "wallsides" {
         // wallsides <root> <world file> <lot id hex>: on outside walls, which covering side
         // (A or B) faces the outdoor room — by the pattern names landing there.

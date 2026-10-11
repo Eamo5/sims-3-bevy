@@ -435,11 +435,10 @@ fn auto_move_in(
         // The first residential lot with a pre-built house.
         world.data.lots.iter().enumerate().position(|(i, l)| l.is_residential() && world.data.buildings.get(&i).is_some_and(|b| b.is_furnished()))
     } else {
-        world
-            .data
-            .lots
-            .iter()
-            .position(|l| l.internal_name.to_ascii_lowercase().contains(&want) || format!("{:016x}", l.id).contains(&want))
+        // (By its internal name, its id, or the name the town shows.)
+        world.data.lots.iter().enumerate().position(|(i, l)| {
+            l.internal_name.to_ascii_lowercase().contains(&want) || format!("{:016x}", l.id).contains(&want) || world.data.lot_names.get(i).is_some_and(|n| n.to_ascii_lowercase().contains(&want))
+        })
     }
     .or_else(|| world.data.lots.iter().position(|l| l.is_residential()));
     if let Some(i) = idx {

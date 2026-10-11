@@ -213,12 +213,37 @@ pub fn bake_texture(pkgs: &PackageSet, key: Key, max: u32, layer_mode: bool) -> 
     }
 }
 
+/// When the compact complates' numbered names ("Color 0"…) began to be read right again (they
+/// were misread from 9 October 2026): a texture drawn from one before then is drawn again.
+const NAMES_FIXED: u64 = 1791694904;
+
+/// Whether a texture drawn from a complate was drawn before its parameter names were read right.
+pub(crate) fn drawn_before_names_fixed(path: &std::path::Path) -> bool {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .is_some_and(|d| d.as_secs() < NAMES_FIXED)
+}
+
 /// Renders the lots' wall and floor coverings into the texture store.
 fn bake_covers(root: &BakeRoot, pkgs: &PackageSet, jobs: Vec<crate::building::CoverJob>, label: &str, progress: Progress) {
     use crate::building::CoverSource;
     std::fs::create_dir_all(root.textures_dir()).ok();
     let mut seen = HashSet::new();
-    let todo: Vec<_> = jobs.into_iter().filter(|j| seen.insert(j.key) && !root.tex_path(j.key).exists()).collect();
+    // (Drawn again: those drawn while their numbered colours' names were misread.)
+    let redraw = |j: &crate::building::CoverJob| {
+        drawn_before_names_fixed(&root.tex_path(j.key))
+            && match &j.source {
+                CoverSource::Design { complate, .. } => s3formats::complate::uses_escaped_names(complate),
+                CoverSource::Pattern(k) => pkgs
+                    .read(k)
+                    .and_then(|d| s3formats::catalog::WallFloorPattern::parse(&d).ok())
+                    .and_then(|p| p.materials.into_iter().next())
+                    .is_some_and(|m| s3formats::complate::uses_escaped_names(&m.complate)),
+            }
+    };
+    let todo: Vec<_> = jobs.into_iter().filter(|j| seen.insert(j.key) && (!root.tex_path(j.key).exists() || redraw(j))).collect();
     let done = std::sync::atomic::AtomicUsize::new(0);
     let total = todo.len();
     par_map(&todo, |j| {

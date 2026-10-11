@@ -32,6 +32,12 @@ const STRINGS: [&str; 112] = [
     "S 2", "V 2", "H 3", "V 3", "S 3", "true", "1,0,0,0", "defaultFlatColor", "solidColor_1",
 ];
 
+/// Whether a parameter name is one of the table's entries past 0x40 (written with the escape):
+/// those that were misread before the escape was read right.
+pub fn escaped_name(name: &str) -> bool {
+    STRINGS[0x41..].contains(&name) && !STRINGS[..0x40].contains(&name)
+}
+
 /// A complate parameter value.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum CValue {
@@ -157,7 +163,11 @@ fn cstring(r: &mut Reader) -> R<String> {
         let n = if b & 0x40 != 0 { r.u8()? as usize } else { (b & 0x3F) as usize };
         return Ok(String::from_utf8_lossy(r.bytes(n)?).into_owned());
     }
-    let i = if b & 0x40 != 0 { (b & 0x3F) as usize + r.u8()? as usize } else { b as usize };
+    // (`0x40 n` is the table's entry 0x40 + n: "Color 0" is `0x40 7`. Read as entry n, every
+    // numbered colour, channel and fourth pattern lost its name: checked against the game's own
+    // pictures of the lots, and over every catalogue pattern and lot design, which only ever
+    // escape with 0x40 itself.)
+    let i = if b == 0x40 { 0x40 + r.u8()? as usize } else { b as usize };
     Ok(STRINGS.get(i).copied().unwrap_or("").to_string())
 }
 
@@ -388,7 +398,8 @@ mod style_tests {
         let mut r = Reader::new(&bytes);
         assert_eq!(cstring(&mut r).unwrap(), literal);
         assert_eq!(cstring(&mut r).unwrap(), "end", "long literal must leave the next field aligned");
-        assert_eq!(cstring(&mut Reader::new(&[0x41, 4])).unwrap(), STRINGS[5]);
+        assert_eq!(cstring(&mut Reader::new(&[0x40, 7])).unwrap(), "Color 0");
+        assert_eq!(cstring(&mut Reader::new(&[0x07])).unwrap(), "Color");
         assert!(cstring(&mut Reader::new(&[0xc0, 90, b'x'])).is_err());
     }
 

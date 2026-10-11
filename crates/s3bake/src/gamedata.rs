@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 70;
+pub const GAMEDATA_VERSION: u32 = 72;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -705,7 +705,7 @@ fn bake_object_designs(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, Stri
         let mut count = 0u8;
         for (i, p) in o.presets.iter().enumerate().take(16).filter(|_| o.presets.len() > 1) {
             let key = (T_DESIGN, i as u32, c.objd.2);
-            if !root.tex_path(key).exists() {
+            if !root.tex_path(key).exists() || s3formats::complate::uses_escaped_names(&p.complate) && crate::bake::drawn_before_names_fixed(&root.tex_path(key)) {
                 let Some(img) = s3formats::complate::render(pkgs, &p.complate, &p.keys, w, h) else { break };
                 let _ = std::fs::write(root.tex_path(key), crate::ddsw::encode_dds(&img));
             }
@@ -1530,7 +1530,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 seen.push(sig);
                 let key = if i == 0 { texture } else { (crate::types::T_COVER, (if floor { 4 } else { 3 }) | (i as u32) << 8, k.i) };
                 let path = root.tex_path(key);
-                if !path.exists() {
+                if !path.exists() || s3formats::complate::uses_escaped_names(&m.complate) && crate::bake::drawn_before_names_fixed(&path) {
                     let Some(img) = s3formats::complate::render(pkgs, &m.complate, &m.keys, w, h) else { continue };
                     if std::fs::write(&path, crate::ddsw::encode_dds(&img)).is_err() {
                         continue;

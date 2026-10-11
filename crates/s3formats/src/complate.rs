@@ -84,6 +84,11 @@ pub struct ComplateXml {
 }
 
 impl ComplateXml {
+    /// Whether the recipe has a parameter of this name.
+    pub fn has_param(&self, name: &str) -> bool {
+        self.params.contains_key(&name.to_ascii_lowercase())
+    }
+
     pub fn parse(xml: &str) -> Self {
         let mut name = String::new();
         let mut params = HashMap::new();
@@ -192,6 +197,13 @@ impl Builder {
             }
         }
     }
+}
+
+/// Whether a complate (or a pattern in it) has parameters named past the compact table's escape
+/// ("Color 0".."Color 4", "Channel 1".., "Pattern D"..): drawn wrongly while those names were
+/// misread, so drawn again when baking (see `s3bake::bake::drawn_before_names_fixed`).
+pub fn uses_escaped_names(inst: &Complate) -> bool {
+    inst.overrides.iter().any(|(k, _)| crate::catalog::escaped_name(k)) || inst.blocks.iter().any(uses_escaped_names)
 }
 
 /// Builds the compositor program for a complate with an instance's overrides. `mkeys` is the
@@ -533,6 +545,15 @@ mod style_tests {
     }
 
     const DENIM: &str = r#"<preset><complate name="CasRgbMask"><value key="Pattern A Enabled" value="true" /><pattern name="denimRough" variable="Pattern A"><value key="Base H Bg" value="0.6" /><value key="Base S Bg" value="0.7" /><value key="Base V Bg" value="0.5" /><value key="HSVShift Bg" value="-0.0345,-0.4571,-0.2700" /><value key="H Bg" value="-0.0345" /><value key="S Bg" value="-0.4571" /><value key="V Bg" value="-0.27" /><value key="rgbmask" value="denim_mask" /></pattern></complate></preset>"#;
+
+    #[test]
+    fn escaped_names_found_in_patterns() {
+        let c = crate::catalog::CValue::Str("1,1,1,1".into());
+        let plain = Complate { overrides: vec![("Color".into(), c.clone())], ..Default::default() };
+        assert!(!uses_escaped_names(&plain));
+        let numbered = Complate { blocks: vec![Complate { overrides: vec![("Color 0".into(), c)], ..Default::default() }], ..Default::default() };
+        assert!(uses_escaped_names(&numbered));
+    }
 
     #[test]
     fn patterned_channels_recoloured() {
