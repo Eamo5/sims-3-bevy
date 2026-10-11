@@ -3363,6 +3363,20 @@ fn ui_flow(
         }
         (100, AppState::CreateHousehold, _) if since > 2.0 => {
             shot(&mut commands, "2g_sculpted");
+            // (A child of the two, in the game's genetics screen.)
+            crate::casgenetics::OPEN.store(true, std::sync::atomic::Ordering::Relaxed);
+            *stage = (230, now);
+        }
+        (230, AppState::CreateHousehold, _) if since > 1.5 => {
+            shot(&mut commands, "2u_genetics");
+            *stage = (232, now);
+        }
+        (232, AppState::CreateHousehold, _) if since > 0.5 => {
+            crate::casgenetics::TEST_CHILD.store(true, std::sync::atomic::Ordering::Relaxed);
+            *stage = (231, now);
+        }
+        (231, AppState::CreateHousehold, _) if since > 3.0 => {
+            shot(&mut commands, "2u_child");
             // (The game's family screen, as Accept puts it up for a household.)
             crate::casfamily::OPEN.store(true, std::sync::atomic::Ordering::Relaxed);
             *stage = (207, now);

@@ -36,6 +36,10 @@ const SKEWER_NONE: u32 = 0x05da_4d0a;
 const SKEWER_SHORT: u32 = 0x05da_4d09;
 const SKEWER_LONG: u32 = 0x05da_4d06;
 const ADD_SIM: u32 = 0x05da_4d00;
+/// Add a Sim's menu: Create a Sim, or a child of two of the household's (`CASGenetics`).
+const ADD_MENU: u32 = 0x05da_4d20;
+const ADD_CREATE: u32 = 0x05da_4d22;
+const ADD_GENETICS: u32 = 0x05da_4d23;
 const ADD_PETS: u32 = 0x05da_4d04;
 const UNDO: u32 = 0x05da_4d01;
 const REDO: u32 = 0x05da_4d02;
@@ -110,7 +114,6 @@ fn spawn_cas_frame(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut im
     }
     // The buttons that work CAS actions as they are.
     for (s, id, action, tip) in [
-        (&puck, ADD_SIM, CasAction::Add, "Add a Sim"),
         (&sheet, SHEET_BASICS, CasAction::Tab(CasTab::Basics), "Basics"),
         (&sheet, SHEET_HAIR, CasAction::Tab(CasTab::Hair), "Hair"),
         (&sheet, SHEET_FACE, CasAction::Tab(CasTab::Face), "Face"),
@@ -122,7 +125,7 @@ fn spawn_cas_frame(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut im
             commands.entity(e).insert((action, crate::icons::Tooltip(tip.into())));
         }
     }
-    for (id, tip) in [(ACCEPT, "Accept"), (CANCEL, "Cancel"), (MORE, "More"), (OPTIONS, "Options"), (ROTATE_LEFT, "Rotate"), (ROTATE_RIGHT, "Rotate"), (ZOOM_IN, "Zoom In"), (ZOOM_OUT, "Zoom Out")] {
+    for (id, tip) in [(ACCEPT, "Accept"), (CANCEL, "Cancel"), (MORE, "More"), (OPTIONS, "Options"), (ROTATE_LEFT, "Rotate"), (ROTATE_RIGHT, "Rotate"), (ZOOM_IN, "Zoom In"), (ZOOM_OUT, "Zoom Out"), (ADD_SIM, "Add a Sim"), (ADD_CREATE, "Create a Sim"), (ADD_GENETICS, "Genetics")] {
         if let Some(e) = puck.id(id) {
             commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
         }
@@ -240,9 +243,33 @@ fn puck_buttons(
     (mut options, settings): (ResMut<crate::options::OptionsPanel>, Res<crate::options::Settings>),
     mut actions: MessageWriter<crate::cas::CasActionRequest>,
     (families, pending, mut zoom): (Res<crate::cas::CasFamilies>, Res<PendingHousehold>, ResMut<crate::cas::CasZoom>),
+    (mut vis, mut buttons, mut add_menu): (Query<&mut Visibility>, Query<&mut UiButton>, Local<bool>),
 ) {
     let (Some(f), Some(mut ui)) = (frame, ui) else { return };
     let pressed = |id: u32| crate::livehud::pressed(&clicks, f.puck.id(id));
+    // Add a Sim: its menu (Create a Sim, or a child of two of the household's).
+    let mut menu = *add_menu;
+    if pressed(ADD_SIM) {
+        menu = !menu;
+    }
+    if pressed(ADD_CREATE) {
+        actions.write(crate::cas::CasActionRequest(CasAction::Add));
+        menu = false;
+    }
+    if pressed(ADD_GENETICS) && crate::casgenetics::possible(&pending.members) {
+        crate::casgenetics::OPEN.store(true, Ordering::Relaxed);
+        menu = false;
+    }
+    if menu != *add_menu || f.puck.id(ADD_MENU).and_then(|e| vis.get(e).ok()).is_some_and(|v| (*v == Visibility::Hidden) == menu) {
+        *add_menu = menu;
+        crate::livehud::set_visible(&mut vis, f.puck.id(ADD_MENU), menu);
+    }
+    if let Some(mut b) = f.puck.id(ADD_GENETICS).and_then(|e| buttons.get_mut(e).ok()) {
+        let off = !crate::casgenetics::possible(&pending.members);
+        if b.disabled != off {
+            b.disabled = off;
+        }
+    }
     if pressed(CANCEL) {
         next.set(AppState::MainMenu);
     }

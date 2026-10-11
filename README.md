@@ -694,6 +694,10 @@ installation is unreachable.
   that suit them, favourite food, music and colour from the game's grids, the three voices).
   A household of more than one is accepted through the game's Sims and Relationships screen:
   the family tree, and a Sim dragged onto another asks what they are to each other.
+  Add a Sim opens the game's add menu: a new Sim, or Play with Genetics (`CASGenetics`): a
+  father and mother from the household, the child's gender and age, Create Baby (a skin tone
+  between the parents', one's hair colour and one's eyes, a face between theirs) and Accept, the
+  child joining as their son or daughter (and their other children's sibling).
 - **The game's own Play Flow**: a new household chooses its home as in the game: the speech
   bubble's instructions ("Choose a place to live!", then "Let's play!" with Play, Cancel back to
   Create a Sim or to choosing again), the play flow puck (turn the town, options), the bin of the
@@ -809,7 +813,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-complete Build Mode interface; Create a Sim's pets, genetics and colour picker; complete object placement and routing compatibility; the rest of the expansions'
+complete Build Mode interface; Create a Sim's pets; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
 ## Controls
