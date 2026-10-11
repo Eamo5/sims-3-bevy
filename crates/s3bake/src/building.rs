@@ -375,12 +375,22 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
                         let by_column = gl as i32 - ground_index as i32 + 1 - on_foundation(x, z) as i32;
                         let s = if gl >= ground_index + 2 {
                             let (lo, hi) = (gl - ground_index, gl - ground_index + 1);
-                            // (Either known, the other a storey from it.)
-                            match (expected(lo), expected(hi)) {
-                                (Some(a), Some(b)) => (if (h - a).abs() <= (h - b).abs() { lo } else { hi }) as i32,
-                                (Some(a), None) => (if h - a < LEVEL_HEIGHT * 0.5 { lo } else { hi }) as i32,
-                                (None, Some(b)) => (if b - h < LEVEL_HEIGHT * 0.5 { hi } else { lo }) as i32,
-                                (None, None) => by_column,
+                            // (The storey whose floor it's on or a little over: a platform raised
+                            // a step over a storey, as on a foundation (Oasis Landing's and
+                            // Bridgeport's half-storeys, 1.13 m up), is that storey's.)
+                            let fits = [lo - 1, lo, hi]
+                                .into_iter()
+                                .filter(|s| *s >= 1)
+                                .filter_map(|s| Some((s, h - expected(s)?)))
+                                .filter(|(_, d)| (-0.3..LEVEL_HEIGHT * 0.8).contains(d))
+                                .min_by(|a, b| a.1.total_cmp(&b.1));
+                            match (fits, expected(lo), expected(hi)) {
+                                (Some((s, _)), ..) => s as i32,
+                                // (Either known, the other a storey from it.)
+                                (None, Some(a), Some(b)) => (if (h - a).abs() <= (h - b).abs() { lo } else { hi }) as i32,
+                                (None, Some(a), None) => (if h - a < LEVEL_HEIGHT * 0.5 { lo } else { hi }) as i32,
+                                (None, None, Some(b)) => (if b - h < LEVEL_HEIGHT * 0.5 { hi } else { lo }) as i32,
+                                (None, None, None) => by_column,
                             }
                         } else {
                             by_column
@@ -421,6 +431,25 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
                     }
                 }
             }
+        }
+    }
+    // (A platform raised on a storey's floor (Into the Future's) is on the storey's tiles: the
+    // storey's floor there is the platform's top, the one under it hidden.)
+    for v in storeys.values_mut() {
+        let mut top: HashMap<(u32, u32), usize> = HashMap::new();
+        for (i, c) in v.iter().enumerate() {
+            let e = top.entry((c.0, c.1)).or_insert(i);
+            if c.4 > v[*e].4 {
+                *e = i;
+            }
+        }
+        if top.len() < v.len() {
+            let keep: std::collections::HashSet<usize> = top.into_values().collect();
+            let mut i = 0;
+            v.retain(|_| {
+                i += 1;
+                keep.contains(&(i - 1))
+            });
         }
     }
     // Each wall's storey. A wall's level counts from the ground's grid level (below it, a pool's
@@ -535,13 +564,17 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
                 rotation = parent.rotation;
             }
         }
-        // Its storey: the highest floor on its tile at or just under it, else by the storeys'
+        // Its storey: the highest floor on its tile at or just under it (or, for what stands on
+        // a tile's edge, as a painting on a wall, on a tile beside it), else by the storeys'
         // heights.
-        let (tx, tz) = {
-            let l = to_local(p);
-            (l[0].floor(), l[1].floor())
+        let l = to_local(p);
+        let on = |dx: f32, dz: f32| {
+            let (tx, tz) = ((l[0] + dx).floor(), (l[1] + dz).floor());
+            (tx >= 0.0 && tz >= 0.0).then(|| (0..=top_level + 1).rev().find(|s| tile_y.get(&(*s, tx as u32, tz as u32)).is_some_and(|y| p[1] >= y - 0.3))).flatten()
         };
-        let on_tile = (tx >= 0.0 && tz >= 0.0).then(|| (0..=top_level + 1).rev().find(|s| tile_y.get(&(*s, tx as u32, tz as u32)).is_some_and(|y| p[1] >= y - 0.3))).flatten();
+        let on_tile = on(0.0, 0.0)
+            .or_else(|| [(-0.3, 0.0), (0.3, 0.0), (0.0, -0.3), (0.0, 0.3)].iter().filter_map(|&(dx, dz)| on(dx, dz)).max())
+            .or_else(|| [(-1.0, -1.0), (0.0, -1.0), (1.0, -1.0), (-1.0, 0.0), (1.0, 0.0), (-1.0, 1.0), (0.0, 1.0), (1.0, 1.0)].iter().filter_map(|&(dx, dz)| on(dx, dz)).max());
         let by_height = levels.iter().enumerate().skip(1).filter(|(_, y)| p[1] >= **y - 0.3).map(|(s, _)| s as u32).last().unwrap_or(0);
         let mut level = on_tile.unwrap_or(by_height) as u8;
         if o.script.as_deref().is_some_and(|s| s.ends_with(".Stairs")) {
@@ -1004,7 +1037,8 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
                     } else if s.top > s.bottom {
                         if let Some(top) = level_storey(s.top as u32, &[end(half)]) {
                             let bottom = if s.bottom == 0 { (top > 1) as u32 } else { level_storey(s.bottom as u32, &[end(-half)]).unwrap_or(s.bottom as u32) };
-                            if top > bottom {
+                            // (Or both on one storey: the steps up onto a platform raised on it.)
+                            if top >= bottom {
                                 (s.bottom, s.top) = (bottom as u8, top as u8);
                             }
                         }

@@ -163,11 +163,24 @@ impl ActiveBuilding {
         level
     }
 
-    /// The floor a point is on: a basement's (0) when it's down on one of its tiles, else by its
-    /// height (1 = ground).
+    /// The floor a point is on: a basement's (0) when it's down on one of its tiles, else the
+    /// highest floor at or just under it on its tile or one beside it (a painting on a wall
+    /// stands on a tile's edge; storeys a hillside or a half-storey makes aren't 3 m apart),
+    /// else by its height (1 = ground).
     pub fn level_at_point(&self, p: Vec3) -> u8 {
         let l = self.local(p);
-        if self.data.in_basement([l.x, l.y], p.y) { 0 } else { self.level_at(p.y) }
+        if self.data.in_basement([l.x, l.y], p.y) {
+            return 0;
+        }
+        let on = |dx: f32, dz: f32| {
+            let (x, z) = ((l.x + dx).floor() as i32, (l.y + dz).floor() as i32);
+            (1..=self.top_level.max(1))
+                .rev()
+                .find(|s| self.floor_cells.contains_key(&(*s, x, z)) && p.y >= self.floor_heights.get(&(*s, x, z)).copied().unwrap_or(self.levels[*s as usize]) - 0.3)
+        };
+        on(0.0, 0.0)
+            .or_else(|| [(-0.3, 0.0), (0.3, 0.0), (0.0, -0.3), (0.0, 0.3)].iter().filter_map(|&(dx, dz)| on(dx, dz)).max())
+            .unwrap_or_else(|| self.level_at(p.y))
     }
 
     /// Refreshes the floor lookups after the floors changed.
@@ -2020,19 +2033,29 @@ pub fn spawn_building(
         }
     }
 
-    // Elevators: one per floor, stacked; Sims ride between the floors they stop at.
+    // Elevators: one per floor, stacked; Sims ride between the floors they stop at. (A tube
+    // elevator's top one also goes up to the floor over it, as the game's `TubeElevator`
+    // does, where there's a floor there.)
     if neighbor.is_none() || visit {
-        let mut shafts: HashMap<(i32, i32), Vec<(u8, Vec2)>> = HashMap::new();
+        let mut shafts: HashMap<(i32, i32), (Vec<(u8, Vec2)>, bool)> = HashMap::new();
         for o in b.objects.iter().filter(|o| o.script.to_ascii_lowercase().contains("elevator")) {
             let q = Quat::from_xyzw(o.rotation[0], o.rotation[1], o.rotation[2], o.rotation[3]).normalize();
             let f = rot.inverse() * (q * Vec3::Z);
             let door = Vec2::from(o.local) + Vec2::new(f.x, f.z).normalize_or_zero() * 0.9;
             let key = ((o.local[0] * 2.0).round() as i32, (o.local[1] * 2.0).round() as i32);
-            shafts.entry(key).or_default().push((b.object_storey(o), door));
+            let e = shafts.entry(key).or_default();
+            e.0.push((b.object_storey(o), door));
+            e.1 |= o.script.contains("TubeElevator");
         }
-        for mut stops in shafts.into_values() {
+        for (mut stops, tube) in shafts.into_values() {
             stops.sort_by_key(|s| s.0);
             stops.dedup_by_key(|s| s.0);
+            if tube
+                && let Some(&(top, door)) = stops.last()
+                && active.floor_cells_has(top + 1, door)
+            {
+                stops.push((top + 1, door));
+            }
             for w in stops.windows(2) {
                 let ((l0, p0), (l1, p1)) = (w[0], w[1]);
                 let bw = |q: Vec2| active.world(q.x, q.y, 0.0).xz();

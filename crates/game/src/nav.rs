@@ -99,7 +99,24 @@ fn plan_route_depth(
 ) -> Option<Vec<Waypoint>> {
     let grid_of = |l: u8| if l == 1 { Some(ground) } else { upper.and_then(|u| u.grids.get(&l)) };
     if from_level == to_level {
-        let pts = grid_of(from_level)?.find_path(from, to)?;
+        let grid = grid_of(from_level)?;
+        if let Some(pts) = grid.find_path(from, to).filter(|pts| pts.last().is_some_and(|q| q.distance(to) < 1.6)) {
+            return Some(pts.into_iter().map(|p| Waypoint { p, level: from_level, climb: None }).collect());
+        }
+        // (Or up or down the steps between two parts of the storey: a platform raised on it.)
+        for s in upper.into_iter().flat_map(|u| u.stairs.iter()).filter(|s| s.level == from_level && s.upper == from_level) {
+            for (a, b, ys) in [(s.bottom, s.top, (s.y0, s.y1)), (s.top, s.bottom, (s.y1, s.y0))] {
+                let (Some(first), Some(rest)) = (grid.find_path(from, a), grid.find_path(b, to)) else { continue };
+                if !first.last().is_some_and(|q| q.distance(a) < 0.8) || !rest.last().is_some_and(|q| q.distance(to) < 1.6) {
+                    continue;
+                }
+                let mut w: Vec<Waypoint> = first.into_iter().map(|p| Waypoint { p, level: from_level, climb: None }).collect();
+                w.push(Waypoint { p: b, level: from_level, climb: Some(ys) });
+                w.extend(rest.into_iter().map(|p| Waypoint { p, level: from_level, climb: None }));
+                return Some(w);
+            }
+        }
+        let pts = grid.find_path(from, to)?;
         return Some(pts.into_iter().map(|p| Waypoint { p, level: from_level, climb: None }).collect());
     }
     if depth > 6 {
