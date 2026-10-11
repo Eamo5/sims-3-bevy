@@ -36,7 +36,9 @@ installation is unreachable.
 - **Houses**: every lot's real walls (with door and window openings) and floors in the very
   wallpapers, sidings, tiles, carpets and paving the builders chose — the game's texture
   recipes (complates) re-rendered from each lot's designs — plus foundations (as tall as the
-  lot makes them: the Goths' manor stands high on its slope), staircases built from the game's
+  lot makes them: the Goths' manor stands high on its slope), every storey where the game has it
+  (houses with or without foundations, garages beside them, split-levels out over a hillside
+  as Cormorant's), staircases built from the game's
   own stair pieces and railings (as wide as the builders made them), and the house's own
   furniture; the ground never shows through a floor; nearby lots are shown in full detail with
   the game's roofs, distant ones as the game's pre-rendered imposters.

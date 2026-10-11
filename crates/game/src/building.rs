@@ -1876,14 +1876,18 @@ pub fn spawn_building(
     let mut links = Vec::new();
     for s in b.stairs.iter().filter(|s| s.flight.is_some()) {
         let (run, width) = s.run_width();
-        let (y0, y1) = (level_y(s.bottom), level_y(s.top));
-        if run == 0 || width == 0 || y1 - y0 < 0.1 {
-            continue;
-        }
         let d = Vec2::from(s.climb());
         let across = Vec2::new(-d.y, d.x);
         let middle = (Vec2::new(s.min[0] as f32, s.min[1] as f32) + Vec2::new(s.max[0] as f32, s.max[1] as f32)) * 0.5;
         let bottom = middle - d * (run as f32 * 0.5);
+        // (From the floors at either end where they stand at their own heights (a split-level's,
+        // a hillside's), or up from the ground where it is.)
+        let tile_y = |level: u8, p: Vec2| active.floor_heights.get(&(level, p.x.floor() as i32, p.y.floor() as i32)).copied();
+        let y0 = if s.bottom == 0 { b.ground_at(bottom.x, bottom.y).unwrap_or(level_y(0)) } else { tile_y(s.bottom, bottom - d * 0.5).unwrap_or(level_y(s.bottom)) };
+        let y1 = tile_y(s.top, bottom + d * (run as f32 + 0.5)).unwrap_or(level_y(s.top));
+        if run == 0 || width == 0 || y1 - y0 < 0.1 {
+            continue;
+        }
         // (Railings up the side they're on.)
         let rails: Vec<(f32, &StairRail)> = s.rails.iter().map(|r| (if (Vec2::from(r.at) - middle).dot(across) < 0.0 { -1.0 } else { 1.0 }, r)).collect();
         let p = stair_pieces(s, &rails, bottom, d, run, width, y0, y1, active.rot);

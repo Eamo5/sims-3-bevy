@@ -492,6 +492,90 @@ fn main() {
         }
         return;
     }
+    if args[1] == "lotstoreys" {
+        // lotstoreys <world>: per lot with walls, its ground level and foundation, its walls by
+        // grid level, and the floored grid levels with their heights over the ground (median).
+        use s3formats::lotdesign as ld;
+        let w = Package::open(&args[2]).unwrap();
+        let d = w.read(w.of_type(0x2AD195F2).next().unwrap()).unwrap();
+        let hm = s3formats::world::Heightmap::parse(&d).unwrap();
+        for e in w.of_type(0xD063545B) {
+            let Ok(l) = s3formats::world::LotInfo::parse(e.key.i, &w.read(e).unwrap()) else { continue };
+            let Some(b) = s3formats::lot::LotBuildData::load(&w, l.id) else { continue };
+            if b.walls.edges.is_empty() {
+                continue;
+            }
+            let Some(t) = s3formats::lot::LotTerrain::load(&w, l.id) else { continue };
+            let gi = s3bake::ponds::ground_level(&t, &l, &hm).map_or(0, |(g, _, _)| g);
+            let f = t.levels.get(gi + 1).is_some_and(|v| v.iter().filter(|h| (0.4..1.2).contains(*h)).count() >= 4);
+            let mut walls = std::collections::BTreeMap::<u32, usize>::new();
+            for s in b.walls.segments() {
+                *walls.entry(s.2).or_default() += 1;
+            }
+            let Some(gd) = w.find(&s3pkg::ResourceKey::new(ld::T_GRID, ld::G_FLOOR_GRID, l.id)).and_then(|e| w.read(e).ok()) else { continue };
+            let Ok(g) = ld::Grid::parse(&gd) else { continue };
+            let mut floors = Vec::new();
+            for gl in 0..g.levels.min(t.levels.len() as u32) {
+                let mut hs: Vec<f32> = Vec::new();
+                for x in 0..g.width {
+                    for z in 0..g.depth {
+                        if g.quad(gl, x, z).is_some_and(|q| q.iter().any(|v| *v != 0)) {
+                            hs.push(t.at(gl as usize, x as usize, z as usize) - t.at(gi, x as usize, z as usize));
+                        }
+                    }
+                }
+                if !hs.is_empty() {
+                    hs.sort_by(f32::total_cmp);
+                    floors.push(format!("gl{gl}:{}@{:.2}", hs.len(), hs[hs.len() / 2]));
+                }
+            }
+            println!("{:28} gi {gi} F {} walls {walls:?} floors {}", l.internal_name, f as u8, floors.join(" "));
+        }
+        return;
+    }
+    if args[1] == "lotfit" {
+        // lotfit <world> <lot id hex>: how each of the lot's levels meets the world's terrain
+        // (its base: the middle difference along the lot's edge, and how far the edge strays),
+        // and a map of world height less the ground level's (in half metres, '.' within 0.25).
+        let w = Package::open(&args[2]).unwrap();
+        let id = parse_hex(&args[3]);
+        let d = w.read(w.of_type(0x2AD195F2).next().unwrap()).unwrap();
+        let hm = s3formats::world::Heightmap::parse(&d).unwrap();
+        let lot = w.of_type(0xD063545B).filter_map(|e| s3formats::world::LotInfo::parse(e.key.i, &w.read(e).ok()?).ok()).find(|l| l.id == id).expect("lot");
+        let t = s3formats::lot::LotTerrain::load(&w, id).expect("terrain");
+        let (s, c) = lot.rotation.sin_cos();
+        let to_world = |x: f32, z: f32| (lot.corner[0] + x * c + z * s, lot.corner[2] - x * s + z * c);
+        println!("{} corner {:?} rotation {:.3}, {}x{} vertices", lot.internal_name, lot.corner, lot.rotation, t.nx, t.nz);
+        for l in 0..t.levels.len() {
+            let mut d: Vec<f32> = (0..t.nx).flat_map(|x| [(x, 0), (x, t.nz - 1)]).chain((0..t.nz).flat_map(|z| [(0, z), (t.nx - 1, z)])).map(|(x, z)| {
+                let (wx, wz) = to_world(x as f32, z as f32);
+                hm.sample(wx, wz) - t.at(l, x, z)
+            }).collect();
+            d.sort_by(f32::total_cmp);
+            let mid = d[d.len() / 2];
+            let mut dev: Vec<f32> = d.iter().map(|v| (v - mid).abs()).collect();
+            dev.sort_by(f32::total_cmp);
+            println!("level {l}: base {mid:.3} edge deviation {:.3} (max {:.3})", dev[dev.len() / 2], dev[dev.len() - 1]);
+        }
+        for z in 0..t.nz {
+            let row: String = (0..t.nx).map(|x| {
+                let (wx, wz) = to_world(x as f32, z as f32);
+                let v = hm.sample(wx, wz) - lot.corner[1] - t.at(0, x, z);
+                if v.abs() < 0.25 { '.' } else { let k = (v * 2.0).round() as i32; if k > 0 { char::from_digit(k.min(35) as u32, 36).unwrap() } else { '-' } }
+            }).collect();
+            println!("{z:3} {row}");
+        }
+        // (LEVELS=a,b: those levels' heights, in tenths of a metre.)
+        if let Ok(ls) = std::env::var("LEVELS") {
+            for l in ls.split(',').filter_map(|v| v.parse::<usize>().ok()).filter(|l| *l < t.levels.len()) {
+                println!("level {l} heights (dm):");
+                for z in 0..t.nz {
+                    println!("{z:3} {}", (0..t.nx).map(|x| format!("{:4}", (t.at(l, x, z) * 10.0).round() as i32)).collect::<String>());
+                }
+            }
+        }
+        return;
+    }
     if args[1] == "modlverts" {
         // modlverts <root> <world> <modl key> <mesh index> [n]
         let root = std::path::Path::new(&args[2]);
