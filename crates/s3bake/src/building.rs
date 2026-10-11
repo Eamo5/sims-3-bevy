@@ -113,7 +113,7 @@ pub fn lot_stairs(pkg: &Package, lot: u64) -> Vec<StairBaked> {
 }
 
 /// A lot's staircases, each with the id of its stair object. (Version 6, from later packs: four
-/// style references (the first the stairs'), and four bytes more after the railings.)
+/// style references for each staircase and each railing, the first its own.)
 pub fn lot_stairs_with_ids(pkg: &Package, lot: u64) -> Vec<(u64, StairBaked)> {
     let read = |t: u32, g: u32| pkg.find(&s3pkg::ResourceKey::new(t, g, lot)).and_then(|e| pkg.read(e).ok());
     let (Some(d), Some(refs)) = (read(0x04A09283, 0), read(0x05ED1226, 0).and_then(|r| s3formats::objn::parse_refs(&r).ok())) else { return Vec::new() };
@@ -132,13 +132,14 @@ pub fn lot_stairs_with_ids(pkg: &Package, lot: u64) -> Vec<(u64, StairBaked)> {
         let Ok(n_rails) = r.u32() else { break };
         let mut rails = Vec::new();
         for _ in 0..n_rails.min(64) {
-            let (Ok(_), Ok(cral), Ok(x), Ok(z)) = (r.u32(), r.u16(), r.f32(), r.f32()) else { break };
+            let (Ok(_), Ok(cral)) = (r.u32(), r.u16()) else { break };
+            if version >= 6 && r.skip(6).is_err() {
+                break;
+            }
+            let (Ok(x), Ok(z)) = (r.f32(), r.f32()) else { break };
             if let Some(k) = refs.get(&cral) {
                 rails.push(StairRail { at: [x, z], style: key_of(k), rail: None, start: None, post: None });
             }
-        }
-        if version >= 6 && r.u32().is_err() {
-            break;
         }
         let Some(k) = refs.get(&style) else { continue };
         let lo = |a: f32, b: f32| a.min(b).max(0.0).round() as u16;

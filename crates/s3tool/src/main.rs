@@ -1492,6 +1492,56 @@ fn main() {
         std::fs::write(&args[4], d).unwrap();
         return;
     }
+    if args[1] == "stairparse" {
+        // stairparse <world file>: each lot's staircase records read through by the bake's
+        // layout (version 6: four style references per staircase and railing, and a list at the
+        // end), and the bytes left over after them (any is a misread).
+        let w = Package::open(&args[2]).unwrap();
+        let (mut good, mut bad) = (0, 0);
+        for e in w.of_type(0xD063545B) {
+            let Ok(l) = s3formats::world::LotInfo::parse(e.key.i, &w.read(e).unwrap()) else { continue };
+            let Some(d) = w.find(&s3pkg::ResourceKey::new(0x04A09283, 0, l.id)).and_then(|e| w.read(e).ok()) else { continue };
+            let mut r = s3formats::util::Reader::new(&d);
+            let (version, n) = (r.u32().unwrap_or(0), r.u32().unwrap_or(0));
+            let mut ok = true;
+            for _ in 0..n {
+                let skip = if version >= 6 { 6 } else { 0 };
+                if r.skip(4 + 2 + skip + 8 + 4 + 12 + 12).is_err() {
+                    ok = false;
+                    break;
+                }
+                let Ok(rails) = r.u32() else { ok = false; break };
+                if r.skip(rails as usize * (4 + 2 + skip + 8)).is_err() {
+                    ok = false;
+                    break;
+                }
+            }
+            // (Version 6 ends with a list: a count, and five bytes each, a staircase's id and a
+            // byte (the Egyptian tombs' have some).)
+            if version >= 6
+                && let Ok(m) = r.u32()
+                && r.skip(m as usize * 5).is_err()
+            {
+                ok = false;
+            }
+            let left = r.remaining();
+            if ok && left == 0 { good += 1 } else { bad += 1 }
+            if !ok || left != 0 {
+                println!("{} v{version}: {n} staircases, {} bytes, {left} left over{}", l.internal_name, d.len(), if ok { "" } else { " (ran out)" });
+            }
+        }
+        println!("{good} lots read through, {bad} not");
+        return;
+    }
+    if args[1] == "worldraw" {
+        // worldraw <world file> <type:group:instance> <out>: one of a world's resources' bytes.
+        let w = Package::open(&args[2]).unwrap();
+        let parts: Vec<&str> = args[3].split(':').collect();
+        let k = s3pkg::ResourceKey::new(parse_hex(parts[0]) as u32, parse_hex(parts[1]) as u32, parse_hex(parts[2]));
+        let d = w.find(&k).and_then(|e| w.read(e).ok()).expect("no such resource");
+        std::fs::write(&args[4], d).unwrap();
+        return;
+    }
     if args[1] == "txtcraw" {
         // txtcraw <root> <txtc key> <out.rgba>: composite a TXTC to raw RGBA (w, h as u32 header).
         let root = std::path::Path::new(&args[2]);

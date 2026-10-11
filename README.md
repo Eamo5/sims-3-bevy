@@ -284,7 +284,9 @@ installation is unreachable.
   town's houses are furnished in the very designs their builders chose (each placed object's own, drawn from
   the lot data: quilts, cribs, counter tops and upholstery as they were),
   multi-storey navigation by stairs, walls up, cut away or down (the HUD's walls button or
-  Home), day/night with lamps and street lights. Sims deciding on
+  Home), Sims walking round walls and fences however they lie on the grid (through doorways,
+  arches and gates, under curtains, over a house's floors out over a hillside), day/night with
+  lamps and street lights. Sims deciding on
   something by themselves think of it in a balloon with its picture.
 - **Build mode painting**: the catalogue's wallpapers and floor coverings (every base-game
   pattern with its name and price, swatched from its texture recipe) on Wallpaper and Floors
