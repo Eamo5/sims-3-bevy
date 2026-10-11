@@ -839,13 +839,10 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         .lots
         .iter()
         .enumerate()
-        .filter_map(|(i, l)| crate::building::bake_building(&pkg, i, l, placed.get(&l.id).map(|v| v.as_slice()).unwrap_or(&[]), &world.heightmap))
+        .filter_map(|(i, l)| crate::building::bake_building(&pkg, i, l, placed.get(&l.id).map(|v| v.as_slice()).unwrap_or(&[]), &world.heightmap, std::mem::take(&mut fences[i])))
         .unzip();
     bake_covers(root, pkgs, cover_jobs.into_iter().flatten().collect(), &format!("Converting {name}: walls and floors"), progress);
     for b in &mut buildings {
-        if let Some(f) = fences.get_mut(b.lot as usize) {
-            b.fences = std::mem::take(f);
-        }
         for s in &mut b.stairs {
             if let Some(&(flight, start, side)) = stair_styles.get(&s.style) {
                 (s.flight, s.start, s.side) = (flight, start, side);

@@ -252,7 +252,7 @@ pub fn stair_pieces(pkgs: &s3pkg::PackageSet, cstr: &s3pkg::ResourceKey) -> (Opt
     (flight, start, side)
 }
 
-pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[PlacedObject], hm: &s3formats::world::Heightmap) -> Option<(LotBuildingBaked, Vec<CoverJob>)> {
+pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[PlacedObject], hm: &s3formats::world::Heightmap, fences: Vec<FenceBaked>) -> Option<(LotBuildingBaked, Vec<CoverJob>)> {
     let data = LotBuildData::load(pkg, lot.id).unwrap_or_default();
     let read = |t: u32, g: u32| pkg.find(&s3pkg::ResourceKey::new(t, g, lot.id)).and_then(|e| pkg.read(e).ok());
     let mut covers = Covers::load(pkg, lot.id);
@@ -338,15 +338,72 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
                     }
                 }
                 let on_foundation = |x: u32, z: u32| founded.contains(&(x, z));
+                // (Higher up, a tile over a floor is a storey up from it (the Koffis' second floor
+                // over their foundation room and their third over the rooms beside it share a
+                // grid level; the Altos' over a tall foundation). One with no floor under it is on
+                // the one of its two storeys its height fits, the storey its grid level makes it
+                // or one less on a foundation, by the heights of the storeys found below: a
+                // balcony out past the foundation's edge is on the storey of the floor it leads
+                // off (Wolff's).)
+                let mut heights: std::collections::BTreeMap<u32, Vec<f32>> = std::collections::BTreeMap::new();
+                let mut below: HashMap<(u32, u32), (u32, f32, u32)> = HashMap::new();
+                let middle = |v: &Vec<f32>| {
+                    let mut v = v.clone();
+                    v.sort_by(f32::total_cmp);
+                    v[v.len() / 2]
+                };
                 for gl in ground_index..g.levels.min(t.levels.len() as u32) {
-                    for x in 0..g.width.min(w + 1) {
-                        for z in 0..g.depth.min(d + 1) {
-                            let Some(mask) = mask_at(gl, x, z) else { continue };
-                            let s = gl as i32 - ground_index as i32 + 1 - on_foundation(x, z) as i32;
-                            if s >= 0 {
-                                storeys.entry(s as u32).or_default().push((x, z, mask, Some(ground + t.at(gl as usize, x as usize, z as usize)), gl));
-                            }
+                    let tiles: Vec<(u32, u32, u8, f32)> = (0..g.width.min(w + 1))
+                        .flat_map(|x| (0..g.depth.min(d + 1)).map(move |z| (x, z)))
+                        .filter_map(|(x, z)| Some((x, z, mask_at(gl, x, z)?, t.at(gl as usize, x as usize, z as usize))))
+                        .collect();
+                    // (First those a storey over a floor, then the rest by the heights with them.)
+                    let over = |x: u32, z: u32, h: f32| {
+                        below.get(&(x, z)).filter(|b| gl >= ground_index + 2 && b.2 + 1 == gl && h - b.1 > LEVEL_HEIGHT * 0.66).map(|&(s0, h0, _)| s0 + ((h - h0) / LEVEL_HEIGHT).round().max(1.0) as u32)
+                    };
+                    let mut found: Vec<(u32, u32, u8, f32, u32)> = tiles.iter().filter_map(|&(x, z, mask, h)| Some((x, z, mask, h, over(x, z, h)?))).collect();
+                    let mut first = heights.clone();
+                    for &(_, _, _, h, s) in &found {
+                        first.entry(s).or_default().push(h);
+                    }
+                    let expected = |s: u32| first.get(&s).map(middle).or_else(|| first.get(&s.checked_sub(1)?).map(|v| middle(v) + LEVEL_HEIGHT));
+                    for &(x, z, mask, h) in &tiles {
+                        if over(x, z, h).is_some() {
+                            continue;
                         }
+                        let by_column = gl as i32 - ground_index as i32 + 1 - on_foundation(x, z) as i32;
+                        let s = if gl >= ground_index + 2 {
+                            let (lo, hi) = (gl - ground_index, gl - ground_index + 1);
+                            // (Either known, the other a storey from it.)
+                            match (expected(lo), expected(hi)) {
+                                (Some(a), Some(b)) => (if (h - a).abs() <= (h - b).abs() { lo } else { hi }) as i32,
+                                (Some(a), None) => (if h - a < LEVEL_HEIGHT * 0.5 { lo } else { hi }) as i32,
+                                (None, Some(b)) => (if b - h < LEVEL_HEIGHT * 0.5 { hi } else { lo }) as i32,
+                                (None, None) => by_column,
+                            }
+                        } else {
+                            by_column
+                        };
+                        if s >= 0 {
+                            found.push((x, z, mask, h, s as u32));
+                        }
+                    }
+                    for &(x, z, mask, h, s) in &found {
+                        storeys.entry(s).or_default().push((x, z, mask, Some(ground + h), gl));
+                        below.insert((x, z), (s, h, gl));
+                    }
+                    let found: Vec<(u32, f32)> = found.into_iter().map(|(_, _, _, h, s)| (s, h)).collect();
+                    // (STOREYDEBUG=<lot name part>: each grid level's storeys, counts and heights.)
+                    if std::env::var("STOREYDEBUG").is_ok_and(|n| lot.internal_name.contains(&n)) {
+                        let mut by: std::collections::BTreeMap<u32, Vec<f32>> = std::collections::BTreeMap::new();
+                        for &(s, h) in &found {
+                            by.entry(s).or_default().push(h);
+                        }
+                        let parts: Vec<String> = by.iter().map(|(s, v)| format!("s{s}:{}@{:.2}", v.len(), middle(v))).collect();
+                        eprintln!("{} gl{gl}: {} (expected {:?})", lot.internal_name, parts.join(" "), (1..6).map(|s| expected(s).map(|e| (e * 100.0).round() / 100.0)).collect::<Vec<_>>());
+                    }
+                    for (s, h) in found {
+                        heights.entry(s).or_default().push(h);
                     }
                 }
             }
@@ -761,6 +818,49 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     let foundation_top: Vec<f32> = foundation.iter().map(|&(a, b)| beside(1, a, b).into_iter().reduce(f32::max).unwrap_or(levels[1])).collect();
     let foundation_top = if foundation_top.iter().any(|y| (y - levels[1]).abs() > 0.05) { foundation_top } else { Vec::new() };
 
+    // Fences and railings. Their levels count as the walls' do: a balcony's railing is on its
+    // floor's storey (on the ground, 0). A run on the edge of a wall on its level, or the level
+    // up, is the edge of the foundation under that wall (the fence graph holds the rooms'
+    // edges too), not a fence: it would stand in the wall and across its doors.
+    let unit_edges = |a: [f32; 2], b: [f32; 2]| -> Vec<((i32, i32), (i32, i32))> {
+        let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
+        let steps = dx.abs().max(dz.abs()).round() as i32;
+        if steps == 0 {
+            return Vec::new();
+        }
+        let (sx, sz) = ((dx / steps as f32).round() as i32, (dz / steps as f32).round() as i32);
+        let (ax, az) = (a[0].round() as i32, a[1].round() as i32);
+        (0..steps)
+            .map(|s| {
+                let (p, q) = ((ax + sx * s, az + sz * s), (ax + sx * (s + 1), az + sz * (s + 1)));
+                if p < q { (p, q) } else { (q, p) }
+            })
+            .collect()
+    };
+    let wall_edges: std::collections::HashSet<((i32, i32), (i32, i32), u32)> =
+        data.walls.segments().flat_map(|(a, b, l, _)| unit_edges(a, b).into_iter().map(move |(p, q)| (p, q, l))).collect();
+    let fences: Vec<FenceBaked> = fences
+        .into_iter()
+        .filter_map(|mut f| {
+            let raw = f.level as u32;
+            if f.a != f.b && unit_edges(f.a, f.b).iter().all(|&(p, q)| wall_edges.contains(&(p, q, raw)) || wall_edges.contains(&(p, q, raw + 1))) {
+                return None;
+            }
+            if raw >= 1 {
+                let mid = ((f.a[0] + f.b[0]) * 0.5, (f.a[1] + f.b[1]) * 0.5);
+                let (dx, dz) = (f.b[0] - f.a[0], f.b[1] - f.a[1]);
+                let len = (dx * dx + dz * dz).sqrt();
+                let near: Vec<(f32, f32)> = if len > 1e-3 {
+                    let (nx, nz) = (-dz / len * 0.3, dx / len * 0.3);
+                    vec![(mid.0 + nx, mid.1 + nz), (mid.0 - nx, mid.1 - nz)]
+                } else {
+                    [(0.3, 0.3), (-0.3, -0.3), (0.3, -0.3), (-0.3, 0.3)].iter().map(|(u, v)| (mid.0 + u, mid.1 + v)).collect()
+                };
+                f.level = level_storey(raw, &near)? as u8;
+            }
+            Some(f)
+        })
+        .collect();
     let jobs = std::mem::take(&mut covers.jobs);
     Some((
         LotBuildingBaked {
@@ -805,7 +905,7 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
             ground: Vec::new(),
             pool,
             pool_depth,
-            fences: Vec::new(),
+            fences,
         },
         jobs,
     ))
