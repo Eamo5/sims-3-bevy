@@ -276,6 +276,9 @@ fn question_dialogs(
         let name = match &ask.about {
             crate::dialog::Question::LifetimeWish { .. } => "LifetimeWishSelectionDialog",
             crate::dialog::Question::Reward { .. } => "HUDRewardTraitsShopDialog",
+            // (A career's fork: the game's two (or three) button dialog, a button a path.)
+            crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 2 => "TwoButtonDialog",
+            crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 3 => "ThreeButtonDialog",
             _ => return,
         };
         let Some(s) = spawn_dialog(&mut commands, &mut ui, &mut images, &mut fonts, name) else { return };
@@ -283,6 +286,22 @@ fn question_dialogs(
         shown.plain = Some(plain);
         shown.dirty = true;
         match &ask.about {
+            crate::dialog::Question::CareerPath { .. } => {
+                // The offer's words; a button for each path, in the game's words for it.
+                let words = [ask.title.as_str(), ask.text.as_str()].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join("
+
+");
+                if let Some(t) = s.comment("Message").and_then(|w| s.text_of(w)) {
+                    commands.entity(t).insert(Text::new(words));
+                }
+                for (k, a) in ask.answers.iter().enumerate() {
+                    let Some(b) = s.id(2 + k as u32) else { continue };
+                    commands.entity(b).insert((crate::dialog::AnswerButton(k), crate::icons::Tooltip(a.detail.clone())));
+                    if let Some(t) = s.text_of(b) {
+                        commands.entity(t).insert(Text::new(a.label.clone()));
+                    }
+                }
+            }
             crate::dialog::Question::LifetimeWish { sim, .. } => {
                 let who = sims.get(*sim).map(|(s, _)| s.full_name()).unwrap_or_default();
                 if let Some(t) = s.text(WISH_HEADER) {

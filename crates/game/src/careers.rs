@@ -86,9 +86,10 @@ impl crate::dialog::Questions {
             .iter()
             .filter_map(|p| {
                 let l = p.levels.get(job.level)?;
+                // (The path's name, as the game's buttons have it; the job along it below.)
                 Some(crate::dialog::Answer {
-                    label: format!("{} — the {} path", l.title, p.label()),
-                    detail: format!("§{} an hour, {} to {}", l.hourly, hour_label(l.start), hour_label(l.end)),
+                    label: p.label(),
+                    detail: format!("{}: §{} an hour, {} to {}", l.title, l.hourly, hour_label(l.start), hour_label(l.end)),
                     icon: String::new(),
                 })
             })

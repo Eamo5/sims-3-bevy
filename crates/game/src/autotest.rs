@@ -549,6 +549,14 @@ fn ask_question_hook(
             w.points = w.points.max(25_000);
             crate::wishes::ask_reward(&mut questions, &ui.data, e, sim, &w);
         }
+        // (The first career that forks, at its fork.)
+        "CareerPath" => {
+            let Some((track, c)) = crate::careers::careers().iter().enumerate().find(|(_, c)| c.paths.len() >= 2) else { return };
+            let first = &c.paths[0].levels;
+            let level = (0..first.len()).find(|&l| c.paths.iter().any(|p| p.levels.get(l).map(|x| &x.title) != first.get(l).map(|x| &x.title))).unwrap_or(5);
+            let job = crate::careers::Job { track, level, branch: 0, performance: 0.0, last_day: None, tone: Default::default() };
+            questions.ask_career_path(e, sim, &job);
+        }
         _ => crate::lifetime::ask_lifetime_wish(&mut questions, Some(&ui.data), e, sim),
     }
     *done = true;
