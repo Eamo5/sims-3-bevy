@@ -54,6 +54,7 @@ fn home_action(id: u32) -> Option<Action> {
         0x1014 => Action::Objects(ObjTab::Windows),
         0x1015 => Action::Objects(ObjTab::Arches),
         0x1007 => Action::Objects(ObjTab::Columns),
+        0x1010 => Action::Objects(ObjTab::Gates),
         0x1000 => Action::Objects(ObjTab::Fireplaces),
         0x1001 => Action::Objects(ObjTab::Trees),
         0x100c => Action::Objects(ObjTab::Shrubs),

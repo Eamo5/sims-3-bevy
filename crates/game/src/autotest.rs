@@ -2340,6 +2340,42 @@ fn auto_fence(
         }
         info!("build test: {} at the pool, {at}", e.name);
     }
+    // FENCE_GATE=<x>,<z>[,<name part>[,wide]]: a gate (the cheapest, or the one so named; `wide`:
+    // the dearest of that name, its double) set into the fence at that lot point, through the
+    // same snapping as the pointer.
+    if let Ok(g) = std::env::var("FENCE_GATE") {
+        let parts: Vec<&str> = g.split(',').collect();
+        let (x, z) = (parts.first().and_then(|s| s.trim().parse::<f32>().ok()).unwrap_or(0.0), parts.get(1).and_then(|s| s.trim().parse::<f32>().ok()).unwrap_or(0.0));
+        let want = parts.get(2).map(|s| s.to_ascii_lowercase());
+        let wide = parts.get(3).is_some_and(|s| s.trim() == "wide");
+        let gate = catalog.entries.iter().filter(|e| e.price > 0 && e.gate && want.as_ref().is_none_or(|w| e.name.to_ascii_lowercase().contains(w.as_str()))).min_by_key(|e| if wide { -e.price } else { e.price });
+        let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+        if let Some(e) = gate {
+            let bounds = crate::objects::parts_bounds(&assets.object(&mut ctx, e.key));
+            let tiles = bounds.map_or(1, |(mn, mx)| ((mx.x - mn.x).round() as u32).max(1));
+            let centre = bounds.map_or(0.0, |(mn, mx)| ((mn.x + mx.x) * 0.5 * 2.0).round() * 0.5);
+            let ray = Ray3d::new(b.world(x, z, b.levels[0] + 20.0), Dir3::NEG_Y);
+            match crate::build::snap_to_fence(b, ray, tiles, centre) {
+                Some((at, rot, ops)) => {
+                    crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces);
+                    if let Some(l) = log.as_mut() {
+                        l.0.extend(ops.iter().cloned());
+                    }
+                    if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, e.key, at, rot, None) {
+                        commands.entity(o.entity).insert((crate::save::Bought, crate::nav::Floor(1), crate::building::BuildingPiece { level: 1 }));
+                    }
+                    info!("gate test: {} ({tiles} wide) set in, {} fence runs out, at {at}", e.name, ops.len());
+                }
+                None => {
+                    let near: Vec<String> = b.data.fences.iter().filter(|f| f.a != f.b && (Vec2::from(f.a) - Vec2::new(x, z)).length() < 3.0).map(|f| format!("{:?}-{:?}@{}", f.a, f.b, f.level)).collect();
+                    info!("gate test: {} ({tiles} wide) has no fence at {x},{z}: runs near {near:?}", e.name)
+                }
+            }
+        }
+        if let Some(g) = grid.as_mut() {
+            g.dirty = true;
+        }
+    }
     if let Ok(d) = std::env::var("FENCE_CAM")
         && let Ok(mut c) = cam.single_mut()
     {

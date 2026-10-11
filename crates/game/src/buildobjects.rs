@@ -1,8 +1,9 @@
 //! Build mode's object catalogues in the game's own look (UI.dll's `BuildController`): the
 //! Construction catalogue (doors, windows, arches, columns and fireplaces, its tabs along the
-//! top) and the Gardening catalogue (flowers, shrubs, trees and rocks), each the game's expanding
+//! top; or, from the house diagram's gate, the gates alone, as the game's fence tool shows them)
+//! and the Gardening catalogue (flowers, shrubs, trees and rocks), each the game's expanding
 //! grid of catalogue cells, opened from the house diagram's buttons. An object picked is in hand
-//! as in Buy mode (doors, windows and arches set into a wall).
+//! as in Buy mode (doors, windows and arches set into a wall, gates into a fence).
 
 use std::collections::HashMap;
 
@@ -38,7 +39,7 @@ impl Plugin for BuildObjectsPlugin {
 
 /// BUILD_OBJECTS=1 (tests): Build mode (ten seconds in), the construction catalogue's columns,
 /// the gardening catalogue's trees, and the first tree taken in hand, a step every two seconds,
-/// with screenshots into BUILD_OBJECTS_SHOTS.
+/// then the gates (from the house diagram's gate), with screenshots into BUILD_OBJECTS_SHOTS.
 #[allow(clippy::too_many_arguments)]
 fn scripted(
     mut commands: Commands,
@@ -98,6 +99,15 @@ fn scripted(
             crate::buy::enter_mode(&mut buy, None, &mut commands, &mut clock);
             shot(&mut commands, "bo4_planted");
         }
+        9 if t > 29.0 => crate::buy::enter_mode(&mut buy, Some(true), &mut commands, &mut clock),
+        10 if t > 31.0 => {
+            objects.choose(ObjTab::Gates);
+            buy.show(CONSTRUCTION_TAB);
+        }
+        11 if t > 33.0 => {
+            info!("build objects test: {} gates", objects.count);
+            shot(&mut commands, "bo5_gates");
+        }
         _ => return,
     }
     *step += 1;
@@ -124,6 +134,7 @@ pub enum ObjTab {
     Fireplaces,
     Arches,
     Columns,
+    Gates,
     Flowers,
     Shrubs,
     Trees,
@@ -134,6 +145,7 @@ const CONSTRUCTION: [ObjTab; 5] = [ObjTab::Doors, ObjTab::Windows, ObjTab::Firep
 const GARDENING: [ObjTab; 4] = [ObjTab::Flowers, ObjTab::Shrubs, ObjTab::Trees, ObjTab::Rocks];
 
 // The OBJDs' build category bits.
+const GATE: u32 = 0x8;
 const ARCH: u32 = 0x100;
 const COLUMN: u32 = 0x10;
 const FLOWER: u32 = 0x200;
@@ -155,6 +167,8 @@ impl ObjTab {
             ObjTab::Columns => 0x3903,
             ObjTab::Arches => 0x3904,
             ObjTab::Fireplaces => 0x3905,
+            // (The house diagram's gate.)
+            ObjTab::Gates => 0x1010,
             ObjTab::Flowers => 0x3a01,
             ObjTab::Shrubs => 0x3a02,
             ObjTab::Trees => 0x3a03,
@@ -169,6 +183,7 @@ impl ObjTab {
             ObjTab::Fireplaces => "Fireplaces",
             ObjTab::Arches => "Arches",
             ObjTab::Columns => "Columns",
+            ObjTab::Gates => "Gates",
             ObjTab::Flowers => "Flowers",
             ObjTab::Shrubs => "Shrubs",
             ObjTab::Trees => "Trees",
@@ -179,10 +194,11 @@ impl ObjTab {
     /// Whether a catalogue object belongs on this tab (by its build categories).
     fn keeps(self, e: &CatalogEntry, build: u32) -> bool {
         match self {
-            ObjTab::Doors => e.opening == Some(true) && build & ARCH == 0,
+            ObjTab::Doors => e.opening == Some(true) && build & (ARCH | GATE) == 0 && !e.gate,
             ObjTab::Windows => e.opening == Some(false),
             ObjTab::Arches => e.opening == Some(true) && build & ARCH != 0,
             ObjTab::Columns => build & COLUMN != 0,
+            ObjTab::Gates => e.gate || (e.opening == Some(true) && build & GATE != 0),
             ObjTab::Fireplaces => e.kind == crate::interact::ObjectKind::Fireplace,
             ObjTab::Flowers => build & FLOWER != 0,
             ObjTab::Shrubs => build & SHRUB != 0 && build & TREE == 0,
@@ -317,11 +333,12 @@ fn controls(
     }
 }
 
-/// The objects on a tab: in the catalogue, one of each name, cheapest first.
+/// The objects on a tab: in the catalogue, cheapest first; one of each name at a price (a
+/// single gate and its double share a name).
 fn listed<'a>(catalog: &'a Catalog, flags: &HashMap<Key, u32>, tab: ObjTab) -> Vec<&'a CatalogEntry> {
     let mut v: Vec<&CatalogEntry> = catalog.entries.iter().filter(|e| e.price > 0 && !e.name.is_empty() && !e.shell && tab.keeps(e, flags.get(&e.key).copied().unwrap_or(0))).collect();
     v.sort_by(|a, b| a.price.cmp(&b.price).then(a.name.cmp(&b.name)));
-    v.dedup_by(|a, b| a.name == b.name);
+    v.dedup_by(|a, b| a.name == b.name && a.price == b.price);
     v
 }
 
@@ -345,8 +362,8 @@ fn draw(
     let (Some(mut ui), Ok(window)) = (ui, windows.single()) else { return };
     let o = &mut *objects;
     let k = (buy.category == GARDENING_TAB) as usize;
-    // (The tab chosen must be one of this catalogue's.)
-    let tabs: &[ObjTab] = if k == 1 { &GARDENING } else { &CONSTRUCTION };
+    // (The tab chosen must be one of this catalogue's; the gates are on their own.)
+    let tabs: &[ObjTab] = if k == 1 { &GARDENING } else if o.tab == ObjTab::Gates { &[ObjTab::Gates] } else { &CONSTRUCTION };
     if !tabs.contains(&o.tab) {
         o.choose(tabs[0]);
     }
@@ -465,7 +482,7 @@ mod tests {
     use super::*;
 
     fn entry(opening: Option<bool>, kind: crate::interact::ObjectKind) -> CatalogEntry {
-        CatalogEntry { key: (1, 0, 1), name: "x".into(), price: 10, kind, opening, category: "Misc", shell: false }
+        CatalogEntry { key: (1, 0, 1), name: "x".into(), price: 10, kind, opening, category: "Misc", shell: false, gate: false }
     }
 
     #[test]
@@ -477,6 +494,11 @@ mod tests {
         assert!(ObjTab::Arches.keeps(&door, 0x2 | ARCH));
         assert!(!ObjTab::Doors.keeps(&door, 0x2 | ARCH));
         assert!(ObjTab::Windows.keeps(&entry(Some(false), K::Other), 0x4));
+        let gate = CatalogEntry { gate: true, ..entry(Some(true), K::Other) };
+        assert!(ObjTab::Gates.keeps(&gate, GATE));
+        assert!(!ObjTab::Doors.keeps(&gate, GATE), "gates aren't doors");
+        assert!(crate::building::is_gate("Sims3.Gameplay.Objects.Door.FenceRedwood_Gate2x1"));
+        assert!(!crate::building::is_gate("Sims3.Gameplay.Objects.Door.DoorSingleFederal2x1"));
         let plant = entry(None, K::Other);
         assert!(ObjTab::Trees.keeps(&plant, TREE | SHRUB));
         assert!(!ObjTab::Shrubs.keeps(&plant, TREE | SHRUB), "a tree that's also a shrub is a tree");

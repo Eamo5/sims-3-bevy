@@ -485,6 +485,12 @@ pub fn is_opening(script: &str) -> Option<bool> {
     }
 }
 
+/// Whether a door is a gate, set into a fence (`…Objects.Door.Fence<Style>_Gate…`).
+pub fn is_gate(script: &str) -> bool {
+    let s = script.to_ascii_lowercase();
+    s.contains(".door.fence") && s.contains("_gate")
+}
+
 /// Puts a spawned piece either into the active house (per-floor visibility) or under a
 /// neighbouring lot's root entity.
 fn place(commands: &mut Commands, e: Entity, root: Option<Entity>, level: u8) {
@@ -1015,7 +1021,11 @@ fn cut_openings(
         let hole = Hole::new(b.local(tf.translation), b.local_dir(tf.rotation * Vec3::Z), b.local_dir(tf.rotation * Vec3::X), bounds, door, level);
         changed.extend(walls_cut(&b, &hole));
         let mid = b.world(hole.wall_point.x, hole.wall_point.y, tf.translation.y);
-        commands.entity(e).remove::<Obstacle>().insert((WallObject { mid }, BuildingPiece { level }, Floor(level)));
+        commands.entity(e).remove::<Obstacle>().insert((BuildingPiece { level }, Floor(level)));
+        // (Gates stand in fences, never cut away.)
+        if !catalog.by_key(&obj.objd).is_some_and(|c| c.gate) {
+            commands.entity(e).insert(WallObject { mid });
+        }
         b.holes.push((Some(e), hole));
     }
     if changed.is_empty() {
@@ -1862,7 +1872,8 @@ pub fn spawn_building(
         if let (Some(door), Some(bounds)) = (opening, parts_bounds(&assets.object(ctx, o.objd))) {
             let hole = Hole::new(Vec2::from(o.local), active.local_dir(q * Vec3::Z), active.local_dir(q * Vec3::X), bounds, door, o.level);
             let wp = hole.wall_point;
-            if neighbor.is_none() {
+            // (Gates stand in fences, never cut away.)
+            if neighbor.is_none() && !is_gate(&o.script) {
                 commands.entity(entity).insert(WallObject { mid: active.world(wp.x, wp.y, o.position[1]) });
             }
             holes.push((neighbor.is_none().then_some(entity), hole));

@@ -798,7 +798,9 @@ installation is unreachable.
   diagram's doors, windows, arches, columns and fireplaces open the game's Construction
   catalogue, and its trees, shrubs, flowers and rocks the Gardening catalogue (their tabs and
   expanding grids, sorted by the objects' own build categories); trees, shrubs and flowers are
-  planted from their species' billboards, bought, moved and sold like any object.
+  planted from their species' billboards, bought, moved and sold like any object. The
+  diagram's gate opens the gates alone (single and double), each set into a fence as a door
+  into a wall, in the fence runs it replaces (on the ground or a deck), Sims walking through it.
 - **Interface**: the game's own icons and words — moodlets (name, description, time left),
   traits (Create-a-Sim and the Sim's panel) and wishes — read from the game's tuning tables
   (`GameplayData.package`) and string tables, with tooltips on hover. Sims' portraits are

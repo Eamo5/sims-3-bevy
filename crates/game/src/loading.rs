@@ -48,6 +48,8 @@ pub struct CatalogEntry {
     /// A building shell (Bridgeport's apartment buildings and storefronts): one large object
     /// round the rooms inside it.
     pub shell: bool,
+    /// A gate: a door set into a fence.
+    pub gate: bool,
 }
 
 /// The buy-mode tab of a catalogue object: by what it does, else by the game's own grouping of
@@ -98,6 +100,7 @@ impl Catalog {
                 opening: crate::building::is_opening(&c.script),
                 category: buy_category(crate::interact::ObjectKind::from_script(&c.script, &c.instance_name), &c.script),
                 shell: c.script.contains(".Shells."),
+                gate: crate::building::is_gate(&c.script),
             })
             .collect();
         let index = entries.iter().enumerate().map(|(i, e)| (e.key, i)).collect();
@@ -110,7 +113,7 @@ impl Catalog {
 
     /// Buyable doors (or windows), cheapest first.
     pub fn openings(&self, doors: bool) -> Vec<&CatalogEntry> {
-        let mut v: Vec<&CatalogEntry> = self.entries.iter().filter(|e| e.price > 0 && e.opening == Some(doors) && !e.name.is_empty()).collect();
+        let mut v: Vec<&CatalogEntry> = self.entries.iter().filter(|e| e.price > 0 && e.opening == Some(doors) && !e.gate && !e.name.is_empty()).collect();
         v.sort_by(|a, b| a.price.cmp(&b.price).then(a.name.cmp(&b.name)));
         v.dedup_by(|a, b| a.name == b.name);
         v

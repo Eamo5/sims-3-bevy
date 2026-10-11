@@ -323,6 +323,69 @@ fn snap_wall_local(data: &LotBuildingBaked, level: u8, floor_y: f32, ray: Ray3d,
     Some((Vec3::new(at.x, y, at.y), fwd, ops))
 }
 
+/// A gate's place in the fence under the pointer (as many grid segments of it as the gate is
+/// `tiles` wide, on the floor in view or the ground under it): where it stands, turned to face
+/// the pointer's side, and the fence runs it takes the place of. `centre` is how far along its
+/// own X its model's middle is from its origin (a two-tile gate's origin is on its first tile).
+pub fn snap_to_fence(b: &ActiveBuilding, ray: Ray3d, tiles: u32, centre: f32) -> Option<(Vec3, Quat, Vec<PaintOp>)> {
+    let local = b.local(ray.origin);
+    let ray = Ray3d::new(Vec3::new(local.x, ray.origin.y, local.y), Dir3::new(b.rot.inverse() * *ray.direction).ok()?);
+    // (On the ground floor, a fence on the ground or on a deck there is the same.)
+    let levels: &[u8] = if b.view_level <= 1 { &[0, 1] } else { &[b.view_level] };
+    let (_, at, fwd, ops) = snap_fence_local(&b.data, levels, ray, tiles, centre)?;
+    let f3 = b.rot * Vec3::new(fwd.x, 0.0, fwd.y);
+    Some((b.world(at.x, at.z, at.y), Quat::from_rotation_y(f3.x.atan2(f3.z)), ops))
+}
+
+/// The fence run (on one of `levels`) nearest where `ray` meets its height, and a gate's place
+/// in it: how far off the run the ray met it, the gate's position (lot-local, with its height),
+/// facing, and the runs it takes out.
+fn snap_fence_local(data: &LotBuildingBaked, levels: &[u8], ray: Ray3d, tiles: u32, centre: f32) -> Option<(f32, Vec3, Vec2, Vec<PaintOp>)> {
+    if tiles == 0 || ray.direction.y.abs() < 1e-4 {
+        return None;
+    }
+    let height = |level: u8, p: Vec2| if level == 0 { data.ground_at(p.x, p.y).unwrap_or(data.levels[0]) } else { data.levels.get(level as usize).copied().unwrap_or(data.levels[data.levels.len() - 1]) };
+    let runs: Vec<(Vec2, Vec2, u8)> = data.fences.iter().filter(|f| levels.contains(&f.level) && f.a != f.b).map(|f| (Vec2::from(f.a), Vec2::from(f.b), f.level)).collect();
+    let mut best: Option<(f32, Vec2, Vec2, Vec2, u8)> = None;
+    for &(a, c, level) in &runs {
+        let t = (height(level, (a + c) * 0.5) - ray.origin.y) / ray.direction.y;
+        if t <= 0.0 {
+            continue;
+        }
+        let lp = (ray.origin + *ray.direction * t).xz();
+        let len = a.distance(c);
+        let along = (c - a) / len.max(1e-6);
+        let s = (lp - a).dot(along);
+        if s < -0.2 || s > len + 0.2 {
+            continue;
+        }
+        let dist = (lp - a - along * s).length();
+        if dist < 1.2 && best.is_none_or(|bb| dist < bb.0) {
+            best = Some((dist, a, along, lp, level));
+        }
+    }
+    let (dist, a, along, lp, level) = best?;
+    // One grid segment: unit length on an axis, a diagonal step along a diagonal.
+    let dir = if along.x.abs() < 0.01 { Vec2::Y * along.y.signum() } else if along.y.abs() < 0.01 { Vec2::X * along.x.signum() } else { Vec2::new(along.x.signum(), along.y.signum()) };
+    let step = (lp - a).dot(dir) / dir.length_squared();
+    let step = if tiles % 2 == 1 { step.floor() + 0.5 } else { step.round() };
+    let mid = a + dir * step;
+    let near = |p: Vec2, q: Vec2| p.distance(q) < 0.05;
+    let mut ops = Vec::new();
+    for k in 0..tiles {
+        let p = mid - dir * (tiles as f32 * 0.5) + dir * k as f32;
+        let q = p + dir;
+        let run = runs.iter().find(|&&(r0, r1, _)| (near(r0, p) && near(r1, q)) || (near(r0, q) && near(r1, p)))?;
+        ops.push(PaintOp::RemoveFence { a: p.into(), b: q.into(), level: run.2 });
+    }
+    let n = dir.perp().normalize();
+    let fwd = if (lp - mid).dot(n) >= 0.0 { n } else { -n };
+    // (Its model's X is along the run, its +Z facing `fwd`: its middle on the run's.)
+    let x_axis = Vec2::new(fwd.y, -fwd.x);
+    let at = mid + fwd * 0.5 - x_axis * centre;
+    Some((dist, Vec3::new(at.x, height(level, mid), at.y), fwd, ops))
+}
+
 #[cfg(test)]
 mod wall_placement_tests {
     use super::*;
@@ -331,6 +394,43 @@ mod wall_placement_tests {
         LotBuildingBaked { lot: 0, width: 8, depth: 8, levels: vec![0.0, 0.0], walls: Vec::new(), floors: Vec::new(),
             foundation: Vec::new(), foundation_top: Vec::new(), objects: Vec::new(), covers: Vec::new(), ground: Vec::new(), pool: Vec::new(),
             pool_depth: 0.0, fences: Vec::new(), stairs: Vec::new() }
+    }
+
+    #[test]
+    fn gates_take_the_place_of_their_fence() {
+        let mut data = lot();
+        // A fence along z = 2 from x = 1 to 6, a run a segment (some laid backwards), with posts.
+        for x in 1..6 {
+            let (a, b) = if x % 2 == 0 { ([x as f32 + 1.0, 2.0], [x as f32, 2.0]) } else { ([x as f32, 2.0], [x as f32 + 1.0, 2.0]) };
+            data.fences.push(s3bake::FenceBaked { a, b, level: 0, model: (0, 0, 0) });
+            data.fences.push(s3bake::FenceBaked { a, b: a, level: 0, model: (0, 0, 1) });
+        }
+        let down = |x: f32, z: f32| Ray3d::new(Vec3::new(x, 10.0, z), Dir3::NEG_Y);
+        // A single gate on the segment under the pointer, facing the pointer's side.
+        let (_, at, fwd, ops) = snap_fence_local(&data, &[0], down(3.3, 2.4), 1, 0.0).unwrap();
+        assert_eq!(ops.len(), 1);
+        assert!((at - Vec3::new(3.5, 0.0, 2.5)).length() < 1e-4, "{at}");
+        assert_eq!(fwd, Vec2::Y);
+        let (_, at, fwd, _) = snap_fence_local(&data, &[0], down(3.3, 1.6), 1, 0.0).unwrap();
+        assert!((at - Vec3::new(3.5, 0.0, 1.5)).length() < 1e-4, "{at}");
+        assert_eq!(fwd, -Vec2::Y);
+        // A double gate: two segments either side of the grid point nearest, its origin on its
+        // first tile (its model's middle half a tile along its X).
+        for x in [3.2, 3.8, 4.2] {
+            let (_, at, fwd, ops) = snap_fence_local(&data, &[0], down(x, 2.3), 2, 0.5).unwrap_or_else(|| panic!("no gate at {x}"));
+            assert_eq!(ops.len(), 2);
+            let mid = Vec2::new(x.round(), 2.0);
+            let x_axis = Vec2::new(fwd.y, -fwd.x);
+            assert!((at.xz() + x_axis * 0.5 - fwd * 0.5 - mid).length() < 1e-4, "{at} for {mid}");
+        }
+        // Not past the fence's end, nor off it.
+        assert!(snap_fence_local(&data, &[0], down(6.3, 2.3), 2, 0.5).is_none());
+        assert!(snap_fence_local(&data, &[0], down(3.3, 5.0), 1, 0.0).is_none());
+        assert!(snap_fence_local(&data, &[2], down(3.3, 2.4), 1, 0.0).is_none(), "a fence on the ground isn't one upstairs");
+        // (A fence partly on a deck on the ground floor is one fence there.)
+        data.fences.iter_mut().filter(|f| f.a[0] >= 4.0).for_each(|f| f.level = 1);
+        let (_, _, _, ops) = snap_fence_local(&data, &[0, 1], down(4.2, 2.3), 2, 0.5).unwrap();
+        assert!(matches!(ops[..], [PaintOp::RemoveFence { level: 0, .. }, PaintOp::RemoveFence { level: 1, .. }] | [PaintOp::RemoveFence { level: 1, .. }, PaintOp::RemoveFence { level: 0, .. }]), "{ops:?}");
     }
 
     #[test]

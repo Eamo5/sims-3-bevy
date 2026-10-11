@@ -1916,12 +1916,19 @@ fn placement(
     // Doors and windows go into the wall under the pointer; paintings, mirrors and wall lamps
     // hang on it (their models hang behind their middle, on the tile's wall, off the floor).
     let opening = catalog.by_key(&objd).and_then(|e| e.opening);
+    // (Gates go into a fence instead.)
+    let gate = catalog.by_key(&objd).is_some_and(|e| e.gate);
     let bounds = {
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
         crate::objects::parts_bounds(&assets.object(&mut ctx, objd))
     };
     let wall_hung = opening.is_none() && bounds.is_some_and(crate::building::hangs_on_wall);
     let in_wall = match (opening.is_some() || wall_hung, building.as_deref()) {
+        (true, Some(b)) if gate => {
+            let tiles = bounds.map_or(1, |(mn, mx)| ((mx.x - mn.x).round() as u32).max(1));
+            let centre = bounds.map_or(0.0, |(mn, mx)| ((mn.x + mx.x) * 0.5 * 2.0).round() * 0.5);
+            crate::build::snap_to_fence(b, ray, tiles, centre)
+        }
         (true, Some(b)) => {
             let tiles = bounds.map_or(1, |(mn, mx)| ((mx.x - mn.x).round() as u32).max(1));
             crate::build::snap_to_wall(b, ray, tiles).map(|(p, r, ops)| (p, r, if wall_hung { Vec::new() } else { ops }))
@@ -1973,7 +1980,9 @@ fn placement(
         let bounds = bounds?;
         placement_problem(b, tf, bounds, floor.map_or(b.view_level, |(_, level)| level), ladder, opening.is_some() || wall_hung)
     }).or_else(|| {
-        if opening.is_some() && in_wall.is_none() {
+        if gate && in_wall.is_none() {
+            Some("Gates go into a fence, as wide as the gate, on the floor in view.")
+        } else if opening.is_some() && in_wall.is_none() {
             Some("Doors and windows go into a straight wall, on the floor in view.")
         } else if wall_hung && in_wall.is_none() {
             Some("Paintings, mirrors and wall lamps go on a straight wall, on the floor in view.")
