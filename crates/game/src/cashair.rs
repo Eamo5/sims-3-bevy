@@ -30,17 +30,17 @@ impl Plugin for CasHairPlugin {
 pub static HAIR_UP: AtomicBool = AtomicBool::new(false);
 
 // `CASPhysical`'s windows.
-const PHYSICAL_CLOSE: u32 = 0x05db_9c00;
-const PHYSICAL_HAIR: u32 = 0x05db_9c03;
+pub(crate) const PHYSICAL_CLOSE: u32 = 0x05db_9c00;
+pub(crate) const PHYSICAL_HAIR: u32 = 0x05db_9c03;
 const PHYSICAL_EYEBROWS: u32 = 0x05db_9c09;
-const PHYSICAL_BEARD: u32 = 0x05db_9c0a;
+pub(crate) const PHYSICAL_BEARD: u32 = 0x05db_9c0a;
 const PHYSICAL_BODY_HAIR: u32 = 0x05db_9c0c;
 // `CASHair`'s.
-const TITLE: u32 = 0x05db_cf01;
-const HAIR_TAB: u32 = 0x05db_b905;
+pub(crate) const TITLE: u32 = 0x05db_cf01;
+pub(crate) const HAIR_TAB: u32 = 0x05db_b905;
 const HATS_TAB: u32 = 0x05db_b906;
-const STYLES_GRID: u32 = 0x05db_cf21;
-const COLOURS_GRID: u32 = 0x05db_cf22;
+pub(crate) const STYLES_GRID: u32 = 0x05db_cf21;
+pub(crate) const COLOURS_GRID: u32 = 0x05db_cf22;
 /// What this game hasn't: the category lock, the content filter, hats' and shared hair's
 /// buttons, and the colour picker.
 const NOT_HERE: [u32; 7] = [0x0001_0005, 0x05db_b90f, 0x05db_cf30, 0x05db_b90e, 0x05db_b903, 0x05db_b950, HATS_TAB];
@@ -50,7 +50,7 @@ const CELL_COLOUR: u32 = 0x30;
 // The item grid's own (layout `ItemGrid`): its scroll bar.
 const GRID_SCROLLBAR: u32 = 0x0582_0672;
 /// The styles' rows in view.
-const ROWS: usize = 3;
+pub(crate) const ROWS: usize = 3;
 
 /// The panels on screen, the cells shown, and what they were shown for.
 #[derive(Resource)]
@@ -68,54 +68,24 @@ pub struct CasHair {
 
 /// A style's cell: its entry in the list (`usize::MAX`: none).
 #[derive(Component)]
-struct StyleCell(usize);
+pub(crate) struct StyleCell(pub usize);
 
 /// A hair colour's swatch (of `sim::HAIRS`).
 #[derive(Component)]
-struct ColourCell(usize);
+pub(crate) struct ColourCell(pub usize);
 
 fn spawn_hair(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>), frame: Option<Res<crate::caslook::CasFrame>>, hair: Option<Res<CasHair>>) {
     let (Some(mut ui), Some(_)) = (ui, frame) else { return };
     if hair.is_some() || ui.layout("CASPhysical").is_none() || ui.layout("CASHair").is_none() {
         return;
     }
-    let (Some(physical), Some(s)) = (ui.spawn(&mut commands, &mut images, &mut fonts, "CASPhysical"), ui.spawn(&mut commands, &mut images, &mut fonts, "CASHair")) else { return };
+    let Some((physical, s, bar)) = spawn_hair_panels(&mut commands, &mut ui, &mut images, &mut fonts) else { return };
     for root in [physical.root, s.root].into_iter().flatten() {
         commands.entity(root).insert((DespawnOnExit(AppState::CreateHousehold), GlobalZIndex(5), Visibility::Hidden));
     }
     // (The hair over the physical panel's back.)
     if let Some(r) = s.root {
         commands.entity(r).insert(GlobalZIndex(6));
-    }
-    for (spawned, ids) in [(&physical, &[PHYSICAL_CLOSE, PHYSICAL_EYEBROWS, PHYSICAL_BODY_HAIR][..]), (&s, &NOT_HERE[..])] {
-        for id in ids {
-            for e in spawned.all_with(*id) {
-                commands.entity(e).insert(Visibility::Hidden);
-            }
-        }
-    }
-    for (id, tip) in [(PHYSICAL_HAIR, "Hair"), (PHYSICAL_BEARD, "Facial Hair")] {
-        if let Some(e) = physical.id(id) {
-            commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
-        }
-    }
-    if let Some(e) = s.id(HAIR_TAB) {
-        commands.entity(e).insert(crate::icons::Tooltip("Hair".into()));
-    }
-    // The styles' scroll bar: the item grid's own, down its right.
-    let mut bar = None;
-    if let (Some(grid), Some(mut w)) = (s.id(STYLES_GRID), ui.find("ItemGrid", GRID_SCROLLBAR).cloned()) {
-        let size = ui.find("CASHair", STYLES_GRID).map_or(Vec2::new(322.0, 321.0), |g| Vec2::new(g.area[2] - g.area[0], g.area[3] - g.area[1]));
-        w.flags |= s3bake::ui::WIN_VISIBLE;
-        w.place = s3bake::ui::UiPlace::Fixed;
-        w.area = [size.x - 22.0, 6.0, size.x - 2.0, size.y - 26.0];
-        bar = ui.spawn_under(&mut commands, &mut images, &mut fonts, &w, grid).root;
-    }
-    // (The grids take the wheel.)
-    for id in [STYLES_GRID, COLOURS_GRID] {
-        if let Some(e) = s.id(id) {
-            commands.entity(e).insert(bevy::ui::RelativeCursorPosition::default());
-        }
     }
     HAIR_UP.store(true, Ordering::Relaxed);
     commands.insert_resource(CasHair { physical, hair: s, beard: false, styles: None, colours: None, bar, scroll: 0, shown: None });
@@ -239,25 +209,85 @@ fn hair_panel(
     let title = if h.beard { ui.localize("Ui/Caption/CAS/Physical:Beard").unwrap_or_else(|| "Facial Hair".into()) } else { ui.localize("Ui/Caption/CAS/Hair:Title").unwrap_or_else(|| "Hair".into()) };
     crate::livehud::set_text(&mut texts, h.hair.text(TITLE), &title);
     // The styles in view, each in the game's cell, the one worn lit.
-    if restyle && let (Some(grid), Some(g), Some(template)) = (h.hair.id(STYLES_GRID), ui.find("CASHair", STYLES_GRID).and_then(|w| w.grid), ui.layout("GenericCasItem").cloned()) {
-        let holder = fresh_holder(&mut commands, grid, &mut h.styles);
+    if restyle {
+        spawn_styles(&mut commands, &mut ui, (&mut images, &mut fonts), gu.as_deref_mut(), &h.hair, &mut h.styles, &list, h.beard, worn, h.scroll);
+    }
+    spawn_colours(&mut commands, &mut ui, (&mut images, &mut fonts), &h.hair, &mut h.colours, sim.hair);
+}
+
+/// `CASPhysical` and `CASHair` put up (hidden), what this game hasn't put away, with the styles'
+/// scroll bar: the item grid's own, down its right.
+pub(crate) fn spawn_hair_panels(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>) -> Option<(Spawned, Spawned, Option<Entity>)> {
+    let (Some(physical), Some(s)) = (ui.spawn(commands, images, fonts, "CASPhysical"), ui.spawn(commands, images, fonts, "CASHair")) else { return None };
+    for (spawned, ids) in [(&physical, &[PHYSICAL_CLOSE, PHYSICAL_EYEBROWS, PHYSICAL_BODY_HAIR][..]), (&s, &NOT_HERE[..])] {
+        for id in ids {
+            for e in spawned.all_with(*id) {
+                commands.entity(e).insert(Visibility::Hidden);
+            }
+        }
+    }
+    for (id, tip) in [(PHYSICAL_HAIR, "Hair"), (PHYSICAL_BEARD, "Facial Hair")] {
+        if let Some(e) = physical.id(id) {
+            commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
+        }
+    }
+    if let Some(e) = s.id(HAIR_TAB) {
+        commands.entity(e).insert(crate::icons::Tooltip("Hair".into()));
+    }
+    // The styles' scroll bar: the item grid's own, down its right.
+    let mut bar = None;
+    if let (Some(grid), Some(mut w)) = (s.id(STYLES_GRID), ui.find("ItemGrid", GRID_SCROLLBAR).cloned()) {
+        let size = ui.find("CASHair", STYLES_GRID).map_or(Vec2::new(322.0, 321.0), |g| Vec2::new(g.area[2] - g.area[0], g.area[3] - g.area[1]));
+        w.flags |= s3bake::ui::WIN_VISIBLE;
+        w.place = s3bake::ui::UiPlace::Fixed;
+        w.area = [size.x - 22.0, 6.0, size.x - 2.0, size.y - 26.0];
+        bar = ui.spawn_under(commands, images, fonts, &w, grid).root;
+    }
+    // (The grids take the wheel.)
+    for id in [STYLES_GRID, COLOURS_GRID] {
+        if let Some(e) = s.id(id) {
+            commands.entity(e).insert(bevy::ui::RelativeCursorPosition::default());
+        }
+    }
+    Some((physical, s, bar))
+}
+
+/// The styles in view on `CASHair`'s grid from row `scroll` (facial hair: none first), each in
+/// the game's cell (`GenericCasItem`) with the game's picture, the one worn lit.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn spawn_styles(
+    commands: &mut Commands,
+    ui: &mut UiAssets,
+    (images, fonts): (&mut Assets<Image>, &mut Assets<Font>),
+    mut gu: Option<&mut crate::icons::GameUi>,
+    hair: &Spawned,
+    last: &mut Option<Entity>,
+    list: &[(s3bake::Key, String)],
+    beard: bool,
+    worn: Option<s3bake::Key>,
+    scroll: usize,
+) {
+    let cols = 3usize;
+    let entries = list.len() + beard as usize;
+    if let (Some(grid), Some(g), Some(template)) = (hair.id(STYLES_GRID), ui.find("CASHair", STYLES_GRID).and_then(|w| w.grid), ui.layout("GenericCasItem").cloned()) {
+        let holder = fresh_holder(commands, grid, last);
         let step = Vec2::new(g.cell[0] + g.cell_padding[0] + g.cell_padding[2], g.cell[1] + g.cell_padding[1] + g.cell_padding[3]);
-        for n in (h.scroll * cols)..((h.scroll + ROWS) * cols).min(entries) {
-            let at = n - h.scroll * cols;
+        for n in (scroll * cols)..((scroll + ROWS) * cols).min(entries) {
+            let at = n - scroll * cols;
             let (col, row) = ((at % cols) as f32, (at / cols) as f32);
             let (x, y) = (g.padding[0] + col * step.x + g.cell_padding[0], g.padding[1] + row * step.y + g.cell_padding[1]);
             let mut cell = template.clone();
             cell.area = [x, y, x + g.cell[0], y + g.cell[1]];
             // (A button, so it lights under the pointer and when chosen, as the grid's cells do.)
             cell.cls = "Button".into();
-            let entry = if h.beard { n.checked_sub(1) } else { Some(n) };
+            let entry = if beard { n.checked_sub(1) } else { Some(n) };
             let item = entry.and_then(|i| list.get(i));
             let chosen = match (item, worn) {
                 (Some((key, _)), Some(w)) => *key == w,
-                (None, w) => h.beard && (w.is_none() || w == Some(crate::sim::OutfitChoice::NONE)),
+                (None, w) => beard && (w.is_none() || w == Some(crate::sim::OutfitChoice::NONE)),
                 _ => false,
             };
-            let c = ui.spawn_under(&mut commands, &mut images, &mut fonts, &cell, holder);
+            let c = ui.spawn_under(commands, images, fonts, &cell, holder);
             let Some(root) = c.root else { continue };
             commands.entity(root).insert((StyleCell(entry.unwrap_or(usize::MAX)), crate::icons::Tooltip(item.map_or_else(|| "None".to_string(), |i| i.1.clone()))));
             if chosen {
@@ -268,18 +298,22 @@ fn hair_panel(
                 });
             }
             if let (Some(win), Some((key, _))) = (c.id(CELL_THUMBNAIL), item)
-                && let Some(thumb) = gu.as_deref_mut().and_then(|g| g.icon(&mut images, &s3bake::gamedata::cas_thumb_name(key.2)))
+                && let Some(thumb) = gu.as_deref_mut().and_then(|g| g.icon(images, &s3bake::gamedata::cas_thumb_name(key.2)))
             {
-                crate::hudpanels::picture(&mut commands, win, thumb, Color::WHITE);
+                crate::hudpanels::picture(commands, win, thumb, Color::WHITE);
             }
         }
     }
-    // The colours: the game's swatches, two down and across, the Sim's lit.
-    if let (Some(grid), Some(g), Some(template)) = (h.hair.id(COLOURS_GRID), ui.find("CASHair", COLOURS_GRID).and_then(|w| w.grid), ui.layout("HairColorPresetGridItem").cloned()) {
-        let holder = fresh_holder(&mut commands, grid, &mut h.colours);
+}
+
+/// The hair colours on `CASHair`'s colour grid: the game's swatches, two down and across, the
+/// one `current` is lit.
+pub(crate) fn spawn_colours(commands: &mut Commands, ui: &mut UiAssets, (images, fonts): (&mut Assets<Image>, &mut Assets<Font>), hair: &Spawned, last: &mut Option<Entity>, current: Color) {
+    if let (Some(grid), Some(g), Some(template)) = (hair.id(COLOURS_GRID), ui.find("CASHair", COLOURS_GRID).and_then(|w| w.grid), ui.layout("HairColorPresetGridItem").cloned()) {
+        let holder = fresh_holder(commands, grid, last);
         let step = Vec2::new(g.cell[0] + g.cell_padding[0] + g.cell_padding[2], g.cell[1] + g.cell_padding[1] + g.cell_padding[3]);
         let rows = g.rows.max(1) as usize;
-        let cur = sim.hair.to_srgba();
+        let cur = current.to_srgba();
         for (n, (r, gr, b)) in crate::sim::HAIRS.iter().enumerate() {
             let (col, row) = ((n / rows) as f32, (n % rows) as f32);
             let (x, y) = (g.padding[0] + col * step.x + g.cell_padding[0], g.padding[1] + row * step.y + g.cell_padding[1]);
@@ -292,7 +326,7 @@ fn hair_panel(
             for i in 0..4 {
                 crate::caslook::shade_window(&mut cell, CELL_COLOUR + i, argb);
             }
-            let c = ui.spawn_under(&mut commands, &mut images, &mut fonts, &cell, holder);
+            let c = ui.spawn_under(commands, images, fonts, &cell, holder);
             let Some(root) = c.root else { continue };
             commands.entity(root).insert(ColourCell(n));
             // (The one chosen in the cell's chosen frame, over its colours: they cover the
@@ -300,7 +334,7 @@ fn hair_panel(
             let on = (cur.red - r).abs() < 0.01 && (cur.green - gr).abs() < 0.01 && (cur.blue - b).abs() < 0.01;
             if on
                 && let Some(s3bake::ui::UiDrawable::Std { images: keys, .. }) = &template.drawable
-                && let Some((frame, _)) = ui.image(&mut images, keys[4])
+                && let Some((frame, _)) = ui.image(images, keys[4])
             {
                 commands.spawn((ImageNode::new(frame), Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE, ChildOf(root)));
             }

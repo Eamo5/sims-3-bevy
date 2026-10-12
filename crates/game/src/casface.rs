@@ -87,7 +87,7 @@ const EYE_COLOURS: u32 = 0x05db_b914;
 const EYES_NOT_HERE: [u32; 2] = [0x05db_b908, 0x05db_b915];
 // `CASMakeup`'s: its kinds (eye shadow, eyeliner, blush, lipstick, costume), its parts' grid,
 // and what this game hasn't.
-const MAKEUP_KINDS: [u32; 5] = [0x100, 0x101, 0x102, 0x103, 0x104];
+pub(crate) const MAKEUP_KINDS: [u32; 5] = [0x100, 0x101, 0x102, 0x103, 0x104];
 const MAKEUP_PARTS: u32 = 0x1001;
 const MAKEUP_NOT_HERE: [u32; 10] = [0x0cd0_e9e0, 0x096d_7730, 0x1006, 0x1003, 0x1004, 0x1005, 0x2000, 0x101, 0x102, 0x104];
 // `CASBodySlider`'s and the item cells'.
@@ -139,7 +139,7 @@ struct FaceSliderRow(usize);
 #[derive(Component)]
 struct EyeCell(usize);
 #[derive(Component)]
-struct MakeupCell(usize);
+pub(crate) struct MakeupCell(pub usize);
 
 fn spawn_face(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>), frame: Option<Res<crate::caslook::CasFrame>>, face: Option<Res<CasFace>>) {
     let (Some(mut ui), Some(_)) = (ui, frame) else { return };
@@ -210,21 +210,7 @@ fn spawn_face(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut images,
         }
         regions.push(s);
     }
-    let Some(makeup) = ui.spawn(&mut commands, &mut images, &mut fonts, "CASMakeup") else { return };
-    for id in MAKEUP_NOT_HERE {
-        for e in makeup.all_with(id) {
-            commands.entity(e).insert(Visibility::Hidden);
-        }
-    }
-    // (The presets' grid of a part's colours: this game's make-up has its own.)
-    if let Some(e) = makeup.id(0x1002) {
-        commands.entity(e).insert(Visibility::Hidden);
-    }
-    for (id, tip) in [(MAKEUP_KINDS[0], "Eye Shadow"), (MAKEUP_KINDS[3], "Lipstick")] {
-        if let Some(e) = makeup.id(id) {
-            commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
-        }
-    }
+    let Some(makeup) = spawn_makeup_panel(&mut commands, &mut ui, &mut images, &mut fonts) else { return };
     for root in [details.root, makeup.root].into_iter().chain(regions.iter().map(|s| s.root)).flatten() {
         commands.entity(root).insert((DespawnOnExit(AppState::CreateHousehold), GlobalZIndex(5), Visibility::Hidden));
     }
@@ -452,9 +438,42 @@ fn face_panel(
         }
     }
     let (list, worn) = if f.lipstick { (&lipsticks, sim.outfit.lipstick) } else { (&shadows, sim.outfit.eyeshadow) };
-    let (Some(grid), Some(g), Some(template)) = (f.makeup.id(MAKEUP_PARTS), ui.find("CASMakeup", MAKEUP_PARTS).and_then(|w| w.grid), ui.layout("GenericCasItem").cloned()) else { return };
+    f.cells = spawn_makeup_cells(&mut commands, &mut ui, (&mut images, &mut fonts), gu.as_deref_mut(), &f.makeup, list, worn);
+}
+
+/// `CASMakeup` put up, what this game hasn't put away (eye shadow and lipstick its kinds).
+pub(crate) fn spawn_makeup_panel(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>) -> Option<Spawned> {
+    let Some(makeup) = ui.spawn(commands, images, fonts, "CASMakeup") else { return None };
+    for id in MAKEUP_NOT_HERE {
+        for e in makeup.all_with(id) {
+            commands.entity(e).insert(Visibility::Hidden);
+        }
+    }
+    // (The presets' grid of a part's colours: this game's make-up has its own.)
+    if let Some(e) = makeup.id(0x1002) {
+        commands.entity(e).insert(Visibility::Hidden);
+    }
+    for (id, tip) in [(MAKEUP_KINDS[0], "Eye Shadow"), (MAKEUP_KINDS[3], "Lipstick")] {
+        if let Some(e) = makeup.id(id) {
+            commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
+        }
+    }
+    Some(makeup)
+}
+
+/// A kind of make-up's parts (none first) in `CASMakeup`'s grid, in the game's cells with the
+/// game's pictures, the one worn lit; the holder they're in.
+pub(crate) fn spawn_makeup_cells(
+    commands: &mut Commands,
+    ui: &mut UiAssets,
+    (images, fonts): (&mut Assets<Image>, &mut Assets<Font>),
+    mut gu: Option<&mut crate::icons::GameUi>,
+    makeup: &Spawned,
+    list: &[(s3bake::Key, String)],
+    worn: Option<s3bake::Key>,
+) -> Option<Entity> {
+    let (Some(grid), Some(g), Some(template)) = (makeup.id(MAKEUP_PARTS), ui.find("CASMakeup", MAKEUP_PARTS).and_then(|w| w.grid), ui.layout("GenericCasItem").cloned()) else { return None };
     let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE, ChildOf(grid))).id();
-    f.cells = Some(holder);
     let cols = g.columns.max(1) as usize;
     let step = Vec2::new(g.cell[0] + g.cell_padding[0] + g.cell_padding[2], g.cell[1] + g.cell_padding[1] + g.cell_padding[3]);
     let none = worn.is_none() || worn == Some(crate::sim::OutfitChoice::NONE);
@@ -464,7 +483,7 @@ fn face_panel(
         cell.area = [x, y, x + g.cell[0], y + g.cell[1]];
         cell.cls = "Button".into();
         let item = n.checked_sub(1).and_then(|i| list.get(i));
-        let c = ui.spawn_under(&mut commands, &mut images, &mut fonts, &cell, holder);
+        let c = ui.spawn_under(commands, images, fonts, &cell, holder);
         let Some(root) = c.root else { continue };
         commands.entity(root).insert((MakeupCell(n.checked_sub(1).unwrap_or(usize::MAX)), crate::icons::Tooltip(item.map_or_else(|| "None".to_string(), |i| i.1.clone()))));
         let chosen = match item {
@@ -479,11 +498,12 @@ fn face_panel(
             });
         }
         if let (Some(win), Some((key, _))) = (c.id(CELL_THUMBNAIL), item)
-            && let Some(thumb) = gu.as_deref_mut().and_then(|g| g.icon(&mut images, &s3bake::gamedata::cas_thumb_name(key.2)))
+            && let Some(thumb) = gu.as_deref_mut().and_then(|g| g.icon(images, &s3bake::gamedata::cas_thumb_name(key.2)))
         {
-            crate::hudpanels::picture(&mut commands, win, thumb, Color::WHITE);
+            crate::hudpanels::picture(commands, win, thumb, Color::WHITE);
         }
     }
+    Some(holder)
 }
 
 /// An eye in a colour, close up: the iris (lighter towards the pupil, the colour doubled over its

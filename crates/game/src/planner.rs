@@ -180,8 +180,9 @@ fn planner_ui(
         return;
     }
     p.dirty = false;
-    // (Clothes in the game's own dresser panels, where they're to hand: `planlook`.)
-    if !p.looks && layouts.is_some_and(|l| crate::planlook::available(&l)) {
+    // (In the game's own dresser or mirror panels, where they're to hand: `planlook`,
+    // `mirrorlook`.)
+    if layouts.is_some_and(|l| if p.looks { crate::mirrorlook::available(&l) } else { crate::planlook::available(&l) }) {
         return;
     }
     if let Some(r) = p.root.take() {
