@@ -213,15 +213,20 @@ installation is unreachable.
   delivery, in the game's pizza uniform, carries the pizza box in to the kitchen counter.
   What's left of a meal goes in the fridge once it's been out a while (neat Sims see to it
   first, slobs never), to be had another time ("Have Leftovers": a plate of it at the table);
-  the fridge keeps a dozen servings, and they're kept in saves. A quick meal is a plate of
-  something simple taken out of the fridge and carried to the table; a microwave dinner is put
-  in (its door swinging open), checked on while it heats, taken out and carried to the table
-  the same way.
-- **Recipes** from the game's recipe list: the stove offers "Cook Breakfast/Lunch/Dinner ›"
-  and "Cook Dessert ›" with the recipes the Sim knows for that time of day (Mac and Cheese and
+  the fridge keeps a dozen servings, and they're kept in saves. The fridge's "Have Quick
+  Meal ›" is the game's snacks (Cereal, Bread and Jam, Canned Soup, Ice Cream, Juice), taken
+  out and carried to the table; a Microwave Meal (not for children) is put in the microwave
+  (its door swinging open), checked on while it heats, taken out and carried to the table the
+  same way. A group meal is served a plate at a time: the rest wait their turn.
+- **Recipes** from the game's recipe list: the fridge (and the stove) offer the game's food
+  menus, "Have Breakfast/Lunch/Dinner ›" (made for one: the cook's own plate), "Serve
+  Breakfast/Lunch/Dinner ›" (a platter for everyone) and "Serve Dessert ›", each recipe with
+  what its ingredients cost, cooked at the stove nearest the fridge, with the recipes the Sim
+  knows for that time of day (Mac and Cheese and
   Waffles to start; Goopy Carbonara, Spaghetti, Key Lime Pie, Lobster Thermidor... as Cooking
   grows; meatless ones for vegetarians), the rest from recipe books bought at the bookstore
-  at the game's prices. The food is the game's own models in their geometry states — the dish
+  at the game's prices. The food is the game's own models in their geometry states (those named
+  only by their rig, Waffles, Autumn Salad, Sushi, found through it) — the dish
   on the serving platter, a plateful in front of each Sim — scraped clean once eaten. The
   Culinary Librarian lifetime wish asks for every one. Learned recipes are kept in saves.
 - **Props in hand**: the game's own plates, forks, books and guitars, held as its animation

@@ -161,6 +161,19 @@ fn main() {
         println!("{n} models with geometry states");
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--rig-models") {
+        // --rig-models <name>: the VPXYs that list the rig (or footprint) named so, and their models.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let inst = s3pkg::fnv64(&args[i + 1]);
+        for k in pkgs.keys_of_type(0x736884F1).cloned().collect::<Vec<_>>() {
+            let Some(d) = pkgs.read(&k) else { continue };
+            let keys = s3formats::model::vpxy_keys(&d);
+            if keys.iter().any(|x| x.i == inst) {
+                println!("vpxy {k:?}: {:?}", keys.iter().map(|x| format!("{:08X}:{:X}:{:016X}", x.t, x.g, x.i)).collect::<Vec<_>>());
+            }
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--model-name") {
         // --model-name <name>: the models (MODL, VPXY) named so (instance = fnv64 of the name).
         let pkgs = s3pkg::install::open_install(&data, |_| true);
@@ -603,6 +616,12 @@ cover {:?}", g.seasons.temperature, g.seasons.freeze_melt, g.seasons.cover);
             }
             for b in g.buffs.iter().filter(|b| ["GettingChilly", "TeethChattering", "SweatingProfusely", "GettingWarm", "Soaked", "Frostbitten"].contains(&b.hex.as_str())) {
                 println!("{b:?}");
+            }
+        }
+        // The recipes and snacks, with the food they're drawn with.
+        if std::env::var("RECIPES").is_ok() {
+            for r in &g.recipes {
+                println!("{} {:?} snack {} microwave {} one {} group {} meals {} §{} single {:?} {:?} {:?} group {:?}", r.key, r.name, r.snack, r.microwave, r.for_one, r.for_group, r.meals, r.cost, r.single, r.single_half, r.single_empty, r.group);
             }
         }
         // The build catalogue's fences.

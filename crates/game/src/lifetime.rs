@@ -438,7 +438,8 @@ fn track_lifetime_wishes(
         let careers = w.careers.clone();
         let royalties = author.map_or(0, |a| a.weekly_royalties());
         let all = data.map_or(&[][..], |d| &d.recipes[..]);
-        let recipes = (all.iter().filter(|r| crate::meals::knows(r, skills.level("Cooking"), known)).count(), all.len());
+        // (Of the recipes cooked, not the snacks.)
+        let recipes = (all.iter().filter(|r| !r.snack && crate::meals::knows(r, skills.level("Cooking"), known)).count(), all.iter().filter(|r| !r.snack).count());
         let perfect = garden.as_ref().map_or(0, |g| g.perfect.len());
         let chess_rank = chess.map_or(0, |c| c.rank);
         let perfect_fish = bowls.as_ref().map_or(0, |b| b.0);

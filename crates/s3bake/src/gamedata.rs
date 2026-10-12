@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 73;
+pub const GAMEDATA_VERSION: u32 = 75;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -305,7 +305,8 @@ pub const MEAL_LUNCH: u8 = 4;
 pub const MEAL_DINNER: u8 = 8;
 pub const MEAL_DESSERT: u8 = 16;
 
-/// A recipe: a base game row of `RecipeMasterList` that's cooked as a meal.
+/// A recipe: a base game row of `RecipeMasterList` that's cooked as a meal, or one of its
+/// snacks (the fridge's "Have Quick Meal..." menu: cereal, juice...), after the meals.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct RecipeInfo {
     /// `Spaghetti`, `GoopyCarbonara`...
@@ -331,6 +332,17 @@ pub struct RecipeInfo {
     pub single: Option<crate::types::Key>,
     pub single_half: Option<crate::types::Key>,
     pub single_empty: Option<crate::types::Key>,
+    /// A snack, taken out of the fridge rather than cooked (no meal times of its own).
+    #[serde(default)]
+    pub snack: bool,
+    /// Heated in a microwave (the Microwave Meal).
+    #[serde(default)]
+    pub microwave: bool,
+    /// Whether it's made for one ("Have Dinner...") and for a group ("Serve Dinner...").
+    #[serde(default)]
+    pub for_one: bool,
+    #[serde(default)]
+    pub for_group: bool,
 }
 
 /// A lifetime wish: one of the base game's "Lifetime Dreams" (`DreamsAndPromisesNodes`), with
@@ -1759,7 +1771,9 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         for k in pkgs.keys_of_type(T_NMAP) {
             if let Some(d) = pkgs.read(k) {
                 for (inst, n) in s3formats::audio::parse_name_map(&d) {
-                    if n.starts_with("food") && !n.contains('_') && pkgs.find_ti(s3pkg::types::MODL, inst).is_some() {
+                    // (Snacks' own have a part in the name: `foodSnackBreadandJam_slice`.)
+                    let lower = n.to_ascii_lowercase();
+                    if n.starts_with("food") && (!n.contains('_') || lower.starts_with("foodsnack")) && pkgs.find_ti(s3pkg::types::MODL, inst).is_some() {
                         food.insert(n.to_ascii_lowercase(), inst);
                     }
                 }
@@ -1768,12 +1782,31 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         // (Some are hidden catalogue objects instead: `FoodEatHamburger`.)
         let catalog: Vec<crate::types::CatalogEntry> = read_value(&root.global_dir().join("catalog.bin")).unwrap_or_default();
         let mut models: Vec<(crate::types::Key, s3pkg::ResourceKey, u32)> = Vec::new();
+        // (Others are named only by their rig and footprint (`foodServeBelgianWaffles`), which
+        // the model's VPXY lists beside it: the models by those names' hashes.)
+        let mut by_rig: Option<HashMap<u64, s3pkg::ResourceKey>> = None;
         let mut model_of = |spec: &str| -> Option<crate::types::Key> {
             let (name, rest) = spec.split_once('#').unwrap_or((spec, ""));
             let state = rest.split(':').next().filter(|s| !s.is_empty());
             let modl = match food.get(&name.to_ascii_lowercase()) {
                 Some(&inst) => pkgs.find_ti(s3pkg::types::MODL, inst)?,
-                None => crate::types::rkey(*catalog.iter().find(|c| c.instance_name.eq_ignore_ascii_case(name))?.models.first()?),
+                None => match catalog.iter().find(|c| c.instance_name.eq_ignore_ascii_case(name)) {
+                    Some(c) => crate::types::rkey(*c.models.first()?),
+                    None => *by_rig
+                        .get_or_insert_with(|| {
+                            let mut m = HashMap::new();
+                            for k in pkgs.keys_of_type(s3pkg::types::VPXY).filter(|k| k.g == 1) {
+                                let keys = pkgs.read(k).map(|d| s3formats::model::vpxy_keys(&d)).unwrap_or_default();
+                                if let Some(modl) = keys.iter().find(|x| x.t == s3pkg::types::MODL) {
+                                    for x in keys.iter().filter(|x| x.t == 0x8EAF13DE || x.t == 0xD382BF57) {
+                                        m.entry(x.i).or_insert(*modl);
+                                    }
+                                }
+                            }
+                            m
+                        })
+                        .get(&s3pkg::fnv64(name))?,
+                },
             };
             let inst = modl.i;
             let hash = state.map_or(0, s3pkg::fnv32);
@@ -1783,6 +1816,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             }
             Some(key)
         };
+        let mut snacks = Vec::new();
         for f in records(&x, "Data") {
             let code = get(&f, "CodeVersion");
             let key = get(&f, "Recipe_Key");
@@ -1790,11 +1824,12 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 .iter()
                 .filter(|(m, _)| !get(&f, m).is_empty())
                 .fold(0, |a, (_, b)| a | b);
-            if key.is_empty() || !(code.is_empty() || code == "BaseGame") || meals == 0 || get(&f, "Learnable") == "False" {
+            let snack = !get(&f, "Snack").is_empty();
+            if key.is_empty() || !(code.is_empty() || code == "BaseGame") || (!snack && (meals == 0 || get(&f, "Learnable") == "False")) {
                 continue;
             }
             let name = text("RecipeMasterList/Data", &key);
-            out.recipes.push(RecipeInfo {
+            (if snack { &mut snacks } else { &mut out.recipes }).push(RecipeInfo {
                 name: if name.is_empty() { pretty(&key) } else { name },
                 level: num(&f, "Level") as u8,
                 auto: !get(&f, "Auto_Learn").is_empty(),
@@ -1809,9 +1844,14 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 single_half: model_of(&get(&f, "Single_Half")),
                 single_empty: model_of(&get(&f, "Single_Empty")),
                 book_price: 0,
+                snack,
+                microwave: get(&f, "Recipe_Class") == "MicrowaveMeal",
+                for_one: !get(&f, "Can_Make_Single").is_empty(),
+                for_group: !get(&f, "Can_Make_Group").is_empty(),
                 key,
             });
         }
+        out.recipes.append(&mut snacks);
         // Recipe books (`Books`' `BookRecipe` rows) and their prices.
         if let Some(b) = xml("Books") {
             for f in records(&b, "BookRecipe") {

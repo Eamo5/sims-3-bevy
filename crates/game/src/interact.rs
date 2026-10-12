@@ -1635,6 +1635,8 @@ pub struct Action {
     pub canvas_choice: Option<u8>,
     pub fish_choice: Option<(String, u8)>,
     pub recipe_choice: Option<usize>,
+    /// The recipe's made for one (to eat themselves: "Have Dinner"), not everyone.
+    pub for_one: bool,
     /// Where the Sim came up to the object (a hot tub got into from a side, a chair at a table
     /// from behind): where they get up and away from it again.
     pub approach: Option<Vec2>,
@@ -1642,7 +1644,7 @@ pub struct Action {
 
 impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
-        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, fish_choice: None, recipe_choice: None, approach: None }
+        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, fish_choice: None, recipe_choice: None, for_one: false, approach: None }
     }
 }
 
@@ -2096,6 +2098,10 @@ pub(crate) fn run_actions(
                     let dest: Option<(Vec2, u8)> = match &action.kind {
                         ActionKind::Object { target, def } => match objects.get(*target) {
                             Ok((obj, otf, used, of)) => {
+                                // (A group meal's served one at a time: the rest wait their turn.)
+                                if used.0.is_some_and(|u| u != me) && obj.kind == ObjectKind::Meal {
+                                    continue;
+                                }
                                 if used.0.is_some_and(|u| u != me) {
                                     if !action.autonomous {
                                         notes.push(format!("{} can't use the {}: it's in use.", sim.first, obj.name));
@@ -2773,6 +2779,11 @@ pub(crate) fn run_actions(
                                                 } else {
                                                     commands.entity(me).remove::<crate::meals::MealPlan>();
                                                 }
+                                                if action.for_one {
+                                                    commands.entity(me).insert(crate::meals::ForOne);
+                                                } else {
+                                                    commands.entity(me).remove::<crate::meals::ForOne>();
+                                                }
                                                 commands.entity(me).insert(crate::meals::MealRequest::Serve(*target));
                                             }
                                         }
@@ -2864,12 +2875,22 @@ pub(crate) fn run_actions(
                                             }
                                         }
                                         Special::Cook => {
+                                            // (The snack chosen; taken out of the microwave, what went in.)
+                                            if let Some(recipe) = action.recipe_choice.take() {
+                                                commands.entity(me).insert(crate::meals::MealPlan(recipe));
+                                            } else if d.name != "Take Out Dinner" {
+                                                commands.entity(me).remove::<crate::meals::MealPlan>();
+                                            }
                                             commands.entity(me).insert(crate::meals::MealRequest::Quick);
                                         }
                                         Special::TurnOnTv => {
                                             commands.entity(me).insert(crate::surroundings::WatchFrom(*target));
                                         }
                                         Special::Microwave => {
+                                            match action.recipe_choice.take() {
+                                                Some(recipe) => commands.entity(me).insert(crate::meals::MealPlan(recipe)),
+                                                None => commands.entity(me).remove::<crate::meals::MealPlan>(),
+                                            };
                                             commands.entity(me).insert(crate::meals::MicrowaveDone(*target));
                                         }
                                         Special::None | Special::BubbleBath | Special::Ducky | Special::VampireOnly => {}
@@ -3402,8 +3423,9 @@ pub(crate) fn run_actions(
 
 /// Revalidate maintenance on every action tick, including object reservations.
 fn object_action_available(actor: Entity, kind: ObjectKind, def: usize, owner: Option<Entity>, broken: bool, phase: Phase) -> bool {
+    // (A group meal's served one at a time: the rest wait their turn.)
     !broken && interactions_for(kind).get(def).is_some()
-        && if matches!(phase, Phase::Running(_)) { owner == Some(actor) } else { owner.is_none_or(|e| e == actor) }
+        && if matches!(phase, Phase::Running(_)) { owner == Some(actor) } else { kind == ObjectKind::Meal || owner.is_none_or(|e| e == actor) }
 }
 
 fn maintenance_available(actor: Entity, kind: ObjectKind, owner: Option<Entity>, broken: bool, upgrades: Option<&crate::upgrades::Upgrades>, bit: Option<u8>) -> bool {

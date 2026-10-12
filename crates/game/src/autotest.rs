@@ -2601,11 +2601,13 @@ fn auto_gate_route(
 /// CLICK_USE=<kind>,<kind>... (tests, object kinds as `ObjectKind` names): one after another, the
 /// camera turned on the nearest such object shown, a click on it through the real input path,
 /// the pie's first option (not a submenu) pressed as a player would, and what the selected Sim
-/// then has queued logged.
+/// then has queued logged. `<kind>:<option>><option>` picks the options instead, by how their
+/// labels start (`Fridge:Have Quick Meal>Cereal`).
 #[allow(clippy::type_complexity)]
 fn auto_click_use(
     time: Res<Time>,
     mut state: Local<(usize, u8, f32)>,
+    mut depth: Local<usize>,
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut cams: Query<(&Camera, &GlobalTransform, &mut crate::camera::SimsCamera)>,
@@ -2615,13 +2617,16 @@ fn auto_click_use(
     queues: Query<&crate::interact::ActionQueue, With<crate::sim::Selected>>,
 ) {
     let Ok(list) = std::env::var("CLICK_USE") else { return };
-    let kinds: Vec<&str> = list.split(',').collect();
+    // (Each `Kind` or `Kind:Option>Submenu option`, by the start of their labels.)
+    let entries: Vec<(&str, Vec<&str>)> = list.split(',').map(|e| e.split_once(':').map_or((e, Vec::new()), |(k, p)| (k, p.split('>').collect()))).collect();
+    let kinds: Vec<&str> = entries.iter().map(|e| e.0).collect();
     let t = time.elapsed_secs();
     let (idx, stage, at) = *state;
+    // (A click lasts a frame.)
+    mouse.release(MouseButton::Left);
     if idx >= kinds.len() || t < 10.0 || t < at {
         return;
     }
-    mouse.release(MouseButton::Left);
     let Ok((camera, cam_tf, mut cam)) = cams.single_mut() else { return };
     let target = || {
         objects
@@ -2639,6 +2644,7 @@ fn auto_click_use(
                 return;
             };
             info!("click use: {}: '{}'", kinds[idx], name.trim());
+            *depth = 0;
             cam.focus = mid;
             cam.distance = 9.0;
             *state = (idx, 1, t + 1.5);
@@ -2663,15 +2669,30 @@ fn auto_click_use(
                 return;
             }
             let labels: Vec<&str> = pie.options.iter().map(|(l, _)| l.as_str()).collect();
-            let Some(k) = pie.options.iter().position(|(_, a)| !matches!(a, crate::interact::ActionKind::GoHere(p, _) if p.x.is_nan())) else { return };
+            // (The first that does something; failing that, the first submenu, then its first.)
+            let submenu = |a: &crate::interact::ActionKind| matches!(a, crate::interact::ActionKind::GoHere(p, _) if p.x.is_nan());
+            let k = match entries[idx].1.get(*depth) {
+                Some(want) => {
+                    let Some(k) = pie.options.iter().position(|(l, _)| l.starts_with(want)) else {
+                        info!("click use: {}: no '{want}' in {labels:?}", kinds[idx]);
+                        *state = (idx + 1, 0, t);
+                        return;
+                    };
+                    k
+                }
+                None => pie.options.iter().position(|(_, a)| !submenu(a)).unwrap_or(0),
+            };
+            let opens = submenu(&pie.options[k].1);
             info!("click use: {}: pie {:?}, choosing '{}'", kinds[idx], labels, pie.options[k].0);
             // (A click on its bubble, as a player's.)
             if let (Some((_, at)), Ok(mut window)) = (options.iter().find(|(o, _)| o.0 == k), windows.single_mut()) {
                 let scale = window.scale_factor();
+                debug!("click use: option {k} of {} at {:?}", options.iter().count(), at.translation / scale);
                 window.set_cursor_position(Some(at.translation / scale));
                 mouse.press(MouseButton::Left);
             }
-            *state = (idx, 3, t + 2.0);
+            *depth += 1;
+            *state = if opens { (idx, 2, t + 1.0) } else { (idx, 3, t + 2.0) };
         }
         _ => {
             let last = queues.single().ok().and_then(|q| q.0.back().map(|a| a.label.clone()));

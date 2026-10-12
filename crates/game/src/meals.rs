@@ -42,10 +42,14 @@ pub struct ServingFrom(pub Entity);
 #[derive(Component)]
 pub struct MicrowaveDone(pub Entity);
 
-/// Heated, the dinner is taken out of the microwave (then eaten at the table).
-fn take_out_dinner(mut commands: Commands, mut sims: Query<(Entity, &MicrowaveDone, &mut ActionQueue)>) {
-    for (e, m, mut queue) in &mut sims {
+/// Heated, the dinner is taken out of the microwave (then eaten at the table): a Microwave
+/// Meal, unless something else went in.
+fn take_out_dinner(mut commands: Commands, mut sims: Query<(Entity, &MicrowaveDone, &mut ActionQueue, Has<MealPlan>)>, ui: Option<Res<crate::icons::GameUi>>) {
+    for (e, m, mut queue, planned) in &mut sims {
         commands.entity(e).remove::<MicrowaveDone>();
+        if !planned && let Some(r) = ui.as_ref().and_then(|u| u.data.recipes.iter().position(|r| r.snack && r.microwave)) {
+            commands.entity(e).insert(MealPlan(r));
+        }
         if let Some(def) = crate::interact::interactions_for(ObjectKind::Microwave).iter().position(|d| d.name == "Take Out Dinner") {
             queue.0.push_front(Action::new("Take Out Dinner", ActionKind::Object { target: m.0, def }, true));
         }
@@ -197,6 +201,10 @@ pub fn pizza_spot(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, c
 /// Choices for queued cooking actions live on `Action::recipe_choice`.
 #[derive(Component)]
 pub struct MealPlan(pub usize);
+
+/// What's cooking is for the cook alone ("Have Dinner"), not a group meal.
+#[derive(Component)]
+pub struct ForOne;
 
 /// The recipe a platter holds (and so each plate from it).
 #[derive(Component, Clone, Copy)]
@@ -749,7 +757,7 @@ fn meal_requests(
         &mut ActionQueue,
         &Sim,
         Option<&EatingPlate>,
-        (Option<&MealPlan>, Option<&Plateful>, &crate::interact::Skills, Option<&KnownRecipes>, Option<&ServingFrom>),
+        (Option<&MealPlan>, Option<&Plateful>, &crate::interact::Skills, Option<&KnownRecipes>, Option<&ServingFrom>, Has<ForOne>),
     )>,
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy)>,
     mut meals: Query<(&mut Meal, Option<&Dish>, Option<&DishFood>)>,
@@ -764,7 +772,7 @@ fn meal_requests(
     let recipes = ui.as_ref().map(|u| u.data.clone());
     let recipe = |i: usize| recipes.as_ref().and_then(|d| d.recipes.get(i));
     let mut taken: Vec<Entity> = Vec::new();
-    for (me, req, tf, mut queue, sim, eating, (plan, plateful, skills, known, serving)) in &mut sims {
+    for (me, req, tf, mut queue, sim, eating, (plan, plateful, skills, known, serving, one)) in &mut sims {
         commands.entity(me).remove::<MealRequest>();
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
         // A favourite meal is satisfying whether eaten at a table or standing up.
@@ -785,8 +793,10 @@ fn meal_requests(
         match *req {
             MealRequest::Serve(stove) => {
                 let Ok((_, s, stf, _)) = objects.get(stove) else { continue };
-                // (First carried from the stove to the counter or table it's served on.)
+                // (First carried from the stove to the counter or table it's served on; a plate
+                // for one, to the table.)
                 if serving.is_none()
+                    && !one
                     && let Some(surface) = surface_entity_near(&objects, s.world_center(stf), 6.0)
                     && let Some(def) = crate::interact::interactions_for(ObjectKind::Table).iter().position(|d| d.special == Special::PlaceMeal)
                 {
@@ -818,6 +828,27 @@ fn meal_requests(
                 let cost = r.map_or(0, |r| (r.cost as i64).max(0));
                 if cost > 0 && funds.as_ref().is_none_or(|h| h.funds < cost) {
                     notes.push(format!("{} can't afford the ingredients for {label} (§{cost}).", sim.first));
+                    continue;
+                }
+                if one {
+                    commands.entity(me).remove::<ForOne>();
+                    if let Some(h) = funds.as_mut() {
+                        h.funds -= cost;
+                    }
+                    did.write(crate::journal::Did::count(me, crate::journal::Stat::Dishes, 1.0));
+                    info!("{} made {label} for one", sim.first);
+                    match dish {
+                        Some(d) => commands.entity(me).insert(Plateful(d)),
+                        None => commands.entity(me).remove::<Plateful>(),
+                    };
+                    commands.entity(me).insert(crate::anim::Carrying(crate::surroundings::DISH_CARRY));
+                    match dining_seat(&objects, tf.translation, &taken) {
+                        Some((chair, _)) => {
+                            taken.push(chair);
+                            queue.0.push_front(Action::new("Eat", ActionKind::Object { target: chair, def: CHAIR_EAT }, true));
+                        }
+                        None => queue.0.push_front(Action::new("Eat", ActionKind::EatHere, true)),
+                    }
                     continue;
                 }
                 let Some(platter) = spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, PLATTER, ObjectKind::Meal, "Group Meal", at, yaw) else { continue };
@@ -921,8 +952,15 @@ fn meal_requests(
                 }
             }
             MealRequest::Quick => {
-                // (Something simple of what they know, for the time of day.)
-                let pick = recipes.as_ref().and_then(|d| {
+                // (The snack chosen, or one of those out of the fridge; failing those, something
+                // simple of what they know, for the time of day.)
+                commands.entity(me).remove::<MealPlan>();
+                let pick = plan.map(|p| p.0).or_else(|| {
+                    let d = recipes.as_ref()?;
+                    let snacks: Vec<usize> = (0..d.recipes.len()).filter(|&i| d.recipes[i].snack && !d.recipes[i].microwave).collect();
+                    if let Some(&i) = snacks.choose(&mut rand::rng()) {
+                        return Some(i);
+                    }
                     let mut options = cookable(d, sim, skills.level("Cooking"), known, meal_time(clock.hour_f(), clock.weekday()).0);
                     options.sort_by_key(|&i| d.recipes[i].level);
                     options.truncate(3);
@@ -945,7 +983,7 @@ fn meal_requests(
                 // (Any dish there is, but those made of what's only found.)
                 use rand::seq::IndexedRandom;
                 let pick = recipes.as_ref().and_then(|d| {
-                    let ok: Vec<usize> = (0..d.recipes.len()).filter(|&i| !d.recipes[i].ingredients.iter().any(|x| RARE.contains(&x.as_str()))).collect();
+                    let ok: Vec<usize> = (0..d.recipes.len()).filter(|&i| !d.recipes[i].snack && !d.recipes[i].ingredients.iter().any(|x| RARE.contains(&x.as_str()))).collect();
                     ok.choose(&mut rand::rng()).copied()
                 });
                 match pick {

@@ -99,6 +99,62 @@ pub struct PieMenu {
     /// Second-level menus (social categories), opened by `PIE_SUBMENU` options.
     pub submenus: Vec<(String, Vec<(String, ActionKind)>)>,
     pub at: Vec2,
+    /// What it's titled (a submenu's name: "Have Dinner").
+    pub title: String,
+}
+
+/// The fridge's (and microwave's) menu of snacks, as the game titles it.
+const QUICK_MEAL: &str = "Have Quick Meal";
+
+/// A recipe as the food menus list it: with what its ingredients cost, when they do.
+fn recipe_label(r: &s3bake::gamedata::RecipeInfo) -> String {
+    if r.cost > 0 { format!("{} (§{})", r.name, r.cost) } else { r.name.clone() }
+}
+
+/// The game's food menus, its fridge's and stove's: "Have Dinner" and "Serve Dinner", the
+/// recipes they know for the time of day made for one or for everyone (cooked at `stove`),
+/// "Serve Dessert", and "Have Quick Meal", the snacks (out of the fridge, or heated in the
+/// microwave; not for children, those).
+#[allow(clippy::too_many_arguments)]
+fn food_menus(
+    pie: &mut PieMenu,
+    options: &mut Vec<(String, ActionKind)>,
+    data: &s3bake::GameDataBaked,
+    sim: &Sim,
+    cooking: u32,
+    known: Option<&crate::meals::KnownRecipes>,
+    (hour, weekday): (f32, usize),
+    stove: Option<ActionKind>,
+    (fridge, microwave): (Option<ActionKind>, Option<ActionKind>),
+) {
+    use s3bake::gamedata::MEAL_DESSERT;
+    let (meal, word) = crate::meals::meal_time(hour, weekday);
+    if let Some(cook) = stove.filter(|_| ObjectKind::Stove.usable_by(sim.age)) {
+        for (title, m, one) in [(format!("Have {word}"), meal, true), (format!("Serve {word}"), meal, false), ("Serve Dessert".to_string(), MEAL_DESSERT, false)] {
+            let list: Vec<(String, ActionKind)> = crate::meals::cookable(data, sim, cooking, known, m)
+                .into_iter()
+                .map(|r| &data.recipes[r])
+                // (Desserts on their own menu.)
+                .filter(|r| (m == MEAL_DESSERT || r.meals & MEAL_DESSERT == 0) && if one { r.for_one } else { r.for_group })
+                .map(|r| (recipe_label(r), cook.clone()))
+                .collect();
+            if !list.is_empty() {
+                options.push((format!("{title} ›"), submenu_kind(pie.submenus.len())));
+                pie.submenus.push((title, list));
+            }
+        }
+    }
+    let child = sim.age == crate::sim::Age::Child;
+    let list: Vec<(String, ActionKind)> = data
+        .recipes
+        .iter()
+        .filter(|r| r.snack)
+        .filter_map(|r| Some((recipe_label(r), if r.microwave { microwave.clone().filter(|_| !child)? } else { fridge.clone()? })))
+        .collect();
+    if !list.is_empty() {
+        options.push((format!("{QUICK_MEAL} ›"), submenu_kind(pie.submenus.len())));
+        pie.submenus.push((QUICK_MEAL.to_string(), list));
+    }
 }
 
 /// Marks a pie option that opens `submenus[i]` (`ActionKind::GoHere(NaN, i)`).
@@ -721,6 +777,9 @@ pub fn open_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &st
     pie.root = Some(root);
     pie.actor = Some(actor);
     pie.options = options;
+    pie.title = title.to_string();
+    // (Where its submenus open too.)
+    pie.at = at;
 }
 
 /// How far along a ray it meets a box (none: it misses).
@@ -1114,6 +1173,35 @@ fn world_click(
                 if matches!(d.special, Special::WashDishes | Special::DropTrash | Special::ReadBook | Special::GetIngredients | Special::PrepFood | Special::PlaceMeal | Special::WatchTv) || (d.special == Special::Cook && d.name == "Take Out Dinner") || (d.special == Special::ReadPaper && d.name == "Read the Paper") {
                     continue;
                 }
+                // (A snack's on the fridge's Have Quick Meal menu, not apart from it.)
+                if obj.kind == ObjectKind::Fridge && d.name == "Grab a Snack" {
+                    continue;
+                }
+                // The fridge's food menus (cooked at the stove nearest it, or heated in the
+                // microwave), the stove's, and the microwave's quick meals.
+                if (obj.kind == ObjectKind::Fridge && d.special == Special::Cook) || (obj.kind == ObjectKind::Stove && d.special == Special::ServeMeal) || d.special == Special::Microwave {
+                    let (Ok((_, skills, known)), Some(ui)) = (writers.get(actor), opp_q.0.as_ref()) else { continue };
+                    let at = pickable.get(t).map_or(Vec3::ZERO, |p| p.1.translation());
+                    let nearest = |kind: ObjectKind, special: Special| -> Option<ActionKind> {
+                        let def = interactions_for(kind).iter().position(|d| d.special == special)?;
+                        pickable
+                            .iter()
+                            .filter(|(e, _, _, o, _)| o.is_some_and(|o| o.kind == kind) && !broken_q.contains(*e))
+                            .map(|(e, tf, ..)| (e, tf.translation()))
+                            .filter(|(_, p)| (p.y - at.y).abs() < 1.5)
+                            .min_by(|a, b| a.1.distance(at).total_cmp(&b.1.distance(at)))
+                            .map(|(e, _)| ActionKind::Object { target: e, def })
+                    };
+                    let here = ActionKind::Object { target: t, def: i };
+                    let (stove, fridge, microwave) = match obj.kind {
+                        ObjectKind::Fridge => (nearest(ObjectKind::Stove, Special::ServeMeal), Some(here), nearest(ObjectKind::Microwave, Special::Microwave)),
+                        ObjectKind::Stove => (Some(here), None, None),
+                        _ => (None, None, Some(here)),
+                    };
+                    let time = (opp_q.2.hour_f(), opp_q.2.weekday());
+                    food_menus(&mut pie, &mut options, &ui.data, actor_sim, skills.level("Cooking"), known, time, stove, (fridge, microwave));
+                    continue;
+                }
                 if d.special == Special::WriteNovel {
                     // Carry on with the book under way, or start one in a genre they can write.
                     let Ok((author, skills, _)) = writers.get(actor) else { continue };
@@ -1181,23 +1269,6 @@ fn world_click(
                 if d.special == Special::ToggleAlarm {
                     let label = if opp_q.6.on { "Turn Off Alarm" } else { "Set Alarm" };
                     options.push((label.to_string(), ActionKind::Object { target: t, def: i }));
-                    continue;
-                }
-                if d.special == Special::ServeMeal
-                    && let (Ok((_, skills, known)), Some(ui)) = (writers.get(actor), opp_q.0.as_ref())
-                {
-                    // The recipes they know for the time of day, and desserts.
-                    let (meal, word) = crate::meals::meal_time(opp_q.2.hour_f(), opp_q.2.weekday());
-                    for (label, m) in [(word, meal), ("Dessert", s3bake::gamedata::MEAL_DESSERT)] {
-                        let list: Vec<(String, ActionKind)> = crate::meals::cookable(&ui.data, actor_sim, skills.level("Cooking"), known, m)
-                            .into_iter()
-                            .map(|r| (format!("Cook: {}", ui.data.recipes[r].name), ActionKind::Object { target: t, def: i }))
-                            .collect();
-                        if !list.is_empty() {
-                            options.push((format!("Cook {label} ›"), submenu_kind(pie.submenus.len())));
-                            pie.submenus.push((format!("Cook {label}"), list));
-                        }
-                    }
                     continue;
                 }
                 if d.special == Special::ChangeClothes {
@@ -1332,8 +1403,9 @@ fn pie_buttons(
         }
     }
     let Some(idx) = chosen else { return };
-    let Some((label, kind)) = pie.options.get(idx).cloned() else { return };
+    let Some((mut label, kind)) = pie.options.get(idx).cloned() else { return };
     let actor = pie.actor;
+    let title = std::mem::take(&mut pie.title);
     close_pie(&mut commands, &mut pie);
     if let ActionKind::BuyReward(_) = kind {
         return;
@@ -1377,8 +1449,22 @@ fn pie_buttons(
     if let Some(a) = actor
         && let Ok(mut queue) = queues.get_mut(a)
     {
-        let recipe_choice = label.strip_prefix("Cook: ").or_else(|| label.strip_prefix("Grill: "))
+        let mut recipe_choice = label.strip_prefix("Cook: ").or_else(|| label.strip_prefix("Grill: "))
             .and_then(|n| ui_data.as_ref().and_then(|ui| ui.data.recipes.iter().position(|r| r.name == n)));
+        // A dish off the food menus: which, and whether for one ("Have Dinner") or everyone.
+        let mut for_one = false;
+        let snack = title == QUICK_MEAL;
+        let verb = if snack || title.starts_with("Have ") { Some("Have") } else { title.starts_with("Serve ").then_some("Serve") };
+        if let Some(verb) = verb
+            && let Some(ui) = ui_data.as_ref()
+        {
+            let name = label.split(" (§").next().unwrap_or_default().to_string();
+            if let Some(r) = ui.data.recipes.iter().position(|r| r.name == name && r.snack == snack) {
+                recipe_choice = Some(r);
+                for_one = verb == "Have" && !snack;
+                label = format!("{verb} {name}");
+            }
+        }
         // The fish chosen for a bowl.
         let fish_choice = label.strip_prefix("Place Fish: ")
             .and_then(|n| inventories.get(a).ok().and_then(|inv| inv.0.iter().find(|s| s.kind == crate::inventory::ItemKind::Fish && s.name == n)))
@@ -1394,6 +1480,7 @@ fn pie_buttons(
         action.canvas_choice = canvas_choice;
         action.fish_choice = fish_choice;
         action.recipe_choice = recipe_choice;
+        action.for_one = for_one;
         queue.push_player(action);
     }
 }
@@ -1506,7 +1593,7 @@ fn test_pie(mut commands: Commands, mut pie: ResMut<PieMenu>, time: Res<Time>, s
     }
     let (Ok(actor), Ok(w)) = (sel.single(), windows.single()) else { return };
     *done = true;
-    let options = ["Have Quick Meal", "Grab a Snack", "Bake Birthday Cake", "Cook Dinner ›", "Cook Dessert ›", "Clean"].iter().map(|s| (s.to_string(), ActionKind::EatHere)).collect();
+    let options = ["Have Dinner ›", "Serve Dinner ›", "Serve Dessert ›", "Have Quick Meal ›", "Bake Birthday Cake", "Clean"].iter().map(|s| (s.to_string(), ActionKind::EatHere)).collect();
     open_pie(&mut commands, &mut pie, Vec2::new(w.width() * 0.5, w.height() * 0.45), "Fridge", actor, options);
 }
 
