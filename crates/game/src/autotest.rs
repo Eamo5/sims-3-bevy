@@ -2626,7 +2626,19 @@ fn auto_reach(
         }
         let level = floor.map_or(1, |f| f.0);
         let to = o.use_point(tf);
-        if crate::nav::plan_route(grid, upper.as_deref(), exit.0, 1, to, level).is_some() {
+        // (As the game goes: some are reached from another side when the front can't be.)
+        let sides = matches!(o.kind, crate::interact::ObjectKind::Chair | crate::interact::ObjectKind::Stool | crate::interact::ObjectKind::Sofa | crate::interact::ObjectKind::HotTub);
+        let others: Vec<Vec2> = if sides {
+            [Vec3::new(o.center.x, 0.0, o.center.y - o.half.y - 0.45), Vec3::new(o.center.x + o.half.x + 0.45, 0.0, o.center.y), Vec3::new(o.center.x - o.half.x - 0.45, 0.0, o.center.y)]
+                .map(|p| {
+                    let w = tf.transform_point(p);
+                    Vec2::new(w.x, w.z)
+                })
+                .to_vec()
+        } else {
+            Vec::new()
+        };
+        if std::iter::once(to).chain(others).any(|p| crate::nav::plan_route(grid, upper.as_deref(), exit.0, 1, p, level).is_some()) {
             ok += 1;
         } else {
             bad += 1;

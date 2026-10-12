@@ -1622,11 +1622,14 @@ pub struct Action {
     pub canvas_choice: Option<u8>,
     pub fish_choice: Option<(String, u8)>,
     pub recipe_choice: Option<usize>,
+    /// Where the Sim came up to the object, when not at its front (a hot tub got into from a
+    /// side): where they get up and away from it again.
+    pub approach: Option<Vec2>,
 }
 
 impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
-        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, fish_choice: None, recipe_choice: None }
+        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, fish_choice: None, recipe_choice: None, approach: None }
     }
 }
 
@@ -2055,7 +2058,7 @@ pub(crate) fn run_actions(
                     used.0 = None;
                 }
                 if matches!(action.phase, Phase::Running(_)) {
-                    stand_up_at = Some(obj.use_point(otf));
+                    stand_up_at = Some(action.approach.unwrap_or_else(|| obj.use_point(otf)));
                 }
             }
             finished = true;
@@ -2157,12 +2160,14 @@ pub(crate) fn run_actions(
                     if let ActionKind::Jog { home } = &mut action.kind {
                         *home = from;
                     }
-                    // A chair pushed in at a table is reached from behind or beside it.
+                    // A chair pushed in at a table is reached from behind or beside it; a hot tub,
+                    // got into from any side, from whichever can be walked to (the Wolffs' roof
+                    // has its front over the edge).
                     let alternatives: Vec<Vec2> = match &action.kind {
                         ActionKind::Object { target, .. } => objects
                             .get(*target)
                             .ok()
-                            .filter(|(o, ..)| matches!(o.kind, ObjectKind::Chair | ObjectKind::Stool | ObjectKind::Sofa))
+                            .filter(|(o, ..)| matches!(o.kind, ObjectKind::Chair | ObjectKind::Stool | ObjectKind::Sofa | ObjectKind::HotTub))
                             .map(|(o, otf, ..)| {
                                 [Vec3::new(o.center.x, 0.0, o.center.y - o.half.y - 0.45), Vec3::new(o.center.x + o.half.x + 0.45, 0.0, o.center.y), Vec3::new(o.center.x - o.half.x - 0.45, 0.0, o.center.y)]
                                     .map(|p| {
@@ -2175,7 +2180,13 @@ pub(crate) fn run_actions(
                         _ => Vec::new(),
                     };
                     let routed = dest.and_then(|(d, l)| {
-                        plan_route(my_grid, my_upper, from, floor.0, d, l).or_else(|| alternatives.iter().find_map(|a| plan_route(my_grid, my_upper, from, floor.0, *a, l)))
+                        plan_route(my_grid, my_upper, from, floor.0, d, l).or_else(|| {
+                            alternatives.iter().find_map(|a| {
+                                let wp = plan_route(my_grid, my_upper, from, floor.0, *a, l)?;
+                                action.approach = Some(*a);
+                                Some(wp)
+                            })
+                        })
                     });
                     match routed {
                         Some(wp) => {
@@ -2229,6 +2240,24 @@ pub(crate) fn run_actions(
                                             r.0.push((target, now));
                                         }
                                     });
+                                }
+                                // (With no way even off the lot from where they stand (put out on a
+                                // ledge), they're set back on their feet where the lot's walks reach,
+                                // as the game resets a stuck Sim.)
+                                if let Some(out) = way_out
+                                    && plan_route(my_grid, my_upper, from, floor.0, out, 1).is_none()
+                                {
+                                    let reach = my_grid.reachable_from(out);
+                                    let near = (0..my_grid.h)
+                                        .flat_map(|z| (0..my_grid.w).map(move |x| (x, z)))
+                                        .filter(|&(x, z)| reach[z * my_grid.w + x])
+                                        .map(|(x, z)| my_grid.center_of(x, z))
+                                        .min_by(|a, b| a.distance(from).total_cmp(&b.distance(from)));
+                                    if let Some(p) = near {
+                                        info!("{} was stuck at {from} on floor {}: set back at {p}", sim.first, floor.0);
+                                        tf.translation = Vec3::new(p.x, ground(1, p.x, p.y), p.y);
+                                        commands.entity(me).insert(Floor(1));
+                                    }
                                 }
                             }
                             finished = true;
@@ -2570,7 +2599,7 @@ pub(crate) fn run_actions(
                                         notes.push(format!("Oh no! {} {what}. Repair it, or call the repairman.", upper_first(&the(&obj.name))));
                                     }
                                     if d.on_object {
-                                        stand_up_at = Some(obj.use_point(otf));
+                                        stand_up_at = Some(action.approach.unwrap_or_else(|| obj.use_point(otf)));
                                     }
                                     // (Its ending, played before they're up and away.)
                                     // (Then up out of the seat.)
@@ -3545,7 +3574,8 @@ fn autonomy(
     let others: Vec<(Entity, Vec3, Age, [f32; 6], Option<usize>)> = sims.iter().map(|s| (s.0, s.1.translation, s.7.age, s.2.0, s.9.map(|l| l.0))).collect();
     // A meal already out is eaten before anyone cooks another.
     let meal_out = objects.iter().any(|(_, o, ..)| o.kind == ObjectKind::Meal);
-    let bills_due = hh.is_some_and(|h| !h.bills.is_empty());
+    // (Bills to pay that the household can pay: left alone on their own when it can't.)
+    let bills_due = hh.is_some_and(|h| !h.bills.is_empty() && h.funds >= h.bills.iter().map(|b| b.amount).sum::<i64>());
     let mut rng = rand::rng();
     // Callers at the door, and who's already going to let them in.
     let greet = crate::social::social_index("Greet");
