@@ -84,6 +84,8 @@ fn build_pies(
     let Some(mut ui) = ui else { return };
     for (root, req) in &q {
         for (k, (label, (loc, slot))) in req.0.iter().zip(places(req.0.len())).enumerate() {
+            // (What opens more, as the game marks it: "Have Breakfast...".)
+            let label = &label.strip_suffix(" ›").map_or_else(|| label.clone(), |l| format!("{l}..."));
             let Some(mut b) = ui.find("HUDPieMenu", ITEM + slot).cloned() else { continue };
             let [x1, y1, x2, y2] = b.area;
             let bw = x2 - x1;
