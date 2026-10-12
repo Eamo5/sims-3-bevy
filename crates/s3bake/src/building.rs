@@ -598,8 +598,9 @@ pub fn bake_building(
     let mut stair_levels: HashMap<u64, u32> = HashMap::new();
     for o in objects {
         let (Some(cat), Some(mut p)) = (o.catalog, o.position) else { continue };
-        // Trees on the lot are drawn with the world's trees.
-        if cat.t != OBJD || !o.trees.is_empty() || o.speedtree.is_some() {
+        // Trees on the lot are drawn with the world's trees. (Nor the game's jigs: the unseen
+        // footprints it routes round, 21 of them about the Buckshots' pool table.)
+        if cat.t != OBJD || !o.trees.is_empty() || o.speedtree.is_some() || o.script.as_deref().is_some_and(|s| s.ends_with(".Jig")) {
             continue;
         }
         let mut rotation = o.rotation;
