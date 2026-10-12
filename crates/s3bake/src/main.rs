@@ -380,7 +380,7 @@ fn main() {
                             .map(|d| d.iter().map(|c| (c.objd, c.instance_name.clone())).collect())
                             .unwrap_or_default();
                     for o in b.map(|b| b.objects.as_slice()).unwrap_or(&[]) {
-                        println!("    {:?} {} at {:?} {}", o.objd, cat.get(&o.objd).map_or("?", |s| s.as_str()), o.position, o.script);
+                        println!("    {:?} {} at {:?} local {:?} rot {:?} level {} {}", o.objd, cat.get(&o.objd).map_or("?", |s| s.as_str()), o.position, o.local, o.rotation, o.level, o.script);
                     }
                 }
                 println!(

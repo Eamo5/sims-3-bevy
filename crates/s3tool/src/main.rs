@@ -497,6 +497,32 @@ fn main() {
         }
         return;
     }
+    if args[1] == "groundfit" {
+        // groundfit <world>...: lots with walls whose edges don't meet the world's terrain at any
+        // of their levels (the nearest level's middle difference more than a metre off the lot's
+        // own height: houseboats, platforms), with the world's height under their middle.
+        for path in &args[2..] {
+            let w = Package::open(path).unwrap();
+            let d = w.read(w.of_type(0x2AD195F2).next().unwrap()).unwrap();
+            let hm = s3formats::world::Heightmap::parse(&d).unwrap();
+            for e in w.of_type(0xD063545B) {
+                let Ok(l) = s3formats::world::LotInfo::parse(e.key.i, &w.read(e).unwrap()) else { continue };
+                let Some(b) = s3formats::lot::LotBuildData::load(&w, l.id) else { continue };
+                if b.walls.edges.is_empty() {
+                    continue;
+                }
+                let Some(t) = s3formats::lot::LotTerrain::load(&w, l.id) else { continue };
+                let Some((g, mid, dev)) = s3bake::ponds::ground_level(&t, &l, &hm) else { continue };
+                if (mid - l.corner[1]).abs() > 1.0 {
+                    let (s, c) = l.rotation.sin_cos();
+                    let (cx, cz) = (l.width as f32 * 0.5, l.depth as f32 * 0.5);
+                    let under = hm.sample(l.corner[0] + cx * c + cz * s, l.corner[2] - cx * s + cz * c);
+                    println!("{} {}: level {g} middle {mid:.2} vs corner {:.2} (deviation {dev:.2}), ground under its middle {under:.2}", path.rsplit('/').next().unwrap_or(""), l.internal_name, l.corner[1]);
+                }
+            }
+        }
+        return;
+    }
     if args[1] == "lotstoreys" {
         // lotstoreys <world>: per lot with walls, its ground level and foundation, its walls by
         // grid level, and the floored grid levels with their heights over the ground (median).
@@ -1514,6 +1540,46 @@ fn main() {
                 parts.push(format!("{:X}:{levels:?}", g & 0xF));
             }
             println!("{:28} {}", l.internal_name, parts.join(" "));
+        }
+        return;
+    }
+    if args[1] == "lotheights" {
+        // lotheights <world file> <lot name part>: per grid level, a map of the floored tiles'
+        // heights over the lot (0x0093D6D4 at the tile's corner) in quarter metres as a letter
+        // ('a' 0, 'e' 1 m, 'A' 6.5 m, '-' below 0, '+' 13 m up).
+        let w = Package::open(&args[2]).unwrap();
+        let lot = w.of_type(0xD063545B).filter_map(|e| s3formats::world::LotInfo::parse(e.key.i, &w.read(e).ok()?).ok()).find(|l| l.internal_name.contains(args[3].as_str())).expect("lot");
+        let t = s3formats::lot::LotTerrain::load(&w, lot.id).expect("terrain");
+        let grid_data = w.find(&s3pkg::ResourceKey::new(s3formats::lotdesign::T_GRID, s3formats::lotdesign::G_FLOOR_GRID, lot.id)).and_then(|e| w.read(e).ok()).expect("floor grid");
+        let grid = s3formats::lotdesign::Grid::parse(&grid_data).expect("floor grid");
+        println!("{} id {:016X}, {} levels, grid {}x{}", lot.internal_name, lot.id, t.levels.len(), grid.width, grid.depth);
+        for gl in 0..t.levels.len() as u32 {
+            let mut hs: Vec<f32> = Vec::new();
+            let mut rows = Vec::new();
+            for z in 0..grid.depth {
+                let row: String = (0..grid.width)
+                    .map(|x| match grid.quad(gl, x, z) {
+                        Some(q) if q.iter().any(|v| *v != 0) => {
+                            let h = t.at(gl as usize, x as usize, z as usize);
+                            hs.push(h);
+                            let k = (h * 4.0).round() as i32;
+                            if k < 0 { '-' } else if k < 26 { (b'a' + k as u8) as char } else if k < 52 { (b'A' + (k - 26) as u8) as char } else { '+' }
+                        }
+                        _ => '.',
+                    })
+                    .collect();
+                if row.chars().any(|c| c != '.') {
+                    rows.push(format!("{z:3} {row}"));
+                }
+            }
+            if hs.is_empty() {
+                continue;
+            }
+            hs.sort_by(f32::total_cmp);
+            println!("grid level {gl}: {} tiles, heights {:.2}..{:.2} (median {:.2})", hs.len(), hs[0], hs[hs.len() - 1], hs[hs.len() / 2]);
+            for r in rows {
+                println!("{r}");
+            }
         }
         return;
     }
