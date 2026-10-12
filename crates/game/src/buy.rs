@@ -805,8 +805,10 @@ fn buy_panel(
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     swatches: Res<crate::terrain_paint::Swatches>,
     renders: Res<crate::style::StyleRenders>,
+    live: Option<Res<crate::livehud::LiveHud>>,
 ) {
-    if !*spawned_toggle {
+    // (Again when the game's HUD comes up: its puck has the buy mode button.)
+    if !*spawned_toggle || live.as_ref().is_some_and(|l| l.is_added()) {
         *spawned_toggle = true;
         buy.dirty = true;
     }
@@ -816,6 +818,9 @@ fn buy_panel(
     buy.dirty = false;
     for p in &panel {
         commands.entity(p).despawn();
+    }
+    if !buy.active && live.is_some() {
+        return;
     }
     // (The game's own catalogue is up, with the object in hand's designs: only Create a Style
     // here, above it.)
