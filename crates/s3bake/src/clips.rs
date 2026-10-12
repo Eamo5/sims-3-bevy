@@ -317,6 +317,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_tv_watch_",
     "a2o_computer_game_loop",
     "a2o_computer_chess_type_loop",
+    // (Browsing the web, and practising writing.)
+    "a2o_computer_generic_type",
+    "a2o_computer_serious",
     "a2o_book_readBook_standing",
     "a2o_book_readBook_sitting",
     "c2o_book_readBook_sitting",

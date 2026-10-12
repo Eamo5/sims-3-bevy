@@ -970,12 +970,15 @@ static TV: [InteractionDef; 3] = [
 /// (The TV watched: from a seat facing it, or standing.)
 const WATCH_TV: InteractionDef = InteractionDef { autonomous: false, special: Special::WatchTv, ..def("Watch the TV", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 55.0], Pose::Stand) };
 const WATCH_TV_SEATED: InteractionDef = InteractionDef { on_object: true, pose: Pose::Sit, per_hour: [0.0, 0.0, 3.0, 0.0, 0.0, 55.0], ..WATCH_TV };
-static COMPUTER: [InteractionDef; 5] = [
+static COMPUTER: [InteractionDef; 7] = [
     def("Play Computer Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 60.0], Pose::Use),
     InteractionDef { autonomous: false, skill: Some("Writing"), special: Special::WriteNovel, ..def("Write Novel", 120.0, [0.0, 0.0, -4.0, 0.0, 0.0, 10.0], Pose::Use) },
     InteractionDef { autonomous: false, special: Special::FindJob, ..def("Find Job", 20.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::QuitJob, ..def("Quit Job", 5.0, N, Pose::Use) },
     InteractionDef { skill: Some("Logic"), ..def("Play Chess", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 40.0], Pose::Use) },
+    // (The game's `BrowseWeb` and `PracticeWriting`.)
+    def("Browse Web", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 35.0], Pose::Use),
+    InteractionDef { skill: Some("Writing"), ..def("Practice Writing", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 5.0], Pose::Use) },
 ];
 static CRIB: [InteractionDef; 1] = [InteractionDef {
     until_full: Some(ENERGY),
@@ -1203,6 +1206,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         }
         "Play Computer Games" => A::new(None, &["a2o_computer_game_loop1_x", "a2o_computer_game_loop2_x"]),
         "Play Chess" if kind == ObjectKind::Computer => A::new(None, &["a2o_computer_chess_type_loop_x"]),
+        "Browse Web" => A::new(None, &["a2o_computer_generic_type_loop1_x", "a2o_computer_generic_type_loop2_x", "a2o_computer_generic_type_breathe_x"]),
+        "Practice Writing" => A::new(None, &["a2o_computer_serious_Type_chinRub_x", "a2o_computer_serious_Type_templeTab_x", "a2o_computer_serious_ahHa_x"]),
         "Write Novel" | "Find a Job" | "Quit Job" => A::new(None, &["a2o_computer_chess_type_loop_x"]),
         "Dance" => A::new(None, &["a_dance_beg_", "a_dance_med_"]),
         "Read a Book" => A::new(None, &["a2o_bookshelf_getBook_Carry_x"]),
