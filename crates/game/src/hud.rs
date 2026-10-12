@@ -1362,15 +1362,9 @@ fn world_click(
                     continue;
                 }
                 if d.special == Special::FindJob {
-                    // Job listings: every career's entry-level position (part-time jobs for teens).
-                    let teen = actor_sim.age == crate::sim::Age::Teen;
-                    let can_work = !matches!(actor_sim.age, crate::sim::Age::Child) && !actor_sim.age.is_little();
-                    for (k, c) in crate::careers::careers().iter().enumerate().filter(|(_, c)| can_work && c.part_time == teen) {
-                        let l = &c.levels()[0];
-                        options.push((
-                            format!("Join {}: {} §{}/hr", c.name, l.title, l.hourly),
-                            ActionKind::JoinCareer { target: t, track: k },
-                        ));
+                    // The day's job listings (see `jobpaper`), for teens and up.
+                    if actor_sim.age == crate::sim::Age::Teen || actor_sim.age.is_grown() {
+                        options.push((d.name.to_string(), ActionKind::Object { target: t, def: i }));
                     }
                 } else if d.special != Special::EatMeal {
                     options.push((d.name.to_string(), ActionKind::Object { target: t, def: i }));

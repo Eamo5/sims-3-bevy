@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 75;
+pub const GAMEDATA_VERSION: u32 = 76;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -102,6 +102,9 @@ pub struct CareerInfo {
     pub hex: String,
     pub name: String,
     pub desc: String,
+    /// What the job listings say of it (`Text_JobOffer`: "The Hospital could always use...").
+    #[serde(default)]
+    pub offer: String,
     pub icon: String,
     pub part_time: bool,
     pub levels: Vec<CareerLevelInfo>,
@@ -1528,6 +1531,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             out.careers.push(CareerInfo {
                 name: text("Careers/CareerList", &name_key),
                 desc: text("Careers/CareerList", &get(&f, "CareerDescription")),
+                offer: text("Careers/CareerList", &get(&f, "Text_JobOffer")),
                 icon: get(&f, "DreamsAndPromisesIcon"),
                 part_time: category == "PartTime",
                 hex: name_key,

@@ -647,7 +647,12 @@ installation is unreachable.
   Sports included) with every level's title, pay, hours and workdays, and the part-time jobs
   (bookstore, grocery, spa, mausoleum) for teens. Careers branch where the game's do
   (Criminal into Thief or Evil, Music into Electric Rock or Symphonic, Law Enforcement into
-  Special Agent or Forensic Analyst): the promotion there asks which path to take.
+  Special Agent or Forensic Analyst): the promotion there asks which path to take. Jobs are
+  found as the game's are: "Find a Job" in the paper (three openings a day, the game's
+  tuning) or "Find Job" on the computer (five), the same all day, in the game's Available
+  Jobs dialog: the career and the job, its pay, hours and workdays (today marked), what the
+  listing says, the career's icon and the Sim's face, arrows through the openings, Accept
+  Career or Cancel, the game standing still meanwhile.
 - **Career uniforms**: Sims head off to work in their level's uniform from the game's own
   outfits (suits, chef's whites with toques, police blues with the peaked cap, lab coats,
   scrubs, fatigues, the henchman's mask) in the outfit's own colours and fabrics, with their

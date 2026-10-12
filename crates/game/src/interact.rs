@@ -844,7 +844,7 @@ static MEAL: [InteractionDef; 2] = [
 static MAILBOX: [InteractionDef; 1] = [InteractionDef { special: Special::PayBills, ..def("Pay Bills", 3.0, N, Pose::Use) }];
 static NEWSPAPER: [InteractionDef; 3] = [
     InteractionDef { special: Special::GetPaper, ..def("Read", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 45.0], Pose::Use) },
-    InteractionDef { special: Special::FindJob, ..def("Look for a Job", 10.0, N, Pose::Use) },
+    InteractionDef { special: Special::FindJob, ..def("Find a Job", 10.0, N, Pose::Use) },
     // (Read where it lay when there's no seat free: never on the menu.)
     READ_PAPER,
 ];
@@ -968,7 +968,7 @@ const WATCH_TV_SEATED: InteractionDef = InteractionDef { on_object: true, pose: 
 static COMPUTER: [InteractionDef; 5] = [
     def("Play Computer Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 60.0], Pose::Use),
     InteractionDef { autonomous: false, skill: Some("Writing"), special: Special::WriteNovel, ..def("Write Novel", 120.0, [0.0, 0.0, -4.0, 0.0, 0.0, 10.0], Pose::Use) },
-    InteractionDef { autonomous: false, special: Special::FindJob, ..def("Find a Job", 20.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::FindJob, ..def("Find Job", 20.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::QuitJob, ..def("Quit Job", 5.0, N, Pose::Use) },
     InteractionDef { skill: Some("Logic"), ..def("Play Chess", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 40.0], Pose::Use) },
 ];
@@ -2656,7 +2656,11 @@ pub(crate) fn run_actions(
                                     };
                                     match d.special {
                                         // (Getting out of the pool is the swim module's.)
-                                        Special::FindJob | Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport | Special::WashDishes | Special::DropTrash | Special::ReadBook | Special::WatchTv => {}
+                                        Special::FindJob => {
+                                            // (The day's openings, in the game's listings.)
+                                            commands.insert_resource(crate::jobpaper::JobHunt { sim: me, computer: obj.kind == ObjectKind::Computer });
+                                        }
+                                        Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport | Special::WashDishes | Special::DropTrash | Special::ReadBook | Special::WatchTv => {}
                                         Special::GetBook => {
                                             commands.entity(me).insert(crate::surroundings::ReadSomewhere(*target));
                                         }

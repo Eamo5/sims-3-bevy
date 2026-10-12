@@ -43,6 +43,8 @@ pub struct CareerTrack {
     pub skill: &'static str,
     /// The game's career icon.
     pub icon: &'static str,
+    /// What the job listings say of it ("{0.SimFirstName}" for the Sim looking).
+    pub offer: &'static str,
     /// A teen's after-school job.
     pub part_time: bool,
     /// The ways up the career: each its levels from the first, sharing those before the career
@@ -174,7 +176,7 @@ pub fn install_tracks(data: &s3bake::GameDataBaked) {
                 .collect();
             let branch_at = c.levels.iter().filter(|l| l.branch != "Base").map(|l| l.level as usize - 1).min().filter(|_| paths.len() > 1);
             let skill = c.levels.iter().find_map(|l| l.skills.first().cloned()).unwrap_or_else(|| default_skill(&c.hex).to_string());
-            CareerTrack { name: leak(c.name.clone()), skill: leak(skill), icon: leak(c.icon.clone()), part_time: c.part_time, paths, branch_at }
+            CareerTrack { name: leak(c.name.clone()), skill: leak(skill), icon: leak(c.icon.clone()), offer: leak(c.offer.clone()), part_time: c.part_time, paths, branch_at }
         })
         .filter(|t| t.paths.iter().all(|p| !p.levels.is_empty()))
         .collect();
@@ -209,6 +211,7 @@ impl BuiltinTrack {
             name: self.name,
             skill: self.skill,
             icon: "",
+            offer: "",
             part_time: false,
             paths: vec![CareerPath {
                 branch: "Base",
