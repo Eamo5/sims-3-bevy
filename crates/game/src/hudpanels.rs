@@ -363,7 +363,7 @@ fn career_panel(
         Some(j) => {
             let l = j.info();
             let path = j.branch_label().map_or(String::new(), |b| format!(" ({b})"));
-            (format!("{}{path}", l.title), format!("§{}/hour", l.hourly), l.start, l.end, l.days, j.performance)
+            (format!("{}{path}", l.title_for(sim.female)), format!("§{}/hour", l.hourly), l.start, l.end, l.days, j.performance)
         }
         None => {
             let g = grades.copied().unwrap_or_default();
@@ -439,7 +439,7 @@ fn career_panel(
     if let Some(m) = s.id(CAREER_PERF_TIP) {
         let t = match job {
             Some(j) => {
-                let next = j.levels().get(j.level + 1).map_or("the top of the career".to_string(), |n| n.title.to_string());
+                let next = j.levels().get(j.level + 1).map_or("the top of the career".to_string(), |n| n.title_for(sim.female).to_string());
                 format!("Performance: {:+.0}\nRaise it with {} skill and a good mood at work, towards {next}.\nWorking: {}", j.performance, j.career().skill, j.tone.label(j.career().skill))
             }
             None => format!("Grade: {}\n{}", grades.copied().unwrap_or_default().letter(), homework.map_or_else(|| "No unfinished homework.".into(), |h| format!("Homework: {}% complete", h.0 as u32))),

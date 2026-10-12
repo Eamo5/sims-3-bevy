@@ -3276,7 +3276,7 @@ pub(crate) fn run_actions(
                                         "{} retired from the {} career after years as a {}, and will be paid a pension of §{daily} a day.",
                                         sim.first,
                                         j.career().name,
-                                        j.info().title
+                                        j.info().title_for(sim.female)
                                     ));
                                     commands.entity(me).remove::<Job>().insert(crate::careers::Pension { daily, paid: clock.day() });
                                 }

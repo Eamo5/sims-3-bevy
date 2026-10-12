@@ -26,6 +26,8 @@ impl Plugin for CareersPlugin {
 #[derive(Clone, Copy)]
 pub struct CareerLevel {
     pub title: &'static str,
+    /// A woman's title, where the game has its own ("Paper Girl"; empty where it's the same).
+    pub title_female: &'static str,
     /// Pay per hour worked.
     pub hourly: i64,
     pub start: f32,
@@ -91,7 +93,7 @@ impl crate::dialog::Questions {
                 // (The path's name, as the game's buttons have it; the job along it below.)
                 Some(crate::dialog::Answer {
                     label: p.label(),
-                    detail: format!("{}: §{} an hour, {} to {}", l.title, l.hourly, hour_label(l.start), hour_label(l.end)),
+                    detail: format!("{}: §{} an hour, {} to {}", l.title_for(sim.female), l.hourly, hour_label(l.start), hour_label(l.end)),
                     icon: String::new(),
                 })
             })
@@ -113,7 +115,14 @@ fn career_path_answers(mut answers: MessageReader<crate::dialog::Answered>, mut 
         let crate::dialog::Question::CareerPath { sim, paths } = &a.about else { continue };
         let (Ok((s, mut job)), Some(&p)) = (jobs.get_mut(*sim), paths.get(a.answer)) else { continue };
         job.branch = p;
-        notes.push(format!("{} is now a {} on the {} path.", s.first, job.info().title, job.path().label()));
+        notes.push(format!("{} is now a {} on the {} path.", s.first, job.info().title_for(s.female), job.path().label()));
+    }
+}
+
+impl CareerLevel {
+    /// The title for a man or a woman, as the game localizes it for the Sim.
+    pub fn title_for(&self, female: bool) -> &'static str {
+        if female && !self.title_female.is_empty() { self.title_female } else { self.title }
     }
 }
 
@@ -164,6 +173,7 @@ pub fn install_tracks(data: &s3bake::GameDataBaked) {
                         let start = l.start;
                         levels.push(CareerLevel {
                             title: leak(if l.title.is_empty() { format!("Level {}", l.level) } else { l.title.clone() }),
+                            title_female: leak(if l.title_female == l.title { String::new() } else { l.title_female.clone() }),
                             hourly: l.hourly.round() as i64,
                             start,
                             end: (start + l.hours) % 24.0,
@@ -215,7 +225,7 @@ impl BuiltinTrack {
             part_time: false,
             paths: vec![CareerPath {
                 branch: "Base",
-                levels: self.levels.iter().map(|&(title, hourly, start, end)| CareerLevel { title, hourly, start, end, days: self.days, outfits: [""; 4] }).collect(),
+                levels: self.levels.iter().map(|&(title, hourly, start, end)| CareerLevel { title, title_female: "", hourly, start, end, days: self.days, outfits: [""; 4] }).collect(),
             }],
             branch_at: None,
         }
@@ -643,7 +653,7 @@ fn work_schedule(
                     notes.push(format!("{} was promoted and got a §{bonus} bonus! The {} career branches here.", sim.first, track.name));
                     questions.ask_career_path(e, sim, &job);
                 } else {
-                    notes.push(format!("{} was promoted to {} and got a §{bonus} bonus!", sim.first, job.info().title));
+                    notes.push(format!("{} was promoted to {} and got a §{bonus} bonus!", sim.first, job.info().title_for(sim.female)));
                 }
                 life.write(LifeEvent::new(e, LifeEventKind::Promoted));
             } else if job.performance <= -100.0 {
@@ -654,7 +664,7 @@ fn work_schedule(
                 } else {
                     job.level -= 1;
                     job.performance = 0.0;
-                    notes.push(format!("{} was demoted to {}.", sim.first, job.info().title));
+                    notes.push(format!("{} was demoted to {}.", sim.first, job.info().title_for(sim.female)));
                     life.write(LifeEvent::new(e, LifeEventKind::Demoted));
                 }
             }

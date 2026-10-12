@@ -380,7 +380,7 @@ fn tab_content(
                         row.spawn(crate::icons::icon_bundle(h, 36.0));
                     }
                     let path = j.branch_label().map_or(String::new(), |b| format!(" · {b} path"));
-                    row.spawn(text(format!("{} — {}\nLevel {} of {}{path}", track.name, lvl.title, j.level + 1, j.levels().len()), 15.0, Color::WHITE));
+                    row.spawn(text(format!("{} — {}\nLevel {} of {}{path}", track.name, lvl.title_for(sim.female), j.level + 1, j.levels().len()), 15.0, Color::WHITE));
                 });
                 let days: Vec<&str> = (0..7).filter(|d| lvl.days & (1 << d) != 0).map(|d| DAYS[d]).collect();
                 p.spawn(text(
@@ -397,7 +397,7 @@ fn tab_content(
                 let next = match j.levels().get(j.level + 1) {
                     // At the branch, the next step depends on the path taken.
                     Some(_) if track.branch_at == Some(j.level + 1) => {
-                        let ways: Vec<String> = track.paths.iter().map(|p| format!("{} ({})", p.levels[j.level + 1].title, p.label())).collect();
+                        let ways: Vec<String> = track.paths.iter().map(|p| format!("{} ({})", p.levels[j.level + 1].title_for(sim.female), p.label())).collect();
                         format!("Next: {}", ways.join(" or "))
                     }
                     Some(n) => format!("Next: {} (§{} an hour)", n.title, n.hourly),

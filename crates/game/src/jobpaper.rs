@@ -156,7 +156,7 @@ fn fill(commands: &mut Commands, ui: &UiAssets, game_ui: Option<&mut crate::icon
     let level = &track.levels()[0];
     let pay = ui.localize("Ui/Caption/CareerSelection:Pay").unwrap_or_else(|| "{0.Money}/hour".into()).replace("{0.Money}", &format!("§{}", level.hourly));
     let desc = track.offer.replace("{0.SimFirstName}", &sim.first);
-    let words = [track.name.to_string(), level.title.to_string(), pay, format!("{} - {}", clock_label(level.start), clock_label(level.end)), desc];
+    let words = [track.name.to_string(), level.title_for(sim.female).to_string(), pay, format!("{} - {}", clock_label(level.start), clock_label(level.end)), desc];
     for (e, t) in l.texts.iter().zip(words) {
         if let Some(e) = e {
             commands.entity(*e).insert(Text::new(t));
@@ -209,7 +209,7 @@ fn listing_buttons(
                     "{} joined the {} career as a {} (§{}/hr, {}–{}).",
                     sim.first,
                     j.career().name,
-                    info.title,
+                    info.title_for(sim.female),
                     info.hourly,
                     crate::interact::hour_label(info.start),
                     crate::interact::hour_label(info.end)

@@ -1262,6 +1262,10 @@ fn world_click(
                 if d.special == Special::EmptyTrash && !trash_q.get(t).is_ok_and(|f| f.0 > 0) {
                     continue;
                 }
+                // (A job quit only by someone who has one.)
+                if d.special == Special::QuitJob && jobs_q.get(actor).ok().flatten().is_none() {
+                    continue;
+                }
                 // (The bills paid only when there are some in the mailbox, as the game offers.)
                 if d.special == Special::PayBills && opp_q.4.as_ref().is_none_or(|h| h.bills.is_empty()) {
                     continue;
