@@ -2583,7 +2583,12 @@ fn auto_gate_route(
         let (Some(b), Some(grid), Some(upper)) = (building.as_deref(), grid.as_deref(), upper.as_deref()) else { return };
         *done = true;
         let n: Vec<f32> = v.split(',').filter_map(|s| s.trim().parse().ok()).collect();
-        let (from, to) = (b.world(n[0], n[1], 0.0).xz(), b.world(n[3], n[4], 0.0).xz());
+        // (NAV_CHECK_WORLD=1: the points in the world's coordinates, as the logs give them.)
+        let (from, to) = if std::env::var("NAV_CHECK_WORLD").is_ok() {
+            (Vec2::new(n[0], n[1]), Vec2::new(n[3], n[4]))
+        } else {
+            (b.world(n[0], n[1], 0.0).xz(), b.world(n[3], n[4], 0.0).xz())
+        };
         let (l0, l1) = (n[2] as u8, n[5] as u8);
         let grid_of = |l: u8| if l <= 1 { Some(grid) } else { upper.grids.get(&l) };
         for s in &upper.stairs {

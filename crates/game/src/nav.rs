@@ -116,6 +116,37 @@ fn plan_route_depth(
                 return Some(w);
             }
         }
+        // (Or down a floor and up again by other stairs, or up and down: two parts of a storey
+        // joined only by the floor below or above it.)
+        if depth < 4
+            && let Some(u) = upper
+        {
+            let mut ways: Vec<(Vec2, Vec2, u8, (f32, f32))> = u
+                .stairs
+                .iter()
+                .filter_map(|s| {
+                    if s.upper == from_level && s.level < from_level {
+                        Some((s.top, s.bottom, s.level, (s.y1, s.y0)))
+                    } else if s.level == from_level && s.upper > from_level {
+                        Some((s.bottom, s.top, s.upper, (s.y0, s.y1)))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            ways.sort_by(|a, b| a.0.distance(from).total_cmp(&b.0.distance(from)));
+            for (entry, exit, level, ys) in ways {
+                let Some(first) = grid.find_path(from, entry).filter(|p| p.last().is_some_and(|q| q.distance(entry) < 0.8)) else { continue };
+                let Some(rest) = plan_route_depth(ground, upper, exit, level, to, to_level, depth + 2) else { continue };
+                if !rest.last().is_some_and(|w| w.level == to_level && w.p.distance(to) < 1.6) {
+                    continue;
+                }
+                let mut w: Vec<Waypoint> = first.into_iter().map(|p| Waypoint { p, level: from_level, climb: None }).collect();
+                w.push(Waypoint { p: exit, level, climb: Some(ys) });
+                w.extend(rest);
+                return Some(w);
+            }
+        }
         let pts = grid.find_path(from, to)?;
         return Some(pts.into_iter().map(|p| Waypoint { p, level: from_level, climb: None }).collect());
     }
