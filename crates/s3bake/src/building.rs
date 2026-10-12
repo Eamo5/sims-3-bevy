@@ -338,6 +338,50 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
                         }
                     }
                 }
+                // (A floor over the level above the ground is one floor, on a foundation or not as
+                // most of it is: one flat floor out over a hillside stands higher over the ground
+                // at its foot than up the slope (Isla Paradiso's Ichtaca house), and isn't a
+                // storey up there.)
+                let (gw, gd) = (g.width.min(w + 1), g.depth.min(d + 1));
+                let up_floor = |x: u32, z: u32| mask_at(gi as u32 + 1, x, z).is_some() && gi + 1 < t.levels.len();
+                let mut seen: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
+                for x in 0..gw {
+                    for z in 0..gd {
+                        if seen.contains(&(x, z)) || !up_floor(x, z) {
+                            continue;
+                        }
+                        let mut part = vec![(x, z)];
+                        seen.insert((x, z));
+                        let mut i = 0;
+                        while i < part.len() {
+                            let (px, pz) = part[i];
+                            i += 1;
+                            let h = t.at(gi + 1, px as usize, pz as usize);
+                            for (dx, dz) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                                let (nx, nz) = (px as i32 + dx, pz as i32 + dz);
+                                if nx < 0 || nz < 0 || nx as u32 >= gw || nz as u32 >= gd {
+                                    continue;
+                                }
+                                let (nx, nz) = (nx as u32, nz as u32);
+                                if !seen.contains(&(nx, nz)) && up_floor(nx, nz) && (t.at(gi + 1, nx as usize, nz as usize) - h).abs() < 0.3 {
+                                    seen.insert((nx, nz));
+                                    part.push((nx, nz));
+                                }
+                            }
+                        }
+                        let on = part.iter().filter(|c| founded.contains(c)).count();
+                        // (Only where it's split: a floor wholly on or off a foundation stays so.)
+                        if on > 0 && on < part.len() {
+                            if on * 2 >= part.len() {
+                                founded.extend(part.iter().copied());
+                            } else {
+                                for c in &part {
+                                    founded.remove(c);
+                                }
+                            }
+                        }
+                    }
+                }
                 let on_foundation = |x: u32, z: u32| founded.contains(&(x, z));
                 // (Higher up, a tile over a floor is a storey up from it (the Koffis' second floor
                 // over their foundation room and their third over the rooms beside it share a
