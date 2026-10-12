@@ -434,6 +434,7 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "c2o_videoGame_sitFloor_",
     "a2o_Vrgoggles_",
     "a2o_stuffedAnimal_play_loop",
+    "a2o_stuffedAnimal_play_start",
     "c2o_stuffedAnimal_play_loop",
     "p2o_stuffedAnimal_play_loop",
     "c2o_stuffedAnimal_play_start_normal",

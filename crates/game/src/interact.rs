@@ -1371,7 +1371,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         ),
         "Turn On" | "Turn Off" if kind == ObjectKind::Sprinkler => A::new(None, &["a2o_gardening_crouch_pullWeeds_x"]),
         "Play with Toy" => A::new(
-            Some("a2o_stuffedAnimal_play_start_normal_x"),
+            Some("a2o_stuffedAnimal_play_start_x"),
             &["a2o_stuffedAnimal_play_loop1_x", "a2o_stuffedAnimal_play_loop2_x", "a2o_stuffedAnimal_play_loop3_x"],
         ),
         "Explore Virtual Worlds" => A::new(
@@ -4102,6 +4102,33 @@ mod tests {
         for (class, names) in &by_class {
             println!("{class}: {} ({})", names.len(), names.iter().take(4).cloned().collect::<Vec<_>>().join(", "));
         }
+    }
+}
+
+#[cfg(test)]
+mod clip_names {
+    /// Every animation clip the game's code names is one the bake keeps (its name starts with
+    /// one of `CLIP_PREFIXES`); otherwise it silently never plays.
+    #[test]
+    fn every_clip_named_is_baked() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut missing = Vec::new();
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let src = std::fs::read_to_string(&path).unwrap();
+            for lit in src.split('"').skip(1).step_by(2) {
+                let clip = ["a2o_", "a2a_", "c2o_", "p2o_", "b2o_", "a2b_", "a2p_", "a_", "c_", "p_"].iter().any(|p| lit.starts_with(p))
+                    && lit.len() > 6
+                    && lit.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                if clip && !s3bake::clips::CLIP_PREFIXES.iter().any(|p| lit.starts_with(p)) {
+                    missing.push(format!("{}: {lit}", path.file_name().unwrap().to_string_lossy()));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "clips named but not baked: {missing:?}");
     }
 }
 
