@@ -256,6 +256,9 @@ impl ObjectKind {
             Self::Buffet
         } else if has("cookingobjects.picnicbasket") {
             Self::PicnicBasket
+        } else if s.ends_with("cookingobjects.cake") {
+            // (The birthday cake bought in buy mode, as the game sells it.)
+            Self::BirthdayCake
         } else if (has("electronics.phonetable") || has("electronics.phonewall")) && !has("handset") {
             Self::Phone
         } else if has("miscellaneous.bubblebath") {
