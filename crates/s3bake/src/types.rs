@@ -10,7 +10,7 @@ pub const BAKE_VERSION: u32 = 4;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
 pub const CAS_VERSION: u32 = 10;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 61;
+pub const WORLD_VERSION: u32 = 63;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -442,11 +442,26 @@ impl LotBuildingBaked {
     /// Whether a point (lot-local, with its height) is down in the basement: well below the
     /// ground, over one of its floor tiles (not in a pool, as a pool's ladder is).
     pub fn in_basement(&self, local: [f32; 2], y: f32) -> bool {
-        self.basement.is_some()
-            && y < self.levels[0] - 1.0
-            && local[0] >= 0.0
-            && local[1] >= 0.0
-            && self.floors.iter().any(|f| f.level == 0 && f.y.is_some() && f.x == local[0] as u16 && f.z == local[1] as u16)
+        // (Well under the ground floor: a walk-out lower floor's is over the lot's own level. On
+        // one of its tiles; or by a wall beside one at its floor's height, as its doors and
+        // windows are (a wide one's origin half a tile out from the wall), not out in a garden
+        // a storey over it.)
+        if self.basement.is_none() || y >= self.levels.get(1).copied().unwrap_or(self.levels[0]) - 1.5 {
+            return false;
+        }
+        let tile = |dx: f32, dz: f32| {
+            let (x, z) = (local[0] + dx, local[1] + dz);
+            (x >= 0.0 && z >= 0.0).then_some((x as u16, z as u16))
+        };
+        let own = tile(0.0, 0.0);
+        let beside: Vec<(u16, u16)> = [(0.6, 0.0), (-0.6, 0.0), (0.0, 0.6), (0.0, -0.6)].iter().filter_map(|&(dx, dz)| tile(dx, dz)).collect();
+        self.floors.iter().any(|f| {
+            f.level == 0
+                && f.y.is_some_and(|fy| {
+                    let at = (f.x, f.z);
+                    Some(at) == own || (beside.contains(&at) && (y - fy).abs() < 0.5)
+                })
+        })
     }
 
     /// The storey an object stands on: the basement's (0), else from the ground floor (1) up.

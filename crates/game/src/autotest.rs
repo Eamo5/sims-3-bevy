@@ -2484,9 +2484,11 @@ fn auto_gate_route(
                 info!("nav map: obstacle {e:?} {} at {l} half {} offset {} barrier {barrier}", names.get(e).map_or("-".to_string(), |o| o.name.clone()), ob.half, ob.center_offset);
             }
         }
-        let g = if level <= 1 { Some(grid) } else { upper.as_deref().and_then(|u| u.grids.get(&level)) };
+        // (Floor 0 a basement's own grid, where there's one.)
+        let own = upper.as_deref().and_then(|u| u.grids.get(&level)).filter(|_| level != 1);
+        let g = if level <= 1 && own.is_none() { Some(grid) } else { own };
         // (On the ground floor, 'o': a cell reached from the way off the lot.)
-        let reach = (level <= 1).then(|| exit.as_deref().map(|e| grid.reachable_from(e.0))).flatten();
+        let reach = (level <= 1 && own.is_none()).then(|| exit.as_deref().map(|e| grid.reachable_from(e.0))).flatten();
         if let Some(g) = g {
             // (Rows along the lot's z, a character a quarter metre; NAV_MAP_STEP=<metres> for
             // coarser.)

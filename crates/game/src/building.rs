@@ -1976,8 +1976,12 @@ pub fn spawn_building(
         // (From the floors at either end where they stand at their own heights (a split-level's,
         // a hillside's), or up from the ground where it is.)
         let tile_y = |level: u8, p: Vec2| active.floor_heights.get(&(level, p.x.floor() as i32, p.y.floor() as i32)).copied();
+        // (From storey 0: a basement's floor where its foot is in the basement, else the
+        // ground, as porch steps beside a basement or a walk-out floor go.)
+        let in_basement = |p: Vec2| b.basement.is_some() && b.floors.iter().any(|f| f.level == 0 && f.y.is_some() && f.x as i32 == p.x.floor() as i32 && f.z as i32 == p.y.floor() as i32);
+        let from_basement = s.bottom == 0 && (in_basement(bottom - d * 0.5) || in_basement(bottom + d * 0.5));
         let y0 = tile_y(s.bottom, bottom - d * 0.5)
-            .or_else(|| (s.bottom == 0).then(|| b.basement.or_else(|| b.ground_at(bottom.x, bottom.y))).flatten())
+            .or_else(|| (s.bottom == 0).then(|| if from_basement { b.basement } else { b.ground_at(bottom.x, bottom.y) }).flatten())
             .unwrap_or(level_y(s.bottom));
         let y1 = tile_y(s.top, bottom + d * (run as f32 + 0.5)).unwrap_or(level_y(s.top));
         if run == 0 || width == 0 || y1 - y0 < 0.1 {
@@ -1994,7 +1998,7 @@ pub fn spawn_building(
             let e = spawn_parts(commands, &parts, Transform { translation: active.world(at.x, at.y, y), rotation: p.rotation, scale: if stretched { p.scale } else { Vec3::ONE } });
             place(commands, e, neighbor, s.bottom);
         }
-        if (s.bottom >= 1 || b.basement.is_some()) && (neighbor.is_none() || visit) {
+        if (s.bottom >= 1 || from_basement) && (neighbor.is_none() || visit) {
             let top = bottom + d * run as f32;
             links.push((s.bottom, s.top, bottom - d * 0.45, top + d * 0.45, y0, y1));
         }
@@ -2044,8 +2048,13 @@ pub fn spawn_building(
         for o in b.objects.iter().filter(|o| o.script.to_ascii_lowercase().contains("elevator")) {
             let q = Quat::from_xyzw(o.rotation[0], o.rotation[1], o.rotation[2], o.rotation[3]).normalize();
             let f = rot.inverse() * (q * Vec3::Z);
-            let door = Vec2::from(o.local) + Vec2::new(f.x, f.z).normalize_or_zero() * 0.9;
-            let key = ((o.local[0] * 2.0).round() as i32, (o.local[1] * 2.0).round() as i32);
+            let fwd = Vec2::new(f.x, f.z).normalize_or_zero();
+            // (A 2x2 car, its origin at the middle of the tile at its doors' left: the shaft is
+            // its footprint's middle, whichever way each floor's doors face (the Wolffs' face
+            // opposite ways on their two floors).)
+            let middle = Vec2::from(o.local) - fwd * 0.5 + Vec2::new(fwd.y, -fwd.x) * 0.5;
+            let door = middle + fwd * 1.4;
+            let key = ((middle.x * 2.0).round() as i32, (middle.y * 2.0).round() as i32);
             let e = shafts.entry(key).or_default();
             e.0.push((b.object_storey(o), door));
             e.1 |= o.script.contains("TubeElevator");

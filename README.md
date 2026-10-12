@@ -39,7 +39,8 @@ installation is unreachable.
   lot makes them: the Goths' manor stands high on its slope), every storey where the game has it
   (houses with or without foundations, garages beside them, split-levels out over a hillside
   as Cormorant's, basements: storey 0 below the ground floor, its stairs, walls and rooms, the
-  ground open over it to look in, Page Down to it), staircases built from the game's
+  ground open over it to look in, Page Down to it; a hillside house's walk-out lower floor dug
+  into the slope, as the Wolffs' garage and den, likewise), staircases built from the game's
   own stair pieces and railings (as wide as the builders made them), and the house's own
   furniture; the ground never shows through a floor; nearby lots are shown in full detail with
   the game's roofs, distant ones as the game's pre-rendered imposters.

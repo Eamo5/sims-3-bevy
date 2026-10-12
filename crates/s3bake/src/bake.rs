@@ -966,6 +966,35 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
                 }
             }
         }
+        // (Nor through a walk-out lower floor, its storey 0 mostly at the ground's own height and
+        // walled up to the floor over it: there the terrain goes just under it, the hill dug
+        // away inside its walls. A basement's under the garden, the ground well over it, keeps
+        // its ground.)
+        let low: HashMap<(i32, i32), f32> = b.floors.iter().filter(|f| f.level == 0).filter_map(|f| Some(((f.x as i32, f.z as i32), f.y?))).collect();
+        if low.is_empty() {
+            continue;
+        }
+        let (s, c) = l.rotation.sin_cos();
+        let at_grade = low
+            .iter()
+            .filter(|((x, z), y)| {
+                let (wx, wz) = (l.corner[0] + (*x as f32 + 0.5) * c + (*z as f32 + 0.5) * s, l.corner[2] - (*x as f32 + 0.5) * s + (*z as f32 + 0.5) * c);
+                (heightmap.sample(wx, wz) - **y).abs() < 0.5
+            })
+            .count();
+        if at_grade * 2 < low.len() {
+            continue;
+        }
+        for pz in z0..=z1 {
+            for px in x0..=x1 {
+                let (lx, lz) = to_local(px as f32, pz as f32);
+                let Some(y) = [(-0.5, -0.5), (0.5, -0.5), (-0.5, 0.5), (0.5, 0.5)].iter().filter_map(|(u, v)| low.get(&((lx + u).floor() as i32, (lz + v).floor() as i32)).copied()).reduce(f32::min) else { continue };
+                let k = pz * heightmap.width + px;
+                if heightmap.data[k] as f32 * heightmap.scale > y - 0.06 {
+                    heightmap.data[k] = ((y - 0.06) / heightmap.scale).floor().clamp(0.0, 65535.0) as u16;
+                }
+            }
+        }
     }
 
     // Paving on a lot follows its ground (where it dips, the paving goes down with it).
