@@ -1497,6 +1497,46 @@ fn main() {
         std::fs::write(&args[4], d).unwrap();
         return;
     }
+    if args[1] == "wallgroups" {
+        // wallgroups <world file>: per lot, the edges in each wall-graph group (0x312E7545:
+        // 0x2E7B1A..1F) and their levels.
+        let w = Package::open(&args[2]).unwrap();
+        for e in w.of_type(0xD063545B) {
+            let Ok(l) = s3formats::world::LotInfo::parse(e.key.i, &w.read(e).unwrap()) else { continue };
+            let mut parts = Vec::new();
+            for g in 0x2E7B1Au32..=0x2E7B1F {
+                let Some(d) = w.find(&s3pkg::ResourceKey::new(0x312E7545, g, l.id)).and_then(|e| w.read(e).ok()) else { continue };
+                let Ok(graph) = s3formats::lot::WallGraph::parse(&d) else { parts.push(format!("{g:X}:?{}b", d.len())); continue };
+                let mut levels = BTreeMap::<u32, usize>::new();
+                for s in graph.segments() {
+                    *levels.entry(s.2).or_default() += 1;
+                }
+                parts.push(format!("{:X}:{levels:?}", g & 0xF));
+            }
+            println!("{:28} {}", l.internal_name, parts.join(" "));
+        }
+        return;
+    }
+    if args[1] == "lotres" {
+        // lotres <world file> [lot name part]: each lot's own resources (instance = the lot's
+        // id): type, group and size; with no name, a tally of type:group over every lot.
+        let w = Package::open(&args[2]).unwrap();
+        let lots: Vec<s3formats::world::LotInfo> = w.of_type(0xD063545B).filter_map(|e| s3formats::world::LotInfo::parse(e.key.i, &w.read(e).ok()?).ok()).collect();
+        let ids: std::collections::HashMap<u64, String> = lots.iter().map(|l| (l.id, l.internal_name.clone())).collect();
+        let mut tally: BTreeMap<(u32, u32), usize> = BTreeMap::new();
+        for e in w.entries.iter().filter(|e| !e.is_deleted()) {
+            let Some(name) = ids.get(&e.key.i) else { continue };
+            match args.get(3) {
+                Some(want) if name.contains(want.as_str()) => println!("{:08X}:{:08X} {} bytes", e.key.t, e.key.g, w.read(e).map(|d| d.len()).unwrap_or(0)),
+                Some(_) => {}
+                None => *tally.entry((e.key.t, e.key.g)).or_default() += 1,
+            }
+        }
+        for ((t, g), n) in tally {
+            println!("{t:08X}:{g:08X} on {n} lots");
+        }
+        return;
+    }
     if args[1] == "stairparse" {
         // stairparse <world file>: each lot's staircase records read through by the bake's
         // layout (version 6: four style references per staircase and railing, and a list at the
