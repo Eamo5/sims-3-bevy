@@ -496,6 +496,8 @@ impl ObjectKind {
                 | K::LaserHarp
                 // (A bath's: its open side, as the game's tubs set against walls have it.)
                 | K::Bathtub
+                // (A telescope's: behind it, looking through it.)
+                | K::Telescope
         )
         .then_some(0)
     }
