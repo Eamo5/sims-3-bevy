@@ -1097,6 +1097,10 @@ fn world_click(
                 if d.special == Special::EmptyTrash && !trash_q.get(t).is_ok_and(|f| f.0 > 0) {
                     continue;
                 }
+                // (The bills paid only when there are some in the mailbox, as the game offers.)
+                if d.special == Special::PayBills && opp_q.4.as_ref().is_none_or(|h| h.bills.is_empty()) {
+                    continue;
+                }
                 // (Dishes are washed up when cleared away, not from the menu.)
                 if matches!(d.special, Special::WashDishes | Special::DropTrash | Special::ReadBook | Special::GetIngredients | Special::PrepFood | Special::PlaceMeal | Special::WatchTv) || (d.special == Special::Cook && d.name == "Take Out Dinner") || (d.special == Special::ReadPaper && d.name == "Read the Paper") {
                     continue;
