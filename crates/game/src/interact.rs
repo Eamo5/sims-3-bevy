@@ -922,10 +922,12 @@ static BATHTUB: [InteractionDef; 3] = [
     // (With a rubber duck in the house.)
     InteractionDef { on_object: true, special: Special::Ducky, ..def("Play with Rubber Ducky", 30.0, [0.0, 0.0, 4.0, 0.0, 160.0, 100.0], Pose::Lie) },
 ];
-static SINK: [InteractionDef; 2] = [
+static SINK: [InteractionDef; 3] = [
     def("Wash Hands", 6.0, [0.0, 0.0, 0.0, 0.0, 160.0, 0.0], Pose::Use),
     // (Where a dish cleared away is taken without a dishwasher: never on the menu.)
     InteractionDef { autonomous: false, special: Special::WashDishes, ..def("Wash Dishes", 8.0, N, Pose::Use) },
+    // (The game's `Sink.BrushTeeth`: Minty Breath after, coffee and garlic breath gone.)
+    def("Brush Teeth", 5.0, [0.0, 0.0, 0.0, 0.0, 120.0, 0.0], Pose::Use),
 ];
 /// (A flame lit and blown out: the fireplace's, smaller.)
 static CANDLE: [InteractionDef; 2] = [
@@ -1176,6 +1178,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Take Shower" => A::new(Some("a2o_shower_takeShower_getIn_x"), &["a2o_shower_takeShower_loop"]).ending(&["a2o_shower_takeShower_getOut_x"], 2.4),
         "Take Bath" => A::new(None, &["a2o_bathtub_relax_loop"]),
         "Wash Hands" => A::new(Some("a2o_sink_washhands_start_x"), &["a2o_sink_washhands_scrubHands_x", "a2o_sink_washhands_rinseHands_x"]).ending(&["a2o_sink_washhands_stop_x"], 2.6),
+        "Brush Teeth" => A::new(Some("a2o_sink_brushTeeth_start_x"), &["a2o_sink_brushTeeth_Loop"]).ending(&["a2o_sink_brushTeeth_stop_x"], 2.6),
         // (Only the plain loop: the toss-and-turn ones are authored from beside the bed.)
         "Sleep" => A::new(Some("a2o_bed_getIn_made_x"), &["a2o_bed_sleep_back_loop_x"]).ending(&["a2o_bed_getout_start_x", "a2o_bed_getout_stop_x"], 7.3),
         "Nap" => A::new(Some("a2o_bed_nap_start_x"), &["a2o_bed_nap_loop_breathe_x"]),

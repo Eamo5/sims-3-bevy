@@ -636,10 +636,11 @@ pub enum MoodletKind {
     // Supernaturals.
     TooMuchSun,
     Werewolf,
+    MintyBreath,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 56] = {
+    pub const ALL: [MoodletKind; 57] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -647,7 +648,7 @@ impl MoodletKind {
             Inspired, Embarrassed, PassedOut, Uncomfortable, Promoted, Demoted, Fired, NewJob, Annoyed, Flirty, FirstKiss,
             InLove, Heartbroken, JustMarried, NewHome, Birthday, WishFulfilled, Nauseous, Pregnant, NewBaby, GreatParty,
             LameParty, AwesomeParty, Scared, GreatDate, BadDate, Singed, DirtySurroundings, FilthySurroundings, GettingChilly,
-            TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf,
+            TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf, MintyBreath,
         ]
     };
 
@@ -728,6 +729,7 @@ impl MoodletKind {
             Soaked => md("Soaked", "Being soaked is never really comfortable.", -5, 2.0),
             TooMuchSun => md("Too Much Sun", "The sun is draining this vampire.", -20, 0.0),
             Werewolf => md("Werewolf", "The full moon has brought out the beast within.", 15, 0.0),
+            MintyBreath => md("Minty Breath", "Fresh from brushing.", 5, 4.0),
         }
     }
 
@@ -796,6 +798,7 @@ impl MoodletKind {
             Soaked => ("Soaked", true),
             TooMuchSun => ("TooMuchSun", true),
             Werewolf => ("Werewolf", true),
+            MintyBreath => ("MintyBreath", true),
         }
     }
 }
@@ -980,6 +983,7 @@ fn life_events(
             LifeEventKind::Finished { activity, completed } => match *activity {
                 "Sleep" if m.0[ENERGY] >= 95.0 => ml.add(K::WellRested, now),
                 "Nap" if *completed => {}
+                "Brush Teeth" if *completed => ml.add(K::MintyBreath, now),
                 "Take Shower" | "Take Bath" if m.0[HYGIENE] >= 90.0 => {
                     if has(Trait::Hydrophobic) {
                         ml.add(K::Annoyed, now);

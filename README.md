@@ -581,6 +581,8 @@ installation is unreachable.
   spot the game's own routing slots put them (the piano bench's side, the bowling lane's
   end, the pool table's edge), so the game's animations line up with the object, whose own
   half of each animation plays with them; a jukebox plays music to dance to.
+- **Brushing teeth** at a sink (the game's brushTeeth animation, toothbrush in hand) leaves the
+  game's *Minty Breath* moodlet for four hours, as its `Sink.BrushTeeth` does.
 - **Dirty surroundings**: dirty dishes left about, food left out until it spoils (eight
   hours) and a full trash can give nearby household Sims the game's *Dirty Surroundings*,
   then *Filthy Surroundings*, moodlets. A dish cleared away (picked up with the game's
