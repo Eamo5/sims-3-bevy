@@ -23,7 +23,9 @@ impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "shaders/tree.wgsl");
         embedded_asset!(app, "shaders/tree_frag.wgsl");
-        app.add_plugins(MaterialPlugin::<TreeMaterial>::default()).add_systems(OnEnter(AppState::InGame), spawn_world_content);
+        app.add_plugins(MaterialPlugin::<TreeMaterial>::default())
+            .add_systems(OnEnter(AppState::InGame), spawn_world_content)
+            .add_systems(Update, street_lights.run_if(in_state(AppState::InGame)));
     }
 }
 
@@ -103,6 +105,72 @@ pub struct Tree;
 /// Marks the pre-built shell of a lot, hidden when the household moves onto it.
 #[derive(Component)]
 pub struct LotImposter(pub usize);
+
+/// A street lamp out in the town, and how high its lamp is.
+#[derive(Component)]
+pub struct StreetLamp(pub f32);
+
+/// The lights the street lamps nearest the view shine with at night.
+#[derive(Component)]
+struct StreetGlow;
+
+/// How many street lamps light up at once (the nearest the view), and how far off they do.
+const STREET_GLOWS: usize = 20;
+const STREET_GLOW_REACH: f32 = 90.0;
+
+/// At night the street lamps nearest the view light up, each a pool of warm light on the road
+/// and the ground round it, as the game's do (farther off, the world's baked light map shows
+/// theirs on the terrain).
+fn street_lights(
+    mut commands: Commands,
+    night: Res<crate::clock::Night>,
+    cams: Query<&crate::camera::SimsCamera>,
+    lamps: Query<(&GlobalTransform, &StreetLamp)>,
+    mut glows: Query<(Entity, &mut Transform, &mut PointLight, &mut Visibility), With<StreetGlow>>,
+    mut last: Local<(f32, Vec3)>,
+) {
+    if glows.is_empty() {
+        for _ in 0..STREET_GLOWS {
+            commands.spawn((
+                StreetGlow,
+                PointLight { intensity: 0.0, range: 16.0, radius: 0.2, color: Color::srgb(1.0, 0.86, 0.64), shadow_maps_enabled: false, ..default() },
+                Transform::default(),
+                Visibility::Hidden,
+                DespawnOnExit(AppState::InGame),
+            ));
+        }
+        return;
+    }
+    let Ok(cam) = cams.single() else { return };
+    // (Placed again when the view has moved a few metres or the night has deepened.)
+    if (night.0 - last.0).abs() < 0.02 && cam.focus.distance(last.1) < 4.0 {
+        return;
+    }
+    *last = (night.0, cam.focus);
+    let mut near: Vec<(f32, Vec3)> = if night.0 > 0.02 {
+        lamps
+            .iter()
+            .map(|(tf, l)| (tf.translation().distance_squared(cam.focus), tf.translation() + Vec3::Y * l.0))
+            .filter(|(d, _)| *d < STREET_GLOW_REACH * STREET_GLOW_REACH)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    near.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut spots = near.into_iter().map(|(_, p)| p);
+    for (_, mut tf, mut light, mut vis) in &mut glows {
+        match spots.next() {
+            Some(p) => {
+                tf.translation = p;
+                light.intensity = 450_000.0 * night.0;
+                vis.set_if_neq(Visibility::Inherited);
+            }
+            None => {
+                vis.set_if_neq(Visibility::Hidden);
+            }
+        }
+    }
+}
 
 /// Runs `f` over `items` on all CPU cores.
 pub fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
@@ -184,6 +252,17 @@ fn spawn_world_content(
         let parts = assets.ingest_model(&mut ctx, k, cpu);
         parts_of.insert(k, parts);
     }
+    // (The street lamps, by their models.)
+    let street_models: std::collections::HashSet<Key> = baked
+        .0
+        .catalog
+        .iter()
+        .filter(|c| {
+            let s = c.script.to_ascii_lowercase();
+            s.contains(".lighting.") && (s.contains("streetlight") || s.contains("lightoutdoorstreet"))
+        })
+        .flat_map(|c| c.models.iter().copied())
+        .collect();
     let mut spawned = 0;
     for inst in build.instances.drain(..) {
         let Some(parts) = parts_of.get(&inst.model) else { continue };
@@ -193,6 +272,10 @@ fn spawn_world_content(
         let tf = Transform::from_translation(Vec3::from(inst.position)).with_rotation(quat(inst.rotation));
         let e = spawn_parts(&mut commands, parts, tf);
         commands.entity(e).insert(DespawnOnExit(AppState::InGame));
+        if street_models.contains(&inst.model) {
+            let top = parts.iter().map(|p| p.bounds.1.y).fold(0.0f32, f32::max);
+            commands.entity(e).insert(StreetLamp(top * 0.92));
+        }
         if let Some(l) = inst.lot {
             commands.entity(e).insert(LotImposter(l as usize));
         } else {

@@ -29,6 +29,14 @@ pub struct RoadExt {
     #[texture(103)]
     #[sampler(104)]
     pub opacity: Option<Handle<Image>>,
+    /// The street lights' glow, as on the terrain: x how dark it is (0 day .. 1 night), y one
+    /// over the world's size (the light map's uv), z whether there's a light map.
+    #[uniform(105)]
+    pub glow: Vec4,
+    /// The world's light map (its pools of street light), shared with the terrain.
+    #[texture(106)]
+    #[sampler(107)]
+    pub lightmap: Option<Handle<Image>>,
 }
 
 impl MaterialExtension for RoadExt {
@@ -115,7 +123,7 @@ fn spawn_roads(
                         depth_bias: 40.0,
                         ..default()
                     },
-                    extension: RoadExt { params, overlay, opacity },
+                    extension: RoadExt { params, overlay, opacity, glow: Vec4::ZERO, lightmap: None },
                 })
             })
             .clone();

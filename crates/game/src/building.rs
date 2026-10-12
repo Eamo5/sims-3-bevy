@@ -29,7 +29,7 @@ impl Plugin for BuildingPlugin {
         )
         // (Choosing a lot to move into, the lots the camera comes close to are shown in full,
         // as the game streams them in.)
-        .add_systems(Update, stream_nearby_lots.run_if(in_state(PlayMode::ChooseLot).and(in_state(AppState::InGame))))
+        .add_systems(Update, stream_nearby_lots.run_if(in_state(PlayMode::ChooseLot).and_then(in_state(AppState::InGame))))
         // (The lots shown went with the game: a game loaded after it, or a household changed to,
         // shows its own.)
         .add_systems(OnExit(crate::AppState::InGame), |mut nearby: ResMut<NearbyLots>| *nearby = NearbyLots::default());

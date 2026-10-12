@@ -401,6 +401,7 @@ fn main() {
         let name = &args[i + 1];
         let w: s3bake::WorldBaked = s3bake::read_value(&root.world_dir(name).join("world.bin")).expect("world");
         let weights = lz4_flex::decompress_size_prepended(&w.weights_lz4).unwrap_or_default();
+        println!("heightmap {}x{}, overview {:?}, lightmap {:?}", w.heightmap.width, w.heightmap.height, w.overview.as_ref().map(|m| (m.size, m.mips, m.bc3)), w.lightmap.as_ref().map(|m| (m.size, m.mips, m.bc3)));
         let px = (w.weights_size * w.weights_size) as usize;
         let mut sums = vec![0u64; 16];
         for g in 0..4 {

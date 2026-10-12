@@ -21,6 +21,10 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var overlay_samp: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(103) var opacity_tex: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var opacity_samp: sampler;
+// x: darkness, y: 1 / world size, z: light map present
+@group(#{MATERIAL_BIND_GROUP}) @binding(105) var<uniform> road_glow: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(106) var light_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(107) var light_samp: sampler;
 
 @fragment
 fn fragment(
@@ -48,6 +52,11 @@ fn fragment(
         pbr_input.material.perceptual_roughness = mix(pbr_input.material.perceptual_roughness, 0.25, road_params.w);
     }
     pbr_input.material.base_color = vec4<f32>(c, a);
+    if (road_glow.z > 0.5 && road_glow.x > 0.01) {
+        // Pools of street light, as the terrain beside the road has them.
+        let glow = textureSample(light_tex, light_samp, in.world_position.xz * road_glow.y).rgb;
+        pbr_input.material.emissive = vec4<f32>(glow * glow * road_glow.x * 2.5, 1.0);
+    }
 
 #ifdef PREPASS_PIPELINE
     let out = deferred_output(in, pbr_input);

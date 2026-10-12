@@ -59,9 +59,26 @@ pub struct TerrainExt {
 pub struct TerrainMaterialHandle(pub Handle<TerrainMaterial>);
 
 /// The terrain's darkness (for the street lights' glow) and the seasons' ground cover: snow,
-/// wetness, frost.
-fn terrain_night(night: Res<crate::clock::Night>, weather: Option<Res<crate::weather::Weather>>, handle: Option<Res<TerrainMaterialHandle>>, mut mats: ResMut<Assets<TerrainMaterial>>) {
+/// wetness, frost. (The roads glow with the same street lights.)
+fn terrain_night(
+    night: Res<crate::clock::Night>,
+    weather: Option<Res<crate::weather::Weather>>,
+    handle: Option<Res<TerrainMaterialHandle>>,
+    mut mats: ResMut<Assets<TerrainMaterial>>,
+    mut roads: ResMut<Assets<crate::roads::RoadMaterial>>,
+) {
     let Some(h) = handle else { return };
+    if let Some(m) = mats.get(&h.0) {
+        let (lightmap, size) = (m.extension.lightmap.clone(), m.extension.params.x);
+        let glow = Vec4::new(night.0, 1.0 / size.max(1.0), lightmap.is_some() as u32 as f32, 0.0);
+        let stale: Vec<AssetId<crate::roads::RoadMaterial>> = roads.iter().filter(|(_, r)| (r.extension.glow - glow).abs().max_element() > 0.004).map(|(id, _)| id).collect();
+        for id in stale {
+            if let Some(mut r) = roads.get_mut(id) {
+                r.extension.glow = glow;
+                r.extension.lightmap = lightmap.clone();
+            }
+        }
+    }
     let cover = weather.as_ref().map_or(Vec3::ZERO, |w| Vec3::new(w.snow, w.wet, w.frost) / 100.0);
     let want = Vec4::new(night.0, cover.x, cover.y, cover.z);
     let Some(m) = mats.get(&h.0) else { return };
