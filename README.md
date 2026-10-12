@@ -370,7 +370,16 @@ installation is unreachable.
   after (in pyjamas when it's late, as the game's `GettingOutOfBath`).
 - **Baths**: as the game's: stood in the tub, the taps turned on and the water rising (the
   tub's own water, raised by its half of the clip), sat down, arms and legs washed, then lying
-  back; sat up and out at the end. The rubber ducky's played with in the water too.
+  back; sat up and out at the end. The rubber ducky's played with in the water too, and a
+  bubble bath is a tub of foam.
+- **Double beds** sleep two, a side each, as the game's couples do: the second Sim gets in on
+  the far side, with the game's animations played mirrored (the rig's two sides are each
+  other's mirror images, so each bone plays its partner's track, reflected). Sims share a bed
+  on their own with their partner, fiancé(e) or spouse. (The covers turn back on the first side
+  only: the second sleeper lies on them, for now.)
+- **The workout bench** (The Exercise Queen): "Pump Iron", for teens and up, in athletic wear:
+  on to the bench, then the game's bench presses, leg extensions and pec flys in turn, building
+  Athletic.
 - **Jogging**: clicking the selected Sim offers "Go Jogging": out to the street in athletic
   wear and up and down its sidewalk at a jog (the game's jogging clip) for an hour, or until
   they're worn out, then home (and usually to the shower). It trains Athletic, builds fitness,

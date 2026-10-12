@@ -119,6 +119,68 @@ fn main() {
         }
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--mirror-check") {
+        // --mirror-check <rig>: whether each left bone's bind pose, reflected across x, is its
+        // right bone's (in the model's space): if so, a clip plays mirrored by giving each bone
+        // its partner's track, reflected.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let rig = pkgs.read_ti(s3pkg::types::RIG, s3pkg::fnv64(&args[i + 1])).and_then(|d| s3formats::sim::Rig::parse(&d).ok()).expect("rig");
+        // (Rotation then translation, as quaternion and vector.)
+        let mul = |a: ([f32; 4], [f32; 3]), b: ([f32; 4], [f32; 3])| -> ([f32; 4], [f32; 3]) {
+            let (q1, t1) = a;
+            let (q2, t2) = b;
+            let q = [
+                q1[3] * q2[0] + q1[0] * q2[3] + q1[1] * q2[2] - q1[2] * q2[1],
+                q1[3] * q2[1] - q1[0] * q2[2] + q1[1] * q2[3] + q1[2] * q2[0],
+                q1[3] * q2[2] + q1[0] * q2[1] - q1[1] * q2[0] + q1[2] * q2[3],
+                q1[3] * q2[3] - q1[0] * q2[0] - q1[1] * q2[1] - q1[2] * q2[2],
+            ];
+            // rotate t2 by q1
+            let (x, y, z, w) = (q1[0], q1[1], q1[2], q1[3]);
+            let v = t2;
+            let uv = [y * v[2] - z * v[1], z * v[0] - x * v[2], x * v[1] - y * v[0]];
+            let uuv = [y * uv[2] - z * uv[1], z * uv[0] - x * uv[2], x * uv[1] - y * uv[0]];
+            let r = [v[0] + 2.0 * (w * uv[0] + uuv[0]), v[1] + 2.0 * (w * uv[1] + uuv[1]), v[2] + 2.0 * (w * uv[2] + uuv[2])];
+            (q, [t1[0] + r[0], t1[1] + r[1], t1[2] + r[2]])
+        };
+        let mut global: Vec<([f32; 4], [f32; 3])> = Vec::new();
+        for b in &rig.bones {
+            let local = (b.rotation, b.position);
+            let g = if b.parent >= 0 && (b.parent as usize) < global.len() { mul(global[b.parent as usize], local) } else { local };
+            global.push(g);
+        }
+        let reflect = |g: ([f32; 4], [f32; 3])| ([g.0[0], -g.0[1], -g.0[2], g.0[3]], [-g.1[0], g.1[1], g.1[2]]);
+        let (mut good, mut bad) = (0, 0);
+        for (k, b) in rig.bones.iter().enumerate() {
+            let Some(other) = s3formats::sim::mirror_bone_name(&b.name) else {
+                // (A bone down the middle is its own mirror image.)
+                let (q, t) = reflect(global[k]);
+                let (q2, t2) = global[k];
+                let dq = (q[0] * q2[0] + q[1] * q2[1] + q[2] * q2[2] + q[3] * q2[3]).abs();
+                let dt = ((t[0] - t2[0]).powi(2) + (t[1] - t2[1]).powi(2) + (t[2] - t2[2]).powi(2)).sqrt();
+                if dq < 0.999 || dt > 0.005 {
+                    println!("{} (middle): rotation dot {dq:.4}, apart {dt:.4}", b.name);
+                }
+                continue;
+            };
+            let Some(j) = rig.bones.iter().position(|x| x.name == other) else {
+                println!("{}: no {other}", b.name);
+                continue;
+            };
+            let (q, t) = reflect(global[k]);
+            let (q2, t2) = global[j];
+            let dq = (q[0] * q2[0] + q[1] * q2[1] + q[2] * q2[2] + q[3] * q2[3]).abs();
+            let dt = ((t[0] - t2[0]).powi(2) + (t[1] - t2[1]).powi(2) + (t[2] - t2[2]).powi(2)).sqrt();
+            if dq > 0.999 && dt < 0.005 {
+                good += 1;
+            } else {
+                bad += 1;
+                println!("{} vs {other}: rotation dot {dq:.4}, apart {dt:.4}", b.name);
+            }
+        }
+        println!("{good} bones mirror their partners, {bad} don't");
+        return;
+    }
     if args.iter().any(|a| a == "--hair-check") {
         // --hair-check: baked hair parts with no meshes, no layer, or a missing layer texture.
         let cas: s3bake::CasBaked = s3bake::read_value(&root.global_dir().join("cas.bin")).expect("cas.bin");

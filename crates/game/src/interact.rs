@@ -26,7 +26,7 @@ impl Plugin for InteractPlugin {
                     .run_if(in_state(PlayMode::Live)),
             )
             .add_systems(Update, route_objects.run_if(in_state(crate::AppState::InGame)))
-            .add_systems(Update, (wear_new_objects, floor_new_objects).run_if(in_state(crate::AppState::InGame)));
+            .add_systems(Update, (wear_new_objects, floor_new_objects, second_places).run_if(in_state(crate::AppState::InGame)));
     }
 }
 
@@ -80,6 +80,8 @@ pub enum ObjectKind {
     Easel,
     Guitar,
     Treadmill,
+    /// A workout bench (the game's `WorkoutBench`: The Exercise Queen): pumping iron.
+    WorkoutBench,
     Chess,
     Crib,
     HighChair,
@@ -379,7 +381,7 @@ impl ObjectKind {
             Self::Sofa
         } else if has("stool") {
             Self::Stool
-        } else if has("seating") || has("chair") || has("bench") {
+        } else if has("seating") || has("chair") || (has("bench") && !has("workoutbench")) {
             Self::Chair
         } else if has("electronics.tv") {
             Self::Tv
@@ -395,6 +397,8 @@ impl ObjectKind {
             Self::Easel
         } else if has("guitar") && !has("decorations") {
             Self::Guitar
+        } else if has("workoutbench") || has("exercisemachine") {
+            Self::WorkoutBench
         } else if has("treadmill") || has("workout") {
             Self::Treadmill
         } else if has("chess") {
@@ -423,7 +427,7 @@ impl ObjectKind {
             Self::Toilet | Self::Shower | Self::Bathtub | Self::Sink => "Plumbing",
             Self::Sofa | Self::Chair | Self::Stool => "Seating",
             Self::Tv | Self::Computer | Self::Stereo | Self::VideoGame | Self::VrGoggles => "Electronics",
-            Self::Bookshelf | Self::Mirror | Self::Easel | Self::Guitar | Self::Treadmill | Self::Chess | Self::Telescope | Self::Foosball => {
+            Self::Bookshelf | Self::Mirror | Self::Easel | Self::Guitar | Self::Treadmill | Self::WorkoutBench | Self::Chess | Self::Telescope | Self::Foosball => {
                 "Hobbies"
             }
             Self::SwingSet | Self::JungleGym | Self::DollHouse | Self::StuffedToy => "Kids",
@@ -513,6 +517,10 @@ impl ObjectKind {
                 // a treadmill's, behind it, stepping up onto the belt.)
                 | K::Shower
                 | K::Treadmill
+                // (The workout bench's, beside it, for the way there; a dollhouse's, at its open
+                // side.)
+                | K::WorkoutBench
+                | K::DollHouse
         )
         .then_some(0)
     }
@@ -586,6 +594,39 @@ impl GameObject {
 
 #[derive(Component, Default)]
 pub struct UsedBy(pub Option<Entity>);
+
+/// A double bed's other side: whoever's on it (the first side's is its `UsedBy`). Two share a
+/// double bed, each on a side, as the game's couples do.
+#[derive(Component, Default)]
+pub struct SecondPlace(pub Option<Entity>);
+
+/// Double beds have a second side; a claim on it lapses once its Sim is doing something else.
+fn second_places(mut commands: Commands, beds: Query<(Entity, &GameObject), Without<SecondPlace>>, mut claimed: Query<(Entity, &mut SecondPlace)>, sims: Query<&ActionQueue>) {
+    for (e, o) in &beds {
+        if o.kind == ObjectKind::BedDouble {
+            commands.entity(e).insert(SecondPlace(None));
+        }
+    }
+    for (bed, mut second) in &mut claimed {
+        let Some(who) = second.0 else { continue };
+        let still = sims.get(who).is_ok_and(|q| {
+            q.0.front().is_some_and(|a| matches!(a.kind, ActionKind::Object { target, .. } if target == bed) || matches!(a.kind, ActionKind::Outro { target, .. } if target == bed))
+        });
+        if !still {
+            second.0 = None;
+        }
+    }
+}
+
+/// Who has a double bed's side, to the Sim asking: the side's taken when the first is someone
+/// else's and so is the second (a single bed, or anything else, has only the one).
+fn effective_owner(me: Entity, used: Option<Entity>, second: Option<Option<Entity>>) -> Option<Entity> {
+    match second {
+        Some(s) if used == Some(me) || s == Some(me) => Some(me),
+        Some(s) if used.is_none() || s.is_none() => None,
+        _ => used,
+    }
+}
 
 /// A broken object: only repairing it is possible.
 #[derive(Component)]
@@ -1147,6 +1188,15 @@ static TREADMILL: [InteractionDef; 1] = [InteractionDef {
     skill: Some("Athletic"),
     ..def("Work Out", 60.0, [-10.0, 0.0, -25.0, 0.0, -40.0, 5.0], Pose::Exercise)
 }];
+/// (The game's `WorkOut.StrengthSingleton`, for teens and up.)
+/// (Walked to from beside it, its routing slot; then on the seat, its clips played from the
+/// bench's own origin.)
+static WORKOUT_BENCH: [InteractionDef; 1] = [InteractionDef {
+    autonomous: false,
+    on_object: true,
+    skill: Some("Athletic"),
+    ..def("Pump Iron", 60.0, [-10.0, 0.0, -25.0, 0.0, -40.0, 5.0], Pose::Exercise)
+}];
 static CHESS: [InteractionDef; 2] = [
     InteractionDef { skill: Some("Logic"), ..def("Play Chess", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 40.0], Pose::Use) },
     InteractionDef { autonomous: false, skill: Some("Logic"), special: Special::ChessMatch, ..def("Play a Ranked Match", 60.0, [0.0, 0.0, -2.0, 10.0, 0.0, 35.0], Pose::Use) },
@@ -1167,6 +1217,28 @@ fn seat_clips(kind: ObjectKind) -> Option<(&'static str, &'static str, f32)> {
 }
 
 /// The animation played while performing an interaction: start clip, then loop variants.
+/// The workout bench's lifts, as the game's state machine plays them: bench presses, leg
+/// extensions and pec flys, each started, done a few times and put down.
+const BENCH_LIFTS: &[&str] = &[
+    "a2o_workoutBench_benchPress_start_x",
+    "a2o_workoutBench_benchPress_easy_x",
+    "a2o_workoutBench_benchPress_easy_x",
+    "a2o_workoutBench_benchPress_easy_x",
+    "a2o_workoutBench_benchPress_stop_x",
+    "a2o_workoutBench_legExtension_start_x",
+    "a2o_workoutBench_legExtension_easy_x",
+    "a2o_workoutBench_legExtension_easy_x",
+    "a2o_workoutBench_legExtension_easy_x",
+    "a2o_workoutBench_legExtension_stop_x",
+    "a2o_workoutBench_pecFly_start_x",
+    "a2o_workoutBench_pecFly_easy_x",
+    "a2o_workoutBench_pecFly_easy_x",
+    "a2o_workoutBench_pecFly_easy_x",
+    "a2o_workoutBench_pecFly_stop_x",
+];
+/// How long getting off the bench takes (seconds).
+const BENCH_OFF: f32 = 2.0;
+
 /// A bath's start, the taps on: sat down, arms and legs washed, then lying back.
 const BATH_WASH: &[&str] = &[
     "a2o_bathtub_takeBath_getIn_x",
@@ -1294,6 +1366,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Paint" => A::new(Some("a2o_painting_start_x"), &["a2o_painting_loopMed", "a2o_painting_loopLarge", "a2o_painting_consider"]),
         "Play Guitar" => A::new(None, &["a2o_guitar_play_med_loop", "a2o_guitar_play_high_loop", "a2o_guitar_play_low_loop"]),
         "Work Out" => A::new(Some("a2o_treadmill_jog_start_x"), &["a2o_treadmill_jog_loop"]),
+        // (On the bench, then the game's three lifts in turn, each started and put down.)
+        "Pump Iron" => A::new(Some("a2o_workoutBench_getIn_W_x"), BENCH_LIFTS).in_order().ending(&["a2o_workoutBench_getOut_W_x"], BENCH_OFF),
         "Play Chess" | "Play a Ranked Match" => A::new(None, &["a2o_chessTable_loop", "a2o_chessTable_move"]),
         "Nap in Crib" => A::new(Some("p2o_crib_sleep_start_y"), &["p2o_crib_sleep_loop_y"]),
         "Change Clothes" | "Change Into" | "New Everyday Outfit" | "Plan Outfit" => A::new(Some("a2o_dresser_use_open"), &["a2o_dresser_use_close"]),
@@ -1543,7 +1617,7 @@ impl ObjectKind {
             Age::Baby => false,
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy),
             // (Children can't cook or light fires, and the goggles are for teens and up.)
-            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles),
+            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench),
             _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::DollHouse | K::JungleGym | K::StuffedToy | K::ToyOven),
         }
     }
@@ -1587,6 +1661,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Easel => &EASEL,
         ObjectKind::Guitar => &GUITAR,
         ObjectKind::Treadmill => &TREADMILL,
+        ObjectKind::WorkoutBench => &WORKOUT_BENCH,
         ObjectKind::Chess => &CHESS,
         ObjectKind::Crib => &CRIB,
         ObjectKind::ToyBox => &TOYBOX,
@@ -2118,7 +2193,13 @@ pub(crate) fn run_actions(
         Query<(), With<Broken>>,
         Query<(), Or<(With<crate::buy::HeldObject>, With<crate::buyhistory::HistoryHidden>)>>,
     ),
-    (mut did, journals, mut inventories, mut wear): (MessageWriter<crate::journal::Did>, Query<&crate::journal::SkillJournal>, Query<&mut crate::inventory::Inventory>, Query<&mut Wear>),
+    (mut did, journals, mut inventories, mut wear, mut seconds): (
+        MessageWriter<crate::journal::Did>,
+        Query<&crate::journal::SkillJournal>,
+        Query<&mut crate::inventory::Inventory>,
+        Query<&mut Wear>,
+        Query<&mut SecondPlace>,
+    ),
 ) {
     let Some(grid) = grid else { return };
     let dt = delta.0;
@@ -2171,8 +2252,9 @@ pub(crate) fn run_actions(
         let mut outro: Option<(&'static [&'static str], Option<&'static str>, f32, Entity)> = None;
 
         if let ActionKind::Object { target, def } = action.kind {
+            let second = seconds.get(target).ok().map(|s| s.0);
             let valid = !unavailable.contains(target) && objects.get(target).is_ok_and(|(obj, _, used, _)| {
-                object_action_available(me, obj.kind, def, used.0, broken.contains(target), action.phase)
+                object_action_available(me, obj.kind, def, effective_owner(me, used.0, second), broken.contains(target), action.phase)
             });
             if !valid { action.cancel = true; }
         }
@@ -2200,6 +2282,11 @@ pub(crate) fn run_actions(
                 if used.0 == Some(me) {
                     used.0 = None;
                 }
+                if let Ok(mut s) = seconds.get_mut(target)
+                    && s.0 == Some(me)
+                {
+                    s.0 = None;
+                }
                 if matches!(action.phase, Phase::Running(_)) {
                     stand_up_at = Some(action.approach.unwrap_or_else(|| obj.use_point(otf)));
                 }
@@ -2222,7 +2309,7 @@ pub(crate) fn run_actions(
                                 if used.0.is_some_and(|u| u != me) && obj.kind == ObjectKind::Meal {
                                     continue;
                                 }
-                                if used.0.is_some_and(|u| u != me) {
+                                if effective_owner(me, used.0, seconds.get(*target).ok().map(|s| s.0)).is_some_and(|u| u != me) {
                                     if !action.autonomous {
                                         notes.push(format!("{} can't use the {}: it's in use.", sim.first, obj.name));
                                     }
@@ -2370,7 +2457,11 @@ pub(crate) fn run_actions(
                                 && let Ok((o, _, mut used, _)) = objects.get_mut(target)
                                 && o.kind != ObjectKind::PicnicTable
                             {
-                                used.0 = Some(me);
+                                // (A double bed's other side, when someone has the first.)
+                                match seconds.get_mut(target) {
+                                    Ok(mut s) if matches!(action.kind, ActionKind::Object { .. }) && used.0.is_some_and(|u| u != me) => s.0 = Some(me),
+                                    _ => used.0 = Some(me),
+                                }
                             }
                         }
                         None => {
@@ -2441,15 +2532,19 @@ pub(crate) fn run_actions(
                                     // (Into the seat first.)
                                     let seat_in = (d.on_object && d.pose == Pose::Sit).then(|| seat_clips(obj.kind)).flatten().map(|(into, ..)| into);
                                     let clip = toddler_toy.or_else(|| interaction_clip(d.name, obj.kind)).or_else(|| seat_in.map(|_| crate::anim::ActionClip::new(None, crate::anim::SIT_LOOPS)));
+                                    // (A double bed's second side: the first's, mirrored.)
+                                    let far_side = obj.kind == ObjectKind::BedDouble && seconds.get(*target).is_ok_and(|s| s.0 == Some(me));
                                     if let Some(mut c) = clip {
                                         c.before = c.before.or(seat_in);
+                                        c.mirror = far_side;
                                         commands.entity(me).insert(c);
                                     }
                                     let face = otf.rotation * Quat::from_rotation_y(std::f32::consts::PI);
                                     if d.on_object {
                                         let bed = matches!(obj.kind, ObjectKind::BedSingle | ObjectKind::BedDouble);
-                                        // In a double bed, one side of it.
+                                        // In a double bed, one side of it (the other's the far side).
                                         let side = if bed && obj.half.x > 0.8 { -obj.half.x * 0.5 } else { 0.0 };
+                                        let side = if far_side { -side } else { side };
                                         let c = otf.transform_point(Vec3::new(obj.center.x + side, 0.0, obj.center.y));
                                         tf.translation = Vec3::new(c.x, otf.translation.y, c.z);
                                         tf.rotation = otf.rotation;
@@ -2473,10 +2568,12 @@ pub(crate) fn run_actions(
                                         if bed && d.name == "Nap" {
                                             // The nap clips are played from beside the bed, facing
                                             // across it (the Sim lies down 1.09 m ahead, head to
-                                            // the left).
-                                            let p = otf.transform_point(Vec3::new(obj.center.x + side - 1.09, 0.0, obj.center.y));
+                                            // the left; on a double bed's far side, all of it the
+                                            // other way about).
+                                            let way = if far_side { -1.0 } else { 1.0 };
+                                            let p = otf.transform_point(Vec3::new(obj.center.x + side - 1.09 * way, 0.0, obj.center.y));
                                             tf.translation = Vec3::new(p.x, otf.translation.y, p.z);
-                                            tf.rotation = otf.rotation * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+                                            tf.rotation = otf.rotation * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2 * way);
                                         }
                                         if obj.kind == ObjectKind::Shower
                                             && let Some((p, f)) = obj.route
@@ -2750,7 +2847,9 @@ pub(crate) fn run_actions(
                                 if complete {
                                     finished = true;
                                     life.write(LifeEvent::new(me, LifeEventKind::Finished { activity: d.name, completed: true }));
-                                    used.0 = None;
+                                    if used.0 == Some(me) {
+                                        used.0 = None;
+                                    }
                                     // A night at the telescope may find something new up there.
                                     if d.name == "Stargaze" && rand::rng().random_bool((0.2 + skills.level("Logic") as f64 * 0.06).min(0.8)) {
                                         did.write(crate::journal::Did::count(me, crate::journal::Stat::StarsFound, 1.0));
@@ -3688,6 +3787,21 @@ mod maintenance_tests {
     }
 
     #[test]
+    fn a_double_bed_has_a_side_for_each_of_two() {
+        let mut world = World::new();
+        let (a, b, c) = (world.spawn_empty().id(), world.spawn_empty().id(), world.spawn_empty().id());
+        // (Anything else, or a single bed, has the one place.)
+        assert_eq!(effective_owner(b, Some(a), None), Some(a));
+        // A double bed: the second side's free while one has the first.
+        assert_eq!(effective_owner(b, Some(a), Some(None)), None);
+        assert_eq!(effective_owner(b, Some(a), Some(Some(b))), Some(b));
+        assert_eq!(effective_owner(a, Some(a), Some(Some(b))), Some(a));
+        // Both sides taken: in use to a third.
+        assert_eq!(effective_owner(c, Some(a), Some(Some(b))), Some(a));
+        assert_eq!(effective_owner(c, None, Some(Some(b))), None);
+    }
+
+    #[test]
     fn maintenance_rejects_stale_work_and_other_sims_reservations() {
         let mut world = World::new();
         let actor = world.spawn_empty().id();
@@ -3752,7 +3866,7 @@ fn autonomy(
         (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim, Has<SocialPartner>, Option<&crate::visit::OnLot>),
         (Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>, Without<OffLot>),
     >,
-    objects: Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>,
+    (objects, seconds): (Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>, Query<&SecondPlace>),
     hh: Option<Res<Household>>,
     (broken, plant_q, lit_q, hw_q): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>, Query<(), With<crate::fireplace::Lit>>, Query<(), With<crate::rabbitholes::Homework>>),
     (party_on, trash_q, served_q, leftovers, sprinkling, route_failed): (
@@ -3824,7 +3938,9 @@ fn autonomy(
         };
         let mut best: Option<(f32, Action)> = None;
         for (oe, obj, otf, used, obj_lot) in &objects {
-            if used.0.is_some_and(|u| u != me) || obj_lot.map(|l| l.0) != my_lot {
+            // (A double bed with their partner in it has room for them, on its other side.)
+            let beside_partner = seconds.get(oe).is_ok_and(|s| s.0.is_none()) && used.0.is_some() && used.0 == rels.partner().map(|p| p.0);
+            if (used.0.is_some_and(|u| u != me) && !beside_partner) || obj_lot.map(|l| l.0) != my_lot {
                 continue;
             }
             if !obj.kind.suits(sim) {
@@ -4185,7 +4301,7 @@ mod tests {
     fn clip_lengths() {
         let data = crate::baked::BakedData::open(s3bake::default_root(), None).unwrap();
         for name in std::env::var("CLIPS").unwrap_or_default().split(',').filter(|n| !n.is_empty()) {
-            println!("{name}: {:?}", data.clip(name).map(|c| c.duration));
+            println!("{name}: {:?} parents {:?}", data.clip(name).map(|c| c.duration), data.clip(name).map(|c| c.parents.clone()));
             // (Where the root and hips are at its start and end.)
             if let Some(c) = data.clip(name) {
                 for bone in ["b__ROOT__", "b__ROOT_bind__", "b__Pelvis__"] {

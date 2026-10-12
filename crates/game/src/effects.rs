@@ -11,14 +11,15 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use rand::Rng;
 
 use crate::camera::SimsCamera;
-use crate::interact::{GameObject, ObjectKind, UsedBy};
+use crate::interact::{ActionKind, ActionQueue, GameObject, ObjectKind, Special, UsedBy, interactions_for};
 use crate::{AppState, PlayMode};
 
 pub struct EffectsPlugin;
 
 impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (attach, fountain_water, sprinkler_spray, emit, fall, tv_screens, censor).chain().run_if(in_state(PlayMode::Live)));
+        app.init_resource::<WaterLooks>()
+            .add_systems(Update, (attach, fountain_water, bubble_baths, sprinkler_spray, emit, fall, tv_screens, censor).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -59,6 +60,14 @@ struct FountainWater;
 /// A bathtub: its water is clear, not a fountain's green.
 #[derive(Component)]
 struct BathWater;
+
+/// The water's looks, made once: a fountain's, a bath's, and a bubble bath's foam.
+#[derive(Resource, Default)]
+struct WaterLooks {
+    fountain: Option<Handle<StandardMaterial>>,
+    tub: Option<Handle<StandardMaterial>>,
+    foam: Option<Handle<StandardMaterial>>,
+}
 
 #[derive(Component)]
 struct Droplet {
@@ -268,24 +277,25 @@ fn fountain_water(
     q: Query<(Entity, &Children, Has<BathWater>), With<FountainWater>>,
     parts: Query<&MeshMaterial3d<StandardMaterial>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
-    mut water: Local<Option<(Handle<StandardMaterial>, Handle<StandardMaterial>)>>,
+    mut looks: ResMut<WaterLooks>,
 ) {
+    if looks.fountain.is_none() {
+        let mut m = StandardMaterial {
+            base_color: Color::srgba(0.32, 0.6, 0.66, 0.82),
+            perceptual_roughness: 0.04,
+            reflectance: 0.6,
+            alpha_mode: AlphaMode::Blend,
+            ..default()
+        };
+        looks.fountain = Some(mats.add(m.clone()));
+        m.base_color = Color::srgba(0.62, 0.8, 0.9, 0.6);
+        looks.tub = Some(mats.add(m));
+        // (A bubble bath's foam: thick and white over the water.)
+        looks.foam = Some(mats.add(StandardMaterial { base_color: Color::srgba(0.97, 0.97, 0.99, 0.94), perceptual_roughness: 0.85, alpha_mode: AlphaMode::Blend, ..default() }));
+    }
+    let (Some(fountain), Some(tub)) = (looks.fountain.clone(), looks.tub.clone()) else { return };
     for (e, children, bath) in &q {
-        let (fountain, tub) = water
-            .get_or_insert_with(|| {
-                let mut m = StandardMaterial {
-                    base_color: Color::srgba(0.32, 0.6, 0.66, 0.82),
-                    perceptual_roughness: 0.04,
-                    reflectance: 0.6,
-                    alpha_mode: AlphaMode::Blend,
-                    ..default()
-                };
-                let fountain = mats.add(m.clone());
-                m.base_color = Color::srgba(0.62, 0.8, 0.9, 0.6);
-                (fountain, mats.add(m))
-            })
-            .clone();
-        let w = if bath { tub } else { fountain };
+        let w = if bath { tub.clone() } else { fountain.clone() };
         for c in children {
             let Ok(m) = parts.get(*c) else { continue };
             if mats.get(&m.0).is_some_and(|m| m.base_color_texture.is_none() && m.alpha_mode == AlphaMode::Opaque) {
@@ -293,6 +303,30 @@ fn fountain_water(
             }
         }
         commands.entity(e).remove::<FountainWater>();
+    }
+}
+
+/// A bubble bath's water is foam, while it's being had (the game's `BubbleBathFXName`).
+fn bubble_baths(
+    tubs: Query<(&Children, &UsedBy), With<BathWater>>,
+    sims: Query<&ActionQueue>,
+    mut parts: Query<&mut MeshMaterial3d<StandardMaterial>>,
+    looks: Res<WaterLooks>,
+) {
+    let (Some(tub), Some(foam)) = (&looks.tub, &looks.foam) else { return };
+    for (children, used) in &tubs {
+        let bubbly = used.0.and_then(|s| sims.get(s).ok()).and_then(|q| q.0.front()).is_some_and(|a| {
+            matches!(a.kind, ActionKind::Object { def, .. } if interactions_for(ObjectKind::Bathtub).get(def).is_some_and(|d| d.special == Special::BubbleBath))
+        });
+        let want = if bubbly { foam } else { tub };
+        for c in children {
+            if let Ok(mut m) = parts.get_mut(*c)
+                && (m.0 == *tub || m.0 == *foam)
+                && m.0 != *want
+            {
+                m.0 = want.clone();
+            }
+        }
     }
 }
 

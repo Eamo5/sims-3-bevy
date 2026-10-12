@@ -304,6 +304,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     // (In and out of the bath, the taps turned on and the tub's water up, washing.)
     "a2o_bathtub_takeBath",
     "a2o_bathtub_waterUpPose",
+    // (The workout bench: on and off it, and its lifts.)
+    "a2o_workoutBench",
     "a2o_sink_washhands",
     "a2o_sink_brushTeeth",
     // Beds and seating.

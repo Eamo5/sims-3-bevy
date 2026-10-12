@@ -98,6 +98,9 @@ pub struct ActionClip {
     pub after: Option<&'static str>,
     /// The loops played in turn rather than at random (a ball fetched, bowled, the pins seen).
     pub in_order: bool,
+    /// Played mirrored, left for right (the game's `mirror` parameter: the far side of a double
+    /// bed).
+    pub mirror: bool,
 }
 
 /// Sitting about: a living chair's breathing and crossed legs.
@@ -105,14 +108,19 @@ pub const SIT_LOOPS: &[&str] = &["a2o_chairLiving_sit_breathe_loop_x", "a2o_chai
 
 impl ActionClip {
     pub const fn new(start: Option<&'static str>, loops: &'static [&'static str]) -> Self {
-        Self { start, steps: &[], loops, side: None, end: &[], end_secs: 0.0, before: None, after: None, in_order: false }
+        Self { start, steps: &[], loops, side: None, end: &[], end_secs: 0.0, before: None, after: None, in_order: false, mirror: false }
     }
     /// A start clip, steps after it in order, then loops.
     pub const fn steps(start: &'static str, steps: &'static [&'static str], loops: &'static [&'static str]) -> Self {
-        Self { start: Some(start), steps, loops, side: None, end: &[], end_secs: 0.0, before: None, after: None, in_order: false }
+        Self { start: Some(start), steps, loops, side: None, end: &[], end_secs: 0.0, before: None, after: None, in_order: false, mirror: false }
     }
     pub const fn social(loops: &'static [&'static str], side: char) -> Self {
-        Self { start: None, steps: &[], loops, side: Some(side), end: &[], end_secs: 0.0, before: None, after: None, in_order: false }
+        Self { start: None, steps: &[], loops, side: Some(side), end: &[], end_secs: 0.0, before: None, after: None, in_order: false, mirror: false }
+    }
+    /// Played left for right.
+    pub const fn mirrored(mut self) -> Self {
+        self.mirror = true;
+        self
     }
     /// With its loops played in turn.
     pub const fn in_order(mut self) -> Self {
@@ -308,6 +316,7 @@ pub fn drive_skeletons(
     mut joints: Query<&mut Transform, Without<Sim>>,
     mut cues: MessageWriter<crate::sound::ClipCue>,
     mut arms: Local<HashMap<String, Arc<Vec<bool>>>>,
+    mut partners: Local<HashMap<String, Arc<Vec<u32>>>>,
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed];
     for (entity, sim, anim, skel, action, mut player, carried, toddler, carrying, jogging, path, pregnancy, wolf) in &mut sims {
@@ -408,22 +417,34 @@ pub fn drive_skeletons(
             (true, true) => player.time.min(clip.duration),
             (true, false) => player.time % clip.duration,
         };
-        let anchor = clip_anchor(&player.name);
+        // (Mirrored: each bone plays its partner's track on the body's other side, reflected
+        // across the middle: the rig's sides are each other's mirror images.)
+        let mirror = action.is_some_and(|a| a.mirror);
+        let partner = mirror.then(|| {
+            partners
+                .entry(skel.rig.name.clone())
+                .or_insert_with(|| Arc::new(skel.rig.bones.iter().map(|b| s3formats::sim::mirror_bone_name(&b.name).map_or(b.hash, |n| s3pkg::fnv32(&n))).collect()))
+                .clone()
+        });
+        let anchor = clip_anchor(&player.name).map(|(at, turn)| if mirror { (Vec3::new(-at.x, at.y, at.z), -turn) } else { (at, turn) });
         for (i, bone) in skel.rig.bones.iter().enumerate() {
             let Ok(mut tf) = joints.get_mut(skel.joints[i]) else { continue };
             let bind = skel.bind[i];
             let mut target = bind;
             let placed = carried && bone.name == "transformBone";
-            if let Some(track) = clip.tracks.get(&bone.hash).filter(|_| !placed) {
+            let source = partner.as_ref().and_then(|p| p.get(i).copied()).unwrap_or(bone.hash);
+            if let Some(track) = clip.tracks.get(&source).filter(|_| !placed) {
                 // (The face's shape goes back over what the animation does to a bone.)
                 let shape = skel.shape.get(i).copied().flatten();
                 // The root's translation is root motion; movement is driven by the pathfinder.
                 if i != 0
                     && let Some(p) = sample_track_vec(&track.translation, t)
                 {
+                    let p = if mirror { Vec3::new(-p.x, p.y, p.z) } else { p };
                     target.translation = p + shape.map_or(Vec3::ZERO, |s| s.offset);
                 }
                 if let Some(r) = sample_track_quat(&track.rotation, t) {
+                    let r = if mirror { Quat::from_xyzw(r.x, -r.y, -r.z, r.w) } else { r };
                     target.rotation = shape.map_or(r, |s| s.apply_rotation(r));
                 }
             }

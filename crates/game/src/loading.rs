@@ -94,7 +94,8 @@ impl Catalog {
             .iter()
             .map(|c| CatalogEntry {
                 key: c.objd,
-                name: if c.name.is_empty() { c.instance_name.clone() } else { c.name.clone() },
+                // (Some of the game's names end in a space: "Outdoor Trashcan ".)
+                name: if c.name.trim().is_empty() { c.instance_name.clone() } else { c.name.trim().to_string() },
                 price: c.price,
                 kind: crate::interact::ObjectKind::from_script(&c.script, &c.instance_name),
                 opening: crate::building::is_opening(&c.script),

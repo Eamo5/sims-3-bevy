@@ -19,6 +19,21 @@ pub struct Bone {
     pub scale: [f32; 3],
 }
 
+/// A bone's partner on the body's other side (`b__L_Hand__` and `b__R_Hand__`), for playing a
+/// clip mirrored; none for a bone down the middle.
+pub fn mirror_bone_name(name: &str) -> Option<String> {
+    for (a, b) in [("_L_", "_R_"), ("_R_", "_L_"), ("_l_", "_r_"), ("_r_", "_l_"), ("Left", "Right"), ("Right", "Left")] {
+        if name.contains(a) {
+            return Some(name.replacen(a, b, 1));
+        }
+    }
+    // (The rig's helpers: `L_footWorld`.)
+    if let Some(rest) = name.strip_prefix("L_") {
+        return Some(format!("R_{rest}"));
+    }
+    name.strip_prefix("R_").map(|rest| format!("L_{rest}"))
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Rig {
     pub name: String,

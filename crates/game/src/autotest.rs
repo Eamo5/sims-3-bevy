@@ -194,7 +194,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(First, tick_input_timeline.after(bevy::time::TimeSystems).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, keep_hungry, wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, (show_designs, show_style), walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, (keep_hungry, all_use), wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, (show_designs, show_style), walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, strand_swimmers.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, press_key.after(bevy::input::InputSystems).before(crate::buy::toggle_buy).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, buy_pick.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
@@ -1989,6 +1989,40 @@ fn run_out(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives)>, mut do
             }
         }
     }
+}
+
+/// ALL_USE=<Kind>:<option>: ten seconds in, every grown-up of the household is sent to the
+/// nearest such object for it, one after another (two Sims to one double bed).
+fn all_use(
+    time: Res<Time>,
+    mut done: Local<bool>,
+    mut sims: Query<(&crate::sim::Sim, &Transform, &mut crate::interact::ActionQueue), With<crate::sim::HouseholdMember>>,
+    objects: Query<(Entity, &crate::interact::GameObject, &Transform)>,
+) {
+    if *done || time.elapsed_secs() < 10.0 {
+        return;
+    }
+    let Ok(want) = std::env::var("ALL_USE") else { return };
+    let (kind, name) = want.split_once(':').unwrap_or((want.as_str(), ""));
+    let mut sent = 0;
+    for (sim, tf, mut q) in &mut sims {
+        if !sim.age.is_grown() {
+            continue;
+        }
+        let Some((e, o, _)) = objects
+            .iter()
+            .filter(|(_, o, _)| format!("{:?}", o.kind).eq_ignore_ascii_case(kind))
+            .min_by(|a, b| a.2.translation.distance(tf.translation).total_cmp(&b.2.translation.distance(tf.translation)))
+        else {
+            continue;
+        };
+        let Some((def, d)) = crate::interact::interactions_for(o.kind).iter().enumerate().find(|(_, d)| name.is_empty() || d.name.eq_ignore_ascii_case(name)) else { continue };
+        q.0.clear();
+        q.push_player(crate::interact::Action::new(d.name, crate::interact::ActionKind::Object { target: e, def }, false));
+        info!("all use: {} to {} the {}", sim.first, d.name, o.name);
+        sent += 1;
+    }
+    *done = sent > 0;
 }
 
 fn keep_hungry(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives), With<crate::sim::HouseholdMember>>, mut dirtied: Local<bool>) {
