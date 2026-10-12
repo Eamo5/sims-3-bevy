@@ -867,17 +867,26 @@ fn plumbob_color(mood: f32) -> Color {
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn update_plumbobs(
     time: Res<Time>,
-    sims: Query<(&PlumbobRef, &crate::life::Mood, Has<Selected>)>,
+    sims: Query<(&PlumbobRef, &crate::life::Mood, Has<Selected>, Option<&crate::simbody::Skeleton>, &GlobalTransform)>,
+    joints: Query<&GlobalTransform, Without<PlumbobTint>>,
     mut q: Query<(&mut Transform, &mut Visibility, &MeshMaterial3d<StandardMaterial>, &mut PlumbobTint)>,
     mut mats: ResMut<Assets<StandardMaterial>>,
 ) {
-    for (plumbob, mood, selected) in &sims {
+    for (plumbob, mood, selected, skel, sim_tf) in &sims {
         if let Ok((mut tf, mut vis, mat, mut tint)) = q.get_mut(plumbob.0) {
             *vis = if selected { Visibility::Inherited } else { Visibility::Hidden };
             tf.rotation = Quat::from_rotation_y(time.elapsed_secs() * 1.5);
-            tf.translation.y = 2.15 + (time.elapsed_secs() * 2.0).sin() * 0.03;
+            // Over their head, wherever the clip has it (sat down, lying in the bath, a child's
+            // lower), as the game's: eased there, so it doesn't sway with every nod.
+            let head = skel
+                .and_then(|s| s.rig.bones.iter().position(|b| b.name == "b__Head__").and_then(|i| joints.get(*s.joints.get(i)?).ok()))
+                .map(|h| sim_tf.affine().inverse().transform_point3(h.translation()) + Vec3::Y * 0.5);
+            let at = head.unwrap_or(Vec3::new(0.0, 2.15, 0.0)) + Vec3::Y * (time.elapsed_secs() * 2.0).sin() * 0.03;
+            let ease = (time.delta_secs() * 6.0).min(1.0);
+            tf.translation = if tf.translation.distance(at) > 1.5 { at } else { tf.translation.lerp(at, ease) };
             let c = tint.update(plumbob_color(mood.0), time.delta_secs());
             if let Some(mut m) = mats.get_mut(&mat.0) {
                 m.base_color = c;

@@ -18,7 +18,7 @@ pub struct EffectsPlugin;
 
 impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (attach, fountain_water, sprinkler_spray, emit, fall, tv_screens).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (attach, fountain_water, sprinkler_spray, emit, fall, tv_screens, censor).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -52,9 +52,13 @@ struct FxChecked;
 struct SprayDome;
 
 /// A fountain whose water surfaces (its untextured parts, drawn by the game's water shader)
-/// are still to be made water.
+/// are still to be made water (a bathtub's too: its water, raised as it's run).
 #[derive(Component)]
 struct FountainWater;
+
+/// A bathtub: its water is clear, not a fountain's green.
+#[derive(Component)]
+struct BathWater;
 
 #[derive(Component)]
 struct Droplet {
@@ -229,6 +233,10 @@ fn attach(
             }
             continue;
         }
+        if o.kind == ObjectKind::Bathtub {
+            commands.entity(e).insert((FountainWater, BathWater));
+            continue;
+        }
         let spray = match o.kind {
             ObjectKind::Shower => Spray::Shower,
             ObjectKind::Sink => Spray::Tap,
@@ -257,23 +265,27 @@ fn attach(
 /// untextured part.
 fn fountain_water(
     mut commands: Commands,
-    q: Query<(Entity, &Children), With<FountainWater>>,
+    q: Query<(Entity, &Children, Has<BathWater>), With<FountainWater>>,
     parts: Query<&MeshMaterial3d<StandardMaterial>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
-    mut water: Local<Option<Handle<StandardMaterial>>>,
+    mut water: Local<Option<(Handle<StandardMaterial>, Handle<StandardMaterial>)>>,
 ) {
-    for (e, children) in &q {
-        let w = water
+    for (e, children, bath) in &q {
+        let (fountain, tub) = water
             .get_or_insert_with(|| {
-                mats.add(StandardMaterial {
+                let mut m = StandardMaterial {
                     base_color: Color::srgba(0.32, 0.6, 0.66, 0.82),
                     perceptual_roughness: 0.04,
                     reflectance: 0.6,
                     alpha_mode: AlphaMode::Blend,
                     ..default()
-                })
+                };
+                let fountain = mats.add(m.clone());
+                m.base_color = Color::srgba(0.62, 0.8, 0.9, 0.6);
+                (fountain, mats.add(m))
             })
             .clone();
+        let w = if bath { tub } else { fountain };
         for c in children {
             let Ok(m) = parts.get(*c) else { continue };
             if mats.get(&m.0).is_some_and(|m| m.base_color_texture.is_none() && m.alpha_mode == AlphaMode::Opaque) {
@@ -428,6 +440,98 @@ fn fall(
         tf.translation += d.vel * dt;
         if let Some(c) = cam {
             tf.rotation = Transform::from_translation(tf.translation).looking_at(c, Vec3::Y).rotation;
+        }
+    }
+}
+
+/// The game's censor (`simCensorFx`, put on by its `AutoEnableCensor`) over a Sim with nothing
+/// on: a mosaic of big squares in their skin's colours, over a man's hips (`LowerBody`, from the
+/// pelvis) or a woman's chest and hips (`FullBody`), turned to the camera.
+#[derive(Component)]
+struct Censor {
+    sim: Entity,
+    /// Its mosaic's frames, shuffled through as the game's shimmers.
+    frames: Vec<Handle<StandardMaterial>>,
+}
+
+/// A frame of a censor's mosaic: squares of the skin's colour, lighter and darker.
+fn censor_frame(skin: Srgba, female: bool, rng: &mut impl Rng) -> Image {
+    let (w, h) = if female { (5u32, 8u32) } else { (5, 5) };
+    let mut data = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let k = rng.random_range(0.55..1.3f32);
+            let warm = rng.random_range(0.88..1.06f32);
+            let edge = x == 0 || y == 0 || x == w - 1 || y == h - 1;
+            let c = |v: f32| (v.clamp(0.0, 1.0) * 255.0) as u8;
+            data.extend_from_slice(&[c(skin.red * k), c(skin.green * k * warm), c(skin.blue * k * warm), if edge { 200 } else { 255 }]);
+        }
+    }
+    let mut img = Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, data, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD);
+    img.sampler = bevy::image::ImageSampler::nearest();
+    img
+}
+
+#[allow(clippy::type_complexity)]
+fn censor(
+    mut commands: Commands,
+    sims: Query<(Entity, &crate::sim::Sim, &crate::simbody::Wearing, &crate::simbody::Skeleton, &GlobalTransform)>,
+    joints: Query<&GlobalTransform>,
+    mut censors: Query<(Entity, &Censor, &mut Transform, &mut MeshMaterial3d<StandardMaterial>)>,
+    camera: Query<&GlobalTransform, With<SimsCamera>>,
+    (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    mut quad: Local<Option<Handle<Mesh>>>,
+    time: Res<Time>,
+) {
+    use crate::simbody::OutfitKind;
+    // Gone with the clothes back on.
+    for (e, c, ..) in &censors {
+        if !sims.get(c.sim).is_ok_and(|s| s.2.0 == OutfitKind::Naked) {
+            commands.entity(e).try_despawn();
+        }
+    }
+    let Ok(cam) = camera.single() else { return };
+    let quad = quad.get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0))).clone();
+    for (me, sim, wearing, skel, sim_tf) in &sims {
+        if wearing.0 != OutfitKind::Naked {
+            continue;
+        }
+        let bone = |n: &str| skel.rig.bones.iter().position(|b| b.name == n).and_then(|i| joints.get(*skel.joints.get(i)?).ok()).map(|g| g.translation());
+        let (Some(pelvis), Some(chest)) = (bone("b__Pelvis__"), bone("b__Spine2__")) else { continue };
+        // Along the body (up it standing, along it lying in the bath), sized by it.
+        let torso = chest - pelvis;
+        let len = torso.length().max(0.05);
+        let up = torso / len;
+        let (centre, size) = if sim.female { (pelvis + torso * 0.25, Vec2::new(len * 1.25, len * 1.7)) } else { (pelvis - up * len * 0.33, Vec2::new(len * 1.0, len * 0.95)) };
+        let toward = (cam.translation() - centre).normalize_or_zero();
+        let world = Transform::from_translation(centre + toward * 0.3).looking_to(-toward, up).with_scale(size.extend(1.0));
+        let local = GlobalTransform::from(world).reparented_to(sim_tf);
+        match censors.iter_mut().find(|c| c.1.sim == me) {
+            Some((_, c, mut tf, mut mat)) => {
+                *tf = local;
+                let frame = &c.frames[(time.elapsed_secs() * 6.0) as usize % c.frames.len()];
+                if mat.0 != *frame {
+                    mat.0 = frame.clone();
+                }
+            }
+            None => {
+                let mut rng = rand::rng();
+                let frames: Vec<Handle<StandardMaterial>> = (0..4)
+                    .map(|_| {
+                        let img = images.add(censor_frame(sim.skin.to_srgba(), sim.female, &mut rng));
+                        materials.add(StandardMaterial {
+                            base_color_texture: Some(img),
+                            unlit: true,
+                            alpha_mode: AlphaMode::Blend,
+                            cull_mode: None,
+                            ..default()
+                        })
+                    })
+                    .collect();
+                let first = frames[0].clone();
+                let e = commands.spawn((Censor { sim: me, frames }, Mesh3d(quad.clone()), MeshMaterial3d(first), local, NotShadowCaster)).id();
+                commands.entity(me).add_child(e);
+            }
         }
     }
 }

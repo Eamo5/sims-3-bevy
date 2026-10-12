@@ -498,7 +498,7 @@ pub fn load_model(pkgs: &PackageSet, modl_key: &ResourceKey) -> Option<Vec<MeshD
         .filter(|l| l.lod_id & 0x10000 == 0)
         .min_by_key(|l| l.lod_id)?;
     match rcol.decode_ref(lod.reference) {
-        ChunkRef::Chunk(i) => decode_mlod(&rcol, rcol.chunk_data(i)?).ok(),
+        ChunkRef::Chunk(i) => decode_mlod(&rcol, rcol.chunk_data(i)?).ok().map(contain_tub_water),
         ChunkRef::External(i) => {
             let key = *rcol.external.get(i)?;
             load_mlod_resource(pkgs, &key)
@@ -507,11 +507,45 @@ pub fn load_model(pkgs: &PackageSet, modl_key: &ResourceKey) -> Option<Vec<MeshD
     }
 }
 
+/// fnv32 of the bone a bathtub's water hangs from (raised by the bath's clips).
+const TUB_WATER_BONE: u32 = 0x8501_3389;
+
+/// A bathtub's water is a plane a little wider than the tub, the game drawing only what's
+/// inside its basin: kept within the tub's own sides (so none of it shows outside them, nor on
+/// the floor round the tub while it's empty).
+fn contain_tub_water(mut meshes: Vec<MeshData>) -> Vec<MeshData> {
+    let water = |m: &MeshData| m.joints.contains(&TUB_WATER_BONE) && m.joints.len() == 1;
+    if !meshes.iter().any(water) {
+        return meshes;
+    }
+    let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+    for m in meshes.iter().filter(|m| !water(m)) {
+        lo = [lo[0].min(m.bounds_min[0]), lo[1].min(m.bounds_min[2])];
+        hi = [hi[0].max(m.bounds_max[0]), hi[1].max(m.bounds_max[2])];
+    }
+    if lo[0] >= hi[0] {
+        return meshes;
+    }
+    let inset = 0.03;
+    for m in meshes.iter_mut().filter(|m| water(m)) {
+        for p in m.positions.iter_mut() {
+            p[0] = p[0].clamp(lo[0] + inset, hi[0] - inset);
+            p[2] = p[2].clamp(lo[1] + inset, hi[1] - inset);
+        }
+        // (Its bounds with it.)
+        for a in [0, 2] {
+            m.bounds_min[a] = m.positions.iter().map(|p| p[a]).fold(f32::MAX, f32::min);
+            m.bounds_max[a] = m.positions.iter().map(|p| p[a]).fold(f32::MIN, f32::max);
+        }
+    }
+    meshes
+}
+
 pub fn load_mlod_resource(pkgs: &PackageSet, key: &ResourceKey) -> Option<Vec<MeshData>> {
     let data = pkgs.read(key).or_else(|| pkgs.read_ti(key.t, key.i))?;
     let rcol = Rcol::parse(&data).ok()?;
     let mi = rcol.find_tag(b"MLOD")?;
-    decode_mlod(&rcol, rcol.chunk_data(mi)?).ok()
+    decode_mlod(&rcol, rcol.chunk_data(mi)?).ok().map(contain_tub_water)
 }
 
 /// Finds the MODL keys referenced by a VPXY resource.

@@ -28,7 +28,7 @@ fn pyjamas(
     sims: Query<(Entity, &Sim, &ActionQueue, Option<&crate::simbody::Wearing>, Option<&crate::careers::Job>, Has<crate::simbody::ChangedInto>, &Transform), With<crate::sim::HouseholdMember>>,
     beds: Query<&GameObject>,
     cas: Option<Res<crate::simbody::CasData>>,
-    (weather, building): (Res<crate::weather::Weather>, Option<Res<crate::building::ActiveBuilding>>),
+    (weather, building, clock): (Res<crate::weather::Weather>, Option<Res<crate::building::ActiveBuilding>>, Res<crate::clock::GameClock>),
 ) {
     use crate::simbody::{OutfitKind, Wearing};
     let cold = weather.temperature < COLD;
@@ -42,6 +42,9 @@ fn pyjamas(
                 let d = interactions_for(o.kind).get(*def)?;
                 if matches!(o.kind, crate::interact::ObjectKind::BedSingle | crate::interact::ObjectKind::BedDouble) && d.name == "Sleep" {
                     Some(OutfitKind::Sleepwear)
+                } else if matches!(o.kind, crate::interact::ObjectKind::Shower | crate::interact::ObjectKind::Bathtub) {
+                    // (Undressed for a shower or a bath, as the game's `GoingToBathe`.)
+                    Some(OutfitKind::Naked)
                 } else if d.pose == crate::sim::Pose::Exercise {
                     Some(OutfitKind::Athletic)
                 } else {
@@ -58,6 +61,15 @@ fn pyjamas(
         let keep = want.is_none() && (chosen || (has == Some(OutfitKind::Career) && uniform));
         if has == Some(OutfitKind::Swimwear) || want == has || keep {
             continue;
+        }
+        // Out of the bath at night, into pyjamas (the game's `GettingOutOfBath`: within ten hours
+        // of six in the morning, at home), kept on until it's time for something else.
+        if want.is_none() && has == Some(OutfitKind::Naked) && !sim.age.is_little() {
+            let until_six = (6.0 - clock.hour_f()).rem_euclid(24.0);
+            if until_six < 10.0 {
+                commands.entity(e).insert((Wearing(OutfitKind::Sleepwear), crate::simbody::ChangedInto, crate::aging::NeedsNewBody));
+                continue;
+            }
         }
         match want {
             Some(k) => {

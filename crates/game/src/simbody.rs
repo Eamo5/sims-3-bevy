@@ -185,6 +185,8 @@ pub enum OutfitKind {
     Career,
     /// Coats and boots for the cold (Seasons).
     Outerwear,
+    /// Nothing on, for a bath or a shower (the game's naked outfit, under its censor).
+    Naked,
 }
 
 impl OutfitKind {
@@ -199,6 +201,7 @@ impl OutfitKind {
             Self::Athletic => "Athletic",
             Self::Career => "Career",
             Self::Outerwear => "Outerwear",
+            Self::Naked => "Naked",
         }
     }
 
@@ -211,6 +214,7 @@ impl OutfitKind {
             Self::Athletic => s3formats::sim::CAT_ATHLETIC,
             Self::Formal => s3formats::sim::CAT_FORMAL,
             Self::Outerwear => s3formats::sim::CAT_OUTERWEAR,
+            Self::Naked => s3formats::sim::CAT_NAKED,
         }
     }
 }
@@ -276,6 +280,20 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
     // (A uniform is worn over the everyday look: see `uniform`.)
     if kind == OutfitKind::Career {
         return pick_outfit_for(cas, sim, rng, OutfitKind::Everyday);
+    }
+    // (Bathing: their own look, with the game's naked parts for clothes, and glasses off.)
+    if kind == OutfitKind::Naked {
+        let mut o = pick_outfit_for(cas, sim, rng, OutfitKind::Everyday);
+        let (age, gender) = (age_bits(sim.age), if sim.female { GENDER_FEMALE } else { GENDER_MALE });
+        let nude: Vec<CasPartInfo> = [("TopNude", CT_TOP), ("BottomNude", CT_BOTTOM), ("ShoesNude", CT_SHOES)]
+            .iter()
+            .filter_map(|(n, t)| cas.parts.iter().find(|p| p.baked && p.clothing_type == *t && p.age_gender & age != 0 && p.age_gender & gender != 0 && p.name.ends_with(n)).cloned())
+            .collect();
+        if nude.len() == 3 {
+            o.body = nude;
+            o.glasses = None;
+        }
+        return o;
     }
     let swim = kind != OutfitKind::Everyday;
     let cat = kind.category();
@@ -385,7 +403,7 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
         OutfitKind::Formal => !fulls.is_empty() && rng.random_bool(0.5),
         // (Snowsuits now and then; mostly a coat.)
         OutfitKind::Outerwear => !fulls.is_empty() && rng.random_bool(0.25),
-        OutfitKind::Career => use_full,
+        OutfitKind::Career | OutfitKind::Naked => use_full,
     };
     if let Some(f) = cf {
         body.push(f);

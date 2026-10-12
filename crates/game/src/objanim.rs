@@ -140,6 +140,15 @@ fn companion(data: &Baked, name: &str) -> Option<String> {
         .cloned()
 }
 
+/// The pose an object's held in through a Sim's clips that don't move it: a bath's water up
+/// (`a2o_bathtub_waterUpPose_bathtub`) once the taps are on, until they're out of the tub.
+fn held_pose(data: &Baked, name: &str) -> Option<String> {
+    let l = name.to_ascii_lowercase();
+    // (A grown-up's or a child's clip at the tub.)
+    let bathing = l.get(1..).is_some_and(|r| r.starts_with("2o_bathtub_")) && !["repair", "clean", "upgrade"].iter().any(|n| l.contains(n));
+    bathing.then(|| data.0.clip_names.iter().find(|n| n.eq_ignore_ascii_case("a2o_bathtub_waterUpPose_bathtub")).cloned()).flatten()
+}
+
 /// While a Sim plays a clip at an object with moving parts, the object plays its half of it
 /// (in step); once nobody's using it, it's back at rest.
 fn animate_objects(
@@ -161,7 +170,7 @@ fn animate_objects(
             continue;
         };
         let Ok((_, mut rig, _)) = objects.get_mut(target) else { continue };
-        let Some(name) = companions.entry(player.name.clone()).or_insert_with(|| companion(&data, &player.name)).clone() else { continue };
+        let Some(name) = companions.entry(player.name.clone()).or_insert_with(|| companion(&data, &player.name).or_else(|| held_pose(&data, &player.name))).clone() else { continue };
         let Some(clip) = lib.get(&data, &name) else { continue };
         let t = player.time.clamp(0.0, clip.duration.max(0.0));
         for inst in &rig.rigs {

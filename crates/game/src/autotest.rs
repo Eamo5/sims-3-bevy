@@ -437,7 +437,8 @@ impl Plugin for AutoTestPlugin {
                   named: Query<(&Transform, &crate::interact::ActionQueue, Option<&crate::visit::OnLot>, &crate::sim::Sim)>,
                   mut cam: Query<&mut SimsCamera>,
                   mut last: Local<f32>,
-                  time: Res<Time>| {
+                  time: Res<Time>,
+                  (bobs, globals): (Query<&crate::sim::PlumbobRef, With<crate::sim::Selected>>, Query<&GlobalTransform>)| {
                     if !args.follow || time.elapsed_secs() - *last < 2.0 {
                         return;
                     }
@@ -449,6 +450,14 @@ impl Plugin for AutoTestPlugin {
                     let who = std::env::var("FOLLOW_NAME").ok().and_then(|n| named.iter().find(|s| s.3.first == n || s.3.last == n).map(|s| (s.0, s.1, s.2)));
                     if let (Some((tf, q, on)), Ok(mut c)) = (who.or(sel.single().ok()), cam.single_mut()) {
                         c.look_at(tf.translation);
+                        // (FOLLOW_HEAD=1: at the selected Sim's head, under the plumbob, where a clip
+                        // has carried it: in the bath.)
+                        if who.is_none()
+                            && std::env::var("FOLLOW_HEAD").is_ok()
+                            && let Some(b) = bobs.single().ok().and_then(|b| globals.get(b.0).ok())
+                        {
+                            c.look_at(b.translation());
+                        }
                         if let Some(d) = std::env::var("FOLLOW_DIST").ok().and_then(|d| d.parse::<f32>().ok()) {
                             c.distance = d;
                         }
@@ -1982,7 +1991,14 @@ fn run_out(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives)>, mut do
     }
 }
 
-fn keep_hungry(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives)>) {
+fn keep_hungry(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives), With<crate::sim::HouseholdMember>>, mut dirtied: Local<bool>) {
+    // (DIRTY=1: the household start in need of a wash, once.)
+    if !*dirtied && std::env::var("DIRTY").is_ok() && !sims.is_empty() {
+        for (_, mut m) in &mut sims {
+            m.0[crate::sim::HYGIENE] = -80.0;
+        }
+        *dirtied = true;
+    }
     let Ok(who) = std::env::var("HUNGRY") else { return };
     for (s, mut m) in &mut sims {
         if s.first == who {
@@ -2222,7 +2238,12 @@ fn portrait_cam(
     if let Some(want) = &args.select
         && let Some((e, _, is_sel)) = members
             .iter()
-            .find(|(_, s, _)| s.first.eq_ignore_ascii_case(want) || (want == "@baby" && s.age == crate::sim::Age::Baby))
+            .find(|(_, s, _)| {
+                s.first.eq_ignore_ascii_case(want)
+                    || (want == "@baby" && s.age == crate::sim::Age::Baby)
+                    || (want == "@man" && !s.female && s.age.is_grown())
+                    || (want == "@woman" && s.female && s.age.is_grown())
+            })
     {
         for (o, _, selected) in &members {
             if selected && o != e {
@@ -3060,7 +3081,9 @@ fn auto_place(
     *done = true;
     // (Several, comma-separated: side by side.)
     for (i, want) in want.to_ascii_lowercase().split(',').enumerate() {
-        let Some(e) = catalog.entries.iter().filter(|e| e.price > 0 && format!("{:?}", e.kind).to_ascii_lowercase() == want).min_by_key(|e| e.price) else {
+        // (PLACE_NAME=<part of its name>: that one of them.)
+        let named = |e: &&crate::loading::CatalogEntry| std::env::var("PLACE_NAME").map_or(true, |n| e.name.to_ascii_lowercase().contains(&n.to_ascii_lowercase()));
+        let Some(e) = catalog.entries.iter().filter(|e| e.price > 0 && format!("{:?}", e.kind).to_ascii_lowercase() == want).filter(named).min_by_key(|e| e.price) else {
             warn!("--place {want}: nothing in the catalog");
             continue;
         };

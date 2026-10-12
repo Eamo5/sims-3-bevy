@@ -262,6 +262,29 @@ fn next_loop(lib: &mut ClipLibrary, data: &Baked, script: &ActionClip, child: bo
 }
 
 #[allow(clippy::type_complexity)]
+/// fnv32("b__ROOT_bind__"): the body under the root.
+const ROOT_BIND: u32 = 0x5788_4BB9;
+
+/// Clips made round another root than the rest of their set's (the game puts the Sim at
+/// another of the object's slots for them): where the hips are in them, and how they're turned,
+/// to bring the body back round the set's root. A bath's are played from where the Sim stands
+/// in the tub to sit down (its getting in and out); its washing has the hips 0.92 m from the
+/// root, turned about, and its lying back (and the rubber ducky) a metre to the side and 0.77 m
+/// back.
+pub fn clip_anchor(name: &str) -> Option<(Vec3, f32)> {
+    let n = name.get(4..)?;
+    if !name.get(1..4).is_some_and(|p| p == "2o_") {
+        return None;
+    }
+    if n.starts_with("bathtub_relax") || n.starts_with("bathtub_ducky") {
+        Some((Vec3::new(-1.0, 0.0, -0.7698), 0.0))
+    } else if ["bathtub_takeBath_wash", "bathtub_takeBath_trans", "bathtub_takeBath_holdBreath"].iter().any(|p| n.starts_with(p)) {
+        Some((Vec3::new(0.0, 0.0, 0.9241), std::f32::consts::PI))
+    } else {
+        None
+    }
+}
+
 pub fn drive_skeletons(
     time: Res<Time>,
     clock: Res<GameClock>,
@@ -385,6 +408,7 @@ pub fn drive_skeletons(
             (true, true) => player.time.min(clip.duration),
             (true, false) => player.time % clip.duration,
         };
+        let anchor = clip_anchor(&player.name);
         for (i, bone) in skel.rig.bones.iter().enumerate() {
             let Ok(mut tf) = joints.get_mut(skel.joints[i]) else { continue };
             let bind = skel.bind[i];
@@ -416,6 +440,14 @@ pub fn drive_skeletons(
             }
             if i == 0 {
                 target.rotation = bind.rotation;
+            }
+            // (Brought round to its set's root.)
+            if let Some((at, turn)) = anchor
+                && bone.hash == ROOT_BIND
+            {
+                let q = Quat::from_rotation_y(turn);
+                target.translation = q * (target.translation - at);
+                target.rotation = q * target.rotation;
             }
             if player.blend > 0.0
                 && let Some(from) = player.from.get(i)

@@ -230,6 +230,8 @@ installation is unreachable.
   only by their rig, Waffles, Autumn Salad, Sushi, found through it) — the dish
   on the serving platter, a plateful in front of each Sim — scraped clean once eaten. The
   Culinary Librarian lifetime wish asks for every one. Learned recipes are kept in saves.
+- **Plumbob**: over the Sim's head wherever their animation has it (lying in the bath, sat
+  down, a child's lower).
 - **Props in hand**: the game's own plates, forks, books and guitars, held as its animation
   clips place them (each Sim clip's companion prop clips, and their parent events moving a
   prop from slot to slot: the SimLife Goggles go from the hand onto the face).
@@ -362,7 +364,13 @@ installation is unreachable.
   climb down, swim about the pool with the game's swim cycle (building Athletic skill) and
   climb out back into their clothes. From a diving board they walk out and dive in (the game's
   dives, cannonball included), then swim. At bedtime they change into their sleepwear (pyjamas,
-  nightgowns, boxers), and into athletic wear to work out, and dress again after.
+  nightgowns, boxers), and into athletic wear to work out, and dress again after. They undress
+  for a shower or a bath (the game's naked outfit, which has no anatomy) under its censor, a
+  mosaic in their skin's colours over a man's hips or a woman's chest and hips, and dress again
+  after (in pyjamas when it's late, as the game's `GettingOutOfBath`).
+- **Baths**: as the game's: stood in the tub, the taps turned on and the water rising (the
+  tub's own water, raised by its half of the clip), sat down, arms and legs washed, then lying
+  back; sat up and out at the end. The rubber ducky's played with in the water too.
 - **Jogging**: clicking the selected Sim offers "Go Jogging": out to the street in athletic
   wear and up and down its sidewalk at a jog (the game's jogging clip) for an hour, or until
   they're worn out, then home (and usually to the shower). It trains Athletic, builds fitness,

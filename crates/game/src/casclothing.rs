@@ -297,7 +297,7 @@ fn clothing_panel(
     c.shown = Some(want);
     // The title: the outfit's name, as the game has it.
     let state = match wear {
-        OutfitKind::Everyday | OutfitKind::Career => "Everyday",
+        OutfitKind::Everyday | OutfitKind::Career | OutfitKind::Naked => "Everyday",
         OutfitKind::Formal => "Formal",
         OutfitKind::Sleepwear => "Sleepwear",
         OutfitKind::Swimwear => "Swimwear",

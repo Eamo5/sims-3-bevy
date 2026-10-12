@@ -1167,6 +1167,20 @@ fn seat_clips(kind: ObjectKind) -> Option<(&'static str, &'static str, f32)> {
 }
 
 /// The animation played while performing an interaction: start clip, then loop variants.
+/// A bath's start, the taps on: sat down, arms and legs washed, then lying back.
+const BATH_WASH: &[&str] = &[
+    "a2o_bathtub_takeBath_getIn_x",
+    "a2o_bathtub_takeBath_washArm_start_x",
+    "a2o_bathtub_takeBath_washArm_loop1_x",
+    "a2o_bathtub_takeBath_washArm_loop2_x",
+    "a2o_bathtub_takeBath_washArm_stop_x",
+    "a2o_bathtub_takeBath_washLeg_start_x",
+    "a2o_bathtub_takeBath_washLeg_loop1_x",
+    "a2o_bathtub_takeBath_washLeg_loop2_x",
+    "a2o_bathtub_takeBath_washLeg_stop_x",
+    "a2o_bathtub_takeBath_trans_relax_x",
+];
+
 pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::ActionClip> {
     use crate::anim::ActionClip as A;
     Some(match name {
@@ -1199,9 +1213,16 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         // (Served from the table, eaten standing.)
         "Have a Plate" => A::steps("a2o_buffetTable_serve_x", &[], &["a2o_eat_stand_fork_neat_x"]),
         "Have a Picnic" => A::steps("a2o_picnicBasket_getPlate_part1_x", &["a2o_picnicBasket_eat_start_x"], &["a2o_picnicBasket_eat_x"]).ending(&["a2o_picnicBasket_eat_stop_finished_x"], 0.7),
-        "Take Bubble Bath" => A::new(None, &["a2o_bathtub_relax_loop"]),
-        "Play with Rubber Ducky" => A::new(Some("a2o_bathtub_ducky_start_x"), &["a2o_bathtub_ducky_loop1_x", "a2o_bathtub_ducky_loop2_x", "a2o_bathtub_ducky_loop3_x"])
-            .ending(&["a2o_bathtub_ducky_stop_x"], 2.3),
+        // (Stood in the tub, the taps turned on and the water up, sat down, washed, then lying
+        // back; sat up and out at the end.)
+        "Take Bath" | "Take Bubble Bath" => A::steps("a2o_bathtub_takeBath_turnOn_x", BATH_WASH, &["a2o_bathtub_relax_loop1_x", "a2o_bathtub_relax_loop2_x"])
+            .ending(&["a2o_bathtub_takeBath_trans_sitUp_x", "a2o_bathtub_takeBath_getOut_x"], 5.2),
+        "Play with Rubber Ducky" => A::steps(
+            "a2o_bathtub_takeBath_turnOn_x",
+            &["a2o_bathtub_takeBath_getIn_x", "a2o_bathtub_takeBath_trans_relax_x", "a2o_bathtub_ducky_start_x"],
+            &["a2o_bathtub_ducky_loop1_x", "a2o_bathtub_ducky_loop2_x", "a2o_bathtub_ducky_loop3_x"],
+        )
+        .ending(&["a2o_bathtub_ducky_stop_x", "a2o_bathtub_takeBath_trans_sitUp_x", "a2o_bathtub_takeBath_getOut_x"], 7.5),
         "Light Fire" => A::new(None, &["a2o_fireplace_light_start_x"]),
         "Light Candle" | "Blow Out" => A::new(None, &["a2o_object_genericSwipe_x"]),
         "Put Out Fire" => A::new(None, &["a2o_fireplace_putOut_x"]),
@@ -1230,7 +1251,6 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         ),
         "Use Toilet" => A::new(Some("a2o_toilet_useStanding_start_x"), &["a2o_toilet_useStanding_loop_x"]),
         "Take Shower" => A::new(Some("a2o_shower_takeShower_getIn_x"), &["a2o_shower_takeShower_loop"]).ending(&["a2o_shower_takeShower_getOut_x"], 2.4),
-        "Take Bath" => A::new(None, &["a2o_bathtub_relax_loop"]),
         "Wash Hands" => A::new(Some("a2o_sink_washhands_start_x"), &["a2o_sink_washhands_scrubHands_x", "a2o_sink_washhands_rinseHands_x"]).ending(&["a2o_sink_washhands_stop_x"], 2.6),
         "Brush Teeth" => A::new(Some("a2o_sink_brushTeeth_start_x"), &["a2o_sink_brushTeeth_Loop"]).ending(&["a2o_sink_brushTeeth_stop_x"], 2.6),
         // (Only the plain loop: the toss-and-turn ones are authored from beside the bed.)
@@ -2470,13 +2490,11 @@ pub(crate) fn run_actions(
                                             tf.rotation = otf.rotation * Quat::from_rotation_y(f.x.atan2(f.y));
                                         }
                                         if obj.kind == ObjectKind::Bathtub {
-                                            // The bath's clips are played from the tub's side, the
-                                            // Sim's hips a metre to the left of their root and
-                                            // 0.77 m behind it, back to the taps: rooted there so
-                                            // they sit in the tub.
-                                            let hips = Vec2::new(obj.center.x, obj.center.y - obj.half.y + 0.5);
-                                            let p = otf.transform_point(Vec3::new(hips.x + 1.0, 0.0, hips.y + 0.77));
-                                            tf.translation = Vec3::new(p.x, otf.translation.y, p.z);
+                                            // Stood in the tub where they'll sit, back to the taps
+                                            // (the bath's clips brought round that spot: see
+                                            // `anim::clip_anchor`).
+                                            let hips = otf.transform_point(Vec3::new(obj.center.x, 0.0, obj.center.y - obj.half.y + 0.5));
+                                            tf.translation = Vec3::new(hips.x, otf.translation.y, hips.z);
                                         }
                                         anim.seat_height = obj.seat_height();
                                         debug!("{} on the {}: centre {:?} half {:?}, object at {:?} turned {:?}", d.name, obj.name, obj.center, obj.half, otf.translation, otf.rotation.to_euler(EulerRot::YXZ).0);
@@ -4157,6 +4175,68 @@ mod tests {
             assert_eq!(app.world().resource::<Household>().funds, if mailbox { 1000 } else { 940 });
             app.update();
             assert_eq!(app.world().resource::<Household>().funds, if mailbox { 1000 } else { 940 }, "only one bill per scheduled day");
+        }
+    }
+
+    /// How long clips are (`CLIPS=<name>,<name> cargo test -p sims3 clip_lengths -- --ignored
+    /// --nocapture`), for an interaction's ending.
+    #[test]
+    #[ignore]
+    fn clip_lengths() {
+        let data = crate::baked::BakedData::open(s3bake::default_root(), None).unwrap();
+        for name in std::env::var("CLIPS").unwrap_or_default().split(',').filter(|n| !n.is_empty()) {
+            println!("{name}: {:?}", data.clip(name).map(|c| c.duration));
+            // (Where the root and hips are at its start and end.)
+            if let Some(c) = data.clip(name) {
+                for bone in ["b__ROOT__", "b__ROOT_bind__", "b__Pelvis__"] {
+                    if let Some(t) = c.tracks.get(&s3pkg::fnv32(bone)) {
+                        if std::env::var("TRACK").is_ok() {
+                            let n = t.translation.len();
+                            for k in (0..n).step_by((n / 8).max(1)) {
+                                println!("    t {:.2} {:?}", t.translation[k].0, t.translation[k].1);
+                            }
+                        }
+                        println!("  {bone}: {:?} .. {:?} turned {:?} .. {:?}", t.translation.first().map(|p| p.1), t.translation.last().map(|p| p.1), t.rotation.first().map(|r| Quat::from_array(r.1).to_euler(EulerRot::YXZ).0.to_degrees()), t.rotation.last().map(|r| Quat::from_array(r.1).to_euler(EulerRot::YXZ).0.to_degrees()));
+                    }
+                }
+            }
+        }
+    }
+
+    /// An object model's rig and skinning, and a clip's tracks for it (`SKIN=<modl instance hex>
+    /// CLIPS=<clip> cargo test -p sims3 object_skin -- --ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn object_skin() {
+        let data = crate::baked::BakedData::open(s3bake::default_root(), None).unwrap();
+        let inst = u64::from_str_radix(&std::env::var("SKIN").unwrap(), 16).unwrap();
+        let skin = data.skin(&(0x0166_1233, 1, inst)).or_else(|| data.skin(&(0x0166_1233, 0, inst)));
+        for name in std::env::var("CLIPS").unwrap_or_default().split(',').filter(|n| !n.is_empty()) {
+            let Some(c) = data.clip(name) else { continue };
+            for (h, t) in &c.tracks {
+                println!("{name} {h:08X}: {:?} .. {:?}", t.translation.first(), t.translation.last());
+            }
+        }
+        for k in [(0x0166_1233, 1, inst), (0x0166_1233, 0, inst)] {
+            for p in data.model(&k).map(|m| m.parts).unwrap_or_default() {
+                println!("part: {} verts, first {:?}, texture {:?}, bounds {:?}..{:?}", p.positions.len(), p.positions.first(), p.texture, p.bmin, p.bmax);
+            }
+        }
+        let Some(skin) = skin else { return println!("not skinned") };
+        for (i, b) in skin.bones.iter().enumerate() {
+            println!("bone {i}: {:08X} parent {} at {:?}", b.0, b.1, b.2);
+        }
+        for (m, mesh) in skin.meshes.iter().enumerate() {
+            let mut used: Vec<u16> = mesh.bones.iter().zip(&mesh.weights).flat_map(|(b, w)| b.iter().zip(w).filter(|(_, w)| **w > 0).map(|(b, _)| *b)).collect();
+            used.sort();
+            used.dedup();
+            println!("mesh {m}: {} verts, first {:?}, bones {used:?}", mesh.verts, mesh.first);
+        }
+        for name in std::env::var("CLIPS").unwrap_or_default().split(',').filter(|n| !n.is_empty()) {
+            let Some(c) = data.clip(name) else { continue };
+            for (h, t) in &c.tracks {
+                println!("{name} {h:08X}: {:?} .. {:?}", t.translation.first(), t.translation.last());
+            }
         }
     }
 

@@ -6,11 +6,11 @@ pub use s3formats::sim::{Clip, Rig};
 pub use s3formats::world::{Heightmap, LotInfo};
 
 /// Bump whenever any baked format changes; stale caches are rebuilt.
-pub const BAKE_VERSION: u32 = 4;
+pub const BAKE_VERSION: u32 = 6;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
-pub const CAS_VERSION: u32 = 10;
+pub const CAS_VERSION: u32 = 11;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 67;
+pub const WORLD_VERSION: u32 = 69;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);

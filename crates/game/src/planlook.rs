@@ -396,7 +396,7 @@ fn look_rows(
     l.shown = Some(want);
     // The panel's title: the outfit's name, as the game has it.
     let title = match p.wear {
-        OutfitKind::Everyday => "Everyday",
+        OutfitKind::Everyday | OutfitKind::Naked => "Everyday",
         OutfitKind::Career => "Career",
         OutfitKind::Formal => "Formal",
         OutfitKind::Sleepwear => "Sleepwear",

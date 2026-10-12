@@ -208,7 +208,7 @@ fn main() {
                         .iter()
                         .map(|(h, ix)| format!("{} ({} tris)", names.iter().find(|n| fnv32(n) == *h).copied().unwrap_or("?"), ix.len() / 3))
                         .collect();
-                    println!("mesh {:08X} {} tris, states {st:?}", mesh.name_hash, mesh.indices.len() / 3);
+                    println!("mesh {:08X} {} tris, states {st:?}, shader {:08X}, bounds {:?}..{:?}, joints {:?}", mesh.name_hash, mesh.indices.len() / 3, mesh.material.shader, mesh.bounds_min, mesh.bounds_max, mesh.joints);
                 }
             }
         }
