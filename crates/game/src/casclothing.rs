@@ -37,21 +37,21 @@ pub static TEST_ACCESSORIES: AtomicBool = AtomicBool::new(false);
 // `CASClothing`'s windows: the outfits' buttons (in `cas::WEAR`'s order) and its close button.
 const OUTFITS: [u32; 6] = [0x05db_c502, 0x05db_c503, 0x05db_c504, 0x05db_c506, 0x05db_c505, 0x05db_c507];
 const CAREER: u32 = 0x05db_c509;
-const CLOSE: u32 = 0x05db_9c00;
+pub(crate) const CLOSE: u32 = 0x05db_9c00;
 // `CASClothingCategory`'s.
-const TITLE: u32 = 0x05db_cf01;
-const TOPS: u32 = 0x05db_cf11;
-const BOTTOMS: u32 = 0x05db_cf12;
-const WHOLE: u32 = 0x05db_cf14;
-const SHOES: u32 = 0x05db_cf13;
+pub(crate) const TITLE: u32 = 0x05db_cf01;
+pub(crate) const TOPS: u32 = 0x05db_cf11;
+pub(crate) const BOTTOMS: u32 = 0x05db_cf12;
+pub(crate) const WHOLE: u32 = 0x05db_cf14;
+pub(crate) const SHOES: u32 = 0x05db_cf13;
 const KINDS: [(u32, CasTab, &str); 4] = [(TOPS, CasTab::Tops, "Tops"), (BOTTOMS, CasTab::Bottoms, "Bottoms"), (WHOLE, CasTab::Outfits, "Outfits"), (SHOES, CasTab::Shoes, "Shoes")];
-const GRID: u32 = 0x05db_cf21;
+pub(crate) const GRID: u32 = 0x05db_cf21;
 /// Accessories (glasses, here), after the kinds of clothes.
-const ACCESSORIES: u32 = 0x05db_cf90;
+pub(crate) const ACCESSORIES: u32 = 0x05db_cf90;
 /// What this game hasn't: the content filter, saving, deleting and sharing designs.
-const NOT_HERE: [u32; 5] = [0x05db_cf19, 0x05db_b904, 0x05db_b905, 0x05db_cf17, 0x05db_cf16];
+pub(crate) const NOT_HERE: [u32; 5] = [0x05db_cf19, 0x05db_b904, 0x05db_b905, 0x05db_cf17, 0x05db_cf16];
 /// Create a Style for the item worn.
-const DESIGN: u32 = 0x05db_cf1a;
+pub(crate) const DESIGN: u32 = 0x05db_cf1a;
 // `CASClothingRow`'s: its arrows, and its five cells (the first and last out of view, in the
 // game's carousel), each with its thumbnail.
 const LEFT_ARROW: u32 = 0x32;
@@ -59,10 +59,10 @@ const RIGHT_ARROW: u32 = 0x33;
 const CELLS: [u32; 5] = [0x50, 0x51, 0x52, 0x53, 0x54];
 const CELL_THUMBNAIL: u32 = 0x21;
 // The item grid's own (layout `ItemGrid`): its scroll bar.
-const GRID_SCROLLBAR: u32 = 0x0582_0672;
+pub(crate) const GRID_SCROLLBAR: u32 = 0x0582_0672;
 /// The rows in view, and the colourways in view along a row.
-const ROWS: usize = 3;
-const ACROSS: usize = 3;
+pub(crate) const ROWS: usize = 3;
+pub(crate) const ACROSS: usize = 3;
 
 /// The panels on screen, the rows shown, and what they were shown for.
 #[derive(Resource)]
@@ -95,11 +95,11 @@ struct Shown {
 
 /// A colourway's cell: the item's place in the list, and the colourway.
 #[derive(Component)]
-struct DesignCell(usize, u8);
+pub(crate) struct DesignCell(pub usize, pub u8);
 
 /// A row's arrow: the item's place in the list, and which way.
 #[derive(Component)]
-struct RowArrow(usize, i8);
+pub(crate) struct RowArrow(pub usize, pub i8);
 
 fn spawn_clothing(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>), frame: Option<Res<crate::caslook::CasFrame>>, clothing: Option<Res<CasClothing>>) {
     let (Some(mut ui), Some(_)) = (ui, frame) else { return };
@@ -307,18 +307,37 @@ fn clothing_panel(
     let title = ui.localize(&format!("Ui/Caption/CAS/Clothing:{state}")).unwrap_or_else(|| wear.label().to_string());
     crate::livehud::set_text(&mut texts, c.category.text(TITLE), &title);
     // The rows in view.
-    let (Some(grid), Some(g), Some(template)) = (c.category.id(GRID), ui.find("CASClothingCategory", GRID).and_then(|w| w.grid), ui.layout("CASClothingRow").cloned()) else { return };
     if let Some(old) = c.rows.take() {
         commands.entity(old).despawn();
     }
+    c.rows = spawn_rows(&mut commands, &mut ui, (&mut images, &mut fonts), gu.as_deref_mut(), &c.category, &list, &designs, worn, c.scroll, &c.turned);
+}
+
+/// The rows in view on `CASClothingCategory`'s grid, from `scroll`: each item a
+/// `CASClothingRow` of its colourways (turned as `turned` has it, the one worn lit), the game's
+/// own picture in each cell; the holder they're in.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn spawn_rows(
+    commands: &mut Commands,
+    ui: &mut UiAssets,
+    (images, fonts): (&mut Assets<Image>, &mut Assets<Font>),
+    mut gu: Option<&mut crate::icons::GameUi>,
+    category: &Spawned,
+    list: &[(s3bake::Key, String)],
+    designs: &dyn Fn(&s3bake::Key) -> usize,
+    worn: Option<(s3bake::Key, u8)>,
+    scroll: usize,
+    turned: &HashMap<usize, usize>,
+) -> Option<Entity> {
+    let rows = list.len();
+    let (Some(grid), Some(g), Some(template)) = (category.id(GRID), ui.find("CASClothingCategory", GRID).and_then(|w| w.grid), ui.layout("CASClothingRow").cloned()) else { return None };
     let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE)).id();
     commands.entity(grid).insert_children(0, &[holder]);
-    c.rows = Some(holder);
     let step = g.cell[1] + g.cell_padding[1] + g.cell_padding[3];
-    for (row, n) in (c.scroll..(c.scroll + ROWS).min(rows)).enumerate() {
+    for (row, n) in (scroll..(scroll + ROWS).min(rows)).enumerate() {
         let (key, name) = &list[n];
         let count = designs(key);
-        let first = c.turned.get(&n).copied().unwrap_or(0).min(count.saturating_sub(ACROSS));
+        let first = turned.get(&n).copied().unwrap_or(0).min(count.saturating_sub(ACROSS));
         let mut w = template.clone();
         let (x, y) = (g.padding[0] + g.cell_padding[0], g.padding[1] + row as f32 * step + g.cell_padding[1]);
         w.area = [x, y, x + (w.area[2] - w.area[0]), y + (w.area[3] - w.area[1])];
@@ -334,7 +353,7 @@ fn clothing_panel(
         for id in [CELLS[0], CELLS[4]] {
             edit_windows(&mut w, id, &mut |w| w.flags &= !s3bake::ui::WIN_VISIBLE);
         }
-        let s = ui.spawn_under(&mut commands, &mut images, &mut fonts, &w, holder);
+        let s = ui.spawn_under(commands, images, fonts, &w, holder);
         for (dir, id, shown) in [(-1i8, LEFT_ARROW, first > 0), (1, RIGHT_ARROW, first + ACROSS < count)] {
             if let Some(e) = s.id(id) {
                 commands.entity(e).insert((RowArrow(n, dir), if shown { Visibility::Inherited } else { Visibility::Hidden }));
@@ -357,12 +376,13 @@ fn clothing_panel(
             }
             // The game's picture of the item in this colourway (or of the item).
             let thumb = ui
-                .image(&mut images, s3bake::ui::cas_preset_thumb(key.2, d))
+                .image(images, s3bake::ui::cas_preset_thumb(key.2, d))
                 .map(|(h, _)| h)
-                .or_else(|| gu.as_deref_mut().and_then(|g| g.icon(&mut images, &s3bake::gamedata::cas_thumb_name(key.2))));
+                .or_else(|| gu.as_deref_mut().and_then(|g| g.icon(images, &s3bake::gamedata::cas_thumb_name(key.2))));
             if let (Some(win), Some(thumb)) = (s.within(cell, CELL_THUMBNAIL), thumb) {
-                crate::hudpanels::picture(&mut commands, win, thumb, Color::WHITE);
+                crate::hudpanels::picture(commands, win, thumb, Color::WHITE);
             }
         }
     }
+    Some(holder)
 }

@@ -34,9 +34,9 @@ const PAGE: usize = 18;
 pub struct OutfitPlanner {
     pub sim: Entity,
     /// The outfit being planned.
-    wear: crate::simbody::OutfitKind,
+    pub(crate) wear: crate::simbody::OutfitKind,
     /// Their looks rather than their clothes (at a mirror).
-    looks: bool,
+    pub(crate) looks: bool,
     tab: u32,
     page: usize,
     root: Option<Entity>,
@@ -152,7 +152,7 @@ fn planner_buttons(
 }
 
 /// Puts a Sim in an outfit (kept on until it's time for another).
-fn dress(commands: &mut Commands, sim: Entity, kind: crate::simbody::OutfitKind) {
+pub(crate) fn dress(commands: &mut Commands, sim: Entity, kind: crate::simbody::OutfitKind) {
     let mut e = commands.entity(sim);
     match kind {
         crate::simbody::OutfitKind::Everyday => {
@@ -173,12 +173,17 @@ fn planner_ui(
     cas: Option<Res<crate::simbody::CasData>>,
     mut ui: Option<ResMut<crate::icons::GameUi>>,
     mut images: ResMut<Assets<Image>>,
+    layouts: Option<Res<crate::layout::UiAssets>>,
 ) {
     let (Some(mut p), Some(cas)) = (planner, cas) else { return };
     if !p.dirty {
         return;
     }
     p.dirty = false;
+    // (Clothes in the game's own dresser panels, where they're to hand: `planlook`.)
+    if !p.looks && layouts.is_some_and(|l| crate::planlook::available(&l)) {
+        return;
+    }
     if let Some(r) = p.root.take() {
         commands.entity(r).despawn();
     }
