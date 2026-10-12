@@ -91,7 +91,7 @@ pub fn open_popup(commands: &mut Commands, ui: &mut UiAssets, images: &mut Asset
     Some(root)
 }
 
-/// A click on an item chooses it; on the cancel button or outside, nothing.
+/// A click on an item chooses it; on the cancel button or outside (or Escape), nothing.
 fn popup_clicks(
     mut commands: Commands,
     popups: Query<(Entity, &OpenPopup)>,
@@ -99,10 +99,11 @@ fn popup_clicks(
     clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
     mut out: MessageWriter<PopupChoice>,
     mut play: MessageWriter<crate::sound::PlaySound>,
+    keys: Res<ButtonInput<KeyCode>>,
 ) {
     let Some((root, p)) = popups.iter().next() else { return };
     let mut chosen = items.iter().find(|(i, _)| **i == Interaction::Pressed).map(|(_, item)| Some(item.0));
-    if chosen.is_none() && (crate::livehud::pressed(&clicks, p.s.id(CANCEL)) || crate::livehud::pressed(&clicks, Some(root))) {
+    if chosen.is_none() && (crate::livehud::pressed(&clicks, p.s.id(CANCEL)) || crate::livehud::pressed(&clicks, Some(root)) || keys.just_pressed(KeyCode::Escape)) {
         chosen = Some(None);
     }
     if let Some(index) = chosen {

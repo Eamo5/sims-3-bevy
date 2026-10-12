@@ -530,7 +530,8 @@ enum GameMenuButton {
     Quit,
 }
 
-fn game_menu_key(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn game_menu_key(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     mut menu: ResMut<GameMenu>,
@@ -538,12 +539,21 @@ fn game_menu_key(
     pie: Option<Res<crate::hud::PieMenu>>,
     buy: Option<Res<crate::buy::BuyMode>>,
     mut clock: Option<ResMut<crate::clock::GameClock>>,
+    (play_mode, popups): (Option<Res<State<crate::PlayMode>>>, Query<(), With<crate::popupmenu::OpenPopup>>),
 ) {
     if !keys.just_pressed(KeyCode::Escape) || options_open(&panel) {
         return;
     }
-    // Escape first closes pie menus and buy mode.
-    if pie.is_some_and(|p| p.root.is_some()) || buy.is_some_and(|b| b.active) {
+    // Escape first closes pie menus and buy mode (and an open popup closes itself).
+    if pie.is_some_and(|p| p.root.is_some()) || buy.is_some_and(|b| b.active) || !popups.is_empty() {
+        return;
+    }
+    // In live mode, the game's own options menu (its `GotoOptionsMode` key), where it's to hand.
+    if menu.root.is_none()
+        && play_mode.is_some_and(|m| *m.get() == crate::PlayMode::Live)
+        && crate::gamepopup::GAME_POPUP.load(std::sync::atomic::Ordering::Relaxed)
+    {
+        commands.insert_resource(crate::gamepopup::OpenGamePopup);
         return;
     }
     toggle_game_menu(&mut commands, &mut menu, clock.as_deref_mut());

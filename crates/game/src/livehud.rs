@@ -46,7 +46,7 @@ const PUCK_WALLS: u32 = PUCK + 0x07;
 const PUCK_LEVEL_UP: u32 = PUCK + 0x0f;
 const PUCK_LEVEL_DOWN: u32 = PUCK + 0x10;
 const PUCK_WALLS_UP: u32 = PUCK + 0x12;
-const PUCK_OPTIONS: u32 = PUCK + 0x16;
+pub(crate) const PUCK_OPTIONS: u32 = PUCK + 0x16;
 const PUCK_RECORD: u32 = PUCK + 0x17;
 const PUCK_SNAPSHOT: u32 = PUCK + 0x18;
 /// Rotate left and right, zoom out and in, pitch down and up, Sim, house and map views.

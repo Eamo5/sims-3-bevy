@@ -207,6 +207,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(PreUpdate, ui_click.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, ui_right_click.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, pointer_script.after(bevy::input::InputSystems).before(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(PreUpdate, key_script.after(bevy::input::InputSystems).before(crate::options::game_menu_key).before(crate::buy::toggle_buy).run_if(in_state(crate::PlayMode::Live)))
             // Observe furniture after gameplay's deferred restore/despawn commands apply.
             .add_systems(PostUpdate, buy_move_test.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PostUpdate, buy_history_test.run_if(in_state(crate::PlayMode::Live)))
@@ -958,6 +959,56 @@ fn pointer_script(time: Res<Time<InputTimeline>>, mut windows: Query<&mut Window
         *step += 1;
     }
     info!("autotest: pointer at {x},{y} (click {click})");
+}
+
+/// KEY_AT=<key>@<seconds>;...: key presses through the real input path (Escape, Enter, Space,
+/// Tab, PageUp, PageDown, or a letter or digit), each with SHOT_AFTER_KEY=<folder>: a picture a
+/// second later.
+fn key_script(
+    mut commands: Commands,
+    time: Res<Time<InputTimeline>>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut step: Local<usize>,
+    mut pending: Local<Option<(KeyCode, f32)>>,
+    mut shot_at: Local<Option<(f32, usize)>>,
+) {
+    let Ok(script) = std::env::var("KEY_AT") else { return };
+    let t = time.elapsed_secs();
+    if let Some((k, _)) = pending.take() {
+        keys.release(k);
+    }
+    if let Some((at, n)) = *shot_at
+        && t >= at
+    {
+        *shot_at = None;
+        if let Ok(dir) = std::env::var("SHOT_AFTER_KEY") {
+            let _ = std::fs::create_dir_all(&dir);
+            commands.spawn(Screenshot::primary_window()).observe(save_to_disk(format!("{dir}/key{n}.png")));
+        }
+    }
+    let Some((name, at)) = script.split(';').nth(*step).and_then(|s| s.split_once('@')) else { return };
+    if t < at.parse::<f32>().unwrap_or(10.0) {
+        return;
+    }
+    let key = match name {
+        "Escape" => KeyCode::Escape,
+        "Enter" => KeyCode::Enter,
+        "Space" => KeyCode::Space,
+        "Tab" => KeyCode::Tab,
+        "PageUp" => KeyCode::PageUp,
+        "PageDown" => KeyCode::PageDown,
+        s if s.len() == 1 => match s.chars().next().unwrap().to_ascii_uppercase() {
+            c @ 'A'..='Z' => [KeyCode::KeyA, KeyCode::KeyB, KeyCode::KeyC, KeyCode::KeyD, KeyCode::KeyE, KeyCode::KeyF, KeyCode::KeyG, KeyCode::KeyH, KeyCode::KeyI, KeyCode::KeyJ, KeyCode::KeyK, KeyCode::KeyL, KeyCode::KeyM, KeyCode::KeyN, KeyCode::KeyO, KeyCode::KeyP, KeyCode::KeyQ, KeyCode::KeyR, KeyCode::KeyS, KeyCode::KeyT, KeyCode::KeyU, KeyCode::KeyV, KeyCode::KeyW, KeyCode::KeyX, KeyCode::KeyY, KeyCode::KeyZ][(c as u8 - b'A') as usize],
+            c @ '0'..='9' => [KeyCode::Digit0, KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4, KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8, KeyCode::Digit9][(c as u8 - b'0') as usize],
+            _ => return,
+        },
+        _ => return,
+    };
+    keys.press(key);
+    *pending = Some((key, t));
+    *step += 1;
+    *shot_at = Some((t + 1.0, *step));
+    info!("autotest: key {name}");
 }
 
 /// BUY_MOVE_TEST=move|cancel: pick up furniture with upgrades and breakage, then assert that a

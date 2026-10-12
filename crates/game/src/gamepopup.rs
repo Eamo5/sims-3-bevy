@@ -56,11 +56,15 @@ fn open_menu(
     mut clock: ResMut<crate::clock::GameClock>,
     open: Option<Res<OpenItems>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    (hud, nodes): (Option<Res<crate::livehud::LiveHud>>, Query<(&ComputedNode, &bevy::ui::UiGlobalTransform)>),
 ) {
     if want.is_none() {
         return;
     }
-    let at = windows.single().ok().and_then(|w| w.cursor_position()).unwrap_or(Vec2::new(40.0, 600.0));
+    // (From the puck's options button's middle, as the game's `OptionsMenuInfo` puts it, however
+    // it was asked for: the button or its key.)
+    let button = hud.as_ref().and_then(|h| h.puck.id(crate::livehud::PUCK_OPTIONS)).and_then(|e| nodes.get(e).ok()).map(|(n, tf)| tf.translation * n.inverse_scale_factor());
+    let at = button.or_else(|| windows.single().ok().and_then(|w| w.cursor_position())).unwrap_or(Vec2::new(40.0, 600.0));
     commands.remove_resource::<OpenGamePopup>();
     let Some(mut ui) = ui else { return };
     if open.is_some() {
