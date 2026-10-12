@@ -517,6 +517,8 @@ impl PartialOrd for Node {
 pub fn fill_grid(grid: &mut NavGrid, world: &crate::loading::WorldInfo, obstacles: &Obstacles, building: Option<&crate::building::ActiveBuilding>) {
     let hm = &world.heightmap;
     let (w, h) = (grid.w, grid.h);
+    // (The paving on the ground's level: a houseboat's deck is, out over the water.)
+    let paved: std::collections::HashSet<(i32, i32)> = building.map(|b| b.data.floors.iter().filter(|f| f.level == 0 && f.y.is_none()).map(|f| (f.x as i32, f.z as i32)).collect()).unwrap_or_default();
     for z in 0..h {
         for x in 0..w {
             let c = grid.center_of(x, z);
@@ -527,6 +529,16 @@ pub fn fill_grid(grid: &mut NavGrid, world: &crate::loading::WorldInfo, obstacle
                 continue;
             }
             let y = hm.sample(c.x, c.y);
+            if y < world.sea_level + 0.2
+                && let Some(b) = building
+                && paved.contains(&{
+                    let l = b.local(Vec3::new(c.x, 0.0, c.y));
+                    (l.x.floor() as i32, l.y.floor() as i32)
+                })
+            {
+                grid.blocked[z * w + x] = false;
+                continue;
+            }
             let slope = (hm.sample(c.x + 0.5, c.y) - hm.sample(c.x - 0.5, c.y))
                 .abs()
                 .max((hm.sample(c.x, c.y + 0.5) - hm.sample(c.x, c.y - 0.5)).abs());

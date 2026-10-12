@@ -268,10 +268,28 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
     // (1 when there's a level below it for pools and basements), and whether the house stands
     // on a foundation (the level above the ground is 0.75 m up under it).
     let terrain = s3formats::lot::LotTerrain::load(pkg, lot.id);
+    // (A houseboat (Isla Paradiso's) meets no terrain, out on the water: its ground is its
+    // deck, the level at the lot's own height, its hull going down from the deck's edge to
+    // the water a storey under it.)
+    let middle_of = |v: &[f32]| {
+        let mut v = v.to_vec();
+        v.sort_by(f32::total_cmp);
+        v.get(v.len() / 2).copied().unwrap_or(0.0)
+    };
+    let mut hull_y = None;
     let (ground_index, has_foundation) = match &terrain {
         Some(t) => {
             // (Where the lot's edge meets the world's terrain.)
-            let g = crate::ponds::ground_level(t, lot, hm).map_or(0, |(g, _, _)| g);
+            let fit = crate::ponds::ground_level(t, lot, hm);
+            let g = match fit {
+                Some((g, mid, _)) if (mid - lot.corner[1]).abs() <= 1.0 => g,
+                None => 0,
+                Some(_) => {
+                    let deck = (0..t.levels.len()).min_by(|&a, &b| middle_of(&t.levels[a]).abs().total_cmp(&middle_of(&t.levels[b]).abs())).unwrap_or(0);
+                    hull_y = Some(lot.corner[1] + middle_of(&t.levels[deck]) - LEVEL_HEIGHT - 0.3);
+                    deck
+                }
+            };
             let f = t.levels.get(g + 1).is_some_and(|l| l.iter().filter(|h| (0.4..1.2).contains(*h)).count() >= 4);
             (g as u32, f)
         }
@@ -914,11 +932,16 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
         }
         let n = normal_of(a, b);
         let mid = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
-        let floored = |s: f32| {
+        let floored = |s: f32, gl: u32| {
             let p = [mid[0] + n[0] * 0.3 * s, mid[1] + n[1] * 0.3 * s];
-            p[0] >= 0.0 && p[1] >= 0.0 && floor_grid.as_ref().is_some_and(|g| g.quad(ground_index, p[0] as u32, p[1] as u32).is_some_and(|q| q.iter().any(|v| *v != 0)))
+            p[0] >= 0.0 && p[1] >= 0.0 && floor_grid.as_ref().is_some_and(|g| g.quad(gl, p[0] as u32, p[1] as u32).is_some_and(|q| q.iter().any(|v| *v != 0)))
         };
-        !floored(1.0) && !floored(-1.0)
+        // (On a houseboat's deck, floored all round, the rim of a platform raised on it: its
+        // floor on one side only.)
+        if hull_y.is_some() && has_foundation {
+            return floored(1.0, ground_index + 1) != floored(-1.0, ground_index + 1);
+        }
+        !floored(1.0, ground_index) && !floored(-1.0, ground_index)
     };
     let mut agree = 0i32;
     for (a, b, level, e) in data.walls.segments() {
@@ -1042,6 +1065,24 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
             }
             if t < 0.99 {
                 walls.push(WallBaked { a: at(t), b, level: level as u8, left, right, cover: [NO_COVER; 2], y: wall_y });
+            }
+        }
+    }
+    // A houseboat's hull: down from its deck's outer edge to under the waterline.
+    if let (Some(y), Some(g)) = (hull_y, floor_grid.as_ref()) {
+        let deck = |x: i32, z: i32| x >= 0 && z >= 0 && g.quad(ground_index, x as u32, z as u32).is_some_and(|q| q.iter().any(|v| *v != 0));
+        for x in 0..g.width as i32 {
+            for z in 0..g.depth as i32 {
+                if !deck(x, z) {
+                    continue;
+                }
+                let (fx, fz) = (x as f32, z as f32);
+                // (Each side with no deck beyond it, the wall's outside to the left of a to b.)
+                for (dx, dz, a, b) in [(0, -1, [fx + 1.0, fz], [fx, fz]), (1, 0, [fx + 1.0, fz + 1.0], [fx + 1.0, fz]), (0, 1, [fx, fz + 1.0], [fx + 1.0, fz + 1.0]), (-1, 0, [fx, fz], [fx, fz + 1.0])] {
+                    if !deck(x + dx, z + dz) {
+                        walls.push(WallBaked { a, b, level: 0, left: ROOM_OUTSIDE, right: ROOM_OUTSIDE, cover: [NO_COVER; 2], y: Some(y) });
+                    }
+                }
             }
         }
     }

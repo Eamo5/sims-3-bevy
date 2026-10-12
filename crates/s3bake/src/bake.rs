@@ -1008,8 +1008,9 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
                 lot_ground.sample(l.corner[0] + x * c + z * s, l.corner[2] - x * s + z * c)
             })
             .collect();
-        // (Only worth keeping where the ground isn't flat at the lot's own height.)
-        if ground.iter().any(|y| (y - b.levels[0]).abs() > 0.05) {
+        // (Only worth keeping where the ground isn't flat at the lot's own height; nor where it's
+        // the sea's floor far under a houseboat's deck.)
+        if ground.iter().any(|y| (y - b.levels[0]).abs() > 0.05) && !ground.iter().all(|y| *y < b.levels[0] - 2.0) {
             b.ground = ground;
         }
     }

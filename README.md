@@ -40,7 +40,9 @@ installation is unreachable.
   (houses with or without foundations, garages beside them, split-levels out over a hillside
   as Cormorant's, basements: storey 0 below the ground floor, its stairs, walls and rooms, the
   ground open over it to look in, Page Down to it; a hillside house's walk-out lower floor dug
-  into the slope, as the Wolffs' garage and den, likewise), staircases built from the game's
+  into the slope, as the Wolffs' garage and den, likewise; Isla Paradiso's houseboats afloat,
+  their decks walked on over the water, a hull down from the deck's edge), staircases built
+  from the game's
   own stair pieces and railings (as wide as the builders made them), and the house's own
   furniture; the ground never shows through a floor; nearby lots are shown in full detail with
   the game's roofs, distant ones as the game's pre-rendered imposters.
