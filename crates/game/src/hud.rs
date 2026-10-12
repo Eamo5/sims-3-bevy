@@ -748,8 +748,9 @@ fn slab(o: Vec3, d: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
 pub(crate) fn object_hit(ray: Ray3d, tf: &GlobalTransform, o: &GameObject) -> Option<f32> {
     let inv = tf.affine().inverse();
     let (lo, ld) = (inv.transform_point3(ray.origin), inv.transform_vector3(Vec3::from(ray.direction)));
-    let h = o.height.max(0.15);
-    slab(lo, ld, Vec3::new(o.center.x - o.half.x, -0.05, o.center.y - o.half.y), Vec3::new(o.center.x + o.half.x, h, o.center.y + o.half.y))
+    // (Some thickness to what's flat against a wall, a mirror.)
+    let (h, half) = (o.height.max(0.15), o.half.max(Vec2::splat(0.08)));
+    slab(lo, ld, Vec3::new(o.center.x - half.x, -0.05, o.center.y - half.y), Vec3::new(o.center.x + half.x, h, o.center.y + half.y))
 }
 
 /// The shown object, Sim or pet aimed at: of those whose boxes the ray passes through (an
