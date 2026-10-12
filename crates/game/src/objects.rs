@@ -169,6 +169,11 @@ impl ObjectAssets {
         parts
     }
 
+    /// The unlit materials (the lot imposters' pre-rendered pictures), dimmed with the night.
+    pub fn unlit_materials(&self) -> impl Iterator<Item = &Handle<StandardMaterial>> {
+        self.materials.iter().filter(|((_, _, unlit), _)| *unlit).map(|(_, h)| h)
+    }
+
     fn material_for_key(&mut self, ctx: &mut AssetCtx, tex_key: Option<Key>, mode: u8, unlit: bool) -> Handle<StandardMaterial> {
         if let Some(h) = self.materials.get(&(tex_key, mode, unlit)) {
             return h.clone();

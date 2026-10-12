@@ -25,7 +25,7 @@ impl Plugin for WorldPlugin {
         embedded_asset!(app, "shaders/tree_frag.wgsl");
         app.add_plugins(MaterialPlugin::<TreeMaterial>::default())
             .add_systems(OnEnter(AppState::InGame), spawn_world_content)
-            .add_systems(Update, street_lights.run_if(in_state(AppState::InGame)));
+            .add_systems(Update, (street_lights, imposters_at_night).run_if(in_state(AppState::InGame)));
     }
 }
 
@@ -105,6 +105,23 @@ pub struct Tree;
 /// Marks the pre-built shell of a lot, hidden when the household moves onto it.
 #[derive(Component)]
 pub struct LotImposter(pub usize);
+
+/// The lot imposters, pictures pre-rendered by day and drawn unlit, darken with the night as
+/// the lit world round them does (else distant houses glare at midnight).
+fn imposters_at_night(night: Res<crate::clock::Night>, assets: Res<ObjectAssets>, mut mats: ResMut<Assets<StandardMaterial>>, mut last: Local<Option<(f32, usize)>>) {
+    let handles: Vec<Handle<StandardMaterial>> = assets.unlit_materials().cloned().collect();
+    if last.is_some_and(|(n, c)| (n - night.0).abs() < 0.01 && c == handles.len()) {
+        return;
+    }
+    *last = Some((night.0, handles.len()));
+    let f = 1.0 - 0.78 * night.0;
+    let tint = Color::srgb(f * (1.0 - 0.12 * night.0), f * (1.0 - 0.06 * night.0), f);
+    for h in handles {
+        if let Some(mut m) = mats.get_mut(&h) {
+            m.base_color = tint;
+        }
+    }
+}
 
 /// A street lamp out in the town, and how high its lamp is.
 #[derive(Component)]
