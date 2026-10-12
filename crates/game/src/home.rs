@@ -24,7 +24,28 @@ impl Plugin for HomePlugin {
                 Update,
                 (button_visuals, lot_buttons, draw_lots, auto_move_in, premade_move_in).run_if(in_state(PlayMode::ChooseLot)),
             )
-            .add_systems(Update, (draw_home_lot, start_move).run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (draw_home_lot, start_move).run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, invisible_lights.run_if(in_state(crate::AppState::InGame)));
+    }
+}
+
+/// One of the game's invisible lights (lighting a pool or a dark corner): its marker is seen
+/// only in buy mode, as the game's is, its light always.
+#[derive(Component)]
+pub struct InvisibleLight;
+
+fn invisible_lights(
+    buy: Res<crate::buy::BuyMode>,
+    q: Query<&Children, With<InvisibleLight>>,
+    mut vis: Query<&mut Visibility, Without<crate::building::LotLamp>>,
+) {
+    let want = if buy.active { Visibility::Inherited } else { Visibility::Hidden };
+    for children in &q {
+        for c in children.iter() {
+            if let Ok(mut v) = vis.get_mut(c) {
+                v.set_if_neq(want);
+            }
+        }
     }
 }
 
@@ -643,6 +664,9 @@ pub fn spawn_game_object_design(
         commands.entity(e).insert(crate::building::Shell);
     }
     let script = ctx.baked.catalog_entry(&objd).map_or("", |c| c.script.as_str()).to_ascii_lowercase();
+    if script.contains("lightinvisible") {
+        commands.entity(e).insert(InvisibleLight);
+    }
     if kind == ObjectKind::Light || script.contains(".lighting.") || script.contains("lightfloorlamp") || script.contains("lightwalllamp") || script.contains("lighttablelamp") {
         let height = if script.contains("ceiling") { mn.y.max(-1.2) } else { mx.y * 0.8 };
         commands.spawn((
