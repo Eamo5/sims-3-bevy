@@ -509,6 +509,8 @@ impl ObjectKind {
                 | K::Bathtub
                 // (A telescope's: behind it, looking through it.)
                 | K::Telescope
+                // (A shower's: beside its door, the game's clips walking the Sim in from there.)
+                | K::Shower
         )
         .then_some(0)
     }
@@ -574,6 +576,7 @@ impl GameObject {
         match self.kind {
             ObjectKind::BedDouble | ObjectKind::BedSingle => self.height.min(0.75).max(0.45),
             ObjectKind::Bathtub => 0.25,
+            ObjectKind::Shower => 0.0,
             _ => 0.45,
         }
     }
@@ -941,7 +944,7 @@ static BED: [InteractionDef; 3] = [
 static TOILET: [InteractionDef; 1] =
     [InteractionDef { until_full: Some(BLADDER), on_object: true, ..def("Use Toilet", 15.0, [0.0, 900.0, 0.0, 0.0, -10.0, 0.0], Pose::Sit) }];
 static SHOWER: [InteractionDef; 1] =
-    [InteractionDef { until_full: Some(HYGIENE), ..def("Take Shower", 30.0, [0.0, 0.0, 0.0, 0.0, 400.0, 10.0], Pose::Use) }];
+    [InteractionDef { until_full: Some(HYGIENE), on_object: true, ..def("Take Shower", 30.0, [0.0, 0.0, 0.0, 0.0, 400.0, 10.0], Pose::Use) }];
 static BATHTUB: [InteractionDef; 3] = [
     InteractionDef { until_full: Some(HYGIENE), on_object: true, ..def("Take Bath", 50.0, [0.0, 0.0, 6.0, 0.0, 260.0, 40.0], Pose::Lie) },
     // (With bubble bath in the house: a longer soak, and more fun.)
@@ -2452,6 +2455,16 @@ pub(crate) fn run_actions(
                                             let p = otf.transform_point(Vec3::new(obj.center.x + side - 1.09, 0.0, obj.center.y));
                                             tf.translation = Vec3::new(p.x, otf.translation.y, p.z);
                                             tf.rotation = otf.rotation * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+                                        }
+                                        if obj.kind == ObjectKind::Shower
+                                            && let Some((p, f)) = obj.route
+                                        {
+                                            // In the stall: a metre in from beside its door, where
+                                            // the game's getting-in walks the Sim, facing that way
+                                            // (the clips play where the Sim stands).
+                                            let w = otf.transform_point(Vec3::new(p.x + f.x, 0.0, p.y + f.y));
+                                            tf.translation = Vec3::new(w.x, otf.translation.y, w.z);
+                                            tf.rotation = otf.rotation * Quat::from_rotation_y(f.x.atan2(f.y));
                                         }
                                         if obj.kind == ObjectKind::Bathtub {
                                             // The bath's clips are played from the tub's side, the
