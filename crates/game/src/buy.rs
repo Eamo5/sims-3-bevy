@@ -197,6 +197,7 @@ fn buy_pick(
     mut ray_cast: MeshRayCast,
     parents: Query<&ChildOf>,
     objects: Query<(), (With<GameObject>, Without<crate::visit::LotObject>)>,
+    boxes: Query<(Entity, &GlobalTransform, &GameObject, &InheritedVisibility), Without<crate::visit::LotObject>>,
 ) {
     if !buy.active || buy.placing.is_some() || buy.painting.is_some() || buy.tool.is_some() || !mouse.just_pressed(MouseButton::Left) || over_ui.0 {
         return;
@@ -217,7 +218,16 @@ fn buy_pick(
     };
     let filter = |e: Entity| root_of(e).is_some();
     let hits = ray_cast.cast_ray(ray, &MeshRayCastSettings::default().with_filter(&filter));
-    if let Some(root) = hits.first().and_then(|(e, _)| root_of(*e)) {
+    // (Most objects' meshes are the GPU's alone: by their boxes, the nearest shown.)
+    let by_box = || {
+        boxes
+            .iter()
+            .filter(|(.., vis)| vis.get())
+            .filter_map(|(e, tf, o, _)| Some((e, crate::hud::object_hit(ray, tf, o)?)))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(e, _)| e)
+    };
+    if let Some(root) = hits.first().and_then(|(e, _)| root_of(*e)).or_else(by_box) {
         if buy.eyedropper {
             commands.insert_resource(EyedropRequest(root));
         } else {

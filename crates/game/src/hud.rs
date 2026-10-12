@@ -723,6 +723,35 @@ pub fn open_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &st
     pie.options = options;
 }
 
+/// How far along a ray it meets a box (none: it misses).
+fn slab(o: Vec3, d: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
+    let (mut t0, mut t1) = (0.0f32, f32::MAX);
+    for a in 0..3 {
+        if d[a].abs() < 1e-6 {
+            if o[a] < min[a] || o[a] > max[a] {
+                return None;
+            }
+            continue;
+        }
+        let (ta, tb) = ((min[a] - o[a]) / d[a], (max[a] - o[a]) / d[a]);
+        t0 = t0.max(ta.min(tb));
+        t1 = t1.min(ta.max(tb));
+        if t0 > t1 {
+            return None;
+        }
+    }
+    Some(t0)
+}
+
+/// How far along a ray it meets an object: its footprint, up to its height, in its own frame.
+/// (Its meshes are the GPU's alone, with no copy to test.)
+pub(crate) fn object_hit(ray: Ray3d, tf: &GlobalTransform, o: &GameObject) -> Option<f32> {
+    let inv = tf.affine().inverse();
+    let (lo, ld) = (inv.transform_point3(ray.origin), inv.transform_vector3(Vec3::from(ray.direction)));
+    let h = o.height.max(0.15);
+    slab(lo, ld, Vec3::new(o.center.x - o.half.x, -0.05, o.center.y - o.half.y), Vec3::new(o.center.x + o.half.x, h, o.center.y + o.half.y))
+}
+
 /// The nearest shown object, Sim or pet the ray passes through: an object by its footprint and
 /// height, a Sim or pet by a box their size round where they stand.
 #[allow(clippy::type_complexity)]
@@ -730,24 +759,6 @@ fn pick_by_box(
     ray: Ray3d,
     pickable: &Query<(Entity, &GlobalTransform, &InheritedVisibility, Option<&GameObject>, Has<crate::pets::Pet>), Or<(With<GameObject>, With<Sim>, With<crate::pets::Pet>)>>,
 ) -> Option<Entity> {
-    let slab = |o: Vec3, d: Vec3, min: Vec3, max: Vec3| -> Option<f32> {
-        let (mut t0, mut t1) = (0.0f32, f32::MAX);
-        for a in 0..3 {
-            if d[a].abs() < 1e-6 {
-                if o[a] < min[a] || o[a] > max[a] {
-                    return None;
-                }
-                continue;
-            }
-            let (ta, tb) = ((min[a] - o[a]) / d[a], (max[a] - o[a]) / d[a]);
-            t0 = t0.max(ta.min(tb));
-            t1 = t1.min(ta.max(tb));
-            if t0 > t1 {
-                return None;
-            }
-        }
-        Some(t0)
-    };
     let dir = Vec3::from(ray.direction);
     pickable
         .iter()
@@ -755,13 +766,7 @@ fn pick_by_box(
         .filter(|(_, _, vis, obj, _)| vis.get() && obj.is_none_or(|o| !crate::interact::interactions_for(o.kind).is_empty()))
         .filter_map(|(e, tf, _, obj, pet)| {
             let t = match obj {
-                // (In the object's own frame: its footprint, up to its height.)
-                Some(o) => {
-                    let inv = tf.affine().inverse();
-                    let (lo, ld) = (inv.transform_point3(ray.origin), inv.transform_vector3(dir));
-                    let h = o.height.max(0.15);
-                    slab(lo, ld, Vec3::new(o.center.x - o.half.x, -0.05, o.center.y - o.half.y), Vec3::new(o.center.x + o.half.x, h, o.center.y + o.half.y))?
-                }
+                Some(o) => object_hit(ray, tf, o)?,
                 None => {
                     let p = tf.translation();
                     let (r, h) = if pet { (0.4, 0.8) } else { (0.3, 1.8) };
