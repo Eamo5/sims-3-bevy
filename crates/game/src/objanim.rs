@@ -49,6 +49,46 @@ struct RigData {
     parents: Arc<Vec<i16>>,
     bind: Arc<Vec<Transform>>,
     inverse: Handle<SkinnedMeshInverseBindposes>,
+    /// Each bone's partner across the model's middle (x = 0): the bone at its place mirrored
+    /// (itself, down the middle), for playing a clip mirrored; and where across it each lies.
+    partner: Arc<Vec<usize>>,
+    across: Arc<Vec<f32>>,
+}
+
+impl RigData {
+    fn parent(&self, i: usize) -> Option<usize> {
+        usize::try_from(self.parents[i]).ok().filter(|&p| p < self.bind.len() && p != i)
+    }
+
+    /// A pose mirrored across the model's middle: each bone placed as its partner is,
+    /// reflected (in the model's space, so whatever its own axes).
+    fn mirrored(&self, pose: &[Transform]) -> Vec<Transform> {
+        let n = pose.len();
+        let mut global: Vec<Option<Mat4>> = vec![None; n];
+        fn place(i: usize, rig: &RigData, pose: &[Transform], global: &mut Vec<Option<Mat4>>, depth: usize) -> Mat4 {
+            if let Some(g) = global[i] {
+                return g;
+            }
+            let local = pose[i].to_matrix();
+            let g = match rig.parent(i).filter(|_| depth < 64) {
+                Some(p) => place(p, rig, pose, global, depth + 1) * local,
+                None => local,
+            };
+            global[i] = Some(g);
+            g
+        }
+        let m = Mat4::from_scale(Vec3::new(-1.0, 1.0, 1.0));
+        let reflected: Vec<Mat4> = (0..n).map(|j| m * place(self.partner[j], self, pose, &mut global, 0) * m).collect();
+        (0..n)
+            .map(|j| {
+                let g = match self.parent(j) {
+                    Some(p) => reflected[p].inverse() * reflected[j],
+                    None => reflected[j],
+                };
+                Transform::from_matrix(g)
+            })
+            .collect()
+    }
 }
 
 /// The rigs loaded so far, by model.
@@ -71,12 +111,26 @@ fn load_rig(data: &Baked, model: Key, bindposes: &mut Assets<SkinnedMeshInverseB
             None => local,
         }
     }
-    let inverse: Vec<Mat4> = (0..bind.len()).map(|i| world(i, &bind, &parents, 0).inverse()).collect();
+    let worlds: Vec<Mat4> = (0..bind.len()).map(|i| world(i, &bind, &parents, 0)).collect();
+    let inverse: Vec<Mat4> = worlds.iter().map(|w| w.inverse()).collect();
+    // (A bone's partner: the one at its place mirrored, itself when it's in the middle.)
+    let at: Vec<Vec3> = worlds.iter().map(|w| w.w_axis.truncate()).collect();
+    let partner: Vec<usize> = (0..at.len())
+        .map(|i| {
+            let want = Vec3::new(-at[i].x, at[i].y, at[i].z);
+            if at[i].distance(want) < 0.01 {
+                return i;
+            }
+            (0..at.len()).filter(|&j| at[j].distance(want) < 0.01).min_by_key(|&j| j.abs_diff(i)).unwrap_or(i)
+        })
+        .collect();
     Some(RigData {
         hashes: Arc::new(skin.bones.iter().map(|b| b.0).collect()),
         parents: Arc::new(parents),
         bind: Arc::new(bind),
         inverse: bindposes.add(SkinnedMeshInverseBindposes::from(inverse)),
+        partner: Arc::new(partner),
+        across: Arc::new(at.iter().map(|p| p.x).collect()),
     })
 }
 
@@ -151,47 +205,73 @@ fn held_pose(data: &Baked, name: &str) -> Option<String> {
 
 /// While a Sim plays a clip at an object with moving parts, the object plays its half of it
 /// (in step); once nobody's using it, it's back at rest.
+#[allow(clippy::type_complexity)]
 fn animate_objects(
     data: Option<Res<Baked>>,
     mut lib: ResMut<ClipLibrary>,
-    sims: Query<(&ClipPlayer, &ActionQueue)>,
-    mut objects: Query<(Entity, &mut ObjectRig, Option<&UsedBy>)>,
+    sims: Query<(&ClipPlayer, &ActionQueue, Option<&crate::anim::ActionClip>, &GlobalTransform)>,
+    mut objects: Query<(Entity, &mut ObjectRig, Option<&UsedBy>, &GlobalTransform)>,
     mut bones: Query<&mut Transform, Without<ObjectRig>>,
     mut companions: Local<HashMap<String, Option<String>>>,
     mut animated: Local<Vec<Entity>>,
 ) {
     let Some(data) = data else { return };
     animated.clear();
-    for (player, queue) in &sims {
-        let Some(target) = queue.0.front().and_then(|a| match a.kind {
+    let target_of = |queue: &ActionQueue| {
+        queue.0.front().and_then(|a| match a.kind {
             ActionKind::Object { target, .. } | ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } | ActionKind::Outro { target, .. } => Some(target),
             _ => None,
-        }) else {
-            continue;
-        };
-        let Ok((_, mut rig, _)) = objects.get_mut(target) else { continue };
+        })
+    };
+    // (How many are at each object: two in a double bed each move their own side of it.)
+    let mut users: HashMap<Entity, usize> = HashMap::new();
+    for (_, queue, ..) in &sims {
+        if let Some(t) = target_of(queue) {
+            *users.entry(t).or_default() += 1;
+        }
+    }
+    for (player, queue, action, sim_tf) in &sims {
+        let Some(target) = target_of(queue) else { continue };
+        let Ok((_, mut rig, _, obj_tf)) = objects.get_mut(target) else { continue };
         let Some(name) = companions.entry(player.name.clone()).or_insert_with(|| companion(&data, &player.name).or_else(|| held_pose(&data, &player.name))).clone() else { continue };
         let Some(clip) = lib.get(&data, &name) else { continue };
         let t = player.time.clamp(0.0, clip.duration.max(0.0));
+        // (Played mirrored with the Sim's: the far side of a double bed.)
+        let mirror = action.is_some_and(|a| a.mirror);
+        // (Shared: only the bones on this Sim's side of the object's middle.)
+        let side = (users.get(&target).copied().unwrap_or(0) > 1).then(|| obj_tf.affine().inverse().transform_point3(sim_tf.translation()).x.signum());
         for inst in &rig.rigs {
+            let mut pose: Vec<Transform> = inst.rig.bind.to_vec();
+            let mut moved = vec![false; pose.len()];
             for (i, h) in inst.rig.hashes.iter().enumerate() {
-                let (Some(track), Some(&bone)) = (clip.tracks.get(h), inst.bones.get(i)) else { continue };
-                let Ok(mut tf) = bones.get_mut(bone) else { continue };
-                let mut pose = inst.rig.bind[i];
+                let Some(track) = clip.tracks.get(h) else { continue };
                 if let Some(p) = sample_track_vec(&track.translation, t) {
-                    pose.translation = p;
+                    pose[i].translation = p;
                 }
                 if let Some(r) = sample_track_quat(&track.rotation, t) {
-                    pose.rotation = r;
+                    pose[i].rotation = r;
                 }
-                *tf = pose;
+                moved[i] = true;
+            }
+            if mirror {
+                pose = inst.rig.mirrored(&pose);
+                moved = (0..pose.len()).map(|j| moved[inst.rig.partner[j]]).collect();
+            }
+            for (i, &bone) in inst.bones.iter().enumerate() {
+                let x = inst.rig.across.get(i).copied().unwrap_or(0.0);
+                if !moved[i] || side.is_some_and(|s| x.abs() > 0.05 && x.signum() != s) {
+                    continue;
+                }
+                if let Ok(mut tf) = bones.get_mut(bone) {
+                    *tf = pose[i];
+                }
             }
         }
         rig.posed = true;
         animated.push(target);
     }
     // At rest again once nobody's using it.
-    for (e, mut rig, used) in &mut objects {
+    for (e, mut rig, used, _) in &mut objects {
         if !rig.posed || animated.contains(&e) || used.is_some_and(|u| u.0.is_some()) {
             continue;
         }

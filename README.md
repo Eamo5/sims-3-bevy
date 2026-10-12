@@ -375,8 +375,9 @@ installation is unreachable.
 - **Double beds** sleep two, a side each, as the game's couples do: the second Sim gets in on
   the far side, with the game's animations played mirrored (the rig's two sides are each
   other's mirror images, so each bone plays its partner's track, reflected). Sims share a bed
-  on their own with their partner, fiancé(e) or spouse. (The covers turn back on the first side
-  only: the second sleeper lies on them, for now.)
+  on their own with their partner, fiancé(e) or spouse. The bed's half of the clip is mirrored
+  with it (each of its bones played as its partner across the bed's middle is), each sleeper
+  turning back the covers on their own side.
 - **The workout bench** (The Exercise Queen): "Pump Iron", for teens and up, in athletic wear:
   on to the bench, then the game's bench presses, leg extensions and pec flys in turn, building
   Athletic.
