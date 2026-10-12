@@ -2615,6 +2615,7 @@ fn auto_click_use(
     pie: Res<crate::hud::PieMenu>,
     options: Query<(&crate::hud::PieOption, &bevy::ui::UiGlobalTransform)>,
     queues: Query<&crate::interact::ActionQueue, With<crate::sim::Selected>>,
+    pickable: Query<(Entity, &GlobalTransform, &InheritedVisibility, Option<&crate::interact::GameObject>, Has<crate::pets::Pet>), Or<(With<crate::interact::GameObject>, With<crate::sim::Sim>, With<crate::pets::Pet>)>>,
 ) {
     let Ok(list) = std::env::var("CLICK_USE") else { return };
     // (Each `Kind` or `Kind:Option>Submenu option`, by the start of their labels.)
@@ -2659,6 +2660,9 @@ fn auto_click_use(
             };
             window.set_cursor_position(Some(screen));
             mouse.press(MouseButton::Left);
+            // (What a box test finds there, for when no pie opens.)
+            let picked = camera.viewport_to_world(cam_tf, screen).ok().and_then(|ray| crate::hud::pick_by_box(ray, &pickable));
+            debug!("click use: picked {:?} at {screen} (camera at {:?}, focus {:?})", picked.map(|e| objects.get(e).map_or("a Sim or pet".to_string(), |o| o.1.name.clone())), cam_tf.translation(), cam.focus);
             *state = (idx, 2, t + 1.0);
         }
         // The pie's first option.
@@ -2771,22 +2775,12 @@ fn auto_reach(
         let level = floor.map_or(1, |f| f.0);
         let to = o.use_point(tf);
         // (As the game goes: some are reached from another side when the front can't be.)
-        let sides = matches!(o.kind, crate::interact::ObjectKind::Chair | crate::interact::ObjectKind::Stool | crate::interact::ObjectKind::Sofa | crate::interact::ObjectKind::HotTub);
-        let others: Vec<Vec2> = if sides {
-            [Vec3::new(o.center.x, 0.0, o.center.y - o.half.y - 0.45), Vec3::new(o.center.x + o.half.x + 0.45, 0.0, o.center.y), Vec3::new(o.center.x - o.half.x - 0.45, 0.0, o.center.y)]
-                .map(|p| {
-                    let w = tf.transform_point(p);
-                    Vec2::new(w.x, w.z)
-                })
-                .to_vec()
-        } else {
-            Vec::new()
-        };
+        let others = o.other_approaches(tf);
         if std::iter::once(to).chain(others).any(|p| crate::nav::plan_route(grid, upper.as_deref(), exit.0, 1, p, level).is_some()) {
             ok += 1;
         } else {
             bad += 1;
-            info!("nav reach: can't reach {} on floor {level} at lot {l} (use point {})", o.name, b.local(Vec3::new(to.x, 0.0, to.y)));
+            info!("nav reach: can't reach {} on floor {level} at lot {l} (use point {}; box centre {} half {}, route {:?})", o.name, b.local(Vec3::new(to.x, 0.0, to.y)), o.center, o.half, o.route);
             // (On the ground floor: the barriers a way would cross without them.)
             if level <= 1
                 && let Some(path) = grid.without_barriers().find_path(exit.0, to)

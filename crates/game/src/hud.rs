@@ -993,7 +993,10 @@ fn world_click(
     ),
 ) {
     // (Not in buy mode, nor in Edit Town: a click there picks lots.)
-    if buy.is_some_and(|b| b.active) || edit_town.is_open() {
+    if buy.as_ref().is_some_and(|b| b.active) || edit_town.is_open() {
+        if mouse.just_pressed(MouseButton::Left) {
+            debug!("click in {}", if edit_town.is_open() { "Edit Town" } else { "buy mode" });
+        }
         return;
     }
     if mouse.just_pressed(MouseButton::Right) {
@@ -1001,6 +1004,9 @@ fn world_click(
         return;
     }
     if !mouse.just_pressed(MouseButton::Left) || over_ui.0 {
+        if mouse.just_pressed(MouseButton::Left) {
+            debug!("click at {:?}: on the interface", windows.single().ok().and_then(|w| w.cursor_position()));
+        }
         return;
     }
     let Ok(window) = windows.single() else { return };
@@ -1016,6 +1022,7 @@ fn world_click(
     // (The objects' meshes are the GPU's alone, so most are found by their footprints: the
     // nearest object, Sim or pet whose box the ray passes through, of those shown.)
     let target = hits.first().and_then(|(e, _)| ancestor_with(*e, &parents, is_target)).or_else(|| pick_by_box(ray, &pickable));
+    debug!("click at {cursor}: {:?} ({})", target.map(|t| objects.get(t).map_or("a Sim or pet".to_string(), |o| o.name.clone())), if hits.is_empty() { "by its box" } else { "by its mesh" });
 
     // A pet: what can be done with it.
     if let Some((t, (pet, ptf))) = target.and_then(|t| pets_q.get(t).ok().map(|p| (t, p)))

@@ -494,6 +494,8 @@ impl ObjectKind {
                 | K::Keyboard
                 | K::Drums
                 | K::LaserHarp
+                // (A bath's: its open side, as the game's tubs set against walls have it.)
+                | K::Bathtub
         )
         .then_some(0)
     }
@@ -511,6 +513,27 @@ impl GameObject {
         let local = Vec3::new(self.center.x, 0.0, self.center.y + ahead);
         let p = tf.transform_point(local);
         Vec2::new(p.x, p.z)
+    }
+
+    /// Where else it's got into or sat on from, when its front can't be walked to: a chair
+    /// pushed in at a table from behind or beside it, a hot tub from any side, a bath from its
+    /// other side or either end.
+    pub fn other_approaches(&self, tf: &Transform) -> Vec<Vec2> {
+        let (c, h) = (self.center, self.half);
+        let local = match self.kind {
+            ObjectKind::Chair | ObjectKind::Stool | ObjectKind::Sofa | ObjectKind::HotTub => {
+                vec![Vec2::new(c.x, c.y - h.y - 0.45), Vec2::new(c.x + h.x + 0.45, c.y), Vec2::new(c.x - h.x - 0.45, c.y)]
+            }
+            ObjectKind::Bathtub => vec![Vec2::new(c.x + h.x + 0.45, c.y), Vec2::new(c.x, c.y + h.y + 0.45), Vec2::new(c.x, c.y - h.y - 0.45)],
+            _ => Vec::new(),
+        };
+        local
+            .into_iter()
+            .map(|p| {
+                let w = tf.transform_point(Vec3::new(p.x, 0.0, p.y));
+                Vec2::new(w.x, w.z)
+            })
+            .collect()
     }
 
     pub fn world_center(&self, tf: &Transform) -> Vec3 {
@@ -2187,23 +2210,11 @@ pub(crate) fn run_actions(
                     if let ActionKind::Jog { home } = &mut action.kind {
                         *home = from;
                     }
-                    // A chair pushed in at a table is reached from behind or beside it; a hot tub,
-                    // got into from any side, from whichever can be walked to (the Wolffs' roof
-                    // has its front over the edge).
+                    // A chair pushed in at a table is reached from behind or beside it; a hot tub
+                    // or a bath, got into from more than one side, from whichever can be walked
+                    // to (the Wolffs' roof has a hot tub's front over the edge).
                     let alternatives: Vec<Vec2> = match &action.kind {
-                        ActionKind::Object { target, .. } => objects
-                            .get(*target)
-                            .ok()
-                            .filter(|(o, ..)| matches!(o.kind, ObjectKind::Chair | ObjectKind::Stool | ObjectKind::Sofa | ObjectKind::HotTub))
-                            .map(|(o, otf, ..)| {
-                                [Vec3::new(o.center.x, 0.0, o.center.y - o.half.y - 0.45), Vec3::new(o.center.x + o.half.x + 0.45, 0.0, o.center.y), Vec3::new(o.center.x - o.half.x - 0.45, 0.0, o.center.y)]
-                                    .map(|p| {
-                                        let w = otf.transform_point(p);
-                                        Vec2::new(w.x, w.z)
-                                    })
-                                    .to_vec()
-                            })
-                            .unwrap_or_default(),
+                        ActionKind::Object { target, .. } => objects.get(*target).ok().map(|(o, otf, ..)| o.other_approaches(otf)).unwrap_or_default(),
                         _ => Vec::new(),
                     };
                     let routed = dest.and_then(|(d, l)| {

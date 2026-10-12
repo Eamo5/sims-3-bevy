@@ -618,6 +618,12 @@ cover {:?}", g.seasons.temperature, g.seasons.freeze_melt, g.seasons.cover);
                 println!("{b:?}");
             }
         }
+        // ROUTESLOTS=<OBJD instance>: that object's routing slots (number, position, facing).
+        if let Some(i) = std::env::var("ROUTESLOTS").ok().and_then(|v| v.parse::<u64>().ok()) {
+            for (k, slots) in g.route_slots.iter().filter(|(k, _)| k.2 == i) {
+                println!("{k:?} {slots:?}");
+            }
+        }
         // The recipes and snacks, with the food they're drawn with.
         if std::env::var("RECIPES").is_ok() {
             for r in &g.recipes {
