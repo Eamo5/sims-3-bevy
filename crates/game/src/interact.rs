@@ -697,6 +697,9 @@ pub enum Special {
     Microwave,
     /// The TV turned on, to watch from a seat facing it (or standing, with none free).
     TurnOnTv,
+    /// A stereo turned on (to a radio station: it plays until it's turned off) or off.
+    StereoOn,
+    StereoOff,
     /// The TV watched (from a seat, or standing before it).
     WatchTv,
     /// A garden sprinkler turned on (it runs a couple of hours) or off.
@@ -1075,7 +1078,12 @@ static DIVING_BOARD: [InteractionDef; 1] = [InteractionDef {
 }];
 static STUFFED_TOY: [InteractionDef; 1] = [def("Play with Toy", 30.0, [0.0, 0.0, -2.0, 6.0, 0.0, 75.0], Pose::Use)];
 static VRGOGGLES: [InteractionDef; 1] = [def("Explore Virtual Worlds", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 95.0], Pose::Use)];
-static STEREO: [InteractionDef; 1] = [def("Dance", 45.0, [0.0, 0.0, -6.0, 0.0, -6.0, 70.0], Pose::Dance)];
+static STEREO: [InteractionDef; 3] = [
+    def("Dance", 45.0, [0.0, 0.0, -6.0, 0.0, -6.0, 70.0], Pose::Dance),
+    // (The game's `TurnOnOff`: a button pressed.)
+    InteractionDef { autonomous: false, special: Special::StereoOn, ..def("Turn On", 1.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::StereoOff, ..def("Turn Off", 1.0, N, Pose::Use) },
+];
 /// (A book taken down to read in a seat; read standing there when no seat is free.)
 static BOOKSHELF: [InteractionDef; 2] = [
     InteractionDef { special: Special::GetBook, ..def("Read a Book", 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Stand) },
@@ -2918,6 +2926,12 @@ pub(crate) fn run_actions(
                                         }
                                         Special::TurnOnTv => {
                                             commands.entity(me).insert(crate::surroundings::WatchFrom(*target));
+                                        }
+                                        Special::StereoOn => {
+                                            commands.entity(*target).insert(crate::music::StereoOn(None));
+                                        }
+                                        Special::StereoOff => {
+                                            commands.entity(*target).remove::<crate::music::StereoOn>();
                                         }
                                         Special::Microwave => {
                                             match action.recipe_choice.take() {

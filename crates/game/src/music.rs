@@ -42,11 +42,43 @@ fn load_music(mut lib: ResMut<MusicLibrary>, mut sources: ResMut<Assets<AudioSou
 #[derive(Component)]
 struct StereoMusic(Entity, String);
 
+/// A stereo turned on: it plays until it's turned off, on a station chosen (`stereo_pop`) or
+/// one of its own choosing.
+#[derive(Component, Clone, PartialEq)]
+pub struct StereoOn(pub Option<String>);
+
+/// The stations a stereo can be changed to: the game's that are installed, with their names.
+pub fn stations(sounds: Option<&crate::sound::Sounds>) -> Vec<(&'static str, String)> {
+    s3bake::sounds::STATIONS
+        .iter()
+        .copied()
+        .filter(|n| sounds.is_some_and(|s| s.def(n).is_some()))
+        .map(|n| (n, station_name(n)))
+        .collect()
+}
+
+/// A station's name for show: `stereo_geekrock` "Geek Rock".
+pub fn station_name(key: &str) -> String {
+    match key.trim_start_matches("stereo_") {
+        "hiphop" => "Hip Hop".into(),
+        "rnb" => "R&B".into(),
+        "geekrock" => "Geek Rock".into(),
+        "songwriter" => "Singer-Songwriter".into(),
+        "islandlife" => "Island Life".into(),
+        "beachparty" => "Beach Party".into(),
+        "darkwave" => "Darkwave".into(),
+        k => {
+            let mut c = k.chars();
+            c.next().map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn stereo_music(
     mut commands: Commands,
     lib: Res<MusicLibrary>,
-    stereos: Query<(Entity, &GameObject, &UsedBy, &GlobalTransform)>,
+    stereos: Query<(Entity, &GameObject, &UsedBy, &GlobalTransform, Option<&StereoOn>)>,
     playing: Query<(Entity, &StereoMusic)>,
     cams: Query<&SimsCamera>,
     sounds: Option<Res<crate::sound::Sounds>>,
@@ -56,15 +88,24 @@ fn stereo_music(
 ) {
     let cam = cams.single().ok();
     let level = settings.gain(crate::options::Channel::Music);
-    // Stop music for stereos nobody is using any more.
+    // Stop music for stereos turned off (and nobody dancing to), or changed to another station.
     for (e, m) in &playing {
-        if !stereos.get(m.0).is_ok_and(|(_, _, used, _)| used.0.is_some()) {
+        let keep = stereos.get(m.0).is_ok_and(|(_, _, used, _, on)| match on {
+            Some(StereoOn(Some(station))) => station.trim_start_matches("stereo_") == m.1,
+            Some(_) => true,
+            None => used.0.is_some(),
+        });
+        if !keep {
             commands.entity(e).despawn();
         }
     }
-    for (stereo, obj, used, tf) in &stereos {
-        if !matches!(obj.kind, ObjectKind::Stereo) || used.0.is_none() || playing.iter().any(|(_, m)| m.0 == stereo) {
+    for (stereo, obj, used, tf, on) in &stereos {
+        if !matches!(obj.kind, ObjectKind::Stereo) || (used.0.is_none() && on.is_none()) || playing.iter().any(|(_, m)| m.0 == stereo) {
             continue;
+        }
+        // (Danced to, it's on: it plays on after, as the game's does.)
+        if on.is_none() {
+            commands.entity(stereo).insert(StereoOn(None));
         }
         let volume = cam.map_or(0.5, |c| {
             let d = c.focus.distance(tf.translation()) + c.distance * 0.35;
@@ -72,8 +113,12 @@ fn stereo_music(
         });
         // A song from a random radio station; the custom-music folder counts as one more.
         let mut rng = rand::rng();
-        let stations: Vec<&str> = sounds.as_ref().map_or(vec![], |s| s3bake::sounds::STATIONS.iter().copied().filter(|n| s.def(n).is_some()).collect());
-        let custom = !lib.0.is_empty() && rng.random_range(0..=stations.len()) == 0;
+        let mut stations: Vec<&str> = sounds.as_ref().map_or(vec![], |s| s3bake::sounds::STATIONS.iter().copied().filter(|n| s.def(n).is_some()).collect());
+        // (The station it's on, if one was chosen.)
+        if let Some(StereoOn(Some(chosen))) = on {
+            stations.retain(|n| *n == chosen.as_str());
+        }
+        let custom = !lib.0.is_empty() && on.is_none_or(|o| o.0.is_none()) && rng.random_range(0..=stations.len()) == 0;
         let mut genre = "custom".to_string();
         let track = match (custom, stations.choose(&mut rng), sounds.as_ref()) {
             (false, Some(station), Some(s)) => {

@@ -645,7 +645,9 @@ installation is unreachable.
   WAV): object sounds and Simlish voices cued by the animations, footsteps by floor and
   shoe, interface clicks, stings for promotions, weddings and other moments, birds by day
   and insects at night, music for the menus, Create-a-Sim and buy mode, and the radio
-  stations on stereos.
+  stations on stereos: turned on and off as the game's are (a Sim presses the button), kept
+  playing until turned off (dancing to one turns it on), and "Change to..." any of the game's
+  stations there and then.
 - **Careers** from the game's own career tables: all eleven base-game careers (Professional
   Sports included) with every level's title, pay, hours and workdays, and the part-time jobs
   (bookstore, grocery, spa, mausoleum) for teens. Careers branch where the game's do

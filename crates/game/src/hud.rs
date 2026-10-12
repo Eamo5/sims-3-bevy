@@ -114,6 +114,8 @@ pub struct PieMenu {
 const QUICK_MEAL: &str = "Have Quick Meal";
 /// The fridge's menu of leftovers.
 const LEFTOVERS: &str = "Eat Leftovers";
+/// A stereo's menu of stations.
+const CHANGE_STATION: &str = "Change to";
 
 /// A recipe as the food menus list it: with what its ingredients cost, when they do.
 fn recipe_label(r: &s3bake::gamedata::RecipeInfo) -> String {
@@ -1050,6 +1052,8 @@ fn world_click(
             Option<Res<crate::interact::Household>>,
             Option<Res<crate::gardening::Garden>>,
             Res<crate::appliances::Alarm>,
+            Option<Res<crate::sound::Sounds>>,
+            Query<Option<&crate::music::StereoOn>>,
         ),
     ),
     (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q): (
@@ -1261,6 +1265,26 @@ fn world_click(
                 }
                 if d.special == Special::EmptyTrash && !trash_q.get(t).is_ok_and(|f| f.0 > 0) {
                     continue;
+                }
+                // A stereo: on or off, and "Change to..." each of the game's stations (there and
+                // then, as its `ChangeStation` is), beside Turn On or Turn Off.
+                if obj.kind == ObjectKind::Stereo && matches!(d.special, Special::StereoOn | Special::StereoOff) {
+                    let on = opp_q.8.get(t).ok().flatten();
+                    if d.special == Special::StereoOn {
+                        let current = on.and_then(|o| o.0.clone());
+                        let list: Vec<(String, ActionKind)> = crate::music::stations(opp_q.7.as_deref())
+                            .into_iter()
+                            .filter(|(k, _)| current.as_deref() != Some(*k))
+                            .map(|(_, name)| (name, ActionKind::Object { target: t, def: i }))
+                            .collect();
+                        if !list.is_empty() {
+                            options.push((format!("{CHANGE_STATION} ›"), submenu_kind(pie.submenus.len())));
+                            pie.submenus.push((CHANGE_STATION.to_string(), list));
+                        }
+                    }
+                    if (d.special == Special::StereoOn) == on.is_some() {
+                        continue;
+                    }
                 }
                 // (A job quit only by someone who has one.)
                 if d.special == Special::QuitJob && jobs_q.get(actor).ok().flatten().is_none() {
@@ -1490,7 +1514,7 @@ fn pie_buttons(
     (mut wishes, mut notes): (Query<(&Sim, &mut crate::wishes::Wishes), With<Selected>>, ResMut<Notifications>),
     (ui_data, inventories): (Option<Res<crate::icons::GameUi>>, Query<&crate::inventory::Inventory>),
     mut jobs: Query<&mut crate::careers::Job>,
-    (back, windows): (Query<&Interaction, (Changed<Interaction>, With<crate::piemenu::PieBack>)>, Query<&Window, With<PrimaryWindow>>),
+    (back, windows, sounds): (Query<&Interaction, (Changed<Interaction>, With<crate::piemenu::PieBack>)>, Query<&Window, With<PrimaryWindow>>, Option<Res<crate::sound::Sounds>>),
 ) {
     // A submenu's middle: back to the menu it was opened from, where that was.
     if back.iter().any(|i| *i == Interaction::Pressed)
@@ -1534,6 +1558,14 @@ fn pie_buttons(
         return;
     }
     let _ = (&mut wishes, &mut notes);
+    // A stereo changed to a station, there and then.
+    if title == CHANGE_STATION
+        && let ActionKind::Object { target, .. } = kind
+        && let Some((key, _)) = crate::music::stations(sounds.as_deref()).into_iter().find(|(_, n)| *n == label)
+    {
+        commands.entity(target).insert(crate::music::StereoOn(Some(key.to_string())));
+        return;
+    }
     // A long menu's next page, where it was.
     if let Some(i) = as_more(&kind)
         && let (Some(page), Some(a)) = (pie.pages.get(i).cloned(), actor)
