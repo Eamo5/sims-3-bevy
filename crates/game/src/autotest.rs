@@ -2621,7 +2621,7 @@ fn auto_reach(
     for (o, tf, floor) in &objects {
         let l = b.local(tf.translation);
         // (Only what Sims use: not decorations, windows or lights.)
-        if l.cmplt(Vec2::ZERO).any() || l.cmpgt(size).any() || o.price <= 0 || matches!(o.kind, crate::interact::ObjectKind::Other | crate::interact::ObjectKind::Light) {
+        if l.cmplt(Vec2::ZERO).any() || l.cmpgt(size).any() || o.price <= 0 || matches!(o.kind, crate::interact::ObjectKind::Other | crate::interact::ObjectKind::Light) || o.name.contains("Floor Panel") {
             continue;
         }
         let level = floor.map_or(1, |f| f.0);

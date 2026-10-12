@@ -654,8 +654,8 @@ pub fn spawn_game_object_design(
         ));
     }
     // Small decorations don't block walking, nor what hangs on a wall (paintings, mirrors) or in
-    // it over a window or a door (curtains).
-    if half.x * half.y > 0.04 && mx.y > 0.25 && !matches!(kind, ObjectKind::Light) && !script.contains(".curtain") && !crate::building::hangs_on_wall((mn, mx)) {
+    // it over a window or a door (curtains), nor Into the Future's glass floor panels, walked on.
+    if half.x * half.y > 0.04 && mx.y > 0.25 && !matches!(kind, ObjectKind::Light) && !script.contains(".curtain") && !script.ends_with(".glassfloor") && !crate::building::hangs_on_wall((mn, mx)) {
         commands.entity(e).insert(Obstacle { half, center_offset: center });
     }
     Some(SpawnedObject { entity: e })
