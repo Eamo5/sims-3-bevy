@@ -752,10 +752,12 @@ pub(crate) fn object_hit(ray: Ray3d, tf: &GlobalTransform, o: &GameObject) -> Op
     slab(lo, ld, Vec3::new(o.center.x - o.half.x, -0.05, o.center.y - o.half.y), Vec3::new(o.center.x + o.half.x, h, o.center.y + o.half.y))
 }
 
-/// The nearest shown object, Sim or pet the ray passes through: an object by its footprint and
-/// height, a Sim or pet by a box their size round where they stand.
+/// The shown object, Sim or pet aimed at: of those whose boxes the ray passes through (an
+/// object's footprint up to its height, a Sim or pet a box their size round where they stand),
+/// the one whose middle it passes nearest, the smaller winning a near tie (a sink set in a
+/// counter, a chair at a table, a counter under an overhead cabinet).
 #[allow(clippy::type_complexity)]
-fn pick_by_box(
+pub(crate) fn pick_by_box(
     ray: Ray3d,
     pickable: &Query<(Entity, &GlobalTransform, &InheritedVisibility, Option<&GameObject>, Has<crate::pets::Pet>), Or<(With<GameObject>, With<Sim>, With<crate::pets::Pet>)>>,
 ) -> Option<Entity> {
@@ -765,15 +767,21 @@ fn pick_by_box(
         // (Not what there's nothing to do with, a rug: a click there is on the floor.)
         .filter(|(_, _, vis, obj, _)| vis.get() && obj.is_none_or(|o| !crate::interact::interactions_for(o.kind).is_empty()))
         .filter_map(|(e, tf, _, obj, pet)| {
-            let t = match obj {
-                Some(o) => object_hit(ray, tf, o)?,
+            let (mid, size) = match obj {
+                Some(o) => {
+                    object_hit(ray, tf, o)?;
+                    (tf.transform_point(Vec3::new(o.center.x, o.height.max(0.15) * 0.5, o.center.y)), o.half.x.max(o.half.y))
+                }
                 None => {
                     let p = tf.translation();
                     let (r, h) = if pet { (0.4, 0.8) } else { (0.3, 1.8) };
-                    slab(ray.origin, dir, p + Vec3::new(-r, 0.0, -r), p + Vec3::new(r, h, r))?
+                    slab(ray.origin, dir, p + Vec3::new(-r, 0.0, -r), p + Vec3::new(r, h, r))?;
+                    (p + Vec3::Y * h * 0.5, r)
                 }
             };
-            Some((e, t))
+            // (How far the ray passes from its middle.)
+            let off = (mid - ray.origin).cross(dir).length();
+            Some((e, off + 0.25 * size))
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(e, _)| e)

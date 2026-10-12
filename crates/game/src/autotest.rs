@@ -225,7 +225,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_build.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_fence.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_gate_route.run_if(in_state(crate::PlayMode::Live)))
-            .add_systems(Update, auto_reach.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (auto_reach, auto_pick).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_balloon.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(
                 Update,
@@ -2595,6 +2595,45 @@ fn auto_gate_route(
         }
         None => info!("gate route: no way from one side of the gate to the other"),
     }
+}
+
+/// PICK_TEST=1 (tests), ten seconds in: whether a click through the middle of each object shown
+/// that has something to do picks it (not another whose box is in front), from the camera as
+/// it is; those that don't are logged with what was picked instead.
+#[allow(clippy::type_complexity)]
+fn auto_pick(
+    time: Res<Time>,
+    mut done: Local<bool>,
+    cams: Query<(&Camera, &GlobalTransform), With<crate::camera::SimsCamera>>,
+    pickable: Query<(Entity, &GlobalTransform, &InheritedVisibility, Option<&crate::interact::GameObject>, Has<crate::pets::Pet>), Or<(With<crate::interact::GameObject>, With<crate::sim::Sim>, With<crate::pets::Pet>)>>,
+    names: Query<&crate::interact::GameObject>,
+) {
+    if std::env::var("PICK_TEST").is_err() || *done || time.elapsed_secs() < 10.0 {
+        return;
+    }
+    let Ok((camera, cam_tf)) = cams.single() else { return };
+    *done = true;
+    let (mut ok, mut stolen, mut off) = (0, 0, 0);
+    for (e, tf, vis, obj, _) in &pickable {
+        let Some(o) = obj else { continue };
+        if !vis.get() || crate::interact::interactions_for(o.kind).is_empty() {
+            continue;
+        }
+        let mid = tf.transform_point(Vec3::new(o.center.x, o.height.max(0.15) * 0.5, o.center.y));
+        let Ok(screen) = camera.world_to_viewport(cam_tf, mid) else {
+            off += 1;
+            continue;
+        };
+        let Ok(ray) = camera.viewport_to_world(cam_tf, screen) else { continue };
+        match crate::hud::pick_by_box(ray, &pickable) {
+            Some(p) if p == e => ok += 1,
+            other => {
+                stolen += 1;
+                info!("pick test: {} at {mid} picked {:?} instead", o.name, other.and_then(|p| names.get(p).ok()).map(|n| n.name.clone()));
+            }
+        }
+    }
+    info!("pick test: {ok} picked, {stolen} picked something else, {off} off screen");
 }
 
 /// NAV_REACH=1 (tests), ten seconds in: whether each object on the lot can be walked to from

@@ -835,11 +835,22 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         }
     });
     progress(&format!("Converting {name}: houses…"));
+    // (The container slots of what has things slotted into it: tables' chairs.)
+    let parents: Vec<ResourceKey> = placed
+        .values()
+        .flat_map(|objs| {
+            let by_guid: HashMap<u64, &s3formats::objn::PlacedObject> = objs.iter().map(|o| (o.guid, o)).collect();
+            objs.iter().filter(|o| o.parent != 0 && o.parent_slot != 0).filter_map(move |o| by_guid.get(&o.parent).and_then(|p| p.catalog)).collect::<Vec<_>>()
+        })
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let containers: HashMap<ResourceKey, Vec<s3formats::model::Slot>> = par_map(&parents, |k| (*k, s3formats::object::object_container_slots(pkgs, k))).into_iter().collect();
     let (mut buildings, cover_jobs): (Vec<LotBuildingBaked>, Vec<Vec<crate::building::CoverJob>>) = world
         .lots
         .iter()
         .enumerate()
-        .filter_map(|(i, l)| crate::building::bake_building(&pkg, i, l, placed.get(&l.id).map(|v| v.as_slice()).unwrap_or(&[]), &world.heightmap, std::mem::take(&mut fences[i])))
+        .filter_map(|(i, l)| crate::building::bake_building(&pkg, i, l, placed.get(&l.id).map(|v| v.as_slice()).unwrap_or(&[]), &world.heightmap, std::mem::take(&mut fences[i]), &containers))
         .unzip();
     bake_covers(root, pkgs, cover_jobs.into_iter().flatten().collect(), &format!("Converting {name}: walls and floors"), progress);
     for b in &mut buildings {

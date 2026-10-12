@@ -253,7 +253,15 @@ pub fn stair_pieces(pkgs: &s3pkg::PackageSet, cstr: &s3pkg::ResourceKey) -> (Opt
     (flight, start, side)
 }
 
-pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[PlacedObject], hm: &s3formats::world::Heightmap, fences: Vec<FenceBaked>) -> Option<(LotBuildingBaked, Vec<CoverJob>)> {
+pub fn bake_building(
+    pkg: &Package,
+    lot_index: usize,
+    lot: &LotInfo,
+    objects: &[PlacedObject],
+    hm: &s3formats::world::Heightmap,
+    fences: Vec<FenceBaked>,
+    containers: &HashMap<s3pkg::ResourceKey, Vec<s3formats::model::Slot>>,
+) -> Option<(LotBuildingBaked, Vec<CoverJob>)> {
     let data = LotBuildData::load(pkg, lot.id).unwrap_or_default();
     let read = |t: u32, g: u32| pkg.find(&s3pkg::ResourceKey::new(t, g, lot.id)).and_then(|e| pkg.read(e).ok());
     let mut covers = Covers::load(pkg, lot.id);
@@ -600,13 +608,23 @@ pub fn bake_building(pkg: &Package, lot_index: usize, lot: &LotInfo, objects: &[
             let Some(pp) = parent.position.filter(|pp| *pp != [0.0, 0.0, 0.0]) else { continue };
             let script = o.script.as_deref().unwrap_or("").to_ascii_lowercase();
             let [qx, qy, qz, qw] = parent.rotation;
+            // (Its place in the parent: the parent's container slot it's in, where the parent
+            // has it (a dining table's nine), else round the parent as below.)
+            let slot = parent.catalog.and_then(|k| containers.get(&k)).and_then(|v| v.iter().find(|s| s.name == o.parent_slot && o.parent_slot != 0));
             // Parent axes on the ground (rotation of +X and +Z by the parent quaternion).
             let rot = |v: [f32; 3]| -> [f32; 3] {
                 let (x, y, z) = (v[0], v[1], v[2]);
                 let (ix, iy, iz, iw) = (qw * x + qy * z - qz * y, qw * y + qz * x - qx * z, qw * z + qx * y - qy * x, -qx * x - qy * y - qz * z);
                 [ix * qw + iw * -qx + iy * -qz - iz * -qy, iy * qw + iw * -qy + iz * -qx - ix * -qz, iz * qw + iw * -qz + ix * -qy - iy * -qx]
             };
-            if script.contains("seating") || script.contains("chair") || script.contains("stool") {
+            if let Some(s) = slot {
+                // (Where the slot is in the parent, turned the way it faces: a chair's to the
+                // table.)
+                let w = rot(s.pos);
+                p = [pp[0] + w[0], pp[1] + w[1], pp[2] + w[2]];
+                let yaw = 2.0 * qy.atan2(qw) + s.rot[0][2].atan2(s.rot[2][2]);
+                rotation = [0.0, (yaw * 0.5).sin(), 0.0, (yaw * 0.5).cos()];
+            } else if script.contains("seating") || script.contains("chair") || script.contains("stool") {
                 // Chairs go round the table: front, back, left, right.
                 let k = sibling_count.entry(o.parent).or_default();
                 let (off, face) = match *k % 4 {

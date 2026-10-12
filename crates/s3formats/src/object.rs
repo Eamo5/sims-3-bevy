@@ -93,6 +93,17 @@ pub fn object_fx_slots(pkgs: &PackageSet, objd_key: &ResourceKey) -> Vec<[f32; 3
     pkgs.read(&rk).or_else(|| pkgs.read_ti(rk.t, rk.i)).and_then(|d| crate::model::parse_rslt(&d)).map(|s| s.effects.iter().map(|e| e.pos).collect()).unwrap_or_default()
 }
 
+/// An object's container slots (model space): where what's slotted into it sits (a dining
+/// table's chairs, a counter's sink), by the slot name's hash.
+pub fn object_container_slots(pkgs: &PackageSet, objd_key: &ResourceKey) -> Vec<crate::model::Slot> {
+    let Some(objd) = pkgs.read(objd_key) else { return Vec::new() };
+    let Some(objk) = objd_objk(pkgs, &objd) else { return Vec::new() };
+    let Some(mk) = objk.model_key.filter(|k| k.t == types::VPXY) else { return Vec::new() };
+    let Some(v) = pkgs.read(&mk).or_else(|| pkgs.read_ti(mk.t, mk.i)) else { return Vec::new() };
+    let Some(rk) = crate::model::vpxy_keys(&v).into_iter().find(|k| k.t == crate::model::T_RSLT) else { return Vec::new() };
+    pkgs.read(&rk).or_else(|| pkgs.read_ti(rk.t, rk.i)).and_then(|d| crate::model::parse_rslt(&d)).map(|s| s.containers).unwrap_or_default()
+}
+
 /// An object's routing slots (`routingSlot_N`, model space): where a Sim stands to use it, by
 /// slot number, and the way they face there.
 pub fn object_route_slots(pkgs: &PackageSet, objd_key: &ResourceKey) -> Vec<(u8, [f32; 3], [f32; 3])> {

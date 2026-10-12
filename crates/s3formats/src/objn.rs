@@ -59,6 +59,8 @@ pub struct PlacedObject {
     pub position: Option<[f32; 3]>,
     pub rotation: [f32; 4],
     pub parent: u64,
+    /// The parent's container slot it sits in (the slot name's hash), when it has a parent.
+    pub parent_slot: u32,
     pub script: Option<String>,
     pub speedtree: Option<ResourceKey>,
     pub trees: Vec<TreeInstance>,
@@ -234,7 +236,7 @@ fn parse_object(r: &mut Reader, refs: &HashMap<u16, ResourceKey>, tail: usize) -
         o.rotation = [r.f32()?, r.f32()?, r.f32()?, r.f32()?];
         o.parent = r.u64()?;
         if o.parent != 0 {
-            r.u32()?;
+            o.parent_slot = r.u32()?;
             r.u16()?;
         }
     }
