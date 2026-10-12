@@ -2064,6 +2064,29 @@ pub fn spawn_building(
         }
     }
 
+    // Spiral staircases and ladders, one on each floor they climb from: each goes up to the floor
+    // over it, stepped onto at its front at the foot, and at the top on whichever side there's
+    // floor (a spiral's turns round; a ladder leans on the floor it climbs to).
+    if neighbor.is_none() || visit {
+        for o in b.objects.iter().filter(|o| o.script.contains("StaircaseSpiral") || o.script.ends_with(".Objects.Ladder")) {
+            let s = b.object_storey(o);
+            let q = Quat::from_xyzw(o.rotation[0], o.rotation[1], o.rotation[2], o.rotation[3]).normalize();
+            let f = rot.inverse() * (q * Vec3::Z);
+            let fwd = Vec2::new(f.x, f.z).normalize_or_zero();
+            let right = fwd.perp();
+            let at = Vec2::from(o.local);
+            let ladder = o.script.ends_with("Ladder");
+            let reach = if ladder { 0.8 } else { 1.3 };
+            let bottom = at + fwd * reach;
+            let tops = if ladder { [at - fwd * 0.6, at + fwd * reach, at + right * reach, at - right * reach] } else { [at + right * reach, at - fwd * reach, at - right * reach, at + fwd * reach] };
+            let Some(top) = tops.into_iter().find(|p| active.floor_cells_has(s + 1, *p)) else { continue };
+            let (wb, wt) = (active.world(bottom.x, bottom.y, 0.0), active.world(top.x, top.y, 0.0));
+            let y0 = active.floor_y(s, wb).unwrap_or(level_y(s));
+            let y1 = active.floor_y(s + 1, wt).unwrap_or(level_y(s + 1));
+            active.stairs.push(StairLink { level: s, upper: s + 1, bottom: wb.xz(), top: wt.xz(), y0, y1 });
+        }
+    }
+
     // Walls: one entity per segment with a face per side, full and cut-away versions
     // (neighbours: everything merged into a few meshes).
     // (Indexed by height: full walls, and for a visit cut-down walls too.)
