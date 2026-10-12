@@ -618,6 +618,18 @@ cover {:?}", g.seasons.temperature, g.seasons.freeze_melt, g.seasons.cover);
                 println!("{b:?}");
             }
         }
+        // SLOTAUDIT=1: each catalogue object's first routing slot, by script (where Sims stand).
+        if std::env::var("SLOTAUDIT").is_ok() {
+            let cat: Vec<s3bake::types::CatalogEntry> = s3bake::pack::read_value(&s3bake::default_root().global_dir().join("catalog.bin")).unwrap_or_default();
+            let slots: std::collections::HashMap<s3bake::Key, &Vec<(u8, [f32; 3], [f32; 3])>> = g.route_slots.iter().map(|(k, v)| (*k, v)).collect();
+            for c in &cat {
+                if let Some(v) = slots.get(&c.objd)
+                    && let Some((n, p, f)) = v.iter().min_by_key(|s| s.0)
+                {
+                    println!("SLOT	{}	{}	{n}	{:.2}	{:.2}	{:.2}	{:.2}	{}", c.script, c.instance_name, p[0], p[2], f[0], f[2], v.len());
+                }
+            }
+        }
         // ROUTESLOTS=<OBJD instance>: that object's routing slots (number, position, facing).
         if let Some(i) = std::env::var("ROUTESLOTS").ok().and_then(|v| v.parse::<u64>().ok()) {
             for (k, slots) in g.route_slots.iter().filter(|(k, _)| k.2 == i) {
