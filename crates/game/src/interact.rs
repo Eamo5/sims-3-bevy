@@ -509,8 +509,10 @@ impl ObjectKind {
                 | K::Bathtub
                 // (A telescope's: behind it, looking through it.)
                 | K::Telescope
-                // (A shower's: beside its door, the game's clips walking the Sim in from there.)
+                // (A shower's: beside its door, the game's clips walking the Sim in from there;
+                // a treadmill's, behind it, stepping up onto the belt.)
                 | K::Shower
+                | K::Treadmill
         )
         .then_some(0)
     }
@@ -2459,10 +2461,11 @@ pub(crate) fn run_actions(
                                         if obj.kind == ObjectKind::Shower
                                             && let Some((p, f)) = obj.route
                                         {
-                                            // In the stall: a metre in from beside its door, where
-                                            // the game's getting-in walks the Sim, facing that way
-                                            // (the clips play where the Sim stands).
-                                            let w = otf.transform_point(Vec3::new(p.x + f.x, 0.0, p.y + f.y));
+                                            // In the stall: the game puts the Sim there once in (its
+                                            // clips don't walk them in), on the way in from beside
+                                            // its door, at the middle, facing that way.
+                                            let inside = p + f * (obj.center - p).dot(f).max(0.0);
+                                            let w = otf.transform_point(Vec3::new(inside.x, 0.0, inside.y));
                                             tf.translation = Vec3::new(w.x, otf.translation.y, w.z);
                                             tf.rotation = otf.rotation * Quat::from_rotation_y(f.x.atan2(f.y));
                                         }
