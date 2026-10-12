@@ -101,6 +101,11 @@ pub struct PieMenu {
     pub at: Vec2,
     /// What it's titled (a submenu's name: "Have Dinner").
     pub title: String,
+    /// The menus a submenu was opened from (where each was, its title and options), back to
+    /// which its middle goes.
+    pub parents: Vec<(Vec2, String, Vec<(String, ActionKind)>)>,
+    /// Where the pointer's to be put: the middle of a menu moved onto the screen.
+    pub warp: Option<Vec2>,
 }
 
 /// The fridge's (and microwave's) menu of snacks, as the game titles it.
@@ -693,10 +698,23 @@ struct PieBubble;
 struct PieCenter(Entity);
 
 pub fn open_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, actor: Entity, options: Vec<(String, ActionKind)>) {
+    pie.parents.clear();
+    spawn_pie(commands, pie, at, title, actor, options);
+}
+
+/// A submenu, opened where its option was clicked (as the game's are), with the way back to the
+/// menu it's in at its middle.
+fn open_submenu(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, actor: Entity, options: Vec<(String, ActionKind)>, parent: (Vec2, String, Vec<(String, ActionKind)>)) {
+    pie.parents.push(parent);
+    spawn_pie(commands, pie, at, title, actor, options);
+}
+
+fn spawn_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, actor: Entity, options: Vec<(String, ActionKind)>) {
     close_pie(commands, pie);
     if options.is_empty() {
         return;
     }
+    let submenu = !pie.parents.is_empty();
     let n = options.len();
     let radius = 90.0 + n as f32 * 10.0;
     // (In the game's own bubbles when its interface is to hand: see `piemenu`.)
@@ -708,40 +726,69 @@ pub fn open_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &st
             GlobalZIndex(10),
         ))
         .with_children(|p| {
-            // The one acting, in the middle, with what's been clicked above.
-            p.spawn((
-                PieCenter(actor),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(-28.0),
-                    top: Val::Px(-28.0),
-                    width: Val::Px(56.0),
-                    height: Val::Px(56.0),
-                    border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Px(28.0)),
-                    overflow: Overflow::clip(),
-                    ..default()
-                },
-                BorderColor::all(Color::WHITE),
-                BackgroundColor(Color::srgb(0.55, 0.7, 0.9)),
-                BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.45), Val::Px(0.0), Val::Px(2.0), Val::Px(0.0), Val::Px(6.0)),
-                Pickable::IGNORE,
-            ));
-            // (A label under it, on a dark pill so it reads over anything.)
-            p.spawn((
-                Node { position_type: PositionType::Absolute, left: Val::Px(-110.0), top: Val::Px(31.0), width: Val::Px(220.0), justify_content: JustifyContent::Center, ..default() },
-                Pickable::IGNORE,
-            ))
-            .with_children(|l| {
-                l.spawn((
-                    Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(1.0)), border_radius: BorderRadius::all(Val::Px(9.0)), ..default() },
-                    BackgroundColor(Color::srgba(0.05, 0.12, 0.25, 0.75)),
+            // A submenu's middle: the way back, named for it (see `piemenu`; here, a bubble).
+            if submenu {
+                if !game_look {
+                    p.spawn((
+                        Button,
+                        PieBubble,
+                        crate::piemenu::PieBack,
+                        Node {
+                            border_radius: BorderRadius::all(Val::Px(17.0)),
+                            border: UiRect::all(Val::Px(1.5)),
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(-75.0),
+                            top: Val::Px(-16.0),
+                            width: Val::Px(150.0),
+                            height: Val::Px(32.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BorderColor::all(Color::srgb(0.45, 0.6, 0.82)),
+                        BackgroundColor(BUBBLE),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((text(format!("{title}..."), 14.0, BUBBLE_TEXT), Pickable::IGNORE));
+                    });
+                }
+            }
+            if !submenu {
+                // The one acting, in the middle, with what's been clicked above.
+                p.spawn((
+                    PieCenter(actor),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(-28.0),
+                        top: Val::Px(-28.0),
+                        width: Val::Px(56.0),
+                        height: Val::Px(56.0),
+                        border: UiRect::all(Val::Px(2.0)),
+                        border_radius: BorderRadius::all(Val::Px(28.0)),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    BorderColor::all(Color::WHITE),
+                    BackgroundColor(Color::srgb(0.55, 0.7, 0.9)),
+                    BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.45), Val::Px(0.0), Val::Px(2.0), Val::Px(0.0), Val::Px(6.0)),
+                    Pickable::IGNORE,
+                ));
+                // (A label under it, on a dark pill so it reads over anything.)
+                p.spawn((
+                    Node { position_type: PositionType::Absolute, left: Val::Px(-110.0), top: Val::Px(31.0), width: Val::Px(220.0), justify_content: JustifyContent::Center, ..default() },
                     Pickable::IGNORE,
                 ))
-                .with_children(|b| {
-                    b.spawn((text(title, 13.0, Color::WHITE), Pickable::IGNORE));
+                .with_children(|l| {
+                    l.spawn((
+                        Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(1.0)), border_radius: BorderRadius::all(Val::Px(9.0)), ..default() },
+                        BackgroundColor(Color::srgba(0.05, 0.12, 0.25, 0.75)),
+                        Pickable::IGNORE,
+                    ))
+                    .with_children(|b| {
+                        b.spawn((text(title, 13.0, Color::WHITE), Pickable::IGNORE));
+                    });
                 });
-            });
+            }
             for (i, (label, _)) in options.iter().enumerate().filter(|_| !game_look) {
                 let a = -std::f32::consts::FRAC_PI_2 + i as f32 / n as f32 * std::f32::consts::TAU;
                 let (x, y) = (a.cos() * radius, a.sin() * radius * 0.8);
@@ -772,7 +819,7 @@ pub fn open_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &st
         })
         .id();
     if game_look {
-        commands.entity(root).insert(crate::piemenu::PieRequest(options.iter().map(|o| o.0.clone()).collect()));
+        commands.entity(root).insert(crate::piemenu::PieRequest(options.iter().map(|o| o.0.clone()).collect(), submenu.then(|| title.to_string())));
     }
     pie.root = Some(root);
     pie.actor = Some(actor);
@@ -1402,7 +1449,15 @@ fn pie_buttons(
     (mut wishes, mut notes): (Query<(&Sim, &mut crate::wishes::Wishes), With<Selected>>, ResMut<Notifications>),
     (ui_data, inventories): (Option<Res<crate::icons::GameUi>>, Query<&crate::inventory::Inventory>),
     mut jobs: Query<&mut crate::careers::Job>,
+    (back, windows): (Query<&Interaction, (Changed<Interaction>, With<crate::piemenu::PieBack>)>, Query<&Window, With<PrimaryWindow>>),
 ) {
+    // A submenu's middle: back to the menu it was opened from, where that was.
+    if back.iter().any(|i| *i == Interaction::Pressed)
+        && let (Some((at, title, options)), Some(a)) = (pie.parents.pop(), pie.actor)
+    {
+        spawn_pie(&mut commands, &mut pie, at, &title, a, options);
+        return;
+    }
     let mut chosen = None;
     for (i, opt) in &q {
         if *i == Interaction::Pressed {
@@ -1413,6 +1468,7 @@ fn pie_buttons(
     let Some((mut label, kind)) = pie.options.get(idx).cloned() else { return };
     let actor = pie.actor;
     let title = std::mem::take(&mut pie.title);
+    let parent = (pie.at, title.clone(), pie.options.clone());
     close_pie(&mut commands, &mut pie);
     if let ActionKind::BuyReward(_) = kind {
         return;
@@ -1437,11 +1493,12 @@ fn pie_buttons(
         return;
     }
     let _ = (&mut wishes, &mut notes);
+    // (Opened where its option was clicked, as the game's are.)
     if let Some(i) = as_submenu(&kind)
         && let (Some((title, list)), Some(a)) = (pie.submenus.get(i).cloned(), actor)
     {
-        let at = pie.at;
-        open_pie(&mut commands, &mut pie, at, &title, a, list);
+        let at = windows.single().ok().and_then(|w| w.cursor_position()).unwrap_or(pie.at);
+        open_submenu(&mut commands, &mut pie, at, &title, a, list, parent);
         return;
     }
     if let ActionKind::Social { target, social } = kind

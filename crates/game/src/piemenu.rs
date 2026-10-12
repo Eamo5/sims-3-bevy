@@ -2,7 +2,9 @@
 //! first option at the top and the rest round clockwise, each in the bubble of the twelve whose
 //! place is nearest (its tail towards the middle), widened to its words, lit under the pointer
 //! with the bubble's own pictures and the game's highlight colour, as UI.dll's `PieMenu` lays
-//! them out. The acting Sim's face is in the middle (see `hud::open_pie`).
+//! them out. The acting Sim's face is in the middle (see `hud::open_pie`); a submenu's middle is
+//! the game's return button, named for it. A menu that would go off the screen is moved onto it,
+//! the pointer with it, as the game's `SetupPieMenuButtons` does.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -14,7 +16,7 @@ pub struct PieMenuPlugin;
 
 impl Plugin for PieMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (enable, build_pies, text_hover).chain());
+        app.add_systems(Update, (enable, build_pies, warp_pointer, text_hover).chain());
     }
 }
 
@@ -24,9 +26,13 @@ pub static GAME_PIE: AtomicBool = AtomicBool::new(false);
 /// Most options a menu shows round its middle (`kMaxVisibleItems`).
 pub const MAX_ITEMS: usize = 12;
 
-/// A pie menu to draw: its options' words.
+/// A pie menu to draw: its options' words, and a submenu's name (its middle's way back).
 #[derive(Component)]
-pub struct PieRequest(pub Vec<String>);
+pub struct PieRequest(pub Vec<String>, pub Option<String>);
+
+/// A submenu's middle: back to the menu it was opened from.
+#[derive(Component)]
+pub struct PieBack;
 
 /// An option's words (lit under the pointer).
 #[derive(Component)]
@@ -38,6 +44,8 @@ const ITEM: u32 = 0x8ed0_d610;
 const ITEM_TEXT: u32 = 1;
 const ITEM_ICON: u32 = 2;
 const ITEM_GROOVE: u32 = 3;
+/// The middle's return button.
+const RETURN: u32 = 0x8ed0_d61c;
 /// The game's layout radius, the width the bubbles' words are drawn at, the icon's room
 /// (taken off when there's none), and the narrowest bubble.
 const RADIUS: f32 = 80.0;
@@ -75,14 +83,49 @@ pub fn places(n: usize) -> Vec<(Vec2, u32)> {
         .collect()
 }
 
+#[allow(clippy::type_complexity)]
 fn build_pies(
     mut commands: Commands,
-    q: Query<(Entity, &PieRequest), Added<PieRequest>>,
+    mut q: Query<(Entity, &PieRequest, &mut Node), Added<PieRequest>>,
     ui: Option<ResMut<UiAssets>>,
     (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
+    mut pie: ResMut<crate::hud::PieMenu>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
     let Some(mut ui) = ui else { return };
-    for (root, req) in &q {
+    for (root, req, mut node) in &mut q {
+        // (All its bubbles' room, to keep it on the screen.)
+        let mut room = Rect::EMPTY;
+        // The middle of a submenu: back to the menu before, named for this one.
+        if let Some(name) = &req.1
+            && let Some(mut b) = ui.find("HUDPieMenu", RETURN).cloned()
+        {
+            let words = name.chars().count() as f32 * CHAR_WIDTH;
+            let [x1, y1, x2, y2] = b.area;
+            let grow = (words - TEXT_WIDTH).max(0.0).round();
+            b.area = [x1 - (grow * 0.5).round(), y1, x2 + grow - (grow * 0.5).round(), y2];
+            b.cls = "Button".to_string();
+            b.flags |= s3bake::ui::WIN_VISIBLE | s3bake::ui::WIN_ENABLED;
+            for c in &mut b.children {
+                match c.id {
+                    ITEM_TEXT => {
+                        c.caption = format!("{name}...");
+                        c.colors = vec![REGULAR];
+                        c.area[2] += grow;
+                    }
+                    ITEM_ICON => c.flags &= !s3bake::ui::WIN_VISIBLE,
+                    _ => {}
+                }
+            }
+            room = room.union(Rect::new(b.area[0], b.area[1], b.area[2], b.area[3]));
+            let s = ui.spawn_under(&mut commands, &mut images, &mut fonts, &b, root);
+            if let Some(r) = s.root {
+                commands.entity(r).insert((PieBack, crate::hud::BlocksWorld));
+                if let Some(t) = s.text(ITEM_TEXT) {
+                    commands.entity(r).insert(PieText(t));
+                }
+            }
+        }
         for (k, (label, (loc, slot))) in req.0.iter().zip(places(req.0.len())).enumerate() {
             // (What opens more, as the game marks it: "Have Breakfast...".)
             let label = &label.strip_suffix(" ›").map_or_else(|| label.clone(), |l| format!("{l}..."));
@@ -99,6 +142,7 @@ fn build_pies(
             };
             let p = (loc + Vec2::new(x, y1)).round();
             b.area = [p.x, p.y, p.x + width, p.y + (y2 - y1)];
+            room = room.union(Rect::new(b.area[0], b.area[1], b.area[2], b.area[3]));
             b.cls = "Button".to_string();
             b.flags |= s3bake::ui::WIN_VISIBLE | s3bake::ui::WIN_ENABLED;
             for c in &mut b.children {
@@ -134,6 +178,31 @@ fn build_pies(
                 }
             }
         }
+        // Moved onto the screen when it would go off it, the pointer to its middle again.
+        if let (Ok(w), Val::Px(x), Val::Px(y)) = (windows.single(), node.left, node.top)
+            && !room.is_empty()
+        {
+            let at = Vec2::new(x, y);
+            let (lo, hi) = (at + room.min, at + room.max);
+            let screen = Vec2::new(w.width(), w.height());
+            let shift = |lo: f32, hi: f32, size: f32| if lo < 0.0 { -lo } else if hi > size { size - hi } else { 0.0 };
+            let d = Vec2::new(shift(lo.x, hi.x, screen.x), shift(lo.y, hi.y, screen.y));
+            if d != Vec2::ZERO {
+                node.left = Val::Px(at.x + d.x);
+                node.top = Val::Px(at.y + d.y);
+                pie.at = at + d;
+                pie.warp = Some(at + d);
+            }
+        }
+    }
+}
+
+/// The pointer moved to a menu's middle, when the menu was moved onto the screen.
+fn warp_pointer(mut pie: ResMut<crate::hud::PieMenu>, mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>) {
+    if let Some(p) = pie.warp.take()
+        && let Ok(mut w) = windows.single_mut()
+    {
+        w.set_cursor_position(Some(p));
     }
 }
 

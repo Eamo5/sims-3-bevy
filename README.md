@@ -668,7 +668,10 @@ installation is unreachable.
   top and the rest round clockwise, each in the bubble whose place is nearest (its tail or
   groove towards the middle) widened to its words, lit under the pointer with the game's own
   pictures and colours; the acting Sim's face in the middle (what was clicked named beneath
-  it), with submenus (›) for long lists. The interaction queue at the top left and the
+  it), with submenus ("Have Breakfast...") for long lists, opened where their option was
+  clicked with the game's return button in the middle, named for them, back to the menu
+  before. A menu that would go off the screen is moved onto it, the pointer with it, as the
+  game's are. The interaction queue at the top left and the
   notices at the top right are the game's own too: each queued action in its frame with the
   object's picture or the other Sim's face, the running one's progress bar, a cross to cancel;
   each notice a speech card with the Sim's face or a system card, closed with its cross.

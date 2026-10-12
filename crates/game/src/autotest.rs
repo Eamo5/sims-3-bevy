@@ -2616,6 +2616,7 @@ fn auto_click_use(
     options: Query<(&crate::hud::PieOption, &bevy::ui::UiGlobalTransform)>,
     queues: Query<&crate::interact::ActionQueue, With<crate::sim::Selected>>,
     pickable: Query<(Entity, &GlobalTransform, &InheritedVisibility, Option<&crate::interact::GameObject>, Has<crate::pets::Pet>), Or<(With<crate::interact::GameObject>, With<crate::sim::Sim>, With<crate::pets::Pet>)>>,
+    back: Query<&bevy::ui::UiGlobalTransform, With<crate::piemenu::PieBack>>,
 ) {
     let Ok(list) = std::env::var("CLICK_USE") else { return };
     // (Each `Kind` or `Kind:Option>Submenu option`, by the start of their labels.)
@@ -2658,6 +2659,13 @@ fn auto_click_use(
                 *state = (idx + 1, 0, t);
                 return;
             };
+            // (CLICK_USE_TOP=1: the camera eased back until it's at the screen's top edge, for
+            // a menu that won't fit there.)
+            if std::env::var("CLICK_USE_TOP").is_ok() && screen.y > 24.0 {
+                let ahead = cam_tf.forward().with_y(0.0).normalize_or_zero();
+                cam.focus -= ahead * 0.2;
+                return;
+            }
             window.set_cursor_position(Some(screen));
             mouse.press(MouseButton::Left);
             // (What a box test finds there, for when no pie opens.)
@@ -2673,6 +2681,20 @@ fn auto_click_use(
                 return;
             }
             let labels: Vec<&str> = pie.options.iter().map(|(l, _)| l.as_str()).collect();
+            // (`<`: the submenu's middle, back to the menu before.)
+            if entries[idx].1.get(*depth) == Some(&"<") {
+                if let (Ok(at), Ok(mut window)) = (back.single(), windows.single_mut()) {
+                    let scale = window.scale_factor();
+                    info!("click use: {}: back from {labels:?}", kinds[idx]);
+                    window.set_cursor_position(Some(at.translation / scale));
+                    mouse.press(MouseButton::Left);
+                } else {
+                    info!("click use: {}: no way back from {labels:?}", kinds[idx]);
+                }
+                *depth += 1;
+                *state = (idx, 2, t + 1.0);
+                return;
+            }
             // (The first that does something; failing that, the first submenu, then its first.)
             let submenu = |a: &crate::interact::ActionKind| matches!(a, crate::interact::ActionKind::GoHere(p, _) if p.x.is_nan());
             let k = match entries[idx].1.get(*depth) {
