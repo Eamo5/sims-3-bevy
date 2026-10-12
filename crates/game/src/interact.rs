@@ -167,6 +167,8 @@ pub enum ObjectKind {
     Buffet,
     /// A picnic basket: a picnic out of it.
     PicnicBasket,
+    /// A picnic table: four places on its benches (the game's `PicnicTable`).
+    PicnicTable,
     /// A house phone, on the wall or a table: the phone's menu.
     Phone,
     /// Bubble bath, and a rubber duck: baths with them, while they're about the house.
@@ -256,6 +258,8 @@ impl ObjectKind {
             Self::Buffet
         } else if has("cookingobjects.picnicbasket") {
             Self::PicnicBasket
+        } else if has("environment.picnictable") || has("mimics.picnictable") || has("mimics.tablepicnic") {
+            Self::PicnicTable
         } else if s.ends_with("cookingobjects.cake") {
             // (The birthday cake bought in buy mode, as the game sells it.)
             Self::BirthdayCake
@@ -442,7 +446,7 @@ impl ObjectKind {
             | Self::Drums
             | Self::LaserHarp => "Hobbies",
             Self::Snowman | Self::SnowAngel | Self::LeafPile => "Outdoors",
-            Self::FirePit | Self::PicnicBasket => "Outdoors",
+            Self::FirePit | Self::PicnicBasket | Self::PicnicTable => "Outdoors",
             Self::Buffet => "Surfaces",
             Self::Phone => "Electronics",
             Self::HotTub => "Plumbing",
@@ -509,6 +513,9 @@ impl ObjectKind {
 impl GameObject {
     /// Where a sim stands to use the object (its routing slot, or in front, along local +Z).
     pub fn use_point(&self, tf: &Transform) -> Vec2 {
+        if self.kind == ObjectKind::PicnicTable {
+            return Self::picnic_places(tf)[0].0;
+        }
         if let Some((p, _)) = self.route {
             let w = tf.transform_point(Vec3::new(p.x, 0.0, p.y));
             return Vec2::new(w.x, w.z);
@@ -530,6 +537,7 @@ impl GameObject {
                 vec![Vec2::new(c.x, c.y - h.y - 0.45), Vec2::new(c.x + h.x + 0.45, c.y), Vec2::new(c.x - h.x - 0.45, c.y)]
             }
             ObjectKind::Bathtub => vec![Vec2::new(c.x + h.x + 0.45, c.y), Vec2::new(c.x, c.y + h.y + 0.45), Vec2::new(c.x, c.y - h.y - 0.45)],
+            ObjectKind::PicnicTable => return Self::picnic_places(tf)[1..].iter().map(|p| p.0).collect(),
             _ => Vec::new(),
         };
         local
@@ -539,6 +547,18 @@ impl GameObject {
                 Vec2::new(w.x, w.z)
             })
             .collect()
+    }
+
+    /// A picnic table's four places (the game's routing slots: two each side, facing it): where
+    /// a Sim stands to sit down, and where they sit, on the bench.
+    pub fn picnic_places(tf: &Transform) -> [(Vec2, Vec2); 4] {
+        [(-0.5, -1.0), (0.5, -1.0), (0.5, 1.0), (-0.5, 1.0)].map(|(x, side): (f32, f32)| {
+            let at = |z: f32| {
+                let w = tf.transform_point(Vec3::new(x, 0.0, z * side));
+                Vec2::new(w.x, w.z)
+            };
+            (at(1.26), at(0.72))
+        })
     }
 
     pub fn world_center(&self, tf: &Transform) -> Vec3 {
@@ -1008,6 +1028,17 @@ static FIRE_PIT: [InteractionDef; 4] = [
     def("Roast Marshmallows", 25.0, [110.0, 0.0, 0.0, 0.0, -4.0, 45.0], Pose::Use),
 ];
 static BUFFET: [InteractionDef; 1] = [def("Have a Plate", 15.0, [220.0, 0.0, 0.0, 8.0, 0.0, 6.0], Pose::Use)];
+/// (Sat at by up to four, each at a place of their own: see `GameObject::picnic_places`; eaten
+/// at as a dining chair is, its Eat at the same place in the list, `CHAIR_EAT`.)
+static PICNIC_TABLE: [InteractionDef; 2] = [
+    InteractionDef { on_object: true, autonomous: false, ..def("Sit", 30.0, [0.0, 0.0, 4.0, 0.0, 0.0, 4.0], Pose::Sit) },
+    InteractionDef {
+        on_object: true,
+        autonomous: false,
+        special: Special::EatMeal,
+        ..def("Eat", MEAL_MINUTES, [MEAL_PER_HOUR, -4.0, 0.0, 20.0, -4.0, 6.0], Pose::Sit)
+    },
+];
 static PICNIC: [InteractionDef; 1] = [def("Have a Picnic", 30.0, [150.0, 0.0, 0.0, 10.0, 0.0, 25.0], Pose::Use)];
 static XYLOPHONE: [InteractionDef; 1] = [def("Play Xylophone", 40.0, [0.0, 0.0, -4.0, 20.0, 0.0, 130.0], Pose::Use)];
 static PEGBOX: [InteractionDef; 1] = [def("Play with Peg Box", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 120.0], Pose::Use)];
@@ -1119,6 +1150,7 @@ fn seat_clips(kind: ObjectKind) -> Option<(&'static str, &'static str, f32)> {
     match kind {
         ObjectKind::Chair | ObjectKind::Sofa => Some(("a2o_chairDining_getIn_x", "a2o_chairDining_getOut_x", 1.6)),
         ObjectKind::Stool => Some(("a2o_barstool_getIn_N_x", "a2o_barstool_getOut_N_x", 1.3)),
+        ObjectKind::PicnicTable => Some(("a2o_picnicTable_getIn_x", "a2o_picnicTable_getOut_x", 1.6)),
         _ => None,
     }
 }
@@ -1128,7 +1160,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
     use crate::anim::ActionClip as A;
     Some(match name {
         "Nap" if kind == ObjectKind::Sofa => A::new(Some("a2o_sofa_sit_trans_nap_x"), &["a2o_sofa_nap_loop1_x"]),
-        "Eat" if kind == ObjectKind::Chair => A::new(Some("a2o_eat_diningIn_fork_start_x"), &["a2o_eat_diningIn_fork_neat_x"]).ending(&["a2o_eat_diningIn_fork_stop_x"], 0.9),
+        "Eat" if matches!(kind, ObjectKind::Chair | ObjectKind::PicnicTable) => A::new(Some("a2o_eat_diningIn_fork_start_x"), &["a2o_eat_diningIn_fork_neat_x"]).ending(&["a2o_eat_diningIn_fork_stop_x"], 0.9),
         "Do Homework" => A::new(Some("a2o_homework_table_start_x"), &["a2o_homework_table_write_x", "a2o_homework_table_read_x", "a2o_homework_table_think_x", "a2o_homework_table_erase_x"]),
         "Pay Bills" => A::new(None, &["a2o_mailbox_getMail_x"]),
         "Water" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_wateringCan_start_x"), &["a2o_gardening_wateringCan_waterPlants_x"]),
@@ -1576,6 +1608,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::FirePit => &FIRE_PIT,
         ObjectKind::Buffet => &BUFFET,
         ObjectKind::PicnicBasket => &PICNIC,
+        ObjectKind::PicnicTable => &PICNIC_TABLE,
         ObjectKind::Snowman => &SNOWMAN,
         ObjectKind::SnowAngel => &SNOW_ANGEL,
         ObjectKind::LeafPile => &LEAF_PILE,
@@ -2067,6 +2100,17 @@ pub(crate) fn run_actions(
     // Little ones a care social picks up: (little one, grown-up, age, grown-up's transform).
     let mut carry_fx: Vec<(Entity, Entity, Age, Transform, bool)> = Vec::new();
     let positions: HashMap<Entity, (Vec3, u8)> = sims.iter().map(|s| (s.0, (s.3.translation, s.11.0))).collect();
+    // (The places Sims have gone to at an object: a picnic table's taken.)
+    let places_taken: Vec<(Entity, Entity, Vec2)> = sims
+        .iter()
+        .filter_map(|s| {
+            let a = s.2.0.front()?;
+            match a.kind {
+                ActionKind::Object { target, .. } => Some((s.0, target, a.approach?)),
+                _ => None,
+            }
+        })
+        .collect();
     let partnered: HashMap<Entity, bool> = sims.iter().map(|q| (q.0, q.8.partner().is_some())).collect();
     let who: HashMap<Entity, (Sim, crate::life::Mood, bool, bool)> = people
         .iter()
@@ -2151,6 +2195,17 @@ pub(crate) fn run_actions(
                                         notes.push(format!("{} can't use the {}: it's in use.", sim.first, obj.name));
                                     }
                                     None
+                                } else if obj.kind == ObjectKind::PicnicTable {
+                                    // The nearest place no one else has.
+                                    let me_at = Vec2::new(tf.translation.x, tf.translation.z);
+                                    GameObject::picnic_places(otf)
+                                        .into_iter()
+                                        .filter(|(stand, seat)| {
+                                            !places_taken.iter().any(|(who, t, at)| *who != me && t == target && at.distance(*stand) < 0.3)
+                                                && !positions.iter().any(|(who, (p, _))| *who != me && Vec2::new(p.x, p.z).distance(*seat) < 0.35)
+                                        })
+                                        .min_by(|a, b| a.0.distance(me_at).total_cmp(&b.0.distance(me_at)))
+                                        .map(|(stand, _)| (stand, of.map_or(1, |f| f.0)))
                                 } else {
                                     let _ = def;
                                     Some((obj.use_point(otf), of.map_or(1, |f| f.0)))
@@ -2280,7 +2335,8 @@ pub(crate) fn run_actions(
                             commands.entity(me).insert(PathFollow::new(wp).with_style(style));
                             action.phase = Phase::Routing;
                             if let ActionKind::Object { target, .. } | ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } = action.kind
-                                && let Ok((_, _, mut used, _)) = objects.get_mut(target)
+                                && let Ok((o, _, mut used, _)) = objects.get_mut(target)
+                                && o.kind != ObjectKind::PicnicTable
                             {
                                 used.0 = Some(me);
                             }
@@ -2370,6 +2426,17 @@ pub(crate) fn run_actions(
                                             // which belongs at the table's edge.
                                             let back = if obj.kind == ObjectKind::Stool { 0.67 } else { 0.576 };
                                             tf.translation += (otf.rotation * Vec3::Z).with_y(0.0).normalize_or_zero() * back;
+                                        }
+                                        if obj.kind == ObjectKind::PicnicTable {
+                                            // On the bench at the place come to, facing the table.
+                                            let came = action.approach.unwrap_or(Vec2::new(tf.translation.x, tf.translation.z));
+                                            if let Some((stand, seat)) = GameObject::picnic_places(otf).into_iter().min_by(|a, b| a.0.distance(came).total_cmp(&b.0.distance(came))) {
+                                                let to = (seat - stand).normalize_or_zero();
+                                                // (Eating, rooted at the table's edge as at a dining chair.)
+                                                let at = if d.special == Special::EatMeal { seat + to * 0.576 } else { seat };
+                                                tf.translation = Vec3::new(at.x, otf.translation.y, at.y);
+                                                tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
+                                            }
                                         }
                                         if bed && d.name == "Nap" {
                                             // The nap clips are played from beside the bed, facing
@@ -3470,9 +3537,10 @@ pub(crate) fn run_actions(
 
 /// Revalidate maintenance on every action tick, including object reservations.
 fn object_action_available(actor: Entity, kind: ObjectKind, def: usize, owner: Option<Entity>, broken: bool, phase: Phase) -> bool {
-    // (A group meal's served one at a time: the rest wait their turn.)
+    // (A group meal's served one at a time: the rest wait their turn. A picnic table is
+    // shared, a place each.)
     !broken && interactions_for(kind).get(def).is_some()
-        && if matches!(phase, Phase::Running(_)) { owner == Some(actor) } else { kind == ObjectKind::Meal || owner.is_none_or(|e| e == actor) }
+        && (kind == ObjectKind::PicnicTable || if matches!(phase, Phase::Running(_)) { owner == Some(actor) } else { kind == ObjectKind::Meal || owner.is_none_or(|e| e == actor) })
 }
 
 fn maintenance_available(actor: Entity, kind: ObjectKind, owner: Option<Entity>, broken: bool, upgrades: Option<&crate::upgrades::Upgrades>, bit: Option<u8>) -> bool {

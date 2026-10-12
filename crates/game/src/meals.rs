@@ -709,6 +709,11 @@ fn surface_near(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, at:
 /// A free dining chair (a chair with a table in front of it) near the Sim, and the point on the
 /// table where their plate goes.
 fn dining_seat(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, near: Vec3, taken: &[Entity]) -> Option<(Entity, Vec3)> {
+    // (A picnic table's nearest place too: the place itself is taken on the way to it.)
+    let picnic = objects.iter().filter(|(e, o, _, _)| o.kind == ObjectKind::PicnicTable && !taken.contains(e)).filter_map(|(e, o, tf, _)| {
+        let (plate, seat) = picnic_plate(o, tf, near)?;
+        Some((e, plate, Vec3::new(seat.x, tf.translation.y, seat.y).distance(near)))
+    });
     objects
         .iter()
         .filter(|(e, o, _, used)| matches!(o.kind, ObjectKind::Chair | ObjectKind::Stool) && used.0.is_none() && !taken.contains(e))
@@ -717,8 +722,18 @@ fn dining_seat(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, near
             let (_, plate) = dining_seat_for(objects, e)?;
             Some((e, plate, seat.distance(near)))
         })
+        .chain(picnic)
         .min_by(|a, b| a.2.total_cmp(&b.2))
         .map(|(e, p, _)| (e, p))
+}
+
+/// Where a plate goes at a picnic table, for the place nearest a point: on the table top before
+/// it (and the place's seat).
+fn picnic_plate(o: &GameObject, tf: &Transform, near: Vec3) -> Option<(Vec3, Vec2)> {
+    let near = Vec2::new(near.x, near.z);
+    let (stand, seat) = GameObject::picnic_places(tf).into_iter().min_by(|a, b| a.0.distance(near).total_cmp(&b.0.distance(near)))?;
+    let p = seat + (seat - stand).normalize_or_zero() * 0.55;
+    Some((Vec3::new(p.x, tf.translation.y + o.height, p.y), seat))
 }
 
 /// Spawns one of the game's objects (by internal name) as an object of `kind`.
@@ -1021,9 +1036,17 @@ fn meal_requests(
             }
             MealRequest::PlateAt(chair) => {
                 info!("{} sits down to eat", sim.first);
-                let Ok((_, _, ctf, _)) = objects.get(chair) else { continue };
-                let Some((_, at)) = dining_seat_for(&objects, chair) else { continue };
-                let yaw = ctf.rotation.to_euler(EulerRot::YXZ).0;
+                let Ok((_, co, ctf, _)) = objects.get(chair) else { continue };
+                // (At a picnic table, before the place sat at.)
+                let picnic = (co.kind == ObjectKind::PicnicTable).then(|| picnic_plate(co, ctf, tf.translation)).flatten();
+                let Some(at) = picnic.map(|p| p.0).or_else(|| dining_seat_for(&objects, chair).map(|d| d.1)) else { continue };
+                let yaw = match picnic {
+                    Some((plate, seat)) => {
+                        let to = Vec2::new(plate.x, plate.z) - seat;
+                        to.x.atan2(to.y)
+                    }
+                    None => ctf.rotation.to_euler(EulerRot::YXZ).0,
+                };
                 if let Some(plate) = spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, PLATE, ObjectKind::DirtyDishes, "Dirty Dishes", at, yaw) {
                     set_food(&mut commands, &mut assets, &mut ctx, plate, None, plateful.and_then(|p| recipe(p.0)).and_then(|r| r.single));
                     // (Not to be cleared away while it's being eaten from.)
@@ -1246,6 +1269,21 @@ mod tests {
         assert!(surface_near(&objects, Vec3::new(0.0, 3.0, 0.55), 6.0).is_none());
         assert!(surface_entity_near(&objects, Vec3::new(0.0, 3.0, 0.55), 6.0).is_none());
         assert!(dining_seat_for(&objects, chair).is_none(), "a downstairs table is not within reach of an upstairs chair");
+    }
+
+    #[test]
+    fn a_picnic_table_is_eaten_at_from_its_nearest_place() {
+        let mut world = World::new();
+        let object = |kind, height| GameObject { kind, name: "Fixture".into(), objd: (0, 0, 0), price: 0,
+            center: Vec2::ZERO, half: Vec2::new(0.9, 0.8), height, route: None };
+        let picnic = world.spawn((object(ObjectKind::PicnicTable, 0.8), Transform::from_xyz(10.0, 0.0, 0.0), UsedBy(None))).id();
+        let mut state = bevy::ecs::system::SystemState::<Query<(Entity, &GameObject, &Transform, &UsedBy)>>::new(&mut world);
+        let objects = state.get(&world).unwrap();
+        // (From the -z side: the place there, its plate on the table top before it.)
+        let (seat, plate) = dining_seat(&objects, Vec3::new(9.5, 0.0, -3.0), &[]).unwrap();
+        assert_eq!(seat, picnic);
+        assert!((plate.y - 0.8).abs() < 1e-4 && plate.z < 0.0 && plate.z > -0.45, "{plate:?}");
+        assert!(dining_seat(&objects, Vec3::new(9.5, 0.0, -3.0), &[picnic]).is_none());
     }
 
     #[test]

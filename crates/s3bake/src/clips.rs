@@ -39,6 +39,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_foodTray_carry",
     "a2o_carryObject_carry",
     "a2o_chairDining_getIn_x",
+    // (Onto a picnic table's bench and off it.)
+    "a2o_picnicTable_get",
     "a2o_chairDining_getOut_x",
     "c2o_chairDining_getIn_x",
     "c2o_chairDining_getOut_x",

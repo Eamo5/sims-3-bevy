@@ -564,7 +564,9 @@ installation is unreachable.
 - **Fire pits, picnics, toys and the rest of the catalogue**: a fire pit is lit with the
   lighter (flames in its bowl, a glow on the ground about it), hands are warmed by it and
   marshmallows roasted on the skewer and eaten off it, and it's put out with the poker; a
-  picnic basket gives a picnic on the ground off paper plates; a buffet table serves a plate
+  picnic basket gives a picnic on the ground off paper plates; a picnic table seats four on
+  its benches (the game's four places, getting in and out with its own animations), sat at or
+  eaten at like a dining table; a buffet table serves a plate
   of food; children bake pretend cakes in the toy oven, bowl and spoon in hand; men and boys
   use the urinal (whistling); recycling bins take the trash; a bath can be a bubble bath
   (with bubble bath in the house) or a play with the rubber duck (with one about); a
