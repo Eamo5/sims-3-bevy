@@ -26,7 +26,7 @@ impl Plugin for InteractPlugin {
                     .run_if(in_state(PlayMode::Live)),
             )
             .add_systems(Update, route_objects.run_if(in_state(crate::AppState::InGame)))
-            .add_systems(Update, wear_new_objects.run_if(in_state(crate::AppState::InGame)));
+            .add_systems(Update, (wear_new_objects, floor_new_objects).run_if(in_state(crate::AppState::InGame)));
     }
 }
 
@@ -550,6 +550,19 @@ pub const STURDY_MINUTES: f64 = 24.0 * 60.0;
 fn wear_new_objects(mut commands: Commands, clock: Res<GameClock>, added: Query<Entity, (Added<GameObject>, Without<Wear>)>) {
     for e in &added {
         commands.entity(e).insert(Wear { breaks: 0, sturdy_until: clock.minutes + STURDY_MINUTES });
+    }
+}
+
+/// What's put in the world as the game goes (a plate laid at a table, a platter served) stands
+/// on the floor it's put on, upstairs too: not the ground floor every object without a floor is
+/// taken for (a Sim who ate upstairs went down to clear their plate from under the table).
+fn floor_new_objects(mut commands: Commands, building: Option<Res<crate::building::ActiveBuilding>>, added: Query<(Entity, &Transform), (Added<GameObject>, Without<Floor>)>) {
+    let Some(b) = building else { return };
+    for (e, tf) in &added {
+        let level = b.level_at_point(tf.translation);
+        if level != 1 {
+            commands.entity(e).insert(Floor(level));
+        }
     }
 }
 
@@ -1622,8 +1635,8 @@ pub struct Action {
     pub canvas_choice: Option<u8>,
     pub fish_choice: Option<(String, u8)>,
     pub recipe_choice: Option<usize>,
-    /// Where the Sim came up to the object, when not at its front (a hot tub got into from a
-    /// side): where they get up and away from it again.
+    /// Where the Sim came up to the object (a hot tub got into from a side, a chair at a table
+    /// from behind): where they get up and away from it again.
     pub approach: Option<Vec2>,
 }
 
@@ -1723,6 +1736,10 @@ pub struct JoinHousehold {
 #[derive(Component)]
 pub struct GoingHome;
 
+/// How often a visitor has set off home and not got to the way off the lot.
+#[derive(Component, Default)]
+pub struct HomeTries(u8);
+
 /// Off the lot (at home elsewhere in town); can be phoned and invited over.
 #[derive(Component)]
 pub struct OffLot;
@@ -1757,7 +1774,7 @@ fn comings_and_goings(
     exit: Option<Res<LotExit>>,
     world: Res<CurrentWorld>,
     mut joining: Query<(Entity, &mut Sim, &JoinHousehold)>,
-    mut leaving: Query<(Entity, &mut ActionQueue, &Transform), (With<GoingHome>, Without<OffLot>)>,
+    mut leaving: Query<(Entity, &mut ActionQueue, &Transform, Option<&HomeTries>), (With<GoingHome>, Without<OffLot>)>,
     mut visitors: Query<(Entity, &Visitor), (Without<GoingHome>, Without<OffLot>, Without<HouseholdMember>)>,
     mut arriving: Query<(Entity, &Invited, &mut Transform, Option<&mut ActionQueue>), Without<GoingHome>>,
     (town, mut household, mut notes, members): (Option<Res<crate::premade::TownPremades>>, Option<ResMut<Household>>, ResMut<Notifications>, Query<(), With<HouseholdMember>>),
@@ -1788,13 +1805,17 @@ fn comings_and_goings(
             commands.entity(e).insert(GoingHome);
         }
     }
-    for (e, mut queue, tf) in &mut leaving {
+    for (e, mut queue, tf, tries) in &mut leaving {
         let at_exit = Vec2::new(tf.translation.x, tf.translation.z).distance(exit.0) < 1.5;
-        if at_exit {
+        // (Three times set off and still not there, with no way to the street (a houseboat's guests
+        // come and go by water): they're off from where they are.)
+        let given_up = queue.0.is_empty() && tries.is_some_and(|t| t.0 >= 3);
+        if at_exit || given_up {
             queue.0.clear();
-            commands.entity(e).remove::<(GoingHome, Visitor, crate::nav::PathFollow)>().insert((OffLot, Visibility::Hidden));
+            commands.entity(e).remove::<(GoingHome, Visitor, crate::nav::PathFollow, HomeTries)>().insert((OffLot, Visibility::Hidden));
         } else if queue.0.is_empty() {
             queue.0.push_back(Action::new("Go Home", ActionKind::GoHere(exit.0, 1), true));
+            commands.entity(e).insert(HomeTries(tries.map_or(1, |t| t.0 + 1)));
         }
     }
     for (e, inv, mut tf, queue) in &mut arriving {
@@ -2192,6 +2213,11 @@ pub(crate) fn run_actions(
                         Some(wp) => {
                             // Gone in the game's walk style for the way.
                             let to = wp.last().map_or(from, |w| w.p);
+                            // (Where they'll get up from it again: where the walk there ends, on
+                            // walkable floor, not a front pushed in under a table.)
+                            if matches!(action.kind, ActionKind::Object { .. }) {
+                                action.approach = Some(to);
+                            }
                             let at = |p: Vec2| Vec3::new(p.x, 0.0, p.y);
                             let indoors = |p: Vec2| building.as_deref().is_some_and(|b| b.is_indoors(at(p)));
                             let lot = |p: Vec2| crate::rabbitholes::lot_at(&world.data.lots, at(p));

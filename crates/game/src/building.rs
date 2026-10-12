@@ -2089,18 +2089,23 @@ pub fn spawn_building(
             let at = Vec2::from(o.local);
             let ladder = o.script.ends_with("Ladder");
             let reach = if ladder { 0.8 } else { 1.3 };
-            let bottom = at + fwd * reach;
             let tops = if ladder { [at - fwd * 0.6, at + fwd * reach, at + right * reach, at - right * reach] } else { [at + right * reach, at - fwd * reach, at - right * reach, at + fwd * reach] };
-            // (Onto floor on the storey over it, not through a wall there (the Scotts' houseboat
-            // has deck behind the wall beside its spiral's top).)
-            let walled = |p: Vec2| {
+            // (Onto floor, not through a wall there (the Scotts' houseboat has deck behind the
+            // wall beside its spiral's top), nor at a wall (just short of one: on it, its foot
+            // was shut in with the wall (the Ichtacas')).)
+            let walled = |p: Vec2, storey: u8| {
                 let cross = |a: Vec2, b: Vec2, c: Vec2, d: Vec2| {
                     let side = |p: Vec2, q: Vec2, r: Vec2| (q - p).perp_dot(r - p);
                     side(a, b, c) * side(a, b, d) < 0.0 && side(c, d, a) * side(c, d, b) < 0.0
                 };
-                b.walls.iter().any(|w| w.storey() == s + 1 && cross(at, p, Vec2::from(w.a), Vec2::from(w.b)))
+                let beyond = at + (p - at) * 1.25;
+                b.walls.iter().any(|w| w.storey() == storey && cross(at, beyond, Vec2::from(w.a), Vec2::from(w.b)))
             };
-            let Some(top) = tops.iter().copied().find(|p| active.floor_cells_has(s + 1, *p) && !walled(*p)).or_else(|| tops.into_iter().find(|p| active.floor_cells_has(s + 1, *p))) else { continue };
+            let pick = |options: &[Vec2], storey: u8| {
+                options.iter().copied().find(|p| active.floor_cells_has(storey, *p) && !walled(*p, storey)).or_else(|| options.iter().copied().find(|p| active.floor_cells_has(storey, *p)))
+            };
+            let bottom = if ladder { at + fwd * reach } else { pick(&[at + fwd * reach, at - right * reach, at + right * reach, at - fwd * reach], s).unwrap_or(at + fwd * reach) };
+            let Some(top) = pick(&tops, s + 1) else { continue };
             let (wb, wt) = (active.world(bottom.x, bottom.y, 0.0), active.world(top.x, top.y, 0.0));
             let y0 = active.floor_y(s, wb).unwrap_or(level_y(s));
             let y1 = active.floor_y(s + 1, wt).unwrap_or(level_y(s + 1));
