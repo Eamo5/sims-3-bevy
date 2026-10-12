@@ -106,6 +106,8 @@ pub struct PieMenu {
     pub parents: Vec<(Vec2, String, Vec<(String, ActionKind)>)>,
     /// Where the pointer's to be put: the middle of a menu moved onto the screen.
     pub warp: Option<Vec2>,
+    /// A long menu's pages, each led by "More..." to the next.
+    pub pages: Vec<Vec<(String, ActionKind)>>,
 }
 
 /// The fridge's (and microwave's) menu of snacks, as the game titles it.
@@ -169,7 +171,19 @@ fn submenu_kind(i: usize) -> ActionKind {
 
 fn as_submenu(k: &ActionKind) -> Option<usize> {
     match k {
-        ActionKind::GoHere(p, i) if p.x.is_nan() && p.y.is_infinite() => Some(*i as usize),
+        ActionKind::GoHere(p, i) if p.x.is_nan() && p.y == f32::INFINITY => Some(*i as usize),
+        _ => None,
+    }
+}
+
+/// Marks a long menu's "More..." option, to `pages[i]` (`ActionKind::GoHere(NaN, -inf, i)`).
+fn more_kind(i: usize) -> ActionKind {
+    ActionKind::GoHere(Vec2::new(f32::NAN, f32::NEG_INFINITY), i as u8)
+}
+
+fn as_more(k: &ActionKind) -> Option<usize> {
+    match k {
+        ActionKind::GoHere(p, i) if p.x.is_nan() && p.y == f32::NEG_INFINITY => Some(*i as usize),
         _ => None,
     }
 }
@@ -714,6 +728,16 @@ fn spawn_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, 
     if options.is_empty() {
         return;
     }
+    // (More than the game shows at once: in pages of eleven, each led by "More..." to the next
+    // and the last back to the first, as UI.dll's `ValidateMenuStructure` has it.)
+    let options = if options.len() > crate::piemenu::MAX_ITEMS {
+        let chunks: Vec<Vec<(String, ActionKind)>> = options.chunks(crate::piemenu::MAX_ITEMS - 1).map(|c| c.to_vec()).collect();
+        let n = chunks.len();
+        pie.pages = chunks.into_iter().enumerate().map(|(i, c)| std::iter::once(("More ›".to_string(), more_kind((i + 1) % n))).chain(c).collect()).collect();
+        pie.pages[0].clone()
+    } else {
+        options
+    };
     let submenu = !pie.parents.is_empty();
     let n = options.len();
     let radius = 90.0 + n as f32 * 10.0;
@@ -1493,6 +1517,13 @@ fn pie_buttons(
         return;
     }
     let _ = (&mut wishes, &mut notes);
+    // A long menu's next page, where it was.
+    if let Some(i) = as_more(&kind)
+        && let (Some(page), Some(a)) = (pie.pages.get(i).cloned(), actor)
+    {
+        spawn_pie(&mut commands, &mut pie, parent.0, &title, a, page);
+        return;
+    }
     // (Opened where its option was clicked, as the game's are.)
     if let Some(i) = as_submenu(&kind)
         && let (Some((title, list)), Some(a)) = (pie.submenus.get(i).cloned(), actor)
@@ -1657,7 +1688,11 @@ fn test_pie(mut commands: Commands, mut pie: ResMut<PieMenu>, time: Res<Time>, s
     }
     let (Ok(actor), Ok(w)) = (sel.single(), windows.single()) else { return };
     *done = true;
-    let options = ["Have Dinner ›", "Serve Dinner ›", "Serve Dessert ›", "Have Quick Meal ›", "Bake Birthday Cake", "Clean"].iter().map(|s| (s.to_string(), ActionKind::EatHere)).collect();
+    // (PIE=<n>: n numbered options, a long menu's pages.)
+    let options = match std::env::var("PIE").ok().and_then(|v| v.parse::<usize>().ok()) {
+        Some(n) => (1..=n).map(|i| (format!("Option {i}"), ActionKind::EatHere)).collect(),
+        None => ["Have Dinner ›", "Serve Dinner ›", "Serve Dessert ›", "Have Quick Meal ›", "Bake Birthday Cake", "Clean"].iter().map(|s| (s.to_string(), ActionKind::EatHere)).collect(),
+    };
     open_pie(&mut commands, &mut pie, Vec2::new(w.width() * 0.5, w.height() * 0.45), "Fridge", actor, options);
 }
 
