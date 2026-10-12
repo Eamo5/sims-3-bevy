@@ -2273,7 +2273,7 @@ fn camera_to_floor(
     world: Res<crate::loading::CurrentWorld>,
     mut cams: Query<&mut SimsCamera>,
     selected: Query<&Floor, (With<crate::sim::Selected>, With<crate::visit::OnLot>)>,
-    mut raised: Local<bool>,
+    mut last: Local<Option<f32>>,
 ) {
     let Ok(mut cam) = cams.single_mut() else { return };
     let over = |b: &ActiveBuilding| {
@@ -2281,27 +2281,31 @@ fn camera_to_floor(
         l.x > -4.0 && l.y > -4.0 && l.x < b.data.width as f32 + 4.0 && l.y < b.data.depth as f32 + 4.0
     };
     let ground = world.data.heightmap.sample(cam.focus.x, cam.focus.z);
-    // (Over the house the floor viewed; over a lot being visited, the selected Sim's floor there.)
-    let want = building.as_deref().map_or(0.0, |b| {
+    // (Over the house the floor viewed, a storey up for each one up, down into a basement;
+    // over a lot being visited, the selected Sim's floor there.)
+    let want = building.as_deref().and_then(|b| {
         if over(b) {
-            (b.levels.get(b.view_level as usize).copied().unwrap_or(0.0) - ground).max(0.0)
-        } else if let Some(a) = b.away.as_deref().filter(|a| over(a)) {
-            let level = selected.iter().next().map_or(1, |f| f.0);
-            (a.levels.get(level as usize).copied().unwrap_or(0.0) - ground).max(0.0)
+            Some(b.levels.get(b.view_level as usize).copied().unwrap_or(ground) - ground)
         } else {
-            0.0
+            let a = b.away.as_deref().filter(|a| over(a))?;
+            let level = selected.iter().next().map_or(1, |f| f.0);
+            Some(a.levels.get(level as usize).copied().unwrap_or(ground) - ground)
         }
     });
-    // (Only a floor well above the ground lifts it: a house's own storeys are seen as they are;
-    // and it's let down again only if raised here.)
-    if want > 6.0 {
-        if (cam.height_offset - want).abs() > 0.01 {
-            cam.height_offset = want;
+    // (Set only when it changes, and let down again only if raised here: a camera put
+    // somewhere on purpose stays put.)
+    match want {
+        Some(w) => {
+            if last.is_none_or(|l| (l - w).abs() > 0.01) {
+                cam.height_offset = w;
+                *last = Some(w);
+            }
         }
-        *raised = true;
-    } else if *raised {
-        cam.height_offset = 0.0;
-        *raised = false;
+        None => {
+            if last.take().is_some() {
+                cam.height_offset = 0.0;
+            }
+        }
     }
 }
 
