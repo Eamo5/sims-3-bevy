@@ -226,6 +226,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_fence.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_gate_route.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, (auto_reach, auto_pick).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(PreUpdate, auto_click_use.after(bevy::input::InputSystems).before(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_balloon.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(
                 Update,
@@ -2594,6 +2595,89 @@ fn auto_gate_route(
             info!("gate route: {len:.1} m from one side of the gate to the other ({} through it; {} barriers, crossing {})", if len < 4.5 { "straight" } else { "not" }, grid.barrier_count(), grid.crosses(from, to));
         }
         None => info!("gate route: no way from one side of the gate to the other"),
+    }
+}
+
+/// CLICK_USE=<kind>,<kind>... (tests, object kinds as `ObjectKind` names): one after another, the
+/// camera turned on the nearest such object shown, a click on it through the real input path,
+/// the pie's first option (not a submenu) pressed as a player would, and what the selected Sim
+/// then has queued logged.
+#[allow(clippy::type_complexity)]
+fn auto_click_use(
+    time: Res<Time>,
+    mut state: Local<(usize, u8, f32)>,
+    mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+    mut mouse: ResMut<ButtonInput<MouseButton>>,
+    mut cams: Query<(&Camera, &GlobalTransform, &mut crate::camera::SimsCamera)>,
+    objects: Query<(Entity, &crate::interact::GameObject, &GlobalTransform, &InheritedVisibility)>,
+    pie: Res<crate::hud::PieMenu>,
+    options: Query<(&crate::hud::PieOption, &bevy::ui::UiGlobalTransform)>,
+    queues: Query<&crate::interact::ActionQueue, With<crate::sim::Selected>>,
+) {
+    let Ok(list) = std::env::var("CLICK_USE") else { return };
+    let kinds: Vec<&str> = list.split(',').collect();
+    let t = time.elapsed_secs();
+    let (idx, stage, at) = *state;
+    if idx >= kinds.len() || t < 10.0 || t < at {
+        return;
+    }
+    mouse.release(MouseButton::Left);
+    let Ok((camera, cam_tf, mut cam)) = cams.single_mut() else { return };
+    let target = || {
+        objects
+            .iter()
+            .filter(|(_, o, _, vis)| vis.get() && format!("{:?}", o.kind).eq_ignore_ascii_case(kinds[idx]))
+            .map(|(e, o, tf, _)| (e, o.name.clone(), tf.transform_point(Vec3::new(o.center.x, o.height.max(0.15) * 0.5, o.center.y))))
+            .min_by(|a, b| a.2.distance(cam.focus).total_cmp(&b.2.distance(cam.focus)))
+    };
+    match stage {
+        // The camera on it.
+        0 => {
+            let Some((_, name, mid)) = target() else {
+                info!("click use: {}: none shown", kinds[idx]);
+                *state = (idx + 1, 0, t);
+                return;
+            };
+            info!("click use: {}: '{}'", kinds[idx], name.trim());
+            cam.focus = mid;
+            cam.distance = 9.0;
+            *state = (idx, 1, t + 1.5);
+        }
+        // A click on it.
+        1 => {
+            let Some((_, _, mid)) = target() else { return };
+            let (Ok(screen), Ok(mut window)) = (camera.world_to_viewport(cam_tf, mid), windows.single_mut()) else {
+                info!("click use: {}: off screen", kinds[idx]);
+                *state = (idx + 1, 0, t);
+                return;
+            };
+            window.set_cursor_position(Some(screen));
+            mouse.press(MouseButton::Left);
+            *state = (idx, 2, t + 1.0);
+        }
+        // The pie's first option.
+        2 => {
+            if pie.root.is_none() || pie.options.is_empty() {
+                info!("click use: {}: no pie opened", kinds[idx]);
+                *state = (idx + 1, 0, t);
+                return;
+            }
+            let labels: Vec<&str> = pie.options.iter().map(|(l, _)| l.as_str()).collect();
+            let Some(k) = pie.options.iter().position(|(_, a)| !matches!(a, crate::interact::ActionKind::GoHere(p, _) if p.x.is_nan())) else { return };
+            info!("click use: {}: pie {:?}, choosing '{}'", kinds[idx], labels, pie.options[k].0);
+            // (A click on its bubble, as a player's.)
+            if let (Some((_, at)), Ok(mut window)) = (options.iter().find(|(o, _)| o.0 == k), windows.single_mut()) {
+                let scale = window.scale_factor();
+                window.set_cursor_position(Some(at.translation / scale));
+                mouse.press(MouseButton::Left);
+            }
+            *state = (idx, 3, t + 2.0);
+        }
+        _ => {
+            let last = queues.single().ok().and_then(|q| q.0.back().map(|a| a.label.clone()));
+            info!("click use: {}: the Sim's queue now ends with {:?}", kinds[idx], last);
+            *state = (idx + 1, 0, t);
+        }
     }
 }
 
