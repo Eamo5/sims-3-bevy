@@ -112,6 +112,8 @@ pub struct PieMenu {
 
 /// The fridge's (and microwave's) menu of snacks, as the game titles it.
 const QUICK_MEAL: &str = "Have Quick Meal";
+/// The fridge's menu of leftovers.
+const LEFTOVERS: &str = "Eat Leftovers";
 
 /// A recipe as the food menus list it: with what its ingredients cost, when they do.
 fn recipe_label(r: &s3bake::gamedata::RecipeInfo) -> String {
@@ -1235,6 +1237,23 @@ fn world_click(
                 if d.special == Special::Leftovers && leftovers.0.is_empty() {
                     continue;
                 }
+                // The leftovers in the fridge, each dish once ("Eat Leftovers..."), as the game's
+                // `Fridge_EatLeftovers` lists them.
+                if d.special == Special::Leftovers {
+                    let Some(ui) = opp_q.0.as_ref() else { continue };
+                    let mut list: Vec<(String, ActionKind)> = Vec::new();
+                    for key in &leftovers.0 {
+                        let Some(r) = ui.data.recipes.iter().find(|r| &r.key == key) else { continue };
+                        if !list.iter().any(|(l, _)| *l == r.name) {
+                            list.push((r.name.clone(), ActionKind::Object { target: t, def: i }));
+                        }
+                    }
+                    if !list.is_empty() {
+                        options.push((format!("{LEFTOVERS} ›"), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((LEFTOVERS.to_string(), list));
+                    }
+                    continue;
+                }
                 // A sprinkler: on or off, and played in while it's on.
                 let on = sprinkling.contains(t);
                 if (d.special == Special::SprinklerOn && on) || (matches!(d.special, Special::SprinklerOff | Special::PlayInSprinkler) && !on) {
@@ -1542,6 +1561,13 @@ fn pie_buttons(
             .and_then(|n| ui_data.as_ref().and_then(|ui| ui.data.recipes.iter().position(|r| r.name == n)));
         // A dish off the food menus: which, and whether for one ("Have Dinner") or everyone.
         let mut for_one = false;
+        // (A dish of leftovers: "Eat Leftover Spaghetti".)
+        if title == LEFTOVERS
+            && let Some(r) = ui_data.as_ref().and_then(|ui| ui.data.recipes.iter().position(|r| r.name == label))
+        {
+            recipe_choice = Some(r);
+            label = format!("Eat Leftover {label}");
+        }
         let snack = title == QUICK_MEAL;
         let verb = if snack || title.starts_with("Have ") { Some("Have") } else { title.starts_with("Serve ").then_some("Serve") };
         if let Some(verb) = verb

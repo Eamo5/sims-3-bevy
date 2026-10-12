@@ -817,7 +817,7 @@ static FRIDGE: [InteractionDef; 6] = [
     InteractionDef { special: Special::VampireOnly, ..def("Drink Plasma Juice", 6.0, [900.0, -4.0, 0.0, 0.0, 0.0, 10.0], Pose::Use) },
     InteractionDef { special: Special::Cook, ..def("Have Quick Meal", 30.0, [130.0, -6.0, 0.0, 0.0, -4.0, 4.0], Pose::Use) },
     // (What it leads to: a plate of a proper meal, eaten at the table.)
-    InteractionDef { special: Special::Leftovers, ..def("Have Leftovers", 3.0, [5000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) },
+    InteractionDef { special: Special::Leftovers, ..def("Eat Leftovers", 3.0, [5000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) },
     def("Grab a Snack", 12.0, [140.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Use),
     InteractionDef { autonomous: false, skill: Some("Cooking"), special: Special::BakeCake, ..def("Bake Birthday Cake", 30.0, [0.0, 0.0, 0.0, 0.0, 0.0, 6.0], Pose::Use) },
     // (Before cooking at the stove: never on the menu.)
@@ -2817,6 +2817,11 @@ pub(crate) fn run_actions(
                                             commands.entity(me).insert(crate::meals::MealRequest::PutAway(*target));
                                         }
                                         Special::Leftovers => {
+                                            // (The dish chosen, else the oldest.)
+                                            match action.recipe_choice.take() {
+                                                Some(r) => commands.entity(me).insert(crate::meals::MealPlan(r)),
+                                                None => commands.entity(me).remove::<crate::meals::MealPlan>(),
+                                            };
                                             commands.entity(me).insert(crate::meals::MealRequest::FromFridge);
                                         }
                                         Special::BakeCake => {

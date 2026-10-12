@@ -212,7 +212,8 @@ installation is unreachable.
   eat but don't cook, children don't use the stove. Or phone for a pizza: within the hour the
   delivery, in the game's pizza uniform, carries the pizza box in to the kitchen counter.
   What's left of a meal goes in the fridge once it's been out a while (neat Sims see to it
-  first, slobs never), to be had another time ("Have Leftovers": a plate of it at the table);
+  first, slobs never), to be had another time ("Eat Leftovers...", each dish in the fridge once,
+  as the game lists them: a plate of it at the table);
   the fridge keeps a dozen servings, and they're kept in saves. The fridge's "Have Quick
   Meal ›" is the game's snacks (Cereal, Bread and Jam, Canned Soup, Ice Cream, Juice), taken
   out and carried to the table; a Microwave Meal (not for children) is put in the microwave

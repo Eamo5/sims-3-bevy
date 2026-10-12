@@ -999,11 +999,13 @@ fn meal_requests(
                 }
             }
             MealRequest::FromFridge => {
-                // (The oldest first.)
+                // (The dish chosen; else the oldest first.)
+                commands.entity(me).remove::<MealPlan>();
                 if leftovers.0.is_empty() {
                     continue;
                 }
-                let key = leftovers.0.remove(0);
+                let chosen = plan.and_then(|p| recipe(p.0)).and_then(|r| leftovers.0.iter().position(|k| *k == r.key));
+                let key = leftovers.0.remove(chosen.unwrap_or(0));
                 match recipes.as_ref().and_then(|d| d.recipes.iter().position(|r| r.key == key)) {
                     Some(i) => commands.entity(me).insert(Plateful(i)),
                     None => commands.entity(me).remove::<Plateful>(),

@@ -225,7 +225,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_build.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_fence.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_gate_route.run_if(in_state(crate::PlayMode::Live)))
-            .add_systems(Update, (auto_reach, auto_pick).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (auto_reach, auto_pick, auto_leftovers).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, auto_click_use.after(bevy::input::InputSystems).before(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_balloon.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(
@@ -2725,6 +2725,17 @@ fn auto_click_use(
             info!("click use: {}: the Sim's queue now ends with {:?}", kinds[idx], last);
             *state = (idx + 1, 0, t);
         }
+    }
+}
+
+/// LEFTOVERS=<recipe key>,... (tests): those servings put away in the fridge from the start.
+fn auto_leftovers(mut done: Local<bool>, mut leftovers: ResMut<crate::meals::Leftovers>) {
+    if *done {
+        return;
+    }
+    *done = true;
+    if let Ok(v) = std::env::var("LEFTOVERS") {
+        leftovers.0.extend(v.split(',').map(|k| k.trim().to_string()).filter(|k| !k.is_empty()));
     }
 }
 
