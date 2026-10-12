@@ -4096,3 +4096,26 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod kind_audit {
+    use super::*;
+
+    /// The buyable catalogue objects that come out as nothing in particular (no interactions):
+    /// `cargo test -p sims3 kind_audit -- --ignored --nocapture`, with the cache baked.
+    #[test]
+    #[ignore]
+    fn buyable_objects_with_no_kind() {
+        let cat: Vec<s3bake::types::CatalogEntry> = s3bake::pack::read_value(&s3bake::default_root().global_dir().join("catalog.bin")).unwrap_or_default();
+        let mut by: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+        for c in cat.iter().filter(|c| c.price > 0 && !c.script.is_empty()) {
+            if ObjectKind::from_script(&c.script, &c.name) == ObjectKind::Other {
+                let class = c.script.split(".Mimics.").next().unwrap_or(&c.script).to_string();
+                by.entry(class).or_default().push(c.name.clone());
+            }
+        }
+        for (class, names) in &by {
+            println!("KIND	{class}	{}	{}", names.len(), names.iter().take(3).cloned().collect::<Vec<_>>().join(" | "));
+        }
+    }
+}
