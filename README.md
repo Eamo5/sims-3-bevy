@@ -542,8 +542,10 @@ installation is unreachable.
 - **Traffic**: the game's cars (sedans, hatchbacks, pickups, vans, sports cars) drive the
   town's roads around the camera, keeping right along the world's own road graph and turning
   at its intersections; the school bus, the carpool and taxis pull up at the curb to take Sims
-  away and bring them back. A household with a car of its own takes it out on its trips: it
-  leaves the driveway and drives off with them, and comes back when they do.
+  away and bring them back. A household with a car of its own takes it out on its trips and
+  to work, as the game's Sims drive themselves: it leaves the driveway and drives off with
+  them, and comes back when they do. Clicked, the car offers what the game's does: "Go to Work"
+  when it's nearly time, and "Go to Community Lot...".
 - **Collecting and fishing**: the world builders' spawners leave gems, metals and space rocks
   about the community lots (from the game's own tables, with their odds and prices); Sims
   crouch to collect them, catch the butterflies flitting about by day and the beetles in the

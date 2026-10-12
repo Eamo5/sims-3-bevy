@@ -185,7 +185,8 @@ fn rides(
             _ if work => "CarServiceSedan",
             _ => "CarTaxi",
         };
-        if kind == "CarTaxi"
+        // (Their own car, for a trip or to work, as the game's Sims drive themselves.)
+        if (kind == "CarTaxi" || kind == "CarServiceSedan")
             && member
             && let Some((car, o, _)) = cars.iter().find(|(_, o, out)| out.is_none() && own_car(&data.0, o.objd))
         {

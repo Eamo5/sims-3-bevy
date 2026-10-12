@@ -169,6 +169,8 @@ pub enum ObjectKind {
     PicnicBasket,
     /// A picnic table: four places on its benches (the game's `PicnicTable`).
     PicnicTable,
+    /// The household's own car (the game's `CarOwnable`): driven to work, or to a community lot.
+    Car,
     /// A house phone, on the wall or a table: the phone's menu.
     Phone,
     /// Bubble bath, and a rubber duck: baths with them, while they're about the house.
@@ -260,6 +262,8 @@ impl ObjectKind {
             Self::PicnicBasket
         } else if has("environment.picnictable") || has("mimics.picnictable") || has("mimics.tablepicnic") {
             Self::PicnicTable
+        } else if s.starts_with("sims3.gameplay.objects.vehicles.car") && !["service", "taxi", "bus", "police", "limo"].iter().any(|x| s.contains(x)) {
+            Self::Car
         } else if s.ends_with("cookingobjects.cake") {
             // (The birthday cake bought in buy mode, as the game sells it.)
             Self::BirthdayCake
@@ -446,7 +450,7 @@ impl ObjectKind {
             | Self::Drums
             | Self::LaserHarp => "Hobbies",
             Self::Snowman | Self::SnowAngel | Self::LeafPile => "Outdoors",
-            Self::FirePit | Self::PicnicBasket | Self::PicnicTable => "Outdoors",
+            Self::FirePit | Self::PicnicBasket | Self::PicnicTable | Self::Car => "Outdoors",
             Self::Buffet => "Surfaces",
             Self::Phone => "Electronics",
             Self::HotTub => "Plumbing",
@@ -1039,6 +1043,8 @@ static PICNIC_TABLE: [InteractionDef; 2] = [
         ..def("Eat", MEAL_MINUTES, [MEAL_PER_HOUR, -4.0, 0.0, 20.0, -4.0, 6.0], Pose::Sit)
     },
 ];
+/// (Its menu is the trips it can take: see `hud::world_click`.)
+static CAR: [InteractionDef; 1] = [InteractionDef { autonomous: false, ..def("Go to Work", 1.0, N, Pose::Use) }];
 static PICNIC: [InteractionDef; 1] = [def("Have a Picnic", 30.0, [150.0, 0.0, 0.0, 10.0, 0.0, 25.0], Pose::Use)];
 static XYLOPHONE: [InteractionDef; 1] = [def("Play Xylophone", 40.0, [0.0, 0.0, -4.0, 20.0, 0.0, 130.0], Pose::Use)];
 static PEGBOX: [InteractionDef; 1] = [def("Play with Peg Box", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 120.0], Pose::Use)];
@@ -1609,6 +1615,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Buffet => &BUFFET,
         ObjectKind::PicnicBasket => &PICNIC,
         ObjectKind::PicnicTable => &PICNIC_TABLE,
+        ObjectKind::Car => &CAR,
         ObjectKind::Snowman => &SNOWMAN,
         ObjectKind::SnowAngel => &SNOW_ANGEL,
         ObjectKind::LeafPile => &LEAF_PILE,

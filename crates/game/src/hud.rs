@@ -1201,6 +1201,26 @@ fn world_click(
             let usable = if obj.kind.suits(actor_sim) { interactions_for(obj.kind) } else { &[] };
             let plant = opp_q.3.get(t).ok();
             pie.submenus.clear();
+            // The household's car, as the game's `CarOwnable` offers it (to teens and up): to
+            // work when it's nearly time, or to a community lot ("Go to Community Lot...").
+            if obj.kind == ObjectKind::Car && (actor_sim.age == crate::sim::Age::Teen || actor_sim.age.is_grown()) {
+                let clock = &opp_q.2;
+                if let Ok(Some(job)) = jobs_q.get(actor) {
+                    let (h, start) = (clock.hour_f(), job.info().start);
+                    if job.works_on(clock.weekday()) && h >= start - 1.0 && h < start + 1.0 && job.last_day != Some(clock.day()) {
+                        options.push(("Go to Work".to_string(), ActionKind::GoToWork));
+                    }
+                }
+                let lots: Vec<(String, ActionKind)> = (0..world.data.lots.len())
+                    .filter(|&l| crate::visit::visitable(&world.data, l))
+                    .map(|l| (crate::visit::place_name(&world.data, l), ActionKind::GoToLot { lot: l }))
+                    .collect();
+                if !lots.is_empty() {
+                    options.push(("Go to Community Lot ›".to_string(), submenu_kind(pie.submenus.len())));
+                    pie.submenus.push(("Go to Community Lot".to_string(), lots));
+                }
+            }
+            let usable = if obj.kind == ObjectKind::Car { &[] } else { usable };
             for (i, d) in usable.iter().enumerate() {
                 if plant.is_some_and(|p| !crate::gardening::offers(p, d.special)) {
                     continue;
