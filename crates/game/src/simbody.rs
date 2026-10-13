@@ -352,6 +352,11 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
     let mut own = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look);
     let random_hair = everyday(CT_HAIR).choose(&mut own).map(|e| (*e).clone());
     let hair = chosen(sim.outfit.hair, CT_HAIR).or(random_hair);
+    // (FORCE_HAIR=<part name>: that hair on whoever it fits, for testing hairstyles.)
+    let hair = std::env::var("FORCE_HAIR")
+        .ok()
+        .and_then(|n| cas.parts.iter().find(|e| e.clothing_type == CT_HAIR && e.name.eq_ignore_ascii_case(&n) && fits(e)).cloned())
+        .or(hair);
     let brows = everyday(CT_EYEBROW).into_iter().filter(natural).collect::<Vec<_>>().choose(&mut own).map(|e| (*e).clone());
     // Facial hair, glasses and make-up, as chosen (or now and then, by their look).
     let mut extra = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look ^ 0x5EED_FACE);
@@ -662,7 +667,25 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
     }
     // Hair is drawn from a greyscale copy of its texture tinted with the Sim's hair colour.
     let mut hair_keys: Vec<(Key, Key)> = Vec::new();
-    for (i, p) in [&outfit.scalp, &outfit.hair, &outfit.beard].into_iter().enumerate() {
+    // The scalp (the top of the head, under the hair) is skin; under a buzz or crew cut, whose
+    // hair mesh is only a placeholder (the game paints the cut on), it's the hair's colour.
+    let cropped = outfit.hair.as_ref().is_some_and(|h| {
+        baked.cas_meshes(&h.key).is_none_or(|m| {
+            let ys = m.meshes.iter().flat_map(|x| x.positions.iter().map(|v| v[1]));
+            let (lo, hi) = ys.fold((f32::MAX, f32::MIN), |(lo, hi), y| (lo.min(y), hi.max(y)));
+            hi - lo < 0.03
+        })
+    });
+    if let Some(scalp) = &outfit.scalp {
+        for m in baked.cas_meshes(&scalp.key).map(|m| m.meshes).unwrap_or_default() {
+            let Some(skin) = m.texture else { continue };
+            tex_keys.push(skin);
+            let hair = Vec3::from_slice(&sim.hair.to_linear().to_f32_array()[..3]);
+            let shade = if cropped { tint * 0.25 + hair * 0.75 } else { tint };
+            parts.push((skin_mesh(m), SimMat::Skin { base: Some(skin), tint: shade, layers: Vec::new() }));
+        }
+    }
+    for (i, p) in [&None, &outfit.hair, &outfit.beard].into_iter().enumerate() {
         let Some(p) = p else { continue };
         // (A beard with no mesh is painted on the face instead.)
         for m in baked.cas_meshes(&p.key).map(|m| m.meshes).unwrap_or_default() {

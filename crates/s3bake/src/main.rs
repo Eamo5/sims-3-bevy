@@ -609,8 +609,58 @@ fn main() {
         let cas: s3bake::CasBaked = s3bake::read_value(&root.global_dir().join("cas.bin")).expect("cas.bin");
         let pack = s3bake::PackReader::open(&root.global_dir().join("cas.pack")).expect("cas.pack");
         let want = args[i + 1].to_ascii_lowercase();
+        // (CAS_VPXY=1: the part's own resources too: each VPXY's meshes by LOD.)
+        let pkgs = std::env::var("CAS_VPXY").is_ok().then(|| s3pkg::install::open_install(&data, |_| true));
         for p in cas.parts.iter().filter(|p| p.name.to_ascii_lowercase().contains(&want)).take(12) {
             println!("{} {:?} type {} ages {:x} cat {:x} baked {} layer {:?}", p.name, p.key, p.clothing_type, p.age_gender, p.category, p.baked, p.layer);
+            if let Some(pkgs) = &pkgs
+                && let Some(c) = pkgs.read(&s3pkg::ResourceKey::new(p.key.0, p.key.1, p.key.2)).and_then(|d| s3formats::sim::CasPart::parse(&d).ok())
+            {
+                for v in &c.vpxy {
+                    println!("  vpxy {v:?}");
+                    if let Some(d) = pkgs.read(v).or_else(|| pkgs.read_ti(v.t, v.i)) {
+                        for lod in 0..4 {
+                            let geoms = s3formats::sim::vpxy_lod_geoms(&d, lod);
+                            let sizes: Vec<String> = geoms.iter().map(|g| format!("{:016X}:{}", g.i, pkgs.read(g).or_else(|| pkgs.read_ti(g.t, g.i)).map_or(0, |b| b.len()))).collect();
+                            println!("    lod {lod}: {sizes:?}");
+                            // (The GEOM's version and the words at its end: its bone list.)
+                            if lod == 0
+                                && let Some(g) = geoms.first()
+                                && let Some(b) = pkgs.read(g).or_else(|| pkgs.read_ti(g.t, g.i))
+                                && let Ok(rcol) = s3formats::rcol::Rcol::parse(&b)
+                                && let Some(ci) = rcol.find_tag(b"GEOM")
+                                && let Some(c) = rcol.chunk_data(ci)
+                            {
+                                let w = |o: usize| u32::from_le_bytes(c[o..o + 4].try_into().unwrap());
+                                let tail: Vec<String> = (0..12).map(|k| format!("{:08X}", w(c.len() - 4 * (12 - k)))).collect();
+                                println!("    geom version {} chunk {} bytes, tail {tail:?}", w(4), c.len());
+                                if let Ok(geom) = s3formats::sim::Geom::parse(&b) {
+                                    let rig = pkgs.read_ti(s3pkg::types::RIG, s3pkg::fnv64("auRig")).and_then(|d| s3formats::sim::Rig::parse(&d).ok());
+                                    let name = |h: u32| rig.as_ref().and_then(|r| r.bones.iter().find(|b| b.hash == h).map(|b| b.name.clone())).unwrap_or_else(|| format!("?{h:08X}"));
+                                    println!("    bones {:?}", geom.bone_hashes.iter().map(|h| name(*h)).collect::<Vec<_>>());
+                                    let mut used = std::collections::BTreeMap::<u8, (usize, f32)>::new();
+                                    for (bi, bw) in geom.bone_indices.iter().zip(&geom.weights) {
+                                        for k in 0..4 {
+                                            if bw[k] > 0.0 {
+                                                let e = used.entry(bi[k]).or_default();
+                                                e.0 += 1;
+                                                e.1 += bw[k];
+                                            }
+                                        }
+                                    }
+                                    println!("    used (index: verts, weight) {used:?}");
+                                    // (CAS_VERTS=<file>: its vertices, x y z per line.)
+                                    if let Ok(f) = std::env::var("CAS_VERTS") {
+                                        let text: String = geom.positions.iter().map(|v| format!("{} {} {}
+", v[0], v[1], v[2])).collect();
+                                        let _ = std::fs::write(f, text);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             let m: Option<s3bake::CasPartMeshes> = pack.get(&p.key);
             for (k, mesh) in m.map(|m| m.meshes).unwrap_or_default().iter().enumerate() {
                 let mags: Vec<String> = mesh
@@ -677,6 +727,56 @@ fn main() {
             println!("{n}");
         }
         eprintln!("{} clips", names.len());
+        return;
+    }
+    if let Some(i) = args.iter().position(|a| a == "--txtc") {
+        // --txtc <group hex> <instance hex> [out.png]: a texture recipe's steps, its images'
+        // sizes, and (with a path) what it draws.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let (g, inst) = (u32::from_str_radix(&args[i + 1], 16).expect("group"), u64::from_str_radix(&args[i + 2], 16).expect("instance"));
+        let key = s3pkg::ResourceKey::new(s3pkg::types::TXTC, g, inst);
+        let d = pkgs.read(&key).or_else(|| pkgs.read_ti(key.t, key.i)).expect("txtc");
+        let t = s3formats::txtc::Txtc::parse(&d).expect("parses");
+        println!("version {} fabrics {} steps {}", t.version, t.fabrics.len(), t.steps.len());
+        for (n, k) in t.keys.iter().enumerate() {
+            let size = pkgs.read(k).or_else(|| pkgs.read_ti(k.t, k.i)).and_then(|b| s3formats::dds::decode(&b, 4096)).map(|im| (im.width, im.height));
+            println!("  key {n}: {k:?} {size:?}");
+        }
+        for st in &t.steps {
+            let props: Vec<String> = st.props.iter().map(|(p, v)| format!("{}={v:?}", s3formats::txtc::Txtc::prop_name(*p))).collect();
+            println!("  {} {}", s3formats::txtc::Txtc::step_name(st.kind()), props.join(" "));
+        }
+        if let Some(out) = args.get(i + 3) {
+            let mut c = s3formats::compositor::Compositor::new(&pkgs);
+            let (w, h) = c.output_size(&t);
+            let img = c.run(&t, w, h);
+            let f = std::fs::File::create(out).expect("out");
+            let mut enc = png::Encoder::new(std::io::BufWriter::new(f), img.width as u32, img.height as u32);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            enc.write_header().and_then(|mut wr| wr.write_image_data(&img.data)).expect("png");
+            println!("drawn {}x{}", img.width, img.height);
+        }
+        return;
+    }
+    if args.iter().any(|a| a == "--hair-heights") {
+        // --hair-heights: each baked hair's height (its meshes' lowest to highest vertex), the
+        // shortest first: the partial ones (hat hair) stand out.
+        let cas: s3bake::CasBaked = s3bake::read_value(&root.global_dir().join("cas.bin")).expect("cas.bin");
+        let pack = s3bake::PackReader::open(&root.global_dir().join("cas.pack")).expect("cas.pack");
+        let mut rows: Vec<(f32, f32, String, u32, u32)> = Vec::new();
+        for p in cas.parts.iter().filter(|p| p.baked && p.clothing_type == s3formats::sim::CT_HAIR) {
+            let m: Option<s3bake::CasPartMeshes> = pack.get(&p.key);
+            let ys: Vec<f32> = m.map(|m| m.meshes.iter().flat_map(|x| x.positions.iter().map(|v| v[1])).collect()).unwrap_or_default();
+            if let (Some(lo), Some(hi)) = (ys.iter().copied().reduce(f32::min), ys.iter().copied().reduce(f32::max)) {
+                rows.push((hi - lo, hi, p.name.clone(), p.age_gender, p.category));
+            }
+        }
+        rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+        for r in rows.iter().take(40) {
+            println!("{:.3} top {:.3} {} ages {:x} cat {:x}", r.0, r.1, r.2, r.3, r.4);
+        }
+        println!("{} hairs", rows.len());
         return;
     }
     if args.iter().any(|a| a == "--cas-stats") {
