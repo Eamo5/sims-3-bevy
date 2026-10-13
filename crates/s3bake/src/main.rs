@@ -729,6 +729,38 @@ fn main() {
         eprintln!("{} clips", names.len());
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--spt") {
+        // --spt <kind hex> [out.spt]: a SpeedTree resource's size, the texture names it holds
+        // and whether each is in the install (and its size); with a path, the raw file.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let kind = u64::from_str_radix(&args[i + 1], 16).expect("kind");
+        let spt = pkgs.read_ti(0x00B5_52EA, kind).expect("speedtree");
+        println!("{} bytes, magic {:?}", spt.len(), String::from_utf8_lossy(&spt[..spt.len().min(24)]));
+        let mut start = None;
+        for (n, &b) in spt.iter().enumerate() {
+            match (b.is_ascii_graphic() || b == b' ', start) {
+                (true, None) => start = Some(n),
+                (false, Some(s0)) => {
+                    if n - s0 >= 6 {
+                        let t = String::from_utf8_lossy(&spt[s0..n]).to_string();
+                        if t.to_ascii_lowercase().contains(".tga") {
+                            let stem = t.to_ascii_lowercase();
+                            let stem = stem.rsplit(['\\', '/']).next().unwrap_or(&stem).trim_end_matches(".tga").to_string();
+                            let k = s3pkg::ResourceKey::new(s3pkg::types::DDS, 0, s3pkg::fnv64(&stem));
+                            let size = pkgs.read(&k).or_else(|| pkgs.read_ti(k.t, k.i)).and_then(|d| s3formats::dds::decode(&d, 4096)).map(|im| (im.width, im.height));
+                            println!("  @{s0}: {t} -> {size:?}");
+                        }
+                    }
+                    start = None;
+                }
+                _ => {}
+            }
+        }
+        if let Some(out) = args.get(i + 2) {
+            let _ = std::fs::write(out, &spt);
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--txtc") {
         // --txtc <group hex> <instance hex> [out.png]: a texture recipe's steps, its images'
         // sizes, and (with a path) what it draws.

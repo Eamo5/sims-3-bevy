@@ -2659,6 +2659,8 @@ fn stream_nearby_lots(
     let visited_lot = visited.as_ref().map(|v| v.lot);
     let zoomed_in = cam.distance < IMPOSTER_DISTANCE;
     let (near_in, near_out) = nearby_radius(cam.distance);
+    // (NEARBY_MAX=<n>: a test's own cap, to weigh what the detailed street costs.)
+    let most = std::env::var("NEARBY_MAX").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(NEARBY_MAX);
     let lot_center = |i: usize| crate::home::lot_center(&world.data.lots[i]);
     // Drop lots that went out of range (and the furthest, past the most there's room for).
     let mut by_distance: Vec<(usize, f32)> = nearby.spawned.keys().map(|&i| (i, lot_center(i).xz().distance(cam.focus.xz()))).collect();
@@ -2666,7 +2668,7 @@ fn stream_nearby_lots(
     let gone: Vec<usize> = by_distance
         .iter()
         .enumerate()
-        .filter(|(n, (i, d))| !zoomed_in || Some(*i) == active_lot || Some(*i) == visited_lot || *d > near_out || *n >= NEARBY_MAX)
+        .filter(|(n, (i, d))| !zoomed_in || Some(*i) == active_lot || Some(*i) == visited_lot || *d > near_out || *n >= most)
         .map(|(_, (i, _))| *i)
         .collect();
     for i in gone {
@@ -2675,7 +2677,7 @@ fn stream_nearby_lots(
         }
     }
     // Bring in the nearest lot not yet shown (one per frame).
-    if zoomed_in && nearby.spawned.len() < NEARBY_MAX {
+    if zoomed_in && nearby.spawned.len() < most {
         // (The households played before's homes too, as they left them: on an empty lot, what
         // they built.)
         let next = world

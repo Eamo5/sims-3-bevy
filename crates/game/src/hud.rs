@@ -270,7 +270,12 @@ struct HudButton;
 #[derive(Component)]
 pub struct FpsText;
 
-fn update_fps(time: Res<Time>, mut avg: Local<f32>, mut q: Query<&mut Text, With<FpsText>>) {
+fn update_fps(time: Res<Time>, mut avg: Local<f32>, mut q: Query<&mut Text, With<FpsText>>, mut logged: Local<f32>) {
+    // (FPS_LOG=1: the frame rate in the log every few seconds, for comparing runs.)
+    if std::env::var("FPS_LOG").is_ok() && time.elapsed_secs() - *logged > 3.0 && *avg > 0.0 {
+        *logged = time.elapsed_secs();
+        info!("fps {:.1} at {:.0}s", 1.0 / *avg, time.elapsed_secs());
+    }
     let dt = time.delta_secs().max(1e-4);
     *avg = if *avg == 0.0 { dt } else { *avg * 0.95 + dt * 0.05 };
     if let Ok(mut t) = q.single_mut() {
