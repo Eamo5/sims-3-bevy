@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::{BakeRoot, Progress, par_map};
 use crate::pack::{PackReader, PackWriter, write_value};
 
-pub const SOUNDS_VERSION: u32 = 7;
+pub const SOUNDS_VERSION: u32 = 8;
 
 /// Sample file formats in `sounds.pack`.
 pub const FORMAT_MP3: u8 = 0;
@@ -63,6 +63,10 @@ pub const SEATS: [&str; 4] = ["cloth", "leath", "wood", "cment"];
 
 /// Sounds the game plays outside animations.
 pub const EXTRA_SOUNDS: &[&str] = &[
+    // A shower's water, and singing in it (the shower's script starts them).
+    "shower_running_lp",
+    "vo_shower_singA",
+    "vo_shower_singC",
     // Interface.
     "ui_piemenu_primary",
     "ui_primary_button",
@@ -232,7 +236,7 @@ pub const STATIONS: &[&str] = &[
 pub fn expand_cue(name: &str) -> Vec<String> {
     let mut out = vec![name.to_string(), format!("{name}_lp")];
     if name.starts_with("vo_") {
-        let voices: &[&str] = if name.ends_with('c') { &CHILD_VOICES } else { &ADULT_VOICES };
+        let voices: &[&str] = if name.to_ascii_lowercase().ends_with('c') { &CHILD_VOICES } else { &ADULT_VOICES };
         out.extend(voices.iter().map(|v| format!("{name}_{v}")));
     }
     if name.starts_with("foot_") {
@@ -310,7 +314,7 @@ pub fn bake_sounds(root: &BakeRoot, pkgs: &PackageSet, progress: Progress) -> Re
             names.extend(expand_cue(&c));
         }
     }
-    names.extend(EXTRA_SOUNDS.iter().map(|s| s.to_string()));
+    names.extend(EXTRA_SOUNDS.iter().flat_map(|s| expand_cue(s)));
     names.extend(STATIONS.iter().map(|s| s.to_string()));
     names.sort();
     names.dedup();

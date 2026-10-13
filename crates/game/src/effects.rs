@@ -41,7 +41,14 @@ struct Emitter {
     slot: Vec3,
     spray: Spray,
     owed: f32,
+    /// Who the shower's running for (its water's sound, and their singing, theirs).
+    sounding: Option<Entity>,
 }
+
+/// The game's shower water (`shower_running_lp`, the shower's `EventCallbackStartShoweringSound`)
+/// and singing in it (`vo_shower_singA`, a child's `C`), now and then (its `ChanceOfSinging`).
+const SHOWER_WATER: &str = "shower_running_lp";
+const SING_CHANCE: f64 = 0.25;
 
 /// An object already looked at for effects.
 #[derive(Component)]
@@ -274,7 +281,7 @@ fn attach(
         if !matches!(spray, Spray::Tap | Spray::Sprinkler) && slot[1] < 0.3 {
             continue;
         }
-        commands.entity(e).insert(Emitter { slot: Vec3::from(slot), spray, owed: 0.0 });
+        commands.entity(e).insert(Emitter { slot: Vec3::from(slot), spray, owed: 0.0, sounding: None });
     }
 }
 
@@ -385,6 +392,7 @@ fn emit(
     time: Res<Time>,
     mut emitters: Query<(&mut Emitter, &GlobalTransform, &UsedBy, &InheritedVisibility, Has<crate::gardening::Sprinkling>, Has<ShowerOnly>)>,
     users: Query<(&GlobalTransform, &ActionQueue), With<crate::sim::Sim>>,
+    (mut cues, sims): (MessageWriter<crate::sound::ClipCue>, Query<&crate::sim::Sim>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut looks: Local<Looks>,
 ) {
@@ -404,6 +412,24 @@ fn emit(
                         || q.0.front().is_some_and(|a| matches!(a.kind, ActionKind::Object { def, .. } if interactions_for(ObjectKind::ShowerTub).get(def).is_some_and(|d| d.name == "Take Shower"))))
             }),
         };
+        // (A shower's water heard while it runs, on its Sim.)
+        if em.spray == Spray::Shower {
+            let user = used.0.filter(|_| on);
+            if em.sounding != user {
+                if let Some(was) = em.sounding.take() {
+                    cues.write(crate::sound::ClipCue { sim: was, name: String::new(), action: s3formats::sim::SoundAction::StopLoop });
+                }
+                if let Some(now) = user {
+                    cues.write(crate::sound::ClipCue { sim: now, name: SHOWER_WATER.into(), action: s3formats::sim::SoundAction::StartLoop });
+                    if rand::rng().random_bool(SING_CHANCE) {
+                        let child = sims.get(now).is_ok_and(|s| s.age.is_little() || s.age == crate::sim::Age::Child);
+                        let song = if child { "vo_shower_singC" } else { "vo_shower_singA" };
+                        cues.write(crate::sound::ClipCue { sim: now, name: song.into(), action: s3formats::sim::SoundAction::StartLoop });
+                    }
+                    em.sounding = Some(now);
+                }
+            }
+        }
         if !on {
             em.owed = 0.0;
             continue;
