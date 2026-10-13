@@ -1251,7 +1251,13 @@ fn interaction_queue(
         x += QUEUE_ITEM_WIDTH + QUEUE_ITEM_GAP;
         let s = ui.spawn_under(&mut commands, &mut assets, &mut fonts, &item, holder);
         let picture = match pic {
-            Some(QueuePicture::Object(objd)) => game_ui.as_deref_mut().and_then(|g| g.icon(&mut assets, &s3bake::gamedata::thumb_name(objd.2))).map(|h| (h, None)),
+            // (Something with no picture of its own in the catalogue, a puddle or a stand-in: the
+            // Sim's own face rather than an empty frame.)
+            Some(QueuePicture::Object(objd)) => game_ui
+                .as_deref_mut()
+                .and_then(|g| g.icon(&mut assets, &s3bake::gamedata::thumb_name(objd.2)))
+                .map(|h| (h, None))
+                .or_else(|| Some((portraits.portrait(&mut assets, me), Some(me)))),
             Some(QueuePicture::Sim(e)) => Some((portraits.portrait(&mut assets, e), Some(e))),
             // (What a Sim does by themselves: their own face.)
             None => Some((portraits.portrait(&mut assets, me), Some(me))),

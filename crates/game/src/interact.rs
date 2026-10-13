@@ -2613,10 +2613,30 @@ pub(crate) fn run_actions(
                                         }
                                     });
                                 }
+                                // (Stopped part way up the stairs or in a lift by something else coming
+                                // up, they're between floors: set down on the nearest one, where its
+                                // walks reach.)
+                                let off_floor = (tf.translation.y - ground(floor.0, from.x, from.y)).abs() > 0.6;
+                                if off_floor {
+                                    let grid_of = |l: u8| if l == 1 { Some(my_grid) } else { my_upper.and_then(|u| u.grids.get(&l)) };
+                                    let nearest = (0..8u8)
+                                        .filter(|l| grid_of(*l).is_some())
+                                        .min_by(|a, b| (tf.translation.y - ground(*a, from.x, from.y)).abs().total_cmp(&(tf.translation.y - ground(*b, from.x, from.y)).abs()));
+                                    if let Some(l) = nearest
+                                        && let Some(g) = grid_of(l)
+                                        && let Some((x, z)) = g.nearest_free(from)
+                                    {
+                                        let p = g.center_of(x, z);
+                                        info!("{} was between floors at {from} (floor {}, {:.1} m up): set down on floor {l} at {p}", sim.first, floor.0, tf.translation.y);
+                                        tf.translation = Vec3::new(p.x, ground(l, p.x, p.y), p.y);
+                                        commands.entity(me).insert(Floor(l));
+                                    }
+                                }
                                 // (With no way even off the lot from where they stand (put out on a
                                 // ledge), they're set back on their feet where the lot's walks reach,
                                 // as the game resets a stuck Sim.)
-                                if let Some(out) = way_out
+                                if !off_floor
+                                    && let Some(out) = way_out
                                     && plan_route(my_grid, my_upper, from, floor.0, out, 1).is_none()
                                 {
                                     let reach = my_grid.reachable_from(out);

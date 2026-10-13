@@ -384,8 +384,9 @@ installation is unreachable.
   game's spin (`a_clothesChange`, a child's own), in a swirl of sparkles with its whoosh, the
   new clothes on mid-turn: by the bed, the shower or the bench before getting in or on (not on
   the way, and not to clean the shower), out of the bath once they're out, at the dresser, on
-  the way out to work or into the cold (a walk waits for it). Babies and toddlers are changed
-  as they are.
+  the way out to work or into the cold (a walk waits for it, though never on the stairs or in
+  a lift). Babies and toddlers are changed as they are. A Sim stopped part way up the stairs
+  or in a lift by something else coming up is set down on the nearest floor.
 - **Baths**: as the game's: stood in the tub, the taps turned on and the water rising (the
   tub's own water, raised by its half of the clip), sat down, arms and legs washed, then lying
   back; sat up and out at the end. The rubber ducky's played with in the water too, and a

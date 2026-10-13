@@ -34,7 +34,7 @@ fn pyjamas(
             Option<&crate::careers::Job>,
             Has<crate::simbody::ChangedInto>,
             &Transform,
-            (Has<ActionClip>, Has<crate::dressing::ClothesSpin>, &InheritedVisibility),
+            (Has<ActionClip>, Has<crate::dressing::ClothesSpin>, &InheritedVisibility, Option<&crate::nav::PathFollow>, Option<&crate::nav::Floor>),
         ),
         With<crate::sim::HouseholdMember>,
     >,
@@ -44,8 +44,10 @@ fn pyjamas(
 ) {
     use crate::simbody::OutfitKind;
     let cold = weather.temperature < COLD;
-    for (e, sim, queue, wearing, job, chosen, tf, (acting, spinning, shown)) in &sims {
-        if spinning {
+    for (e, sim, queue, wearing, job, chosen, tf, (acting, spinning, shown, path, floor)) in &sims {
+        // (Not turning round on the stairs or in the lift: once they're off them, on a floor.)
+        let changing_floor = path.is_some_and(|p| !p.done && p.waypoints.first().is_some_and(|w| w.climb.is_some() || floor.is_some_and(|f| f.0 != w.level)));
+        if spinning || changing_floor {
             continue;
         }
         let uniform = job.and_then(|j| j.uniform(sim)).is_some_and(|u| cas.as_ref().is_some_and(|c| c.outfits.contains_key(u)));
