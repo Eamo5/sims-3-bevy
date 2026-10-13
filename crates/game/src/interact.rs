@@ -553,8 +553,9 @@ impl GameObject {
             let w = tf.transform_point(Vec3::new(p.x, 0.0, p.y));
             return Vec2::new(w.x, w.z);
         }
-        // (A pool ladder faces into the water: Sims stand behind it, on the side.)
-        let ahead = if self.kind == ObjectKind::PoolLadder { -(self.half.y + 0.45) } else { self.half.y + 0.45 };
+        // (A pool ladder and a diving board face into the water: Sims stand behind them, on the
+        // side.)
+        let ahead = if matches!(self.kind, ObjectKind::PoolLadder | ObjectKind::DivingBoard) { -(self.half.y + 0.45) } else { self.half.y + 0.45 };
         let local = Vec3::new(self.center.x, 0.0, self.center.y + ahead);
         let p = tf.transform_point(local);
         Vec2::new(p.x, p.z)
@@ -2516,14 +2517,19 @@ pub(crate) fn run_actions(
                         ActionKind::Object { target, .. } => objects.get(*target).ok().map(|(o, otf, ..)| o.other_approaches(otf)).unwrap_or_default(),
                         _ => Vec::new(),
                     };
+                    // (A pool's ladder or diving board filed a storey low, under the deck it stands
+                    // on at a walk-out: reached from the storey above.)
+                    let pool_thing = matches!(&action.kind, ActionKind::Object { target, .. } if objects.get(*target).is_ok_and(|(o, ..)| matches!(o.kind, ObjectKind::PoolLadder | ObjectKind::DivingBoard)));
                     let routed = dest.and_then(|(d, l)| {
-                        plan_route(my_grid, my_upper, from, floor.0, d, l).or_else(|| {
-                            alternatives.iter().find_map(|a| {
-                                let wp = plan_route(my_grid, my_upper, from, floor.0, *a, l)?;
-                                action.approach = Some(*a);
-                                Some(wp)
+                        plan_route(my_grid, my_upper, from, floor.0, d, l)
+                            .or_else(|| {
+                                alternatives.iter().find_map(|a| {
+                                    let wp = plan_route(my_grid, my_upper, from, floor.0, *a, l)?;
+                                    action.approach = Some(*a);
+                                    Some(wp)
+                                })
                             })
-                        })
+                            .or_else(|| pool_thing.then(|| plan_route(my_grid, my_upper, from, floor.0, d, l + 1)).flatten())
                     });
                     match routed {
                         Some(wp) => {

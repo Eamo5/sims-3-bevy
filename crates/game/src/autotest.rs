@@ -2888,7 +2888,12 @@ fn auto_reach(
         let to = o.use_point(tf);
         // (As the game goes: some are reached from another side when the front can't be.)
         let others = o.other_approaches(tf);
-        if std::iter::once(to).chain(others).any(|p| crate::nav::plan_route(grid, upper.as_deref(), exit.0, 1, p, level).is_some()) {
+        // (A pool's ladder or diving board filed a storey low: reached from the one above, as
+        // the game's Sims do.)
+        let pool_thing = matches!(o.kind, crate::interact::ObjectKind::PoolLadder | crate::interact::ObjectKind::DivingBoard);
+        if std::iter::once(to).chain(others).any(|p| crate::nav::plan_route(grid, upper.as_deref(), exit.0, 1, p, level).is_some())
+            || (pool_thing && crate::nav::plan_route(grid, upper.as_deref(), exit.0, 1, to, level + 1).is_some())
+        {
             ok += 1;
         } else {
             bad += 1;
