@@ -106,7 +106,10 @@ fn plan_route_depth(
         // (Or up or down the steps between two parts of the storey: a platform raised on it.)
         for s in upper.into_iter().flat_map(|u| u.stairs.iter()).filter(|s| s.level == from_level && s.upper == from_level) {
             for (a, b, ys) in [(s.bottom, s.top, (s.y0, s.y1)), (s.top, s.bottom, (s.y1, s.y0))] {
-                let (Some(first), Some(rest)) = (grid.find_path(from, a), grid.find_path(b, to)) else { continue };
+                // (A step or so from where they are, its foot's a landing's width away: stepped
+                // to (a staircase's top meeting a half-storey's steps, the grid split between).)
+                let first = grid.find_path(from, a).filter(|p| p.last().is_some_and(|q| q.distance(a) < 0.8)).or_else(|| (from.distance(a) < 1.25).then(|| vec![a]));
+                let (Some(first), Some(rest)) = (first, grid.find_path(b, to)) else { continue };
                 if !first.last().is_some_and(|q| q.distance(a) < 0.8) || !rest.last().is_some_and(|q| q.distance(to) < 1.6) {
                     continue;
                 }
