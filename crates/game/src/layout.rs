@@ -992,6 +992,19 @@ fn combos(
 mod tests {
     use super::*;
 
+    /// (SIMS3_CACHE=<baked>: whether the baked interface opens, and has the live HUD.)
+    #[test]
+    #[ignore]
+    fn baked_ui_opens() {
+        let root = s3bake::default_root();
+        println!("ready {}", s3bake::ui_ready(&root));
+        let ui = s3bake::load_ui(&root);
+        println!("loaded {}", ui.is_some());
+        let mut fonts = Assets::<Font>::default();
+        let ui = open(&mut fonts);
+        println!("opened {} HUD {}", ui.is_some(), ui.as_ref().is_some_and(|u| u.layout("HUDSimDisplay").is_some()));
+    }
+
     #[test]
     fn scroll_thumb_tracks_rows_and_stays_in_the_track() {
         let (top, size, travel) = scroll_geometry(200.0, 16.0, 20, 4, 30.0, 0);

@@ -293,7 +293,7 @@ pub const ZODIAC: [&str; 12] = ["Aries", "Taurus", "Gemini", "Cancer", "Leo", "V
 
 pub fn ui_ready(root: &BakeRoot) -> bool {
     let g = root.global_dir();
-    g.join("ui.pack").exists() && read_value::<u32>(&g.join("ui.version")).is_ok_and(|v| v == UI_VERSION)
+    crate::PackReader::current(&g.join("ui.pack")) && read_value::<u32>(&g.join("ui.version")).is_ok_and(|v| v == UI_VERSION)
 }
 
 pub fn load_ui(root: &BakeRoot) -> Option<UiBaked> {

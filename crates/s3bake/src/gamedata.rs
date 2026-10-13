@@ -510,7 +510,7 @@ impl GameDataBaked {
 
 pub fn gamedata_ready(root: &BakeRoot) -> bool {
     let g = root.global_dir();
-    g.join("icons.pack").exists() && read_value::<GameDataBaked>(&g.join("gamedata.bin")).is_ok_and(|d| d.version == GAMEDATA_VERSION)
+    crate::PackReader::current(&g.join("icons.pack")) && read_value::<GameDataBaked>(&g.join("gamedata.bin")).is_ok_and(|d| d.version == GAMEDATA_VERSION)
 }
 
 pub fn load_gamedata(root: &BakeRoot) -> Option<GameDataBaked> {

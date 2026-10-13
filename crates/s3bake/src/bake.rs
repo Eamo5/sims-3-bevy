@@ -526,7 +526,7 @@ pub const CLIPS_VERSION: u32 = 66;
 
 pub fn clips_ready(root: &BakeRoot) -> bool {
     let g = root.global_dir();
-    g.join("clips.pack").exists()
+    crate::PackReader::current(&g.join("clips.pack"))
         && g.join("clip_names.bin").exists()
         && std::fs::read_to_string(g.join("clips.version")).is_ok_and(|v| v.trim() == CLIPS_VERSION.to_string())
 }

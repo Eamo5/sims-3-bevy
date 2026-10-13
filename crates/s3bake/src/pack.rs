@@ -55,6 +55,13 @@ pub struct PackReader {
 }
 
 impl PackReader {
+    /// Whether a pack is there and of this bake's format (`open` refuses one that isn't: a
+    /// bake whose own version is current still needs redoing when `BAKE_VERSION` moves on).
+    pub fn current(path: &Path) -> bool {
+        let mut hdr = [0u8; 8];
+        File::open(path).and_then(|mut f| f.read_exact(&mut hdr)).is_ok() && &hdr[0..4] == MAGIC && u32::from_le_bytes(hdr[4..8].try_into().unwrap()) == crate::types::BAKE_VERSION
+    }
+
     pub fn open(path: &Path) -> io::Result<Self> {
         let mut f = File::open(path)?;
         let mut hdr = [0u8; 16];

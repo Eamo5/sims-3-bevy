@@ -254,7 +254,7 @@ pub fn expand_cue(name: &str) -> Vec<String> {
 
 pub fn sounds_ready(root: &BakeRoot) -> bool {
     let g = root.global_dir();
-    g.join("sounds.pack").exists()
+    crate::PackReader::current(&g.join("sounds.pack"))
         && crate::pack::read_value::<SoundBank>(&g.join("sounds.bin")).is_ok_and(|b| b.version == SOUNDS_VERSION)
 }
 
