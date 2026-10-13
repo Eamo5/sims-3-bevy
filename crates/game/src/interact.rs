@@ -522,6 +522,10 @@ impl ObjectKind {
                 | K::Shower
                 // (A shower-tub's: beside it, its open side.)
                 | K::ShowerTub
+                // (A toilet's and a sink's: in front, close enough to clean them, wash or brush
+                // teeth at.)
+                | K::Toilet
+                | K::Sink
                 | K::Treadmill
                 // (The workout bench's, beside it, for the way there; a dollhouse's, at its open
                 // side.)
@@ -860,6 +864,8 @@ pub enum Special {
     Clear,
     /// Making an unmade bed (offered only then).
     MakeBed,
+    /// Cleaning a dirty toilet, shower, tub or sink (offered once it needs it: `grime`).
+    Scrub,
     /// WooHoo in a double bed with their partner, or trying for a baby (the socials of those
     /// names, accepted, as the game's `MakeSimsWooHooOnMe`).
     WooHoo,
@@ -1015,8 +1021,13 @@ static BED: [InteractionDef; 6] = [
 ];
 /// WooHoo's needs per hour: fun and company, at some cost to energy and hygiene.
 const WOOHOO_RATES: [f32; 6] = [0.0, 0.0, -8.0, 180.0, -20.0, 160.0];
-static TOILET: [InteractionDef; 1] =
-    [InteractionDef { until_full: Some(BLADDER), on_object: true, ..def("Use Toilet", 15.0, [0.0, 900.0, 0.0, 0.0, -10.0, 0.0], Pose::Sit) }];
+static TOILET: [InteractionDef; 2] = [
+    InteractionDef { until_full: Some(BLADDER), on_object: true, ..def("Use Toilet", 15.0, [0.0, 900.0, 0.0, 0.0, -10.0, 0.0], Pose::Sit) },
+    SCRUB,
+];
+/// Cleaning something dirty (the game's `CleanableComponent.Clean`: its grime gone in ten
+/// minutes or so).
+const SCRUB: InteractionDef = InteractionDef { special: Special::Scrub, ..def("Clean", 10.0, [0.0, 0.0, -2.0, 0.0, -10.0, -4.0], Pose::Use) };
 const TAKE_SHOWER: InteractionDef = InteractionDef { until_full: Some(HYGIENE), on_object: true, ..def("Take Shower", 30.0, [0.0, 0.0, 0.0, 0.0, 400.0, 10.0], Pose::Use) };
 const TAKE_BATH: InteractionDef = InteractionDef { until_full: Some(HYGIENE), on_object: true, ..def("Take Bath", 50.0, [0.0, 0.0, 6.0, 0.0, 260.0, 40.0], Pose::Lie) };
 // (With bubble bath in the house: a longer soak, and more fun.)
@@ -1024,16 +1035,17 @@ const BUBBLE_BATH: InteractionDef =
     InteractionDef { until_full: Some(HYGIENE), on_object: true, special: Special::BubbleBath, ..def("Take Bubble Bath", 60.0, [0.0, 0.0, 10.0, 0.0, 300.0, 70.0], Pose::Lie) };
 // (With a rubber duck in the house.)
 const DUCKY: InteractionDef = InteractionDef { on_object: true, special: Special::Ducky, ..def("Play with Rubber Ducky", 30.0, [0.0, 0.0, 4.0, 0.0, 160.0, 100.0], Pose::Lie) };
-static SHOWER: [InteractionDef; 1] = [TAKE_SHOWER];
-static BATHTUB: [InteractionDef; 3] = [TAKE_BATH, BUBBLE_BATH, DUCKY];
+static SHOWER: [InteractionDef; 2] = [TAKE_SHOWER, SCRUB];
+static BATHTUB: [InteractionDef; 4] = [TAKE_BATH, BUBBLE_BATH, DUCKY, SCRUB];
 /// A shower over a tub (the game's shower-tubs): a shower or a bath.
-static SHOWER_TUB: [InteractionDef; 4] = [TAKE_SHOWER, TAKE_BATH, BUBBLE_BATH, DUCKY];
-static SINK: [InteractionDef; 3] = [
+static SHOWER_TUB: [InteractionDef; 5] = [TAKE_SHOWER, TAKE_BATH, BUBBLE_BATH, DUCKY, SCRUB];
+static SINK: [InteractionDef; 4] = [
     def("Wash Hands", 6.0, [0.0, 0.0, 0.0, 0.0, 160.0, 0.0], Pose::Use),
     // (Where a dish cleared away is taken without a dishwasher: never on the menu.)
     InteractionDef { autonomous: false, special: Special::WashDishes, ..def("Wash Dishes", 8.0, N, Pose::Use) },
     // (The game's `Sink.BrushTeeth`: Minty Breath after, coffee and garlic breath gone.)
     def("Brush Teeth", 5.0, [0.0, 0.0, 0.0, 0.0, 120.0, 0.0], Pose::Use),
+    SCRUB,
 ];
 /// (A flame lit and blown out: the fireplace's, smaller.)
 static CANDLE: [InteractionDef; 2] = [
@@ -1303,6 +1315,15 @@ const BATH_WASH: &[&str] = &[
 pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::ActionClip> {
     use crate::anim::ActionClip as A;
     Some(match name {
+        // (Scrubbed with the game's sponge, or the toilet brush.)
+        "Clean" if kind == ObjectKind::Toilet => A::new(Some("a2o_toilet_clean_start_x"), &["a2o_toilet_clean_loopA_x", "a2o_toilet_clean_loopB_x"]).ending(&["a2o_toilet_clean_stop_x"], 1.5),
+        "Clean" if kind == ObjectKind::Shower => {
+            A::new(Some("a2o_shower_cleanShower_start_x"), &["a2o_shower_cleanShower_loop1_x", "a2o_shower_cleanShower_loop2_x"]).ending(&["a2o_shower_cleanShower_stop_x"], 1.5)
+        }
+        "Clean" if matches!(kind, ObjectKind::Bathtub | ObjectKind::ShowerTub) => {
+            A::new(Some("a2o_bathtub_clean_start_x"), &["a2o_bathtub_clean_loop1_x", "a2o_bathtub_clean_loop2_x", "a2o_bathtub_clean_loop3_x"]).ending(&["a2o_bathtub_clean_stop_x"], 1.5)
+        }
+        "Clean" if kind == ObjectKind::Sink => A::new(Some("a2o_sink_clean_start_x"), &["a2o_sink_clean_loop1_x", "a2o_sink_clean_loop2_x"]).ending(&["a2o_sink_clean_stop_x"], 1.5),
         "Make Bed" => A::steps("a2o_bed_make_start_x", &["a2o_bed_make_smooth_x", "a2o_bed_make_pat_x"], &["a2o_bed_make_smooth_x"]).ending(&["a2o_bed_make_stop_x"], 1.0),
         "Nap" if kind == ObjectKind::Sofa => A::new(Some("a2o_sofa_sit_trans_nap_x"), &["a2o_sofa_nap_loop1_x"]),
         "Eat" if matches!(kind, ObjectKind::Chair | ObjectKind::PicnicTable) => A::new(Some("a2o_eat_diningIn_fork_start_x"), &["a2o_eat_diningIn_fork_neat_x"]).ending(&["a2o_eat_diningIn_fork_stop_x"], 0.9),
@@ -2976,6 +2997,15 @@ pub(crate) fn run_actions(
                                 if complete {
                                     finished = true;
                                     life.write(LifeEvent::new(me, LifeEventKind::Finished { activity: d.name, completed: true }));
+                                    // (A bathroom thing used is that much dirtier.)
+                                    if crate::grime::cleanable(obj.kind) && d.special != Special::Scrub {
+                                        let traits = sim.traits.clone();
+                                        commands.entity(*target).queue_silenced(move |mut e: EntityWorldMut| {
+                                            if let Some(mut g) = e.get_mut::<crate::grime::Grime>() {
+                                                g.used(&traits);
+                                            }
+                                        });
+                                    }
                                     // (WooHoo's done: as the social's, with whoever's on the bed's other side;
                                     // a baby tried for once, by the first side's.)
                                     if matches!(d.special, Special::WooHoo | Special::TryForBaby) {
@@ -3039,6 +3069,9 @@ pub(crate) fn run_actions(
                                         }
                                         Special::MakeBed => {
                                             commands.entity(*target).remove::<Unmade>();
+                                        }
+                                        Special::Scrub => {
+                                            commands.entity(*target).insert(crate::grime::Grime(0.0));
                                         }
                                         Special::GetIngredients => {
                                             commands.entity(me).insert(crate::anim::Carrying(crate::meals::FOOD_CARRY));
@@ -4017,7 +4050,12 @@ fn autonomy(
         (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim, Has<SocialPartner>, Option<&crate::visit::OnLot>),
         (Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>, Without<OffLot>),
     >,
-    (objects, seconds, unmade_q): (Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>, Query<&SecondPlace>, Query<(), With<Unmade>>),
+    (objects, seconds, unmade_q, grime_q): (
+        Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>,
+        Query<&SecondPlace>,
+        Query<(), With<Unmade>>,
+        Query<&crate::grime::Grime>,
+    ),
     hh: Option<Res<Household>>,
     (broken, plant_q, lit_q, hw_q): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>, Query<(), With<crate::fireplace::Lit>>, Query<(), With<crate::rabbitholes::Homework>>),
     (party_on, trash_q, served_q, leftovers, sprinkling, route_failed): (
@@ -4208,6 +4246,22 @@ fn autonomy(
                 // A full trash can is a chore like dishes; an emptier one isn't.
                 if d.special == Special::EmptyTrash && !trash_q.get(oe).is_ok_and(|f| f.0 >= crate::surroundings::trash_capacity(obj.kind)) {
                     continue;
+                }
+                if d.special == Special::Scrub {
+                    let Some(g) = grime_q.get(oe).ok().filter(|g| g.needs_cleaning()) else { continue };
+                    if used.0.is_some() {
+                        continue;
+                    }
+                    let filthy = g.0 >= 60.0;
+                    score = if sim.traits.contains(&crate::life::Trait::Slob) {
+                        0.0
+                    } else if sim.traits.contains(&crate::life::Trait::Neat) {
+                        28.0
+                    } else if filthy {
+                        8.0
+                    } else {
+                        1.5
+                    };
                 }
                 if d.special == Special::MakeBed {
                     if !unmade_q.contains(oe) || used.0.is_some() {
@@ -4498,7 +4552,7 @@ mod tests {
         }
         for k in [(0x0166_1233, 1, inst), (0x0166_1233, 0, inst)] {
             for p in data.model(&k).map(|m| m.parts).unwrap_or_default() {
-                println!("part: {} verts, first {:?}, texture {:?}, bounds {:?}..{:?}", p.positions.len(), p.positions.first(), p.texture, p.bmin, p.bmax);
+                println!("part: {} verts, first {:?}, texture {:?}, bounds {:?}..{:?}, states {:?}", p.positions.len(), p.positions.first(), p.texture, p.bmin, p.bmax, p.states);
             }
         }
         let Some(skin) = skin else { return println!("not skinned") };

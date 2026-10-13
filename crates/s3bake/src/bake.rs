@@ -183,6 +183,16 @@ pub fn bake_model_state(pkgs: &PackageSet, modl: &ResourceKey, state: Option<u32
             layer: 0,
             bmin,
             bmax,
+            states: m
+                .state_textures
+                .iter()
+                .filter_map(|(s, k, overlay)| match (overlay, tex) {
+                    (false, _) => Some((*s, key_of(k))),
+                    (true, Some(base)) => Some((*s, composite_key(key_of(&base), key_of(k)))),
+                    (true, None) => None,
+                })
+                .collect(),
+            overlays: m.state_textures.iter().filter(|s| s.2 && tex.is_some()).map(|s| key_of(&s.1)).collect(),
         };
         if imposter {
             parts.extend(split_imposter(&part));
@@ -282,9 +292,13 @@ pub(crate) fn bake_textures(root: &BakeRoot, pkgs: &PackageSet, keys: &[(Key, bo
     ok.into_iter().filter(|b| *b).count() + (keys.len() - todo.len())
 }
 
-fn write_models(path: &Path, pkgs: &PackageSet, keys: &[Key], label: &str, progress: Progress) -> Result<(usize, Vec<(Key, bool)>), String> {
+/// The models' textures to bake, and the dirty looks to draw from them (base, overlay).
+type ModelTextures = (Vec<(Key, bool)>, Vec<(Key, Key)>);
+
+fn write_models(path: &Path, pkgs: &PackageSet, keys: &[Key], label: &str, progress: Progress) -> Result<(usize, ModelTextures), String> {
     let mut w = PackWriter::create(path).map_err(|e| e.to_string())?;
     let mut tex = HashSet::new();
+    let mut composites = HashSet::new();
     let mut n = 0;
     for (ci, chunk) in keys.chunks(400).enumerate() {
         progress(&format!("{label}: models {}/{}", (ci * 400 + chunk.len()).min(keys.len()), keys.len()));
@@ -294,13 +308,47 @@ fn write_models(path: &Path, pkgs: &PackageSet, keys: &[Key], label: &str, progr
                 if let Some(t) = p.texture {
                     tex.insert(t);
                 }
+                // (And its dirty and other states' looks: their own textures, or its own with
+                // their dirt drawn over it.)
+                if let Some(base) = p.texture {
+                    composites.extend(p.overlays.iter().map(|o| (base, *o)));
+                }
+                tex.extend(p.states.iter().map(|s| s.1).filter(|k| k.1 != 0x00D1_D700));
             }
             w.add(k, &m).map_err(|e| e.to_string())?;
             n += 1;
         }
     }
     w.finish().map_err(|e| e.to_string())?;
-    Ok((n, tex.into_iter().map(|k| (k, false)).collect()))
+    Ok((n, (tex.into_iter().map(|k| (k, false)).collect(), composites.into_iter().collect())))
+}
+
+/// Draws dirty looks: each object texture with a dirt overlay over it (alpha over), into the
+/// texture store under `composite_key`, once its own texture's there.
+fn bake_composites(root: &BakeRoot, pkgs: &PackageSet, jobs: &[(Key, Key)]) -> usize {
+    let done = par_map(jobs, |(base, overlay)| {
+        let out = root.tex_path(composite_key(*base, *overlay));
+        if out.exists() {
+            return true;
+        }
+        let Some(b) = std::fs::read(root.tex_path(*base)).ok().and_then(|d| s3formats::dds::decode(&d, OBJECT_TEX_MAX as usize)) else { return false };
+        let Some(o) = pkgs.read(&rkey(*overlay)).or_else(|| pkgs.read_ti(overlay.0, overlay.2)).and_then(|d| s3formats::dds::decode(&d, b.width.max(1))) else { return false };
+        let mut img = b;
+        for y in 0..img.height {
+            for x in 0..img.width {
+                // (The overlay at the same place in the UV square, whatever its size.)
+                let (ox, oy) = (x * o.width / img.width.max(1), y * o.height / img.height.max(1));
+                let d = o.get(ox.min(o.width - 1), oy.min(o.height - 1));
+                let a = d[3] as f32 / 255.0;
+                let i = (y * img.width + x) * 4;
+                for c in 0..3 {
+                    img.data[i + c] = (img.data[i + c] as f32 * (1.0 - a) + d[c] as f32 * a).round() as u8;
+                }
+            }
+        }
+        std::fs::write(out, encode_dds(&img)).is_ok()
+    });
+    done.into_iter().filter(|d| *d).count()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -474,7 +522,7 @@ pub fn bake_clips(root: &BakeRoot, pkgs: &PackageSet, progress: Progress) -> Res
 }
 
 /// Bumped when the baked clip layout changes.
-pub const CLIPS_VERSION: u32 = 65;
+pub const CLIPS_VERSION: u32 = 66;
 
 pub fn clips_ready(root: &BakeRoot) -> bool {
     let g = root.global_dir();
@@ -527,8 +575,10 @@ pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progr
 
     let mut model_keys: Vec<Key> = catalog.iter().flat_map(|c| c.models.iter().copied()).collect::<HashSet<_>>().into_iter().collect();
     model_keys.sort();
-    let (n_models, tex) = write_models(&gdir.join("models.pack"), pkgs, &model_keys, "Converting objects", progress)?;
+    let (n_models, (tex, composites)) = write_models(&gdir.join("models.pack"), pkgs, &model_keys, "Converting objects", progress)?;
     let n_tex = bake_textures(root, pkgs, &tex, OBJECT_TEX_MAX, "Converting objects", progress);
+    let dirty = bake_composites(root, pkgs, &composites);
+    progress(&format!("Converting objects: {dirty} dirty looks"));
 
     // CAS: index every part, bake meshes and layers for the wardrobe sims are dressed from.
     progress("Converting: Create-a-Sim parts…");
@@ -801,8 +851,9 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         .into_iter()
         .collect();
     model_keys.sort();
-    let (_, tex) = write_models(&wdir.join("models.pack"), pkgs, &model_keys, &format!("Converting {name}"), progress)?;
+    let (_, (tex, composites)) = write_models(&wdir.join("models.pack"), pkgs, &model_keys, &format!("Converting {name}"), progress)?;
     bake_textures(root, pkgs, &tex, OBJECT_TEX_MAX, &format!("Converting {name}"), progress);
+    bake_composites(root, pkgs, &composites);
 
     progress(&format!("Converting {name}: roads…"));
     let sectors = (world.heightmap.width.saturating_sub(1) / SECTOR) as u64;

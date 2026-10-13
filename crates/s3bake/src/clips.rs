@@ -315,6 +315,11 @@ pub const CLIP_PREFIXES: &[&str] = &[
     // (Into an unmade bed, and making one.)
     "a2o_bed_getIn_unmade",
     "a2o_bed_make",
+    // (Cleaning the bathroom: the toilet brush, the sponge.)
+    "a2o_toilet_clean",
+    "a2o_shower_cleanShower",
+    "a2o_bathtub_clean",
+    "a2o_sink_clean",
     "a2o_bed_getout",
     "a2o_bed_nap",
     "a2o_bed_sleep",

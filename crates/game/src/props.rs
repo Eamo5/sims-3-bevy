@@ -33,6 +33,8 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("plateDinner", "Plate", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("book", "BookGeneral", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("toothbrush", "Toothbrush", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("sponge", "AccessorySponge", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("toiletBrush", "ToiletBrush", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("guitar", "musicalInstrumentGuitar", "b__R_carry_slot", [0.0, 0.43762, -0.020687], [0.0, -0.08, 0.17]),
     ("spatula", "Spatula", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("scythe", "DeathScythe", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),

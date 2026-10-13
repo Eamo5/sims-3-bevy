@@ -119,6 +119,21 @@ fn main() {
         }
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--dds-png") {
+        // --dds-png <out.png> <instance hex>: a DDS (0x00B2D882) written out as a PNG.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let inst = u64::from_str_radix(&args[i + 2], 16).expect("instance");
+        let d = pkgs.read_ti(0x00B2_D882, inst).expect("dds");
+        let img = s3formats::dds::decode(&d, 4096).expect("decodes");
+        let f = std::fs::File::create(&args[i + 1]).expect("out");
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(f), img.width as u32, img.height as u32);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().and_then(|mut w| w.write_image_data(&img.data)).expect("png");
+        let alpha: Vec<u8> = img.data.chunks(4).map(|p| p[3]).collect();
+        println!("{}x{}, alpha {}..{}", img.width, img.height, alpha.iter().min().unwrap_or(&0), alpha.iter().max().unwrap_or(&0));
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--mirror-check") {
         // --mirror-check <rig>: whether each left bone's bind pose, reflected across x, is its
         // right bone's (in the model's space): if so, a clip plays mirrored by giving each bone
@@ -257,6 +272,17 @@ fn main() {
                         println!("name {n} {inst:016X} types {types:?}");
                     }
                 }
+            }
+        }
+        // MTST=<instance hex>: that model's material sets and their states.
+        if let Some(m) = std::env::var("MTST").ok().and_then(|h| u64::from_str_radix(&h, 16).ok())
+            && let Some(k) = pkgs.find_ti(s3pkg::types::MODL, m)
+        {
+            for (default, states) in s3formats::model::material_sets(&pkgs, &k) {
+                println!("mtst default {default:08X} states {:?}", states.iter().map(|(a, b)| format!("{a:08X}:{b:08X}")).collect::<Vec<_>>());
+            }
+            for (state, param, tex) in s3formats::model::material_set_textures(&pkgs, &k) {
+                println!("  state {state:08X} param {param:08X} texture {:08X}:{:X}:{:016X}", tex.t, tex.g, tex.i);
             }
         }
         // MODEL=<instance hex>: that model's meshes and their geometry states.

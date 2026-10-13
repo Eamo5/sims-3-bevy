@@ -24,6 +24,8 @@ pub struct ModelPart {
     pub unlit: bool,
     /// The model whose rig it's skinned to, when it has moving parts (`objanim`).
     pub rig: Option<Key>,
+    /// Its other looks: the model's material states (dirty, clogged; see `grime`).
+    pub states: Vec<(u32, Handle<StandardMaterial>)>,
 }
 
 /// A catalogue object in a design: the texture drawn from it, in place of the object's own
@@ -96,6 +98,7 @@ pub struct CpuPart {
     pub unlit: bool,
     pub bounds: (Vec3, Vec3),
     pub layer: u8,
+    pub states: Vec<(u32, Key)>,
 }
 
 /// How far flat parts lying on the floor (rugs, a bowling lane's boards) are raised: just over
@@ -131,7 +134,7 @@ pub fn cpu_model(model: BakedModel) -> Vec<CpuPart> {
             mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, p.normals);
             mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, p.uvs);
             mesh.insert_indices(Indices::U32(p.indices));
-            CpuPart { mesh, tex: p.texture, mode: p.mode, unlit: p.unlit, bounds: (Vec3::from(p.bmin), Vec3::from(p.bmax)), layer: p.layer }
+            CpuPart { mesh, tex: p.texture, mode: p.mode, unlit: p.unlit, bounds: (Vec3::from(p.bmin), Vec3::from(p.bmax)), layer: p.layer, states: p.states }
         })
         .collect()
 }
@@ -163,7 +166,8 @@ impl ObjectAssets {
             let material = self.material_for_key(ctx, p.tex, mode, p.unlit);
             // A moving part: skinned to the model's rig (its mesh found by its vertices).
             let rig = skin.as_ref().is_some_and(|s| skin_part(&mut p.mesh, s)).then_some(key);
-            parts.push(ModelPart { mesh: ctx.meshes.add(p.mesh), material, bounds: p.bounds, layer: p.layer, tex: p.tex, mode, unlit: p.unlit, rig });
+            let states = p.states.iter().map(|(s, k)| (*s, self.material_for_key(ctx, Some(*k), mode, p.unlit))).collect();
+            parts.push(ModelPart { mesh: ctx.meshes.add(p.mesh), material, bounds: p.bounds, layer: p.layer, tex: p.tex, mode, unlit: p.unlit, rig, states });
         }
         self.models.insert(key, parts.clone());
         parts
@@ -284,6 +288,7 @@ impl ObjectAssets {
                 mode: 0,
                 unlit: false,
                 rig: None,
+                states: Vec::new(),
             });
         }
         self.objects.insert(objd, parts.clone());
@@ -352,6 +357,9 @@ pub fn spawn_parts(commands: &mut Commands, parts: &[ModelPart], transform: Tran
                 let mut e = c.spawn((Mesh3d(p.mesh.clone()), MeshMaterial3d(p.material.clone())));
                 if let Some(rig) = p.rig {
                     e.insert(crate::objanim::SkinPart(rig));
+                }
+                if !p.states.is_empty() {
+                    e.insert(crate::grime::MaterialStates { states: p.states.clone(), own: None, shown: 0 });
                 }
                 if p.layer != 0 {
                     e.insert(ImposterLayer(p.layer));

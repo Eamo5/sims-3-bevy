@@ -376,6 +376,11 @@ installation is unreachable.
   back; sat up and out at the end. The rubber ducky's played with in the water too, and a
   bubble bath is a tub of foam. A shower over a tub (the Shower of Power) is showered in,
   over its side and back with the game's shower-tub clips, or bathed in.
+- **Grime**: toilets, showers, tubs and sinks get dirtier with every use (the game's numbers:
+  less after Neat Sims, more after slobs) and look it: the model's own Dirty and Very Dirty
+  materials, their dirt drawn over the object's texture (a clogged toilet its Clogged look).
+  Once one needs it, "Clean" is offered: the game's scrubbing, with the toilet brush or the
+  sponge in hand. Neat Sims clean up on their own; others when it's filthy; slobs never.
 - **Unmade beds**: a bed slept, napped or lazed in is left unmade, its covers thrown back, until
   someone makes it ("Make Bed", from beside it, with the game's clips: the covers pulled up,
   smoothed and patted; Neat Sims do it on their own). An unmade bed is got into as it is.

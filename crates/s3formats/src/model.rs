@@ -160,6 +160,45 @@ pub fn load_matd_resource(pkgs: &PackageSet, key: &ResourceKey) -> Option<Materi
 }
 
 /// Resolves a material reference (MATD, or MTST -> default MATD).
+/// A model's material sets (MTST): for each, its default material's chunk and its states'
+/// (state hash, material chunk), for looking over (`MTST=<modl hex> s3bake --model-name x`).
+pub fn material_sets(pkgs: &PackageSet, modl_key: &ResourceKey) -> Vec<(u32, Vec<(u32, u32)>)> {
+    let Some(data) = pkgs.read(modl_key) else { return Vec::new() };
+    let Ok(rcol) = Rcol::parse(&data) else { return Vec::new() };
+    let mut out = Vec::new();
+    for i in 0..rcol.chunks.len() {
+        let Some(d) = rcol.chunk_data(i) else { continue };
+        if d.get(0..4) != Some(b"MTST") {
+            continue;
+        }
+        let mut r = Reader::new(d);
+        let (Ok(_), Ok(_ver), Ok(_name), Ok(default), Ok(n)) = (r.u32(), r.u32(), r.u32(), r.u32(), r.u32()) else { continue };
+        let entries = (0..n.min(32)).filter_map(|_| Some((r.u32().ok()?, r.u32().ok()?))).collect();
+        out.push((default, entries));
+    }
+    out
+}
+
+/// A model's material sets' states' materials' textures (state hash, parameter, texture), for
+/// looking over.
+pub fn material_set_textures(pkgs: &PackageSet, modl_key: &ResourceKey) -> Vec<(u32, u32, ResourceKey)> {
+    let Some(data) = pkgs.read(modl_key) else { return Vec::new() };
+    let Ok(rcol) = Rcol::parse(&data) else { return Vec::new() };
+    let mut out = Vec::new();
+    for (_, states) in material_sets(pkgs, modl_key) {
+        for (chunk, state) in states {
+            if let Some(m) = resolve_material(&rcol, chunk, 1) {
+                for (p, v) in &m.params {
+                    if let ParamValue::Texture(k) = v {
+                        out.push((state, *p, *k));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 fn resolve_material(rcol: &Rcol, raw: u32, depth: u32) -> Option<Material> {
     if depth > 4 {
         return None;
@@ -263,6 +302,41 @@ pub struct MeshData {
     pub joints: Vec<u32>,
     pub blend_indices: Vec<[u8; 4]>,
     pub blend_weights: Vec<[f32; 4]>,
+    /// Its material's other states' looks (a toilet `Dirty`, `VeryDirty` or `Clogged`: see
+    /// `STATE_*`): a texture of their own, or (`true`) a dirt overlay drawn over its own.
+    pub state_textures: Vec<(u32, ResourceKey, bool)>,
+}
+
+/// Material states (the MTST's), as the game's `SetMaterial` names them.
+pub const STATE_DIRTY: u32 = 0xEEAB4327;
+pub const STATE_VERY_DIRTY: u32 = 0x2E5DF9BB;
+pub const STATE_CLOGGED: u32 = 0x257FB026;
+pub const STATE_BURNT: u32 = 0xC3867C32;
+
+/// A dirty material's dirt, drawn over its diffuse (an RGBA mask in the object's UV space).
+pub const P_DIRT_OVERLAY: u32 = 0x48372E62;
+
+/// A material set's states' looks (those of `STATE_*`): their own diffuse where it differs from
+/// the default's, or the dirt overlay drawn over it.
+fn state_textures(rcol: &Rcol, raw: u32, default: &Material) -> Vec<(u32, ResourceKey, bool)> {
+    let Some((_, d)) = rcol.resolve(raw) else { return Vec::new() };
+    if d.get(0..4) != Some(b"MTST") {
+        return Vec::new();
+    }
+    let mut r = Reader::new(d);
+    let (Ok(_), Ok(_), Ok(_), Ok(_), Ok(n)) = (r.u32(), r.u32(), r.u32(), r.u32(), r.u32()) else { return Vec::new() };
+    let base = default.texture(P_DIFFUSE_MAP);
+    (0..n.min(32))
+        .filter_map(|_| Some((r.u32().ok()?, r.u32().ok()?)))
+        .filter(|(_, state)| matches!(*state, STATE_DIRTY | STATE_VERY_DIRTY | STATE_CLOGGED | STATE_BURNT))
+        .filter_map(|(chunk, state)| {
+            let m = resolve_material(rcol, chunk, 1)?;
+            match m.texture(P_DIFFUSE_MAP) {
+                Some(t) if Some(t) != base => Some((state, t, false)),
+                _ => m.texture(P_DIRT_OVERLAY).map(|o| (state, o, true)),
+            }
+        })
+        .collect()
 }
 
 fn color_ubyte4_vec(e: &[u8]) -> [f32; 3] {
@@ -447,6 +521,7 @@ pub fn decode_mlod(rcol: &Rcol, mlod: &[u8]) -> R<Vec<MeshData>> {
                 m.states.push((name, s.iter().map(|&i| i.min(vertex_count.saturating_sub(1) as u32)).collect()));
             }
         }
+        m.state_textures = state_textures(rcol, material_ref, &material);
         m.material = material;
         out.push(m);
     }

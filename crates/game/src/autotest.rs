@@ -194,7 +194,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(First, tick_input_timeline.after(bevy::time::TimeSystems).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, (keep_hungry, all_use), wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, (show_designs, show_style), walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, (keep_hungry, all_use, set_grime), wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, (show_designs, show_style), walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, strand_swimmers.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, press_key.after(bevy::input::InputSystems).before(crate::buy::toggle_buy).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, buy_pick.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
@@ -2023,6 +2023,18 @@ fn all_use(
         sent += 1;
     }
     *done = sent > 0;
+}
+
+/// GRIME=<0-100>: every bathroom thing that dirty, a few seconds in.
+fn set_grime(time: Res<Time>, mut done: Local<bool>, mut grime: Query<&mut crate::grime::Grime>) {
+    if *done || time.elapsed_secs() < 9.0 {
+        return;
+    }
+    let Some(v) = std::env::var("GRIME").ok().and_then(|v| v.parse::<f32>().ok()) else { return };
+    for mut g in &mut grime {
+        g.0 = v;
+        *done = true;
+    }
 }
 
 fn keep_hungry(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives), With<crate::sim::HouseholdMember>>, mut dirtied: Local<bool>) {

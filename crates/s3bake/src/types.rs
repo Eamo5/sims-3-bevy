@@ -6,11 +6,11 @@ pub use s3formats::sim::{Clip, Rig};
 pub use s3formats::world::{Heightmap, LotInfo};
 
 /// Bump whenever any baked format changes; stale caches are rebuilt.
-pub const BAKE_VERSION: u32 = 6;
+pub const BAKE_VERSION: u32 = 8;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
 pub const CAS_VERSION: u32 = 11;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 69;
+pub const WORLD_VERSION: u32 = 71;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -40,6 +40,20 @@ pub struct BakedPart {
     pub layer: u8,
     pub bmin: [f32; 3],
     pub bmax: [f32; 3],
+    /// Its material's other states' textures (a toilet dirty, very dirty, clogged; see
+    /// `s3formats::model::STATE_*`): drawn for the state, its own texture with the state's dirt
+    /// over it (`composite_key`).
+    #[serde(default)]
+    pub states: Vec<(u32, Key)>,
+    /// The dirt overlays those are drawn from (the bake's).
+    #[serde(default)]
+    pub overlays: Vec<Key>,
+}
+
+/// A texture drawn from another with an overlay over it (a dirty state's): its key in the
+/// texture store.
+pub fn composite_key(base: Key, overlay: Key) -> Key {
+    (0x00B2_D882, 0x00D1_D700, base.2 ^ overlay.2.rotate_left(17))
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]

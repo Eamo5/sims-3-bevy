@@ -1053,7 +1053,7 @@ fn world_click(
             Option<Res<crate::gardening::Garden>>,
             Res<crate::appliances::Alarm>,
             Option<Res<crate::sound::Sounds>>,
-            Query<(Option<&crate::music::StereoOn>, Has<crate::interact::Unmade>)>,
+            Query<(Option<&crate::music::StereoOn>, Has<crate::interact::Unmade>, Option<&crate::grime::Grime>)>,
         ),
     ),
     (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q): (
@@ -1305,6 +1305,10 @@ fn world_click(
                     if (d.special == Special::StereoOn) == on.is_some() {
                         continue;
                     }
+                }
+                // (Cleaned only once it needs it.)
+                if d.special == Special::Scrub && !opp_q.8.get(t).is_ok_and(|s| s.2.is_some_and(|g| g.needs_cleaning())) {
+                    continue;
                 }
                 // (A bed's made only when it's unmade.)
                 if d.special == Special::MakeBed && !opp_q.8.get(t).is_ok_and(|s| s.1) {
