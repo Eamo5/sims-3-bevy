@@ -4099,7 +4099,9 @@ fn autonomy(
     (settings, household): (Res<crate::options::Settings>, Query<(), With<HouseholdMember>>),
     mut sims: Query<
         (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim, Has<SocialPartner>, Option<&crate::visit::OnLot>),
-        (Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>, Without<OffLot>),
+        // (Nor a cook between the stove and serving: their queue's empty a moment, with the meal
+        // still in their hands, and they'd set about cooking it again.)
+        (Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>, Without<OffLot>, Without<crate::meals::MealRequest>, Without<crate::meals::ServingFrom>),
     >,
     (objects, seconds, unmade_q, grime_q): (
         Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>,

@@ -483,6 +483,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_speed.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, look_kind.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, queue_log.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, queue_diff.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, spin_shots.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_save.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_switch.run_if(in_state(crate::PlayMode::Live)))
@@ -2045,6 +2046,25 @@ fn spin_shots(mut commands: Commands, spins: Query<&crate::dressing::ClothesSpin
         }
     }
     *was = now;
+}
+
+/// QUEUE_DIFF=1: each household Sim's queue whenever it changes (labels, cancelled ones marked
+/// with a `~`), to see where an action came from.
+fn queue_diff(
+    clock: Res<crate::clock::GameClock>,
+    mut was: Local<std::collections::HashMap<Entity, Vec<String>>>,
+    sims: Query<(Entity, &crate::sim::Sim, &crate::interact::ActionQueue), With<crate::sim::HouseholdMember>>,
+) {
+    if std::env::var("QUEUE_DIFF").is_err() {
+        return;
+    }
+    for (e, sim, q) in &sims {
+        let now: Vec<String> = q.0.iter().map(|a| format!("{}{}", if a.cancel { "~" } else { "" }, a.label)).collect();
+        if was.get(&e) != Some(&now) {
+            info!("queue diff {} @{:.0}: {:?}", sim.first, clock.minutes, now);
+            was.insert(e, now);
+        }
+    }
 }
 
 /// QUEUE_LOG=<seconds>: that often, what each Sim of the household is about (the action, its
