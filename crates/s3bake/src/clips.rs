@@ -316,6 +316,7 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_bed_trans_relax2sleep",
     "a2o_bed_relax_loop",
     "a2o_bed_relax_getin",
+    "a2o_bed_relax_getout",
     "a2o_chairLiving_sit_breathe",
     "a2o_chairLiving_sit_crossedLeg_front",
     "a2o_sitTemplate_sit_loopBreathe",

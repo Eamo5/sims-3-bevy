@@ -267,6 +267,9 @@ installation is unreachable.
   order pizza and call the services. Friendships fade after three days without seeing or
   speaking to each other (good friends more slowly; spouses, partners and family stay close),
   and grudges soften.
+- **WooHoo**: WooHoo and Try for Baby, accepted, take the couple to the nearest free double
+  bed (the game's `FindNearestBed`): into bed on either side, the game's WooHoo under the covers
+  (its two parts, the bed's covers rolling with it), and out again, closer for it.
 - **Families grow**: couples can try for a baby; pregnancy brings morning sickness, then the
   game's pregnant waddle once she's showing (and no running), then a baby in a crib (the
   game's swaddled baby model). Grown-ups feed, change, cuddle and settle babies (cradled in

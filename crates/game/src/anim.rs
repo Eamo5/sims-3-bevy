@@ -281,8 +281,18 @@ const ROOT_BIND: u32 = 0x5788_4BB9;
 /// back.
 pub fn clip_anchor(name: &str) -> Option<(Vec3, f32)> {
     let n = name.get(4..)?;
-    if !name.get(1..4).is_some_and(|p| p == "2o_") {
+    if !name.get(1..4).is_some_and(|p| p == "2o_" || p == "2a_") {
         return None;
+    }
+    // (WooHoo's two parts, each kept to its Sim's own side of the bed, under the covers.)
+    if n.starts_with("bed_cuddle_woohoo_loop_x") || n.starts_with("bed_cuddle_woohoo_stop_x") {
+        return Some((Vec3::new(-0.5896, 0.0, 0.9859), -131.65f32.to_radians()));
+    }
+    if n.starts_with("bed_cuddle_woohoo_loop_y") {
+        return Some((Vec3::new(-0.2561, 0.0, -1.1558), -57.47f32.to_radians()));
+    }
+    if n.starts_with("bed_cuddle_woohoo_stop_y") {
+        return Some((Vec3::new(0.3731, 0.0, 0.9069), 3.71f32.to_radians()));
     }
     if n.starts_with("bathtub_relax") || n.starts_with("bathtub_ducky") {
         Some((Vec3::new(-1.0, 0.0, -0.7698), 0.0))

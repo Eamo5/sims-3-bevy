@@ -840,6 +840,10 @@ pub enum Special {
     VampireOnly,
     /// Gone once it's done (a snowman knocked down, a leaf pile raked up).
     Clear,
+    /// WooHoo in a double bed with their partner, or trying for a baby (the socials of those
+    /// names, accepted, as the game's `MakeSimsWooHooOnMe`).
+    WooHoo,
+    TryForBaby,
 }
 
 impl Special {
@@ -974,7 +978,7 @@ static MICROWAVE: [InteractionDef; 2] = [
     // (Once it's heated: never on the menu.)
     InteractionDef { autonomous: false, special: Special::Cook, ..def("Take Out Dinner", 2.0, N, Pose::Use) },
 ];
-static BED: [InteractionDef; 3] = [
+static BED: [InteractionDef; 5] = [
     InteractionDef {
         until_full: Some(ENERGY),
         on_object: true,
@@ -983,7 +987,12 @@ static BED: [InteractionDef; 3] = [
     },
     InteractionDef { on_object: true, decay: SLEEP_DECAY, ..def("Nap", 90.0, [0.0, 0.0, 26.0, 0.0, 0.0, 0.0], Pose::Lie) },
     InteractionDef { on_object: true, ..def("Relax", 45.0, [0.0, 0.0, 6.0, 0.0, 0.0, 14.0], Pose::Lie) },
+    // (Never on the bed's menu: the socials' when they're accepted.)
+    InteractionDef { autonomous: false, on_object: true, special: Special::WooHoo, ..def("WooHoo", 25.0, WOOHOO_RATES, Pose::Lie) },
+    InteractionDef { autonomous: false, on_object: true, special: Special::TryForBaby, ..def("Try for Baby", 25.0, WOOHOO_RATES, Pose::Lie) },
 ];
+/// WooHoo's needs per hour: fun and company, at some cost to energy and hygiene.
+const WOOHOO_RATES: [f32; 6] = [0.0, 0.0, -8.0, 180.0, -20.0, 160.0];
 static TOILET: [InteractionDef; 1] =
     [InteractionDef { until_full: Some(BLADDER), on_object: true, ..def("Use Toilet", 15.0, [0.0, 900.0, 0.0, 0.0, -10.0, 0.0], Pose::Sit) }];
 static SHOWER: [InteractionDef; 1] =
@@ -1239,6 +1248,20 @@ const BENCH_LIFTS: &[&str] = &[
 /// How long getting off the bench takes (seconds).
 const BENCH_OFF: f32 = 2.0;
 
+/// WooHoo under the covers: into the bed and sat up, then the game's WooHoo (the bed's covers
+/// rolling with it), its end, and out again; the one on the far side plays the other's part.
+pub fn woohoo_clip(far_side: bool) -> crate::anim::ActionClip {
+    use crate::anim::ActionClip as A;
+    let (loops, end): (&'static [&'static str], &'static [&'static str]) = if far_side {
+        (&["a2a_bed_cuddle_woohoo_loop_y"], &["a2a_bed_cuddle_woohoo_stop_y", "a2o_bed_relax_getout_x"])
+    } else {
+        (&["a2a_bed_cuddle_woohoo_loop_x"], &["a2a_bed_cuddle_woohoo_stop_x", "a2o_bed_relax_getout_x"])
+    };
+    A::steps("a2o_bed_relax_getin_start_x", &["a2o_bed_relax_getin_stop_x"], loops).ending(end, WOOHOO_END)
+}
+/// How long WooHoo's end and getting out of bed take (seconds).
+const WOOHOO_END: f32 = 8.6;
+
 /// A bath's start, the taps on: sat down, arms and legs washed, then lying back.
 const BATH_WASH: &[&str] = &[
     "a2o_bathtub_takeBath_getIn_x",
@@ -1287,6 +1310,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Have a Picnic" => A::steps("a2o_picnicBasket_getPlate_part1_x", &["a2o_picnicBasket_eat_start_x"], &["a2o_picnicBasket_eat_x"]).ending(&["a2o_picnicBasket_eat_stop_finished_x"], 0.7),
         // (Stood in the tub, the taps turned on and the water up, sat down, washed, then lying
         // back; sat up and out at the end.)
+        "WooHoo" | "Try for Baby" if matches!(kind, ObjectKind::BedDouble | ObjectKind::BedSingle) => woohoo_clip(false),
         "Take Bath" | "Take Bubble Bath" => A::steps("a2o_bathtub_takeBath_turnOn_x", BATH_WASH, &["a2o_bathtub_relax_loop1_x", "a2o_bathtub_relax_loop2_x"])
             .ending(&["a2o_bathtub_takeBath_trans_sitUp_x", "a2o_bathtub_takeBath_getOut_x"], 5.2),
         "Play with Rubber Ducky" => A::steps(
@@ -2193,12 +2217,13 @@ pub(crate) fn run_actions(
         Query<(), With<Broken>>,
         Query<(), Or<(With<crate::buy::HeldObject>, With<crate::buyhistory::HistoryHidden>)>>,
     ),
-    (mut did, journals, mut inventories, mut wear, mut seconds): (
+    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds): (
         MessageWriter<crate::journal::Did>,
         Query<&crate::journal::SkillJournal>,
         Query<&mut crate::inventory::Inventory>,
         Query<&mut Wear>,
         Query<&mut SecondPlace>,
+        Query<Entity, (With<SecondPlace>, Without<Broken>)>,
     ),
 ) {
     let Some(grid) = grid else { return };
@@ -2249,7 +2274,9 @@ pub(crate) fn run_actions(
         };
         let mut finished = false;
         let mut stand_up_at: Option<Vec2> = None;
-        let mut outro: Option<(&'static [&'static str], Option<&'static str>, f32, Entity)> = None;
+        // (Its clips, what follows, how long, the object, and whether played mirrored: the far
+        // side of a double bed.)
+        let mut outro: Option<(&'static [&'static str], Option<&'static str>, f32, Entity, bool)> = None;
 
         if let ActionKind::Object { target, def } = action.kind {
             let second = seconds.get(target).ok().map(|s| s.0);
@@ -2534,6 +2561,8 @@ pub(crate) fn run_actions(
                                     let clip = toddler_toy.or_else(|| interaction_clip(d.name, obj.kind)).or_else(|| seat_in.map(|_| crate::anim::ActionClip::new(None, crate::anim::SIT_LOOPS)));
                                     // (A double bed's second side: the first's, mirrored.)
                                     let far_side = obj.kind == ObjectKind::BedDouble && seconds.get(*target).is_ok_and(|s| s.0 == Some(me));
+                                    // (WooHoo's other part, on the far side.)
+                                    let clip = if far_side && matches!(d.special, Special::WooHoo | Special::TryForBaby) { Some(woohoo_clip(true)) } else { clip };
                                     if let Some(mut c) = clip {
                                         c.before = c.before.or(seat_in);
                                         c.mirror = far_side;
@@ -2647,6 +2676,42 @@ pub(crate) fn run_actions(
                                         social_fx.push((*target, me, 0.0, 0.0, f, r));
                                         life.write(LifeEvent::new(me, LifeEventKind::Socialized { other: *target, social: "Argue" }));
                                         finished = true;
+                                    }
+                                }
+                                // WooHoo and trying for a baby, accepted: off to the nearest free double
+                                // bed together (the game's `FindNearestBed`), she on one side and he on
+                                // the other; with none, there and then as before.
+                                if !finished && matches!(s.effect, SocialEffect::WooHoo | SocialEffect::TryForBaby) {
+                                    let partner = *target;
+                                    let free = |b: Entity| {
+                                        objects.get(b).is_ok_and(|(_, _, used, _)| used.0.is_none_or(|u| u == me || u == partner))
+                                            && seconds.get(b).is_ok_and(|s| s.0.is_none_or(|u| u == me || u == partner))
+                                            && !unavailable.contains(b)
+                                    };
+                                    let bed = double_beds
+                                        .iter()
+                                        .filter(|b| free(*b))
+                                        .filter_map(|b| objects.get(b).ok().map(|(_, btf, ..)| (b, btf.translation.distance(tf.translation))))
+                                        .filter(|(_, d)| *d < 40.0)
+                                        .min_by(|a, b| a.1.total_cmp(&b.1))
+                                        .map(|(b, _)| b);
+                                    let special = if s.effect == SocialEffect::WooHoo { Special::WooHoo } else { Special::TryForBaby };
+                                    if let Some(bed) = bed
+                                        && let Some(def) = interactions_for(ObjectKind::BedDouble).iter().position(|d| d.special == special)
+                                    {
+                                        let label = interactions_for(ObjectKind::BedDouble)[def].name;
+                                        commands.entity(me).remove::<crate::anim::ActionClip>();
+                                        commands.entity(partner).remove::<(crate::anim::ActionClip, SocialPartner)>();
+                                        anim.pose = Pose::Stand;
+                                        action.kind = ActionKind::Object { target: bed, def };
+                                        action.phase = Phase::Start;
+                                        action.label = label.to_string();
+                                        let autonomous = action.autonomous;
+                                        commands.entity(partner).queue_silenced(move |mut e: EntityWorldMut| {
+                                            if let Some(mut q) = e.get_mut::<ActionQueue>() {
+                                                q.0.push_front(Action::new(label, ActionKind::Object { target: bed, def }, autonomous));
+                                            }
+                                        });
                                     }
                                 }
                             }
@@ -2847,6 +2912,21 @@ pub(crate) fn run_actions(
                                 if complete {
                                     finished = true;
                                     life.write(LifeEvent::new(me, LifeEventKind::Finished { activity: d.name, completed: true }));
+                                    // (WooHoo's done: as the social's, with whoever's on the bed's other side;
+                                    // a baby tried for once, by the first side's.)
+                                    if matches!(d.special, Special::WooHoo | Special::TryForBaby) {
+                                        let second = seconds.get(*target).ok().and_then(|s| s.0);
+                                        let other = if used.0 == Some(me) { second } else { used.0 };
+                                        if let Some(other) = other.filter(|o| *o != me) {
+                                            if rels.add(other, 6.0, 15.0) {
+                                                life.write(LifeEvent::new(me, LifeEventKind::MadeFriend { other }));
+                                            }
+                                            life.write(LifeEvent::new(me, LifeEventKind::Socialized { other, social: d.name }));
+                                            if d.special == Special::TryForBaby && used.0 == Some(me) {
+                                                conceive.write(crate::little::Conceive { a: me, b: other });
+                                            }
+                                        }
+                                    }
                                     if used.0 == Some(me) {
                                         used.0 = None;
                                     }
@@ -2875,9 +2955,12 @@ pub(crate) fn run_actions(
                                     // (Its ending, played before they're up and away.)
                                     // (Then up out of the seat.)
                                     let up = (d.on_object && d.pose == Pose::Sit).then(|| seat_clips(obj.kind)).flatten().map(|(_, out, secs)| (out, secs));
-                                    outro = match (interaction_clip(d.name, obj.kind).filter(|c| !c.end.is_empty()), up) {
-                                        (Some(c), up) => Some((c.end, up.map(|u| u.0), c.end_secs + up.map_or(0.0, |u| u.1), *target)),
-                                        (None, Some((out, secs))) => Some((&[], Some(out), secs, *target)),
+                                    // (On a double bed's far side: mirrored, and WooHoo's other part.)
+                                    let far_side = obj.kind == ObjectKind::BedDouble && seconds.get(*target).is_ok_and(|s| s.0 == Some(me));
+                                    let ending = if far_side && matches!(d.special, Special::WooHoo | Special::TryForBaby) { Some(woohoo_clip(true)) } else { interaction_clip(d.name, obj.kind) };
+                                    outro = match (ending.filter(|c| !c.end.is_empty()), up) {
+                                        (Some(c), up) => Some((c.end, up.map(|u| u.0), c.end_secs + up.map_or(0.0, |u| u.1), *target, far_side)),
+                                        (None, Some((out, secs))) => Some((&[], Some(out), secs, *target, far_side)),
                                         (None, None) => None,
                                     };
                                     match d.special {
@@ -2886,7 +2969,7 @@ pub(crate) fn run_actions(
                                             // (The day's openings, in the game's listings.)
                                             commands.insert_resource(crate::jobpaper::JobHunt { sim: me, computer: obj.kind == ObjectKind::Computer });
                                         }
-                                        Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport | Special::WashDishes | Special::DropTrash | Special::ReadBook | Special::WatchTv => {}
+                                        Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport | Special::WashDishes | Special::DropTrash | Special::ReadBook | Special::WatchTv | Special::WooHoo | Special::TryForBaby => {}
                                         Special::GetBook => {
                                             commands.entity(me).insert(crate::surroundings::ReadSomewhere(*target));
                                         }
@@ -3315,7 +3398,7 @@ pub(crate) fn run_actions(
                                 // (Then up out of the snow.)
                                 let c = what.clip();
                                 if !c.end.is_empty() {
-                                    outro = Some((c.end, None, c.end_secs, Entity::PLACEHOLDER));
+                                    outro = Some((c.end, None, c.end_secs, Entity::PLACEHOLDER, false));
                                 }
                             }
                         }
@@ -3591,13 +3674,14 @@ pub(crate) fn run_actions(
             commands.entity(me).remove::<PathFollow>();
             match outro {
                 // (Still where they were, their interaction's ending plays; then they're up.)
-                Some((clips, then, secs, target)) => {
+                Some((clips, then, secs, target, mirror)) => {
                     queue.0.push_front(Action::new("Finish Up", ActionKind::Outro { clips, then, secs, stand_at: stand_up_at, target }, true));
                     let mut c = match clips.split_first() {
                         Some((first, rest)) => crate::anim::ActionClip::steps(first, rest, &[]),
                         None => crate::anim::ActionClip::new(None, &[]),
                     };
                     c.after = then;
+                    c.mirror = mirror;
                     commands.entity(me).insert(c);
                 }
                 None => {

@@ -224,9 +224,12 @@ fn animate_objects(
         })
     };
     // (How many are at each object: two in a double bed each move their own side of it.)
+    // (Counting those whose clip moves it: WooHoo's other part leaves the covers to the first.)
     let mut users: HashMap<Entity, usize> = HashMap::new();
-    for (_, queue, ..) in &sims {
-        if let Some(t) = target_of(queue) {
+    for (player, queue, ..) in &sims {
+        if let Some(t) = target_of(queue)
+            && companions.entry(player.name.clone()).or_insert_with(|| companion(&data, &player.name).or_else(|| held_pose(&data, &player.name))).is_some()
+        {
             *users.entry(t).or_default() += 1;
         }
     }

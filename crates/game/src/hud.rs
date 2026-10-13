@@ -1315,7 +1315,7 @@ fn world_click(
                     continue;
                 }
                 // (Dishes are washed up when cleared away, not from the menu.)
-                if matches!(d.special, Special::WashDishes | Special::DropTrash | Special::ReadBook | Special::GetIngredients | Special::PrepFood | Special::PlaceMeal | Special::WatchTv) || (d.special == Special::Cook && d.name == "Take Out Dinner") || (d.special == Special::ReadPaper && d.name == "Read the Paper") {
+                if matches!(d.special, Special::WashDishes | Special::DropTrash | Special::ReadBook | Special::GetIngredients | Special::PrepFood | Special::PlaceMeal | Special::WatchTv | Special::WooHoo | Special::TryForBaby) || (d.special == Special::Cook && d.name == "Take Out Dinner") || (d.special == Special::ReadPaper && d.name == "Read the Paper") {
                     continue;
                 }
                 // (A snack's on the fridge's Have Quick Meal menu, not apart from it.)
