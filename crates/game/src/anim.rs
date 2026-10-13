@@ -17,7 +17,7 @@ pub struct AnimPlugin;
 impl Plugin for AnimPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ClipLibrary>()
-            .add_systems(Update, drive_skeletons.run_if(in_state(PlayMode::Live).or_else(in_state(crate::AppState::CreateHousehold))));
+            .add_systems(Update, (commit_root_motion, drive_skeletons).chain().run_if(in_state(PlayMode::Live).or_else(in_state(crate::AppState::CreateHousehold))));
     }
 }
 
@@ -171,6 +171,30 @@ pub struct ClipPlayer {
     /// Pose before the last clip change, faded out over a short blend.
     from: Vec<Transform>,
     blend: f32,
+    /// How far a clip that carries the Sim along (down a slide) has taken them from where it
+    /// began, in their own frame: where they're left when it's done.
+    pub root_offset: Vec3,
+}
+
+/// fnv32("world_offset"): the rig's helper whose track is how far a clip takes the Sim (the
+/// game's engine moves the Sim by it; the body is drawn back from it).
+const WORLD_OFFSET: u32 = 0x0EB4_037B;
+
+/// The clips whose travel is played: up the jungle gym's ladder, down its pole and the slide,
+/// where nothing else moves the body.
+fn travels(name: &str) -> bool {
+    name.starts_with("c2o_JungleGym")
+}
+
+/// A clip that carried the Sim somewhere is done: they're left there.
+pub fn commit_root_motion(mut sims: Query<(&mut Transform, &mut ClipPlayer), (With<Sim>, Without<ActionClip>)>) {
+    for (mut tf, mut player) in &mut sims {
+        if player.root_offset.length_squared() > 1e-6 {
+            let by = tf.rotation * player.root_offset;
+            tf.translation += Vec3::new(by.x, 0.0, by.z);
+            player.root_offset = Vec3::ZERO;
+        }
+    }
 }
 
 impl ClipPlayer {
@@ -442,6 +466,14 @@ pub fn drive_skeletons(
                 .clone()
         });
         let anchor = clip_anchor(&player.name).map(|(at, turn)| if mirror { (Vec3::new(-at.x, at.y, at.z), -turn) } else { (at, turn) });
+        // (Carried along by the clip: the body drawn where its travel has taken it.)
+        let travel = (action.is_some() && travels(&player.name))
+            .then(|| clip.tracks.get(&WORLD_OFFSET).and_then(|w| sample_track_vec(&w.translation, t)))
+            .flatten()
+            .map(|w| Vec3::new(if mirror { -w.x } else { w.x }, 0.0, -w.z));
+        if let Some(o) = travel {
+            player.root_offset = o;
+        }
         for (i, bone) in skel.rig.bones.iter().enumerate() {
             let Ok(mut tf) = joints.get_mut(skel.joints[i]) else { continue };
             let bind = skel.bind[i];
@@ -476,6 +508,9 @@ pub fn drive_skeletons(
             }
             if i == 0 {
                 target.rotation = bind.rotation;
+                if let Some(o) = travel {
+                    target.translation = bind.translation + o;
+                }
             }
             // (Brought round to its set's root.)
             if let Some((at, turn)) = anchor

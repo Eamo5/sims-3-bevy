@@ -97,6 +97,8 @@ pub enum ObjectKind {
     HotTub,
     DollHouse,
     JungleGym,
+    /// A playground slide: up its ladder and down it.
+    Slide,
     Foosball,
     Table,
     Light,
@@ -345,6 +347,8 @@ impl ObjectKind {
             Self::HotTub
         } else if has("toys.dollhouse") {
             Self::DollHouse
+        } else if has("junglegymslide") {
+            Self::Slide
         } else if has("junglegym") {
             Self::JungleGym
         } else if has("foosball") {
@@ -434,7 +438,7 @@ impl ObjectKind {
             Self::Bookshelf | Self::Mirror | Self::Easel | Self::Guitar | Self::Treadmill | Self::WorkoutBench | Self::Chess | Self::Telescope | Self::Foosball => {
                 "Hobbies"
             }
-            Self::SwingSet | Self::JungleGym | Self::DollHouse | Self::StuffedToy => "Kids",
+            Self::SwingSet | Self::JungleGym | Self::Slide | Self::DollHouse | Self::StuffedToy => "Kids",
             Self::Sprinkler => "Outdoors",
             Self::DivingBoard => "Outdoors",
             Self::Bar => "Surfaces",
@@ -531,6 +535,9 @@ impl ObjectKind {
                 // side.)
                 | K::WorkoutBench
                 | K::DollHouse
+                // (A jungle gym's and a slide's: at the foot of the ladder.)
+                | K::JungleGym
+                | K::Slide
         )
         .then_some(0)
     }
@@ -1153,6 +1160,8 @@ static HOTTUB: [InteractionDef; 1] = [InteractionDef {
 }];
 static DOLLHOUSE: [InteractionDef; 1] = [def("Play with Dollhouse", 45.0, [0.0, 0.0, -3.0, 8.0, 0.0, 85.0], Pose::Use)];
 static JUNGLEGYM: [InteractionDef; 1] = [def("Play on Jungle Gym", 40.0, [0.0, 0.0, -8.0, 0.0, -8.0, 95.0], Pose::Use)];
+/// (Up the ladder and down the slide, once: played again and again, as children do.)
+static SLIDE: [InteractionDef; 1] = [def("Play on Slide", 9.6, [0.0, 0.0, -8.0, 0.0, -6.0, 110.0], Pose::Use)];
 static FOOSBALL: [InteractionDef; 1] = [def("Play Foosball", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 65.0], Pose::Use)];
 static POOL_TABLE: [InteractionDef; 1] = [def("Play Pool", 45.0, [0.0, 0.0, -3.0, 0.0, 0.0, 60.0], Pose::Use)];
 static DARTBOARD: [InteractionDef; 1] = [def("Throw Darts", 30.0, [0.0, 0.0, -3.0, 0.0, 0.0, 55.0], Pose::Use)];
@@ -1457,7 +1466,9 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Swing" => A::new(Some("a2o_swingset_getIn"), &["a2o_swingset_swing"]),
         "Relax in Hot Tub" => A::new(Some("a2o_hotTub_getIn"), &["a2o_hotTub_idles_relaxing_loop", "a2o_hotTub_idles_playingToe", "a2o_hotTub_splash"]),
         "Play with Dollhouse" => A::new(Some("c2o_dollhouse_play_start"), &["c2o_dollhouse_play_loop"]),
-        "Play on Jungle Gym" => A::new(Some("c2o_JungleGymTower_climbUp"), &["c2o_JungleGymTower_loop", "c2o_JungleGymTower_slideDown"]),
+        // (Up the tower's ladder, about in its lookout, and down its pole at the end.)
+        "Play on Jungle Gym" => A::new(Some("c2o_JungleGymTower_climbUp_x"), &["c2o_JungleGymTower_loop1_x", "c2o_JungleGymTower_loop2_x"]).ending(&["c2o_JungleGymTower_slideDown_x"], 6.1),
+        "Play on Slide" => A::steps("c2o_JungleGymSlide_climbUp_x", &["c2o_JungleGymSlide_breathe_x"], &["c2o_JungleGymSlide_succeed_x"]),
         "Play Foosball" => A::new(None, &["a2o_foosballTable_play"]),
         // (The cue fetched from the rack, then shots round the table, the balls rolling.)
         "Play Pool" => A::new(
@@ -1692,7 +1703,7 @@ impl ObjectKind {
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy),
             // (Children can't cook or light fires, and the goggles are for teens and up.)
             Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench),
-            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::DollHouse | K::JungleGym | K::StuffedToy | K::ToyOven),
+            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::DollHouse | K::JungleGym | K::Slide | K::StuffedToy | K::ToyOven),
         }
     }
 
@@ -1755,6 +1766,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::HotTub => &HOTTUB,
         ObjectKind::DollHouse => &DOLLHOUSE,
         ObjectKind::JungleGym => &JUNGLEGYM,
+        ObjectKind::Slide => &SLIDE,
         ObjectKind::Foosball => &FOOSBALL,
         ObjectKind::PoolTable => &POOL_TABLE,
         ObjectKind::Dartboard => &DARTBOARD,
@@ -4521,9 +4533,9 @@ mod tests {
             println!("{name}: {:?} parents {:?}", data.clip(name).map(|c| c.duration), data.clip(name).map(|c| c.parents.clone()));
             // (Where the root and hips are at its start and end.)
             if let Some(c) = data.clip(name) {
-                for bone in ["b__ROOT__", "b__ROOT_bind__", "b__Pelvis__"] {
+                for bone in ["b__ROOT__", "b__ROOT_bind__", "b__Pelvis__", "world_offset"] {
                     if let Some(t) = c.tracks.get(&s3pkg::fnv32(bone)) {
-                        if std::env::var("TRACK").is_ok() {
+                        if std::env::var("TRACK").is_ok_and(|v| v == "1" || v == bone) {
                             let n = t.translation.len();
                             for k in (0..n).step_by((n / 8).max(1)) {
                                 println!("    t {:.2} {:?}", t.translation[k].0, t.translation[k].1);

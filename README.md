@@ -376,6 +376,10 @@ installation is unreachable.
   back; sat up and out at the end. The rubber ducky's played with in the water too, and a
   bubble bath is a tub of foam. A shower over a tub (the Shower of Power) is showered in,
   over its side and back with the game's shower-tub clips, or bathed in.
+- **Playgrounds**: children climb a slide's ladder, sit at the top and slide down, and climb a
+  jungle gym's tower, play in its lookout and come down its pole: the game's clips carrying them
+  along (its `world_offset` channel, the travel the engine moves Sims by), left where they end
+  up. The dollhouse is played at its open side.
 - **Grime**: toilets, showers, tubs and sinks get dirtier with every use (the game's numbers:
   less after Neat Sims, more after slobs) and look it: the model's own Dirty and Very Dirty
   materials, their dirt drawn over the object's texture (a clogged toilet its Clogged look).
