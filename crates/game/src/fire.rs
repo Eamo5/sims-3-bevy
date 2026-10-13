@@ -66,8 +66,14 @@ pub struct Panicking;
 pub struct Firefighter {
     /// The fire being put out, and since when.
     target: Option<(Entity, f64)>,
+    /// A burning Sim being put out first (the game's `ExtinguishSim`), and since when.
+    rescuing: Option<(Entity, f64)>,
     leaving: bool,
 }
+
+/// A burning Sim the firefighter's on the way to put out: they stand still for it.
+#[derive(Component)]
+pub struct BeingHelped;
 
 /// Whether the fire department has been called, and when they arrive.
 #[derive(Resource, Default)]
@@ -86,6 +92,10 @@ const PANIC_RANGE: f32 = 12.0;
 const CATCH_RANGE: f32 = 0.9;
 const RESPONSE_MINUTES: f64 = 40.0;
 const EXTINGUISH_MINUTES: f64 = 6.0;
+/// How long a burning Sim lasts (the game's `OnFire` timeout, game minutes), and how long the
+/// firefighter takes to put one out.
+const BURN_MINUTES: f64 = 60.0;
+const PUT_OUT_SIM_MINUTES: f64 = 1.5;
 
 /// Whether a cook's dinner goes up in flames: likelier for the unskilled (and the clumsy).
 pub fn cooking_fire(cooking_level: u32, clumsy: bool) -> bool {
@@ -324,6 +334,8 @@ fn panic(
             continue;
         }
         if burning {
+            // (Burning, they can think of nothing else.)
+            q.0.clear();
             continue;
         }
         if nearest < PANIC_RANGE && !panicking {
@@ -338,7 +350,8 @@ fn panic(
     }
 }
 
-/// A burning Sim may stop, drop and roll; burning too long is the end of them.
+/// A burning Sim may stop, drop and roll; burning too long is the end of them (not of the
+/// Daredevils, as the game's).
 fn burning(mut commands: Commands, clock: Res<GameClock>, mut q: Query<(Entity, &Sim, &mut OnFire, &mut crate::sim::Motives)>, mut notes: ResMut<Notifications>) {
     let mut rng = rand::rng();
     for (e, sim, mut f, mut m) in &mut q {
@@ -348,10 +361,10 @@ fn burning(mut commands: Commands, clock: Res<GameClock>, mut q: Query<(Entity, 
         }
         f.next = clock.minutes + 5.0;
         if rng.random_bool(0.3) {
-            commands.entity(e).remove::<OnFire>().insert(ActionClip::new(Some("a_fire_onFire_putOut_start_x"), &["a_fire_onFire_putOut_stop_x"]));
+            commands.entity(e).remove::<(OnFire, BeingHelped)>().insert(ActionClip::new(Some("a_fire_onFire_putOut_start_x"), &["a_fire_onFire_putOut_stop_x"]));
             notes.push(format!("{} stopped, dropped and rolled, and put the flames out!", sim.first));
-        } else if clock.minutes - f.since > 30.0 {
-            commands.entity(e).remove::<(OnFire, Panicking)>().insert(crate::death::Dying::in_fire());
+        } else if clock.minutes - f.since > BURN_MINUTES && !sim.traits.contains(&crate::life::Trait::Daredevil) {
+            commands.entity(e).remove::<(OnFire, Panicking, BeingHelped)>().insert(crate::death::Dying::in_fire());
         }
     }
 }
@@ -363,7 +376,7 @@ fn run_about(
     clock: Res<GameClock>,
     grid: Option<Res<crate::nav::NavGrid>>,
     upper: Option<Res<crate::nav::UpperFloors>>,
-    mut burning: Query<(Entity, &Transform, &crate::nav::Floor, &mut OnFire, Option<&crate::nav::PathFollow>)>,
+    mut burning: Query<(Entity, &Transform, &crate::nav::Floor, &mut OnFire, Option<&crate::nav::PathFollow>), Without<BeingHelped>>,
 ) {
     let Some(grid) = grid else { return };
     let mut rng = rand::rng();
@@ -425,6 +438,7 @@ fn firefighting(
     mut dept: ResMut<FireDepartment>,
     fires: Query<(Entity, &Transform, &Fire)>,
     mut ff: Query<(Entity, &mut Firefighter, &Transform, Option<&crate::nav::PathFollow>, &Floor), Without<Fire>>,
+    burning: Query<(Entity, &Transform, &Floor, Has<crate::visit::OnLot>, &Sim), (With<OnFire>, Without<Firefighter>)>,
     (exit, grid, upper): (Option<Res<crate::interact::LotExit>>, Option<Res<crate::nav::NavGrid>>, Option<Res<crate::nav::UpperFloors>>),
     world: Res<crate::loading::CurrentWorld>,
     cas: Option<Res<crate::simbody::CasData>>,
@@ -432,11 +446,12 @@ fn firefighting(
     mut notes: ResMut<Notifications>,
 ) {
     let Some(called) = dept.called else { return };
+    // (Called for a burning Sim alone, they come all the same.)
     let (Some(exit), Some(grid)) = (exit, grid) else { return };
     let mut rng = rand::rng();
     // The truck arrives with the firefighter.
     if dept.firefighter.is_none() {
-        if fires.is_empty() {
+        if fires.is_empty() && burning.iter().all(|b| b.3) {
             dept.called = None;
             return;
         }
@@ -461,7 +476,7 @@ fn firefighting(
                 crate::aging::NeedsNewBody,
                 Floor(1),
                 ActionQueue::default(),
-                Firefighter { target: None, leaving: false },
+                Firefighter { target: None, rescuing: None, leaving: false },
                 DespawnOnExit(AppState::InGame),
             ))
             .with_children(|c| {
@@ -488,6 +503,41 @@ fn firefighting(
         }
     };
     if walking {
+        return;
+    }
+    // Burning Sims first (the game's `ExtinguishSim`): up to them, then the extinguisher on them.
+    if f.rescuing.is_none()
+        && !f.leaving
+        && let Some((s, ..)) = burning.iter().filter(|b| !b.3).min_by(|a, b| a.1.translation.distance(tf.translation).total_cmp(&b.1.translation.distance(tf.translation)))
+    {
+        f.rescuing = Some((s, 0.0));
+        f.target = None;
+        commands.entity(s).remove::<crate::nav::PathFollow>().insert(BeingHelped);
+        commands.entity(me).remove::<ActionClip>();
+    }
+    if let Some((s, since)) = f.rescuing {
+        let Ok((_, stf, sfloor, _, sim)) = burning.get(s) else {
+            // (Put out already, or gone.)
+            f.rescuing = None;
+            commands.entity(me).remove::<ActionClip>();
+            return;
+        };
+        let to = (stf.translation - tf.translation).with_y(0.0);
+        if since == 0.0 {
+            if to.length() > 1.8 || sfloor.0 != floor.0 {
+                walk_to(&mut commands, (stf.translation - to.normalize_or(Vec3::Z) * 1.2).xz(), sfloor.0);
+                return;
+            }
+            f.rescuing = Some((s, clock.minutes));
+            commands
+                .entity(me)
+                .insert((Transform { rotation: Quat::from_rotation_y(to.x.atan2(to.z)), ..*tf }, ActionClip::new(Some("a_fireFighter_extinguishFire_floor1_start_x"), &["a_fireFighter_extinguishFire_floor1_loop_x"])));
+        } else if clock.minutes - since > PUT_OUT_SIM_MINUTES {
+            commands.entity(s).remove::<(OnFire, BeingHelped)>().insert(ActionClip::new(Some("a_fire_onFire_panic_stop_x"), &[]));
+            commands.entity(me).insert(ActionClip::new(Some("a_fireFighter_extinguishFire_floor1_stop_x"), &[]));
+            notes.push(format!("The firefighter put out the flames on {}!", sim.first));
+            f.rescuing = None;
+        }
         return;
     }
     if f.leaving {

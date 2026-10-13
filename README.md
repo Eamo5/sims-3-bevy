@@ -408,6 +408,21 @@ installation is unreachable.
   moodlets' (yawning when tired, the bladder dance, sniffing an armpit when smelly) or one of
   their traits' (the Neurotic's, the Artistic's, the Grumpy's muttering...), weighted 1, 3, 6
   and 6 as the game weights them; half of those with a thought balloon show it.
+- **Facial expressions**, the game's (its `FacialOverlays`): every few minutes a Sim's face shows
+  what they feel most, over whatever the body is doing (on the face alone): a smile in a good
+  mood, a frown when sad or lonely, a sneer when smelly or in a mess, a scowl when annoyed, wide
+  eyes when scared, drooping lids when tired, and now and then the Evil's grin.
+- **Reactions**, as the game's (its reaction broadcasters, with its `Reactions` clips), turned to
+  face what they react to: near someone smelly (the same room, or in sight outdoors), a sniff
+  and a grimace and the Disgusted moodlet while they're about (not the Slobs); at someone
+  wetting themselves, shock, or what their traits make of it when they're not friends (the
+  Mean-Spirited point and laugh, the Grumpy grumble, the Over-Emotional cry), and the one it
+  happened to is Embarrassed only if someone was near; at a death, shock, then tears for someone
+  close, a laugh from the Evil or an enemy, or a distressed look, and those left behind grieve
+  (a partner Heartbroken, family and friends Mourning). Some moodlets play their own as they
+  come: a wipe of the brow when Fatigued, tears of joy at a First Kiss, queasiness, a start when
+  Scared, a jolt when Singed. A reaction waits for its Sim to be standing free, then lapses.
+- **Stink**: green wisps rise off a smelly Sim's armpits, as the game's `stinkAdult` does.
 - **Puddles**, as the game's: a broken shower, tub, sink or toilet sprays water and spills a
   puddle every quarter hour (four at most, running to the nearest free tile), and a Sim who
   couldn't make it to the bathroom leaves one. They dry up (two hours outdoors, eight on a

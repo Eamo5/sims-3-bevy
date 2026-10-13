@@ -51,7 +51,7 @@ const WEIGHTS: [u32; 4] = [1, 3, 6, 6];
 const BALLOON_CHANCE: f64 = 0.5;
 
 /// The table's letter for an age.
-fn age_letter(age: Age) -> Option<&'static str> {
+pub(crate) fn age_letter(age: Age) -> Option<&'static str> {
     match age {
         Age::Child => Some("C"),
         Age::Teen => Some("T"),

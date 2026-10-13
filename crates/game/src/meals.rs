@@ -109,11 +109,17 @@ fn serve_if_interrupted(mut commands: Commands, sims: Query<(Entity, &ServingFro
     }
 }
 
+/// Whether a surface's top is within reach of someone standing at `at` (a floor): not a shelf
+/// up on the wall.
+fn within_reach(o: &GameObject, tf: &Transform, at: Vec3) -> bool {
+    o.kind == ObjectKind::Table && (tf.translation.y - at.y).abs() < 1.5 && (0.3..1.4).contains(&(tf.translation.y + o.height - at.y))
+}
+
 /// A counter or table near a point (the one the meal is set down on).
 fn surface_entity_near(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, at: Vec3, within: f32) -> Option<Entity> {
     objects
         .iter()
-        .filter(|(_, o, tf, _)| o.kind == ObjectKind::Table && (tf.translation.y - at.y).abs() < 1.5)
+        .filter(|(_, o, tf, _)| within_reach(o, tf, at))
         .map(|(e, o, tf, _)| (e, o.world_center(tf).with_y(tf.translation.y).distance(at.with_y(tf.translation.y))))
         .filter(|(_, d)| *d < within)
         .min_by(|a, b| a.1.total_cmp(&b.1))
@@ -696,7 +702,7 @@ pub const PLATE: &str = "Plate";
 fn surface_near(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, at: Vec3, within: f32) -> Option<Vec3> {
     objects
         .iter()
-        .filter(|(_, o, tf, _)| o.kind == ObjectKind::Table && (tf.translation.y - at.y).abs() < 1.5)
+        .filter(|(_, o, tf, _)| within_reach(o, tf, at))
         .map(|(_, o, tf, _)| {
             let c = o.world_center(tf);
             (Vec3::new(c.x, tf.translation.y + o.height, c.z), c.with_y(tf.translation.y).distance(at.with_y(tf.translation.y)))
@@ -1005,6 +1011,8 @@ fn meal_requests(
                     Some(i) => commands.entity(me).insert(Plateful(i)),
                     None => commands.entity(me).remove::<Plateful>(),
                 };
+                // (Carried off to the table.)
+                commands.entity(me).insert(crate::anim::Carrying(crate::surroundings::DISH_CARRY));
                 match dining_seat(&objects, tf.translation, &taken) {
                     Some((chair, _)) => {
                         taken.push(chair);
@@ -1255,6 +1263,8 @@ mod tests {
         let object = |kind, height| GameObject { kind, name: "Fixture".into(), objd: (0, 0, 0), price: 0,
             center: Vec2::ZERO, half: Vec2::splat(0.5), height, route: None };
         world.spawn((object(ObjectKind::Table, 0.75), Transform::from_xyz(0.0, 0.0, 0.55), UsedBy(None)));
+        // (A shelf up on the wall, nearer: out of reach.)
+        world.spawn((object(ObjectKind::Table, 1.3), Transform::from_xyz(0.0, 4.5, 0.6), UsedBy(None)));
         let upper = world.spawn((object(ObjectKind::Table, 0.75), Transform::from_xyz(0.0, 3.0, 0.7), UsedBy(None))).id();
         let chair = world.spawn((object(ObjectKind::Chair, 1.0), Transform::from_xyz(0.0, 3.0, 0.0), UsedBy(None))).id();
         let mut state = bevy::ecs::system::SystemState::<Query<(Entity, &GameObject, &Transform, &UsedBy)>>::new(&mut world);

@@ -259,6 +259,12 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a_react_awkward_x",
     "a_react_annoyed_sigh_standing_x",
     "a_soc_idle_neutral_",
+    // Facial expressions over whatever the body's doing (the game's facial overlays).
+    "a_expression",
+    // Reactions to what goes on about them (the game's `Reactions`).
+    "a_react_",
+    "c_react_",
+    "c_Buff_disgusted_",
     // Mopping up a puddle.
     "a2o_puddle_mopUp",
     // A change of clothes: a spin.
@@ -484,6 +490,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "c2o_divingBoard_",
     "a2o_bar_makeDrink_",
     "a2o_lifetimeReward_foodReplicator",
+    // The future's food synthesizer.
+    "a2o_foodSynthesizer_",
+    "c2o_foodSynthesizer_",
     "a2o_bodySculptor_",
     "c2o_bodySculptor_",
     "a2o_hotBeverageMachine_fill",

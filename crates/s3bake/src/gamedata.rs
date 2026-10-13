@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 82;
+pub const GAMEDATA_VERSION: u32 = 83;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -237,6 +237,12 @@ pub struct IdleAnim {
 /// `Happy`...), trait (`Neurotic`...) and moodlet (`Hungry`, `HasToPee`...).
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct IdleTables {
+    /// The facial expressions by kind (`FacialHappy`, `FacialSad`...): each clip and its weight.
+    #[serde(default)]
+    pub faces: Vec<(String, Vec<(String, f32)>)>,
+    /// The reactions (`Shocked`, `SmellsBad`, `PointLaugh`, `Cry`...): each one's clips.
+    #[serde(default)]
+    pub reactions: Vec<(String, Vec<IdleAnim>)>,
     pub standing: Vec<IdleAnim>,
     pub mood: Vec<(String, Vec<IdleAnim>)>,
     pub traits: Vec<(String, Vec<IdleAnim>)>,
@@ -1467,6 +1473,22 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             mood: idle_rows(&x, "MoodIdle", "MoodFlavor"),
             traits: idle_rows(&x, "TraitIdle", "Trait"),
             buffs: idle_rows(&x, "BuffIdle", "BuffName"),
+            reactions: idle_rows(&x, "Reactions", "ReactionType"),
+            faces: {
+                let mut faces: Vec<(String, Vec<(String, f32)>)> = Vec::new();
+                for r in records(&x, "FacialOverlays").into_iter().skip(1) {
+                    let (cat, clip) = (r.get("Category").cloned().unwrap_or_default(), r.get("Clip").cloned().unwrap_or_default());
+                    if cat.is_empty() || clip.is_empty() {
+                        continue;
+                    }
+                    let w = r.get("Weight").and_then(|w| w.parse::<f32>().ok()).unwrap_or(1.0);
+                    match faces.iter_mut().find(|f| f.0 == cat) {
+                        Some(f) => f.1.push((clip, w)),
+                        None => faces.push((cat, vec![(clip, w)])),
+                    }
+                }
+                faces
+            },
         };
     }
     progress("Converting: object effect slots…");
@@ -2575,3 +2597,25 @@ const EXTRA_ICONS: &[&str] = &[
     "w_simoleon",
     "w_simoleon_32",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn idle_rows_group_under_their_name_and_take_the_first_rows_defaults() {
+        let xml = "<Idles>            <TraitIdle><Trait></Trait><AnimationName></AnimationName><AnimationProbability>10</AnimationProbability><AgesSpeciesAllowed>T,Y,A,E</AgesSpeciesAllowed><CASOnly>False</CASOnly><TraitRequired>Unknown</TraitRequired></TraitIdle>            <TraitIdle><Trait>Grumpy</Trait><AnimationName>a_idle_grumpy_muttering01_x</AnimationName><AgesSpeciesAllowed>C,T,Y,A,E</AgesSpeciesAllowed><ThoughtBalloon>TraitGrumpy</ThoughtBalloon></TraitIdle>            <TraitIdle><Trait></Trait><AnimationName>a_idle_grumpy_muttering02_x</AnimationName></TraitIdle>            <TraitIdle><Trait>GreenThumb</Trait><AnimationName>a_trait_greenThumb_x</AnimationName><CASOnly>True</CASOnly></TraitIdle>            <TraitIdle><Trait>Neat</Trait><AnimationName>a_start_x,a_loop_x,a_stop_x</AnimationName><TraitRequired>Neat</TraitRequired></TraitIdle>            </Idles>";
+        let groups = idle_rows(xml, "TraitIdle", "Trait");
+        let names: Vec<&str> = groups.iter().map(|g| g.0.as_str()).collect();
+        assert_eq!(names, ["Grumpy", "Neat"], "Create a Sim's alone (GreenThumb) left out");
+        let grumpy = &groups[0].1;
+        assert_eq!(grumpy.len(), 2, "the unnamed row after Grumpy is Grumpy's too");
+        assert_eq!(grumpy[0].ages, ["C", "T", "Y", "A", "E"]);
+        assert_eq!(grumpy[1].ages, ["T", "Y", "A", "E"], "left out: the first row's");
+        assert_eq!(grumpy[1].probability, 10);
+        assert_eq!(grumpy[0].balloon, "TraitGrumpy");
+        assert!(grumpy[0].trait_required.is_empty(), "Unknown is no trait");
+        assert_eq!(groups[1].1[0].clips, ["a_start_x", "a_loop_x", "a_stop_x"]);
+        assert_eq!(groups[1].1[0].trait_required, "Neat");
+    }
+}

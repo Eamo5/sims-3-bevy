@@ -637,10 +637,13 @@ pub enum MoodletKind {
     TooMuchSun,
     Werewolf,
     MintyBreath,
+    // Reactions to those about them.
+    Disgusted,
+    Mourning,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 57] = {
+    pub const ALL: [MoodletKind; 59] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -649,6 +652,7 @@ impl MoodletKind {
             InLove, Heartbroken, JustMarried, NewHome, Birthday, WishFulfilled, Nauseous, Pregnant, NewBaby, GreatParty,
             LameParty, AwesomeParty, Scared, GreatDate, BadDate, Singed, DirtySurroundings, FilthySurroundings, GettingChilly,
             TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf, MintyBreath,
+            Disgusted, Mourning,
         ]
     };
 
@@ -730,6 +734,8 @@ impl MoodletKind {
             TooMuchSun => md("Too Much Sun", "The sun is draining this vampire.", -20, 0.0),
             Werewolf => md("Werewolf", "The full moon has brought out the beast within.", 15, 0.0),
             MintyBreath => md("Minty Breath", "Fresh from brushing.", 5, 4.0),
+            Disgusted => md("Disgusted", "Something around here really stinks!", -5, 0.25),
+            Mourning => md("Mourning", "Someone close has passed away.", -50, 48.0),
         }
     }
 
@@ -799,6 +805,8 @@ impl MoodletKind {
             TooMuchSun => ("TooMuchSun", true),
             Werewolf => ("Werewolf", true),
             MintyBreath => ("MintyBreath", true),
+            Disgusted => ("Disgusted", true),
+            Mourning => ("Mourning", true),
         }
     }
 }
@@ -936,17 +944,23 @@ fn need_failures(
     mut q: Query<(Entity, &Sim, &mut Motives, &mut Moodlets, &mut crate::interact::ActionQueue, &InheritedVisibility, &Transform, Option<&crate::nav::Floor>)>,
     mut notes: ResMut<crate::interact::Notifications>,
     mut puddles: MessageWriter<crate::puddles::AddPuddle>,
+    mut seen: MessageWriter<crate::reactions::Spectacle>,
 ) {
     use crate::interact::{Action, ActionKind};
-    for (_, sim, mut m, mut ml, mut queue, vis, tf, floor) in &mut q {
+    for (e, sim, mut m, mut ml, mut queue, vis, tf, floor) in &mut q {
         // (Babies and toddlers are seen to by others; away, it happens off stage.)
         let shown = vis.get() && !sim.age.is_little();
         let failing = |q: &crate::interact::ActionQueue| q.0.iter().any(|a| matches!(a.kind, ActionKind::MotiveFail(_)) && !a.cancel);
         if m.0[BLADDER] <= -99.0 {
             m.0[BLADDER] = 100.0;
             m.add(HYGIENE, -60.0);
-            ml.add(MoodletKind::Embarrassed, clock.minutes);
             notes.push(format!("{} couldn't make it to the bathroom in time!", sim.first));
+            // (Embarrassed if anyone was near to see: see `reactions`; off stage, as like as not.)
+            if shown {
+                seen.write(crate::reactions::Spectacle::Accident(e));
+            } else {
+                ml.add(MoodletKind::Embarrassed, clock.minutes);
+            }
             if shown && !failing(&queue) {
                 for a in queue.0.iter_mut() {
                     a.cancel = true;

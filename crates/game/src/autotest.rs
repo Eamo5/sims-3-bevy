@@ -486,7 +486,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, queue_diff.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, zoom_shots.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, spin_shots.run_if(in_state(crate::PlayMode::Live)))
-            .add_systems(Update, idle_shots.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (idle_shots, react_shots, face_shots).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_save.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_switch.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_load.run_if(in_state(AppState::MainMenu)))
@@ -1980,17 +1980,18 @@ fn buy_close(mut commands: Commands, time: Res<Time>, mut state: Local<u8>, mut 
     }
 }
 
-/// EXHAUST=<first name>: that Sim's energy (or BLADDER_FAIL=<first name>: bladder) runs out,
-/// once, a few seconds in.
-fn run_out(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives)>, mut done: Local<bool>, time: Res<Time>) {
+/// EXHAUST=<first name>: that Sim's energy (or BLADDER_FAIL=<first name>: bladder; SMELLY:
+/// hygiene) runs out, once, a few seconds in (`*`: the selected Sim's).
+fn run_out(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives, Has<crate::sim::Selected>)>, mut done: Local<bool>, time: Res<Time>) {
     if *done || time.elapsed_secs() < 8.0 {
         return;
     }
-    for (var, motive) in [("EXHAUST", crate::sim::ENERGY), ("BLADDER_FAIL", crate::sim::BLADDER)] {
+    for (var, motive) in [("EXHAUST", crate::sim::ENERGY), ("BLADDER_FAIL", crate::sim::BLADDER), ("SMELLY", crate::sim::HYGIENE)] {
         let Ok(who) = std::env::var(var) else { continue };
         *done = true;
-        for (s, mut m) in &mut sims {
-            if s.first == who {
+        for (s, mut m, selected) in &mut sims {
+            if s.first == who || (who == "*" && selected) {
+                info!("{}'s {var} runs out", s.first);
                 m.0[motive] = -100.0;
             }
         }
@@ -2047,6 +2048,68 @@ fn idle_shots(mut commands: Commands, idling: Query<&crate::idles::Idling, With<
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
     }
     *was = at;
+}
+
+/// REACT_SHOTS=<folder>: the camera to each Sim as they start reacting to something (see
+/// `reactions`), and a picture of them halfway through it, up to a dozen.
+fn react_shots(
+    mut commands: Commands,
+    sims: Query<(Entity, &crate::sim::Sim, &Transform, &crate::interact::ActionQueue)>,
+    mut cam: Query<&mut SimsCamera>,
+    mut shot: Local<Vec<Entity>>,
+    mut n: Local<u32>,
+) {
+    let Ok(dir) = std::env::var("REACT_SHOTS") else { return };
+    for (e, sim, tf, queue) in &sims {
+        let Some(a) = queue.0.front().filter(|a| a.label == "React") else {
+            shot.retain(|s| *s != e);
+            continue;
+        };
+        let (crate::interact::Phase::Running(t), crate::interact::ActionKind::Outro { secs, .. }) = (a.phase, &a.kind) else { continue };
+        if t < 0.2 && !shot.contains(&e)
+            && let Ok(mut c) = cam.single_mut()
+        {
+            c.focus = tf.translation;
+            c.distance = 7.0;
+        }
+        if t >= secs * 0.5 && !shot.contains(&e) && *n < 12 {
+            shot.push(e);
+            *n += 1;
+            let path = std::path::Path::new(&dir).join(format!("react{:02}_{}.png", *n, sim.first));
+            info!("shot {}", path.display());
+            commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+        }
+    }
+}
+
+/// FACE_SHOTS=<folder>: while the selected Sim's face shows an expression (see `faces`), the
+/// camera close in front of it, and a picture a second in, up to six.
+fn face_shots(
+    mut commands: Commands,
+    sel: Query<(&Transform, &crate::sim::Sim, Option<&crate::anim::FaceOverlay>), With<crate::sim::Selected>>,
+    mut cam: Query<&mut SimsCamera>,
+    mut shot: Local<Option<String>>,
+    mut n: Local<u32>,
+) {
+    let Ok(dir) = std::env::var("FACE_SHOTS") else { return };
+    let (Ok((tf, sim, face)), Ok(mut c)) = (sel.single(), cam.single_mut()) else { return };
+    let Some(face) = face else {
+        *shot = None;
+        return;
+    };
+    let ahead = tf.rotation * Vec3::Z;
+    c.focus = tf.translation;
+    c.yaw = ahead.x.atan2(ahead.z);
+    c.pitch = 0.08;
+    c.distance = 1.0;
+    c.height_offset = if sim.age == crate::sim::Age::Child { 1.0 } else { 1.55 };
+    if face.time >= 1.0 && shot.as_deref() != Some(face.clip.as_str()) && *n < 6 {
+        *shot = Some(face.clip.clone());
+        *n += 1;
+        let path = std::path::Path::new(&dir).join(format!("face{:02}_{}.png", *n, face.clip));
+        info!("shot {}", path.display());
+        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+    }
 }
 
 /// SPIN_SHOTS=<folder>: a picture of each change of clothes mid-turn (in the sparkles) and just

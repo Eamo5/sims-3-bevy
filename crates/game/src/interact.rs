@@ -165,6 +165,9 @@ pub enum ObjectKind {
     FoodReplicator,
     BodySculptor,
     MoodletManager,
+    /// The future's kitchen (Into the Future): a meal programmed and made at the touch of a
+    /// screen, where a house has no fridge or stove.
+    FoodSynthesizer,
     /// A urinal (for men and boys).
     Urinal,
     /// A child's toy oven, to bake pretend cakes in.
@@ -315,6 +318,8 @@ impl ObjectKind {
             Self::Teleporter
         } else if has("rewards.foodreplicator") {
             Self::FoodReplicator
+        } else if has("appliances.futurefoodsynthesizer") {
+            Self::FoodSynthesizer
         } else if has("rewards.bodysculptor") {
             Self::BodySculptor
         } else if has("rewards.moodmodifier") {
@@ -428,7 +433,7 @@ impl ObjectKind {
 
     pub fn category(&self) -> &'static str {
         match self {
-            Self::Fridge | Self::Stove | Self::Microwave | Self::Grill | Self::HotBeverage => "Appliances",
+            Self::Fridge | Self::Stove | Self::Microwave | Self::Grill | Self::HotBeverage | Self::FoodSynthesizer => "Appliances",
             Self::AlarmClock => "Electronics",
             Self::TrashCan | Self::TrashCompactor | Self::Candle => "Misc",
             Self::Dishwasher => "Appliances",
@@ -1199,6 +1204,9 @@ static SPRINKLER: [InteractionDef; 3] = [
 static TELEPORTER: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::Teleport, ..def("Teleport", 1.0, N, Pose::Use) }];
 static FOOD_REPLICATOR: [InteractionDef; 1] =
     [InteractionDef { special: Special::ReplicateFood, ..def("Replicate Food", 3.0, [6000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) }];
+/// (A plate of whatever's programmed, as the replicator's: the screen tapped, a wait, and out.)
+static FOOD_SYNTHESIZER: [InteractionDef; 1] =
+    [InteractionDef { special: Special::ReplicateFood, ..def("Synthesize Food", 4.0, [4500.0, 0.0, 0.0, 0.0, 0.0, 2.0], Pose::Use) }];
 /// (A new shape, the sculptor at work for an hour.)
 static BODY_SCULPTOR: [InteractionDef; 3] = [
     InteractionDef { autonomous: false, special: Special::Sculpt, ..def("Sculpt Fitter", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 10.0], Pose::Use) },
@@ -1588,6 +1596,11 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         ),
         // (Children's: grown-ups play with toys only with a little one.)
         "Replicate Food" => A::new(None, &["a2o_lifetimeReward_foodReplicator_pushButton_x"]),
+        "Synthesize Food" => A::steps(
+            "a2o_foodSynthesizer_start1_x",
+            &["a2o_foodSynthesizer_program_loop1_x", "a2o_foodSynthesizer_program_loop2_x", "a2o_foodSynthesizer_celebrate_x"],
+            &["a2o_plateDinner_carry_x"],
+        ),
         "Sculpt Fitter" | "Sculpt Slimmer" | "Sculpt Fuller" => A::steps("a2o_bodySculptor_openDoor_x", &["a2o_bodySculptor_getIn_x", "a2o_bodySculptor_closeDoor_x"], &["a2o_bodySculptor_working_x"]),
         "Make a Drink" => A::steps(
             "a2o_bar_makeDrink_start_x",
@@ -1802,6 +1815,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::DivingBoard => &DIVING_BOARD,
         ObjectKind::Bar => &BAR,
         ObjectKind::FoodReplicator => &FOOD_REPLICATOR,
+        ObjectKind::FoodSynthesizer => &FOOD_SYNTHESIZER,
         ObjectKind::Teleporter => &TELEPORTER,
         ObjectKind::BodySculptor => &BODY_SCULPTOR,
         ObjectKind::MoodletManager => &MOODLET_MANAGER,
@@ -4166,7 +4180,16 @@ fn autonomy(
         (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim, Has<SocialPartner>, Option<&crate::visit::OnLot>),
         // (Nor a cook between the stove and serving: their queue's empty a moment, with the meal
         // still in their hands, and they'd set about cooking it again.)
-        (Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>, Without<OffLot>, Without<crate::meals::MealRequest>, Without<crate::meals::ServingFrom>),
+        (
+            Without<AtWork>,
+            Without<crate::rabbitholes::AtRabbitHole>,
+            Without<OffLot>,
+            Without<crate::meals::MealRequest>,
+            Without<crate::meals::ServingFrom>,
+            // (Nor anyone in a panic at a fire, or burning.)
+            Without<crate::fire::Panicking>,
+            Without<crate::fire::OnFire>,
+        ),
     >,
     (objects, seconds, unmade_q, grime_q): (
         Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>,

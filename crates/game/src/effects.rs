@@ -20,7 +20,7 @@ impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WaterLooks>()
             .add_message::<SpinSparkle>()
-            .add_systems(Update, (attach, fountain_water, bubble_baths, sprinkler_spray, emit, fall, tv_screens, censor, sparkle).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (attach, fountain_water, bubble_baths, sprinkler_spray, emit, fall, tv_screens, censor, sparkle, stink).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -561,7 +561,7 @@ fn star_image() -> Image {
             let a = (glow * 0.9 + rays).min(1.0);
             // (White at the heart and along the rays, blue round them: seen against a white wall.)
             let w = (rays * 1.5 + (1.0 - r * 2.5).max(0.0)).min(1.0);
-            let c = |blue: f32| ((blue + (255.0 - blue) * w) as u8);
+            let c = |blue: f32| (blue + (255.0 - blue) * w) as u8;
             data.extend_from_slice(&[c(90.0), c(150.0), 255, (a * 255.0) as u8]);
         }
     }
@@ -647,6 +647,128 @@ fn sparkle(
         tf.scale = Vec3::splat(s.size * (0.6 + 0.8 * fade));
         if let Some(c) = cam {
             tf.rotation = Transform::from_translation(tf.translation).looking_at(c, Vec3::Y).rotation;
+        }
+        if let Some(mut mat) = mats.get_mut(&m.0) {
+            mat.base_color = Color::srgba(1.0, 1.0, 1.0, fade);
+        }
+    }
+}
+
+/// A wisp of stink off a smelly Sim (the game's `stinkAdult`, at each armpit): a green squiggle
+/// rising and swaying from the side it came off (`side`: -1 left, 1 right), fading in and out.
+#[derive(Component)]
+struct Wisp {
+    sim: Entity,
+    side: f32,
+    y: f32,
+    age: f32,
+    life: f32,
+    sway: f32,
+}
+
+/// How often wisps rise off a smelly Sim (seconds at the game's pace), how high they go, and
+/// how big they are (wide, tall).
+const WISP_EVERY: f32 = 0.45;
+const WISP_RISE: f32 = 0.55;
+const WISP_SIZE: Vec2 = Vec2::new(0.16, 0.36);
+
+/// A wisp's look: a pale green line edged darker (seen on grass as on a floor), waving up the
+/// picture, fading at its ends.
+fn wisp_image() -> Image {
+    let (w, h) = (24u32, 64u32);
+    let mut data = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let (u, v) = ((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+            let centre = 0.5 + 0.25 * (v * std::f32::consts::TAU * 1.25).sin();
+            // (How far from the line's middle, in its half-widths: pale inside, dark at the edge.)
+            let d = (u - centre).abs() / 0.2;
+            let a = (1.0 - d).clamp(0.0, 1.0).powf(0.5);
+            let pale = (1.0 - d * 1.6).clamp(0.0, 1.0);
+            let ends = (v * (1.0 - v) * 4.0).min(1.0).powf(0.7);
+            let c = |dark: f32, light: f32| (dark + (light - dark) * pale) as u8;
+            data.extend_from_slice(&[c(55.0, 175.0), c(95.0, 235.0), c(15.0, 80.0), (a * ends * 255.0) as u8]);
+        }
+    }
+    Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, data, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD)
+}
+
+/// Stink rising off smelly Sims, while they're smelly and to be seen (not in the water).
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn stink(
+    mut commands: Commands,
+    time: Res<Time>,
+    clock: Res<crate::clock::GameClock>,
+    (mut meshes, mut mats, mut images): (ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>, ResMut<Assets<Image>>),
+    mut looks: Local<Option<(Handle<Mesh>, StandardMaterial)>>,
+    mut due: Local<HashMap<Entity, f32>>,
+    cams: Query<&GlobalTransform, With<SimsCamera>>,
+    sims: Query<(Entity, &crate::sim::Sim, &GlobalTransform, &crate::life::Moodlets, &InheritedVisibility, Has<crate::swim::Swimming>)>,
+    mut q: Query<(Entity, &mut Wisp, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+) {
+    let dt = time.delta_secs().min(0.1) * crate::clock::SPEED_RATES[clock.speed];
+    let mut rng = rand::rng();
+    let (quad, look) = looks
+        .get_or_insert_with(|| {
+            let look = StandardMaterial {
+                base_color: Color::WHITE,
+                base_color_texture: Some(images.add(wisp_image())),
+                alpha_mode: AlphaMode::Blend,
+                unlit: true,
+                double_sided: true,
+                cull_mode: None,
+                ..default()
+            };
+            (meshes.add(Rectangle::new(1.0, 1.0)), look)
+        })
+        .clone();
+    let mut smelly: Vec<Entity> = Vec::new();
+    for (e, sim, at, moodlets, shown, swimming) in &sims {
+        if !shown.get() || swimming || sim.age.is_little() || !moodlets.has(crate::life::MoodletKind::Smelly) {
+            continue;
+        }
+        smelly.push(e);
+        let t = due.entry(e).or_insert_with(|| rng.random_range(0.0..WISP_EVERY));
+        *t -= dt;
+        if *t > 0.0 {
+            continue;
+        }
+        *t += WISP_EVERY * rng.random_range(0.7..1.3);
+        trace!("a wisp of stink off {}", sim.first);
+        // (From the armpits: a little below the shoulders.)
+        let y = if sim.age == crate::sim::Age::Child { 0.82 } else { 1.22 };
+        commands.spawn((
+            Mesh3d(quad.clone()),
+            MeshMaterial3d(mats.add(look.clone())),
+            Transform::from_translation(at.translation()).with_scale(Vec3::ZERO),
+            Wisp { sim: e, side: if rng.random_bool(0.5) { -1.0 } else { 1.0 }, y, age: 0.0, life: rng.random_range(1.3..1.9), sway: rng.random_range(0.0..std::f32::consts::TAU) },
+            NotShadowCaster,
+            DespawnOnExit(AppState::InGame),
+        ));
+    }
+    due.retain(|e, _| smelly.contains(e));
+    let cam = cams.single().ok().map(|c| c.translation());
+    for (e, mut w, mut tf, m) in &mut q {
+        w.age += dt;
+        let Ok((_, _, at, ..)) = sims.get(w.sim) else {
+            commands.entity(e).try_despawn();
+            continue;
+        };
+        if w.age >= w.life {
+            commands.entity(e).try_despawn();
+            continue;
+        }
+        let f = w.age / w.life;
+        let fade = (f * 4.0).min(1.0) * (1.0 - f).powf(0.7);
+        // (Out from the side it came off, drifting up and waving.)
+        let (_, turn, _) = at.to_scale_rotation_translation();
+        let out = turn * Vec3::new(w.side * (0.2 + 0.12 * f), 0.0, 0.0) + Vec3::new((w.sway + w.age * 2.5).sin() * 0.04, w.y + WISP_RISE * f, 0.0);
+        tf.translation = at.translation() + out;
+        tf.scale = Vec3::new(WISP_SIZE.x, WISP_SIZE.y * (0.7 + 0.5 * f), 1.0);
+        // (Upright, turned to the camera.)
+        if let Some(c) = cam {
+            let d = c - tf.translation;
+            tf.rotation = Quat::from_rotation_y(d.x.atan2(d.z));
         }
         if let Some(mut mat) = mats.get_mut(&m.0) {
             mat.base_color = Color::srgba(1.0, 1.0, 1.0, fade);

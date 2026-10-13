@@ -335,7 +335,6 @@ fn daily_aging(
     let per_day = 1.0 / settings.lifespan.factor();
     let mut rng = rand::rng();
     let mut died: Vec<(Entity, String, bool)> = Vec::new();
-    let mut survivors: Vec<Entity> = Vec::new();
     for (e, mut sim, aging, mut moodlets, selected, journal) in &mut sims {
         let Some(mut aging) = aging else {
             commands.entity(e).insert(Aging::default());
@@ -346,12 +345,9 @@ fn daily_aging(
             let probability = settings.lifespan.elder_mortality() * if crate::journal::earned(journal, "Marathon Runner") { 0.75 } else { 1.0 };
             if aging.old_age_today(probability) {
                 died.push((e, sim.full_name(), selected));
-            } else {
-                survivors.push(e);
             }
             continue;
         }
-        survivors.push(e);
         let remaining = remaining_days(stage_days(sim.age), aging.days, settings.lifespan.factor());
         if remaining > 0 {
             if remaining == 1 {
@@ -364,12 +360,8 @@ fn daily_aging(
     for (e, _name, _selected) in died {
         // The Grim Reaper comes for them (see `death`).
         play.write(PlaySound::ui("sting_death").with_volume(0.7));
+        // (Those left behind grieve: see `reactions`.)
         commands.entity(e).insert(crate::death::Dying::new());
-        for &s in &survivors {
-            if let Ok((_, _, _, mut m, _, _)) = sims.get_mut(s) {
-                m.add(MoodletKind::Heartbroken, clock.minutes);
-            }
-        }
     }
 }
 
