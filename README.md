@@ -366,7 +366,8 @@ installation is unreachable.
   water over the mosaics; the terrain is left open over them. Sims swim from the ladders: they
   change into swimwear (the game's own: trunks and a bare chest, swimsuits and two-pieces),
   climb down, swim about the pool with the game's swim cycle (building Athletic skill) and
-  climb out back into their clothes. From a diving board they walk out and dive in (the game's
+  climb out, staying in their swimwear until there's something else to do (the hot tub's the
+  same). From a diving board they walk out and dive in (the game's
   dives, cannonball included), then swim. At bedtime they change into their sleepwear (pyjamas,
   nightgowns, boxers), and into athletic wear to work out, and dress again after. They undress
   for a shower or a bath (the game's naked outfit, which has no anatomy) under its censor, a

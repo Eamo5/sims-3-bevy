@@ -72,10 +72,10 @@ fn pyjamas(
         // (Babies and toddlers are carried in and out as they are.)
         let want = want.or_else(|| (cold && !sim.age.is_little() && !crate::weather::sheltered(building.as_deref(), tf.translation)).then_some(OutfitKind::Outerwear));
         let has = wearing.map(|w| w.0);
-        // (Swimwear is the swim's to change; the uniform stays on after work, and an outfit
-        // chosen at the dresser until it's time for another.)
-        let keep = want.is_none() && (chosen || (has == Some(OutfitKind::Career) && uniform));
-        if has == Some(OutfitKind::Swimwear) || want == has || keep {
+        // (Out of the pool, swimwear's kept on until there's something else to do; the uniform
+        // stays on after work, and an outfit chosen at the dresser until it's time for another.)
+        let keep = want.is_none() && (chosen || (has == Some(OutfitKind::Career) && uniform) || (has == Some(OutfitKind::Swimwear) && queue.0.is_empty()));
+        if want == has || keep {
             continue;
         }
         // Out of the bath at night, into pyjamas (the game's `GettingOutOfBath`: within ten hours
@@ -98,7 +98,8 @@ fn pyjamas(
 }
 
 /// What's worn to use something: pyjamas to sleep, nothing in the shower or the bath (the game's
-/// `GoingToBathe`; not to clean them), workout clothes to work out.
+/// `GoingToBathe`; not to clean them), swimwear for a swim or the hot tub (`GoingToSwim`),
+/// workout clothes to work out.
 pub fn outfit_for_use(kind: crate::interact::ObjectKind, d: &crate::interact::InteractionDef) -> Option<crate::simbody::OutfitKind> {
     use crate::interact::ObjectKind as K;
     use crate::simbody::OutfitKind;
@@ -106,6 +107,8 @@ pub fn outfit_for_use(kind: crate::interact::ObjectKind, d: &crate::interact::In
         Some(OutfitKind::Sleepwear)
     } else if matches!(kind, K::Shower | K::Bathtub | K::ShowerTub) && d.on_object {
         Some(OutfitKind::Naked)
+    } else if d.special == Special::Swim || kind == K::HotTub {
+        Some(OutfitKind::Swimwear)
     } else if d.pose == crate::sim::Pose::Exercise {
         Some(OutfitKind::Athletic)
     } else {
@@ -170,7 +173,7 @@ fn swim(
     delta: Res<crate::clock::SimDelta>,
     world: Res<CurrentWorld>,
     mut sims: Query<
-        (Entity, &Sim, &mut ActionQueue, &mut Transform, Option<&mut Swimming>, &crate::anim::ClipPlayer, &mut crate::sim::Motives),
+        (Entity, &Sim, &mut ActionQueue, &mut Transform, Option<&mut Swimming>, &crate::anim::ClipPlayer, &mut crate::sim::Motives, Option<&crate::simbody::Wearing>),
         Without<crate::death::Dying>,
     >,
     ladders: Query<(&GameObject, &Transform), Without<Sim>>,
@@ -178,7 +181,7 @@ fn swim(
     mut notes: ResMut<crate::interact::Notifications>,
 ) {
     let mut rng = rand::rng();
-    for (e, sim, mut queue, mut tf, swimming, player, mut motives) in &mut sims {
+    for (e, sim, mut queue, mut tf, swimming, player, mut motives, wearing) in &mut sims {
         // Swimming now: the front action is a swim, under way.
         let swim_from = queue.0.front().and_then(|a| match (&a.kind, a.phase) {
             (ActionKind::Object { target, def }, Phase::Running(_)) => {
@@ -202,13 +205,11 @@ fn swim(
                 let exit = tf.translation;
                 tf.translation = Vec3::new(first.x, water_y - SWIM_DROP, first.y);
                 let target = tiles[rng.random_range(0..tiles.len())];
-                // (Into swimwear for the swim.)
-                commands.entity(e).insert((
-                    Swimming { tiles, water_y, target, exit, stranded: None },
-                    ActionClip::new(None, &["a_swim_cycle_x"]),
-                    crate::simbody::Wearing(crate::simbody::OutfitKind::Swimwear),
-                    crate::aging::NeedsNewBody,
-                ));
+                commands.entity(e).insert((Swimming { tiles, water_y, target, exit, stranded: None }, ActionClip::new(None, &["a_swim_cycle_x"])));
+                // (In swimwear for the swim: spun into at the ladder, or put on now.)
+                if wearing.map(|w| w.0) != Some(crate::simbody::OutfitKind::Swimwear) {
+                    commands.entity(e).insert((crate::simbody::Wearing(crate::simbody::OutfitKind::Swimwear), crate::aging::NeedsNewBody));
+                }
             }
             (Some(_), Some(mut s)) => {
                 let here = tf.translation.xz();
@@ -259,12 +260,10 @@ fn swim(
                     commands.entity(e).insert(ActionClip::new(None, &["a_swim_cycle_x"]));
                     continue;
                 }
-                // Out of the water by the ladder.
+                // Out of the water by the ladder (still in swimwear, until there's something else
+                // to do).
                 tf.translation = s.exit;
-                commands
-                    .entity(e)
-                    .remove::<(Swimming, crate::simbody::Wearing)>()
-                    .insert((ActionClip::new(Some("a2o_ladder_climbUp_L_x"), &[]), crate::aging::NeedsNewBody));
+                commands.entity(e).remove::<Swimming>().insert(ActionClip::new(Some("a2o_ladder_climbUp_L_x"), &[]));
             }
             (None, None) => {}
         }
