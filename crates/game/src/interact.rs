@@ -2639,13 +2639,38 @@ pub(crate) fn run_actions(
                                     && let Some(out) = way_out
                                     && plan_route(my_grid, my_upper, from, floor.0, out, 1).is_none()
                                 {
+                                    // (Upstairs, on their own floor where its stairs reach; else on
+                                    // the ground, where the way off the lot does.)
+                                    let upstairs = (floor.0 != 1).then(|| my_upper.and_then(|u| u.grids.get(&floor.0).map(|g| (u, g)))).flatten().and_then(|(u, g)| {
+                                        let mut reach = vec![false; g.w * g.h];
+                                        for s in &u.stairs {
+                                            let p = if s.upper == floor.0 {
+                                                s.top
+                                            } else if s.level == floor.0 {
+                                                s.bottom
+                                            } else {
+                                                continue;
+                                            };
+                                            for (i, r) in g.reachable_from(p).into_iter().enumerate() {
+                                                reach[i] |= r;
+                                            }
+                                        }
+                                        (0..g.h)
+                                            .flat_map(|z| (0..g.w).map(move |x| (x, z)))
+                                            .filter(|&(x, z)| reach[z * g.w + x])
+                                            .map(|(x, z)| g.center_of(x, z))
+                                            .min_by(|a, b| a.distance(from).total_cmp(&b.distance(from)))
+                                    });
                                     let reach = my_grid.reachable_from(out);
                                     let near = (0..my_grid.h)
                                         .flat_map(|z| (0..my_grid.w).map(move |x| (x, z)))
                                         .filter(|&(x, z)| reach[z * my_grid.w + x])
                                         .map(|(x, z)| my_grid.center_of(x, z))
                                         .min_by(|a, b| a.distance(from).total_cmp(&b.distance(from)));
-                                    if let Some(p) = near {
+                                    if let Some(p) = upstairs {
+                                        info!("{} was stuck at {from} on floor {}: set back on that floor at {p}", sim.first, floor.0);
+                                        tf.translation = Vec3::new(p.x, ground(floor.0, p.x, p.y), p.y);
+                                    } else if let Some(p) = near {
                                         info!("{} was stuck at {from} on floor {}: set back at {p}", sim.first, floor.0);
                                         tf.translation = Vec3::new(p.x, ground(1, p.x, p.y), p.y);
                                         commands.entity(me).insert(Floor(1));

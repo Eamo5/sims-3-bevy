@@ -145,11 +145,18 @@ fn puddle_image(seed: u32) -> Image {
     Image::new(Extent3d { width: n, height: n, depth_or_array_layers: 1 }, TextureDimension::D2, data, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD)
 }
 
-/// Where a puddle can lie: the floor's free there (nothing standing on it), on that storey.
+/// Where a puddle can lie: the floor's free there (nothing standing on it), on that storey, and
+/// open to the rest of it (not a pocket behind the tub, where whoever came to mop it would be
+/// stranded).
 fn free_at(grid: Option<&crate::nav::NavGrid>, upper: Option<&crate::nav::UpperFloors>, level: u8, p: Vec2) -> bool {
     let g = if level == 1 { grid } else { upper.and_then(|u| u.grids.get(&level)) };
-    g.and_then(|g| g.cell_of(p).map(|(x, z)| !g.is_blocked(x, z))).unwrap_or(false)
+    g.is_some_and(|g| {
+        g.cell_of(p).is_some_and(|(x, z)| !g.is_blocked(x, z) && g.reachable_from(p).iter().filter(|r| **r).count() >= OPEN_CELLS)
+    })
 }
+
+/// How many walkable cells a puddle's spot must be joined to (a room's worth, not a pocket).
+const OPEN_CELLS: usize = 40;
 
 /// Puts each spilled puddle on its tile, or the nearest free one about it.
 #[allow(clippy::too_many_arguments)]
