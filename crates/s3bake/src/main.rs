@@ -729,6 +729,28 @@ fn main() {
         eprintln!("{} clips", names.len());
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--gameplay-xml") {
+        // --gameplay-xml <name> <out>: a tuning XML from GameplayData.package, by name.
+        let path = std::path::Path::new(&data).join("Game").join("Bin").join("Gameplay").join("GameplayData.package");
+        let pkg = s3pkg::Package::open(&path).expect("GameplayData");
+        let mut names = std::collections::HashMap::new();
+        for e in pkg.of_type(0x0166_038C) {
+            if let Ok(d) = pkg.read(e) {
+                names.extend(s3formats::audio::parse_name_map(&d));
+            }
+        }
+        let want = args[i + 1].to_ascii_lowercase();
+        for e in pkg.of_type(0x0333_406C) {
+            if names.get(&e.key.i).is_some_and(|n: &String| n.to_ascii_lowercase() == want || n.to_ascii_lowercase().starts_with(&format!("{want}_0x"))) {
+                let d = pkg.read(e).expect("xml");
+                std::fs::write(&args[i + 2], &d).expect("write");
+                println!("{} bytes", d.len());
+                return;
+            }
+        }
+        eprintln!("not found");
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--spt") {
         // --spt <kind hex> [out.spt]: a SpeedTree resource's size, the texture names it holds
         // and whether each is in the install (and its size); with a path, the raw file.

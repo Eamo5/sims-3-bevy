@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 80;
+pub const GAMEDATA_VERSION: u32 = 82;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -219,6 +219,65 @@ pub struct BalloonEntry {
 
 /// The game's balloon table (`Balloons`): what Sims think and say, keyed by need, moodlet or
 /// trait (idle thoughts), social interaction, conversation topic, and random sets.
+/// One of the game's idle animations (its `Idles` tuning): its clips (a start, a loop and a stop,
+/// or one), how likely it is among its fellows, the ages it's for (the table's letters: C, T,
+/// Y, A, E, and the pets'), and the thought balloon list it may show.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct IdleAnim {
+    pub clips: Vec<String>,
+    pub probability: u32,
+    pub ages: Vec<String>,
+    pub balloon: String,
+    /// Only for Sims with this trait (the game's trait name; empty: anyone).
+    #[serde(default)]
+    pub trait_required: String,
+}
+
+/// The game's idle tables: the everyday standing idles, and those by mood flavour (`Sad`,
+/// `Happy`...), trait (`Neurotic`...) and moodlet (`Hungry`, `HasToPee`...).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct IdleTables {
+    pub standing: Vec<IdleAnim>,
+    pub mood: Vec<(String, Vec<IdleAnim>)>,
+    pub traits: Vec<(String, Vec<IdleAnim>)>,
+    pub buffs: Vec<(String, Vec<IdleAnim>)>,
+}
+
+/// An idle table's rows, grouped under the row that names them (`key`; the rows after it
+/// without a name are more of its idles). The first row holds the defaults the others leave
+/// out. With no `key`, one group.
+fn idle_rows(xml: &str, row: &str, key: &str) -> Vec<(String, Vec<IdleAnim>)> {
+    let rows = records(xml, row);
+    let Some(defaults) = rows.first().cloned() else { return Vec::new() };
+    let field = |r: &HashMap<String, String>, k: &str| r.get(k).filter(|v| !v.is_empty()).or_else(|| defaults.get(k)).cloned().unwrap_or_default();
+    let mut out: Vec<(String, Vec<IdleAnim>)> = Vec::new();
+    if key.is_empty() {
+        out.push((String::new(), Vec::new()));
+    }
+    for r in rows.iter().skip(1) {
+        let name = if key.is_empty() { String::new() } else { r.get(key).cloned().unwrap_or_default() };
+        if !name.is_empty() {
+            out.push((name, Vec::new()));
+        }
+        let anim = r.get("AnimationName").cloned().unwrap_or_default();
+        let Some(group) = out.last_mut() else { continue };
+        // (Create a Sim's alone: the trait's preview there.)
+        if anim.is_empty() || field(r, "CASOnly") == "True" {
+            continue;
+        }
+        let trait_required = field(r, "TraitRequired");
+        group.1.push(IdleAnim {
+            clips: anim.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+            probability: field(r, "AnimationProbability").parse().unwrap_or(1),
+            ages: field(r, "AgesSpeciesAllowed").split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+            balloon: r.get("ThoughtBalloon").cloned().unwrap_or_default(),
+            trait_required: if trait_required == "Unknown" { String::new() } else { trait_required },
+        });
+    }
+    out.retain(|g| !g.1.is_empty());
+    out
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct BalloonTable {
     pub idle: HashMap<String, Vec<BalloonEntry>>,
@@ -237,6 +296,10 @@ impl BalloonTable {
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct GameDataBaked {
     pub version: u32,
+    /// The idle animations Sims play standing about (the game's `Idles`): by trait, moodlet and
+    /// mood, and the everyday ones.
+    #[serde(default)]
+    pub idles: IdleTables,
     pub buffs: Vec<BuffInfo>,
     pub traits: Vec<TraitInfo>,
     pub skills: Vec<SkillInfo>,
@@ -1397,6 +1460,15 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     let get = |f: &HashMap<String, String>, k: &str| f.get(k).cloned().unwrap_or_default();
 
     let mut out = GameDataBaked { version: GAMEDATA_VERSION, ..Default::default() };
+    // The idle animations.
+    if let Some(x) = xml("Idles") {
+        out.idles = IdleTables {
+            standing: idle_rows(&x, "StandingIdle", "").into_iter().next().map(|g| g.1).unwrap_or_default(),
+            mood: idle_rows(&x, "MoodIdle", "MoodFlavor"),
+            traits: idle_rows(&x, "TraitIdle", "Trait"),
+            buffs: idle_rows(&x, "BuffIdle", "BuffName"),
+        };
+    }
     progress("Converting: object effect slots…");
     let mut objds: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(s3pkg::types::OBJD).copied().collect();
     objds.sort();

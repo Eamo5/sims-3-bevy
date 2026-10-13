@@ -402,6 +402,12 @@ installation is unreachable.
   Once one needs it, "Clean" is offered: the game's scrubbing, with the toilet brush or the
   sponge in hand. Neat Sims clean up on their own; others when it's filthy; slobs never. Kept
   in saves.
+- **Idles**, as the game's (its `Idles` tuning, picked as its idle manager picks): Sims
+  standing about with nothing to do fidget now and then, an everyday idle (stretching,
+  scratching their head), their mood's (a smile and a nod; grumbling when tense), one of their
+  moodlets' (yawning when tired, the bladder dance, sniffing an armpit when smelly) or one of
+  their traits' (the Neurotic's, the Artistic's, the Grumpy's muttering...), weighted 1, 3, 6
+  and 6 as the game weights them; half of those with a thought balloon show it.
 - **Puddles**, as the game's: a broken shower, tub, sink or toilet sprays water and spills a
   puddle every quarter hour (four at most, running to the nearest free tile), and a Sim who
   couldn't make it to the bathroom leaves one. They dry up (two hours outdoors, eight on a

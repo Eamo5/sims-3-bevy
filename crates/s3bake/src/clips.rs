@@ -243,6 +243,22 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_beetle_catch",
     "c2o_butterfly_catch",
     "c2o_beetle_catch",
+    // Standing about: the game's idles (its `Idles` tuning) by trait, moodlet and mood.
+    "a_trait_",
+    "c_trait_",
+    "a_buff_",
+    "a_Buff_",
+    "c_buff_",
+    "a_motDistress_",
+    "a_motdistress_",
+    "c_motDistress_",
+    "a_idle_neutral_",
+    "a_idle_netural_",
+    "a_idle_grumpy_",
+    "c_idle_",
+    "a_react_awkward_x",
+    "a_react_annoyed_sigh_standing_x",
+    "a_soc_idle_neutral_",
     // Mopping up a puddle.
     "a2o_puddle_mopUp",
     // A change of clothes: a spin.

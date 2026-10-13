@@ -486,6 +486,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, queue_diff.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, zoom_shots.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, spin_shots.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, idle_shots.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_save.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_switch.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_load.run_if(in_state(AppState::MainMenu)))
@@ -2028,6 +2029,24 @@ fn all_use(
         sent += 1;
     }
     *done = sent > 0;
+}
+
+/// IDLE_SHOTS=<folder>: a picture of the selected Sim halfway through each idle they play (a
+/// dozen at most), named after it.
+fn idle_shots(mut commands: Commands, idling: Query<&crate::idles::Idling, With<crate::sim::Selected>>, mut was: Local<f32>, mut n: Local<u32>) {
+    let Ok(dir) = std::env::var("IDLE_SHOTS") else { return };
+    let Ok(i) = idling.single() else {
+        *was = 0.0;
+        return;
+    };
+    let (name, at) = i.progress();
+    if *was < 0.5 && at >= 0.5 && *n < 12 {
+        *n += 1;
+        let path = std::path::Path::new(&dir).join(format!("idle{:02}_{name}.png", *n));
+        info!("shot {}", path.display());
+        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+    }
+    *was = at;
 }
 
 /// SPIN_SHOTS=<folder>: a picture of each change of clothes mid-turn (in the sparkles) and just
