@@ -559,7 +559,8 @@ installation is unreachable.
   given a crib — a toddler or a child, a girl or a boy), who join the family a couple of hours
   later.
 - **Fire**: a poor (or clumsy) cook can set the stove alight; the flames flicker and light
-  the room, spread to what's beside them and ruin it, and Sims nearby panic with the game's
+  the room, spread to what's beside them and ruin it (charred, the model's own Burnt look,
+  until it's mended), and Sims nearby panic with the game's
   fire animations. Anyone caught in the flames burns, in flames head to foot, dashing about in
   a panic (the game's on-fire run) between bouts of flailing: they may stop, drop and roll, or die
   (the Grim Reaper comes). A smoke alarm calls the fire department at once (otherwise someone

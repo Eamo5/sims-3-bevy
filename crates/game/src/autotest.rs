@@ -481,6 +481,7 @@ impl Plugin for AutoTestPlugin {
                 .run_if(in_state(crate::PlayMode::Live)),
             )
             .add_systems(Update, auto_speed.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, look_kind.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_save.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_switch.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_load.run_if(in_state(AppState::MainMenu)))
@@ -2023,6 +2024,27 @@ fn all_use(
         sent += 1;
     }
     *done = sent > 0;
+}
+
+/// LOOK_KIND=<Kind>: the camera held on the household's first such object (a stove, to see it
+/// burn), from FOLLOW_DIST / FOLLOW_YAW / FOLLOW_PITCH.
+fn look_kind(time: Res<Time>, objects: Query<(&crate::interact::GameObject, &GlobalTransform)>, mut cam: Query<&mut SimsCamera>) {
+    let Ok(kind) = std::env::var("LOOK_KIND") else { return };
+    if time.elapsed_secs() < 8.0 {
+        return;
+    }
+    let (Some((_, g)), Ok(mut c)) = (objects.iter().find(|(o, _)| format!("{:?}", o.kind).eq_ignore_ascii_case(&kind)), cam.single_mut()) else { return };
+    c.look_at(g.translation());
+    let env = |k: &str| std::env::var(k).ok().and_then(|d| d.parse::<f32>().ok());
+    if let Some(d) = env("FOLLOW_DIST") {
+        c.distance = d;
+    }
+    if let Some(y) = env("FOLLOW_YAW") {
+        c.yaw = y;
+    }
+    if let Some(p) = env("FOLLOW_PITCH") {
+        c.pitch = p;
+    }
 }
 
 /// GRIME=<0-100>: every bathroom thing that dirty, a few seconds in.

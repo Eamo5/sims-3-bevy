@@ -15,6 +15,10 @@ impl Plugin for GrimePlugin {
     }
 }
 
+/// Burnt in a fire: charred, its `Burnt` look, until it's mended (the game's `Charred`).
+#[derive(Component)]
+pub struct Charred;
+
 /// How dirty something is: 0 clean, 100 filthy (the game's dirty level, turned about).
 #[derive(Component, Default)]
 pub struct Grime(pub f32);
@@ -72,15 +76,17 @@ pub struct MaterialStates {
 fn dirty_looks(
     mut parts: Query<(&mut MaterialStates, &mut MeshMaterial3d<StandardMaterial>, &ChildOf)>,
     up: Query<&ChildOf>,
-    objects: Query<(&GameObject, Option<&Grime>, Has<Broken>)>,
+    objects: Query<(&GameObject, Option<&Grime>, Has<Broken>, Has<Charred>)>,
 ) {
-    use s3formats::model::{STATE_CLOGGED, STATE_DIRTY, STATE_VERY_DIRTY};
+    use s3formats::model::{STATE_BURNT, STATE_CLOGGED, STATE_DIRTY, STATE_VERY_DIRTY};
     for (mut states, mut mat, parent) in &mut parts {
         // (The object: the part's model's parent, or the model itself.)
         let object = [parent.parent()].into_iter().chain(up.get(parent.parent()).ok().map(|p| p.parent())).find(|e| objects.contains(*e));
-        let Some((o, grime, broken)) = object.and_then(|e| objects.get(e).ok()) else { continue };
+        let Some((o, grime, broken, charred)) = object.and_then(|e| objects.get(e).ok()) else { continue };
         let g = grime.map_or(0.0, |g| g.0);
-        let want = if broken && o.kind == ObjectKind::Toilet {
+        let want = if charred {
+            STATE_BURNT
+        } else if broken && o.kind == ObjectKind::Toilet {
             STATE_CLOGGED
         } else if g >= LOOKS_VERY_DIRTY {
             STATE_VERY_DIRTY

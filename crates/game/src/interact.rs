@@ -3551,7 +3551,7 @@ pub(crate) fn run_actions(
                                         commands.entity(me).insert(crate::death::Shocked);
                                         notes.push(format!("{} was electrocuted trying to fix {}!", sim.first, the(&o.name)));
                                     } else {
-                                        commands.entity(*target).remove::<Broken>();
+                                        commands.entity(*target).remove::<(Broken, crate::grime::Charred)>();
                                         if let Ok(mut w) = wear.get_mut(*target) {
                                             w.sturdy_until = clock.minutes + STURDY_MINUTES;
                                         }

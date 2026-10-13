@@ -274,10 +274,10 @@ fn spread(
     let count = fires.iter().count();
     let mut rng = rand::rng();
     for (tf, mut f) in &mut fires {
-        // What's in the flames is ruined.
+        // What's in the flames is ruined: broken, and charred (the game's `Charred`).
         for (e, otf) in &objects {
             if otf.translation().xz().distance(tf.translation.xz()) < 0.9 && (otf.translation().y - tf.translation.y).abs() < 1.5 {
-                commands.entity(e).insert(crate::interact::Broken);
+                commands.entity(e).insert((crate::interact::Broken, crate::grime::Charred));
             }
         }
         if clock.minutes < f.next_spread {
