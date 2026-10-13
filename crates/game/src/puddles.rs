@@ -241,7 +241,7 @@ fn add_puddles(
 fn dry_up(mut commands: Commands, clock: Res<GameClock>, puddles: Query<(Entity, &Puddle, &UsedBy)>) {
     for (e, p, used) in &puddles {
         if clock.minutes >= p.until && used.0.is_none() {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
     }
 }

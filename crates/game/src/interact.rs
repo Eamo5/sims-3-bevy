@@ -2821,7 +2821,15 @@ pub(crate) fn run_actions(
                                         // (At the routing slot, facing its way: the game's clips
                                         // are played from there.)
                                         let w = otf.transform_point(Vec3::new(p.x, 0.0, p.y));
-                                        tf.translation = Vec3::new(w.x, tf.translation.y, w.z);
+                                        // (Not through a wall or a window to it, nor from far off:
+                                        // a slot the walk couldn't reach is used from where it
+                                        // ended, not stood in, stranded, behind the glass.)
+                                        let here = tf.translation.xz();
+                                        let floor_grid = if floor.0 == 1 { Some(my_grid) } else { my_upper.and_then(|u| u.grids.get(&floor.0)) };
+                                        let walled = floor_grid.is_some_and(|g| g.crosses(here, w.xz()));
+                                        if !walled && here.distance(w.xz()) < 1.5 {
+                                            tf.translation = Vec3::new(w.x, tf.translation.y, w.z);
+                                        }
                                         tf.rotation = otf.rotation * Quat::from_rotation_y(f.x.atan2(f.y));
                                         anim.seat_height = 0.0;
                                     } else if !making {

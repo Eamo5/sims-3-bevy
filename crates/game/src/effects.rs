@@ -515,7 +515,7 @@ fn fall(
     for (e, mut d, mut tf) in &mut drops {
         d.age += dt;
         if d.age >= d.life {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
             continue;
         }
         d.vel.y -= 9.8 * dt;
@@ -630,11 +630,11 @@ fn sparkle(
     for (e, mut s, mut tf, m) in &mut q {
         s.age += dt;
         let Ok(at) = sims.get(s.sim) else {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
             continue;
         };
         if s.age >= s.life {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
             continue;
         }
         s.angle += s.turn * dt;
