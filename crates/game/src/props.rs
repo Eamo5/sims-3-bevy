@@ -35,6 +35,8 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("toothbrush", "Toothbrush", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("sponge", "AccessorySponge", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("toiletBrush", "ToiletBrush", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    // (The mop's clip carries it about from the Sim's root.)
+    ("mop", "cleaningMop", "b__ROOT__", [0.0; 3], [0.0; 3]),
     ("guitar", "musicalInstrumentGuitar", "b__R_carry_slot", [0.0, 0.43762, -0.020687], [0.0, -0.08, 0.17]),
     ("spatula", "Spatula", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("scythe", "DeathScythe", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
@@ -231,7 +233,8 @@ fn hold_props(
             // shown while the clip has it elsewhere than on the Sim: a toy still on the floor.)
             let parent = clip.parents.iter().rev().find(|p| p.time <= t + 1e-3);
             if let Ok(mut v) = shown.get_mut(entity) {
-                let on_sim = parent.is_none_or(|p| p.parent == SIM_ACTOR);
+                // (The mop's clip carries it about the puddle's root, where the Sim stands.)
+                let on_sim = parent.is_none_or(|p| p.parent == SIM_ACTOR) || OBJECT_SPACE.contains(&PROPS[*i].0);
                 v.set_if_neq(if on_sim { Visibility::Inherited } else { Visibility::Hidden });
             }
             if let Some(p) = parent.filter(|p| p.parent == SIM_ACTOR)
@@ -254,6 +257,10 @@ fn hold_props(
         }
     }
 }
+
+/// Props whose clips move them about the object's root rather than in a Sim's hand: held at
+/// the Sim's root, the object's origin, where they stand to use it.
+const OBJECT_SPACE: &[&str] = &["mop"];
 
 /// fnv32("x"): the Sim in an object clip.
 const SIM_ACTOR: u32 = 0x050C5D67;

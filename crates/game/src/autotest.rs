@@ -3494,6 +3494,14 @@ fn auto_action(
         *done = true;
         return;
     }
+    // "Flood": a sink breaks (and is left broken, spilling puddles).
+    if name == "Flood" {
+        if let Some((e, _)) = objects.iter().find(|(_, o)| o.kind == crate::interact::ObjectKind::Sink) {
+            commands.entity(e).insert(crate::interact::Broken);
+        }
+        *done = true;
+        return;
+    }
     // "Break": a shower breaks and the selected Sim repairs it.
     if name == "Break" {
         if let Some((e, _)) = objects.iter().find(|(_, o)| o.kind == crate::interact::ObjectKind::Shower) {

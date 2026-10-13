@@ -99,6 +99,8 @@ pub enum ObjectKind {
     JungleGym,
     /// A playground slide: up its ladder and down it.
     Slide,
+    /// Water on the floor (see `puddles`).
+    Puddle,
     Foosball,
     Table,
     Light,
@@ -439,6 +441,7 @@ impl ObjectKind {
                 "Hobbies"
             }
             Self::SwingSet | Self::JungleGym | Self::Slide | Self::DollHouse | Self::StuffedToy => "Kids",
+            Self::Puddle => "Misc",
             Self::Sprinkler => "Outdoors",
             Self::DivingBoard => "Outdoors",
             Self::Bar => "Surfaces",
@@ -872,6 +875,8 @@ pub enum Special {
     Clear,
     /// Making an unmade bed (offered only then).
     MakeBed,
+    /// A puddle mopped up.
+    MopUp,
     /// Cleaning a dirty toilet, shower, tub or sink (offered once it needs it: `grime`).
     Scrub,
     /// WooHoo in a double bed with their partner, or trying for a baby (the socials of those
@@ -1163,6 +1168,8 @@ static DOLLHOUSE: [InteractionDef; 1] = [def("Play with Dollhouse", 45.0, [0.0, 
 static JUNGLEGYM: [InteractionDef; 1] = [def("Play on Jungle Gym", 40.0, [0.0, 0.0, -8.0, 0.0, -8.0, 95.0], Pose::Use)];
 /// (Up the ladder and down the slide, once: played again and again, as children do.)
 static SLIDE: [InteractionDef; 1] = [def("Play on Slide", 9.6, [0.0, 0.0, -8.0, 0.0, -6.0, 110.0], Pose::Use)];
+/// (The game's `kTimeToMopPuddle`: five minutes with the mop.)
+static PUDDLE: [InteractionDef; 1] = [InteractionDef { special: Special::MopUp, ..def("Mop Up", 5.0, [0.0, 0.0, -2.0, 0.0, -4.0, -4.0], Pose::Use) }];
 static FOOSBALL: [InteractionDef; 1] = [def("Play Foosball", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 65.0], Pose::Use)];
 static POOL_TABLE: [InteractionDef; 1] = [def("Play Pool", 45.0, [0.0, 0.0, -3.0, 0.0, 0.0, 60.0], Pose::Use)];
 static DARTBOARD: [InteractionDef; 1] = [def("Throw Darts", 30.0, [0.0, 0.0, -3.0, 0.0, 0.0, 55.0], Pose::Use)];
@@ -1334,6 +1341,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
             A::new(Some("a2o_bathtub_clean_start_x"), &["a2o_bathtub_clean_loop1_x", "a2o_bathtub_clean_loop2_x", "a2o_bathtub_clean_loop3_x"]).ending(&["a2o_bathtub_clean_stop_x"], 1.5)
         }
         "Clean" if kind == ObjectKind::Sink => A::new(Some("a2o_sink_clean_start_x"), &["a2o_sink_clean_loop1_x", "a2o_sink_clean_loop2_x"]).ending(&["a2o_sink_clean_stop_x"], 1.5),
+        "Mop Up" => A::new(Some("a2o_puddle_mopUp_start_x"), &["a2o_puddle_mopUp_loop_1_x", "a2o_puddle_mopUp_loop_2_x"]).ending(&["a2o_puddle_mopUp_stop_x"], 1.2),
         "Make Bed" => A::steps("a2o_bed_make_start_x", &["a2o_bed_make_smooth_x", "a2o_bed_make_pat_x"], &["a2o_bed_make_smooth_x"]).ending(&["a2o_bed_make_stop_x"], 1.0),
         "Nap" if kind == ObjectKind::Sofa => A::new(Some("a2o_sofa_sit_trans_nap_x"), &["a2o_sofa_nap_loop1_x"]),
         "Eat" if matches!(kind, ObjectKind::Chair | ObjectKind::PicnicTable) => A::new(Some("a2o_eat_diningIn_fork_start_x"), &["a2o_eat_diningIn_fork_neat_x"]).ending(&["a2o_eat_diningIn_fork_stop_x"], 0.9),
@@ -1703,7 +1711,7 @@ impl ObjectKind {
             Age::Baby => false,
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy),
             // (Children can't cook or light fires, and the goggles are for teens and up.)
-            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench),
+            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle),
             _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::DollHouse | K::JungleGym | K::Slide | K::StuffedToy | K::ToyOven),
         }
     }
@@ -1768,6 +1776,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::DollHouse => &DOLLHOUSE,
         ObjectKind::JungleGym => &JUNGLEGYM,
         ObjectKind::Slide => &SLIDE,
+        ObjectKind::Puddle => &PUDDLE,
         ObjectKind::Foosball => &FOOSBALL,
         ObjectKind::PoolTable => &POOL_TABLE,
         ObjectKind::Dartboard => &DARTBOARD,
@@ -3124,6 +3133,9 @@ pub(crate) fn run_actions(
                                         Special::MakeBed => {
                                             commands.entity(*target).remove::<Unmade>();
                                         }
+                                        Special::MopUp => {
+                                            commands.entity(*target).try_despawn();
+                                        }
                                         Special::Scrub => {
                                             commands.entity(*target).insert(crate::grime::Grime(0.0));
                                         }
@@ -4314,6 +4326,20 @@ fn autonomy(
                         8.0
                     } else {
                         1.5
+                    };
+                }
+                // (Puddles mopped: by Neat Sims as soon as they see one, others now and then,
+                // slobs never.)
+                if d.special == Special::MopUp {
+                    if used.0.is_some() {
+                        continue;
+                    }
+                    score = if sim.traits.contains(&crate::life::Trait::Slob) {
+                        0.0
+                    } else if sim.traits.contains(&crate::life::Trait::Neat) {
+                        30.0
+                    } else {
+                        4.0
                     };
                 }
                 if d.special == Special::MakeBed {

@@ -391,7 +391,7 @@ fn sprinkler_spray(
 fn emit(
     mut commands: Commands,
     time: Res<Time>,
-    mut emitters: Query<(&mut Emitter, &GlobalTransform, &UsedBy, &InheritedVisibility, Has<crate::gardening::Sprinkling>, Has<ShowerOnly>)>,
+    mut emitters: Query<(&mut Emitter, &GlobalTransform, &UsedBy, &InheritedVisibility, Has<crate::gardening::Sprinkling>, Has<ShowerOnly>, Has<crate::interact::Broken>)>,
     users: Query<(&GlobalTransform, &ActionQueue), With<crate::sim::Sim>>,
     (mut cues, sims): (MessageWriter<crate::sound::ClipCue>, Query<&crate::sim::Sim>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
@@ -399,13 +399,16 @@ fn emit(
 ) {
     let dt = time.delta_secs().min(0.1);
     let mut rng = rand::rng();
-    for (mut em, gt, used, vis, sprinkling, shower_only) in &mut emitters {
+    for (mut em, gt, used, vis, sprinkling, shower_only, broken) in &mut emitters {
         if !vis.get() {
             continue;
         }
+        // (Broken, a tap or a shower sprays all the while: water everywhere, and puddles.)
+        let leaking = broken && matches!(em.spray, Spray::Tap | Spray::Shower);
         let on = match em.spray {
             Spray::Fountain => true,
             Spray::Sprinkler => sprinkling,
+            _ if leaking => true,
             // (Someone at it, not just on their way.)
             _ => used.0.and_then(|u| users.get(u).ok()).is_some_and(|(u, q)| {
                 u.translation().xz().distance(gt.translation().xz()) < 1.3
@@ -439,6 +442,7 @@ fn emit(
             debug!("{:?} running at {:?}", em.spray, gt.transform_point(em.slot));
         }
         let rate = match em.spray {
+            Spray::Tap if leaking => 120.0,
             Spray::Fountain => 170.0,
             Spray::Sprinkler => 140.0,
             Spray::Shower => 110.0,
@@ -478,6 +482,11 @@ fn emit(
                 Spray::Shower => {
                     let out = rng.random_range(0.0..0.22);
                     (Vec3::new(a.cos() * out, -1.0, a.sin() * out), rng.random_range(1.2..2.0), 0.85, 0.035, 0.06)
+                }
+                // (A broken tap spurts up and out.)
+                Spray::Tap if leaking => {
+                    let out = rng.random_range(0.15..0.6);
+                    (Vec3::new(a.cos() * out, 1.0, a.sin() * out), rng.random_range(1.4..2.4), rng.random_range(0.35..0.55), 0.03, 0.01)
                 }
                 Spray::Tap => (Vec3::new(0.0, -1.0, 0.0), 0.4, 0.3, 0.025, 0.005),
             };

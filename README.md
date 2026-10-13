@@ -393,6 +393,11 @@ installation is unreachable.
   Once one needs it, "Clean" is offered: the game's scrubbing, with the toilet brush or the
   sponge in hand. Neat Sims clean up on their own; others when it's filthy; slobs never. Kept
   in saves.
+- **Puddles**, as the game's: a broken shower, tub, sink or toilet sprays water and spills a
+  puddle every quarter hour (four at most, running to the nearest free tile), and a Sim who
+  couldn't make it to the bathroom leaves one. They dry up (two hours outdoors, eight on a
+  floor) or are mopped up with the game's mop clips (five minutes): Neat Sims do it on their
+  own, slobs never. Kept in saves.
 - **Unmade beds**: a bed slept, napped or lazed in is left unmade, its covers thrown back, until
   someone makes it ("Make Bed", from beside it, with the game's clips: the covers pulled up,
   smoothed and patted; Neat Sims do it on their own). An unmade bed is got into as it is. Kept

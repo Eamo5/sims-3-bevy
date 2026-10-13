@@ -933,11 +933,12 @@ fn need_moodlets(mut q: Query<(&Motives, &Sim, &mut Moodlets)>) {
 /// sleeping on the floor a couple of hours and getting up again).
 fn need_failures(
     clock: Res<GameClock>,
-    mut q: Query<(Entity, &Sim, &mut Motives, &mut Moodlets, &mut crate::interact::ActionQueue, &InheritedVisibility)>,
+    mut q: Query<(Entity, &Sim, &mut Motives, &mut Moodlets, &mut crate::interact::ActionQueue, &InheritedVisibility, &Transform, Option<&crate::nav::Floor>)>,
     mut notes: ResMut<crate::interact::Notifications>,
+    mut puddles: MessageWriter<crate::puddles::AddPuddle>,
 ) {
     use crate::interact::{Action, ActionKind};
-    for (_, sim, mut m, mut ml, mut queue, vis) in &mut q {
+    for (_, sim, mut m, mut ml, mut queue, vis, tf, floor) in &mut q {
         // (Babies and toddlers are seen to by others; away, it happens off stage.)
         let shown = vis.get() && !sim.age.is_little();
         let failing = |q: &crate::interact::ActionQueue| q.0.iter().any(|a| matches!(a.kind, ActionKind::MotiveFail(_)) && !a.cancel);
@@ -951,6 +952,8 @@ fn need_failures(
                     a.cancel = true;
                 }
                 queue.0.push_back(Action::new("Accident", ActionKind::MotiveFail(0), false));
+                // (And there's a puddle to mop up.)
+                puddles.write(crate::puddles::AddPuddle { at: tf.translation, level: floor.map_or(1, |f| f.0), lasts: None });
             }
         }
         if m.0[ENERGY] <= -99.0 && !failing(&queue) {

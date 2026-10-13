@@ -308,6 +308,9 @@ pub struct SaveGame {
     /// Grime and unmade beds.
     #[serde(default)]
     pub object_states: Vec<SavedObjectState>,
+    /// Water on the floor.
+    #[serde(default)]
+    pub puddles: Vec<crate::puddles::SavedPuddle>,
     pub version: u32,
     pub world: String,
     pub lot_index: usize,
@@ -750,7 +753,7 @@ fn save_game(
         Query<(&crate::pets::Pet, &crate::pets::HomePet, &Transform)>,
         Res<crate::pets::PetData>,
     ),
-    (mut slot, maid, mail_due, upgraded, family, strokes, sculpted, broken, family_inventory): (
+    (mut slot, maid, mail_due, upgraded, family, strokes, sculpted, broken, family_inventory, puddles): (
         ResMut<SaveSlot>,
         Res<crate::services::MaidService>,
         Option<Res<crate::services::MailDue>>,
@@ -763,6 +766,7 @@ fn save_game(
             (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>),
         >,
         Res<crate::familyinv::FamilyInventory>,
+        Query<(&Transform, &crate::nav::Floor, &crate::puddles::Puddle)>,
     ),
 ) {
     let new_file = save_as.read().count() > 0;
@@ -859,6 +863,7 @@ fn save_game(
     }
     let game = SaveGame {
         broken_objects: broken.iter().filter(|b| b.2).map(|(o, tf, _, charred, ..)| SavedBroken { objd: o.objd, position: tf.translation.to_array(), charred }).collect(),
+        puddles: crate::puddles::saved(&clock, &puddles),
         object_states: broken
             .iter()
             .filter(|(.., grime, unmade)| grime.is_some_and(|g| g.0 > 0.0) || *unmade)
@@ -1010,6 +1015,7 @@ pub(crate) fn apply_loaded_game(
     delta.0 = 0.0;
     commands.insert_resource(PendingBroken(game.broken_objects.clone(), None));
     commands.insert_resource(PendingStates(game.object_states.clone(), None));
+    commands.insert_resource(crate::puddles::PendingPuddles(game.puddles.clone()));
     // A restored date is not a midnight tick, even when loading within a session.
     commands.insert_resource(crate::aging::AgingDay::default());
     if let Some(h) = household.as_mut() {

@@ -243,6 +243,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_beetle_catch",
     "c2o_butterfly_catch",
     "c2o_beetle_catch",
+    // Mopping up a puddle.
+    "a2o_puddle_mopUp",
     // A change of clothes: a spin.
     "a_clothesChange",
     "c_clothesChange",
