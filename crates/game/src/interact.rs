@@ -2260,7 +2260,14 @@ pub(crate) fn run_actions(
             Option<&mut PathFollow>,
             Option<&mut Job>,
             &Floor,
-            (Option<&crate::wishes::Wishes>, Option<&crate::paintings::PaintPlan>, Option<&crate::life::Moodlets>, Option<&crate::little::Pregnancy>, Option<&mut crate::rabbitholes::Homework>),
+            (
+                Option<&crate::wishes::Wishes>,
+                Option<&crate::paintings::PaintPlan>,
+                Option<&crate::life::Moodlets>,
+                Option<&crate::little::Pregnancy>,
+                Option<&mut crate::rabbitholes::Homework>,
+                (Option<&crate::simbody::Wearing>, Has<crate::dressing::ClothesSpin>),
+            ),
             Option<&crate::opportunities::SimOpportunities>,
             Option<&crate::visit::OnLot>,
         ),
@@ -2322,7 +2329,7 @@ pub(crate) fn run_actions(
     // Relationship changes to apply to both Sims: (a, b, status, kissed)
     let mut status_fx: Vec<(Entity, Entity, Option<RelStatus>, bool)> = Vec::new();
 
-    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, mut job, floor, (wishes, plan, moodlets, pregnancy, mut homework), opps, on_lot) in &mut sims {
+    for (me, sim, mut queue, mut tf, mut motives, mut decay, mut anim, mut skills, mut rels, path, mut job, floor, (wishes, plan, moodlets, pregnancy, mut homework, (wearing, spinning)), opps, on_lot) in &mut sims {
         let mood_learning = who.get(&me).map_or(1.0, |(_, mood, _, _)| mood.skill_rate());
         // Out on a community lot: its walk grid and way out.
         let away = on_lot.and_then(|o| visited.as_deref().filter(|v| v.lot == o.0));
@@ -2619,6 +2626,21 @@ pub(crate) fn run_actions(
                 }
                 Phase::Routing => {
                     let arrived = path.as_ref().is_some_and(|p| p.done);
+                    // (Changed for it first, with a spin: into pyjamas by the bed, out of their
+                    // clothes by the bath, before getting in.)
+                    if arrived && spinning {
+                        continue;
+                    }
+                    if arrived
+                        && crate::dressing::spins(sim)
+                        && let ActionKind::Object { target, def } = &action.kind
+                        && let Ok((obj, ..)) = objects.get(*target)
+                        && let Some(want) = interactions_for(obj.kind).get(*def).and_then(|d| crate::swim::outfit_for_use(obj.kind, d))
+                        && wearing.map(|w| w.0) != Some(want)
+                    {
+                        crate::dressing::start(&mut commands, me, Some(want), false);
+                        continue;
+                    }
                     if arrived {
                         commands.entity(me).remove::<PathFollow>();
                         action.phase = Phase::Running(0.0);
@@ -3155,18 +3177,15 @@ pub(crate) fn run_actions(
                                             notes.push(format!("{} finished a painting ({}, worth §{}). It's in their inventory.", sim.first, p.name.to_lowercase(), p.worth));
                                         }
                                         Special::ChangeClothes => {
-                                            // Into the outfit chosen, kept on until it's time for another.
-                                            let outfit = action.outfit_choice.take();
-                                            commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| {
-                                                use crate::simbody::{ChangedInto, OutfitKind, Wearing};
-                                                let Some(kind) = outfit else { return };
-                                                if kind == OutfitKind::Everyday {
-                                                    e.remove::<(Wearing, ChangedInto)>();
+                                            // Into the outfit chosen, with a spin, kept on until it's time for another.
+                                            if let Some(kind) = action.outfit_choice.take() {
+                                                let to = (kind != crate::simbody::OutfitKind::Everyday).then_some(kind);
+                                                if crate::dressing::spins(sim) {
+                                                    crate::dressing::start(&mut commands, me, to, true);
                                                 } else {
-                                                    e.insert((Wearing(kind), ChangedInto));
+                                                    crate::dressing::put_on(&mut commands.entity(me), to, true);
                                                 }
-                                                e.insert(crate::aging::NeedsNewBody);
-                                            });
+                                            }
                                         }
                                         Special::ToggleAlarm => {
                                             commands.queue(|w: &mut World| {

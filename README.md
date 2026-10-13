@@ -370,7 +370,12 @@ installation is unreachable.
   nightgowns, boxers), and into athletic wear to work out, and dress again after. They undress
   for a shower or a bath (the game's naked outfit, which has no anatomy) under its censor, a
   mosaic in their skin's colours over a man's hips or a woman's chest and hips, and dress again
-  after (in pyjamas when it's late, as the game's `GettingOutOfBath`).
+  after (in pyjamas when it's late, as the game's `GettingOutOfBath`). Every change is the
+  game's spin (`a_clothesChange`, a child's own), in a swirl of sparkles with its whoosh, the
+  new clothes on mid-turn: by the bed, the shower or the bench before getting in or on (not on
+  the way, and not to clean the shower), out of the bath once they're out, at the dresser, on
+  the way out to work or into the cold (a walk waits for it). Babies and toddlers are changed
+  as they are.
 - **Baths**: as the game's: stood in the tub, the taps turned on and the water rising (the
   tub's own water, raised by its half of the clip), sat down, arms and legs washed, then lying
   back; sat up and out at the end. The rubber ducky's played with in the water too, and a

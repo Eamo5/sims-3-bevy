@@ -949,7 +949,10 @@ fn follow_paths(
     clock: Res<GameClock>,
     world: Res<CurrentWorld>,
     building: Option<Res<crate::building::ActiveBuilding>>,
-    mut q: Query<(&mut Transform, &mut PathFollow, &mut SimAnim, &mut Floor, Option<&crate::sim::Sim>, Option<&crate::little::Pregnancy>), Without<crate::portraits::Staged>>,
+    mut q: Query<
+        (&mut Transform, &mut PathFollow, &mut SimAnim, &mut Floor, Option<&crate::sim::Sim>, Option<&crate::little::Pregnancy>),
+        (Without<crate::portraits::Staged>, Without<crate::dressing::ClothesSpin>),
+    >,
 ) {
     let rate = SPEED_RATES[clock.speed];
     let dt = time.delta_secs().min(0.1) * rate;

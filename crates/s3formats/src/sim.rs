@@ -462,6 +462,44 @@ pub fn clip_parents(res: &[u8]) -> Vec<ClipParent> {
     out
 }
 
+/// Every event of a CLIP resource's event table, raw: kind, time, name and the strings and
+/// words of its payload (a dev tool's).
+pub fn clip_events(res: &[u8]) -> Vec<(u16, f32, String, Vec<String>, Vec<u32>)> {
+    let mut out = Vec::new();
+    let Ok(rel) = u32_at(res, 0x18) else { return out };
+    let start = 0x18 + rel as usize;
+    if res.get(start..start + 4) != Some(b"=CE=") {
+        return out;
+    }
+    let count = u32_at(res, start + 8).unwrap_or(0) as usize;
+    let end = (start + 20 + u32_at(res, start + 12).unwrap_or(0) as usize + 64).min(res.len());
+    let mut o = start + 20;
+    while o + 28 <= end && out.len() < count {
+        let kind = u16_at(res, o).unwrap_or(0);
+        let a = u32_at(res, o + 12).unwrap_or(0);
+        let b = u32_at(res, o + 16).unwrap_or(0);
+        if !(1..=40).contains(&kind) || a != 0xBF80_0000 || b != 0xBF80_0000 {
+            o += 4;
+            continue;
+        }
+        let time = f32_at(res, o + 8).unwrap_or(0.0);
+        let len = u32_at(res, o + 24).unwrap_or(0) as usize;
+        let name = cstr(res, o + 28);
+        let payload = o + 28 + ((len + 1 + 3) & !3);
+        // (Up to the next event's header, or a little way.)
+        let mut next = payload;
+        while next + 28 <= end && !(u32_at(res, next + 12).ok() == Some(0xBF80_0000) && u32_at(res, next + 16).ok() == Some(0xBF80_0000) && (1..=40).contains(&u16_at(res, next).unwrap_or(0))) {
+            next += 4;
+        }
+        let body = &res[payload.min(res.len())..next.min(res.len()).max(payload.min(res.len()))];
+        let strings: Vec<String> = body.split(|c| *c == 0).filter(|s| s.len() >= 3 && s.iter().all(|c| c.is_ascii_graphic())).map(|s| String::from_utf8_lossy(s).into_owned()).collect();
+        let words: Vec<u32> = body.chunks_exact(4).take(12).map(|w| u32::from_le_bytes(w.try_into().unwrap())).collect();
+        out.push((kind, time, name, strings, words));
+        o = payload;
+    }
+    out
+}
+
 /// Splits a script event like `play_sound_a_chp__cheap___a_norm__normal___a_exp__expensive`
 /// into the action and the sound for the normal-quality object.
 pub fn script_sound(script: &str) -> Option<(SoundAction, String)> {

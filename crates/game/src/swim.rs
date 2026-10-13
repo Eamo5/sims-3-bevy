@@ -25,31 +25,47 @@ impl Plugin for SwimPlugin {
 #[allow(clippy::type_complexity)]
 fn pyjamas(
     mut commands: Commands,
-    sims: Query<(Entity, &Sim, &ActionQueue, Option<&crate::simbody::Wearing>, Option<&crate::careers::Job>, Has<crate::simbody::ChangedInto>, &Transform), With<crate::sim::HouseholdMember>>,
+    sims: Query<
+        (
+            Entity,
+            &Sim,
+            &ActionQueue,
+            Option<&crate::simbody::Wearing>,
+            Option<&crate::careers::Job>,
+            Has<crate::simbody::ChangedInto>,
+            &Transform,
+            (Has<ActionClip>, Has<crate::dressing::ClothesSpin>, &InheritedVisibility),
+        ),
+        With<crate::sim::HouseholdMember>,
+    >,
     beds: Query<&GameObject>,
     cas: Option<Res<crate::simbody::CasData>>,
     (weather, building, clock): (Res<crate::weather::Weather>, Option<Res<crate::building::ActiveBuilding>>, Res<crate::clock::GameClock>),
 ) {
-    use crate::simbody::{OutfitKind, Wearing};
+    use crate::simbody::OutfitKind;
     let cold = weather.temperature < COLD;
-    for (e, sim, queue, wearing, job, chosen, tf) in &sims {
+    for (e, sim, queue, wearing, job, chosen, tf, (acting, spinning, shown)) in &sims {
+        if spinning {
+            continue;
+        }
         let uniform = job.and_then(|j| j.uniform(sim)).is_some_and(|u| cas.as_ref().is_some_and(|c| c.outfits.contains_key(u)));
+        // (On their way to something with its own clothes, left as they are: they change there,
+        // and stay changed for it.)
+        let on_the_way = queue.0.front().is_some_and(|a| match (&a.kind, a.phase) {
+            (ActionKind::Object { target, def }, Phase::Start | Phase::Routing) => {
+                beds.get(*target).ok().and_then(|o| interactions_for(o.kind).get(*def).and_then(|d| outfit_for_use(o.kind, d))).is_some()
+            }
+            _ => false,
+        });
+        if on_the_way {
+            continue;
+        }
         let want = queue.0.front().and_then(|a| match (&a.kind, a.phase) {
             (ActionKind::GoToWork, _) if uniform => Some(OutfitKind::Career),
             (ActionKind::Jog { .. }, Phase::Running(_)) => Some(OutfitKind::Athletic),
             (ActionKind::Object { target, def }, Phase::Running(_)) => {
                 let o = beds.get(*target).ok()?;
-                let d = interactions_for(o.kind).get(*def)?;
-                if matches!(o.kind, crate::interact::ObjectKind::BedSingle | crate::interact::ObjectKind::BedDouble) && d.name == "Sleep" {
-                    Some(OutfitKind::Sleepwear)
-                } else if matches!(o.kind, crate::interact::ObjectKind::Shower | crate::interact::ObjectKind::Bathtub | crate::interact::ObjectKind::ShowerTub) {
-                    // (Undressed for a shower or a bath, as the game's `GoingToBathe`.)
-                    Some(OutfitKind::Naked)
-                } else if d.pose == crate::sim::Pose::Exercise {
-                    Some(OutfitKind::Athletic)
-                } else {
-                    None
-                }
+                outfit_for_use(o.kind, interactions_for(o.kind).get(*def)?)
             }
             _ => None,
         });
@@ -64,21 +80,36 @@ fn pyjamas(
         }
         // Out of the bath at night, into pyjamas (the game's `GettingOutOfBath`: within ten hours
         // of six in the morning, at home), kept on until it's time for something else.
-        if want.is_none() && has == Some(OutfitKind::Naked) && !sim.age.is_little() {
-            let until_six = (6.0 - clock.hour_f()).rem_euclid(24.0);
-            if until_six < 10.0 {
-                commands.entity(e).insert((Wearing(OutfitKind::Sleepwear), crate::simbody::ChangedInto, crate::aging::NeedsNewBody));
-                continue;
-            }
+        let night = (6.0 - clock.hour_f()).rem_euclid(24.0) < 10.0;
+        let (to, keep_on) = if want.is_none() && has == Some(OutfitKind::Naked) && !sim.age.is_little() && night { (Some(OutfitKind::Sleepwear), true) } else { (want, false) };
+        if to == has {
+            continue;
         }
-        match want {
-            Some(k) => {
-                commands.entity(e).remove::<crate::simbody::ChangedInto>().insert((Wearing(k), crate::aging::NeedsNewBody));
-            }
-            None => {
-                commands.entity(e).remove::<Wearing>().insert(crate::aging::NeedsNewBody);
-            }
+        // With a spin, when they're free to turn round; in the middle of something (climbing out
+        // of the bath) they're dressed once it's done, and what's worn for it is put on as it is.
+        if crate::dressing::spins(sim) && shown.get() && !acting {
+            crate::dressing::start(&mut commands, e, to, keep_on);
+        } else if acting && want.is_none() && shown.get() {
+            continue;
+        } else {
+            crate::dressing::put_on(&mut commands.entity(e), to, keep_on);
         }
+    }
+}
+
+/// What's worn to use something: pyjamas to sleep, nothing in the shower or the bath (the game's
+/// `GoingToBathe`; not to clean them), workout clothes to work out.
+pub fn outfit_for_use(kind: crate::interact::ObjectKind, d: &crate::interact::InteractionDef) -> Option<crate::simbody::OutfitKind> {
+    use crate::interact::ObjectKind as K;
+    use crate::simbody::OutfitKind;
+    if matches!(kind, K::BedSingle | K::BedDouble) && d.name == "Sleep" {
+        Some(OutfitKind::Sleepwear)
+    } else if matches!(kind, K::Shower | K::Bathtub | K::ShowerTub) && d.on_object {
+        Some(OutfitKind::Naked)
+    } else if d.pose == crate::sim::Pose::Exercise {
+        Some(OutfitKind::Athletic)
+    } else {
+        None
     }
 }
 

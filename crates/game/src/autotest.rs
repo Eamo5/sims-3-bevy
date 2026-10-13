@@ -482,6 +482,8 @@ impl Plugin for AutoTestPlugin {
             )
             .add_systems(Update, auto_speed.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, look_kind.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, queue_log.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, spin_shots.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_save.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_switch.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_load.run_if(in_state(AppState::MainMenu)))
@@ -2024,6 +2026,58 @@ fn all_use(
         sent += 1;
     }
     *done = sent > 0;
+}
+
+/// SPIN_SHOTS=<folder>: a picture of each change of clothes mid-turn (in the sparkles) and just
+/// after (in the new clothes), up to a dozen.
+fn spin_shots(mut commands: Commands, spins: Query<&crate::dressing::ClothesSpin>, mut was: Local<Vec<f32>>, mut n: Local<u32>) {
+    let Ok(dir) = std::env::var("SPIN_SHOTS") else { return };
+    let now: Vec<f32> = spins.iter().map(|s| s.at()).collect();
+    for t in &now {
+        let before = was.iter().copied().filter(|w| w <= t).fold(-1.0f32, f32::max);
+        for mark in [0.4, 0.75] {
+            if before < mark && *t >= mark && *n < 12 {
+                *n += 1;
+                let path = std::path::Path::new(&dir).join(format!("spin{:02}_{mark}.png", *n));
+                info!("shot {}", path.display());
+                commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+            }
+        }
+    }
+    *was = now;
+}
+
+/// QUEUE_LOG=<seconds>: that often, what each Sim of the household is about (the action, its
+/// phase, whether they've a path and how far along it, and where they are): for finding Sims
+/// who stall.
+#[allow(clippy::type_complexity)]
+fn queue_log(
+    time: Res<Time>,
+    clock: Res<crate::clock::GameClock>,
+    mut last: Local<f32>,
+    sims: Query<(&crate::sim::Sim, &Transform, &crate::interact::ActionQueue, Option<&crate::nav::PathFollow>, Has<crate::portraits::Staged>, Has<crate::anim::ActionClip>), With<crate::sim::HouseholdMember>>,
+) {
+    let Some(every) = std::env::var("QUEUE_LOG").ok().and_then(|v| v.parse::<f32>().ok()) else { return };
+    if time.elapsed_secs() - *last < every {
+        return;
+    }
+    *last = time.elapsed_secs();
+    for (sim, tf, q, path, staged, clip) in &sims {
+        let path = path.map(|p| (p.done, p.waypoints.len()));
+        info!(
+            "queue {} @{:.0}: {:?} path {:?} staged {} clip {} at {:.1},{:.1},{:.1} (+{} more)",
+            sim.first,
+            clock.minutes,
+            q.0.front().map(|a| (&a.label, a.phase)),
+            path,
+            staged,
+            clip,
+            tf.translation.x,
+            tf.translation.y,
+            tf.translation.z,
+            q.0.len().saturating_sub(1)
+        );
+    }
 }
 
 /// LOOK_KIND=<Kind>: the camera held on the household's first such object (a stove, to see it

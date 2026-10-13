@@ -599,6 +599,23 @@ fn main() {
         }
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--clip-events") {
+        // --clip-events <name>: a clip's event table (kind, time, name, the payload's strings).
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let want = args[i + 1].to_ascii_lowercase();
+        for k in pkgs.keys_of_type(s3pkg::types::CLIP) {
+            let Some(res) = pkgs.read(k) else { continue };
+            if s3formats::sim::clip_name(&res).is_none_or(|n| n.to_ascii_lowercase() != want) {
+                continue;
+            }
+            for e in s3formats::sim::clip_events(&res) {
+                println!("{e:?}");
+            }
+            return;
+        }
+        eprintln!("no such clip");
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--list-clips") {
         // --list-clips <prefix>: every clip in the install starting with the prefix.
         let pkgs = s3pkg::install::open_install(&data, |_| true);

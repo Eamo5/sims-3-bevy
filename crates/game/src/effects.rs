@@ -19,7 +19,8 @@ pub struct EffectsPlugin;
 impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WaterLooks>()
-            .add_systems(Update, (attach, fountain_water, bubble_baths, sprinkler_spray, emit, fall, tv_screens, censor).chain().run_if(in_state(PlayMode::Live)));
+            .add_message::<SpinSparkle>()
+            .add_systems(Update, (attach, fountain_water, bubble_baths, sprinkler_spray, emit, fall, tv_screens, censor, sparkle).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -512,6 +513,134 @@ fn fall(
         tf.translation += d.vel * dt;
         if let Some(c) = cam {
             tf.rotation = Transform::from_translation(tf.translation).looking_at(c, Vec3::Y).rotation;
+        }
+    }
+}
+
+/// A change of clothes' swirl of sparkles round a Sim (the game's `clothesChangeAdult`): how
+/// tall they are.
+#[derive(Message)]
+pub struct SpinSparkle {
+    pub sim: Entity,
+    pub height: f32,
+}
+
+/// One of a swirl's sparkles: round its Sim and up, fading out.
+#[derive(Component)]
+struct Sparkle {
+    sim: Entity,
+    angle: f32,
+    turn: f32,
+    radius: f32,
+    y: f32,
+    rise: f32,
+    age: f32,
+    life: f32,
+    size: f32,
+}
+
+/// A twinkle: a soft glow with a four-pointed star through it.
+fn star_image() -> Image {
+    let n = 32u32;
+    let mut data = Vec::with_capacity((n * n * 4) as usize);
+    for y in 0..n {
+        for x in 0..n {
+            let (u, v) = ((x as f32 + 0.5) / n as f32 * 2.0 - 1.0, (y as f32 + 0.5) / n as f32 * 2.0 - 1.0);
+            let r = (u * u + v * v).sqrt();
+            let glow = (1.0 - r).clamp(0.0, 1.0).powf(3.0);
+            let rays = (-u.abs() * 14.0).exp() * (1.0 - v.abs()).max(0.0).powf(2.0) + (-v.abs() * 14.0).exp() * (1.0 - u.abs()).max(0.0).powf(2.0);
+            let a = (glow * 0.9 + rays).min(1.0);
+            // (White at the heart and along the rays, blue round them: seen against a white wall.)
+            let w = (rays * 1.5 + (1.0 - r * 2.5).max(0.0)).min(1.0);
+            let c = |blue: f32| ((blue + (255.0 - blue) * w) as u8);
+            data.extend_from_slice(&[c(90.0), c(150.0), 255, (a * 255.0) as u8]);
+        }
+    }
+    Image::new(Extent3d { width: n, height: n, depth_or_array_layers: 1 }, TextureDimension::D2, data, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD)
+}
+
+/// Swirls of sparkles round Sims changing their clothes, spiralling up them and fading.
+#[allow(clippy::too_many_arguments)]
+fn sparkle(
+    mut commands: Commands,
+    mut asked: MessageReader<SpinSparkle>,
+    time: Res<Time>,
+    clock: Res<crate::clock::GameClock>,
+    (mut meshes, mut mats, mut images): (ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>, ResMut<Assets<Image>>),
+    mut looks: Local<Option<(Handle<Mesh>, Handle<StandardMaterial>)>>,
+    cams: Query<&GlobalTransform, With<SimsCamera>>,
+    sims: Query<&GlobalTransform, With<crate::sim::Sim>>,
+    mut q: Query<(Entity, &mut Sparkle, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+) {
+    let mut rng = rand::rng();
+    for s in asked.read() {
+        let (quad, mat) = looks
+            .get_or_insert_with(|| {
+                (
+                    meshes.add(Rectangle::new(1.0, 1.0)),
+                    mats.add(StandardMaterial {
+                        base_color: Color::WHITE,
+                        base_color_texture: Some(images.add(star_image())),
+                        alpha_mode: AlphaMode::Blend,
+                        unlit: true,
+                        double_sided: true,
+                        cull_mode: None,
+                        ..default()
+                    }),
+                )
+            })
+            .clone();
+        let Ok(at) = sims.get(s.sim) else { continue };
+        let look = mats.get(&mat).cloned().unwrap_or_default();
+        for _ in 0..70 {
+            let life = rng.random_range(0.7..1.3);
+            commands.spawn((
+                Mesh3d(quad.clone()),
+                // (Each its own material, to fade on its own.)
+                MeshMaterial3d(mats.add(look.clone())),
+                Transform::from_translation(at.translation()).with_scale(Vec3::ZERO),
+                Sparkle {
+                    sim: s.sim,
+                    angle: rng.random_range(0.0..std::f32::consts::TAU),
+                    turn: rng.random_range(5.0..9.0),
+                    radius: rng.random_range(0.22..0.42),
+                    y: rng.random_range(-0.1..0.35) * s.height,
+                    rise: s.height * rng.random_range(0.8..1.25) / life,
+                    age: 0.0,
+                    life,
+                    size: rng.random_range(0.07..0.16),
+                },
+                NotShadowCaster,
+                DespawnOnExit(AppState::InGame),
+            ));
+        }
+    }
+    // (In step with the spin: at the game's speed.)
+    let dt = time.delta_secs().min(0.1) * crate::clock::SPEED_RATES[clock.speed];
+    let cam = cams.single().ok().map(|c| c.translation());
+    for (e, mut s, mut tf, m) in &mut q {
+        s.age += dt;
+        let Ok(at) = sims.get(s.sim) else {
+            commands.entity(e).despawn();
+            continue;
+        };
+        if s.age >= s.life {
+            commands.entity(e).despawn();
+            continue;
+        }
+        s.angle += s.turn * dt;
+        s.y += s.rise * dt;
+        let f = s.age / s.life;
+        // (In quickly, twinkling, and out.)
+        let fade = (f * 14.0).min(1.0) * (1.0 - f).powf(0.6) * (0.75 + 0.25 * (s.age * 40.0 + s.angle).sin());
+        let r = s.radius * (1.0 - 0.35 * f);
+        tf.translation = at.translation() + Vec3::new(s.angle.cos() * r, s.y, s.angle.sin() * r);
+        tf.scale = Vec3::splat(s.size * (0.6 + 0.8 * fade));
+        if let Some(c) = cam {
+            tf.rotation = Transform::from_translation(tf.translation).looking_at(c, Vec3::Y).rotation;
+        }
+        if let Some(mut mat) = mats.get_mut(&m.0) {
+            mat.base_color = Color::srgba(1.0, 1.0, 1.0, fade);
         }
     }
 }
