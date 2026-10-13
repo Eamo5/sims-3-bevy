@@ -23,13 +23,17 @@ impl Plugin for SavePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RemovedLotObjects>()
             .init_resource::<PendingBroken>()
+            .init_resource::<PendingStates>()
             .init_resource::<SaveSlot>()
             .add_message::<SaveRequest>()
             .add_message::<SnapshotRequest>()
             .add_message::<SaveAsRequest>()
             .add_systems(OnEnter(crate::AppState::Loading), new_game_slot)
-            .add_systems(OnEnter(crate::AppState::Loading), |mut pending: ResMut<PendingBroken>| { *pending = PendingBroken::default(); })
-            .add_systems(Update, restore_broken.after(apply_loaded_game).run_if(in_state(PlayMode::Live)))
+            .add_systems(OnEnter(crate::AppState::Loading), |mut pending: ResMut<PendingBroken>, mut states: ResMut<PendingStates>| {
+                *pending = PendingBroken::default();
+                *states = PendingStates::default();
+            })
+            .add_systems(Update, (restore_broken, restore_states).after(apply_loaded_game).run_if(in_state(PlayMode::Live)))
             .add_systems(Update, resume_saved_lot.run_if(in_state(PlayMode::ChooseLot)))
             .add_systems(Update, (apply_loaded_game.after(crate::clock::advance_clock), save_game.after(crate::buyhistory::update)).run_if(in_state(PlayMode::Live)));
     }
@@ -225,6 +229,53 @@ impl SavedObject {
 pub struct SavedBroken {
     pub objd: (u32, u32, u64),
     pub position: [f32; 3],
+    /// Burnt in a fire (charred until it's mended).
+    #[serde(default)]
+    pub charred: bool,
+}
+
+/// An object's wear that isn't breakage: a bathroom's grime, a bed left unmade.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SavedObjectState {
+    pub objd: (u32, u32, u64),
+    pub position: [f32; 3],
+    #[serde(default)]
+    pub grime: f32,
+    #[serde(default)]
+    pub unmade: bool,
+}
+
+#[derive(Resource, Default)]
+struct PendingStates(Vec<SavedObjectState>, Option<f32>);
+
+/// Grime and unmade beds put back on their objects once the furniture's there (and, for grime,
+/// once it's been given its clean slate).
+fn restore_states(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut pending: ResMut<PendingStates>,
+    mut objects: Query<(Entity, &GameObject, &Transform, Option<&mut crate::grime::Grime>), (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>,
+) {
+    if pending.0.is_empty() {
+        return;
+    }
+    let started = *pending.1.get_or_insert(time.elapsed_secs());
+    pending.0.retain(|saved| {
+        let Some((e, o, _, grime)) = objects.iter_mut().find(|(_, o, tf, _)| o.objd == saved.objd && tf.translation.distance(Vec3::from(saved.position)) < 0.2) else { return true };
+        let cleanable = crate::grime::cleanable(o.kind);
+        if cleanable && saved.grime > 0.0 {
+            let Some(mut g) = grime else { return true };
+            g.0 = saved.grime;
+        }
+        if saved.unmade {
+            commands.entity(e).insert(crate::interact::Unmade);
+        }
+        debug!("{} as it was: grime {}, unmade {}", o.name, saved.grime, saved.unmade);
+        false
+    });
+    if time.elapsed_secs() - started > 10.0 {
+        pending.0.clear();
+    }
 }
 
 #[derive(Resource, Default)]
@@ -241,6 +292,9 @@ fn restore_broken(
     pending.0.retain(|saved| {
         if let Some((e, ..)) = objects.iter().find(|(_, o, tf)| o.objd == saved.objd && tf.translation.distance(Vec3::from(saved.position)) < 0.2) {
             commands.entity(e).insert(crate::interact::Broken);
+            if saved.charred {
+                commands.entity(e).insert(crate::grime::Charred);
+            }
             false
         } else { true }
     });
@@ -251,6 +305,9 @@ fn restore_broken(
 pub struct SaveGame {
     #[serde(default)]
     pub broken_objects: Vec<SavedBroken>,
+    /// Grime and unmade beds.
+    #[serde(default)]
+    pub object_states: Vec<SavedObjectState>,
     pub version: u32,
     pub world: String,
     pub lot_index: usize,
@@ -701,7 +758,10 @@ fn save_game(
         Res<crate::family::Genealogy>,
         Res<crate::terrain_paint::Strokes>,
         Res<crate::terrain_paint::Sculpted>,
-        Query<(&GameObject, &Transform), (With<crate::interact::Broken>, Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>,
+        Query<
+            (&GameObject, &Transform, Has<crate::interact::Broken>, Has<crate::grime::Charred>, Option<&crate::grime::Grime>, Has<crate::interact::Unmade>),
+            (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>),
+        >,
         Res<crate::familyinv::FamilyInventory>,
     ),
 ) {
@@ -798,7 +858,12 @@ fn save_game(
         });
     }
     let game = SaveGame {
-        broken_objects: broken.iter().map(|(o, tf)| SavedBroken { objd: o.objd, position: tf.translation.to_array() }).collect(),
+        broken_objects: broken.iter().filter(|b| b.2).map(|(o, tf, _, charred, ..)| SavedBroken { objd: o.objd, position: tf.translation.to_array(), charred }).collect(),
+        object_states: broken
+            .iter()
+            .filter(|(.., grime, unmade)| grime.is_some_and(|g| g.0 > 0.0) || *unmade)
+            .map(|(o, tf, _, _, grime, unmade)| SavedObjectState { objd: o.objd, position: tf.translation.to_array(), grime: grime.map_or(0.0, |g| g.0), unmade })
+            .collect(),
         version: SAVE_VERSION,
         world: world.name.clone(),
         lot_index: hh.lot_index,
@@ -944,6 +1009,7 @@ pub(crate) fn apply_loaded_game(
     // advance restored temperature, recovery timers, or other simulation state.
     delta.0 = 0.0;
     commands.insert_resource(PendingBroken(game.broken_objects.clone(), None));
+    commands.insert_resource(PendingStates(game.object_states.clone(), None));
     // A restored date is not a midnight tick, even when loading within a session.
     commands.insert_resource(crate::aging::AgingDay::default());
     if let Some(h) = household.as_mut() {
@@ -1215,7 +1281,7 @@ mod tests {
 
     #[test]
     fn broken_objects_restore_after_spawn_without_breaking_neighbours_or_repaired_objects() {
-        let saved = SavedBroken { objd: (1, 2, 3), position: [4.0, 0.0, 8.0] };
+        let saved = SavedBroken { objd: (1, 2, 3), position: [4.0, 0.0, 8.0], charred: false };
         let saved: SavedBroken = serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
         let mut app = App::new();
         app.init_resource::<Time>().insert_resource(PendingBroken(vec![saved], None)).add_systems(Update, restore_broken);
@@ -1231,6 +1297,24 @@ mod tests {
         app.world_mut().entity_mut(target).remove::<crate::interact::Broken>();
         app.update();
         assert!(app.world().get::<crate::interact::Broken>(target).is_none(), "restoration must not replay after a repair");
+    }
+
+    #[test]
+    fn grime_and_unmade_beds_come_back_once_the_furniture_has() {
+        let toilet = SavedObjectState { objd: (1, 2, 3), position: [4.0, 0.0, 8.0], grime: 45.0, unmade: false };
+        let bed = SavedObjectState { objd: (1, 2, 4), position: [9.0, 0.0, 8.0], grime: 0.0, unmade: true };
+        let mut app = App::new();
+        app.init_resource::<Time>().insert_resource(PendingStates(vec![toilet, bed], None)).add_systems(Update, restore_states);
+        let obj = |kind, objd| GameObject { kind, name: "x".into(), objd, price: 100, center: Vec2::ZERO, half: Vec2::ONE, height: 1.0, route: None };
+        let t = app.world_mut().spawn((obj(crate::interact::ObjectKind::Toilet, (1, 2, 3)), Transform::from_xyz(4.0, 0.0, 8.0))).id();
+        let b = app.world_mut().spawn((obj(crate::interact::ObjectKind::BedDouble, (1, 2, 4)), Transform::from_xyz(9.0, 0.0, 8.0))).id();
+        app.update();
+        assert!(app.world().get::<crate::interact::Unmade>(b).is_some());
+        assert_eq!(app.world().resource::<PendingStates>().0.len(), 1, "the toilet waits for its clean slate");
+        app.world_mut().entity_mut(t).insert(crate::grime::Grime::default());
+        app.update();
+        assert_eq!(app.world().get::<crate::grime::Grime>(t).map(|g| g.0), Some(45.0));
+        assert!(app.world().resource::<PendingStates>().0.is_empty());
     }
 
     #[test]

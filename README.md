@@ -389,10 +389,12 @@ installation is unreachable.
   less after Neat Sims, more after slobs) and look it: the model's own Dirty and Very Dirty
   materials, their dirt drawn over the object's texture (a clogged toilet its Clogged look).
   Once one needs it, "Clean" is offered: the game's scrubbing, with the toilet brush or the
-  sponge in hand. Neat Sims clean up on their own; others when it's filthy; slobs never.
+  sponge in hand. Neat Sims clean up on their own; others when it's filthy; slobs never. Kept
+  in saves.
 - **Unmade beds**: a bed slept, napped or lazed in is left unmade, its covers thrown back, until
   someone makes it ("Make Bed", from beside it, with the game's clips: the covers pulled up,
-  smoothed and patted; Neat Sims do it on their own). An unmade bed is got into as it is.
+  smoothed and patted; Neat Sims do it on their own). An unmade bed is got into as it is. Kept
+  in saves, as what a fire charred is.
 - **Double beds** sleep two, a side each, as the game's couples do: the second Sim gets in on
   the far side, with the game's animations played mirrored (the rig's two sides are each
   other's mirror images, so each bone plays its partner's track, reflected). Sims share a bed
