@@ -2561,8 +2561,18 @@ pub fn bulldozed_lots(
     }
 }
 
+/// Lots within this of the camera's focus are shown in full detail (further as the camera
+/// draws back, so the street round the household's house is real too, not the game's low
+/// pictures), and dropped again a little further out; the nearest so many at most.
 const NEARBY_IN: f32 = 70.0;
 const NEARBY_OUT: f32 = 95.0;
+const NEARBY_MAX: usize = 16;
+
+/// How far round the focus lots are shown in full detail, with the camera this far back.
+fn nearby_radius(cam_distance: f32) -> (f32, f32) {
+    let r = (NEARBY_IN + (cam_distance - 40.0).max(0.0) * 0.6).min(220.0);
+    (r, r * NEARBY_OUT / NEARBY_IN)
+}
 /// Below this camera distance the active house's roof is taken off.
 const ROOF_DISTANCE: f32 = 42.0;
 
@@ -2647,14 +2657,17 @@ fn stream_nearby_lots(
     let Ok(cam) = cams.single() else { return };
     let active_lot = active.as_ref().map(|a| a.lot);
     let visited_lot = visited.as_ref().map(|v| v.lot);
-    let zoomed_in = cam.distance < 110.0;
+    let zoomed_in = cam.distance < IMPOSTER_DISTANCE;
+    let (near_in, near_out) = nearby_radius(cam.distance);
     let lot_center = |i: usize| crate::home::lot_center(&world.data.lots[i]);
-    // Drop lots that went out of range.
-    let gone: Vec<usize> = nearby
-        .spawned
-        .keys()
-        .copied()
-        .filter(|&i| !zoomed_in || Some(i) == active_lot || Some(i) == visited_lot || lot_center(i).xz().distance(cam.focus.xz()) > NEARBY_OUT)
+    // Drop lots that went out of range (and the furthest, past the most there's room for).
+    let mut by_distance: Vec<(usize, f32)> = nearby.spawned.keys().map(|&i| (i, lot_center(i).xz().distance(cam.focus.xz()))).collect();
+    by_distance.sort_by(|a, b| a.1.total_cmp(&b.1));
+    let gone: Vec<usize> = by_distance
+        .iter()
+        .enumerate()
+        .filter(|(n, (i, d))| !zoomed_in || Some(*i) == active_lot || Some(*i) == visited_lot || *d > near_out || *n >= NEARBY_MAX)
+        .map(|(_, (i, _))| *i)
         .collect();
     for i in gone {
         if let Some(e) = nearby.spawned.remove(&i) {
@@ -2662,7 +2675,7 @@ fn stream_nearby_lots(
         }
     }
     // Bring in the nearest lot not yet shown (one per frame).
-    if zoomed_in {
+    if zoomed_in && nearby.spawned.len() < NEARBY_MAX {
         // (The households played before's homes too, as they left them: on an empty lot, what
         // they built.)
         let next = world
@@ -2673,7 +2686,7 @@ fn stream_nearby_lots(
             .chain(dormant.0.iter().filter(|d| !d.homeless).map(|d| d.lot_index))
             .filter(|i| *i < world.data.lots.len() && Some(*i) != active_lot && Some(*i) != visited_lot && !nearby.spawned.contains_key(i))
             .map(|i| (i, lot_center(i).xz().distance(cam.focus.xz())))
-            .filter(|(_, d)| *d < NEARBY_IN)
+            .filter(|(_, d)| *d < near_in)
             .min_by(|a, b| a.1.total_cmp(&b.1));
         if let Some((i, _)) = next {
             let root = commands.spawn((Transform::IDENTITY, Visibility::default(), DespawnOnExit(AppState::InGame))).id();

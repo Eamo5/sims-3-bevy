@@ -97,26 +97,21 @@ fn split_imposter(p: &BakedPart) -> Vec<BakedPart> {
         };
         tris[layer].extend_from_slice(t);
     }
-    // (On a sloping lot the ground rises above the flat: what's drawn from the ground's own
-    // picture in the atlas is ground too, however high, not a wall to show over the terrain.)
-    let uv = |i: u32| p.uvs.get(i as usize).copied().unwrap_or([0.0, 0.0]);
-    let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
-    for &i in &tris[0] {
-        let q = uv(i);
-        lo = [lo[0].min(q[0]), lo[1].min(q[1])];
-        hi = [hi[0].max(q[0]), hi[1].max(q[1])];
-    }
-    if !tris[0].is_empty() {
-        let inside = |i: u32| {
-            let q = uv(i);
-            q[0] >= lo[0] - 1e-4 && q[0] <= hi[0] + 1e-4 && q[1] >= lo[1] - 1e-4 && q[1] <= hi[1] + 1e-4
+    // (On a sloping lot the ground rises above the flat. The ground's picture is the lot seen
+    // from above: every ground triangle maps x and z to the atlas by the one same plan, however
+    // high it is. That plan is the one most of the up-facing triangles' area follows; whatever
+    // follows it is ground, not a wall to show over the terrain.)
+    if let Some(plan) = ground_plan(p) {
+        let on_plan = |i: u32| {
+            let (v, q) = (p.positions[i as usize], p.uvs.get(i as usize).copied().unwrap_or([0.0, 0.0]));
+            let (u, w) = (plan[0] * v[0] + plan[1] * v[2] + plan[4], plan[2] * v[0] + plan[3] * v[2] + plan[5]);
+            (u - q[0]).abs() < 2e-3 && (w - q[1]).abs() < 2e-3
         };
-        let rest = std::mem::take(&mut tris[2]);
-        for t in rest.chunks_exact(3) {
-            if t.iter().all(|&i| inside(i)) {
-                tris[0].extend_from_slice(t);
-            } else {
-                tris[2].extend_from_slice(t);
+        for from in [1, 2] {
+            let others = std::mem::take(&mut tris[from]);
+            for t in others.chunks_exact(3) {
+                let to = if t.iter().all(|&i| on_plan(i)) { 0 } else { from };
+                tris[to].extend_from_slice(t);
             }
         }
     }
@@ -127,6 +122,57 @@ fn split_imposter(p: &BakedPart) -> Vec<BakedPart> {
         // the imposter's own shading.
         .map(|(i, idx)| BakedPart { indices: idx, layer: i as u8 + LAYER_GROUND, unlit: i as u8 + LAYER_GROUND != LAYER_ROOF, ..p.clone() })
         .collect()
+}
+
+/// A lot imposter's ground plan: the affine map from a point's x and z to its place in the
+/// atlas's ground picture (`[a, b, c, d, e, f]`: u = a x + b z + e, v = c x + d z + f), the one
+/// that most of the up-facing triangles' area follows (roofs each have their own).
+fn ground_plan(p: &BakedPart) -> Option<[f32; 6]> {
+    let pos = |i: u32| p.positions[i as usize];
+    let uv = |i: u32| p.uvs.get(i as usize).copied().unwrap_or([0.0, 0.0]);
+    let tris: Vec<(&[u32], f32)> = p
+        .indices
+        .chunks_exact(3)
+        .filter_map(|t| {
+            let (a, b, c) = (pos(t[0]), pos(t[1]), pos(t[2]));
+            let (e1, e2) = ([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]);
+            let n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+            let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            (len > 1e-6 && n[1].abs() / len > 0.5).then_some((t, len * 0.5))
+        })
+        .collect();
+    let plan_of = |t: &[u32]| -> Option<[f32; 6]> {
+        let (a, b, c) = (pos(t[0]), pos(t[1]), pos(t[2]));
+        let (ua, ub, uc) = (uv(t[0]), uv(t[1]), uv(t[2]));
+        let (x1, z1, x2, z2) = (b[0] - a[0], b[2] - a[2], c[0] - a[0], c[2] - a[2]);
+        let det = x1 * z2 - x2 * z1;
+        if det.abs() < 1e-6 {
+            return None;
+        }
+        let (u1, v1, u2, v2) = (ub[0] - ua[0], ub[1] - ua[1], uc[0] - ua[0], uc[1] - ua[1]);
+        let (i00, i01, i10, i11) = (z2 / det, -x2 / det, -z1 / det, x1 / det);
+        let (pa, pb) = (u1 * i00 + u2 * i10, u1 * i01 + u2 * i11);
+        let (pc, pd) = (v1 * i00 + v2 * i10, v1 * i01 + v2 * i11);
+        Some([pa, pb, pc, pd, ua[0] - pa * a[0] - pb * a[2], ua[1] - pc * a[0] - pd * a[2]])
+    };
+    let follows = |plan: &[f32; 6], t: &[u32]| {
+        t.iter().all(|&i| {
+            let (v, q) = (pos(i), uv(i));
+            (plan[0] * v[0] + plan[1] * v[2] + plan[4] - q[0]).abs() < 2e-3 && (plan[2] * v[0] + plan[3] * v[2] + plan[5] - q[1]).abs() < 2e-3
+        })
+    };
+    // (Tried from the biggest triangles; the first plan most of the area follows.)
+    let mut by_size = tris.clone();
+    by_size.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let total: f32 = tris.iter().map(|t| t.1).sum();
+    by_size
+        .iter()
+        .take(64)
+        .filter_map(|(t, _)| plan_of(t))
+        .map(|plan| (plan, tris.iter().filter(|(t, _)| follows(&plan, t)).map(|t| t.1).sum::<f32>()))
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .filter(|(_, area)| *area > total * 0.25)
+        .map(|(plan, _)| plan)
 }
 
 /// Decodes a MODL into ready-to-upload parts.
@@ -1364,6 +1410,48 @@ pub fn open_pack(path: &Path) -> Option<PackReader> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sloping_lots_ground_stays_ground_however_high() {
+        // (A 20 m lot's ground rising 6 m across it, its picture the top-left square of the
+        // atlas seen from above; a roof over it, 5 m up, from elsewhere in the atlas.)
+        let plan = |x: f32, z: f32| [x / 20.0 * 0.25, z / 20.0 * 0.5];
+        let mut positions = Vec::new();
+        let mut uvs = Vec::new();
+        let mut indices = Vec::new();
+        let mut quad = |ps: [[f32; 3]; 4], ts: [[f32; 2]; 4]| {
+            let b = positions.len() as u32;
+            positions.extend_from_slice(&ps);
+            uvs.extend_from_slice(&ts);
+            indices.extend_from_slice(&[b, b + 1, b + 2, b, b + 2, b + 3]);
+        };
+        for (x0, x1) in [(0.0, 10.0), (10.0, 20.0)] {
+            let y = |x: f32| x * 0.3;
+            let ps = [[x0, y(x0), 0.0], [x1, y(x1), 0.0], [x1, y(x1), 20.0], [x0, y(x0), 20.0]];
+            quad(ps, ps.map(|p| plan(p[0], p[2])));
+        }
+        quad([[4.0, 8.0, 4.0], [12.0, 8.0, 4.0], [12.0, 9.0, 12.0], [4.0, 9.0, 12.0]], [[0.6, 0.1], [0.9, 0.1], [0.9, 0.4], [0.6, 0.4]]);
+        let normals = vec![[0.0, 1.0, 0.0]; positions.len()];
+        let part = BakedPart {
+            positions,
+            normals,
+            uvs,
+            indices,
+            texture: None,
+            mode: 0,
+            unlit: true,
+            layer: 0,
+            bmin: [0.0; 3],
+            bmax: [20.0, 9.0, 20.0],
+            states: Vec::new(),
+            overlays: Vec::new(),
+        };
+        let split = split_imposter(&part);
+        let ground = split.iter().find(|p| p.layer == LAYER_GROUND).map_or(0, |p| p.indices.len() / 3);
+        let roof = split.iter().find(|p| p.layer == LAYER_ROOF).map_or(0, |p| p.indices.len() / 3);
+        assert_eq!(ground, 4, "both halves of the slope, the high one too");
+        assert_eq!(roof, 2);
+    }
 
     #[test]
     fn a_cut_outs_clear_texels_take_the_colour_of_its_solid_ones() {

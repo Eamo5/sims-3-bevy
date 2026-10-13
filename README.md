@@ -47,8 +47,10 @@ installation is unreachable.
   furniture; the ground never shows through a floor; nearby lots are shown in full detail with
   the game's roofs, distant ones as the game's pre-rendered imposters. Better than the game's
   engine allowed: the household's own house stays itself (walls up, roof on) out to 260 m
-  rather than turning to its low imposter at 75; the imposters' ground on a sloping lot stays
-  ground (not shards of it over the terrain), and every cut-out (the imposters' fences and
+  rather than turning to its low imposter at 75, and the street round it (the nearest sixteen
+  lots, further round as the camera draws back) with it; the imposters' ground on a sloping
+  lot stays ground (whatever follows the ground picture's plan of the lot, however high: not
+  shards of it over the terrain), and every cut-out (the imposters' fences and
   railings, real ones, leaves) is drawn from a copy of its texture with the colour bled under
   the cut-away part and fresh mipmaps, so far off they thin out instead of turning to thick
   black lines; leaves and imposters are cut out with alpha to coverage, soft-edged up close.
