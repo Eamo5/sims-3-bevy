@@ -206,7 +206,8 @@ installation is unreachable.
   breakfast from 1am, lunch from 11am, dinner from 5pm and weekend brunch from 9am–3pm.
   The meal goes on the game's serving platter on the nearest counter, and the cook calls the household to it (the
   game's wave over): whoever's hungry and not busy with something they were told to do comes
-  for a plate. Sims grab a plate and sit down at a dining table or counter stool to eat (the
+  for a plate (one at a time at the platter, in the order they get there: the cook, beside
+  it, first). Sims grab a plate and sit down at a dining table or counter stool to eat (the
   game's sit-down and bar-stool eating animations, plate on the table, fork in hand), or eat
   standing when every seat is taken, and leave dirty dishes that neat Sims clear away. Guests
   eat but don't cook, children don't use the stove. Or phone for a pizza: within the hour the

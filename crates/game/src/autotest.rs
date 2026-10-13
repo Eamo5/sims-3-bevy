@@ -2065,7 +2065,7 @@ fn queue_log(
     for (sim, tf, q, path, staged, clip) in &sims {
         let path = path.map(|p| (p.done, p.waypoints.len()));
         info!(
-            "queue {} @{:.0}: {:?} path {:?} staged {} clip {} at {:.1},{:.1},{:.1} (+{} more)",
+            "queue {} @{:.0}: {:?} path {:?} staged {} clip {} at {:.1},{:.1},{:.1} then {:?}",
             sim.first,
             clock.minutes,
             q.0.front().map(|a| (&a.label, a.phase)),
@@ -2075,7 +2075,7 @@ fn queue_log(
             tf.translation.x,
             tf.translation.y,
             tf.translation.z,
-            q.0.len().saturating_sub(1)
+            q.0.iter().skip(1).map(|a| a.label.as_str()).collect::<Vec<_>>()
         );
     }
 }

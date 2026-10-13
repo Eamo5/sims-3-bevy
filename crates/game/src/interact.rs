@@ -2573,6 +2573,9 @@ pub(crate) fn run_actions(
                             if let ActionKind::Object { target, .. } | ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } = action.kind
                                 && let Ok((o, _, mut used, _)) = objects.get_mut(target)
                                 && o.kind != ObjectKind::PicnicTable
+                                // (A meal's taken once they're at it: one coming from the far end
+                                // of the lot doesn't keep the cook beside it waiting.)
+                                && o.kind != ObjectKind::Meal
                             {
                                 // (A double bed's other side, when someone has the first.)
                                 match seconds.get_mut(target) {
@@ -2630,6 +2633,17 @@ pub(crate) fn run_actions(
                     // clothes by the bath, before getting in.)
                     if arrived && spinning {
                         continue;
+                    }
+                    // (At a meal someone else is taking a plate from: their turn first, then theirs.)
+                    if arrived
+                        && let ActionKind::Object { target, .. } = &action.kind
+                        && let Ok((o, _, mut used, _)) = objects.get_mut(*target)
+                        && o.kind == ObjectKind::Meal
+                    {
+                        if used.0.is_some_and(|u| u != me) {
+                            continue;
+                        }
+                        used.0 = Some(me);
                     }
                     if arrived
                         && crate::dressing::spins(sim)
