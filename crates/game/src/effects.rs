@@ -61,6 +61,10 @@ struct FountainWater;
 #[derive(Component)]
 struct BathWater;
 
+/// A shower-tub's spray: only for a shower, not a bath.
+#[derive(Component)]
+struct ShowerOnly;
+
 /// The water's looks, made once: a fountain's, a bath's, and a bubble bath's foam.
 #[derive(Resource, Default)]
 struct WaterLooks {
@@ -246,8 +250,12 @@ fn attach(
             commands.entity(e).insert((FountainWater, BathWater));
             continue;
         }
+        // (A shower over a tub: the tub's water, and the shower's spray only while showering.)
+        if o.kind == ObjectKind::ShowerTub {
+            commands.entity(e).insert((FountainWater, BathWater, ShowerOnly));
+        }
         let spray = match o.kind {
-            ObjectKind::Shower => Spray::Shower,
+            ObjectKind::Shower | ObjectKind::ShowerTub => Spray::Shower,
             ObjectKind::Sink => Spray::Tap,
             ObjectKind::Sprinkler => Spray::Sprinkler,
             _ if script.contains(".Environment.Fountain") && !script.contains("FountainJet") => Spray::Fountain,
@@ -308,15 +316,15 @@ fn fountain_water(
 
 /// A bubble bath's water is foam, while it's being had (the game's `BubbleBathFXName`).
 fn bubble_baths(
-    tubs: Query<(&Children, &UsedBy), With<BathWater>>,
+    tubs: Query<(&Children, &UsedBy, &GameObject), With<BathWater>>,
     sims: Query<&ActionQueue>,
     mut parts: Query<&mut MeshMaterial3d<StandardMaterial>>,
     looks: Res<WaterLooks>,
 ) {
     let (Some(tub), Some(foam)) = (&looks.tub, &looks.foam) else { return };
-    for (children, used) in &tubs {
+    for (children, used, o) in &tubs {
         let bubbly = used.0.and_then(|s| sims.get(s).ok()).and_then(|q| q.0.front()).is_some_and(|a| {
-            matches!(a.kind, ActionKind::Object { def, .. } if interactions_for(ObjectKind::Bathtub).get(def).is_some_and(|d| d.special == Special::BubbleBath))
+            matches!(a.kind, ActionKind::Object { def, .. } if interactions_for(o.kind).get(def).is_some_and(|d| d.special == Special::BubbleBath))
         });
         let want = if bubbly { foam } else { tub };
         for c in children {
@@ -375,14 +383,14 @@ fn sprinkler_spray(
 fn emit(
     mut commands: Commands,
     time: Res<Time>,
-    mut emitters: Query<(&mut Emitter, &GlobalTransform, &UsedBy, &InheritedVisibility, Has<crate::gardening::Sprinkling>)>,
-    users: Query<&GlobalTransform, With<crate::sim::Sim>>,
+    mut emitters: Query<(&mut Emitter, &GlobalTransform, &UsedBy, &InheritedVisibility, Has<crate::gardening::Sprinkling>, Has<ShowerOnly>)>,
+    users: Query<(&GlobalTransform, &ActionQueue), With<crate::sim::Sim>>,
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut looks: Local<Looks>,
 ) {
     let dt = time.delta_secs().min(0.1);
     let mut rng = rand::rng();
-    for (mut em, gt, used, vis, sprinkling) in &mut emitters {
+    for (mut em, gt, used, vis, sprinkling, shower_only) in &mut emitters {
         if !vis.get() {
             continue;
         }
@@ -390,7 +398,11 @@ fn emit(
             Spray::Fountain => true,
             Spray::Sprinkler => sprinkling,
             // (Someone at it, not just on their way.)
-            _ => used.0.and_then(|u| users.get(u).ok()).is_some_and(|u| u.translation().xz().distance(gt.translation().xz()) < 1.3),
+            _ => used.0.and_then(|u| users.get(u).ok()).is_some_and(|(u, q)| {
+                u.translation().xz().distance(gt.translation().xz()) < 1.3
+                    && (!shower_only
+                        || q.0.front().is_some_and(|a| matches!(a.kind, ActionKind::Object { def, .. } if interactions_for(ObjectKind::ShowerTub).get(def).is_some_and(|d| d.name == "Take Shower"))))
+            }),
         };
         if !on {
             em.owed = 0.0;

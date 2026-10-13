@@ -300,6 +300,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_shower_takeShower_getIn",
     "a2o_shower_takeShower_loop",
     "a2o_shower_takeShower_getOut",
+    // (A shower in a tub: in and out over its side, the curtain or door drawn.)
+    "a2o_showertub_takeShower",
     "a2o_bathtub_relax",
     // (In and out of the bath, the taps turned on and the tub's water up, washing.)
     "a2o_bathtub_takeBath",

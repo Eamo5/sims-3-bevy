@@ -54,8 +54,8 @@ impl Upgrade {
     pub fn name(self, kind: ObjectKind) -> Option<&'static str> {
         use ObjectKind as K;
         match (self, kind) {
-            (Upgrade::Unbreakable, K::Shower | K::Bathtub | K::Sink | K::Toilet | K::Tv | K::Computer | K::Stereo) => Some("Unbreakable"),
-            (Upgrade::Improved, K::Shower | K::Bathtub) => Some("Water Heater"),
+            (Upgrade::Unbreakable, K::Shower | K::Bathtub | K::ShowerTub | K::Sink | K::Toilet | K::Tv | K::Computer | K::Stereo) => Some("Unbreakable"),
+            (Upgrade::Improved, K::Shower | K::Bathtub | K::ShowerTub) => Some("Water Heater"),
             (Upgrade::Improved, K::Tv) => Some("Improved Channels"),
             (Upgrade::Improved, K::Stereo) => Some("Better Speakers"),
             (Upgrade::Improved, K::Computer) => Some("Faster Processor"),
@@ -79,7 +79,7 @@ impl Upgrade {
 pub fn boost(kind: ObjectKind, upgrades: Option<&Upgrades>, motive: usize, gain: f32) -> f32 {
     let improved = upgrades.is_some_and(|u| u.has(Upgrade::Improved));
     let boosted = match kind {
-        ObjectKind::Shower | ObjectKind::Bathtub => motive == crate::sim::HYGIENE,
+        ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::ShowerTub => motive == crate::sim::HYGIENE,
         ObjectKind::Tv | ObjectKind::Stereo | ObjectKind::Computer => motive == crate::sim::FUN,
         _ => false,
     };

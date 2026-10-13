@@ -374,7 +374,8 @@ installation is unreachable.
 - **Baths**: as the game's: stood in the tub, the taps turned on and the water rising (the
   tub's own water, raised by its half of the clip), sat down, arms and legs washed, then lying
   back; sat up and out at the end. The rubber ducky's played with in the water too, and a
-  bubble bath is a tub of foam.
+  bubble bath is a tub of foam. A shower over a tub (the Shower of Power) is showered in,
+  over its side and back with the game's shower-tub clips, or bathed in.
 - **Double beds** sleep two, a side each, as the game's couples do: the second Sim gets in on
   the far side, with the game's animations played mirrored (the rig's two sides are each
   other's mirror images, so each bone plays its partner's track, reflected). Sims share a bed

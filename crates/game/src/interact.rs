@@ -67,6 +67,8 @@ pub enum ObjectKind {
     Toilet,
     Shower,
     Bathtub,
+    /// A shower over a tub: showered in, or bathed in.
+    ShowerTub,
     Sink,
     Sofa,
     Chair,
@@ -369,9 +371,11 @@ impl ObjectKind {
             Self::BedDouble
         } else if has("beds.") {
             Self::BedSingle
-        } else if has("toilet") {
+        } else if has("toilet") && !has("clutter") {
             Self::Toilet
-        } else if has("bathtubshower") || has("shower") {
+        } else if has("bathtubshower") || has("showertub") {
+            Self::ShowerTub
+        } else if has("shower") {
             Self::Shower
         } else if has("bathtub") || has("hottub") {
             Self::Bathtub
@@ -424,7 +428,7 @@ impl ObjectKind {
             Self::Dishwasher => "Appliances",
             Self::FishBowl => "Decor",
             Self::BedDouble | Self::BedSingle => "Beds",
-            Self::Toilet | Self::Shower | Self::Bathtub | Self::Sink => "Plumbing",
+            Self::Toilet | Self::Shower | Self::Bathtub | Self::ShowerTub | Self::Sink => "Plumbing",
             Self::Sofa | Self::Chair | Self::Stool => "Seating",
             Self::Tv | Self::Computer | Self::Stereo | Self::VideoGame | Self::VrGoggles => "Electronics",
             Self::Bookshelf | Self::Mirror | Self::Easel | Self::Guitar | Self::Treadmill | Self::WorkoutBench | Self::Chess | Self::Telescope | Self::Foosball => {
@@ -516,6 +520,8 @@ impl ObjectKind {
                 // (A shower's: beside its door, the game's clips walking the Sim in from there;
                 // a treadmill's, behind it, stepping up onto the belt.)
                 | K::Shower
+                // (A shower-tub's: beside it, its open side.)
+                | K::ShowerTub
                 | K::Treadmill
                 // (The workout bench's, beside it, for the way there; a dollhouse's, at its open
                 // side.)
@@ -552,7 +558,7 @@ impl GameObject {
             ObjectKind::Chair | ObjectKind::Stool | ObjectKind::Sofa | ObjectKind::HotTub => {
                 vec![Vec2::new(c.x, c.y - h.y - 0.45), Vec2::new(c.x + h.x + 0.45, c.y), Vec2::new(c.x - h.x - 0.45, c.y)]
             }
-            ObjectKind::Bathtub => vec![Vec2::new(c.x + h.x + 0.45, c.y), Vec2::new(c.x, c.y + h.y + 0.45), Vec2::new(c.x, c.y - h.y - 0.45)],
+            ObjectKind::Bathtub | ObjectKind::ShowerTub => vec![Vec2::new(c.x + h.x + 0.45, c.y), Vec2::new(c.x, c.y + h.y + 0.45), Vec2::new(c.x, c.y - h.y - 0.45)],
             ObjectKind::PicnicTable => return Self::picnic_places(tf)[1..].iter().map(|p| p.0).collect(),
             _ => Vec::new(),
         };
@@ -585,7 +591,7 @@ impl GameObject {
     pub fn seat_height(&self) -> f32 {
         match self.kind {
             ObjectKind::BedDouble | ObjectKind::BedSingle => self.height.min(0.75).max(0.45),
-            ObjectKind::Bathtub => 0.25,
+            ObjectKind::Bathtub | ObjectKind::ShowerTub => 0.25,
             ObjectKind::Shower => 0.0,
             _ => 0.45,
         }
@@ -668,7 +674,7 @@ fn floor_new_objects(mut commands: Commands, building: Option<Res<crate::buildin
 /// built better), a point more for each time it has broken before.
 fn break_chance(kind: ObjectKind, price: i32, breaks: u32) -> f64 {
     let base = match kind {
-        ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::Sink | ObjectKind::Dishwasher | ObjectKind::Toilet => 0.05,
+        ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::ShowerTub | ObjectKind::Sink | ObjectKind::Dishwasher | ObjectKind::Toilet => 0.05,
         ObjectKind::TrashCompactor => 0.02,
         ObjectKind::Tv | ObjectKind::Computer | ObjectKind::Stereo => 0.03,
         _ => 0.0,
@@ -700,7 +706,7 @@ pub fn repair_of(kind: ObjectKind) -> (&'static str, crate::anim::ActionClip) {
     match kind {
         ObjectKind::Toilet => ("Unclog", A::new(Some("a2o_toilet_unclog_start_x"), &["a2o_toilet_unclog_loop_x"])),
         ObjectKind::Shower => ("Repair", A::new(Some("a2o_shower_repairShower_start_x"), &["a2o_shower_repairShower_loop1_x", "a2o_shower_repairShower_loop2_x"])),
-        ObjectKind::Bathtub | ObjectKind::HotTub => (
+        ObjectKind::Bathtub | ObjectKind::ShowerTub | ObjectKind::HotTub => (
             "Repair",
             A::new(Some("a2o_bathtub_repair_start_x"), &["a2o_bathtub_repair_loopTightenLeft_x", "a2o_bathtub_repair_loopTightenRight_x", "a2o_bathtub_repair_loopWhackFaucet_x"]),
         ),
@@ -995,15 +1001,17 @@ static BED: [InteractionDef; 5] = [
 const WOOHOO_RATES: [f32; 6] = [0.0, 0.0, -8.0, 180.0, -20.0, 160.0];
 static TOILET: [InteractionDef; 1] =
     [InteractionDef { until_full: Some(BLADDER), on_object: true, ..def("Use Toilet", 15.0, [0.0, 900.0, 0.0, 0.0, -10.0, 0.0], Pose::Sit) }];
-static SHOWER: [InteractionDef; 1] =
-    [InteractionDef { until_full: Some(HYGIENE), on_object: true, ..def("Take Shower", 30.0, [0.0, 0.0, 0.0, 0.0, 400.0, 10.0], Pose::Use) }];
-static BATHTUB: [InteractionDef; 3] = [
-    InteractionDef { until_full: Some(HYGIENE), on_object: true, ..def("Take Bath", 50.0, [0.0, 0.0, 6.0, 0.0, 260.0, 40.0], Pose::Lie) },
-    // (With bubble bath in the house: a longer soak, and more fun.)
-    InteractionDef { until_full: Some(HYGIENE), on_object: true, special: Special::BubbleBath, ..def("Take Bubble Bath", 60.0, [0.0, 0.0, 10.0, 0.0, 300.0, 70.0], Pose::Lie) },
-    // (With a rubber duck in the house.)
-    InteractionDef { on_object: true, special: Special::Ducky, ..def("Play with Rubber Ducky", 30.0, [0.0, 0.0, 4.0, 0.0, 160.0, 100.0], Pose::Lie) },
-];
+const TAKE_SHOWER: InteractionDef = InteractionDef { until_full: Some(HYGIENE), on_object: true, ..def("Take Shower", 30.0, [0.0, 0.0, 0.0, 0.0, 400.0, 10.0], Pose::Use) };
+const TAKE_BATH: InteractionDef = InteractionDef { until_full: Some(HYGIENE), on_object: true, ..def("Take Bath", 50.0, [0.0, 0.0, 6.0, 0.0, 260.0, 40.0], Pose::Lie) };
+// (With bubble bath in the house: a longer soak, and more fun.)
+const BUBBLE_BATH: InteractionDef =
+    InteractionDef { until_full: Some(HYGIENE), on_object: true, special: Special::BubbleBath, ..def("Take Bubble Bath", 60.0, [0.0, 0.0, 10.0, 0.0, 300.0, 70.0], Pose::Lie) };
+// (With a rubber duck in the house.)
+const DUCKY: InteractionDef = InteractionDef { on_object: true, special: Special::Ducky, ..def("Play with Rubber Ducky", 30.0, [0.0, 0.0, 4.0, 0.0, 160.0, 100.0], Pose::Lie) };
+static SHOWER: [InteractionDef; 1] = [TAKE_SHOWER];
+static BATHTUB: [InteractionDef; 3] = [TAKE_BATH, BUBBLE_BATH, DUCKY];
+/// A shower over a tub (the game's shower-tubs): a shower or a bath.
+static SHOWER_TUB: [InteractionDef; 4] = [TAKE_SHOWER, TAKE_BATH, BUBBLE_BATH, DUCKY];
 static SINK: [InteractionDef; 3] = [
     def("Wash Hands", 6.0, [0.0, 0.0, 0.0, 0.0, 160.0, 0.0], Pose::Use),
     // (Where a dish cleared away is taken without a dishwasher: never on the menu.)
@@ -1311,6 +1319,10 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         // (Stood in the tub, the taps turned on and the water up, sat down, washed, then lying
         // back; sat up and out at the end.)
         "WooHoo" | "Try for Baby" if matches!(kind, ObjectKind::BedDouble | ObjectKind::BedSingle) => woohoo_clip(false),
+        // (Over a tub's side and back, its curtain or door drawn.)
+        "Take Shower" if kind == ObjectKind::ShowerTub => {
+            A::new(Some("a2o_showertub_takeShower_getIn_x"), &["a2o_shower_takeShower_loop"]).ending(&["a2o_showertub_takeShower_getOut_x"], 2.2)
+        }
         "Take Bath" | "Take Bubble Bath" => A::steps("a2o_bathtub_takeBath_turnOn_x", BATH_WASH, &["a2o_bathtub_relax_loop1_x", "a2o_bathtub_relax_loop2_x"])
             .ending(&["a2o_bathtub_takeBath_trans_sitUp_x", "a2o_bathtub_takeBath_getOut_x"], 5.2),
         "Play with Rubber Ducky" => A::steps(
@@ -1661,6 +1673,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Toilet => &TOILET,
         ObjectKind::Shower => &SHOWER,
         ObjectKind::Bathtub => &BATHTUB,
+        ObjectKind::ShowerTub => &SHOWER_TUB,
         ObjectKind::Sink => &SINK,
         ObjectKind::Sofa => &SOFA,
         ObjectKind::Chair | ObjectKind::Stool => &CHAIR,
@@ -2604,7 +2617,7 @@ pub(crate) fn run_actions(
                                             tf.translation = Vec3::new(p.x, otf.translation.y, p.z);
                                             tf.rotation = otf.rotation * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2 * way);
                                         }
-                                        if obj.kind == ObjectKind::Shower
+                                        if (obj.kind == ObjectKind::Shower || (obj.kind == ObjectKind::ShowerTub && d.name == "Take Shower"))
                                             && let Some((p, f)) = obj.route
                                         {
                                             // In the stall: the game puts the Sim there once in (its
@@ -2615,7 +2628,7 @@ pub(crate) fn run_actions(
                                             tf.translation = Vec3::new(w.x, otf.translation.y, w.z);
                                             tf.rotation = otf.rotation * Quat::from_rotation_y(f.x.atan2(f.y));
                                         }
-                                        if obj.kind == ObjectKind::Bathtub {
+                                        if obj.kind == ObjectKind::Bathtub || (obj.kind == ObjectKind::ShowerTub && d.name != "Take Shower") {
                                             // Stood in the tub where they'll sit, back to the taps
                                             // (the bath's clips brought round that spot: see
                                             // `anim::clip_anchor`).
@@ -3438,7 +3451,7 @@ pub(crate) fn run_actions(
                                             w.sturdy_until = clock.minutes + STURDY_MINUTES;
                                         }
                                         notes.push(format!("{} fixed {}.", sim.first, the(&o.name)));
-                                        let plumbing = matches!(o.kind, ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::Sink | ObjectKind::Dishwasher | ObjectKind::Toilet);
+                                        let plumbing = matches!(o.kind, ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::ShowerTub | ObjectKind::Sink | ObjectKind::Dishwasher | ObjectKind::Toilet);
                                         if electric {
                                             did.write(crate::journal::Did::count(me, crate::journal::Stat::ElectricalRepairs, 1.0));
                                         } else if plumbing {
@@ -4034,7 +4047,7 @@ fn autonomy(
                 continue;
             }
             // Visitors to the family's home don't sleep in its beds or bathe there.
-            if my_lot.is_none() && !household.contains(me) && matches!(obj.kind, ObjectKind::BedSingle | ObjectKind::BedDouble | ObjectKind::Shower | ObjectKind::Bathtub) {
+            if my_lot.is_none() && !household.contains(me) && matches!(obj.kind, ObjectKind::BedSingle | ObjectKind::BedDouble | ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::ShowerTub) {
                 continue;
             }
             let dist = obj.world_center(otf).distance(tf.translation);
@@ -4536,6 +4549,26 @@ mod kind_audit {
         }
         for (class, names) in &by {
             println!("KIND	{class}	{}	{}", names.len(), names.iter().take(3).cloned().collect::<Vec<_>>().join(" | "));
+        }
+    }
+
+    /// Every base-game script class and the kind it comes out as, to look over for ones taken
+    /// for something else (a workout bench for a treadmill): `... kind_audit_all ...`.
+    #[test]
+    #[ignore]
+    fn kind_audit_all() {
+        let cat: Vec<s3bake::types::CatalogEntry> = s3bake::pack::read_value(&s3bake::default_root().global_dir().join("catalog.bin")).unwrap_or_default();
+        let mut by: std::collections::BTreeMap<String, (ObjectKind, usize)> = std::collections::BTreeMap::new();
+        for c in cat.iter().filter(|c| c.price > 0 && !c.script.is_empty() && c.objd.1 == 0) {
+            let kind = ObjectKind::from_script(&c.script, &c.name);
+            if kind == ObjectKind::Other {
+                continue;
+            }
+            let class = format!("{kind:?}	{}", c.script.trim_start_matches("Sims3.Gameplay.Objects."));
+            by.entry(class).or_insert((kind, 0)).1 += 1;
+        }
+        for (class, (_, n)) in &by {
+            println!("ALL	{class}	{n}");
         }
     }
 }

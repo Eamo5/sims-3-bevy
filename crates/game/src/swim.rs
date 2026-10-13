@@ -42,7 +42,7 @@ fn pyjamas(
                 let d = interactions_for(o.kind).get(*def)?;
                 if matches!(o.kind, crate::interact::ObjectKind::BedSingle | crate::interact::ObjectKind::BedDouble) && d.name == "Sleep" {
                     Some(OutfitKind::Sleepwear)
-                } else if matches!(o.kind, crate::interact::ObjectKind::Shower | crate::interact::ObjectKind::Bathtub) {
+                } else if matches!(o.kind, crate::interact::ObjectKind::Shower | crate::interact::ObjectKind::Bathtub | crate::interact::ObjectKind::ShowerTub) {
                     // (Undressed for a shower or a bath, as the game's `GoingToBathe`.)
                     Some(OutfitKind::Naked)
                 } else if d.pose == crate::sim::Pose::Exercise {
