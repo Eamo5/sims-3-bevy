@@ -210,7 +210,7 @@ fn animate_objects(
     data: Option<Res<Baked>>,
     mut lib: ResMut<ClipLibrary>,
     sims: Query<(&ClipPlayer, &ActionQueue, Option<&crate::anim::ActionClip>, &GlobalTransform)>,
-    mut objects: Query<(Entity, &mut ObjectRig, Option<&UsedBy>, &GlobalTransform)>,
+    mut objects: Query<(Entity, &mut ObjectRig, Option<&UsedBy>, &GlobalTransform, Has<crate::interact::Unmade>)>,
     mut bones: Query<&mut Transform, Without<ObjectRig>>,
     mut companions: Local<HashMap<String, Option<String>>>,
     mut animated: Local<Vec<Entity>>,
@@ -235,7 +235,7 @@ fn animate_objects(
     }
     for (player, queue, action, sim_tf) in &sims {
         let Some(target) = target_of(queue) else { continue };
-        let Ok((_, mut rig, _, obj_tf)) = objects.get_mut(target) else { continue };
+        let Ok((_, mut rig, _, obj_tf, _)) = objects.get_mut(target) else { continue };
         let Some(name) = companions.entry(player.name.clone()).or_insert_with(|| companion(&data, &player.name).or_else(|| held_pose(&data, &player.name))).clone() else { continue };
         let Some(clip) = lib.get(&data, &name) else { continue };
         let t = player.time.clamp(0.0, clip.duration.max(0.0));
@@ -274,8 +274,9 @@ fn animate_objects(
         animated.push(target);
     }
     // At rest again once nobody's using it.
-    for (e, mut rig, used, _) in &mut objects {
-        if !rig.posed || animated.contains(&e) || used.is_some_and(|u| u.0.is_some()) {
+    // (An unmade bed's covers stay as they were left.)
+    for (e, mut rig, used, _, unmade) in &mut objects {
+        if !rig.posed || animated.contains(&e) || used.is_some_and(|u| u.0.is_some()) || unmade {
             continue;
         }
         rig.posed = false;

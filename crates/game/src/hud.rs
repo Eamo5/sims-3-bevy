@@ -1053,7 +1053,7 @@ fn world_click(
             Option<Res<crate::gardening::Garden>>,
             Res<crate::appliances::Alarm>,
             Option<Res<crate::sound::Sounds>>,
-            Query<Option<&crate::music::StereoOn>>,
+            Query<(Option<&crate::music::StereoOn>, Has<crate::interact::Unmade>)>,
         ),
     ),
     (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q): (
@@ -1289,7 +1289,7 @@ fn world_click(
                 // A stereo: on or off, and "Change to..." each of the game's stations (there and
                 // then, as its `ChangeStation` is), beside Turn On or Turn Off.
                 if obj.kind == ObjectKind::Stereo && matches!(d.special, Special::StereoOn | Special::StereoOff) {
-                    let on = opp_q.8.get(t).ok().flatten();
+                    let on = opp_q.8.get(t).ok().and_then(|s| s.0);
                     if d.special == Special::StereoOn {
                         let current = on.and_then(|o| o.0.clone());
                         let list: Vec<(String, ActionKind)> = crate::music::stations(opp_q.7.as_deref())
@@ -1305,6 +1305,10 @@ fn world_click(
                     if (d.special == Special::StereoOn) == on.is_some() {
                         continue;
                     }
+                }
+                // (A bed's made only when it's unmade.)
+                if d.special == Special::MakeBed && !opp_q.8.get(t).is_ok_and(|s| s.1) {
+                    continue;
                 }
                 // (A job quit only by someone who has one.)
                 if d.special == Special::QuitJob && jobs_q.get(actor).ok().flatten().is_none() {

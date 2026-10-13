@@ -53,12 +53,17 @@ impl ClipLibrary {
                 }
                 // (Never a prop's own clip, `…_guitar`.)
                 let prop = |n: &str| n.rsplit_once('_').is_some_and(|(_, a)| crate::props::prop_actor(a));
-                data.0
+                let all: Vec<String> = data
+                    .0
                     .clip_names
                     .iter()
                     .filter(|n| n.starts_with(p) && !prop(n) && side.is_none_or(|s| n.ends_with(&format!("_{s}"))))
                     .cloned()
-                    .collect()
+                    .collect();
+                // (Nor the object's half of a clip at it, `…_bed`: a Sim's are `_x` or `_y`.)
+                let object_clip = p.get(1..4).is_some_and(|s| s == "2o_");
+                let sims: Vec<String> = all.iter().filter(|n| !object_clip || n.ends_with("_x") || n.ends_with("_y")).cloned().collect();
+                if sims.is_empty() { all } else { sims }
             };
             if child {
                 let kid = if let Some(r) = prefix.strip_prefix("a2o_") {

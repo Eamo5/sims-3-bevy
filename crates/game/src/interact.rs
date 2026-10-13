@@ -560,6 +560,7 @@ impl GameObject {
             }
             ObjectKind::Bathtub | ObjectKind::ShowerTub => vec![Vec2::new(c.x + h.x + 0.45, c.y), Vec2::new(c.x, c.y + h.y + 0.45), Vec2::new(c.x, c.y - h.y - 0.45)],
             ObjectKind::PicnicTable => return Self::picnic_places(tf)[1..].iter().map(|p| p.0).collect(),
+            ObjectKind::BedSingle | ObjectKind::BedDouble => Self::bed_sides(self.center, self.half).to_vec(),
             _ => Vec::new(),
         };
         local
@@ -569,6 +570,12 @@ impl GameObject {
                 Vec2::new(w.x, w.z)
             })
             .collect()
+    }
+
+    /// Beside a bed, either side (where the game's routing slots stand Sims to make it), in its
+    /// own space.
+    pub fn bed_sides(c: Vec2, h: Vec2) -> [Vec2; 2] {
+        [Vec2::new(c.x - h.x - 0.45, c.y - 0.35), Vec2::new(c.x + h.x + 0.45, c.y - 0.35)]
     }
 
     /// A picnic table's four places (the game's routing slots: two each side, facing it): where
@@ -600,6 +607,11 @@ impl GameObject {
 
 #[derive(Component, Default)]
 pub struct UsedBy(pub Option<Entity>);
+
+/// A bed slept, napped or lazed in and not made since: its covers left thrown back (the game's
+/// unmade bed, got into with its own clip) until someone makes it.
+#[derive(Component)]
+pub struct Unmade;
 
 /// A double bed's other side: whoever's on it (the first side's is its `UsedBy`). Two share a
 /// double bed, each on a side, as the game's couples do.
@@ -846,6 +858,8 @@ pub enum Special {
     VampireOnly,
     /// Gone once it's done (a snowman knocked down, a leaf pile raked up).
     Clear,
+    /// Making an unmade bed (offered only then).
+    MakeBed,
     /// WooHoo in a double bed with their partner, or trying for a baby (the socials of those
     /// names, accepted, as the game's `MakeSimsWooHooOnMe`).
     WooHoo,
@@ -984,7 +998,7 @@ static MICROWAVE: [InteractionDef; 2] = [
     // (Once it's heated: never on the menu.)
     InteractionDef { autonomous: false, special: Special::Cook, ..def("Take Out Dinner", 2.0, N, Pose::Use) },
 ];
-static BED: [InteractionDef; 5] = [
+static BED: [InteractionDef; 6] = [
     InteractionDef {
         until_full: Some(ENERGY),
         on_object: true,
@@ -996,6 +1010,8 @@ static BED: [InteractionDef; 5] = [
     // (Never on the bed's menu: the socials' when they're accepted.)
     InteractionDef { autonomous: false, on_object: true, special: Special::WooHoo, ..def("WooHoo", 25.0, WOOHOO_RATES, Pose::Lie) },
     InteractionDef { autonomous: false, on_object: true, special: Special::TryForBaby, ..def("Try for Baby", 25.0, WOOHOO_RATES, Pose::Lie) },
+    // (From beside it, the game's routing slot: the covers pulled up, smoothed and patted.)
+    InteractionDef { special: Special::MakeBed, ..def("Make Bed", 7.0, [0.0, 0.0, 0.0, 0.0, -2.0, 0.0], Pose::Use) },
 ];
 /// WooHoo's needs per hour: fun and company, at some cost to energy and hygiene.
 const WOOHOO_RATES: [f32; 6] = [0.0, 0.0, -8.0, 180.0, -20.0, 160.0];
@@ -1287,6 +1303,7 @@ const BATH_WASH: &[&str] = &[
 pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::ActionClip> {
     use crate::anim::ActionClip as A;
     Some(match name {
+        "Make Bed" => A::steps("a2o_bed_make_start_x", &["a2o_bed_make_smooth_x", "a2o_bed_make_pat_x"], &["a2o_bed_make_smooth_x"]).ending(&["a2o_bed_make_stop_x"], 1.0),
         "Nap" if kind == ObjectKind::Sofa => A::new(Some("a2o_sofa_sit_trans_nap_x"), &["a2o_sofa_nap_loop1_x"]),
         "Eat" if matches!(kind, ObjectKind::Chair | ObjectKind::PicnicTable) => A::new(Some("a2o_eat_diningIn_fork_start_x"), &["a2o_eat_diningIn_fork_neat_x"]).ending(&["a2o_eat_diningIn_fork_stop_x"], 0.9),
         "Do Homework" => A::new(Some("a2o_homework_table_start_x"), &["a2o_homework_table_write_x", "a2o_homework_table_read_x", "a2o_homework_table_think_x", "a2o_homework_table_erase_x"]),
@@ -2230,13 +2247,14 @@ pub(crate) fn run_actions(
         Query<(), With<Broken>>,
         Query<(), Or<(With<crate::buy::HeldObject>, With<crate::buyhistory::HistoryHidden>)>>,
     ),
-    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds): (
+    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade): (
         MessageWriter<crate::journal::Did>,
         Query<&crate::journal::SkillJournal>,
         Query<&mut crate::inventory::Inventory>,
         Query<&mut Wear>,
         Query<&mut SecondPlace>,
         Query<Entity, (With<SecondPlace>, Without<Broken>)>,
+        Query<(), With<Unmade>>,
     ),
 ) {
     let Some(grid) = grid else { return };
@@ -2365,8 +2383,21 @@ pub(crate) fn run_actions(
                                         })
                                         .min_by(|a, b| a.0.distance(me_at).total_cmp(&b.0.distance(me_at)))
                                         .map(|(stand, _)| (stand, of.map_or(1, |f| f.0)))
+                                } else if interactions_for(obj.kind).get(*def).is_some_and(|d| d.special == Special::MakeBed) {
+                                    // (Made from beside it: the nearer side, the other if that can't be reached.)
+                                    let me_at = Vec2::new(tf.translation.x, tf.translation.z);
+                                    let sides = GameObject::bed_sides(obj.center, obj.half).map(|p| {
+                                        let w = otf.transform_point(Vec3::new(p.x, 0.0, p.y));
+                                        Vec2::new(w.x, w.z)
+                                    });
+                                    let near = if sides[0].distance(me_at) <= sides[1].distance(me_at) { sides[0] } else { sides[1] };
+                                    Some((near, of.map_or(1, |f| f.0)))
+                                } else if obj.kind == ObjectKind::BedDouble && interactions_for(obj.kind).get(*def).is_some_and(|d| d.on_object) && used.0.is_some_and(|u| u != me) {
+                                    // (A double bed's far side, someone in the first: walked to on that side.)
+                                    let local = otf.compute_affine().inverse().transform_point3(Vec3::new(obj.use_point(otf).x, otf.translation.y, obj.use_point(otf).y));
+                                    let w = otf.transform_point(Vec3::new(2.0 * obj.center.x - local.x, 0.0, local.z));
+                                    Some((Vec2::new(w.x, w.z), of.map_or(1, |f| f.0)))
                                 } else {
-                                    let _ = def;
                                     Some((obj.use_point(otf), of.map_or(1, |f| f.0)))
                                 }
                             }
@@ -2576,10 +2607,30 @@ pub(crate) fn run_actions(
                                     let far_side = obj.kind == ObjectKind::BedDouble && seconds.get(*target).is_ok_and(|s| s.0 == Some(me));
                                     // (WooHoo's other part, on the far side.)
                                     let clip = if far_side && matches!(d.special, Special::WooHoo | Special::TryForBaby) { Some(woohoo_clip(true)) } else { clip };
+                                    // (A bed got into is unmade after; an unmade one's got into as it is.)
+                                    let in_bed = matches!(obj.kind, ObjectKind::BedSingle | ObjectKind::BedDouble) && d.on_object;
+                                    let clip = clip.map(|mut c| {
+                                        if in_bed && c.start == Some("a2o_bed_getIn_made_x") && unmade.contains(*target) {
+                                            c.start = Some("a2o_bed_getIn_unmade_x");
+                                        }
+                                        c
+                                    });
+                                    if in_bed {
+                                        commands.entity(*target).insert(Unmade);
+                                    }
+                                    // (Making the bed from its right: the game's clips mirrored.)
+                                    let came = action.approach.unwrap_or(Vec2::new(tf.translation.x, tf.translation.z));
+                                    let right_of_bed = otf.compute_affine().inverse().transform_point3(Vec3::new(came.x, otf.translation.y, came.y)).x > obj.center.x;
+                                    let making = d.special == Special::MakeBed;
                                     if let Some(mut c) = clip {
                                         c.before = c.before.or(seat_in);
-                                        c.mirror = far_side;
+                                        c.mirror = far_side || (making && right_of_bed);
                                         commands.entity(me).insert(c);
+                                    }
+                                    if making {
+                                        // Across the bed from where they came to its side.
+                                        let across = otf.rotation * if right_of_bed { Vec3::NEG_X } else { Vec3::X };
+                                        tf.rotation = Quat::from_rotation_y(across.x.atan2(across.z));
                                     }
                                     let face = otf.rotation * Quat::from_rotation_y(std::f32::consts::PI);
                                     if d.on_object {
@@ -2644,7 +2695,7 @@ pub(crate) fn run_actions(
                                         tf.translation = Vec3::new(w.x, tf.translation.y, w.z);
                                         tf.rotation = otf.rotation * Quat::from_rotation_y(f.x.atan2(f.y));
                                         anim.seat_height = 0.0;
-                                    } else {
+                                    } else if !making {
                                         tf.rotation = face;
                                         anim.seat_height = 0.0;
                                     }
@@ -2985,6 +3036,9 @@ pub(crate) fn run_actions(
                                         Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport | Special::WashDishes | Special::DropTrash | Special::ReadBook | Special::WatchTv | Special::WooHoo | Special::TryForBaby => {}
                                         Special::GetBook => {
                                             commands.entity(me).insert(crate::surroundings::ReadSomewhere(*target));
+                                        }
+                                        Special::MakeBed => {
+                                            commands.entity(*target).remove::<Unmade>();
                                         }
                                         Special::GetIngredients => {
                                             commands.entity(me).insert(crate::anim::Carrying(crate::meals::FOOD_CARRY));
@@ -3963,7 +4017,7 @@ fn autonomy(
         (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim, Has<SocialPartner>, Option<&crate::visit::OnLot>),
         (Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>, Without<OffLot>),
     >,
-    (objects, seconds): (Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>, Query<&SecondPlace>),
+    (objects, seconds, unmade_q): (Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>, Query<&SecondPlace>, Query<(), With<Unmade>>),
     hh: Option<Res<Household>>,
     (broken, plant_q, lit_q, hw_q): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>, Query<(), With<crate::fireplace::Lit>>, Query<(), With<crate::rabbitholes::Homework>>),
     (party_on, trash_q, served_q, leftovers, sprinkling, route_failed): (
@@ -4154,6 +4208,18 @@ fn autonomy(
                 // A full trash can is a chore like dishes; an emptier one isn't.
                 if d.special == Special::EmptyTrash && !trash_q.get(oe).is_ok_and(|f| f.0 >= crate::surroundings::trash_capacity(obj.kind)) {
                     continue;
+                }
+                if d.special == Special::MakeBed {
+                    if !unmade_q.contains(oe) || used.0.is_some() {
+                        continue;
+                    }
+                    score = if sim.traits.contains(&crate::life::Trait::Slob) {
+                        0.0
+                    } else if sim.traits.contains(&crate::life::Trait::Neat) {
+                        24.0
+                    } else {
+                        1.5
+                    };
                 }
                 if d.special == Special::PutAway {
                     score = if sim.traits.contains(&crate::life::Trait::Neat) { 30.0 } else { 12.0 };

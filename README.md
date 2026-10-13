@@ -376,6 +376,9 @@ installation is unreachable.
   back; sat up and out at the end. The rubber ducky's played with in the water too, and a
   bubble bath is a tub of foam. A shower over a tub (the Shower of Power) is showered in,
   over its side and back with the game's shower-tub clips, or bathed in.
+- **Unmade beds**: a bed slept, napped or lazed in is left unmade, its covers thrown back, until
+  someone makes it ("Make Bed", from beside it, with the game's clips: the covers pulled up,
+  smoothed and patted; Neat Sims do it on their own). An unmade bed is got into as it is.
 - **Double beds** sleep two, a side each, as the game's couples do: the second Sim gets in on
   the far side, with the game's animations played mirrored (the rig's two sides are each
   other's mirror images, so each bone plays its partner's track, reflected). Sims share a bed

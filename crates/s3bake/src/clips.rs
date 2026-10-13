@@ -312,6 +312,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_sink_brushTeeth",
     // Beds and seating.
     "a2o_bed_getIn_made",
+    // (Into an unmade bed, and making one.)
+    "a2o_bed_getIn_unmade",
+    "a2o_bed_make",
     "a2o_bed_getout",
     "a2o_bed_nap",
     "a2o_bed_sleep",
