@@ -484,6 +484,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, look_kind.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, queue_log.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, queue_diff.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, zoom_shots.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, spin_shots.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_save.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_switch.run_if(in_state(crate::PlayMode::Live)))
@@ -2046,6 +2047,32 @@ fn spin_shots(mut commands: Commands, spins: Query<&crate::dressing::ClothesSpin
         }
     }
     *was = now;
+}
+
+/// ZOOM_SHOTS=<folder>:<d1>,<d2>,...: from twelve seconds in, the camera zoomed out to each
+/// distance in turn (from where `--cam` put it), a picture of each once it's settled.
+fn zoom_shots(mut commands: Commands, time: Res<Time>, mut cam: Query<&mut SimsCamera>, mut step: Local<(usize, f32)>) {
+    let Some((dir, list)) = std::env::var("ZOOM_SHOTS").ok().and_then(|v| v.rsplit_once(':').map(|(a, b)| (a.to_string(), b.to_string()))) else { return };
+    let dists: Vec<f32> = list.split(',').filter_map(|d| d.trim().parse().ok()).collect();
+    let now = time.elapsed_secs();
+    if now < 12.0 || step.0 >= dists.len() * 2 {
+        return;
+    }
+    if now < step.1 {
+        return;
+    }
+    let i = step.0 / 2;
+    if step.0 % 2 == 0 {
+        if let Ok(mut c) = cam.single_mut() {
+            c.distance = dists[i];
+        }
+        *step = (step.0 + 1, now + 3.0);
+    } else {
+        let path = std::path::Path::new(&dir).join(format!("zoom_{:03}.png", dists[i] as i32));
+        info!("shot {}", path.display());
+        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+        *step = (step.0 + 1, now + 0.5);
+    }
 }
 
 /// QUEUE_DIFF=1: each household Sim's queue whenever it changes (labels, cancelled ones marked

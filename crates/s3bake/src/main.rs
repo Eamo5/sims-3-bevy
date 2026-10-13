@@ -472,6 +472,52 @@ fn main() {
                     *kinds.entry(s).or_default() += 1;
                 }
                 let top: Vec<String> = kinds.iter().filter(|(k, _)| !k.is_empty()).map(|(k, n)| format!("{k}x{n}")).collect();
+                // (With IMPOSTER_PNG=<path>: its imposter's meshes, and its atlas as a picture.)
+                if let (Ok(out), Ok(f)) = (std::env::var("IMPOSTER_PNG"), std::env::var("LOTOBJS"))
+                    && l.info.internal_name.contains(&f)
+                    && let Some(inst) = w.instances.iter().find(|x| x.lot == Some(k as u32))
+                {
+                    let mut pkgs = s3pkg::install::open_install(&data, |_| true);
+                    // (Lot imposters live in the worlds' own packages.)
+                    for wp in s3pkg::install::discover_worlds(std::path::Path::new(&data)) {
+                        if let Ok(p) = s3pkg::Package::open(&wp) {
+                            pkgs.add(p);
+                        }
+                    }
+                    let key = s3pkg::ResourceKey::new(inst.model.0, inst.model.1, inst.model.2);
+                    println!("imposter {key:?}");
+                    for mesh in s3formats::model::load_model(&pkgs, &key).unwrap_or_default() {
+                        let m = &mesh.material;
+                        println!(
+                            "  mesh {} tris shader {:08X} tested {} blended {} tex {:?} diffuse {:?}",
+                            mesh.indices.len() / 3,
+                            m.shader,
+                            m.is_alpha_tested(),
+                            m.is_alpha_blended(),
+                            m.texture(0xBDCF71C5),
+                            m.texture(s3formats::model::P_DIFFUSE_MAP)
+                        );
+                        if let Some(t) = m.texture(0xBDCF71C5).or(m.texture(s3formats::model::P_DIFFUSE_MAP))
+                            && let Some(img) = pkgs.read(&t).or_else(|| pkgs.read_ti(t.t, t.i)).and_then(|d| s3formats::dds::decode(&d, 4096))
+                        {
+                            let f = std::fs::File::create(&out).expect("out");
+                            let mut enc = png::Encoder::new(std::io::BufWriter::new(f), img.width as u32, img.height as u32);
+                            enc.set_color(png::ColorType::Rgba);
+                            enc.set_depth(png::BitDepth::Eight);
+                            enc.write_header().and_then(|mut wr| wr.write_image_data(&img.data)).expect("png");
+                            let (mut clear_black, mut clear) = (0, 0);
+                            for p in img.data.chunks(4) {
+                                if p[3] < 128 {
+                                    clear += 1;
+                                    if p[0] < 16 && p[1] < 16 && p[2] < 16 {
+                                        clear_black += 1;
+                                    }
+                                }
+                            }
+                            println!("  atlas {}x{}: {clear} clear texels, {clear_black} of them black", img.width, img.height);
+                        }
+                    }
+                }
                 // LOTOBJS=<lot name part>: every object on it, with its catalogue name.
                 if let Ok(f) = std::env::var("LOTOBJS")
                     && l.info.internal_name.contains(&f)

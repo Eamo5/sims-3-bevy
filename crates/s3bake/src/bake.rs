@@ -41,7 +41,7 @@ impl BakeRoot {
     }
     pub fn global_manifest(&self) -> Option<GlobalManifest> {
         let m: GlobalManifest = serde_json::from_slice(&std::fs::read(self.global_dir().join("manifest.json")).ok()?).ok()?;
-        (m.version == BAKE_VERSION && m.cas_version == CAS_VERSION).then_some(m)
+        (m.version == BAKE_VERSION && m.cas_version == CAS_VERSION && m.objects_version == OBJECTS_VERSION).then_some(m)
     }
     pub fn world_ready(&self, world: &str) -> bool {
         let p = self.world_dir(world).join("world.bin");
@@ -96,6 +96,29 @@ fn split_imposter(p: &BakedPart) -> Vec<BakedPart> {
             2
         };
         tris[layer].extend_from_slice(t);
+    }
+    // (On a sloping lot the ground rises above the flat: what's drawn from the ground's own
+    // picture in the atlas is ground too, however high, not a wall to show over the terrain.)
+    let uv = |i: u32| p.uvs.get(i as usize).copied().unwrap_or([0.0, 0.0]);
+    let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+    for &i in &tris[0] {
+        let q = uv(i);
+        lo = [lo[0].min(q[0]), lo[1].min(q[1])];
+        hi = [hi[0].max(q[0]), hi[1].max(q[1])];
+    }
+    if !tris[0].is_empty() {
+        let inside = |i: u32| {
+            let q = uv(i);
+            q[0] >= lo[0] - 1e-4 && q[0] <= hi[0] + 1e-4 && q[1] >= lo[1] - 1e-4 && q[1] <= hi[1] + 1e-4
+        };
+        let rest = std::mem::take(&mut tris[2]);
+        for t in rest.chunks_exact(3) {
+            if t.iter().all(|&i| inside(i)) {
+                tris[0].extend_from_slice(t);
+            } else {
+                tris[2].extend_from_slice(t);
+            }
+        }
     }
     tris.into_iter()
         .enumerate()
@@ -292,20 +315,30 @@ pub(crate) fn bake_textures(root: &BakeRoot, pkgs: &PackageSet, keys: &[(Key, bo
     ok.into_iter().filter(|b| *b).count() + (keys.len() - todo.len())
 }
 
-/// The models' textures to bake, and the dirty looks to draw from them (base, overlay).
-type ModelTextures = (Vec<(Key, bool)>, Vec<(Key, Key)>);
+/// The models' textures to bake, the dirty looks to draw from them (base, overlay), and the
+/// lot imposters' atlases to bleed (see `bled_key`).
+type ModelTextures = (Vec<(Key, bool)>, Vec<(Key, Key)>, Vec<Key>);
 
 fn write_models(path: &Path, pkgs: &PackageSet, keys: &[Key], label: &str, progress: Progress) -> Result<(usize, ModelTextures), String> {
     let mut w = PackWriter::create(path).map_err(|e| e.to_string())?;
     let mut tex = HashSet::new();
     let mut composites = HashSet::new();
+    let mut bled = HashSet::new();
     let mut n = 0;
     for (ci, chunk) in keys.chunks(400).enumerate() {
         progress(&format!("{label}: models {}/{}", (ci * 400 + chunk.len()).min(keys.len()), keys.len()));
         let baked = par_map(chunk, |k| (*k, bake_model(pkgs, &rkey(*k))));
-        for (k, m) in baked {
-            for p in &m.parts {
+        for (k, mut m) in baked {
+            // (A lot imposter's atlas, and any cut-out's texture (railings, fences, leaves), is
+            // drawn from its bled copy: see `bake_bled`.)
+            for p in m.parts.iter_mut().filter(|p| p.layer != 0 || p.mode == 1) {
                 if let Some(t) = p.texture {
+                    bled.insert(t);
+                    p.texture = Some(bled_key(t));
+                }
+            }
+            for p in &m.parts {
+                if let Some(t) = p.texture.filter(|t| t.1 != BLED_GROUP) {
                     tex.insert(t);
                 }
                 // (And its dirty and other states' looks: their own textures, or its own with
@@ -320,7 +353,79 @@ fn write_models(path: &Path, pkgs: &PackageSet, keys: &[Key], label: &str, progr
         }
     }
     w.finish().map_err(|e| e.to_string())?;
-    Ok((n, (tex.into_iter().map(|k| (k, false)).collect(), composites.into_iter().collect())))
+    Ok((n, (tex.into_iter().map(|k| (k, false)).collect(), composites.into_iter().collect(), bled.into_iter().collect())))
+}
+
+/// The group a bled atlas is kept under, beside its own texture's key.
+const BLED_GROUP: u32 = 0x00D1_D701;
+
+/// A lot imposter atlas's bled copy: its key in the texture store.
+pub fn bled_key(base: Key) -> Key {
+    (base.0, BLED_GROUP, base.2)
+}
+
+/// Fills a picture's clear texels with the colour of the nearest solid ones (pull-push: the
+/// solid colour averaged down to coarser levels, then pushed back up into the holes), so its
+/// mipmaps don't darken what's cut out with the black under it.
+pub fn bleed(img: &mut s3formats::dds::Rgba) {
+    let (w0, h0) = (img.width, img.height);
+    let mut levels: Vec<(usize, usize, Vec<[f32; 4]>)> =
+        vec![(w0, h0, img.data.chunks_exact(4).map(|p| if p[3] >= 128 { [p[0] as f32, p[1] as f32, p[2] as f32, 1.0] } else { [0.0; 4] }).collect())];
+    while levels.last().is_some_and(|l| l.0 > 1 || l.1 > 1) {
+        let (w, h, prev) = levels.last().unwrap();
+        let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
+        let mut next = vec![[0.0f32; 4]; nw * nh];
+        for y in 0..nh {
+            for x in 0..nw {
+                let mut s = [0.0f32; 4];
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let q = prev[(y * 2 + dy).min(h - 1) * w + (x * 2 + dx).min(w - 1)];
+                    for c in 0..4 {
+                        s[c] += q[c];
+                    }
+                }
+                next[y * nw + x] = s;
+            }
+        }
+        levels.push((nw, nh, next));
+    }
+    // (Each level's holes from the level coarser than it, normalised.)
+    for li in (0..levels.len() - 1).rev() {
+        let (cw, ch, coarse) = levels[li + 1].clone();
+        let (w, _, fine) = &mut levels[li];
+        for (i, q) in fine.iter_mut().enumerate() {
+            if q[3] <= 0.0 {
+                let (x, y) = (i % *w, i / *w);
+                let p = coarse[(y / 2).min(ch - 1) * cw + (x / 2).min(cw - 1)];
+                if p[3] > 0.0 {
+                    *q = [p[0] / p[3], p[1] / p[3], p[2] / p[3], 1.0];
+                }
+            } else if q[3] != 1.0 {
+                *q = [q[0] / q[3], q[1] / q[3], q[2] / q[3], 1.0];
+            }
+        }
+    }
+    for (i, q) in levels[0].2.iter().enumerate() {
+        if img.data[i * 4 + 3] < 128 && q[3] > 0.0 {
+            for c in 0..3 {
+                img.data[i * 4 + c] = q[c].round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+}
+
+/// Writes each lot imposter atlas's bled copy (fresh mipmaps from it) into the texture store.
+fn bake_bled(root: &BakeRoot, pkgs: &PackageSet, jobs: &[Key]) -> usize {
+    let done = par_map(jobs, |base| {
+        let out = root.tex_path(bled_key(*base));
+        if out.exists() {
+            return true;
+        }
+        let Some(mut img) = pkgs.read(&rkey(*base)).or_else(|| pkgs.read_ti(base.0, base.2)).and_then(|d| s3formats::dds::decode(&d, OBJECT_TEX_MAX as usize)) else { return false };
+        bleed(&mut img);
+        std::fs::write(out, encode_dds(&img)).is_ok()
+    });
+    done.into_iter().filter(|d| *d).count()
 }
 
 /// Draws dirty looks: each object texture with a dirt overlay over it (alpha over), into the
@@ -575,7 +680,8 @@ pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progr
 
     let mut model_keys: Vec<Key> = catalog.iter().flat_map(|c| c.models.iter().copied()).collect::<HashSet<_>>().into_iter().collect();
     model_keys.sort();
-    let (n_models, (tex, composites)) = write_models(&gdir.join("models.pack"), pkgs, &model_keys, "Converting objects", progress)?;
+    let (n_models, (tex, composites, bled)) = write_models(&gdir.join("models.pack"), pkgs, &model_keys, "Converting objects", progress)?;
+    bake_bled(root, pkgs, &bled);
     let n_tex = bake_textures(root, pkgs, &tex, OBJECT_TEX_MAX, "Converting objects", progress);
     let dirty = bake_composites(root, pkgs, &composites);
     progress(&format!("Converting objects: {dirty} dirty looks"));
@@ -587,7 +693,11 @@ pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progr
     let child_rig = rig_of("cuRig");
     let toddler_rig = rig_of("puRig");
     let baby_rig = rig_of("buBody");
-    let casp_keys: Vec<ResourceKey> = pkgs.keys_of_type(types::CASP).copied().collect();
+    // (In a fixed order: the town's Sims are dressed from this list by their own seeds, so the
+    // same Sim wears the same clothes after every conversion.)
+    let mut casp_keys: Vec<ResourceKey> = pkgs.keys_of_type(types::CASP).copied().collect();
+    casp_keys.sort_by_key(|k| (k.t, k.g, k.i));
+    casp_keys.dedup();
     let parsed: Vec<(ResourceKey, CasPart)> =
         par_map(&casp_keys, |k| Some((*k, CasPart::parse(&pkgs.read(k)?).ok()?))).into_iter().flatten().collect();
     let mut infos = Vec::with_capacity(parsed.len());
@@ -666,6 +776,7 @@ pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progr
         cas_parts: meshes.len(),
         clips: n_clips,
         cas_version: CAS_VERSION,
+        objects_version: OBJECTS_VERSION,
     };
     std::fs::write(gdir.join("manifest.json"), serde_json::to_vec_pretty(&manifest).unwrap()).map_err(|e| e.to_string())?;
     Ok(manifest)
@@ -851,9 +962,11 @@ pub fn bake_world(root: &BakeRoot, pkgs: &PackageSet, world_path: &Path, name: &
         .into_iter()
         .collect();
     model_keys.sort();
-    let (_, (tex, composites)) = write_models(&wdir.join("models.pack"), pkgs, &model_keys, &format!("Converting {name}"), progress)?;
+    let (_, (tex, composites, bled)) = write_models(&wdir.join("models.pack"), pkgs, &model_keys, &format!("Converting {name}"), progress)?;
     bake_textures(root, pkgs, &tex, OBJECT_TEX_MAX, &format!("Converting {name}"), progress);
     bake_composites(root, pkgs, &composites);
+    let n = bake_bled(root, pkgs, &bled);
+    progress(&format!("Converting {name}: {n} lot imposters' atlases"));
 
     progress(&format!("Converting {name}: roads…"));
     let sectors = (world.heightmap.width.saturating_sub(1) / SECTOR) as u64;
@@ -1246,4 +1359,22 @@ fn mat3_to_quat(m: [[f32; 3]; 3]) -> [f32; 4] {
 /// Opens a baked model pack (for runtime).
 pub fn open_pack(path: &Path) -> Option<PackReader> {
     PackReader::open(path).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cut_outs_clear_texels_take_the_colour_of_its_solid_ones() {
+        // (A fence's one solid texel, red, in a clear black picture.)
+        let mut data = vec![0u8; 8 * 8 * 4];
+        data[(3 * 8 + 5) * 4..(3 * 8 + 5) * 4 + 4].copy_from_slice(&[200, 30, 20, 255]);
+        let mut img = s3formats::dds::Rgba { width: 8, height: 8, data };
+        bleed(&mut img);
+        for p in img.data.chunks_exact(4) {
+            assert_eq!(&p[..3], &[200, 30, 20], "every texel the fence's colour");
+        }
+        assert_eq!(img.data.chunks_exact(4).filter(|p| p[3] == 255).count(), 1, "what's clear stays clear");
+    }
 }

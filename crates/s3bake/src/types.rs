@@ -9,8 +9,11 @@ pub use s3formats::world::{Heightmap, LotInfo};
 pub const BAKE_VERSION: u32 = 8;
 /// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
 pub const CAS_VERSION: u32 = 11;
+/// The objects' models and textures (the global bake's, beside its packs' `BAKE_VERSION`): 1,
+/// cut-outs drawn from bled copies of their textures; 2, the wardrobe in a fixed order.
+pub const OBJECTS_VERSION: u32 = 2;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 71;
+pub const WORLD_VERSION: u32 = 73;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -157,6 +160,8 @@ pub struct GlobalManifest {
     pub clips: usize,
     #[serde(default)]
     pub cas_version: u32,
+    #[serde(default)]
+    pub objects_version: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

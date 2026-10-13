@@ -79,7 +79,9 @@ const WALL_H: f32 = s3bake::building::LEVEL_HEIGHT;
 const WALL_T: f32 = 0.14;
 const CUT_H: f32 = 0.45;
 /// Beyond this camera distance the pre-rendered imposter replaces the detailed house.
-const IMPOSTER_DISTANCE: f32 = 75.0;
+/// (Not the engine's limit any more: the household's own house stays itself, walls up and roof
+/// on, until it's small on the screen; the game's low pictured stand-in only beyond.)
+const IMPOSTER_DISTANCE: f32 = 260.0;
 
 /// The detailed house of the active lot.
 #[derive(Resource)]
@@ -2346,7 +2348,7 @@ fn shell_visibility(walls: Res<WallMode>, cams: Query<&SimsCamera>, mut shells: 
 }
 
 fn building_visibility(
-    (building, walls): (Option<ResMut<ActiveBuilding>>, Res<WallMode>),
+    (building, walls, mut trees_shown): (Option<ResMut<ActiveBuilding>>, Res<WallMode>, Local<Option<bool>>),
     cams: Query<(&SimsCamera, &GlobalTransform)>,
     mut pieces: Query<(&BuildingPiece, Option<&WallObject>, &mut Visibility, Has<crate::traffic::CarOut>), (Without<LotImposter>, Without<crate::world::Tree>, Without<crate::buy::HeldObject>)>,
     mut imposters: Query<(&LotImposter, &mut Visibility), (Without<BuildingPiece>, Without<crate::world::Tree>)>,
@@ -2375,14 +2377,17 @@ fn building_visibility(
     let Some(mut b) = building else { return };
     let Ok((cam, cam_tf)) = cams.single() else { return };
     let far = !b.always_detailed && (cam.distance > IMPOSTER_DISTANCE || cam.focus.distance(b.center) > IMPOSTER_DISTANCE * 1.4);
-    if b.far != Some(far) {
+    // World trees right around the house would hide it in close-up (not once it's seen from
+    // outside, walls up).
+    let trees_out = far || cam.distance > ROOF_DISTANCE;
+    if b.far != Some(far) || *trees_shown != Some(trees_out) {
         b.far = Some(far);
+        *trees_shown = Some(trees_out);
         let _ = &mut imposters;
-        // World trees right around the house would hide it in close-up.
         for (tf, mut vis) in &mut trees {
             let near = tf.translation().xz().distance(b.center.xz()) < 22.0;
             if near {
-                *vis = if far { Visibility::Inherited } else { Visibility::Hidden };
+                *vis = if trees_out { Visibility::Inherited } else { Visibility::Hidden };
             }
         }
     }

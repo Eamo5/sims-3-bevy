@@ -45,7 +45,13 @@ installation is unreachable.
   from the game's
   own stair pieces and railings (as wide as the builders made them), and the house's own
   furniture; the ground never shows through a floor; nearby lots are shown in full detail with
-  the game's roofs, distant ones as the game's pre-rendered imposters.
+  the game's roofs, distant ones as the game's pre-rendered imposters. Better than the game's
+  engine allowed: the household's own house stays itself (walls up, roof on) out to 260 m
+  rather than turning to its low imposter at 75; the imposters' ground on a sloping lot stays
+  ground (not shards of it over the terrain), and every cut-out (the imposters' fences and
+  railings, real ones, leaves) is drawn from a copy of its texture with the colour bled under
+  the cut-away part and fresh mipmaps, so far off they thin out instead of turning to thick
+  black lines; leaves and imposters are cut out with alpha to coverage, soft-edged up close.
 - **Sims**: Create-a-Sim from real CAS parts (browsed as the game's own style pictures), with
   human traits restricted to the original age groups in CAS, random generation, birthdays
   and Mid-Life Crisis, with conflicts taken from the original exclusion groups; changing to

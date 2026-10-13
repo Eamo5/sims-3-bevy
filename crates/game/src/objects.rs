@@ -161,8 +161,9 @@ impl ObjectAssets {
         let skin = ctx.baked.skin(&key);
         for mut p in cpu {
             // Lot imposters cut out railings, fences, shrubs and window frames with their
-            // atlas's alpha.
-            let mode = if p.layer != 0 { p.mode.max(1) } else { p.mode };
+            // atlas's alpha: smoothed over the pixel's samples (alpha to coverage), so thin
+            // fences thin out with distance rather than flicker.
+            let mode = if p.layer != 0 && p.mode < 2 { 3 } else { p.mode };
             let material = self.material_for_key(ctx, p.tex, mode, p.unlit);
             // A moving part: skinned to the model's rig (its mesh found by its vertices).
             let rig = skin.as_ref().is_some_and(|s| skin_part(&mut p.mesh, s)).then_some(key);
@@ -199,6 +200,7 @@ impl ObjectAssets {
             alpha_mode: match mode {
                 2 => AlphaMode::Blend,
                 1 => AlphaMode::Mask(0.5),
+                3 => AlphaMode::AlphaToCoverage,
                 _ => AlphaMode::Opaque,
             },
             double_sided: mode != 0,

@@ -313,7 +313,10 @@ fn spawn_world_content(
         };
         let base = StandardMaterial {
             base_color_texture: Some(tex),
-            alpha_mode: AlphaMode::Mask(0.45),
+            // (Leaves cut out over the pixel's samples, alpha to coverage: soft at their edges
+            // rather than in stair-steps of the picture's texels up close, and not flickering
+            // far off. The shadow pass still cuts them out.)
+            alpha_mode: AlphaMode::AlphaToCoverage,
             double_sided: true,
             cull_mode: None,
             perceptual_roughness: 0.95,
