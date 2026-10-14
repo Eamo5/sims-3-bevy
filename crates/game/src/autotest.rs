@@ -848,11 +848,12 @@ fn build_history_test(
                 let at = (2..b.data.depth as i32 - 4).flat_map(|z| (2..b.data.width as i32 - 4).map(move |x| IVec2::new(x, z)))
                     .find(|p| (0..=3).all(|z| (0..=3).all(|x| !b.data.floors.iter().chain(&b.data.pool).any(|f| f.x as i32 == p.x + x && f.z as i32 == p.y + z)))
                         && project(p.as_vec2()).is_some() && project(p.as_vec2() + Vec2::splat(2.0)).is_some()).expect("visible empty construction area");
-                let offset = if mode == "pool" || mode == "pave" || mode == "foundation" { Vec2::splat(0.2) } else { Vec2::ZERO };
+                let offset = if matches!(mode.as_str(), "pool" | "pave" | "foundation" | "basement") { Vec2::splat(0.2) } else { Vec2::ZERO };
                 (at.as_vec2() + offset, at.as_vec2() + Vec2::splat(2.0) + offset,
                     match mode.as_str() {
                         "pool" => crate::build::BuildTool::Pool,
                         "foundation" => crate::build::BuildTool::Foundation,
+                        "basement" => crate::build::BuildTool::Basement,
                         "terrain" => crate::build::BuildTool::Terrain,
                         "sculpt" => crate::build::BuildTool::Sculpt,
                         _ => crate::build::BuildTool::Room,
@@ -3332,6 +3333,16 @@ fn auto_build(
                 info!("build test: foundation — {} tiles, §{cost} {why:?}", ops.len());
                 apply(&mut commands, &mut assets, b, &mut ctx, ops);
             }
+            // (BUILD_BASEMENT=1: a basement dug under it first, with stairs up from it.)
+            if std::env::var("BUILD_BASEMENT").is_ok() {
+                let (ops, cost) = crate::build::plan_basement(b, false, 1, IVec2::new(x, z), IVec2::new(x + w - 1, z + d - 1));
+                info!("build test: basement — {} tiles, §{cost}", ops.len());
+                apply(&mut commands, &mut assets, b, &mut ctx, ops);
+                match crate::build::plan_stairs(b, 0, IVec2::new(x + 1, z + d - 2), 0, false) {
+                    Ok(ops) => apply(&mut commands, &mut assets, b, &mut ctx, ops),
+                    Err(why) => warn!("build test: basement stairs: {why}"),
+                }
+            }
             // (BUILD_DIAGONAL=1: the Diagonal Room tool's diamond, dragged the same way.)
             let tool = if std::env::var("BUILD_DIAGONAL").is_ok() { crate::build::BuildTool::DiagonalRoom } else { crate::build::BuildTool::Room };
             let (ops, cost) = crate::build::plan(b, tool, false, b.view_level, IVec2::new(x, z), IVec2::new(x + w, z + d));
@@ -3387,6 +3398,14 @@ fn auto_build(
         }
         3 if time.elapsed_secs() - t0 > 6.0 => {
             *stage = 4;
+            // (Down into the basement.)
+            if std::env::var("BUILD_BASEMENT").is_ok() {
+                let to = b.world(x as f32 + w as f32 - 1.5, z as f32 + 1.5, 0.0).xz();
+                if let Ok((mut q, ..)) = sel.single_mut() {
+                    q.0.clear();
+                    q.0.push_back(crate::interact::Action::new("Go Here", crate::interact::ActionKind::GoHere(to, 0), false));
+                }
+            }
             // (On a foundation: in through the door and up onto it.)
             if std::env::var("BUILD_FOUNDATION").is_ok() {
                 let to = b.world(x as f32 + w as f32 * 0.5, z as f32 + d as f32 - 1.5, 0.0).xz();

@@ -413,6 +413,33 @@ mod foundation_tests {
     }
 
     #[test]
+    fn a_basement_is_dug_a_storey_down_with_walls_round_it() {
+        let mut b = deck_lot();
+        b.levels = vec![0.0, 0.12, 3.12];
+        for (x, z) in [(1, 1), (2, 1)] {
+            apply_paint(&mut b, &PaintOp::AddBasement { x, z });
+        }
+        let y = 0.12 - s3bake::building::LEVEL_HEIGHT;
+        assert_eq!(b.basement, Some(y));
+        assert!(in_basement_tile(&b, 1, 1) && in_basement_tile(&b, 2, 1));
+        // (Six walls round two tiles side by side, at the basement's floor; none between.)
+        let standing = |b: &LotBuildingBaked| b.walls.iter().filter(|w| w.level == 0 && w.y == Some(y) && w.a != w.b).count();
+        assert_eq!(standing(&b), 6);
+        assert!(b.walls.iter().all(|w| w.storey() == 0));
+        // (Walls built down there stand on its floor.)
+        apply_paint(&mut b, &PaintOp::AddWall { a: [1.0, 1.5], b: [1.0, 2.0], level: 0 });
+        assert_eq!(b.walls.last().unwrap().y, Some(y));
+        // (Filled in: four round the tile left; then none, and no basement.)
+        apply_paint(&mut b, &PaintOp::RemoveBasement { x: 2, z: 1 });
+        assert_eq!(standing(&b) - 1, 4);
+        apply_paint(&mut b, &PaintOp::RemoveBasement { x: 1, z: 1 });
+        assert_eq!(b.basement, None);
+        // (Paving's on the ground over it, not its floor.)
+        apply_paint(&mut b, &PaintOp::AddBasement { x: 5, z: 5 });
+        assert!(crate::covering::pave_room(&b, Vec2::new(5.5, 5.5), Key::default(), false, |_| [0.0; 4]).is_empty());
+    }
+
+    #[test]
     fn a_foundation_taken_away_leaves_its_neighbour_a_side() {
         let mut b = deck_lot();
         for (x, z) in [(5, 5), (6, 5)] {
@@ -786,6 +813,10 @@ pub enum PaintOp {
     /// highest ground under it, as it was when laid), or taken away again.
     AddFoundation { x: u16, z: u16, ground: f32 },
     RemoveFoundation { x: u16, z: u16 },
+    /// A tile of basement dug (its floor a storey under the ground floor, walls round the dug
+    /// area), or filled in again.
+    AddBasement { x: u16, z: u16 },
+    RemoveBasement { x: u16, z: u16 },
 }
 
 /// How deep a pool dug in build mode is (a storey down, as the game's).
@@ -883,6 +914,7 @@ pub fn repaint(
     let mut pool_changed = false;
     let mut foundation_changed = false;
     for op in ops {
+        let walls_before = b.data.walls.len() as u32;
         apply_paint(&mut b.data, op);
         let last = b.data.walls.len().saturating_sub(1) as u32;
         match *op {
@@ -935,6 +967,14 @@ pub fn repaint(
             PaintOp::AddFoundation { .. } | PaintOp::RemoveFoundation { .. } => {
                 foundation_changed = true;
                 floors_changed = true;
+            }
+            PaintOp::AddBasement { .. } | PaintOp::RemoveBasement { .. } => {
+                // (Its walls, new and taken down, redrawn; the ground opened over it.)
+                b.built.extend(walls_before..b.data.walls.len() as u32);
+                walls_changed.extend((0..b.data.walls.len() as u32).filter(|&i| b.data.walls[i as usize].level == 0 && b.data.walls[i as usize].y.is_some()));
+                structure = true;
+                floors_changed = true;
+                pool_changed = true;
             }
         }
     }
@@ -1298,7 +1338,7 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
         PaintOp::Pave { x, z, mask, texture, heights } => {
             if x as u32 >= b.width || z as u32 >= b.depth { return; }
             let i = index(b, texture);
-            let tile = match b.floors.iter().position(|f| f.level == 0 && f.x == x && f.z == z) {
+            let tile = match b.floors.iter().position(|f| f.level == 0 && f.y.is_none() && f.x == x && f.z == z) {
                 Some(index) => index,
                 None => {
                     b.floors.push(FloorBaked { level: 0, x, z, mask: 0, kind: ROOM_OUTSIDE, region: 0, cover: [NO_COVER; 4], y: None });
@@ -1321,7 +1361,12 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
             }
             // (On the ground floor, a wall between tiles at their own height (the deck beside a
             // foundation) stands on them.)
-            let y = if level == 1 { floor_under_wall(b, Vec2::from(a), Vec2::from(end)) } else { None };
+            let y = match level {
+                1 => floor_under_wall(b, Vec2::from(a), Vec2::from(end)),
+                // (Down in the basement, on its floor.)
+                0 => b.basement,
+                _ => None,
+            };
             b.walls.push(WallBaked { a, b: end, level, left: ROOM_OUTSIDE, right: ROOM_OUTSIDE, cover: [NO_COVER; 2], y });
         }
         PaintOp::RemoveWall { wall } => {
@@ -1390,6 +1435,8 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
         PaintOp::RemovePool { x, z } => b.pool.retain(|f| !(f.x == x && f.z == z)),
         PaintOp::AddFoundation { x, z, ground } => add_foundation(b, x, z, ground),
         PaintOp::RemoveFoundation { x, z } => remove_foundation(b, x, z),
+        PaintOp::AddBasement { x, z } => add_basement(b, x, z),
+        PaintOp::RemoveBasement { x, z } => remove_basement(b, x, z),
         PaintOp::RemoveFence { a, b: end, level } => {
             let near = |p: [f32; 2], q: [f32; 2]| Vec2::from(p).distance(Vec2::from(q)) < 0.05;
             b.fences.retain(|f| !(f.level == level && f.a != f.b && ((near(f.a, a) && near(f.b, end)) || (near(f.a, end) && near(f.b, a)))));
@@ -1521,6 +1568,64 @@ fn remove_foundation(b: &mut LotBuildingBaked, x: u16, z: u16) {
             b.foundation.push((q, p));
             b.foundation_top.push(h);
         }
+    }
+}
+
+/// Whether a tile's dug out for the basement.
+pub fn in_basement_tile(b: &LotBuildingBaked, x: i32, z: i32) -> bool {
+    b.floors.iter().any(|f| f.level == 0 && f.y.is_some() && f.x as i32 == x && f.z as i32 == z)
+}
+
+/// Takes down the basement wall along a tile side (left in the list with no length, as walls
+/// knocked down are, so the others keep their places).
+fn collapse_basement_wall(b: &mut LotBuildingBaked, p: [f32; 2], q: [f32; 2]) {
+    let near = |u: [f32; 2], v: [f32; 2]| Vec2::from(u).distance(Vec2::from(v)) < 0.05;
+    for w in b.walls.iter_mut().filter(|w| w.level == 0 && w.y.is_some()) {
+        if (near(w.a, p) && near(w.b, q)) || (near(w.a, q) && near(w.b, p)) {
+            w.b = w.a;
+        }
+    }
+}
+
+/// Puts up a basement wall along a tile side, if there isn't one.
+fn basement_wall(b: &mut LotBuildingBaked, p: [f32; 2], q: [f32; 2], y: f32) {
+    let near = |u: [f32; 2], v: [f32; 2]| Vec2::from(u).distance(Vec2::from(v)) < 0.05;
+    if !b.walls.iter().any(|w| w.level == 0 && w.y.is_some() && ((near(w.a, p) && near(w.b, q)) || (near(w.a, q) && near(w.b, p)))) {
+        b.walls.push(WallBaked { a: p, b: q, level: 0, left: ROOM_OUTSIDE, right: ROOM_OUTSIDE, cover: [NO_COVER; 2], y: Some(y) });
+    }
+}
+
+/// Digs a tile of basement: its floor a storey under the ground floor (the basement's, once
+/// there's one), walls round the dug area and none between tiles dug side by side.
+fn add_basement(b: &mut LotBuildingBaked, x: u16, z: u16) {
+    if x as u32 >= b.width || z as u32 >= b.depth || b.levels.len() < 2 || in_basement_tile(b, x as i32, z as i32) {
+        return;
+    }
+    let y = *b.basement.get_or_insert(b.levels[1] - s3bake::building::LEVEL_HEIGHT);
+    b.floors.push(FloorBaked { level: 0, x, z, mask: 0xF, kind: ROOM_LIVING, region: 0, cover: [NO_COVER; 4], y: Some(y) });
+    for (p, q, (nx, nz)) in tile_sides(x, z) {
+        if in_basement_tile(b, nx, nz) {
+            collapse_basement_wall(b, p, q);
+        } else {
+            basement_wall(b, p, q, y);
+        }
+    }
+}
+
+/// Fills a tile of basement in again: its floor and walls go, and the dug tiles beside it get
+/// a wall where it was. With none left, there's no basement.
+fn remove_basement(b: &mut LotBuildingBaked, x: u16, z: u16) {
+    let Some(i) = b.floors.iter().position(|f| f.level == 0 && f.y.is_some() && f.x == x && f.z == z) else { return };
+    b.floors.remove(i);
+    let y = b.basement.unwrap_or(b.levels[1] - s3bake::building::LEVEL_HEIGHT);
+    for (p, q, (nx, nz)) in tile_sides(x, z) {
+        collapse_basement_wall(b, p, q);
+        if in_basement_tile(b, nx, nz) {
+            basement_wall(b, q, p, y);
+        }
+    }
+    if !b.floors.iter().any(|f| f.level == 0 && f.y.is_some()) {
+        b.basement = None;
     }
 }
 
@@ -2182,6 +2287,8 @@ fn respawn_stairs(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut 
         let (bottom, d) = s.bottom();
         let run = STAIR_RUN as f32;
         let (Some(&y0), Some(&y1)) = (b.levels.get(s.level as usize), b.levels.get(s.level as usize + 1)) else { continue };
+        // (Up from the basement: from its floor.)
+        let y0 = if s.level == 0 { b.data.basement.unwrap_or(y0) } else { y0 };
         // In the stair style's pieces (with its railing up both sides); steps made here with no
         // style to hand.
         let built = b.stair_style.as_ref().map(|style| {
@@ -2676,8 +2783,8 @@ fn view_level_keys(keys: Res<ButtonInput<KeyCode>>, building: Option<ResMut<Acti
             b.levels.push(h);
         }
     }
-    // (A basement's storey 0 is looked into, not built on.)
-    if keys.just_pressed(KeyCode::PageDown) && b.view_level > if building_up { 1 } else { b.data.lowest_storey() } {
+    // (Down into the basement, to look into it, or to build there.)
+    if keys.just_pressed(KeyCode::PageDown) && b.view_level > b.data.lowest_storey() {
         b.view_level -= 1;
     }
 }

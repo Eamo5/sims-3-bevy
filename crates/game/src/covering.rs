@@ -115,7 +115,7 @@ pub fn pave_room(b: &LotBuildingBaked, at: Vec2, texture: Key, fill: bool, heigh
 fn pave_tile(b: &LotBuildingBaked, x: i32, z: i32, mask: u8, texture: Key, heights: &impl Fn(Vec2) -> [f32; 4]) -> Option<PaintOp> {
     if x < 0 || z < 0 || x >= b.width as i32 || z >= b.depth as i32
         || b.pool.iter().any(|f| f.x as i32 == x && f.z as i32 == z)
-        || b.floors.iter().any(|f| f.level == 1 && f.x as i32 == x && f.z as i32 == z)
+        || b.floors.iter().any(|f| (f.level == 1 || f.y.is_some()) && f.x as i32 == x && f.z as i32 == z)
     { return None; }
     let tile = b.floors.iter().find(|f| f.level == 0 && f.x as i32 == x && f.z as i32 == z);
     let changed = (0..4).fold(0, |changed, t| {

@@ -30,8 +30,9 @@ pub const FLOOR_PRICE: i64 = 5;
 pub const STAIRS_PRICE: i64 = 300;
 /// What a pool tile costs to dig.
 pub const POOL_PRICE: i64 = 40;
-/// A tile of foundation (ours: the game's engine prices it).
+/// A tile of foundation, and of basement dug (ours: the game's engine prices them).
 pub const FOUNDATION_PRICE: i64 = 20;
+pub const BASEMENT_PRICE: i64 = 60;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BuildTool {
@@ -48,6 +49,8 @@ pub enum BuildTool {
     Pool,
     /// Lay a foundation, the ground floor raised on it (before the walls go up).
     Foundation,
+    /// Dig a basement, a storey under the ground floor.
+    Basement,
     /// Paint the ground (the paint picked on the Terrain tab).
     Terrain,
     /// Raise, lower, flatten or smooth the ground (the tool picked on the Terrain tab).
@@ -68,6 +71,7 @@ impl BuildTool {
             BuildTool::Fence => "Fence Tool".to_string(),
             BuildTool::Pool => format!("Pool Tool\n§{POOL_PRICE} a tile"),
             BuildTool::Foundation => format!("Foundation Tool\n§{FOUNDATION_PRICE} a tile"),
+            BuildTool::Basement => format!("Basement Tool\n§{BASEMENT_PRICE} a tile"),
             BuildTool::Terrain => "Terrain Paint".to_string(),
             BuildTool::Sculpt => "Terrain Tools".to_string(),
         }
@@ -84,6 +88,7 @@ impl BuildTool {
             BuildTool::Fence => "Drag along the grid to put up the fence; Ctrl+drag takes fencing down.",
             BuildTool::Pool => "Drag out a pool on the ground out of doors; Ctrl+drag fills it in. Buy a pool ladder for Sims to swim.",
             BuildTool::Foundation => "Drag out a foundation to build the house on; Ctrl+drag takes it away. Lay it before the walls.",
+            BuildTool::Basement => "Drag out a basement to dig under the house; Ctrl+drag fills it in. Page Down to go down and build there; stairs lead up from it.",
             BuildTool::Terrain => "Hold the mouse down to paint the ground on the lot.",
             BuildTool::Sculpt => "Hold the mouse down to work the ground on the lot (not under the house or things).",
         }
@@ -560,9 +565,12 @@ pub fn plan_stairs(b: &ActiveBuilding, level: u8, at: IVec2, dir: u8, removing: 
     if !tiles.iter().all(|t| inside(*t)) || !inside(landing) {
         return Err("The staircase doesn't fit on the lot there.");
     }
-    let has_floor = |l: u8, t: IVec2| b.data.floors.iter().any(|f| f.level == l && f.x as i32 == t.x && f.z as i32 == t.y);
+    let has_floor = |l: u8, t: IVec2| b.data.floors.iter().any(|f| f.level == l && f.x as i32 == t.x && f.z as i32 == t.y && (l != 0 || f.y.is_some()));
     if level > 1 && !tiles.iter().all(|t| has_floor(level, *t)) {
         return Err("Stairs upstairs need floor under them.");
+    }
+    if level == 0 && !tiles.iter().all(|t| has_floor(0, *t)) {
+        return Err("Stairs up from the basement go in what's dug.");
     }
     if b.built_stairs.iter().any(|o| o.level == level && o.tiles().iter().any(|t| tiles.contains(t))) {
         return Err("There's a staircase there already.");
@@ -669,6 +677,37 @@ pub fn plan_foundation(b: &ActiveBuilding, removing: bool, level: u8, start: IVe
     (ops, cost, None)
 }
 
+/// A basement dug under the tiles from `start` to `cur` (or filled in), from the ground floor:
+/// its ops and what it costs. Not under a pool or paving, nor filled in under a staircase.
+pub fn plan_basement(b: &ActiveBuilding, removing: bool, level: u8, start: IVec2, cur: IVec2) -> (Vec<PaintOp>, i64) {
+    if level > 1 {
+        return (Vec::new(), 0);
+    }
+    let d = &b.data;
+    let (lo, hi) = (start.min(cur), start.max(cur));
+    let mut ops = Vec::new();
+    for z in lo.y..=hi.y {
+        for x in lo.x..=hi.x {
+            let dug = crate::building::in_basement_tile(d, x, z);
+            let (x, z) = (x as u16, z as u16);
+            let stairs = b.built_stairs.iter().any(|s| s.level == 0 && s.tiles().contains(&IVec2::new(x as i32, z as i32)));
+            if removing {
+                if dug && !stairs {
+                    ops.push(PaintOp::RemoveBasement { x, z });
+                }
+                continue;
+            }
+            let pool = d.pool.iter().any(|f| f.x == x && f.z == z);
+            let paved = d.floors.iter().any(|f| f.level == 0 && f.y.is_none() && f.x == x && f.z == z);
+            if !dug && !pool && !paved {
+                ops.push(PaintOp::AddBasement { x, z });
+            }
+        }
+    }
+    let cost = if removing { 0 } else { ops.len() as i64 * BASEMENT_PRICE };
+    (ops, cost)
+}
+
 /// A fence along the grid from `start` to `cur` (or taken down): its ops and what it costs.
 /// Out of doors on the ground floor it stands on the ground.
 pub fn plan_fence(b: &ActiveBuilding, style: &s3bake::gamedata::FenceStyle, removing: bool, level: u8, start: IVec2, cur: IVec2) -> (Vec<PaintOp>, i64) {
@@ -706,6 +745,10 @@ pub fn plan_fence(b: &ActiveBuilding, style: &s3bake::gamedata::FenceStyle, remo
 pub fn plan(b: &ActiveBuilding, tool: BuildTool, removing: bool, level: u8, start: IVec2, cur: IVec2) -> (Vec<PaintOp>, i64) {
     let mut sim = b.data.clone();
     let mut ops = Vec::new();
+    // (The basement's floor is dug with it.)
+    if tool == BuildTool::Floor && level == 0 {
+        return (ops, 0);
+    }
     if tool == BuildTool::Floor {
         let (lo, hi) = (start.min(cur), start.max(cur));
         let mut cost = 0;
@@ -740,11 +783,11 @@ pub fn plan(b: &ActiveBuilding, tool: BuildTool, removing: bool, level: u8, star
         if wall_along(&sim, level, p, q).is_some() {
             continue;
         }
-        // Upstairs, walls stand on floor.
-        if level > 1 {
+        // Upstairs, walls stand on floor; down in the basement, in what's dug.
+        if level > 1 || level == 0 {
             let mid = (p + q) * 0.5;
             let n = (q - p).perp();
-            let has = |c: Vec2| sim.floors.iter().any(|f| f.level == level && f.x as f32 == c.x.floor() && f.z as f32 == c.y.floor());
+            let has = |c: Vec2| sim.floors.iter().any(|f| f.level == level && f.x as f32 == c.x.floor() && f.z as f32 == c.y.floor() && (level != 0 || f.y.is_some()));
             if !has(mid + n * 0.5) && !has(mid - n * 0.5) {
                 continue;
             }
@@ -866,7 +909,7 @@ fn build_tool(
     }
     let local = b.local(ray.origin + *ray.direction * t);
     let (w, d) = (b.data.width as i32, b.data.depth as i32);
-    let tiles = matches!(tool, BuildTool::Floor | BuildTool::Stairs | BuildTool::Pool | BuildTool::Foundation);
+    let tiles = matches!(tool, BuildTool::Floor | BuildTool::Stairs | BuildTool::Pool | BuildTool::Foundation | BuildTool::Basement);
     let cur = if tiles {
         IVec2::new((local.x.floor() as i32).clamp(0, w - 1), (local.y.floor() as i32).clamp(0, d - 1))
     } else {
@@ -989,6 +1032,7 @@ fn build_tool(
         (Some(style), BuildTool::Fence) => plan_fence(b, style, removing, level, start, cur),
         (None, BuildTool::Fence) => (Vec::new(), 0),
         (_, BuildTool::Pool) => plan_pool(b, removing, level, start, cur),
+        (_, BuildTool::Basement) => plan_basement(b, removing, level, start, cur),
         _ => plan(b, tool, removing, level, start, cur),
     };
     let funds = household.as_ref().map_or(i64::MAX, |h| h.funds);
@@ -1081,6 +1125,7 @@ fn build_tool(
     play.write(crate::sound::PlaySound::ui(match (tiles, removing) {
         (true, _) if tool == BuildTool::Pool => "ui_build_pool_mdown",
         (true, _) if tool == BuildTool::Foundation => "ui_build_deck_section",
+        (true, _) if tool == BuildTool::Basement => "ui_build_pool_mdown",
         (true, _) => "ui_build_flooring_section",
         (false, true) => "ui_build_walldelete_section",
         (false, false) if tool == BuildTool::Fence => "ui_build_rail_plop",

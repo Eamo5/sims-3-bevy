@@ -878,7 +878,13 @@ installation is unreachable.
   walls built on the deck standing on it), the foundation's brick sides round its edge and
   none between tiles laid side by side; not under walls, a staircase or a pool, and before
   the house's walls go up; Ctrl+drag takes it away again where no room stands on it. Sims
-  step up onto it as onto the game's own houses' foundations. A Terrain tab paints the ground on the lot with
+  step up onto it as onto the game's own houses' foundations. The Basement tool (the game's
+  Basement panel) digs a basement (§60 a tile): its floor a storey under the ground floor,
+  walls round the dug area and none between tiles dug side by side, never under a pool or
+  paving; Ctrl+drag fills it in. Page Down goes down into it, to look or to build: walls
+  there stand on its floor, and staircases lead up from it to the floor above (its stairwell
+  opened, a landing at the top), Sims going down and up them. As the game's houses' basements,
+  it's open to look into where the ground floor's over it, under the ground elsewhere. A Terrain tab paints the ground on the lot with
   the world's own terrain paints (pictured from their textures), in three brush sizes, or
   erases back to how the world had it; its terrain tools raise, lower, flatten and smooth the
   ground (not under the house, the pool or anything standing on the lot, nor at its edges).
@@ -1087,8 +1093,8 @@ installation is unreachable.
   Apply/Enter commits, Cancel/Escape restores the original, and Buy Mode undo reverses the edit.
 - **Build Mode navigation**: the original house diagram opens walls, wallpaper, floors, doors,
   windows, roofs, fences, stairs, pools and terrain tools. The original puck provides mode,
-  camera, floor, wall-view, lighting and grid controls. Wall/room, rectangular-pool and
-  foundation tools use their original panels and Back button; catalogue browsers appear above the navigation.
+  camera, floor, wall-view, lighting and grid controls. Wall/room, rectangular-pool,
+  foundation and basement tools use their original panels and Back button; catalogue browsers appear above the navigation.
   Floor and wallpaper catalogues use the original Build panels and expandable thumbnail grids,
   with wheel/skinned-scrollbar navigation and single-surface/room-fill buttons. Pattern names
   and prices appear on hover; selecting one retains its colour presets and Create a Style.
@@ -1206,7 +1212,7 @@ to verify keyboard shortcuts. Both check funds, save records, identity, upgrades
 `BUILD_NAV_TEST=1` with `PRESS_KEY=F3@5` and
 `UI_CLICK=1002@6;302@7;06e89130@8;1013@9;06e89130@10;1003@11;8ffffa04@12;8feffa03@13`
 verifies original Build navigation and mode switching; capture after 15 seconds.
-`BUILD_HISTORY_TEST=room`, `pool`, `demolish`, `terrain` or `sculpt`, with `PRESS_KEY=F3@5`
+`BUILD_HISTORY_TEST=room`, `pool`, `foundation`, `basement`, `demolish`, `terrain` or `sculpt`, with `PRESS_KEY=F3@5`
 and `--view-level 1`, performs a real drag then clicks the original Undo/Redo buttons. It checks
 building data, furniture identity, funds, save records, terrain heights and paint-map pixels;
 capture after 11 seconds.
