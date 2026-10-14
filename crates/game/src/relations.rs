@@ -67,7 +67,7 @@ fn toggle_panel(
         panel.shown.clear();
         if !panel.open {
             for r in [panel.root.take(), panel.tree_root.take()].into_iter().flatten() {
-                commands.entity(r).despawn();
+                commands.entity(r).try_despawn();
             }
             panel.tree = false;
             panel.tree_shown.clear();
@@ -129,7 +129,7 @@ fn update_panel(
     }
     panel.shown = shown;
     if let Some(r) = panel.root.take() {
-        commands.entity(r).despawn();
+        commands.entity(r).try_despawn();
     }
     let root = commands
         .spawn((
@@ -232,7 +232,7 @@ fn tree_button(mut commands: Commands, buttons: Query<&Interaction, (Changed<Int
         if !panel.tree
             && let Some(r) = panel.tree_root.take()
         {
-            commands.entity(r).despawn();
+            commands.entity(r).try_despawn();
         }
     }
 }
@@ -272,7 +272,7 @@ fn update_tree(
     }
     panel.tree_shown = shown;
     if let Some(r) = panel.tree_root.take() {
-        commands.entity(r).despawn();
+        commands.entity(r).try_despawn();
     }
     let entity_of = |id: u64| people.iter().find(|(_, s)| s.id == id);
     let name_of = |id: u64| entity_of(id).map(|(_, s)| s.full_name()).or_else(|| family.0.get(&id).map(|p| p.name.clone())).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "Unknown".into());

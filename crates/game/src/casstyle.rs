@@ -334,7 +334,7 @@ fn style_panel(
     // The materials: the item's colourways, each the game's picture of it; the palette's
     // swatches.
     for old in [st.materials.take(), st.swatches.take()].into_iter().flatten() {
-        commands.entity(old).despawn();
+        commands.entity(old).try_despawn();
     }
     let holder = |commands: &mut Commands, grid: Entity| commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE, ChildOf(grid))).id();
     if let (Some(grid), Some(g), Some(template), Some(key)) = (s.id(MATERIAL_GRID), ui.find("CASCompositor", MATERIAL_GRID).and_then(|w| w.grid), ui.layout("MaterialsGridItem").cloned(), key) {

@@ -70,7 +70,7 @@ fn game_picker(
     // (The plain one stands aside.)
     p.dirty = false;
     if let Some(r) = p.root.take() {
-        commands.entity(r).despawn();
+        commands.entity(r).try_despawn();
     }
     let Ok((sim, _)) = sims.get(p.sim) else {
         commands.remove_resource::<TraitPicker>();
@@ -150,7 +150,7 @@ fn picker_buttons(
     }
     let close = |commands: &mut Commands, p: &TraitPicker| {
         if let Some(r) = p.root {
-            commands.entity(r).despawn();
+            commands.entity(r).try_despawn();
         }
         commands.remove_resource::<TraitPicker>();
     };
@@ -212,7 +212,7 @@ fn picker_ui(
     }
     p.dirty = false;
     if let Some(r) = p.root.take() {
-        commands.entity(r).despawn();
+        commands.entity(r).try_despawn();
     }
     let Ok(sim) = sims.get(p.sim) else { return };
     let slots = crate::life::trait_slots(sim.age);

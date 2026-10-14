@@ -529,7 +529,7 @@ fn dig_pools(
     // The ground round the pool, laid anew.
     for (e, c) in &collars {
         if c.0 == b.lot {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
     }
     if let (Some(m), Some(mat)) = (collar_mesh(&data.heightmap, &lot, &b.data), material) {

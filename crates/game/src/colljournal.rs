@@ -182,7 +182,7 @@ fn journal_dialog(
     }
     let close = |commands: &mut Commands, d: &mut CollDialog| {
         if let Some(r) = d.s.take().and_then(|s| s.root) {
-            commands.entity(r).despawn();
+            commands.entity(r).try_despawn();
         }
         d.tabs.clear();
         d.rows = None;

@@ -742,7 +742,7 @@ fn build_tool(
     }
     drag.sync(context, cancel);
     if interrupted {
-        for (e, ..) in &label { commands.entity(e).despawn(); }
+        for (e, ..) in &label { commands.entity(e).try_despawn(); }
     }
     if blocked || !buy.active {
         buy.roof_pick = None;
@@ -770,7 +770,7 @@ fn build_tool(
     let Some((tool, b, cursor)) = tool.zip(cursor).and_then(|(tool, cursor)| building.as_deref_mut().map(|b| (tool, b, cursor))) else {
         drag.start = None;
         for (e, ..) in &label {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
         return;
     };
@@ -837,7 +837,7 @@ fn build_tool(
             }
         }
         for (e, ..) in &label {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
         drag.start = None;
         if !mouse.just_pressed(MouseButton::Left) || over_ui.0 {
@@ -896,7 +896,7 @@ fn build_tool(
             gizmos.circle(Isometry3d::new(at(p, 0.02), Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)), 0.2, c);
         }
         for (e, ..) in &label {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
         return;
     };

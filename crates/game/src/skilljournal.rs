@@ -88,7 +88,7 @@ fn journal_dialog(
     }
     let close = |commands: &mut Commands, d: &mut JournalDialog| {
         if let Some(r) = d.s.take().and_then(|s| s.root) {
-            commands.entity(r).despawn();
+            commands.entity(r).try_despawn();
         }
         *d = JournalDialog::default();
     };
@@ -228,7 +228,7 @@ fn journal_dialog(
         commands.entity(t).insert(Text::new(ui.localize("Ui/Caption/HUD/SkillJournal:Challenges").unwrap_or_else(|| "Skill Challenges".into())));
     }
     if let Some(old) = d.rows.take() {
-        commands.entity(old).despawn();
+        commands.entity(old).try_despawn();
     }
     let (Some(holder), Some(template)) = (s.id(OPPORTUNITY_HOLDER), ui.layout("HUDSkillsJournalOppEntry").cloned()) else { return };
     let rows = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(30.0), right: Val::Px(0.0), height: Val::Px(challenges.len() as f32 * ROW), ..default() }, Pickable::IGNORE, ChildOf(holder))).id();

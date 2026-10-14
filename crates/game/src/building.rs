@@ -2548,12 +2548,12 @@ pub fn bulldozed_lots(
     // (The pictures and detailed houses drawn for the lots as they were go.)
     for (e, imp) in &imposters {
         if changed.contains(&imp.0) {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
     }
     for i in &changed {
         if let Some(e) = nearby.spawned.remove(i) {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
     }
     // (A house put down takes its picture with it: the roof the detailed house is drawn under,
@@ -2684,7 +2684,7 @@ fn stream_nearby_lots(
         .collect();
     for i in gone {
         if let Some(e) = nearby.spawned.remove(&i) {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
     }
     // Bring in the nearest lot not yet shown (one per frame).

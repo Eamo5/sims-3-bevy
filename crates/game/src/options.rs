@@ -444,7 +444,7 @@ pub fn options_open(panel: &OptionsPanel) -> bool {
 /// Closes the options panel, keeping the settings.
 pub fn close_options(commands: &mut Commands, panel: &mut OptionsPanel, settings: &Settings) {
     if let Some(e) = panel.root.take() {
-        commands.entity(e).despawn();
+        commands.entity(e).try_despawn();
     }
     settings.save();
 }
@@ -463,7 +463,7 @@ fn option_buttons(
             OptionButton::Step(opt, dir) => opt.step(&mut settings, dir),
             OptionButton::Close => {
                 if let Some(e) = panel.root.take() {
-                    commands.entity(e).despawn();
+                    commands.entity(e).try_despawn();
                 }
                 settings.save();
             }
@@ -563,7 +563,7 @@ pub(crate) fn game_menu_key(
 pub fn toggle_game_menu(commands: &mut Commands, menu: &mut GameMenu, mut clock: Option<&mut crate::clock::GameClock>) {
     debug!("game menu: {}", if menu.root.is_some() { "close" } else { "open" });
     if let Some(root) = menu.root.take() {
-        commands.entity(root).despawn();
+        commands.entity(root).try_despawn();
         if let Some(c) = clock.as_deref_mut() {
             c.speed = menu.speed;
         }
@@ -654,7 +654,7 @@ fn game_menu_buttons(
         }
         let mut close = |commands: &mut Commands, menu: &mut GameMenu| {
             if let Some(root) = menu.root.take() {
-                commands.entity(root).despawn();
+                commands.entity(root).try_despawn();
             }
             if let Some(c) = clock.as_deref_mut() {
                 c.speed = menu.speed;
@@ -695,9 +695,9 @@ fn game_menu_buttons(
 
 fn close_game_menu(mut commands: Commands, mut menu: ResMut<GameMenu>, mut panel: ResMut<OptionsPanel>) {
     if let Some(root) = menu.root.take() {
-        commands.entity(root).despawn();
+        commands.entity(root).try_despawn();
     }
     if let Some(root) = panel.root.take() {
-        commands.entity(root).despawn();
+        commands.entity(root).try_despawn();
     }
 }

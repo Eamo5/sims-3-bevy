@@ -357,7 +357,7 @@ fn weather_sounds(
         let target = want.iter().find(|(n, _)| *n == l.name).map_or(0.0, |(_, v)| *v);
         l.level += (target - l.level).clamp(-dt * 0.4, dt * 0.4);
         if target == 0.0 && l.level <= 0.001 {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
             continue;
         }
         if let Some(mut sink) = sink {

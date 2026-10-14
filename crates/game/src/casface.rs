@@ -345,7 +345,7 @@ fn face_panel(
         }
     }
     if let Some(old) = f.cells.take() {
-        commands.entity(old).despawn();
+        commands.entity(old).try_despawn();
     }
     f.sliders.clear();
     if f.region < 4 {

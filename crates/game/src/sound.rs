@@ -252,7 +252,7 @@ fn clip_cues(
         if cue.action == SoundAction::StopLoop && cue.name.is_empty() {
             for (e, l) in &loops {
                 if l.owner == cue.sim {
-                    commands.entity(e).despawn();
+                    commands.entity(e).try_despawn();
                 }
             }
             continue;
@@ -291,7 +291,7 @@ fn clip_cues(
                 let stem = name.trim_end_matches("_lp");
                 for (e, l) in &loops {
                     if l.owner == cue.sim && l.name.trim_end_matches("_lp") == stem {
-                        commands.entity(e).despawn();
+                        commands.entity(e).try_despawn();
                     }
                 }
             }
@@ -335,7 +335,7 @@ fn loop_volumes(
     let cam = cams.single().ok();
     for (e, l, sink) in &mut loops {
         let Ok(tf) = owners.get(l.owner) else {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
             continue;
         };
         if let Some(mut sink) = sink {

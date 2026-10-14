@@ -4877,7 +4877,7 @@ fn pay_bills(
             }
             taken += o.price as i64;
             names.push(o.name.clone());
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
         notes.push(format!("The repo man came for the unpaid bills (§{overdue}) and took: {}.", names.join(", ")));
     }

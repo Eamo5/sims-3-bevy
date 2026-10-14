@@ -378,7 +378,7 @@ fn progress(
         }
         // (Out of sight, they're gone.)
         if died.contains(&s.id) && *vis == Visibility::Hidden {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
     }
     info!("story progression: {days} day(s), {} news", story.news.len());

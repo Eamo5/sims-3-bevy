@@ -17,7 +17,7 @@ impl Plugin for MapTagsPlugin {
         app.add_systems(Update, (spawn_tags, collectible_tags, place_tags, tag_clicks).chain().run_if(in_state(PlayMode::Live)))
             .add_systems(OnExit(PlayMode::Live), |mut c: Commands, q: Query<Entity, With<MapTag>>| {
                 for e in &q {
-                    c.entity(e).despawn();
+                    c.entity(e).try_despawn();
                 }
             });
     }
@@ -68,7 +68,7 @@ fn collectible_tags(
             CollectibleTag::Spawner(lot) => Some(*lot) == here,
         };
         if !helper || gone {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
     }
     if !helper {
@@ -177,7 +177,7 @@ fn spawn_tags(
     // (The town changed (a lot's type, say): its tags made afresh.)
     if world.is_changed() && !existing.is_empty() {
         for e in &existing {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
         return;
     }

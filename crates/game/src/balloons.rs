@@ -525,7 +525,7 @@ fn place_balloons(
     let mut alpha: HashMap<Entity, f32> = HashMap::new();
     for (e, b, mut node) in &mut balloons {
         if now >= b.until {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
             if let Some(st) = state.sims.get_mut(&b.sim)
                 && st.showing == Some(e)
             {
@@ -566,7 +566,7 @@ fn place_balloons(
 
 fn clear_balloons(mut commands: Commands, balloons: Query<Entity, With<BalloonUi>>, mut state: ResMut<BalloonState>) {
     for e in &balloons {
-        commands.entity(e).despawn();
+        commands.entity(e).try_despawn();
     }
     state.sims.clear();
 }

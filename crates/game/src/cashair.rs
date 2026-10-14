@@ -345,7 +345,7 @@ pub(crate) fn spawn_colours(commands: &mut Commands, ui: &mut UiAssets, (images,
 /// A holder for a grid's cells, the last one's put away.
 fn fresh_holder(commands: &mut Commands, grid: Entity, last: &mut Option<Entity>) -> Entity {
     if let Some(old) = last.take() {
-        commands.entity(old).despawn();
+        commands.entity(old).try_despawn();
     }
     let h = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE)).id();
     // (Under the grid's scroll bar.)

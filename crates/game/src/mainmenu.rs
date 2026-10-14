@@ -201,7 +201,7 @@ fn spawn_menu(
         return;
     }
     for e in &old {
-        commands.entity(e).despawn();
+        commands.entity(e).try_despawn();
     }
     let Some(s) = ui.spawn(&mut commands, &mut images, &mut fonts, "GameEntryMainMenu") else { return };
     if let Some(r) = s.root {

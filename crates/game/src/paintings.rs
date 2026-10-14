@@ -253,7 +253,7 @@ fn easel_canvases(
     // The canvases of those who've stopped go (and one's put up afresh as the picture comes).
     for (e, c) in &canvases {
         if !painting.iter().any(|p| p.0 == c.painter && p.4 == c.shown) {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
     }
     for (me, easel, size, design, shown) in painting {

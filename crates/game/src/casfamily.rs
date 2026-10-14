@@ -89,7 +89,7 @@ fn family_screen(
     let pressed = |id: u32| crate::livehud::pressed(&clicks, f.s.id(id));
     let close = |commands: &mut Commands, f: &FamilyScreen| {
         if let Some(r) = f.s.root {
-            commands.entity(r).despawn();
+            commands.entity(r).try_despawn();
         }
         commands.remove_resource::<FamilyScreen>();
     };
@@ -193,7 +193,7 @@ fn family_screen(
     f.shown = Some(want);
     let Some(tree) = f.s.id(TREE) else { return };
     if let Some(old) = f.tree.take() {
-        commands.entity(old).despawn();
+        commands.entity(old).try_despawn();
     }
     let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE, ChildOf(tree))).id();
     f.tree = Some(holder);

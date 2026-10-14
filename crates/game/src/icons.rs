@@ -122,7 +122,7 @@ fn tooltips(
         return;
     }
     for (b, _) in &boxes {
-        commands.entity(b).despawn();
+        commands.entity(b).try_despawn();
     }
     *shown = want.clone();
     let (Some(t), Some((c, w, h))) = (want, cursor) else { return };

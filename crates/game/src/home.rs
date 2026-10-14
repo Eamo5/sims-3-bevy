@@ -725,7 +725,7 @@ pub fn move_in(
     if house.is_none() {
         for (e, imp) in &imposters {
             if imp.0 == lot_index {
-                commands.entity(e).despawn();
+                commands.entity(e).try_despawn();
             }
         }
     }

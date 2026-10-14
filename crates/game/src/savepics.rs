@@ -145,10 +145,10 @@ fn lot_picture(mut commands: Commands, mut shots: Query<(Entity, &mut LotShot)>,
         if s.frames > FRAMES + 2 {
             for (card, c) in &cards {
                 if c.0 == e {
-                    commands.entity(card).despawn();
+                    commands.entity(card).try_despawn();
                 }
             }
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
     }
 }

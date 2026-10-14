@@ -270,7 +270,7 @@ fn dialog_controls(
             *settings = d.work.clone();
             settings.save();
         }
-        commands.entity(d.backdrop).despawn();
+        commands.entity(d.backdrop).try_despawn();
         commands.remove_resource::<OptionsDialog>();
         return;
     }

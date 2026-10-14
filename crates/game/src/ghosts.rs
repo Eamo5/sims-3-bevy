@@ -70,7 +70,7 @@ fn haunt(
     let night = NIGHT.contains(&clock.hour_f());
     if !night {
         for (e, _) in &ghosts {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
         return;
     }

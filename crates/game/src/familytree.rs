@@ -245,7 +245,7 @@ fn family_tree(
     let Some(mut ui) = ui else { return };
     let close = |commands: &mut Commands, d: &TreeDialog| {
         if let Some(r) = d.s.root {
-            commands.entity(r).despawn();
+            commands.entity(r).try_despawn();
         }
         commands.remove_resource::<TreeDialog>();
     };

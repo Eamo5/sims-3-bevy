@@ -476,7 +476,7 @@ fn rebuild_bodies(
         let Some(model) = crate::simbody::build_sim_model(&data.0, &cas, sim, &outfit, crate::simbody::tone_of(sim)) else { continue };
         for c in children.iter() {
             if parts.get(c).is_ok() {
-                commands.entity(c).despawn();
+                commands.entity(c).try_despawn();
             }
         }
         let mut ctx = crate::simbody::SimRenderCtx {

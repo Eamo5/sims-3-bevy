@@ -1147,7 +1147,7 @@ pub(crate) fn apply_loaded_game(
             .iter()
             .find(|(_, o, tf)| o.objd == r.objd && tf.translation.xz().distance(Vec3::from(r.position).xz()) < 0.1 && (tf.translation.y - r.position[1]).abs() < 3.0)
         {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
     }
     // (A copy of the building as it stands, for lifting old positions onto the deck.)

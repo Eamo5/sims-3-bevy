@@ -881,7 +881,7 @@ fn rebuild_model(
     }
     scene.dirty_model = false;
     if let Some(m) = scene.model.take() {
-        commands.entity(m).despawn();
+        commands.entity(m).try_despawn();
     }
     let Some(sim) = pending.members.get(scene.selected).cloned() else { return };
     // (In the outfit being dressed.)
@@ -1053,7 +1053,7 @@ fn rebuild_ui(
     }
     scene.dirty_ui = false;
     if let Some(u) = scene.ui.take() {
-        commands.entity(u).despawn();
+        commands.entity(u).try_despawn();
     }
     let sel = scene.selected.min(pending.members.len().saturating_sub(1));
     let sim = pending.members[sel].clone();

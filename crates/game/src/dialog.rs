@@ -215,7 +215,7 @@ fn answer_buttons(
         pick = Some(n.min(q.queue.front().map_or(1, |a| a.answers.len()).saturating_sub(1)));
     }
     let Some(i) = pick else { return };
-    commands.entity(root).despawn();
+    commands.entity(root).try_despawn();
     q.shown = None;
     if let Some(a) = q.queue.pop_front() {
         answered.write(Answered { about: a.about, answer: i });

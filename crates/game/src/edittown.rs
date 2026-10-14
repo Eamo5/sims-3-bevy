@@ -244,7 +244,7 @@ fn show_edit_town(
     }
     edit.dirty = false;
     if let Some(r) = edit.root.take() {
-        commands.entity(r).despawn();
+        commands.entity(r).try_despawn();
     }
     if !edit.open {
         return;

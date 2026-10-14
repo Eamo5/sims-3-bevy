@@ -116,7 +116,7 @@ fn take_thumbs(
         if *frame < 4 {
             return;
         }
-        commands.entity(*root).despawn();
+        commands.entity(*root).try_despawn();
         thumbs.busy = None;
         camera.is_active = false;
     }

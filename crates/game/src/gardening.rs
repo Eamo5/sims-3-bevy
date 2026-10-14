@@ -399,7 +399,7 @@ fn garden_requests(
                     if let Some(s) = soil {
                         commands.entity(s.0).try_despawn();
                     }
-                    commands.entity(e).despawn();
+                    commands.entity(e).try_despawn();
                 }
             }
             GardenRequest::BoughtSeeds => {

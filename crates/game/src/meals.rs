@@ -365,7 +365,7 @@ struct DishFood(Entity);
 /// Sets one of the recipes' food models on a dish, in place of any food already there.
 fn set_food(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetCtx, dish: Entity, old: Option<&DishFood>, model: Option<s3bake::Key>) {
     if let Some(f) = old {
-        commands.entity(f.0).despawn();
+        commands.entity(f.0).try_despawn();
         commands.entity(dish).remove::<DishFood>();
     }
     let Some(model) = model else { return };

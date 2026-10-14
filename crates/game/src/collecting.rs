@@ -560,7 +560,7 @@ fn toggle_journal(
         if !panel.open
             && let Some(r) = panel.root.take()
         {
-            commands.entity(r).despawn();
+            commands.entity(r).try_despawn();
         }
     }
 }
@@ -575,7 +575,7 @@ fn journal_panel(
     // (The game's own dialog stands in for it: see `colljournal`.)
     if !panel.open || crate::colljournal::GAME_JOURNAL.load(std::sync::atomic::Ordering::Relaxed) {
         if let Some(r) = panel.root.take() {
-            commands.entity(r).despawn();
+            commands.entity(r).try_despawn();
         }
         return;
     }
@@ -590,7 +590,7 @@ fn journal_panel(
     }
     panel.shown = Some(key);
     if let Some(r) = panel.root.take() {
-        commands.entity(r).despawn();
+        commands.entity(r).try_despawn();
     }
     let root = commands
         .spawn((

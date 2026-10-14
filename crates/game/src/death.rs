@@ -228,7 +228,7 @@ fn reap(
                 if let Some(r) = d.reaper {
                     commands.entity(r).try_despawn();
                 }
-                commands.entity(me).despawn();
+                commands.entity(me).try_despawn();
             }
             _ => {}
         }

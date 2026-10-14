@@ -678,7 +678,7 @@ fn fade_help(mut commands: Commands, time: Res<Time>, mut since: Local<Option<f3
     let a = (1.0 - (time.elapsed_secs() - t0 - 90.0) / 5.0).clamp(0.0, 1.0) * 0.75;
     for (e, mut c) in &mut q {
         if a <= 0.0 {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         } else {
             c.0 = Color::srgba(1.0, 1.0, 1.0, a);
         }
@@ -691,7 +691,7 @@ pub(crate) fn pointer_over_ui(mut over: ResMut<PointerOverUi>, q: Query<(&Intera
 
 fn close_pie(commands: &mut Commands, pie: &mut PieMenu) {
     if let Some(r) = pie.root.take() {
-        commands.entity(r).despawn();
+        commands.entity(r).try_despawn();
     }
     pie.options.clear();
 }

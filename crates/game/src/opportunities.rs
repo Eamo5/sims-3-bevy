@@ -311,7 +311,7 @@ fn dialog_buttons(
     let Some((root, sim, index)) = board.dialog else { return };
     let auto = auto_accept.is_some().then_some(true).or_else(|| auto_decline.is_some().then_some(false));
     let Some(choice) = auto.or_else(|| buttons.iter().find(|(i, _)| **i == Interaction::Pressed).map(|(_, b)| b.0)) else { return };
-    commands.entity(root).despawn();
+    commands.entity(root).try_despawn();
     board.dialog = None;
     board.shown.clear();
     let (Some(ui), true) = (ui, choice) else { return };
@@ -425,7 +425,7 @@ fn toggle_panel(
         if !board.panel_open
             && let Some(p) = board.panel.take()
         {
-            commands.entity(p).despawn();
+            commands.entity(p).try_despawn();
         }
     }
 }
@@ -451,7 +451,7 @@ fn update_panel(
     }
     board.shown = shown;
     if let Some(p) = board.panel.take() {
-        commands.entity(p).despawn();
+        commands.entity(p).try_despawn();
     }
     let data = ui.data.clone();
     let rows: Vec<(Option<Handle<Image>>, &OpportunityInfo, &ActiveOpp)> =

@@ -286,7 +286,7 @@ pub fn update(
         && let Some(g) = ui.find("TraitsPicker", PICK_CURRENT).and_then(|w| w.grid)
     {
         if let Some(old) = p.current.take() {
-            commands.entity(old).despawn();
+            commands.entity(old).try_despawn();
         }
         let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE, ChildOf(grid))).id();
         p.current = Some(holder);
@@ -325,7 +325,7 @@ pub fn update(
         && let Some(g) = ui.find("TraitsPicker", PICK_AVAILABLE).and_then(|w| w.grid)
     {
         if let Some(old) = p.available.take() {
-            commands.entity(old).despawn();
+            commands.entity(old).try_despawn();
         }
         let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE)).id();
         commands.entity(grid).insert_children(0, &[holder]);

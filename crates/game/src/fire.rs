@@ -188,7 +188,7 @@ fn sim_flames(
     for (e, owner, mut tf) in &mut flames {
         match burning.get(owner.0) {
             Ok((_, at)) => tf.translation = at.translation,
-            Err(_) => commands.entity(e).despawn(),
+            Err(_) => commands.entity(e).try_despawn(),
         }
     }
     for sim in &caught {
@@ -542,7 +542,7 @@ fn firefighting(
     }
     if f.leaving {
         if tf.translation.xz().distance(exit.0) < 2.5 || path.is_some() {
-            commands.entity(me).despawn();
+            commands.entity(me).try_despawn();
             dept.firefighter = None;
             dept.called = None;
         } else {
@@ -565,7 +565,7 @@ fn firefighting(
                     .entity(me)
                     .insert((Transform { rotation: Quat::from_rotation_y(to.x.atan2(to.z)), ..*tf }, ActionClip::new(Some("a_fireFighter_extinguishFire_floor1_start_x"), &["a_fireFighter_extinguishFire_floor1_loop_x"])));
             } else if clock.minutes - since > EXTINGUISH_MINUTES {
-                commands.entity(target).despawn();
+                commands.entity(target).try_despawn();
                 commands.entity(me).insert(ActionClip::new(Some("a_fireFighter_extinguishFire_floor1_stop_x"), &[]));
                 f.target = None;
             }

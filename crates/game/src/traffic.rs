@@ -260,7 +260,7 @@ fn traffic(
     for (e, mut car, mut tf, ride) in &mut cars {
         // Out of sight (or zoomed far out): gone.
         if tf.translation.xz().distance(focus) > NEAR * 1.3 || cam.distance > 240.0 {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
             continue;
         }
         count += usize::from(!ride);

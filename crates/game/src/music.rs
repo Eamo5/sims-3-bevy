@@ -96,7 +96,7 @@ fn stereo_music(
             None => used.0.is_some(),
         });
         if !keep {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
     }
     for (stereo, obj, used, tf, on) in &stereos {

@@ -308,7 +308,7 @@ fn clothing_panel(
     crate::livehud::set_text(&mut texts, c.category.text(TITLE), &title);
     // The rows in view.
     if let Some(old) = c.rows.take() {
-        commands.entity(old).despawn();
+        commands.entity(old).try_despawn();
     }
     c.rows = spawn_rows(&mut commands, &mut ui, (&mut images, &mut fonts), gu.as_deref_mut(), &c.category, &list, &designs, worn, c.scroll, &c.turned);
 }

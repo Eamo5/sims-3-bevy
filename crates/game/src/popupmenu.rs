@@ -109,6 +109,6 @@ fn popup_clicks(
     if let Some(index) = chosen {
         out.write(PopupChoice { id: p.id, index });
         play.write(crate::sound::PlaySound::ui("ui_tertiary_button"));
-        commands.entity(root).despawn();
+        commands.entity(root).try_despawn();
     }
 }

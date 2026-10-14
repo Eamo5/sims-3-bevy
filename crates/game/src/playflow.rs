@@ -255,7 +255,7 @@ fn play_flow(
                 commands.insert_resource(terms);
             }
             if let Some(r) = b.s.root {
-                commands.entity(r).despawn();
+                commands.entity(r).try_despawn();
             }
             f.dialog = None;
         }
@@ -335,7 +335,7 @@ fn play_flow(
     let Some(grid) = f.bin.id(BIN_GRID) else { return };
     let (Some(g), Some(template)) = (ui.find("PlayFlowBinPanel", BIN_GRID).and_then(|w| w.grid), ui.layout("PlayFlowBinGridItem").cloned()) else { return };
     if let Some(old) = f.cells.take() {
-        commands.entity(old).despawn();
+        commands.entity(old).try_despawn();
     }
     let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE, ChildOf(grid))).id();
     f.cells = Some(holder);

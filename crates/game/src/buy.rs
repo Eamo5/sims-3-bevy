@@ -627,7 +627,7 @@ impl BuyMode {
         self.apply_design = false;
         self.tool = None;
         if let Some(p) = self.placing.take() {
-            commands.entity(p.ghost).despawn();
+            commands.entity(p.ghost).try_despawn();
             if p.owned {
                 self.returning.push(p);
             }
@@ -827,7 +827,7 @@ fn buy_panel(
     }
     buy.dirty = false;
     for p in &panel {
-        commands.entity(p).despawn();
+        commands.entity(p).try_despawn();
     }
     if !buy.active && live.is_some() {
         return;
@@ -1369,7 +1369,7 @@ pub(crate) fn buy_buttons(
         let design = r.0.texture();
         let parts = assets.object_design(&mut ctx, p.objd, Some(design));
         let at = ghost_tf.get(p.ghost).copied().unwrap_or_default();
-        commands.entity(p.ghost).despawn();
+        commands.entity(p.ghost).try_despawn();
         p.ghost = spawn_parts(&mut commands, &parts, at);
         commands.entity(p.ghost).insert(DespawnOnExit(AppState::InGame));
         p.design = Some(design);
@@ -1458,7 +1458,7 @@ pub(crate) fn buy_buttons(
                 let design = crate::objects::design_texture(p.objd, *d);
                 let parts = assets.object_design(&mut ctx, p.objd, Some(design));
                 let at = ghost_tf.get(p.ghost).copied().unwrap_or_default();
-                commands.entity(p.ghost).despawn();
+                commands.entity(p.ghost).try_despawn();
                 p.ghost = spawn_parts(&mut commands, &parts, at);
                 commands.entity(p.ghost).insert(DespawnOnExit(AppState::InGame));
                 p.design = Some(design);
@@ -1862,7 +1862,7 @@ fn placement(
                     crate::buyhistory::record(&mut commands, source, true, 0, removed_before);
                 }
             }
-            commands.entity(ghost).despawn();
+            commands.entity(ghost).try_despawn();
             buy.placing = None;
             buy.styling = false;
             buy.apply_design = false;
@@ -1881,7 +1881,7 @@ fn placement(
             crate::buyhistory::park(&mut commands, source);
         }
         family.0.push(crate::familyinv::stored(objd, design, placing.item.clone()));
-        commands.entity(ghost).despawn();
+        commands.entity(ghost).try_despawn();
         buy.dirty = true;
         if let Some(g) = grid.as_mut() {
             g.dirty = true;
@@ -1904,7 +1904,7 @@ fn placement(
             }
             crate::buyhistory::park(&mut commands, source);
         }
-        commands.entity(ghost).despawn();
+        commands.entity(ghost).try_despawn();
         buy.placing = None;
         buy.dirty = true;
         if let Some(h) = household.as_mut() {
@@ -1982,7 +1982,7 @@ fn placement(
             let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
             put_back(&mut commands, &mut assets, &mut ctx, &catalog, p);
         }
-        commands.entity(ghost).despawn();
+        commands.entity(ghost).try_despawn();
         buy.placing = None;
         buy.dirty = true;
         if let Some(g) = grid.as_mut() {
@@ -2095,7 +2095,7 @@ fn placement(
                 } else {
                     crate::buyhistory::discard(&mut commands);
                 }
-                commands.entity(ghost).despawn();
+                commands.entity(ghost).try_despawn();
                 buy.placing = None;
                 buy.dirty = true;
             } else {

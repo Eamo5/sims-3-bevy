@@ -196,7 +196,7 @@ fn burglar(
                 }
                 notes.push(format!("A burglar stole {}!", the(&obj.name)));
                 bur.loot = Some((obj.objd, *otf, bought, obj.name.clone()));
-                commands.entity(t).despawn();
+                commands.entity(t).try_despawn();
             }
             commands.entity(me).remove::<ActionClip>();
             if let Some(wp) = crate::nav::plan_route(&grid, None, tf.translation.xz(), 1, exit.0, 1) {
@@ -205,7 +205,7 @@ fn burglar(
             bur.stage = Stage::Leaving;
         }
         Stage::Leaving if arrived => {
-            commands.entity(me).despawn();
+            commands.entity(me).try_despawn();
             b.burglar = None;
             b.called = None;
         }
@@ -284,7 +284,7 @@ fn police(
     let walking = path.is_some_and(|p| !p.done);
     if off.leaving {
         if !walking {
-            commands.entity(me).despawn();
+            commands.entity(me).try_despawn();
             b.officer = None;
             b.called = None;
         }
@@ -329,7 +329,7 @@ fn police(
                 }
                 None => notes.push("The police caught the burglar! Nothing was taken."),
             }
-            commands.entity(be).despawn();
+            commands.entity(be).try_despawn();
             b.burglar = None;
             commands.entity(me).remove::<ActionClip>();
             off.leaving = true;

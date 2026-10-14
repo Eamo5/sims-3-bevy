@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 86;
+pub const GAMEDATA_VERSION: u32 = 88;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1589,9 +1589,20 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     let get = |f: &HashMap<String, String>, k: &str| f.get(k).cloned().unwrap_or_default();
 
     let mut out = GameDataBaked { version: GAMEDATA_VERSION, ..Default::default() };
-    // The social interactions (the base game's).
-    if let Some(x) = xml("SocialData_BaseGame") {
-        out.socials = social_actions(&x, &|key| text("Socializing/Action", key));
+    // The social interactions: the base game's. (The packs' are left: theirs are mostly bound to
+    // what those packs bring, a celebrity, a degree, the future, under tests in their code.)
+    let tables = std::iter::once("SocialData_BaseGame".to_string());
+    let mut found = false;
+    for table in tables {
+        let Some(x) = xml(&table) else { continue };
+        found = true;
+        for a in social_actions(&x, &|key| text("Socializing/Action", key)) {
+            if !out.socials.iter().any(|s| s.key == a.key) {
+                out.socials.push(a);
+            }
+        }
+    }
+    if found {
         // (And the topics they're offered under.)
         if let Some(t) = xml("SocializingActionAvailability") {
             for (topic, action, first) in social_topics(&t) {

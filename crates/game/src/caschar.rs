@@ -318,7 +318,7 @@ fn character_panel(
         return;
     }
     if let Some(old) = c.cells.take() {
-        commands.entity(old).despawn();
+        commands.entity(old).try_despawn();
     }
     let Some(n) = c.open else { return };
     let (pic, list, now) = &lists[n];

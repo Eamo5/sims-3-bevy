@@ -92,7 +92,7 @@ type Shown = (Entity, Option<View>, bool, Option<s3bake::Key>, [u8; 3], usize, b
 impl MirrorLook {
     fn despawn(&self, commands: &mut Commands) {
         for r in [self.sheet.root, self.physical.root, self.hair.root, self.details.root, self.makeup.root].into_iter().flatten() {
-            commands.entity(r).despawn();
+            commands.entity(r).try_despawn();
         }
     }
 }
@@ -405,7 +405,7 @@ fn mirror_panels(
         crate::cashair::spawn_colours(&mut commands, &mut ui, (&mut images, &mut fonts), &l.hair, &mut l.colours, sim.hair);
     } else {
         if let Some(old) = l.cells.take() {
-            commands.entity(old).despawn();
+            commands.entity(old).try_despawn();
         }
         l.cells = crate::casface::spawn_makeup_cells(&mut commands, &mut ui, (&mut images, &mut fonts), gu.as_deref_mut(), &l.makeup, &list, worn);
     }

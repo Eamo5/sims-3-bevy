@@ -83,7 +83,7 @@ fn planner_buttons(
     let Some(mut p) = planner else { return };
     if keys.just_pressed(KeyCode::Escape) {
         if let Some(r) = p.root {
-            commands.entity(r).despawn();
+            commands.entity(r).try_despawn();
         }
         commands.remove_resource::<OutfitPlanner>();
         return;
@@ -122,7 +122,7 @@ fn planner_buttons(
             }
             PlanButton::Done => {
                 if let Some(r) = p.root {
-                    commands.entity(r).despawn();
+                    commands.entity(r).try_despawn();
                 }
                 commands.remove_resource::<OutfitPlanner>();
                 return;
@@ -186,7 +186,7 @@ fn planner_ui(
         return;
     }
     if let Some(r) = p.root.take() {
-        commands.entity(r).despawn();
+        commands.entity(r).try_despawn();
     }
     let Ok(sim) = sims.get(p.sim) else { return };
     let wear = p.wear;

@@ -1168,7 +1168,7 @@ fn buy_design_test(
                 let placing = buy.placing.as_ref().unwrap();
                 assert_eq!(*transforms.get(placing.ghost).unwrap(), original_tf, "the design preview stays in place");
                 assert_eq!(design.map(|d| d.0), original_design, "preview must be cancellable");
-                if let Some(e) = trigger.take() { commands.entity(e).despawn(); }
+                if let Some(e) = trigger.take() { commands.entity(e).try_despawn(); }
                 if mode == "preview" {
                     *stage = 6;
                     return;
@@ -1178,7 +1178,7 @@ fn buy_design_test(
                 *stage = 3;
             }
             3 if buy.placing.is_none() => {
-                if let Some(e) = trigger.take() { commands.entity(e).despawn(); }
+                if let Some(e) = trigger.take() { commands.entity(e).try_despawn(); }
                 if mode == "cancel" {
                     assert_eq!(design.map(|d| d.0), original_design);
                     assert!(!history.can_undo(), "cancelling must not create a transaction");
@@ -1869,7 +1869,7 @@ fn strand_swimmers(mut commands: Commands, mut done: Local<bool>, swimmers: Quer
     for (e, o) in &ladders {
         if matches!(o.kind, crate::interact::ObjectKind::PoolLadder | crate::interact::ObjectKind::DivingBoard) {
             info!("strand test: the {} is gone", o.name);
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
     }
 }

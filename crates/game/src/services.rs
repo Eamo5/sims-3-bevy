@@ -69,7 +69,7 @@ pub(crate) fn arrive(commands: &mut Commands, sim: Sim, at: Vec3, uniform: Optio
 /// Back to the curb and away: true once they're gone.
 fn leave(commands: &mut Commands, me: Entity, queue: &mut ActionQueue, tf: &Transform, path: Option<&PathFollow>, exit: Vec2) -> bool {
     if tf.translation.xz().distance(exit) < 2.0 {
-        commands.entity(me).despawn();
+        commands.entity(me).try_despawn();
         return true;
     }
     if queue.0.is_empty() && path.is_none() {
@@ -605,7 +605,7 @@ fn social_worker(
         };
         if w.leaving {
             if tf.translation.xz().distance(exit.0) < 2.0 {
-                commands.entity(me).despawn();
+                commands.entity(me).try_despawn();
                 state.worker = None;
             } else if queue.0.is_empty() && path.is_none() {
                 queue.0.push_back(Action::new("Leave", ActionKind::GoHere(exit.0, 1), false));
@@ -628,7 +628,7 @@ fn social_worker(
             if selected && let Some(&s) = others.first() {
                 commands.entity(s).insert(crate::sim::Selected);
             }
-            commands.entity(ce).despawn();
+            commands.entity(ce).try_despawn();
             state.neglected.retain(|(e, ..)| *e != ce);
             w.leaving = true;
             queue.0.clear();
@@ -762,7 +762,7 @@ fn babysitting(
     if b.leaving {
         let at_exit = tf.translation.xz().distance(exit.0) < 2.0;
         if at_exit {
-            commands.entity(me).despawn();
+            commands.entity(me).try_despawn();
             state.sitter = None;
             state.alone_since = None;
         } else if queue.0.is_empty() && path.is_none() {

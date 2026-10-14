@@ -129,7 +129,7 @@ fn genetics(
     let pressed = |id: u32| crate::livehud::pressed(&clicks, g.s.id(id));
     let close = |commands: &mut Commands, g: &Genetics| {
         if let Some(r) = g.s.root {
-            commands.entity(r).despawn();
+            commands.entity(r).try_despawn();
         }
         commands.remove_resource::<Genetics>();
     };

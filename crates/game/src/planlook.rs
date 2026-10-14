@@ -86,7 +86,7 @@ type Shown = (Entity, OutfitKind, u32, Option<(s3bake::Key, u8)>, usize, Vec<(us
 impl PlanLook {
     fn despawn(&self, commands: &mut Commands) {
         for r in [self.sheet.root, self.clothing.root, self.category.root].into_iter().flatten() {
-            commands.entity(r).despawn();
+            commands.entity(r).try_despawn();
         }
     }
 }
@@ -407,7 +407,7 @@ fn look_rows(
     let title = ui.localize(&format!("Ui/Caption/CAS/Clothing:{title}")).unwrap_or_else(|| p.wear.label().to_string());
     crate::livehud::set_text(&mut texts, l.category.text(crate::casclothing::TITLE), &title);
     if let Some(old) = l.rows.take() {
-        commands.entity(old).despawn();
+        commands.entity(old).try_despawn();
     }
     l.rows = crate::casclothing::spawn_rows(&mut commands, &mut ui, (&mut images, &mut fonts), gu.as_deref_mut(), &l.category, &list, &designs, worn, l.scroll, &l.turned);
 }
