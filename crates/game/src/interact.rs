@@ -1320,6 +1320,8 @@ const SLAM_ODDS: (f64, f64, f64) = (0.15, 0.4, 0.15);
 /// A vending machine with a snack stuck in it.
 #[derive(Component)]
 pub struct SnackStuck;
+/// What a mooched snack does for hunger.
+const MOOCHED_SNACK: f32 = 20.0;
 /// What a vending machine's snack costs away from home (the game's `kSodaPrice`, `kCandyPrice`).
 pub const VEND_PRICE: i64 = 5;
 /// (A new shape, the sculptor at work for an hour.)
@@ -3947,6 +3949,29 @@ pub(crate) fn run_actions(
                                             commands.queue(move |world: &mut World| {
                                                 crate::rabbitholes::complete_homework(world, student, Some(me), minutes);
                                             });
+                                        }
+                                        SocialEffect::MoochSmall | SocialEffect::MoochLarge => {
+                                            let (small, large) = crate::social::MOOCH_AMOUNTS;
+                                            let mut rng = rand::rng();
+                                            let base = if s.effect == SocialEffect::MoochLarge { large } else { small } as f32;
+                                            let times = if rng.random_bool(0.25) { 4.0 } else if rng.random_bool(0.5) { 2.0 } else { 1.0 };
+                                            let n = (base * times * rng.random_range(0.7..1.3)).round().max(1.0) as i64;
+                                            if people.get(me).is_ok_and(|p| p.3)
+                                                && let Some(h) = household.as_mut()
+                                            {
+                                                h.funds += n;
+                                                notes.push(format!("{} mooched §{n} from {tname}.", sim.first));
+                                            }
+                                        }
+                                        SocialEffect::MoochFood => {
+                                            commands.entity(me).queue_silenced(|mut w: EntityWorldMut| {
+                                                if let Some(mut m) = w.get_mut::<Motives>() {
+                                                    m.add(HUNGER, MOOCHED_SNACK);
+                                                }
+                                            });
+                                            if people.get(me).is_ok_and(|p| p.3) {
+                                                notes.push(format!("{} mooched a snack from {tname}.", sim.first));
+                                            }
                                         }
                                         // (Done if they're of the household or like the one asking, as the
                                         // game's: liking 25.)

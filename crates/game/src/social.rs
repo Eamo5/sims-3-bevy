@@ -219,14 +219,28 @@ pub enum SocialEffect {
     Greet,
     /// Telling a child or teen to do their homework (the game's "Request Do Your Homework").
     RequestHomework,
+    /// A Mooch's way with others' money and food (the game's "Mooch Money", "Mooch Food").
+    MoochSmall,
+    MoochLarge,
+    MoochFood,
 }
+
+/// What a Mooch gets out of others (the game's `MoochAmount`, at the hidden Mooch skill's first
+/// level: a small sum, and a large one two levels up), as often doubled (a half) or quadrupled
+/// (a quarter), give or take three tenths.
+pub const MOOCH_AMOUNTS: (i64, i64) = (2, 10);
 
 /// How much a child or teen must like someone not of their household to do their homework when
 /// told (the game's `LLTR min`).
 pub const HOMEWORK_LIKING: f32 = 25.0;
 
 /// The game's socials that do something of their own here, by their key.
-const GAME_EFFECTS: &[(&str, SocialEffect)] = &[("Request Do Your Homework", SocialEffect::RequestHomework)];
+const GAME_EFFECTS: &[(&str, SocialEffect)] = &[
+    ("Request Do Your Homework", SocialEffect::RequestHomework),
+    ("Mooch Money (Small)", SocialEffect::MoochSmall),
+    ("Mooch Money (Large)", SocialEffect::MoochLarge),
+    ("Mooch Food", SocialEffect::MoochFood),
+];
 
 pub struct SocialDef {
     pub name: &'static str,
@@ -576,6 +590,7 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
             t if PASSED_TESTS.contains(&t) => None,
             // (Its own effect's test: `available`.)
             "TestRequestDoYourHomework" if effect == SocialEffect::RequestHomework => None,
+            "TestMoochMoney" | "TestMoochFood" => None,
             "TestThankForCooking" | "TestWorryAboutGrades" | "TestThankForTutoring" => Some(GameTest::About),
             "TestActorHasWork" => Some(GameTest::ActorWorks),
             "TestActorAndTargetHasWork" => Some(GameTest::BothWork),
@@ -856,6 +871,8 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
         // (Who's at the door is for the menu: the household's own let callers in.)
         SocialEffect::Greet => target_in_household == false,
         SocialEffect::RequestHomework => side[1].homework && matches!(target.age, Age::Child | Age::Teen),
+        // (Money from those of another household.)
+        SocialEffect::MoochSmall | SocialEffect::MoochLarge => !(side[0].member && side[1].member),
         SocialEffect::WooHoo => matches!(rel.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married) || rel.romance >= 80.0,
         _ => true,
     }
@@ -1034,6 +1051,22 @@ mod tests {
         fired.add(crate::life::MoodletKind::Fired, 0.0);
         assert!(available(&got[2], &rel, &a, &b, false, false, moods([None, Some(&fired)])));
         assert!(!available(&got[2], &rel, &a, &b, false, false, moods([Some(&fired), None])), "not the one fired asking");
+    }
+
+    /// Why one of the game's socials is or isn't kept, from the baked game data (SOCIAL_WHY=<part
+    /// of its name>): `... social_why -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn social_why() {
+        let data: s3bake::GameDataBaked = s3bake::pack::read_value(&s3bake::default_root().global_dir().join("gamedata.bin")).unwrap();
+        let want = std::env::var("SOCIAL_WHY").unwrap_or_default().to_ascii_lowercase();
+        for a in data.socials.iter().filter(|a| a.name.to_ascii_lowercase().contains(&want) || a.key.to_ascii_lowercase().contains(&want)) {
+            let kept = game_socials(std::slice::from_ref(a), &[]);
+            println!(
+                "{:?} (key {:?}) tone {} graph {} suite {:?} test {:?} topics {:?} required {:?} ages {:?}/{:?} kept-without-clips {}",
+                a.name, a.key, a.tone, a.graph, a.suite, a.test, a.topics, a.required, a.actor_ages, a.target_ages, kept.len()
+            );
+        }
     }
 
     #[test]

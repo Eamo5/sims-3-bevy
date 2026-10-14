@@ -437,7 +437,8 @@ installation is unreachable.
   done to, the topics it's offered under (traits': the Evil may Mastermind a Plot, and others
   Accuse them of Being Evil; moodlets': a Sim just fired is asked about work; a pregnancy, a new
   job, a new home) and its suite's own clips; those sharing a phrase gathered on a menu of their
-  own, long menus paged with "More ›". Sims chat with the friendly and funny ones of their own
+  own, long menus paged with "More ›". A Mooch moochs money from other households (the game's
+  sums, as often doubled or quadrupled) and snacks. Sims chat with the friendly and funny ones of their own
   accord, as their traits favour. Children have theirs too, in the children's own clips: the
   game's child-to-child, child-to-grown-up and grown-up-to-child versions where it has them
   for the social (a hug, a gossip, cheering up), else its generic talk, with the listener

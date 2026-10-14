@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 89;
+pub const GAMEDATA_VERSION: u32 = 90;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -368,7 +368,8 @@ pub fn social_actions(xml: &str, name: &dyn Fn(&str) -> String) -> Vec<SocialAct
         let body = &rest[head_end..head_end + close];
         rest = &rest[head_end + close..];
         let Some(key) = attr(head, "key") else { continue };
-        let aa = body.find("<AA>").and_then(|s| body[s..].find("</AA>").map(|e| &body[s..s + e])).unwrap_or("");
+        // (Its availability: `<AA>`, or with attributes, `<AA oaend="1">`.)
+        let aa = body.find("<AA>").or_else(|| body.find("<AA ")).and_then(|s| body[s..].find("</AA>").map(|e| &body[s..s + e])).unwrap_or("");
         let age = tag(aa, "AGE");
         let available = tag(aa, "Available");
         let graph = tag(body, "Graph");
@@ -2860,9 +2861,13 @@ mod tests {
 	<Action key="Chat" com="Friendly">
 		<AA><AGE x="C,T" y="C,T" /><Available auto="False" udo="True" /></AA>
 	</Action>
+	<Action key="Ask About Day" com="Friendly">
+		<AA oaend="1"><AGE x="T,Y" y="T" /></AA>
+	</Action>
 </Social>"#;
         let a = social_actions(xml, &|k| if k == "AccuseofBeingEvil" { "Accuse of Being Evil".into() } else { String::new() });
-        assert_eq!(a.len(), 2);
+        assert_eq!(a.len(), 3);
+        assert_eq!(a[2].actor_ages, ["T", "Y"], "an `<AA>` with attributes read too");
         assert_eq!((a[0].name.as_str(), a[0].tone.as_str()), ("Accuse of Being Evil", "Insulting"));
         assert_eq!(a[0].actor_ages, ["T", "Y", "A", "E"]);
         assert_eq!(a[0].target_ages.len(), 5);
