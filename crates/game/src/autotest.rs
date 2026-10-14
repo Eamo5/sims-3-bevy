@@ -194,7 +194,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(First, tick_input_timeline.after(bevy::time::TimeSystems).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, (keep_hungry, all_use, set_grime), wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, run_out, face_hook, shots_every, (show_designs, show_style), walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, (keep_hungry, all_use, set_grime), wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, (run_out, give_topics), face_hook, shots_every, (show_designs, show_style), walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, strand_swimmers.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, press_key.after(bevy::input::InputSystems).before(crate::buy::toggle_buy).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, buy_pick.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
@@ -1998,6 +1998,24 @@ fn run_out(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives, Has<crat
     }
 }
 
+/// TOPICS=<topic>,<topic>... (the game's topic names): a few seconds in, every Sim has them
+/// (`Thank For Cooking` about the selected Sim).
+fn give_topics(sims: Query<(Entity, Has<crate::sim::Selected>), With<crate::sim::Sim>>, selected: Query<Entity, With<crate::sim::Selected>>, mut topics: MessageWriter<crate::topics::AddTopic>, mut done: Local<bool>, time: Res<Time>) {
+    if *done || time.elapsed_secs() < 8.0 {
+        return;
+    }
+    let Ok(list) = std::env::var("TOPICS") else { return };
+    *done = true;
+    let about = selected.single().ok();
+    for name in list.split(',') {
+        let name: &'static str = Box::leak(name.trim().to_string().into_boxed_str());
+        for (e, me) in &sims {
+            info!("test topic: {name}");
+            topics.write(crate::topics::AddTopic { sim: e, name, about: about.filter(|_| !me) });
+        }
+    }
+}
+
 /// ALL_USE=<Kind>:<option>: ten seconds in, every grown-up of the household is sent to the
 /// nearest such object for it, one after another (two Sims to one double bed).
 fn all_use(
@@ -2210,20 +2228,41 @@ fn queue_diff(
 
 /// QUEUE_LOG=<seconds>: that often, what each Sim of the household is about (the action, its
 /// phase, whether they've a path and how far along it, and where they are): for finding Sims
-/// who stall.
+/// who stall. One with nothing to do that their free will is kept from is logged with what
+/// keeps it ("idle ...").
 #[allow(clippy::type_complexity)]
 fn queue_log(
     time: Res<Time>,
     clock: Res<crate::clock::GameClock>,
     mut last: Local<f32>,
-    sims: Query<(&crate::sim::Sim, &Transform, &crate::interact::ActionQueue, Option<&crate::nav::PathFollow>, Has<crate::portraits::Staged>, Has<crate::anim::ActionClip>), With<crate::sim::HouseholdMember>>,
+    sims: Query<(Entity, &crate::sim::Sim, &Transform, &crate::interact::ActionQueue, Option<&crate::nav::PathFollow>, Has<crate::portraits::Staged>, Has<crate::anim::ActionClip>), With<crate::sim::HouseholdMember>>,
+    blockers: Query<(
+        Option<&crate::interact::SocialPartner>,
+        Has<crate::meals::MealRequest>,
+        Has<crate::meals::ServingFrom>,
+        Has<crate::fire::Panicking>,
+        Has<crate::fire::OnFire>,
+        Has<crate::interact::OffLot>,
+        Has<crate::doorbell::AtTheDoor>,
+        Has<crate::reactions::Pending>,
+        Has<crate::privacy::WaitingForPrivacy>,
+    )>,
 ) {
     let Some(every) = std::env::var("QUEUE_LOG").ok().and_then(|v| v.parse::<f32>().ok()) else { return };
     if time.elapsed_secs() - *last < every {
         return;
     }
     *last = time.elapsed_secs();
-    for (sim, tf, q, path, staged, clip) in &sims {
+    for (e, sim, tf, q, path, staged, clip) in &sims {
+        if q.0.is_empty()
+            && let Ok((partner, meal, serving, panic, burning, off, door, pending, privacy)) = blockers.get(e)
+        {
+            let flags = [("meal request", meal), ("serving", serving), ("panicking", panic), ("burning", burning), ("off lot", off), ("at the door", door), ("reaction pending", pending), ("waiting for privacy", privacy)];
+            let on: Vec<&str> = flags.iter().filter(|f| f.1).map(|f| f.0).collect();
+            if partner.is_some() || !on.is_empty() {
+                info!("idle {} @{:.0}: partner of {:?}, {:?}", sim.first, clock.minutes, partner.map(|p| p.0), on);
+            }
+        }
         let path = path.map(|p| (p.done, p.waypoints.len()));
         info!(
             "queue {} @{:.0}: {:?} path {:?} staged {} clip {} at {:.1},{:.1},{:.1} then {:?}",

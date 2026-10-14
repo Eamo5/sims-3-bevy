@@ -23,6 +23,13 @@ impl Plugin for BurglarPlugin {
     }
 }
 
+impl Break {
+    /// Whether the household's seen tonight's burglar.
+    pub fn spotted(&self) -> bool {
+        self.burglar.is_some() && self.seen.is_some()
+    }
+}
+
 /// Tonight's break-in, if any: the burglar, the officer, and when the police were called.
 #[derive(Resource, Default)]
 pub struct Break {

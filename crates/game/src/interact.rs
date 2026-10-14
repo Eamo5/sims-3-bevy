@@ -21,7 +21,7 @@ impl Plugin for InteractPlugin {
         app.init_resource::<Notifications>()
             .add_systems(
                 Update,
-                (comings_and_goings, off_lot_idle, autonomy, run_actions, motive_warnings, pay_bills, parties, crate::social::note_contact, crate::social::fade_relationships)
+                (comings_and_goings, off_lot_idle, autonomy, run_actions, release_partners, motive_warnings, pay_bills, parties, crate::social::note_contact, crate::social::fade_relationships)
                     .chain()
                     .run_if(in_state(PlayMode::Live)),
             )
@@ -4793,6 +4793,23 @@ fn autonomy(
             && score > 2.0
         {
             queue.0.push_back(action);
+        }
+    }
+}
+
+/// One talked to whose other is no longer at it with them (gone home, called away, onto
+/// something else without finishing) is free again.
+fn release_partners(mut commands: Commands, partners: Query<(Entity, &SocialPartner)>, actors: Query<&ActionQueue>) {
+    for (e, p) in &partners {
+        let actor = p.0;
+        let at_it = actors.get(actor).is_ok_and(|q| q.0.front().is_some_and(|a| matches!(a.kind, ActionKind::Social { target, .. } if target == e)));
+        if !at_it {
+            debug!("{e} let go: {actor} is no longer at the social with them");
+            commands.entity(e).queue_silenced(move |mut w: EntityWorldMut| {
+                if w.get::<SocialPartner>().is_some_and(|p| p.0 == actor) {
+                    w.remove::<(SocialPartner, crate::anim::ActionClip)>();
+                }
+            });
         }
     }
 }

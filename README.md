@@ -429,12 +429,28 @@ installation is unreachable.
   free (giving up after half an hour), and choose another bathroom of their own accord.
 - **The game's own socials**, from its `SocialData` (Admire, Gossip, Brighten Day, Talk About
   Weather, Mock, Flatter, Deep Conversation, the Accuse of..., Ask About..., Complain About...
-  and Joke About... families and more), each with its tone's effects, the ages, traits and
-  liking it asks for, the topics it's offered under (traits': the Evil may Mastermind a Plot,
-  and others Accuse them of Being Evil; moodlets': a Sim just fired is asked about work; a
-  pregnancy, a new job, a new home) and its suite's own clips; those sharing a phrase gathered on
-  a menu of their own, long menus paged with "More ›". Sims chat with the friendly and funny
-  ones of their own accord, as their traits favour.
+  and Joke About... families and more), each with its tone's effects, the ages and liking it
+  asks for, the traits it asks of the one doing it (only the Good Brighten a Day, only a
+  Schmoozer Flatters; the Grumpy aren't asked to but won't do some unasked) and of the one it's
+  done to, the topics it's offered under (traits': the Evil may Mastermind a Plot, and others
+  Accuse them of Being Evil; moodlets': a Sim just fired is asked about work; a pregnancy, a new
+  job, a new home) and its suite's own clips; those sharing a phrase gathered on a menu of their
+  own, long menus paged with "More ›". Sims chat with the friendly and funny ones of their own
+  accord, as their traits favour.
+- **Conversation topics**, as the game's (its `ActiveTopic`s, for as long as its table has them
+  last): what's happened to a Sim lately is talked about, by them or by others with them,
+  opening the game's socials under it. A birthday (Announce Birthday; Birthday Congratulations
+  from others), a fire (Talk About Fire, for all who were there), a burglar seen, a promotion,
+  an engagement, a wedding, a new outfit (Compliment or Mock Appearance), a meal cooked
+  (Compliment Cooking; Thank for Cooking from those at the meal, to the cook), cleaning up
+  (thanked for it), a day at work (Enthuse About Work; Worry About Work after a bad one), a
+  skill come on (Boast About Culinary Prowess...), a swim, money running low; what a Sim's doing
+  while they do it and twenty minutes after (Ask: Good Show? at the TV, Compliment Music,
+  Ask About Game); grown-ups with children, the household's own, those in the same line of
+  work. Most are said once between two Sims while they last. Sims bring them up of their own
+  accord now and then (thanking the cook after dinner, congratulating someone on their
+  birthday): something mean only from the mean or to someone disliked, something romantic only
+  where there's romance.
 - **Art**: paintings and sculptures are viewed ("View", for fun): the Sim looks the piece over
   and then shows what they make of it with the game's reactions, by its price and their taste
   (Snobs and the Artistic love fine art, Snobs sniff at cheap art, those who can't stand art
@@ -1006,6 +1022,9 @@ and `--ui-flow <dir>` clicks through the menus saving a screenshot of each scree
 the inventory, three hung on the nearest walls, the camera on them), `PAINTINGS=look` puts the
 camera on a hung painting (`PAINTINGS=easel`: on the easel), `PAINTINGS_BUY=1` holds one up in Buy mode and `BUY_CLOSE_AT=<s>`
 closes Buy mode then, logging the inventory. `DIVE=1` puts a diving board on the lot's pool.
+`TOPICS=Birthday,Talk About Fire` gives every Sim those conversation topics (`Thank For
+Cooking` about the selected Sim); `WEATHER=rain@30` has the rain begin half an hour in;
+`QUEUE_LOG=<s>` also names what keeps an idle Sim's free will back.
 
 `PRESS_KEY=F2@5;F3@7;F1@9` presses a sequence of keys at the given seconds;
 `UI_CLICK=05b706c0@6;05b706d0@7` clicks visible original-layout controls (hex control ids).

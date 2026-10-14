@@ -624,6 +624,7 @@ fn work_schedule(
             // (A Multi-Tasker gets more done.)
             let gain = gain + if crate::wishes::has(wishes, "MultiTasker") { 3.0 } else { 0.0 };
             job.performance = (job.performance + gain).clamp(-100.0, 100.0);
+            life.write(LifeEvent::new(e, LifeEventKind::HomeFromWork { worse: gain < 0.0 }));
             // Studying the career's skill on the job.
             if job.tone == WorkTone::Study {
                 let sk = job.career().skill;

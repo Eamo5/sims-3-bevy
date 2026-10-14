@@ -1039,7 +1039,7 @@ fn world_click(
         Res<crate::weather::Weather>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, moods_q): (Query<(), With<HouseholdMember>>, Res<crate::laundry::Laundry>, Query<&crate::life::Moodlets>),
+    (members_q, laundry, sides_q): (Query<(), With<HouseholdMember>>, Res<crate::laundry::Laundry>, Query<crate::social::SideQuery>),
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
     (buy, edit_town, pickable): (
@@ -1160,7 +1160,15 @@ fn world_click(
                 let list: Vec<(String, ActionKind)> = crate::social::all_socials()
                     .filter(|(_, s)| {
                         s.cat == cat
-                            && crate::social::available(s, &rel, actor_sim, sim, target_member, family.kin(actor_sim.id, sim.id).is_some(), [moods_q.get(actor).ok(), moods_q.get(t).ok()])
+                            && crate::social::available(
+                                s,
+                                &rel,
+                                actor_sim,
+                                sim,
+                                target_member,
+                                family.kin(actor_sim.id, sim.id).is_some(),
+                                [crate::social::Side::of(actor, sides_q.get(actor).ok()), crate::social::Side::of(t, sides_q.get(t).ok())],
+                            )
                     })
                     // (Nothing more to teach a toddler who's learned it; homework helped with only
                     // when there's some.)

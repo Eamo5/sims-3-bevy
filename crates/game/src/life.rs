@@ -915,6 +915,8 @@ pub enum LifeEventKind {
     Demoted,
     Fired,
     NewJob,
+    /// Home from a day's work (`worse`: having done worse at it than they went in).
+    HomeFromWork { worse: bool },
     SkillUp { skill: &'static str, level: u32 },
     FirstKiss,
     StartedDating,
@@ -1067,7 +1069,7 @@ fn life_events(
             LifeEventKind::BrokeUp => ml.add(K::Heartbroken, now),
             LifeEventKind::MovedIn => ml.add(K::NewHome, now),
             LifeEventKind::Birthday => ml.add(K::Birthday, now),
-            LifeEventKind::SkillUp { .. } | LifeEventKind::Bought { .. } | LifeEventKind::MadeFriend { .. } => {}
+            LifeEventKind::SkillUp { .. } | LifeEventKind::Bought { .. } | LifeEventKind::MadeFriend { .. } | LifeEventKind::HomeFromWork { .. } => {}
         }
     }
 }

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 88;
+pub const GAMEDATA_VERSION: u32 = 89;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -222,9 +222,9 @@ pub struct BalloonEntry {
 /// One of the game's social interactions (its `SocialData` tables): what it's called, its tone
 /// (`Friendly`, `Funny`, `Amorous`, `Insulting`...), the ages that do it and have it done to
 /// them, whether Sims do it of their own accord or only when told, the traits it asks of the one
-/// it's done to (`ATRA`) and those that make a Sim keener or less keen on it (`ATE`, `ATR`), the
-/// liking it needs (`ALTR`), the game's own test for it (when it has one), and its animations'
-/// graph and suite.
+/// it's done to (`AKTT`) and of the one who does it (`ATREQ`), those that rule it out (`ATR`, and
+/// of their own accord `ATRA`) and those that make a Sim keener on it (`ATE`), the liking it needs
+/// (`ALTR`), the game's own test for it (when it has one), and its animations' graph and suite.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct SocialAction {
     pub key: String,
@@ -234,9 +234,12 @@ pub struct SocialAction {
     pub target_ages: Vec<String>,
     pub autonomous: bool,
     pub user_only: bool,
+    /// The traits the one it's done to must have, each of them (the game's `AKTT`: unless the one
+    /// doing it has it too).
     pub target_traits: Vec<String>,
     pub keen: Vec<String>,
-    pub unkeen: Vec<String>,
+    /// The traits that rule it out for the one who'd do it (`ATR`).
+    pub restrict: Vec<String>,
     pub liking: Option<(f32, f32)>,
     pub test: String,
     pub graph: String,
@@ -246,6 +249,59 @@ pub struct SocialAction {
     /// with the topic (or to others, with them). None: it's always offered.
     #[serde(default)]
     pub topics: Vec<(String, bool)>,
+    /// The traits that rule it out of a Sim's own accord (`ATRA`).
+    #[serde(default)]
+    pub restrict_auto: Vec<String>,
+    /// The traits one of which the one doing it must have (`ATREQ`, the robots' chips and modes
+    /// left out).
+    #[serde(default)]
+    pub required: Vec<String>,
+}
+
+/// One of the game's conversation topics (its `ActiveTopic` rows): how long it lasts once a Sim
+/// has it (game hours; 0 as long as what gives it), whether others talk to the Sim about it, and
+/// whether a social under it is done only once between two Sims.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct TopicInfo {
+    pub name: String,
+    pub hours: f32,
+    pub for_other: bool,
+    pub used_up: bool,
+}
+
+/// The game's conversation topics (its `SocializingActionAvailability` table's `ActiveTopic`
+/// rows; the first row's values stand for any left out).
+pub fn topic_infos(xml: &str) -> Vec<TopicInfo> {
+    let field = |row: &str, name: &str| -> Option<String> {
+        let (open, close) = (format!("<{name}>"), format!("</{name}>"));
+        let a = row.find(&open)? + open.len();
+        let b = row[a..].find(&close)?;
+        Some(row[a..a + b].trim().to_string()).filter(|v| !v.is_empty())
+    };
+    let mut out = Vec::new();
+    let mut defaults: Option<(f32, bool, bool)> = None;
+    let mut rest = xml;
+    while let Some(a) = rest.find("<ActiveTopic>") {
+        let Some(b) = rest[a..].find("</ActiveTopic>") else { break };
+        let row = &rest[a..a + b];
+        rest = &rest[a + b..];
+        let num = |k: &str| field(row, k).and_then(|v| v.parse::<f32>().ok());
+        let d = *defaults.get_or_insert((num("Duration").unwrap_or(0.0), num("AvailableForOtherSim") == Some(1.0), num("UsedUpAfterDoneOnce") == Some(1.0)));
+        let Some(name) = field(row, "Name") else { continue };
+        out.push(TopicInfo {
+            name,
+            hours: num("Duration").unwrap_or(d.0),
+            for_other: num("AvailableForOtherSim").map_or(d.1, |v| v == 1.0),
+            used_up: num("UsedUpAfterDoneOnce").map_or(d.2, |v| v == 1.0),
+        });
+    }
+    out
+}
+
+/// Whether a trait the game's socials ask for is the robots' own (their chips and modes), which
+/// it asks only of them.
+fn bot_trait(t: &str) -> bool {
+    t.ends_with("Chip") || t.starts_with("Bot") || t == "RobotHiddenTrait" || t == "CareerCashBooster"
 }
 
 /// The game's topics and the socials each offers (its `SocializingActionAvailability` table's
@@ -326,9 +382,11 @@ pub fn social_actions(xml: &str, name: &dyn Fn(&str) -> String) -> Vec<SocialAct
             target_ages: list(age.and_then(|t| attr(t, "y"))),
             autonomous: available.and_then(|t| attr(t, "auto")) == Some("True"),
             user_only: available.and_then(|t| attr(t, "udo")) == Some("True"),
-            target_traits: list(tag(aa, "ATRA").and_then(|t| attr(t, "val"))),
+            target_traits: list(tag(aa, "AKTT").and_then(|t| attr(t, "val"))),
             keen: list(tag(aa, "ATE").and_then(|t| attr(t, "val"))),
-            unkeen: list(tag(aa, "ATR").and_then(|t| attr(t, "val"))),
+            restrict: list(tag(aa, "ATR").and_then(|t| attr(t, "val"))),
+            restrict_auto: list(tag(aa, "ATRA").and_then(|t| attr(t, "val"))),
+            required: list(tag(aa, "ATREQ").and_then(|t| attr(t, "val"))).into_iter().filter(|t| !bot_trait(t)).collect(),
             liking,
             test: tag(aa, "ProcTest").and_then(|t| attr(t, "key")).unwrap_or("").to_string(),
             graph: graph.and_then(|t| attr(t, "val")).unwrap_or("").to_string(),
@@ -429,6 +487,9 @@ pub struct GameDataBaked {
     /// The game's social interactions (its `SocialData` tables).
     #[serde(default)]
     pub socials: Vec<SocialAction>,
+    /// The conversation topics they're offered under.
+    #[serde(default)]
+    pub social_topics: Vec<TopicInfo>,
     pub buffs: Vec<BuffInfo>,
     pub traits: Vec<TraitInfo>,
     pub skills: Vec<SkillInfo>,
@@ -1605,6 +1666,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     if found {
         // (And the topics they're offered under.)
         if let Some(t) = xml("SocializingActionAvailability") {
+            out.social_topics = topic_infos(&t);
             for (topic, action, first) in social_topics(&t) {
                 for s in out.socials.iter_mut().filter(|s| s.key == action) {
                     if !s.topics.iter().any(|x| x.0 == topic && x.1 == first) {
@@ -2767,6 +2829,15 @@ mod tests {
     }
 
     #[test]
+    fn topic_infos_take_the_first_rows_defaults() {
+        let xml = "<X><ActiveTopic><Name></Name><AvailableForOtherSim>0</AvailableForOtherSim><UsedUpAfterDoneOnce>1</UsedUpAfterDoneOnce><Duration>0</Duration></ActiveTopic>            <ActiveTopic><Name>Birthday</Name><AvailableForOtherSim>1</AvailableForOtherSim><UsedUpAfterDoneOnce>0</UsedUpAfterDoneOnce><Duration>6</Duration></ActiveTopic>            <ActiveTopic><Name>Woken Up</Name><Duration>2</Duration></ActiveTopic></X>";
+        let t = topic_infos(xml);
+        assert_eq!(t.len(), 2);
+        assert_eq!(t[0], TopicInfo { name: "Birthday".into(), hours: 6.0, for_other: true, used_up: false });
+        assert_eq!(t[1], TopicInfo { name: "Woken Up".into(), hours: 2.0, for_other: false, used_up: true });
+    }
+
+    #[test]
     fn social_actions_are_read_from_the_games_tables() {
         let xml = r#"<Social>
 	<Action key="Accuse of Being Evil" com="Insulting">
@@ -2774,7 +2845,10 @@ mod tests {
 		<AA>
 			<AGE x="T,Y,A,E" y="C,T,Y,A,E" />
 			<ALTR min="-19" max="100" />
+			<AKTT val="Evil" />
 			<ATRA val="Evil" />
+			<ATREQ val="Good,BotAngryModeHiddenTrait,EvilChip" />
+			<ATR val="Coward" />
 			<ATE val="Good" />
 			<Available auto="True" udo="False" />
 			<ProcTest key="TestSomething" />
@@ -2794,6 +2868,8 @@ mod tests {
         assert_eq!(a[0].target_ages.len(), 5);
         assert_eq!(a[0].liking, Some((-19.0, 100.0)));
         assert_eq!((a[0].target_traits[0].as_str(), a[0].keen[0].as_str(), a[0].test.as_str()), ("Evil", "Good", "TestSomething"));
+        assert_eq!((a[0].restrict_auto.as_slice(), a[0].restrict.as_slice()), (["Evil".to_string()].as_slice(), ["Coward".to_string()].as_slice()));
+        assert_eq!(a[0].required, ["Good"], "the robots' own traits left out");
         assert!(a[0].autonomous && !a[0].user_only);
         assert_eq!((a[0].graph.as_str(), a[0].suite.as_str()), ("social_generic", "Accuse"));
         // (No text: its key; no animations: none.)
