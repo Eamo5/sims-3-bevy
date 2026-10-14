@@ -86,7 +86,9 @@ installation is unreachable.
   slider by slider, part by part (head, eyes, nose, mouth; the camera closes in on the face),
   kept in saves, and handed down (a baby's face somewhere between their parents'), with the game's body-shape
   morphs (weight and fitness sliders; town Sims keep their builds, working out firms Sims up);
-  needs, moods, skills, careers, relationships, autonomy, social interactions; children,
+  needs (falling as the game's `Motives` tuning has them: hunger, bladder and energy by the band
+  they're in, slowing as they run low; social and hygiene steadily; fun only down to nothing),
+  moods, skills, careers, relationships, autonomy, social interactions; children,
   teens, adults and elders who grow up and grow old (birthdays, new traits, passing away). A
   birthday cake baked at the fridge (§20) lets someone grow up there and then: they blow out
   the candles with the game's animation, the household cheers, and the cake is cut for

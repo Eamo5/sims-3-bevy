@@ -28,8 +28,45 @@ pub const SOCIAL: usize = 3;
 pub const HYGIENE: usize = 4;
 pub const FUN: usize = 5;
 
-/// Change per game hour while awake and idle.
-const DECAY_PER_HOUR: [f32; 6] = [-7.5, -11.0, -5.5, -6.0, -4.5, -6.5];
+/// How much a need falls in a game hour on its own, as the game's `Motives` tuning has it for
+/// people: hunger, bladder and energy by the band they're in (each band's `Decay`, slowing as
+/// they run low: a Sim very hungry hardly gets hungrier), social and hygiene steadily (the whole
+/// range over 72 hours, 168 for a Loner, and 42), and fun only down to nothing (7 an hour, 10
+/// for a child or the Childish: the game's `kAdultFunLossPerSimHour`).
+pub fn natural_decay(i: usize, value: f32, age: Age, traits: &[crate::life::Trait]) -> f32 {
+    use crate::life::Trait;
+    let v = value.trunc();
+    let little = age.is_little();
+    match i {
+        HUNGER => match v {
+            v if v >= -35.0 => 11.25,
+            v if v >= -60.0 => 8.0,
+            _ if little => 1.6,
+            _ => 0.7916667,
+        },
+        BLADDER => match v {
+            v if v >= -60.0 => if age == Age::Elder { 16.0 } else { 13.333_34 },
+            v if v >= -90.0 => 14.5,
+            _ => 9.0,
+        },
+        ENERGY if little => if age == Age::Baby { 200.0 / 35.0 } else { 200.0 / 24.0 },
+        ENERGY => match v {
+            v if v >= 100.0 => 0.0,
+            v if v >= -59.0 => 10.6,
+            v if v > -100.0 => 6.333_333,
+            _ => 0.0,
+        },
+        SOCIAL if little => match v {
+            v if v >= -60.0 => 11.428_57,
+            v if v >= -88.0 => 2.7,
+            _ => 1.375,
+        },
+        SOCIAL => 200.0 / if traits.contains(&Trait::Loner) { 168.0 } else { 72.0 },
+        HYGIENE => 200.0 / 42.0,
+        FUN if v > 0.0 => if age.is_little() || age == Age::Child || traits.contains(&Trait::Childish) { 10.0 } else { 7.0 },
+        _ => 0.0,
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Age {
@@ -705,7 +742,11 @@ fn decay_motives(
             if (at_work || away) && (i == HUNGER || i == BLADDER) {
                 continue;
             }
-            let d = DECAY_PER_HOUR[i] * scale.0[i] * crate::life::decay_rate(&sim.traits, i) * crate::wishes::reward_decay(wishes, i) * hours;
+            let mut d = -natural_decay(i, m.0[i], sim.age, &sim.traits) * scale.0[i] * crate::life::decay_rate(&sim.traits, i) * crate::wishes::reward_decay(wishes, i) * hours;
+            // (Fun falls no further than nothing.)
+            if i == FUN && m.0[i] > 0.0 {
+                d = d.max(-m.0[i]);
+            }
             m.add(i, d);
         }
     }
@@ -714,6 +755,18 @@ fn decay_motives(
 #[cfg(test)]
 mod reward_motive_tests {
     use super::*;
+
+    #[test]
+    fn needs_fall_as_the_games_motives_tuning_has_it() {
+        // (Hunger slows as it runs low; fun goes no lower than nothing.)
+        assert_eq!(natural_decay(HUNGER, 80.0, Age::Adult, &[]), 11.25);
+        assert_eq!(natural_decay(HUNGER, -50.0, Age::Adult, &[]), 8.0);
+        assert!(natural_decay(HUNGER, -90.0, Age::Adult, &[]) < 1.0);
+        assert_eq!(natural_decay(FUN, -20.0, Age::Adult, &[]), 0.0);
+        assert_eq!(natural_decay(FUN, 20.0, Age::Child, &[]), 10.0);
+        assert!(natural_decay(SOCIAL, 0.0, Age::Adult, &[crate::life::Trait::Loner]) < natural_decay(SOCIAL, 0.0, Age::Adult, &[]));
+        assert!((natural_decay(HYGIENE, 0.0, Age::Adult, &[]) * 42.0 - 200.0).abs() < 1e-3);
+    }
 
     #[test]
     fn lifetime_rewards_apply_to_normal_decay_and_restored_low_needs() {
@@ -728,14 +781,15 @@ mod reward_motive_tests {
         let normal = &app.world().get::<Motives>(plain).unwrap().0;
         let rewards = &app.world().get::<Motives>(rewarded).unwrap().0;
         for i in 0..6 {
-            assert_eq!(normal[i], 50.0 + DECAY_PER_HOUR[i]);
+            let decay = -natural_decay(i, 50.0, Age::Adult, &[]);
+            assert!((normal[i] - (50.0 + decay)).abs() < 1e-3, "motive {i}");
             let expected = match i {
                 BLADDER => 100.0,
-                HYGIENE => 50.0 + DECAY_PER_HOUR[i] * 0.25,
-                HUNGER => 50.0 + DECAY_PER_HOUR[i] * 0.25,
+                HYGIENE => 50.0 + decay * 0.25,
+                HUNGER => 50.0 + decay * 0.25,
                 _ => normal[i],
             };
-            assert_eq!(rewards[i], expected, "motive {i}");
+            assert!((rewards[i] - expected).abs() < 1e-3, "motive {i}");
         }
         app.update();
         assert_eq!(app.world().get::<Motives>(rewarded).unwrap().0[BLADDER], 100.0);

@@ -749,13 +749,15 @@ fn main() {
             }
             return;
         }
-        for e in pkg.of_type(0x0333_406C) {
-            if names.get(&e.key.i).is_some_and(|n: &String| n.to_ascii_lowercase() == want || n.to_ascii_lowercase().starts_with(&format!("{want}_0x"))) {
-                let d = pkg.read(e).expect("xml");
-                std::fs::write(&args[i + 2], &d).expect("write");
-                println!("{} bytes", d.len());
-                return;
-            }
+        // (The one named exactly first: a table, `Motives`, rather than its class's tuning,
+        // `Motives_0x...`.)
+        let exact = pkg.of_type(0x0333_406C).find(|e| names.get(&e.key.i).is_some_and(|n: &String| n.to_ascii_lowercase() == want));
+        let found = exact.or_else(|| pkg.of_type(0x0333_406C).find(|e| names.get(&e.key.i).is_some_and(|n: &String| n.to_ascii_lowercase().starts_with(&format!("{want}_0x")))));
+        if let Some(e) = found {
+            let d = pkg.read(e).expect("xml");
+            std::fs::write(&args[i + 2], &d).expect("write");
+            println!("{} bytes", d.len());
+            return;
         }
         eprintln!("not found");
         return;

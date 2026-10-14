@@ -473,7 +473,6 @@ pub fn decay_rate(traits: &[Trait], motive: usize) -> f32 {
     for t in traits {
         r *= match (t, motive) {
             (Trait::Lazy, ENERGY) => 1.25,
-            (Trait::Loner, SOCIAL) => 0.5,
             (Trait::PartyAnimal | Trait::Friendly, SOCIAL) => 1.2,
             (Trait::Slob, HYGIENE) => 0.75,
             (Trait::Excitable, FUN) => 1.2,
