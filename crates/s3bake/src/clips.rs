@@ -19,6 +19,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a_soc_callOver_x",
     "a2o_door_ringBell_x",
     "a2a_soc_Neutral_Greet_Friendly_Friendly",
+    // The game's social interactions, all of them (see `SocialData`).
+    "a2a_soc_",
     "a2a_soc_neutral_greet",
     "a_idle_neutral_",
     "a_idle_friendly_",

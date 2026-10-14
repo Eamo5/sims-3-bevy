@@ -9,7 +9,7 @@ use crate::clock::GameClock;
 use crate::interact::{Action, ActionKind, ActionQueue, GoingHome, Notifications, Visitor};
 use crate::life::{Mood, MoodletKind, Moodlets};
 use crate::sim::Sim;
-use crate::social::{Relationships, SOCIALS, social_index};
+use crate::social::{Relationships, social_index};
 use crate::PlayMode;
 
 pub struct DatesPlugin;
@@ -87,7 +87,7 @@ fn dates(
             {
                 let pick = ["Flirt", "Chat", "Compliment", "Compliment Appearance", "Tell Joke"].choose(&mut rand::rng()).copied().unwrap_or("Chat");
                 if let Some(si) = social_index(pick) {
-                    q.0.push_back(Action::new(SOCIALS[si].name, ActionKind::Social { target: d.a, social: si }, true));
+                    q.0.push_back(Action::new(crate::social::social(si).name, ActionKind::Social { target: d.a, social: si }, true));
                 }
             }
         }

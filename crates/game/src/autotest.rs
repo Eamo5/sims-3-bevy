@@ -2911,9 +2911,13 @@ fn auto_gate_route(
 /// camera turned on the nearest such object shown, a click on it through the real input path,
 /// the pie's first option (not a submenu) pressed as a player would, and what the selected Sim
 /// then has queued logged. `<kind>:<option>><option>` picks the options instead, by how their
-/// labels start (`Fridge:Have Quick Meal>Cereal`).
-#[allow(clippy::type_complexity)]
+/// labels start (`Fridge:Have Quick Meal>Cereal`). `Sim` is the nearest other Sim (its socials);
+/// CLICK_SHOTS=<folder> takes a picture of each menu as it opens.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn auto_click_use(
+    mut commands: Commands,
+    sims: Query<(Entity, &crate::sim::Sim, &GlobalTransform), Without<crate::sim::Selected>>,
+    mut shots: Local<u32>,
     time: Res<Time>,
     mut state: Local<(usize, u8, f32)>,
     mut depth: Local<usize>,
@@ -2940,6 +2944,13 @@ fn auto_click_use(
     }
     let Ok((camera, cam_tf, mut cam)) = cams.single_mut() else { return };
     let target = || {
+        if kinds[idx].eq_ignore_ascii_case("Sim") {
+            return sims
+                .iter()
+                .filter(|(_, s, _)| !s.age.is_little())
+                .map(|(e, s, tf)| (e, s.first.clone(), tf.translation() + Vec3::Y))
+                .min_by(|a, b| a.2.distance(cam.focus).total_cmp(&b.2.distance(cam.focus)));
+        }
         objects
             .iter()
             .filter(|(_, o, _, vis)| vis.get() && format!("{:?}", o.kind).eq_ignore_ascii_case(kinds[idx]))
@@ -2990,6 +3001,12 @@ fn auto_click_use(
                 return;
             }
             let labels: Vec<&str> = pie.options.iter().map(|(l, _)| l.as_str()).collect();
+            if let Ok(dir) = std::env::var("CLICK_SHOTS") {
+                *shots += 1;
+                let path = std::path::Path::new(&dir).join(format!("menu{:02}.png", *shots));
+                info!("shot {}", path.display());
+                commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(path));
+            }
             // (`<`: the submenu's middle, back to the menu before.)
             if entries[idx].1.get(*depth) == Some(&"<") {
                 if let (Ok(at), Ok(mut window)) = (back.single(), windows.single_mut()) {
@@ -3784,20 +3801,30 @@ fn auto_action(
         return;
     }
     // "Social:<name>": the selected Sim does this social three times with another grown-up of
-    // the household (or a visitor), as friends.
-    if let Some(social) = name.strip_prefix("Social:") {
+    // the household (or a visitor), as friends ("Social:<a>;<b>;...": each of those once).
+    if let Some(list) = name.strip_prefix("Social:") {
         let me = sel_e.single().unwrap();
         let target = members.iter().find(|(e, s)| *e != me && s.age.is_grown() && s.age != crate::sim::Age::Child).map(|(e, _)| e).or_else(|| visitors.iter().next());
-        let (Some(target), Some(si)) = (target, crate::social::social_index(social)) else { return };
+        let Some(target) = target else { return };
         for (a, b) in [(me, target), (target, me)] {
             if let Ok(mut rels) = rels_q.get_mut(a) {
                 let r = rels.entry(b);
                 r.friendship = r.friendship.max(60.0);
+                r.romance = r.romance.max(30.0);
             }
         }
         q.0.clear();
-        for _ in 0..3 {
-            q.push_player(crate::interact::Action::new(social, crate::interact::ActionKind::Social { target, social: si }, false));
+        let socials: Vec<&str> = list.split(';').collect();
+        let times = if socials.len() == 1 { 3 } else { 1 };
+        for social in socials {
+            let Some(si) = crate::social::social_index(social) else {
+                warn!("social test: no social {social:?}");
+                continue;
+            };
+            info!("social test: {social} ({:?})", crate::interact::social_clips(social, None));
+            for _ in 0..times {
+                q.push_player(crate::interact::Action::new(social, crate::interact::ActionKind::Social { target, social: si }, false));
+            }
         }
         *done = true;
         return;

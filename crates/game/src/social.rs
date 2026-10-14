@@ -237,6 +237,24 @@ pub struct SocialDef {
     pub care: [f32; 6],
     /// Only for a Sim of this life state (a vampire's hypnotic gaze, a witch's spells).
     pub needs: Option<crate::sim::Occult>,
+    /// One of the game's own socials (from its social data): what more it asks, and its clips.
+    pub game: Option<&'static GameRules>,
+}
+
+/// What one of the game's own socials asks beyond the hand-made ones' rules: the ages that do it
+/// and have it done to them, the traits wanted in the one it's done to (any of them), the traits
+/// that make a Sim keener on it or less keen, and its animations (the clips' names without their
+/// side, `_x` / `_y`).
+pub struct GameRules {
+    pub actor_ages: Vec<Age>,
+    pub target_ages: Vec<Age>,
+    pub target_traits: Vec<Trait>,
+    pub keen: Vec<Trait>,
+    pub unkeen: Vec<Trait>,
+    pub clips: &'static [&'static str],
+    /// The trait topics it's offered under (the game's `<Trait> Trait` topics): offered when the
+    /// one who does it has the trait (`true`), or the one it's done to (`false`). None: always.
+    pub topics: Vec<(Trait, bool)>,
 }
 
 const fn sd(name: &'static str, cat: SocialCat, minutes: f32, social: f32, fun: f32, friendship: f32, romance: f32) -> SocialDef {
@@ -255,6 +273,7 @@ const fn sd(name: &'static str, cat: SocialCat, minutes: f32, social: f32, fun: 
         effect: SocialEffect::None,
         care: [0.0; 6],
         needs: None,
+        game: None,
     }
 }
 
@@ -340,13 +359,267 @@ pub fn apart(def: &SocialDef) -> f32 {
 }
 
 pub fn social_index(name: &str) -> Option<usize> {
-    SOCIALS.iter().position(|s| s.name == name)
+    all_socials().find(|(_, s)| s.name == name).map(|(i, _)| i)
+}
+
+/// The game's own socials, numbered on from the hand-made ones (`SOCIALS`): those from its
+/// social data it has the animations for and whose conditions are known here. Filled in once
+/// its data is loaded (see `load_game_socials`).
+static GAME_SOCIALS: std::sync::OnceLock<Vec<SocialDef>> = std::sync::OnceLock::new();
+
+/// A social by its number: one of the hand-made ones, or the game's own after them.
+pub fn social(i: usize) -> &'static SocialDef {
+    SOCIALS.get(i).or_else(|| GAME_SOCIALS.get()?.get(i.checked_sub(SOCIALS.len())?)).unwrap_or(&SOCIALS[0])
+}
+
+/// Every social, with its number.
+pub fn all_socials() -> impl Iterator<Item = (usize, &'static SocialDef)> {
+    SOCIALS.iter().chain(GAME_SOCIALS.get().into_iter().flatten()).enumerate()
+}
+
+/// The game's tests (its `ProcTest`s) a social of its may have that are taken here as passed:
+/// those that only ask what's asked anyway (how well they get on, how romantic they are).
+const PASSED_TESTS: &[&str] = &["TestChat", "TalkAboutWeatherTest", "ShareInterestsProceduralTest", "TestFriendlyHug", "TestKissOnCheek", "TestAskAboutRecentAction"];
+
+/// The word in their clips' names for the game's socials with a graph of their own (not its
+/// `social_generic` with a suite): asking for things, sharing interests, compliments...
+const GRAPH_CLIPS: &[(&str, &str)] = &[
+    ("social_askFor", "AskFor"),
+    ("social_share_interests", "ShareInterests"),
+    ("FriendlyCompliment", "Compliment"),
+    ("FlirtyCompliment", "Compliment"),
+    ("social_boastabout", "BoastAbout"),
+    ("social_insult", "ExtraInsult"),
+    ("social_neutral_telljoke", "tellJoke"),
+    ("FriendlyHug", "FriendlyHug"),
+    ("socialization_kissmakeout", "kissMakeOut"),
+    ("social_apologize", "Apologize"),
+    ("social_yellAt", "YellAt"),
+    ("social_massage", "Massage"),
+    ("social_tell_funny_story", "TellFunnyStory"),
+    ("social_boretodeath", "BoreToDeath"),
+    ("social_shoo", "Shoo"),
+    ("social_shykiss", "ShyKiss"),
+    // (Just talking: the chat's own.)
+    ("social_neutral_talk", "Gossip"),
+];
+
+/// Clip names for how a social goes down badly: left out of one that's taken well.
+const BADLY: &[&str] = &["reject", "creepy", "boring", "awkward"];
+
+/// The game's socials left out: those that need what isn't kept here (the dark, a skill to
+/// teach, old times, a tattoo parlour, someone else's affairs), and its "Goodbye" (it's "Say
+/// Goodbye" here).
+const LEFT_OUT: &[&str] = &[
+    "Fret Over Darkness",
+    "Ask to be Tattooed",
+    "Persuade To Change Body Shape",
+    "Teach Skill",
+    "Goodbye",
+    "Trait Incompatibility",
+    "Talk About Shared Traits",
+    "Reminisce",
+];
+
+/// The age a letter of the game's tables stands for.
+fn age_of(letter: &str) -> Option<Age> {
+    match letter {
+        "T" => Some(Age::Teen),
+        "Y" => Some(Age::YoungAdult),
+        "A" => Some(Age::Adult),
+        "E" => Some(Age::Elder),
+        _ => None,
+    }
+}
+
+/// The game's own socials, from its social data: each one not hand-made already (by name), with
+/// a test that's known or none, for teens and up (children's have their own clips), its tone
+/// telling its kind (friendly, funny, romantic, mean) and what it does, and its suite's clips
+/// (those `clip_names` has: `a2a_soc_<stance>_<suite>_..._x` and the `_y` to go with it).
+pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[String]) -> Vec<SocialDef> {
+    let leak = |s: &str| -> &'static str { Box::leak(s.to_string().into_boxed_str()) };
+    let traits = |ids: &[String]| -> Vec<Trait> { ids.iter().filter_map(|id| Trait::ALL.iter().find(|t| t.game_id().eq_ignore_ascii_case(id)).copied()).collect() };
+    let mut out: Vec<SocialDef> = Vec::new();
+    for a in actions {
+        // (Its clips' word: its suite, or its graph's.)
+        let word = if a.suite.is_empty() { GRAPH_CLIPS.iter().find(|g| g.0.eq_ignore_ascii_case(&a.graph)).map(|g| g.1) } else { Some(a.suite.as_str()) };
+        let Some(word) = word else { continue };
+        if !a.test.is_empty() && !PASSED_TESTS.contains(&a.test.as_str()) {
+            continue;
+        }
+        if SOCIALS.iter().chain(out.iter()).any(|s| s.name.eq_ignore_ascii_case(&a.name)) || LEFT_OUT.contains(&a.name.as_str()) || a.name.contains('{') {
+            continue;
+        }
+        // (Offered under topics: those of traits are known here; a birthday, a moodlet, a
+        // pregnancy aren't yet, so what's only offered under them is left out.)
+        let topics: Vec<(Trait, bool)> = a
+            .topics
+            .iter()
+            .filter_map(|(t, first)| {
+                let name = t.strip_suffix(" Trait")?.replace(' ', "");
+                Trait::ALL.iter().find(|x| x.game_id().eq_ignore_ascii_case(&name) || format!("{x:?}").eq_ignore_ascii_case(&name)).map(|x| (*x, *first))
+            })
+            .collect();
+        if !a.topics.is_empty() && topics.is_empty() {
+            continue;
+        }
+        let (cat, minutes, social, fun, friendship, romance) = match a.tone.as_str() {
+            "Friendly" | "Neutral" | "Impressive" => (SocialCat::Friendly, 8.0, 90.0, 5.0, 5.0, 0.0),
+            "Funny" => (SocialCat::Funny, 8.0, 85.0, 60.0, 4.0, 0.0),
+            "Amorous" => (SocialCat::Romantic, 8.0, 100.0, 20.0, 2.0, 7.0),
+            "Insulting" | "Steamed" => (SocialCat::Mean, 6.0, 40.0, -20.0, -10.0, -3.0),
+            _ => continue,
+        };
+        let ages = |l: &[String]| -> Vec<Age> { l.iter().filter_map(|x| age_of(x)).collect() };
+        let (actor_ages, target_ages) = (ages(&a.actor_ages), ages(&a.target_ages));
+        if actor_ages.is_empty() || target_ages.is_empty() {
+            continue;
+        }
+        // (Its clips: the Sims' sides of its suite's, both there.)
+        let suite = format!("_{}_", word.to_ascii_lowercase());
+        let mut clips: Vec<&'static str> = clip_names
+            .iter()
+            .filter(|n| n.starts_with("a2a_soc_") && n.to_ascii_lowercase().contains(&suite))
+            .filter_map(|n| n.strip_suffix("_x"))
+            .filter(|base| clip_names.iter().any(|m| m.strip_suffix("_y") == Some(*base)))
+            .map(leak)
+            .collect();
+        clips.sort();
+        clips.dedup();
+        // (Taken well, unless it's meant to go down badly; in its own tone, where there are those.)
+        let well: Vec<&'static str> = clips.iter().copied().filter(|c| !BADLY.iter().any(|b| c.to_ascii_lowercase().contains(b))).collect();
+        if cat != SocialCat::Mean && !well.is_empty() {
+            clips = well;
+        }
+        let tones: &[&str] = match cat {
+            SocialCat::Friendly => &["_friendly"],
+            SocialCat::Funny => &["_funny", "_friendly"],
+            SocialCat::Romantic => &["_amorous", "_flirty"],
+            _ => &["_insulting", "_steamed", "_bad"],
+        };
+        let toned: Vec<&'static str> = clips.iter().copied().filter(|c| tones.iter().any(|t| c.to_ascii_lowercase().contains(t))).collect();
+        if !toned.is_empty() {
+            clips = toned;
+        }
+        // (The neutral stance's first, as most begin from it.)
+        clips.sort_by_key(|c| !c.to_ascii_lowercase().starts_with("a2a_soc_neutral_"));
+        clips.truncate(4);
+        if clips.is_empty() {
+            continue;
+        }
+        let (min_friendship, max_friendship) = a.liking.map_or((-100.0, 101.0), |(lo, hi)| (lo, if hi >= 100.0 { 101.0 } else { hi }));
+        let rules: &'static GameRules = Box::leak(Box::new(GameRules {
+            actor_ages,
+            target_ages,
+            target_traits: traits(&a.target_traits),
+            keen: traits(&a.keen),
+            unkeen: traits(&a.unkeen),
+            clips: Box::leak(clips.into_boxed_slice()),
+            topics,
+        }));
+        // (Romance only where there's some already; asked for or not, the friendly and the funny
+        // are what Sims get up to of their own accord.)
+        let min_romance = if cat == SocialCat::Romantic { 10.0 } else { -100.0 };
+        let autonomous = a.autonomous && !a.user_only && matches!(cat, SocialCat::Friendly | SocialCat::Funny) && rules.target_traits.is_empty() && rules.topics.is_empty();
+        out.push(SocialDef {
+            min_friendship,
+            max_friendship,
+            min_romance,
+            autonomous,
+            game: Some(rules),
+            ..sd(leak(&a.name), cat, minutes, social, fun, friendship, romance)
+        });
+    }
+    out
+}
+
+/// One of the game's own socials a Sim might start of their own accord with someone of an age
+/// they get on with this well: the friendly and the funny, weighted to what their traits favour
+/// (three times as likely) or not (a fifth).
+pub fn pick_game_social(actor: &Sim, target_age: Age, rel: &Relationship, rng: &mut impl rand::Rng) -> Option<&'static str> {
+    use rand::seq::IndexedRandom;
+    let fits: Vec<(&'static SocialDef, f32)> = all_socials()
+        .filter_map(|(_, s)| {
+            let g = s.game?;
+            let ok = s.autonomous
+                && g.actor_ages.contains(&actor.age)
+                && g.target_ages.contains(&target_age)
+                && rel.friendship >= s.min_friendship
+                && rel.friendship <= s.max_friendship
+                && rel.romance >= s.min_romance;
+            let keen = if g.keen.iter().any(|t| actor.traits.contains(t)) { 3.0 } else { 1.0 };
+            let unkeen = if g.unkeen.iter().any(|t| actor.traits.contains(t)) { 0.2 } else { 1.0 };
+            ok.then_some((s, keen * unkeen))
+        })
+        .collect();
+    fits.choose_weighted(rng, |f| f.1).ok().map(|f| f.0.name)
+}
+
+/// The phrases the game's socials of a kind share, gathered on their own menu ("Ask About ›",
+/// then Day, Career...) when there are three or more.
+const GROUPS: &[&str] = &["Accuse of ", "Ask About ", "Ask for ", "Ask to ", "Boast About ", "Brag About ", "Complain About ", "Compliment ", "Discuss ", "Enthuse About ", "Enthuse about ", "Joke About ", "Mock ", "Talk About ", "Announce ", "Tell "];
+
+/// A menu's socials with those that share a phrase gathered on their own menu (made by `submenu`
+/// from its label and options; it gives back what opens it), named there by the rest of their
+/// names.
+pub fn grouped<K: Clone>(list: Vec<(String, K)>, mut submenu: impl FnMut(&str, Vec<(String, K)>) -> K) -> Vec<(String, K)> {
+    let mut out: Vec<(String, K)> = Vec::new();
+    let mut done: Vec<&str> = Vec::new();
+    for (label, kind) in &list {
+        let Some(g) = GROUPS.iter().find(|g| label.starts_with(**g)) else {
+            out.push((label.clone(), kind.clone()));
+            continue;
+        };
+        let members: Vec<&(String, K)> = list.iter().filter(|(l, _)| l.starts_with(g)).collect();
+        if members.len() < 3 {
+            out.push((label.clone(), kind.clone()));
+            continue;
+        }
+        if done.contains(g) {
+            continue;
+        }
+        done.push(g);
+        let rest = |l: &str| {
+            let r = l[g.len()..].trim();
+            let mut c = r.chars();
+            c.next().map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
+        };
+        let sub: Vec<(String, K)> = members.iter().map(|(l, k)| (rest(l), k.clone())).collect();
+        let title = format!("{} ›", g.trim());
+        let opens = submenu(g.trim(), sub);
+        out.push((title, opens));
+    }
+    out
+}
+
+/// Loads the game's own socials once its data is there.
+pub fn load_game_socials(ui: Option<Res<crate::icons::GameUi>>, data: Option<Res<crate::baked::Baked>>) {
+    if GAME_SOCIALS.get().is_some() {
+        return;
+    }
+    let (Some(ui), Some(data)) = (ui, data) else { return };
+    let list = game_socials(&ui.data.socials, &data.0.clip_names);
+    info!("socials: {} of the game's own besides the {} hand-made", list.len(), SOCIALS.len());
+    let _ = GAME_SOCIALS.set(list);
 }
 
 /// Whether `actor` can start this social with `target` (shown in the pie menu); `kin`: whether
 /// they're family (no romance between relatives).
 pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim, target_in_household: bool, kin: bool) -> bool {
     if rel.friendship < def.min_friendship || rel.romance < def.min_romance || rel.friendship > def.max_friendship {
+        return false;
+    }
+    // (The game's own: the ages it's for, and the traits it asks of the one it's done to.)
+    if let Some(g) = def.game
+        && (!g.actor_ages.contains(&actor.age) || !g.target_ages.contains(&target.age) || (!g.target_traits.is_empty() && !g.target_traits.iter().any(|t| target.traits.contains(t))))
+    {
+        return false;
+    }
+    // (Under a trait's topic: the one with the trait, the Sim or the other.)
+    if let Some(g) = def.game
+        && !g.topics.is_empty()
+        && !g.topics.iter().any(|(t, first)| if *first { actor.traits.contains(t) } else { target.traits.contains(t) })
+    {
         return false;
     }
     if def.needs.is_some_and(|o| actor.occult != Some(o)) {
@@ -458,6 +731,95 @@ pub fn acceptance(def: &SocialDef, rel: &Relationship, target: &Sim, target_mood
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn socials_sharing_a_phrase_get_a_menu_of_their_own() {
+        let list: Vec<(String, u32)> = ["Chat", "Ask About Day", "Ask About Career", "Ask About Kids", "Mock Dancing", "Mock Ambition", "Admire"]
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.to_string(), i as u32))
+            .collect();
+        let mut menus: Vec<(String, Vec<(String, u32)>)> = Vec::new();
+        let out = grouped(list, |label, sub| {
+            menus.push((label.to_string(), sub));
+            100 + menus.len() as u32
+        });
+        // (Three asks gathered; two mocks aren't enough for a menu.)
+        let labels: Vec<&str> = out.iter().map(|o| o.0.as_str()).collect();
+        assert_eq!(labels, ["Chat", "Ask About ›", "Mock Dancing", "Mock Ambition", "Admire"]);
+        assert_eq!(out[1].1, 101);
+        assert_eq!(menus[0].0, "Ask About");
+        let sub: Vec<&str> = menus[0].1.iter().map(|o| o.0.as_str()).collect();
+        assert_eq!(sub, ["Day", "Career", "Kids"]);
+        assert_eq!(menus[0].1[0].1, 1);
+    }
+
+    #[test]
+    fn the_games_own_socials_come_with_their_clips_and_rules() {
+        use s3bake::gamedata::SocialAction;
+        let act = |name: &str, tone: &str, suite: &str, test: &str| SocialAction {
+            key: name.into(),
+            name: name.into(),
+            tone: tone.into(),
+            actor_ages: vec!["C".into(), "T".into(), "Y".into(), "A".into()],
+            target_ages: vec!["T".into(), "Y".into()],
+            autonomous: true,
+            suite: suite.into(),
+            test: test.into(),
+            target_traits: if name == "Accuse of Being Evil" { vec!["Evil".into()] } else { vec![] },
+            liking: Some((-19.0, 100.0)),
+            ..Default::default()
+        };
+        let actions = [
+            act("Accuse of Being Evil", "Insulting", "Accuse", ""),
+            act("Admire", "Friendly", "Admire", ""),
+            // (Hand-made already; a test not known here; no clips for it; a tone not handled.)
+            act("Chat", "Friendly", "Chat", ""),
+            act("Ask for Promotion", "Friendly", "Admire", "TestAskForPromotion"),
+            act("Sing", "Friendly", "Sing", ""),
+            act("Mumble", "Boring", "Admire", ""),
+        ];
+        let clips: Vec<String> =
+            ["a2a_soc_Bad_Accuse_Insulting_Bad_x", "a2a_soc_Bad_Accuse_Insulting_Bad_y", "a2a_soc_Neutral_Admire_Friendly_Neutral_x", "a2a_soc_Neutral_Admire_Friendly_Neutral_y", "a2a_soc_Neutral_Admire_Lonely_x"]
+                .map(String::from)
+                .to_vec();
+        let got = game_socials(&actions, &clips);
+        let names: Vec<&str> = got.iter().map(|s| s.name).collect();
+        assert_eq!(names, ["Accuse of Being Evil", "Admire"]);
+        let (accuse, admire) = (&got[0], &got[1]);
+        assert_eq!(accuse.cat, SocialCat::Mean);
+        assert_eq!(accuse.game.unwrap().clips, ["a2a_soc_Bad_Accuse_Insulting_Bad"]);
+        // (Only a clip with both sides.)
+        assert_eq!(admire.game.unwrap().clips, ["a2a_soc_Neutral_Admire_Friendly_Neutral"]);
+        assert_eq!(admire.min_friendship, -19.0);
+        // (Children are left out: their clips are their own; the friendly done of their own
+        // accord, the one asking a trait of the other not.)
+        assert_eq!(admire.game.unwrap().actor_ages, [Age::Teen, Age::YoungAdult, Age::Adult]);
+        assert!(admire.autonomous && !accuse.autonomous);
+        // Asked of the one it's done to: their being evil.
+        let mut a = crate::sim::random_sim(&mut rand::rng(), "A", Some(true), Age::Adult);
+        let mut b = crate::sim::random_sim(&mut rand::rng(), "B", Some(false), Age::YoungAdult);
+        a.traits.clear();
+        b.traits = vec![Trait::Good];
+        let rel = Relationship::default();
+        assert!(!available(accuse, &rel, &a, &b, false, false));
+        b.traits = vec![Trait::Evil];
+        assert!(available(accuse, &rel, &a, &b, false, false));
+        b.age = Age::Elder;
+        assert!(!available(accuse, &rel, &a, &b, false, false), "not for the ages it isn't for");
+        // Under a trait's topic: offered when the one with it does it; under a birthday's (not
+        // known here), not at all.
+        let mut plot = act("Mastermind Plot", "Friendly", "Admire", "");
+        plot.topics = vec![("Evil Trait".into(), true)];
+        let mut cake = act("Announce Birthday", "Friendly", "Admire", "");
+        cake.topics = vec![("Birthday".into(), true)];
+        let got = game_socials(&[plot, cake], &clips);
+        assert_eq!(got.len(), 1);
+        b.age = Age::YoungAdult;
+        assert!(!available(&got[0], &rel, &a, &b, false, false));
+        a.traits = vec![Trait::Evil];
+        assert!(available(&got[0], &rel, &a, &b, false, false));
+    }
 
     #[test]
     fn friendships_fade_without_contact() {

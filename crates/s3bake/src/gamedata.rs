@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 84;
+pub const GAMEDATA_VERSION: u32 = 86;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -219,6 +219,126 @@ pub struct BalloonEntry {
 
 /// The game's balloon table (`Balloons`): what Sims think and say, keyed by need, moodlet or
 /// trait (idle thoughts), social interaction, conversation topic, and random sets.
+/// One of the game's social interactions (its `SocialData` tables): what it's called, its tone
+/// (`Friendly`, `Funny`, `Amorous`, `Insulting`...), the ages that do it and have it done to
+/// them, whether Sims do it of their own accord or only when told, the traits it asks of the one
+/// it's done to (`ATRA`) and those that make a Sim keener or less keen on it (`ATE`, `ATR`), the
+/// liking it needs (`ALTR`), the game's own test for it (when it has one), and its animations'
+/// graph and suite.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SocialAction {
+    pub key: String,
+    pub name: String,
+    pub tone: String,
+    pub actor_ages: Vec<String>,
+    pub target_ages: Vec<String>,
+    pub autonomous: bool,
+    pub user_only: bool,
+    pub target_traits: Vec<String>,
+    pub keen: Vec<String>,
+    pub unkeen: Vec<String>,
+    pub liking: Option<(f32, f32)>,
+    pub test: String,
+    pub graph: String,
+    pub suite: String,
+    /// The topics it's offered under (the game's `SocializingActionAvailability`): a topic's
+    /// name (`Evil Trait`, `Buff Fired`, `Birthday`...), and whether it's offered to the Sim
+    /// with the topic (or to others, with them). None: it's always offered.
+    #[serde(default)]
+    pub topics: Vec<(String, bool)>,
+}
+
+/// The game's topics and the socials each offers (its `SocializingActionAvailability` table's
+/// `TAA` rows, in order: a `Cat` names a topic, then its `FPA`s are offered to the Sim with it and
+/// its `SPA`s to others with them).
+pub fn social_topics(xml: &str) -> Vec<(String, String, bool)> {
+    let mut out = Vec::new();
+    let mut topic = String::new();
+    let field = |row: &str, name: &str| -> Option<String> {
+        let (open, close) = (format!("<{name}>"), format!("</{name}>"));
+        let a = row.find(&open)? + open.len();
+        let b = row[a..].find(&close)?;
+        Some(row[a..a + b].trim().to_string()).filter(|v| !v.is_empty())
+    };
+    let mut rest = xml;
+    while let Some(a) = rest.find("<TAA>") {
+        let Some(b) = rest[a..].find("</TAA>") else { break };
+        let row = &rest[a..a + b];
+        rest = &rest[a + b..];
+        if let Some(cat) = field(row, "Cat") {
+            topic = cat;
+            continue;
+        }
+        if topic.is_empty() {
+            continue;
+        }
+        if let Some(f) = field(row, "FPA") {
+            out.push((topic.clone(), f, true));
+        }
+        if let Some(s) = field(row, "SPA") {
+            out.push((topic.clone(), s, false));
+        }
+    }
+    out
+}
+
+/// An attribute's value in a tag's text (`key="..."`).
+fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let at = tag.find(&format!(" {name}=\""))? + name.len() + 3;
+    let len = tag[at..].find('"')?;
+    Some(&tag[at..at + len])
+}
+
+/// The text of the first `<name .../>` tag in a body.
+fn tag<'a>(body: &'a str, name: &str) -> Option<&'a str> {
+    let a = body.find(&format!("<{name} "))?;
+    let b = body[a..].find('>')?;
+    Some(&body[a..a + b])
+}
+
+fn list(v: Option<&str>) -> Vec<String> {
+    v.map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()).unwrap_or_default()
+}
+
+/// The social interactions in one of the game's `SocialData` tables, named in English by `name`
+/// (their text keys).
+pub fn social_actions(xml: &str, name: &dyn Fn(&str) -> String) -> Vec<SocialAction> {
+    let mut out = Vec::new();
+    let mut rest = xml;
+    while let Some(a) = rest.find("<Action ") {
+        let head_end = rest[a..].find('>').map_or(rest.len(), |e| a + e);
+        let head = &rest[a..head_end];
+        let Some(close) = rest[head_end..].find("</Action>") else { break };
+        let body = &rest[head_end..head_end + close];
+        rest = &rest[head_end + close..];
+        let Some(key) = attr(head, "key") else { continue };
+        let aa = body.find("<AA>").and_then(|s| body[s..].find("</AA>").map(|e| &body[s..s + e])).unwrap_or("");
+        let age = tag(aa, "AGE");
+        let available = tag(aa, "Available");
+        let graph = tag(body, "Graph");
+        let text = tag(body, "Text").and_then(|t| attr(t, "key")).unwrap_or(key);
+        let liking = tag(aa, "ALTR").and_then(|t| Some((attr(t, "min")?.parse().ok()?, attr(t, "max")?.parse().ok()?)));
+        out.push(SocialAction {
+            key: key.to_string(),
+            name: Some(name(text)).filter(|n| !n.is_empty()).unwrap_or_else(|| key.to_string()),
+            tone: attr(head, "com").unwrap_or("").to_string(),
+            actor_ages: list(age.and_then(|t| attr(t, "x"))),
+            target_ages: list(age.and_then(|t| attr(t, "y"))),
+            autonomous: available.and_then(|t| attr(t, "auto")) == Some("True"),
+            user_only: available.and_then(|t| attr(t, "udo")) == Some("True"),
+            target_traits: list(tag(aa, "ATRA").and_then(|t| attr(t, "val"))),
+            keen: list(tag(aa, "ATE").and_then(|t| attr(t, "val"))),
+            unkeen: list(tag(aa, "ATR").and_then(|t| attr(t, "val"))),
+            liking,
+            test: tag(aa, "ProcTest").and_then(|t| attr(t, "key")).unwrap_or("").to_string(),
+            graph: graph.and_then(|t| attr(t, "val")).unwrap_or("").to_string(),
+            suite: graph.and_then(|t| attr(t, "suite")).unwrap_or("").to_string(),
+            topics: Vec::new(),
+        });
+    }
+    out
+}
+
 /// One of the game's idle animations (its `Idles` tuning): its clips (a start, a loop and a stop,
 /// or one), how likely it is among its fellows, the ages it's for (the table's letters: C, T,
 /// Y, A, E, and the pets'), and the thought balloon list it may show.
@@ -306,6 +426,9 @@ pub struct GameDataBaked {
     /// mood, and the everyday ones.
     #[serde(default)]
     pub idles: IdleTables,
+    /// The game's social interactions (its `SocialData` tables).
+    #[serde(default)]
+    pub socials: Vec<SocialAction>,
     pub buffs: Vec<BuffInfo>,
     pub traits: Vec<TraitInfo>,
     pub skills: Vec<SkillInfo>,
@@ -1466,6 +1589,20 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     let get = |f: &HashMap<String, String>, k: &str| f.get(k).cloned().unwrap_or_default();
 
     let mut out = GameDataBaked { version: GAMEDATA_VERSION, ..Default::default() };
+    // The social interactions (the base game's).
+    if let Some(x) = xml("SocialData_BaseGame") {
+        out.socials = social_actions(&x, &|key| text("Socializing/Action", key));
+        // (And the topics they're offered under.)
+        if let Some(t) = xml("SocializingActionAvailability") {
+            for (topic, action, first) in social_topics(&t) {
+                for s in out.socials.iter_mut().filter(|s| s.key == action) {
+                    if !s.topics.iter().any(|x| x.0 == topic && x.1 == first) {
+                        s.topics.push((topic.clone(), first));
+                    }
+                }
+            }
+        }
+    }
     // The idle animations.
     if let Some(x) = xml("Idles") {
         out.idles = IdleTables {
@@ -2602,6 +2739,56 @@ const EXTRA_ICONS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn social_topics_offer_their_actions_to_the_sim_with_them_or_others() {
+        let xml = "<X><TAA><Cat></Cat><Gr></Gr><FPA></FPA></TAA><TAA><FPA>Stray</FPA></TAA><TAA><Cat>Evil Trait</Cat></TAA><TAA><Gr>Default</Gr></TAA>\
+            <TAA><FPA>Mastermind Plot</FPA><SPA>Accuse of Being Evil</SPA></TAA><TAA><Cat>Buff Fired</Cat></TAA><TAA><SPA>Ask About Work</SPA></TAA></X>";
+        let t = social_topics(xml);
+        assert_eq!(
+            t,
+            [
+                ("Evil Trait".to_string(), "Mastermind Plot".to_string(), true),
+                ("Evil Trait".to_string(), "Accuse of Being Evil".to_string(), false),
+                ("Buff Fired".to_string(), "Ask About Work".to_string(), false),
+            ]
+        );
+    }
+
+    #[test]
+    fn social_actions_are_read_from_the_games_tables() {
+        let xml = r#"<Social>
+	<Action key="Accuse of Being Evil" com="Insulting">
+		<Text key="AccuseofBeingEvil" pvt="BeAccused" />
+		<AA>
+			<AGE x="T,Y,A,E" y="C,T,Y,A,E" />
+			<ALTR min="-19" max="100" />
+			<ATRA val="Evil" />
+			<ATE val="Good" />
+			<Available auto="True" udo="False" />
+			<ProcTest key="TestSomething" />
+		</AA>
+		<Jazz>
+			<Graph val="social_generic" suite="Accuse" data="BaseGame" x="Bad" y="Bad" />
+		</Jazz>
+	</Action>
+	<Action key="Chat" com="Friendly">
+		<AA><AGE x="C,T" y="C,T" /><Available auto="False" udo="True" /></AA>
+	</Action>
+</Social>"#;
+        let a = social_actions(xml, &|k| if k == "AccuseofBeingEvil" { "Accuse of Being Evil".into() } else { String::new() });
+        assert_eq!(a.len(), 2);
+        assert_eq!((a[0].name.as_str(), a[0].tone.as_str()), ("Accuse of Being Evil", "Insulting"));
+        assert_eq!(a[0].actor_ages, ["T", "Y", "A", "E"]);
+        assert_eq!(a[0].target_ages.len(), 5);
+        assert_eq!(a[0].liking, Some((-19.0, 100.0)));
+        assert_eq!((a[0].target_traits[0].as_str(), a[0].keen[0].as_str(), a[0].test.as_str()), ("Evil", "Good", "TestSomething"));
+        assert!(a[0].autonomous && !a[0].user_only);
+        assert_eq!((a[0].graph.as_str(), a[0].suite.as_str()), ("social_generic", "Accuse"));
+        // (No text: its key; no animations: none.)
+        assert_eq!(a[1].name, "Chat");
+        assert!(a[1].user_only && a[1].suite.is_empty());
+    }
 
     #[test]
     fn idle_rows_group_under_their_name_and_take_the_first_rows_defaults() {

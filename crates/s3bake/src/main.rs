@@ -740,6 +740,15 @@ fn main() {
             }
         }
         let want = args[i + 1].to_ascii_lowercase();
+        // (`?`: the names of them all.)
+        if want == "?" {
+            let mut all: Vec<&String> = pkg.of_type(0x0333_406C).filter_map(|e| names.get(&e.key.i)).collect();
+            all.sort();
+            for n in all {
+                println!("{n}");
+            }
+            return;
+        }
         for e in pkg.of_type(0x0333_406C) {
             if names.get(&e.key.i).is_some_and(|n: &String| n.to_ascii_lowercase() == want || n.to_ascii_lowercase().starts_with(&format!("{want}_0x"))) {
                 let d = pkg.read(e).expect("xml");

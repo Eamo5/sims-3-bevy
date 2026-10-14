@@ -17,7 +17,7 @@ use crate::interact::{Action, ActionKind, ActionQueue, Household, Notifications,
 use crate::loading::CurrentWorld;
 use crate::nav::{Floor, PathFollow};
 use crate::sim::{Age, BLADDER, DecayScale, FUN, HUNGER, HouseholdMember, Motives, SOCIAL, Sim};
-use crate::social::{SOCIALS, social_index};
+use crate::social::social_index;
 use crate::{AppState, PlayMode};
 
 pub struct ServicesPlugin;
@@ -797,8 +797,8 @@ fn babysitting(
     }
     match best.and_then(|(_, e, what)| social_index(what).map(|si| (e, si))) {
         Some((target, si)) => {
-            debug!("the babysitter sees to {}: {}", littles.iter().find(|l| l.0 == target).map_or("?", |l| l.1.first.as_str()), SOCIALS[si].name);
-            queue.0.push_back(Action::new(SOCIALS[si].name, ActionKind::Social { target, social: si }, false));
+            debug!("the babysitter sees to {}: {}", littles.iter().find(|l| l.0 == target).map_or("?", |l| l.1.first.as_str()), crate::social::social(si).name);
+            queue.0.push_back(Action::new(crate::social::social(si).name, ActionKind::Social { target, social: si }, false));
         }
         None => {
             // Keep an eye on them.

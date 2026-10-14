@@ -25,7 +25,7 @@ impl Plugin for InteractPlugin {
                     .chain()
                     .run_if(in_state(PlayMode::Live)),
             )
-            .add_systems(Update, route_objects.run_if(in_state(crate::AppState::InGame)))
+            .add_systems(Update, (route_objects, crate::social::load_game_socials).run_if(in_state(crate::AppState::InGame)))
             .add_systems(Update, (wear_new_objects, floor_new_objects, second_places).run_if(in_state(crate::AppState::InGame)));
     }
 }
@@ -1794,6 +1794,10 @@ pub fn social_start(name: &str, little: Option<Age>) -> Option<&'static str> {
 
 pub fn social_clips(name: &str, little: Option<Age>) -> &'static [&'static str] {
     let baby = little == Some(Age::Baby);
+    // (The game's own socials bring their clips with them.)
+    if let Some(g) = crate::social::social_index(name).and_then(|i| crate::social::social(i).game) {
+        return g.clips;
+    }
     match name {
         // Babies are cradled while they're fed, changed and cuddled. (The game's own feeding
         // and changing clips IK-solve the arms around the baby and a bottle.)
@@ -2620,7 +2624,7 @@ pub(crate) fn run_actions(
                         ActionKind::Social { target, social } => positions.get(target).map(|(p, l)| {
                             let mine = Vec2::new(tf.translation.x, tf.translation.z);
                             let theirs = Vec2::new(p.x, p.z);
-                            (theirs + (mine - theirs).normalize_or(Vec2::X) * crate::social::apart(&SOCIALS[*social]), *l)
+                            (theirs + (mine - theirs).normalize_or(Vec2::X) * crate::social::apart(crate::social::social(*social)), *l)
                         }),
                         ActionKind::GoHere(p, l) => Some((*p, *l)),
                         // (Kneeling beside the spot.)
@@ -3010,7 +3014,7 @@ pub(crate) fn run_actions(
                                     tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
                                 }
                                 anim.pose = Pose::Talk;
-                                let s = &SOCIALS[*social];
+                                let s = crate::social::social(*social);
                                 let little = who.get(target).map(|w| w.0.age).filter(|a| a.is_little());
                                 let clips = social_clips(s.name, little);
                                 let start = social_start(s.name, little);
@@ -3658,7 +3662,7 @@ pub(crate) fn run_actions(
                             }
                         }
                         ActionKind::Social { target, social } => {
-                            let s = &SOCIALS[*social];
+                            let s = crate::social::social(*social);
                             let close = positions.get(target).is_some_and(|p| p.0.distance(tf.translation) < crate::social::apart(s) + 1.6);
                             if !close {
                                 action.phase = Phase::Start;
@@ -4720,7 +4724,7 @@ fn autonomy(
                         score *= 1.5;
                     }
                     if best.as_ref().is_none_or(|b| score > b.0) {
-                        best = Some((score, Action::new(SOCIALS[si].name, ActionKind::Social { target: other, social: si }, true)));
+                        best = Some((score, Action::new(crate::social::social(si).name, ActionKind::Social { target: other, social: si }, true)));
                     }
                 }
             }
@@ -4736,14 +4740,16 @@ fn autonomy(
                     continue;
                 }
                 let rel = rels.friendship(other);
-                let name = match () {
+                // (Among friends, now and then one of the game's own: whatever their traits favour.)
+                let game = if rel > 10.0 && rng.random_bool(0.4) { crate::social::pick_game_social(sim, age, &rels.get(other), &mut rng) } else { None };
+                let name = game.unwrap_or_else(|| match () {
                     _ if rel < 5.0 => "Get to Know",
                     _ if rel > 10.0 && rng.random_bool(0.35) => "Tell Joke",
                     _ if rel > 20.0 && rng.random_bool(0.3) => "Talk About Hobbies",
                     _ => "Chat",
-                };
+                });
                 let si = crate::social::social_index(name).unwrap_or(0);
-                let s = &SOCIALS[si];
+                let s = crate::social::social(si);
                 let mut score = (s.social_per_hour * s.minutes / 60.0) * urgency(SOCIAL) * rng.random_range(0.8..1.2);
                 if partying {
                     score = score.max(30.0 * rng.random_range(0.8..1.2));

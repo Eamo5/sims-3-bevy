@@ -11,7 +11,7 @@ use s3bake::gamedata::{BalloonEntry, BalloonTable};
 
 use crate::PlayMode;
 use crate::camera::SimsCamera;
-use crate::interact::{ActionKind, ActionQueue, Phase, SOCIALS};
+use crate::interact::{ActionKind, ActionQueue, Phase};
 use crate::sim::{Age, Motives, Sim};
 
 pub struct BalloonsPlugin;
@@ -307,7 +307,7 @@ fn balloon_triggers(
                 && let (ActionKind::Social { target, social }, Phase::Running(_)) = (&a.kind, a.phase)
             {
                 if now >= st.next_talk {
-                    let s = &SOCIALS[*social];
+                    let s = crate::social::social(*social);
                     let talks_back = CONVERSATIONS.contains(&s.name);
                     let their_turn = talks_back && st.talk_turn % 2 == 1;
                     st.talk_turn += 1;

@@ -1157,9 +1157,7 @@ fn world_click(
             let target_member = members_q.contains(t);
             pie.submenus.clear();
             for cat in crate::social::SocialCat::ALL {
-                let list: Vec<(String, ActionKind)> = SOCIALS
-                    .iter()
-                    .enumerate()
+                let list: Vec<(String, ActionKind)> = crate::social::all_socials()
                     .filter(|(_, s)| s.cat == cat && crate::social::available(s, &rel, actor_sim, sim, target_member, family.kin(actor_sim.id, sim.id).is_some()))
                     // (Nothing more to teach a toddler who's learned it; homework helped with only
                     // when there's some.)
@@ -1174,6 +1172,12 @@ fn world_click(
                     })
                     .map(|(i, s)| (s.name.to_string(), ActionKind::Social { target: t, social: i }))
                     .collect();
+                // (Those of a kind together, as the game's menus have them: "Ask About ›" Day,
+                // Career...)
+                let list = crate::social::grouped(list, |label, sub| {
+                    pie.submenus.push((label.to_string(), sub));
+                    submenu_kind(pie.submenus.len() - 1)
+                });
                 if !list.is_empty() {
                     options.push((format!("{} ›", cat.name()), submenu_kind(pie.submenus.len())));
                     pie.submenus.push((cat.name().to_string(), list));
@@ -1663,6 +1667,10 @@ fn pie_buttons(
         // Keep the genre with its action: later queued choices must not replace
         // the draft currently being written or survive cancellation of that choice.
         let novel_genre = label.strip_prefix("Write: ").and_then(|n| crate::writing::GENRES.iter().position(|g| g.name == n));
+        // (A social chosen from a group's menu by the rest of its name: its whole name.)
+        if let ActionKind::Social { social, .. } = kind {
+            label = crate::social::social(social).name.to_string();
+        }
         let mut action = Action::new(label, kind, false);
         action.novel_genre = novel_genre;
         action.outfit_choice = outfit_choice;

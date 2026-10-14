@@ -423,6 +423,13 @@ installation is unreachable.
   come: a wipe of the brow when Fatigued, tears of joy at a First Kiss, queasiness, a start when
   Scared, a jolt when Singed. A reaction waits for its Sim to be standing free, then lapses.
 - **Stink**: green wisps rise off a smelly Sim's armpits, as the game's `stinkAdult` does.
+- **The game's own socials**, from its `SocialData` (Admire, Gossip, Brighten Day, Talk About
+  Weather, Mock, Flatter, Deep Conversation, the Accuse of..., Ask About..., Complain About...
+  and Joke About... families and more), each with its tone's effects, the ages, traits and
+  liking it asks for, the trait topics it's offered under (the Evil may Mastermind a Plot, and
+  others Accuse them of Being Evil) and its suite's own clips; those sharing a phrase gathered on
+  a menu of their own, long menus paged with "More ›". Sims chat with the friendly and funny
+  ones of their own accord, as their traits favour.
 - **Art**: paintings and sculptures are viewed ("View", for fun): the Sim looks the piece over
   and then shows what they make of it with the game's reactions, by its price and their taste
   (Snobs and the Artistic love fine art, Snobs sniff at cheap art, those who can't stand art
