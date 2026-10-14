@@ -3679,8 +3679,8 @@ pub(crate) fn run_actions(
                                         }
                                         Special::ServeMeal => {
                                             // A poor cook may set the stove on fire instead.
-                                            let clumsy = sim.traits.contains(&crate::life::Trait::Clumsy);
-                                            if crate::fire::cooking_fire(skills.level("Cooking"), clumsy) {
+                                            let natural = sim.traits.contains(&crate::life::Trait::NaturalCook);
+                                            if crate::fire::cooking_fire(skills.level("Cooking"), natural) {
                                                 fire.write(crate::fire::StartFire { at: otf.translation + Vec3::Y * obj.height * 0.85, level: of.map_or(1, |f| f.0) });
                                                 notes.push(format!("{} set the stove on fire!", sim.first));
                                             } else {
@@ -3962,6 +3962,25 @@ pub(crate) fn run_actions(
                                                 h.funds += n;
                                                 notes.push(format!("{} mooched §{n} from {tname}.", sim.first));
                                             }
+                                        }
+                                        SocialEffect::LearnRecipe => {
+                                            let (first, other) = (sim.first.clone(), tname.clone());
+                                            commands.queue(move |w: &mut World| {
+                                                let Some(data) = w.get_resource::<crate::icons::GameUi>().map(|u| u.data.clone()) else { return };
+                                                let cooking = w.get::<Skills>(me).map_or(0, |s| s.level("Cooking"));
+                                                let known = w.get::<crate::meals::KnownRecipes>(me).cloned();
+                                                let books = crate::meals::books_for(&data, cooking, known.as_ref());
+                                                use rand::seq::IndexedRandom;
+                                                let Some(&i) = books.choose(&mut rand::rng()) else { return };
+                                                let r = &data.recipes[i];
+                                                let mut known = known.unwrap_or_default();
+                                                known.0.push(r.key.clone());
+                                                let member = w.get::<HouseholdMember>(me).is_some();
+                                                w.entity_mut(me).insert(known);
+                                                if member {
+                                                    w.resource_mut::<Notifications>().push(format!("{first} learned to make {} from {other}.", r.name));
+                                                }
+                                            });
                                         }
                                         SocialEffect::MoochFood => {
                                             commands.entity(me).queue_silenced(|mut w: EntityWorldMut| {

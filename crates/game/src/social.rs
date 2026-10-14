@@ -223,6 +223,9 @@ pub enum SocialEffect {
     MoochSmall,
     MoochLarge,
     MoochFood,
+    /// A recipe learned from another cook (the game's "Ask for Recipe": one from the books, at
+    /// the asker's Cooking).
+    LearnRecipe,
 }
 
 /// What a Mooch gets out of others (the game's `MoochAmount`, at the hidden Mooch skill's first
@@ -240,6 +243,8 @@ const GAME_EFFECTS: &[(&str, SocialEffect)] = &[
     ("Mooch Money (Small)", SocialEffect::MoochSmall),
     ("Mooch Money (Large)", SocialEffect::MoochLarge),
     ("Mooch Food", SocialEffect::MoochFood),
+    ("Ask for Recipe", SocialEffect::LearnRecipe),
+    ("Trade Kitchen Secrets", SocialEffect::LearnRecipe),
 ];
 
 pub struct SocialDef {
@@ -334,6 +339,8 @@ pub struct Side<'a> {
     pub member: bool,
     /// Their Charisma skill.
     pub charisma: u32,
+    /// Whether they cook at all (have the Cooking skill).
+    pub cooks: bool,
 }
 
 /// What `Side::of` reads of a Sim.
@@ -353,7 +360,16 @@ impl<'a> Side<'a> {
         q: Option<(Option<&'a crate::life::Moodlets>, Option<&'a crate::topics::Topics>, Option<&'a crate::careers::Job>, bool, bool, Option<&'a crate::interact::Skills>)>,
     ) -> Self {
         let (moods, topics, job, homework, member, skills) = q.unwrap_or_default();
-        Self { sim: Some(sim), moods, topics, career: job.map(|j| j.track), homework, member, charisma: skills.map_or(0, |s| s.level("Charisma")) }
+        Self {
+            sim: Some(sim),
+            moods,
+            topics,
+            career: job.map(|j| j.track),
+            homework,
+            member,
+            charisma: skills.map_or(0, |s| s.level("Charisma")),
+            cooks: skills.is_some_and(|s| s.0.get("Cooking").is_some_and(|v| *v > 0.0)),
+        }
     }
 }
 
@@ -590,7 +606,7 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
             t if PASSED_TESTS.contains(&t) => None,
             // (Its own effect's test: `available`.)
             "TestRequestDoYourHomework" if effect == SocialEffect::RequestHomework => None,
-            "TestMoochMoney" | "TestMoochFood" => None,
+            "TestMoochMoney" | "TestMoochFood" | "TestAskForRecipe" => None,
             "TestThankForCooking" | "TestWorryAboutGrades" | "TestThankForTutoring" => Some(GameTest::About),
             "TestActorHasWork" => Some(GameTest::ActorWorks),
             "TestActorAndTargetHasWork" => Some(GameTest::BothWork),
@@ -873,6 +889,8 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
         SocialEffect::RequestHomework => side[1].homework && matches!(target.age, Age::Child | Age::Teen),
         // (Money from those of another household.)
         SocialEffect::MoochSmall | SocialEffect::MoochLarge => !(side[0].member && side[1].member),
+        // (A recipe from a cook of another household.)
+        SocialEffect::LearnRecipe => !(side[0].member && side[1].member) && side[0].cooks && side[1].cooks,
         SocialEffect::WooHoo => matches!(rel.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married) || rel.romance >= 80.0,
         _ => true,
     }
