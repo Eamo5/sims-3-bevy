@@ -510,6 +510,7 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_trashPile_drop_outdoors_trashbag",
     // Laundry: piles picked up, the washer, the dryer and the line.
     "a2o_clothingPile_get_floor",
+    "a2o_clothingPile_get_hamper",
     "a2o_washMachine_operate",
     "a2o_washMachine_empty_easy",
     "a2o_dryer_operate",

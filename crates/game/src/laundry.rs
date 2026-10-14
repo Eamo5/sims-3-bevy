@@ -1,9 +1,11 @@
-//! Laundry, as the game's (Generations): where there's a washing machine, Sims who change their
-//! clothes at home now and then leave a pile of dirty clothes on the floor. Piles are picked up
-//! (the Neat at once, slobs never) and, once there's a load, someone does the laundry with the
-//! game's clips: into the washer, an hour's wash, the wet clothes into the dryer (or pegged on
-//! the line), and once they're dry and taken out the household's in Fresh Clothing (dried on
-//! the line, Very Fresh). Kept in saves.
+//! Laundry, as the game's (Generations, its `LaundryManager`): where there's laundry to do it
+//! with, Sims taking off their everyday clothes indoors at home leave them in a pile on the
+//! floor, or in the hamper if there's one in the room with room in it (slobs, as often as not,
+//! drop them anyway): two piles a day each at most (a slob's four). Piles are picked up (the Neat
+//! at once, slobs never) and, once there's a load, someone does the laundry with the game's
+//! clips: half an hour in the washer, ten minutes in the dryer (or half an hour on the line).
+//! For twelve hours after it's dry and taken out, whoever dresses is in Fresh Clothing (Very
+//! Fresh, line-dried or from fine machines). Kept in saves.
 
 use std::collections::HashMap;
 
@@ -13,8 +15,9 @@ use rand::Rng;
 use crate::PlayMode;
 use crate::clock::GameClock;
 use crate::interact::{Action, ActionKind, ActionQueue, GameObject, ObjectKind, Phase, Special, interactions_for};
-use crate::life::{MoodletKind, Moodlets};
+use crate::life::{MoodletKind, Moodlets, Trait};
 use crate::sim::{HouseholdMember, Sim};
+use crate::simbody::OutfitKind;
 
 pub struct LaundryPlugin;
 
@@ -22,8 +25,8 @@ impl Plugin for LaundryPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Laundry>()
             .init_resource::<PendingLaundry>()
-            .add_message::<DropClothes>()
-            .add_systems(Update, (drop_piles, gather_piles, requests, run_machines, board, restore).chain().run_if(in_state(PlayMode::Live)));
+            .add_message::<ChangedClothes>()
+            .add_systems(Update, (changes, gather_piles, requests, run_machines, board, restore).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -35,9 +38,17 @@ pub struct Laundry {
     pub waiting: u32,
     pub piles: usize,
     pub loads: HashMap<Entity, Load>,
-    /// Dryers and lines, and how many are free.
+    /// Dryers and lines, and how many are free; free washers.
     pub driers: usize,
     pub free_driers: usize,
+    pub free_washers: usize,
+    /// Until when clean laundry gives Fresh Clothing to those who dress (game minutes), and
+    /// whether it's Very Fresh; whether the last wash was in a fine machine.
+    pub fresh_until: f64,
+    pub very: bool,
+    fine_wash: bool,
+    /// The piles each Sim has left today (the day, and how many).
+    left_today: HashMap<Entity, (u32, u32)>,
 }
 
 /// A machine's load: running (until when, game minutes) or done.
@@ -51,14 +62,21 @@ pub enum Load {
 #[derive(Component)]
 pub struct ClothingPile;
 
-/// A Sim has changed out of their clothes (see `dressing`): perhaps they leave them lying.
+/// A Sim has changed their clothes (see `dressing`), from one outfit into another (none: their
+/// everyday clothes): perhaps leaving the old ones lying, perhaps into fresh ones.
 #[derive(Message, Clone, Copy)]
-pub struct DropClothes(pub Entity);
+pub struct ChangedClothes {
+    pub sim: Entity,
+    pub from: Option<OutfitKind>,
+    pub to: Option<OutfitKind>,
+}
 
 /// What a Sim has just done with the laundry (set by the interactions, handled here).
 #[derive(Component, Clone, Copy, Debug)]
 pub enum LaundryRequest {
     PickedUp(Entity),
+    /// Took the clothes out of the hamper, for a washer.
+    FromHamper,
     Wash(Entity),
     /// Took the wet clothes out of the washer, for the dryer or the line.
     Unload(Entity),
@@ -68,15 +86,25 @@ pub enum LaundryRequest {
     Fresh(Entity, bool),
 }
 
-/// The chance a change of clothes leaves a pile, and the most piles about at once.
-const PILE_CHANCE: f64 = 0.4;
-const MAX_PILES: usize = 8;
+/// The most piles a Sim leaves in a day, a slob's, and the chance a slob drops them by a hamper
+/// (the game's `kMaximumNumberOfClothingPilesPerSim`, `...PerSlob`, `kChanceSlobBehavior`).
+const PILES_A_DAY: u32 = 2;
+const SLOB_PILES_A_DAY: u32 = 4;
+const SLOB_DROPS: f64 = 0.5;
+/// What a hamper holds (the game's `kCapacity`), and how near it must be (in the room).
+const HAMPER_HOLDS: u32 = 16;
+const HAMPER_REACH: f32 = 6.0;
 /// How many clothes make a load worth washing, without being asked.
 pub const LOAD: u32 = 4;
-/// How long the washer, the dryer and the line take (game minutes).
-const WASH_MINUTES: f64 = 60.0;
-const DRY_MINUTES: f64 = 60.0;
-const LINE_MINUTES: f64 = 180.0;
+/// How long the washer, the dryer and the line take (the game's `kTimeToWashNormal`, `DryTime`,
+/// the line's `kDryTime`), and how long the laundry keeps giving Fresh Clothing
+/// (`FreshClothingBuffTimeInHrs`), in game minutes.
+const WASH_MINUTES: f64 = 30.0;
+const DRY_MINUTES: f64 = 10.0;
+const LINE_MINUTES: f64 = 30.0;
+const FRESH_MINUTES: f64 = 12.0 * 60.0;
+/// The price from which a washer or dryer is a fine one (both: Very Fresh Clothing).
+const FINE_PRICE: i32 = 1000;
 /// The most piles gathered up on the way to the washer.
 const GATHER: usize = 4;
 
@@ -87,6 +115,7 @@ impl Laundry {
         let load = self.loads.get(&target).copied();
         match special {
             Special::DoLaundry => load.is_none() && self.waiting as usize + self.piles > 0,
+            Special::EmptyHamper => self.waiting > 0 && self.free_washers > 0,
             Special::MoveLaundry => load == Some(Load::Done) && (self.driers == 0 || self.free_driers > 0),
             Special::EmptyDryer => load == Some(Load::Done),
             Special::LoadDryer => kind != ObjectKind::Washer && load.is_none(),
@@ -97,7 +126,7 @@ impl Laundry {
     /// Whether a Sim would see to it of their own accord.
     pub fn worth_doing(&self, special: Special) -> bool {
         match special {
-            Special::DoLaundry => self.waiting as usize + self.piles >= LOAD as usize,
+            Special::DoLaundry | Special::EmptyHamper => self.waiting as usize + self.piles >= LOAD as usize,
             Special::LoadDryer => false,
             _ => true,
         }
@@ -109,36 +138,63 @@ fn machine(kind: ObjectKind) -> bool {
     matches!(kind, ObjectKind::Washer | ObjectKind::Dryer | ObjectKind::Clothesline)
 }
 
-/// A change of clothes at home, where there's a washer, may leave the old ones on the floor.
+/// A change of clothes at home: out of everyday clothes indoors, perhaps a pile on the floor (or
+/// into the hamper); into clean ones while the laundry's fresh, Fresh Clothing; into nothing or
+/// a swimsuit, the fresh clothes off.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
-fn drop_piles(
+fn changes(
     mut commands: Commands,
-    mut dropped: MessageReader<DropClothes>,
-    sims: Query<(&Sim, &Transform), (With<HouseholdMember>, Without<crate::visit::OnLot>, Without<crate::swim::Swimming>)>,
-    objects: Query<&GameObject>,
-    piles: Query<(), With<ClothingPile>>,
+    clock: Res<GameClock>,
+    mut changed: MessageReader<ChangedClothes>,
+    mut laundry: ResMut<Laundry>,
+    mut sims: Query<(&Sim, &Transform, &mut Moodlets), (With<HouseholdMember>, Without<crate::visit::OnLot>, Without<crate::swim::Swimming>)>,
+    objects: Query<(&GameObject, &Transform)>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
     (data, catalog, mut assets): (Res<crate::baked::Baked>, Res<crate::loading::Catalog>, ResMut<crate::objects::ObjectAssets>),
     (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
 ) {
-    let mut count = piles.iter().count();
     let mut rng = rand::rng();
-    for d in dropped.read() {
-        let Ok((sim, tf)) = sims.get(d.0) else {
-            debug!("clothes changed, not by someone at home");
+    let day = clock.day();
+    for c in changed.read() {
+        let Ok((sim, tf, mut moodlets)) = sims.get_mut(c.sim) else { continue };
+        // Into clean clothes, or out of them.
+        let dressed = |o: Option<OutfitKind>| matches!(o, None | Some(OutfitKind::Formal | OutfitKind::Athletic | OutfitKind::Career | OutfitKind::Sleepwear | OutfitKind::Outerwear));
+        if matches!(c.to, Some(OutfitKind::Naked | OutfitKind::Swimwear)) {
+            moodlets.remove(MoodletKind::FreshClothing);
+            moodlets.remove(MoodletKind::VeryFreshClothing);
+        } else if dressed(c.to) && clock.minutes < laundry.fresh_until && !moodlets.has(MoodletKind::Smelly) {
+            moodlets.add(if laundry.very { MoodletKind::VeryFreshClothing } else { MoodletKind::FreshClothing }, clock.minutes);
+        }
+        // Out of the day's clothes (not out of nightwear, a swimsuit or nothing), indoors at
+        // home where the laundry's done.
+        let taken_off = !matches!(c.from, Some(OutfitKind::Naked | OutfitKind::Sleepwear | OutfitKind::Swimwear));
+        // (In a room on the floor they're on: a bathroom upstairs over the porch is indoors.)
+        let indoors = building.as_deref().is_some_and(|b| b.room_at(b.level_at(tf.translation.y + 0.3), tf.translation).is_some_and(|k| k != s3bake::ROOM_OUTSIDE && k != s3bake::ROOM_PORCH));
+        if !taken_off || sim.age.is_little() || !indoors || !objects.iter().any(|(o, _)| machine(o.kind)) {
+            trace!("{}'s clothes not left: taken off {taken_off}, indoors {indoors}", sim.first);
             continue;
-        };
-        if sim.age.is_little() || count >= MAX_PILES || !objects.iter().any(|o| o.kind == ObjectKind::Washer) || !rng.random_bool(PILE_CHANCE) {
-            debug!("{} keeps their clothes off the floor ({count} piles; a washer: {})", sim.first, objects.iter().any(|o| o.kind == ObjectKind::Washer));
+        }
+        let slob = sim.traits.contains(&Trait::Slob);
+        let left = laundry.left_today.entry(c.sim).or_insert((day, 0));
+        if left.0 != day {
+            *left = (day, 0);
+        }
+        if left.1 >= if slob { SLOB_PILES_A_DAY } else { PILES_A_DAY } {
+            continue;
+        }
+        left.1 += 1;
+        // (Into a hamper in the room with room in it, unless a slob can't be bothered.)
+        let hampers = objects.iter().filter(|(o, t)| o.kind == ObjectKind::Hamper && t.translation.distance(tf.translation) < HAMPER_REACH && (t.translation.y - tf.translation.y).abs() < 1.5).count() as u32;
+        if hampers > 0 && laundry.waiting < hampers * HAMPER_HOLDS && !(slob && rng.random_bool(SLOB_DROPS)) {
+            debug!("{} puts their clothes in the hamper", sim.first);
+            laundry.waiting += 1;
             continue;
         }
         let ahead = tf.rotation * Vec3::Z;
         let at = tf.translation + ahead.with_y(0.0).normalize_or(Vec3::Z) * 0.35;
         let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
         match spawn_pile(&mut commands, &mut assets, &mut ctx, &catalog, at, rng.random_range(0.0..std::f32::consts::TAU)) {
-            Some(p) => {
-                debug!("{} leaves their clothes in a pile ({p})", sim.first);
-                count += 1;
-            }
+            Some(p) => debug!("{} leaves their clothes in a pile ({p})", sim.first),
             None => warn!("no clothing pile to leave"),
         }
     }
@@ -194,7 +250,6 @@ fn requests(
     mut sims: Query<(Entity, &Sim, &LaundryRequest, &Transform, &mut ActionQueue)>,
     objects: Query<(Entity, &GameObject, &Transform, Option<&Load>)>,
     piles: Query<(), With<ClothingPile>>,
-    mut household: Query<&mut Moodlets, With<HouseholdMember>>,
 ) {
     // (What's in a machine now: two Sims may have set out for the same one, and a machine seen
     // to this frame waits for the next.)
@@ -202,7 +257,7 @@ fn requests(
     for (me, sim, req, tf, mut queue) in &mut sims {
         commands.entity(me).remove::<LaundryRequest>();
         let machine = match *req {
-            LaundryRequest::PickedUp(_) => None,
+            LaundryRequest::PickedUp(_) | LaundryRequest::FromHamper => None,
             LaundryRequest::Wash(e) | LaundryRequest::Unload(e) | LaundryRequest::Dry(e) | LaundryRequest::Hang(e) | LaundryRequest::Fresh(e, _) => Some(e),
         };
         if machine.is_some_and(|m| touched.contains(&m)) {
@@ -217,9 +272,22 @@ fn requests(
                     laundry.waiting += 1;
                 }
             }
+            LaundryRequest::FromHamper => {
+                // (Off to the nearest free washer with them.)
+                let washer = objects
+                    .iter()
+                    .filter(|(_, o, _, load)| o.kind == ObjectKind::Washer && load.is_none())
+                    .min_by(|a, b| a.2.translation.distance(tf.translation).total_cmp(&b.2.translation.distance(tf.translation)));
+                if let Some((w, ..)) = washer
+                    && let Some(def) = interactions_for(ObjectKind::Washer).iter().position(|d| d.special == Special::DoLaundry)
+                {
+                    queue.0.push_front(Action::new("Do Laundry", ActionKind::Object { target: w, def }, true));
+                }
+            }
             LaundryRequest::Wash(washer) if load(washer).is_none() => {
                 info!("{} puts on a load of laundry", sim.first);
                 laundry.waiting = 0;
+                laundry.fine_wash = objects.get(washer).is_ok_and(|o| o.1.price >= FINE_PRICE);
                 commands.entity(washer).insert(Load::Running(clock.minutes + WASH_MINUTES));
             }
             LaundryRequest::Unload(washer) if load(washer) == Some(Load::Done) => {
@@ -238,7 +306,7 @@ fn requests(
                         let label = if kind == ObjectKind::Clothesline { "Hang Clothes" } else { "Load the Dryer" };
                         queue.0.push_front(Action::new(label, ActionKind::Object { target: to, def }, true));
                     }
-                    None => fresh(&mut household, &clock, false),
+                    None => fresh(&mut laundry, &clock, false),
                 }
             }
             LaundryRequest::Dry(drier) if load(drier).is_none() => {
@@ -247,23 +315,22 @@ fn requests(
             LaundryRequest::Hang(line) if load(line).is_none() => {
                 commands.entity(line).insert(Load::Running(clock.minutes + LINE_MINUTES));
             }
-            LaundryRequest::Fresh(drier, very) if load(drier) == Some(Load::Done) => {
-                info!("{} takes the laundry out: the household's in {} clothes", sim.first, if very { "line-dried" } else { "fresh" });
+            LaundryRequest::Fresh(drier, line) if load(drier) == Some(Load::Done) => {
+                let very = line || (laundry.fine_wash && objects.get(drier).is_ok_and(|o| o.1.price >= FINE_PRICE));
+                info!("{} takes the laundry out ({})", sim.first, if very { "very fresh" } else { "fresh" });
                 commands.entity(drier).remove::<Load>();
-                fresh(&mut household, &clock, very);
+                fresh(&mut laundry, &clock, very);
             }
             _ => {}
         }
     }
 }
 
-/// The household in fresh clothes (line-dried, very fresh), and no longer smelling of the old.
-fn fresh(household: &mut Query<&mut Moodlets, With<HouseholdMember>>, clock: &GameClock, very: bool) {
-    for mut m in household.iter_mut() {
-        m.remove(MoodletKind::FreshClothing);
-        m.remove(MoodletKind::VeryFreshClothing);
-        m.add(if very { MoodletKind::VeryFreshClothing } else { MoodletKind::FreshClothing }, clock.minutes);
-    }
+/// Clean laundry: Fresh Clothing (or Very Fresh) for whoever dresses in the next twelve hours
+/// (the game's `OnDryerCycleFinished`).
+fn fresh(laundry: &mut Laundry, clock: &GameClock, very: bool) {
+    laundry.very = if clock.minutes < laundry.fresh_until { laundry.very || very } else { very };
+    laundry.fresh_until = clock.minutes + FRESH_MINUTES;
 }
 
 /// Washers, dryers and lines finish their loads in time.
@@ -284,12 +351,16 @@ fn board(mut laundry: ResMut<Laundry>, objects: Query<(Entity, &GameObject, Opti
     l.loads.clear();
     l.driers = 0;
     l.free_driers = 0;
+    l.free_washers = 0;
     for (e, o, load) in &objects {
         if !machine(o.kind) {
             continue;
         }
         if let Some(load) = load {
             l.loads.insert(e, *load);
+        }
+        if o.kind == ObjectKind::Washer {
+            l.free_washers += usize::from(load.is_none());
         }
         if matches!(o.kind, ObjectKind::Dryer | ObjectKind::Clothesline) {
             l.driers += 1;
@@ -305,6 +376,12 @@ pub struct SavedLaundry {
     pub waiting: u32,
     pub piles: Vec<[f32; 3]>,
     pub loads: Vec<((u32, u32, u64), [f32; 3], Option<f64>)>,
+    /// How long the clean laundry has left to give Fresh Clothing (game minutes), and whether
+    /// Very Fresh.
+    #[serde(default)]
+    pub fresh_left: f64,
+    #[serde(default)]
+    pub very: bool,
 }
 
 /// A loaded game's laundry, put back once the house's furniture is there.
@@ -340,6 +417,8 @@ fn restore(
     }
     let Some(saved) = pending.0.take() else { return };
     laundry.waiting = saved.waiting;
+    laundry.fresh_until = clock.minutes + saved.fresh_left;
+    laundry.very = saved.very;
     for (objd, at, left) in &saved.loads {
         if let Some((e, ..)) = objects.iter().find(|(_, o, tf)| o.objd == *objd && tf.translation.distance(Vec3::from(*at)) < 0.2) {
             commands.entity(e).insert(left.map_or(Load::Done, |m| Load::Running(clock.minutes + m)));
@@ -363,6 +442,8 @@ pub struct LaundrySave<'w, 's> {
 impl LaundrySave<'_, '_> {
     pub fn saved(&self) -> SavedLaundry {
         SavedLaundry {
+            fresh_left: (self.laundry.fresh_until - self.clock.minutes).max(0.0),
+            very: self.laundry.very,
             waiting: self.laundry.waiting,
             piles: self.piles.iter().map(|tf| tf.translation.to_array()).collect(),
             loads: self
@@ -387,9 +468,31 @@ mod tests {
         assert_eq!(k("Sims3.Gameplay.Objects.Appliances.WashingMachineCheap", "washerCheap"), ObjectKind::Washer);
         assert_eq!(k("Sims3.Gameplay.Objects.Appliances.WashingMachineExpensive", "washerExpensive"), ObjectKind::Washer);
         assert_eq!(k("Sims3.Gameplay.Objects.Appliances.DryerCheap", "dryerCheap"), ObjectKind::Dryer);
+        assert_eq!(k("Sims3.Gameplay.Objects.Appliances.Mimics.WasherVenueLaundry", "washerVenueLaundry"), ObjectKind::Washer);
+        assert_eq!(k("Sims3.Gameplay.Objects.Appliances.Mimics.DryerVenueLaundry", "dryerVenueLaundry"), ObjectKind::Dryer);
+        assert_eq!(k("Sims3.Gameplay.Objects.Appliances.Mimics.RefrigeratorPatio", "RefrigeratorPatio"), ObjectKind::Fridge);
         assert_eq!(k("Sims3.Gameplay.Objects.Appliances.Clothesline", "clothesLineStandard4x1"), ObjectKind::Clothesline);
         assert_eq!(k("Sims3.Gameplay.Objects.Miscellaneous.ClothingPileDry", "clothingPileDry"), ObjectKind::ClothingPile);
         assert_eq!(k("Sims3.Gameplay.Objects.Miscellaneous.WasteChute", "trashChute"), ObjectKind::WasteChute);
+        assert_eq!(k("Sims3.Gameplay.Objects.Miscellaneous.Hamper", "hamperStandard"), ObjectKind::Hamper);
+    }
+
+    #[test]
+    fn clean_laundry_stays_fresh_for_half_a_day() {
+        let mut l = Laundry::default();
+        let mut clock = GameClock::default();
+        clock.minutes = 100.0;
+        fresh(&mut l, &clock, false);
+        assert_eq!(l.fresh_until, 100.0 + FRESH_MINUTES);
+        assert!(!l.very);
+        // (A line-dried load while the last is still fresh: very fresh, and fresh for longer.)
+        clock.minutes = 200.0;
+        fresh(&mut l, &clock, true);
+        assert!(l.very && l.fresh_until == 200.0 + FRESH_MINUTES);
+        // (Once it's worn off, the next is as it is.)
+        clock.minutes = 2000.0;
+        fresh(&mut l, &clock, false);
+        assert!(!l.very);
     }
 
     #[test]

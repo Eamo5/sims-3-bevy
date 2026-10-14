@@ -76,12 +76,12 @@ fn spin(
     mut commands: Commands,
     time: Res<Time>,
     clock: Res<GameClock>,
-    mut sims: Query<(Entity, &Sim, &mut ClothesSpin, &mut SimAnim, Option<&ClipPlayer>)>,
+    mut sims: Query<(Entity, &Sim, &mut ClothesSpin, &mut SimAnim, Option<&ClipPlayer>, Option<&Wearing>)>,
     mut sparkles: MessageWriter<crate::effects::SpinSparkle>,
-    mut dropped: MessageWriter<crate::laundry::DropClothes>,
+    mut changed: MessageWriter<crate::laundry::ChangedClothes>,
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed];
-    for (e, sim, mut s, mut anim, player) in &mut sims {
+    for (e, sim, mut s, mut anim, player, wearing) in &mut sims {
         // (Stood still for it.)
         if anim.pose == Pose::Walk {
             anim.pose = Pose::Stand;
@@ -97,10 +97,8 @@ fn spin(
         if !s.swapped && s.t >= SWAP_AT {
             s.swapped = true;
             put_on(&mut commands.entity(e), s.to, s.chosen);
-            // (Out of their everyday clothes: perhaps left on the floor, see `laundry`.)
-            if s.to.is_some() {
-                dropped.write(crate::laundry::DropClothes(e));
-            }
+            // (The old clothes perhaps left on the floor, and fresh ones on: see `laundry`.)
+            changed.write(crate::laundry::ChangedClothes { sim: e, from: wearing.map(|w| w.0).filter(|k| *k != OutfitKind::Everyday), to: s.to });
         }
         let len = player.filter(|p| p.name.contains("clothesChange")).and_then(|p| p.clip.as_ref()).map_or(1.5, |c| c.duration);
         if s.t >= len.max(SWAP_AT + 0.05).min(MAX_SECS) {

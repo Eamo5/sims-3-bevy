@@ -427,11 +427,14 @@ installation is unreachable.
   and then shows what they make of it with the game's reactions, by its price and their taste
   (Snobs and the Artistic love fine art, Snobs sniff at cheap art, those who can't stand art
   hate it all and never look of their own accord).
-- **Laundry** (Generations), with the game's clips: where there's a washing machine, a change of
-  clothes at home now and then leaves a pile of dirty clothes, picked up by the Neat at once and
-  others in time. Once there's a load, someone does the laundry (gathering the piles first): an
-  hour in the washer, then into the dryer (Fresh Clothing for the household once it's taken
-  out) or onto the clothesline (Very Fresh). Kept in saves.
+- **Laundry** (Generations), as the game's `LaundryManager` has it, with its clips: where the
+  laundry's done, Sims taking off their day's clothes indoors leave them in a pile (or in a
+  hamper in the room; slobs drop them anyway, often), two a day each at most (a slob's four).
+  Piles are picked up by the Neat at once, others in time; once there's a load, someone does
+  the laundry (gathering the piles first): half an hour in the washer, ten minutes in the dryer
+  or half an hour on the line. For twelve hours after, whoever dresses is in Fresh Clothing
+  (Very Fresh, line-dried or from fine machines); a swimsuit or the bath takes it off, smelling
+  does too. Kept in saves.
 - **The future's kitchen**: a house with only the Food Synthesizer (Into the Future) eats from
   it, a plate made at the touch of its screen; apartments' trash goes down the trash chute.
 - **Puddles**, as the game's: a broken shower, tub, sink or toilet sprays water and spills a

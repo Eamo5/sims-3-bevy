@@ -167,6 +167,8 @@ pub enum ObjectKind {
     Dryer,
     Clothesline,
     ClothingPile,
+    /// A clothes hamper: where clothes taken off by it go, for the laundry.
+    Hamper,
     /// The Teleporter (a lifetime reward): to a community lot at once.
     Teleporter,
     /// The Collection Helper (a lifetime reward): collectibles shown in Map View.
@@ -324,14 +326,16 @@ impl ObjectKind {
             Self::TrashCompactor
         } else if has("miscellaneous.wastechute") {
             Self::WasteChute
-        } else if has("appliances.washingmachine") {
+        } else if has("appliances.washingmachine") || has("appliances.mimics.washer") {
             Self::Washer
-        } else if has("appliances.dryer") {
+        } else if has("appliances.dryer") || has("appliances.mimics.dryer") {
             Self::Dryer
         } else if has("appliances.clothesline") {
             Self::Clothesline
         } else if has("miscellaneous.clothingpiledry") {
             Self::ClothingPile
+        } else if has("miscellaneous.hamper") {
+            Self::Hamper
         } else if has("rewards.collectionhelper") {
             Self::CollectionHelper
         } else if has("rewards.teleporter") {
@@ -392,7 +396,7 @@ impl ObjectKind {
             Self::Mailbox
         } else if has("miscellaneous.newspaper") {
             Self::Newspaper
-        } else if has("fridge") {
+        } else if has("fridge") || has("appliances.mimics.refrigerator") {
             Self::Fridge
         } else if has("microwave") {
             Self::Microwave
@@ -459,6 +463,7 @@ impl ObjectKind {
             Self::AlarmClock => "Electronics",
             Self::TrashCan | Self::TrashCompactor | Self::WasteChute | Self::Candle | Self::ClothingPile => "Misc",
             Self::Washer | Self::Dryer | Self::Clothesline => "Appliances",
+            Self::Hamper => "Misc",
             Self::Dishwasher => "Appliances",
             Self::FishBowl => "Decor",
             Self::BedDouble | Self::BedSingle => "Beds",
@@ -586,10 +591,10 @@ impl GameObject {
         }
         // (A pool ladder and a diving board face into the water: Sims stand behind them, on the
         // side.)
-        // (Art's looked at from a step back.)
+        // (Art's looked at from two metres off, as the game's `MinDistanceToView`.)
         let ahead = match self.kind {
             ObjectKind::PoolLadder | ObjectKind::DivingBoard => -(self.half.y + 0.45),
-            ObjectKind::Art => self.half.y + 0.9,
+            ObjectKind::Art => self.half.y + 2.0,
             _ => self.half.y + 0.45,
         };
         let local = Vec3::new(self.center.x, 0.0, self.center.y + ahead);
@@ -609,15 +614,18 @@ impl GameObject {
             ObjectKind::Bathtub | ObjectKind::ShowerTub => vec![Vec2::new(c.x + h.x + 0.45, c.y), Vec2::new(c.x, c.y + h.y + 0.45), Vec2::new(c.x, c.y - h.y - 0.45)],
             ObjectKind::PicnicTable => return Self::picnic_places(tf)[1..].iter().map(|p| p.0).collect(),
             ObjectKind::BedSingle | ObjectKind::BedDouble => Self::bed_sides(self.center, self.half).to_vec(),
-            // (Art from wherever it can be seen: a sculpture in a flower bed from its sides or
-            // behind.)
+            // (Art from wherever it can be seen, two or three metres off: a sculpture in a flower
+            // bed from its sides or behind; in a narrow room, nearer.)
             ObjectKind::Art => vec![
+                Vec2::new(c.x - h.x - 1.4, c.y + h.y + 1.4),
+                Vec2::new(c.x + h.x + 1.4, c.y + h.y + 1.4),
+                Vec2::new(c.x, c.y + h.y + 2.8),
+                Vec2::new(c.x + h.x + 2.0, c.y),
+                Vec2::new(c.x - h.x - 2.0, c.y),
+                Vec2::new(c.x, c.y - h.y - 2.0),
+                Vec2::new(c.x, c.y + h.y + 1.0),
                 Vec2::new(c.x - h.x - 0.7, c.y + h.y + 0.7),
                 Vec2::new(c.x + h.x + 0.7, c.y + h.y + 0.7),
-                Vec2::new(c.x + h.x + 0.9, c.y),
-                Vec2::new(c.x - h.x - 0.9, c.y),
-                Vec2::new(c.x, c.y - h.y - 0.9),
-                Vec2::new(c.x, c.y + h.y + 1.6),
             ],
             _ => Vec::new(),
         };
@@ -824,6 +832,8 @@ pub enum Special {
     /// taken out of the washer, put in the dryer (or on the line), and the dry clothes out.
     PickUpClothes,
     DoLaundry,
+    /// The clothes taken out of the hamper, for a washer.
+    EmptyHamper,
     MoveLaundry,
     LoadDryer,
     EmptyDryer,
@@ -1056,6 +1066,7 @@ static TRASH: [InteractionDef; 2] =
         InteractionDef { autonomous: false, special: Special::DropTrash, ..def("Throw Out Trash", 3.0, N, Pose::Use) },
     ];
 static CLOTHING_PILE: [InteractionDef; 1] = [InteractionDef { special: Special::PickUpClothes, ..def("Pick Up", 1.5, [0.0, 0.0, 0.0, 0.0, -1.0, 0.0], Pose::Use) }];
+static HAMPER: [InteractionDef; 1] = [InteractionDef { special: Special::EmptyHamper, ..def("Do Laundry", 1.5, N, Pose::Use) }];
 static WASHER: [InteractionDef; 2] = [
     InteractionDef { special: Special::DoLaundry, ..def("Do Laundry", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 0.0], Pose::Use) },
     InteractionDef { special: Special::MoveLaundry, ..def("Dry Clothes", 2.0, N, Pose::Use) },
@@ -1597,6 +1608,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Load Dishes" => A::new(None, &["a2o_dishwasher_use_x"]),
         "Throw Out Trash" if kind == ObjectKind::WasteChute => A::new(None, &["a2o_wasteChute_dispose_x"]),
         "Pick Up" if kind == ObjectKind::ClothingPile => A::new(None, &["a2o_clothingPile_get_floor_x"]),
+        "Do Laundry" if kind == ObjectKind::Hamper => A::new(None, &["a2o_clothingPile_get_hamper_x"]),
         "Do Laundry" => A::new(None, &["a2o_washMachine_operate_x"]),
         "Dry Clothes" => A::new(None, &["a2o_washMachine_empty_easy_x"]),
         "Load the Dryer" => A::new(None, &["a2o_dryer_operate_x"]),
@@ -1914,6 +1926,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Dryer => &DRYER,
         ObjectKind::Clothesline => &CLOTHESLINE,
         ObjectKind::ClothingPile => &CLOTHING_PILE,
+        ObjectKind::Hamper => &HAMPER,
         ObjectKind::Dishwasher => &DISHWASHER,
         ObjectKind::FishBowl => &FISHBOWL,
         ObjectKind::Telescope => &TELESCOPE,
@@ -3547,6 +3560,9 @@ pub(crate) fn run_actions(
                                         Special::DoLaundry => {
                                             commands.entity(me).insert(crate::laundry::LaundryRequest::Wash(*target));
                                         }
+                                        Special::EmptyHamper => {
+                                            commands.entity(me).insert(crate::laundry::LaundryRequest::FromHamper);
+                                        }
                                         Special::MoveLaundry => {
                                             commands.entity(me).insert(crate::laundry::LaundryRequest::Unload(*target));
                                         }
@@ -4578,7 +4594,7 @@ fn autonomy(
                     score = if bills_due { 25.0 } else { 0.0 };
                 }
                 // The laundry, when there's some to do: a chore like the dishes.
-                if matches!(d.special, Special::PickUpClothes | Special::DoLaundry | Special::MoveLaundry | Special::LoadDryer | Special::EmptyDryer) {
+                if matches!(d.special, Special::PickUpClothes | Special::DoLaundry | Special::EmptyHamper | Special::MoveLaundry | Special::LoadDryer | Special::EmptyDryer) {
                     // (Grown-ups' work: the game's clips are theirs.)
                     if !household.contains(me) || !sim.age.is_grown() || sim.age == Age::Child || used.0.is_some() || !laundry.offers(d.special, obj.kind, oe) || !laundry.worth_doing(d.special) {
                         continue;

@@ -942,6 +942,11 @@ fn need_moodlets(mut q: Query<(&Motives, &Sim, &mut Moodlets)>) {
         ml.set_need(MoodletKind::Tired, (-70.0..-25.0).contains(&v[ENERGY]));
         ml.set_need(MoodletKind::Lonely, v[SOCIAL] < -30.0 && !sim.traits.contains(&Trait::Loner));
         ml.set_need(MoodletKind::Smelly, v[HYGIENE] < -35.0 && !sim.traits.contains(&Trait::Slob));
+        // (Smelly, clean clothes don't help: the game's `BuffSmelly` takes Fresh Clothing away.)
+        if ml.has(MoodletKind::Smelly) {
+            ml.remove(MoodletKind::FreshClothing);
+            ml.remove(MoodletKind::VeryFreshClothing);
+        }
         ml.set_need(MoodletKind::Bored, v[FUN] < -35.0);
     }
 }

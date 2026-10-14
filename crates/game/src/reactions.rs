@@ -13,7 +13,8 @@
 //!   singed.
 //!
 //! A reaction waits for its Sim to be standing free (between things, as the game's
-//! `AfterInteraction`), for a while, then lapses.
+//! `AfterInteraction`), for a while, then lapses. Sitting at a table or on a sofa, they react
+//! where they sit, with the game's seated clips, and carry on.
 
 use std::collections::{HashMap, HashSet};
 
@@ -25,7 +26,7 @@ use rand::seq::IndexedRandom;
 use crate::PlayMode;
 use crate::anim::{ActionClip, ClipLibrary, FaceOverlay};
 use crate::clock::GameClock;
-use crate::interact::{Action, ActionKind, ActionQueue, Phase};
+use crate::interact::{Action, ActionKind, ActionQueue, ObjectKind, Phase};
 use crate::life::{MoodletKind, Moodlets, Trait};
 use crate::nav::{Floor, NavGrid, UpperFloors};
 use crate::sim::{Age, HouseholdMember, Pose, Sim, SimAnim};
@@ -36,7 +37,7 @@ pub struct ReactionsPlugin;
 
 impl Plugin for ReactionsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<Spectacle>().add_systems(Update, (smelly_about, accidents, deaths, on_moodlets, play, turn).chain().run_if(in_state(PlayMode::Live)));
+        app.add_message::<Spectacle>().add_systems(Update, (smelly_about, accidents, deaths, on_moodlets, play, turn, seated).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -59,6 +60,16 @@ pub struct Pending {
 /// Turning to face what they react to.
 #[derive(Component)]
 struct Facing(Quat);
+
+/// A reaction played sitting down, over what they're doing there: the clip it took the place
+/// of (put back after), the action it was over, and how long it has left (seconds at the
+/// game's pace).
+#[derive(Component)]
+struct SeatedReaction {
+    prev: Option<ActionClip>,
+    label: String,
+    left: f32,
+}
 
 /// How far off those who see something react (the game's `kDistanceToReact`).
 const REACT_RANGE: f32 = 10.0;
@@ -286,16 +297,26 @@ fn on_moodlets(mut commands: Commands, clock: Res<GameClock>, mut had: Local<Has
 }
 
 /// A reaction's clips for a Sim of an age (a child's are the `c_` ones), if the game has them.
-fn clips_for(table: &[(String, Vec<s3bake::gamedata::IdleAnim>)], kind: &str, sim: &Sim, known: &HashSet<String>, rng: &mut impl Rng) -> Option<Vec<String>> {
+fn clips_for(table: &[(String, Vec<s3bake::gamedata::IdleAnim>)], kind: &str, sim: &Sim, seated: bool, known: &HashSet<String>, rng: &mut impl Rng) -> Option<Vec<String>> {
     let letter = crate::idles::age_letter(sim.age)?;
     let child = sim.age == Age::Child;
+    // (Sitting down: the game's seated version, `_sitting_x` for a standing one's `_x` or
+    // `_standing_x`.)
+    let sitting = |c: String| -> String {
+        if !seated {
+            return c;
+        }
+        let l = c.to_ascii_lowercase();
+        let base = l.strip_suffix("_standing_x").or_else(|| l.strip_suffix("_x")).unwrap_or(&l);
+        format!("{base}_sitting_x")
+    };
     let fitting: Vec<(Vec<String>, u32)> = table
         .iter()
         .filter(|g| g.0.eq_ignore_ascii_case(kind))
         .flat_map(|g| g.1.iter())
         .filter(|a| a.ages.is_empty() || a.ages.iter().any(|x| x == letter))
         .filter_map(|a| {
-            let clips: Vec<String> = a.clips.iter().map(|c| if child && c.starts_with("a_") { format!("c_{}", &c[2..]) } else { c.clone() }).collect();
+            let clips: Vec<String> = a.clips.iter().map(|c| sitting(if child && c.starts_with("a_") { format!("c_{}", &c[2..]) } else { c.clone() })).collect();
             (!clips.is_empty() && clips.iter().all(|c| known.contains(&c.to_ascii_lowercase()))).then_some((clips, a.probability.max(1)))
         })
         .collect();
@@ -313,8 +334,16 @@ fn play(
     mut lib: ResMut<ClipLibrary>,
     mut sims: Query<
         (Entity, &Sim, &mut ActionQueue, &SimAnim, &Transform, &Pending, Option<&ActionClip>, Has<crate::idles::Idling>, Option<&crate::nav::PathFollow>, &InheritedVisibility),
-        (Without<crate::swim::Swimming>, Without<crate::death::Dying>, Without<crate::fire::OnFire>, Without<crate::fire::Panicking>, Without<crate::dressing::ClothesSpin>),
+        (
+            Without<crate::swim::Swimming>,
+            Without<crate::death::Dying>,
+            Without<crate::fire::OnFire>,
+            Without<crate::fire::Panicking>,
+            Without<crate::dressing::ClothesSpin>,
+            Without<SeatedReaction>,
+        ),
     >,
+    objects: Query<&crate::interact::GameObject>,
     (mut known, mut names): (Local<Option<HashSet<String>>>, Local<HashMap<String, &'static [&'static str]>>),
 ) {
     let Some(ui) = ui else { return };
@@ -323,6 +352,27 @@ fn play(
     for (e, sim, mut queue, anim, tf, p, clip, idling, path, shown) in &mut sims {
         if clock.minutes > p.until || !shown.get() {
             commands.entity(e).remove::<Pending>();
+            continue;
+        }
+        // (Sitting at a table or on a sofa: reacted to where they sit.)
+        let seat = queue.0.front().filter(|a| matches!(a.phase, Phase::Running(_)) && anim.pose == Pose::Sit).and_then(|a| match a.kind {
+            ActionKind::Object { target, .. } => objects
+                .get(target)
+                .ok()
+                .filter(|o| matches!(o.kind, ObjectKind::Chair | ObjectKind::Stool | ObjectKind::Sofa | ObjectKind::PicnicTable))
+                .map(|_| a.label.clone()),
+            _ => None,
+        });
+        if let Some(label) = seat {
+            let all: Vec<String> = p.kinds.iter().filter_map(|k| clips_for(&ui.data.idles.reactions, k, sim, true, known, &mut rng)).flatten().collect();
+            let secs: f32 = all.iter().filter_map(|c| lib.get(&data, c)).map(|c| c.duration).sum();
+            commands.entity(e).remove::<Pending>();
+            if all.is_empty() || secs <= 0.0 {
+                continue;
+            }
+            let clips: &'static [&'static str] = *names.entry(all.join(",")).or_insert_with(|| Box::leak(all.iter().map(|c| &*Box::leak(c.clone().into_boxed_str())).collect::<Vec<_>>().into_boxed_slice()));
+            debug!("{} reacts where they sit: {} ({:.1} s)", sim.first, all.join(", "), secs);
+            commands.entity(e).remove::<FaceOverlay>().insert((ActionClip::steps(clips[0], &clips[1..], &[]), SeatedReaction { prev: clip.cloned(), label, left: secs }));
             continue;
         }
         // (Standing, between things.)
@@ -340,7 +390,7 @@ fn play(
             continue;
         }
         commands.entity(e).remove::<Pending>();
-        let all: Vec<String> = p.kinds.iter().filter_map(|k| clips_for(&ui.data.idles.reactions, k, sim, known, &mut rng)).flatten().collect();
+        let all: Vec<String> = p.kinds.iter().filter_map(|k| clips_for(&ui.data.idles.reactions, k, sim, false, known, &mut rng)).flatten().collect();
         let secs: f32 = all.iter().filter_map(|c| lib.get(&data, c)).map(|c| c.duration).sum();
         if all.is_empty() || secs <= 0.0 {
             continue;
@@ -354,6 +404,25 @@ fn play(
             if d.xz().length() > 0.2 {
                 commands.entity(e).insert(Facing(Quat::from_rotation_y(d.x.atan2(d.z))));
             }
+        }
+    }
+}
+
+/// A seated reaction over: back to what they were doing there (if they're still at it).
+fn seated(mut commands: Commands, time: Res<Time>, clock: Res<GameClock>, mut sims: Query<(Entity, &mut SeatedReaction, &ActionQueue, &SimAnim)>) {
+    let dt = time.delta_secs().min(0.1) * crate::clock::SPEED_RATES[clock.speed];
+    for (e, mut s, queue, anim) in &mut sims {
+        s.left -= dt;
+        let still = anim.pose == Pose::Sit && queue.0.front().is_some_and(|a| a.label == s.label && matches!(a.phase, Phase::Running(_)));
+        if s.left > 0.0 && still {
+            continue;
+        }
+        commands.entity(e).remove::<SeatedReaction>();
+        if still {
+            match s.prev.take() {
+                Some(c) => commands.entity(e).insert(c),
+                None => commands.entity(e).remove::<ActionClip>(),
+            };
         }
     }
 }
