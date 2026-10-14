@@ -23,7 +23,7 @@ impl Plugin for BuildingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NearbyLots>().init_resource::<WallMode>().add_message::<PoolChanged>().add_systems(
             Update,
-            (follow_selected_floor, view_level_keys, camera_to_floor, building_visibility, shell_visibility, visit_floors, bulldozed_lots, stream_nearby_lots, lamps_at_night, cut_openings)
+            (follow_selected_floor, view_level_keys, camera_to_floor, storey_of_furniture, building_visibility, shell_visibility, visit_floors, bulldozed_lots, stream_nearby_lots, lamps_at_night, cut_openings)
                 .chain()
                 .run_if(in_state(PlayMode::Live)),
         )
@@ -33,6 +33,20 @@ impl Plugin for BuildingPlugin {
         // (The lots shown went with the game: a game loaded after it, or a household changed to,
         // shows its own.)
         .add_systems(OnExit(crate::AppState::InGame), |mut nearby: ResMut<NearbyLots>| *nearby = NearbyLots::default());
+    }
+}
+
+/// Furniture put down on the lot without its storey known (the starter furniture, what's
+/// restored from a save): on the floor it stands on, so it's hidden with the floors above the
+/// one viewed (a basement looked into without the ground floor's furniture over it).
+fn storey_of_furniture(mut commands: Commands, building: Option<Res<ActiveBuilding>>, added: Query<(Entity, &Transform), (Added<crate::interact::GameObject>, Without<BuildingPiece>)>) {
+    let Some(b) = building else { return };
+    for (e, tf) in &added {
+        let l = b.local(tf.translation);
+        if l.x < 0.0 || l.y < 0.0 || l.x > b.data.width as f32 || l.y > b.data.depth as f32 {
+            continue;
+        }
+        commands.entity(e).insert(BuildingPiece { level: b.level_at_point(tf.translation) });
     }
 }
 
