@@ -311,6 +311,9 @@ pub struct SaveGame {
     /// Water on the floor.
     #[serde(default)]
     pub puddles: Vec<crate::puddles::SavedPuddle>,
+    /// The laundry: what's waiting, the piles, and the machines' loads.
+    #[serde(default)]
+    pub laundry: crate::laundry::SavedLaundry,
     pub version: u32,
     pub world: String,
     pub lot_index: usize,
@@ -768,6 +771,7 @@ fn save_game(
         Res<crate::familyinv::FamilyInventory>,
         Query<(&Transform, &crate::nav::Floor, &crate::puddles::Puddle)>,
     ),
+    laundry: crate::laundry::LaundrySave,
 ) {
     let new_file = save_as.read().count() > 0;
     let write = requests.read().count() > 0 || new_file;
@@ -864,6 +868,7 @@ fn save_game(
     let game = SaveGame {
         broken_objects: broken.iter().filter(|b| b.2).map(|(o, tf, _, charred, ..)| SavedBroken { objd: o.objd, position: tf.translation.to_array(), charred }).collect(),
         puddles: crate::puddles::saved(&clock, &puddles),
+        laundry: laundry.saved(),
         object_states: broken
             .iter()
             .filter(|(.., grime, unmade)| grime.is_some_and(|g| g.0 > 0.0) || *unmade)
@@ -1016,6 +1021,7 @@ pub(crate) fn apply_loaded_game(
     commands.insert_resource(PendingBroken(game.broken_objects.clone(), None));
     commands.insert_resource(PendingStates(game.object_states.clone(), None));
     commands.insert_resource(crate::puddles::PendingPuddles(game.puddles.clone()));
+    commands.insert_resource(crate::laundry::PendingLaundry::of(game.laundry.clone()));
     // A restored date is not a midnight tick, even when loading within a session.
     commands.insert_resource(crate::aging::AgingDay::default());
     if let Some(h) = household.as_mut() {

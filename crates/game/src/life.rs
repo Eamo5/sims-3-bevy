@@ -511,6 +511,8 @@ pub fn activity_affinity(traits: &[Trait], activity: &str) -> f32 {
             (Trait::Hydrophobic, "Take Shower" | "Take Bath") => 0.4,
             (Trait::Neat, "Take Shower" | "Take Bath" | "Wash Hands") => 1.4,
             (Trait::Childish, "Play Computer Games" | "Dance") => 1.4,
+            (Trait::Artistic | Trait::Snob, "View") => 2.0,
+            (Trait::CantStandArt, "View") => 0.0,
             _ => 1.0,
         };
     }
@@ -640,10 +642,13 @@ pub enum MoodletKind {
     // Reactions to those about them.
     Disgusted,
     Mourning,
+    // Laundry.
+    FreshClothing,
+    VeryFreshClothing,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 59] = {
+    pub const ALL: [MoodletKind; 61] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -652,7 +657,7 @@ impl MoodletKind {
             InLove, Heartbroken, JustMarried, NewHome, Birthday, WishFulfilled, Nauseous, Pregnant, NewBaby, GreatParty,
             LameParty, AwesomeParty, Scared, GreatDate, BadDate, Singed, DirtySurroundings, FilthySurroundings, GettingChilly,
             TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf, MintyBreath,
-            Disgusted, Mourning,
+            Disgusted, Mourning, FreshClothing, VeryFreshClothing,
         ]
     };
 
@@ -736,6 +741,8 @@ impl MoodletKind {
             MintyBreath => md("Minty Breath", "Fresh from brushing.", 5, 4.0),
             Disgusted => md("Disgusted", "Something around here really stinks!", -5, 0.25),
             Mourning => md("Mourning", "Someone close has passed away.", -50, 48.0),
+            FreshClothing => md("Fresh Clothing", "Clean clothes, fresh from the dryer.", 15, 16.0),
+            VeryFreshClothing => md("Very Fresh Clothing", "Clothes dried in the fresh air.", 25, 16.0),
         }
     }
 
@@ -807,6 +814,8 @@ impl MoodletKind {
             MintyBreath => ("MintyBreath", true),
             Disgusted => ("Disgusted", true),
             Mourning => ("Mourning", true),
+            FreshClothing => ("FreshClothing", true),
+            VeryFreshClothing => ("VeryFreshClothing", true),
         }
     }
 }

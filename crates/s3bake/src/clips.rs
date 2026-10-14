@@ -508,6 +508,18 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_trashPile_carry",
     "a2o_trashPile_drop_outdoors_x",
     "a2o_trashPile_drop_outdoors_trashbag",
+    // Laundry: piles picked up, the washer, the dryer and the line.
+    "a2o_clothingPile_get_floor",
+    "a2o_washMachine_operate",
+    "a2o_washMachine_empty_easy",
+    "a2o_dryer_operate",
+    "a2o_dryer_empty_succeed",
+    "a2o_clothesLine_hang",
+    "a2o_clothesLine_remove",
+    // Down an apartment's trash chute.
+    "a2o_wasteChute_dispose_x",
+    "a2o_wasteChute_dispose_trashbag",
+    "a2o_wasteChute_dispose_trashchute",
     "a2o_dishwasher_repair_start_kneel",
     "a2o_dishwasher_repair_loopInspect",
     "a2o_sink_dishes_scrub",
@@ -569,6 +581,7 @@ pub const PROP_ACTORS: &[&str] = &[
     "newspaper",
     "newspaperRolled",
     "trashbag",
+    "clothesBag",
     "wrench",
     "firePitSkewer",
     "fireplaceLighter",
@@ -595,8 +608,8 @@ pub const PROP_ACTORS: &[&str] = &[
 ];
 
 /// Objects' own halves of clips whose actor isn't named for the object (the pool table's
-/// `_pool`, the drum kit's `_drumKit`).
-pub const OBJECT_ACTORS: &[&str] = &["pool", "arcadeClaw", "bull", "drumKit"];
+/// `_pool`, the drum kit's `_drumKit`, the waste chute's `_trashchute`).
+pub const OBJECT_ACTORS: &[&str] = &["pool", "arcadeClaw", "bull", "drumKit", "trashChute", "washer"];
 
 /// Whether a clip should be baked.
 pub fn wanted(name: &str) -> bool {

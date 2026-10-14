@@ -105,6 +105,8 @@ pub enum ObjectKind {
     Table,
     Light,
     Plant,
+    /// A painting or a sculpture: looked over, and liked or not.
+    Art,
     Decoration,
     /// A cooked group meal on its serving platter.
     Meal,
@@ -157,6 +159,14 @@ pub enum ObjectKind {
     Candle,
     /// A trash compactor: a trash can that holds three times as much.
     TrashCompactor,
+    /// An apartment's trash chute (Late Night): where the bag goes when there's no can outdoors.
+    WasteChute,
+    /// Laundry (Generations): the washer, the dryer, the clothesline, and a pile of dirty
+    /// clothes on the floor (see `laundry`).
+    Washer,
+    Dryer,
+    Clothesline,
+    ClothingPile,
     /// The Teleporter (a lifetime reward): to a community lot at once.
     Teleporter,
     /// The Collection Helper (a lifetime reward): collectibles shown in Map View.
@@ -312,6 +322,16 @@ impl ObjectKind {
             Self::Dishwasher
         } else if has("miscellaneous.trashcompactor") {
             Self::TrashCompactor
+        } else if has("miscellaneous.wastechute") {
+            Self::WasteChute
+        } else if has("appliances.washingmachine") {
+            Self::Washer
+        } else if has("appliances.dryer") {
+            Self::Dryer
+        } else if has("appliances.clothesline") {
+            Self::Clothesline
+        } else if has("miscellaneous.clothingpiledry") {
+            Self::ClothingPile
         } else if has("rewards.collectionhelper") {
             Self::CollectionHelper
         } else if has("rewards.teleporter") {
@@ -424,6 +444,8 @@ impl ObjectKind {
             Self::Light
         } else if has("flora") || n.contains("plant") || has("tree") {
             Self::Plant
+        } else if has("decorations") && is_art(&n) {
+            Self::Art
         } else if has("decorations") {
             Self::Decoration
         } else {
@@ -435,7 +457,8 @@ impl ObjectKind {
         match self {
             Self::Fridge | Self::Stove | Self::Microwave | Self::Grill | Self::HotBeverage | Self::FoodSynthesizer => "Appliances",
             Self::AlarmClock => "Electronics",
-            Self::TrashCan | Self::TrashCompactor | Self::Candle => "Misc",
+            Self::TrashCan | Self::TrashCompactor | Self::WasteChute | Self::Candle | Self::ClothingPile => "Misc",
+            Self::Washer | Self::Dryer | Self::Clothesline => "Appliances",
             Self::Dishwasher => "Appliances",
             Self::FishBowl => "Decor",
             Self::BedDouble | Self::BedSingle => "Beds",
@@ -477,7 +500,7 @@ impl ObjectKind {
             Self::Dresser => "Surfaces",
             Self::Table => "Surfaces",
             Self::Light => "Lighting",
-            Self::Plant | Self::Decoration => "Decor",
+            Self::Plant | Self::Decoration | Self::Art => "Decor",
             Self::Meal | Self::DirtyDishes | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
             Self::Other => "Misc",
@@ -563,7 +586,12 @@ impl GameObject {
         }
         // (A pool ladder and a diving board face into the water: Sims stand behind them, on the
         // side.)
-        let ahead = if matches!(self.kind, ObjectKind::PoolLadder | ObjectKind::DivingBoard) { -(self.half.y + 0.45) } else { self.half.y + 0.45 };
+        // (Art's looked at from a step back.)
+        let ahead = match self.kind {
+            ObjectKind::PoolLadder | ObjectKind::DivingBoard => -(self.half.y + 0.45),
+            ObjectKind::Art => self.half.y + 0.9,
+            _ => self.half.y + 0.45,
+        };
         let local = Vec3::new(self.center.x, 0.0, self.center.y + ahead);
         let p = tf.transform_point(local);
         Vec2::new(p.x, p.z)
@@ -581,6 +609,16 @@ impl GameObject {
             ObjectKind::Bathtub | ObjectKind::ShowerTub => vec![Vec2::new(c.x + h.x + 0.45, c.y), Vec2::new(c.x, c.y + h.y + 0.45), Vec2::new(c.x, c.y - h.y - 0.45)],
             ObjectKind::PicnicTable => return Self::picnic_places(tf)[1..].iter().map(|p| p.0).collect(),
             ObjectKind::BedSingle | ObjectKind::BedDouble => Self::bed_sides(self.center, self.half).to_vec(),
+            // (Art from wherever it can be seen: a sculpture in a flower bed from its sides or
+            // behind.)
+            ObjectKind::Art => vec![
+                Vec2::new(c.x - h.x - 0.7, c.y + h.y + 0.7),
+                Vec2::new(c.x + h.x + 0.7, c.y + h.y + 0.7),
+                Vec2::new(c.x + h.x + 0.9, c.y),
+                Vec2::new(c.x - h.x - 0.9, c.y),
+                Vec2::new(c.x, c.y - h.y - 0.9),
+                Vec2::new(c.x, c.y + h.y + 1.6),
+            ],
             _ => Vec::new(),
         };
         local
@@ -780,6 +818,15 @@ pub enum Special {
     ChangeAppearance,
     /// A plate of food from the food replicator.
     ReplicateFood,
+    /// Art looked over, then liked or not, by taste (`art_taste`).
+    ViewArt,
+    /// The laundry's steps (see `laundry`): a pile picked up, a load put on, the wet clothes
+    /// taken out of the washer, put in the dryer (or on the line), and the dry clothes out.
+    PickUpClothes,
+    DoLaundry,
+    MoveLaundry,
+    LoadDryer,
+    EmptyDryer,
     /// Off to a lot by the Teleporter (the menu's `ActionKind::Teleport`).
     Teleport,
     /// A new shape from the body sculptor (fitter, slimmer or fuller, by the interaction).
@@ -1008,6 +1055,22 @@ static TRASH: [InteractionDef; 2] =
         // (Where the bag goes, outdoors: never on the menu.)
         InteractionDef { autonomous: false, special: Special::DropTrash, ..def("Throw Out Trash", 3.0, N, Pose::Use) },
     ];
+static CLOTHING_PILE: [InteractionDef; 1] = [InteractionDef { special: Special::PickUpClothes, ..def("Pick Up", 1.5, [0.0, 0.0, 0.0, 0.0, -1.0, 0.0], Pose::Use) }];
+static WASHER: [InteractionDef; 2] = [
+    InteractionDef { special: Special::DoLaundry, ..def("Do Laundry", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 0.0], Pose::Use) },
+    InteractionDef { special: Special::MoveLaundry, ..def("Dry Clothes", 2.0, N, Pose::Use) },
+];
+static DRYER: [InteractionDef; 2] = [
+    // (From the washer: never on the menu.)
+    InteractionDef { autonomous: false, special: Special::LoadDryer, ..def("Load the Dryer", 2.0, N, Pose::Use) },
+    InteractionDef { special: Special::EmptyDryer, ..def("Empty Dryer", 2.0, N, Pose::Use) },
+];
+static CLOTHESLINE: [InteractionDef; 2] = [
+    InteractionDef { autonomous: false, special: Special::LoadDryer, ..def("Hang Clothes", 5.0, N, Pose::Use) },
+    InteractionDef { special: Special::EmptyDryer, ..def("Take Down Clothes", 4.0, N, Pose::Use) },
+];
+/// (Down the chute with it: never on the menu.)
+static WASTE_CHUTE: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::DropTrash, ..def("Throw Out Trash", 2.0, N, Pose::Use) }];
 static FISHBOWL: [InteractionDef; 2] = [
     InteractionDef { autonomous: false, special: Special::PlaceFish, ..def("Place Fish", 2.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::TakeFish, ..def("Take Fish", 2.0, N, Pose::Use) },
@@ -1204,6 +1267,8 @@ static SPRINKLER: [InteractionDef; 3] = [
 static TELEPORTER: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::Teleport, ..def("Teleport", 1.0, N, Pose::Use) }];
 static FOOD_REPLICATOR: [InteractionDef; 1] =
     [InteractionDef { special: Special::ReplicateFood, ..def("Replicate Food", 3.0, [6000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) }];
+/// (Art: looked over a while, for the fun of it.)
+static ART: [InteractionDef; 1] = [InteractionDef { special: Special::ViewArt, ..def("View", 10.0, [0.0, 0.0, 0.0, 0.0, 0.0, 70.0], Pose::Use) }];
 /// (A plate of whatever's programmed, as the replicator's: the screen tapped, a wait, and out.)
 static FOOD_SYNTHESIZER: [InteractionDef; 1] =
     [InteractionDef { special: Special::ReplicateFood, ..def("Synthesize Food", 4.0, [4500.0, 0.0, 0.0, 0.0, 0.0, 2.0], Pose::Use) }];
@@ -1336,6 +1401,61 @@ const BATH_WASH: &[&str] = &[
     "a2o_bathtub_takeBath_washLeg_stop_x",
     "a2o_bathtub_takeBath_trans_relax_x",
 ];
+
+/// Whether a decoration (by its catalogue name) is art to be looked at: a painting or a
+/// sculpture, not the towel rails, shelves and partitions the catalogue files with them.
+fn is_art(name: &str) -> bool {
+    name.starts_with("painting")
+        || (name.starts_with("sculpture") && !["towel", "hutch", "clutter", "partition", "shelf", "fern", "plant", "light", "mirror", "rack"].iter().any(|k| name.contains(k)))
+}
+
+/// What a Sim makes of a piece of art (the game's `ViewHate`, `ViewSoSo`, `ViewLike` and
+/// `ViewLove` reactions), by its price and their taste: those who can't stand art hate it all;
+/// the Snobs and the Artistic love what's fine (and the Snobs think little of what's cheap);
+/// others like it as it's dear. `roll` (0 to 1) settles the near things.
+fn art_taste(sim: &crate::sim::Sim, price: i32, roll: f32) -> &'static str {
+    use crate::life::Trait;
+    let has = |t: Trait| sim.traits.contains(&t);
+    if has(Trait::CantStandArt) {
+        "hate"
+    } else if has(Trait::Snob) && price < 300 {
+        "soso"
+    } else if has(Trait::Snob) || has(Trait::Artistic) {
+        if price >= 800 || roll < 0.3 { "love" } else { "like" }
+    } else if price >= 1500 && roll < 0.6 {
+        "love"
+    } else if price >= 300 || roll < 0.5 {
+        "like"
+    } else {
+        "soso"
+    }
+}
+
+/// A Sim's own roll for a thing (0 to 1), the same each time it's asked: what they make of a
+/// piece of art doesn't change between looking and reacting.
+fn taste_roll(sim: Entity, thing: Entity) -> f32 {
+    let h = (sim.to_bits() ^ thing.to_bits().rotate_left(29)).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    (h >> 40) as f32 / (1u64 << 24) as f32
+}
+
+/// Looking art over (a curious look, an admiring idle), then the reaction to it: the game's
+/// `a_react_view_` clips (a child's `c_`).
+fn view_clip(sim: &crate::sim::Sim, taste: &'static str) -> crate::anim::ActionClip {
+    let child = sim.age == Age::Child;
+    let ending: &'static [&'static str] = match (child, taste) {
+        (false, "hate") => &["a_react_view_hate_x"],
+        (false, "soso") => &["a_react_view_soso_x"],
+        (false, "love") => &["a_react_view_love_x"],
+        (false, _) => &["a_react_view_like_x"],
+        (true, "hate") => &["c_react_view_hate_x"],
+        (true, "soso") => &["c_react_view_soso_x"],
+        (true, "love") => &["c_react_view_love_x"],
+        (true, _) => &["c_react_view_like_x"],
+    };
+    let (start, looks): (&'static str, &'static [&'static str]) =
+        if child { ("c_idle_neutral_look_upAndOver_x", &["c_idle_neutral_loop_1", "c_idle_neutral_look_rightLeft_x"]) } else { ("a_react_view_curious_x", &["a_soc_idle_neutral_admire_x", "a_idle_neutral_look_upAndOver_x"]) };
+    crate::anim::ActionClip::new(Some(start), looks).ending(ending, 3.5)
+}
 
 pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::ActionClip> {
     use crate::anim::ActionClip as A;
@@ -1475,6 +1595,14 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Empty Trash" if kind == ObjectKind::TrashCompactor => A::new(None, &["a2o_trashCompactor_takeOut_x"]),
         "Empty Trash" => A::new(None, &["a2o_trashCan_empty_pullout_x"]),
         "Load Dishes" => A::new(None, &["a2o_dishwasher_use_x"]),
+        "Throw Out Trash" if kind == ObjectKind::WasteChute => A::new(None, &["a2o_wasteChute_dispose_x"]),
+        "Pick Up" if kind == ObjectKind::ClothingPile => A::new(None, &["a2o_clothingPile_get_floor_x"]),
+        "Do Laundry" => A::new(None, &["a2o_washMachine_operate_x"]),
+        "Dry Clothes" => A::new(None, &["a2o_washMachine_empty_easy_x"]),
+        "Load the Dryer" => A::new(None, &["a2o_dryer_operate_x"]),
+        "Empty Dryer" => A::new(None, &["a2o_dryer_empty_succeed_x"]),
+        "Hang Clothes" => A::new(None, &["a2o_clothesLine_hang_x"]),
+        "Take Down Clothes" => A::new(None, &["a2o_clothesLine_remove_x"]),
         "Throw Out Trash" => A::new(None, &["a2o_trashPile_drop_outdoors_x"]),
         "Wash Dishes" => A::new(Some("a2o_sink_dishes_scrub_start_x"), &["a2o_sink_dishes_scrub_loop1_x", "a2o_sink_dishes_scrub_loop2_x"]).ending(&["a2o_sink_dishes_scrub_stop_x"], 3.5),
         "Clean Up" => A::steps("a2o_plateDinner_pickUp_table_part1_x", &["a2o_plateDinner_pickUp_table_part2_x"], &["a2o_plateDinner_carry_x"]),
@@ -1781,6 +1909,11 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::HotBeverage => &HOT_BEVERAGE,
         ObjectKind::AlarmClock => &ALARM,
         ObjectKind::TrashCan | ObjectKind::TrashCompactor => &TRASH,
+        ObjectKind::WasteChute => &WASTE_CHUTE,
+        ObjectKind::Washer => &WASHER,
+        ObjectKind::Dryer => &DRYER,
+        ObjectKind::Clothesline => &CLOTHESLINE,
+        ObjectKind::ClothingPile => &CLOTHING_PILE,
         ObjectKind::Dishwasher => &DISHWASHER,
         ObjectKind::FishBowl => &FISHBOWL,
         ObjectKind::Telescope => &TELESCOPE,
@@ -1816,6 +1949,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Bar => &BAR,
         ObjectKind::FoodReplicator => &FOOD_REPLICATOR,
         ObjectKind::FoodSynthesizer => &FOOD_SYNTHESIZER,
+        ObjectKind::Art => &ART,
         ObjectKind::Teleporter => &TELEPORTER,
         ObjectKind::BodySculptor => &BODY_SCULPTOR,
         ObjectKind::MoodletManager => &MOODLET_MANAGER,
@@ -1950,6 +2084,9 @@ pub struct ActionQueue(pub VecDeque<Action>);
 /// while, rather than tried again and again.
 #[derive(Component, Default)]
 pub struct RouteFailed(pub Vec<(Entity, f64)>);
+
+/// A need this low comes before chores and pastimes that do nothing for it.
+const CRITICAL_NEED: f32 = -60.0;
 
 /// How long a Sim leaves an object they couldn't reach (game minutes).
 const ROUTE_FAIL_MINUTES: f64 = 120.0;
@@ -2746,6 +2883,8 @@ pub(crate) fn run_actions(
                                     // (Into the seat first.)
                                     let seat_in = (d.on_object && d.pose == Pose::Sit).then(|| seat_clips(obj.kind)).flatten().map(|(into, ..)| into);
                                     let clip = toddler_toy.or_else(|| interaction_clip(d.name, obj.kind)).or_else(|| seat_in.map(|_| crate::anim::ActionClip::new(None, crate::anim::SIT_LOOPS)));
+                                    // (Art looked over, and then what they make of it.)
+                                    let clip = if d.special == Special::ViewArt { Some(view_clip(sim, art_taste(sim, obj.price, taste_roll(me, *target)))) } else { clip };
                                     // (A double bed's second side: the first's, mirrored.)
                                     let far_side = obj.kind == ObjectKind::BedDouble && seconds.get(*target).is_ok_and(|s| s.0 == Some(me));
                                     // (WooHoo's other part, on the far side.)
@@ -3181,7 +3320,13 @@ pub(crate) fn run_actions(
                                     let up = (d.on_object && d.pose == Pose::Sit).then(|| seat_clips(obj.kind)).flatten().map(|(_, out, secs)| (out, secs));
                                     // (On a double bed's far side: mirrored, and WooHoo's other part.)
                                     let far_side = obj.kind == ObjectKind::BedDouble && seconds.get(*target).is_ok_and(|s| s.0 == Some(me));
-                                    let ending = if far_side && matches!(d.special, Special::WooHoo | Special::TryForBaby) { Some(woohoo_clip(true)) } else { interaction_clip(d.name, obj.kind) };
+                                    let ending = if far_side && matches!(d.special, Special::WooHoo | Special::TryForBaby) {
+                                        Some(woohoo_clip(true))
+                                    } else if d.special == Special::ViewArt {
+                                        Some(view_clip(sim, art_taste(sim, obj.price, taste_roll(me, *target))))
+                                    } else {
+                                        interaction_clip(d.name, obj.kind)
+                                    };
                                     outro = match (ending.filter(|c| !c.end.is_empty()), up) {
                                         (Some(c), up) => Some((c.end, up.map(|u| u.0), c.end_secs + up.map_or(0.0, |u| u.1), *target, far_side)),
                                         (None, Some((out, secs))) => Some((&[], Some(out), secs, *target, far_side)),
@@ -3193,7 +3338,17 @@ pub(crate) fn run_actions(
                                             // (The day's openings, in the game's listings.)
                                             commands.insert_resource(crate::jobpaper::JobHunt { sim: me, computer: obj.kind == ObjectKind::Computer });
                                         }
-                                        Special::Swim | Special::WriteNovel | Special::PlayInSprinkler | Special::Teleport | Special::WashDishes | Special::DropTrash | Special::ReadBook | Special::WatchTv | Special::WooHoo | Special::TryForBaby => {}
+                                        Special::Swim
+                                        | Special::WriteNovel
+                                        | Special::PlayInSprinkler
+                                        | Special::Teleport
+                                        | Special::WashDishes
+                                        | Special::DropTrash
+                                        | Special::ReadBook
+                                        | Special::WatchTv
+                                        | Special::WooHoo
+                                        | Special::TryForBaby
+                                        | Special::ViewArt => {}
                                         Special::GetBook => {
                                             commands.entity(me).insert(crate::surroundings::ReadSomewhere(*target));
                                         }
@@ -3385,6 +3540,22 @@ pub(crate) fn run_actions(
                                         }
                                         Special::TakeFish => {
                                             commands.entity(me).insert(crate::fishbowl::BowlRequest::Take(*target));
+                                        }
+                                        Special::PickUpClothes => {
+                                            commands.entity(me).insert(crate::laundry::LaundryRequest::PickedUp(*target));
+                                        }
+                                        Special::DoLaundry => {
+                                            commands.entity(me).insert(crate::laundry::LaundryRequest::Wash(*target));
+                                        }
+                                        Special::MoveLaundry => {
+                                            commands.entity(me).insert(crate::laundry::LaundryRequest::Unload(*target));
+                                        }
+                                        Special::LoadDryer => {
+                                            let to = if obj.kind == ObjectKind::Clothesline { crate::laundry::LaundryRequest::Hang(*target) } else { crate::laundry::LaundryRequest::Dry(*target) };
+                                            commands.entity(me).insert(to);
+                                        }
+                                        Special::EmptyDryer => {
+                                            commands.entity(me).insert(crate::laundry::LaundryRequest::Fresh(*target, obj.kind == ObjectKind::Clothesline));
                                         }
                                         Special::EmptyTrash => {
                                             commands.entity(*target).insert(crate::surroundings::TrashFill(0));
@@ -4116,6 +4287,26 @@ mod maintenance_tests {
     }
 
     #[test]
+    fn paintings_and_sculptures_are_art_and_tastes_differ() {
+        let art = "sims3.gameplay.objects.decorations.mimics.paintingflowers";
+        assert_eq!(ObjectKind::from_script(art, "PaintingFlowers"), ObjectKind::Art);
+        assert_eq!(ObjectKind::from_script("Sims3.Gameplay.Objects.Decorations.Mimics.SculptureVaseDaffodil", "SculptureVaseDaffodil"), ObjectKind::Art);
+        assert_eq!(ObjectKind::from_script("Sims3.Gameplay.Objects.Decorations.Mimics.SculptureWallTowelRing", "SculptureWallTowelRing"), ObjectKind::Decoration);
+        let mut sim = crate::sim::random_sim(&mut rand::rng(), "Test", Some(true), Age::Adult);
+        sim.traits = vec![crate::life::Trait::CantStandArt];
+        assert_eq!(art_taste(&sim, 5000, 0.0), "hate");
+        sim.traits = vec![crate::life::Trait::Snob];
+        assert_eq!(art_taste(&sim, 100, 0.0), "soso");
+        assert_eq!(art_taste(&sim, 2000, 0.9), "love");
+        sim.traits = vec![];
+        assert_eq!(art_taste(&sim, 100, 0.9), "soso");
+        assert_eq!(art_taste(&sim, 600, 0.9), "like");
+        let (a, b) = (Entity::from_raw_u32(7).unwrap(), Entity::from_raw_u32(9).unwrap());
+        assert_eq!(taste_roll(a, b), taste_roll(a, b));
+        assert!((0.0..1.0).contains(&taste_roll(a, b)));
+    }
+
+    #[test]
     fn maintenance_rejects_stale_work_and_other_sims_reservations() {
         let mut world = World::new();
         let actor = world.spawn_empty().id();
@@ -4207,7 +4398,7 @@ fn autonomy(
         Query<(), With<crate::gardening::Sprinkling>>,
         Query<&RouteFailed>,
     ),
-    (called, repairmen): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>),
+    (called, repairmen, laundry): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>, Res<crate::laundry::Laundry>),
     friends_away: Query<(Entity, &Sim), (With<OffLot>, Without<Invited>)>,
     callers: Query<(Entity, &crate::doorbell::AtTheDoor)>,
     (weather, building): (Res<crate::weather::Weather>, Option<Res<crate::building::ActiveBuilding>>),
@@ -4267,6 +4458,8 @@ fn autonomy(
             u * u * u * 4.0 + u * 0.3
         };
         let mut best: Option<(f32, Action)> = None;
+        // (A need gone critical comes first: chores and pastimes that do nothing for it wait.)
+        let critical = [HUNGER, BLADDER, ENERGY, HYGIENE].into_iter().filter(|&i| motives.0[i] < CRITICAL_NEED).min_by(|a, b| motives.0[*a].total_cmp(&motives.0[*b]));
         for (oe, obj, otf, used, obj_lot) in &objects {
             // (A double bed with their partner in it has room for them, on its other side.)
             let beside_partner = seconds.get(oe).is_ok_and(|s| s.0.is_none()) && used.0.is_some() && used.0 == rels.partner().map(|p| p.0);
@@ -4384,6 +4577,22 @@ fn autonomy(
                 if d.special == Special::PayBills {
                     score = if bills_due { 25.0 } else { 0.0 };
                 }
+                // The laundry, when there's some to do: a chore like the dishes.
+                if matches!(d.special, Special::PickUpClothes | Special::DoLaundry | Special::MoveLaundry | Special::LoadDryer | Special::EmptyDryer) {
+                    // (Grown-ups' work: the game's clips are theirs.)
+                    if !household.contains(me) || !sim.age.is_grown() || sim.age == Age::Child || used.0.is_some() || !laundry.offers(d.special, obj.kind, oe) || !laundry.worth_doing(d.special) {
+                        continue;
+                    }
+                    score = if sim.traits.contains(&crate::life::Trait::Slob) {
+                        0.0
+                    } else if sim.traits.contains(&crate::life::Trait::Neat) {
+                        26.0
+                    } else if d.special == Special::PickUpClothes {
+                        3.0
+                    } else {
+                        7.0
+                    };
+                }
                 // A full trash can is a chore like dishes; an emptier one isn't.
                 if d.special == Special::EmptyTrash && !trash_q.get(oe).is_ok_and(|f| f.0 >= crate::surroundings::trash_capacity(obj.kind)) {
                     continue;
@@ -4445,6 +4654,9 @@ fn autonomy(
                 score *= crate::life::activity_affinity(&sim.traits, d.name).sqrt();
                 score /= 1.0 + dist / 25.0;
                 score *= rng.random_range(0.85..1.15);
+                if critical.is_some_and(|m| d.per_hour[m] <= 0.0) {
+                    score *= 0.15;
+                }
                 if best.as_ref().is_none_or(|b| score > b.0) {
                     best = Some((score, Action::new(d.name, ActionKind::Object { target: oe, def: di }, true)));
                 }

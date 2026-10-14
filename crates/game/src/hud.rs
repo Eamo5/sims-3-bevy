@@ -1039,7 +1039,7 @@ fn world_click(
         Res<crate::weather::Weather>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    members_q: Query<(), With<HouseholdMember>>,
+    (members_q, laundry): (Query<(), With<HouseholdMember>>, Res<crate::laundry::Laundry>),
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
     (buy, edit_town, pickable): (
@@ -1291,6 +1291,11 @@ fn world_click(
                 if d.special == Special::EmptyTrash && !trash_q.get(t).is_ok_and(|f| f.0 > 0) {
                     continue;
                 }
+                // (The laundry's steps as it stands: a load on when there are clothes to wash, the
+                // wet clothes out once washed, the dry ones once dry.)
+                if !laundry.offers(d.special, obj.kind, t) {
+                    continue;
+                }
                 // A stereo: on or off, and "Change to..." each of the game's stations (there and
                 // then, as its `ChangeStation` is), beside Turn On or Turn Off.
                 if obj.kind == ObjectKind::Stereo && matches!(d.special, Special::StereoOn | Special::StereoOff) {
@@ -1328,7 +1333,7 @@ fn world_click(
                     continue;
                 }
                 // (Dishes are washed up when cleared away, not from the menu.)
-                if matches!(d.special, Special::WashDishes | Special::DropTrash | Special::ReadBook | Special::GetIngredients | Special::PrepFood | Special::PlaceMeal | Special::WatchTv | Special::WooHoo | Special::TryForBaby) || (d.special == Special::Cook && d.name == "Take Out Dinner") || (d.special == Special::ReadPaper && d.name == "Read the Paper") {
+                if matches!(d.special, Special::WashDishes | Special::DropTrash | Special::LoadDryer | Special::ReadBook | Special::GetIngredients | Special::PrepFood | Special::PlaceMeal | Special::WatchTv | Special::WooHoo | Special::TryForBaby) || (d.special == Special::Cook && d.name == "Take Out Dinner") || (d.special == Special::ReadPaper && d.name == "Read the Paper") {
                     continue;
                 }
                 // (A snack's on the fridge's Have Quick Meal menu, not apart from it.)

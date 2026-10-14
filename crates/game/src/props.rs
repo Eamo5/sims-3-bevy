@@ -58,6 +58,7 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("glassBar", "GlassBar", "b__L_Hand_slot", [0.0; 3], [0.0; 3]),
     ("plate", "Plate", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("trashbag", "TrashBag", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("clothesBag", "clothesBag", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("newspaper", "Newspaper", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("foodTray", "FoodTray", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     // (The serving platter, carried from the stove.)

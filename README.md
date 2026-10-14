@@ -423,6 +423,17 @@ installation is unreachable.
   come: a wipe of the brow when Fatigued, tears of joy at a First Kiss, queasiness, a start when
   Scared, a jolt when Singed. A reaction waits for its Sim to be standing free, then lapses.
 - **Stink**: green wisps rise off a smelly Sim's armpits, as the game's `stinkAdult` does.
+- **Art**: paintings and sculptures are viewed ("View", for fun): the Sim looks the piece over
+  and then shows what they make of it with the game's reactions, by its price and their taste
+  (Snobs and the Artistic love fine art, Snobs sniff at cheap art, those who can't stand art
+  hate it all and never look of their own accord).
+- **Laundry** (Generations), with the game's clips: where there's a washing machine, a change of
+  clothes at home now and then leaves a pile of dirty clothes, picked up by the Neat at once and
+  others in time. Once there's a load, someone does the laundry (gathering the piles first): an
+  hour in the washer, then into the dryer (Fresh Clothing for the household once it's taken
+  out) or onto the clothesline (Very Fresh). Kept in saves.
+- **The future's kitchen**: a house with only the Food Synthesizer (Into the Future) eats from
+  it, a plate made at the touch of its screen; apartments' trash goes down the trash chute.
 - **Puddles**, as the game's: a broken shower, tub, sink or toilet sprays water and spills a
   puddle every quarter hour (four at most, running to the nearest free tile), and a Sim who
   couldn't make it to the bathroom leaves one. They dry up (two hours outdoors, eight on a

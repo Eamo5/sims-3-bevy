@@ -411,14 +411,15 @@ fn take_out_trash(
         if cans.get(from.0).is_ok_and(|(_, _, t)| !indoors(t.translation)) {
             continue;
         }
-        let Some((can, ..)) = cans
+        // (A can outdoors, or an apartment's trash chute.)
+        let Some((can, o, _)) = cans
             .iter()
-            .filter(|(_, o, t)| o.kind == ObjectKind::TrashCan && !indoors(t.translation) && t.translation.distance(tf.translation) < 60.0)
+            .filter(|(_, o, t)| (o.kind == ObjectKind::TrashCan && !indoors(t.translation) || o.kind == ObjectKind::WasteChute) && t.translation.distance(tf.translation) < 60.0)
             .min_by(|a, b| a.2.translation.distance(tf.translation).total_cmp(&b.2.translation.distance(tf.translation)))
         else {
             continue;
         };
-        let Some(def) = crate::interact::interactions_for(ObjectKind::TrashCan).iter().position(|d| d.special == crate::interact::Special::DropTrash) else { continue };
+        let Some(def) = crate::interact::interactions_for(o.kind).iter().position(|d| d.special == crate::interact::Special::DropTrash) else { continue };
         queue.0.push_front(crate::interact::Action::new("Throw Out Trash", crate::interact::ActionKind::Object { target: can, def }, true));
         commands.entity(e).insert(crate::anim::Carrying(TRASH_CARRY));
     }
@@ -443,7 +444,7 @@ fn surroundings(
         .filter_map(|(o, tf, spoiled, fill)| {
             let w = match o.kind {
                 ObjectKind::DirtyDishes if spoiled => 3,
-                ObjectKind::DirtyDishes => 1,
+                ObjectKind::DirtyDishes | ObjectKind::ClothingPile => 1,
                 ObjectKind::TrashCan | ObjectKind::TrashCompactor if fill.is_some_and(|f| f.0 >= trash_capacity(o.kind)) => 3,
                 _ => return None,
             };

@@ -78,6 +78,7 @@ fn spin(
     clock: Res<GameClock>,
     mut sims: Query<(Entity, &Sim, &mut ClothesSpin, &mut SimAnim, Option<&ClipPlayer>)>,
     mut sparkles: MessageWriter<crate::effects::SpinSparkle>,
+    mut dropped: MessageWriter<crate::laundry::DropClothes>,
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed];
     for (e, sim, mut s, mut anim, player) in &mut sims {
@@ -96,6 +97,10 @@ fn spin(
         if !s.swapped && s.t >= SWAP_AT {
             s.swapped = true;
             put_on(&mut commands.entity(e), s.to, s.chosen);
+            // (Out of their everyday clothes: perhaps left on the floor, see `laundry`.)
+            if s.to.is_some() {
+                dropped.write(crate::laundry::DropClothes(e));
+            }
         }
         let len = player.filter(|p| p.name.contains("clothesChange")).and_then(|p| p.clip.as_ref()).map_or(1.5, |c| c.duration);
         if s.t >= len.max(SWAP_AT + 0.05).min(MAX_SECS) {

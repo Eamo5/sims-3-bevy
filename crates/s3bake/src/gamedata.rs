@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 83;
+pub const GAMEDATA_VERSION: u32 = 84;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1477,7 +1477,8 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             faces: {
                 let mut faces: Vec<(String, Vec<(String, f32)>)> = Vec::new();
                 for r in records(&x, "FacialOverlays").into_iter().skip(1) {
-                    let (cat, clip) = (r.get("Category").cloned().unwrap_or_default(), r.get("Clip").cloned().unwrap_or_default());
+                    // (The table names one clip with a doubled underscore: `angry2__noblink`.)
+                    let (cat, clip) = (r.get("Category").cloned().unwrap_or_default(), r.get("Clip").cloned().unwrap_or_default().replace("__", "_"));
                     if cat.is_empty() || clip.is_empty() {
                         continue;
                     }
