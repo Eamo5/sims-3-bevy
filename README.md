@@ -546,7 +546,9 @@ installation is unreachable.
   Each season has its holiday, as the game's: Love Day, Leisure Day, Spooky Day and Snowflake
   Day, two days before the season ends; word of it the day before, and on the day at five in
   the morning its sting, the game's own notice and its moodlet for everyone (Spring Fling,
-  Summer Fun, Spooky Time, Holiday Cheer), no school, and work a paid day off. The season
+  Summer Fun, Spooky Time, Holiday Cheer), no school, and work a paid day off. After heavy
+  snow (within twelve hours, with the ground's snow at least medium) it's a snow day: the
+  game's notice and sting, and no school. The season
   and the weather are kept in saves; the World Adventures destinations have none.
 - **Pets**, from the Pets pack: cats, dogs, little dogs and horses (and their young) in the
   game's own bodies on their own skeletons, each in one of the game's 233 breeds (its coat

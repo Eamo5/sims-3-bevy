@@ -588,7 +588,7 @@ mod school_schedule_tests {
     fn bus_classroom_hours_and_weekends_follow_student_age() {
         for (age, end, classroom_minutes) in [(Age::Child, 15.0, 360.0), (Age::Teen, 14.0, 300.0)] {
             let mut app = App::new();
-            app.init_resource::<GameClock>().init_resource::<Notifications>().add_systems(Update, school_bus);
+            app.init_resource::<GameClock>().init_resource::<Notifications>().add_message::<crate::sound::PlaySound>().add_systems(Update, school_bus);
             let mut rng = rand::rngs::StdRng::seed_from_u64(33);
             let sim = crate::sim::random_sim(&mut rng, "School", Some(false), age);
             let e = app.world_mut().spawn((sim, HouseholdMember, ActionQueue::default())).id();
@@ -629,7 +629,7 @@ fn school_bus(
     mut kids: Query<(Entity, &Sim, &mut ActionQueue, Option<&mut SchoolGrades>, Option<&AtRabbitHole>, Has<Homework>), With<HouseholdMember>>,
     mut last_day: Local<std::collections::HashMap<Entity, u32>>,
     mut notes: ResMut<Notifications>,
-    weather: Option<Res<crate::weather::Weather>>,
+    (weather, layouts, mut sound, mut snow_told): (Option<Res<crate::weather::Weather>>, Option<Res<crate::layout::UiAssets>>, MessageWriter<crate::sound::PlaySound>, Local<Option<u32>>),
 ) {
     let h = clock.hour_f();
     let day = clock.day();
@@ -637,6 +637,8 @@ fn school_bus(
     if weather.as_deref().is_some_and(|w| crate::holidays::is_holiday(w, day)) {
         return;
     }
+    // (Nor on a snow day: told of it once, with its sting, as the game's.)
+    let snow_day = weather.as_deref().is_some_and(|w| w.snow_day(clock.minutes));
     for (e, sim, mut queue, mut grades, away, homework) in &mut kids {
         if !matches!(sim.age, Age::Child | Age::Teen) {
             continue;
@@ -649,6 +651,15 @@ fn school_bus(
             continue;
         }
         last_day.insert(e, day);
+        if snow_day {
+            if *snow_told != Some(day) {
+                *snow_told = Some(day);
+                let text = layouts.as_ref().and_then(|l| l.localize("Gameplay/Excel/Notifications/Notifications:SnowDaySchoolTNS"));
+                notes.push(text.unwrap_or_else(|| "It's a snow day! School is cancelled.".into()));
+                sound.write(crate::sound::PlaySound::ui("sting_snow_day"));
+            }
+            continue;
+        }
         for a in queue.0.iter_mut() {
             a.cancel = true;
         }

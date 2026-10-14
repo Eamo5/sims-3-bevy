@@ -137,6 +137,8 @@ pub struct Weather {
     pub first_day: u32,
     /// The game minute last simulated.
     pub last: f64,
+    /// When heavy snow last fell (game minutes; the game's `LastHeavySnowTime`).
+    pub last_heavy_snow: Option<f64>,
 }
 
 impl Default for Weather {
@@ -160,6 +162,7 @@ impl Default for Weather {
             first_season: 0,
             first_day: 0,
             last: 0.0,
+            last_heavy_snow: None,
         }
     }
 }
@@ -197,6 +200,12 @@ impl Weather {
         }
         let ease = (((minutes - self.since) / 30.0).min((self.until - minutes) / 30.0)).clamp(0.0, 1.0) as f32;
         [0.35, 0.65, 1.0][self.intensity.index()] * ease
+    }
+
+    /// Whether school's off for the snow (the game's snow day): heavy snow within the last
+    /// twelve hours (`kSnowDayTimeWindow`) and the ground's snow at least medium (over 35).
+    pub fn snow_day(&self, now: f64) -> bool {
+        self.last_heavy_snow.is_some_and(|t| now - t < 12.0 * 60.0) && self.snow > 35.0
     }
 
     /// How overcast (0..1): nothing for a few clouds, all of it under rain or snow.
@@ -554,6 +563,9 @@ fn simulate(
     let per = |hours: f32| 100.0 / hours * dh;
     match w.kind {
         WeatherKind::Snow => {
+            if w.intensity == Intensity::Heavy && w.falling(now) > 0.0 {
+                w.last_heavy_snow = Some(now);
+            }
             w.frost += per(cover("kFrostAccumulationTimeWhenSnowing", i, 1.0));
             if w.frost >= 100.0 {
                 w.snow += per(cover("kSnowAccumulationTime", i, 12.0));
