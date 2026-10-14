@@ -26,7 +26,8 @@ impl Plugin for InteractPlugin {
                     .run_if(in_state(PlayMode::Live)),
             )
             .add_systems(Update, (route_objects, crate::social::load_game_socials).run_if(in_state(crate::AppState::InGame)))
-            .add_systems(Update, (wear_new_objects, floor_new_objects, second_places).run_if(in_state(crate::AppState::InGame)));
+            .init_resource::<RepairTunings>()
+            .add_systems(Update, (load_repair_tunings, wear_new_objects, floor_new_objects, second_places).chain().run_if(in_state(crate::AppState::InGame)));
     }
 }
 
@@ -739,11 +740,54 @@ pub struct Wear {
 /// How long an object can't break after it's new or repaired (game minutes).
 pub const STURDY_MINUTES: f64 = 24.0 * 60.0;
 
-/// Every object put in the world starts out sturdy for a day.
-fn wear_new_objects(mut commands: Commands, clock: Res<GameClock>, added: Query<Entity, (Added<GameObject>, Without<Wear>)>) {
-    for e in &added {
-        commands.entity(e).insert(Wear { breaks: 0, sturdy_until: clock.minutes + STURDY_MINUTES });
+/// Every object put in the world starts out sturdy a while: as long as its class is tuned to
+/// (a day for most).
+fn wear_new_objects(mut commands: Commands, clock: Res<GameClock>, tunings: Res<RepairTunings>, added: Query<(Entity, &GameObject), Without<Wear>>) {
+    for (e, o) in &added {
+        commands.entity(e).insert(Wear { breaks: 0, sturdy_until: clock.minutes + tunings.sturdy_minutes(o.objd) });
     }
+}
+
+/// Each catalogue object's breakage and repair, as the game tunes its class (by its OBJD).
+#[derive(Resource, Default)]
+pub struct RepairTunings(pub HashMap<Key, s3bake::gamedata::RepairTuning>);
+
+impl RepairTunings {
+    pub fn get(&self, objd: Key) -> Option<&s3bake::gamedata::RepairTuning> {
+        self.0.get(&objd)
+    }
+
+    /// How long it can't break once new or repaired (game minutes).
+    pub fn sturdy_minutes(&self, objd: Key) -> f64 {
+        self.get(objd).map_or(STURDY_MINUTES, |t| t.hours_unbreakable as f64 * 60.0)
+    }
+}
+
+/// The catalogue's objects matched to their classes' tuning, once the game data's there.
+fn load_repair_tunings(mut tunings: ResMut<RepairTunings>, ui: Option<Res<crate::icons::GameUi>>, baked: Option<Res<crate::baked::Baked>>, mut done: Local<bool>) {
+    let (false, Some(ui), Some(baked)) = (*done, ui, baked) else { return };
+    *done = true;
+    let by: HashMap<String, &s3bake::gamedata::RepairTuning> = ui.data.repairs.iter().map(|r| (r.class.to_ascii_lowercase(), r)).collect();
+    for c in &baked.0.catalog {
+        let class = c.script.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+        if let Some(r) = by.get(&class) {
+            tunings.0.insert(c.objd, (*r).clone());
+        }
+    }
+    info!("repairs: {} kinds of object tuned, {} catalogue objects", ui.data.repairs.len(), tunings.0.len());
+}
+
+/// The game's chance of a shock repairing something (per cent): from its most at no Handiness
+/// to its least at the repair's complexity.
+pub fn shock_chance(t: &s3bake::gamedata::RepairTuning, handiness: f32) -> f32 {
+    let f = (handiness / t.complexity.max(1.0)).clamp(0.0, 1.0);
+    t.max_shock + (t.min_shock - t.max_shock) * f
+}
+
+/// The game's time for a repair (game minutes), likewise from its longest to its shortest.
+pub fn repair_time(t: &s3bake::gamedata::RepairTuning, handiness: f32) -> f32 {
+    let f = (handiness / t.complexity.max(1.0)).clamp(0.0, 1.0);
+    t.max_time + (t.min_time - t.max_time) * f
 }
 
 /// What's put in the world as the game goes (a plate laid at a table, a platter served) stands
@@ -759,8 +803,16 @@ fn floor_new_objects(mut commands: Commands, building: Option<Res<crate::buildin
     }
 }
 
-/// How likely an object is to break when used (per use): the game's 5% (less for what's
-/// built better), a point more for each time it has broken before.
+/// How likely an object is to break when used (per use): as the game tunes its class (a chance
+/// growing with each break), else the game's usual 5% (less for what's built better), a point
+/// more for each time it has broken before.
+fn break_chance_tuned(tuning: Option<&s3bake::gamedata::RepairTuning>, kind: ObjectKind, price: i32, breaks: u32) -> f64 {
+    match tuning {
+        Some(t) => ((t.start_break + t.break_increase * breaks as f32) as f64 / 100.0).clamp(0.0, 1.0),
+        None => break_chance(kind, price, breaks),
+    }
+}
+
 fn break_chance(kind: ObjectKind, price: i32, breaks: u32) -> f64 {
     let base = match kind {
         ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::ShowerTub | ObjectKind::Sink | ObjectKind::Dishwasher | ObjectKind::Toilet => 0.05,
@@ -779,6 +831,25 @@ fn break_chance(kind: ObjectKind, price: i32, breaks: u32) -> f64 {
 #[cfg(test)]
 mod wear_tests {
     use super::*;
+
+    #[test]
+    fn repairs_go_by_the_games_tuning_for_the_thing() {
+        let tv = s3bake::gamedata::RepairTuning {
+            class: "TVCheap".into(),
+            hours_unbreakable: 48.0,
+            start_break: 6.0,
+            break_increase: 3.0,
+            complexity: 5.0,
+            min_time: 25.0,
+            max_time: 120.0,
+            min_shock: 0.0,
+            max_shock: 7.0,
+            shock_in_puddle: true,
+        };
+        assert_eq!((repair_time(&tv, 0.0), repair_time(&tv, 5.0), repair_time(&tv, 9.0)), (120.0, 25.0, 25.0));
+        assert!((shock_chance(&tv, 0.0) - 7.0).abs() < 1e-6 && shock_chance(&tv, 5.0).abs() < 1e-6);
+        assert!((break_chance_tuned(Some(&tv), ObjectKind::Tv, 300, 2) - 0.12).abs() < 1e-9, "6% and 3% a break before");
+    }
 
     #[test]
     fn breaking_gets_likelier_and_better_things_last() {
@@ -2585,7 +2656,7 @@ pub(crate) fn run_actions(
         Query<(), With<Broken>>,
         Query<(), Or<(With<crate::buy::HeldObject>, With<crate::buyhistory::HistoryHidden>)>>,
     ),
-    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade): (
+    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q)): (
         MessageWriter<crate::journal::Did>,
         Query<&crate::journal::SkillJournal>,
         Query<&mut crate::inventory::Inventory>,
@@ -2593,6 +2664,7 @@ pub(crate) fn run_actions(
         Query<&mut SecondPlace>,
         Query<Entity, (With<SecondPlace>, Without<Broken>)>,
         Query<(), With<Unmade>>,
+        (Res<RepairTunings>, Query<&Transform, (With<crate::puddles::Puddle>, Without<Sim>)>),
     ),
 ) {
     let Some(grid) = grid else { return };
@@ -3471,7 +3543,7 @@ pub(crate) fn run_actions(
                                     let worn = wear.get(*target).ok().copied().filter(|w| clock.minutes >= w.sturdy_until);
                                     if !unbreakable
                                         && let Some(w) = worn
-                                        && rand::rng().random_bool(break_chance(obj.kind, obj.price, w.breaks))
+                                        && rand::rng().random_bool(break_chance_tuned(tunings.get(obj.objd), obj.kind, obj.price, w.breaks))
                                     {
                                         if let Ok(mut w) = wear.get_mut(*target) {
                                             w.breaks += 1;
@@ -4070,7 +4142,12 @@ pub(crate) fn run_actions(
                         }
                         ActionKind::Repair { target } => {
                             let handy = skills.level("Handiness") as f32 + if sim.traits.contains(&crate::life::Trait::Handy) { 3.0 } else { 0.0 };
-                            let minutes = maintenance_minutes(90.0, handy, &sim.traits, objects.get(*target).ok().map(|(o, ..)| o.kind), false);
+                            // (As long as the game tunes the repair of the thing, by Handiness.)
+                            let tuning = objects.get(*target).ok().and_then(|(o, ..)| tunings.get(o.objd));
+                            let minutes = match tuning {
+                                Some(t) => maintenance_minutes(repair_time(t, handy), 0.0, &sim.traits, objects.get(*target).ok().map(|(o, ..)| o.kind), false),
+                                None => maintenance_minutes(90.0, handy, &sim.traits, objects.get(*target).ok().map(|(o, ..)| o.kind), false),
+                            };
                             let e = skills.0.entry("Handiness").or_insert(0.0);
                             let before = *e as u32;
                             *e = (*e + dt / 60.0 * 0.5 * crate::life::skill_rate(&sim.traits, "Handiness") * crate::wishes::reward_skill_rate(wishes) * mood_learning / (1.0 + *e * 0.25)).min(10.0);
@@ -4081,11 +4158,20 @@ pub(crate) fn run_actions(
                             motives.add(FUN, -4.0 * dt / 60.0);
                             if elapsed >= minutes {
                                 finished = true;
-                                // Electronics can shock the unskilled; a second shock while
-                                // still singed stops their heart.
+                                // Electronics can shock the unskilled, at the game's odds for the
+                                // thing (none for the Handy, the pregnant or an Electrician); one
+                                // still singed, or standing in water, surely; a second shock while
+                                // singed stops their heart.
                                 let electric = objects.get(*target).is_ok_and(|(o, ..)| matches!(o.kind, ObjectKind::Tv | ObjectKind::Computer | ObjectKind::Stereo));
                                 let journal = journals.get(me).ok();
-                                let shocked = electric && !crate::journal::earned(journal, "Electrician") && rand::rng().random_bool(((0.35 - handy * 0.04) as f64).clamp(0.0, 1.0));
+                                let safe = sim.traits.contains(&crate::life::Trait::Handy) || pregnancy.is_some() || crate::journal::earned(journal, "Electrician");
+                                let singed = moodlets.is_some_and(|m| m.has(crate::life::MoodletKind::Singed));
+                                let wet = tuning.is_some_and(|t| t.shock_in_puddle) && puddles_q.iter().any(|p| p.translation.xz().distance(tf.translation.xz()) < 0.6);
+                                let chance = match tuning {
+                                    Some(t) => shock_chance(t, skills.level("Handiness") as f32) as f64 / 100.0,
+                                    None => (0.35 - handy as f64 * 0.04).clamp(0.0, 1.0),
+                                };
+                                let shocked = electric && !safe && (singed || wet || rand::rng().random_bool(chance.clamp(0.0, 1.0)));
                                 if let Ok((o, _, mut used, _)) = objects.get_mut(*target) {
                                     used.0 = None;
                                     if shocked {
@@ -4094,7 +4180,7 @@ pub(crate) fn run_actions(
                                     } else {
                                         commands.entity(*target).remove::<(Broken, crate::grime::Charred)>();
                                         if let Ok(mut w) = wear.get_mut(*target) {
-                                            w.sturdy_until = clock.minutes + STURDY_MINUTES;
+                                            w.sturdy_until = clock.minutes + tunings.sturdy_minutes(o.objd);
                                         }
                                         notes.push(format!("{} fixed {}.", sim.first, the(&o.name)));
                                         let plumbing = matches!(o.kind, ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::ShowerTub | ObjectKind::Sink | ObjectKind::Dishwasher | ObjectKind::Toilet);

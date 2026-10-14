@@ -115,7 +115,12 @@ installation is unreachable.
   ›", with the same animations, building Handiness): at level 3 a water heater for the shower
   and the bath, improved channels for the TV, better speakers for the stereo and a faster
   processor for the computer (half as much again of what they give); at level 5 Unbreakable.
-  Electronics can shock the unskilled; upgrades are kept in saves. Fishing trips teach Fishing
+  Things break and are repaired as the game tunes each kind (its `RepairableComponent` values
+  for every class: a TV unbreakable for two days new or fixed, then 6% a use and 3% more each
+  break; a repair's time from its longest at no Handiness to its shortest at the repair's
+  complexity). Electronics can shock the unskilled at their own odds (a cheap stereo half the
+  time, a computer hardly ever), surely one still singed or standing in a puddle, never the
+  Handy, the pregnant or an Electrician; upgrades are kept in saves. Fishing trips teach Fishing
   and bring back a catch to sell.
 - **Writing novels** by the game's Writing tuning: at a computer, "Write Novel" offers the
   genres the Sim has opened up (Fiction and Non-Fiction to start; Sci-Fi, Trashy, Drama,

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 90;
+pub const GAMEDATA_VERSION: u32 = 91;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -258,6 +258,52 @@ pub struct SocialAction {
     pub required: Vec<String>,
 }
 
+/// How an object breaks and is repaired, as the game tunes each class (its `RepairableComponent`
+/// tuning): unbreakable that many hours once new or repaired, then a chance a use (per cent)
+/// growing with each time it's broken; the repair's complexity (the Handiness it takes to do it
+/// quickest and safest), its time (game minutes, at no skill and at that skill), and the chance
+/// of a shock (per cent, likewise), and whether standing in water means one.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct RepairTuning {
+    /// The class it's for (`TVCheap`, `ToiletCheap`...).
+    pub class: String,
+    pub hours_unbreakable: f32,
+    pub start_break: f32,
+    pub break_increase: f32,
+    pub complexity: f32,
+    pub min_time: f32,
+    pub max_time: f32,
+    pub min_shock: f32,
+    pub max_shock: f32,
+    pub shock_in_puddle: bool,
+}
+
+/// An object class's repair tuning, from its tuning XML (the first of each value; none when it
+/// doesn't break).
+pub fn repair_tuning(class: &str, xml: &str) -> Option<RepairTuning> {
+    let val = |k: &str| -> Option<&str> {
+        let at = xml.find(&format!("<{k} value=\""))? + k.len() + 9;
+        xml[at..].split('"').next()
+    };
+    let num = |k: &str| val(k).and_then(|v| v.trim().parse::<f32>().ok());
+    let (start, inc) = (num("StartPercentChanceBreak")?, num("PercentChanceBreakIncrease").unwrap_or(0.0));
+    if start == 0.0 && inc == 0.0 {
+        return None;
+    }
+    Some(RepairTuning {
+        class: class.to_string(),
+        hours_unbreakable: num("HoursUnbreakable").unwrap_or(24.0),
+        start_break: start,
+        break_increase: inc,
+        complexity: num("RepairComplexity").unwrap_or(1.0),
+        min_time: num("MinRepairTime").unwrap_or(30.0),
+        max_time: num("MaxRepairTime").unwrap_or(90.0),
+        min_shock: num("MinChanceOfElectrocution").unwrap_or(0.0),
+        max_shock: num("MaxChanceOfElectrocution").unwrap_or(0.0),
+        shock_in_puddle: val("ShouldShockInPuddle").is_some_and(|v| v.eq_ignore_ascii_case("true")),
+    })
+}
+
 /// One of the game's conversation topics (its `ActiveTopic` rows): how long it lasts once a Sim
 /// has it (game hours; 0 as long as what gives it), whether others talk to the Sim about it, and
 /// whether a social under it is done only once between two Sims.
@@ -491,6 +537,9 @@ pub struct GameDataBaked {
     /// The conversation topics they're offered under.
     #[serde(default)]
     pub social_topics: Vec<TopicInfo>,
+    /// How each class of object breaks and is repaired.
+    #[serde(default)]
+    pub repairs: Vec<RepairTuning>,
     pub buffs: Vec<BuffInfo>,
     pub traits: Vec<TraitInfo>,
     pub skills: Vec<SkillInfo>,
@@ -1653,6 +1702,22 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     let mut out = GameDataBaked { version: GAMEDATA_VERSION, ..Default::default() };
     // The social interactions: the base game's. (The packs' are left: theirs are mostly bound to
     // what those packs bring, a celebrity, a degree, the future, under tests in their code.)
+    // The objects' breakage and repair tuning, every class that breaks.
+    for e in pkg.of_type(T_XML) {
+        let Some(name) = names.get(&e.key.i) else { continue };
+        let class = name.split("_0x").next().unwrap_or(name);
+        if class.contains('+') {
+            continue;
+        }
+        let Ok(d) = pkg.read(e) else { continue };
+        let x = String::from_utf8_lossy(&d);
+        if x.contains("StartPercentChanceBreak")
+            && let Some(t) = repair_tuning(class, &x)
+            && !out.repairs.iter().any(|r| r.class == t.class)
+        {
+            out.repairs.push(t);
+        }
+    }
     let tables = std::iter::once("SocialData_BaseGame".to_string());
     let mut found = false;
     for table in tables {
@@ -2827,6 +2892,15 @@ mod tests {
                 ("Buff Fired".to_string(), "Ask About Work".to_string(), false),
             ]
         );
+    }
+
+    #[test]
+    fn repair_tuning_is_read_from_an_objects_tuning() {
+        let xml = r#"<base><HoursUnbreakable value="48" /><StartPercentChanceBreak value="6" /><PercentChanceBreakIncrease value="3" /><RepairComplexity value="5" /><MinRepairTime value="25" /><MaxRepairTime value="120" /><ShouldShockInPuddle value="True" /><MinChanceOfElectrocution value="0" /><MaxChanceOfElectrocution value="7" /></base>"#;
+        let t = repair_tuning("TVCheap", xml).unwrap();
+        assert_eq!((t.hours_unbreakable, t.start_break, t.break_increase, t.complexity), (48.0, 6.0, 3.0, 5.0));
+        assert_eq!((t.min_time, t.max_time, t.min_shock, t.max_shock, t.shock_in_puddle), (25.0, 120.0, 0.0, 7.0, true));
+        assert!(repair_tuning("Chair", "<base><StartPercentChanceBreak value=\"0\" /></base>").is_none(), "what doesn't break");
     }
 
     #[test]
