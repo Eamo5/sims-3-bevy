@@ -27,6 +27,7 @@ impl Plugin for InteractPlugin {
             )
             .add_systems(Update, (route_objects, crate::social::load_game_socials).run_if(in_state(crate::AppState::InGame)))
             .init_resource::<RepairTunings>()
+            .add_systems(Update, note_recent.run_if(in_state(PlayMode::Live)))
             .add_systems(Update, (load_repair_tunings, wear_new_objects, floor_new_objects, second_places).chain().run_if(in_state(crate::AppState::InGame)));
     }
 }
@@ -745,6 +746,39 @@ pub const STURDY_MINUTES: f64 = 24.0 * 60.0;
 fn wear_new_objects(mut commands: Commands, clock: Res<GameClock>, tunings: Res<RepairTunings>, added: Query<(Entity, &GameObject), Without<Wear>>) {
     for (e, o) in &added {
         commands.entity(e).insert(Wear { breaks: 0, sturdy_until: clock.minutes + tunings.sturdy_minutes(o.objd) });
+    }
+}
+
+/// What a Sim has done lately for the fun of it (each pastime, and when it finished), so they
+/// don't take up the same one again and again.
+#[derive(Component, Default)]
+pub struct RecentDone(pub Vec<(&'static str, f64)>);
+
+/// How long a pastime stays fresh in mind (game minutes), and how much less keen a Sim is on it
+/// for each time they've done it in that while.
+const RECENT_MINUTES: f64 = 180.0;
+const RECENT_KEEN: f32 = 0.55;
+
+impl RecentDone {
+    pub fn times(&self, activity: &str, now: f64) -> usize {
+        self.0.iter().filter(|(a, t)| *a == activity && now - t < RECENT_MINUTES).count()
+    }
+}
+
+/// Pastimes finished, kept in mind a few hours.
+fn note_recent(mut commands: Commands, clock: Res<GameClock>, mut events: MessageReader<LifeEvent>, mut sims: Query<Option<&mut RecentDone>, With<Sim>>) {
+    for ev in events.read() {
+        let LifeEventKind::Finished { activity, .. } = ev.kind else { continue };
+        match sims.get_mut(ev.sim) {
+            Ok(Some(mut r)) => {
+                r.0.retain(|(_, t)| clock.minutes - t < RECENT_MINUTES);
+                r.0.push((activity, clock.minutes));
+            }
+            Ok(None) => {
+                commands.entity(ev.sim).insert(RecentDone(vec![(activity, clock.minutes)]));
+            }
+            Err(_) => {}
+        }
     }
 }
 
@@ -4718,7 +4752,7 @@ fn autonomy(
     clock: Res<GameClock>,
     (settings, household): (Res<crate::options::Settings>, Query<(), With<HouseholdMember>>),
     mut sims: Query<
-        (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim, Has<SocialPartner>, Option<&crate::visit::OnLot>),
+        (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim, Has<SocialPartner>, Option<&crate::visit::OnLot>, Option<&RecentDone>),
         // (Nor a cook between the stove and serving: their queue's empty a moment, with the meal
         // still in their hands, and they'd set about cooking it again.)
         (
@@ -4775,7 +4809,7 @@ fn autonomy(
             _ => None,
         }))
         .collect();
-    for (me, tf, motives, mut queue, mut timer, rels, job, sim, partner, on_lot) in &mut sims {
+    for (me, tf, motives, mut queue, mut timer, rels, job, sim, partner, on_lot, recent) in &mut sims {
         let my_lot = on_lot.map(|l| l.0);
         // (A caller at the door waits there to be let in.)
         if callers.contains(me) {
@@ -5017,6 +5051,12 @@ fn autonomy(
                 score *= crate::life::activity_affinity(&sim.traits, d.name).sqrt();
                 score /= 1.0 + dist / 25.0;
                 score *= rng.random_range(0.85..1.15);
+                // (Not the same pastime again and again.)
+                if d.per_hour[FUN] > 0.0
+                    && let Some(r) = recent
+                {
+                    score *= RECENT_KEEN.powi(r.times(d.name, clock.minutes) as i32);
+                }
                 if critical.is_some_and(|m| d.per_hour[m] <= 0.0) {
                     score *= 0.15;
                 }
