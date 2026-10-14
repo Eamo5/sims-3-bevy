@@ -2656,7 +2656,7 @@ pub(crate) fn run_actions(
         Query<(), With<Broken>>,
         Query<(), Or<(With<crate::buy::HeldObject>, With<crate::buyhistory::HistoryHidden>)>>,
     ),
-    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q)): (
+    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather)): (
         MessageWriter<crate::journal::Did>,
         Query<&crate::journal::SkillJournal>,
         Query<&mut crate::inventory::Inventory>,
@@ -2664,7 +2664,7 @@ pub(crate) fn run_actions(
         Query<&mut SecondPlace>,
         Query<Entity, (With<SecondPlace>, Without<Broken>)>,
         Query<(), With<Unmade>>,
-        (Res<RepairTunings>, Query<&Transform, (With<crate::puddles::Puddle>, Without<Sim>)>),
+        (Res<RepairTunings>, Query<&Transform, (With<crate::puddles::Puddle>, Without<Sim>)>, Option<Res<crate::weather::Weather>>),
     ),
 ) {
     let Some(grid) = grid else { return };
@@ -3248,8 +3248,14 @@ pub(crate) fn run_actions(
                                     carry_fx.push((*target, me, age, *tf, s.effect != SocialEffect::PutToBed));
                                 }
                                 if let Some((tsim, tmood, _, tpartner)) = who.get(target) {
-                                    let rel = rels.get(*target);
+                                    let mut rel = rels.get(*target);
                                     let other_partner = *tpartner && rel.status == RelStatus::None;
+                                    // (On Snowflake Day everyone's warmer, and on Love Day to romance:
+                                    // the game's holiday liking bonus, 10.)
+                                    let holiday = weather.as_deref().and_then(|w| crate::holidays::holiday_today(w, clock.day()));
+                                    if holiday == Some("Snowflake Day") || (holiday == Some("Love Day") && s.cat == crate::social::SocialCat::Romantic) {
+                                        rel.friendship += crate::holidays::HOLIDAY_LIKING;
+                                    }
                                     let mut p = crate::social::acceptance(s, &rel, tsim, tmood, other_partner);
                                     // People simply like the Attractive more.
                                     if s.cat != crate::social::SocialCat::Mean && crate::wishes::has(wishes, "Attractive") {

@@ -20,6 +20,10 @@ impl Plugin for HolidaysPlugin {
     }
 }
 
+/// How much warmer Sims take to socials on Snowflake Day (and to romance on Love Day): the game's
+/// `kWinterHolidaySocialLikingBonus`, `kSpringHolidaySocialLikingBonus`.
+pub const HOLIDAY_LIKING: f32 = 10.0;
+
 /// The hour a holiday's notice and moodlet come (the game's `kTimeOfDayToShowStartHoliday`).
 const START_HOUR: f32 = 5.0;
 
