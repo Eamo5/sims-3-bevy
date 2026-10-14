@@ -455,7 +455,8 @@ installation is unreachable.
   Pregnancy), dirty dishes about (complained of; a mess too, by the Neat); what a Sim's doing
   while they do it and twenty minutes after (Ask: Good Show? at the TV, Compliment Music,
   Ask About Game); grown-ups with children, the household's own, those in the same line of
-  work. Most are said once between two Sims while they last. Sims bring them up of their own
+  work; a Sim's Charisma (its greetings, by their level: Amusing and Flirty, Funny, Hilarious,
+  Seductive, Hot). Most are said once between two Sims while they last. Sims bring them up of their own
   accord now and then, as their free will has it (thanking the cook after dinner,
   congratulating someone on their birthday): something mean only from the mean or to someone disliked, something romantic only
   where there's romance.

@@ -284,6 +284,8 @@ pub enum Topic {
     SameHousehold,
     AdultToChild,
     SameWork,
+    /// The greetings of a Sim with that much Charisma (the game's "Greet Charisma Level N").
+    Charisma(u32),
     Event(&'static str),
 }
 
@@ -310,6 +312,8 @@ pub struct Side<'a> {
     pub homework: bool,
     /// Whether they're of the household.
     pub member: bool,
+    /// Their Charisma skill.
+    pub charisma: u32,
 }
 
 /// What `Side::of` reads of a Sim.
@@ -319,13 +323,17 @@ pub type SideQuery<'a> = (
     Option<&'a crate::careers::Job>,
     Has<crate::rabbitholes::Homework>,
     Has<crate::sim::HouseholdMember>,
+    Option<&'a crate::interact::Skills>,
 );
 
 impl<'a> Side<'a> {
     #[allow(clippy::type_complexity)]
-    pub fn of(sim: Entity, q: Option<(Option<&'a crate::life::Moodlets>, Option<&'a crate::topics::Topics>, Option<&'a crate::careers::Job>, bool, bool)>) -> Self {
-        let (moods, topics, job, homework, member) = q.unwrap_or_default();
-        Self { sim: Some(sim), moods, topics, career: job.map(|j| j.track), homework, member }
+    pub fn of(
+        sim: Entity,
+        q: Option<(Option<&'a crate::life::Moodlets>, Option<&'a crate::topics::Topics>, Option<&'a crate::careers::Job>, bool, bool, Option<&'a crate::interact::Skills>)>,
+    ) -> Self {
+        let (moods, topics, job, homework, member, skills) = q.unwrap_or_default();
+        Self { sim: Some(sim), moods, topics, career: job.map(|j| j.track), homework, member, charisma: skills.map_or(0, |s| s.level("Charisma")) }
     }
 }
 
@@ -358,6 +366,7 @@ fn topic(name: &str) -> Option<Topic> {
         "Adult to Child" => Some(Topic::AdultToChild),
         "Work General" => Some(Topic::SameWork),
         "" => None,
+        g if g.starts_with("Greet Charisma Level ") => g["Greet Charisma Level ".len()..].trim().parse().ok().map(Topic::Charisma),
         other => Some(Topic::Event(Box::leak(other.to_string().into_boxed_str()))),
     }
 }
@@ -484,7 +493,7 @@ pub fn all_socials() -> impl Iterator<Item = (usize, &'static SocialDef)> {
 
 /// The game's tests (its `ProcTest`s) a social of its may have that are taken here as passed:
 /// those that only ask what's asked anyway (how well they get on, how romantic they are).
-const PASSED_TESTS: &[&str] = &["TestChat", "TalkAboutWeatherTest", "ShareInterestsProceduralTest", "TestFriendlyHug", "TestKissOnCheek", "TestAskAboutRecentAction", "TestComplimentParty", "TestWoo", "TestComplainAboutDirtyDishes"];
+const PASSED_TESTS: &[&str] = &["TestChat", "TalkAboutWeatherTest", "ShareInterestsProceduralTest", "TestFriendlyHug", "TestKissOnCheek", "TestAskAboutRecentAction", "TestComplimentParty", "TestWoo", "TestComplainAboutDirtyDishes", "TestCharismaGreets"];
 
 /// The word in their clips' names for the game's socials with a graph of their own (not its
 /// `social_generic` with a suite): asking for things, sharing interests, compliments...
@@ -693,6 +702,7 @@ pub fn topic_holds(t: Topic, first: bool, actor: &Sim, target: &Sim, target_in_h
         Topic::SameHousehold => target_in_household,
         Topic::AdultToChild => (grown(actor) && !grown(target)) == first && grown(actor) != grown(target),
         Topic::SameWork => side[0].career.is_some() && side[0].career == side[1].career,
+        Topic::Charisma(level) => first && side[0].charisma == level,
         Topic::Event(name) => me.topics.and_then(|t| t.get(name)).is_some_and(|h| {
             !other.sim.is_some_and(|o| h.used_with.contains(&o)) && (test != Some(GameTest::About) || (h.about.is_some() && h.about == other.sim))
         }),
