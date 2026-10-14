@@ -205,6 +205,9 @@ pub struct SavedRel {
     pub stc: Option<(String, f32)>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub enemy: bool,
+    /// Romantically involved (older saves: kissed, or romance under way).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub romantic: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -853,6 +856,7 @@ fn save_game(
                         last: r.last,
                         stc: (r.stc.value > 0.0).then(|| (r.stc.commodity.name().to_string(), r.stc.value)),
                         enemy: r.enemy,
+                        romantic: r.romantic,
                     })
                 })
                 .collect(),
@@ -1093,6 +1097,7 @@ pub(crate) fn apply_loaded_game(
                 x.kissed = r.kissed;
                 x.last = r.last;
                 x.enemy = r.enemy;
+                x.romantic = r.romantic || r.kissed || r.romance >= 20.0;
                 if let Some((c, v)) = &r.stc
                     && let Some(c) = crate::conversation::Commodity::from_name(c)
                 {

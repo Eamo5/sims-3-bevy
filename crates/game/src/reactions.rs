@@ -131,7 +131,7 @@ impl Pending {
 }
 
 fn partners(r: &Relationship) -> bool {
-    matches!(r.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married) || (r.romance >= 20.0 && r.friendship > PARTNER_LIKING)
+    matches!(r.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married) || (r.romantic && r.friendship > PARTNER_LIKING)
 }
 
 /// What a Sim's traits make of something bad befalling someone not their friend (the game's

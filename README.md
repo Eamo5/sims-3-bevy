@@ -312,7 +312,13 @@ installation is unreachable.
   they're friends (40, about two dozen socials from strangers), less after; the witty gain more
   from jokes, the charming from anything; boring, creepy and rude contexts cost the most
   between good friends. Relationships are the game's: Friends at 40, Good Friends at 60, Best
-  at 80, Disliked from -20, Enemies only sworn ones. Each midnight liking drifts by the
+  at 80, Disliked from -20, Enemies only sworn ones; romance is the game's flag, a first kiss or
+  a confessed attraction making them Romantic Interests ("Let's Just Be Friends" undoing it),
+  its socials offered as the conversation warms rather than by a meter: four flirts taken well
+  make it Seductive (a kiss on the menu between friends), more make it Hot (going steady between
+  romantic interests, a proposal between partners, WooHoo). A social taken well earns Charisma
+  once a Sim has the skill, by the context (100 points in an OK one, up to 200 in a very friendly
+  or hilarious one). Each midnight liking drifts by the
   context's own rate (two a day in a good one; a grudge softens by three, or one while it's
   still sour) and the context cools; romance cools after three days apart unless they're
   together. The socials offered are the game's menus for the context and the relationship

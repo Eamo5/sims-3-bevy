@@ -2949,7 +2949,7 @@ pub(crate) fn run_actions(
     let ground = |level: u8, x: f32, z: f32| crate::nav::floor_height(&world.data, building.as_deref(), level, Vec3::new(x, 0.0, z));
     // Social effects to apply to partners after the main pass: (target, actor, social, fun, rel, pose talk)
     // (Who's talked to whom: social and fun, liking and romance, and their conversation's context.)
-    let mut social_fx: Vec<(Entity, Entity, f32, f32, f32, f32, Option<(crate::conversation::Stc, f32, bool)>)> = Vec::new();
+    let mut social_fx: Vec<(Entity, Entity, f32, f32, f32, f32, Option<crate::conversation::Shared>)> = Vec::new();
     // Needs a care social fills for the little one: (target, per-need gain).
     let mut care_fx: Vec<(Entity, [f32; 6])> = Vec::new();
     // Social partners whose animation should end: (target, actor).
@@ -3539,7 +3539,7 @@ pub(crate) fn run_actions(
                                         actor_moodlets: &mine,
                                         target_moodlets: &[],
                                         liking: rel.friendship,
-                                        relationship: crate::conversation::relationship_state(rel.friendship, rel.status, rel.romance > 0.0 || rel.kissed, rel.enemy),
+                                        relationship: rel.state(),
                                         stc: rel.stc,
                                         target_mood: tmood.0,
                                         charisma: skills.0.get("Charisma").map(|v| *v as u32),
@@ -3570,7 +3570,7 @@ pub(crate) fn run_actions(
                                         if rels.add(*target, f, r) {
                                             life.write(LifeEvent::new(me, LifeEventKind::MadeFriend { other: *target }));
                                         }
-                                        social_fx.push((*target, me, 0.0, 0.0, 0.0, r, Some((stc, rels.get(*target).friendship, rels.get(*target).enemy))));
+                                        social_fx.push((*target, me, 0.0, 0.0, 0.0, r, Some(crate::conversation::Shared::of(&rels.get(*target)))));
                                         memories.0.entry(me).or_default().after(*social, clock.minutes);
                                         life.write(LifeEvent::new(me, LifeEventKind::Socialized { other: *target, social: "Argue" }));
                                         finished = true;
@@ -4247,22 +4247,26 @@ pub(crate) fn run_actions(
                                         && let Some((tsim, ..)) = who.get(target)
                                     {
                                         let before = rels.get(*target);
+                                        // (Charisma for one taken well, once they've the skill.)
+                                        let charm = crate::conversation::charisma_points(&o, &before.stc);
+                                        if charm > 0.0 && skills.0.contains_key("Charisma") {
+                                            let rate = crate::life::skill_rate(&sim.traits, "Charisma") * crate::wishes::reward_skill_rate(wishes) * mood_learning;
+                                            if let Some(level) = skills.add_points("Charisma", charm * rate) {
+                                                notes.push(format!("{} reached level {level} in Charisma!", sim.first));
+                                                life.write(LifeEvent::new(me, LifeEventKind::SkillUp { skill: "Charisma", level }));
+                                            }
+                                        }
                                         let (f, stc) = crate::conversation::effect(*social, before.friendship, before.stc, &o, sim, tsim);
                                         let e = rels.entry(*target);
                                         e.stc = stc;
-                                        if o.bits_add & crate::conversation::BIT_MAKE_ENEMY != 0 {
-                                            e.enemy = true;
-                                        }
-                                        if o.bits_remove & crate::conversation::BIT_MAKE_ENEMY != 0 {
-                                            e.enemy = false;
-                                        }
+                                        crate::conversation::apply_bits(e, &o);
                                         if rels.add(*target, f, 0.0) {
                                             life.write(LifeEvent::new(me, LifeEventKind::MadeFriend { other: *target }));
                                         }
                                         if rels.get(*target).friendship >= 0.0 {
                                             rels.entry(*target).enemy = false;
                                         }
-                                        social_fx.push((*target, me, 0.0, 0.0, 0.0, 0.0, Some((stc, rels.get(*target).friendship, rels.get(*target).enemy))));
+                                        social_fx.push((*target, me, 0.0, 0.0, 0.0, 0.0, Some(crate::conversation::Shared::of(&rels.get(*target)))));
                                         memories.0.entry(me).or_default().after(*social, clock.minutes);
                                         debug!("{} and {}: {:?}, liking {:+.2} to {:.1}, now {}", sim.first, tsim.first, o.result, f, rels.get(*target).friendship, stc.name());
                                     }
@@ -4785,9 +4789,12 @@ pub(crate) fn run_actions(
                     r.status = s;
                     if s == RelStatus::Ex {
                         r.romance = (r.romance - 60.0).max(-100.0);
+                    } else {
+                        r.romantic = true;
                     }
                 }
                 r.kissed |= kissed;
+                r.romantic |= kissed;
             }
         }
     }
@@ -4820,12 +4827,14 @@ pub(crate) fn run_actions(
             motives.add(SOCIAL, social);
             motives.add(FUN, fun);
             // (Their conversation, and liking, the same both ways.)
-            if let Some((stc, liking, enemy)) = stc {
+            if let Some(shared) = stc {
+                let liking = shared.liking;
                 let r = rels.entry(actor);
                 let was = r.friendship;
-                r.stc = stc;
+                r.stc = shared.stc;
                 r.friendship = liking;
-                r.enemy = enemy;
+                r.enemy = shared.enemy;
+                r.romantic = shared.romantic;
                 if was < crate::social::FRIEND_THRESHOLD && liking >= crate::social::FRIEND_THRESHOLD {
                     life.write(LifeEvent::new(target, LifeEventKind::MadeFriend { other: actor }));
                 }

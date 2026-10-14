@@ -218,7 +218,7 @@ fn ltr_icon(r: &crate::social::Relationship) -> &'static str {
         RelStatus::Engaged => "relationships_state_fiancee",
         RelStatus::Partner => "relationships_state_partners",
         RelStatus::Ex => "relationships_state_ex_romance",
-        RelStatus::None if r.romance >= 20.0 => "relationships_state_date",
+        RelStatus::None if r.romantic && r.friendship >= 1.0 => "relationships_state_date",
         RelStatus::None => match r.friendship_label() {
             "Enemy" => "relationships_state_enemy",
             "Disliked" => "relationships_state_disliked",

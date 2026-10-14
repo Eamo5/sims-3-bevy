@@ -310,8 +310,20 @@ pub struct Outcome {
     pub ltr_override: f32,
     pub bits_add: u32,
     pub bits_remove: u32,
+    /// The Charisma points it's worth taken well (-1: the context's).
+    pub charisma: f32,
     /// Whether it went down as meant (the game's `IsSocialAccepted`).
     pub accepted: bool,
+}
+
+/// The Charisma points a social taken well earns its Sim, once they've the skill (the game's
+/// `UpdateSimBeforeInteraction`: its outcome's own, else the context's `CharismaIncrease`: 100 in
+/// an OK one up to 200 in a very friendly or hilarious one).
+pub fn charisma_points(o: &Outcome, stc: &Stc) -> f32 {
+    if !o.accepted {
+        return 0.0;
+    }
+    if o.charisma >= 0.0 { o.charisma } else { stc.row().map_or(0.0, |r| r.charisma) }
 }
 
 /// The game's `IsSocialAccepted`: a good social taken neutrally isn't taken well; a mean one
@@ -414,6 +426,11 @@ fn norm(s: &str) -> String {
 
 fn same(a: &str, b: &str) -> bool {
     norm(a) == norm(b)
+}
+
+/// Whether the game's menus govern a social (lists it in some context).
+pub fn governed(def: &crate::social::SocialDef) -> bool {
+    tables().is_some_and(|t| t.in_menus.contains(&norm(def.game.map_or_else(|| game_key(def.name), |g| g.key))))
 }
 
 /// Whether the game offers a social now (its `SocializingActionAvailability`, as
@@ -562,7 +579,7 @@ fn request_threshold(j: &Judging) -> f32 {
 /// outcomes for that result).
 pub fn decide(social: usize, j: &Judging) -> Outcome {
     let Some(model) = model(social) else {
-        return Outcome { result: Commodity::Friendly, amount: 40.0, ltr_override: 0.0, bits_add: 0, bits_remove: 0, accepted: true };
+        return Outcome { result: Commodity::Friendly, amount: 40.0, ltr_override: 0.0, bits_add: 0, bits_remove: 0, charisma: -1.0, accepted: true };
     };
     // (The holiday warms both.)
     let warm = if j.holiday { 20.0 } else { 0.0 };
@@ -600,6 +617,7 @@ pub fn decide(social: usize, j: &Judging) -> Outcome {
         ltr_override: found.map_or(0.0, |r| r.ltr_override),
         bits_add: rhs.map_or(0, |o| o.bits_add),
         bits_remove: rhs.map_or(0, |o| o.bits_remove),
+        charisma: rhs.map_or(-1.0, |o| o.charisma),
         accepted: accepted(model.intended, result),
     }
 }
@@ -631,9 +649,46 @@ pub fn effect(social: usize, liking: f32, stc: Stc, o: &Outcome, actor: &Sim, ta
     (liking_change(&stc, liking) * num, stc)
 }
 
-/// The game's relationship flag a social's outcome sets and clears that we keep: sworn enmity
-/// (`MakeEnemy`).
+/// The game's relationship flags a social's outcome sets and clears that we keep: romance
+/// (`Romantic`), the first kiss (`Kissed`) and sworn enmity (`MakeEnemy`).
+pub const BIT_ROMANTIC: u32 = 0x2;
 pub const BIT_MAKE_ENEMY: u32 = 0x800;
+pub const BIT_KISSED: u32 = 0x2000;
+
+/// What a social's outcome makes of the relationship's flags.
+pub fn apply_bits(rel: &mut crate::social::Relationship, o: &Outcome) {
+    if o.bits_add & (BIT_ROMANTIC | BIT_KISSED) != 0 {
+        rel.romantic = true;
+    }
+    if o.bits_add & BIT_KISSED != 0 {
+        rel.kissed = true;
+    }
+    if o.bits_remove & BIT_ROMANTIC != 0 {
+        rel.romantic = false;
+    }
+    if o.bits_add & BIT_MAKE_ENEMY != 0 {
+        rel.enemy = true;
+    }
+    if o.bits_remove & BIT_MAKE_ENEMY != 0 {
+        rel.enemy = false;
+    }
+}
+
+/// What's the same for both of them after a social: their conversation, liking, enmity and
+/// romance.
+#[derive(Clone, Copy, Debug)]
+pub struct Shared {
+    pub stc: Stc,
+    pub liking: f32,
+    pub enemy: bool,
+    pub romantic: bool,
+}
+
+impl Shared {
+    pub fn of(rel: &crate::social::Relationship) -> Self {
+        Self { stc: rel.stc, liking: rel.friendship, enemy: rel.enemy, romantic: rel.romantic }
+    }
+}
 
 /// Each Sim's memory of what they've said in their conversation.
 #[derive(bevy::prelude::Resource, Default)]
@@ -788,6 +843,21 @@ mod tests {
         assert_eq!(decide(flirt, &judge(-40.0, ok, 10.0)).result, Commodity::Awkward);
         // (Chat ignores liking: Friendly in good company.)
         assert_eq!(decide(index("Chat"), &judge(-60.0, ok, 10.0)).result, Commodity::Friendly);
+        // (Four flirts taken well make it seductive: a kiss is on the menu between friends then,
+        // not before; going steady only once it's hot between romantic interests.)
+        let mut stc = ok;
+        for _ in 0..4 {
+            let o = decide(flirt, &judge(45.0, stc, 10.0));
+            assert_eq!(o.result, Commodity::Amorous);
+            stc.update(o.result, o.amount);
+        }
+        assert_eq!(stc.name(), "Seductive");
+        let kiss = crate::social::all_socials().find(|(_, s)| s.name == "Kiss").unwrap().1;
+        assert!(!offered(kiss, ok, "Friend"));
+        assert!(offered(kiss, stc, "Friend"));
+        let steady = crate::social::all_socials().find(|(_, s)| s.name == "Ask to Go Steady").unwrap().1;
+        assert!(!offered(steady, stc, "Romantic Interest"));
+        assert!(offered(steady, Stc { commodity: Commodity::Amorous, value: 320.0 }, "Romantic Interest"));
     }
 
     #[test]

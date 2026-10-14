@@ -33,6 +33,9 @@ pub struct Relationship {
     pub stc: crate::conversation::Stc,
     /// Sworn enemies (the game's `MakeEnemy` flag: enmity takes a declaration, not just dislike).
     pub enemy: bool,
+    /// Romantically involved (the game's `Romantic` flag: a first kiss, a confessed attraction;
+    /// cleared by "Let's Just Be Friends").
+    pub romantic: bool,
 }
 
 /// Days without seeing or speaking to each other before a relationship starts to fade.
@@ -129,6 +132,11 @@ impl Relationship {
         }
     }
 
+    /// Their relationship's state by the game's name ("Friend", "Romantic Interest", "Spouse").
+    pub fn state(&self) -> &'static str {
+        crate::conversation::relationship_state(self.friendship, self.status, self.romantic, self.enemy)
+    }
+
     /// What they are to one another by liking (the game's relationship states: Friends at 40,
     /// Good Friends at 60, Best at 80, Disliked from -20; Enemies only sworn ones).
     pub fn friendship_label(&self) -> &'static str {
@@ -149,7 +157,7 @@ impl Relationship {
             RelStatus::Engaged => "Fiancé(e)".into(),
             RelStatus::Partner => "Partner".into(),
             RelStatus::Ex => format!("Ex · {friend}"),
-            RelStatus::None if self.romance >= 20.0 => format!("{friend} · Romantic Interest"),
+            RelStatus::None if self.romantic && self.friendship >= 1.0 => format!("{friend} · Romantic Interest"),
             RelStatus::None => friend.into(),
         }
     }
@@ -738,16 +746,16 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
 pub fn pick_autonomous(actor: &Sim, target_age: Age, rel: &Relationship, rng: &mut impl rand::Rng) -> Option<usize> {
     use crate::conversation::{self as conv, Commodity};
     use rand::seq::IndexedRandom;
-    let state = conv::relationship_state(rel.friendship, rel.status, rel.romance > 0.0 || rel.kissed, rel.enemy);
+    let state = rel.state();
     let desired = conv::desired_tone(actor, rel.stc, state, rng);
     let (_, avoid) = conv::trait_tones(&actor.traits);
-    let romantic = rel.romance > 0.0 || matches!(rel.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married);
+    let romantic = rel.romantic || matches!(rel.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married);
     let fits: Vec<(usize, f32)> = all_socials()
         .filter_map(|(i, s)| {
             if !s.autonomous || s.cat == SocialCat::Care || s.needs.is_some() {
                 return None;
             }
-            if rel.friendship < s.min_friendship || rel.friendship > s.max_friendship || rel.romance < s.min_romance {
+            if rel.friendship < s.min_friendship || rel.friendship > s.max_friendship || (!conv::governed(s) && rel.romance < s.min_romance) {
                 return None;
             }
             if let Some(g) = s.game
@@ -854,12 +862,14 @@ pub fn load_game_socials(ui: Option<Res<crate::icons::GameUi>>, data: Option<Res
 /// Whether `actor` can start this social with `target` (shown in the pie menu); `kin`: whether
 /// they're family (no romance between relatives).
 pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim, target_in_household: bool, kin: bool, side: [Side; 2]) -> bool {
-    if rel.friendship < def.min_friendship || rel.romance < def.min_romance || rel.friendship > def.max_friendship {
+    // (Romance as far along as it asks, where the game's menus don't say: theirs go by the
+    // conversation and the relationship.)
+    let governed = crate::conversation::governed(def);
+    if rel.friendship < def.min_friendship || (!governed && rel.romance < def.min_romance) || rel.friendship > def.max_friendship {
         return false;
     }
     // (What the game offers in their conversation, as things stand between them.)
-    let state = crate::conversation::relationship_state(rel.friendship, rel.status, rel.romance > 0.0 || rel.kissed, rel.enemy);
-    if !crate::conversation::offered(def, rel.stc, state) {
+    if !crate::conversation::offered(def, rel.stc, rel.state()) {
         return false;
     }
     // (The game's own: the ages it's for, the traits it asks of the one it's done to and of the

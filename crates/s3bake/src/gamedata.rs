@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 99;
+pub const GAMEDATA_VERSION: u32 = 100;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -337,6 +337,14 @@ pub struct SocialOutcome {
     pub amount: f32,
     pub bits_add: u32,
     pub bits_remove: u32,
+    /// The Charisma points it's worth when it goes down well (`<TUN charInc>`; -1: the
+    /// context's).
+    #[serde(default = "no_charisma_override")]
+    pub charisma: f32,
+}
+
+fn no_charisma_override() -> f32 {
+    -1.0
 }
 
 /// One of the game's short-term contexts (the `Socializing` table's `<STC>` rows): the
@@ -598,6 +606,7 @@ fn social_rules(body: &str) -> (Vec<SocialRule>, Vec<SocialOutcome>) {
             amount: tag(inner, "TUN").and_then(|t| attr(t, "val")).and_then(|v| v.parse().ok()).unwrap_or(40.0),
             bits_add: hex(bits.and_then(|t| attr(t, "val"))),
             bits_remove: hex(bits.and_then(|t| attr(t, "rem"))),
+            charisma: tag(inner, "TUN").and_then(|t| attr(t, "charInc")).and_then(|v| v.parse().ok()).unwrap_or(-1.0),
         });
     }
     (out, outcomes)
@@ -3440,8 +3449,8 @@ mod tests {
         let chat = &social_actions(xml, &|k| k.to_string())[0];
         assert_eq!((chat.speech_act.as_str(), chat.chances, chat.recharges), ("Talk", 4, 6));
         assert_eq!(chat.outcomes, vec![
-            SocialOutcome { result: "Friendly".into(), amount: 40.0, bits_add: 0, bits_remove: 0 },
-            SocialOutcome { result: "Boring".into(), amount: 80.0, bits_add: 0x800, bits_remove: 0x100 },
+            SocialOutcome { result: "Friendly".into(), amount: 40.0, bits_add: 0, bits_remove: 0, charisma: -1.0 },
+            SocialOutcome { result: "Boring".into(), amount: 80.0, bits_add: 0x800, bits_remove: 0x100, charisma: -1.0 },
         ]);
         let r = &chat.rules;
         assert_eq!((r[0].result.as_str(), r[0].spec, r[0].third_party, r[0].repetition), ("Boring", 54.0, 2, 1));
