@@ -52,6 +52,11 @@ impl Dying {
         Self { cause: "of hunger", clip: &["a_die_starvation_x"], ..Self::new() }
     }
 
+    /// Under a vending machine that toppled as they shook it (the game's blunt force trauma).
+    pub fn crushed() -> Self {
+        Self { cause: "under a toppled vending machine", clip: &["a2o_vendingMachine_fallOver_x"], ..Self::new() }
+    }
+
     pub fn electrocuted() -> Self {
         Self { cause: "of electrocution", clip: &["a_die_electrocution_x"], ..Self::new() }
     }

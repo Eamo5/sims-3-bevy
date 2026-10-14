@@ -839,6 +839,10 @@ pub enum Special {
     ReplicateFood,
     /// A soda or a candy bar from a vending machine, paid for away from home.
     Vend,
+    /// A snack stuck in the machine instead (not on the menu: a purchase turns into it).
+    VendStuck,
+    /// The machine shaken or slammed, for a snack stuck in it or one for free.
+    VendShake,
     /// Art looked over, then liked or not, by taste (`art_taste`).
     ViewArt,
     /// The laundry's steps (see `laundry`): a pile picked up, a load put on, the wet clothes
@@ -1300,9 +1304,22 @@ static FOOD_SYNTHESIZER: [InteractionDef; 1] =
 /// quarter of an hour it takes.)
 const VEND_SODA: InteractionDef = InteractionDef { special: Special::Vend, ..def("Buy Soda", 12.0, [25.0, 0.0, 0.0, 0.0, 0.0, 5.0], Pose::Use) };
 const VEND_CANDY: InteractionDef = InteractionDef { special: Special::Vend, ..def("Buy Candy", 12.0, [25.0, 0.0, 0.0, 0.0, 0.0, 5.0], Pose::Use) };
-static VENDING_SODA: [InteractionDef; 1] = [VEND_SODA];
-static VENDING_CANDY: [InteractionDef; 1] = [VEND_CANDY];
-static VENDING_BOTH: [InteractionDef; 2] = [VEND_SODA, VEND_CANDY];
+const VEND_STUCK: InteractionDef = InteractionDef { autonomous: false, special: Special::VendStuck, ..def("Stuck", 2.0, N, Pose::Use) };
+const VEND_SHAKE: InteractionDef = InteractionDef { autonomous: false, special: Special::VendShake, ..def("Shake Machine", 2.0, N, Pose::Use) };
+const VEND_SLAM: InteractionDef = InteractionDef { autonomous: false, special: Special::VendShake, ..def("Slam Machine", 2.0, N, Pose::Use) };
+static VENDING_SODA: [InteractionDef; 4] = [VEND_SODA, VEND_SHAKE, VEND_SLAM, VEND_STUCK];
+static VENDING_CANDY: [InteractionDef; 4] = [VEND_CANDY, VEND_SHAKE, VEND_SLAM, VEND_STUCK];
+static VENDING_BOTH: [InteractionDef; 5] = [VEND_SODA, VEND_CANDY, VEND_SHAKE, VEND_SLAM, VEND_STUCK];
+/// How often a purchase sticks in the machine (the game's `kChanceItemStuck`).
+const VEND_STUCK_CHANCE: f64 = 0.1;
+/// Shaking or slamming a vending machine (the game's tuning): the chance of a snack for free,
+/// of shaking loose one that's stuck, and of the machine toppling onto them.
+const SHAKE_ODDS: (f64, f64, f64) = (0.05, 0.2, 0.05);
+const SLAM_ODDS: (f64, f64, f64) = (0.15, 0.4, 0.15);
+
+/// A vending machine with a snack stuck in it.
+#[derive(Component)]
+pub struct SnackStuck;
 /// What a vending machine's snack costs away from home (the game's `kSodaPrice`, `kCandyPrice`).
 pub const VEND_PRICE: i64 = 5;
 /// (A new shape, the sculptor at work for an hour.)
@@ -1761,6 +1778,10 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         // (The coins in, the can or the bar out of the tray, and had there and then.)
         "Buy Soda" => A::steps("a2o_vendingMachine_start_x", &["a2o_vendingMachine_retrieveSoda_x"], &["a2o_vendingMachine_drinkSoda_x"]),
         "Buy Candy" => A::steps("a2o_vendingMachine_start_x", &["a2o_vendingMachine_retrieveCandy_x"], &["a2o_vendingMachine_eatCandy_x", "a2o_vendingMachine_eatCandy_reactNormal_x"]),
+        // (Nothing comes out: a glare at it.)
+        "Stuck" => A::steps("a2o_vendingMachine_start_x", &["a2o_vendingMachine_retrieve_fail_x"], &["a2o_vendingMachine_reactUpset_x"]),
+        "Shake Machine" => A::new(None, &["a2o_vendingMachine_shakeMachine_x"]),
+        "Slam Machine" => A::new(None, &["a2o_vendingMachine_slamMachine_x"]),
         "Synthesize Food" => A::steps(
             "a2o_foodSynthesizer_start1_x",
             &["a2o_foodSynthesizer_program_loop1_x", "a2o_foodSynthesizer_program_loop2_x", "a2o_foodSynthesizer_celebrate_x"],
@@ -2982,6 +3003,25 @@ pub(crate) fn run_actions(
                     if arrived {
                         commands.entity(me).remove::<PathFollow>();
                         action.phase = Phase::Running(0.0);
+                        // (Now and then a purchase sticks in the vending machine.)
+                        let stuck = match &action.kind {
+                            ActionKind::Object { target, def } => objects.get(*target).ok().and_then(|(obj, ..)| {
+                                let defs = interactions_for(obj.kind);
+                                (defs.get(*def).is_some_and(|d| d.special == Special::Vend) && rand::rng().random_bool(VEND_STUCK_CHANCE))
+                                    .then(|| defs.iter().position(|d| d.special == Special::VendStuck))
+                                    .flatten()
+                                    .map(|i| (*target, i))
+                            }),
+                            _ => None,
+                        };
+                        if let Some((target, def)) = stuck {
+                            action.kind = ActionKind::Object { target, def };
+                            commands.entity(target).insert(SnackStuck);
+                            // (Told of it when it was theirs to ask for.)
+                            if !action.autonomous {
+                                notes.push(format!("{}'s snack got stuck in the machine.", sim.first));
+                            }
+                        }
                         match &action.kind {
                             ActionKind::Object { target, def } => {
                                 if let Ok((obj, otf, _, _)) = objects.get(*target) {
@@ -3578,6 +3618,27 @@ pub(crate) fn run_actions(
                                         Special::ReplicateFood => {
                                             commands.entity(me).insert(crate::meals::MealRequest::Replicated);
                                             notes.push(format!("{} replicated a meal.", sim.first));
+                                        }
+                                        // (Nothing to pay for a snack that stuck.)
+                                        Special::VendStuck => {}
+                                        // (Shaken loose, for free, or the machine toppling onto them.)
+                                        Special::VendShake => {
+                                            let (free, loose, topple) = if d.name == "Slam Machine" { SLAM_ODDS } else { SHAKE_ODDS };
+                                            let (machine, first) = (*target, sim.first.clone());
+                                            commands.queue(move |w: &mut World| {
+                                                let mut rng = rand::rng();
+                                                let stuck = w.get::<SnackStuck>(machine).is_some();
+                                                let pregnant = w.get::<crate::little::Pregnancy>(me).is_some();
+                                                if !pregnant && rng.random_bool(topple) {
+                                                    w.entity_mut(me).insert(crate::death::Dying::crushed());
+                                                } else if rng.random_bool(if stuck { loose } else { free }) {
+                                                    w.entity_mut(machine).remove::<SnackStuck>();
+                                                    if let Some(mut m) = w.get_mut::<Motives>(me) {
+                                                        m.add(HUNGER, 5.0);
+                                                    }
+                                                    w.resource_mut::<Notifications>().push(format!("{first} got a snack out of the machine."));
+                                                }
+                                            });
                                         }
                                         // (Paid for away from home.)
                                         Special::Vend => {

@@ -688,7 +688,10 @@ installation is unreachable.
   fetches).
 - **Vending machines** (Late Night): *Buy Soda* or *Buy Candy* (the healthy one has both),
   with the game's clips, the coins in and the can or the bar out of the tray, and had there
-  and then (a little hunger, as the game's), §5 away from home, free at home. Catalogue objects
+  and then (a little hunger, as the game's), §5 away from home, free at home. One in ten sticks
+  in the machine (a glare at it, and nothing to pay); *Shake Machine* or *Slam Machine* may
+  shake it loose, or one for free, or topple the machine onto them, at the game's odds (the
+  slam riskier). Catalogue objects
   come in their first swatch, as the game sells them (some, the vending machines, have no
   picture of their own without one).
 - **Bars**: *Make a Drink* at any of the catalogue's bars: the Sim pours from the blender,

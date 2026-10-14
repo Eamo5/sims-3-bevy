@@ -1253,6 +1253,10 @@ fn world_click(
                 if d.special.needs().is_some_and(|k| !objects.iter().any(|o| o.kind == k)) {
                     continue;
                 }
+                // (A snack sticking is what a purchase turns into, not one to choose.)
+                if d.special == Special::VendStuck {
+                    continue;
+                }
                 if d.special == Special::VampireOnly && actor_sim.occult != Some(crate::sim::Occult::Vampire) {
                     continue;
                 }
