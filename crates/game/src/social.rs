@@ -484,7 +484,7 @@ pub fn all_socials() -> impl Iterator<Item = (usize, &'static SocialDef)> {
 
 /// The game's tests (its `ProcTest`s) a social of its may have that are taken here as passed:
 /// those that only ask what's asked anyway (how well they get on, how romantic they are).
-const PASSED_TESTS: &[&str] = &["TestChat", "TalkAboutWeatherTest", "ShareInterestsProceduralTest", "TestFriendlyHug", "TestKissOnCheek", "TestAskAboutRecentAction", "TestComplimentParty", "TestWoo"];
+const PASSED_TESTS: &[&str] = &["TestChat", "TalkAboutWeatherTest", "ShareInterestsProceduralTest", "TestFriendlyHug", "TestKissOnCheek", "TestAskAboutRecentAction", "TestComplimentParty", "TestWoo", "TestComplainAboutDirtyDishes"];
 
 /// The word in their clips' names for the game's socials with a graph of their own (not its
 /// `social_generic` with a suite): asking for things, sharing interests, compliments...

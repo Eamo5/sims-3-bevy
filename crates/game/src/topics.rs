@@ -21,7 +21,7 @@ pub struct TopicsPlugin;
 
 impl Plugin for TopicsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AddTopic>().add_systems(Update, (give, events, doing, chatter).chain().run_if(in_state(PlayMode::Live)));
+        app.add_message::<AddTopic>().add_systems(Update, (give, (mess, expecting), events, doing, chatter).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -113,6 +113,50 @@ const LOW_FUNDS: i64 = 500;
 const WHILE_ON: f64 = 70.0;
 /// How far from a fire, or a meal's cook, Sims are taken to be there (metres).
 const THERE: f32 = 30.0;
+
+/// How near dirty dishes or mess a Sim is to notice it (metres), and how often it's looked at
+/// (game minutes).
+const MESS_NEAR: f32 = 5.0;
+const MESS_EVERY: f64 = 15.0;
+
+/// Mess about: dirty dishes for anyone near to complain of (and ask someone to clean up), and a
+/// mess for the Neat (the game's broadcasters' "Complain About Dirty Dishes", "Disgusted By
+/// Mess").
+fn mess(
+    clock: Res<GameClock>,
+    mut next: Local<f64>,
+    mut adds: MessageWriter<AddTopic>,
+    sims: Query<(Entity, &Sim, &Transform, &InheritedVisibility), With<HouseholdMember>>,
+    objects: Query<(&crate::interact::GameObject, &Transform)>,
+) {
+    if clock.minutes < *next {
+        return;
+    }
+    *next = clock.minutes + MESS_EVERY;
+    use crate::interact::ObjectKind as K;
+    let dishes: Vec<Vec3> = objects.iter().filter(|(o, _)| o.kind == K::DirtyDishes).map(|(_, tf)| tf.translation).collect();
+    let mess: Vec<Vec3> = objects.iter().filter(|(o, _)| matches!(o.kind, K::DirtyDishes | K::ClothingPile | K::Puddle)).map(|(_, tf)| tf.translation).collect();
+    let near = |at: Vec3, spots: &[Vec3]| spots.iter().any(|p| (p.y - at.y).abs() < 1.8 && p.with_y(0.0).distance(at.with_y(0.0)) < MESS_NEAR);
+    for (e, sim, tf, shown) in &sims {
+        if !shown.get() || sim.age.is_little() {
+            continue;
+        }
+        if near(tf.translation, &dishes) {
+            debug!("{} notices the dirty dishes", sim.first);
+            adds.write(AddTopic::new(e, "Complain About Dirty Dishes"));
+        }
+        if sim.traits.contains(&crate::life::Trait::Neat) && near(tf.translation, &mess) {
+            adds.write(AddTopic::new(e, "Disgusted By Mess"));
+        }
+    }
+}
+
+/// A pregnancy begun is news to announce (the game's "Announce Pregnancy").
+fn expecting(mut adds: MessageWriter<AddTopic>, new: Query<Entity, Added<crate::little::Pregnancy>>) {
+    for e in &new {
+        adds.write(AddTopic::new(e, "Announce Pregnancy"));
+    }
+}
 
 /// Every Sim has their topics.
 fn give(mut commands: Commands, sims: Query<Entity, (With<Sim>, Without<Topics>)>) {
@@ -299,6 +343,7 @@ const FANCY: f32 = 30.0;
 #[allow(clippy::type_complexity)]
 fn chatter(
     clock: Res<GameClock>,
+    settings: Res<crate::options::Settings>,
     mut next: Local<f64>,
     mut rested: Local<HashMap<Entity, f64>>,
     mut said: Local<HashMap<(Entity, &'static str), f64>>,
@@ -314,6 +359,10 @@ fn chatter(
     let mut rng = rand::rng();
     let about: Vec<(Entity, Sim, Vec3)> = sims.iter().filter(|(_, s, _, shown, ..)| shown.get() && !s.age.is_little()).map(|(e, s, tf, ..)| (e, s.clone(), tf.translation)).collect();
     for (me, sim, tf, shown, mut queue, anim) in &mut sims {
+        // (The household's own free will, as the rest of what they do unasked.)
+        if members.contains(me) && settings.free_will == crate::options::FreeWill::Off {
+            continue;
+        }
         if !shown.get() || sim.age.is_little() || !queue.0.is_empty() || anim.pose == crate::sim::Pose::Lie || rested.get(&me).is_some_and(|t| clock.minutes < *t) || !rng.random_bool(CHATTER_CHANCE) {
             continue;
         }

@@ -451,12 +451,13 @@ installation is unreachable.
   (thanked for it), a day at work (Enthuse About Work; Worry About Work after a bad one), a
   skill come on (Boast About Culinary Prowess...), a swim, money running low, a party thrown
   (complimented or mocked while it's on, boasted or complained of after), a visit (the guests
-  Compliment the Home), a novel finished (Praise Written Book); what a Sim's doing
+  Compliment the Home), a novel finished (Praise Written Book), a pregnancy (Announce
+  Pregnancy), dirty dishes about (complained of; a mess too, by the Neat); what a Sim's doing
   while they do it and twenty minutes after (Ask: Good Show? at the TV, Compliment Music,
   Ask About Game); grown-ups with children, the household's own, those in the same line of
   work. Most are said once between two Sims while they last. Sims bring them up of their own
-  accord now and then (thanking the cook after dinner, congratulating someone on their
-  birthday): something mean only from the mean or to someone disliked, something romantic only
+  accord now and then, as their free will has it (thanking the cook after dinner,
+  congratulating someone on their birthday): something mean only from the mean or to someone disliked, something romantic only
   where there's romance.
 - **Art**: paintings and sculptures are viewed ("View", for fun): the Sim looks the piece over
   and then shows what they make of it with the game's reactions, by its price and their taste
