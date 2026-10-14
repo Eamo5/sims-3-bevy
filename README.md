@@ -872,7 +872,13 @@ installation is unreachable.
   tile, never under a floor or a garage): the ground opens over it, a coping goes round it
   and the terrain round its edge is laid along the lot's grid; Ctrl+drag fills it in. Pool
   ladders from the catalogue snap to a pool's edge, and Sims swim in the pool they stand
-  at (a lot's other pools are left alone). A Terrain tab paints the ground on the lot with
+  at (a lot's other pools are left alone). The Foundation tool (the game's Foundations panel)
+  drags out a foundation to build on (§20 a tile): the ground floor raised the game's 0.75 m
+  over the highest ground under the first one laid (the starter deck staying where it stood,
+  walls built on the deck standing on it), the foundation's brick sides round its edge and
+  none between tiles laid side by side; not under walls, a staircase or a pool, and before
+  the house's walls go up; Ctrl+drag takes it away again where no room stands on it. Sims
+  step up onto it as onto the game's own houses' foundations. A Terrain tab paints the ground on the lot with
   the world's own terrain paints (pictured from their textures), in three brush sizes, or
   erases back to how the world had it; its terrain tools raise, lower, flatten and smooth the
   ground (not under the house, the pool or anything standing on the lot, nor at its edges).
@@ -1081,8 +1087,8 @@ installation is unreachable.
   Apply/Enter commits, Cancel/Escape restores the original, and Buy Mode undo reverses the edit.
 - **Build Mode navigation**: the original house diagram opens walls, wallpaper, floors, doors,
   windows, roofs, fences, stairs, pools and terrain tools. The original puck provides mode,
-  camera, floor, wall-view, lighting and grid controls. Wall/room and rectangular-pool tools
-  use their original panels and Back button; catalogue browsers appear above the navigation.
+  camera, floor, wall-view, lighting and grid controls. Wall/room, rectangular-pool and
+  foundation tools use their original panels and Back button; catalogue browsers appear above the navigation.
   Floor and wallpaper catalogues use the original Build panels and expandable thumbnail grids,
   with wheel/skinned-scrollbar navigation and single-surface/room-fill buttons. Pattern names
   and prices appear on hover; selecting one retains its colour presets and Create a Style.

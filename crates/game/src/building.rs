@@ -128,6 +128,7 @@ pub struct ActiveBuilding {
     stair_entities: Vec<Entity>,
     fence_entities: Vec<Entity>,
     pool_entities: Vec<Entity>,
+    foundation_entities: Vec<Entity>,
     roof_entity: Option<Entity>,
     /// The roof pattern on the household's rooms, and their shape.
     pub roof_texture: Key,
@@ -364,6 +365,65 @@ mod lamp_tests {
         app.update();
         assert_eq!(app.world().get::<PointLight>(e).unwrap().intensity, 90_000.0);
         assert_eq!(*app.world().get::<Visibility>(e).unwrap(), Visibility::Inherited);
+    }
+}
+
+#[cfg(test)]
+mod foundation_tests {
+    use super::*;
+
+    /// An empty lot with its starter deck (the deck at 0.12 over flat ground at 0).
+    fn deck_lot() -> LotBuildingBaked {
+        let mut b = LotBuildingBaked { lot: 0, width: 10, depth: 10, levels: vec![0.0, 0.12], walls: Vec::new(), floors: Vec::new(),
+            foundation: Vec::new(), foundation_top: Vec::new(), objects: Vec::new(), covers: Vec::new(), ground: Vec::new(), pool: Vec::new(),
+            pool_depth: 0.0, fences: Vec::new(), stairs: Vec::new(), basement: None };
+        for x in 0..3 {
+            for z in 0..3 {
+                b.floors.push(FloorBaked { level: 1, x, z, mask: 0xF, kind: s3bake::ROOM_PORCH, region: 0, cover: [NO_COVER; 4], y: None });
+            }
+        }
+        b.foundation = vec![([0.0, 0.0], [0.0, 3.0]), ([0.0, 3.0], [3.0, 3.0]), ([3.0, 3.0], [3.0, 0.0]), ([3.0, 0.0], [0.0, 0.0])];
+        b
+    }
+
+    #[test]
+    fn a_foundation_raises_the_ground_floor_and_leaves_the_deck_where_it_is() {
+        let mut b = deck_lot();
+        assert!(!founded(&b));
+        for (x, z) in [(5, 5), (6, 5)] {
+            apply_paint(&mut b, &PaintOp::AddFoundation { x, z, ground: 0.0 });
+        }
+        assert!(founded(&b));
+        // (The game's 0.75 m up; the deck kept at its own height, its sides theirs.)
+        assert_eq!(b.levels[1], 0.75);
+        assert!(b.floors.iter().filter(|f| f.kind == s3bake::ROOM_PORCH).all(|f| f.y == Some(0.12)));
+        assert_eq!(b.foundation_top.len(), b.foundation.len());
+        assert!(b.foundation_top[..4].iter().all(|t| *t == 0.12));
+        // (Two tiles side by side: six sides round them, none between.)
+        assert_eq!(b.foundation.len(), 4 + 6);
+        assert!(!b.foundation.iter().any(|(a, c)| (*a == [6.0, 5.0] && *c == [6.0, 6.0]) || (*a == [6.0, 6.0] && *c == [6.0, 5.0])));
+        // (Walls on the foundation stand on it; on the deck, on the deck.)
+        apply_paint(&mut b, &PaintOp::AddWall { a: [5.0, 5.0], b: [7.0, 5.0], level: 1 });
+        apply_paint(&mut b, &PaintOp::AddWall { a: [0.0, 1.0], b: [3.0, 1.0], level: 1 });
+        assert_eq!(b.walls[0].y, None);
+        assert_eq!(b.walls[1].y, Some(0.12));
+        // (A later one, wherever the ground is, is as high as the first.)
+        apply_paint(&mut b, &PaintOp::AddFoundation { x: 8, z: 8, ground: 0.4 });
+        assert_eq!(b.levels[1], 0.75);
+    }
+
+    #[test]
+    fn a_foundation_taken_away_leaves_its_neighbour_a_side() {
+        let mut b = deck_lot();
+        for (x, z) in [(5, 5), (6, 5)] {
+            apply_paint(&mut b, &PaintOp::AddFoundation { x, z, ground: 0.0 });
+        }
+        apply_paint(&mut b, &PaintOp::RemoveFoundation { x: 6, z: 5 });
+        assert!(!b.floors.iter().any(|f| f.level == 1 && f.x == 6 && f.z == 5));
+        // (The one left has its four sides again, looking out.)
+        assert_eq!(b.foundation.len(), 4 + 4);
+        assert!(b.foundation.iter().any(|(a, c)| *a == [6.0, 6.0] && *c == [6.0, 5.0]));
+        assert_eq!(b.foundation_top.len(), b.foundation.len());
     }
 }
 
@@ -722,6 +782,10 @@ pub enum PaintOp {
     /// A pool tile dug (on the ground floor, out of doors), or filled in again.
     AddPool { x: u16, z: u16 },
     RemovePool { x: u16, z: u16 },
+    /// A tile of foundation laid (the ground floor raised on it, the game's 0.75 m up, over the
+    /// highest ground under it, as it was when laid), or taken away again.
+    AddFoundation { x: u16, z: u16, ground: f32 },
+    RemoveFoundation { x: u16, z: u16 },
 }
 
 /// How deep a pool dug in build mode is (a storey down, as the game's).
@@ -785,10 +849,11 @@ pub fn restore_history(
     respawn_walls(&mut commands, b, &mut assets, &mut ctx, &walls);
     respawn_stairs(&mut commands, b, &mut assets, &mut ctx);
     respawn_roofs(&mut commands, b, &mut assets, &mut ctx);
-    for e in b.floor_entities.drain(..).chain(b.pool_entities.drain(..)).chain(b.fence_entities.drain(..)) {
+    for e in b.floor_entities.drain(..).chain(b.pool_entities.drain(..)).chain(b.fence_entities.drain(..)).chain(b.foundation_entities.drain(..)) {
         commands.entity(e).try_despawn();
     }
     let data = b.data.clone();
+    b.foundation_entities = spawn_foundation(&mut commands, &mut assets, &mut ctx, &data, b, None);
     b.floor_entities = spawn_floors(&mut commands, &mut assets, &mut ctx, &data, b, None);
     b.pool_entities = spawn_pool(&mut commands, &mut assets, &mut ctx, &data, b, None);
     b.fence_entities = spawn_fences(&mut commands, &mut assets, &mut ctx, &data, b, None);
@@ -816,6 +881,7 @@ pub fn repaint(
     let mut roof_changed = false;
     let mut fences_changed = false;
     let mut pool_changed = false;
+    let mut foundation_changed = false;
     for op in ops {
         apply_paint(&mut b.data, op);
         let last = b.data.walls.len().saturating_sub(1) as u32;
@@ -866,7 +932,20 @@ pub fn repaint(
             }
             PaintOp::AddFence { .. } | PaintOp::RemoveFence { .. } => fences_changed = true,
             PaintOp::AddPool { .. } | PaintOp::RemovePool { .. } => pool_changed = true,
+            PaintOp::AddFoundation { .. } | PaintOp::RemoveFoundation { .. } => {
+                foundation_changed = true;
+                floors_changed = true;
+            }
         }
+    }
+    if foundation_changed {
+        // (The ground floor may have gone up to it.)
+        b.levels = b.data.levels.clone();
+        for e in b.foundation_entities.drain(..) {
+            commands.entity(e).try_despawn();
+        }
+        let data = b.data.clone();
+        b.foundation_entities = spawn_foundation(commands, assets, ctx, &data, b, None);
     }
     if pool_changed {
         for e in b.pool_entities.drain(..) {
@@ -920,6 +999,51 @@ pub fn repaint(
         let floors = spawn_floors(commands, assets, ctx, &data, b, None);
         b.floor_entities = floors;
     }
+}
+
+/// The foundation's sides, from slightly below the ground up to the floor each holds up.
+fn spawn_foundation(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetCtx, b: &LotBuildingBaked, active: &ActiveBuilding, neighbor: Option<Entity>) -> Vec<Entity> {
+    if b.foundation.is_empty() {
+        return Vec::new();
+    }
+    let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);
+    let mut buf = MeshBuf::default();
+    let (g, top) = (level_y(0) - 0.6, level_y(1));
+    for (i, (a, bb)) in b.foundation.iter().enumerate() {
+        let (a, bb) = (Vec2::from(*a), Vec2::from(*bb));
+        // (Each up to the floor it holds up.)
+        let top = b.foundation_top.get(i).copied().unwrap_or(top);
+        let len = (bb - a).length();
+        if len < 1e-3 {
+            continue;
+        }
+        let n = (bb - a) / len;
+        let n3 = active.dir(-n.y, n.x);
+        // (Down to the ground where the lot slopes away under the house.)
+        let ga = b.ground_at(a.x, a.y).map_or(g, |y| y.min(level_y(0)) - 0.6);
+        let gb = b.ground_at(bb.x, bb.y).map_or(g, |y| y.min(level_y(0)) - 0.6);
+        let p = [active.world(a.x, a.y, ga), active.world(bb.x, bb.y, gb), active.world(bb.x, bb.y, top), active.world(a.x, a.y, top)];
+        let (va, vb) = ((top - ga) / WALL_H, (top - gb) / WALL_H);
+        buf.quad(p, [[0.0, va], [len, vb], [len, 0.0], [0.0, 0.0]], n3);
+    }
+    if buf.is_empty() {
+        return Vec::new();
+    }
+    let mat = {
+        let tex = assets.texture(ctx, STYLE_FOUNDATION);
+        ctx.materials.add(StandardMaterial {
+            base_color: if tex.is_some() { Color::WHITE } else { Color::srgb(0.8, 0.78, 0.72) },
+            base_color_texture: tex,
+            perceptual_roughness: 0.85,
+            reflectance: 0.2,
+            double_sided: true,
+            cull_mode: None,
+            ..default()
+        })
+    };
+    let e = commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(mat))).id();
+    place(commands, e, neighbor, 0);
+    vec![e]
 }
 
 /// Redraws walls of the active house from its data (with the openings cut into them).
@@ -1195,7 +1319,10 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
                 let top = b.levels[b.levels.len() - 1];
                 b.levels.push(top + s3bake::building::LEVEL_HEIGHT);
             }
-            b.walls.push(WallBaked { a, b: end, level, left: ROOM_OUTSIDE, right: ROOM_OUTSIDE, cover: [NO_COVER; 2], y: None });
+            // (On the ground floor, a wall between tiles at their own height (the deck beside a
+            // foundation) stands on them.)
+            let y = if level == 1 { floor_under_wall(b, Vec2::from(a), Vec2::from(end)) } else { None };
+            b.walls.push(WallBaked { a, b: end, level, left: ROOM_OUTSIDE, right: ROOM_OUTSIDE, cover: [NO_COVER; 2], y });
         }
         PaintOp::RemoveWall { wall } => {
             if let Some(w) = b.walls.get_mut(wall as usize) {
@@ -1261,12 +1388,138 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
             }
         }
         PaintOp::RemovePool { x, z } => b.pool.retain(|f| !(f.x == x && f.z == z)),
+        PaintOp::AddFoundation { x, z, ground } => add_foundation(b, x, z, ground),
+        PaintOp::RemoveFoundation { x, z } => remove_foundation(b, x, z),
         PaintOp::RemoveFence { a, b: end, level } => {
             let near = |p: [f32; 2], q: [f32; 2]| Vec2::from(p).distance(Vec2::from(q)) < 0.05;
             b.fences.retain(|f| !(f.level == level && f.a != f.b && ((near(f.a, a) && near(f.b, end)) || (near(f.a, end) && near(f.b, a)))));
             // (Posts with no run left at them go too.)
             let runs: Vec<([f32; 2], [f32; 2])> = b.fences.iter().filter(|f| f.level == level && f.a != f.b).map(|f| (f.a, f.b)).collect();
             b.fences.retain(|f| f.level != level || f.a != f.b || !(near(f.a, a) || near(f.a, end)) || runs.iter().any(|r| near(r.0, f.a) || near(r.1, f.a)));
+        }
+    }
+}
+
+/// The height a ground-floor wall from `a` to `b` stands at when the floor either side has its
+/// own (and none's at the storey's): none otherwise.
+fn floor_under_wall(b: &LotBuildingBaked, a: Vec2, c: Vec2) -> Option<f32> {
+    let mid = (a + c) * 0.5;
+    let n = (c - a).perp().normalize_or_zero() * 0.5;
+    let tiles: Vec<&FloorBaked> = [mid + n, mid - n]
+        .iter()
+        .filter_map(|p| b.floors.iter().find(|f| f.level == 1 && f.x as f32 == p.x.floor() && f.z as f32 == p.y.floor()))
+        .collect();
+    if tiles.is_empty() || tiles.iter().any(|f| f.y.is_none()) {
+        return None;
+    }
+    tiles.iter().filter_map(|f| f.y).reduce(f32::max)
+}
+
+/// The sides of a floor tile, each from corner to corner turning so its face looks out of the
+/// tile (as the foundation's are drawn), with the tile beyond it.
+fn tile_sides(x: u16, z: u16) -> [([f32; 2], [f32; 2], (i32, i32)); 4] {
+    let (fx, fz) = (x as f32, z as f32);
+    let (x, z) = (x as i32, z as i32);
+    [
+        ([fx, fz], [fx, fz + 1.0], (x - 1, z)),
+        ([fx, fz + 1.0], [fx + 1.0, fz + 1.0], (x, z + 1)),
+        ([fx + 1.0, fz + 1.0], [fx + 1.0, fz], (x + 1, z)),
+        ([fx + 1.0, fz], [fx, fz], (x, z - 1)),
+    ]
+}
+
+/// Takes away the foundation sides along a tile side (either way round).
+fn remove_foundation_side(b: &mut LotBuildingBaked, p: [f32; 2], q: [f32; 2]) {
+    let near = |u: [f32; 2], v: [f32; 2]| Vec2::from(u).distance(Vec2::from(v)) < 0.05;
+    let mut i = 0;
+    while i < b.foundation.len() {
+        let (a, c) = b.foundation[i];
+        if (near(a, p) && near(c, q)) || (near(a, q) && near(c, p)) {
+            b.foundation.remove(i);
+            if i < b.foundation_top.len() {
+                b.foundation_top.remove(i);
+            }
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// The height of the ground-floor tile there (its own, or the storey's), if there's one.
+fn ground_floor_at(b: &LotBuildingBaked, x: i32, z: i32) -> Option<f32> {
+    b.floors.iter().find(|f| f.level == 1 && f.x as i32 == x && f.z as i32 == z).map(|f| f.y.unwrap_or(b.levels[1]))
+}
+
+/// Whether the lot's ground floor stands on a foundation: one laid in build mode (a ground-floor
+/// tile at the storey's height that isn't the starter deck's), or a house's own.
+pub fn founded(b: &LotBuildingBaked) -> bool {
+    b.floors.iter().any(|f| f.level == 1 && f.y.is_none() && f.kind != s3bake::ROOM_PORCH && b.walls.is_empty())
+        || (b.is_house() && !b.foundation.is_empty() && b.levels.len() > 1 && b.levels[1] - b.levels[0] >= s3bake::building::FOUNDATION_HEIGHT - 0.05)
+}
+
+/// Lays a tile of foundation: the ground floor raised on it. The first sets its height, the
+/// game's 0.75 m over the highest ground under it, the lot's ground floor going to it (up or
+/// down), what's on the floor already (the starter deck) staying where it stands; the
+/// foundation's sides go round its edge, where the floor beside isn't as high.
+fn add_foundation(b: &mut LotBuildingBaked, x: u16, z: u16, ground: f32) {
+    if x as u32 >= b.width || z as u32 >= b.depth || b.levels.len() < 2 {
+        return;
+    }
+    if !founded(b) {
+        let top = ground + s3bake::building::FOUNDATION_HEIGHT;
+        let old = b.levels[1];
+        // (What's on the ground floor keeps its height; the storeys above go up with it.)
+        for f in b.floors.iter_mut().filter(|f| f.level == 1 && f.y.is_none()) {
+            f.y = Some(old);
+        }
+        for w in b.walls.iter_mut().filter(|w| w.level == 1 && w.y.is_none()) {
+            w.y = Some(old);
+        }
+        let n = b.foundation.len();
+        b.foundation_top.resize(n, old);
+        for l in b.levels.iter_mut().skip(1) {
+            *l += top - old;
+        }
+    }
+    let top = b.levels[1];
+    match b.floors.iter_mut().find(|f| f.level == 1 && f.x == x && f.z == z) {
+        // (A deck tile under it now: foundation, as high as the rest.)
+        Some(f) => {
+            f.y = None;
+            if f.kind == s3bake::ROOM_PORCH {
+                f.kind = ROOM_OUTSIDE;
+            }
+        }
+        None => b.floors.push(FloorBaked { level: 1, x, z, mask: 0xF, kind: ROOM_OUTSIDE, region: 0, cover: [NO_COVER; 4], y: None }),
+    }
+    for (p, q, (nx, nz)) in tile_sides(x, z) {
+        remove_foundation_side(b, p, q);
+        match ground_floor_at(b, nx, nz) {
+            // (Beside floor as high: one floor, no side between.)
+            Some(h) if (h - top).abs() < 0.05 => {}
+            // (Beside lower floor or the ground: the side, looking out.)
+            _ => {
+                let n = b.foundation.len();
+                b.foundation_top.resize(n, top);
+                b.foundation.push((p, q));
+                b.foundation_top.push(top);
+            }
+        }
+    }
+}
+
+/// Takes a tile of foundation away: its floor, its sides, and the side of the foundation beside
+/// it looking out over it now.
+fn remove_foundation(b: &mut LotBuildingBaked, x: u16, z: u16) {
+    let Some(i) = b.floors.iter().position(|f| f.level == 1 && f.x == x && f.z == z && f.y.is_none()) else { return };
+    b.floors.remove(i);
+    for (p, q, (nx, nz)) in tile_sides(x, z) {
+        remove_foundation_side(b, p, q);
+        if let Some(h) = ground_floor_at(b, nx, nz) {
+            let n = b.foundation.len();
+            b.foundation_top.resize(n, b.levels[1]);
+            b.foundation.push((q, p));
+            b.foundation_top.push(h);
         }
     }
 }
@@ -2012,6 +2265,7 @@ pub fn spawn_building(
         stair_entities: Vec::new(),
         fence_entities: Vec::new(),
         pool_entities: Vec::new(),
+        foundation_entities: Vec::new(),
         roof_entity: None,
     };
     let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);
@@ -2320,32 +2574,7 @@ pub fn spawn_building(
     active.floor_entities = floor_entities;
 
     // Foundation sides from slightly below the ground up to the ground floor.
-    if !b.foundation.is_empty() {
-        let mut buf = MeshBuf::default();
-        let (g, top) = (level_y(0) - 0.6, level_y(1));
-        for (i, (a, bb)) in b.foundation.iter().enumerate() {
-            let (a, bb) = (Vec2::from(*a), Vec2::from(*bb));
-            // (Each up to the floor it holds up.)
-            let top = b.foundation_top.get(i).copied().unwrap_or(top);
-            let len = (bb - a).length();
-            if len < 1e-3 {
-                continue;
-            }
-            let n = (bb - a) / len;
-            let n3 = active.dir(-n.y, n.x);
-            // (Down to the ground where the lot slopes away under the house.)
-            let ga = b.ground_at(a.x, a.y).map_or(g, |y| y.min(level_y(0)) - 0.6);
-            let gb = b.ground_at(bb.x, bb.y).map_or(g, |y| y.min(level_y(0)) - 0.6);
-            let p = [active.world(a.x, a.y, ga), active.world(bb.x, bb.y, gb), active.world(bb.x, bb.y, top), active.world(a.x, a.y, top)];
-            let (va, vb) = ((top - ga) / WALL_H, (top - gb) / WALL_H);
-            buf.quad(p, [[0.0, va], [len, vb], [len, 0.0], [0.0, 0.0]], n3);
-        }
-        if !buf.is_empty() {
-            let mat = material(assets, ctx, STYLE_FOUNDATION);
-            let e = commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(mat))).id();
-            place(commands, e, neighbor, 0);
-        }
-    }
+    active.foundation_entities = spawn_foundation(commands, assets, ctx, b, &active, neighbor);
     // Fences and railings.
     active.fence_entities = spawn_fences(commands, assets, ctx, b, &active, neighbor);
 

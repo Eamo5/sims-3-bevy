@@ -32,6 +32,10 @@ const MIDDLE: u32 = 0x06e7_70f8;
 const BACK: u32 = 0x06e8_9130;
 const WALLS: u32 = 0x300;
 const POOL: u32 = 0x06ee_34e8;
+/// The Foundations panel (its square and diagonal tools, and its catalogue of styles).
+const FOUNDATIONS: u32 = 0x000a_a300;
+const FOUNDATION_SQUARE: u32 = 0x000a_a305;
+const FOUNDATION_DIAGONAL: u32 = 0x000a_a306;
 const HAND: u32 = 0x2e4;
 const HAMMER: u32 = 0x2e5;
 const DESIGN: u32 = 0x2e6;
@@ -64,6 +68,7 @@ fn home_action(id: u32) -> Option<Action> {
         0x100f => Action::Category(FENCES_TAB),
         0x1008 => Action::Tool(BuildTool::Stairs),
         0x1013 => Action::Tool(BuildTool::Pool),
+        0x1004 => Action::Tool(BuildTool::Foundation),
         0x100b | 0x1011 => Action::Category(TERRAIN_TAB),
         _ => return None,
     })
@@ -72,7 +77,7 @@ fn home_action(id: u32) -> Option<Action> {
 pub fn native_panel(buy: &BuyMode) -> bool {
     buy.build_look && buy.active && buy.category == BUILD_TAB
         && !(buy.styling() && buy.placing.is_some())
-        && matches!(buy.tool, None | Some(BuildTool::Wall | BuildTool::Room | BuildTool::DiagonalRoom | BuildTool::Pool | BuildTool::Sledgehammer))
+        && matches!(buy.tool, None | Some(BuildTool::Wall | BuildTool::Room | BuildTool::DiagonalRoom | BuildTool::Pool | BuildTool::Foundation | BuildTool::Sledgehammer))
 }
 
 fn spawn(
@@ -120,9 +125,19 @@ fn spawn(
         (0x321a, Action::Tool(BuildTool::Wall)), (0x321b, Action::Category(WALLPAPER_TAB)),
         (0x321c, Action::Tool(BuildTool::Wall)), (0x321d, Action::Category(WALLPAPER_TAB)),
         (0x06ee_34a0, Action::Tool(BuildTool::Pool)), (0x06ee_34af, Action::Tool(BuildTool::Pool)),
+        (FOUNDATION_SQUARE, Action::Tool(BuildTool::Foundation)),
     ] {
         let e = if matches!(id, 0x301 | 0x302 | 0x304) { s.id(WALLS).and_then(|p| s.within(p, id)) } else { s.id(id) };
         if let Some(e) = e { commands.entity(e).insert(action); }
+    }
+    // (The diagonal foundation isn't laid here yet, nor the foundation styles offered.)
+    if let Some(e) = s.id(FOUNDATION_DIAGONAL) {
+        commands.entity(e).insert(Unavailable);
+    }
+    for id in [0x000a_a302, 0x000a_a307] {
+        if let Some(e) = s.id(id) {
+            commands.entity(e).insert(Visibility::Hidden);
+        }
     }
     for (id, button) in [(CLONE, BuyButton::Eyedropper), (DESIGN, BuyButton::Styling)] {
         if let Some(e) = s.id(id) { commands.entity(e).insert(button); }
@@ -194,10 +209,12 @@ fn show(
     if !on { return; }
     let wall = buy.category == BUILD_TAB && matches!(buy.tool, Some(BuildTool::Wall | BuildTool::Room | BuildTool::DiagonalRoom | BuildTool::Sledgehammer));
     let pool = buy.category == BUILD_TAB && buy.tool == Some(BuildTool::Pool);
+    let foundation = buy.category == BUILD_TAB && buy.tool == Some(BuildTool::Foundation);
     let covers = crate::buildcatalog::showing(&buy) || crate::buildobjects::showing(&buy);
-    set_visible(&mut visibility, s.id(HOME), !wall && !pool && !covers);
-    set_visible(&mut visibility, s.id(MIDDLE), wall || pool || covers);
-    set_visible(&mut visibility, s.id(BACK), wall || pool || covers);
+    set_visible(&mut visibility, s.id(HOME), !wall && !pool && !foundation && !covers);
+    set_visible(&mut visibility, s.id(MIDDLE), wall || pool || foundation || covers);
+    set_visible(&mut visibility, s.id(BACK), wall || pool || foundation || covers);
+    set_visible(&mut visibility, s.id(FOUNDATIONS), foundation);
     set_visible(&mut visibility, s.id(0x390), crate::buildobjects::showing(&buy) && buy.category == crate::buy::CONSTRUCTION_TAB);
     set_visible(&mut visibility, s.id(0x3a0), crate::buildobjects::showing(&buy) && buy.category == crate::buy::GARDENING_TAB);
     set_visible(&mut visibility, s.id(0x320), covers && buy.category == WALLPAPER_TAB);
