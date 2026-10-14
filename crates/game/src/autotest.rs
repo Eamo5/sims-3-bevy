@@ -486,7 +486,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, queue_diff.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, zoom_shots.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, spin_shots.run_if(in_state(crate::PlayMode::Live)))
-            .add_systems(Update, (idle_shots, react_shots, face_shots).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (idle_shots, react_shots, face_shots, spawn_shots).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_save.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_switch.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_load.run_if(in_state(AppState::MainMenu)))
@@ -2109,6 +2109,38 @@ fn face_shots(
         let path = std::path::Path::new(&dir).join(format!("face{:02}_{}.png", *n, face.clip));
         info!("shot {}", path.display());
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+    }
+}
+
+/// SPAWN_SHOTS=<Kind>:<folder>: the camera to each object of that kind as it's put down (a pile
+/// of clothes left on the floor), and a picture of it a moment later, up to six.
+fn spawn_shots(
+    mut commands: Commands,
+    time: Res<Time>,
+    added: Query<(&crate::interact::GameObject, &Transform), Added<crate::interact::GameObject>>,
+    mut cam: Query<&mut SimsCamera>,
+    mut due: Local<Option<f32>>,
+    mut n: Local<u32>,
+) {
+    let Some((kind, dir)) = std::env::var("SPAWN_SHOTS").ok().and_then(|v| v.split_once(':').map(|(k, d)| (k.to_string(), d.to_string()))) else { return };
+    if let Some(at) = *due
+        && time.elapsed_secs() >= at
+    {
+        *due = None;
+        *n += 1;
+        let path = std::path::Path::new(&dir).join(format!("spawn{:02}.png", *n));
+        info!("shot {}", path.display());
+        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+    }
+    if due.is_some() || *n >= 6 {
+        return;
+    }
+    if let Some((_, tf)) = added.iter().find(|(o, _)| format!("{:?}", o.kind).eq_ignore_ascii_case(&kind))
+        && let Ok(mut c) = cam.single_mut()
+    {
+        c.focus = tf.translation;
+        c.distance = 4.0;
+        *due = Some(time.elapsed_secs() + 1.5);
     }
 }
 

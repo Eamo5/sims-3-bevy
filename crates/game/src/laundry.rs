@@ -190,8 +190,8 @@ fn changes(
             laundry.waiting += 1;
             continue;
         }
-        let ahead = tf.rotation * Vec3::Z;
-        let at = tf.translation + ahead.with_y(0.0).normalize_or(Vec3::Z) * 0.35;
+        // (Dropped where they stand: floor they could walk on, not in the sink in front of them.)
+        let at = tf.translation;
         let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
         match spawn_pile(&mut commands, &mut assets, &mut ctx, &catalog, at, rng.random_range(0.0..std::f32::consts::TAU)) {
             Some(p) => debug!("{} leaves their clothes in a pile ({p})", sim.first),
