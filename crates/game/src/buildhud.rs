@@ -269,7 +269,7 @@ mod tests {
         buy.build_look = true;
         buy.show(BUILD_TAB);
         assert!(native_panel(&buy));
-        for tool in [BuildTool::Wall, BuildTool::Room, BuildTool::Pool, BuildTool::Sledgehammer] {
+        for tool in [BuildTool::Wall, BuildTool::Room, BuildTool::Pool, BuildTool::Foundation, BuildTool::Basement, BuildTool::Sledgehammer] {
             buy.tool = Some(tool);
             assert!(native_panel(&buy));
         }
@@ -280,7 +280,9 @@ mod tests {
         assert!(matches!(home_action(0x1013), Some(Action::Tool(BuildTool::Pool))));
         assert!(matches!(home_action(0x1005), Some(Action::Objects(crate::buildobjects::ObjTab::Doors))));
         assert!(matches!(home_action(0x1001), Some(Action::Objects(crate::buildobjects::ObjTab::Trees))));
-        assert!(home_action(0x1016).is_none());
+        assert!(matches!(home_action(0x1004), Some(Action::Tool(BuildTool::Foundation))));
+        assert!(matches!(home_action(0x1016), Some(Action::Tool(BuildTool::Basement))));
+        assert!(home_action(0x1006).is_none());
     }
 
     #[test]
