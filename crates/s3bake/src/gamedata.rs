@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 103;
+pub const GAMEDATA_VERSION: u32 = 104;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -155,8 +155,9 @@ pub struct CareerInfo {
 /// One of a career's events at work (a row of the game's `CareerEvents` table): a message with
 /// its rewards (`EventReward`), a choice (`EventChoice`: yes might win or lose, no), or a career
 /// opportunity offered (`EventOpportunity`); how likely each work day, at which levels (1-based;
-/// none: any) of which branch ("All" or one), whether it's the day's sure one; its words; what
-/// it gives (the game's reward strings: `CareerPerformance,20`, `Buff,Fatigued`...).
+/// none: any) of which branch ("All" or one), whether it's the day's sure one; its words (for a
+/// man and for a woman); what it gives (the game's reward strings: `CareerPerformance,20`,
+/// `Buff,Fatigued`...).
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct CareerEventInfo {
     pub key: String,
@@ -165,12 +166,12 @@ pub struct CareerEventInfo {
     pub branch: String,
     pub levels: Vec<u32>,
     pub sure: bool,
-    pub text: String,
-    pub yes: String,
-    pub no: String,
-    pub yes_result: String,
-    pub yes_lose_result: String,
-    pub no_result: String,
+    pub text: [String; 2],
+    pub yes: [String; 2],
+    pub no: [String; 2],
+    pub yes_result: [String; 2],
+    pub yes_lose_result: [String; 2],
+    pub no_result: [String; 2],
     /// The chance (percent) a yes wins, and what changes it (`Mood,30`, `Skill,Cooking,5`).
     pub chance: f32,
     pub modifiers: Vec<String>,
@@ -181,8 +182,15 @@ pub struct CareerEventInfo {
 }
 
 /// The events of one career in the game's `CareerEvents` table (rows under the career's own
-/// tag, the first its defaults), their words from the career's `CareerEvents` sheet.
+/// tag, the first its defaults), their words from the career's `CareerEvents` sheet (a woman's
+/// under the key's `_Female`, where there's one).
 pub fn career_events(xml: &str, career: &str, text: &dyn Fn(&str) -> String) -> Vec<CareerEventInfo> {
+    let text = |k: &str| -> [String; 2] {
+        let m = text(k);
+        let f = if k.is_empty() { String::new() } else { text(&format!("{k}_Female")) };
+        let f = if f.is_empty() { m.clone() } else { f };
+        [m, f]
+    };
     let rows = records(xml, career);
     let default = rows.first().cloned().unwrap_or_default();
     let mut out = Vec::new();
@@ -3601,7 +3609,7 @@ mod tests {
         assert_eq!(e.len(), 2, "the game's own classes left out");
         assert_eq!((e[0].kind.as_str(), e[0].levels.clone(), e[0].opportunity.as_str(), e[0].chance), ("Opportunity", vec![3, 4, 5], "BusinessCareer_Memo", 100.0));
         let golf = &e[1];
-        assert_eq!((golf.kind.as_str(), golf.text.as_str(), golf.yes.as_str(), golf.chance, golf.branch.as_str()), ("Choice", "<Golf>", "<GolfYes>", 60.0, "All"));
+        assert_eq!((golf.kind.as_str(), golf.text[0].as_str(), golf.text[1].as_str(), golf.yes[0].as_str(), golf.chance, golf.branch.as_str()), ("Choice", "<Golf>", "<Golf_Female>", "<GolfYes>", 60.0, "All"));
         assert_eq!((golf.levels.clone(), golf.modifiers.clone(), golf.rewards_yes.clone(), golf.rewards_no.clone()), (vec![1, 4], vec!["Mood,30".to_string()], vec!["RelationshipWithBoss,20".to_string()], vec!["CareerPerformance,-10".to_string()]));
     }
 

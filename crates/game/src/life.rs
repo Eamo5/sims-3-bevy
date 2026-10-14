@@ -793,10 +793,17 @@ pub enum MoodletKind {
     NicelyDecorated,
     BeautifullyDecorated,
     GreatMeal,
+    /// What a day at work can leave them with (the game's career events and Work Hard).
+    Stressed,
+    Winner,
+    Overworked,
+    IAmBeautiful,
+    SugarRush,
+    GarlicBreath,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 69] = {
+    pub const ALL: [MoodletKind; 75] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -806,7 +813,8 @@ impl MoodletKind {
             LameParty, AwesomeParty, Scared, GreatDate, BadDate, Singed, DirtySurroundings, FilthySurroundings, GettingChilly,
             TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf, MintyBreath,
             Disgusted, Mourning, FreshClothing, VeryFreshClothing, HolidayCheer, SpringFling, SummerFun, SpookyTime,
-            Decorated, NicelyDecorated, BeautifullyDecorated, GreatMeal,
+            Decorated, NicelyDecorated, BeautifullyDecorated, GreatMeal, Stressed, Winner, Overworked, IAmBeautiful, SugarRush,
+            GarlicBreath,
         ]
     };
 
@@ -901,6 +909,13 @@ impl MoodletKind {
             NicelyDecorated => md("Nicely Decorated", "This room is nicely put together.", 25, 0.0),
             BeautifullyDecorated => md("Beautifully Decorated", "This room is a sight to behold!", 40, 0.0),
             GreatMeal => md("Great Meal", "That was a really great meal.", 25, 8.0),
+            // (The game's: Stressed lasts till something fun puts it right; a day at most here.)
+            Stressed => md("Stressed", "Something fun would take the edge off.", -40, 24.0),
+            Winner => md("Winner", "Life is good when you win!", 25, 8.0),
+            Overworked => md("Overworked", "Working too hard takes its toll.", -15, 12.0),
+            IAmBeautiful => md("I Am Beautiful", "Looking good, feeling good.", 10, 4.0),
+            SugarRush => md("Sugar Rush", "So much sugar!", 15, 4.0),
+            GarlicBreath => md("Garlic Breath", "Better keep a distance.", 0, 3.0),
         }
     }
 
@@ -982,6 +997,12 @@ impl MoodletKind {
             GreatMeal => ("Meal", false),
             FreshClothing => ("FreshClothing", true),
             VeryFreshClothing => ("VeryFreshClothing", true),
+            Stressed => ("Stressed", true),
+            Winner => ("Winner", true),
+            Overworked => ("Overworked", true),
+            IAmBeautiful => ("IAmBeautiful", true),
+            SugarRush => ("SugarRush", true),
+            GarlicBreath => ("GarlicBreath", true),
         }
     }
 }
@@ -1116,6 +1137,10 @@ fn need_moodlets(mut q: Query<(&Motives, &Sim, &mut Moodlets)>) {
         ml.set_need(MoodletKind::Tired, (-70.0..-25.0).contains(&v[ENERGY]));
         ml.set_need(MoodletKind::Lonely, v[SOCIAL] < -30.0 && !sim.traits.contains(&Trait::Loner));
         ml.set_need(MoodletKind::Smelly, v[HYGIENE] < -35.0 && !sim.traits.contains(&Trait::Slob));
+        // (Stressed till they've had some fun: the game's, solved by Fun.)
+        if v[FUN] >= 50.0 {
+            ml.remove(MoodletKind::Stressed);
+        }
         // (Smelly, clean clothes don't help: the game's `BuffSmelly` takes Fresh Clothing away.)
         if ml.has(MoodletKind::Smelly) {
             ml.remove(MoodletKind::FreshClothing);

@@ -164,6 +164,18 @@ fn grow(w: &mut s3bake::ui::UiWindow, id: u32, by: f32) {
     }
 }
 
+/// Makes a window taller (found by its comment, the layout's name for it, under a layout window:
+/// where ids repeat).
+fn grow_named(w: &mut s3bake::ui::UiWindow, comment: &str, by: f32) {
+    if w.comment == comment {
+        w.area[3] += by;
+        return;
+    }
+    for c in &mut w.children {
+        grow_named(c, comment, by);
+    }
+}
+
 /// Moves a window down (found by id anywhere under a layout window).
 fn shift(w: &mut s3bake::ui::UiWindow, id: u32, by: f32) {
     if w.id == id {
@@ -190,7 +202,20 @@ fn set_area(w: &mut s3bake::ui::UiWindow, id: u32, area: [f32; 4]) {
 /// A layout's dialog put up on its own, in the middle of the screen (as `ModalDialog` centres
 /// its window), above the game.
 pub(crate) fn spawn_dialog(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>, name: &str) -> Option<crate::layout::Spawned> {
+    spawn_dialog_with(commands, ui, images, fonts, name, |_| {})
+}
+
+/// The same, its layout changed first (a window grown for longer words).
+pub(crate) fn spawn_dialog_with(
+    commands: &mut Commands,
+    ui: &mut UiAssets,
+    images: &mut Assets<Image>,
+    fonts: &mut Assets<Font>,
+    name: &str,
+    adjust: impl FnOnce(&mut s3bake::ui::UiWindow),
+) -> Option<crate::layout::Spawned> {
     let mut dialog = ui.layout(name)?.clone();
+    adjust(&mut dialog);
     let (w, h) = (dialog.area[2] - dialog.area[0], dialog.area[3] - dialog.area[1]);
     dialog.area = [0.0, 0.0, w, h];
     dialog.place = s3bake::ui::UiPlace::Center(0.5);
@@ -278,16 +303,29 @@ fn question_dialogs(
             crate::dialog::Question::Reward { .. } => "HUDRewardTraitsShopDialog",
             // (A career's fork: the game's two (or three) button dialog, a button a path.)
             crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 2 => "TwoButtonDialog",
+            // (A career event's choice: the game's two button dialog, yes and no.)
+            crate::dialog::Question::CareerEvent { .. } => "TwoButtonDialog",
             crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 3 => "ThreeButtonDialog",
             _ => return,
         };
-        let Some(s) = spawn_dialog(&mut commands, &mut ui, &mut images, &mut fonts, name) else { return };
+        // (Longer words take more lines: the message, and so the dialog, grows to fit them, the
+        // buttons at its foot moving down with it, as the game's `AutoSize` has it.)
+        let lines = 2.0 + (ask.text.chars().count() as f32 / 54.0).ceil();
+        let extra = if name == "TwoButtonDialog" || name == "ThreeButtonDialog" { (lines * 21.0 - 61.0).max(0.0) } else { 0.0 };
+        let Some(s) = spawn_dialog_with(&mut commands, &mut ui, &mut images, &mut fonts, name, |d| {
+            if extra > 0.0 {
+                grow_named(d, "Message", extra);
+                d.area[3] += extra;
+            }
+        }) else {
+            return;
+        };
         commands.entity(plain).insert(Visibility::Hidden);
         shown.plain = Some(plain);
         shown.dirty = true;
         match &ask.about {
-            crate::dialog::Question::CareerPath { .. } => {
-                // The offer's words; a button for each path, in the game's words for it.
+            crate::dialog::Question::CareerPath { .. } | crate::dialog::Question::CareerEvent { .. } => {
+                // The offer's words; a button for each path (or yes and no), in the game's words.
                 let words = [ask.title.as_str(), ask.text.as_str()].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join("
 
 ");

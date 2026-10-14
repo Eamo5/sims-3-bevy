@@ -23,7 +23,7 @@ pub struct OpportunitiesPlugin;
 
 impl Plugin for OpportunitiesPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<OpportunityBoard>().add_systems(
+        app.init_resource::<OpportunityBoard>().add_message::<OfferThis>().add_systems(
             Update,
             (restore_pending, offer_opportunities, dialog_buttons, complete_opportunities, toggle_panel, update_panel).chain().run_if(in_state(PlayMode::Live)),
         );
@@ -164,7 +164,15 @@ fn eligible(o: &OpportunityInfo, sim: &Sim, skills: &Skills, job: Option<&crate:
     !o.skill.is_empty() && level >= o.skill_min.max(1) && level <= o.skill_max.max(o.skill_min)
 }
 
-/// Every game hour or so in the daytime, someone may be offered an opportunity.
+/// An opportunity to offer a Sim now (one of their career's events at work).
+#[derive(Message, Clone, Debug)]
+pub struct OfferThis {
+    pub sim: Entity,
+    pub guid: String,
+}
+
+/// Every game hour or so in the daytime, someone may be offered an opportunity (a skill's: a
+/// career's come at work, as the game's career events); and any asked for.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 fn offer_opportunities(
@@ -176,40 +184,63 @@ fn offer_opportunities(
     mut images: ResMut<Assets<Image>>,
     sims: Query<(Entity, &Sim, &Skills, Option<&crate::careers::Job>, Option<&SimOpportunities>), With<HouseholdMember>>,
     force: Option<Res<ForceOffer>>,
+    (mut asked, mut waiting): (MessageReader<OfferThis>, Local<Vec<OfferThis>>),
 ) {
+    waiting.extend(asked.read().cloned());
     let Some(mut ui) = ui else { return };
     if board.dialog.is_some() {
         return;
     }
+    // (One asked for, if it's still one to take on.)
+    let types = || -> Vec<&str> { (0..world.data.lots.len()).flat_map(|i| lot_types(&world.data, i)).collect() };
+    let mut requested = None;
+    while requested.is_none() && !waiting.is_empty() {
+        let w = waiting.remove(0);
+        let data = ui.data.clone();
+        let Some(i) = data.opportunities.iter().position(|o| o.guid == w.guid) else { continue };
+        let Ok((_, sim, skills, job, opps)) = sims.get(w.sim) else { continue };
+        let taken = opps.is_some_and(|x| x.active.iter().any(|a| a.index == i) || (!data.opportunities[i].repeat && x.done.contains(&w.guid)));
+        if !taken && !opps.is_some_and(|o| o.active.len() >= 3) && eligible(&data.opportunities[i], sim, skills, job, &data, &types()) {
+            requested = Some((w.sim, i));
+        }
+    }
     let forced = force.is_some();
-    // (Not the moment play starts.)
-    if board.next_check == 0.0 {
-        board.next_check = clock.minutes + 90.0;
-    }
-    if !forced && (clock.minutes < board.next_check || !(9.0..19.0).contains(&clock.hour_f())) {
-        return;
-    }
-    board.next_check = clock.minutes + 60.0;
-    let mut rng = rand::rng();
-    if !forced && !rng.random_bool(0.2) {
-        return;
-    }
-    commands.remove_resource::<ForceOffer>();
     let data = ui.data.clone();
-    let types: Vec<&str> = (0..world.data.lots.len()).flat_map(|i| lot_types(&world.data, i)).collect();
-    let mut choices: Vec<(Entity, usize)> = Vec::new();
-    for (e, sim, skills, job, opps) in &sims {
-        if opps.is_some_and(|o| o.active.len() >= 3) {
-            continue;
-        }
-        for (i, o) in data.opportunities.iter().enumerate() {
-            let taken = opps.is_some_and(|x| x.active.iter().any(|a| a.index == i) || (!o.repeat && x.done.contains(&o.guid)));
-            if !taken && eligible(o, sim, skills, job, &data, &types) {
-                choices.push((e, i));
+    let (sim_e, index) = match requested {
+        Some(r) => r,
+        None => {
+            // (Not the moment play starts.)
+            if board.next_check == 0.0 {
+                board.next_check = clock.minutes + 90.0;
             }
+            if !forced && (clock.minutes < board.next_check || !(9.0..19.0).contains(&clock.hour_f())) {
+                return;
+            }
+            board.next_check = clock.minutes + 60.0;
+            let mut rng = rand::rng();
+            if !forced && !rng.random_bool(0.2) {
+                return;
+            }
+            commands.remove_resource::<ForceOffer>();
+            let types = types();
+            // (Those a career's events offer come at work.)
+            let at_work = |guid: &str| data.careers.iter().any(|c| c.events.iter().any(|e| e.opportunity == guid));
+            let mut choices: Vec<(Entity, usize)> = Vec::new();
+            for (e, sim, skills, job, opps) in &sims {
+                if opps.is_some_and(|o| o.active.len() >= 3) {
+                    continue;
+                }
+                for (i, o) in data.opportunities.iter().enumerate() {
+                    let taken = opps.is_some_and(|x| x.active.iter().any(|a| a.index == i) || (!o.repeat && x.done.contains(&o.guid)));
+                    if !taken && !(!forced && at_work(&o.guid)) && eligible(o, sim, skills, job, &data, &types) {
+                        choices.push((e, i));
+                    }
+                }
+            }
+            let Some(&c) = choices.choose(&mut rng) else { return };
+            c
         }
-    }
-    let Some(&(sim_e, index)) = choices.choose(&mut rng) else { return };
+    };
     let Ok((_, sim, ..)) = sims.get(sim_e) else { return };
     let o = &data.opportunities[index];
     let icon = ui.icon(&mut images, &o.icon);

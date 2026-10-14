@@ -7,6 +7,7 @@
 //! asks which path to take.
 
 use bevy::prelude::*;
+use rand::Rng;
 
 use crate::PlayMode;
 use crate::clock::GameClock;
@@ -19,7 +20,12 @@ pub struct CareersPlugin;
 
 impl Plugin for CareersPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (work_flow, work_schedule, promote_when_agreed, career_path_answers, pay_pensions, find_colleagues).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(
+            Update,
+            (work_flow, work_schedule, roll_career_events, run_career_events, promote_when_agreed, career_path_answers, career_event_answers, pay_pensions, find_colleagues)
+                .chain()
+                .run_if(in_state(PlayMode::Live)),
+        );
     }
 }
 
@@ -67,6 +73,8 @@ pub struct CareerTrack {
     pub bonus_hours: f32,
     pub fun_per_hour: f32,
     pub coworkers: (u8, u8),
+    /// What can happen at work (the game's `CareerEvents`).
+    pub events: &'static [s3bake::gamedata::CareerEventInfo],
 }
 
 pub struct CareerPath {
@@ -216,6 +224,7 @@ pub fn install_tracks(data: &s3bake::GameDataBaked) {
                 bonus_hours: c.bonus_hours,
                 fun_per_hour: c.fun_per_hour,
                 coworkers: c.coworkers,
+                events: Box::leak(c.events.clone().into_boxed_slice()),
             }
         })
         .filter(|t| t.paths.iter().all(|p| !p.levels.is_empty()))
@@ -267,6 +276,7 @@ impl BuiltinTrack {
             bonus_hours: 12.0,
             fun_per_hour: -5.0,
             coworkers: (2, 4),
+            events: &[],
         }
     }
 }
@@ -715,8 +725,6 @@ fn work_schedule(
     weather: Option<Res<crate::weather::Weather>>,
     people: Query<(Entity, &Sim)>,
 ) {
-    use rand::Rng;
-    let mut rng = rand::rng();
     let h = clock.hour_f();
     let day = clock.day();
     let ids: std::collections::HashMap<u64, Entity> = people.iter().map(|(e, s)| (s.id, e)).collect();
@@ -772,13 +780,6 @@ fn work_schedule(
                 job.give_raise();
                 job.performance = 0.0;
                 notes.push(format!("{} got a raise for outstanding work: §{} an hour now.", sim.first, info.hourly + job.raise));
-            }
-            // (At the day's end, now and then a raise for good work: the game's daily raise event,
-            // 1% likely at nothing to 25% at the best, twice as likely for the Lucky.)
-            let luck = if sim.traits.contains(&Trait::Lucky) { 2.0 } else if sim.traits.contains(&Trait::Unlucky) { 0.5 } else { 1.0 };
-            if job.performance > 0.0 && rng.random_bool(((job.performance / 100.0 * 0.24 + 0.01) * luck).clamp(0.0, 1.0) as f64) {
-                job.give_raise();
-                notes.push(format!("{} got a raise: §{} an hour now.", sim.first, job.info().hourly + job.raise));
             }
             demotion(&mut commands, &mut notes, &mut life, e, sim, &mut job, &mut motives, clock.minutes, member);
             // Needs: lunch halfway through (the game's, so hungry no earlier than half a shift's
@@ -912,18 +913,31 @@ pub fn hourly_performance(job: &Job, scores: &[(&s3bake::gamedata::CareerMetric,
 /// spent on them (Suck Up 3 an hour, Hanging With Co-Workers 5 among them; more for the
 /// charismatic, two and a half times for a Schmoozer), as the game's careers have it.
 #[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity)]
 fn work_flow(
     delta: Res<crate::clock::SimDelta>,
+    clock: Res<GameClock>,
     mut commands: Commands,
-    mut workers: Query<(Entity, &Sim, &mut Job, &Mood, &Skills, &mut crate::social::Relationships, Option<&crate::wishes::Wishes>), (With<AtWork>, With<HouseholdMember>)>,
+    mut workers: Query<
+        (Entity, &Sim, &mut Job, &Mood, &Skills, &mut crate::social::Relationships, Option<&crate::wishes::Wishes>, &Motives, &mut crate::life::Moodlets),
+        (With<AtWork>, With<HouseholdMember>),
+    >,
     people: Query<(Entity, &Sim)>,
+    mut notes: ResMut<Notifications>,
 ) {
     let hours = delta.0 / 60.0;
     if hours <= 0.0 || workers.is_empty() {
         return;
     }
     let ids: std::collections::HashMap<u64, Entity> = people.iter().map(|(e, s)| (s.id, e)).collect();
-    for (e, sim, mut job, mood, skills, mut rels, wishes) in &mut workers {
+    for (e, sim, mut job, mood, skills, mut rels, wishes, motives, mut moodlets) in &mut workers {
+        // (Working hard till there's no fun left: Overworked, and back to working normally, as
+        // the game's Work Hard tone; a Workaholic never minds.)
+        if job.tone == WorkTone::WorkHard && motives.0[FUN] < -40.0 && !sim.traits.contains(&Trait::Workaholic) {
+            job.tone = WorkTone::Normal;
+            moodlets.add(crate::life::MoodletKind::Overworked, clock.minutes);
+            notes.push(format!("{} is overworked and can't keep working this hard.", sim.first));
+        }
         let boss = job.boss.and_then(|b| ids.get(&b).copied());
         let coworkers: Vec<Entity> = job.coworkers.iter().filter_map(|c| ids.get(c).copied()).collect();
         let charm = if sim.traits.contains(&Trait::Schmoozer) { 2.5 } else { 1.0 };
@@ -1019,7 +1033,6 @@ fn find_colleagues(
             new.push((id, hire, true));
         }
         if job.coworkers.len() < min as usize {
-            use rand::Rng;
             let want = rng.random_range(min..=max.max(min)) as usize;
             while job.coworkers.len() < want {
                 let Some((id, hire)) = pool.next() else { break };
@@ -1123,6 +1136,336 @@ fn promote_when_agreed(
     }
 }
 
+/// One of what a work day may bring (the game's `CareerEventManager`): a raise for good work, a
+/// Loser's bad luck, or one of the career's own events (an index into its `events`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Due {
+    Raise,
+    Loser,
+    Event(usize),
+}
+
+/// The day's events, each at its time (game minutes), while they're at work.
+#[derive(Component, Default, Debug)]
+pub struct EventsDue(pub Vec<(f64, Due)>);
+
+/// A choice made in a career event's dialog, to be carried out.
+#[derive(Component)]
+pub struct EventChoice {
+    pub event: usize,
+    pub yes: bool,
+}
+
+/// Whether one of the career's events can come today: at their level and on their path, and,
+/// one that offers an opportunity, with it there to offer and no other career opportunity on.
+pub fn event_open(e: &s3bake::gamedata::CareerEventInfo, job: &Job, opportunity_ok: impl Fn(&str) -> bool) -> bool {
+    let level = job.level as u32 + 1;
+    e.likelihood > 0.0
+        && (e.levels.is_empty() || e.levels.contains(&level))
+        && (e.branch.eq_ignore_ascii_case("All") || e.branch.eq_ignore_ascii_case(job.path().branch))
+        && (e.kind != "Opportunity" || opportunity_ok(&e.opportunity))
+}
+
+/// The day's event (the game's `RollForEvent`): none as likely as every candidate not coming
+/// (the product of their chances against), else one by its likelihood; a sure one besides.
+pub fn roll_events(cands: &[(Due, f32)], sure: &[Due], rng: &mut impl rand::Rng) -> Vec<Due> {
+    let mut out = Vec::new();
+    let none: f32 = cands.iter().map(|c| 1.0 - c.1.clamp(0.0, 1.0)).product();
+    if !cands.is_empty() && rng.random::<f32>() >= none {
+        let total: f32 = cands.iter().map(|c| c.1).sum();
+        let mut x = rng.random::<f32>() * total;
+        let pick = cands.iter().find(|c| {
+            x -= c.1;
+            x <= 0.0
+        });
+        out.extend(pick.or(cands.last()).map(|c| c.0));
+    }
+    out.extend_from_slice(sure);
+    out
+}
+
+/// At the start of a shift, what the day will bring: the raise for good work (1% likely at
+/// nothing to 25% at the best, twice as likely for the Lucky), a Loser's bad luck (half the
+/// time), the career's own events by their likelihood; each at a time in the shift.
+#[allow(clippy::type_complexity)]
+fn roll_career_events(
+    mut commands: Commands,
+    clock: Res<GameClock>,
+    started: Query<(Entity, &Sim, &Job, &AtWork, Option<&crate::opportunities::SimOpportunities>), (Added<AtWork>, With<HouseholdMember>)>,
+    ui: Option<Res<crate::icons::GameUi>>,
+) {
+    let mut rng = rand::rng();
+    for (e, sim, job, w, opps) in &started {
+        let hours_left = ((w.until - clock.minutes) / 60.0) as f32;
+        if hours_left < 0.5 {
+            continue;
+        }
+        let track = job.career();
+        let data = ui.as_ref().map(|u| u.data.clone());
+        // (An opportunity's to offer if it's one of those there are, not done already, and no
+        // other career opportunity is on.)
+        let on_career = opps.is_some_and(|o| o.active.iter().any(|a| data.as_ref().and_then(|d| d.opportunities.get(a.index)).is_some_and(|x| !x.career.is_empty())));
+        let opportunity_ok = |guid: &str| {
+            !on_career
+                && data.as_ref().is_some_and(|d| d.opportunities.iter().any(|o| o.guid == guid && (o.repeat || !opps.is_some_and(|x| x.done.iter().any(|g| g == guid)))))
+        };
+        let luck = if sim.traits.contains(&Trait::Lucky) { 2.0 } else if sim.traits.contains(&Trait::Unlucky) { 0.5 } else { 1.0 };
+        let mut cands: Vec<(Due, f32)> = Vec::new();
+        if job.performance > 0.0 {
+            cands.push((Due::Raise, (job.performance / 100.0 * 0.24 + 0.01) * luck));
+        }
+        if sim.traits.contains(&Trait::Loser) {
+            cands.push((Due::Loser, 0.5));
+        }
+        let mut sure = Vec::new();
+        for (i, ev) in track.events.iter().enumerate() {
+            if event_open(ev, job, opportunity_ok) {
+                if ev.sure { sure.push(Due::Event(i)) } else { cands.push((Due::Event(i), ev.likelihood)) }
+            }
+        }
+        // (CAREER_EVENT=<key>: that one, twenty minutes in, for tests.)
+        if let Ok(k) = std::env::var("CAREER_EVENT")
+            && let Some(i) = track.events.iter().position(|ev| ev.key == k)
+        {
+            commands.entity(e).insert(EventsDue(vec![(clock.minutes + 20.0, Due::Event(i))]));
+            continue;
+        }
+        debug!("{}'s work day: {} events could come, {:.0}% likely none", sim.first, cands.len() + sure.len(), cands.iter().map(|c| 1.0 - c.1.clamp(0.0, 1.0)).product::<f32>() * 100.0);
+        let due: Vec<(f64, Due)> = roll_events(&cands, &sure, &mut rng)
+            .into_iter()
+            .map(|d| {
+                // (An opportunity comes an hour in at the earliest; the rest any time but the end.)
+                let opportunity = matches!(d, Due::Event(i) if track.events[i].kind == "Opportunity");
+                let h = if opportunity { rng.random_range(1.0..hours_left.max(1.01)) } else { rng.random_range(0.0..(hours_left - 0.2).max(0.01)) };
+                (clock.minutes + h as f64 * 60.0, d)
+            })
+            .collect();
+        if !due.is_empty() {
+            debug!("{}'s work day: {:?}", sim.first, due);
+            commands.entity(e).insert(EventsDue(due));
+        }
+    }
+}
+
+/// A career event's words for this Sim (a woman's where the game has them).
+fn event_words(t: &[String; 2], sim: &Sim) -> String {
+    t[sim.female as usize].replace("{0.SimFirstName}", &sim.first).replace("{0.SimName}", &sim.full_name())
+}
+
+/// A choice's chance of coming off (the game's `CheckForWin`): its own, plus each modifier's
+/// share by how they stand (mood, a skill's level of ten, liking with the boss or co-workers).
+pub fn win_chance(e: &s3bake::gamedata::CareerEventInfo, mood: f32, skills: &Skills, boss: f32, coworkers: Option<f32>) -> f32 {
+    if e.chance >= 100.0 {
+        return 100.0;
+    }
+    let mut c = e.chance;
+    for m in &e.modifiers {
+        let p: Vec<&str> = m.split(',').map(str::trim).collect();
+        let amount = |i: usize| p.get(i).and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
+        c += match p[0] {
+            "Mood" => mood / 100.0 * amount(1),
+            "Skill" => skills.level(p.get(1).copied().unwrap_or("")) as f32 / 10.0 * amount(2),
+            "RelationshipWithBoss" => boss / 100.0 * amount(1),
+            "RelationshipWithCoworkers" => coworkers.map_or(0.0, |l| l / 100.0 * amount(1)),
+            _ => 0.0,
+        };
+    }
+    c.min(100.0)
+}
+
+/// The moodlet a game buff gives, by its name.
+fn buff_moodlet(name: &str) -> Option<crate::life::MoodletKind> {
+    let name = if name == "Singed" { "SingedElectricity" } else { name };
+    crate::life::MoodletKind::ALL.into_iter().find(|k| k.buff() == (name, true))
+}
+
+/// What a career event gives (the game's `RewardsManager`): performance, a raise (a percent of
+/// the level's pay), a promotion, demotion or the sack, liking with the boss or co-workers (both
+/// ways), money, a moodlet.
+#[allow(clippy::too_many_arguments)]
+fn give_rewards(
+    rewards: &[String],
+    e: Entity,
+    sim: &Sim,
+    job: &mut Job,
+    rels: &mut crate::social::Relationships,
+    moodlets: &mut crate::life::Moodlets,
+    colleagues: (Option<Entity>, &[Entity]),
+    now: f64,
+    commands: &mut Commands,
+    household: Option<&mut Household>,
+    notes: &mut Notifications,
+    life: &mut MessageWriter<LifeEvent>,
+) {
+    let mut funds = household;
+    let warm = |x: Entity, d: f32, rels: &mut crate::social::Relationships, commands: &mut Commands| {
+        rels.add(x, d, 0.0);
+        commands.entity(x).queue(move |mut ew: EntityWorldMut| {
+            if let Some(mut r) = ew.get_mut::<crate::social::Relationships>() {
+                r.add(e, d, 0.0);
+            }
+        });
+    };
+    for r in rewards {
+        let p: Vec<&str> = r.split(',').map(str::trim).collect();
+        let n = |i: usize| p.get(i).and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
+        match p[0] {
+            "CareerPerformance" => job.performance = (job.performance + n(1)).clamp(-100.0, 100.0),
+            "CareerRaise" => {
+                let r = ((job.info().hourly as f32 * n(1) / 100.0) as i64).max(1);
+                job.raise += r;
+            }
+            "CareerPromotion" => job.promote = true,
+            "CareerDemotion" if job.level > 0 => {
+                job.level -= 1;
+                job.performance = 0.0;
+                notes.push(format!("{} was demoted to {}.", sim.first, job.info().title_for(sim.female)));
+                life.write(LifeEvent::new(e, LifeEventKind::Demoted));
+            }
+            "CareerFired" | "CareerDemotion" => {
+                notes.push(format!("{} was fired from the {} career.", sim.first, job.career().name));
+                commands.entity(e).remove::<Job>();
+                life.write(LifeEvent::new(e, LifeEventKind::Fired));
+            }
+            "RelationshipWithBoss" => {
+                if let Some(b) = colleagues.0 {
+                    warm(b, n(1), rels, commands);
+                }
+            }
+            "RelationshipWithCoworkers" => {
+                for &c in colleagues.1 {
+                    warm(c, n(1), rels, commands);
+                }
+            }
+            "Money" => {
+                if let Some(h) = funds.as_deref_mut() {
+                    h.funds += n(1) as i64;
+                }
+            }
+            "Buff" => {
+                if let Some(k) = p.get(1).and_then(|b| buff_moodlet(b)) {
+                    moodlets.add(k, now);
+                }
+            }
+            // (Objects, fish, a group meal, strangers, gigs: not had here.)
+            _ => {}
+        }
+    }
+}
+
+/// The day's events as their times come, while they're still at work: the raise, a Loser's
+/// luck, a message with its rewards, a choice put to the player, an opportunity offered; and the
+/// choices made, carried out.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn run_career_events(
+    mut commands: Commands,
+    clock: Res<GameClock>,
+    mut workers: Query<
+        (
+            Entity,
+            &Sim,
+            &mut Job,
+            Option<&mut EventsDue>,
+            Has<AtWork>,
+            Option<&EventChoice>,
+            &mut crate::social::Relationships,
+            &mut crate::life::Moodlets,
+            &Skills,
+            &Mood,
+        ),
+        (With<HouseholdMember>, Or<(With<EventsDue>, With<EventChoice>)>),
+    >,
+    people: Query<(Entity, &Sim)>,
+    mut household: Option<ResMut<Household>>,
+    mut notes: ResMut<Notifications>,
+    mut questions: ResMut<crate::dialog::Questions>,
+    mut life: MessageWriter<LifeEvent>,
+    mut offers: MessageWriter<crate::opportunities::OfferThis>,
+    ui: Option<Res<crate::layout::UiAssets>>,
+) {
+    let now = clock.minutes;
+    for (e, sim, mut job, due, at_work, choice, mut rels, mut moodlets, skills, mood) in &mut workers {
+        let find = |id: u64| people.iter().find(|(_, s)| s.id == id).map(|(x, _)| x);
+        let boss = job.boss.and_then(find);
+        let coworkers: Vec<Entity> = job.coworkers.iter().filter_map(|c| find(*c)).collect();
+        let events = job.career().events;
+        // A choice made: it comes off or it doesn't, and its rewards.
+        if let Some(c) = choice {
+            commands.entity(e).remove::<EventChoice>();
+            if let Some(ev) = events.get(c.event) {
+                let (text, rewards) = if c.yes {
+                    let mean = (!coworkers.is_empty()).then(|| coworkers.iter().map(|x| rels.get(*x).friendship).sum::<f32>() / coworkers.len() as f32);
+                    let chance = win_chance(ev, mood.0, skills, boss.map_or(0.0, |b| rels.get(b).friendship), mean);
+                    if rand::rng().random_range(0.0..100.0) < chance { (&ev.yes_result, &ev.rewards_yes) } else { (&ev.yes_lose_result, &ev.rewards_yes_lose) }
+                } else {
+                    (&ev.no_result, &ev.rewards_no)
+                };
+                let words = event_words(text, sim);
+                if !words.is_empty() {
+                    notes.push(words);
+                }
+                give_rewards(rewards, e, sim, &mut job, &mut rels, &mut moodlets, (boss, &coworkers), now, &mut commands, household.as_deref_mut(), &mut notes, &mut life);
+            }
+        }
+        let Some(mut due) = due else { continue };
+        if !at_work {
+            commands.entity(e).remove::<EventsDue>();
+            continue;
+        }
+        let Some(i) = due.0.iter().position(|(t, _)| *t <= now) else { continue };
+        let (_, d) = due.0.remove(i);
+        match d {
+            // (A raise only if they're doing well and getting better.)
+            Due::Raise if job.performance > 0.0 && job.rate > 0.0 => {
+                let r = job.give_raise();
+                let line = ui.as_ref().and_then(|u| u.localize(&format!("Gameplay/Careers/Career:EventRaise{}", if sim.female { "_Female" } else { "" })));
+                notes.push(line.map_or_else(
+                    || format!("{}'s hard work has paid off: a raise of §{r} an hour.", sim.first),
+                    |t| t.replace("{0.SimFirstName}", &sim.first).replace("{1.Money}", &format!("§{r}")),
+                ));
+            }
+            Due::Raise => {}
+            Due::Loser => notes.push(format!("{} had another bad day at work. Nothing ever seems to go right!", sim.first)),
+            Due::Event(i) => {
+                let Some(ev) = events.get(i) else { continue };
+                match ev.kind.as_str() {
+                    "Choice" => {
+                        let track = job.career();
+                        let answer = |t: &[String; 2], plain: &str| crate::dialog::Answer { label: if t[0].is_empty() { plain.into() } else { event_words(t, sim) }, detail: String::new(), icon: String::new() };
+                        questions.ask(crate::dialog::Ask {
+                            about: crate::dialog::Question::CareerEvent { sim: e, event: i },
+                            icon: track.icon.to_string(),
+                            heading: format!("{} at work", sim.first),
+                            title: job.info().title_for(sim.female).to_string(),
+                            text: event_words(&ev.text, sim),
+                            answers: vec![answer(&ev.yes, "Yes"), answer(&ev.no, "No")],
+                        });
+                    }
+                    "Opportunity" => {
+                        offers.write(crate::opportunities::OfferThis { sim: e, guid: ev.opportunity.clone() });
+                    }
+                    _ => {
+                        let words = event_words(&ev.text, sim);
+                        if !words.is_empty() {
+                            notes.push(words);
+                        }
+                        give_rewards(&ev.rewards_yes, e, sim, &mut job, &mut rels, &mut moodlets, (boss, &coworkers), now, &mut commands, household.as_deref_mut(), &mut notes, &mut life);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The player's answer to a career event's choice: yes (the first) or no.
+fn career_event_answers(mut commands: Commands, mut answers: MessageReader<crate::dialog::Answered>) {
+    for a in answers.read() {
+        if let crate::dialog::Question::CareerEvent { sim, event } = a.about {
+            commands.entity(sim).insert(EventChoice { event, yes: a.answer == 0 });
+        }
+    }
+}
+
 /// What a performance review comes to (the game's `DemotionChecker`).
 #[derive(Debug, PartialEq)]
 pub enum Review {
@@ -1206,6 +1549,12 @@ mod audit {
             for l in c.levels.iter().take(3) {
                 println!("   L{} {} ${} boss {} {:?}", l.level, l.branch, l.hourly, l.has_boss, l.metrics.iter().map(|m| format!("{} {:?} {}", m.kind, m.mappings, m.arg)).collect::<Vec<_>>());
             }
+            for e in c.events.iter().filter(|e| e.kind != "Opportunity") {
+                println!("   EVENT {} {} p {} levels {:?} {} sure {} | {} | yes {:?} no {:?} | {:?} {:?} {:?} chance {} {:?}", e.kind, e.key, e.likelihood, e.levels, e.branch, e.sure, e.text[1], e.yes[0], e.no[0], e.rewards_yes, e.rewards_yes_lose, e.rewards_no, e.chance, e.modifiers);
+            }
+            let opps: Vec<&str> = c.events.iter().filter(|e| e.kind == "Opportunity").map(|e| e.opportunity.as_str()).collect();
+            let known: Vec<&&str> = opps.iter().filter(|g| data.opportunities.iter().any(|o| o.guid == **g)).collect();
+            println!("   {} opportunity events, {} of opportunities we have: {:?}", opps.len(), known.len(), known.iter().take(4).collect::<Vec<_>>());
         }
     }
 }
@@ -1338,6 +1687,37 @@ mod tests {
         let mut job = Job::new(0);
         let r = job.give_raise();
         assert_eq!((r, job.raise), (((hourly as f32 * 0.15) as i64).max(1), r));
+    }
+
+    #[test]
+    fn career_events_come_by_the_games_roll() {
+        use s3bake::gamedata::CareerEventInfo;
+        let mut job = Job::new(0);
+        job.level = 3;
+        let ev = |levels: Vec<u32>, branch: &str, kind: &str| CareerEventInfo { kind: kind.into(), likelihood: 0.05, branch: branch.into(), levels, chance: 100.0, ..Default::default() };
+        // (At their level, on their path; an opportunity only if there's one to offer.)
+        assert!(event_open(&ev(vec![3, 4, 5], "All", "Reward"), &job, |_| false));
+        assert!(!event_open(&ev(vec![1, 2], "All", "Reward"), &job, |_| false));
+        assert!(event_open(&ev(vec![], "Base", "Choice"), &job, |_| false));
+        assert!(!event_open(&ev(vec![], "Thief", "Choice"), &job, |_| false));
+        assert!(!event_open(&ev(vec![], "All", "Opportunity"), &job, |_| false));
+        assert!(event_open(&ev(vec![], "All", "Opportunity"), &job, |_| true));
+        // (Nothing as likely as all of them not coming; the sure one besides.)
+        let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(7);
+        let cands = [(Due::Raise, 0.25), (Due::Event(0), 0.05), (Due::Event(1), 0.05)];
+        let n = 20000;
+        let none = (0..n).filter(|_| roll_events(&cands, &[], &mut rng).is_empty()).count() as f32 / n as f32;
+        assert!((none - 0.75 * 0.95 * 0.95).abs() < 0.015, "{none}");
+        assert_eq!(roll_events(&[], &[Due::Event(5)], &mut rng), vec![Due::Event(5)]);
+        // (A choice's chance: its own, the mood's share, a skill's by its level of ten.)
+        let mut choice = ev(vec![], "All", "Choice");
+        choice.chance = 50.0;
+        choice.modifiers = vec!["Mood,25".into(), "Skill,Athletic,20".into()];
+        let mut skills = Skills::default();
+        skills.0.insert("Athletic", 5.0);
+        assert_eq!(win_chance(&choice, 80.0, &skills, 0.0, None), 50.0 + 20.0 + 10.0);
+        assert_eq!(buff_moodlet("Singed"), Some(crate::life::MoodletKind::Singed));
+        assert_eq!(buff_moodlet("Stressed"), Some(crate::life::MoodletKind::Stressed));
     }
 
     #[test]

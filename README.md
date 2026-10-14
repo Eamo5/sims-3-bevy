@@ -915,7 +915,16 @@ installation is unreachable.
   of its socials' results raise theirs), and then "Ask for Promotion" and "Ask for a Raise"
   go by the game's own rules: liking 60 and performance 75 for a promotion (40 for a
   Schmoozer, less liking with Charisma), 60 for a raise; promoted at once, or 15% more an
-  hour.
+  hour. Working hard till fun runs out leaves them Overworked and back to working normally.
+- **Career events at work**, from the game's own table: each work day may bring one, as
+  likely as the game rolls it (none as likely as every candidate not coming): a raise for good
+  work, a Loser's bad day, or one of the career's own at their level and on their path — a
+  message in the game's words with what it gives (performance, a raise, a promotion, liking
+  with the boss or co-workers both ways, money, a moodlet: Stressed, Winner, Overworked, I Am
+  Beautiful, Sugar Rush, Garlic Breath and others), a choice put in the game's two-button
+  dialog with its own answers (yes might come off or not, by its chance and the mood or skill
+  it asks; no has its own outcome), or a career opportunity offered in the game's
+  opportunity dialog. Each comes at a time in the shift, only while they're still there.
 - **Career uniforms**: Sims head off to work in their level's uniform from the game's own
   outfits (suits, chef's whites with toques, police blues with the peaked cap, lab coats,
   scrubs, fatigues, the henchman's mask) in the outfit's own colours and fabrics, with their

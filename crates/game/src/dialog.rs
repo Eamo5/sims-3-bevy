@@ -32,13 +32,15 @@ pub enum Question {
     Reward { sim: Entity, rewards: Vec<String> },
     /// Which household to play (answers past them keep the one being played).
     Household(Vec<crate::household::Choice>),
+    /// A career event's choice (an index into the Sim's career's events): yes or no.
+    CareerEvent { sim: Entity, event: usize },
 }
 
 impl Question {
     /// The Sim the question is about.
     pub fn sim(&self) -> Option<Entity> {
         match self {
-            Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } => Some(*sim),
+            Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } | Question::CareerEvent { sim, .. } => Some(*sim),
             Question::Household(_) => None,
         }
     }
