@@ -649,10 +649,13 @@ pub enum MoodletKind {
     SpringFling,
     SummerFun,
     SpookyTime,
+    Decorated,
+    NicelyDecorated,
+    BeautifullyDecorated,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 65] = {
+    pub const ALL: [MoodletKind; 68] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -662,6 +665,7 @@ impl MoodletKind {
             LameParty, AwesomeParty, Scared, GreatDate, BadDate, Singed, DirtySurroundings, FilthySurroundings, GettingChilly,
             TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf, MintyBreath,
             Disgusted, Mourning, FreshClothing, VeryFreshClothing, HolidayCheer, SpringFling, SummerFun, SpookyTime,
+            Decorated, NicelyDecorated, BeautifullyDecorated,
         ]
     };
 
@@ -752,6 +756,9 @@ impl MoodletKind {
             SpringFling => md("Spring Fling", "It's Love Day!", 10, 19.0),
             SummerFun => md("Summer Fun", "It's Leisure Day!", 10, 19.0),
             SpookyTime => md("Spooky Time", "It's Spooky Day!", 10, 19.0),
+            Decorated => md("Decorated", "This room has a few nice touches.", 10, 0.0),
+            NicelyDecorated => md("Nicely Decorated", "This room is nicely put together.", 25, 0.0),
+            BeautifullyDecorated => md("Beautifully Decorated", "This room is a sight to behold!", 40, 0.0),
         }
     }
 
@@ -827,6 +834,9 @@ impl MoodletKind {
             SpringFling => ("SpringFling", true),
             SummerFun => ("SummerFun", true),
             SpookyTime => ("SpookyTime", true),
+            Decorated => ("Decorated", true),
+            NicelyDecorated => ("NicelyDecorated", true),
+            BeautifullyDecorated => ("BeautifullyDecorated", true),
             FreshClothing => ("FreshClothing", true),
             VeryFreshClothing => ("VeryFreshClothing", true),
         }

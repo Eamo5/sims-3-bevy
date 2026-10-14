@@ -27,6 +27,7 @@ impl Plugin for InteractPlugin {
             )
             .add_systems(Update, (route_objects, crate::social::load_game_socials).run_if(in_state(crate::AppState::InGame)))
             .init_resource::<RepairTunings>()
+            .init_resource::<ObjectRates>()
             .add_systems(Update, note_recent.run_if(in_state(PlayMode::Live)))
             .init_resource::<DepreciationDay>()
             .add_systems(OnEnter(crate::AppState::Loading), |mut day: ResMut<DepreciationDay>| day.0 = None)
@@ -802,9 +803,113 @@ impl RepairTunings {
 }
 
 /// The catalogue's objects matched to their classes' tuning, once the game data's there.
-fn load_repair_tunings(mut tunings: ResMut<RepairTunings>, ui: Option<Res<crate::icons::GameUi>>, baked: Option<Res<crate::baked::Baked>>, mut done: Local<bool>) {
+/// How much one of our interactions does for needs on each catalogue object, as the game tunes
+/// the object's class (`WatchTV_TVCheap`: a cheap TV's fun) or the nearest class it's a kind of
+/// (a `ShowerRomantic` a `Shower`'s), and how much faster its bed restores energy.
+#[derive(Resource, Default)]
+pub struct ObjectRates(pub HashMap<Key, ObjectNeedRates>);
+
+#[derive(Clone, Debug)]
+pub struct ObjectNeedRates {
+    pub by: HashMap<&'static str, s3bake::gamedata::InteractionRates>,
+    pub energy: f32,
+    /// What it adds to the look of a room (its class's `EnvironmentScore`).
+    pub environment: f32,
+}
+
+impl Default for ObjectNeedRates {
+    fn default() -> Self {
+        Self { by: HashMap::new(), energy: 1.0, environment: 0.0 }
+    }
+}
+
+/// The game's tuning name for those of our interactions it tunes object by object.
+fn itun_name(def: &str) -> Option<&'static str> {
+    Some(match def {
+        "Sleep" => "BedSleep",
+        "Nap" => "BedNap",
+        "Take Shower" => "TakeShower",
+        "Take Bath" => "TakeBath",
+        "Take Bubble Bath" => "TakeBubbleBath",
+        "Watch TV" | "Watch the TV" => "WatchTV",
+        "Play Computer Games" => "PlayComputerGames",
+        "Browse Web" => "BrowseWeb",
+        "Use Toilet" => "UseToilet",
+        _ => return None,
+    })
+}
+
+const ITUN_NAMES: [&str; 9] = ["BedSleep", "BedNap", "TakeShower", "TakeBath", "TakeBubbleBath", "WatchTV", "PlayComputerGames", "BrowseWeb", "UseToilet"];
+
+/// A class and the classes it's named a kind of (`BedDoubleBrass`, `BedDouble`, `Bed`): the
+/// game's object classes are named so.
+fn class_chain(class: &str) -> impl Iterator<Item = &str> {
+    std::iter::successors(Some(class), |c| c.char_indices().rev().find(|(i, ch)| *i > 0 && ch.is_ascii_uppercase()).map(|(i, _)| &c[..i]))
+}
+
+impl ObjectRates {
+    /// An interaction's change to each need an hour on this object.
+    pub fn per_hour(&self, d: &InteractionDef, objd: Key) -> [f32; 6] {
+        let mut r = d.per_hour;
+        let Some(o) = self.0.get(&objd) else { return r };
+        if let Some(t) = itun_name(d.name).and_then(|n| o.by.get(n)) {
+            for i in 0..6 {
+                if t.per_hour[i] != 0.0 {
+                    r[i] = t.per_hour[i];
+                } else if t.once[i] != 0.0 {
+                    // (What it does at once, over the time it takes.)
+                    r[i] = t.once[i] / d.minutes.max(1.0) * 60.0;
+                }
+            }
+        }
+        if matches!(d.name, "Sleep" | "Nap") && r[ENERGY] > 0.0 {
+            r[ENERGY] *= o.energy;
+        }
+        r
+    }
+}
+
+fn load_object_rates<'a>(rates: &mut ObjectRates, data: &s3bake::gamedata::GameDataBaked, catalog: impl IntoIterator<Item = (Key, &'a str)>) {
+    let mut by_class: HashMap<(&str, &str), &s3bake::gamedata::InteractionRates> = HashMap::new();
+    for r in &data.interaction_rates {
+        by_class.insert((r.class.as_str(), r.interaction.as_str()), r);
+    }
+    let energy: HashMap<&str, f32> = data.energy_multipliers.iter().map(|(c, v)| (c.as_str(), *v)).collect();
+    let environment: HashMap<&str, f32> = data.environment_scores.iter().map(|(c, v)| (c.as_str(), *v)).collect();
+    for (objd, script) in catalog {
+        let class = script.rsplit('.').next().unwrap_or("");
+        if class.is_empty() {
+            continue;
+        }
+        let mut o = ObjectNeedRates::default();
+        for n in ITUN_NAMES {
+            if let Some(r) = class_chain(class).find_map(|k| by_class.get(&(k, n))) {
+                o.by.insert(n, (*r).clone());
+            }
+        }
+        if let Some(e) = class_chain(class).find_map(|k| energy.get(k)) {
+            o.energy = *e;
+        }
+        if let Some(e) = class_chain(class).find_map(|k| environment.get(k)) {
+            o.environment = *e;
+        }
+        if !o.by.is_empty() || o.energy != 1.0 || o.environment != 0.0 {
+            rates.0.insert(objd, o);
+        }
+    }
+}
+
+fn load_repair_tunings(
+    mut tunings: ResMut<RepairTunings>,
+    mut rates: ResMut<ObjectRates>,
+    ui: Option<Res<crate::icons::GameUi>>,
+    baked: Option<Res<crate::baked::Baked>>,
+    mut done: Local<bool>,
+) {
     let (false, Some(ui), Some(baked)) = (*done, ui, baked) else { return };
     *done = true;
+    load_object_rates(&mut rates, &ui.data, baked.0.catalog.iter().map(|c| (c.objd, c.script.as_str())));
+    info!("need rates: {} catalogue objects tuned by their class", rates.0.len());
     let by: HashMap<String, &s3bake::gamedata::RepairTuning> = ui.data.repairs.iter().map(|r| (r.class.to_ascii_lowercase(), r)).collect();
     for c in &baked.0.catalog {
         let class = c.script.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
@@ -2792,7 +2897,7 @@ pub(crate) fn run_actions(
         Query<(), With<Broken>>,
         Query<(), Or<(With<crate::buy::HeldObject>, With<crate::buyhistory::HistoryHidden>)>>,
     ),
-    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather)): (
+    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates)): (
         MessageWriter<crate::journal::Did>,
         Query<&crate::journal::SkillJournal>,
         Query<&mut crate::inventory::Inventory>,
@@ -2800,7 +2905,7 @@ pub(crate) fn run_actions(
         Query<&mut SecondPlace>,
         Query<Entity, (With<SecondPlace>, Without<Broken>)>,
         Query<(), With<Unmade>>,
-        (Res<RepairTunings>, Query<&Transform, (With<crate::puddles::Puddle>, Without<Sim>)>, Option<Res<crate::weather::Weather>>),
+        (Res<RepairTunings>, Query<&Transform, (With<crate::puddles::Puddle>, Without<Sim>)>, Option<Res<crate::weather::Weather>>, Res<ObjectRates>),
     ),
 ) {
     let Some(grid) = grid else { return };
@@ -3569,8 +3674,11 @@ pub(crate) fn run_actions(
                             if let Ok((obj, otf, mut used, of)) = objects.get_mut(*target) {
                                 let d = &interactions_for(obj.kind)[*def];
                                 let affinity = crate::life::activity_affinity(&sim.traits, d.name);
+                                // (As the game tunes this object: a cheap TV less fun than a
+                                // flatscreen.)
+                                let per_hour = object_rates.per_hour(d, obj.objd);
                                 for i in 0..6 {
-                                    let mut gain = d.per_hour[i];
+                                    let mut gain = per_hour[i];
                                     if i == HUNGER && matches!(d.special, Special::ServeMeal | Special::GrabPlate) {
                                         gain = 0.0;
                                     }
@@ -4850,7 +4958,7 @@ pub fn hour_label(h: f32) -> String {
 fn autonomy(
     delta: Res<SimDelta>,
     clock: Res<GameClock>,
-    (settings, household): (Res<crate::options::Settings>, Query<(), With<HouseholdMember>>),
+    (settings, household, object_rates): (Res<crate::options::Settings>, Query<(), With<HouseholdMember>>, Res<ObjectRates>),
     mut sims: Query<
         (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim, Has<SocialPartner>, Option<&crate::visit::OnLot>, Option<&RecentDone>),
         // (Nor a cook between the stove and serving: their queue's empty a moment, with the meal
@@ -5040,14 +5148,16 @@ fn autonomy(
                 if d.until_full.is_some_and(|m| motives.0[m] >= 95.0) {
                     continue;
                 }
-                // (And what it does for the other needs only lasts as long as it does.)
+                // (And what it does for the other needs only lasts as long as it does; on this
+                // object, as the game tunes it.)
+                let per_hour = object_rates.per_hour(d, obj.objd);
                 let minutes = match d.until_full {
-                    Some(m) if d.per_hour[m] > 0.0 => d.minutes.min((100.0 - motives.0[m]).max(0.0) / (d.per_hour[m] / 60.0)),
+                    Some(m) if per_hour[m] > 0.0 => d.minutes.min((100.0 - motives.0[m]).max(0.0) / (per_hour[m] / 60.0)),
                     _ => d.minutes,
                 };
                 let mut score = 0.0;
                 for i in 0..6 {
-                    let gain = d.per_hour[i] * minutes / 60.0;
+                    let gain = per_hour[i] * minutes / 60.0;
                     let room = (100.0 - motives.0[i]).max(0.0);
                     score += gain.min(room).max(-50.0) * urgency(i);
                 }
@@ -5526,6 +5636,33 @@ mod tests {
     }
 
     #[test]
+    fn objects_do_for_needs_as_their_class_is_tuned() {
+        assert_eq!(class_chain("BedDoubleBrass").collect::<Vec<_>>(), ["BedDoubleBrass", "BedDouble", "Bed"]);
+        assert_eq!(class_chain("TVModerateFlatscreenHETech").find(|c| *c == "TVModerateFlatscreen"), Some("TVModerateFlatscreen"));
+        let rate = |class: &str, interaction: &str, per_hour: [f32; 6], once: [f32; 6]| s3bake::gamedata::InteractionRates { class: class.into(), interaction: interaction.into(), per_hour, once };
+        let data = s3bake::gamedata::GameDataBaked {
+            interaction_rates: vec![
+                rate("TVCheap", "WatchTV", [0.0, 0.0, 0.0, 0.0, 0.0, 25.0], [0.0; 6]),
+                rate("Toilet", "UseToilet", [0.0; 6], [0.0, 200.0, 0.0, 0.0, -10.0, 0.0]),
+            ],
+            energy_multipliers: vec![("BedDoubleCeleb".into(), 1.4)],
+            ..Default::default()
+        };
+        let catalog = [((1, 0, 1), "Sims3.Gameplay.Objects.Electronics.TVCheap"), ((1, 0, 2), "Sims3.Gameplay.Objects.Plumbing.ToiletRanch"), ((1, 0, 3), "Sims3.Gameplay.Objects.Beds.BedDoubleCeleb"), ((1, 0, 4), "Sims3.Gameplay.Objects.Chair")];
+        let mut rates = ObjectRates::default();
+        load_object_rates(&mut rates, &data, catalog);
+        let def = |name: &str| interactions_for(match name { "Watch TV" => ObjectKind::Tv, "Use Toilet" => ObjectKind::Toilet, _ => ObjectKind::BedDouble }).iter().find(|d| d.name == name).unwrap();
+        let tv = def("Watch TV");
+        assert_eq!(rates.per_hour(tv, (1, 0, 1))[FUN], 25.0, "a cheap TV's fun");
+        assert_eq!(rates.per_hour(tv, (1, 0, 4))[FUN], tv.per_hour[FUN], "what the game doesn't tune keeps ours");
+        let toilet = def("Use Toilet");
+        assert!((rates.per_hour(toilet, (1, 0, 2))[BLADDER] * toilet.minutes / 60.0 - 200.0).abs() < 1e-3, "a Toilet's, at once, over the time it takes");
+        let sleep = def("Sleep");
+        assert!((rates.per_hour(sleep, (1, 0, 3))[ENERGY] - sleep.per_hour[ENERGY] * 1.4).abs() < 1e-3, "a better bed");
+        assert!(!rates.0.contains_key(&(1, 0, 4)));
+    }
+
+    #[test]
     fn skills_grow_by_the_games_points() {
         // (Level 1 at 1,800 points, 2 at 3,150; halfway between them is 1.5.)
         assert_eq!(level_to_points(&SKILL_POINTS, 0.0), 0.0);
@@ -5577,6 +5714,32 @@ mod tests {
         assert!(app.world().get::<Depreciated>(away).is_none());
         app.update();
         assert_eq!(app.world().get::<Depreciated>(home), Some(&Depreciated(100)), "once a night");
+    }
+
+    /// Which catalogue objects the game tunes need rates for, and what (`cargo test -p sims3
+    /// need_rates_audit -- --ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn need_rates_audit() {
+        let root = s3bake::default_root();
+        let data = s3bake::gamedata::load_gamedata(&root).expect("game data");
+        let baked = crate::baked::BakedData::open(root, None).unwrap();
+        let mut rates = ObjectRates::default();
+        load_object_rates(&mut rates, &data, baked.catalog.iter().map(|c| (c.objd, c.script.as_str())));
+        let mut rows: Vec<String> = baked
+            .catalog
+            .iter()
+            .filter_map(|c| rates.0.get(&c.objd).map(|o| (c, o)))
+            .map(|(c, o)| {
+                let mut by: Vec<String> = o.by.iter().map(|(n, r)| format!("{n} {:?} {:?}", r.per_hour, r.once)).collect();
+                by.sort();
+                format!("{:40} {:28} energy x{} {}", c.name, c.script.rsplit('.').next().unwrap_or(""), o.energy, by.join("; "))
+            })
+            .collect();
+        rows.sort();
+        for r in rows {
+            println!("{r}");
+        }
     }
 
     /// How long clips are (`CLIPS=<name>,<name> cargo test -p sims3 clip_lengths -- --ignored

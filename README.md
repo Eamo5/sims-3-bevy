@@ -87,7 +87,11 @@ installation is unreachable.
   kept in saves, and handed down (a baby's face somewhere between their parents'), with the game's body-shape
   morphs (weight and fitness sliders; town Sims keep their builds, working out firms Sims up);
   needs (falling as the game's `Motives` tuning has them: hunger, bladder and energy by the band
-  they're in, slowing as they run low; social and hygiene steadily; fun only down to nothing),
+  they're in, slowing as they run low; social and hygiene steadily; fun only down to nothing;
+  and met as each object's class is tuned in the game's interaction tuning: a cheap TV's 25 fun
+  an hour against a wall TV's 80, a simple shower's 260 hygiene against a good one's 800, a
+  bath's fun, a toilet's relief, a bed's energy by its own multiplier from a trash-heap cot's
+  0.8 to a luxury bed's 1.4; Sims weigh it choosing what to use),
   moods, skills (learned in the game's skill points: each skill's points for each level from
   its `Skills` table, and each pastime's points an hour from its interaction tuning: an hour
   at the piano 420, at the easel 430, the workout bench 1014, the telescope 800, a jog 600;
@@ -755,6 +759,12 @@ installation is unreachable.
   half of each animation plays with them; a jukebox plays music to dance to.
 - **Brushing teeth** at a sink (the game's brushTeeth animation, toothbrush in hand) leaves the
   game's *Minty Breath* moodlet for four hours, as its `Sink.BrushTeeth` does.
+- **Decor**: the things in the room a household Sim is in at home (or within ten metres of them
+  outdoors) make it *Decorated*, *Nicely Decorated* or *Beautifully Decorated*, the game's
+  moodlets, as the game judges a room: each thing's class's `EnvironmentScore`, the best in
+  full and each after it less (in a big room the best counts half, and up to fifteen count;
+  in a small one five), nothing for what's dirty, broken or burnt, and twice as much for a
+  Snob.
 - **Dirty surroundings**: dirty dishes left about, food left out until it spoils (eight
   hours) and a full trash can give nearby household Sims the game's *Dirty Surroundings*,
   then *Filthy Surroundings*, moodlets. A dish cleared away (picked up with the game's

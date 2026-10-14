@@ -12,10 +12,12 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 92;
+pub const GAMEDATA_VERSION: u32 = 95;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
+/// Interaction tuning (ITUN).
+const T_ITUN: u32 = 0x03B3_3DDF;
 /// Textures (balloon icons are 64 px DDS pictures, instance = fnv64 of the lowercase name).
 const T_DDS: u32 = 0x00B2D882;
 /// Buy-mode catalogue thumbnails, 128 px PNG (`Thumbnails/AllThumbnails.package`): instance =
@@ -320,6 +322,55 @@ pub fn repair_tuning(class: &str, xml: &str) -> Option<RepairTuning> {
     })
 }
 
+/// What one of the game's interactions does to needs on a class of object (its interaction
+/// tuning, ITUN): each need's `ContinuousFlow` change an hour and its `ImmediateDelta` once,
+/// in the order hunger, bladder, energy, social, hygiene, fun.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct InteractionRates {
+    /// The object's class (`TVCheap`) and the interaction (`WatchTV`).
+    pub class: String,
+    pub interaction: String,
+    pub per_hour: [f32; 6],
+    pub once: [f32; 6],
+}
+
+/// The game's interaction tuning (an ITUN's XML) as need changes; none when it changes none.
+pub fn interaction_rates(xml: &str) -> Option<InteractionRates> {
+    let attr = |tag: &str| -> Option<&str> {
+        let at = xml.find(&format!("<{tag} name=\""))? + tag.len() + 8;
+        xml[at..].split('"').next()
+    };
+    // (`...Electronics.TV+WatchTV+Definition` or `...Electronics.PlayComputerGames+Definition`:
+    // the interaction's own name; the object's class last of its namespace.)
+    let interaction = attr("Interaction")?.trim_end_matches("+Definition").rsplit(['+', '.']).next()?.to_string();
+    let class = attr("Object")?.rsplit('.').next()?.to_string();
+    let mut r = InteractionRates { class, interaction, ..Default::default() };
+    let mut any = false;
+    for change in xml.split("<Change ").skip(1) {
+        let val = |k: &str| -> Option<&str> {
+            let at = change.find(&format!(" {k}=\""))? + k.len() + 3;
+            change[at..].split('"').next()
+        };
+        let i = match change.split('"').nth(1) {
+            Some("Hunger") => 0,
+            Some("Bladder") => 1,
+            Some("Energy") => 2,
+            Some("Social") => 3,
+            Some("Hygiene") => 4,
+            Some("Fun") => 5,
+            _ => continue,
+        };
+        let Some(v) = val("actual").and_then(|v| v.trim().parse::<f32>().ok()).filter(|v| *v != 0.0) else { continue };
+        match val("updateType") {
+            Some("ContinuousFlow") => r.per_hour[i] = v,
+            Some("ImmediateDelta") => r.once[i] = v,
+            _ => continue,
+        }
+        any = true;
+    }
+    any.then_some(r)
+}
+
 /// One of the game's conversation topics (its `ActiveTopic` rows): how long it lasts once a Sim
 /// has it (game hours; 0 as long as what gives it), whether others talk to the Sim about it, and
 /// whether a social under it is done only once between two Sims.
@@ -556,6 +607,15 @@ pub struct GameDataBaked {
     /// How each class of object breaks and is repaired.
     #[serde(default)]
     pub repairs: Vec<RepairTuning>,
+    /// What the game's interactions do to needs on each class of object, and how much faster
+    /// each class of bed restores energy (its `EnergyMultiplier`).
+    #[serde(default)]
+    pub interaction_rates: Vec<InteractionRates>,
+    #[serde(default)]
+    pub energy_multipliers: Vec<(String, f32)>,
+    /// What each class of object adds to the look of a room (its `EnvironmentScore`).
+    #[serde(default)]
+    pub environment_scores: Vec<(String, f32)>,
     pub buffs: Vec<BuffInfo>,
     pub traits: Vec<TraitInfo>,
     pub skills: Vec<SkillInfo>,
@@ -1732,6 +1792,28 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             && !out.repairs.iter().any(|r| r.class == t.class)
         {
             out.repairs.push(t);
+        }
+        if let Some(at) = x.find("<EnergyMultiplier value=\"")
+            && let Some(v) = x[at + 25..].split('"').next().and_then(|v| v.trim().parse::<f32>().ok())
+            && !out.energy_multipliers.iter().any(|(c, _)| c == class)
+        {
+            out.energy_multipliers.push((class.to_string(), v));
+        }
+        if let Some(at) = x.find("<EnvironmentScore value=\"")
+            && let Some(v) = x[at + 25..].split('"').next().and_then(|v| v.trim().parse::<f32>().ok())
+            && v != 0.0
+            && !out.environment_scores.iter().any(|(c, _)| c == class)
+        {
+            out.environment_scores.push((class.to_string(), v));
+        }
+    }
+    // The interactions' need changes, each class's (the game's ITUNs).
+    for e in pkg.of_type(T_ITUN) {
+        let Ok(d) = pkg.read(e) else { continue };
+        if let Some(r) = interaction_rates(&String::from_utf8_lossy(&d))
+            && !out.interaction_rates.iter().any(|o| o.class == r.class && o.interaction == r.interaction)
+        {
+            out.interaction_rates.push(r);
         }
     }
     let tables = std::iter::once("SocialData_BaseGame".to_string());
@@ -2920,6 +3002,23 @@ mod tests {
                 ("Buff Fired".to_string(), "Ask About Work".to_string(), false),
             ]
         );
+    }
+
+    #[test]
+    fn interaction_tuning_gives_need_changes() {
+        let xml = r#"<base><Interaction name="Sims3.Gameplay.Objects.Plumbing.Toilet+UseToilet+Definition" /><Object name="Sims3.Gameplay.Objects.Plumbing.ToiletCheap" /><Output>
+            <Change type="Bladder" advertised="200" locked="True" actual="200" updateType="ImmediateDelta" timeDependsOn="False" />
+            <Change type="Hygiene" advertised="-10" locked="True" actual="-10" updateType="ImmediateDelta" />
+            <Change type="Fun" advertised="5" locked="True" actual="5" updateType="ContinuousFlow" />
+            <Change type="SkillLogic" advertised="5" locked="True" actual="5" updateType="ContinuousFlow" />
+            <Change type="Energy" advertised="0" locked="True" actual="0" updateType="ContinuousFlow" /></Output></base>"#;
+        let r = interaction_rates(xml).unwrap();
+        assert_eq!((r.class.as_str(), r.interaction.as_str()), ("ToiletCheap", "UseToilet"));
+        assert_eq!(r.once, [0.0, 200.0, 0.0, 0.0, -10.0, 0.0]);
+        assert_eq!(r.per_hour, [0.0, 0.0, 0.0, 0.0, 0.0, 5.0]);
+        assert!(interaction_rates(r#"<base><Interaction name="A+B+Definition" /><Object name="C" /></base>"#).is_none(), "no need changes");
+        let own = interaction_rates(r#"<base><Interaction name="Sims3.Gameplay.Objects.Electronics.PlayComputerGames+Definition" /><Object name="X.ComputerCheap" /><Change type="Fun" advertised="40" locked="False" actual="35" updateType="ContinuousFlow" /></base>"#).unwrap();
+        assert_eq!(own.interaction, "PlayComputerGames", "an interaction of its own, not inside the object's class");
     }
 
     #[test]

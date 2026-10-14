@@ -66,6 +66,7 @@ mod puddles;
 mod idles;
 mod faces;
 mod privacy;
+mod decor;
 mod laundry;
 mod reactions;
 mod jobpaper;
@@ -204,7 +205,7 @@ fn main() {
         .add_plugins((midlife::MidLifePlugin, objanim::ObjectAnimPlugin, household::HouseholdPlugin, journal::JournalPlugin, jog::JogPlugin, doorbell::DoorbellPlugin, edittown::EditTownPlugin, style::StylePlugin, weather::WeatherPlugin, seasonal::SeasonalPlugin, pets::PetsPlugin, supernatural::SupernaturalPlugin, planlook::PlanLookPlugin, mirrorlook::MirrorLookPlugin))
         .add_plugins((layout::LayoutPlugin, livehud::LiveHudPlugin, hudpanels::HudPanelsPlugin, piemenu::PieMenuPlugin, buyhud::BuyHudPlugin, infopanels::InfoPanelsPlugin, buildhud::BuildHudPlugin, popupmenu::PopupMenuPlugin, mainmenu::MainMenuPlugin, loadscreen::LoadScreenPlugin, savepics::SavePicsPlugin, gamepopup::GamePopupPlugin, optionsdialog::OptionsDialogPlugin, gamedialogs::GameDialogsPlugin, (caslook::CasLookPlugin, cashair::CasHairPlugin, casclothing::CasClothingPlugin, caschar::CasCharPlugin, casface::CasFacePlugin, casfamily::CasFamilyPlugin, casstyle::CasStylePlugin, skilljournal::SkillJournalPlugin, casgenetics::CasGeneticsPlugin, colljournal::CollJournalPlugin, familytree::FamilyTreePlugin, playflow::PlayFlowPlugin, edittownui::EditTownUiPlugin, familyinv::FamilyInventoryPlugin, buildobjects::BuildObjectsPlugin)))
         .add_plugins(jobpaper::JobPaperPlugin)
-        .add_plugins((grime::GrimePlugin, dressing::DressingPlugin, puddles::PuddlesPlugin, idles::IdlesPlugin, faces::FacesPlugin, reactions::ReactionsPlugin, laundry::LaundryPlugin, privacy::PrivacyPlugin, topics::TopicsPlugin, holidays::HolidaysPlugin))
+        .add_plugins((grime::GrimePlugin, dressing::DressingPlugin, puddles::PuddlesPlugin, idles::IdlesPlugin, faces::FacesPlugin, reactions::ReactionsPlugin, laundry::LaundryPlugin, privacy::PrivacyPlugin, topics::TopicsPlugin, holidays::HolidaysPlugin, decor::DecorPlugin))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)
         .run();

@@ -290,6 +290,11 @@ impl ActiveBuilding {
         self.floor_regions.get(&(level, l.x.floor() as i32, l.y.floor() as i32)).copied().filter(|r| *r > 0)
     }
 
+    /// How many tiles of floor a room has.
+    pub fn room_tiles(&self, level: u8, room: u16) -> usize {
+        self.floor_regions.iter().filter(|((l, ..), r)| *l == level && **r == room).count()
+    }
+
     /// Room kind (`ROOM_*`) of the floor at `p` on `level`, if the house has floor there.
     pub fn room_at(&self, level: u8, p: Vec3) -> Option<u8> {
         self.floor_y(level, p)?;
