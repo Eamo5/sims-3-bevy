@@ -103,6 +103,8 @@ pub struct ActiveBuilding {
     floor_heights: HashMap<(u8, i32, i32), f32>,
     /// Room kind (`ROOM_*`) of each floor tile.
     floor_kinds: HashMap<(u8, i32, i32), u8>,
+    /// Which room each tile is in (its region; 0: none, outdoors).
+    floor_regions: HashMap<(u8, i32, i32), u16>,
     far: Option<bool>,
     /// The house as built (with any repainting), for redrawing parts of it.
     pub data: LotBuildingBaked,
@@ -193,6 +195,7 @@ impl ActiveBuilding {
         self.floor_cells = self.data.floors.iter().filter(|f| f.level > 0 || f.y.is_some()).map(|f| ((f.level, f.x as i32, f.z as i32), f.mask)).collect();
         self.floor_heights = self.data.floors.iter().filter_map(|f| Some(((f.level, f.x as i32, f.z as i32), f.y?))).collect();
         self.floor_kinds = self.data.floors.iter().map(|f| ((f.level, f.x as i32, f.z as i32), f.kind)).collect();
+        self.floor_regions = self.data.floors.iter().map(|f| ((f.level, f.x as i32, f.z as i32), f.region)).collect();
     }
 
     /// Doors and windows set in the wall section from `p` to `q` on `level`.
@@ -278,6 +281,12 @@ impl ActiveBuilding {
             3
         };
         (mask & (1 << t) != 0).then(|| self.floor_heights.get(&(level, x as i32, z as i32)).copied().unwrap_or(self.levels[level as usize]))
+    }
+
+    /// The room (its region) the floor at `p` on `level` is in, indoors.
+    pub fn room_id(&self, level: u8, p: Vec3) -> Option<u16> {
+        let l = self.local(p);
+        self.floor_regions.get(&(level, l.x.floor() as i32, l.y.floor() as i32)).copied().filter(|r| *r > 0)
     }
 
     /// Room kind (`ROOM_*`) of the floor at `p` on `level`, if the house has floor there.
@@ -1858,6 +1867,7 @@ pub fn spawn_building(
     let floor_cells = b.floors.iter().filter(|f| f.level > 0 || f.y.is_some()).map(|f| ((f.level, f.x as i32, f.z as i32), f.mask)).collect();
     let floor_heights = b.floors.iter().filter_map(|f| Some(((f.level, f.x as i32, f.z as i32), f.y?))).collect();
     let floor_kinds = b.floors.iter().map(|f| ((f.level, f.x as i32, f.z as i32), f.kind)).collect();
+    let floor_regions = b.floors.iter().map(|f| ((f.level, f.x as i32, f.z as i32), f.region)).collect();
     let mut active = ActiveBuilding {
         lot: b.lot as usize,
         corner,
@@ -1871,6 +1881,7 @@ pub fn spawn_building(
         floor_cells,
         floor_heights,
         floor_kinds,
+        floor_regions,
         far: None,
         data: b.clone(),
         exterior: STYLE_EXTERIOR[(lot.id % STYLE_EXTERIOR.len() as u64) as usize],

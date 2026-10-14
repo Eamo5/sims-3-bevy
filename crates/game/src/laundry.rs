@@ -49,6 +49,9 @@ pub struct Laundry {
     fine_wash: bool,
     /// The piles each Sim has left today (the day, and how many).
     left_today: HashMap<Entity, (u32, u32)>,
+    /// Not before then is the laundry tried again of anyone's own accord (game minutes): once a
+    /// load came to nothing, the piles out of reach.
+    pub rest_until: f64,
 }
 
 /// A machine's load: running (until when, game minutes) or done.
@@ -96,6 +99,10 @@ const HAMPER_HOLDS: u32 = 16;
 const HAMPER_REACH: f32 = 6.0;
 /// How many clothes make a load worth washing, without being asked.
 pub const LOAD: u32 = 4;
+/// How long the laundry's left after a load came to nothing (game minutes).
+const REST_MINUTES: f64 = 60.0;
+/// How far from where they stand a pile may be left, for floor that can be walked to.
+const PILE_REACH: i32 = 3;
 /// How long the washer, the dryer and the line take (the game's `kTimeToWashNormal`, `DryTime`,
 /// the line's `kDryTime`), and how long the laundry keeps giving Fresh Clothing
 /// (`FreshClothingBuffTimeInHrs`), in game minutes.
@@ -123,10 +130,10 @@ impl Laundry {
         }
     }
 
-    /// Whether a Sim would see to it of their own accord.
-    pub fn worth_doing(&self, special: Special) -> bool {
+    /// Whether a Sim would see to it of their own accord (at `now`, game minutes).
+    pub fn worth_doing(&self, special: Special, now: f64) -> bool {
         match special {
-            Special::DoLaundry | Special::EmptyHamper => self.waiting as usize + self.piles >= LOAD as usize,
+            Special::DoLaundry | Special::EmptyHamper => self.waiting as usize + self.piles >= LOAD as usize && now >= self.rest_until,
             Special::LoadDryer => false,
             _ => true,
         }
@@ -152,6 +159,7 @@ fn changes(
     building: Option<Res<crate::building::ActiveBuilding>>,
     (data, catalog, mut assets): (Res<crate::baked::Baked>, Res<crate::loading::Catalog>, ResMut<crate::objects::ObjectAssets>),
     (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    (grid, upper): (Option<Res<crate::nav::NavGrid>>, Option<Res<crate::nav::UpperFloors>>),
 ) {
     let mut rng = rand::rng();
     let day = clock.day();
@@ -190,8 +198,17 @@ fn changes(
             laundry.waiting += 1;
             continue;
         }
-        // (Dropped where they stand: floor they could walk on, not in the sink in front of them.)
-        let at = tf.translation;
+        // (Dropped where they stand, or as near as there's open floor to pick it up from: not in
+        // the shower stall they undressed in, nor the sink in front of them.)
+        let level = building.as_deref().map_or(1, |b| b.level_at(tf.translation.y + 0.3));
+        let near = (0..=PILE_REACH)
+            .flat_map(|r| (-r..=r).flat_map(move |dx| (-r..=r).filter(move |dz| dx.abs().max(dz.abs()) == r).map(move |dz| (dx, dz))))
+            .map(|(dx, dz)| tf.translation.xz() + Vec2::new(dx as f32, dz as f32) * 0.5)
+            .find(|p| crate::puddles::free_at(grid.as_deref(), upper.as_deref(), level, *p));
+        let Some(at) = near.map(|p| Vec3::new(p.x, tf.translation.y, p.y)) else {
+            debug!("{}'s clothes not left: no open floor about", sim.first);
+            continue;
+        };
         let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
         match spawn_pile(&mut commands, &mut assets, &mut ctx, &catalog, at, rng.random_range(0.0..std::f32::consts::TAU)) {
             Some(p) => debug!("{} leaves their clothes in a pile ({p})", sim.first),
@@ -283,6 +300,11 @@ fn requests(
                 {
                     queue.0.push_front(Action::new("Do Laundry", ActionKind::Object { target: w, def }, true));
                 }
+            }
+            // (Nothing gathered to wash: the piles were out of reach. Left a while.)
+            LaundryRequest::Wash(_) if laundry.waiting == 0 => {
+                debug!("{} found nothing to wash", sim.first);
+                laundry.rest_until = clock.minutes + REST_MINUTES;
             }
             LaundryRequest::Wash(washer) if load(washer).is_none() => {
                 info!("{} puts on a load of laundry", sim.first);
@@ -503,9 +525,13 @@ mod tests {
         assert!(!l.offers(Special::DoLaundry, ObjectKind::Washer, w));
         l.piles = 1;
         assert!(l.offers(Special::DoLaundry, ObjectKind::Washer, w));
-        assert!(!l.worth_doing(Special::DoLaundry));
+        assert!(!l.worth_doing(Special::DoLaundry, 0.0));
         l.waiting = LOAD - 1;
-        assert!(l.worth_doing(Special::DoLaundry));
+        assert!(l.worth_doing(Special::DoLaundry, 0.0));
+        // (Left a while after a load came to nothing.)
+        l.rest_until = 60.0;
+        assert!(!l.worth_doing(Special::DoLaundry, 30.0));
+        assert!(l.worth_doing(Special::DoLaundry, 61.0));
         // Washing: nothing more until it's done; then it's dried, where there's room.
         l.loads.insert(w, Load::Running(10.0));
         assert!(!l.offers(Special::DoLaundry, ObjectKind::Washer, w));

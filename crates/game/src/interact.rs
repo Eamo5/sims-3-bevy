@@ -2451,7 +2451,7 @@ pub(crate) fn run_actions(
         (Without<GameObject>, Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>),
     >,
     mut objects: Query<(&GameObject, &Transform, &mut UsedBy, Option<&Floor>), Without<Sim>>,
-    (building, upper, visited): (Option<Res<crate::building::ActiveBuilding>>, Option<Res<UpperFloors>>, Option<Res<crate::visit::VisitedLot>>),
+    (building, upper, visited, privacy): (Option<Res<crate::building::ActiveBuilding>>, Option<Res<UpperFloors>>, Option<Res<crate::visit::VisitedLot>>, Res<crate::privacy::Privacy>),
     mut life: MessageWriter<LifeEvent>,
     people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
     mut conceive: MessageWriter<crate::little::Conceive>,
@@ -2583,6 +2583,11 @@ pub(crate) fn run_actions(
                             Ok((obj, otf, used, of)) => {
                                 // (A group meal's served one at a time: the rest wait their turn.)
                                 if used.0.is_some_and(|u| u != me) && obj.kind == ObjectKind::Meal {
+                                    continue;
+                                }
+                                // (A bathroom someone's using is theirs: the rest wait till it's free.)
+                                if privacy.objects.get(target).is_some_and(|u| *u != me) {
+                                    commands.entity(me).insert_if_new(crate::privacy::WaitingForPrivacy::new(clock.minutes));
                                     continue;
                                 }
                                 if effective_owner(me, used.0, seconds.get(*target).ok().map(|s| s.0)).is_some_and(|u| u != me) {
@@ -4418,7 +4423,7 @@ fn autonomy(
         Query<(), With<crate::gardening::Sprinkling>>,
         Query<&RouteFailed>,
     ),
-    (called, repairmen, laundry): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>, Res<crate::laundry::Laundry>),
+    (called, repairmen, laundry, privacy): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>, Res<crate::laundry::Laundry>, Res<crate::privacy::Privacy>),
     friends_away: Query<(Entity, &Sim), (With<OffLot>, Without<Invited>)>,
     callers: Query<(Entity, &crate::doorbell::AtTheDoor)>,
     (weather, building): (Res<crate::weather::Weather>, Option<Res<crate::building::ActiveBuilding>>),
@@ -4486,6 +4491,10 @@ fn autonomy(
             if (used.0.is_some_and(|u| u != me) && !beside_partner) || obj_lot.map(|l| l.0) != my_lot {
                 continue;
             }
+            // (Not in a bathroom someone else is using.)
+            if privacy.objects.get(&oe).is_some_and(|u| *u != me) {
+                continue;
+            }
             if !obj.kind.suits(sim) {
                 continue;
             }
@@ -4505,9 +4514,17 @@ fn autonomy(
                 // badly needs the bathroom unclogs the toilet (the plunger needs no skill).
                 let keen = sim.traits.contains(&crate::life::Trait::Handy) || sim.traits.contains(&crate::life::Trait::Neat);
                 let desperate = obj.kind == ObjectKind::Toilet && motives.0[BLADDER] < -20.0;
+                // (A leak's fixed before its puddles are mopped, by anyone grown now and then.)
+                let leaking = crate::puddles::spills(obj.kind);
                 // (At home: the town's own things are the town's to fix.)
-                if household.contains(me) && my_lot.is_none() && sim.age.is_grown() && sim.age != Age::Child && (keen || desperate) && !repairman {
-                    let score = if desperate { urgency(BLADDER) * 40.0 } else { 25.0 } / (1.0 + dist / 25.0);
+                if household.contains(me) && my_lot.is_none() && sim.age.is_grown() && sim.age != Age::Child && (keen || desperate || leaking) && !repairman {
+                    let score = if desperate {
+                        urgency(BLADDER) * 40.0
+                    } else if leaking {
+                        if keen { 35.0 } else { 10.0 }
+                    } else {
+                        25.0
+                    } / (1.0 + dist / 25.0);
                     if best.as_ref().is_none_or(|b| score > b.0) {
                         best = Some((score, Action::new(repair_of(obj.kind).0, ActionKind::Repair { target: oe }, true)));
                     }
@@ -4600,9 +4617,10 @@ fn autonomy(
                 // The laundry, when there's some to do: a chore like the dishes.
                 if matches!(d.special, Special::PickUpClothes | Special::DoLaundry | Special::EmptyHamper | Special::MoveLaundry | Special::LoadDryer | Special::EmptyDryer) {
                     // (Grown-ups' work: the game's clips are theirs.)
-                    if !household.contains(me) || !sim.age.is_grown() || sim.age == Age::Child || used.0.is_some() || !laundry.offers(d.special, obj.kind, oe) || !laundry.worth_doing(d.special) {
+                    if !household.contains(me) || !sim.age.is_grown() || sim.age == Age::Child || used.0.is_some() || !laundry.offers(d.special, obj.kind, oe) || !laundry.worth_doing(d.special, clock.minutes) {
                         continue;
                     }
+                    trace!("{} could {} ({} waiting, {} piles)", sim.first, d.name, laundry.waiting, laundry.piles);
                     score = if sim.traits.contains(&crate::life::Trait::Slob) {
                         0.0
                     } else if sim.traits.contains(&crate::life::Trait::Neat) {

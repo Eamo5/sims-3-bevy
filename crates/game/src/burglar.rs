@@ -194,7 +194,7 @@ fn burglar(
                 if !bought {
                     crate::save::note_removed(&mut removed, obj, otf);
                 }
-                notes.push(format!("A burglar stole the {}!", obj.name));
+                notes.push(format!("A burglar stole {}!", the(&obj.name)));
                 bur.loot = Some((obj.objd, *otf, bought, obj.name.clone()));
                 commands.entity(t).despawn();
             }
@@ -324,7 +324,7 @@ fn police(
         Some(since) if clock.minutes - since > CUFF_MINUTES => {
             match bur.loot.take() {
                 Some((objd, tf, bought, name)) => {
-                    notes.push(format!("The police caught the burglar and got the {name} back!"));
+                    notes.push(format!("The police caught the burglar and got {} back!", the(&name)));
                     commands.insert_resource(Recovered(objd, tf, bought));
                 }
                 None => notes.push("The police caught the burglar! Nothing was taken."),
@@ -339,4 +339,9 @@ fn police(
         }
         _ => {}
     }
+}
+
+/// An object's name with "the" before it, unless it has its own ("The Dromedary").
+fn the(name: &str) -> String {
+    if name.len() >= 4 && name[..4].eq_ignore_ascii_case("the ") { name.to_string() } else { format!("the {name}") }
 }

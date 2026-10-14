@@ -57,7 +57,7 @@ const FLOOR_LIFETIME: f64 = 480.0;
 const MAX_RADIUS: i32 = 15;
 
 /// What spills when it's broken.
-fn spills(kind: ObjectKind) -> bool {
+pub(crate) fn spills(kind: ObjectKind) -> bool {
     matches!(kind, ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::ShowerTub | ObjectKind::Sink | ObjectKind::Toilet | ObjectKind::Dishwasher)
 }
 
@@ -148,7 +148,7 @@ fn puddle_image(seed: u32) -> Image {
 /// Where a puddle can lie: the floor's free there (nothing standing on it), on that storey, and
 /// open to the rest of it (not a pocket behind the tub, where whoever came to mop it would be
 /// stranded).
-fn free_at(grid: Option<&crate::nav::NavGrid>, upper: Option<&crate::nav::UpperFloors>, level: u8, p: Vec2) -> bool {
+pub(crate) fn free_at(grid: Option<&crate::nav::NavGrid>, upper: Option<&crate::nav::UpperFloors>, level: u8, p: Vec2) -> bool {
     let g = if level == 1 { grid } else { upper.and_then(|u| u.grids.get(&level)) };
     g.is_some_and(|g| {
         g.cell_of(p).is_some_and(|(x, z)| !g.is_blocked(x, z) && g.reachable_from(p).iter().filter(|r| **r).count() >= OPEN_CELLS)

@@ -252,9 +252,44 @@ pub struct GameRules {
     pub keen: Vec<Trait>,
     pub unkeen: Vec<Trait>,
     pub clips: &'static [&'static str],
-    /// The trait topics it's offered under (the game's `<Trait> Trait` topics): offered when the
-    /// one who does it has the trait (`true`), or the one it's done to (`false`). None: always.
-    pub topics: Vec<(Trait, bool)>,
+    /// The topics it's offered under (the game's `<Trait> Trait` and `Buff <Moodlet>` topics,
+    /// and a few more): offered when the one who does it has the trait or the moodlet (`true`),
+    /// or the one it's done to (`false`). None: always.
+    pub topics: Vec<(Topic, bool)>,
+}
+
+/// A topic a social's offered under: a Sim's trait, or a moodlet of theirs.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Topic {
+    Trait(Trait),
+    Moodlet(crate::life::MoodletKind),
+}
+
+/// The game's topic, if it's one kept here: `<Trait> Trait`, `Buff <Moodlet>` (by the game's
+/// buff name), and the pregnancy, a new job and a new home.
+fn topic(name: &str) -> Option<Topic> {
+    use crate::life::MoodletKind as M;
+    let squash = |s: &str| s.replace(' ', "");
+    if let Some(t) = name.strip_suffix(" Trait") {
+        let t = squash(t);
+        return Trait::ALL.iter().find(|x| x.game_id().eq_ignore_ascii_case(&t) || format!("{x:?}").eq_ignore_ascii_case(&t)).map(|x| Topic::Trait(*x));
+    }
+    if let Some(b) = name.strip_prefix("Buff ") {
+        let b = squash(b);
+        // (The game's names for some of them.)
+        let b = match b.as_str() {
+            "Stinky" => "Smelly",
+            "Hunger" => "Hungry",
+            other => other,
+        };
+        return M::ALL.iter().find(|m| m.buff().0.eq_ignore_ascii_case(b)).map(|m| Topic::Moodlet(*m));
+    }
+    match name {
+        "Pregnancy" => Some(Topic::Moodlet(M::Pregnant)),
+        "New Job" => Some(Topic::Moodlet(M::NewJob)),
+        "New House" => Some(Topic::Moodlet(M::NewHome)),
+        _ => None,
+    }
 }
 
 const fn sd(name: &'static str, cat: SocialCat, minutes: f32, social: f32, fun: f32, friendship: f32, romance: f32) -> SocialDef {
@@ -450,16 +485,9 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
         if SOCIALS.iter().chain(out.iter()).any(|s| s.name.eq_ignore_ascii_case(&a.name)) || LEFT_OUT.contains(&a.name.as_str()) || a.name.contains('{') {
             continue;
         }
-        // (Offered under topics: those of traits are known here; a birthday, a moodlet, a
-        // pregnancy aren't yet, so what's only offered under them is left out.)
-        let topics: Vec<(Trait, bool)> = a
-            .topics
-            .iter()
-            .filter_map(|(t, first)| {
-                let name = t.strip_suffix(" Trait")?.replace(' ', "");
-                Trait::ALL.iter().find(|x| x.game_id().eq_ignore_ascii_case(&name) || format!("{x:?}").eq_ignore_ascii_case(&name)).map(|x| (*x, *first))
-            })
-            .collect();
+        // (Offered under topics: those of traits and moodlets are known here; what's only offered
+        // under others, a birthday, a burglary, is left out.)
+        let topics: Vec<(Topic, bool)> = a.topics.iter().filter_map(|(t, first)| Some((topic(t)?, *first))).collect();
         if !a.topics.is_empty() && topics.is_empty() {
             continue;
         }
@@ -605,7 +633,7 @@ pub fn load_game_socials(ui: Option<Res<crate::icons::GameUi>>, data: Option<Res
 
 /// Whether `actor` can start this social with `target` (shown in the pie menu); `kin`: whether
 /// they're family (no romance between relatives).
-pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim, target_in_household: bool, kin: bool) -> bool {
+pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim, target_in_household: bool, kin: bool, moods: [Option<&crate::life::Moodlets>; 2]) -> bool {
     if rel.friendship < def.min_friendship || rel.romance < def.min_romance || rel.friendship > def.max_friendship {
         return false;
     }
@@ -615,10 +643,16 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
     {
         return false;
     }
-    // (Under a trait's topic: the one with the trait, the Sim or the other.)
+    // (Under a topic: the one with the trait or the moodlet, the Sim or the other.)
     if let Some(g) = def.game
         && !g.topics.is_empty()
-        && !g.topics.iter().any(|(t, first)| if *first { actor.traits.contains(t) } else { target.traits.contains(t) })
+        && !g.topics.iter().any(|(t, first)| {
+            let (sim, mood) = if *first { (actor, moods[0]) } else { (target, moods[1]) };
+            match t {
+                Topic::Trait(x) => sim.traits.contains(x),
+                Topic::Moodlet(m) => mood.is_some_and(|ml| ml.has(*m)),
+            }
+        })
     {
         return false;
     }
@@ -802,23 +836,31 @@ mod tests {
         a.traits.clear();
         b.traits = vec![Trait::Good];
         let rel = Relationship::default();
-        assert!(!available(accuse, &rel, &a, &b, false, false));
+        assert!(!available(accuse, &rel, &a, &b, false, false, [None, None]));
         b.traits = vec![Trait::Evil];
-        assert!(available(accuse, &rel, &a, &b, false, false));
+        assert!(available(accuse, &rel, &a, &b, false, false, [None, None]));
         b.age = Age::Elder;
-        assert!(!available(accuse, &rel, &a, &b, false, false), "not for the ages it isn't for");
+        assert!(!available(accuse, &rel, &a, &b, false, false, [None, None]), "not for the ages it isn't for");
         // Under a trait's topic: offered when the one with it does it; under a birthday's (not
         // known here), not at all.
         let mut plot = act("Mastermind Plot", "Friendly", "Admire", "");
         plot.topics = vec![("Evil Trait".into(), true)];
         let mut cake = act("Announce Birthday", "Friendly", "Admire", "");
         cake.topics = vec![("Birthday".into(), true)];
-        let got = game_socials(&[plot, cake], &clips);
-        assert_eq!(got.len(), 1);
+        let mut work = act("Ask About Work", "Friendly", "Admire", "");
+        work.topics = vec![("Buff Fired".into(), false)];
+        let got = game_socials(&[plot, cake, work], &clips);
+        assert_eq!(got.len(), 2);
         b.age = Age::YoungAdult;
-        assert!(!available(&got[0], &rel, &a, &b, false, false));
+        assert!(!available(&got[0], &rel, &a, &b, false, false, [None, None]));
         a.traits = vec![Trait::Evil];
-        assert!(available(&got[0], &rel, &a, &b, false, false));
+        assert!(available(&got[0], &rel, &a, &b, false, false, [None, None]));
+        // Under a moodlet's topic: asked about work by others once fired.
+        let mut fired = crate::life::Moodlets::default();
+        assert!(!available(&got[1], &rel, &a, &b, false, false, [None, Some(&fired)]));
+        fired.add(crate::life::MoodletKind::Fired, 0.0);
+        assert!(available(&got[1], &rel, &a, &b, false, false, [None, Some(&fired)]));
+        assert!(!available(&got[1], &rel, &a, &b, false, false, [Some(&fired), None]), "not the one fired asking");
     }
 
     #[test]
