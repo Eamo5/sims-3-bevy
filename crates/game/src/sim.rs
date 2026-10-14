@@ -724,13 +724,16 @@ pub fn spawn_sim(
 fn decay_motives(
     delta: Res<SimDelta>,
     // (Sims at home elsewhere in town live off stage: they come over as they were.)
-    mut q: Query<(&mut Motives, &DecayScale, &Sim, Option<&crate::wishes::Wishes>, Has<crate::careers::AtWork>, Has<crate::rabbitholes::AtRabbitHole>), Without<crate::interact::OffLot>>,
+    mut q: Query<
+        (&mut Motives, &DecayScale, &Sim, Option<&crate::wishes::Wishes>, Has<crate::careers::AtWork>, Has<crate::rabbitholes::AtRabbitHole>, Option<&crate::careers::Job>),
+        Without<crate::interact::OffLot>,
+    >,
 ) {
     let hours = delta.0 / 60.0;
     if hours <= 0.0 {
         return;
     }
-    for (mut m, scale, sim, wishes, at_work, away) in &mut q {
+    for (mut m, scale, sim, wishes, at_work, away, job) in &mut q {
         // Steel Bladder keeps this need satisfied, including when restored from a save
         // with a low bladder value or when the Sim is away at work.
         if crate::wishes::has(wishes, "SteelBladder") {
@@ -746,6 +749,16 @@ fn decay_motives(
             // (Fun falls no further than nothing.)
             if i == FUN && m.0[i] > 0.0 {
                 d = d.max(-m.0[i]);
+            }
+            // (At work, the job's own: the worse of it and the day's, or the job's past nothing;
+            // never for a Workaholic, and not while taking it easy.)
+            if i == FUN
+                && at_work
+                && let Some(job) = job
+                && job.tone != crate::careers::WorkTone::TakeItEasy
+            {
+                let stress = job.career().fun_per_hour * hours;
+                d = if sim.traits.contains(&crate::life::Trait::Workaholic) { stress.max(0.0) } else if d < 0.0 && stress <= 0.0 { d.min(stress) } else { stress };
             }
             m.add(i, d);
         }

@@ -256,6 +256,10 @@ pub enum SocialEffect {
     /// A recipe learned from another cook (the game's "Ask for Recipe": one from the books, at
     /// the asker's Cooking).
     LearnRecipe,
+    /// Asking the boss for a promotion or a raise (the game's `JobPromotion`, `PayRise`), done
+    /// when it's taken well.
+    AskPromotion,
+    AskRaise,
 }
 
 /// What a Mooch gets out of others (the game's `MoochAmount`, at the hidden Mooch skill's first
@@ -275,6 +279,8 @@ const GAME_EFFECTS: &[(&str, SocialEffect)] = &[
     ("Mooch Food", SocialEffect::MoochFood),
     ("Ask for Recipe", SocialEffect::LearnRecipe),
     ("Trade Kitchen Secrets", SocialEffect::LearnRecipe),
+    ("Ask for a Promotion", SocialEffect::AskPromotion),
+    ("Ask for a Raise", SocialEffect::AskRaise),
 ];
 
 pub struct SocialDef {
@@ -355,6 +361,9 @@ pub enum GameTest {
     NotPartner,
     /// A guest to their host (complimenting the home).
     GuestToHost,
+    /// To the one doing it's boss (asking for a raise); and below level 9 (for a promotion).
+    Boss,
+    BossBelowNine,
 }
 
 /// What's known of a Sim for the game's socials beyond their `Sim`: who they are, their
@@ -373,6 +382,10 @@ pub struct Side<'a> {
     pub charisma: u32,
     /// Whether they cook at all (have the Cooking skill).
     pub cooks: bool,
+    /// Their boss (by id), their level (0-based) and performance at work.
+    pub boss: Option<u64>,
+    pub level: usize,
+    pub performance: f32,
 }
 
 /// What `Side::of` reads of a Sim.
@@ -401,6 +414,9 @@ impl<'a> Side<'a> {
             member,
             charisma: skills.map_or(0, |s| s.level("Charisma")),
             cooks: skills.is_some_and(|s| s.0.get("Cooking").is_some_and(|v| *v > 0.0)),
+            boss: job.and_then(|j| j.boss),
+            level: job.map_or(0, |j| j.level),
+            performance: job.map_or(0.0, |j| j.performance),
         }
     }
 }
@@ -646,6 +662,8 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
             "TestTargetHasWork" => Some(GameTest::TargetWorks),
             "TestAnnouncePromotion" => Some(GameTest::ActorWorks),
             "TestAnnounceEngagement" => Some(GameTest::NotPartner),
+            "TestAskForRaise" => Some(GameTest::Boss),
+            "TestAskForPromotion" => Some(GameTest::BossBelowNine),
             // (What's said of a line of work: its topic is the other's being in it.)
             t if t.starts_with("TargetHas") && t.ends_with("Career") && a.topics.iter().any(|(n, _)| n.starts_with("Learn ")) => None,
             _ => continue,
@@ -853,10 +871,15 @@ pub fn load_game_socials(ui: Option<Res<crate::icons::GameUi>>, data: Option<Res
         return;
     }
     let (Some(ui), Some(data)) = (ui, data) else { return };
-    let list = game_socials(&ui.data.socials, &data.0.clip_names);
+    install_game_socials(&ui.data.socials, &data.0.clip_names);
+    crate::conversation::load(&ui.data);
+}
+
+/// The game's own socials, from its social data and the clips there are, for this session.
+pub fn install_game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[String]) {
+    let list = game_socials(actions, clip_names);
     info!("socials: {} of the game's own besides the {} hand-made", list.len(), SOCIALS.len());
     let _ = GAME_SOCIALS.set(list);
-    crate::conversation::load(&ui.data);
 }
 
 /// Whether `actor` can start this social with `target` (shown in the pie menu); `kin`: whether
@@ -885,6 +908,8 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
                 Some(GameTest::GuestToHost) => side[0].member || !side[1].member,
                 Some(GameTest::TargetWorks) => side[1].career.is_none(),
                 Some(GameTest::NotPartner) => matches!(rel.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married),
+                Some(GameTest::Boss) => side[0].boss != Some(target.id),
+                Some(GameTest::BossBelowNine) => side[0].boss != Some(target.id) || side[0].level + 1 >= 9,
                 _ => false,
             })
     {
@@ -997,7 +1022,7 @@ mod tests {
             act("Admire", "Friendly", "Admire", ""),
             // (Hand-made already; a test not known here; no clips for it; a tone not handled.)
             act("Chat", "Friendly", "Chat", ""),
-            act("Ask for Promotion", "Friendly", "Admire", "TestAskForPromotion"),
+            act("Ask for Directions", "Friendly", "Admire", "TestNotKnownHere"),
             act("Sing", "Friendly", "Sing", ""),
             act("Mumble", "Boring", "Admire", ""),
         ];

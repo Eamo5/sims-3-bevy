@@ -188,6 +188,22 @@ pub struct SavedJob {
     /// How they go about their work ("WorkHard"...; none: normally).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tone: Option<String>,
+    /// Their boss and coworkers (Sims' ids), the highest level they've reached, raises, and
+    /// when they were warned about their work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boss: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub coworkers: Vec<u64>,
+    #[serde(default)]
+    pub highest: usize,
+    #[serde(default, skip_serializing_if = "no_raise")]
+    pub raise: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warned_at: Option<f64>,
+}
+
+fn no_raise(v: &i64) -> bool {
+    *v == 0
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -842,6 +858,11 @@ fn save_game(
                 performance: j.performance,
                 branch: j.path().branch.into(),
                 tone: (j.tone != crate::careers::WorkTone::Normal).then(|| j.tone.name().into()),
+                boss: j.boss,
+                coworkers: j.coworkers.clone(),
+                highest: j.highest,
+                raise: j.raise,
+                warned_at: j.warned_at,
             }),
             relationships: rels
                 .0
@@ -1153,6 +1174,11 @@ pub(crate) fn apply_loaded_game(
                     job.level = j.level.min(job.levels().len() - 1);
                     job.performance = j.performance;
                     job.tone = j.tone.as_deref().map(crate::careers::WorkTone::from_name).unwrap_or_default();
+                    job.boss = j.boss;
+                    job.coworkers = j.coworkers.clone();
+                    job.highest = j.highest.max(job.level);
+                    job.raise = j.raise;
+                    job.warned_at = j.warned_at;
                     ec.insert(job);
                 }
             }

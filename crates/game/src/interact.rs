@@ -3550,6 +3550,7 @@ pub(crate) fn run_actions(
                                         actor_member: who.get(&me).is_some_and(|w| w.2),
                                         target_member: *t_member,
                                         holiday: warm,
+                                        boss_hears: job.as_deref().filter(|j| j.boss == Some(tsim.id)).map(|j| j.performance),
                                     };
                                     let mut outcome = crate::conversation::decide(*social, &judging);
                                     // (A Comedian's jokes always land; told to do their homework, they
@@ -4268,6 +4269,17 @@ pub(crate) fn run_actions(
                                         }
                                         social_fx.push((*target, me, 0.0, 0.0, 0.0, 0.0, Some(crate::conversation::Shared::of(&rels.get(*target)))));
                                         memories.0.entry(me).or_default().after(*social, clock.minutes);
+                                        // (The topics it raises: the one's, the other's, and both of
+                                        // theirs, the conversation's.)
+                                        let [mine, theirs, both] = o.topics;
+                                        let other = *target;
+                                        for (who, name) in [(me, mine), (other, theirs), (me, both), (other, both)] {
+                                            if !name.is_empty() {
+                                                commands.queue(move |w: &mut World| {
+                                                    w.write_message(crate::topics::AddTopic::new(who, name));
+                                                });
+                                            }
+                                        }
                                         debug!("{} and {}: {:?}, liking {:+.2} to {:.1}, now {}", sim.first, tsim.first, o.result, f, rels.get(*target).friendship, stc.name());
                                     }
                                     if s.name == "Tell Joke" {
@@ -4409,6 +4421,19 @@ pub(crate) fn run_actions(
                                                 });
                                             } else {
                                                 notes.push(format!("{tname} won't do their homework for {}.", sim.first));
+                                            }
+                                        }
+                                        // (The boss agrees, or doesn't: the game's `JobPromotion` and
+                                        // `PayRise`, on a friendly answer.)
+                                        SocialEffect::AskPromotion | SocialEffect::AskRaise => {
+                                            let agreed = action.social_outcome.is_some_and(|o| o.result == crate::conversation::Commodity::Friendly);
+                                            match job.as_deref_mut() {
+                                                Some(j) if agreed && s.effect == SocialEffect::AskPromotion => j.promote = true,
+                                                Some(j) if agreed => {
+                                                    j.give_raise();
+                                                    notes.push(format!("{} asked {tname} for a raise and got one: §{} an hour now.", sim.first, j.info().hourly + j.raise));
+                                                }
+                                                _ => notes.push(format!("{tname} turned {} down.", sim.first)),
                                             }
                                         }
                                         SocialEffect::Greet => {

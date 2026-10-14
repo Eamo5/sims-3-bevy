@@ -700,24 +700,6 @@ pub fn social_affinity(traits: &[Trait], social: &str) -> f32 {
     r
 }
 
-/// Career performance speed.
-pub fn work_rate(traits: &[Trait]) -> f32 {
-    let mut r = 1.0;
-    for t in traits {
-        r *= match t {
-            Trait::Ambitious => 1.25,
-            Trait::Workaholic => 1.2,
-            Trait::Lazy => 0.8,
-            Trait::Absentminded => 0.9,
-            Trait::Schmoozer => 1.15,
-            Trait::Loser => 0.85,
-            Trait::Lucky => 1.05,
-            Trait::Unlucky => 0.95,
-            _ => 1.0,
-        };
-    }
-    r
-}
 
 /// Energy regained while sleeping.
 pub fn sleep_rate(traits: &[Trait]) -> f32 {

@@ -403,10 +403,12 @@ fn tab_content(
                     Some(n) => format!("Next: {} (§{} an hour)", n.title, n.hourly),
                     None => "Top of the career!".to_string(),
                 };
-                p.spawn(text(format!("{next} · Improve with {}, and a good mood at work.", track.skill), 13.0, Color::srgb(0.8, 0.85, 0.95)));
+                let judged: Vec<String> = j.info().metrics.iter().map(crate::careers::metric_label).collect();
+                let judged = if judged.is_empty() { format!("{}, and a good mood at work", track.skill) } else { judged.join(", ") };
+                p.spawn(text(format!("{next} · Judged on {judged}."), 13.0, Color::srgb(0.8, 0.85, 0.95)));
                 // How they go about their work.
                 p.spawn(Node { column_gap: Val::Px(5.0), row_gap: Val::Px(4.0), flex_wrap: FlexWrap::Wrap, max_width: Val::Px(440.0), ..default() }).with_children(|row| {
-                    for t in crate::careers::WorkTone::ALL {
+                    for t in crate::careers::WorkTone::ALL.into_iter().filter(|t| t.offered(j)) {
                         let on = j.tone == t;
                         row.spawn((
                             Button,

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 100;
+pub const GAMEDATA_VERSION: u32 = 103;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -82,6 +82,14 @@ pub struct SkillInfo {
     pub points: Vec<u32>,
 }
 
+/// One of a career level's performance metrics.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct CareerMetric {
+    pub kind: String,
+    pub mappings: [f32; 3],
+    pub arg: String,
+}
+
 /// One level of a career (a row of the career's own table).
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct CareerLevelInfo {
@@ -97,6 +105,14 @@ pub struct CareerLevelInfo {
     /// When a Sim at this level gets up for work (the table's `WakeupTime`; 0 where it has none).
     #[serde(default)]
     pub wakeup: f32,
+    /// How performance is judged at this level (the table's `Metric1..4`, `Mappings1..4` and
+    /// `Args1..4`): each metric (`Mood`, `RelBoss`, `RelCoworkers`, `SkillX`...), the values it
+    /// scores -3, 0 and +3 at, and its skill.
+    #[serde(default)]
+    pub metrics: Vec<CareerMetric>,
+    /// Whether there's a boss at this level (`HasBoss`).
+    #[serde(default)]
+    pub has_boss: bool,
     /// Workdays: bit 0 = Monday.
     pub days: u8,
     /// Skills that count towards performance at this level.
@@ -111,12 +127,106 @@ pub struct CareerInfo {
     pub hex: String,
     pub name: String,
     pub desc: String,
+    /// How fast performance flows at work: an hour at the best (`MaxPerfFlow`) and worst
+    /// (`MinPerfFlow`) metrics, the same at the top levels (`...MaxLevel`), and an hour missed
+    /// (`MissWorkPerf`); a promotion's bonus in hours' pay (`BonusAmountInHours`); fun an hour at
+    /// work (`FunStressPerHour`); how many coworkers (`MinCoworkers`, `MaxCoworkers`).
+    #[serde(default)]
+    pub flow: [f32; 4],
+    #[serde(default)]
+    pub miss_work: f32,
+    #[serde(default)]
+    pub bonus_hours: f32,
+    #[serde(default)]
+    pub fun_per_hour: f32,
+    #[serde(default)]
+    pub coworkers: (u8, u8),
     /// What the job listings say of it (`Text_JobOffer`: "The Hospital could always use...").
     #[serde(default)]
     pub offer: String,
     pub icon: String,
     pub part_time: bool,
     pub levels: Vec<CareerLevelInfo>,
+    /// What can happen at work (the game's `CareerEvents` table).
+    #[serde(default)]
+    pub events: Vec<CareerEventInfo>,
+}
+
+/// One of a career's events at work (a row of the game's `CareerEvents` table): a message with
+/// its rewards (`EventReward`), a choice (`EventChoice`: yes might win or lose, no), or a career
+/// opportunity offered (`EventOpportunity`); how likely each work day, at which levels (1-based;
+/// none: any) of which branch ("All" or one), whether it's the day's sure one; its words; what
+/// it gives (the game's reward strings: `CareerPerformance,20`, `Buff,Fatigued`...).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct CareerEventInfo {
+    pub key: String,
+    pub kind: String,
+    pub likelihood: f32,
+    pub branch: String,
+    pub levels: Vec<u32>,
+    pub sure: bool,
+    pub text: String,
+    pub yes: String,
+    pub no: String,
+    pub yes_result: String,
+    pub yes_lose_result: String,
+    pub no_result: String,
+    /// The chance (percent) a yes wins, and what changes it (`Mood,30`, `Skill,Cooking,5`).
+    pub chance: f32,
+    pub modifiers: Vec<String>,
+    pub rewards_yes: Vec<String>,
+    pub rewards_yes_lose: Vec<String>,
+    pub rewards_no: Vec<String>,
+    pub opportunity: String,
+}
+
+/// The events of one career in the game's `CareerEvents` table (rows under the career's own
+/// tag, the first its defaults), their words from the career's `CareerEvents` sheet.
+pub fn career_events(xml: &str, career: &str, text: &dyn Fn(&str) -> String) -> Vec<CareerEventInfo> {
+    let rows = records(xml, career);
+    let default = rows.first().cloned().unwrap_or_default();
+    let mut out = Vec::new();
+    for r in rows.iter().skip(1) {
+        let get = |k: &str| r.get(k).or(default.get(k)).map(|v| v.trim().to_string()).unwrap_or_default();
+        let name = get("EventName");
+        let class = name.split(',').next().unwrap_or("").rsplit(['+', '.']).next().unwrap_or("").to_string();
+        let opportunity = get("OpportunityName");
+        let kind = match class.as_str() {
+            "EventReward" => "Reward",
+            "EventChoice" => "Choice",
+            "" if !opportunity.is_empty() => "Opportunity",
+            _ => continue,
+        };
+        let mut levels = Vec::new();
+        for part in get("AvailableLevels").split(',').map(str::trim).filter(|p| !p.is_empty()) {
+            let (a, b) = part.split_once(':').unwrap_or((part, part));
+            if let (Ok(a), Ok(b)) = (a.trim().parse::<u32>(), b.trim().parse::<u32>()) {
+                levels.extend(a..=b);
+            }
+        }
+        let list = |prefix: &str| (1..=3).map(|i| get(&format!("{prefix}{i}"))).filter(|v| !v.is_empty()).collect::<Vec<_>>();
+        out.push(CareerEventInfo {
+            key: get("EventType"),
+            kind: kind.into(),
+            likelihood: get("Likelihood").parse().unwrap_or(0.0),
+            branch: { let b = get("BranchName"); if b.is_empty() { "All".into() } else { b } },
+            levels,
+            sure: get("SureShotEvent") == "1",
+            text: text(&get("Description")),
+            yes: text(&get("YesText")),
+            no: text(&get("NoText")),
+            yes_result: text(&get("YesResultText")),
+            yes_lose_result: text(&get("YesLoseResultText")),
+            no_result: text(&get("NoResultText")),
+            chance: get("ChanceToWin").parse().unwrap_or(100.0),
+            modifiers: list("ChanceModifier"),
+            rewards_yes: list("RewardYes"),
+            rewards_yes_lose: list("RewardYesLose"),
+            rewards_no: list("RewardNo"),
+            opportunity,
+        });
+    }
+    out
 }
 
 /// An opportunity done at a rabbit hole (the game's most common kind): go to a venue of a type
@@ -341,6 +451,10 @@ pub struct SocialOutcome {
     /// context's).
     #[serde(default = "no_charisma_override")]
     pub charisma: f32,
+    /// The topics it raises (`<Topic x y teo>`): the actor's, the target's, and the
+    /// conversation's (both of theirs).
+    #[serde(default)]
+    pub topics: [String; 3],
 }
 
 fn no_charisma_override() -> f32 {
@@ -607,6 +721,7 @@ fn social_rules(body: &str) -> (Vec<SocialRule>, Vec<SocialOutcome>) {
             bits_add: hex(bits.and_then(|t| attr(t, "val"))),
             bits_remove: hex(bits.and_then(|t| attr(t, "rem"))),
             charisma: tag(inner, "TUN").and_then(|t| attr(t, "charInc")).and_then(|v| v.parse().ok()).unwrap_or(-1.0),
+            topics: ["x", "y", "teo"].map(|k| tag(inner, "Topic").and_then(|t| attr(t, k)).unwrap_or("").to_string()),
         });
     }
     (out, outcomes)
@@ -2383,6 +2498,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
 
     // Careers: the base game's full-time careers and part-time jobs, each with its own table
     // of levels (and branches).
+    let events_xml = xml("CareerEvents").unwrap_or_default();
     if let Some(careers) = xml("Careers") {
         let day_bit = |d: &str| match d.trim() {
             "M" => 1u8,
@@ -2394,8 +2510,18 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             "U" => 64,
             _ => 0,
         };
-        for f in records(&careers, "CareerList") {
-            let name_key = get(&f, "CareerName");
+        let list = records(&careers, "CareerList");
+        // (Columns a row leaves out are the first row's, the defaults.)
+        let list_default = list.first().cloned().unwrap_or_default();
+        for f in list.iter().skip(1) {
+            let f = &{
+                let mut f = f.clone();
+                for (k, v) in &list_default {
+                    f.entry(k.clone()).or_insert_with(|| v.clone());
+                }
+                f
+            };
+            let name_key = get(f, "CareerName");
             let table = get(&f, "TableName");
             let category = get(&f, "Category");
             if name_key.is_empty() || table.is_empty() || f.get("ProductVersion").is_some_and(|s| s != "BaseGame") {
@@ -2406,7 +2532,16 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             }
             let mut levels = Vec::new();
             let mut last_skill: Vec<String> = Vec::new();
-            for r in records(&careers, &table) {
+            let rows = records(&careers, &table);
+            let row_default = rows.first().cloned().unwrap_or_default();
+            for r in rows {
+                let r = {
+                    let mut r = r;
+                    for (k, v) in &row_default {
+                        r.entry(k.clone()).or_insert_with(|| v.clone());
+                    }
+                    r
+                };
                 let level = num(&r, "Level") as u32;
                 if level == 0 {
                     continue;
@@ -2430,6 +2565,19 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                     start,
                     hours: num(&r, "DayLength"),
                     wakeup: num(&r, "WakeupTime"),
+                    metrics: (1..=4)
+                        .filter_map(|i| {
+                            let m = get(&r, &format!("Metric{i}"));
+                            // (`Sims3.Gameplay.Careers.MetricMood, Sims3GameplaySystems` is `Mood`.)
+                            let kind = m.split(',').next()?.rsplit('.').next()?.trim().trim_start_matches("Metric").to_string();
+                            if kind.is_empty() {
+                                return None;
+                            }
+                            let map: Vec<f32> = get(&r, &format!("Mappings{i}")).split(',').filter_map(|v| v.trim().parse().ok()).collect();
+                            Some(CareerMetric { kind, mappings: if map.len() == 3 { [map[0], map[1], map[2]] } else { [0.0; 3] }, arg: get(&r, &format!("Args{i}")) })
+                        })
+                        .collect(),
+                    has_boss: get(&r, "HasBoss").eq_ignore_ascii_case("true") || get(&r, "HasBoss") == "1",
                     days: get(&r, "DaysToWork").split(',').map(day_bit).fold(0, |a, b| a | b),
                     skills: last_skill.clone(),
                     outfits: ["OutfitMale", "OutfitFemale", "OutfitMaleElder", "OutfitFemaleElder"].map(|c| get(&r, c)),
@@ -2438,12 +2586,19 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             if levels.is_empty() {
                 continue;
             }
+            let n = |k: &str, d: f32| f.get(k).and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(d);
             out.careers.push(CareerInfo {
                 name: text("Careers/CareerList", &name_key),
-                desc: text("Careers/CareerList", &get(&f, "CareerDescription")),
-                offer: text("Careers/CareerList", &get(&f, "Text_JobOffer")),
-                icon: get(&f, "DreamsAndPromisesIcon"),
+                desc: text("Careers/CareerList", &get(f, "CareerDescription")),
+                offer: text("Careers/CareerList", &get(f, "Text_JobOffer")),
+                icon: get(f, "DreamsAndPromisesIcon"),
+                flow: [n("MaxPerfFlow", 14.0), n("MinPerfFlow", -8.0), n("MaxPerfFlowMaxLevel", 8.0), n("MinPerfFlowMaxLevel", -10.0)],
+                miss_work: n("MissWorkPerf", -10.0),
+                bonus_hours: n("BonusAmountInHours", 12.0),
+                fun_per_hour: n("FunStressPerHour", -5.0),
+                coworkers: (n("MinCoworkers", 2.0) as u8, n("MaxCoworkers", 4.0) as u8),
                 part_time: category == "PartTime",
+                events: career_events(&events_xml, &name_key, &|k| text(&format!("CareerEvents/{name_key}"), k)),
                 hex: name_key,
                 levels,
             });
@@ -3434,12 +3589,29 @@ mod tests {
     }
 
     #[test]
+    fn career_events_are_read_with_their_rows_defaults() {
+        let xml = r#"<CareerEvents>
+            <Business><EventType></EventType><EventName></EventName><SureShotEvent>0</SureShotEvent><BranchName>All</BranchName><ChanceToWin></ChanceToWin></Business>
+            <Business><EventType>BusinessCareer_Memo</EventType><OpportunityName>BusinessCareer_Memo</OpportunityName><Likelihood>0.0875</Likelihood><AvailableLevels>3:5</AvailableLevels></Business>
+            <Business><EventType>BusinessCareer_Golf</EventType><EventName>Sims3.Gameplay.Careers.Career+EventChoice, Sims3GameplaySystems</EventName><Description>Golf</Description><YesText>GolfYes</YesText><ChanceToWin>60</ChanceToWin><ChanceModifier1>Mood,30</ChanceModifier1><Likelihood>0.05</Likelihood><AvailableLevels>1,4</AvailableLevels><RewardYes1>RelationshipWithBoss,20</RewardYes1><RewardNo1>CareerPerformance,-10</RewardNo1></Business>
+            <Business><EventType>BusinessCareer_Odd</EventType><EventName>Sims3.Gameplay.Careers.Business+ImpromptuMeeting, Sims3GameplaySystems</EventName></Business>
+            <Medical><EventType>MedicalCareer_X</EventType><OpportunityName>X</OpportunityName></Medical>
+        </CareerEvents>"#;
+        let e = career_events(xml, "Business", &|k| if k.is_empty() { String::new() } else { format!("<{k}>") });
+        assert_eq!(e.len(), 2, "the game's own classes left out");
+        assert_eq!((e[0].kind.as_str(), e[0].levels.clone(), e[0].opportunity.as_str(), e[0].chance), ("Opportunity", vec![3, 4, 5], "BusinessCareer_Memo", 100.0));
+        let golf = &e[1];
+        assert_eq!((golf.kind.as_str(), golf.text.as_str(), golf.yes.as_str(), golf.chance, golf.branch.as_str()), ("Choice", "<Golf>", "<GolfYes>", 60.0, "All"));
+        assert_eq!((golf.levels.clone(), golf.modifiers.clone(), golf.rewards_yes.clone(), golf.rewards_no.clone()), (vec![1, 4], vec!["Mood,30".to_string()], vec!["RelationshipWithBoss,20".to_string()], vec!["CareerPerformance,-10".to_string()]));
+    }
+
+    #[test]
     fn social_rules_are_read_as_the_game_has_them() {
         let xml = r#"<Social><Action key="Chat" com="Friendly"><SA key="Talk" /><AD val="0x00080512"><Misc ITLA="10" r="6" c="4" /></AD>
             <AA><AGE x="C,T,Y,A,E" y="C,T,Y,A,E" /><Available auto="True" udo="False" /></AA>
             <Rules>
             <RHS com="Friendly" state="friendly"><Anim /><TUN is="True" lvl="20" /></RHS>
-            <RHS com="Boring" state="boring"><Anim /><TUN val="80" /><LTRBits val="0x800" rem="0x100" /></RHS>
+            <RHS com="Boring" state="boring"><Anim /><TUN val="80" /><LTRBits val="0x800" rem="0x100" /><Topic teo="Work Pay" /></RHS>
             <LHS com="Boring" val="54" TP="2"><SC /><SE x="None" remX="None" y="None" remY="None" /><AGE x="T,Y,A,E" y="" /><Trait y="~Friendly" /><MAYBE rep="True" /></LHS>
             <LHS com="Friendly" val="53" TP="2"><SC stc="Awkward" val="True" /><Trait /><MAYBE /></LHS>
             <LHS com="Boring" val="52" TP="2"><SC com="Creepy" is="True" /><Trait /><MAYBE /></LHS>
@@ -3449,8 +3621,8 @@ mod tests {
         let chat = &social_actions(xml, &|k| k.to_string())[0];
         assert_eq!((chat.speech_act.as_str(), chat.chances, chat.recharges), ("Talk", 4, 6));
         assert_eq!(chat.outcomes, vec![
-            SocialOutcome { result: "Friendly".into(), amount: 40.0, bits_add: 0, bits_remove: 0, charisma: -1.0 },
-            SocialOutcome { result: "Boring".into(), amount: 80.0, bits_add: 0x800, bits_remove: 0x100, charisma: -1.0 },
+            SocialOutcome { result: "Friendly".into(), amount: 40.0, bits_add: 0, bits_remove: 0, charisma: -1.0, topics: Default::default() },
+            SocialOutcome { result: "Boring".into(), amount: 80.0, bits_add: 0x800, bits_remove: 0x100, charisma: -1.0, topics: [String::new(), String::new(), "Work Pay".into()] },
         ]);
         let r = &chat.rules;
         assert_eq!((r[0].result.as_str(), r[0].spec, r[0].third_party, r[0].repetition), ("Boring", 54.0, 2, 1));

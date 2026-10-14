@@ -282,6 +282,12 @@ const CAREER_GRADE_TITLE: u32 = 0x0652_5f1d;
 const CAREER_FACTORS: u32 = 0x0652_5f18;
 const CAREER_PERF_TIP: u32 = 0x0652_5f19;
 const CAREER_GO: u32 = 0x0652_5f23;
+/// A performance factor's name and face (`HUDCareerPanelFactorsEntry`), and the faces, worst to
+/// best (`HUDCareerPanelFactorTooltip`'s).
+const FACTOR_NAME: u32 = 2;
+const FACTOR_FACE: u32 = 3;
+const FACTOR_FACES: u32 = 2;
+const QUALITIES: [&str; 7] = ["Horrifying", "Foul", "Bad", "Neutral", "Great", "Excellent", "Outstanding"];
 const CAREER_HISTORY: u32 = 0x0652_5f60;
 const DEGREE_HISTORY: u32 = 0x0e6a_f650;
 const ACTIVE_CAREER: u32 = 0x0919_0b11;
@@ -297,6 +303,7 @@ pub fn open_tones(commands: &mut Commands, pie: &mut crate::hud::PieMenu, sim: E
     let skill = job.career().skill;
     let options = crate::careers::WorkTone::ALL
         .into_iter()
+        .filter(|t| t.offered(job))
         .map(|t| (format!("{TONE_PREFIX}{}{}", t.label(skill), if t == job.tone { " ✓" } else { "" }), crate::interact::ActionKind::EatHere))
         .collect();
     pie.submenus.clear();
@@ -313,16 +320,28 @@ fn career_panel(
     hud: Res<LiveHud>,
     ui: Option<ResMut<UiAssets>>,
     mut assets: ResMut<Assets<Image>>,
-    sel: Query<(Entity, &Sim, Option<&crate::careers::Job>, Has<crate::careers::AtWork>, Option<&crate::rabbitholes::SchoolGrades>, Option<&crate::rabbitholes::Homework>), With<Selected>>,
+    sel: Query<
+        (
+            Entity,
+            &Sim,
+            Option<&crate::careers::Job>,
+            Has<crate::careers::AtWork>,
+            Option<&crate::rabbitholes::SchoolGrades>,
+            Option<&crate::rabbitholes::Homework>,
+            (&crate::life::Mood, &crate::interact::Skills, &crate::social::Relationships),
+        ),
+        With<Selected>,
+    >,
     mut game_ui: Option<ResMut<crate::icons::GameUi>>,
     (mut vis, mut texts, mut bars): (Query<&mut Visibility>, Query<&mut Text>, Query<&mut crate::layout::UiFillBar>),
     clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
     (clock, mut pie, windows): (Res<crate::clock::GameClock>, ResMut<crate::hud::PieMenu>, Query<&Window, With<bevy::window::PrimaryWindow>>),
-    mut state: Local<String>,
+    (mut state, mut factors): (Local<String>, Local<Option<Entity>>),
     panel: Res<InfoPanel>,
+    (people, mut fonts): (Query<(Entity, &Sim)>, ResMut<Assets<Font>>),
 ) {
     let s: &Spawned = &hud.career;
-    let (Some(mut ui), Ok((e, sim, job, at_work, grades, homework))) = (ui, sel.single()) else { return };
+    let (Some(mut ui), Ok((e, sim, job, at_work, grades, homework, (mood, skills, rels)))) = (ui, sel.single()) else { return };
     if *panel != InfoPanel::Career {
         return;
     }
@@ -334,12 +353,27 @@ fn career_panel(
         let at = windows.single().ok().and_then(|w| w.cursor_position()).unwrap_or(Vec2::new(600.0, 600.0));
         open_tones(&mut commands, &mut pie, e, j, at);
     }
-    for id in [ACTIVE_CAREER, CAREER_HISTORY, DEGREE_HISTORY, CAREER_FACTORS, CAREER_NO_SCHOOL, CAREER_BOARDING] {
+    for id in [ACTIVE_CAREER, CAREER_HISTORY, DEGREE_HISTORY, CAREER_NO_SCHOOL, CAREER_BOARDING] {
         set_visible(&mut vis, s.id(id), false);
     }
-    for id in CAREER_TABS_HIDDEN.into_iter().chain(CAREER_ARROWS) {
+    for id in CAREER_TABS_HIDDEN {
         set_visible(&mut vis, s.id(id), false);
     }
+    // At work, the arrow by the meter shows which way it's going. (The active careers' panel has
+    // arrows by the same ids.)
+    let rate = job.filter(|_| at_work).map_or(0.0, |j| j.rate);
+    let meter = s.id(CAREER_PERFORMANCE).unwrap_or(Entity::PLACEHOLDER);
+    for (i, id) in CAREER_ARROWS.into_iter().enumerate() {
+        let shown = match i {
+            0 => rate > 0.0,
+            1 => rate < 0.0,
+            // (The second arrow when it's going fast.)
+            2 => rate >= 10.0,
+            _ => rate <= -5.0,
+        };
+        set_visible(&mut vis, s.within(meter, id), shown);
+    }
+    set_visible(&mut vis, s.id(CAREER_FACTORS), job.is_some());
     for d in 0..7 {
         set_visible(&mut vis, s.id(CAREER_HOLIDAY + d), false);
     }
@@ -363,7 +397,7 @@ fn career_panel(
         Some(j) => {
             let l = j.info();
             let path = j.branch_label().map_or(String::new(), |b| format!(" ({b})"));
-            (format!("{}{path}", l.title_for(sim.female)), format!("§{}/hour", l.hourly), l.start, l.end, l.days, j.performance)
+            (format!("{}{path}", l.title_for(sim.female)), format!("§{}/hour", l.hourly + j.raise), l.start, l.end, l.days, j.performance)
         }
         None => {
             let g = grades.copied().unwrap_or_default();
@@ -423,12 +457,55 @@ fn career_panel(
     }
     // The button: off to work (or, there, how to work).
     set_visible(&mut vis, s.id(CAREER_GO), job.is_some() && at_work);
-    // What changes rarely is set on change: the icon and the tooltips.
-    let key = format!("{e:?} {:?} {:?} {school} {} {:?}", job.map(|j| (j.track, j.level, j.branch, j.tone)), (performance / 5.0) as i32, game_ui.is_some(), homework.map(|h| h.0 as u32));
-    if *state == key {
+    // How the level's judged, and how they're doing at each.
+    let scores: Vec<(&'static s3bake::gamedata::CareerMetric, f32)> = job.map_or_else(Vec::new, |j| {
+        let find = |id: u64| people.iter().find(|(_, s)| s.id == id).map(|(e, _)| e);
+        let coworkers: Vec<Entity> = j.coworkers.iter().filter_map(|c| find(*c)).collect();
+        crate::careers::metric_scores(j.info(), mood.0, skills, rels, j.boss.and_then(find), &coworkers)
+    });
+    // What changes rarely is set on change: the icon, the factors and the tooltips.
+    let key = format!(
+        "{e:?} {:?} {:?} {school} {} {:?} {:?}",
+        job.map(|j| (j.track, j.level, j.branch, j.tone)),
+        (performance / 5.0) as i32,
+        game_ui.is_some(),
+        homework.map(|h| h.0 as u32),
+        scores.iter().map(|s| s.1 as i8).collect::<Vec<_>>()
+    );
+    if *state == key && factors.is_some_and(|h| vis.contains(h)) {
         return;
     }
     *state = key;
+    if let (Some(grid), Some(g), Some(template)) = (s.id(CAREER_FACTORS), ui.layout("HUDCareerPanel").and_then(|l| l.find(CAREER_FACTORS)).and_then(|w| w.grid), ui.layout("HUDCareerPanelFactorsEntry").cloned()) {
+        let holder = grid_holder(&mut commands, grid, &mut factors, &vis);
+        let say = |ui: &UiAssets, key: &str, arg: &str, plain: String| ui.localize(&format!("Gameplay/Careers/Metrics:{key}")).map_or(plain, |t| t.replace("{0.String}", arg));
+        for (i, (m, score)) in scores.iter().enumerate() {
+            let mut entry = template.clone();
+            entry.area = cell_area(&g, i, Vec2::new(entry.area[2] - entry.area[0], entry.area[3] - entry.area[1]));
+            let c = ui.spawn_under(&mut commands, &mut assets, &mut fonts, &entry, holder);
+            let kind = if m.kind == "RelPartner" { "RelCoworkers" } else { m.kind.as_str() };
+            let name = say(&ui, &format!("Title{kind}"), &m.arg, if kind == "SkillX" { m.arg.clone() } else { kind.to_string() });
+            let desc = say(&ui, &format!("Description{kind}"), &m.arg, String::new());
+            let face = (*score as i32 + 3).clamp(0, 6) as usize;
+            if let Some(t) = c.text(FACTOR_NAME) {
+                commands.entity(t).insert(Text::new(name.clone()));
+            }
+            if let (Some(w), Some(Some((h, _)))) = (
+                c.id(FACTOR_FACE),
+                ui.layout("HUDCareerPanelFactorTooltip").and_then(|l| l.find(FACTOR_FACES + face as u32)).and_then(|w| match &w.drawable {
+                    Some(s3bake::ui::UiDrawable::Image { image, .. }) => Some(*image),
+                    _ => None,
+                }).map(|k| ui.image(&mut assets, k)),
+            ) {
+                picture(&mut commands, w, h, Color::WHITE);
+            }
+            let quality = ui.localize(&format!("Gameplay/Objects/Quality:Quality{}", QUALITIES[face])).unwrap_or_else(|| QUALITIES[face].into());
+            let status = ui.localize("Ui/Caption/HUD/CareerPanel:MetricStatus").map_or_else(|| format!("Status: {quality}"), |t| t.replace("{0.String}", &quality));
+            if let Some(r) = c.root {
+                tip(&mut commands, r, if desc.is_empty() { format!("{name}\n{status}") } else { format!("{name}\n{status}\n{desc}") });
+            }
+        }
+    }
     if let (Some(j), Some(win), Some(gu)) = (job, s.id(CAREER_ICON), game_ui.as_deref_mut())
         && let Some(h) = gu.icon(&mut assets, j.career().icon)
     {
@@ -440,7 +517,8 @@ fn career_panel(
         let t = match job {
             Some(j) => {
                 let next = j.levels().get(j.level + 1).map_or("the top of the career".to_string(), |n| n.title_for(sim.female).to_string());
-                format!("Performance: {:+.0}\nRaise it with {} skill and a good mood at work, towards {next}.\nWorking: {}", j.performance, j.career().skill, j.tone.label(j.career().skill))
+                let pay = j.info().hourly + j.raise;
+                format!("Performance: {:+.0}, towards {next}\nPay: §{pay} an hour\nWorking: {}", j.performance, j.tone.label(j.career().skill))
             }
             None => format!("Grade: {}\n{}", grades.copied().unwrap_or_default().letter(), homework.map_or_else(|| "No unfinished homework.".into(), |h| format!("Homework: {}% complete", h.0 as u32))),
         };

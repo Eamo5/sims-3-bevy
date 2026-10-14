@@ -648,8 +648,14 @@ mod tests {
             .insert_resource(Weather { temperature: 0.0, ..default() })
             .add_systems(Update, sim_temperatures);
         let mut rng = rand::rng();
+        // (No trait that takes the cold better or worse.)
+        let mut plain = || {
+            let mut s = crate::sim::random_sim(&mut rng, "Winter", Some(true), crate::sim::Age::Adult);
+            s.traits.clear();
+            s
+        };
         let mut spawn = |outfit| app.world_mut().spawn((
-            crate::sim::random_sim(&mut rng, "Winter", Some(true), crate::sim::Age::Adult),
+            plain(),
             Transform::default(), Moodlets::default(), Wearing(outfit),
             BodyTemperature { value: -55.0, in_rain: 0.0 },
         )).id();

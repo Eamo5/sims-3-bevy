@@ -298,6 +298,8 @@ pub struct Judging<'a> {
     /// The holiday warmth (the game's +20 liking and mood on Snowflake Day, and for romance on
     /// Love Day).
     pub holiday: bool,
+    /// The actor's performance at work, when it's their boss they're talking to.
+    pub boss_hears: Option<f32>,
 }
 
 /// What a social came to.
@@ -314,6 +316,8 @@ pub struct Outcome {
     pub charisma: f32,
     /// Whether it went down as meant (the game's `IsSocialAccepted`).
     pub accepted: bool,
+    /// The topics it raises: the actor's, the target's, and both of theirs ("" for none).
+    pub topics: [&'static str; 3],
 }
 
 /// The Charisma points a social taken well earns its Sim, once they've the skill (the game's
@@ -543,6 +547,10 @@ fn suitable(rule: &SocialRule, model: &Model, j: &Judging, liking: f32, mood: f3
             "IsTargetPartnerOfActor" => j.partners,
             "FamilyOrientedSimWithFamilyMember" => has_trait(j.target, "FamilyOriented") && (j.kin || j.partners),
             "IsTargetSelectableWithPartnerAndNotRomanticInterestOfActor" => !j.actor_member && j.target_member && j.partner_elsewhere,
+            // (The boss agrees to a promotion at 75 performance, to a raise at 60; a Schmoozer's
+            // at 40 and 30.)
+            "ShouldReceivePromotion" => j.boss_hears.is_some_and(|p| p >= 75.0 || (has_trait(j.actor, "Schmoozer") && p >= 40.0)),
+            "ShouldReceiveRaise" => j.boss_hears.is_some_and(|p| p >= 60.0 || (has_trait(j.actor, "Schmoozer") && p >= 30.0)),
             // (The game's other tests aren't ours to run: the rule stands aside.)
             _ => false,
         };
@@ -579,7 +587,7 @@ fn request_threshold(j: &Judging) -> f32 {
 /// outcomes for that result).
 pub fn decide(social: usize, j: &Judging) -> Outcome {
     let Some(model) = model(social) else {
-        return Outcome { result: Commodity::Friendly, amount: 40.0, ltr_override: 0.0, bits_add: 0, bits_remove: 0, charisma: -1.0, accepted: true };
+        return Outcome { result: Commodity::Friendly, amount: 40.0, ltr_override: 0.0, bits_add: 0, bits_remove: 0, charisma: -1.0, accepted: true, topics: [""; 3] };
     };
     // (The holiday warms both.)
     let warm = if j.holiday { 20.0 } else { 0.0 };
@@ -619,6 +627,7 @@ pub fn decide(social: usize, j: &Judging) -> Outcome {
         bits_remove: rhs.map_or(0, |o| o.bits_remove),
         charisma: rhs.map_or(-1.0, |o| o.charisma),
         accepted: accepted(model.intended, result),
+        topics: rhs.map_or([""; 3], |o| [o.topics[0].as_str(), o.topics[1].as_str(), o.topics[2].as_str()]),
     }
 }
 
@@ -834,6 +843,8 @@ mod tests {
     #[ignore]
     fn rules_decide_as_the_games() {
         let data = s3bake::gamedata::load_gamedata(&s3bake::default_root()).expect("game data");
+        let clip_names: Vec<String> = s3bake::read_value(&s3bake::default_root().global_dir().join("clip_names.bin")).unwrap_or_default();
+        crate::social::install_game_socials(&data.socials, &clip_names);
         load(&data);
         let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(1);
         let mut a = crate::sim::random_sim(&mut rng, "A", Some(true), Age::Adult);
@@ -845,7 +856,7 @@ mod tests {
             actor: &a, target: &b, actor_moodlets: &[], target_moodlets: &[], liking,
             relationship: relationship_state(liking, crate::social::RelStatus::None, false, false), stc, target_mood: mood,
             charisma: None, partner_elsewhere: false, partners: false, kin: false, repetition: false,
-            actor_member: true, target_member: false, holiday: false,
+            actor_member: true, target_member: false, holiday: false, boss_hears: None,
         };
         let ok = Stc { commodity: Commodity::Friendly, value: 0.0 };
         // (Hugging: Friendly from -19 up, Neutral down to -49, Boring below.)
@@ -862,6 +873,17 @@ mod tests {
         let flirt = index("Flirt");
         assert_eq!(decide(flirt, &judge(30.0, ok, 10.0)).result, Commodity::Amorous);
         assert_eq!(decide(flirt, &judge(0.0, ok, 10.0)).result, Commodity::Neutral);
+        // (Asking the boss for a promotion: agreed at liking 60 with performance 75, not at 50.)
+        let ask = index("Ask for Promotion");
+        let boss = |perf: f32| Judging { boss_hears: Some(perf), ..judge(70.0, ok, 10.0) };
+        assert_eq!(decide(ask, &boss(80.0)).result, Commodity::Friendly);
+        assert_eq!(decide(ask, &Judging { boss_hears: Some(80.0), ..judge(30.0, ok, 10.0) }).result, Commodity::Boring);
+        assert_ne!(decide(ask, &boss(50.0)).result, Commodity::Friendly);
+        let raise = index("Ask for a Raise");
+        assert_eq!(decide(raise, &boss(65.0)).result, Commodity::Friendly);
+        // (Discussing work raises the talk of pay that asking needs.)
+        let discuss = index("Discuss Work");
+        assert_eq!(decide(discuss, &judge(30.0, ok, 10.0)).topics[2], "Work Pay");
         assert_eq!(decide(flirt, &judge(-40.0, ok, 10.0)).result, Commodity::Awkward);
         // (Chat ignores liking: Friendly in good company.)
         assert_eq!(decide(index("Chat"), &judge(-60.0, ok, 10.0)).result, Commodity::Friendly);
@@ -900,7 +922,7 @@ mod tests {
         assert_eq!(liking_multiplier(2.0, 50.0, &a, &b), 2.5, "the Nurturing to the young");
         // (The Irresistible push romance twice as far.)
         a.traits = vec![Trait::Irresistible];
-        let o = Outcome { result: Commodity::Amorous, amount: 40.0, ltr_override: 0.0, bits_add: 0, bits_remove: 0, charisma: -1.0, accepted: true };
+        let o = Outcome { result: Commodity::Amorous, amount: 40.0, ltr_override: 0.0, bits_add: 0, bits_remove: 0, charisma: -1.0, accepted: true, topics: [""; 3] };
         let (_, stc) = effect(0, 10.0, Stc::default(), &o, &a, &b);
         assert_eq!(stc, Stc { commodity: Commodity::Amorous, value: 80.0 });
     }

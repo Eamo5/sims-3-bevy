@@ -424,9 +424,10 @@ installation is unreachable.
   when the camera comes in close.
 - **Sim panel tabs**, as the game's: Needs; Skills (each skill learned with its icon, level
   and progress to the next); Career (the job and level, hours, days and pay, the performance
-  meter and the next promotion, and how they go about their work: normally, working hard —
-  half as fast again to promotion but tiring and no fun — taking it easy, hanging with
-  co-workers, or studying the career's skill on the job; elders can phone to retire, on a
+  meter and the next promotion, and how they go about their work: normally, working hard
+  (3 performance an hour more, 10 fun less), taking it easy (1.5 less, 20 fun more), hanging
+  with co-workers, sucking up to the boss (where there is one), or studying the career's
+  skill on the job; elders can phone to retire, on a
   pension of half their average day's pay, paid each morning); Simology (the lifetime wish and how far along it is, traits
   with what they mean, lifetime happiness and the rewards bought). F5 to F8 switch tabs.
 - **Fences and railings**: every lot's fences (picket, rail, iron, garden edging) and its porch
@@ -893,6 +894,28 @@ installation is unreachable.
   Jobs dialog: the career and the job, its pay, hours and workdays (today marked), what the
   listing says, the career's icon and the Sim's face, arrows through the openings, Accept
   Career or Cancel, the game standing still meanwhile.
+- **Performance at work** as the game's careers judge it: each level's own metrics from the
+  career tables (mood, how well they get on with the boss or co-workers, a skill), each
+  scored from -3 to +3 against the level's mappings, their average moving performance by
+  the career's own flow every hour at work (14 an hour at best for most, 8 at the top
+  levels), with the tone's, the Ambitious's (+2) and a Multi-Tasker's (+3) on top. A boss
+  (where the level has one) and co-workers (as many as the career has) come with the job,
+  from the town's Sims, the same career's first, then whoever's out of work, hired (a boss
+  at level 5 or better); Suck Up to Boss warms the boss 3 an hour and Hang With Co-Workers
+  the co-workers 5 between them, more with Charisma and two and a half times for a Schmoozer.
+  Promotion comes at the shift's end at full performance, with a bonus of the career's
+  hours of the old pay the first time at a level (12 for most, 24 for a criminal), a raise
+  instead at the top; now and then a raise for good work (1% likely at nothing, 25% at the
+  best, twice as likely for the Lucky); below -50 the boss warns them and two days on they're
+  demoted if it's no better, at -100 at once (fired from the first level), with the fun it
+  costs. Pay is for the hours actually there; a missed shift costs the career's 10 an hour
+  of it (a fifth for a Vacationer). At work the job's own stress drains fun (none for a
+  Workaholic), lunch halfway through and the bathroom there, company 10 an hour. Talking
+  with the boss, "Discuss Work" raises the talk of pay (the game's *Work Pay* topic, as any
+  of its socials' results raise theirs), and then "Ask for Promotion" and "Ask for a Raise"
+  go by the game's own rules: liking 60 and performance 75 for a promotion (40 for a
+  Schmoozer, less liking with Charisma), 60 for a raise; promoted at once, or 15% more an
+  hour.
 - **Career uniforms**: Sims head off to work in their level's uniform from the game's own
   outfits (suits, chef's whites with toques, police blues with the peaked cap, lab coats,
   scrubs, fatigues, the henchman's mask) in the outfit's own colours and fabrics, with their
@@ -1008,7 +1031,9 @@ installation is unreachable.
   this life stage's icon to the next's with the days left on hover, the traits with their
   icons and meanings, the favourite food, music and colour, the family tree button); Career
   (the job's icon and title, its pay, hours and working days, the time till work, the
-  performance meter up or down from the middle; school and its grade for children and teens;
+  performance meter up or down from the middle with the game's arrow showing which way it's
+  going at work, and the level's performance factors, each with the game's face from
+  horrifying to outstanding and what it means on hover; school and its grade for children and teens;
   at work, its button chooses how they work); Inventory (the stacks in the game's cells with
   their pictures and counts, each clicked for its menu: sell one or all, eat, hang, place;
   the cell phone opens the phone, the green book the collection journal); Relationships (a

@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use crate::PlayMode;
 use crate::clock::GameClock;
 use crate::interact::*;
-use crate::life::{LifeEvent, LifeEventKind, Mood};
+use crate::life::{LifeEvent, LifeEventKind, Mood, Trait};
 use crate::loading::CurrentWorld;
 use crate::sim::*;
 
@@ -19,7 +19,7 @@ pub struct CareersPlugin;
 
 impl Plugin for CareersPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (work_schedule, career_path_answers, pay_pensions).run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (work_flow, work_schedule, promote_when_agreed, career_path_answers, pay_pensions, find_colleagues).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -39,6 +39,9 @@ pub struct CareerLevel {
     /// The uniform (an outfit's name; empty for everyday clothes) for men, women, elderly men
     /// and elderly women.
     pub outfits: [&'static str; 4],
+    /// How performance is judged at this level, and whether there's a boss.
+    pub metrics: &'static [s3bake::gamedata::CareerMetric],
+    pub has_boss: bool,
 }
 
 pub struct CareerTrack {
@@ -56,6 +59,14 @@ pub struct CareerTrack {
     pub paths: Vec<CareerPath>,
     /// The first level (0-based) that differs between paths.
     pub branch_at: Option<usize>,
+    /// Performance an hour at the best and worst metrics (and at the top levels), an hour of
+    /// work missed, a promotion's bonus in hours' pay, fun an hour at work, and how many
+    /// coworkers (the game's `CareerList`).
+    pub flow: [f32; 4],
+    pub miss_work: f32,
+    pub bonus_hours: f32,
+    pub fun_per_hour: f32,
+    pub coworkers: (u8, u8),
 }
 
 pub struct CareerPath {
@@ -183,6 +194,8 @@ pub fn install_tracks(data: &s3bake::GameDataBaked) {
                             wakeup: if l.wakeup > 0.0 { l.wakeup } else { (start + 22.0) % 24.0 },
                             days: l.days,
                             outfits: [0, 1, 2, 3].map(|i| leak(l.outfits[i].to_ascii_lowercase())),
+                            metrics: Box::leak(l.metrics.clone().into_boxed_slice()),
+                            has_boss: l.has_boss,
                         });
                     }
                     CareerPath { branch: leak(b.to_string()), levels }
@@ -190,7 +203,20 @@ pub fn install_tracks(data: &s3bake::GameDataBaked) {
                 .collect();
             let branch_at = c.levels.iter().filter(|l| l.branch != "Base").map(|l| l.level as usize - 1).min().filter(|_| paths.len() > 1);
             let skill = c.levels.iter().find_map(|l| l.skills.first().cloned()).unwrap_or_else(|| default_skill(&c.hex).to_string());
-            CareerTrack { name: leak(c.name.clone()), skill: leak(skill), icon: leak(c.icon.clone()), offer: leak(c.offer.clone()), part_time: c.part_time, paths, branch_at }
+            CareerTrack {
+                name: leak(c.name.clone()),
+                skill: leak(skill),
+                icon: leak(c.icon.clone()),
+                offer: leak(c.offer.clone()),
+                part_time: c.part_time,
+                paths,
+                branch_at,
+                flow: c.flow,
+                miss_work: c.miss_work,
+                bonus_hours: c.bonus_hours,
+                fun_per_hour: c.fun_per_hour,
+                coworkers: c.coworkers,
+            }
         })
         .filter(|t| t.paths.iter().all(|p| !p.levels.is_empty()))
         .collect();
@@ -229,9 +255,18 @@ impl BuiltinTrack {
             part_time: false,
             paths: vec![CareerPath {
                 branch: "Base",
-                levels: self.levels.iter().map(|&(title, hourly, start, end)| CareerLevel { title, title_female: "", hourly, start, end, wakeup: (start + 22.0) % 24.0, days: self.days, outfits: [""; 4] }).collect(),
+                levels: self
+                    .levels
+                    .iter()
+                    .map(|&(title, hourly, start, end)| CareerLevel { title, title_female: "", hourly, start, end, wakeup: (start + 22.0) % 24.0, days: self.days, outfits: [""; 4], metrics: &[], has_boss: false })
+                    .collect(),
             }],
             branch_at: None,
+            flow: [14.0, -8.0, 8.0, -10.0],
+            miss_work: -10.0,
+            bonus_hours: 12.0,
+            fun_per_hour: -5.0,
+            coworkers: (2, 4),
         }
     }
 }
@@ -427,6 +462,20 @@ pub struct Job {
     pub last_day: Option<u32>,
     /// How they go about their work.
     pub tone: WorkTone,
+    /// Their boss and coworkers (Sims of the town, by id).
+    pub boss: Option<u64>,
+    pub coworkers: Vec<u64>,
+    /// The highest level reached in this career (0-based; a promotion's bonus only the first
+    /// time), and raises (an hour's pay more, kept through promotions).
+    pub highest: usize,
+    pub raise: i64,
+    /// When they were warned their performance was dangerously low (demoted 48 hours on if it
+    /// still is).
+    pub warned_at: Option<f64>,
+    /// How fast their performance is moving at work (an hour; for the Career panel's arrows).
+    pub rate: f32,
+    /// To be promoted now (the boss agreed to it: the game's `ShouldPromote`).
+    pub promote: bool,
 }
 
 /// A retired Sim's pension: paid each morning (half of what the job paid, on average, a day).
@@ -483,10 +532,16 @@ pub enum WorkTone {
     TakeItEasy,
     Socialize,
     Study,
+    SuckUp,
 }
 
 impl WorkTone {
-    pub const ALL: [WorkTone; 5] = [WorkTone::Normal, WorkTone::WorkHard, WorkTone::TakeItEasy, WorkTone::Socialize, WorkTone::Study];
+    pub const ALL: [WorkTone; 6] = [WorkTone::Normal, WorkTone::WorkHard, WorkTone::TakeItEasy, WorkTone::Socialize, WorkTone::SuckUp, WorkTone::Study];
+
+    /// Whether the job offers it (the game's `ShouldAddTone`: sucking up takes a boss).
+    pub fn offered(self, job: &Job) -> bool {
+        self != WorkTone::SuckUp || (job.info().has_boss && job.boss.is_some())
+    }
 
     pub fn label(self, skill: &str) -> String {
         match self {
@@ -494,6 +549,7 @@ impl WorkTone {
             WorkTone::WorkHard => "Work Hard".into(),
             WorkTone::TakeItEasy => "Take It Easy".into(),
             WorkTone::Socialize => "Hang With Co-Workers".into(),
+            WorkTone::SuckUp => "Suck Up to Boss".into(),
             WorkTone::Study => format!("Study {skill}"),
         }
     }
@@ -504,6 +560,7 @@ impl WorkTone {
             WorkTone::WorkHard => "WorkHard",
             WorkTone::TakeItEasy => "TakeItEasy",
             WorkTone::Socialize => "Socialize",
+            WorkTone::SuckUp => "SuckUp",
             WorkTone::Study => "Study",
         }
     }
@@ -512,30 +569,69 @@ impl WorkTone {
         Self::ALL.into_iter().find(|t| t.name() == s).unwrap_or_default()
     }
 
-    /// How much of a shift's performance it earns.
-    fn performance(self) -> f32 {
+    /// Performance an hour it adds (the game's tones: Work Hard +3, Take It Easy -1.5, nothing
+    /// for a Professional Slacker).
+    fn performance(self, slacker: bool) -> f32 {
         match self {
-            WorkTone::Normal => 1.0,
-            WorkTone::WorkHard => 1.5,
-            WorkTone::TakeItEasy => 0.5,
-            WorkTone::Socialize | WorkTone::Study => 0.8,
-        }
-    }
-
-    /// What a shift does to energy, fun and social, on top of a normal one's.
-    fn motives(self) -> [f32; 3] {
-        match self {
-            WorkTone::Normal | WorkTone::Study => [0.0; 3],
-            WorkTone::WorkHard => [-15.0, -15.0, 0.0],
-            WorkTone::TakeItEasy => [15.0, 20.0, 0.0],
-            WorkTone::Socialize => [0.0, 10.0, 30.0],
+            WorkTone::WorkHard => 3.0,
+            WorkTone::TakeItEasy if !slacker => -1.5,
+            _ => 0.0,
         }
     }
 }
 
+/// How performance moves while at work, as the game's `Career.UpdatePerformance` has it: each
+/// metric of the level scored -3 to +3 against its mappings (`PerfMetric.CalcMetric`), their
+/// average scaling the career's best or worst flow an hour.
+pub fn metric_score(value: f32, [n3, z, p3]: [f32; 3]) -> f32 {
+    if value == z {
+        0.0
+    } else if value < z {
+        if value <= n3 {
+            -3.0
+        } else if value < (n3 + z) / 2.0 {
+            -2.0
+        } else {
+            -1.0
+        }
+    } else if value >= p3 {
+        3.0
+    } else if value > (p3 + z) / 2.0 {
+        2.0
+    } else {
+        1.0
+    }
+}
+
+/// The hour's performance at work from the metrics' average score (`MaxPerfFlow` at +3,
+/// `MinPerfFlow` at -3; their top-level variants from level 10).
+pub fn performance_rate(avg: f32, flow: [f32; 4], top: bool) -> f32 {
+    let (max, min) = if top { (flow[2], flow[3]) } else { (flow[0], flow[1]) };
+    if avg > 0.0 { avg / 3.0 * max } else { avg / -3.0 * min }
+}
+
+/// How much more Charisma makes of time spent on the boss and coworkers (the Charisma skill's
+/// `Improve_Relatinoship_With_Boss` and `Improve_Coworker_Relatinoships`, by level).
+fn charisma_boost(level: u32, boss: bool) -> f32 {
+    const BOSS: [f32; 10] = [1.0, 1.01, 1.02, 1.03, 1.05, 1.10, 1.20, 1.32, 1.49, 1.72];
+    const COWORKERS: [f32; 10] = [1.0, 1.01, 1.02, 1.03, 1.05, 1.10, 1.20, 1.35, 1.55, 1.77];
+    if level == 0 {
+        return 1.0;
+    }
+    let i = (level as usize - 1).min(9);
+    if boss { BOSS[i] } else { COWORKERS[i] }
+}
+
 impl Job {
     pub fn new(track: usize) -> Self {
-        Self { track, level: 0, branch: 0, performance: 0.0, last_day: None, tone: WorkTone::Normal }
+        Self { track, level: 0, branch: 0, performance: 0.0, last_day: None, tone: WorkTone::Normal, boss: None, coworkers: Vec::new(), highest: 0, raise: 0, warned_at: None, rate: 0.0, promote: false }
+    }
+    /// A raise (the game's `GiveRaise`): 15% of the level's pay an hour more, 10% at the top
+    /// levels; what it came to.
+    pub fn give_raise(&mut self) -> i64 {
+        let r = ((self.info().hourly as f32 * if self.level + 1 >= 10 { 0.10 } else { 0.15 }) as i64).max(1);
+        self.raise += r;
+        r
     }
     pub fn career(&self) -> &'static CareerTrack {
         &careers()[self.track.min(careers().len() - 1)]
@@ -578,7 +674,13 @@ impl Job {
 #[derive(Component)]
 pub struct AtWork {
     pub until: f64,
+    /// When they got there, and their performance then.
+    pub from: f64,
+    pub start_perf: f32,
 }
+
+/// How long a warning about poor work stands before a demotion (the game's 48 hours).
+const DEMOTION_WARNING_MINUTES: f64 = 48.0 * 60.0;
 
 /// Head to work before the shift; come home with pay and a performance review.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -586,7 +688,7 @@ fn work_schedule(
     mut commands: Commands,
     clock: Res<GameClock>,
     exit: Option<Res<LotExit>>,
-    world: Res<CurrentWorld>,
+    world: Option<Res<CurrentWorld>>,
     mut household: Option<ResMut<Household>>,
     mut notes: ResMut<Notifications>,
     mut life: MessageWriter<LifeEvent>,
@@ -604,46 +706,57 @@ fn work_schedule(
             Option<&crate::lifetime::LifetimeWish>,
             Has<HouseholdMember>,
             Option<&crate::wishes::Wishes>,
+            &mut crate::social::Relationships,
         ),
         Without<crate::rabbitholes::AtRabbitHole>,
     >,
     mut session_start: Local<Option<f64>>,
     mut questions: ResMut<crate::dialog::Questions>,
     weather: Option<Res<crate::weather::Weather>>,
+    people: Query<(Entity, &Sim)>,
 ) {
+    use rand::Rng;
+    let mut rng = rand::rng();
     let h = clock.hour_f();
     let day = clock.day();
+    let ids: std::collections::HashMap<u64, Entity> = people.iter().map(|(e, s)| (s.id, e)).collect();
+    // (The boss and coworkers have seen them today: theirs, applied after.)
+    let mut seen: Vec<(Entity, Entity)> = Vec::new();
     // A shift already under way when play began isn't held against anyone.
     let started = *session_start.get_or_insert(clock.minutes);
-    for (e, sim, mut job, mut queue, at_work, mut tf, mut motives, mood, mut skills, ltw, member, wishes) in &mut workers {
+    for (e, sim, mut job, mut queue, at_work, mut tf, mut motives, mood, mut skills, ltw, member, wishes, mut rels) in &mut workers {
         let info = job.info();
         if let Some(w) = at_work {
             if clock.minutes < w.until {
                 continue;
             }
-            // Home from work: pay, needs, and a performance review.
-            let pay = (info.hourly as f32 * job.hours()) as i64;
+            if let (Some(x), Some(world)) = (&exit, &world) {
+                tf.translation = Vec3::new(x.0.x, world.data.heightmap.sample(x.0.x, x.0.y), x.0.y);
+            }
+            // (Back on the ground, whichever floor they left from.)
+            commands.entity(e).remove::<AtWork>().insert((Visibility::Inherited, crate::nav::Floor(1)));
+            // (The town's careers move only with the story, as the game's.)
+            if !member {
+                continue;
+            }
+            // Home from work: pay for the hours worked, needs, and the performance the shift
+            // earned, as the game's careers have it.
+            let worked = ((w.until - w.from) / 60.0).clamp(0.0, job.hours() as f64) as f32;
+            let pay = ((info.hourly + job.raise) as f32 * worked) as i64;
             if let Some(hh) = household.as_mut() {
                 hh.funds += pay;
             }
-            let skill = skills.level(job.career().skill) as f32;
-            let want = (job.level as f32 + 1.0) * 0.8;
-            // (A Professional Slacker's bad moods don't count against them.)
-            let mut moody = mood.level() / 100.0 * 22.0;
-            if crate::wishes::has(wishes, "ProfessionalSlacker") {
-                moody = moody.max(0.0);
-            }
-            let gain = (moody + (skill - want) * 3.0 + 8.0) * crate::life::work_rate(&sim.traits);
-            // (Working hard gets them noticed faster; taking it easy, the other way.)
-            let gain = if gain > 0.0 { gain * job.tone.performance() } else { gain / job.tone.performance().max(0.5) };
-            // (A Multi-Tasker gets more done.)
-            let gain = gain + if crate::wishes::has(wishes, "MultiTasker") { 3.0 } else { 0.0 };
-            job.performance = (job.performance + gain).clamp(-100.0, 100.0);
+            let track = job.career();
+            let workaholic = sim.traits.contains(&Trait::Workaholic);
+            // (Who they spent the day with, for the needs below.)
+            let boss = job.boss.and_then(|b| ids.get(&b).copied());
+            let coworkers: Vec<Entity> = job.coworkers.iter().filter_map(|c| ids.get(c).copied()).collect();
+            let gain = job.performance - w.start_perf;
             life.write(LifeEvent::new(e, LifeEventKind::HomeFromWork { worse: gain < 0.0 }));
             // Studying the career's skill on the job.
             if job.tone == WorkTone::Study {
-                let sk = job.career().skill;
-                let points = job.hours() * 60.0 * study_points(job.career().name) * crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) * mood.skill_rate();
+                let sk = track.skill;
+                let points = worked * 60.0 * study_points(track.name) * crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) * mood.skill_rate();
                 if let Some(level) = skills.add_points(sk, points)
                     && member
                 {
@@ -653,51 +766,38 @@ fn work_schedule(
             }
             notes.push(format!("{} is home from work and earned §{pay}.", sim.first));
             if job.performance >= 100.0 && job.level + 1 < job.levels().len() {
-                job.level += 1;
+                promote(&mut job, e, sim, ltw, member, household.as_deref_mut(), &mut notes, &mut questions, &mut life);
+            } else if job.performance >= 100.0 {
+                // (At the top, a raise instead, and back to work at it.)
+                job.give_raise();
                 job.performance = 0.0;
-                let track = job.career();
-                let branching = track.branch_at == Some(job.level);
-                if branching {
-                    // The path their lifetime wish lies along, or the first.
-                    job.branch = ltw.and_then(|w| w.def().career_branch(track.name)).and_then(|b| track.path_index(b)).unwrap_or(0);
-                }
-                let bonus = job.info().hourly * 8;
-                if let Some(hh) = household.as_mut() {
-                    hh.funds += bonus;
-                }
-                if branching && member {
-                    notes.push(format!("{} was promoted and got a §{bonus} bonus! The {} career branches here.", sim.first, track.name));
-                    questions.ask_career_path(e, sim, &job);
-                } else {
-                    notes.push(format!("{} was promoted to {} and got a §{bonus} bonus!", sim.first, job.info().title_for(sim.female)));
-                }
-                life.write(LifeEvent::new(e, LifeEventKind::Promoted));
-            } else if job.performance <= -100.0 {
-                if job.level == 0 {
-                    notes.push(format!("{} was fired from the {} career.", sim.first, job.career().name));
-                    commands.entity(e).remove::<Job>();
-                    life.write(LifeEvent::new(e, LifeEventKind::Fired));
-                } else {
-                    job.level -= 1;
-                    job.performance = 0.0;
-                    notes.push(format!("{} was demoted to {}.", sim.first, job.info().title_for(sim.female)));
-                    life.write(LifeEvent::new(e, LifeEventKind::Demoted));
-                }
+                notes.push(format!("{} got a raise for outstanding work: §{} an hour now.", sim.first, info.hourly + job.raise));
             }
-            motives.0[HUNGER] = (motives.0[HUNGER] - 35.0).max(-90.0);
-            motives.0[ENERGY] = (motives.0[ENERGY] - 30.0).max(-80.0);
-            motives.0[FUN] = (motives.0[FUN] - 25.0).max(-80.0);
-            motives.0[SOCIAL] = (motives.0[SOCIAL] + 40.0).min(100.0);
-            motives.0[HYGIENE] = (motives.0[HYGIENE] - 20.0).max(-80.0);
-            let [energy, fun, social] = job.tone.motives();
-            motives.add(ENERGY, energy);
-            motives.add(FUN, fun);
-            motives.add(SOCIAL, social);
-            if let Some(x) = &exit {
-                tf.translation = Vec3::new(x.0.x, world.data.heightmap.sample(x.0.x, x.0.y), x.0.y);
+            // (At the day's end, now and then a raise for good work: the game's daily raise event,
+            // 1% likely at nothing to 25% at the best, twice as likely for the Lucky.)
+            let luck = if sim.traits.contains(&Trait::Lucky) { 2.0 } else if sim.traits.contains(&Trait::Unlucky) { 0.5 } else { 1.0 };
+            if job.performance > 0.0 && rng.random_bool(((job.performance / 100.0 * 0.24 + 0.01) * luck).clamp(0.0, 1.0) as f64) {
+                job.give_raise();
+                notes.push(format!("{} got a raise: §{} an hour now.", sim.first, job.info().hourly + job.raise));
             }
-            // (Back on the ground, whichever floor they left from.)
-            commands.entity(e).remove::<AtWork>().insert((Visibility::Inherited, crate::nav::Floor(1)));
+            demotion(&mut commands, &mut notes, &mut life, e, sim, &mut job, &mut motives, clock.minutes, member);
+            // Needs: lunch halfway through (the game's, so hungry no earlier than half a shift's
+            // worth), the bathroom there, the tone's fun (the job's own drains as they work) and the
+            // company.
+            motives.0[HUNGER] = (motives.0[HUNGER] - 11.25 * worked).max(100.0 - 11.25 * worked / 2.0);
+            motives.0[BLADDER] = 100.0;
+            let tone_fun = match job.tone {
+                WorkTone::TakeItEasy => 20.0 * worked,
+                WorkTone::WorkHard => -10.0 * if workaholic { 0.75 } else { 1.0 } * worked,
+                _ => 0.0,
+            };
+            motives.add(FUN, tone_fun);
+            motives.add(SOCIAL, (10.0 + if job.tone == WorkTone::Socialize { 50.0 } else { 0.0 }) * worked);
+            // (They've seen their boss and coworkers today.)
+            for x in boss.iter().chain(&coworkers) {
+                rels.entry(*x).last = clock.minutes;
+                seen.push((*x, e));
+            }
             continue;
         }
         let workday = job.works_on(clock.weekday());
@@ -706,18 +806,25 @@ fn work_schedule(
             job.last_day = Some(day);
             continue;
         }
-        // A missed shift costs performance.
+        // A missed shift costs performance: the career's for every hour of it (a fifth of it
+        // for a Vacationer), and a Workaholic misses it.
         if workday && h > info.start + 2.0 && h < info.start + 3.0 && job.last_day != Some(day) {
             job.last_day = Some(day);
-            // TraitTuning reduces a Vacationer's missed-shift penalty to 20%.
+            if !member {
+                continue;
+            }
             let vacationer = crate::wishes::has(wishes, "Vacationer");
-            let penalty = 35.0 * if vacationer { 0.2 } else { 1.0 };
-            job.performance = (job.performance - penalty).max(-100.0);
+            let penalty = job.career().miss_work * job.hours() * if vacationer { 0.2 } else { 1.0 };
+            job.performance = (job.performance + penalty).max(-100.0);
+            if sim.traits.contains(&Trait::Workaholic) {
+                motives.add(FUN, -15.0 * job.hours());
+            }
             notes.push(if vacationer {
                 format!("{} took the day off work. Vacationer softened the performance penalty.", sim.first)
             } else {
                 format!("{} missed work today! Their boss is not pleased.", sim.first)
             });
+            demotion(&mut commands, &mut notes, &mut life, e, sim, &mut job, &mut motives, clock.minutes, member);
             continue;
         }
         // (A holiday's a paid day off, as the game's `TryGiveDayOffForHoliday`.)
@@ -744,6 +851,331 @@ fn work_schedule(
             queue.0.push_back(Action::new("Go to Work", ActionKind::GoToWork, false));
         }
     }
+    let now = clock.minutes;
+    for (x, worker) in seen {
+        commands.entity(x).queue(move |mut ew: EntityWorldMut| {
+            if let Some(mut r) = ew.get_mut::<crate::social::Relationships>() {
+                r.entry(worker).last = now;
+            }
+        });
+    }
+}
+
+/// What a performance metric's called, plainly.
+pub fn metric_label(m: &s3bake::gamedata::CareerMetric) -> String {
+    match m.kind.as_str() {
+        "Mood" => "mood".into(),
+        "RelBoss" => "the boss".into(),
+        "RelCoworkers" | "RelPartner" => "co-workers".into(),
+        "SkillX" => m.arg.clone(),
+        k => k.into(),
+    }
+}
+
+/// What the level's metrics come to now: each this game can judge, with its score (-3 to +3;
+/// the game's `PerfMetric.FindMetricValue`).
+pub fn metric_scores(info: &CareerLevel, mood: f32, skills: &Skills, rels: &crate::social::Relationships, boss: Option<Entity>, coworkers: &[Entity]) -> Vec<(&'static s3bake::gamedata::CareerMetric, f32)> {
+    let liking = |x: Entity| rels.get(x).friendship;
+    info.metrics
+        .iter()
+        .filter_map(|m| {
+            let v = match m.kind.as_str() {
+                "Mood" => mood.clamp(-100.0, 150.0),
+                "RelBoss" => boss.map_or(0.0, liking),
+                "RelCoworkers" | "RelPartner" => {
+                    if coworkers.is_empty() { 0.0 } else { coworkers.iter().map(|c| liking(*c)).sum::<f32>() / coworkers.len() as f32 }
+                }
+                "SkillX" => skills.level(&m.arg) as f32,
+                // (What there's no way to do here yet isn't held against them.)
+                _ => return None,
+            };
+            Some((m, metric_score(v, m.mappings)))
+        })
+        .collect()
+}
+
+/// Performance an hour at work: the metrics' average through the career's flow, then the
+/// tone's, the Ambitious's and a Multi-Tasker's.
+pub fn hourly_performance(job: &Job, scores: &[(&s3bake::gamedata::CareerMetric, f32)], traits: &[Trait], wishes: Option<&crate::wishes::Wishes>) -> f32 {
+    let avg = if scores.is_empty() { 0.0 } else { scores.iter().map(|s| s.1).sum::<f32>() / scores.len() as f32 };
+    let mut rate = performance_rate(avg, job.career().flow, job.level + 1 >= 10) + job.tone.performance(crate::wishes::has(wishes, "ProfessionalSlacker"));
+    if traits.contains(&Trait::Ambitious) {
+        rate += 2.0;
+    }
+    if crate::wishes::has(wishes, "MultiTasker") {
+        rate += 3.0;
+    }
+    rate
+}
+
+/// At work: performance flows by the level's metrics, and the boss and coworkers warm to time
+/// spent on them (Suck Up 3 an hour, Hanging With Co-Workers 5 among them; more for the
+/// charismatic, two and a half times for a Schmoozer), as the game's careers have it.
+#[allow(clippy::type_complexity)]
+fn work_flow(
+    delta: Res<crate::clock::SimDelta>,
+    mut commands: Commands,
+    mut workers: Query<(Entity, &Sim, &mut Job, &Mood, &Skills, &mut crate::social::Relationships, Option<&crate::wishes::Wishes>), (With<AtWork>, With<HouseholdMember>)>,
+    people: Query<(Entity, &Sim)>,
+) {
+    let hours = delta.0 / 60.0;
+    if hours <= 0.0 || workers.is_empty() {
+        return;
+    }
+    let ids: std::collections::HashMap<u64, Entity> = people.iter().map(|(e, s)| (s.id, e)).collect();
+    for (e, sim, mut job, mood, skills, mut rels, wishes) in &mut workers {
+        let boss = job.boss.and_then(|b| ids.get(&b).copied());
+        let coworkers: Vec<Entity> = job.coworkers.iter().filter_map(|c| ids.get(c).copied()).collect();
+        let charm = if sim.traits.contains(&Trait::Schmoozer) { 2.5 } else { 1.0 };
+        let charisma = skills.level("Charisma");
+        let mut warmed: Vec<(Entity, f32)> = Vec::new();
+        if job.tone == WorkTone::SuckUp
+            && let Some(b) = boss
+        {
+            warmed.push((b, 3.0 * charisma_boost(charisma, true) * charm * hours));
+        }
+        if job.tone == WorkTone::Socialize && !coworkers.is_empty() {
+            let d = 5.0 * charisma_boost(charisma, false) * charm * hours / coworkers.len() as f32;
+            warmed.extend(coworkers.iter().map(|c| (*c, d)));
+        }
+        for (x, d) in warmed {
+            rels.add(x, d, 0.0);
+            commands.entity(x).queue(move |mut ew: EntityWorldMut| {
+                if let Some(mut r) = ew.get_mut::<crate::social::Relationships>() {
+                    r.add(e, d, 0.0);
+                }
+            });
+        }
+        let scores = metric_scores(job.info(), mood.0, skills, &rels, boss, &coworkers);
+        let rate = hourly_performance(&job, &scores, &sim.traits, wishes);
+        job.rate = rate;
+        job.performance = (job.performance + rate * hours).clamp(-100.0, 100.0);
+    }
+}
+
+/// The boss and coworkers a job comes with (the game's `CheckBoss` and `CheckCoworkers`): Sims
+/// of the town outside the household, those in the same career first, then anyone grown and
+/// out of work, who's hired; the boss is at least level 5 in it. New ones are acquaintances.
+#[allow(clippy::type_complexity)]
+fn find_colleagues(
+    mut commands: Commands,
+    clock: Res<GameClock>,
+    mut workers: Query<(Entity, &Sim, &mut Job, &mut crate::social::Relationships), With<HouseholdMember>>,
+    town: Query<(Entity, &Sim, Option<&Job>, Has<Pension>, Option<&crate::town::Townie>), (Or<(With<crate::interact::OffLot>, With<crate::town::Townie>)>, Without<HouseholdMember>, Without<crate::ghosts::Ghost>)>,
+    mut next: Local<f64>,
+) {
+    // (Now and then is often enough.)
+    if clock.minutes < *next {
+        return;
+    }
+    *next = clock.minutes + 60.0;
+    use rand::seq::SliceRandom;
+    let mut rng = rand::rng();
+    // (Townspeople out on a stroll aren't taken till they're home again.)
+    let people: std::collections::HashMap<u64, (Entity, Option<(usize, usize)>, bool, bool)> = town
+        .iter()
+        .filter(|(_, s, _, _, t)| s.age.is_grown() && !t.is_some_and(|t| t.walking))
+        .map(|(e, s, j, retired, t)| (s.id, (e, j.map(|j| (j.track, j.level)), retired, t.is_some())))
+        .collect();
+    // (Whoever's been taken this round, so two of the household don't hire the same Sim twice.)
+    let mut hired: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+    for (e, sim, mut job, mut rels) in &mut workers {
+        let track = job.track;
+        let has_boss = job.info().has_boss;
+        let (min, max) = job.career().coworkers;
+        let still = |id: &u64| people.contains_key(id);
+        let stale = job.boss.is_some_and(|b| !still(&b) || !has_boss) || job.coworkers.iter().any(|c| !still(c));
+        let short = (has_boss && job.boss.is_none()) || job.coworkers.len() < min as usize;
+        if !stale && !short {
+            continue;
+        }
+        if !has_boss {
+            job.boss = None;
+        }
+        job.boss = job.boss.filter(still);
+        job.coworkers.retain(still);
+        // The candidates: the career's own, then the out of work; each shuffled.
+        let taken: Vec<u64> = job.boss.iter().chain(&job.coworkers).copied().collect();
+        let mut same = Vec::new();
+        let mut idle = Vec::new();
+        for (&id, &(_, j, retired, _)) in &people {
+            if id == sim.id || taken.contains(&id) {
+                continue;
+            }
+            match j.map(|(t, _)| t).or(hired.get(&id).copied()) {
+                Some(t) if t == track => same.push(id),
+                None if !retired => idle.push(id),
+                _ => {}
+            }
+        }
+        same.shuffle(&mut rng);
+        idle.shuffle(&mut rng);
+        let mut pool = same.into_iter().map(|id| (id, false)).chain(idle.into_iter().map(|id| (id, true)));
+        let mut new = Vec::new();
+        if has_boss && job.boss.is_none()
+            && let Some((id, hire)) = pool.next()
+        {
+            job.boss = Some(id);
+            new.push((id, hire, true));
+        }
+        if job.coworkers.len() < min as usize {
+            use rand::Rng;
+            let want = rng.random_range(min..=max.max(min)) as usize;
+            while job.coworkers.len() < want {
+                let Some((id, hire)) = pool.next() else { break };
+                job.coworkers.push(id);
+                new.push((id, hire, false));
+            }
+        }
+        let now = clock.minutes;
+        let levels = job.levels().len();
+        if !new.is_empty() {
+            info!("{} works for {:?} with {} coworkers ({} new)", sim.first, job.boss, job.coworkers.len(), new.len());
+        }
+        for (id, hire, boss) in new {
+            let (other, j, _, townie) = people[&id];
+            rels.entry(other).last = now;
+            // (Someone they know now: kept with the household's save, as a party's guests are.)
+            if townie {
+                commands.entity(other).remove::<(crate::town::Townie, crate::nav::PathFollow)>().insert((crate::interact::OffLot, Visibility::Hidden)).insert_if_new(Skills::default());
+            }
+            let worker = e;
+            // (A boss is at least level 5; whoever's hired starts at the bottom.)
+            let at_least = if boss { 4.min(levels - 1) } else { 0 };
+            if hire {
+                hired.insert(id, track);
+                let mut j = Job::new(track);
+                j.level = at_least;
+                j.highest = at_least;
+                commands.entity(other).insert(j);
+            } else if let Some((_, level)) = j
+                && level < at_least
+            {
+                commands.entity(other).queue(move |mut ew: EntityWorldMut| {
+                    if let Some(mut j) = ew.get_mut::<Job>() {
+                        j.level = j.level.max(at_least);
+                    }
+                });
+            }
+            commands.entity(other).queue(move |mut ew: EntityWorldMut| {
+                if let Some(mut r) = ew.get_mut::<crate::social::Relationships>() {
+                    r.entry(worker).last = now;
+                }
+            });
+        }
+    }
+}
+
+/// A promotion (the game's `PromoteIfShould`): the bonus at the old pay, the first time at the
+/// new level only; the path to take where the career branches; performance back to nothing.
+#[allow(clippy::too_many_arguments)]
+fn promote(
+    job: &mut Job,
+    e: Entity,
+    sim: &Sim,
+    ltw: Option<&crate::lifetime::LifetimeWish>,
+    member: bool,
+    household: Option<&mut Household>,
+    notes: &mut Notifications,
+    questions: &mut crate::dialog::Questions,
+    life: &mut MessageWriter<LifeEvent>,
+) {
+    let track = job.career();
+    let bonus = if job.level + 1 > job.highest { (track.bonus_hours * (job.info().hourly + job.raise) as f32) as i64 } else { 0 };
+    job.level += 1;
+    job.highest = job.highest.max(job.level);
+    job.performance = 0.0;
+    job.warned_at = None;
+    let branching = track.branch_at == Some(job.level);
+    if branching {
+        // The path their lifetime wish lies along, or the first.
+        job.branch = ltw.and_then(|w| w.def().career_branch(track.name)).and_then(|b| track.path_index(b)).unwrap_or(0);
+    }
+    if let Some(hh) = household {
+        hh.funds += bonus;
+    }
+    let got = if bonus > 0 { format!(" and got a §{bonus} bonus") } else { String::new() };
+    if branching && member {
+        notes.push(format!("{} was promoted{got}! The {} career branches here.", sim.first, track.name));
+        questions.ask_career_path(e, sim, job);
+    } else {
+        notes.push(format!("{} was promoted to {}{got}!", sim.first, job.info().title_for(sim.female)));
+    }
+    life.write(LifeEvent::new(e, LifeEventKind::Promoted));
+}
+
+/// Promoted at once when the boss agreed to it ("Ask for a Promotion" taken well).
+fn promote_when_agreed(
+    mut jobs: Query<(Entity, &Sim, &mut Job, Option<&crate::lifetime::LifetimeWish>, Has<HouseholdMember>)>,
+    mut household: Option<ResMut<Household>>,
+    mut notes: ResMut<Notifications>,
+    mut questions: ResMut<crate::dialog::Questions>,
+    mut life: MessageWriter<LifeEvent>,
+) {
+    for (e, sim, mut job, ltw, member) in &mut jobs {
+        if !job.promote {
+            continue;
+        }
+        job.promote = false;
+        if job.level + 1 < job.levels().len() {
+            promote(&mut job, e, sim, ltw, member, household.as_deref_mut(), &mut notes, &mut questions, &mut life);
+        }
+    }
+}
+
+/// What a performance review comes to (the game's `DemotionChecker`).
+#[derive(Debug, PartialEq)]
+pub enum Review {
+    Fine,
+    Warned,
+    Demoted,
+}
+
+/// Demotion as the game's: at -100 at once; below -50 a warning, then demoted if still at -50
+/// or below when it's run out (48 hours).
+pub fn review(job: &mut Job, now: f64) -> Review {
+    if job.performance <= -100.0 {
+        job.warned_at = None;
+        return Review::Demoted;
+    }
+    match job.warned_at {
+        Some(t) if now - t >= DEMOTION_WARNING_MINUTES => {
+            job.warned_at = None;
+            if job.performance <= -50.0 { Review::Demoted } else { Review::Fine }
+        }
+        Some(_) => Review::Fine,
+        None if job.performance < -50.0 => {
+            job.warned_at = Some(now);
+            Review::Warned
+        }
+        None => Review::Fine,
+    }
+}
+
+/// The review, and a demotion (fun -50) or firing at the bottom (fun -100) if it comes to that.
+#[allow(clippy::too_many_arguments)]
+fn demotion(commands: &mut Commands, notes: &mut Notifications, life: &mut MessageWriter<LifeEvent>, e: Entity, sim: &Sim, job: &mut Job, motives: &mut Motives, now: f64, member: bool) {
+    match review(job, now) {
+        Review::Fine => {}
+        Review::Warned => {
+            if member {
+                notes.push(format!("{}'s boss has warned them: their work had better improve, or they'll be demoted.", sim.first));
+            }
+        }
+        Review::Demoted if job.level == 0 => {
+            notes.push(format!("{} was fired from the {} career.", sim.first, job.career().name));
+            motives.add(FUN, -100.0);
+            commands.entity(e).remove::<Job>();
+            life.write(LifeEvent::new(e, LifeEventKind::Fired));
+        }
+        Review::Demoted => {
+            job.level -= 1;
+            job.performance = 0.0;
+            motives.add(FUN, -50.0);
+            notes.push(format!("{} was demoted to {}.", sim.first, job.info().title_for(sim.female)));
+            life.write(LifeEvent::new(e, LifeEventKind::Demoted));
+        }
+    }
 }
 
 /// Called when a Sim reaches the carpool: off to work until the shift ends.
@@ -756,8 +1188,26 @@ pub fn leave_for_work(commands: &mut Commands, clock: &GameClock, e: Entity, sim
     let start_minute = (clock.minutes / 1440.0).floor() * 1440.0 + info.start as f64 * 60.0;
     let start_minute = if (h as f64) < info.start as f64 - 12.0 { start_minute - 1440.0 } else { start_minute };
     let until = start_minute + job.hours() as f64 * 60.0;
-    commands.entity(e).insert((AtWork { until: until.max(clock.minutes + 30.0) }, Visibility::Hidden));
+    // (Paid from when they get there.)
+    commands.entity(e).insert((AtWork { until: until.max(clock.minutes + 30.0), from: clock.minutes, start_perf: job.performance }, Visibility::Hidden));
     notes.push(format!("{} left for work as a {}.", sim.first, info.title));
+}
+
+#[cfg(test)]
+mod audit {
+    /// The careers as baked (`SIMS3_CACHE=<baked> cargo test -p sims3 careers_audit -- --ignored
+    /// --nocapture`).
+    #[test]
+    #[ignore]
+    fn careers_audit() {
+        let data = s3bake::gamedata::load_gamedata(&s3bake::default_root()).expect("game data");
+        for c in &data.careers {
+            println!("{} part {} flow {:?} miss {} bonus {} fun {} coworkers {:?} levels {}", c.hex, c.part_time, c.flow, c.miss_work, c.bonus_hours, c.fun_per_hour, c.coworkers, c.levels.len());
+            for l in c.levels.iter().take(3) {
+                println!("   L{} {} ${} boss {} {:?}", l.level, l.branch, l.hourly, l.has_boss, l.metrics.iter().map(|m| format!("{} {:?} {}", m.kind, m.mappings, m.arg)).collect::<Vec<_>>());
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -771,7 +1221,139 @@ mod tests {
         }
         // (Saves from before work tones, or with one this doesn't know: normally.)
         assert_eq!(WorkTone::from_name(""), WorkTone::Normal);
-        assert!(WorkTone::WorkHard.performance() > WorkTone::Normal.performance());
-        assert!(WorkTone::TakeItEasy.performance() < WorkTone::Normal.performance());
+        assert!(WorkTone::WorkHard.performance(false) > WorkTone::Normal.performance(false));
+        assert!(WorkTone::TakeItEasy.performance(false) < WorkTone::Normal.performance(false));
+        // (A Professional Slacker takes it easy at no cost.)
+        assert_eq!(WorkTone::TakeItEasy.performance(true), 0.0);
+    }
+
+    #[test]
+    fn performance_flows_by_the_levels_metrics() {
+        // The game's Business level 1: in a good mood (+3) with a new boss (0), 7 an hour; working
+        // hard, 10, so promoted after the second shift.
+        let flow = [14.0, -8.0, 8.0, -10.0];
+        let avg = (metric_score(40.0, [-500.0, 0.0, 30.0]) + metric_score(0.0, [-50.0, 0.0, 50.0])) / 2.0;
+        assert_eq!(avg, 1.5);
+        assert_eq!(performance_rate(avg, flow, false) + WorkTone::WorkHard.performance(false), 10.0);
+        // (Halfway to a mapping's end is the lesser score; exactly halfway below, the lesser still.)
+        assert_eq!(metric_score(15.0, [-500.0, 0.0, 30.0]), 1.0);
+        assert_eq!(metric_score(16.0, [-500.0, 0.0, 30.0]), 2.0);
+        assert_eq!(metric_score(-250.0, [-500.0, 0.0, 30.0]), -1.0);
+        assert_eq!(metric_score(-251.0, [-500.0, 0.0, 30.0]), -2.0);
+        assert_eq!(metric_score(-600.0, [-500.0, 0.0, 30.0]), -3.0);
+        // (Level 2 wants the boss warmer: a new one counts against them.)
+        assert_eq!(metric_score(0.0, [-50.0, 12.5, 75.0]), -1.0);
+        assert_eq!(performance_rate(-3.0, flow, false), -8.0);
+        assert_eq!(performance_rate(3.0, flow, true), 8.0);
+        assert_eq!(charisma_boost(0, true), 1.0);
+        assert_eq!(charisma_boost(10, false), 1.77);
+    }
+
+    #[test]
+    fn poor_work_is_warned_then_demoted() {
+        let mut job = Job::new(0);
+        job.performance = -60.0;
+        assert_eq!(review(&mut job, 0.0), Review::Warned);
+        assert_eq!(review(&mut job, 47.0 * 60.0), Review::Fine);
+        assert_eq!(review(&mut job, 48.0 * 60.0), Review::Demoted);
+        // (Better by the time it runs out, and it's forgotten.)
+        job.performance = -60.0;
+        assert_eq!(review(&mut job, 0.0), Review::Warned);
+        job.performance = -40.0;
+        assert_eq!(review(&mut job, 48.0 * 60.0), Review::Fine);
+        assert_eq!(job.warned_at, None);
+        // (At the very bottom, at once.)
+        job.performance = -100.0;
+        assert_eq!(review(&mut job, 0.0), Review::Demoted);
+    }
+
+    fn shift(job: Job, hours: f64) -> (App, Entity) {
+        use crate::sim::{Age, random_sim};
+        let mut app = App::new();
+        let clock = GameClock::default();
+        let now = clock.minutes;
+        app.insert_resource(clock)
+            .init_resource::<Notifications>()
+            .init_resource::<crate::dialog::Questions>()
+            .add_message::<LifeEvent>()
+            .insert_resource(Household { name: "Test".into(), funds: 0, lot_index: 0, last_bill_day: 0, bills: Vec::new() })
+            .add_systems(Update, work_schedule);
+        let mut sim = random_sim(&mut rand::rng(), "Test", Some(false), Age::Adult);
+        sim.traits.clear();
+        let e = app
+            .world_mut()
+            .spawn((
+                sim,
+                HouseholdMember,
+                job,
+                ActionQueue::default(),
+                AtWork { until: now, from: now - hours * 60.0, start_perf: 0.0 },
+                Transform::default(),
+                Motives([0.0; 6]),
+                Skills::default(),
+                crate::social::Relationships::default(),
+            ))
+            .id();
+        (app, e)
+    }
+
+    #[test]
+    fn a_shift_pays_its_hours_and_a_first_promotion_its_bonus() {
+        let mut job = Job::new(0);
+        job.performance = 100.0;
+        let hourly = job.info().hourly;
+        let (mut app, e) = shift(job, 4.0);
+        app.update();
+        let job = app.world().get::<Job>(e).unwrap();
+        assert_eq!(job.level, 1);
+        assert_eq!(job.highest, 1);
+        assert_eq!(job.performance, 0.0);
+        // Four hours' pay, and the bonus at the old pay.
+        assert_eq!(app.world().resource::<Household>().funds, hourly * 4 + (12.0 * hourly as f32) as i64);
+        assert_eq!(app.world().get::<Motives>(e).unwrap().0[BLADDER], 100.0);
+        // (Back to a level they've been at before: no bonus.)
+        let mut job = Job::new(0);
+        job.highest = 3;
+        job.performance = 100.0;
+        let (mut app, e) = shift(job, 1.0);
+        app.update();
+        assert_eq!(app.world().get::<Job>(e).unwrap().level, 1);
+        assert_eq!(app.world().resource::<Household>().funds, hourly);
+    }
+
+    #[test]
+    fn a_promotion_the_boss_agreed_to_comes_at_once() {
+        let mut job = Job::new(0);
+        job.promote = true;
+        job.performance = 30.0;
+        let hourly = job.info().hourly;
+        let (mut app, e) = shift(job, 0.0);
+        app.world_mut().entity_mut(e).remove::<AtWork>();
+        app.add_systems(Update, promote_when_agreed);
+        app.update();
+        let job = app.world().get::<Job>(e).unwrap();
+        assert_eq!((job.level, job.performance, job.promote), (1, 0.0, false));
+        assert_eq!(app.world().resource::<Household>().funds, (12.0 * hourly as f32) as i64);
+        // (A raise: 15% of the level's pay an hour.)
+        let mut job = Job::new(0);
+        let r = job.give_raise();
+        assert_eq!((r, job.raise), (((hourly as f32 * 0.15) as i64).max(1), r));
+    }
+
+    #[test]
+    fn sucking_up_warms_the_boss_both_ways() {
+        let boss_sim = crate::sim::random_sim(&mut rand::rng(), "Boss", Some(true), crate::sim::Age::Adult);
+        let mut job = Job::new(0);
+        job.tone = WorkTone::SuckUp;
+        job.boss = Some(boss_sim.id);
+        let (mut app, e) = shift(job, 4.0);
+        // (Four hours of it, before the shift's end.)
+        app.world_mut().get_mut::<AtWork>(e).unwrap().until += 1.0;
+        app.insert_resource(crate::clock::SimDelta(240.0)).add_systems(Update, work_flow.before(work_schedule));
+        let boss = app.world_mut().spawn((boss_sim, crate::social::Relationships::default())).id();
+        app.update();
+        // Three an hour (no Charisma, not a Schmoozer).
+        assert_eq!(app.world().get::<crate::social::Relationships>(e).unwrap().friendship(boss), 12.0);
+        assert_eq!(app.world().get::<crate::social::Relationships>(boss).unwrap().friendship(e), 12.0);
     }
 }
