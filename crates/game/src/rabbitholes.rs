@@ -629,9 +629,14 @@ fn school_bus(
     mut kids: Query<(Entity, &Sim, &mut ActionQueue, Option<&mut SchoolGrades>, Option<&AtRabbitHole>, Has<Homework>), With<HouseholdMember>>,
     mut last_day: Local<std::collections::HashMap<Entity, u32>>,
     mut notes: ResMut<Notifications>,
+    weather: Option<Res<crate::weather::Weather>>,
 ) {
     let h = clock.hour_f();
     let day = clock.day();
+    // (No school on a holiday.)
+    if weather.as_deref().is_some_and(|w| crate::holidays::is_holiday(w, day)) {
+        return;
+    }
     for (e, sim, mut queue, mut grades, away, homework) in &mut kids {
         if !matches!(sim.age, Age::Child | Age::Teen) {
             continue;

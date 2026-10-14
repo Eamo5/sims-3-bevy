@@ -645,10 +645,15 @@ pub enum MoodletKind {
     // Laundry.
     FreshClothing,
     VeryFreshClothing,
+    // The seasons' holidays (Seasons).
+    HolidayCheer,
+    SpringFling,
+    SummerFun,
+    SpookyTime,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 61] = {
+    pub const ALL: [MoodletKind; 65] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -657,7 +662,7 @@ impl MoodletKind {
             InLove, Heartbroken, JustMarried, NewHome, Birthday, WishFulfilled, Nauseous, Pregnant, NewBaby, GreatParty,
             LameParty, AwesomeParty, Scared, GreatDate, BadDate, Singed, DirtySurroundings, FilthySurroundings, GettingChilly,
             TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf, MintyBreath,
-            Disgusted, Mourning, FreshClothing, VeryFreshClothing,
+            Disgusted, Mourning, FreshClothing, VeryFreshClothing, HolidayCheer, SpringFling, SummerFun, SpookyTime,
         ]
     };
 
@@ -743,6 +748,11 @@ impl MoodletKind {
             Mourning => md("Mourning", "Someone close has passed away.", -50, 48.0),
             FreshClothing => md("Fresh Clothing", "Clean clothes, fresh from the dryer.", 15, 16.0),
             VeryFreshClothing => md("Very Fresh Clothing", "Clothes dried in the fresh air.", 25, 16.0),
+            // (The holiday's, for its day: the game's `EffectValue` 10.)
+            HolidayCheer => md("Holiday Cheer", "It's Snowflake Day!", 10, 19.0),
+            SpringFling => md("Spring Fling", "It's Love Day!", 10, 19.0),
+            SummerFun => md("Summer Fun", "It's Leisure Day!", 10, 19.0),
+            SpookyTime => md("Spooky Time", "It's Spooky Day!", 10, 19.0),
         }
     }
 
@@ -814,6 +824,10 @@ impl MoodletKind {
             MintyBreath => ("MintyBreath", true),
             Disgusted => ("Disgusted", true),
             Mourning => ("Mourning", true),
+            HolidayCheer => ("HolidayCheer", true),
+            SpringFling => ("SpringFling", true),
+            SummerFun => ("SummerFun", true),
+            SpookyTime => ("SpookyTime", true),
             FreshClothing => ("FreshClothing", true),
             VeryFreshClothing => ("VeryFreshClothing", true),
         }

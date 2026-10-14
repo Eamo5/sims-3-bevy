@@ -595,6 +595,7 @@ fn work_schedule(
     >,
     mut session_start: Local<Option<f64>>,
     mut questions: ResMut<crate::dialog::Questions>,
+    weather: Option<Res<crate::weather::Weather>>,
 ) {
     let h = clock.hour_f();
     let day = clock.day();
@@ -703,6 +704,22 @@ fn work_schedule(
             } else {
                 format!("{} missed work today! Their boss is not pleased.", sim.first)
             });
+            continue;
+        }
+        // (A holiday's a paid day off, as the game's `TryGiveDayOffForHoliday`.)
+        if workday
+            && job.last_day != Some(day)
+            && h >= info.start - 0.75
+            && let Some(name) = weather.as_deref().and_then(|w| crate::holidays::holiday_today(w, day))
+        {
+            job.last_day = Some(day);
+            let pay = (info.hourly as f32 * job.hours()) as i64;
+            if member {
+                if let Some(hh) = household.as_mut() {
+                    hh.funds += pay;
+                }
+                notes.push(format!("{} has {name} off work, with pay (§{pay}).", sim.first));
+            }
             continue;
         }
         let going = queue.0.iter().any(|a| matches!(a.kind, ActionKind::GoToWork));
