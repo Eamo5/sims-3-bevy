@@ -1514,13 +1514,15 @@ pub(crate) fn buy_buttons(
             BuyButton::Item(key) => {
                 buy.drop_tools(&mut commands);
                 let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-                let parts = assets.object(&mut ctx, *key);
+                // (In its first swatch, as the game sells it.)
+                let design = crate::objects::first_design(&data.0, *key);
+                let parts = assets.object_design(&mut ctx, *key, design);
                 if parts.is_empty() {
                     continue;
                 }
                 let ghost = spawn_parts(&mut commands, &parts, Transform::from_xyz(0.0, -1000.0, 0.0));
                 commands.entity(ghost).insert(DespawnOnExit(AppState::InGame));
-                buy.placing = Some(Placing::new(*key, ghost, false, None));
+                buy.placing = Some(Placing::new(*key, ghost, false, design));
                 buy.dirty = true;
             }
             BuyButton::Inventory(i) => {

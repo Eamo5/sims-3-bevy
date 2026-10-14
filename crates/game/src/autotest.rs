@@ -3453,7 +3453,8 @@ fn auto_place(
         };
         let pos = tf.translation + tf.rotation * Vec3::new(i as f32 * 2.0, 0.0, 2.0);
         let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
-        if let Some(object) = crate::home::spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, e.key, pos, 0.0) {
+        let design = crate::objects::first_design(&data.0, e.key);
+        if let Some(object) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, e.key, pos, Quat::IDENTITY, design) {
             let level = building.as_ref().map_or(1, |b| b.level_at_point(pos));
             commands.entity(object.entity).insert((crate::save::Bought, crate::nav::Floor(level), crate::building::BuildingPiece { level }));
             info!("placed {} for the test", e.name);

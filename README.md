@@ -686,6 +686,11 @@ installation is unreachable.
   statistics, metals, gems, insects and fish tabs, and the game's table of each kind's finds
   (picture and name, greyed until found; rarity; how many the household holds; what one
   fetches).
+- **Vending machines** (Late Night): *Buy Soda* or *Buy Candy* (the healthy one has both),
+  with the game's clips, the coins in and the can or the bar out of the tray, and had there
+  and then (a little hunger, as the game's), §5 away from home, free at home. Catalogue objects
+  come in their first swatch, as the game sells them (some, the vending machines, have no
+  picture of their own without one).
 - **Bars**: *Make a Drink* at any of the catalogue's bars: the Sim pours from the blender,
   blends, serves and sips, with the game's animations and props.
 - **Grills, coffee makers and alarm clocks** from the catalogue: a grill's *Grill ›* menu

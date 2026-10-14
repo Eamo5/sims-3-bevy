@@ -38,6 +38,13 @@ pub fn design_texture(objd: Key, design: u8) -> Key {
     (s3bake::gamedata::T_DESIGN, design as u32, objd.2)
 }
 
+/// The design a catalogue object comes in when bought, as the game's first swatch (some ship
+/// with a material of no picture of their own, the Late Night vending machines): none for one
+/// without designs.
+pub fn first_design(baked: &BakedData, objd: Key) -> Option<Key> {
+    baked.designs.contains_key(&objd).then(|| design_texture(objd, 0))
+}
+
 /// A part of a lot imposter: its ground, roofs or the rest.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 pub struct ImposterLayer(pub u8);

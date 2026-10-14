@@ -182,6 +182,10 @@ pub enum ObjectKind {
     FoodSynthesizer,
     /// A urinal (for men and boys).
     Urinal,
+    /// Vending machines (Late Night): soda, candy, or both (the healthy one).
+    VendingSoda,
+    VendingCandy,
+    VendingBoth,
     /// A child's toy oven, to bake pretend cakes in.
     ToyOven,
     /// An outdoor fire pit: lit, hands warmed by it and marshmallows roasted over it.
@@ -344,6 +348,12 @@ impl ObjectKind {
             Self::FoodReplicator
         } else if has("appliances.futurefoodsynthesizer") {
             Self::FoodSynthesizer
+        } else if has("environment.vendingmachinecandy") {
+            Self::VendingCandy
+        } else if has("environment.vendingmachinehealthy") {
+            Self::VendingBoth
+        } else if has("environment.vendingmachine") {
+            Self::VendingSoda
         } else if has("rewards.bodysculptor") {
             Self::BodySculptor
         } else if has("rewards.moodmodifier") {
@@ -460,6 +470,7 @@ impl ObjectKind {
     pub fn category(&self) -> &'static str {
         match self {
             Self::Fridge | Self::Stove | Self::Microwave | Self::Grill | Self::HotBeverage | Self::FoodSynthesizer => "Appliances",
+            Self::VendingSoda | Self::VendingCandy | Self::VendingBoth => "Misc",
             Self::AlarmClock => "Electronics",
             Self::TrashCan | Self::TrashCompactor | Self::WasteChute | Self::Candle | Self::ClothingPile => "Misc",
             Self::Washer | Self::Dryer | Self::Clothesline => "Appliances",
@@ -826,6 +837,8 @@ pub enum Special {
     ChangeAppearance,
     /// A plate of food from the food replicator.
     ReplicateFood,
+    /// A soda or a candy bar from a vending machine, paid for away from home.
+    Vend,
     /// Art looked over, then liked or not, by taste (`art_taste`).
     ViewArt,
     /// The laundry's steps (see `laundry`): a pile picked up, a load put on, the wet clothes
@@ -1283,6 +1296,15 @@ static ART: [InteractionDef; 1] = [InteractionDef { special: Special::ViewArt, .
 /// (A plate of whatever's programmed, as the replicator's: the screen tapped, a wait, and out.)
 static FOOD_SYNTHESIZER: [InteractionDef; 1] =
     [InteractionDef { special: Special::ReplicateFood, ..def("Synthesize Food", 4.0, [4500.0, 0.0, 0.0, 0.0, 0.0, 2.0], Pose::Use) }];
+/// (A soda or a candy bar, had there and then: the game's `kHungerFillAmount`, 5, over the
+/// quarter of an hour it takes.)
+const VEND_SODA: InteractionDef = InteractionDef { special: Special::Vend, ..def("Buy Soda", 12.0, [25.0, 0.0, 0.0, 0.0, 0.0, 5.0], Pose::Use) };
+const VEND_CANDY: InteractionDef = InteractionDef { special: Special::Vend, ..def("Buy Candy", 12.0, [25.0, 0.0, 0.0, 0.0, 0.0, 5.0], Pose::Use) };
+static VENDING_SODA: [InteractionDef; 1] = [VEND_SODA];
+static VENDING_CANDY: [InteractionDef; 1] = [VEND_CANDY];
+static VENDING_BOTH: [InteractionDef; 2] = [VEND_SODA, VEND_CANDY];
+/// What a vending machine's snack costs away from home (the game's `kSodaPrice`, `kCandyPrice`).
+pub const VEND_PRICE: i64 = 5;
 /// (A new shape, the sculptor at work for an hour.)
 static BODY_SCULPTOR: [InteractionDef; 3] = [
     InteractionDef { autonomous: false, special: Special::Sculpt, ..def("Sculpt Fitter", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 10.0], Pose::Use) },
@@ -1736,6 +1758,9 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         ),
         // (Children's: grown-ups play with toys only with a little one.)
         "Replicate Food" => A::new(None, &["a2o_lifetimeReward_foodReplicator_pushButton_x"]),
+        // (The coins in, the can or the bar out of the tray, and had there and then.)
+        "Buy Soda" => A::steps("a2o_vendingMachine_start_x", &["a2o_vendingMachine_retrieveSoda_x"], &["a2o_vendingMachine_drinkSoda_x"]),
+        "Buy Candy" => A::steps("a2o_vendingMachine_start_x", &["a2o_vendingMachine_retrieveCandy_x"], &["a2o_vendingMachine_eatCandy_x", "a2o_vendingMachine_eatCandy_reactNormal_x"]),
         "Synthesize Food" => A::steps(
             "a2o_foodSynthesizer_start1_x",
             &["a2o_foodSynthesizer_program_loop1_x", "a2o_foodSynthesizer_program_loop2_x", "a2o_foodSynthesizer_celebrate_x"],
@@ -2034,6 +2059,9 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Bar => &BAR,
         ObjectKind::FoodReplicator => &FOOD_REPLICATOR,
         ObjectKind::FoodSynthesizer => &FOOD_SYNTHESIZER,
+        ObjectKind::VendingSoda => &VENDING_SODA,
+        ObjectKind::VendingCandy => &VENDING_CANDY,
+        ObjectKind::VendingBoth => &VENDING_BOTH,
         ObjectKind::Art => &ART,
         ObjectKind::Teleporter => &TELEPORTER,
         ObjectKind::BodySculptor => &BODY_SCULPTOR,
@@ -3550,6 +3578,16 @@ pub(crate) fn run_actions(
                                         Special::ReplicateFood => {
                                             commands.entity(me).insert(crate::meals::MealRequest::Replicated);
                                             notes.push(format!("{} replicated a meal.", sim.first));
+                                        }
+                                        // (Paid for away from home.)
+                                        Special::Vend => {
+                                            commands.queue(move |w: &mut World| {
+                                                if w.get::<crate::visit::OnLot>(me).is_some() && w.get::<HouseholdMember>(me).is_some()
+                                                    && let Some(mut h) = w.get_resource_mut::<Household>()
+                                                {
+                                                    h.funds -= VEND_PRICE;
+                                                }
+                                            });
                                         }
                                         Special::Sculpt => {
                                             let (weight, fit) = match d.name {
