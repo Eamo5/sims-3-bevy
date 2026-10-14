@@ -17,7 +17,7 @@ pub struct RabbitHolePlugin;
 
 impl Plugin for RabbitHolePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (school_bus, outings).chain().after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (school_bus, outings, told_homework).chain().after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -385,9 +385,32 @@ fn outings(
     }
 }
 
-/// Homework from today's school, not yet done.
+/// Homework from today's school, not yet done: how far along (0..100), and whether they've just
+/// been told to get on with it (and agreed: the game's "Request Do Your Homework").
 #[derive(Component, Default)]
-pub struct Homework(pub f32);
+pub struct Homework(pub f32, pub bool);
+
+/// One told to do their homework, who agreed, sets about it there and then (the game's
+/// `OnDoYourHomeworkAccepted`): at the nearest place for it.
+fn told_homework(mut sims: Query<(&Sim, &Transform, &mut Homework, &mut ActionQueue)>, objects: Query<(Entity, &GameObject, &Transform)>) {
+    for (sim, tf, mut hw, mut queue) in &mut sims {
+        if !hw.1 {
+            continue;
+        }
+        hw.1 = false;
+        if queue.0.iter().any(|a| matches!(a.kind, ActionKind::Object { .. }) && a.label == "Do Homework") {
+            continue;
+        }
+        let spot = objects
+            .iter()
+            .filter_map(|(oe, o, otf)| interactions_for(o.kind).iter().position(|d| d.special == Special::Homework).map(|def| (oe, def, otf.translation.distance(tf.translation))))
+            .min_by(|a, b| a.2.total_cmp(&b.2));
+        if let Some((oe, def, _)) = spot {
+            info!("{} sets about their homework", sim.first);
+            queue.0.push_back(Action::new("Do Homework", ActionKind::Object { target: oe, def }, true));
+        }
+    }
+}
 
 impl Homework {
     /// Progress belongs to the assignment, so ending an interaction never resets it.

@@ -3773,6 +3773,20 @@ pub(crate) fn run_actions(
                                                 crate::rabbitholes::complete_homework(world, student, Some(me), minutes);
                                             });
                                         }
+                                        // (Done if they're of the household or like the one asking, as the
+                                        // game's: liking 25.)
+                                        SocialEffect::RequestHomework => {
+                                            if t_member || rel.friendship >= crate::social::HOMEWORK_LIKING {
+                                                notes.push(format!("{tname} agreed to do their homework."));
+                                                commands.entity(*target).queue_silenced(|mut w: EntityWorldMut| {
+                                                    if let Some(mut h) = w.get_mut::<crate::rabbitholes::Homework>() {
+                                                        h.1 = true;
+                                                    }
+                                                });
+                                            } else {
+                                                notes.push(format!("{tname} won't do their homework for {}.", sim.first));
+                                            }
+                                        }
                                         SocialEffect::Greet => {
                                             notes.push(format!("{} let {tname} in.", sim.first));
                                             commands.entity(*target).remove::<crate::doorbell::AtTheDoor>();

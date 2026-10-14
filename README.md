@@ -584,7 +584,10 @@ installation is unreachable.
    lifts their grades; left undone, it drags them down. A teen or grown-up
   can Help with Homework (a Friendly social, offered while there's homework): it's done, with
   better grades, the helper learns a little Logic, and the hours count towards Teacher
-   Extraordinaire (whose teachers get through it twice as fast). Grades and unfinished homework
+   Extraordinaire (whose teachers get through it twice as fast). A grown-up can tell a teen
+   with homework to "Do Homework" (the game's own social, which family-minded parents use
+   unasked): one of the household, or who likes them well enough, sets about it there and then.
+   Grades and unfinished homework
    survive saves, including partial homework progress and school visits in progress;
    cancelled homework can be resumed, with its percentage shown in the school tooltip.
    Becoming a young adult clears school

@@ -217,7 +217,16 @@ pub enum SocialEffect {
     HelpHomework,
     /// Greeting a caller at the door (who then comes in).
     Greet,
+    /// Telling a child or teen to do their homework (the game's "Request Do Your Homework").
+    RequestHomework,
 }
+
+/// How much a child or teen must like someone not of their household to do their homework when
+/// told (the game's `LLTR min`).
+pub const HOMEWORK_LIKING: f32 = 25.0;
+
+/// The game's socials that do something of their own here, by their key.
+const GAME_EFFECTS: &[(&str, SocialEffect)] = &[("Request Do Your Homework", SocialEffect::RequestHomework)];
 
 pub struct SocialDef {
     pub name: &'static str,
@@ -295,15 +304,17 @@ pub struct Side<'a> {
     pub moods: Option<&'a crate::life::Moodlets>,
     pub topics: Option<&'a crate::topics::Topics>,
     pub career: Option<usize>,
+    /// Whether they've homework to do.
+    pub homework: bool,
 }
 
 /// What `Side::of` reads of a Sim.
-pub type SideQuery<'a> = (Option<&'a crate::life::Moodlets>, Option<&'a crate::topics::Topics>, Option<&'a crate::careers::Job>);
+pub type SideQuery<'a> = (Option<&'a crate::life::Moodlets>, Option<&'a crate::topics::Topics>, Option<&'a crate::careers::Job>, Has<crate::rabbitholes::Homework>);
 
 impl<'a> Side<'a> {
-    pub fn of(sim: Entity, q: Option<SideQuery<'a>>) -> Self {
-        let (moods, topics, job) = q.unwrap_or_default();
-        Self { sim: Some(sim), moods, topics, career: job.map(|j| j.track) }
+    pub fn of(sim: Entity, q: Option<(Option<&'a crate::life::Moodlets>, Option<&'a crate::topics::Topics>, Option<&'a crate::careers::Job>, bool)>) -> Self {
+        let (moods, topics, job, homework) = q.unwrap_or_default();
+        Self { sim: Some(sim), moods, topics, career: job.map(|j| j.track), homework }
     }
 }
 
@@ -527,9 +538,12 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
         // (Its clips' word: its suite, or its graph's.)
         let word = if a.suite.is_empty() { GRAPH_CLIPS.iter().find(|g| g.0.eq_ignore_ascii_case(&a.graph)).map(|g| g.1) } else { Some(a.suite.as_str()) };
         let Some(word) = word else { continue };
+        let effect = GAME_EFFECTS.iter().find(|g| g.0 == a.key).map_or(SocialEffect::None, |g| g.1);
         let test = match a.test.as_str() {
             "" => None,
             t if PASSED_TESTS.contains(&t) => None,
+            // (Its own effect's test: `available`.)
+            "TestRequestDoYourHomework" if effect == SocialEffect::RequestHomework => None,
             "TestThankForCooking" | "TestWorryAboutGrades" | "TestThankForTutoring" => Some(GameTest::About),
             "TestActorHasWork" => Some(GameTest::ActorWorks),
             "TestActorAndTargetHasWork" => Some(GameTest::BothWork),
@@ -616,6 +630,7 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
             min_romance,
             autonomous,
             game: Some(rules),
+            effect,
             ..sd(leak(&a.name), cat, minutes, social, fun, friendship, romance)
         });
     }
@@ -789,6 +804,7 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
         SocialEffect::HelpHomework => actor.age != Age::Child && matches!(target.age, Age::Child | Age::Teen),
         // (Who's at the door is for the menu: the household's own let callers in.)
         SocialEffect::Greet => target_in_household == false,
+        SocialEffect::RequestHomework => side[1].homework && matches!(target.age, Age::Child | Age::Teen),
         SocialEffect::WooHoo => matches!(rel.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married) || rel.romance >= 80.0,
         _ => true,
     }
@@ -796,6 +812,10 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
 
 /// Chance (0..1) that the target goes along with the social.
 pub fn acceptance(def: &SocialDef, rel: &Relationship, target: &Sim, target_mood: &Mood, has_other_partner: bool) -> f32 {
+    // (Told to do their homework, they hear it out; whether they do it is the effect's.)
+    if def.effect == SocialEffect::RequestHomework {
+        return 1.0;
+    }
     let has = |t: Trait| target.traits.contains(&t);
     let mood = target_mood.level() / 100.0;
     let mut p = match def.cat {
@@ -964,6 +984,35 @@ mod tests {
         fired.add(crate::life::MoodletKind::Fired, 0.0);
         assert!(available(&got[2], &rel, &a, &b, false, false, moods([None, Some(&fired)])));
         assert!(!available(&got[2], &rel, &a, &b, false, false, moods([Some(&fired), None])), "not the one fired asking");
+    }
+
+    #[test]
+    fn grown_ups_tell_teens_with_homework_to_do_it() {
+        use s3bake::gamedata::SocialAction;
+        let a = SocialAction {
+            key: "Request Do Your Homework".into(),
+            name: "Request Do Your Homework".into(),
+            tone: "Neutral".into(),
+            actor_ages: ["C", "T", "Y", "A", "E"].map(String::from).to_vec(),
+            target_ages: ["C", "T"].map(String::from).to_vec(),
+            autonomous: true,
+            suite: "RequestAction".into(),
+            test: "TestRequestDoYourHomework".into(),
+            topics: vec![("Adult to Child".into(), true)],
+            ..Default::default()
+        };
+        let clips: Vec<String> = ["a2a_soc_Neutral_RequestAction_Friendly_Neutral_x", "a2a_soc_Neutral_RequestAction_Friendly_Neutral_y"].map(String::from).to_vec();
+        let got = game_socials(&[a], &clips);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].effect, SocialEffect::RequestHomework);
+        let mom = crate::sim::random_sim(&mut rand::rng(), "Mom", Some(true), Age::Adult);
+        // (Teens: children's clips for it are their own.)
+        let kid = crate::sim::random_sim(&mut rand::rng(), "Kid", Some(false), Age::Teen);
+        let rel = Relationship::default();
+        let with = |homework| [Side::default(), Side { homework, ..default() }];
+        assert!(!available(&got[0], &rel, &mom, &kid, true, true, with(false)), "no homework to do");
+        assert!(available(&got[0], &rel, &mom, &kid, true, true, with(true)));
+        assert!(!available(&got[0], &rel, &kid, &mom, true, true, with(true)), "not the child telling the grown-up");
     }
 
     #[test]

@@ -194,7 +194,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(First, tick_input_timeline.after(bevy::time::TimeSystems).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, (keep_hungry, all_use, set_grime), wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, (run_out, give_topics), face_hook, shots_every, (show_designs, show_style), walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, (keep_hungry, all_use, set_grime), wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, (run_out, give_topics, give_homework), face_hook, shots_every, (show_designs, show_style), walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, strand_swimmers.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, press_key.after(bevy::input::InputSystems).before(crate::buy::toggle_buy).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, buy_pick.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
@@ -1994,6 +1994,21 @@ fn run_out(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives, Has<crat
                 info!("{}'s {var} runs out", s.first);
                 m.0[motive] = -100.0;
             }
+        }
+    }
+}
+
+/// HOMEWORK=<first name>: a few seconds in, that Sim has homework to do.
+fn give_homework(mut commands: Commands, sims: Query<(Entity, &crate::sim::Sim)>, mut done: Local<bool>, time: Res<Time>) {
+    if *done || time.elapsed_secs() < 8.0 {
+        return;
+    }
+    let Ok(who) = std::env::var("HOMEWORK") else { return };
+    *done = true;
+    for (e, s) in &sims {
+        if s.first.eq_ignore_ascii_case(&who) {
+            info!("{} has homework", s.first);
+            commands.entity(e).insert(crate::rabbitholes::Homework::default());
         }
     }
 }
@@ -3841,9 +3856,14 @@ fn auto_action(
     }
     // "Social:<name>": the selected Sim does this social three times with another grown-up of
     // the household (or a visitor), as friends ("Social:<a>;<b>;...": each of those once).
-    if let Some(list) = name.strip_prefix("Social:") {
+    // (`Social@<first name>:<social>`: with that Sim.)
+    let named = name.strip_prefix("Social@").and_then(|r| r.split_once(':'));
+    if let Some(list) = name.strip_prefix("Social:").or(named.map(|n| n.1)) {
         let me = sel_e.single().unwrap();
-        let target = members.iter().find(|(e, s)| *e != me && s.age.is_grown() && s.age != crate::sim::Age::Child).map(|(e, _)| e).or_else(|| visitors.iter().next());
+        let target = match named {
+            Some((who, _)) => members.iter().find(|(e, s)| *e != me && s.first.eq_ignore_ascii_case(who)).map(|(e, _)| e),
+            None => members.iter().find(|(e, s)| *e != me && s.age.is_grown() && s.age != crate::sim::Age::Child).map(|(e, _)| e).or_else(|| visitors.iter().next()),
+        };
         let Some(target) = target else { return };
         for (a, b) in [(me, target), (target, me)] {
             if let Ok(mut rels) = rels_q.get_mut(a) {

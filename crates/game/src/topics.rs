@@ -235,7 +235,8 @@ fn events(
 fn doing(clock: Res<GameClock>, mut sims: Query<(&ActionQueue, &mut Topics)>) {
     for (q, mut t) in &mut sims {
         let Some(a) = q.0.front() else { continue };
-        if !matches!(a.phase, Phase::Running(_)) {
+        // (Not a social of the same name: telling someone to "Do Homework".)
+        if !matches!(a.phase, Phase::Running(_)) || matches!(a.kind, ActionKind::Social { .. }) {
             continue;
         }
         if let Some((topic, _)) = ACTION_TOPICS.iter().find(|(_, labels)| labels.contains(&a.label.as_str())) {

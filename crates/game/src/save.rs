@@ -975,7 +975,7 @@ fn restore_school(ec: &mut EntityCommands, saved: &SavedSim) {
             ec.insert(crate::rabbitholes::SchoolGrades(grade.clamp(0.0, 100.0)));
         }
         if saved.homework {
-            ec.insert(crate::rabbitholes::Homework(saved.homework_progress.clamp(0.0, 100.0)));
+            ec.insert(crate::rabbitholes::Homework(saved.homework_progress.clamp(0.0, 100.0), false));
         }
         if let Some((inside_from, until)) = saved.school_visit {
             ec.insert((crate::rabbitholes::AtRabbitHole {
