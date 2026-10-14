@@ -108,6 +108,9 @@ fn skill_topic(skill: &str) -> Option<&'static str> {
 
 /// Below this the household worries about money (the game's `kWorryinglyLowFamilyFunds`).
 const LOW_FUNDS: i64 = 500;
+/// How long a topic lasting while a visit or a party is on is had at a time (game minutes; it's
+/// looked at hourly).
+const WHILE_ON: f64 = 70.0;
 /// How far from a fire, or a meal's cook, Sims are taken to be there (metres).
 const THERE: f32 = 30.0;
 
@@ -129,7 +132,8 @@ fn events(
     fires: Query<&Transform, With<crate::fire::Fire>>,
     burglary: Option<Res<crate::burglar::Break>>,
     household: Option<Res<crate::interact::Household>>,
-    mut was: Local<(bool, bool, f64)>,
+    (party, visitors): (Option<Res<crate::interact::Party>>, Query<(Entity, &InheritedVisibility), With<crate::interact::Visitor>>),
+    mut was: Local<(bool, bool, f64, Option<Entity>)>,
     mut sims: Query<(Entity, &mut Topics, &Transform, &InheritedVisibility, Has<HouseholdMember>)>,
 ) {
     let ui = ui.as_deref();
@@ -163,6 +167,8 @@ fn events(
                 }
                 "Bake Birthday Cake" | "Prepare Food" => given.push((e, "Has Made Food", None)),
                 "Clean" | "Mop Up" | "Clean Up" | "Wash Dishes" | "Load Dishes" => given.push((e, "Thank For Cleaning", None)),
+                // (A novel finished: praised by those who hear of it.)
+                "Write Novel" => given.push((e, "Written Book", None)),
                 _ => {}
             },
             // (Done between them: a topic of theirs that's used up once done isn't again.)
@@ -204,17 +210,42 @@ fn events(
         given.extend(sims.iter().filter(|s| s.4).map(|(e, ..)| (e, "Talk About Burglary", None)));
     }
     was.1 = spotted;
-    // (Money running low, looked at hourly.)
+    // (A party: the host's while it's on, and once it's over.)
+    match (party.as_deref(), was.3) {
+        (Some(p), _) => {
+            if was.3.is_none() {
+                given.push((p.host, "Party Happening", None));
+            }
+            was.3 = Some(p.host);
+        }
+        (None, Some(host)) => {
+            given.push((host, "Party Over", None));
+            was.3 = None;
+        }
+        (None, None) => {}
+    }
+    // (Money running low, and visitors over, looked at hourly: a visit's for the household and
+    // its guests.)
     if now - was.2 >= 60.0 {
         was.2 = now;
         if household.is_some_and(|h| h.funds < LOW_FUNDS) {
             given.extend(sims.iter().filter(|s| s.4).map(|(e, ..)| (e, "Worry About Money", None)));
         }
+        if let Some(p) = party.as_deref() {
+            given.push((p.host, "Party Happening", None));
+        }
+        let guests: Vec<Entity> = visitors.iter().filter(|(_, shown)| shown.get()).map(|(e, _)| e).collect();
+        if !guests.is_empty() {
+            given.extend(guests.into_iter().map(|e| (e, "Visit", None)));
+            given.extend(sims.iter().filter(|s| s.4 && s.3.get()).map(|(e, ..)| (e, "Visit", None)));
+        }
     }
     for (e, name, about) in given {
         if let Ok((_, mut t, ..)) = sims.get_mut(e) {
             debug!("topic for {e}: {name}");
-            t.add(name, now + minutes(ui, name), about);
+            // (Those that last while the visit or the party does: until the next look.)
+            let last = if matches!(name, "Visit" | "Party Happening") { WHILE_ON } else { minutes(ui, name) };
+            t.add(name, now + last, about);
         }
     }
     for (e, other, name) in used {

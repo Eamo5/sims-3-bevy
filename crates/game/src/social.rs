@@ -294,6 +294,8 @@ pub enum GameTest {
     About,
     ActorWorks,
     BothWork,
+    /// A guest to their host (complimenting the home).
+    GuestToHost,
 }
 
 /// What's known of a Sim for the game's socials beyond their `Sim`: who they are, their
@@ -306,15 +308,24 @@ pub struct Side<'a> {
     pub career: Option<usize>,
     /// Whether they've homework to do.
     pub homework: bool,
+    /// Whether they're of the household.
+    pub member: bool,
 }
 
 /// What `Side::of` reads of a Sim.
-pub type SideQuery<'a> = (Option<&'a crate::life::Moodlets>, Option<&'a crate::topics::Topics>, Option<&'a crate::careers::Job>, Has<crate::rabbitholes::Homework>);
+pub type SideQuery<'a> = (
+    Option<&'a crate::life::Moodlets>,
+    Option<&'a crate::topics::Topics>,
+    Option<&'a crate::careers::Job>,
+    Has<crate::rabbitholes::Homework>,
+    Has<crate::sim::HouseholdMember>,
+);
 
 impl<'a> Side<'a> {
-    pub fn of(sim: Entity, q: Option<(Option<&'a crate::life::Moodlets>, Option<&'a crate::topics::Topics>, Option<&'a crate::careers::Job>, bool)>) -> Self {
-        let (moods, topics, job, homework) = q.unwrap_or_default();
-        Self { sim: Some(sim), moods, topics, career: job.map(|j| j.track), homework }
+    #[allow(clippy::type_complexity)]
+    pub fn of(sim: Entity, q: Option<(Option<&'a crate::life::Moodlets>, Option<&'a crate::topics::Topics>, Option<&'a crate::careers::Job>, bool, bool)>) -> Self {
+        let (moods, topics, job, homework, member) = q.unwrap_or_default();
+        Self { sim: Some(sim), moods, topics, career: job.map(|j| j.track), homework, member }
     }
 }
 
@@ -473,7 +484,7 @@ pub fn all_socials() -> impl Iterator<Item = (usize, &'static SocialDef)> {
 
 /// The game's tests (its `ProcTest`s) a social of its may have that are taken here as passed:
 /// those that only ask what's asked anyway (how well they get on, how romantic they are).
-const PASSED_TESTS: &[&str] = &["TestChat", "TalkAboutWeatherTest", "ShareInterestsProceduralTest", "TestFriendlyHug", "TestKissOnCheek", "TestAskAboutRecentAction"];
+const PASSED_TESTS: &[&str] = &["TestChat", "TalkAboutWeatherTest", "ShareInterestsProceduralTest", "TestFriendlyHug", "TestKissOnCheek", "TestAskAboutRecentAction", "TestComplimentParty", "TestWoo"];
 
 /// The word in their clips' names for the game's socials with a graph of their own (not its
 /// `social_generic` with a suite): asking for things, sharing interests, compliments...
@@ -549,6 +560,7 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
             "TestThankForCooking" | "TestWorryAboutGrades" | "TestThankForTutoring" => Some(GameTest::About),
             "TestActorHasWork" => Some(GameTest::ActorWorks),
             "TestActorAndTargetHasWork" => Some(GameTest::BothWork),
+            "TestComplimentHome" => Some(GameTest::GuestToHost),
             _ => continue,
         };
         if SOCIALS.iter().chain(out.iter()).any(|s| s.name.eq_ignore_ascii_case(&a.name)) || LEFT_OUT.contains(&a.name.as_str()) || a.name.contains('{') {
@@ -751,6 +763,7 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
             || match g.test {
                 Some(GameTest::ActorWorks) => side[0].career.is_none(),
                 Some(GameTest::BothWork) => side[0].career.is_none() || side[1].career.is_none(),
+                Some(GameTest::GuestToHost) => side[0].member || !side[1].member,
                 _ => false,
             })
     {

@@ -2363,6 +2363,7 @@ pub struct PartyPlan {
 #[derive(Resource)]
 pub struct Party {
     pub end: f64,
+    pub host: Entity,
     pub guests: Vec<Entity>,
     /// Conversations had during it.
     pub chats: u32,
@@ -2418,7 +2419,7 @@ fn parties(
             coming += 1;
         }
         notes.push(format!("{} is throwing a party! {coming} guests are coming at {}.", host.first, hour_label(((p.start / 60.0) % 24.0) as f32)));
-        commands.insert_resource(Party { end: p.start + 300.0, guests, chats: 0 });
+        commands.insert_resource(Party { end: p.start + 300.0, host: p.by, guests, chats: 0 });
         return;
     }
     let Some(party) = party else { return };

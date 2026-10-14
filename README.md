@@ -449,7 +449,9 @@ installation is unreachable.
   an engagement, a wedding, a new outfit (Compliment or Mock Appearance), a meal cooked
   (Compliment Cooking; Thank for Cooking from those at the meal, to the cook), cleaning up
   (thanked for it), a day at work (Enthuse About Work; Worry About Work after a bad one), a
-  skill come on (Boast About Culinary Prowess...), a swim, money running low; what a Sim's doing
+  skill come on (Boast About Culinary Prowess...), a swim, money running low, a party thrown
+  (complimented or mocked while it's on, boasted or complained of after), a visit (the guests
+  Compliment the Home), a novel finished (Praise Written Book); what a Sim's doing
   while they do it and twenty minutes after (Ask: Good Show? at the TV, Compliment Music,
   Ask About Game); grown-ups with children, the household's own, those in the same line of
   work. Most are said once between two Sims while they last. Sims bring them up of their own
