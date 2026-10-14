@@ -421,7 +421,8 @@ installation is unreachable.
   close, a laugh from the Evil or an enemy, or a distressed look, and those left behind grieve
   (a partner Heartbroken, family and friends Mourning). Some moodlets play their own as they
   come: a wipe of the brow when Fatigued, tears of joy at a First Kiss, queasiness, a start when
-  Scared, a jolt when Singed. A reaction waits for its Sim to be standing free, then lapses.
+  Scared, a jolt when Singed. As rain, snow or hail begins, most of those out in it look up at
+  the sky. A reaction waits for its Sim to be standing free, then lapses.
 - **Stink**: green wisps rise off a smelly Sim's armpits, as the game's `stinkAdult` does.
 - **Privacy**: while a Sim's using the toilet, the shower or the bath, the room is theirs:
   others set out for anything in it wait where they are, thinking of the bathroom, until it's

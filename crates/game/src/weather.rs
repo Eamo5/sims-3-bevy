@@ -428,7 +428,8 @@ fn freeze_melt(t: &s3bake::gamedata::SeasonsTuning, temperature: f32) -> f32 {
     p.last().map_or(0.0, |l| l[1])
 }
 
-/// The test settings: `WEATHER=<kind>[:<intensity>]` (rain, snow, fog, hail, sunny),
+/// The test settings: `WEATHER=<kind>[:<intensity>][@<in game minutes>]` (rain, snow, fog, hail,
+/// sunny; beginning that much later, or an hour since),
 /// `SEASON=<season>[:<day>]`, `SNOW=<level>`, `WET=<level>`, `TEMP=<°F>`.
 fn test_settings(w: &mut Weather, clock: &GameClock) {
     if let Ok(v) = std::env::var("SEASON")
@@ -443,11 +444,12 @@ fn test_settings(w: &mut Weather, clock: &GameClock) {
         w.first_season = (i + 4 - here) % 4;
     }
     if let Ok(v) = std::env::var("WEATHER") {
-        let (k, i) = v.split_once(':').unwrap_or((&v, "moderate"));
+        let (v, later) = v.split_once('@').map_or((v.as_str(), None), |(v, m)| (v, m.parse::<f64>().ok()));
+        let (k, i) = v.split_once(':').unwrap_or((v, "moderate"));
         if let Some(kind) = WeatherKind::from_name(k) {
             w.kind = kind;
             w.intensity = [Intensity::Light, Intensity::Moderate, Intensity::Heavy].into_iter().find(|x| x.name().eq_ignore_ascii_case(i)).unwrap_or_default();
-            w.since = clock.minutes - 60.0;
+            w.since = clock.minutes + later.unwrap_or(-60.0);
             w.until = clock.minutes + 24.0 * 60.0;
             w.clouds = if kind.falls() { 1.0 } else { w.clouds };
         }

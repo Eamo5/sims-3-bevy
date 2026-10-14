@@ -10,7 +10,8 @@
 //!   distressed look. Their partner is heartbroken; family and friends mourn;
 //! - to some moodlets as they come (as the game's buffs do): embarrassment, a wipe of the brow
 //!   when worn out, tears of joy at a first kiss, queasiness, a start when scared, a jolt when
-//!   singed.
+//!   singed;
+//! - to the weather, out in it as it starts: rain, snow, hail (the game's `ReactRain`...).
 //!
 //! A reaction waits for its Sim to be standing free (between things, as the game's
 //! `AfterInteraction`), for a while, then lapses. Sitting at a table or on a sofa, they react
@@ -37,7 +38,7 @@ pub struct ReactionsPlugin;
 
 impl Plugin for ReactionsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<Spectacle>().add_systems(Update, (smelly_about, accidents, deaths, on_moodlets, play, turn, seated).chain().run_if(in_state(PlayMode::Live)));
+        app.add_message::<Spectacle>().add_systems(Update, (smelly_about, accidents, deaths, on_moodlets, weather, play, turn, seated).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -267,6 +268,43 @@ fn deaths(
             };
             commands.entity(e).insert(Pending::new(&["Shocked", then], Some(there.at), clock.minutes + LASTING));
         }
+    }
+}
+
+/// The chance a Sim out in the weather as it starts reacts to it.
+const WEATHER_CHANCE: f64 = 0.6;
+
+/// Rain, snow or hail starting: those out in it (not under a roof) look up at it, as the game's
+/// Sims do, once a spell.
+#[allow(clippy::type_complexity)]
+fn weather(
+    mut commands: Commands,
+    clock: Res<GameClock>,
+    weather: Option<Res<crate::weather::Weather>>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+    mut seen: Local<Option<f64>>,
+    sims: Query<(Entity, &Sim, &Transform, &InheritedVisibility), Without<crate::swim::Swimming>>,
+) {
+    use crate::weather::WeatherKind;
+    let Some(w) = weather else { return };
+    let kind = match w.kind {
+        WeatherKind::Rain => "ReactRain",
+        WeatherKind::Snow => "ReactSnow",
+        WeatherKind::Hail => "ReactHail",
+        _ => return,
+    };
+    // (Once it's begun to come down, once a spell.)
+    if *seen == Some(w.since) || w.falling(clock.minutes) < 0.1 {
+        return;
+    }
+    *seen = Some(w.since);
+    let mut rng = rand::rng();
+    for (e, sim, tf, shown) in &sims {
+        if !shown.get() || sim.age.is_little() || crate::weather::sheltered(building.as_deref(), tf.translation) || !rng.random_bool(WEATHER_CHANCE) {
+            continue;
+        }
+        debug!("{} looks up at the {kind}", sim.first);
+        commands.entity(e).insert(Pending::new(&[kind], None, clock.minutes + BRIEF));
     }
 }
 
