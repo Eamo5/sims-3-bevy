@@ -28,6 +28,9 @@ impl Plugin for InteractPlugin {
             .add_systems(Update, (route_objects, crate::social::load_game_socials).run_if(in_state(crate::AppState::InGame)))
             .init_resource::<RepairTunings>()
             .add_systems(Update, note_recent.run_if(in_state(PlayMode::Live)))
+            .init_resource::<DepreciationDay>()
+            .add_systems(OnEnter(crate::AppState::Loading), |mut day: ResMut<DepreciationDay>| day.0 = None)
+            .add_systems(Update, depreciate.after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)))
             .add_systems(Update, (load_repair_tunings, wear_new_objects, floor_new_objects, second_places).chain().run_if(in_state(crate::AppState::InGame)));
     }
 }
@@ -5213,17 +5216,114 @@ fn motive_warnings(
     }
 }
 
+/// What an object has lost of its price since the household bought it (the game's
+/// depreciation): 15% once bought, 10% of its price each day after, and at most 40%.
+#[derive(Component, Clone, Copy, Default, Debug, PartialEq)]
+pub struct Depreciated(pub i32);
+
+const INITIAL_DEPRECIATION: f32 = 0.15;
+const DAILY_DEPRECIATION: f32 = 0.1;
+const DEPRECIATION_LIMIT: f32 = 0.4;
+
+impl Depreciated {
+    /// Just bought (once the shopping's done).
+    pub fn initial(price: i32) -> Self {
+        Self((price as f32 * INITIAL_DEPRECIATION) as i32).limited(price)
+    }
+
+    /// A day older.
+    pub fn day_older(self, price: i32) -> Self {
+        Self(self.0 + ((price as f32 * DAILY_DEPRECIATION) as i32).max(1)).limited(price)
+    }
+
+    fn limited(self, price: i32) -> Self {
+        Self(self.0.min((price as f32 * DEPRECIATION_LIMIT) as i32))
+    }
+}
+
+/// What an object is worth now: its price less what it's lost, a painting what it's valued at,
+/// and nothing once burnt (the game's `GameObject.Value`).
+pub fn object_value(o: &GameObject, lost: Option<&Depreciated>, charred: bool, hung: Option<&crate::paintings::Hung>) -> i64 {
+    if charred {
+        return 0;
+    }
+    if let Some(h) = hung {
+        return h.0.each();
+    }
+    (o.price - lost.map_or(0, |d| d.0)).max(0) as i64
+}
+
+/// The day things last lost worth (none yet since loading: a restored date isn't a midnight).
+#[derive(Resource, Default)]
+pub struct DepreciationDay(pub Option<u32>);
+
+/// At midnight everything on the home lot is worth a little less (the game's
+/// `AppreciationDepreciationCallback`).
+fn depreciate(
+    mut commands: Commands,
+    clock: Res<GameClock>,
+    mut last: ResMut<DepreciationDay>,
+    household: Option<Res<Household>>,
+    mut objects: Query<
+        (Entity, &GameObject, Option<&mut Depreciated>),
+        (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>, Without<crate::paintings::Hung>),
+    >,
+) {
+    let day = clock.day();
+    let before = *last.0.get_or_insert(day);
+    if day <= before {
+        last.0 = Some(day);
+        return;
+    }
+    last.0 = Some(day);
+    if household.is_none() {
+        return;
+    }
+    // (Days slept through count too, though no more than it takes to reach the limit.)
+    let days = (day - before).min(5);
+    let mut total = 0;
+    for (e, o, lost) in &mut objects {
+        if o.price <= 0 {
+            continue;
+        }
+        let mut d = lost.as_deref().copied().unwrap_or_default();
+        for _ in 0..days {
+            d = d.day_older(o.price);
+        }
+        total += d.0 as i64;
+        match lost {
+            Some(mut l) => *l = d,
+            None => {
+                commands.entity(e).insert(d);
+            }
+        }
+    }
+    info!("depreciation: the home lot's things have lost §{total} in all");
+}
+
+/// The share of what's on the home lot is worth that each bill comes to (the game's
+/// `kPercentageOfWealthBilled`).
+const BILLED_SHARE: f64 = 0.045;
+
+/// A bill for the home lot's things: their worth, as the game bills it.
+pub fn bill_for(worth: i64) -> i64 {
+    (worth as f64 * BILLED_SHARE) as i64
+}
+
 fn pay_bills(
     mut commands: Commands,
     clock: Res<GameClock>,
     household: Option<ResMut<Household>>,
     mut notes: ResMut<Notifications>,
-    objects: Query<(Entity, &GameObject)>,
+    objects: Query<
+        (Entity, &GameObject, Option<&Depreciated>, Has<crate::grime::Charred>, Option<&crate::paintings::Hung>),
+        (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>),
+    >,
     rewards: Query<&crate::wishes::Wishes, With<HouseholdMember>>,
 ) {
     let Some(mut h) = household else { return };
     let day = clock.day();
-    let mailbox = objects.iter().any(|(_, o)| o.kind == ObjectKind::Mailbox);
+    let mailbox = objects.iter().any(|(_, o, ..)| o.kind == ObjectKind::Mailbox);
     // Bills arrive Monday and Thursday mornings.
     if day != h.last_bill_day && (day % 7 == 0 || day % 7 == 3) && clock.hour_f() >= 9.0 {
         h.last_bill_day = day;
@@ -5231,9 +5331,14 @@ fn pay_bills(
             return;
         }
         if !rewards.iter().any(|w| w.has_reward("NoBillsEver")) {
-            let value: i64 = objects.iter().map(|(_, o)| o.price as i64).sum();
-            let bill = 60 + value / 60;
-            if mailbox {
+            let worth: i64 = objects.iter().map(|(_, o, lost, charred, hung)| object_value(o, lost, charred, hung)).sum();
+            let bill = bill_for(worth);
+            let mut each: Vec<(i64, &str)> = objects.iter().map(|(_, o, lost, charred, hung)| (object_value(o, lost, charred, hung), o.name.as_str())).collect();
+            each.sort_by_key(|(w, _)| -w);
+            debug!("bill §{bill} for §{worth} in {} things, the dearest {:?}", each.len(), &each[..each.len().min(12)]);
+            if bill <= 0 {
+                // (Nothing worth billing.)
+            } else if mailbox {
                 // (The mail carrier brings them.)
                 commands.insert_resource(crate::services::MailDue(Bill { amount: bill, day }));
             } else {
@@ -5246,18 +5351,20 @@ fn pay_bills(
     let overdue: i64 = h.bills.iter().filter(|b| day >= b.day + 3).map(|b| b.amount).sum();
     if overdue > 0 && clock.hour_f() >= 10.0 {
         h.bills.retain(|b| day < b.day + 3);
-        let mut items: Vec<(Entity, &GameObject)> = objects
+        let mut items: Vec<(Entity, &GameObject, i64)> = objects
             .iter()
-            .filter(|(_, o)| o.price > 0 && !matches!(o.kind, ObjectKind::Mailbox | ObjectKind::Tombstone | ObjectKind::Meal | ObjectKind::DirtyDishes))
+            .filter(|(_, o, ..)| o.price > 0 && !matches!(o.kind, ObjectKind::Mailbox | ObjectKind::Tombstone | ObjectKind::Meal | ObjectKind::DirtyDishes))
+            .map(|(e, o, lost, charred, hung)| (e, o, object_value(o, lost, charred, hung)))
+            .filter(|(.., worth)| *worth > 0)
             .collect();
-        items.sort_by_key(|(_, o)| -o.price);
+        items.sort_by_key(|(.., worth)| -worth);
         let mut taken = 0i64;
         let mut names = Vec::new();
-        for (e, o) in items {
+        for (e, o, worth) in items {
             if taken >= overdue {
                 break;
             }
-            taken += o.price as i64;
+            taken += worth;
             names.push(o.name.clone());
             commands.entity(e).try_despawn();
         }
@@ -5298,6 +5405,12 @@ mod tests {
                 app.world_mut().spawn(GameObject { kind: ObjectKind::Mailbox, name: "Mailbox".into(), objd: (0, 0, 0), price: 0,
                     center: Vec2::ZERO, half: Vec2::ONE, height: 1.0, route: None });
             }
+            // (Worth §2,000 when new, and a third of that lost: billed §60. Another lot's
+            // things aren't the household's.)
+            app.world_mut().spawn((GameObject { kind: ObjectKind::Sofa, name: "Sofa".into(), objd: (0, 0, 0), price: 2000,
+                center: Vec2::ZERO, half: Vec2::ONE, height: 1.0, route: None }, Depreciated(2000 / 3)));
+            app.world_mut().spawn((GameObject { kind: ObjectKind::Sofa, name: "Sofa".into(), objd: (0, 0, 0), price: 50000,
+                center: Vec2::ZERO, half: Vec2::ONE, height: 1.0, route: None }, crate::visit::LotObject(1)));
             let owner = app.world_mut().spawn((HouseholdMember,
                 crate::wishes::Wishes::restored(0, vec!["NoBillsEver".into()], 0.0))).id();
             app.update();
@@ -5313,6 +5426,43 @@ mod tests {
             app.update();
             assert_eq!(app.world().resource::<Household>().funds, if mailbox { 1000 } else { 940 }, "only one bill per scheduled day");
         }
+    }
+
+    #[test]
+    fn things_lose_worth_as_the_game_depreciates_them() {
+        // (15% once bought, 10% a day after, never past 40%.)
+        let d = Depreciated::initial(1000);
+        assert_eq!(d.0, 150);
+        assert_eq!(d.day_older(1000).0, 250);
+        assert_eq!(d.day_older(1000).day_older(1000).day_older(1000).day_older(1000).0, 400);
+        assert_eq!(Depreciated::default().day_older(5).0, 1, "something cheap still loses a simoleon");
+        assert_eq!(Depreciated::default().day_older(0).0, 0);
+        let sofa = GameObject { kind: ObjectKind::Sofa, name: "Sofa".into(), objd: (0, 0, 0), price: 1000, center: Vec2::ZERO, half: Vec2::ONE, height: 1.0, route: None };
+        assert_eq!(object_value(&sofa, Some(&d), false, None), 850);
+        assert_eq!(object_value(&sofa, Some(&d), true, None), 0, "burnt");
+        assert_eq!(bill_for(20000), 900);
+    }
+
+    #[test]
+    fn the_home_lot_depreciates_at_midnight() {
+        let mut app = App::new();
+        let mut clock = GameClock::default();
+        clock.minutes = 2.0 * 1440.0 + 23.0 * 60.0;
+        app.insert_resource(clock)
+            .insert_resource(Household { name: "Test".into(), funds: 1000, lot_index: 0, last_bill_day: 0, bills: Vec::new() })
+            .init_resource::<DepreciationDay>()
+            .add_systems(Update, depreciate);
+        let object = |price| GameObject { kind: ObjectKind::Sofa, name: "Sofa".into(), objd: (0, 0, 0), price, center: Vec2::ZERO, half: Vec2::ONE, height: 1.0, route: None };
+        let home = app.world_mut().spawn(object(1000)).id();
+        let away = app.world_mut().spawn((object(1000), crate::visit::LotObject(1))).id();
+        app.update();
+        assert!(app.world().get::<Depreciated>(home).is_none(), "not till midnight");
+        app.world_mut().resource_mut::<GameClock>().minutes = 3.0 * 1440.0 + 1.0;
+        app.update();
+        assert_eq!(app.world().get::<Depreciated>(home), Some(&Depreciated(100)));
+        assert!(app.world().get::<Depreciated>(away).is_none());
+        app.update();
+        assert_eq!(app.world().get::<Depreciated>(home), Some(&Depreciated(100)), "once a night");
     }
 
     /// How long clips are (`CLIPS=<name>,<name> cargo test -p sims3 clip_lengths -- --ignored

@@ -203,7 +203,11 @@ installation is unreachable.
 - **Mail**: on Mondays and Thursdays the mail carrier walks up in uniform, puts the bills in
   the mailbox and the flag up (the game's animation); they're paid there (Sims see
   to them on their own too); bills left three days bring the repo man, who takes things worth
-  what's owed. The paper is delivered every morning, to read or look for a job in.
+  what's owed. The paper is delivered every morning, to read or look for a job in. Bills are
+  the game's 4.5% of what the home lot's things are worth, and things lose worth as the game
+  has them do: 15% once the shopping's done (till then they sell back at full price), 10% of
+  their price each midnight after, never more than 40%; burnt things are worth nothing. Sold,
+  stored in the family inventory or billed, they go at what they're worth now.
 - **Death**: an elder whose time has come collapses and the Grim Reaper appears in his robe
   with his scythe (the game's own Reaper animations), raises a tombstone where they fell and
   vanishes; the family is heartbroken and can mourn at the tombstone. Sims can also die of

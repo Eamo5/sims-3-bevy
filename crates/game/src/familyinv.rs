@@ -20,12 +20,13 @@ impl Plugin for FamilyInventoryPlugin {
 #[derive(Resource, Default, Clone, Debug)]
 pub struct FamilyInventory(pub Vec<SavedObject>);
 
-/// An object as it goes into the inventory.
-pub fn stored(objd: s3bake::Key, design: Option<s3bake::Key>, item: Option<crate::inventory::Stack>) -> SavedObject {
-    SavedObject { objd, position: [0.0; 3], rotation: [0.0, 0.0, 0.0, 1.0], design: None, design_key: design, item }
+/// An object as it goes into the inventory (and what it's lost of its price so far).
+pub fn stored(objd: s3bake::Key, design: Option<s3bake::Key>, item: Option<crate::inventory::Stack>, lost: i32) -> SavedObject {
+    SavedObject { objd, position: [0.0; 3], rotation: [0.0, 0.0, 0.0, 1.0], design: None, design_key: design, item, lost }
 }
 
-/// What an object in the inventory sells for: a painting's worth, or its catalogue price.
+/// What an object in the inventory sells for: a painting's worth, or its catalogue price less
+/// what it's lost.
 pub fn worth(o: &SavedObject, catalog: &crate::loading::Catalog) -> i64 {
-    o.item.as_ref().map_or_else(|| catalog.by_key(&o.objd).map_or(0, |e| e.price.max(0) as i64), |i| i.worth)
+    o.item.as_ref().map_or_else(|| catalog.by_key(&o.objd).map_or(0, |e| (e.price.max(0) - o.lost).max(0) as i64), |i| i.worth)
 }

@@ -22,16 +22,25 @@ pub struct PendingPurchase {
     pub price: i32,
 }
 
+/// Bought this time in buy mode: it loses its first 15% when the shopping's done (the game's
+/// `DepreciateNewPurchasesAndSendBoughtEvent`), so it sells back at full price till then.
+#[derive(Component)]
+pub struct NewPurchase;
+
 pub fn settle_purchases(
     mut commands: Commands,
     buy: Res<BuyMode>,
     pending: Query<(Entity, &PendingPurchase), With<GameObject>>,
+    new: Query<(Entity, &GameObject), (With<NewPurchase>, Without<HistoryHidden>)>,
     mut events: MessageWriter<crate::life::LifeEvent>,
 ) {
     if buy.active { return; }
     for (entity, purchase) in &pending {
         events.write(crate::life::LifeEvent::new(purchase.sim, crate::life::LifeEventKind::Bought { price: purchase.price }));
         commands.entity(entity).remove::<PendingPurchase>();
+    }
+    for (entity, object) in &new {
+        commands.entity(entity).remove::<NewPurchase>().insert(crate::interact::Depreciated::initial(object.price));
     }
 }
 

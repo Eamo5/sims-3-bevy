@@ -522,7 +522,7 @@ fn edit_town_buttons(
                     let refund: i64 = if keep { 0 } else { d.bought.iter().filter_map(|o| catalog.by_key(&o.objd)).map(|e| e.price.max(0) as i64 * 4 / 5).sum() };
                     d.funds += refund;
                     if keep {
-                        let packed: Vec<crate::save::SavedObject> = d.bought.iter().map(|o| crate::familyinv::stored(o.objd, o.design_texture(), o.item.clone())).collect();
+                        let packed: Vec<crate::save::SavedObject> = d.bought.iter().map(|o| crate::familyinv::stored(o.objd, o.design_texture(), o.item.clone(), o.lost)).collect();
                         d.family_inventory.extend(packed);
                     }
                     for v in [&mut d.bought, &mut d.removed] {

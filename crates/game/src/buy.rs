@@ -1776,7 +1776,7 @@ fn placement(
     mut grid: Option<ResMut<NavGrid>>,
     (pickup, hold, mut family): (Option<Res<PickupRequest>>, Option<Res<HoldRequest>>, ResMut<crate::familyinv::FamilyInventory>),
     objects: Query<(&GameObject, &Transform, Option<&crate::objects::Design>, Option<&crate::paintings::Hung>, Option<&crate::interact::UsedBy>, Option<&crate::nav::Obstacle>)>,
-    (bought_q, mut removed): (Query<(), With<crate::save::Bought>>, ResMut<crate::save::RemovedLotObjects>),
+    (bought_q, mut removed, worn): (Query<(), With<crate::save::Bought>>, ResMut<crate::save::RemovedLotObjects>, Query<&crate::interact::Depreciated>),
     mut tfs: Query<&mut Transform, Without<GameObject>>,
     (mut faces, mut gizmos, renders, menu, modal): (Query<(&crate::building::WallFace, &mut MeshMaterial3d<StandardMaterial>)>, Gizmos, Res<crate::style::StyleRenders>, Res<crate::options::GameMenu>, Query<(), With<crate::dialog::Modal>>),
 ) {
@@ -1895,7 +1895,8 @@ fn placement(
             }
             crate::buyhistory::park(&mut commands, source);
         }
-        family.0.push(crate::familyinv::stored(objd, design, placing.item.clone()));
+        let lost = placing.source.and_then(|(e, _)| worn.get(e).ok()).map(|d| d.0).or(placing.stored.as_ref().map(|s| s.lost)).unwrap_or(0);
+        family.0.push(crate::familyinv::stored(objd, design, placing.item.clone(), lost));
         commands.entity(ghost).try_despawn();
         buy.dirty = true;
         if let Some(g) = grid.as_mut() {
@@ -1909,6 +1910,9 @@ fn placement(
     }
     let placing = buy.placing.as_ref().unwrap();
     let price = placing.item.as_ref().map_or_else(|| catalog.by_key(&objd).map_or(0, |e| e.price.max(0) as i64), |i| i.worth);
+    // (What it's worth now: the household's things sell for less as they age.)
+    let lost = placing.source.and_then(|(e, _)| worn.get(e).ok()).map(|d| d.0).or(placing.stored.as_ref().map(|s| s.lost)).unwrap_or(0);
+    let worth = price - (lost as i64).min(price);
     // Selling and cancelling do not need a cursor in the window.
     if (keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace) || buy.selling) && owned {
         let removed_before = removed.0.clone();
@@ -1923,14 +1927,14 @@ fn placement(
         buy.placing = None;
         buy.dirty = true;
         if let Some(h) = household.as_mut() {
-            h.funds += price;
+            h.funds += worth;
         }
         if let Some(g) = grid.as_mut() {
             g.dirty = true;
         }
-        notes.push(format!("Sold for §{price}."));
+        notes.push(format!("Sold for §{worth}."));
         if let Some(source) = source {
-            crate::buyhistory::record(&mut commands, source, true, price, removed_before);
+            crate::buyhistory::record(&mut commands, source, true, worth, removed_before);
         } else {
             crate::buyhistory::discard(&mut commands);
         }
@@ -2092,8 +2096,16 @@ fn placement(
         if let Some(entity) = placed {
             commands.entity(entity).insert((crate::nav::Floor(level), crate::building::BuildingPiece { level }));
             commands.entity(entity).insert(crate::save::Bought);
+            // (Out of the family inventory, still worth what it was.)
+            if let Some(lost) = buy.placing.as_ref().and_then(|p| p.stored.as_ref()).map(|s| s.lost).filter(|l| *l > 0) {
+                commands.entity(entity).insert(crate::interact::Depreciated(lost));
+            }
             if let Some(item) = buy.placing.as_ref().and_then(|p| p.item.clone()) {
                 commands.entity(entity).insert(crate::paintings::Hung(item));
+            }
+            if !owned {
+                // (Worth a little less once the shopping's done.)
+                commands.entity(entity).insert(crate::buyhistory::NewPurchase);
             }
             if !owned && let Some(h) = household.as_mut() {
                 h.funds -= price;

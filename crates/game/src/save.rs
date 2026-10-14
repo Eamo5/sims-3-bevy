@@ -216,6 +216,9 @@ pub struct SavedObject {
     /// A painting hung on a wall: the inventory item it is (its picture and worth).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item: Option<crate::inventory::Stack>,
+    /// In the family inventory: what it had lost of its price (on the lot, its state keeps that).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub lost: i32,
 }
 
 impl SavedObject {
@@ -243,6 +246,13 @@ pub struct SavedObjectState {
     pub grime: f32,
     #[serde(default)]
     pub unmade: bool,
+    /// What it's lost of its price since it was bought.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub lost: i32,
+}
+
+fn is_zero(v: &i32) -> bool {
+    *v == 0
 }
 
 #[derive(Resource, Default)]
@@ -270,7 +280,10 @@ fn restore_states(
         if saved.unmade {
             commands.entity(e).insert(crate::interact::Unmade);
         }
-        debug!("{} as it was: grime {}, unmade {}", o.name, saved.grime, saved.unmade);
+        if saved.lost > 0 {
+            commands.entity(e).insert(crate::interact::Depreciated(saved.lost));
+        }
+        debug!("{} as it was: grime {}, unmade {}, lost {}", o.name, saved.grime, saved.unmade, saved.lost);
         false
     });
     if time.elapsed_secs() - started > 10.0 {
@@ -686,6 +699,7 @@ fn saved_object(o: &GameObject, tf: &Transform, design: Option<&crate::objects::
         design: preset,
         design_key: key.filter(|_| preset.is_none()),
         item: hung.map(|h| h.0.clone()),
+        lost: 0,
     }
 }
 
@@ -765,7 +779,7 @@ fn save_game(
         Res<crate::terrain_paint::Strokes>,
         Res<crate::terrain_paint::Sculpted>,
         Query<
-            (&GameObject, &Transform, Has<crate::interact::Broken>, Has<crate::grime::Charred>, Option<&crate::grime::Grime>, Has<crate::interact::Unmade>),
+            (&GameObject, &Transform, Has<crate::interact::Broken>, Has<crate::grime::Charred>, Option<&crate::grime::Grime>, Has<crate::interact::Unmade>, Option<&crate::interact::Depreciated>),
             (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>),
         >,
         Res<crate::familyinv::FamilyInventory>,
@@ -871,8 +885,14 @@ fn save_game(
         laundry: laundry.saved(),
         object_states: broken
             .iter()
-            .filter(|(.., grime, unmade)| grime.is_some_and(|g| g.0 > 0.0) || *unmade)
-            .map(|(o, tf, _, _, grime, unmade)| SavedObjectState { objd: o.objd, position: tf.translation.to_array(), grime: grime.map_or(0.0, |g| g.0), unmade })
+            .filter(|(.., grime, unmade, lost)| grime.is_some_and(|g| g.0 > 0.0) || *unmade || lost.is_some_and(|d| d.0 > 0))
+            .map(|(o, tf, _, _, grime, unmade, lost)| SavedObjectState {
+                objd: o.objd,
+                position: tf.translation.to_array(),
+                grime: grime.map_or(0.0, |g| g.0),
+                unmade,
+                lost: lost.map_or(0, |d| d.0),
+            })
             .collect(),
         version: SAVE_VERSION,
         world: world.name.clone(),
@@ -1024,6 +1044,7 @@ pub(crate) fn apply_loaded_game(
     commands.insert_resource(crate::laundry::PendingLaundry::of(game.laundry.clone()));
     // A restored date is not a midnight tick, even when loading within a session.
     commands.insert_resource(crate::aging::AgingDay::default());
+    commands.insert_resource(crate::interact::DepreciationDay::default());
     if let Some(h) = household.as_mut() {
         h.funds = game.funds;
         h.last_bill_day = game.last_bill_day;
@@ -1313,8 +1334,8 @@ mod tests {
 
     #[test]
     fn grime_and_unmade_beds_come_back_once_the_furniture_has() {
-        let toilet = SavedObjectState { objd: (1, 2, 3), position: [4.0, 0.0, 8.0], grime: 45.0, unmade: false };
-        let bed = SavedObjectState { objd: (1, 2, 4), position: [9.0, 0.0, 8.0], grime: 0.0, unmade: true };
+        let toilet = SavedObjectState { objd: (1, 2, 3), position: [4.0, 0.0, 8.0], grime: 45.0, unmade: false, lost: 0 };
+        let bed = SavedObjectState { objd: (1, 2, 4), position: [9.0, 0.0, 8.0], grime: 0.0, unmade: true, lost: 0 };
         let mut app = App::new();
         app.init_resource::<Time>().insert_resource(PendingStates(vec![toilet, bed], None)).add_systems(Update, restore_states);
         let obj = |kind, objd| GameObject { kind, name: "x".into(), objd, price: 100, center: Vec2::ZERO, half: Vec2::ONE, height: 1.0, route: None };
