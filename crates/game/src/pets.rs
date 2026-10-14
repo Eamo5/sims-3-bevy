@@ -92,6 +92,21 @@ pub struct PetSocial {
     pub social: f32,
 }
 
+/// How much more a Sim gets out of time with a pet of a kind (`TraitTuning`: an Animal Lover a
+/// sixth more with any, a Cat Person a quarter more with cats, a Dog Person with dogs, an
+/// Equestrian with horses).
+pub fn pet_person(traits: &[crate::life::Trait], kind: &str) -> f32 {
+    use crate::life::Trait;
+    let species = kind.get(1..).unwrap_or("");
+    if traits.contains(&Trait::AnimalLover) {
+        1.15
+    } else if (species == "c" && traits.contains(&Trait::CatPerson)) || (matches!(species, "d" | "l") && traits.contains(&Trait::DogPerson)) || (species == "h" && traits.contains(&Trait::Equestrian)) {
+        1.25
+    } else {
+        1.0
+    }
+}
+
 const ALL: &[&str] = &["ac", "cc", "ad", "cd", "al", "cl", "ah", "ch"];
 const GROWN: &[&str] = &["ac", "ad", "al", "ah"];
 

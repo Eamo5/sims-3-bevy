@@ -320,8 +320,8 @@ pub(crate) fn sim_temperatures(
     w: Res<Weather>,
     building: Option<Res<crate::building::ActiveBuilding>>,
     mut sims: Query<
-        (Entity, &Transform, &mut crate::life::Moodlets, Option<&mut BodyTemperature>, Has<crate::swim::Swimming>, Option<&crate::simbody::Wearing>, Option<&crate::wishes::Wishes>),
-        (With<crate::sim::Sim>, Without<crate::interact::OffLot>, Without<crate::rabbitholes::AtRabbitHole>, Without<crate::careers::AtWork>),
+        (Entity, &Transform, &mut crate::life::Moodlets, Option<&mut BodyTemperature>, Has<crate::swim::Swimming>, Option<&crate::simbody::Wearing>, Option<&crate::wishes::Wishes>, &crate::sim::Sim),
+        (Without<crate::interact::OffLot>, Without<crate::rabbitholes::AtRabbitHole>, Without<crate::careers::AtWork>),
     >,
 ) {
     let dh = delta.0 / 60.0;
@@ -331,14 +331,24 @@ pub(crate) fn sim_temperatures(
     use crate::life::MoodletKind as M;
     let world = ((w.temperature - NEUTRAL_TEMP) * SIM_DEGREES).clamp(-100.0, 100.0);
     let raining = w.raining() && w.falling(clock.minutes) > 0.1;
-    for (e, tf, mut moodlets, t, swimming, wearing, wishes) in &mut sims {
+    for (e, tf, mut moodlets, t, swimming, wearing, wishes, sim) in &mut sims {
         let Some(mut t) = t else {
             commands.entity(e).insert(BodyTemperature::default());
             continue;
         };
         let outdoors = !sheltered(building.as_deref(), tf.translation);
         let outfit = wearing.map_or(crate::simbody::OutfitKind::Everyday, |w| w.0);
-        t.value = temperature_step(t.value, world, outdoors, outfit, dh);
+        let before = t.value;
+        let after = temperature_step(before, world, outdoors, outfit, dh);
+        // (Those who love the cold chill half as fast, and those who love the heat warm half as
+        // fast: the game's `kTempMultiplierForLovesThe...Trait`.)
+        let d = after - before;
+        let loves = |tr: crate::life::Trait| sim.traits.contains(&tr);
+        t.value = if (d < 0.0 && before <= 0.0 && loves(crate::life::Trait::LovesTheCold)) || (d > 0.0 && before >= 0.0 && loves(crate::life::Trait::LovesTheHeat)) {
+            before + d * LOVES_TEMPERATURE
+        } else {
+            after
+        };
         let cold_immune = crate::wishes::has(wishes, "ImmuneToCold");
         let heat_immune = crate::wishes::has(wishes, "ImmuneToHeat");
         if cold_immune {
@@ -365,6 +375,9 @@ pub(crate) fn sim_temperatures(
         }
     }
 }
+
+/// How much slower body temperature heads the way a Sim loves (`SimTemperature`).
+const LOVES_TEMPERATURE: f32 = 0.5;
 
 /// The World Adventures destinations, where Seasons doesn't reach.
 pub fn vacation(world: &str) -> bool {

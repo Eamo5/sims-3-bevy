@@ -4445,10 +4445,13 @@ pub(crate) fn run_actions(
                                 }
                             }
                         }
-                        ActionKind::PetSocial { social, .. } => {
+                        ActionKind::PetSocial { social, kind, .. } => {
                             let s = &crate::pets::PET_SOCIALS[*social];
-                            motives.add(FUN, s.fun * dt / 60.0);
-                            motives.add(SOCIAL, s.social * dt / 60.0);
+                            // (An Animal Lover warms to any, a Cat or Dog Person to theirs most: the
+                            // game's kAnimalLoverLtrMultiplier and kPreferredPetLtrMultiplier.)
+                            let keen = crate::pets::pet_person(&sim.traits, kind);
+                            motives.add(FUN, s.fun * keen * dt / 60.0);
+                            motives.add(SOCIAL, s.social * keen * dt / 60.0);
                             if elapsed >= s.minutes {
                                 finished = true;
                             }

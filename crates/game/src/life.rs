@@ -91,6 +91,44 @@ pub enum Trait {
     Vegetarian,
     Virtuoso,
     Workaholic,
+    // (The expansions' human traits.)
+    Disciplined,
+    Adventurous,
+    PhotographersEye,
+    SavvySculptor,
+    EnvironmentallyConscious,
+    Perceptive,
+    BornSalesman,
+    Eccentric,
+    Dramatic,
+    VehicleEnthusiast,
+    Shy,
+    XFactor,
+    Nurturing,
+    Rebellious,
+    AnimalLover,
+    CatPerson,
+    DogPerson,
+    Equestrian,
+    NaturalBornPerformer,
+    SupernaturalFan,
+    SupernaturalSkeptic,
+    Brooding,
+    Gatherer,
+    Proper,
+    CompetitiveEater,
+    AllWeatherChampion,
+    FestivalFrequenter,
+    LovesTheCold,
+    LovesTheHeat,
+    Irresistible,
+    AvantGarde,
+    SociallyAwkward,
+    LovesToSwim,
+    Sailor,
+    BotFan,
+    Unstable,
+    MaintenanceMaster,
 }
 
 impl Trait {
@@ -102,6 +140,9 @@ impl Trait {
             Trait::HatesTheOutdoors => "HatesOutdoors".into(),
             Trait::Technophobe => "AntiTV".into(),
             Trait::NightOwl => "NightOwlTrait".into(),
+            Trait::SupernaturalFan => "SupernaturalFanTrait".into(),
+            Trait::Brooding => "BroodingTrait".into(),
+            Trait::Gatherer => "GathererTrait".into(),
             // (Only the pets' version is in the table; its icon is the same.)
             Trait::Lazy => "LazyPet".into(),
             t => format!("{t:?}"),
@@ -109,7 +150,7 @@ impl Trait {
     }
 
     /// Selectable human traits. LazyPet is retained in the enum only for old saves.
-    pub const ALL: [Trait; 64] = [
+    pub const ALL: [Trait; 101] = [
         Trait::Absentminded,
         Trait::Ambitious,
         Trait::Angler,
@@ -174,6 +215,43 @@ impl Trait {
         Trait::Vegetarian,
         Trait::Virtuoso,
         Trait::Workaholic,
+        Trait::Disciplined,
+        Trait::Adventurous,
+        Trait::PhotographersEye,
+        Trait::SavvySculptor,
+        Trait::EnvironmentallyConscious,
+        Trait::Perceptive,
+        Trait::BornSalesman,
+        Trait::Eccentric,
+        Trait::Dramatic,
+        Trait::VehicleEnthusiast,
+        Trait::Shy,
+        Trait::XFactor,
+        Trait::Nurturing,
+        Trait::Rebellious,
+        Trait::AnimalLover,
+        Trait::CatPerson,
+        Trait::DogPerson,
+        Trait::Equestrian,
+        Trait::NaturalBornPerformer,
+        Trait::SupernaturalFan,
+        Trait::SupernaturalSkeptic,
+        Trait::Brooding,
+        Trait::Gatherer,
+        Trait::Proper,
+        Trait::CompetitiveEater,
+        Trait::AllWeatherChampion,
+        Trait::FestivalFrequenter,
+        Trait::LovesTheCold,
+        Trait::LovesTheHeat,
+        Trait::Irresistible,
+        Trait::AvantGarde,
+        Trait::SociallyAwkward,
+        Trait::LovesToSwim,
+        Trait::Sailor,
+        Trait::BotFan,
+        Trait::Unstable,
+        Trait::MaintenanceMaster,
     ];
 
     pub fn name(self) -> &'static str {
@@ -243,6 +321,43 @@ impl Trait {
             Trait::Unflirty => "Unflirty",
             Trait::Virtuoso => "Virtuoso",
             Trait::Workaholic => "Workaholic",
+            Trait::Disciplined => "Disciplined",
+            Trait::Adventurous => "Adventurous",
+            Trait::PhotographersEye => "Photographer's Eye",
+            Trait::SavvySculptor => "Savvy Sculptor",
+            Trait::EnvironmentallyConscious => "Eco-Friendly",
+            Trait::Perceptive => "Perceptive",
+            Trait::BornSalesman => "Born Salesman",
+            Trait::Eccentric => "Eccentric",
+            Trait::Dramatic => "Dramatic",
+            Trait::VehicleEnthusiast => "Vehicle Enthusiast",
+            Trait::Shy => "Shy",
+            Trait::XFactor => "Star Quality",
+            Trait::Nurturing => "Nurturing",
+            Trait::Rebellious => "Rebellious",
+            Trait::AnimalLover => "Animal Lover",
+            Trait::CatPerson => "Cat Person",
+            Trait::DogPerson => "Dog Person",
+            Trait::Equestrian => "Equestrian",
+            Trait::NaturalBornPerformer => "Natural Born Performer",
+            Trait::SupernaturalFan => "Supernatural Fan",
+            Trait::SupernaturalSkeptic => "Supernatural Skeptic",
+            Trait::Brooding => "Brooding",
+            Trait::Gatherer => "Gatherer",
+            Trait::Proper => "Proper",
+            Trait::CompetitiveEater => "Competitive Eater",
+            Trait::AllWeatherChampion => "All Weather Champion",
+            Trait::FestivalFrequenter => "Festival Frequenter",
+            Trait::LovesTheCold => "Loves the Cold",
+            Trait::LovesTheHeat => "Loves the Heat",
+            Trait::Irresistible => "Irresistible",
+            Trait::AvantGarde => "Avant Garde",
+            Trait::SociallyAwkward => "Socially Awkward",
+            Trait::LovesToSwim => "Loves To Swim",
+            Trait::Sailor => "Sailor",
+            Trait::BotFan => "Bot Fan",
+            Trait::Unstable => "Unstable",
+            Trait::MaintenanceMaster => "Maintenance Master",
         }
     }
 
@@ -266,6 +381,10 @@ impl Trait {
             | Evil | Excitable | Friendly | Genius | Good | Grumpy | HatesTheOutdoors
             | HeavySleeper | Insane | LightSleeper | Loner | LovesTheOutdoors | Neurotic
             | Slob | Virtuoso => true,
+            Disciplined | Perceptive | Eccentric | LovesTheCold | LovesTheHeat | Sailor => true,
+            SavvySculptor | BornSalesman | Dramatic | Nurturing | NaturalBornPerformer | SupernaturalSkeptic | Brooding | Gatherer | Proper | Irresistible | AvantGarde | SociallyAwkward => {
+                matches!(age, Age::Teen | Age::YoungAdult | Age::Adult | Age::Elder)
+            }
             _ => !age.is_little(),
         }
     }
@@ -298,6 +417,33 @@ impl Trait {
             (Loner, PartyAnimal),
             (Lucky, Unlucky),
             (Neat, Slob),
+            (Disciplined, CouchPotato),
+            (SavvySculptor, CantStandArt),
+            (EnvironmentallyConscious, HatesTheOutdoors),
+            (Perceptive, Absentminded),
+            (Shy, Flirty),
+            (Shy, PartyAnimal),
+            (Nurturing, DislikesChildren),
+            (Rebellious, Schmoozer),
+            (AnimalLover, CatPerson),
+            (AnimalLover, DogPerson),
+            (AnimalLover, Equestrian),
+            (CatPerson, DogPerson),
+            (CatPerson, Equestrian),
+            (DogPerson, Equestrian),
+            (NaturalBornPerformer, Clumsy),
+            (NaturalBornPerformer, Coward),
+            (SupernaturalFan, Coward),
+            (SupernaturalFan, SupernaturalSkeptic),
+            (Brooding, Excitable),
+            (Proper, Inappropriate),
+            (Proper, Slob),
+            (AvantGarde, CantStandArt),
+            (AvantGarde, EasilyImpressed),
+            (SociallyAwkward, Charismatic),
+            (LovesToSwim, Hydrophobic),
+            (Sailor, HatesTheOutdoors),
+            (BotFan, Technophobe),
             // Retain the historical constraints only for old saves containing Lazy.
             (Lazy, Athletic),
             (Lazy, Workaholic),
@@ -416,14 +562,26 @@ mod trait_age_tests {
                 if a.conflicts(*b) { pairs += 1; }
             }
         }
-        assert_eq!(pairs, 24);
+        // (The base game's 24, and the expansions' 27.)
+        assert_eq!(pairs, 51);
+    }
+
+    /// Every trait has the game's name, description and icon (`SIMS3_CACHE=<baked> cargo test
+    /// -p sims3 traits_have_their_game_data -- --ignored`).
+    #[test]
+    #[ignore]
+    fn traits_have_their_game_data() {
+        let data = s3bake::gamedata::load_gamedata(&s3bake::default_root()).expect("game data");
+        let missing: Vec<String> = Trait::ALL.iter().filter(|t| !data.traits.iter().any(|d| d.hex == t.game_id() && !d.icon.is_empty())).map(|t| t.game_id()).collect();
+        assert!(missing.is_empty(), "no game data for {missing:?}");
     }
 
     #[test]
     fn original_age_groups_and_random_traits_remain_valid() {
-        assert_eq!(Trait::ALL.iter().filter(|t| t.allowed_at(Age::Baby)).count(), 22);
-        assert_eq!(Trait::ALL.iter().filter(|t| t.allowed_at(Age::Child)).count(), 52);
-        assert_eq!(Trait::ALL.iter().filter(|t| t.allowed_at(Age::Teen)).count(), 64);
+        // (The base game's, and the expansions': 6 more from birth, 25 more for children.)
+        assert_eq!(Trait::ALL.iter().filter(|t| t.allowed_at(Age::Baby)).count(), 28);
+        assert_eq!(Trait::ALL.iter().filter(|t| t.allowed_at(Age::Child)).count(), 77);
+        assert_eq!(Trait::ALL.iter().filter(|t| t.allowed_at(Age::Teen)).count(), 101);
         assert_eq!(Trait::from_name("Lazy"), Some(Trait::Lazy));
         let mut rng = rand::rngs::StdRng::seed_from_u64(123);
         for age in [Age::Baby, Age::Toddler, Age::Child, Age::Teen, Age::YoungAdult, Age::Adult, Age::Elder] {

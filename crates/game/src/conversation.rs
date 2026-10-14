@@ -628,12 +628,14 @@ pub fn decide(social: usize, j: &Judging) -> Outcome {
 /// less for anything not. Liking's the same both ways.
 pub fn effect(social: usize, liking: f32, stc: Stc, o: &Outcome, actor: &Sim, target: &Sim) -> (f32, Stc) {
     let mut stc = stc;
-    stc.update(o.result, o.amount);
+    // (The Irresistible stir romance twice as fast: `kSTCUpdateMultiplerIrresistibleTrait`.)
+    let amount = if o.result == Commodity::Amorous && actor.traits.contains(&Trait::Irresistible) { o.amount * IRRESISTIBLE } else { o.amount };
+    stc.update(o.result, amount);
+    let either = |t: Trait| actor.traits.contains(&t) || target.traits.contains(&t);
     if o.ltr_override != 0.0 {
-        return (o.ltr_override, stc);
+        return (liking_multiplier(o.ltr_override, liking, actor, target), stc);
     }
     let intended = model(social).map_or(Commodity::Friendly, |m| m.intended);
-    let either = |t: Trait| actor.traits.contains(&t) || target.traits.contains(&t);
     let mut num: f32 = 1.0;
     // (TraitTuning's humour and Charismatic multipliers, as the game tunes them.)
     if o.result == Commodity::Funny && either(Trait::GoodSenseOfHumor) {
@@ -646,7 +648,27 @@ pub fn effect(social: usize, liking: f32, stc: Stc, o: &Outcome, actor: &Sim, ta
             num = num.max(1.25);
         }
     }
-    (liking_change(&stc, liking) * num, stc)
+    (liking_multiplier(liking_change(&stc, liking) * num, liking, actor, target), stc)
+}
+
+/// The Irresistible's push to a romantic context, and how much less the Shy warm to anyone
+/// (till they're friends) and more the Nurturing to the young (`TraitTuning`).
+const IRRESISTIBLE: f32 = 2.0;
+const SHY_GAIN: f32 = 0.85;
+const NURTURING_GAIN: f32 = 1.25;
+
+/// The game's `LongTermRelationship.UpdateLiking` multipliers on any change in liking.
+fn liking_multiplier(change: f32, liking: f32, a: &Sim, b: &Sim) -> f32 {
+    let either = |t: Trait| a.traits.contains(&t) || b.traits.contains(&t);
+    let young = |s: &Sim| matches!(s.age, Age::Baby | Age::Toddler | Age::Child | Age::Teen);
+    let mut c = change;
+    if c > 0.0 && either(Trait::Shy) && liking < crate::social::FRIEND_THRESHOLD {
+        c *= SHY_GAIN;
+    }
+    if (a.traits.contains(&Trait::Nurturing) && young(b)) || (b.traits.contains(&Trait::Nurturing) && young(a)) {
+        c *= NURTURING_GAIN;
+    }
+    c
 }
 
 /// The game's relationship flags a social's outcome sets and clears that we keep: romance
@@ -858,6 +880,29 @@ mod tests {
         let steady = crate::social::all_socials().find(|(_, s)| s.name == "Ask to Go Steady").unwrap().1;
         assert!(!offered(steady, stc, "Romantic Interest"));
         assert!(offered(steady, Stc { commodity: Commodity::Amorous, value: 320.0 }, "Romantic Interest"));
+    }
+
+    #[test]
+    fn traits_bend_liking_as_the_games() {
+        let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(2);
+        let mut a = crate::sim::random_sim(&mut rng, "A", Some(true), Age::Adult);
+        let mut b = crate::sim::random_sim(&mut rng, "B", Some(false), Age::Adult);
+        a.traits.clear();
+        b.traits.clear();
+        assert_eq!(liking_multiplier(2.0, 10.0, &a, &b), 2.0);
+        b.traits.push(Trait::Shy);
+        assert_eq!(liking_multiplier(2.0, 10.0, &a, &b), 1.7, "the Shy warm slower");
+        assert_eq!(liking_multiplier(2.0, 50.0, &a, &b), 2.0, "once they're friends, not");
+        assert_eq!(liking_multiplier(-2.0, 10.0, &a, &b), -2.0);
+        b.traits.clear();
+        a.traits.push(Trait::Nurturing);
+        b.age = Age::Teen;
+        assert_eq!(liking_multiplier(2.0, 50.0, &a, &b), 2.5, "the Nurturing to the young");
+        // (The Irresistible push romance twice as far.)
+        a.traits = vec![Trait::Irresistible];
+        let o = Outcome { result: Commodity::Amorous, amount: 40.0, ltr_override: 0.0, bits_add: 0, bits_remove: 0, charisma: -1.0, accepted: true };
+        let (_, stc) = effect(0, 10.0, Stc::default(), &o, &a, &b);
+        assert_eq!(stc, Stc { commodity: Commodity::Amorous, value: 80.0 });
     }
 
     #[test]

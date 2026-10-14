@@ -61,7 +61,14 @@ installation is unreachable.
   and Mid-Life Crisis, with conflicts taken from the original exclusion groups; changing to
   a younger age replaces traits no longer available. The game's own traits picker serves Create
   a Sim, the Mid-Life Crisis reward (every trait chosen again) and a child's or teen's birthday
-  (the trait their new age brings chosen, their others kept). With
+  (the trait their new age brings chosen, their others kept). Besides the base game's 64, the
+  expansions' 37 human traits (Shy, Irresistible, Socially Awkward, Nurturing, Loves the Cold
+  and the Heat, Cat and Dog Person, Animal Lover, Eccentric, Dramatic, Brooding...) with their
+  ages and exclusion groups; their effects where ours reach: the Shy warm to people more slowly
+  till they're friends, the Nurturing faster to the young, the Irresistible stir romance twice
+  as fast, the Socially Awkward say the wrong thing a quarter of the time, those who love the
+  cold or the heat take half as long to feel it, and pet people enjoy their animals more; the
+  game's rules and topics weigh them all. With
   favourites (a food from the game's recipes, a music, a colour, each picked by the game's own
   pictures; a favourite meal is an amazing one, and their favourite music playing nearby is
   enjoyed; shown on the Simology tab and kept in saves), clothes chosen for each of the game's
