@@ -3325,6 +3325,13 @@ fn auto_build(
             let c = b.world(x as f32 + w as f32 * 0.5, z as f32 + d as f32 * 0.5, 0.0);
             info!("build test: room {}x{} at {:.1},{:.1} — {} ops, §{cost}", w, d, c.x, c.z, ops.len());
             apply(&mut commands, &mut assets, b, &mut ctx, ops);
+            // (ROOF_STYLE=hip|gable|shed|mansard: the roofs in that shape.)
+            if let Ok(s) = std::env::var("ROOF_STYLE")
+                && let Some(style) = crate::building::RoofStyle::ALL.into_iter().find(|r| r.label().to_ascii_lowercase().starts_with(&s.to_ascii_lowercase()))
+            {
+                info!("build test: {}", style.label());
+                apply(&mut commands, &mut assets, b, &mut ctx, vec![crate::building::PaintOp::RoofStyle { style }]);
+            }
             *stage = 1;
         }
         1 if time.elapsed_secs() - t0 > 4.0 => {

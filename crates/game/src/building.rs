@@ -129,8 +129,9 @@ pub struct ActiveBuilding {
     fence_entities: Vec<Entity>,
     pool_entities: Vec<Entity>,
     roof_entity: Option<Entity>,
-    /// The roof pattern on the household's rooms.
+    /// The roof pattern on the household's rooms, and their shape.
     pub roof_texture: Key,
+    pub roof_style: RoofStyle,
     /// The stair style the household's staircases are built in (the house's own, or one of the
     /// town's): its pieces and railings.
     pub stair_style: Option<StairBaked>,
@@ -707,6 +708,8 @@ pub enum PaintOp {
     RemoveStairs { x: u16, z: u16, level: u8 },
     /// The roof pattern for the household's rooms.
     Roof { texture: Key },
+    /// The shape of the household's roofs.
+    RoofStyle { style: RoofStyle },
     /// A fence run built along a grid edge (with posts at its ends, for fences that have them).
     AddFence { a: [f32; 2], b: [f32; 2], level: u8, model: Key, post: Option<Key> },
     /// The fence along a grid edge taken down (and posts left standing alone).
@@ -734,6 +737,7 @@ pub struct BuildingSnapshot {
     built: HashSet<u32>,
     stairs: Vec<BuiltStairs>,
     roof: Key,
+    roof_style: RoofStyle,
     levels: Vec<f32>,
     top_level: u8,
     center: Vec3,
@@ -744,7 +748,7 @@ impl BuildingSnapshot {
     pub fn capture(b: &ActiveBuilding, paint: Option<&LotPaint>) -> Self {
         Self {
             data: b.data.clone(), built: b.built.clone(), stairs: b.built_stairs.clone(),
-            roof: b.roof_texture, levels: b.levels.clone(), top_level: b.top_level,
+            roof: b.roof_texture, roof_style: b.roof_style, levels: b.levels.clone(), top_level: b.top_level,
             center: b.center, paint: paint.cloned().unwrap_or_default(),
         }
     }
@@ -764,6 +768,7 @@ pub fn restore_history(
     b.built = snapshot.built;
     b.built_stairs = snapshot.stairs;
     b.roof_texture = snapshot.roof;
+    b.roof_style = snapshot.roof_style;
     b.levels = snapshot.levels;
     b.top_level = snapshot.top_level;
     b.view_level = b.view_level.min(b.top_level);
@@ -848,6 +853,10 @@ pub fn repaint(
             }
             PaintOp::Roof { texture } => {
                 b.roof_texture = texture;
+                roof_changed = true;
+            }
+            PaintOp::RoofStyle { style } => {
+                b.roof_style = style;
                 roof_changed = true;
             }
             PaintOp::AddFence { .. } | PaintOp::RemoveFence { .. } => fences_changed = true,
@@ -1224,7 +1233,7 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
                 b.levels.push(top + s3bake::building::LEVEL_HEIGHT);
             }
         }
-        PaintOp::RemoveStairs { .. } | PaintOp::Roof { .. } => {}
+        PaintOp::RemoveStairs { .. } | PaintOp::Roof { .. } | PaintOp::RoofStyle { .. } => {}
         PaintOp::AddFence { a, b: end, level, model, post } => {
             let same = |f: &s3bake::FenceBaked| f.level == level && ((f.a == a && f.b == end) || (f.a == end && f.b == a));
             if !b.fences.iter().any(same) {
@@ -1624,6 +1633,40 @@ pub const ROOF_DEFAULT: Key = (T_COVER, 6, 0x70C833585F305186);
 const ROOF_OVERHANG: f32 = 0.35;
 const ROOF_PITCH: f32 = 0.6;
 
+/// The shapes of roof the household's rooms can have (the game's roof tools': hip, gable, shed
+/// and mansard).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub enum RoofStyle {
+    #[default]
+    Hip,
+    Gable,
+    Shed,
+    Mansard,
+}
+
+impl RoofStyle {
+    pub const ALL: [RoofStyle; 4] = [RoofStyle::Hip, RoofStyle::Gable, RoofStyle::Shed, RoofStyle::Mansard];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            RoofStyle::Hip => "Hip Roof",
+            RoofStyle::Gable => "Gable Roof",
+            RoofStyle::Shed => "Shed Roof",
+            RoofStyle::Mansard => "Mansard Roof",
+        }
+    }
+}
+
+/// A mansard's steep lower slopes (rise per run), how far in they reach (at most), and its
+/// shallow top; a shed roof's single slope.
+const MANSARD_STEEP: f32 = 2.2;
+const MANSARD_INSET: f32 = 1.0;
+const MANSARD_TOP: f32 = 0.25;
+const SHED_PITCH: f32 = 0.35;
+/// The colour of the walls a roof's gable and shed ends close in (siding, as the game's plain
+/// walls under a roof are painted).
+const ROOF_END_COLOR: Color = Color::srgb(0.86, 0.84, 0.8);
+
 /// A roof over the household's rooms (shown in the outside view, as the game's are).
 #[derive(Component)]
 pub struct BuiltRoof;
@@ -1659,30 +1702,30 @@ fn rectangles(cells: &mut [bool], w: usize, d: usize) -> Vec<(usize, usize, usiz
     out
 }
 
-/// A hip roof over the lot-local rectangle (`x0`, `z0`)-(`x1`, `z1`) with its eaves at height `y`.
-fn hip_roof(buf: &mut MeshBuf, b: &ActiveBuilding, (x0, z0, x1, z1): (f32, f32, f32, f32), y: f32) {
+/// A roof of a style over the lot-local rectangle (`x0`, `z0`)-(`x1`, `z1`) with its eaves at
+/// height `y`: its slopes in `buf`, and the walls its gable and shed ends close in, in `ends`.
+fn style_roof(buf: &mut MeshBuf, ends: &mut MeshBuf, b: &ActiveBuilding, (x0, z0, x1, z1): (f32, f32, f32, f32), y: f32, style: RoofStyle) {
     let o = ROOF_OVERHANG;
+    let wall_top = y;
     let (x0, z0, x1, z1) = (x0 - o, z0 - o, x1 + o, z1 + o);
     let y = y - o * ROOF_PITCH;
     // Roofed along x when it's the longer way (else along z: swap the axes).
     let along_x = x1 - x0 >= z1 - z0;
     let (a0, a1, c0, c1) = if along_x { (x0, x1, z0, z1) } else { (z0, z1, x0, x1) };
     let half = (c1 - c0) * 0.5;
-    let top = y + half * ROOF_PITCH;
     let cm = c0 + half;
-    let (r0, r1) = (a0 + half, a1 - half);
     let pt = |a: f32, c: f32, h: f32| if along_x { b.world(a, c, h) } else { b.world(c, a, h) };
-    let slope = (1.0 + ROOF_PITCH * ROOF_PITCH).sqrt();
-    let mut face = |pts: Vec<(f32, f32, f32)>, eave: ((f32, f32), (f32, f32))| {
+    // A slope: textured along its eave and up the slope.
+    let mut face = |pts: &[(f32, f32, f32)], eave: ((f32, f32), (f32, f32)), eave_y: f32| {
         let p: Vec<Vec3> = pts.iter().map(|&(a, c, h)| pt(a, c, h)).collect();
         let mut n = (p[1] - p[0]).cross(p[2] - p[0]).normalize_or_zero();
         if n.y < 0.0 {
             n = -n;
         }
-        // Texture along the eave and up the slope.
-        let (e0, e1) = (pt(eave.0.0, eave.0.1, y), pt(eave.1.0, eave.1.1, y));
+        let (e0, e1) = (pt(eave.0.0, eave.0.1, eave_y), pt(eave.1.0, eave.1.1, eave_y));
         let ed = (e1 - e0).with_y(0.0).normalize_or_zero();
         let up = Vec3::new(n.x, 0.0, n.z).normalize_or_zero() * -1.0;
+        let slope = 1.0 / n.y.max(0.05);
         let m = s3bake::gamedata::ROOF_ATLAS_METRES;
         let uv = |q: Vec3| [(q - e0).dot(ed) / m, (q - e0).with_y(0.0).dot(up) * slope / m];
         if p.len() == 4 {
@@ -1691,11 +1734,66 @@ fn hip_roof(buf: &mut MeshBuf, b: &ActiveBuilding, (x0, z0, x1, z1): (f32, f32, 
             buf.tri([p[0], p[1], p[2]], [uv(p[0]), uv(p[1]), uv(p[2])], n);
         }
     };
-    // The two long slopes, and the hipped ends.
-    face(vec![(a0, c0, y), (a1, c0, y), (r1, cm, top), (r0, cm, top)], ((a0, c0), (a1, c0)));
-    face(vec![(a1, c1, y), (a0, c1, y), (r0, cm, top), (r1, cm, top)], ((a1, c1), (a0, c1)));
-    face(vec![(a0, c1, y), (a0, c0, y), (r0, cm, top)], ((a0, c1), (a0, c0)));
-    face(vec![(a1, c0, y), (a1, c1, y), (r1, cm, top)], ((a1, c0), (a1, c1)));
+    // An upright wall closing in an end (both faces drawn).
+    let mut wall = |pts: &[(f32, f32, f32)]| {
+        let p: Vec<Vec3> = pts.iter().map(|&(a, c, h)| pt(a, c, h)).collect();
+        let n = (p[1] - p[0]).cross(p[2] - p[0]).normalize_or_zero();
+        let along = (p[1] - p[0]).with_y(0.0).normalize_or_zero();
+        let uv = |q: Vec3| [(q - p[0]).dot(along) / 2.0, -(q.y - p[0].y) / 2.0];
+        if p.len() == 4 {
+            ends.quad([p[0], p[1], p[2], p[3]], [uv(p[0]), uv(p[1]), uv(p[2]), uv(p[3])], n);
+        } else {
+            ends.tri([p[0], p[1], p[2]], [uv(p[0]), uv(p[1]), uv(p[2])], n);
+        }
+    };
+    // (The walls' line, inside the overhang.)
+    let (w0, w1, v0, v1) = (a0 + o, a1 - o, c0 + o, c1 - o);
+    match style {
+        RoofStyle::Hip => {
+            let top = y + half * ROOF_PITCH;
+            let (r0, r1) = (a0 + half, a1 - half);
+            face(&[(a0, c0, y), (a1, c0, y), (r1, cm, top), (r0, cm, top)], ((a0, c0), (a1, c0)), y);
+            face(&[(a1, c1, y), (a0, c1, y), (r0, cm, top), (r1, cm, top)], ((a1, c1), (a0, c1)), y);
+            face(&[(a0, c1, y), (a0, c0, y), (r0, cm, top)], ((a0, c1), (a0, c0)), y);
+            face(&[(a1, c0, y), (a1, c1, y), (r1, cm, top)], ((a1, c0), (a1, c1)), y);
+        }
+        RoofStyle::Gable => {
+            // Two slopes the length of it, and a gable at either end.
+            let top = y + half * ROOF_PITCH;
+            face(&[(a0, c0, y), (a1, c0, y), (a1, cm, top), (a0, cm, top)], ((a0, c0), (a1, c0)), y);
+            face(&[(a1, c1, y), (a0, c1, y), (a0, cm, top), (a1, cm, top)], ((a1, c1), (a0, c1)), y);
+            let at = |c: f32| y + (half - (c - cm).abs()) * ROOF_PITCH;
+            for a in [w0, w1] {
+                wall(&[(a, v0, wall_top), (a, v1, wall_top), (a, cm, at(cm))]);
+            }
+        }
+        RoofStyle::Shed => {
+            // One slope, from the eave at the front up to the back, the sides and the back closed.
+            let at = |c: f32| y + (c - c0) * SHED_PITCH;
+            face(&[(a0, c0, y), (a1, c0, y), (a1, c1, at(c1)), (a0, c1, at(c1))], ((a0, c0), (a1, c0)), y);
+            for a in [w0, w1] {
+                wall(&[(a, v0, wall_top), (a, v1, wall_top), (a, v1, at(v1))]);
+            }
+            wall(&[(w0, v1, wall_top), (w1, v1, wall_top), (w1, v1, at(v1)), (w0, v1, at(v1))]);
+        }
+        RoofStyle::Mansard => {
+            // Steep lower slopes all round, a shallow hip over the top.
+            let m = MANSARD_INSET.min(half * 0.45);
+            let yb = y + m * MANSARD_STEEP;
+            let (i0, i1, j0, j1) = (a0 + m, a1 - m, c0 + m, c1 - m);
+            face(&[(a0, c0, y), (a1, c0, y), (i1, j0, yb), (i0, j0, yb)], ((a0, c0), (a1, c0)), y);
+            face(&[(a1, c1, y), (a0, c1, y), (i0, j1, yb), (i1, j1, yb)], ((a1, c1), (a0, c1)), y);
+            face(&[(a0, c1, y), (a0, c0, y), (i0, j0, yb), (i0, j1, yb)], ((a0, c1), (a0, c0)), y);
+            face(&[(a1, c0, y), (a1, c1, y), (i1, j1, yb), (i1, j0, yb)], ((a1, c0), (a1, c1)), y);
+            let ih = (j1 - j0) * 0.5;
+            let (im, top) = (j0 + ih, yb + ih * MANSARD_TOP);
+            let (r0, r1) = (i0 + ih, i1 - ih);
+            face(&[(i0, j0, yb), (i1, j0, yb), (r1, im, top), (r0, im, top)], ((i0, j0), (i1, j0)), yb);
+            face(&[(i1, j1, yb), (i0, j1, yb), (r0, im, top), (r1, im, top)], ((i1, j1), (i0, j1)), yb);
+            face(&[(i0, j1, yb), (i0, j0, yb), (r0, im, top)], ((i0, j1), (i0, j0)), yb);
+            face(&[(i1, j0, yb), (i1, j1, yb), (r1, im, top)], ((i1, j0), (i1, j1)), yb);
+        }
+    }
 }
 
 /// Roofs over the household's rooms: each room's top floor (no floor above it) gets hip roofs
@@ -1707,6 +1805,7 @@ fn respawn_roofs(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut O
     }
     let (w, d) = (b.data.width as usize, b.data.depth as usize);
     let mut buf = MeshBuf::default();
+    let mut ends = MeshBuf::default();
     let has_floor: HashSet<(u8, u16, u16)> = b.data.floors.iter().map(|f| (f.level, f.x, f.z)).collect();
     for level in 1..b.levels.len() as u8 {
         let rooms = rooms(&b.data, level);
@@ -1739,7 +1838,7 @@ fn respawn_roofs(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut O
         let mut cells: Vec<bool> = (0..w * d).map(|i| roofed.contains(&rooms[i]) && !has_floor.contains(&(level + 1, (i % w) as u16, (i / w) as u16))).collect();
         let y = b.levels[level as usize] + WALL_H;
         for (x0, z0, x1, z1) in rectangles(&mut cells, w, d) {
-            hip_roof(&mut buf, b, (x0 as f32, z0 as f32, x1 as f32, z1 as f32), y);
+            style_roof(&mut buf, &mut ends, b, (x0 as f32, z0 as f32, x1 as f32, z1 as f32), y, b.roof_style);
         }
     }
     if buf.is_empty() {
@@ -1754,7 +1853,14 @@ fn respawn_roofs(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut O
         cull_mode: None,
         ..default()
     });
-    b.roof_entity = Some(commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(mat), BuiltRoof, Visibility::Hidden, DespawnOnExit(AppState::InGame))).id());
+    let roof = commands.spawn((Mesh3d(ctx.meshes.add(buf.mesh())), MeshMaterial3d(mat), BuiltRoof, Visibility::Hidden, DespawnOnExit(AppState::InGame))).id();
+    // (The gable and shed ends, with the roof, hidden and shown with it.)
+    if !ends.is_empty() {
+        let siding = ctx.materials.add(StandardMaterial { base_color: ROOF_END_COLOR, perceptual_roughness: 0.85, double_sided: true, cull_mode: None, ..default() });
+        let e = commands.spawn((Mesh3d(ctx.meshes.add(ends.mesh())), MeshMaterial3d(siding), Transform::default(), Visibility::Inherited)).id();
+        commands.entity(roof).add_child(e);
+    }
+    b.roof_entity = Some(roof);
 }
 
 /// The stair style most of the town's houses have (for staircases built on a lot whose house
@@ -1893,6 +1999,7 @@ pub fn spawn_building(
         built_stairs: Vec::new(),
         had_house: b.is_house(),
         roof_texture: ROOF_DEFAULT,
+        roof_style: RoofStyle::Hip,
         stair_style: b.stairs.iter().find(|s| s.flight.is_some()).cloned(),
         away: None,
         wall_entities: HashMap::new(),

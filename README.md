@@ -783,7 +783,8 @@ installation is unreachable.
   a live outline and price), the sledgehammer, floor tiles and staircases up to a new floor
   (stairwell opened, landing floored, Sims climb them; put together from the game's stair
   pieces with railings up both sides, in the house's own stair style or, on a lot with none,
-  the one most of the town's houses have), and hip roofs over the rooms in any
+  the one most of the town's houses have), and roofs over the rooms in the game's shapes (hip,
+  gable with its gable ends, shed, mansard; chosen on the Roofs tab) in any
   of the catalogue's 27 roof patterns (the plain tiles recovered from each pattern's atlas of
   tiles, ridges and hips); closing off a room lays its
   floor and turns its walls' inner sides to wallpaper. Doors, archways and windows from the

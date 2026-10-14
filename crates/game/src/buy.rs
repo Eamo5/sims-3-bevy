@@ -108,13 +108,15 @@ pub struct BuyMode {
     pub page: usize,
     pub placing: Option<Placing>,
     pub yaw: f32,
-    dirty: bool,
+    pub(crate) dirty: bool,
     /// The wallpaper or floor being painted with (index into the game data's patterns).
     pub painting: Option<usize>,
     /// The construction tool in hand.
     pub tool: Option<crate::build::BuildTool>,
     /// A roof pattern just chosen (index into the game data's roofs), to put on the house.
     pub roof_pick: Option<usize>,
+    /// A roof shape chosen on the Roofs tab, to put on the household's roofs.
+    pub roof_style_pick: Option<crate::building::RoofStyle>,
     /// The fence the fence tool puts up (index into the game data's fences).
     pub fence: Option<usize>,
     /// The terrain paint in the brush (a paint layer, or `terrain_paint::ERASE`), the terrain
@@ -319,6 +321,7 @@ pub enum BuyButton {
     Pattern(usize),
     Tool(crate::build::BuildTool),
     Roof(usize),
+    RoofStyle(crate::building::RoofStyle),
     Fence(usize),
     /// A design for the object in hand.
     Design(u8),
@@ -815,7 +818,7 @@ fn buy_panel(
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     swatches: Res<crate::terrain_paint::Swatches>,
     renders: Res<crate::style::StyleRenders>,
-    live: Option<Res<crate::livehud::LiveHud>>,
+    (live, roof_style): (Option<Res<crate::livehud::LiveHud>>, Option<Res<crate::building::ActiveBuilding>>),
 ) {
     // (Again when the game's HUD comes up: its puck has the buy mode button.)
     if !*spawned_toggle || live.as_ref().is_some_and(|l| l.is_added()) {
@@ -905,6 +908,13 @@ fn buy_panel(
         if buy.category == ROOFS_TAB && !editing_style {
             let Some(ui) = ui.as_deref() else { return };
             let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+            // (Their shape first: the game's roof styles.)
+            let current = roof_style.as_deref().map(|b| b.roof_style);
+            p.spawn(Node { column_gap: Val::Px(6.0), ..default() }).with_children(|row| {
+                for s in crate::building::RoofStyle::ALL {
+                    button(row, s.label().to_string(), BuyButton::RoofStyle(s), Val::Auto, 32.0, current == Some(s));
+                }
+            });
             p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|grid| {
                 for (i, r) in ui.data.roofs.iter().enumerate() {
                     let tex = assets.texture(&mut ctx, r.tile);
@@ -1398,6 +1408,9 @@ pub(crate) fn buy_buttons(
             }
             BuyButton::Roof(i) => {
                 buy.roof_pick = Some(*i);
+            }
+            BuyButton::RoofStyle(s) => {
+                buy.roof_style_pick = Some(*s);
             }
             BuyButton::Styling => {
                 buy.select_design_tool(&mut commands);

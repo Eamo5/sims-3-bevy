@@ -746,6 +746,7 @@ fn build_tool(
     }
     if blocked || !buy.active {
         buy.roof_pick = None;
+        buy.roof_style_pick = None;
         return;
     }
     if interrupted { return; }
@@ -764,6 +765,24 @@ fn build_tool(
         }
         play.write(crate::sound::PlaySound::ui("ui_build_roof_mup"));
         notes.push(format!("The roof is now {}.", r.name));
+    }
+    // A roof shape chosen there.
+    if let Some(style) = buy.roof_style_pick.take()
+        && let Some(b) = building.as_deref_mut()
+        && b.roof_style != style
+    {
+        let ops = vec![PaintOp::RoofStyle { style }];
+        let before = crate::building::BuildingSnapshot::capture(b, log.as_deref());
+        let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+        crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces);
+        crate::buyhistory::record_construction(&mut commands, before, b, &ops, 0, removed.0.clone(), Vec::new());
+        match log.as_mut() {
+            Some(l) => l.0.extend(ops),
+            None => commands.insert_resource(crate::building::LotPaint(ops)),
+        }
+        play.write(crate::sound::PlaySound::ui("ui_build_roof_mup"));
+        notes.push(format!("The roofs are now a {}.", style.label().to_lowercase()));
+        buy.dirty = true;
     }
     let tool = buy.tool.filter(|_| buy.active);
     let cursor = windows.single().ok().and_then(|w| w.cursor_position());
