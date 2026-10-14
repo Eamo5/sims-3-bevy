@@ -286,6 +286,9 @@ pub enum Topic {
     SameWork,
     /// The greetings of a Sim with that much Charisma (the game's "Greet Charisma Level N").
     Charisma(u32),
+    /// The line of work the other's in (the game's "Learn About ... Career": what's said of it
+    /// once known), by a word of its name.
+    Career(&'static str),
     Event(&'static str),
 }
 
@@ -296,6 +299,9 @@ pub enum GameTest {
     About,
     ActorWorks,
     BothWork,
+    TargetWorks,
+    /// Not to the one they're with (announcing an engagement).
+    NotPartner,
     /// A guest to their host (complimenting the home).
     GuestToHost,
 }
@@ -367,6 +373,10 @@ fn topic(name: &str) -> Option<Topic> {
         "Work General" => Some(Topic::SameWork),
         "" => None,
         g if g.starts_with("Greet Charisma Level ") => g["Greet Charisma Level ".len()..].trim().parse().ok().map(Topic::Charisma),
+        g if g.starts_with("Learn ") && g.ends_with(" Career") => {
+            let w = g["Learn ".len()..g.len() - " Career".len()].trim_start_matches("About ").replace(' ', "").to_ascii_lowercase();
+            Some(Topic::Career(Box::leak(w.into_boxed_str())))
+        }
         other => Some(Topic::Event(Box::leak(other.to_string().into_boxed_str()))),
     }
 }
@@ -570,6 +580,11 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
             "TestActorHasWork" => Some(GameTest::ActorWorks),
             "TestActorAndTargetHasWork" => Some(GameTest::BothWork),
             "TestComplimentHome" => Some(GameTest::GuestToHost),
+            "TestTargetHasWork" => Some(GameTest::TargetWorks),
+            "TestAnnouncePromotion" => Some(GameTest::ActorWorks),
+            "TestAnnounceEngagement" => Some(GameTest::NotPartner),
+            // (What's said of a line of work: its topic is the other's being in it.)
+            t if t.starts_with("TargetHas") && t.ends_with("Career") && a.topics.iter().any(|(n, _)| n.starts_with("Learn ")) => None,
             _ => continue,
         };
         if SOCIALS.iter().chain(out.iter()).any(|s| s.name.eq_ignore_ascii_case(&a.name)) || LEFT_OUT.contains(&a.name.as_str()) || a.name.contains('{') {
@@ -703,10 +718,19 @@ pub fn topic_holds(t: Topic, first: bool, actor: &Sim, target: &Sim, target_in_h
         Topic::AdultToChild => (grown(actor) && !grown(target)) == first && grown(actor) != grown(target),
         Topic::SameWork => side[0].career.is_some() && side[0].career == side[1].career,
         Topic::Charisma(level) => first && side[0].charisma == level,
+        Topic::Career(word) => side[1].career.is_some_and(|c| career_is(c, word)),
         Topic::Event(name) => me.topics.and_then(|t| t.get(name)).is_some_and(|h| {
             !other.sim.is_some_and(|o| h.used_with.contains(&o)) && (test != Some(GameTest::About) || (h.about.is_some() && h.about == other.sim))
         }),
     }
+}
+
+/// Whether a career (its track) goes by a word of the game's topics for it ("lawenforcement",
+/// "musical", "sports").
+fn career_is(track: usize, word: &str) -> bool {
+    let Some(t) = crate::careers::careers().get(track) else { return false };
+    let name = t.name.replace(' ', "").to_ascii_lowercase();
+    name.contains(word) || word.contains(&name) || (word.len() >= 5 && name.starts_with(&word[..5]))
 }
 
 /// The phrases the game's socials of a kind share, gathered on their own menu ("Ask About ›",
@@ -774,6 +798,8 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
                 Some(GameTest::ActorWorks) => side[0].career.is_none(),
                 Some(GameTest::BothWork) => side[0].career.is_none() || side[1].career.is_none(),
                 Some(GameTest::GuestToHost) => side[0].member || !side[1].member,
+                Some(GameTest::TargetWorks) => side[1].career.is_none(),
+                Some(GameTest::NotPartner) => matches!(rel.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married),
                 _ => false,
             })
     {
