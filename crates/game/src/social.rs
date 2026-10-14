@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
-use crate::life::{Mood, Trait};
+use crate::life::Trait;
 use crate::sim::{Age, Sim};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -29,11 +29,16 @@ pub struct Relationship {
     pub kissed: bool,
     /// When they last spent time together (game minutes; 0: not known, taken as now).
     pub last: f64,
+    /// Their conversation's short-term context (the game's, one between the two).
+    pub stc: crate::conversation::Stc,
+    /// Sworn enemies (the game's `MakeEnemy` flag: enmity takes a declaration, not just dislike).
+    pub enemy: bool,
 }
 
 /// Days without seeing or speaking to each other before a relationship starts to fade.
 pub const FADE_AFTER_DAYS: f64 = 3.0;
-pub const FRIEND_THRESHOLD: f32 = 15.0;
+/// The liking that makes Sims friends (the game's `Friend` row; Good Friends at 60, Best at 80).
+pub const FRIEND_THRESHOLD: f32 = 40.0;
 
 /// Keeps track of when Sims last spent time together (a social in person or on the phone).
 pub fn note_contact(clock: Res<crate::clock::GameClock>, mut events: MessageReader<crate::life::LifeEvent>, mut rels: Query<&mut Relationships>) {
@@ -46,14 +51,14 @@ pub fn note_contact(clock: Res<crate::clock::GameClock>, mut events: MessageRead
     }
 }
 
-/// Relationships fade when Sims don't see or speak to each other for a few days, as the game's
-/// do: friends drift towards acquaintances (good friends more slowly), romance cools unless
-/// they're together, and grudges soften. Spouses, partners and family stay close. The
-/// household's relationships, both ways (the town's Sims among themselves are left as they
-/// are).
+/// Relationships fade as the game's do (its `Relationship.DecayAll`, each midnight): liking above
+/// nothing drifts down and below it back up, by their conversation's context (2 a day in a good
+/// one; a grudge softens by 3, or 1 while it's still sour), and the context itself cools.
+/// Romance, ours, cools unless they're together, after a few days apart. The household's
+/// relationships, both ways (the town's Sims among themselves are left as they are).
 pub fn fade_relationships(
     clock: Res<crate::clock::GameClock>,
-    mut last_hour: Local<i64>,
+    (mut last_hour, mut last_day): (Local<i64>, Local<Option<u32>>),
     mut q: Query<(Entity, &crate::sim::Sim, &mut Relationships, Has<crate::sim::HouseholdMember>, Option<&crate::wishes::Wishes>, Option<&crate::journal::SkillJournal>)>,
     family: Res<crate::family::Genealogy>,
 ) {
@@ -62,41 +67,52 @@ pub fn fade_relationships(
         return;
     }
     *last_hour = hour;
+    let day = clock.day();
+    let midnight = last_day.is_some_and(|d| d != day);
+    *last_day = Some(day);
     let household: std::collections::HashSet<Entity> = q.iter().filter(|x| x.3).map(|x| x.0).collect();
     let ids: HashMap<Entity, u64> = q.iter().map(|x| (x.0, x.1.id)).collect();
     for (_, sim, mut rels, member, wishes, journal) in &mut q {
         // (A Long Distance Friend's friends never drift, nor a Super Friendly Sim's.)
-        if crate::wishes::has(wishes, "LongDistanceFriend") || crate::journal::earned(journal, "Super Friendly") {
-            continue;
-        }
+        let steadfast = crate::wishes::has(wishes, "LongDistanceFriend") || crate::journal::earned(journal, "Super Friendly");
         for (other, r) in rels.0.iter_mut() {
             if r.last <= 0.0 {
                 r.last = clock.minutes;
                 continue;
             }
-            if (!member && !household.contains(other)) || (clock.minutes - r.last) / 1440.0 < FADE_AFTER_DAYS {
+            if !member && !household.contains(other) {
                 continue;
             }
-            let together = matches!(r.status, RelStatus::Married | RelStatus::Engaged | RelStatus::Partner);
-            let kin = ids.get(other).is_some_and(|o| family.kin(sim.id, *o).is_some());
-            let per_day = if together || kin {
-                0.25
-            } else if r.friendship >= 60.0 {
-                0.5
-            } else {
-                1.0
-            };
-            let step = per_day / 24.0;
-            let floor = if together || kin { 40.0 } else { 0.0 };
-            if r.friendship > floor {
-                r.friendship = (r.friendship - step).max(floor);
-            } else if r.friendship < 0.0 {
-                r.friendship = (r.friendship + step * 0.5).min(0.0);
+            if midnight {
+                if !steadfast {
+                    r.friendship = daily_liking(r.friendship, &r.stc);
+                }
+                r.stc.decay();
             }
-            if !together && r.romance > 0.0 {
+            let together = matches!(r.status, RelStatus::Married | RelStatus::Engaged | RelStatus::Partner);
+            if steadfast || together || (clock.minutes - r.last) / 1440.0 < FADE_AFTER_DAYS {
+                continue;
+            }
+            let kin = ids.get(other).is_some_and(|o| family.kin(sim.id, *o).is_some());
+            let step = if kin { 0.25 } else { 1.0 } / 24.0;
+            if r.romance > 0.0 {
                 r.romance = (r.romance - step).max(0.0);
             }
         }
+    }
+}
+
+/// A day's drift in liking (the game's `DecayAll`): above nothing by the context's
+/// `LTRDecayFromAbove`, never below it; below by its `LTRDecayFromBelow`, never above it.
+pub fn daily_liking(liking: f32, stc: &crate::conversation::Stc) -> f32 {
+    // (An OK context's, -2 and +3, before the game's table is in.)
+    let (above, below) = stc.row().map_or((-2.0, 3.0), |r| (r.decay_above, r.decay_below));
+    if liking > 0.0 {
+        (liking + above).max(0.0)
+    } else if liking < 0.0 {
+        (liking + below).min(0.0)
+    } else {
+        liking
     }
 }
 
@@ -113,15 +129,21 @@ impl Relationship {
         }
     }
 
-    pub fn label(&self) -> String {
-        let friend = match self.friendship {
-            v if v < -60.0 => "Enemy",
-            v if v < -20.0 => "Disliked",
+    /// What they are to one another by liking (the game's relationship states: Friends at 40,
+    /// Good Friends at 60, Best at 80, Disliked from -20; Enemies only sworn ones).
+    pub fn friendship_label(&self) -> &'static str {
+        match self.friendship {
+            v if self.enemy && v <= -1.0 => "Enemy",
+            v if v <= -20.0 => "Disliked",
             v if v < FRIEND_THRESHOLD => "Acquaintance",
-            v if v < 40.0 => "Friend",
-            v if v < 75.0 => "Good Friend",
+            v if v < 60.0 => "Friend",
+            v if v < 80.0 => "Good Friend",
             _ => "Best Friend",
-        };
+        }
+    }
+
+    pub fn label(&self) -> String {
+        let friend = self.friendship_label();
         match self.status {
             RelStatus::Married => "Spouse".into(),
             RelStatus::Engaged => "Fiancé(e)".into(),
@@ -275,6 +297,8 @@ pub struct SocialDef {
 /// out (or out of a Sim's own accord), those that make a Sim keener on it, the game's test it
 /// passes, and its animations (the clips' names without their side, `_x` / `_y`).
 pub struct GameRules {
+    /// Its key in the game's tables (`Accuse of Being Evil`).
+    pub key: &'static str,
     pub actor_ages: Vec<Age>,
     pub target_ages: Vec<Age>,
     pub target_traits: Vec<Trait>,
@@ -677,6 +701,7 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
         }
         let (min_friendship, max_friendship) = a.liking.map_or((-100.0, 101.0), |(lo, hi)| (lo, if hi >= 100.0 { 101.0 } else { hi }));
         let rules: &'static GameRules = Box::leak(Box::new(GameRules {
+            key: leak(&a.key),
             actor_ages,
             target_ages,
             target_traits,
@@ -706,26 +731,39 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
     out
 }
 
-/// One of the game's own socials a Sim might start of their own accord with someone of an age
-/// they get on with this well: the friendly and the funny, weighted to what their traits favour
-/// (three times as likely) or not (a fifth).
-pub fn pick_game_social(actor: &Sim, target_age: Age, rel: &Relationship, rng: &mut impl rand::Rng) -> Option<&'static str> {
+/// A social to strike up of their own accord (the game's autonomous choice, its
+/// `SocialComponent.SocialScore`): among those offered them as things stand, as keen on each as
+/// its tone suits the one they want, a social their traits favour a little more; none in a tone
+/// their traits keep them from, nor romance with someone they've none with.
+pub fn pick_autonomous(actor: &Sim, target_age: Age, rel: &Relationship, rng: &mut impl rand::Rng) -> Option<usize> {
+    use crate::conversation::{self as conv, Commodity};
     use rand::seq::IndexedRandom;
-    let fits: Vec<(&'static SocialDef, f32)> = all_socials()
-        .filter_map(|(_, s)| {
-            let g = s.game?;
-            let ok = s.autonomous
-                && g.actor_ages.contains(&actor.age)
-                && g.target_ages.contains(&target_age)
-                && rel.friendship >= s.min_friendship
-                && rel.friendship <= s.max_friendship
-                && rel.romance >= s.min_romance
-                && actor_may(g, actor, true);
-            let keen = if g.keen.iter().any(|t| actor.traits.contains(t)) { 3.0 } else { 1.0 };
-            ok.then_some((s, keen))
+    let state = conv::relationship_state(rel.friendship, rel.status, rel.romance > 0.0 || rel.kissed, rel.enemy);
+    let desired = conv::desired_tone(actor, rel.stc, state, rng);
+    let (_, avoid) = conv::trait_tones(&actor.traits);
+    let romantic = rel.romance > 0.0 || matches!(rel.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married);
+    let fits: Vec<(usize, f32)> = all_socials()
+        .filter_map(|(i, s)| {
+            if !s.autonomous || s.cat == SocialCat::Care || s.needs.is_some() {
+                return None;
+            }
+            if rel.friendship < s.min_friendship || rel.friendship > s.max_friendship || rel.romance < s.min_romance {
+                return None;
+            }
+            if let Some(g) = s.game
+                && (!g.actor_ages.contains(&actor.age) || !g.target_ages.contains(&target_age) || !actor_may(g, actor, true) || !g.topics.is_empty())
+            {
+                return None;
+            }
+            let intended = conv::intended(i);
+            if avoid.contains(&intended) || (intended == Commodity::Amorous && !romantic) || !conv::offered(s, rel.stc, state) {
+                return None;
+            }
+            let keen = s.game.is_some_and(|g| g.keen.iter().any(|t| actor.traits.contains(t)));
+            Some((i, conv::tone_weight(desired, intended) * if keen { 1.2 } else { 1.0 }))
         })
         .collect();
-    fits.choose_weighted(rng, |f| f.1).ok().map(|f| f.0.name)
+    fits.choose_weighted(rng, |f| f.1).ok().map(|f| f.0)
 }
 
 /// Whether a Sim's traits let them do one of the game's socials (of their own accord or not):
@@ -810,12 +848,18 @@ pub fn load_game_socials(ui: Option<Res<crate::icons::GameUi>>, data: Option<Res
     let list = game_socials(&ui.data.socials, &data.0.clip_names);
     info!("socials: {} of the game's own besides the {} hand-made", list.len(), SOCIALS.len());
     let _ = GAME_SOCIALS.set(list);
+    crate::conversation::load(&ui.data);
 }
 
 /// Whether `actor` can start this social with `target` (shown in the pie menu); `kin`: whether
 /// they're family (no romance between relatives).
 pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim, target_in_household: bool, kin: bool, side: [Side; 2]) -> bool {
     if rel.friendship < def.min_friendship || rel.romance < def.min_romance || rel.friendship > def.max_friendship {
+        return false;
+    }
+    // (What the game offers in their conversation, as things stand between them.)
+    let state = crate::conversation::relationship_state(rel.friendship, rel.status, rel.romance > 0.0 || rel.kissed, rel.enemy);
+    if !crate::conversation::offered(def, rel.stc, state) {
         return false;
     }
     // (The game's own: the ages it's for, the traits it asks of the one it's done to and of the
@@ -894,68 +938,6 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
         SocialEffect::WooHoo => matches!(rel.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married) || rel.romance >= 80.0,
         _ => true,
     }
-}
-
-/// Chance (0..1) that the target goes along with the social.
-pub fn acceptance(def: &SocialDef, rel: &Relationship, target: &Sim, target_mood: &Mood, has_other_partner: bool) -> f32 {
-    // (Told to do their homework, they hear it out; whether they do it is the effect's.)
-    if def.effect == SocialEffect::RequestHomework {
-        return 1.0;
-    }
-    let has = |t: Trait| target.traits.contains(&t);
-    let mood = target_mood.level() / 100.0;
-    let mut p = match def.cat {
-        // Friendly chat is almost always welcome unless the Sim is in a foul mood or dislikes you.
-        SocialCat::Friendly | SocialCat::Funny => 0.97 + rel.friendship.min(0.0) / 150.0 + mood.min(0.0) * 0.2,
-        SocialCat::Mean => 1.0,
-        SocialCat::Special => 0.6 + rel.friendship / 200.0,
-        SocialCat::Care => 1.0,
-        SocialCat::Romantic => {
-            let base = match def.effect {
-                SocialEffect::GoSteady => 0.2 + rel.romance / 120.0,
-                SocialEffect::Propose => 0.1 + rel.romance / 110.0,
-                SocialEffect::Marry | SocialEffect::WooHoo | SocialEffect::TryForBaby => 0.5 + rel.romance / 200.0,
-                _ => 0.35 + rel.romance / 100.0 + rel.friendship / 300.0,
-            };
-            base + mood * 0.15
-        }
-    };
-    if def.cat == SocialCat::Romantic {
-        if has(Trait::Flirty) || has(Trait::HopelessRomantic) {
-            p += 0.15;
-        }
-        if has(Trait::Unflirty) {
-            p -= 0.3;
-        }
-        if has(Trait::CommitmentIssues) && matches!(def.effect, SocialEffect::GoSteady | SocialEffect::Propose | SocialEffect::Marry) {
-            p -= 0.35;
-        }
-        if has_other_partner {
-            p -= 0.5;
-        }
-    }
-    if def.cat == SocialCat::Funny {
-        if has(Trait::GoodSenseOfHumor) {
-            p += 0.1;
-        }
-        if has(Trait::Grumpy) {
-            p -= 0.35;
-        }
-        if has(Trait::NoSenseOfHumor) {
-            p -= 0.5;
-        }
-    }
-    if has(Trait::EasilyImpressed) {
-        p += 0.1;
-    }
-    // The evil and the mean-spirited take an insult in their stride.
-    if def.cat == SocialCat::Mean && (has(Trait::Evil) || has(Trait::MeanSpirited)) {
-        p = p.max(0.9);
-    }
-    if def.cat == SocialCat::Friendly && has(Trait::Loner) {
-        p -= 0.15;
-    }
-    p.clamp(0.02, 1.0)
 }
 
 #[cfg(test)]
@@ -1162,7 +1144,7 @@ mod tests {
         let start = 1440.0;
         for (me, other, status) in [(a, b, RelStatus::None), (b, a, RelStatus::None)] {
             let mut rels = app.world_mut().get_mut::<Relationships>(me).unwrap();
-            *rels.entry(other) = Relationship { friendship: 50.0, romance: 20.0, status, kissed: false, last: start };
+            *rels.entry(other) = Relationship { friendship: 50.0, romance: 20.0, status, last: start, ..Default::default() };
         }
         let mut run_hours = |app: &mut App, from: f64, hours: usize| {
             for h in 0..hours {
@@ -1170,21 +1152,20 @@ mod tests {
                 app.update();
             }
         };
-        // Two days apart: as they were.
+        // Two days on: liking two points less each midnight, as the game's; romance as it was.
         run_hours(&mut app, start + 60.0, 48);
-        assert_eq!(app.world().get::<Relationships>(a).unwrap().friendship(b), 50.0);
-        // Five days apart: a day and a half of fading, both ways (friendship a point a day,
-        // romance too).
+        let r = app.world().get::<Relationships>(a).unwrap().get(b);
+        assert_eq!((r.friendship, r.romance), (46.0, 20.0));
+        // Days apart (three midnights more), romance cools too, both ways.
         run_hours(&mut app, start + 3.5 * 1440.0, 48);
         for (me, other) in [(a, b), (b, a)] {
             let r = app.world().get::<Relationships>(me).unwrap().get(other);
-            assert!(r.friendship < 50.0 && r.friendship > 47.5, "{}", r.friendship);
+            assert_eq!(r.friendship, 40.0);
             assert!(r.romance < 20.0, "{}", r.romance);
         }
-        // Spouses stay close.
-        app.world_mut().get_mut::<Relationships>(a).unwrap().entry(b).status = RelStatus::Married;
-        app.world_mut().get_mut::<Relationships>(a).unwrap().entry(b).friendship = 41.0;
-        run_hours(&mut app, start + 10.0 * 1440.0, 24 * 10);
-        assert_eq!(app.world().get::<Relationships>(a).unwrap().friendship(b), 40.0);
+        // A grudge softens, three a day, to nothing.
+        app.world_mut().get_mut::<Relationships>(a).unwrap().entry(b).friendship = -4.0;
+        run_hours(&mut app, start + 6.0 * 1440.0, 48);
+        assert_eq!(app.world().get::<Relationships>(a).unwrap().friendship(b), 0.0);
     }
 }

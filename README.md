@@ -298,9 +298,34 @@ installation is unreachable.
   both sides (lonely Sims at home alone call a friend by themselves) — or invite them over
   (they come up to the front door and ring the bell, the game's ring, and wait there until
   someone of the household goes to greet them and let them in; left two hours, they go home),
-  order pizza and call the services. Friendships fade after three days without seeing or
-  speaking to each other (good friends more slowly; spouses, partners and family stay close),
-  and grudges soften.
+  order pizza and call the services.
+- **Conversations** go as the game's: each pair talking is in a short-term context, a
+  commodity and how far it's gone (OK, Friendly, Very Friendly; Amusing, Funny, Hilarious;
+  Flirty, Seductive, Hot; Dull, Odd, Impolite, Awkward, Steamed...). How a social comes across
+  is decided by the game's own rules, the social's and its 478 general ones for what it's meant
+  as, the most specific that fits first: by the context, liking, the target's mood, either
+  side's traits and Charisma (Charisma 3, 6 and 9 win over those who'd otherwise be cool),
+  partners elsewhere, repetition (the same social once too often, Chat's four times, falls
+  flat), the holidays. A good social taken neutrally, or a flirt taken awkwardly, is rejected.
+  The outcome pushes the context its way (a neutral reply halves a good one), and liking moves
+  by the context's own step: +2.5 to +3.3 a social while they dislike each other, +1.67 till
+  they're friends (40, about two dozen socials from strangers), less after; the witty gain more
+  from jokes, the charming from anything; boring, creepy and rude contexts cost the most
+  between good friends. Relationships are the game's: Friends at 40, Good Friends at 60, Best
+  at 80, Disliked from -20, Enemies only sworn ones. Each midnight liking drifts by the
+  context's own rate (two a day in a good one; a grudge softens by three, or one while it's
+  still sour) and the context cools; romance cools after three days apart unless they're
+  together. The socials offered are the game's menus for the context and the relationship
+  (its `SocializingActionAvailability`): each submenu's from its commodity's context, the
+  conversation's own if it's in it, else its first (OK, Amusing, Flirty, Impolite), for the
+  pair's state or the rest: a kiss once things are flirty between romantic interests or
+  partners, or seductive between friends; a joke once the conversation's funny, silly faces and
+  funny stories before. Of their own accord Sims pick among the socials offered them by the tone
+  they're after, as the game's `CommodityTable` weighs each social's against it: the one their
+  traits favour (the flirty romance, the mean-spirited insults, the witty jokes, the humourless
+  dull talk), their relationship's (friends friendly, sweethearts amorous or friendly, foes
+  insulting), romance once things are seductive; none in a tone their traits keep them from (the
+  Good and the Friendly never insult anyone of their own accord).
 - **WooHoo**: WooHoo and Try for Baby, accepted, take the couple to the nearest free double
   bed (the game's `FindNearestBed`): into bed on either side, the game's WooHoo under the covers
   (its two parts, the bed's covers rolling with it), and out again, closer for it.

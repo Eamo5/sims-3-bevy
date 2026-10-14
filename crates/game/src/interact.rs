@@ -28,6 +28,7 @@ impl Plugin for InteractPlugin {
             .add_systems(Update, (route_objects, crate::social::load_game_socials).run_if(in_state(crate::AppState::InGame)))
             .init_resource::<RepairTunings>()
             .init_resource::<ObjectRates>()
+            .init_resource::<crate::conversation::SocialMemories>()
             .add_systems(Update, note_recent.run_if(in_state(PlayMode::Live)))
             .init_resource::<DepreciationDay>()
             .add_systems(OnEnter(crate::AppState::Loading), |mut day: ResMut<DepreciationDay>| day.0 = None)
@@ -2455,11 +2456,13 @@ pub struct Action {
     /// Where the Sim came up to the object (a hot tub got into from a side, a chair at a table
     /// from behind): where they get up and away from it again.
     pub approach: Option<Vec2>,
+    /// What a social came to, decided as it began (applied as it ends).
+    pub social_outcome: Option<crate::conversation::Outcome>,
 }
 
 impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
-        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, fish_choice: None, recipe_choice: None, for_one: false, approach: None }
+        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, fish_choice: None, recipe_choice: None, for_one: false, approach: None, social_outcome: None }
     }
 }
 
@@ -2930,7 +2933,7 @@ pub(crate) fn run_actions(
         Query<(), With<Broken>>,
         Query<(), Or<(With<crate::buy::HeldObject>, With<crate::buyhistory::HistoryHidden>)>>,
     ),
-    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates)): (
+    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates, mut memories)): (
         MessageWriter<crate::journal::Did>,
         Query<&crate::journal::SkillJournal>,
         Query<&mut crate::inventory::Inventory>,
@@ -2938,14 +2941,15 @@ pub(crate) fn run_actions(
         Query<&mut SecondPlace>,
         Query<Entity, (With<SecondPlace>, Without<Broken>)>,
         Query<(), With<Unmade>>,
-        (Res<RepairTunings>, Query<&Transform, (With<crate::puddles::Puddle>, Without<Sim>)>, Option<Res<crate::weather::Weather>>, Res<ObjectRates>),
+        (Res<RepairTunings>, Query<&Transform, (With<crate::puddles::Puddle>, Without<Sim>)>, Option<Res<crate::weather::Weather>>, Res<ObjectRates>, ResMut<crate::conversation::SocialMemories>),
     ),
 ) {
     let Some(grid) = grid else { return };
     let dt = delta.0;
     let ground = |level: u8, x: f32, z: f32| crate::nav::floor_height(&world.data, building.as_deref(), level, Vec3::new(x, 0.0, z));
     // Social effects to apply to partners after the main pass: (target, actor, social, fun, rel, pose talk)
-    let mut social_fx: Vec<(Entity, Entity, f32, f32, f32, f32)> = Vec::new();
+    // (Who's talked to whom: social and fun, liking and romance, and their conversation's context.)
+    let mut social_fx: Vec<(Entity, Entity, f32, f32, f32, f32, Option<(crate::conversation::Stc, f32, bool)>)> = Vec::new();
     // Needs a care social fills for the little one: (target, per-need gain).
     let mut care_fx: Vec<(Entity, [f32; 6])> = Vec::new();
     // Social partners whose animation should end: (target, actor).
@@ -3521,33 +3525,53 @@ pub(crate) fn run_actions(
                                 if let Some(age) = little {
                                     carry_fx.push((*target, me, age, *tf, s.effect != SocialEffect::PutToBed));
                                 }
-                                if let Some((tsim, tmood, _, tpartner)) = who.get(target) {
-                                    let mut rel = rels.get(*target);
-                                    let other_partner = *tpartner && rel.status == RelStatus::None;
+                                if let Some((tsim, tmood, t_member, tpartner)) = who.get(target) {
+                                    let rel = rels.get(*target);
                                     // (On Snowflake Day everyone's warmer, and on Love Day to romance:
-                                    // the game's holiday liking bonus, 10.)
+                                    // the game's holiday liking and mood, 20, as the rules see them.)
                                     let holiday = weather.as_deref().and_then(|w| crate::holidays::holiday_today(w, clock.day()));
-                                    if holiday == Some("Snowflake Day") || (holiday == Some("Love Day") && s.cat == crate::social::SocialCat::Romantic) {
-                                        rel.friendship += crate::holidays::HOLIDAY_LIKING;
+                                    let warm = holiday == Some("Snowflake Day") || (holiday == Some("Love Day") && s.cat == crate::social::SocialCat::Romantic);
+                                    let mine: Vec<crate::life::MoodletKind> = moodlets.map(|m| m.0.iter().map(|x| x.kind).collect()).unwrap_or_default();
+                                    let repetition = memories.0.entry(me).or_default().before(*social, clock.minutes);
+                                    let judging = crate::conversation::Judging {
+                                        actor: sim,
+                                        target: tsim,
+                                        actor_moodlets: &mine,
+                                        target_moodlets: &[],
+                                        liking: rel.friendship,
+                                        relationship: crate::conversation::relationship_state(rel.friendship, rel.status, rel.romance > 0.0 || rel.kissed, rel.enemy),
+                                        stc: rel.stc,
+                                        target_mood: tmood.0,
+                                        charisma: skills.0.get("Charisma").map(|v| *v as u32),
+                                        partner_elsewhere: *tpartner && rel.status == RelStatus::None,
+                                        partners: matches!(rel.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married),
+                                        kin: false,
+                                        repetition,
+                                        actor_member: who.get(&me).is_some_and(|w| w.2),
+                                        target_member: *t_member,
+                                        holiday: warm,
+                                    };
+                                    let mut outcome = crate::conversation::decide(*social, &judging);
+                                    // (A Comedian's jokes always land; told to do their homework, they
+                                    // hear it out, whether they do it being the effect's.)
+                                    if (s.name == "Tell Joke" && crate::journal::earned(journals.get(me).ok(), "Comedian")) || s.effect == SocialEffect::RequestHomework {
+                                        outcome.accepted = true;
                                     }
-                                    let mut p = crate::social::acceptance(s, &rel, tsim, tmood, other_partner);
-                                    // People simply like the Attractive more.
-                                    if s.cat != crate::social::SocialCat::Mean && crate::wishes::has(wishes, "Attractive") {
-                                        p = (p + 0.12).min(0.98);
-                                    }
-                                    // (A Comedian's jokes rarely fall flat.)
-                                    if s.name == "Tell Joke" && crate::journal::earned(journals.get(me).ok(), "Comedian") {
-                                        p = p.max(0.97);
-                                    }
-                                    if !rand::rng().random_bool(p as f64) {
+                                    debug!("{} to {}: {} comes across {:?} (in {}, liking {:.0})", sim.first, tsim.first, s.name, outcome.result, rel.stc.name(), rel.friendship);
+                                    action.social_outcome = Some(outcome);
+                                    if crate::conversation::rebuffed(*social, &outcome) {
                                         if !action.autonomous {
                                             notes.push(format!("{} rejected {}'s attempt to {}.", tsim.first, sim.first, s.name.to_lowercase()));
                                         }
-                                        let (f, r) = if s.cat == crate::social::SocialCat::Romantic { (-4.0, -8.0) } else { (-5.0, 0.0) };
+                                        // (The rebuff: the conversation turns, and liking with it.)
+                                        let (f, stc) = crate::conversation::effect(*social, rel.friendship, rel.stc, &outcome, sim, tsim);
+                                        let r = if s.cat == crate::social::SocialCat::Romantic { -8.0 } else { 0.0 };
+                                        rels.entry(*target).stc = stc;
                                         if rels.add(*target, f, r) {
                                             life.write(LifeEvent::new(me, LifeEventKind::MadeFriend { other: *target }));
                                         }
-                                        social_fx.push((*target, me, 0.0, 0.0, f, r));
+                                        social_fx.push((*target, me, 0.0, 0.0, 0.0, r, Some((stc, rels.get(*target).friendship, rels.get(*target).enemy))));
+                                        memories.0.entry(me).or_default().after(*social, clock.minutes);
                                         life.write(LifeEvent::new(me, LifeEventKind::Socialized { other: *target, social: "Argue" }));
                                         finished = true;
                                     }
@@ -4198,19 +4222,50 @@ pub(crate) fn run_actions(
                                 motives.add(SOCIAL, s.social_per_hour * dt / 60.0);
                                 motives.add(FUN, s.fun_per_hour * dt / 60.0);
                                 let k = dt / s.minutes * crate::life::social_affinity(&sim.traits, s.name);
-                                let (f, r) = (s.friendship * k, s.romance * k);
+                                // (Liking comes of how it went, as it ends: the game's. Romance builds
+                                // through it, ours.)
+                                let (f, r) = match action.social_outcome {
+                                    // (Romance only of a flirt that's taken as one.)
+                                    Some(o) => (0.0, if o.result == crate::conversation::Commodity::Amorous || s.romance <= 0.0 { s.romance * k } else { 0.0 }),
+                                    None => (s.friendship * k, s.romance * k),
+                                };
                                 if rels.add(*target, f, r) {
                                     life.write(LifeEvent::new(me, LifeEventKind::MadeFriend { other: *target }));
                                 }
                                 if s.cat == crate::social::SocialCat::Care {
                                     care_fx.push((*target, s.care.map(|v| v * dt / 60.0)));
                                 }
-                                social_fx.push((*target, me, s.social_per_hour * dt / 60.0, s.fun_per_hour * dt / 60.0, f, r));
+                                social_fx.push((*target, me, s.social_per_hour * dt / 60.0, s.fun_per_hour * dt / 60.0, f, r, None));
                                 anim.pose = if s.name.contains("Dance") { Pose::Dance } else { Pose::Talk };
                                 // (A Teacher Extraordinaire gets through homework twice as fast.)
                                 let minutes = if s.effect == SocialEffect::HelpHomework && crate::journal::earned(journals.get(me).ok(), "Teacher Extraordinaire") { s.minutes * 0.5 } else { s.minutes };
                                 if elapsed >= minutes {
                                     finished = true;
+                                    // How it went: the conversation pushed its way, liking with it, and
+                                    // the relationship's flags.
+                                    if let Some(o) = action.social_outcome
+                                        && let Some((tsim, ..)) = who.get(target)
+                                    {
+                                        let before = rels.get(*target);
+                                        let (f, stc) = crate::conversation::effect(*social, before.friendship, before.stc, &o, sim, tsim);
+                                        let e = rels.entry(*target);
+                                        e.stc = stc;
+                                        if o.bits_add & crate::conversation::BIT_MAKE_ENEMY != 0 {
+                                            e.enemy = true;
+                                        }
+                                        if o.bits_remove & crate::conversation::BIT_MAKE_ENEMY != 0 {
+                                            e.enemy = false;
+                                        }
+                                        if rels.add(*target, f, 0.0) {
+                                            life.write(LifeEvent::new(me, LifeEventKind::MadeFriend { other: *target }));
+                                        }
+                                        if rels.get(*target).friendship >= 0.0 {
+                                            rels.entry(*target).enemy = false;
+                                        }
+                                        social_fx.push((*target, me, 0.0, 0.0, 0.0, 0.0, Some((stc, rels.get(*target).friendship, rels.get(*target).enemy))));
+                                        memories.0.entry(me).or_default().after(*social, clock.minutes);
+                                        debug!("{} and {}: {:?}, liking {:+.2} to {:.1}, now {}", sim.first, tsim.first, o.result, f, rels.get(*target).friendship, stc.name());
+                                    }
                                     if s.name == "Tell Joke" {
                                         did.write(crate::journal::Did::count(me, crate::journal::Stat::Jokes, 1.0));
                                     }
@@ -4620,7 +4675,7 @@ pub(crate) fn run_actions(
                             if rels.add(*target, df, 0.0) {
                                 life.write(LifeEvent::new(me, LifeEventKind::MadeFriend { other: *target }));
                             }
-                            social_fx.push((*target, me, s, f, df, 0.0));
+                            social_fx.push((*target, me, s, f, df, 0.0, None));
                             if elapsed >= PHONE_CHAT_MINUTES {
                                 finished = true;
                                 life.write(LifeEvent::new(me, LifeEventKind::Socialized { other: *target, social: "Chat" }));
@@ -4760,10 +4815,21 @@ pub(crate) fn run_actions(
             q.3.rotation = at.rotation * Quat::from_rotation_y(std::f32::consts::PI);
         }
     }
-    for (target, actor, social, fun, friendship, romance) in social_fx {
+    for (target, actor, social, fun, friendship, romance, stc) in social_fx {
         if let Ok((_, tsim, queue, mut tf, mut motives, _, mut anim, _, mut rels, path, _, _, _, _, _)) = sims.get_mut(target) {
             motives.add(SOCIAL, social);
             motives.add(FUN, fun);
+            // (Their conversation, and liking, the same both ways.)
+            if let Some((stc, liking, enemy)) = stc {
+                let r = rels.entry(actor);
+                let was = r.friendship;
+                r.stc = stc;
+                r.friendship = liking;
+                r.enemy = enemy;
+                if was < crate::social::FRIEND_THRESHOLD && liking >= crate::social::FRIEND_THRESHOLD {
+                    life.write(LifeEvent::new(target, LifeEventKind::MadeFriend { other: actor }));
+                }
+            }
             if rels.add(actor, friendship, romance) {
                 life.write(LifeEvent::new(target, LifeEventKind::MadeFriend { other: actor }));
             }
@@ -5364,16 +5430,11 @@ fn autonomy(
                 if partying && pos.distance(tf.translation) > 20.0 {
                     continue;
                 }
-                let rel = rels.friendship(other);
-                // (Among friends, now and then one of the game's own: whatever their traits favour.)
-                let game = if rel > 10.0 && rng.random_bool(0.4) { crate::social::pick_game_social(sim, age, &rels.get(other), &mut rng) } else { None };
-                let name = game.unwrap_or_else(|| match () {
-                    _ if rel < 5.0 => "Get to Know",
-                    _ if rel > 10.0 && rng.random_bool(0.35) => "Tell Joke",
-                    _ if rel > 20.0 && rng.random_bool(0.3) => "Talk About Hobbies",
-                    _ => "Chat",
-                });
-                let si = crate::social::social_index(name).unwrap_or(0);
+                let rel = rels.get(other);
+                // (Someone they barely know: getting to know them; else whatever the game would
+                // have them say, as things stand between them, in the tone they're after.)
+                let pick = if rel.friendship < 5.0 && rng.random_bool(0.5) { None } else { crate::social::pick_autonomous(sim, age, &rel, &mut rng) };
+                let si = pick.or_else(|| crate::social::social_index(if rel.friendship < 5.0 { "Get to Know" } else { "Chat" })).unwrap_or(0);
                 let s = crate::social::social(si);
                 let mut score = (s.social_per_hour * s.minutes / 60.0) * urgency(SOCIAL) * rng.random_range(0.8..1.2);
                 if partying {
@@ -5759,6 +5820,27 @@ mod tests {
         assert!(app.world().get::<Depreciated>(away).is_none());
         app.update();
         assert_eq!(app.world().get::<Depreciated>(home), Some(&Depreciated(100)), "once a night");
+    }
+
+    /// The game's social rules as baked (`cargo test -p sims3 social_rules_audit -- --ignored
+    /// --nocapture`).
+    #[test]
+    #[ignore]
+    fn social_rules_audit() {
+        let data = s3bake::gamedata::load_gamedata(&s3bake::default_root()).expect("game data");
+        let mut by: std::collections::BTreeMap<&str, usize> = Default::default();
+        for r in &data.general_rules {
+            *by.entry(r.commodity.as_str()).or_default() += 1;
+        }
+        println!("general rules {} {:?}", data.general_rules.len(), by);
+        let with = data.socials.iter().filter(|s| !s.rules.is_empty()).count();
+        println!("socials {} with rules {} rules {} outcomes {}", data.socials.len(), with, data.socials.iter().map(|s| s.rules.len()).sum::<usize>(), data.socials.iter().map(|s| s.outcomes.len()).sum::<usize>());
+        println!("stcs {:?}", data.stcs.iter().map(|s| format!("{} {} {}-{}", s.name, s.commodity, s.min, s.max)).collect::<Vec<_>>());
+        if let Some(chat) = data.socials.iter().find(|s| s.key == "Chat") {
+            for r in &chat.rules {
+                println!("Chat {} spec {} stc {:?} com {:?} rep {}", r.result, r.spec, r.st_context, r.st_commodity, r.repetition);
+            }
+        }
     }
 
     /// Which catalogue objects the game tunes need rates for, and what (`cargo test -p sims3

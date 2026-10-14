@@ -200,6 +200,11 @@ pub struct SavedRel {
     /// When they last spent time together (game minutes; older saves: taken as when loaded).
     #[serde(default)]
     pub last: f64,
+    /// Their conversation's context (commodity and how far), and whether they're sworn enemies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stc: Option<(String, f32)>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub enemy: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -839,7 +844,16 @@ fn save_game(
                 .0
                 .iter()
                 .filter_map(|(e, r)| {
-                    Some(SavedRel { with: *ids.get(e)?, friendship: r.friendship, romance: r.romance, status: status_name(r.status).into(), kissed: r.kissed, last: r.last })
+                    Some(SavedRel {
+                        with: *ids.get(e)?,
+                        friendship: r.friendship,
+                        romance: r.romance,
+                        status: status_name(r.status).into(),
+                        kissed: r.kissed,
+                        last: r.last,
+                        stc: (r.stc.value > 0.0).then(|| (r.stc.commodity.name().to_string(), r.stc.value)),
+                        enemy: r.enemy,
+                    })
                 })
                 .collect(),
             lifetime_happiness: wishes.map_or(0, |w| w.points),
@@ -1078,6 +1092,12 @@ pub(crate) fn apply_loaded_game(
                 x.status = status_from(&r.status);
                 x.kissed = r.kissed;
                 x.last = r.last;
+                x.enemy = r.enemy;
+                if let Some((c, v)) = &r.stc
+                    && let Some(c) = crate::conversation::Commodity::from_name(c)
+                {
+                    x.stc = crate::conversation::Stc { commodity: c, value: *v };
+                }
             }
         }
         let mut ec = commands.entity(e);

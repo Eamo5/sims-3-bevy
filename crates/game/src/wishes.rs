@@ -543,7 +543,7 @@ mod tests {
         sim.traits.clear();
         let other = app.world_mut().spawn_empty().id();
         let mut rels = crate::social::Relationships::default();
-        assert!(rels.add(other, 20.0, 0.0));
+        assert!(rels.add(other, crate::social::FRIEND_THRESHOLD + 5.0, 0.0));
         assert!(!rels.add(other, 5.0, 0.0));
         let e = app.world_mut().spawn((sim, Wishes {
             promised: vec![Wish { kind: WishKind::MakeFriend, points: 400 }], ..default()

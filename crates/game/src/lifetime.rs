@@ -334,7 +334,7 @@ fn measure(d: &LifetimeWishDef, data: Option<&s3bake::GameDataBaked>, at: &Stand
         Goal::Cash => (at.funds as f32 / n, format!("§{} of §{}", group(at.funds), group(n as i64))),
         Goal::NetWorth => (at.worth as f32 / n, format!("Worth §{} of §{}", group(at.worth), group(n as i64))),
         Goal::Friends => {
-            let k = at.rels.0.values().filter(|r| r.friendship >= 15.0).count();
+            let k = at.rels.0.values().filter(|r| r.friendship >= crate::social::FRIEND_THRESHOLD).count();
             (k as f32 / n, format!("{k} of {n} friends"))
         }
         Goal::Sweethearts => {

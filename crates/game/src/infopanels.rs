@@ -219,12 +219,12 @@ fn ltr_icon(r: &crate::social::Relationship) -> &'static str {
         RelStatus::Partner => "relationships_state_partners",
         RelStatus::Ex => "relationships_state_ex_romance",
         RelStatus::None if r.romance >= 20.0 => "relationships_state_date",
-        RelStatus::None => match r.friendship {
-            v if v < -60.0 => "relationships_state_enemy",
-            v if v < -20.0 => "relationships_state_disliked",
-            v if v < crate::social::FRIEND_THRESHOLD => "relationships_state_aquaintance",
-            v if v < 40.0 => "relationships_state_friend",
-            v if v < 75.0 => "relationships_state_friend_good",
+        RelStatus::None => match r.friendship_label() {
+            "Enemy" => "relationships_state_enemy",
+            "Disliked" => "relationships_state_disliked",
+            "Acquaintance" => "relationships_state_aquaintance",
+            "Friend" => "relationships_state_friend",
+            "Good Friend" => "relationships_state_friend_good",
             _ => "relationships_state_friend_best",
         },
     }

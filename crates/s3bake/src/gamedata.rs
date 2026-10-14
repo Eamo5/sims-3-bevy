@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 97;
+pub const GAMEDATA_VERSION: u32 = 99;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -265,6 +265,367 @@ pub struct SocialAction {
     /// left out).
     #[serde(default)]
     pub required: Vec<String>,
+    /// What kind of talk it is (`<SA key>`: Talk, Boast, Request...; empty: none).
+    #[serde(default)]
+    pub speech_act: String,
+    /// How many times running it goes down well before it's repetition, and how many more chances
+    /// doing something else between earns back (`<Misc c r>`, 2 and 2 where not given).
+    #[serde(default)]
+    pub chances: u8,
+    #[serde(default)]
+    pub recharges: u8,
+    /// Its own rules (`<LHS>`), each with the result it gives.
+    #[serde(default)]
+    pub rules: Vec<SocialRule>,
+    /// What each result does (`<RHS>`): the conversation's push towards it and the relationship's
+    /// flags it sets or clears.
+    #[serde(default)]
+    pub outcomes: Vec<SocialOutcome>,
+}
+
+/// One of the game's social rules: a general one (the `Socializing` table's `<GR>` rows, for
+/// socials of one intended commodity) or a social's own (`<LHS>`). What it asks of the
+/// conversation, the two Sims and their relationship, and the result (a commodity) it gives;
+/// the first that fits, most specific first, decides. Negations are written `~X`.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct SocialRule {
+    /// The intended commodity a general rule is for (`GC`; empty for a social's own).
+    pub commodity: String,
+    pub result: String,
+    pub spec: f32,
+    /// The kind of talk it's for (`SpAct`; empty: any).
+    pub speech_act: String,
+    /// 0: judged by the one it's done to; 1: by onlookers only; 2: both.
+    pub third_party: u8,
+    /// The conversation's commodity positive (1) or negative (-1), or either (0).
+    pub stc_positive: i8,
+    pub st_commodity: String,
+    pub st_context: String,
+    /// The target's mood at least this (or, below 0, at most); -101: any.
+    pub mood: f32,
+    pub relationship: String,
+    pub liking: (f32, f32),
+    pub actor_traits: Vec<String>,
+    pub target_traits: Vec<String>,
+    /// The actor's skill at least `skill_level` (`~Skill`: below it).
+    pub skill: String,
+    pub skill_level: f32,
+    /// Increased and reduced effectiveness asked of the actor and of the one judging.
+    pub actor_increased: String,
+    pub actor_reduced: String,
+    pub target_increased: String,
+    pub target_reduced: String,
+    /// The game's own test it runs (`SocialTest.<name>`).
+    pub proc_test: String,
+    /// 1: must be so; -1: must not; 0: either.
+    pub partner: i8,
+    pub wrong_gender: i8,
+    pub repetition: i8,
+    pub betrayed: i8,
+    pub actor_ages: Vec<String>,
+    pub target_ages: Vec<String>,
+    /// Liking changed by this, flat, instead of by the conversation (`LTROverride`).
+    pub ltr_override: f32,
+}
+
+/// What one of a social's results does (its `<RHS>`): the commodity, how far it moves the
+/// conversation (`<TUN val>`, 40 where not given), and the relationship's flags (the game's
+/// `InteractionBits`) it sets and clears.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct SocialOutcome {
+    pub result: String,
+    pub amount: f32,
+    pub bits_add: u32,
+    pub bits_remove: u32,
+}
+
+/// One of the game's short-term contexts (the `Socializing` table's `<STC>` rows): the
+/// conversation's commodity and its range, the liking change a social makes in it (`Y1` below
+/// liking `X2`, `Y2` below `X3`, else `Y3`), the liking it drifts by a day above and below
+/// nothing, and the mood a request is accepted at.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct StcInfo {
+    pub name: String,
+    pub commodity: String,
+    pub min: f32,
+    pub max: f32,
+    pub x2: f32,
+    pub x3: f32,
+    pub y: [f32; 3],
+    pub decay_above: f32,
+    pub decay_below: f32,
+    pub mood_to_accept: f32,
+    pub charisma: f32,
+}
+
+/// Which socials the game offers in a conversation (its `SocializingActionAvailability`
+/// table's `SAA` rows): in a context (`Cat`), between Sims in a relationship state (`Gr`: one of
+/// them, `Default` for the rest, `All` for any), the socials' keys.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct SocialMenu {
+    pub stc: String,
+    pub group: String,
+    pub socials: Vec<String>,
+}
+
+/// The `SAA` rows as menus: a `Cat` row starts a context, `Gr` rows the relationship states
+/// (consecutive ones sharing what follows), `FPA` rows the socials.
+pub fn social_menus(xml: &str) -> Vec<SocialMenu> {
+    let mut out: Vec<SocialMenu> = Vec::new();
+    let mut stc = String::new();
+    // (The groups taking the socials that follow, and whether a social came since the last.)
+    let mut groups: Vec<usize> = Vec::new();
+    let mut since_social = true;
+    for r in records(xml, "SAA").iter().skip(1) {
+        let get = |k: &str| r.get(k).map(|v| v.trim()).filter(|v| !v.is_empty());
+        if let Some(c) = get("Cat") {
+            stc = c.to_string();
+            groups.clear();
+            since_social = true;
+        }
+        if let Some(g) = get("Gr") {
+            if since_social {
+                groups.clear();
+            }
+            since_social = false;
+            out.push(SocialMenu { stc: stc.clone(), group: g.to_string(), socials: Vec::new() });
+            groups.push(out.len() - 1);
+        }
+        if let Some(a) = get("FPA") {
+            since_social = true;
+            for &g in &groups {
+                if !out[g].socials.iter().any(|s| s == a) {
+                    out[g].socials.push(a.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A rule's specificity where the table doesn't give it (`SocialRuleLHS.Specificity`).
+fn rule_specificity(r: &SocialRule, general: bool) -> f32 {
+    let mut s = if general { 0.9 } else { 1.0 };
+    let set = |v: &str| !v.is_empty() && v != "None";
+    if set(&r.speech_act) {
+        s += 0.5;
+    }
+    if r.stc_positive != 0 {
+        s += 0.5;
+    }
+    if set(&r.st_commodity) {
+        s += 1.0;
+    }
+    if set(&r.st_context) {
+        s += 2.0;
+    }
+    if r.mood != -101.0 {
+        s += 10.0;
+    }
+    if set(&r.relationship) {
+        s += 3.0;
+    }
+    if r.liking != (-100.0, 100.0) {
+        s += 3.0 + 1.0 - (r.liking.1 - r.liking.0) / 200.0;
+    }
+    s += 4.0 * r.actor_traits.len() as f32 + 8.0 * r.target_traits.len() as f32;
+    if set(&r.skill) {
+        s += 4.5 + 0.1 * r.skill_level;
+    }
+    for (v, w) in [(&r.actor_increased, 5.0), (&r.actor_reduced, 5.0), (&r.target_increased, 4.0), (&r.target_reduced, 4.0)] {
+        if set(v) {
+            s += w;
+        }
+    }
+    if set(&r.proc_test) {
+        s += 25.0;
+    }
+    if r.partner != 0 {
+        s += 8.0;
+    }
+    if r.repetition != 0 {
+        s += 10.0;
+    }
+    if !r.actor_ages.is_empty() {
+        s += 20.0;
+    }
+    if !r.target_ages.is_empty() {
+        s += 20.0;
+    }
+    if r.betrayed != 0 {
+        s += 20.0;
+    }
+    if r.wrong_gender != 0 {
+        s += 30.0;
+    }
+    if r.third_party == 1 {
+        s += 50.0;
+    }
+    s
+}
+
+/// A tri-state flag as the tables write it.
+fn maybe(v: Option<&str>) -> i8 {
+    match v.map(str::trim) {
+        Some("True") | Some("1") => 1,
+        Some("False") | Some("-1") => -1,
+        _ => 0,
+    }
+}
+
+/// The general rules (the `Socializing` table's `<GR>` rows; the first is the defaults).
+pub fn general_rules(xml: &str) -> Vec<SocialRule> {
+    let rows = records(xml, "GR");
+    let Some(defaults) = rows.first().cloned() else { return Vec::new() };
+    let field = |r: &HashMap<String, String>, k: &str| r.get(k).filter(|v| !v.is_empty()).or_else(|| defaults.get(k).filter(|v| !v.is_empty())).cloned().unwrap_or_default();
+    let num = |r: &HashMap<String, String>, k: &str, d: f32| field(r, k).trim().parse::<f32>().unwrap_or(d);
+    rows.iter()
+        .skip(1)
+        .map(|r| {
+            let mut rule = SocialRule {
+                commodity: field(r, "GC"),
+                result: field(r, "Result"),
+                speech_act: field(r, "SpAct").replace("None", ""),
+                third_party: num(r, "ThP", 0.0) as u8,
+                stc_positive: num(r, "STCPos", 0.0) as i8,
+                st_commodity: field(r, "STCom"),
+                st_context: field(r, "STContext"),
+                mood: num(r, "Mood", -101.0),
+                relationship: field(r, "LTRelationship"),
+                liking: (num(r, "LTRMin", -100.0), num(r, "LTRMax", 100.0)),
+                actor_traits: list(Some(&field(r, "AcTr"))),
+                target_traits: list(Some(&field(r, "TaTr"))),
+                skill: field(r, "Skill"),
+                skill_level: num(r, "SkillLevel", 1.0),
+                actor_increased: field(r, "AIE"),
+                actor_reduced: field(r, "ARE"),
+                target_increased: field(r, "TIE"),
+                target_reduced: field(r, "TRE"),
+                proc_test: field(r, "Proc"),
+                partner: num(r, "Partner", 0.0) as i8,
+                wrong_gender: num(r, "WrongGender", 0.0) as i8,
+                repetition: num(r, "Repetition", 0.0) as i8,
+                betrayed: num(r, "TargetBetrayed", 0.0) as i8,
+                actor_ages: list(Some(&field(r, "ActorAge"))),
+                target_ages: list(Some(&field(r, "TargetAge"))),
+                ltr_override: num(r, "LTROverride", 0.0),
+                spec: num(r, "Spec", 0.0),
+            };
+            if rule.spec == 0.0 {
+                rule.spec = rule_specificity(&rule, true);
+            }
+            rule
+        })
+        .collect()
+}
+
+/// A social's own rules (its `<LHS>`) and outcomes (its `<RHS>`), from its `<Rules>`.
+fn social_rules(body: &str) -> (Vec<SocialRule>, Vec<SocialOutcome>) {
+    let Some(rules) = body.find("<Rules>").map(|s| &body[s..]) else { return (Vec::new(), Vec::new()) };
+    let mut out = Vec::new();
+    let mut rest = rules;
+    while let Some(a) = rest.find("<LHS ") {
+        let head_end = rest[a..].find('>').map_or(rest.len(), |e| a + e);
+        let head = &rest[a..head_end];
+        let end = if head.ends_with('/') { head_end } else { rest[head_end..].find("</LHS>").map_or(rest.len(), |e| head_end + e) };
+        let inner = &rest[head_end..end];
+        rest = &rest[end..];
+        // (`~` before what must not be so: the tables' `is`/`val` flags false.)
+        let flagged = |v: Option<&str>, is: Option<&str>| match v.filter(|v| !v.is_empty() && *v != "Undefined" && *v != "None") {
+            Some(v) if is == Some("True") => v.to_string(),
+            Some(v) => format!("~{v}"),
+            None => String::new(),
+        };
+        let lltr = tag(inner, "LLTR");
+        let sc = tag(inner, "SC");
+        let sk = tag(inner, "SK");
+        let se = tag(inner, "SE");
+        let age = tag(inner, "AGE");
+        let traits = tag(inner, "Trait");
+        let mb = tag(inner, "MAYBE");
+        let num = |t: Option<&str>, k: &str, d: f32| t.and_then(|t| attr(t, k)).and_then(|v| v.parse::<f32>().ok()).unwrap_or(d);
+        let effect = |k: &str| se.and_then(|t| attr(t, k)).filter(|v| *v != "None").unwrap_or("").to_string();
+        let mut rule = SocialRule {
+            result: attr(head, "com").unwrap_or("").to_string(),
+            speech_act: attr(head, "SA").filter(|v| *v != "None").unwrap_or("").to_string(),
+            third_party: attr(head, "TP").and_then(|v| v.parse().ok()).unwrap_or(0),
+            stc_positive: attr(head, "cp").and_then(|v| v.parse().ok()).unwrap_or(0),
+            st_commodity: flagged(sc.and_then(|t| attr(t, "com")), sc.and_then(|t| attr(t, "is"))),
+            st_context: flagged(sc.and_then(|t| attr(t, "stc")), sc.and_then(|t| attr(t, "val"))),
+            mood: num(lltr, "mood", -101.0),
+            relationship: flagged(lltr.and_then(|t| attr(t, "key")), lltr.and_then(|t| attr(t, "is"))),
+            liking: (num(lltr, "min", -100.0), num(lltr, "max", 100.0)),
+            actor_traits: list(traits.and_then(|t| attr(t, "x"))),
+            target_traits: list(traits.and_then(|t| attr(t, "y"))),
+            skill: match sk.and_then(|t| attr(t, "key")).filter(|v| !v.is_empty() && *v != "None") {
+                Some(k) if sk.and_then(|t| attr(t, "is")) == Some("True") => k.to_string(),
+                Some(k) => format!("~{k}"),
+                None => String::new(),
+            },
+            skill_level: num(sk, "val", -1.0),
+            actor_increased: effect("x"),
+            actor_reduced: effect("remX"),
+            target_increased: effect("y"),
+            target_reduced: effect("remY"),
+            proc_test: attr(head, "ProcTest").unwrap_or("").to_string(),
+            partner: maybe(mb.and_then(|t| attr(t, "part"))),
+            wrong_gender: maybe(mb.and_then(|t| attr(t, "wgp"))),
+            repetition: maybe(mb.and_then(|t| attr(t, "rep"))),
+            betrayed: maybe(mb.and_then(|t| attr(t, "tb"))),
+            actor_ages: list(age.and_then(|t| attr(t, "x"))),
+            target_ages: list(age.and_then(|t| attr(t, "y"))),
+            ltr_override: attr(head, "ltro").and_then(|v| v.parse().ok()).unwrap_or(0.0),
+            spec: attr(head, "val").and_then(|v| v.parse().ok()).unwrap_or(0.0),
+            commodity: String::new(),
+        };
+        if rule.spec == 0.0 {
+            rule.spec = rule_specificity(&rule, false);
+        }
+        out.push(rule);
+    }
+    let mut outcomes = Vec::new();
+    let mut rest = rules;
+    while let Some(a) = rest.find("<RHS ") {
+        let head_end = rest[a..].find('>').map_or(rest.len(), |e| a + e);
+        let head = &rest[a..head_end];
+        let end = rest[head_end..].find("</RHS>").map_or(rest.len(), |e| head_end + e);
+        let inner = &rest[head_end..end];
+        rest = &rest[end..];
+        let hex = |v: Option<&str>| v.and_then(|v| u32::from_str_radix(v.trim().trim_start_matches("0x"), 16).ok()).unwrap_or(0);
+        let bits = tag(inner, "LTRBits");
+        outcomes.push(SocialOutcome {
+            result: attr(head, "com").unwrap_or("").to_string(),
+            amount: tag(inner, "TUN").and_then(|t| attr(t, "val")).and_then(|v| v.parse().ok()).unwrap_or(40.0),
+            bits_add: hex(bits.and_then(|t| attr(t, "val"))),
+            bits_remove: hex(bits.and_then(|t| attr(t, "rem"))),
+        });
+    }
+    (out, outcomes)
+}
+
+/// The short-term contexts (the `Socializing` table's `<STC>` rows; the first is the defaults).
+pub fn stc_infos(xml: &str) -> Vec<StcInfo> {
+    let rows = records(xml, "STC");
+    rows.iter()
+        .skip(1)
+        .filter(|r| r.get("Commodity").is_some_and(|c| !c.is_empty()))
+        .map(|r| {
+            let num = |k: &str| r.get(k).and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(0.0);
+            StcInfo {
+                name: r.get("Name").cloned().unwrap_or_default(),
+                commodity: r.get("Commodity").cloned().unwrap_or_default(),
+                min: num("RangeMin"),
+                max: num("RangeMax"),
+                x2: num("X2"),
+                x3: num("X3"),
+                y: [num("Y1"), num("Y2"), num("Y3")],
+                decay_above: num("LTRDecayFromAbove"),
+                decay_below: num("LTRDecayFromBelow"),
+                mood_to_accept: num("MoodThresholdForAcceptRequest"),
+                charisma: num("CharismaIncrease"),
+            }
+        })
+        .collect()
 }
 
 /// How an object breaks and is repaired, as the game tunes each class (its `RepairableComponent`
@@ -517,6 +878,8 @@ pub fn social_actions(xml: &str, name: &dyn Fn(&str) -> String) -> Vec<SocialAct
         let graph = tag(body, "Graph");
         let text = tag(body, "Text").and_then(|t| attr(t, "key")).unwrap_or(key);
         let liking = tag(aa, "ALTR").and_then(|t| Some((attr(t, "min")?.parse().ok()?, attr(t, "max")?.parse().ok()?)));
+        let (rules, outcomes) = social_rules(body);
+        let misc = tag(body, "Misc");
         out.push(SocialAction {
             key: key.to_string(),
             name: Some(name(text)).filter(|n| !n.is_empty()).unwrap_or_else(|| key.to_string()),
@@ -535,6 +898,11 @@ pub fn social_actions(xml: &str, name: &dyn Fn(&str) -> String) -> Vec<SocialAct
             graph: graph.and_then(|t| attr(t, "val")).unwrap_or("").to_string(),
             suite: graph.and_then(|t| attr(t, "suite")).unwrap_or("").to_string(),
             topics: Vec::new(),
+            speech_act: tag(body, "SA").and_then(|t| attr(t, "key")).filter(|v| *v != "None").unwrap_or("").to_string(),
+            chances: misc.and_then(|t| attr(t, "c")).and_then(|v| v.parse().ok()).unwrap_or(2),
+            recharges: misc.and_then(|t| attr(t, "r")).and_then(|v| v.parse().ok()).unwrap_or(2),
+            rules,
+            outcomes,
         });
     }
     out
@@ -648,6 +1016,14 @@ pub struct GameDataBaked {
     /// How each class of stove and grill cooks.
     #[serde(default)]
     pub appliance_cooking: Vec<ApplianceCooking>,
+    /// The game's general social rules and its short-term contexts.
+    #[serde(default)]
+    pub general_rules: Vec<SocialRule>,
+    #[serde(default)]
+    pub stcs: Vec<StcInfo>,
+    /// The socials offered in each context and relationship.
+    #[serde(default)]
+    pub social_menus: Vec<SocialMenu>,
     pub buffs: Vec<BuffInfo>,
     pub traits: Vec<TraitInfo>,
     pub skills: Vec<SkillInfo>,
@@ -1865,8 +2241,14 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         }
     }
     if found {
-        // (And the topics they're offered under.)
+        // (How they go: the general rules and the conversation's contexts.)
+        if let Some(s) = xml("Socializing") {
+            out.general_rules = general_rules(&s);
+            out.stcs = stc_infos(&s);
+        }
+        // (And the topics they're offered under, and the contexts.)
         if let Some(t) = xml("SocializingActionAvailability") {
+            out.social_menus = social_menus(&t);
             out.social_topics = topic_infos(&t);
             for (topic, action, first) in social_topics(&t) {
                 for s in out.socials.iter_mut().filter(|s| s.key == action) {
@@ -3040,6 +3422,59 @@ mod tests {
                 ("Buff Fired".to_string(), "Ask About Work".to_string(), false),
             ]
         );
+    }
+
+    #[test]
+    fn social_rules_are_read_as_the_game_has_them() {
+        let xml = r#"<Social><Action key="Chat" com="Friendly"><SA key="Talk" /><AD val="0x00080512"><Misc ITLA="10" r="6" c="4" /></AD>
+            <AA><AGE x="C,T,Y,A,E" y="C,T,Y,A,E" /><Available auto="True" udo="False" /></AA>
+            <Rules>
+            <RHS com="Friendly" state="friendly"><Anim /><TUN is="True" lvl="20" /></RHS>
+            <RHS com="Boring" state="boring"><Anim /><TUN val="80" /><LTRBits val="0x800" rem="0x100" /></RHS>
+            <LHS com="Boring" val="54" TP="2"><SC /><SE x="None" remX="None" y="None" remY="None" /><AGE x="T,Y,A,E" y="" /><Trait y="~Friendly" /><MAYBE rep="True" /></LHS>
+            <LHS com="Friendly" val="53" TP="2"><SC stc="Awkward" val="True" /><Trait /><MAYBE /></LHS>
+            <LHS com="Boring" val="52" TP="2"><SC com="Creepy" is="True" /><Trait /><MAYBE /></LHS>
+            <LHS com="Awkward" val="1000" ProcTest="SociallyAwkwardChanceTest"><LLTR max="70" /><SC /><MAYBE rep="False" /></LHS>
+            <LHS com="Amorous" ltro="5"><LLTR mood="0" min="10" /><SC /><MAYBE /></LHS>
+            </Rules></Action></Social>"#;
+        let chat = &social_actions(xml, &|k| k.to_string())[0];
+        assert_eq!((chat.speech_act.as_str(), chat.chances, chat.recharges), ("Talk", 4, 6));
+        assert_eq!(chat.outcomes, vec![
+            SocialOutcome { result: "Friendly".into(), amount: 40.0, bits_add: 0, bits_remove: 0 },
+            SocialOutcome { result: "Boring".into(), amount: 80.0, bits_add: 0x800, bits_remove: 0x100 },
+        ]);
+        let r = &chat.rules;
+        assert_eq!((r[0].result.as_str(), r[0].spec, r[0].third_party, r[0].repetition), ("Boring", 54.0, 2, 1));
+        assert_eq!((r[0].target_traits.clone(), r[0].actor_ages.len()), (vec!["~Friendly".to_string()], 4));
+        assert_eq!(r[1].st_context, "Awkward");
+        assert_eq!(r[2].st_commodity, "Creepy");
+        assert_eq!((r[3].liking, r[3].proc_test.as_str(), r[3].repetition), ((-100.0, 70.0), "SociallyAwkwardChanceTest", -1));
+        // (Where the data gives none, the game's own reckoning: 1, +10 for the mood, +3.55 for the liking.)
+        assert_eq!((r[4].mood, r[4].ltr_override), (0.0, 5.0));
+        assert!((r[4].spec - 14.55).abs() < 1e-4);
+        let gr = r#"<Socializing><GR><Key></Key><GC></GC><SpAct>None</SpAct><ThP>0</ThP><STCPos>0</STCPos><Mood>-101</Mood><LTRMin>-100</LTRMin><LTRMax>100</LTRMax><SkillLevel>1</SkillLevel><Spec>0</Spec><Result></Result></GR>
+            <GR><Key>GR</Key><GC>Friendly</GC><STCPos>1</STCPos><LTRMin>-19</LTRMin><Spec>1.9</Spec><Result>Friendly</Result></GR>
+            <GR><Key>GR</Key><GC>Insulting</GC><Result>Insulting</Result></GR></Socializing>"#;
+        let rules = general_rules(gr);
+        assert_eq!(rules.len(), 2);
+        assert_eq!((rules[0].commodity.as_str(), rules[0].stc_positive, rules[0].liking, rules[0].spec), ("Friendly", 1, (-19.0, 100.0), 1.9));
+        assert!((rules[1].spec - 0.9).abs() < 1e-6, "a general rule asking nothing");
+    }
+
+    #[test]
+    fn social_menus_are_read_by_context_and_relationship() {
+        let xml = r#"<SocializingActionAvailability><SAA><Cat></Cat><Gr></Gr><FPA></FPA><SPA></SPA></SAA>
+            <SAA><Cat>Flirty</Cat></SAA><SAA><Gr>All</Gr></SAA><SAA><FPA>Wave</FPA></SAA>
+            <SAA><Gr>Default</Gr></SAA><SAA><FPA>Flirt</FPA></SAA>
+            <SAA><Gr>Partner</Gr></SAA><SAA><Gr>Spouse</Gr></SAA><SAA><FPA>Kiss</FPA></SAA><SAA><FPA>Make Out</FPA></SAA>
+            <SAA><Cat>OK</Cat></SAA><SAA><Gr>Default</Gr></SAA><SAA><FPA>Chat</FPA></SAA></SocializingActionAvailability>"#;
+        let m = social_menus(xml);
+        let of = |stc: &str, g: &str| m.iter().find(|x| x.stc == stc && x.group == g).map(|x| x.socials.clone()).unwrap_or_default();
+        assert_eq!(of("Flirty", "All"), vec!["Wave"]);
+        assert_eq!(of("Flirty", "Default"), vec!["Flirt"]);
+        assert_eq!(of("Flirty", "Partner"), vec!["Kiss", "Make Out"], "consecutive groups share what follows");
+        assert_eq!(of("Flirty", "Spouse"), vec!["Kiss", "Make Out"]);
+        assert_eq!(of("OK", "Default"), vec!["Chat"]);
     }
 
     #[test]

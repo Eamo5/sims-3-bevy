@@ -67,6 +67,7 @@ mod idles;
 mod faces;
 mod privacy;
 mod decor;
+mod conversation;
 mod laundry;
 mod reactions;
 mod jobpaper;
