@@ -20,6 +20,24 @@ impl Plugin for HolidaysPlugin {
     }
 }
 
+/// Snowflake Day's holiday bonus at work (every career's `HolidayBonusChance` and
+/// `HolidayBonusSalaryPercentage`, and the game's interpolations): how likely, its days' pay to
+/// start with, what good work adds (a quarter of a day's pay at performance 25, two at 100), what
+/// long service adds (taken as the most, two days: hiring dates aren't kept) and what never
+/// calling in sick adds (two days), and above how many days' pay it's average, and large.
+const BONUS_CHANCE: f64 = 0.75;
+const BONUS_DAYS: f32 = 2.0;
+const BONUS_SERVICE_DAYS: f32 = 2.0;
+const BONUS_HEALTHY_DAYS: f32 = 2.0;
+const BONUS_AVERAGE: f32 = 2.0;
+const BONUS_LARGE: f32 = 4.5;
+
+/// A working Sim's Snowflake Day bonus: how many days' pay, as the game reckons it.
+pub fn bonus_days(performance: f32) -> f32 {
+    let perf = 0.25 + (performance.clamp(25.0, 100.0) - 25.0) / 75.0 * 1.75;
+    BONUS_DAYS + perf + BONUS_SERVICE_DAYS + BONUS_HEALTHY_DAYS
+}
+
 /// How much warmer Sims take to socials on Snowflake Day (and to romance on Love Day): the game's
 /// `kWinterHolidaySocialLikingBonus`, `kSpringHolidaySocialLikingBonus`.
 pub const HOLIDAY_LIKING: f32 = 10.0;
@@ -65,8 +83,9 @@ fn holidays(
     layouts: Option<Res<crate::layout::UiAssets>>,
     mut notes: ResMut<crate::interact::Notifications>,
     mut sound: MessageWriter<crate::sound::PlaySound>,
-    mut sims: Query<&mut crate::life::Moodlets, With<Sim>>,
+    mut sims: Query<(&Sim, &mut crate::life::Moodlets, Option<&crate::careers::Job>, Has<crate::sim::HouseholdMember>)>,
     mut told: Local<(Option<u32>, Option<u32>)>,
+    mut household: Option<ResMut<crate::interact::Household>>,
 ) {
     let Some(w) = weather else { return };
     let day = clock.day();
@@ -83,8 +102,30 @@ fn holidays(
         told.1 = Some(holiday);
         notes.push(say("Starting", format!("{name} is here!")));
         sound.write(crate::sound::PlaySound::ui(sting));
-        for mut m in &mut sims {
+        let mut rng = rand::rng();
+        for (sim, mut m, job, member) in &mut sims {
             m.add(moodlet, clock.minutes);
+            // (Snowflake Day: the working household's holiday bonus, or word there's none.)
+            let Some(job) = job.filter(|_| member && season == Season::Winter) else { continue };
+            use rand::Rng;
+            let bonus = |key: &str, amount: i64| {
+                layouts
+                    .as_ref()
+                    .and_then(|l| l.localize(&format!("Gameplay/Careers/HolidayBonus:{key}")))
+                    .map(|t| t.replace("{0.SimFirstName}", &sim.first).replace("{1.Money}", &format!("§{amount}")))
+            };
+            if !rng.random_bool(BONUS_CHANCE) {
+                notes.push(bonus("NoBonusTNS", 0).unwrap_or_else(|| format!("{} didn't get a holiday bonus this year.", sim.first)));
+                continue;
+            }
+            let days = bonus_days(job.performance);
+            let amount = (days * job.hours() * job.info().hourly as f32) as i64;
+            if let Some(h) = household.as_mut() {
+                h.funds += amount;
+            }
+            let key = if days < BONUS_AVERAGE { "SmallBonusTNS" } else if days < BONUS_LARGE { "AverageBonusTNS" } else { "LargeBonusTNS" };
+            notes.push(bonus(key, amount).unwrap_or_else(|| format!("{} got a holiday bonus of §{amount}.", sim.first)));
+            sound.write(crate::sound::PlaySound::ui("sting_winter_holiday_bonus"));
         }
         info!("holiday: {name}");
     }
@@ -93,6 +134,13 @@ fn holidays(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn holiday_bonuses_go_by_work_done() {
+        // (Never sick and long employed: six days' pay and a quarter, to eight at the best work.)
+        assert!((bonus_days(0.0) - 6.25).abs() < 1e-4);
+        assert!((bonus_days(100.0) - 8.0).abs() < 1e-4);
+    }
 
     #[test]
     fn a_holiday_comes_two_days_before_the_seasons_end() {

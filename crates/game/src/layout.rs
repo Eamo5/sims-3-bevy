@@ -384,9 +384,16 @@ impl UiAssets {
         self.by_id.get(&s3pkg::fnv64(name)).and_then(|&i| self.data.layouts[i].1.iter().find_map(|w| w.1.find(id)))
     }
 
-    /// The game's words for a text key (`Ui/Caption/...:Name`).
+    /// The game's words for a text key (`Ui/Caption/...:Name`). A text that's only
+    /// `{Variation.N}` has its words in N variations (`..._1` to `..._N`): one of them.
     pub fn localize(&self, key: &str) -> Option<String> {
-        self.strings.get(&s3pkg::fnv64(key)).cloned()
+        let s = self.strings.get(&s3pkg::fnv64(key)).cloned()?;
+        if let Some(n) = s.trim().strip_prefix("{Variation.").and_then(|r| r.strip_suffix('}')).and_then(|n| n.parse::<u32>().ok()) {
+            use rand::Rng;
+            let pick = rand::rng().random_range(1..=n.max(1));
+            return self.strings.get(&s3pkg::fnv64(&format!("{key}_{pick}"))).or_else(|| self.strings.get(&s3pkg::fnv64(&format!("{key}_1")))).cloned().or(Some(s));
+        }
+        Some(s)
     }
 
     /// The game's words for a text key's hash (a world file's name and description).

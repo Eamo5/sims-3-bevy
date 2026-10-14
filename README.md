@@ -548,7 +548,9 @@ installation is unreachable.
   Each season has its holiday, as the game's: Love Day, Leisure Day, Spooky Day and Snowflake
   Day, two days before the season ends; word of it the day before, and on the day at five in
   the morning its sting, the game's own notice and its moodlet for everyone (Spring Fling,
-  Summer Fun, Spooky Time, Holiday Cheer), no school, and work a paid day off; on Snowflake
+  Summer Fun, Spooky Time, Holiday Cheer), no school, and work a paid day off (and on
+  Snowflake Day, three times in four, a holiday bonus of days' pay, more for good work, in the
+  game's own words); on Snowflake
   Day Sims take more warmly to every social, and on Love Day to romance. After heavy
   snow (within twelve hours, with the ground's snow at least medium) it's a snow day: the
   game's notice and sting, and no school. The season
