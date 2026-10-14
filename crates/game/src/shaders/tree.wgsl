@@ -17,7 +17,8 @@
 struct TreeBillboard {
     // The views round the tree, in order: uv rectangles (u0, v0, u1, v1).
     views: array<vec4<f32>, 16>,
-    // x: how many views, y: the atlas's width / height, z: the tree's height (metres).
+    // x: how many views, y: the atlas's width / height, z: the tree's height (metres), w: the
+    // atlas's width in texels.
     params: vec4<f32>,
     // (The seasons, for the fragment shader.)
     season: vec4<f32>,
@@ -85,16 +86,20 @@ fn vertex(v: Vertex) -> VertexOutput {
 #ifdef VERTEX_UVS_A
     out.uv = vec2<f32>(mix(r.x, r.z, v.uv.x), mix(r.y, r.w, v.uv.y));
 #endif
-    // Lit as a whole crown from above, so every side looks alike.
+    // Lit as a rounded crown, as the game's leaves are (theirs face out from the tree's middle):
+    // the side the sun's on bright, the far side and underneath in shade.
+    let across = (v.uv.x - 0.5) * 2.0;
+    let rise = (0.5 - v.uv.y) * 2.0;
+    let round = normalize(right * (across * 0.6) + vec3<f32>(0.0, 1.0, 0.0) * (rise * 0.45 + 0.5) + back * 0.75);
 #ifdef PREPASS_PIPELINE
 #ifdef NORMAL_PREPASS_OR_DEFERRED_PREPASS
-    out.world_normal = vec3<f32>(0.0, 1.0, 0.0);
+    out.world_normal = round;
 #endif
 #ifdef MOTION_VECTOR_PREPASS
     out.previous_world_position = out.world_position;
 #endif
 #else
-    out.world_normal = vec3<f32>(0.0, 1.0, 0.0);
+    out.world_normal = round;
 #endif
 #ifdef VERTEX_OUTPUT_INSTANCE_INDEX
     out.instance_index = v.instance_index;

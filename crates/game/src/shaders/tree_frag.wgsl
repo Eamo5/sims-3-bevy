@@ -1,3 +1,7 @@
+// Close up, where the picture's texels are blown up into a blur, the leaves are drawn in: each
+// texel's patch of green broken into a few leaves, lit and shaded, with ragged edges, as the
+// game's own leaf cards are up close.
+//
 // Trees through the seasons: in fall the leaves of the picture turn orange, gold and red and
 // then drop, clusters at a time, leaving the trunk and branches bare through winter until they
 // grow back in spring; evergreens keep theirs. Snow frosts them over.
@@ -36,6 +40,32 @@ fn fragment(
 #endif
     // The leaves: the greens of the picture.
     let leafy = smoothstep(0.005, 0.05, c.g - max(c.r, c.b) * 0.92);
+    // (How blown up the picture is: screen pixels to a texel.)
+    let dims = vec2<f32>(tree.params.w, tree.params.w / max(tree.params.y, 0.01));
+    let texel = uv * dims;
+    let near = smoothstep(1.6, 4.0, 1.0 / max(length(fwidth(texel)), 1e-4));
+    if (near > 0.0 && leafy > 0.0) {
+        // A few leaves to a texel: each a lit middle and shaded gaps, a little lighter or
+        // darker than its neighbours.
+        // (Skewed so the leaves don't line up in rows.)
+        let g = vec2<f32>(texel.x * 0.9 + texel.y * 0.35, texel.y * 0.8 - texel.x * 0.3);
+        let cell = floor(g);
+        var leaf = 0.0;
+        for (var j = -1; j <= 1; j++) {
+            for (var i = -1; i <= 1; i++) {
+                let n = cell + vec2<f32>(f32(i), f32(j));
+                let at = n + vec2<f32>(hash(n), hash(n + vec2<f32>(17.3, 5.1)));
+                let d = g - at;
+                // (An oval leaf, turned its own way.)
+                let a = hash(n + vec2<f32>(8.1, 2.9)) * 6.2831853;
+                let r = vec2<f32>(d.x * cos(a) + d.y * sin(a), (d.y * cos(a) - d.x * sin(a)) * 1.7);
+                leaf = max(leaf, (1.0 - smoothstep(0.15, 0.6, length(r))) * mix(0.75, 1.0, hash(n + vec2<f32>(3.7, 9.2))));
+            }
+        }
+        let shade = mix(0.8, 1.08, leaf);
+        let k = near * leafy;
+        c = vec4<f32>(c.rgb * mix(1.0, shade, k), clamp(c.a + (leaf - 0.5) * 0.7 * k * (1.0 - c.a) * 2.0, 0.0, 1.0));
+    }
     if (!evergreen) {
         // (Whole clusters of leaves go at a time.)
         if (tree.season.y > 0.0 && leafy > 0.5 && hash(floor(uv * 700.0)) < tree.season.y) {

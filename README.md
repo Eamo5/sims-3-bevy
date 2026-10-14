@@ -30,7 +30,9 @@ installation is unreachable.
   World Adventures destinations Shang Simla, Al Simhara and Champs Les Sims) with their
   terrain paint, the game's own terrain colour and shadow maps,
   roads with markings, water, placed objects and SpeedTree trees drawn from their own 360°
-  billboard pictures (each tree turned to the view, showing the side of it that's seen, and
+  billboard pictures (each tree turned to the view, showing the side of it that's seen, lit as
+  a rounded crown the way the game's leaves are, bright on the sun's side and shaded on the
+  far side and underneath, close up drawn in with leaves where the picture would blur, and
   casting its own outline as a shadow), under a sky made from the game's own sky textures: drifting clouds from
   its cloud noise, the sun's halo, the moon and the night's stars, coloured through the day.
 - **Houses**: every lot's real walls (with door and window openings) and floors in the very

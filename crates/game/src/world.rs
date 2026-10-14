@@ -43,7 +43,8 @@ pub struct TreeExt {
 pub struct TreeBillboard {
     /// The views round the tree, in order (uv rectangles).
     pub views: [Vec4; 16],
-    /// x: how many views, y: the atlas's width / height, z: the tree's height.
+    /// x: how many views, y: the atlas's width / height, z: the tree's height, w: the atlas's
+    /// width in texels.
     pub params: Vec4,
     /// x: fall colour, y: leaves gone, z: snow (0..1), w: 1 for an evergreen (`weather`).
     pub season: Vec4,
@@ -311,6 +312,8 @@ fn spawn_world_content(
         else {
             continue;
         };
+        // (The atlas's width in texels, for the leaves drawn in close up.)
+        let texels = images.get(&tex).map_or(1024.0, |i| i.width() as f32);
         let base = StandardMaterial {
             base_color_texture: Some(tex),
             // (Leaves cut out over the pixel's samples, alpha to coverage: soft at their edges
@@ -330,8 +333,11 @@ fn spawn_world_content(
             }
             let evergreen = evergreen(&k);
             debug!("tree {}: {}", k.name, if evergreen { "evergreen" } else { "deciduous" });
-            let billboard =
-                TreeBillboard { views, params: Vec4::new(k.views.len().min(16) as f32, k.atlas_aspect, k.height.max(0.3), 0.0), season: Vec4::new(0.0, 0.0, 0.0, evergreen as u8 as f32) };
+            let billboard = TreeBillboard {
+                views,
+                params: Vec4::new(k.views.len().min(16) as f32, k.atlas_aspect, k.height.max(0.3), texels),
+                season: Vec4::new(0.0, 0.0, 0.0, evergreen as u8 as f32),
+            };
             let (mesh, aabb) = billboard_quad(&k);
             billboards.insert(k.kind, (meshes.add(mesh), tree_mats.add(TreeMaterial { base, extension: TreeExt { billboard } }), aabb));
             continue;
