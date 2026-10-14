@@ -14,7 +14,7 @@ pub struct GameDialogsPlugin;
 
 impl Plugin for GameDialogsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (opportunity_dialog, question_dialogs).run_if(in_state(crate::PlayMode::Live)));
+        app.add_systems(Update, (opportunity_dialog, question_dialogs, type_into_box).run_if(in_state(crate::PlayMode::Live)));
     }
 }
 
@@ -265,6 +265,67 @@ const SHOP_ALTERNATE: u32 = 0xffd2_ebf7;
 const SHOP_TEXT: u32 = 0xff00_3263;
 const SHOP_SELECTED: u32 = 0xff9c_c8f0;
 
+// `StringInputDialog`'s: its title, words, the box typed into, OK and Cancel.
+const NAME_TITLE: u32 = 5;
+const NAME_MESSAGE: u32 = 1;
+const NAME_BOX: u32 = 2;
+const NAME_OK: u32 = 3;
+const NAME_CANCEL: u32 = 4;
+
+/// The text in a dialog's box that's typed into.
+#[derive(Component)]
+pub struct TypedBox;
+
+/// While a question wants a name typed (a newborn's): the keys into it (the suggested name to
+/// start), Backspace taking one off, Enter for OK; the box showing it.
+fn type_into_box(
+    questions: Res<crate::dialog::Questions>,
+    mut typed: ResMut<crate::dialog::Typed>,
+    mut keys: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    mut boxes: Query<&mut Text, With<TypedBox>>,
+    mut ok: Query<(&crate::dialog::AnswerButton, &mut Interaction)>,
+    mut asking: Local<Option<Entity>>,
+) {
+    use bevy::input::keyboard::Key;
+    let Some(crate::dialog::Question::NameBaby { sim, suggested }) = questions.queue.front().map(|a| &a.about) else {
+        *asking = None;
+        keys.clear();
+        return;
+    };
+    if *asking != Some(*sim) {
+        *asking = Some(*sim);
+        typed.0 = suggested.clone();
+    }
+    let mut enter = false;
+    for ev in keys.read() {
+        if !ev.state.is_pressed() {
+            continue;
+        }
+        match &ev.logical_key {
+            Key::Character(c) if typed.0.chars().count() < 20 => typed.0.push_str(c.as_str()),
+            Key::Space if typed.0.chars().count() < 20 => typed.0.push(' '),
+            Key::Backspace => {
+                typed.0.pop();
+            }
+            Key::Enter => enter = true,
+            _ => {}
+        }
+    }
+    for mut t in &mut boxes {
+        let shown = format!("{}|", typed.0);
+        if t.0 != shown {
+            t.0 = shown;
+        }
+    }
+    if enter && !typed.0.trim().is_empty() {
+        for (b, mut i) in &mut ok {
+            if b.0 == 0 {
+                *i = Interaction::Pressed;
+            }
+        }
+    }
+}
+
 /// A row of the shop's table, a slot of the wish chooser (the answer it stands for).
 #[derive(Component)]
 struct ChoiceRow(usize);
@@ -305,6 +366,8 @@ fn question_dialogs(
             crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 2 => "TwoButtonDialog",
             // (A career event's choice: the game's two button dialog, yes and no.)
             crate::dialog::Question::CareerEvent { .. } => "TwoButtonDialog",
+            // (A newborn's name: the game's box to type it in.)
+            crate::dialog::Question::NameBaby { .. } => "StringInputDialog",
             crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 3 => "ThreeButtonDialog",
             _ => return,
         };
@@ -338,6 +401,28 @@ fn question_dialogs(
                     if let Some(t) = s.text_of(b) {
                         commands.entity(t).insert(Text::new(a.label.clone()));
                     }
+                }
+            }
+            crate::dialog::Question::NameBaby { suggested, .. } => {
+                // The title ("It's a Girl!"), the words, the name in its box, OK.
+                for w in s.all_with(NAME_TITLE) {
+                    if let Some(t) = s.text_of(w) {
+                        commands.entity(t).insert(Text::new(ask.title.clone()));
+                    }
+                }
+                if let Some(t) = s.id(NAME_MESSAGE).and_then(|w| s.text_of(w)) {
+                    commands.entity(t).insert(Text::new(ask.text.clone()));
+                }
+                if let Some(b) = s.id(NAME_BOX) {
+                    let t = s.text_of(b).unwrap_or(b);
+                    commands.entity(t).insert((Text::new(format!("{suggested}|")), TypedBox));
+                }
+                if let Some(b) = s.id(NAME_OK) {
+                    commands.entity(b).insert(crate::dialog::AnswerButton(0));
+                }
+                // (A name's needed: no cancelling it.)
+                if let Some(b) = s.id(NAME_CANCEL) {
+                    commands.entity(b).insert(Visibility::Hidden);
                 }
             }
             crate::dialog::Question::LifetimeWish { sim, .. } => {

@@ -125,11 +125,11 @@ pub fn lot_title(lot: &LotInfo, display: &str) -> String {
         return display.split(" — ").next().unwrap_or(display).to_string();
     }
     // (The name's first word that says what it is: past "Com_", "RH_", "Shell_" and the like,
-    // whatever their case.)
+    // whatever their case, and a number ("45_Hospital").)
     let raw = lot
         .internal_name
         .split('_')
-        .find(|p| !p.is_empty() && !["com", "res", "rh", "shell", "bb"].contains(&p.to_ascii_lowercase().as_str()))
+        .find(|p| !p.is_empty() && !p.chars().all(|c| c.is_ascii_digit()) && !["com", "res", "rh", "shell", "bb"].contains(&p.to_ascii_lowercase().as_str()))
         .unwrap_or(&lot.internal_name);
     let mut out = String::new();
     for (i, ch) in raw.chars().enumerate() {

@@ -11,6 +11,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a_male_walk",
     "a_male_jog",
     "a_female_walk_pregnant",
+    // (A pregnancy's contractions, belly rubs and home birth, the mother's side and the baby's.)
+    "a_pregnancy_",
+    "a2b_pregnancy_homeBirth",
     // (The game's walk styles: fast walk, fast jog, run, fast run, on fire.)
     "a_male_fastjog",
     "a_male_run",

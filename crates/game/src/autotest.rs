@@ -3556,7 +3556,7 @@ fn auto_action(
                 if let Some(e) = mum
                     && !*expecting
                 {
-                    commands.entity(e).insert(crate::little::Pregnancy { since: clock.minutes - 3.0 * 1440.0 + 5.0, other_parent: None, stage: 2 });
+                    commands.entity(e).insert(crate::little::Pregnancy { stage: 2, hour: 71, ..crate::little::Pregnancy::new(clock.minutes - 3.0 * 1440.0 + 5.0, None) });
                     *expecting = true;
                 }
             }
@@ -3567,7 +3567,7 @@ fn auto_action(
     // "Pregnant": the selected Sim (a grown woman) is visibly expecting, a day and a half along.
     if name == "Pregnant" {
         if let Ok((e, _)) = members.iter().find(|(e, s)| s.female && s.age.is_grown() && s.age != crate::sim::Age::Child && sel.contains(*e)).ok_or(()) {
-            commands.entity(e).insert(crate::little::Pregnancy { since: clock.minutes - 1.5 * 1440.0, other_parent: None, stage: 2 });
+            commands.entity(e).insert(crate::little::Pregnancy { stage: 2, hour: 36, ..crate::little::Pregnancy::new(clock.minutes - 1.5 * 1440.0, None) });
         }
         *done = true;
         return;
@@ -3575,8 +3575,19 @@ fn auto_action(
     // "Baby": a grown woman of the household is about to give birth.
     if name == "Baby" {
         if let Some((e, _)) = members.iter().find(|(_, s)| s.female && s.age.is_grown() && s.age != crate::sim::Age::Child) {
-            let since = clock.minutes - 3.0 * 1440.0 + 20.0;
-            commands.entity(e).insert(crate::little::Pregnancy { since, other_parent: None, stage: 2 });
+            // (BIRTH=hospital: off to the hospital in labour, an hour and a half to go.)
+            let hospital = std::env::var("BIRTH").is_ok_and(|b| b == "hospital");
+            let since = clock.minutes - 3.0 * 1440.0 + if hospital { 90.0 } else { 20.0 };
+            // (BIRTH_MOOD=<mood>: her mood all along.)
+            let mood = std::env::var("BIRTH_MOOD").ok().and_then(|m| m.parse::<f64>().ok()).unwrap_or(0.0) * (clock.minutes - since);
+            commands.entity(e).insert(crate::little::Pregnancy { stage: 2, hour: 69, mood, ..crate::little::Pregnancy::new(since, None) });
+            if hospital && let Some(lot) = world.data.lots.iter().position(|l| l.internal_name.to_ascii_lowercase().contains("hospital")) {
+                commands.entity(e).queue(move |mut w: EntityWorldMut| {
+                    if let Some(mut q) = w.get_mut::<crate::interact::ActionQueue>() {
+                        q.push_player(crate::interact::Action::new("Go to the Hospital", crate::interact::ActionKind::Visit { lot, activity: crate::little::BIRTH_TASK }, false));
+                    }
+                });
+            }
         }
         *done = true;
         return;

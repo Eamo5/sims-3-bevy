@@ -342,9 +342,19 @@ installation is unreachable.
 - **WooHoo**: WooHoo and Try for Baby, accepted, take the couple to the nearest free double
   bed (the game's `FindNearestBed`): into bed on either side, the game's WooHoo under the covers
   (its two parts, the bed's covers rolling with it), and out again, closer for it.
-- **Families grow**: couples can try for a baby; pregnancy brings morning sickness, then the
-  game's pregnant waddle once she's showing (and no running), then a baby in a crib (the
-  game's swaddled baby model). Grown-ups feed, change, cuddle and settle babies (cradled in
+- **Families grow**: couples can try for a baby; the pregnancy goes by the game's hours:
+  morning sickness from hour 8 (and now and then till the bump shows at 24), the pregnant
+  waddle from 32 (and no running), and at 70 the waters break (puddles), Baby is Coming, and
+  contractions every few minutes (the game's animations), "Go to the Hospital" on her own
+  menu while it lasts. At 72 the baby comes, at home (the game's home-birth animation) or at
+  the hospital, where she's in a little better spirits; twins one time in twenty, triplets
+  one in a hundred (three and a half times as likely with a Fertility Treatment), room
+  allowing. Each baby's traits come of her mood over the pregnancy, as the game's do: an
+  unhappy one gives bad ones, an ordinary one two inherited (from the parents half the time),
+  a happy one one, a very happy one none, the rest the player's to choose in the traits
+  picker; each is named in the game's box (its words saying what the baby was born with),
+  It's a Boy, a Girl, Twins or Triplets for both parents, and a crib for each (the game's
+  swaddled baby model). Grown-ups feed, change, cuddle and settle babies (cradled in
   their arms) and pick up, read to and put toddlers to bed; toddlers crawl about until a
   grown-up has taught them to walk (three lessons, with the game's kneel-and-hold-hands
   animation; talking is taught the same way, and both show on the toddler's Skills tab), play

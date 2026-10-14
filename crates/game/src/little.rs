@@ -86,7 +86,8 @@ impl Plugin for LittlePlugin {
         app.add_message::<Lesson>()
             .add_systems(Update, (lessons, crawl_speed).run_if(in_state(PlayMode::Live)))
             .add_message::<Conceive>()
-            .add_systems(Update, (conceive, pregnancy, little_life, put_down).chain().run_if(in_state(PlayMode::Live)))
+            .init_resource::<NewbornPicks>()
+            .add_systems(Update, (conceive, pregnancy, name_babies, newborn_traits_picker, little_life, put_down).chain().run_if(in_state(PlayMode::Live)))
             .add_systems(PostUpdate, carry_follow.after(bevy::transform::TransformSystems::Propagate));
     }
 }
@@ -98,16 +99,60 @@ pub struct Conceive {
     pub b: Entity,
 }
 
-/// A pregnant Sim: when it started (game minutes), the other parent, and what's been shown.
+/// A pregnant Sim: when it started (game minutes), the other parent, how far along (`stage`:
+/// 1 sick in the mornings, 2 showing, 3 the walk, 4 in labour), her mood over it all (mood ×
+/// game minutes, as the game's `PregnancyScore`), and the last hour gone by.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Pregnancy {
     pub since: f64,
     pub other_parent: Option<Entity>,
     pub stage: u8,
+    pub mood: f64,
+    pub hour: u32,
 }
 
-/// Days from conception to birth (the game's normal pregnancy).
-const PREGNANCY_DAYS: f64 = 3.0;
+impl Pregnancy {
+    pub fn new(since: f64, other_parent: Option<Entity>) -> Self {
+        Self { since, other_parent, stage: 0, mood: 0.0, hour: 0 }
+    }
+
+    /// Her mood on average over the pregnancy so far.
+    pub fn average_mood(&self, now: f64) -> f32 {
+        let minutes = (now - self.since).max(1.0);
+        (self.mood / minutes) as f32
+    }
+}
+
+/// The game's pregnancy, by the hour (`Pregnancy` tuning): sick from hour 8 (and now and then
+/// till 24, one hour in ten), showing at 24, the pregnant walk from 32, the waters breaking and
+/// contractions at 70, the baby at 72.
+const HOUR_SICK: u32 = 8;
+const HOUR_SHOWING: u32 = 24;
+const HOUR_WALK: u32 = 32;
+const HOUR_LABOUR: u32 = 70;
+pub const HOURS_OF_PREGNANCY: u32 = 72;
+const CHANCE_OF_NAUSEA: f64 = 0.1;
+/// A contraction every five minutes in labour; four puddles when the waters break.
+const CONTRACTION_MINUTES: f64 = 5.0;
+const WATER_PUDDLES: usize = 4;
+/// Twins one time in twenty, triplets one in a hundred; three and a half times as likely with a
+/// Fertility Treatment. A hospital birth's 10 more mood towards the baby's traits.
+const CHANCE_OF_TWINS: f64 = 0.05;
+const CHANCE_OF_TRIPLETS: f64 = 0.01;
+const FERTILITY_MULTIPLIER: f64 = 3.5;
+const HOSPITAL_MOOD_BONUS: f32 = 10.0;
+/// The most Sims a household can have.
+const HOUSEHOLD_MAX: usize = 8;
+
+/// In labour: when the next contraction comes.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Labour {
+    pub next: f64,
+}
+
+/// Off to the hospital to have the baby (a rabbit hole's "activity", lasting till the birth).
+pub const BIRTH_TASK: usize = 997;
+pub static HAVE_BABY: crate::rabbitholes::Activity = crate::rabbitholes::act("Have the Baby", 24.0 * 60.0, 0, [0.0, 0.0, -2.0, 0.0, 0.0, 0.0], None);
 
 fn conceive(
     mut commands: Commands,
@@ -129,17 +174,149 @@ fn conceive(
         }
         info!("conceive: {} and {} are expecting", a.first, b.first);
         let (mother, father) = if a.female { (ev.a, ev.b) } else { (ev.b, ev.a) };
-        commands.entity(mother).insert(Pregnancy { since: clock.minutes, other_parent: Some(father), stage: 0 });
+        commands.entity(mother).insert(Pregnancy::new(clock.minutes, Some(father)));
         play.write(PlaySound::ui("sting_baby_conception").with_volume(0.6));
     }
 }
 
-/// Morning sickness, the bump, then the birth.
+/// How the babies' traits come out of the mother's mood over the pregnancy (the game's
+/// `TraitOutcome`, by `kMoodLevel*`: under -49, under 0, under 31, under 66, and above).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TraitOutcome {
+    Horrible,
+    Bad,
+    Average,
+    Good,
+    Excellent,
+}
+
+impl TraitOutcome {
+    pub fn of(mood: f32) -> Self {
+        if mood < -49.0 {
+            TraitOutcome::Horrible
+        } else if mood < 0.0 {
+            TraitOutcome::Bad
+        } else if mood < 31.0 {
+            TraitOutcome::Average
+        } else if mood < 66.0 {
+            TraitOutcome::Good
+        } else {
+            TraitOutcome::Excellent
+        }
+    }
+}
+
+/// How many babies come (the game's `GetNumForBirth`): one, twins one time in twenty, triplets
+/// one in a hundred (more likely with a Fertility Treatment), no more than the household has
+/// room for.
+pub fn babies_born(roll: f64, fertility: bool, room: usize) -> usize {
+    let m = if fertility { FERTILITY_MULTIPLIER } else { 1.0 };
+    let n = if roll < CHANCE_OF_TRIPLETS * m { 3 } else if roll < CHANCE_OF_TWINS * m { 2 } else { 1 };
+    n.min(room.max(1))
+}
+
+/// A newborn's traits as the game's `Genetics.InheritTraits` draws them: in an unhappy
+/// pregnancy, the bad ones (horrible and negative ones, by their weights); in an ordinary one,
+/// two from the parents (each half the time one of theirs, else one at random); a happy one,
+/// one; a very happy one, none, the rest the player's to choose (`chosen`: how many of the
+/// two are left to them). `score` and `weight` are a trait's (from the game's tables).
+pub fn newborn_traits(
+    outcome: TraitOutcome,
+    parents: &[crate::life::Trait],
+    score: &dyn Fn(crate::life::Trait) -> (i32, f32, bool),
+    rng: &mut impl Rng,
+) -> (Vec<crate::life::Trait>, usize) {
+    use crate::life::Trait;
+    let slots = crate::life::trait_slots(Age::Baby);
+    let pool: Vec<Trait> = Trait::ALL.iter().copied().filter(|t| t.allowed_at(Age::Baby) && score(*t).2).collect();
+    let mut out: Vec<Trait> = Vec::new();
+    // (Weighted from a list, fitting with what's drawn.)
+    let draw = |from: &[Trait], out: &Vec<Trait>, rng: &mut dyn rand::RngCore| -> Option<Trait> {
+        let fits: Vec<Trait> = from.iter().copied().filter(|t| t.compatible(out)).collect();
+        let total: f32 = fits.iter().map(|t| score(*t).1.max(0.1)).sum();
+        if fits.is_empty() || total <= 0.0 {
+            return None;
+        }
+        let mut x = rng.random::<f32>() * total;
+        for t in &fits {
+            x -= score(*t).1.max(0.1);
+            if x <= 0.0 {
+                return Some(*t);
+            }
+        }
+        fits.last().copied()
+    };
+    let bad: Vec<Trait> = pool.iter().copied().filter(|t| score(*t).0 < 0).collect();
+    let good: Vec<Trait> = pool.iter().copied().filter(|t| score(*t).0 >= 0).collect();
+    let inherited: Vec<Trait> = parents.iter().copied().filter(|t| t.allowed_at(Age::Baby)).collect();
+    // (One the parents have half the time, else one from all there are.)
+    let genetic = |out: &Vec<Trait>, rng: &mut dyn rand::RngCore| -> Option<Trait> {
+        if rng.random_bool(0.5)
+            && let Some(t) = draw(&inherited, out, rng)
+        {
+            return Some(t);
+        }
+        draw(&pool, out, rng)
+    };
+    let push = |t: Option<Trait>, out: &mut Vec<Trait>| {
+        if let Some(t) = t
+            && out.len() < slots
+        {
+            out.push(t);
+        }
+    };
+    match outcome {
+        TraitOutcome::Horrible => {
+            for _ in 0..slots {
+                let t = draw(&bad, &out, rng);
+                push(t, &mut out);
+            }
+        }
+        TraitOutcome::Bad => {
+            let t = draw(&bad, &out, rng);
+            push(t, &mut out);
+            let either: Vec<Trait> = bad.iter().chain(&good).copied().collect();
+            let t = draw(&either, &out, rng);
+            push(t, &mut out);
+        }
+        TraitOutcome::Average => {
+            for _ in 0..slots {
+                let t = genetic(&out, rng);
+                push(t, &mut out);
+            }
+        }
+        TraitOutcome::Good => {
+            let t = genetic(&out, rng);
+            push(t, &mut out);
+        }
+        TraitOutcome::Excellent => {}
+    }
+    let chosen = slots.saturating_sub(out.len());
+    (out, chosen)
+}
+
+/// Newborns whose last traits are the player's to choose, one at a time (after their names).
+#[derive(Resource, Default)]
+pub struct NewbornPicks(pub std::collections::VecDeque<Entity>);
+
+/// The game's pregnancy hour by hour (sick in the mornings, the bump, the walk, labour with its
+/// waters and contractions, "Go to the Hospital" there to be had), and the birth at hour 72:
+/// at home, or at the hospital in a little better spirits.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn pregnancy(
     mut commands: Commands,
     clock: Res<GameClock>,
-    mut mothers: Query<(Entity, &Sim, &mut Pregnancy, &mut Moodlets, &Transform, Has<HouseholdMember>)>,
+    delta: Res<crate::clock::SimDelta>,
+    mut mothers: Query<(
+        Entity,
+        &Sim,
+        &mut Pregnancy,
+        &mut Moodlets,
+        &Transform,
+        Has<HouseholdMember>,
+        &crate::life::Mood,
+        (Option<&mut Labour>, Option<&mut crate::rabbitholes::AtRabbitHole>, Option<&mut crate::interact::ActionQueue>, &crate::nav::Floor, Option<&crate::wishes::Wishes>),
+    )>,
     cribs: Query<(&GameObject, &Transform)>,
     mut notes: ResMut<Notifications>,
     mut play: MessageWriter<PlaySound>,
@@ -155,100 +332,267 @@ fn pregnancy(
         ResMut<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>,
         ResMut<crate::simbody::SimTextures>,
     ),
-    (mut family, fathers): (ResMut<crate::family::Genealogy>, Query<&Sim, Without<Pregnancy>>),
+    (mut family, fathers, members): (ResMut<crate::family::Genealogy>, Query<(&Sim, Option<&crate::wishes::Wishes>), Without<Pregnancy>>, Query<(), With<HouseholdMember>>),
+    (mut questions, mut picks, ui, words, mut puddles, mut topics): (
+        ResMut<crate::dialog::Questions>,
+        ResMut<NewbornPicks>,
+        Option<Res<crate::icons::GameUi>>,
+        Option<Res<crate::layout::UiAssets>>,
+        MessageWriter<crate::puddles::AddPuddle>,
+        MessageWriter<crate::topics::AddTopic>,
+    ),
 ) {
-    for (mother, sim, mut p, mut moodlets, tf, member) in &mut mothers {
-        let days = (clock.minutes - p.since) / 1440.0;
-        if p.stage == 0 && days > 0.25 {
-            p.stage = 1;
-            moodlets.add(MoodletKind::Nauseous, clock.minutes);
-            if member {
-                notes.push(format!("{} isn't feeling well this morning…", sim.first));
+    let mut rng = rand::rng();
+    for (mother, sim, mut p, mut moodlets, tf, member, mood, (labour, at, mut queue, floor, wishes)) in &mut mothers {
+        // (Her mood all along, for the baby's traits.)
+        p.mood += mood.0 as f64 * delta.0 as f64;
+        let hours = ((clock.minutes - p.since) / 60.0).max(0.0) as u32;
+        while p.hour < hours.min(HOURS_OF_PREGNANCY) {
+            p.hour += 1;
+            let h = p.hour;
+            if h == HOUR_SICK || (h > HOUR_SICK && h < HOUR_SHOWING && rng.random_bool(CHANCE_OF_NAUSEA)) {
+                moodlets.add(MoodletKind::Nauseous, clock.minutes);
+                if p.stage == 0 {
+                    p.stage = 1;
+                    if member {
+                        notes.push(format!("{} isn't feeling well this morning…", sim.first));
+                    }
+                }
+            }
+            if h == HOUR_SHOWING {
+                p.stage = 2;
+                moodlets.add(MoodletKind::Pregnant, clock.minutes);
+                if member {
+                    notes.push(format!("{} is pregnant!", sim.first));
+                }
+            }
+            if h == HOUR_WALK {
+                p.stage = 3;
+                topics.write(crate::topics::AddTopic::new(mother, "Pregnant"));
+            }
+            if h == HOUR_LABOUR {
+                // The waters break; the contractions begin.
+                p.stage = 4;
+                for _ in 0..WATER_PUDDLES {
+                    puddles.write(crate::puddles::AddPuddle { at: tf.translation, level: floor.0, lasts: None });
+                }
+                moodlets.remove(MoodletKind::Pregnant);
+                moodlets.add(MoodletKind::BabyIsComing, clock.minutes);
+                commands.entity(mother).insert(Labour { next: clock.minutes });
+                if member {
+                    notes.push(format!("{}'s baby is coming! She can go to the hospital, or have the baby at home.", sim.first));
+                    play.write(PlaySound::ui("sting_baby_conception").with_volume(0.6));
+                }
             }
         }
-        if p.stage == 1 && days > 1.0 {
-            p.stage = 2;
-            moodlets.add(MoodletKind::Pregnant, clock.minutes);
-            if member {
-                notes.push(format!("{} is pregnant!", sim.first));
+        // A contraction every few minutes, when she isn't busy with one.
+        if let (Some(mut l), Some(q)) = (labour, queue.as_mut())
+            && at.is_none()
+            && clock.minutes >= l.next
+        {
+            l.next = clock.minutes + CONTRACTION_MINUTES;
+            if q.0.iter().all(|a| !a.label.starts_with("Contraction")) {
+                let clips: &'static [&'static str] = if rng.random_bool(0.5) { &["a_pregnancy_contractions_x"] } else { &["a_pregnancy_contractions2_x"] };
+                q.0.push_front(crate::interact::Action::new(
+                    "Contraction",
+                    crate::interact::ActionKind::Outro { clips, then: None, secs: 4.0, stand_at: None, target: mother },
+                    false,
+                ));
             }
         }
-        if days < PREGNANCY_DAYS {
+        if p.hour < HOURS_OF_PREGNANCY {
             continue;
         }
-        commands.entity(mother).remove::<Pregnancy>();
+        // The birth: at the hospital, or at home.
+        let hospital = at.as_ref().is_some_and(|a| std::ptr::eq(a.activity, &HAVE_BABY));
+        if let Some(mut a) = at {
+            if hospital {
+                // (Home again with the babies.)
+                a.until = a.until.min(clock.minutes + 25.0);
+            } else {
+                // (Out at a rabbit hole otherwise: the baby waits till she's home.)
+                continue;
+            }
+        }
+        commands.entity(mother).remove::<(Pregnancy, Labour)>();
         moodlets.remove(MoodletKind::Pregnant);
+        moodlets.remove(MoodletKind::BabyIsComing);
         if !member {
             continue;
         }
-        // The baby: a boy or a girl, with two traits, named after nobody in particular.
-        let mut rng = rand::rng();
-        let female = rng.random_bool(0.5);
-        let mut baby = random_sim(&mut rng, &sim.last, Some(female), Age::Baby);
-        baby.skin = sim.skin;
-        baby.hair = if rng.random_bool(0.5) { sim.hair } else { baby.hair };
-        // Eyes like the mother's or the father's.
-        let father = p.other_parent.and_then(|f| fathers.get(f).ok());
-        baby.eyes = match father {
-            Some(f) if rng.random_bool(0.5) => f.eyes,
-            _ if rng.random_bool(0.85) || father.is_some() => sim.eyes,
-            _ => baby.eyes,
-        };
-        // A face between their parents'.
-        baby.face = crate::simbody::inherited_face(sim, father, &mut rng);
-        // The crib: the household's own, or a new one beside the mother.
-        let crib = cribs.iter().filter(|(o, _)| o.kind == ObjectKind::Crib).min_by(|a, b| {
-            a.1.translation.distance(tf.translation).total_cmp(&b.1.translation.distance(tf.translation))
-        });
-        let (crib_pos, crib_rot) = match crib {
-            Some((_, ctf)) => (ctf.translation, ctf.rotation),
-            None => {
-                let pos = tf.translation + tf.rotation * Vec3::new(1.2, 0.0, 0.6);
-                let key = catalog.entries.iter().filter(|e| e.kind == ObjectKind::Crib && e.price > 0).min_by_key(|e| e.price).map(|e| e.key);
-                if let Some(key) = key {
-                    let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-                    crate::home::spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, key, pos, 0.0);
-                }
-                (pos, Quat::IDENTITY)
-            }
-        };
-        let model = cas.as_ref().and_then(|cas| {
-            let outfit = crate::simbody::pick_outfit(cas, &baby, &mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(baby.look));
-            crate::simbody::build_sim_model(&data.0, cas, &baby, &outfit, crate::simbody::tone_of(&baby))
-        });
-        let name = baby.first.clone();
-        // The family tree: the mother, and the father if he's known.
-        family.note(sim.id, &sim.full_name(), sim.female);
-        family.note(baby.id, &baby.full_name(), baby.female);
-        family.add_parent(baby.id, sim.id);
-        if let Some(f) = p.other_parent.and_then(|f| fathers.get(f).ok()) {
-            family.note(f.id, &f.full_name(), f.female);
-            family.add_parent(baby.id, f.id);
+        if !hospital
+            && let Some(mut q) = queue
+        {
+            q.0.retain(|a| !a.label.starts_with("Contraction"));
+            q.0.push_front(crate::interact::Action::new(
+                "Have Baby",
+                crate::interact::ActionKind::Outro { clips: &["a2b_pregnancy_homeBirth_x"], then: None, secs: 8.0, stand_at: None, target: mother },
+                false,
+            ));
         }
-        let mut sctx = SimSpawnCtx {
-            assets: &sim_assets,
-            render: crate::simbody::SimRenderCtx {
-                meshes: &mut meshes,
-                images: &mut images,
-                mats: &mut mats,
-                skin_mats: &mut skin_mats,
-                bindposes: &mut bindposes,
-                textures: &mut textures,
-            },
+        let father = p.other_parent.and_then(|f| fathers.get(f).ok());
+        let fertility = crate::wishes::has(wishes, "FertilityTreatment") || father.is_some_and(|(_, w)| crate::wishes::has(w, "FertilityTreatment"));
+        let n = babies_born(rng.random::<f64>(), fertility, HOUSEHOLD_MAX.saturating_sub(members.iter().count()));
+        let average = p.average_mood(clock.minutes) + if hospital { HOSPITAL_MOOD_BONUS } else { 0.0 };
+        let outcome = TraitOutcome::of(average);
+        info!("birth: {} has {n} at {} (mood {average:.0}: {outcome:?})", sim.first, if hospital { "the hospital" } else { "home" });
+        let parent_traits: Vec<crate::life::Trait> = sim.traits.iter().chain(father.map(|f| f.0.traits.iter()).into_iter().flatten()).copied().collect();
+        let score = |t: crate::life::Trait| ui.as_ref().and_then(|u| u.trait_info(t)).map_or((10, 10.0, true), |i| (i.score, i.weight, i.random));
+        // The cribs: the household's own, nearest first, and new ones beside her for the rest.
+        let mut free: Vec<(Vec3, Quat)> = cribs.iter().filter(|(o, _)| o.kind == ObjectKind::Crib).map(|(_, c)| (c.translation, c.rotation)).collect();
+        free.sort_by(|a, b| a.0.distance(tf.translation).total_cmp(&b.0.distance(tf.translation)));
+        let mut girls = 0;
+        for k in 0..n {
+            let female = rng.random_bool(0.5);
+            girls += female as usize;
+            let mut baby = random_sim(&mut rng, &sim.last, Some(female), Age::Baby);
+            baby.skin = sim.skin;
+            baby.hair = if rng.random_bool(0.5) { sim.hair } else { baby.hair };
+            // Eyes like the mother's or the father's; a face between theirs.
+            baby.eyes = match father {
+                Some((f, _)) if rng.random_bool(0.5) => f.eyes,
+                _ if rng.random_bool(0.85) || father.is_some() => sim.eyes,
+                _ => baby.eyes,
+            };
+            baby.face = crate::simbody::inherited_face(sim, father.map(|f| f.0), &mut rng);
+            // (The rest the player's, in the traits picker after the name.)
+            let (traits, chosen) = newborn_traits(outcome, &parent_traits, &score, &mut rng);
+            baby.traits = traits;
+            let (crib_pos, crib_rot) = match free.get(k) {
+                Some(&c) => c,
+                None => {
+                    let pos = tf.translation + tf.rotation * Vec3::new(1.2 + k as f32 * 1.4, 0.0, 0.6);
+                    let key = catalog.entries.iter().filter(|e| e.kind == ObjectKind::Crib && e.price > 0).min_by_key(|e| e.price).map(|e| e.key);
+                    if let Some(key) = key {
+                        let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+                        crate::home::spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, key, pos, 0.0);
+                    }
+                    (pos, Quat::IDENTITY)
+                }
+            };
+            let model = cas.as_ref().and_then(|cas| {
+                let outfit = crate::simbody::pick_outfit(cas, &baby, &mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(baby.look));
+                crate::simbody::build_sim_model(&data.0, cas, &baby, &outfit, crate::simbody::tone_of(&baby))
+            });
+            // The family tree: the mother, and the father if he's known.
+            family.note(sim.id, &sim.full_name(), sim.female);
+            family.note(baby.id, &baby.full_name(), baby.female);
+            family.add_parent(baby.id, sim.id);
+            if let Some((f, _)) = father {
+                family.note(f.id, &f.full_name(), f.female);
+                family.add_parent(baby.id, f.id);
+            }
+            let prompt = birth_prompt(ui.as_deref(), words.as_deref(), outcome, sim, &baby);
+            let title = if baby.female { "It's a Girl!" } else { "It's a Boy!" };
+            let suggested = baby.first.clone();
+            let mut sctx = SimSpawnCtx {
+                assets: &sim_assets,
+                render: crate::simbody::SimRenderCtx {
+                    meshes: &mut meshes,
+                    images: &mut images,
+                    mats: &mut mats,
+                    skin_mats: &mut skin_mats,
+                    bindposes: &mut bindposes,
+                    textures: &mut textures,
+                },
+            };
+            let e = spawn_sim_full(&mut commands, &mut sctx, baby, crib_pos + Vec3::Y * CRIB_HEIGHT, model);
+            commands.entity(e).insert((
+                Transform::from_translation(crib_pos + Vec3::Y * CRIB_HEIGHT).with_rotation(crib_rot),
+                HouseholdMember,
+                crate::interact::ActionQueue::default(),
+                crate::interact::Skills::default(),
+                InCrib(crib_pos, crib_rot),
+                crate::aging::Aging::default(),
+                DespawnOnExit(AppState::InGame),
+            ));
+            // Named as the game's: a box for each, the traits it came with said.
+            questions.ask(crate::dialog::Ask {
+                about: crate::dialog::Question::NameBaby { sim: e, suggested },
+                icon: String::new(),
+                heading: format!("{}'s baby", sim.first),
+                title: title.to_string(),
+                text: prompt,
+                answers: vec![crate::dialog::Answer { label: "OK".into(), detail: String::new(), icon: String::new() }],
+            });
+            if chosen > 0 {
+                picks.0.push_back(e);
+            }
+        }
+        // It's a Boy, a Girl, Twins or Triplets, for both parents.
+        let kind = match (n, girls) {
+            (3.., _) => MoodletKind::ItsTriplets,
+            (2, _) => MoodletKind::ItsTwins,
+            (_, 1) => MoodletKind::ItsAGirl,
+            _ => MoodletKind::NewBaby,
         };
-        let e = spawn_sim_full(&mut commands, &mut sctx, baby, crib_pos + Vec3::Y * CRIB_HEIGHT, model);
-        commands.entity(e).insert((
-            Transform::from_translation(crib_pos + Vec3::Y * CRIB_HEIGHT).with_rotation(crib_rot),
-            HouseholdMember,
-            crate::interact::ActionQueue::default(),
-            crate::interact::Skills::default(),
-            InCrib(crib_pos, crib_rot),
-            crate::aging::Aging::default(),
-            DespawnOnExit(AppState::InGame),
-        ));
-        moodlets.add(MoodletKind::NewBaby, clock.minutes);
+        moodlets.add(kind, clock.minutes);
+        if let Some(f) = p.other_parent {
+            let now = clock.minutes;
+            commands.entity(f).queue(move |mut w: EntityWorldMut| {
+                if let Some(mut m) = w.get_mut::<Moodlets>() {
+                    m.add(kind, now);
+                }
+            });
+        }
         play.write(PlaySound::ui("sting_good_event").with_volume(0.7));
-        notes.push(format!("{} had a baby {}! Welcome to the family, {name}.", sim.first, if female { "girl" } else { "boy" }));
+        let said = match n {
+            3 => "triplets".to_string(),
+            2 => "twins".to_string(),
+            _ => format!("a baby {}", if girls == 1 { "girl" } else { "boy" }),
+        };
+        notes.push(format!("{} had {said}{}!", sim.first, if hospital { " at the hospital" } else { "" }));
+    }
+}
+
+/// The game's words for a newborn as it's named, by how the traits came out
+/// (`Gameplay/CAS/Genetics:MakeBabyDesc...`).
+fn birth_prompt(ui: Option<&crate::icons::GameUi>, words: Option<&crate::layout::UiAssets>, outcome: TraitOutcome, mother: &Sim, baby: &Sim) -> String {
+    let name = |i: usize| baby.traits.get(i).map_or(String::new(), |t| ui.and_then(|u| u.trait_info(*t)).map_or(t.name().to_string(), |i| i.name));
+    let (key, n) = match outcome {
+        TraitOutcome::Horrible => ("MakeBabyDescTwoTraitsHorrible", 2),
+        TraitOutcome::Bad => ("MakeBabyDescTwoTraitsBad", 2),
+        TraitOutcome::Average => ("MakeBabyDescTwoTraits", 2),
+        TraitOutcome::Good => ("MakeBabyDescOneTraits", 1),
+        TraitOutcome::Excellent => ("MakeBabyDesc", 0),
+    };
+    let text = words.and_then(|w| {
+        let key = format!("Gameplay/CAS/Genetics:{key}");
+        (if baby.female { w.localize(&format!("{key}_Female")) } else { None }).or_else(|| w.localize(&key))
+    });
+    match text {
+        Some(t) => t.replace("{0.SimFirstName}", &mother.first).replace("{1.String}", &name(0)).replace("{2.String}", &name(1)),
+        None => match n {
+            2 => format!("{} gave birth! The baby is {} and {}. What should the baby be named?", mother.first, name(0), name(1)),
+            1 => format!("{} gave birth! The baby is {}. What should the baby be named?", mother.first, name(0)),
+            _ => format!("{} gave birth! What should the baby be named?", mother.first),
+        },
+    }
+}
+
+/// A newborn's name, as the player typed it (or the one suggested).
+fn name_babies(mut answers: MessageReader<crate::dialog::Answered>, typed: Res<crate::dialog::Typed>, mut sims: Query<&mut Sim>, mut family: ResMut<crate::family::Genealogy>) {
+    for a in answers.read() {
+        if let crate::dialog::Question::NameBaby { sim, suggested } = &a.about
+            && let Ok(mut s) = sims.get_mut(*sim)
+        {
+            let name = typed.0.trim();
+            s.first = if name.is_empty() { suggested.clone() } else { name.chars().take(20).collect() };
+            family.note(s.id, &s.full_name(), s.female);
+        }
+    }
+}
+
+/// Once named, a newborn whose last traits are the player's: the traits picker for them.
+fn newborn_traits_picker(mut commands: Commands, mut picks: ResMut<NewbornPicks>, questions: Res<crate::dialog::Questions>, open: Option<Res<crate::midlife::TraitPicker>>, sims: Query<&Sim>) {
+    if open.is_some() || !questions.queue.is_empty() {
+        return;
+    }
+    while let Some(e) = picks.0.pop_front() {
+        if let Ok(s) = sims.get(e) {
+            commands.insert_resource(crate::midlife::TraitPicker::newborn(e, &s.traits));
+            return;
+        }
     }
 }
 
@@ -407,3 +751,51 @@ fn little_life(
 const CRY_BABY: crate::anim::ActionClip = crate::anim::ActionClip::new(Some("b2o_crib_cry_start_y"), &["b2o_crib_cry_loop"]);
 const CRY_TODDLER: crate::anim::ActionClip = crate::anim::ActionClip::new(Some("p2o_crib_cry_start_y"), &["p2o_crib_cry_loop"]);
 
+#[cfg(test)]
+mod birth_tests {
+    use super::*;
+    use crate::life::Trait;
+
+    #[test]
+    fn twins_and_triplets_come_as_the_games_odds_have_them() {
+        assert_eq!(babies_born(0.5, false, 6), 1);
+        assert_eq!(babies_born(0.03, false, 6), 2);
+        assert_eq!(babies_born(0.005, false, 6), 3);
+        // (A Fertility Treatment: three and a half times as likely.)
+        assert_eq!(babies_born(0.15, true, 6), 2);
+        assert_eq!(babies_born(0.03, true, 6), 3);
+        // (No more than the household has room for.)
+        assert_eq!(babies_born(0.005, false, 1), 1);
+    }
+
+    #[test]
+    fn a_newborns_traits_come_of_the_mothers_mood() {
+        assert_eq!(TraitOutcome::of(-60.0), TraitOutcome::Horrible);
+        assert_eq!(TraitOutcome::of(-10.0), TraitOutcome::Bad);
+        assert_eq!(TraitOutcome::of(20.0), TraitOutcome::Average);
+        assert_eq!(TraitOutcome::of(40.0), TraitOutcome::Good);
+        assert_eq!(TraitOutcome::of(80.0), TraitOutcome::Excellent);
+        let bad = [Trait::Grumpy, Trait::Loser, Trait::Slob, Trait::Unlucky];
+        let score = |t: Trait| (if bad.contains(&t) { -10 } else { 10 }, 10.0, true);
+        let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(3);
+        // (Unhappy: both bad.)
+        for _ in 0..20 {
+            let (t, chosen) = newborn_traits(TraitOutcome::Horrible, &[], &score, &mut rng);
+            assert_eq!((t.len(), chosen), (2, 0));
+            assert!(t.iter().all(|x| bad.contains(x)), "{t:?}");
+        }
+        // (Happy: one drawn, one the player's; very happy: both the player's.)
+        let (t, chosen) = newborn_traits(TraitOutcome::Good, &[Trait::Friendly], &score, &mut rng);
+        assert_eq!((t.len(), chosen), (1, 1));
+        let (t, chosen) = newborn_traits(TraitOutcome::Excellent, &[Trait::Friendly], &score, &mut rng);
+        assert_eq!((t.len(), chosen), (0, 2));
+        // (Ordinary: two, a parent's often enough.)
+        let mut parents = 0;
+        for _ in 0..200 {
+            let (t, _) = newborn_traits(TraitOutcome::Average, &[Trait::Friendly], &score, &mut rng);
+            assert_eq!(t.len(), 2);
+            parents += t.contains(&Trait::Friendly) as usize;
+        }
+        assert!(parents > 60, "{parents}");
+    }
+}

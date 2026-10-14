@@ -110,6 +110,9 @@ pub struct SavedSim {
     /// Pregnant since (game minutes), with the other parent's id and the stage shown so far.
     #[serde(default)]
     pub pregnancy: Option<(f64, Option<u64>, u8)>,
+    /// Her mood over the pregnancy (mood × minutes), for the baby's traits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pregnancy_mood: Option<f64>,
     /// Body shape: weight and fitness.
     #[serde(default)]
     pub shape: Option<(f32, f32)>,
@@ -489,6 +492,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         next_wish_offer: None,
         school_visit: None,
         pregnancy: None,
+        pregnancy_mood: None,
         shape: Some((sim.weight, sim.fitness)),
         opportunities: Vec::new(),
         opportunities_done: Vec::new(),
@@ -898,6 +902,7 @@ fn save_game(
             homework_progress: homework.map_or(0.0, |h| h.0),
             school_visit: rabbit.filter(|r| std::ptr::eq(r.activity, &crate::rabbitholes::SCHOOL)).map(|r| (r.inside_from, r.until)),
             pregnancy: pregnancy.map(|p| (p.since, p.other_parent.and_then(|o| ids.get(&o).copied()), p.stage)),
+            pregnancy_mood: pregnancy.map(|p| p.mood),
             shape: Some((sim.weight, sim.fitness)),
             opportunities: opps.map(|o| o.active.iter().filter_map(|a| Some((guid(a.index)?, a.deadline))).collect()).unwrap_or_default(),
             opportunities_done: opps.map(|o| o.done.clone()).unwrap_or_default(),
@@ -1164,7 +1169,12 @@ pub(crate) fn apply_loaded_game(
         }
         if let Some((since, other, stage)) = s.pregnancy {
             let other_parent = other.and_then(|o| by_id.get(&o).copied());
-            ec.insert(crate::little::Pregnancy { since, other_parent, stage });
+            // (The hours gone by aren't gone over again: what's due comes at the next.)
+            let hour = (((game.minutes - since) / 60.0).max(0.0) as u32).min(crate::little::HOURS_OF_PREGNANCY - 1);
+            ec.insert(crate::little::Pregnancy { since, other_parent, stage, mood: s.pregnancy_mood.unwrap_or(0.0), hour });
+            if stage >= 4 {
+                ec.insert(crate::little::Labour { next: game.minutes });
+            }
         }
         match &s.job {
             Some(j) => {

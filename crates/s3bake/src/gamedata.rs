@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 104;
+pub const GAMEDATA_VERSION: u32 = 105;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -64,6 +64,15 @@ pub struct TraitInfo {
     pub category: String,
     /// A lifetime reward's cost in lifetime happiness (`RewardMotive`, `RewardShop`... traits).
     pub points: u32,
+    /// A personality trait's score (the same `Points`: +10 good, -10 bad, -20 or less horrible)
+    /// and its weight when drawn at random (`RandomWeight`), as a newborn's are; whether it's
+    /// ever drawn so (`CanBeLearnedRandomly`).
+    #[serde(default)]
+    pub score: i32,
+    #[serde(default)]
+    pub weight: f32,
+    #[serde(default)]
+    pub random: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -2468,7 +2477,10 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             icon: get(&f, "ThumbFilename"),
             icon_small: get(&f, "ThumbPieMenu"),
             category: get(&f, "Category"),
-            points: num(&f, "Points") as u32,
+            points: num(&f, "Points").max(0.0) as u32,
+            score: num(&f, "Points") as i32,
+            weight: num(&f, "RandomWeight"),
+            random: !get(&f, "CanBeLearnedRandomly").eq_ignore_ascii_case("false"),
             hex,
         });
     }

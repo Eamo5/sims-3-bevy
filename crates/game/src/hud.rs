@@ -1061,7 +1061,7 @@ fn world_click(
             Query<(Option<&crate::music::StereoOn>, Has<crate::interact::Unmade>, Option<&crate::grime::Grime>)>,
         ),
     ),
-    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q): (
+    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -1072,6 +1072,7 @@ fn world_click(
         Res<crate::family::Genealogy>,
         Query<&crate::doorbell::AtTheDoor>,
         Query<(&crate::pets::Pet, &GlobalTransform)>,
+        Query<(), With<crate::little::Labour>>,
     ),
 ) {
     // (Not in buy mode, nor in Edit Town: a click there picks lots.)
@@ -1130,6 +1131,12 @@ fn world_click(
                 let mut options = Vec::new();
                 if crate::jog::can_jog(sim) && on_lot.get(actor).is_err() {
                     options.push(("Go Jogging".to_string(), ActionKind::Jog { home: Vec2::ZERO }));
+                }
+                // (In labour: off to the hospital to have the baby, as the game's "Go to Hospital".)
+                if labour_q.contains(actor)
+                    && let Some(lot) = world.data.lots.iter().position(|l| l.internal_name.to_ascii_lowercase().contains("hospital"))
+                {
+                    options.push(("Go to the Hospital".to_string(), ActionKind::Visit { lot, activity: crate::little::BIRTH_TASK }));
                 }
                 // (Their cell phone, as the game's: calls, services, adopting, moving.)
                 if !sim.age.is_little() {

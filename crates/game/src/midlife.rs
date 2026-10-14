@@ -33,12 +33,38 @@ pub struct TraitPicker {
     /// The traits that stay (a birthday's: the Sim's others), and the game's picker when it's up.
     locked: Vec<Trait>,
     birthday: bool,
+    /// A newborn's: the traits it came with kept, the rest the player's (at random if not).
+    newborn: bool,
     game: Option<crate::traitpicker::Picker>,
+}
+
+/// The newborn's traits filled up to a baby's, at random, where the player didn't.
+fn fill_newborn(traits: &mut Vec<Trait>) {
+    let mut rng = rand::rng();
+    for t in crate::life::random_traits(&mut rng, crate::sim::Age::Baby) {
+        if traits.len() < crate::life::trait_slots(crate::sim::Age::Baby) && t.compatible(traits) {
+            traits.push(t);
+        }
+    }
+}
+
+/// "A, B and C".
+fn listed(names: &[&str]) -> String {
+    match names.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        Some((last, _)) => last.to_string(),
+        None => "with no traits at all".to_string(),
+    }
 }
 
 impl TraitPicker {
     pub fn open(sim: Entity, traits: &[Trait], cost: u32) -> Self {
-        Self { sim, traits: traits.to_vec(), cost, root: None, dirty: true, locked: Vec::new(), birthday: false, game: None }
+        Self { sim, traits: traits.to_vec(), cost, root: None, dirty: true, locked: Vec::new(), birthday: false, newborn: false, game: None }
+    }
+
+    /// A newborn's last traits chosen by the player (those it came with kept).
+    pub fn newborn(sim: Entity, traits: &[Trait]) -> Self {
+        Self { locked: traits.to_vec(), birthday: true, newborn: true, ..Self::open(sim, traits, 0) }
     }
 
     /// A birthday's new trait chosen: `traits` with the new one (drawn at random already), the
@@ -90,7 +116,11 @@ fn game_picker(
                 let birthday = p.birthday;
                 let gained: Vec<&str> = list.iter().filter(|t| !sim.traits.contains(t)).map(|t| t.name()).collect();
                 sim.traits = list.clone();
-                if birthday {
+                if p.newborn {
+                    fill_newborn(&mut sim.traits);
+                    let names: Vec<&str> = sim.traits.iter().map(|t| t.name()).collect();
+                    notes.push(format!("{} is {}.", sim.first, listed(&names)));
+                } else if birthday {
                     if !gained.is_empty() {
                         notes.push(format!("{} has become {} instead.", sim.first, gained.join(" and ")));
                     }
@@ -107,6 +137,11 @@ fn game_picker(
             true
         }
         crate::traitpicker::Outcome::Cancelled => {
+            if p.newborn
+                && let Ok((mut sim, _)) = sims.get_mut(p.sim)
+            {
+                fill_newborn(&mut sim.traits);
+            }
             if !p.birthday
                 && let Ok((sim, Some(mut w))) = sims.get_mut(p.sim)
             {
@@ -184,13 +219,15 @@ fn picker_buttons(
             PickButton::Done => {
                 if let Ok((mut sim, _)) = sims.get_mut(p.sim) {
                     sim.traits = p.traits.clone();
-                    let names: Vec<&str> = p.traits.iter().map(|t| t.name()).collect();
-                    let list = match names.split_last() {
-                        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
-                        Some((last, _)) => last.to_string(),
-                        None => "with no traits at all".to_string(),
-                    };
-                    notes.push(format!("{} came out of a mid-life crisis: {list}.", sim.first));
+                    if p.newborn {
+                        fill_newborn(&mut sim.traits);
+                    }
+                    let names: Vec<&str> = sim.traits.iter().map(|t| t.name()).collect();
+                    if p.newborn {
+                        notes.push(format!("{} is {}.", sim.first, listed(&names)));
+                    } else {
+                        notes.push(format!("{} came out of a mid-life crisis: {}.", sim.first, listed(&names)));
+                    }
                 }
                 close(&mut commands, &p);
                 return;

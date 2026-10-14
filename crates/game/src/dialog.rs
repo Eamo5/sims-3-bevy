@@ -16,6 +16,7 @@ pub struct DialogPlugin;
 impl Plugin for DialogPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Questions>()
+            .init_resource::<Typed>()
             .add_message::<Answered>()
             .add_systems(Update, (show_question, answer_buttons, scroll_answers).chain().run_if(in_state(PlayMode::Live)));
     }
@@ -34,13 +35,15 @@ pub enum Question {
     Household(Vec<crate::household::Choice>),
     /// A career event's choice (an index into the Sim's career's events): yes or no.
     CareerEvent { sim: Entity, event: usize },
+    /// A newborn's name (typed in; the one suggested if not).
+    NameBaby { sim: Entity, suggested: String },
 }
 
 impl Question {
     /// The Sim the question is about.
     pub fn sim(&self) -> Option<Entity> {
         match self {
-            Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } | Question::CareerEvent { sim, .. } => Some(*sim),
+            Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } | Question::CareerEvent { sim, .. } | Question::NameBaby { sim, .. } => Some(*sim),
             Question::Household(_) => None,
         }
     }
@@ -91,6 +94,10 @@ impl Questions {
         }
     }
 }
+
+/// What's typed into a question's box (a newborn's name), as it stands.
+#[derive(Resource, Default, Clone, Debug)]
+pub struct Typed(pub String);
 
 /// The player's answer: index into the question's answers.
 #[derive(Message)]

@@ -3676,6 +3676,7 @@ pub(crate) fn run_actions(
                                     let task = crate::opportunities::opportunity_task(opps, *activity)
                                         .map(|t| t.0)
                                         .or_else(|| (*activity == crate::gardening::SEEDS_TASK).then_some(&crate::gardening::BUY_SEEDS))
+                                        .or_else(|| (*activity == crate::little::BIRTH_TASK).then_some(&crate::little::HAVE_BABY))
                                         .or_else(|| crate::meals::recipe_task(*activity));
                                     if crate::meals::recipe_task(*activity).is_some() {
                                         commands.entity(me).insert(crate::meals::BuyingRecipe(*activity - crate::meals::RECIPE_TASK));

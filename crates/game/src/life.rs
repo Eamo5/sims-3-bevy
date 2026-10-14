@@ -800,10 +800,15 @@ pub enum MoodletKind {
     IAmBeautiful,
     SugarRush,
     GarlicBreath,
+    /// Labour, and the babies come (It's a Boy is `NewBaby`).
+    BabyIsComing,
+    ItsAGirl,
+    ItsTwins,
+    ItsTriplets,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 75] = {
+    pub const ALL: [MoodletKind; 79] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -814,7 +819,7 @@ impl MoodletKind {
             TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf, MintyBreath,
             Disgusted, Mourning, FreshClothing, VeryFreshClothing, HolidayCheer, SpringFling, SummerFun, SpookyTime,
             Decorated, NicelyDecorated, BeautifullyDecorated, GreatMeal, Stressed, Winner, Overworked, IAmBeautiful, SugarRush,
-            GarlicBreath,
+            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets,
         ]
     };
 
@@ -876,7 +881,7 @@ impl MoodletKind {
             Birthday => md("It's My Birthday!", "Another year older!", 40, 24.0),
             Nauseous => md("Nauseous", "Something doesn't agree with this Sim this morning.", -25, 2.0),
             Pregnant => md("Pregnant", "A little one is on the way!", 20, 48.0),
-            NewBaby => md("It's a Baby!", "A new addition to the family!", 40, 24.0),
+            NewBaby => md("It's a Boy!", "A new addition to the family!", 80, 24.0),
             GreatParty => md("Threw a Great Party", "Sims love a great party and the host that throws them.", 30, 24.0),
             LameParty => md("Threw a Lame Party", "Not every party is a hit.", -15, 8.0),
             AwesomeParty => md("Awesome Party", "What a party!", 20, 3.0),
@@ -916,6 +921,11 @@ impl MoodletKind {
             IAmBeautiful => md("I Am Beautiful", "Looking good, feeling good.", 10, 4.0),
             SugarRush => md("Sugar Rush", "So much sugar!", 15, 4.0),
             GarlicBreath => md("Garlic Breath", "Better keep a distance.", 0, 3.0),
+            // (The game's: no mood of its own; the babies' 80 for a day.)
+            BabyIsComing => md("Baby is Coming", "The baby is on the way!", 0, 4.0),
+            ItsAGirl => md("It's a Girl!", "A new addition to the family!", 80, 24.0),
+            ItsTwins => md("It's Twins!", "Two new additions to the family!", 80, 24.0),
+            ItsTriplets => md("It's Triplets!", "Three new additions to the family!", 80, 24.0),
         }
     }
 
@@ -966,7 +976,7 @@ impl MoodletKind {
             WishFulfilled => ("Fulfilled", false),
             Nauseous => ("Nauseous", true),
             Pregnant => ("Pregnant", true),
-            NewBaby => ("ItsABoy", false),
+            NewBaby => ("ItsABoy", true),
             GreatParty => ("ThrewAGreatParty", true),
             LameParty => ("ThrewLameParty", true),
             AwesomeParty => ("AwesomeParty", true),
@@ -1003,6 +1013,10 @@ impl MoodletKind {
             IAmBeautiful => ("IAmBeautiful", true),
             SugarRush => ("SugarRush", true),
             GarlicBreath => ("GarlicBreath", true),
+            BabyIsComing => ("BabyIsComing", true),
+            ItsAGirl => ("ItsAGirl", true),
+            ItsTwins => ("ItsTwins", true),
+            ItsTriplets => ("ItsTriplets", true),
         }
     }
 }
