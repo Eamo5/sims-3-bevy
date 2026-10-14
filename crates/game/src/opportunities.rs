@@ -386,7 +386,9 @@ fn complete_opportunities(
         if let Some(sk) = skill.filter(|_| o.skill_reward > 0.0)
             && let Some(name) = crate::save::SKILLS.iter().find(|s| s.eq_ignore_ascii_case(&sk))
         {
-            *skills.0.entry(name).or_insert(0.0) += o.skill_reward / 100.0;
+            // (The game's: that per cent more of the skill points they have.)
+            let more = skills.points(name) * o.skill_reward / 100.0;
+            skills.add_points(*name, more);
             got.push(format!("{name} skill"));
         }
         let text = if o.completion.is_empty() { format!("{} completed {}!", sim.first, o.name) } else { fill(&o.completion, o, "") };

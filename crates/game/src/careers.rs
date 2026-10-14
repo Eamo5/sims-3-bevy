@@ -458,6 +458,16 @@ fn pay_pensions(clock: Res<GameClock>, mut household: Option<ResMut<Household>>,
     }
 }
 
+/// Skill points a minute studying the career's skill at work, as the game's study tones have
+/// them: Journalism's `PracticeWriting` and Law Enforcement's `WorkoutTone` 5, the Culinary,
+/// Criminal and Music ones 4 (and so the rest).
+pub fn study_points(career: &str) -> f32 {
+    match career {
+        "Journalism" | "Law Enforcement" => 5.0,
+        _ => 4.0,
+    }
+}
+
 /// How a Sim goes about their work, as the game's work tones: hard (faster to promotion, but
 /// tiring and no fun), easy (slower, but restful), with the co-workers (sociable), or studying
 /// the career's skill.
@@ -629,12 +639,12 @@ fn work_schedule(
             // Studying the career's skill on the job.
             if job.tone == WorkTone::Study {
                 let sk = job.career().skill;
-                let v = skills.0.entry(sk).or_insert(0.0);
-                let before = *v as u32;
-                *v = (*v + job.hours() * 0.12 * crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) * mood.skill_rate() / (1.0 + *v * 0.25)).min(10.0);
-                if *v as u32 > before && member {
-                    notes.push(format!("{} reached level {} in {}!", sim.first, *v as u32, sk));
-                    life.write(LifeEvent::new(e, LifeEventKind::SkillUp { skill: sk, level: *v as u32 }));
+                let points = job.hours() * 60.0 * study_points(job.career().name) * crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) * mood.skill_rate();
+                if let Some(level) = skills.add_points(sk, points)
+                    && member
+                {
+                    notes.push(format!("{} reached level {level} in {sk}!", sim.first));
+                    life.write(LifeEvent::new(e, LifeEventKind::SkillUp { skill: sk, level }));
                 }
             }
             notes.push(format!("{} is home from work and earned §{pay}.", sim.first));

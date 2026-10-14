@@ -166,15 +166,17 @@ mod harvest_tests {
         let mut notes = Notifications::default();
         let mut ordinary = Skills::default();
         let mut rewarded = Skills::default();
-        ordinary.0.insert("Gardening", 0.45);
-        rewarded.0.insert("Gardening", 0.45);
+        // (1,458 of the 1,800 points to level 1: 325 more falls short, a Fast Learner's 15% more
+        // doesn't.)
+        ordinary.0.insert("Gardening", 0.81);
+        rewarded.0.insert("Gardening", 0.81);
         learn(&sim, me, &mut ordinary, &mut notes, &mut writer, 325.0, None);
         assert_eq!(ordinary.level("Gardening"), 0);
         assert!(notes.0.is_empty());
         learn(&sim, me, &mut rewarded, &mut notes, &mut writer, 325.0, Some(&wishes));
         assert_eq!(rewarded.level("Gardening"), 1);
         assert_eq!(notes.0.len(), 1, "reward-driven level crossing must notify");
-        learn(&sim, me, &mut rewarded, &mut notes, &mut writer, 65000.0, Some(&wishes));
+        learn(&sim, me, &mut rewarded, &mut notes, &mut writer, 200000.0, Some(&wishes));
         assert_eq!(rewarded.0["Gardening"], 10.0);
     }
 }
@@ -308,10 +310,6 @@ fn scale(growth: f32) -> f32 {
     0.25 + 0.75 * growth.clamp(0.0, 1.0)
 }
 
-/// Skill points (the table's) as Gardening levels.
-fn skill_gain(points: f32) -> f32 {
-    points / 650.0
-}
 
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
@@ -425,12 +423,9 @@ fn garden_requests(
 
 /// Gardening skill from the table's points.
 fn learn(sim: &Sim, me: Entity, skills: &mut Skills, notes: &mut Notifications, life: &mut MessageWriter<crate::life::LifeEvent>, points: f32, wishes: Option<&crate::wishes::Wishes>) {
-    let v = skills.0.entry("Gardening").or_insert(0.0);
-    let before = *v as u32;
-    *v = (*v + skill_gain(points) * crate::life::skill_rate(&sim.traits, "Gardening") * crate::wishes::reward_skill_rate(wishes)).min(10.0);
-    if *v as u32 > before {
-        notes.push(format!("{} reached level {} in Gardening!", sim.first, *v as u32));
-        life.write(crate::life::LifeEvent::new(me, crate::life::LifeEventKind::SkillUp { skill: "Gardening", level: *v as u32 }));
+    if let Some(level) = skills.add_points("Gardening", points * crate::life::skill_rate(&sim.traits, "Gardening") * crate::wishes::reward_skill_rate(wishes)) {
+        notes.push(format!("{} reached level {level} in Gardening!", sim.first));
+        life.write(crate::life::LifeEvent::new(me, crate::life::LifeEventKind::SkillUp { skill: "Gardening", level }));
     }
 }
 

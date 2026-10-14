@@ -88,7 +88,11 @@ installation is unreachable.
   morphs (weight and fitness sliders; town Sims keep their builds, working out firms Sims up);
   needs (falling as the game's `Motives` tuning has them: hunger, bladder and energy by the band
   they're in, slowing as they run low; social and hygiene steadily; fun only down to nothing),
-  moods, skills, careers, relationships, autonomy, social interactions; children,
+  moods, skills (learned in the game's skill points: each skill's points for each level from
+  its `Skills` table, and each pastime's points an hour from its interaction tuning: an hour
+  at the piano 420, at the easel 430, the workout bench 1014, the telescope 800, a jog 600;
+  a repair or upgrade the object's own tuning; study at work the career's tone; more in a
+  good mood, as the game's), careers, relationships, autonomy, social interactions; children,
   teens, adults and elders who grow up and grow old (birthdays, new traits, passing away). A
   birthday cake baked at the fridge (§20) lets someone grow up there and then: they blow out
   the candles with the game's animation, the household cheers, and the cake is cut for

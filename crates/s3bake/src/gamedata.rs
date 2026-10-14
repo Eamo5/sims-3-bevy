@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 91;
+pub const GAMEDATA_VERSION: u32 = 92;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -74,6 +74,10 @@ pub struct SkillInfo {
     pub wish_icon: String,
     pub object_icon: String,
     pub max_level: u32,
+    /// The skill points it takes to reach each level (running totals, level 1 first: the
+    /// table's `Level_N`, the first row's where it has none).
+    #[serde(default)]
+    pub points: Vec<u32>,
 }
 
 /// One level of a career (a row of the career's own table).
@@ -276,6 +280,12 @@ pub struct RepairTuning {
     pub min_shock: f32,
     pub max_shock: f32,
     pub shock_in_puddle: bool,
+    /// Handiness points for mending it from broken to whole (`RepairSkillGain`), and for its
+    /// never-breaks upgrade (`UpgradeUnbreakable`'s `SkillGainRate`).
+    #[serde(default)]
+    pub repair_skill: f32,
+    #[serde(default)]
+    pub upgrade_skill: f32,
 }
 
 /// An object class's repair tuning, from its tuning XML (the first of each value; none when it
@@ -301,6 +311,12 @@ pub fn repair_tuning(class: &str, xml: &str) -> Option<RepairTuning> {
         min_shock: num("MinChanceOfElectrocution").unwrap_or(0.0),
         max_shock: num("MaxChanceOfElectrocution").unwrap_or(0.0),
         shock_in_puddle: val("ShouldShockInPuddle").is_some_and(|v| v.eq_ignore_ascii_case("true")),
+        repair_skill: num("RepairSkillGain").unwrap_or(1000.0),
+        upgrade_skill: xml.find("<UpgradeUnbreakable>").and_then(|at| {
+            let rest = &xml[at..];
+            let rest = &rest[rest.find("<SkillGainRate value=\"")? + 22..];
+            rest.split('"').next()?.trim().parse::<f32>().ok()
+        }).unwrap_or(3600.0),
     })
 }
 
@@ -1824,8 +1840,19 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         });
     }
     if let Some(skills) = xml("Skills") {
-        for f in records(&skills, "SkillList") {
+        let rows = records(&skills, "SkillList");
+        // (The first row is every skill's default.)
+        let default = rows.first().cloned().unwrap_or_default();
+        for f in rows {
             let hex = get(&f, "Hex");
+            let mut total = 0;
+            let points = (1..=10)
+                .map(|n| {
+                    let k = format!("Level_{n}");
+                    total += f.get(&k).or(default.get(&k)).and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(0);
+                    total
+                })
+                .collect();
             // (The packs' skills that show in the skills panel too: Late Night's piano and
             // drums, Into the Future's laser harp...)
             if hex.is_empty() || (f.get("CodeVersion").is_some_and(|s| s != "BaseGame") && get(&f, "IconKey").is_empty()) {
@@ -1838,6 +1865,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 wish_icon: get(&f, "DreamsAndPromisesIcon"),
                 object_icon: get(&f, "SkillUIIcon"),
                 max_level: num(&f, "MaxSkillLevel") as u32,
+                points,
                 hex,
             });
         }
@@ -2896,10 +2924,11 @@ mod tests {
 
     #[test]
     fn repair_tuning_is_read_from_an_objects_tuning() {
-        let xml = r#"<base><HoursUnbreakable value="48" /><StartPercentChanceBreak value="6" /><PercentChanceBreakIncrease value="3" /><RepairComplexity value="5" /><MinRepairTime value="25" /><MaxRepairTime value="120" /><ShouldShockInPuddle value="True" /><MinChanceOfElectrocution value="0" /><MaxChanceOfElectrocution value="7" /></base>"#;
+        let xml = r#"<base><HoursUnbreakable value="48" /><StartPercentChanceBreak value="6" /><PercentChanceBreakIncrease value="3" /><RepairComplexity value="5" /><MinRepairTime value="25" /><MaxRepairTime value="120" /><ShouldShockInPuddle value="True" /><MinChanceOfElectrocution value="0" /><MaxChanceOfElectrocution value="7" /><RepairSkillGain value="1500" /><UpgradeBoostChannelTuning><SkillGainRate value="5" /></UpgradeBoostChannelTuning><UpgradeUnbreakable><UpgradeTime value="240" /><SkillGainRate value="2640" /></UpgradeUnbreakable></base>"#;
         let t = repair_tuning("TVCheap", xml).unwrap();
         assert_eq!((t.hours_unbreakable, t.start_break, t.break_increase, t.complexity), (48.0, 6.0, 3.0, 5.0));
         assert_eq!((t.min_time, t.max_time, t.min_shock, t.max_shock, t.shock_in_puddle), (25.0, 120.0, 0.0, 7.0, true));
+        assert_eq!((t.repair_skill, t.upgrade_skill), (1500.0, 2640.0), "the never-breaks upgrade's, not another's");
         assert!(repair_tuning("Chair", "<base><StartPercentChanceBreak value=\"0\" /></base>").is_none(), "what doesn't break");
     }
 

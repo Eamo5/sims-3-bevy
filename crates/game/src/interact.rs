@@ -31,7 +31,8 @@ impl Plugin for InteractPlugin {
             .init_resource::<DepreciationDay>()
             .add_systems(OnEnter(crate::AppState::Loading), |mut day: ResMut<DepreciationDay>| day.0 = None)
             .add_systems(Update, depreciate.after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)))
-            .add_systems(Update, (load_repair_tunings, wear_new_objects, floor_new_objects, second_places).chain().run_if(in_state(crate::AppState::InGame)));
+            .add_systems(Update, (load_repair_tunings, wear_new_objects, floor_new_objects, second_places).chain().run_if(in_state(crate::AppState::InGame)))
+            .add_systems(Update, load_skill_points.run_if(in_state(crate::AppState::InGame)));
     }
 }
 
@@ -882,6 +883,8 @@ mod wear_tests {
             min_shock: 0.0,
             max_shock: 7.0,
             shock_in_puddle: true,
+            repair_skill: 1000.0,
+            upgrade_skill: 3600.0,
         };
         assert_eq!((repair_time(&tv, 0.0), repair_time(&tv, 5.0), repair_time(&tv, 9.0)), (120.0, 25.0, 25.0));
         assert!((shock_chance(&tv, 0.0) - 7.0).abs() < 1e-6 && shock_chance(&tv, 5.0).abs() < 1e-6);
@@ -2365,6 +2368,102 @@ impl Skills {
     pub fn level(&self, s: &str) -> u32 {
         (self.0.get(s).copied().unwrap_or(0.0) as u32).min(10)
     }
+
+    /// Practice: that many of the game's skill points more (already for traits and mood); the
+    /// level reached if it's a new one.
+    pub fn add_points(&mut self, skill: &'static str, points: f32) -> Option<u32> {
+        let table = skill_points(skill);
+        let v = self.0.entry(skill).or_insert(0.0);
+        let before = *v as u32;
+        *v = points_to_level(table, level_to_points(table, *v) + points.max(0.0));
+        (*v as u32 > before).then_some(*v as u32)
+    }
+
+    /// The game's skill points a Sim has in a skill.
+    pub fn points(&self, skill: &str) -> f32 {
+        level_to_points(skill_points(skill), self.0.get(skill).copied().unwrap_or(0.0))
+    }
+}
+
+/// The skill points it takes to reach each level (running totals, level 1 first), as the game's
+/// `Skills` table has them for most skills (its first row's).
+pub const SKILL_POINTS: [u32; 10] = [1800, 3150, 5550, 9450, 15150, 23550, 35250, 50850, 71250, 98250];
+
+/// Each skill's own points per level, once the game's data is in.
+static SKILL_TABLES: std::sync::OnceLock<HashMap<String, Vec<u32>>> = std::sync::OnceLock::new();
+
+fn load_skill_points(ui: Option<Res<crate::icons::GameUi>>, mut done: Local<bool>) {
+    let (false, Some(ui)) = (*done, ui) else { return };
+    *done = true;
+    let tables: HashMap<String, Vec<u32>> = ui.data.skills.iter().filter(|s| s.points.len() == 10).map(|s| (s.hex.clone(), s.points.clone())).collect();
+    info!("skill points: {} skills' levels", tables.len());
+    let _ = SKILL_TABLES.set(tables);
+}
+
+/// A skill's points per level.
+pub fn skill_points(skill: &str) -> &'static [u32] {
+    SKILL_TABLES.get().and_then(|t| t.get(skill)).map_or(&SKILL_POINTS, |v| v.as_slice())
+}
+
+/// A skill level (with the way to the next as its fraction) as the game's skill points.
+pub fn level_to_points(table: &[u32], level: f32) -> f32 {
+    let n = table.len();
+    let l = (level.max(0.0) as usize).min(n);
+    if l >= n {
+        return table[n - 1] as f32;
+    }
+    let lo = if l == 0 { 0.0 } else { table[l - 1] as f32 };
+    lo + level.fract() * (table[l] as f32 - lo)
+}
+
+/// The game's skill points as a level (and the way to the next).
+pub fn points_to_level(table: &[u32], points: f32) -> f32 {
+    let mut lo = 0.0;
+    for (l, &next) in table.iter().enumerate() {
+        let next = next as f32;
+        if points < next {
+            return l as f32 + (points - lo) / (next - lo).max(1.0);
+        }
+        lo = next;
+    }
+    table.len() as f32
+}
+
+/// The game's skill points an hour practising (each interaction's tuning, its `Skill*`
+/// change: `ContinuousFlow` points an hour).
+pub fn practice_points(name: &str) -> f32 {
+    match name {
+        // (Play_Piano, Play_Guitar, Play_Drums, Play_LaserHarp.)
+        "Play Piano" | "Play Keyboard" | "Play Guitar" | "Play Drums" | "Play Laser Harp" => 420.0,
+        // (Paint_Easel.)
+        "Paint" => 430.0,
+        // (PracticeChess_ChessTable, PlayChess_Computer; against someone, the chess table's
+        // kPlayWithLogicMultiplier, half again.)
+        "Play Chess" => 400.0,
+        "Play a Ranked Match" => 600.0,
+        // (PracticeWriting_Computer; a novel, the Computer's kWritingNovelPointsPerHour.)
+        "Practice Writing" => 650.0,
+        "Write Novel" => 500.0,
+        // (LookThroughOrStargaze_Telescope.)
+        "Stargaze" => 800.0,
+        // (RideBull_MechanicalBull; Play_Trampoline's.)
+        "Ride Mechanical Bull" => 800.0,
+        "Jump on Trampoline" => 100.0,
+        // (PracticeSpeech_Mirror.)
+        "Practice Speech" => 420.0,
+        // (WorkOut_Treadmill, WorkOut_WorkoutBench, SwimmingInPool's kSkillGainRatePerMinute.)
+        "Work Out" => 780.0,
+        "Pump Iron" => 1014.0,
+        "Swim" => 480.0,
+        // (Cooking at the stove or the grill: FryingPan_CookOnStove, Grillable_Grill.)
+        "Cook Dinner" | "Bake Birthday Cake" | "Prepare Food" | "Grill" => 600.0,
+        // (FishHere_Terrain.)
+        "Fish" => 300.0,
+        // (Gardening's comes of the plants themselves: WaterPlant_Plant, WeedPlant_Plant and
+        // Harvest_HarvestPlant have none.)
+        "Water" | "Weed" | "Harvest" => 0.0,
+        _ => 420.0,
+    }
 }
 
 pub use crate::careers::{AtWork, Job};
@@ -3514,12 +3613,9 @@ pub(crate) fn run_actions(
                                 if let Some(sk) = d.skill {
                                     let computer_chess = if obj.kind == ObjectKind::Computer && d.name == "Play Chess" && sim.traits.contains(&crate::life::Trait::ComputerWhiz) { 1.1 } else { 1.0 };
                                     let rate = crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) * mood_learning * computer_chess;
-                                    let e = skills.0.entry(sk).or_insert(0.0);
-                                    let before = *e as u32;
-                                    *e = (*e + dt / 60.0 * 0.6 * rate / (1.0 + *e * 0.25)).min(10.0);
-                                    if *e as u32 > before {
-                                        notes.push(format!("{} reached level {} in {}!", sim.first, *e as u32, sk));
-                                        life.write(LifeEvent::new(me, LifeEventKind::SkillUp { skill: sk, level: *e as u32 }));
+                                    if let Some(level) = skills.add_points(sk, dt / 60.0 * practice_points(d.name) * rate) {
+                                        notes.push(format!("{} reached level {level} in {sk}!", sim.first));
+                                        life.write(LifeEvent::new(me, LifeEventKind::SkillUp { skill: sk, level }));
                                     }
                                 }
                                 let full = d.until_full.is_some_and(|m| motives.0[m] >= 98.0);
@@ -4191,12 +4287,13 @@ pub(crate) fn run_actions(
                                 Some(t) => maintenance_minutes(repair_time(t, handy), 0.0, &sim.traits, objects.get(*target).ok().map(|(o, ..)| o.kind), false),
                                 None => maintenance_minutes(90.0, handy, &sim.traits, objects.get(*target).ok().map(|(o, ..)| o.kind), false),
                             };
-                            let e = skills.0.entry("Handiness").or_insert(0.0);
-                            let before = *e as u32;
-                            *e = (*e + dt / 60.0 * 0.5 * crate::life::skill_rate(&sim.traits, "Handiness") * crate::wishes::reward_skill_rate(wishes) * mood_learning / (1.0 + *e * 0.25)).min(10.0);
-                            if *e as u32 > before {
-                                notes.push(format!("{} reached level {} in Handiness!", sim.first, *e as u32));
-                                life.write(LifeEvent::new(me, LifeEventKind::SkillUp { skill: "Handiness", level: *e as u32 }));
+                            // (The game's points for the whole repair, as far as it's got: the
+                            // thing's RepairSkillGain.)
+                            let whole = tuning.map_or(1000.0, |t| t.repair_skill);
+                            let rate = crate::life::skill_rate(&sim.traits, "Handiness") * crate::wishes::reward_skill_rate(wishes) * mood_learning;
+                            if let Some(level) = skills.add_points("Handiness", dt / minutes.max(1.0) * whole * rate) {
+                                notes.push(format!("{} reached level {level} in Handiness!", sim.first));
+                                life.write(LifeEvent::new(me, LifeEventKind::SkillUp { skill: "Handiness", level }));
                             }
                             motives.add(FUN, -4.0 * dt / 60.0);
                             if elapsed >= minutes {
@@ -4244,12 +4341,12 @@ pub(crate) fn run_actions(
                         ActionKind::Upgrade { target, bit } => {
                             let handy = skills.level("Handiness") as f32 + if sim.traits.contains(&crate::life::Trait::Handy) { 3.0 } else { 0.0 };
                             let minutes = maintenance_minutes(crate::upgrades::Upgrade::MINUTES, handy, &sim.traits, objects.get(*target).ok().map(|(o, ..)| o.kind), true);
-                            let e = skills.0.entry("Handiness").or_insert(0.0);
-                            let before = *e as u32;
-                            *e = (*e + dt / 60.0 * 0.6 * crate::life::skill_rate(&sim.traits, "Handiness") * crate::wishes::reward_skill_rate(wishes) * mood_learning / (1.0 + *e * 0.25)).min(10.0);
-                            if *e as u32 > before {
-                                notes.push(format!("{} reached level {} in Handiness!", sim.first, *e as u32));
-                                life.write(LifeEvent::new(me, LifeEventKind::SkillUp { skill: "Handiness", level: *e as u32 }));
+                            // (The game's points for the whole upgrade, as far as it's got.)
+                            let whole = objects.get(*target).ok().and_then(|(o, ..)| tunings.get(o.objd)).map_or(3600.0, |t| t.upgrade_skill);
+                            let rate = crate::life::skill_rate(&sim.traits, "Handiness") * crate::wishes::reward_skill_rate(wishes) * mood_learning;
+                            if let Some(level) = skills.add_points("Handiness", dt / minutes.max(1.0) * whole * rate) {
+                                notes.push(format!("{} reached level {level} in Handiness!", sim.first));
+                                life.write(LifeEvent::new(me, LifeEventKind::SkillUp { skill: "Handiness", level }));
                             }
                             motives.add(FUN, -3.0 * dt / 60.0);
                             if elapsed >= minutes {
@@ -5426,6 +5523,23 @@ mod tests {
             app.update();
             assert_eq!(app.world().resource::<Household>().funds, if mailbox { 1000 } else { 940 }, "only one bill per scheduled day");
         }
+    }
+
+    #[test]
+    fn skills_grow_by_the_games_points() {
+        // (Level 1 at 1,800 points, 2 at 3,150; halfway between them is 1.5.)
+        assert_eq!(level_to_points(&SKILL_POINTS, 0.0), 0.0);
+        assert_eq!(level_to_points(&SKILL_POINTS, 1.5), 2475.0);
+        assert_eq!(points_to_level(&SKILL_POINTS, 2475.0), 1.5);
+        assert_eq!(points_to_level(&SKILL_POINTS, 200000.0), 10.0);
+        assert_eq!(level_to_points(&SKILL_POINTS, 10.0), 98250.0);
+        let mut skills = Skills::default();
+        assert_eq!(skills.add_points("Piano", 900.0), None);
+        assert_eq!(skills.add_points("Piano", 900.0), Some(1), "a level at 1,800");
+        // (An hour at the piano is 420 points: level 10 takes the game's weeks.)
+        let hours = (SKILL_POINTS[9] as f32 - skills.points("Piano")) / practice_points("Play Piano");
+        assert!(hours > 200.0);
+        assert!((skills.points("Piano") - 1800.0).abs() < 0.5);
     }
 
     #[test]

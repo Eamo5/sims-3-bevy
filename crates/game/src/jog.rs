@@ -39,6 +39,8 @@ impl Jogging {
 const JOG_MINUTES: f64 = 60.0;
 /// The game's kilometres of running an hour (`kDistanceJoggedPerHourOfRunning`).
 pub const KM_PER_HOUR: f64 = 6.0;
+/// Athletic skill points an hour of it (the game's `JogHere_Terrain`).
+const JOG_POINTS: f32 = 600.0;
 
 /// Who can go jogging: teens and grown-ups.
 pub fn can_jog(sim: &Sim) -> bool {
@@ -74,12 +76,10 @@ fn jog(
             motives.add(HYGIENE, -30.0 * h);
             motives.add(FUN, crate::life::activity_affinity(&sim.traits, "Work Out") * 10.0 * h);
             let rate = crate::life::skill_rate(&sim.traits, "Athletic") * crate::wishes::reward_skill_rate(wishes) * mood.map_or(1.0, |m| m.skill_rate());
-            let v = skills.0.entry("Athletic").or_insert(0.0);
-            let before = *v as u32;
-            *v = (*v + h * 0.6 * rate / (1.0 + *v * 0.25)).min(10.0);
-            if *v as u32 > before {
-                notes.push(format!("{} reached level {} in Athletic!", sim.first, *v as u32));
-                life.write(LifeEvent::new(e, LifeEventKind::SkillUp { skill: "Athletic", level: *v as u32 }));
+            // (The game's JogHere_Terrain: 600 points an hour.)
+            if let Some(level) = skills.add_points("Athletic", h * JOG_POINTS * rate) {
+                notes.push(format!("{} reached level {level} in Athletic!", sim.first));
+                life.write(LifeEvent::new(e, LifeEventKind::SkillUp { skill: "Athletic", level }));
             }
             let burn = if crate::wishes::has(wishes, "FastMetabolism") { 1.25 } else { 1.0 };
             commands.entity(e).queue_silenced(move |mut w: EntityWorldMut| crate::aging::reshape(&mut w, -0.03 * h * burn, 0.05 * h));

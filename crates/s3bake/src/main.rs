@@ -740,9 +740,28 @@ fn main() {
             }
         }
         let want = args[i + 1].to_ascii_lowercase();
+        // (`itun:<name>`: an interaction's tuning, `itun:?` their names, `itun:*<part>` all those
+        // whose names hold that, one after another.)
+        let (kind, want) = match want.strip_prefix("itun:") {
+            Some(w) => (0x03B3_3DDFu32, w.to_string()),
+            None => (0x0333_406C, want),
+        };
+        if let Some(part) = want.strip_prefix('*') {
+            let mut out = Vec::new();
+            for e in pkg.of_type(kind) {
+                if names.get(&e.key.i).is_some_and(|n: &String| n.to_ascii_lowercase().contains(part)) {
+                    out.extend_from_slice(format!("<!-- {} -->\n", names[&e.key.i]).as_bytes());
+                    out.extend_from_slice(&pkg.read(e).expect("xml"));
+                    out.push(b'\n');
+                }
+            }
+            std::fs::write(&args[i + 2], &out).expect("write");
+            println!("{} bytes", out.len());
+            return;
+        }
         // (`?`: the names of them all.)
         if want == "?" {
-            let mut all: Vec<&String> = pkg.of_type(0x0333_406C).filter_map(|e| names.get(&e.key.i)).collect();
+            let mut all: Vec<&String> = pkg.of_type(kind).filter_map(|e| names.get(&e.key.i)).collect();
             all.sort();
             for n in all {
                 println!("{n}");
@@ -751,8 +770,8 @@ fn main() {
         }
         // (The one named exactly first: a table, `Motives`, rather than its class's tuning,
         // `Motives_0x...`.)
-        let exact = pkg.of_type(0x0333_406C).find(|e| names.get(&e.key.i).is_some_and(|n: &String| n.to_ascii_lowercase() == want));
-        let found = exact.or_else(|| pkg.of_type(0x0333_406C).find(|e| names.get(&e.key.i).is_some_and(|n: &String| n.to_ascii_lowercase().starts_with(&format!("{want}_0x")))));
+        let exact = pkg.of_type(kind).find(|e| names.get(&e.key.i).is_some_and(|n: &String| n.to_ascii_lowercase() == want));
+        let found = exact.or_else(|| pkg.of_type(kind).find(|e| names.get(&e.key.i).is_some_and(|n: &String| n.to_ascii_lowercase().starts_with(&format!("{want}_0x")))));
         if let Some(e) = found {
             let d = pkg.read(e).expect("xml");
             std::fs::write(&args[i + 2], &d).expect("write");

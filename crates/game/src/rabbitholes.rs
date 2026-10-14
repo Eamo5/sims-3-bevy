@@ -321,12 +321,13 @@ fn outings(
                 did.write(crate::journal::Did::count(e, crate::journal::Stat::StrengthHours, dt as f64 / 60.0));
             }
             if let Some(sk) = at.activity.skill {
-                let v = skills.0.entry(sk).or_insert(0.0);
-                let before = *v as u32;
-                *v = (*v + dt / 60.0 * 0.35 * crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) * mood.map_or(1.0, |m| m.skill_rate()) / (1.0 + *v * 0.25)).min(10.0);
-                if *v as u32 > before {
-                    notes.push(format!("{} reached level {} in {}!", sim.first, *v as u32, sk));
-                    life.write(LifeEvent::new(e, LifeEventKind::SkillUp { skill: sk, level: *v as u32 }));
+                // (Swimming at the pool as the game's SwimmingInPool has it; the rest at the
+                // usual rate for practising.)
+                let per_hour = if at.activity.name == "Go Swimming" { crate::interact::practice_points("Swim") } else { crate::interact::practice_points("") };
+                let points = dt / 60.0 * per_hour * crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) * mood.map_or(1.0, |m| m.skill_rate());
+                if let Some(level) = skills.add_points(sk, points) {
+                    notes.push(format!("{} reached level {level} in {sk}!", sim.first));
+                    life.write(LifeEvent::new(e, LifeEventKind::SkillUp { skill: sk, level }));
                 }
             }
         }
@@ -457,10 +458,7 @@ pub fn complete_homework(world: &mut World, student: Entity, helper: Option<Enti
     }
     let message = if let (Some(helper), Some(name)) = (helper, helper_name) {
         world.write_message(crate::journal::Did::count(helper, crate::journal::Stat::TutoringHours, minutes as f64 / 60.0));
-        if let Some(mut skills) = world.get_mut::<Skills>(helper) {
-            let logic = skills.0.entry("Logic").or_insert(0.0);
-            *logic = (*logic + minutes / 60.0 * 0.3 / (1.0 + *logic * 0.25)).min(10.0);
-        }
+        // (No Logic for it: the game's HelpWithHomework_Homework has none.)
         format!("{name} helped {student_name} with their homework.")
     } else {
         format!("{student_name} finished their homework.")
@@ -575,7 +573,7 @@ mod school_schedule_tests {
         assert!(!complete_homework(world, student, None, 0.0));
         assert!(!complete_homework(world, student, Some(helper), 60.0));
         assert_eq!(world.get::<SchoolGrades>(student).unwrap().0, 70.0);
-        assert_eq!(world.get::<Skills>(helper).unwrap().0.get("Logic"), Some(&0.3));
+        assert_eq!(world.get::<Skills>(helper).unwrap().0.get("Logic"), None, "the game gives no Logic for helping");
         assert_eq!(world.resource::<Messages<crate::journal::Did>>().len(), 1);
         world.entity_mut(student).insert(Homework::default());
         world.get_mut::<Sim>(student).unwrap().age = Age::YoungAdult;
