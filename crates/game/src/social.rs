@@ -518,6 +518,7 @@ const LEFT_OUT: &[&str] = &[
 /// The age a letter of the game's tables stands for.
 fn age_of(letter: &str) -> Option<Age> {
     match letter {
+        "C" => Some(Age::Child),
         "T" => Some(Age::Teen),
         "Y" => Some(Age::YoungAdult),
         "A" => Some(Age::Adult),
@@ -527,7 +528,8 @@ fn age_of(letter: &str) -> Option<Age> {
 }
 
 /// The game's own socials, from its social data: each one not hand-made already (by name), with
-/// a test that's known or none, for teens and up (children's have their own clips), its tone
+/// a test that's known or none, for the ages it's for (a child plays the children's clips:
+/// `interact::child_social_clips`), its tone
 /// telling its kind (friendly, funny, romantic, mean) and what it does, and its suite's clips
 /// (those `clip_names` has: `a2a_soc_<stance>_<suite>_..._x` and the `_y` to go with it).
 pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[String]) -> Vec<SocialDef> {
@@ -936,9 +938,8 @@ mod tests {
         // (Only a clip with both sides.)
         assert_eq!(admire.game.unwrap().clips, ["a2a_soc_Neutral_Admire_Friendly_Neutral"]);
         assert_eq!(admire.min_friendship, -19.0);
-        // (Children are left out: their clips are their own; the friendly done of their own
-        // accord, the one asking a trait of the other not.)
-        assert_eq!(admire.game.unwrap().actor_ages, [Age::Teen, Age::YoungAdult, Age::Adult]);
+        // (The friendly done of their own accord, the one asking a trait of the other not.)
+        assert_eq!(admire.game.unwrap().actor_ages, [Age::Child, Age::Teen, Age::YoungAdult, Age::Adult]);
         assert!(admire.autonomous && !accuse.autonomous);
         // Asked of the one it's done to: their being evil.
         let mut a = crate::sim::random_sim(&mut rand::rng(), "A", Some(true), Age::Adult);

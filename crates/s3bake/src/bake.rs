@@ -673,7 +673,7 @@ pub fn bake_clips(root: &BakeRoot, pkgs: &PackageSet, progress: Progress) -> Res
 }
 
 /// Bumped when the baked clip layout changes.
-pub const CLIPS_VERSION: u32 = 73;
+pub const CLIPS_VERSION: u32 = 74;
 
 pub fn clips_ready(root: &BakeRoot) -> bool {
     let g = root.global_dir();

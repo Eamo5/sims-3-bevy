@@ -1779,6 +1779,74 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
 
 /// Both sides of a social's animation.
 /// The clip a care social opens with (picking a toddler up, opening the book).
+/// The game's generic conversation, for a social with a child that has no clips of its own for
+/// their two ages: talking, and listening as it goes down (a child plays the children's, the
+/// clip library's `c_` for `a_`).
+const TALK: &[&str] = &[
+    "a_soc_talkTalk_gen_a_x",
+    "a_soc_talkTalk_gen_b_x",
+    "a_soc_talkTalk_gen_d_x",
+    "a_soc_talkTalk_gen_e_x",
+    "a_soc_talkTalk_gen_g_x",
+    "a_soc_talkTalk_gen_i_x",
+    "a_soc_talkTalk_gen_j_x",
+    "a_soc_talkTalk_gen_k_x",
+    "a_soc_talkTalk_gen_l_x",
+];
+const AGREE: &[&str] = &[
+    "a_soc_talkListen_agreeAha_x",
+    "a_soc_talkListen_agreeBobble1_x",
+    "a_soc_talkListen_agreeBobblePoint_x",
+    "a_soc_talkListen_agreeEager_x",
+    "a_soc_talkListen_agree_funny_x",
+    "a_soc_talkListen_agree_wow_x",
+    "a_soc_talkRespond_agree_enlightened_x",
+    "a_soc_talkRespond_agree_laugh_x",
+    "a_soc_talkRespond_agree_totally_x",
+];
+const DISAGREE: &[&str] = &[
+    "a_soc_talkListen_disagree_high_x",
+    "a_soc_talkListen_disagree_kiddingMe_x",
+    "a_soc_talkListen_disagree_low_x",
+    "a_soc_talkListen_disagree_med_x",
+    "a_soc_talkListen_disagree_wince_x",
+    "a_soc_talkRespond_disagree_correction_x",
+    "a_soc_talkRespond_disagree_disgust_x",
+    "a_soc_talkRespond_disagree_holdOn_x",
+];
+
+/// A social's clips with a child in it, each side's: the game's own for their two ages (its
+/// `c2c_`, `c2a_` and `a2c_` for the grown-ups' `a2a_`) where it has them, else its generic
+/// talk; none (the clips as they are) between those of a grown-up's build.
+pub fn child_social_clips(clips: &'static [&'static str], actor: Age, target: Age, mean: bool, names: &[String]) -> Option<(crate::anim::ActionClip, crate::anim::ActionClip)> {
+    use std::sync::{Mutex, OnceLock};
+    let kid = |a: Age| a == Age::Child;
+    if !kid(actor) && !kid(target) {
+        return None;
+    }
+    let (p, q) = (if kid(actor) { 'c' } else { 'a' }, if kid(target) { 'c' } else { 'a' });
+    static PAIRS: OnceLock<Mutex<HashMap<String, &'static [&'static str]>>> = OnceLock::new();
+    let mut pairs = PAIRS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    let mapped = *pairs.entry(format!("{p}{q}:{}", clips.join(","))).or_insert_with(|| {
+        let has = |base: &str, side: &str| {
+            let base = base.to_ascii_lowercase();
+            names.iter().any(|n| n.to_ascii_lowercase().starts_with(&base) && n.ends_with(side))
+        };
+        let v: Vec<&'static str> = clips
+            .iter()
+            .filter_map(|c| c.strip_prefix("a2a_"))
+            .map(|r| format!("{p}2{q}_{r}"))
+            .filter(|m| has(m, "_x") && has(m, "_y"))
+            .map(|m| &*Box::leak(m.into_boxed_str()))
+            .collect();
+        Box::leak(v.into_boxed_slice())
+    });
+    if !mapped.is_empty() {
+        return Some((crate::anim::ActionClip::social(mapped, 'x'), crate::anim::ActionClip::social(mapped, 'y')));
+    }
+    Some((crate::anim::ActionClip::new(None, TALK), crate::anim::ActionClip::new(None, if mean { DISAGREE } else { AGREE })))
+}
+
 pub fn social_start(name: &str, little: Option<Age>) -> Option<&'static str> {
     match (name, little) {
         ("Frolic", _) => Some("a2a_soc_fairy_frolic_start"),
@@ -3024,8 +3092,15 @@ pub(crate) fn run_actions(
                                 let clips = social_clips(s.name, little);
                                 let start = social_start(s.name, little);
                                 let clip = |side| crate::anim::ActionClip { start, ..crate::anim::ActionClip::social(clips, side) };
-                                commands.entity(me).insert(clip('x'));
-                                commands.entity(*target).insert((clip('y'), SocialPartner(me)));
+                                // (A child in it: the children's own clips.)
+                                let kids = who
+                                    .get(target)
+                                    .filter(|_| little.is_none())
+                                    .zip(baked.as_deref())
+                                    .and_then(|(w, b)| child_social_clips(clips, sim.age, w.0.age, s.cat == crate::social::SocialCat::Mean, &b.0.clip_names));
+                                let (mine, theirs) = kids.unwrap_or_else(|| (clip('x'), clip('y')));
+                                commands.entity(me).insert(mine);
+                                commands.entity(*target).insert((theirs, SocialPartner(me)));
                                 if let Some(age) = little {
                                     carry_fx.push((*target, me, age, *tf, s.effect != SocialEffect::PutToBed));
                                 }
@@ -4917,6 +4992,21 @@ fn pay_bills(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn children_play_their_own_social_clips() {
+        let names: Vec<String> = ["c2c_soc_Neutral_FriendlyHug_Friendly_Neutral_x", "c2c_soc_Neutral_FriendlyHug_Friendly_Neutral_y", "a2c_soc_Neutral_FriendlyHug_Friendly_Neutral_x"].map(String::from).to_vec();
+        let hug: &'static [&'static str] = &["a2a_soc_Neutral_FriendlyHug_Friendly_Neutral"];
+        assert!(child_social_clips(hug, Age::Adult, Age::Teen, false, &names).is_none(), "grown-ups' clips between the grown-up built");
+        let (x, y) = child_social_clips(hug, Age::Child, Age::Child, false, &names).unwrap();
+        assert_eq!((x.loops, y.loops), (["c2c_soc_Neutral_FriendlyHug_Friendly_Neutral"].as_slice(), ["c2c_soc_Neutral_FriendlyHug_Friendly_Neutral"].as_slice()));
+        assert_eq!((x.side, y.side), (Some('x'), Some('y')));
+        // (A grown-up with a child, and only one side of theirs there: the generic talk.)
+        let (x, y) = child_social_clips(hug, Age::Adult, Age::Child, false, &names).unwrap();
+        assert_eq!((x.loops, y.loops), (TALK, AGREE));
+        let (_, y) = child_social_clips(hug, Age::Adult, Age::Child, true, &names).unwrap();
+        assert_eq!(y.loops, DISAGREE, "a mean one goes down badly");
+    }
 
     #[test]
     fn no_bills_ever_exempts_the_household_but_not_visitors() {

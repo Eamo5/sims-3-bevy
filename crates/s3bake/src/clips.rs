@@ -19,8 +19,14 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a_soc_callOver_x",
     "a2o_door_ringBell_x",
     "a2a_soc_Neutral_Greet_Friendly_Friendly",
-    // The game's social interactions, all of them (see `SocialData`).
+    // The game's social interactions, all of them (see `SocialData`), and children's: with each
+    // other, with grown-ups, and their generic talk (theirs and the grown-ups').
     "a2a_soc_",
+    "a2c_soc_",
+    "c2a_soc_",
+    "c2c_soc_",
+    "a_soc_talk",
+    "c_soc_talk",
     "a2a_soc_neutral_greet",
     "a_idle_neutral_",
     "a_idle_friendly_",
@@ -629,7 +635,7 @@ pub fn wanted(name: &str) -> bool {
         if !name.starts_with(p) {
             return false;
         }
-        let object_or_social = ["a2o_", "a2a_", "c2o_", "p2o_", "b2o_", "a2b_", "a2p_"].iter().any(|p| name.starts_with(p));
+        let object_or_social = ["a2o_", "a2a_", "a2c_", "c2a_", "c2c_", "c2o_", "p2o_", "b2o_", "a2b_", "a2p_"].iter().any(|p| name.starts_with(p));
         !object_or_social || actor_side(name)
     })
 }

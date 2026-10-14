@@ -436,7 +436,10 @@ installation is unreachable.
   Accuse them of Being Evil; moodlets': a Sim just fired is asked about work; a pregnancy, a new
   job, a new home) and its suite's own clips; those sharing a phrase gathered on a menu of their
   own, long menus paged with "More ›". Sims chat with the friendly and funny ones of their own
-  accord, as their traits favour.
+  accord, as their traits favour. Children have theirs too, in the children's own clips: the
+  game's child-to-child, child-to-grown-up and grown-up-to-child versions where it has them
+  for the social (a hug, a gossip, cheering up), else its generic talk, with the listener
+  nodding along or wincing as it goes down (the grown-up in it talking down to them).
 - **Conversation topics**, as the game's (its `ActiveTopic`s, for as long as its table has them
   last): what's happened to a Sim lately is talked about, by them or by others with them,
   opening the game's socials under it. A birthday (Announce Birthday; Birthday Congratulations
@@ -584,8 +587,8 @@ installation is unreachable.
    lifts their grades; left undone, it drags them down. A teen or grown-up
   can Help with Homework (a Friendly social, offered while there's homework): it's done, with
   better grades, the helper learns a little Logic, and the hours count towards Teacher
-   Extraordinaire (whose teachers get through it twice as fast). A grown-up can tell a teen
-   with homework to "Do Homework" (the game's own social, which family-minded parents use
+   Extraordinaire (whose teachers get through it twice as fast). A grown-up can tell a child or
+   teen with homework to "Do Homework" (the game's own social, which family-minded parents use
    unasked): one of the household, or who likes them well enough, sets about it there and then.
    Grades and unfinished homework
    survive saves, including partial homework progress and school visits in progress;
