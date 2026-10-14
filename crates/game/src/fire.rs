@@ -97,23 +97,24 @@ const EXTINGUISH_MINUTES: f64 = 6.0;
 const BURN_MINUTES: f64 = 60.0;
 const PUT_OUT_SIM_MINUTES: f64 = 1.5;
 
-/// Whether a cook's dinner goes up in flames: likelier for the unskilled (and the clumsy).
-pub fn cooking_fire(cooking_level: u32, natural_cook: bool) -> bool {
-    rand::rng().random_bool(cooking_fire_chance(cooking_level, 0, natural_cook))
-}
-
-/// The game's chance of a cooking fire: the food burnt (its `kBaseChanceOfFailurePerSkillLevel`,
-/// less `kSkillLevelDifferenceChanceMultiplier` a level the cook's above the recipe; never by a
-/// Natural Cook), and then the stove alight (`ChanceOfRandomFireAfterFailure`, 5%).
-pub fn cooking_fire_chance(cooking_level: u32, recipe_level: u32, natural_cook: bool) -> f64 {
-    const BURN: [f64; 11] = [33.0, 25.0, 20.0, 20.0, 18.0, 15.0, 12.0, 8.0, 6.0, 4.0, 2.0];
-    const FIRE_AFTER_BURNING: f64 = 0.05;
+/// The game's chance (0..1) a dish burns (the Cooking skill's `CalculateChanceOfFailure`): its
+/// `kBaseChanceOfFailurePerSkillLevel` for the cook's level, less
+/// `kSkillLevelDifferenceChanceMultiplier` a level they're above the recipe, times the stove's
+/// `ChanceOfRandomFailureMultiplier`; never for a Natural Cook.
+pub fn burn_chance(cooking_level: u32, recipe_level: u32, natural_cook: bool, stove_failure: f32) -> f64 {
+    const BURN: [f64; 11] = [33.0, 25.0, 18.0, 16.0, 14.0, 12.0, 10.0, 8.0, 6.0, 4.0, 2.0];
+    const PER_LEVEL_ABOVE: f64 = 2.0;
     if natural_cook {
         return 0.0;
     }
     let level = cooking_level.min(10);
-    let burn = (BURN[level as usize] - (level as f64 - recipe_level as f64) * 1.1).max(0.0) / 100.0;
-    burn * FIRE_AFTER_BURNING
+    ((BURN[level as usize] - (level as f64 - recipe_level as f64) * PER_LEVEL_ABOVE).max(0.0) * stove_failure as f64 / 100.0).min(1.0)
+}
+
+/// The game's chance of a cooking fire: the dish burnt, and then the stove alight (its
+/// `ChanceOfRandomFireAfterFailure`, per cent).
+pub fn cooking_fire_chance(cooking_level: u32, recipe_level: u32, natural_cook: bool, stove_failure: f32, fire_after: f32) -> f64 {
+    burn_chance(cooking_level, recipe_level, natural_cook, stove_failure) * (fire_after as f64 / 100.0).clamp(0.0, 1.0)
 }
 
 /// A flame's texture: bright at the root, orange and red above, fading out at the tips.
@@ -609,9 +610,13 @@ mod tests {
     #[test]
     fn cooking_fires_come_at_the_games_odds() {
         // (A novice: a third of meals burnt, one in twenty of those alight.)
-        assert!((cooking_fire_chance(0, 0, false) - 0.0165).abs() < 1e-9);
-        assert!(cooking_fire_chance(5, 0, false) < cooking_fire_chance(0, 0, false) / 3.0);
-        assert!(cooking_fire_chance(10, 0, false) == 0.0, "a master cook above the recipe never burns it");
-        assert_eq!(cooking_fire_chance(0, 0, true), 0.0, "nor a Natural Cook");
+        // (A novice on a cheap stove: a third of dishes burn, half again for the stove, and a
+        // fifth of those catch.)
+        assert!((burn_chance(0, 0, false, 1.5) - 0.495).abs() < 1e-9);
+        assert!((cooking_fire_chance(0, 0, false, 1.5, 20.0) - 0.099).abs() < 1e-9);
+        assert!(burn_chance(5, 0, false, 1.0) == 0.02, "two points less a level above the recipe");
+        assert!(burn_chance(10, 0, false, 1.0) == 0.0, "a master cook above the recipe never burns it");
+        assert_eq!(burn_chance(0, 0, true, 1.0), 0.0, "nor a Natural Cook");
+        assert_eq!(burn_chance(0, 0, false, 0.0), 0.0, "nor anyone on the best stove");
     }
 }

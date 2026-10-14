@@ -104,6 +104,8 @@ pub struct Did {
 pub enum Deed {
     Count(Stat, f64),
     Kind(Kinds, String),
+    /// A recipe made once more.
+    Made(String),
 }
 
 impl Did {
@@ -112,6 +114,9 @@ impl Did {
     }
     pub fn kind(sim: Entity, kinds: Kinds, name: impl Into<String>) -> Self {
         Self { sim, what: Deed::Kind(kinds, name.into()) }
+    }
+    pub fn made(sim: Entity, recipe: impl Into<String>) -> Self {
+        Self { sim, what: Deed::Made(recipe.into()) }
     }
 }
 
@@ -134,6 +139,10 @@ impl SkillJournal {
     pub fn get(&self, s: Stat) -> f64 {
         self.tally.get(s.key()).copied().unwrap_or(0.0)
     }
+    /// How many times they've made a recipe.
+    pub fn times_made(&self, recipe: &str) -> f64 {
+        self.tally.get(&format!("made:{recipe}")).copied().unwrap_or(0.0)
+    }
     pub fn kinds(&self, k: Kinds) -> usize {
         self.kinds.get(k.key()).map_or(0, |v| v.len())
     }
@@ -150,6 +159,7 @@ impl SkillJournal {
                     v.push(name.clone());
                 }
             }
+            Deed::Made(recipe) => *self.tally.entry(format!("made:{recipe}")).or_default() += 1.0,
         }
     }
 }

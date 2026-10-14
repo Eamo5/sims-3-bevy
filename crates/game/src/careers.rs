@@ -32,6 +32,8 @@ pub struct CareerLevel {
     pub hourly: i64,
     pub start: f32,
     pub end: f32,
+    /// When a Sim at this level gets up for work (hour of the day).
+    pub wakeup: f32,
     /// Workdays: bit 0 = Monday.
     pub days: u8,
     /// The uniform (an outfit's name; empty for everyday clothes) for men, women, elderly men
@@ -177,6 +179,8 @@ pub fn install_tracks(data: &s3bake::GameDataBaked) {
                             hourly: l.hourly.round() as i64,
                             start,
                             end: (start + l.hours) % 24.0,
+                            // (Two hours before work where the table doesn't say.)
+                            wakeup: if l.wakeup > 0.0 { l.wakeup } else { (start + 22.0) % 24.0 },
                             days: l.days,
                             outfits: [0, 1, 2, 3].map(|i| leak(l.outfits[i].to_ascii_lowercase())),
                         });
@@ -225,7 +229,7 @@ impl BuiltinTrack {
             part_time: false,
             paths: vec![CareerPath {
                 branch: "Base",
-                levels: self.levels.iter().map(|&(title, hourly, start, end)| CareerLevel { title, title_female: "", hourly, start, end, days: self.days, outfits: [""; 4] }).collect(),
+                levels: self.levels.iter().map(|&(title, hourly, start, end)| CareerLevel { title, title_female: "", hourly, start, end, wakeup: (start + 22.0) % 24.0, days: self.days, outfits: [""; 4] }).collect(),
             }],
             branch_at: None,
         }

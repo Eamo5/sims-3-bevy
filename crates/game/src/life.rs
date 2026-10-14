@@ -652,10 +652,11 @@ pub enum MoodletKind {
     Decorated,
     NicelyDecorated,
     BeautifullyDecorated,
+    GreatMeal,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 68] = {
+    pub const ALL: [MoodletKind; 69] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -665,7 +666,7 @@ impl MoodletKind {
             LameParty, AwesomeParty, Scared, GreatDate, BadDate, Singed, DirtySurroundings, FilthySurroundings, GettingChilly,
             TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf, MintyBreath,
             Disgusted, Mourning, FreshClothing, VeryFreshClothing, HolidayCheer, SpringFling, SummerFun, SpookyTime,
-            Decorated, NicelyDecorated, BeautifullyDecorated,
+            Decorated, NicelyDecorated, BeautifullyDecorated, GreatMeal,
         ]
     };
 
@@ -701,8 +702,8 @@ impl MoodletKind {
             WellRested => md("Well Rested", "A good night's sleep.", 15, 6.0),
             Comfy => md("Comfy", "Sitting somewhere comfortable.", 10, 1.0),
             SqueakyClean => md("Squeaky Clean", "Freshly washed.", 15, 4.0),
-            GoodMeal => md("Good Meal", "That hit the spot.", 10, 3.0),
-            AmazingMeal => md("Amazing Meal", "A culinary masterpiece!", 25, 4.0),
+            GoodMeal => md("Good Meal", "That hit the spot.", 10, 8.0),
+            AmazingMeal => md("Amazing Meal", "A culinary masterpiece!", 40, 8.0),
             HavingFun => md("Having Fun", "That was a blast.", 10, 2.0),
             GoodConversation => md("Good Conversation", "Nice to have a chat.", 15, 3.0),
             EnjoyingMusic => md("Enjoying the Music", "Great tunes!", 10, 2.0),
@@ -759,6 +760,7 @@ impl MoodletKind {
             Decorated => md("Decorated", "This room has a few nice touches.", 10, 0.0),
             NicelyDecorated => md("Nicely Decorated", "This room is nicely put together.", 25, 0.0),
             BeautifullyDecorated => md("Beautifully Decorated", "This room is a sight to behold!", 40, 0.0),
+            GreatMeal => md("Great Meal", "That was a really great meal.", 25, 8.0),
         }
     }
 
@@ -783,7 +785,7 @@ impl MoodletKind {
             Comfy => ("Comfy", true),
             SqueakyClean => ("SqueakyClean", true),
             GoodMeal => ("Meal", false),
-            AmazingMeal => ("DivineMeal", true),
+            AmazingMeal => ("Meal", false),
             HavingFun => ("Excited", false),
             GoodConversation => ("BrightenedDay", true),
             EnjoyingMusic => ("EnjoyingMusic", true),
@@ -837,6 +839,7 @@ impl MoodletKind {
             Decorated => ("Decorated", true),
             NicelyDecorated => ("NicelyDecorated", true),
             BeautifullyDecorated => ("BeautifullyDecorated", true),
+            GreatMeal => ("Meal", false),
             FreshClothing => ("FreshClothing", true),
             VeryFreshClothing => ("VeryFreshClothing", true),
         }
@@ -864,6 +867,12 @@ impl Moodlets {
             return;
         }
         self.0.push(Moodlet { kind, value: d.value, until });
+    }
+
+    /// Adds an event moodlet at its own strength and length (a meal's, as good as it was).
+    pub fn add_valued(&mut self, kind: MoodletKind, now: f64, value: i32, minutes: f64) {
+        self.remove(kind);
+        self.0.push(Moodlet { kind, value, until: now + minutes });
     }
 
     pub fn remove(&mut self, kind: MoodletKind) {

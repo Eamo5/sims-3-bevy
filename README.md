@@ -88,6 +88,10 @@ installation is unreachable.
   morphs (weight and fitness sliders; town Sims keep their builds, working out firms Sims up);
   needs (falling as the game's `Motives` tuning has them: hunger, bladder and energy by the band
   they're in, slowing as they run low; social and hygiene steadily; fun only down to nothing;
+  sleep as the game has Sims take it: to bed of their own accord when sleepy (energy down to
+  −60) or at bedtime (eight hours before getting up, at six or their job level's wake-up time)
+  once energy's down to 50, and naps of two hours only when sleepy and still ten hours or more
+  from getting up;
   and met as each object's class is tuned in the game's interaction tuning: a cheap TV's 25 fun
   an hour against a wall TV's 80, a simple shower's 260 hygiene against a good one's 800, a
   bath's fun, a toilet's relief, a bed's energy by its own multiplier from a trash-heap cot's
@@ -686,8 +690,18 @@ installation is unreachable.
   is heartbroken. She also brings adopted children: the phone's "Adopt a Child ›" (a baby —
   given a crib — a toddler or a child, a girl or a boy), who join the family a couple of hours
   later.
-- **Fire**: a poor cook can set the stove alight, at the game's odds (the food burnt, a third
-  of the time for a novice and never for a Natural Cook, and one in twenty of those alight); the flames flicker and light
+- **Food quality**, as the game cooks: each dish's food points are its recipe level's, 1.5
+  more for every time the cook has made it before, the stove's own (nothing on a cheap one, 20
+  on the best), 15 for a Natural Cook's or a Perfectionist's touch, three quarters of that for
+  a group meal, making it anything from Horrifying to Perfect (a Menu Maven's a quality better):
+  "Mia made Nice Sushi for 8". Eaten, it's a Good, Great or Amazing Meal at its strength (10
+  for Neutral to 50 for Perfect) for eight hours. Food burns at the game's odds for the cook's
+  level against the recipe's (a third of the time for a novice, never for a Natural Cook) and
+  the stove's (half again on a cheap one, never on the best); a burnt dinner is served all the
+  same, and does nothing for anyone's mood.
+- **Fire**: a poor cook can set the stove alight, at the game's odds (the food burnt, and then
+  the stove's own chance of catching, from one in a hundred on the best to one in five on a
+  cheap one); the flames flicker and light
   the room, spread to what's beside them and ruin it (charred, the model's own Burnt look,
   until it's mended), and Sims nearby panic with the game's
   fire animations. Anyone caught in the flames burns, in flames head to foot, dashing about in

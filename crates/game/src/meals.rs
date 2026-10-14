@@ -204,6 +204,94 @@ pub fn pizza_spot(objects: &Query<(Entity, &GameObject, &Transform, &UsedBy)>, c
 }
 
 /// The finished recipe awaiting serving (index into the game's recipes).
+/// The game's meal qualities (its `Quality`), worst to best.
+pub const QUALITIES: [&str; 11] = ["Horrifying", "Putrid", "Foul", "Bad", "Neutral", "Nice", "Very Nice", "Great", "Excellent", "Outstanding", "Perfect"];
+/// The food points a dish must be under for each quality (the Cooking skill's sheet,
+/// `PointsToGet_*`; at or over the last, Perfect), and the meal moodlet's strength for each
+/// (`Buff_*`; none below Neutral).
+const POINTS_TO_GET: [f32; 11] = [-70.0, -50.0, -30.0, -10.0, 15.0, 30.0, 45.0, 60.0, 75.0, 100.0, 101.0];
+const MEAL_STRENGTH: [i32; 11] = [0, 0, 0, 0, 10, 15, 20, 25, 30, 35, 50];
+/// Food points for the recipe's level (`Level_N_Points`), more each time the cook has made it
+/// (`Food_Point_Bonus_Per_Times_Made`), for a Natural Cook's or a Perfectionist's touch
+/// (`TraitTuning`), a group meal's share (`Food.kQualityMultiplierForServedFood`), and a burnt
+/// dish's (`Food.kNumFoodPointsBurnt`).
+const LEVEL_POINTS: [f32; 11] = [0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0];
+const POINTS_PER_TIME_MADE: f32 = 1.5;
+const NATURAL_COOK_POINTS: f32 = 15.0;
+const PERFECTIONIST_POINTS: f32 = 15.0;
+const GROUP_SHARE: f32 = 0.75;
+const BURNT_POINTS: f32 = -150.0;
+/// How long a meal's moodlet lasts (the Cooking tuning's `kBuffDuration`), and the strengths
+/// it's Good, Great and Amazing at (`kBuffThreshold`).
+const MEAL_MOODLET_MINUTES: f64 = 480.0;
+const GREAT_MEAL: i32 = 25;
+const AMAZING_MEAL: i32 = 40;
+
+/// How good a cooked dish came out: its quality (an index of `QUALITIES`) and the strength of the
+/// moodlet it gives.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct MealQuality {
+    pub quality: usize,
+    pub strength: i32,
+}
+
+impl MealQuality {
+    pub fn label(&self) -> &'static str {
+        QUALITIES[self.quality.min(10)]
+    }
+}
+
+/// What a cook brings to a dish.
+pub struct Cook {
+    pub times_made: f64,
+    pub natural_cook: bool,
+    pub perfectionist: bool,
+    pub menu_maven: bool,
+}
+
+/// A dish's quality as the game's `SetQualityAndFoodPoints` reckons it: the recipe level's food
+/// points, the cook's practice with it, the stove's own, the cook's touch, less for a group
+/// meal, nothing to speak of if burnt; a Menu Maven's a quality better.
+pub fn meal_quality(recipe_level: u8, cook: &Cook, stove_points: f32, group: bool, burnt: bool) -> MealQuality {
+    let points = if burnt {
+        BURNT_POINTS
+    } else {
+        let mut p = LEVEL_POINTS[recipe_level.min(10) as usize] + cook.times_made as f32 * POINTS_PER_TIME_MADE + stove_points;
+        if cook.natural_cook {
+            p += NATURAL_COOK_POINTS;
+        }
+        if cook.perfectionist {
+            p += PERFECTIONIST_POINTS;
+        }
+        if group { (p * GROUP_SHARE).trunc() } else { p.trunc() }
+    };
+    let mut quality = POINTS_TO_GET.iter().position(|&k| points < k).unwrap_or(10);
+    let strength = MEAL_STRENGTH[quality];
+    if !burnt && cook.menu_maven && quality < 10 {
+        quality += 1;
+    }
+    MealQuality { quality, strength }
+}
+
+/// The moodlet a meal gives: Good, Great or Amazing by its strength.
+pub fn meal_moodlet(strength: i32) -> Option<crate::life::MoodletKind> {
+    use crate::life::MoodletKind as K;
+    match strength {
+        s if s >= AMAZING_MEAL => Some(K::AmazingMeal),
+        s if s >= GREAT_MEAL => Some(K::GreatMeal),
+        s if s > 0 => Some(K::GoodMeal),
+        _ => None,
+    }
+}
+
+/// A cook whose dish burnt at the stove, carrying it to the table.
+#[derive(Component)]
+pub struct BurntDinner;
+
+/// What's on the plate a Sim's eating from, as it was cooked.
+#[derive(Component, Clone, Copy)]
+pub struct OnPlate(pub MealQuality);
+
 /// Choices for queued cooking actions live on `Action::recipe_choice`.
 #[derive(Component)]
 pub struct MealPlan(pub usize);
@@ -779,6 +867,7 @@ fn meal_requests(
         &Sim,
         Option<&EatingPlate>,
         (Option<&MealPlan>, Option<&Plateful>, &crate::interact::Skills, Option<&KnownRecipes>, Option<&ServingFrom>, Has<ForOne>),
+        (Option<&crate::journal::SkillJournal>, Has<BurntDinner>, Option<&OnPlate>),
     )>,
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy)>,
     mut meals: Query<(&mut Meal, Option<&Dish>, Option<&DishFood>)>,
@@ -789,11 +878,13 @@ fn meal_requests(
     mut notes: ResMut<Notifications>,
     (ui, clock, mut funds, mut leftovers): (Option<Res<crate::icons::GameUi>>, Res<crate::clock::GameClock>, Option<ResMut<crate::interact::Household>>, ResMut<Leftovers>),
     mut did: MessageWriter<crate::journal::Did>,
+    (qualities, floors, mut fire, rates): (Query<&MealQuality>, Query<&crate::nav::Floor>, MessageWriter<crate::fire::StartFire>, Res<crate::interact::ObjectRates>),
 ) {
+    use rand::Rng;
     let recipes = ui.as_ref().map(|u| u.data.clone());
     let recipe = |i: usize| recipes.as_ref().and_then(|d| d.recipes.get(i));
     let mut taken: Vec<Entity> = Vec::new();
-    for (me, req, tf, mut queue, sim, eating, (plan, plateful, skills, known, serving, one)) in &mut sims {
+    for (me, req, tf, mut queue, sim, eating, (plan, plateful, skills, known, serving, one), (journal, burnt_before, on_plate)) in &mut sims {
         commands.entity(me).remove::<MealRequest>();
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
         // A favourite meal is satisfying whether eaten at a table or standing up.
@@ -814,6 +905,45 @@ fn meal_requests(
         match *req {
             MealRequest::Serve(stove) => {
                 let Ok((_, s, stf, _)) = objects.get(stove) else { continue };
+                // The recipe chosen, or the best they know for the time of day.
+                let (meal, word) = meal_time(clock.hour_f(), clock.weekday());
+                let grill = s.kind == ObjectKind::Grill;
+                let dish = plan.map(|p| p.0).or_else(|| {
+                    let d = recipes.as_ref()?;
+                    let mut options = cookable(d, sim, skills.level("Cooking"), known, if grill { 0xFF } else { meal });
+                    // (A grill cooks its own menu.)
+                    if grill {
+                        options.retain(|&i| crate::appliances::GRILL_RECIPES.contains(&d.recipes[i].key.as_str()));
+                    }
+                    options.sort_by_key(|&i| std::cmp::Reverse(d.recipes[i].level));
+                    options.truncate(3);
+                    options.choose(&mut rand::rng()).copied()
+                });
+                let stove_tuning = rates.0.get(&s.objd).and_then(|o| o.cooking.as_ref());
+                // (At the stove, whether it burns, or sets the stove alight: the game's odds for
+                // the cook, the recipe and the stove. A burnt dinner is still served.)
+                let mut burnt = burnt_before;
+                if serving.is_none() {
+                    let natural = sim.traits.contains(&crate::life::Trait::NaturalCook);
+                    let level = dish.and_then(recipe).map_or(0, |r| r.level as u32);
+                    let mut rng = rand::rng();
+                    if rng.random_bool(crate::fire::burn_chance(skills.level("Cooking"), level, natural, stove_tuning.map_or(1.0, |t| t.failure))) {
+                        if rng.random_bool((stove_tuning.map_or(5.0, |t| t.fire) as f64 / 100.0).clamp(0.0, 1.0)) {
+                            fire.write(crate::fire::StartFire { at: stf.translation + Vec3::Y * s.height * 0.85, level: floors.get(stove).map_or(1, |f| f.0) });
+                            notes.push(format!("{} set the stove on fire!", sim.first));
+                            commands.entity(me).remove::<(MealPlan, BurntDinner)>();
+                            continue;
+                        }
+                        burnt = true;
+                    }
+                    // (Kept for when it's set down.)
+                    if let Some(d) = dish {
+                        commands.entity(me).insert(MealPlan(d));
+                    }
+                    if burnt {
+                        commands.entity(me).insert(BurntDinner);
+                    }
+                }
                 // (First carried from the stove to the counter or table it's served on; a plate
                 // for one, to the table.)
                 if serving.is_none()
@@ -829,23 +959,22 @@ fn meal_requests(
                 let at = surface_near(&objects, s.world_center(stf), 6.0).unwrap_or(Vec3::new(s.world_center(stf).x, stf.translation.y + s.height, s.world_center(stf).z));
                 let servings = GROUP_MEAL_SERVINGS;
                 let yaw = stf.rotation.to_euler(EulerRot::YXZ).0;
-                // The recipe chosen, or the best they know for the time of day.
-                let (meal, word) = meal_time(clock.hour_f(), clock.weekday());
-                let grill = s.kind == ObjectKind::Grill;
-                let dish = plan.map(|p| p.0).or_else(|| {
-                    let d = recipes.as_ref()?;
-                    let mut options = cookable(d, sim, skills.level("Cooking"), known, if grill { 0xFF } else { meal });
-                    // (A grill cooks its own menu.)
-                    if grill {
-                        options.retain(|&i| crate::appliances::GRILL_RECIPES.contains(&d.recipes[i].key.as_str()));
-                    }
-                    options.sort_by_key(|&i| std::cmp::Reverse(d.recipes[i].level));
-                    options.truncate(3);
-                    options.choose(&mut rand::rng()).copied()
-                });
-                commands.entity(me).remove::<MealPlan>();
+                commands.entity(me).remove::<(MealPlan, BurntDinner)>();
                 let r = dish.and_then(recipe);
                 let label = r.map_or("Group Meal".to_string(), |r| r.name.clone());
+                // How it came out.
+                let cook = Cook {
+                    times_made: r.and_then(|r| journal.map(|j| j.times_made(&r.key))).unwrap_or(0.0),
+                    natural_cook: sim.traits.contains(&crate::life::Trait::NaturalCook),
+                    perfectionist: sim.traits.contains(&crate::life::Trait::Perfectionist),
+                    menu_maven: crate::journal::earned(journal, "Menu Maven"),
+                };
+                let quality = r.map(|r| meal_quality(r.level, &cook, stove_tuning.map_or(0.0, |t| t.bonus_points), !one, burnt));
+                let served = match (r, quality) {
+                    (Some(r), Some(_)) if burnt => format!("burnt {}", r.name),
+                    (Some(r), Some(q)) => format!("{} {}", q.label(), r.name),
+                    _ => label.clone(),
+                };
                 let cost = r.map_or(0, |r| (r.cost as i64).max(0));
                 if cost > 0 && funds.as_ref().is_none_or(|h| h.funds < cost) {
                     notes.push(format!("{} can't afford the ingredients for {label} (§{cost}).", sim.first));
@@ -857,10 +986,17 @@ fn meal_requests(
                         h.funds -= cost;
                     }
                     did.write(crate::journal::Did::count(me, crate::journal::Stat::Dishes, 1.0));
-                    info!("{} made {label} for one", sim.first);
+                    if let Some(r) = r {
+                        did.write(crate::journal::Did::made(me, r.key.clone()));
+                    }
+                    info!("{} made {served} for one", sim.first);
                     match dish {
                         Some(d) => commands.entity(me).insert(Plateful(d)),
                         None => commands.entity(me).remove::<Plateful>(),
+                    };
+                    match quality {
+                        Some(q) => commands.entity(me).insert(OnPlate(q)),
+                        None => commands.entity(me).remove::<OnPlate>(),
                     };
                     commands.entity(me).insert(crate::anim::Carrying(crate::surroundings::DISH_CARRY));
                     match dining_seat(&objects, tf.translation, &taken) {
@@ -874,6 +1010,12 @@ fn meal_requests(
                 }
                 let Some(platter) = spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, PLATTER, ObjectKind::Meal, "Group Meal", at, yaw) else { continue };
                 did.write(crate::journal::Did::count(me, crate::journal::Stat::Dishes, 1.0));
+                if let Some(r) = r {
+                    did.write(crate::journal::Did::made(me, r.key.clone()));
+                }
+                if let Some(q) = quality {
+                    commands.entity(platter).insert(q);
+                }
                 // (Hot dogs and burgers have no platter of their own: a plate of them.)
                 set_food(&mut commands, &mut assets, &mut ctx, platter, None, r.and_then(|r| r.group.or(r.single)));
                 commands.entity(platter).insert(Meal { servings });
@@ -892,10 +1034,10 @@ fn meal_requests(
                 if let Some(h) = funds.as_mut() {
                     h.funds -= cost;
                 }
-                info!("meal served at {at:.1?}: {label}");
+                info!("meal served at {at:.1?}: {served}");
                 let dish_word = if r.is_some_and(|r| r.meals == s3bake::gamedata::MEAL_DESSERT) { "Dessert" } else { word };
                 notes.push(match r {
-                    Some(r) => format!("{} made {} for {servings}. {dish_word} is served!", sim.first, r.name),
+                    Some(_) => format!("{} made {served} for {servings}. {dish_word} is served!", sim.first),
                     None => format!("{} made {} for {servings}. {dish_word} is served!", sim.first, dish_word.to_lowercase()),
                 });
                 // The cook eats too; first, with more than their own, calling everyone to it (the
@@ -929,6 +1071,10 @@ fn meal_requests(
                     match dish {
                         Some(d) => commands.entity(me).insert(Plateful(d.0)),
                         None => commands.entity(me).remove::<Plateful>(),
+                    };
+                    match qualities.get(platter) {
+                        Ok(q) => commands.entity(me).insert(OnPlate(*q)),
+                        Err(_) => commands.entity(me).remove::<OnPlate>(),
                     };
                     if m.servings == 0 {
                         // The empty platter waits to be washed up (what's left of the dish on it).
@@ -991,6 +1137,7 @@ fn meal_requests(
                     Some(i) => commands.entity(me).insert(Plateful(i)),
                     None => commands.entity(me).remove::<Plateful>(),
                 };
+                commands.entity(me).remove::<OnPlate>();
                 commands.entity(me).insert(crate::anim::Carrying(crate::surroundings::DISH_CARRY));
                 match dining_seat(&objects, tf.translation, &taken) {
                     Some((chair, _)) => {
@@ -1011,6 +1158,7 @@ fn meal_requests(
                     Some(i) => commands.entity(me).insert(Plateful(i)),
                     None => commands.entity(me).remove::<Plateful>(),
                 };
+                commands.entity(me).remove::<OnPlate>();
                 // (Carried off to the table.)
                 commands.entity(me).insert(crate::anim::Carrying(crate::surroundings::DISH_CARRY));
                 match dining_seat(&objects, tf.translation, &taken) {
@@ -1033,6 +1181,7 @@ fn meal_requests(
                     Some(i) => commands.entity(me).insert(Plateful(i)),
                     None => commands.entity(me).remove::<Plateful>(),
                 };
+                commands.entity(me).remove::<OnPlate>();
                 match dining_seat(&objects, tf.translation, &taken) {
                     Some((chair, at)) => {
                         info!("{} takes leftovers to the table at {:.1?}", sim.first, at);
@@ -1064,6 +1213,7 @@ fn meal_requests(
             }
             MealRequest::Ate => {
                 info!("{} finished eating", sim.first);
+                eat_quality(&mut commands, me, on_plate, plateful.and_then(|p| recipe(p.0)).is_some_and(|r| r.key == sim.favorites.food));
                 if let Some(p) = eating {
                     commands.entity(me).remove::<EatingPlate>();
                     commands.entity(p.0).insert(UsedBy(None));
@@ -1075,6 +1225,7 @@ fn meal_requests(
                 commands.entity(me).remove::<Plateful>();
             }
             MealRequest::AteStanding => {
+                eat_quality(&mut commands, me, on_plate, plateful.and_then(|p| recipe(p.0)).is_some_and(|r| r.key == sim.favorites.food));
                 // The plate goes on the nearest surface, or the floor.
                 let at = surface_near(&objects, tf.translation, 4.0).unwrap_or(tf.translation + tf.rotation * Vec3::new(0.3, 0.0, 0.4));
                 if let Some(plate) = spawn_dish(&mut commands, &mut assets, &mut ctx, &catalog, PLATE, ObjectKind::DirtyDishes, "Dirty Dishes", at, 0.0) {
@@ -1085,6 +1236,25 @@ fn meal_requests(
             }
         }
     }
+}
+
+/// A meal eaten: its moodlet, Good, Great or Amazing as it was cooked (a favourite's Amazing
+/// already).
+fn eat_quality(commands: &mut Commands, me: Entity, on_plate: Option<&OnPlate>, favourite: bool) {
+    commands.entity(me).remove::<OnPlate>();
+    let Some(q) = on_plate.map(|p| p.0) else { return };
+    let Some(kind) = meal_moodlet(q.strength).filter(|_| !favourite) else { return };
+    debug!("a {} meal: {kind:?} +{}", q.label(), q.strength);
+    commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| {
+        let now = e.world().resource::<crate::clock::GameClock>().minutes;
+        if let Some(mut m) = e.get_mut::<crate::life::Moodlets>() {
+            use crate::life::MoodletKind as K;
+            for k in [K::GoodMeal, K::GreatMeal, K::AmazingMeal] {
+                m.remove(k);
+            }
+            m.add_valued(kind, now, q.strength, MEAL_MOODLET_MINUTES);
+        }
+    });
 }
 
 /// Food tuning's cleanup chance, with trait behavior and player queue precedence.
@@ -1141,6 +1311,25 @@ fn release_plates(mut commands: Commands, sims: Query<(Entity, &ActionQueue, &Ea
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn meals_come_out_as_the_game_cooks_them() {
+        use crate::life::MoodletKind as K;
+        let novice = Cook { times_made: 0.0, natural_cook: false, perfectionist: false, menu_maven: false };
+        // (An easy recipe made for the first time, on a plain stove: Neutral, a Good Meal.)
+        let q = meal_quality(0, &novice, 0.0, false, false);
+        assert_eq!((q.label(), q.strength, meal_moodlet(q.strength)), ("Neutral", 10, Some(K::GoodMeal)));
+        // (The hardest, made twenty times before, on the best stove: Perfect, an Amazing Meal.)
+        let practised = Cook { times_made: 20.0, ..novice };
+        let best = meal_quality(10, &practised, 20.0, false, false);
+        assert_eq!((best.label(), meal_moodlet(best.strength)), ("Perfect", Some(K::AmazingMeal)));
+        assert_eq!(meal_quality(10, &practised, 20.0, true, false).label(), "Outstanding", "a group meal's share is three quarters");
+        let burnt = meal_quality(5, &practised, 20.0, false, true);
+        assert_eq!((burnt.label(), meal_moodlet(burnt.strength)), ("Horrifying", None));
+        let maven = meal_quality(0, &Cook { menu_maven: true, ..novice }, 0.0, false, false);
+        assert_eq!((maven.label(), maven.strength), ("Nice", 10), "a quality better, as strong as it was cooked");
+        assert_eq!(meal_moodlet(25), Some(K::GreatMeal));
+    }
 
     #[test]
     fn half_eaten_visual_starts_at_the_original_remaining_bite_threshold() {

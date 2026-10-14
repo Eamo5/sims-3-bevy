@@ -815,12 +815,43 @@ pub struct ObjectNeedRates {
     pub energy: f32,
     /// What it adds to the look of a room (its class's `EnvironmentScore`).
     pub environment: f32,
+    /// A stove's or grill's cooking.
+    pub cooking: Option<s3bake::gamedata::ApplianceCooking>,
 }
 
 impl Default for ObjectNeedRates {
     fn default() -> Self {
-        Self { by: HashMap::new(), energy: 1.0, environment: 0.0 }
+        Self { by: HashMap::new(), energy: 1.0, environment: 0.0, cooking: None }
     }
+}
+
+/// The game's sleepiness: energy down to its Energy motive's Sleepy buff (Tired and Exhausted
+/// below it).
+pub const SLEEPY: f32 = -60.0;
+/// When a Sim gets up when work doesn't say (`Sim.kDefaultWakeupTime`), how long a night's
+/// sleep is (`kTypicalNumHoursToSleep`: bedtime is that long before waking), how tired they
+/// must be to go to bed then (`kEnergyThresholdBelowWhichTheyWantToSleepWhenSleepyDuringTheirBedTime`),
+/// and how long before waking they no longer nap (`kNapAvailabilityHoursBeforeWakeupTime`).
+const WAKE_HOUR: f32 = 6.0;
+const NIGHT_HOURS: f32 = 8.0;
+const BEDTIME_ENERGY: f32 = 50.0;
+const NO_NAP_HOURS: f32 = 10.0;
+
+/// Hours till a Sim gets up: for work, at their level's wake-up time, or at six.
+pub fn hours_until_waking(hour: f32, job: Option<&Job>) -> f32 {
+    let wake = job.map_or(WAKE_HOUR, |j| j.info().wakeup);
+    let h = (wake - hour).rem_euclid(24.0);
+    if h == 0.0 { 24.0 } else { h }
+}
+
+/// Whether a Sim goes to bed of their own accord (the game's `BedSleep` test).
+pub fn may_sleep(energy: f32, hours_until_waking: f32) -> bool {
+    energy <= SLEEPY || (hours_until_waking <= NIGHT_HOURS && energy <= BEDTIME_ENERGY)
+}
+
+/// Whether a Sim naps of their own accord (the game's `AbleToNap`).
+pub fn may_nap(energy: f32, hours_until_waking: f32) -> bool {
+    energy <= SLEEPY && hours_until_waking > NO_NAP_HOURS
 }
 
 /// The game's tuning name for those of our interactions it tunes object by object.
@@ -893,7 +924,8 @@ fn load_object_rates<'a>(rates: &mut ObjectRates, data: &s3bake::gamedata::GameD
         if let Some(e) = class_chain(class).find_map(|k| environment.get(k)) {
             o.environment = *e;
         }
-        if !o.by.is_empty() || o.energy != 1.0 || o.environment != 0.0 {
+        o.cooking = class_chain(class).find_map(|k| data.appliance_cooking.iter().find(|a| a.class == k)).cloned();
+        if !o.by.is_empty() || o.energy != 1.0 || o.environment != 0.0 || o.cooking.is_some() {
             rates.0.insert(objd, o);
         }
     }
@@ -1207,6 +1239,8 @@ pub struct InteractionDef {
 const N: [f32; 6] = [0.0; 6];
 const D1: [f32; 6] = [1.0; 6];
 const SLEEP_DECAY: [f32; 6] = [0.35, 0.35, 0.0, 0.3, 0.4, 0.2];
+/// How long a nap in bed lasts (the game's `kNapLengthInMinutes`).
+const NAP_MINUTES: f32 = 120.0;
 
 /// Minutes to eat a piece of produce.
 const PRODUCE_MINUTES: f32 = 8.0;
@@ -1336,7 +1370,7 @@ static BED: [InteractionDef; 6] = [
         decay: SLEEP_DECAY,
         ..def("Sleep", 600.0, [0.0, 0.0, 24.0, 0.0, 0.0, 0.0], Pose::Lie)
     },
-    InteractionDef { on_object: true, decay: SLEEP_DECAY, ..def("Nap", 90.0, [0.0, 0.0, 26.0, 0.0, 0.0, 0.0], Pose::Lie) },
+    InteractionDef { on_object: true, decay: SLEEP_DECAY, ..def("Nap", NAP_MINUTES, [0.0, 0.0, 26.0, 0.0, 0.0, 0.0], Pose::Lie) },
     InteractionDef { on_object: true, ..def("Relax", 45.0, [0.0, 0.0, 6.0, 0.0, 0.0, 14.0], Pose::Lie) },
     // (Never on the bed's menu: the socials' when they're accepted.)
     InteractionDef { autonomous: false, on_object: true, special: Special::WooHoo, ..def("WooHoo", 25.0, WOOHOO_RATES, Pose::Lie) },
@@ -2887,8 +2921,7 @@ pub(crate) fn run_actions(
     mut life: MessageWriter<LifeEvent>,
     people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
     mut conceive: MessageWriter<crate::little::Conceive>,
-    (mut fire, upgraded, baked, paper_in_hand, prepped, serving_from, broken, unavailable): (
-        MessageWriter<crate::fire::StartFire>,
+    (upgraded, baked, paper_in_hand, prepped, serving_from, broken, unavailable): (
         Query<&crate::upgrades::Upgrades>,
         Option<Res<crate::baked::Baked>>,
         Query<&crate::surroundings::PaperInHand>,
@@ -3671,7 +3704,7 @@ pub(crate) fn run_actions(
                     action.phase = Phase::Running(elapsed);
                     match &action.kind {
                         ActionKind::Object { target, def } => {
-                            if let Ok((obj, otf, mut used, of)) = objects.get_mut(*target) {
+                            if let Ok((obj, otf, mut used, _)) = objects.get_mut(*target) {
                                 let d = &interactions_for(obj.kind)[*def];
                                 let affinity = crate::life::activity_affinity(&sim.traits, d.name);
                                 // (As the game tunes this object: a cheap TV less fun than a
@@ -3997,24 +4030,18 @@ pub(crate) fn run_actions(
                                             });
                                         }
                                         Special::ServeMeal => {
-                                            // A poor cook may set the stove on fire instead.
-                                            let natural = sim.traits.contains(&crate::life::Trait::NaturalCook);
-                                            if crate::fire::cooking_fire(skills.level("Cooking"), natural) {
-                                                fire.write(crate::fire::StartFire { at: otf.translation + Vec3::Y * obj.height * 0.85, level: of.map_or(1, |f| f.0) });
-                                                notes.push(format!("{} set the stove on fire!", sim.first));
+                                            // (Whether it burns, or sets the stove alight, is the meal's.)
+                                            if let Some(recipe) = action.recipe_choice.take() {
+                                                commands.entity(me).insert(crate::meals::MealPlan(recipe));
                                             } else {
-                                                if let Some(recipe) = action.recipe_choice.take() {
-                                                    commands.entity(me).insert(crate::meals::MealPlan(recipe));
-                                                } else {
-                                                    commands.entity(me).remove::<crate::meals::MealPlan>();
-                                                }
-                                                if action.for_one {
-                                                    commands.entity(me).insert(crate::meals::ForOne);
-                                                } else {
-                                                    commands.entity(me).remove::<crate::meals::ForOne>();
-                                                }
-                                                commands.entity(me).insert(crate::meals::MealRequest::Serve(*target));
+                                                commands.entity(me).remove::<crate::meals::MealPlan>();
                                             }
+                                            if action.for_one {
+                                                commands.entity(me).insert(crate::meals::ForOne);
+                                            } else {
+                                                commands.entity(me).remove::<crate::meals::ForOne>();
+                                            }
+                                            commands.entity(me).insert(crate::meals::MealRequest::Serve(*target));
                                         }
                                         Special::GrabPlate => {
                                             commands.entity(me).insert(crate::meals::MealRequest::Grabbed(*target));
@@ -5161,9 +5188,14 @@ fn autonomy(
                     let room = (100.0 - motives.0[i]).max(0.0);
                     score += gain.min(room).max(-50.0) * urgency(i);
                 }
-                // Only sleep when actually tired.
-                if d.until_full == Some(ENERGY) && motives.0[ENERGY] > -10.0 {
-                    score *= 0.1;
+                // Sleep and naps as the game's: to bed when sleepy, or at bedtime once tired enough;
+                // a nap only when sleepy, and not this near waking.
+                let waking = hours_until_waking(clock.hour_f(), job);
+                if d.until_full == Some(ENERGY) && !may_sleep(motives.0[ENERGY], waking) {
+                    continue;
+                }
+                if d.name == "Nap" && !may_nap(motives.0[ENERGY], waking) {
+                    continue;
                 }
                 // Homework gets done (by the bookish sooner), unless they're miserable.
                 if d.special == Special::Homework && motives.0.iter().all(|m| *m > -30.0) {
@@ -5660,6 +5692,19 @@ mod tests {
         let sleep = def("Sleep");
         assert!((rates.per_hour(sleep, (1, 0, 3))[ENERGY] - sleep.per_hour[ENERGY] * 1.4).abs() < 1e-3, "a better bed");
         assert!(!rates.0.contains_key(&(1, 0, 4)));
+    }
+
+    #[test]
+    fn sleep_and_naps_come_as_the_games() {
+        // (Waking at six: at four in the afternoon, fourteen hours off; at eleven at night, seven.)
+        assert_eq!(hours_until_waking(16.0, None), 14.0);
+        assert_eq!(hours_until_waking(23.0, None), 7.0);
+        assert!(!may_sleep(0.0, 14.0), "not in the afternoon, not sleepy");
+        assert!(may_sleep(-65.0, 14.0), "sleepy");
+        assert!(may_sleep(40.0, 7.0) && !may_sleep(60.0, 7.0), "at bedtime once tired enough");
+        assert!(may_nap(-70.0, 14.0));
+        assert!(!may_nap(-70.0, 7.0), "not this near waking: bed instead");
+        assert!(!may_nap(-30.0, 14.0));
     }
 
     #[test]

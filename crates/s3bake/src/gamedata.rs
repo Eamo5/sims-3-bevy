@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 95;
+pub const GAMEDATA_VERSION: u32 = 97;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -94,6 +94,9 @@ pub struct CareerLevelInfo {
     pub hourly: f32,
     pub start: f32,
     pub hours: f32,
+    /// When a Sim at this level gets up for work (the table's `WakeupTime`; 0 where it has none).
+    #[serde(default)]
+    pub wakeup: f32,
     /// Workdays: bit 0 = Monday.
     pub days: u8,
     /// Skills that count towards performance at this level.
@@ -319,6 +322,32 @@ pub fn repair_tuning(class: &str, xml: &str) -> Option<RepairTuning> {
             let rest = &rest[rest.find("<SkillGainRate value=\"")? + 22..];
             rest.split('"').next()?.trim().parse::<f32>().ok()
         }).unwrap_or(3600.0),
+    })
+}
+
+/// How a class of stove or grill cooks (its tuning): food points it adds to what's cooked on it
+/// (`ApplianceBonusFoodPoints`), how much likelier the food is to burn there
+/// (`ChanceOfRandomFailureMultiplier`), and the chance (per cent) burning sets it alight
+/// (`ChanceOfRandomFireAfterFailure`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ApplianceCooking {
+    pub class: String,
+    pub bonus_points: f32,
+    pub failure: f32,
+    pub fire: f32,
+}
+
+/// A stove's or grill's cooking, from its class's tuning; none when it isn't one.
+pub fn appliance_cooking(class: &str, xml: &str) -> Option<ApplianceCooking> {
+    let num = |k: &str| -> Option<f32> {
+        let at = xml.find(&format!("<{k} value=\""))? + k.len() + 9;
+        xml[at..].split('"').next()?.trim().parse().ok()
+    };
+    Some(ApplianceCooking {
+        class: class.to_string(),
+        bonus_points: num("ApplianceBonusFoodPoints")?,
+        failure: num("ChanceOfRandomFailureMultiplier").unwrap_or(1.0),
+        fire: num("ChanceOfRandomFireAfterFailure").unwrap_or(5.0),
     })
 }
 
@@ -616,6 +645,9 @@ pub struct GameDataBaked {
     /// What each class of object adds to the look of a room (its `EnvironmentScore`).
     #[serde(default)]
     pub environment_scores: Vec<(String, f32)>,
+    /// How each class of stove and grill cooks.
+    #[serde(default)]
+    pub appliance_cooking: Vec<ApplianceCooking>,
     pub buffs: Vec<BuffInfo>,
     pub traits: Vec<TraitInfo>,
     pub skills: Vec<SkillInfo>,
@@ -1806,6 +1838,11 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         {
             out.environment_scores.push((class.to_string(), v));
         }
+        if let Some(c) = appliance_cooking(class, &x)
+            && !out.appliance_cooking.iter().any(|o| o.class == c.class)
+        {
+            out.appliance_cooking.push(c);
+        }
     }
     // The interactions' need changes, each class's (the game's ITUNs).
     for e in pkg.of_type(T_ITUN) {
@@ -2001,6 +2038,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                     hourly: num(&r, "BasePay"),
                     start,
                     hours: num(&r, "DayLength"),
+                    wakeup: num(&r, "WakeupTime"),
                     days: get(&r, "DaysToWork").split(',').map(day_bit).fold(0, |a, b| a | b),
                     skills: last_skill.clone(),
                     outfits: ["OutfitMale", "OutfitFemale", "OutfitMaleElder", "OutfitFemaleElder"].map(|c| get(&r, c)),
@@ -3002,6 +3040,13 @@ mod tests {
                 ("Buff Fired".to_string(), "Ask About Work".to_string(), false),
             ]
         );
+    }
+
+    #[test]
+    fn stoves_cook_as_tuned() {
+        let xml = r#"<base><kStoveTuning><ChanceOfRandomFailureMultiplier value="1.5" /><ApplianceBonusFoodPoints value="0" /><ChanceOfRandomFireAfterFailure value="20" /></kStoveTuning></base>"#;
+        assert_eq!(appliance_cooking("StoveCheap", xml), Some(ApplianceCooking { class: "StoveCheap".into(), bonus_points: 0.0, failure: 1.5, fire: 20.0 }));
+        assert!(appliance_cooking("Chair", "<base />").is_none());
     }
 
     #[test]
