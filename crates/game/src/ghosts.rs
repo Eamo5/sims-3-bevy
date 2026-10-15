@@ -31,7 +31,7 @@ pub struct Grave {
 /// A ghost out from its grave.
 #[derive(Component)]
 pub struct Ghost {
-    grave: Entity,
+    pub grave: Entity,
     next_move: f64,
     last_fright: f64,
 }
@@ -111,7 +111,7 @@ fn drift(
     clock: Res<GameClock>,
     grid: Option<Res<crate::nav::NavGrid>>,
     graves: Query<&Transform, With<Grave>>,
-    mut ghosts: Query<(Entity, &mut Ghost, &Transform, Option<&PathFollow>)>,
+    mut ghosts: Query<(Entity, &mut Ghost, &Transform, Option<&PathFollow>), Without<crate::ambrosia::Feasting>>,
 ) {
     let Some(grid) = grid else { return };
     let mut rng = rand::rng();

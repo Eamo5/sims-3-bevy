@@ -833,10 +833,11 @@ pub enum MoodletKind {
     OutAfterCurfew,
     CaughtAfterCurfew,
     CozyFire,
+    DivineMeal,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 104] = {
+    pub const ALL: [MoodletKind; 105] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -847,7 +848,7 @@ impl MoodletKind {
             TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf, MintyBreath,
             Disgusted, Mourning, FreshClothing, VeryFreshClothing, HolidayCheer, SpringFling, SummerFun, SpookyTime,
             Decorated, NicelyDecorated, BeautifullyDecorated, GreatMeal, Stressed, Winner, Overworked, IAmBeautiful, SugarRush,
-            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, NiceNails, CompletelyAtEase, Horrified, Tranquil, BornToDoThis, DrawnIn, OutAfterCurfew, CaughtAfterCurfew, CozyFire,
+            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, NiceNails, CompletelyAtEase, Horrified, Tranquil, BornToDoThis, DrawnIn, OutAfterCurfew, CaughtAfterCurfew, CozyFire, DivineMeal,
         ]
     };
 
@@ -982,6 +983,7 @@ impl MoodletKind {
             OutAfterCurfew => md("Out After Curfew!", "Being out after curfew is totally radical.", 15, 24.0),
             CaughtAfterCurfew => md("Caught After Curfew!", "It's so unfair! Why don't parents understand?", -15, 3.0),
             CozyFire => md("Cozy", "Nothing beats the warm glow of a fire.", 5, 1.0),
+            DivineMeal => md("Divine Meal", "That was the food of the gods!", 75, 168.0),
         }
     }
 
@@ -1098,6 +1100,7 @@ impl MoodletKind {
             OutAfterCurfew => ("OutAfterCurfew", true),
             CaughtAfterCurfew => ("CaughtAfterCurfew", true),
             CozyFire => ("CozyFire", true),
+            DivineMeal => ("DivineMeal", true),
         }
     }
 }

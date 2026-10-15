@@ -134,6 +134,12 @@ installation is unreachable.
   in its bearer's stead: they're spared) and the **Money Tree** (its money bags, a harvest
   cycle's worth by the tree's quality, §100 to §1900, and the tree better for each harvest).
   `--do "Garden <plant>"` plants one and `GARDEN_GROWN=1` grows it at once (tests).
+  **Ambrosia**, as the game's: a Sim who's mastered Cooking, Gardening and Fishing learns it,
+  and makes it of a Lifefruit and a Deathfish (neither to be bought), set out a single
+  serving for whoever's to eat it. Eaten, it's a Divine Meal (the game's moodlet, a week) and
+  the years fall away to the start of the eater's stage of life (a tenth kept); left out at
+  night, a ghost of the household drifts over, eats it and is alive again, back in the
+  household. `GRAVE=1` puts a grave by the selected Sim (a test).
   Perfect produce counts towards The Perfect Garden lifetime wish. The garden is kept in
   saves.
 - **Breakdowns**: showers, baths, sinks, TVs, computers and stereos break now and then with

@@ -444,6 +444,19 @@ pub fn meal_time(hour: f32, weekday: usize) -> (u8, &'static str) {
     }
 }
 
+/// The recipes a Sim knows for a meal time, whether or not what they take can be bought (the
+/// food menus offer those they've the makings of).
+pub fn known_for(data: &s3bake::GameDataBaked, sim: &Sim, cooking: u32, known: Option<&KnownRecipes>, meal: u8) -> Vec<usize> {
+    let veg = sim.traits.contains(&crate::life::Trait::Vegetarian);
+    data.recipes
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.meals & meal != 0 && (!veg || r.vegetarian))
+        .filter(|(_, r)| knows(r, cooking, known))
+        .map(|(i, _)| i)
+        .collect()
+}
+
 /// The recipes a Sim can cook for a meal time (vegetarians, the meatless ones).
 pub fn cookable(data: &s3bake::GameDataBaked, sim: &Sim, cooking: u32, known: Option<&KnownRecipes>, meal: u8) -> Vec<usize> {
     let veg = sim.traits.contains(&crate::life::Trait::Vegetarian);
@@ -905,6 +918,10 @@ fn meal_requests(
     for (me, req, tf, mut queue, sim, eating, (plan, plateful, skills, known, serving, one), (journal, burnt_before, on_plate)) in &mut sims {
         commands.entity(me).remove::<MealRequest>();
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+        // Ambrosia eaten: divine (`ambrosia`).
+        if matches!(req, MealRequest::Ate | MealRequest::AteStanding) && plateful.and_then(|p| recipe(p.0)).is_some_and(|r| r.key == crate::ambrosia::AMBROSIA) {
+            commands.entity(me).insert(crate::ambrosia::AteAmbrosia);
+        }
         // A favourite meal is satisfying whether eaten at a table or standing up.
         if matches!(req, MealRequest::Ate | MealRequest::AteStanding)
             && let Some(r) = plateful.and_then(|p| recipe(p.0))
@@ -975,10 +992,12 @@ fn meal_requests(
                 }
                 commands.entity(me).remove::<ServingFrom>();
                 let at = surface_near(&objects, s.world_center(stf), 6.0).unwrap_or(Vec3::new(s.world_center(stf).x, stf.translation.y + s.height, s.world_center(stf).z));
-                let servings = GROUP_MEAL_SERVINGS;
                 let yaw = stf.rotation.to_euler(EulerRot::YXZ).0;
                 commands.entity(me).remove::<(MealPlan, BurntDinner)>();
                 let r = dish.and_then(recipe);
+                // (Ambrosia's set out, a single serving, for whoever's to eat it: `ambrosia`.)
+                let set_out = r.is_some_and(|r| r.key == crate::ambrosia::AMBROSIA);
+                let servings = if set_out { 1 } else { GROUP_MEAL_SERVINGS };
                 let label = r.map_or("Group Meal".to_string(), |r| r.name.clone());
                 // How it came out.
                 let cook = Cook {
@@ -1012,7 +1031,10 @@ fn meal_requests(
                         h.funds -= cost;
                     }
                 }
-                if one {
+                if set_out {
+                    commands.entity(me).remove::<ForOne>();
+                }
+                if one && !set_out {
                     commands.entity(me).remove::<ForOne>();
                     did.write(crate::journal::Did::count(me, crate::journal::Stat::Dishes, 1.0));
                     if let Some(r) = r {
@@ -1061,6 +1083,10 @@ fn meal_requests(
                 }
                 info!("meal served at {at:.1?}: {served}");
                 let dish_word = if r.is_some_and(|r| r.meals == s3bake::gamedata::MEAL_DESSERT) { "Dessert" } else { word };
+                if set_out {
+                    notes.push(format!("{} made {served}. It's set out, for whoever is to eat it.", sim.first));
+                    continue;
+                }
                 notes.push(match r {
                     Some(_) => format!("{} made {served} for {servings}. {dish_word} is served!", sim.first),
                     None => format!("{} made {} for {servings}. {dish_word} is served!", sim.first, dish_word.to_lowercase()),

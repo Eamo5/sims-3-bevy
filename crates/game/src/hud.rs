@@ -155,7 +155,7 @@ fn food_menus(
     let (meal, word) = crate::meals::meal_time(hour, weekday);
     if let Some(cook) = stove.filter(|_| ObjectKind::Stove.usable_by(sim.age)) {
         for (title, m, one) in [(format!("Have {word}"), meal, true), (format!("Serve {word}"), meal, false), ("Serve Dessert".to_string(), MEAL_DESSERT, false)] {
-            let list: Vec<(String, ActionKind)> = crate::meals::cookable(data, sim, cooking, known, m)
+            let list: Vec<(String, ActionKind)> = crate::meals::known_for(data, sim, cooking, known, m)
                 .into_iter()
                 .map(|r| &data.recipes[r])
                 // (Desserts on their own menu.)
