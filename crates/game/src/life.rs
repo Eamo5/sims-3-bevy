@@ -805,10 +805,13 @@ pub enum MoodletKind {
     ItsAGirl,
     ItsTwins,
     ItsTriplets,
+    /// Cheated on, and seeing a loved one cheated on (the game's `Betrayed`, `WitnessedBetrayal`).
+    Betrayed,
+    WitnessedBetrayal,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 79] = {
+    pub const ALL: [MoodletKind; 81] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -819,7 +822,7 @@ impl MoodletKind {
             TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf, MintyBreath,
             Disgusted, Mourning, FreshClothing, VeryFreshClothing, HolidayCheer, SpringFling, SummerFun, SpookyTime,
             Decorated, NicelyDecorated, BeautifullyDecorated, GreatMeal, Stressed, Winner, Overworked, IAmBeautiful, SugarRush,
-            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets,
+            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal,
         ]
     };
 
@@ -926,6 +929,9 @@ impl MoodletKind {
             ItsAGirl => md("It's a Girl!", "A new addition to the family!", 80, 24.0),
             ItsTwins => md("It's Twins!", "Two new additions to the family!", 80, 24.0),
             ItsTriplets => md("It's Triplets!", "Three new additions to the family!", 80, 24.0),
+            // (The game's Betrayed lasts as long as the romance was: `jealousy`.)
+            Betrayed => md("Betrayed", "My significant other cheated on me! I feel so betrayed and alone right now.", -50, 24.0),
+            WitnessedBetrayal => md("Witnessed Betrayal", "Witnessing the romantic betrayal of a loved one is quite devastating.", -20, 6.0),
         }
     }
 
@@ -1017,6 +1023,8 @@ impl MoodletKind {
             ItsAGirl => ("ItsAGirl", true),
             ItsTwins => ("ItsTwins", true),
             ItsTriplets => ("ItsTriplets", true),
+            Betrayed => ("Betrayed", true),
+            WitnessedBetrayal => ("WitnessedBetrayal", true),
         }
     }
 }

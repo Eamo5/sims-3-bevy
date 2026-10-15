@@ -132,6 +132,8 @@ pub struct Model {
     pub speech_act: String,
     pub chances: u8,
     pub recharges: u8,
+    /// How it strikes a partner who sees it (`jealousy::Romanced`; 0 not at all).
+    pub jealousy: u8,
     /// Its own rules, most specific first.
     pub rules: Vec<SocialRule>,
     /// What each result does; none: anything the rules give goes.
@@ -217,6 +219,7 @@ pub fn load(data: &s3bake::gamedata::GameDataBaked) {
                 speech_act,
                 chances: action.map_or(2, |a| a.chances.max(1)),
                 recharges: action.map_or(2, |a| a.recharges),
+                jealousy: action.map_or(0, |a| a.jealousy),
                 rules: action.map(|a| by_specificity(a.rules.clone())).unwrap_or_default(),
                 outcomes: action.map(|a| a.outcomes.clone()).unwrap_or_default(),
             },

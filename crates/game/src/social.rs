@@ -36,6 +36,17 @@ pub struct Relationship {
     /// Romantically involved (the game's `Romantic` flag: a first kiss, a confessed attraction;
     /// cleared by "Let's Just Be Friends").
     pub romantic: bool,
+    /// Feeling betrayed by them (the game's `Betrayed` buff, for this cheater): until when (game
+    /// minutes) they have to make it up, and the liking it left.
+    pub betrayed: Option<(f64, f32)>,
+}
+
+impl Relationship {
+    /// A romance between them (the game's romantic relationship types: a romantic interest,
+    /// going steady, engaged, married; not exes).
+    pub fn is_romance(&self) -> bool {
+        matches!(self.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married) || (self.romantic && self.status != RelStatus::Ex)
+    }
 }
 
 /// Days without seeing or speaking to each other before a relationship starts to fade.
@@ -184,6 +195,10 @@ impl Relationships {
         r.romance = (r.romance + romance).clamp(-100.0, 100.0);
         !was_friend && r.friendship >= FRIEND_THRESHOLD
     }
+    /// How many romances the Sim has going (the game's active romances).
+    pub fn romances(&self) -> usize {
+        self.0.values().filter(|r| r.is_romance()).count()
+    }
     /// The Sim's current partner, fiancé(e) or spouse.
     pub fn partner(&self) -> Option<(Entity, RelStatus)> {
         self.0.iter().find(|(_, r)| matches!(r.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married)).map(|(e, r)| (*e, r.status))
@@ -260,6 +275,10 @@ pub enum SocialEffect {
     /// when it's taken well.
     AskPromotion,
     AskRaise,
+    /// Having it out with a cheating romance, or owning up to cheating (the game's
+    /// `OnAccuseOfCheating`, `OnConfessCheating`): `jealousy::CheatedOn`.
+    Accuse,
+    Confess,
 }
 
 /// What a Mooch gets out of others (the game's `MoochAmount`, at the hidden Mooch skill's first
@@ -281,6 +300,8 @@ const GAME_EFFECTS: &[(&str, SocialEffect)] = &[
     ("Trade Kitchen Secrets", SocialEffect::LearnRecipe),
     ("Ask for a Promotion", SocialEffect::AskPromotion),
     ("Ask for a Raise", SocialEffect::AskRaise),
+    ("Accuse of Cheating", SocialEffect::Accuse),
+    ("Confess Cheating", SocialEffect::Confess),
 ];
 
 pub struct SocialDef {
@@ -364,6 +385,11 @@ pub enum GameTest {
     /// To the one doing it's boss (asking for a raise); and below level 9 (for a promotion).
     Boss,
     BossBelowNine,
+    /// The game's `CommonCheatingTest`: romantically involved, the cheater with another romance
+    /// besides, the other not betrayed by them already. Accusing: the one it's said to cheats;
+    /// confessing: the one saying it.
+    Accuse,
+    Confess,
 }
 
 /// What's known of a Sim for the game's socials beyond their `Sim`: who they are, their
@@ -386,6 +412,8 @@ pub struct Side<'a> {
     pub boss: Option<u64>,
     pub level: usize,
     pub performance: f32,
+    /// Their relationships.
+    pub rels: Option<&'a Relationships>,
 }
 
 /// What `Side::of` reads of a Sim.
@@ -396,15 +424,24 @@ pub type SideQuery<'a> = (
     Has<crate::rabbitholes::Homework>,
     Has<crate::sim::HouseholdMember>,
     Option<&'a crate::interact::Skills>,
+    Option<&'a Relationships>,
 );
 
 impl<'a> Side<'a> {
     #[allow(clippy::type_complexity)]
     pub fn of(
         sim: Entity,
-        q: Option<(Option<&'a crate::life::Moodlets>, Option<&'a crate::topics::Topics>, Option<&'a crate::careers::Job>, bool, bool, Option<&'a crate::interact::Skills>)>,
+        q: Option<(
+            Option<&'a crate::life::Moodlets>,
+            Option<&'a crate::topics::Topics>,
+            Option<&'a crate::careers::Job>,
+            bool,
+            bool,
+            Option<&'a crate::interact::Skills>,
+            Option<&'a Relationships>,
+        )>,
     ) -> Self {
-        let (moods, topics, job, homework, member, skills) = q.unwrap_or_default();
+        let (moods, topics, job, homework, member, skills, rels) = q.unwrap_or_default();
         Self {
             sim: Some(sim),
             moods,
@@ -417,6 +454,7 @@ impl<'a> Side<'a> {
             boss: job.and_then(|j| j.boss),
             level: job.map_or(0, |j| j.level),
             performance: job.map_or(0.0, |j| j.performance),
+            rels,
         }
     }
 }
@@ -664,6 +702,8 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
             "TestAnnounceEngagement" => Some(GameTest::NotPartner),
             "TestAskForRaise" => Some(GameTest::Boss),
             "TestAskForPromotion" => Some(GameTest::BossBelowNine),
+            "TestAccuseOfCheating" => Some(GameTest::Accuse),
+            "TestConfessCheating" => Some(GameTest::Confess),
             // (What's said of a line of work: its topic is the other's being in it.)
             t if t.starts_with("TargetHas") && t.ends_with("Career") && a.topics.iter().any(|(n, _)| n.starts_with("Learn ")) => None,
             _ => continue,
@@ -910,6 +950,12 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
                 Some(GameTest::NotPartner) => matches!(rel.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married),
                 Some(GameTest::Boss) => side[0].boss != Some(target.id),
                 Some(GameTest::BossBelowNine) => side[0].boss != Some(target.id) || side[0].level + 1 >= 9,
+                Some(GameTest::Accuse) => !rel.is_romance() || side[1].rels.is_none_or(|r| r.romances() < 2) || rel.betrayed.is_some(),
+                Some(GameTest::Confess) => {
+                    !rel.is_romance()
+                        || side[0].rels.is_none_or(|r| r.romances() < 2)
+                        || side[1].rels.zip(side[0].sim).is_some_and(|(r, me)| r.get(me).betrayed.is_some())
+                }
                 _ => false,
             })
     {

@@ -497,6 +497,17 @@ installation is unreachable.
   come: a wipe of the brow when Fatigued, tears of joy at a First Kiss, queasiness, a start when
   Scared, a jolt when Singed. As rain, snow or hail begins, most of those out in it look up at
   the sky. A reaction waits for its Sim to be standing free, then lapses.
+- **Jealousy**, as the game's (each social's jealousy level: a flirt low, a kiss medium, WooHoo
+  high). Romance within ten metres of someone romantically involved with either Sim makes them
+  jealous. A flirt gets a jealous look and costs some liking. For a kiss or more, they walk over
+  and *Accuse of Cheating* (the game's social and animations), throw a tantrum, lose 60 liking
+  and feel **Betrayed**. The cheater then has five days (spouse or fiancé(e)), three (partner)
+  or two (romantic interest) to win back 25 liking. If they do, they stay together; if not,
+  the betrayed Sim breaks it off. Caught again while they still feel betrayed, it's over at
+  once (the game's own "not interested in fixing this relationship" message). Family and
+  friends of the cheater's partner who see it are upset too (Witnessed Betrayal). *Confess
+  Cheating* owns up, as a smaller betrayal. *Accuse of Cheating* is offered only against a
+  romance who has another romance going.
 - **Stink**: green wisps rise off a smelly Sim's armpits, as the game's `stinkAdult` does.
 - **Privacy**: while a Sim's using the toilet, the shower or the bath, the room is theirs:
   others set out for anything in it wait where they are, thinking of the bathroom, until it's

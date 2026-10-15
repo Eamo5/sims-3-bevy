@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 105;
+pub const GAMEDATA_VERSION: u32 = 106;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -401,6 +401,10 @@ pub struct SocialAction {
     pub chances: u8,
     #[serde(default)]
     pub recharges: u8,
+    /// How it strikes a partner who sees it (`<Misc JL>`: 1 low, a flirt; 2 medium, a kiss; 3
+    /// high, WooHoo; 0 not at all).
+    #[serde(default)]
+    pub jealousy: u8,
     /// Its own rules (`<LHS>`), each with the result it gives.
     #[serde(default)]
     pub rules: Vec<SocialRule>,
@@ -1042,6 +1046,12 @@ pub fn social_actions(xml: &str, name: &dyn Fn(&str) -> String) -> Vec<SocialAct
             speech_act: tag(body, "SA").and_then(|t| attr(t, "key")).filter(|v| *v != "None").unwrap_or("").to_string(),
             chances: misc.and_then(|t| attr(t, "c")).and_then(|v| v.parse().ok()).unwrap_or(2),
             recharges: misc.and_then(|t| attr(t, "r")).and_then(|v| v.parse().ok()).unwrap_or(2),
+            jealousy: misc.and_then(|t| attr(t, "JL")).map_or(0, |v| match v {
+                "Low" => 1,
+                "Medium" => 2,
+                "High" => 3,
+                _ => 0,
+            }),
             rules,
             outcomes,
         });

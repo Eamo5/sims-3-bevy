@@ -4311,6 +4311,14 @@ pub(crate) fn run_actions(
                                     }
                                     life.write(LifeEvent::new(me, LifeEventKind::Socialized { other: *target, social: s.name }));
                                     life.write(LifeEvent::new(*target, LifeEventKind::Socialized { other: me, social: s.name }));
+                                    // (Romance in front of others: those it's an affront to may see
+                                    // it, the game's `JealousyLevel`.)
+                                    if let Some(level) = crate::conversation::model(*social).map(|m| m.jealousy).filter(|l| *l > 0) {
+                                        let (actor, target, accepted) = (me, *target, action.social_outcome.is_none_or(|o| o.accepted));
+                                        commands.queue(move |w: &mut World| {
+                                            w.write_message(crate::jealousy::Romanced { actor, target, level, accepted });
+                                        });
+                                    }
                                     let rel = rels.get(*target);
                                     let tname = who.get(target).map(|w| w.0.first.clone()).unwrap_or_default();
                                     let t_member = who.get(target).is_some_and(|w| w.2);
@@ -4459,6 +4467,13 @@ pub(crate) fn run_actions(
                                                 }
                                                 _ => notes.push(format!("{tname} turned {} down.", sim.first)),
                                             }
+                                        }
+                                        // (Having it out, or owning up: the one cheated on finds out.)
+                                        SocialEffect::Accuse | SocialEffect::Confess => {
+                                            let (victim, naughty, level) = if s.effect == SocialEffect::Accuse { (me, *target, 3) } else { (*target, me, 2) };
+                                            commands.queue(move |w: &mut World| {
+                                                w.write_message(crate::jealousy::CheatedOn { victim, naughty, other: None, level });
+                                            });
                                         }
                                         SocialEffect::Greet => {
                                             notes.push(format!("{} let {tname} in.", sim.first));

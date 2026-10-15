@@ -125,7 +125,7 @@ impl Sight<'_> {
 }
 
 impl Pending {
-    fn new(kinds: &[&'static str], toward: Option<Vec3>, until: f64) -> Self {
+    pub fn new(kinds: &[&'static str], toward: Option<Vec3>, until: f64) -> Self {
         Self { kinds: kinds.to_vec(), toward, until }
     }
 }

@@ -393,7 +393,7 @@ mod tests {
             "motives": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "skills": [], "moodlets": [], "relationships": []
         }))
         .unwrap();
-        s.relationships = rels.iter().map(|&(with, f)| crate::save::SavedRel { with, friendship: f, romance: 0.0, status: "None".into(), kissed: false, last: 10.0, stc: None, enemy: false, romantic: false }).collect();
+        s.relationships = rels.iter().map(|&(with, f)| crate::save::SavedRel { with, friendship: f, romance: 0.0, status: "None".into(), kissed: false, last: 10.0, stc: None, enemy: false, romantic: false, betrayed: None }).collect();
         s
     }
 
