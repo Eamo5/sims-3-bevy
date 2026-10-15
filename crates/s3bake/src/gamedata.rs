@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 113;
+pub const GAMEDATA_VERSION: u32 = 115;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1371,6 +1371,14 @@ pub struct CollectibleInfo {
     /// The catalogue object showing it (by instance name): "Gem", "Metal", "MeteorMedium",
     /// "fishMinnow"...
     pub model: String,
+    /// A fish's preferred bait: the ingredient or fish it bites on most ("Apple", "Minnow").
+    #[serde(default)]
+    pub bait: String,
+    /// A fish's weights (lb), lightest to heaviest, and whether one can grow heavier still.
+    #[serde(default)]
+    pub weight: (f32, f32),
+    #[serde(default)]
+    pub over_max: bool,
 }
 
 /// What a spawner (placed on lots by the world builders) turns up, by its script class.
@@ -2830,6 +2838,9 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                     rarity: get(&f, "Rarity"),
                     level: num(&f, "MinHuntSkillLevel") as u8,
                     model,
+                    bait: String::new(),
+                    weight: (0.0, 0.0),
+                    over_max: false,
                 });
             }
         }
@@ -2867,6 +2878,9 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                     rarity: get(&f, "Rarity"),
                     level: 0,
                     model: get(&f, "ModelMaterial").split(':').next().unwrap_or("").to_string(),
+                    bait: String::new(),
+                    weight: (0.0, 0.0),
+                    over_max: false,
                 });
             }
         }
@@ -3129,6 +3143,13 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 level: num(&f, "Level") as u8,
                 model: get(&f, "Model_Name"),
                 kind: CollectKind::Fish,
+                bait: get(&f, "Bait"),
+                // (As the game reads them: a tenth of a pound to ten by default.)
+                weight: (
+                    get(&f, "MinWeight").parse().unwrap_or(0.1),
+                    get(&f, "MaxWeight").parse().unwrap_or(10.0),
+                ),
+                over_max: get(&f, "OverMax").eq_ignore_ascii_case("true"),
                 key,
             });
         }

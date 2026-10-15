@@ -2969,7 +2969,8 @@ fn auto_gate_route(
 /// then has queued logged. `<kind>:<option>><option>` picks the options instead, by how their
 /// labels start (`Fridge:Have Quick Meal>Cereal`). `Sim` is the nearest other Sim (its socials);
 /// CLICK_SHOTS=<folder> takes a picture of each menu as it opens; CLICK_USE_DISTANCE=<metres>
-/// brings the camera that near.
+/// brings the camera that near; CLICK_USE_AFTER=<seconds> waits that long first (ten by default:
+/// longer for a lot being visited), and an entry `wait:<seconds>` that long between two.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn auto_click_use(
     mut commands: Commands,
@@ -2996,7 +2997,14 @@ fn auto_click_use(
     let (idx, stage, at) = *state;
     // (A click lasts a frame.)
     mouse.release(MouseButton::Left);
-    if idx >= kinds.len() || t < 10.0 || t < at {
+    let after = std::env::var("CLICK_USE_AFTER").ok().and_then(|s| s.parse().ok()).unwrap_or(10.0);
+    if idx >= kinds.len() || t < after || t < at {
+        return;
+    }
+    if let Some(secs) = kinds[idx].strip_prefix("wait") {
+        let secs: f32 = entries[idx].1.first().and_then(|s| s.parse().ok()).or_else(|| secs.trim_start_matches(':').parse().ok()).unwrap_or(10.0);
+        info!("click use: waiting {secs} s");
+        *state = (idx + 1, 0, t + secs);
         return;
     }
     let Ok((camera, cam_tf, mut cam)) = cams.single_mut() else { return };

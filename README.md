@@ -896,7 +896,15 @@ installation is unreachable.
   about the community lots (from the game's own tables, with their odds and prices); Sims
   crouch to collect them, catch the butterflies flitting about by day and the beetles in the
   grass (each kind in its colour, caught with the game's catching animations), and fish at the lots' fishing spots with the game's casting and
-  reeling animations, rod in hand, catching what each spot holds by Fishing skill. Finds go in
+  reeling animations, rod in hand, from the shore nearest that they can walk to, catching what
+  each spot holds by Fishing skill. A catch weighs what the game's would (heavier with skill
+  beyond what the fish needs, and the more of the kind caught), and its weight makes its
+  quality, Normal to Perfect, and its price; the journal keeps the heaviest. **Bait**, as the
+  game's: produce from the inventory (and fish, live bait, from Fishing level five) on the hook,
+  from "Choose Bait..." or as last time ("Fish with Apple (Minnow)", the fish named once its
+  bait's known). Each fish likes one bait (the game's table): with it on, that fish bites
+  twelve times as often, even beyond the Sim's skill, and runs heavier for better bait; a third
+  of catches use a piece up; catching a fish on its bait teaches the Sim that bait. Finds go in
   the finder's inventory, and the Collection Journal (J) is the game's own dialog: its
   statistics, metals, gems, insects and fish tabs, and the game's table of each kind's finds
   (picture and name, greyed until found; rarity; how many the household holds; what one

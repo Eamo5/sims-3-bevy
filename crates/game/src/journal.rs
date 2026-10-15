@@ -46,6 +46,8 @@ pub enum Stat {
     GuitarHours,
     KmJogged,
     TutoringHours,
+    /// The heaviest fish caught (lb).
+    HeaviestFish,
 }
 
 impl Stat {
@@ -71,6 +73,7 @@ impl Stat {
             Stat::GuitarHours => "guitar_hours",
             Stat::KmJogged => "km_jogged",
             Stat::TutoringHours => "tutoring_hours",
+            Stat::HeaviestFish => "heaviest_fish",
         }
     }
 }
@@ -81,6 +84,8 @@ pub enum Kinds {
     FishTypes,
     PlantTypes,
     Upgrades,
+    /// The fish whose bait they know.
+    BaitKnown,
 }
 
 impl Kinds {
@@ -89,6 +94,7 @@ impl Kinds {
             Kinds::FishTypes => "fish_types",
             Kinds::PlantTypes => "plant_types",
             Kinds::Upgrades => "upgrades",
+            Kinds::BaitKnown => "bait_known",
         }
     }
 }
@@ -106,6 +112,10 @@ pub enum Deed {
     Kind(Kinds, String),
     /// A recipe made once more.
     Made(String),
+    /// The bait fished with (none: without).
+    Bait(Option<(String, u8)>),
+    /// A fish caught, of a kind and weight (lb).
+    Caught(String, f64),
 }
 
 impl Did {
@@ -117,6 +127,12 @@ impl Did {
     }
     pub fn made(sim: Entity, recipe: impl Into<String>) -> Self {
         Self { sim, what: Deed::Made(recipe.into()) }
+    }
+    pub fn bait(sim: Entity, bait: Option<(String, u8)>) -> Self {
+        Self { sim, what: Deed::Bait(bait) }
+    }
+    pub fn caught(sim: Entity, fish: impl Into<String>, weight: f64) -> Self {
+        Self { sim, what: Deed::Caught(fish.into(), weight) }
     }
 }
 
@@ -130,11 +146,22 @@ pub struct SkillJournal {
     pub kinds: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub earned: Vec<String>,
+    /// The bait they fished with last (its kind and quality), to fish with again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bait: Option<(String, u8)>,
 }
 
 impl SkillJournal {
     pub fn is_empty(&self) -> bool {
-        self.tally.is_empty() && self.kinds.is_empty() && self.earned.is_empty()
+        self.tally.is_empty() && self.kinds.is_empty() && self.earned.is_empty() && self.bait.is_none()
+    }
+    /// How many of a kind of fish they've caught.
+    pub fn caught(&self, fish: &str) -> f64 {
+        self.tally.get(&format!("caught:{fish}")).copied().unwrap_or(0.0)
+    }
+    /// Whether they know the bait a fish likes.
+    pub fn knows_bait(&self, fish: &str) -> bool {
+        self.kinds.get(Kinds::BaitKnown.key()).is_some_and(|v| v.iter().any(|f| f == fish))
     }
     pub fn get(&self, s: Stat) -> f64 {
         self.tally.get(s.key()).copied().unwrap_or(0.0)
@@ -160,6 +187,12 @@ impl SkillJournal {
                 }
             }
             Deed::Made(recipe) => *self.tally.entry(format!("made:{recipe}")).or_default() += 1.0,
+            Deed::Bait(b) => self.bait = b.clone(),
+            Deed::Caught(fish, w) => {
+                *self.tally.entry(format!("caught:{fish}")).or_default() += 1.0;
+                let heaviest = self.tally.entry(Stat::HeaviestFish.key().to_string()).or_default();
+                *heaviest = heaviest.max(*w);
+            }
         }
     }
 }
@@ -418,7 +451,11 @@ pub fn statistics(skill: &str) -> &'static [(&'static str, Measure)] {
         ],
         "Charisma" => &[("Friends", Measure::Friends), ("Best friends", Measure::BestFriends), ("Successful jokes", Measure::Stat(Stat::Jokes))],
         "Cooking" => &[("Dishes prepared", Measure::Stat(Stat::Dishes)), ("Recipes known", Measure::RecipesKnown)],
-        "Fishing" => &[("Fish caught", Measure::Stat(Stat::Fish)), ("Types of fish caught", Measure::Kinds(Kinds::FishTypes))],
+        "Fishing" => &[
+            ("Fish caught", Measure::Stat(Stat::Fish)),
+            ("Types of fish caught", Measure::Kinds(Kinds::FishTypes)),
+            ("Heaviest fish", Measure::Stat(Stat::HeaviestFish)),
+        ],
         "Gardening" => &[
             ("Fruits and vegetables harvested", Measure::Stat(Stat::Harvested)),
             ("Perfect harvests", Measure::Stat(Stat::PerfectHarvested)),
@@ -473,6 +510,7 @@ pub fn shown(m: Measure, v: f64) -> String {
         Measure::Stat(Stat::Royalties) => format!("§{}", crate::lifetime::group(v as i64)),
         Measure::Stat(Stat::StrengthHours | Stat::CardioHours | Stat::GuitarHours | Stat::KmJogged | Stat::TutoringHours) => format!("{v:.1}"),
         Measure::ChessRank => crate::chess::RANKS[(v as usize).min(crate::chess::RANKS.len() - 1)].to_string(),
+        Measure::Stat(Stat::HeaviestFish) => format!("{v:.2} lbs"),
         _ => format!("{}", v as i64),
     }
 }

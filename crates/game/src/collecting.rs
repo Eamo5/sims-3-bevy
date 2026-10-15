@@ -71,12 +71,13 @@ pub struct FishingSpot {
     pub class: String,
 }
 
-/// A Sim's finished collecting: a pick-up, a try at catching an insect, or a spell of fishing.
+/// A Sim's finished collecting: a pick-up, a try at catching an insect, or a spell of fishing
+/// (with the bait chosen: an empty kind for none; not chosen, as last time).
 #[derive(Component)]
 pub enum CollectRequest {
     Pick(Entity),
     Caught(Entity),
-    Fished { spot: Entity, minutes: f32 },
+    Fished { spot: Entity, minutes: f32, bait: Option<(String, u8)> },
 }
 
 /// A butterfly or beetle: wanders about where it turned up (butterflies in the air).
@@ -121,13 +122,19 @@ fn info<'a>(ui: &'a crate::icons::GameUi, key: &str) -> Option<&'a CollectibleIn
 }
 
 fn pick_weighted<'a>(items: &'a [(String, f32)], ok: impl Fn(&str) -> bool) -> Option<&'a str> {
-    let total: f32 = items.iter().filter(|(k, _)| ok(k)).map(|(_, w)| *w).sum();
+    pick_scaled(items, |k, w| if ok(k) { w } else { 0.0 })
+}
+
+/// One of a spawner's items, by their weights as reckoned.
+fn pick_scaled<'a>(items: &'a [(String, f32)], weight: impl Fn(&str, f32) -> f32) -> Option<&'a str> {
+    let weights: Vec<f32> = items.iter().map(|(k, w)| weight(k, *w).max(0.0)).collect();
+    let total: f32 = weights.iter().sum();
     if total <= 0.0 {
         return None;
     }
     let mut r = rand::rng().random_range(0.0..total);
-    for (k, w) in items.iter().filter(|(k, _)| ok(k)) {
-        if r < *w {
+    for ((k, _), w) in items.iter().zip(weights) {
+        if w > 0.0 && r < w {
             return Some(k);
         }
         r -= w;
@@ -178,12 +185,14 @@ fn lot_finds(
             cull_mode: None,
             ..default()
         });
+        // (The shore's where Sims arriving can walk to: not an island's.)
+        let reached = v.grid.reachable_from(v.exit);
         for o in &b.objects {
             let class = o.script.rsplit('.').next().unwrap_or("").to_string();
             let at = Vec3::from(o.position);
             if class.starts_with("FishingSpawner") {
-                // The spot faces the shore (its use point): where a Sim can stand nearest.
-                let Some((x, z)) = v.grid.nearest_free(at.xz()) else { continue };
+                // The spot faces the shore: where a Sim stands to fish it, facing the water.
+                let Some((x, z)) = v.grid.nearest_reached(at.xz(), &reached).or_else(|| v.grid.nearest_free(at.xz())) else { continue };
                 let shore = v.grid.center_of(x, z);
                 let to_shore = (shore - at.xz()).normalize_or(Vec2::Y);
                 let y = world.data.sea_level.max(world.data.heightmap.sample(at.x, at.z)) + 0.05;
@@ -200,7 +209,7 @@ fn lot_finds(
                             center: Vec2::ZERO,
                             half: Vec2::splat(0.3),
                             height: 0.1,
-                            route: None,
+                            route: Some((Vec2::new(0.0, shore.distance(at.xz())), Vec2::NEG_Y)),
                         },
                         UsedBy::default(),
                         FishingSpot { class },
@@ -438,7 +447,8 @@ fn tint_insects(
 #[allow(clippy::too_many_arguments)]
 fn collect_requests(
     mut commands: Commands,
-    q: Query<(Entity, &CollectRequest, &Sim, &crate::interact::Skills)>,
+    q: Query<(Entity, &CollectRequest, &Sim, &crate::interact::Skills, Option<&crate::journal::SkillJournal>)>,
+    mut inventories: Query<&mut Inventory>,
     pickups: Query<&Pickup>,
     spots: Query<&FishingSpot>,
     ui: Option<Res<crate::icons::GameUi>>,
@@ -449,7 +459,7 @@ fn collect_requests(
 ) {
     let Some(ui) = ui else { return };
     let mut rng = rand::rng();
-    for (e, req, sim, skills) in &q {
+    for (e, req, sim, skills, journal) in &q {
         commands.entity(e).remove::<CollectRequest>();
         match req {
             CollectRequest::Pick(target) => {
@@ -494,38 +504,85 @@ fn collect_requests(
                 ));
                 life.write(crate::life::LifeEvent::new(e, crate::life::LifeEventKind::Finished { activity: "Collect", completed: true }));
             }
-            CollectRequest::Fished { spot, minutes } => {
+            CollectRequest::Fished { spot, minutes, bait } => {
                 let Ok(s) = spots.get(*spot) else { continue };
                 let Some(spawner) = ui.data.spawners.iter().find(|x| x.class == s.class) else { continue };
-                let level = skills.level("Fishing") as u8 + if sim.traits.contains(&crate::life::Trait::Angler) { 2 } else { 0 };
+                let skill = skills.level("Fishing");
+                let level = skill as u8 + if sim.traits.contains(&crate::life::Trait::Angler) { 2 } else { 0 };
                 let tries = (minutes / 20.0).floor().max(1.0) as u32;
-                let mut caught: Vec<(String, i64)> = Vec::new();
+                // The bait: as chosen, or as last time; if they hold some.
+                let wanted = match bait {
+                    Some(b) if b.0.is_empty() => None,
+                    Some(b) => Some(b.clone()),
+                    None => journal.and_then(|j| j.bait.clone()),
+                };
+                did.write(crate::journal::Did::bait(e, wanted.clone()));
+                let mut inv = inventories.get_mut(e).ok();
+                let mut on = wanted.as_ref().and_then(|b| crate::bait::held(inv.as_deref()?, b, skill)).map(|s| (s.key.clone(), s.quality));
+                let mut learned: Vec<String> = Vec::new();
+                let mut ran_out: Option<String> = None;
+                let mut kinds: Vec<String> = Vec::new();
+                let ichthyologist = crate::journal::earned(journal, "Amateur Ichthyologist");
+                let mut caught: Vec<(String, i64, f32)> = Vec::new();
                 for _ in 0..tries {
-                    if !rng.random_bool((0.3 + level as f64 * 0.05).min(0.85)) {
+                    if !rng.random_bool(crate::bait::bite_chance(level, on.is_some())) {
                         continue;
                     }
-                    let ok = |k: &str| info(&ui, k).is_some_and(|c| c.kind == CollectKind::Fish && c.level <= level + 1);
-                    let Some(key) = pick_weighted(&spawner.items, ok) else { continue };
+                    let hook = on.as_ref().map(|b| b.0.clone());
+                    let weight = |k: &str, w: f32| info(&ui, k).filter(|c| c.kind == CollectKind::Fish).map_or(0.0, |c| crate::bait::bite_weight(c, w, level, hook.as_deref()));
+                    let Some(key) = pick_scaled(&spawner.items, weight) else { continue };
                     let Some(c) = info(&ui, key) else { continue };
-                    // Bigger fish for better anglers, and finer ones: a master angler often
-                    // lands a perfect fish.
-                    let t = (level as f32 / 10.0 + rng.random_range(-0.2..0.3)).clamp(0.0, 1.0);
-                    let value = (c.min_price as f32 + (c.max_price - c.min_price) as f32 * t).round() as i64;
-                    let tier = crate::gardening::quality_tier((level as f32 / 10.0).min(1.0) * 0.85 + rng.random_range(0.0..0.2));
-                    let word = crate::gardening::QUALITIES[tier].0;
+                    // Its weight, by their skill and the bait if it likes it, and so its quality
+                    // and worth.
+                    let likes = hook.as_deref().is_some_and(|b| b == c.bait);
+                    let before = journal.map_or(0.0, |j| j.caught(&c.key)) as f32 + kinds.iter().filter(|k| **k == c.key).count() as f32;
+                    let w = crate::bait::catch_weight(c, skill, on.as_ref().filter(|_| likes).map(|b| b.1), before, ichthyologist, &mut rng);
+                    let tier = crate::bait::catch_tier(c, w);
+                    let value = crate::bait::catch_value(c, w);
+                    kinds.push(c.key.clone());
+                    // Caught on the bait it likes: now they know it.
+                    if likes && !journal.is_some_and(|j| j.knows_bait(&c.key)) && !learned.contains(&c.name) {
+                        learned.push(c.name.clone());
+                        did.write(crate::journal::Did::kind(e, crate::journal::Kinds::BaitKnown, c.key.clone()));
+                    }
+                    // (A third of the time the bait's taken.)
+                    if let Some(used) = on.clone()
+                        && rng.random_bool(crate::bait::USED_UP)
+                        && let Some(i) = inv.as_deref_mut()
+                    {
+                        on = crate::bait::use_one(i, &used);
+                        if on.is_none() {
+                            ran_out = Some(info(&ui, &used.0).map_or(used.0.clone(), |c| c.name.clone()));
+                        }
+                    }
+                    let word = crate::gardening::QUALITIES[tier as usize].0;
                     let name = if word == "Normal" { c.name.clone() } else { format!("{word} {}", c.name) };
                     collection.add(&c.key);
-                    give(&mut commands, e, ItemKind::Fish, c.key.clone(), name.clone(), tier as u8, value, 1);
+                    give(&mut commands, e, ItemKind::Fish, c.key.clone(), name.clone(), tier, value, 1);
                     did.write(crate::journal::Did::count(e, crate::journal::Stat::Fish, 1.0));
                     did.write(crate::journal::Did::kind(e, crate::journal::Kinds::FishTypes, c.key.clone()));
-                    caught.push((name, value));
+                    did.write(crate::journal::Did::caught(e, c.key.clone(), w as f64));
+                    caught.push((name, value, w));
                 }
                 if caught.is_empty() {
                     notes.push(format!("{} didn't catch anything.", sim.first));
                 } else {
                     let worth: i64 = caught.iter().map(|c| c.1).sum();
-                    let best = caught.iter().max_by_key(|c| c.1).map(|c| c.0.clone()).unwrap_or_default();
-                    notes.push(format!("{} caught {} fish (the best: {best}), worth §{worth} in all.", sim.first, caught.len()));
+                    let best = caught.iter().max_by_key(|c| c.1).map(|c| format!("{}, {:.2} lbs", c.0, c.2)).unwrap_or_default();
+                    let bait = wanted.as_ref().map(|b| info(&ui, &b.0).map_or(b.0.clone(), |c| c.name.clone()));
+                    let taught = match (&bait, learned.as_slice()) {
+                        (Some(b), [_, ..]) => format!(" Through careful observation, {} learned that {b} is the bait for the {}.", sim.first, learned.join(" and the ")),
+                        _ => String::new(),
+                    };
+                    notes.push(format!("{} caught {} fish (the best: {best}), worth §{worth} in all.{taught}", sim.first, caught.len()));
+                }
+                // ("{0} has lost his last piece of {1} bait...")
+                if let Some(b) = ran_out {
+                    let (he, his) = if sim.female { ("She", "her") } else { ("He", "his") };
+                    notes.push(format!(
+                        "{} has lost {his} last piece of {b} bait. {he} is now fishing with no bait. {he} should choose new bait or go buy some more at the supermarket.",
+                        sim.first
+                    ));
                 }
             }
         }

@@ -1047,13 +1047,14 @@ fn world_click(
         Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
         Query<&crate::life::Moodlets>,
         Query<&crate::doorlocks::DoorLock>,
         Query<(), With<crate::visit::LotObject>>,
+        Query<&crate::journal::SkillJournal>,
     ),
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
@@ -1417,6 +1418,25 @@ fn world_click(
                     continue;
                 }
                 if d.special == Special::TakeFish && !bowl_q.contains(t) {
+                    continue;
+                }
+                // Fishing: with the bait used last, if they've some ("Fish with Apple (Minnow)",
+                // the fish it's known for); or "Choose Bait...", none or one of those held.
+                if d.special == Special::Fish
+                    && let (Ok(inv), Some(ui)) = (inv_q.get(actor), opp_q.0.as_ref())
+                {
+                    let level = writers.get(actor).map_or(0, |w| w.1.level("Fishing"));
+                    let journal = journals_q.get(actor).ok();
+                    let known = |s: &crate::inventory::Stack| crate::bait::known_for(&ui.data, journal, &s.key);
+                    let last = journal.and_then(|j| j.bait.as_ref()).and_then(|b| crate::bait::held(inv, b, level));
+                    options.push((last.map_or(d.name.to_string(), |s| crate::bait::fish_with(s, known(s))), ActionKind::Object { target: t, def: i }));
+                    let baits = crate::bait::baits(inv, level);
+                    if !baits.is_empty() {
+                        let mut list = vec![(crate::bait::NO_BAIT.to_string(), ActionKind::Object { target: t, def: i })];
+                        list.extend(baits.into_iter().map(|s| (crate::bait::fish_with(s, known(s)), ActionKind::Object { target: t, def: i })));
+                        options.push((format!("{}... ›", crate::bait::CHOOSE_BAIT), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((crate::bait::CHOOSE_BAIT.to_string(), list));
+                    }
                     continue;
                 }
                 // (An empty trash can has nothing to take out.)
@@ -1909,9 +1929,19 @@ fn pie_buttons(
             }
         }
         // The fish chosen for a bowl.
-        let fish_choice = label.strip_prefix("Place Fish: ")
+        let mut fish_choice = label.strip_prefix("Place Fish: ")
             .and_then(|n| inventories.get(a).ok().and_then(|inv| inv.0.iter().find(|s| s.kind == crate::inventory::ItemKind::Fish && s.name == n)))
             .map(|s| (s.key.clone(), s.quality));
+        // (The bait chosen to fish with, as the menu offered it; "No Bait", none.)
+        if let ActionKind::Object { .. } = kind {
+            if label == crate::bait::NO_BAIT {
+                fish_choice = Some((String::new(), 0));
+                label = "Fish".to_string();
+            } else if let Some(b) = inventories.get(a).ok().and_then(|inv| crate::bait::chosen(&label, inv, u32::MAX)) {
+                fish_choice = Some(b);
+                label = "Fish".to_string();
+            }
+        }
         let outfit_choice = label.strip_prefix("Change Into: ").and_then(|n| crate::simbody::OutfitKind::CHOICES.into_iter().find(|k| k.label() == n));
         let canvas_choice = label.strip_prefix("Paint: ").and_then(|n| crate::paintings::CANVASES.iter().position(|c| *c == n)).map(|c| c as u8);
         // (The channel chosen from "Change to...".)

@@ -3,6 +3,7 @@ mod anim;
 mod appliances;
 mod autotest;
 mod baked;
+mod bait;
 mod balloons;
 mod build;
 mod buildhud;

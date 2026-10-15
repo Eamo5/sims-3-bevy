@@ -4212,7 +4212,7 @@ pub(crate) fn run_actions(
                                             commands.entity(me).insert(crate::collecting::CollectRequest::Pick(*target));
                                         }
                                         Special::Fish => {
-                                            commands.entity(me).insert(crate::collecting::CollectRequest::Fished { spot: *target, minutes: d.minutes });
+                                            commands.entity(me).insert(crate::collecting::CollectRequest::Fished { spot: *target, minutes: d.minutes, bait: action.fish_choice.take() });
                                         }
                                         Special::Catch => {
                                             commands.entity(me).insert(crate::collecting::CollectRequest::Caught(*target));

@@ -269,7 +269,7 @@ impl NavGrid {
         out
     }
 
-    /// (Debugging) the cells that can be walked to from `p`.
+    /// The cells that can be walked to from `p`.
     pub fn reachable_from(&self, p: Vec2) -> Vec<bool> {
         let mut seen = vec![false; self.w * self.h];
         let Some(start) = self.nearest_free(p) else { return seen };
@@ -406,8 +406,18 @@ impl NavGrid {
 
     /// Nearest unblocked cell to `p`, searching outward.
     pub fn nearest_free(&self, p: Vec2) -> Option<(usize, usize)> {
+        self.nearest_where(p, |x, z| !self.is_blocked(x, z))
+    }
+
+    /// Nearest cell to `p` among those reached (by [`NavGrid::reachable_from`]): a pond's shore
+    /// a Sim can walk to, not an island's.
+    pub fn nearest_reached(&self, p: Vec2, reached: &[bool]) -> Option<(usize, usize)> {
+        self.nearest_where(p, |x, z| reached.get(z * self.w + x).copied().unwrap_or(false))
+    }
+
+    fn nearest_where(&self, p: Vec2, ok: impl Fn(usize, usize) -> bool) -> Option<(usize, usize)> {
         let (cx, cz) = self.cell_of(p.clamp(self.origin, self.origin + Vec2::new(self.w as f32, self.h as f32) * CELL - 0.01))?;
-        if !self.is_blocked(cx, cz) {
+        if ok(cx, cz) {
             return Some((cx, cz));
         }
         for r in 1..40i64 {
@@ -422,7 +432,7 @@ impl NavGrid {
                         continue;
                     }
                     let (x, z) = (x as usize, z as usize);
-                    if !self.is_blocked(x, z) {
+                    if ok(x, z) {
                         let d = self.center_of(x, z).distance(p);
                         if best.is_none_or(|b| d < b.1) {
                             best = Some(((x, z), d));
