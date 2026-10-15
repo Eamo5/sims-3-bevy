@@ -1046,7 +1046,7 @@ fn world_click(
         Res<crate::tips::Performances>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q): (Query<(), With<HouseholdMember>>, Res<crate::laundry::Laundry>, Query<crate::social::SideQuery>),
+    (members_q, laundry, sides_q, moods_q): (Query<(), With<HouseholdMember>>, Res<crate::laundry::Laundry>, Query<crate::social::SideQuery>, Query<&crate::life::Moodlets>),
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
     (buy, edit_town, pickable): (
@@ -1153,6 +1153,9 @@ fn world_click(
                 if !sim.age.is_little() {
                     options.push((PHONE_LABEL.to_string(), ActionKind::EatHere));
                 }
+                // (What they do for who they are: talking to themselves, freaking out, a fake
+                // faint, a TaDa!)
+                options.extend(crate::traitacts::offered(sim, moods_q.get(actor).ok()));
                 // (A werewolf under the full moon howls at it.)
                 if sim.occult == Some(crate::sim::Occult::Werewolf) && crate::supernatural::full_moon_night(opp_q.2.minutes) {
                     options.push((

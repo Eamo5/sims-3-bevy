@@ -2456,6 +2456,9 @@ pub enum ActionKind {
     /// A need gone to nothing: 0, an accident (bladder); 1, collapsing from exhaustion and
     /// sleeping on the floor a while.
     MotiveFail(u8),
+    /// Something done for who they are (`traitacts`): talking to themselves, freaking out, a
+    /// fake faint, a TaDa!; and how long it takes (game minutes).
+    TraitAct { act: crate::traitacts::TraitAct, minutes: f32 },
     /// Plant a seed here.
     PlantSeed { at: Vec2, level: u8, plant: usize },
     /// Something done out on the ground (Seasons: a snowman, a snow angel, catching snowflakes).
@@ -3095,6 +3098,13 @@ pub(crate) fn run_actions(
                             commands.entity(me).insert(PHONE_CALL);
                             continue;
                         }
+                        ActionKind::TraitAct { act, .. } => {
+                            action.phase = Phase::Running(0.0);
+                            let (pose, clip) = act.clip(sim.age == Age::Child);
+                            anim.pose = pose;
+                            commands.entity(me).insert((clip, crate::traitacts::Began(*act)));
+                            continue;
+                        }
                         ActionKind::MotiveFail(k) => {
                             action.phase = Phase::Running(0.0);
                             anim.pose = Pose::Use;
@@ -3637,6 +3647,7 @@ pub(crate) fn run_actions(
                             | ActionKind::CallRepairman
                             | ActionKind::HireMaid(_)
                             | ActionKind::MotiveFail(_)
+                            | ActionKind::TraitAct { .. }
                             | ActionKind::ThrowParty => {}
                             ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } => {
                                 if let Ok((obj, otf, _, _)) = objects.get(*target) {
@@ -4612,6 +4623,18 @@ pub(crate) fn run_actions(
                         }
                         // (On the phone till the party's arranged in its picker: `parties`.)
                         ActionKind::ThrowParty => {}
+                        ActionKind::TraitAct { act, minutes } => {
+                            let per_hour = act.per_hour();
+                            for (i, g) in per_hour.iter().enumerate() {
+                                motives.add(i, g * dt / 60.0);
+                            }
+                            // (Up off the floor after a fake faint.)
+                            let up = minutes - crate::traitacts::GET_UP_MINUTES;
+                            if *act == crate::traitacts::TraitAct::FakePassOut && elapsed >= up && elapsed - dt < up {
+                                commands.entity(me).insert(crate::anim::ActionClip::new(Some("a_sleeponFloor_getUp_x"), &["a_idle_neutral_loop_"]));
+                            }
+                            finished = elapsed >= *minutes;
+                        }
                         ActionKind::MotiveFail(k) => {
                             const ACCIDENT: f32 = 4.0;
                             // (Asleep on the floor a couple of hours, then up again, still tired.)
@@ -5111,7 +5134,7 @@ fn autonomy(
     clock: Res<GameClock>,
     (settings, household, object_rates): (Res<crate::options::Settings>, Query<(), With<HouseholdMember>>, Res<ObjectRates>),
     mut sims: Query<
-        (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim, Has<SocialPartner>, Option<&crate::visit::OnLot>, Option<&RecentDone>),
+        (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim, Has<SocialPartner>, Option<&crate::visit::OnLot>, Option<&RecentDone>, Option<&crate::life::Moodlets>),
         // (Nor a cook between the stove and serving: their queue's empty a moment, with the meal
         // still in their hands, and they'd set about cooking it again.)
         (
@@ -5168,7 +5191,7 @@ fn autonomy(
             _ => None,
         }))
         .collect();
-    for (me, tf, motives, mut queue, mut timer, rels, job, sim, partner, on_lot, recent) in &mut sims {
+    for (me, tf, motives, mut queue, mut timer, rels, job, sim, partner, on_lot, recent, moodlets) in &mut sims {
         let my_lot = on_lot.map(|l| l.0);
         // (A caller at the door waits there to be let in.)
         if callers.contains(me) {
@@ -5458,6 +5481,15 @@ fn autonomy(
         {
             greeted.push(caller);
             best = Some((80.0, Action::new("Greet", ActionKind::Social { target: caller, social }, true)));
+        }
+        // What they do for who they are (`traitacts`): the Insane talk to themselves, the
+        // Neurotic freak out, a Natural-Born Performer's TaDa! (with someone about to see it).
+        let audience = others.iter().any(|o| o.0 != me && o.4 == my_lot && !o.2.is_little() && o.1.distance(tf.translation) < 8.0);
+        let gain = |per_hour: [f32; 6], minutes: f32| (0..6).map(|i| (per_hour[i] * minutes / 60.0).min((100.0 - motives.0[i]).max(0.0)).max(-50.0) * urgency(i)).sum::<f32>();
+        if let Some((score, act)) = crate::traitacts::autonomous(sim, moodlets, gain, audience)
+            && best.as_ref().is_none_or(|b| score > b.0)
+        {
+            best = Some((score * rng.random_range(0.85..1.15), act.action(true)));
         }
         // An athletic Sim goes jogging now and then (by day, at home, with the energy for it).
         if household.contains(me)

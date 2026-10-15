@@ -657,6 +657,13 @@ installation is unreachable.
   Sims go jogging on their own by day, and some of the town's passers-by jog past in their
   athletic wear (most of them mornings and evenings). The sidewalk they all use runs beside
   the street nearest the lot.
+- **What Sims do for who they are**, as the game's `TraitFunctions`, on their own menu and by
+  free will: the Insane "Talk To Self" (half an hour yelling at and mocking nobody, the game's
+  own clips, for fun and company); the Neurotic "Freak Out" (teens and up, then Tranquil for
+  eight hours, and anyone who sees it shocked); the Dramatic "Fake Passing Out" on the floor
+  for ten to thirty minutes; a Natural-Born Performer's "TaDa!" (those about cheer and are
+  Drawn In; Born To Do This an hour for each who did). `TRAIT_ACT=talk|freak|fake|tada` has
+  the selected Sim do one (a test).
 - **Walk styles**: each way a Sim goes is gone in the game's walk style for it, by the game's
   own rules: about their business on their own lot they walk; sent across it, they hurry (the
   fast walk) the long ways; elsewhere the further the faster, from a walk to a fast walk, a
