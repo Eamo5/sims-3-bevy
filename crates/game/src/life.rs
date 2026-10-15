@@ -830,10 +830,12 @@ pub enum MoodletKind {
     Tranquil,
     BornToDoThis,
     DrawnIn,
+    OutAfterCurfew,
+    CaughtAfterCurfew,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 101] = {
+    pub const ALL: [MoodletKind; 103] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -844,7 +846,7 @@ impl MoodletKind {
             TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf, MintyBreath,
             Disgusted, Mourning, FreshClothing, VeryFreshClothing, HolidayCheer, SpringFling, SummerFun, SpookyTime,
             Decorated, NicelyDecorated, BeautifullyDecorated, GreatMeal, Stressed, Winner, Overworked, IAmBeautiful, SugarRush,
-            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, NiceNails, CompletelyAtEase, Horrified, Tranquil, BornToDoThis, DrawnIn,
+            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, NiceNails, CompletelyAtEase, Horrified, Tranquil, BornToDoThis, DrawnIn, OutAfterCurfew, CaughtAfterCurfew,
         ]
     };
 
@@ -975,6 +977,9 @@ impl MoodletKind {
             Tranquil => md("Tranquil", "Nothing can stress or anger Sims who have reached their happy place.", 10, 8.0),
             BornToDoThis => md("Born To Do This", "You're a natural at this, and you know it!", 5, 1.0),
             DrawnIn => md("Drawn In", "Watching a Sim who seems to be in their natural element on a stage makes the show that much more exciting.", 5, 1.0),
+            // (While they're out: see `curfew`.)
+            OutAfterCurfew => md("Out After Curfew!", "Being out after curfew is totally radical.", 15, 24.0),
+            CaughtAfterCurfew => md("Caught After Curfew!", "It's so unfair! Why don't parents understand?", -15, 3.0),
         }
     }
 
@@ -1088,6 +1093,8 @@ impl MoodletKind {
             Tranquil => ("Tranquil", true),
             BornToDoThis => ("BornToDoThis", true),
             DrawnIn => ("DrawnIn", true),
+            OutAfterCurfew => ("OutAfterCurfew", true),
+            CaughtAfterCurfew => ("CaughtAfterCurfew", true),
         }
     }
 }

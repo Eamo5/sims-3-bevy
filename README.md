@@ -391,6 +391,11 @@ installation is unreachable.
   grown-up has taught them to walk (three lessons, with the game's kneel-and-hold-hands
   animation; talking is taught the same way, and both show on the toddler's Skills tab), play
   with toy boxes, xylophones and peg boxes, nap in cribs and cry when neglected.
+- **Curfews**, as the game's: children are home by ten at night and teens by eleven (till six),
+  with a word an hour before for anyone still out. A child out after it without a grown-up of
+  the household near goes home; a teen out unsupervised is Out After Curfew (not a Good one),
+  and from half past eleven may be caught by the police every half hour (less often if
+  Rebellious): brought home, and Caught After Curfew.
 - **Door locks**, as the game's `LockDoor`: a door of the household's home can be locked from
   its menu ("Lock..." for Everybody, Everyone but Myself, Everyone but My Household, or all
   but the Sims picked under "Specify Sims for this Door"), and unlocked; whoever it's locked
