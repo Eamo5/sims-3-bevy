@@ -116,6 +116,11 @@ struct HeldProps(Vec<(usize, Entity, usize)>, Option<Entity>);
 #[derive(Component)]
 struct Prop;
 
+/// An object put away while its copy's in a Sim's hand (the guitar played from where it stood):
+/// kept out of sight whatever storey's shown.
+#[derive(Component)]
+pub struct InHand;
+
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 fn hold_props(
@@ -188,11 +193,13 @@ fn hold_props(
                 && let Ok((_, mut v)) = placed.get_mut(old)
             {
                 *v = Visibility::Inherited;
+                commands.entity(old).try_remove::<InHand>();
             }
             if let Some(new) = in_hand
                 && let Ok((_, mut v)) = placed.get_mut(new)
             {
                 *v = Visibility::Hidden;
+                commands.entity(new).try_insert(InHand);
             }
             held.1 = in_hand;
         }

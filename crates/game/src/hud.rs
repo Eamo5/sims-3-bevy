@@ -1033,7 +1033,7 @@ fn world_click(
     mut ray_cast: MeshRayCast,
     parents: Query<&ChildOf>,
     sims: Query<(&Sim, Has<HouseholdMember>, Has<Selected>)>,
-    (objects, broken_q, lit_q, hw_q, trash_q, leftovers, sprinkling, weather, chess): (
+    (objects, broken_q, lit_q, hw_q, trash_q, leftovers, sprinkling, weather, chess, music): (
         Query<&GameObject>,
         Query<(), With<crate::interact::Broken>>,
         Query<(), With<crate::fireplace::Lit>>,
@@ -1043,6 +1043,7 @@ fn world_click(
         Query<(), With<crate::gardening::Sprinkling>>,
         Res<crate::weather::Weather>,
         Res<crate::chess::ChessTables>,
+        Res<crate::tips::Performances>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
     (members_q, laundry, sides_q): (Query<(), With<HouseholdMember>>, Res<crate::laundry::Laundry>, Query<crate::social::SideQuery>),
@@ -1285,6 +1286,17 @@ fn world_click(
                     continue;
                 }
                 if d.special == Special::WatchChess && !chess.watchable(t, actor) {
+                    continue;
+                }
+                // (An instrument played for tips outdoors or on a community lot, as the game's;
+                // watched while someone else is playing it.)
+                if d.special == Special::PlayForTips {
+                    if music.tips_ok(t) {
+                        options.push((crate::tips::PLAY_FOR_TIPS.to_string(), ActionKind::Object { target: t, def: i }));
+                    }
+                    continue;
+                }
+                if d.special == Special::WatchMusic && !music.watchable(t, actor) {
                     continue;
                 }
                 if d.special == Special::PlayChess {

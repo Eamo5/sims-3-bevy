@@ -1207,6 +1207,10 @@ pub enum Special {
     PlayChess,
     /// Watch a chess game from beside the table.
     WatchChess,
+    /// Play an instrument for tips (outdoors, or on a community lot: see `tips`).
+    PlayForTips,
+    /// Watch someone play an instrument.
+    WatchMusic,
     /// Blow out a birthday cake's candles and grow up.
     BlowOutCandles,
     /// Write (a page at a time) the book under way.
@@ -1552,10 +1556,22 @@ static SHUFFLEBOARD: [InteractionDef; 1] = [def("Practice Shuffleboard", 30.0, [
 static MECH_BULL: [InteractionDef; 1] = [InteractionDef { skill: Some("Athletic"), ..def("Ride Mechanical Bull", 15.0, [0.0, 0.0, -10.0, 0.0, -8.0, 90.0], Pose::Use) }];
 static TRAMPOLINE: [InteractionDef; 1] = [InteractionDef { skill: Some("Athletic"), ..def("Jump on Trampoline", 30.0, [0.0, 0.0, -10.0, 0.0, -8.0, 90.0], Pose::Use) }];
 static SANDBOX: [InteractionDef; 1] = [def("Play in Sandbox", 40.0, [0.0, 0.0, -4.0, 0.0, -10.0, 90.0], Pose::Use)];
-static PIANO: [InteractionDef; 1] = [InteractionDef { skill: Some("Piano"), ..def("Play Piano", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 45.0], Pose::Use) }];
-static KEYBOARD: [InteractionDef; 1] = [InteractionDef { skill: Some("Piano"), ..def("Play Keyboard", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 45.0], Pose::Use) }];
-static DRUMS: [InteractionDef; 1] = [InteractionDef { skill: Some("Drums"), ..def("Play Drums", 60.0, [0.0, 0.0, -5.0, 0.0, -2.0, 50.0], Pose::Use) }];
-static LASER_HARP: [InteractionDef; 1] = [InteractionDef { skill: Some("LaserHarp"), ..def("Play Laser Harp", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 50.0], Pose::Use) }];
+/// (Each instrument's play, its play for tips (the same, named "Play for Tips" on the menu: see
+/// `tips`), and watching whoever's playing it, the game's Fun 25 to playing's 10, until
+/// they've had their fill or the playing's over.)
+const PLAY_PIANO: InteractionDef = InteractionDef { skill: Some("Piano"), ..def("Play Piano", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 45.0], Pose::Use) };
+const PLAY_KEYBOARD: InteractionDef = InteractionDef { skill: Some("Piano"), ..def("Play Keyboard", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 45.0], Pose::Use) };
+const PLAY_DRUMS: InteractionDef = InteractionDef { skill: Some("Drums"), ..def("Play Drums", 60.0, [0.0, 0.0, -5.0, 0.0, -2.0, 50.0], Pose::Use) };
+const PLAY_LASER_HARP: InteractionDef = InteractionDef { skill: Some("LaserHarp"), ..def("Play Laser Harp", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 50.0], Pose::Use) };
+const PLAY_GUITAR: InteractionDef = InteractionDef { skill: Some("Guitar"), ..def("Play Guitar", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 45.0], Pose::Use) };
+const WATCH_MUSIC: InteractionDef = InteractionDef { special: Special::WatchMusic, until_full: Some(FUN), ..def("Watch", 120.0, [0.0, 0.0, -2.0, 0.0, 0.0, 60.0], Pose::Stand) };
+const fn for_tips(play: InteractionDef) -> InteractionDef {
+    InteractionDef { special: Special::PlayForTips, ..play }
+}
+static PIANO: [InteractionDef; 3] = [PLAY_PIANO, for_tips(PLAY_PIANO), WATCH_MUSIC];
+static KEYBOARD: [InteractionDef; 3] = [PLAY_KEYBOARD, for_tips(PLAY_KEYBOARD), WATCH_MUSIC];
+static DRUMS: [InteractionDef; 3] = [PLAY_DRUMS, for_tips(PLAY_DRUMS), WATCH_MUSIC];
+static LASER_HARP: [InteractionDef; 3] = [PLAY_LASER_HARP, for_tips(PLAY_LASER_HARP), WATCH_MUSIC];
 static VIDEOGAME: [InteractionDef; 1] = [def("Play Video Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 70.0], Pose::Use)];
 static SPRINKLER: [InteractionDef; 3] = [
     InteractionDef { autonomous: false, special: Special::SprinklerOn, ..def("Turn On", 2.0, N, Pose::Use) },
@@ -1640,8 +1656,7 @@ static EASEL: [InteractionDef; 1] = [InteractionDef {
     special: Special::SellPainting,
     ..def("Paint", 90.0, [0.0, 0.0, -3.0, 0.0, 0.0, 40.0], Pose::Use)
 }];
-static GUITAR: [InteractionDef; 1] =
-    [InteractionDef { skill: Some("Guitar"), ..def("Play Guitar", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 45.0], Pose::Use) }];
+static GUITAR: [InteractionDef; 3] = [PLAY_GUITAR, for_tips(PLAY_GUITAR), WATCH_MUSIC];
 static TREADMILL: [InteractionDef; 1] = [InteractionDef {
     autonomous: false,
     skill: Some("Athletic"),
@@ -1924,6 +1939,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         // (In the chair at the chess table, pulled up to it; its moves are `chess::play_chess`'s.)
         "Play Chess" | "Play a Ranked Match" if kind == ObjectKind::Chair => A::new(Some("a2o_chessTable_start_x"), &["a2o_chessTable_loop"]).ending(&["a2o_chessTable_stop_x"], 1.5),
         "Watch Chess Match" => A::new(None, crate::chess::WATCHING),
+        "Watch" => A::new(None, crate::tips::WATCHING),
         "Nap in Crib" => A::new(Some("p2o_crib_sleep_start_y"), &["p2o_crib_sleep_loop_y"]),
         "Change Clothes" | "Change Into" | "New Everyday Outfit" | "Plan Outfit" => A::new(Some("a2o_dresser_use_open"), &["a2o_dresser_use_close"]),
         "Grill" => A::new(Some("a2o_bbq_grill_start"), &["a2o_bbq_grill_loopBreathe", "a2o_bbq_grill_loopPokeLeft", "a2o_bbq_grill_loopPokeRight", "a2o_bbq_grill_loopExpert"]),
@@ -3002,7 +3018,7 @@ pub(crate) fn run_actions(
                                     commands.entity(me).insert_if_new(crate::privacy::WaitingForPrivacy::new(clock.minutes));
                                     continue;
                                 }
-                                if effective_owner(me, used.0, seconds.get(*target).ok().map(|s| s.0)).is_some_and(|u| u != me) {
+                                if effective_owner(me, used.0, seconds.get(*target).ok().map(|s| s.0)).is_some_and(|u| u != me) && !watches(obj.kind, *def) {
                                     if !action.autonomous {
                                         notes.push(format!("{} can't use the {}: it's in use.", sim.first, obj.name));
                                     }
@@ -3027,6 +3043,9 @@ pub(crate) fn run_actions(
                                     });
                                     let near = if sides[0].distance(me_at) <= sides[1].distance(me_at) { sides[0] } else { sides[1] };
                                     Some((near, of.map_or(1, |f| f.0)))
+                                } else if watches(obj.kind, *def) {
+                                    // (Watching someone play: before them, a couple of metres off.)
+                                    Some((crate::tips::watch_spot(obj, otf, me), of.map_or(1, |f| f.0)))
                                 } else if obj.kind == ObjectKind::Tv && interactions_for(obj.kind).get(*def).is_some_and(|d| d.name == "Work Out") {
                                     // (Out in front of the set, to work out along with it.)
                                     Some((obj.workout_spot(otf), of.map_or(1, |f| f.0)))
@@ -3170,6 +3189,7 @@ pub(crate) fn run_actions(
                             if let ActionKind::Object { target, .. } | ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } = action.kind
                                 && let Ok((o, _, mut used, _)) = objects.get_mut(target)
                                 && !matches!(o.kind, ObjectKind::PicnicTable | ObjectKind::Chess)
+                                && !matches!(action.kind, ActionKind::Object { def, .. } if watches(o.kind, def))
                                 // (A meal's taken once they're at it: one coming from the far end
                                 // of the lot doesn't keep the cook beside it waiting.)
                                 && o.kind != ObjectKind::Meal
@@ -3371,7 +3391,10 @@ pub(crate) fn run_actions(
                                         tf.rotation = Quat::from_rotation_y(across.x.atan2(across.z));
                                     }
                                     let face = otf.rotation * Quat::from_rotation_y(std::f32::consts::PI);
-                                    if obj.kind == ObjectKind::Tv && d.name == "Work Out" {
+                                    if d.special == Special::WatchMusic {
+                                        // (Standing where they came to, turned to the player: see `tips`.)
+                                        anim.seat_height = 0.0;
+                                    } else if obj.kind == ObjectKind::Tv && d.name == "Work Out" {
                                         let w = obj.workout_spot(otf);
                                         if tf.translation.xz().distance(w) < 1.0 {
                                             tf.translation = Vec3::new(w.x, tf.translation.y, w.y);
@@ -3862,7 +3885,9 @@ pub(crate) fn run_actions(
                                         | Special::TryForBaby
                                         | Special::ViewArt
                                         | Special::PlayChess
-                                        | Special::WatchChess => {}
+                                        | Special::WatchChess
+                                        | Special::PlayForTips
+                                        | Special::WatchMusic => {}
                                         Special::GetBook => {
                                             commands.entity(me).insert(crate::surroundings::ReadSomewhere(*target));
                                             // (A skill book taken down: read for its skill.)
@@ -4874,11 +4899,16 @@ pub(crate) fn run_actions(
 }
 
 /// Revalidate maintenance on every action tick, including object reservations.
+/// Watching someone play: the instrument's theirs still, watched by any number.
+fn watches(kind: ObjectKind, def: usize) -> bool {
+    interactions_for(kind).get(def).is_some_and(|d| d.special == Special::WatchMusic)
+}
+
 fn object_action_available(actor: Entity, kind: ObjectKind, def: usize, owner: Option<Entity>, broken: bool, phase: Phase) -> bool {
     // (A group meal's served one at a time: the rest wait their turn. A picnic table is
     // shared, a place each.)
     !broken && interactions_for(kind).get(def).is_some()
-        && (matches!(kind, ObjectKind::PicnicTable | ObjectKind::Chess) || if matches!(phase, Phase::Running(_)) { owner == Some(actor) } else { kind == ObjectKind::Meal || owner.is_none_or(|e| e == actor) })
+        && (matches!(kind, ObjectKind::PicnicTable | ObjectKind::Chess) || watches(kind, def) || if matches!(phase, Phase::Running(_)) { owner == Some(actor) } else { kind == ObjectKind::Meal || owner.is_none_or(|e| e == actor) })
 }
 
 fn maintenance_available(actor: Entity, kind: ObjectKind, owner: Option<Entity>, broken: bool, upgrades: Option<&crate::upgrades::Upgrades>, bit: Option<u8>) -> bool {
@@ -5114,7 +5144,7 @@ fn autonomy(
     (called, repairmen, laundry, privacy): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>, Res<crate::laundry::Laundry>, Res<crate::privacy::Privacy>),
     friends_away: Query<(Entity, &Sim), (With<OffLot>, Without<Invited>)>,
     (callers, residents): (Query<(Entity, &crate::doorbell::AtTheDoor)>, Query<&crate::homes::Resident>),
-    (weather, building, chess): (Res<crate::weather::Weather>, Option<Res<crate::building::ActiveBuilding>>, Res<crate::chess::ChessTables>),
+    (weather, building, chess, music): (Res<crate::weather::Weather>, Option<Res<crate::building::ActiveBuilding>>, Res<crate::chess::ChessTables>, Res<crate::tips::Performances>),
 ) {
     if delta.0 <= 0.0 {
         return;
@@ -5176,7 +5206,9 @@ fn autonomy(
         for (oe, obj, otf, used, obj_lot) in &objects {
             // (A double bed with their partner in it has room for them, on its other side.)
             let beside_partner = seconds.get(oe).is_ok_and(|s| s.0.is_none()) && used.0.is_some() && used.0 == rels.partner().map(|p| p.0);
-            if (used.0.is_some_and(|u| u != me) && !beside_partner) || obj_lot.map(|l| l.0) != my_lot {
+            // (Someone else's: only to watch them play it.)
+            let theirs = used.0.is_some_and(|u| u != me) && !beside_partner;
+            if (theirs && !music.watchable(oe, me)) || obj_lot.map(|l| l.0) != my_lot {
                 continue;
             }
             // (Not in a bathroom someone else is using.)
@@ -5221,6 +5253,10 @@ fn autonomy(
             }
             for (di, d) in interactions_for(obj.kind).iter().enumerate() {
                 if !d.autonomous {
+                    continue;
+                }
+                // (Someone playing: watched; played for tips only outdoors or on a community lot.)
+                if (theirs && d.special != Special::WatchMusic) || (d.special == Special::WatchMusic && !music.watchable(oe, me)) || (d.special == Special::PlayForTips && !music.tips_ok(oe)) {
                     continue;
                 }
                 // (Chess from a free chair at the table; a game watched only while there's one.)
@@ -5408,7 +5444,8 @@ fn autonomy(
                     score *= 0.15;
                 }
                 if best.as_ref().is_none_or(|b| score > b.0) {
-                    best = Some((score, Action::new(d.name, ActionKind::Object { target: oe, def: di }, true)));
+                    let label = if d.special == Special::PlayForTips { crate::tips::PLAY_FOR_TIPS } else { d.name };
+                    best = Some((score, Action::new(label, ActionKind::Object { target: oe, def: di }, true)));
                 }
             }
         }

@@ -708,7 +708,7 @@ pub fn visit_floors(
     cams: Query<&SimsCamera>,
     selected: Query<(&Floor, &crate::visit::OnLot), With<crate::sim::Selected>>,
     mut pieces: Query<(&PieceLevel, &ChildOf, &mut Visibility)>,
-    mut objects: Query<(&crate::visit::LotObject, &Floor, &mut Visibility), Without<PieceLevel>>,
+    mut objects: Query<(&crate::visit::LotObject, &Floor, &mut Visibility, Has<crate::props::InHand>), Without<PieceLevel>>,
 ) {
     let Some(v) = visited else { return };
     let Ok(cam) = cams.single() else { return };
@@ -722,9 +722,9 @@ pub fn visit_floors(
             vis.set_if_neq(if l.0 > top { Visibility::Hidden } else { Visibility::Inherited });
         }
     }
-    for (o, f, mut vis) in &mut objects {
+    for (o, f, mut vis, in_hand) in &mut objects {
         if o.0 == v.lot {
-            vis.set_if_neq(if f.0 > top { Visibility::Hidden } else { Visibility::Inherited });
+            vis.set_if_neq(if f.0 > top || in_hand { Visibility::Hidden } else { Visibility::Inherited });
         }
     }
 }
@@ -2823,7 +2823,10 @@ fn shell_visibility(walls: Res<WallMode>, cams: Query<&SimsCamera>, mut shells: 
 fn building_visibility(
     (building, walls, mut trees_shown): (Option<ResMut<ActiveBuilding>>, Res<WallMode>, Local<Option<bool>>),
     cams: Query<(&SimsCamera, &GlobalTransform)>,
-    mut pieces: Query<(&BuildingPiece, Option<&WallObject>, &mut Visibility, Has<crate::traffic::CarOut>), (Without<LotImposter>, Without<crate::world::Tree>, Without<crate::buy::HeldObject>)>,
+    mut pieces: Query<
+        (&BuildingPiece, Option<&WallObject>, &mut Visibility, (Has<crate::traffic::CarOut>, Has<crate::props::InHand>)),
+        (Without<LotImposter>, Without<crate::world::Tree>, Without<crate::buy::HeldObject>),
+    >,
     mut imposters: Query<(&LotImposter, &mut Visibility), (Without<BuildingPiece>, Without<crate::world::Tree>)>,
     mut faces: Query<(&mut WallFace, &mut Mesh3d, &mut Visibility), (Without<BuildingPiece>, Without<LotImposter>, Without<crate::world::Tree>)>,
     mut trees: Query<(&GlobalTransform, &mut Visibility), (With<crate::world::Tree>, Without<BuildingPiece>, Without<LotImposter>)>,
@@ -2877,9 +2880,10 @@ fn building_visibility(
     for (floor, mut vis) in &mut sims {
         vis.set_if_neq(if floor.0 <= view_level { Visibility::Inherited } else { Visibility::Hidden });
     }
-    for (piece, wall_obj, mut vis, car_out) in &mut pieces {
-        // (The household's car is away while someone's out in it.)
-        let show = !far && !car_out && piece.level <= view_level && !wall_obj.is_some_and(|w| is_cut(w.mid, piece.level));
+    for (piece, wall_obj, mut vis, (car_out, in_hand)) in &mut pieces {
+        // (The household's car is away while someone's out in it; the guitar's in its player's
+        // hands.)
+        let show = !far && !car_out && !in_hand && piece.level <= view_level && !wall_obj.is_some_and(|w| is_cut(w.mid, piece.level));
         vis.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });
     }
     if far {

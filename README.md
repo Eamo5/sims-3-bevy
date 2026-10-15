@@ -912,6 +912,17 @@ installation is unreachable.
   spot the game's own routing slots put them (the piano bench's side, the bowling lane's
   end, the pool table's edge), so the game's animations line up with the object, whose own
   half of each animation plays with them; a jukebox plays music to dance to.
+- **Playing for tips, and an audience**, as the game's `MusicalInstrument`: a guitar, piano,
+  keyboard, drum kit or laser harp outdoors or on a community lot can be played "for Tips",
+  the guitar's case opened before the player or a tip jar set out (put away again after).
+  Anyone else about may "Watch" someone play (visitors and townsfolk do by themselves):
+  standing before them, liking them a little more each half hour, enjoying the music from a
+  player of level five or better, and applauding (or booing) at each song's end. Played for
+  tips, a watcher from outside the household may decide to tip every five minutes, at the
+  player's level's chance (none below five; twice as likely from the Good and the Easily
+  Impressed, half from the Evil, the Frugal and Snobs), walking up at the song's end to put
+  in about ten simoleons a level for the household. `TIPS=1` plays the selected Sim for tips
+  with a visitor watching (a test).
 - **Brushing teeth** at a sink (the game's brushTeeth animation, toothbrush in hand) leaves the
   game's *Minty Breath* moodlet for four hours, as its `Sink.BrushTeeth` does.
 - **Decor**: the things in the room a household Sim is in at home (or within ten metres of them

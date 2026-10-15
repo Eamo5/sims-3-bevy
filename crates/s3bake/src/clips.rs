@@ -403,6 +403,10 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_painting_stop",
     "a2o_holographicEasel_loopMed",
     "a2o_guitar_play_",
+    // (A tip put in a player's case or jar, and the audience grooving to the music.)
+    "a2o_guitar_tip_x",
+    "a_Neutral_groove_idle_x",
+    "c2o_guitar_tip_x",
     "a2o_treadmill_jog",
     // (Chess: sat down to it, the moves from either side, won, lost, the board cleared and set.)
     "a2o_chessTable_",
@@ -658,4 +662,16 @@ pub fn wanted(name: &str) -> bool {
 /// Pack key of a clip by name.
 pub fn clip_key(name: &str) -> crate::types::Key {
     (s3pkg::types::CLIP, 0, s3pkg::fnv64(&name.to_ascii_lowercase()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chess_and_tip_clips_are_baked_but_not_their_props() {
+        assert!(wanted("a2o_guitar_tip_x"));
+        assert!(wanted("a2o_chessTable_win_otherSide_x"));
+        assert!(!wanted("a2o_chessTable_win_chessTablePiece"));
+    }
 }

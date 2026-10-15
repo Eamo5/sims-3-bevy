@@ -3721,7 +3721,8 @@ mod tests {
         let chat = &social_actions(xml, &|k| k.to_string())[0];
         assert_eq!((chat.speech_act.as_str(), chat.chances, chat.recharges), ("Talk", 4, 6));
         assert_eq!(chat.outcomes, vec![
-            SocialOutcome { result: "Friendly".into(), amount: 40.0, bits_add: 0, bits_remove: 0, charisma: -1.0, topics: Default::default(), learn_random: false, teaches: Default::default() },
+            // (`TUN is="True"`: the game's LearnRandomTrait.)
+            SocialOutcome { result: "Friendly".into(), amount: 40.0, bits_add: 0, bits_remove: 0, charisma: -1.0, topics: Default::default(), learn_random: true, teaches: Default::default() },
             SocialOutcome { result: "Boring".into(), amount: 80.0, bits_add: 0x800, bits_remove: 0x100, charisma: -1.0, topics: [String::new(), String::new(), "Work Pay".into()], learn_random: false, teaches: Default::default() },
         ]);
         let r = &chat.rules;

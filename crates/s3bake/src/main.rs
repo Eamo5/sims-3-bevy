@@ -215,11 +215,16 @@ fn main() {
         return;
     }
     if args.iter().any(|a| a == "--geostates") {
-        // --geostates: catalogue objects whose models have geometry states, with the states.
+        // --geostates: catalogue objects whose models have geometry states, with the states
+        // (GEOSTATES=<name part>: just those, hidden ones too).
         let pkgs = s3pkg::install::open_install(&data, |_| true);
         let cat: Vec<s3bake::types::CatalogEntry> = s3bake::pack::read_value(&root.global_dir().join("catalog.bin")).unwrap_or_default();
+        let only = std::env::var("GEOSTATES").ok().map(|s| s.to_ascii_lowercase());
         let mut n = 0;
-        for c in cat.iter().filter(|c| c.price >= 0) {
+        for c in cat.iter().filter(|c| match &only {
+            Some(o) => c.instance_name.to_ascii_lowercase().contains(o),
+            None => c.price >= 0,
+        }) {
             for m in &c.models {
                 let meshes = s3formats::model::load_model(&pkgs, &s3bake::types::rkey(*m)).unwrap_or_default();
                 let states: Vec<String> = meshes
@@ -710,6 +715,61 @@ fn main() {
             return;
         }
         eprintln!("no such clip");
+        return;
+    }
+    if let Some(i) = args.iter().position(|a| a == "--asm-clips") {
+        // --asm-clips <state machine>: the clips a game state machine (its JAZZ resource, named
+        // as the scripts' EnterStateMachine has it: "FreakOut", "chess") plays, found by the
+        // clip names' hashes in it, in the order they appear. (The state machines are in
+        // Game/Bin/Jazz/JazzData.package, beside the game's GameData.)
+        let mut pkgs = s3pkg::install::open_install(&data, |_| true);
+        if let Ok(p) = s3pkg::Package::open(&std::path::Path::new(&data).join("Game/Bin/Jazz/JazzData.package")) {
+            pkgs.add(p);
+        }
+        let want = s3pkg::fnv64(&args[i + 1].to_ascii_lowercase());
+        let clips: std::collections::HashMap<u64, s3pkg::ResourceKey> = pkgs.keys_of_type(s3pkg::types::CLIP).map(|k| (k.i, *k)).collect();
+        let mut found = false;
+        for k in pkgs.keys_of_type(0x02D5_DF13).filter(|k| k.i == want).copied().collect::<Vec<_>>() {
+            let Some(d) = pkgs.read(&k) else { continue };
+            found = true;
+            let mut seen = std::collections::HashSet::new();
+            for w in d.windows(8) {
+                let v = u64::from_le_bytes(w.try_into().unwrap());
+                if let Some(ck) = clips.get(&v)
+                    && seen.insert(v)
+                {
+                    println!("{}", pkgs.read(ck).and_then(|r| s3formats::sim::clip_name(&r)).unwrap_or_else(|| format!("{v:016X}")));
+                }
+            }
+        }
+        if !found {
+            // (ASM_LIST=1: what there is, for finding how they're keyed.)
+            let all: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(0x02D5_DF13).copied().collect();
+            eprintln!("no such state machine ({} JAZZ resources; want {want:016X})", all.len());
+            if std::env::var("ASM_TYPES").is_ok() {
+                let mut types: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
+                for k in pkgs.keys() {
+                    *types.entry(k.t).or_default() += 1;
+                }
+                for (t, n) in types {
+                    println!("{t:08X} {n}");
+                }
+            }
+            if let Ok(t) = std::env::var("ASM_PEEK") {
+                // (ASM_PEEK=<type hex>: a few of that type's resources' first bytes.)
+                let t = u32::from_str_radix(&t, 16).unwrap_or(0);
+                for k in pkgs.keys_of_type(t).take(4) {
+                    let d = pkgs.read(k).unwrap_or_default();
+                    println!("{:08X}:{:08X}:{:016X} {} bytes {:?}", k.t, k.g, k.i, d.len(), String::from_utf8_lossy(&d[..d.len().min(80)]));
+                }
+            }
+            if std::env::var("ASM_LIST").is_ok() {
+                for k in all.iter().take(5) {
+                    let d = pkgs.read(k).unwrap_or_default();
+                    println!("{:08X}:{:08X}:{:016X} {} bytes {:02X?}", k.t, k.g, k.i, d.len(), &d[..d.len().min(64)]);
+                }
+            }
+        }
         return;
     }
     if let Some(i) = args.iter().position(|a| a == "--clip-root") {
