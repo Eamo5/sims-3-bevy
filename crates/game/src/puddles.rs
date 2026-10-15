@@ -22,8 +22,22 @@ impl Plugin for PuddlesPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<AddPuddle>()
             .init_resource::<PendingPuddles>()
-            .add_systems(Update, (restore, spill, add_puddles, dry_up).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (puddle_test, restore, spill, add_puddles, dry_up).chain().run_if(in_state(PlayMode::Live)));
     }
+}
+
+/// PUDDLE_AT=<x>,<z>,<storey> (tests): a puddle spilled there (world metres) a few seconds in.
+fn puddle_test(mut done: Local<bool>, time: Res<Time>, world: Res<crate::loading::CurrentWorld>, mut add: MessageWriter<AddPuddle>) {
+    let Ok(v) = std::env::var("PUDDLE_AT") else { return };
+    if *done || time.elapsed_secs() < 8.0 {
+        return;
+    }
+    *done = true;
+    let n: Vec<f32> = v.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+    let [x, z, level] = n[..] else { return };
+    let y = world.data.heightmap.sample(x, z);
+    info!("puddle test: one spilled at {x},{z} on floor {level}");
+    add.write(AddPuddle { at: Vec3::new(x, y, z), level: level as u8, lasts: None });
 }
 
 /// Water on a floor tile, drying by `until` (game minutes).
@@ -183,11 +197,15 @@ fn add_puddles(
         let (tx, tz) = (l.x.floor() as i32, l.y.floor() as i32);
         let tile = |dx: i32, dz: i32| to_world(Vec2::new((tx + dx) as f32 + 0.5, (tz + dz) as f32 + 0.5));
         let taken = |p: Vec2| placed.iter().any(|(q, lv)| *lv == ask.level && q.distance(p) < 0.5);
+        // (Where the house can be walked to from its front door: not a pocket of an upper
+        // storey that's open floor enough but joined to no stairs, where no one could mop it.)
+        let entry = building.as_deref().and_then(|b| b.front_door(ask.at.xz())).map(|d| d.0);
+        let walked_to = |p: Vec2| entry.is_none_or(|e| grid.as_deref().is_some_and(|g| crate::nav::plan_route(g, upper.as_deref(), e, 1, p, ask.level).is_some()));
         // (Ring by ring outwards: the tile itself first.)
         let Some(at) = (0..=MAX_RADIUS)
             .flat_map(|r| (-r..=r).flat_map(move |dx| (-r..=r).filter(move |dz| dx.abs().max(dz.abs()) == r).map(move |dz| (dx, dz))))
             .map(|(dx, dz)| tile(dx, dz))
-            .find(|p| !taken(*p) && free_at(grid.as_deref(), upper.as_deref(), ask.level, *p))
+            .find(|p| !taken(*p) && free_at(grid.as_deref(), upper.as_deref(), ask.level, *p) && walked_to(*p))
         else {
             debug!("no room for a puddle about {:?} on floor {}", ask.at, ask.level);
             continue;
