@@ -311,6 +311,7 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_phone_makeCall_cellPhone",
     "a2o_phone_chat_",
     "a2o_phone_hangUp_cellPhone",
+    "a2o_phone_answer_cellPhone",
     // The mailbox and the paper.
     "a2o_mailbox_getMail",
     "a2o_mailbox_putFlagUp",

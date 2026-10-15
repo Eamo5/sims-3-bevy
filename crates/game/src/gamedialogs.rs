@@ -344,6 +344,7 @@ fn question_dialogs(
     (mut game_ui, sims): (Option<ResMut<crate::icons::GameUi>>, Query<(&crate::sim::Sim, Option<&crate::wishes::Wishes>)>),
     (rows, hovered): (Query<(&Interaction, &ChoiceRow), Changed<Interaction>>, Query<&Interaction>),
     (mut buttons, mut wheel): (Query<&mut crate::layout::UiButton>, MessageReader<bevy::input::mouse::MouseWheel>),
+    modals: Query<(), With<crate::dialog::Modal>>,
 ) {
     let scrolled: f32 = wheel.read().map(|w| w.y.signum()).sum();
     let plain = questions.shown();
@@ -355,6 +356,10 @@ fn question_dialogs(
         *shown = QuestionShown::default();
     }
     let (Some(plain), Some(ask)) = (plain, questions.queue.front()) else { return };
+    // (Once the plain one's there to hide: asked this frame, it's still to be made.)
+    if shown.plain.is_none() && !modals.contains(plain) {
+        return;
+    }
     let (Some(mut ui), Some(gu)) = (ui, game_ui.as_deref_mut()) else { return };
     let data = gu.data.clone();
     // Put it up.
@@ -366,6 +371,8 @@ fn question_dialogs(
             crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 2 => "TwoButtonDialog",
             // (A career event's choice: the game's two button dialog, yes and no.)
             crate::dialog::Question::CareerEvent { .. } => "TwoButtonDialog",
+            // (A call come in: answered or not.)
+            crate::dialog::Question::PhoneCall { .. } => "TwoButtonDialog",
             // (A newborn's name: the game's box to type it in.)
             crate::dialog::Question::NameBaby { .. } => "StringInputDialog",
             crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 3 => "ThreeButtonDialog",
@@ -383,11 +390,11 @@ fn question_dialogs(
         }) else {
             return;
         };
-        commands.entity(plain).insert(Visibility::Hidden);
+        commands.entity(plain).try_insert(Visibility::Hidden);
         shown.plain = Some(plain);
         shown.dirty = true;
         match &ask.about {
-            crate::dialog::Question::CareerPath { .. } | crate::dialog::Question::CareerEvent { .. } => {
+            crate::dialog::Question::CareerPath { .. } | crate::dialog::Question::CareerEvent { .. } | crate::dialog::Question::PhoneCall { .. } => {
                 // The offer's words; a button for each path (or yes and no), in the game's words.
                 let words = [ask.title.as_str(), ask.text.as_str()].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join("
 

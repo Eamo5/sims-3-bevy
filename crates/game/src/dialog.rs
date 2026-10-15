@@ -37,13 +37,15 @@ pub enum Question {
     CareerEvent { sim: Entity, event: usize },
     /// A newborn's name (typed in; the one suggested if not).
     NameBaby { sim: Entity, suggested: String },
+    /// A call come in (`calls`): to chat, or to hang out (at the caller's home, if they've one).
+    PhoneCall { sim: Entity, caller: Entity, invite: bool, home: Option<usize> },
 }
 
 impl Question {
     /// The Sim the question is about.
     pub fn sim(&self) -> Option<Entity> {
         match self {
-            Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } | Question::CareerEvent { sim, .. } | Question::NameBaby { sim, .. } => Some(*sim),
+            Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } | Question::CareerEvent { sim, .. } | Question::NameBaby { sim, .. } | Question::PhoneCall { sim, .. } => Some(*sim),
             Question::Household(_) => None,
         }
     }

@@ -318,7 +318,13 @@ installation is unreachable.
   both sides (lonely Sims at home alone call a friend by themselves) — or invite them over
   (they come up to the front door and ring the bell, the game's ring, and wait there until
   someone of the household goes to greet them and let them in; left two hours, they go home),
-  order pizza and call the services.
+  order pizza and call the services. Calls come in too, as the game's: every six hours or so,
+  from seven in the morning to ten at night, someone the household knows may ring (for a chat,
+  liking them 25 or more; to hang out, 40 or more). The phone rings, it's answered with the
+  game's clip, and the game's question comes up: "Bella would like to chat. Does Mia want to
+  talk?" (Sure: a chat on the phone), or "Do you want to hang out?" (I'll Come Over: off to
+  the caller's home in town; At My Place, when they've none: they come over). Left ringing
+  25 minutes, it's a missed call. `CALL=chat` or `CALL=invite` rings at once (a test).
 - **Conversations** go as the game's: each pair talking is in a short-term context, a
   commodity and how far it's gone (OK, Friendly, Very Friendly; Amusing, Funny, Hilarious;
   Flirty, Seductive, Hot; Dull, Odd, Impolite, Awkward, Steamed...). How a social comes across
