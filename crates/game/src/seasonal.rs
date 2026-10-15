@@ -28,6 +28,8 @@ pub enum Outdoor {
     SnowAngel,
     CatchSnow,
     CatchRain,
+    /// A Kleptomaniac pocketing something there (`klepto`).
+    Swipe,
 }
 
 /// Snow deep enough to build in (`kSnowLevelCutOffs`: low snow).
@@ -40,6 +42,7 @@ impl Outdoor {
             Outdoor::SnowAngel => "Make Snow Angel",
             Outdoor::CatchSnow => "Catch Snowflakes",
             Outdoor::CatchRain => "Catch Raindrops",
+            Outdoor::Swipe => crate::klepto::SWIPE,
         }
     }
 
@@ -50,6 +53,7 @@ impl Outdoor {
             Outdoor::Snowman => 54.0,
             Outdoor::SnowAngel => 16.0,
             Outdoor::CatchSnow | Outdoor::CatchRain => 12.0,
+            Outdoor::Swipe => 3.0,
         }
     }
 
@@ -59,6 +63,7 @@ impl Outdoor {
             Outdoor::Snowman => 70.0,
             Outdoor::SnowAngel => 90.0,
             Outdoor::CatchSnow | Outdoor::CatchRain => 80.0,
+            Outdoor::Swipe => 0.0,
         }
     }
 
@@ -88,6 +93,7 @@ impl Outdoor {
             Outdoor::SnowAngel => ActionClip::new(Some("a2o_snowAngel_makeBack_start_x"), &["a2o_snowAngel_makeBack_loop_x"]).ending(&["a2o_snowAngel_makeBack_stop_x"], 4.6),
             Outdoor::CatchSnow => ActionClip::new(None, &["a_idle_catchSnowTongue_x", "a_idle_catchSnowHand_x"]),
             Outdoor::CatchRain => ActionClip::new(None, &["a_idle_catchRainTongue_x", "a_idle_catchRainHand_x"]),
+            Outdoor::Swipe => ActionClip::new(Some("a_trait_kleptomaniac_x"), &[]),
         }
     }
 
@@ -142,6 +148,10 @@ fn outdoor_events(
     (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
 ) {
     for (sim, ev) in &sims {
+        // (A swipe's for `klepto`.)
+        if matches!(ev, OutdoorEvent::Done { what: Outdoor::Swipe, .. }) {
+            continue;
+        }
         commands.entity(sim).remove::<OutdoorEvent>();
         let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
         match *ev {

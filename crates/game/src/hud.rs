@@ -1047,7 +1047,7 @@ fn world_click(
         Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1055,6 +1055,11 @@ fn world_click(
         Query<&crate::doorlocks::DoorLock>,
         Query<(), With<crate::visit::LotObject>>,
         Query<&crate::journal::SkillJournal>,
+        (
+            Query<(Entity, &GameObject, &GlobalTransform, &crate::visit::LotObject, Option<&crate::nav::Floor>, Option<&crate::interact::UsedBy>)>,
+            Query<(Entity, &Transform, Option<&crate::nav::Floor>, Option<&crate::visit::OnLot>), With<Sim>>,
+            Query<&crate::klepto::SwipedToday>,
+        ),
     ),
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
@@ -1758,6 +1763,20 @@ fn world_click(
         if !actor_sim.age.is_little() && level <= 1 && !crate::weather::sheltered(building.as_deref(), p) {
             for what in crate::seasonal::Outdoor::options(&weather, opp_q.2.minutes) {
                 options.push((what.label().to_string(), ActionKind::Outdoor { at: Vec2::new(p.x, p.z), level, what }));
+            }
+        }
+        // A Kleptomaniac out on another's lot after dark: something near there pocketed, if no
+        // one's in the room to see.
+        if let Some(lot) = out_at.filter(|l| here == Some(*l))
+            && let Some(ui) = opp_q.0.as_ref()
+            && crate::klepto::ready(actor_sim, klepto_q.2.get(actor).ok(), opp_q.2.hour_f(), opp_q.2.day(), true)
+        {
+            let (things, about) = crate::klepto::lot_scene(&ui.data, building.as_deref(), &klepto_q.0, &klepto_q.1, lot);
+            let room = building.as_deref().and_then(|b| b.room_id(level, p));
+            if !crate::klepto::watched(actor, level, room, &about)
+                && let Some(t) = crate::klepto::pick(&things, p, level, room)
+            {
+                options.push((crate::klepto::SWIPE.to_string(), ActionKind::Outdoor { at: t.at.xz(), level: t.level, what: crate::seasonal::Outdoor::Swipe }));
             }
         }
         // Out on a community lot: home again.

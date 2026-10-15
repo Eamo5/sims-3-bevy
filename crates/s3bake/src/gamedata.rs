@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 115;
+pub const GAMEDATA_VERSION: u32 = 116;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1249,6 +1249,9 @@ pub struct GameDataBaked {
     /// The catalogue's trees, shrubs and flowers drawn by SpeedTree (no models of their own):
     /// each OBJD with its species' billboard, to plant in Build mode.
     pub garden: Vec<(crate::types::Key, crate::types::TreeKindBaked)>,
+    /// The catalogue objects that can be stolen (their OBJDs' flag), by OBJD instance, sorted.
+    #[serde(default)]
+    pub stealable: Vec<u64>,
 }
 
 /// The seasons' weather, from the game's `Seasons` table: temperatures through the day, how
@@ -3580,6 +3583,16 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         t.retain(|_, l| !l.is_empty());
     }
     pack.finish().map_err(|e| e.to_string())?;
+    // The objects that can be stolen (a Kleptomaniac's swipes).
+    let catalog: Vec<crate::types::CatalogEntry> = read_value(&g.join("catalog.bin")).unwrap_or_default();
+    out.stealable = crate::bake::par_map(&catalog.iter().collect::<Vec<_>>(), |c| {
+        s3formats::object::parse_objd(&pkgs.read(&crate::types::rkey(c.objd))?).ok().filter(|o| o.stealable).map(|_| c.objd.2)
+    })
+    .into_iter()
+    .flatten()
+    .collect();
+    out.stealable.sort_unstable();
+    out.stealable.dedup();
     write_value(&g.join("gamedata.bin"), &out).map_err(|e| e.to_string())?;
     Ok(n)
 }

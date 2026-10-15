@@ -32,6 +32,8 @@ pub enum ItemKind {
     Painting,
     /// A lifetime reward object, to place on the lot.
     Reward,
+    /// A catalogue object (one swiped): to place on the lot, or sell.
+    Object,
 }
 
 /// Items of one kind (and, for produce, one quality).
@@ -154,7 +156,7 @@ pub fn stack_picture(
         return crate::paintings::image(pictures, images, &baked?.0, s).map(|(h, r)| (h, Some(r)));
     }
     let ui = ui?;
-    if s.kind == ItemKind::Reward {
+    if matches!(s.kind, ItemKind::Reward | ItemKind::Object) {
         let objd = baked?.0.catalog.iter().find(|c| c.instance_name == s.key)?.objd;
         return ui.icon(images, &s3bake::gamedata::thumb_name(objd.2)).map(|h| (h, None));
     }
@@ -183,7 +185,7 @@ pub fn stack_actions(sim: &Sim, s: &Stack) -> Vec<(String, ItemButton)> {
     if s.kind == ItemKind::Painting {
         out.push(("Hang on a Wall".to_string(), ItemButton::Hang));
     }
-    if s.kind == ItemKind::Reward {
+    if matches!(s.kind, ItemKind::Reward | ItemKind::Object) {
         out.push(("Place on the Lot".to_string(), ItemButton::Hang));
     }
     out
@@ -301,7 +303,7 @@ pub fn draw_tab(
             if s.kind == ItemKind::Painting {
                 buttons.push((ItemButton::Hang, "Hang on a Wall".to_string()));
             }
-            if s.kind == ItemKind::Reward {
+            if matches!(s.kind, ItemKind::Reward | ItemKind::Object) {
                 buttons.push((ItemButton::Hang, "Place on the Lot".to_string()));
             }
             for (b, label) in buttons {
@@ -391,7 +393,7 @@ fn inventory_buttons(
                 // Out of the inventory and up to the walls (or onto the lot), in Buy mode (back if
                 // it isn't put down).
                 let object = baked.as_ref().and_then(|b| match s.kind {
-                    ItemKind::Reward => b.0.catalog.iter().find(|c| c.instance_name == s.key).map(|c| (c.objd, None)),
+                    ItemKind::Reward | ItemKind::Object => b.0.catalog.iter().find(|c| c.instance_name == s.key).map(|c| (c.objd, None)),
                     _ => crate::paintings::object(&b.0.paintings, &s).map(|(o, d)| (o, Some(d))),
                 });
                 let Some((objd, design)) = object else { continue };

@@ -153,6 +153,8 @@ pub struct ObjdInfo {
     pub desc_guid: u64,
     pub price: f32,
     pub show_in_catalog: bool,
+    /// Whether a Kleptomaniac or a burglar may take it (`IsStealable`).
+    pub stealable: bool,
     pub objk_index: u32,
     pub keys: Vec<ResourceKey>,
     /// Where buy mode lists it: by room (`roomCategoryFlags`, `roomSubCategoryFlags`) and by
@@ -246,7 +248,7 @@ pub fn parse_objd(d: &[u8]) -> R<ObjdInfo> {
     let _u7 = r.u8()?;
     let _env = r.f32()?;
     let _fire = r.u32()?;
-    let _steal = r.u8()?;
+    let steal = r.u8()?;
     let _repo = r.u8()?;
     let sort = r.u32()?;
     if common_version >= 0x0D {
@@ -269,6 +271,7 @@ pub fn parse_objd(d: &[u8]) -> R<ObjdInfo> {
         desc_guid,
         price,
         show_in_catalog: status & 1 != 0,
+        stealable: steal != 0,
         objk_index,
         keys,
         presets,

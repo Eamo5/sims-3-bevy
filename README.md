@@ -684,6 +684,15 @@ installation is unreachable.
   for ten to thirty minutes; a Natural-Born Performer's "TaDa!" (those about cheer and are
   Drawn In; Born To Do This an hour for each who did). `TRAIT_ACT=talk|freak|fake|tada` has
   the selected Sim do one (a test).
+- **Kleptomaniacs**, as the game's `SwipeSomething`: from seven in the evening till six in the
+  morning, out on any lot but their own, the ground's menu offers "Swipe Something": a thing
+  within six tiles that the catalogue lets be stolen (its OBJD's flag), on that floor and in
+  that room, while no one else is in the room; three a day. They walk over and pocket it with
+  the game's animation, and it's in their inventory, to put down at home or sell (the lot has
+  its own back when it's next opened). Their free will has them at it whenever they can, and
+  anyone come into the room meanwhile likes them less and knows them for a Kleptomaniac. A day
+  of work or school brings something home one time in five (worth up to §350 a career level,
+  or §500 from school). `KLEPTO=1` makes the selected Sim one who swipes all they can (a test).
 - **Walk styles**: each way a Sim goes is gone in the game's walk style for it, by the game's
   own rules: about their business on their own lot they walk; sent across it, they hurry (the
   fast walk) the long ways; elsewhere the further the faster, from a walk to a fast walk, a

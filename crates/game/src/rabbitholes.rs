@@ -350,6 +350,7 @@ fn outings(
                 floor.0 = 1;
             }
             if std::ptr::eq(at.activity, &SCHOOL) {
+                commands.entity(e).insert(crate::klepto::DayDone(crate::klepto::FROM_SCHOOL));
                 if let Some(mut g) = grades {
                     let mood_ok = motives.0.iter().all(|m| *m > -40.0);
                     g.0 = (g.0 + if mood_ok { 8.0 } else { -12.0 }).clamp(0.0, 100.0);

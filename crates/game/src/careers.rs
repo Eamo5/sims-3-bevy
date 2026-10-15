@@ -773,6 +773,8 @@ fn work_schedule(
                 }
             }
             notes.push(format!("{} is home from work and earned §{pay}.", sim.first));
+            // (A Kleptomaniac's pockets: see `klepto`.)
+            commands.entity(e).insert(crate::klepto::DayDone((job.level as i32 + 1) * crate::klepto::PER_CAREER_LEVEL));
             if job.performance >= 100.0 && job.level + 1 < job.levels().len() {
                 promote(&mut job, e, sim, ltw, member, household.as_deref_mut(), &mut notes, &mut questions, &mut life);
             } else if job.performance >= 100.0 {

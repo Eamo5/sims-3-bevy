@@ -5218,7 +5218,14 @@ fn autonomy(
     (called, repairmen, laundry, privacy): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>, Res<crate::laundry::Laundry>, Res<crate::privacy::Privacy>),
     friends_away: Query<(Entity, &Sim), (With<OffLot>, Without<Invited>)>,
     (callers, residents): (Query<(Entity, &crate::doorbell::AtTheDoor)>, Query<&crate::homes::Resident>),
-    (weather, building, chess, music, potties): (Res<crate::weather::Weather>, Option<Res<crate::building::ActiveBuilding>>, Res<crate::chess::ChessTables>, Res<crate::tips::Performances>, Res<crate::potty::Potties>),
+    (weather, building, chess, music, potties, swipeable): (
+        Res<crate::weather::Weather>,
+        Option<Res<crate::building::ActiveBuilding>>,
+        Res<crate::chess::ChessTables>,
+        Res<crate::tips::Performances>,
+        Res<crate::potty::Potties>,
+        Res<crate::klepto::Swipeable>,
+    ),
 ) {
     if delta.0 <= 0.0 {
         return;
@@ -5557,6 +5564,13 @@ fn autonomy(
             && best.as_ref().is_none_or(|b| score > b.0)
         {
             best = Some((score * rng.random_range(0.85..1.15), act.action(true)));
+        }
+        // A Kleptomaniac out after dark swipes something when no one's looking (the game's
+        // `SwipeSomethingAutonomous`, its urge strongly advertised).
+        if let Some((at, level)) = swipeable.0.get(&me)
+            && best.as_ref().is_none_or(|b| crate::klepto::SWIPE_SCORE > b.0)
+        {
+            best = Some((crate::klepto::SWIPE_SCORE * rng.random_range(0.85..1.15), crate::klepto::swipe_action(*at, *level, true)));
         }
         // An athletic Sim goes jogging now and then (by day, at home, with the energy for it).
         if household.contains(me)
