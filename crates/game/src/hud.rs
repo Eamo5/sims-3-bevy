@@ -1064,7 +1064,7 @@ fn world_click(
             Query<(Option<&crate::music::StereoOn>, Has<crate::interact::Unmade>, Option<&crate::grime::Grime>)>,
         ),
     ),
-    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels): (
+    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -1077,6 +1077,7 @@ fn world_click(
         Query<(&crate::pets::Pet, &GlobalTransform)>,
         Query<(), With<crate::little::Labour>>,
         Query<&crate::tvchannels::TvLevel>,
+        Query<(&Sim, Option<&crate::classes::ClassesTaken>)>,
     ),
 ) {
     // (Not in buy mode, nor in Edit Town: a click there picks lots.)
@@ -1527,7 +1528,12 @@ fn world_click(
                 .as_ref()
                 .map(|ui| crate::opportunities::lot_options(&world.data, lot, opp_q.1.single().ok().flatten(), &ui.data, opp_q.2.hour_f()))
                 .unwrap_or_default();
-            let opp_tasks: Vec<(String, ActionKind)> = opp_tasks.into_iter().chain(crate::gardening::lot_options(&world.data, lot)).collect();
+            let mut opp_tasks: Vec<(String, ActionKind)> = opp_tasks.into_iter().chain(crate::gardening::lot_options(&world.data, lot)).collect();
+            // (Its skill classes, in class hours.)
+            if let Ok((s, taken)) = classes_q.get(actor) {
+                let clock = &opp_q.2;
+                opp_tasks.extend(crate::classes::lot_classes(l, clock.hour_f(), clock.day(), s.age, taken, None).into_iter().map(|(label, task)| (label, ActionKind::Visit { lot, activity: task })));
+            }
             let visit = crate::visit::visitable(&world.data, lot);
             if !acts.is_empty() || !opp_tasks.is_empty() || visit {
                 title = crate::rabbitholes::lot_title(l, world.data.lot_names.get(lot).map_or("", |s| s.as_str()));

@@ -459,6 +459,13 @@ installation is unreachable.
   hosts ask the visitor to go home. The family met are kept, with what they think of the
   household, like the household's other acquaintances. `HOME_VISIT=1` drives the selected Sim
   to the nearest home with someone in.
+- **Skill classes**, as the game's: *Attend Cooking Class (§400)* at the bistro, Athletic at
+  the stadium, Gardening and Logic at the science lab, Writing at the business office, Guitar
+  at the theatre, Charisma at city hall, Painting at the school, Handiness at the military base
+  and Fishing at the grocery. Each is an hour, from eight in the morning to four in the
+  afternoon, once per skill, from the lot's menu or its map tag. A class gives the skill's
+  first level's worth of points, and one class a day is a fifth off. Taken classes are kept in
+  saves. `--do "Class Cooking"` attends one.
 - **Sim panel tabs**, as the game's: Needs; Skills (each skill learned with its icon, level
   and progress to the next); Career (the job and level, hours, days and pay, the performance
   meter and the next promotion, and how they go about their work: normally, working hard

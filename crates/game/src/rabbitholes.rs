@@ -360,6 +360,8 @@ fn outings(
                 }
             } else if std::ptr::eq(at.activity, &crate::meals::BUY_RECIPE) {
                 commands.entity(e).insert(crate::meals::RecipeBookBought);
+            } else if let Some(skill) = crate::classes::class_of(at.activity) {
+                commands.entity(e).insert(crate::classes::ClassOver(skill));
             } else if std::ptr::eq(at.activity, &crate::gardening::BUY_SEEDS) {
                 commands.entity(e).insert(crate::gardening::GardenRequest::BoughtSeeds);
                 notes.push(format!("{} is back from the grocery store.", sim.first));

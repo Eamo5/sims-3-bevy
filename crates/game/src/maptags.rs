@@ -249,6 +249,7 @@ fn tag_clicks(
     mut cam: Query<&mut SimsCamera>,
     (ui, opps, clock): (Option<Res<crate::icons::GameUi>>, Query<Option<&crate::opportunities::SimOpportunities>, With<crate::sim::Selected>>, Res<crate::clock::GameClock>),
     (town, story, dormant, household): (Option<Res<crate::premade::TownPremades>>, Res<crate::story::TownStory>, Res<crate::household::Dormant>, Option<Res<crate::interact::Household>>),
+    learners: Query<(&crate::sim::Sim, Option<&crate::classes::ClassesTaken>)>,
 ) {
     for (i, tag, collectible) in &tags {
         if *i != Interaction::Pressed {
@@ -271,6 +272,9 @@ fn tag_clicks(
         let acts = crate::rabbitholes::activities(lot);
         let mut tasks = ui.as_ref().map(|u| crate::opportunities::lot_options(&world.data, tag.lot, opps.single().ok().flatten(), &u.data, clock.hour_f())).unwrap_or_default();
         tasks.extend(crate::gardening::lot_options(&world.data, tag.lot));
+        if let Ok((s, taken)) = learners.get(selected.single().unwrap_or(Entity::PLACEHOLDER)) {
+            tasks.extend(crate::classes::lot_classes(lot, clock.hour_f(), clock.day(), s.age, taken, None).into_iter().map(|(label, task)| (label, ActionKind::Visit { lot: tag.lot, activity: task })));
+        }
         if crate::visit::visitable(&world.data, tag.lot) {
             tasks.insert(0, ("Visit".to_string(), ActionKind::GoToLot { lot: tag.lot }));
         }

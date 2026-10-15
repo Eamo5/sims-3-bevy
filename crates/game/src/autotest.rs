@@ -4017,6 +4017,24 @@ fn auto_action(
         *done = true;
         return;
     }
+    // "Class <skill>": off to the lot teaching it, to attend its class.
+    if let Some(skill) = name.strip_prefix("Class ") {
+        let found = crate::classes::CLASSES.iter().position(|c| c.skill.eq_ignore_ascii_case(skill)).and_then(|i| {
+            let c = &crate::classes::CLASSES[i];
+            let lot = world.data.lots.iter().position(|l| {
+                let n = l.internal_name.to_ascii_lowercase();
+                !l.is_residential() && c.venue.iter().any(|v| n.contains(v))
+            })?;
+            Some((lot, i))
+        });
+        if let (Some((lot, i)), Ok(mut q)) = (found, sel.single_mut()) {
+            info!("class test: {skill} at lot {lot}");
+            q.0.clear();
+            q.push_player(crate::interact::Action::new(name.clone(), crate::interact::ActionKind::Visit { lot, activity: crate::classes::CLASS_TASK + i }, false));
+        }
+        *done = true;
+        return;
+    }
     // "Visit <place>": drive to that community lot's first activity.
     if let Some(place) = name.strip_prefix("Visit ") {
         let place = place.to_ascii_lowercase();

@@ -129,6 +129,9 @@ pub struct SavedSim {
     /// Recipes learned from recipe books.
     #[serde(default)]
     pub recipes: Vec<String>,
+    /// The skills whose classes they've taken.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub classes: Vec<String>,
     /// Ranked chess: wins, losses and rank.
     #[serde(default)]
     pub chess: Option<crate::chess::ChessRecord>,
@@ -502,6 +505,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         lifetime_wish: None,
         author: None,
         recipes: Vec::new(),
+        classes: Vec::new(),
         chess: None,
         inventory: Default::default(),
         toddler: None,
@@ -780,7 +784,14 @@ fn save_game(
                 Option<&crate::journal::SkillJournal>,
                 Option<&crate::rabbitholes::SchoolGrades>,
                 Option<&crate::rabbitholes::Homework>,
-                (Option<&crate::rabbitholes::AtRabbitHole>, Option<&crate::weather::BodyTemperature>, Option<&crate::simbody::Wearing>, Has<crate::simbody::ChangedInto>, Option<&crate::portraits::Staged>),
+                (
+                    Option<&crate::rabbitholes::AtRabbitHole>,
+                    Option<&crate::weather::BodyTemperature>,
+                    Option<&crate::simbody::Wearing>,
+                    Has<crate::simbody::ChangedInto>,
+                    Option<&crate::portraits::Staged>,
+                    Option<&crate::classes::ClassesTaken>,
+                ),
             ),
         ),
         (Without<crate::town::Townie>, Without<crate::visit::LotGuest>, Without<crate::services::ServiceNpc>),
@@ -827,7 +838,7 @@ fn save_game(
     let Some(hh) = household else { return };
     let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).collect();
     let mut saved = Vec::new();
-    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged))) in &sims {
+    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes))) in &sims {
         if let Some(s) = staged {
             debug!("saving {} during portrait: scene {:?}, gameplay {:?}", sim.first, tf.translation, s.original.translation);
         }
@@ -913,6 +924,7 @@ fn save_game(
             lifetime_wish: ltw.map(|l| SavedLifetimeWish { check: l.def().check.into(), fulfilled: l.fulfilled, careers: l.careers.clone(), raised: l.raised, rich_spouse: l.rich_spouse }),
             author: author.cloned(),
             recipes: recipes.map(|r| r.0.clone()).unwrap_or_default(),
+            classes: classes.map(|c| c.0.clone()).unwrap_or_default(),
             chess: chess.copied(),
             inventory: inventory.cloned().unwrap_or_default(),
             toddler: toddler.copied(),
@@ -1154,6 +1166,9 @@ pub(crate) fn apply_loaded_game(
         }
         if !s.recipes.is_empty() {
             ec.insert(crate::meals::KnownRecipes(s.recipes.clone()));
+        }
+        if !s.classes.is_empty() {
+            ec.insert(crate::classes::ClassesTaken(s.classes.clone()));
         }
         if let Some(c) = s.chess {
             ec.insert(c);

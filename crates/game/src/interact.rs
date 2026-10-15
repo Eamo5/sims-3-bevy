@@ -3605,13 +3605,18 @@ pub(crate) fn run_actions(
                                         .map(|t| t.0)
                                         .or_else(|| (*activity == crate::gardening::SEEDS_TASK).then_some(&crate::gardening::BUY_SEEDS))
                                         .or_else(|| (*activity == crate::little::BIRTH_TASK).then_some(&crate::little::HAVE_BABY))
-                                        .or_else(|| crate::meals::recipe_task(*activity));
+                                        .or_else(|| crate::meals::recipe_task(*activity))
+                                        .or_else(|| crate::classes::class_task(*activity));
                                     if crate::meals::recipe_task(*activity).is_some() {
                                         commands.entity(me).insert(crate::meals::BuyingRecipe(*activity - crate::meals::RECIPE_TASK));
                                     }
                                     if let Some(a) = task.or_else(|| acts.get(*activity)) {
                                         let place = crate::rabbitholes::lot_title(l, name);
-                                        let price = crate::wishes::price_factor(wishes, a.name);
+                                        let mut price = crate::wishes::price_factor(wishes, a.name);
+                                        // (The day's discounted class, a fifth off.)
+                                        if let Some(i) = activity.checked_sub(crate::classes::CLASS_TASK).filter(|i| *i < crate::classes::CLASSES.len()) {
+                                            price *= crate::classes::price(i, clock.day()) as f32 / a.cost.max(1) as f32;
+                                        }
                                         crate::rabbitholes::head_out(&mut commands, &clock, me, sim, *lot, a, place, household.as_deref_mut(), &mut notes, price);
                                     }
                                 }
