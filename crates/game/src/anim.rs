@@ -166,6 +166,11 @@ fn face_bone(name: &str) -> bool {
     ["Brow", "Lid", "Cheek", "Squint", "Nose", "Nostril", "Lip", "Mouth", "Jaw", "Chin", "Tongue"].iter().any(|k| name.contains(k))
 }
 
+/// The bones a seated talk moves: the spine, neck and head, the arms, and the face.
+fn upper_bone(name: &str) -> bool {
+    ["Spine", "Neck", "Head"].iter().any(|k| name.contains(k)) || arm_bone(name) || face_bone(name)
+}
+
 /// The bones a carry clip moves: the shoulders, arms, hands and fingers.
 fn arm_bone(name: &str) -> bool {
     ["Clavicle", "UpperArm", "Bicep", "Forearm", "Wrist", "Hand", "Index", "_Mid", "Pinky", "Ring", "Thumb", "Shoulder"].iter().any(|k| name.contains(k))
@@ -364,7 +369,7 @@ pub fn drive_skeletons(
         Option<&crate::nav::PathFollow>,
         Option<&crate::little::Pregnancy>,
         Has<crate::supernatural::WolfForm>,
-        Option<&FaceOverlay>,
+        (Option<&FaceOverlay>, Option<&mut crate::seatedtalk::TalkOverlay>),
     )>,
     mut joints: Query<&mut Transform, Without<Sim>>,
     mut cues: MessageWriter<crate::sound::ClipCue>,
@@ -372,7 +377,7 @@ pub fn drive_skeletons(
     mut partners: Local<HashMap<String, Arc<Vec<u32>>>>,
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed];
-    for (entity, sim, anim, skel, action, mut player, carried, toddler, carrying, jogging, path, pregnancy, wolf, face_overlay) in &mut sims {
+    for (entity, sim, anim, skel, action, mut player, carried, toddler, carrying, jogging, path, pregnancy, wolf, (face_overlay, mut talk_overlay)) in &mut sims {
         use crate::sim::Occult;
         let fast = matches!(path.filter(|p| !p.done).map(|p| p.now), Some(crate::nav::WalkStyle::Run | crate::nav::WalkStyle::FastRun | crate::nav::WalkStyle::FastJog));
         let child = sim.age == crate::sim::Age::Child;
@@ -450,6 +455,16 @@ pub fn drive_skeletons(
             }
         };
         let arm = carry.as_ref().map(|_| arms.entry(skel.rig.name.clone()).or_insert_with(|| Arc::new(skel.rig.bones.iter().map(|b| arm_bone(&b.name)).collect())).clone());
+        // (A seated talk over the upper body, looping on its own time.)
+        let talk = talk_overlay.as_mut().and_then(|t| {
+            let c = lib.get(&data, &t.clip)?.clone();
+            t.time += dt;
+            if c.duration > 0.0 {
+                t.time %= c.duration;
+            }
+            Some((c, t.time))
+        });
+        let upper = talk.as_ref().map(|_| arms.entry(format!("{}#upper", skel.rig.name)).or_insert_with(|| Arc::new(skel.rig.bones.iter().map(|b| upper_bone(&b.name)).collect())).clone());
         // (An expression on the face, over it all.)
         let face = face_overlay.and_then(|f| lib.get(&data, &f.clip).map(|c| (c.clone(), f.time.clamp(0.0, c.duration))));
         let face_mask = face.as_ref().map(|_| arms.entry(format!("{}#face", skel.rig.name)).or_insert_with(|| Arc::new(skel.rig.bones.iter().map(|b| face_bone(&b.name)).collect())).clone());
@@ -521,6 +536,18 @@ pub fn drive_skeletons(
                 }
                 if let Some(r) = sample_track_quat(&track.rotation, carry_t) {
                     target.rotation = r;
+                }
+            }
+            if let (Some((tc, tt)), Some(mask)) = (&talk, &upper)
+                && mask.get(i).copied().unwrap_or(false)
+                && let Some(track) = tc.tracks.get(&bone.hash)
+            {
+                let shape = skel.shape.get(i).copied().flatten();
+                if let Some(p) = sample_track_vec(&track.translation, *tt) {
+                    target.translation = p + shape.map_or(Vec3::ZERO, |s| s.offset);
+                }
+                if let Some(r) = sample_track_quat(&track.rotation, *tt) {
+                    target.rotation = shape.map_or(r, |s| s.apply_rotation(r));
                 }
             }
             if let (Some((fc, ft)), Some(mask)) = (&face, &face_mask)

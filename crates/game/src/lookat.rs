@@ -37,7 +37,7 @@ struct Gaze {
 fn look_at(
     mut commands: Commands,
     time: Res<Time>,
-    sims: Query<(Entity, &Skeleton, Option<&ActionQueue>, Option<&SocialPartner>, Option<&mut Gaze>)>,
+    sims: Query<(Entity, &Skeleton, Option<&ActionQueue>, (Option<&SocialPartner>, Option<&crate::seatedtalk::TalkOverlay>), Option<&mut Gaze>)>,
     mut joints: Query<(&mut Transform, &GlobalTransform)>,
     mut heads: Local<HashMap<Entity, Vec3>>,
 ) {
@@ -52,13 +52,13 @@ fn look_at(
     }
     let mut sims = sims;
     let mut todo = Vec::new();
-    for (e, skel, queue, partner, gaze) in sims.iter_mut() {
+    for (e, skel, queue, (partner, talk), gaze) in sims.iter_mut() {
         // Who they're talking with: their own social, or the Sim who started one with them.
         let talking = queue.and_then(|q| q.0.front()).and_then(|a| match (&a.kind, a.phase) {
             (ActionKind::Social { target, .. }, Phase::Running(_)) => Some(*target),
             _ => None,
         });
-        let target = talking.or(partner.map(|p| p.0)).and_then(|t| heads.get(&t).copied());
+        let target = talking.or(partner.map(|p| p.0)).or(talk.map(|t| t.with)).and_then(|t| heads.get(&t).copied());
         let Some(gaze) = gaze else {
             commands.entity(e).insert(Gaze::default());
             continue;

@@ -150,26 +150,31 @@ pub struct WatchFrom(pub Entity);
 #[derive(Component)]
 pub struct WatchingTv(pub Entity);
 
+/// Somewhere free to sit: an empty seat, or the other place on a sofa someone's on.
+fn free_seat(o: &GameObject, used: &crate::interact::UsedBy, second: Option<&crate::interact::SecondPlace>) -> bool {
+    used.0.is_none() || (o.sofa_seats().is_some() && second.is_some_and(|s| s.0.is_none()))
+}
+
 /// Turned on, the TV is watched from the nearest free sofa or chair facing it (a few metres
-/// off); with none, standing before it.
+/// off: a sofa with someone on it has room beside them); with none, standing before it.
 #[allow(clippy::type_complexity)]
 fn watch_somewhere(
     mut commands: Commands,
     mut sims: Query<(Entity, &WatchFrom, &mut crate::interact::ActionQueue)>,
-    seats: Query<(Entity, &GameObject, &Transform, &crate::interact::UsedBy), Without<crate::interact::Broken>>,
+    seats: Query<(Entity, &GameObject, &Transform, &crate::interact::UsedBy, Option<&crate::interact::SecondPlace>), Without<crate::interact::Broken>>,
 ) {
     for (e, from, mut queue) in &mut sims {
         commands.entity(e).remove::<WatchFrom>();
-        let Ok((_, _, ttf, _)) = seats.get(from.0) else { continue };
+        let Ok((_, _, ttf, ..)) = seats.get(from.0) else { continue };
         let tv = ttf.translation;
         let watch = |kind: ObjectKind| crate::interact::interactions_for(kind).iter().position(|d| d.special == crate::interact::Special::WatchTv);
         let seat = seats
             .iter()
-            .filter(|(_, o, t, used)| {
+            .filter(|(_, o, t, used, second)| {
                 let to_tv = (tv - t.translation).with_y(0.0);
                 let ahead = (t.rotation * Vec3::Z).with_y(0.0).normalize_or_zero();
                 matches!(o.kind, ObjectKind::Sofa | ObjectKind::Chair)
-                    && used.0.is_none()
+                    && free_seat(o, used, *second)
                     && (t.translation.y - tv.y).abs() < 1.5
                     && (1.2..6.0).contains(&to_tv.length())
                     && to_tv.normalize_or_zero().dot(ahead) > 0.7
@@ -227,14 +232,14 @@ pub struct PaperInHand(pub Entity);
 fn read_paper_somewhere(
     mut commands: Commands,
     mut sims: Query<(Entity, &Transform, &PaperInHand, &mut crate::interact::ActionQueue), Added<PaperInHand>>,
-    seats: Query<(Entity, &GameObject, &Transform, &crate::interact::UsedBy), Without<crate::interact::Broken>>,
+    seats: Query<(Entity, &GameObject, &Transform, &crate::interact::UsedBy, Option<&crate::interact::SecondPlace>), Without<crate::interact::Broken>>,
 ) {
     for (e, tf, paper, mut queue) in &mut sims {
         let read = |kind: ObjectKind| crate::interact::interactions_for(kind).iter().position(|d| d.special == crate::interact::Special::ReadPaper);
         let seat = seats
             .iter()
-            .filter(|(_, o, t, used)| {
-                matches!(o.kind, ObjectKind::Sofa | ObjectKind::Chair) && used.0.is_none() && (t.translation.y - tf.translation.y).abs() < 1.5 && t.translation.distance(tf.translation) < 30.0
+            .filter(|(_, o, t, used, second)| {
+                matches!(o.kind, ObjectKind::Sofa | ObjectKind::Chair) && free_seat(o, used, *second) && (t.translation.y - tf.translation.y).abs() < 1.5 && t.translation.distance(tf.translation) < 30.0
             })
             .min_by(|a, b| a.2.translation.distance(tf.translation).total_cmp(&b.2.translation.distance(tf.translation)));
         match seat.and_then(|(s, o, ..)| Some((s, read(o.kind)?))) {
@@ -273,7 +278,7 @@ pub struct ReadSomewhere(pub Entity);
 fn read_somewhere(
     mut commands: Commands,
     mut sims: Query<(Entity, &Transform, &ReadSomewhere, &mut crate::interact::ActionQueue)>,
-    seats: Query<(Entity, &GameObject, &Transform, &crate::interact::UsedBy), Without<crate::interact::Broken>>,
+    seats: Query<(Entity, &GameObject, &Transform, &crate::interact::UsedBy, Option<&crate::interact::SecondPlace>), Without<crate::interact::Broken>>,
 ) {
     for (e, tf, shelf, mut queue) in &mut sims {
         commands.entity(e).remove::<ReadSomewhere>();
@@ -281,11 +286,11 @@ fn read_somewhere(
         // (Sofas sooner than chairs.)
         let seat = seats
             .iter()
-            .filter(|(_, o, t, used)| {
-                matches!(o.kind, ObjectKind::Sofa | ObjectKind::Chair) && used.0.is_none() && (t.translation.y - tf.translation.y).abs() < 1.5 && t.translation.distance(tf.translation) < 15.0
+            .filter(|(_, o, t, used, second)| {
+                matches!(o.kind, ObjectKind::Sofa | ObjectKind::Chair) && free_seat(o, used, *second) && (t.translation.y - tf.translation.y).abs() < 1.5 && t.translation.distance(tf.translation) < 15.0
             })
             .min_by(|a, b| {
-                let far = |(_, o, t, _): &(Entity, &GameObject, &Transform, &crate::interact::UsedBy)| t.translation.distance(tf.translation) + if o.kind == ObjectKind::Sofa { 0.0 } else { 4.0 };
+                let far = |(_, o, t, ..): &(Entity, &GameObject, &Transform, &crate::interact::UsedBy, Option<&crate::interact::SecondPlace>)| t.translation.distance(tf.translation) + if o.kind == ObjectKind::Sofa { 0.0 } else { 4.0 };
                 far(a).total_cmp(&far(b))
             });
         match seat.and_then(|(s, o, ..)| Some((s, read(o.kind)?))) {

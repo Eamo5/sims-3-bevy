@@ -1055,7 +1055,7 @@ fn world_click(
         Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1069,6 +1069,7 @@ fn world_click(
             Query<&crate::klepto::SwipedToday>,
         ),
         Res<crate::ingredients::Fridge>,
+        Query<(&crate::sim::SimAnim, &GlobalTransform, Option<&crate::nav::Floor>)>,
     ),
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
@@ -1199,9 +1200,13 @@ fn world_click(
             }
             let rel = rels.get(t);
             let target_member = members_q.contains(t);
+            // (Sat near each other: what can be said where they sit, the game's seated talk.)
+            let posture = |e: Entity| postures.get(e).ok().map(|(a, tf, f)| (a, tf.translation(), f.map_or(1, |f| f.0)));
+            let seated = matches!((posture(actor), posture(t)), (Some(a), Some(b)) if crate::seatedtalk::sat_together(a, b));
             pie.submenus.clear();
             for cat in crate::social::SocialCat::ALL {
                 let list: Vec<(String, ActionKind)> = crate::social::all_socials()
+                    .filter(|(_, s)| !seated || crate::social::seated_ok(s))
                     .filter(|(_, s)| {
                         s.cat == cat
                             && crate::social::available(
@@ -1233,7 +1238,10 @@ fn world_click(
                     pie.submenus.push((label.to_string(), sub));
                     submenu_kind(pie.submenus.len() - 1)
                 });
-                if !list.is_empty() {
+                // (Sat together, the game's single-level menu: the friendly talk, at the top.)
+                if seated {
+                    options.extend(list);
+                } else if !list.is_empty() {
                     options.push((format!("{} ›", cat.name()), submenu_kind(pie.submenus.len())));
                     pie.submenus.push((cat.name().to_string(), list));
                 }
@@ -1804,7 +1812,13 @@ fn pie_buttons(
     mut queues: Query<&mut ActionQueue>,
     selected: Query<Entity, With<Selected>>,
     (mut wishes, mut notes): (Query<(&Sim, &mut crate::wishes::Wishes), With<Selected>>, ResMut<Notifications>),
-    (ui_data, inventories, people, locks): (Option<Res<crate::icons::GameUi>>, Query<&crate::inventory::Inventory>, Query<(Entity, &Sim)>, Query<&crate::doorlocks::DoorLock>),
+    (ui_data, inventories, people, locks, postures): (
+        Option<Res<crate::icons::GameUi>>,
+        Query<&crate::inventory::Inventory>,
+        Query<(Entity, &Sim)>,
+        Query<&crate::doorlocks::DoorLock>,
+        Query<(&crate::sim::SimAnim, &GlobalTransform, Option<&crate::nav::Floor>)>,
+    ),
     mut jobs: Query<&mut crate::careers::Job>,
     (back, windows, sounds): (Query<&Interaction, (Changed<Interaction>, With<crate::piemenu::PieBack>)>, Query<&Window, With<PrimaryWindow>>, Option<Res<crate::sound::Sounds>>),
 ) {
@@ -2002,6 +2016,20 @@ fn pie_buttons(
         action.fish_choice = fish_choice;
         action.recipe_choice = recipe_choice;
         action.for_one = for_one;
+        // (Sat near each other, a talk had where they sit: before what they sat down to, which
+        // carries on after.)
+        if let ActionKind::Social { target, social } = action.kind
+            && crate::social::seated_ok(crate::social::social(social))
+        {
+            let posture = |e: Entity| postures.get(e).ok().map(|(an, tf, f)| (an, tf.translation(), f.map_or(1, |f| f.0)));
+            if let (Some(me), Some(them)) = (posture(a), posture(target))
+                && crate::seatedtalk::sat_together(me, them)
+            {
+                action.seated = true;
+                queue.0.push_front(action);
+                return;
+            }
+        }
         queue.push_player(action);
     }
 }

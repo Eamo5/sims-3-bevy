@@ -2985,7 +2985,8 @@ fn auto_gate_route(
 /// labels start (`Fridge:Have Quick Meal>Cereal`). `Sim` is the nearest other Sim (its socials);
 /// CLICK_SHOTS=<folder> takes a picture of each menu as it opens; CLICK_USE_DISTANCE=<metres>
 /// brings the camera that near; CLICK_USE_AFTER=<seconds> waits that long first (ten by default:
-/// longer for a lot being visited), and an entry `wait:<seconds>` that long between two.
+/// longer for a lot being visited), an entry `wait:<seconds>` that long between two, and
+/// `select:<first name>` the Sim to click with from then on.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn auto_click_use(
     mut commands: Commands,
@@ -3003,6 +3004,7 @@ fn auto_click_use(
     queues: Query<&crate::interact::ActionQueue, With<crate::sim::Selected>>,
     pickable: Query<(Entity, &GlobalTransform, &InheritedVisibility, Option<&crate::interact::GameObject>, Has<crate::pets::Pet>), Or<(With<crate::interact::GameObject>, With<crate::sim::Sim>, With<crate::pets::Pet>)>>,
     back: Query<&bevy::ui::UiGlobalTransform, With<crate::piemenu::PieBack>>,
+    selected: Query<Entity, With<crate::sim::Selected>>,
 ) {
     let Ok(list) = std::env::var("CLICK_USE") else { return };
     // (Each `Kind` or `Kind:Option>Submenu option`, by the start of their labels.)
@@ -3020,6 +3022,18 @@ fn auto_click_use(
         let secs: f32 = entries[idx].1.first().and_then(|s| s.parse().ok()).or_else(|| secs.trim_start_matches(':').parse().ok()).unwrap_or(10.0);
         info!("click use: waiting {secs} s");
         *state = (idx + 1, 0, t + secs);
+        return;
+    }
+    if kinds[idx].eq_ignore_ascii_case("select") {
+        let name = entries[idx].1.first().copied().unwrap_or_default();
+        if let Some((e, ..)) = sims.iter().find(|(_, s, _)| s.first.eq_ignore_ascii_case(name)) {
+            info!("click use: selecting {name}");
+            for s in &selected {
+                commands.entity(s).remove::<crate::sim::Selected>();
+            }
+            commands.entity(e).insert(crate::sim::Selected);
+        }
+        *state = (idx + 1, 0, t + 0.5);
         return;
     }
     let Ok((camera, cam_tf, mut cam)) = cams.single_mut() else { return };

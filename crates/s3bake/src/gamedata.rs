@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 118;
+pub const GAMEDATA_VERSION: u32 = 119;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -432,6 +432,10 @@ pub struct SocialAction {
     /// Its own rules (`<LHS>`), each with the result it gives.
     #[serde(default)]
     pub rules: Vec<SocialRule>,
+    /// The game's `ActionDataBits` (`<AD val>`): whether it's grouped, terminating, not while
+    /// carrying a child (8), forces a jig (0x2000)...
+    #[serde(default)]
+    pub bits: u32,
     /// What each result does (`<RHS>`): the conversation's push towards it and the relationship's
     /// flags it sets or clears.
     #[serde(default)]
@@ -1088,6 +1092,7 @@ pub fn social_actions(xml: &str, name: &dyn Fn(&str) -> String) -> Vec<SocialAct
             }),
             rules,
             outcomes,
+            bits: tag(body, "AD").and_then(|t| attr(t, "val")).and_then(|v| u32::from_str_radix(v.trim().trim_start_matches("0x"), 16).ok()).unwrap_or(0),
         });
     }
     out

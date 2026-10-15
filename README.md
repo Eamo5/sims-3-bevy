@@ -650,6 +650,16 @@ installation is unreachable.
   game's child-to-child, child-to-grown-up and grown-up-to-child versions where it has them
   for the social (a hug, a gossip, cheering up), else its generic talk, with the listener
   nodding along or wincing as it goes down (the grown-up in it talking down to them).
+- **Seated talk**, as the game's `SeatedSocialInteractionA`: two Sims sat near each other (at
+  the dinner table, side by side on the sofa) are offered the friendly talk the game allows
+  seated (its friendly socials that don't need a jig, Chat and Get to Know, Compliment, Brag...)
+  and have it where they sit, without getting up: the one talking gestures and talks over the
+  top of their meal or show (the game's `a_soc_talkRespond_*_sitting` clips, played on the upper
+  body alone) and the other listens (`a_soc_talkListen_*_sitting`), agreeing or not as it goes
+  down; then they carry on eating, and it's over once either gets up. Sat together, the menu's
+  the game's single level of that talk; Sims strike up such a talk of their own accord now and
+  then, so a family meal is talked through. Talked to where they sit by someone standing, a Sim
+  listens sat there instead of being pulled up into it.
 - **Conversation topics**, as the game's (its `ActiveTopic`s, for as long as its table has them
   last): what's happened to a Sim lately is talked about, by them or by others with them,
   opening the game's socials under it. A birthday (Announce Birthday; Birthday Congratulations
@@ -812,6 +822,10 @@ installation is unreachable.
 - **Television**: *Watch TV* turns the set on, then the Sim sits down on a sofa or chair facing
   it to watch (the game's seated and armchair TV animations; standing when there's no seat), the
   screen flickering with pictures as long as someone watches.
+- **Sofas seat two**: a loveseat a cushion each, a three-seater its middle and the next, so a
+  second Sim sits down beside the first (to watch the TV, read, or just sit), walking up to the
+  cushion that'll be theirs, and the two can talk where they sit; a nap along it wants it to
+  themselves.
 - **TV channels**: *Change to...* lists the channels the set gets, as the game's TV table has
   them: a cheap set the first four (Action World, Sports Universe, Romantic Rendezvous, KidZ
   Zone), a moderate one Cookin' Cable, Terror TV and Got Garden? as well, an expensive one Halls

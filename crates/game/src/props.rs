@@ -138,6 +138,7 @@ fn hold_props(
         Has<crate::anim::ActionClip>,
         Option<&crate::anim::Carrying>,
         &crate::sim::SimAnim,
+        Has<crate::seatedtalk::TalkOverlay>,
     )>,
     (mut props, mut shown): (Query<&mut Transform, With<Prop>>, Query<&mut Visibility, (With<Prop>, Without<crate::interact::GameObject>)>),
     mut placed: Query<(&crate::interact::GameObject, &mut Visibility), Without<Prop>>,
@@ -148,7 +149,7 @@ fn hold_props(
     let objects = objects.get_or_insert_with(|| {
         data.0.catalog.iter().filter(|c| PROPS.iter().any(|(_, o, ..)| *o == c.instance_name)).map(|c| (c.instance_name.clone(), c.objd)).collect()
     });
-    for (sim, player, skel, held, queue, acting, carrying, anim) in &mut sims {
+    for (sim, player, skel, held, queue, acting, carrying, anim, talking) in &mut sims {
         // (Something carried: the carry clip's props, at its time.)
         let carry = carrying.filter(|_| crate::anim::Carrying::shows(anim.pose, acting)).map(|c| c.0);
         let (clip_of, time_of) = match carry {
@@ -246,7 +247,8 @@ fn hold_props(
             if let Ok(mut v) = shown.get_mut(entity) {
                 // (The mop's clip carries it about the puddle's root, where the Sim stands.)
                 let on_sim = parent.is_none_or(|p| p.parent == SIM_ACTOR) || OBJECT_SPACE.contains(&PROPS[*i].0);
-                v.set_if_neq(if on_sim { Visibility::Inherited } else { Visibility::Hidden });
+                // (Put down to talk where they sit, the hands at the talk.)
+                v.set_if_neq(if on_sim && !talking { Visibility::Inherited } else { Visibility::Hidden });
             }
             if let Some(p) = parent.filter(|p| p.parent == SIM_ACTOR)
                 && let Some(bone) = skel.rig.bones.iter().position(|b| s3pkg::fnv32(&b.name) == p.slot)

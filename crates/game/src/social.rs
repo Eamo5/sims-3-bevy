@@ -360,6 +360,9 @@ pub struct GameRules {
     /// Whether Sims do it unasked (the game's `Available auto`, and not `udo`), under its topics.
     pub auto: bool,
     pub clips: &'static [&'static str],
+    /// Done seated too (the game's `SeatedSocialInteractionA`: a friendly one that can be done
+    /// with a child in arms, `ActionData.AllowCarryChild`).
+    pub seated: bool,
     /// The topics it's offered under (the game's `<Trait> Trait` and `Buff <Moodlet>` topics,
     /// and a few more): offered when the one who does it has the trait or the moodlet (`true`),
     /// or the one it's done to (`false`). None: always.
@@ -793,6 +796,7 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
             test,
             auto: a.autonomous && !a.user_only,
             clips: Box::leak(clips.into_boxed_slice()),
+            seated: cat == SocialCat::Friendly && (a.graph.eq_ignore_ascii_case("social_greet") || a.bits & (SOCIAL_NOT_CARRYING | SOCIAL_FORCE_JIG) == 0),
             topics,
         }));
         // (Romance only where there's some already; asked for or not, the friendly and the funny
@@ -939,6 +943,20 @@ pub fn install_game_socials(actions: &[s3bake::gamedata::SocialAction], clip_nam
 
 /// Whether `actor` can start this social with `target` (shown in the pie menu); `kin`: whether
 /// they're family (no romance between relatives).
+/// The game's `ActionDataBits`: not while carrying a child, and its own jig.
+const SOCIAL_NOT_CARRYING: u32 = 0x8;
+const SOCIAL_FORCE_JIG: u32 = 0x2000;
+/// The hand-made ones that are talk, done seated.
+const SEATED_TALK: [&str; 7] = ["Chat", "Get to Know", "Compliment", "Talk About Hobbies", "Tell Dramatic Story", "Brag", "Cheer Up"];
+
+/// Whether a social's done seated (at the table, on the sofa): the game's friendly talk.
+pub fn seated_ok(def: &SocialDef) -> bool {
+    match def.game {
+        Some(g) => g.seated,
+        None => def.cat == SocialCat::Friendly && SEATED_TALK.contains(&def.name),
+    }
+}
+
 pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim, target_in_household: bool, kin: bool, side: [Side; 2]) -> bool {
     // (Romance as far along as it asks, where the game's menus don't say: theirs go by the
     // conversation and the relationship.)

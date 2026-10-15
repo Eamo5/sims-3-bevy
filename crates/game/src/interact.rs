@@ -698,6 +698,12 @@ impl GameObject {
         tf.transform_point(Vec3::new(self.center.x, 0.0, self.center.y))
     }
 
+    /// A sofa's two places to sit, along it from its middle: the middle and the next cushion on
+    /// a three-seater, a cushion each on a loveseat (an armchair, the one).
+    pub fn sofa_seats(&self) -> Option<[f32; 2]> {
+        (self.kind == ObjectKind::Sofa && self.half.x >= 0.7).then(|| if self.half.x >= 1.05 { [0.0, 0.62 * self.half.x] } else { [-0.48 * self.half.x, 0.48 * self.half.x] })
+    }
+
     /// Height of the seat / mattress surface.
     pub fn seat_height(&self) -> f32 {
         match self.kind {
@@ -717,22 +723,26 @@ pub struct UsedBy(pub Option<Entity>);
 #[derive(Component)]
 pub struct Unmade;
 
-/// A double bed's other side: whoever's on it (the first side's is its `UsedBy`). Two share a
-/// double bed, each on a side, as the game's couples do.
+/// A double bed's other side, or a sofa's other seat: whoever's on it (the first's is its
+/// `UsedBy`). Two share a double bed, each on a side, as the game's couples do, and sit side by
+/// side on a sofa.
 #[derive(Component, Default)]
 pub struct SecondPlace(pub Option<Entity>);
 
-/// Double beds have a second side; a claim on it lapses once its Sim is doing something else.
+/// Double beds have a second side, sofas a second seat; a claim on it lapses once its Sim is
+/// doing something else.
 fn second_places(mut commands: Commands, beds: Query<(Entity, &GameObject), Without<SecondPlace>>, mut claimed: Query<(Entity, &mut SecondPlace)>, sims: Query<&ActionQueue>) {
     for (e, o) in &beds {
-        if o.kind == ObjectKind::BedDouble {
+        if o.kind == ObjectKind::BedDouble || o.sofa_seats().is_some() {
             commands.entity(e).insert(SecondPlace(None));
         }
     }
     for (bed, mut second) in &mut claimed {
         let Some(who) = second.0 else { continue };
+        // (Through a talk had where they sit, still theirs.)
         let still = sims.get(who).is_ok_and(|q| {
-            q.0.front().is_some_and(|a| matches!(a.kind, ActionKind::Object { target, .. } if target == bed) || matches!(a.kind, ActionKind::Outro { target, .. } if target == bed))
+            let on = |a: &Action| matches!(a.kind, ActionKind::Object { target, .. } if target == bed) || matches!(a.kind, ActionKind::Outro { target, .. } if target == bed);
+            q.0.front().is_some_and(on) || (q.0.front().is_some_and(|a| a.seated) && q.0.get(1).is_some_and(on))
         });
         if !still {
             second.0 = None;
@@ -748,6 +758,20 @@ fn effective_owner(me: Entity, used: Option<Entity>, second: Option<Option<Entit
         Some(s) if used.is_none() || s.is_none() => None,
         _ => used,
     }
+}
+
+/// Who has it, for what's done with the whole of it (a nap along a sofa): anyone else in
+/// either place.
+fn owner_for(me: Entity, kind: ObjectKind, def: usize, used: Option<Entity>, second: Option<Option<Entity>>) -> Option<Entity> {
+    if whole_of(kind, def) {
+        return used.filter(|u| *u != me).or(second.flatten().filter(|u| *u != me)).or(used);
+    }
+    effective_owner(me, used, second)
+}
+
+/// Lying along a sofa takes both its places.
+fn whole_of(kind: ObjectKind, def: usize) -> bool {
+    kind == ObjectKind::Sofa && interactions_for(kind).get(def).is_some_and(|d| d.pose == Pose::Lie)
 }
 
 /// A broken object: only repairing it is possible.
@@ -2541,11 +2565,13 @@ pub struct Action {
     pub approach: Option<Vec2>,
     /// What a social came to, decided as it began (applied as it ends).
     pub social_outcome: Option<crate::conversation::Outcome>,
+    /// A social had where the two sit (`seatedtalk`), not walked over for.
+    pub seated: bool,
 }
 
 impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
-        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, channel_choice: None, book_choice: None, fish_choice: None, recipe_choice: None, for_one: false, approach: None, social_outcome: None }
+        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, channel_choice: None, book_choice: None, fish_choice: None, recipe_choice: None, for_one: false, approach: None, social_outcome: None, seated: false }
     }
 }
 
@@ -2928,7 +2954,7 @@ pub(crate) fn run_actions(
         Query<(), With<Broken>>,
         Query<(), Or<(With<crate::buy::HeldObject>, With<crate::buyhistory::HistoryHidden>)>>,
     ),
-    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates, mut memories)): (
+    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates, mut memories, (partners_of, at_door))): (
         MessageWriter<crate::journal::Did>,
         Query<&crate::journal::SkillJournal>,
         Query<&mut crate::inventory::Inventory>,
@@ -2936,7 +2962,14 @@ pub(crate) fn run_actions(
         Query<&mut SecondPlace>,
         Query<Entity, (With<SecondPlace>, Without<Broken>)>,
         Query<(), With<Unmade>>,
-        (Res<RepairTunings>, Query<&Transform, (With<crate::puddles::Puddle>, Without<Sim>)>, Option<Res<crate::weather::Weather>>, Res<ObjectRates>, ResMut<crate::conversation::SocialMemories>),
+        (
+            Res<RepairTunings>,
+            Query<&Transform, (With<crate::puddles::Puddle>, Without<Sim>)>,
+            Option<Res<crate::weather::Weather>>,
+            Res<ObjectRates>,
+            ResMut<crate::conversation::SocialMemories>,
+            (Query<&SocialPartner>, Query<(), With<crate::doorbell::AtTheDoor>>),
+        ),
     ),
 ) {
     let Some(grid) = grid else { return };
@@ -2952,6 +2985,7 @@ pub(crate) fn run_actions(
     // Little ones a care social picks up: (little one, grown-up, age, grown-up's transform).
     let mut carry_fx: Vec<(Entity, Entity, Age, Transform, bool)> = Vec::new();
     let positions: HashMap<Entity, (Vec3, u8)> = sims.iter().map(|s| (s.0, (s.3.translation, s.11.0))).collect();
+    let sitting: std::collections::HashSet<Entity> = sims.iter().filter(|s| s.6.pose == Pose::Sit).map(|s| s.0).collect();
     // (The places Sims have gone to at an object: a picnic table's taken.)
     let places_taken: Vec<(Entity, Entity, Vec2)> = sims
         .iter()
@@ -2995,7 +3029,7 @@ pub(crate) fn run_actions(
         if let ActionKind::Object { target, def } = action.kind {
             let second = seconds.get(target).ok().map(|s| s.0);
             let valid = !unavailable.contains(target) && objects.get(target).is_ok_and(|(obj, _, used, _)| {
-                object_action_available(me, obj.kind, def, effective_owner(me, used.0, second), broken.contains(target), action.phase)
+                object_action_available(me, obj.kind, def, owner_for(me, obj.kind, def, used.0, second), broken.contains(target), action.phase)
             });
             if !valid { action.cancel = true; }
         }
@@ -3010,6 +3044,14 @@ pub(crate) fn run_actions(
                 maintenance_available(me, obj.kind, used.0, broken.contains(target), upgraded.get(target).ok(), bit)
             });
             if !valid { action.cancel = true; }
+        }
+
+        // (A caller at the door who's given up and gone home isn't greeted.)
+        if let ActionKind::Social { target, social } = action.kind
+            && crate::social::social(social).effect == SocialEffect::Greet
+            && !at_door.contains(target)
+        {
+            action.cancel = true;
         }
 
         // Cancellation
@@ -3036,6 +3078,23 @@ pub(crate) fn run_actions(
         }
 
         if !finished {
+            // (Setting out to talk to someone who's already come over to talk to them: they wait
+            // where they are, the other side of it, and have theirs once it's done, rather than
+            // each walking after the other for ever.)
+            if let ActionKind::Social { target, .. } = action.kind
+                && matches!(action.phase, Phase::Start | Phase::Routing)
+                && partners_of.get(me).is_ok_and(|p| p.0 == target)
+            {
+                if matches!(action.phase, Phase::Routing) {
+                    commands.entity(me).remove::<PathFollow>();
+                    action.phase = Phase::Start;
+                }
+                continue;
+            }
+            // (Had where they sit: no walk to it.)
+            if action.seated && matches!(action.phase, Phase::Start) {
+                action.phase = Phase::Routing;
+            }
             match action.phase {
                 Phase::Start => {
                     // (While the walk grids are being made afresh, a way is planned a frame on,
@@ -3055,7 +3114,7 @@ pub(crate) fn run_actions(
                                     commands.entity(me).insert_if_new(crate::privacy::WaitingForPrivacy::new(clock.minutes));
                                     continue;
                                 }
-                                if effective_owner(me, used.0, seconds.get(*target).ok().map(|s| s.0)).is_some_and(|u| u != me) && !watches(obj.kind, *def) {
+                                if owner_for(me, obj.kind, *def, used.0, seconds.get(*target).ok().map(|s| s.0)).is_some_and(|u| u != me) && !watches(obj.kind, *def) {
                                     if !action.autonomous {
                                         notes.push(format!("{} can't use the {}: it's in use.", sim.first, obj.name));
                                     }
@@ -3086,6 +3145,11 @@ pub(crate) fn run_actions(
                                 } else if obj.kind == ObjectKind::Tv && interactions_for(obj.kind).get(*def).is_some_and(|d| d.name == "Work Out") {
                                     // (Out in front of the set, to work out along with it.)
                                     Some((obj.workout_spot(otf), of.map_or(1, |f| f.0)))
+                                } else if let Some(seats) = obj.sofa_seats().filter(|_| !whole_of(obj.kind, *def)) {
+                                    // (Before the cushion that'll be theirs: the second, someone on the first.)
+                                    let seat = seats[used.0.is_some_and(|u| u != me) as usize];
+                                    let p = obj.use_point(otf) + (otf.rotation * Vec3::X).xz() * seat;
+                                    Some((p, of.map_or(1, |f| f.0)))
                                 } else if obj.kind == ObjectKind::BedDouble && interactions_for(obj.kind).get(*def).is_some_and(|d| d.on_object) && used.0.is_some_and(|u| u != me) {
                                     // (A double bed's far side, someone in the first: walked to on that side.)
                                     let local = otf.compute_affine().inverse().transform_point3(Vec3::new(obj.use_point(otf).x, otf.translation.y, obj.use_point(otf).y));
@@ -3252,6 +3316,11 @@ pub(crate) fn run_actions(
                             {
                                 // (A double bed's other side, when someone has the first.)
                                 match seconds.get_mut(target) {
+                                    // (Along a sofa: both its places.)
+                                    Ok(mut s) if matches!(action.kind, ActionKind::Object { def, .. } if whole_of(o.kind, def)) => {
+                                        used.0 = Some(me);
+                                        s.0 = Some(me);
+                                    }
                                     Ok(mut s) if matches!(action.kind, ActionKind::Object { .. }) && used.0.is_some_and(|u| u != me) => s.0 = Some(me),
                                     _ => used.0 = Some(me),
                                 }
@@ -3346,7 +3415,7 @@ pub(crate) fn run_actions(
                     }
                 }
                 Phase::Routing => {
-                    let arrived = path.as_ref().is_some_and(|p| p.done);
+                    let arrived = path.as_ref().is_some_and(|p| p.done) || action.seated;
                     // (Changed for it first, with a spin: into pyjamas by the bed, out of their
                     // clothes by the bath, before getting in.)
                     if arrived && spinning {
@@ -3418,7 +3487,7 @@ pub(crate) fn run_actions(
                                     // (Art looked over, and then what they make of it.)
                                     let clip = if d.special == Special::ViewArt { Some(view_clip(sim, art_taste(sim, obj.price, taste_roll(me, *target)))) } else { clip };
                                     // (A double bed's second side: the first's, mirrored.)
-                                    let far_side = obj.kind == ObjectKind::BedDouble && seconds.get(*target).is_ok_and(|s| s.0 == Some(me));
+                                    let far_side = (obj.kind == ObjectKind::BedDouble || (obj.kind == ObjectKind::Sofa && d.pose == Pose::Sit)) && seconds.get(*target).is_ok_and(|s| s.0 == Some(me));
                                     // (WooHoo's other part, on the far side.)
                                     let clip = if far_side && matches!(d.special, Special::WooHoo | Special::TryForBaby) { Some(woohoo_clip(true)) } else { clip };
                                     // (A bed got into is unmade after; an unmade one's got into as it is.)
@@ -3462,6 +3531,11 @@ pub(crate) fn run_actions(
                                         // In a double bed, one side of it (the other's the far side).
                                         let side = if bed && obj.half.x > 0.8 { -obj.half.x * 0.5 } else { 0.0 };
                                         let side = if far_side { -side } else { side };
+                                        // (On a sofa, the cushion that's theirs.)
+                                        let side = match obj.sofa_seats() {
+                                            Some(seats) if d.pose == Pose::Sit => seats[far_side as usize],
+                                            _ => side,
+                                        };
                                         let c = otf.transform_point(Vec3::new(obj.center.x + side, 0.0, obj.center.y));
                                         tf.translation = Vec3::new(c.x, otf.translation.y, c.z);
                                         tf.rotation = otf.rotation;
@@ -3534,27 +3608,35 @@ pub(crate) fn run_actions(
                                 }
                             }
                             ActionKind::Social { target, social } => {
-                                if let Some(p) = positions.get(target) {
-                                    let to = Vec2::new(p.0.x - tf.translation.x, p.0.z - tf.translation.z);
-                                    tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
-                                }
-                                anim.pose = Pose::Talk;
                                 let s = crate::social::social(*social);
                                 let little = who.get(target).map(|w| w.0.age).filter(|a| a.is_little());
-                                let clips = social_clips(s.name, little);
-                                let start = social_start(s.name, little);
-                                let clip = |side| crate::anim::ActionClip { start, ..crate::anim::ActionClip::social(clips, side) };
-                                // (A child in it: the children's own clips.)
-                                let kids = who
-                                    .get(target)
-                                    .filter(|_| little.is_none())
-                                    .zip(baked.as_deref())
-                                    .and_then(|(w, b)| child_social_clips(clips, sim.age, w.0.age, s.cat == crate::social::SocialCat::Mean, &b.0.clip_names));
-                                let (mine, theirs) = kids.unwrap_or_else(|| (clip('x'), clip('y')));
-                                commands.entity(me).insert(mine);
-                                commands.entity(*target).insert((theirs, SocialPartner(me)));
-                                if let Some(age) = little {
-                                    carry_fx.push((*target, me, age, *tf, s.effect != SocialEffect::PutToBed));
+                                // (Talked to where they sit, a friendly talk: they listen sat there,
+                                // as the game's seated socials, not pulled up into it.)
+                                let listens_sat = !action.seated && little.is_none() && sitting.contains(target) && crate::social::seated_ok(s);
+                                // (Seated: they stay as they are, talk played over them below.)
+                                if !action.seated {
+                                    if let Some(p) = positions.get(target) {
+                                        let to = Vec2::new(p.0.x - tf.translation.x, p.0.z - tf.translation.z);
+                                        tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
+                                    }
+                                    anim.pose = Pose::Talk;
+                                    let clips = social_clips(s.name, little);
+                                    let start = social_start(s.name, little);
+                                    let clip = |side| crate::anim::ActionClip { start, ..crate::anim::ActionClip::social(clips, side) };
+                                    // (A child in it: the children's own clips.)
+                                    let kids = who
+                                        .get(target)
+                                        .filter(|_| little.is_none())
+                                        .zip(baked.as_deref())
+                                        .and_then(|(w, b)| child_social_clips(clips, sim.age, w.0.age, s.cat == crate::social::SocialCat::Mean, &b.0.clip_names));
+                                    let (mine, theirs) = kids.unwrap_or_else(|| (clip('x'), clip('y')));
+                                    commands.entity(me).insert(mine);
+                                    if !listens_sat {
+                                        commands.entity(*target).insert((theirs, SocialPartner(me)));
+                                    }
+                                    if let Some(age) = little {
+                                        carry_fx.push((*target, me, age, *tf, s.effect != SocialEffect::PutToBed));
+                                    }
                                 }
                                 if let Some((tsim, tmood, t_member, tpartner)) = who.get(target) {
                                     let rel = rels.get(*target);
@@ -3583,14 +3665,29 @@ pub(crate) fn run_actions(
                                         holiday: warm,
                                         boss_hears: job.as_deref().filter(|j| j.boss == Some(tsim.id)).map(|j| j.performance),
                                     };
-                                    let mut outcome = crate::conversation::decide(*social, &judging);
-                                    // (A Comedian's jokes always land; told to do their homework, they
-                                    // hear it out, whether they do it being the effect's.)
-                                    if (s.name == "Tell Joke" && crate::journal::earned(journals.get(me).ok(), "Comedian")) || s.effect == SocialEffect::RequestHomework {
-                                        outcome.accepted = true;
+                                    // (Caught up with again after the other moved off: as it was
+                                    // already going.)
+                                    let decided = action.social_outcome;
+                                    let mut outcome = decided.unwrap_or_else(|| crate::conversation::decide(*social, &judging));
+                                    if decided.is_none() {
+                                        // (A Comedian's jokes always land; told to do their homework,
+                                        // they hear it out, whether they do it being the effect's.)
+                                        if (s.name == "Tell Joke" && crate::journal::earned(journals.get(me).ok(), "Comedian")) || s.effect == SocialEffect::RequestHomework {
+                                            outcome.accepted = true;
+                                        }
+                                        debug!("{} to {}: {} comes across {:?} (in {}, liking {:.0})", sim.first, tsim.first, s.name, outcome.result, rel.stc.name(), rel.friendship);
                                     }
-                                    debug!("{} to {}: {} comes across {:?} (in {}, liking {:.0})", sim.first, tsim.first, s.name, outcome.result, rel.stc.name(), rel.friendship);
                                     action.social_outcome = Some(outcome);
+                                    // (Seated: the talker's talk and the listener's, over the top of them;
+                                    // to one sat, theirs.)
+                                    if action.seated || listens_sat {
+                                        let child = [sim.age == crate::sim::Age::Child, who.get(target).is_some_and(|w| w.0.age == crate::sim::Age::Child)];
+                                        let (talk, listen) = crate::seatedtalk::talk_clips(outcome.accepted, child, &mut rand::rng());
+                                        if action.seated {
+                                            commands.entity(me).insert(crate::seatedtalk::TalkOverlay { clip: talk, time: 0.0, with: *target, talking: true });
+                                        }
+                                        commands.entity(*target).insert(crate::seatedtalk::TalkOverlay { clip: listen, time: 0.0, with: me, talking: false });
+                                    }
                                     if crate::conversation::rebuffed(*social, &outcome) {
                                         if !action.autonomous {
                                             notes.push(format!("{} rejected {}'s attempt to {}.", tsim.first, sim.first, s.name.to_lowercase()));
@@ -3620,6 +3717,7 @@ pub(crate) fn run_actions(
                                     };
                                     let bed = double_beds
                                         .iter()
+                                        .filter(|b| objects.get(*b).is_ok_and(|(o, ..)| o.kind == ObjectKind::BedDouble))
                                         .filter(|b| free(*b))
                                         .filter_map(|b| objects.get(b).ok().map(|(_, btf, ..)| (b, btf.translation.distance(tf.translation))))
                                         .filter(|(_, d)| *d < 40.0)
@@ -4275,8 +4373,12 @@ pub(crate) fn run_actions(
                         }
                         ActionKind::Social { target, social } => {
                             let s = crate::social::social(*social);
-                            let close = positions.get(target).is_some_and(|p| p.0.distance(tf.translation) < crate::social::apart(s) + 1.6);
-                            if !close {
+                            let reach = if action.seated { crate::seatedtalk::SEATED_RANGE + 0.5 } else { crate::social::apart(s) + 1.6 };
+                            let close = positions.get(target).is_some_and(|p| p.0.distance(tf.translation) < reach);
+                            // (Had where they sit: over once either gets up.)
+                            if action.seated && !(close && sitting.contains(target) && sitting.contains(&me)) {
+                                finished = true;
+                            } else if !close {
                                 action.phase = Phase::Start;
                             } else {
                                 motives.add(SOCIAL, s.social_per_hour * dt / 60.0);
@@ -4296,7 +4398,9 @@ pub(crate) fn run_actions(
                                     care_fx.push((*target, s.care.map(|v| v * dt / 60.0)));
                                 }
                                 social_fx.push((*target, me, s.social_per_hour * dt / 60.0, s.fun_per_hour * dt / 60.0, f, r, None));
-                                anim.pose = if s.name.contains("Dance") { Pose::Dance } else { Pose::Talk };
+                                if !action.seated {
+                                    anim.pose = if s.name.contains("Dance") { Pose::Dance } else { Pose::Talk };
+                                }
                                 // (A Teacher Extraordinaire gets through homework twice as fast.)
                                 let minutes = if s.effect == SocialEffect::HelpHomework && crate::journal::earned(journals.get(me).ok(), "Teacher Extraordinaire") { s.minutes * 0.5 } else { s.minutes };
                                 if elapsed >= minutes {
@@ -4865,7 +4969,13 @@ pub(crate) fn run_actions(
             if let Some(a) = queue.0.front() {
                 debug!("{} finished {} ({:?}{})", sim.first, a.label, a.phase, if a.cancel { ", cancelled" } else { "" });
             }
-            commands.entity(me).remove::<crate::anim::ActionClip>();
+            // (A seated talk over: the talk off them both, and on with what they sat at.)
+            if let Some(Action { kind: ActionKind::Social { target, .. }, seated: true, .. }) = queue.0.front() {
+                commands.entity(me).remove::<crate::seatedtalk::TalkOverlay>();
+                commands.entity(*target).remove::<crate::seatedtalk::TalkOverlay>();
+            } else {
+                commands.entity(me).remove::<crate::anim::ActionClip>();
+            }
             if let Some(Action { kind: ActionKind::Social { target, .. }, .. }) = queue.0.front() {
                 partners_done.push((*target, me));
             }
@@ -5108,6 +5218,28 @@ mod maintenance_tests {
     }
 
     #[test]
+    fn a_sofa_seats_two_side_by_side_and_a_nap_takes_all_of_it() {
+        let sofa = |half: f32| GameObject { kind: ObjectKind::Sofa, name: "Sofa".into(), objd: (0, 0, 0), price: 1000, center: Vec2::ZERO, half: Vec2::new(half, 0.38), height: 1.0, route: None };
+        // (An armchair the one; a loveseat a cushion each; a three-seater the middle and the next.)
+        assert!(sofa(0.5).sofa_seats().is_none());
+        let [l, r] = sofa(0.9).sofa_seats().unwrap();
+        assert!(l < -0.3 && r > 0.3 && (l + r).abs() < 1e-5);
+        let [m, n] = sofa(1.4).sofa_seats().unwrap();
+        assert!(m == 0.0 && n > 0.7 && n < 1.0);
+        let mut world = World::new();
+        let (a, b) = (world.spawn_empty().id(), world.spawn_empty().id());
+        let (sit, nap) = (0, 1);
+        assert_eq!(SOFA[nap].pose, Pose::Lie);
+        // Sat on by one: room beside them for another, not to lie along it.
+        assert_eq!(owner_for(b, ObjectKind::Sofa, sit, Some(a), Some(None)), None);
+        assert_eq!(owner_for(b, ObjectKind::Sofa, nap, Some(a), Some(None)), Some(a));
+        assert_eq!(owner_for(b, ObjectKind::Sofa, nap, None, Some(Some(a))), Some(a));
+        assert_eq!(owner_for(a, ObjectKind::Sofa, nap, None, None), None);
+        // One napping on it has both places.
+        assert_eq!(owner_for(b, ObjectKind::Sofa, sit, Some(a), Some(Some(a))), Some(a));
+    }
+
+    #[test]
     fn paintings_and_sculptures_are_art_and_tastes_differ() {
         let art = "sims3.gameplay.objects.decorations.mimics.paintingflowers";
         assert_eq!(ObjectKind::from_script(art, "PaintingFlowers"), ObjectKind::Art);
@@ -5289,10 +5421,13 @@ fn autonomy(
         // (A need gone critical comes first: chores and pastimes that do nothing for it wait.)
         let critical = [HUNGER, BLADDER, ENERGY, HYGIENE].into_iter().filter(|&i| motives.0[i] < CRITICAL_NEED).min_by(|a, b| motives.0[*a].total_cmp(&motives.0[*b]));
         for (oe, obj, otf, used, obj_lot) in &objects {
-            // (A double bed with their partner in it has room for them, on its other side.)
-            let beside_partner = seconds.get(oe).is_ok_and(|s| s.0.is_none()) && used.0.is_some() && used.0 == rels.partner().map(|p| p.0);
+            // (A double bed with their partner in it has room for them, on its other side; a sofa
+            // someone's sat on, for anyone.)
+            let beside_partner = seconds.get(oe).is_ok_and(|s| s.0.is_none()) && used.0.is_some() && (used.0 == rels.partner().map(|p| p.0) || obj.sofa_seats().is_some());
             // (Someone else's: only to watch them play it.)
             let theirs = used.0.is_some_and(|u| u != me) && !beside_partner;
+            // (A sofa shared: only sat on.)
+            let shared = obj.sofa_seats().is_some() && (used.0.is_some_and(|u| u != me) || seconds.get(oe).is_ok_and(|s| s.0.is_some_and(|u| u != me)));
             if (theirs && !music.watchable(oe, me)) || obj_lot.map(|l| l.0) != my_lot {
                 continue;
             }
@@ -5337,7 +5472,7 @@ fn autonomy(
                 continue;
             }
             for (di, d) in interactions_for(obj.kind).iter().enumerate() {
-                if !d.autonomous {
+                if !d.autonomous || (shared && whole_of(obj.kind, di)) {
                     continue;
                 }
                 // (A potty chair: sat on by toddlers trained to, emptied by grown-ups once used.)
