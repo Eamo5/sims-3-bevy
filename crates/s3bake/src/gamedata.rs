@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 106;
+pub const GAMEDATA_VERSION: u32 = 107;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1112,8 +1112,17 @@ fn idle_rows(xml: &str, row: &str, key: &str) -> Vec<(String, Vec<IdleAnim>)> {
             continue;
         }
         let trait_required = field(r, "TraitRequired");
+        // (A looping one, named by its state machine (`wedding_genericClap`, "Looping, 15, 30"):
+        // its clips, `a_wedding_genericClap_start_x`, the loop a few times, the stop.)
+        let looping = r.get("AnimationType").is_some_and(|t| t.starts_with("Looping")) && !anim.contains(',') && !anim.starts_with("a_");
+        let clips: Vec<String> = if looping {
+            let n = anim.trim();
+            vec![format!("a_{n}_start_x"), format!("a_{n}_loop_x"), format!("a_{n}_loop_x"), format!("a_{n}_loop_x"), format!("a_{n}_stop_x")]
+        } else {
+            anim.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+        };
         group.1.push(IdleAnim {
-            clips: anim.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+            clips,
             probability: field(r, "AnimationProbability").parse().unwrap_or(1),
             ages: field(r, "AgesSpeciesAllowed").split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
             balloon: r.get("ThoughtBalloon").cloned().unwrap_or_default(),

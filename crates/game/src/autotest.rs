@@ -3522,6 +3522,7 @@ fn auto_action(
     (mut commands, clock, members): (Commands, Res<crate::clock::GameClock>, Query<(Entity, &crate::sim::Sim), With<crate::sim::HouseholdMember>>),
     (time, mut since): (Res<Time>, Local<Option<f32>>),
     (opps_q, ui, sel_tf): (Query<&crate::opportunities::SimOpportunities>, Option<Res<crate::icons::GameUi>>, Query<&Transform, With<crate::sim::Selected>>),
+    townsfolk: Query<(Entity, &crate::sim::Sim), (Without<crate::sim::HouseholdMember>, Or<(With<crate::interact::OffLot>, With<crate::town::Townie>)>)>,
 ) {
     let Some(name) = &args.action else { return };
     if *done {
@@ -3835,10 +3836,27 @@ fn auto_action(
         *done = true;
         return;
     }
-    // "Party": the selected Sim throws a party.
+    // "Party": the selected Sim throws a party (knowing a few of the town's grown-ups first,
+    // friends and acquaintances, to ask).
     if name == "Party" {
+        let me = sel_e.single().unwrap();
+        let known: Vec<Entity> = townsfolk.iter().filter(|(_, s)| s.age.is_grown() && s.age != crate::sim::Age::Child).map(|(e, _)| e).take(8).collect();
+        // (PARTY=wedding: the best liked their fiancé(e).)
+        let wedding = std::env::var("PARTY").is_ok_and(|p| p.eq_ignore_ascii_case("wedding"));
+        for (k, &e) in known.iter().enumerate() {
+            let liking = [60.0, 45.0, 30.0, 20.0, 10.0, 5.0, 0.0, -10.0][k];
+            for (a, b) in [(me, e), (e, me)] {
+                if let Ok(mut rels) = rels_q.get_mut(a) {
+                    let r = rels.entry(b);
+                    r.friendship = liking;
+                    if wedding && k == 0 {
+                        (r.status, r.romance, r.romantic) = (crate::social::RelStatus::Engaged, 80.0, true);
+                    }
+                }
+            }
+        }
         if let Ok(mut q) = sel.single_mut() {
-            q.push_player(crate::interact::Action::new("Throw a Party", crate::interact::ActionKind::ThrowParty, false));
+            q.push_player(crate::parties::throw_party_action());
         }
         *done = true;
         return;

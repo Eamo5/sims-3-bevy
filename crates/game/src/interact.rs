@@ -21,7 +21,7 @@ impl Plugin for InteractPlugin {
         app.init_resource::<Notifications>()
             .add_systems(
                 Update,
-                (comings_and_goings, off_lot_idle, autonomy, run_actions, release_partners, motive_warnings, pay_bills, parties, crate::social::note_contact, crate::social::fade_relationships)
+                (comings_and_goings, off_lot_idle, autonomy, run_actions, release_partners, motive_warnings, pay_bills, crate::social::note_contact, crate::social::fade_relationships)
                     .chain()
                     .run_if(in_state(PlayMode::Live)),
             )
@@ -2709,7 +2709,7 @@ fn comings_and_goings(
     mut visitors: Query<(Entity, &Visitor), (Without<GoingHome>, Without<OffLot>, Without<HouseholdMember>)>,
     mut arriving: Query<(Entity, &Invited, &mut Transform, Option<&mut ActionQueue>), Without<GoingHome>>,
     (town, mut household, mut notes, members): (Option<Res<crate::premade::TownPremades>>, Option<ResMut<Household>>, ResMut<Notifications>, Query<(), With<HouseholdMember>>),
-    (building, party): (Option<Res<crate::building::ActiveBuilding>>, (Option<Res<PartyPlan>>, Option<Res<Party>>)),
+    (building, party): (Option<Res<crate::building::ActiveBuilding>>, Option<Res<Party>>),
 ) {
     for (e, mut sim, j) in &mut joining {
         if let Some(l) = &j.last_name {
@@ -2754,126 +2754,32 @@ fn comings_and_goings(
             tf.translation = Vec3::new(exit.0.x, world.data.heightmap.sample(exit.0.x, exit.0.y), exit.0.y);
             let day_end = (clock.minutes / 1440.0).floor() * 1440.0 + 22.0 * 60.0;
             let leave_at = day_end.max(clock.minutes + 240.0);
-            commands.entity(e).remove::<(Invited, OffLot)>().insert((Visibility::Inherited, Visitor { leave_at }));
+            // (Someone from about town, come over: with a mind of their own while they're here, as
+            // the town's Sims met out and about have.)
+            commands
+                .entity(e)
+                .remove::<(Invited, OffLot)>()
+                .insert((Visibility::Inherited, Visitor { leave_at }))
+                .insert_if_new((AutonomyTimer(rand::rng().random_range(0.5..3.0)), Skills::default()));
             // To the front door, to ring and be let in (a party's guests come straight in).
-            let partying = party.0.is_some() || party.1.is_some();
-            if let (Some(mut queue), Some((door, door_e)), false) = (queue, building.as_ref().and_then(|b| b.front_door(exit.0)), partying) {
-                crate::doorbell::come_to_door(&mut commands, e, &mut queue, door, door_e.unwrap_or(e));
+            let partying = party.is_some();
+            let door = building.as_ref().and_then(|b| b.front_door(exit.0)).filter(|_| !partying);
+            match (queue, door) {
+                (Some(mut queue), Some((door, door_e))) => crate::doorbell::come_to_door(&mut commands, e, &mut queue, door, door_e.unwrap_or(e)),
+                (Some(_), None) => {}
+                (None, door) => {
+                    let mut queue = ActionQueue::default();
+                    if let Some((door, door_e)) = door {
+                        crate::doorbell::come_to_door(&mut commands, e, &mut queue, door, door_e.unwrap_or(e));
+                    }
+                    commands.entity(e).insert(queue);
+                }
             }
         }
     }
 }
 
-/// A party being planned: guests are phoned and arrive at `start`.
-#[derive(Resource)]
-pub struct PartyPlan {
-    pub by: Entity,
-    pub start: f64,
-}
-
-/// A party under way, and who came.
-#[derive(Resource)]
-pub struct Party {
-    pub end: f64,
-    pub host: Entity,
-    pub guests: Vec<Entity>,
-    /// Conversations had during it.
-    pub chats: u32,
-}
-
-/// What throwing a party costs (food and drink for the guests).
-pub const PARTY_PRICE: i64 = 150;
-
-/// Guests are invited (people the host knows first, then townsfolk); when it ends, the party is
-/// judged by how much fun everyone had.
-#[allow(clippy::too_many_arguments)]
-#[allow(clippy::type_complexity)]
-fn parties(
-    mut commands: Commands,
-    clock: Res<GameClock>,
-    plan: Option<Res<PartyPlan>>,
-    party: Option<ResMut<Party>>,
-    mut household: Option<ResMut<Household>>,
-    hosts: Query<(&Sim, &Relationships)>,
-    away: Query<(Entity, &Sim, Has<crate::town::Townie>), (Or<(With<OffLot>, With<crate::town::Townie>)>, Without<Invited>, Without<HouseholdMember>)>,
-    present: Query<Entity, (With<Visitor>, Without<GoingHome>)>,
-    mut members: Query<(&Sim, &mut crate::life::Moodlets, &Motives, Option<&crate::wishes::Wishes>), With<HouseholdMember>>,
-    mut guests: Query<(&mut Visitor, &mut crate::life::Moodlets, &Motives, &Sim), Without<HouseholdMember>>,
-    mut notes: ResMut<Notifications>,
-    mut events: MessageReader<LifeEvent>,
-    started: Option<Res<PartyPlan>>,
-) {
-    let _ = started;
-    let socials = events.read().filter(|e| matches!(e.kind, LifeEventKind::Socialized { .. })).count() as u32;
-    if let Some(p) = plan {
-        commands.remove_resource::<PartyPlan>();
-        let Ok((host, rels)) = hosts.get(p.by) else { return };
-        let Some(h) = household.as_mut() else { return };
-        if h.funds < PARTY_PRICE {
-            notes.push(format!("There isn't enough money to throw a party (§{PARTY_PRICE})."));
-            return;
-        }
-        h.funds -= PARTY_PRICE;
-        // Friends first, then acquaintances, then whoever's about town.
-        let mut people: Vec<(f32, Entity, bool)> =
-            away.iter().filter(|(_, s, _)| !s.age.is_little()).map(|(e, _, townie)| (rels.friendship(e) + if rels.0.contains_key(&e) { 200.0 } else { 0.0 }, e, townie)).collect();
-        people.sort_by(|a, b| b.0.total_cmp(&a.0));
-        let mut rng = rand::rng();
-        let mut guests: Vec<Entity> = present.iter().collect();
-        let mut coming = 0;
-        for (_, e, townie) in people.into_iter().take(8usize.saturating_sub(guests.len())) {
-            // (A townsperson on a stroll becomes a guest.)
-            if townie {
-                commands.entity(e).remove::<(crate::town::Townie, crate::nav::PathFollow)>().insert(OffLot);
-            }
-            commands.entity(e).insert(Invited { arrive_at: p.start + rng.random_range(0.0..40.0) });
-            guests.push(e);
-            coming += 1;
-        }
-        notes.push(format!("{} is throwing a party! {coming} guests are coming at {}.", host.first, hour_label(((p.start / 60.0) % 24.0) as f32)));
-        commands.insert_resource(Party { end: p.start + 300.0, host: p.by, guests, chats: 0 });
-        return;
-    }
-    let Some(party) = party else { return };
-    let party = {
-        let mut p = party;
-        p.chats += socials;
-        p
-    };
-    // Guests stay until it's over.
-    for &g in &party.guests {
-        if let Ok((mut v, ..)) = guests.get_mut(g) {
-            v.leave_at = v.leave_at.max(party.end);
-        }
-    }
-    if clock.minutes < party.end {
-        return;
-    }
-    commands.remove_resource::<Party>();
-    // How did it go? The guests' (and hosts') fun and social.
-    let mut score = 0.0;
-    let mut n: f32 = 0.0;
-    for &g in &party.guests {
-        if let Ok((_, mut m, motives, sim)) = guests.get_mut(g) {
-            score += motives.0[FUN] + motives.0[SOCIAL];
-            n += 1.0;
-            if sim.traits.contains(&crate::life::Trait::PartyAnimal) {
-                m.add(crate::life::MoodletKind::AwesomeParty, clock.minutes);
-            }
-        }
-    }
-    debug!("party over: {} chats, {n} guests here, fun+social {:.0}", party.chats, if n > 0.0 { score / n } else { 0.0 });
-    // A party is a hit when people talked (each social counts for both Sims in it).
-    let great = n > 0.0 && (party.chats as f32 / 2.0 >= (n * 1.5f32).max(3.0) || score / n > 40.0);
-    // (A Legendary Host's parties always are.)
-    let great = great || members.iter().any(|(.., w)| crate::wishes::has(w, "LegendaryHost"));
-    for (sim, mut m, ..) in &mut members {
-        if !sim.age.is_little() {
-            m.add(if great { crate::life::MoodletKind::GreatParty } else { crate::life::MoodletKind::LameParty }, clock.minutes);
-        }
-    }
-    notes.push(if great { "The party was a hit! The guests had a great time.".to_string() } else { "The party fizzled out. Better luck next time.".to_string() });
-}
+pub use crate::parties::Party;
 
 /// A phone call: the cell phone out, then chatting (the game's clips, with the phone in hand).
 const PHONE_CALL: crate::anim::ActionClip = crate::anim::ActionClip::new(
@@ -4629,12 +4535,8 @@ pub(crate) fn run_actions(
                                 }
                             }
                         }
-                        ActionKind::ThrowParty => {
-                            if elapsed >= 10.0 {
-                                finished = true;
-                                commands.insert_resource(PartyPlan { by: me, start: clock.minutes + 120.0 });
-                            }
-                        }
+                        // (On the phone till the party's arranged in its picker: `parties`.)
+                        ActionKind::ThrowParty => {}
                         ActionKind::MotiveFail(k) => {
                             const ACCIDENT: f32 = 4.0;
                             // (Asleep on the floor a couple of hours, then up again, still tired.)
@@ -5497,7 +5399,7 @@ fn autonomy(
             }
         }
         // At a party everyone mingles.
-        let partying = party_on.is_some() && sim.age.is_grown();
+        let partying = party_on.as_deref().is_some_and(|p| p.on()) && sim.age.is_grown();
         if (motives.0[SOCIAL] < social_need || partying) && !sim.age.is_little() {
             for &(other, pos, age, _, lot) in &others {
                 if other == me || age.is_little() || lot != my_lot {

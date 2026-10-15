@@ -277,6 +277,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     // Reactions to what goes on about them (the game's `Reactions`).
     "a_react_",
     "c_react_",
+    // A wedding's guests: watching the vows, then clapping, crying, beaming, throwing rice.
+    "a_wedding_",
+    "c_wedding_",
     "c_Buff_disgusted_",
     // Mopping up a puddle.
     "a2o_puddle_mopUp",

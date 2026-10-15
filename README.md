@@ -215,10 +215,23 @@ installation is unreachable.
   home in green with a star, other homes and empty lots, and each venue's own glyph (cut from
   the game's map-tag atlas); hover for the name, click a venue for its activities or a home to
   fly there.
-- **Parties**: phone round to throw one; friends (then townsfolk) arrive two hours later and
-  stay till midnight, everyone mingling, and the household gets the game's "Threw a Great
-  Party" or "Threw a Lame Party" moodlet depending on how much talking went on; party animals
-  have an "Awesome Party".
+- **Parties**: *Throw Party...* on the phone puts up the game's party planner during the call.
+  It offers the kind of party (a house party; a wedding, with one of the household engaged; a
+  birthday party; a funeral, with someone buried on the lot), the dress code (casual, formal,
+  swimwear) and the start time, typed in, AM or PM. Everyone the household knows is listed,
+  filtered to all, friends or co-workers, each with their picture and liking, and up to ten are
+  moved to the guest list with the arrows or a double click. Accept stays greyed, its tooltip
+  in the game's words, until the party is possible: 9 AM to 9 PM, at least an hour's notice.
+  Friends and romances always come; others come by how well they're liked, now and then
+  bringing a friend. Guests arrive in the dress code and mingle. They stay two to four hours,
+  longer the better they get on with the household and the better their mood; the tired and the
+  miserable go home, and children at ten. Each guest's mood as they leave counts towards the
+  party and moves their liking for the host. When the last one leaves, the party is judged by
+  the game's thresholds: an average mood over 65 is a great party (Threw a Great Party), under
+  10 a lame one, with the game's own messages. A birthday party where nobody has a birthday,
+  or a wedding where nobody marries, fails. At a wedding the couple has Wedding Day, the
+  guests stop to watch the vows, then clap, cry, beam or throw rice (the game's wedding
+  clips), and a couple who don't marry miss their wedding.
 - **Mail**: on Mondays and Thursdays the mail carrier walks up in uniform, puts the bills in
   the mailbox and the flag up (the game's animation); they're paid there (Sims see
   to them on their own too); bills left three days bring the repo man, who takes things worth
@@ -1211,6 +1224,13 @@ closes Buy mode then, logging the inventory. `DIVE=1` puts a diving board on the
 `TOPICS=Birthday,Talk About Fire` gives every Sim those conversation topics (`Thank For
 Cooking` about the selected Sim); `WEATHER=rain@30` has the rain begin half an hour in;
 `QUEUE_LOG=<s>` also names what keeps an idle Sim's free will back.
+`CHEAT=kiss` has the selected Sim, married to another of the household, kiss a neighbour in
+front of their spouse (`again`: the spouse already feels betrayed; `timeout`: the time to make
+it up runs out); the log reports `cheat test ... PASS`. `--do Party` acquaints the selected
+Sim with a few of the town first and calls round; with `--speed` the party planner answers
+itself (a house party, or `PARTY=wedding`, `birthday` or `funeral`). `PARTY_MARRY=1` has the
+engaged couple marry once the fiancé(e) arrives, and `PARTY_BIRTHDAY=1` gives the host their
+birthday once the party has begun.
 
 `PRESS_KEY=F2@5;F3@7;F1@9` presses a sequence of keys at the given seconds;
 `UI_CLICK=05b706c0@6;05b706d0@7` clicks visible original-layout controls (hex control ids).

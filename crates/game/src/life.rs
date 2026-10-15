@@ -808,10 +808,13 @@ pub enum MoodletKind {
     /// Cheated on, and seeing a loved one cheated on (the game's `Betrayed`, `WitnessedBetrayal`).
     Betrayed,
     WitnessedBetrayal,
+    /// A wedding party's couple on the day, and those whose wedding didn't happen.
+    WeddingDay,
+    MissedWedding,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 81] = {
+    pub const ALL: [MoodletKind; 83] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -822,7 +825,7 @@ impl MoodletKind {
             TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf, MintyBreath,
             Disgusted, Mourning, FreshClothing, VeryFreshClothing, HolidayCheer, SpringFling, SummerFun, SpookyTime,
             Decorated, NicelyDecorated, BeautifullyDecorated, GreatMeal, Stressed, Winner, Overworked, IAmBeautiful, SugarRush,
-            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal,
+            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding,
         ]
     };
 
@@ -932,6 +935,9 @@ impl MoodletKind {
             // (The game's Betrayed lasts as long as the romance was: `jealousy`.)
             Betrayed => md("Betrayed", "My significant other cheated on me! I feel so betrayed and alone right now.", -50, 24.0),
             WitnessedBetrayal => md("Witnessed Betrayal", "Witnessing the romantic betrayal of a loved one is quite devastating.", -20, 6.0),
+            // (The game's Wedding Day lasts till the party's over: a day here, taken off then.)
+            WeddingDay => md("Wedding Day", "Sims love to celebrate this incredibly important day with a party... just make sure everything goes to plan!", 40, 24.0),
+            MissedWedding => md("Missed the Wedding", "It's a bad, bad, bad idea to miss the wedding. It takes two to tango and your Sim missed the dance.", -30, 24.0),
         }
     }
 
@@ -1025,6 +1031,8 @@ impl MoodletKind {
             ItsTriplets => ("ItsTriplets", true),
             Betrayed => ("Betrayed", true),
             WitnessedBetrayal => ("WitnessedBetrayal", true),
+            WeddingDay => ("WeddingDay", true),
+            MissedWedding => ("MissedWedding", true),
         }
     }
 }

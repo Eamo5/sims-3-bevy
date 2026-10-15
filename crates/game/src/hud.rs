@@ -2411,7 +2411,8 @@ fn phone_button(
         } else {
             (format!("Hire a Maid (§{} an hour)", crate::services::MAID_WAGE), ActionKind::HireMaid(true))
         },
-        (format!("Throw a Party (§{})", crate::interact::PARTY_PRICE), ActionKind::ThrowParty),
+        // (The game's "Throw Party": its picker up during the call, `partypicker`.)
+        ("Throw Party...".to_string(), ActionKind::ThrowParty),
     ];
     // Calling someone they know: for a chat, or to invite them over.
     pie.submenus.clear();
