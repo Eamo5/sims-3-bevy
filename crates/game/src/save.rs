@@ -233,6 +233,9 @@ pub struct SavedRel {
     /// Feeling betrayed by them: until when, and the liking it left.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub betrayed: Option<(f64, f32)>,
+    /// Their traits known (the game's names).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub known_traits: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -897,6 +900,7 @@ fn save_game(
                         enemy: r.enemy,
                         romantic: r.romantic,
                         betrayed: r.betrayed,
+                        known_traits: crate::life::Trait::ALL.iter().filter(|t| r.knows(**t)).map(|t| t.game_id()).collect(),
                     })
                 })
                 .collect(),
@@ -1141,6 +1145,9 @@ pub(crate) fn apply_loaded_game(
                 x.enemy = r.enemy;
                 x.romantic = r.romantic || r.kissed || r.romance >= 20.0;
                 x.betrayed = r.betrayed;
+                for t in r.known_traits.iter().filter_map(|n| crate::life::Trait::ALL.iter().find(|t| t.game_id().eq_ignore_ascii_case(n))) {
+                    x.learn(*t);
+                }
                 if let Some((c, v)) = &r.stc
                     && let Some(c) = crate::conversation::Commodity::from_name(c)
                 {

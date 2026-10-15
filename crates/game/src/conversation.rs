@@ -168,6 +168,8 @@ fn game_key(name: &str) -> &str {
         "Say Goodbye" => "Goodbye",
         "Give Back Rub" => "Massage",
         "Try for Baby" => "Try For Baby",
+        // (The game's "Get to Know" is its "Share Interests".)
+        "Get to Know" => "Share Interests",
         n => n,
     }
 }
@@ -321,6 +323,16 @@ pub struct Outcome {
     pub accepted: bool,
     /// The topics it raises: the actor's, the target's, and both of theirs ("" for none).
     pub topics: [&'static str; 3],
+    /// A trait of the target's the way it went turned on, learned by the actor (the game's
+    /// `ConsiderLearningAboutTargetSim`: the rule's target trait, or the trait behind the
+    /// target's effectiveness it asked).
+    pub learned: Option<Trait>,
+    /// Whether it may teach the actor one of the target's traits besides (the game's
+    /// `LearnRandomTrait`).
+    pub learn_random: bool,
+    /// The traits it teaches if they've them: the actor's (to the target) and the target's (to
+    /// the actor), comma lists of the game's names.
+    pub teaches: [&'static str; 2],
 }
 
 /// The Charisma points a social taken well earns its Sim, once they've the skill (the game's
@@ -590,7 +602,7 @@ fn request_threshold(j: &Judging) -> f32 {
 /// outcomes for that result).
 pub fn decide(social: usize, j: &Judging) -> Outcome {
     let Some(model) = model(social) else {
-        return Outcome { result: Commodity::Friendly, amount: 40.0, ltr_override: 0.0, bits_add: 0, bits_remove: 0, charisma: -1.0, accepted: true, topics: [""; 3] };
+        return Outcome { result: Commodity::Friendly, amount: 40.0, ltr_override: 0.0, bits_add: 0, bits_remove: 0, charisma: -1.0, accepted: true, topics: [""; 3], learned: None, learn_random: false, teaches: [""; 2] };
     };
     // (The holiday warms both.)
     let warm = if j.holiday { 20.0 } else { 0.0 };
@@ -631,7 +643,23 @@ pub fn decide(social: usize, j: &Judging) -> Outcome {
         charisma: rhs.map_or(-1.0, |o| o.charisma),
         accepted: accepted(model.intended, result),
         topics: rhs.map_or([""; 3], |o| [o.topics[0].as_str(), o.topics[1].as_str(), o.topics[2].as_str()]),
+        learned: found.and_then(|r| learned_of(r, j.target)),
+        learn_random: rhs.is_some_and(|o| o.learn_random),
+        teaches: rhs.map_or([""; 2], |o| [o.teaches[0].as_str(), o.teaches[1].as_str()]),
     }
+}
+
+/// The target's trait a rule turned on (the game's `ConsiderLearningAboutTargetSim`): one it
+/// asks of them, else the one lending the effectiveness it asks.
+fn learned_of(r: &SocialRule, target: &Sim) -> Option<Trait> {
+    let asked = r.target_traits.iter().filter(|t| !t.starts_with('~')).find_map(|n| target.traits.iter().find(|t| same(&t.game_id(), n)).copied());
+    asked.or_else(|| {
+        let kind = |k: &str, up: bool| target.traits.iter().find(|t| {
+            let (u, d) = effectiveness(&[**t], &[]);
+            if up { u.contains(&k) } else { d.contains(&k) }
+        }).copied();
+        (!r.target_increased.is_empty()).then(|| kind(&r.target_increased, true)).flatten().or_else(|| (!r.target_reduced.is_empty()).then(|| kind(&r.target_reduced, false)).flatten())
+    })
 }
 
 /// What a social does to the two of them (the game's `UpdateSimAfterInteraction`): the
@@ -905,6 +933,14 @@ mod tests {
         let steady = crate::social::all_socials().find(|(_, s)| s.name == "Ask to Go Steady").unwrap().1;
         assert!(!offered(steady, stc, "Romantic Interest"));
         assert!(offered(steady, Stc { commodity: Commodity::Amorous, value: 320.0 }, "Romantic Interest"));
+        // (A joke on someone with no sense of humour: the way it goes turns on it, and it's learned.)
+        let mut c = b.clone();
+        c.traits = vec![crate::life::Trait::NoSenseOfHumor];
+        let o = decide(joke, &Judging { target: &c, ..judge(30.0, ok, 10.0) });
+        println!("joke on the humourless: {:?}, learned {:?}", o.result, o.learned);
+        assert_eq!(o.learned, Some(crate::life::Trait::NoSenseOfHumor));
+        // (A chat may teach one of theirs, the game's `LearnRandomTrait`.)
+        assert!(decide(index("Chat"), &judge(30.0, ok, 10.0)).learn_random);
     }
 
     #[test]
@@ -925,7 +961,7 @@ mod tests {
         assert_eq!(liking_multiplier(2.0, 50.0, &a, &b), 2.5, "the Nurturing to the young");
         // (The Irresistible push romance twice as far.)
         a.traits = vec![Trait::Irresistible];
-        let o = Outcome { result: Commodity::Amorous, amount: 40.0, ltr_override: 0.0, bits_add: 0, bits_remove: 0, charisma: -1.0, accepted: true, topics: [""; 3] };
+        let o = Outcome { result: Commodity::Amorous, amount: 40.0, ltr_override: 0.0, bits_add: 0, bits_remove: 0, charisma: -1.0, accepted: true, topics: [""; 3], learned: None, learn_random: false, teaches: [""; 2] };
         let (_, stc) = effect(0, 10.0, Stc::default(), &o, &a, &b);
         assert_eq!(stc, Stc { commodity: Commodity::Amorous, value: 80.0 });
     }

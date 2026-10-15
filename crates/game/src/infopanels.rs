@@ -346,7 +346,12 @@ fn relationships_panel(
             commands.entity(t).with_children(|c| {
                 c.spawn((ImageNode::new(pic), crate::portraits::PortraitOf(*e), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
             });
-            commands.entity(t).remove::<Pickable>().insert((Card(*e), Interaction::default(), crate::hud::BlocksWorld, crate::icons::Tooltip(format!("{}\n{label}", sim.full_name()))));
+            // (Their traits as far as they're known: the rest a question mark, as the game's.)
+            // (The household's own all known.)
+            let ours = people.get(*e).is_ok_and(|p| p.2);
+            let traits: Vec<String> = sim.traits.iter().map(|t| if ours || r.knows(*t) { t.name().to_string() } else { "?".to_string() }).collect();
+            let tip = if traits.is_empty() { format!("{}\n{label}", sim.full_name()) } else { format!("{}\n{label}\nTraits: {}", sim.full_name(), traits.join(", ")) };
+            commands.entity(t).remove::<Pickable>().insert((Card(*e), Interaction::default(), crate::hud::BlocksWorld, crate::icons::Tooltip(tip)));
         }
         if let Some(t) = c.text(ENTRY_TEXT) {
             commands.entity(t).insert(Text::new(label.clone()));

@@ -1177,6 +1177,15 @@ installation is unreachable.
   clothes or a birthday) for the household buttons, ringed in each Sim's mood colour, for
   balloons about someone, and for the Relationships panel (R): everyone the Sim knows with
   what they are to each other and friendship and romance bars.
+- **Learning about each other**, as the game's: a Sim learns another's trait when the way a
+  social went turned on it (a joke falling flat on someone with No Sense of Humor), when the
+  social's outcome names it (Get to Know with a Charismatic Sim), and a quarter of the time in
+  the conversations the game marks for it (Chat, Get to Know, Deep Conversation, Tell Story...).
+  Charismatic Sims getting to know someone learn one half the time. The household's learning
+  is told in the game's words ("Bella learned that Amy is Artistic."), and the Relationships
+  panel shows each Sim's traits as far as they're known (the rest "?"; the household's own all
+  known). Known traits are kept in saves. The game's Get to Know (its "Share Interests") now
+  goes by its own rules.
 - **Saves**: a game saves (as JSON in `saves/`, or the folder `SIMS3_SAVES` names) back to the
   file it was loaded from; a new game takes a file name no other save has ("Goth - Sunset
   Valley (2).json"), so one household never writes over another's game. Each save goes to a

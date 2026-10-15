@@ -4204,6 +4204,13 @@ pub(crate) fn run_actions(
                                         }
                                         social_fx.push((*target, me, 0.0, 0.0, 0.0, 0.0, Some(crate::conversation::Shared::of(&rels.get(*target)))));
                                         memories.0.entry(me).or_default().after(*social, clock.minutes);
+                                        // (A trait of theirs the way it went turned on: learned.)
+                                        if o.learned.is_some() || o.learn_random || o.teaches.iter().any(|t| !t.is_empty()) {
+                                            let (learner, about, what, random, teaches) = (me, *target, o.learned, o.learn_random, o.teaches);
+                                            commands.queue(move |w: &mut World| {
+                                                w.write_message(crate::learning::Learned { learner, about, what, random, teaches });
+                                            });
+                                        }
                                         // (The topics it raises: the one's, the other's, and both of
                                         // theirs, the conversation's.)
                                         let [mine, theirs, both] = o.topics;

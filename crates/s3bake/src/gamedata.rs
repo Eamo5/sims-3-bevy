@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 107;
+pub const GAMEDATA_VERSION: u32 = 110;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -73,6 +73,10 @@ pub struct TraitInfo {
     pub weight: f32,
     #[serde(default)]
     pub random: bool,
+    /// How it's said of someone, once it's learned ("{0.SimFirstName} is a Bookworm": its
+    /// `Predicate`).
+    #[serde(default)]
+    pub predicate: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -476,6 +480,14 @@ pub struct SocialOutcome {
     /// conversation's (both of theirs).
     #[serde(default)]
     pub topics: [String; 3],
+    /// Whether it may teach the actor one of the target's traits (`<TUN is>`: the game's
+    /// `LearnRandomTrait`, Chat, Deep Conversation, Share Interests...).
+    #[serde(default)]
+    pub learn_random: bool,
+    /// The traits it teaches if they have them (`<Trait x y>`: the actor's, learned by the
+    /// target, and the target's, learned by the actor; comma lists).
+    #[serde(default)]
+    pub teaches: [String; 2],
 }
 
 fn no_charisma_override() -> f32 {
@@ -742,6 +754,8 @@ fn social_rules(body: &str) -> (Vec<SocialRule>, Vec<SocialOutcome>) {
             bits_add: hex(bits.and_then(|t| attr(t, "val"))),
             bits_remove: hex(bits.and_then(|t| attr(t, "rem"))),
             charisma: tag(inner, "TUN").and_then(|t| attr(t, "charInc")).and_then(|v| v.parse().ok()).unwrap_or(-1.0),
+            learn_random: tag(inner, "TUN").and_then(|t| attr(t, "is")).is_some_and(|v| v.eq_ignore_ascii_case("true")),
+            teaches: ["x", "y"].map(|k| tag(inner, "Trait").and_then(|t| attr(t, k)).unwrap_or("").to_string()),
             topics: ["x", "y", "teo"].map(|k| tag(inner, "Topic").and_then(|t| attr(t, k)).unwrap_or("").to_string()),
         });
     }
@@ -2500,6 +2514,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             score: num(&f, "Points") as i32,
             weight: num(&f, "RandomWeight"),
             random: !get(&f, "CanBeLearnedRandomly").eq_ignore_ascii_case("false"),
+            predicate: text("Traits/TraitList", &get(&f, "Predicate")),
             hex,
         });
     }
@@ -3660,8 +3675,8 @@ mod tests {
         let chat = &social_actions(xml, &|k| k.to_string())[0];
         assert_eq!((chat.speech_act.as_str(), chat.chances, chat.recharges), ("Talk", 4, 6));
         assert_eq!(chat.outcomes, vec![
-            SocialOutcome { result: "Friendly".into(), amount: 40.0, bits_add: 0, bits_remove: 0, charisma: -1.0, topics: Default::default() },
-            SocialOutcome { result: "Boring".into(), amount: 80.0, bits_add: 0x800, bits_remove: 0x100, charisma: -1.0, topics: [String::new(), String::new(), "Work Pay".into()] },
+            SocialOutcome { result: "Friendly".into(), amount: 40.0, bits_add: 0, bits_remove: 0, charisma: -1.0, topics: Default::default(), learn_random: false, teaches: Default::default() },
+            SocialOutcome { result: "Boring".into(), amount: 80.0, bits_add: 0x800, bits_remove: 0x100, charisma: -1.0, topics: [String::new(), String::new(), "Work Pay".into()], learn_random: false, teaches: Default::default() },
         ]);
         let r = &chat.rules;
         assert_eq!((r[0].result.as_str(), r[0].spec, r[0].third_party, r[0].repetition), ("Boring", 54.0, 2, 1));

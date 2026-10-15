@@ -39,9 +39,24 @@ pub struct Relationship {
     /// Feeling betrayed by them (the game's `Betrayed` buff, for this cheater): until when (game
     /// minutes) they have to make it up, and the liking it left.
     pub betrayed: Option<(f64, f32)>,
+    /// Their traits known (bits by `Trait::ALL`'s order: the game's `InformationLearnedAboutSim`).
+    pub known: u128,
 }
 
 impl Relationship {
+    /// Whether one of their traits is known.
+    pub fn knows(&self, t: Trait) -> bool {
+        Trait::ALL.iter().position(|x| *x == t).is_some_and(|i| self.known & (1 << i) != 0)
+    }
+
+    /// One of their traits learned: whether it's news.
+    pub fn learn(&mut self, t: Trait) -> bool {
+        let Some(i) = Trait::ALL.iter().position(|x| *x == t) else { return false };
+        let new = self.known & (1 << i) == 0;
+        self.known |= 1 << i;
+        new
+    }
+
     /// A romance between them (the game's romantic relationship types: a romantic interest,
     /// going steady, engaged, married; not exes).
     pub fn is_romance(&self) -> bool {
