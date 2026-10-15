@@ -121,6 +121,7 @@ const CHANGE_STATION: &str = "Change to";
 const CHANGE_CHANNEL: &str = "Change to";
 /// The bookshelf's skill books' menu.
 const READ_SKILL_BOOK: &str = "Read a Skill Book";
+const READ_NOVEL: &str = "Read a Novel";
 
 /// A recipe as the food menus list it: with what its ingredients cost, when they do.
 fn recipe_label(r: &s3bake::gamedata::RecipeInfo) -> String {
@@ -1092,7 +1093,7 @@ fn world_click(
             Query<(Option<&crate::music::StereoOn>, Has<crate::interact::Unmade>, Option<&crate::grime::Grime>)>,
         ),
     ),
-    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, books_q, company_q): (
+    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q), company_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -1106,7 +1107,7 @@ fn world_click(
         Query<(), With<crate::little::Labour>>,
         Query<&crate::tvchannels::TvLevel>,
         Query<(&Sim, Option<&crate::classes::ClassesTaken>)>,
-        Query<(&crate::skillbooks::SkillBooks, Has<HouseholdMember>)>,
+        (Query<(&crate::skillbooks::SkillBooks, Has<HouseholdMember>)>, Query<(&crate::novels::Novels, Has<HouseholdMember>)>),
         Query<(Entity, &Sim, Has<crate::interact::Visitor>, Option<&crate::visit::OnLot>), Or<(With<HouseholdMember>, With<crate::interact::Visitor>)>>,
     ),
 ) {
@@ -1634,6 +1635,18 @@ fn world_click(
                         pie.submenus.push((READ_SKILL_BOOK.to_string(), list));
                     }
                 }
+                // The household's own books, read for their own sake (the game's "Read...").
+                if d.special == Special::GetBook
+                    && let Some(ui) = opp_q.0.as_ref()
+                {
+                    let owned = crate::novels::shelved(novels_q.iter().filter(|b| b.1).map(|b| b.0));
+                    let mine = novels_q.get(actor).ok().map(|b| b.0);
+                    let list: Vec<(String, ActionKind)> = crate::novels::readable(&ui.data.novels, &owned, mine).into_iter().map(|(_, label)| (label, ActionKind::Object { target: t, def: i })).collect();
+                    if !list.is_empty() {
+                        options.push((format!("{READ_NOVEL} ›"), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((READ_NOVEL.to_string(), list));
+                    }
+                }
                 // The canvas to paint on.
                 if d.special == Special::SellPainting {
                     let list: Vec<(String, ActionKind)> =
@@ -1740,33 +1753,7 @@ fn world_click(
                         pie.submenus.push((format!("{name}{}", crate::venues::WITH), list));
                     }
                 }
-                // The bookstore's recipe books.
-                if crate::opportunities::lot_types(&world.data, lot).contains(&"Bookstore")
-                    && let (Some(ui), Ok((_, skills, known))) = (opp_q.0.as_ref(), writers.get(actor))
-                {
-                    let list: Vec<(String, ActionKind)> = crate::meals::books_for(&ui.data, skills.level("Cooking"), known)
-                        .into_iter()
-                        .map(|r| {
-                            let rec = &ui.data.recipes[r];
-                            (format!("{} (§{})", rec.name, rec.book_price), ActionKind::Visit { lot, activity: crate::meals::RECIPE_TASK + r })
-                        })
-                        .collect();
-                    if !list.is_empty() {
-                        pie.submenus.clear();
-                        options.push(("Buy a Recipe Book ›".to_string(), submenu_kind(pie.submenus.len())));
-                        pie.submenus.push(("Recipe Books".to_string(), list));
-                    }
-                    // (And its skill books, those the household hasn't.)
-                    let owned = crate::skillbooks::shelved(books_q.iter().filter(|b| b.1).map(|b| b.0));
-                    let books: Vec<(String, ActionKind)> = crate::skillbooks::for_sale(&ui.data.skill_books, &owned)
-                        .into_iter()
-                        .map(|(i, label)| (label, ActionKind::Visit { lot, activity: crate::skillbooks::BOOK_TASK + i }))
-                        .collect();
-                    if !books.is_empty() {
-                        options.push(("Buy a Skill Book ›".to_string(), submenu_kind(pie.submenus.len())));
-                        pie.submenus.push(("Skill Books".to_string(), books));
-                    }
-                }
+                // (The bookstore's books are in its shop: `shop`.)
             }
             // Planting a seed outdoors on the home lot.
             let home = opp_q.4.as_ref().map(|h| h.lot_index) == Some(lot);
@@ -1996,7 +1983,9 @@ fn pie_buttons(
         let book_choice = (title == READ_SKILL_BOOK)
             .then(|| ui_data.as_ref().and_then(|u| u.data.skill_books.iter().position(|b| label == b.name || label.starts_with(&format!("{} (", b.name)))))
             .flatten()
-            .map(|b| b as u16);
+            .map(|b| b as u16)
+            // (Or one of the household's own books.)
+            .or_else(|| (title == READ_NOVEL).then(|| ui_data.as_ref().and_then(|u| crate::novels::by_label(&u.data.novels, &label))).flatten().map(|b| crate::novels::NOVEL_CHOICE + b as u16));
         if book_choice.is_some() {
             label = "Read a Book".to_string();
         }

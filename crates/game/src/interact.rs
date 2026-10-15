@@ -4051,7 +4051,11 @@ pub(crate) fn run_actions(
                                             commands.entity(me).insert(crate::surroundings::ReadSomewhere(*target));
                                             // (A skill book taken down: read for its skill.)
                                             if let Some(b) = action.book_choice {
-                                                commands.entity(me).insert(crate::skillbooks::ReadingBook(b as usize));
+                                                // (Or a book for its own sake.)
+                                                match b.checked_sub(crate::novels::NOVEL_CHOICE) {
+                                                    Some(n) => commands.entity(me).insert(crate::novels::ReadingNovel(n as usize)),
+                                                    None => commands.entity(me).insert(crate::skillbooks::ReadingBook(b as usize)),
+                                                };
                                             }
                                         }
                                         Special::MakeBed => {

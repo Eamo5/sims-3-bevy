@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 119;
+pub const GAMEDATA_VERSION: u32 = 121;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -94,6 +94,24 @@ pub struct SkillBookInfo {
     pub price: i64,
     pub pages_per_minute: f32,
     pub bookworm_pages_per_minute: f32,
+}
+
+/// A book to read for its own sake (`Books`' `BookGeneral` rows): a novel, a biography, a
+/// career's handbook (those not sold at the bookstore).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct NovelInfo {
+    /// The game's id: its title's key and author's together.
+    pub key: String,
+    pub name: String,
+    pub author: String,
+    /// Its genre, in words.
+    pub genre: String,
+    pub pages: u32,
+    pub price: i64,
+    pub pages_per_minute: f32,
+    pub bookworm_pages_per_minute: f32,
+    /// Sold at the bookstore.
+    pub in_store: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -297,6 +315,13 @@ pub struct OpportunityInfo {
     pub raise: f32,
     pub skill_reward: f32,
     pub repeat: bool,
+    /// A book the boss hands over to be read (a `BookGeneral`'s id), the opportunity done by
+    /// going to work once it's finished.
+    #[serde(default)]
+    pub book: String,
+    /// The boss's liking for it.
+    #[serde(default)]
+    pub boss_liking: f32,
 }
 
 /// A garden plant from the game's `plants` table, with what it bears (`ingredients`).
@@ -1251,6 +1276,9 @@ pub struct GameDataBaked {
     /// The skill books (`Books`' `BookSkill` rows).
     #[serde(default)]
     pub skill_books: Vec<SkillBookInfo>,
+    /// The books read for their own sake (`Books`' `BookGeneral` rows).
+    #[serde(default)]
+    pub novels: Vec<NovelInfo>,
     pub recipes: Vec<RecipeInfo>,
     /// The Seasons tuning (`Seasons` table and SeasonsManager's managers).
     pub seasons: SeasonsTuning,
@@ -3005,6 +3033,45 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 key,
             });
         }
+        // (The books read for their own sake, the same way; their id the title's key and the
+        // author's together, as the game's.)
+        let rows = records(&x, "BookGeneral");
+        let defaults = rows.first().cloned().unwrap_or_default();
+        let field = |f: &HashMap<String, String>, k: &str| f.get(k).filter(|v| !v.trim().is_empty()).or(defaults.get(k)).map(|v| v.trim().to_string()).unwrap_or_default();
+        for f in rows.iter().skip(1) {
+            let (title, author) = (get(f, "Title"), get(f, "Author"));
+            let worlds = field(f, "AllowedWorldTypes");
+            let version = field(f, "CodeVersion");
+            if title.is_empty() || !version.eq_ignore_ascii_case("Basegame") || !worlds.split(',').any(|w| w.trim() == "Base") {
+                continue;
+            }
+            let name = text("Books/BookGeneral", &title);
+            if name.is_empty() {
+                continue;
+            }
+            let n = |k: &str| field(f, k).parse::<f32>().unwrap_or(0.0);
+            // (Its genre's words: the enum's, any case.)
+            let genre = match field(f, "Genre").to_ascii_lowercase().as_str() {
+                "nonfiction" => "NonFiction".to_string(),
+                g => ["Article", "Autobiography", "Biography", "Childrens", "Drama", "Fantasy", "Fiction", "Historical", "Humor", "LifeStory", "Masterpiece", "Mystery", "PoliticalMemoir", "Romance", "Satire", "SciFi", "Trashy", "Vaudeville", "Poetry", "Horror", "Sports"]
+                    .into_iter()
+                    .find(|x| x.eq_ignore_ascii_case(g))
+                    .unwrap_or("None")
+                    .to_string(),
+            };
+            let genre = Some(text("Books/BookGeneral", &genre).trim().to_string()).filter(|g| !g.is_empty()).unwrap_or(genre);
+            out.novels.push(NovelInfo {
+                key: format!("{title}{author}"),
+                name,
+                author: text("Books/BookGeneral", &author),
+                genre,
+                pages: n("Length") as u32,
+                price: n("Value") as i64,
+                pages_per_minute: n("PagesMinNorm").max(0.1),
+                bookworm_pages_per_minute: n("PagesMinBW").max(0.1),
+                in_store: !field(f, "NotInBookStore").eq_ignore_ascii_case("true"),
+            });
+        }
     }
     // Recipes, with the food they make (the dish and a plate of it, full and emptied).
     if let Some(x) = xml("RecipeMasterList") {
@@ -3403,17 +3470,24 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             // (Only the ones that are done by going there: some also need a feat first, which
             // the game listens for with its event listeners.)
             // (Nor ones that need things brought along: paintings, fish, produce.)
-            if get(s, "CompletionEvent") != "kVisitedRabbitHole"
-                || get(s, "Target") != "RabbitHole"
-                || !get(s, "Object").is_empty()
-                || !get(s, "EventListenerInfo1").is_empty()
-                || !get(s, "TargetInteractionItemRequired").is_empty()
-                || !get(s, "TargetInteractionNumberItemsRequired").is_empty()
+            // (Or a book from the boss, read and reported on at work.)
+            let book = get(s, "Object") == "BookGeneral" && get(s, "EventListenerInfo1") == "kReadBook" && get(s, "CompletionEvent") == "kWentToWork";
+            if !book
+                && (get(s, "CompletionEvent") != "kVisitedRabbitHole
+                    || get(s, "Target") != "RabbitHole"
+                    || !get(s, "Object").is_empty()
+                    || !get(s, "EventListenerInfo1").is_empty()
+                    || !get(s, "TargetInteractionItemRequired").is_empty()
+                    || !get(s, "TargetInteractionNumberItemsRequired").is_empty())
             {
                 continue;
             }
             let mut o = OpportunityInfo { guid: g.clone(), ..Default::default() };
-            o.rabbit_hole = get(s, "TargetData");
+            if book {
+                o.book = get(s, "ObjectData");
+            } else {
+                o.rabbit_hole = get(s, "TargetData");
+            }
             o.icon = get(s, "Icon");
             o.minutes = num(s, "TargetInteractionLength").max(15.0);
             o.open = s.get("TargetInteractionStartTime").map_or(0.0, |t| hour(t));
@@ -3463,6 +3537,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                     "CareerRaise" => o.raise += n(1),
                     "SkillPercentage" => o.skill_reward += n(2).max(n(1)),
                     "Skill" => o.skill_reward += n(2),
+                    "RelationshipWithBoss" => o.boss_liking += n(1),
                     _ => {}
                 }
             }

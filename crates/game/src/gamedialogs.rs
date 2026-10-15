@@ -86,7 +86,7 @@ fn opportunity_dialog(
     }
     // (Longer words take more lines: the objective's window, and so the dialog, grows to fit,
     // as `DeltaSize` grows them.)
-    let objective_lines = (objective_text(&ui, o, sim).chars().count() as f32 / 50.0).ceil().max(1.0);
+    let objective_lines = (objective_text(&ui, o, &game_ui.data).chars().count() as f32 / 50.0).ceil().max(1.0);
     let extra = (objective_lines - 1.0) * 16.0;
     if extra > 0.0 {
         grow(&mut dialog, OBJECTIVE, extra);
@@ -118,11 +118,14 @@ fn opportunity_dialog(
     if o.skill_reward > 0.0 {
         reward.push(format!("{} skill", o.skill));
     }
+    if o.boss_liking > 0.0 {
+        reward.push("the boss's respect".to_string());
+    }
     let texts = [
         (TITLE, o.name.clone()),
         (FOR_SIM, word("Ui/Caption/OpportunityConfirmDialog:ForSim", "for {0.String}").replace("{0.String}", &sim.full_name())),
         (DESCRIPTION, desc),
-        (OBJECTIVE, objective_text(&ui, o, sim)),
+        (OBJECTIVE, objective_text(&ui, o, &game_ui.data)),
         (REWARD_TITLE, if reward.is_empty() { String::new() } else { word("Ui/Caption/OpportunityConfirmDialog:RewardTitle", "Reward:") }),
         (REWARD, reward.join(", ")),
         (19, ui.localize_key(ACCEPT_PROMPT).unwrap_or_else(|| "Would you like to accept this opportunity?".into())),
@@ -147,9 +150,9 @@ fn opportunity_dialog(
 }
 
 /// An opportunity's objective, in the game's words ("Objective: ...").
-fn objective_text(ui: &UiAssets, o: &s3bake::gamedata::OpportunityInfo, _sim: &crate::sim::Sim) -> String {
-    let place = crate::opportunities::venue_word(&o.rabbit_hole);
-    let objective = format!("{} at the {} between {} and {}", crate::opportunities::task_for(o).name, place, crate::interact::hour_label(o.open), crate::interact::hour_label(o.close));
+fn objective_text(ui: &UiAssets, o: &s3bake::gamedata::OpportunityInfo, data: &s3bake::GameDataBaked) -> String {
+    let activity = if o.interaction.is_empty() { &o.name } else { &o.interaction };
+    let objective = crate::opportunities::objective(o, activity, data);
     ui.localize("Ui/Caption/OpportunityConfirmDialog:ObjectiveText").unwrap_or_else(|| "Objective: {0.String}".into()).replace("{0.String}", &objective)
 }
 

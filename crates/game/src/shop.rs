@@ -8,6 +8,11 @@
 //!   ingredients bought together;
 //! - "Sell": the shopper's produce and fish, at a tenth over their worth (`kSellBackPriceModifier`).
 //!
+//! The bookstore's shop (the game's `Bookstore.ShopForBooks`) is the same dialog over its own
+//! tabs: "General", the books read for their own sake it sells; "Skill", the skill books; and
+//! "Recipe", the recipe books a Sim could learn from; at their prices (less for a Bookshop
+//! Bargainer or a Haggler), each a book for the household's shelves (a recipe's, learned).
+//!
 //! A row is picked, and added ("Add to Cart", or picked again); a line of the cart, clicked,
 //! comes off it. The cart shows each line's count and cost, the total and the household's
 //! funds; "Purchase" pays and puts what's bought in the shopper's inventory, Nice
@@ -77,12 +82,72 @@ pub enum Mode {
 
 /// The buying tabs: the ingredients' own (`UiTab`), and everything.
 const TABS_SHOWN: [(&str, &str); 4] = [("All", ""), ("Produce", "Produce"), ("Meat", "Meat"), ("Fish", "Fish")];
+/// The bookstore's (its `mItemDictionary`'s).
+const BOOK_TABS: [(&str, &str); 3] = [("General", "General"), ("Skill", "Skill"), ("Recipe", "Recipe")];
 
-/// A line of a list: an ingredient bought, or a stack sold.
+/// Which shop it is.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Store {
+    #[default]
+    Grocery,
+    Books,
+}
+
+impl Store {
+    fn tabs(self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            Store::Grocery => &TABS_SHOWN,
+            Store::Books => &BOOK_TABS,
+        }
+    }
+}
+
+/// A line of a list: an ingredient bought, or a stack sold; a book (read for its own sake, a
+/// skill's, a recipe's) bought.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Line {
     Buy(String),
     Sell(ItemKind, String, u8),
+    Novel(String),
+    SkillBook(String),
+    RecipeBook(String),
+}
+
+/// What the household has of books, and what the shopper knows, for the bookstore to sell by.
+#[derive(Default)]
+pub struct Shelves<'a> {
+    pub novels: Vec<String>,
+    pub skill_books: Vec<String>,
+    pub cooking: u32,
+    pub known: Option<&'a crate::meals::KnownRecipes>,
+    pub wishes: Option<&'a crate::wishes::Wishes>,
+}
+
+/// What the bookstore sells under a tab: the books the household hasn't, at their prices (a
+/// recipe's, those the shopper could learn from).
+pub fn books_for_sale(data: &GameDataBaked, tab: &str, s: &Shelves) -> Vec<Row> {
+    let price = |p: i64| crate::wishes::book_price(s.wishes, p as i32);
+    match tab {
+        "Skill" => crate::skillbooks::for_sale(&data.skill_books, &s.skill_books)
+            .into_iter()
+            .map(|(i, _)| {
+                let b = &data.skill_books[i];
+                Row { label: b.name.clone(), price: price(b.price), adds: vec![Line::SkillBook(b.key.clone())] }
+            })
+            .collect(),
+        "Recipe" => crate::meals::books_for(data, s.cooking, s.known)
+            .into_iter()
+            .map(|r| {
+                let rec = &data.recipes[r];
+                Row { label: rec.name.clone(), price: price(rec.book_price as i64), adds: vec![Line::RecipeBook(rec.key.clone())] }
+            })
+            .collect(),
+        _ => {
+            let mut v: Vec<&s3bake::gamedata::NovelInfo> = data.novels.iter().filter(|b| b.in_store && b.price > 0 && !s.novels.contains(&b.key)).collect();
+            v.sort_by(|a, b| a.genre.cmp(&b.genre).then(a.name.cmp(&b.name)));
+            v.into_iter().map(|b| Row { label: format!("{} ({})", b.name, b.genre), price: price(b.price), adds: vec![Line::Novel(b.key.clone())] }).collect()
+        }
+    }
 }
 
 /// A row of the store's table: what it's called, what it costs (or fetches), and what it puts
@@ -130,18 +195,23 @@ fn sell_price(s: &Stack) -> i64 {
 }
 
 /// A list's line: its name and what one costs (or fetches).
-fn line_info(data: &GameDataBaked, inv: Option<&Inventory>, l: &Line) -> Option<(String, i64)> {
+fn line_info(data: &GameDataBaked, inv: Option<&Inventory>, wishes: Option<&crate::wishes::Wishes>, l: &Line) -> Option<(String, i64)> {
+    let book = |p: i64| crate::wishes::book_price(wishes, p as i32);
     match l {
         Line::Buy(k) => data.ingredients.iter().find(|i| i.key == *k).map(|i| (i.name.clone(), crate::ingredients::store_price(i))),
         Line::Sell(kind, k, q) => inv?.0.iter().find(|s| s.kind == *kind && s.key == *k && s.quality == *q).map(|s| (s.name.clone(), sell_price(s))),
+        Line::Novel(k) => data.novels.iter().find(|b| b.key == *k).map(|b| (b.name.clone(), book(b.price))),
+        Line::SkillBook(k) => data.skill_books.iter().find(|b| b.key == *k).map(|b| (b.name.clone(), book(b.price))),
+        Line::RecipeBook(k) => data.recipes.iter().find(|r| r.key == *k).map(|r| (r.name.clone(), book(r.book_price as i64))),
     }
 }
 
-/// How many more of a stack can go on the list to sell (no more than are held).
+/// How many more of a stack can go on the list to sell (no more than are held); a book, the one.
 fn sellable(inv: Option<&Inventory>, l: &Line, listed: u32) -> bool {
     match l {
         Line::Buy(_) => true,
         Line::Sell(kind, k, q) => inv.and_then(|inv| inv.0.iter().find(|s| s.kind == *kind && s.key == *k && s.quality == *q)).is_some_and(|s| s.count > listed),
+        Line::Novel(_) | Line::SkillBook(_) | Line::RecipeBook(_) => listed == 0,
     }
 }
 
@@ -157,6 +227,7 @@ pub fn add_line(list: &mut Vec<(Line, u32)>, l: Line) {
 #[derive(Resource, Default)]
 pub struct ShopDialog {
     pub shopper: Option<Entity>,
+    pub store: Store,
     s: Option<Spawned>,
     mode: Mode,
     tab: usize,
@@ -198,10 +269,12 @@ fn open_shop(
     if d.shopper.is_some() {
         return;
     }
-    let Some(shop) = crate::venues::shop_activity() else { return };
-    if let Some((e, _)) = sims.iter().find(|(_, at)| std::ptr::eq(at.activity, shop) && clock.minutes >= at.inside_from) {
+    let shop = |effect| crate::venues::ACTS.iter().find(|a| a.effect == effect).map(|a| &a.activity);
+    let (Some(grocery), Some(books)) = (shop(crate::venues::Effect::Shop), shop(crate::venues::Effect::ShopBooks)) else { return };
+    if let Some((e, at)) = sims.iter().find(|(_, at)| (std::ptr::eq(at.activity, grocery) || std::ptr::eq(at.activity, books)) && clock.minutes >= at.inside_from) {
         commands.entity(e).insert(Shopped);
         d.shopper = Some(e);
+        d.store = if std::ptr::eq(at.activity, books) { Store::Books } else { Store::Grocery };
         d.mode = Mode::Buy;
         d.tab = 0;
         d.picked = None;
@@ -212,15 +285,18 @@ fn open_shop(
     }
 }
 
-/// SHOP=1 (tests): the shop put up for the selected Sim ten seconds in, as if they'd gone in.
+/// SHOP=1 (tests): the shop put up for the selected Sim ten seconds in, as if they'd gone in
+/// (SHOP=books: the bookstore's).
 fn shop_test(mut d: ResMut<ShopDialog>, time: Res<Time>, sel: Query<Entity, With<crate::sim::Selected>>, mut done: Local<bool>) {
-    if *done || std::env::var("SHOP").is_err() || time.elapsed_secs() < 10.0 {
+    let Ok(which) = std::env::var("SHOP") else { return };
+    if *done || time.elapsed_secs() < 10.0 {
         return;
     }
     let Ok(e) = sel.single() else { return };
     *done = true;
     info!("shop test: the shop up");
     d.shopper = Some(e);
+    d.store = if which == "books" { Store::Books } else { Store::Grocery };
 }
 
 /// `{0}` (or `{0.Money}`...) in the game's words filled.
@@ -239,7 +315,13 @@ fn shop_dialog(
     (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
     (mut clock, mut household, gu): (ResMut<crate::clock::GameClock>, Option<ResMut<crate::interact::Household>>, Option<ResMut<crate::icons::GameUi>>),
     (mut pictures, baked, mut thumbs): (ResMut<crate::paintings::PaintingImages>, Option<Res<crate::baked::Baked>>, ResMut<crate::thumbs::ModelThumbs>),
-    mut shoppers: Query<(&Sim, Option<&mut Inventory>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
+    mut shoppers: Query<(
+        &Sim,
+        Option<&mut Inventory>,
+        &crate::interact::Skills,
+        Option<&mut crate::meals::KnownRecipes>,
+        (Option<&mut crate::novels::Novels>, Option<&mut crate::skillbooks::SkillBooks>, Option<&crate::wishes::Wishes>, Has<crate::sim::HouseholdMember>),
+    )>,
     (clicks, rows, lines, tabs, hovered): (
         Query<(Entity, &Interaction), Changed<Interaction>>,
         Query<(&Interaction, &StoreRow), Changed<Interaction>>,
@@ -265,13 +347,19 @@ fn shop_dialog(
         d.shown = None;
     };
     let Some(me) = d.shopper else { return };
-    let Ok((sim, _, skills, known)) = shoppers.get(me) else {
+    let Ok((sim, _, skills, known, (_, _, wishes, _))) = shoppers.get(me) else {
         close(&mut commands, &mut d, &mut clock);
         return;
     };
     let sim = sim.clone();
     let cooking = skills.level("Cooking");
     let known = known.cloned();
+    let wishes = wishes.cloned();
+    let store_kind = d.store;
+    let tabs_shown = store_kind.tabs();
+    // (The household's books, for the bookstore not to sell them again.)
+    let novels = crate::novels::shelved(shoppers.iter().filter(|s| s.4.3).filter_map(|s| s.4.0));
+    let skill_books = crate::skillbooks::shelved(shoppers.iter().filter(|s| s.4.3).filter_map(|s| s.4.1));
     // Put up, in the middle of the screen, the game paused.
     if d.s.is_none() {
         let Some(mut w) = ui.layout("Shop").cloned() else {
@@ -307,6 +395,14 @@ fn shop_dialog(
         if let Some(e) = s.id(CLOSE) {
             commands.entity(e).insert(crate::icons::Tooltip("Close".into()));
         }
+        // (The bookstore neither shops by recipe nor buys back.)
+        if store_kind == Store::Books {
+            for id in [BY_RECIPE, BY_SELL] {
+                for x in s.all_with(id) {
+                    commands.entity(x).insert(Visibility::Hidden);
+                }
+            }
+        }
         // The table's headers: the game's column buttons.
         if let Some(col) = ui.layout("ColumnControl").cloned() {
             for (table, words, widths) in [(STORE_TABLE, vec!["Item", "Price"], STORE_COLUMNS.to_vec()), (CART_TABLE, vec!["Item", "Count", "Price"], CART_COLUMNS.to_vec())] {
@@ -327,7 +423,7 @@ fn shop_dialog(
         if let Some(holder) = s.id(TABS) {
             let (font, line) = ui.text_font(&mut fonts, 0);
             commands.entity(holder).despawn_children();
-            for (i, (word, _)) in TABS_SHOWN.iter().enumerate() {
+            for (i, (word, _)) in tabs_shown.iter().enumerate() {
                 let b = commands
                     .spawn((
                         Button,
@@ -369,8 +465,10 @@ fn shop_dialog(
         d.scroll = 0;
         changed = true;
     }
+    let shelves = Shelves { novels, skill_books, cooking, known: known.as_ref(), wishes: wishes.as_ref() };
     let store: Vec<Row> = match d.mode {
-        Mode::Buy => for_sale(&data, TABS_SHOWN[d.tab.min(TABS_SHOWN.len() - 1)].1),
+        Mode::Buy if store_kind == Store::Books => books_for_sale(&data, tabs_shown[d.tab.min(tabs_shown.len() - 1)].1, &shelves),
+        Mode::Buy => for_sale(&data, tabs_shown[d.tab.min(tabs_shown.len() - 1)].1),
         Mode::Recipe => by_recipe(&data, |r| crate::meals::knows(r, cooking, known.as_ref())),
         Mode::Sell => to_sell(inv.as_ref()),
     };
@@ -414,7 +512,7 @@ fn shop_dialog(
         changed = true;
     }
     let list = if selling { d.sell.clone() } else { d.buy.clone() };
-    let priced: Vec<(String, u32, i64)> = list.iter().filter_map(|(l, n)| line_info(&data, inv.as_ref(), l).map(|(name, each)| (name, *n, each * *n as i64))).collect();
+    let priced: Vec<(String, u32, i64)> = list.iter().filter_map(|(l, n)| line_info(&data, inv.as_ref(), wishes.as_ref(), l).map(|(name, each)| (name, *n, each * *n as i64))).collect();
     let total: i64 = priced.iter().map(|p| p.2).sum();
     let funds = household.as_ref().map_or(0, |h| h.funds);
     // Purchase: paid, and in their inventory; or sold.
@@ -444,6 +542,23 @@ fn shop_dialog(
         } else {
             if let Some(h) = household.as_mut() {
                 h.funds -= total;
+            }
+            // (Books: on the household's shelves, a recipe's learned.)
+            if let Ok((_, _, _, known, (novels, skill_books, _, _))) = shoppers.get_mut(me) {
+                let mut novels = novels.as_deref().cloned().unwrap_or_default();
+                let mut skill_books = skill_books.as_deref().cloned().unwrap_or_default();
+                let mut known = known.as_deref().cloned().unwrap_or_default();
+                for (l, _) in &list {
+                    match l {
+                        Line::Novel(k) => novels.own(k),
+                        Line::SkillBook(k) if skill_books.pages(k).is_none() => skill_books.0.push((k.clone(), 0.0)),
+                        Line::RecipeBook(k) if !known.0.contains(k) => known.0.push(k.clone()),
+                        _ => {}
+                    }
+                }
+                if store_kind == Store::Books {
+                    commands.entity(me).insert((novels, skill_books, known));
+                }
             }
             for (l, n) in &list {
                 let Line::Buy(k) = l else { continue };
@@ -479,13 +594,13 @@ fn shop_dialog(
     };
     let loc = |k: &str, or: &str| ui.localize(k).unwrap_or_else(|| or.to_string());
     let (title, mode, add_word, buy_word, cart) = match d.mode {
-        Mode::Buy => (TABS_SHOWN[d.tab.min(TABS_SHOWN.len() - 1)].0.to_string(), loc("Ui/Caption/Shopping:ByItem", "Shop"), loc("Ui/Caption/Shopping:AddToCart", "Add to Cart"), loc("Ui/Caption/Shopping/Cart:Buy", "Purchase"), loc("Ui/Caption/Shopping/Cart:ShoppingCart", "Shopping Cart")),
+        Mode::Buy => (tabs_shown[d.tab.min(tabs_shown.len() - 1)].0.to_string(), loc("Ui/Caption/Shopping:ByItem", "Shop"), loc("Ui/Caption/Shopping:AddToCart", "Add to Cart"), loc("Ui/Caption/Shopping/Cart:Buy", "Purchase"), loc("Ui/Caption/Shopping/Cart:ShoppingCart", "Shopping Cart")),
         Mode::Recipe => (loc("Ui/Caption/Shopping:Recipes", "Recipes"), loc("Ui/Caption/Shopping:ByRecipe", "Shop by Recipe"), loc("Ui/Caption/Shopping:AddToCart", "Add to Cart"), loc("Ui/Caption/Shopping/Cart:Buy", "Purchase"), loc("Ui/Caption/Shopping/Cart:ShoppingCart", "Shopping Cart")),
         Mode::Sell => (loc("Ui/Caption/Shopping:SellableItems", "Sellable Items"), loc("Ui/Caption/Shopping:Sell", "Sell"), loc("Ui/Caption/Shopping:AddToSellList", "Add to Sell List"), loc("Ui/Caption/Shopping/Cart:SellItems", "Sell Items"), loc("Ui/Caption/Shopping/Cart:ListToSell", "List to Sell")),
     };
     say(&mut commands, STORE_TITLE, title);
     say(&mut commands, MODE_TEXT, mode);
-    say(&mut commands, STORE_NAME, "Grocery".to_string());
+    say(&mut commands, STORE_NAME, if store_kind == Store::Books { "Bookstore" } else { "Grocery" }.to_string());
     say(&mut commands, CART_TITLE, cart);
     say(&mut commands, TOTAL, fill(&loc("Ui/Caption/Shopping/Cart:Total", "Total: {0}"), &format!("§{total}")));
     say(&mut commands, FUNDS, fill(&loc("Ui/Caption/Shopping/Cart:AvailableFunds", "Available Funds: {0}"), &format!("§{}", crate::lifetime::group(funds))));
@@ -537,7 +652,7 @@ fn shop_dialog(
                     Some(Stack { kind, key: k.clone(), name: String::new(), quality: 0, count: 1, worth: 0 })
                 }
                 Some(Line::Sell(kind, k, q)) => Some(Stack { kind: *kind, key: k.clone(), name: String::new(), quality: *q, count: 1, worth: 0 }),
-                None => None,
+                _ => None,
             };
             let picture = shown.and_then(|st| crate::inventory::stack_picture(&st, Some(&mut gu), &mut pictures, &mut images, baked.as_deref(), &mut thumbs));
             for (k, (w, words)) in STORE_COLUMNS.iter().zip([r.label.clone(), format!("§{}", r.price)]).enumerate() {
@@ -620,5 +735,21 @@ mod tests {
         assert_eq!(sell[0].price, 22);
         assert!(sellable(Some(&inv), &sell[0].adds[0], 0) && !sellable(Some(&inv), &sell[0].adds[0], 1));
         assert_eq!(fill("Total: {0.Money}", "§5"), "Total: §5");
+    }
+
+    #[test]
+    fn the_bookstore_sells_the_books_the_household_hasnt() {
+        let mut d = data();
+        let novel = |key: &str, name: &str, genre: &str, price: i64, in_store: bool| s3bake::gamedata::NovelInfo { key: key.into(), name: name.into(), genre: genre.into(), price, in_store, pages: 100, ..Default::default() };
+        d.novels = vec![novel("AB", "Zed", "Fiction", 20, true), novel("CD", "Alpha", "Fiction", 30, true), novel("EF", "Handbook", "Nonfiction", 100, false)];
+        // (Not the household's own, nor a boss's handbook the store hasn't.)
+        let s = Shelves { novels: vec!["AB".into()], ..Default::default() };
+        let rows = books_for_sale(&d, "General", &s);
+        assert_eq!(rows.iter().map(|r| (r.label.as_str(), r.price)).collect::<Vec<_>>(), vec![("Alpha (Fiction)", 30)]);
+        assert_eq!(rows[0].adds, vec![Line::Novel("CD".into())]);
+        assert_eq!(line_info(&d, None, None, &rows[0].adds[0]), Some(("Alpha".to_string(), 30)));
+        // (A book's bought the once.)
+        assert!(sellable(None, &rows[0].adds[0], 0) && !sellable(None, &rows[0].adds[0], 1));
+        assert_eq!(Store::Books.tabs().len(), 3);
     }
 }

@@ -25,7 +25,7 @@ impl Plugin for OpportunitiesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<OpportunityBoard>().add_message::<OfferThis>().add_systems(
             Update,
-            (restore_pending, offer_opportunities, dialog_buttons, complete_opportunities, toggle_panel, update_panel).chain().run_if(in_state(PlayMode::Live)),
+            (restore_pending, offer_opportunities, dialog_buttons, complete_opportunities, book_reports, toggle_panel, update_panel).chain().run_if(in_state(PlayMode::Live)),
         );
     }
 }
@@ -148,12 +148,24 @@ pub fn lot_options(world: &crate::loading::WorldInfo, lot: usize, opps: Option<&
         .collect()
 }
 
+/// What's to be done for it, in words: the venue's task (`activity`, its name) and when, or the
+/// boss's book to read.
+pub fn objective(o: &OpportunityInfo, activity: &str, data: &s3bake::GameDataBaked) -> String {
+    if !o.book.is_empty() {
+        let book = data.novels.iter().find(|n| n.key == o.book).map_or("the book".to_string(), |n| format!("\"{}\"", n.name));
+        return format!("Read {book}, then go to work");
+    }
+    format!("{activity} at the {} between {} and {}", venue_word(&o.rabbit_hole), crate::interact::hour_label(o.open), crate::interact::hour_label(o.close))
+}
+
 /// Visit activities from this number up are opportunity tasks (minus it, the opportunity).
 pub const OPPORTUNITY_TASK: usize = 1000;
 
 /// Whether this Sim could be offered this opportunity.
 fn eligible(o: &OpportunityInfo, sim: &Sim, skills: &Skills, job: Option<&crate::careers::Job>, data: &s3bake::GameDataBaked, types: &[&str]) -> bool {
-    if !types.contains(&o.rabbit_hole.as_str()) || matches!(sim.age, Age::Baby | Age::Toddler | Age::Child) {
+    // (A venue's, where the town has one; a book to read, the book.)
+    let book = !o.book.is_empty();
+    if (book && !data.novels.iter().any(|n| n.key == o.book)) || (!book && !types.contains(&o.rabbit_hole.as_str())) || matches!(sim.age, Age::Baby | Age::Toddler | Age::Child) {
         return false;
     }
     if !o.career.is_empty() {
@@ -335,7 +347,7 @@ fn dialog_buttons(
     buttons: Query<(&Interaction, &OppButton), Changed<Interaction>>,
     clock: Res<crate::clock::GameClock>,
     ui: Option<Res<crate::icons::GameUi>>,
-    mut opps: Query<Option<&mut SimOpportunities>>,
+    mut opps: Query<(&Sim, Option<&mut SimOpportunities>, Option<&mut crate::novels::Novels>)>,
     mut notes: ResMut<Notifications>,
     (auto_accept, auto_decline): (Option<Res<AutoAccept>>, Option<Res<AutoDecline>>),
 ) {
@@ -348,14 +360,97 @@ fn dialog_buttons(
     let (Some(ui), true) = (ui, choice) else { return };
     let Some(o) = ui.data.opportunities.get(index) else { return };
     let active = ActiveOpp { index, deadline: (o.days > 0.0).then(|| clock.minutes + o.days as f64 * 1440.0), activity: task_for(o) };
-    match opps.get_mut(sim) {
-        Ok(Some(mut s)) => s.active.push(active),
-        Ok(None) => {
+    let Ok((who, mine, novels)) = opps.get_mut(sim) else { return };
+    let first = who.first.clone();
+    match mine {
+        Some(mut s) => s.active.push(active),
+        None => {
             commands.entity(sim).insert(SimOpportunities { active: vec![active], done: Vec::new() });
         }
-        Err(_) => return,
+    }
+    // (The boss's book, handed over to take home.)
+    if let Some(b) = ui.data.novels.iter().find(|n| !o.book.is_empty() && n.key == o.book) {
+        match novels {
+            Some(mut n) => n.own(&b.key),
+            None => {
+                let mut n = crate::novels::Novels::default();
+                n.own(&b.key);
+                commands.entity(sim).insert(n);
+            }
+        }
+        notes.push(format!("Opportunity accepted: {}. {first} has \"{}\" to read: finished, it's reported on at work.", o.name, b.name));
+        return;
     }
     notes.push(format!("Opportunity accepted: {}. Go to the {} to {}.", o.name, venue_word(&o.rabbit_hole), o.interaction.to_lowercase()));
+}
+
+/// At work with the boss's book read: the opportunity done (the game's `kWentToWork` with the
+/// book's `kReadBook` heard), and its rewards, the boss's liking among them.
+#[allow(clippy::type_complexity)]
+fn book_reports(
+    ui: Option<Res<crate::icons::GameUi>>,
+    mut household: Option<ResMut<Household>>,
+    mut sims: Query<
+        (&Sim, &mut SimOpportunities, &mut Skills, Option<&mut crate::careers::Job>, Option<&crate::wishes::Wishes>, Option<&crate::novels::Novels>, &mut crate::social::Relationships),
+        Added<crate::careers::AtWork>,
+    >,
+    people: Query<(Entity, &Sim), Without<crate::careers::AtWork>>,
+    mut notes: ResMut<Notifications>,
+) {
+    let Some(ui) = ui else { return };
+    let data = &ui.data;
+    for (sim, mut opps, mut skills, mut job, wishes, novels, mut rels) in &mut sims {
+        let read: Vec<usize> = opps
+            .active
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| data.opportunities.get(a.index).is_some_and(|o| !o.book.is_empty() && novels.is_some_and(|n| n.finished(&o.book))))
+            .map(|(i, _)| i)
+            .collect();
+        for i in read.into_iter().rev() {
+            let a = opps.active.remove(i);
+            let Some(o) = data.opportunities.get(a.index) else { continue };
+            opps.done.push(o.guid.clone());
+            let mut got = reward(o, household.as_deref_mut(), job.as_deref_mut(), &mut skills, wishes);
+            if o.boss_liking > 0.0
+                && let Some(boss) = job.as_ref().and_then(|j| j.boss).and_then(|id| people.iter().find(|(_, s)| s.id == id).map(|(e, _)| e))
+            {
+                rels.add(boss, o.boss_liking, 0.0);
+                got.push("the boss's respect".into());
+            }
+            let text = if o.completion.is_empty() { format!("{} completed {}!", sim.first, o.name) } else { fill(&o.completion, o, "") };
+            notes.push(if got.is_empty() { text } else { format!("{text} ({})", got.join(", ")) });
+        }
+    }
+}
+
+/// An opportunity done: its money (half again for the Opportunistic), the boost at work, the
+/// skill; what was had, in words.
+fn reward(o: &OpportunityInfo, household: Option<&mut Household>, job: Option<&mut crate::careers::Job>, skills: &mut Skills, wishes: Option<&crate::wishes::Wishes>) -> Vec<String> {
+    let mut got = Vec::new();
+    let money = if crate::wishes::has(wishes, "Opportunistic") { o.money * 3 / 2 } else { o.money };
+    if money > 0
+        && let Some(h) = household
+    {
+        h.funds += money;
+        got.push(format!("§{money}"));
+    }
+    if let Some(j) = job
+        && (o.performance > 0.0 || o.raise > 0.0)
+    {
+        j.performance = (j.performance + o.performance + o.raise).min(100.0);
+        got.push("a boost at work".into());
+    }
+    let skill = if o.skill.is_empty() { None } else { Some(o.skill.clone()) };
+    if let Some(sk) = skill.filter(|_| o.skill_reward > 0.0)
+        && let Some(name) = crate::save::SKILLS.iter().find(|s| s.eq_ignore_ascii_case(&sk))
+    {
+        // (The game's: that per cent more of the skill points they have.)
+        let more = skills.points(name) * o.skill_reward / 100.0;
+        skills.add_points(*name, more);
+        got.push(format!("{name} skill"));
+    }
+    got
 }
 
 /// The game's rabbit-hole types in words.
@@ -393,35 +488,12 @@ fn complete_opportunities(
     let data = &ui.data;
     for ev in events.read() {
         let LifeEventKind::Finished { activity, completed: true } = ev.kind else { continue };
-        let Ok((sim, mut opps, mut skills, job, wishes)) = sims.get_mut(ev.sim) else { continue };
+        let Ok((sim, mut opps, mut skills, mut job, wishes)) = sims.get_mut(ev.sim) else { continue };
         let Some(pos) = opps.active.iter().position(|a| std::ptr::eq(a.activity.name, activity)) else { continue };
         let a = opps.active.remove(pos);
         let Some(o) = data.opportunities.get(a.index) else { continue };
         opps.done.push(o.guid.clone());
-        let mut got = Vec::new();
-        // (Half again for the Opportunistic.)
-        let money = if crate::wishes::has(wishes, "Opportunistic") { o.money * 3 / 2 } else { o.money };
-        if money > 0
-            && let Some(h) = household.as_mut()
-        {
-            h.funds += money;
-            got.push(format!("§{money}"));
-        }
-        if let Some(mut j) = job
-            && (o.performance > 0.0 || o.raise > 0.0)
-        {
-            j.performance = (j.performance + o.performance + o.raise).min(100.0);
-            got.push("a boost at work".into());
-        }
-        let skill = if o.skill.is_empty() { None } else { Some(o.skill.clone()) };
-        if let Some(sk) = skill.filter(|_| o.skill_reward > 0.0)
-            && let Some(name) = crate::save::SKILLS.iter().find(|s| s.eq_ignore_ascii_case(&sk))
-        {
-            // (The game's: that per cent more of the skill points they have.)
-            let more = skills.points(name) * o.skill_reward / 100.0;
-            skills.add_points(*name, more);
-            got.push(format!("{name} skill"));
-        }
+        let got = reward(o, household.as_deref_mut(), job.as_deref_mut(), &mut skills, wishes);
         let text = if o.completion.is_empty() { format!("{} completed {}!", sim.first, o.name) } else { fill(&o.completion, o, "") };
         notes.push(if got.is_empty() { text } else { format!("{text} ({})", got.join(", ")) });
     }
@@ -523,7 +595,7 @@ fn update_panel(
                             if h > 48.0 { format!(" · {:.0} days left", h / 24.0) } else { format!(" · {h:.0} hours left") }
                         });
                         c.spawn(text(
-                            format!("{} at the {} ({}–{}){}", a.activity.name, venue_word(&o.rabbit_hole), crate::interact::hour_label(o.open), crate::interact::hour_label(o.close), left.unwrap_or_default()),
+                            format!("{}{}", objective(o, a.activity.name, &data), left.unwrap_or_default()),
                             12.0,
                             Color::srgb(0.75, 0.85, 1.0),
                         ));

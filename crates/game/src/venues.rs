@@ -56,6 +56,8 @@ pub enum Effect {
     Sell,
     /// Gone in to shop (`shop`'s dialog, while they're there).
     Shop,
+    /// Gone in to the bookstore's shop (the same dialog, its books).
+    ShopBooks,
 }
 
 /// A venue's activity: where (words in the lot's name), when (days of the week, Monday 0; and
@@ -102,11 +104,12 @@ const MAUSOLEUM: &[&str] = &["mausoleum", "graveyard"];
 const CITY_HALL: &[&str] = &["cityhall"];
 const SCIENCE: &[&str] = &["science"];
 const MILITARY: &[&str] = &["military"];
+const BOOKSTORE: &[&str] = &["bookstore"];
 
 /// A great show: sixteen hours.
 const SHOW_MINUTES: f64 = 960.0;
 
-pub static ACTS: [VenueAct; 34] = [
+pub static ACTS: [VenueAct; 35] = [
     // The theatre (`ShowVenue`): evenings from five (doors close two hours before the end).
     v(THEATRE, MON_TO_THU, a("See a Movie", 120.0, 40, AT_SHOW, 17.0, 21.0), Effect::Moodlet(MoodletKind::SawGreatMovie, 10, SHOW_MINUTES)),
     v(THEATRE, FRI_SAT_SUN, a("See a Movie", 120.0, 40, AT_SHOW, 17.0, 21.0), Effect::Moodlet(MoodletKind::SawGreatMovie, 10, SHOW_MINUTES)),
@@ -150,6 +153,8 @@ pub static ACTS: [VenueAct; 34] = [
     v(MAUSOLEUM, EVERY_DAY, a("Explore the Catacombs", 180.0, 0, EXPLORING, 0.0, 24.0), Effect::Explore),
     // The grocery's shop (`Grocery.ShopByRecipe`), from seven till midnight.
     v(GROCERY, EVERY_DAY, a("Shop", 30.0, 0, SELLING, 7.0, 24.0), Effect::Shop),
+    // The bookstore's (`Bookstore.ShopForBooks`), nine till nine.
+    v(BOOKSTORE, EVERY_DAY, a("Shop for Books", 30.0, 0, SELLING, 9.0, 21.0), Effect::ShopBooks),
 ];
 
 /// The grocery's "Shop" (its visit's activity, for `shop` to know a shopper by).
@@ -210,7 +215,7 @@ pub fn lot_options(lot: &s3formats::world::LotInfo, day: u32, hour: f32, age: Ag
 
 /// The venues' rabbit holes by the game's class for them (`opportunities::lot_types`), for a lot
 /// of several not named for any (Sunset Valley's plaza, with its grocery).
-const BY_TYPE: [(&str, &[&str]); 6] = [("Grocery", GROCERY), ("Theatre", THEATRE), ("Stadium", STADIUM), ("CityHall", CITY_HALL), ("ScienceLab", SCIENCE), ("MilitaryBase", MILITARY)];
+const BY_TYPE: [(&str, &[&str]); 7] = [("Grocery", GROCERY), ("Theatre", THEATRE), ("Stadium", STADIUM), ("CityHall", CITY_HALL), ("ScienceLab", SCIENCE), ("MilitaryBase", MILITARY), ("Bookstore", BOOKSTORE)];
 
 /// What a town's lot offers of the venues': by its name, or by the rabbit holes on it.
 pub fn world_lot_options(world: &crate::loading::WorldInfo, lot: usize, day: u32, hour: f32, age: Age) -> Vec<(String, usize)> {
@@ -370,7 +375,7 @@ fn venue_done(
                     notes.push(format!("Something in the catacombs horrified {}!", sim.first));
                 }
             }
-            Effect::Shop => {}
+            Effect::Shop | Effect::ShopBooks => {}
             Effect::Sell => {
                 let Some(mut inv) = inv else {
                     notes.push(format!("{} had nothing to sell.", sim.first));

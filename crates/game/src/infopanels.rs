@@ -468,7 +468,7 @@ fn opportunities_panel(
         Some((o, a)) => {
             set_text(&mut texts, p.opp.text(OPP_NAME), &o.name);
             set_visible(&mut vis, type_text, false);
-            let mut progress = format!("{} at the {} between {} and {}", a.activity.name, crate::opportunities::venue_word(&o.rabbit_hole), crate::interact::hour_label(o.open), crate::interact::hour_label(o.close));
+            let mut progress = crate::opportunities::objective(o, a.activity.name, &data);
             if let Some(d) = a.deadline {
                 let hours = ((d - clock.minutes) / 60.0).max(0.0);
                 let (days, h) = ((hours / 24.0).floor(), (hours % 24.0).floor());

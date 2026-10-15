@@ -238,7 +238,11 @@ installation is unreachable.
   opportunities are listed in the Opportunities panel (O) with their deadlines and are done
   at the right venue during its hours (Business Sims sign deals at the office, cooks compete
   at the restaurant...), paying money, performance at work or skill, with the game's
-  completion and failure texts. Kept in saves.
+  completion and failure texts. A career's boss may instead hand over a book to read (the
+  game's `kReadBook` ones, a hundred of them: "Grey Matters" for a neurosurgeon, "How to Run
+  Recess" for a playground monitor): it's on the household's shelf, and once it's been read to
+  the end, the next day at work it's reported on, for performance and the boss's liking. Kept
+  in saves.
 - **Map View**: zoomed out over town, every lot gets the game's map tag — the household's
   home in green with a star, other homes and empty lots, and each venue's own glyph (cut from
   the game's map-tag atlas); hover for the name, click a venue for its activities or a home to
@@ -307,8 +311,8 @@ installation is unreachable.
   what its ingredients cost, cooked at the stove nearest the fridge, with the recipes the Sim
   knows for that time of day (Mac and Cheese and
   Waffles to start; Goopy Carbonara, Spaghetti, Key Lime Pie, Lobster Thermidor... as Cooking
-  grows; meatless ones for vegetarians), the rest from recipe books bought at the bookstore
-  at the game's prices. The food is the game's own models in their geometry states (those named
+  grows; meatless ones for vegetarians), the rest from recipe books bought at the bookstore's
+  shop at the game's prices. The food is the game's own models in their geometry states (those named
   only by their rig, Waffles, Autumn Salad, Sushi, found through it) — the dish
   on the serving platter, a plateful in front of each Sim — scraped clean once eaten. The
   Culinary Librarian lifetime wish asks for every one. Learned recipes are kept in saves.
@@ -537,6 +541,15 @@ installation is unreachable.
   they've got. Read in a chair, a page a minute (a Bookworm a quarter more), each page worth
   the book's points in its skill, on until it's finished or a need presses; the place is kept,
   in saves too. `--do "BuyBook Handiness Vol. 1"` and `--do "ReadBook Handiness Vol. 1"` (tests).
+- **Books to read**, the game's (its `BookGeneral` table: 184 novels, biographies, poetry,
+  children's books...): the bookstore's *Shop for Books* puts up the game's shop dialog, its
+  "General" tab the books it sells by genre at their prices, "Skill" the skill books and
+  "Recipe" the recipe books the Sim could learn from (a Bookshop Bargainer or Haggler pays
+  less); bought, they're on the household's shelves (a recipe's, learned). A bookshelf's *Read
+  a Novel ›* lists the household's, with how far the Sim is into each; read in a chair at the
+  book's own pages a minute (a Bookworm's faster rate), for fun by the game's sum (a dearer book
+  more, each time it's been read before less, twice for a Bookworm), the place kept between
+  sittings and in saves. `SHOP=books`, `NOVEL=<title>` and `OFFER_BOOK=1` (tests).
 - **The venues' own menus**, as the game's rabbit holes have them. The theatre has an evening
   show every night from five (§40): a movie most nights, and on Friday to Sunday one night in
   two a play, a symphony or a concert. There's a weekend matinee from noon (§30), each with

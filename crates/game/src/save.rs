@@ -135,6 +135,9 @@ pub struct SavedSim {
     /// Their skill books (on the household's shelves) and the pages they've read of each.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skill_books: Vec<(String, f32)>,
+    /// Their books read for their own sake: those they brought home, and how far they are.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub novels: Vec<crate::novels::NovelRead>,
     /// Ranked chess: wins, losses and rank.
     #[serde(default)]
     pub chess: Option<crate::chess::ChessRecord>,
@@ -522,6 +525,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         recipes: Vec::new(),
         classes: Vec::new(),
         skill_books: Vec::new(),
+        novels: Vec::new(),
         chess: None,
         inventory: Default::default(),
         toddler: None,
@@ -808,6 +812,7 @@ fn save_game(
                     Option<&crate::portraits::Staged>,
                     Option<&crate::classes::ClassesTaken>,
                     Option<&crate::skillbooks::SkillBooks>,
+                    Option<&crate::novels::Novels>,
                 ),
             ),
         ),
@@ -855,7 +860,7 @@ fn save_game(
     let Some(hh) = household else { return };
     let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).collect();
     let mut saved = Vec::new();
-    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes, books))) in &sims {
+    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes, books, novels))) in &sims {
         if let Some(s) = staged {
             debug!("saving {} during portrait: scene {:?}, gameplay {:?}", sim.first, tf.translation, s.original.translation);
         }
@@ -944,6 +949,7 @@ fn save_game(
             recipes: recipes.map(|r| r.0.clone()).unwrap_or_default(),
             classes: classes.map(|c| c.0.clone()).unwrap_or_default(),
             skill_books: books.map(|b| b.0.clone()).unwrap_or_default(),
+            novels: novels.map(|b| b.0.clone()).unwrap_or_default(),
             chess: chess.copied(),
             inventory: inventory.cloned().unwrap_or_default(),
             toddler: toddler.copied(),
@@ -1193,6 +1199,9 @@ pub(crate) fn apply_loaded_game(
         }
         if !s.classes.is_empty() {
             ec.insert(crate::classes::ClassesTaken(s.classes.clone()));
+        }
+        if !s.novels.is_empty() {
+            ec.insert(crate::novels::Novels(s.novels.clone()));
         }
         if !s.skill_books.is_empty() {
             ec.insert(crate::skillbooks::SkillBooks(s.skill_books.clone()));
