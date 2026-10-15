@@ -2968,7 +2968,8 @@ fn auto_gate_route(
 /// the pie's first option (not a submenu) pressed as a player would, and what the selected Sim
 /// then has queued logged. `<kind>:<option>><option>` picks the options instead, by how their
 /// labels start (`Fridge:Have Quick Meal>Cereal`). `Sim` is the nearest other Sim (its socials);
-/// CLICK_SHOTS=<folder> takes a picture of each menu as it opens.
+/// CLICK_SHOTS=<folder> takes a picture of each menu as it opens; CLICK_USE_DISTANCE=<metres>
+/// brings the camera that near.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn auto_click_use(
     mut commands: Commands,
@@ -3024,7 +3025,8 @@ fn auto_click_use(
             info!("click use: {}: '{}'", kinds[idx], name.trim());
             *depth = 0;
             cam.focus = mid;
-            cam.distance = 9.0;
+            // (CLICK_USE_DISTANCE=<metres>: nearer, for a closer look after.)
+            cam.distance = std::env::var("CLICK_USE_DISTANCE").ok().and_then(|d| d.parse().ok()).unwrap_or(9.0);
             *state = (idx, 1, t + 1.5);
         }
         // A click on it.

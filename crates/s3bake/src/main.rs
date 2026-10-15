@@ -712,6 +712,24 @@ fn main() {
         eprintln!("no such clip");
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--clip-root") {
+        // --clip-root <name>...: where each clip has the body (its root bind bone) at its start,
+        // middle and end, round the Sim's own root.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let want: Vec<String> = args[i + 1..].iter().map(|a| a.to_ascii_lowercase()).collect();
+        for k in pkgs.keys_of_type(s3pkg::types::CLIP) {
+            let Some(res) = pkgs.read(k) else { continue };
+            let Some(name) = s3formats::sim::clip_name(&res).filter(|n| want.contains(&n.to_ascii_lowercase())) else { continue };
+            let Ok(c) = s3formats::sim::Clip::parse(&res) else { continue };
+            let Some(t) = c.tracks.get(&0x5788_4BB9) else { continue };
+            let at = |f: f32| {
+                let x = f * c.duration;
+                t.translation.iter().min_by(|a, b| (a.0 - x).abs().total_cmp(&(b.0 - x).abs())).map(|p| p.1)
+            };
+            println!("{name} {:.2}s: {:.3?} {:.3?} {:.3?}", c.duration, at(0.0), at(0.5), at(1.0));
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--list-clips") {
         // --list-clips <prefix>: every clip in the install starting with the prefix.
         let pkgs = s3pkg::install::open_install(&data, |_| true);
@@ -916,6 +934,30 @@ fn main() {
             let n = w.trees.iter().filter(|t| t.kind == k.kind).count();
             println!("{:016X} {n:5} trees round {} views {} atlas {:?} aspect {:.2} height {:.1} radius {:.1}", k.kind, k.round, k.views.len(), root.tex_path(k.billboard), k.atlas_aspect, k.height, k.radius);
         }
+        return;
+    }
+    if let Some(i) = args.iter().position(|a| a == "--slots") {
+        // --slots <OBJD instance, hex> [names...]: the object's routing and containment slots
+        // (model space), named where one of the given names hashes to it.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let inst = u64::from_str_radix(args[i + 1].trim_start_matches("0x"), 16).expect("instance");
+        let names: Vec<&String> = args[i + 2..].iter().collect();
+        let name = |h: u32| names.iter().find(|n| s3pkg::fnv32(&n.to_ascii_lowercase()) == h).map_or(format!("{h:08X}"), |n| n.to_string());
+        for k in pkgs.keys_of_type(s3pkg::types::OBJD).filter(|k| k.i == inst) {
+            let Some(objd) = pkgs.read(k) else { continue };
+            let Some(objk) = s3formats::object::objd_objk(&pkgs, &objd) else { continue };
+            let Some(mk) = objk.model_key else { continue };
+            let Some(v) = pkgs.read(&mk).or_else(|| pkgs.read_ti(mk.t, mk.i)) else { continue };
+            let Some(rk) = s3formats::model::vpxy_keys(&v).into_iter().find(|k| k.t == s3formats::model::T_RSLT) else { continue };
+            let Some(slots) = pkgs.read(&rk).or_else(|| pkgs.read_ti(rk.t, rk.i)).and_then(|d| s3formats::model::parse_rslt(&d)) else { continue };
+            for (kind, list) in [("routing", &slots.routing), ("container", &slots.containers)] {
+                for s in list {
+                    println!("{kind} {} at {:.3?} facing {:.2?}", name(s.name), s.pos, [s.rot[0][2], s.rot[1][2], s.rot[2][2]]);
+                }
+            }
+            return;
+        }
+        eprintln!("no such object");
         return;
     }
     if let Some(i) = args.iter().position(|a| a == "--catalog") {

@@ -1033,7 +1033,7 @@ fn world_click(
     mut ray_cast: MeshRayCast,
     parents: Query<&ChildOf>,
     sims: Query<(&Sim, Has<HouseholdMember>, Has<Selected>)>,
-    (objects, broken_q, lit_q, hw_q, trash_q, leftovers, sprinkling, weather): (
+    (objects, broken_q, lit_q, hw_q, trash_q, leftovers, sprinkling, weather, chess): (
         Query<&GameObject>,
         Query<(), With<crate::interact::Broken>>,
         Query<(), With<crate::fireplace::Lit>>,
@@ -1042,6 +1042,7 @@ fn world_click(
         Res<crate::meals::Leftovers>,
         Query<(), With<crate::gardening::Sprinkling>>,
         Res<crate::weather::Weather>,
+        Res<crate::chess::ChessTables>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
     (members_q, laundry, sides_q): (Query<(), With<HouseholdMember>>, Res<crate::laundry::Laundry>, Query<crate::social::SideQuery>),
@@ -1274,6 +1275,38 @@ fn world_click(
                     continue;
                 }
                 if d.special == Special::VampireOnly && actor_sim.occult != Some(crate::sim::Occult::Vampire) {
+                    continue;
+                }
+                // Chess, as the game's table offers it: practice alone, or a game with whoever's
+                // there alone ("Play Chess With Bella Goth"); "Play Chess With..." anyone about,
+                // with both chairs free; a game watched while there's one (and they're not in it).
+                // (Played in the chair at it: not on the chair's own menu.)
+                if matches!(d.special, Special::PlayChess | Special::ChessMatch) && obj.kind != ObjectKind::Chess {
+                    continue;
+                }
+                if d.special == Special::WatchChess && !chess.watchable(t, actor) {
+                    continue;
+                }
+                if d.special == Special::PlayChess {
+                    let players = chess.players(t);
+                    if players.contains(&actor) {
+                        continue;
+                    }
+                    let label = match players.as_slice() {
+                        [one] => sims.get(*one).map_or(crate::chess::PRACTICE.to_string(), |s| format!("{} {}", crate::chess::PLAY_WITH, s.0.full_name())),
+                        _ => crate::chess::PRACTICE.to_string(),
+                    };
+                    options.push((label, ActionKind::Object { target: t, def: i }));
+                    let here = on_lot.get(actor).ok().map(|l| l.0);
+                    let list: Vec<(String, ActionKind)> = company_q
+                        .iter()
+                        .filter(|c| c.0 != actor && !c.1.age.is_little() && c.3.map(|l| l.0) == here && !players.contains(&c.0))
+                        .map(|c| (c.1.full_name(), ActionKind::Object { target: t, def: i }))
+                        .collect();
+                    if players.is_empty() && chess.free_chairs(t) >= 2 && !list.is_empty() {
+                        options.push((format!("{}... ›", crate::chess::PLAY_WITH), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((crate::chess::PLAY_WITH.to_string(), list));
+                    }
                     continue;
                 }
                 // The TV's channels: "Change to..." one of those the set gets, as the game's.
@@ -1692,6 +1725,15 @@ fn pie_buttons(
         && let Some((key, _)) = crate::music::stations(sounds.as_deref()).into_iter().find(|(_, n)| *n == label)
     {
         commands.entity(target).insert(crate::music::StereoOn(Some(key.to_string())));
+        return;
+    }
+    // Chess with someone: both to the table, a chair each.
+    if title == crate::chess::PLAY_WITH
+        && let ActionKind::Object { target, def } = kind
+        && let (Some(a), Some(other)) = (actor, people.iter().find(|p| p.1.full_name() == label))
+        && let Ok(me) = people.get(a)
+    {
+        crate::chess::play_with(&mut queues, target, def, me, other);
         return;
     }
     // An outing with someone: off they both go.

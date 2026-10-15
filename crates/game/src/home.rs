@@ -563,7 +563,7 @@ pub fn starter_furniture(lot: &LotInfo, hm: &s3formats::world::Heightmap) -> Vec
         .collect()
 }
 
-const STARTER: [(u64, f32, f32, f32); 22] = [
+const STARTER: [(u64, f32, f32, f32); 24] = [
     (0x5BE, -6.6, -3.2, 0.0),   // fridge
     (0x919, -5.4, -3.2, 0.0),   // stove
     (0x358, -5.4, 0.2, 0.0),    // dining table
@@ -583,6 +583,8 @@ const STARTER: [(u64, f32, f32, f32); 22] = [
     (0x3E6, 3.6, -5.7, 0.0),    // mirror
     (0x624, -6.4, 4.6, 180.0),  // easel
     (0x5E4, -3.0, 5.4, 0.0),    // chess
+    (0x364, -3.0, 6.25, 180.0), // its chairs (the game's slots: white's before it, black's behind)
+    (0x364, -3.0, 4.55, 0.0),
     (0x626, 2.0, 5.4, 180.0),   // guitar
     (0x6B0, 5.4, 5.6, 180.0),   // treadmill
     (0x369, 3.6, 1.6, 180.0),   // computer (on the desk)

@@ -404,8 +404,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_holographicEasel_loopMed",
     "a2o_guitar_play_",
     "a2o_treadmill_jog",
-    "a2o_chessTable_loop",
-    "a2o_chessTable_move",
+    // (Chess: sat down to it, the moves from either side, won, lost, the board cleared and set.)
+    "a2o_chessTable_",
+    "c2o_chessTable_",
     "a2o_phone_call_loopBreathe",
     "a2o_phone_chat_talk",
     // Socials (both sides).

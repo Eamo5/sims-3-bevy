@@ -622,7 +622,13 @@ impl GameObject {
             ObjectKind::Art => self.half.y + 2.0,
             _ => self.half.y + 0.45,
         };
-        let local = Vec3::new(self.center.x, 0.0, self.center.y + ahead);
+        // (A chess game's watched from beside the table, its players' chairs before and behind
+        // it: within the game's `kDistanceToWatch`.)
+        let local = if self.kind == ObjectKind::Chess {
+            Vec3::new(self.center.x + self.half.x + 0.8, 0.0, self.center.y)
+        } else {
+            Vec3::new(self.center.x, 0.0, self.center.y + ahead)
+        };
         let p = tf.transform_point(local);
         Vec2::new(p.x, p.z)
     }
@@ -638,6 +644,7 @@ impl GameObject {
             }
             ObjectKind::Bathtub | ObjectKind::ShowerTub => vec![Vec2::new(c.x + h.x + 0.45, c.y), Vec2::new(c.x, c.y + h.y + 0.45), Vec2::new(c.x, c.y - h.y - 0.45)],
             ObjectKind::PicnicTable => return Self::picnic_places(tf)[1..].iter().map(|p| p.0).collect(),
+            ObjectKind::Chess => vec![Vec2::new(c.x - h.x - 0.8, c.y), Vec2::new(c.x + h.x + 0.7, c.y + h.y + 0.5), Vec2::new(c.x - h.x - 0.7, c.y - h.y - 0.5)],
             ObjectKind::BedSingle | ObjectKind::BedDouble => Self::bed_sides(self.center, self.half).to_vec(),
             // (Art from wherever it can be seen, two or three metres off: a sculpture in a flower
             // bed from its sides or behind; in a narrow room, nearer.)
@@ -1196,6 +1203,10 @@ pub enum Special {
     BakeCake,
     /// Play a ranked chess match against an opponent of the Sim's rank.
     ChessMatch,
+    /// Play chess (alone, or against whoever has the other chair: see `chess`).
+    PlayChess,
+    /// Watch a chess game from beside the table.
+    WatchChess,
     /// Blow out a birthday cake's candles and grow up.
     BlowOutCandles,
     /// Write (a page at a time) the book under way.
@@ -1430,7 +1441,7 @@ static SOFA: [InteractionDef; 5] = [
 /// (A book from the shelf, read sitting down: never on the menu.)
 const READ_SEATED: InteractionDef =
     InteractionDef { on_object: true, autonomous: false, special: Special::ReadBook, ..def("Read Book", 60.0, [0.0, 0.0, 4.0, 0.0, 0.0, 30.0], Pose::Sit) };
-static CHAIR: [InteractionDef; 6] = [
+static CHAIR: [InteractionDef; 8] = [
     InteractionDef { on_object: true, autonomous: false, ..def("Sit", 30.0, [0.0, 0.0, 4.0, 0.0, 0.0, 4.0], Pose::Sit) },
     InteractionDef {
         on_object: true,
@@ -1442,6 +1453,9 @@ static CHAIR: [InteractionDef; 6] = [
     READ_SEATED,
     READ_PAPER_SEATED,
     WATCH_TV_SEATED,
+    // (At a chess table: never on the chair's menu.)
+    InteractionDef { on_object: true, autonomous: false, skill: Some("Logic"), special: Special::PlayChess, ..def("Play Chess", 90.0, CHESS_PER_HOUR, Pose::Sit) },
+    InteractionDef { on_object: true, autonomous: false, skill: Some("Logic"), special: Special::ChessMatch, ..def("Play a Ranked Match", 120.0, RANKED_PER_HOUR, Pose::Sit) },
 ];
 /// The dining chair's "Eat" (not offered in its menu).
 pub const CHAIR_EAT: usize = 1;
@@ -1642,10 +1656,16 @@ static WORKOUT_BENCH: [InteractionDef; 1] = [InteractionDef {
     skill: Some("Athletic"),
     ..def("Pump Iron", 60.0, [-10.0, 0.0, -25.0, 0.0, -40.0, 5.0], Pose::Exercise)
 }];
-static CHESS: [InteractionDef; 2] = [
-    InteractionDef { skill: Some("Logic"), ..def("Play Chess", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 40.0], Pose::Use) },
-    InteractionDef { autonomous: false, skill: Some("Logic"), special: Special::ChessMatch, ..def("Play a Ranked Match", 60.0, [0.0, 0.0, -2.0, 10.0, 0.0, 35.0], Pose::Use) },
+/// (Played from a chair at the table, the chair's own "Play Chess" or ranked match: see
+/// `chess::take_seats`; watched from beside it, `kDistanceToWatch`, for the game's Fun 10 to
+/// playing's 15, until they've had their fill or the game's over.)
+static CHESS: [InteractionDef; 3] = [
+    InteractionDef { skill: Some("Logic"), special: Special::PlayChess, ..def("Play Chess", 90.0, CHESS_PER_HOUR, Pose::Use) },
+    InteractionDef { autonomous: false, skill: Some("Logic"), special: Special::ChessMatch, ..def("Play a Ranked Match", 120.0, RANKED_PER_HOUR, Pose::Use) },
+    InteractionDef { special: Special::WatchChess, until_full: Some(FUN), ..def("Watch Chess Match", 240.0, [0.0, 0.0, -2.0, 0.0, 0.0, 27.0], Pose::Stand) },
 ];
+const CHESS_PER_HOUR: [f32; 6] = [0.0, 0.0, -2.0, 0.0, 0.0, 40.0];
+const RANKED_PER_HOUR: [f32; 6] = [0.0, 0.0, -2.0, 10.0, 0.0, 35.0];
 
 /// Taking something out of the fridge, after opening it.
 const FRIDGE_STEPS: &[&str] = &["a2o_fridge_takeFoodOut_plateDinner_x", "a2o_fridge_closeDoor_x"];
@@ -1901,7 +1921,9 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Work Out" => A::new(Some("a2o_treadmill_jog_start_x"), &["a2o_treadmill_jog_loop"]),
         // (On the bench, then the game's three lifts in turn, each started and put down.)
         "Pump Iron" => A::new(Some("a2o_workoutBench_getIn_W_x"), BENCH_LIFTS).in_order().ending(&["a2o_workoutBench_getOut_W_x"], BENCH_OFF),
-        "Play Chess" | "Play a Ranked Match" => A::new(None, &["a2o_chessTable_loop", "a2o_chessTable_move"]),
+        // (In the chair at the chess table, pulled up to it; its moves are `chess::play_chess`'s.)
+        "Play Chess" | "Play a Ranked Match" if kind == ObjectKind::Chair => A::new(Some("a2o_chessTable_start_x"), &["a2o_chessTable_loop"]).ending(&["a2o_chessTable_stop_x"], 1.5),
+        "Watch Chess Match" => A::new(None, crate::chess::WATCHING),
         "Nap in Crib" => A::new(Some("p2o_crib_sleep_start_y"), &["p2o_crib_sleep_loop_y"]),
         "Change Clothes" | "Change Into" | "New Everyday Outfit" | "Plan Outfit" => A::new(Some("a2o_dresser_use_open"), &["a2o_dresser_use_close"]),
         "Grill" => A::new(Some("a2o_bbq_grill_start"), &["a2o_bbq_grill_loopBreathe", "a2o_bbq_grill_loopPokeLeft", "a2o_bbq_grill_loopPokeRight", "a2o_bbq_grill_loopExpert"]),
@@ -3147,7 +3169,7 @@ pub(crate) fn run_actions(
                             action.phase = Phase::Routing;
                             if let ActionKind::Object { target, .. } | ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } = action.kind
                                 && let Ok((o, _, mut used, _)) = objects.get_mut(target)
-                                && o.kind != ObjectKind::PicnicTable
+                                && !matches!(o.kind, ObjectKind::PicnicTable | ObjectKind::Chess)
                                 // (A meal's taken once they're at it: one coming from the far end
                                 // of the lot doesn't keep the cook beside it waiting.)
                                 && o.kind != ObjectKind::Meal
@@ -3838,7 +3860,9 @@ pub(crate) fn run_actions(
                                         | Special::WatchTv
                                         | Special::WooHoo
                                         | Special::TryForBaby
-                                        | Special::ViewArt => {}
+                                        | Special::ViewArt
+                                        | Special::PlayChess
+                                        | Special::WatchChess => {}
                                         Special::GetBook => {
                                             commands.entity(me).insert(crate::surroundings::ReadSomewhere(*target));
                                             // (A skill book taken down: read for its skill.)
@@ -3881,9 +3905,8 @@ pub(crate) fn run_actions(
                                                 notes.push(format!("{} quit their job.", sim.first));
                                             }
                                         }
-                                        Special::ChessMatch => {
-                                            commands.entity(me).insert(crate::chess::MatchPlayed);
-                                        }
+                                        // (Its result's the game's at the table: see `chess::play_chess`.)
+                                        Special::ChessMatch => {}
                                         Special::SellPainting => {
                                             // One of the game's pictures, for their canvas, skill and traits.
                                             let lvl = skills.level("Painting");
@@ -4855,7 +4878,7 @@ fn object_action_available(actor: Entity, kind: ObjectKind, def: usize, owner: O
     // (A group meal's served one at a time: the rest wait their turn. A picnic table is
     // shared, a place each.)
     !broken && interactions_for(kind).get(def).is_some()
-        && (kind == ObjectKind::PicnicTable || if matches!(phase, Phase::Running(_)) { owner == Some(actor) } else { kind == ObjectKind::Meal || owner.is_none_or(|e| e == actor) })
+        && (matches!(kind, ObjectKind::PicnicTable | ObjectKind::Chess) || if matches!(phase, Phase::Running(_)) { owner == Some(actor) } else { kind == ObjectKind::Meal || owner.is_none_or(|e| e == actor) })
 }
 
 fn maintenance_available(actor: Entity, kind: ObjectKind, owner: Option<Entity>, broken: bool, upgrades: Option<&crate::upgrades::Upgrades>, bit: Option<u8>) -> bool {
@@ -5021,7 +5044,7 @@ mod maintenance_tests {
         assert_eq!(chess.skill, Some("Logic"));
         let computer = interaction_clip(chess.name, ObjectKind::Computer).unwrap();
         assert_eq!(computer.loops, &["a2o_computer_chess_type_loop_x"]);
-        let table = interaction_clip("Play Chess", ObjectKind::Chess).unwrap();
+        let table = interaction_clip("Play Chess", ObjectKind::Chair).unwrap();
         assert!(table.loops.iter().all(|s| s.contains("chessTable")));
     }
 
@@ -5091,7 +5114,7 @@ fn autonomy(
     (called, repairmen, laundry, privacy): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>, Res<crate::laundry::Laundry>, Res<crate::privacy::Privacy>),
     friends_away: Query<(Entity, &Sim), (With<OffLot>, Without<Invited>)>,
     (callers, residents): (Query<(Entity, &crate::doorbell::AtTheDoor)>, Query<&crate::homes::Resident>),
-    (weather, building): (Res<crate::weather::Weather>, Option<Res<crate::building::ActiveBuilding>>),
+    (weather, building, chess): (Res<crate::weather::Weather>, Option<Res<crate::building::ActiveBuilding>>, Res<crate::chess::ChessTables>),
 ) {
     if delta.0 <= 0.0 {
         return;
@@ -5200,6 +5223,12 @@ fn autonomy(
                 if !d.autonomous {
                     continue;
                 }
+                // (Chess from a free chair at the table; a game watched only while there's one.)
+                if obj.kind == ObjectKind::Chess
+                    && ((d.special == Special::PlayChess && (chess.free_chairs(oe) == 0 || chess.playing(me))) || (d.special == Special::WatchChess && !chess.watchable(oe, me)))
+                {
+                    continue;
+                }
                 // Guests don't cook or do the chores.
                 // A fireplace is lit when cold, and warmed by when lit.
                 if matches!(obj.kind, ObjectKind::Fireplace | ObjectKind::FirePit | ObjectKind::Candle) && (d.special == Special::LightFire) == lit_q.contains(oe) {
@@ -5258,6 +5287,11 @@ fn autonomy(
                     let gain = per_hour[i] * minutes / 60.0;
                     let room = (100.0 - motives.0[i]).max(0.0);
                     score += gain.min(room).max(-50.0) * urgency(i);
+                }
+                // (Someone at the chess table alone: a game with them, the more inviting, as the
+                // game's `IncreaseScoreIfSomeonePlayingAtTheTable`.)
+                if d.special == Special::PlayChess && chess.players(oe).len() == 1 && !sim.traits.contains(&crate::life::Trait::Loner) {
+                    score *= 2.0;
                 }
                 // Sleep and naps as the game's: to bed when sleepy, or at bedtime once tired enough;
                 // a nap only when sleepy, and not this near waking.

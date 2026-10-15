@@ -152,6 +152,19 @@ installation is unreachable.
   book gets one of the game's titles, turns out a flop, a success, a hit or a best seller, and
   pays royalties at noon each week, six times. The Skills tab shows the book under way, books
   written and the week's royalties. Kept in saves.
+- **Chess at the table, alone or with someone**, as the game's `ChessTable`: it's played from
+  the dining chairs set either side of it (the game's slots: white's before it, black's behind;
+  with none, "Must have a chair to use."), sitting down and pulling up to the board. "Practice
+  Chess" alone, or "Play Chess With..." anyone about (both go, a chair each); someone at the
+  table alone is joined ("Play Chess With Bella Goth"), by free will too. A move every twelve
+  minutes or so, white first, each side's from its own side of the board, the other now and
+  then reacting; five moves in it's decided by the game's scores (Logic, a Genius better, the
+  Absent-Minded worse, luck either way): the winner's win, the loser's applause (a friend) or
+  knocked-over king, the board cleared and set up again, and the next game. A game with
+  someone is twice the fun and the Logic (three times against a Grand Master) and a little
+  liking. "Watch Chess Match" stands others beside the table until they've had their fill or
+  the game's over, cheering a winner they like. `CHESS_WATCH=1` sends someone to watch the
+  first game going (`fond`: fond of both players; a test).
 - **Ranked chess** by the game's Logic tuning: "Play a Ranked Match" at a chess table pits the
   Sim against an opponent of their rank (stronger each rank), won by Logic and a little luck;
   wins lift them from Unranked through Apprentice, Tenderfoot, Journeyman and Instructor to
