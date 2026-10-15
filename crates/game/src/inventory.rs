@@ -34,6 +34,8 @@ pub enum ItemKind {
     Reward,
     /// A catalogue object (one swiped): to place on the lot, or sell.
     Object,
+    /// Something kept, by its catalogue object (a Death Flower): sold, if not kept.
+    Keepsake,
 }
 
 /// Items of one kind (and, for produce, one quality).
@@ -156,7 +158,7 @@ pub fn stack_picture(
         return crate::paintings::image(pictures, images, &baked?.0, s).map(|(h, r)| (h, Some(r)));
     }
     let ui = ui?;
-    if matches!(s.kind, ItemKind::Reward | ItemKind::Object) {
+    if matches!(s.kind, ItemKind::Reward | ItemKind::Object | ItemKind::Keepsake) {
         let objd = baked?.0.catalog.iter().find(|c| c.instance_name == s.key)?.objd;
         return ui.icon(images, &s3bake::gamedata::thumb_name(objd.2)).map(|h| (h, None));
     }

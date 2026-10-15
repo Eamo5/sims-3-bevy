@@ -288,6 +288,7 @@ fn venue_done(
     mut sims: Query<(Entity, &crate::sim::Sim, &VenueDone, &mut crate::life::Moodlets, &mut crate::sim::Motives, Option<&mut crate::inventory::Inventory>, Option<&OutingWith>)>,
     mut household: Option<ResMut<crate::interact::Household>>,
     mut notes: ResMut<crate::interact::Notifications>,
+    (mut garden, ui): (ResMut<crate::gardening::Garden>, Option<Res<crate::icons::GameUi>>),
 ) {
     let now = clock.minutes;
     let mut rng = rand::rng();
@@ -345,18 +346,25 @@ fn venue_done(
                 let mut found = Vec::new();
                 for _ in 0..finds {
                     let r = rng.random_range(0..100);
+                    // (A seed of any rarity, the game's `Mausoleum` find: kept, to plant.)
+                    if (35..70).contains(&r)
+                        && let Some(ui) = ui.as_ref()
+                        && let Some(seed) = crate::gardening::find_seed(&mut garden, &ui.data, crate::gardening::RARITIES[rng.random_range(0..4)], &mut rng)
+                    {
+                        found.push(seed);
+                        continue;
+                    }
                     let (what, worth) = match r {
                         0..35 => ("a gem", rng.random_range(15..60)),
-                        35..70 => ("some seeds", rng.random_range(3..12)),
                         70..90 => ("an old book", rng.random_range(10..40)),
                         _ => ("a rubber duck", 2),
                     };
-                    found.push(what);
+                    found.push(format!("{what} (sold for §{worth})"));
                     if let Some(h) = household.as_deref_mut() {
                         h.funds += worth;
                     }
                 }
-                notes.push(format!("{} explored the catacombs and found {} (sold).", sim.first, found.join(", ")));
+                notes.push(format!("{} explored the catacombs and found {}.", sim.first, found.join(", ")));
                 if rng.random_bool(0.25) {
                     m.add(MoodletKind::Horrified, now);
                     notes.push(format!("Something in the catacombs horrified {}!", sim.first));

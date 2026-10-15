@@ -233,7 +233,7 @@ fn lot_finds(
                     }
                 }
                 finds.spawners.push(s);
-            } else if class.starts_with("RockGemMetalSpawner") && ui.data.spawners.iter().any(|s| s.class == class) {
+            } else if (class.starts_with("RockGemMetalSpawner") || class.starts_with("SeedSpawner")) && ui.data.spawners.iter().any(|s| s.class == class) {
                 let mut s = Spawner { class, at, next: clock.minutes + rng.random_range(60.0..600.0), out: Vec::new(), butterflies: false };
                 // Something already lying about, most of the time.
                 if rng.random_bool(0.7) {
@@ -296,9 +296,17 @@ fn spawn_find(
     s: &Spawner,
 ) -> Option<Entity> {
     let spawner = ui.data.spawners.iter().find(|x| x.class == s.class)?;
-    let key = pick_weighted(&spawner.items, |k| k != "None" && info(ui, k).is_some())?.to_string();
-    let c = info(ui, &key)?;
-    let objd = data.0.catalog.iter().find(|o| o.instance_name == c.model).map(|o| o.objd)?;
+    let key = pick_weighted(&spawner.items, |k| k != "None" && (k.starts_with(SEED) || info(ui, k).is_some()))?.to_string();
+    // (A seed: the game's seed, lying on the ground.)
+    let (model, name) = match info(ui, &key) {
+        Some(c) => (c.model.as_str(), match c.kind {
+            CollectKind::Gem => "Gem",
+            CollectKind::Metal => "Metal",
+            _ => "Space Rock",
+        }),
+        None => ("Seed", "Seed"),
+    };
+    let objd = data.0.catalog.iter().find(|o| o.instance_name == model).map(|o| o.objd)?;
     let mut rng = rand::rng();
     let spot = (0..12).find_map(|_| {
         let p = s.at.xz() + Vec2::new(rng.random_range(-SPREAD..SPREAD), rng.random_range(-SPREAD..SPREAD));
@@ -306,11 +314,6 @@ fn spawn_find(
     })?;
     let y = crate::building::walk_height(world, building, Vec3::new(spot.x, 0.0, spot.y));
     let o = crate::home::spawn_game_object(commands, assets, ctx, catalog, objd, Vec3::new(spot.x, y, spot.y), rng.random_range(0.0..std::f32::consts::TAU))?;
-    let name = match c.kind {
-        CollectKind::Gem => "Gem",
-        CollectKind::Metal => "Metal",
-        _ => "Space Rock",
-    };
     let lot = v.lot;
     commands.entity(o.entity).remove::<Obstacle>().insert((Pickup { key }, LotObject(lot), Floor(1)));
     // (A collectible, whatever its catalogue script.)
@@ -442,6 +445,9 @@ fn tint_insects(
     }
 }
 
+/// A seed spawner's find: `seed:` and its rarity.
+const SEED: &str = "seed:";
+
 /// What a Sim brings back: the find picked up, the insect caught, or the catch from a spell of
 /// fishing.
 #[allow(clippy::too_many_arguments)]
@@ -449,6 +455,7 @@ fn collect_requests(
     mut commands: Commands,
     q: Query<(Entity, &CollectRequest, &Sim, &crate::interact::Skills, Option<&crate::journal::SkillJournal>)>,
     mut inventories: Query<&mut Inventory>,
+    mut garden: ResMut<crate::gardening::Garden>,
     pickups: Query<&Pickup>,
     spots: Query<&FishingSpot>,
     ui: Option<Res<crate::icons::GameUi>>,
@@ -464,6 +471,15 @@ fn collect_requests(
         match req {
             CollectRequest::Pick(target) => {
                 let Ok(p) = pickups.get(*target) else { continue };
+                // A seed, in hand: what it'll grow known if it's a common one.
+                if let Some(rarity) = p.key.strip_prefix(SEED) {
+                    commands.entity(*target).try_despawn();
+                    if let Some(what) = crate::gardening::find_seed(&mut garden, &ui.data, rarity, &mut rng) {
+                        notes.push(format!("{} found {what}.", sim.first));
+                    }
+                    life.write(crate::life::LifeEvent::new(e, crate::life::LifeEventKind::Finished { activity: "Collect", completed: true }));
+                    continue;
+                }
                 let Some(c) = info(&ui, &p.key) else { continue };
                 let value = rng.random_range(c.min_price..=c.max_price.max(c.min_price)) as i64;
                 let new = collection.add(&c.key);

@@ -582,17 +582,20 @@ fn ask_question_hook(
     *done = true;
 }
 
-/// GIVE_SKILL=<skill>:<level>: the selected Sim is that good at it from the start.
+/// GIVE_SKILL=<skill>:<level>[,...]: the selected Sim is that good at them from the start.
 fn give_skill(mut sel: Query<&mut crate::interact::Skills, With<crate::sim::Selected>>, mut done: Local<bool>) {
-    let Some((name, level)) = std::env::var("GIVE_SKILL").ok().and_then(|v| v.split_once(':').map(|(s, l)| (s.to_string(), l.parse::<f32>().unwrap_or(0.0)))) else { return };
+    let Ok(v) = std::env::var("GIVE_SKILL") else { return };
     if *done {
         return;
     }
-    if let (Ok(mut skills), Some(n)) = (sel.single_mut(), crate::save::SKILLS.iter().find(|n| n.eq_ignore_ascii_case(&name))) {
-        let v = skills.0.entry(n).or_insert(0.0);
-        *v = v.max(level);
-        *done = true;
+    let Ok(mut skills) = sel.single_mut() else { return };
+    for (name, level) in v.split(',').filter_map(|p| p.split_once(':').map(|(s, l)| (s.trim().to_string(), l.parse::<f32>().unwrap_or(0.0)))) {
+        if let Some(n) = crate::save::SKILLS.iter().find(|n| n.eq_ignore_ascii_case(&name)) {
+            let v = skills.0.entry(n).or_insert(0.0);
+            *v = v.max(level);
+        }
     }
+    *done = true;
 }
 
 /// OPTIONS_DIALOG=<seconds>: the Options dialog opened then.
@@ -1436,6 +1439,18 @@ fn give_items(
         }
         if what.eq_ignore_ascii_case("painting") {
             crate::inventory::give(&mut commands, e, ItemKind::Painting, "painting#test".into(), "Fine Painting".into(), 0, 120, n);
+        } else if what.eq_ignore_ascii_case("DeathFlower") {
+            crate::inventory::give(&mut commands, e, ItemKind::Keepsake, "DeathFlower".into(), crate::gardening::DEATH_FLOWER.into(), 3, 25, n);
+        } else if let Some(rarity) = what.strip_prefix("seed:") {
+            // (Seeds of a rarity, found.)
+            let data = ui.data.clone();
+            let rarity = rarity.to_string();
+            commands.queue(move |w: &mut World| {
+                let mut g = w.resource_mut::<crate::gardening::Garden>();
+                for _ in 0..n {
+                    crate::gardening::find_seed(&mut g, &data, &rarity, &mut rand::rng());
+                }
+            });
         } else if let Some((produce, q)) = what.split_once('/') {
             let q: usize = q.parse().unwrap_or(3).min(9);
             let Some(p) = ui.data.plants.iter().find(|p| p.produce.eq_ignore_ascii_case(produce)) else { continue };
@@ -3763,16 +3778,25 @@ fn auto_action(
         *done = true;
         return;
     }
-    // "Garden": the selected Sim plants a tomato seed a few steps away (outdoors).
-    if name == "Garden" {
+    // "Garden": the selected Sim plants a tomato seed a few steps away (outdoors); "Garden <plant>"
+    // that plant's (an unknown seed, if it isn't a common one): "Garden Money Tree".
+    if let Some(which) = name.strip_prefix("Garden") {
         let Some(ui) = ui.as_ref() else { return };
-        let Some(tomato) = ui.data.plants.iter().position(|p| p.produce == "Tomato") else { return };
+        let which = which.trim();
+        let Some(i) = ui.data.plants.iter().position(|p| if which.is_empty() { p.produce == "Tomato" } else { p.name.eq_ignore_ascii_case(which) }) else { return };
         let Ok(me) = sel_e.single() else { return };
         let Ok(tf) = sel_tf.get(me) else { return };
-        commands.insert_resource(crate::gardening::Garden { seeds: [(tomato, 2)].into_iter().collect(), ..default() });
+        let info = &ui.data.plants[i];
+        let r = crate::gardening::RARITIES.iter().position(|r| *r == info.rarity).unwrap_or(0);
+        let (garden, plant) = if r == 0 {
+            (crate::gardening::Garden { seeds: [(i, 2)].into_iter().collect(), ..default() }, i)
+        } else {
+            (crate::gardening::Garden { unknown: [(i, 1)].into_iter().collect(), ..default() }, crate::gardening::UNKNOWN_SEED + r)
+        };
+        commands.insert_resource(garden);
         let at = tf.translation + tf.rotation * Vec3::new(0.0, 0.0, 3.0);
         if let Ok(mut q) = sel.single_mut() {
-            q.push_player(crate::interact::Action::new("Plant", crate::interact::ActionKind::PlantSeed { at: Vec2::new(at.x, at.z), level: 1, plant: tomato }, false));
+            q.push_player(crate::interact::Action::new("Plant", crate::interact::ActionKind::PlantSeed { at: Vec2::new(at.x, at.z), level: 1, plant }, false));
         }
         *done = true;
         return;

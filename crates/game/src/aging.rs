@@ -19,7 +19,7 @@ impl Plugin for AgingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AgingDay>()
             .add_systems(OnEnter(crate::AppState::Loading), reset_aging_day)
-            .add_systems(Update, (initialize_aging, daily_aging, grow_up_now, rebuild_bodies).chain().after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (initialize_aging, lifefruit, daily_aging, grow_up_now, rebuild_bodies).chain().after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -40,6 +40,31 @@ impl Default for Aging {
 
 #[derive(Resource, Default)]
 pub(crate) struct AgingDay(Option<u32>);
+
+/// A Lifefruit eaten (`gardening`'s Life Plant).
+#[derive(Component)]
+pub struct AteLifefruit;
+
+/// The game's `LifeFruitEatEffects`: a day more of the stage they're in
+/// (`kLifeFruitEatenLifetimeExtensionDays`), an elder's a day more of life.
+const LIFEFRUIT_DAYS: f32 = 1.0;
+
+fn lifefruit(mut commands: Commands, mut q: Query<(Entity, &crate::sim::Sim, Option<&mut Aging>), With<AteLifefruit>>, mut notes: ResMut<crate::interact::Notifications>) {
+    for (e, sim, aging) in &mut q {
+        commands.entity(e).remove::<AteLifefruit>();
+        if let Some(mut a) = aging {
+            a.days = (a.days - LIFEFRUIT_DAYS).max(0.0);
+            if sim.age == crate::sim::Age::Elder {
+                a.elder_span += LIFEFRUIT_DAYS;
+            }
+        }
+        notes.push(if sim.age == crate::sim::Age::Elder {
+            format!("{} ate a Lifefruit: a day more of life.", sim.first)
+        } else {
+            format!("{} ate a Lifefruit: a day longer before growing older.", sim.first)
+        });
+    }
+}
 
 fn reset_aging_day(mut day: ResMut<AgingDay>) {
     day.0 = None;

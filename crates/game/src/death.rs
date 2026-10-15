@@ -5,7 +5,8 @@
 //!
 //! Sims die of old age, in fires, of hunger (a day and a half starving), of electrocution
 //! (a second shock while still singed from the first) and by drowning (left in a pool with no
-//! way out), each with the game's own last moments.
+//! way out), each with the game's own last moments. One carrying a Death Flower (`gardening`)
+//! is spared: the Reaper takes the flower instead and goes (the game's `DeathFlower` state).
 
 use bevy::prelude::*;
 
@@ -128,6 +129,8 @@ pub struct GrimReaper;
 /// Seconds (at normal speed) between the scene's steps.
 const APPEAR_AT: f32 = 1.5;
 const REAP_AT: f32 = 7.0;
+/// Needs (at least) of one spared by a Death Flower.
+const SPARED_NEEDS: f32 = 20.0;
 const TOMBSTONE_AT: f32 = 8.0;
 const LEAVE_AT: f32 = 12.0;
 
@@ -137,7 +140,7 @@ fn reap(
     mut commands: Commands,
     time: Res<Time>,
     clock: Res<crate::clock::GameClock>,
-    mut dying: Query<(Entity, &Sim, &mut Dying, &Transform, Option<&mut ActionQueue>, Has<Selected>, Option<&crate::nav::Floor>)>,
+    mut dying: Query<(Entity, &Sim, &mut Dying, &Transform, Option<&mut ActionQueue>, Has<Selected>, Option<&crate::nav::Floor>, (Option<&mut crate::inventory::Inventory>, Option<&mut crate::sim::Motives>))>,
     survivors: Query<Entity, (With<crate::sim::HouseholdMember>, Without<Dying>)>,
     cas: Option<Res<crate::simbody::CasData>>,
     (data, catalog, mut assets): (Res<Baked>, Res<Catalog>, ResMut<ObjectAssets>),
@@ -148,8 +151,28 @@ fn reap(
         return;
     }
     let dt = time.delta_secs() * (clock.speed as f32).min(2.0);
-    for (me, sim, mut d, tf, queue, selected, floor) in &mut dying {
+    for (me, sim, mut d, tf, queue, selected, floor, (inv, motives)) in &mut dying {
         d.t += dt;
+        // A Death Flower carried: the Reaper takes it in their stead, and goes.
+        if d.stage == 2
+            && d.t >= REAP_AT
+            && let Some(mut inv) = inv
+            && let Some(i) = inv.0.iter().position(|s| s.kind == crate::inventory::ItemKind::Keepsake && s.key == "DeathFlower" && s.count > 0)
+        {
+            inv.take_one(i);
+            if let Some(r) = d.reaper {
+                commands.entity(r).try_despawn();
+            }
+            commands.entity(me).remove::<(Dying, ActionClip)>();
+            // (Back on their feet, not at death's door again at once.)
+            if let Some(mut m) = motives {
+                for v in m.0.iter_mut() {
+                    *v = v.max(SPARED_NEEDS);
+                }
+            }
+            notes.push(format!("The Grim Reaper accepted {}'s Death Flower and spared {} life. For now...", sim.full_name(), if sim.female { "her" } else { "his" }));
+            continue;
+        }
         match d.stage {
             // Their last moments.
             0 => {

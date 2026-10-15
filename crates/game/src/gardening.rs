@@ -1,8 +1,15 @@
 //! Gardening, from the game's `plants` and `ingredients` tables: seeds (a starter packet, more
-//! from the grocery store), planted anywhere outdoors on the home lot in the game's garden soil;
-//! the plant (the game's bush, vine or tree) grows over a couple of days while it's kept watered
-//! and weeded, then bears produce to harvest, sold at the table's prices. Planting, watering,
-//! weeding and harvesting use the game's gardening animations and teach Gardening.
+//! from the grocery store, and found about town: the seed spawners', the catacombs'), planted
+//! anywhere outdoors on the home lot in the game's garden soil; the plant (the game's bush, vine
+//! or tree) grows over a couple of days while it's kept watered and weeded, then bears produce to
+//! harvest, sold at the table's prices. Planting, watering, weeding and harvesting use the game's
+//! gardening animations and teach Gardening.
+//!
+//! Seeds found other than common ones are unknown till planted ("Unknown Special Seed": the
+//! game's `PlayerDisclosure.Concealed`). The special plants are the game's: the Life Plant (its
+//! Lifefruit, eaten, a day more of life), the Flame Plant, the Death Flower Bush (a Death Flower,
+//! carried, the Grim Reaper takes in a Sim's stead) and the Money Tree (its money bags, a harvest
+//! cycle's worth by its quality, the tree better for each: `MoneyTree`'s tuning).
 
 use std::collections::BTreeMap;
 
@@ -23,7 +30,7 @@ pub struct GardeningPlugin;
 impl Plugin for GardeningPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Garden>()
-            .add_systems(Update, (starter_packet, restore_plants, garden_requests, grow, sprinkle).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (starter_packet, restore_plants, garden_requests, grow, sprinkle, flame_fruit).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -33,6 +40,27 @@ impl Plugin for GardeningPlugin {
 pub struct Garden {
     pub seeds: BTreeMap<usize, u32>,
     pub perfect: Vec<String>,
+    /// Seeds found not yet known (what they'll grow), by plant.
+    pub unknown: BTreeMap<usize, u32>,
+}
+
+/// The rarities of seeds, as the game ranks them (`PlantRarity`).
+pub const RARITIES: [&str; 4] = ["Common", "Uncommon", "Rare", "Special"];
+/// A plant option's number for an unknown seed of a rarity: this plus the rarity's.
+pub const UNKNOWN_SEED: usize = 1_000_000;
+
+/// A seed found (of a rarity): one of its plants at random, in hand (known if common). What's
+/// found, as said ("a Tomato Seed", "an Unknown Special Seed").
+pub fn find_seed(garden: &mut Garden, data: &s3bake::GameDataBaked, rarity: &str, rng: &mut impl Rng) -> Option<String> {
+    let pool: Vec<usize> = data.plants.iter().enumerate().filter(|(_, p)| p.rarity == rarity).map(|(i, _)| i).collect();
+    let i = *pool.get(rng.random_range(0..pool.len().max(1)))?;
+    if rarity == "Common" {
+        *garden.seeds.entry(i).or_insert(0) += 1;
+        Some(format!("a {}", data.plants[i].seed))
+    } else {
+        *garden.unknown.entry(i).or_insert(0) += 1;
+        Some(format!("an Unknown {rarity} Seed"))
+    }
 }
 
 /// The game's produce qualities, worst to best, with what each sells for (its harvest
@@ -108,6 +136,31 @@ mod harvest_tests {
     fn plant() -> GrowingPlant {
         GrowingPlant { plant: 0, growth: 1.0, water: 70.0, weedy: false,
             ready: 3, harvests_left: 2, next_ready: 0.0, quality: 0.55, care: 0.5 }
+    }
+
+    #[test]
+    fn money_trees_pay_by_their_quality_and_seeds_found_are_known_only_if_common() {
+        let mut rng = rand::rng();
+        let poor = money_bags(0.2, 3, &mut rng);
+        assert!((3..=75).contains(&poor), "{poor}");
+        let best = money_bags(1.0, 5, &mut rng);
+        assert!((1710..=2090).contains(&best), "{best}");
+        let data = s3bake::GameDataBaked {
+            plants: vec![
+                s3bake::gamedata::PlantInfo { name: "Tomato Plant".into(), rarity: "Common".into(), seed: "Tomato Seed".into(), ..Default::default() },
+                s3bake::gamedata::PlantInfo { name: "Money Tree".into(), rarity: "Special".into(), seed: "Money Tree Seed".into(), ..Default::default() },
+            ],
+            ..Default::default()
+        };
+        let mut g = Garden::default();
+        assert_eq!(find_seed(&mut g, &data, "Common", &mut rng).as_deref(), Some("a Tomato Seed"));
+        assert_eq!(find_seed(&mut g, &data, "Special", &mut rng).as_deref(), Some("an Unknown Special Seed"));
+        assert!(find_seed(&mut g, &data, "Rare", &mut rng).is_none());
+        assert_eq!((g.seeds.get(&0), g.unknown.get(&1)), (Some(&1), Some(&1)));
+        let options = plant_options(&g, &data, Vec2::ZERO, 1);
+        assert_eq!(options.iter().map(|o| o.0.as_str()).collect::<Vec<_>>(), vec!["Plant Tomato Seed (1)", "Plant Unknown Special Seed (1)"]);
+        // (Kept in saves, the unknown marked.)
+        assert_eq!(saved_seeds(&g, &data), vec![("Tomato Plant".to_string(), 1), ("?Money Tree".to_string(), 1)]);
     }
 
     #[test]
@@ -244,17 +297,24 @@ pub fn offers(p: &GrowingPlant, special: crate::interact::Special) -> bool {
     }
 }
 
-/// Seed options for planting at a spot on the home lot.
+/// Seed options for planting at a spot on the home lot (unknown ones by their rarity).
 pub fn plant_options(garden: &Garden, data: &s3bake::GameDataBaked, at: Vec2, level: u8) -> Vec<(String, crate::interact::ActionKind)> {
-    garden
+    let mut out: Vec<(String, crate::interact::ActionKind)> = garden
         .seeds
         .iter()
         .filter(|(_, n)| **n > 0)
         .filter_map(|(i, n)| {
             let p = data.plants.get(*i)?;
-            Some((format!("Plant {} Seed ({n})", p.produce), crate::interact::ActionKind::PlantSeed { at, level, plant: *i }))
+            Some((format!("Plant {} ({n})", p.seed), crate::interact::ActionKind::PlantSeed { at, level, plant: *i }))
         })
-        .collect()
+        .collect();
+    for (r, rarity) in RARITIES.iter().enumerate() {
+        let n: u32 = garden.unknown.iter().filter(|(i, _)| data.plants.get(**i).is_some_and(|p| p.rarity == *rarity)).map(|(_, n)| *n).sum();
+        if n > 0 {
+            out.push((format!("Plant Unknown {rarity} Seed ({n})"), crate::interact::ActionKind::PlantSeed { at, level, plant: UNKNOWN_SEED + r }));
+        }
+    }
+    out
 }
 
 /// Spawns one of the game's objects by internal name, as an object of `kind`.
@@ -325,6 +385,7 @@ fn garden_requests(
     mut notes: ResMut<Notifications>,
     mut life: MessageWriter<crate::life::LifeEvent>,
     mut did: MessageWriter<crate::journal::Did>,
+    mut household: Option<ResMut<crate::interact::Household>>,
 ) {
     let Some(ui) = ui else { return };
     let mut rng = rand::rng();
@@ -334,8 +395,18 @@ fn garden_requests(
         let level = skills.level("Gardening") as f32;
         match *req {
             GardenRequest::Plant { at, plant } => {
+                // (An unknown seed of a rarity: one of those held, at random, known now.)
+                let (plant, unknown) = match plant.checked_sub(UNKNOWN_SEED).and_then(|r| RARITIES.get(r)) {
+                    Some(rarity) => {
+                        let held: Vec<usize> = garden.unknown.iter().filter(|(i, n)| **n > 0 && ui.data.plants.get(**i).is_some_and(|p| p.rarity == *rarity)).map(|(i, _)| *i).collect();
+                        let Some(&i) = held.get(rng.random_range(0..held.len().max(1))) else { continue };
+                        (i, true)
+                    }
+                    None => (plant, false),
+                };
                 let Some(info) = ui.data.plants.get(plant) else { continue };
-                let Some(n) = garden.seeds.get_mut(&plant).filter(|n| **n > 0) else { continue };
+                let held = if unknown { garden.unknown.get_mut(&plant) } else { garden.seeds.get_mut(&plant) };
+                let Some(n) = held.filter(|n| **n > 0) else { continue };
                 // (Better gardeners plant better seeds.)
                 let state = GrowingPlant {
                     plant,
@@ -351,7 +422,11 @@ fn garden_requests(
                 let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
                 if plant_at(&mut commands, &mut assets, &mut ctx, &catalog, info, state, at, rng.random_range(0.0..6.28)).is_some() {
                     *n -= 1;
-                    notes.push(format!("{} planted a {}.", sim.first, info.name.to_lowercase()));
+                    if unknown {
+                        notes.push(format!("{} planted the unknown {} seed: it's a {}!", sim.first, info.rarity.to_lowercase(), info.name));
+                    } else {
+                        notes.push(format!("{} planted a {}.", sim.first, info.name.to_lowercase()));
+                    }
                     did.write(crate::journal::Did::kind(me, crate::journal::Kinds::PlantTypes, info.name.clone()));
                     learn(sim, me, &mut skills, &mut notes, &mut life, info.skill_plant * mood_rate, wishes);
                 }
@@ -379,6 +454,33 @@ fn garden_requests(
                 let q = p.quality + rng.random_range(-0.075..0.075);
                 let tier = quality_tier(q);
                 let (word, multiplier) = QUALITIES[tier];
+                // A money tree's money bags: a harvest cycle's worth by its quality (a few
+                // simoleons a bag, below normal), cashed in; and the tree the better for it.
+                if info.produce == MONEY_BAG {
+                    let worth = money_bags(p.quality, picked, &mut rng);
+                    p.quality = (p.quality + MONEY_TREE_BETTER).min(1.0);
+                    if let Some(h) = household.as_mut() {
+                        h.funds += worth;
+                    }
+                    learn(sim, me, &mut skills, &mut notes, &mut life, info.skill_harvest * mood_rate, wishes);
+                    notes.push(format!("{} harvested {picked} money bags from the money tree: §{worth}!", sim.first));
+                    did.write(crate::journal::Did::count(me, crate::journal::Stat::Harvested, picked as f64));
+                    continue;
+                }
+                // A Death Flower: kept (the Grim Reaper takes it instead of its bearer).
+                if info.produce == DEATH_FLOWER {
+                    crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Keepsake, "DeathFlower".into(), DEATH_FLOWER.into(), tier as u8, (info.price as f32 * multiplier).round() as i64, picked);
+                    learn(sim, me, &mut skills, &mut notes, &mut life, info.skill_harvest * mood_rate, wishes);
+                    notes.push(format!("{} harvested {} from the death flower bush.", sim.first, if picked == 1 { "a Death Flower".to_string() } else { format!("{picked} Death Flowers") }));
+                    if p.harvests_left == 0 {
+                        notes.push(format!("The {} has borne its last.", info.name.to_lowercase()));
+                        if let Some(s) = soil {
+                            commands.entity(s.0).try_despawn();
+                        }
+                        commands.entity(e).try_despawn();
+                    }
+                    continue;
+                }
                 // Into their inventory, to sell or eat.
                 let each = (info.price as f32 * multiplier).round() as i64;
                 crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Produce, info.produce.clone(), format!("{word} {}", info.produce), tier as u8, each, picked);
@@ -492,6 +594,12 @@ fn grow(
         let tended = p.water > 30.0 && !p.weedy;
         let change = if tended { 0.091 * (0.4 + p.care) } else if p.water <= 0.0 || p.weedy { -0.091 * 0.5 } else { 0.0 };
         p.quality = (p.quality + change * dt / 1440.0).clamp(0.0, 1.0);
+        // (GARDEN_GROWN=1, for tests: grown at once.)
+        if p.growth < 1.0 && std::env::var("GARDEN_GROWN").is_ok() {
+            p.growth = 1.0;
+            p.next_ready = clock.minutes;
+            tf.scale = Vec3::ONE;
+        }
         if p.water > 0.0 && p.growth < 1.0 {
             let rate = (0.5 + p.water / 200.0) * if p.weedy { 0.5 } else { 1.0 };
             p.growth = (p.growth + dt / GROW_MINUTES * rate).min(1.0);
@@ -520,8 +628,10 @@ fn restore_plants(
 ) {
     let (Some(pending), Some(ui)) = (pending, ui) else { return };
     commands.remove_resource::<PendingPlants>();
-    let seeds = pending.1.iter().filter_map(|(name, n)| Some((ui.data.plants.iter().position(|p| &p.name == name)?, *n))).collect();
-    commands.insert_resource(Garden { seeds, perfect: pending.2.clone() });
+    let by_name = |name: &str| ui.data.plants.iter().position(|p| p.name == name);
+    let seeds = pending.1.iter().filter(|(name, _)| !name.starts_with('?')).filter_map(|(name, n)| Some((by_name(name)?, *n))).collect();
+    let unknown = pending.1.iter().filter_map(|(name, n)| Some((by_name(name.strip_prefix('?')?)?, *n))).collect();
+    commands.insert_resource(Garden { seeds, perfect: pending.2.clone(), unknown });
     let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
     for s in &pending.0 {
         let Some(i) = ui.data.plants.iter().position(|p| p.name == s.name) else { continue };
@@ -540,9 +650,47 @@ fn starter_packet(mut commands: Commands, starter: Option<Res<StarterSeeds>>, ui
     commands.insert_resource(starter_seeds(&ui.data));
 }
 
-/// The household's seeds, for saving.
+/// A Flame Fruit carried keeps its bearer Cozy (the game's `BuffCozyFire`,
+/// `kFlameFruitMoodEffect`), and no longer once it's gone.
+fn flame_fruit(clock: Res<crate::clock::GameClock>, mut sims: Query<(&crate::inventory::Inventory, &mut crate::life::Moodlets)>) {
+    use crate::life::MoodletKind;
+    for (inv, mut m) in &mut sims {
+        let carried = inv.0.iter().any(|s| s.kind == crate::inventory::ItemKind::Produce && s.key == "Flame Fruit" && s.count > 0);
+        match (carried, m.has(MoodletKind::CozyFire)) {
+            (true, _) => m.add(MoodletKind::CozyFire, clock.minutes),
+            (false, true) if !m.0.iter().any(|x| x.kind == MoodletKind::CozyFire && x.until > clock.minutes + 61.0) => m.remove(MoodletKind::CozyFire),
+            _ => {}
+        }
+    }
+}
+
+/// The household's seeds, for saving (the unknown ones' plants marked `?`).
 pub fn saved_seeds(garden: &Garden, data: &s3bake::GameDataBaked) -> Vec<(String, u32)> {
-    garden.seeds.iter().filter_map(|(i, n)| Some((data.plants.get(*i)?.name.clone(), *n))).collect()
+    let known = garden.seeds.iter().filter_map(|(i, n)| Some((data.plants.get(*i)?.name.clone(), *n)));
+    let unknown = garden.unknown.iter().filter_map(|(i, n)| Some((format!("?{}", data.plants.get(*i)?.name), *n)));
+    known.chain(unknown).collect()
+}
+
+/// What a money tree bears that's sold, and a Death Flower bush.
+pub const MONEY_BAG: &str = "Money Bag";
+pub const DEATH_FLOWER: &str = "Death Flower";
+/// A money tree's harvest cycle (`kAggregateMoneyBagValuePerHarvestCycle`: from normal to
+/// perfect), give or take a tenth; a sorry one's bags a few simoleons each
+/// (`kMoneyBagValueForSubNeutralMoneyTree`).
+const MONEY_CYCLE: (f32, f32) = (100.0, 1900.0);
+const MONEY_POOR: (i64, i64) = (1, 25);
+/// How much better each harvest leaves it (`kQualityIncrease`, on this scale).
+const MONEY_TREE_BETTER: f32 = 0.05;
+/// Where the normal quality starts (as `quality_tier` has it).
+const NORMAL_QUALITY: f32 = 0.3;
+
+/// What a money tree's harvest of `bags` comes to.
+pub fn money_bags(quality: f32, bags: u32, rng: &mut impl Rng) -> i64 {
+    if quality < NORMAL_QUALITY {
+        return (0..bags).map(|_| rng.random_range(MONEY_POOR.0..=MONEY_POOR.1)).sum();
+    }
+    let t = ((quality - NORMAL_QUALITY) / (1.0 - NORMAL_QUALITY)).clamp(0.0, 1.0);
+    ((MONEY_CYCLE.0 + t * (MONEY_CYCLE.1 - MONEY_CYCLE.0)) * rng.random_range(0.9..1.1)) as i64
 }
 
 /// A new household's starter packet: a few everyday seeds.

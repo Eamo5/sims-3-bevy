@@ -125,6 +125,15 @@ installation is unreachable.
   garden sprinkler, turned on, runs for two hours watering the plants in its reach (its dome
   of spray from the game's model, and droplets), and Sims play in it while it runs, with the
   game's animations.
+  Seeds are found too: lying about Central Park at the game's seed spawners (common ones, now
+  and then an uncommon or rare one, at their tuned odds), and in the mausoleum's catacombs (any
+  rarity). Any but a common one is unknown till planted ("Unknown Special Seed"). The special
+  plants are the game's: the **Life Plant** (its Lifefruit, eaten, gives a day more before
+  growing older, an elder a day more of life), the **Flame Plant** (a Flame Fruit carried keeps
+  a Sim Cozy), the **Death Flower Bush** (its Death Flower, carried, is taken by the Grim Reaper
+  in its bearer's stead: they're spared) and the **Money Tree** (its money bags, a harvest
+  cycle's worth by the tree's quality, §100 to §1900, and the tree better for each harvest).
+  `--do "Garden <plant>"` plants one and `GARDEN_GROWN=1` grows it at once (tests).
   Perfect produce counts towards The Perfect Garden lifetime wish. The garden is kept in
   saves.
 - **Breakdowns**: showers, baths, sinks, TVs, computers and stereos break now and then with

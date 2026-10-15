@@ -4842,11 +4842,15 @@ pub(crate) fn run_actions(
                                 commands.entity(me).insert(crate::meals::MealRequest::AteStanding);
                             }
                         }
-                        ActionKind::EatItem { quality, .. } => {
+                        ActionKind::EatItem { key, quality } => {
                             // A snack's worth, a little more for finer produce.
                             motives.add(HUNGER, (150.0 + *quality as f32 * 12.0) * dt / 60.0);
                             if elapsed >= PRODUCE_MINUTES {
                                 finished = true;
+                                // (A Lifefruit: a day more of life.)
+                                if key == "Lifefruit" {
+                                    commands.entity(me).insert(crate::aging::AteLifefruit);
+                                }
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`.)

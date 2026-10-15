@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 117;
+pub const GAMEDATA_VERSION: u32 = 118;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -303,8 +303,11 @@ pub struct OpportunityInfo {
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PlantInfo {
     pub name: String,
-    /// Common, Uncommon or Rare.
+    /// Common, Uncommon, Rare or Special.
     pub rarity: String,
+    /// Its seed's name ("Tomato Seed", "Money Tree Seed").
+    #[serde(default)]
+    pub seed: String,
     /// The plant object (`GardenPlantBush`, `PlantLargeTree`, `PlantSmallVine`) and how high its
     /// produce grows (Low, Medium, High: the harvesting animation).
     pub model: String,
@@ -2884,6 +2887,32 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             });
         }
     }
+    // Seed spawners (their classes' tuning): seeds of each rarity by its chances ("seed:Common"),
+    // a couple at most out, every four to ten hours seven times in ten.
+    for class in [
+        "SeedSpawnerCommon1", "SeedSpawnerCommon2", "SeedSpawnerCommon3", "SeedSpawnerCommon4", "SeedSpawnerUncommon1", "SeedSpawnerUncommon2", "SeedSpawnerUncommon3", "SeedSpawnerRare1",
+        "SeedSpawnerRare2", "SeedSpawnerRare3", "SeedSpawnerSpecial1", "SeedSpawnerSpecial2", "SeedSpawnerSpecial3",
+    ] {
+        let Some(x) = xml(class) else { continue };
+        let val = |k: &str| -> Vec<f32> {
+            x.find(&format!("<{k} value=\""))
+                .and_then(|at| x[at + k.len() + 9..].split('"').next())
+                .map(|v| v.split(',').filter_map(|n| n.trim().parse().ok()).collect())
+                .unwrap_or_default()
+        };
+        let chances = val("SeedRarityChances");
+        let every = val("SpawnFrequency");
+        let chance = val("SpawnChance").first().copied().unwrap_or(1.0).max(0.05);
+        if chances.len() < 4 || chances.iter().all(|c| *c <= 0.0) {
+            continue;
+        }
+        out.spawners.push(SpawnerInfo {
+            class: class.to_string(),
+            items: ["Common", "Uncommon", "Rare", "Special"].iter().zip(&chances).filter(|(_, c)| **c > 0.0).map(|(r, c)| (format!("seed:{r}"), *c)).collect(),
+            capacity: val("MaxSpawnCapacity").first().copied().unwrap_or(2.0).max(1.0) as u8,
+            hours: (every.first().copied().unwrap_or(4.0) / chance, every.get(1).copied().unwrap_or(10.0) / chance),
+        });
+    }
     if let Some(x) = xml("Insects") {
         for (row, kind, sheet) in [("Butterflies", CollectKind::Butterfly, "Insects/Butterflies"), ("Beetles", CollectKind::Beetle, "Insects/Beetles")] {
             for f in records(&x, row) {
@@ -3241,19 +3270,32 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             }
             Some(key)
         };
+        // (What the special plants bear that isn't food: a Death Flower, a money bag.)
+        let not_food: HashMap<String, (String, i64, String)> = HashMap::from([
+            ("Death Flower Bush".to_string(), ("Death Flower".to_string(), 25, "DeathFlower".to_string())),
+            ("Money Tree".to_string(), ("Money Bag".to_string(), 0, "HarvestMoneyBag".to_string())),
+        ]);
         for f in records(&p, "PlantList") {
             let name = get(&f, "PlantName");
             let rarity = get(&f, "Rarity");
-            if name.is_empty() || f.get("CodeVersion").is_some_and(|v| v != "BaseGame") || !matches!(rarity.as_str(), "Common" | "Uncommon" | "Rare") {
+            // (The special ones found about town; not those only from the store.)
+            if name.is_empty()
+                || f.get("CodeVersion").is_some_and(|v| v != "BaseGame")
+                || !matches!(rarity.as_str(), "Common" | "Uncommon" | "Rare" | "Special")
+                || get(&f, "LimitedAvailability").eq_ignore_ascii_case("true")
+            {
                 continue;
             }
-            let Some((produce, price, spec)) = produce.get(&name).cloned() else { continue };
+            let Some((produce, price, spec)) = produce.get(&name).or_else(|| not_food.get(&name)).cloned() else { continue };
+            let seed = text("Plants/PlantList", &get(&f, "LocalizationKeySeedName"));
+            let seed = if seed.is_empty() { format!("{} Seed", if rarity == "Special" { name.trim_end_matches(" Bush") } else { produce.as_str() }) } else { seed };
             let model = get(&f, "MedatorName");
             let produce_model = produce_model(&spec);
             out.plants.push(PlantInfo {
                 height: heights.get(&model).cloned().unwrap_or_else(|| "Medium".into()),
                 name,
                 rarity,
+                seed,
                 model,
                 produce,
                 price,
