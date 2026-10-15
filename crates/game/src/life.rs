@@ -653,7 +653,7 @@ pub fn activity_affinity(traits: &[Trait], activity: &str) -> f32 {
     let mut r = 1.0;
     for t in traits {
         r *= match (t, activity) {
-            (Trait::CouchPotato, "Watch TV" | "Watch Cooking Channel") => 2.0,
+            (Trait::CouchPotato, "Watch TV") => 2.0,
             (Trait::Bookworm, "Read a Book") => 2.0,
             (Trait::Athletic, "Work Out") => 2.0,
             (Trait::Lazy, "Work Out") => 0.3,

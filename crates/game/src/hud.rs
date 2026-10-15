@@ -117,6 +117,9 @@ const LEFTOVERS: &str = "Eat Leftovers";
 /// A stereo's menu of stations.
 const CHANGE_STATION: &str = "Change to";
 
+/// The TV's channel menu (the game's "Change to...": its middle adds the dots).
+const CHANGE_CHANNEL: &str = "Change to";
+
 /// A recipe as the food menus list it: with what its ingredients cost, when they do.
 fn recipe_label(r: &s3bake::gamedata::RecipeInfo) -> String {
     if r.cost > 0 { format!("{} (§{})", r.name, r.cost) } else { r.name.clone() }
@@ -1061,7 +1064,7 @@ fn world_click(
             Query<(Option<&crate::music::StereoOn>, Has<crate::interact::Unmade>, Option<&crate::grime::Grime>)>,
         ),
     ),
-    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q): (
+    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -1073,6 +1076,7 @@ fn world_click(
         Query<&crate::doorbell::AtTheDoor>,
         Query<(&crate::pets::Pet, &GlobalTransform)>,
         Query<(), With<crate::little::Labour>>,
+        Query<&crate::tvchannels::TvLevel>,
     ),
 ) {
     // (Not in buy mode, nor in Edit Town: a click there picks lots.)
@@ -1266,6 +1270,13 @@ fn world_click(
                 }
                 if d.special == Special::VampireOnly && actor_sim.occult != Some(crate::sim::Occult::Vampire) {
                     continue;
+                }
+                // The TV's channels: "Change to..." one of those the set gets, as the game's.
+                if d.special == Special::TurnOnTv {
+                    let level = tv_levels.get(t).map_or(2, |l| l.0);
+                    let list: Vec<(String, ActionKind)> = crate::tvchannels::channels_for(level).map(|(_, c)| (c.name.to_string(), ActionKind::Object { target: t, def: i })).collect();
+                    options.push((format!("{CHANGE_CHANNEL}... ›"), submenu_kind(pie.submenus.len())));
+                    pie.submenus.push((CHANGE_CHANNEL.to_string(), list));
                 }
                 if d.special == Special::Homework && !hw_q.contains(actor) {
                     continue;
@@ -1686,6 +1697,11 @@ fn pie_buttons(
             .map(|s| (s.key.clone(), s.quality));
         let outfit_choice = label.strip_prefix("Change Into: ").and_then(|n| crate::simbody::OutfitKind::CHOICES.into_iter().find(|k| k.label() == n));
         let canvas_choice = label.strip_prefix("Paint: ").and_then(|n| crate::paintings::CANVASES.iter().position(|c| *c == n)).map(|c| c as u8);
+        // (The channel chosen from "Change to...".)
+        let channel_choice = (title == CHANGE_CHANNEL).then(|| crate::tvchannels::CHANNELS.iter().position(|c| c.name == label)).flatten().map(|c| c as u8);
+        if channel_choice.is_some() {
+            label = format!("Watch {label}");
+        }
         // Keep the genre with its action: later queued choices must not replace
         // the draft currently being written or survive cancellation of that choice.
         let novel_genre = label.strip_prefix("Write: ").and_then(|n| crate::writing::GENRES.iter().position(|g| g.name == n));
@@ -1697,6 +1713,7 @@ fn pie_buttons(
         action.novel_genre = novel_genre;
         action.outfit_choice = outfit_choice;
         action.canvas_choice = canvas_choice;
+        action.channel_choice = channel_choice;
         action.fish_choice = fish_choice;
         action.recipe_choice = recipe_choice;
         action.for_one = for_one;

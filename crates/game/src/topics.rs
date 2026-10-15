@@ -83,7 +83,7 @@ fn used_up(ui: Option<&crate::icons::GameUi>, name: &str) -> bool {
 /// game's `kMaxTimeToTalkAboutActionAfterFinishing`), by its topic.
 const ACTION_MINUTES: f64 = 20.0;
 const ACTION_TOPICS: &[(&str, &[&str])] = &[
-    ("Action Watch TV", &["Watch TV", "Watch the TV", "Watch Cooking Channel"]),
+    ("Action Watch TV", &["Watch TV", "Watch the TV"]),
     ("Action Read", &["Read a Book", "Read Book", "Read"]),
     ("Action Homework", &["Do Homework"]),
     ("Action Repair", &["Repair", "Upgrade"]),

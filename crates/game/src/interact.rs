@@ -600,6 +600,12 @@ impl ObjectKind {
 
 impl GameObject {
     /// Where a sim stands to use the object (its routing slot, or in front, along local +Z).
+    /// Where a Sim works out to the TV: a metre and a half out in front of it.
+    pub fn workout_spot(&self, tf: &Transform) -> Vec2 {
+        let p = tf.transform_point(Vec3::new(self.center.x, 0.0, self.center.y + self.half.y + 1.5));
+        Vec2::new(p.x, p.z)
+    }
+
     pub fn use_point(&self, tf: &Transform) -> Vec2 {
         if self.kind == ObjectKind::PicnicTable {
             return Self::picnic_places(tf)[0].0;
@@ -1441,7 +1447,8 @@ static CHAIR: [InteractionDef; 6] = [
 pub const CHAIR_EAT: usize = 1;
 static TV: [InteractionDef; 3] = [
     InteractionDef { special: Special::TurnOnTv, ..def("Watch TV", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 55.0], Pose::Stand) },
-    def("Watch Cooking Channel", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 35.0], Pose::Stand),
+    // (Fit Net: working out along with it, as the game's TV "Work Out".)
+    InteractionDef { skill: Some("Athletic"), ..def("Work Out", 60.0, [-10.0, 0.0, -25.0, 0.0, -40.0, 5.0], Pose::Exercise) },
     // (Watched standing when there's no seat facing it free: never on the menu.)
     WATCH_TV,
 ];
@@ -1867,7 +1874,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
                 "a2o_tv_watch_active_livingChairSeated",
             ],
         ),
-        "Watch the TV" | "Watch Cooking Channel" => {
+        "Watch the TV" => {
             A::new(None, &["a2o_tv_watch_idle1_standing", "a2o_tv_watch_idle2_standing", "a2o_tv_watch_idle3_standing", "a2o_tv_watch_active_standing"])
         }
         "Play Computer Games" => A::new(None, &["a2o_computer_game_loop1_x", "a2o_computer_game_loop2_x"]),
@@ -1888,6 +1895,9 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Practice Speech" | "Change Appearance" => A::new(None, &["a2o_mirror_full_checkSelfOut_loop"]),
         "Paint" => A::new(Some("a2o_painting_start_x"), &["a2o_painting_loopMed", "a2o_painting_loopLarge", "a2o_painting_consider"]),
         "Play Guitar" => A::new(None, &["a2o_guitar_play_med_loop", "a2o_guitar_play_high_loop", "a2o_guitar_play_low_loop"]),
+        // (To Fit Net on the TV: jumping jacks, knee bends and stretches.)
+        "Work Out" if kind == ObjectKind::Tv => A::new(Some("a_workOut_start_x"), &["a_workOut_jumpingJack_loop_x", "a_workOut_kneeBend_loop_x", "a_workOut_stretchSide_loop_x"])
+            .ending(&["a_workOut_stop_x"], 1.0),
         "Work Out" => A::new(Some("a2o_treadmill_jog_start_x"), &["a2o_treadmill_jog_loop"]),
         // (On the bench, then the game's three lifts in turn, each started and put down.)
         "Pump Iron" => A::new(Some("a2o_workoutBench_getIn_W_x"), BENCH_LIFTS).in_order().ending(&["a2o_workoutBench_getOut_W_x"], BENCH_OFF),
@@ -2449,6 +2459,8 @@ pub struct Action {
     pub novel_genre: Option<usize>,
     pub outfit_choice: Option<crate::simbody::OutfitKind>,
     pub canvas_choice: Option<u8>,
+    /// The TV channel chosen to watch ("Change to..."; an index into `tvchannels::CHANNELS`).
+    pub channel_choice: Option<u8>,
     pub fish_choice: Option<(String, u8)>,
     pub recipe_choice: Option<usize>,
     /// The recipe's made for one (to eat themselves: "Have Dinner"), not everyone.
@@ -2462,7 +2474,7 @@ pub struct Action {
 
 impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
-        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, fish_choice: None, recipe_choice: None, for_one: false, approach: None, social_outcome: None }
+        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, channel_choice: None, fish_choice: None, recipe_choice: None, for_one: false, approach: None, social_outcome: None }
     }
 }
 
@@ -3085,6 +3097,9 @@ pub(crate) fn run_actions(
                                     });
                                     let near = if sides[0].distance(me_at) <= sides[1].distance(me_at) { sides[0] } else { sides[1] };
                                     Some((near, of.map_or(1, |f| f.0)))
+                                } else if obj.kind == ObjectKind::Tv && interactions_for(obj.kind).get(*def).is_some_and(|d| d.name == "Work Out") {
+                                    // (Out in front of the set, to work out along with it.)
+                                    Some((obj.workout_spot(otf), of.map_or(1, |f| f.0)))
                                 } else if obj.kind == ObjectKind::BedDouble && interactions_for(obj.kind).get(*def).is_some_and(|d| d.on_object) && used.0.is_some_and(|u| u != me) {
                                     // (A double bed's far side, someone in the first: walked to on that side.)
                                     let local = otf.compute_affine().inverse().transform_point3(Vec3::new(obj.use_point(otf).x, otf.translation.y, obj.use_point(otf).y));
@@ -3426,7 +3441,14 @@ pub(crate) fn run_actions(
                                         tf.rotation = Quat::from_rotation_y(across.x.atan2(across.z));
                                     }
                                     let face = otf.rotation * Quat::from_rotation_y(std::f32::consts::PI);
-                                    if d.on_object {
+                                    if obj.kind == ObjectKind::Tv && d.name == "Work Out" {
+                                        let w = obj.workout_spot(otf);
+                                        if tf.translation.xz().distance(w) < 1.0 {
+                                            tf.translation = Vec3::new(w.x, tf.translation.y, w.y);
+                                        }
+                                        tf.rotation = face;
+                                        anim.seat_height = 0.0;
+                                    } else if d.on_object {
                                         let bed = matches!(obj.kind, ObjectKind::BedSingle | ObjectKind::BedDouble);
                                         // In a double bed, one side of it (the other's the far side).
                                         let side = if bed && obj.half.x > 0.8 { -obj.half.x * 0.5 } else { 0.0 };
@@ -4191,6 +4213,7 @@ pub(crate) fn run_actions(
                                         }
                                         Special::TurnOnTv => {
                                             commands.entity(me).insert(crate::surroundings::WatchFrom(*target));
+                                            commands.entity(*target).insert(crate::tvchannels::Tune { channel: action.channel_choice.map(|c| c as usize), by: me });
                                         }
                                         Special::StereoOn => {
                                             commands.entity(*target).insert(crate::music::StereoOn(None));

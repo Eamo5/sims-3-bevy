@@ -662,6 +662,15 @@ installation is unreachable.
 - **Television**: *Watch TV* turns the set on, then the Sim sits down on a sofa or chair facing
   it to watch (the game's seated and armchair TV animations; standing when there's no seat), the
   screen flickering with pictures as long as someone watches.
+- **TV channels**: *Change to...* lists the channels the set gets, as the game's TV table has
+  them: a cheap set the first four (Action World, Sports Universe, Romantic Rendezvous, KidZ
+  Zone), a moderate one Cookin' Cable, Terror TV and Got Garden? as well, an expensive one Halls
+  of History and Fishing Fracas, the best the Super Shopping Network too. A Sim turning it on
+  puts on the channel their traits like (sports for the athletic, gardening for a green thumb),
+  which is more fun to them; Cookin' Cable teaches Cooking (and now and then a recipe), Got
+  Garden? Gardening and Fishing Fracas Fishing; Terror TV frightens neurotic, cowardly and
+  over-emotional Sims off it. *Work Out* puts Fit Net on: jumping jacks, knee bends and side
+  stretches in front of the set (the game's animations) for Athletic skill.
 - **Reading**: *Read a Book* at a bookshelf takes a book down (the game's animation), carries it
   to the nearest free sofa or chair and reads it sitting there, turning the pages (standing at
   the shelf when there's no seat free). The morning paper is picked up off the ground and carried

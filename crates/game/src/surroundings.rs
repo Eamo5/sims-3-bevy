@@ -186,6 +186,7 @@ fn watch_somewhere(
             None => {
                 if let Some(def) = watch(ObjectKind::Tv) {
                     queue.0.push_front(crate::interact::Action::new("Watch the TV", crate::interact::ActionKind::Object { target: from.0, def }, true));
+                    commands.entity(e).insert(WatchingTv(from.0));
                 }
             }
         }
