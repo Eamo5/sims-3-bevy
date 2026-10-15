@@ -42,15 +42,22 @@ pub fn come_to_door(commands: &mut Commands, e: Entity, queue: &mut ActionQueue,
 fn door_waits(
     mut commands: Commands,
     clock: Res<crate::clock::GameClock>,
-    mut callers: Query<(Entity, &Sim, &mut AtTheDoor, &mut ActionQueue)>,
+    mut callers: Query<(Entity, &Sim, &mut AtTheDoor, &mut ActionQueue, Has<crate::sim::HouseholdMember>)>,
     mut notes: ResMut<Notifications>,
 ) {
-    for (e, sim, mut door, mut queue) in &mut callers {
+    for (e, sim, mut door, mut queue, ours) in &mut callers {
         match door.since {
             // (Rung: now waiting.)
             None if queue.0.is_empty() => {
                 door.since = Some(clock.minutes);
-                notes.push(format!("{} is at the door.", sim.full_name()));
+                if !ours {
+                    notes.push(format!("{} is at the door.", sim.full_name()));
+                }
+            }
+            // (The household's own, calling on someone: nobody answered, and they're left outside.)
+            Some(since) if ours && clock.minutes - since > WAIT_MINUTES => {
+                notes.push(format!("Nobody answered the door for {}.", sim.first));
+                commands.entity(e).remove::<AtTheDoor>();
             }
             Some(since) if clock.minutes - since > WAIT_MINUTES => {
                 notes.push(format!("{} got tired of waiting at the door and went home.", sim.first));

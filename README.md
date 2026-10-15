@@ -445,6 +445,14 @@ installation is unreachable.
   "Go Home" drives them back while the household carries on at home. Bridgeport's
   apartments and storefronts stand inside building shells, taken away like walls and roof
   when the camera comes in close.
+- **Visiting the town's families**: a home on the map where one of the town's households
+  lives offers *Visit Lot*. Whoever of the family is home is there (grown-ups with a job are
+  at work nine to five on weekdays, children and teens at school eight to three), going about
+  their own lives in their own house. The visitor goes to the front door and rings; one of them
+  comes to greet them in, and if nobody answers they're left outside. From eleven at night the
+  hosts ask the visitor to go home. The family met are kept, with what they think of the
+  household, like the household's other acquaintances. `HOME_VISIT=1` drives the selected Sim
+  to the nearest home with someone in.
 - **Sim panel tabs**, as the game's: Needs; Skills (each skill learned with its icon, level
   and progress to the next); Career (the job and level, hours, days and pay, the performance
   meter and the next promotion, and how they go about their work: normally, working hard

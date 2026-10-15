@@ -71,7 +71,7 @@ fn come_to_meal(
     mut commands: Commands,
     call: Option<Res<MealCall>>,
     mut sims: Query<
-        (Entity, &Sim, &crate::sim::Motives, &mut ActionQueue),
+        (Entity, &Sim, &crate::sim::Motives, &mut ActionQueue, Option<&crate::visit::OnLot>),
         (With<HouseholdMember>, Without<crate::interact::AtWork>, Without<crate::interact::OffLot>, Without<crate::rabbitholes::AtRabbitHole>),
     >,
     meals: Query<&Meal>,
@@ -83,8 +83,10 @@ fn come_to_meal(
     // (The cook has one.)
     let mut left = m.servings.saturating_sub(1);
     let mut coming = Vec::new();
-    for (e, sim, motives, mut queue) in &mut sims {
-        if left == 0 || e == c.cook || sim.age.is_little() || motives.0[crate::sim::HUNGER] > 70.0 || queue.0.iter().any(|a| !a.autonomous) {
+    // (Those where the cook is: not those out visiting.)
+    let lot = sims.get(c.cook).ok().map(|s| s.4.map(|l| l.0));
+    for (e, sim, motives, mut queue, on) in &mut sims {
+        if left == 0 || e == c.cook || sim.age.is_little() || motives.0[crate::sim::HUNGER] > 70.0 || queue.0.iter().any(|a| !a.autonomous) || lot.is_some_and(|l| l != on.map(|o| o.0)) {
             continue;
         }
         for a in queue.0.iter_mut() {

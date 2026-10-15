@@ -5063,7 +5063,7 @@ fn autonomy(
     ),
     (called, repairmen, laundry, privacy): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>, Res<crate::laundry::Laundry>, Res<crate::privacy::Privacy>),
     friends_away: Query<(Entity, &Sim), (With<OffLot>, Without<Invited>)>,
-    callers: Query<(Entity, &crate::doorbell::AtTheDoor)>,
+    (callers, residents): (Query<(Entity, &crate::doorbell::AtTheDoor)>, Query<&crate::homes::Resident>),
     (weather, building): (Res<crate::weather::Weather>, Option<Res<crate::building::ActiveBuilding>>),
 ) {
     if delta.0 <= 0.0 {
@@ -5351,8 +5351,10 @@ fn autonomy(
                 }
             }
         }
-        // Someone at the door is let in by whoever of the household is free (one of them).
-        if household.contains(me) && my_lot.is_none() && sim.age.is_grown() && sim.age != Age::Child
+        // Someone at the door is let in by whoever of the household is free (one of them); at a
+        // home visited, by one of the family living there.
+        let at_home = (household.contains(me) && my_lot.is_none()) || residents.get(me).is_ok_and(|r| Some(r.0) == my_lot);
+        if at_home && sim.age.is_grown() && sim.age != Age::Child
             && let Some(social) = greet
             && let Some((caller, _)) = callers.iter().find(|(c, d)| d.since.is_some() && !greeted.contains(c))
         {

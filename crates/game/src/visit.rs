@@ -89,8 +89,11 @@ pub fn lot_exit(l: &s3formats::world::LotInfo) -> Vec2 {
     p.xz()
 }
 
-/// A lot's name for messages.
+/// A lot's name for messages (a family's home by the family).
 pub fn place_name(world: &WorldInfo, lot: usize) -> String {
+    if let Some(h) = crate::homes::home_name(lot) {
+        return h;
+    }
     world.lots.get(lot).map_or_else(String::new, |l| crate::rabbitholes::lot_title(l, world.lot_names.get(lot).map_or("", |s| s.as_str())))
 }
 
@@ -233,7 +236,7 @@ fn close_lot(
     clock: Res<GameClock>,
     visited: Option<ResMut<VisitedLot>>,
     mut building: Option<ResMut<ActiveBuilding>>,
-    on_lot: Query<&OnLot>,
+    on_lot: Query<&OnLot, With<crate::sim::HouseholdMember>>,
     trips: Query<&Trip>,
 ) {
     let Some(mut v) = visited else { return };

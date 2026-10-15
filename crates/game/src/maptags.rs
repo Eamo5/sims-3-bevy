@@ -248,6 +248,7 @@ fn tag_clicks(
     mut pie: ResMut<crate::hud::PieMenu>,
     mut cam: Query<&mut SimsCamera>,
     (ui, opps, clock): (Option<Res<crate::icons::GameUi>>, Query<Option<&crate::opportunities::SimOpportunities>, With<crate::sim::Selected>>, Res<crate::clock::GameClock>),
+    (town, story, dormant, household): (Option<Res<crate::premade::TownPremades>>, Res<crate::story::TownStory>, Res<crate::household::Dormant>, Option<Res<crate::interact::Household>>),
 ) {
     for (i, tag, collectible) in &tags {
         if *i != Interaction::Pressed {
@@ -273,7 +274,17 @@ fn tag_clicks(
         if crate::visit::visitable(&world.data, tag.lot) {
             tasks.insert(0, ("Visit".to_string(), ActionKind::GoToLot { lot: tag.lot }));
         }
-        if !lot.is_residential() && (!acts.is_empty() || !tasks.is_empty()) {
+        // (A home the town's families live in: a visit to them.)
+        let family = lot
+            .is_residential()
+            .then(|| crate::homes::family_at(&world, town.as_deref(), &story, &dormant, household.as_ref().map(|h| h.lot_index), tag.lot))
+            .flatten();
+        if let (Some(f), Ok(actor), Some(cursor)) = (family, selected.single(), windows.single().ok().and_then(|w| w.cursor_position())) {
+            crate::homes::name_home(tag.lot, &f.name);
+            pie.at = cursor;
+            let options = vec![("Visit Lot".to_string(), ActionKind::GoToLot { lot: tag.lot })];
+            crate::hud::open_pie(&mut commands, &mut pie, cursor, &format!("The {} Household", f.name), actor, options);
+        } else if !lot.is_residential() && (!acts.is_empty() || !tasks.is_empty()) {
             let (Ok(actor), Some(cursor)) = (selected.single(), windows.single().ok().and_then(|w| w.cursor_position())) else { continue };
             let name = world.data.lot_names.get(tag.lot).map_or("", |s| s.as_str());
             let mut options: Vec<(String, ActionKind)> = acts.iter().enumerate().map(|(k, a)| (crate::hud::activity_label(a), ActionKind::Visit { lot: tag.lot, activity: k })).collect();
