@@ -238,6 +238,8 @@ pub enum ObjectKind {
     Keyboard,
     Drums,
     LaserHarp,
+    /// A door or gate (locked from its menu: see `doorlocks`).
+    Door,
     Other,
 }
 
@@ -470,6 +472,8 @@ impl ObjectKind {
             Self::Art
         } else if has("decorations") {
             Self::Decoration
+        } else if has("objects.door.") && !has("shelldoor") {
+            Self::Door
         } else {
             Self::Other
         }
@@ -525,6 +529,8 @@ impl ObjectKind {
             Self::Table => "Surfaces",
             Self::Light => "Lighting",
             Self::Plant | Self::Decoration | Self::Art => "Decor",
+            // (Build mode's, not a buy-mode tab: see `loading::buy_category`.)
+            Self::Door => "Misc",
             Self::Meal | Self::DirtyDishes | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
             Self::Other => "Misc",
@@ -1216,6 +1222,8 @@ pub enum Special {
     PottyTrain,
     PottyLesson,
     EmptyPotty,
+    /// Lock or unlock a door (from its menu, at once: see `doorlocks`).
+    LockDoor,
     /// Blow out a birthday cake's candles and grow up.
     BlowOutCandles,
     /// Write (a page at a time) the book under way.
@@ -1529,6 +1537,8 @@ static CAR: [InteractionDef; 1] = [InteractionDef { autonomous: false, ..def("Go
 static PICNIC: [InteractionDef; 1] = [def("Have a Picnic", 30.0, [150.0, 0.0, 0.0, 10.0, 0.0, 25.0], Pose::Use)];
 static XYLOPHONE: [InteractionDef; 1] = [def("Play Xylophone", 40.0, [0.0, 0.0, -4.0, 20.0, 0.0, 130.0], Pose::Use)];
 static PEGBOX: [InteractionDef; 1] = [def("Play with Peg Box", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 120.0], Pose::Use)];
+/// (Its menu's the locks: see `hud::world_click` and `doorlocks`.)
+static DOOR: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::LockDoor, ..def("Lock", 0.0, N, Pose::Use) }];
 /// (Sat on, by toddlers potty trained, or a grown-up's to teach them on and empty: see `potty`.)
 static POTTY: [InteractionDef; 4] = [
     InteractionDef { until_full: Some(BLADDER), on_object: true, ..def("Use Potty Chair", 15.0, [0.0, 600.0, 0.0, 0.0, -20.0, 0.0], Pose::Sit) },
@@ -2416,6 +2426,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Snowman => &SNOWMAN,
         ObjectKind::SnowAngel => &SNOW_ANGEL,
         ObjectKind::LeafPile => &LEAF_PILE,
+        ObjectKind::Door => &DOOR,
         _ => &[],
     }
 }
@@ -2898,7 +2909,13 @@ pub(crate) fn run_actions(
         (Without<GameObject>, Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>),
     >,
     mut objects: Query<(&GameObject, &Transform, &mut UsedBy, Option<&Floor>), Without<Sim>>,
-    (building, upper, visited, privacy): (Option<Res<crate::building::ActiveBuilding>>, Option<Res<UpperFloors>>, Option<Res<crate::visit::VisitedLot>>, Res<crate::privacy::Privacy>),
+    (building, upper, visited, privacy, locks): (
+        Option<Res<crate::building::ActiveBuilding>>,
+        Option<Res<UpperFloors>>,
+        Option<Res<crate::visit::VisitedLot>>,
+        Res<crate::privacy::Privacy>,
+        Query<(Entity, &crate::doorlocks::DoorLock)>,
+    ),
     mut life: MessageWriter<LifeEvent>,
     people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
     mut conceive: MessageWriter<crate::little::Conceive>,
@@ -3170,16 +3187,28 @@ pub(crate) fn run_actions(
                     // (A pool's ladder or diving board filed a storey low, under the deck it stands
                     // on at a walk-out: reached from the storey above.)
                     let pool_thing = matches!(&action.kind, ActionKind::Object { target, .. } if objects.get(*target).is_ok_and(|(o, ..)| matches!(o.kind, ObjectKind::PoolLadder | ObjectKind::DivingBoard)));
-                    let routed = dest.and_then(|(d, l)| {
-                        plan_route(my_grid, my_upper, from, floor.0, d, l)
-                            .or_else(|| {
-                                alternatives.iter().find_map(|a| {
-                                    let wp = plan_route(my_grid, my_upper, from, floor.0, *a, l)?;
-                                    action.approach = Some(*a);
-                                    Some(wp)
+                    // (At home, through no door locked against them.)
+                    let member = who.get(&me).is_some_and(|w| w.2);
+                    let shut: Vec<(u8, [Vec2; 2])> = if away.is_none() {
+                        locks.iter().filter(|(_, l)| !l.lets(sim, member)).filter_map(|(e, _)| building.as_deref()?.door_span(e)).collect()
+                    } else {
+                        Vec::new()
+                    };
+                    if !shut.is_empty() {
+                        debug!("{}'s way planned round {} locked doors", sim.first, shut.len());
+                    }
+                    let routed = crate::nav::with_locked(&shut, || {
+                        dest.and_then(|(d, l)| {
+                            plan_route(my_grid, my_upper, from, floor.0, d, l)
+                                .or_else(|| {
+                                    alternatives.iter().find_map(|a| {
+                                        let wp = plan_route(my_grid, my_upper, from, floor.0, *a, l)?;
+                                        action.approach = Some(*a);
+                                        Some(wp)
+                                    })
                                 })
-                            })
-                            .or_else(|| pool_thing.then(|| plan_route(my_grid, my_upper, from, floor.0, d, l + 1)).flatten())
+                                .or_else(|| pool_thing.then(|| plan_route(my_grid, my_upper, from, floor.0, d, l + 1)).flatten())
+                        })
                     });
                     match routed {
                         Some(wp) => {
@@ -3918,7 +3947,8 @@ pub(crate) fn run_actions(
                                         | Special::WatchMusic
                                         | Special::PottyTrain
                                         | Special::PottyLesson
-                                        | Special::EmptyPotty => {}
+                                        | Special::EmptyPotty
+                                        | Special::LockDoor => {}
                                         Special::GetBook => {
                                             commands.entity(me).insert(crate::surroundings::ReadSomewhere(*target));
                                             // (A skill book taken down: read for its skill.)

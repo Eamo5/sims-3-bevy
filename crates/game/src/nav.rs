@@ -196,6 +196,26 @@ pub struct NavGrid {
     /// The barriers' lines, and each cell's barriers (those whose line may pass through it).
     barriers: Vec<[Vec2; 2]>,
     near: Vec<Vec<u32>>,
+    /// The storey it's the walks of (doors locked against a Sim are shut on theirs).
+    pub level: u8,
+}
+
+thread_local! {
+    /// The doorways shut to the Sim a way's being planned for (their storey, and the line across
+    /// them): see `with_locked`.
+    static LOCKED: std::cell::RefCell<Vec<(u8, [Vec2; 2])>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A way planned with these doorways shut (the doors locked against whoever's going: see
+/// `doorlocks`).
+pub fn with_locked<R>(doors: &[(u8, [Vec2; 2])], f: impl FnOnce() -> R) -> R {
+    if doors.is_empty() {
+        return f();
+    }
+    LOCKED.with(|l| *l.borrow_mut() = doors.to_vec());
+    let r = f();
+    LOCKED.with(|l| l.borrow_mut().clear());
+    r
 }
 
 impl NavGrid {
@@ -210,6 +230,7 @@ impl NavGrid {
             settling: false,
             barriers: Vec::new(),
             near: vec![Vec::new(); n * n],
+            level: 1,
         }
     }
 
@@ -229,6 +250,7 @@ impl NavGrid {
             settling: false,
             barriers: Vec::new(),
             near: vec![Vec::new(); self.w * self.h],
+            level: self.level,
         }
     }
 
@@ -304,6 +326,10 @@ impl NavGrid {
     /// Whether the straight way from `a` to `b` crosses (or touches) a barrier: the barriers of
     /// every cell it passes through, checked against it.
     pub fn crosses(&self, a: Vec2, b: Vec2) -> bool {
+        // (A doorway shut to whoever's way this is.)
+        if LOCKED.with(|l| l.borrow().iter().any(|(level, [c, d])| *level == self.level && segments_touch(a, b, *c, *d))) {
+            return true;
+        }
         if self.barriers.is_empty() {
             return false;
         }
@@ -658,6 +684,7 @@ pub fn rebuild_upper(b: &crate::building::ActiveBuilding, upper: &mut UpperFloor
     for level in (b.data.basement.is_some().then_some(0).into_iter()).chain(2..=b.top_level) {
         let mut g = NavGrid::new(b.center.xz(), b.extent + 2.0);
         g.dirty = false;
+        g.level = level;
         for z in 0..g.h {
             for x in 0..g.w {
                 let c = g.center_of(x, z);

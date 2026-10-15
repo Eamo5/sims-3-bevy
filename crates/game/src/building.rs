@@ -241,6 +241,17 @@ impl ActiveBuilding {
         })
     }
 
+    /// A door's way through: its storey, and the line across the doorway (world, along the
+    /// wall from one side of it to the other).
+    pub fn door_span(&self, door: Entity) -> Option<(u8, [Vec2; 2])> {
+        let (_, h) = self.holes.iter().find(|(e, h)| *e == Some(door) && h.door)?;
+        let end = |x: f32| {
+            let p = h.wall_point + h.right * x;
+            self.world(p.x, p.y, 0.0).xz()
+        };
+        Some((h.level, [end(h.x0), end(h.x1)]))
+    }
+
     /// The doors on storey `level`: each doorway's middle (lot-local) and the way through it.
     pub fn doorways(&self, level: u8) -> Vec<(Vec2, Vec2)> {
         self.holes.iter().filter(|(_, h)| h.door && h.level == level).map(|(_, h)| (h.wall_point + h.right * ((h.x0 + h.x1) * 0.5), h.fwd)).collect()

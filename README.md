@@ -391,6 +391,13 @@ installation is unreachable.
   grown-up has taught them to walk (three lessons, with the game's kneel-and-hold-hands
   animation; talking is taught the same way, and both show on the toddler's Skills tab), play
   with toy boxes, xylophones and peg boxes, nap in cribs and cry when neglected.
+- **Door locks**, as the game's `LockDoor`: a door of the household's home can be locked from
+  its menu ("Lock..." for Everybody, Everyone but Myself, Everyone but My Household, or all
+  but the Sims picked under "Specify Sims for this Door"), and unlocked; whoever it's locked
+  against can't get through ("can't find a way to get there"), their ways planned with that
+  doorway shut. Locks are saved with the door. Doors are drawn in the game's `unlocked`
+  state (no tomb chain and padlock), in the lot's own designs. `DOOR_LOCK=Everybody` locks
+  every door of the home (a test).
 - **Potty training**, as the game's potty chair: a grown-up of the family can "Potty Train"
   a toddler there (from the chair's menu): the toddler sits on it a quarter of an hour (the
   game's sitting animations) with the grown-up encouraging them, if they're in a good enough

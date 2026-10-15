@@ -288,6 +288,9 @@ pub struct SavedObjectState {
     /// What it's lost of its price since it was bought.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub lost: i32,
+    /// A door's lock.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lock: Option<crate::doorlocks::DoorLock>,
 }
 
 fn is_zero(v: &i32) -> bool {
@@ -321,6 +324,9 @@ fn restore_states(
         }
         if saved.lost > 0 {
             commands.entity(e).insert(crate::interact::Depreciated(saved.lost));
+        }
+        if let Some(lock) = saved.lock.clone() {
+            commands.entity(e).insert(lock);
         }
         debug!("{} as it was: grime {}, unmade {}, lost {}", o.name, saved.grime, saved.unmade, saved.lost);
         false
@@ -829,7 +835,7 @@ fn save_game(
         Res<crate::terrain_paint::Strokes>,
         Res<crate::terrain_paint::Sculpted>,
         Query<
-            (&GameObject, &Transform, Has<crate::interact::Broken>, Has<crate::grime::Charred>, Option<&crate::grime::Grime>, Has<crate::interact::Unmade>, Option<&crate::interact::Depreciated>),
+            (&GameObject, &Transform, Has<crate::interact::Broken>, Has<crate::grime::Charred>, Option<&crate::grime::Grime>, Has<crate::interact::Unmade>, Option<&crate::interact::Depreciated>, Option<&crate::doorlocks::DoorLock>),
             (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>),
         >,
         Res<crate::familyinv::FamilyInventory>,
@@ -955,13 +961,14 @@ fn save_game(
         laundry: laundry.saved(),
         object_states: broken
             .iter()
-            .filter(|(.., grime, unmade, lost)| grime.is_some_and(|g| g.0 > 0.0) || *unmade || lost.is_some_and(|d| d.0 > 0))
-            .map(|(o, tf, _, _, grime, unmade, lost)| SavedObjectState {
+            .filter(|(.., grime, unmade, lost, lock)| grime.is_some_and(|g| g.0 > 0.0) || *unmade || lost.is_some_and(|d| d.0 > 0) || lock.is_some())
+            .map(|(o, tf, _, _, grime, unmade, lost, lock)| SavedObjectState {
                 objd: o.objd,
                 position: tf.translation.to_array(),
                 grime: grime.map_or(0.0, |g| g.0),
                 unmade,
                 lost: lost.map_or(0, |d| d.0),
+                lock: lock.cloned(),
             })
             .collect(),
         version: SAVE_VERSION,
@@ -1431,8 +1438,8 @@ mod tests {
 
     #[test]
     fn grime_and_unmade_beds_come_back_once_the_furniture_has() {
-        let toilet = SavedObjectState { objd: (1, 2, 3), position: [4.0, 0.0, 8.0], grime: 45.0, unmade: false, lost: 0 };
-        let bed = SavedObjectState { objd: (1, 2, 4), position: [9.0, 0.0, 8.0], grime: 0.0, unmade: true, lost: 0 };
+        let toilet = SavedObjectState { objd: (1, 2, 3), position: [4.0, 0.0, 8.0], grime: 45.0, unmade: false, lost: 0, lock: None };
+        let bed = SavedObjectState { objd: (1, 2, 4), position: [9.0, 0.0, 8.0], grime: 0.0, unmade: true, lost: 0, lock: None };
         let mut app = App::new();
         app.init_resource::<Time>().insert_resource(PendingStates(vec![toilet, bed], None)).add_systems(Update, restore_states);
         let obj = |kind, objd| GameObject { kind, name: "x".into(), objd, price: 100, center: Vec2::ZERO, half: Vec2::ONE, height: 1.0, route: None };

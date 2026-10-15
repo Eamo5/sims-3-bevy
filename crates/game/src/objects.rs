@@ -250,7 +250,9 @@ impl ObjectAssets {
             parts
                 .into_iter()
                 .map(|mut p| {
-                    if p.tex == Some(texture) {
+                    // (By type and instance: a model drawn in a geometry state names its textures
+                    // in another group.)
+                    if p.tex.is_some_and(|k| k.0 == texture.0 && k.2 == texture.2) {
                         p.material = self.material_for_key(ctx, Some(tex), p.mode, p.unlit);
                         p.tex = Some(tex);
                     }

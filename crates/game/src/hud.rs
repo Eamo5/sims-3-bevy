@@ -1047,7 +1047,14 @@ fn world_click(
         Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q): (Query<(), With<HouseholdMember>>, Res<crate::laundry::Laundry>, Query<crate::social::SideQuery>, Query<&crate::life::Moodlets>),
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q): (
+        Query<(), With<HouseholdMember>>,
+        Res<crate::laundry::Laundry>,
+        Query<crate::social::SideQuery>,
+        Query<&crate::life::Moodlets>,
+        Query<&crate::doorlocks::DoorLock>,
+        Query<(), With<crate::visit::LotObject>>,
+    ),
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
     (buy, edit_town, pickable): (
@@ -1290,6 +1297,38 @@ fn world_click(
                     continue;
                 }
                 if d.special == Special::WatchChess && !chess.watchable(t, actor) {
+                    continue;
+                }
+                // A door of their own home: locked for everybody, all but themselves or the
+                // household, or all but the Sims picked; or unlocked (the game's "Lock...").
+                if d.special == Special::LockDoor {
+                    use crate::doorlocks as dl;
+                    if lot_objects_q.contains(t) || actor_sim.age.is_little() || actor_sim.age == crate::sim::Age::Child {
+                        continue;
+                    }
+                    let lock = locks_q.get(t).ok();
+                    if lock.is_some() {
+                        options.push((dl::UNLOCK.to_string(), ActionKind::Object { target: t, def: i }));
+                    }
+                    let mut list: Vec<(String, ActionKind)> = [dl::EVERYBODY, dl::BUT_ME, dl::BUT_HOUSEHOLD]
+                        .into_iter()
+                        .filter(|l| !lock.is_some_and(|k| k.is(l, actor_sim)))
+                        .map(|l| (l.to_string(), ActionKind::Object { target: t, def: i }))
+                        .collect();
+                    let here = on_lot.get(actor).ok().map(|l| l.0);
+                    let picks: Vec<(String, ActionKind)> = company_q
+                        .iter()
+                        .filter(|c| c.3.map(|l| l.0) == here && !c.1.age.is_little())
+                        .map(|c| (dl::picker_label(c.1, lock), ActionKind::Object { target: t, def: i }))
+                        .collect();
+                    if !picks.is_empty() {
+                        list.push((format!("{}... ›", dl::SPECIFY), submenu_kind(pie.submenus.len() + 1)));
+                    }
+                    options.push((format!("{}... ›", dl::LOCK), submenu_kind(pie.submenus.len())));
+                    pie.submenus.push((dl::LOCK.to_string(), list));
+                    if !picks.is_empty() {
+                        pie.submenus.push((dl::SPECIFY.to_string(), picks));
+                    }
                     continue;
                 }
                 // A potty chair: sat on by toddlers; a grown-up's to empty once used, and to
@@ -1716,7 +1755,7 @@ fn pie_buttons(
     mut queues: Query<&mut ActionQueue>,
     selected: Query<Entity, With<Selected>>,
     (mut wishes, mut notes): (Query<(&Sim, &mut crate::wishes::Wishes), With<Selected>>, ResMut<Notifications>),
-    (ui_data, inventories, people): (Option<Res<crate::icons::GameUi>>, Query<&crate::inventory::Inventory>, Query<(Entity, &Sim)>),
+    (ui_data, inventories, people, locks): (Option<Res<crate::icons::GameUi>>, Query<&crate::inventory::Inventory>, Query<(Entity, &Sim)>, Query<&crate::doorlocks::DoorLock>),
     mut jobs: Query<&mut crate::careers::Job>,
     (back, windows, sounds): (Query<&Interaction, (Changed<Interaction>, With<crate::piemenu::PieBack>)>, Query<&Window, With<PrimaryWindow>>, Option<Res<crate::sound::Sounds>>),
 ) {
@@ -1768,6 +1807,24 @@ fn pie_buttons(
         && let Some((key, _)) = crate::music::stations(sounds.as_deref()).into_iter().find(|(_, n)| *n == label)
     {
         commands.entity(target).insert(crate::music::StereoOn(Some(key.to_string())));
+        return;
+    }
+    // A door locked or unlocked, there and then (the game's are immediate).
+    if let ActionKind::Object { target, .. } = kind
+        && (title == crate::doorlocks::LOCK || title == crate::doorlocks::SPECIFY || label == crate::doorlocks::UNLOCK)
+        && let Some((_, me)) = actor.and_then(|a| people.get(a).ok())
+    {
+        let picked = (title == crate::doorlocks::SPECIFY).then(|| people.iter().find(|p| p.1.full_name() == label.trim_end_matches(" ✓")).map(|p| p.1)).flatten();
+        if let Some(lock) = crate::doorlocks::DoorLock::chosen(&label, me, locks.get(target).ok(), picked) {
+            match lock {
+                Some(l) => {
+                    commands.entity(target).insert(l);
+                }
+                None => {
+                    commands.entity(target).remove::<crate::doorlocks::DoorLock>();
+                }
+            }
+        }
         return;
     }
     // A toddler potty trained: the grown-up to the chair, the toddler sat on it once they're there.

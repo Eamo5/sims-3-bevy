@@ -182,8 +182,8 @@ pub fn bake_model(pkgs: &PackageSet, modl: &ResourceKey) -> BakedModel {
 
 /// The geometry state a model is drawn in when nothing chooses one. A model with alternative
 /// states (a chess table's games, a dish full or emptied) is drawn in the one it rests in
-/// (the names are the game scripts': `boardSet`, `tableClothOff`, `basketClosed`...), else its
-/// fullest; never its catalogue `thumbnail` state. Bookshelves (`base`, `halfFull`, `full`)
+/// (the names are the game scripts': `boardSet`, `tableClothOff`, `basketClosed`, a door
+/// `unlocked`...), else its fullest; never its catalogue `thumbnail` state. Bookshelves (`base`, `halfFull`, `full`)
 /// stand full, as does anything with one state or none (its whole mesh).
 pub fn default_state(meshes: &[model::MeshData]) -> Option<u32> {
     let thumbnail = s3pkg::fnv32("thumbnail");
@@ -195,6 +195,11 @@ pub fn default_state(meshes: &[model::MeshData]) -> Option<u32> {
                 None => totals.push((*h, ix.len())),
             }
         }
+    }
+    // (A door's `unlocked`, as the game's `UpdateLockVisualState` sets it: its tomb chain and
+    // padlock hidden, whatever's drawn of it.)
+    if let Some((h, _)) = totals.iter().find(|(h, _)| *h == s3pkg::fnv32("unlocked")) {
+        return Some(*h);
     }
     if totals.len() < 2 {
         return None;
