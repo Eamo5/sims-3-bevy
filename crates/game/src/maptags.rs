@@ -250,6 +250,7 @@ fn tag_clicks(
     (ui, opps, clock): (Option<Res<crate::icons::GameUi>>, Query<Option<&crate::opportunities::SimOpportunities>, With<crate::sim::Selected>>, Res<crate::clock::GameClock>),
     (town, story, dormant, household): (Option<Res<crate::premade::TownPremades>>, Res<crate::story::TownStory>, Res<crate::household::Dormant>, Option<Res<crate::interact::Household>>),
     learners: Query<(&crate::sim::Sim, Option<&crate::classes::ClassesTaken>)>,
+    company_q: Query<(Entity, &crate::sim::Sim, Has<crate::interact::Visitor>, Option<&crate::visit::OnLot>), Or<(With<crate::sim::HouseholdMember>, With<crate::interact::Visitor>)>>,
 ) {
     for (i, tag, collectible) in &tags {
         if *i != Interaction::Pressed {
@@ -293,7 +294,29 @@ fn tag_clicks(
             let (Ok(actor), Some(cursor)) = (selected.single(), windows.single().ok().and_then(|w| w.cursor_position())) else { continue };
             let name = world.data.lot_names.get(tag.lot).map_or("", |s| s.as_str());
             let mut options: Vec<(String, ActionKind)> = acts.iter().enumerate().map(|(k, a)| (crate::hud::activity_label(a), ActionKind::Visit { lot: tag.lot, activity: k })).collect();
+            // (Going out with someone about with the Sim, as the game's "...With".)
+            let here = company_q.get(actor).ok().and_then(|c| c.3.map(|l| l.0));
+            let company: Vec<String> = company_q
+                .iter()
+                .filter(|c| c.0 != actor && !c.1.age.is_little() && c.3.map(|l| l.0) == here && (!c.2 || here.is_none()))
+                .map(|c| c.1.full_name())
+                .collect();
+            let outings: Vec<(String, usize)> = tasks
+                .iter()
+                .filter_map(|(_, k)| match k {
+                    ActionKind::Visit { activity, .. } if crate::venues::groupable(*activity) => Some((crate::venues::outing_name(*activity)?.to_string(), *activity)),
+                    _ => None,
+                })
+                .collect();
             options.extend(tasks);
+            pie.submenus.clear();
+            if !company.is_empty() {
+                for (name, task) in outings {
+                    let list: Vec<(String, ActionKind)> = company.iter().map(|c| (c.clone(), ActionKind::Visit { lot: tag.lot, activity: task })).collect();
+                    options.push((format!("{name}{} ›", crate::venues::WITH), crate::hud::submenu_kind(pie.submenus.len())));
+                    pie.submenus.push((format!("{name}{}", crate::venues::WITH), list));
+                }
+            }
             pie.at = cursor;
             crate::hud::open_pie(&mut commands, &mut pie, cursor, &crate::rabbitholes::lot_title(lot, name), actor, options);
         } else if let Ok(mut c) = cam.single_mut() {

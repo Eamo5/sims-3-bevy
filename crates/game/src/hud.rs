@@ -174,7 +174,7 @@ fn food_menus(
 }
 
 /// Marks a pie option that opens `submenus[i]` (`ActionKind::GoHere(NaN, i)`).
-fn submenu_kind(i: usize) -> ActionKind {
+pub(crate) fn submenu_kind(i: usize) -> ActionKind {
     ActionKind::GoHere(Vec2::new(f32::NAN, f32::INFINITY), i as u8)
 }
 
@@ -1066,7 +1066,7 @@ fn world_click(
             Query<(Option<&crate::music::StereoOn>, Has<crate::interact::Unmade>, Option<&crate::grime::Grime>)>,
         ),
     ),
-    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, books_q): (
+    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, books_q, company_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -1081,6 +1081,7 @@ fn world_click(
         Query<&crate::tvchannels::TvLevel>,
         Query<(&Sim, Option<&crate::classes::ClassesTaken>)>,
         Query<(&crate::skillbooks::SkillBooks, Has<HouseholdMember>)>,
+        Query<(Entity, &Sim, Has<crate::interact::Visitor>, Option<&crate::visit::OnLot>), Or<(With<HouseholdMember>, With<crate::interact::Visitor>)>>,
     ),
 ) {
     // (Not in buy mode, nor in Edit Town: a click there picks lots.)
@@ -1562,7 +1563,25 @@ fn world_click(
                 for (i, a) in acts.iter().enumerate() {
                     options.push((activity_label(a), ActionKind::Visit { lot, activity: i }));
                 }
+                // (Going out with someone: those about with the Sim, as the game's "...With".)
+                let here = on_lot.get(actor).ok().map(|l| l.0);
+                let company: Vec<String> = company_q
+                    .iter()
+                    .filter(|c| c.0 != actor && !c.1.age.is_little() && c.3.map(|l| l.0) == here && (!c.2 || here.is_none()))
+                    .map(|c| c.1.full_name())
+                    .collect();
+                let outings: Vec<(String, usize)> = opp_tasks.iter().filter_map(|(_, k)| match k {
+                    ActionKind::Visit { activity, .. } if crate::venues::groupable(*activity) => Some((crate::venues::outing_name(*activity)?.to_string(), *activity)),
+                    _ => None,
+                }).collect();
                 options.extend(opp_tasks);
+                if !company.is_empty() {
+                    for (name, task) in outings {
+                        let list: Vec<(String, ActionKind)> = company.iter().map(|c| (c.clone(), ActionKind::Visit { lot, activity: task })).collect();
+                        options.push((format!("{name}{} ›", crate::venues::WITH), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((format!("{name}{}", crate::venues::WITH), list));
+                    }
+                }
                 // The bookstore's recipe books.
                 if crate::opportunities::lot_types(&world.data, lot).contains(&"Bookstore")
                     && let (Some(ui), Ok((_, skills, known))) = (opp_q.0.as_ref(), writers.get(actor))
@@ -1621,7 +1640,7 @@ fn pie_buttons(
     mut queues: Query<&mut ActionQueue>,
     selected: Query<Entity, With<Selected>>,
     (mut wishes, mut notes): (Query<(&Sim, &mut crate::wishes::Wishes), With<Selected>>, ResMut<Notifications>),
-    (ui_data, inventories): (Option<Res<crate::icons::GameUi>>, Query<&crate::inventory::Inventory>),
+    (ui_data, inventories, people): (Option<Res<crate::icons::GameUi>>, Query<&crate::inventory::Inventory>, Query<(Entity, &Sim)>),
     mut jobs: Query<&mut crate::careers::Job>,
     (back, windows, sounds): (Query<&Interaction, (Changed<Interaction>, With<crate::piemenu::PieBack>)>, Query<&Window, With<PrimaryWindow>>, Option<Res<crate::sound::Sounds>>),
 ) {
@@ -1673,6 +1692,18 @@ fn pie_buttons(
         && let Some((key, _)) = crate::music::stations(sounds.as_deref()).into_iter().find(|(_, n)| *n == label)
     {
         commands.entity(target).insert(crate::music::StereoOn(Some(key.to_string())));
+        return;
+    }
+    // An outing with someone: off they both go.
+    if let (Some(name), ActionKind::Visit { .. }) = (title.strip_suffix(crate::venues::WITH), &kind)
+        && let (Some(a), Some((companion, _))) = (actor, people.iter().find(|p| p.1.full_name() == label))
+    {
+        for (who, other) in [(a, companion), (companion, a)] {
+            if let Ok(mut q) = queues.get_mut(who) {
+                q.push_player(Action::new(name, kind.clone(), false));
+            }
+            commands.entity(who).insert(crate::venues::OutingWith(other));
+        }
         return;
     }
     // A long menu's next page, where it was.

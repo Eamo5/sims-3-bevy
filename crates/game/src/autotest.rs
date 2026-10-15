@@ -4055,7 +4055,8 @@ fn auto_action(
         return;
     }
     // "Venue <place>:<activity>": off to that venue for one of its own ("Venue bistro:Eat Here").
-    if let Some((place, what)) = name.strip_prefix("Venue ").and_then(|r| r.split_once(':')) {
+    let with = name.starts_with("VenueWith ");
+    if let Some((place, what)) = name.strip_prefix("Venue ").or_else(|| name.strip_prefix("VenueWith ")).and_then(|r| r.split_once(':')) {
         let place = place.to_ascii_lowercase();
         let found = world.data.lots.iter().enumerate().filter(|(_, l)| !l.is_residential() && l.internal_name.to_ascii_lowercase().contains(&place)).find_map(|(lot, l)| {
             let n = l.internal_name.to_ascii_lowercase().replace("amphitheater", "amphi");
@@ -4065,7 +4066,18 @@ fn auto_action(
         if let (Some((lot, i)), Ok(mut q)) = (found, sel.single_mut()) {
             info!("venue test: {what} at lot {lot}");
             q.0.clear();
-            q.push_player(crate::interact::Action::new(name.clone(), crate::interact::ActionKind::Visit { lot, activity: crate::venues::VENUE_TASK + i }, false));
+            q.push_player(crate::interact::Action::new(what, crate::interact::ActionKind::Visit { lot, activity: crate::venues::VENUE_TASK + i }, false));
+            // ("VenueWith": another of the household along.)
+            let me = sel_e.single().unwrap();
+            if with && let Some((other, _)) = members.iter().find(|(e, s)| *e != me && !s.age.is_little()) {
+                commands.entity(me).insert(crate::venues::OutingWith(other));
+                commands.entity(other).insert(crate::venues::OutingWith(me));
+                commands.entity(other).queue(move |mut w: EntityWorldMut| {
+                    if let Some(mut q) = w.get_mut::<crate::interact::ActionQueue>() {
+                        q.push_player(crate::interact::Action::new("Outing", crate::interact::ActionKind::Visit { lot, activity: crate::venues::VENUE_TASK + i }, false));
+                    }
+                });
+            }
         }
         *done = true;
         return;

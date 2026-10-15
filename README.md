@@ -487,7 +487,10 @@ installation is unreachable.
   worth. City hall, the science lab, the military base, the theatre and the mausoleum can be
   visited: Bored, by age, else Fascinated, Intrigued, Impressed, Educated or excited. The
   mausoleum's catacombs can be explored for gems, seeds and old books, with a one-in-four
-  chance of being Horrified.
+  chance of being Horrified. Meals, drinks, shows, games and visits can be gone to with someone,
+  as the game's "Eat Here With...": a *With ›* menu lists the household and any visitors about;
+  both go, and they come back liking each other more (the game's 5 to 15). `--do "VenueWith
+  bistro:Eat Here"` takes another of the household along.
 - **Sim panel tabs**, as the game's: Needs; Skills (each skill learned with its icon, level
   and progress to the next); Career (the job and level, hours, days and pay, the performance
   meter and the next promotion, and how they go about their work: normally, working hard

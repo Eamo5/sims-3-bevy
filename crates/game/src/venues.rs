@@ -218,6 +218,25 @@ pub fn lot_options(lot: &s3formats::world::LotInfo, day: u32, hour: f32, age: Ag
 #[derive(Component)]
 pub struct VenueDone(pub usize);
 
+/// Out with someone (the game's "Eat Here With...", "Attend Show With..."): who.
+#[derive(Component, Clone, Copy)]
+pub struct OutingWith(pub Entity);
+
+/// The ending of an outing's menu's title ("Eat Here With").
+pub const WITH: &str = " With";
+/// The liking an outing together's worth (the game's companions' 5 to 15).
+const OUTING_LIKING: std::ops::RangeInclusive<f32> = 5.0..=15.0;
+
+/// Whether an activity's one to go to with someone (meals, drinks, shows, games, visits).
+pub fn groupable(task: usize) -> bool {
+    task.checked_sub(VENUE_TASK).and_then(|i| ACTS.get(i)).is_some_and(|a| matches!(a.effect, Effect::Meal(_) | Effect::Drinks | Effect::Moodlet(..) | Effect::Visit(_) | Effect::Explore))
+}
+
+/// The name an outing's activity goes by (its option's, without the price).
+pub fn outing_name(task: usize) -> Option<&'static str> {
+    task.checked_sub(VENUE_TASK).and_then(|i| ACTS.get(i)).map(|a| a.activity.name)
+}
+
 /// The venue's act a rabbit hole activity is.
 pub fn act_of(a: &Activity) -> Option<usize> {
     ACTS.iter().position(|v| std::ptr::eq(&v.activity, a))
@@ -237,14 +256,26 @@ const VISIT_GOOD: [(MoodletKind, i32); 5] = [
 fn venue_done(
     mut commands: Commands,
     clock: Res<crate::clock::GameClock>,
-    mut sims: Query<(Entity, &crate::sim::Sim, &VenueDone, &mut crate::life::Moodlets, &mut crate::sim::Motives, Option<&mut crate::inventory::Inventory>)>,
+    mut sims: Query<(Entity, &crate::sim::Sim, &VenueDone, &mut crate::life::Moodlets, &mut crate::sim::Motives, Option<&mut crate::inventory::Inventory>, Option<&OutingWith>)>,
     mut household: Option<ResMut<crate::interact::Household>>,
     mut notes: ResMut<crate::interact::Notifications>,
 ) {
     let now = clock.minutes;
     let mut rng = rand::rng();
-    for (e, sim, done, mut m, mut motives, inv) in &mut sims {
-        commands.entity(e).remove::<VenueDone>();
+    for (e, sim, done, mut m, mut motives, inv, with) in &mut sims {
+        commands.entity(e).remove::<(VenueDone, OutingWith)>();
+        // (Out together: closer for it, both ways.)
+        if let Some(&OutingWith(other)) = with {
+            let liking = rng.random_range(OUTING_LIKING);
+            commands.queue(move |w: &mut World| {
+                for (a, b) in [(e, other), (other, e)] {
+                    if let Some(mut r) = w.get_mut::<crate::social::Relationships>(a) {
+                        r.add(b, liking / 2.0, 0.0);
+                    }
+                }
+            });
+            motives.add(crate::sim::SOCIAL, 30.0);
+        }
         let Some(act) = ACTS.get(done.0) else { continue };
         debug!("venue: {} back from {}: {:?}", sim.first, act.activity.name, act.effect);
         match act.effect {
