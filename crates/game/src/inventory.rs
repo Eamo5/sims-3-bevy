@@ -182,6 +182,9 @@ pub fn stack_actions(sim: &Sim, s: &Stack) -> Vec<(String, ItemButton)> {
     if s.kind == ItemKind::Produce && !sim.age.is_little() {
         out.push((format!("Eat {}", s.name), ItemButton::Eat));
     }
+    if matches!(s.kind, ItemKind::Produce | ItemKind::Fish) {
+        out.push(("Put in Fridge".to_string(), ItemButton::ToFridge));
+    }
     if s.kind == ItemKind::Painting {
         out.push(("Hang on a Wall".to_string(), ItemButton::Hang));
     }
@@ -201,6 +204,8 @@ pub enum ItemButton {
     Eat,
     /// Hang a painting on a wall.
     Hang,
+    /// Put produce or fish in the fridge, for whoever cooks (`ingredients`).
+    ToFridge,
 }
 
 /// The tile's colour for produce, by quality (grey for the worst, gold for perfect).
@@ -335,6 +340,7 @@ fn inventory_buttons(
     mut play: MessageWriter<crate::sound::PlaySound>,
     selected: Query<Entity, Changed<Selected>>,
     asked: Option<Res<DoItem>>,
+    (mut fridge, away): (ResMut<crate::ingredients::Fridge>, Query<(), With<crate::visit::OnLot>>),
 ) {
     // (A different Sim: nothing picked.)
     if !selected.is_empty() {
@@ -388,6 +394,23 @@ fn inventory_buttons(
             }
             ItemButton::Eat => {
                 queue.push_player(Action::new(format!("Eat {}", s.name), ActionKind::EatItem { key: s.key.clone(), quality: s.quality }, false));
+            }
+            ItemButton::ToFridge => {
+                if away.contains(me) {
+                    notes.push(format!("{} isn't home to put the {} in the fridge.", sim.first, s.name));
+                    continue;
+                }
+                inv.0.remove(k);
+                let stock = fridge.0.get_or_insert_with(Vec::new);
+                match stock.iter_mut().find(|x| x.kind == s.kind && x.key == s.key && x.quality == s.quality) {
+                    Some(x) => {
+                        x.count += s.count;
+                        x.worth += s.worth;
+                    }
+                    None => stock.push(s.clone()),
+                }
+                notes.push(format!("{} put the {} in the fridge.", sim.first, if s.count > 1 { format!("{} × {}", s.count, s.name) } else { s.name.clone() }));
+                chosen.reconcile(&inv);
             }
             ItemButton::Hang => {
                 // Out of the inventory and up to the walls (or onto the lot), in Buy mode (back if
@@ -450,6 +473,7 @@ mod button_tests {
         let mut app = App::new();
         app.init_resource::<Chosen>()
             .init_resource::<Notifications>()
+            .init_resource::<crate::ingredients::Fridge>()
             .add_message::<crate::sound::PlaySound>()
             .insert_resource(Household { name: "Test".into(), funds: 100, lot_index: 0, last_bill_day: 0, bills: Vec::new() })
             .add_systems(Update, inventory_buttons);

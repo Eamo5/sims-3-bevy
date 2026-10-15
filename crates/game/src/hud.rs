@@ -127,6 +127,13 @@ fn recipe_label(r: &s3bake::gamedata::RecipeInfo) -> String {
     if r.cost > 0 { format!("{} (§{})", r.name, r.cost) } else { r.name.clone() }
 }
 
+/// A recipe to cook as the food menus list it: with what's missing of its ingredients costs
+/// (the game's "RecipeWithCost"); none, if one can't be had.
+fn cooked_label(data: &s3bake::GameDataBaked, r: &s3bake::gamedata::RecipeInfo, (cook, fridge): (Option<&crate::inventory::Inventory>, &[crate::inventory::Stack])) -> Option<String> {
+    let p = crate::ingredients::plan(data, &r.ingredients, cook, fridge)?;
+    Some(if p.cost > 0 { format!("{} (§{})", r.name, p.cost) } else { r.name.clone() })
+}
+
 /// The game's food menus, its fridge's and stove's: "Have Dinner" and "Serve Dinner", the
 /// recipes they know for the time of day made for one or for everyone (cooked at `stove`),
 /// "Serve Dessert", and "Have Quick Meal", the snacks (out of the fridge, or heated in the
@@ -142,6 +149,7 @@ fn food_menus(
     (hour, weekday): (f32, usize),
     stove: Option<ActionKind>,
     (fridge, microwave): (Option<ActionKind>, Option<ActionKind>),
+    stock: (Option<&crate::inventory::Inventory>, &[crate::inventory::Stack]),
 ) {
     use s3bake::gamedata::MEAL_DESSERT;
     let (meal, word) = crate::meals::meal_time(hour, weekday);
@@ -152,7 +160,7 @@ fn food_menus(
                 .map(|r| &data.recipes[r])
                 // (Desserts on their own menu.)
                 .filter(|r| (m == MEAL_DESSERT || r.meals & MEAL_DESSERT == 0) && if one { r.for_one } else { r.for_group })
-                .map(|r| (recipe_label(r), cook.clone()))
+                .filter_map(|r| Some((cooked_label(data, r, stock)?, cook.clone())))
                 .collect();
             if !list.is_empty() {
                 options.push((format!("{title} ›"), submenu_kind(pie.submenus.len())));
@@ -1047,7 +1055,7 @@ fn world_click(
         Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1060,6 +1068,7 @@ fn world_click(
             Query<(Entity, &Transform, Option<&crate::nav::Floor>, Option<&crate::visit::OnLot>), With<Sim>>,
             Query<&crate::klepto::SwipedToday>,
         ),
+        Res<crate::ingredients::Fridge>,
     ),
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
@@ -1544,7 +1553,8 @@ fn world_click(
                         _ => (None, None, Some(here)),
                     };
                     let time = (opp_q.2.hour_f(), opp_q.2.weekday());
-                    food_menus(&mut pie, &mut options, &ui.data, actor_sim, skills.level("Cooking"), known, time, stove, (fridge, microwave));
+                    let stock = (inv_q.get(actor).ok(), fridge_stock.stock());
+                    food_menus(&mut pie, &mut options, &ui.data, actor_sim, skills.level("Cooking"), known, time, stove, (fridge, microwave), stock);
                     continue;
                 }
                 if d.special == Special::WriteNovel {
@@ -1691,7 +1701,7 @@ fn world_click(
                 let clock = &opp_q.2;
                 opp_tasks.extend(crate::classes::lot_classes(l, clock.hour_f(), clock.day(), s.age, taken, None).into_iter().map(|(label, task)| (label, ActionKind::Visit { lot, activity: task })));
                 // (The venue's own: its show, its game, its meals, its treatments...)
-                opp_tasks.splice(0..0, crate::venues::lot_options(l, clock.day(), clock.hour_f(), s.age).into_iter().map(|(label, task)| (label, ActionKind::Visit { lot, activity: task })));
+                opp_tasks.splice(0..0, crate::venues::world_lot_options(&world.data, lot, clock.day(), clock.hour_f(), s.age).into_iter().map(|(label, task)| (label, ActionKind::Visit { lot, activity: task })));
             }
             let visit = crate::visit::visitable(&world.data, lot);
             if !acts.is_empty() || !opp_tasks.is_empty() || visit {

@@ -11,7 +11,8 @@
 //! - the day spa's massages, facials, body treatments, nails and day packages, three levels
 //!   each at the game's prices and lengths, each with its moodlet, the better ones taking bad
 //!   moodlets away;
-//! - selling the produce and fish carried at the grocery (a tenth over their worth);
+//! - selling the produce and fish carried at the grocery (a tenth over their worth), and going in
+//!   to shop there (`shop`: its ingredients, by tab or recipe, and selling);
 //! - a visit to city hall, the science lab, the military base, the theatre or the mausoleum:
 //!   Bored, by age, or Excited, Fascinated, Intrigued, Impressed or Educated; and exploring the
 //!   mausoleum's catacombs, for what's to be found (and now and then a fright).
@@ -53,6 +54,8 @@ pub enum Effect {
     Explore,
     /// The produce and fish sold.
     Sell,
+    /// Gone in to shop (`shop`'s dialog, while they're there).
+    Shop,
 }
 
 /// A venue's activity: where (words in the lot's name), when (days of the week, Monday 0; and
@@ -103,7 +106,7 @@ const MILITARY: &[&str] = &["military"];
 /// A great show: sixteen hours.
 const SHOW_MINUTES: f64 = 960.0;
 
-pub static ACTS: [VenueAct; 33] = [
+pub static ACTS: [VenueAct; 34] = [
     // The theatre (`ShowVenue`): evenings from five (doors close two hours before the end).
     v(THEATRE, MON_TO_THU, a("See a Movie", 120.0, 40, AT_SHOW, 17.0, 21.0), Effect::Moodlet(MoodletKind::SawGreatMovie, 10, SHOW_MINUTES)),
     v(THEATRE, FRI_SAT_SUN, a("See a Movie", 120.0, 40, AT_SHOW, 17.0, 21.0), Effect::Moodlet(MoodletKind::SawGreatMovie, 10, SHOW_MINUTES)),
@@ -145,7 +148,14 @@ pub static ACTS: [VenueAct; 33] = [
     v(MILITARY, EVERY_DAY, a("Visit the Military Base", 60.0, 0, VISITING, 8.0, 20.0), Effect::Visit([10, 20, 2])),
     v(MAUSOLEUM, EVERY_DAY, a("Visit the Mausoleum", 60.0, 0, VISITING, 0.0, 24.0), Effect::Visit([10, 5, 2])),
     v(MAUSOLEUM, EVERY_DAY, a("Explore the Catacombs", 180.0, 0, EXPLORING, 0.0, 24.0), Effect::Explore),
+    // The grocery's shop (`Grocery.ShopByRecipe`), from seven till midnight.
+    v(GROCERY, EVERY_DAY, a("Shop", 30.0, 0, SELLING, 7.0, 24.0), Effect::Shop),
 ];
+
+/// The grocery's "Shop" (its visit's activity, for `shop` to know a shopper by).
+pub fn shop_activity() -> Option<&'static Activity> {
+    ACTS.iter().find(|a| a.effect == Effect::Shop).map(|a| &a.activity)
+}
 
 /// The show on at the theatre on a day (the game's: Friday to Sunday, 15 in a hundred each a
 /// concert, a play, a symphony, the rest a movie; other nights a movie): the index of its act.
@@ -195,10 +205,29 @@ pub fn is_venue(lot: &s3formats::world::LotInfo) -> bool {
 /// What a venue offers a Sim now: its activities open today and at this hour (the theatre's
 /// show of the day), labelled with their prices, and their activity numbers.
 pub fn lot_options(lot: &s3formats::world::LotInfo, day: u32, hour: f32, age: Age) -> Vec<(String, usize)> {
+    options_for(&venue_name(lot), day, hour, age)
+}
+
+/// The venues' rabbit holes by the game's class for them (`opportunities::lot_types`), for a lot
+/// of several not named for any (Sunset Valley's plaza, with its grocery).
+const BY_TYPE: [(&str, &[&str]); 6] = [("Grocery", GROCERY), ("Theatre", THEATRE), ("Stadium", STADIUM), ("CityHall", CITY_HALL), ("ScienceLab", SCIENCE), ("MilitaryBase", MILITARY)];
+
+/// What a town's lot offers of the venues': by its name, or by the rabbit holes on it.
+pub fn world_lot_options(world: &crate::loading::WorldInfo, lot: usize, day: u32, hour: f32, age: Age) -> Vec<(String, usize)> {
+    let Some(l) = world.lots.get(lot) else { return Vec::new() };
+    if is_venue(l) {
+        return lot_options(l, day, hour, age);
+    }
+    let types = crate::opportunities::lot_types(world, lot);
+    let words: Vec<&str> = BY_TYPE.iter().filter(|(t, _)| types.contains(t)).flat_map(|(_, w)| w.iter().copied()).collect();
+    if words.is_empty() { Vec::new() } else { options_for(&words.join(" "), day, hour, age) }
+}
+
+/// The acts of the venues named in `n` open now.
+fn options_for(n: &str, day: u32, hour: f32, age: Age) -> Vec<(String, usize)> {
     if age.is_little() {
         return Vec::new();
     }
-    let n = venue_name(lot);
     let weekday = day % 7;
     let show = tonights_show(day);
     ACTS.iter()
@@ -333,6 +362,7 @@ fn venue_done(
                     notes.push(format!("Something in the catacombs horrified {}!", sim.first));
                 }
             }
+            Effect::Shop => {}
             Effect::Sell => {
                 let Some(mut inv) = inv else {
                     notes.push(format!("{} had nothing to sell.", sim.first));

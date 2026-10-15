@@ -493,7 +493,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(PreUpdate, ui_flow.after(bevy::ui::UiSystems::Focus))
             .add_systems(PreUpdate, auto_move_house.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::ChooseLot)))
             .add_systems(OnEnter(AppState::InGame), showroom)
-            .add_systems(Update, show_layouts.run_if(in_state(crate::PlayMode::Live)));
+            .add_systems(Update, (show_layouts, layout_tree).run_if(in_state(crate::PlayMode::Live)));
     }
 }
 
@@ -4068,8 +4068,10 @@ fn auto_action(
     let with = name.starts_with("VenueWith ");
     if let Some((place, what)) = name.strip_prefix("Venue ").or_else(|| name.strip_prefix("VenueWith ")).and_then(|r| r.split_once(':')) {
         let place = place.to_ascii_lowercase();
-        let found = world.data.lots.iter().enumerate().filter(|(_, l)| !l.is_residential() && l.internal_name.to_ascii_lowercase().contains(&place)).find_map(|(lot, l)| {
-            let n = l.internal_name.to_ascii_lowercase().replace("amphitheater", "amphi");
+        // (By the lot's name, or a rabbit hole on it: the plaza's grocery.)
+        let named = |lot: usize, l: &s3formats::world::LotInfo| format!("{} {}", l.internal_name, crate::opportunities::lot_types(&world.data, lot).join(" ")).to_ascii_lowercase();
+        let found = world.data.lots.iter().enumerate().filter(|(lot, l)| !l.is_residential() && named(*lot, l).contains(&place)).find_map(|(lot, l)| {
+            let n = named(lot, l).replace("amphitheater", "amphi");
             let i = crate::venues::ACTS.iter().position(|a| a.activity.name.eq_ignore_ascii_case(what) && a.venue.iter().any(|v| n.contains(v)))?;
             Some((lot, i))
         });
@@ -4777,6 +4779,45 @@ fn auto_load(args: Res<AutoArgs>, worlds: Res<WorldList>, mut commands: Commands
         && crate::save::begin_load(&mut commands, &worlds, g, Some(p))
     {
         next.set(AppState::Loading);
+    }
+}
+
+/// LAYOUT_TREE=<name,name...>: the game's interface layouts' windows logged, as a tree (each
+/// window's class, id, area, place and words: for laying out a dialog from one).
+fn layout_tree(ui: Option<Res<crate::layout::UiAssets>>, mut done: Local<bool>) {
+    let (Ok(v), Some(ui)) = (std::env::var("LAYOUT_TREE"), ui) else { return };
+    if *done {
+        return;
+    }
+    *done = true;
+    fn walk(w: &s3bake::ui::UiWindow, depth: usize, out: &mut String) {
+        out.push_str(&format!(
+            "{}{} {:#010x} [{:.0} {:.0} {:.0} {:.0}] {:?} flags {:#x}{}{}
+",
+            "  ".repeat(depth),
+            w.cls,
+            w.id,
+            w.area[0],
+            w.area[1],
+            w.area[2],
+            w.area[3],
+            w.place,
+            w.flags,
+            if w.caption.is_empty() { String::new() } else { format!(" \"{}\"", w.caption) },
+            w.grid.map_or(String::new(), |g| format!(" grid {:?}x{} {:?}", g.cell, g.columns, g.rows)),
+        ));
+        for c in &w.children {
+            walk(c, depth + 1, out);
+        }
+    }
+    for name in v.split(',') {
+        let mut out = String::new();
+        match ui.layout(name.trim()) {
+            Some(w) => walk(w, 0, &mut out),
+            None => out.push_str("(none)"),
+        }
+        info!("LAYOUT_TREE {name}:
+{out}");
     }
 }
 

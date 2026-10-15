@@ -432,6 +432,9 @@ pub struct SaveGame {
     /// Leftovers in the fridge (servings, by recipe).
     #[serde(default)]
     pub leftovers: Vec<String>,
+    /// The ingredients in the fridge (none: saves from before ingredients, given the start's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fridge: Option<Vec<crate::inventory::Stack>>,
     /// Meals still on the lot, including pizza and cut cakes, with remaining servings.
     #[serde(default)]
     pub meals: Vec<crate::meals::SavedMeal>,
@@ -817,11 +820,11 @@ fn save_game(
     ),
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
-    (story, alarm, bowls, leftovers, weather, pets, pet_data): (
+    (story, alarm, bowls, (leftovers, fridge), weather, pets, pet_data): (
         Res<crate::story::TownStory>,
         Res<crate::appliances::Alarm>,
         Query<(&crate::fishbowl::BowlFish, &Transform), (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>,
-        Res<crate::meals::Leftovers>,
+        (Res<crate::meals::Leftovers>, Res<crate::ingredients::Fridge>),
         Res<crate::weather::Weather>,
         Query<(&crate::pets::Pet, &crate::pets::HomePet, &Transform)>,
         Res<crate::pets::PetData>,
@@ -1005,6 +1008,7 @@ fn save_game(
             .map(|(g, tf)| SavedGrave { position: tf.translation.to_array(), rotation: tf.rotation.to_array(), cause: g.cause.clone(), sim: saved_look(&g.sim) })
             .collect(),
         leftovers: leftovers.0.clone(),
+        fridge: fridge.0.clone(),
         meals: ui.as_deref().map(|u| crate::meals::saved_meals(&meals, &u.data)).unwrap_or_default(),
         weather: Some(weather.clone()),
         pets: crate::pets::saved(&pets, pet_data.0.as_deref()),
@@ -1307,6 +1311,7 @@ pub(crate) fn apply_loaded_game(
     commands.insert_resource(crate::fishbowl::PendingBowls(game.fishbowls.clone()));
     commands.insert_resource(game.collection.clone());
     commands.insert_resource(crate::meals::Leftovers(game.leftovers.clone()));
+    commands.insert_resource(crate::ingredients::Fridge(game.fridge.clone()));
     commands.insert_resource(crate::meals::PendingMeals(game.meals.clone()));
     commands.insert_resource(game.weather.clone().unwrap_or_default());
     commands.insert_resource(crate::pets::PendingPets(game.pets.clone()));

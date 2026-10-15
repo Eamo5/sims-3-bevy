@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 116;
+pub const GAMEDATA_VERSION: u32 = 117;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1252,6 +1252,30 @@ pub struct GameDataBaked {
     /// The catalogue objects that can be stolen (their OBJDs' flag), by OBJD instance, sorted.
     #[serde(default)]
     pub stealable: Vec<u64>,
+    /// The ingredients, of the kinds there are (the game's `ItemTypes` tree).
+    #[serde(default)]
+    pub ingredients: Vec<IngredientInfo>,
+}
+
+/// An ingredient: a base game row of `ingredients`, or a fish of `Fishing`. What kind of thing it
+/// is (the game's `ItemTypes`, by `Parent`: a Tomato a Vegetable, a Minnow a Fish), and what
+/// the grocery asks for it.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct IngredientInfo {
+    /// `Tomato`, `Hot Dogs`, `Minnow`; or a kind of them (`Vegetable`, `Fish`, `Ingredient`).
+    pub key: String,
+    pub name: String,
+    /// The kind it's of (`ROOT` at the top).
+    pub parent: String,
+    /// A kind of ingredient, not one in itself.
+    pub kind: bool,
+    pub price: i32,
+    /// Sold at the grocery.
+    pub can_buy: bool,
+    /// A plant's produce: the grocery asks its quality's price for it.
+    pub grown: bool,
+    /// The grocery's tab for it (`Meat`, `Produce`, `Fish`).
+    pub tab: String,
 }
 
 /// The seasons' weather, from the game's `Seasons` table: temperatures through the day, how
@@ -3244,6 +3268,47 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             });
         }
         ppack.finish().map_err(|e| e.to_string())?;
+    }
+    // The ingredients, and the fish (as ingredients: a kind of Fish).
+    if let Some(ing) = xml("ingredients") {
+        for f in records(&ing, "Data") {
+            let key = get(&f, "Ingredient_Key");
+            if key.is_empty() || !f.get("CodeVersion").is_none_or(|v| v.is_empty() || v == "BaseGame") {
+                continue;
+            }
+            let name = text("Ingredients/Data", &get(&f, "Ingredient_Name"));
+            out.ingredients.push(IngredientInfo {
+                name: if name.is_empty() { key.clone() } else { name },
+                parent: get(&f, "Parent"),
+                kind: !get(&f, "Abstract").is_empty(),
+                price: num(&f, "Price") as i32,
+                can_buy: get(&f, "CanBuyFromStore").eq_ignore_ascii_case("true"),
+                grown: !get(&f, "Plant_Name").is_empty(),
+                tab: get(&f, "UiTab"),
+                key,
+            });
+        }
+    }
+    if let Some(x) = xml("Fishing") {
+        for f in records(&x, "Fish") {
+            let key = get(&f, "Name");
+            if key.is_empty() || !f.get("CodeVersion").is_none_or(|v| v.is_empty() || v == "BaseGame") || out.ingredients.iter().any(|i| i.key == key) {
+                continue;
+            }
+            let can_buy = get(&f, "CanBuyFromStore").eq_ignore_ascii_case("true");
+            let name = out.collectibles.iter().find(|c| c.key == key).map_or(key.clone(), |c| c.name.clone());
+            out.ingredients.push(IngredientInfo {
+                name,
+                parent: "Fish".into(),
+                kind: false,
+                // (Sold at its least, if at all.)
+                price: if can_buy { num(&f, "MinPrice") as i32 } else { 0 },
+                can_buy,
+                grown: false,
+                tab: "Fish".into(),
+                key,
+            });
+        }
     }
 
     // Opportunities (the base game's), the ones done at a rabbit hole.

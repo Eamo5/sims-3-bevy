@@ -297,6 +297,22 @@ installation is unreachable.
   only by their rig, Waffles, Autumn Salad, Sushi, found through it) — the dish
   on the serving platter, a plateful in front of each Sim — scraped clean once eaten. The
   Culinary Librarian lifetime wish asks for every one. Learned recipes are kept in saves.
+- **Ingredients**, as the game's: a recipe's (up to three, of a kind or any of a kind of thing:
+  a Tomato, any Fish, any Ingredient for Stu Surprise) come from the cook's inventory, then the
+  fridge, and what's missing is bought there and then at its price and half again (the menus
+  show what that comes to: Spaghetti §5 from an empty fridge, nothing with a tomato in hand); a
+  recipe needing what can't be bought (a Lifefruit) isn't offered. What it's made of counts
+  towards how it comes out: a perfect tomato's thirty of the game's food points, a horrifying
+  one fifty against. A household's fridge starts with three each of what the simplest recipes
+  take (cheese, lettuce, eggs, hot dogs, tofu), and produce and fish can be put in it from the
+  inventory ("Put in Fridge"); it's kept in saves.
+- **The grocery's shop**, the game's own dialog: "Shop" there (the plaza's grocery too, found by
+  its rabbit hole) and it's up when the Sim goes in, the game paused: what the grocery sells by
+  tab (produce, meat, fish) at its prices (produce at half again, being Nice), "Shop by Recipe"
+  (the recipes the Sim knows, a recipe's ingredients together) and "Sell" (their produce and
+  fish at a tenth over their worth); rows added to the cart, the cart's lines with their counts
+  and cost, the total and the funds, and "Buy Items" puts what's bought in the Sim's inventory.
+  `SHOP=1` puts it up for the selected Sim (a test).
 - **Plumbob**: over the Sim's head wherever their animation has it (lying in the bath, sat
   down, a child's lower).
 - **Props in hand**: the game's own plates, forks, books and guitars, held as its animation

@@ -24,7 +24,12 @@ pub struct MealsPlugin;
 impl Plugin for MealsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Leftovers>()
-            .add_systems(OnEnter(crate::AppState::InGame), |mut l: ResMut<Leftovers>| l.0.clear())
+            .init_resource::<crate::ingredients::Fridge>()
+            .add_systems(OnEnter(crate::AppState::InGame), |mut l: ResMut<Leftovers>, mut f: ResMut<crate::ingredients::Fridge>| {
+                l.0.clear();
+                f.0 = None;
+            })
+            .add_systems(Update, crate::ingredients::stock_fridge.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, (restore_meals, cook_prep, cook_prep_done, serve_if_interrupted, take_out_dinner, meal_requests, update_platters, update_eating_plates, probe_platters, probe_meal_budget, come_to_meal, release_plates, learn_recipes, cut_cakes).chain().run_if(in_state(PlayMode::Live)));
     }
 }
@@ -252,13 +257,14 @@ pub struct Cook {
 }
 
 /// A dish's quality as the game's `SetQualityAndFoodPoints` reckons it: the recipe level's food
-/// points, the cook's practice with it, the stove's own, the cook's touch, less for a group
-/// meal, nothing to speak of if burnt; a Menu Maven's a quality better.
-pub fn meal_quality(recipe_level: u8, cook: &Cook, stove_points: f32, group: bool, burnt: bool) -> MealQuality {
+/// points, the cook's practice with it, what it's made of (`ingredients`: see
+/// `ingredients::points`), the stove's own, the cook's touch, less for a group meal, nothing to
+/// speak of if burnt; a Menu Maven's a quality better.
+pub fn meal_quality(recipe_level: u8, cook: &Cook, ingredients: f32, stove_points: f32, group: bool, burnt: bool) -> MealQuality {
     let points = if burnt {
         BURNT_POINTS
     } else {
-        let mut p = LEVEL_POINTS[recipe_level.min(10) as usize] + cook.times_made as f32 * POINTS_PER_TIME_MADE + stove_points;
+        let mut p = LEVEL_POINTS[recipe_level.min(10) as usize] + cook.times_made as f32 * POINTS_PER_TIME_MADE + ingredients + stove_points;
         if cook.natural_cook {
             p += NATURAL_COOK_POINTS;
         }
@@ -417,8 +423,11 @@ fn cut_cakes(
     }
 }
 
-/// Ingredients only found, never bought.
-const RARE: [&str; 4] = ["Lifefruit", "Deathfish", "Flame Fruit", "Ingredient"];
+/// Whether a recipe's ingredients can all be bought (not those only found: a Lifefruit, a
+/// Deathfish).
+fn buyable(data: &s3bake::GameDataBaked, r: &s3bake::gamedata::RecipeInfo) -> bool {
+    r.ingredients.iter().all(|i| crate::ingredients::cheapest(data, i).is_some())
+}
 
 /// The meal of the hour (`MEAL_*`) and its name, from the installed Food tuning.
 /// Weekdays are Monday=0 through Sunday=6, as in GameClock.
@@ -443,7 +452,7 @@ pub fn cookable(data: &s3bake::GameDataBaked, sim: &Sim, cooking: u32, known: Op
         .enumerate()
         .filter(|(_, r)| r.meals & meal != 0 && (!veg || r.vegetarian))
         .filter(|(_, r)| knows(r, cooking, known))
-        .filter(|(_, r)| !r.ingredients.iter().any(|i| RARE.contains(&i.as_str())))
+        .filter(|(_, r)| buyable(data, r))
         .map(|(i, _)| i)
         .collect()
 }
@@ -739,7 +748,7 @@ fn probe_meal_budget(
     mut commands: Commands, time: Res<Time<crate::autotest::InputTimeline>>,
     ui: Option<Res<crate::icons::GameUi>>, funds: Option<ResMut<crate::interact::Household>>,
     objects: Query<(Entity, &GameObject)>, mut selected: Query<(Entity, &mut ActionQueue), With<crate::sim::Selected>>,
-    notes: Res<Notifications>, mut state: Local<(u8, usize)>,
+    notes: Res<Notifications>, mut state: Local<(u8, usize)>, fridge: Res<crate::ingredients::Fridge>,
 ) {
     if std::env::var_os("MEAL_BUDGET_TEST").is_none() || state.0 == 3 || time.elapsed_secs() < 6.0 { return; }
     let (Some(ui), Some(mut funds), Ok((sim, mut queue))) = (ui, funds, selected.single_mut()) else { return };
@@ -749,7 +758,13 @@ fn probe_meal_budget(
             funds.funds = 0;
             queue.0.clear();
             let stove = objects.iter().find(|(_, o)| o.kind == ObjectKind::Stove).expect("fixture stove").0;
-            let recipe = ui.data.recipes.iter().position(|r| r.cost > 0).expect("paid recipe");
+            // (One whose ingredients have to be bought.)
+            let recipe = ui
+                .data
+                .recipes
+                .iter()
+                .position(|r| crate::ingredients::plan(&ui.data, &r.ingredients, None, fridge.stock()).is_some_and(|p| p.cost > 0))
+                .expect("paid recipe");
             commands.entity(sim).insert((MealPlan(recipe), ServingFrom(stove), MealRequest::Serve(stove)));
             state.1 = count;
             state.0 = 1;
@@ -881,6 +896,7 @@ fn meal_requests(
     (ui, clock, mut funds, mut leftovers): (Option<Res<crate::icons::GameUi>>, Res<crate::clock::GameClock>, Option<ResMut<crate::interact::Household>>, ResMut<Leftovers>),
     mut did: MessageWriter<crate::journal::Did>,
     (qualities, floors, mut fire, rates): (Query<&MealQuality>, Query<&crate::nav::Floor>, MessageWriter<crate::fire::StartFire>, Res<crate::interact::ObjectRates>),
+    (mut inventories, mut fridge): (Query<&mut crate::inventory::Inventory>, ResMut<crate::ingredients::Fridge>),
 ) {
     use rand::Rng;
     let recipes = ui.as_ref().map(|u| u.data.clone());
@@ -971,22 +987,33 @@ fn meal_requests(
                     perfectionist: sim.traits.contains(&crate::life::Trait::Perfectionist),
                     menu_maven: crate::journal::earned(journal, "Menu Maven"),
                 };
-                let quality = r.map(|r| meal_quality(r.level, &cook, stove_tuning.map_or(0.0, |t| t.bonus_points), !one, burnt));
+                // The ingredients: the cook's own, the fridge's, the rest bought there and then.
+                let ingredients = r.map(|r| recipes.as_deref().and_then(|d| crate::ingredients::plan(d, &r.ingredients, inventories.get(me).ok(), fridge.stock())));
+                if let Some(None) = ingredients {
+                    notes.push(format!("{} doesn't have the ingredients for {label}.", sim.first));
+                    commands.entity(me).remove::<(MealPlan, BurntDinner)>();
+                    continue;
+                }
+                let ingredients = ingredients.flatten();
+                let quality = r.map(|r| meal_quality(r.level, &cook, ingredients.as_ref().map_or(0.0, |p| p.points), stove_tuning.map_or(0.0, |t| t.bonus_points), !one, burnt));
                 let served = match (r, quality) {
                     (Some(r), Some(_)) if burnt => format!("burnt {}", r.name),
                     (Some(r), Some(q)) => format!("{} {}", q.label(), r.name),
                     _ => label.clone(),
                 };
-                let cost = r.map_or(0, |r| (r.cost as i64).max(0));
+                let cost = ingredients.as_ref().map_or(0, |p| p.cost);
                 if cost > 0 && funds.as_ref().is_none_or(|h| h.funds < cost) {
                     notes.push(format!("{} can't afford the ingredients for {label} (§{cost}).", sim.first));
                     continue;
                 }
-                if one {
-                    commands.entity(me).remove::<ForOne>();
+                if let Some(p) = &ingredients {
+                    crate::ingredients::use_up(p, inventories.get_mut(me).ok().as_deref_mut(), &mut fridge);
                     if let Some(h) = funds.as_mut() {
                         h.funds -= cost;
                     }
+                }
+                if one {
+                    commands.entity(me).remove::<ForOne>();
                     did.write(crate::journal::Did::count(me, crate::journal::Stat::Dishes, 1.0));
                     if let Some(r) = r {
                         did.write(crate::journal::Did::made(me, r.key.clone()));
@@ -1031,10 +1058,6 @@ fn meal_requests(
                 }
                 if let Some(d) = dish {
                     commands.entity(platter).insert(Dish(d));
-                }
-                // The ingredients.
-                if let Some(h) = funds.as_mut() {
-                    h.funds -= cost;
                 }
                 info!("meal served at {at:.1?}: {served}");
                 let dish_word = if r.is_some_and(|r| r.meals == s3bake::gamedata::MEAL_DESSERT) { "Dessert" } else { word };
@@ -1153,7 +1176,7 @@ fn meal_requests(
                 // (Any dish there is, but those made of what's only found.)
                 use rand::seq::IndexedRandom;
                 let pick = recipes.as_ref().and_then(|d| {
-                    let ok: Vec<usize> = (0..d.recipes.len()).filter(|&i| !d.recipes[i].snack && !d.recipes[i].ingredients.iter().any(|x| RARE.contains(&x.as_str()))).collect();
+                    let ok: Vec<usize> = (0..d.recipes.len()).filter(|&i| !d.recipes[i].snack && buyable(d, &d.recipes[i])).collect();
                     ok.choose(&mut rand::rng()).copied()
                 });
                 match pick {
@@ -1319,16 +1342,19 @@ mod tests {
         use crate::life::MoodletKind as K;
         let novice = Cook { times_made: 0.0, natural_cook: false, perfectionist: false, menu_maven: false };
         // (An easy recipe made for the first time, on a plain stove: Neutral, a Good Meal.)
-        let q = meal_quality(0, &novice, 0.0, false, false);
+        let q = meal_quality(0, &novice, 0.0, 0.0, false, false);
         assert_eq!((q.label(), q.strength, meal_moodlet(q.strength)), ("Neutral", 10, Some(K::GoodMeal)));
+        // (Made of a perfect tomato: better.)
+        let fresh = meal_quality(0, &novice, crate::ingredients::points(9), 0.0, false, false);
+        assert!(fresh.quality > q.quality, "{}", fresh.label());
         // (The hardest, made twenty times before, on the best stove: Perfect, an Amazing Meal.)
         let practised = Cook { times_made: 20.0, ..novice };
-        let best = meal_quality(10, &practised, 20.0, false, false);
+        let best = meal_quality(10, &practised, 0.0, 20.0, false, false);
         assert_eq!((best.label(), meal_moodlet(best.strength)), ("Perfect", Some(K::AmazingMeal)));
-        assert_eq!(meal_quality(10, &practised, 20.0, true, false).label(), "Outstanding", "a group meal's share is three quarters");
-        let burnt = meal_quality(5, &practised, 20.0, false, true);
+        assert_eq!(meal_quality(10, &practised, 0.0, 20.0, true, false).label(), "Outstanding", "a group meal's share is three quarters");
+        let burnt = meal_quality(5, &practised, 0.0, 20.0, false, true);
         assert_eq!((burnt.label(), meal_moodlet(burnt.strength)), ("Horrifying", None));
-        let maven = meal_quality(0, &Cook { menu_maven: true, ..novice }, 0.0, false, false);
+        let maven = meal_quality(0, &Cook { menu_maven: true, ..novice }, 0.0, 0.0, false, false);
         assert_eq!((maven.label(), maven.strength), ("Nice", 10), "a quality better, as strong as it was cooked");
         assert_eq!(meal_moodlet(25), Some(K::GreatMeal));
     }
