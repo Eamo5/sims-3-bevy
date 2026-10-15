@@ -391,6 +391,14 @@ installation is unreachable.
   grown-up has taught them to walk (three lessons, with the game's kneel-and-hold-hands
   animation; talking is taught the same way, and both show on the toddler's Skills tab), play
   with toy boxes, xylophones and peg boxes, nap in cribs and cry when neglected.
+- **Potty training**, as the game's potty chair: a grown-up of the family can "Potty Train"
+  a toddler there (from the chair's menu): the toddler sits on it a quarter of an hour (the
+  game's sitting animations) with the grown-up encouraging them, if they're in a good enough
+  mood; three sessions train them (a Family-Oriented teacher's count half as much again), and
+  it shows on their Skills tab. Only trained toddlers use the potty by themselves (diapers till
+  then). Each use leaves it to be emptied ("Empty", a chore for the household), and it
+  overflows into a puddle past two. `POTTY=1` has the selected Sim train the household's
+  toddler (a test).
 - **Town families**: every world's premade households (the Goths, Landgraabs, Altos, …) with
   their names, bios, family portraits, traits, careers, skills, marriages and homes — play one
   of them, or meet them around town.

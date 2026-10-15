@@ -19,6 +19,9 @@ use crate::{AppState, PlayMode};
 pub struct ToddlerSkills {
     pub walk: f32,
     pub talk: f32,
+    /// Potty training (see `potty`).
+    #[serde(default)]
+    pub potty: f32,
 }
 
 impl ToddlerSkills {
@@ -27,6 +30,9 @@ impl ToddlerSkills {
     }
     pub fn talks(&self) -> bool {
         self.talk >= 1.0
+    }
+    pub fn potty_trained(&self) -> bool {
+        self.potty >= 1.0
     }
 }
 

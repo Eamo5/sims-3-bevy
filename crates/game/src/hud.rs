@@ -1033,7 +1033,7 @@ fn world_click(
     mut ray_cast: MeshRayCast,
     parents: Query<&ChildOf>,
     sims: Query<(&Sim, Has<HouseholdMember>, Has<Selected>)>,
-    (objects, broken_q, lit_q, hw_q, trash_q, leftovers, sprinkling, weather, chess, music): (
+    (objects, broken_q, lit_q, hw_q, trash_q, leftovers, sprinkling, weather, chess, music, potties): (
         Query<&GameObject>,
         Query<(), With<crate::interact::Broken>>,
         Query<(), With<crate::fireplace::Lit>>,
@@ -1044,6 +1044,7 @@ fn world_click(
         Res<crate::weather::Weather>,
         Res<crate::chess::ChessTables>,
         Res<crate::tips::Performances>,
+        Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
     (members_q, laundry, sides_q, moods_q): (Query<(), With<HouseholdMember>>, Res<crate::laundry::Laundry>, Query<crate::social::SideQuery>, Query<&crate::life::Moodlets>),
@@ -1290,6 +1291,33 @@ fn world_click(
                 }
                 if d.special == Special::WatchChess && !chess.watchable(t, actor) {
                     continue;
+                }
+                // A potty chair: sat on by toddlers; a grown-up's to empty once used, and to
+                // "Potty Train..." the family's toddlers not yet trained on.
+                if obj.kind == ObjectKind::PottyChair {
+                    if !crate::potty::suits(d, actor_sim) || (d.special == Special::EmptyPotty && !potties.needs_emptying(t)) || d.special == Special::PottyLesson {
+                        continue;
+                    }
+                    if d.special == Special::PottyTrain {
+                        let here = on_lot.get(actor).ok().map(|l| l.0);
+                        let toddlers = company_q
+                            .iter()
+                            .filter(|c| c.3.map(|l| l.0) == here)
+                            .map(|c| (c.0, c.1, members_q.contains(c.0) || family.kin(actor_sim.id, c.1.id).is_some()));
+                        let list: Vec<(String, ActionKind)> = crate::potty::trainable(&potties, toddlers)
+                            .into_iter()
+                            .map(|(_, name)| (format!("{} {name}", crate::potty::POTTY_TRAIN), ActionKind::Object { target: t, def: i }))
+                            .collect();
+                        match list.len() {
+                            0 => {}
+                            1 => options.extend(list),
+                            _ => {
+                                options.push((format!("{}... ›", crate::potty::POTTY_TRAIN), submenu_kind(pie.submenus.len())));
+                                pie.submenus.push((crate::potty::POTTY_TRAIN.to_string(), list));
+                            }
+                        }
+                        continue;
+                    }
                 }
                 // (An instrument played for tips outdoors or on a community lot, as the game's;
                 // watched while someone else is playing it.)
@@ -1740,6 +1768,16 @@ fn pie_buttons(
         && let Some((key, _)) = crate::music::stations(sounds.as_deref()).into_iter().find(|(_, n)| *n == label)
     {
         commands.entity(target).insert(crate::music::StereoOn(Some(key.to_string())));
+        return;
+    }
+    // A toddler potty trained: the grown-up to the chair, the toddler sat on it once they're there.
+    if let ActionKind::Object { .. } = kind
+        && let Some(name) = label.strip_prefix(&format!("{} ", crate::potty::POTTY_TRAIN))
+        && let (Some(a), Some((toddler, _))) = (actor, people.iter().find(|p| p.1.first == name && p.1.age == crate::sim::Age::Toddler))
+        && let Ok(mut q) = queues.get_mut(a)
+    {
+        q.push_player(Action::new(label.clone(), kind.clone(), false));
+        commands.entity(a).insert(crate::potty::PottyTraining { toddler, asked: false });
         return;
     }
     // Chess with someone: both to the table, a chair each.

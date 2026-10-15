@@ -480,6 +480,11 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "p2o_toyPegBox_play_",
     "p2o_toybox_playIn_",
     "p2o_highChair_",
+    // (The potty chair: sat on, potty training, emptied.)
+    "p2o_pottyChair_",
+    "a2p_pottyChair_",
+    "a2o_pottyChair_empty_",
+    "c2o_pottyChair_empty_",
     // Babies.
     "b_idle_breathe",
     "b_sleep_beingHeld_y",

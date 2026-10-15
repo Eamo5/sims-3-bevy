@@ -1211,6 +1211,11 @@ pub enum Special {
     PlayForTips,
     /// Watch someone play an instrument.
     WatchMusic,
+    /// Potty train a toddler at the potty chair, the toddler's sitting for it, and emptying it
+    /// (see `potty`).
+    PottyTrain,
+    PottyLesson,
+    EmptyPotty,
     /// Blow out a birthday cake's candles and grow up.
     BlowOutCandles,
     /// Write (a page at a time) the book under way.
@@ -1524,7 +1529,15 @@ static CAR: [InteractionDef; 1] = [InteractionDef { autonomous: false, ..def("Go
 static PICNIC: [InteractionDef; 1] = [def("Have a Picnic", 30.0, [150.0, 0.0, 0.0, 10.0, 0.0, 25.0], Pose::Use)];
 static XYLOPHONE: [InteractionDef; 1] = [def("Play Xylophone", 40.0, [0.0, 0.0, -4.0, 20.0, 0.0, 130.0], Pose::Use)];
 static PEGBOX: [InteractionDef; 1] = [def("Play with Peg Box", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 120.0], Pose::Use)];
-static POTTY: [InteractionDef; 1] = [InteractionDef { until_full: Some(BLADDER), ..def("Use Potty", 10.0, [0.0, 600.0, 0.0, 0.0, -20.0, 0.0], Pose::Sit) }];
+/// (Sat on, by toddlers potty trained, or a grown-up's to teach them on and empty: see `potty`.)
+static POTTY: [InteractionDef; 4] = [
+    InteractionDef { until_full: Some(BLADDER), on_object: true, ..def("Use Potty Chair", 15.0, [0.0, 600.0, 0.0, 0.0, -20.0, 0.0], Pose::Sit) },
+    // (Waiting there while the toddler comes and sits: done when they are.)
+    InteractionDef { autonomous: false, special: Special::PottyTrain, ..def("Potty Train", 120.0, [0.0, 0.0, -2.0, 10.0, 0.0, 5.0], Pose::Stand) },
+    InteractionDef { special: Special::EmptyPotty, ..def("Empty", 3.0, N, Pose::Use) },
+    // (Sat on to be taught, the quarter hour through, for the company: never on the menu.)
+    InteractionDef { autonomous: false, on_object: true, special: Special::PottyLesson, ..def("Use Potty Chair", 15.0, [0.0, 600.0, 0.0, 30.0, -20.0, 0.0], Pose::Sit) },
+];
 static DRESSER: [InteractionDef; 2] = [
     InteractionDef { autonomous: false, special: Special::ChangeClothes, ..def("Change Into", 4.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::PlanOutfit, ..def("Plan Outfit", 2.0, N, Pose::Use) },
@@ -1940,6 +1953,10 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Play Chess" | "Play a Ranked Match" if kind == ObjectKind::Chair => A::new(Some("a2o_chessTable_start_x"), &["a2o_chessTable_loop"]).ending(&["a2o_chessTable_stop_x"], 1.5),
         "Watch Chess Match" => A::new(None, crate::chess::WATCHING),
         "Watch" => A::new(None, crate::tips::WATCHING),
+        // (Sat on it, the game's `PottyChair` toddler's; emptied into its bag.)
+        "Use Potty Chair" => A::new(None, &["p2o_pottyChair_use_loopBreath_y", "p2o_pottyChair_use_loopPat_y"]),
+        "Empty" if kind == ObjectKind::PottyChair => A::new(None, &["a2o_pottyChair_empty_x"]),
+        "Potty Train" => A::new(None, &["a_idle_neutral_loop_"]),
         "Nap in Crib" => A::new(Some("p2o_crib_sleep_start_y"), &["p2o_crib_sleep_loop_y"]),
         "Change Clothes" | "Change Into" | "New Everyday Outfit" | "Plan Outfit" => A::new(Some("a2o_dresser_use_open"), &["a2o_dresser_use_close"]),
         "Grill" => A::new(Some("a2o_bbq_grill_start"), &["a2o_bbq_grill_loopBreathe", "a2o_bbq_grill_loopPokeLeft", "a2o_bbq_grill_loopPokeRight", "a2o_bbq_grill_loopExpert"]),
@@ -2284,7 +2301,7 @@ impl ObjectKind {
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy),
             // (Children can't cook or light fires, and the goggles are for teens and up.)
             Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle),
-            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::DollHouse | K::JungleGym | K::Slide | K::StuffedToy | K::ToyOven),
+            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::HighChair | K::DollHouse | K::JungleGym | K::Slide | K::StuffedToy | K::ToyOven),
         }
     }
 
@@ -3898,7 +3915,10 @@ pub(crate) fn run_actions(
                                         | Special::PlayChess
                                         | Special::WatchChess
                                         | Special::PlayForTips
-                                        | Special::WatchMusic => {}
+                                        | Special::WatchMusic
+                                        | Special::PottyTrain
+                                        | Special::PottyLesson
+                                        | Special::EmptyPotty => {}
                                         Special::GetBook => {
                                             commands.entity(me).insert(crate::surroundings::ReadSomewhere(*target));
                                             // (A skill book taken down: read for its skill.)
@@ -4922,9 +4942,10 @@ pub(crate) fn run_actions(
 }
 
 /// Revalidate maintenance on every action tick, including object reservations.
-/// Watching someone play: the instrument's theirs still, watched by any number.
+/// Watching someone play (the instrument's theirs still, watched by any number); and a grown-up
+/// beside the potty chair their toddler's on.
 fn watches(kind: ObjectKind, def: usize) -> bool {
-    interactions_for(kind).get(def).is_some_and(|d| d.special == Special::WatchMusic)
+    interactions_for(kind).get(def).is_some_and(|d| matches!(d.special, Special::WatchMusic | Special::PottyTrain))
 }
 
 fn object_action_available(actor: Entity, kind: ObjectKind, def: usize, owner: Option<Entity>, broken: bool, phase: Phase) -> bool {
@@ -5167,7 +5188,7 @@ fn autonomy(
     (called, repairmen, laundry, privacy): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>, Res<crate::laundry::Laundry>, Res<crate::privacy::Privacy>),
     friends_away: Query<(Entity, &Sim), (With<OffLot>, Without<Invited>)>,
     (callers, residents): (Query<(Entity, &crate::doorbell::AtTheDoor)>, Query<&crate::homes::Resident>),
-    (weather, building, chess, music): (Res<crate::weather::Weather>, Option<Res<crate::building::ActiveBuilding>>, Res<crate::chess::ChessTables>, Res<crate::tips::Performances>),
+    (weather, building, chess, music, potties): (Res<crate::weather::Weather>, Option<Res<crate::building::ActiveBuilding>>, Res<crate::chess::ChessTables>, Res<crate::tips::Performances>, Res<crate::potty::Potties>),
 ) {
     if delta.0 <= 0.0 {
         return;
@@ -5276,6 +5297,12 @@ fn autonomy(
             }
             for (di, d) in interactions_for(obj.kind).iter().enumerate() {
                 if !d.autonomous {
+                    continue;
+                }
+                // (A potty chair: sat on by toddlers trained to, emptied by grown-ups once used.)
+                if obj.kind == ObjectKind::PottyChair
+                    && (!crate::potty::suits(d, sim) || (d.special == Special::None && !potties.trained.contains(&me)) || (d.special == Special::EmptyPotty && !potties.needs_emptying(oe)))
+                {
                     continue;
                 }
                 // (Someone playing: watched; played for tips only outdoors or on a community lot.)
@@ -5428,6 +5455,16 @@ fn autonomy(
                         30.0
                     } else {
                         4.0
+                    };
+                }
+                // (A used potty chair emptied as a chore, the game's environment penalty till then.)
+                if d.special == Special::EmptyPotty {
+                    score = if sim.traits.contains(&crate::life::Trait::Slob) {
+                        0.0
+                    } else if sim.traits.contains(&crate::life::Trait::Neat) {
+                        26.0
+                    } else {
+                        9.0
                     };
                 }
                 if d.special == Special::MakeBed {

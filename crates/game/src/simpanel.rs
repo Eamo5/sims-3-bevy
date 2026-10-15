@@ -236,7 +236,7 @@ fn tab_content(
             only_journal.0,
             journal_page.as_ref().map(|(s, c)| (open.0, s.clone(), c.iter().map(|x| (x.2, (x.3 * 10.0) as i64)).collect::<Vec<_>>())),
             skills.0.iter().map(|(k, v)| (*k, (*v * 20.0) as i32)).collect::<Vec<_>>(),
-            (author.map(|a| (a.books.len(), a.weekly_royalties(), a.draft.as_ref().map(|d| (d.pages / d.length * 50.0) as i32))), chess.map(|c| (c.wins, c.losses)), toddler.map(|t| ((t.walk * 100.0) as i32, (t.talk * 100.0) as i32)))
+            (author.map(|a| (a.books.len(), a.weekly_royalties(), a.draft.as_ref().map(|d| (d.pages / d.length * 50.0) as i32))), chess.map(|c| (c.wins, c.losses)), toddler.map(|t| ((t.walk * 100.0) as i32, (t.talk * 100.0) as i32, (t.potty * 100.0) as i32)))
         ),
         SimTab::Career => format!("{e:?} {:?} {at_work}", job.map(|j| (j.track, j.level, j.performance as i32, j.tone))),
         SimTab::Simology => format!("{e:?} {:?} {:?} {:?}", sim.traits, wishes.map(|w| (w.points, w.rewards.len())), ltw.map(|l| (l.wish, &l.status))),
@@ -259,10 +259,11 @@ fn tab_content(
             if only_journal.0 {
                 list.retain(|(k, _)| open.0 == Some(*k));
             }
-            // A toddler's walking and talking, learned from grown-ups.
+            // A toddler's walking and talking, and potty training (the game's toddler skills),
+            // learned from grown-ups.
             if sim.age == crate::sim::Age::Toddler {
                 let t = toddler.copied().unwrap_or_default();
-                for (name, v, done) in [("Walking", t.walk, "Can walk"), ("Talking", t.talk, "Can talk")] {
+                for (name, v, done) in [("Walking", t.walk, "Can walk"), ("Talking", t.talk, "Can talk"), ("Potty Training", t.potty, "Potty trained")] {
                     p.spawn(Node { column_gap: Val::Px(8.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
                         row.spawn((text(name, 14.0, Color::WHITE), Node { width: Val::Px(120.0), ..default() }));
                         if v >= 1.0 {
@@ -272,7 +273,7 @@ fn tab_content(
                         }
                     });
                 }
-                p.spawn(text(format!("A grown-up can teach {} to walk and talk.", sim.first), 12.0, Color::srgb(0.8, 0.85, 0.95)));
+                p.spawn(text(format!("A grown-up can teach {} to walk and talk, and potty train them at a potty chair.", sim.first), 12.0, Color::srgb(0.8, 0.85, 0.95)));
                 return;
             }
             if list.is_empty() {
