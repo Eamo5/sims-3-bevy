@@ -811,10 +811,26 @@ pub enum MoodletKind {
     /// A wedding party's couple on the day, and those whose wedding didn't happen.
     WeddingDay,
     MissedWedding,
+    /// Out on the town (`venues`): shows and games, a visit's, the spa's, the catacombs' fright.
+    SawGreatMovie,
+    SawGreatPlay,
+    SawGreatSymphony,
+    SawGreatConcert,
+    SawGreatGame,
+    Fascinated,
+    Intrigued,
+    Impressed,
+    Educated,
+    Relaxed,
+    SmoothSkin,
+    Rejuvenated,
+    NiceNails,
+    CompletelyAtEase,
+    Horrified,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 83] = {
+    pub const ALL: [MoodletKind; 98] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -825,7 +841,7 @@ impl MoodletKind {
             TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf, MintyBreath,
             Disgusted, Mourning, FreshClothing, VeryFreshClothing, HolidayCheer, SpringFling, SummerFun, SpookyTime,
             Decorated, NicelyDecorated, BeautifullyDecorated, GreatMeal, Stressed, Winner, Overworked, IAmBeautiful, SugarRush,
-            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding,
+            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, NiceNails, CompletelyAtEase, Horrified,
         ]
     };
 
@@ -938,6 +954,21 @@ impl MoodletKind {
             // (The game's Wedding Day lasts till the party's over: a day here, taken off then.)
             WeddingDay => md("Wedding Day", "Sims love to celebrate this incredibly important day with a party... just make sure everything goes to plan!", 40, 24.0),
             MissedWedding => md("Missed the Wedding", "It's a bad, bad, bad idea to miss the wedding. It takes two to tango and your Sim missed the dance.", -30, 24.0),
+            SawGreatMovie => md("Saw Great Movie", "Sims have a special place in their hearts for movies on the silver screen, and a special place in their stomachs for the buttery popcorn.", 10, 16.0),
+            SawGreatPlay => md("Saw Great Play", "Sims love to watch people on stage doing funny and unexpected things right before their eyes.", 25, 16.0),
+            SawGreatSymphony => md("Saw Great Symphony", "A feast for the ears, Sims devour the mellifluous melodies of symphonies with jubilee.", 30, 16.0),
+            SawGreatConcert => md("Saw Great Concert", "Sims unanimously agree that experiencing a concert is well-worth the potential inner-ear damage.", 25, 16.0),
+            SawGreatGame => md("Saw Great Game", "The fans are rowdy, the food is messy, but when combined with a sports game, it's an experience Sims love!", 20, 16.0),
+            Fascinated => md("Fascinated", "Some Sims take joy in things ordinary Sims might otherwise overlook.", 10, 2.0),
+            Intrigued => md("Intrigued", "Juicy gossip satisfies eager ears!", 10, 3.0),
+            Impressed => md("Impressed", "Touring public place sometimes reveals unexpected and impressive sights.", 10, 3.0),
+            Educated => md("Educated", "Exploring the local halls of culture and learning may teach even the most studious individual a thing or two.", 10, 3.0),
+            Relaxed => md("Relaxed", "Sims love the rhythmic pounding of well-trained hands on the overly tense muscles of the body. So relaxing!", 25, 12.0),
+            SmoothSkin => md("Smooth Skin", "A fabulous facial clears the pores and brings a glow to the recently smoothed skin that's rather refreshing.", 10, 48.0),
+            Rejuvenated => md("Rejuvenated", "The cost of a body treatment seems to melt away when the relaxing feeling of rejuvenation overwhelms a Sim.", 30, 24.0),
+            NiceNails => md("Nice Nails", "It's foolish not to focus on the nails from time to time. There's nothing quite like crisp cuticles!", 5, 48.0),
+            CompletelyAtEase => md("Completely At Ease", "Spending the Simoleons and time to enjoy a full spa package will render your Sim completely at ease.", 20, 168.0),
+            Horrified => md("Horrified", "Terrible things have been seen underneath the mausoleum. Explorers beware.", -35, 8.0),
         }
     }
 
@@ -1033,6 +1064,21 @@ impl MoodletKind {
             WitnessedBetrayal => ("WitnessedBetrayal", true),
             WeddingDay => ("WeddingDay", true),
             MissedWedding => ("MissedWedding", true),
+            SawGreatMovie => ("SawGreatMovie", true),
+            SawGreatPlay => ("SawGreatPlay", true),
+            SawGreatSymphony => ("SawGreatSymphony", true),
+            SawGreatConcert => ("SawGreatConcert", true),
+            SawGreatGame => ("SawGreatGame", true),
+            Fascinated => ("Fascinated", true),
+            Intrigued => ("Intrigued", true),
+            Impressed => ("Impressed", true),
+            Educated => ("Educated", true),
+            Relaxed => ("Relaxed", true),
+            SmoothSkin => ("SmoothSkin", true),
+            Rejuvenated => ("Rejuvinated", true),
+            NiceNails => ("NiceNails", true),
+            CompletelyAtEase => ("CompletelyAtEase", true),
+            Horrified => ("Horrified", true),
         }
     }
 }

@@ -274,6 +274,7 @@ fn tag_clicks(
         tasks.extend(crate::gardening::lot_options(&world.data, tag.lot));
         if let Ok((s, taken)) = learners.get(selected.single().unwrap_or(Entity::PLACEHOLDER)) {
             tasks.extend(crate::classes::lot_classes(lot, clock.hour_f(), clock.day(), s.age, taken, None).into_iter().map(|(label, task)| (label, ActionKind::Visit { lot: tag.lot, activity: task })));
+            tasks.splice(0..0, crate::venues::lot_options(lot, clock.day(), clock.hour_f(), s.age).into_iter().map(|(label, task)| (label, ActionKind::Visit { lot: tag.lot, activity: task })));
         }
         if crate::visit::visitable(&world.data, tag.lot) {
             tasks.insert(0, ("Visit".to_string(), ActionKind::GoToLot { lot: tag.lot }));

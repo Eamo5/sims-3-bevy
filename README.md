@@ -466,6 +466,28 @@ installation is unreachable.
   afternoon, once per skill, from the lot's menu or its map tag. A class gives the skill's
   first level's worth of points, and one class a day is a fifth off. Taken classes are kept in
   saves. `--do "Class Cooking"` attends one.
+- **Skill books**, as the game's (its `BookSkill` table): the bookstore sells the Cooking,
+  Gardening, Handiness, Logic and Charisma books, three volumes each ("Handiness Vol. 1: Unplug
+  It First!", §50 to §750). Bought, they're on the household's shelves; a bookshelf's *Read a
+  Skill Book ›* lists those within the Sim's skill (each volume for its levels) with how far
+  they've got. Read in a chair, a page a minute (a Bookworm a quarter more), each page worth
+  the book's points in its skill, on until it's finished or a need presses; the place is kept,
+  in saves too. `--do "BuyBook Handiness Vol. 1"` and `--do "ReadBook Handiness Vol. 1"` (tests).
+- **The venues' own menus**, as the game's rabbit holes have them. The theatre has an evening
+  show every night from five (§40): a movie most nights, and on Friday to Sunday one night in
+  two a play, a symphony or a concert. There's a weekend matinee from noon (§30), each with
+  the game's moodlet (Saw Great Play +25, Saw Great Symphony +30...). The stadium has games on
+  Sundays and Wednesdays from two (§60, Saw Great Game) and concerts on Friday and Saturday
+  evenings. The bistro (eleven to eleven) and the diner (all day and night) serve a meal (§50,
+  §75 for dinner, a fifth off before six; the diner §12 and §18) and drinks. Both fill the Sim
+  up, the bistro's meal the better. The day spa offers massages, facials, body treatments,
+  manicures and spa days, each at three levels with the game's prices, lengths and moodlets
+  (Relaxed, Smooth Skin, Rejuvenated, Nice Nails, Completely At Ease); the better ones ease
+  away bad moodlets. The grocery buys the produce and fish carried for a tenth over their
+  worth. City hall, the science lab, the military base, the theatre and the mausoleum can be
+  visited: Bored, by age, else Fascinated, Intrigued, Impressed, Educated or excited. The
+  mausoleum's catacombs can be explored for gems, seeds and old books, with a one-in-four
+  chance of being Horrified.
 - **Sim panel tabs**, as the game's: Needs; Skills (each skill learned with its icon, level
   and progress to the next); Career (the job and level, hours, days and pay, the performance
   meter and the next promotion, and how they go about their work: normally, working hard

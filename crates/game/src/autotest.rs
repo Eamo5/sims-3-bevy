@@ -3523,6 +3523,7 @@ fn auto_action(
     (time, mut since): (Res<Time>, Local<Option<f32>>),
     (opps_q, ui, sel_tf): (Query<&crate::opportunities::SimOpportunities>, Option<Res<crate::icons::GameUi>>, Query<&Transform, With<crate::sim::Selected>>),
     townsfolk: Query<(Entity, &crate::sim::Sim), (Without<crate::sim::HouseholdMember>, Or<(With<crate::interact::OffLot>, With<crate::town::Townie>)>)>,
+    tfs: Query<&GlobalTransform>,
 ) {
     let Some(name) = &args.action else { return };
     if *done {
@@ -4013,6 +4014,58 @@ fn auto_action(
         for social in ["Kiss", "Propose Marriage", "Get Married"] {
             let si = crate::social::social_index(social).unwrap();
             q.push_player(crate::interact::Action::new(social, crate::interact::ActionKind::Social { target, social: si }, false));
+        }
+        *done = true;
+        return;
+    }
+    // "BuyBook <words>": off to the bookstore for the skill book whose title has them; "ReadBook
+    // <words>": that book on the household's shelf, read at the nearest bookshelf.
+    if let Some((buy, words)) = name.strip_prefix("BuyBook ").map(|w| (true, w)).or_else(|| name.strip_prefix("ReadBook ").map(|w| (false, w))) {
+        let Some(ui) = ui.as_ref() else { return };
+        let Some(i) = ui.data.skill_books.iter().position(|b| b.name.to_ascii_lowercase().contains(&words.to_ascii_lowercase())) else {
+            warn!("book test: no book {words:?}");
+            *done = true;
+            return;
+        };
+        let me = sel_e.single().unwrap();
+        if buy {
+            let lot = (0..world.data.lots.len()).find(|&l| crate::opportunities::lot_types(&world.data, l).contains(&"Bookstore"));
+            if let (Some(lot), Ok(mut q)) = (lot, sel.single_mut()) {
+                info!("book test: buying {} at lot {lot}", ui.data.skill_books[i].name);
+                q.0.clear();
+                q.push_player(crate::interact::Action::new("Buy a Skill Book", crate::interact::ActionKind::Visit { lot, activity: crate::skillbooks::BOOK_TASK + i }, false));
+            }
+        } else {
+            let at = sel_tf.single().map(|t| t.translation).unwrap_or_default();
+            let shelf = objects.iter().filter(|(_, o)| o.kind == crate::interact::ObjectKind::Bookshelf).min_by(|a, b| {
+                let d = |e: Entity| tfs.get(e).map(|t| t.translation().distance(at)).unwrap_or(f32::MAX);
+                d(a.0).total_cmp(&d(b.0))
+            });
+            let def = crate::interact::interactions_for(crate::interact::ObjectKind::Bookshelf).iter().position(|d| d.special == crate::interact::Special::GetBook);
+            if let (Some((shelf, _)), Some(def), Ok(mut q)) = (shelf, def, sel.single_mut()) {
+                info!("book test: reading {}", ui.data.skill_books[i].name);
+                commands.entity(me).insert(crate::skillbooks::SkillBooks(vec![(ui.data.skill_books[i].key.clone(), 0.0)]));
+                q.0.clear();
+                let mut a = crate::interact::Action::new("Read a Book", crate::interact::ActionKind::Object { target: shelf, def }, false);
+                a.book_choice = Some(i as u16);
+                q.push_player(a);
+            }
+        }
+        *done = true;
+        return;
+    }
+    // "Venue <place>:<activity>": off to that venue for one of its own ("Venue bistro:Eat Here").
+    if let Some((place, what)) = name.strip_prefix("Venue ").and_then(|r| r.split_once(':')) {
+        let place = place.to_ascii_lowercase();
+        let found = world.data.lots.iter().enumerate().filter(|(_, l)| !l.is_residential() && l.internal_name.to_ascii_lowercase().contains(&place)).find_map(|(lot, l)| {
+            let n = l.internal_name.to_ascii_lowercase().replace("amphitheater", "amphi");
+            let i = crate::venues::ACTS.iter().position(|a| a.activity.name.eq_ignore_ascii_case(what) && a.venue.iter().any(|v| n.contains(v)))?;
+            Some((lot, i))
+        });
+        if let (Some((lot, i)), Ok(mut q)) = (found, sel.single_mut()) {
+            info!("venue test: {what} at lot {lot}");
+            q.0.clear();
+            q.push_player(crate::interact::Action::new(name.clone(), crate::interact::ActionKind::Visit { lot, activity: crate::venues::VENUE_TASK + i }, false));
         }
         *done = true;
         return;

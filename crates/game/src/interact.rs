@@ -2461,6 +2461,8 @@ pub struct Action {
     pub canvas_choice: Option<u8>,
     /// The TV channel chosen to watch ("Change to..."; an index into `tvchannels::CHANNELS`).
     pub channel_choice: Option<u8>,
+    /// The skill book chosen to read (an index into the game data's `skill_books`).
+    pub book_choice: Option<u16>,
     pub fish_choice: Option<(String, u8)>,
     pub recipe_choice: Option<usize>,
     /// The recipe's made for one (to eat themselves: "Have Dinner"), not everyone.
@@ -2474,7 +2476,7 @@ pub struct Action {
 
 impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
-        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, channel_choice: None, fish_choice: None, recipe_choice: None, for_one: false, approach: None, social_outcome: None }
+        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, channel_choice: None, book_choice: None, fish_choice: None, recipe_choice: None, for_one: false, approach: None, social_outcome: None }
     }
 }
 
@@ -3606,9 +3608,14 @@ pub(crate) fn run_actions(
                                         .or_else(|| (*activity == crate::gardening::SEEDS_TASK).then_some(&crate::gardening::BUY_SEEDS))
                                         .or_else(|| (*activity == crate::little::BIRTH_TASK).then_some(&crate::little::HAVE_BABY))
                                         .or_else(|| crate::meals::recipe_task(*activity))
-                                        .or_else(|| crate::classes::class_task(*activity));
+                                        .or_else(|| crate::classes::class_task(*activity))
+                                        .or_else(|| (crate::skillbooks::BOOK_TASK..crate::skillbooks::BOOK_TASK + 1000).contains(activity).then_some(&crate::skillbooks::BUY_BOOK))
+                                        .or_else(|| crate::venues::task(*activity));
                                     if crate::meals::recipe_task(*activity).is_some() {
                                         commands.entity(me).insert(crate::meals::BuyingRecipe(*activity - crate::meals::RECIPE_TASK));
+                                    }
+                                    if (crate::skillbooks::BOOK_TASK..crate::skillbooks::BOOK_TASK + 1000).contains(activity) {
+                                        commands.entity(me).insert(crate::skillbooks::BuyingBook(*activity - crate::skillbooks::BOOK_TASK));
                                     }
                                     if let Some(a) = task.or_else(|| acts.get(*activity)) {
                                         let place = crate::rabbitholes::lot_title(l, name);
@@ -3616,6 +3623,10 @@ pub(crate) fn run_actions(
                                         // (The day's discounted class, a fifth off.)
                                         if let Some(i) = activity.checked_sub(crate::classes::CLASS_TASK).filter(|i| *i < crate::classes::CLASSES.len()) {
                                             price *= crate::classes::price(i, clock.day()) as f32 / a.cost.max(1) as f32;
+                                        }
+                                        // (A meal out's price by the hour: dinner dearer, early birds less.)
+                                        if let Some(i) = activity.checked_sub(crate::venues::VENUE_TASK).filter(|i| *i < crate::venues::ACTS.len()) {
+                                            price *= crate::venues::meal_price(i, clock.hour_f()) as f32 / a.cost.max(1) as f32;
                                         }
                                         crate::rabbitholes::head_out(&mut commands, &clock, me, sim, *lot, a, place, household.as_deref_mut(), &mut notes, price);
                                     }
@@ -3830,6 +3841,10 @@ pub(crate) fn run_actions(
                                         | Special::ViewArt => {}
                                         Special::GetBook => {
                                             commands.entity(me).insert(crate::surroundings::ReadSomewhere(*target));
+                                            // (A skill book taken down: read for its skill.)
+                                            if let Some(b) = action.book_choice {
+                                                commands.entity(me).insert(crate::skillbooks::ReadingBook(b as usize));
+                                            }
                                         }
                                         Special::MakeBed => {
                                             commands.entity(*target).remove::<Unmade>();

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 110;
+pub const GAMEDATA_VERSION: u32 = 111;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -77,6 +77,23 @@ pub struct TraitInfo {
     /// `Predicate`).
     #[serde(default)]
     pub predicate: String,
+}
+
+/// A skill book (the game's `BookSkill`): for the skill between its levels, so many points a
+/// page, so many pages (read so many a minute, a Bookworm more), at its price.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SkillBookInfo {
+    pub key: String,
+    pub name: String,
+    pub author: String,
+    pub skill: String,
+    pub min: u32,
+    pub max: u32,
+    pub points_per_page: f32,
+    pub pages: u32,
+    pub price: i64,
+    pub pages_per_minute: f32,
+    pub bookworm_pages_per_minute: f32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -1223,6 +1240,9 @@ pub struct GameDataBaked {
     pub writing: HashMap<String, f32>,
     /// Titles for the books Sims write, by genre (`Fiction`, `SciFi`, `Romance`...).
     pub book_titles: Vec<(String, Vec<String>)>,
+    /// The skill books (`Books`' `BookSkill` rows).
+    #[serde(default)]
+    pub skill_books: Vec<SkillBookInfo>,
     pub recipes: Vec<RecipeInfo>,
     /// The Seasons tuning (`Seasons` table and SeasonsManager's managers).
     pub seasons: SeasonsTuning,
@@ -2884,6 +2904,32 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             }
         }
         out.book_titles = by_genre;
+        // (The skill books: the first row is the defaults; those of the base game's worlds.)
+        let rows = records(&x, "BookSkill");
+        let defaults = rows.first().cloned().unwrap_or_default();
+        let field = |f: &HashMap<String, String>, k: &str| f.get(k).filter(|v| !v.trim().is_empty()).or(defaults.get(k)).map(|v| v.trim().to_string()).unwrap_or_default();
+        for f in rows.iter().skip(1) {
+            let key = get(f, "Title");
+            let worlds = field(f, "AllowedWorldTypes");
+            let version = field(f, "CodeVersion");
+            if key.is_empty() || !version.eq_ignore_ascii_case("Basegame") || !worlds.split(',').any(|w| w.trim() == "Base") {
+                continue;
+            }
+            let n = |k: &str| field(f, k).parse::<f32>().unwrap_or(0.0);
+            out.skill_books.push(SkillBookInfo {
+                name: text("Books/BookSkill", &key),
+                author: text("Books/BookSkill", &get(f, "Author")),
+                skill: get(f, "Skill"),
+                min: n("MinSkill") as u32,
+                max: n("MaxSkill") as u32,
+                points_per_page: n("SkillPointsPerPage"),
+                pages: n("Length") as u32,
+                price: n("Value") as i64,
+                pages_per_minute: n("PagesMinNorm").max(0.1),
+                bookworm_pages_per_minute: n("PagesMinBW").max(0.1),
+                key,
+            });
+        }
     }
     // Recipes, with the food they make (the dish and a plate of it, full and emptied).
     if let Some(x) = xml("RecipeMasterList") {

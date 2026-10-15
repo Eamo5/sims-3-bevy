@@ -90,6 +90,10 @@ pub static SCHOOL: Activity = act("School", 0.0, 0, [-6.0, -3.0, -6.0, 25.0, -6.
 
 /// The rabbit-hole activities a community lot offers, from its name.
 pub fn activities(lot: &LotInfo) -> &'static [Activity] {
+    // (The venues with their own menus, the game's: `venues`.)
+    if crate::venues::is_venue(lot) {
+        return &[];
+    }
     let n = lot.internal_name.to_ascii_lowercase();
     let has = |k: &str| n.contains(k);
     if has("gym") {
@@ -360,6 +364,10 @@ fn outings(
                 }
             } else if std::ptr::eq(at.activity, &crate::meals::BUY_RECIPE) {
                 commands.entity(e).insert(crate::meals::RecipeBookBought);
+            } else if std::ptr::eq(at.activity, &crate::skillbooks::BUY_BOOK) {
+                commands.entity(e).insert(crate::skillbooks::BookBought);
+            } else if let Some(i) = crate::venues::act_of(at.activity) {
+                commands.entity(e).insert(crate::venues::VenueDone(i));
             } else if let Some(skill) = crate::classes::class_of(at.activity) {
                 commands.entity(e).insert(crate::classes::ClassOver(skill));
             } else if std::ptr::eq(at.activity, &crate::gardening::BUY_SEEDS) {

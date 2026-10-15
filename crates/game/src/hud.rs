@@ -119,6 +119,8 @@ const CHANGE_STATION: &str = "Change to";
 
 /// The TV's channel menu (the game's "Change to...": its middle adds the dots).
 const CHANGE_CHANNEL: &str = "Change to";
+/// The bookshelf's skill books' menu.
+const READ_SKILL_BOOK: &str = "Read a Skill Book";
 
 /// A recipe as the food menus list it: with what its ingredients cost, when they do.
 fn recipe_label(r: &s3bake::gamedata::RecipeInfo) -> String {
@@ -1064,7 +1066,7 @@ fn world_click(
             Query<(Option<&crate::music::StereoOn>, Has<crate::interact::Unmade>, Option<&crate::grime::Grime>)>,
         ),
     ),
-    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q): (
+    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, books_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -1078,6 +1080,7 @@ fn world_click(
         Query<(), With<crate::little::Labour>>,
         Query<&crate::tvchannels::TvLevel>,
         Query<(&Sim, Option<&crate::classes::ClassesTaken>)>,
+        Query<(&crate::skillbooks::SkillBooks, Has<HouseholdMember>)>,
     ),
 ) {
     // (Not in buy mode, nor in Edit Town: a click there picks lots.)
@@ -1459,6 +1462,19 @@ fn world_click(
                     }
                     continue;
                 }
+                // The household's skill books, for those whose skill they'd teach.
+                if d.special == Special::GetBook
+                    && let (Some(ui), Ok((_, skills, _))) = (opp_q.0.as_ref(), writers.get(actor))
+                {
+                    let owned = crate::skillbooks::shelved(books_q.iter().filter(|b| b.1).map(|b| b.0));
+                    let mine = books_q.get(actor).ok().map(|b| b.0);
+                    let list: Vec<(String, ActionKind)> =
+                        crate::skillbooks::readable(&ui.data.skill_books, &owned, mine, skills).into_iter().map(|(_, label)| (label, ActionKind::Object { target: t, def: i })).collect();
+                    if !list.is_empty() {
+                        options.push((format!("{READ_SKILL_BOOK} ›"), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((READ_SKILL_BOOK.to_string(), list));
+                    }
+                }
                 // The canvas to paint on.
                 if d.special == Special::SellPainting {
                     let list: Vec<(String, ActionKind)> =
@@ -1533,6 +1549,8 @@ fn world_click(
             if let Ok((s, taken)) = classes_q.get(actor) {
                 let clock = &opp_q.2;
                 opp_tasks.extend(crate::classes::lot_classes(l, clock.hour_f(), clock.day(), s.age, taken, None).into_iter().map(|(label, task)| (label, ActionKind::Visit { lot, activity: task })));
+                // (The venue's own: its show, its game, its meals, its treatments...)
+                opp_tasks.splice(0..0, crate::venues::lot_options(l, clock.day(), clock.hour_f(), s.age).into_iter().map(|(label, task)| (label, ActionKind::Visit { lot, activity: task })));
             }
             let visit = crate::visit::visitable(&world.data, lot);
             if !acts.is_empty() || !opp_tasks.is_empty() || visit {
@@ -1560,6 +1578,16 @@ fn world_click(
                         pie.submenus.clear();
                         options.push(("Buy a Recipe Book ›".to_string(), submenu_kind(pie.submenus.len())));
                         pie.submenus.push(("Recipe Books".to_string(), list));
+                    }
+                    // (And its skill books, those the household hasn't.)
+                    let owned = crate::skillbooks::shelved(books_q.iter().filter(|b| b.1).map(|b| b.0));
+                    let books: Vec<(String, ActionKind)> = crate::skillbooks::for_sale(&ui.data.skill_books, &owned)
+                        .into_iter()
+                        .map(|(i, label)| (label, ActionKind::Visit { lot, activity: crate::skillbooks::BOOK_TASK + i }))
+                        .collect();
+                    if !books.is_empty() {
+                        options.push(("Buy a Skill Book ›".to_string(), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push(("Skill Books".to_string(), books));
                     }
                 }
             }
@@ -1708,6 +1736,14 @@ fn pie_buttons(
         if channel_choice.is_some() {
             label = format!("Watch {label}");
         }
+        // (The skill book chosen from the shelf: "Read a Book", that book.)
+        let book_choice = (title == READ_SKILL_BOOK)
+            .then(|| ui_data.as_ref().and_then(|u| u.data.skill_books.iter().position(|b| label == b.name || label.starts_with(&format!("{} (", b.name)))))
+            .flatten()
+            .map(|b| b as u16);
+        if book_choice.is_some() {
+            label = "Read a Book".to_string();
+        }
         // Keep the genre with its action: later queued choices must not replace
         // the draft currently being written or survive cancellation of that choice.
         let novel_genre = label.strip_prefix("Write: ").and_then(|n| crate::writing::GENRES.iter().position(|g| g.name == n));
@@ -1720,6 +1756,7 @@ fn pie_buttons(
         action.outfit_choice = outfit_choice;
         action.canvas_choice = canvas_choice;
         action.channel_choice = channel_choice;
+        action.book_choice = book_choice;
         action.fish_choice = fish_choice;
         action.recipe_choice = recipe_choice;
         action.for_one = for_one;
