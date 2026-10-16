@@ -257,7 +257,11 @@ installation is unreachable.
 - **Map View**: zoomed out over town, every lot gets the game's map tag — the household's
   home in green with a star, other homes and empty lots, and each venue's own glyph (cut from
   the game's map-tag atlas); hover for the name, click a venue for its activities or a home to
-  fly there.
+  fly there. The household's Sims have tags of their own, their faces where they are (at home,
+  out on a lot, in a venue, at work; clicked, that Sim's selected), and the selected Sim's
+  opportunities theirs, in the opportunity's icon, at the venue where each is done or by the Sim
+  it's done with, what's to be done on hover; tags that would cover others moved along beside
+  them.
 - **Parties**: *Throw Party...* on the phone puts up the game's party planner during the call.
   It offers the kind of party (a house party; a wedding, with one of the household engaged; a
   birthday party; a funeral, with someone buried on the lot), the dress code (casual, formal,

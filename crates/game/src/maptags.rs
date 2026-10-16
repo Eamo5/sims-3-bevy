@@ -2,6 +2,10 @@
 //! by kind, with the venue's glyph from the game's map-tag atlas): the household's home with a
 //! star, other homes, empty lots, and each community venue. Hovering shows the lot's name;
 //! clicking a venue offers its activities, clicking a home flies the camera there.
+//!
+//! The household's Sims have theirs too, their faces where they are (at home, out on a lot, in a
+//! venue or at work: clicked, that's the Sim selected), and the selected Sim's opportunities
+//! theirs (the opportunity's icon), at the venue where it's done or by the Sim it's done with.
 
 use bevy::prelude::*;
 
@@ -14,7 +18,7 @@ pub struct MapTagsPlugin;
 
 impl Plugin for MapTagsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spawn_tags, collectible_tags, place_tags, tag_clicks).chain().run_if(in_state(PlayMode::Live)))
+        app.add_systems(Update, (spawn_tags, collectible_tags, sim_tags, opportunity_tags, place_tags, tag_clicks, sim_tag_clicks).chain().run_if(in_state(PlayMode::Live)))
             .add_systems(OnExit(PlayMode::Live), |mut c: Commands, q: Query<Entity, With<MapTag>>| {
                 for e in &q {
                     c.entity(e).try_despawn();
@@ -39,6 +43,210 @@ struct MapTag {
 enum CollectibleTag {
     Find(Entity),
     Spawner(usize),
+}
+
+/// A household Sim's tag: their face, where they are.
+#[derive(Component)]
+struct SimTag(Entity);
+
+/// An opportunity's tag: the opportunity (its index in the game data's), and the Sim it's done
+/// with, if it's by them.
+#[derive(Component)]
+struct OppTag(usize, Option<Entity>);
+
+/// The lot type a career's Sims work at (its rabbit hole: `opportunities::lot_types`).
+fn workplace(career: &str) -> Option<&'static str> {
+    Some(match career {
+        "Business" | "Journalism" => "BusinessAndJournalism",
+        "Culinary" => "Restaurant",
+        "Political" => "CityHall",
+        "Professional Sports" | "ProfessionalSports" | "Athletic" => "Stadium",
+        "Science" => "ScienceLab",
+        "Law Enforcement" | "LawEnforcement" => "PoliceStation",
+        "Military" => "MilitaryBase",
+        "Music" => "Theatre",
+        "Medical" => "Hospital",
+        "Criminal" => "Hideout",
+        _ => return None,
+    })
+}
+
+/// Where a household Sim is, for their tag: their own place when they're about, else the lot
+/// they're out at (a venue, their work), else home.
+#[allow(clippy::type_complexity)]
+fn sim_tags(
+    mut commands: Commands,
+    members: Query<
+        (Entity, &crate::sim::Sim, &GlobalTransform, &InheritedVisibility, Option<&crate::rabbitholes::AtRabbitHole>, Has<crate::careers::AtWork>, Option<&crate::careers::Job>),
+        With<crate::sim::HouseholdMember>,
+    >,
+    mut tags: Query<(Entity, &SimTag, &mut MapTag, &mut crate::icons::Tooltip)>,
+    world: Res<CurrentWorld>,
+    household: Option<Res<Household>>,
+    ui: Option<ResMut<crate::icons::GameUi>>,
+    mut images: ResMut<Assets<Image>>,
+    mut portraits: ResMut<crate::portraits::Portraits>,
+) {
+    let Some(mut ui) = ui else { return };
+    let home = household.as_ref().and_then(|h| world.data.lots.get(h.lot_index)).map(crate::home::lot_center);
+    for (e, tag, ..) in &tags {
+        if !members.contains(tag.0) {
+            commands.entity(e).try_despawn();
+        }
+    }
+    for (e, sim, tf, shown, out, at_work, job) in &members {
+        let lot_of = |t: &str| (0..world.data.lots.len()).find(|&l| crate::opportunities::lot_types(&world.data, l).contains(&t));
+        let (at, where_) = if shown.get() {
+            (tf.translation(), "here".to_string())
+        } else if let Some(r) = out.filter(|r| r.lot < world.data.lots.len()) {
+            (crate::home::lot_center(&world.data.lots[r.lot]), format!("at {}", r.place))
+        } else if let Some(l) = at_work.then(|| job.and_then(|j| workplace(j.career().name)).and_then(lot_of)).flatten() {
+            (crate::home::lot_center(&world.data.lots[l]), "at work".to_string())
+        } else if let Some(h) = home {
+            (h, if at_work { "at work".to_string() } else { "out".to_string() })
+        } else {
+            continue;
+        };
+        let at = at + Vec3::Y * 9.0;
+        let words = format!("{} ({where_})", sim.full_name());
+        if let Some((_, _, mut t, mut tip)) = tags.iter_mut().find(|t| t.1.0 == e) {
+            if t.at.distance(at) > 0.05 {
+                t.at = at;
+            }
+            if tip.0 != words {
+                tip.0 = words;
+            }
+            continue;
+        }
+        let Some(base) = ui.icon(&mut images, "hud_icon_maptagbase_r2") else { return };
+        let face = portraits.portrait(&mut images, e);
+        commands
+            .spawn((
+                MapTag { lot: usize::MAX, at },
+                SimTag(e),
+                Button,
+                Node { position_type: PositionType::Absolute, width: Val::Px(SIZE), height: Val::Px(SIZE), display: Display::None, ..default() },
+                ImageNode { color: Color::srgb(0.45, 0.9, 0.35), ..ImageNode::new(base) },
+                crate::icons::Tooltip(words),
+                crate::hud::BlocksWorld,
+                GlobalZIndex(-9),
+                DespawnOnExit(PlayMode::Live),
+            ))
+            .with_children(|t| {
+                t.spawn((
+                    ImageNode::new(face),
+                    crate::portraits::PortraitOf(e),
+                    Node { position_type: PositionType::Absolute, left: Val::Percent(16.0), top: Val::Percent(12.0), width: Val::Percent(68.0), height: Val::Percent(68.0), ..default() },
+                    Pickable::IGNORE,
+                ));
+            });
+    }
+}
+
+/// The selected Sim's opportunities in Map View: at each lot where one's venue task is done, and
+/// by the Sim one's done with (when they're about), with the opportunity's icon; what's to be done
+/// on hover.
+#[allow(clippy::type_complexity)]
+fn opportunity_tags(
+    mut commands: Commands,
+    selected: Query<Option<&crate::opportunities::SimOpportunities>, With<crate::sim::Selected>>,
+    people: Query<(Entity, &crate::sim::Sim, &GlobalTransform, &InheritedVisibility)>,
+    mut tags: Query<(Entity, &OppTag, &mut MapTag)>,
+    world: Res<CurrentWorld>,
+    ui: Option<ResMut<crate::icons::GameUi>>,
+    mut images: ResMut<Assets<Image>>,
+    mut shown: Local<Vec<(usize, usize, Option<Entity>)>>,
+) {
+    let Some(mut ui) = ui else { return };
+    let data = ui.data.clone();
+    let opps = selected.single().ok().flatten();
+    // (What's wanted: each opportunity's places, and the Sims it's with.)
+    let mut want: Vec<(usize, usize, Option<Entity>, Vec3, String)> = Vec::new();
+    for a in opps.map(|o| o.active.as_slice()).unwrap_or_default() {
+        let Some(o) = data.opportunities.get(a.index) else { continue };
+        let with = a.with.as_ref().map(|w| w.1.as_str());
+        let words = format!("{}: {}", o.name, crate::opportunities::objective_with(o, a.activity.name, &data, with));
+        if let Some((id, _)) = &a.with {
+            if let Some((e, _, tf, _)) = people.iter().find(|p| p.1.id == *id && p.3.get()) {
+                want.push((a.index, usize::MAX, Some(e), tf.translation() + Vec3::Y * 9.0, words));
+            }
+        } else if !o.rabbit_hole.is_empty() && !a.visited {
+            for l in (0..world.data.lots.len()).filter(|&l| crate::opportunities::lot_types(&world.data, l).contains(&o.rabbit_hole.as_str())) {
+                want.push((a.index, l, None, crate::home::lot_center(&world.data.lots[l]) + Vec3::Y * 14.0, words.clone()));
+            }
+        }
+    }
+    let keys: Vec<(usize, usize, Option<Entity>)> = want.iter().map(|w| (w.0, w.1, w.2)).collect();
+    if *shown != keys {
+        for (e, ..) in &tags {
+            commands.entity(e).try_despawn();
+        }
+        *shown = keys;
+        let Some(base) = ui.icon(&mut images, "hud_icon_maptagbase_r2") else { return };
+        for (index, lot, with, at, words) in want {
+            let icon = data.opportunities.get(index).and_then(|o| ui.icon(&mut images, &o.icon));
+            commands
+                .spawn((
+                    MapTag { lot: if with.is_some() { usize::MAX } else { lot }, at },
+                    OppTag(index, with),
+                    Button,
+                    Node { position_type: PositionType::Absolute, width: Val::Px(SIZE * 0.85), height: Val::Px(SIZE * 0.85), display: Display::None, ..default() },
+                    ImageNode { color: Color::srgb(1.0, 0.82, 0.3), ..ImageNode::new(base.clone()) },
+                    crate::icons::Tooltip(words),
+                    crate::hud::BlocksWorld,
+                    GlobalZIndex(-8),
+                    DespawnOnExit(PlayMode::Live),
+                ))
+                .with_children(|t| {
+                    if let Some(g) = icon {
+                        t.spawn((
+                            ImageNode::new(g),
+                            Node { position_type: PositionType::Absolute, left: Val::Percent(18.0), top: Val::Percent(14.0), width: Val::Percent(64.0), height: Val::Percent(64.0), ..default() },
+                            Pickable::IGNORE,
+                        ));
+                    }
+                });
+        }
+        return;
+    }
+    // (The Sims it's with move about.)
+    for (_, tag, mut t) in &mut tags {
+        if let Some(e) = tag.1
+            && let Ok((_, _, tf, _)) = people.get(e)
+        {
+            let at = tf.translation() + Vec3::Y * 9.0;
+            if t.at.distance(at) > 0.05 {
+                t.at = at;
+            }
+        }
+    }
+}
+
+/// A household Sim's tag clicked: they're selected, and the camera's on them; an opportunity's
+/// Sim's: the camera's on them.
+fn sim_tag_clicks(
+    mut commands: Commands,
+    tags: Query<(&Interaction, &MapTag, Option<&SimTag>, Option<&OppTag>), Changed<Interaction>>,
+    selected: Query<Entity, With<crate::sim::Selected>>,
+    mut cam: Query<&mut SimsCamera>,
+) {
+    for (i, tag, sim, opp) in &tags {
+        if *i != Interaction::Pressed {
+            continue;
+        }
+        let who = sim.map(|s| s.0).or(opp.and_then(|o| o.1));
+        let Some(who) = who else { continue };
+        if sim.is_some() {
+            for s in &selected {
+                commands.entity(s).remove::<crate::sim::Selected>();
+            }
+            commands.entity(who).insert(crate::sim::Selected);
+        }
+        if let Ok(mut c) = cam.single_mut() {
+            c.look_at(tag.at - Vec3::Y * 9.0);
+            c.distance = 30.0;
+        }
+    }
 }
 
 /// With a Collection Helper at home, the collectibles about town are tagged in Map View: those
@@ -221,18 +429,40 @@ fn spawn_tags(
     }
 }
 
-fn place_tags(cams: Query<(&Camera, &GlobalTransform, &SimsCamera)>, mut tags: Query<(&MapTag, &mut Node)>) {
+#[allow(clippy::type_complexity)]
+fn place_tags(cams: Query<(&Camera, &GlobalTransform, &SimsCamera)>, mut tags: Query<(Entity, &MapTag, &mut Node, Has<SimTag>, Has<OppTag>)>) {
     let Ok((cam, tf, sims_cam)) = cams.single() else { return };
     let on = sims_cam.distance > MAP_DISTANCE;
-    for (tag, mut node) in &mut tags {
+    // (The lots' tags where they are; the Sims' and opportunities' moved along beside any they'd
+    // cover, as the game's map keeps its tags apart.)
+    let mut placed: Vec<Vec2> = Vec::new();
+    let mut movable: Vec<(Entity, Vec2)> = Vec::new();
+    for (e, tag, mut node, sim, opp) in &mut tags {
         let shown = on.then(|| cam.world_to_viewport(tf, tag.at).ok()).flatten().filter(|_| (tag.at - tf.translation()).dot(tf.forward().as_vec3()) > 0.0);
         match shown {
+            Some(p) if sim || opp => movable.push((e, p)),
             Some(p) => {
                 node.display = Display::Flex;
                 node.left = Val::Px(p.x - SIZE * 0.5);
                 node.top = Val::Px(p.y - SIZE * 0.5);
+                placed.push(p);
             }
             None => node.display = Display::None,
+        }
+    }
+    movable.sort_by(|a, b| a.0.cmp(&b.0));
+    for (e, mut p) in movable {
+        for _ in 0..8 {
+            if !placed.iter().any(|q| q.distance(p) < SIZE * 0.8) {
+                break;
+            }
+            p.x += SIZE * 0.85;
+        }
+        placed.push(p);
+        if let Ok((_, _, mut node, ..)) = tags.get_mut(e) {
+            node.display = Display::Flex;
+            node.left = Val::Px(p.x - SIZE * 0.5);
+            node.top = Val::Px(p.y - SIZE * 0.5);
         }
     }
 }
