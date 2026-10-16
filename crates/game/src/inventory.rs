@@ -65,6 +65,17 @@ impl Stack {
 pub struct Inventory(pub Vec<Stack>);
 
 impl Inventory {
+    /// A whole stack put in: with its like, if they've some already.
+    pub fn put(&mut self, s: Stack) {
+        match self.0.iter_mut().find(|x| x.kind == s.kind && x.key == s.key && x.quality == s.quality) {
+            Some(x) => {
+                x.count += s.count;
+                x.worth += s.worth;
+            }
+            None => self.0.push(s),
+        }
+    }
+
     pub fn add(&mut self, kind: ItemKind, key: &str, name: &str, quality: u8, value: i64) {
         match self.0.iter_mut().find(|s| s.kind == kind && s.key == key && s.quality == quality) {
             Some(s) => {
@@ -208,6 +219,9 @@ pub enum ItemButton {
     Hang,
     /// Put produce or fish in the fridge, for whoever cooks (`ingredients`).
     ToFridge,
+    /// Handed to another of the household, into their inventory (the game's drag onto their
+    /// portrait).
+    GiveTo(Entity),
 }
 
 /// The tile's colour for produce, by quality (grey for the worst, gold for perfect).
@@ -427,6 +441,23 @@ fn inventory_buttons(
                 commands.insert_resource(crate::buy::HoldRequest { objd, design, item, from: me });
                 chosen.clear();
             }
+            ItemButton::GiveTo(to) => {
+                if *to == me {
+                    continue;
+                }
+                let s = inv.0.remove(k);
+                let to = *to;
+                notes.push(format!("{} gave {}.", sim.first, if s.count > 1 { format!("{} × {}", s.count, s.name) } else { s.name.clone() }));
+                commands.entity(to).queue_silenced(move |mut w: EntityWorldMut| {
+                    if w.get::<Inventory>().is_none() {
+                        w.insert(Inventory::default());
+                    }
+                    if let Some(mut theirs) = w.get_mut::<Inventory>() {
+                        theirs.put(s);
+                    }
+                });
+                chosen.reconcile(&inv);
+            }
         }
     }
 }
@@ -434,6 +465,19 @@ fn inventory_buttons(
 #[cfg(test)]
 mod button_tests {
     use super::*;
+
+    #[test]
+    fn a_stack_given_joins_its_like() {
+        let mut mine = Inventory::default();
+        mine.add(ItemKind::Produce, "Tomato", "Tomato", 3, 10);
+        mine.add(ItemKind::Produce, "Tomato", "Tomato", 3, 10);
+        let mut theirs = Inventory::default();
+        theirs.add(ItemKind::Produce, "Tomato", "Tomato", 3, 10);
+        theirs.put(mine.0.remove(0));
+        assert_eq!((theirs.0.len(), theirs.0[0].count, theirs.0[0].worth), (1, 3, 30));
+        theirs.put(Stack { quality: 5, ..theirs.0[0].clone() });
+        assert_eq!(theirs.0.len(), 2, "a finer one stacks apart");
+    }
 
     #[test]
     fn selected_stack_follows_removals_and_never_switches_to_its_neighbor() {

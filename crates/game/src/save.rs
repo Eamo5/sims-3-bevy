@@ -491,6 +491,48 @@ pub fn saved_sim_for_test(id: u64, first: &str) -> SavedSim {
     saved_look(&s)
 }
 
+/// A Sim's relationships as saved: with whom (by id), and how they stand.
+pub fn saved_rels(rels: &Relationships, ids: &HashMap<Entity, u64>) -> Vec<SavedRel> {
+    rels.0
+        .iter()
+        .filter_map(|(e, r)| {
+            Some(SavedRel {
+                with: *ids.get(e)?,
+                friendship: r.friendship,
+                romance: r.romance,
+                status: status_name(r.status).into(),
+                kissed: r.kissed,
+                last: r.last,
+                stc: (r.stc.value > 0.0).then(|| (r.stc.commodity.name().to_string(), r.stc.value)),
+                enemy: r.enemy,
+                romantic: r.romantic,
+                betrayed: r.betrayed,
+                known_traits: crate::life::Trait::ALL.iter().filter(|t| r.knows(**t)).map(|t| t.game_id()).collect(),
+            })
+        })
+        .collect()
+}
+
+/// A saved relationship back as it stood.
+pub fn restore_rel(x: &mut crate::social::Relationship, r: &SavedRel) {
+    x.friendship = r.friendship;
+    x.romance = r.romance;
+    x.status = status_from(&r.status);
+    x.kissed = r.kissed;
+    x.last = r.last;
+    x.enemy = r.enemy;
+    x.romantic = r.romantic || r.kissed || r.romance >= 20.0;
+    x.betrayed = r.betrayed;
+    for t in r.known_traits.iter().filter_map(|n| crate::life::Trait::ALL.iter().find(|t| t.game_id().eq_ignore_ascii_case(n))) {
+        x.learn(*t);
+    }
+    if let Some((c, v)) = &r.stc
+        && let Some(c) = crate::conversation::Commodity::from_name(c)
+    {
+        x.stc = crate::conversation::Stc { commodity: c, value: *v };
+    }
+}
+
 /// How a Sim looks, for saving someone no longer about (the rest left empty).
 fn saved_look(sim: &Sim) -> SavedSim {
     let rgb = |c: Color| {
@@ -842,10 +884,11 @@ fn save_game(
         ),
         (Without<crate::town::Townie>, Without<crate::visit::LotGuest>, Without<crate::services::ServiceNpc>),
     >,
-    (bought, exit, graves): (
+    (bought, exit, graves, ghosts): (
         Query<(&GameObject, &Transform, Option<&crate::objects::Design>, Option<&crate::paintings::Hung>), With<Bought>>,
         Option<Res<crate::interact::LotExit>>,
-        Query<(&crate::ghosts::Grave, &Transform), Without<crate::buyhistory::HistoryHidden>>,
+        Query<(Entity, &crate::ghosts::Grave, &Transform), Without<crate::buyhistory::HistoryHidden>>,
+        Query<(Entity, &Sim, &crate::ghosts::Ghost, &Relationships)>,
     ),
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
@@ -882,7 +925,8 @@ fn save_game(
         return;
     }
     let Some(hh) = household else { return };
-    let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).collect();
+    // (The ghosts too: whom the living know among the dead.)
+    let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).chain(ghosts.iter().map(|g| (g.0, g.1.id))).collect();
     let mut saved = Vec::new();
     for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes, books, novels))) in &sims {
         if let Some(s) = staged {
@@ -928,25 +972,7 @@ fn save_game(
                 raise: j.raise,
                 warned_at: j.warned_at,
             }),
-            relationships: rels
-                .0
-                .iter()
-                .filter_map(|(e, r)| {
-                    Some(SavedRel {
-                        with: *ids.get(e)?,
-                        friendship: r.friendship,
-                        romance: r.romance,
-                        status: status_name(r.status).into(),
-                        kissed: r.kissed,
-                        last: r.last,
-                        stc: (r.stc.value > 0.0).then(|| (r.stc.commodity.name().to_string(), r.stc.value)),
-                        enemy: r.enemy,
-                        romantic: r.romantic,
-                        betrayed: r.betrayed,
-                        known_traits: crate::life::Trait::ALL.iter().filter(|t| r.knows(**t)).map(|t| t.game_id()).collect(),
-                    })
-                })
-                .collect(),
+            relationships: saved_rels(rels, &ids),
             lifetime_happiness: wishes.map_or(0, |w| w.points),
             happiness_fraction: wishes.map_or(0.0, |w| w.mood_fraction),
             body_temperature: temperature.copied().unwrap_or_default(),
@@ -1038,7 +1064,11 @@ fn save_game(
         collection: collection.clone(),
         graves: graves
             .iter()
-            .map(|(g, tf)| SavedGrave { position: tf.translation.to_array(), rotation: tf.rotation.to_array(), cause: g.cause.clone(), sim: saved_look(&g.sim), epitaph: g.epitaph.clone() })
+            .map(|(ge, g, tf)| {
+                // (Whom the ghost knows, kept with its grave.)
+                let known = ghosts.iter().find(|x| x.2.grave == ge).map_or_else(|| g.known.clone(), |x| saved_rels(x.3, &ids));
+                SavedGrave { position: tf.translation.to_array(), rotation: tf.rotation.to_array(), cause: g.cause.clone(), sim: SavedSim { relationships: known, ..saved_look(&g.sim) }, epitaph: g.epitaph.clone() }
+            })
             .collect(),
         leftovers: leftovers.0.clone(),
         fridge: fridge.0.clone(),
@@ -1166,6 +1196,7 @@ pub(crate) fn apply_loaded_game(
         h.name = game.household.clone();
     }
     let by_id: HashMap<u64, Entity> = sims.iter().map(|q| (q.1.id, q.0)).collect();
+    let mut unmet: Vec<(Entity, SavedRel)> = Vec::new();
     for s in &game.sims {
         let Some(&e) = by_id.get(&s.id) else { continue };
         let Ok((_, _, mut tf, mut floor, mut motives, mut skills, mut moodlets, mut rels)) = sims.get_mut(e) else { continue };
@@ -1185,24 +1216,10 @@ pub(crate) fn apply_loaded_game(
         }
         rels.0.clear();
         for r in &s.relationships {
-            if let Some(&other) = by_id.get(&r.with) {
-                let x = rels.entry(other);
-                x.friendship = r.friendship;
-                x.romance = r.romance;
-                x.status = status_from(&r.status);
-                x.kissed = r.kissed;
-                x.last = r.last;
-                x.enemy = r.enemy;
-                x.romantic = r.romantic || r.kissed || r.romance >= 20.0;
-                x.betrayed = r.betrayed;
-                for t in r.known_traits.iter().filter_map(|n| crate::life::Trait::ALL.iter().find(|t| t.game_id().eq_ignore_ascii_case(n))) {
-                    x.learn(*t);
-                }
-                if let Some((c, v)) = &r.stc
-                    && let Some(c) = crate::conversation::Commodity::from_name(c)
-                {
-                    x.stc = crate::conversation::Stc { commodity: c, value: *v };
-                }
+            match by_id.get(&r.with) {
+                Some(&other) => restore_rel(rels.entry(other), r),
+                // (Someone not about yet, a ghost in its grave: known again once they rise.)
+                None => unmet.push((e, r.clone())),
             }
         }
         let mut ec = commands.entity(e);
@@ -1359,7 +1376,7 @@ pub(crate) fn apply_loaded_game(
             let sim = SaveGame::sim(&g.sim);
             let label = format!("{}'s Tombstone", sim.full_name());
             if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, entry.objd, lift(Vec3::from(g.position)), Quat::from_array(g.rotation)) {
-                commands.entity(o.entity).insert(crate::ghosts::Grave { sim, cause: g.cause.clone(), epitaph: g.epitaph.clone() }).queue_silenced(move |mut w: EntityWorldMut| {
+                commands.entity(o.entity).insert(crate::ghosts::Grave { sim, cause: g.cause.clone(), epitaph: g.epitaph.clone(), known: g.sim.relationships.clone() }).queue_silenced(move |mut w: EntityWorldMut| {
                     if let Some(mut obj) = w.get_mut::<GameObject>() {
                         obj.name = label;
                     }
@@ -1367,6 +1384,7 @@ pub(crate) fn apply_loaded_game(
             }
         }
     }
+    commands.insert_resource(crate::ghosts::PendingRels(unmet));
     commands.insert_resource(crate::familyinv::FamilyInventory(game.family_inventory.clone()));
     for b in &game.bought {
         let rot = Quat::from_array(b.rotation);

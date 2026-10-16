@@ -557,7 +557,12 @@ fn inventory_panel(
     (mut vis, mut nodes): (Query<&mut Visibility>, Query<&mut Node>),
     (clicks, cells, hovered): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &InventoryCell), Changed<Interaction>>, Query<&Interaction>),
     (baked, mut thumbs, mut pictures): (Option<Res<crate::baked::Baked>>, ResMut<crate::thumbs::ModelThumbs>, ResMut<crate::paintings::PaintingImages>),
-    (mut pie, mut chosen, windows): (ResMut<crate::hud::PieMenu>, ResMut<crate::inventory::Chosen>, Query<&Window, With<bevy::window::PrimaryWindow>>),
+    (mut pie, mut chosen, windows, family): (
+        ResMut<crate::hud::PieMenu>,
+        ResMut<crate::inventory::Chosen>,
+        Query<&Window, With<bevy::window::PrimaryWindow>>,
+        Query<(Entity, &Sim), With<crate::sim::HouseholdMember>>,
+    ),
     mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
     mut state: Local<(Option<Entity>, String, f32)>,
     panel: Res<InfoPanel>,
@@ -579,7 +584,7 @@ fn inventory_panel(
             && let Some(st) = stacks.get(c.0)
         {
             chosen.select(c.0, st);
-            let options = crate::inventory::stack_actions(sim, st)
+            let mut options = crate::inventory::stack_actions(sim, st)
                 .into_iter()
                 .map(|(label, b)| {
                     let kind = match b {
@@ -589,9 +594,19 @@ fn inventory_panel(
                     (label, kind)
                 })
                 .collect::<Vec<_>>();
+            pie.submenus.clear();
+            // (Handed to another of the household: the game's drag onto their portrait.)
+            let give: Vec<(String, crate::interact::ActionKind)> = family
+                .iter()
+                .filter(|(e, s)| *e != me && !s.age.is_little())
+                .map(|(e, s)| (s.full_name(), crate::interact::ActionKind::InventoryItem(crate::inventory::ItemButton::GiveTo(e), me, st.clone())))
+                .collect();
+            if !give.is_empty() {
+                options.push(("Give to ›".to_string(), crate::hud::submenu_kind(pie.submenus.len())));
+                pie.submenus.push(("Give to".to_string(), give));
+            }
             if !options.is_empty() {
                 let at = windows.single().ok().and_then(|w| w.cursor_position()).unwrap_or(Vec2::new(600.0, 600.0));
-                pie.submenus.clear();
                 pie.at = at;
                 crate::hud::open_pie(&mut commands, &mut pie, at, &st.name, me, options);
             }

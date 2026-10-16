@@ -2985,7 +2985,7 @@ pub(crate) fn run_actions(
         Query<(), With<Broken>>,
         Query<(), Or<(With<crate::buy::HeldObject>, With<crate::buyhistory::HistoryHidden>)>>,
     ),
-    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates, mut memories, (partners_of, at_door, cuddles, convs))): (
+    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates, mut memories, (partners_of, at_door, cuddles, convs, ghost_spots))): (
         MessageWriter<crate::journal::Did>,
         Query<&crate::journal::SkillJournal>,
         Query<&mut crate::inventory::Inventory>,
@@ -2999,7 +2999,13 @@ pub(crate) fn run_actions(
             Option<Res<crate::weather::Weather>>,
             Res<ObjectRates>,
             ResMut<crate::conversation::SocialMemories>,
-            (Query<&SocialPartner>, Query<(), With<crate::doorbell::AtTheDoor>>, Query<&crate::seatedtalk::Cuddling>, Res<crate::groups::Conversations>),
+            (
+                Query<&SocialPartner>,
+                Query<(), With<crate::doorbell::AtTheDoor>>,
+                Query<&crate::seatedtalk::Cuddling>,
+                Res<crate::groups::Conversations>,
+                Query<(Entity, &Transform, &crate::nav::Floor), (With<crate::ghosts::Ghost>, Without<crate::ghosts::Resting>, Without<crate::sim::Motives>)>,
+            ),
         ),
     ),
 ) {
@@ -3015,7 +3021,8 @@ pub(crate) fn run_actions(
     let mut partners_done: Vec<(Entity, Entity)> = Vec::new();
     // Little ones a care social picks up: (little one, grown-up, age, grown-up's transform).
     let mut carry_fx: Vec<(Entity, Entity, Age, Transform, bool)> = Vec::new();
-    let positions: HashMap<Entity, (Vec3, u8)> = sims.iter().map(|s| (s.0, (s.3.translation, s.11.0))).collect();
+    // (The ghosts out at night too: someone to go up to and talk with.)
+    let positions: HashMap<Entity, (Vec3, u8)> = sims.iter().map(|s| (s.0, (s.3.translation, s.11.0))).chain(ghost_spots.iter().map(|(e, t, f)| (e, (t.translation, f.0)))).collect();
     let sitting: std::collections::HashSet<Entity> = sims.iter().filter(|s| s.6.pose == Pose::Sit).map(|s| s.0).collect();
     let lying: std::collections::HashSet<Entity> = sims.iter().filter(|s| s.6.pose == Pose::Lie).map(|s| s.0).collect();
     // (The places Sims have gone to at an object: a picnic table's taken.)
@@ -5238,6 +5245,28 @@ pub(crate) fn run_actions(
                     tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
                 }
             }
+        } else {
+            // (A ghost talked to: liking the same both ways, kept by it; turned to whoever's
+            // talking.)
+            let toward = positions.get(&actor).map(|p| p.0);
+            commands.entity(target).queue_silenced(move |mut w: EntityWorldMut| {
+                if let Some(mut rels) = w.get_mut::<crate::social::Relationships>() {
+                    if let Some(shared) = stc {
+                        let r = rels.entry(actor);
+                        r.stc = shared.stc;
+                        r.friendship = shared.liking;
+                        r.enemy = shared.enemy;
+                        r.romantic = shared.romantic;
+                    }
+                    rels.add(actor, friendship, romance);
+                }
+                if let (Some(at), Some(mut tf)) = (toward, w.get_mut::<Transform>()) {
+                    let to = (at - tf.translation).xz();
+                    if to.length() > 0.1 {
+                        tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
+                    }
+                }
+            });
         }
     }
 }

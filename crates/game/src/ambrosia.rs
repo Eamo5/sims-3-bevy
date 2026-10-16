@@ -116,7 +116,7 @@ fn ghost_feast(
     clock: Res<crate::clock::GameClock>,
     ui: Option<Res<crate::icons::GameUi>>,
     grid: Option<Res<crate::nav::NavGrid>>,
-    ghosts: Query<(Entity, &crate::ghosts::Ghost, &Transform, &Sim, Option<&crate::nav::PathFollow>)>,
+    ghosts: Query<(Entity, &crate::ghosts::Ghost, &Transform, &Sim, Option<&crate::nav::PathFollow>), Without<crate::ghosts::Resting>>,
     graves: Query<&crate::ghosts::Grave>,
     mut meals: Query<(Entity, &mut crate::meals::Meal, &crate::meals::Dish, &Transform)>,
     mut notes: ResMut<Notifications>,

@@ -998,8 +998,12 @@ installation is unreachable.
   fire with the extinguisher.
 - **Ghosts**: the household's dead rise from their tombstones in the small hours, see-through
   and tinted by how they died (pale blue for old age, ember-orange for fire), float about the
-  lot with the game's ghost animations and give the living a fright (Scared). Graves and who
-  lies in them are kept in saves.
+  lot with the game's ghost animations and give the living a fright (Scared). The living can
+  talk with them as with anyone (every social but moving in, as the game has it for ghosts not
+  yet playable): a ghost holds still while it's talked to, turns to whoever's talking, and comes
+  to like them back; it's the same ghost that rises night after night, knowing whom it knew, and
+  those who know it well aren't frightened by it any more. Graves, who lies in them, and who
+  their ghosts know (both ways) are kept in saves.
 - **Burglars**: some nights a burglar in black slips onto the lot and bags the priciest thing
   in the house. A burglar alarm (or an awake Sim who spots them) calls the police; an officer
   in uniform arrives in the cruiser, and if they catch the burglar with the game's cuffing
@@ -1113,7 +1117,8 @@ installation is unreachable.
   or keep), in stacks on the
   Sim panel's Inventory tab (F9) with the objects' catalogue pictures (produce by quality);
   pick a stack to sell one or all of it, or to eat a piece of produce (a snack's worth,
-  more for finer produce). Inventories are kept in saves.
+  more for finer produce), or give it to another of the household ("Give to ›", the game's drag
+  onto their portrait). Inventories are kept in saves.
 - **Water**: the sea and the ponds ripple, reflect the sky and the sun's glints (more at
   grazing angles), deepen in colour with the depth of water over the ground, and turn clear
   and turquoise in the shallows with a line of foam on the shore.

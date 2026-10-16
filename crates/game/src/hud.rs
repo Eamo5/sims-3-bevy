@@ -1060,7 +1060,7 @@ fn world_click(
         Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs)): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q)): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1075,7 +1075,7 @@ fn world_click(
         ),
         Res<crate::ingredients::Fridge>,
         Query<(&crate::sim::SimAnim, &GlobalTransform, Option<&crate::nav::Floor>)>,
-        (Query<&crate::ghosts::Grave>, Query<&ActionQueue>, Query<&crate::seatedtalk::Cuddling>, Res<crate::groups::Conversations>),
+        (Query<&crate::ghosts::Grave>, Query<&ActionQueue>, Query<&crate::seatedtalk::Cuddling>, Res<crate::groups::Conversations>, Query<(), With<crate::ghosts::Ghost>>),
     ),
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
@@ -1267,6 +1267,8 @@ fn world_click(
                         crate::social::SocialEffect::PlayCatch => objects.iter().any(|o| o.kind == ObjectKind::Ball),
                         // (An opportunity's delivery to them, what it asks held.)
                         crate::social::SocialEffect::DeliverOpportunity => delivery.is_some(),
+                        // (A ghost doesn't move in: the game's, for those not yet playable.)
+                        crate::social::SocialEffect::MoveIn => !ghosts_q.contains(t),
                         _ => true,
                     })
                     // (A delivery under the opportunity's own words: "Deliver Painting".)
