@@ -39,6 +39,8 @@ pub enum Question {
     NameBaby { sim: Entity, suggested: String },
     /// A call come in (`calls`): to chat, or to hang out (at the caller's home, if they've one).
     PhoneCall { sim: Entity, caller: Entity, invite: bool, home: Option<usize> },
+    /// An epitaph for a tombstone (typed in; the one suggested if not).
+    Engrave { grave: Entity, suggested: String },
 }
 
 impl Question {
@@ -46,7 +48,7 @@ impl Question {
     pub fn sim(&self) -> Option<Entity> {
         match self {
             Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } | Question::CareerEvent { sim, .. } | Question::NameBaby { sim, .. } | Question::PhoneCall { sim, .. } => Some(*sim),
-            Question::Household(_) => None,
+            Question::Household(_) | Question::Engrave { .. } => None,
         }
     }
 }

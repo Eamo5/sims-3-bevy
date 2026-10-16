@@ -290,13 +290,18 @@ fn type_into_box(
     mut asking: Local<Option<Entity>>,
 ) {
     use bevy::input::keyboard::Key;
-    let Some(crate::dialog::Question::NameBaby { sim, suggested }) = questions.queue.front().map(|a| &a.about) else {
-        *asking = None;
-        keys.clear();
-        return;
+    // (A name's twenty letters at most; an epitaph's longer.)
+    let (who, suggested, most) = match questions.queue.front().map(|a| &a.about) {
+        Some(crate::dialog::Question::NameBaby { sim, suggested }) => (*sim, suggested, 20),
+        Some(crate::dialog::Question::Engrave { grave, suggested }) => (*grave, suggested, crate::ghosts::EPITAPH_LENGTH),
+        _ => {
+            *asking = None;
+            keys.clear();
+            return;
+        }
     };
-    if *asking != Some(*sim) {
-        *asking = Some(*sim);
+    if *asking != Some(who) {
+        *asking = Some(who);
         typed.0 = suggested.clone();
     }
     let mut enter = false;
@@ -305,8 +310,8 @@ fn type_into_box(
             continue;
         }
         match &ev.logical_key {
-            Key::Character(c) if typed.0.chars().count() < 20 => typed.0.push_str(c.as_str()),
-            Key::Space if typed.0.chars().count() < 20 => typed.0.push(' '),
+            Key::Character(c) if typed.0.chars().count() < most => typed.0.push_str(c.as_str()),
+            Key::Space if typed.0.chars().count() < most => typed.0.push(' '),
             Key::Backspace => {
                 typed.0.pop();
             }
@@ -377,7 +382,7 @@ fn question_dialogs(
             // (A call come in: answered or not.)
             crate::dialog::Question::PhoneCall { .. } => "TwoButtonDialog",
             // (A newborn's name: the game's box to type it in.)
-            crate::dialog::Question::NameBaby { .. } => "StringInputDialog",
+            crate::dialog::Question::NameBaby { .. } | crate::dialog::Question::Engrave { .. } => "StringInputDialog",
             crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 3 => "ThreeButtonDialog",
             _ => return,
         };
@@ -413,7 +418,7 @@ fn question_dialogs(
                     }
                 }
             }
-            crate::dialog::Question::NameBaby { suggested, .. } => {
+            crate::dialog::Question::NameBaby { suggested, .. } | crate::dialog::Question::Engrave { suggested, .. } => {
                 // The title ("It's a Girl!"), the words, the name in its box, OK.
                 for w in s.all_with(NAME_TITLE) {
                     if let Some(t) = s.text_of(w) {

@@ -158,6 +158,10 @@ installation is unreachable.
   time, a computer hardly ever), surely one still singed or standing in a puddle, never the
   Handy, the pregnant or an Electrician; upgrades are kept in saves. Fishing trips teach Fishing
   and bring back a catch to sell.
+- **Chatting online** at a computer (the game's `ChatRandom`): with someone of the town (new
+  to the household's Sims, else someone known; never a grown-up and a child who don't know each
+  other), getting on a little better every five minutes of it, and every twenty to fifty
+  something learned about them, one of their traits; good for Social and fun as the game's.
 - **Writing novels** by the game's Writing tuning: at a computer, "Write Novel" offers the
   genres the Sim has opened up (Fiction and Non-Fiction to start; Sci-Fi, Trashy, Drama,
   Humor, Mystery and Romance with skill — sooner for the good-humoured and hopeless romantics;
@@ -295,7 +299,9 @@ installation is unreachable.
   shock animation, the repair failed), and a second shock while still singed stops their
   heart. A swimmer whose pool's ladders are taken away can't get out: they swim on, tiring,
   and drown (the game's drowning animation; the tombstone at the pool's side). Each death has
-  the game's own last moments, and its ghost its own colour.
+  the game's own last moments, and its ghost its own colour. A tombstone's "Engrave Epitaph"
+  puts up the game's box to type the words in (its own offered to start: "Here lies Parker
+  Ghostly, always loved."), and "Read Epitaph" shows them; kept in saves.
 - **Meals**: cooking serves eight portions, matching the installed game's group-meal tuning,
   and platters switch to the recipe's original half-depleted model at four servings when available,
   while seated meals use their half-eaten plate model at the original seven-bites-remaining threshold,
@@ -430,8 +436,11 @@ installation is unreachable.
   contractions every few minutes (the game's animations), "Go to the Hospital" on her own
   menu while it lasts. At 72 the baby comes, at home (the game's home-birth animation) or at
   the hospital, where she's in a little better spirits; twins one time in twenty, triplets
-  one in a hundred (three and a half times as likely with a Fertility Treatment), room
-  allowing. Each baby's traits come of her mood over the pregnancy, as the game's do: an
+  one in a hundred (three and a half times as likely with a Fertility Treatment, and once more
+  as likely for each hour of KidZ Zone on TV or the children's radio station in hearing while
+  pregnant, as the game's `mMultipleBabiesMultiplier`), room allowing; a girl or a boy at
+  evens, swayed a twentieth for each watermelon eaten (a girl) or apple (a boy), at most three
+  twentieths, as the game's `IncreaseFemaleChance`. Each baby's traits come of her mood over the pregnancy, as the game's do: an
   unhappy one gives bad ones, an ordinary one two inherited (from the parents half the time),
   a happy one one, a very happy one none, the rest the player's to choose in the traits
   picker; each is named in the game's box (its words saying what the baby was born with),
@@ -745,7 +754,10 @@ installation is unreachable.
   and counts the game's six kilometres an hour towards the Marathon Runner challenge. Athletic
   Sims go jogging on their own by day, and some of the town's passers-by jog past in their
   athletic wear (most of them mornings and evenings). The sidewalk they all use runs beside
-  the street nearest the lot.
+  the street nearest the lot. Clicking the ground twenty metres off or more, teens and up with
+  a level of Athletic can "Jog Here" (the game's `JogHere`: the fast jog from level five), for
+  the same exercise on the way; and somewhere a good way off, "Go Here With ›" brings others
+  of the household along (one, or everyone).
 - **What Sims do for who they are**, as the game's `TraitFunctions`, on their own menu and by
   free will: the Insane "Talk To Self" (half an hour yelling at and mocking nobody, the game's
   own clips, for fun and company); the Neurotic "Freak Out" (teens and up, then Tranquil for

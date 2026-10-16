@@ -157,6 +157,7 @@ fn channel_effects(
         Option<&mut crate::meals::KnownRecipes>,
         Option<&crate::wishes::Wishes>,
         &crate::life::Mood,
+        Option<&mut crate::little::Pregnancy>,
     )>,
     tvs: Query<&OnChannel>,
     ui: Option<Res<crate::icons::GameUi>>,
@@ -168,12 +169,18 @@ fn channel_effects(
         return;
     }
     let mut rng = rand::rng();
-    for (e, sim, watching, mut queue, mut skills, mut motives, mut moodlets, known, wishes, mood) in &mut watchers {
+    for (e, sim, watching, mut queue, mut skills, mut motives, mut moodlets, known, wishes, mood, pregnancy) in &mut watchers {
         let Ok(on) = tvs.get(watching.0) else { continue };
         let c = &CHANNELS[on.0];
         let Some(front) = queue.0.front_mut() else { continue };
         if front.label != "Watch the TV" || front.cancel {
             continue;
+        }
+        // (Children's TV in a pregnancy: twins likelier, the game's `StartWatchingKidsTv`.)
+        if c.key == "KidZone"
+            && let Some(mut p) = pregnancy
+        {
+            p.kids_hours += hours as f64;
         }
         // (Terror TV: the timid frightened, and off.)
         if c.scares.iter().any(|t| sim.traits.contains(t)) {

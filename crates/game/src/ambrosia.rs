@@ -102,7 +102,7 @@ fn grave_test(
     let Some(stone) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, entry.objd, at, tf.rotation) else { return };
     let sim = crate::sim::random_sim(&mut rand::rng(), "Ghostly", Some(false), crate::sim::Age::Elder);
     info!("grave test: {} lies at {at}", sim.full_name());
-    commands.entity(stone.entity).insert(crate::ghosts::Grave { sim, cause: "of old age".into() });
+    commands.entity(stone.entity).insert(crate::ghosts::Grave::new(sim, "of old age"));
 }
 
 /// A ghost on its way to the Ambrosia (not drifting about).

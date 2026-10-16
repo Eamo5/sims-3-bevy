@@ -122,6 +122,10 @@ const CHANGE_CHANNEL: &str = "Change to";
 /// The bookshelf's skill books' menu.
 const READ_SKILL_BOOK: &str = "Read a Skill Book";
 const READ_NOVEL: &str = "Read a Novel";
+const GO_HERE_WITH: &str = "Go Here With";
+/// The game's `kGoHereWithOnLotAvailableDistance`: how far from where the Sim is a place must be
+/// for others to come along.
+const GO_HERE_WITH_DISTANCE: f32 = 30.0;
 
 /// A recipe as the food menus list it: with what its ingredients cost, when they do.
 fn recipe_label(r: &s3bake::gamedata::RecipeInfo) -> String {
@@ -1056,7 +1060,7 @@ fn world_click(
         Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, graves_q): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1071,6 +1075,7 @@ fn world_click(
         ),
         Res<crate::ingredients::Fridge>,
         Query<(&crate::sim::SimAnim, &GlobalTransform, Option<&crate::nav::Floor>)>,
+        Query<&crate::ghosts::Grave>,
     ),
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
@@ -1306,6 +1311,10 @@ fn world_click(
             let usable = if obj.kind == ObjectKind::Car { &[] } else { usable };
             for (i, d) in usable.iter().enumerate() {
                 if plant.is_some_and(|p| !crate::gardening::offers(p, d.special)) {
+                    continue;
+                }
+                // (A tombstone's epitaph read once there is one; engraved where someone lies.)
+                if (d.special == Special::ReadEpitaph && graves_q.get(t).ok().is_none_or(|g| g.epitaph.is_empty())) || (d.special == Special::Engrave && !graves_q.contains(t)) {
                     continue;
                 }
                 // A fireplace offers lighting when cold, the rest when lit.
@@ -1717,6 +1726,30 @@ fn world_click(
         let mut title = String::new();
         let here = crate::rabbitholes::lot_at(&world.data.lots, p);
         let out_at = on_lot.get(actor).ok().map(|l| l.0);
+        let from = postures.get(actor).ok().map(|(_, tf, _)| tf.translation());
+        // (At a jog, for the athletic: the game's "Jog Here".)
+        if let (Some(from), Ok((_, skills, _))) = (from, writers.get(actor))
+            && crate::jog::can_jog_here(actor_sim, skills.level("Athletic"), from, p)
+        {
+            options.push(("Jog Here".to_string(), ActionKind::GoHere(Vec2::new(p.x, p.z), level)));
+        }
+        // (With others of the household there, somewhere a way off: "Go Here With...".)
+        if let Some(from) = from.filter(|f| f.xz().distance(p.xz()) > GO_HERE_WITH_DISTANCE) {
+            let mine = on_lot.get(actor).ok().map(|l| l.0);
+            let others: Vec<String> = company_q
+                .iter()
+                .filter(|c| c.0 != actor && !c.2 && !c.1.age.is_little() && c.3.map(|l| l.0) == mine && postures.get(c.0).is_ok_and(|(_, tf, _)| tf.translation().distance(from) < 60.0))
+                .map(|c| c.1.full_name())
+                .collect();
+            if !others.is_empty() {
+                let mut list: Vec<(String, ActionKind)> = others.iter().map(|n| (n.clone(), ActionKind::GoHere(Vec2::new(p.x, p.z), level))).collect();
+                if others.len() > 1 {
+                    list.insert(0, ("Everyone".to_string(), ActionKind::GoHere(Vec2::new(p.x, p.z), level)));
+                }
+                options.push((format!("{GO_HERE_WITH} ›"), submenu_kind(pie.submenus.len())));
+                pie.submenus.push((GO_HERE_WITH.to_string(), list));
+            }
+        }
         // A community lot: its rabbit hole's activities, and opportunities done there.
         if let Some(lot) = here.filter(|l| Some(*l) != out_at) {
             let l = &world.data.lots[lot];
@@ -1812,7 +1845,7 @@ fn pie_buttons(
     (ui_data, inventories, people, locks, postures): (
         Option<Res<crate::icons::GameUi>>,
         Query<&crate::inventory::Inventory>,
-        Query<(Entity, &Sim)>,
+        Query<(Entity, &Sim, Has<HouseholdMember>)>,
         Query<&crate::doorlocks::DoorLock>,
         Query<(&crate::sim::SimAnim, &GlobalTransform, Option<&crate::nav::Floor>)>,
     ),
@@ -1872,7 +1905,7 @@ fn pie_buttons(
     // A door locked or unlocked, there and then (the game's are immediate).
     if let ActionKind::Object { target, .. } = kind
         && (title == crate::doorlocks::LOCK || title == crate::doorlocks::SPECIFY || label == crate::doorlocks::UNLOCK)
-        && let Some((_, me)) = actor.and_then(|a| people.get(a).ok())
+        && let Some((_, me, _)) = actor.and_then(|a| people.get(a).ok())
     {
         let picked = (title == crate::doorlocks::SPECIFY).then(|| people.iter().find(|p| p.1.full_name() == label.trim_end_matches(" ✓")).map(|p| p.1)).flatten();
         if let Some(lock) = crate::doorlocks::DoorLock::chosen(&label, me, locks.get(target).ok(), picked) {
@@ -1890,7 +1923,7 @@ fn pie_buttons(
     // A toddler potty trained: the grown-up to the chair, the toddler sat on it once they're there.
     if let ActionKind::Object { .. } = kind
         && let Some(name) = label.strip_prefix(&format!("{} ", crate::potty::POTTY_TRAIN))
-        && let (Some(a), Some((toddler, _))) = (actor, people.iter().find(|p| p.1.first == name && p.1.age == crate::sim::Age::Toddler))
+        && let (Some(a), Some((toddler, _))) = (actor, people.iter().find(|p| p.1.first == name && p.1.age == crate::sim::Age::Toddler).map(|p| (p.0, p.1)))
         && let Ok(mut q) = queues.get_mut(a)
     {
         q.push_player(Action::new(label.clone(), kind.clone(), false));
@@ -1900,15 +1933,15 @@ fn pie_buttons(
     // Chess with someone: both to the table, a chair each.
     if title == crate::chess::PLAY_WITH
         && let ActionKind::Object { target, def } = kind
-        && let (Some(a), Some(other)) = (actor, people.iter().find(|p| p.1.full_name() == label))
-        && let Ok(me) = people.get(a)
+        && let (Some(a), Some(other)) = (actor, people.iter().find(|p| p.1.full_name() == label).map(|p| (p.0, p.1)))
+        && let Ok(me) = people.get(a).map(|p| (p.0, p.1))
     {
         crate::chess::play_with(&mut queues, target, def, me, other);
         return;
     }
     // An outing with someone: off they both go.
     if let (Some(name), ActionKind::Visit { .. }) = (title.strip_suffix(crate::venues::WITH), &kind)
-        && let (Some(a), Some((companion, _))) = (actor, people.iter().find(|p| p.1.full_name() == label))
+        && let (Some(a), Some((companion, ..))) = (actor, people.iter().find(|p| p.1.full_name() == label))
     {
         for (who, other) in [(a, companion), (companion, a)] {
             if let Ok(mut q) = queues.get_mut(who) {
@@ -2006,7 +2039,23 @@ fn pie_buttons(
         if let ActionKind::Social { social, .. } = kind {
             label = crate::social::social(social).name.to_string();
         }
-        let mut action = Action::new(label, kind, false);
+        // (Others of the household along too: "Go Here With...".)
+        let go_with = title == GO_HERE_WITH;
+        let near = |e: Entity| match (postures.get(a), postures.get(e)) {
+            (Ok((_, x, _)), Ok((_, y, _))) => x.translation().distance(y.translation()) < 60.0,
+            _ => false,
+        };
+        let followers: Vec<Entity> = if go_with {
+            people.iter().filter(|(e, s, member)| *e != a && *member && !s.age.is_little() && near(*e) && (label == "Everyone" || s.full_name() == label)).map(|(e, ..)| e).collect()
+        } else {
+            Vec::new()
+        };
+        if go_with {
+            label = "Go Here".to_string();
+        }
+        let jog = label == "Jog Here";
+        let mut action = Action::new(label, kind.clone(), false);
+        action.jog = jog;
         action.novel_genre = novel_genre;
         action.outfit_choice = outfit_choice;
         action.canvas_choice = canvas_choice;
@@ -2030,6 +2079,16 @@ fn pie_buttons(
             }
         }
         queue.push_player(action);
+        // (Those along with them: there too, a step apart.)
+        if let ActionKind::GoHere(p, level) = kind {
+            for (k, f) in followers.into_iter().enumerate() {
+                let a = (k as f32 + 1.0) * 2.1;
+                let at = p + Vec2::new(a.cos(), a.sin()) * 1.2;
+                if let Ok(mut q) = queues.get_mut(f) {
+                    q.push_player(Action::new("Go Here", ActionKind::GoHere(at, level), false));
+                }
+            }
+        }
     }
 }
 

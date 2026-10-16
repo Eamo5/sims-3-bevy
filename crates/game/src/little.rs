@@ -94,6 +94,7 @@ impl Plugin for LittlePlugin {
             .add_message::<Conceive>()
             .init_resource::<NewbornPicks>()
             .add_systems(Update, (conceive, pregnancy, name_babies, newborn_traits_picker, little_life, put_down).chain().run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, kids_radio.run_if(in_state(PlayMode::Live)))
             .add_systems(PostUpdate, carry_follow.after(bevy::transform::TransformSystems::Propagate));
     }
 }
@@ -115,11 +116,54 @@ pub struct Pregnancy {
     pub stage: u8,
     pub mood: f64,
     pub hour: u32,
+    /// How much likelier a girl than evens (the game's `mBabySexOffset`: watermelon a girl, apples
+    /// a boy, a twentieth a piece, at most three twentieths either way).
+    pub girl_bias: f32,
+    /// Hours of children's TV and radio she's had (the game's `mMultipleBabiesMultiplier`, one
+    /// more for each: twins and triplets likelier).
+    pub kids_hours: f64,
 }
+
+/// How near a stereo playing the children's station she's in its hearing (the game's room's
+/// listeners).
+const KIDS_RADIO_RANGE: f32 = 8.0;
+
+/// A pregnant Sim in hearing of a stereo on the children's station: the hours counted, as the
+/// game's `StartListeningKidsRadio` (twins likelier).
+fn kids_radio(delta: Res<crate::clock::SimDelta>, mut pregnant: Query<(&GlobalTransform, &mut Pregnancy)>, stereos: Query<(&GlobalTransform, &crate::music::StereoOn)>) {
+    let hours = delta.0 as f64 / 60.0;
+    if hours <= 0.0 {
+        return;
+    }
+    let playing: Vec<Vec3> = stereos.iter().filter(|(_, on)| on.0.as_deref() == Some("stereo_kids")).map(|(tf, _)| tf.translation()).collect();
+    if playing.is_empty() {
+        return;
+    }
+    for (tf, mut p) in &mut pregnant {
+        if playing.iter().any(|s| s.distance(tf.translation()) < KIDS_RADIO_RANGE) {
+            p.kids_hours += hours;
+        }
+    }
+}
+
+/// The game's `kGenderOffsetPerFoodEaten` and `kMaxGenderOffset`.
+pub const GENDER_OFFSET_PER_FOOD: f32 = 0.05;
+pub const MAX_GENDER_OFFSET: f32 = 0.15;
 
 impl Pregnancy {
     pub fn new(since: f64, other_parent: Option<Entity>) -> Self {
-        Self { since, other_parent, stage: 0, mood: 0.0, hour: 0 }
+        Self { since, other_parent, stage: 0, mood: 0.0, hour: 0, girl_bias: 0.0, kids_hours: 0.0 }
+    }
+
+    /// Something eaten that sways the baby's sex (the game's `Ingredient` keys: `Watermelon` a
+    /// girl, `Apple` a boy).
+    pub fn ate(&mut self, key: &str) {
+        let d = match key {
+            "Watermelon" => GENDER_OFFSET_PER_FOOD,
+            "Apple" => -GENDER_OFFSET_PER_FOOD,
+            _ => return,
+        };
+        self.girl_bias = (self.girl_bias + d).clamp(-MAX_GENDER_OFFSET, MAX_GENDER_OFFSET);
     }
 
     /// Her mood on average over the pregnancy so far.
@@ -213,10 +257,10 @@ impl TraitOutcome {
 }
 
 /// How many babies come (the game's `GetNumForBirth`): one, twins one time in twenty, triplets
-/// one in a hundred (more likely with a Fertility Treatment), no more than the household has
-/// room for.
-pub fn babies_born(roll: f64, fertility: bool, room: usize) -> usize {
-    let m = if fertility { FERTILITY_MULTIPLIER } else { 1.0 };
+/// one in a hundred (more likely with a Fertility Treatment, and for each hour of children's TV
+/// and radio in the pregnancy), no more than the household has room for.
+pub fn babies_born(roll: f64, fertility: bool, kids_hours: f64, room: usize) -> usize {
+    let m = (if fertility { FERTILITY_MULTIPLIER } else { 1.0 }) * (1.0 + kids_hours.max(0.0));
     let n = if roll < CHANCE_OF_TRIPLETS * m { 3 } else if roll < CHANCE_OF_TWINS * m { 2 } else { 1 };
     n.min(room.max(1))
 }
@@ -438,7 +482,7 @@ fn pregnancy(
         }
         let father = p.other_parent.and_then(|f| fathers.get(f).ok());
         let fertility = crate::wishes::has(wishes, "FertilityTreatment") || father.is_some_and(|(_, w)| crate::wishes::has(w, "FertilityTreatment"));
-        let n = babies_born(rng.random::<f64>(), fertility, HOUSEHOLD_MAX.saturating_sub(members.iter().count()));
+        let n = babies_born(rng.random::<f64>(), fertility, p.kids_hours, HOUSEHOLD_MAX.saturating_sub(members.iter().count()));
         let average = p.average_mood(clock.minutes) + if hospital { HOSPITAL_MOOD_BONUS } else { 0.0 };
         let outcome = TraitOutcome::of(average);
         info!("birth: {} has {n} at {} (mood {average:.0}: {outcome:?})", sim.first, if hospital { "the hospital" } else { "home" });
@@ -449,7 +493,8 @@ fn pregnancy(
         free.sort_by(|a, b| a.0.distance(tf.translation).total_cmp(&b.0.distance(tf.translation)));
         let mut girls = 0;
         for k in 0..n {
-            let female = rng.random_bool(0.5);
+            // (Evens, as swayed by what she ate.)
+            let female = rng.random_bool((0.5 + p.girl_bias.clamp(-MAX_GENDER_OFFSET, MAX_GENDER_OFFSET)) as f64);
             girls += female as usize;
             let mut baby = random_sim(&mut rng, &sim.last, Some(female), Age::Baby);
             baby.skin = sim.skin;
@@ -764,14 +809,25 @@ mod birth_tests {
 
     #[test]
     fn twins_and_triplets_come_as_the_games_odds_have_them() {
-        assert_eq!(babies_born(0.5, false, 6), 1);
-        assert_eq!(babies_born(0.03, false, 6), 2);
-        assert_eq!(babies_born(0.005, false, 6), 3);
+        assert_eq!(babies_born(0.5, false, 0.0, 6), 1);
+        assert_eq!(babies_born(0.03, false, 0.0, 6), 2);
+        assert_eq!(babies_born(0.005, false, 0.0, 6), 3);
+        // (Two hours of children's TV: three times as likely.)
+        assert_eq!(babies_born(0.12, false, 2.0, 6), 2);
+        assert_eq!(babies_born(0.12, false, 0.0, 6), 1);
+        let mut p = Pregnancy::new(0.0, None);
+        for _ in 0..5 {
+            p.ate("Watermelon");
+        }
+        assert!((p.girl_bias - MAX_GENDER_OFFSET).abs() < 1e-6);
+        p.ate("Apple");
+        p.ate("Tomato");
+        assert!((p.girl_bias - 0.10).abs() < 1e-6);
         // (A Fertility Treatment: three and a half times as likely.)
-        assert_eq!(babies_born(0.15, true, 6), 2);
-        assert_eq!(babies_born(0.03, true, 6), 3);
+        assert_eq!(babies_born(0.15, true, 0.0, 6), 2);
+        assert_eq!(babies_born(0.03, true, 0.0, 6), 3);
         // (No more than the household has room for.)
-        assert_eq!(babies_born(0.005, false, 1), 1);
+        assert_eq!(babies_born(0.005, false, 0.0, 1), 1);
     }
 
     #[test]

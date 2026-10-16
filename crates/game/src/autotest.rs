@@ -3678,7 +3678,7 @@ fn auto_action(
                                     let mut commands = Commands::new(&mut queue, w);
                                     let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
                                     if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, objd, at, rot) {
-                                        commands.entity(o.entity).insert(crate::ghosts::Grave { sim, cause: "in a fire".into() });
+                                        commands.entity(o.entity).insert(crate::ghosts::Grave::new(sim, "in a fire"));
                                     }
                                     queue.apply(w);
                                 });
@@ -3710,6 +3710,31 @@ fn auto_action(
     // "Burglar": a burglar breaks in now.
     if name == "Burglar" {
         commands.queue(|w: &mut World| w.resource_mut::<crate::burglar::Break>().force = true);
+        *done = true;
+        return;
+    }
+    // "JogHere" / "GoHereWith": the selected Sim jogs (or walks, the household with them) to a
+    // place thirty metres off along the street side.
+    if name == "JogHere" || name == "GoHereWith" {
+        let Ok(tf) = sel_tf.single() else { return };
+        let Ok(me) = sel_e.single() else { return };
+        let to = tf.translation.xz() + Vec2::new(30.0, 0.0);
+        if let Ok(mut q) = sel.single_mut() {
+            let mut a = crate::interact::Action::new(if name == "JogHere" { "Jog Here" } else { "Go Here" }, crate::interact::ActionKind::GoHere(to, 1), false);
+            a.jog = name == "JogHere";
+            q.push_player(a);
+        }
+        if name == "GoHereWith" {
+            for (k, (e, s)) in members.iter().filter(|(e, s)| *e != me && !s.age.is_little()).enumerate() {
+                let at = to + Vec2::new(0.0, (k as f32 + 1.0) * 1.2);
+                commands.entity(e).queue_silenced(move |mut w: EntityWorldMut| {
+                    if let Some(mut q) = w.get_mut::<crate::interact::ActionQueue>() {
+                        q.push_player(crate::interact::Action::new("Go Here", crate::interact::ActionKind::GoHere(at, 1), false));
+                    }
+                });
+                info!("go here with: {}", s.first);
+            }
+        }
         *done = true;
         return;
     }

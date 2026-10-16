@@ -17,15 +17,86 @@ pub struct GhostsPlugin;
 
 impl Plugin for GhostsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (haunt, drift, fright, ghostly_bodies).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (haunt, drift, fright, ghostly_bodies).chain().run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, epitaphs.run_if(in_state(PlayMode::Live)));
     }
 }
 
-/// A tombstone, with who lies there and how they died.
+/// A tombstone, with who lies there, how they died, and what's engraved on it.
 #[derive(Component, Clone)]
 pub struct Grave {
     pub sim: Sim,
     pub cause: String,
+    pub epitaph: String,
+}
+
+impl Grave {
+    pub fn new(sim: Sim, cause: impl Into<String>) -> Self {
+        Self { sim, cause: cause.into(), epitaph: String::new() }
+    }
+}
+
+/// An epitaph to engrave on a tombstone (the game's `Urnstone.Engrave`: typed in), or to read
+/// (`ReadEpitaph`).
+#[derive(Component)]
+pub struct EngraveAt(pub Entity);
+#[derive(Component)]
+pub struct ReadEpitaphAt(pub Entity);
+
+/// How long an epitaph may be.
+pub const EPITAPH_LENGTH: usize = 80;
+
+/// The game's words offered to start an epitaph (`EngraveDialogDefault1`-`3`), with the name.
+pub fn suggested_epitaph(ui: Option<&crate::layout::UiAssets>, name: &str, k: u32) -> String {
+    let key = format!("Gameplay/Objects/Urnstone:EngraveDialogDefault{}", k.clamp(1, 3));
+    ui.and_then(|u| u.localize(&key)).map_or_else(|| format!("Here lies {name}, always loved."), |t| t.replace("{0.SimName}", name).replace("{0.String}", name))
+}
+
+/// At a tombstone: an epitaph asked for (the game's string input dialog), or read out.
+#[allow(clippy::too_many_arguments)]
+fn epitaphs(
+    mut commands: Commands,
+    engrave: Query<(Entity, &EngraveAt)>,
+    read: Query<(Entity, &ReadEpitaphAt)>,
+    mut graves: Query<&mut Grave>,
+    mut questions: ResMut<crate::dialog::Questions>,
+    mut answers: MessageReader<crate::dialog::Answered>,
+    typed: Res<crate::dialog::Typed>,
+    ui: Option<Res<crate::layout::UiAssets>>,
+    mut notes: ResMut<crate::interact::Notifications>,
+) {
+    for (e, at) in &engrave {
+        commands.entity(e).remove::<EngraveAt>();
+        let Ok(g) = graves.get(at.0) else { continue };
+        let name = g.sim.full_name();
+        let suggested = if g.epitaph.is_empty() { suggested_epitaph(ui.as_deref(), &name, rand::random_range(1..=3)) } else { g.epitaph.clone() };
+        info!("engraving {name}'s tombstone");
+        let word = |k: &str, or: &str| ui.as_deref().and_then(|u| u.localize(&format!("Gameplay/Objects/Urnstone:{k}"))).unwrap_or_else(|| or.to_string()).replace("{0.SimName}", &name).replace("{0.String}", &name);
+        questions.ask(crate::dialog::Ask {
+            about: crate::dialog::Question::Engrave { grave: at.0, suggested },
+            icon: String::new(),
+            heading: format!("{name}'s Tombstone"),
+            title: word("EngraveDialogTitle", "Engrave Epitaph"),
+            text: word("EngraveDialogPrompt", "What should the epitaph say?"),
+            answers: vec![crate::dialog::Answer { label: "OK".into(), detail: String::new(), icon: String::new() }],
+        });
+    }
+    for a in answers.read() {
+        if let crate::dialog::Question::Engrave { grave, suggested } = &a.about
+            && let Ok(mut g) = graves.get_mut(*grave)
+        {
+            let t = typed.0.trim();
+            g.epitaph = if t.is_empty() { suggested.clone() } else { t.chars().take(EPITAPH_LENGTH).collect() };
+        }
+    }
+    for (e, at) in &read {
+        commands.entity(e).remove::<ReadEpitaphAt>();
+        if let Ok(g) = graves.get(at.0)
+            && !g.epitaph.is_empty()
+        {
+            notes.push(g.epitaph.clone());
+        }
+    }
 }
 
 /// A ghost out from its grave.

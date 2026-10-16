@@ -110,6 +110,9 @@ pub struct SavedSim {
     /// Pregnant since (game minutes), with the other parent's id and the stage shown so far.
     #[serde(default)]
     pub pregnancy: Option<(f64, Option<u64>, u8)>,
+    /// What sways the baby: the sex (towards a girl), and hours of children's TV and radio.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pregnancy_sway: Option<(f32, f64)>,
     /// Her mood over the pregnancy (mood × minutes), for the baby's traits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pregnancy_mood: Option<f64>,
@@ -474,6 +477,9 @@ pub struct SavedGrave {
     pub rotation: [f32; 4],
     pub cause: String,
     pub sim: SavedSim,
+    /// What's engraved on it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub epitaph: String,
 }
 
 /// How a Sim looks, for saving someone no longer about (the rest left empty).
@@ -523,6 +529,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         school_visit: None,
         pregnancy: None,
         pregnancy_mood: None,
+        pregnancy_sway: None,
         shape: Some((sim.weight, sim.fitness)),
         opportunities: Vec::new(),
         opportunities_done: Vec::new(),
@@ -949,6 +956,7 @@ fn save_game(
             school_visit: rabbit.filter(|r| std::ptr::eq(r.activity, &crate::rabbitholes::SCHOOL)).map(|r| (r.inside_from, r.until)),
             pregnancy: pregnancy.map(|p| (p.since, p.other_parent.and_then(|o| ids.get(&o).copied()), p.stage)),
             pregnancy_mood: pregnancy.map(|p| p.mood),
+            pregnancy_sway: pregnancy.map(|p| (p.girl_bias, p.kids_hours)),
             shape: Some((sim.weight, sim.fitness)),
             opportunities: opps.map(|o| o.active.iter().filter_map(|a| Some((guid(a.index)?, a.deadline))).collect()).unwrap_or_default(),
             opportunities_done: opps.map(|o| o.done.clone()).unwrap_or_default(),
@@ -1021,7 +1029,7 @@ fn save_game(
         collection: collection.clone(),
         graves: graves
             .iter()
-            .map(|(g, tf)| SavedGrave { position: tf.translation.to_array(), rotation: tf.rotation.to_array(), cause: g.cause.clone(), sim: saved_look(&g.sim) })
+            .map(|(g, tf)| SavedGrave { position: tf.translation.to_array(), rotation: tf.rotation.to_array(), cause: g.cause.clone(), sim: saved_look(&g.sim), epitaph: g.epitaph.clone() })
             .collect(),
         leftovers: leftovers.0.clone(),
         fridge: fridge.0.clone(),
@@ -1237,7 +1245,8 @@ pub(crate) fn apply_loaded_game(
             let other_parent = other.and_then(|o| by_id.get(&o).copied());
             // (The hours gone by aren't gone over again: what's due comes at the next.)
             let hour = (((game.minutes - since) / 60.0).max(0.0) as u32).min(crate::little::HOURS_OF_PREGNANCY - 1);
-            ec.insert(crate::little::Pregnancy { since, other_parent, stage, mood: s.pregnancy_mood.unwrap_or(0.0), hour });
+            let (girl_bias, kids_hours) = s.pregnancy_sway.unwrap_or_default();
+            ec.insert(crate::little::Pregnancy { since, other_parent, stage, mood: s.pregnancy_mood.unwrap_or(0.0), hour, girl_bias, kids_hours });
             if stage >= 4 {
                 ec.insert(crate::little::Labour { next: game.minutes });
             }
@@ -1341,7 +1350,7 @@ pub(crate) fn apply_loaded_game(
             let sim = SaveGame::sim(&g.sim);
             let label = format!("{}'s Tombstone", sim.full_name());
             if let Some(o) = crate::home::spawn_game_object_rot(&mut commands, &mut assets, &mut ctx, &catalog, entry.objd, lift(Vec3::from(g.position)), Quat::from_array(g.rotation)) {
-                commands.entity(o.entity).insert(crate::ghosts::Grave { sim, cause: g.cause.clone() }).queue_silenced(move |mut w: EntityWorldMut| {
+                commands.entity(o.entity).insert(crate::ghosts::Grave { sim, cause: g.cause.clone(), epitaph: g.epitaph.clone() }).queue_silenced(move |mut w: EntityWorldMut| {
                     if let Some(mut obj) = w.get_mut::<GameObject>() {
                         obj.name = label;
                     }

@@ -1125,6 +1125,11 @@ pub struct RepairmanVisit {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Special {
     None,
+    /// Chatting online at a computer (`chatonline`).
+    ChatOnline,
+    /// An epitaph engraved on a tombstone, or read (`ghosts`).
+    Engrave,
+    ReadEpitaph,
     /// Their looks changed at a mirror (hair, facial hair, glasses, make-up).
     ChangeAppearance,
     /// A plate of food from the food replicator.
@@ -1377,7 +1382,12 @@ static POOL_LADDER: [InteractionDef; 1] = [InteractionDef {
     ..def("Swim", 60.0, [-6.0, -4.0, -12.0, 0.0, 10.0, 32.0], Pose::Use)
 }];
 static INSECT: [InteractionDef; 1] = [InteractionDef { special: Special::Catch, ..def("Catch", 2.0, [0.0, 0.0, 0.0, 0.0, -1.0, 12.0], Pose::Use) }];
-static TOMBSTONE: [InteractionDef; 1] = [def("Mourn", 20.0, [0.0, 0.0, -2.0, 15.0, 0.0, -10.0], Pose::Stand)];
+static TOMBSTONE: [InteractionDef; 3] = [
+    def("Mourn", 20.0, [0.0, 0.0, -2.0, 15.0, 0.0, -10.0], Pose::Stand),
+    // (The game's `Urnstone.Engrave` and `ReadEpitaph`: the player's own.)
+    InteractionDef { autonomous: false, special: Special::Engrave, ..def("Engrave Epitaph", 1.0, N, Pose::Stand) },
+    InteractionDef { autonomous: false, special: Special::ReadEpitaph, ..def("Read Epitaph", 1.0, N, Pose::Stand) },
+];
 static GRILL: [InteractionDef; 1] = [InteractionDef {
     skill: Some("Cooking"),
     special: Special::ServeMeal,
@@ -1510,8 +1520,10 @@ static TV: [InteractionDef; 3] = [
 /// (The TV watched: from a seat facing it, or standing.)
 const WATCH_TV: InteractionDef = InteractionDef { autonomous: false, special: Special::WatchTv, ..def("Watch the TV", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 55.0], Pose::Stand) };
 const WATCH_TV_SEATED: InteractionDef = InteractionDef { on_object: true, pose: Pose::Sit, per_hour: [0.0, 0.0, 3.0, 0.0, 0.0, 55.0], ..WATCH_TV };
-static COMPUTER: [InteractionDef; 7] = [
+static COMPUTER: [InteractionDef; 8] = [
     def("Play Computer Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 60.0], Pose::Use),
+    // (The game's `ChatRandom`: its ITUN's Social 50, Fun 15 an hour.)
+    InteractionDef { special: Special::ChatOnline, ..def("Chat Online", 60.0, [0.0, 0.0, -2.0, 50.0, 0.0, 15.0], Pose::Use) },
     InteractionDef { autonomous: false, skill: Some("Writing"), special: Special::WriteNovel, ..def("Write Novel", 120.0, [0.0, 0.0, -4.0, 0.0, 0.0, 10.0], Pose::Use) },
     InteractionDef { autonomous: false, special: Special::FindJob, ..def("Find Job", 20.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::QuitJob, ..def("Quit Job", 5.0, N, Pose::Use) },
@@ -2567,11 +2579,13 @@ pub struct Action {
     pub social_outcome: Option<crate::conversation::Outcome>,
     /// A social had where the two sit (`seatedtalk`), not walked over for.
     pub seated: bool,
+    /// Gone at a jog (the game's "Jog Here"): `jog`.
+    pub jog: bool,
 }
 
 impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
-        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, channel_choice: None, book_choice: None, fish_choice: None, recipe_choice: None, for_one: false, approach: None, social_outcome: None, seated: false }
+        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, channel_choice: None, book_choice: None, fish_choice: None, recipe_choice: None, for_one: false, approach: None, social_outcome: None, seated: false, jog: false }
     }
 }
 
@@ -3298,6 +3312,10 @@ pub(crate) fn run_actions(
                                 pregnant: pregnancy.is_some_and(|p| p.stage >= 2),
                             };
                             let mut style = crate::nav::walk_style(&sense, rand::random::<f32>());
+                            // (Jogging there: the fast jog for the athletic, as the game's.)
+                            if action.jog {
+                                style = if skills.level("Athletic") >= crate::jog::FAST_JOG_LEVEL { crate::nav::WalkStyle::FastJog } else { crate::nav::WalkStyle::Jog };
+                            }
                             // (WALK_STYLE=<style>: the player's routes so, for a test.)
                             if !action.autonomous && let Ok(s) = std::env::var("WALK_STYLE") {
                                 use crate::nav::WalkStyle::*;
@@ -4047,6 +4065,14 @@ pub(crate) fn run_actions(
                                         | Special::PottyLesson
                                         | Special::EmptyPotty
                                         | Special::LockDoor => {}
+                                        // (Chatting's done as it goes: `chatonline`.)
+                                        Special::ChatOnline => {}
+                                        Special::Engrave => {
+                                            commands.entity(me).insert(crate::ghosts::EngraveAt(*target));
+                                        }
+                                        Special::ReadEpitaph => {
+                                            commands.entity(me).insert(crate::ghosts::ReadEpitaphAt(*target));
+                                        }
                                         Special::GetBook => {
                                             commands.entity(me).insert(crate::surroundings::ReadSomewhere(*target));
                                             // (A skill book taken down: read for its skill.)
@@ -4964,6 +4990,13 @@ pub(crate) fn run_actions(
                                 if key == "Lifefruit" {
                                     commands.entity(me).insert(crate::aging::AteLifefruit);
                                 }
+                                // (Pregnant: a watermelon sways towards a girl, an apple a boy.)
+                                let key = key.clone();
+                                commands.entity(me).queue_silenced(move |mut w: EntityWorldMut| {
+                                    if let Some(mut p) = w.get_mut::<crate::little::Pregnancy>() {
+                                        p.ate(&key);
+                                    }
+                                });
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`.)
