@@ -3537,7 +3537,9 @@ fn auto_place(
             warn!("--place {want}: nothing in the catalog");
             continue;
         };
-        let pos = tf.translation + tf.rotation * Vec3::new(i as f32 * 2.0, 0.0, 2.0);
+        // (PLACE_AHEAD=<metres>: further off than the 2 m before them, clear of the hedges.)
+        let ahead: f32 = std::env::var("PLACE_AHEAD").ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
+        let pos = tf.translation + tf.rotation * Vec3::new(i as f32 * 2.0, 0.0, ahead);
         let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
         let design = crate::objects::first_design(&data.0, e.key);
         if let Some(object) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, e.key, pos, Quat::IDENTITY, design) {

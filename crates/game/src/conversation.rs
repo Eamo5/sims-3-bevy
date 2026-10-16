@@ -268,7 +268,8 @@ fn effectiveness(traits: &[Trait], moodlets: &[MoodletKind]) -> (Vec<&'static st
     }
     for m in moodlets {
         match m {
-            MoodletKind::MintyBreath => up.push("Romance"),
+            // (Gussied up at a mirror: the game's Attractive buff, romance the better for it.)
+            MoodletKind::MintyBreath | MoodletKind::Attractive => up.push("Romance"),
             MoodletKind::Heartbroken => up.push("AcceptingOfRomance"),
             MoodletKind::Smelly => down.extend(["Social", "Romance"]),
             _ => {}

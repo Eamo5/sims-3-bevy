@@ -785,6 +785,11 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
         // (The neutral stance's first, as most begin from it.)
         clips.sort_by_key(|c| !c.to_ascii_lowercase().starts_with("a2a_soc_neutral_"));
         clips.truncate(4);
+        // (The game's Cuddle has no standing clips: it's done sat on a sofa, its own seated ones
+        // (`seatedtalk::cuddle_clip`).)
+        if clips.is_empty() && a.key == "Cuddle" {
+            clips.push(leak("a2a_sofa_sit_cuddle_loop1"));
+        }
         if clips.is_empty() {
             continue;
         }

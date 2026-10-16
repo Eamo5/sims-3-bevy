@@ -1060,7 +1060,7 @@ fn world_click(
         Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, graves_q): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q)): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1075,7 +1075,7 @@ fn world_click(
         ),
         Res<crate::ingredients::Fridge>,
         Query<(&crate::sim::SimAnim, &GlobalTransform, Option<&crate::nav::Floor>)>,
-        Query<&crate::ghosts::Grave>,
+        (Query<&crate::ghosts::Grave>, Query<&ActionQueue>, Query<&crate::seatedtalk::Cuddling>),
     ),
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
@@ -1216,13 +1216,33 @@ fn world_click(
             // (Sat near each other: what can be said where they sit, the game's seated talk.)
             let posture = |e: Entity| postures.get(e).ok().map(|(a, tf, f)| (a, tf.translation(), f.map_or(1, |f| f.0)));
             let seated = matches!((posture(actor), posture(t)), (Some(a), Some(b)) if crate::seatedtalk::sat_together(a, b));
+            // (Sat on the same sofa, or two grown-ups relaxing in the same double bed: a cuddle,
+            // the game's seated one or its `BedCuddle`.)
+            let spot = |e: Entity| crate::seatedtalk::cuddle_spot(queues_q.get(e).ok(), |o| objects.get(o).ok().map(|g| g.kind));
+            let together = spot(actor).is_some() && spot(actor) == spot(t);
+            let same_bed = together && spot(actor).is_some_and(|s| s.1) && actor_sim.age.is_grown() && sim.age.is_grown();
+            let same_sofa = together && seated && !same_bed;
+            // (Cuddling already: a kiss, or making out, the game's.)
+            let cuddling = (same_sofa || same_bed) && cuddles_q.get(actor).is_ok_and(|c| c.with == t && c.accepted);
             pie.submenus.clear();
             for cat in crate::social::SocialCat::ALL {
                 let list: Vec<(String, ActionKind)> = crate::social::all_socials()
-                    .filter(|(_, s)| !seated || crate::social::seated_ok(s))
+                    .filter(|(_, s)| {
+                        let cuddle = s.name == crate::seatedtalk::CUDDLE || (cuddling && crate::seatedtalk::WHILE_CUDDLING.contains(&s.name));
+                        // (Lying in bed together: the cuddle, and WooHoo.)
+                        if same_bed {
+                            cuddle || matches!(s.effect, crate::social::SocialEffect::WooHoo | crate::social::SocialEffect::TryForBaby)
+                        } else {
+                            !seated || crate::social::seated_ok(s) || (same_sofa && cuddle)
+                        }
+                    })
+                    // (A cuddle only sat on a sofa or lying in bed together, and not twice over.)
+                    .filter(|(_, s)| s.name != crate::seatedtalk::CUDDLE || ((same_sofa || same_bed) && !cuddling))
                     .filter(|(_, s)| {
                         s.cat == cat
-                            && crate::social::available(
+                            // (While cuddling, a kiss or making out is the couple's to have, as the
+                            // game's `CuddleSeatedKiss`: their romance, not the talk's turn.)
+                            && ((cuddling && crate::seatedtalk::WHILE_CUDDLING.contains(&s.name) && (rel.is_romance() || rel.romance >= s.min_romance)) || crate::social::available(
                                 s,
                                 &rel,
                                 actor_sim,
@@ -1230,7 +1250,7 @@ fn world_click(
                                 target_member,
                                 family.kin(actor_sim.id, sim.id).is_some(),
                                 [crate::social::Side::of(actor, sides_q.get(actor).ok()), crate::social::Side::of(t, sides_q.get(t).ok())],
-                            )
+                            ))
                     })
                     // (Nothing more to teach a toddler who's learned it; homework helped with only
                     // when there's some.)
@@ -1254,12 +1274,21 @@ fn world_click(
                     pie.submenus.push((label.to_string(), sub));
                     submenu_kind(pie.submenus.len() - 1)
                 });
-                // (Sat together, the game's single-level menu: the friendly talk, at the top.)
-                if seated {
+                // (Sat together, the game's single-level menu: the friendly talk, at the top; in bed
+                // together, the same.)
+                if seated || same_bed {
                     options.extend(list);
                 } else if !list.is_empty() {
                     options.push((format!("{} ›", cat.name()), submenu_kind(pie.submenus.len())));
                     pie.submenus.push((cat.name().to_string(), list));
+                }
+            }
+            // (A cuddle on the sofa first, as the game's own interaction beside the talk.)
+            for first in crate::seatedtalk::WHILE_CUDDLING.iter().rev().chain([&crate::seatedtalk::CUDDLE]) {
+                if (seated || same_bed) && let Some(i) = options.iter().position(|o| o.0 == *first) {
+                    let c = options.remove(i);
+                    let at = options.iter().position(|o| !o.0.starts_with("Select")).unwrap_or(options.len());
+                    options.insert(at, c);
                 }
             }
             let title = format!("{} ({})", sim.full_name(), rel.label_for(sim.female));
@@ -1330,6 +1359,10 @@ fn world_click(
                     continue;
                 }
                 if d.special == Special::VampireOnly && actor_sim.occult != Some(crate::sim::Occult::Vampire) {
+                    continue;
+                }
+                // (At a mirror, what's theirs: Admire Self the Snobs', Play with Mirror the children's.)
+                if !crate::mirrors::offers(d.special, actor_sim) {
                     continue;
                 }
                 // Chess, as the game's table offers it: practice alone, or a game with whoever's
@@ -1842,12 +1875,13 @@ fn pie_buttons(
     mut queues: Query<&mut ActionQueue>,
     selected: Query<Entity, With<Selected>>,
     (mut wishes, mut notes): (Query<(&Sim, &mut crate::wishes::Wishes), With<Selected>>, ResMut<Notifications>),
-    (ui_data, inventories, people, locks, postures): (
+    (ui_data, inventories, people, locks, postures, (sofas, cuddles)): (
         Option<Res<crate::icons::GameUi>>,
         Query<&crate::inventory::Inventory>,
         Query<(Entity, &Sim, Has<HouseholdMember>)>,
         Query<&crate::doorlocks::DoorLock>,
         Query<(&crate::sim::SimAnim, &GlobalTransform, Option<&crate::nav::Floor>)>,
+        (Query<&GameObject>, Query<&crate::seatedtalk::Cuddling>),
     ),
     mut jobs: Query<&mut crate::careers::Job>,
     (back, windows, sounds): (Query<&Interaction, (Changed<Interaction>, With<crate::piemenu::PieBack>)>, Query<&Window, With<PrimaryWindow>>, Option<Res<crate::sound::Sounds>>),
@@ -1975,6 +2009,18 @@ fn pie_buttons(
         commands.entity(target).insert(Selected);
         return;
     }
+    // (A cuddle with someone on the same sofa: worked out before the queue's taken.)
+    let spot = |e: Entity| crate::seatedtalk::cuddle_spot(queues.get(e).ok(), |o| sofas.get(o).ok().map(|g| g.kind));
+    let cuddle_ok = match (actor, &kind) {
+        (Some(a), ActionKind::Social { target, .. }) => spot(a).is_some() && spot(a) == spot(*target),
+        _ => false,
+    };
+    // (Lying in bed together: had where they lie.)
+    let in_bed = cuddle_ok && actor.and_then(spot).is_some_and(|s| s.1);
+    let cuddling = match (actor, &kind) {
+        (Some(a), ActionKind::Social { target, .. }) => cuddle_ok && cuddles.get(a).is_ok_and(|c| c.with == *target && c.accepted),
+        _ => false,
+    };
     if let Some(a) = actor
         && let Ok(mut queue) = queues.get_mut(a)
     {
@@ -2067,12 +2113,12 @@ fn pie_buttons(
         // (Sat near each other, a talk had where they sit: before what they sat down to, which
         // carries on after.)
         if let ActionKind::Social { target, social } = action.kind
-            && crate::social::seated_ok(crate::social::social(social))
+            && (crate::social::seated_ok(crate::social::social(social))
+                || (crate::social::social(social).name == crate::seatedtalk::CUDDLE && cuddle_ok)
+                || (cuddling && crate::seatedtalk::WHILE_CUDDLING.contains(&crate::social::social(social).name)))
         {
             let posture = |e: Entity| postures.get(e).ok().map(|(an, tf, f)| (an, tf.translation(), f.map_or(1, |f| f.0)));
-            if let (Some(me), Some(them)) = (posture(a), posture(target))
-                && crate::seatedtalk::sat_together(me, them)
-            {
+            if in_bed || matches!((posture(a), posture(target)), (Some(me), Some(them)) if crate::seatedtalk::sat_together(me, them)) {
                 action.seated = true;
                 queue.0.push_front(action);
                 return;

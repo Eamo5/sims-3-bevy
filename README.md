@@ -693,7 +693,16 @@ installation is unreachable.
   and have it where they sit, without getting up: the one talking gestures and talks over the
   top of their meal or show (the game's `a_soc_talkRespond_*_sitting` clips, played on the upper
   body alone) and the other listens (`a_soc_talkListen_*_sitting`), agreeing or not as it goes
-  down; then they carry on eating, and it's over once either gets up. Sat together, the menu's
+  down; then they carry on eating, and it's over once either gets up. Two sat on the same sofa
+  can Cuddle (the game's own romantic social, done as its `StartSeatedCuddleA`), taken well or
+  not by its rules: they lean in together, an arm round the other, in the game's seated cuddle
+  clips (the teens' own), for the best part of an hour or till one gets up, then sit back.
+  Cuddling, they can Kiss or Make Out where they sit (the game's `CuddleSeatedKiss` and
+  `CuddleSeatedMakeOut`, theirs to have by their romance rather than the talk's turn), back to
+  the cuddle after; turned away, the cuddle's over. Two grown-ups relaxing in the same double
+  bed can Cuddle there too (the game's `BedCuddle` clips, each from their side of the bed), and
+  Kiss or Make Out from the cuddle (a kiss turned away there, they stay cuddled up); in bed
+  together the menu's the cuddle and WooHoo. Sat together, the menu's
   the game's single level of that talk; Sims strike up such a talk of their own accord now and
   then, so a family meal is talked through. Talked to where they sit by someone standing, a Sim
   listens sat there instead of being pulled up into it.
@@ -1191,6 +1200,11 @@ installation is unreachable.
   base game's first, pictured by the game's Create-a-Sim thumbnails), the Sim dressing in
   each piece as it's picked. A mirror's *Change Appearance* does the same for their looks:
   hairstyle and hair colour, facial hair, glasses, lipstick and eye shadow.
+- **Mirrors**, as the game's: besides *Practice Speech* (rehearsed as talk to the glass) and
+  *Change Appearance*, teens and up can *Gussy Up* (primping, then Attractive for five hours:
+  romance goes better) or *Check Self Out*; Snobs *Admire Self* (I am Beautiful after);
+  children, and the Childish of any age, *Play with Mirror*, pulling faces for fun. Snobs and
+  the Flirty go to their reflection of their own accord, and the Childish to make faces in it.
 - **Blinking**: Sims blink every few seconds (the rig's eyelid bones closing over the eyes on
   top of whatever they're doing), and sleep with their eyes shut.
 - **Looking at each other**: in conversation a Sim's head turns towards the other's face on

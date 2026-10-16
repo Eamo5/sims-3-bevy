@@ -396,6 +396,12 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_newspaper_carry_newspaper",
     "c2o_bookshelf_getBook_Carry",
     "a2o_mirror_full_checkSelfOut",
+    // (The rest of the game's `Mirror` state machine: primping, and faces pulled; the children's
+    // own.)
+    "a2o_mirror_face_primp",
+    "a2o_mirror_play_",
+    "c2o_mirror_face_primp",
+    "c2o_mirror_play_",
     "a2o_painting_start",
     "a2o_painting_loopMed",
     "a2o_painting_loopLarge",
@@ -455,6 +461,23 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2a_soc_Amorous_LeapIntoArms_Amorous_Amorous",
     "a2a_soc_amorous_dipKiss_amorous_amorous",
     "a2a_bed_cuddle_woohoo",
+    // (Cuddling in bed, the game's `BedCuddle`: into it from relaxing, and out; a kiss and a
+    // making out from it.)
+    "a2a_bed_relax_trans2cuddle",
+    "a2a_bed_relax_cuddle_loop",
+    "a2a_bed_relax_cuddler_reject",
+    "a2a_bed_cuddle_trans2relax",
+    "a2a_bed_cuddle_kiss",
+    "a2a_bed_cuddle_makeout",
+    "a2a_bed_kiss_trans_cuddle",
+    "a2a_bed_makeout_trans_cuddle",
+    // (Cuddling on a sofa, the game's `SeatingCuddle`: grown-ups' and teens'.)
+    "a2a_sofa_sit_trans_cuddle",
+    "a2a_sofa_sit_cuddle_",
+    "a2a_sofa_cuddle_trans_sit",
+    "t2t_sofa_sit_trans_cuddle",
+    "t2t_sofa_sit_cuddle_",
+    "t2t_sofa_cuddle_trans_sit",
     "a2a_danceClub_dance_medSkill_loop1",
     // Children.
     "c2o_bed_getIn_made",

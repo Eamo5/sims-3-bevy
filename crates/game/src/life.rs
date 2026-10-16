@@ -834,10 +834,12 @@ pub enum MoodletKind {
     CaughtAfterCurfew,
     CozyFire,
     DivineMeal,
+    /// Gussied up at a mirror (the game's `Attractive`).
+    Attractive,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 105] = {
+    pub const ALL: [MoodletKind; 106] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -848,7 +850,7 @@ impl MoodletKind {
             TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf, MintyBreath,
             Disgusted, Mourning, FreshClothing, VeryFreshClothing, HolidayCheer, SpringFling, SummerFun, SpookyTime,
             Decorated, NicelyDecorated, BeautifullyDecorated, GreatMeal, Stressed, Winner, Overworked, IAmBeautiful, SugarRush,
-            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, NiceNails, CompletelyAtEase, Horrified, Tranquil, BornToDoThis, DrawnIn, OutAfterCurfew, CaughtAfterCurfew, CozyFire, DivineMeal,
+            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, NiceNails, CompletelyAtEase, Horrified, Tranquil, BornToDoThis, DrawnIn, OutAfterCurfew, CaughtAfterCurfew, CozyFire, DivineMeal, Attractive,
         ]
     };
 
@@ -947,7 +949,7 @@ impl MoodletKind {
             Stressed => md("Stressed", "Something fun would take the edge off.", -40, 24.0),
             Winner => md("Winner", "Life is good when you win!", 25, 8.0),
             Overworked => md("Overworked", "Working too hard takes its toll.", -15, 12.0),
-            IAmBeautiful => md("I Am Beautiful", "Looking good, feeling good.", 10, 4.0),
+            IAmBeautiful => md("I am Beautiful", "Recognizing beauty, even one's own, is just a benefit of vanity.", 10, 4.0),
             SugarRush => md("Sugar Rush", "So much sugar!", 15, 4.0),
             GarlicBreath => md("Garlic Breath", "Better keep a distance.", 0, 3.0),
             // (The game's: no mood of its own; the babies' 80 for a day.)
@@ -984,6 +986,7 @@ impl MoodletKind {
             CaughtAfterCurfew => md("Caught After Curfew!", "It's so unfair! Why don't parents understand?", -15, 3.0),
             CozyFire => md("Cozy", "Nothing beats the warm glow of a fire.", 5, 1.0),
             DivineMeal => md("Divine Meal", "That was the food of the gods!", 75, 168.0),
+            Attractive => md("Attractive", "When a Sim looks this good, it's difficult for others not to notice. Wowza!", 10, 5.0),
         }
     }
 
@@ -1101,6 +1104,7 @@ impl MoodletKind {
             CaughtAfterCurfew => ("CaughtAfterCurfew", true),
             CozyFire => ("CozyFire", true),
             DivineMeal => ("DivineMeal", true),
+            Attractive => ("Attractive", true),
         }
     }
 }

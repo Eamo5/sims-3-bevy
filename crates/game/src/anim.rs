@@ -341,6 +341,17 @@ pub fn clip_anchor(name: &str) -> Option<(Vec3, f32)> {
     if n.starts_with("bed_cuddle_woohoo_stop_y") {
         return Some((Vec3::new(0.3731, 0.0, 0.9069), 3.71f32.to_radians()));
     }
+    // (Cuddling in bed: each part round its Sim's own side of the bed, from where they lie there
+    // (the `_x` part the near side's, the `_y` the far side's, a quarter turn from their lying
+    // back); the making out's set has its own root, a quarter turn back again.)
+    if n.starts_with("bed_") && ["cuddle", "cuddler", "makeout"].iter().any(|k| n.contains(k)) && !n.starts_with("bed_cuddle_woohoo") {
+        return Some(match (n.contains("makeout"), n.ends_with("_x")) {
+            (false, true) => (Vec3::new(0.133, 0.0, 0.938), 90f32.to_radians()),
+            (false, false) => (Vec3::new(-0.133, 0.0, 0.938), -90f32.to_radians()),
+            (true, true) => (Vec3::new(0.029, 0.0, -0.133), 0.0),
+            (true, false) => (Vec3::new(0.085, 0.0, -0.133), 0.0),
+        });
+    }
     if n.starts_with("bathtub_relax") || n.starts_with("bathtub_ducky") {
         Some((Vec3::new(-1.0, 0.0, -0.7698), 0.0))
     } else if ["bathtub_takeBath_wash", "bathtub_takeBath_trans", "bathtub_takeBath_holdBreath"].iter().any(|p| n.starts_with(p)) {

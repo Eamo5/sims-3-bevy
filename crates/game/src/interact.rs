@@ -1274,6 +1274,12 @@ pub enum Special {
     /// names, accepted, as the game's `MakeSimsWooHooOnMe`).
     WooHoo,
     TryForBaby,
+    /// At a mirror (`mirrors`): admiring themselves, gussying up, making faces, checking
+    /// themselves out.
+    AdmireSelf,
+    GussyUp,
+    PlayWithMirror,
+    CheckSelfOut,
 }
 
 impl Special {
@@ -1706,9 +1712,14 @@ static BOOKSHELF: [InteractionDef; 2] = [
     InteractionDef { special: Special::GetBook, ..def("Read a Book", 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Stand) },
     InteractionDef { autonomous: false, special: Special::ReadBook, ..def("Read Book", 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Stand) },
 ];
-static MIRROR: [InteractionDef; 2] = [
+static MIRROR: [InteractionDef; 6] = [
     InteractionDef { autonomous: false, skill: Some("Charisma"), ..def("Practice Speech", 40.0, [0.0, 0.0, -2.0, 6.0, 0.0, 10.0], Pose::Talk) },
     InteractionDef { autonomous: false, special: Special::ChangeAppearance, ..def("Change Appearance", 2.0, N, Pose::Use) },
+    // (The game's, ten minutes each; making faces eight, fun 25 an hour.)
+    InteractionDef { special: Special::AdmireSelf, ..def("Admire Self", 10.0, N, Pose::Use) },
+    InteractionDef { special: Special::GussyUp, ..def("Gussy Up", 10.0, N, Pose::Use) },
+    InteractionDef { special: Special::PlayWithMirror, ..def("Play with Mirror", 8.0, [0.0, 0.0, 0.0, 0.0, 0.0, 25.0], Pose::Use) },
+    InteractionDef { special: Special::CheckSelfOut, ..def("Check Self Out", 10.0, N, Pose::Use) },
 ];
 static EASEL: [InteractionDef; 1] = [InteractionDef {
     skill: Some("Painting"),
@@ -1986,7 +1997,13 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
                 .ending(&["a2o_book_readBook_sitting_fromCarry_stop_x"], 0.9)
         }
         "Read Book" => A::new(Some("a2o_book_readBook_standing_fromCarry_start_x"), &["a2o_book_readBook_standing_loop"]).ending(&["a2o_book_readBook_standing_fromCarry_stop_x"], 0.8),
-        "Practice Speech" | "Change Appearance" => A::new(None, &["a2o_mirror_full_checkSelfOut_loop"]),
+        // (The game's `Mirror` state machine's: a speech practised as talk, a look over in the
+        // glass, primping, faces pulled and pointed at.)
+        "Practice Speech" => A::new(None, &["a_soc_talkTalk_gen_b_x", "a_soc_talkTalk_gen_e_x", "a_soc_talkRespond_disagree_correction_x", "a_soc_talkTalk_gen_j_x"]),
+        "Change Appearance" | "Check Self Out" => A::new(None, &["a2o_mirror_full_checkSelfOut_loop"]),
+        "Admire Self" => A::new(None, &["a2o_mirror_full_checkSelfOut_loop1_x", "a_soc_idle_neutral_admire_x", "a2o_mirror_full_checkSelfOut_loop5_x"]),
+        "Gussy Up" => A::new(Some("a2o_mirror_face_primp_start_x"), &["a2o_mirror_face_primp_Loop"]).ending(&["a2o_mirror_face_primp_stop_x"], 1.0),
+        "Play with Mirror" => A::new(None, &["a2o_mirror_play_makeFaces_x", "a2o_mirror_play_point_x"]),
         "Paint" => A::new(Some("a2o_painting_start_x"), &["a2o_painting_loopMed", "a2o_painting_loopLarge", "a2o_painting_consider"]),
         "Play Guitar" => A::new(None, &["a2o_guitar_play_med_loop", "a2o_guitar_play_high_loop", "a2o_guitar_play_low_loop"]),
         // (To Fit Net on the TV: jumping jacks, knee bends and stretches.)
@@ -2968,7 +2985,7 @@ pub(crate) fn run_actions(
         Query<(), With<Broken>>,
         Query<(), Or<(With<crate::buy::HeldObject>, With<crate::buyhistory::HistoryHidden>)>>,
     ),
-    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates, mut memories, (partners_of, at_door))): (
+    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates, mut memories, (partners_of, at_door, cuddles))): (
         MessageWriter<crate::journal::Did>,
         Query<&crate::journal::SkillJournal>,
         Query<&mut crate::inventory::Inventory>,
@@ -2982,7 +2999,7 @@ pub(crate) fn run_actions(
             Option<Res<crate::weather::Weather>>,
             Res<ObjectRates>,
             ResMut<crate::conversation::SocialMemories>,
-            (Query<&SocialPartner>, Query<(), With<crate::doorbell::AtTheDoor>>),
+            (Query<&SocialPartner>, Query<(), With<crate::doorbell::AtTheDoor>>, Query<&crate::seatedtalk::Cuddling>),
         ),
     ),
 ) {
@@ -3000,6 +3017,7 @@ pub(crate) fn run_actions(
     let mut carry_fx: Vec<(Entity, Entity, Age, Transform, bool)> = Vec::new();
     let positions: HashMap<Entity, (Vec3, u8)> = sims.iter().map(|s| (s.0, (s.3.translation, s.11.0))).collect();
     let sitting: std::collections::HashSet<Entity> = sims.iter().filter(|s| s.6.pose == Pose::Sit).map(|s| s.0).collect();
+    let lying: std::collections::HashSet<Entity> = sims.iter().filter(|s| s.6.pose == Pose::Lie).map(|s| s.0).collect();
     // (The places Sims have gone to at an object: a picnic table's taken.)
     let places_taken: Vec<(Entity, Entity, Vec2)> = sims
         .iter()
@@ -3028,6 +3046,12 @@ pub(crate) fn run_actions(
             None => (&grid, upper.as_deref()),
         };
         let way_out = away.map(|v| v.exit).or_else(|| exit.as_ref().map(|e| e.0));
+        // (A talk had lying in bed: the double bed they're relaxing in, and whether on its near
+        // side, for a cuddle there.)
+        let in_bed: Option<bool> = queue.0.get(1).and_then(|a| match a.kind {
+            ActionKind::Object { target, .. } if objects.get(target).is_ok_and(|(o, ..)| o.kind == ObjectKind::BedDouble) => Some(!seconds.get(target).is_ok_and(|s| s.0 == Some(me))),
+            _ => None,
+        });
         let Some(action) = queue.0.front_mut() else {
             if anim.pose != Pose::Walk && anim.pose != Pose::Stand && path.is_none() {
                 anim.pose = Pose::Stand;
@@ -3698,7 +3722,44 @@ pub(crate) fn run_actions(
                                     action.social_outcome = Some(outcome);
                                     // (Seated: the talker's talk and the listener's, over the top of them;
                                     // to one sat, theirs.)
-                                    if action.seated || listens_sat {
+                                    // (A cuddle on the sofa: the game's seated cuddle, leaning in (or turned
+                                    // away), each as they sit to the other.)
+                                    // (A kiss, or making out, while cuddling: the game's own, back to the
+                                    // cuddle after; turned away, the cuddle's over.)
+                                    let cuddling = cuddles.get(me).ok().filter(|c| c.with == *target && c.accepted).copied();
+                                    if let (true, Some(c)) = (action.seated && crate::seatedtalk::WHILE_CUDDLING.contains(&s.name), cuddling) {
+                                        let make_out = s.name == "Make Out";
+                                        // (In bed, turned away, they're still cuddling; on the sofa
+                                        // it's over.)
+                                        if c.bed {
+                                            commands.entity(me).insert(crate::seatedtalk::bed_cuddle_kiss_clip(c.x, outcome.accepted, make_out));
+                                            commands.entity(*target).insert(crate::seatedtalk::bed_cuddle_kiss_clip(!c.x, outcome.accepted, make_out));
+                                        } else {
+                                            commands.entity(me).insert(crate::seatedtalk::cuddle_kiss_clip(c.x, c.teen, outcome.accepted, make_out));
+                                            commands.entity(*target).insert(crate::seatedtalk::cuddle_kiss_clip(!c.x, c.teen, outcome.accepted, make_out));
+                                            if !outcome.accepted {
+                                                for (who, with, x) in [(me, *target, c.x), (*target, me, !c.x)] {
+                                                    commands.entity(who).insert(crate::seatedtalk::Cuddling { with, x, accepted: false, ..c });
+                                                }
+                                            }
+                                        }
+                                    } else if action.seated && s.name == crate::seatedtalk::CUDDLE {
+                                        // (In bed, each from their side of it; on the sofa, each as
+                                        // they sit to the other.)
+                                        let teen = sim.age == Age::Teen;
+                                        let (x, bed) = match in_bed {
+                                            Some(near) => (near, true),
+                                            None => (positions.get(target).is_some_and(|p| crate::seatedtalk::cuddles_as_x(&tf, p.0)), false),
+                                        };
+                                        let accepted = outcome.accepted;
+                                        let clip = |x: bool| if bed { crate::seatedtalk::bed_cuddle_clip(x, accepted) } else { crate::seatedtalk::cuddle_clip(x, teen, accepted) };
+                                        commands.entity(me).insert((clip(x), crate::seatedtalk::Cuddling { with: *target, x, teen, accepted, bed }));
+                                        commands.entity(*target).insert((clip(!x), crate::seatedtalk::Cuddling { with: me, x: !x, teen, accepted, bed }));
+                                        // (Turned away in bed, the far side lies back as it lay.)
+                                        if bed && !accepted {
+                                            commands.entity(if x { *target } else { me }).insert(crate::seatedtalk::LieBack);
+                                        }
+                                    } else if action.seated || listens_sat {
                                         let child = [sim.age == crate::sim::Age::Child, who.get(target).is_some_and(|w| w.0.age == crate::sim::Age::Child)];
                                         let (talk, listen) = crate::seatedtalk::talk_clips(outcome.accepted, child, &mut rand::rng());
                                         if action.seated {
@@ -3966,6 +4027,9 @@ pub(crate) fn run_actions(
                                 };
                                 let complete = if d.special == Special::WriteNovel {
                                     action.completed
+                                } else if cuddles.get(me).is_ok_and(|c| c.accepted) {
+                                    // (Cuddling there: not up till the cuddle's over.)
+                                    false
                                 } else if d.special == Special::Homework {
                                     homework.as_mut().is_none_or(|assignment| assignment.advance(dt, minutes))
                                 } else {
@@ -4067,6 +4131,21 @@ pub(crate) fn run_actions(
                                         | Special::LockDoor => {}
                                         // (Chatting's done as it goes: `chatonline`.)
                                         Special::ChatOnline => {}
+                                        // (At a mirror: what it leaves them feeling.)
+                                        Special::AdmireSelf | Special::GussyUp | Special::PlayWithMirror | Special::CheckSelfOut => {
+                                            let now = clock.minutes;
+                                            commands.queue(move |w: &mut World| {
+                                                w.resource_mut::<crate::mirrors::LastLooked>().0.insert(me, now);
+                                            });
+                                            if let Some(kind) = crate::mirrors::moodlet(d.special) {
+                                                let now = clock.minutes;
+                                                commands.entity(me).queue_silenced(move |mut w: EntityWorldMut| {
+                                                    if let Some(mut m) = w.get_mut::<crate::life::Moodlets>() {
+                                                        m.add(kind, now);
+                                                    }
+                                                });
+                                            }
+                                        }
                                         Special::Engrave => {
                                             commands.entity(me).insert(crate::ghosts::EngraveAt(*target));
                                         }
@@ -4405,8 +4484,9 @@ pub(crate) fn run_actions(
                             let s = crate::social::social(*social);
                             let reach = if action.seated { crate::seatedtalk::SEATED_RANGE + 0.5 } else { crate::social::apart(s) + 1.6 };
                             let close = positions.get(target).is_some_and(|p| p.0.distance(tf.translation) < reach);
-                            // (Had where they sit: over once either gets up.)
-                            if action.seated && !(close && sitting.contains(target) && sitting.contains(&me)) {
+                            // (Had where they sit, or lie in bed: over once either gets up.)
+                            let there = |e: &Entity| if in_bed.is_some() { lying.contains(e) } else { sitting.contains(e) };
+                            if action.seated && !(close && there(target) && there(&me)) {
                                 finished = true;
                             } else if !close {
                                 action.phase = Phase::Start;
@@ -4433,6 +4513,8 @@ pub(crate) fn run_actions(
                                 }
                                 // (A Teacher Extraordinaire gets through homework twice as fast.)
                                 let minutes = if s.effect == SocialEffect::HelpHomework && crate::journal::earned(journals.get(me).ok(), "Teacher Extraordinaire") { s.minutes * 0.5 } else { s.minutes };
+                                // (A cuddle on the sofa goes on a while.)
+                                let minutes = if action.seated && s.name == crate::seatedtalk::CUDDLE { crate::seatedtalk::CUDDLE_MINUTES } else { minutes };
                                 if elapsed >= minutes {
                                     finished = true;
                                     // How it went: the conversation pushed its way, liking with it, and
@@ -5012,15 +5094,37 @@ pub(crate) fn run_actions(
                 debug!("{} finished {} ({:?}{})", sim.first, a.label, a.phase, if a.cancel { ", cancelled" } else { "" });
             }
             // (A seated talk over: the talk off them both, and on with what they sat at.)
-            if let Some(Action { kind: ActionKind::Social { target, .. }, seated: true, .. }) = queue.0.front() {
+            if let Some(Action { kind: ActionKind::Social { target, social }, seated: true, .. }) = queue.0.front() {
                 commands.entity(me).remove::<crate::seatedtalk::TalkOverlay>();
                 commands.entity(*target).remove::<crate::seatedtalk::TalkOverlay>();
+                // (Out of a cuddle: back to sitting, or lying back, those still there.)
+                if crate::social::social(*social).name == crate::seatedtalk::CUDDLE {
+                    for who in [me, *target] {
+                        let (sat, lies) = (sitting.contains(&who), lying.contains(&who));
+                        commands.entity(who).queue_silenced(move |mut w: EntityWorldMut| {
+                            if let Some(c) = w.take::<crate::seatedtalk::Cuddling>()
+                                && c.accepted
+                            {
+                                if c.bed && lies {
+                                    w.insert(crate::seatedtalk::bed_uncuddle_clip(c.x));
+                                    if !c.x {
+                                        w.insert(crate::seatedtalk::LieBack);
+                                    }
+                                } else if !c.bed && sat {
+                                    w.insert(crate::seatedtalk::uncuddle_clip(c.x, c.teen));
+                                }
+                            }
+                        });
+                    }
+                }
             } else {
                 commands.entity(me).remove::<crate::anim::ActionClip>();
             }
             if let Some(Action { kind: ActionKind::Social { target, .. }, .. }) = queue.0.front() {
                 partners_done.push((*target, me));
             }
+            // (A talk had sat down: still sat, on with what they sat at.)
+            let sat_on = queue.0.front().is_some_and(|a| a.seated);
             queue.0.pop_front();
             *decay = DecayScale::default();
             commands.entity(me).remove::<PathFollow>();
@@ -5036,6 +5140,7 @@ pub(crate) fn run_actions(
                     c.mirror = mirror;
                     commands.entity(me).insert(c);
                 }
+                None if sat_on => {}
                 None => {
                     anim.pose = Pose::Stand;
                     anim.seat_height = 0.0;
@@ -5397,13 +5502,14 @@ fn autonomy(
     (called, repairmen, laundry, privacy): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>, Res<crate::laundry::Laundry>, Res<crate::privacy::Privacy>),
     friends_away: Query<(Entity, &Sim), (With<OffLot>, Without<Invited>)>,
     (callers, residents): (Query<(Entity, &crate::doorbell::AtTheDoor)>, Query<&crate::homes::Resident>),
-    (weather, building, chess, music, potties, swipeable): (
+    (weather, building, chess, music, potties, swipeable, looked): (
         Res<crate::weather::Weather>,
         Option<Res<crate::building::ActiveBuilding>>,
         Res<crate::chess::ChessTables>,
         Res<crate::tips::Performances>,
         Res<crate::potty::Potties>,
         Res<crate::klepto::Swipeable>,
+        Res<crate::mirrors::LastLooked>,
     ),
 ) {
     if delta.0 <= 0.0 {
@@ -5543,6 +5649,10 @@ fn autonomy(
                 if d.special.needs().is_some_and(|k| !objects.iter().any(|(_, o, ..)| o.kind == k)) {
                     continue;
                 }
+                // (At a mirror, what's theirs: the Snobs admire themselves, children make faces.)
+                if !crate::mirrors::offers(d.special, sim) {
+                    continue;
+                }
                 // (Plasma for vampires, and vampires drink it rather than eat.)
                 if (d.special == Special::VampireOnly) != (sim.occult == Some(crate::sim::Occult::Vampire)) && (d.special == Special::VampireOnly || d.per_hour[0] > 50.0) {
                     continue;
@@ -5624,6 +5734,11 @@ fn autonomy(
                 }
                 if d.special == Special::PayBills {
                     score = if bills_due { 25.0 } else { 0.0 };
+                }
+                // (A mirror draws the vain and the childish, as their traits have it.)
+                if matches!(d.special, Special::AdmireSelf | Special::GussyUp | Special::PlayWithMirror | Special::CheckSelfOut) {
+                    // (Their pull met for a while once they've looked.)
+                    score += crate::mirrors::drawn(d.special, sim).filter(|_| looked.due(me, clock.minutes)).unwrap_or(0.0);
                 }
                 // The laundry, when there's some to do: a chore like the dishes.
                 if matches!(d.special, Special::PickUpClothes | Special::DoLaundry | Special::EmptyHamper | Special::MoveLaundry | Special::LoadDryer | Special::EmptyDryer) {
