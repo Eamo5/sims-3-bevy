@@ -840,10 +840,16 @@ pub enum MoodletKind {
     SuccessfulPrank,
     PrankedNegative,
     PrankedPositive,
+    /// A Neurotic's worries (`neurotic`): the game's one Feeling Anxious, named for what about;
+    /// and the calm of having checked.
+    AnxiousSink,
+    AnxiousStove,
+    AnxiousFireplace,
+    FeelingCalm,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 109] = {
+    pub const ALL: [MoodletKind; 113] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -855,6 +861,7 @@ impl MoodletKind {
             Disgusted, Mourning, FreshClothing, VeryFreshClothing, HolidayCheer, SpringFling, SummerFun, SpookyTime,
             Decorated, NicelyDecorated, BeautifullyDecorated, GreatMeal, Stressed, Winner, Overworked, IAmBeautiful, SugarRush,
             GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, NiceNails, CompletelyAtEase, Horrified, Tranquil, BornToDoThis, DrawnIn, OutAfterCurfew, CaughtAfterCurfew, CozyFire, DivineMeal, Attractive, SuccessfulPrank, PrankedNegative, PrankedPositive,
+            AnxiousSink, AnxiousStove, AnxiousFireplace, FeelingCalm,
         ]
     };
 
@@ -995,6 +1002,20 @@ impl MoodletKind {
             PrankedNegative => md("Pranked!", "What tastes worse? The embarrassment or the humiliation?", -10, 1.0),
             // (The game's is "Pranked!" too; named apart here, as saves keep moodlets by name.)
             PrankedPositive => md("Pranked (and Amused)", "It's hard not to appreciate a cleverly devised prank. And they chose you to play it on...how wonderful!", 10, 1.0),
+            AnxiousSink => md("Feeling Anxious About Faucet", "If someone left the sink on, the house could flood any minute! Neurotic Sims like to double check things... just to be sure.", -15, 5.0),
+            AnxiousStove => md("Feeling Anxious About the Stove", "An untended stove could light the entire house on fire! Neurotic Sims like to double check things... just to be sure.", -15, 5.0),
+            AnxiousFireplace => md(
+                "Feeling Anxious About Fireplace",
+                "Was the fireplace left on, meaning the entire home can go up in flames any second? Neurotic Sims like to double check things... just to be sure.",
+                -15,
+                5.0,
+            ),
+            FeelingCalm => md(
+                "Feeling Calm",
+                "It turns out it was just anxiety getting the best of your Sim. The object wasn't left turned on and impending disaster wasn't looming. But, double checking helps to calm the anxiety.",
+                15,
+                3.0,
+            ),
         }
     }
 
@@ -1115,6 +1136,9 @@ impl MoodletKind {
             Attractive => ("Attractive", true),
             SuccessfulPrank => ("UberPrankster", true),
             PrankedNegative | PrankedPositive => ("PrankedNegPos", true),
+            // (Named for what about, as the game's `SetAnxietyType` does.)
+            AnxiousSink | AnxiousStove | AnxiousFireplace => ("FeelingAnxious", false),
+            FeelingCalm => ("FeelingCalm", true),
         }
     }
 }

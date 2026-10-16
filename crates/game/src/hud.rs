@@ -1060,7 +1060,7 @@ fn world_click(
         Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q)): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed)): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1081,7 +1081,8 @@ fn world_click(
             Query<&crate::seatedtalk::Cuddling>,
             Res<crate::groups::Conversations>,
             Query<(), With<crate::ghosts::Ghost>>,
-            Query<(Has<crate::computertraits::BookClub>, Option<&crate::computertraits::WorkedIssues>)>,
+            Query<(Has<crate::computertraits::BookClub>, Option<&crate::computertraits::WorkToDo>)>,
+            Res<crate::toilets::Unflushed>,
         ),
     ),
     world: Res<CurrentWorld>,
@@ -1360,7 +1361,7 @@ fn world_click(
                     continue;
                 }
                 // A fireplace offers lighting when cold, the rest when lit.
-                if matches!(obj.kind, ObjectKind::Fireplace | ObjectKind::FirePit | ObjectKind::Candle) && (d.special == Special::LightFire) == lit_q.contains(t) {
+                if matches!(obj.kind, ObjectKind::Fireplace | ObjectKind::FirePit | ObjectKind::Candle) && d.special != Special::NeuroticCheck && (d.special == Special::LightFire) == lit_q.contains(t) {
                     continue;
                 }
                 // (A bubble bath with bubble bath in the house, a play with the duck with one.)
@@ -1378,9 +1379,18 @@ fn world_click(
                 if !crate::mirrors::offers(d.special, actor_sim) {
                     continue;
                 }
+                // (A Neurotic's Check Sink, Check Stove, Check Fireplace.)
+                if !crate::neurotic::offers(d.special, actor_sim) {
+                    continue;
+                }
+                // (Flush: while it needs one.)
+                if d.special == Special::Flush && !unflushed.0.contains_key(&t) {
+                    continue;
+                }
                 // (At the computer, the traits' own: a Genius's problems, a Workaholic's job, a
                 // Bookworm's club.)
-                if !crate::computertraits::offers(d.special, actor_sim, jobs_q.get(actor).ok().flatten(), club_q.get(actor).is_ok_and(|c| c.0), club_q.get(actor).ok().and_then(|c| c.1)) {
+                let work_to_do = club_q.get(actor).ok().and_then(|c| c.1).is_some_and(|w| w.0 > opp_q.2.minutes);
+                if !crate::computertraits::offers(d.special, actor_sim, jobs_q.get(actor).ok().flatten(), club_q.get(actor).is_ok_and(|c| c.0), work_to_do) {
                     continue;
                 }
                 // Chess, as the game's table offers it: practice alone, or a game with whoever's
@@ -2885,6 +2895,10 @@ fn phone_button(
         let invite = known.iter().map(|(_, e, n)| (format!("Invite {n} Over"), ActionKind::Invite { target: *e })).collect();
         options.push(("Invite Someone Over ›".to_string(), submenu_kind(pie.submenus.len())));
         pie.submenus.push(("Invite Over".to_string(), invite));
+        // (A Workaholic calling to Check Up On Work, the game's `CallCheckUpOnWork`.)
+        if has_job && me.traits.contains(&crate::life::Trait::Workaholic) {
+            options.push(("Check Up On Work".to_string(), ActionKind::CheckUpOnWork));
+        }
         // (A prank call, the game's `CallPrank`.)
         if !me.age.is_little() {
             let prank = known.iter().map(|(_, e, n)| (format!("Prank Call {n}"), ActionKind::PrankCall { target: *e })).collect();

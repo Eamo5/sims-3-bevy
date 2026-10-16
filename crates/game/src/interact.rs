@@ -1286,6 +1286,11 @@ pub enum Special {
     JobIssues,
     JoinBookClub,
     LeaveBookClub,
+    /// A Neurotic's Check Sink, Check Stove, Check Fireplace (`neurotic`).
+    NeuroticCheck,
+    /// The toilet used, and one left unflushed flushed (`toilets`).
+    UseToilet,
+    Flush,
 }
 
 impl Special {
@@ -1356,11 +1361,10 @@ static CAKE: [InteractionDef; 1] =
     [InteractionDef { autonomous: false, special: Special::BlowOutCandles, ..def("Grow Up", 3.0, [0.0, 0.0, 0.0, 10.0, 0.0, 20.0], Pose::Use) }];
 // (Cooking and grabbing a plate don't feed by themselves: the hunger figures are what they lead
 // to, for autonomy to weigh. The meal is eaten afterwards.)
-static STOVE: [InteractionDef; 1] = [InteractionDef {
-    skill: Some("Cooking"),
-    special: Special::ServeMeal,
-    ..def("Cook Dinner", 60.0, [100.0, 0.0, 0.0, 0.0, -5.0, 10.0], Pose::Use)
-}];
+static STOVE: [InteractionDef; 2] = [
+    InteractionDef { skill: Some("Cooking"), special: Special::ServeMeal, ..def("Cook Dinner", 60.0, [100.0, 0.0, 0.0, 0.0, -5.0, 10.0], Pose::Use) },
+    InteractionDef { special: Special::NeuroticCheck, ..def("Check Stove", 5.3, N, Pose::Use) },
+];
 static MEAL: [InteractionDef; 2] = [
     InteractionDef { special: Special::GrabPlate, ..def("Grab a Plate", 2.0, [9000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) },
     InteractionDef { special: Special::PutAway, ..def("Put Away Leftovers", 3.0, N, Pose::Use) },
@@ -1383,10 +1387,11 @@ static GARDEN: [InteractionDef; 3] = [
 static COLLECTIBLE: [InteractionDef; 1] = [InteractionDef { special: Special::Collect, ..def("Collect", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 10.0], Pose::Use) }];
 static FISHING_SPOT: [InteractionDef; 1] =
     [InteractionDef { special: Special::Fish, skill: Some("Fishing"), ..def("Fish", 60.0, [-4.0, -4.0, -3.0, 0.0, -2.0, 25.0], Pose::Use) }];
-static FIREPLACE: [InteractionDef; 3] = [
+static FIREPLACE: [InteractionDef; 4] = [
     InteractionDef { special: Special::LightFire, ..def("Light Fire", 2.0, [0.0, 0.0, 0.0, 0.0, 0.0, 4.0], Pose::Use) },
     InteractionDef { autonomous: false, special: Special::PutOutFire, ..def("Put Out Fire", 2.0, [0.0; 6], Pose::Use) },
     def("Warm Hands", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 14.0], Pose::Use),
+    InteractionDef { special: Special::NeuroticCheck, ..def("Check Fireplace", 5.1, N, Pose::Use) },
 ];
 static POOL_LADDER: [InteractionDef; 1] = [InteractionDef {
     special: Special::Swim,
@@ -1461,9 +1466,11 @@ static BED: [InteractionDef; 6] = [
 ];
 /// WooHoo's needs per hour: fun and company, at some cost to energy and hygiene.
 const WOOHOO_RATES: [f32; 6] = [0.0, 0.0, -8.0, 180.0, -20.0, 160.0];
-static TOILET: [InteractionDef; 2] = [
-    InteractionDef { until_full: Some(BLADDER), on_object: true, ..def("Use Toilet", 15.0, [0.0, 900.0, 0.0, 0.0, -10.0, 0.0], Pose::Sit) },
+static TOILET: [InteractionDef; 3] = [
+    InteractionDef { until_full: Some(BLADDER), on_object: true, special: Special::UseToilet, ..def("Use Toilet", 15.0, [0.0, 900.0, 0.0, 0.0, -10.0, 0.0], Pose::Sit) },
     SCRUB,
+    // (The game's `Toilet.Flush`: offered while it needs one.)
+    InteractionDef { special: Special::Flush, ..def("Flush", 1.6, N, Pose::Use) },
 ];
 /// Cleaning something dirty (the game's `CleanableComponent.Clean`: its grime gone in ten
 /// minutes or so).
@@ -1479,13 +1486,14 @@ static SHOWER: [InteractionDef; 2] = [TAKE_SHOWER, SCRUB];
 static BATHTUB: [InteractionDef; 4] = [TAKE_BATH, BUBBLE_BATH, DUCKY, SCRUB];
 /// A shower over a tub (the game's shower-tubs): a shower or a bath.
 static SHOWER_TUB: [InteractionDef; 5] = [TAKE_SHOWER, TAKE_BATH, BUBBLE_BATH, DUCKY, SCRUB];
-static SINK: [InteractionDef; 4] = [
+static SINK: [InteractionDef; 5] = [
     def("Wash Hands", 6.0, [0.0, 0.0, 0.0, 0.0, 160.0, 0.0], Pose::Use),
     // (Where a dish cleared away is taken without a dishwasher: never on the menu.)
     InteractionDef { autonomous: false, special: Special::WashDishes, ..def("Wash Dishes", 8.0, N, Pose::Use) },
     // (The game's `Sink.BrushTeeth`: Minty Breath after, coffee and garlic breath gone.)
     def("Brush Teeth", 5.0, [0.0, 0.0, 0.0, 0.0, 120.0, 0.0], Pose::Use),
     SCRUB,
+    InteractionDef { special: Special::NeuroticCheck, ..def("Check Sink", 3.9, N, Pose::Use) },
 ];
 /// (A flame lit and blown out: the fireplace's, smaller.)
 static CANDLE: [InteractionDef; 2] = [
@@ -1943,6 +1951,11 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         )
         .ending(&["a2o_bathtub_ducky_stop_x", "a2o_bathtub_takeBath_trans_sitUp_x", "a2o_bathtub_takeBath_getOut_x"], 7.5),
         "Light Fire" => A::new(None, &["a2o_fireplace_light_start_x"]),
+        // (The game's `TraitNeurotic` checks, in the sink's, stove's and fireplace's machines: each
+        // played once through, as long as its interaction.)
+        "Check Sink" => A::new(None, &["a2o_trait_neurotic_check_sink_x"]),
+        "Check Stove" => A::new(None, &["a2o_trait_neurotic_check_stove_x"]),
+        "Check Fireplace" => A::new(None, &["a2o_trait_neurotic_check_fireplace_x"]),
         "Light Candle" | "Blow Out" => A::new(None, &["a2o_object_genericSwipe_x"]),
         "Put Out Fire" => A::new(None, &["a2o_fireplace_putOut_x"]),
         "Warm Hands" => A::new(Some("a2o_fireplace_warmHands_start_x"), &["a2o_fireplace_warmHands_x"]),
@@ -1969,6 +1982,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
             &["a2o_stove_fryingPan_idle_x", "a2o_stove_fryingPan_spatula_flip_x", "a2o_stove_fryingPan_spatula_poke_x"],
         ),
         "Use Toilet" => A::new(Some("a2o_toilet_useStanding_start_x"), &["a2o_toilet_useStanding_loop_x"]),
+        "Flush" => A::new(None, &["a2o_toilet_flush_x"]),
         "Take Shower" => A::new(Some("a2o_shower_takeShower_getIn_x"), &["a2o_shower_takeShower_loop"]).ending(&["a2o_shower_takeShower_getOut_x"], 2.4),
         "Wash Hands" => A::new(Some("a2o_sink_washhands_start_x"), &["a2o_sink_washhands_scrubHands_x", "a2o_sink_washhands_rinseHands_x"]).ending(&["a2o_sink_washhands_stop_x"], 2.6),
         "Brush Teeth" => A::new(Some("a2o_sink_brushTeeth_start_x"), &["a2o_sink_brushTeeth_Loop"]).ending(&["a2o_sink_brushTeeth_stop_x"], 2.6),
@@ -2525,6 +2539,8 @@ pub enum ActionKind {
     PhoneChat { target: Entity },
     /// A prank call to someone they know (`pranks`).
     PrankCall { target: Entity },
+    /// A Workaholic's call to Check Up On Work (`computertraits`).
+    CheckUpOnWork,
     /// Phone the boss: an elder retires from their career, on a pension.
     Retire,
     /// Spend lifetime happiness on a reward (instant, from the rewards menu).
@@ -3117,6 +3133,11 @@ pub(crate) fn run_actions(
         }
 
         // Cancellation
+        // (Not part way up or down the stairs: they go on to the end of the flight first, rather
+        // than stand there on the steps.)
+        if action.cancel && matches!(action.phase, Phase::Routing) && path.as_ref().is_some_and(|p| !p.done && p.waypoints.first().is_some_and(|w| w.climb.is_some())) {
+            continue;
+        }
         if action.cancel {
             if let ActionKind::Outro { stand_at, .. } = action.kind {
                 stand_up_at = stand_at;
@@ -3255,6 +3276,7 @@ pub(crate) fn run_actions(
                         ActionKind::Invite { .. }
                         | ActionKind::PhoneChat { .. }
                         | ActionKind::PrankCall { .. }
+                        | ActionKind::CheckUpOnWork
                         | ActionKind::Retire
                         | ActionKind::OrderPizza
                         | ActionKind::Adopt { .. }
@@ -3893,6 +3915,7 @@ pub(crate) fn run_actions(
                             ActionKind::Invite { .. }
                             | ActionKind::PhoneChat { .. }
                             | ActionKind::PrankCall { .. }
+                            | ActionKind::CheckUpOnWork
                             | ActionKind::Retire
                             | ActionKind::BuyReward(_)
                             | ActionKind::InventoryItem(..)
@@ -4230,6 +4253,18 @@ pub(crate) fn run_actions(
                                         }
                                         Special::SolveProblems | Special::JobIssues | Special::JoinBookClub | Special::LeaveBookClub => {
                                             commands.entity(me).insert(crate::computertraits::Done(d.special));
+                                        }
+                                        Special::NeuroticCheck => {
+                                            if let Some(about) = crate::neurotic::About::of(obj.kind) {
+                                                commands.entity(me).insert(crate::neurotic::Checked(about));
+                                            }
+                                        }
+                                        // (Flushed after, or not; hands washed after: `toilets`.)
+                                        Special::UseToilet => {
+                                            commands.entity(me).insert(crate::toilets::UsedToilet { toilet: *target, autonomous: action.autonomous });
+                                        }
+                                        Special::Flush => {
+                                            commands.entity(me).insert(crate::toilets::Flushed(*target));
                                         }
                                         Special::QuitJob => {
                                             if job.is_some() {
@@ -5063,6 +5098,12 @@ pub(crate) fn run_actions(
                                 life.write(LifeEvent::new(*target, LifeEventKind::Socialized { other: me, social: "Chat" }));
                             }
                         }
+                        ActionKind::CheckUpOnWork => {
+                            if elapsed >= crate::computertraits::CHECK_UP_MINUTES {
+                                finished = true;
+                                commands.entity(me).insert(crate::computertraits::CheckedUp);
+                            }
+                        }
                         ActionKind::PrankCall { target } => {
                             if elapsed >= crate::pranks::PRANK_MINUTES {
                                 finished = true;
@@ -5578,7 +5619,7 @@ fn autonomy(
         Res<crate::klepto::Swipeable>,
         Res<crate::mirrors::LastLooked>,
     ),
-    convs: Res<crate::groups::Conversations>,
+    (convs, toilets): (Res<crate::groups::Conversations>, Res<crate::toilets::Unflushed>),
 ) {
     if delta.0 <= 0.0 {
         return;
@@ -5710,7 +5751,7 @@ fn autonomy(
                 }
                 // Guests don't cook or do the chores.
                 // A fireplace is lit when cold, and warmed by when lit.
-                if matches!(obj.kind, ObjectKind::Fireplace | ObjectKind::FirePit | ObjectKind::Candle) && (d.special == Special::LightFire) == lit_q.contains(oe) {
+                if matches!(obj.kind, ObjectKind::Fireplace | ObjectKind::FirePit | ObjectKind::Candle) && d.special != Special::NeuroticCheck && (d.special == Special::LightFire) == lit_q.contains(oe) {
                     continue;
                 }
                 // (A bubble bath with bubble bath in the house.)
@@ -5719,6 +5760,10 @@ fn autonomy(
                 }
                 // (At a mirror, what's theirs: the Snobs admire themselves, children make faces.)
                 if !crate::mirrors::offers(d.special, sim) {
+                    continue;
+                }
+                // (A Neurotic's own checks.)
+                if !crate::neurotic::offers(d.special, sim) {
                     continue;
                 }
                 // (Plasma for vampires, and vampires drink it rather than eat.)
@@ -5802,6 +5847,16 @@ fn autonomy(
                 }
                 if d.special == Special::PayBills {
                     score = if bills_due { 25.0 } else { 0.0 };
+                }
+                // (A toilet left unflushed: flushed by anyone but a Slob, the Neat sooner.)
+                if d.special == Special::Flush {
+                    let Some(pull) = crate::toilets::drawn(sim).filter(|_| toilets.0.contains_key(&oe)) else { continue };
+                    score = pull;
+                }
+                // (A Neurotic checks what they're anxious about; now and then otherwise.)
+                if d.special == Special::NeuroticCheck {
+                    let Some(pull) = crate::neurotic::drawn(obj.kind, moodlets) else { continue };
+                    score = pull;
                 }
                 // (A mirror draws the vain and the childish, as their traits have it.)
                 if matches!(d.special, Special::AdmireSelf | Special::GussyUp | Special::PlayWithMirror | Special::CheckSelfOut) {

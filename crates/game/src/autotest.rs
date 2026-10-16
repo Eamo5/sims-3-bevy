@@ -3959,6 +3959,14 @@ fn auto_action(
         return;
     }
     // "Call": the selected Sim phones the Sim they know best (who isn't about) for a chat.
+    // "CheckUp": the selected Sim phones to Check Up On Work.
+    if name == "CheckUp" {
+        if let Ok(mut q) = sel.single_mut() {
+            *done = true;
+            q.push_player(crate::interact::Action::new("Check Up On Work", crate::interact::ActionKind::CheckUpOnWork, false));
+        }
+        return;
+    }
     // "Prank": the selected Sim prank calls the best friend they know out of the house.
     if name == "Prank" {
         let me = sel_e.single().unwrap();

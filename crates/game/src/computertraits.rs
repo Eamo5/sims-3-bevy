@@ -1,7 +1,8 @@
 //! The computer's interactions for the traits, as the game's `Computer`: a Genius can Solve Hard
 //! Problems (three in five times solved, for a prize of up to §1,000: `SolveHardProblems`,
 //! `GeniusTraitChanceToSolveProblem`); a Workaholic can Work on Job-Related Issues (a little more
-//! performance, once between days at work: `WorkOnJobRelatedIssues`); a Bookworm can Join the
+//! performance: `WorkOnJobRelatedIssues`), once a phone call to Check Up On Work has found there's
+//! something to do (half the time; for two hours: `CallCheckUpOnWork`); a Bookworm can Join the
 //! Book Club (§200 for life, `JoinBookClub`), and a book comes in the mail for each member every
 //! Monday (`Mailbox.SendBookClubBooks`), onto the household's shelves.
 
@@ -18,7 +19,7 @@ pub struct ComputerTraitsPlugin;
 
 impl Plugin for ComputerTraitsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (done, book_club_mail, traits_test).run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (done, checked_up, book_club_mail, traits_test).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -44,9 +45,14 @@ fn traits_test(mut sel: Query<&mut Sim, With<crate::sim::Selected>>, time: Res<T
 #[derive(Component, Clone, Copy)]
 pub struct BookClub;
 
-/// Worked on job issues at home since their last day at work (the day it was).
+/// Work to be done from home, found by checking up on work: until when (game minutes).
 #[derive(Component, Clone, Copy)]
-pub struct WorkedIssues(pub Option<u32>);
+pub struct WorkToDo(pub f64);
+
+/// The game's `kMinuesToDisableWorkaholicInteraction`: how long the work's there to be done.
+const WORK_OPEN_MINUTES: f64 = 120.0;
+/// How long the call takes (game minutes).
+pub const CHECK_UP_MINUTES: f32 = 5.0;
 
 /// One of these finished at the computer, its outcome to be had.
 #[derive(Component)]
@@ -61,15 +67,49 @@ pub const BOOK_CLUB_COST: i64 = 200;
 
 /// Whether one's offered: the trait's own (and teens and up), the job and the club as the
 /// game's tests have them.
-pub fn offers(special: Special, sim: &Sim, job: Option<&crate::careers::Job>, in_club: bool, worked: Option<&WorkedIssues>) -> bool {
+pub fn offers(special: Special, sim: &Sim, job: Option<&crate::careers::Job>, in_club: bool, work_to_do: bool) -> bool {
     let has = |t: Trait| sim.traits.contains(&t);
     let teen_up = sim.age == Age::Teen || sim.age.is_grown();
     match special {
         Special::SolveProblems => teen_up && has(Trait::Genius),
-        Special::JobIssues => teen_up && has(Trait::Workaholic) && job.is_some_and(|j| worked.is_none_or(|w| w.0 != j.last_day)),
+        Special::JobIssues => teen_up && has(Trait::Workaholic) && job.is_some() && work_to_do,
         Special::JoinBookClub => !sim.age.is_little() && has(Trait::Bookworm) && !in_club,
         Special::LeaveBookClub => in_club,
         _ => true,
+    }
+}
+
+/// Called to check up on work (its outcome to be had).
+#[derive(Component)]
+pub struct CheckedUp;
+
+/// Checked up on work by phone: half the time there's something to be getting on with at the
+/// computer, for a couple of hours; else there's nothing to worry about.
+fn checked_up(
+    mut commands: Commands,
+    callers: Query<(Entity, &Sim), With<CheckedUp>>,
+    clock: Res<crate::clock::GameClock>,
+    ui: Option<Res<crate::layout::UiAssets>>,
+    mut notes: ResMut<crate::interact::Notifications>,
+) {
+    for (e, sim) in &callers {
+        commands.entity(e).remove::<CheckedUp>();
+        check_up(&mut commands, e, sim, clock.minutes, ui.as_deref(), &mut notes);
+    }
+}
+
+fn check_up(commands: &mut Commands, e: Entity, sim: &Sim, now: f64, ui: Option<&crate::layout::UiAssets>, notes: &mut crate::interact::Notifications) {
+    let mut rng = rand::rng();
+    let found = rng.random_bool(0.5);
+    let k = rng.random_range(1..=2);
+    let key = if found { format!("WorkaholicCheckonWorkInteracitonText{k}") } else { format!("WorkaholicDoNotWorry{k}") };
+    let or = if found { format!("There's a lot going on at work: {} can help sort it out on the computer.", sim.first) } else { format!("Things are under control at work. {} needn't worry!", sim.first) };
+    let text = ui
+        .and_then(|u| u.localize(&format!("Gameplay/Objects/Electronics/Phone/CallCheckUpOnWork:{key}")))
+        .map_or(or, |t| t.replace("{0.SimName}", &sim.full_name()).replace("{0.SimFirstName}", &sim.first).replace('\u{fffd}', "-"));
+    notes.push(text);
+    if found {
+        commands.entity(e).insert(WorkToDo(now + WORK_OPEN_MINUTES));
     }
 }
 
@@ -111,7 +151,7 @@ fn done(
             Special::JobIssues => {
                 if let Some(mut j) = job {
                     j.performance = (j.performance + ISSUES_PERFORMANCE).clamp(-100.0, 100.0);
-                    commands.entity(e).insert(WorkedIssues(j.last_day));
+                    commands.entity(e).remove::<WorkToDo>();
                     notes.push(say(
                         "Gameplay/Objects/Electronics/Computer/WorkOnJobRelatedProblems:PerformanceBonusTns",
                         format!("{} got some work done from home: their boss will be pleased.", sim.first),
@@ -180,11 +220,11 @@ mod tests {
 
     #[test]
     fn each_trait_has_its_own() {
-        assert!(offers(Special::SolveProblems, &sim(&[Trait::Genius]), None, false, None));
-        assert!(!offers(Special::SolveProblems, &sim(&[]), None, false, None));
-        assert!(offers(Special::JoinBookClub, &sim(&[Trait::Bookworm]), None, false, None));
-        assert!(!offers(Special::JoinBookClub, &sim(&[Trait::Bookworm]), None, true, None) && offers(Special::LeaveBookClub, &sim(&[]), None, true, None));
+        assert!(offers(Special::SolveProblems, &sim(&[Trait::Genius]), None, false, false));
+        assert!(!offers(Special::SolveProblems, &sim(&[]), None, false, false));
+        assert!(offers(Special::JoinBookClub, &sim(&[Trait::Bookworm]), None, false, false));
+        assert!(!offers(Special::JoinBookClub, &sim(&[Trait::Bookworm]), None, true, false) && offers(Special::LeaveBookClub, &sim(&[]), None, true, false));
         // (No job, nothing to work on.)
-        assert!(!offers(Special::JobIssues, &sim(&[Trait::Workaholic]), None, false, None));
+        assert!(!offers(Special::JobIssues, &sim(&[Trait::Workaholic]), None, false, true));
     }
 }

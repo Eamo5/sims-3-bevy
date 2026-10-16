@@ -164,8 +164,9 @@ installation is unreachable.
   something learned about them, one of their traits; good for Social and fun as the game's.
 - **The computer and the traits**, as the game's: a Genius can Solve Hard Problems (45 minutes
   of Logic; three times in five solved, for a prize of up to §1,000, in the game's words); a
-  Workaholic can Work on Job-Related Issues from home (a little more performance, once between
-  days at work); a Bookworm can Join the Book Club (§200 for life, kept in saves), and every
+  Workaholic can phone to Check Up On Work, and half the time there's something to be getting on
+  with: two hours to Work on Job-Related Issues at the computer, for a little more performance; a
+  Bookworm can Join the Book Club (§200 for life, kept in saves), and every
   Monday a book they haven't got comes in the mail for each member, onto the shelves.
 - **Writing novels** by the game's Writing tuning: at a computer, "Write Novel" offers the
   genres the Sim has opened up (Fiction and Non-Fiction to start; Sci-Fi, Trashy, Drama,
@@ -643,6 +644,11 @@ installation is unreachable.
   Once one needs it, "Clean" is offered: the game's scrubbing, with the toilet brush or the
   sponge in hand. Neat Sims clean up on their own; others when it's filthy; slobs never. Kept
   in saves.
+- **Toilet etiquette**, as the game's `UseToilet`: Sims flush after nine times in ten (Neat
+  Sims always, Slobs never) and then wash their hands at the nearest sink as often. A toilet
+  left unflushed offers "Flush" (the game's flush clip), gets flushed by anyone but a Slob of
+  their own accord, the Neat sooner, and until then counts as mess towards Dirty Surroundings
+  for everyone but the Slobs.
 - **Idles**, as the game's (its `Idles` tuning, picked as its idle manager picks): Sims
   standing about with nothing to do fidget now and then, an everyday idle (stretching,
   scratching their head), their mood's (a smile and a nod; grumbling when tense), one of their
@@ -789,7 +795,12 @@ installation is unreachable.
   eight hours, and anyone who sees it shocked); the Dramatic "Fake Passing Out" on the floor
   for ten to thirty minutes; a Natural-Born Performer's "TaDa!" (those about cheer and are
   Drawn In; Born To Do This an hour for each who did). `TRAIT_ACT=talk|freak|fake|tada` has
-  the selected Sim do one (a test).
+  the selected Sim do one (a test). A Neurotic who's used a sink, the stove or a fireplace is
+  Feeling Anxious about it an hour later (the game's `CheckForNeuroticAnxiety`: "Feeling
+  Anxious About Faucet", one worry at a time); Check Sink, Check Stove and Check Fireplace are
+  theirs alone, with the game's `a2o_trait_neurotic_check` clips, and leave them Feeling Calm
+  for three hours, the worry gone. They check what they're anxious about by free will, and
+  now and then anyway once they're no longer calm.
 - **Kleptomaniacs**, as the game's `SwipeSomething`: from seven in the evening till six in the
   morning, out on any lot but their own, the ground's menu offers "Swipe Something": a thing
   within six tiles that the catalogue lets be stolen (its OBJD's flag), on that floor and in

@@ -436,32 +436,39 @@ fn take_out_trash(
 fn surroundings(
     time: Res<Time>,
     mut last: Local<f32>,
-    mut sims: Query<(&Transform, &mut Moodlets, &Visibility), (With<Sim>, With<HouseholdMember>)>,
-    mess: Query<(&GameObject, &Transform, Has<Spoiled>, Option<&TrashFill>)>,
+    mut sims: Query<(&Sim, &Transform, &mut Moodlets, &Visibility), With<HouseholdMember>>,
+    mess: Query<(Entity, &GameObject, &Transform, Has<Spoiled>, Option<&TrashFill>)>,
+    unflushed: Res<crate::toilets::Unflushed>,
 ) {
     let now = time.elapsed_secs();
     if now - *last < 1.0 {
         return;
     }
     *last = now;
-    // Each mess and how bad it is: dishes, spoiled food, a full trash can.
-    let spots: Vec<(Vec3, u32)> = mess
+    // Each mess and how bad it is: dishes, spoiled food, a full trash can, a toilet left
+    // unflushed (not to a Slob).
+    let spots: Vec<(Vec3, u32, bool)> = mess
         .iter()
-        .filter_map(|(o, tf, spoiled, fill)| {
+        .filter_map(|(e, o, tf, spoiled, fill)| {
             let w = match o.kind {
                 ObjectKind::DirtyDishes if spoiled => 3,
                 ObjectKind::DirtyDishes | ObjectKind::ClothingPile => 1,
                 ObjectKind::TrashCan | ObjectKind::TrashCompactor if fill.is_some_and(|f| f.0 >= trash_capacity(o.kind)) => 3,
+                ObjectKind::Toilet if unflushed.0.contains_key(&e) => 2,
                 _ => return None,
             };
-            Some((tf.translation, w))
+            Some((tf.translation, w, o.kind == ObjectKind::Toilet))
         })
         .collect();
-    for (tf, mut moodlets, vis) in &mut sims {
+    for (sim, tf, mut moodlets, vis) in &mut sims {
         let score: u32 = if *vis == Visibility::Hidden {
             0
         } else {
-            spots.iter().filter(|(p, _)| (p.y - tf.translation.y).abs() < 1.8 && p.with_y(0.0).distance(tf.translation.with_y(0.0)) < NEAR).map(|s| s.1).sum()
+            spots
+                .iter()
+                .filter(|(p, _, toilet)| (p.y - tf.translation.y).abs() < 1.8 && p.with_y(0.0).distance(tf.translation.with_y(0.0)) < NEAR && (!toilet || crate::toilets::bothers(sim)))
+                .map(|s| s.1)
+                .sum()
         };
         let filthy = score >= 6;
         moodlets.set_while(MoodletKind::FilthySurroundings, filthy);

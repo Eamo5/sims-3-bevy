@@ -400,6 +400,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     // own.)
     "a2o_mirror_face_primp",
     "a2o_mirror_play_",
+    // (A Neurotic's checks: the sink's, stove's and fireplace's `Check` states.)
+    "a2o_trait_neurotic_check",
     "c2o_mirror_face_primp",
     "c2o_mirror_play_",
     "a2o_painting_start",
