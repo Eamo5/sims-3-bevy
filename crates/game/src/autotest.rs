@@ -3647,7 +3647,8 @@ fn auto_action(
         let Ok(opps) = opps_q.get(me) else { return };
         let Some(ui) = ui.as_ref() else { return };
         for lot in 0..world.data.lots.len() {
-            if let Some((label, kind)) = crate::opportunities::lot_options(&world.data, lot, Some(opps), &ui.data, 12.0).into_iter().next() {
+            let any_day = crate::opportunities::Today { hour: 12.0, weekday: 5, work_day: false };
+            if let Some((label, kind)) = crate::opportunities::lot_options(&world.data, lot, Some(opps), &ui.data, any_day).into_iter().next() {
                 info!("going to do {label}");
                 q.0.clear();
                 q.push_player(crate::interact::Action::new(label, kind, false));

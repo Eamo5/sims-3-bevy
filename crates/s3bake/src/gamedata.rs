@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 121;
+pub const GAMEDATA_VERSION: u32 = 122;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -322,6 +322,44 @@ pub struct OpportunityInfo {
     /// The boss's liking for it.
     #[serde(default)]
     pub boss_liking: f32,
+    /// Done at the venue, then reported on at work (the game's `kVisitedRabbitHole` heard, then
+    /// `kWentToWork`).
+    #[serde(default)]
+    pub then_work: bool,
+    /// The days the venue's task can be done on (`TargetInteractionDays`: `NonWorkDays`,
+    /// `WeekendDays`, or the weekdays named); empty, any.
+    #[serde(default)]
+    pub on_days: String,
+    /// Things to take in to work (`TargetInteractionItemRequired`), taken from the inventory.
+    #[serde(default)]
+    pub bring: Option<BringItems>,
+}
+
+/// What an opportunity wants taken in to work: paintings, fish or produce (`Painting`, `Fish`,
+/// `Produce`), of a kind (its key; empty, any), of a quality (its name: `Nice`, `VeryNice`...;
+/// empty, any) or better (or no better: `worse`), each worth at least so much, so many.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct BringItems {
+    pub kind: String,
+    pub key: String,
+    pub quality: String,
+    pub worse: bool,
+    pub worth: i64,
+    pub count: u32,
+}
+
+/// The game's `TargetInteractionItemRequired` for the things this game keeps in an inventory:
+/// `PaintingAny[,worth]`, `Fish,<key|Any>,<quality|Any>`, `Harvestable,<key|Any>,<quality|Any>[,EqualOrBetter|EqualOrWorse]`.
+pub fn bring_items(required: &str, count: &str) -> Option<BringItems> {
+    let p: Vec<&str> = required.split(',').map(|x| x.trim()).collect();
+    let count = count.trim().parse().unwrap_or(1).max(1);
+    let any = |s: Option<&&str>| s.filter(|v| !v.eq_ignore_ascii_case("Any")).map(|v| v.to_string()).unwrap_or_default();
+    match p.first().copied()? {
+        "PaintingAny" => Some(BringItems { kind: "Painting".into(), worth: p.get(1).and_then(|v| v.parse().ok()).unwrap_or(0), count, ..Default::default() }),
+        "Fish" => Some(BringItems { kind: "Fish".into(), key: any(p.get(1)), quality: any(p.get(2)), count, ..Default::default() }),
+        "Harvestable" => Some(BringItems { kind: "Produce".into(), key: any(p.get(1)), quality: any(p.get(2)), worse: p.get(3).is_some_and(|c| c.eq_ignore_ascii_case("EqualOrWorse")), count, ..Default::default() }),
+        _ => None,
+    }
 }
 
 /// A garden plant from the game's `plants` table, with what it bears (`ingredients`).
@@ -3472,8 +3510,21 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             // (Nor ones that need things brought along: paintings, fish, produce.)
             // (Or a book from the boss, read and reported on at work.)
             let book = get(s, "Object") == "BookGeneral" && get(s, "EventListenerInfo1") == "kReadBook" && get(s, "CompletionEvent") == "kWentToWork";
+            // (Or a venue's task, then a report on it at work.)
+            let then_work = get(s, "Target") == "RabbitHole"
+                && get(s, "EventListenerInfo1").starts_with("kVisitedRabbitHole")
+                && get(s, "EventListenerInfo2").is_empty()
+                && get(s, "CompletionEvent") == "kWentToWork"
+                && get(s, "Object").is_empty()
+                && get(s, "TargetInteractionItemRequired").is_empty();
+            // (Or things taken in to work, out of the inventory.)
+            let bring = (get(s, "Target").is_empty() && get(s, "EventListenerInfo1").is_empty() && get(s, "CompletionEvent") == "kWentToWork")
+                .then(|| bring_items(&get(s, "TargetInteractionItemRequired"), &get(s, "TargetInteractionNumberItemsRequired")))
+                .flatten();
             if !book
-                && (get(s, "CompletionEvent") != "kVisitedRabbitHole
+                && !then_work
+                && bring.is_none()
+                && (get(s, "CompletionEvent") != "kVisitedRabbitHole"
                     || get(s, "Target") != "RabbitHole"
                     || !get(s, "Object").is_empty()
                     || !get(s, "EventListenerInfo1").is_empty()
@@ -3485,8 +3536,12 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             let mut o = OpportunityInfo { guid: g.clone(), ..Default::default() };
             if book {
                 o.book = get(s, "ObjectData");
+            } else if bring.is_some() {
+                o.bring = bring;
             } else {
                 o.rabbit_hole = get(s, "TargetData");
+                o.then_work = then_work;
+                o.on_days = get(s, "TargetInteractionDays");
             }
             o.icon = get(s, "Icon");
             o.minutes = num(s, "TargetInteractionLength").max(15.0);

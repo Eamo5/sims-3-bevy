@@ -1252,13 +1252,27 @@ fn need_moodlets(mut q: Query<(&Motives, &Sim, &mut Moodlets)>) {
 /// sleeping on the floor a couple of hours and getting up again).
 fn need_failures(
     clock: Res<GameClock>,
-    mut q: Query<(Entity, &Sim, &mut Motives, &mut Moodlets, &mut crate::interact::ActionQueue, &InheritedVisibility, &Transform, Option<&crate::nav::Floor>)>,
+    mut q: Query<(
+        Entity,
+        &Sim,
+        &mut Motives,
+        &mut Moodlets,
+        &mut crate::interact::ActionQueue,
+        &InheritedVisibility,
+        &Transform,
+        Option<&crate::nav::Floor>,
+        (Has<crate::fire::Panicking>, Has<crate::fire::OnFire>),
+    )>,
     mut notes: ResMut<crate::interact::Notifications>,
     mut puddles: MessageWriter<crate::puddles::AddPuddle>,
     mut seen: MessageWriter<crate::reactions::Spectacle>,
 ) {
     use crate::interact::{Action, ActionKind};
-    for (e, sim, mut m, mut ml, mut queue, vis, tf, floor) in &mut q {
+    for (e, sim, mut m, mut ml, mut queue, vis, tf, floor, (panicking, burning)) in &mut q {
+        // (In a fire's panic, nothing else: once it's over.)
+        if panicking || burning {
+            continue;
+        }
         // (Babies and toddlers are seen to by others; away, it happens off stage.)
         let shown = vis.get() && !sim.age.is_little();
         let failing = |q: &crate::interact::ActionQueue| q.0.iter().any(|a| matches!(a.kind, ActionKind::MotiveFail(_)) && !a.cancel);

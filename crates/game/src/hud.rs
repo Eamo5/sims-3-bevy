@@ -1714,7 +1714,7 @@ fn world_click(
             let opp_tasks = opp_q
                 .0
                 .as_ref()
-                .map(|ui| crate::opportunities::lot_options(&world.data, lot, opp_q.1.single().ok().flatten(), &ui.data, opp_q.2.hour_f()))
+                .map(|ui| crate::opportunities::lot_options(&world.data, lot, opp_q.1.single().ok().flatten(), &ui.data, crate::opportunities::Today::of(&opp_q.2, jobs_q.get(actor).ok().flatten())))
                 .unwrap_or_default();
             let mut opp_tasks: Vec<(String, ActionKind)> = opp_tasks.into_iter().chain(crate::gardening::lot_options(&world.data, lot)).collect();
             // (Its skill classes, in class hours.)

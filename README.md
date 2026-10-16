@@ -241,8 +241,13 @@ installation is unreachable.
   completion and failure texts. A career's boss may instead hand over a book to read (the
   game's `kReadBook` ones, a hundred of them: "Grey Matters" for a neurosurgeon, "How to Run
   Recess" for a playground monitor): it's on the household's shelf, and once it's been read to
-  the end, the next day at work it's reported on, for performance and the boss's liking. Kept
-  in saves.
+  the end, the next day at work it's reported on, for performance and the boss's liking. Others
+  are a venue's task done first and then reported on at work (a reporter checking out a lead
+  at City Hall, a doctor at the school's blood drive), some only on a day off, at the weekend or
+  on weekdays, as the game's; or things to take in to work, taken from the inventory at the
+  shift's start, the cheapest first (a painting worth §750 for the business office, three Nice
+  apples for the hospital, five sharks for the restaurant). `OFFER=book|venue|bring` (tests).
+  Kept in saves.
 - **Map View**: zoomed out over town, every lot gets the game's map tag — the household's
   home in green with a star, other homes and empty lots, and each venue's own glyph (cut from
   the game's map-tag atlas); hover for the name, click a venue for its activities or a home to
@@ -549,7 +554,7 @@ installation is unreachable.
   a Novel ›* lists the household's, with how far the Sim is into each; read in a chair at the
   book's own pages a minute (a Bookworm's faster rate), for fun by the game's sum (a dearer book
   more, each time it's been read before less, twice for a Bookworm), the place kept between
-  sittings and in saves. `SHOP=books`, `NOVEL=<title>` and `OFFER_BOOK=1` (tests).
+  sittings and in saves. `SHOP=books`, `NOVEL=<title>` and `OFFER=book` (tests).
 - **The venues' own menus**, as the game's rabbit holes have them. The theatre has an evening
   show every night from five (§40): a movie most nights, and on Friday to Sunday one night in
   two a play, a symphony or a concert. There's a weekend matinee from noon (§30), each with

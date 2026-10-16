@@ -121,6 +121,9 @@ pub struct SavedSim {
     pub opportunities: Vec<(String, Option<f64>)>,
     #[serde(default)]
     pub opportunities_done: Vec<String>,
+    /// Those whose venue task is done, to be reported on at work.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub opportunities_visited: Vec<String>,
     #[serde(default)]
     pub lifetime_wish: Option<SavedLifetimeWish>,
     /// The book under way and those written.
@@ -520,6 +523,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         shape: Some((sim.weight, sim.fitness)),
         opportunities: Vec::new(),
         opportunities_done: Vec::new(),
+        opportunities_visited: Vec::new(),
         lifetime_wish: None,
         author: None,
         recipes: Vec::new(),
@@ -944,6 +948,7 @@ fn save_game(
             shape: Some((sim.weight, sim.fitness)),
             opportunities: opps.map(|o| o.active.iter().filter_map(|a| Some((guid(a.index)?, a.deadline))).collect()).unwrap_or_default(),
             opportunities_done: opps.map(|o| o.done.clone()).unwrap_or_default(),
+            opportunities_visited: opps.map(|o| o.active.iter().filter(|a| a.visited).filter_map(|a| guid(a.index)).collect()).unwrap_or_default(),
             lifetime_wish: ltw.map(|l| SavedLifetimeWish { check: l.def().check.into(), fulfilled: l.fulfilled, careers: l.careers.clone(), raised: l.raised, rich_spouse: l.rich_spouse }),
             author: author.cloned(),
             recipes: recipes.map(|r| r.0.clone()).unwrap_or_default(),
@@ -1221,7 +1226,7 @@ pub(crate) fn apply_loaded_game(
             ec.insert(crate::lifetime::LifetimeWish { fulfilled: l.fulfilled, careers: l.careers.clone(), raised: l.raised, rich_spouse: l.rich_spouse, ..crate::lifetime::LifetimeWish::new(wish) });
         }
         if !s.opportunities.is_empty() || !s.opportunities_done.is_empty() {
-            ec.insert(crate::opportunities::PendingOpportunities(s.opportunities.clone(), s.opportunities_done.clone()));
+            ec.insert(crate::opportunities::PendingOpportunities(s.opportunities.clone(), s.opportunities_done.clone(), s.opportunities_visited.clone()));
         }
         if let Some((since, other, stage)) = s.pregnancy {
             let other_parent = other.and_then(|o| by_id.get(&o).copied());

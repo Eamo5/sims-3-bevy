@@ -16,7 +16,7 @@ pub struct NovelsPlugin;
 
 impl Plugin for NovelsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (read_on, novel_test, offer_book_test).run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (read_on, novel_test).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -174,32 +174,6 @@ fn read_on(
             commands.entity(e).remove::<ReadingNovel>();
         }
     }
-}
-
-/// OFFER_BOOK=1 (tests): ten seconds in, one of the boss's books (of the selected Sim's career)
-/// offered them as an opportunity, and taken.
-fn offer_book_test(
-    mut commands: Commands,
-    time: Res<Time>,
-    ui: Option<Res<crate::icons::GameUi>>,
-    sel: Query<(Entity, &Sim, Option<&crate::careers::Job>), With<crate::sim::Selected>>,
-    mut offers: MessageWriter<crate::opportunities::OfferThis>,
-    mut done: Local<bool>,
-) {
-    if *done || std::env::var("OFFER_BOOK").is_err() || time.elapsed_secs() < 10.0 {
-        return;
-    }
-    let (Some(ui), Ok((e, sim, job))) = (ui, sel.single()) else { return };
-    *done = true;
-    let career = job.map(|j| j.career().name);
-    let key = |name: &str| ui.data.careers.iter().find(|c| c.name == name).map(|c| c.hex.clone());
-    let Some(o) = ui.data.opportunities.iter().find(|o| !o.book.is_empty() && career.and_then(key).is_some_and(|k| k == o.career)) else {
-        info!("offer book test: none for {}'s career ({career:?})", sim.first);
-        return;
-    };
-    info!("offer book test: {} ({}) for {}", o.name, o.book, sim.first);
-    commands.insert_resource(crate::opportunities::AutoAccept);
-    offers.write(crate::opportunities::OfferThis { sim: e, guid: o.guid.clone() });
 }
 
 /// NOVEL=<title words> (tests): the selected Sim's household has that book on its shelf (`@opp`:

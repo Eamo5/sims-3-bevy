@@ -5309,7 +5309,8 @@ mod maintenance_tests {
 }
 
 pub fn hour_label(h: f32) -> String {
-    let h = h as u32;
+    // (Midnight at the day's end too.)
+    let h = h as u32 % 24;
     match h {
         0 => "12 AM".into(),
         1..=11 => format!("{h} AM"),

@@ -61,6 +61,14 @@ impl OnFire {
 #[derive(Component)]
 pub struct Panicking;
 
+/// A Sim whose flames were just put out: not to catch fire again from the flames still by them
+/// until then (game minutes), but off out of them.
+#[derive(Component)]
+pub struct Doused(pub f64);
+
+/// How long the put out don't catch fire again.
+const DOUSED_MINUTES: f64 = 60.0;
+
 /// The firefighter come to put the fires out.
 #[derive(Component)]
 pub struct Firefighter {
@@ -324,11 +332,11 @@ fn panic(
     clock: Res<GameClock>,
     fires: Query<&Transform, With<Fire>>,
     mut sims: Query<
-        (Entity, &Transform, &mut ActionQueue, &Sim, Has<Panicking>, Has<OnFire>),
+        (Entity, &Transform, &mut ActionQueue, &Sim, Has<Panicking>, Has<OnFire>, Option<&Doused>),
         (Without<Firefighter>, Without<crate::death::Dying>, Without<crate::interact::AtWork>, Without<crate::rabbitholes::AtRabbitHole>),
     >,
 ) {
-    for (e, tf, mut q, sim, panicking, burning) in &mut sims {
+    for (e, tf, mut q, sim, panicking, burning, doused) in &mut sims {
         // (Babies and toddlers don't catch fire or panic: they've no animations for it.)
         if sim.age.is_little() {
             continue;
@@ -339,7 +347,9 @@ fn panic(
             .filter(|f| (f.translation.y - tf.translation.y).abs() < 2.0)
             .map(|f| f.translation.xz().distance(tf.translation.xz()))
             .fold(f32::MAX, f32::min);
-        if !burning && nearest < CATCH_RANGE {
+        // (Just put out: not again at once, from the flames still by them.)
+        let doused = doused.is_some_and(|d| clock.minutes < d.0);
+        if !burning && nearest < CATCH_RANGE && !doused {
             q.0.clear();
             commands
                 .entity(e)
@@ -375,7 +385,7 @@ fn burning(mut commands: Commands, clock: Res<GameClock>, mut q: Query<(Entity, 
         }
         f.next = clock.minutes + 5.0;
         if rng.random_bool(0.3) {
-            commands.entity(e).remove::<(OnFire, BeingHelped)>().insert(ActionClip::new(Some("a_fire_onFire_putOut_start_x"), &["a_fire_onFire_putOut_stop_x"]));
+            commands.entity(e).remove::<(OnFire, BeingHelped)>().insert((ActionClip::new(Some("a_fire_onFire_putOut_start_x"), &["a_fire_onFire_putOut_stop_x"]), Doused(clock.minutes + DOUSED_MINUTES)));
             notes.push(format!("{} stopped, dropped and rolled, and put the flames out!", sim.first));
         } else if clock.minutes - f.since > BURN_MINUTES && !sim.traits.contains(&crate::life::Trait::Daredevil) {
             commands.entity(e).remove::<(OnFire, Panicking, BeingHelped)>().insert(crate::death::Dying::in_fire());
@@ -547,7 +557,7 @@ fn firefighting(
                 .entity(me)
                 .insert((Transform { rotation: Quat::from_rotation_y(to.x.atan2(to.z)), ..*tf }, ActionClip::new(Some("a_fireFighter_extinguishFire_floor1_start_x"), &["a_fireFighter_extinguishFire_floor1_loop_x"])));
         } else if clock.minutes - since > PUT_OUT_SIM_MINUTES {
-            commands.entity(s).remove::<(OnFire, BeingHelped)>().insert(ActionClip::new(Some("a_fire_onFire_panic_stop_x"), &[]));
+            commands.entity(s).remove::<(OnFire, BeingHelped)>().insert((ActionClip::new(Some("a_fire_onFire_panic_stop_x"), &[]), Doused(clock.minutes + DOUSED_MINUTES)));
             commands.entity(me).insert(ActionClip::new(Some("a_fireFighter_extinguishFire_floor1_stop_x"), &[]));
             notes.push(format!("The firefighter put out the flames on {}!", sim.first));
             f.rescuing = None;
