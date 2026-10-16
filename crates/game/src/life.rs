@@ -836,10 +836,14 @@ pub enum MoodletKind {
     DivineMeal,
     /// Gussied up at a mirror (the game's `Attractive`).
     Attractive,
+    /// A prank call's (`pranks`): the prankster's, and the one pranked, put out or amused.
+    SuccessfulPrank,
+    PrankedNegative,
+    PrankedPositive,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 106] = {
+    pub const ALL: [MoodletKind; 109] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -850,7 +854,7 @@ impl MoodletKind {
             TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf, MintyBreath,
             Disgusted, Mourning, FreshClothing, VeryFreshClothing, HolidayCheer, SpringFling, SummerFun, SpookyTime,
             Decorated, NicelyDecorated, BeautifullyDecorated, GreatMeal, Stressed, Winner, Overworked, IAmBeautiful, SugarRush,
-            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, NiceNails, CompletelyAtEase, Horrified, Tranquil, BornToDoThis, DrawnIn, OutAfterCurfew, CaughtAfterCurfew, CozyFire, DivineMeal, Attractive,
+            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, NiceNails, CompletelyAtEase, Horrified, Tranquil, BornToDoThis, DrawnIn, OutAfterCurfew, CaughtAfterCurfew, CozyFire, DivineMeal, Attractive, SuccessfulPrank, PrankedNegative, PrankedPositive,
         ]
     };
 
@@ -987,6 +991,10 @@ impl MoodletKind {
             CozyFire => md("Cozy", "Nothing beats the warm glow of a fire.", 5, 1.0),
             DivineMeal => md("Divine Meal", "That was the food of the gods!", 75, 168.0),
             Attractive => md("Attractive", "When a Sim looks this good, it's difficult for others not to notice. Wowza!", 10, 5.0),
+            SuccessfulPrank => md("Successful Prank!", "The timing, the preparation, the execution! Boy, does it feel great to play a good prank and get away with it!", 15, 12.0),
+            PrankedNegative => md("Pranked!", "What tastes worse? The embarrassment or the humiliation?", -10, 1.0),
+            // (The game's is "Pranked!" too; named apart here, as saves keep moodlets by name.)
+            PrankedPositive => md("Pranked (and Amused)", "It's hard not to appreciate a cleverly devised prank. And they chose you to play it on...how wonderful!", 10, 1.0),
         }
     }
 
@@ -1105,6 +1113,8 @@ impl MoodletKind {
             CozyFire => ("CozyFire", true),
             DivineMeal => ("DivineMeal", true),
             Attractive => ("Attractive", true),
+            SuccessfulPrank => ("UberPrankster", true),
+            PrankedNegative | PrankedPositive => ("PrankedNegPos", true),
         }
     }
 }

@@ -162,6 +162,11 @@ installation is unreachable.
   to the household's Sims, else someone known; never a grown-up and a child who don't know each
   other), getting on a little better every five minutes of it, and every twenty to fifty
   something learned about them, one of their traits; good for Social and fun as the game's.
+- **The computer and the traits**, as the game's: a Genius can Solve Hard Problems (45 minutes
+  of Logic; three times in five solved, for a prize of up to §1,000, in the game's words); a
+  Workaholic can Work on Job-Related Issues from home (a little more performance, once between
+  days at work); a Bookworm can Join the Book Club (§200 for life, kept in saves), and every
+  Monday a book they haven't got comes in the mail for each member, onto the shelves.
 - **Writing novels** by the game's Writing tuning: at a computer, "Write Novel" offers the
   genres the Sim has opened up (Fiction and Non-Fiction to start; Sci-Fi, Trashy, Drama,
   Humor, Mystery and Romance with skill — sooner for the good-humoured and hopeless romantics;
@@ -387,7 +392,9 @@ installation is unreachable.
   both sides (lonely Sims at home alone call a friend by themselves) — or invite them over
   (they come up to the front door and ring the bell, the game's ring, and wait there until
   someone of the household goes to greet them and let them in; left two hours, they go home),
-  order pizza and call the services. Calls come in too, as the game's: every six hours or so,
+  prank call them (the game's `CallPrank`: the Childish, the Friendly and Loners laugh along;
+  anyone else is put out, the talk between them turned Insulting, and the prankster has a
+  Successful Prank), order pizza and call the services. Calls come in too, as the game's: every six hours or so,
   from seven in the morning to ten at night, someone the household knows may ring (for a chat,
   liking them 25 or more; to hang out, 40 or more). The phone rings, it's answered with the
   game's clip, and the game's question comes up: "Bella would like to chat. Does Mia want to

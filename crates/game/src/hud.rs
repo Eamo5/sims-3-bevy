@@ -1060,7 +1060,7 @@ fn world_click(
         Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q)): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q)): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1075,7 +1075,14 @@ fn world_click(
         ),
         Res<crate::ingredients::Fridge>,
         Query<(&crate::sim::SimAnim, &GlobalTransform, Option<&crate::nav::Floor>)>,
-        (Query<&crate::ghosts::Grave>, Query<&ActionQueue>, Query<&crate::seatedtalk::Cuddling>, Res<crate::groups::Conversations>, Query<(), With<crate::ghosts::Ghost>>),
+        (
+            Query<&crate::ghosts::Grave>,
+            Query<&ActionQueue>,
+            Query<&crate::seatedtalk::Cuddling>,
+            Res<crate::groups::Conversations>,
+            Query<(), With<crate::ghosts::Ghost>>,
+            Query<(Has<crate::computertraits::BookClub>, Option<&crate::computertraits::WorkedIssues>)>,
+        ),
     ),
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
@@ -1369,6 +1376,11 @@ fn world_click(
                 }
                 // (At a mirror, what's theirs: Admire Self the Snobs', Play with Mirror the children's.)
                 if !crate::mirrors::offers(d.special, actor_sim) {
+                    continue;
+                }
+                // (At the computer, the traits' own: a Genius's problems, a Workaholic's job, a
+                // Bookworm's club.)
+                if !crate::computertraits::offers(d.special, actor_sim, jobs_q.get(actor).ok().flatten(), club_q.get(actor).is_ok_and(|c| c.0), club_q.get(actor).ok().and_then(|c| c.1)) {
                     continue;
                 }
                 // Chess, as the game's table offers it: practice alone, or a game with whoever's
@@ -2873,6 +2885,12 @@ fn phone_button(
         let invite = known.iter().map(|(_, e, n)| (format!("Invite {n} Over"), ActionKind::Invite { target: *e })).collect();
         options.push(("Invite Someone Over ›".to_string(), submenu_kind(pie.submenus.len())));
         pie.submenus.push(("Invite Over".to_string(), invite));
+        // (A prank call, the game's `CallPrank`.)
+        if !me.age.is_little() {
+            let prank = known.iter().map(|(_, e, n)| (format!("Prank Call {n}"), ActionKind::PrankCall { target: *e })).collect();
+            options.push(("Prank Call ›".to_string(), submenu_kind(pie.submenus.len())));
+            pie.submenus.push(("Prank Call".to_string(), prank));
+        }
     }
     // Grown-ups can adopt (a baby only where there's a crib for it).
     if me.age.is_grown() && me.age != crate::sim::Age::Child {

@@ -3959,6 +3959,26 @@ fn auto_action(
         return;
     }
     // "Call": the selected Sim phones the Sim they know best (who isn't about) for a chat.
+    // "Prank": the selected Sim prank calls the best friend they know out of the house.
+    if name == "Prank" {
+        let me = sel_e.single().unwrap();
+        commands.queue(move |w: &mut World| {
+            let mut away = w.query_filtered::<Entity, With<crate::interact::OffLot>>();
+            let away: Vec<Entity> = away.iter(w).collect();
+            let Some(rels) = w.get::<crate::social::Relationships>(me) else { return };
+            let Some(target) = away.into_iter().filter(|e| rels.0.contains_key(e)).max_by(|a, b| rels.friendship(*a).total_cmp(&rels.friendship(*b))) else {
+                warn!("prank test: nobody to call");
+                return;
+            };
+            let name = w.get::<crate::sim::Sim>(target).map(|s| s.full_name()).unwrap_or_default();
+            info!("prank test: prank calling {name}");
+            if let Some(mut q) = w.get_mut::<crate::interact::ActionQueue>(me) {
+                q.push_player(crate::interact::Action::new(&format!("Prank Call {name}"), crate::interact::ActionKind::PrankCall { target }, false));
+            }
+        });
+        *done = true;
+        return;
+    }
     if name == "Call" {
         let me = sel_e.single().unwrap();
         commands.queue(move |w: &mut World| {

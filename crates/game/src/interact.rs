@@ -1280,6 +1280,12 @@ pub enum Special {
     GussyUp,
     PlayWithMirror,
     CheckSelfOut,
+    /// At the computer, the game's trait ones: a Genius's hard problems, a Workaholic's job
+    /// issues, a Bookworm's book club (`computertraits`).
+    SolveProblems,
+    JobIssues,
+    JoinBookClub,
+    LeaveBookClub,
 }
 
 impl Special {
@@ -1526,7 +1532,7 @@ static TV: [InteractionDef; 3] = [
 /// (The TV watched: from a seat facing it, or standing.)
 const WATCH_TV: InteractionDef = InteractionDef { autonomous: false, special: Special::WatchTv, ..def("Watch the TV", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 55.0], Pose::Stand) };
 const WATCH_TV_SEATED: InteractionDef = InteractionDef { on_object: true, pose: Pose::Sit, per_hour: [0.0, 0.0, 3.0, 0.0, 0.0, 55.0], ..WATCH_TV };
-static COMPUTER: [InteractionDef; 8] = [
+static COMPUTER: [InteractionDef; 12] = [
     def("Play Computer Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 60.0], Pose::Use),
     // (The game's `ChatRandom`: its ITUN's Social 50, Fun 15 an hour.)
     InteractionDef { special: Special::ChatOnline, ..def("Chat Online", 60.0, [0.0, 0.0, -2.0, 50.0, 0.0, 15.0], Pose::Use) },
@@ -1537,6 +1543,12 @@ static COMPUTER: [InteractionDef; 8] = [
     // (The game's `BrowseWeb` and `PracticeWriting`.)
     def("Browse Web", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 35.0], Pose::Use),
     InteractionDef { skill: Some("Writing"), ..def("Practice Writing", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 5.0], Pose::Use) },
+    // (The game's trait ones: `SolveHardProblems` (45 minutes, Logic, fun 10 an hour),
+    // `WorkOnJobRelatedIssues` (five loops of ten), `JoinBookClub` and `LeaveBookClub`.)
+    InteractionDef { autonomous: false, skill: Some("Logic"), special: Special::SolveProblems, ..def("Solve Hard Problems", 45.0, [0.0, 0.0, -3.0, 0.0, 0.0, 10.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::JobIssues, ..def("Work on Job-Related Issues", 50.0, [0.0, 0.0, -4.0, 0.0, 0.0, 0.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::JoinBookClub, ..def("Join Book Club", 5.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::LeaveBookClub, ..def("Leave Book Club", 5.0, N, Pose::Use) },
 ];
 static CRIB: [InteractionDef; 1] = [InteractionDef {
     until_full: Some(ENERGY),
@@ -1985,7 +1997,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Play Computer Games" => A::new(None, &["a2o_computer_game_loop1_x", "a2o_computer_game_loop2_x"]),
         "Play Chess" if kind == ObjectKind::Computer => A::new(None, &["a2o_computer_chess_type_loop_x"]),
         "Browse Web" => A::new(None, &["a2o_computer_generic_type_loop1_x", "a2o_computer_generic_type_loop2_x", "a2o_computer_generic_type_breathe_x"]),
-        "Practice Writing" => A::new(None, &["a2o_computer_serious_Type_chinRub_x", "a2o_computer_serious_Type_templeTab_x", "a2o_computer_serious_ahHa_x"]),
+        "Practice Writing" | "Solve Hard Problems" => A::new(None, &["a2o_computer_serious_Type_chinRub_x", "a2o_computer_serious_Type_templeTab_x", "a2o_computer_serious_ahHa_x"]),
+        "Work on Job-Related Issues" | "Join Book Club" | "Leave Book Club" => A::new(None, &["a2o_computer_generic_type_loop1_x", "a2o_computer_generic_type_loop2_x"]),
         "Write Novel" | "Find a Job" | "Quit Job" => A::new(None, &["a2o_computer_chess_type_loop_x"]),
         "Dance" => A::new(None, &["a_dance_beg_", "a_dance_med_"]),
         "Read a Book" => A::new(None, &["a2o_bookshelf_getBook_Carry_x"]),
@@ -2510,6 +2523,8 @@ pub enum ActionKind {
     Invite { target: Entity },
     /// Phone a friend for a chat.
     PhoneChat { target: Entity },
+    /// A prank call to someone they know (`pranks`).
+    PrankCall { target: Entity },
     /// Phone the boss: an elder retires from their career, on a pension.
     Retire,
     /// Spend lifetime happiness on a reward (instant, from the rewards menu).
@@ -2725,6 +2740,8 @@ pub fn practice_points(name: &str) -> f32 {
         "Play a Ranked Match" => 600.0,
         // (PracticeWriting_Computer; a novel, the Computer's kWritingNovelPointsPerHour.)
         "Practice Writing" => 650.0,
+        // (SolveHardProblems_Computer's SkillLogic.)
+        "Solve Hard Problems" => 200.0,
         "Write Novel" => 500.0,
         // (LookThroughOrStargaze_Telescope.)
         "Stargaze" => 800.0,
@@ -3237,6 +3254,7 @@ pub(crate) fn run_actions(
                         ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } => objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0))),
                         ActionKind::Invite { .. }
                         | ActionKind::PhoneChat { .. }
+                        | ActionKind::PrankCall { .. }
                         | ActionKind::Retire
                         | ActionKind::OrderPizza
                         | ActionKind::Adopt { .. }
@@ -3874,6 +3892,7 @@ pub(crate) fn run_actions(
                             }
                             ActionKind::Invite { .. }
                             | ActionKind::PhoneChat { .. }
+                            | ActionKind::PrankCall { .. }
                             | ActionKind::Retire
                             | ActionKind::BuyReward(_)
                             | ActionKind::InventoryItem(..)
@@ -4208,6 +4227,9 @@ pub(crate) fn run_actions(
                                             commands.queue(move |world: &mut World| {
                                                 crate::rabbitholes::complete_homework(world, me, None, 0.0);
                                             });
+                                        }
+                                        Special::SolveProblems | Special::JobIssues | Special::JoinBookClub | Special::LeaveBookClub => {
+                                            commands.entity(me).insert(crate::computertraits::Done(d.special));
                                         }
                                         Special::QuitJob => {
                                             if job.is_some() {
@@ -5039,6 +5061,12 @@ pub(crate) fn run_actions(
                                 finished = true;
                                 life.write(LifeEvent::new(me, LifeEventKind::Socialized { other: *target, social: "Chat" }));
                                 life.write(LifeEvent::new(*target, LifeEventKind::Socialized { other: me, social: "Chat" }));
+                            }
+                        }
+                        ActionKind::PrankCall { target } => {
+                            if elapsed >= crate::pranks::PRANK_MINUTES {
+                                finished = true;
+                                commands.entity(me).insert(crate::pranks::PrankMade(*target));
                             }
                         }
                         ActionKind::Invite { target } => {
