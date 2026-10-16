@@ -1294,7 +1294,8 @@ fn list_cams(time: Res<Time>, mut last: Local<f32>, cams: Query<(Entity, &Camera
     }
 }
 
-/// `--do Move:<lot name part>`: moving house, the lot is chosen and Move In pressed.
+/// `--do Move:<lot name part>` (or `MoveOut:<first name>:<lot name part>`): moving house, the lot
+/// is chosen and Move In pressed.
 fn auto_move_house(
     args: Res<AutoArgs>,
     moving: Option<Res<crate::home::Moving>>,
@@ -1304,7 +1305,8 @@ fn auto_move_house(
     time: Res<Time>,
     mut since: Local<Option<f32>>,
 ) {
-    let (Some(_), Some(want)) = (moving, args.action.as_deref().and_then(|a| a.strip_prefix("Move:"))) else { return };
+    let lot_of = |a: &str| a.strip_prefix("Move:").or_else(|| a.strip_prefix("MoveOut:").and_then(|r| r.split_once(':')).map(|(_, l)| l)).map(str::to_string);
+    let (Some(_), Some(want)) = (moving, args.action.as_deref().and_then(lot_of)) else { return };
     let t0 = *since.get_or_insert(time.elapsed_secs());
     if time.elapsed_secs() - t0 < 2.0 {
         return;
@@ -3784,6 +3786,21 @@ fn auto_action(
         if let Ok(mut q) = sel.single_mut() {
             *done = true;
             q.push_player(crate::interact::Action::new("Adopt", crate::interact::ActionKind::Adopt { age: a, female: true }, false));
+        }
+        return;
+    }
+    // "MoveOut:<first name>:<lot name part>": the selected Sim phones for that Sim of the
+    // household to move out (the lot's picked below).
+    if let Some((who, _)) = name.strip_prefix("MoveOut:").and_then(|r| r.split_once(':')) {
+        if let Ok(mut q) = sel.single_mut() {
+            *done = true;
+            let who = who.to_string();
+            commands.queue(move |w: &mut World| {
+                let mut q = w.query_filtered::<&crate::sim::Sim, With<crate::sim::HouseholdMember>>();
+                let ids: Vec<u64> = q.iter(w).filter(|s| s.first.eq_ignore_ascii_case(&who)).map(|s| s.id).collect();
+                w.insert_resource(crate::moveout::MoveOutChoice(ids));
+            });
+            q.push_player(crate::interact::Action::new("Move Out", crate::interact::ActionKind::MoveHouse, false));
         }
         return;
     }

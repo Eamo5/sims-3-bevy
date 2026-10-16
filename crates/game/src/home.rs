@@ -304,7 +304,7 @@ pub struct Moving(pub crate::save::SaveGame);
 pub fn start_move(
     mut commands: Commands,
     req: Option<Res<MoveRequested>>,
-    last: Option<Res<crate::save::LastSave>>,
+    (last, choice): (Option<Res<crate::save::LastSave>>, Option<Res<crate::moveout::MoveOutChoice>>),
     mut asked: Local<bool>,
     mut save: MessageWriter<crate::save::SaveRequest>,
     mut next: ResMut<NextState<PlayMode>>,
@@ -320,7 +320,18 @@ pub fn start_move(
     }
     if let Some(l) = last.filter(|l| l.0.minutes >= req.at) {
         commands.remove_resource::<MoveRequested>();
-        commands.insert_resource(Moving(l.0.clone()));
+        // (Some of the household moving out: split off to choose a home of their own, the rest
+        // staying on.)
+        match choice.filter(|c| !c.0.is_empty()) {
+            Some(c) => {
+                let (out, rest) = crate::moveout::split(&l.0, &c.0);
+                info!("moving out of the {} household: {} (§{})", rest.household, c.0.len(), out.funds);
+                commands.insert_resource(Moving(out));
+                commands.insert_resource(crate::moveout::Staying(rest));
+                commands.remove_resource::<crate::moveout::MoveOutChoice>();
+            }
+            None => commands.insert_resource(Moving(l.0.clone())),
+        }
         *asked = false;
         next.set(PlayMode::ChooseLot);
     }
@@ -336,7 +347,7 @@ fn lot_buttons(
     mut next: ResMut<NextState<PlayMode>>,
     mut commands: Commands,
     (moving, worlds, catalog, mut app, slot): (Option<Res<Moving>>, Res<crate::data::WorldList>, Res<Catalog>, ResMut<NextState<AppState>>, Res<crate::save::SaveSlot>),
-    (terms, now): (Option<Res<PurchaseTerms>>, Option<Res<MoveInNow>>),
+    (terms, now, staying): (Option<Res<PurchaseTerms>>, Option<Res<MoveInNow>>, Option<Res<crate::moveout::Staying>>),
     (town, story, dormant, household, mut notes): (
         Option<Res<crate::premade::TownPremades>>,
         Res<crate::story::TownStory>,
@@ -367,6 +378,34 @@ fn lot_buttons(
             if let Some(who) = lived_in.get(&l) {
                 notes.push(format!("That's the {who} household's home. (In Edit Town they can be moved out.)"));
                 continue;
+            }
+            // Moving out: those leaving housed there, a household of their own about town; the rest
+            // back to playing on where they are.
+            if let (Some(m), Some(stay)) = (&moving, &staying) {
+                let mut out = m.0.clone();
+                out.lot_index = l;
+                out.lot_name = world.data.lot_names.get(l).cloned().unwrap_or_default();
+                out.homeless = false;
+                if let Some(t) = terms.as_deref().filter(|t| t.lot == l) {
+                    out.funds -= t.price;
+                }
+                let c = lot_center(&world.data.lots[l]);
+                let y = world.data.heightmap.sample(c.x, c.z);
+                for s in out.sims.iter_mut().filter(|s| s.member) {
+                    s.position = [c.x, y, c.z];
+                    s.floor = 1;
+                    s.whereabouts = "home".into();
+                }
+                info!("the {} household moved out to lot {l} ({}) with §{}", out.household, out.lot_name, out.funds);
+                let mut g = stay.0.clone();
+                notes.push(format!("The {} household moved into {}.", out.household, out.lot_name));
+                g.dormant.push(out);
+                commands.remove_resource::<Moving>();
+                commands.remove_resource::<crate::moveout::Staying>();
+                if crate::save::begin_load(&mut commands, &worlds, g, slot.0.clone()) {
+                    app.set(AppState::Loading);
+                }
+                return;
             }
             // Moving house: the save, rewritten for the new home, is loaded there.
             if let Some(m) = &moving {

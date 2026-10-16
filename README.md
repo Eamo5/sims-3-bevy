@@ -939,6 +939,13 @@ installation is unreachable.
   on the chosen lot the household starts afresh with everything else they had (Sims, skills,
   jobs, relationships, money, wishes, garden seeds, collection, the town's story), the old
   home's bought furniture sold back for four-fifths of its price.
+- **Moving out**: the phone's "Move Out ›" sends a grown-up of the household (or a couple of
+  them) off to a home of their own, as the game's move splits a household: they take its share
+  of the money (a tenth for each who goes, at least §1,000, as `GameEntryMovingModel` has it),
+  choose and buy their home in the play flow with that, and are a household of their own after,
+  living their lives about town and playable with Change Household. The rest stay on where they
+  are; who's married to whom and who's friends with whom carries on between them. Someone has
+  to stay behind with any children.
 - **Changing household**: the game menu's "Change Household" lists the town's other families
   (each with who's in it, their money and their home): the households played before, then
   the world's families never played. The household being played stays in town just as it is,

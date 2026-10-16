@@ -160,6 +160,7 @@ mod planlook;
 mod mirrorlook;
 mod mirrors;
 mod groups;
+mod moveout;
 mod supernatural;
 
 use bevy::prelude::*;

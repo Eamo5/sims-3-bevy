@@ -482,6 +482,15 @@ pub struct SavedGrave {
     pub epitaph: String,
 }
 
+/// A saved Sim for tests: a random one, with this id and name.
+#[cfg(test)]
+pub fn saved_sim_for_test(id: u64, first: &str) -> SavedSim {
+    let mut s = crate::sim::random_sim(&mut rand::rng(), "Test", None, crate::sim::Age::Adult);
+    s.id = id;
+    s.first = first.to_string();
+    saved_look(&s)
+}
+
 /// How a Sim looks, for saving someone no longer about (the rest left empty).
 fn saved_look(sim: &Sim) -> SavedSim {
     let rgb = |c: Color| {

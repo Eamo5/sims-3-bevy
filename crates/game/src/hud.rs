@@ -1879,13 +1879,13 @@ fn pie_buttons(
     mut queues: Query<&mut ActionQueue>,
     selected: Query<Entity, With<Selected>>,
     (mut wishes, mut notes): (Query<(&Sim, &mut crate::wishes::Wishes), With<Selected>>, ResMut<Notifications>),
-    (ui_data, inventories, people, locks, postures, (sofas, cuddles)): (
+    (ui_data, inventories, people, locks, postures, (sofas, cuddles, rels_q)): (
         Option<Res<crate::icons::GameUi>>,
         Query<&crate::inventory::Inventory>,
         Query<(Entity, &Sim, Has<HouseholdMember>)>,
         Query<&crate::doorlocks::DoorLock>,
         Query<(&crate::sim::SimAnim, &GlobalTransform, Option<&crate::nav::Floor>)>,
-        (Query<&GameObject>, Query<&crate::seatedtalk::Cuddling>),
+        (Query<&GameObject>, Query<&crate::seatedtalk::Cuddling>, Query<&Relationships>),
     ),
     mut jobs: Query<&mut crate::careers::Job>,
     (back, windows, sounds): (Query<&Interaction, (Changed<Interaction>, With<crate::piemenu::PieBack>)>, Query<&Window, With<PrimaryWindow>>, Option<Res<crate::sound::Sounds>>),
@@ -2012,6 +2012,25 @@ fn pie_buttons(
         }
         commands.entity(target).insert(Selected);
         return;
+    }
+    // (Moving out, some of the household: who, kept for the move; the call made.)
+    if let (ActionKind::Social { target, social: crate::moveout::MOVE_OUT | crate::moveout::MOVE_OUT_TOGETHER }, Some(a)) = (&kind, actor)
+        && let Ok(mut queue) = queues.get_mut(a)
+    {
+        let together = matches!(kind, ActionKind::Social { social: crate::moveout::MOVE_OUT_TOGETHER, .. });
+        let mover = people.get(*target).ok().map(|(_, s, _)| s.id);
+        let partnered = |e: Entity| {
+            rels_q.get(*target).is_ok_and(|r| r.0.get(&e).is_some_and(|x| matches!(x.status, crate::social::RelStatus::Partner | crate::social::RelStatus::Engaged | crate::social::RelStatus::Married)))
+        };
+        let partner = together.then(|| people.iter().find(|(e, _, m)| *m && *e != *target && partnered(*e)).map(|(_, s, _)| s.id)).flatten();
+        let movers: Vec<u64> = mover.into_iter().chain(partner).collect();
+        commands.insert_resource(crate::moveout::MoveOutChoice(movers));
+        queue.push_player(Action::new("Move Out", ActionKind::MoveHouse, false));
+        return;
+    }
+    // (The whole household moving: no one split off.)
+    if matches!(kind, ActionKind::MoveHouse) {
+        commands.remove_resource::<crate::moveout::MoveOutChoice>();
     }
     // (Called over to join the conversation: the call over, then their Chat.)
     if let (ActionKind::Social { target, social: crate::groups::INVITE }, Some(a)) = (&kind, actor)
@@ -2813,7 +2832,7 @@ fn phone_button(
     asked: Option<Res<OpenPhone>>,
     selected: Query<(Entity, &Relationships, &Sim, Has<crate::careers::Job>), With<Selected>>,
     away: Query<(Entity, &Sim), (With<crate::interact::OffLot>, Without<crate::interact::Invited>)>,
-    windows: Query<&Window, With<PrimaryWindow>>,
+    (windows, household): (Query<&Window, With<PrimaryWindow>>, Query<(Entity, &Sim, &Relationships), With<HouseholdMember>>),
     mut pie: ResMut<PieMenu>,
     mut notes: ResMut<Notifications>,
     objects: Query<&GameObject>,
@@ -2871,6 +2890,26 @@ fn phone_button(
         options.push(("Adopt a Pet ›".to_string(), submenu_kind(pie.submenus.len())));
         pie.submenus.push(("Adopt a Pet".to_string(), pets));
         options.push(("Move to a New Home".to_string(), ActionKind::MoveHouse));
+        // (Some of the household moving out to a home of their own, the game's move split:
+        // a grown-up on their own, or with their partner.)
+        let members: Vec<(u64, crate::sim::Age)> = household.iter().map(|(_, s, _)| (s.id, s.age)).collect();
+        let mut out: Vec<(String, ActionKind)> = Vec::new();
+        for (e, s, r) in &household {
+            if crate::moveout::may_move_out(&members, &[s.id]) {
+                out.push((s.full_name(), ActionKind::Social { target: e, social: crate::moveout::MOVE_OUT }));
+            }
+            let partner = household.iter().find(|(o, _, _)| r.0.get(o).is_some_and(|x| matches!(x.status, crate::social::RelStatus::Partner | crate::social::RelStatus::Engaged | crate::social::RelStatus::Married)));
+            if let Some((_, p, _)) = partner
+                && s.id < p.id
+                && crate::moveout::may_move_out(&members, &[s.id, p.id])
+            {
+                out.push((format!("{} and {}", s.first, p.first), ActionKind::Social { target: e, social: crate::moveout::MOVE_OUT_TOGETHER }));
+            }
+        }
+        if !out.is_empty() {
+            options.push(("Move Out ›".to_string(), submenu_kind(pie.submenus.len())));
+            pie.submenus.push(("Move Out".to_string(), out));
+        }
     }
     // An elder with a job can retire, on a pension.
     if me.age == crate::sim::Age::Elder && has_job {
