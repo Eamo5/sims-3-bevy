@@ -2982,7 +2982,8 @@ fn auto_gate_route(
 /// camera turned on the nearest such object shown, a click on it through the real input path,
 /// the pie's first option (not a submenu) pressed as a player would, and what the selected Sim
 /// then has queued logged. `<kind>:<option>><option>` picks the options instead, by how their
-/// labels start (`Fridge:Have Quick Meal>Cereal`). `Sim` is the nearest other Sim (its socials);
+/// labels start (`Fridge:Have Quick Meal>Cereal`). `Sim` is the nearest other Sim (its socials),
+/// `Sim=<first name>` that one;
 /// CLICK_SHOTS=<folder> takes a picture of each menu as it opens; CLICK_USE_DISTANCE=<metres>
 /// brings the camera that near; CLICK_USE_AFTER=<seconds> waits that long first (ten by default:
 /// longer for a lot being visited), an entry `wait:<seconds>` that long between two, and
@@ -3038,10 +3039,12 @@ fn auto_click_use(
     }
     let Ok((camera, cam_tf, mut cam)) = cams.single_mut() else { return };
     let target = || {
-        if kinds[idx].eq_ignore_ascii_case("Sim") {
+        // (`Sim=<first name>`: that one.)
+        let named = kinds[idx].split_once('=').filter(|(k, _)| k.eq_ignore_ascii_case("Sim")).map(|(_, n)| n);
+        if kinds[idx].eq_ignore_ascii_case("Sim") || named.is_some() {
             return sims
                 .iter()
-                .filter(|(_, s, _)| !s.age.is_little())
+                .filter(|(_, s, _)| !s.age.is_little() && named.is_none_or(|n| s.first.eq_ignore_ascii_case(n)))
                 .map(|(e, s, tf)| (e, s.first.clone(), tf.translation() + Vec3::Y))
                 .min_by(|a, b| a.2.distance(cam.focus).total_cmp(&b.2.distance(cam.focus)));
         }

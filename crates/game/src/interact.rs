@@ -2985,7 +2985,7 @@ pub(crate) fn run_actions(
         Query<(), With<Broken>>,
         Query<(), Or<(With<crate::buy::HeldObject>, With<crate::buyhistory::HistoryHidden>)>>,
     ),
-    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates, mut memories, (partners_of, at_door, cuddles))): (
+    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates, mut memories, (partners_of, at_door, cuddles, convs))): (
         MessageWriter<crate::journal::Did>,
         Query<&crate::journal::SkillJournal>,
         Query<&mut crate::inventory::Inventory>,
@@ -2999,7 +2999,7 @@ pub(crate) fn run_actions(
             Option<Res<crate::weather::Weather>>,
             Res<ObjectRates>,
             ResMut<crate::conversation::SocialMemories>,
-            (Query<&SocialPartner>, Query<(), With<crate::doorbell::AtTheDoor>>, Query<&crate::seatedtalk::Cuddling>),
+            (Query<&SocialPartner>, Query<(), With<crate::doorbell::AtTheDoor>>, Query<&crate::seatedtalk::Cuddling>, Res<crate::groups::Conversations>),
         ),
     ),
 ) {
@@ -3129,8 +3129,11 @@ pub(crate) fn run_actions(
                 }
                 continue;
             }
-            // (Had where they sit: no walk to it.)
-            if action.seated && matches!(action.phase, Phase::Start) {
+            // (Had where they sit, or with one of a conversation they're standing in: no walk to it.)
+            // (On the same floor, within reach: a floor apart, they'd never be close enough.)
+            let grouped = matches!(action.kind, ActionKind::Social { target, .. }
+                if convs.together(me, target) && positions.get(&target).is_some_and(|p| p.1 == floor.0 && p.0.distance(tf.translation) < crate::groups::IN_RING));
+            if (action.seated || grouped) && matches!(action.phase, Phase::Start) {
                 action.phase = Phase::Routing;
             }
             match action.phase {
@@ -3202,7 +3205,14 @@ pub(crate) fn run_actions(
                         ActionKind::Social { target, social } => positions.get(target).map(|(p, l)| {
                             let mine = Vec2::new(tf.translation.x, tf.translation.z);
                             let theirs = Vec2::new(p.x, p.z);
-                            (theirs + (mine - theirs).normalize_or(Vec2::X) * crate::social::apart(crate::social::social(*social)), *l)
+                            // (Someone talking in a group: a place in its ring, as the game's
+                            // conversations stand.)
+                            let ring: Vec<Vec2> = std::iter::once(*target).chain(convs.others(*target)).filter(|m| *m != me).filter_map(|m| positions.get(&m).map(|q| q.0.xz())).collect();
+                            if crate::groups::huddled(&ring) && crate::social::apart(crate::social::social(*social)) < 1.0 {
+                                (crate::groups::ring_spot(&ring, mine), *l)
+                            } else {
+                                (theirs + (mine - theirs).normalize_or(Vec2::X) * crate::social::apart(crate::social::social(*social)), *l)
+                            }
                         }),
                         ActionKind::GoHere(p, l) => Some((*p, *l)),
                         // (Kneeling beside the spot.)
@@ -3457,7 +3467,7 @@ pub(crate) fn run_actions(
                     }
                 }
                 Phase::Routing => {
-                    let arrived = path.as_ref().is_some_and(|p| p.done) || action.seated;
+                    let arrived = path.as_ref().is_some_and(|p| p.done) || action.seated || grouped;
                     // (Changed for it first, with a spin: into pyjamas by the bed, out of their
                     // clothes by the bath, before getting in.)
                     if arrived && spinning {
@@ -5511,6 +5521,7 @@ fn autonomy(
         Res<crate::klepto::Swipeable>,
         Res<crate::mirrors::LastLooked>,
     ),
+    convs: Res<crate::groups::Conversations>,
 ) {
     if delta.0 <= 0.0 {
         return;
@@ -5928,6 +5939,25 @@ fn autonomy(
                 if partying {
                     score = score.max(30.0 * rng.random_range(0.8..1.2));
                 }
+                if best.as_ref().is_none_or(|b| score > b.0) {
+                    best = Some((score, Action::new(s.name, ActionKind::Social { target: other, social: si }, true)));
+                }
+            }
+        }
+        // In a conversation, they keep it going among themselves a while (the game's 2 to 4
+        // socials before they think of leaving), with whoever in it wasn't just talking.
+        // (Not while something's pressing: a need first.)
+        if let Some(g) = convs.group(me).filter(|g| g.socials_left > 0 && !sim.traits.contains(&crate::life::Trait::Loner) && motives.0.iter().all(|m| *m > -20.0)) {
+            for &other in g.members.iter().filter(|m| **m != me) {
+                // (Not the one just talking, when there's someone else in it to turn to.)
+                if g.members.len() > 2 && g.talk.is_some_and(|(a, b)| a == other || b == other) {
+                    continue;
+                }
+                let Some(&(_, _, age, _, _)) = others.iter().find(|o| o.0 == other) else { continue };
+                let rel = rels.get(other);
+                let si = crate::social::pick_autonomous(sim, age, &rel, &mut rng).or_else(|| crate::social::social_index("Chat")).unwrap_or(0);
+                let s = crate::social::social(si);
+                let score = 28.0 * rng.random_range(0.8..1.2);
                 if best.as_ref().is_none_or(|b| score > b.0) {
                     best = Some((score, Action::new(s.name, ActionKind::Social { target: other, social: si }, true)));
                 }

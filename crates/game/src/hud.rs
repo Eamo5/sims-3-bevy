@@ -1060,7 +1060,7 @@ fn world_click(
         Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q)): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs)): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1075,7 +1075,7 @@ fn world_click(
         ),
         Res<crate::ingredients::Fridge>,
         Query<(&crate::sim::SimAnim, &GlobalTransform, Option<&crate::nav::Floor>)>,
-        (Query<&crate::ghosts::Grave>, Query<&ActionQueue>, Query<&crate::seatedtalk::Cuddling>),
+        (Query<&crate::ghosts::Grave>, Query<&ActionQueue>, Query<&crate::seatedtalk::Cuddling>, Res<crate::groups::Conversations>),
     ),
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
@@ -1206,6 +1206,10 @@ fn world_click(
             }
             let rel = rels.get(t);
             let target_member = members_q.contains(t);
+            // (Talking in a group: someone they know called over to join it.)
+            if convs.group(actor).is_some() && !convs.together(actor, t) && rels.0.contains_key(&t) && !sim.age.is_little() {
+                options.push((crate::groups::INVITE_LABEL.to_string(), ActionKind::Social { target: t, social: crate::groups::INVITE }));
+            }
             // (An opportunity's delivery to make to them: its words.)
             let delivery = opp_q.0.as_ref().and_then(|ui| {
                 let opps = opp_q.1.single().ok().flatten();
@@ -2007,6 +2011,14 @@ fn pie_buttons(
             commands.entity(s).remove::<Selected>();
         }
         commands.entity(target).insert(Selected);
+        return;
+    }
+    // (Called over to join the conversation: the call over, then their Chat.)
+    if let (ActionKind::Social { target, social: crate::groups::INVITE }, Some(a)) = (&kind, actor)
+        && let Ok(mut queue) = queues.get_mut(a)
+    {
+        queue.0.push_front(crate::groups::invite_action(*target));
+        commands.entity(a).insert((crate::groups::CallingOver(*target), crate::anim::ActionClip::new(Some("a_soc_callOver_x"), &[])));
         return;
     }
     // (A cuddle with someone on the same sofa: worked out before the queue's taken.)

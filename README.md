@@ -706,6 +706,15 @@ installation is unreachable.
   the game's single level of that talk; Sims strike up such a talk of their own accord now and
   then, so a family meal is talked through. Talked to where they sit by someone standing, a Sim
   listens sat there instead of being pulled up into it.
+- **Group conversations**, as the game's `Conversation`: two who talk are in a conversation,
+  and whoever comes to talk with one of them joins it (two conversations that meet merge). A
+  newcomer takes a place in the ring round the group, in its widest gap; the rest, while two of
+  them talk, stand turned to the one talking and listen along in the game's conversation idles,
+  a little company had by it. They keep it going among themselves a while of their own accord
+  (the game's 2 to 4 socials, 3 more after one the player chose), talking from where they
+  stand; one who goes off to do something else, or drifts more than 3 m from the rest, has left
+  it, and it's over once it's gone quiet. *Invite to Join Conversation* calls someone they know
+  over (the game's wave over), and they come and Chat.
 - **Conversation topics**, as the game's (its `ActiveTopic`s, for as long as its table has them
   last): what's happened to a Sim lately is talked about, by them or by others with them,
   opening the game's socials under it. A birthday (Announce Birthday; Birthday Congratulations
