@@ -25,7 +25,7 @@ impl Plugin for OpportunitiesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<OpportunityBoard>().add_message::<OfferThis>().add_systems(
             Update,
-            (restore_pending, offer_test, offer_opportunities, dialog_buttons, complete_opportunities, book_reports, toggle_panel, update_panel).chain().run_if(in_state(PlayMode::Live)),
+            (restore_pending, offer_test, offer_opportunities, dialog_buttons, complete_opportunities, book_reports, relationship_goals, toggle_panel, update_panel).chain().run_if(in_state(PlayMode::Live)),
         );
     }
 }
@@ -41,6 +41,8 @@ pub struct ActiveOpp {
     pub activity: &'static Activity,
     /// Done at the venue already, to be reported on at work.
     pub visited: bool,
+    /// The Sim it's done with (their id, and name).
+    pub with: Option<(u64, String)>,
 }
 
 /// A Sim's opportunities: the ones taken on and the ones done (not offered again).
@@ -54,6 +56,8 @@ pub struct SimOpportunities {
 #[derive(Resource, Default)]
 pub struct OpportunityBoard {
     dialog: Option<(Entity, Entity, usize)>,
+    /// The Sim the offer on show is to be done with.
+    with: Option<(u64, String)>,
     next_check: f64,
     panel_open: bool,
     panel: Option<Entity>,
@@ -187,6 +191,25 @@ pub fn lot_options(world: &crate::loading::WorldInfo, lot: usize, opps: Option<&
 }
 
 /// What's to be done for it, in words: the venue's task (`activity`, its name) and when, or the
+/// boss's book to read; with a Sim (`with`, their name), what's to be done with them.
+pub fn objective_with(o: &OpportunityInfo, activity: &str, data: &s3bake::GameDataBaked, with: Option<&str>) -> String {
+    if let Some(name) = with.filter(|_| !o.with.is_empty()) {
+        let then = if o.then_work { ", then go to work" } else { "" };
+        return match o.becomes.as_str() {
+            "Friend" => format!("Become friends with {name}{then}"),
+            "Best Friend" => format!("Become best friends with {name}{then}"),
+            "Enemy" => format!("Make an enemy of {name}{then}"),
+            _ => {
+                let what = if o.interaction.is_empty() { activity.to_string() } else { o.interaction.clone() };
+                let items = o.bring.as_ref().map(|b| format!(" ({})", bring_words(b, data))).unwrap_or_default();
+                format!("{what} to {name}{items}")
+            }
+        };
+    }
+    objective(o, activity, data)
+}
+
+/// What's to be done for it, in words: the venue's task (`activity`, its name) and when, or the
 /// boss's book to read.
 pub fn objective(o: &OpportunityInfo, activity: &str, data: &s3bake::GameDataBaked) -> String {
     if !o.book.is_empty() {
@@ -224,6 +247,7 @@ pub fn bring_words(b: &s3bake::gamedata::BringItems, data: &s3bake::GameDataBake
     };
     let quality = tier_of(&b.quality).map(|t| format!("{} {}", crate::gardening::QUALITIES[t as usize].0, if b.worse { "or worse " } else { "or better " })).unwrap_or_default();
     let what = match b.kind.as_str() {
+        "Painting" if !b.key.is_empty() => format!("a {} painting", b.key.to_lowercase()),
         "Painting" => (if b.count == 1 { "a painting" } else { "paintings" }).to_string(),
         "Fish" if b.key.is_empty() => "fish".to_string(),
         "Fish" => name(&b.key),
@@ -248,7 +272,13 @@ pub fn brings(b: &s3bake::gamedata::BringItems, s: &crate::inventory::Stack) -> 
         Some(t) if b.worse => s.quality <= t,
         Some(t) => s.quality >= t,
     };
-    s.kind == kind && (b.key.is_empty() || s.key.eq_ignore_ascii_case(&b.key)) && quality && s.each() >= b.worth
+    // (A painting's size: its canvas, the key's first part: `painting:<canvas>:...`.)
+    let key = match (kind, b.key.as_str()) {
+        (_, "") => true,
+        (ItemKind::Painting, size) => crate::paintings::CANVASES.iter().position(|c| c.starts_with(size)).is_some_and(|c| s.key.starts_with(&format!("painting:{c}:"))),
+        _ => s.key.eq_ignore_ascii_case(&b.key),
+    };
+    s.kind == kind && key && quality && s.each() >= b.worth
 }
 
 /// Visit activities from this number up are opportunity tasks (minus it, the opportunity).
@@ -258,7 +288,7 @@ pub const OPPORTUNITY_TASK: usize = 1000;
 fn eligible(o: &OpportunityInfo, sim: &Sim, skills: &Skills, job: Option<&crate::careers::Job>, data: &s3bake::GameDataBaked, types: &[&str]) -> bool {
     // (A venue's, where the town has one; a book to read, the book; things to take in.)
     let book = !o.book.is_empty();
-    let venue = !book && o.bring.is_none();
+    let venue = !book && o.bring.is_none() && o.with.is_empty();
     if (book && !data.novels.iter().any(|n| n.key == o.book)) || (venue && !types.contains(&o.rabbit_hole.as_str())) || matches!(sim.age, Age::Baby | Age::Toddler | Age::Child) {
         return false;
     }
@@ -272,16 +302,20 @@ fn eligible(o: &OpportunityInfo, sim: &Sim, skills: &Skills, job: Option<&crate:
     !o.skill.is_empty() && level >= o.skill_min.max(1) && level <= o.skill_max.max(o.skill_min)
 }
 
-/// OFFER=book|venue|bring (tests): ten seconds in, one of the selected Sim's career's
-/// opportunities of that kind (a book to read; a venue's task reported on at work; things to
-/// take in) offered them, and taken; a venue's, they set off to do it.
+/// OFFER=book|venue|bring|deliver|friend (tests): ten seconds in, the selected Sim's career's (or
+/// skill's) opportunities of that kind (a book to read; a venue's task reported on at work;
+/// things to take in; a delivery to a Sim; a friend to make) offered them, and the first they
+/// can take, taken; a venue's, they set off to do it; a delivery, made to a Sim on the lot (the
+/// Sim it's for, for the test).
 #[allow(clippy::type_complexity)]
 fn offer_test(
     mut commands: Commands,
     time: Res<Time>,
     world: Res<CurrentWorld>,
     ui: Option<Res<crate::icons::GameUi>>,
-    mut sel: Query<(Entity, &Sim, Option<&crate::careers::Job>, Option<&SimOpportunities>, &mut crate::interact::ActionQueue), With<Selected>>,
+    mut sel: Query<(Entity, &Sim, Option<&crate::careers::Job>, Option<&mut SimOpportunities>, &mut crate::interact::ActionQueue, &mut crate::social::Relationships), With<Selected>>,
+    others: Query<(Entity, &Sim, &InheritedVisibility, &GlobalTransform), (Without<HouseholdMember>, Without<Selected>)>,
+    here: Query<&GlobalTransform, With<Selected>>,
     mut offers: MessageWriter<OfferThis>,
     mut stage: Local<u8>,
 ) {
@@ -289,18 +323,26 @@ fn offer_test(
     if *stage >= 2 || time.elapsed_secs() < 10.0 {
         return;
     }
-    let (Some(ui), Ok((e, sim, job, opps, mut queue))) = (ui, sel.single_mut()) else { return };
+    let (Some(ui), Ok((e, sim, job, opps, mut queue, mut rels))) = (ui, sel.single_mut()) else { return };
     let career = job.map(|j| j.career().name);
     let hex = career.and_then(|name| ui.data.careers.iter().find(|c| c.name == name).map(|c| c.hex.clone()));
     let of_kind = |o: &OpportunityInfo| match kind.as_str() {
         "book" => !o.book.is_empty(),
-        "bring" => o.bring.is_some(),
-        _ => o.then_work,
+        "bring" => o.bring.is_some() && o.with.is_empty(),
+        "deliver" => o.deliver,
+        "friend" => !o.becomes.is_empty(),
+        _ => o.then_work && o.with.is_empty(),
     };
     if *stage == 0 {
         *stage = 1;
         let types: Vec<&str> = (0..world.data.lots.len()).flat_map(|i| lot_types(&world.data, i)).collect();
-        let Some(o) = ui.data.opportunities.iter().find(|o| of_kind(o) && hex.as_ref().is_some_and(|k| *k == o.career) && (o.rabbit_hole.is_empty() || types.contains(&o.rabbit_hole.as_str()))) else {
+        let fits: Vec<&OpportunityInfo> = ui
+            .data
+            .opportunities
+            .iter()
+            .filter(|o| of_kind(o) && (o.career.is_empty() || hex.as_ref().is_some_and(|k| *k == o.career)) && (o.rabbit_hole.is_empty() || types.contains(&o.rabbit_hole.as_str())))
+            .collect();
+        if fits.is_empty() {
             // (Their career may be one they're joining yet: tried a while.)
             *stage = 0;
             if time.elapsed_secs() > 90.0 {
@@ -308,24 +350,56 @@ fn offer_test(
                 *stage = 2;
             }
             return;
-        };
-        info!("offer test: {} ({}) for {}: {}", o.name, o.guid, sim.first, objective(o, &o.interaction, &ui.data));
+        }
         commands.insert_resource(AutoAccept);
-        offers.write(OfferThis { sim: e, guid: o.guid.clone() });
+        // (A delivery: to the nearest Sim about, for the test.)
+        if kind == "deliver"
+            && let Ok(me_at) = here.single()
+            && let Some((to, tsim, ..)) = others.iter().filter(|o| o.2.get() && !o.1.age.is_little()).min_by(|a, b| a.3.translation().distance(me_at.translation()).total_cmp(&b.3.translation().distance(me_at.translation())))
+        {
+            rels.add(to, 5.0, 0.0);
+            commands.insert_resource(TestWith(tsim.id, tsim.full_name()));
+        }
+        for o in fits {
+            info!("offer test: {} ({}) for {}: {}", o.name, o.guid, sim.first, objective(o, &o.interaction, &ui.data));
+            offers.write(OfferThis { sim: e, guid: o.guid.clone() });
+        }
         return;
     }
     // (Taken: a venue's task, off to do it.)
-    let Some(opps) = opps else { return };
+    let Some(opps) = opps else {
+        if time.elapsed_secs() > 120.0 {
+            *stage = 2;
+        }
+        return;
+    };
     *stage = 2;
     if kind == "venue" {
         let any_day = Today { hour: 12.0, weekday: 5, work_day: false };
         for lot in 0..world.data.lots.len() {
-            if let Some((label, kind)) = lot_options(&world.data, lot, Some(opps), &ui.data, any_day).into_iter().next() {
+            if let Some((label, kind)) = lot_options(&world.data, lot, Some(&opps), &ui.data, any_day).into_iter().next() {
                 info!("offer test: going to do {label}");
                 queue.push_player(crate::interact::Action::new(label, kind, false));
                 return;
             }
         }
+    }
+    // (A friend to make: made, for the test.)
+    if kind == "friend"
+        && let Some(with) = opps.active.iter().find(|a| ui.data.opportunities.get(a.index).is_some_and(|o| !o.becomes.is_empty())).and_then(|a| a.with.clone())
+        && let Some((to, ..)) = others.iter().find(|o| o.1.id == with.0)
+    {
+        info!("offer test: friends with {}", with.1);
+        rels.add(to, 85.0, 0.0);
+    }
+    // (A delivery: the social with them.)
+    if kind == "deliver"
+        && let Some(with) = opps.active.iter().find(|a| ui.data.opportunities.get(a.index).is_some_and(|o| o.deliver)).and_then(|a| a.with.clone())
+        && let Some((to, ..)) = others.iter().find(|o| o.1.id == with.0)
+        && let Some(social) = crate::social::all_socials().find(|(_, s)| s.effect == crate::social::SocialEffect::DeliverOpportunity).map(|(i, _)| i)
+    {
+        info!("offer test: delivering to {}", with.1);
+        queue.push_player(crate::interact::Action::new("Deliver Opportunity", crate::interact::ActionKind::Social { target: to, social }, false));
     }
 }
 
@@ -347,9 +421,11 @@ fn offer_opportunities(
     world: Res<CurrentWorld>,
     ui: Option<ResMut<crate::icons::GameUi>>,
     mut images: ResMut<Assets<Image>>,
-    sims: Query<(Entity, &Sim, &Skills, Option<&crate::careers::Job>, Option<&SimOpportunities>), With<HouseholdMember>>,
+    sims: Query<(Entity, &Sim, &Skills, Option<&crate::careers::Job>, Option<&SimOpportunities>, &crate::social::Relationships), With<HouseholdMember>>,
     force: Option<Res<ForceOffer>>,
     (mut asked, mut waiting): (MessageReader<OfferThis>, Local<Vec<OfferThis>>),
+    town: Query<(Entity, &Sim, Option<&crate::careers::Job>), (Without<HouseholdMember>, Without<crate::ghosts::Ghost>, Without<crate::services::ServiceNpc>, Without<crate::fire::Firefighter>)>,
+    test_with: Option<Res<TestWith>>,
 ) {
     waiting.extend(asked.read().cloned());
     let Some(mut ui) = ui else { return };
@@ -358,20 +434,38 @@ fn offer_opportunities(
     }
     // (One asked for, if it's still one to take on.)
     let types = || -> Vec<&str> { (0..world.data.lots.len()).flat_map(|i| lot_types(&world.data, i)).collect() };
+    let townsfolk: Vec<TownSim> = town.iter().collect();
+    let mut rng = rand::rng();
+    // (Someone to do it with, if it's done with someone; found, or it's not to be offered.)
+    let mut partner = |o: &OpportunityInfo, sim: &Sim, rels: &crate::social::Relationships, job: Option<&crate::careers::Job>| -> Option<Option<(u64, String)>> {
+        if o.with.is_empty() {
+            return Some(None);
+        }
+        // (A test's own.)
+        if let Some(t) = test_with.as_deref() {
+            return Some(Some((t.0, t.1.clone())));
+        }
+        pick_with(o, sim, rels, job, &townsfolk, &mut rng).map(Some)
+    };
     let mut requested = None;
     while requested.is_none() && !waiting.is_empty() {
         let w = waiting.remove(0);
         let data = ui.data.clone();
         let Some(i) = data.opportunities.iter().position(|o| o.guid == w.guid) else { continue };
-        let Ok((_, sim, skills, job, opps)) = sims.get(w.sim) else { continue };
+        let Ok((_, sim, skills, job, opps, rels)) = sims.get(w.sim) else { continue };
         let taken = opps.is_some_and(|x| x.active.iter().any(|a| a.index == i) || (!data.opportunities[i].repeat && x.done.contains(&w.guid)));
         if !taken && !opps.is_some_and(|o| o.active.len() >= 3) && eligible(&data.opportunities[i], sim, skills, job, &data, &types()) {
-            requested = Some((w.sim, i));
+            match partner(&data.opportunities[i], sim, rels, job) {
+                Some(with) => requested = Some((w.sim, i, with)),
+                None => debug!("opportunity {}: nobody of the {} in town to do it with", data.opportunities[i].guid, townsfolk.len()),
+            }
+        } else {
+            debug!("opportunity {}: not one for {} now", data.opportunities[i].guid, sim.first);
         }
     }
     let forced = force.is_some();
     let data = ui.data.clone();
-    let (sim_e, index) = match requested {
+    let (sim_e, index, with) = match requested {
         Some(r) => r,
         None => {
             // (Not the moment play starts.)
@@ -382,31 +476,33 @@ fn offer_opportunities(
                 return;
             }
             board.next_check = clock.minutes + 60.0;
-            let mut rng = rand::rng();
-            if !forced && !rng.random_bool(0.2) {
+            if !forced && !rand::rng().random_bool(0.2) {
                 return;
             }
             commands.remove_resource::<ForceOffer>();
             let types = types();
             // (Those a career's events offer come at work.)
             let at_work = |guid: &str| data.careers.iter().any(|c| c.events.iter().any(|e| e.opportunity == guid));
-            let mut choices: Vec<(Entity, usize)> = Vec::new();
-            for (e, sim, skills, job, opps) in &sims {
+            let mut choices: Vec<(Entity, usize, Option<(u64, String)>)> = Vec::new();
+            for (e, sim, skills, job, opps, rels) in &sims {
                 if opps.is_some_and(|o| o.active.len() >= 3) {
                     continue;
                 }
                 for (i, o) in data.opportunities.iter().enumerate() {
                     let taken = opps.is_some_and(|x| x.active.iter().any(|a| a.index == i) || (!o.repeat && x.done.contains(&o.guid)));
-                    if !taken && !(!forced && at_work(&o.guid)) && eligible(o, sim, skills, job, &data, &types) {
-                        choices.push((e, i));
+                    if !taken && !(!forced && at_work(&o.guid)) && eligible(o, sim, skills, job, &data, &types)
+                        && let Some(with) = partner(o, sim, rels, job)
+                    {
+                        choices.push((e, i, with));
                     }
                 }
             }
-            let Some(&c) = choices.choose(&mut rng) else { return };
+            let Some(c) = choices.choose(&mut rand::rng()).cloned() else { return };
             c
         }
     };
     let Ok((_, sim, ..)) = sims.get(sim_e) else { return };
+    let with_name = with.as_ref().map(|w| w.1.clone());
     let o = &data.opportunities[index];
     let icon = ui.icon(&mut images, &o.icon);
     let root = commands
@@ -440,7 +536,7 @@ fn offer_opportunities(
                     c.spawn(text(o.name.clone(), 22.0, Color::WHITE));
                 });
             });
-            p.spawn(text(fill(&o.desc, o, ""), 15.0, Color::WHITE));
+            p.spawn(text(fill_with(&fill(&o.desc, o, ""), with_name.as_deref()), 15.0, Color::WHITE));
             let mut terms = Vec::new();
             if o.money > 0 {
                 terms.push(format!("Reward: §{}", o.money));
@@ -467,6 +563,7 @@ fn offer_opportunities(
         })
         .id();
     board.dialog = Some((root, sim_e, index));
+    board.with = with;
 }
 
 impl OpportunityBoard {
@@ -474,6 +571,66 @@ impl OpportunityBoard {
     pub fn offer(&self) -> Option<(Entity, Entity, usize)> {
         self.dialog
     }
+
+    /// The name of the Sim the offer on show is to be done with.
+    pub fn offer_with(&self) -> Option<&str> {
+        self.with.as_ref().map(|w| w.1.as_str())
+    }
+}
+
+/// The town's Sims, for an opportunity to be done with: who, their Sim, their job.
+pub type TownSim<'a> = (Entity, &'a Sim, Option<&'a crate::careers::Job>);
+
+/// Someone of the town to do an opportunity with, as the game's `TargetData` asks: an
+/// acquaintance (or a young adult's, a child's or teen's), a stranger, a co-worker not yet a
+/// friend, someone in a career, any grown-up; not already what it asks them to become.
+pub fn pick_with(o: &OpportunityInfo, me: &Sim, rels: &crate::social::Relationships, job: Option<&crate::careers::Job>, town: &[TownSim], rng: &mut impl Rng) -> Option<(u64, String)> {
+    use rand::seq::IndexedRandom;
+    if o.with.is_empty() {
+        return None;
+    }
+    let mut parts = o.with.split(',');
+    let kind = parts.next().unwrap_or("");
+    let career = parts.next().map(str::trim);
+    let fits: Vec<&TownSim> = town
+        .iter()
+        .filter(|(e, s, j)| {
+            let met = rels.0.contains_key(e);
+            let r = rels.get(*e);
+            let acquainted = met && !r.enemy && r.friendship > -20.0;
+            let fits = match kind {
+                "AcquaintanceOrHigher" => acquainted && s.age.is_grown(),
+                "YAAcquaintanceOrHigher" => acquainted && s.age == Age::YoungAdult,
+                "ChildOrTeenAcquaintanceOrHigher" => acquainted && matches!(s.age, Age::Child | Age::Teen),
+                "Stranger" => !met && s.age.is_grown() && s.age != Age::Teen,
+                "NonFriendCoworker" => job.is_some_and(|j| j.coworkers.contains(&s.id)) && r.friendship < crate::social::FRIEND_THRESHOLD,
+                "InCareer" => j.is_some_and(|j| career.is_some_and(|c| j.career().name.eq_ignore_ascii_case(c))),
+                "NonHouseholdAdult" => s.age.is_grown() && s.age != Age::Teen,
+                _ => false,
+            };
+            // (Not already what they're to become.)
+            let label = r.friendship_label();
+            let already = match o.becomes.as_str() {
+                "Friend" => r.friendship >= crate::social::FRIEND_THRESHOLD,
+                "Best Friend" => label == "Best Friend",
+                "Enemy" => label == "Enemy",
+                _ => false,
+            };
+            s.id != me.id && fits && !already
+        })
+        .collect();
+    fits.choose(rng).map(|(_, s, _)| (s.id, s.full_name()))
+}
+
+/// The game's words for the Sim an opportunity's done with, filled.
+pub fn fill_with(s: &str, with: Option<&str>) -> String {
+    let Some(name) = with else { return s.to_string() };
+    let first = name.split(' ').next().unwrap_or(name);
+    ["{2.String}", "{2.SimName}", "{1.String}", "{1.SimName}", "{0.SimName}", "{OpTarget}"]
+        .iter()
+        .fold(s.to_string(), |t, k| t.replace(k, name))
+        .replace("{2.SimFirstName}", first)
+        .replace("{1.SimFirstName}", first)
 }
 
 /// Asks for an opportunity to be offered now (tests).
@@ -483,6 +640,10 @@ pub struct ForceOffer;
 /// Accepts offers without asking (tests).
 #[derive(Resource)]
 pub struct AutoAccept;
+
+/// The Sim an opportunity offered is to be done with (tests): their id and name.
+#[derive(Resource, Clone)]
+pub struct TestWith(pub u64, pub String);
 
 /// Turns offers down without asking (tests).
 #[derive(Resource)]
@@ -503,6 +664,7 @@ fn dialog_buttons(
     mut opps: Query<(&Sim, Option<&mut SimOpportunities>, Option<&mut crate::novels::Novels>)>,
     mut notes: ResMut<Notifications>,
     (auto_accept, auto_decline): (Option<Res<AutoAccept>>, Option<Res<AutoDecline>>),
+    callers: Query<(Entity, &Sim, Has<crate::interact::Visitor>, Has<crate::interact::Invited>), (Without<HouseholdMember>, Or<(With<crate::town::Townie>, With<crate::interact::OffLot>)>)>,
 ) {
     let Some((root, sim, index)) = board.dialog else { return };
     let auto = auto_accept.is_some().then_some(true).or_else(|| auto_decline.is_some().then_some(false));
@@ -510,9 +672,10 @@ fn dialog_buttons(
     commands.entity(root).try_despawn();
     board.dialog = None;
     board.shown.clear();
+    let with = board.with.take();
     let (Some(ui), true) = (ui, choice) else { return };
     let Some(o) = ui.data.opportunities.get(index) else { return };
-    let active = ActiveOpp { index, deadline: (o.days > 0.0).then(|| clock.minutes + o.days as f64 * 1440.0), activity: task_for(o), visited: false };
+    let active = ActiveOpp { index, deadline: (o.days > 0.0).then(|| clock.minutes + o.days as f64 * 1440.0), activity: task_for(o), visited: false, with: with.clone() };
     let Ok((who, mine, novels)) = opps.get_mut(sim) else { return };
     let first = who.first.clone();
     match mine {
@@ -532,6 +695,19 @@ fn dialog_buttons(
             }
         }
         notes.push(format!("Opportunity accepted: {}. {first} has \"{}\" to read: finished, it's reported on at work.", o.name, b.name));
+        return;
+    }
+    if let Some((id, name)) = with.as_ref().filter(|_| !o.with.is_empty()) {
+        notes.push(format!("Opportunity accepted: {}. {}.", o.name, objective_with(o, &o.interaction, &ui.data, Some(name))));
+        // (Someone of the town not to be phoned, a stranger: they'll be by in a few hours, to be
+        // found.)
+        if ["Stranger", "NonHouseholdAdult", "InCareer"].iter().any(|k| o.with.starts_with(k))
+            && let Some((e, ..)) = callers.iter().find(|c| c.1.id == *id && !c.2 && !c.3)
+        {
+            let arrive_at = clock.minutes + rand::rng().random_range(60.0..240.0);
+            commands.entity(e).remove::<(crate::town::Townie, crate::nav::PathFollow)>().insert((crate::interact::OffLot, crate::interact::Invited { arrive_at }));
+            notes.push(format!("{name} will be by later on."));
+        }
         return;
     }
     if let Some(b) = &o.bring {
@@ -607,6 +783,65 @@ fn book_reports(
     }
 }
 
+/// Friends (or best friends, or enemies) with the Sim it asked: done (the game's
+/// `kRelationshipLTRChanged`), or to be reported on at work.
+#[allow(clippy::type_complexity)]
+fn relationship_goals(
+    clock: Res<crate::clock::GameClock>,
+    mut next: Local<f64>,
+    ui: Option<Res<crate::icons::GameUi>>,
+    mut household: Option<ResMut<Household>>,
+    mut sims: Query<(&Sim, &mut SimOpportunities, &mut Skills, Option<&mut crate::careers::Job>, Option<&crate::wishes::Wishes>, &crate::social::Relationships)>,
+    people: Query<(Entity, &Sim)>,
+    mut notes: ResMut<Notifications>,
+) {
+    if clock.minutes < *next {
+        return;
+    }
+    *next = clock.minutes + 10.0;
+    let Some(ui) = ui else { return };
+    let data = &ui.data;
+    for (sim, mut opps, mut skills, mut job, wishes, rels) in &mut sims {
+        for i in (0..opps.active.len()).rev() {
+            let a = &opps.active[i];
+            let Some(o) = data.opportunities.get(a.index).filter(|o| !o.becomes.is_empty() && !a.visited) else { continue };
+            let Some((id, name)) = a.with.clone() else { continue };
+            let Some(e) = people.iter().find(|(_, s)| s.id == id).map(|(e, _)| e) else { continue };
+            let r = rels.get(e);
+            let done = match o.becomes.as_str() {
+                "Friend" => r.friendship >= crate::social::FRIEND_THRESHOLD,
+                "Best Friend" => r.friendship_label() == "Best Friend",
+                "Enemy" => r.friendship_label() == "Enemy",
+                _ => false,
+            };
+            if !done {
+                continue;
+            }
+            if o.then_work {
+                opps.active[i].visited = true;
+                notes.push(format!("{} has done what was asked with {name}: it's reported on at work next shift.", sim.first));
+                continue;
+            }
+            let a = opps.active.remove(i);
+            opps.done.push(o.guid.clone());
+            let got = reward(o, household.as_deref_mut(), job.as_deref_mut(), &mut skills, wishes);
+            let text = if o.completion.is_empty() { format!("{} completed {}!", sim.first, o.name) } else { fill_with(&fill(&o.completion, o, ""), a.with.as_ref().map(|w| w.1.as_str())) };
+            notes.push(if got.is_empty() { text } else { format!("{text} ({})", got.join(", ")) });
+        }
+    }
+}
+
+/// Whether a Sim has an opportunity's delivery to make to another (by their id), with what it
+/// asks for held: its index among their active ones.
+pub fn delivery_for(data: &s3bake::GameDataBaked, opps: Option<&SimOpportunities>, inv: Option<&crate::inventory::Inventory>, to: u64) -> Option<usize> {
+    opps?.active.iter().position(|a| {
+        a.with.as_ref().is_some_and(|w| w.0 == to)
+            && data.opportunities.get(a.index).is_some_and(|o| {
+                o.deliver && o.bring.as_ref().is_none_or(|b| inv.map_or(0, |inv| inv.0.iter().filter(|s| brings(b, s)).map(|s| s.count).sum::<u32>()) >= b.count)
+            })
+    })
+}
+
 /// An opportunity done: its money (half again for the Opportunistic), the boost at work, the
 /// skill; what was had, in words.
 fn reward(o: &OpportunityInfo, household: Option<&mut Household>, job: Option<&mut crate::careers::Job>, skills: &mut Skills, wishes: Option<&crate::wishes::Wishes>) -> Vec<String> {
@@ -666,10 +901,36 @@ fn complete_opportunities(
     mut household: Option<ResMut<Household>>,
     mut sims: Query<(&Sim, &mut SimOpportunities, &mut Skills, Option<&mut crate::careers::Job>, Option<&crate::wishes::Wishes>)>,
     mut notes: ResMut<Notifications>,
+    (people, mut inventories): (Query<&Sim>, Query<&mut crate::inventory::Inventory>),
 ) {
     let Some(ui) = ui else { return };
     let data = &ui.data;
     for ev in events.read() {
+        // (Delivered: the game's "Deliver Opportunity" with the Sim it's for, what's asked of them
+        // handed over.)
+        if let LifeEventKind::Delivered { other } = ev.kind {
+            let Ok((sim, mut opps, mut skills, mut job, wishes)) = sims.get_mut(ev.sim) else { continue };
+            let other_id = people.get(other).map(|s| s.id).ok();
+            let Some(pos) = opps.active.iter().position(|a| data.opportunities.get(a.index).is_some_and(|o| o.deliver) && a.with.as_ref().map(|w| w.0) == other_id) else {
+                debug!("{} delivered to {other_id:?}: no opportunity of theirs for them ({:?})", sim.first, opps.active.iter().map(|a| &a.with).collect::<Vec<_>>());
+                continue;
+            };
+            let a = opps.active.remove(pos);
+            let Some(o) = data.opportunities.get(a.index) else { continue };
+            if let (Some(b), Ok(mut inv)) = (o.bring.as_ref(), inventories.get_mut(ev.sim)) {
+                for _ in 0..b.count {
+                    let cheapest = inv.0.iter().enumerate().filter(|(_, s)| brings(b, s) && s.count > 0).min_by_key(|(_, s)| s.each()).map(|(j, _)| j);
+                    if let Some(j) = cheapest {
+                        inv.take_one(j);
+                    }
+                }
+            }
+            opps.done.push(o.guid.clone());
+            let got = reward(o, household.as_deref_mut(), job.as_deref_mut(), &mut skills, wishes);
+            let text = if o.completion.is_empty() { format!("{} completed {}!", sim.first, o.name) } else { fill_with(&fill(&o.completion, o, ""), a.with.as_ref().map(|w| w.1.as_str())) };
+            notes.push(if got.is_empty() { text } else { format!("{text} ({})", got.join(", ")) });
+            continue;
+        }
         let LifeEventKind::Finished { activity, completed: true } = ev.kind else { continue };
         let Ok((sim, mut opps, mut skills, mut job, wishes)) = sims.get_mut(ev.sim) else { continue };
         let Some(pos) = opps.active.iter().position(|a| std::ptr::eq(a.activity.name, activity)) else { continue };
@@ -786,7 +1047,7 @@ fn update_panel(
                             if h > 48.0 { format!(" · {:.0} days left", h / 24.0) } else { format!(" · {h:.0} hours left") }
                         });
                         c.spawn(text(
-                            format!("{}{}", objective(o, a.activity.name, &data), left.unwrap_or_default()),
+                            format!("{}{}", objective_with(o, a.activity.name, &data, a.with.as_ref().map(|w| w.1.as_str())), left.unwrap_or_default()),
                             12.0,
                             Color::srgb(0.75, 0.85, 1.0),
                         ));
@@ -801,7 +1062,7 @@ fn update_panel(
 /// Opportunities from a saved game, by id, waiting for the game data: those taken on, those
 /// done, and those whose venue task is done (to be reported on at work).
 #[derive(Component)]
-pub struct PendingOpportunities(pub Vec<(String, Option<f64>)>, pub Vec<String>, pub Vec<String>);
+pub struct PendingOpportunities(pub Vec<(String, Option<f64>)>, pub Vec<String>, pub Vec<String>, pub Vec<(String, u64, String)>);
 
 fn restore_pending(mut commands: Commands, pending: Query<(Entity, &PendingOpportunities)>, ui: Option<Res<crate::icons::GameUi>>) {
     let Some(ui) = ui else { return };
@@ -811,7 +1072,8 @@ fn restore_pending(mut commands: Commands, pending: Query<(Entity, &PendingOppor
             .iter()
             .filter_map(|(guid, deadline)| {
                 let index = ui.data.opportunities.iter().position(|o| &o.guid == guid)?;
-                Some(ActiveOpp { index, deadline: *deadline, activity: task_for(&ui.data.opportunities[index]), visited: p.2.contains(guid) })
+                let with = p.3.iter().find(|w| w.0 == *guid).map(|w| (w.1, w.2.clone()));
+                Some(ActiveOpp { index, deadline: *deadline, activity: task_for(&ui.data.opportunities[index]), visited: p.2.contains(guid), with })
             })
             .collect();
         commands.entity(e).remove::<PendingOpportunities>().insert(SimOpportunities { active, done: p.1.clone() });
@@ -859,5 +1121,36 @@ mod tests {
         assert_eq!(bring_words(&art, &data), "a painting worth §750");
         assert_eq!(bring_words(&nice, &data), "3 Very Nice or better produce");
         assert_eq!(bring_words(&apples, &data), "10 Bad or worse Apples");
+        // (A painting's size by its canvas.)
+        let large = bring_items("PaintingLarge", "1").unwrap();
+        assert!(brings(&large, &stack(ItemKind::Painting, "painting:2:x#1", 0, 50)) && !brings(&large, &stack(ItemKind::Painting, "painting:0:x#1", 0, 50)));
+        assert_eq!(bring_words(&large, &data), "a large painting");
+    }
+
+    #[test]
+    fn someone_to_do_it_with_as_the_game_asks() {
+        let mut world = World::new();
+        let mut rng = rand::rng();
+        let me = crate::sim::random_sim(&mut rng, "Me", Some(true), Age::Adult);
+        let friend = crate::sim::random_sim(&mut rng, "Friend", Some(true), Age::Adult);
+        let stranger = crate::sim::random_sim(&mut rng, "Stranger", Some(false), Age::Adult);
+        let child = crate::sim::random_sim(&mut rng, "Kid", Some(false), Age::Child);
+        let (ef, es, ec) = (world.spawn_empty().id(), world.spawn_empty().id(), world.spawn_empty().id());
+        let mut rels = crate::social::Relationships::default();
+        rels.add(ef, 30.0, 0.0);
+        rels.add(ec, 10.0, 0.0);
+        let town: Vec<TownSim> = vec![(ef, &friend, None), (es, &stranger, None), (ec, &child, None)];
+        let with = |w: &str, becomes: &str| OpportunityInfo { with: w.into(), becomes: becomes.into(), ..Default::default() };
+        let pick = |o: &OpportunityInfo, rng: &mut rand::rngs::ThreadRng| pick_with(o, &me, &rels, None, &town, rng).map(|p| p.0);
+        assert_eq!(pick(&with("AcquaintanceOrHigher", ""), &mut rng), Some(friend.id));
+        assert_eq!(pick(&with("Stranger", ""), &mut rng), Some(stranger.id));
+        assert_eq!(pick(&with("ChildOrTeenAcquaintanceOrHigher", ""), &mut rng), Some(child.id));
+        // (Not someone already what they're to become, nor anyone at all it doesn't ask.)
+        rels.add(ef, 30.0, 0.0);
+        let pick = |o: &OpportunityInfo, rng: &mut rand::rngs::ThreadRng| pick_with(o, &me, &rels, None, &town, rng).map(|p| p.0);
+        assert_eq!(pick(&with("AcquaintanceOrHigher", "Friend"), &mut rng), None);
+        assert_eq!(pick(&with("NonFriendCoworker", ""), &mut rng), None);
+        assert_eq!(pick(&with("", ""), &mut rng), None);
+        assert_eq!(fill_with("Deliver it to {2.String}; {2.SimFirstName} waits.", Some("Gretle Goth")), "Deliver it to Gretle Goth; Gretle waits.");
     }
 }

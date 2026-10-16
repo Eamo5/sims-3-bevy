@@ -468,7 +468,8 @@ fn opportunities_panel(
         Some((o, a)) => {
             set_text(&mut texts, p.opp.text(OPP_NAME), &o.name);
             set_visible(&mut vis, type_text, false);
-            let mut progress = crate::opportunities::objective(o, a.activity.name, &data);
+            let with = a.with.as_ref().map(|w| w.1.as_str());
+            let mut progress = crate::opportunities::objective_with(o, a.activity.name, &data, with);
             if let Some(d) = a.deadline {
                 let hours = ((d - clock.minutes) / 60.0).max(0.0);
                 let (days, h) = ((hours / 24.0).floor(), (hours % 24.0).floor());
@@ -476,7 +477,7 @@ fn opportunities_panel(
             }
             set_text(&mut texts, p.opp.text(OPP_PROGRESS), &progress);
             let place = crate::opportunities::venue_word(&o.rabbit_hole);
-            set_text(&mut texts, p.opp.text(OPP_DESCRIPTION), &crate::opportunities::fill(&o.desc, o, place).replace("{0.SimFirstName}", &sim.first));
+            set_text(&mut texts, p.opp.text(OPP_DESCRIPTION), &crate::opportunities::fill_with(&crate::opportunities::fill(&o.desc, o, place), with).replace("{0.SimFirstName}", &sim.first));
         }
         None => {
             set_text(&mut texts, p.opp.text(OPP_NAME), "");

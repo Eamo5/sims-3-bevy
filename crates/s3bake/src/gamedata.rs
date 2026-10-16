@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 122;
+pub const GAMEDATA_VERSION: u32 = 123;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -330,10 +330,25 @@ pub struct OpportunityInfo {
     /// `WeekendDays`, or the weekdays named); empty, any.
     #[serde(default)]
     pub on_days: String,
-    /// Things to take in to work (`TargetInteractionItemRequired`), taken from the inventory.
+    /// Things to take in to work (`TargetInteractionItemRequired`), taken from the inventory (or,
+    /// `deliver`, given to the Sim it's done with).
     #[serde(default)]
     pub bring: Option<BringItems>,
+    /// The Sim it's done with (`Target` `Sim`, its `TargetData`: `AcquaintanceOrHigher`,
+    /// `Stranger`, `NonFriendCoworker`, `InCareer,Culinary`, `NonHouseholdAdult`...).
+    #[serde(default)]
+    pub with: String,
+    /// Done by becoming this to them (`kRelationshipLTRChanged`: `Friend`, `Best Friend`, `Enemy`).
+    #[serde(default)]
+    pub becomes: String,
+    /// Done by the game's "Deliver Opportunity" social with them (`kDeliveredToSim`): its words,
+    /// `interaction`.
+    #[serde(default)]
+    pub deliver: bool,
 }
+
+/// The Sims an opportunity can be done with, as this game picks them.
+pub const WITH_SIMS: [&str; 7] = ["AcquaintanceOrHigher", "Stranger", "NonFriendCoworker", "InCareer", "NonHouseholdAdult", "YAAcquaintanceOrHigher", "ChildOrTeenAcquaintanceOrHigher"];
 
 /// What an opportunity wants taken in to work: paintings, fish or produce (`Painting`, `Fish`,
 /// `Produce`), of a kind (its key; empty, any), of a quality (its name: `Nice`, `VeryNice`...;
@@ -356,6 +371,8 @@ pub fn bring_items(required: &str, count: &str) -> Option<BringItems> {
     let any = |s: Option<&&str>| s.filter(|v| !v.eq_ignore_ascii_case("Any")).map(|v| v.to_string()).unwrap_or_default();
     match p.first().copied()? {
         "PaintingAny" => Some(BringItems { kind: "Painting".into(), worth: p.get(1).and_then(|v| v.parse().ok()).unwrap_or(0), count, ..Default::default() }),
+        // (A canvas's size: its key.)
+        size @ ("PaintingSmall" | "PaintingMedium" | "PaintingLarge") => Some(BringItems { kind: "Painting".into(), key: size.trim_start_matches("Painting").into(), count, ..Default::default() }),
         "Fish" => Some(BringItems { kind: "Fish".into(), key: any(p.get(1)), quality: any(p.get(2)), count, ..Default::default() }),
         "Harvestable" => Some(BringItems { kind: "Produce".into(), key: any(p.get(1)), quality: any(p.get(2)), worse: p.get(3).is_some_and(|c| c.eq_ignore_ascii_case("EqualOrWorse")), count, ..Default::default() }),
         _ => None,
@@ -3517,6 +3534,17 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 && get(s, "CompletionEvent") == "kWentToWork"
                 && get(s, "Object").is_empty()
                 && get(s, "TargetInteractionItemRequired").is_empty();
+            // (Or done with a Sim: becoming their friend (or enemy), or delivering to them.)
+            let with = (get(s, "Target") == "Sim").then(|| get(s, "TargetData")).filter(|w| WITH_SIMS.contains(&w.split(',').next().unwrap_or("")));
+            let listener = get(s, "EventListenerInfo1");
+            let becomes = listener.strip_prefix("kRelationshipLTRChanged").map(|r| r.trim_start_matches(',').trim().to_string()).filter(|b| ["Friend", "Best Friend", "Enemy"].contains(&b.as_str()));
+            let deliver = get(s, "CompletionEvent") == "kDeliveredToSim" && listener.is_empty() && get(s, "Object").is_empty();
+            let wanted = get(s, "TargetInteractionItemRequired");
+            let deliver_items = (!wanted.is_empty()).then(|| bring_items(&wanted, &get(s, "TargetInteractionNumberItemsRequired")));
+            let with_sim = with.is_some()
+                && get(s, "EventListenerInfo2").is_empty()
+                && ((becomes.is_some() && wanted.is_empty() && ["", "kWentToWork"].contains(&get(s, "CompletionEvent").as_str()))
+                    || (deliver && deliver_items.as_ref().is_none_or(|i| i.is_some())));
             // (Or things taken in to work, out of the inventory.)
             let bring = (get(s, "Target").is_empty() && get(s, "EventListenerInfo1").is_empty() && get(s, "CompletionEvent") == "kWentToWork")
                 .then(|| bring_items(&get(s, "TargetInteractionItemRequired"), &get(s, "TargetInteractionNumberItemsRequired")))
@@ -3524,6 +3552,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             if !book
                 && !then_work
                 && bring.is_none()
+                && !with_sim
                 && (get(s, "CompletionEvent") != "kVisitedRabbitHole"
                     || get(s, "Target") != "RabbitHole"
                     || !get(s, "Object").is_empty()
@@ -3536,6 +3565,12 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             let mut o = OpportunityInfo { guid: g.clone(), ..Default::default() };
             if book {
                 o.book = get(s, "ObjectData");
+            } else if with_sim {
+                o.with = with.unwrap_or_default();
+                o.becomes = becomes.unwrap_or_default();
+                o.deliver = deliver;
+                o.bring = deliver_items.flatten();
+                o.then_work = get(s, "CompletionEvent") == "kWentToWork";
             } else if bring.is_some() {
                 o.bring = bring;
             } else {
@@ -3574,6 +3609,9 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                         o.skill_max = p[3].parse().unwrap_or(10);
                     }
                     "WorldHasRabbitHoleType" => {}
+                    // (Someone to do it with: found as it's offered.)
+                    "HasAcquaintanceOrHigher" | "HasStrangers" | "HasNonFriendCoworker" | "WorldHasSimInCareer" | "HasNonHouseholdAdultSims" | "HasYAAcquaintanceOrHigher" | "HasChildOrTeenAcquaintanceOrHigher"
+                        if !o.with.is_empty() => {}
                     _ => ok = false,
                 }
             }

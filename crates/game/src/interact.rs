@@ -4473,6 +4473,11 @@ pub(crate) fn run_actions(
                                     let tname = who.get(target).map(|w| w.0.first.clone()).unwrap_or_default();
                                     let t_member = who.get(target).is_some_and(|w| w.2);
                                     match s.effect {
+                                        // (An opportunity's delivery made: `opportunities`.)
+                                        SocialEffect::DeliverOpportunity => {
+                                            debug!("{} delivered to {tname}", sim.first);
+                                            life.write(LifeEvent::new(me, LifeEventKind::Delivered { other: *target }));
+                                        }
                                         SocialEffect::Kiss if !rel.kissed => {
                                             status_fx.push((me, *target, None, true));
                                             life.write(LifeEvent::new(me, LifeEventKind::FirstKiss));

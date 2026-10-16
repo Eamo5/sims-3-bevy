@@ -246,8 +246,14 @@ installation is unreachable.
   at City Hall, a doctor at the school's blood drive), some only on a day off, at the weekend or
   on weekdays, as the game's; or things to take in to work, taken from the inventory at the
   shift's start, the cheapest first (a painting worth §750 for the business office, three Nice
-  apples for the hospital, five sharks for the restaurant). `OFFER=book|venue|bring` (tests).
-  Kept in saves.
+  apples for the hospital, five sharks for the restaurant). And some are done with a Sim of the
+  town, picked as the game's `TargetData` asks (an acquaintance, a stranger, a co-worker not yet
+  a friend, someone in a career) and named in the texts: becoming their friend, best friend or
+  enemy (then reported on at work, for a career's), or the game's *Deliver Opportunity* social
+  with them, offered under the opportunity's own words ("Convince That Technology Is Cool",
+  "Deliver Painting") once what it asks is held (produce of a quality, a painting of a size), the
+  things handed over. A stranger asked for drops by the lot a few hours on, to be found.
+  `OFFER=book|venue|bring|deliver|friend` (tests). Kept in saves.
 - **Map View**: zoomed out over town, every lot gets the game's map tag — the household's
   home in green with a star, other homes and empty lots, and each venue's own glyph (cut from
   the game's map-tag atlas); hover for the name, click a venue for its activities or a home to

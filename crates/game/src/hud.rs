@@ -1201,6 +1201,13 @@ fn world_click(
             }
             let rel = rels.get(t);
             let target_member = members_q.contains(t);
+            // (An opportunity's delivery to make to them: its words.)
+            let delivery = opp_q.0.as_ref().and_then(|ui| {
+                let opps = opp_q.1.single().ok().flatten();
+                let i = crate::opportunities::delivery_for(&ui.data, opps, inv_q.get(actor).ok(), sim.id)?;
+                let o = ui.data.opportunities.get(opps?.active[i].index)?;
+                Some(if o.interaction.is_empty() { o.name.clone() } else { o.interaction.clone() })
+            });
             // (Sat near each other: what can be said where they sit, the game's seated talk.)
             let posture = |e: Entity| postures.get(e).ok().map(|(a, tf, f)| (a, tf.translation(), f.map_or(1, |f| f.0)));
             let seated = matches!((posture(actor), posture(t)), (Some(a), Some(b)) if crate::seatedtalk::sat_together(a, b));
@@ -1229,9 +1236,12 @@ fn world_click(
                         crate::social::SocialEffect::Greet => door_q.get(t).is_ok_and(|d| d.since.is_some()) && members_q.contains(actor),
                         // (Catch with a ball about.)
                         crate::social::SocialEffect::PlayCatch => objects.iter().any(|o| o.kind == ObjectKind::Ball),
+                        // (An opportunity's delivery to them, what it asks held.)
+                        crate::social::SocialEffect::DeliverOpportunity => delivery.is_some(),
                         _ => true,
                     })
-                    .map(|(i, s)| (s.name.to_string(), ActionKind::Social { target: t, social: i }))
+                    // (A delivery under the opportunity's own words: "Deliver Painting".)
+                    .map(|(i, s)| (if s.effect == crate::social::SocialEffect::DeliverOpportunity { delivery.clone().unwrap_or_default() } else { s.name.to_string() }, ActionKind::Social { target: t, social: i }))
                     .collect();
                 // (Those of a kind together, as the game's menus have them: "Ask About ›" Day,
                 // Career...)

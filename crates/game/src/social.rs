@@ -294,6 +294,9 @@ pub enum SocialEffect {
     /// `OnAccuseOfCheating`, `OnConfessCheating`): `jealousy::CheatedOn`.
     Accuse,
     Confess,
+    /// An opportunity's delivery (the game's "Deliver Opportunity": `kDeliveredToSim`), offered
+    /// to the Sim it's for, under the opportunity's own words.
+    DeliverOpportunity,
 }
 
 /// What a Mooch gets out of others (the game's `MoochAmount`, at the hidden Mooch skill's first
@@ -317,6 +320,7 @@ const GAME_EFFECTS: &[(&str, SocialEffect)] = &[
     ("Ask for a Raise", SocialEffect::AskRaise),
     ("Accuse of Cheating", SocialEffect::Accuse),
     ("Confess Cheating", SocialEffect::Confess),
+    ("Deliver Opportunity", SocialEffect::DeliverOpportunity),
 ];
 
 pub struct SocialDef {
@@ -710,6 +714,7 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
             t if PASSED_TESTS.contains(&t) => None,
             // (Its own effect's test: `available`.)
             "TestRequestDoYourHomework" if effect == SocialEffect::RequestHomework => None,
+            "TestDeliverOpportunity" if effect == SocialEffect::DeliverOpportunity => None,
             "TestMoochMoney" | "TestMoochFood" | "TestAskForRecipe" => None,
             "TestThankForCooking" | "TestWorryAboutGrades" | "TestThankForTutoring" => Some(GameTest::About),
             "TestActorHasWork" => Some(GameTest::ActorWorks),
