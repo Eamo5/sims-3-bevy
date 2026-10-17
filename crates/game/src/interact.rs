@@ -1212,6 +1212,8 @@ pub enum Special {
     /// The dollhouse smashed in a temper, and thrown away smashed (`dollhouse`).
     SmashDollhouse,
     DisposeDollhouse,
+    /// Searching the galaxy through a telescope, for something new to name (`telescope`).
+    SearchGalaxy,
     /// An outdoor trash can knocked over, set up again, rummaged through (`trashcans`).
     KnockOverCan,
     PickUpCan,
@@ -1681,8 +1683,11 @@ static DRESSER: [InteractionDef; 2] = [
     InteractionDef { autonomous: false, special: Special::ChangeClothes, ..def("Change Into", 4.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::PlanOutfit, ..def("Plan Outfit", 2.0, N, Pose::Use) },
 ];
-static TELESCOPE: [InteractionDef; 1] =
-    [InteractionDef { skill: Some("Logic"), ..def("Stargaze", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 50.0], Pose::Use) }];
+static TELESCOPE: [InteractionDef; 2] = [
+    InteractionDef { skill: Some("Logic"), ..def("Stargaze", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 50.0], Pose::Use) },
+    // (The game's `SearchGalaxyInteraction`: till something new's found, a few hours at most.)
+    InteractionDef { skill: Some("Logic"), autonomous: false, special: Special::SearchGalaxy, ..def("Search Galaxy", 360.0, [0.0, 0.0, -3.0, 0.0, 0.0, 30.0], Pose::Use) },
+];
 static SWINGSET: [InteractionDef; 1] = [def("Swing", 30.0, [0.0, 0.0, -6.0, 0.0, -4.0, 75.0], Pose::Use)];
 static HOTTUB: [InteractionDef; 1] = [InteractionDef {
     on_object: true,
@@ -2154,7 +2159,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Wash Dishes" => A::new(Some("a2o_sink_dishes_scrub_start_x"), &["a2o_sink_dishes_scrub_loop1_x", "a2o_sink_dishes_scrub_loop2_x"]).ending(&["a2o_sink_dishes_scrub_stop_x"], 3.5),
         "Clean Up" => A::steps("a2o_plateDinner_pickUp_table_part1_x", &["a2o_plateDinner_pickUp_table_part2_x"], &["a2o_plateDinner_carry_x"]),
         "Make Hot Beverage" => A::new(Some("a2o_hotBeverageMachine_fill"), &["a2o_hotBeverageMachine_drink_loopSip_standing", "a2o_hotBeverageMachine_drink_loopLongSip_standing"]),
-        "Stargaze" => A::new(Some("a2o_telescope_start"), &["a2o_telescope_look_loop", "a2o_telescope_look_breathe", "a2o_telescope_react_wonderment"]),
+        "Stargaze" | "Search Galaxy" => A::new(Some("a2o_telescope_start"), &["a2o_telescope_look_loop", "a2o_telescope_look_breathe", "a2o_telescope_react_wonderment"]),
         "Swing" => A::new(Some("a2o_swingset_getIn"), &["a2o_swingset_swing"]),
         "Relax in Hot Tub" => A::new(Some("a2o_hotTub_getIn"), &["a2o_hotTub_idles_relaxing_loop", "a2o_hotTub_idles_playingToe", "a2o_hotTub_splash"]),
         "Play with Dollhouse" => A::new(Some("a2o_dollhouse_play_start_x"), &["a2o_dollhouse_play_loop"]),
@@ -4249,11 +4254,6 @@ pub(crate) fn run_actions(
                                     if used.0 == Some(me) {
                                         used.0 = None;
                                     }
-                                    // A night at the telescope may find something new up there.
-                                    if d.name == "Stargaze" && rand::rng().random_bool((0.2 + skills.level("Logic") as f64 * 0.06).min(0.8)) {
-                                        did.write(crate::journal::Did::count(me, crate::journal::Stat::StarsFound, 1.0));
-                                        notes.push(format!("{} discovered {} through the telescope!", sim.first, crate::journal::celestial_find(&mut rand::rng())));
-                                    }
                                     let unbreakable = upgraded.get(*target).is_ok_and(|u| u.has(crate::upgrades::Upgrade::Unbreakable));
                                     // (Not within a day of being new or repaired.)
                                     let worn = wear.get(*target).ok().copied().filter(|w| clock.minutes >= w.sturdy_until);
@@ -4402,6 +4402,7 @@ pub(crate) fn run_actions(
                                         Special::SolveProblems | Special::JobIssues | Special::JoinBookClub | Special::LeaveBookClub => {
                                             commands.entity(me).insert(crate::computertraits::Done(d.special));
                                         }
+                                        Special::SearchGalaxy => {}
                                         Special::NeuroticCheck => {
                                             if let Some(about) = crate::neurotic::About::of(obj.kind) {
                                                 commands.entity(me).insert(crate::neurotic::Checked(about));

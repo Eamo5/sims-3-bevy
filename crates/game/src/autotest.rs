@@ -4822,9 +4822,12 @@ fn auto_speed(mut commands: Commands, args: Res<AutoArgs>, mut clock: ResMut<cra
         if let Some(s) = args.speed {
             clock.speed = s.min(3);
             // (Left on its own, the game answers its own questions and turns opportunities
-            // down, rather than standing still waiting for an answer.)
+            // down, rather than standing still waiting for an answer; KEEP_DIALOGS=1, they're
+            // left up to be seen.)
             let opp = args.action.as_deref().is_some_and(|a| a.starts_with("Opp"));
-            commands.insert_resource(crate::dialog::AutoAnswer(0));
+            if std::env::var("KEEP_DIALOGS").is_err() {
+                commands.insert_resource(crate::dialog::AutoAnswer(0));
+            }
             if !opp {
                 commands.insert_resource(crate::opportunities::AutoDecline);
             }

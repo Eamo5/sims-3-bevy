@@ -465,6 +465,9 @@ pub struct SaveGame {
     /// The household's collection journal.
     #[serde(default)]
     pub collection: crate::collecting::Collection,
+    /// What's been discovered through telescopes (`telescope`).
+    #[serde(default)]
+    pub discoveries: crate::telescope::Discoveries,
     /// Tombstones on the lot, with who lies there.
     #[serde(default)]
     pub graves: Vec<SavedGrave>,
@@ -861,13 +864,14 @@ fn save_game(
     clock: Res<GameClock>,
     world: Res<CurrentWorld>,
     household: Option<Res<Household>>,
-    (removed, paint, garden, plants, collection, meals): (
+    (removed, paint, garden, plants, collection, meals, discoveries): (
         Res<RemovedLotObjects>,
         Option<Res<crate::building::LotPaint>>,
         Option<Res<crate::gardening::Garden>>,
         Query<(&crate::gardening::GrowingPlant, &Transform)>,
         Res<crate::collecting::Collection>,
         crate::meals::SavableMeals,
+        Res<crate::telescope::Discoveries>,
     ),
     sims: Query<
         (
@@ -1100,6 +1104,7 @@ fn save_game(
         terrain: strokes.saved(),
         heights: sculpted.saved(),
         collection: collection.clone(),
+        discoveries: discoveries.clone(),
         graves: graves
             .iter()
             .map(|(ge, g, tf)| {
@@ -1411,6 +1416,7 @@ pub(crate) fn apply_loaded_game(
     commands.queue(move |w: &mut World| w.resource_mut::<crate::services::MaidService>().hired = hired);
     commands.insert_resource(crate::fishbowl::PendingBowls(game.fishbowls.clone()));
     commands.insert_resource(game.collection.clone());
+    commands.insert_resource(game.discoveries.clone());
     commands.insert_resource(crate::meals::Leftovers(game.leftovers.clone()));
     commands.insert_resource(crate::ingredients::Fridge(game.fridge.clone()));
     commands.insert_resource(crate::meals::PendingMeals(game.meals.clone()));

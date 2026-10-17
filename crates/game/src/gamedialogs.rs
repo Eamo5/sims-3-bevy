@@ -294,6 +294,7 @@ fn type_into_box(
     let (who, suggested, most) = match questions.queue.front().map(|a| &a.about) {
         Some(crate::dialog::Question::NameBaby { sim, suggested }) => (*sim, suggested, 20),
         Some(crate::dialog::Question::Engrave { grave, suggested }) => (*grave, suggested, crate::ghosts::EPITAPH_LENGTH),
+        Some(crate::dialog::Question::NameDiscovery { sim, suggested }) => (*sim, suggested, crate::telescope::NAME_LENGTH),
         _ => {
             *asking = None;
             keys.clear();
@@ -382,7 +383,7 @@ fn question_dialogs(
             // (A call come in: answered or not.)
             crate::dialog::Question::PhoneCall { .. } => "TwoButtonDialog",
             // (A newborn's name: the game's box to type it in.)
-            crate::dialog::Question::NameBaby { .. } | crate::dialog::Question::Engrave { .. } => "StringInputDialog",
+            crate::dialog::Question::NameBaby { .. } | crate::dialog::Question::Engrave { .. } | crate::dialog::Question::NameDiscovery { .. } => "StringInputDialog",
             crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 3 => "ThreeButtonDialog",
             _ => return,
         };
@@ -418,7 +419,7 @@ fn question_dialogs(
                     }
                 }
             }
-            crate::dialog::Question::NameBaby { suggested, .. } | crate::dialog::Question::Engrave { suggested, .. } => {
+            crate::dialog::Question::NameBaby { suggested, .. } | crate::dialog::Question::Engrave { suggested, .. } | crate::dialog::Question::NameDiscovery { suggested, .. } => {
                 // The title ("It's a Girl!"), the words, the name in its box, OK.
                 for w in s.all_with(NAME_TITLE) {
                     if let Some(t) = s.text_of(w) {

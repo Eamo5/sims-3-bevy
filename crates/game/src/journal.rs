@@ -523,12 +523,6 @@ impl Challenge {
     }
 }
 
-/// Something found through a telescope.
-pub fn celestial_find(rng: &mut impl rand::Rng) -> &'static str {
-    const FINDS: [&str; 6] = ["a new star", "a comet", "a distant planet", "a nebula", "a binary star", "an asteroid"];
-    FINDS[rng.random_range(0..FINDS.len())]
-}
-
 /// The tallies kept as things are done (by the household's Sims).
 fn keep_tallies(mut commands: Commands, mut did: MessageReader<Did>, mut journals: Query<Option<&mut SkillJournal>, With<HouseholdMember>>) {
     let mut fresh: Vec<(Entity, SkillJournal)> = Vec::new();

@@ -202,6 +202,13 @@ installation is unreachable.
   Sim against an opponent of their rank (stronger each rank), won by Logic and a little luck;
   wins lift them from Unranked through Apprentice, Tenderfoot, Journeyman and Instructor to
   Grand Master. The record shows under Logic in the Skills tab and is saved.
+- **Telescopes**: *Search Galaxy*, as the game's: every hour to three something's seen, and the
+  first time and three times in four after, it's new: mostly a star (its colour, kind and size
+  likelier the nearer their difficulty to the Sim's Logic), now and then a satellite, comet,
+  moon, planet or galaxy, one time in a thousand a black hole (§10,000). The player names it,
+  the Holmberg-Weidler Astronomical Society pays the game's tuned value (half again to a
+  Celestial Explorer), and the search is over; otherwise one found before is spotted again.
+  The town's discoveries are kept in saves and counted in the finder's skill journal.
 - **Skill journals**: clicking a skill in the Skills tab opens its journal, with what the Sim
   has done with it (hours of strength training and cardio, friends and best friends, jokes
   that landed, dishes prepared and recipes known, fish caught and kinds of fish, harvests,
