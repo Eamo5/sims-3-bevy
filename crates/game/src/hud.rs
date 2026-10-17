@@ -2100,7 +2100,7 @@ fn world_click(
                 let level = skills.level("Handiness") as u32;
                 let list: Vec<(String, ActionKind)> = crate::upgrades::Upgrade::ALL
                     .into_iter()
-                    .filter(|u| have & u.bit() == 0 && level >= u.level())
+                    .filter(|u| have & u.bit() == 0 && level >= u.level(obj.kind))
                     .filter_map(|u| Some((format!("Upgrade: {}", u.name(obj.kind)?), ActionKind::Upgrade { target: t, bit: u.bit() })))
                     .collect();
                 if !list.is_empty() {

@@ -159,12 +159,12 @@ fn requests(
 fn burn(
     mut commands: Commands,
     clock: Res<GameClock>,
-    mut lit: Query<(Entity, &mut Lit, &GameObject, &Transform, Option<&Floor>)>,
+    mut lit: Query<(Entity, &mut Lit, &GameObject, &Transform, Option<&Floor>, Option<&crate::upgrades::Upgrades>)>,
     mut fire: MessageWriter<crate::fire::StartFire>,
     mut notes: ResMut<crate::interact::Notifications>,
 ) {
     let mut rng = rand::rng();
-    for (e, mut l, o, tf, floor) in &mut lit {
+    for (e, mut l, o, tf, floor, upgrades) in &mut lit {
         if clock.minutes >= l.until {
             commands.entity(l.flames).try_despawn();
             commands.entity(e).remove::<Lit>();
@@ -172,7 +172,8 @@ fn burn(
         }
         if clock.minutes >= l.next_spark {
             l.next_spark = clock.minutes + 60.0;
-            if rng.random_bool(0.015) {
+            // (Never from a fireproof one: "Make Fireproof".)
+            if rng.random_bool(0.015) && !crate::upgrades::has(upgrades, crate::upgrades::Upgrade::Fireproof) {
                 let at = tf.translation + tf.rotation * Vec3::new(o.center.x, 0.0, o.center.y + o.half.y + 0.9);
                 fire.write(crate::fire::StartFire { at, level: floor.map_or(1, |f| f.0) });
                 notes.push(format!("A spark from the {} caught the floor!", o.name));

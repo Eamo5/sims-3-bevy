@@ -4333,7 +4333,7 @@ pub(crate) fn run_actions(
                                     finished = true;
                                     life.write(LifeEvent::new(me, LifeEventKind::Finished { activity: d.name, completed: true }));
                                     // (A bathroom thing used is that much dirtier.)
-                                    if crate::grime::cleanable(obj.kind) && d.special != Special::Scrub {
+                                    if crate::grime::cleanable(obj.kind) && d.special != Special::Scrub && !upgraded.get(*target).is_ok_and(|u| u.has(crate::upgrades::Upgrade::SelfCleaning)) {
                                         let traits = sim.traits.clone();
                                         commands.entity(*target).queue_silenced(move |mut e: EntityWorldMut| {
                                             if let Some(mut g) = e.get_mut::<crate::grime::Grime>() {

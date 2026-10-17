@@ -342,15 +342,16 @@ fn spread(
     mut commands: Commands,
     clock: Res<GameClock>,
     mut fires: Query<(&Transform, &mut Fire)>,
-    objects: Query<(Entity, &GlobalTransform), (With<GameObject>, Without<crate::interact::Broken>, Without<crate::visit::LotObject>)>,
+    objects: Query<(Entity, &GlobalTransform, Option<&crate::upgrades::Upgrades>), (With<GameObject>, Without<crate::interact::Broken>, Without<crate::visit::LotObject>)>,
     mut starts: MessageWriter<StartFire>,
 ) {
     let count = fires.iter().count();
     let mut rng = rand::rng();
     for (tf, mut f) in &mut fires {
-        // What's in the flames is ruined: broken, and charred (the game's `Charred`).
-        for (e, otf) in &objects {
-            if otf.translation().xz().distance(tf.translation.xz()) < 0.9 && (otf.translation().y - tf.translation.y).abs() < 1.5 {
+        // What's in the flames is ruined: broken, and charred (the game's `Charred`); not what's
+        // been made fireproof.
+        for (e, otf, upgrades) in &objects {
+            if otf.translation().xz().distance(tf.translation.xz()) < 0.9 && (otf.translation().y - tf.translation.y).abs() < 1.5 && !crate::upgrades::has(upgrades, crate::upgrades::Upgrade::Fireproof) {
                 commands.entity(e).insert((crate::interact::Broken, crate::grime::Charred));
             }
         }

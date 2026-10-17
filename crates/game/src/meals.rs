@@ -1009,7 +1009,7 @@ fn meal_requests(
     mut notes: ResMut<Notifications>,
     (ui, clock, mut funds, mut leftovers): (Option<Res<crate::icons::GameUi>>, Res<crate::clock::GameClock>, Option<ResMut<crate::interact::Household>>, ResMut<Leftovers>),
     mut did: MessageWriter<crate::journal::Did>,
-    (qualities, floors, mut fire, rates): (Query<&MealQuality>, Query<&crate::nav::Floor>, MessageWriter<crate::fire::StartFire>, Res<crate::interact::ObjectRates>),
+    (qualities, floors, mut fire, rates, upgrades): (Query<&MealQuality>, Query<&crate::nav::Floor>, MessageWriter<crate::fire::StartFire>, Res<crate::interact::ObjectRates>, Query<&crate::upgrades::Upgrades>),
     (mut inventories, mut fridge): (Query<&mut crate::inventory::Inventory>, ResMut<crate::ingredients::Fridge>),
 ) {
     use rand::Rng;
@@ -1066,7 +1066,9 @@ fn meal_requests(
                     // (FIRE_ON_COOK=1: every dinner sets the stove alight, a test.)
                     let forced = std::env::var("FIRE_ON_COOK").is_ok();
                     if forced || rng.random_bool(crate::fire::burn_chance(skills.level("Cooking"), level, natural, stove_tuning.map_or(1.0, |t| t.failure))) {
-                        if forced || rng.random_bool((stove_tuning.map_or(5.0, |t| t.fire) as f64 / 100.0).clamp(0.0, 1.0)) {
+                        // (Never a fireproof stove: "Make Fireproof".)
+                        let fireproof = crate::upgrades::has(upgrades.get(stove).ok(), crate::upgrades::Upgrade::Fireproof);
+                        if !fireproof && (forced || rng.random_bool((stove_tuning.map_or(5.0, |t| t.fire) as f64 / 100.0).clamp(0.0, 1.0))) {
                             fire.write(crate::fire::StartFire { at: stf.translation + Vec3::Y * s.height * 0.85, level: floors.get(stove).map_or(1, |f| f.0) });
                             notes.push(format!("{} set the stove on fire!", sim.first));
                             commands.entity(me).remove::<(MealPlan, BurntDinner)>();
@@ -1117,7 +1119,9 @@ fn meal_requests(
                     continue;
                 }
                 let ingredients = ingredients.flatten();
-                let quality = r.map(|r| meal_quality(r.level, &cook, ingredients.as_ref().map_or(0.0, |p| p.points), stove_tuning.map_or(0.0, |t| t.bonus_points), !one, burnt));
+                // (A stove with "Improve Meal Quality": its meals' bonus points a fifth more.)
+                let better = if crate::upgrades::has(upgrades.get(stove).ok(), crate::upgrades::Upgrade::Improved) { crate::upgrades::IMPROVED_MEAL } else { 1.0 };
+                let quality = r.map(|r| meal_quality(r.level, &cook, ingredients.as_ref().map_or(0.0, |p| p.points) * better, stove_tuning.map_or(0.0, |t| t.bonus_points) * better, !one, burnt));
                 let served = match (r, quality) {
                     (Some(r), Some(_)) if burnt => format!("burnt {}", r.name),
                     (Some(r), Some(q)) => format!("{} {}", q.label(), r.name),
