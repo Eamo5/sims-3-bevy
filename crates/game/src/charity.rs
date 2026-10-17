@@ -1,9 +1,9 @@
 //! Donating to charity at the mailbox, as the game's `Mailbox.DonateToCharity`: a Good Sim (or
-//! an Evil one, to undermine it) gives §100, §250 or §500 once a day to one of two causes, the
+//! an Evil one, to undermine it) gives §100, §250 or §1000 once a day to one of two causes, the
 //! game's `Charity` table's (any of its general ones, and those of their traits: The Arts for the
 //! artistic, Volcano Preservation for the evil), chosen afresh each week. Good Sims come away
 //! Charitable, the Evil Fiendishly Delighted, the more so the more they gave
-//! (`kLow/Medium/HighCharitableBuffMood`, 10, 20, 30).
+//! (its tuning's `kLow/Medium/HighCharitableBuffMood`, 10, 15, 30).
 
 use bevy::prelude::*;
 use rand::seq::IndexedRandom;
@@ -69,8 +69,8 @@ const CAUSES: &[(&str, &str)] = &[
     ("BerjesHoganUnited", ""),
 ];
 
-/// The game's donations and how much each pleases them.
-pub const AMOUNTS: [(i64, i32); 3] = [(500, 30), (250, 20), (100, 10)];
+/// The game's tuned donations and how much each pleases them.
+pub const AMOUNTS: [(i64, i32); 3] = [(1000, 30), (250, 15), (100, 10)];
 /// How long the moodlets last (game minutes): the game's Charitable, Fiendishly Delighted.
 const CHARITABLE_MINUTES: f64 = 1440.0;
 const DELIGHTED_MINUTES: f64 = 360.0;

@@ -164,11 +164,11 @@ installation is unreachable.
   something learned about them, one of their traits; good for Social and fun as the game's.
   *Chat... ›* picks whom (the game's `ChatSpecific`): someone they know who isn't there or of
   the household.
-- **The computer and the traits**, as the game's: a Genius can Solve Hard Problems (45 minutes
-  of Logic; three times in five solved, for a prize of up to §1,000, in the game's words); a
+- **The computer and the traits**, as the game's: a Genius can Solve Hard Problems (two hours
+  of Logic; three times in five solved, for a prize of §50 to §225, in the game's words); a
   Workaholic can phone to Check Up On Work, and half the time there's something to be getting on
-  with: two hours to Work on Job-Related Issues at the computer, for a little more performance; a
-  Bookworm can Join the Book Club (§200 for life, kept in saves), and every
+  with: two hours to start four hours' Work on Job-Related Issues at the computer, for 4
+  performance; a Bookworm can Join the Book Club (§250 for life, kept in saves), and every
   Monday a book they haven't got comes in the mail for each member, onto the shelves.
 - **Writing novels** by the game's Writing tuning: at a computer, "Write Novel" offers the
   genres the Sim has opened up (Fiction and Non-Fiction to start; Sci-Fi, Trashy, Drama,
@@ -295,9 +295,9 @@ installation is unreachable.
   the mailbox and the flag up (the game's animation); they're paid there (Sims see
   to them on their own too); bills left three days bring the repo man, who takes things worth
   what's owed. A Good Sim can donate at the mailbox (an Evil one to undermine the cause), once
-  a day: §100, §250 or §500 to either of the week's two causes from the game's `Charity` table
+  a day: §100, §250 or §1000 to either of the week's two causes from the game's `Charity` table
   (its general ones and their traits', in the game's names), for Charitable (Fiendishly
-  Delighted) 10, 20 or 30. The paper is delivered every morning, to read or look for a job in. Bills are
+  Delighted) 10, 15 or 30. The paper is delivered every morning, to read or look for a job in. Bills are
   the game's 4.5% of what the home lot's things are worth, and things lose worth as the game
   has them do: 15% once the shopping's done (till then they sell back at full price), 10% of
   their price each midnight after, never more than 40%; burnt things are worth nothing. Sold,
@@ -402,8 +402,8 @@ installation is unreachable.
   anyone else is put out, the talk between them turned Insulting, and the prankster has a
   Successful Prank), order pizza and call the services, or take time off work (the game's
   `CallToTakeUnpaidTimeOff`): within four hours of a shift, *Call In Sick* (when sick, a paid
-  day off) or *Call In Fake Sick* (the same, but found out at the day's end 15% of the time,
-  more for the absent-minded, the unlucky, anyone who went out and those who call in sick
+  day off) or *Call In Fake Sick* (the same, but found out at the day's end 10% of the time,
+  more for the absent-minded, losers, the unlucky, anyone who went out and those who call in sick
   often, less for Workaholics and the lucky: 25 performance off); or *Take Unpaid Time Off...*
   a day, two or five, not again for 48, 72 or 240 hours; or quit. Calls come in too, as the game's (unless
   the phones are silenced, the game's *Silence Phone*): every six hours or so,
@@ -655,8 +655,9 @@ installation is unreachable.
   Once one needs it, "Clean" is offered: the game's scrubbing, with the toilet brush or the
   sponge in hand. Neat Sims clean up on their own; others when it's filthy; slobs never. Kept
   in saves.
-- **Toilet etiquette**, as the game's `UseToilet`: Sims flush after nine times in ten (Neat
-  Sims always, Slobs never) and then wash their hands at the nearest sink as often. A toilet
+- **Toilet etiquette**, as the game's `UseToilet` and its tuning: Sims flush after 95 times in
+  a hundred (Neat Sims always, Slobs half the time when told to and never of their own accord),
+  and Neat Sims wash their hands at the nearest sink after. A toilet
   left unflushed offers "Flush" (the game's flush clip), gets flushed by anyone but a Slob of
   their own accord, the Neat sooner, and until then counts as mess towards Dirty Surroundings
   for everyone but the Slobs.
@@ -786,7 +787,11 @@ installation is unreachable.
   other's mirror images, so each bone plays its partner's track, reflected). Sims share a bed
   on their own with their partner, fiancé(e) or spouse. The bed's half of the clip is mirrored
   with it (each of its bones played as its partner across the bed's middle is), each sleeper
-  turning back the covers on their own side.
+  turning back the covers on their own side. Beds are owned, as the game's: a Sim sent to bed
+  by the player claims their side (and gives up any other), *Set Bed Ownership... ›* gives a
+  side to one of the household, and by free will Sims sleep only where a side is free or theirs
+  (or their partner's), hardly ever (the game's tuned ×0.01) in another bed once they've one
+  of their own. Kept in saves.
 - **The workout bench** (The Exercise Queen): "Pump Iron", for teens and up, in athletic wear:
   on to the bench, then the game's bench presses, leg extensions and pec flys in turn, building
   Athletic.
@@ -806,9 +811,9 @@ installation is unreachable.
   eight hours, and anyone who sees it shocked); the Dramatic "Fake Passing Out" on the floor
   for ten to thirty minutes; a Natural-Born Performer's "TaDa!" (those about cheer and are
   Drawn In; Born To Do This an hour for each who did). `TRAIT_ACT=talk|freak|fake|tada` has
-  the selected Sim do one (a test). A Neurotic who's used a sink, the stove or a fireplace is
-  Feeling Anxious about it an hour later (the game's `CheckForNeuroticAnxiety`: "Feeling
-  Anxious About Faucet", one worry at a time); Check Sink, Check Stove and Check Fireplace are
+  the selected Sim do one (a test). A Neurotic who's used a sink, the stove or a fireplace is,
+  one time in ten, Feeling Anxious about it an hour later (the game's `CheckForNeuroticAnxiety`
+  and its tuning: "Feeling Anxious About Faucet", one worry at a time); Check Sink, Check Stove and Check Fireplace are
   theirs alone, with the game's `a2o_trait_neurotic_check` clips, and leave them Feeling Calm
   for three hours, the worry gone. They check what they're anxious about by free will, and
   now and then anyway once they're no longer calm.

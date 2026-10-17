@@ -1,7 +1,8 @@
 //! Toilet etiquette, as the game's `Toilet.UseToilet`: each use leaves the toilet needing a
-//! flush (its `ToiletVolume`) unless they flush after, nine times in ten (a Neat Sim always,
-//! a Slob never: `kFlushChanceNormal`, `kFlushChanceNeat`, `kFlushChanceSlob`), and then they
-//! wash their hands at the nearest sink as often (`kWashHandsChance...`). A toilet left
+//! flush (its `ToiletVolume`) unless they flush after: 95 times in a hundred, a Neat Sim always,
+//! a Slob half the time when told to and never of their own accord (its tuning's
+//! `kFlushChanceNormal`, `kFlushChanceNeat`, `kFlushChanceSlob`); and the Neat wash their
+//! hands at the nearest sink after (`kWashHandsChance...`: 100 for them, 0 else). A toilet left
 //! unflushed can be flushed (`Toilet.Flush`: not by a Slob of their own accord), and until then
 //! it's a mess about the place to all but the Slobs (`kNeedsToBeFlushedEnvironmentScorePenalty`).
 
@@ -38,9 +39,10 @@ pub struct UsedToilet {
 #[derive(Component)]
 pub struct Flushed(pub Entity);
 
-/// The game's chances (in a hundred): flushing, and washing hands after.
-const FLUSH_CHANCE: f64 = 0.9;
-const WASH_CHANCE: f64 = 0.9;
+/// The game's tuned chances: flushing (and a Slob's), washing hands after.
+const FLUSH_CHANCE: f64 = 0.95;
+const SLOB_FLUSH_CHANCE: f64 = 0.5;
+const WASH_CHANCE: f64 = 0.0;
 /// How keen they are to flush one left unflushed: the Neat, and anyone else.
 const NEAT_FLUSH: f32 = 26.0;
 const FLUSH: f32 = 6.0;
@@ -49,12 +51,12 @@ fn has(sim: &Sim, t: Trait) -> bool {
     sim.traits.contains(&t)
 }
 
-/// Whether they flush after (`ShouldFlush`).
-pub fn should_flush(sim: &Sim, rng: &mut impl Rng) -> bool {
+/// Whether they flush after (`ShouldFlush`: a Slob never by free will).
+pub fn should_flush(sim: &Sim, autonomous: bool, rng: &mut impl Rng) -> bool {
     if has(sim, Trait::Neat) {
         true
     } else if has(sim, Trait::Slob) {
-        false
+        !autonomous && rng.random_bool(SLOB_FLUSH_CHANCE)
     } else {
         rng.random_bool(FLUSH_CHANCE)
     }
@@ -111,7 +113,7 @@ fn used(
         {
             queue.0.push_front(Action::new("Wash Hands", ActionKind::Object { target: sink.0, def }, u.autonomous));
         }
-        if should_flush(sim, &mut rng)
+        if should_flush(sim, u.autonomous, &mut rng)
             && let Some(def) = def_of(ObjectKind::Toilet, &|d| d.special == Special::Flush)
         {
             queue.0.push_front(Action::new("Flush", ActionKind::Object { target: u.toilet, def }, u.autonomous));
@@ -137,10 +139,13 @@ mod tests {
         let mut rng = rand::rng();
         let mut s = crate::sim::random_sim(&mut rng, "T", Some(true), crate::sim::Age::Adult);
         s.traits = vec![Trait::Slob];
-        assert!((0..50).all(|_| !should_flush(&s, &mut rng) && !should_wash(&s, &mut rng)));
+        assert!((0..50).all(|_| !should_flush(&s, true, &mut rng) && !should_wash(&s, &mut rng)));
         assert!(drawn(&s).is_none() && !bothers(&s));
         s.traits = vec![Trait::Neat];
-        assert!((0..50).all(|_| should_flush(&s, &mut rng) && should_wash(&s, &mut rng)));
+        assert!((0..50).all(|_| should_flush(&s, true, &mut rng) && should_wash(&s, &mut rng)));
         assert_eq!(drawn(&s), Some(NEAT_FLUSH));
+        // (Anyone else doesn't wash after: the game's tuning.)
+        s.traits.clear();
+        assert!((0..50).all(|_| !should_wash(&s, &mut rng)));
     }
 }

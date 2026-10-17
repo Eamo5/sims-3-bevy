@@ -1,11 +1,13 @@
 //! A Neurotic Sim's worries, as the game's `TraitFunctions.CheckForNeuroticAnxiety`: having used a
-//! sink, the stove or a fireplace, an hour later they're Feeling Anxious about it (the game's
-//! `NeuroticTraitAnxiousChance` is 1, `NeuroticTraitAnxiousDelay` an hour; one worry at a time).
+//! sink, the stove or a fireplace, one time in ten an hour later they're Feeling Anxious about it
+//! (its tuning's `NeuroticTraitAnxiousChance` 0.1, `NeuroticTraitAnxiousDelay` an hour; one worry
+//! at a time).
 //! Only theirs to do, Check Sink, Check Stove and Check Fireplace (`Sink.Check`, `Stove_Check`,
 //! `Fireplace.Check`) leave them Feeling Calm, and the worry about it gone; they check of their
 //! own accord now and then too (the game's `TraitNeurotic` commodity), not while still calm.
 
 use bevy::prelude::*;
+use rand::Rng;
 
 use crate::PlayMode;
 use crate::interact::{ActionKind, ActionQueue, GameObject, ObjectKind, Phase, Special};
@@ -49,8 +51,14 @@ impl About {
 
 const WORRIES: [MoodletKind; 3] = [MoodletKind::AnxiousSink, MoodletKind::AnxiousStove, MoodletKind::AnxiousFireplace];
 
-/// `NeuroticTraitAnxiousDelay`: how long after (game minutes).
+/// `NeuroticTraitAnxiousDelay`: how long after (game minutes); and `NeuroticTraitAnxiousChance`.
 const DELAY_MINUTES: f64 = 60.0;
+const ANXIOUS_CHANCE: f64 = 0.1;
+
+/// What they've used and been worried by, or not, already (the chance is had once a use).
+#[derive(Component)]
+pub struct Fretted(pub Entity);
+
 /// How keen they are to check what they're anxious about, and to check now and then.
 const ANXIOUS_PULL: f32 = 40.0;
 const NOW_AND_THEN: f32 = 4.0;
@@ -89,28 +97,38 @@ pub fn drawn(kind: ObjectKind, moodlets: Option<&Moodlets>) -> Option<f32> {
 fn fret(
     mut commands: Commands,
     clock: Res<crate::clock::GameClock>,
-    sims: Query<(Entity, &Sim, &ActionQueue), Without<WorryLater>>,
+    sims: Query<(Entity, &Sim, &ActionQueue, Option<&Fretted>), Without<WorryLater>>,
     objects: Query<&GameObject>,
 ) {
-    for (e, sim, q) in &sims {
+    let mut rng = rand::rng();
+    for (e, sim, q, fretted) in &sims {
         if !sim.traits.contains(&Trait::Neurotic) {
             continue;
         }
-        let Some(a) = q.current() else { continue };
-        if !matches!(a.phase, Phase::Running(_)) {
+        let using = q.current().filter(|a| matches!(a.phase, Phase::Running(_))).and_then(|a| match a.kind {
+            ActionKind::Object { target, def } => Some((target, Some(def))),
+            ActionKind::Repair { target } => Some((target, None)),
+            _ => None,
+        });
+        let worry = using.and_then(|(target, def)| {
+            let obj = objects.get(target).ok()?;
+            let about = About::of(obj.kind)?;
+            let check = def.is_some_and(|d| crate::interact::interactions_for(obj.kind).get(d).is_some_and(|d| d.special == Special::NeuroticCheck));
+            (!check).then_some((target, about))
+        });
+        let Some((target, about)) = worry else {
+            if fretted.is_some() {
+                commands.entity(e).remove::<Fretted>();
+            }
             continue;
-        }
-        let (target, def) = match a.kind {
-            ActionKind::Object { target, def } => (target, Some(def)),
-            ActionKind::Repair { target } => (target, None),
-            _ => continue,
         };
-        let Ok(obj) = objects.get(target) else { continue };
-        let Some(about) = About::of(obj.kind) else { continue };
-        if def.is_some_and(|d| crate::interact::interactions_for(obj.kind).get(d).is_some_and(|d| d.special == Special::NeuroticCheck)) {
+        if fretted.is_some_and(|f| f.0 == target) {
             continue;
         }
-        commands.entity(e).insert(WorryLater { about, at: clock.minutes + DELAY_MINUTES });
+        commands.entity(e).insert(Fretted(target));
+        if rng.random_bool(ANXIOUS_CHANCE) {
+            commands.entity(e).insert(WorryLater { about, at: clock.minutes + DELAY_MINUTES });
+        }
     }
 }
 

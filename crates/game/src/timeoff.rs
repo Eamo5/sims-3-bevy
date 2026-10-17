@@ -1,8 +1,9 @@
 //! Time off work by phone, as the game's `Phone.CallToTakeUnpaidTimeOff`: within four hours of a
 //! shift (`kCallInSickHoursBeforeWork`) a sick Sim can Call In Sick, a paid day off, and a well
 //! one Call In Fake Sick, the same, with a chance at the day's end of being found out (the
-//! game's `kFakeSickDayCaughtChanceBase` 15%, more for the absent-minded, the unlucky and anyone
-//! who went out, less for a Workaholic or the lucky, more each time they've called in sick: then
+//! game's tuned `kFakeSickDayCaughtChanceBase` 10%, more for the absent-minded, losers, the
+//! unlucky and anyone who went out, less for a Workaholic or the lucky, more each time they've
+//! called in sick: then
 //! their performance down 25). Or Take Unpaid Time Off... a day, two or five (not again for 48,
 //! 72 or 240 hours, `kUnpaidDaysOffCooldownInHours`), and none while they've days off still.
 
@@ -28,9 +29,9 @@ const SICK_CALL_HOURS: f32 = 4.0;
 /// `kUnpaidDaysOff` and `kUnpaidDaysOffCooldownInHours`.
 const UNPAID: [(u8, f64); 3] = [(1, 48.0), (2, 72.0), (5, 240.0)];
 /// The fake sick day's reckoning (`kFakeSickDayCaughtChance...`).
-const CAUGHT_BASE: f64 = 0.15;
+const CAUGHT_BASE: f64 = 0.1;
 const CAUGHT_TRAIT: f64 = 0.05;
-const CAUGHT_LEFT_HOME: f64 = 0.1;
+const CAUGHT_LEFT_HOME: f64 = 0.2;
 const CAUGHT_PER_SICK_CALL: f64 = 0.02;
 const CAUGHT_SICK_CALLS_CAP: f64 = 0.2;
 const CAUGHT_PERFORMANCE: f32 = -25.0;
@@ -189,7 +190,7 @@ fn found_out(
 pub fn caught_chance(sim: &Sim, off: &TimeOff) -> f64 {
     let has = |t: Trait| sim.traits.contains(&t);
     let mut p = CAUGHT_BASE;
-    if [Trait::Absentminded, Trait::Unlucky].into_iter().any(has) {
+    if [Trait::Absentminded, Trait::Loser, Trait::Unlucky].into_iter().any(has) {
         p += CAUGHT_TRAIT;
     }
     if [Trait::Workaholic, Trait::Lucky].into_iter().any(has) {
@@ -211,9 +212,9 @@ mod tests {
         let mut s = crate::sim::random_sim(&mut rand::rng(), "T", Some(true), crate::sim::Age::Adult);
         s.traits = vec![Trait::Workaholic];
         let mut off = TimeOff { sick_calls: 1, ..Default::default() };
-        assert!((caught_chance(&s, &off) - 0.12).abs() < 1e-9);
+        assert!((caught_chance(&s, &off) - 0.07).abs() < 1e-9);
         off.left_home = true;
         off.sick_calls = 20;
-        assert!((caught_chance(&s, &off) - 0.4).abs() < 1e-9);
+        assert!((caught_chance(&s, &off) - 0.45).abs() < 1e-9);
     }
 }

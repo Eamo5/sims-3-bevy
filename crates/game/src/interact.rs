@@ -1575,10 +1575,10 @@ static COMPUTER: [InteractionDef; 12] = [
     // (The game's `BrowseWeb` and `PracticeWriting`.)
     def("Browse Web", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 35.0], Pose::Use),
     InteractionDef { skill: Some("Writing"), ..def("Practice Writing", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 5.0], Pose::Use) },
-    // (The game's trait ones: `SolveHardProblems` (45 minutes, Logic, fun 10 an hour),
-    // `WorkOnJobRelatedIssues` (five loops of ten), `JoinBookClub` and `LeaveBookClub`.)
-    InteractionDef { autonomous: false, skill: Some("Logic"), special: Special::SolveProblems, ..def("Solve Hard Problems", 45.0, [0.0, 0.0, -3.0, 0.0, 0.0, 10.0], Pose::Use) },
-    InteractionDef { autonomous: false, special: Special::JobIssues, ..def("Work on Job-Related Issues", 50.0, [0.0, 0.0, -4.0, 0.0, 0.0, 0.0], Pose::Use) },
+    // (The game's trait ones, as its tuning has them: `SolveHardProblems` (two hours, Logic,
+    // fun 10 an hour), `WorkOnJobRelatedIssues` (four hours), `JoinBookClub`, `LeaveBookClub`.)
+    InteractionDef { autonomous: false, skill: Some("Logic"), special: Special::SolveProblems, ..def("Solve Hard Problems", 120.0, [0.0, 0.0, -3.0, 0.0, 0.0, 10.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::JobIssues, ..def("Work on Job-Related Issues", 240.0, [0.0, 0.0, -4.0, 0.0, 0.0, 0.0], Pose::Use) },
     InteractionDef { autonomous: false, special: Special::JoinBookClub, ..def("Join Book Club", 5.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::LeaveBookClub, ..def("Leave Book Club", 5.0, N, Pose::Use) },
 ];
@@ -5695,7 +5695,7 @@ fn autonomy(
         Res<crate::klepto::Swipeable>,
         Res<crate::mirrors::LastLooked>,
     ),
-    (convs, toilets): (Res<crate::groups::Conversations>, Res<crate::toilets::Unflushed>),
+    (convs, toilets, bed_owners): (Res<crate::groups::Conversations>, Res<crate::toilets::Unflushed>, Query<&crate::bedowners::BedOwners>),
 ) {
     if delta.0 <= 0.0 {
         return;
@@ -5705,6 +5705,9 @@ fn autonomy(
     // (The repairman's been called: repairs are left to him.)
     let repairman = called.is_some() || !repairmen.is_empty();
     let others: Vec<(Entity, Vec3, Age, [f32; 6], Option<usize>)> = sims.iter().map(|s| (s.0, s.1.translation, s.7.age, s.2.0, s.9.map(|l| l.0))).collect();
+    // (Sims' ids, for whose bed's whose.)
+    let ids: HashMap<Entity, u64> = sims.iter().map(|s| (s.0, s.7.id)).collect();
+    let bed_owner_ids: std::collections::HashSet<u64> = bed_owners.iter().flat_map(|o| o.0.into_iter().flatten()).collect();
     // A meal already out is eaten before anyone cooks another.
     let meal_out = objects.iter().any(|(_, o, ..)| o.kind == ObjectKind::Meal);
     // (Bills to pay that the household can pay: left alone on their own when it can't.)
@@ -5910,6 +5913,13 @@ fn autonomy(
                 if d.name == "Nap" && !may_nap(motives.0[ENERGY], waking) {
                     continue;
                 }
+                // (Not in a bed that's someone else's on every side: the game's `BedSleep` test.)
+                if d.until_full == Some(ENERGY)
+                    && let Ok(owners) = bed_owners.get(oe)
+                    && !owners.lets(obj.kind, sim.id, rels.partner().and_then(|p| ids.get(&p.0).copied()))
+                {
+                    continue;
+                }
                 // Homework gets done (by the bookish sooner), unless they're miserable.
                 if d.special == Special::Homework && motives.0.iter().all(|m| *m > -30.0) {
                     let keen = [crate::life::Trait::Bookworm, crate::life::Trait::Genius, crate::life::Trait::Perfectionist].iter().any(|t| sim.traits.contains(t));
@@ -6029,6 +6039,11 @@ fn autonomy(
                     };
                 }
                 score *= crate::life::activity_affinity(&sim.traits, d.name).sqrt();
+                // (A bed of their own: any other's hardly thought of, the game's tuned
+                // `kAutonomyScoreMultiplierForBedAwayFromOwnedBed`.)
+                if d.until_full == Some(ENERGY) && bed_owner_ids.contains(&sim.id) && !bed_owners.get(oe).is_ok_and(|o| o.owns(sim.id)) {
+                    score *= crate::bedowners::AWAY_FROM_OWN_BED;
+                }
                 score /= 1.0 + dist / 25.0;
                 score *= rng.random_range(0.85..1.15);
                 // (Not the same pastime again and again.)

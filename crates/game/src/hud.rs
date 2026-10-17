@@ -119,6 +119,8 @@ const CHANGE_STATION: &str = "Change to";
 
 /// The TV's channel menu (the game's "Change to...": its middle adds the dots).
 const CHANGE_CHANNEL: &str = "Change to";
+/// A bed's side given to one of the household (the game's `SetBedOwnership`).
+const SET_BED_OWNER: &str = "Set Bed Ownership";
 /// The computer's chat with someone known (the game's `ChatSpecific`, "Chat...").
 const CHAT_WITH: &str = "Chat";
 /// The bookshelf's skill books' menu.
@@ -1391,6 +1393,18 @@ fn world_click(
                 if d.special == Special::Flush && !unflushed.0.contains_key(&t) {
                     continue;
                 }
+                // (A bed's sides given to the household: the game's `SetBedOwnership`, child and up.)
+                if crate::bedowners::is_bed(obj.kind) && d.name == "Sleep" {
+                    let list: Vec<(String, ActionKind)> = company_q
+                        .iter()
+                        .filter(|c| !c.2 && !c.1.age.is_little())
+                        .map(|c| (c.1.full_name(), ActionKind::Object { target: t, def: i }))
+                        .collect();
+                    if !list.is_empty() {
+                        options.push((format!("{SET_BED_OWNER}... ›"), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((SET_BED_OWNER.to_string(), list));
+                    }
+                }
                 // (A donation, the game's `DonateToCharity`: the Good's or Evil's, once a day, to
                 // either of this week's two causes, as much as the household can spare.)
                 if d.special == Special::Donate {
@@ -1991,6 +2005,16 @@ fn pie_buttons(
     }
     if label == PHONE_LABEL {
         commands.insert_resource(OpenPhone);
+        return;
+    }
+    // (A bed's side given there and then: the game's `SetBedOwnership` is immediate.)
+    if title == SET_BED_OWNER
+        && let ActionKind::Object { target, .. } = kind
+        && let Some((_, s, _)) = people.iter().find(|(_, s, _)| s.full_name() == label)
+    {
+        let id = s.id;
+        notes.push(format!("{} has this bed now.", s.first));
+        commands.queue(move |w: &mut World| crate::bedowners::assign(w, target, id));
         return;
     }
     // (The phones silenced or not, there and then.)

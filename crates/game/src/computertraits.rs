@@ -1,9 +1,10 @@
 //! The computer's interactions for the traits, as the game's `Computer`: a Genius can Solve Hard
-//! Problems (three in five times solved, for a prize of up to §1,000: `SolveHardProblems`,
-//! `GeniusTraitChanceToSolveProblem`); a Workaholic can Work on Job-Related Issues (a little more
-//! performance: `WorkOnJobRelatedIssues`), once a phone call to Check Up On Work has found there's
+//! Problems (two hours; three in five times solved, for a prize of §50 to §225: its tuning's
+//! `SolveHardProblems`, `GeniusTraitChanceToSolveProblem`); a Workaholic can Work on Job-Related
+//! Issues (four hours, for 4 performance: `WorkOnJobRelatedIssues`), once a phone call to Check
+//! Up On Work has found there's
 //! something to do (half the time; for two hours: `CallCheckUpOnWork`); a Bookworm can Join the
-//! Book Club (§200 for life, `JoinBookClub`), and a book comes in the mail for each member every
+//! Book Club (§250 for life, `JoinBookClub`), and a book comes in the mail for each member every
 //! Monday (`Mailbox.SendBookClubBooks`), onto the household's shelves.
 
 use bevy::prelude::*;
@@ -60,10 +61,10 @@ pub struct Done(pub Special);
 
 /// The game's `kMinimumReward`/`kMaximumReward`, `GeniusTraitChanceToSolveProblem`,
 /// `kPerformanceBonusForWorkaholicSim` and the book club's `kCost`.
-const PRIZE: std::ops::RangeInclusive<i64> = 0..=1000;
+const PRIZE: std::ops::RangeInclusive<i64> = 50..=225;
 const SOLVE_CHANCE: f64 = 0.6;
-const ISSUES_PERFORMANCE: f32 = 5.0;
-pub const BOOK_CLUB_COST: i64 = 200;
+const ISSUES_PERFORMANCE: f32 = 4.0;
+pub const BOOK_CLUB_COST: i64 = 250;
 
 /// Whether one's offered: the trait's own (and teens and up), the job and the club as the
 /// game's tests have them.
