@@ -1,6 +1,10 @@
 //! Fish bowls, as the game's: a fish from a Sim's inventory put in a bowl swims there (the
-//! catch's own model, small), and can be taken out again. Bowls of perfect fish of different
-//! kinds count towards The Perfect Aquarium lifetime wish. What swims where is kept in saves.
+//! catch's own model, small), and can be taken out again. It wants feeding (the game's `Feed`):
+//! hungry a day and a half after the last time (its tuning's `kHoursUntilFishWillBeFedByAutonomy`
+//! 36, when Sims feed it of their own accord), dead after three days unfed
+//! (`kHoursUntilFishDiesIfNotFed` 72: belly up, till someone cleans the bowl out, `CleanOut`).
+//! Bowls of perfect fish of different kinds count towards The Perfect Aquarium lifetime wish.
+//! What swims where, and when it was fed, is kept in saves.
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -16,33 +20,54 @@ impl Plugin for FishBowlPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PerfectFish>()
             .init_resource::<PendingBowls>()
-            .add_systems(Update, (restore_bowls, bowl_requests, swim, census).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (restore_bowls, bowl_requests, hunger, swim, census).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
-/// The fish swimming in a bowl, and its model.
+/// The fish swimming in a bowl, and its model; when it was last fed (game minutes), and whether
+/// it's died for want of it.
 #[derive(Component, Clone)]
 pub struct BowlFish {
     pub fish: Stack,
     model: Option<Entity>,
+    pub fed_at: f64,
+    pub dead: bool,
 }
 
-/// A Sim at a bowl: put a fish in, or take it out.
+impl BowlFish {
+    /// Hungry: due feeding (and Sims see to it of their own accord).
+    pub fn hungry(&self, now: f64) -> bool {
+        !self.dead && now - self.fed_at >= HUNGRY_HOURS * 60.0
+    }
+}
+
+/// The game's tuned hours: hungry, and dead, after the last feeding.
+const HUNGRY_HOURS: f64 = 36.0;
+const DIES_HOURS: f64 = 72.0;
+
+/// A Sim at a bowl: put a fish in, take it out, feed it, or clean the dead one out.
 #[derive(Component, Clone)]
 pub enum BowlRequest {
     Place { bowl: Entity, key: String, quality: u8 },
     Take(Entity),
+    Feed(Entity),
+    Clean(Entity),
 }
 
 /// Kinds of perfect fish in the household's bowls.
 #[derive(Resource, Default)]
 pub struct PerfectFish(pub usize);
 
-/// A bowl's fish as saved: where the bowl stands and what's in it.
+/// A bowl's fish as saved: where the bowl stands and what's in it, when it was fed and whether
+/// it's died.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SavedBowl {
     pub at: [f32; 3],
     pub fish: Stack,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fed_at: Option<f64>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dead: bool,
 }
 
 /// Bowls' fish from a save, waiting for the bowls to be set out.
@@ -71,6 +96,29 @@ fn swim(time: Res<Time>, mut q: Query<&mut Transform, With<BowlSwimmer>>) {
     for mut tf in &mut q {
         tf.rotation = Quat::from_rotation_y(time.elapsed_secs() * 0.8);
     }
+}
+
+/// Unfed three days: dead, belly up in the bowl.
+fn hunger(mut commands: Commands, clock: Res<crate::clock::GameClock>, mut bowls: Query<&mut BowlFish>, mut notes: ResMut<Notifications>) {
+    for mut b in &mut bowls {
+        if b.dead || clock.minutes - b.fed_at < DIES_HOURS * 60.0 {
+            continue;
+        }
+        b.dead = true;
+        notes.push(format!("The {} in the fish bowl has died: it wasn't fed. The bowl needs cleaning out.", b.fish.name));
+        if let Some(m) = b.model {
+            belly_up(&mut commands, m);
+        }
+    }
+}
+
+/// A dead fish: still, and upside down.
+fn belly_up(commands: &mut Commands, model: Entity) {
+    commands.entity(model).remove::<BowlSwimmer>().queue_silenced(|mut e: EntityWorldMut| {
+        if let Some(mut tf) = e.get_mut::<Transform>() {
+            tf.rotation = Quat::from_rotation_z(std::f32::consts::PI);
+        }
+    });
 }
 
 /// Reserve the exact fish before any model or bowl state is created.
@@ -121,12 +169,13 @@ fn bowl_requests(
     (data, ui, mut assets): (Option<Res<crate::baked::Baked>>, Option<Res<crate::icons::GameUi>>, ResMut<crate::objects::ObjectAssets>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut notes: ResMut<Notifications>,
+    clock: Res<crate::clock::GameClock>,
 ) {
     let (Some(data), Some(ui)) = (data, ui) else { return };
     let mut transferred = std::collections::HashSet::new();
     for (e, sim, req, inv) in &mut sims {
         commands.entity(e).remove::<BowlRequest>();
-        let bowl = match req { BowlRequest::Place { bowl, .. } | BowlRequest::Take(bowl) => *bowl };
+        let bowl = match req { BowlRequest::Place { bowl, .. } | BowlRequest::Take(bowl) | BowlRequest::Feed(bowl) | BowlRequest::Clean(bowl) => *bowl };
         if transferred.contains(&bowl) { continue; }
         match req {
             BowlRequest::Place { key, quality, .. } => {
@@ -139,11 +188,32 @@ fn bowl_requests(
                 let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
                 let model = spawn_fish(&mut commands, bowl, obj, &fish, &data, &ui, &mut assets, &mut ctx);
                 notes.push(format!("{} put {} {} in the fish bowl.", sim.first, if fish.name.starts_with(['A', 'E', 'I', 'O', 'U']) { "an" } else { "a" }, fish.name));
-                commands.entity(bowl).insert(BowlFish { fish, model });
+                // (FISH_FED_AGO=<hours>, tests: fed that long ago.)
+                let ago = std::env::var("FISH_FED_AGO").ok().and_then(|h| h.parse::<f64>().ok()).unwrap_or(0.0) * 60.0;
+                commands.entity(bowl).insert(BowlFish { fish, model, fed_at: clock.minutes - ago, dead: false });
+            }
+            BowlRequest::Feed(_) => {
+                if let Ok((_, Some(mut held))) = bowls.get_mut(bowl)
+                    && !held.dead
+                {
+                    held.fed_at = clock.minutes;
+                    notes.push(format!("{} fed the {}.", sim.first, held.fish.name));
+                }
+            }
+            BowlRequest::Clean(_) => {
+                let Ok((_, Some(held))) = bowls.get(bowl) else { continue };
+                if !held.dead {
+                    continue;
+                }
+                if let Some(m) = held.model {
+                    commands.entity(m).try_despawn();
+                }
+                commands.entity(bowl).remove::<BowlFish>();
+                notes.push(format!("{} cleaned out the fish bowl.", sim.first));
             }
             BowlRequest::Take(_) => {
                 let Ok((obj, Some(held))) = bowls.get(bowl) else { continue };
-                if obj.kind != ObjectKind::FishBowl { continue; }
+                if obj.kind != ObjectKind::FishBowl || held.dead { continue; }
                 transferred.insert(bowl);
                 let fish = held.fish.clone();
                 if let Some(m) = held.model {
@@ -165,6 +235,7 @@ fn restore_bowls(
     bowls: Query<(Entity, &GameObject, &Transform), Without<BowlFish>>,
     (data, ui, mut assets): (Option<Res<crate::baked::Baked>>, Option<Res<crate::icons::GameUi>>, ResMut<crate::objects::ObjectAssets>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    clock: Res<crate::clock::GameClock>,
 ) {
     if pending.0.is_empty() {
         return;
@@ -177,7 +248,13 @@ fn restore_bowls(
             return true;
         };
         let model = spawn_fish(&mut commands, e, obj, &b.fish, &data, &ui, &mut assets, &mut ctx);
-        commands.entity(e).insert(BowlFish { fish: b.fish.clone(), model });
+        // (Saved before feeding was kept: fed just now.)
+        commands.entity(e).insert(BowlFish { fish: b.fish.clone(), model, fed_at: b.fed_at.unwrap_or(clock.minutes), dead: b.dead });
+        if b.dead
+            && let Some(m) = model
+        {
+            belly_up(&mut commands, m);
+        }
         false
     });
 }
@@ -194,7 +271,7 @@ fn census(bowls: Query<&BowlFish, (Without<crate::visit::LotObject>, Without<cra
 
 /// The bowls' fish, for saving.
 pub fn saved(bowls: &Query<(&BowlFish, &Transform), (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>) -> Vec<SavedBowl> {
-    bowls.iter().map(|(b, tf)| SavedBowl { at: tf.translation.to_array(), fish: b.fish.clone() }).collect()
+    bowls.iter().map(|(b, tf)| SavedBowl { at: tf.translation.to_array(), fish: b.fish.clone(), fed_at: Some(b.fed_at), dead: b.dead }).collect()
 }
 
 #[cfg(test)]
@@ -208,6 +285,8 @@ mod tests {
         let bowl = |key: &str| BowlFish {
             fish: Stack { kind: ItemKind::Fish, key: key.into(), name: key.into(), quality: PERFECT, count: 1, worth: 100 },
             model: None,
+            fed_at: 0.0,
+            dead: false,
         };
         app.world_mut().spawn((bowl("salmon"), Transform::default()));
         let sold = app.world_mut().spawn((bowl("trout"), Transform::default(), crate::buyhistory::HistoryHidden)).id();

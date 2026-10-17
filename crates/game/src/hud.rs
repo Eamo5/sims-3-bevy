@@ -1587,7 +1587,12 @@ fn world_click(
                     }
                     continue;
                 }
-                if d.special == Special::TakeFish && !bowl_q.contains(t) {
+                // (A live fish taken out or fed; a dead one only cleaned out.)
+                let fish = bowl_q.get(t).ok();
+                if matches!(d.special, Special::TakeFish | Special::FeedFish) && !fish.is_some_and(|b| !b.dead) {
+                    continue;
+                }
+                if d.special == Special::CleanBowl && !fish.is_some_and(|b| b.dead) {
                     continue;
                 }
                 // Fishing: with the bait used last, if they've some ("Fish with Apple (Minnow)",

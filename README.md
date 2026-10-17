@@ -160,8 +160,9 @@ installation is unreachable.
   and bring back a catch to sell.
 - **Chatting online** at a computer (the game's `ChatRandom`): with someone of the town (new
   to the household's Sims, else someone known; never a grown-up and a child who don't know each
-  other), getting on a little better every five minutes of it, and every twenty to fifty
-  something learned about them, one of their traits; good for Social and fun as the game's.
+  other), getting on better every forty minutes of it (their talk warmer, the computers'
+  tuning), and every hour and a half to two something learned about them, one of their traits;
+  good for Social and fun as the game's.
   *Chat... ›* picks whom (the game's `ChatSpecific`): someone they know who isn't there or of
   the household.
 - **The computer and the traits**, as the game's: a Genius can Solve Hard Problems (two hours
@@ -1142,7 +1143,9 @@ installation is unreachable.
   much. Dishwashers break now and then, and are repaired with the game's animations.
 - **Fish bowls**: a fish from a Sim's inventory (fish now come in the game's qualities, a
   master angler often landing a perfect one) put in a bowl swims there, its own model
-  turning slowly in the glass, and can be taken out again; bowls are kept in saves, and
+  turning slowly in the glass, and can be taken out again. It wants feeding: hungry a day and
+  a half after the last time (when Sims feed it of their own accord), dead after three days
+  unfed (the game's tuned 36 and 72 hours), belly up till someone cleans the bowl out; bowls are kept in saves, and
   bowls of perfect fish of different kinds count towards The Perfect Aquarium lifetime wish.
 - **Paintings**: at an easel, *Paint ›* offers a small, medium or large canvas (longer to paint,
   worth more), and what a Sim paints is one of the game's own pictures, from the Painting

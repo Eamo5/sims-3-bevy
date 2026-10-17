@@ -1201,6 +1201,9 @@ pub enum Special {
     /// Put the fish selected for this action in a bowl, or take it out.
     PlaceFish,
     TakeFish,
+    /// A bowl's fish fed, and a dead one cleaned out (`fishbowl`).
+    FeedFish,
+    CleanBowl,
     /// Cook a group meal and serve it on a platter.
     ServeMeal,
     /// Take a serving from a platter (then sit down to eat it).
@@ -1454,9 +1457,12 @@ static CLOTHESLINE: [InteractionDef; 2] = [
 ];
 /// (Down the chute with it: never on the menu.)
 static WASTE_CHUTE: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::DropTrash, ..def("Throw Out Trash", 2.0, N, Pose::Use) }];
-static FISHBOWL: [InteractionDef; 2] = [
+static FISHBOWL: [InteractionDef; 4] = [
     InteractionDef { autonomous: false, special: Special::PlaceFish, ..def("Place Fish", 2.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::TakeFish, ..def("Take Fish", 2.0, N, Pose::Use) },
+    // (The game's `Feed` and `CleanOut`: fed when hungry of their own accord too.)
+    InteractionDef { special: Special::FeedFish, ..def("Feed Fish", 2.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::CleanBowl, ..def("Clean Out", 3.0, N, Pose::Use) },
 ];
 static ALARM: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::ToggleAlarm, ..def("Set Alarm", 1.0, N, Pose::Use) }];
 static DISHES: [InteractionDef; 1] = [InteractionDef { special: Special::CleanUp, ..def("Clean Up", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 0.0], Pose::Use) }];
@@ -1980,6 +1986,9 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         // (The game's `TraitNeurotic` checks, in the sink's, stove's and fireplace's machines: each
         // played once through, as long as its interaction.)
         "Check Sink" => A::new(None, &["a2o_trait_neurotic_check_sink_x"]),
+        // (The bowl's `Feed` and `CleanOut` states.)
+        "Feed Fish" => A::new(None, &["a2o_fishBowl_feed_x"]),
+        "Clean Out" if kind == ObjectKind::FishBowl => A::new(None, &["a2o_fishBowl_clean_x"]),
         "Check Stove" => A::new(None, &["a2o_trait_neurotic_check_stove_x"]),
         "Check Fireplace" => A::new(None, &["a2o_trait_neurotic_check_fireplace_x"]),
         // (The poker in hand, jabbing and catching their breath: the fireplace's `Loop PokeFire`.)
@@ -4510,6 +4519,12 @@ pub(crate) fn run_actions(
                                         Special::TakeFish => {
                                             commands.entity(me).insert(crate::fishbowl::BowlRequest::Take(*target));
                                         }
+                                        Special::FeedFish => {
+                                            commands.entity(me).insert(crate::fishbowl::BowlRequest::Feed(*target));
+                                        }
+                                        Special::CleanBowl => {
+                                            commands.entity(me).insert(crate::fishbowl::BowlRequest::Clean(*target));
+                                        }
                                         Special::PickUpClothes => {
                                             commands.entity(me).insert(crate::laundry::LaundryRequest::PickedUp(*target));
                                         }
@@ -5695,7 +5710,7 @@ fn autonomy(
         Res<crate::klepto::Swipeable>,
         Res<crate::mirrors::LastLooked>,
     ),
-    (convs, toilets, bed_owners): (Res<crate::groups::Conversations>, Res<crate::toilets::Unflushed>, Query<&crate::bedowners::BedOwners>),
+    (convs, toilets, bed_owners, bowls): (Res<crate::groups::Conversations>, Res<crate::toilets::Unflushed>, Query<&crate::bedowners::BedOwners>, Query<&crate::fishbowl::BowlFish>),
 ) {
     if delta.0 <= 0.0 {
         return;
@@ -5937,6 +5952,13 @@ fn autonomy(
                 }
                 if d.special == Special::PayBills {
                     score = if bills_due { 25.0 } else { 0.0 };
+                }
+                // (A hungry fish fed; none other's.)
+                if d.special == Special::FeedFish {
+                    if !bowls.get(oe).is_ok_and(|b| b.hungry(clock.minutes)) || !household.contains(me) {
+                        continue;
+                    }
+                    score = 18.0;
                 }
                 // (A toilet left unflushed: flushed by anyone but a Slob, the Neat sooner.)
                 if d.special == Special::Flush {

@@ -1,9 +1,10 @@
 //! Chatting online at a computer, as the game's `Computer.ChatRandom` ("Chat with Someone"): a
 //! Sim of the town to chat with (someone new, for the household's own; else someone known), or
-//! the one chosen from "Chat..." (`ChatSpecific`: someone known), the two of them getting on a
-//! little better every five minutes of it (`ChatRelationshipIncreaseEveryXMinutes`,
-//! `ChatRelationshipIncrease`), and now and then (every 20 to 50 minutes,
-//! `ChatLearnSomethingFrequency`) something learned about them: one of their traits. Social and fun
+//! the one chosen from "Chat..." (`ChatSpecific`: someone known), the two of them getting on
+//! better every forty minutes of it (the computers' tuned `ChatRelationshipIncreaseEveryXMinutes`
+//! and `ChatRelationshipIncrease`: their talk's Friendly 40 more, and liking as that has it, the
+//! game's `UpdateSTCAndLTR`), and every hour and a half to two (`ChatLearnSomethingFrequency`)
+//! something learned about them: one of their traits. Social and fun
 //! come of it as the interaction's own (its ITUN: Social 50, Fun 15 an hour).
 
 use bevy::prelude::*;
@@ -22,11 +23,11 @@ impl Plugin for ChatOnlinePlugin {
     }
 }
 
-/// The game's `ComputerTuning`: liking every so many minutes of chat, and how much; something
-/// learned every so many minutes.
-const LIKING_EVERY: f64 = 5.0;
-const LIKING: f32 = 1.0;
-const LEARN_EVERY: std::ops::Range<f64> = 20.0..50.0;
+/// The computers' tuned `ComputerTuning`: their talk warmer every so many minutes of chat, and by
+/// how much; something learned every so many minutes.
+const LIKING_EVERY: f64 = 40.0;
+const FRIENDLY: f32 = 40.0;
+const LEARN_EVERY: std::ops::Range<f64> = 90.0..120.0;
 
 /// Chatting online: with whom, and when they next get on better or learn something.
 #[derive(Component)]
@@ -114,10 +115,17 @@ fn chat(
         let Some(with) = c.with else { continue };
         if now >= c.next_liking {
             c.next_liking += LIKING_EVERY;
-            rels.add(with, LIKING, 0.0);
+            // (The game's `UpdateSTCAndLTR`: their talk Friendly 40 more, liking as it has it.)
+            let warm = |r: &mut crate::social::Relationships, other: Entity| {
+                let x = r.entry(other);
+                x.stc.update(crate::conversation::Commodity::Friendly, FRIENDLY);
+                let d = crate::conversation::liking_change(&x.stc, x.friendship);
+                r.add(other, d, 0.0);
+            };
+            warm(&mut rels, with);
             commands.entity(with).queue_silenced(move |mut w: EntityWorldMut| {
                 if let Some(mut r) = w.get_mut::<crate::social::Relationships>() {
-                    r.add(e, LIKING, 0.0);
+                    warm(&mut r, e);
                 }
             });
         }
