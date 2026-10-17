@@ -628,13 +628,25 @@ fn load_shot(mut commands: Commands, time: Res<Time>, mut start: Local<Option<f3
 
 /// KNOW=<n>: after a few seconds the selected Sim knows n of the Sims about, from enemies to a
 /// spouse (to see the relationships panel full).
-fn know_people(time: Res<Time>, mut sel: Query<(Entity, &mut crate::sim::Relationships), With<crate::sim::Selected>>, others: Query<Entity, (With<crate::sim::Sim>, Without<crate::sim::Selected>)>, mut done: Local<bool>) {
-    let Some(n) = std::env::var("KNOW").ok().and_then(|v| v.parse::<usize>().ok()) else { return };
+/// (ROMANCE=<first name>: the selected Sim and that one romantically involved, liking 60.)
+fn know_people(time: Res<Time>, mut sel: Query<(Entity, &mut crate::sim::Relationships), With<crate::sim::Selected>>, others: Query<(Entity, &crate::sim::Sim), Without<crate::sim::Selected>>, mut done: Local<bool>) {
     if *done || time.elapsed_secs() < 6.0 {
         return;
     }
+    if let Ok(who) = std::env::var("ROMANCE")
+        && let Ok((_, mut rels)) = sel.single_mut()
+        && let Some((e, _)) = others.iter().find(|(_, s)| s.first == who)
+    {
+        let r = rels.entry(e);
+        r.romantic = true;
+        r.friendship = 60.0;
+        r.romance = 40.0;
+        info!("autotest: romantically involved with {who}");
+        *done = true;
+    }
+    let Some(n) = std::env::var("KNOW").ok().and_then(|v| v.parse::<usize>().ok()) else { return };
     let Ok((me, mut rels)) = sel.single_mut() else { return };
-    let mut people: Vec<Entity> = others.iter().filter(|e| *e != me).collect();
+    let mut people: Vec<Entity> = others.iter().map(|(e, _)| e).filter(|e| *e != me).collect();
     people.sort();
     let k = people.len().min(n).max(1);
     for (i, e) in people.into_iter().take(n).enumerate() {

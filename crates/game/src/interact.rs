@@ -2639,6 +2639,8 @@ pub enum ActionKind {
     CallPolice,
     CallFirefighters,
     CallEverybodyHome,
+    /// Asking someone out to a community lot by phone, or on a date there (`meetups`).
+    InviteOut { target: Entity, lot: usize, date: bool },
     /// A call for time off work: sick, fake sick, or unpaid days (`timeoff`).
     TimeOff(crate::timeoff::Ask),
     /// A call to quit their job (the game's `CallToQuitWork`).
@@ -3388,6 +3390,7 @@ pub(crate) fn run_actions(
                         | ActionKind::CallPolice
                         | ActionKind::CallFirefighters
                         | ActionKind::CallEverybodyHome
+                        | ActionKind::InviteOut { .. }
                         | ActionKind::TimeOff(_)
                         | ActionKind::QuitJobCall
                         | ActionKind::SilencePhone
@@ -4033,6 +4036,7 @@ pub(crate) fn run_actions(
                             | ActionKind::CallPolice
                             | ActionKind::CallFirefighters
                             | ActionKind::CallEverybodyHome
+                            | ActionKind::InviteOut { .. }
                             | ActionKind::TimeOff(_)
                             | ActionKind::QuitJobCall
                             | ActionKind::SilencePhone
@@ -5294,6 +5298,26 @@ pub(crate) fn run_actions(
                             if elapsed >= crate::pranks::PRANK_MINUTES {
                                 finished = true;
                                 commands.entity(me).insert(crate::pranks::PrankMade(*target));
+                            }
+                        }
+                        ActionKind::InviteOut { target, lot, date } => {
+                            if elapsed >= crate::meetups::CALL_MINUTES {
+                                finished = true;
+                                let (t, l, d) = (*target, *lot, *date);
+                                let tname = who.get(&t).map(|w| w.0.first.clone()).unwrap_or_default();
+                                let place = crate::visit::place_name(&world.data, l);
+                                commands.entity(t).insert(crate::meetups::Meeting::new(me, l, d, clock.minutes));
+                                notes.push(if d {
+                                    format!("{tname} will meet {} at {place} for a date.", sim.first)
+                                } else {
+                                    format!("{tname} will meet {} at {place}.", sim.first)
+                                });
+                                // (And off they go to meet them.)
+                                commands.entity(me).queue_silenced(move |mut w: EntityWorldMut| {
+                                    if let Some(mut q) = w.get_mut::<ActionQueue>() {
+                                        q.0.push_back(Action::new("Visit Lot", ActionKind::GoToLot { lot: l }, false));
+                                    }
+                                });
                             }
                         }
                         ActionKind::Invite { target } => {

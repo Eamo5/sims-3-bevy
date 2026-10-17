@@ -2312,6 +2312,10 @@ fn pie_buttons(
         if donation.is_some() {
             label = "Donate to Charity".to_string();
         }
+        // (Someone asked out to a place picked: "Invite Gretle Goth Out".)
+        if let (Some(who), &ActionKind::InviteOut { date, .. }) = (title.strip_prefix("Where to Meet "), &kind) {
+            label = if date { format!("Ask {who} Out on Date") } else { format!("Invite {who} Out") };
+        }
         // (Someone known chatted with online: "Chat...".)
         let chat_with = (title == CHAT_WITH).then(|| people.iter().find(|(_, s, _)| s.full_name() == label).map(|(e, ..)| e)).flatten();
         if chat_with.is_some() {
@@ -3032,6 +3036,7 @@ fn phone_button(
         Res<crate::burglar::Break>,
         Query<(), (With<HouseholdMember>, With<crate::visit::OnLot>)>,
     ),
+    world: Res<CurrentWorld>,
 ) {
     if asked.is_some() {
         commands.remove_resource::<OpenPhone>();
@@ -3066,6 +3071,32 @@ fn phone_button(
         let invite = known.iter().map(|(_, e, n)| (format!("Invite {n} Over"), ActionKind::Invite { target: *e })).collect();
         options.push(("Invite Someone Over ›".to_string(), submenu_kind(pie.submenus.len())));
         pie.submenus.push(("Invite Over".to_string(), invite));
+        // (Out to a community lot, as the game's `CallInviteToLot`: anyone known well enough,
+        // and on a date only someone romantic; the place picked from the town's.)
+        let lots: Vec<usize> = (0..world.data.lots.len()).filter(|&l| crate::visit::visitable(&world.data, l)).collect();
+        if !lots.is_empty() && !me.age.is_little() {
+            for date in [false, true] {
+                let mut who: Vec<(String, ActionKind)> = Vec::new();
+                for (f, e, n) in &known {
+                    let ok = if date {
+                        away.get(*e).is_ok_and(|(_, s)| crate::meetups::can_date(me, s, rels, *e))
+                    } else {
+                        *f >= crate::meetups::INVITE_OUT_MIN
+                    };
+                    if !ok {
+                        continue;
+                    }
+                    let places = lots.iter().map(|&l| (crate::visit::place_name(&world.data, l), ActionKind::InviteOut { target: *e, lot: l, date })).collect();
+                    who.push((format!("{n} ›"), submenu_kind(pie.submenus.len())));
+                    pie.submenus.push((format!("Where to Meet {n}"), places));
+                }
+                if !who.is_empty() {
+                    let (label, title) = if date { ("Ask Out on Date ›", "Ask Out on Date") } else { ("Invite Out ›", "Invite Out") };
+                    options.push((label.to_string(), submenu_kind(pie.submenus.len())));
+                    pie.submenus.push((title.to_string(), who));
+                }
+            }
+        }
         // (A Workaholic calling to Check Up On Work, the game's `CallCheckUpOnWork`.)
         if has_job && me.traits.contains(&crate::life::Trait::Workaholic) {
             options.push(("Check Up On Work".to_string(), ActionKind::CheckUpOnWork));
