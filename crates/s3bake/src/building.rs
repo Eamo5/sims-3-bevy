@@ -1186,8 +1186,13 @@ pub fn bake_building(
             wb.y = Some(y);
         }
     }
-    let foundation: Vec<([f32; 2], [f32; 2])> =
-        if has_foundation { data.rooms.segments().filter(|s| s.2 == 0).map(|s| (s.0, s.1)).collect() } else { Vec::new() };
+    // (Only an outline with the ground floor on a side of it: a room outlined on the ground
+    // with no floor of its own, a garden path's (the Landgraabs'), is no foundation's.)
+    let foundation: Vec<([f32; 2], [f32; 2])> = if has_foundation {
+        data.rooms.segments().filter(|s| s.2 == 0).map(|s| (s.0, s.1)).filter(|&(a, b)| !beside(1, a, b).is_empty()).collect()
+    } else {
+        Vec::new()
+    };
     let foundation_top: Vec<f32> = foundation.iter().map(|&(a, b)| beside(1, a, b).into_iter().reduce(f32::max).unwrap_or(levels[1])).collect();
     let foundation_top = if foundation_top.iter().any(|y| (y - levels[1]).abs() > 0.05) { foundation_top } else { Vec::new() };
 

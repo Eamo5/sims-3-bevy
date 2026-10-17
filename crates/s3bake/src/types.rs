@@ -13,7 +13,7 @@ pub const CAS_VERSION: u32 = 11;
 /// cut-outs drawn from bled copies of their textures; 2, the wardrobe in a fixed order.
 pub const OBJECTS_VERSION: u32 = 2;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 78;
+pub const WORLD_VERSION: u32 = 79;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
