@@ -40,7 +40,8 @@ impl Plugin for BuyPlugin {
             .add_systems(Update, crate::buyhistory::update.run_if(in_state(PlayMode::Live)))
             .add_systems(Update, crate::buyhistory::settle_purchases.after(crate::buyhistory::update).run_if(in_state(PlayMode::Live)))
             .add_systems(Update, (scripted_style, scripted_cover, scripted_eyedrop).run_if(in_state(PlayMode::Live)))
-            .add_systems(Update, scripted_family_inventory.before(buy_buttons).run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, scripted_family_inventory.before(buy_buttons).run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, scripted_surface_placement.before(placement).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -365,6 +366,113 @@ impl BuyMode {
         self.dirty = true;
         self.half_walls = false;
     }
+}
+
+/// SURFACE_TEST=1 (tests): Buy mode opened (12 seconds in), something of the lot that goes on
+/// surfaces (a table lamp, a vase) eyedropped, and put by a click in a free slot it fits of
+/// another object (an end table, a desk, a counter), as a player would (`surfaces`); then where
+/// the new one stands checked (SURFACE_SHOTS=<folder> for a picture). SURFACE_TEST=move: then
+/// the surface picked up and put down a metre off, what's on it checked to have come along.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn scripted_surface_placement(
+    mut commands: Commands,
+    time: Res<Time<crate::autotest::InputTimeline>>,
+    mut buy: ResMut<BuyMode>,
+    mut clock: ResMut<crate::clock::GameClock>,
+    objects: Query<(Entity, &GameObject, &Transform), (Without<crate::buyhistory::HistoryHidden>, Without<crate::visit::LotObject>)>,
+    (catalog, ui, floors): (Res<Catalog>, Option<Res<crate::icons::GameUi>>, Query<&crate::nav::Floor>),
+    (mut cams, mut windows, mut mouse): (Query<(&Camera, &GlobalTransform, &mut SimsCamera)>, Query<&mut Window, With<PrimaryWindow>>, ResMut<ButtonInput<MouseButton>>),
+    mut step: Local<u8>,
+    mut target: Local<Option<(u64, Vec3, Entity)>>,
+) {
+    if std::env::var("SURFACE_TEST").is_err() {
+        return;
+    }
+    let Some(ui) = ui else { return };
+    let t = time.elapsed_secs();
+    let click = |windows: &mut Query<&mut Window, With<PrimaryWindow>>, mouse: &mut ButtonInput<MouseButton>, cams: &Query<(&Camera, &GlobalTransform, &mut SimsCamera)>, at: Vec3| {
+        let (Ok((camera, cam_tf, _)), Ok(mut window)) = (cams.single(), windows.single_mut()) else { return };
+        let Ok(p) = camera.world_to_viewport(cam_tf, at) else { return };
+        window.set_cursor_position(Some(p));
+        mouse.release(MouseButton::Left);
+        mouse.press(MouseButton::Left);
+    };
+    match *step {
+        0 if t > 12.0 => enter_mode(&mut buy, Some(false), &mut commands, &mut clock),
+        1 if t > 14.0 => {
+            // (A decoration sold that goes in slots, and a free slot it fits on something on the
+            // ground floor.)
+            let ground = |e: Entity| floors.get(e).map_or(1, |f| f.0) == 1;
+            let found = objects.iter().filter_map(|(e, o, _)| {
+                let fits = crate::surfaces::placement(&ui.data, o.objd.2).filter(|f| f & s3bake::gamedata::SLOT_SIZES != 0 && f & 0x2000_0000 != 0)?;
+                catalog.by_key(&o.objd).filter(|c| c.price > 0)?;
+                let slot = objects.iter().filter(|(s, ..)| *s != e && ground(*s)).find_map(|(se, so, stf)| {
+                    crate::surfaces::slots(&ui.data, so.objd.2)?
+                        .iter()
+                        .filter(|s| s3bake::gamedata::slot_fits(fits, s.flags))
+                        .map(|s| crate::surfaces::slot_world(stf, s).0)
+                        .find(|p| !objects.iter().any(|(_, _, t)| t.translation.distance(*p) < 0.08))
+                        .map(|p| (so.name.clone(), p, se))
+                })?;
+                Some((e, o.name.clone(), o.objd.2, slot))
+            }).next();
+            let Some((e, name, objd, (surface, at, se))) = found else {
+                info!("surface test: nothing to put on anything");
+                *step = 9;
+                return;
+            };
+            info!("surface test: {name} onto the {surface} at {at:?}");
+            commands.insert_resource(EyedropRequest(e));
+            if let Ok((_, _, mut cam)) = cams.single_mut() {
+                cam.focus = at;
+                cam.distance = 6.0;
+            }
+            *target = Some((objd, at, se));
+        }
+        // (The first click's the eyedropper's own; the second puts it down.)
+        2 if t > 16.0 => click(&mut windows, &mut mouse, &cams, target.unwrap().1),
+        3 if t > 17.0 => click(&mut windows, &mut mouse, &cams, target.unwrap().1),
+        4 if t > 19.0 => {
+            let (objd, at, _) = target.unwrap();
+            match objects.iter().find(|(_, o, tf)| o.objd.2 == objd && tf.translation.distance(at) < 0.08) {
+                Some(_) => info!("surface test: PASS, in the slot at {at:?}"),
+                None => info!("surface test: FAIL, nothing in the slot at {at:?} (nearest {:?})", objects.iter().filter(|(_, o, _)| o.objd.2 == objd).map(|(_, _, tf)| tf.translation).min_by(|a, b| a.distance(at).total_cmp(&b.distance(at)))),
+            }
+            if let Ok(dir) = std::env::var("SURFACE_SHOTS") {
+                let _ = std::fs::create_dir_all(&dir);
+                commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(format!("{dir}/surface.png")));
+            }
+            // (Done with the one in hand, a new purchase: let go of.)
+            if let Some(p) = buy.placing.take() {
+                commands.entity(p.ghost).try_despawn();
+                buy.dirty = true;
+            }
+        }
+        // (Moving the surface: up, and down a metre off.)
+        5 if t > 21.0 && std::env::var("SURFACE_TEST").as_deref() == Ok("move") => {
+            commands.insert_resource(PickupRequest(target.unwrap().2));
+        }
+        6 if t > 23.0 => {
+            let (_, at, se) = target.unwrap();
+            let Ok((_, _, stf)) = objects.get(se) else { return };
+            let to = stf.translation + Vec3::Z;
+            info!("surface test: moving the surface from {:?} to {to:?}", stf.translation);
+            click(&mut windows, &mut mouse, &cams, to);
+            *target = Some((target.unwrap().0, at + Vec3::Z, se));
+        }
+        7 if t > 25.0 => {
+            let (objd, at, _) = target.unwrap();
+            match objects.iter().find(|(_, o, tf)| o.objd.2 == objd && tf.translation.distance(at) < 0.12) {
+                Some(_) => info!("surface test: PASS, came along to {at:?}"),
+                None => info!("surface test: FAIL, not carried to {at:?} (nearest {:?})", objects.iter().filter(|(_, o, _)| o.objd.2 == objd).map(|(_, _, tf)| tf.translation).min_by(|a, b| a.distance(at).total_cmp(&b.distance(at)))),
+            }
+            if let Ok(dir) = std::env::var("SURFACE_SHOTS") {
+                commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(format!("{dir}/moved.png")));
+            }
+        }
+        _ => return,
+    }
+    *step += 1;
 }
 
 /// FAMILY_INV=1 (tests): Buy mode opened (12 seconds in), an object of the lot picked up and put
@@ -1783,7 +1891,13 @@ fn placement(
     ),
     selected: Query<Entity, With<crate::sim::Selected>>,
     mut grid: Option<ResMut<NavGrid>>,
-    (pickup, hold, mut family): (Option<Res<PickupRequest>>, Option<Res<HoldRequest>>, ResMut<crate::familyinv::FamilyInventory>),
+    (pickup, hold, mut family, ui, surf_q): (
+        Option<Res<PickupRequest>>,
+        Option<Res<HoldRequest>>,
+        ResMut<crate::familyinv::FamilyInventory>,
+        Option<Res<crate::icons::GameUi>>,
+        Query<(Entity, &GameObject, &Transform), Without<crate::visit::LotObject>>,
+    ),
     objects: Query<(&GameObject, &Transform, Option<&crate::objects::Design>, Option<&crate::paintings::Hung>, Option<&crate::interact::UsedBy>, Option<&crate::nav::Obstacle>)>,
     (bought_q, mut removed, worn): (Query<(), With<crate::save::Bought>>, ResMut<crate::save::RemovedLotObjects>, Query<&crate::interact::Depreciated>),
     mut tfs: Query<&mut Transform, Without<GameObject>>,
@@ -1895,6 +2009,16 @@ fn placement(
         }
         return;
     }
+    // (A surface with things on it: those taken off first, as nothing's left in the air.)
+    let loaded = buy.placing.as_ref().and_then(|p| p.source).zip(ui.as_ref()).is_some_and(|((source, _), u)| {
+        objects.get(source).is_ok_and(|(obj, tf, ..)| !crate::surfaces::on_surface(&u.data, obj.objd.2, tf, surf_q.iter().filter(|(e, ..)| *e != source).map(|(e, _, t)| (e, t))).is_empty())
+    });
+    if loaded && owned && (buy.store || buy.selling || keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace)) {
+        buy.store = false;
+        buy.selling = false;
+        notes.push("Take what's on it off first.");
+        return;
+    }
     // Into the family inventory: off the lot (or out of a Sim's hands), kept to put down later.
     if std::mem::take(&mut buy.store) && owned {
         let placing = buy.placing.take().unwrap();
@@ -1984,11 +2108,24 @@ fn placement(
         (true, Some(b), Some(p)) => crate::build::snap_to_pool(b, p),
         _ => None,
     };
+    // On a surface: a free slot it fits on what's pointed at (a lamp on an end table, a vase on a
+    // counter, a computer on a desk: `surfaces`).
+    let source_e = buy.placing.as_ref().and_then(|p| p.source.map(|s| s.0));
+    let on_surface = match (ui.as_ref().and_then(|u| crate::surfaces::placement(&u.data, objd.2)), ui.as_ref()) {
+        (Some(fits), Some(u)) if in_wall.is_none() && on_edge.is_none() && opening.is_none() && !wall_hung && !gate => {
+            let taken = |p: Vec3| surf_q.iter().any(|(e, _, t)| Some(e) != source_e && t.translation.distance(p) < 0.08);
+            crate::surfaces::pointed_slot(ray, fits, &u.data, surf_q.iter().filter(|(e, ..)| Some(*e) != source_e), taken)
+        }
+        _ => None,
+    };
     if let Ok(mut tf) = tfs.get_mut(ghost) {
         if let Some((pos, rot, _)) = &in_wall {
             tf.translation = *pos;
             tf.rotation = *rot;
         } else if let Some((pos, rot)) = on_edge {
+            tf.translation = pos;
+            tf.rotation = rot;
+        } else if let Some((_, pos, rot)) = on_surface {
             tf.translation = pos;
             tf.rotation = rot;
         } else if let Some((p, level)) = floor {
@@ -2021,7 +2158,7 @@ fn placement(
     let problem = tfs.get(ghost).ok().and_then(|tf| {
         let b = building.as_deref()?;
         let bounds = bounds?;
-        placement_problem(b, tf, bounds, floor.map_or(b.view_level, |(_, level)| level), ladder, opening.is_some() || wall_hung)
+        placement_problem(b, tf, bounds, floor.map_or(b.view_level, |(_, level)| level), ladder || on_surface.is_some(), opening.is_some() || wall_hung)
     }).or_else(|| {
         if gate && in_wall.is_none() {
             Some("Gates go into a fence, as wide as the gate, on the floor in view.")
@@ -2089,6 +2226,17 @@ fn placement(
                 crate::save::note_removed(&mut removed, obj, tf);
             }
             restore_source(&mut commands, buy.placing.as_ref().unwrap());
+            // (What's on it comes along: `surfaces`.)
+            if let (Ok((obj, old, ..)), Some(u)) = (objects.get(source), ui.as_ref()) {
+                let new = Transform::from_translation(pos).with_rotation(rot).with_scale(old.scale);
+                for child in crate::surfaces::on_surface(&u.data, obj.objd.2, old, surf_q.iter().filter(|(e, ..)| *e != source).map(|(e, _, t)| (e, t))) {
+                    if let Ok((_, _, ct)) = surf_q.get(child) {
+                        let moved = crate::surfaces::carried(old, &new, ct);
+                        let level = building.as_ref().map_or(1, |b| b.level_at_point(moved.translation));
+                        commands.entity(child).insert((moved, crate::nav::Floor(level), crate::building::BuildingPiece { level }));
+                    }
+                }
+            }
             // Moving a placed object must also keep any authored model scale.
             let scale = objects.get(source).map_or(Vec3::ONE, |(_, tf, ..)| tf.scale);
             commands.entity(source).insert(Transform::from_translation(pos).with_rotation(rot).with_scale(scale));

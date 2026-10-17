@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 132;
+pub const GAMEDATA_VERSION: u32 = 133;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1395,6 +1395,45 @@ pub struct GameDataBaked {
     /// The ingredients, of the kinds there are (the game's `ItemTypes` tree).
     #[serde(default)]
     pub ingredients: Vec<IngredientInfo>,
+    /// What goes on what: each catalogue object's slot placement flags (its OBJD's: the slot
+    /// sizes it fits, 0x08 small, 0x10 medium, 0x20 large; the surfaces it needs, 0xC0000; the
+    /// slots of its own for chairs 0x200, sinks 0x400, barstools 0x1000, dishwashers 0x2000) and
+    /// each surface's container slots (model space, with theirs), by OBJD instance, sorted.
+    #[serde(default)]
+    pub placement: Vec<(u64, u32)>,
+    #[serde(default)]
+    pub surfaces: Vec<(u64, Vec<SurfaceSlot>)>,
+}
+
+/// A container slot things can be put in: where (model space), facing (its turn about up), and
+/// its flags (what fits).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct SurfaceSlot {
+    pub pos: [f32; 3],
+    pub yaw: f32,
+    pub flags: u32,
+}
+
+/// Slot flags: sizes, surface kinds, the special slots (chairs, sinks, barstools; dishwashers).
+pub const SLOT_SIZES: u32 = 0x38;
+pub const SLOT_KINDS: u32 = 0x000C_0000;
+pub const SLOT_SPECIAL: u32 = 0x1600;
+pub const SLOT_UNDER_COUNTER: u32 = 0x2000;
+
+/// Whether an object with these slot placement flags fits a slot with these, as the premade
+/// lots have them: a chair in a chair slot, a sink in a sink slot (and nothing else in those);
+/// otherwise by size (a computer's or a TV's, `0x1`, a large one) and, where the object needs
+/// one, the kind of surface.
+pub fn slot_fits(obj: u32, slot: u32) -> bool {
+    let special = obj & SLOT_SPECIAL | if obj & SLOT_SIZES == 0 { obj & SLOT_UNDER_COUNTER } else { 0 };
+    if special != 0 {
+        return slot & special != 0;
+    }
+    if slot & SLOT_SPECIAL != 0 {
+        return false;
+    }
+    let size = if obj & SLOT_SIZES != 0 { obj & SLOT_SIZES } else if obj & 1 != 0 { 0x20 } else { return false };
+    slot & size != 0 && (obj & SLOT_KINDS == 0 || slot & obj & SLOT_KINDS != 0)
 }
 
 /// An ingredient: a base game row of `ingredients`, or a fish of `Fishing`. What kind of thing it
@@ -4019,6 +4058,32 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     .collect();
     out.stealable.sort_unstable();
     out.stealable.dedup();
+    // What goes on what (`placement`, `surfaces`).
+    progress("Converting: surfaces…");
+    let found = crate::bake::par_map(&catalog.iter().collect::<Vec<_>>(), |c| {
+        let key = crate::types::rkey(c.objd);
+        let d = pkgs.read(&key)?;
+        let o = s3formats::object::parse_objd(&d).ok()?;
+        let flags = s3formats::object::objd_slot_placement(&d, &o).unwrap_or(0);
+        let slots: Vec<SurfaceSlot> = s3formats::object::object_container_slots(pkgs, &key)
+            .into_iter()
+            .filter(|s| s.flags & (SLOT_SIZES | SLOT_SPECIAL | SLOT_UNDER_COUNTER) != 0)
+            .map(|s| SurfaceSlot { pos: s.pos, yaw: s.rot[0][2].atan2(s.rot[2][2]), flags: s.flags })
+            .collect();
+        Some((c.objd.2, flags, slots))
+    });
+    for (inst, flags, slots) in found.into_iter().flatten() {
+        if flags & (SLOT_SIZES | SLOT_SPECIAL | SLOT_UNDER_COUNTER | 1) != 0 {
+            out.placement.push((inst, flags));
+        }
+        if !slots.is_empty() {
+            out.surfaces.push((inst, slots));
+        }
+    }
+    out.placement.sort_unstable_by_key(|p| p.0);
+    out.placement.dedup_by_key(|p| p.0);
+    out.surfaces.sort_by_key(|s| s.0);
+    out.surfaces.dedup_by_key(|s| s.0);
     write_value(&g.join("gamedata.bin"), &out).map_err(|e| e.to_string())?;
     Ok(n)
 }
@@ -4132,6 +4197,28 @@ const EXTRA_ICONS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn objects_fit_slots_as_the_premade_lots_have_them() {
+        // (A small vase on an end table's small slot, a table lamp on its middle; a medium lamp
+        // not in a small one.)
+        assert!(slot_fits(0x2000_0008, 0x200C_0008));
+        assert!(slot_fits(0x2000_0010, 0x200C_0038));
+        assert!(!slot_fits(0x2000_0010, 0x200C_0008));
+        // (A computer on a desk, a microwave on a counter, a phone on an end table.)
+        assert!(slot_fits(0x1000_0001, 0x000C_0038));
+        assert!(slot_fits(0x0004_2020, 0x100C_0038));
+        assert!(slot_fits(0x2004_0010, 0x200C_0018));
+        // (A sink in a counter's sink slot and nowhere else; nothing else in it; a dishwasher
+        // under the counter; a chair at a table, not on it.)
+        assert!(slot_fits(0x0000_0410, 0x0004_0418));
+        assert!(!slot_fits(0x0000_0410, 0x100C_0038));
+        assert!(!slot_fits(0x2000_0008, 0x0004_0418));
+        assert!(slot_fits(0x0000_2000, 0x0000_2000));
+        assert!(slot_fits(0x0000_0200, 0x0000_0200) && !slot_fits(0x0000_0200, 0x200C_0038));
+        // (A sofa fits nowhere.)
+        assert!(!slot_fits(0x0000_0001 & 0, 0x200C_0038));
+    }
 
     #[test]
     fn social_topics_offer_their_actions_to_the_sim_with_them_or_others() {

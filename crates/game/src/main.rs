@@ -138,6 +138,7 @@ mod lights;
 mod careerholes;
 mod cheats;
 mod rgmmail;
+mod surfaces;
 mod traitacts;
 mod potty;
 mod doorlocks;

@@ -146,6 +146,8 @@ fn str7(r: &mut Reader) -> R<String> {
 #[derive(Clone, Debug, Default)]
 pub struct ObjdInfo {
     pub version: u32,
+    /// Where the fields after the buy categories begin (bytes; 0 when the record ends early).
+    pub after_buy: usize,
     pub instance_name: String,
     pub name: String,
     pub desc: String,
@@ -240,6 +242,28 @@ pub fn materials_at(d: &[u8], at: usize) -> Vec<crate::catalog::PatternMaterial>
     r.u32().ok().and_then(|n| material_list(&mut r, n as usize).ok()).unwrap_or_default()
 }
 
+/// An OBJD's slot placement flags (what slots it goes in, by size and kind): the field after the
+/// surface cutout, and the floor cutout's (version 0x17 on), the shell states' list (0x18) and the
+/// level-below index (0x19).
+pub fn objd_slot_placement(d: &[u8], o: &ObjdInfo) -> Option<u32> {
+    if o.after_buy == 0 {
+        return None;
+    }
+    let mut r = Reader::at(d, o.after_buy);
+    r.u32().ok()?;
+    if o.version >= 0x17 {
+        r.skip(12).ok()?;
+    }
+    if o.version >= 0x18 {
+        let n = r.u32().ok()? as usize;
+        r.skip(n * 4).ok()?;
+    }
+    if o.version >= 0x19 {
+        r.u32().ok()?;
+    }
+    r.u32().ok()
+}
+
 pub fn parse_objd(d: &[u8]) -> R<ObjdInfo> {
     let keys = tgi_table_at(d, 4)?;
     let mut r = Reader::new(d);
@@ -274,9 +298,12 @@ pub fn parse_objd(d: &[u8]) -> R<ObjdInfo> {
         }
     }
     let objk_index = r.u32()?;
-    let buy = buy_flags(&mut r, version, sort).unwrap_or(BuyFlags { sort, ..Default::default() });
+    let buy = buy_flags(&mut r, version, sort);
+    let after_buy = if buy.is_ok() { r.pos } else { 0 };
+    let buy = buy.unwrap_or(BuyFlags { sort, ..Default::default() });
     Ok(ObjdInfo {
         version,
+        after_buy,
         instance_name,
         name,
         desc,

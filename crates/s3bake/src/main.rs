@@ -1001,6 +1001,54 @@ fn main() {
         }
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--slot-stats") {
+        // --slot-stats <world file name>: for the objects its lots have in other objects' container
+        // slots, how often each pairing of the object's slot placement flags and the slot's flags
+        // comes (and an example), to read what fits where.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let path = data.join("GameData/Shared/NonPackaged/Worlds").join(format!("{}.world", args[i + 1]));
+        let pkg = s3pkg::Package::open(&path).expect("world");
+        let placed = s3formats::objn::load_world_objects(&pkg);
+        let mut flags_of: std::collections::HashMap<s3pkg::ResourceKey, Option<(u32, String)>> = std::collections::HashMap::new();
+        let mut slots_of: std::collections::HashMap<s3pkg::ResourceKey, Vec<s3formats::model::Slot>> = std::collections::HashMap::new();
+        let mut tally: std::collections::BTreeMap<(u32, u32), (usize, String)> = Default::default();
+        for objs in placed.values() {
+            let by_guid: std::collections::HashMap<u64, &s3formats::objn::PlacedObject> = objs.iter().map(|o| (o.guid, o)).collect();
+            for o in objs.iter().filter(|o| o.parent != 0 && o.parent_slot != 0) {
+                let (Some(cat), Some(pcat)) = (o.catalog, by_guid.get(&o.parent).and_then(|p| p.catalog)) else { continue };
+                let of = flags_of
+                    .entry(cat)
+                    .or_insert_with(|| pkgs.read(&cat).and_then(|d| s3formats::object::parse_objd(&d).ok().and_then(|p| Some((s3formats::object::objd_slot_placement(&d, &p)?, p.instance_name)))))
+                    .clone();
+                let slots = slots_of.entry(pcat).or_insert_with(|| s3formats::object::object_container_slots(&pkgs, &pcat));
+                let Some(s) = slots.iter().find(|s| s.name == o.parent_slot) else { continue };
+                let Some((f, name)) = of else { continue };
+                let parent = pkgs.read(&pcat).and_then(|d| s3formats::object::parse_objd(&d).ok()).map(|p| p.instance_name).unwrap_or_default();
+                let e = tally.entry((f, s.flags)).or_insert((0, format!("{name} in {parent} at y {:.2}", s.pos[1])));
+                e.0 += 1;
+            }
+        }
+        for ((f, s), (n, ex)) in tally {
+            println!("obj {f:08X} slot {s:08X} and {:08X}: {n:4} e.g. {ex}", f & s);
+        }
+        return;
+    }
+    if let Some(i) = args.iter().position(|a| a == "--objd-tail") {
+        // --objd-tail <OBJD instance, hex>: the u32 words after the OBJD's buy categories (to
+        // find its fields there).
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let inst = u64::from_str_radix(args[i + 1].trim_start_matches("0x"), 16).expect("instance");
+        for k in pkgs.keys_of_type(s3pkg::types::OBJD).filter(|k| k.i == inst) {
+            let Some(d) = pkgs.read(k) else { continue };
+            let Ok(o) = s3formats::object::parse_objd(&d) else { continue };
+            println!("{} v{:#x} after_buy {} of {}", o.instance_name, o.version, o.after_buy, d.len());
+            let words: Vec<String> = d[o.after_buy..].chunks_exact(4).take(48).map(|c| format!("{:08X}", u32::from_le_bytes([c[0], c[1], c[2], c[3]]))).collect();
+            println!("{}", words.join(" "));
+            return;
+        }
+        eprintln!("no such object");
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--slots") {
         // --slots <OBJD instance, hex> [names...]: the object's routing and containment slots
         // (model space), named where one of the given names hashes to it.
@@ -1017,7 +1065,7 @@ fn main() {
             let Some(slots) = pkgs.read(&rk).or_else(|| pkgs.read_ti(rk.t, rk.i)).and_then(|d| s3formats::model::parse_rslt(&d)) else { continue };
             for (kind, list) in [("routing", &slots.routing), ("container", &slots.containers)] {
                 for s in list {
-                    println!("{kind} {} at {:.3?} facing {:.2?}", name(s.name), s.pos, [s.rot[0][2], s.rot[1][2], s.rot[2][2]]);
+                    println!("{kind} {} at {:.3?} facing {:.2?} bone {:08X} flags {:08X}", name(s.name), s.pos, [s.rot[0][2], s.rot[1][2], s.rot[2][2]], s.bone, s.flags);
                 }
             }
             return;

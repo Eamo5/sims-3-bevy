@@ -641,6 +641,8 @@ pub const T_RSLT: u32 = 0xD3044521;
 pub struct Slot {
     pub name: u32,
     pub bone: u32,
+    /// A container slot's flags (what fits in it; 0 for the rest).
+    pub flags: u32,
     pub pos: [f32; 3],
     /// Rotation rows.
     pub rot: [[f32; 3]; 3],
@@ -672,15 +674,11 @@ pub fn parse_rslt(d: &[u8]) -> Option<Slots> {
         }
         let names: Vec<u32> = (0..n).map(|_| r.u32()).collect::<Result<_, _>>().ok()?;
         let bones: Vec<u32> = (0..n).map(|_| r.u32()).collect::<Result<_, _>>().ok()?;
-        if flags {
-            for _ in 0..n {
-                r.u32().ok()?;
-            }
-        }
+        let flag_list: Vec<u32> = if flags { (0..n).map(|_| r.u32()).collect::<Result<_, _>>().ok()? } else { vec![0; n] };
         let mut out = Vec::with_capacity(n);
         for i in 0..n {
             let m: Vec<f32> = (0..12).map(|_| r.f32()).collect::<Result<_, _>>().ok()?;
-            out.push(Slot { name: names[i], bone: bones[i], pos: [m[3], m[7], m[11]], rot: [[m[0], m[1], m[2]], [m[4], m[5], m[6]], [m[8], m[9], m[10]]] });
+            out.push(Slot { name: names[i], bone: bones[i], flags: flag_list[i], pos: [m[3], m[7], m[11]], rot: [[m[0], m[1], m[2]], [m[4], m[5], m[6]], [m[8], m[9], m[10]]] });
         }
         let offsets = r.u32().ok()? as usize;
         if offsets > 256 {
