@@ -4523,6 +4523,8 @@ pub(crate) fn run_actions(
                                                 )
                                             });
                                             commands.entity(me).remove::<crate::paintings::PaintPlan>();
+                                            // (Off the easel: done.)
+                                            commands.entity(*target).remove::<crate::paintings::LeftOnEasel>();
                                             let p = crate::paintings::finish_value(p, size, journals.get(me).ok(), crate::wishes::has(wishes, "ExtraCreative"));
                                             did.write(crate::journal::Did::count(me, crate::journal::Stat::Paintings, 1.0));
                                             did.write(crate::journal::Did::count(me, crate::paintings::canvas_stat(size), 1.0));
@@ -5925,7 +5927,7 @@ fn autonomy(
         Res<crate::klepto::Swipeable>,
         Res<crate::mirrors::LastLooked>,
     ),
-    (convs, toilets, bed_owners, bowls, (moods, smashed_q), (residents_q, can_owners, tipped_q, visited_lot, work_to_do_q, fridge_keeps)): (
+    (convs, toilets, bed_owners, bowls, (moods, smashed_q), (residents_q, can_owners, tipped_q, visited_lot, work_to_do_q, fridge_keeps, left_on_easel)): (
         Res<crate::groups::Conversations>,
         Res<crate::toilets::Unflushed>,
         Query<&crate::bedowners::BedOwners>,
@@ -5938,6 +5940,7 @@ fn autonomy(
             Option<Res<crate::visit::VisitedLot>>,
             Query<&crate::computertraits::WorkToDo>,
             Res<crate::meals::FridgeKeeps>,
+            Query<&crate::paintings::LeftOnEasel>,
         ),
     ),
 ) {
@@ -6113,6 +6116,10 @@ fn autonomy(
                     continue;
                 }
                 if d.special == Special::Leftovers && (leftovers.0.is_empty() || my_lot.is_some()) {
+                    continue;
+                }
+                // (Not another's unfinished painting to paint over.)
+                if d.special == Special::SellPainting && left_on_easel.get(oe).is_ok_and(|l| l.painter != sim.id) {
                     continue;
                 }
                 // (Spoiled food cleaned out of the household's fridge: by teens and up, the Neat keen

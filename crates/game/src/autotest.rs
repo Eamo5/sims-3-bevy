@@ -3067,6 +3067,20 @@ fn auto_click_use(
         *state = (idx + 1, 0, t + secs);
         return;
     }
+    // (`cancel`: what the selected Sim's doing is cancelled, as the queue's X does.)
+    if kinds[idx].eq_ignore_ascii_case("cancel") {
+        info!("click use: cancelling");
+        commands.queue(|w: &mut World| {
+            let mut q = w.query_filtered::<&mut crate::interact::ActionQueue, With<crate::sim::Selected>>();
+            for mut queue in q.iter_mut(w) {
+                if let Some(a) = queue.0.front_mut() {
+                    a.cancel = true;
+                }
+            }
+        });
+        *state = (idx + 1, 0, t + 0.5);
+        return;
+    }
     if kinds[idx].eq_ignore_ascii_case("select") {
         let name = entries[idx].1.first().copied().unwrap_or_default();
         if let Some((e, ..)) = sims.iter().find(|(_, s, _)| s.first.eq_ignore_ascii_case(name)) {

@@ -1073,7 +1073,7 @@ fn world_click(
         Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q), (can_owners, rummaged, tipped_q, family_homes))): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q), (can_owners, rummaged, tipped_q, family_homes))): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1098,7 +1098,7 @@ fn world_click(
             Res<crate::toilets::Unflushed>,
             Query<(Has<crate::effects::TvOn>, Has<crate::effects::TvLeftOn>)>,
             (Option<Res<crate::layout::UiAssets>>, Query<&crate::charity::Charities>),
-            (Query<&crate::life::Mood>, Query<(), With<crate::dollhouse::Smashed>>, Query<&crate::hotdrinks::DrinkTray>),
+            (Query<&crate::life::Mood>, Query<(), With<crate::dollhouse::Smashed>>, Query<&crate::hotdrinks::DrinkTray>, Query<&crate::paintings::LeftOnEasel>),
             (Res<crate::trashcans::CanOwners>, Res<crate::trashcans::Rummaged>, Query<(), With<crate::trashcans::TippedOver>>, Res<crate::homes::FamilyHomes>),
         ),
     ),
@@ -2007,6 +2007,17 @@ fn world_click(
                 }
                 // The canvas to paint on.
                 if d.special == Special::SellPainting {
+                    // (A painting left on it: its painter's to "Continue", the household's to scrap,
+                    // as the game's `CanPaint` and `CanScrap`.)
+                    if let Ok(l) = easel_q.get(t) {
+                        if l.painter == actor_sim.id {
+                            options.push((crate::paintings::CONTINUE.to_string(), ActionKind::Object { target: t, def: i }));
+                        }
+                        if members_q.contains(actor) {
+                            options.push((crate::paintings::SCRAP.to_string(), ActionKind::Object { target: t, def: i }));
+                        }
+                        continue;
+                    }
                     let list: Vec<(String, ActionKind)> =
                         crate::paintings::CANVASES.iter().map(|c| (format!("Paint: {c}"), ActionKind::Object { target: t, def: i })).collect();
                     options.push(("Paint ›".to_string(), submenu_kind(pie.submenus.len())));
@@ -2270,6 +2281,13 @@ fn pie_buttons(
         && let Some((key, _)) = crate::music::stations(sounds.as_deref()).into_iter().find(|(_, n)| *n == label)
     {
         commands.entity(target).insert(crate::music::StereoOn(Some(key.to_string())));
+        return;
+    }
+    // An unfinished painting scrapped from the easel, there and then (the game's is immediate).
+    if let ActionKind::Object { target, .. } = kind
+        && label == crate::paintings::SCRAP
+    {
+        commands.entity(target).remove::<crate::paintings::LeftOnEasel>();
         return;
     }
     // A stereo turned up or down, or a song skipped, there and then.

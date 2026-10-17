@@ -1213,7 +1213,10 @@ installation is unreachable.
   skill's picture table: chosen by their skill, in their traits' version of it (an evil Sim's,
   a gloomy one's, a virtuoso's) and now and then a brilliant painting or a masterpiece at higher
   skill. While they paint, the canvas stands on the easel's ledge for its size, the game's
-  work-in-progress strokes and then the picture. Finished paintings go in their inventory with
+  work-in-progress strokes and then the picture. Stopped short, the painting's left on the
+  easel as far as it came, as the game leaves it: its painter can *Continue* it where they
+  left off, nobody else paints over it (by free will either), and the household can *Scrap
+  Painting*; it's kept in saves. Finished paintings go in their inventory with
   their picture; *Hang on a Wall* holds
   one up in Buy mode to hang on any straight wall (not over a window or door), where it's the
   game's canvas at its size with the picture on it. Hung paintings can be moved or sold (for

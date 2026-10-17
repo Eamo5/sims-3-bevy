@@ -1063,8 +1063,10 @@ fn meal_requests(
                     let natural = sim.traits.contains(&crate::life::Trait::NaturalCook);
                     let level = dish.and_then(recipe).map_or(0, |r| r.level as u32);
                     let mut rng = rand::rng();
-                    if rng.random_bool(crate::fire::burn_chance(skills.level("Cooking"), level, natural, stove_tuning.map_or(1.0, |t| t.failure))) {
-                        if rng.random_bool((stove_tuning.map_or(5.0, |t| t.fire) as f64 / 100.0).clamp(0.0, 1.0)) {
+                    // (FIRE_ON_COOK=1: every dinner sets the stove alight, a test.)
+                    let forced = std::env::var("FIRE_ON_COOK").is_ok();
+                    if forced || rng.random_bool(crate::fire::burn_chance(skills.level("Cooking"), level, natural, stove_tuning.map_or(1.0, |t| t.failure))) {
+                        if forced || rng.random_bool((stove_tuning.map_or(5.0, |t| t.fire) as f64 / 100.0).clamp(0.0, 1.0)) {
                             fire.write(crate::fire::StartFire { at: stf.translation + Vec3::Y * s.height * 0.85, level: floors.get(stove).map_or(1, |f| f.0) });
                             notes.push(format!("{} set the stove on fire!", sim.first));
                             commands.entity(me).remove::<(MealPlan, BurntDinner)>();

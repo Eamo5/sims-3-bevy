@@ -4,7 +4,10 @@
 //! one's), now and then a brilliant painting or a masterpiece. Finished paintings go in the
 //! painter's inventory, pictured, to sell or to hang on a wall (Buy mode holds them up to it;
 //! hung, they can be moved or sold like the furniture). While a Sim paints, the canvas stands on
-//! the easel, blank at first and then with the picture coming.
+//! the easel, blank at first and then with the picture coming; stopped short of done, it's left
+//! there as the game leaves it (its `CurrentCanvas` short of the last stage), for its painter
+//! to "Continue" where they left off, and nobody else to paint over, till the household scraps
+//! it ("Scrap Painting", the game's `ScrapPaintingInteraction`); it's kept in saves.
 
 use std::collections::HashMap;
 
@@ -198,6 +201,51 @@ fn key_picture(key: &str) -> Option<(u8, String)> {
     Some((size.parse::<u8>().ok()?.min(2), name.to_string()))
 }
 
+/// An unfinished painting left on an easel: whose (their Sim's id), on which canvas, what it's
+/// to be, and how long it's been painted (game minutes).
+#[derive(Component, Clone)]
+pub struct LeftOnEasel {
+    pub painter: u64,
+    pub size: u8,
+    pub painted: Painted,
+    pub minutes: f32,
+}
+
+/// How the game names its easel's "Continue" and "Scrap Painting".
+pub const CONTINUE: &str = "Continue";
+pub const SCRAP: &str = "Scrap Painting";
+
+/// An unfinished painting as kept in saves.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct SavedCanvas {
+    pub painter: u64,
+    pub size: u8,
+    pub key: String,
+    pub name: String,
+    pub worth: i64,
+    pub base_worth: f32,
+    pub minutes: f32,
+}
+
+impl LeftOnEasel {
+    pub fn saved(&self) -> SavedCanvas {
+        SavedCanvas {
+            painter: self.painter,
+            size: self.size,
+            key: self.painted.key.clone(),
+            name: self.painted.name.to_string(),
+            worth: self.painted.worth,
+            base_worth: self.painted.base_worth,
+            minutes: self.minutes,
+        }
+    }
+
+    pub fn from_saved(s: &SavedCanvas) -> Self {
+        let name = ["Masterpiece", "Brilliant Painting", "Amateur Painting", "Fine Painting"].into_iter().find(|n| *n == s.name).unwrap_or("Fine Painting");
+        Self { painter: s.painter, size: s.size, painted: Painted { key: s.key.clone(), name, worth: s.worth, base_worth: s.base_worth }, minutes: s.minutes }
+    }
+}
+
 /// The canvas on an easel while a Sim paints there.
 #[derive(Component)]
 pub struct EaselCanvas {
@@ -213,6 +261,7 @@ fn easel_canvases(
     mut commands: Commands,
     mut painters: Query<(Entity, &crate::sim::Sim, &mut ActionQueue, &Skills, Option<&mut PaintPlan>, Option<&crate::wishes::Wishes>, Option<&crate::journal::SkillJournal>)>,
     objects: Query<&GameObject>,
+    left: Query<(Entity, &LeftOnEasel)>,
     canvases: Query<(Entity, &EaselCanvas)>,
     baked: Option<Res<crate::baked::Baked>>,
     mut assets: ResMut<ObjectAssets>,
@@ -232,6 +281,24 @@ fn easel_canvases(
             continue;
         }
         let level = skills.level("Painting");
+        // (A painting left on the easel: theirs taken up again where they left off; someone
+        // else's not theirs to paint over.)
+        if let Ok((_, l)) = left.get(target) {
+            if l.painter != sim.id {
+                a.cancel = true;
+                continue;
+            }
+            a.canvas_choice = None;
+            if elapsed < l.minutes - 0.01 {
+                a.phase = Phase::Running(l.minutes);
+            }
+            commands.entity(me).insert(PaintPlan { size: l.size, painted: Some(l.painted.clone()) });
+            let elapsed = elapsed.max(l.minutes);
+            commands.entity(target).insert(LeftOnEasel { minutes: elapsed, ..l.clone() });
+            let design = key_picture(&l.painted.key).map(|(_, pic)| s3bake::gamedata::painting_texture(&pic));
+            painting.push((me, target, l.size, design, elapsed >= painting_minutes(l.size, journal) / 3.0));
+            continue;
+        }
         let requested = a.canvas_choice.take();
         let size = requested.map_or_else(|| canvas(plan.as_deref(), level), |size| size.min(2));
         let chosen = || paint(Some(data), size, level, &sim.traits, sim.age == crate::sim::Age::Child, crate::wishes::has(wishes, "ExtraCreative"), crate::journal::earned(journal, "Proficient Painter"), &mut rand::rng());
@@ -248,7 +315,16 @@ fn easel_canvases(
             }
         } };
         let design = key_picture(&painted.key).map(|(_, pic)| s3bake::gamedata::painting_texture(&pic));
+        // (Kept on the easel as it comes, should they stop short.)
+        commands.entity(target).insert(LeftOnEasel { painter: sim.id, size, painted: painted.clone(), minutes: elapsed });
         painting.push((me, target, size, design, elapsed >= painting_minutes(size, journal) / 3.0));
+    }
+    // (Those left on easels nobody's at: standing there as far as they'd come.)
+    for (easel, l) in &left {
+        if !painting.iter().any(|p| p.1 == easel) {
+            let design = key_picture(&l.painted.key).map(|(_, pic)| s3bake::gamedata::painting_texture(&pic));
+            painting.push((easel, easel, l.size, design, l.minutes >= CANVAS_MINUTES[l.size.min(2) as usize] / 3.0));
+        }
     }
     // The canvases of those who've stopped go (and one's put up afresh as the picture comes).
     for (e, c) in &canvases {
