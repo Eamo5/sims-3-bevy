@@ -728,13 +728,13 @@ fn little_life(
         &mut Transform,
         Option<&crate::anim::ActionClip>,
         Option<&Bedtime>,
-        Has<Carried>,
+        (Has<Carried>, Has<crate::highchair::InHighChair>),
     )>,
     cribs: Query<(&GameObject, &Transform), Without<Sim>>,
     mut notes: ResMut<Notifications>,
 ) {
     let h = clock.hour_f();
-    for (e, sim, mut motives, mut anim, crib, last_cry, mut tf, clip, bedtime, carried) in &mut littles {
+    for (e, sim, mut motives, mut anim, crib, last_cry, mut tf, clip, bedtime, (carried, in_chair)) in &mut littles {
         if !sim.age.is_little() || carried {
             continue;
         }
@@ -785,7 +785,8 @@ fn little_life(
             .find(|(m, _)| motives.0[*m] < -40.0);
         if let Some((_, what)) = need {
             let crying = clip.is_some_and(|c| c.loops.first().is_some_and(|l| l.contains("cry")));
-            if !crying && anim.pose != Pose::Lie {
+            // (In a high chair, they fuss there as its own clips have them: `highchair`.)
+            if !crying && anim.pose != Pose::Lie && !in_chair {
                 let cry = if sim.age == Age::Baby { CRY_BABY } else { CRY_TODDLER };
                 commands.entity(e).insert(cry);
             }
@@ -793,7 +794,7 @@ fn little_life(
                 notes.push(format!("{} {what}.", sim.first));
                 commands.entity(e).insert(LastCry(clock.minutes));
             }
-        } else if clip.is_some_and(|c| c.loops.first().is_some_and(|l| l.contains("cry"))) {
+        } else if !in_chair && clip.is_some_and(|c| c.loops.first().is_some_and(|l| l.contains("cry"))) {
             commands.entity(e).remove::<crate::anim::ActionClip>();
         }
     }

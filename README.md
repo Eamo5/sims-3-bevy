@@ -512,6 +512,11 @@ installation is unreachable.
   then). Each use leaves it to be emptied ("Empty", a chore for the household), and it
   overflows into a puddle past two. `POTTY=1` has the selected Sim train the household's
   toddler (a test).
+- **The high chair**, as the game's: a grown-up of the family can "Put Lucy in High Chair"
+  (the toddler comes over and is lifted in with the game's clips), "Give Baby Food" once
+  they're sat there (eaten in the chair over the game's half hour, hunger filled to the full;
+  a toddler who isn't hungry tosses it), and "Take Out" again. Left sitting, a hungry toddler
+  fusses in the chair with its own crying clips.
 - **Town families**: every world's premade households (the Goths, Landgraabs, Altos, …) with
   their names, bios, family portraits, traits, careers, skills, marriages and homes — play one
   of them, or meet them around town.
@@ -1085,8 +1090,10 @@ installation is unreachable.
   at its intersections; the school bus, the carpool and taxis pull up at the curb to take Sims
   away and bring them back. A household with a car of its own takes it out on its trips and
   to work, as the game's Sims drive themselves: it leaves the driveway and drives off with
-  them, and comes back when they do. Clicked, the car offers what the game's does: "Go to Work"
-  when it's nearly time, and "Go to Community Lot...".
+  them, and comes back when they do. Clicked, the car offers what the game's `CarOwnable` does:
+  "Go to Work" when it's nearly time, "Go to Community Lot...", "Visit Lot..." (the town's
+  families' homes, nearest first), each "...with..." the household's Sims about (Everyone, or
+  one of them; they drive over too), and "Go Shopping" to the grocery's Shop while it's open.
 - **Collecting and fishing**: the world builders' spawners leave gems, metals and space rocks
   about the community lots (from the game's own tables, with their odds and prices); Sims
   crouch to collect them, catch the butterflies flitting about by day and the beetles in the

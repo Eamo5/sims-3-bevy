@@ -20,11 +20,41 @@ pub struct HomesPlugin;
 
 impl Plugin for HomesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (residents_home, ring_the_bell, asked_to_leave, residents_away).chain().run_if(in_state(PlayMode::Live)));
+        app.init_resource::<FamilyHomes>()
+            .add_systems(Update, (residents_home, ring_the_bell, asked_to_leave, residents_away, family_homes).chain().run_if(in_state(PlayMode::Live)));
         if std::env::var("HOME_VISIT").is_ok() {
             app.add_systems(Update, home_visit_test.run_if(in_state(PlayMode::Live)));
         }
     }
+}
+
+/// The homes of the town's families (their lots and names, nearest the household's first): where
+/// the car's "Visit Lot" goes.
+#[derive(Resource, Default, Clone)]
+pub struct FamilyHomes(pub Vec<(usize, String)>);
+
+/// Who lives where, looked over now and then.
+#[allow(clippy::too_many_arguments)]
+fn family_homes(
+    time: Res<Time>,
+    mut last: Local<f32>,
+    mut homes: ResMut<FamilyHomes>,
+    world: Option<Res<crate::loading::CurrentWorld>>,
+    (town, story, dormant, household): (Option<Res<crate::premade::TownPremades>>, Res<crate::story::TownStory>, Res<crate::household::Dormant>, Option<Res<crate::interact::Household>>),
+) {
+    if time.elapsed_secs() - *last < 5.0 && !homes.0.is_empty() {
+        return;
+    }
+    *last = time.elapsed_secs();
+    let Some(world) = world else { return };
+    let active = household.as_ref().map(|h| h.lot_index);
+    let from = active.and_then(|l| world.data.lots.get(l)).map(crate::home::lot_center).unwrap_or_default();
+    let mut list: Vec<(usize, String, f32)> = (0..world.data.lots.len())
+        .filter(|&l| world.data.lots[l].is_residential())
+        .filter_map(|l| family_at(&world, town.as_deref(), &story, &dormant, active, l).map(|f| (l, f.name.clone(), crate::home::lot_center(&world.data.lots[l]).distance(from))))
+        .collect();
+    list.sort_by(|a, b| a.2.total_cmp(&b.2));
+    homes.0 = list.into_iter().map(|(l, n, _)| (l, n)).collect();
 }
 
 /// One of a visited family, at home on their lot.

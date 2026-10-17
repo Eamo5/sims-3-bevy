@@ -1275,6 +1275,12 @@ pub enum Special {
     ServeDrinks,
     /// Take a drink from a tray of them.
     GrabDrink,
+    /// A toddler sat in a high chair, eating there, put in it, fed and taken out (see
+    /// `highchair`).
+    HighChairSit,
+    PutInHighChair,
+    GiveBabyFood,
+    TakeOutOfHighChair,
     /// Potty train a toddler at the potty chair, the toddler's sitting for it, and emptying it
     /// (see `potty`).
     PottyTrain,
@@ -1712,6 +1718,15 @@ static POTTY: [InteractionDef; 4] = [
     InteractionDef { special: Special::EmptyPotty, ..def("Empty", 3.0, N, Pose::Use) },
     // (Sat on to be taught, the quarter hour through, for the company: never on the menu.)
     InteractionDef { autonomous: false, on_object: true, special: Special::PottyLesson, ..def("Use Potty Chair", 15.0, [0.0, 600.0, 0.0, 30.0, -20.0, 0.0], Pose::Sit) },
+];
+/// (The game's `HighChair`: sat in by toddlers put in it, and eaten in once fed, never by their
+/// own choice; put in, fed and taken out by teens and up.)
+static HIGH_CHAIR: [InteractionDef; 4] = [
+    // (Eating there, once fed, is `highchair`'s: hunger filled to the full over its half hour.)
+    InteractionDef { autonomous: false, on_object: true, special: Special::HighChairSit, ..def("Sit in High Chair", 240.0, [0.0, 0.0, 2.0, 0.0, 0.0, 0.0], Pose::Sit) },
+    InteractionDef { autonomous: false, special: Special::PutInHighChair, ..def("Put in High Chair", 60.0, N, Pose::Stand) },
+    InteractionDef { autonomous: false, special: Special::GiveBabyFood, ..def("Give Baby Food", 3.0, [0.0, 0.0, 0.0, 6.0, 0.0, 0.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::TakeOutOfHighChair, ..def("Take Out", 2.0, N, Pose::Use) },
 ];
 static DRESSER: [InteractionDef; 2] = [
     InteractionDef { autonomous: false, special: Special::ChangeClothes, ..def("Change Into", 4.0, N, Pose::Use) },
@@ -2170,6 +2185,10 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Watch" => A::new(None, crate::tips::WATCHING),
         // (Sat on it, the game's `PottyChair` toddler's; emptied into its bag.)
         "Use Potty Chair" => A::new(None, &["p2o_pottyChair_use_loopBreath_y", "p2o_pottyChair_use_loopPat_y"]),
+        "Sit in High Chair" => A::new(None, crate::highchair::SITTING),
+        "Put in High Chair" => A::new(None, &["a_idle_neutral_loop_"]),
+        "Give Baby Food" => A::new(None, &["a2p_highChair_serveFood_x"]),
+        "Take Out" if kind == ObjectKind::HighChair => A::new(None, &["a2p_highChair_hold_x"]),
         "Empty" if kind == ObjectKind::PottyChair => A::new(None, &["a2o_pottyChair_empty_x"]),
         "Potty Train" => A::new(None, &["a_idle_neutral_loop_"]),
         "Nap in Crib" => A::new(Some("p2o_crib_sleep_start_y"), &["p2o_crib_sleep_loop_y"]),
@@ -2525,10 +2544,10 @@ impl ObjectKind {
         use ObjectKind as K;
         match age {
             Age::Baby => false,
-            Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy),
+            Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy | K::HighChair),
             // (Children can't cook or light fires, and the goggles are for teens and up.)
             Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle),
-            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::HighChair | K::JungleGym | K::Slide | K::StuffedToy | K::ToyOven),
+            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::JungleGym | K::Slide | K::StuffedToy | K::ToyOven),
         }
     }
 
@@ -2583,6 +2602,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Grill => &GRILL,
         ObjectKind::HotBeverage => &HOT_BEVERAGE,
         ObjectKind::DrinkTray => &DRINK_TRAY,
+        ObjectKind::HighChair => &HIGH_CHAIR,
         ObjectKind::AlarmClock => &ALARM,
         ObjectKind::TrashCan | ObjectKind::TrashCompactor => &TRASH,
         ObjectKind::OutdoorTrashCan => &OUTDOOR_TRASH,
@@ -4373,6 +4393,10 @@ pub(crate) fn run_actions(
                                         | Special::Perform
                                         | Special::Daydream
                                         | Special::GrabDrink
+                                        | Special::HighChairSit
+                                        | Special::PutInHighChair
+                                        | Special::GiveBabyFood
+                                        | Special::TakeOutOfHighChair
                                         | Special::PottyTrain
                                         | Special::PottyLesson
                                         | Special::EmptyPotty
@@ -5624,9 +5648,9 @@ pub(crate) fn run_actions(
 
 /// Revalidate maintenance on every action tick, including object reservations.
 /// Watching someone play (the instrument's theirs still, watched by any number); and a grown-up
-/// beside the potty chair their toddler's on.
+/// beside the potty chair their toddler's on, or the high chair (it's the toddler's).
 fn watches(kind: ObjectKind, def: usize) -> bool {
-    interactions_for(kind).get(def).is_some_and(|d| matches!(d.special, Special::WatchMusic | Special::PottyTrain))
+    interactions_for(kind).get(def).is_some_and(|d| matches!(d.special, Special::WatchMusic | Special::PottyTrain | Special::PutInHighChair | Special::GiveBabyFood | Special::TakeOutOfHighChair))
 }
 
 fn object_action_available(actor: Entity, kind: ObjectKind, def: usize, owner: Option<Entity>, broken: bool, phase: Phase) -> bool {

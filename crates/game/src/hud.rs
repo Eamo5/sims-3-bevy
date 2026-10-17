@@ -127,6 +127,14 @@ const CHAT_WITH: &str = "Chat";
 const READ_SKILL_BOOK: &str = "Read a Skill Book";
 const READ_NOVEL: &str = "Read a Novel";
 const GO_HERE_WITH: &str = "Go Here With";
+/// The car's (`CarOwnable`'s `VisitCommunityLot`, `VisitLot`, their `...With`, `GoShopping`).
+const TO_COMMUNITY_LOT: &str = "Go to Community Lot";
+const VISIT_LOT: &str = "Visit Lot";
+const TO_COMMUNITY_LOT_WITH: &str = "Go to Community Lot with";
+const VISIT_LOT_WITH: &str = "Visit Lot With";
+const GO_SHOPPING: &str = "Go Shopping";
+/// Everyone about, along.
+const EVERYONE: &str = "Everyone";
 /// The game's `kGoHereWithOnLotAvailableDistance`: how far from where the Sim is a place must be
 /// for others to come along.
 const GO_HERE_WITH_DISTANCE: f32 = 30.0;
@@ -1065,7 +1073,7 @@ fn world_click(
         Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q), (can_owners, rummaged, tipped_q))): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q), (can_owners, rummaged, tipped_q, family_homes))): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1091,7 +1099,7 @@ fn world_click(
             Query<(Has<crate::effects::TvOn>, Has<crate::effects::TvLeftOn>)>,
             (Option<Res<crate::layout::UiAssets>>, Query<&crate::charity::Charities>),
             (Query<&crate::life::Mood>, Query<(), With<crate::dollhouse::Smashed>>, Query<&crate::hotdrinks::DrinkTray>),
-            (Res<crate::trashcans::CanOwners>, Res<crate::trashcans::Rummaged>, Query<(), With<crate::trashcans::TippedOver>>),
+            (Res<crate::trashcans::CanOwners>, Res<crate::trashcans::Rummaged>, Query<(), With<crate::trashcans::TippedOver>>, Res<crate::homes::FamilyHomes>),
         ),
     ),
     world: Res<CurrentWorld>,
@@ -1355,9 +1363,54 @@ fn world_click(
                     .filter(|&l| crate::visit::visitable(&world.data, l))
                     .map(|l| (crate::visit::place_name(&world.data, l), ActionKind::GoToLot { lot: l }))
                     .collect();
-                if !lots.is_empty() {
-                    options.push(("Go to Community Lot ›".to_string(), submenu_kind(pie.submenus.len())));
-                    pie.submenus.push(("Go to Community Lot".to_string(), lots));
+                // (The town's families' homes: where two families share a name, their streets.)
+                let homes: Vec<(String, ActionKind)> = family_homes
+                    .0
+                    .iter()
+                    .map(|(l, name)| {
+                        let shared = family_homes.0.iter().filter(|(_, n)| n == name).count() > 1;
+                        let street = world.data.lot_names.get(*l).filter(|s| shared && !s.is_empty());
+                        let label = match street {
+                            Some(s) => format!("The {name} Household ({s})"),
+                            None => format!("The {name} Household"),
+                        };
+                        (label, ActionKind::GoToLot { lot: *l })
+                    })
+                    .collect();
+                // (Those of the household about, to bring along.)
+                let here = on_lot.get(actor).ok().map(|l| l.0);
+                let company: Vec<String> = company_q
+                    .iter()
+                    .filter(|c| c.0 != actor && !c.1.age.is_little() && !c.2 && members_q.contains(c.0) && c.3.map(|l| l.0) == here)
+                    .map(|c| c.1.full_name())
+                    .collect();
+                for (to, with, list) in [(TO_COMMUNITY_LOT, TO_COMMUNITY_LOT_WITH, lots), (VISIT_LOT, VISIT_LOT_WITH, homes)] {
+                    if list.is_empty() {
+                        continue;
+                    }
+                    options.push((format!("{to} ›"), submenu_kind(pie.submenus.len())));
+                    pie.submenus.push((to.to_string(), list.clone()));
+                    // ("...With...": who first, then where.)
+                    if !company.is_empty() {
+                        let mut who: Vec<(String, ActionKind)> = Vec::new();
+                        let names: Vec<String> = if company.len() > 1 { std::iter::once(EVERYONE.to_string()).chain(company.iter().cloned()).collect() } else { company.clone() };
+                        for name in names {
+                            who.push((format!("{name} ›"), submenu_kind(pie.submenus.len() + 1 + who.len())));
+                        }
+                        options.push((format!("{with}... ›"), submenu_kind(pie.submenus.len())));
+                        let names: Vec<String> = who.iter().map(|(n, _)| n.trim_end_matches(" ›").to_string()).collect();
+                        pie.submenus.push((format!("{with}..."), who));
+                        for name in names {
+                            pie.submenus.push((format!("{with} {name}"), list.clone()));
+                        }
+                    }
+                }
+                // (Groceries: the grocery's Shop, while it's open.)
+                let clock = &opp_q.2;
+                if let Some((lot, task)) = (0..world.data.lots.len()).find_map(|l| {
+                    crate::venues::world_lot_options(&world.data, l, clock.day(), clock.hour_f(), actor_sim.age).into_iter().find(|(label, _)| label == "Shop").map(|(_, t)| (l, t))
+                }) {
+                    options.push((GO_SHOPPING.to_string(), ActionKind::Visit { lot, activity: task }));
                 }
             }
             let usable = if obj.kind == ObjectKind::Car { &[] } else { usable };
@@ -1527,6 +1580,43 @@ fn world_click(
                     pie.submenus.push((dl::LOCK.to_string(), list));
                     if !picks.is_empty() {
                         pie.submenus.push((dl::SPECIFY.to_string(), picks));
+                    }
+                    continue;
+                }
+                // A high chair: a toddler of the family put in it ("Put Lucy in High Chair"), fed
+                // and taken out once one's sat there.
+                if obj.kind == ObjectKind::HighChair {
+                    if !crate::highchair::suits(d, actor_sim) || d.special == Special::HighChairSit {
+                        continue;
+                    }
+                    let here = on_lot.get(actor).ok().map(|l| l.0);
+                    // (Who's sat in it, and whether eating.)
+                    let sat = company_q.iter().filter(|c| c.1.age == crate::sim::Age::Toddler).find_map(|c| {
+                        let a = queues_q.get(c.0).ok()?.0.front()?;
+                        match a.kind {
+                            ActionKind::Object { target, def } if target == t && !a.cancel => {
+                                interactions_for(obj.kind).get(def).map(|d| (c.0, d.special, matches!(a.phase, crate::interact::Phase::Running(_))))
+                            }
+                            _ => None,
+                        }
+                    });
+                    match d.special {
+                        Special::PutInHighChair => {
+                            if sat.is_some() {
+                                continue;
+                            }
+                            let toddlers = company_q
+                                .iter()
+                                .filter(|c| c.3.map(|l| l.0) == here)
+                                .map(|c| (c.0, c.1, members_q.contains(c.0) || family.kin(actor_sim.id, c.1.id).is_some()));
+                            for (_, name) in crate::highchair::sittable(toddlers) {
+                                options.push((format!("{} {name} {}", crate::highchair::PUT_IN, crate::highchair::IN_HIGH_CHAIR), ActionKind::Object { target: t, def: i }));
+                            }
+                        }
+                        // (Fed once they're sat in it, not eating already.)
+                        Special::GiveBabyFood if sat.is_some_and(|s| s.1 == Special::HighChairSit && s.2) => options.push((d.name.to_string(), ActionKind::Object { target: t, def: i })),
+                        Special::TakeOutOfHighChair if sat.is_some_and(|s| s.2) => options.push((d.name.to_string(), ActionKind::Object { target: t, def: i })),
+                        _ => {}
                     }
                     continue;
                 }
@@ -2211,6 +2301,16 @@ fn pie_buttons(
         }
         return;
     }
+    // A toddler put in a high chair: the grown-up to the chair, the toddler called over.
+    if let ActionKind::Object { .. } = kind
+        && let Some(name) = label.strip_prefix(&format!("{} ", crate::highchair::PUT_IN)).and_then(|l| l.strip_suffix(&format!(" {}", crate::highchair::IN_HIGH_CHAIR)))
+        && let (Some(a), Some(toddler)) = (actor, people.iter().find(|p| p.1.first == name && p.1.age == crate::sim::Age::Toddler).map(|p| p.0))
+        && let Ok(mut q) = queues.get_mut(a)
+    {
+        q.push_player(Action::new(label.clone(), kind.clone(), false));
+        commands.entity(a).insert(crate::highchair::PuttingIn { toddler, asked: false });
+        return;
+    }
     // A toddler potty trained: the grown-up to the chair, the toddler sat on it once they're there.
     if let ActionKind::Object { .. } = kind
         && let Some(name) = label.strip_prefix(&format!("{} ", crate::potty::POTTY_TRAIN))
@@ -2394,6 +2494,25 @@ fn pie_buttons(
         // (A social chosen from a group's menu by the rest of its name: its whole name.)
         if let ActionKind::Social { social, .. } = kind {
             label = crate::social::social(social).name.to_string();
+        }
+        // (Others of the household along in the car: "Go to Community Lot with Gretle Goth".)
+        if let ActionKind::GoToLot { lot } = kind
+            && let Some((to, who)) = title.strip_prefix(TO_COMMUNITY_LOT_WITH).map(|w| (TO_COMMUNITY_LOT, w)).or_else(|| title.strip_prefix(VISIT_LOT_WITH).map(|w| (VISIT_LOT, w)))
+        {
+            let who = who.trim();
+            let here = postures.get(a).ok().map(|p| p.1.translation());
+            let along: Vec<Entity> = people
+                .iter()
+                .filter(|(e, s, member)| *e != a && *member && !s.age.is_little() && (who == EVERYONE || s.full_name() == who) && here.is_some_and(|h| postures.get(*e).is_ok_and(|p| p.1.translation().distance(h) < 60.0)))
+                .map(|(e, ..)| e)
+                .collect();
+            queue.push_player(Action::new(to, ActionKind::GoToLot { lot }, false));
+            for f in along {
+                if let Ok(mut q) = queues.get_mut(f) {
+                    q.push_player(Action::new(to, ActionKind::GoToLot { lot }, false));
+                }
+            }
+            return;
         }
         // (Others of the household along too: "Go Here With...".)
         let go_with = title == GO_HERE_WITH;
