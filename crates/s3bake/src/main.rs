@@ -120,10 +120,15 @@ fn main() {
         return;
     }
     if let Some(i) = args.iter().position(|a| a == "--dds-png") {
-        // --dds-png <out.png> <instance hex>: a DDS (0x00B2D882) written out as a PNG.
-        let pkgs = s3pkg::install::open_install(&data, |_| true);
-        let inst = u64::from_str_radix(&args[i + 2], 16).expect("instance");
-        let d = pkgs.read_ti(0x00B2_D882, inst).expect("dds");
+        // --dds-png <out.png> <instance hex | a .dds file>: a DDS (0x00B2D882, or one of the
+        // texture store's) written out as a PNG.
+        let d = if args[i + 2].ends_with(".dds") {
+            std::fs::read(&args[i + 2]).expect("dds file")
+        } else {
+            let pkgs = s3pkg::install::open_install(&data, |_| true);
+            let inst = u64::from_str_radix(&args[i + 2], 16).expect("instance");
+            pkgs.read_ti(0x00B2_D882, inst).expect("dds")
+        };
         let img = s3formats::dds::decode(&d, 4096).expect("decodes");
         let f = std::fs::File::create(&args[i + 1]).expect("out");
         let mut enc = png::Encoder::new(std::io::BufWriter::new(f), img.width as u32, img.height as u32);

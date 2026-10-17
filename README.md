@@ -1155,8 +1155,11 @@ installation is unreachable.
   floor and turns its walls' inner sides to wallpaper. Doors, archways and windows from the
   catalogue snap into walls and cut their openings; knocking a wall down sells what was in
   it. Works on an empty lot or the house that came with it, a floor above the top too, and
-  every change is replayed from the save. A Fences tab holds the catalogue's 19 fences and
-  hedges (pictured by rendering a piece of each); the fence tool drags runs along the grid
+  every change is replayed from the save. A Fences tab holds the catalogue's 57 fences and
+  hedges (pictured by rendering a piece of each; the patches' versions of them read too, past
+  their materials), and the Half Walls button its 7 half walls (the catalogue's `halfWall`
+  styles: a metre of wall with the style's cap, glass or lattice on top, as the game's engine
+  draws them). The fence tool drags runs along the grid
   (straight or diagonal, posts at the ends, standing on the ground out of doors), Ctrl+drag
   takes them down, and Sims walk round them. The pool tool digs a pool out of doors (§40 a
   tile, never under a floor or a garage): the ground opens over it, a coping goes round it

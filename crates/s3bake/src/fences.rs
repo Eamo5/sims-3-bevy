@@ -25,17 +25,43 @@ pub struct Pieces {
     pub post: Option<Key>,
 }
 
-/// A CFEN's catalogue entry: its name's string key, its price, and whether the catalogue
-/// shows it. (Version 10: a header, no materials, then the catalogue's common block.)
-pub fn catalog_entry(d: &[u8]) -> Option<(u64, f32, bool)> {
+/// A CFEN's catalogue entry.
+pub struct CatalogFence {
+    /// Its name's string key.
+    pub name_guid: u64,
+    pub price: f32,
+    /// Whether the catalogue shows it (the others are its variants, kept for lots).
+    pub shown: bool,
+    /// A half wall (its internal name's, `CatalogObjects/Name:halfWall...`): the build mode's
+    /// Half Walls tool's, not the Fences'.
+    pub half_wall: bool,
+}
+
+/// A CFEN's catalogue entry, from its common block: at once in version 6 (the base game's);
+/// after a list of materials in version 10 (the patches'), each `u8 type, [u32 when the type
+/// isn't 1], u32 size, size bytes, u32`.
+pub fn catalog_entry(d: &[u8]) -> Option<CatalogFence> {
     let u32_at = |o: usize| d.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
-    if u32_at(12)? != 0 {
+    let mut o = if u32_at(0)? >= 10 {
+        let mut o = 16;
+        for _ in 0..u32_at(12)? {
+            let t = *d.get(o)?;
+            o += 1 + if t != 1 { 4 } else { 0 };
+            o += 4 + u32_at(o)? as usize + 4;
+        }
+        o
+    } else {
+        12
+    };
+    // (The common block's version.)
+    if u32_at(o)? != 0x0c {
         return None;
     }
-    let name_guid = u64::from_le_bytes(d.get(20..28)?.try_into().ok()?);
-    let mut o = 36;
-    // The name and description keys: 7-bit-length UTF-16 strings.
-    for _ in 0..2 {
+    let name_guid = u64::from_le_bytes(d.get(o + 4..o + 12)?.try_into().ok()?);
+    o += 20;
+    // The name and description keys: 7-bit-length UTF-16 (big-endian) strings.
+    let mut key = String::new();
+    for i in 0..2 {
         let mut n = 0usize;
         let mut shift = 0;
         loop {
@@ -47,11 +73,21 @@ pub fn catalog_entry(d: &[u8]) -> Option<(u64, f32, bool)> {
             }
             shift += 7;
         }
+        if i == 0 {
+            let units: Vec<u16> = d.get(o..o + n)?.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+            key = String::from_utf16_lossy(&units);
+        }
         o += n;
     }
     let price = f32::from_le_bytes(d.get(o..o + 4)?.try_into().ok()?);
     let status = *d.get(o + 12)?;
-    Some((name_guid, price, status & 1 != 0))
+    Some(CatalogFence { name_guid, price, shown: status & 1 != 0, half_wall: key.to_ascii_lowercase().contains("halfwall") })
+}
+
+/// A version 10 CFEN's materials (its colour and pattern: what its pieces' composited texture
+/// is drawn from, the gaps of a picket fence too).
+pub fn materials(d: &[u8]) -> Vec<s3formats::catalog::PatternMaterial> {
+    if d.get(0..4).is_some_and(|v| u32::from_le_bytes(v.try_into().unwrap()) >= 10) { s3formats::object::materials_at(d, 12) } else { Vec::new() }
 }
 
 pub fn pieces(pkgs: &PackageSet, cfen: &ResourceKey) -> Pieces {

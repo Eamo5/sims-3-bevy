@@ -202,22 +202,19 @@ fn buy_flags(r: &mut Reader, version: u32, sort: u32) -> R<BuyFlags> {
     Ok(BuyFlags { room, function, function_sub, function_sub2, room_sub, build, sort })
 }
 
-pub fn parse_objd(d: &[u8]) -> R<ObjdInfo> {
-    let keys = tgi_table_at(d, 4)?;
-    let mut r = Reader::new(d);
-    let version = r.u32()?;
-    r.skip(8)?;
-    let mat_count = r.i32()?.max(0) as usize;
-    let mut presets = Vec::new();
-    for _ in 0..mat_count {
+/// A catalogue resource's materials (an OBJD's designs, a CFEN's): each `u8 type, [u32 when the
+/// type isn't 1], u32 size`, then a u16, the TGI list's offset (relative) and size, the complate
+/// and the TGI list; then a u32. (Those that won't read are skipped.)
+fn material_list(r: &mut Reader, count: usize) -> R<Vec<crate::catalog::PatternMaterial>> {
+    let mut out = Vec::new();
+    for _ in 0..count {
         let mtype = r.u8()?;
         if mtype != 1 {
             r.u32()?;
         }
         let len = r.u32()? as usize;
         let end = r.pos + len;
-        // u16, the TGI list's offset (relative) and size, the complate, the TGI list.
-        let mut m = Reader::at(d, r.pos);
+        let mut m = Reader::at(r.data, r.pos);
         let preset = (|| -> R<crate::catalog::PatternMaterial> {
             m.u16()?;
             let rel = m.u32()? as usize;
@@ -229,11 +226,27 @@ pub fn parse_objd(d: &[u8]) -> R<ObjdInfo> {
             Ok(crate::catalog::PatternMaterial { complate, keys })
         })();
         if let Ok(p) = preset {
-            presets.push(p);
+            out.push(p);
         }
         r.pos = end;
         r.u32()?;
     }
+    Ok(out)
+}
+
+/// The materials of a catalogue resource whose list (a u32 count first) starts at `at`.
+pub fn materials_at(d: &[u8], at: usize) -> Vec<crate::catalog::PatternMaterial> {
+    let mut r = Reader::at(d, at);
+    r.u32().ok().and_then(|n| material_list(&mut r, n as usize).ok()).unwrap_or_default()
+}
+
+pub fn parse_objd(d: &[u8]) -> R<ObjdInfo> {
+    let keys = tgi_table_at(d, 4)?;
+    let mut r = Reader::new(d);
+    let version = r.u32()?;
+    r.skip(8)?;
+    let mat_count = r.i32()?.max(0) as usize;
+    let presets = material_list(&mut r, mat_count)?;
     let instance_name = if version >= 0x16 { str7(&mut r)? } else { String::new() };
     let common_version = r.u32()?;
     let name_guid = r.u64()?;

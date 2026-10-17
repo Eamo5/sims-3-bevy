@@ -48,7 +48,7 @@ const LIGHT: u32 = 0x2e8;
 const GRID: u32 = 0x2e9;
 
 #[derive(Component, Clone, Copy)]
-enum Action { Home, Tool(BuildTool), Category(usize), Objects(crate::buildobjects::ObjTab), Hand, Lighting, Grid, Undo, Redo }
+enum Action { Home, Tool(BuildTool), Category(usize), Objects(crate::buildobjects::ObjTab), HalfWalls, Hand, Lighting, Grid, Undo, Redo }
 
 fn home_action(id: u32) -> Option<Action> {
     use crate::buildobjects::ObjTab;
@@ -70,6 +70,8 @@ fn home_action(id: u32) -> Option<Action> {
         0x100e => Action::Objects(ObjTab::Rocks),
         0x1009 => Action::Category(ROOFS_TAB),
         0x100f => Action::Category(FENCES_TAB),
+        // (Half walls: the fences tab's other half, drawn with the fence tool.)
+        0x1017 => Action::HalfWalls,
         0x1008 => Action::Tool(BuildTool::Stairs),
         0x1013 => Action::Tool(BuildTool::Pool),
         0x1004 => Action::Tool(BuildTool::Foundation),
@@ -182,6 +184,7 @@ fn controls(
             Action::Home => { buy.drop_tools(&mut commands); buy.show(BUILD_TAB); }
             Action::Tool(tool) => { buy.drop_tools(&mut commands); buy.show(BUILD_TAB); buy.tool = Some(tool); }
             Action::Category(category) => { buy.drop_tools(&mut commands); buy.show(category); }
+            Action::HalfWalls => { buy.drop_tools(&mut commands); buy.show(FENCES_TAB); buy.half_walls = true; }
             Action::Objects(tab) => {
                 buy.drop_tools(&mut commands);
                 match objects.as_deref_mut() {

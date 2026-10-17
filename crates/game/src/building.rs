@@ -1732,10 +1732,17 @@ fn spawn_pool(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut Asse
     out
 }
 
-/// Fences and railings: each run (and post) is its fence's piece, turned along the run.
+/// A half wall's height (where its style's pieces begin) and thickness (inside their trim).
+const HALF_WALL_HEIGHT: f32 = 1.0;
+const HALF_WALL_THICK: f32 = 0.15;
+
+/// Fences and railings: each run (and post) is its fence's piece, turned along the run. A half
+/// wall's pieces are only what tops it, a metre up (its cap, its glass, its lattice): the wall
+/// beneath, which the game's engine draws, is a metre of plain wall along the run.
 fn spawn_fences(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetCtx, b: &LotBuildingBaked, active: &ActiveBuilding, neighbor: Option<Entity>) -> Vec<Entity> {
     let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[b.levels.len() - 1]);
     let mut out = Vec::new();
+    let mut half_wall: Option<Handle<StandardMaterial>> = None;
     for f in &b.fences {
         let parts = assets.model(ctx, f.model);
         if parts.is_empty() {
@@ -1752,6 +1759,19 @@ fn spawn_fences(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut As
         if d.length_squared() > 1e-6 {
             let len = d.length();
             commands.entity(e).insert((crate::nav::Obstacle { half: Vec2::new(len * 0.5, 0.06), center_offset: Vec2::new(len * 0.5, 0.0) }, crate::nav::Barrier, crate::nav::Floor(f.level.max(1))));
+            if parts.iter().all(|p| p.bounds.0.y >= HALF_WALL_HEIGHT - 0.05) {
+                let mat = half_wall
+                    .get_or_insert_with(|| ctx.materials.add(StandardMaterial { base_color: Color::srgb(0.86, 0.84, 0.8), perceptual_roughness: 0.85, reflectance: 0.2, ..default() }))
+                    .clone();
+                let body = commands
+                    .spawn((
+                        Mesh3d(ctx.meshes.add(Cuboid::new(len, HALF_WALL_HEIGHT, HALF_WALL_THICK))),
+                        MeshMaterial3d(mat),
+                        Transform::from_xyz(len * 0.5, HALF_WALL_HEIGHT * 0.5, 0.0),
+                    ))
+                    .id();
+                commands.entity(e).add_child(body);
+            }
         }
         out.push(e);
     }

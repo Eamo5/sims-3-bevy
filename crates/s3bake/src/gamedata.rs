@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 123;
+pub const GAMEDATA_VERSION: u32 = 127;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -419,6 +419,9 @@ pub struct FenceStyle {
     pub straight: Option<crate::types::Key>,
     pub diagonal: Option<crate::types::Key>,
     pub post: Option<crate::types::Key>,
+    /// One of the Half Walls tool's (`fences::CatalogFence::half_wall`).
+    #[serde(default)]
+    pub half_wall: bool,
 }
 
 /// A wallpaper or floor covering from the build catalogue.
@@ -2414,29 +2417,61 @@ fn bake_fence_styles(root: &BakeRoot, pkgs: &PackageSet, strings: &HashMap<u64, 
     let mut keys: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(0x0418FE2A).copied().collect();
     keys.sort();
     keys.dedup_by_key(|k| k.i);
-    let styles: Vec<Option<FenceStyle>> = crate::bake::par_map(&keys, |k| {
+    let styles: Vec<Option<(FenceStyle, Option<s3formats::catalog::PatternMaterial>)>> = crate::bake::par_map(&keys, |k| {
         let d = pkgs.read(k)?;
-        let (guid, price, shown) = crate::fences::catalog_entry(&d)?;
-        let name = strings.get(&guid).cloned().filter(|n| !n.is_empty())?;
-        if !shown {
+        let c = crate::fences::catalog_entry(&d)?;
+        let name = strings.get(&c.name_guid).cloned().filter(|n| !n.is_empty())?;
+        if !c.shown {
             return None;
         }
         let p = crate::fences::pieces(pkgs, k);
         p.straight?;
-        Some(FenceStyle { key: crate::types::key_of(k), name, price: price.round() as i32, straight: p.straight, diagonal: p.diagonal, post: p.post })
+        let material = crate::fences::materials(&d).into_iter().next();
+        Some((FenceStyle { key: crate::types::key_of(k), name, price: c.price.round() as i32, straight: p.straight, diagonal: p.diagonal, post: p.post, half_wall: c.half_wall }, material))
     });
-    let mut styles: Vec<FenceStyle> = styles.into_iter().flatten().collect();
-    styles.sort_by_key(|s| (s.price, s.name.clone()));
+    let mut styles: Vec<(FenceStyle, Option<s3formats::catalog::PatternMaterial>)> = styles.into_iter().flatten().collect();
+    styles.sort_by_key(|(s, _)| (s.price, s.name.clone()));
+    // (One of each: a style's shown more than once only as the same thing.)
+    styles.dedup_by(|a, b| a.0.name == b.0.name);
     let g = root.global_dir();
     let mut w = PackWriter::create(&g.join("fences.pack")).map_err(|e| e.to_string())?;
     let mut seen = BTreeSet::new();
-    for s in &styles {
+    let mut drawn = BTreeSet::new();
+    // (The towns' own fences, baked with their lots: the same pieces, their textures under keys
+    // of their own, drawn from the material too.)
+    let worlds: Vec<PackReader> = std::fs::read_dir(root.dir.join("worlds")).into_iter().flatten().flatten().filter_map(|e| PackReader::open(&e.path().join("models.pack")).ok()).collect();
+    for (s, material) in &styles {
         for m in [s.straight, s.diagonal, s.post].into_iter().flatten() {
             if !seen.insert(m) {
                 continue;
             }
+            let in_towns: Vec<crate::types::Key> = worlds
+                .iter()
+                .filter_map(|w| w.get::<crate::types::BakedModel>(&m))
+                .flat_map(|b| b.parts.into_iter().filter_map(|p| p.texture))
+                .filter(|t| t.0 == s3pkg::types::TXTC)
+                .collect();
             let b = crate::bake::bake_model(pkgs, &crate::types::rkey(m));
             for t in b.parts.iter().filter_map(|p| p.texture) {
+                // (A composited texture is drawn from the style's own material, as the game
+                // draws it: its colours, its pattern, the gaps between a picket fence's slats.)
+                if let Some(mat) = material.as_ref().filter(|_| t.0 == s3pkg::types::TXTC && drawn.insert(t)) {
+                    let (w, h) = pkgs
+                        .read(&crate::types::rkey(t))
+                        .and_then(|d| s3formats::txtc::Txtc::parse(&d).ok())
+                        .map(|x| s3formats::compositor::Compositor::new(pkgs).output_size(&x))
+                        .filter(|(w, h)| *w > 0 && *h > 0)
+                        .unwrap_or((256, 256));
+                    let scale = (FENCE_TEX_MAX as f32 / w.max(h) as f32).min(1.0);
+                    if let Some(img) = s3formats::complate::render(pkgs, &mat.complate, &mat.keys, ((w as f32 * scale) as usize).max(16), ((h as f32 * scale) as usize).max(16)) {
+                        let dds = crate::ddsw::encode_dds(&img);
+                        for k in in_towns.iter().filter(|k| k.2 == t.2 && **k != t) {
+                            let _ = std::fs::write(root.tex_path(*k), &dds);
+                        }
+                        let _ = std::fs::write(root.tex_path(t), dds);
+                        continue;
+                    }
+                }
                 if !root.tex_path(t).exists()
                     && let Some(dds) = crate::bake::bake_texture(pkgs, t, crate::bake::OBJECT_TEX_MAX, false)
                 {
@@ -2447,8 +2482,11 @@ fn bake_fence_styles(root: &BakeRoot, pkgs: &PackageSet, strings: &HashMap<u64, 
         }
     }
     w.finish().map_err(|e| e.to_string())?;
-    Ok(styles)
+    Ok(styles.into_iter().map(|(s, _)| s).collect())
 }
+
+/// How big a fence's material is drawn (the longer side).
+const FENCE_TEX_MAX: usize = 512;
 
 /// The catalogue's SpeedTree objects (trees, shrubs, flowers: their OBJK's model is a
 /// SpeedTree), each with its species' billboard baked.

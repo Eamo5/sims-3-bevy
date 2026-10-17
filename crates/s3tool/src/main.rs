@@ -787,6 +787,35 @@ fn main() {
         }
         return;
     }
+    if args[1] == "fencestyles" {
+        // fencestyles <name part>: the baked catalogue fences (and half walls) so named, and
+        // each piece's parts in fences.pack.
+        let root = s3bake::default_root();
+        let g = root.global_dir();
+        let data: s3bake::GameDataBaked = s3bake::read_value(&g.join("gamedata.bin")).expect("gamedata.bin");
+        let pack = s3bake::PackReader::open(&g.join("fences.pack")).ok();
+        let want = args[2].to_ascii_lowercase();
+        println!("{} fences, {} half walls", data.fences.iter().filter(|f| !f.half_wall).count(), data.fences.iter().filter(|f| f.half_wall).count());
+        for f in data.fences.iter().filter(|f| f.name.to_ascii_lowercase().contains(&want)) {
+            println!("{} §{} half wall {} cfen {:016X}", f.name, f.price, f.half_wall, f.key.2);
+            for (what, m) in [("straight", f.straight), ("diagonal", f.diagonal), ("post", f.post)] {
+                let Some(m) = m else { continue };
+                let Some(b) = pack.as_ref().and_then(|p| p.get::<s3bake::BakedModel>(&m)) else { continue };
+                println!("  {what} {:016X}: {} parts", m.2, b.parts.len());
+                // (Whether another pack has it first, as the game looks: states, then models.)
+                let worlds: Vec<std::path::PathBuf> = std::fs::read_dir(g.parent().unwrap().join("worlds")).into_iter().flatten().flatten().map(|e| e.path().join("models.pack")).collect();
+                for n in [g.join("states.pack"), g.join("models.pack")].into_iter().chain(worlds) {
+                    if let Some(o) = s3bake::PackReader::open(&n).ok().and_then(|p| p.get::<s3bake::BakedModel>(&m)) {
+                        println!("    also in {}: textures {:?}", n.display(), o.parts.iter().map(|p| p.texture.map(|t| format!("{:08X}_{:08X}_{:016X}", t.0, t.1, t.2))).collect::<Vec<_>>());
+                    }
+                }
+                for p in &b.parts {
+                    println!("    {} tris tex {:?} mode {} bounds {:?}..{:?}", p.indices.len() / 3, p.texture.map(|t| format!("{:08X}_{:08X}_{:016X}", t.0, t.1, t.2)), p.mode, p.bmin, p.bmax);
+                }
+            }
+        }
+        return;
+    }
     if args[1] == "bakedobj" {
         // bakedobj <instance name>: the baked catalogue entry, and each of its models' parts in
         // the cache (from the default cache, `SIMS3_CACHE`).

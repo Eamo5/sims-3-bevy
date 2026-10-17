@@ -119,6 +119,8 @@ pub struct BuyMode {
     pub roof_style_pick: Option<crate::building::RoofStyle>,
     /// The fence the fence tool puts up (index into the game data's fences).
     pub fence: Option<usize>,
+    /// The fences tab showing the half walls instead (build mode's Half Walls tool).
+    pub half_walls: bool,
     /// The terrain paint in the brush (a paint layer, or `terrain_paint::ERASE`), the terrain
     /// tool (index into `terrain_paint::Sculpt::ALL`), and the brush's radius (metres; 0 for
     /// the middle size).
@@ -361,6 +363,7 @@ impl BuyMode {
         self.category = category;
         self.page = 0;
         self.dirty = true;
+        self.half_walls = false;
     }
 }
 
@@ -1041,8 +1044,12 @@ fn buy_panel(
         if buy.category == FENCES_TAB && !editing_style {
             let Some(ui) = ui.as_deref_mut() else { return };
             let fences = ui.data.fences.clone();
+            if buy.half_walls {
+                p.spawn(text("Half Walls", 15.0, Color::WHITE));
+            }
             p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() }).with_children(|grid| {
-                for (i, f) in fences.iter().enumerate() {
+                // (The half walls are the Half Walls tool's; the rest, the fences'.)
+                for (i, f) in fences.iter().enumerate().filter(|(_, f)| f.half_wall == buy.half_walls) {
                     // (The game keeps no pictures of its fences: a piece of each, rendered.)
                     let thumb = ui.icon(&mut images, &s3bake::gamedata::thumb_name(f.key.2)).or_else(|| f.straight.map(|m| thumbs.get(&mut images, m)));
                     let picked = buy.tool == Some(crate::build::BuildTool::Fence) && buy.fence == Some(i);
@@ -1075,7 +1082,9 @@ fn buy_panel(
                     });
                 }
             });
-            p.spawn(text(crate::build::BuildTool::Fence.help(), 13.0, Color::WHITE));
+            let help = crate::build::BuildTool::Fence.help();
+            let help = if buy.half_walls { help.replace("the fence", "the half wall").replace("fencing", "half walls") } else { help };
+            p.spawn(text(help, 13.0, Color::WHITE));
             return;
         }
         // The construction tools.
