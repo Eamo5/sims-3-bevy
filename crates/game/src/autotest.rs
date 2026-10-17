@@ -1385,7 +1385,8 @@ fn wear_uniform(mut commands: Commands, sel: Query<Entity, With<crate::sim::Sele
 
 /// GIVE=<item>,...: puts things in the selected Sim's inventory: a collectible's key
 /// (`Ruby`, `Minnow`) or `<produce>/<quality 0-9>`, each with an optional `*<count>`.
-/// EAT=1: then they eat the first produce.
+/// EAT=1: then they eat the first produce. POST=<key>:<cut number|smelt>[:all]: then they
+/// mail one of those off to be cut or smelted, as its inventory menu does (`rgmmail`).
 /// EAT=check: verify consumption at the start, then cancel and verify it stays consumed.
 fn give_items(
     mut commands: Commands,
@@ -1415,6 +1416,19 @@ fn give_items(
             *done = 4;
         }
         assert!(*done == 4 || time.elapsed_secs() < 20.0, "inventory eating probe must finish");
+    }
+    if *done == 1
+        && let Ok(p) = std::env::var("POST")
+        && let Some(s) = p.split(':').next().and_then(|key| inv.and_then(|i| i.0.iter().find(|s| s.key == key && s.quality == 0)))
+    {
+        *done = 2;
+        let mut parts = p.split(':').skip(1);
+        let what = match parts.next() {
+            Some("smelt") => crate::rgmmail::Post::Smelt,
+            n => crate::rgmmail::Post::Cut(n.and_then(|n| n.parse().ok()).unwrap_or(0)),
+        };
+        info!("posting {} ({what:?})", s.name);
+        commands.insert_resource(crate::inventory::DoItem(crate::inventory::ItemButton::Post(what, parts.next() == Some("all")), e, s.clone()));
     }
     if *done == 1
         && std::env::var("EAT").is_ok()

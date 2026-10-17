@@ -428,6 +428,9 @@ pub struct SaveGame {
     /// The laundry: what's waiting, the piles, and the machines' loads.
     #[serde(default)]
     pub laundry: crate::laundry::SavedLaundry,
+    /// Gems and metals away being cut or smelted (`rgmmail`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub posted: Vec<crate::rgmmail::Away>,
     pub version: u32,
     pub world: String,
     pub lot_index: usize,
@@ -970,7 +973,7 @@ fn save_game(
         Res<crate::familyinv::FamilyInventory>,
         Query<(&Transform, &crate::nav::Floor, &crate::puddles::Puddle)>,
     ),
-    laundry: crate::laundry::LaundrySave,
+    (laundry, posted): (crate::laundry::LaundrySave, Res<crate::rgmmail::Posted>),
 ) {
     let new_file = save_as.read().count() > 0;
     let write = requests.read().count() > 0 || new_file;
@@ -1078,6 +1081,7 @@ fn save_game(
         broken_objects: broken.iter().filter(|b| b.2).map(|(o, tf, _, charred, ..)| SavedBroken { objd: o.objd, position: tf.translation.to_array(), charred }).collect(),
         puddles: crate::puddles::saved(&clock, &puddles),
         laundry: laundry.saved(),
+        posted: posted.0.clone(),
         object_states: broken
             .iter()
             .filter(|(.., grime, unmade, lost, lock, owners, smashed, tipped, canvas, (switched, dimmer))| {
@@ -1253,6 +1257,7 @@ pub(crate) fn apply_loaded_game(
     commands.insert_resource(PendingStates(game.object_states.clone(), None));
     commands.insert_resource(crate::puddles::PendingPuddles(game.puddles.clone()));
     commands.insert_resource(crate::laundry::PendingLaundry::of(game.laundry.clone()));
+    commands.insert_resource(crate::rgmmail::Posted(game.posted.clone()));
     // A restored date is not a midnight tick, even when loading within a session.
     commands.insert_resource(crate::aging::AgingDay::default());
     commands.insert_resource(crate::interact::DepreciationDay::default());

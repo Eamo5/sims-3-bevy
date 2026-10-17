@@ -50,6 +50,8 @@ pub enum Stat {
     TutoringHours,
     /// The heaviest fish caught (lb).
     HeaviestFish,
+    /// Gems they've had cut (the Collecting skill's `GemCut`: the finer cuts come with it).
+    GemsCut,
 }
 
 impl Stat {
@@ -77,6 +79,7 @@ impl Stat {
             Stat::KmJogged => "km_jogged",
             Stat::TutoringHours => "tutoring_hours",
             Stat::HeaviestFish => "heaviest_fish",
+            Stat::GemsCut => "gems_cut",
         }
     }
 }

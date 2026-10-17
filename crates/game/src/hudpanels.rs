@@ -557,11 +557,12 @@ fn inventory_panel(
     (mut vis, mut nodes): (Query<&mut Visibility>, Query<&mut Node>),
     (clicks, cells, hovered): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &InventoryCell), Changed<Interaction>>, Query<&Interaction>),
     (baked, mut thumbs, mut pictures): (Option<Res<crate::baked::Baked>>, ResMut<crate::thumbs::ModelThumbs>, ResMut<crate::paintings::PaintingImages>),
-    (mut pie, mut chosen, windows, family): (
+    (mut pie, mut chosen, windows, family, journals): (
         ResMut<crate::hud::PieMenu>,
         ResMut<crate::inventory::Chosen>,
         Query<&Window, With<bevy::window::PrimaryWindow>>,
         Query<(Entity, &Sim), With<crate::sim::HouseholdMember>>,
+        Query<&crate::journal::SkillJournal>,
     ),
     mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
     mut state: Local<(Option<Entity>, String, f32)>,
@@ -595,6 +596,18 @@ fn inventory_panel(
                 })
                 .collect::<Vec<_>>();
             pie.submenus.clear();
+            // (A gem or metal mailed off to be cut or smelted: `rgmmail`.)
+            if let Some(g) = game_ui.as_deref() {
+                use crate::inventory::ItemButton;
+                let cut = journals.get(me).map_or(0, |j| j.get(crate::journal::Stat::GemsCut) as u32);
+                let (flat, cuts) = crate::rgmmail::options(&g.data, st, cut);
+                let kind = |p, all| crate::interact::ActionKind::InventoryItem(ItemButton::Post(p, all), me, st.clone());
+                options.extend(flat.into_iter().map(|(l, p, all)| (l, kind(p, all))));
+                if !cuts.is_empty() {
+                    options.push((format!("{}... ›", crate::rgmmail::GET_CUT), crate::hud::submenu_kind(pie.submenus.len())));
+                    pie.submenus.push((crate::rgmmail::GET_CUT.to_string(), cuts.into_iter().map(|(l, p, all)| (l, kind(p, all))).collect()));
+                }
+            }
             // (Handed to another of the household: the game's drag onto their portrait.)
             let give: Vec<(String, crate::interact::ActionKind)> = family
                 .iter()

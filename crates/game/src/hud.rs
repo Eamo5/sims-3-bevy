@@ -1601,8 +1601,8 @@ fn world_click(
                     }
                     continue;
                 }
-                // (The testing cheats' own, while they're on.)
-                if d.special == Special::MakeAllHappy && !crate::cheats::testing() {
+                // (The testing cheats' own, while they're on; posting from the inventory's menu.)
+                if d.special == Special::MakeAllHappy && !crate::cheats::testing() || d.special == Special::PostAway {
                     continue;
                 }
                 // A lamp: turned on or off, left to the dark ("Auto-Lights..."), or set brighter or

@@ -1292,6 +1292,8 @@ pub enum Special {
     LightSwitch,
     /// The testing cheats' "Make All Happy" (at once: see `cheats`).
     MakeAllHappy,
+    /// Something posted at the mailbox (`rgmmail`).
+    PostAway,
     /// Blow out a birthday cake's candles and grow up.
     BlowOutCandles,
     /// Write (a page at a time) the book under way.
@@ -1432,11 +1434,13 @@ static MEAL: [InteractionDef; 2] = [
     InteractionDef { special: Special::GrabPlate, ..def("Grab a Plate", 2.0, [9000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) },
     InteractionDef { special: Special::PutAway, ..def("Put Away Leftovers", 3.0, N, Pose::Use) },
 ];
-static MAILBOX: [InteractionDef; 3] = [InteractionDef { special: Special::PayBills, ..def("Pay Bills", 3.0, N, Pose::Use) },
+static MAILBOX: [InteractionDef; 4] = [InteractionDef { special: Special::PayBills, ..def("Pay Bills", 3.0, N, Pose::Use) },
     // (The game's `DonateToCharity`, offered as its causes' menus.)
     InteractionDef { autonomous: false, special: Special::Donate, ..def("Donate to Charity", 2.0, N, Pose::Use) },
     // (With the testing cheats on: `cheats`.)
     InteractionDef { autonomous: false, special: Special::MakeAllHappy, ..def(crate::cheats::MAKE_ALL_HAPPY, 0.0, N, Pose::Use) },
+    // (A gem or metal posted off to be cut or smelted, from the inventory: `rgmmail`.)
+    InteractionDef { autonomous: false, special: Special::PostAway, ..def("Post", 2.0, N, Pose::Use) },
 ];
 static NEWSPAPER: [InteractionDef; 3] = [
     InteractionDef { special: Special::GetPaper, ..def("Read", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 45.0], Pose::Use) },
@@ -4438,6 +4442,9 @@ pub(crate) fn run_actions(
                                             if let Some((cause, amount)) = action.donation.clone() {
                                                 commands.entity(me).insert(crate::charity::Donated { cause, amount });
                                             }
+                                        }
+                                        Special::PostAway => {
+                                            commands.entity(me).insert(crate::rgmmail::PostedNow);
                                         }
                                         Special::PokeFire => {
                                             commands.entity(*target).insert(crate::fireplace::Raging(clock.minutes + crate::fireplace::RAGING_MINUTES));

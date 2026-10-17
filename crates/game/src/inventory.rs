@@ -222,6 +222,8 @@ pub enum ItemButton {
     /// Handed to another of the household, into their inventory (the game's drag onto their
     /// portrait).
     GiveTo(Entity),
+    /// Mailed off to be cut or smelted, one or all of them (`rgmmail`).
+    Post(crate::rgmmail::Post, bool),
 }
 
 /// The tile's colour for produce, by quality (grey for the worst, gold for perfect).
@@ -357,6 +359,7 @@ fn inventory_buttons(
     selected: Query<Entity, Changed<Selected>>,
     asked: Option<Res<DoItem>>,
     (mut fridge, away): (ResMut<crate::ingredients::Fridge>, Query<(), With<crate::visit::OnLot>>),
+    mailboxes: Query<(Entity, &crate::interact::GameObject), Without<crate::visit::LotObject>>,
 ) {
     // (A different Sim: nothing picked.)
     if !selected.is_empty() {
@@ -440,6 +443,19 @@ fn inventory_buttons(
                 let item = Stack { count: 1, worth: each, ..s.clone() };
                 commands.insert_resource(crate::buy::HoldRequest { objd, design, item, from: me });
                 chosen.clear();
+            }
+            // (Off to the household's mailbox to post it: `rgmmail`.)
+            ItemButton::Post(what, all) => {
+                use crate::interact::{ObjectKind, Special};
+                let mailbox = mailboxes.iter().find(|(_, o)| o.kind == ObjectKind::Mailbox).map(|(e, _)| e);
+                let (Some(mailbox), false) = (mailbox, away.contains(me)) else {
+                    notes.push(format!("{} isn't home to mail it off.", sim.first));
+                    continue;
+                };
+                let def = crate::interact::interactions_for(ObjectKind::Mailbox).iter().position(|d| d.special == Special::PostAway).unwrap_or(0);
+                let label = if *what == crate::rgmmail::Post::Smelt { "Get Smelted" } else { crate::rgmmail::GET_CUT };
+                commands.entity(me).insert(crate::rgmmail::ToPost { key: s.key.clone(), all: *all, what: *what });
+                queue.push_player(Action::new(label, ActionKind::Object { target: mailbox, def }, false));
             }
             ItemButton::GiveTo(to) => {
                 if *to == me {
