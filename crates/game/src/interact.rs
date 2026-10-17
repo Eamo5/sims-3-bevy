@@ -1294,6 +1294,11 @@ pub enum Special {
     MakeAllHappy,
     /// Something posted at the mailbox (`rgmmail`).
     PostAway,
+    /// A garden plant fertilized, revived, talked to, or disposed of (`gardening`).
+    Fertilize,
+    RevivePlant,
+    TalkToPlant,
+    DisposePlant,
     /// Blow out a birthday cake's candles and grow up.
     BlowOutCandles,
     /// Write (a page at a time) the book under way.
@@ -1451,10 +1456,16 @@ static NEWSPAPER: [InteractionDef; 3] = [
 /// (The paper read: in a seat, or standing.)
 const READ_PAPER: InteractionDef = InteractionDef { autonomous: false, special: Special::ReadPaper, ..def("Read the Paper", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 45.0], Pose::Use) };
 const READ_PAPER_SEATED: InteractionDef = InteractionDef { on_object: true, pose: Pose::Sit, ..READ_PAPER };
-static GARDEN: [InteractionDef; 3] = [
+static GARDEN: [InteractionDef; 7] = [
     InteractionDef { special: Special::Water, skill: Some("Gardening"), ..def("Water", 12.0, [0.0, 0.0, 0.0, 0.0, -3.0, 4.0], Pose::Use) },
     InteractionDef { special: Special::Weed, skill: Some("Gardening"), ..def("Weed", 15.0, [0.0, 0.0, 0.0, 0.0, -8.0, 2.0], Pose::Use) },
     InteractionDef { special: Special::Harvest, skill: Some("Gardening"), ..def("Harvest", 10.0, [0.0, 0.0, 0.0, 0.0, -3.0, 8.0], Pose::Use) },
+    // (The game's `FertilizePlant`, `RevivePlant`, `DisposeAlivePlant`/`DisposeDeadPlant`, and a
+    // Green Thumb's `TalkToPlant`: see `gardening`.)
+    InteractionDef { autonomous: false, special: Special::Fertilize, skill: Some("Gardening"), ..def("Fertilize", 8.0, [0.0, 0.0, 0.0, 0.0, -6.0, 2.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::RevivePlant, skill: Some("Gardening"), ..def("Revive", 20.0, [0.0, 0.0, 0.0, 0.0, -4.0, 4.0], Pose::Use) },
+    InteractionDef { special: Special::TalkToPlant, ..def("Talk to Plant", 30.0, [0.0, 0.0, 0.0, 20.0, 0.0, 10.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::DisposePlant, ..def("Dispose", 5.0, [0.0, 0.0, 0.0, 0.0, -4.0, 0.0], Pose::Use) },
 ];
 static COLLECTIBLE: [InteractionDef; 1] = [InteractionDef { special: Special::Collect, ..def("Collect", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 10.0], Pose::Use) }];
 static FISHING_SPOT: [InteractionDef; 1] =
@@ -2057,6 +2068,11 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Water" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_wateringCan_start_x"), &["a2o_gardening_wateringCan_waterPlants_x"]),
         "Weed" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_pullWeeds_x"]),
         "Harvest" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_bendover_start_x"), &["a2o_gardening_bendover_harvestmed_x"]),
+        "Fertilize" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_fertilize_x"]).ending(&["a2o_gardening_crouch_stop_x"], 1.2),
+        "Revive" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_revive_med_x"]).ending(&["a2o_gardening_crouch_stop_x"], 1.2),
+        "Dispose" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_pullWeeds_x"]).ending(&["a2o_gardening_crouch_stop_x"], 1.2),
+        // (The plant graph's "Loop Talk": the friendly social talk.)
+        "Talk to Plant" => A::new(None, &["a2a_soc_neutral_talkFriendly_accept_x", "a2a_soc_neutral_tellJoke_accept_x"]),
         "Collect" if kind == ObjectKind::Collectible => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_harvestlow_x"]),
         "Swim" => A::new(Some("a2o_ladder_climbDown_L_x"), &["a_swim_cycle_x"]),
         "Destroy Snowman" => A::new(None, &["a2o_snowman_destroy_x"]),
@@ -2973,7 +2989,7 @@ pub fn practice_points(name: &str) -> f32 {
         "Fish" => 300.0,
         // (Gardening's comes of the plants themselves: WaterPlant_Plant, WeedPlant_Plant and
         // Harvest_HarvestPlant have none.)
-        "Water" | "Weed" | "Harvest" => 0.0,
+        "Water" | "Weed" | "Harvest" | "Fertilize" | "Revive" | "Dispose" | "Talk to Plant" => 0.0,
         _ => 420.0,
     }
 }
@@ -4432,6 +4448,7 @@ pub(crate) fn run_actions(
                                         | Special::EmptyPotty
                                         | Special::LockDoor
                                         | Special::LightSwitch
+                                        | Special::TalkToPlant
                                         | Special::MakeAllHappy
                                         | Special::CardioWorkOut
                                         | Special::StrengthWorkOut
@@ -4788,6 +4805,17 @@ pub(crate) fn run_actions(
                                         }
                                         Special::Harvest => {
                                             commands.entity(me).insert(crate::gardening::GardenRequest::Harvest(*target));
+                                        }
+                                        Special::Fertilize => {
+                                            if let Some((key, quality)) = action.fish_choice.take() {
+                                                commands.entity(me).insert(crate::gardening::GardenRequest::Fertilize(*target, key, quality));
+                                            }
+                                        }
+                                        Special::RevivePlant => {
+                                            commands.entity(me).insert(crate::gardening::GardenRequest::Revive(*target));
+                                        }
+                                        Special::DisposePlant => {
+                                            commands.entity(me).insert(crate::gardening::GardenRequest::Dispose(*target));
                                         }
                                         Special::Collect => {
                                             commands.entity(me).insert(crate::collecting::CollectRequest::Pick(*target));
@@ -6219,6 +6247,11 @@ fn autonomy(
                 if d.special == Special::Homework && motives.0.iter().all(|m| *m > -30.0) {
                     let keen = [crate::life::Trait::Bookworm, crate::life::Trait::Genius, crate::life::Trait::Perfectionist].iter().any(|t| sim.traits.contains(t));
                     score = if keen { 45.0 } else { 22.0 };
+                }
+                // (A Green Thumb talks to their plants now and then, as the game's `TalkToPlant` advertises.)
+                if d.special == Special::TalkToPlant {
+                    let ok = household.contains(me) && plant_q.get(oe).is_ok_and(|p| crate::gardening::offers(p, d.special)) && crate::gardening::sim_offers(sim, 0, d.special);
+                    score = if ok { 12.0 } else { 0.0 };
                 }
                 if matches!(d.special, Special::Water | Special::Weed | Special::Harvest) {
                     let keen = household.contains(me) && (sim.traits.contains(&crate::life::Trait::GreenThumb) || plant_q.get(oe).is_ok());

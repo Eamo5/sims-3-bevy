@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 133;
+pub const GAMEDATA_VERSION: u32 = 134;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -447,6 +447,9 @@ pub struct PlantInfo {
     pub skill_harvest: f32,
     /// The produce's model (in `produce.pack`; its group is the geometry state's hash).
     pub produce_model: Option<crate::types::Key>,
+    /// What a day in dry, neither, and wet soil adds to how it's doing (`PerfBonusDrySoil`...).
+    #[serde(default)]
+    pub soil_bonus: [f32; 3],
 }
 
 /// A fence from the build catalogue, with its pieces' models (in `fences.pack`).
@@ -1455,6 +1458,10 @@ pub struct IngredientInfo {
     pub grown: bool,
     /// The grocery's tab for it (`Meat`, `Produce`, `Fish`).
     pub tab: String,
+    /// As fertilizer: what it adds to a plant's day, and for how many days (`Fertilizer_Value`,
+    /// `Fertilizer_Days`; none where they're empty).
+    #[serde(default)]
+    pub fertilizer: Option<(f32, u32)>,
 }
 
 /// The seasons' weather, from the game's `Seasons` table: temperatures through the day, how
@@ -3619,11 +3626,17 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 skill_plant: num(&f, "SkillPointsPlant"),
                 skill_harvest: num(&f, "SkillPointsHarvest"),
                 produce_model,
+                soil_bonus: [num(&f, "PerfBonusDrySoil"), num(&f, "PerfBonusNeutralSoil"), num(&f, "PerfBonusWetSoil")],
             });
         }
         ppack.finish().map_err(|e| e.to_string())?;
     }
     // The ingredients, and the fish (as ingredients: a kind of Fish).
+    let fertilizer = |f: &HashMap<String, String>| -> Option<(f32, u32)> {
+        let value = f.get("Fertilizer_Value")?.trim().parse::<f32>().ok()?;
+        let days = f.get("Fertilizer_Days")?.trim().parse::<f32>().ok()? as u32;
+        (days > 0).then_some((value, days))
+    };
     if let Some(ing) = xml("ingredients") {
         for f in records(&ing, "Data") {
             let key = get(&f, "Ingredient_Key");
@@ -3639,6 +3652,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 can_buy: get(&f, "CanBuyFromStore").eq_ignore_ascii_case("true"),
                 grown: !get(&f, "Plant_Name").is_empty(),
                 tab: get(&f, "UiTab"),
+                fertilizer: fertilizer(&f),
                 key,
             });
         }
@@ -3660,6 +3674,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 can_buy,
                 grown: false,
                 tab: "Fish".into(),
+                fertilizer: fertilizer(&f),
                 key,
             });
         }

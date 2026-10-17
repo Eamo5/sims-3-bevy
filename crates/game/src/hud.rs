@@ -1436,6 +1436,21 @@ fn world_click(
                 if plant.is_some_and(|p| !crate::gardening::offers(p, d.special)) {
                     continue;
                 }
+                // (What the Sim may do to a plant: fertilize, revive, talk to it.)
+                if plant.is_some() && !crate::gardening::sim_offers(actor_sim, writers.get(actor).map_or(0, |w| w.1.level("Gardening")), d.special) {
+                    continue;
+                }
+                // Fertilizing: with which of their produce or fish ("Fertilize ›").
+                if d.special == Special::Fertilize {
+                    if let (Ok(inv), Some(ui)) = (inv_q.get(actor), opp_q.0.as_ref()) {
+                        let list: Vec<(String, ActionKind)> = crate::gardening::fertilizers(&ui.data, inv).map(|s| (format!("{}: {}", crate::gardening::FERTILIZE, s.name), ActionKind::Object { target: t, def: i })).collect();
+                        if !list.is_empty() {
+                            options.push((format!("{} ›", crate::gardening::FERTILIZE), submenu_kind(pie.submenus.len())));
+                            pie.submenus.push((crate::gardening::FERTILIZE.to_string(), list));
+                        }
+                    }
+                    continue;
+                }
                 // (A tombstone's epitaph read once there is one; engraved where someone lies.)
                 if (d.special == Special::ReadEpitaph && graves_q.get(t).ok().is_none_or(|g| g.epitaph.is_empty())) || (d.special == Special::Engrave && !graves_q.contains(t)) {
                     continue;
@@ -2520,6 +2535,13 @@ fn pie_buttons(
         let mut fish_choice = label.strip_prefix("Place Fish: ")
             .and_then(|n| inventories.get(a).ok().and_then(|inv| inv.0.iter().find(|s| s.kind == crate::inventory::ItemKind::Fish && s.name == n)))
             .map(|s| (s.key.clone(), s.quality));
+        // (What a plant's fertilized with: `gardening`.)
+        if let Some(n) = label.strip_prefix(&format!("{}: ", crate::gardening::FERTILIZE))
+            && let Some(s) = inventories.get(a).ok().and_then(|inv| inv.0.iter().find(|s| s.name == n))
+        {
+            fish_choice = Some((s.key.clone(), s.quality));
+            label = crate::gardening::FERTILIZE.to_string();
+        }
         // (The bait chosen to fish with, as the menu offered it; "No Bait", none.)
         if let ActionKind::Object { .. } = kind {
             if label == crate::bait::NO_BAIT {

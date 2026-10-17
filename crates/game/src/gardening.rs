@@ -10,6 +10,13 @@
 //! Lifefruit, eaten, a day more of life), the Flame Plant, the Death Flower Bush (a Death Flower,
 //! carried, the Grim Reaper takes in a Sim's stead) and the Money Tree (its money bags, a harvest
 //! cycle's worth by its quality, the tree better for each: `MoneyTree`'s tuning).
+//!
+//! Each morning (5 AM, the game's `EvaluatePlantGrowth`) a plant's day is reckoned as the game's
+//! does: a base 10, its soil's bonus for being dry, neither or wet (the plants table's), its
+//! fertilizer's while it lasts, all halved if it's weedy; gone to -100 it's dead, to be disposed
+//! of or (by a Green Thumb, Gardening 5) revived. It's fertilized with produce or fish from the
+//! inventory (Gardening 3: their `Fertilizer_Value` for so many days, better for better
+//! quality), and a Green Thumb talks to their plants.
 
 use std::collections::BTreeMap;
 
@@ -30,7 +37,7 @@ pub struct GardeningPlugin;
 impl Plugin for GardeningPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Garden>()
-            .add_systems(Update, (starter_packet, restore_plants, garden_requests, grow, sprinkle, flame_fruit).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (starter_packet, restore_plants, garden_requests, grow, evaluate_plants, sprinkle, flame_fruit, dead_looks).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -113,6 +120,95 @@ pub struct GrowingPlant {
     /// The skill (0..1) of whoever last tended it.
     #[serde(default)]
     pub care: f32,
+    /// How it's been doing, day by day (the game's `GrowthProgress`: down to -100 and it's dead).
+    #[serde(default)]
+    pub vigor: f32,
+    #[serde(default)]
+    pub dead: bool,
+    /// Fertilizer in its soil: what it adds to its day, and the days it has left.
+    #[serde(default)]
+    pub fertilizer: Option<(f32, u32)>,
+}
+
+/// The game's `kGrowthPerformanceBase`, `kGrowthPerformanceFertilizer`,
+/// `kGrowthPerformancePenaltyWeeds` (its class tuning's), the `-100` a plant dies at, and the hour
+/// it's reckoned (`AddAlarmDay(5f + ...)`).
+const PERF_BASE: f32 = 10.0;
+const PERF_FERTILIZER: f32 = 1.1;
+const PERF_WEEDS: f32 = 0.5;
+const PERF_MIN: f32 = -100.0;
+const EVALUATE_HOUR: f32 = 5.0;
+/// The game's `kFertilizerQualityMultiplier` and `kFertilizerQualityAdditionalDays`, by the
+/// fertilizer's quality (its eleven).
+const FERTILIZER_QUALITY: [f32; 11] = [0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.4, 1.6, 1.8, 2.0];
+const FERTILIZER_DAYS: [u32; 11] = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2];
+/// `kReviveSuccessChance` (its tuning's 70); the Gardening it takes to revive, to fertilize.
+const REVIVE_CHANCE: f64 = 0.7;
+pub const REVIVE_LEVEL: u32 = 5;
+pub const FERTILIZE_LEVEL: u32 = 3;
+/// How the game names fertilizing with something ("Fertilize: Perfect Tomato" here).
+pub const FERTILIZE: &str = "Fertilize";
+
+/// Its soil now: dry, neither, or wet (the game's water level below `kSoilDryWaterLevel` -50 or
+/// above `kSoilWetWaterLevel` 50, of -100..100).
+fn dampness(water: f32) -> usize {
+    if water < 25.0 { 0 } else if water > 75.0 { 2 } else { 1 }
+}
+
+/// A plant's day, reckoned: how it's doing the better or the worse for it, its fertilizer a day
+/// shorter; whether it died of it.
+pub fn reckon(p: &mut GrowingPlant, soil_bonus: [f32; 3]) -> bool {
+    if p.dead {
+        return false;
+    }
+    let mut perf = PERF_BASE + soil_bonus[dampness(p.water)];
+    if let Some((value, days)) = p.fertilizer {
+        perf += PERF_FERTILIZER * value;
+        p.fertilizer = (days > 1).then_some((value, days - 1));
+    }
+    if p.weedy {
+        perf *= 1.0 - PERF_WEEDS;
+    }
+    p.vigor += perf.clamp(PERF_MIN, 100.0);
+    // (A good day's growing past 100 starts it over, as the game's next growth state does.)
+    if p.vigor >= 100.0 {
+        p.vigor -= 100.0;
+    }
+    if p.vigor <= PERF_MIN {
+        p.dead = true;
+        p.ready = 0;
+        return true;
+    }
+    false
+}
+
+/// What a fertilizer of this quality (a tier of `QUALITIES`) adds, and for how many days.
+pub fn fertilizer(value: f32, days: u32, tier: u8) -> (f32, u32) {
+    let q = (tier as usize * 10 / (QUALITIES.len() - 1)).min(10);
+    (value * FERTILIZER_QUALITY[q], days + FERTILIZER_DAYS[q])
+}
+
+/// Whether a Sim may do this to a plant (the plant's side is `offers`): fertilize from
+/// Gardening 3, revive a Green Thumb at Gardening 5, talk to plants a Green Thumb.
+pub fn sim_offers(sim: &Sim, gardening: u32, special: crate::interact::Special) -> bool {
+    use crate::interact::Special as S;
+    let green = sim.traits.contains(&crate::life::Trait::GreenThumb);
+    let teen_up = !sim.age.is_little() && sim.age != crate::sim::Age::Child;
+    match special {
+        S::Fertilize => teen_up && gardening >= FERTILIZE_LEVEL,
+        S::RevivePlant => teen_up && green && gardening >= REVIVE_LEVEL,
+        S::TalkToPlant => green,
+        S::DisposePlant => teen_up,
+        _ => true,
+    }
+}
+
+/// What a Sim has that would do to fertilize with (produce and fish the game gives a
+/// `Fertilizer_Value`).
+pub fn fertilizers<'a>(data: &'a s3bake::GameDataBaked, inv: &'a crate::inventory::Inventory) -> impl Iterator<Item = &'a crate::inventory::Stack> {
+    inv.0.iter().filter(move |s| {
+        matches!(s.kind, crate::inventory::ItemKind::Produce | crate::inventory::ItemKind::Fish) && data.ingredients.iter().any(|i| i.key == s.key && i.fertilizer.is_some())
+    })
 }
 
 impl GrowingPlant {
@@ -135,7 +231,30 @@ mod harvest_tests {
 
     fn plant() -> GrowingPlant {
         GrowingPlant { plant: 0, growth: 1.0, water: 70.0, weedy: false,
-            ready: 3, harvests_left: 2, next_ready: 0.0, quality: 0.55, care: 0.5 }
+            ready: 3, harvests_left: 2, next_ready: 0.0, quality: 0.55, care: 0.5, vigor: 0.0, dead: false, fertilizer: None }
+    }
+
+    #[test]
+    fn a_plant_left_dry_dies_in_days_and_fertilizer_wears_off() {
+        // (A tomato's soil: -40 dry, 40 neither, 90 wet.)
+        let soil = [-40.0, 40.0, 90.0];
+        let mut p = plant();
+        p.water = 0.0;
+        let died: Vec<bool> = (0..5).map(|_| reckon(&mut p, soil)).collect();
+        assert_eq!(died, [false, false, false, true, false], "{:?}", p.vigor);
+        assert!(p.dead && !offers(&p, crate::interact::Special::Water) && offers(&p, crate::interact::Special::RevivePlant));
+        // (Watered and fertilized: on it grows; the fertilizer a day shorter each day.)
+        let mut q = plant();
+        q.water = 90.0;
+        q.fertilizer = Some((5.0, 2));
+        assert!(!reckon(&mut q, soil));
+        assert_eq!(q.fertilizer, Some((5.0, 1)));
+        reckon(&mut q, soil);
+        assert_eq!(q.fertilizer, None);
+        assert!(!q.dead);
+        // (A perfect fertilizer: twice the value, two days more.)
+        assert_eq!(fertilizer(10.0, 4, 9), (20.0, 6));
+        assert_eq!(fertilizer(10.0, 4, 3), (9.0, 4));
     }
 
     #[test]
@@ -248,13 +367,17 @@ pub struct SavedPlant {
 pub struct PendingPlants(pub Vec<SavedPlant>, pub Vec<(String, u32)>, pub Vec<String>);
 
 /// What a Sim has just done in the garden (set by the interactions, handled here).
-#[derive(Component, Clone, Copy, Debug)]
+#[derive(Component, Clone, Debug)]
 pub enum GardenRequest {
     Plant { at: Vec3, plant: usize },
     Water(Entity),
     Weed(Entity),
     Harvest(Entity),
     BoughtSeeds,
+    /// Fertilized with one of these from their inventory (its key and quality).
+    Fertilize(Entity, String, u8),
+    Revive(Entity),
+    Dispose(Entity),
 }
 
 /// Minutes from planting to grown, when kept watered.
@@ -290,9 +413,12 @@ pub fn lot_options(world: &crate::loading::WorldInfo, lot: usize) -> Vec<(String
 pub fn offers(p: &GrowingPlant, special: crate::interact::Special) -> bool {
     use crate::interact::Special as S;
     match special {
-        S::Water => p.water < 85.0,
-        S::Weed => p.weedy,
-        S::Harvest => p.ready > 0 && p.harvests_left > 0,
+        S::Water => !p.dead && p.water < 85.0,
+        S::Weed => !p.dead && p.weedy,
+        S::Harvest => !p.dead && p.ready > 0 && p.harvests_left > 0,
+        S::Fertilize => !p.dead && p.fertilizer.is_none(),
+        S::RevivePlant => p.dead,
+        S::TalkToPlant => !p.dead && p.growth > 0.1,
         _ => true,
     }
 }
@@ -375,7 +501,7 @@ fn scale(growth: f32) -> f32 {
 #[allow(clippy::type_complexity)]
 fn garden_requests(
     mut commands: Commands,
-    mut sims: Query<(Entity, &Sim, &GardenRequest, &mut Skills, Option<&crate::wishes::Wishes>, Option<&crate::life::Mood>)>,
+    mut sims: Query<(Entity, &Sim, &GardenRequest, &mut Skills, Option<&crate::wishes::Wishes>, Option<&crate::life::Mood>, Option<&mut crate::inventory::Inventory>)>,
     mut plants: Query<(&mut GrowingPlant, Option<&PlantSoil>)>,
     mut garden: ResMut<Garden>,
     ui: Option<Res<crate::icons::GameUi>>,
@@ -389,11 +515,11 @@ fn garden_requests(
 ) {
     let Some(ui) = ui else { return };
     let mut rng = rand::rng();
-    for (me, sim, req, mut skills, wishes, mood) in &mut sims {
+    for (me, sim, req, mut skills, wishes, mood, inventory) in &mut sims {
         let mood_rate = mood.map_or(1.0, |m| m.skill_rate());
         commands.entity(me).remove::<GardenRequest>();
         let level = skills.level("Gardening") as f32;
-        match *req {
+        match req.clone() {
             GardenRequest::Plant { at, plant } => {
                 // (An unknown seed of a rarity: one of those held, at random, known now.)
                 let (plant, unknown) = match plant.checked_sub(UNKNOWN_SEED).and_then(|r| RARITIES.get(r)) {
@@ -411,13 +537,17 @@ fn garden_requests(
                 let state = GrowingPlant {
                     plant,
                     growth: 0.0,
-                    water: 70.0,
+                    // (GARDEN_DRY=1, for tests: planted in dry soil.)
+                    water: if std::env::var("GARDEN_DRY").is_ok() { 0.0 } else { 70.0 },
                     weedy: false,
                     ready: 0,
                     harvests_left: info.lifetime.max(1),
                     next_ready: 0.0,
                     quality: planted_quality(level, wishes),
                     care: level / 10.0,
+                    vigor: 0.0,
+                    dead: false,
+                    fertilizer: None,
                 };
                 let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
                 if plant_at(&mut commands, &mut assets, &mut ctx, &catalog, info, state, at, rng.random_range(0.0..6.28)).is_some() {
@@ -502,6 +632,46 @@ fn garden_requests(
                     commands.entity(e).try_despawn();
                 }
             }
+            GardenRequest::Fertilize(e, key, quality) => {
+                let Ok((mut p, _)) = plants.get_mut(e) else { continue };
+                let Some(info) = ui.data.plants.get(p.plant) else { continue };
+                let Some((value, days)) = ui.data.ingredients.iter().find(|i| i.key == key).and_then(|i| i.fertilizer) else { continue };
+                // (One of them out of their inventory, dug in.)
+                let Some(mut inv) = inventory else { continue };
+                let Some(k) = inv.0.iter().position(|s| s.key == key && s.quality == quality && matches!(s.kind, crate::inventory::ItemKind::Produce | crate::inventory::ItemKind::Fish)) else { continue };
+                let name = inv.0[k].name.clone();
+                inv.take_one(k);
+                p.fertilizer = Some(fertilizer(value, days, quality));
+                p.care = level / 10.0;
+                learn(sim, me, &mut skills, &mut notes, &mut life, 40.0 * mood_rate, wishes);
+                let a = if name.starts_with(['A', 'E', 'I', 'O', 'U']) { "an" } else { "a" };
+                notes.push(format!("{} fertilized the {} with {a} {name}.", sim.first, info.name.to_lowercase()));
+            }
+            GardenRequest::Revive(e) => {
+                let Ok((mut p, _)) = plants.get_mut(e) else { continue };
+                let Some(info) = ui.data.plants.get(p.plant) else { continue };
+                if !p.dead {
+                    continue;
+                }
+                learn(sim, me, &mut skills, &mut notes, &mut life, 60.0 * mood_rate, wishes);
+                if rng.random_bool(REVIVE_CHANCE) {
+                    p.dead = false;
+                    p.vigor = 0.0;
+                    p.water = p.water.max(60.0);
+                    notes.push(format!("{} brought the {} back to life!", sim.first, info.name.to_lowercase()));
+                } else {
+                    notes.push(format!("{} couldn't revive the {}.", sim.first, info.name.to_lowercase()));
+                }
+            }
+            GardenRequest::Dispose(e) => {
+                let Ok((p, soil)) = plants.get(e) else { continue };
+                let name = ui.data.plants.get(p.plant).map_or("plant".to_string(), |i| i.name.to_lowercase());
+                if let Some(s) = soil {
+                    commands.entity(s.0).try_despawn();
+                }
+                commands.entity(e).try_despawn();
+                notes.push(format!("{} disposed of the {name}.", sim.first));
+            }
             GardenRequest::BoughtSeeds => {
                 // A packet of four: rarer seeds for better gardeners.
                 let mut got: BTreeMap<String, u32> = BTreeMap::new();
@@ -585,6 +755,10 @@ fn grow(
     let mut rng = rand::rng();
     for (mut p, mut tf) in &mut plants {
         let Some(info) = ui.data.plants.get(p.plant) else { continue };
+        // (A dead one does nothing more.)
+        if p.dead {
+            continue;
+        }
         p.water = (p.water - info.water_decay * dt / 60.0).max(0.0);
         if !p.weedy && rng.random_bool((info.weeds as f64 * 0.04 * dt as f64 / 60.0).clamp(0.0, 1.0)) {
             p.weedy = true;
@@ -613,6 +787,66 @@ fn grow(
         }
         if p.growth >= 1.0 && p.ready == 0 && p.harvests_left > 0 && clock.minutes >= p.next_ready && p.water > 0.0 {
             p.ready = rng.random_range(info.harvest_min.max(1)..=info.harvest_max.max(1));
+        }
+    }
+}
+
+/// Each morning at 5, every plant's day reckoned (`reckon`); the dead noted. (PLANT_DAY=1, for
+/// tests: once a game hour.)
+fn evaluate_plants(
+    clock: Res<crate::clock::GameClock>,
+    ui: Option<Res<crate::icons::GameUi>>,
+    mut plants: Query<&mut GrowingPlant>,
+    mut notes: ResMut<Notifications>,
+    mut last: Local<Option<u32>>,
+) {
+    let Some(ui) = ui else { return };
+    let test = std::env::var("PLANT_DAY").is_ok();
+    let day = if test { (clock.minutes / 60.0) as u32 } else { clock.day() };
+    if (!test && clock.hour_f() < EVALUATE_HOUR) || *last == Some(day) {
+        return;
+    }
+    if last.is_none() && !test {
+        // (Not on the day the game's started or loaded, past its hour already.)
+        *last = Some(day);
+        return;
+    }
+    *last = Some(day);
+    for mut p in &mut plants {
+        let Some(info) = ui.data.plants.get(p.plant) else { continue };
+        if reckon(&mut p, info.soil_bonus) {
+            notes.push(format!("The {} has died.", info.name.to_lowercase()));
+        }
+    }
+}
+
+/// A dead plant's parts in withered browns (its own colours kept, for when it's revived).
+#[derive(Component)]
+struct OwnLook(Handle<StandardMaterial>);
+
+fn dead_looks(
+    mut commands: Commands,
+    plants: Query<(&GrowingPlant, &Children)>,
+    kids: Query<&Children>,
+    mut parts: Query<(&mut MeshMaterial3d<StandardMaterial>, Option<&OwnLook>)>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+) {
+    for (p, children) in &plants {
+        let all: Vec<Entity> = children.iter().flat_map(|c| std::iter::once(c).chain(kids.get(c).into_iter().flat_map(|k| k.iter()))).collect();
+        for e in all {
+            let Ok((mut mat, own)) = parts.get_mut(e) else { continue };
+            match (p.dead, own) {
+                (true, None) => {
+                    let Some(m) = mats.get(&mat.0).cloned() else { continue };
+                    commands.entity(e).insert(OwnLook(mat.0.clone()));
+                    mat.0 = mats.add(StandardMaterial { base_color: Color::srgb(0.42, 0.32, 0.18), perceptual_roughness: 1.0, ..m });
+                }
+                (false, Some(own)) => {
+                    mat.0 = own.0.clone();
+                    commands.entity(e).remove::<OwnLook>();
+                }
+                _ => {}
+            }
         }
     }
 }
