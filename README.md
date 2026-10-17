@@ -162,6 +162,8 @@ installation is unreachable.
   to the household's Sims, else someone known; never a grown-up and a child who don't know each
   other), getting on a little better every five minutes of it, and every twenty to fifty
   something learned about them, one of their traits; good for Social and fun as the game's.
+  *Chat... ›* picks whom (the game's `ChatSpecific`): someone they know who isn't there or of
+  the household.
 - **The computer and the traits**, as the game's: a Genius can Solve Hard Problems (45 minutes
   of Logic; three times in five solved, for a prize of up to §1,000, in the game's words); a
   Workaholic can phone to Check Up On Work, and half the time there's something to be getting on
@@ -292,7 +294,10 @@ installation is unreachable.
 - **Mail**: on Mondays and Thursdays the mail carrier walks up in uniform, puts the bills in
   the mailbox and the flag up (the game's animation); they're paid there (Sims see
   to them on their own too); bills left three days bring the repo man, who takes things worth
-  what's owed. The paper is delivered every morning, to read or look for a job in. Bills are
+  what's owed. A Good Sim can donate at the mailbox (an Evil one to undermine the cause), once
+  a day: §100, §250 or §500 to either of the week's two causes from the game's `Charity` table
+  (its general ones and their traits', in the game's names), for Charitable (Fiendishly
+  Delighted) 10, 20 or 30. The paper is delivered every morning, to read or look for a job in. Bills are
   the game's 4.5% of what the home lot's things are worth, and things lose worth as the game
   has them do: 15% once the shopping's done (till then they sell back at full price), 10% of
   their price each midnight after, never more than 40%; burnt things are worth nothing. Sold,
@@ -395,7 +400,13 @@ installation is unreachable.
   someone of the household goes to greet them and let them in; left two hours, they go home),
   prank call them (the game's `CallPrank`: the Childish, the Friendly and Loners laugh along;
   anyone else is put out, the talk between them turned Insulting, and the prankster has a
-  Successful Prank), order pizza and call the services. Calls come in too, as the game's: every six hours or so,
+  Successful Prank), order pizza and call the services, or take time off work (the game's
+  `CallToTakeUnpaidTimeOff`): within four hours of a shift, *Call In Sick* (when sick, a paid
+  day off) or *Call In Fake Sick* (the same, but found out at the day's end 15% of the time,
+  more for the absent-minded, the unlucky, anyone who went out and those who call in sick
+  often, less for Workaholics and the lucky: 25 performance off); or *Take Unpaid Time Off...*
+  a day, two or five, not again for 48, 72 or 240 hours; or quit. Calls come in too, as the game's (unless
+  the phones are silenced, the game's *Silence Phone*): every six hours or so,
   from seven in the morning to ten at night, someone the household knows may ring (for a chat,
   liking them 25 or more; to hang out, 40 or more). The phone rings, it's answered with the
   game's clip, and the game's question comes up: "Bella would like to chat. Does Mia want to
@@ -910,7 +921,11 @@ installation is unreachable.
   which is more fun to them; Cookin' Cable teaches Cooking (and now and then a recipe), Got
   Garden? Gardening and Fishing Fracas Fishing; Terror TV frightens neurotic, cowardly and
   over-emotional Sims off it. *Work Out* puts Fit Net on: jumping jacks, knee bends and side
-  stretches in front of the set (the game's animations) for Athletic skill.
+  stretches in front of the set (the game's animations) for Athletic skill. A set can be turned
+  on and left on, or off again, there and then (the game's `TurnOnTV`, `TurnOffTV`). A stereo
+  has *Cardio Exercise* and, for teens and up, *Strength Training* (the game's
+  `AthleticGameObject.WorkOut` there), the same exercises with it put on the game's workout
+  station, Electronica.
 - **Reading**: *Read a Book* at a bookshelf takes a book down (the game's animation), carries it
   to the nearest free sofa or chair and reads it sitting there, turning the pages (standing at
   the shelf when there's no seat free). The morning paper is picked up off the ground and carried
@@ -918,7 +933,9 @@ installation is unreachable.
 - **Fireplaces**: Sims light a fire with the game's animations; it burns a few hours, flames
   dancing in the hearth and a flickering warm light on the room, and they warm their hands by
   it or put it out. Now and then a spark catches the floor in front. Candles are lit and blown
-  out too: a little flame and a soft flickering light for a few hours.
+  out too: a little flame and a soft flickering light for a few hours. Anyone within ten metres
+  of a fire is Cozy (the game's `CozyFireBuffNormal`, 10); *Poke Fire* (the game's poker clips,
+  fifteen minutes) sets it raging for twenty, brighter, and Cozy 20.
 - **Homework**: children and teens come home from school (Monday to Friday) with homework,
    and sit down at a table to do it (the game's homework animations and base completion rate;
    faster for Bookworms, Workaholics and Multi-Taskers, slower for Perfectionists); done, it
@@ -1100,7 +1117,9 @@ installation is unreachable.
   in about ten simoleons a level for the household. `TIPS=1` plays the selected Sim for tips
   with a visitor watching (a test).
 - **Brushing teeth** at a sink (the game's brushTeeth animation, toothbrush in hand) leaves the
-  game's *Minty Breath* moodlet for four hours, as its `Sink.BrushTeeth` does.
+  game's *Minty Breath* moodlet for four hours, as its `Sink.BrushTeeth` does. A *Sponge Bath*
+  there (teens and up, the sponge in hand) washes them till they're clean, the game's 400
+  Hygiene an hour.
 - **Decor**: the things in the room a household Sim is in at home (or within ten metres of them
   outdoors) make it *Decorated*, *Nicely Decorated* or *Beautifully Decorated*, the game's
   moodlets, as the game judges a room: each thing's class's `EnvironmentScore`, the best in

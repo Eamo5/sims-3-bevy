@@ -846,10 +846,13 @@ pub enum MoodletKind {
     AnxiousStove,
     AnxiousFireplace,
     FeelingCalm,
+    /// A donation to charity (`charity`): the Good's, and the Evil's to undermine one.
+    Charitable,
+    FiendishlyDelighted,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 113] = {
+    pub const ALL: [MoodletKind; 115] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -861,7 +864,7 @@ impl MoodletKind {
             Disgusted, Mourning, FreshClothing, VeryFreshClothing, HolidayCheer, SpringFling, SummerFun, SpookyTime,
             Decorated, NicelyDecorated, BeautifullyDecorated, GreatMeal, Stressed, Winner, Overworked, IAmBeautiful, SugarRush,
             GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, NiceNails, CompletelyAtEase, Horrified, Tranquil, BornToDoThis, DrawnIn, OutAfterCurfew, CaughtAfterCurfew, CozyFire, DivineMeal, Attractive, SuccessfulPrank, PrankedNegative, PrankedPositive,
-            AnxiousSink, AnxiousStove, AnxiousFireplace, FeelingCalm,
+            AnxiousSink, AnxiousStove, AnxiousFireplace, FeelingCalm, Charitable, FiendishlyDelighted,
         ]
     };
 
@@ -1010,6 +1013,8 @@ impl MoodletKind {
                 -15,
                 5.0,
             ),
+            Charitable => md("Charitable", "It feels great to help out other Sims, especially when they are in need.", 10, 24.0),
+            FiendishlyDelighted => md("Fiendishly Delighted", "Sims of the Evil persuasion take pleasure in the misfortune of others.", 15, 6.0),
             FeelingCalm => md(
                 "Feeling Calm",
                 "It turns out it was just anxiety getting the best of your Sim. The object wasn't left turned on and impending disaster wasn't looming. But, double checking helps to calm the anxiety.",
@@ -1139,6 +1144,8 @@ impl MoodletKind {
             // (Named for what about, as the game's `SetAnxietyType` does.)
             AnxiousSink | AnxiousStove | AnxiousFireplace => ("FeelingAnxious", false),
             FeelingCalm => ("FeelingCalm", true),
+            Charitable => ("Charitable", true),
+            FiendishlyDelighted => ("FiendishlyDelighted", true),
         }
     }
 }

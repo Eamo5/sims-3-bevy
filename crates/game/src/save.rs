@@ -150,6 +150,12 @@ pub struct SavedSim {
     /// In the book club (a Bookworm's, the game's `InBookClub`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub book_club: bool,
+    /// Time off work asked for by phone (`timeoff`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_off: Option<crate::timeoff::TimeOff>,
+    /// This week's charities, and when they last gave (`charity`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub charities: Option<crate::charity::Charities>,
     /// Ranked chess: wins, losses and rank.
     #[serde(default)]
     pub chess: Option<crate::chess::ChessRecord>,
@@ -596,6 +602,8 @@ fn saved_look(sim: &Sim) -> SavedSim {
         skill_books: Vec::new(),
         novels: Vec::new(),
         book_club: false,
+        time_off: None,
+        charities: None,
         chess: None,
         inventory: Default::default(),
         toddler: None,
@@ -882,7 +890,7 @@ fn save_game(
                     Option<&crate::portraits::Staged>,
                     Option<&crate::classes::ClassesTaken>,
                     Option<&crate::skillbooks::SkillBooks>,
-                    (Option<&crate::novels::Novels>, Has<crate::computertraits::BookClub>),
+                    (Option<&crate::novels::Novels>, Has<crate::computertraits::BookClub>, Option<&crate::timeoff::TimeOff>, Option<&crate::charity::Charities>),
                 ),
             ),
         ),
@@ -932,7 +940,7 @@ fn save_game(
     // (The ghosts too: whom the living know among the dead.)
     let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).chain(ghosts.iter().map(|g| (g.0, g.1.id))).collect();
     let mut saved = Vec::new();
-    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes, books, (novels, book_club)))) in &sims {
+    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes, books, (novels, book_club, time_off, charities)))) in &sims {
         if let Some(s) = staged {
             debug!("saving {} during portrait: scene {:?}, gameplay {:?}", sim.first, tf.translation, s.original.translation);
         }
@@ -1008,6 +1016,8 @@ fn save_game(
             skill_books: books.map(|b| b.0.clone()).unwrap_or_default(),
             novels: novels.map(|b| b.0.clone()).unwrap_or_default(),
             book_club,
+            time_off: time_off.cloned(),
+            charities: charities.cloned(),
             chess: chess.copied(),
             inventory: inventory.cloned().unwrap_or_default(),
             toddler: toddler.copied(),
@@ -1251,6 +1261,12 @@ pub(crate) fn apply_loaded_game(
         }
         if !s.novels.is_empty() {
             ec.insert(crate::novels::Novels(s.novels.clone()));
+            if let Some(t) = &s.time_off {
+                ec.insert(t.clone());
+            }
+            if let Some(c) = &s.charities {
+                ec.insert(c.clone());
+            }
             if s.book_club {
                 ec.insert(crate::computertraits::BookClub);
             }

@@ -93,6 +93,10 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_fireplace_light_start",
     "a2o_fireplace_putOut",
     "a2o_fireplace_warmHands",
+    // (Poking the fire, the poker in hand: its clips and the poker's.)
+    "a2o_fireplace_poke_",
+    // (A sponge bath at the sink, the sponge in hand.)
+    "a2o_sink_spongeBath",
     // Fire pits, the urinal, the toy oven, the buffet, the picnic basket, the rubber duck.
     "a2o_firePit_light_start",
     "a2o_firePit_putOut",

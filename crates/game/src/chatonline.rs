@@ -1,5 +1,6 @@
-//! Chatting online at a computer, as the game's `Computer.ChatRandom`: a Sim of the town to chat
-//! with (someone new, for the household's own; else someone known), the two of them getting on a
+//! Chatting online at a computer, as the game's `Computer.ChatRandom` ("Chat with Someone"): a
+//! Sim of the town to chat with (someone new, for the household's own; else someone known), or
+//! the one chosen from "Chat..." (`ChatSpecific`: someone known), the two of them getting on a
 //! little better every five minutes of it (`ChatRelationshipIncreaseEveryXMinutes`,
 //! `ChatRelationshipIncrease`), and now and then (every 20 to 50 minutes,
 //! `ChatLearnSomethingFrequency`) something learned about them: one of their traits. Social and fun
@@ -64,11 +65,11 @@ fn chatting(queue: &ActionQueue, objects: &Query<&crate::interact::GameObject>) 
     })
 }
 
-/// Sat down to chat: the chat begun.
+/// Sat down to chat: the chat begun (with whom they chose, if they did).
 fn start_chats(mut commands: Commands, sims: Query<(Entity, &ActionQueue), Without<ChattingOnline>>, objects: Query<&crate::interact::GameObject>) {
     for (e, q) in &sims {
         if chatting(q, &objects) {
-            commands.entity(e).insert(ChattingOnline::new());
+            commands.entity(e).insert(ChattingOnline { with: q.0.front().and_then(|a| a.chat_with), ..ChattingOnline::new() });
         }
     }
 }
@@ -89,6 +90,14 @@ fn chat(
         if !chatting(queue, &objects) {
             commands.entity(e).remove::<ChattingOnline>();
             continue;
+        }
+        // (Just begun with the one they chose: the chat's clock started.)
+        if c.next_liking == 0.0 {
+            c.next_liking = now + LIKING_EVERY;
+            c.next_learn = now + rng.random_range(LEARN_EVERY);
+            if let Some((_, s)) = c.with.and_then(|w| town.get(w).ok()) {
+                debug!("{} chats online with {}, as they chose", sim.first, s.full_name());
+            }
         }
         // Someone to chat with: someone new (for the household's own), else someone known.
         if c.with.is_none_or(|w| !town.contains(w)) {

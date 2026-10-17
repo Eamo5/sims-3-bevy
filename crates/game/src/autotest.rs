@@ -2730,7 +2730,10 @@ fn auto_fence(
     let (ops, cost) = if pool.is_some() {
         crate::build::plan_pool(b, false, b.view_level, IVec2::new(n[0], n[1]), IVec2::new(n[2], n[3]))
     } else {
-        let Some(style) = ui.data.fences.get(n.get(4).copied().unwrap_or(0) as usize) else { return };
+        // (FENCE_NAME=<part>: the style by its name, a half wall's say, rather than its place.)
+        let named = std::env::var("FENCE_NAME").ok().and_then(|want| ui.data.fences.iter().find(|f| f.name.to_lowercase().contains(&want.to_lowercase())));
+        let Some(style) = named.or_else(|| ui.data.fences.get(n.get(4).copied().unwrap_or(0) as usize)) else { return };
+        info!("fence test: {} ({}half wall)", style.name, if style.half_wall { "" } else { "not a " });
         crate::build::plan_fence(b, style, false, b.view_level, IVec2::new(n[0], n[1]), IVec2::new(n[2], n[3]))
     };
     let (mut lo, mut hi) = (IVec2::MAX, IVec2::MIN);
@@ -3964,6 +3967,22 @@ fn auto_action(
         if let Ok(mut q) = sel.single_mut() {
             *done = true;
             q.push_player(crate::interact::Action::new("Check Up On Work", crate::interact::ActionKind::CheckUpOnWork, false));
+        }
+        return;
+    }
+    // "TimeOff:sick|fake|1|2|5": the selected Sim phones for time off work.
+    if let Some(what) = name.strip_prefix("TimeOff:") {
+        use crate::timeoff::Ask;
+        let ask = match what {
+            "sick" => Ask::Sick,
+            "fake" => Ask::FakeSick,
+            "2" => Ask::Unpaid(1),
+            "5" => Ask::Unpaid(2),
+            _ => Ask::Unpaid(0),
+        };
+        if let Ok(mut q) = sel.single_mut() {
+            *done = true;
+            q.push_player(crate::interact::Action::new(ask.label(), crate::interact::ActionKind::TimeOff(ask), false));
         }
         return;
     }

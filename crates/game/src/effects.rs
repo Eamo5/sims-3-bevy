@@ -100,6 +100,10 @@ struct TvScreen {
 #[derive(Component)]
 pub struct TvOn;
 
+/// A TV turned on and left on (the game's `TurnOnTV`): on till it's turned off.
+#[derive(Component)]
+pub struct TvLeftOn;
+
 /// A TV picture: its frames' materials, and when it next changes.
 #[derive(Component)]
 struct TvPicture {
@@ -146,7 +150,7 @@ fn tv_frames(images: &mut Assets<Image>, mats: &mut Assets<StandardMaterial>) ->
 fn tv_screens(
     mut commands: Commands,
     time: Res<Time>,
-    mut tvs: Query<(Entity, &mut TvScreen, &UsedBy)>,
+    mut tvs: Query<(Entity, &mut TvScreen, &UsedBy, Has<TvLeftOn>)>,
     watchers: Query<(&crate::interact::ActionQueue, Option<&crate::surroundings::WatchingTv>)>,
     mut pictures: Query<(&mut TvPicture, &mut MeshMaterial3d<StandardMaterial>)>,
     mut lights: Query<&mut PointLight>,
@@ -165,8 +169,8 @@ fn tv_screens(
             _ => None,
         })
         .collect();
-    for (e, mut tv, used) in &mut tvs {
-        match (used.0.is_some() || watched.contains(&e), tv.shown) {
+    for (e, mut tv, used, left_on) in &mut tvs {
+        match (used.0.is_some() || watched.contains(&e) || left_on, tv.shown) {
             (true, None) => {
                 if frames.is_empty() {
                     *frames = tv_frames(&mut images, &mut mats);

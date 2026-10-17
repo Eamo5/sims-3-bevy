@@ -694,7 +694,7 @@ const DEMOTION_WARNING_MINUTES: f64 = 48.0 * 60.0;
 
 /// Head to work before the shift; come home with pay and a performance review.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
-fn work_schedule(
+pub fn work_schedule(
     mut commands: Commands,
     clock: Res<GameClock>,
     exit: Option<Res<LotExit>>,

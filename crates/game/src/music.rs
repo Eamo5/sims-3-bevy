@@ -16,7 +16,7 @@ impl Plugin for MusicPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MusicLibrary>()
             .add_systems(OnEnter(AppState::InGame), load_music)
-            .add_systems(Update, (stereo_music, stereo_volume, favorite_music).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (workout_station, stereo_music, stereo_volume, favorite_music).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -46,6 +46,26 @@ struct StereoMusic(Entity, String);
 /// one of its own choosing.
 #[derive(Component, Clone, PartialEq)]
 pub struct StereoOn(pub Option<String>);
+
+/// The game's workout station (its `Stereo` table's `IsWorkoutStation`).
+const WORKOUT_STATION: &str = "stereo_electronica";
+
+/// Working out to a stereo: it's put on its workout station, as the game's `SwitchToWorkOutChannel`.
+fn workout_station(mut commands: Commands, sims: Query<&crate::interact::ActionQueue>, objects: Query<(&crate::interact::GameObject, Option<&StereoOn>)>) {
+    for q in &sims {
+        let Some(a) = q.current() else { continue };
+        let crate::interact::ActionKind::Object { target, def } = a.kind else { continue };
+        if !matches!(a.phase, crate::interact::Phase::Running(_)) {
+            continue;
+        }
+        let Ok((o, on)) = objects.get(target) else { continue };
+        if crate::interact::interactions_for(o.kind).get(def).is_some_and(|d| matches!(d.special, crate::interact::Special::CardioWorkOut | crate::interact::Special::StrengthWorkOut))
+            && on.is_none_or(|s| s.0.as_deref() != Some(WORKOUT_STATION))
+        {
+            commands.entity(target).insert(StereoOn(Some(WORKOUT_STATION.to_string())));
+        }
+    }
+}
 
 /// The stations a stereo can be changed to: the game's that are installed, with their names.
 pub fn stations(sounds: Option<&crate::sound::Sounds>) -> Vec<(&'static str, String)> {

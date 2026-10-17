@@ -20,12 +20,16 @@ pub struct CallsPlugin;
 
 impl Plugin for CallsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (place_calls, answer_calls, call_answers).chain().run_if(in_state(PlayMode::Live)));
+        app.init_resource::<PhonesSilenced>().add_systems(Update, (place_calls, answer_calls, call_answers).chain().run_if(in_state(PlayMode::Live)));
         if std::env::var("CALL").is_ok() {
             app.add_systems(Update, call_test_friends.before(place_calls).run_if(in_state(PlayMode::Live)));
         }
     }
 }
+
+/// The household's phones silenced (the game's `SilenceUnsilencePhone`): no calls come in.
+#[derive(Resource, Default)]
+pub struct PhonesSilenced(pub bool);
 
 /// The phone ringing for a Sim: who's calling, what for, and till when it rings.
 #[derive(Component, Clone, Copy, Debug)]
@@ -93,7 +97,11 @@ fn place_calls(
     mut play: MessageWriter<crate::sound::PlaySound>,
     world: Res<crate::loading::CurrentWorld>,
     (town, story, dormant, household): (Option<Res<crate::premade::TownPremades>>, Res<crate::story::TownStory>, Res<crate::household::Dormant>, Option<Res<crate::interact::Household>>),
+    silenced: Res<PhonesSilenced>,
 ) {
+    if silenced.0 {
+        return;
+    }
     let now = clock.minutes;
     let due = *next.get_or_insert(now + INTERVAL_HOURS * 60.0 * rand::rng().random_range(0.3..1.0));
     // (Tests: CALL=chat|invite rings at once.)

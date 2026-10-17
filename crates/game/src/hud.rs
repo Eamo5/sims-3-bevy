@@ -119,6 +119,8 @@ const CHANGE_STATION: &str = "Change to";
 
 /// The TV's channel menu (the game's "Change to...": its middle adds the dots).
 const CHANGE_CHANNEL: &str = "Change to";
+/// The computer's chat with someone known (the game's `ChatSpecific`, "Chat...").
+const CHAT_WITH: &str = "Chat";
 /// The bookshelf's skill books' menu.
 const READ_SKILL_BOOK: &str = "Read a Skill Book";
 const READ_NOVEL: &str = "Read a Novel";
@@ -1060,7 +1062,7 @@ fn world_click(
         Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed)): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q))): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1083,6 +1085,8 @@ fn world_click(
             Query<(), With<crate::ghosts::Ghost>>,
             Query<(Has<crate::computertraits::BookClub>, Option<&crate::computertraits::WorkToDo>)>,
             Res<crate::toilets::Unflushed>,
+            Query<(Has<crate::effects::TvOn>, Has<crate::effects::TvLeftOn>)>,
+            (Option<Res<crate::layout::UiAssets>>, Query<&crate::charity::Charities>),
         ),
     ),
     world: Res<CurrentWorld>,
@@ -1387,6 +1391,36 @@ fn world_click(
                 if d.special == Special::Flush && !unflushed.0.contains_key(&t) {
                     continue;
                 }
+                // (A donation, the game's `DonateToCharity`: the Good's or Evil's, once a day, to
+                // either of this week's two causes, as much as the household can spare.)
+                if d.special == Special::Donate {
+                    let day = opp_q.2.day();
+                    let funds = opp_q.4.as_ref().map_or(0, |h| h.funds);
+                    let mine = charities_q.get(actor).ok();
+                    if crate::charity::gives(actor_sim, mine, day) && funds > crate::charity::AMOUNTS[2].0 {
+                        let causes = crate::charity::causes_for(actor_sim, mine, day);
+                        if mine.is_none_or(|c| c.causes != causes) {
+                            commands.entity(actor).insert(crate::charity::Charities { causes: causes.clone(), chosen_on: day, gave_on: mine.and_then(|c| c.gave_on) });
+                        }
+                        for cause in &causes {
+                            let name = crate::charity::cause_name(layout_ui.as_deref(), cause);
+                            let title = crate::charity::menu_title(actor_sim, &name);
+                            let list: Vec<(String, ActionKind)> = crate::charity::AMOUNTS.iter().filter(|(a, _)| funds > *a).map(|(a, _)| (format!("Donate §{a}"), ActionKind::Object { target: t, def: i })).collect();
+                            options.push((format!("{title}... ›"), submenu_kind(pie.submenus.len())));
+                            pie.submenus.push((title, list));
+                        }
+                    }
+                    continue;
+                }
+                // (The TV turned on when it's off; off when it's been left on.)
+                let (on, left) = tv_on.get(t).unwrap_or((false, false));
+                if (d.special == Special::TvTurnOn && (on || left)) || (d.special == Special::TvTurnOff && !left) {
+                    continue;
+                }
+                // (Strength training at the stereo: teens and up, as the game's.)
+                if matches!(d.special, Special::StrengthWorkOut | Special::SpongeBath) && !(actor_sim.age == crate::sim::Age::Teen || actor_sim.age.is_grown()) {
+                    continue;
+                }
                 // (At the computer, the traits' own: a Genius's problems, a Workaholic's job, a
                 // Bookworm's club.)
                 let work_to_do = club_q.get(actor).ok().and_then(|c| c.1).is_some_and(|w| w.0 > opp_q.2.minutes);
@@ -1501,6 +1535,25 @@ fn world_click(
                     let list: Vec<(String, ActionKind)> = crate::tvchannels::channels_for(level).map(|(_, c)| (c.name.to_string(), ActionKind::Object { target: t, def: i })).collect();
                     options.push((format!("{CHANGE_CHANNEL}... ›"), submenu_kind(pie.submenus.len())));
                     pie.submenus.push((CHANGE_CHANNEL.to_string(), list));
+                }
+                // (Online, someone they know who isn't here nor one of the household: the game's
+                // "Chat...", `CanSimBeChattedWith`.)
+                if d.special == Special::ChatOnline {
+                    let here = on_lot.get(actor).ok().map(|l| l.0);
+                    let present = |o: Entity| company_q.get(o).is_ok_and(|c| c.3.map(|l| l.0) == here);
+                    let mut list: Vec<(String, ActionKind)> = rels
+                        .0
+                        .keys()
+                        .filter(|o| **o != actor && !present(**o))
+                        .filter_map(|o| sims.get(*o).ok())
+                        .filter(|(s, member, _)| !member && s.age != crate::sim::Age::Toddler && crate::chatonline::may_chat(actor_sim, s, true))
+                        .map(|(s, ..)| (s.full_name(), ActionKind::Object { target: t, def: i }))
+                        .collect();
+                    list.sort_by(|a, b| a.0.cmp(&b.0));
+                    if !list.is_empty() {
+                        options.push((format!("{CHAT_WITH}... ›"), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((CHAT_WITH.to_string(), list));
+                    }
                 }
                 if d.special == Special::Homework && !hw_q.contains(actor) {
                     continue;
@@ -1940,6 +1993,14 @@ fn pie_buttons(
         commands.insert_resource(OpenPhone);
         return;
     }
+    // (The phones silenced or not, there and then.)
+    if let ActionKind::SilencePhone = kind {
+        commands.queue(|w: &mut World| {
+            let mut s = w.resource_mut::<crate::calls::PhonesSilenced>();
+            s.0 = !s.0;
+        });
+        return;
+    }
     // (An inventory stack's actions: see `hudpanels::inventory_panel`.)
     if let ActionKind::InventoryItem(b, owner, stack) = kind {
         commands.insert_resource(crate::inventory::DoItem(b, owner, stack));
@@ -1956,6 +2017,18 @@ fn pie_buttons(
         return;
     }
     let _ = (&mut wishes, &mut notes);
+    // A TV turned on (and left on) or off, there and then (the game's are immediate).
+    if let ActionKind::Object { target, def } = kind
+        && let Some(special) = sofas.get(target).ok().and_then(|o| crate::interact::interactions_for(o.kind).get(def)).map(|d| d.special)
+        && matches!(special, Special::TvTurnOn | Special::TvTurnOff)
+    {
+        if special == Special::TvTurnOn {
+            commands.entity(target).insert(crate::effects::TvLeftOn);
+        } else {
+            commands.entity(target).remove::<crate::effects::TvLeftOn>();
+        }
+        return;
+    }
     // A stereo changed to a station, there and then.
     if title == CHANGE_STATION
         && let ActionKind::Object { target, .. } = kind
@@ -2155,8 +2228,23 @@ fn pie_buttons(
             label = "Go Here".to_string();
         }
         let jog = label == "Jog Here";
+        // (A donation chosen: to which cause, how much.)
+        let donation = title
+            .strip_prefix("Donate to ")
+            .zip(label.strip_prefix("Donate §").and_then(|a| a.parse::<i64>().ok()))
+            .map(|(cause, amount)| (cause.trim_start_matches("Undermine ").to_string(), amount));
+        if donation.is_some() {
+            label = "Donate to Charity".to_string();
+        }
+        // (Someone known chatted with online: "Chat...".)
+        let chat_with = (title == CHAT_WITH).then(|| people.iter().find(|(_, s, _)| s.full_name() == label).map(|(e, ..)| e)).flatten();
+        if chat_with.is_some() {
+            label = format!("Chat with {label}");
+        }
         let mut action = Action::new(label, kind.clone(), false);
         action.jog = jog;
+        action.chat_with = chat_with;
+        action.donation = donation;
         action.novel_genre = novel_genre;
         action.outfit_choice = outfit_choice;
         action.canvas_choice = canvas_choice;
@@ -2861,6 +2949,7 @@ fn phone_button(
     mut notes: ResMut<Notifications>,
     objects: Query<&GameObject>,
     maid: Res<crate::services::MaidService>,
+    (work_q, clock, silenced): (Query<(Option<&crate::careers::Job>, Option<&crate::timeoff::TimeOff>, Option<&crate::life::Moodlets>)>, Res<crate::clock::GameClock>, Res<crate::calls::PhonesSilenced>),
 ) {
     if asked.is_some() {
         commands.remove_resource::<OpenPhone>();
@@ -2945,6 +3034,23 @@ fn phone_button(
             pie.submenus.push(("Move Out".to_string(), out));
         }
     }
+    // Time off work, as the game's "Jobs and Offers...": sick (or fake sick) before a shift, or
+    // unpaid days.
+    if let Ok((Some(job), off, moodlets)) = work_q.get(actor) {
+        let (sick, unpaid) = crate::timeoff::offers(job, off, moodlets, clock.weekday(), clock.hour_f(), clock.minutes);
+        if let Some(ask) = sick {
+            options.push((ask.label(), ActionKind::TimeOff(ask)));
+        }
+        if !unpaid.is_empty() {
+            options.push(("Take Unpaid Time Off... ›".to_string(), submenu_kind(pie.submenus.len())));
+            pie.submenus.push(("Take Unpaid Time Off".to_string(), unpaid.into_iter().map(|a| (a.label(), ActionKind::TimeOff(a))).collect()));
+        }
+    }
+    // (Quitting by phone: the game's `CallToQuitWork`.)
+    if has_job {
+        options.push(("Quit Job".to_string(), ActionKind::QuitJobCall));
+    }
+    options.push((if silenced.0 { "Unsilence Phone" } else { "Silence Phone" }.to_string(), ActionKind::SilencePhone));
     // An elder with a job can retire, on a pension.
     if me.age == crate::sim::Age::Elder && has_job {
         options.push(("Retire".to_string(), ActionKind::Retire));

@@ -1291,6 +1291,20 @@ pub enum Special {
     /// The toilet used, and one left unflushed flushed (`toilets`).
     UseToilet,
     Flush,
+    /// A workout to the stereo (the game's `AthleticGameObject.WorkOut` there: Cardio Exercise,
+    /// and Strength Training for teens and up), on its workout station (`music`).
+    CardioWorkOut,
+    StrengthWorkOut,
+    /// The TV turned on, left on, or off, there and then (the game's immediate `TurnOnTV`,
+    /// `TurnOffTV`: never queued, `hud::pie_buttons`).
+    TvTurnOn,
+    TvTurnOff,
+    /// The fire poked up (the game's `PokeFireInteraction`: it rages a while, `fireplace`).
+    PokeFire,
+    /// A wash at the sink (the game's `Sink.SpongeBath`: teens and up).
+    SpongeBath,
+    /// A donation at the mailbox (`charity`: chosen from its causes' menus, never as itself).
+    Donate,
 }
 
 impl Special {
@@ -1369,7 +1383,10 @@ static MEAL: [InteractionDef; 2] = [
     InteractionDef { special: Special::GrabPlate, ..def("Grab a Plate", 2.0, [9000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) },
     InteractionDef { special: Special::PutAway, ..def("Put Away Leftovers", 3.0, N, Pose::Use) },
 ];
-static MAILBOX: [InteractionDef; 1] = [InteractionDef { special: Special::PayBills, ..def("Pay Bills", 3.0, N, Pose::Use) }];
+static MAILBOX: [InteractionDef; 2] = [InteractionDef { special: Special::PayBills, ..def("Pay Bills", 3.0, N, Pose::Use) },
+    // (The game's `DonateToCharity`, offered as its causes' menus.)
+    InteractionDef { autonomous: false, special: Special::Donate, ..def("Donate to Charity", 2.0, N, Pose::Use) },
+];
 static NEWSPAPER: [InteractionDef; 3] = [
     InteractionDef { special: Special::GetPaper, ..def("Read", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 45.0], Pose::Use) },
     InteractionDef { special: Special::FindJob, ..def("Find a Job", 10.0, N, Pose::Use) },
@@ -1387,11 +1404,13 @@ static GARDEN: [InteractionDef; 3] = [
 static COLLECTIBLE: [InteractionDef; 1] = [InteractionDef { special: Special::Collect, ..def("Collect", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 10.0], Pose::Use) }];
 static FISHING_SPOT: [InteractionDef; 1] =
     [InteractionDef { special: Special::Fish, skill: Some("Fishing"), ..def("Fish", 60.0, [-4.0, -4.0, -3.0, 0.0, -2.0, 25.0], Pose::Use) }];
-static FIREPLACE: [InteractionDef; 4] = [
+static FIREPLACE: [InteractionDef; 5] = [
     InteractionDef { special: Special::LightFire, ..def("Light Fire", 2.0, [0.0, 0.0, 0.0, 0.0, 0.0, 4.0], Pose::Use) },
     InteractionDef { autonomous: false, special: Special::PutOutFire, ..def("Put Out Fire", 2.0, [0.0; 6], Pose::Use) },
     def("Warm Hands", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 14.0], Pose::Use),
     InteractionDef { special: Special::NeuroticCheck, ..def("Check Fireplace", 5.1, N, Pose::Use) },
+    // (The game's `PokeFireStageTime`, 15 minutes; its ITUN's Fun 10 advertised.)
+    InteractionDef { special: Special::PokeFire, ..def("Poke Fire", 15.0, [0.0, 0.0, 0.0, 0.0, 0.0, 10.0], Pose::Use) },
 ];
 static POOL_LADDER: [InteractionDef; 1] = [InteractionDef {
     special: Special::Swim,
@@ -1486,7 +1505,7 @@ static SHOWER: [InteractionDef; 2] = [TAKE_SHOWER, SCRUB];
 static BATHTUB: [InteractionDef; 4] = [TAKE_BATH, BUBBLE_BATH, DUCKY, SCRUB];
 /// A shower over a tub (the game's shower-tubs): a shower or a bath.
 static SHOWER_TUB: [InteractionDef; 5] = [TAKE_SHOWER, TAKE_BATH, BUBBLE_BATH, DUCKY, SCRUB];
-static SINK: [InteractionDef; 5] = [
+static SINK: [InteractionDef; 6] = [
     def("Wash Hands", 6.0, [0.0, 0.0, 0.0, 0.0, 160.0, 0.0], Pose::Use),
     // (Where a dish cleared away is taken without a dishwasher: never on the menu.)
     InteractionDef { autonomous: false, special: Special::WashDishes, ..def("Wash Dishes", 8.0, N, Pose::Use) },
@@ -1494,6 +1513,9 @@ static SINK: [InteractionDef; 5] = [
     def("Brush Teeth", 5.0, [0.0, 0.0, 0.0, 0.0, 120.0, 0.0], Pose::Use),
     SCRUB,
     InteractionDef { special: Special::NeuroticCheck, ..def("Check Sink", 3.9, N, Pose::Use) },
+    // (The game's `SpongeBath`: its ITUN's Hygiene 400 an hour, till clean; advertised weakly
+    // beside a shower's, left to the player here.)
+    InteractionDef { autonomous: false, until_full: Some(HYGIENE), special: Special::SpongeBath, ..def("Sponge Bath", 30.0, [0.0, 0.0, 0.0, 0.0, 400.0, 0.0], Pose::Use) },
 ];
 /// (A flame lit and blown out: the fireplace's, smaller.)
 static CANDLE: [InteractionDef; 2] = [
@@ -1530,12 +1552,14 @@ static CHAIR: [InteractionDef; 8] = [
 ];
 /// The dining chair's "Eat" (not offered in its menu).
 pub const CHAIR_EAT: usize = 1;
-static TV: [InteractionDef; 3] = [
+static TV: [InteractionDef; 5] = [
     InteractionDef { special: Special::TurnOnTv, ..def("Watch TV", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 55.0], Pose::Stand) },
     // (Fit Net: working out along with it, as the game's TV "Work Out".)
     InteractionDef { skill: Some("Athletic"), ..def("Work Out", 60.0, [-10.0, 0.0, -25.0, 0.0, -40.0, 5.0], Pose::Exercise) },
     // (Watched standing when there's no seat facing it free: never on the menu.)
     WATCH_TV,
+    InteractionDef { autonomous: false, special: Special::TvTurnOn, ..def("Turn On", 0.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::TvTurnOff, ..def("Turn Off", 0.0, N, Pose::Use) },
 ];
 /// (The TV watched: from a seat facing it, or standing.)
 const WATCH_TV: InteractionDef = InteractionDef { autonomous: false, special: Special::WatchTv, ..def("Watch the TV", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 55.0], Pose::Stand) };
@@ -1721,8 +1745,10 @@ static DIVING_BOARD: [InteractionDef; 1] = [InteractionDef {
 }];
 static STUFFED_TOY: [InteractionDef; 1] = [def("Play with Toy", 30.0, [0.0, 0.0, -2.0, 6.0, 0.0, 75.0], Pose::Use)];
 static VRGOGGLES: [InteractionDef; 1] = [def("Explore Virtual Worlds", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 95.0], Pose::Use)];
-static STEREO: [InteractionDef; 3] = [
+static STEREO: [InteractionDef; 5] = [
     def("Dance", 45.0, [0.0, 0.0, -6.0, 0.0, -6.0, 70.0], Pose::Dance),
+    InteractionDef { skill: Some("Athletic"), special: Special::CardioWorkOut, ..def("Cardio Exercise", 60.0, [-10.0, 0.0, -25.0, 0.0, -40.0, 5.0], Pose::Exercise) },
+    InteractionDef { skill: Some("Athletic"), special: Special::StrengthWorkOut, ..def("Strength Training", 60.0, [-10.0, 0.0, -25.0, 0.0, -40.0, 5.0], Pose::Exercise) },
     // (The game's `TurnOnOff`: a button pressed.)
     InteractionDef { autonomous: false, special: Special::StereoOn, ..def("Turn On", 1.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::StereoOff, ..def("Turn Off", 1.0, N, Pose::Use) },
@@ -1909,7 +1935,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Nap" if kind == ObjectKind::Sofa => A::new(Some("a2o_sofa_sit_trans_nap_x"), &["a2o_sofa_nap_loop1_x"]),
         "Eat" if matches!(kind, ObjectKind::Chair | ObjectKind::PicnicTable) => A::new(Some("a2o_eat_diningIn_fork_start_x"), &["a2o_eat_diningIn_fork_neat_x"]).ending(&["a2o_eat_diningIn_fork_stop_x"], 0.9),
         "Do Homework" => A::new(Some("a2o_homework_table_start_x"), &["a2o_homework_table_write_x", "a2o_homework_table_read_x", "a2o_homework_table_think_x", "a2o_homework_table_erase_x"]),
-        "Pay Bills" => A::new(None, &["a2o_mailbox_getMail_x"]),
+        "Pay Bills" | "Donate to Charity" => A::new(None, &["a2o_mailbox_getMail_x"]),
         "Water" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_wateringCan_start_x"), &["a2o_gardening_wateringCan_waterPlants_x"]),
         "Weed" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_pullWeeds_x"]),
         "Harvest" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_bendover_start_x"), &["a2o_gardening_bendover_harvestmed_x"]),
@@ -1956,6 +1982,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Check Sink" => A::new(None, &["a2o_trait_neurotic_check_sink_x"]),
         "Check Stove" => A::new(None, &["a2o_trait_neurotic_check_stove_x"]),
         "Check Fireplace" => A::new(None, &["a2o_trait_neurotic_check_fireplace_x"]),
+        // (The poker in hand, jabbing and catching their breath: the fireplace's `Loop PokeFire`.)
+        "Poke Fire" => A::new(Some("a2o_fireplace_poke_start_x"), &["a2o_fireplace_poke_loopjab_x", "a2o_fireplace_poke_loopbreathe_x"]),
         "Light Candle" | "Blow Out" => A::new(None, &["a2o_object_genericSwipe_x"]),
         "Put Out Fire" => A::new(None, &["a2o_fireplace_putOut_x"]),
         "Warm Hands" => A::new(Some("a2o_fireplace_warmHands_start_x"), &["a2o_fireplace_warmHands_x"]),
@@ -1985,6 +2013,9 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Flush" => A::new(None, &["a2o_toilet_flush_x"]),
         "Take Shower" => A::new(Some("a2o_shower_takeShower_getIn_x"), &["a2o_shower_takeShower_loop"]).ending(&["a2o_shower_takeShower_getOut_x"], 2.4),
         "Wash Hands" => A::new(Some("a2o_sink_washhands_start_x"), &["a2o_sink_washhands_scrubHands_x", "a2o_sink_washhands_rinseHands_x"]).ending(&["a2o_sink_washhands_stop_x"], 2.6),
+        // (The sponge in hand: the sink's `SpongeBath` states.)
+        "Sponge Bath" => A::new(Some("a2o_sink_spongeBath_wash_start_x"), &["a2o_sink_spongeBath_wash_loop_x", "a2o_sink_spongeBath_wash_loop1_x", "a2o_sink_spongeBath_wash_loop2_x"])
+            .ending(&["a2o_sink_spongeBath_wash_stop_x"], 1.5),
         "Brush Teeth" => A::new(Some("a2o_sink_brushTeeth_start_x"), &["a2o_sink_brushTeeth_Loop"]).ending(&["a2o_sink_brushTeeth_stop_x"], 2.6),
         // (Only the plain loop: the toss-and-turn ones are authored from beside the bed.)
         "Sleep" => A::new(Some("a2o_bed_getIn_made_x"), &["a2o_bed_sleep_back_loop_x"]).ending(&["a2o_bed_getout_start_x", "a2o_bed_getout_stop_x"], 7.3),
@@ -2034,7 +2065,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Paint" => A::new(Some("a2o_painting_start_x"), &["a2o_painting_loopMed", "a2o_painting_loopLarge", "a2o_painting_consider"]),
         "Play Guitar" => A::new(None, &["a2o_guitar_play_med_loop", "a2o_guitar_play_high_loop", "a2o_guitar_play_low_loop"]),
         // (To Fit Net on the TV: jumping jacks, knee bends and stretches.)
-        "Work Out" if kind == ObjectKind::Tv => A::new(Some("a_workOut_start_x"), &["a_workOut_jumpingJack_loop_x", "a_workOut_kneeBend_loop_x", "a_workOut_stretchSide_loop_x"])
+        "Work Out" | "Cardio Exercise" | "Strength Training" if matches!(kind, ObjectKind::Tv | ObjectKind::Stereo) => A::new(Some("a_workOut_start_x"), &["a_workOut_jumpingJack_loop_x", "a_workOut_kneeBend_loop_x", "a_workOut_stretchSide_loop_x"])
             .ending(&["a_workOut_stop_x"], 1.0),
         "Work Out" => A::new(Some("a2o_treadmill_jog_start_x"), &["a2o_treadmill_jog_loop"]),
         // (On the bench, then the game's three lifts in turn, each started and put down.)
@@ -2541,6 +2572,12 @@ pub enum ActionKind {
     PrankCall { target: Entity },
     /// A Workaholic's call to Check Up On Work (`computertraits`).
     CheckUpOnWork,
+    /// A call for time off work: sick, fake sick, or unpaid days (`timeoff`).
+    TimeOff(crate::timeoff::Ask),
+    /// A call to quit their job (the game's `CallToQuitWork`).
+    QuitJobCall,
+    /// The phones silenced, or not, there and then (`calls::PhonesSilenced`: never queued).
+    SilencePhone,
     /// Phone the boss: an elder retires from their career, on a pension.
     Retire,
     /// Spend lifetime happiness on a reward (instant, from the rewards menu).
@@ -2629,11 +2666,15 @@ pub struct Action {
     pub seated: bool,
     /// Gone at a jog (the game's "Jog Here"): `jog`.
     pub jog: bool,
+    /// Who they chat with online, chosen from "Chat..." (`chatonline`).
+    pub chat_with: Option<Entity>,
+    /// A donation chosen at the mailbox: to what, and how much (`charity`).
+    pub donation: Option<(String, i64)>,
 }
 
 impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
-        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, channel_choice: None, book_choice: None, fish_choice: None, recipe_choice: None, for_one: false, approach: None, social_outcome: None, seated: false, jog: false }
+        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, channel_choice: None, book_choice: None, fish_choice: None, recipe_choice: None, for_one: false, approach: None, social_outcome: None, seated: false, jog: false, chat_with: None, donation: None }
     }
 }
 
@@ -3277,6 +3318,9 @@ pub(crate) fn run_actions(
                         | ActionKind::PhoneChat { .. }
                         | ActionKind::PrankCall { .. }
                         | ActionKind::CheckUpOnWork
+                        | ActionKind::TimeOff(_)
+                        | ActionKind::QuitJobCall
+                        | ActionKind::SilencePhone
                         | ActionKind::Retire
                         | ActionKind::OrderPizza
                         | ActionKind::Adopt { .. }
@@ -3916,6 +3960,9 @@ pub(crate) fn run_actions(
                             | ActionKind::PhoneChat { .. }
                             | ActionKind::PrankCall { .. }
                             | ActionKind::CheckUpOnWork
+                            | ActionKind::TimeOff(_)
+                            | ActionKind::QuitJobCall
+                            | ActionKind::SilencePhone
                             | ActionKind::Retire
                             | ActionKind::BuyReward(_)
                             | ActionKind::InventoryItem(..)
@@ -4187,7 +4234,20 @@ pub(crate) fn run_actions(
                                         | Special::PottyTrain
                                         | Special::PottyLesson
                                         | Special::EmptyPotty
-                                        | Special::LockDoor => {}
+                                        | Special::LockDoor
+                                        | Special::CardioWorkOut
+                                        | Special::StrengthWorkOut
+                                        | Special::TvTurnOn
+                                        | Special::TvTurnOff => {}
+                                        Special::SpongeBath => {}
+                                        Special::Donate => {
+                                            if let Some((cause, amount)) = action.donation.clone() {
+                                                commands.entity(me).insert(crate::charity::Donated { cause, amount });
+                                            }
+                                        }
+                                        Special::PokeFire => {
+                                            commands.entity(*target).insert(crate::fireplace::Raging(clock.minutes + crate::fireplace::RAGING_MINUTES));
+                                        }
                                         // (Chatting's done as it goes: `chatonline`.)
                                         Special::ChatOnline => {}
                                         // (At a mirror: what it leaves them feeling.)
@@ -5104,6 +5164,22 @@ pub(crate) fn run_actions(
                                 commands.entity(me).insert(crate::computertraits::CheckedUp);
                             }
                         }
+                        ActionKind::QuitJobCall => {
+                            if elapsed >= crate::timeoff::CALL_MINUTES {
+                                finished = true;
+                                if job.is_some() {
+                                    commands.entity(me).remove::<Job>();
+                                    notes.push(format!("{} called their boss and quit their job.", sim.first));
+                                }
+                            }
+                        }
+                        ActionKind::SilencePhone => finished = true,
+                        ActionKind::TimeOff(ask) => {
+                            if elapsed >= crate::timeoff::CALL_MINUTES {
+                                finished = true;
+                                commands.entity(me).insert(crate::timeoff::Called(*ask));
+                            }
+                        }
                         ActionKind::PrankCall { target } => {
                             if elapsed >= crate::pranks::PRANK_MINUTES {
                                 finished = true;
@@ -5764,6 +5840,10 @@ fn autonomy(
                 }
                 // (A Neurotic's own checks.)
                 if !crate::neurotic::offers(d.special, sim) {
+                    continue;
+                }
+                // (Strength training's for teens and up, as a sponge bath is.)
+                if matches!(d.special, Special::StrengthWorkOut | Special::SpongeBath) && !(sim.age == Age::Teen || sim.age.is_grown()) {
                     continue;
                 }
                 // (Plasma for vampires, and vampires drink it rather than eat.)

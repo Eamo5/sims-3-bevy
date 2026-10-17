@@ -14,7 +14,7 @@ pub struct FireplacePlugin;
 
 impl Plugin for FireplacePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<FireplaceRequest>().add_systems(Update, (requests, burn, glow).chain().run_if(in_state(PlayMode::Live)));
+        app.add_message::<FireplaceRequest>().add_systems(Update, (requests, burn, glow, cozy).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -32,6 +32,19 @@ pub enum FireplaceRequest {
     Light(Entity),
     PutOut(Entity),
 }
+
+/// A fire poked up to raging (the game's `PokeFireSuccess`), till then.
+#[derive(Component)]
+pub struct Raging(pub f64);
+
+/// The game's `PokeFireTime`: how long a poked fire rages (game minutes).
+pub const RAGING_MINUTES: f64 = 20.0;
+/// The game's `CozyFireBuffNormal`, `CozyFireBuffRaging` and `CozyFireBuffRange` (metres).
+const COZY: i32 = 10;
+const COZY_RAGING: i32 = 20;
+const COZY_RANGE: f32 = 10.0;
+/// How long Cozy lasts, kept up while near (the Flame Fruit's leaves it at an hour to go).
+const COZY_MINUTES: f64 = 120.0;
 
 /// How long a fire burns (game minutes), and a candle.
 const BURN_MINUTES: f64 = 300.0;
@@ -169,12 +182,54 @@ fn burn(
 }
 
 /// The hearth's light flickers.
-fn glow(time: Res<Time>, mut lights: Query<&mut PointLight, With<HearthLight>>, mut candles: Query<&mut PointLight, (With<CandleLight>, Without<HearthLight>)>) {
+fn glow(
+    time: Res<Time>,
+    mut lights: Query<(&mut PointLight, &ChildOf), With<HearthLight>>,
+    mut candles: Query<&mut PointLight, (With<CandleLight>, Without<HearthLight>)>,
+    raging: Query<&Lit, With<Raging>>,
+) {
     let t = time.elapsed_secs();
-    for mut l in &mut lights {
-        l.intensity = 26_000.0 + 9_000.0 * ((t * 11.0).sin() * 0.5 + (t * 27.0).sin() * 0.5);
+    // (A poked fire roars brighter.)
+    let roaring: Vec<Entity> = raging.iter().map(|l| l.flames).collect();
+    for (mut l, parent) in &mut lights {
+        let up = if roaring.contains(&parent.parent()) { 1.6 } else { 1.0 };
+        l.intensity = up * (26_000.0 + 9_000.0 * ((t * 11.0).sin() * 0.5 + (t * 27.0).sin() * 0.5));
     }
     for mut l in &mut candles {
         l.intensity = 2_300.0 + 400.0 * ((t * 13.0).sin() * 0.5 + (t * 31.0).sin() * 0.5);
+    }
+}
+
+/// A fire's warmth: those near it Cozy (the game's `BuffCozyFire` pulse: stronger while it
+/// rages), and a poked fire back to burning once its time's up.
+fn cozy(
+    mut commands: Commands,
+    time: Res<Time>,
+    clock: Res<GameClock>,
+    mut last: Local<f32>,
+    fires: Query<(Entity, &GameObject, &GlobalTransform, Option<&Raging>), With<Lit>>,
+    mut sims: Query<(&GlobalTransform, &mut crate::life::Moodlets), With<crate::sim::Sim>>,
+) {
+    let now = time.elapsed_secs();
+    if now - *last < 1.0 {
+        return;
+    }
+    *last = now;
+    for (e, o, tf, raging) in &fires {
+        if o.kind == crate::interact::ObjectKind::Candle {
+            continue;
+        }
+        if raging.is_some_and(|r| clock.minutes >= r.0) {
+            commands.entity(e).remove::<Raging>();
+        }
+        let strength = if raging.is_some_and(|r| clock.minutes < r.0) { COZY_RAGING } else { COZY };
+        let at = tf.translation();
+        for (stf, mut m) in &mut sims {
+            let p = stf.translation();
+            if (p.y - at.y).abs() > 1.8 || p.xz().distance(at.xz()) > COZY_RANGE {
+                continue;
+            }
+            m.add_valued(crate::life::MoodletKind::CozyFire, clock.minutes, strength, COZY_MINUTES);
+        }
     }
 }

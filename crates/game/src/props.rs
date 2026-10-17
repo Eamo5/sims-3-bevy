@@ -72,6 +72,7 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("firePitSkewer", "FirePitSkewer", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("fireplaceLighter", "AccessoryFireplaceLighter", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("poker", "AccessoryFireplacePoker", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("fireplacePoker", "AccessoryFireplacePoker", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("mixingBowl", "mixingBowlChild", "b__L_Hand_slot", [0.0; 3], [0.0; 3]),
     ("spoon", "spoonChild", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("platePaper", "PlatePaper", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
