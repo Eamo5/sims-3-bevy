@@ -23,7 +23,7 @@ use crate::{AppState, PlayMode};
 static LOG: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| std::env::var_os("SOUND_LOG").is_some());
 
 /// Overall loudness of each kind of sound.
-const SFX_VOLUME: f32 = 0.9;
+pub(crate) const SFX_VOLUME: f32 = 0.9;
 const UI_VOLUME: f32 = 0.6;
 const MUSIC_VOLUME: f32 = 0.45;
 const AMBIENCE_VOLUME: f32 = 0.35;
@@ -86,6 +86,8 @@ impl Sounds {
             return Some(h.clone());
         }
         let bytes: Vec<u8> = self.0.pack.get(&(s3formats::audio::T_SNR, 0, id))?;
+        let format = self.0.bank.samples.get(&id).map_or(s3bake::sounds::FORMAT_MP3, |s| s.format);
+        let bytes = s3bake::sounds::playable(format, bytes)?;
         let h = sources.add(AudioSource { bytes: bytes.into() });
         cache.0.insert(id, h.clone());
         Some(h)
@@ -153,7 +155,7 @@ struct CueLoop {
 }
 
 /// How loud a sound at `at` is for the camera.
-fn spatial_gain(def: &SoundDef, at: Vec3, cam: Option<&SimsCamera>) -> f32 {
+pub(crate) fn spatial_gain(def: &SoundDef, at: Vec3, cam: Option<&SimsCamera>) -> f32 {
     let Some(cam) = cam else { return 1.0 };
     let max = if def.max_distance > 0.0 { def.max_distance } else { 30.0 };
     let min = def.min_distance.clamp(1.0, max * 0.5);

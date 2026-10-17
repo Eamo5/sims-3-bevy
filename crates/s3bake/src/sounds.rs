@@ -1,7 +1,8 @@
 //! The game's sounds: the clips' sound cues (object sounds, Simlish voices, footsteps), UI
 //! clicks, stings, ambience, mode music and the radio stations. Samples are converted once:
-//! EALayer3 is rewrapped losslessly as MP3 and EA-XAS decoded to 16-bit WAV, both formats the
-//! game's audio decoder plays directly. `sounds.bin` maps each sound name to its variants.
+//! EALayer3 is rewrapped losslessly as MP3, a format the game's audio decoder plays directly;
+//! EA-XAS is kept as it is (a quarter the size of the samples decoded) and decoded to 16-bit WAV
+//! as it's first played ([`playable`]). `sounds.bin` maps each sound name to its variants.
 
 use std::collections::{HashMap, HashSet};
 
@@ -12,11 +13,26 @@ use serde::{Deserialize, Serialize};
 use crate::bake::{BakeRoot, Progress, par_map};
 use crate::pack::{PackReader, PackWriter, write_value};
 
-pub const SOUNDS_VERSION: u32 = 11;
+pub const SOUNDS_VERSION: u32 = 13;
 
 /// Sample file formats in `sounds.pack`.
 pub const FORMAT_MP3: u8 = 0;
 pub const FORMAT_WAV: u8 = 1;
+/// EA-XAS as the game has it: its header's length (u32), the header, then its stream if apart.
+pub const FORMAT_XAS: u8 = 2;
+
+/// A sample from `sounds.pack` as a file the audio decoder plays.
+pub fn playable(format: u8, bytes: Vec<u8>) -> Option<Vec<u8>> {
+    if format != FORMAT_XAS {
+        return Some(bytes);
+    }
+    let n = u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?) as usize;
+    let head = bytes.get(4..4 + n)?;
+    let snr = audio::Snr::parse(head)?;
+    let body = if snr.kind == 0 { head.get(snr.header_len..)? } else { bytes.get(4 + n..)? };
+    let pcm = audio::decode_xas(&snr, &audio::blocks(body));
+    Some(audio::wav(&pcm, snr.channels as u16, snr.sample_rate))
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct SoundDef {
@@ -232,6 +248,31 @@ pub const STATIONS: &[&str] = &[
     "stereo_france",
 ];
 
+/// The instruments' music, as the game's `BandInstrument` plays it: practising, a loop for each
+/// skill level (`guitar_playa_group` to `guitar_playk_group`: `GetLoopForSkillLevel`); performed,
+/// the compositions learned from level six (`guitar_playga`... `guitar_playkc`) and the master
+/// tracks (`guitar_mastera`...). By each instrument's `GetLoopForSkillLevelPrefix`.
+pub const INSTRUMENTS: [&str; 5] = ["guitar", "piano", "drums", "bass", "theremin"];
+
+/// The names of the instruments' music.
+pub fn instrument_sounds() -> Vec<String> {
+    let mut out = Vec::new();
+    for p in INSTRUMENTS {
+        for l in 'a'..='k' {
+            out.push(format!("{p}_play{l}_group"));
+        }
+        for l in 'g'..='k' {
+            for v in 'a'..='d' {
+                out.push(format!("{p}_play{l}{v}"));
+            }
+        }
+        for v in 'a'..='e' {
+            out.push(format!("{p}_master{v}"));
+        }
+    }
+    out
+}
+
 /// The concrete sound names a clip cue may stand for.
 pub fn expand_cue(name: &str) -> Vec<String> {
     let mut out = vec![name.to_string(), format!("{name}_lp")];
@@ -277,8 +318,13 @@ fn convert_sample(pkgs: &PackageSet, id: u64) -> Option<(SampleInfo, Vec<u8>)> {
             Some((info(FORMAT_MP3), mp3.data))
         }
         audio::CODEC_XAS1 => {
-            let pcm = audio::decode_xas(&snr, &blocks);
-            Some((info(FORMAT_WAV), audio::wav(&pcm, snr.channels as u16, snr.sample_rate)))
+            // (Kept compressed: decoded as it's played.)
+            let mut out = (head.len() as u32).to_le_bytes().to_vec();
+            out.extend_from_slice(&head);
+            if snr.kind != 0 {
+                out.extend_from_slice(body);
+            }
+            Some((info(FORMAT_XAS), out))
         }
         audio::CODEC_PCM16BE => {
             let pcm: Vec<i16> = blocks.iter().flat_map(|b| b.1.chunks_exact(2).map(|c| i16::from_be_bytes([c[0], c[1]]))).collect();
@@ -316,6 +362,7 @@ pub fn bake_sounds(root: &BakeRoot, pkgs: &PackageSet, progress: Progress) -> Re
     }
     names.extend(EXTRA_SOUNDS.iter().flat_map(|s| expand_cue(s)));
     names.extend(STATIONS.iter().map(|s| s.to_string()));
+    names.extend(instrument_sounds());
     names.sort();
     names.dedup();
 
@@ -369,8 +416,18 @@ pub fn bake_sounds(root: &BakeRoot, pkgs: &PackageSet, progress: Progress) -> Re
     ids.sort();
     ids.dedup();
     progress(&format!("Converting: {} sounds with {} samples…", sounds.len(), ids.len()));
-    let converted = par_map(&ids, |&id| convert_sample(pkgs, id));
+    // (Those converted for the last bank kept as they were, the rest converted.)
+    let old_bank = crate::pack::read_value::<SoundBank>(&gdir.join("sounds.bin")).ok();
+    let old_pack = PackReader::open(&gdir.join("sounds.pack")).ok();
+    let kept = |id: u64| -> Option<(SampleInfo, Vec<u8>)> {
+        // (Those the bank would still keep so: rewrapped as MP3.)
+        let info = old_bank.as_ref()?.samples.get(&id).filter(|i| i.format == FORMAT_MP3)?.clone();
+        Some((info, old_pack.as_ref()?.get::<Vec<u8>>(&(audio::T_SNR, 0, id))?))
+    };
+    let converted = par_map(&ids, |&id| kept(id).or_else(|| convert_sample(pkgs, id)));
     let converted: Vec<_> = converted;
+    // (Let go of the old pack before it's replaced.)
+    drop(old_pack);
     let tmp = gdir.join("sounds.pack.tmp");
     let mut w = PackWriter::create(&tmp).map_err(|e| e.to_string())?;
     if std::env::var_os("SOUND_STATS").is_some() {
@@ -396,12 +453,16 @@ pub fn bake_sounds(root: &BakeRoot, pkgs: &PackageSet, progress: Progress) -> Re
         }
     }
     let mut samples = HashMap::new();
-    let (mut mp3, mut wav, mut failed, mut bytes) = (0, 0, 0, 0usize);
+    let (mut mp3, mut xas, mut wav, mut failed, mut bytes) = (0, 0, 0, 0, 0usize);
     for (id, c) in ids.iter().zip(converted) {
         let c: Option<(SampleInfo, Vec<u8>)> = c;
         match c {
             Some((info, data)) => {
-                if info.format == FORMAT_MP3 { mp3 += 1 } else { wav += 1 }
+                match info.format {
+                    FORMAT_MP3 => mp3 += 1,
+                    FORMAT_XAS => xas += 1,
+                    _ => wav += 1,
+                }
                 bytes += data.len();
                 w.add((audio::T_SNR, 0, *id), &data).map_err(|e| e.to_string())?;
                 samples.insert(*id, info);
@@ -417,6 +478,6 @@ pub fn bake_sounds(root: &BakeRoot, pkgs: &PackageSet, progress: Progress) -> Re
     std::fs::rename(&tmp, gdir.join("sounds.pack")).map_err(|e| e.to_string())?;
     let n = sounds.len();
     write_value(&gdir.join("sounds.bin"), &SoundBank { version: SOUNDS_VERSION, sounds, samples }).map_err(|e| e.to_string())?;
-    progress(&format!("Converting: {n} sounds ({mp3} MP3, {wav} WAV, {failed} unsupported samples, {} MB)", bytes / 1_000_000));
+    progress(&format!("Converting: {n} sounds ({mp3} MP3, {xas} XAS, {wav} WAV, {failed} unsupported samples, {} MB)", bytes / 1_000_000));
     Ok(n)
 }

@@ -1568,6 +1568,22 @@ fn world_click(
                 if d.special == Special::WatchMusic && !music.watchable(t, actor) {
                     continue;
                 }
+                // (The compositions they know, to perform: by teens and up.)
+                if d.special == Special::Perform {
+                    let (Some(ui), Some(sk), Ok((_, skills, _))) = (opp_q.0.as_ref(), d.skill, writers.get(actor)) else { continue };
+                    if !(actor_sim.age == crate::sim::Age::Teen || actor_sim.age.is_grown()) || music.playing.contains_key(&t) {
+                        continue;
+                    }
+                    let list: Vec<(String, ActionKind)> = crate::instruments::known(&ui.data, sk, skills.level(sk), &actor_sim.traits, actor_sim.id)
+                        .into_iter()
+                        .map(|s| (ui.data.compositions[s].name.clone(), ActionKind::Object { target: t, def: i }))
+                        .collect();
+                    if !list.is_empty() {
+                        options.push((format!("{}... ›", crate::instruments::PERFORM), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((crate::instruments::PERFORM.to_string(), list));
+                    }
+                    continue;
+                }
                 if d.special == Special::PlayChess {
                     let players = chess.players(t);
                     if players.contains(&actor) {
@@ -2275,6 +2291,14 @@ fn pie_buttons(
         }
         let outfit_choice = label.strip_prefix("Change Into: ").and_then(|n| crate::simbody::OutfitKind::CHOICES.into_iter().find(|k| k.label() == n));
         let canvas_choice = label.strip_prefix("Paint: ").and_then(|n| crate::paintings::CANVASES.iter().position(|c| *c == n)).map(|c| c as u8);
+        // (The composition chosen to perform: "Performing A Love Since Forgotten".)
+        let song_choice = (title == crate::instruments::PERFORM)
+            .then(|| ui_data.as_ref().and_then(|u| u.data.compositions.iter().position(|c| c.name == label)))
+            .flatten()
+            .map(|s| s as u16);
+        if song_choice.is_some() {
+            label = format!("{} {label}", crate::instruments::PERFORMING);
+        }
         // (The channel chosen from "Change to...".)
         let channel_choice = (title == CHANGE_CHANNEL).then(|| crate::tvchannels::CHANNELS.iter().position(|c| c.name == label)).flatten().map(|c| c as u8);
         if channel_choice.is_some() {
@@ -2340,6 +2364,7 @@ fn pie_buttons(
         action.book_choice = book_choice;
         action.fish_choice = fish_choice;
         action.recipe_choice = recipe_choice;
+        action.song_choice = song_choice;
         action.for_one = for_one;
         // (Sat near each other, a talk had where they sit: before what they sat down to, which
         // carries on after.)
@@ -2967,7 +2992,7 @@ fn update_skill_icons(
             let info = ui.data.skill(name).cloned();
             let Some(h) = info.as_ref().and_then(|i| ui.icon(&mut images, &i.icon)) else { continue };
             let max = info.as_ref().map_or(10, |i| i.max_level.max(1));
-            let desc = info.as_ref().map(|i| i.desc.replace("{0.SimFirstName}", &sim.first)).unwrap_or_default();
+            let desc = info.as_ref().map(|i| i.desc_for(sim.female).replace("{0.SimFirstName}", &sim.first)).unwrap_or_default();
             let tip = format!("{} — level {level} of {max}\n{desc}", info.as_ref().map_or(name, |i| i.name.as_str()));
             c.spawn((
                 Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: Val::Px(2.0), ..default() },

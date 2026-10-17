@@ -607,7 +607,7 @@ fn main() {
         println!("{def:?}");
         for s in &def.samples {
             let info = &bank.samples[s];
-            let bytes: Vec<u8> = pack.get(&(s3formats::audio::T_SNR, 0, *s)).unwrap();
+            let bytes: Vec<u8> = s3bake::sounds::playable(info.format, pack.get(&(s3formats::audio::T_SNR, 0, *s)).unwrap()).unwrap();
             let ext = if info.format == s3bake::sounds::FORMAT_MP3 { "mp3" } else { "wav" };
             std::fs::write(dir.join(format!("{s:016X}.{ext}")), bytes).unwrap();
             println!("{s:016X} {info:?}");
@@ -1181,6 +1181,31 @@ cover {:?}", g.seasons.temperature, g.seasons.freeze_melt, g.seasons.cover);
             println!("career {} = {:?} [{}] part-time {}: {}", c.hex, c.name, c.icon, c.part_time, c.desc);
             for l in &c.levels {
                 println!("   {} {:10} {:30} / {:30} §{}/h {}:00 +{}h days {:07b} skills {:?}", l.level, l.branch, l.title, l.title_female, l.hourly, l.start, l.hours, l.days, l.skills);
+            }
+        }
+        return;
+    }
+    if let Some(i) = args.iter().position(|a| a == "--sound-props") {
+        // --sound-props <name>...: whether the game has these sounds, and their samples' parents.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let mut recs: std::collections::HashMap<u64, Vec<s3formats::audio::SoundProps>> = Default::default();
+        for k in pkgs.keys_of_type(s3formats::audio::T_SOUND_PROPS) {
+            if let Some(d) = pkgs.read(k) {
+                recs.entry(k.i).or_default().push(s3formats::audio::SoundProps::parse(&d));
+            }
+        }
+        for name in &args[i + 1..] {
+            match recs.get(&s3pkg::fnv64(name)) {
+                None => println!("{name}: none"),
+                Some(r) => {
+                    let samples: Vec<u64> = r.iter().flat_map(|r| r.samples().iter().copied()).collect();
+                    let parent = r.iter().find_map(|r| r.parent());
+                    let durs: Vec<String> = samples
+                        .iter()
+                        .filter_map(|s| pkgs.read_ti(s3formats::audio::T_SNR, *s).and_then(|h| s3formats::audio::Snr::parse(&h)).map(|s| format!("{:.1}s", s.duration())))
+                        .collect();
+                    println!("{name}: {} samples {durs:?} parent {parent:?}", samples.len());
+                }
             }
         }
         return;

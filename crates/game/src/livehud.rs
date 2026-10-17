@@ -1107,7 +1107,7 @@ fn skills_panel(
             commands.entity(j).insert(SkillJournalButton(name));
         }
         let into = if level >= max { String::from("Mastered!") } else { format!("{:.0}% of the way to level {}", v.fract() * 100.0, level + 1) };
-        let desc = info.as_ref().map(|i| i.desc.replace("{0.SimFirstName}", &sim.first)).unwrap_or_default();
+        let desc = info.as_ref().map(|i| i.desc_for(sim.female).replace("{0.SimFirstName}", &sim.first)).unwrap_or_default();
         let tip = format!("{} — level {level} of {max}\n{into}\n{desc}", info.as_ref().map_or(*name, |i| i.name.as_str()));
         if let Some(m) = s.id(SKILL_TOOLTIP_MASK) {
             commands.entity(m).remove::<Pickable>().insert((Interaction::default(), crate::icons::Tooltip(tip)));

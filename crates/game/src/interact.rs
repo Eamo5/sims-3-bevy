@@ -1265,6 +1265,8 @@ pub enum Special {
     PlayForTips,
     /// Watch someone play an instrument.
     WatchMusic,
+    /// Perform a composition known on an instrument (see `instruments`).
+    Perform,
     /// Potty train a toddler at the potty chair, the toddler's sitting for it, and emptying it
     /// (see `potty`).
     PottyTrain,
@@ -1736,10 +1738,14 @@ const WATCH_MUSIC: InteractionDef = InteractionDef { special: Special::WatchMusi
 const fn for_tips(play: InteractionDef) -> InteractionDef {
     InteractionDef { special: Special::PlayForTips, ..play }
 }
-static PIANO: [InteractionDef; 3] = [PLAY_PIANO, for_tips(PLAY_PIANO), WATCH_MUSIC];
-static KEYBOARD: [InteractionDef; 3] = [PLAY_KEYBOARD, for_tips(PLAY_KEYBOARD), WATCH_MUSIC];
-static DRUMS: [InteractionDef; 3] = [PLAY_DRUMS, for_tips(PLAY_DRUMS), WATCH_MUSIC];
-static LASER_HARP: [InteractionDef; 3] = [PLAY_LASER_HARP, for_tips(PLAY_LASER_HARP), WATCH_MUSIC];
+/// (The game's `Perform`: by teens and up, ten fun an hour, till the song's over.)
+const fn perform(play: InteractionDef) -> InteractionDef {
+    InteractionDef { special: Special::Perform, autonomous: false, minutes: 240.0, per_hour: [0.0, 0.0, play.per_hour[2], 0.0, 0.0, 10.0], ..play }
+}
+static PIANO: [InteractionDef; 4] = [PLAY_PIANO, for_tips(PLAY_PIANO), WATCH_MUSIC, perform(PLAY_PIANO)];
+static KEYBOARD: [InteractionDef; 4] = [PLAY_KEYBOARD, for_tips(PLAY_KEYBOARD), WATCH_MUSIC, perform(PLAY_KEYBOARD)];
+static DRUMS: [InteractionDef; 4] = [PLAY_DRUMS, for_tips(PLAY_DRUMS), WATCH_MUSIC, perform(PLAY_DRUMS)];
+static LASER_HARP: [InteractionDef; 4] = [PLAY_LASER_HARP, for_tips(PLAY_LASER_HARP), WATCH_MUSIC, perform(PLAY_LASER_HARP)];
 static VIDEOGAME: [InteractionDef; 1] = [def("Play Video Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 70.0], Pose::Use)];
 static SPRINKLER: [InteractionDef; 3] = [
     InteractionDef { autonomous: false, special: Special::SprinklerOn, ..def("Turn On", 2.0, N, Pose::Use) },
@@ -1831,7 +1837,7 @@ static EASEL: [InteractionDef; 1] = [InteractionDef {
     special: Special::SellPainting,
     ..def("Paint", 90.0, [0.0, 0.0, -3.0, 0.0, 0.0, 40.0], Pose::Use)
 }];
-static GUITAR: [InteractionDef; 3] = [PLAY_GUITAR, for_tips(PLAY_GUITAR), WATCH_MUSIC];
+static GUITAR: [InteractionDef; 4] = [PLAY_GUITAR, for_tips(PLAY_GUITAR), WATCH_MUSIC, perform(PLAY_GUITAR)];
 static TREADMILL: [InteractionDef; 1] = [InteractionDef {
     autonomous: false,
     skill: Some("Athletic"),
@@ -2736,6 +2742,8 @@ pub struct Action {
     pub book_choice: Option<u16>,
     pub fish_choice: Option<(String, u8)>,
     pub recipe_choice: Option<usize>,
+    /// The composition chosen to perform (an index into the game data's `compositions`).
+    pub song_choice: Option<u16>,
     /// The recipe's made for one (to eat themselves: "Have Dinner"), not everyone.
     pub for_one: bool,
     /// Where the Sim came up to the object (a hot tub got into from a side, a chair at a table
@@ -2755,7 +2763,7 @@ pub struct Action {
 
 impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
-        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, channel_choice: None, book_choice: None, fish_choice: None, recipe_choice: None, for_one: false, approach: None, social_outcome: None, seated: false, jog: false, chat_with: None, donation: None }
+        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, channel_choice: None, book_choice: None, fish_choice: None, recipe_choice: None, song_choice: None, for_one: false, approach: None, social_outcome: None, seated: false, jog: false, chat_with: None, donation: None }
     }
 }
 
@@ -2863,6 +2871,9 @@ pub fn points_to_level(table: &[u32], points: f32) -> f32 {
     }
     table.len() as f32
 }
+
+/// The skill points an hour performing a composition (`Perform`'s `SkillGuitar`: 780).
+const PERFORM_POINTS: f32 = 780.0;
 
 /// The game's skill points an hour practising (each interaction's tuning, its `Skill*`
 /// change: `ContinuousFlow` points an hour).
@@ -4198,7 +4209,8 @@ pub(crate) fn run_actions(
                                 if let Some(sk) = d.skill {
                                     let computer_chess = if obj.kind == ObjectKind::Computer && d.name == "Play Chess" && sim.traits.contains(&crate::life::Trait::ComputerWhiz) { 1.1 } else { 1.0 };
                                     let rate = crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) * mood_learning * computer_chess;
-                                    if let Some(level) = skills.add_points(sk, dt / 60.0 * practice_points(d.name) * rate) {
+                                    let points = if d.special == Special::Perform { PERFORM_POINTS } else { practice_points(d.name) };
+                                    if let Some(level) = skills.add_points(sk, dt / 60.0 * points * rate) {
                                         notes.push(format!("{} reached level {level} in {sk}!", sim.first));
                                         life.write(LifeEvent::new(me, LifeEventKind::SkillUp { skill: sk, level }));
                                     }
@@ -4223,6 +4235,9 @@ pub(crate) fn run_actions(
                                 };
                                 let complete = if d.special == Special::WriteNovel {
                                     action.completed
+                                } else if d.special == Special::Perform {
+                                    // (Till the song's played through.)
+                                    action.completed || elapsed >= minutes
                                 } else if cuddles.get(me).is_ok_and(|c| c.accepted) {
                                     // (Cuddling there: not up till the cuddle's over.)
                                     false
@@ -4322,6 +4337,7 @@ pub(crate) fn run_actions(
                                         | Special::WatchChess
                                         | Special::PlayForTips
                                         | Special::WatchMusic
+                                        | Special::Perform
                                         | Special::PottyTrain
                                         | Special::PottyLesson
                                         | Special::EmptyPotty

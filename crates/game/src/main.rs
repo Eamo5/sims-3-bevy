@@ -130,6 +130,7 @@ mod learning;
 mod venues;
 mod skillbooks;
 mod tips;
+mod instruments;
 mod traitacts;
 mod potty;
 mod doorlocks;
@@ -246,7 +247,7 @@ fn main() {
         .add_plugins(jobpaper::JobPaperPlugin)
         .add_plugins((grime::GrimePlugin, dressing::DressingPlugin, puddles::PuddlesPlugin, idles::IdlesPlugin, faces::FacesPlugin, reactions::ReactionsPlugin, laundry::LaundryPlugin, privacy::PrivacyPlugin, topics::TopicsPlugin, holidays::HolidaysPlugin, decor::DecorPlugin, tvchannels::TvChannelsPlugin, jealousy::JealousyPlugin, parties::PartiesPlugin))
         .add_plugins((homes::HomesPlugin, calls::CallsPlugin, classes::ClassesPlugin, learning::LearningPlugin, venues::VenuesPlugin, skillbooks::SkillBooksPlugin, tips::TipsPlugin, traitacts::TraitActsPlugin, potty::PottyPlugin, doorlocks::DoorLocksPlugin, curfew::CurfewPlugin, klepto::KleptoPlugin, shop::ShopPlugin, ambrosia::AmbrosiaPlugin, seatedtalk::SeatedTalkPlugin))
-        .add_plugins((novels::NovelsPlugin, chatonline::ChatOnlinePlugin))
+        .add_plugins((novels::NovelsPlugin, chatonline::ChatOnlinePlugin, instruments::InstrumentsPlugin))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
         .add_systems(Startup, load_ui_font)
         .run();

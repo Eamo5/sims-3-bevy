@@ -44,6 +44,8 @@ pub enum Stat {
     Royalties,
     StarsFound,
     GuitarHours,
+    /// Compositions performed on an instrument (`BandSkill.CompositionPlayed`).
+    CompositionsPerformed,
     KmJogged,
     TutoringHours,
     /// The heaviest fish caught (lb).
@@ -71,6 +73,7 @@ impl Stat {
             Stat::Royalties => "royalties",
             Stat::StarsFound => "stars_found",
             Stat::GuitarHours => "guitar_hours",
+            Stat::CompositionsPerformed => "compositions_performed",
             Stat::KmJogged => "km_jogged",
             Stat::TutoringHours => "tutoring_hours",
             Stat::HeaviestFish => "heaviest_fish",
@@ -214,6 +217,8 @@ pub enum Measure {
     BooksWritten,
     /// The most books written in any one genre.
     OneGenre,
+    /// Percent of an instrument's compositions known (by its skill).
+    CompositionsKnown(&'static str),
 }
 
 /// One of the game's skill challenges.
@@ -461,7 +466,13 @@ pub fn statistics(skill: &str) -> &'static [(&'static str, Measure)] {
             ("Perfect harvests", Measure::Stat(Stat::PerfectHarvested)),
             ("Kinds of plants planted", Measure::Kinds(Kinds::PlantTypes)),
         ],
-        "Guitar" => &[("Hours played", Measure::Stat(Stat::GuitarHours))],
+        // (The game's `GuitarSkill` journal: compositions known and performed.)
+        "Guitar" => &[
+            ("Hours played", Measure::Stat(Stat::GuitarHours)),
+            ("Compositions known", Measure::CompositionsKnown("Guitar")),
+            ("Compositions performed", Measure::Stat(Stat::CompositionsPerformed)),
+        ],
+        "Piano" | "Drums" | "LaserHarp" => &[("Compositions performed", Measure::Stat(Stat::CompositionsPerformed))],
         "Handiness" => &[
             ("Electrical objects repaired", Measure::Stat(Stat::ElectricalRepairs)),
             ("Plumbing objects repaired", Measure::Stat(Stat::PlumbingRepairs)),
@@ -487,6 +498,8 @@ pub struct Measures<'a> {
     pub chess: Option<&'a crate::chess::ChessRecord>,
     pub author: Option<&'a crate::writing::Author>,
     pub data: Option<&'a s3bake::GameDataBaked>,
+    /// Whose (their skills and traits).
+    pub sim: Option<(&'a crate::sim::Sim, &'a crate::interact::Skills)>,
 }
 
 impl Measures<'_> {
@@ -500,6 +513,10 @@ impl Measures<'_> {
             Measure::ChessRank => self.chess.map_or(0, |c| c.rank) as f64,
             Measure::BooksWritten => self.author.map_or(0, |a| a.books.len()) as f64,
             Measure::OneGenre => self.author.map_or(0, |a| a.books.iter().map(|b| a.written(&b.genre)).max().unwrap_or(0)) as f64,
+            Measure::CompositionsKnown(skill) => match (self.data, self.sim) {
+                (Some(d), Some((sim, skills))) => crate::instruments::known_percent(d, skill, skills.level(skill), &sim.traits, sim.id),
+                _ => 0.0,
+            },
         }
     }
 }
@@ -510,6 +527,7 @@ pub fn shown(m: Measure, v: f64) -> String {
         Measure::Stat(Stat::Royalties) => format!("§{}", crate::lifetime::group(v as i64)),
         Measure::Stat(Stat::StrengthHours | Stat::CardioHours | Stat::GuitarHours | Stat::KmJogged | Stat::TutoringHours) => format!("{v:.1}"),
         Measure::ChessRank => crate::chess::RANKS[(v as usize).min(crate::chess::RANKS.len() - 1)].to_string(),
+        Measure::CompositionsKnown(_) => format!("{}%", v as i64),
         Measure::Stat(Stat::HeaviestFish) => format!("{v:.2} lbs"),
         _ => format!("{}", v as i64),
     }
@@ -572,7 +590,7 @@ fn earn_challenges(
     *last = time.elapsed_secs();
     for (sim, mut journal, rels, skills, recipes, chess, author) in &mut sims {
         let due: Vec<&Challenge> = {
-            let m = Measures { journal: Some(&journal), rels, cooking: skills.level("Cooking"), recipes, chess, author, data: ui.as_ref().map(|u| &*u.data) };
+            let m = Measures { journal: Some(&journal), rels, cooking: skills.level("Cooking"), recipes, chess, author, data: ui.as_ref().map(|u| &*u.data), sim: Some((sim, skills)) };
             CHALLENGES.iter().filter(|c| !journal.has(c.name) && m.value(c.measure) >= c.need).collect()
         };
         for c in due {

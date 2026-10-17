@@ -218,6 +218,7 @@ fn tab_content(
         chess,
         author,
         data: ui.as_deref().map(|u| &*u.data),
+        sim: Some((sim, skills)),
     };
     let journal_page: Option<(Vec<(String, String)>, Vec<(String, String, bool, f64, f64)>)> = open.0.map(|skill| {
         let stats = crate::journal::statistics(skill).iter().map(|(label, m)| (label.to_string(), crate::journal::shown(*m, measures.value(*m)))).collect();

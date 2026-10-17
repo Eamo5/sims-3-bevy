@@ -225,7 +225,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, auto_build.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_fence.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_gate_route.run_if(in_state(crate::PlayMode::Live)))
-            .add_systems(Update, (auto_reach, auto_pick, auto_leftovers).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (auto_reach, auto_pick, auto_leftovers, auto_skill).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, auto_click_use.after(bevy::input::InputSystems).before(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_balloon.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(
@@ -3195,6 +3195,29 @@ fn auto_click_use(
 }
 
 /// LEFTOVERS=<recipe key>,... (tests): those servings put away in the fridge from the start.
+/// SKILL=<skill>:<level> for the selected Sim, when what they do is clicked (CLICK_USE): that
+/// skill to at least that level. SKILL_JOURNAL=<seconds> opens its journal then.
+fn auto_skill(mut done: Local<bool>, time: Res<Time>, mut sel: Query<&mut crate::interact::Skills, With<crate::sim::Selected>>, mut journal: ResMut<crate::simpanel::OpenJournal>) {
+    if let Some(t) = std::env::var("SKILL_JOURNAL").ok().and_then(|t| t.parse::<f32>().ok())
+        && time.elapsed_secs() > t
+        && journal.0.is_none()
+        && let Some(s) = std::env::var("SKILL").ok().and_then(|v| v.split_once(':').map(|(s, _)| s.to_string()))
+        && let Some(name) = crate::save::SKILLS.iter().find(|n| n.eq_ignore_ascii_case(&s))
+    {
+        journal.0 = Some(name);
+    }
+    if *done || time.elapsed_secs() < 5.0 || std::env::var("CLICK_USE").is_err() {
+        return;
+    }
+    let Some((s, l)) = std::env::var("SKILL").ok().and_then(|v| v.split_once(':').map(|(s, l)| (s.to_string(), l.parse::<f32>().unwrap_or(0.0)))) else { return };
+    let Some(name) = crate::save::SKILLS.iter().find(|n| n.eq_ignore_ascii_case(&s)) else { return };
+    let Ok(mut skills) = sel.single_mut() else { return };
+    *done = true;
+    let v = skills.0.entry(name).or_insert(0.0);
+    *v = v.max(l);
+    info!("test: {s} at {l}");
+}
+
 /// (LEFTOVERS_AGO=<hours>: put away that long ago, to have gone off.)
 fn auto_leftovers(mut done: Local<bool>, mut leftovers: ResMut<crate::meals::Leftovers>, clock: Res<crate::clock::GameClock>) {
     if *done {

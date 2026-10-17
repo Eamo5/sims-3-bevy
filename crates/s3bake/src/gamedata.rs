@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 129;
+pub const GAMEDATA_VERSION: u32 = 131;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -96,6 +96,24 @@ pub struct SkillBookInfo {
     pub bookworm_pages_per_minute: f32,
 }
 
+impl SkillInfo {
+    /// Its description, as it's worded for a woman or a man.
+    pub fn desc_for(&self, female: bool) -> &str {
+        if female && !self.desc_female.is_empty() { &self.desc_female } else { &self.desc }
+    }
+}
+
+/// A composition an instrument's played (the `Skills` sheet's instrument tables: `Guitar`,
+/// `Piano`, `Drums`, `BassGuitar`, `LaserHarp`): its name, its music, and whether it's a master
+/// track (granted, never learned by level).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct CompositionInfo {
+    pub skill: String,
+    pub name: String,
+    pub clip: String,
+    pub master: bool,
+}
+
 /// A book to read for its own sake (`Books`' `BookGeneral` rows): a novel, a biography, a
 /// career's handbook (those not sold at the bookstore).
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -119,6 +137,9 @@ pub struct SkillInfo {
     pub hex: String,
     pub name: String,
     pub desc: String,
+    /// The description for a woman (the key's `_Female`, where it differs: "found her muse").
+    #[serde(default)]
+    pub desc_female: String,
     /// Small icon, the wish icon and the picture of the skill's object.
     pub icon: String,
     pub wish_icon: String,
@@ -1309,6 +1330,9 @@ pub struct GameDataBaked {
     pub buffs: Vec<BuffInfo>,
     pub traits: Vec<TraitInfo>,
     pub skills: Vec<SkillInfo>,
+    /// The instruments' compositions.
+    #[serde(default)]
+    pub compositions: Vec<CompositionInfo>,
     pub careers: Vec<CareerInfo>,
     pub patterns: Vec<PatternInfo>,
     pub balloons: BalloonTable,
@@ -2733,6 +2757,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             out.skills.push(SkillInfo {
                 name: text("Skills/SkillList", &get(&f, "SkillName")),
                 desc: text("Skills/SkillList", &get(&f, "SkillDescription")),
+                desc_female: text("Skills/SkillList", &format!("{}_Female", get(&f, "SkillDescription"))),
                 icon: get(&f, "IconKey"),
                 wish_icon: get(&f, "DreamsAndPromisesIcon"),
                 object_icon: get(&f, "SkillUIIcon"),
@@ -2740,6 +2765,20 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 points,
                 hex,
             });
+        }
+        for skill in ["Guitar", "Piano", "Drums", "BassGuitar", "LaserHarp"] {
+            for f in records(&skills, skill) {
+                let clip = get(&f, "AudioClipName");
+                if clip.is_empty() {
+                    continue;
+                }
+                out.compositions.push(CompositionInfo {
+                    skill: skill.to_string(),
+                    name: text(&format!("Skills/{skill}"), &get(&f, "CompositionName")),
+                    clip,
+                    master: get(&f, "IsMaster").eq_ignore_ascii_case("true"),
+                });
+            }
         }
     }
 

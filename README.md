@@ -1148,6 +1148,16 @@ installation is unreachable.
   Impressed, half from the Evil, the Frugal and Snobs), walking up at the song's end to put
   in about ten simoleons a level for the household. `TIPS=1` plays the selected Sim for tips
   with a visitor watching (a test).
+- **The instruments' music**, as the game's `BandInstrument` plays it: practising, a guitar,
+  piano, keyboard, drum kit or laser harp sounds the game's music for the player's level (a
+  fumbling start at none, eleven sets of loops up to a master's at ten), changing as they
+  level up. From level six they know the game's compositions, three more a level (a
+  Virtuoso at ten one of the master tracks too), and "Perform..." plays one through, by teens
+  and up: "Performing A Love Since Forgotten" lasts as long as the song (a minute of the
+  game's to its second), for nearly twice the skill of practising. The guitar's skill
+  journal counts the compositions known (as the game reckons it, master tracks over and
+  above) and performed. Skill descriptions read as the game words them for women ("found
+  her muse").
 - **Brushing teeth** at a sink (the game's brushTeeth animation, toothbrush in hand) leaves the
   game's *Minty Breath* moodlet for four hours, as its `Sink.BrushTeeth` does. A *Sponge Bath*
   there (teens and up, the sponge in hand) washes them till they're clean, the game's 400

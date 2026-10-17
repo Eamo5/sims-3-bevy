@@ -110,7 +110,7 @@ fn journal_dialog(
     }
     let mut list: Vec<(&'static str, f32)> = skills.0.iter().filter(|(_, v)| **v > 0.01).map(|(k, v)| (*k, *v)).collect();
     list.sort_by(|a, b| b.1.total_cmp(&a.1));
-    let measures = crate::journal::Measures { journal, rels, cooking: skills.level("Cooking"), recipes, chess, author, data: gu.as_deref().map(|g| &*g.data) };
+    let measures = crate::journal::Measures { journal, rels, cooking: skills.level("Cooking"), recipes, chess, author, data: gu.as_deref().map(|g| &*g.data), sim: Some((sim, skills)) };
     let stats: Vec<String> = crate::journal::statistics(skill).iter().map(|(label, m)| format!("{label}: {}", crate::journal::shown(*m, measures.value(*m)))).collect();
     let challenges: Vec<(String, String, bool, f64, f64)> =
         crate::journal::CHALLENGES.iter().filter(|c| c.skill == skill).map(|c| (c.name.to_string(), c.description(), crate::journal::earned(journal, c.name), measures.value(c.measure), c.need)).collect();
@@ -203,7 +203,7 @@ fn journal_dialog(
     let v = skills.0.get(skill).copied().unwrap_or(0.0);
     let level = (v as u32).min(max);
     say(&mut commands, SKILL_NAME, info.as_ref().map_or(skill.to_string(), |i| i.name.clone()));
-    say(&mut commands, DESCRIPTION, info.as_ref().map(|i| i.desc.replace("{0.SimFirstName}", &sim.first)).unwrap_or_default());
+    say(&mut commands, DESCRIPTION, info.as_ref().map(|i| i.desc_for(sim.female).replace("{0.SimFirstName}", &sim.first)).unwrap_or_default());
     say(&mut commands, STATISTICS, if stats.is_empty() { "—".to_string() } else { stats.join("\n") });
     if let Some(m) = s.id(MASTERED) {
         commands.entity(m).insert(if level >= max { Visibility::Inherited } else { Visibility::Hidden });
