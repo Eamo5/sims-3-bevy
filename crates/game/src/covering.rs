@@ -280,6 +280,25 @@ mod tests {
     }
 
     #[test]
+    fn fountain_tiles_built_and_taken_out_leave_the_towns_own_alone() {
+        let mut b = house();
+        let g = b.levels[0];
+        // (The town's own fountain, its basin a metre down.)
+        b.fountains.push(s3bake::types::FountainBaked { cells: vec![(5, 5)], floor: g - 1.0, water: g - 0.25, rim: g });
+        for (x, z) in [(1, 1), (2, 1), (2, 1)] {
+            crate::building::apply_paint(&mut b, &PaintOp::AddFountain { x, z });
+        }
+        let built = b.fountains.iter().find(|f| f.cells.contains(&(1, 1))).unwrap();
+        assert_eq!(built.cells.len(), 2);
+        assert!((built.water - (g + 0.5)).abs() < 1e-4 && (built.rim - (g + 0.75)).abs() < 1e-4);
+        crate::building::apply_paint(&mut b, &PaintOp::RemoveFountain { x: 5, z: 5 });
+        crate::building::apply_paint(&mut b, &PaintOp::RemoveFountain { x: 1, z: 1 });
+        crate::building::apply_paint(&mut b, &PaintOp::RemoveFountain { x: 2, z: 1 });
+        assert_eq!(b.fountains.len(), 1, "the town's left, the built one gone with its last tile");
+        assert_eq!(b.fountains[0].cells, vec![(5, 5)]);
+    }
+
+    #[test]
     fn normal_click_covers_one_tile_shift_fills_only_the_enclosed_room() {
         let mut b = house();
         let texture = (1, 2, 3);

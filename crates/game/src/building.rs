@@ -842,6 +842,10 @@ pub enum PaintOp {
     /// area), or filled in again.
     AddBasement { x: u16, z: u16 },
     RemoveBasement { x: u16, z: u16 },
+    /// A fountain tile built (on the ground out of doors: its basin a quarter metre down, its
+    /// water and ledge over the ground, as the game's Fountain tool builds them), or taken out.
+    AddFountain { x: u16, z: u16 },
+    RemoveFountain { x: u16, z: u16 },
 }
 
 /// How deep a pool dug in build mode is (a storey down, as the game's).
@@ -988,7 +992,7 @@ pub fn repaint(
                 roof_changed = true;
             }
             PaintOp::AddFence { .. } | PaintOp::RemoveFence { .. } => fences_changed = true,
-            PaintOp::AddPool { .. } | PaintOp::RemovePool { .. } => pool_changed = true,
+            PaintOp::AddPool { .. } | PaintOp::RemovePool { .. } | PaintOp::AddFountain { .. } | PaintOp::RemoveFountain { .. } => pool_changed = true,
             PaintOp::AddFoundation { .. } | PaintOp::RemoveFoundation { .. } => {
                 foundation_changed = true;
                 floors_changed = true;
@@ -1458,6 +1462,27 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
             }
         }
         PaintOp::RemovePool { x, z } => b.pool.retain(|f| !(f.x == x && f.z == z)),
+        PaintOp::AddFountain { x, z } => {
+            let g = b.levels[0];
+            let built = |f: &s3bake::types::FountainBaked| (f.floor - (g - BUILT_FOUNTAIN_DEPTH)).abs() < 0.001 && (f.rim - (g + BUILT_FOUNTAIN_RIM)).abs() < 0.001;
+            let i = match b.fountains.iter().position(built) {
+                Some(i) => i,
+                None => {
+                    b.fountains.push(s3bake::types::FountainBaked { cells: Vec::new(), floor: g - BUILT_FOUNTAIN_DEPTH, water: g - BUILT_FOUNTAIN_DEPTH + 0.75, rim: g + BUILT_FOUNTAIN_RIM });
+                    b.fountains.len() - 1
+                }
+            };
+            if !b.fountains[i].cells.contains(&(x, z)) {
+                b.fountains[i].cells.push((x, z));
+            }
+        }
+        PaintOp::RemoveFountain { x, z } => {
+            let g = b.levels[0];
+            for f in b.fountains.iter_mut().filter(|f| (f.floor - (g - BUILT_FOUNTAIN_DEPTH)).abs() < 0.001 && (f.rim - (g + BUILT_FOUNTAIN_RIM)).abs() < 0.001) {
+                f.cells.retain(|c| *c != (x, z));
+            }
+            b.fountains.retain(|f| !f.cells.is_empty());
+        }
         PaintOp::AddFoundation { x, z, ground } => add_foundation(b, x, z, ground),
         PaintOp::RemoveFoundation { x, z } => remove_foundation(b, x, z),
         PaintOp::AddBasement { x, z } => add_basement(b, x, z),
@@ -1732,7 +1757,15 @@ fn spawn_pool(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut Asse
     out
 }
 
-/// The lot's fountains: each basin's floor, its sides up to the rim, and its water.
+/// A fountain built with the Fountain tool: its basin's floor a quarter metre into the ground
+/// and its ledge three quarters over it (the game's: the water 0.75 m over the floor).
+pub const BUILT_FOUNTAIN_DEPTH: f32 = 0.25;
+pub const BUILT_FOUNTAIN_RIM: f32 = 0.75;
+/// How thick a fountain's ledge is, where nothing about it stands as high.
+const LEDGE: f32 = 0.2;
+
+/// The lot's fountains: each basin's floor, its sides up to the rim, and its water; and a
+/// ledge round it where nothing about it stands as high (one built with the Fountain tool).
 fn spawn_fountains(commands: &mut Commands, ctx: &mut AssetCtx, b: &LotBuildingBaked, active: &ActiveBuilding, neighbor: Option<Entity>) -> Vec<Entity> {
     let mut out = Vec::new();
     if b.fountains.is_empty() {
@@ -1764,6 +1797,27 @@ fn spawn_fountains(commands: &mut Commands, ctx: &mut AssetCtx, b: &LotBuildingB
                     [[0.0, 0.0], [1.0, 0.0], [1.0, h], [0.0, h]],
                     active.dir(-dx as f32, -dz as f32),
                 );
+                // (A ledge, where the tile beside it has nothing up as high: its top, and its
+                // outer face down to the ground.)
+                let (nx, nz) = (cx as i32 + dx, cz as i32 + dz);
+                let level_y = |l: u8| b.levels.get(l as usize).copied().unwrap_or(b.levels[0]);
+                let walled = b.floors.iter().any(|fl| fl.x as i32 == nx && fl.z as i32 == nz && (fl.y.unwrap_or(level_y(fl.level)) - f.rim).abs() < 0.15);
+                if !walled {
+                    let out = Vec2::new(dx as f32, dz as f32) * LEDGE;
+                    let (ao, co) = ((a.0 + out.x, a.1 + out.y), (c.0 + out.x, c.1 + out.y));
+                    stone.quad(
+                        [active.world(a.0, a.1, f.rim), active.world(c.0, c.1, f.rim), active.world(co.0, co.1, f.rim), active.world(ao.0, ao.1, f.rim)],
+                        [[0.0, 0.0], [1.0, 0.0], [1.0, LEDGE], [0.0, LEDGE]],
+                        Vec3::Y,
+                    );
+                    let ground = |p: (f32, f32)| b.ground_at(p.0, p.1).unwrap_or(b.levels[0]);
+                    let (ga, gc) = (ground(ao), ground(co));
+                    stone.quad(
+                        [active.world(co.0, co.1, gc), active.world(ao.0, ao.1, ga), active.world(ao.0, ao.1, f.rim), active.world(co.0, co.1, f.rim)],
+                        [[0.0, 0.0], [1.0, 0.0], [1.0, f.rim - ga], [0.0, f.rim - gc]],
+                        active.dir(dx as f32, dz as f32),
+                    );
+                }
             }
         }
     }

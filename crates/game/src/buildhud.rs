@@ -74,6 +74,7 @@ fn home_action(id: u32) -> Option<Action> {
         0x1017 => Action::HalfWalls,
         0x1008 => Action::Tool(BuildTool::Stairs),
         0x1013 => Action::Tool(BuildTool::Pool),
+        0x1018 => Action::Tool(BuildTool::Fountain),
         0x1004 => Action::Tool(BuildTool::Foundation),
         0x1016 => Action::Tool(BuildTool::Basement),
         0x100b | 0x1011 => Action::Category(TERRAIN_TAB),
@@ -84,7 +85,7 @@ fn home_action(id: u32) -> Option<Action> {
 pub fn native_panel(buy: &BuyMode) -> bool {
     buy.build_look && buy.active && buy.category == BUILD_TAB
         && !(buy.styling() && buy.placing.is_some())
-        && matches!(buy.tool, None | Some(BuildTool::Wall | BuildTool::Room | BuildTool::DiagonalRoom | BuildTool::Pool | BuildTool::Foundation | BuildTool::Basement | BuildTool::Sledgehammer))
+        && matches!(buy.tool, None | Some(BuildTool::Wall | BuildTool::Room | BuildTool::DiagonalRoom | BuildTool::Pool | BuildTool::Fountain | BuildTool::Foundation | BuildTool::Basement | BuildTool::Sledgehammer))
 }
 
 fn spawn(

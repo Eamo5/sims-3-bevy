@@ -2749,8 +2749,10 @@ fn auto_fence(
 ) {
     // POOL=<x0>,<z0>,<x1>,<z1>: a pool dug over those lot tiles instead (POOL_LADDER=1: with a
     // ladder at its first edge).
+    // (FOUNTAIN=<x0>,<z0>,<x1>,<z1>: a fountain built there with the Fountain tool.)
     let pool = std::env::var("POOL").ok();
-    let Some(v) = std::env::var("FENCE").ok().or(pool.clone()) else { return };
+    let fountain = std::env::var("FOUNTAIN").ok();
+    let Some(v) = std::env::var("FENCE").ok().or(pool.clone()).or(fountain.clone()) else { return };
     if *done || time.elapsed_secs() < 4.0 {
         return;
     }
@@ -2760,7 +2762,9 @@ fn auto_fence(
     if n.len() < 4 {
         return;
     }
-    let (ops, cost) = if pool.is_some() {
+    let (ops, cost) = if fountain.is_some() {
+        crate::build::plan_fountain(b, false, b.view_level, IVec2::new(n[0], n[1]), IVec2::new(n[2], n[3]))
+    } else if pool.is_some() {
         crate::build::plan_pool(b, false, b.view_level, IVec2::new(n[0], n[1]), IVec2::new(n[2], n[3]))
     } else {
         // (FENCE_NAME=<part>: the style by its name, a half wall's say, rather than its place.)

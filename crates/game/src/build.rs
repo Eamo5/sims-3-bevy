@@ -51,6 +51,8 @@ pub enum BuildTool {
     Foundation,
     /// Dig a basement, a storey under the ground floor.
     Basement,
+    /// Build a fountain out of doors on the ground floor (the game's Fountain tool).
+    Fountain,
     /// Paint the ground (the paint picked on the Terrain tab).
     Terrain,
     /// Raise, lower, flatten or smooth the ground (the tool picked on the Terrain tab).
@@ -72,6 +74,7 @@ impl BuildTool {
             BuildTool::Pool => format!("Pool Tool\n§{POOL_PRICE} a tile"),
             BuildTool::Foundation => format!("Foundation Tool\n§{FOUNDATION_PRICE} a tile"),
             BuildTool::Basement => format!("Basement Tool\n§{BASEMENT_PRICE} a tile"),
+            BuildTool::Fountain => format!("Fountain Tool\n§{POOL_PRICE} a tile"),
             BuildTool::Terrain => "Terrain Paint".to_string(),
             BuildTool::Sculpt => "Terrain Tools".to_string(),
         }
@@ -89,6 +92,7 @@ impl BuildTool {
             BuildTool::Pool => "Drag out a pool on the ground out of doors; Ctrl+drag fills it in. Buy a pool ladder for Sims to swim.",
             BuildTool::Foundation => "Drag out a foundation to build the house on; Ctrl+drag takes it away. Lay it before the walls.",
             BuildTool::Basement => "Drag out a basement to dig under the house; Ctrl+drag fills it in. Page Down to go down and build there; stairs lead up from it.",
+            BuildTool::Fountain => "Drag out a fountain on the ground out of doors; Ctrl+drag takes it out. Buy fountain jets to put in it.",
             BuildTool::Terrain => "Hold the mouse down to paint the ground on the lot.",
             BuildTool::Sculpt => "Hold the mouse down to work the ground on the lot (not under the house or things).",
         }
@@ -629,6 +633,59 @@ pub fn plan_pool(b: &ActiveBuilding, removing: bool, level: u8, start: IVec2, cu
     (ops, cost)
 }
 
+/// A fountain built over the tiles from `start` to `cur` (or taken out), on the ground out of
+/// doors, as the Fountain tool's: its ops and what it costs. (Only those built so are taken out.)
+pub fn plan_fountain(b: &ActiveBuilding, removing: bool, level: u8, start: IVec2, cur: IVec2) -> (Vec<PaintOp>, i64) {
+    if level != 1 {
+        return (Vec::new(), 0);
+    }
+    let g = b.data.levels[0];
+    let built: std::collections::HashSet<(u16, u16)> = b
+        .data
+        .fountains
+        .iter()
+        .filter(|f| (f.floor - (g - crate::building::BUILT_FOUNTAIN_DEPTH)).abs() < 0.001 && (f.rim - (g + crate::building::BUILT_FOUNTAIN_RIM)).abs() < 0.001)
+        .flat_map(|f| f.cells.iter().copied())
+        .collect();
+    let any_fountain = |x: u16, z: u16| b.data.fountains.iter().any(|f| f.cells.contains(&(x, z)));
+    let (lo, hi) = (start.min(cur), start.max(cur));
+    let mut ops = Vec::new();
+    for z in lo.y..=hi.y {
+        for x in lo.x..=hi.x {
+            let (x, z) = (x as u16, z as u16);
+            if removing {
+                if built.contains(&(x, z)) {
+                    ops.push(PaintOp::RemoveFountain { x, z });
+                }
+                continue;
+            }
+            // (Not under a floor, in a pool, on a staircase, in another fountain, nor across a wall
+            // or fence.)
+            let floored = b.data.floors.iter().any(|f| f.x == x && f.z == z);
+            let pool = b.data.pool.iter().any(|f| f.x == x && f.z == z);
+            let stairs = b.built_stairs.iter().any(|s| s.tiles().contains(&IVec2::new(x as i32, z as i32)));
+            if !floored && !pool && !stairs && !any_fountain(x, z) && !walled(&b.data, x, z) && !fenced(&b.data, x, z) {
+                ops.push(PaintOp::AddFountain { x, z });
+            }
+        }
+    }
+    let cost = if removing { 0 } else { ops.len() as i64 * POOL_PRICE };
+    (ops, cost)
+}
+
+/// Whether a ground-floor tile has a fence (or half wall), or a foundation's edge, along one of
+/// its sides.
+fn fenced(b: &LotBuildingBaked, x: u16, z: u16) -> bool {
+    let (x, z) = (x as f32, z as f32);
+    let sides = [(Vec2::new(x, z), Vec2::new(x + 1.0, z)), (Vec2::new(x + 1.0, z), Vec2::new(x + 1.0, z + 1.0)), (Vec2::new(x, z + 1.0), Vec2::new(x + 1.0, z + 1.0)), (Vec2::new(x, z), Vec2::new(x, z + 1.0))];
+    let on = |p: Vec2, a: Vec2, c: Vec2| (c - a).perp_dot(p - a).abs() < 0.01 && (p - a).dot(c - p) >= -0.01;
+    let runs = b.fences.iter().filter(|f| f.level <= 1).map(|f| (f.a, f.b)).chain(b.foundation.iter().copied());
+    runs.into_iter().any(|(a, c)| {
+        let (a, c) = (Vec2::from(a), Vec2::from(c));
+        sides.iter().any(|(p, q)| on(*p, a, c) && on(*q, a, c))
+    })
+}
+
 /// Whether a ground-floor tile has a wall along one of its sides.
 fn walled(b: &LotBuildingBaked, x: u16, z: u16) -> bool {
     let (x, z) = (x as f32, z as f32);
@@ -909,7 +966,7 @@ fn build_tool(
     }
     let local = b.local(ray.origin + *ray.direction * t);
     let (w, d) = (b.data.width as i32, b.data.depth as i32);
-    let tiles = matches!(tool, BuildTool::Floor | BuildTool::Stairs | BuildTool::Pool | BuildTool::Foundation | BuildTool::Basement);
+    let tiles = matches!(tool, BuildTool::Floor | BuildTool::Stairs | BuildTool::Pool | BuildTool::Foundation | BuildTool::Basement | BuildTool::Fountain);
     let cur = if tiles {
         IVec2::new((local.x.floor() as i32).clamp(0, w - 1), (local.y.floor() as i32).clamp(0, d - 1))
     } else {
@@ -1032,6 +1089,7 @@ fn build_tool(
         (Some(style), BuildTool::Fence) => plan_fence(b, style, removing, level, start, cur),
         (None, BuildTool::Fence) => (Vec::new(), 0),
         (_, BuildTool::Pool) => plan_pool(b, removing, level, start, cur),
+        (_, BuildTool::Fountain) => plan_fountain(b, removing, level, start, cur),
         (_, BuildTool::Basement) => plan_basement(b, removing, level, start, cur),
         _ => plan(b, tool, removing, level, start, cur),
     };
@@ -1123,7 +1181,7 @@ fn build_tool(
         g.dirty = true;
     }
     play.write(crate::sound::PlaySound::ui(match (tiles, removing) {
-        (true, _) if tool == BuildTool::Pool => "ui_build_pool_mdown",
+        (true, _) if matches!(tool, BuildTool::Pool | BuildTool::Fountain) => "ui_build_pool_mdown",
         (true, _) if tool == BuildTool::Foundation => "ui_build_deck_section",
         (true, _) if tool == BuildTool::Basement => "ui_build_pool_mdown",
         (true, _) => "ui_build_flooring_section",
