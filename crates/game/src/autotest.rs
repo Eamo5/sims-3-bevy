@@ -3025,7 +3025,7 @@ fn auto_gate_route(
 /// the pie's first option (not a submenu) pressed as a player would, and what the selected Sim
 /// then has queued logged. `<kind>:<option>><option>` picks the options instead, by how their
 /// labels start (`Fridge:Have Quick Meal>Cereal`). `Sim` is the nearest other Sim (its socials),
-/// `Sim=<first or last name>` that one;
+/// `Sim=<first or last name>` that one, `Fire` the nearest fire;
 /// CLICK_SHOTS=<folder> takes a picture of each menu as it opens; CLICK_USE_DISTANCE=<metres>
 /// brings the camera that near; CLICK_USE_AFTER=<seconds> waits that long first (ten by default:
 /// longer for a lot being visited), an entry `wait:<seconds>` that long between two, and
@@ -3041,7 +3041,7 @@ fn auto_click_use(
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut cams: Query<(&Camera, &GlobalTransform, &mut crate::camera::SimsCamera)>,
-    objects: Query<(Entity, &crate::interact::GameObject, &GlobalTransform, &InheritedVisibility)>,
+    (objects, fires): (Query<(Entity, &crate::interact::GameObject, &GlobalTransform, &InheritedVisibility)>, Query<(Entity, &GlobalTransform), With<crate::fire::Fire>>),
     pie: Res<crate::hud::PieMenu>,
     options: Query<(&crate::hud::PieOption, &bevy::ui::UiGlobalTransform)>,
     queues: Query<&crate::interact::ActionQueue, With<crate::sim::Selected>>,
@@ -3103,6 +3103,9 @@ fn auto_click_use(
                 .filter(|(_, s, _)| !s.age.is_little() && named.is_none_or(|n| s.first.eq_ignore_ascii_case(n) || s.last.eq_ignore_ascii_case(n)))
                 .map(|(e, s, tf)| (e, s.first.clone(), tf.translation() + Vec3::Y))
                 .min_by(|a, b| a.2.distance(cam.focus).total_cmp(&b.2.distance(cam.focus)));
+        }
+        if kinds[idx].eq_ignore_ascii_case("Fire") {
+            return fires.iter().map(|(e, tf)| (e, "Fire".to_string(), tf.translation() + Vec3::Y * 0.7)).min_by(|a, b| a.2.distance(cam.focus).total_cmp(&b.2.distance(cam.focus)));
         }
         objects
             .iter()
@@ -3671,6 +3674,7 @@ fn auto_action(
     (opps_q, ui, sel_tf): (Query<&crate::opportunities::SimOpportunities>, Option<Res<crate::icons::GameUi>>, Query<&Transform, With<crate::sim::Selected>>),
     townsfolk: Query<(Entity, &crate::sim::Sim), (Without<crate::sim::HouseholdMember>, Or<(With<crate::interact::OffLot>, With<crate::town::Townie>)>)>,
     tfs: Query<&GlobalTransform>,
+    jobs: Query<&crate::careers::Job>,
 ) {
     let Some(name) = &args.action else { return };
     if *done {
@@ -4320,6 +4324,28 @@ fn auto_action(
                         q.push_player(crate::interact::Action::new("Outing", crate::interact::ActionKind::Visit { lot, activity: crate::venues::VENUE_TASK + i }, false));
                     }
                 });
+            }
+        }
+        *done = true;
+        return;
+    }
+    // "Job <lot name part>:<option>": off to that rabbit hole for one of its career errands
+    // ("Job hospital:Join", "Job hospital:Quit Job"), as its menu offers them the selected Sim.
+    if let Some((place, want)) = name.strip_prefix("Job ").and_then(|s| s.split_once(':')) {
+        let place = place.to_ascii_lowercase();
+        if let (Ok(me), Ok(mut q)) = (sel_e.single(), sel.single_mut())
+            && let Ok((_, sim)) = members.get(me)
+        {
+            let found = (0..world.data.lots.len())
+                .filter(|&l| world.data.lots[l].internal_name.to_ascii_lowercase().contains(&place))
+                .find_map(|l| crate::careerholes::options(&world.data, l, sim, jobs.get(me).ok()).into_iter().find(|(label, _)| label.starts_with(want)).map(|o| (l, o)));
+            match found {
+                Some((lot, (label, task))) => {
+                    info!("job test: {label} at lot {lot}");
+                    q.0.clear();
+                    q.push_player(crate::interact::Action::new(label, crate::interact::ActionKind::Visit { lot, activity: task }, false));
+                }
+                None => info!("job test: no '{want}' at '{place}'"),
             }
         }
         *done = true;

@@ -710,6 +710,7 @@ pub fn spawn_game_object_design(
     }
     if kind == ObjectKind::Light || script.contains(".lighting.") || script.contains("lightfloorlamp") || script.contains("lightwalllamp") || script.contains("lighttablelamp") {
         let height = if script.contains("ceiling") { mn.y.max(-1.2) } else { mx.y * 0.8 };
+        commands.entity(e).insert(crate::lights::Lamp { ceiling: script.contains("ceiling"), lit: false });
         commands.spawn((
             crate::building::LotLamp,
             PointLight { intensity: 0.0, range: 9.0, radius: 0.1, color: Color::srgb(1.0, 0.85, 0.62), shadow_maps_enabled: false, ..default() },

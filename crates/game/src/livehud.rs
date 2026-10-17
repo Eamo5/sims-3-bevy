@@ -364,10 +364,13 @@ fn time_control(
     mut tips: Query<&mut crate::icons::Tooltip>,
     buy: Res<crate::buy::BuyMode>,
     menu: Res<crate::options::GameMenu>,
+    selected_queue: Query<&crate::interact::ActionQueue, With<crate::sim::Selected>>,
 ) {
     let d = &hud.display;
-    for i in 0..4 {
-        if pressed(&clicks, d.id(TIME_BASE + 1 + i)) && !buy.active && !menu.is_open() && modal.is_empty() {
+    // (The fifth, Skip, only with something to skip through: `clock::skip_ends`.)
+    let busy = selected_queue.single().is_ok_and(|q| q.0.front().is_some());
+    for i in 0..5 {
+        if pressed(&clicks, d.id(TIME_BASE + 1 + i)) && !buy.active && !menu.is_open() && modal.is_empty() && (i < 4 || busy) {
             clock.set_speed(i as usize);
         }
     }
@@ -378,7 +381,7 @@ fn time_control(
         if let Some(e) = d.id(TIME_BASE + 1 + i)
             && let Ok(mut b) = buttons.get_mut(e)
         {
-            let (sel, dis) = (i < 4 && i as usize == now, i == 4 || locked);
+            let (sel, dis) = (i as usize == now, (i == 4 && !busy && now != 4) || locked);
             if b.selected != sel || b.disabled != dis {
                 b.selected = sel;
                 b.disabled = dis;

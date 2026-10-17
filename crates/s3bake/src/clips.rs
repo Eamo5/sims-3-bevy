@@ -308,6 +308,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a_fire_panic",
     "a_fire_onFire",
     "a_fireFighter_extinguishFire_floor1",
+    // (A Sim's own extinguisher on it: the game's `Extinguish` graph.)
+    "a2o_fire_fireExtinguisher",
     // Ghosts, and the frights they give.
     "a_ghost_float",
     "a_ghost_scare",
@@ -360,6 +362,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_toilet_useStanding",
     "a2o_toilet_flush_x",
     "a2o_shower_takeShower_getIn",
+    // (WooHoo in the shower: both Sims' parts, and the shower's.)
+    "a2a_shower_woohoo",
     "a2o_shower_takeShower_loop",
     "a2o_shower_takeShower_getOut",
     // (A shower in a tub: in and out over its side, the curtain or door drawn.)

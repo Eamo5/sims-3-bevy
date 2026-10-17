@@ -12,13 +12,16 @@ impl Plugin for ClockPlugin {
             .insert_resource(SimDelta::default())
             .add_systems(
                 Update,
-                (speed_keys, advance_clock, day_night).chain().run_if(in_state(PlayMode::Live)),
+                (speed_keys, skip_ends, advance_clock, day_night).chain().run_if(in_state(PlayMode::Live)),
             )
             .add_systems(OnEnter(AppState::InGame), reset_clock);
     }
 }
 
-pub const SPEED_RATES: [f32; 4] = [0.0, 1.0, 3.0, 12.0];
+pub const SPEED_RATES: [f32; 5] = [0.0, 1.0, 3.0, 12.0, 20.0];
+/// The fourth speed, the game's `Skip` ("skip to the end of the interaction"): its own pace
+/// (`kSkipTimeRate`, tuned 20) till what the selected Sim's doing is done, then back to normal.
+pub const SKIP: usize = 4;
 const DAYS: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 /// Game time in minutes since the start of the first Monday.
@@ -27,11 +30,13 @@ pub struct GameClock {
     pub minutes: f64,
     pub speed: usize,
     paused_from: usize,
+    /// Skipping: whose action it's skipping through, and which (its label).
+    pub skipping: Option<(Entity, String)>,
 }
 
 impl Default for GameClock {
     fn default() -> Self {
-        Self { minutes: 8.0 * 60.0, speed: 1, paused_from: 1 }
+        Self { minutes: 8.0 * 60.0, speed: 1, paused_from: 1, skipping: None }
     }
 }
 
@@ -66,7 +71,10 @@ impl GameClock {
         if s == 0 && self.speed != 0 {
             self.paused_from = self.speed;
         }
-        self.speed = s.min(3);
+        self.speed = s.min(SKIP);
+        if s != SKIP {
+            self.skipping = None;
+        }
     }
     pub fn toggle_pause(&mut self) {
         if self.speed == 0 {
@@ -100,6 +108,29 @@ fn speed_keys(keys: Res<ButtonInput<KeyCode>>, mut clock: ResMut<GameClock>, buy
     }
     if keys.just_pressed(KeyCode::Digit3) {
         clock.set_speed(3);
+    }
+    if keys.just_pressed(KeyCode::Digit4) {
+        clock.set_speed(SKIP);
+    }
+}
+
+/// Skipping through what the selected Sim's doing: from what that is when it's asked for (with
+/// nothing to do, back to normal at once), till it's done or another Sim's chosen.
+fn skip_ends(mut clock: ResMut<GameClock>, selected: Query<(Entity, &crate::interact::ActionQueue), With<crate::sim::Selected>>) {
+    if clock.speed != SKIP {
+        return;
+    }
+    let now = selected.single().ok().and_then(|(e, q)| q.0.front().filter(|a| !a.cancel).map(|a| (e, a.label.clone())));
+    match (&clock.skipping, now) {
+        (None, Some(n)) => {
+            info!("skipping through {}", n.1);
+            clock.skipping = Some(n);
+        }
+        (Some(was), Some(n)) if *was == n => {}
+        _ => {
+            info!("skip over: normal speed");
+            clock.set_speed(1);
+        }
     }
 }
 

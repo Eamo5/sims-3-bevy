@@ -363,17 +363,32 @@ pub struct BuildingPiece {
     pub level: u8,
 }
 
-/// A lamp of the active house; its light comes on after dark.
+/// A lamp of the active house; its light comes on after dark, or when it's switched on by hand
+/// (`lights`).
 #[derive(Component)]
 pub struct LotLamp;
 
-fn lamps_at_night(night: Res<crate::clock::Night>, mut lamps: Query<(&mut PointLight, &mut Visibility, Ref<LotLamp>)>) {
-    for (mut light, mut vis, lamp) in &mut lamps {
-        if !night.is_changed() && !lamp.is_added() {
-            continue;
+pub fn lamps_at_night(
+    night: Res<crate::clock::Night>,
+    mut objects: Query<(&mut crate::lights::Lamp, Option<&crate::lights::Switched>, Option<&crate::lights::Dimmer>)>,
+    mut lamps: Query<(&mut PointLight, &mut Visibility, Option<&ChildOf>), With<LotLamp>>,
+) {
+    for (mut light, mut vis, parent) in &mut lamps {
+        let (on, level) = match parent.and_then(|p| objects.get_mut(p.parent()).ok()) {
+            Some((mut lamp, switched, dimmer)) => {
+                let on = switched.map_or(night.0 > 0.02, |s| s.0);
+                if lamp.lit != on {
+                    lamp.lit = on;
+                }
+                (on, dimmer.map_or(1.0, |d| d.0) * if switched.is_some() { 1.0 } else { night.0 })
+            }
+            None => (night.0 > 0.02, night.0),
+        };
+        let intensity = 90_000.0 * level;
+        if light.intensity != intensity {
+            light.intensity = intensity;
         }
-        light.intensity = 90_000.0 * night.0;
-        vis.set_if_neq(if night.0 > 0.02 { Visibility::Inherited } else { Visibility::Hidden });
+        vis.set_if_neq(if on { Visibility::Inherited } else { Visibility::Hidden });
     }
 }
 
@@ -390,6 +405,26 @@ mod lamp_tests {
         app.update();
         assert_eq!(app.world().get::<PointLight>(e).unwrap().intensity, 90_000.0);
         assert_eq!(*app.world().get::<Visibility>(e).unwrap(), Visibility::Inherited);
+    }
+
+    #[test]
+    fn a_lamp_switched_by_hand_stays_so_whatever_the_hour() {
+        let mut app = App::new();
+        app.insert_resource(crate::clock::Night(0.0)).add_systems(Update, lamps_at_night);
+        let on = app.world_mut().spawn((crate::lights::Lamp::default(), crate::lights::Switched(true), crate::lights::Dimmer(2.0))).id();
+        let off = app.world_mut().spawn((crate::lights::Lamp::default(), crate::lights::Switched(false))).id();
+        let auto = app.world_mut().spawn(crate::lights::Lamp::default()).id();
+        let lights: Vec<Entity> = [on, off, auto].map(|p| app.world_mut().spawn((LotLamp, PointLight::default(), Visibility::Hidden, ChildOf(p))).id()).to_vec();
+        app.update();
+        assert_eq!(app.world().get::<PointLight>(lights[0]).unwrap().intensity, 180_000.0);
+        assert!(app.world().get::<crate::lights::Lamp>(on).unwrap().lit);
+        assert_eq!(*app.world().get::<Visibility>(lights[1]).unwrap(), Visibility::Hidden);
+        assert_eq!(*app.world().get::<Visibility>(lights[2]).unwrap(), Visibility::Hidden);
+        app.insert_resource(crate::clock::Night(1.0));
+        app.update();
+        assert_eq!(*app.world().get::<Visibility>(lights[1]).unwrap(), Visibility::Hidden);
+        assert!(!app.world().get::<crate::lights::Lamp>(off).unwrap().lit);
+        assert!(app.world().get::<crate::lights::Lamp>(auto).unwrap().lit);
     }
 }
 

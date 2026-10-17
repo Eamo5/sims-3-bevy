@@ -1059,7 +1059,7 @@ fn world_click(
     mut ray_cast: MeshRayCast,
     parents: Query<&ChildOf>,
     sims: Query<(&Sim, Has<HouseholdMember>, Has<Selected>)>,
-    (objects, broken_q, lit_q, hw_q, trash_q, (leftovers, fridge_keeps), sprinkling, weather, chess, music, potties): (
+    (objects, broken_q, lit_q, hw_q, trash_q, (leftovers, fridge_keeps), sprinkling, weather, chess, music, potties, fires_q): (
         Query<&GameObject>,
         Query<(), With<crate::interact::Broken>>,
         Query<(), With<crate::fireplace::Lit>>,
@@ -1071,9 +1071,10 @@ fn world_click(
         Res<crate::chess::ChessTables>,
         Res<crate::tips::Performances>,
         Res<crate::potty::Potties>,
+        Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q), (can_owners, rummaged, tipped_q, family_homes))): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes))): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1098,7 +1099,7 @@ fn world_click(
             Res<crate::toilets::Unflushed>,
             Query<(Has<crate::effects::TvOn>, Has<crate::effects::TvLeftOn>)>,
             (Option<Res<crate::layout::UiAssets>>, Query<&crate::charity::Charities>),
-            (Query<&crate::life::Mood>, Query<(), With<crate::dollhouse::Smashed>>, Query<&crate::hotdrinks::DrinkTray>, Query<&crate::paintings::LeftOnEasel>),
+            (Query<&crate::life::Mood>, Query<(), With<crate::dollhouse::Smashed>>, Query<&crate::hotdrinks::DrinkTray>, Query<&crate::paintings::LeftOnEasel>, Query<&crate::lights::Lamp>),
             (Res<crate::trashcans::CanOwners>, Res<crate::trashcans::Rummaged>, Query<(), With<crate::trashcans::TippedOver>>, Res<crate::homes::FamilyHomes>),
         ),
     ),
@@ -1173,6 +1174,23 @@ fn world_click(
     let target = hits.first().and_then(|(e, _)| ancestor_with(*e, &parents, is_target)).or_else(|| pick_by_box(ray, &pickable));
     debug!("click at {cursor}: {:?} ({})", target.map(|t| objects.get(t).map_or("a Sim or pet".to_string(), |o| o.name.clone())), if hits.is_empty() { "by its box" } else { "by its mesh" });
 
+    // A fire: put out ("Extinguish", the game's: teens and up), before what's burning.
+    let fire = fires_q
+        .iter()
+        .filter_map(|(e, ftf, f)| {
+            let p = ftf.translation();
+            slab(ray.origin, Vec3::from(ray.direction), p + Vec3::new(-0.5, 0.0, -0.5), p + Vec3::new(0.5, 1.5, 0.5)).map(|t| (e, t, p, f.level))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1));
+    if let Some((f, _, at, level)) = fire
+        && !actor_sim.age.is_little()
+        && actor_sim.age != crate::sim::Age::Child
+    {
+        pie.submenus.clear();
+        pie.at = cursor;
+        open_pie(&mut commands, &mut pie, cursor, "Fire", actor, vec![(crate::fire::EXTINGUISH.to_string(), ActionKind::Extinguish { target: f, at, level })]);
+        return;
+    }
     // A pet: what can be done with it.
     if let Some((t, (pet, ptf))) = target.and_then(|t| pets_q.get(t).ok().map(|p| (t, p)))
         && !actor_sim.age.is_little()
@@ -1580,6 +1598,29 @@ fn world_click(
                     pie.submenus.push((dl::LOCK.to_string(), list));
                     if !picks.is_empty() {
                         pie.submenus.push((dl::SPECIFY.to_string(), picks));
+                    }
+                    continue;
+                }
+                // (The testing cheats' own, while they're on.)
+                if d.special == Special::MakeAllHappy && !crate::cheats::testing() {
+                    continue;
+                }
+                // A lamp: turned on or off, left to the dark ("Auto-Lights..."), or set brighter or
+                // dimmer; it, its room's, or all the lot's (the game's light menus).
+                if d.special == Special::LightSwitch {
+                    use crate::lights as li;
+                    let lit = lamps_q.get(t).is_ok_and(|l| l.lit);
+                    let scopes = || li::SCOPES.iter().map(|s| (s.0.to_string(), ActionKind::Object { target: t, def: i })).collect::<Vec<_>>();
+                    for menu in [if lit { li::TURN_OFF } else { li::TURN_ON }, li::AUTO] {
+                        options.push((format!("{menu}... ›"), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((menu.to_string(), scopes()));
+                    }
+                    let first = pie.submenus.len() + 1;
+                    let list = li::INTENSITIES.iter().enumerate().map(|(k, n)| (format!("{}... ›", n.0), submenu_kind(first + k))).collect();
+                    options.push((format!("{}... ›", li::SET_INTENSITY), submenu_kind(pie.submenus.len())));
+                    pie.submenus.push((li::SET_INTENSITY.to_string(), list));
+                    for n in li::INTENSITIES {
+                        pie.submenus.push((n.0.to_string(), scopes()));
                     }
                     continue;
                 }
@@ -2118,7 +2159,9 @@ fn world_click(
                 opp_tasks.splice(0..0, crate::venues::world_lot_options(&world.data, lot, clock.day(), clock.hour_f(), s.age).into_iter().map(|(label, task)| (label, ActionKind::Visit { lot, activity: task })));
             }
             let visit = crate::visit::visitable(&world.data, lot);
-            if !acts.is_empty() || !opp_tasks.is_empty() || visit {
+            // (Its careers: joined there, or quit or retired from by those who work there.)
+            let jobs_here = crate::careerholes::options(&world.data, lot, actor_sim, jobs_q.get(actor).ok().flatten());
+            if !acts.is_empty() || !opp_tasks.is_empty() || visit || !jobs_here.is_empty() {
                 title = crate::rabbitholes::lot_title(l, world.data.lot_names.get(lot).map_or("", |s| s.as_str()));
                 options.clear();
                 if visit {
@@ -2127,6 +2170,7 @@ fn world_click(
                 for (i, a) in acts.iter().enumerate() {
                     options.push((activity_label(a), ActionKind::Visit { lot, activity: i }));
                 }
+                options.extend(jobs_here.into_iter().map(|(label, task)| (label, ActionKind::Visit { lot, activity: task })));
                 // (Going out with someone: those about with the Sim, as the game's "...With".)
                 let here = on_lot.get(actor).ok().map(|l| l.0);
                 let company: Vec<String> = company_q
@@ -2299,6 +2343,19 @@ fn pie_buttons(
         } else {
             commands.entity(target).insert(crate::music::SkipSong(label == crate::music::FORWARD));
         }
+        return;
+    }
+    // (The testing cheats' "Make All Happy", there and then.)
+    if label == crate::cheats::MAKE_ALL_HAPPY {
+        commands.queue(crate::cheats::make_all_happy);
+        return;
+    }
+    // A lamp switched (or its room's, or the lot's), there and then (the game's are immediate).
+    if let ActionKind::Object { target, .. } = kind
+        && sofas.get(target).is_ok_and(|o| o.kind == ObjectKind::Light)
+        && let Some(asked) = crate::lights::chosen(&title, &label)
+    {
+        commands.entity(target).insert(asked);
         return;
     }
     // A door locked or unlocked, there and then (the game's are immediate).

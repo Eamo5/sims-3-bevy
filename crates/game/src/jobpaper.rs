@@ -203,17 +203,8 @@ fn listing_buttons(
             if *b == ListingButton::Accept
                 && let Some(&track) = l.offers.get(l.at)
             {
-                let j = crate::careers::Job::new(track);
-                let info = j.info();
-                notes.push(format!(
-                    "{} joined the {} career as a {} (§{}/hr, {}–{}).",
-                    sim.first,
-                    j.career().name,
-                    info.title_for(sim.female),
-                    info.hourly,
-                    crate::interact::hour_label(info.start),
-                    crate::interact::hour_label(info.end)
-                ));
+                let (j, note) = crate::careers::new_job(sim, track);
+                notes.push(note);
                 commands.entity(l.sim).insert(j);
                 life.write(crate::life::LifeEvent::new(l.sim, crate::life::LifeEventKind::NewJob));
             }

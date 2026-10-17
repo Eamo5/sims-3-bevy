@@ -1,7 +1,9 @@
 //! Fire: a stove left to a poor cook catches fire and spreads to what's around it. Sims nearby
 //! panic (and those too close catch fire themselves: they may stop, drop and roll, or die), a
 //! smoke alarm calls the fire department (or someone phones), and a firefighter comes in the fire
-//! truck, in uniform, to put each fire out with the extinguisher.
+//! truck, in uniform, to put each fire out with the extinguisher. Teens and up can put fires out
+//! themselves ("Extinguish", the game's `Fire.Extinguish`: on to the next till they're all out),
+//! and the Brave do by themselves.
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -9,7 +11,7 @@ use rand::Rng;
 use crate::anim::ActionClip;
 use crate::camera::SimsCamera;
 use crate::clock::GameClock;
-use crate::interact::{ActionQueue, GameObject, Notifications};
+use crate::interact::{Action, ActionKind, ActionQueue, GameObject, Notifications};
 use crate::sim::HouseholdMember;
 use crate::nav::Floor;
 use crate::sim::{Age, Sim};
@@ -22,7 +24,7 @@ impl Plugin for FirePlugin {
         app.init_resource::<FireDepartment>()
             .init_resource::<FireLooks>()
             .add_message::<StartFire>()
-            .add_systems(Update, (start_fires, spread, panic, burning, run_about, sim_flames, call_firefighters, firefighting, flicker).chain().run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, (start_fires, spread, panic, extinguishers, burning, run_about, sim_flames, call_firefighters, firefighting, flicker).chain().run_if(in_state(PlayMode::Live)))
             .add_systems(OnEnter(PlayMode::Live), |mut d: ResMut<FireDepartment>| *d = FireDepartment::default());
     }
 }
@@ -60,6 +62,46 @@ impl OnFire {
 /// A Sim panicking at a fire.
 #[derive(Component)]
 pub struct Panicking;
+
+/// How the game names putting a fire out.
+pub const EXTINGUISH: &str = "Extinguish";
+
+/// How long a Sim takes to put a fire out: the game's `kExtinguishTimeForFire` (game minutes,
+/// tuned 8), the quicker for the Brave (`kBraveTraitExtinguishFireSpeedMultiplier` 0.5) and
+/// Daredevils (0.66).
+pub fn extinguish_minutes(traits: &[crate::life::Trait]) -> f32 {
+    use crate::life::Trait;
+    let mut m: f32 = 1.0;
+    if traits.contains(&Trait::Brave) {
+        m = m.min(0.5);
+    }
+    if traits.contains(&Trait::Daredevil) {
+        m = m.min(0.66);
+    }
+    8.0 * m
+}
+
+/// How near the fire they stand to put it out (`kMinExtinguishDistance` 1.2; a Daredevil's,
+/// `kDaredevilMinExtinguishDistance`, 1).
+pub fn extinguish_distance(traits: &[crate::life::Trait]) -> f32 {
+    if traits.contains(&crate::life::Trait::Daredevil) { 1.0 } else { 1.2 }
+}
+
+/// The extinguisher on the fire (the game's `Extinguish` graph, the extinguisher in hand), and
+/// put down after.
+pub fn extinguisher_clip() -> ActionClip {
+    ActionClip::new(Some("a2o_fire_fireExtinguisher_start_x"), &["a2o_fire_fireExtinguisher_loop1_x", "a2o_fire_fireExtinguisher_loop2_x"])
+}
+pub const EXTINGUISHER_STOP: &[&str] = &["a2o_fire_fireExtinguisher_stop_x"];
+
+/// A Sim who's just put a fire out: on to the next while there are any.
+#[derive(Component)]
+pub struct PutOutOne;
+
+/// Putting a fire out: which, where, and on what floor.
+pub fn extinguish(fire: Entity, at: Vec3, level: u8, autonomous: bool) -> Action {
+    Action::new(EXTINGUISH, ActionKind::Extinguish { target: fire, at, level }, autonomous)
+}
 
 /// A Sim whose flames were just put out: not to catch fire again from the flames still by them
 /// until then (game minutes), but off out of them.
@@ -357,6 +399,13 @@ fn panic(
                 .insert(OnFire::caught(clock.minutes));
             continue;
         }
+        // (Putting it out instead, as the game's `Extinguish` comes before the panic.)
+        if !burning && q.0.front().is_some_and(|a| matches!(a.kind, ActionKind::Extinguish { .. })) {
+            if panicking {
+                commands.entity(e).remove::<(Panicking, ActionClip)>();
+            }
+            continue;
+        }
         if burning {
             // (Burning, they can think of nothing else.)
             q.0.clear();
@@ -371,6 +420,59 @@ fn panic(
             // (Too panicked to do anything else.)
             q.0.clear();
         }
+    }
+}
+
+/// Those putting fires out: done when it's out already (the firefighter's, or another's); once
+/// one's out, on to the nearest other on their floor (the game's `Extinguish` goes on while there
+/// are any); and the Brave, with nothing of the player's to do, at it by themselves (the game's
+/// `TraitBrave` 100 for it).
+#[allow(clippy::type_complexity)]
+fn extinguishers(
+    mut commands: Commands,
+    fires: Query<(Entity, &Transform, &Fire)>,
+    mut sims: Query<
+        (Entity, &Sim, &Transform, &mut ActionQueue, Has<PutOutOne>, Has<OnFire>),
+        (
+            Or<(With<HouseholdMember>, With<crate::interact::Visitor>)>,
+            Without<Firefighter>,
+            Without<crate::death::Dying>,
+            Without<crate::interact::AtWork>,
+            Without<crate::rabbitholes::AtRabbitHole>,
+        ),
+    >,
+) {
+    for (me, sim, tf, mut q, put_out, burning) in &mut sims {
+        if put_out {
+            commands.entity(me).remove::<PutOutOne>();
+        }
+        for a in q.0.iter_mut() {
+            if let ActionKind::Extinguish { target, .. } = a.kind
+                && !fires.contains(target)
+            {
+                a.cancel = true;
+            }
+        }
+        if fires.is_empty() || burning || sim.age.is_little() || sim.age == Age::Child || q.0.iter().any(|a| matches!(a.kind, ActionKind::Extinguish { .. }) && !a.cancel) {
+            continue;
+        }
+        let own = q.0.iter().all(|a| a.autonomous || matches!(a.kind, ActionKind::Outro { .. }));
+        let brave = sim.traits.contains(&crate::life::Trait::Brave);
+        if !own || !(put_out || brave) {
+            continue;
+        }
+        let Some((f, ftf, fire)) = fires
+            .iter()
+            .filter(|(_, ftf, _)| (ftf.translation.y - tf.translation.y).abs() < 2.0 && ftf.translation.distance(tf.translation) < 25.0)
+            .min_by(|a, b| a.1.translation.distance(tf.translation).total_cmp(&b.1.translation.distance(tf.translation)))
+        else {
+            continue;
+        };
+        if !put_out {
+            info!("{} (Brave) goes to put the fire out", sim.first);
+        }
+        // (What they were about by themselves wound up first.)
+        q.push_player(extinguish(f, ftf.translation, fire.level, !put_out));
     }
 }
 
@@ -616,6 +718,48 @@ fn firefighting(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sim(age: Age, traits: &[crate::life::Trait]) -> Sim {
+        let mut s = crate::sim::random_sim(&mut rand::rng(), "F", Some(true), age);
+        s.traits = traits.to_vec();
+        s
+    }
+
+    #[test]
+    fn the_brave_go_to_put_fires_out_and_whoever_has_put_one_out_goes_on_to_the_next() {
+        use crate::life::Trait;
+        let mut app = App::new();
+        app.add_systems(Update, extinguishers);
+        let fire = app.world_mut().spawn((Transform::from_xyz(3.0, 0.0, 0.0), Fire { level: 1, next_spread: 0.0 })).id();
+        let spawn = |app: &mut App, s: Sim| app.world_mut().spawn((s, Transform::default(), ActionQueue::default(), HouseholdMember)).id();
+        let brave = spawn(&mut app, sim(Age::Adult, &[Trait::Brave]));
+        let timid = spawn(&mut app, sim(Age::Adult, &[]));
+        let child = spawn(&mut app, sim(Age::Child, &[Trait::Brave]));
+        let done = spawn(&mut app, sim(Age::Teen, &[]));
+        app.world_mut().entity_mut(done).insert(PutOutOne);
+        // (The player's to do first, for this one.)
+        let busy = spawn(&mut app, sim(Age::Adult, &[Trait::Brave]));
+        app.world_mut().get_mut::<ActionQueue>(busy).unwrap().push_player(Action::new("Go Here", ActionKind::GoHere(Vec2::ZERO, 1), false));
+        app.update();
+        let queued = |app: &App, e: Entity| app.world().get::<ActionQueue>(e).unwrap().0.iter().any(|a| matches!(a.kind, ActionKind::Extinguish { target, .. } if target == fire));
+        assert!(queued(&app, brave) && app.world().get::<ActionQueue>(brave).unwrap().0[0].autonomous);
+        assert!(queued(&app, done) && !app.world().get::<ActionQueue>(done).unwrap().0[0].autonomous);
+        assert!(!queued(&app, timid) && !queued(&app, child) && !queued(&app, busy));
+        assert!(app.world().get::<PutOutOne>(done).is_none());
+        // (Put out by someone else: theirs called off.)
+        app.world_mut().entity_mut(fire).despawn();
+        app.update();
+        assert!(app.world().get::<ActionQueue>(brave).unwrap().0[0].cancel);
+    }
+
+    #[test]
+    fn the_brave_and_daredevils_put_fires_out_quicker() {
+        use crate::life::Trait;
+        assert_eq!(extinguish_minutes(&[]), 8.0);
+        assert_eq!(extinguish_minutes(&[Trait::Brave, Trait::Daredevil]), 4.0);
+        assert_eq!(extinguish_minutes(&[Trait::Daredevil]), 8.0 * 0.66);
+        assert_eq!(extinguish_distance(&[Trait::Daredevil]), 1.0);
+    }
 
     #[test]
     fn cooking_fires_come_at_the_games_odds() {

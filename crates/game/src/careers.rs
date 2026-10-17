@@ -52,6 +52,8 @@ pub struct CareerLevel {
 
 pub struct CareerTrack {
     pub name: &'static str,
+    /// The game's key for it (its `OccupationNames`: "LawEnforcement", "PTGroceryStoreClerk").
+    pub key: &'static str,
     /// The skill that improves performance.
     pub skill: &'static str,
     /// The game's career icon.
@@ -213,6 +215,7 @@ pub fn install_tracks(data: &s3bake::GameDataBaked) {
             let skill = c.levels.iter().find_map(|l| l.skills.first().cloned()).unwrap_or_else(|| default_skill(&c.hex).to_string());
             CareerTrack {
                 name: leak(c.name.clone()),
+                key: leak(c.hex.clone()),
                 skill: leak(skill),
                 icon: leak(c.icon.clone()),
                 offer: leak(c.offer.clone()),
@@ -258,6 +261,7 @@ impl BuiltinTrack {
     fn track(&self) -> CareerTrack {
         CareerTrack {
             name: self.name,
+            key: leak_key(self.name),
             skill: self.skill,
             icon: "",
             offer: "",
@@ -279,6 +283,26 @@ impl BuiltinTrack {
             events: &[],
         }
     }
+}
+
+/// A built-in career's key, as the game's: its name without spaces.
+fn leak_key(name: &str) -> &'static str {
+    Box::leak(name.replace(' ', "").into_boxed_str())
+}
+
+/// A level's title for a Sim (a woman's where the game has its own), with "a" or "an": "an
+/// Organ Donor".
+pub fn a_title(info: &CareerLevel, sim: &Sim) -> String {
+    let title = info.title_for(sim.female);
+    format!("{} {title}", if title.starts_with(['A', 'E', 'I', 'O', 'U']) { "an" } else { "a" })
+}
+
+/// A Sim's new job in a career, at its first level, and how it's announced.
+pub fn new_job(sim: &Sim, track: usize) -> (Job, String) {
+    let j = Job::new(track);
+    let info = j.info();
+    let note = format!("{} joined the {} career as {} (§{}/hr, {}–{}).", sim.first, j.career().name, a_title(info, sim), info.hourly, hour_label(info.start), hour_label(info.end));
+    (j, note)
 }
 
 const WEEKDAYS: u8 = 0b0011111;
@@ -1535,7 +1559,7 @@ pub fn leave_for_work(commands: &mut Commands, clock: &GameClock, e: Entity, sim
     let until = start_minute + job.hours() as f64 * 60.0;
     // (Paid from when they get there.)
     commands.entity(e).insert((AtWork { until: until.max(clock.minutes + 30.0), from: clock.minutes, start_perf: job.performance }, Visibility::Hidden));
-    notes.push(format!("{} left for work as a {}.", sim.first, info.title));
+    notes.push(format!("{} left for work as {}.", sim.first, a_title(info, sim)));
 }
 
 #[cfg(test)]

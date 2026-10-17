@@ -1288,6 +1288,10 @@ pub enum Special {
     EmptyPotty,
     /// Lock or unlock a door (from its menu, at once: see `doorlocks`).
     LockDoor,
+    /// A lamp switched, its room's or the lot's (from its menu, at once: see `lights`).
+    LightSwitch,
+    /// The testing cheats' "Make All Happy" (at once: see `cheats`).
+    MakeAllHappy,
     /// Blow out a birthday cake's candles and grow up.
     BlowOutCandles,
     /// Write (a page at a time) the book under way.
@@ -1428,9 +1432,11 @@ static MEAL: [InteractionDef; 2] = [
     InteractionDef { special: Special::GrabPlate, ..def("Grab a Plate", 2.0, [9000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) },
     InteractionDef { special: Special::PutAway, ..def("Put Away Leftovers", 3.0, N, Pose::Use) },
 ];
-static MAILBOX: [InteractionDef; 2] = [InteractionDef { special: Special::PayBills, ..def("Pay Bills", 3.0, N, Pose::Use) },
+static MAILBOX: [InteractionDef; 3] = [InteractionDef { special: Special::PayBills, ..def("Pay Bills", 3.0, N, Pose::Use) },
     // (The game's `DonateToCharity`, offered as its causes' menus.)
     InteractionDef { autonomous: false, special: Special::Donate, ..def("Donate to Charity", 2.0, N, Pose::Use) },
+    // (With the testing cheats on: `cheats`.)
+    InteractionDef { autonomous: false, special: Special::MakeAllHappy, ..def(crate::cheats::MAKE_ALL_HAPPY, 0.0, N, Pose::Use) },
 ];
 static NEWSPAPER: [InteractionDef; 3] = [
     InteractionDef { special: Special::GetPaper, ..def("Read", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 45.0], Pose::Use) },
@@ -1710,6 +1716,8 @@ static XYLOPHONE: [InteractionDef; 1] = [def("Play Xylophone", 40.0, [0.0, 0.0, 
 static PEGBOX: [InteractionDef; 1] = [def("Play with Peg Box", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 120.0], Pose::Use)];
 /// (Its menu's the locks: see `hud::world_click` and `doorlocks`.)
 static DOOR: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::LockDoor, ..def("Lock", 0.0, N, Pose::Use) }];
+/// (Its menu's the switches: see `hud::world_click` and `lights`.)
+static LIGHT: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::LightSwitch, ..def("Lights", 0.0, N, Pose::Use) }];
 /// (Sat on, by toddlers potty trained, or a grown-up's to teach them on and empty: see `potty`.)
 static POTTY: [InteractionDef; 4] = [
     InteractionDef { until_full: Some(BLADDER), on_object: true, ..def("Use Potty Chair", 15.0, [0.0, 600.0, 0.0, 0.0, -20.0, 0.0], Pose::Sit) },
@@ -2666,6 +2674,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::SnowAngel => &SNOW_ANGEL,
         ObjectKind::LeafPile => &LEAF_PILE,
         ObjectKind::Door => &DOOR,
+        ObjectKind::Light => &LIGHT,
         _ => &[],
     }
 }
@@ -2752,6 +2761,8 @@ pub enum ActionKind {
     AdoptPet { kind: &'static str },
     /// A social with a pet (`pets::PET_SOCIALS`): where the pet was, its kind.
     PetSocial { target: Entity, social: usize, at: Vec2, kind: &'static str },
+    /// Putting a fire out (`fire`): which, where, and on what floor.
+    Extinguish { target: Entity, at: Vec3, level: u8 },
     /// Phone round to throw a party.
     ThrowParty,
     /// Drive to a community lot and spend time there.
@@ -3450,6 +3461,11 @@ pub(crate) fn run_actions(
                             let mine = Vec2::new(tf.translation.x, tf.translation.z);
                             Some((*at + (mine - *at).normalize_or(Vec2::X) * crate::pets::social_distance(kind), 1))
                         }
+                        // (Before the fire, as near as the game's `PlanRouteToExtinguish` has them.)
+                        ActionKind::Extinguish { at, level, .. } => {
+                            let (mine, at) = (Vec2::new(tf.translation.x, tf.translation.z), at.xz());
+                            Some((at + (mine - at).normalize_or(Vec2::X) * crate::fire::extinguish_distance(&sim.traits), *level))
+                        }
                         ActionKind::GoToWork | ActionKind::Visit { .. } | ActionKind::GoToLot { .. } | ActionKind::GoHomeFromLot | ActionKind::Jog { .. } => way_out.map(|p| (p, 1)),
                         ActionKind::JoinCareer { target, .. } | ActionKind::Teleport { pad: target, .. } => {
                             objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0)))
@@ -4079,6 +4095,12 @@ pub(crate) fn run_actions(
                                 anim.pose = Pose::Use;
                                 commands.entity(me).insert(crate::anim::ActionClip::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_plantSeeds_x"]));
                             }
+                            ActionKind::Extinguish { at, .. } => {
+                                let to = at.xz() - Vec2::new(tf.translation.x, tf.translation.z);
+                                tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
+                                anim.pose = Pose::Use;
+                                commands.entity(me).insert(crate::fire::extinguisher_clip());
+                            }
                             ActionKind::PetSocial { at, social, kind, .. } => {
                                 let to = *at - Vec2::new(tf.translation.x, tf.translation.z);
                                 tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
@@ -4148,7 +4170,11 @@ pub(crate) fn run_actions(
                                         .or_else(|| crate::meals::recipe_task(*activity))
                                         .or_else(|| crate::classes::class_task(*activity))
                                         .or_else(|| (crate::skillbooks::BOOK_TASK..crate::skillbooks::BOOK_TASK + 1000).contains(activity).then_some(&crate::skillbooks::BUY_BOOK))
-                                        .or_else(|| crate::venues::task(*activity));
+                                        .or_else(|| crate::venues::task(*activity))
+                                        .or_else(|| crate::careerholes::Errand::of(*activity).map(|e| e.activity()));
+                                    if let Some(e) = crate::careerholes::Errand::of(*activity) {
+                                        commands.entity(me).insert(e);
+                                    }
                                     if crate::meals::recipe_task(*activity).is_some() {
                                         commands.entity(me).insert(crate::meals::BuyingRecipe(*activity - crate::meals::RECIPE_TASK));
                                     }
@@ -4401,6 +4427,8 @@ pub(crate) fn run_actions(
                                         | Special::PottyLesson
                                         | Special::EmptyPotty
                                         | Special::LockDoor
+                                        | Special::LightSwitch
+                                        | Special::MakeAllHappy
                                         | Special::CardioWorkOut
                                         | Special::StrengthWorkOut
                                         | Special::TvTurnOn
@@ -5111,6 +5139,16 @@ pub(crate) fn run_actions(
                                 }
                             }
                         }
+                        // (Out once they've had the extinguisher on it long enough; then on to the next.)
+                        ActionKind::Extinguish { target, .. } => {
+                            if elapsed >= crate::fire::extinguish_minutes(&sim.traits) {
+                                finished = true;
+                                commands.entity(*target).try_despawn();
+                                commands.entity(me).insert(crate::fire::PutOutOne);
+                                notes.push(format!("{} put the fire out!", sim.first));
+                                outro = Some((crate::fire::EXTINGUISHER_STOP, None, 2.4, Entity::PLACEHOLDER, false));
+                            }
+                        }
                         ActionKind::PetSocial { social, kind, .. } => {
                             let s = &crate::pets::PET_SOCIALS[*social];
                             // (An Animal Lover warms to any, a Cat or Dog Person to theirs most: the
@@ -5338,10 +5376,10 @@ pub(crate) fn run_actions(
                                 if let Some(j) = job.as_ref() {
                                     let daily = j.pension();
                                     notes.push(format!(
-                                        "{} retired from the {} career after years as a {}, and will be paid a pension of §{daily} a day.",
+                                        "{} retired from the {} career after years as {}, and will be paid a pension of §{daily} a day.",
                                         sim.first,
                                         j.career().name,
-                                        j.info().title_for(sim.female)
+                                        crate::careers::a_title(j.info(), sim)
                                     ));
                                     commands.entity(me).remove::<Job>().insert(crate::careers::Pension { daily, paid: clock.day() });
                                 }
@@ -5429,17 +5467,8 @@ pub(crate) fn run_actions(
                         ActionKind::JoinCareer { track, .. } => {
                             if elapsed >= 15.0 {
                                 finished = true;
-                                let j = Job::new(*track);
-                                let info = j.info();
-                                notes.push(format!(
-                                    "{} joined the {} career as a {} (§{}/hr, {}–{}).",
-                                    sim.first,
-                                    j.career().name,
-                                    info.title,
-                                    info.hourly,
-                                    hour_label(info.start),
-                                    hour_label(info.end)
-                                ));
+                                let (j, note) = crate::careers::new_job(sim, *track);
+                                notes.push(note);
                                 commands.entity(me).insert(j);
                                 life.write(LifeEvent::new(me, LifeEventKind::NewJob));
                             }

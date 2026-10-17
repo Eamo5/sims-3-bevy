@@ -367,6 +367,8 @@ fn outings(
                 commands.entity(e).insert(crate::meals::RecipeBookBought);
             } else if std::ptr::eq(at.activity, &crate::skillbooks::BUY_BOOK) {
                 commands.entity(e).insert(crate::skillbooks::BookBought);
+            } else if crate::careerholes::is_errand(at.activity) {
+                commands.entity(e).insert(crate::careerholes::ErrandDone);
             } else if let Some(i) = crate::venues::act_of(at.activity) {
                 commands.entity(e).insert(crate::venues::VenueDone(i));
             } else if let Some(skill) = crate::classes::class_of(at.activity) {
