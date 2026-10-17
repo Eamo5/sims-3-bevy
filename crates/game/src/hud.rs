@@ -926,8 +926,9 @@ pub(crate) fn pick_by_box(
     let dir = Vec3::from(ray.direction);
     pickable
         .iter()
-        // (Not what there's nothing to do with, a rug: a click there is on the floor.)
-        .filter(|(_, _, vis, obj, _)| vis.get() && obj.is_none_or(|o| !crate::interact::interactions_for(o.kind).is_empty()))
+        // (Not what there's nothing to do with, a rug: a click there is on the floor. A house
+        // phone opens the phone's own menu.)
+        .filter(|(_, _, vis, obj, _)| vis.get() && obj.is_none_or(|o| o.kind == ObjectKind::Phone || !crate::interact::interactions_for(o.kind).is_empty()))
         .filter_map(|(e, tf, _, obj, pet)| {
             let (mid, size) = match obj {
                 Some(o) => {
@@ -3025,6 +3026,12 @@ fn phone_button(
     objects: Query<&GameObject>,
     maid: Res<crate::services::MaidService>,
     (work_q, clock, silenced): (Query<(Option<&crate::careers::Job>, Option<&crate::timeoff::TimeOff>, Option<&crate::life::Moodlets>)>, Res<crate::clock::GameClock>, Res<crate::calls::PhonesSilenced>),
+    (fires_q, dept, breakin, out_q): (
+        Query<(), With<crate::fire::Fire>>,
+        Res<crate::fire::FireDepartment>,
+        Res<crate::burglar::Break>,
+        Query<(), (With<HouseholdMember>, With<crate::visit::OnLot>)>,
+    ),
 ) {
     if asked.is_some() {
         commands.remove_resource::<OpenPhone>();
@@ -3126,6 +3133,17 @@ fn phone_button(
         options.push(("Quit Job".to_string(), ActionKind::QuitJobCall));
     }
     options.push((if silenced.0 { "Unsilence Phone" } else { "Silence Phone" }.to_string(), ActionKind::SilencePhone));
+    // (Emergencies, as the game's: the police while there's a burglar about, the firefighters
+    // while there's a fire, neither already called; everybody home while some are out.)
+    if breakin.police_wanted() {
+        options.insert(0, ("Call Police".to_string(), ActionKind::CallPolice));
+    }
+    if !fires_q.is_empty() && dept.called.is_none() {
+        options.insert(0, ("Call Firefighters".to_string(), ActionKind::CallFirefighters));
+    }
+    if household.iter().any(|(e, ..)| e != actor && out_q.contains(e)) {
+        options.push(("Call Everybody Home".to_string(), ActionKind::CallEverybodyHome));
+    }
     // An elder with a job can retire, on a pension.
     if me.age == crate::sim::Age::Elder && has_job {
         options.push(("Retire".to_string(), ActionKind::Retire));

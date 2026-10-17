@@ -2633,6 +2633,12 @@ pub enum ActionKind {
     PrankCall { target: Entity },
     /// A Workaholic's call to Check Up On Work (`computertraits`).
     CheckUpOnWork,
+    /// Calls for the police (a burglar about), the fire department (a fire at home), and
+    /// everybody out to come home (the game's `CallPolice`, `CallFirefighters`,
+    /// `CallEverybodyHome`).
+    CallPolice,
+    CallFirefighters,
+    CallEverybodyHome,
     /// A call for time off work: sick, fake sick, or unpaid days (`timeoff`).
     TimeOff(crate::timeoff::Ask),
     /// A call to quit their job (the game's `CallToQuitWork`).
@@ -3379,6 +3385,9 @@ pub(crate) fn run_actions(
                         | ActionKind::PhoneChat { .. }
                         | ActionKind::PrankCall { .. }
                         | ActionKind::CheckUpOnWork
+                        | ActionKind::CallPolice
+                        | ActionKind::CallFirefighters
+                        | ActionKind::CallEverybodyHome
                         | ActionKind::TimeOff(_)
                         | ActionKind::QuitJobCall
                         | ActionKind::SilencePhone
@@ -4021,6 +4030,9 @@ pub(crate) fn run_actions(
                             | ActionKind::PhoneChat { .. }
                             | ActionKind::PrankCall { .. }
                             | ActionKind::CheckUpOnWork
+                            | ActionKind::CallPolice
+                            | ActionKind::CallFirefighters
+                            | ActionKind::CallEverybodyHome
                             | ActionKind::TimeOff(_)
                             | ActionKind::QuitJobCall
                             | ActionKind::SilencePhone
@@ -5253,6 +5265,13 @@ pub(crate) fn run_actions(
                             if elapsed >= crate::computertraits::CHECK_UP_MINUTES {
                                 finished = true;
                                 commands.entity(me).insert(crate::computertraits::CheckedUp);
+                            }
+                        }
+                        ActionKind::CallPolice | ActionKind::CallFirefighters | ActionKind::CallEverybodyHome => {
+                            if elapsed >= crate::timeoff::CALL_MINUTES {
+                                finished = true;
+                                let (kind, name, now) = (action.kind.clone(), sim.first.clone(), clock.minutes);
+                                commands.queue(move |world: &mut World| crate::calls::emergency_call(world, me, kind, &name, now));
                             }
                         }
                         ActionKind::QuitJobCall => {

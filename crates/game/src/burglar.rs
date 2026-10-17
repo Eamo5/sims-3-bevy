@@ -44,6 +44,23 @@ pub struct Break {
     pub force: bool,
 }
 
+impl Break {
+    /// Whether there's a burglar about with the police not called yet (the game's `CallPolice`
+    /// test).
+    pub fn police_wanted(&self) -> bool {
+        self.burglar.is_some() && self.called.is_none()
+    }
+
+    /// The police called: whether they weren't already.
+    pub fn call(&mut self, now: f64) -> bool {
+        let first = self.police_wanted();
+        if first {
+            self.called = Some(now);
+        }
+        first
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Stage {
     Sneaking,

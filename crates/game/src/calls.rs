@@ -332,3 +332,39 @@ mod tests {
         assert_eq!(kind_of(94.9), 2);
     }
 }
+
+/// A call made: the police sent for the burglar, the fire department for the fire, or everybody
+/// out on other lots asked home (each going home, the caller too, as the game's).
+pub fn emergency_call(world: &mut World, caller: Entity, kind: crate::interact::ActionKind, name: &str, now: f64) {
+    use crate::interact::ActionKind;
+    match kind {
+        ActionKind::CallPolice => {
+            if world.resource_mut::<crate::burglar::Break>().call(now) {
+                world.resource_mut::<crate::interact::Notifications>().push(format!("{name} called the police!"));
+            }
+        }
+        ActionKind::CallFirefighters => {
+            let mut dept = world.resource_mut::<crate::fire::FireDepartment>();
+            if dept.called.is_none() {
+                dept.called = Some(now);
+                world.resource_mut::<crate::interact::Notifications>().push(format!("{name} called the fire department!"));
+            }
+        }
+        ActionKind::CallEverybodyHome => {
+            let mut away = world.query_filtered::<(Entity, &mut crate::interact::ActionQueue), (With<crate::sim::HouseholdMember>, With<crate::visit::OnLot>)>();
+            let mut n = 0;
+            for (e, mut q) in away.iter_mut(world) {
+                if q.0.iter().any(|a| matches!(a.kind, ActionKind::GoHomeFromLot)) {
+                    continue;
+                }
+                q.0.clear();
+                q.0.push_back(crate::interact::Action::new("Go Home", ActionKind::GoHomeFromLot, e != caller));
+                n += 1;
+            }
+            if n > 0 {
+                world.resource_mut::<crate::interact::Notifications>().push(format!("{name} called everybody home."));
+            }
+        }
+        _ => {}
+    }
+}

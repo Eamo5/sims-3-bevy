@@ -411,7 +411,9 @@ installation is unreachable.
   day off) or *Call In Fake Sick* (the same, but found out at the day's end 10% of the time,
   more for the absent-minded, losers, the unlucky, anyone who went out and those who call in sick
   often, less for Workaholics and the lucky: 25 performance off); or *Take Unpaid Time Off...*
-  a day, two or five, not again for 48, 72 or 240 hours; or quit. Calls come in too, as the game's (unless
+  a day, two or five, not again for 48, 72 or 240 hours; or quit. In an emergency they *Call
+  Police* (a burglar about) or *Call Firefighters* (a fire at home), when nobody has yet, and
+  *Call Everybody Home* brings the household home from other lots. Calls come in too, as the game's (unless
   the phones are silenced, the game's *Silence Phone*): every six hours or so,
   from seven in the morning to ten at night, someone the household knows may ring (for a chat,
   liking them 25 or more; to hang out, 40 or more). The phone rings, it's answered with the
