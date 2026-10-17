@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 131;
+pub const GAMEDATA_VERSION: u32 = 132;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -101,6 +101,25 @@ impl SkillInfo {
     pub fn desc_for(&self, female: bool) -> &str {
         if female && !self.desc_female.is_empty() { &self.desc_female } else { &self.desc }
     }
+}
+
+/// The hot beverage machine's drinks, named as the game's `CustomDrinkRecipe` puts them
+/// together (`Pattern_#` filled with a `Tuple_#`, a `Flavor_#`, a `Cream_#` and a `Mixin_#` of
+/// another flavour; `@` for none), and how its interactions are named, plainly and for the Evil,
+/// the Good and the Daredevils (`DrinkInteractionName`..., `ServeHotBeverages`'
+/// `InteractionName`...).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct DrinkNames {
+    pub patterns: Vec<String>,
+    pub mixins: Vec<String>,
+    pub flavors: Vec<String>,
+    pub creams: Vec<String>,
+    pub tuples: Vec<String>,
+    /// `BoringDrink`, `TrySomethingElse`.
+    pub plain: String,
+    pub try_else: String,
+    pub drink: [String; 4],
+    pub serve: [String; 4],
 }
 
 /// A composition an instrument's played (the `Skills` sheet's instrument tables: `Guitar`,
@@ -1333,6 +1352,9 @@ pub struct GameDataBaked {
     /// The instruments' compositions.
     #[serde(default)]
     pub compositions: Vec<CompositionInfo>,
+    /// The hot beverage machine's drinks.
+    #[serde(default)]
+    pub drinks: DrinkNames,
     pub careers: Vec<CareerInfo>,
     pub patterns: Vec<PatternInfo>,
     pub balloons: BalloonTable,
@@ -2734,6 +2756,26 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             predicate: text("Traits/TraitList", &get(&f, "Predicate")),
             hex,
         });
+    }
+    // The hot beverage machine's drinks' names.
+    {
+        let s = |key: &str| strings.get(&s3pkg::fnv64(&key.to_ascii_lowercase())).cloned().unwrap_or_default();
+        let m = |k: &str| s(&format!("Gameplay/Objects/Appliances/HotBeverageMachine:{k}"));
+        let list = |p: &str, n: usize| (0..n).map(|i| m(&format!("{p}{i}"))).collect::<Vec<_>>();
+        let make = |k: &str| s(&format!("Gameplay/Objects/Appliances/HotBeverageMachine/MakeHotBeverage:{k}"));
+        let serve = |k: &str| s(&format!("Gameplay/Objects/Appliances/HotBeverageMachine/ServeHotBeverages:{k}"));
+        // (The counts are its tuning's: `kStylePatternCount`...)
+        out.drinks = DrinkNames {
+            patterns: list("Pattern_", 4),
+            mixins: list("Mixin_", 3),
+            flavors: list("Flavor_", 6),
+            creams: list("Cream_", 4),
+            tuples: list("Tuple_", 5),
+            plain: m("BoringDrink"),
+            try_else: m("TrySomethingElse").trim().to_string(),
+            drink: ["DrinkInteractionName", "DrinkInteractionName_Evil", "DrinkInteractionName_Good", "DrinkInteractionName_Daredevil"].map(make),
+            serve: ["InteractionName", "EvilInteractionName", "GoodInteractionName", "ExtremeInteractionName"].map(serve),
+        };
     }
     if let Some(skills) = xml("Skills") {
         let rows = records(&skills, "SkillList");

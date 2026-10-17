@@ -754,7 +754,9 @@ installation is unreachable.
   the cuddle after; turned away, the cuddle's over. Two grown-ups relaxing in the same double
   bed can Cuddle there too (the game's `BedCuddle` clips, each from their side of the bed), and
   Kiss or Make Out from the cuddle (a kiss turned away there, they stay cuddled up); in bed
-  together the menu's the cuddle and WooHoo. Sat together, the menu's
+  together the menu's the cuddle and WooHoo. Relaxing in a bed, a Sim can *Daydream* there
+  (the game's `DayDream`, offered from relaxing): lying on as they are, they think of the
+  household's Sims, one every six minutes, for ten fun an hour till they've had their fill. Sat together, the menu's
   the game's single level of that talk; Sims strike up such a talk of their own accord now and
   then, so a family meal is talked through. Talked to where they sit by someone standing, a Sim
   listens sat there instead of being pulled up into it.
@@ -957,7 +959,10 @@ installation is unreachable.
   on and left on, or off again, there and then (the game's `TurnOnTV`, `TurnOffTV`). A stereo
   has *Cardio Exercise* and, for teens and up, *Strength Training* (the game's
   `AthleticGameObject.WorkOut` there), the same exercises with it put on the game's workout
-  station, Electronica.
+  station, Electronica. Turned on, its volume's changed (*Change Volume... ›* Low, Medium or
+  High: the game's gains, a quarter, three fifths and full) and a song skipped there and then
+  (*Skip... ›* Forward to another, Backward to the one before), as its `ChangeVolume` and
+  `SkipSong` are.
 - **Reading**: *Read a Book* at a bookshelf takes a book down (the game's animation), carries it
   to the nearest free sofa or chair and reads it sitting there, turning the pages (standing at
   the shelf when there's no seat free). The morning paper is picked up off the ground and carried
@@ -1113,7 +1118,12 @@ installation is unreachable.
   cooks the game's grilled recipes the Sim knows (hot dogs, tofu dogs, burgers, veggie
   burgers, grilled salmon, tri-tip) with the barbecue animations and serves them like a
   group meal; a hot-beverage maker brews a cup for energy (and a trip to the bathroom
-  later); a set alarm clock wakes the household's workers an hour before their shift and
+  later), each Sim's favourite drink by name as the game puts them together ("Drink Double
+  Banana Lite Latte with Chocolate Swirl"; the Evil's Evil, the Good's Delicious, the
+  Daredevils' Extreme), *Try Something Else... ›* six more, and *Serve Hot Beverages* a tray of
+  four cups of whatever it comes up with, set out on the counter beside it with the machine's
+  clips (the server has the first), for anyone to take one from (the tray's cups taken away
+  one by one; the empty tray's cleaned up as dishes are); a set alarm clock wakes the household's workers an hour before their shift and
   the schoolchildren an hour before the bus, and stays set in saves.
 - **Fire pits, picnics, toys and the rest of the catalogue**: a fire pit is lit with the
   lighter (flames in its bowl, a glow on the ground about it), hands are warmed by it and

@@ -144,6 +144,8 @@ pub enum ObjectKind {
     Grill,
     /// A coffee maker.
     HotBeverage,
+    /// A tray of hot drinks served from it (`hotdrinks`).
+    DrinkTray,
     AlarmClock,
     /// A trash can: clearing dishes fills it.
     TrashCan,
@@ -536,7 +538,7 @@ impl ObjectKind {
             Self::Plant | Self::Decoration | Self::Art => "Decor",
             // (Build mode's, not a buy-mode tab: see `loading::buy_category`.)
             Self::Door => "Misc",
-            Self::Meal | Self::DirtyDishes | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
+            Self::Meal | Self::DirtyDishes | Self::DrinkTray | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
             Self::Other => "Misc",
         }
@@ -1267,6 +1269,12 @@ pub enum Special {
     WatchMusic,
     /// Perform a composition known on an instrument (see `instruments`).
     Perform,
+    /// Daydream lying in bed, from relaxing there (see `daydream`).
+    Daydream,
+    /// Serve a tray of hot beverages from the machine (see `hotdrinks`).
+    ServeDrinks,
+    /// Take a drink from a tray of them.
+    GrabDrink,
     /// Potty train a toddler at the potty chair, the toddler's sitting for it, and emptying it
     /// (see `potty`).
     PottyTrain,
@@ -1461,7 +1469,16 @@ static GRILL: [InteractionDef; 1] = [InteractionDef {
     ..def("Grill", 40.0, [0.0, 0.0, 0.0, 0.0, -4.0, 15.0], Pose::Use)
 }];
 /// A cup of coffee: a lift for the tired, and a trip to the bathroom later.
-static HOT_BEVERAGE: [InteractionDef; 1] = [def("Make Hot Beverage", 15.0, [24.0, -48.0, 80.0, 0.0, 0.0, 20.0], Pose::Use)];
+static HOT_BEVERAGE: [InteractionDef; 2] = [
+    def("Make Hot Beverage", 15.0, [24.0, -48.0, 80.0, 0.0, 0.0, 20.0], Pose::Use),
+    // (The game's `ServeHotBeverages`: four cups on a tray, the machine's clips.)
+    InteractionDef { autonomous: false, special: Special::ServeDrinks, ..def("Serve Hot Beverages", SERVE_DRINKS_MINUTES, N, Pose::Use) },
+];
+/// How long serving hot beverages takes (game minutes: its clips', the machine started and the
+/// cups filled; the tray's taken after).
+const SERVE_DRINKS_MINUTES: f32 = 4.7;
+/// A drink from a tray (`BarTray.GetDrink`): as one made, without the making.
+static DRINK_TRAY: [InteractionDef; 1] = [InteractionDef { special: Special::GrabDrink, ..def("Drink", 15.0, [24.0, -48.0, 80.0, 0.0, 0.0, 20.0], Pose::Use) }];
 static TRASH: [InteractionDef; 2] =
     [
         InteractionDef { special: Special::EmptyTrash, ..def("Empty Trash", 6.0, [0.0, 0.0, 0.0, 0.0, -6.0, 0.0], Pose::Use) },
@@ -1514,7 +1531,7 @@ static MICROWAVE: [InteractionDef; 2] = [
     // (Once it's heated: never on the menu.)
     InteractionDef { autonomous: false, special: Special::Cook, ..def("Take Out Dinner", 2.0, N, Pose::Use) },
 ];
-static BED: [InteractionDef; 6] = [
+static BED: [InteractionDef; 7] = [
     InteractionDef {
         until_full: Some(ENERGY),
         on_object: true,
@@ -1528,6 +1545,15 @@ static BED: [InteractionDef; 6] = [
     InteractionDef { autonomous: false, on_object: true, special: Special::TryForBaby, ..def("Try for Baby", 25.0, WOOHOO_RATES, Pose::Lie) },
     // (From beside it, the game's routing slot: the covers pulled up, smoothed and patted.)
     InteractionDef { special: Special::MakeBed, ..def("Make Bed", 7.0, [0.0, 0.0, 0.0, 0.0, -2.0, 0.0], Pose::Use) },
+    // (The game's `DayDream`: offered while relaxing there, lying on; ten fun an hour, and the
+    // relaxing's rest.)
+    InteractionDef {
+        autonomous: false,
+        on_object: true,
+        until_full: Some(FUN),
+        special: Special::Daydream,
+        ..def("Daydream", 60.0, [0.0, 0.0, 6.0, 0.0, 0.0, 10.0], Pose::Lie)
+    },
 ];
 /// WooHoo's needs per hour: fun and company, at some cost to energy and hygiene.
 const WOOHOO_RATES: [f32; 6] = [0.0, 0.0, -8.0, 180.0, -20.0, 160.0];
@@ -2088,7 +2114,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         // (Only the plain loop: the toss-and-turn ones are authored from beside the bed.)
         "Sleep" => A::new(Some("a2o_bed_getIn_made_x"), &["a2o_bed_sleep_back_loop_x"]).ending(&["a2o_bed_getout_start_x", "a2o_bed_getout_stop_x"], 7.3),
         "Nap" => A::new(Some("a2o_bed_nap_start_x"), &["a2o_bed_nap_loop_breathe_x"]),
-        "Relax" => A::new(Some("a2o_bed_relax_getin_start_x"), &["a2o_bed_relax_loop"]),
+        "Relax" | "Daydream" => A::new(Some("a2o_bed_relax_getin_start_x"), &["a2o_bed_relax_loop"]),
         "Sit" => A::new(None, &["a2o_chairLiving_sit_breathe_loop_x", "a2o_chairLiving_sit_crossedLeg_front_loop_x"]),
         "Watch TV" if kind == ObjectKind::Tv => A::new(None, &["a2o_tv_watch_turnOnOff_standing_x"]),
         "Watch the TV" if kind == ObjectKind::Sofa => A::new(
@@ -2172,6 +2198,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Wash Dishes" => A::new(Some("a2o_sink_dishes_scrub_start_x"), &["a2o_sink_dishes_scrub_loop1_x", "a2o_sink_dishes_scrub_loop2_x"]).ending(&["a2o_sink_dishes_scrub_stop_x"], 3.5),
         "Clean Up" => A::steps("a2o_plateDinner_pickUp_table_part1_x", &["a2o_plateDinner_pickUp_table_part2_x"], &["a2o_plateDinner_carry_x"]),
         "Make Hot Beverage" => A::new(Some("a2o_hotBeverageMachine_fill"), &["a2o_hotBeverageMachine_drink_loopSip_standing", "a2o_hotBeverageMachine_drink_loopLongSip_standing"]),
+        "Serve Hot Beverages" => A::new(Some("a2o_hotBeverageMachine_start_x"), &["a2o_hotBeverageMachine_fill_x"]).ending(&["a2o_hotBeverageMachine_serve_get_x"], 2.9),
+        "Drink" if kind == ObjectKind::DrinkTray => A::new(None, &["a2o_hotBeverageMachine_drink_loopSip_standing", "a2o_hotBeverageMachine_drink_loopLongSip_standing"]),
         "Stargaze" | "Search Galaxy" => A::new(Some("a2o_telescope_start"), &["a2o_telescope_look_loop", "a2o_telescope_look_breathe", "a2o_telescope_react_wonderment"]),
         "Swing" => A::new(Some("a2o_swingset_getIn"), &["a2o_swingset_swing"]),
         "Relax in Hot Tub" => A::new(Some("a2o_hotTub_getIn"), &["a2o_hotTub_idles_relaxing_loop", "a2o_hotTub_idles_playingToe", "a2o_hotTub_splash"]),
@@ -2554,6 +2582,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Dresser => &DRESSER,
         ObjectKind::Grill => &GRILL,
         ObjectKind::HotBeverage => &HOT_BEVERAGE,
+        ObjectKind::DrinkTray => &DRINK_TRAY,
         ObjectKind::AlarmClock => &ALARM,
         ObjectKind::TrashCan | ObjectKind::TrashCompactor => &TRASH,
         ObjectKind::OutdoorTrashCan => &OUTDOOR_TRASH,
@@ -3711,6 +3740,10 @@ pub(crate) fn run_actions(
                                     if d.special == Special::EatMeal {
                                         commands.entity(me).insert(crate::meals::MealRequest::PlateAt(*target));
                                     }
+                                    // (A cup taken off the tray, to drink.)
+                                    if d.special == Special::GrabDrink {
+                                        commands.entity(me).insert(crate::hotdrinks::TookDrink(*target));
+                                    }
                                     *decay = DecayScale(d.decay);
                                     // (Toddlers have their own way with a toy.)
                                     let toddler_toy = (sim.age == Age::Toddler && obj.kind == ObjectKind::StuffedToy)
@@ -4338,6 +4371,8 @@ pub(crate) fn run_actions(
                                         | Special::PlayForTips
                                         | Special::WatchMusic
                                         | Special::Perform
+                                        | Special::Daydream
+                                        | Special::GrabDrink
                                         | Special::PottyTrain
                                         | Special::PottyLesson
                                         | Special::EmptyPotty
@@ -4618,6 +4653,9 @@ pub(crate) fn run_actions(
                                         }
                                         Special::EatMeal => {
                                             commands.entity(me).insert(crate::meals::MealRequest::Ate);
+                                        }
+                                        Special::ServeDrinks => {
+                                            commands.entity(me).insert(crate::hotdrinks::ServedAt(*target));
                                         }
                                         Special::CleanUp => {
                                             commands.entity(*target).try_despawn();

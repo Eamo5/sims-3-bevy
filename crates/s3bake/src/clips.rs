@@ -569,6 +569,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_bodySculptor_",
     "c2o_bodySculptor_",
     "a2o_hotBeverageMachine_fill",
+    // (Hot beverages served: the machine started, and the tray of cups taken from it.)
+    "a2o_hotBeverageMachine_start",
+    "a2o_hotBeverageMachine_serve_get",
     "a2o_bbq_grill_",
     "a2o_cuttingBoard_chop_",
     "a2o_homework_table_",

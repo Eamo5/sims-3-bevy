@@ -1065,7 +1065,7 @@ fn world_click(
         Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q), (can_owners, rummaged, tipped_q))): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q), (can_owners, rummaged, tipped_q))): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1090,7 +1090,7 @@ fn world_click(
             Res<crate::toilets::Unflushed>,
             Query<(Has<crate::effects::TvOn>, Has<crate::effects::TvLeftOn>)>,
             (Option<Res<crate::layout::UiAssets>>, Query<&crate::charity::Charities>),
-            (Query<&crate::life::Mood>, Query<(), With<crate::dollhouse::Smashed>>),
+            (Query<&crate::life::Mood>, Query<(), With<crate::dollhouse::Smashed>>, Query<&crate::hotdrinks::DrinkTray>),
             (Res<crate::trashcans::CanOwners>, Res<crate::trashcans::Rummaged>, Query<(), With<crate::trashcans::TippedOver>>),
         ),
     ),
@@ -1112,7 +1112,7 @@ fn world_click(
             Option<Res<crate::gardening::Garden>>,
             Res<crate::appliances::Alarm>,
             Option<Res<crate::sound::Sounds>>,
-            Query<(Option<&crate::music::StereoOn>, Has<crate::interact::Unmade>, Option<&crate::grime::Grime>)>,
+            Query<(Option<&crate::music::StereoOn>, Has<crate::interact::Unmade>, Option<&crate::grime::Grime>, Option<&crate::music::StereoVolume>)>,
         ),
     ),
     (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q), company_q): (
@@ -1568,6 +1568,37 @@ fn world_click(
                 if d.special == Special::WatchMusic && !music.watchable(t, actor) {
                     continue;
                 }
+                // (A hot beverage machine's: their favourite drink by name, others to try, and
+                // serving; a tray's, its next cup by name.)
+                if matches!(obj.kind, ObjectKind::HotBeverage | ObjectKind::DrinkTray)
+                    && let Some(ui) = opp_q.0.as_ref()
+                {
+                    let n = &ui.data.drinks;
+                    let kind = ActionKind::Object { target: t, def: i };
+                    match d.special {
+                        Special::ServeDrinks => options.push((crate::hotdrinks::serve_label(n, &actor_sim.traits), kind)),
+                        Special::GrabDrink => {
+                            if let Some(c) = trays_q.get(t).ok().and_then(|tr| tr.cups.first()) {
+                                options.push((crate::hotdrinks::drink_label(n, &actor_sim.traits, &c.0), kind));
+                            }
+                        }
+                        _ => {
+                            options.push((crate::hotdrinks::drink_label(n, &actor_sim.traits, &crate::hotdrinks::favorite(n, actor_sim.id)), kind.clone()));
+                            let list: Vec<(String, ActionKind)> =
+                                crate::hotdrinks::others(n, actor_sim.id, crate::hotdrinks::TRY_ANOTHER, &mut rand::rng()).into_iter().map(|name| (name, kind.clone())).collect();
+                            if !list.is_empty() {
+                                options.push((format!("{} ›", n.try_else), submenu_kind(pie.submenus.len())));
+                                pie.submenus.push((n.try_else.clone(), list));
+                            }
+                        }
+                    }
+                    continue;
+                }
+                // (Daydreaming: only while relaxing in this bed, as the game's `RelaxingPosture`
+                // offers it.)
+                if d.special == Special::Daydream && !queues_q.get(actor).is_ok_and(|q| crate::daydream::relaxing_in(q, t, obj.kind)) {
+                    continue;
+                }
                 // (The compositions they know, to perform: by teens and up.)
                 if d.special == Special::Perform {
                     let (Some(ui), Some(sk), Ok((_, skills, _))) = (opp_q.0.as_ref(), d.skill, writers.get(actor)) else { continue };
@@ -1734,6 +1765,20 @@ fn world_click(
                             options.push((format!("{CHANGE_STATION} ›"), submenu_kind(pie.submenus.len())));
                             pie.submenus.push((CHANGE_STATION.to_string(), list));
                         }
+                    }
+                    // (Turned on: its volume, and a song skipped, there and then, as the game's
+                    // `ChangeVolume` and `SkipSong` are.)
+                    if d.special == Special::StereoOff && on.is_some() {
+                        let current = opp_q.8.get(t).ok().and_then(|s| s.3).map_or(1, |v| v.0);
+                        let list: Vec<(String, ActionKind)> = (0..crate::music::VOLUMES.len())
+                            .filter(|&v| v != current)
+                            .map(|v| (crate::music::VOLUMES[v].0.to_string(), ActionKind::Object { target: t, def: i }))
+                            .collect();
+                        options.push((format!("{} ›", crate::music::CHANGE_VOLUME), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((crate::music::CHANGE_VOLUME.to_string(), list));
+                        let skip = [crate::music::FORWARD, crate::music::BACKWARD].map(|s| (s.to_string(), ActionKind::Object { target: t, def: i })).to_vec();
+                        options.push((format!("{} ›", crate::music::SKIP), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((crate::music::SKIP.to_string(), skip));
                     }
                     if (d.special == Special::StereoOn) == on.is_some() {
                         continue;
@@ -2137,6 +2182,17 @@ fn pie_buttons(
         commands.entity(target).insert(crate::music::StereoOn(Some(key.to_string())));
         return;
     }
+    // A stereo turned up or down, or a song skipped, there and then.
+    if let ActionKind::Object { target, .. } = kind
+        && (title == crate::music::CHANGE_VOLUME || title == crate::music::SKIP)
+    {
+        if let Some(v) = crate::music::VOLUMES.iter().position(|(n, _)| *n == label) {
+            commands.entity(target).insert(crate::music::StereoVolume(v));
+        } else {
+            commands.entity(target).insert(crate::music::SkipSong(label == crate::music::FORWARD));
+        }
+        return;
+    }
     // A door locked or unlocked, there and then (the game's are immediate).
     if let ActionKind::Object { target, .. } = kind
         && (title == crate::doorlocks::LOCK || title == crate::doorlocks::SPECIFY || label == crate::doorlocks::UNLOCK)
@@ -2237,6 +2293,16 @@ fn pie_buttons(
         commands.entity(a).insert((crate::groups::CallingOver(*target), crate::anim::ActionClip::new(Some("a_soc_callOver_x"), &[])));
         return;
     }
+    // (Relaxing in bed turned to daydreaming, lying on.)
+    if let (Some(a), ActionKind::Object { target, def }) = (actor, &kind)
+        && label == crate::daydream::DAYDREAM
+        && let Ok(mut q) = queues.get_mut(a)
+        && let Ok(kind_of) = sofas.get(*target).map(|g| g.kind)
+        && crate::daydream::relaxing_in(&q, *target, kind_of)
+    {
+        crate::daydream::start(&mut q, *def);
+        return;
+    }
     // (A cuddle with someone on the same sofa: worked out before the queue's taken.)
     let spot = |e: Entity| crate::seatedtalk::cuddle_spot(queues.get(e).ok(), |o| sofas.get(o).ok().map(|g| g.kind));
     let cuddle_ok = match (actor, &kind) {
@@ -2291,6 +2357,14 @@ fn pie_buttons(
         }
         let outfit_choice = label.strip_prefix("Change Into: ").and_then(|n| crate::simbody::OutfitKind::CHOICES.into_iter().find(|k| k.label() == n));
         let canvas_choice = label.strip_prefix("Paint: ").and_then(|n| crate::paintings::CANVASES.iter().position(|c| *c == n)).map(|c| c as u8);
+        // (Another drink tried: "Drink Soy Chai with Caramel Swirl", as they'd put it.)
+        if let Some(ui) = ui_data.as_ref()
+            && !ui.data.drinks.try_else.is_empty()
+            && title == ui.data.drinks.try_else
+            && let Some((_, me, _)) = people.get(a).ok()
+        {
+            label = crate::hotdrinks::drink_label(&ui.data.drinks, &me.traits, &label);
+        }
         // (The composition chosen to perform: "Performing A Love Since Forgotten".)
         let song_choice = (title == crate::instruments::PERFORM)
             .then(|| ui_data.as_ref().and_then(|u| u.data.compositions.iter().position(|c| c.name == label)))

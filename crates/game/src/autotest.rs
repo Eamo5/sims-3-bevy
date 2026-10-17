@@ -3583,7 +3583,7 @@ fn auto_build(
 }
 
 /// `--place <kind>`: the cheapest catalog object of that kind (`Telescope`, `HotTub`…), set down
-/// 2 m in front of the selected Sim.
+/// 2 m in front of the selected Sim (PLACE_ON_COUNTER=1: on the counter nearest them).
 #[allow(clippy::too_many_arguments)]
 fn auto_place(
     args: Res<AutoArgs>,
@@ -3594,6 +3594,7 @@ fn auto_place(
     (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut commands: Commands,
     building: Option<Res<crate::building::ActiveBuilding>>,
+    surfaces: Query<(&crate::interact::GameObject, &Transform), Without<crate::sim::Selected>>,
 ) {
     let Some(want) = &args.place else { return };
     if *done {
@@ -3611,10 +3612,29 @@ fn auto_place(
         };
         // (PLACE_AHEAD=<metres>: further off than the 2 m before them, clear of the hedges.)
         let ahead: f32 = std::env::var("PLACE_AHEAD").ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
-        let pos = tf.translation + tf.rotation * Vec3::new(i as f32 * 2.0, 0.0, ahead);
+        let mut pos = tf.translation + tf.rotation * Vec3::new(i as f32 * 2.0, 0.0, ahead);
+        let mut rot = Quat::IDENTITY;
+        if std::env::var("PLACE_ON_COUNTER").is_ok() {
+            let mut tables: Vec<(String, f32, f32, f32)> = surfaces
+                .iter()
+                .filter(|(o, _)| o.kind == crate::interact::ObjectKind::Table)
+                .map(|(o, t)| (o.name.clone(), o.height, t.translation.y, t.translation.distance(tf.translation)))
+                .collect();
+            tables.sort_by(|a, b| a.3.total_cmp(&b.3));
+            info!("counters near: {:?}", &tables[..tables.len().min(6)]);
+        }
+        if std::env::var("PLACE_ON_COUNTER").is_ok()
+            && let Some((o, ctf)) = surfaces
+                .iter()
+                .filter(|(o, t)| o.kind == crate::interact::ObjectKind::Table && (0.9..1.2).contains(&o.height) && (t.translation.y - tf.translation.y).abs() < 3.0)
+                .min_by(|a, b| a.1.translation.distance(tf.translation).total_cmp(&b.1.translation.distance(tf.translation)))
+        {
+            pos = o.world_center(ctf).with_y(ctf.translation.y + o.height);
+            rot = ctf.rotation;
+        }
         let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
         let design = crate::objects::first_design(&data.0, e.key);
-        if let Some(object) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, e.key, pos, Quat::IDENTITY, design) {
+        if let Some(object) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, e.key, pos, rot, design) {
             let level = building.as_ref().map_or(1, |b| b.level_at_point(pos));
             commands.entity(object.entity).insert((crate::save::Bought, crate::nav::Floor(level), crate::building::BuildingPiece { level }));
             info!("placed {} for the test", e.name);

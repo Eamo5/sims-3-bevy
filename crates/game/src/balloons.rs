@@ -167,6 +167,11 @@ struct Who<'a> {
 /// The icon name standing for a Sim's portrait.
 const PORTRAIT: &str = "@portrait:";
 
+/// A balloon's picture of a Sim (their portrait).
+pub fn portrait(sim: Entity) -> String {
+    format!("{PORTRAIT}{}", sim.to_bits())
+}
+
 struct Picker<'a> {
     table: &'a BalloonTable,
     actor: Who<'a>,
