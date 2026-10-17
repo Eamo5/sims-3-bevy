@@ -1303,6 +1303,10 @@ pub enum Special {
     LeaveBookClub,
     /// A Computer Whiz hacking (`computertraits`: night only).
     Hack,
+    /// A Workaholic working from home out of work hours, and a Computer Whiz overclocking
+    /// (`computertraits`).
+    WorkFromHome,
+    Overclock,
     /// A Neurotic's Check Sink, Check Stove, Check Fireplace (`neurotic`).
     NeuroticCheck,
     /// The toilet used, and one left unflushed flushed (`toilets`).
@@ -1598,7 +1602,7 @@ static TV: [InteractionDef; 5] = [
 /// (The TV watched: from a seat facing it, or standing.)
 const WATCH_TV: InteractionDef = InteractionDef { autonomous: false, special: Special::WatchTv, ..def("Watch the TV", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 55.0], Pose::Stand) };
 const WATCH_TV_SEATED: InteractionDef = InteractionDef { on_object: true, pose: Pose::Sit, per_hour: [0.0, 0.0, 3.0, 0.0, 0.0, 55.0], ..WATCH_TV };
-static COMPUTER: [InteractionDef; 13] = [
+static COMPUTER: [InteractionDef; 15] = [
     def("Play Computer Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 60.0], Pose::Use),
     // (The game's `ChatRandom`: its ITUN's Social 50, Fun 15 an hour.)
     InteractionDef { special: Special::ChatOnline, ..def("Chat Online", 60.0, [0.0, 0.0, -2.0, 50.0, 0.0, 15.0], Pose::Use) },
@@ -1616,7 +1620,10 @@ static COMPUTER: [InteractionDef; 13] = [
     InteractionDef { autonomous: false, special: Special::JoinBookClub, ..def("Join Book Club", 5.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::LeaveBookClub, ..def("Leave Book Club", 5.0, N, Pose::Use) },
     // (The game's `Hack`: till morning; its fun for a Computer Whiz.)
-    InteractionDef { autonomous: false, special: Special::Hack, ..def("Hack", 600.0, [0.0, 0.0, -3.0, 0.0, 0.0, 20.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::Hack, ..def("Hack", 600.0, [0.0, 0.0, -3.0, 0.0, 0.0, 30.0], Pose::Use) },
+    // (The game's `WorkFromHome`, its four-hour stage, a little less fun; `Overclock`, an hour.)
+    InteractionDef { special: Special::WorkFromHome, ..def("Work from Home", 240.0, [0.0, 0.0, -3.0, 0.0, 0.0, -10.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::Overclock, ..def("Overclock", 60.0, N, Pose::Use) },
 ];
 static CRIB: [InteractionDef; 1] = [InteractionDef {
     until_full: Some(ENERGY),
@@ -2087,7 +2094,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Play Chess" if kind == ObjectKind::Computer => A::new(None, &["a2o_computer_chess_type_loop_x"]),
         "Browse Web" => A::new(None, &["a2o_computer_generic_type_loop1_x", "a2o_computer_generic_type_loop2_x", "a2o_computer_generic_type_breathe_x"]),
         "Practice Writing" | "Solve Hard Problems" => A::new(None, &["a2o_computer_serious_Type_chinRub_x", "a2o_computer_serious_Type_templeTab_x", "a2o_computer_serious_ahHa_x"]),
-        "Work on Job-Related Issues" | "Join Book Club" | "Leave Book Club" | "Hack" => A::new(None, &["a2o_computer_generic_type_loop1_x", "a2o_computer_generic_type_loop2_x"]),
+        "Work on Job-Related Issues" | "Join Book Club" | "Leave Book Club" | "Hack" | "Work from Home" => A::new(None, &["a2o_computer_generic_type_loop1_x", "a2o_computer_generic_type_loop2_x"]),
         "Write Novel" | "Find a Job" | "Quit Job" => A::new(None, &["a2o_computer_chess_type_loop_x"]),
         "Dance" => A::new(None, &["a_dance_beg_", "a_dance_med_"]),
         "Read a Book" => A::new(None, &["a2o_bookshelf_getBook_Carry_x"]),
@@ -2138,6 +2145,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Hang Clothes" => A::new(None, &["a2o_clothesLine_hang_x"]),
         "Take Down Clothes" => A::new(None, &["a2o_clothesLine_remove_x"]),
         "Throw Out Trash" => A::new(None, &["a2o_trashPile_drop_outdoors_x"]),
+        // (Into its works, as an upgrade's done.)
+        "Overclock" => A::new(Some("a2o_computer_repair_start_x"), &["a2o_computer_repair_loop1_x", "a2o_computer_repair_loop2_x"]),
         // (The can's own halves knock it down and stand it up; rummaging, its lid's off.)
         "Knock Over" if kind == ObjectKind::OutdoorTrashCan => A::new(None, &["a2o_trashCan_knock_over_x"]),
         "Pick Up" if kind == ObjectKind::OutdoorTrashCan => A::new(None, &["a2o_trashCan_clean_up_x"]),
@@ -4370,7 +4379,10 @@ pub(crate) fn run_actions(
                                                 crate::rabbitholes::complete_homework(world, me, None, 0.0);
                                             });
                                         }
-                                        Special::Hack => {}
+                                        Special::Hack | Special::WorkFromHome => {}
+                                        Special::Overclock => {
+                                            commands.entity(me).insert(crate::computertraits::Overclocked(*target));
+                                        }
                                         Special::SolveProblems | Special::JobIssues | Special::JoinBookClub | Special::LeaveBookClub => {
                                             commands.entity(me).insert(crate::computertraits::Done(d.special));
                                         }
@@ -5774,7 +5786,7 @@ fn autonomy(
         Res<crate::klepto::Swipeable>,
         Res<crate::mirrors::LastLooked>,
     ),
-    (convs, toilets, bed_owners, bowls, (moods, smashed_q), (residents_q, can_owners, tipped_q, visited_lot)): (
+    (convs, toilets, bed_owners, bowls, (moods, smashed_q), (residents_q, can_owners, tipped_q, visited_lot, work_to_do_q)): (
         Res<crate::groups::Conversations>,
         Res<crate::toilets::Unflushed>,
         Query<&crate::bedowners::BedOwners>,
@@ -5785,6 +5797,7 @@ fn autonomy(
             Res<crate::trashcans::CanOwners>,
             Query<(), With<crate::trashcans::TippedOver>>,
             Option<Res<crate::visit::VisitedLot>>,
+            Query<&crate::computertraits::WorkToDo>,
         ),
     ),
 ) {
@@ -6039,6 +6052,14 @@ fn autonomy(
                         let Some(pull) = crate::dollhouse::drawn(sim, moods.get(me).map_or(0.0, |m| m.0)) else { continue };
                         score = pull;
                     }
+                }
+                // (A Workaholic works from home out of work hours, keen to: the game's `WorkFromHome`.)
+                if d.special == Special::WorkFromHome {
+                    let to_do = work_to_do_q.get(me).is_ok_and(|w| w.0 > clock.minutes);
+                    if !household.contains(me) || !crate::computertraits::may_work_from_home(sim, job, to_do, &clock) {
+                        continue;
+                    }
+                    score = crate::computertraits::WORK_FROM_HOME_PULL * rng.random_range(0.8..1.2);
                 }
                 // (An outdoor trash can: knocked over by those it's for; set up again by its family,
                 // the Neat keen to.)

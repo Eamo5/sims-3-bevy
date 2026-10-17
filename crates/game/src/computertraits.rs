@@ -10,7 +10,13 @@
 //! `HackEndHour`): §8 to §23 into the household funds every quarter hour (one time in ten four
 //! times as much: `HackMinPay`, `HackMaxPay`, `HackChanceOfBonus`, `HackBonusMultiplier`), and
 //! every half hour a chance in fifty of being caught (`ComputerWhizTraitChanceToGetCaughtWhileHacking`,
-//! tuned 0.02): a counter-virus, and the computer broken.
+//! tuned 0.02): a counter-virus, and the computer broken; fun for them (`kComputerWhizFunMotive`,
+//! 30 an hour). A Computer Whiz can Overclock a computer not upgraded yet (an hour: a chance in
+//! four of breaking it, one in four of nothing, else the better graphics or unbreakable,
+//! `kChanceToBreak`, `kChanceToDoNothing`). A Workaholic can Work from Home out of work hours
+//! (not while there's work to sort out on the computer): the computer's tuned performance an
+//! hour (`WorkAtHomePerormanceIncPerHour`: the cheap one 3, a laptop 4, the expensive one 5),
+//! paid by the hour worked (`FinishWorking`).
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -25,7 +31,7 @@ pub struct ComputerTraitsPlugin;
 
 impl Plugin for ComputerTraitsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (done, checked_up, book_club_mail, traits_test, hacking).run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (done, checked_up, book_club_mail, traits_test, hacking, overclocked, working_from_home).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -45,6 +51,138 @@ fn traits_test(mut sel: Query<&mut Sim, With<crate::sim::Selected>>, time: Res<T
         }
     }
     info!("traits test: {} is {:?}", sim.first, sim.traits);
+}
+
+/// How keen a Workaholic is to work from home, by free will (the game's `TraitWorkaholic` 200).
+pub const WORK_FROM_HOME_PULL: f32 = 30.0;
+/// `Overclock`'s `kChanceToBreak` and `kChanceToDoNothing`.
+const OVERCLOCK_BREAKS: f64 = 0.25;
+const OVERCLOCK_NOTHING: f64 = 0.25;
+
+/// Whether it's the hours they'd go to work (the game's `IsAllowedToWork`: from an hour before
+/// the shift till it ends, on a workday).
+pub fn work_time(job: &crate::careers::Job, clock: &crate::clock::GameClock) -> bool {
+    let (h, l) = (clock.hour_f(), job.info());
+    let from = l.start - 1.0;
+    let during = if l.end > from { h >= from && h < l.end } else { h >= from || h < l.end };
+    job.works_on(clock.weekday()) && during
+}
+
+/// Whether they'd work from home now: a Workaholic out of work hours, with nothing to sort out.
+pub fn may_work_from_home(sim: &Sim, job: Option<&crate::careers::Job>, work_to_do: bool, clock: &crate::clock::GameClock) -> bool {
+    offers(Special::WorkFromHome, sim, job, false, work_to_do) && job.is_some_and(|j| !work_time(j, clock))
+}
+
+/// A computer's performance an hour worked at home, by its class's tuning.
+fn home_performance(script: &str) -> f32 {
+    let s = script.to_ascii_lowercase();
+    if s.ends_with(".computercheap") {
+        3.0
+    } else if s.contains(".computerlaptop") {
+        4.0
+    } else {
+        5.0
+    }
+}
+
+/// Working from home: the performance it's worth an hour, and since when.
+#[derive(Component)]
+pub struct WorkingFromHome {
+    rate: f32,
+    since: f64,
+    last: f64,
+}
+
+/// Working from home: performance as they go, paid for the hours when they stop.
+#[allow(clippy::type_complexity)]
+fn working_from_home(
+    mut commands: Commands,
+    clock: Res<crate::clock::GameClock>,
+    mut sims: Query<(Entity, &Sim, &crate::interact::ActionQueue, Option<&mut WorkingFromHome>, Option<&mut crate::careers::Job>)>,
+    objects: Query<&crate::interact::GameObject>,
+    data: Option<Res<crate::baked::Baked>>,
+    mut household: Option<ResMut<crate::interact::Household>>,
+    mut notes: ResMut<crate::interact::Notifications>,
+) {
+    let now = clock.minutes;
+    for (e, sim, queue, working, job) in &mut sims {
+        let at = queue.0.front().filter(|a| matches!(a.phase, crate::interact::Phase::Running(_)) && !a.cancel).and_then(|a| match a.kind {
+            crate::interact::ActionKind::Object { target, def } => objects
+                .get(target)
+                .ok()
+                .filter(|o| crate::interact::interactions_for(o.kind).get(def).is_some_and(|d| d.special == Special::WorkFromHome))
+                .map(|o| o.objd),
+            _ => None,
+        });
+        match (at, working, job) {
+            (Some(objd), None, Some(_)) => {
+                let script = data.as_ref().and_then(|d| d.0.catalog.iter().find(|c| c.objd == objd).map(|c| c.script.clone())).unwrap_or_default();
+                commands.entity(e).insert(WorkingFromHome { rate: home_performance(&script), since: now, last: now });
+            }
+            (Some(_), Some(mut w), Some(mut j)) => {
+                let dt = (now - w.last).max(0.0) as f32;
+                w.last = now;
+                j.performance = (j.performance + w.rate * dt / 60.0).clamp(-100.0, 100.0);
+            }
+            (None, Some(w), job) => {
+                let hours = (now - w.since).max(0.0) / 60.0;
+                let pay = job.map_or(0, |j| (j.info().hourly as f64 * hours) as i64);
+                if pay > 0 {
+                    if let Some(h) = household.as_mut() {
+                        h.funds += pay;
+                    }
+                    notes.push(format!("{} earned §{pay} working from home.", sim.first));
+                }
+                commands.entity(e).remove::<WorkingFromHome>();
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A computer overclocked (its outcome to be had).
+#[derive(Component)]
+pub struct Overclocked(pub Entity);
+
+/// Overclocked: broken, no different, or upgraded (better graphics, or unbreakable).
+fn overclocked(
+    mut commands: Commands,
+    sims: Query<(Entity, &Sim, &Overclocked)>,
+    mut upgrades: Query<&mut crate::upgrades::Upgrades>,
+    ui: Option<Res<crate::layout::UiAssets>>,
+    mut notes: ResMut<crate::interact::Notifications>,
+) {
+    use crate::upgrades::Upgrade;
+    let mut rng = rand::rng();
+    for (e, sim, o) in &sims {
+        commands.entity(e).remove::<Overclocked>();
+        let computer = o.0;
+        let roll: f64 = rng.random();
+        let (key, or) = if roll < OVERCLOCK_BREAKS {
+            commands.entity(computer).insert(crate::interact::Broken);
+            ("BreakComputer", format!("Success! Or not. {} has now thoroughly broken the computer.", sim.first))
+        } else if roll < OVERCLOCK_BREAKS + OVERCLOCK_NOTHING {
+            ("NothingHappens", "YES! No! It doesn't look like the computer's running any differently...".to_string())
+        } else {
+            let (up, key, or) = if rng.random_bool(0.5) {
+                (Upgrade::Improved, "GraphicsUpgrade", "Woohoo! The computer isn't running any faster but the graphics look better somehow.")
+            } else {
+                (Upgrade::Unbreakable, "UnbreakableUpgrade", "Well, the computer didn't get any faster but it certainly looks a lot sturdier. That's a good thing, right?")
+            };
+            match upgrades.get_mut(computer) {
+                Ok(mut u) => u.0 |= up.bit(),
+                Err(_) => {
+                    commands.entity(computer).insert(crate::upgrades::Upgrades(up.bit()));
+                }
+            }
+            (key, or.to_string())
+        };
+        let text = ui
+            .as_deref()
+            .and_then(|u| u.localize(&format!("Gameplay/Objects/Electronics/Computer/Overclock:{key}")))
+            .map_or(or, |t| t.replace("{0.SimFirstName}", &sim.first));
+        notes.push(text);
+    }
 }
 
 /// The computers' tuned hacking: its hours, its pay, and the chance of being caught.
@@ -170,7 +308,8 @@ pub fn offers(special: Special, sim: &Sim, job: Option<&crate::careers::Job>, in
         Special::JobIssues => teen_up && has(Trait::Workaholic) && job.is_some() && work_to_do,
         Special::JoinBookClub => !sim.age.is_little() && has(Trait::Bookworm) && !in_club,
         Special::LeaveBookClub => in_club,
-        Special::Hack => teen_up && has(Trait::ComputerWhiz),
+        Special::Hack | Special::Overclock => teen_up && has(Trait::ComputerWhiz),
+        Special::WorkFromHome => teen_up && has(Trait::Workaholic) && job.is_some() && !work_to_do,
         _ => true,
     }
 }
@@ -312,6 +451,31 @@ mod tests {
         let mut s = crate::sim::random_sim(&mut rand::rng(), "T", Some(true), Age::Adult);
         s.traits = traits.to_vec();
         s
+    }
+
+    #[test]
+    fn workaholics_work_from_home_out_of_work_hours_on_the_computers_tuning() {
+        let job = crate::careers::Job::new(0);
+        let l = job.info();
+        // (A workday at the shift's middle, and the same day late at night.)
+        let day = (0..7u32).find(|d| job.works_on(*d as usize)).unwrap() as f64;
+        let mid = (l.start + job.hours() / 2.0) % 24.0;
+        let at = |h: f32| {
+            let mut c = crate::clock::GameClock::default();
+            c.minutes = day * 1440.0 + h as f64 * 60.0;
+            c
+        };
+        let w = sim(&[Trait::Workaholic]);
+        assert!(work_time(&job, &at(mid)) && !may_work_from_home(&w, Some(&job), false, &at(mid)));
+        let off = (l.end + 3.0) % 24.0;
+        assert!(may_work_from_home(&w, Some(&job), false, &at(off)));
+        assert!(!may_work_from_home(&w, Some(&job), true, &at(off)), "not with work to sort out");
+        assert!(!may_work_from_home(&sim(&[Trait::Friendly]), Some(&job), false, &at(off)));
+        assert!(!may_work_from_home(&w, None, false, &at(off)));
+        assert_eq!(home_performance("Sims3.Gameplay.Objects.Electronics.ComputerCheap"), 3.0);
+        assert_eq!(home_performance("Sims3.Gameplay.Objects.Electronics.ComputerLaptopModern"), 4.0);
+        assert_eq!(home_performance("Sims3.Gameplay.Objects.Electronics.ComputerExpensive"), 5.0);
+        assert!(offers(Special::Overclock, &sim(&[Trait::ComputerWhiz]), None, false, false) && !offers(Special::Overclock, &w, None, false, false));
     }
 
     #[test]

@@ -171,7 +171,10 @@ installation is unreachable.
   with: two hours to start four hours' Work on Job-Related Issues at the computer, for 4
   performance; a Computer Whiz can Hack from nine at night till seven (§8-23 a quarter hour,
   now and then four times that, and a 2% chance each half hour of a counter-virus breaking the
-  computer: the game's tuning); a Bookworm can Join the Book Club (§250 for life, kept in saves), and every
+  computer: the game's tuning) and Overclock a computer (an hour: a chance in four it breaks, one
+  in four nothing, else better graphics or unbreakable); a Workaholic can Work from Home out of
+  work hours (the computer's own performance an hour: 3, 4 or 5 by how good it is, paid for the
+  hours); a Bookworm can Join the Book Club (§250 for life, kept in saves), and every
   Monday a book they haven't got comes in the mail for each member, onto the shelves.
 - **Writing novels** by the game's Writing tuning: at a computer, "Write Novel" offers the
   genres the Sim has opened up (Fiction and Non-Fiction to start; Sci-Fi, Trashy, Drama,

@@ -1477,6 +1477,13 @@ fn world_click(
                 if d.special == Special::Hack && !crate::computertraits::hack_hours(opp_q.2.hour_f()) {
                     continue;
                 }
+                // (Working from home out of work hours; overclocking a computer not upgraded yet.)
+                if d.special == Special::WorkFromHome && !crate::computertraits::may_work_from_home(actor_sim, jobs_q.get(actor).ok().flatten(), work_to_do, &opp_q.2) {
+                    continue;
+                }
+                if d.special == Special::Overclock && upg_q.get(t).is_ok_and(|u| u.has(crate::upgrades::Upgrade::Improved) || u.has(crate::upgrades::Upgrade::Unbreakable)) {
+                    continue;
+                }
                 if !crate::computertraits::offers(d.special, actor_sim, jobs_q.get(actor).ok().flatten(), club_q.get(actor).is_ok_and(|c| c.0), work_to_do) {
                     continue;
                 }
