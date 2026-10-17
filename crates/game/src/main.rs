@@ -208,6 +208,9 @@ fn main() {
     if let Some(g) = s3bake::load_gamedata(&s3bake::default_root()) {
         careers::install_tracks(&g);
     }
+    if let Ok(p) = s3bake::read_value::<s3bake::gamedata::FacePresets>(&s3bake::default_root().global_dir().join("face_presets.bin")) {
+        simbody::install_face_presets(p);
+    }
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {

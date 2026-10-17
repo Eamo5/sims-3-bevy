@@ -93,9 +93,10 @@ pub fn make_child(father: &Sim, mother: &Sim, female: bool, age: Age, seed: u64)
     let hair = if genes.random_bool(0.5) { father.hair } else { mother.hair };
     let eyes = if genes.random_bool(0.5) { father.eyes } else { mother.eyes };
     let face = crate::simbody::inherited_face(mother, Some(father), &mut genes);
+    let presets = crate::simbody::inherited_presets(mother, Some(father), &mut genes);
     let build = (genes.random_range(0.0f32..1.0), genes.random_range(-0.2f32..0.2), genes.random_range(0.5f32..1.0));
     let mut c = crate::sim::random_sim(&mut rand::rngs::StdRng::seed_from_u64(seed ^ 0x5EED_C41D), &father.last, Some(female), age);
-    (c.skin, c.hair, c.eyes, c.face) = (skin, hair, eyes, face);
+    (c.skin, c.hair, c.eyes, c.face, c.face_presets) = (skin, hair, eyes, face, presets);
     if !age.is_little() {
         c.weight = (father.weight + (mother.weight - father.weight) * build.0 + build.1).clamp(-1.0, 1.0);
         c.fitness = ((father.fitness + mother.fitness) * 0.5 * build.2).clamp(0.0, 1.0);

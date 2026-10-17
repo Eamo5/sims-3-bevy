@@ -689,7 +689,7 @@ fn spawn_common(commands: &mut Commands, old: bool) {
         DespawnOnExit(AppState::InGame),
         HelpLine,
         text(
-            "Click objects / sims for actions · Click ground to walk · WASD/arrows pan · Q/E rotate · wheel zoom · Space pause · 1/2/3 speed · Tab next sim · C centre camera · PgUp/PgDn floors · B buy mode · R relationships · O opportunities",
+            "Click objects / sims for actions · Click ground to walk · WASD/arrows pan · Q/E rotate · wheel zoom · Space pause · 1/2/3 speed · Tab next sim · C follow sim · PgUp/PgDn floors · B buy mode · R relationships · O opportunities",
             13.0,
             Color::srgba(1.0, 1.0, 1.0, 0.75),
         ),
@@ -2718,10 +2718,13 @@ fn hud_buttons(
                 commands.entity(s).remove::<Selected>();
             }
             commands.entity(b.0).insert(Selected);
+            // (The selected Sim's portrait clicked again: the camera to them, and following them
+            // about.)
             if already
                 && let (Ok(tf), Ok(mut c)) = (positions.get(b.0), cam.single_mut())
             {
                 c.look_at(tf.translation);
+                c.follow(b.0);
             }
         }
     }
@@ -3167,11 +3170,17 @@ fn keyboard_shortcuts(
             c.look_at(tf.translation);
         }
     }
+    // C: the camera on the selected Sim, following them about (again: no longer).
     if keys.just_pressed(KeyCode::KeyC)
         && let Ok(s) = selected.single()
         && let (Ok(tf), Ok(mut c)) = (positions.get(s), cam.single_mut())
     {
-        c.look_at(tf.translation);
+        if c.follow == Some(s) {
+            c.follow = None;
+        } else {
+            c.look_at(tf.translation);
+            c.follow(s);
+        }
     }
 }
 

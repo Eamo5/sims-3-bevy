@@ -506,6 +506,7 @@ fn pregnancy(
                 _ => baby.eyes,
             };
             baby.face = crate::simbody::inherited_face(sim, father.map(|f| f.0), &mut rng);
+            baby.face_presets = crate::simbody::inherited_presets(sim, father.map(|f| f.0), &mut rng);
             // (The rest the player's, in the traits picker after the name.)
             let (traits, chosen) = newborn_traits(outcome, &parent_traits, &score, &mut rng);
             baby.traits = traits;

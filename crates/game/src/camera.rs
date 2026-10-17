@@ -29,6 +29,9 @@ pub struct SimsCamera {
     /// Smoothed values actually used for the transform.
     smooth_focus: Vec3,
     smooth_distance: f32,
+    /// A Sim the camera's following about, wherever they go (the game's camera follow: the
+    /// selected Sim's portrait clicked again, or C), till the camera's moved.
+    pub follow: Option<Entity>,
 }
 
 impl SimsCamera {
@@ -41,12 +44,19 @@ impl SimsCamera {
             height_offset: 0.0,
             smooth_focus: focus,
             smooth_distance: 30.0,
+            follow: None,
         }
     }
 
-    /// Moves the camera focus to a point (e.g. a selected sim).
+    /// Moves the camera focus to a point (e.g. a selected sim), following no one.
     pub fn look_at(&mut self, p: Vec3) {
         self.focus = p;
+        self.follow = None;
+    }
+
+    /// Follows a Sim about.
+    pub fn follow(&mut self, e: Entity) {
+        self.follow = Some(e);
     }
 }
 
@@ -107,6 +117,7 @@ fn camera_control(
     mut q: Query<(&mut SimsCamera, &mut Transform)>,
     over_ui: Option<Res<crate::hud::PointerOverUi>>,
     buy: Res<crate::buy::BuyMode>,
+    followed: Query<&GlobalTransform>,
 ) {
     let Ok((mut cam, mut tf)) = q.single_mut() else { return };
     let dt = time.delta_secs();
@@ -163,6 +174,16 @@ fn camera_control(
     let speed = (cam.distance * 1.2).max(8.0) * if keys.pressed(KeyCode::ShiftLeft) { 3.0 } else { 1.0 };
     let pan_delta = pan.normalize_or_zero() * speed * dt;
     cam.focus += pan_delta;
+    // (Following a Sim: on them as they go, till the camera's panned away, or they're gone.)
+    if pan != Vec3::ZERO {
+        cam.follow = None;
+    }
+    if let Some(e) = cam.follow {
+        match followed.get(e) {
+            Ok(g) => cam.focus = g.translation(),
+            Err(_) => cam.follow = None,
+        }
+    }
 
     let hm = &world.data.heightmap;
     let size = (hm.width - 1) as f32;

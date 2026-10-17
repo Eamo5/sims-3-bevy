@@ -805,8 +805,12 @@ fn cas_actions(
                 s.face = f;
             }
             CasAction::RandomFace => {
+                // (New preset faces, and the sliders a little either way of the middle, as the
+                // game's randomising does.)
                 let s = &mut pending.members[k];
-                s.face = (0..s3bake::gamedata::FACE_SLIDERS.len()).map(|_| rand::Rng::random_range(&mut rng, -1.0f32..1.0)).collect();
+                let spread = crate::simbody::SLIDER_SPREAD;
+                s.face = (0..s3bake::gamedata::FACE_SLIDERS.len()).map(|_| rand::Rng::random_range(&mut rng, -spread..spread)).collect();
+                s.face_presets = Some(crate::simbody::random_presets(s, &mut rng)).filter(|p| !p.is_empty());
             }
             CasAction::Families => {
                 scene.browsing = !scene.browsing;

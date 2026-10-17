@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 134;
+pub const GAMEDATA_VERSION: u32 = 137;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1848,6 +1848,60 @@ pub struct FaceBones {
     pub sliders: Vec<(u8, Vec<FaceBone>)>,
 }
 
+/// Create a Sim's preset faces, as the game has them: compound blends (CBLN, `0x051DF2DD`) of its
+/// face blends (FACE, `0x0358B08A`), each preset for one region of the face, and each blend's bone
+/// adjustments by age-and-sex prefix (`face_presets.bin`).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct FacePresets {
+    pub blends: Vec<FaceBlendBones>,
+    pub presets: Vec<FacePreset>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct FaceBlendBones {
+    /// The blend's name ("NoseBridgeHeight").
+    pub name: String,
+    /// Its bones at full strength, by `FACE_PREFIXES` prefix.
+    pub bones: Vec<(String, Vec<FaceBone>)>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct FacePreset {
+    /// "NosePreset9".
+    pub name: String,
+    /// Which part of the face: `FACE_EYES` 1, `FACE_NOSE` 2, `FACE_MOUTH` 4, `FACE_HEAD` 640.
+    pub region: u32,
+    /// The ages and sexes it's for (the game's `CASAgeGenderFlags`).
+    pub age_gender: u32,
+    /// Its blends (indices into `blends`) and how much of each.
+    pub blends: Vec<(u16, f32)>,
+}
+
+pub const FACE_EYES: u32 = 1;
+pub const FACE_NOSE: u32 = 2;
+pub const FACE_MOUTH: u32 = 4;
+pub const FACE_HEAD: u32 = 640;
+pub const FACE_REGIONS: [u32; 4] = [FACE_HEAD, FACE_EYES, FACE_NOSE, FACE_MOUTH];
+
+/// Whether an age-and-sex prefix ("af", "cu") is among the game's age/gender flags.
+pub fn prefix_in(prefix: &str, flags: u32) -> bool {
+    let age = match prefix.as_bytes().first() {
+        Some(b'p') => 0x2,
+        Some(b'c') => 0x4,
+        Some(b't') => 0x8,
+        Some(b'y') => 0x10,
+        Some(b'a') => 0x20,
+        Some(b'e') => 0x40,
+        _ => 0,
+    };
+    let sex = match prefix.as_bytes().get(1) {
+        Some(b'm') => 0x1000,
+        Some(b'f') => 0x2000,
+        _ => 0x3000,
+    };
+    flags & age != 0 && (flags & 0x3000 == 0 || flags & sex != 0)
+}
+
 /// Eye colours, as the game draws them: the iris (a greyscale image, its alpha the iris's
 /// shape) in the eye colour, at twice the image's shade times the colour, over the eyes' own
 /// texture (every face's eyes have their iris in the same place); and Create a Sim's presets.
@@ -2277,6 +2331,115 @@ fn bake_face_bones(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, String> 
         .collect();
     let n = out.iter().map(|f| f.sliders.len()).sum();
     write_value(&root.global_dir().join("face_bones.bin"), &out).map_err(|e| e.to_string())?;
+    bake_face_presets(root, pkgs)?;
+    Ok(n)
+}
+
+const T_CBLN: u32 = 0x051D_F2DD;
+const T_FACE: u32 = 0x0358_B08A;
+
+/// A CBLN: `u32 version, u32 name length (chars), UTF-16 name, u32 region, u32 age/gender,
+/// u32 count, count x {f32 amount, u64 instance, u32 group, u32 type}`.
+fn parse_cbln(d: &[u8]) -> Option<(String, u32, u32, Vec<(f32, u64)>)> {
+    let u32_at = |p: usize| d.get(p..p + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    let len = u32_at(4)? as usize;
+    if len > 256 || d.len() < 8 + len * 2 {
+        return None;
+    }
+    let name: String = char::decode_utf16((0..len).map(|i| u16::from_le_bytes([d[8 + i * 2], d[9 + i * 2]]))).filter_map(|c| c.ok()).collect();
+    let mut p = 8 + len * 2;
+    let region = u32_at(p)?;
+    let age_gender = u32_at(p + 4)?;
+    let count = u32_at(p + 8)? as usize;
+    p += 12;
+    if count > 64 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(count);
+    for _ in 0..count {
+        let amount = f32::from_bits(u32_at(p)?);
+        let inst = u32_at(p + 4)? as u64 | (u32_at(p + 8)? as u64) << 32;
+        out.push((amount, inst));
+        p += 20;
+    }
+    Some((name, region, age_gender, out))
+}
+
+/// The game's preset faces (human ones) and their blends' bones.
+fn bake_face_presets(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, String> {
+    let mut out = FacePresets::default();
+    let mut index: HashMap<u64, u16> = HashMap::new();
+    // (The humans' are group 0; Pets' horses, dogs and cats have their own.)
+    let mut keys: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(T_CBLN).filter(|k| k.g == 0).copied().collect();
+    keys.sort();
+    keys.dedup_by_key(|k| k.i);
+    for k in keys {
+        let Some((name, region, age_gender, entries)) = pkgs.read(&k).and_then(|d| parse_cbln(&d)) else { continue };
+        // (Humans': the species bits, 0xF00, Human's 0x100, or none.)
+        if !matches!(age_gender & 0xF00, 0 | 0x100) || !FACE_REGIONS.contains(&region) {
+            continue;
+        }
+        let mut blends = Vec::new();
+        for (amount, inst) in entries {
+            let i = match index.get(&inst) {
+                Some(i) => *i,
+                None => {
+                    let Some(face) = pkgs.read(&s3pkg::ResourceKey::new(T_FACE, 0, inst)).and_then(|d| s3formats::sim::BlendInfo::parse(&d).ok()) else { continue };
+                    // Its bones by prefix: each entry's bone adjustments (BONDs), for the ages and
+                    // sexes it's for, at the entry's amount.
+                    let mut bones: Vec<(String, Vec<FaceBone>)> = Vec::new();
+                    for e in &face.entries {
+                        for (ag, weight, ki) in &e.bones {
+                            // (The entry's key is the BOND itself, or a VPXY that refers to it.)
+                            let read = |k: &s3pkg::ResourceKey| pkgs.read(k).or_else(|| pkgs.read_ti(k.t, k.i));
+                            let bond = face.keys.get(*ki as usize).and_then(|bk| {
+                                let d = read(bk)?;
+                                if bk.t == s3formats::sim::T_BOND {
+                                    return s3formats::sim::parse_bond(&d).ok();
+                                }
+                                let inner = s3formats::model::vpxy_keys(&d).into_iter().find(|k| k.t == s3formats::sim::T_BOND)?;
+                                s3formats::sim::parse_bond(&read(&inner)?).ok()
+                            });
+                            let Some(bond) = bond else { continue };
+                            for prefix in FACE_PREFIXES.iter().filter(|p| prefix_in(p, *ag)) {
+                                if bones.iter().any(|(p, _)| p == prefix) {
+                                    continue;
+                                }
+                                let list = bond
+                                    .iter()
+                                    .map(|a| FaceBone {
+                                        bone: a.bone,
+                                        offset: a.offset.map(|v| v * weight),
+                                        scale: a.scale.map(|v| v * weight),
+                                        rotation: a.rotation.map(|v| v * weight),
+                                    })
+                                    .collect();
+                                bones.push((prefix.to_string(), list));
+                            }
+                        }
+                    }
+                    if bones.is_empty() {
+                        continue;
+                    }
+                    out.blends.push(FaceBlendBones { name: face.name.clone(), bones });
+                    let i = (out.blends.len() - 1) as u16;
+                    index.insert(inst, i);
+                    i
+                }
+            };
+            blends.push((i, amount));
+        }
+        if !blends.is_empty() {
+            out.presets.push(FacePreset { name, region, age_gender, blends });
+        }
+    }
+    // (In their natural order: "NosePreset2" before "NosePreset10".)
+    out.presets.sort_by_key(|p| {
+        let digits: String = p.name.chars().filter(|c| c.is_ascii_digit()).collect();
+        (p.region, p.name.trim_end_matches(|c: char| c.is_ascii_digit()).to_string(), digits.parse::<u32>().unwrap_or(0))
+    });
+    let n = out.presets.len();
+    write_value(&root.global_dir().join("face_presets.bin"), &out).map_err(|e| e.to_string())?;
     Ok(n)
 }
 

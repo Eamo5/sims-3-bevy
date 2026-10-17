@@ -120,6 +120,9 @@ pub struct Sim {
     /// Face shape: where they are on each of the game's face sliders (`FACE_SLIDERS`' pairs,
     /// -1 to 1); none, as their look has it.
     pub face: Vec<f32>,
+    /// Their preset faces, one for each part of the face (head, eyes, nose, mouth: indices into
+    /// the game's, `simbody::presets_of`); none, as their look has it.
+    pub face_presets: Option<Vec<u16>>,
     /// Supernatural (the Supernatural pack's life states, and Late Night's vampires).
     pub occult: Option<Occult>,
 }
@@ -561,6 +564,7 @@ pub fn random_sim(rng: &mut impl Rng, last: &str, female: Option<bool>, age: Age
         traits: crate::life::random_traits(rng, age),
         favorites: Favorites::random(rng),
         face: Vec::new(),
+        face_presets: None,
         occult: None,
         skin: Color::srgb(sr, sg, sb),
         hair: Color::srgb(hr, hg, hb),

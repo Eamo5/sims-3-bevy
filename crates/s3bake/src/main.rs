@@ -1001,6 +1001,35 @@ fn main() {
         }
         return;
     }
+    if args.iter().any(|a| a == "--cbln") {
+        // --cbln: the install's compound blends (Create a Sim's preset faces), raw.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let keys: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(0x051D_F2DD).copied().collect();
+        println!("{} CBLN", keys.len());
+        for k in keys.iter().take(6) {
+            let Some(d) = pkgs.read(k) else { continue };
+            let words: Vec<String> = d.chunks(4).take(24).map(|c| c.iter().map(|b| format!("{b:02X}")).collect::<String>()).collect();
+            println!("{k:?} {} bytes: {}", d.len(), words.join(" "));
+        }
+        let inst = 0x73D7_6D24_A1EF_458E_u64;
+        let face: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(0x0358_B08A).filter(|k| k.i == inst).copied().collect();
+        println!("FACE keys for {inst:X}: {face:?}");
+        if let Some(d) = pkgs.read(&s3pkg::ResourceKey::new(0x0358_B08A, 0, inst)) {
+            let words: Vec<String> = d.chunks(4).take(40).map(|c| c.iter().map(|b| format!("{b:02X}")).collect::<String>()).collect();
+            println!("{} bytes: {}", d.len(), words.join(" "));
+            match s3formats::sim::BlendInfo::parse(&d) {
+                Ok(b) => {
+                    println!("{} entries {:?} keys {:?}", b.name, b.entries, b.keys);
+                    for k in b.keys.iter().take(3) {
+                        let d = pkgs.read(k);
+                        println!("  {k:?}: {:?} bytes, bond {:?}", d.as_ref().map(|d| d.len()), d.as_ref().map(|d| s3formats::sim::parse_bond(d).map(|v| v.len())));
+                    }
+                }
+                Err(e) => println!("parse error {e:?}"),
+            }
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--slot-stats") {
         // --slot-stats <world file name>: for the objects its lots have in other objects' container
         // slots, how often each pairing of the object's slot placement flags and the slot's flags

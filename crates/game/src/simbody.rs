@@ -513,16 +513,19 @@ impl BoneShape {
 }
 
 /// Where a Sim is on each of the game's face sliders (-1 to 1, `FACE_SLIDERS`' pairs): as
-/// sculpted or inherited, or else as their look has it (anywhere along each slider's range, as
-/// Create a Sim's randomising does).
+/// sculpted or inherited, or else as their look has it (a little either way of the middle: their
+/// preset faces make them who they are, as Create a Sim's randomising leaves the sliders be).
 pub fn face_sliders(sim: &Sim) -> Vec<f32> {
     let n = s3bake::gamedata::FACE_SLIDERS.len();
     if sim.face.len() == n {
         return sim.face.clone();
     }
     let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look ^ 0xFACE_B0E5);
-    (0..n).map(|_| rng.random_range(-1.0f32..1.0)).collect()
+    (0..n).map(|_| rng.random_range(-SLIDER_SPREAD..SLIDER_SPREAD)).collect()
 }
+
+/// How far either way of the middle a Sim's face sliders go when nobody's sculpted them.
+pub const SLIDER_SPREAD: f32 = 0.2;
 
 /// A baby's face, from their parents': on each slider somewhere between theirs, give or take a
 /// little (as the game's genetics blend them).
@@ -532,19 +535,83 @@ pub fn inherited_face(mother: &Sim, father: Option<&Sim>, rng: &mut impl Rng) ->
     m.iter().zip(&f).map(|(a, b)| (a + (b - a) * rng.random_range(0.0f32..1.0) + rng.random_range(-0.15f32..0.15)).clamp(-1.0, 1.0)).collect()
 }
 
-/// A Sim's face shape, by their look: on each of the game's face sliders (in opposing pairs,
-/// as Create a Sim's are) they lean one way or the other, some a lot, most a little.
-pub fn face_shape(cas: &CasData, sim: &Sim) -> HashMap<u32, BoneShape> {
-    let mut out: HashMap<u32, BoneShape> = HashMap::new();
-    let prefix = match (sim.age, sim.female) {
-        (Age::Baby, _) => return out,
+/// The game's preset faces (`face_presets.bin`), once loaded.
+static FACE_PRESETS: std::sync::OnceLock<s3bake::gamedata::FacePresets> = std::sync::OnceLock::new();
+
+pub fn install_face_presets(p: s3bake::gamedata::FacePresets) {
+    let _ = FACE_PRESETS.set(p);
+}
+
+pub fn face_presets() -> Option<&'static s3bake::gamedata::FacePresets> {
+    FACE_PRESETS.get().filter(|p| !p.presets.is_empty())
+}
+
+/// The age-and-sex prefix a Sim's face is shaped by ("af", "tm", "cu"...; none for babies).
+pub fn face_prefix(sim: &Sim) -> Option<&'static str> {
+    Some(match (sim.age, sim.female) {
+        (Age::Baby, _) => return None,
         (Age::Toddler, _) => "pu",
         (Age::Child, _) => "cu",
         (Age::Teen, f) => if f { "tf" } else { "tm" },
         (Age::YoungAdult, f) => if f { "yf" } else { "ym" },
         (Age::Adult, f) => if f { "af" } else { "am" },
         (Age::Elder, f) => if f { "ef" } else { "em" },
-    };
+    })
+}
+
+/// One preset for each part of a face (head, eyes, nose, mouth), at random (as the game's
+/// `GetRandomBlendAmounts` picks them: of the region's, whatever the Sim's age and sex, their
+/// blends shaping each age's and sex's face its own way).
+pub fn random_presets(sim: &Sim, rng: &mut impl Rng) -> Vec<u16> {
+    let (Some(all), Some(_)) = (face_presets(), face_prefix(sim)) else { return Vec::new() };
+    s3bake::gamedata::FACE_REGIONS
+        .iter()
+        .filter_map(|r| {
+            let fit: Vec<u16> = all.presets.iter().enumerate().filter(|(_, p)| p.region == *r).map(|(i, _)| i as u16).collect();
+            (!fit.is_empty()).then(|| fit[rng.random_range(0..fit.len())])
+        })
+        .collect()
+}
+
+/// A Sim's preset faces: as chosen or inherited, or else as their look has it.
+pub fn presets_of(sim: &Sim) -> Vec<u16> {
+    if let Some(p) = &sim.face_presets {
+        return p.clone();
+    }
+    random_presets(sim, &mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look ^ 0x9E37_79B9))
+}
+
+/// A baby's preset faces: each part of the face from one parent or the other (as the game's
+/// genetics take each region whole).
+pub fn inherited_presets(mother: &Sim, father: Option<&Sim>, rng: &mut impl Rng) -> Option<Vec<u16>> {
+    let m = presets_of(mother);
+    let f = father.map_or_else(|| m.clone(), presets_of);
+    if m.is_empty() {
+        return None;
+    }
+    Some(m.iter().enumerate().map(|(i, a)| if rng.random_bool(0.5) { f.get(i).copied().unwrap_or(*a) } else { *a }).collect())
+}
+
+/// A Sim's face shape, by their look: on each of the game's face sliders (in opposing pairs,
+/// as Create a Sim's are) they lean one way or the other, some a lot, most a little.
+pub fn face_shape(cas: &CasData, sim: &Sim) -> HashMap<u32, BoneShape> {
+    let mut out: HashMap<u32, BoneShape> = HashMap::new();
+    let Some(prefix) = face_prefix(sim) else { return out };
+    // (Their preset faces first: each preset's blends' bones, at its amounts.)
+    if let Some(all) = face_presets().filter(|_| std::env::var("NO_FACE_SHAPE").is_err()) {
+        for p in presets_of(sim) {
+            let Some(p) = all.presets.get(p as usize) else { continue };
+            for (b, amount) in &p.blends {
+                let Some((_, bones)) = all.blends.get(*b as usize).and_then(|b| b.bones.iter().find(|(px, _)| px == prefix)) else { continue };
+                for bone in bones {
+                    let s = out.entry(bone.bone).or_default();
+                    s.offset += Vec3::from(bone.offset) * *amount;
+                    s.scale += Vec3::from(bone.scale) * *amount;
+                    s.rotation += Vec4::from(bone.rotation) * *amount;
+                }
+            }
+        }
+    }
     // (NO_FACE_SHAPE=1, for comparisons: every face as the game models it.)
     let Some(sliders) = cas.face_bones.get(prefix).filter(|_| std::env::var("NO_FACE_SHAPE").is_err()) else { return out };
     for (pair, w) in face_sliders(sim).into_iter().enumerate() {
@@ -1115,4 +1182,20 @@ pub fn prepare_sims(baked: &BakedData, cas: &CasData, members: &[Sim], known: Op
     let mut neighbors = built.split_off(members.len());
     let townies = neighbors.split_off(neighbors.len() - TOWNIES);
     PreparedSims { members: built, neighbors, townies }
+}
+
+#[cfg(test)]
+mod face_preset_audit {
+    /// The baked preset faces (`SIMS3_CACHE=<baked> cargo test -p sims3 face_presets_audit --
+    /// --ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn face_presets_audit() {
+        let p: s3bake::gamedata::FacePresets = s3bake::read_value(&s3bake::default_root().global_dir().join("face_presets.bin")).unwrap();
+        for r in s3bake::gamedata::FACE_REGIONS {
+            let names: Vec<String> = p.presets.iter().filter(|x| x.region == r).map(|x| format!("{} {:X} ({})", x.name, x.age_gender, x.blends.len())).collect();
+            println!("region {r}: {} {:?}", names.len(), &names[..names.len().min(4)]);
+        }
+        println!("{} blends; first {:?}", p.blends.len(), p.blends.first().map(|b| (b.name.clone(), b.bones.iter().map(|(px, v)| (px.clone(), v.len())).collect::<Vec<_>>())));
+    }
 }
