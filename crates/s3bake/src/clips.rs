@@ -97,6 +97,11 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_fireplace_poke_",
     // (A sponge bath at the sink, the sponge in hand.)
     "a2o_sink_spongeBath",
+    // (The outdoor trash can knocked over, picked up and rummaged through: the can's halves too.)
+    "a2o_trashCan_knock_over",
+    "c2o_trashCan_knock_over",
+    "a2o_trashCan_clean_up",
+    "a2o_trashCan_rummage_",
     // (The dollhouse kicked in, in a temper; played with by a Childish grown-up.)
     "a2o_dollhouse_smash_",
     "c2o_dollhouse_smash_",

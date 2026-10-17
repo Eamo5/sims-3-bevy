@@ -87,15 +87,15 @@ fn smashed(mut commands: Commands, sims: Query<(Entity, &Sim, &DollhouseDone)>, 
 #[allow(clippy::type_complexity)]
 fn show_smashed(
     mut commands: Commands,
-    houses: Query<(Entity, &GameObject), (With<Smashed>, Without<ShownSmashed>)>,
+    houses: Query<(Entity, &GameObject, Option<&crate::objects::Design>), (With<Smashed>, Without<ShownSmashed>)>,
     data: Option<Res<crate::baked::Baked>>,
     mut assets: ResMut<crate::objects::ObjectAssets>,
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
 ) {
     let Some(data) = data else { return };
-    for (e, o) in &houses {
+    for (e, o, design) in &houses {
         let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-        let parts = assets.object_in_state(&mut ctx, o.objd, s3pkg::fnv32(SMASHED_STATE));
+        let parts = assets.object_state_design(&mut ctx, o.objd, Some(s3pkg::fnv32(SMASHED_STATE)), design.map(|d| d.0));
         crate::objects::reshape_parts(&mut commands, e, &parts);
         commands.entity(e).insert(ShownSmashed);
     }

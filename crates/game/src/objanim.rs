@@ -25,6 +25,11 @@ impl Plugin for ObjectAnimPlugin {
     }
 }
 
+/// An object held in a pose of its own while nobody's using it, the last of a clip of its own:
+/// a trash can knocked over (`a2o_trashCan_knock_over_pose_trashcan`).
+#[derive(Component, Clone, Copy)]
+pub struct HeldPose(pub &'static str);
+
 /// A mesh part skinned to its model's rig (the model's key): given its bones once spawned.
 #[derive(Component, Clone, Copy)]
 pub struct SkinPart(pub Key);
@@ -210,7 +215,7 @@ fn animate_objects(
     data: Option<Res<Baked>>,
     mut lib: ResMut<ClipLibrary>,
     sims: Query<(&ClipPlayer, &ActionQueue, Option<&crate::anim::ActionClip>, &GlobalTransform)>,
-    mut objects: Query<(Entity, &mut ObjectRig, Option<&UsedBy>, &GlobalTransform, Has<crate::interact::Unmade>)>,
+    mut objects: Query<(Entity, &mut ObjectRig, Option<&UsedBy>, &GlobalTransform, Has<crate::interact::Unmade>, Option<&HeldPose>)>,
     mut bones: Query<&mut Transform, Without<ObjectRig>>,
     mut companions: Local<HashMap<String, Option<String>>>,
     mut animated: Local<Vec<Entity>>,
@@ -235,7 +240,7 @@ fn animate_objects(
     }
     for (player, queue, action, sim_tf) in &sims {
         let Some(target) = target_of(queue) else { continue };
-        let Ok((_, mut rig, _, obj_tf, _)) = objects.get_mut(target) else { continue };
+        let Ok((_, mut rig, _, obj_tf, ..)) = objects.get_mut(target) else { continue };
         let Some(name) = companions.entry(player.name.clone()).or_insert_with(|| companion(&data, &player.name).or_else(|| held_pose(&data, &player.name))).clone() else { continue };
         let Some(clip) = lib.get(&data, &name) else { continue };
         let t = player.time.clamp(0.0, clip.duration.max(0.0));
@@ -275,7 +280,27 @@ fn animate_objects(
     }
     // At rest again once nobody's using it.
     // (An unmade bed's covers stay as they were left.)
-    for (e, mut rig, used, _, unmade) in &mut objects {
+    for (e, mut rig, used, _, unmade, held) in &mut objects {
+        // (Held in its own pose: the clip's last.)
+        if let Some(h) = held.filter(|_| !animated.contains(&e))
+            && let Some(clip) = lib.get(&data, h.0)
+        {
+            let t = clip.duration.max(0.0);
+            for inst in &rig.rigs {
+                for (i, h) in inst.rig.hashes.iter().enumerate() {
+                    let Some(track) = clip.tracks.get(h) else { continue };
+                    let Ok(mut tf) = bones.get_mut(inst.bones[i]) else { continue };
+                    if let Some(p) = sample_track_vec(&track.translation, t) {
+                        tf.translation = p;
+                    }
+                    if let Some(r) = sample_track_quat(&track.rotation, t) {
+                        tf.rotation = r;
+                    }
+                }
+            }
+            rig.posed = true;
+            continue;
+        }
         if !rig.posed || animated.contains(&e) || used.is_some_and(|u| u.0.is_some()) || unmade {
             continue;
         }

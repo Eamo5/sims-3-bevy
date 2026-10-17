@@ -1146,7 +1146,15 @@ installation is unreachable.
   over the arms while the legs walk); plates taken from a platter are carried to the table the
   same way. Once full, someone has to *Empty Trash* (neat Sims see to it, slobs never do),
   pulling out the bag, and an indoor can's bag is carried out to the trash can outdoors. A trash compactor holds three times as
-  much. Dishwashers break now and then, and are repaired with the game's animations.
+  much. The outdoor can (the game's `TrashcanOutside`, never full) is knocked over by the
+  Insane, by the Mean-Spirited, Evil and Inappropriate away from home and by the family's
+  enemies (a bit of fun), and lies on its side, lid off, till one of the family Picks it Up (the
+  Neat soon do); teens and up Rummage through other families' cans (once a day each, and never
+  their own unless Insane): something turns up every eight minutes, seven things at most, into
+  their inventory, from the game's lists by how well off the family is (old newspapers and
+  trash for most, now and then a rubber ducky or teddy bear, a laptop from the very rich; a
+  rock, gem, metal or seed fifteen times in a hundred). Smelly work, and the family seeing it insult
+  them; anyone else is put off them. Knocked over is kept in saves. Dishwashers break now and then, and are repaired with the game's animations.
 - **Fish bowls**: a fish from a Sim's inventory (fish now come in the game's qualities, a
   master angler often landing a perfect one) put in a bowl swims there, its own model
   turning slowly in the glass, and can be taken out again. It wants feeding: hungry a day and

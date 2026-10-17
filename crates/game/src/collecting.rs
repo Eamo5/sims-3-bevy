@@ -45,7 +45,7 @@ pub struct Collection {
 
 impl Collection {
     /// Records a find: whether it's new to the collection.
-    fn add(&mut self, key: &str) -> bool {
+    pub fn add(&mut self, key: &str) -> bool {
         self.found.insert(key.to_string())
     }
 }

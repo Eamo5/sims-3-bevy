@@ -147,6 +147,9 @@ pub enum ObjectKind {
     AlarmClock,
     /// A trash can: clearing dishes fills it.
     TrashCan,
+    /// The outdoor trash can (the game's `TrashcanOutside`): where the bags go, never full;
+    /// knocked over, picked up and rummaged through (`trashcans`).
+    OutdoorTrashCan,
     /// A fish bowl: a fish from a Sim's inventory swims in it.
     FishBowl,
     /// A games console.
@@ -374,6 +377,8 @@ impl ObjectKind {
             Self::HotBeverage
         } else if has("alarmclock") {
             Self::AlarmClock
+        } else if has("miscellaneous.trashcanoutside") {
+            Self::OutdoorTrashCan
         } else if has("trashcan") {
             Self::TrashCan
         } else if has("decorations.fishbowl") {
@@ -484,7 +489,7 @@ impl ObjectKind {
             Self::Fridge | Self::Stove | Self::Microwave | Self::Grill | Self::HotBeverage | Self::FoodSynthesizer => "Appliances",
             Self::VendingSoda | Self::VendingCandy | Self::VendingBoth => "Misc",
             Self::AlarmClock => "Electronics",
-            Self::TrashCan | Self::TrashCompactor | Self::WasteChute | Self::Candle | Self::ClothingPile => "Misc",
+            Self::TrashCan | Self::OutdoorTrashCan | Self::TrashCompactor | Self::WasteChute | Self::Candle | Self::ClothingPile => "Misc",
             Self::Washer | Self::Dryer | Self::Clothesline => "Appliances",
             Self::Hamper => "Misc",
             Self::Dishwasher => "Appliances",
@@ -1207,6 +1212,10 @@ pub enum Special {
     /// The dollhouse smashed in a temper, and thrown away smashed (`dollhouse`).
     SmashDollhouse,
     DisposeDollhouse,
+    /// An outdoor trash can knocked over, set up again, rummaged through (`trashcans`).
+    KnockOverCan,
+    PickUpCan,
+    Rummage,
     /// Cook a group meal and serve it on a platter.
     ServeMeal,
     /// Take a serving from a platter (then sit down to eat it).
@@ -1445,6 +1454,18 @@ static TRASH: [InteractionDef; 2] =
         // (Where the bag goes, outdoors: never on the menu.)
         InteractionDef { autonomous: false, special: Special::DropTrash, ..def("Throw Out Trash", 3.0, N, Pose::Use) },
     ];
+/// How long knocking a can over and setting it up again take (game minutes: their clips').
+const KNOCK_OVER_MINUTES: f32 = 6.0;
+const PICK_UP_MINUTES: f32 = 7.4;
+static OUTDOOR_TRASH: [InteractionDef; 4] = [
+    // (Where the bag goes, outdoors: never on the menu.)
+    InteractionDef { autonomous: false, special: Special::DropTrash, ..def("Throw Out Trash", 3.0, N, Pose::Use) },
+    // (The game's `KnockOver`: fun 15 at once; `PickUp`; `Rummage`, a fifty of hygiene an hour,
+    // till the seventh thing's turned up.)
+    InteractionDef { special: Special::KnockOverCan, ..def("Knock Over", KNOCK_OVER_MINUTES, [0.0, 0.0, 0.0, 0.0, 0.0, 15.0 * 60.0 / KNOCK_OVER_MINUTES], Pose::Use) },
+    InteractionDef { special: Special::PickUpCan, ..def("Pick Up", PICK_UP_MINUTES, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::Rummage, ..def("Rummage", 57.0, [0.0, 0.0, 0.0, 0.0, -50.0, 0.0], Pose::Use) },
+];
 static CLOTHING_PILE: [InteractionDef; 1] = [InteractionDef { special: Special::PickUpClothes, ..def("Pick Up", 1.5, [0.0, 0.0, 0.0, 0.0, -1.0, 0.0], Pose::Use) }];
 static HAMPER: [InteractionDef; 1] = [InteractionDef { special: Special::EmptyHamper, ..def("Do Laundry", 1.5, N, Pose::Use) }];
 static WASHER: [InteractionDef; 2] = [
@@ -1502,6 +1523,8 @@ static TOILET: [InteractionDef; 3] = [
     // (The game's `Toilet.Flush`: offered while it needs one.)
     InteractionDef { special: Special::Flush, ..def("Flush", 1.6, N, Pose::Use) },
 ];
+/// How long a rummage's putting the lid back takes (seconds, its clip's).
+const RUMMAGE_CLOSE_SECS: f32 = 4.5;
 /// Cleaning something dirty (the game's `CleanableComponent.Clean`: its grime gone in ten
 /// minutes or so).
 const SCRUB: InteractionDef = InteractionDef { special: Special::Scrub, ..def("Clean", 10.0, [0.0, 0.0, -2.0, 0.0, -10.0, -4.0], Pose::Use) };
@@ -2115,6 +2138,10 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Hang Clothes" => A::new(None, &["a2o_clothesLine_hang_x"]),
         "Take Down Clothes" => A::new(None, &["a2o_clothesLine_remove_x"]),
         "Throw Out Trash" => A::new(None, &["a2o_trashPile_drop_outdoors_x"]),
+        // (The can's own halves knock it down and stand it up; rummaging, its lid's off.)
+        "Knock Over" if kind == ObjectKind::OutdoorTrashCan => A::new(None, &["a2o_trashCan_knock_over_x"]),
+        "Pick Up" if kind == ObjectKind::OutdoorTrashCan => A::new(None, &["a2o_trashCan_clean_up_x"]),
+        "Rummage" => A::new(Some("a2o_trashCan_rummage_open_x"), &["a2o_trashCan_rummage_loop"]).ending(&["a2o_trashCan_rummage_close_x"], RUMMAGE_CLOSE_SECS),
         "Wash Dishes" => A::new(Some("a2o_sink_dishes_scrub_start_x"), &["a2o_sink_dishes_scrub_loop1_x", "a2o_sink_dishes_scrub_loop2_x"]).ending(&["a2o_sink_dishes_scrub_stop_x"], 3.5),
         "Clean Up" => A::steps("a2o_plateDinner_pickUp_table_part1_x", &["a2o_plateDinner_pickUp_table_part2_x"], &["a2o_plateDinner_carry_x"]),
         "Make Hot Beverage" => A::new(Some("a2o_hotBeverageMachine_fill"), &["a2o_hotBeverageMachine_drink_loopSip_standing", "a2o_hotBeverageMachine_drink_loopLongSip_standing"]),
@@ -2502,6 +2529,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::HotBeverage => &HOT_BEVERAGE,
         ObjectKind::AlarmClock => &ALARM,
         ObjectKind::TrashCan | ObjectKind::TrashCompactor => &TRASH,
+        ObjectKind::OutdoorTrashCan => &OUTDOOR_TRASH,
         ObjectKind::WasteChute => &WASTE_CHUTE,
         ObjectKind::Washer => &WASHER,
         ObjectKind::Dryer => &DRYER,
@@ -4548,6 +4576,13 @@ pub(crate) fn run_actions(
                                         Special::DisposeDollhouse => {
                                             commands.entity(me).insert(crate::dollhouse::DollhouseDone::ThrownAway(*target));
                                         }
+                                        Special::KnockOverCan => {
+                                            commands.entity(me).insert(crate::trashcans::CanDone::KnockedOver(*target));
+                                        }
+                                        Special::PickUpCan => {
+                                            commands.entity(me).insert(crate::trashcans::CanDone::PickedUp(*target));
+                                        }
+                                        Special::Rummage => {}
                                         Special::FeedFish => {
                                             commands.entity(me).insert(crate::fishbowl::BowlRequest::Feed(*target));
                                         }
@@ -5739,12 +5774,18 @@ fn autonomy(
         Res<crate::klepto::Swipeable>,
         Res<crate::mirrors::LastLooked>,
     ),
-    (convs, toilets, bed_owners, bowls, (moods, smashed_q)): (
+    (convs, toilets, bed_owners, bowls, (moods, smashed_q), (residents_q, can_owners, tipped_q, visited_lot)): (
         Res<crate::groups::Conversations>,
         Res<crate::toilets::Unflushed>,
         Query<&crate::bedowners::BedOwners>,
         Query<&crate::fishbowl::BowlFish>,
         (Query<&crate::life::Mood>, Query<(), With<crate::dollhouse::Smashed>>),
+        (
+            Query<(), With<crate::homes::Resident>>,
+            Res<crate::trashcans::CanOwners>,
+            Query<(), With<crate::trashcans::TippedOver>>,
+            Option<Res<crate::visit::VisitedLot>>,
+        ),
     ),
 ) {
     if delta.0 <= 0.0 {
@@ -5997,6 +6038,20 @@ fn autonomy(
                     if d.special == Special::SmashDollhouse {
                         let Some(pull) = crate::dollhouse::drawn(sim, moods.get(me).map_or(0.0, |m| m.0)) else { continue };
                         score = pull;
+                    }
+                }
+                // (An outdoor trash can: knocked over by those it's for; set up again by its family,
+                // the Neat keen to.)
+                if obj.kind == ObjectKind::OutdoorTrashCan {
+                    let owner = can_owners.0.get(&oe).cloned().unwrap_or_default();
+                    let home = crate::trashcans::home_of(household.contains(me), residents_q.contains(me), visited_lot.as_ref().map(|v| v.lot));
+                    let at_home = home == Some(owner.lot);
+                    let tipped = tipped_q.contains(oe);
+                    match d.special {
+                        Special::KnockOverCan if tipped || !crate::trashcans::may_knock_over(sim, at_home, crate::trashcans::enemy_of(rels, &owner)) => continue,
+                        Special::PickUpCan if !tipped || !crate::trashcans::may_pick_up(sim, at_home) => continue,
+                        Special::PickUpCan => score = crate::trashcans::pick_up_pull(sim) * rng.random_range(0.8..1.2),
+                        _ => {}
                     }
                 }
                 // (A hungry fish fed; none other's.)

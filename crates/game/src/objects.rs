@@ -164,8 +164,14 @@ impl ObjectAssets {
     }
 
     pub fn ingest_model(&mut self, ctx: &mut AssetCtx, key: Key, cpu: Vec<CpuPart>) -> Vec<ModelPart> {
+        self.ingest_skinned(ctx, key, key, cpu)
+    }
+
+    /// A model's parts, skinned to another's rig: a geometry state's, to its model's (the state
+    /// keeps all the model's vertices, so its meshes are found by them as the model's are).
+    fn ingest_skinned(&mut self, ctx: &mut AssetCtx, key: Key, rig_of: Key, cpu: Vec<CpuPart>) -> Vec<ModelPart> {
         let mut parts = Vec::new();
-        let skin = ctx.baked.skin(&key);
+        let skin = ctx.baked.skin(&rig_of);
         for mut p in cpu {
             // Lot imposters cut out railings, fences, shrubs and window frames with their
             // atlas's alpha: smoothed over the pixel's samples (alpha to coverage), so thin
@@ -173,7 +179,7 @@ impl ObjectAssets {
             let mode = if p.layer != 0 && p.mode < 2 { 3 } else { p.mode };
             let material = self.material_for_key(ctx, p.tex, mode, p.unlit);
             // A moving part: skinned to the model's rig (its mesh found by its vertices).
-            let rig = skin.as_ref().is_some_and(|s| skin_part(&mut p.mesh, s)).then_some(key);
+            let rig = skin.as_ref().is_some_and(|s| skin_part(&mut p.mesh, s)).then_some(rig_of);
             let states = p.states.iter().map(|(s, k)| (*s, self.material_for_key(ctx, Some(*k), mode, p.unlit))).collect();
             parts.push(ModelPart { mesh: ctx.meshes.add(p.mesh), material, bounds: p.bounds, layer: p.layer, tex: p.tex, mode, unlit: p.unlit, rig, states });
         }
@@ -236,7 +242,7 @@ impl ObjectAssets {
             if let Some(p) = self.models.get(&key) {
                 parts.extend(p.clone());
             } else if let Some(b) = ctx.baked.state_model(&m, state) {
-                parts.extend(self.ingest_model(ctx, key, cpu_model(b)));
+                parts.extend(self.ingest_skinned(ctx, key, m, cpu_model(b)));
             } else {
                 parts.extend(self.model(ctx, m));
             }
@@ -253,6 +259,26 @@ impl ObjectAssets {
     /// stand in for, and the design's been drawn).
     pub fn design_applies(&mut self, ctx: &mut AssetCtx, objd: Key, design: Key) -> bool {
         ctx.baked.designs.contains_key(&objd) && self.texture(ctx, design).is_some()
+    }
+
+    /// A catalogue object's parts in one of its geometry states (`None`: as it stands), in its
+    /// design (`None`: as the game ships it). A state's model names the object's texture in
+    /// another group, the raw one: the composited one (or the design's) is drawn in its place.
+    pub fn object_state_design(&mut self, ctx: &mut AssetCtx, objd: Key, state: Option<u32>, design: Option<Key>) -> Vec<ModelPart> {
+        let Some(state) = state else { return self.object_design(ctx, objd, design) };
+        let parts = self.object_in_state(ctx, objd, state);
+        let Some(texture) = ctx.baked.designs.get(&objd).map(|d| d.texture) else { return parts };
+        let tex = design.filter(|t| self.texture(ctx, *t).is_some()).unwrap_or(texture);
+        parts
+            .into_iter()
+            .map(|mut p| {
+                if p.tex.is_some_and(|k| k.0 == texture.0 && k.2 == texture.2) && p.tex != Some(tex) {
+                    p.material = self.material_for_key(ctx, Some(tex), p.mode, p.unlit);
+                    p.tex = Some(tex);
+                }
+                p
+            })
+            .collect()
     }
 
     /// A catalogue object's parts in a design (`None`: as the game ships it).
@@ -416,6 +442,10 @@ pub fn reshape_parts(commands: &mut Commands, root: Entity, parts: &[ModelPart])
     commands.entity(root).with_children(|c| {
         for p in &parts {
             let mut e = c.spawn((Mesh3d(p.mesh.clone()), MeshMaterial3d(p.material.clone())));
+            // (Its moving parts given its rig's bones again.)
+            if let Some(rig) = p.rig {
+                e.insert(crate::objanim::SkinPart(rig));
+            }
             if !p.states.is_empty() {
                 e.insert(crate::grime::MaterialStates { states: p.states.clone(), own: None, shown: 0 });
             }

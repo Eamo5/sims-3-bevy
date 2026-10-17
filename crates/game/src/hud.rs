@@ -1064,7 +1064,7 @@ fn world_click(
         Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q))): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q), (can_owners, rummaged, tipped_q))): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1090,6 +1090,7 @@ fn world_click(
             Query<(Has<crate::effects::TvOn>, Has<crate::effects::TvLeftOn>)>,
             (Option<Res<crate::layout::UiAssets>>, Query<&crate::charity::Charities>),
             (Query<&crate::life::Mood>, Query<(), With<crate::dollhouse::Smashed>>),
+            (Res<crate::trashcans::CanOwners>, Res<crate::trashcans::Rummaged>, Query<(), With<crate::trashcans::TippedOver>>),
         ),
     ),
     world: Res<CurrentWorld>,
@@ -1402,6 +1403,26 @@ fn world_click(
                         Special::SmashDollhouse => !smashed && temper,
                         Special::DisposeDollhouse => smashed,
                         _ => !smashed && crate::dollhouse::may_play(actor_sim),
+                    };
+                    if !ok {
+                        continue;
+                    }
+                }
+                // (An outdoor trash can: knocked over, set up again, rummaged through, as the game's
+                // tests have it; whose it is decides.)
+                if obj.kind == ObjectKind::OutdoorTrashCan {
+                    let owner = can_owners.0.get(&t).cloned().unwrap_or_default();
+                    let at_home = owner.lot.is_none();
+                    let tipped = tipped_q.contains(t);
+                    let ok = match d.special {
+                        Special::KnockOverCan => !tipped && crate::trashcans::may_knock_over(actor_sim, at_home, crate::trashcans::enemy_of(rels, &owner)),
+                        Special::PickUpCan => tipped && crate::trashcans::may_pick_up(actor_sim, at_home),
+                        Special::Rummage => {
+                            let employed = jobs_q.get(actor).ok().flatten().is_some();
+                            let today = pickable.get(t).is_ok_and(|p| rummaged.today(opp_q.2.day(), p.1.translation()));
+                            !tipped && crate::trashcans::may_rummage(actor_sim, at_home, owner.lived_in, employed, today)
+                        }
+                        _ => true,
                     };
                     if !ok {
                         continue;

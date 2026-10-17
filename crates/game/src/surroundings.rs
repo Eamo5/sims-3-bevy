@@ -420,7 +420,7 @@ fn take_out_trash(
         // (A can outdoors, or an apartment's trash chute.)
         let Some((can, o, _)) = cans
             .iter()
-            .filter(|(_, o, t)| (o.kind == ObjectKind::TrashCan && !indoors(t.translation) || o.kind == ObjectKind::WasteChute) && t.translation.distance(tf.translation) < 60.0)
+            .filter(|(_, o, t)| (o.kind == ObjectKind::TrashCan && !indoors(t.translation) || matches!(o.kind, ObjectKind::OutdoorTrashCan | ObjectKind::WasteChute)) && t.translation.distance(tf.translation) < 60.0)
             .min_by(|a, b| a.2.translation.distance(tf.translation).total_cmp(&b.2.translation.distance(tf.translation)))
         else {
             continue;
