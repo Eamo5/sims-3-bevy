@@ -238,7 +238,7 @@ mod tests {
     fn house() -> LotBuildingBaked {
         let mut b = LotBuildingBaked { lot: 0, width: 5, depth: 5, levels: vec![0.0, 0.0], walls: Vec::new(), floors: Vec::new(),
             foundation: Vec::new(), foundation_top: Vec::new(), objects: Vec::new(), covers: Vec::new(), ground: Vec::new(), pool: Vec::new(),
-            pool_depth: 0.0, fences: Vec::new(), stairs: Vec::new(), basement: None };
+            pool_depth: 0.0, fences: Vec::new(), stairs: Vec::new(), basement: None, fountains: Vec::new() };
         for (a, c) in [([1.0, 1.0], [3.0, 1.0]), ([3.0, 1.0], [3.0, 3.0]), ([3.0, 3.0], [1.0, 3.0]), ([1.0, 3.0], [1.0, 1.0])] {
             crate::building::apply_paint(&mut b, &PaintOp::AddWall { a, b: c, level: 1 });
         }

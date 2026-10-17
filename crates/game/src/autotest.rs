@@ -2328,13 +2328,22 @@ fn queue_log(
 
 /// LOOK_KIND=<Kind>: the camera held on the household's first such object (a stove, to see it
 /// burn), from FOLLOW_DIST / FOLLOW_YAW / FOLLOW_PITCH.
+/// (LOOK_AT=<x>,<y>,<z>: the camera held on that place instead.)
 fn look_kind(time: Res<Time>, objects: Query<(&crate::interact::GameObject, &GlobalTransform)>, mut cam: Query<&mut SimsCamera>) {
-    let Ok(kind) = std::env::var("LOOK_KIND") else { return };
     if time.elapsed_secs() < 8.0 {
         return;
     }
-    let (Some((_, g)), Ok(mut c)) = (objects.iter().find(|(o, _)| format!("{:?}", o.kind).eq_ignore_ascii_case(&kind)), cam.single_mut()) else { return };
-    c.look_at(g.translation());
+    let at = std::env::var("LOOK_AT").ok().and_then(|v| {
+        let p: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+        (p.len() == 3).then(|| Vec3::new(p[0], p[1], p[2]))
+    });
+    let target = match (at, std::env::var("LOOK_KIND")) {
+        (Some(p), _) => Some(p),
+        (None, Ok(kind)) => objects.iter().find(|(o, _)| format!("{:?}", o.kind).eq_ignore_ascii_case(&kind)).map(|(_, g)| g.translation()),
+        _ => return,
+    };
+    let (Some(target), Ok(mut c)) = (target, cam.single_mut()) else { return };
+    c.look_at(target);
     let env = |k: &str| std::env::var(k).ok().and_then(|d| d.parse::<f32>().ok());
     if let Some(d) = env("FOLLOW_DIST") {
         c.distance = d;

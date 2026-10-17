@@ -404,7 +404,7 @@ mod wall_placement_tests {
     fn lot() -> LotBuildingBaked {
         LotBuildingBaked { lot: 0, width: 8, depth: 8, levels: vec![0.0, 0.0], walls: Vec::new(), floors: Vec::new(),
             foundation: Vec::new(), foundation_top: Vec::new(), objects: Vec::new(), covers: Vec::new(), ground: Vec::new(), pool: Vec::new(),
-            pool_depth: 0.0, fences: Vec::new(), stairs: Vec::new(), basement: None }
+            pool_depth: 0.0, fences: Vec::new(), stairs: Vec::new(), basement: None, fountains: Vec::new() }
     }
 
     #[test]

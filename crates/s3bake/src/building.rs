@@ -16,6 +16,10 @@ use crate::types::*;
 pub const LEVEL_HEIGHT: f32 = 3.0;
 pub const FOUNDATION_HEIGHT: f32 = 0.75;
 
+/// How far over its floor a fountain's water stands (`BuildableFountain.kFountainWaterHeight`),
+/// and its rim (the level laid over it, as the game builds them).
+const FOUNTAIN_WATER: f32 = 0.75;
+const FOUNTAIN_RIM: f32 = 1.0;
 const OBJD: u32 = 0x319E4F1D;
 
 /// What a room is used for, judged by its furniture; picks floor and wall styles.
@@ -684,6 +688,59 @@ pub fn bake_building(
         });
     }
 
+    // Fountains (the game's `BuildableFountain`, a pool whose water stands 0.75 m over its
+    // floor): each one's basin, the tiles about its helper on the grid level at its floor's
+    // height, and its rim's height (the level above, laid over the basin, which isn't drawn
+    // there).
+    let fountains: Vec<FountainBaked> = match &terrain {
+        Some(t) => {
+            let mut found: Vec<FountainBaked> = Vec::new();
+            for o in objs.iter().filter(|o| o.script.ends_with("BuildableFountain")) {
+                let rel = o.position[1] - lot.corner[1];
+                let (hx, hz) = (o.local[0].floor() as i64, o.local[1].floor() as i64);
+                // (A tile is the basin's when its four corners are at the floor's height and the
+                // level above stands a metre over it, as a fountain's rim does: not a foundation's
+                // 0.75 m, nor a storey.)
+                let at = |l: usize, x: i64, z: i64| (x >= 0 && z >= 0 && (x as usize) < t.nx && (z as usize) < t.nz).then(|| t.at(l, x as usize, z as usize));
+                let corners = [(0, 0), (1, 0), (0, 1), (1, 1)];
+                let basin = |l: usize, x: i64, z: i64| {
+                    l + 1 < t.levels.len()
+                        && corners.iter().all(|(dx, dz)| at(l, x + dx, z + dz).is_some_and(|h| (h - rel).abs() < 0.1))
+                        && corners.iter().all(|(dx, dz)| at(l + 1, x + dx, z + dz).is_some_and(|h| (h - rel - FOUNTAIN_RIM).abs() < 0.1))
+                };
+                let near = [(0, 0), (-1, 0), (0, -1), (-1, -1)].map(|(dx, dz)| (hx + dx, hz + dz));
+                let Some((level, start)) = (0..t.levels.len()).find_map(|l| near.iter().find(|&&(x, z)| basin(l, x, z)).map(|&c| (l, c))) else { continue };
+                if found.iter().any(|f| f.cells.contains(&(start.0 as u16, start.1 as u16))) {
+                    continue;
+                }
+                let mut cells = vec![start];
+                let mut i = 0;
+                while i < cells.len() && cells.len() < 200 {
+                    let (x, z) = cells[i];
+                    i += 1;
+                    for n in [(x + 1, z), (x - 1, z), (x, z + 1), (x, z - 1)] {
+                        if !cells.contains(&n) && basin(level, n.0, n.1) {
+                            cells.push(n);
+                        }
+                    }
+                }
+                // (Its rim: the level above, where it stands a little over the water.)
+                let above: Vec<f32> = cells.iter().filter_map(|&(x, z)| at(level + 1, x, z)).filter(|h| (h - rel - FOUNTAIN_RIM).abs() < 0.1).collect();
+                let rim = if above.is_empty() { rel + FOUNTAIN_RIM } else { above.iter().sum::<f32>() / above.len() as f32 };
+                found.push(FountainBaked {
+                    cells: cells.iter().map(|&(x, z)| (x as u16, z as u16)).collect(),
+                    floor: lot.corner[1] + rel,
+                    water: lot.corner[1] + rel + FOUNTAIN_WATER,
+                    rim: lot.corner[1] + rim,
+                });
+            }
+            found
+        }
+        None => Vec::new(),
+    };
+    // (What's laid over a basin up to its rim isn't drawn: its water and floor are.)
+    let in_fountain = |x: u32, z: u32, y: f32| fountains.iter().any(|f| y <= f.rim + 0.1 && f.cells.contains(&(x as u16, z as u16)));
+
     // Floors: per storey, the tiles laid on its grid level (storey `n` is grid level
     // `g + n + F - 1`: on a foundation the ground floor is its own level above the ground);
     // indoors where walls enclose them, porches and paving elsewhere.
@@ -786,6 +843,9 @@ pub fn bake_building(
             if kind == ROOM_PORCH && floor_grid.is_some() && (cover.iter().all(|&c| c == NO_COVER) || (gl == ground_index && pool_below.contains(&(x, z)))) {
                 continue;
             }
+            if in_fountain(x, z, y.unwrap_or(levels[level as usize])) {
+                continue;
+            }
             // (Its own height only where it isn't the storey's.)
             let y = y.filter(|y| (y - levels[level as usize]).abs() > 0.05);
             floors.push(FloorBaked { level: level as u8, x: x as u16, z: z as u16, mask, kind, region: region as u16, cover, y });
@@ -796,7 +856,7 @@ pub fn bake_building(
     // foundation (elsewhere the ground level is the ground floor's, done above).
     for &(x, z, mask, _, gl) in storeys.get(&0).into_iter().flatten() {
         let cover = floor_cover(gl, x, z);
-        if cover.iter().all(|&c| c == NO_COVER) || pool_below.contains(&(x, z)) || walkout.contains_key(&(x, z)) {
+        if cover.iter().all(|&c| c == NO_COVER) || pool_below.contains(&(x, z)) || walkout.contains_key(&(x, z)) || in_fountain(x, z, ground) {
             continue;
         }
         floors.push(FloorBaked { level: 0, x: x as u16, z: z as u16, mask, kind: ROOM_PORCH, region: 0, cover, y: None });
@@ -1234,6 +1294,7 @@ pub fn bake_building(
             ground: Vec::new(),
             pool,
             pool_depth,
+            fountains,
             fences,
             basement: basement_y,
         },

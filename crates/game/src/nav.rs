@@ -589,9 +589,18 @@ pub fn fill_grid(grid: &mut NavGrid, world: &crate::loading::WorldInfo, obstacle
     let (w, h) = (grid.w, grid.h);
     // (The paving on the ground's level: a houseboat's deck is, out over the water.)
     let paved: std::collections::HashSet<(i32, i32)> = building.map(|b| b.data.floors.iter().filter(|f| f.level == 0 && f.y.is_none()).map(|f| (f.x as i32, f.z as i32)).collect()).unwrap_or_default();
+    // (A fountain's basin is water, not walked through.)
+    let fountain: std::collections::HashSet<(i32, i32)> = building.map(|b| b.data.fountains.iter().flat_map(|f| f.cells.iter().map(|&(x, z)| (x as i32, z as i32))).collect()).unwrap_or_default();
     for z in 0..h {
         for x in 0..w {
             let c = grid.center_of(x, z);
+            if let Some(b) = building.filter(|_| !fountain.is_empty()) {
+                let l = b.local(Vec3::new(c.x, 0.0, c.y));
+                if fountain.contains(&(l.x.floor() as i32, l.y.floor() as i32)) {
+                    grid.blocked[z * w + x] = true;
+                    continue;
+                }
+            }
             // (A ground floor's tile is walked on whatever ground lies under it: a hillside under
             // a house standing out over it, as Cormorant's.)
             if building.is_some_and(|b| b.floor_y(1, Vec3::new(c.x, 0.0, c.y)).is_some()) {

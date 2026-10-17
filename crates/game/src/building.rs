@@ -401,7 +401,7 @@ mod foundation_tests {
     fn deck_lot() -> LotBuildingBaked {
         let mut b = LotBuildingBaked { lot: 0, width: 10, depth: 10, levels: vec![0.0, 0.12], walls: Vec::new(), floors: Vec::new(),
             foundation: Vec::new(), foundation_top: Vec::new(), objects: Vec::new(), covers: Vec::new(), ground: Vec::new(), pool: Vec::new(),
-            pool_depth: 0.0, fences: Vec::new(), stairs: Vec::new(), basement: None };
+            pool_depth: 0.0, fences: Vec::new(), stairs: Vec::new(), basement: None, fountains: Vec::new() };
         for x in 0..3 {
             for z in 0..3 {
                 b.floors.push(FloorBaked { level: 1, x, z, mask: 0xF, kind: s3bake::ROOM_PORCH, region: 0, cover: [NO_COVER; 4], y: None });
@@ -1657,7 +1657,7 @@ fn remove_basement(b: &mut LotBuildingBaked, x: u16, z: u16) {
 /// A pool let into the ground: its tiled floor and sides, a stone coping round the edge, and
 /// the water (given its material by the water module).
 fn spawn_pool(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetCtx, b: &LotBuildingBaked, active: &ActiveBuilding, neighbor: Option<Entity>) -> Vec<Entity> {
-    let mut out = Vec::new();
+    let mut out = spawn_fountains(commands, ctx, b, active, neighbor);
     if b.pool.is_empty() {
         return out;
     }
@@ -1724,6 +1724,51 @@ fn spawn_pool(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut Asse
     }
     let stone = ctx.materials.add(StandardMaterial { base_color: Color::srgb(0.82, 0.8, 0.74), perceptual_roughness: 0.8, ..default() });
     let e = commands.spawn((Mesh3d(ctx.meshes.add(coping.mesh())), MeshMaterial3d(stone))).id();
+    place(commands, e, neighbor, 1);
+    out.push(e);
+    let e = commands.spawn((Mesh3d(ctx.meshes.add(water.mesh())), Transform::default(), Visibility::default(), crate::water::PoolWater)).id();
+    place(commands, e, neighbor, 1);
+    out.push(e);
+    out
+}
+
+/// The lot's fountains: each basin's floor, its sides up to the rim, and its water.
+fn spawn_fountains(commands: &mut Commands, ctx: &mut AssetCtx, b: &LotBuildingBaked, active: &ActiveBuilding, neighbor: Option<Entity>) -> Vec<Entity> {
+    let mut out = Vec::new();
+    if b.fountains.is_empty() {
+        return out;
+    }
+    let (mut stone, mut water) = (MeshBuf::default(), MeshBuf::default());
+    for f in &b.fountains {
+        let tiles: HashSet<(i32, i32)> = f.cells.iter().map(|&(x, z)| (x as i32, z as i32)).collect();
+        for &(cx, cz) in &f.cells {
+            let (x, z) = (cx as f32, cz as f32);
+            stone.quad(
+                [active.world(x, z, f.floor), active.world(x + 1.0, z, f.floor), active.world(x + 1.0, z + 1.0, f.floor), active.world(x, z + 1.0, f.floor)],
+                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                Vec3::Y,
+            );
+            water.quad(
+                [active.world(x, z, f.water), active.world(x + 1.0, z, f.water), active.world(x + 1.0, z + 1.0, f.water), active.world(x, z + 1.0, f.water)],
+                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                Vec3::Y,
+            );
+            // (Its sides, where the basin ends: from its floor up to the rim.)
+            for (dx, dz, a, c) in [(-1, 0, (x, z + 1.0), (x, z)), (1, 0, (x + 1.0, z), (x + 1.0, z + 1.0)), (0, -1, (x, z), (x + 1.0, z)), (0, 1, (x + 1.0, z + 1.0), (x, z + 1.0))] {
+                if tiles.contains(&(cx as i32 + dx, cz as i32 + dz)) {
+                    continue;
+                }
+                let h = f.rim - f.floor;
+                stone.quad(
+                    [active.world(a.0, a.1, f.floor), active.world(c.0, c.1, f.floor), active.world(c.0, c.1, f.rim), active.world(a.0, a.1, f.rim)],
+                    [[0.0, 0.0], [1.0, 0.0], [1.0, h], [0.0, h]],
+                    active.dir(-dx as f32, -dz as f32),
+                );
+            }
+        }
+    }
+    let mat = ctx.materials.add(StandardMaterial { base_color: Color::srgb(0.78, 0.76, 0.72), perceptual_roughness: 0.85, ..default() });
+    let e = commands.spawn((Mesh3d(ctx.meshes.add(stone.mesh())), MeshMaterial3d(mat))).id();
     place(commands, e, neighbor, 1);
     out.push(e);
     let e = commands.spawn((Mesh3d(ctx.meshes.add(water.mesh())), Transform::default(), Visibility::default(), crate::water::PoolWater)).id();
@@ -1859,6 +1904,7 @@ pub fn empty_building(lot_index: usize, lot: &LotInfo, ground: f32) -> LotBuildi
         fences: Vec::new(),
         stairs: Vec::new(),
         basement: None,
+        fountains: Vec::new(),
     }
 }
 

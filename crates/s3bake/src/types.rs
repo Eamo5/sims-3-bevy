@@ -13,7 +13,7 @@ pub const CAS_VERSION: u32 = 11;
 /// cut-outs drawn from bled copies of their textures; 2, the wardrobe in a fixed order.
 pub const OBJECTS_VERSION: u32 = 2;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 74;
+pub const WORLD_VERSION: u32 = 78;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -392,6 +392,18 @@ pub struct LotBuildingBaked {
     /// (`y`), under the ground (the ground's paving is storey 0 too, with no height of its own).
     #[serde(default)]
     pub basement: Option<f32>,
+    /// The lot's fountains (the game's buildable ones).
+    #[serde(default)]
+    pub fountains: Vec<FountainBaked>,
+}
+
+/// A fountain: its basin's tiles (lot-local), the heights of its floor, water and rim.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct FountainBaked {
+    pub cells: Vec<(u16, u16)>,
+    pub floor: f32,
+    pub water: f32,
+    pub rim: f32,
 }
 
 /// A staircase's lower level when it's below the ground (the record's -1), before the bake
