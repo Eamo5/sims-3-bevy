@@ -1226,6 +1226,8 @@ pub enum Special {
     PutAway,
     /// A plate of leftovers from the fridge.
     Leftovers,
+    /// The spoiled leftovers thrown out of the fridge (the game's `Fridge_CleanOutBadFood`).
+    CleanOutFridge,
     /// Eat a plate of food at a table (a dining chair's hidden interaction).
     EatMeal,
     /// Clear away dirty dishes.
@@ -1378,7 +1380,7 @@ const fn def(name: &'static str, minutes: f32, per_hour: [f32; 6], pose: Pose) -
     }
 }
 
-static FRIDGE: [InteractionDef; 6] = [
+static FRIDGE: [InteractionDef; 7] = [
     // (Vampires: a pack of plasma juice, instead of food.)
     InteractionDef { special: Special::VampireOnly, ..def("Drink Plasma Juice", 6.0, [900.0, -4.0, 0.0, 0.0, 0.0, 10.0], Pose::Use) },
     InteractionDef { special: Special::Cook, ..def("Have Quick Meal", 30.0, [130.0, -6.0, 0.0, 0.0, -4.0, 4.0], Pose::Use) },
@@ -1388,7 +1390,11 @@ static FRIDGE: [InteractionDef; 6] = [
     InteractionDef { autonomous: false, skill: Some("Cooking"), special: Special::BakeCake, ..def("Bake Birthday Cake", 30.0, [0.0, 0.0, 0.0, 0.0, 0.0, 6.0], Pose::Use) },
     // (Before cooking at the stove: never on the menu.)
     InteractionDef { autonomous: false, special: Special::GetIngredients, ..def("Get Ingredients", 6.0, N, Pose::Use) },
+    // (The game's `Fridge_CleanOutBadFood`: twenty fun and twenty-five hygiene an hour.)
+    InteractionDef { special: Special::CleanOutFridge, ..def("Clean Out", CLEAN_OUT_MINUTES, [0.0, 0.0, 0.0, 0.0, -25.0, -20.0], Pose::Use) },
 ];
+/// How long cleaning out the fridge takes (game minutes: its clip's).
+const CLEAN_OUT_MINUTES: f32 = 4.0;
 /// (A counter, where the ingredients are chopped before cooking: never on the menu.)
 static COUNTER: [InteractionDef; 2] = [
     InteractionDef { autonomous: false, skill: Some("Cooking"), special: Special::PrepFood, ..def("Prepare Food", 15.0, [0.0, 0.0, 0.0, 0.0, -2.0, 4.0], Pose::Use) },
@@ -2150,6 +2156,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Hang Clothes" => A::new(None, &["a2o_clothesLine_hang_x"]),
         "Take Down Clothes" => A::new(None, &["a2o_clothesLine_remove_x"]),
         "Throw Out Trash" => A::new(None, &["a2o_trashPile_drop_outdoors_x"]),
+        "Clean Out" if kind == ObjectKind::Fridge => A::new(None, &["a2o_fridge_cleanOutBadFood_x"]),
         // (Into its works, as an upgrade's done.)
         "Overclock" => A::new(Some("a2o_computer_repair_start_x"), &["a2o_computer_repair_loop1_x", "a2o_computer_repair_loop2_x"]),
         // (The can's own halves knock it down and stand it up; rummaging, its lid's off.)
@@ -4568,6 +4575,16 @@ pub(crate) fn run_actions(
                                         Special::PutAway => {
                                             commands.entity(me).insert(crate::meals::MealRequest::PutAway(*target));
                                         }
+                                        Special::CleanOutFridge => {
+                                            // (What's gone off thrown out, and the bag taken out to the trash.)
+                                            let now = clock.minutes;
+                                            commands.queue(move |w: &mut World| {
+                                                let keeps = w.resource::<crate::meals::FridgeKeeps>().0;
+                                                let n = w.resource_mut::<crate::meals::Leftovers>().clean_out(now, keeps);
+                                                info!("cleaned {n} spoiled servings out of the fridge");
+                                            });
+                                            commands.entity(me).insert(crate::surroundings::TakeOutTrash(*target));
+                                        }
                                         Special::Leftovers => {
                                             // (The dish chosen, else the oldest.)
                                             match action.recipe_choice.take() {
@@ -5830,7 +5847,7 @@ fn autonomy(
         Res<crate::klepto::Swipeable>,
         Res<crate::mirrors::LastLooked>,
     ),
-    (convs, toilets, bed_owners, bowls, (moods, smashed_q), (residents_q, can_owners, tipped_q, visited_lot, work_to_do_q)): (
+    (convs, toilets, bed_owners, bowls, (moods, smashed_q), (residents_q, can_owners, tipped_q, visited_lot, work_to_do_q, fridge_keeps)): (
         Res<crate::groups::Conversations>,
         Res<crate::toilets::Unflushed>,
         Query<&crate::bedowners::BedOwners>,
@@ -5842,6 +5859,7 @@ fn autonomy(
             Query<(), With<crate::trashcans::TippedOver>>,
             Option<Res<crate::visit::VisitedLot>>,
             Query<&crate::computertraits::WorkToDo>,
+            Res<crate::meals::FridgeKeeps>,
         ),
     ),
 ) {
@@ -6019,6 +6037,14 @@ fn autonomy(
                 if d.special == Special::Leftovers && (leftovers.0.is_empty() || my_lot.is_some()) {
                     continue;
                 }
+                // (Spoiled food cleaned out of the household's fridge: by teens and up, the Neat keen
+                // to, as the game's `TraitNeat` 200.)
+                if d.special == Special::CleanOutFridge {
+                    let grown = sim.age == Age::Teen || (sim.age.is_grown() && sim.age != Age::Child);
+                    if !household.contains(me) || my_lot.is_some() || !grown || !leftovers.any_spoiled(clock.minutes, fridge_keeps.0) {
+                        continue;
+                    }
+                }
                 if d.special == Special::PlayInSprinkler && !sprinkling.contains(oe) {
                     continue;
                 }
@@ -6096,6 +6122,9 @@ fn autonomy(
                         let Some(pull) = crate::dollhouse::drawn(sim, moods.get(me).map_or(0.0, |m| m.0)) else { continue };
                         score = pull;
                     }
+                }
+                if d.special == Special::CleanOutFridge {
+                    score = if sim.traits.contains(&crate::life::Trait::Neat) { 60.0 } else { 8.0 } * rng.random_range(0.8..1.2);
                 }
                 // (A Workaholic works from home out of work hours, keen to: the game's `WorkFromHome`.)
                 if d.special == Special::WorkFromHome {

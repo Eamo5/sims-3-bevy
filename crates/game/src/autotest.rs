@@ -3195,13 +3195,17 @@ fn auto_click_use(
 }
 
 /// LEFTOVERS=<recipe key>,... (tests): those servings put away in the fridge from the start.
-fn auto_leftovers(mut done: Local<bool>, mut leftovers: ResMut<crate::meals::Leftovers>) {
+/// (LEFTOVERS_AGO=<hours>: put away that long ago, to have gone off.)
+fn auto_leftovers(mut done: Local<bool>, mut leftovers: ResMut<crate::meals::Leftovers>, clock: Res<crate::clock::GameClock>) {
     if *done {
         return;
     }
     *done = true;
     if let Ok(v) = std::env::var("LEFTOVERS") {
-        leftovers.0.extend(v.split(',').map(|k| k.trim().to_string()).filter(|k| !k.is_empty()));
+        let ago = std::env::var("LEFTOVERS_AGO").ok().and_then(|h| h.parse::<f64>().ok()).unwrap_or(0.0);
+        for k in v.split(',').map(|k| k.trim().to_string()).filter(|k| !k.is_empty()) {
+            leftovers.put(k, clock.minutes - ago * 60.0);
+        }
     }
 }
 

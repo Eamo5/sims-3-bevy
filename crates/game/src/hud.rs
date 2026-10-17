@@ -1051,13 +1051,13 @@ fn world_click(
     mut ray_cast: MeshRayCast,
     parents: Query<&ChildOf>,
     sims: Query<(&Sim, Has<HouseholdMember>, Has<Selected>)>,
-    (objects, broken_q, lit_q, hw_q, trash_q, leftovers, sprinkling, weather, chess, music, potties): (
+    (objects, broken_q, lit_q, hw_q, trash_q, (leftovers, fridge_keeps), sprinkling, weather, chess, music, potties): (
         Query<&GameObject>,
         Query<(), With<crate::interact::Broken>>,
         Query<(), With<crate::fireplace::Lit>>,
         Query<(), With<crate::rabbitholes::Homework>>,
         Query<&crate::surroundings::TrashFill>,
-        Res<crate::meals::Leftovers>,
+        (Res<crate::meals::Leftovers>, Res<crate::meals::FridgeKeeps>),
         Query<(), With<crate::gardening::Sprinkling>>,
         Res<crate::weather::Weather>,
         Res<crate::chess::ChessTables>,
@@ -1665,15 +1665,23 @@ fn world_click(
                 if d.special == Special::Leftovers && leftovers.0.is_empty() {
                     continue;
                 }
+                // (A fridge cleaned out with something in it gone off: teens and up.)
+                if d.special == Special::CleanOutFridge
+                    && (!leftovers.any_spoiled(opp_q.2.minutes, fridge_keeps.0) || !(actor_sim.age == crate::sim::Age::Teen || actor_sim.age.is_grown()))
+                {
+                    continue;
+                }
                 // The leftovers in the fridge, each dish once ("Eat Leftovers..."), as the game's
                 // `Fridge_EatLeftovers` lists them.
                 if d.special == Special::Leftovers {
                     let Some(ui) = opp_q.0.as_ref() else { continue };
                     let mut list: Vec<(String, ActionKind)> = Vec::new();
-                    for key in &leftovers.0 {
+                    for (n, key) in leftovers.0.iter().enumerate() {
                         let Some(r) = ui.data.recipes.iter().find(|r| &r.key == key) else { continue };
-                        if !list.iter().any(|(l, _)| *l == r.name) {
-                            list.push((r.name.clone(), ActionKind::Object { target: t, def: i }));
+                        // (Those gone off, as the game's list shows them.)
+                        let name = if leftovers.spoiled(n, opp_q.2.minutes, fridge_keeps.0) { format!("{} (Spoiled)", r.name) } else { r.name.clone() };
+                        if !list.iter().any(|(l, _)| *l == name) {
+                            list.push((name, ActionKind::Object { target: t, def: i }));
                         }
                     }
                     if !list.is_empty() {

@@ -24,9 +24,12 @@ pub struct MealsPlugin;
 impl Plugin for MealsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Leftovers>()
+            .init_resource::<FridgeKeeps>()
+            .add_systems(Update, fridge_keeps.run_if(in_state(crate::PlayMode::Live)))
             .init_resource::<crate::ingredients::Fridge>()
             .add_systems(OnEnter(crate::AppState::InGame), |mut l: ResMut<Leftovers>, mut f: ResMut<crate::ingredients::Fridge>| {
                 l.0.clear();
+                l.1.clear();
                 f.0 = None;
             })
             .add_systems(Update, crate::ingredients::stock_fridge.run_if(in_state(crate::PlayMode::Live)))
@@ -804,9 +807,107 @@ fn probe_meal_budget(
 /// How many servings of leftovers the fridge keeps.
 const MAX_LEFTOVERS: usize = 12;
 
-/// Servings of meals put away in the fridge (by recipe, oldest first), to be had another time.
+/// Servings of meals put away in the fridge (by recipe, oldest first), to be had another time,
+/// and when each was put away.
 #[derive(Resource, Default, Clone, Debug)]
-pub struct Leftovers(pub Vec<String>);
+pub struct Leftovers(pub Vec<String>, pub Vec<f64>);
+
+/// How long food keeps out of a fridge (`PreparedFood.kBaseTimeToNextFoodSpoilageStage`, tuned:
+/// hours), and in one by how good a fridge it is (each fridge's tuned `SpoilageMultiplier`: the
+/// cheap one 7, the moderate 12, the expensive 21, and the reward fridge's food never spoils).
+const SPOIL_HOURS: f64 = 10.0;
+fn spoilage_multiplier(script: &str) -> f64 {
+    let s = script.to_ascii_lowercase();
+    if s.ends_with(".fridgecheap") {
+        7.0
+    } else if s.ends_with(".fridgemoderate") {
+        12.0
+    } else if s.ends_with(".fridgeexpensive") {
+        21.0
+    } else if s.ends_with(".fridgereward") {
+        f64::INFINITY
+    } else {
+        10.0
+    }
+}
+
+/// How long the household's leftovers keep (game minutes): by their best fridge.
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct FridgeKeeps(pub f64);
+
+impl Default for FridgeKeeps {
+    fn default() -> Self {
+        Self(SPOIL_HOURS * 60.0 * 10.0)
+    }
+}
+
+impl Leftovers {
+    /// A serving put away.
+    pub fn put(&mut self, key: String, at: f64) {
+        self.1.resize(self.0.len(), at);
+        self.0.push(key);
+        self.1.push(at);
+    }
+
+    /// A serving taken out (its recipe's key).
+    pub fn take(&mut self, i: usize) -> String {
+        self.1.resize(self.0.len(), 0.0);
+        self.1.remove(i);
+        self.0.remove(i)
+    }
+
+    /// The oldest let go, past what the fridge holds.
+    fn keep_last(&mut self, n: usize) {
+        self.1.resize(self.0.len(), 0.0);
+        let over = self.0.len().saturating_sub(n);
+        self.0.drain(..over);
+        self.1.drain(..over);
+    }
+
+    /// Whether a serving's gone off (kept longer than the fridge keeps food).
+    pub fn spoiled(&self, i: usize, now: f64, keeps: f64) -> bool {
+        self.1.get(i).is_some_and(|at| now - at > keeps)
+    }
+
+    /// Whether any has.
+    pub fn any_spoiled(&self, now: f64, keeps: f64) -> bool {
+        (0..self.0.len()).any(|i| self.spoiled(i, now, keeps))
+    }
+
+    /// The spoiled ones thrown out: how many.
+    pub fn clean_out(&mut self, now: f64, keeps: f64) -> usize {
+        self.1.resize(self.0.len(), now);
+        let before = self.0.len();
+        let keep: Vec<bool> = (0..before).map(|i| !self.spoiled(i, now, keeps)).collect();
+        let mut k = keep.iter();
+        self.0.retain(|_| *k.next().unwrap_or(&true));
+        let mut k = keep.iter();
+        self.1.retain(|_| *k.next().unwrap_or(&true));
+        before - self.0.len()
+    }
+}
+
+/// How long the household's leftovers keep, by the best fridge on the lot.
+fn fridge_keeps(
+    time: Res<Time>,
+    mut last: Local<f32>,
+    mut keeps: ResMut<FridgeKeeps>,
+    fridges: Query<&GameObject, Without<crate::visit::LotObject>>,
+    data: Option<Res<crate::baked::Baked>>,
+) {
+    let now = time.elapsed_secs();
+    if now - *last < 5.0 {
+        return;
+    }
+    *last = now;
+    let Some(data) = data else { return };
+    let best = fridges
+        .iter()
+        .filter(|o| o.kind == ObjectKind::Fridge)
+        .filter_map(|o| data.0.catalog.iter().find(|c| c.objd == o.objd).map(|c| spoilage_multiplier(&c.script)))
+        .fold(None, |m: Option<f64>, x| Some(m.map_or(x, |m| m.max(x))));
+    keeps.0 = SPOIL_HOURS * 60.0 * best.unwrap_or(10.0);
+}
 
 /// The plate in front of a Sim eating at a table.
 #[derive(Component)]
@@ -1160,11 +1261,10 @@ fn meal_requests(
                     let servings = m.take_remaining();
                     if let Some(r) = dish.and_then(|d| recipe(d.0)) {
                         for _ in 0..servings {
-                            leftovers.0.push(r.key.clone());
+                            leftovers.put(r.key.clone(), clock.minutes);
                         }
                         // (The fridge holds a dozen; the oldest go out.)
-                        let n = leftovers.0.len().saturating_sub(MAX_LEFTOVERS);
-                        leftovers.0.drain(..n);
+                        leftovers.keep_last(MAX_LEFTOVERS);
                     }
                     commands.entity(platter).try_despawn();
                 }
@@ -1227,7 +1327,7 @@ fn meal_requests(
                     continue;
                 }
                 let chosen = plan.and_then(|p| recipe(p.0)).and_then(|r| leftovers.0.iter().position(|k| *k == r.key));
-                let key = leftovers.0.remove(chosen.unwrap_or(0));
+                let key = leftovers.take(chosen.unwrap_or(0));
                 match recipes.as_ref().and_then(|d| d.recipes.iter().position(|r| r.key == key)) {
                     Some(i) => commands.entity(me).insert(Plateful(i)),
                     None => commands.entity(me).remove::<Plateful>(),
@@ -1362,6 +1462,24 @@ fn release_plates(mut commands: Commands, sims: Query<(Entity, &ActionQueue, &Ea
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn leftovers_go_off_by_the_fridge_and_are_cleaned_out() {
+        let mut l = Leftovers::default();
+        l.put("Pancakes".into(), 0.0);
+        l.put("Lasagna".into(), 60.0 * 60.0);
+        // (A cheap fridge keeps food seventy hours; the expensive one three times that.)
+        let cheap = SPOIL_HOURS * 60.0 * spoilage_multiplier("Sims3.Gameplay.Objects.Appliances.FridgeCheap");
+        let dear = SPOIL_HOURS * 60.0 * spoilage_multiplier("Sims3.Gameplay.Objects.Appliances.FridgeExpensive");
+        assert_eq!(cheap, 70.0 * 60.0);
+        let now = 80.0 * 60.0;
+        assert!(l.spoiled(0, now, cheap) && !l.spoiled(1, now, cheap) && !l.any_spoiled(now, dear));
+        assert!(spoilage_multiplier("Sims3.Gameplay.Objects.Appliances.FridgeReward").is_infinite());
+        assert_eq!(l.clean_out(now, cheap), 1);
+        assert_eq!(l.0, vec!["Lasagna".to_string()]);
+        assert_eq!(l.take(0), "Lasagna");
+        assert!(l.0.is_empty() && l.1.is_empty());
+    }
 
     #[test]
     fn meals_come_out_as_the_game_cooks_them() {

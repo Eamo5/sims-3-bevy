@@ -474,6 +474,9 @@ pub struct SaveGame {
     /// Leftovers in the fridge (servings, by recipe).
     #[serde(default)]
     pub leftovers: Vec<String>,
+    /// When each was put away (game minutes; missing in older saves: as loaded).
+    #[serde(default)]
+    pub leftovers_at: Vec<f64>,
     /// The ingredients in the fridge (none: saves from before ingredients, given the start's).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fridge: Option<Vec<crate::inventory::Stack>>,
@@ -1114,6 +1117,7 @@ fn save_game(
             })
             .collect(),
         leftovers: leftovers.0.clone(),
+        leftovers_at: leftovers.1.clone(),
         fridge: fridge.0.clone(),
         meals: ui.as_deref().map(|u| crate::meals::saved_meals(&meals, &u.data)).unwrap_or_default(),
         weather: Some(weather.clone()),
@@ -1417,7 +1421,9 @@ pub(crate) fn apply_loaded_game(
     commands.insert_resource(crate::fishbowl::PendingBowls(game.fishbowls.clone()));
     commands.insert_resource(game.collection.clone());
     commands.insert_resource(game.discoveries.clone());
-    commands.insert_resource(crate::meals::Leftovers(game.leftovers.clone()));
+    let mut at = game.leftovers_at.clone();
+    at.resize(game.leftovers.len(), game.minutes);
+    commands.insert_resource(crate::meals::Leftovers(game.leftovers.clone(), at));
     commands.insert_resource(crate::ingredients::Fridge(game.fridge.clone()));
     commands.insert_resource(crate::meals::PendingMeals(game.meals.clone()));
     commands.insert_resource(game.weather.clone().unwrap_or_default());

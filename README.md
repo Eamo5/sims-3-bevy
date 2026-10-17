@@ -345,7 +345,11 @@ installation is unreachable.
   What's left of a meal goes in the fridge once it's been out a while (neat Sims see to it
   first, slobs never), to be had another time ("Eat Leftovers...", each dish in the fridge once,
   as the game lists them: a plate of it at the table);
-  the fridge keeps a dozen servings, and they're kept in saves. The fridge's "Have Quick
+  the fridge keeps a dozen servings, and they're kept in saves. Leftovers go off, as the
+  game's: ten hours times the fridge's tuned multiplier (the cheap fridge 70 hours, the
+  moderate 120, the expensive 210; the reward fridge's never), listed "(Spoiled)" then; the
+  fridge's *Clean Out* (teens and up, the Neat keen to) throws them out, the bag carried out
+  to the trash. The fridge's "Have Quick
   Meal ›" is the game's snacks (Cereal, Bread and Jam, Canned Soup, Ice Cream, Juice), taken
   out and carried to the table; a Microwave Meal (not for children) is put in the microwave
   (its door swinging open), checked on while it heats, taken out and carried to the table the
