@@ -5,7 +5,12 @@
 //! Up On Work has found there's
 //! something to do (half the time; for two hours: `CallCheckUpOnWork`); a Bookworm can Join the
 //! Book Club (§250 for life, `JoinBookClub`), and a book comes in the mail for each member every
-//! Monday (`Mailbox.SendBookClubBooks`), onto the household's shelves.
+//! Monday (`Mailbox.SendBookClubBooks`), onto the household's shelves. A Computer Whiz can Hack
+//! from nine at night till seven in the morning (the computers' tuned `HackStartHour`,
+//! `HackEndHour`): §8 to §23 into the household funds every quarter hour (one time in ten four
+//! times as much: `HackMinPay`, `HackMaxPay`, `HackChanceOfBonus`, `HackBonusMultiplier`), and
+//! every half hour a chance in fifty of being caught (`ComputerWhizTraitChanceToGetCaughtWhileHacking`,
+//! tuned 0.02): a counter-virus, and the computer broken.
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -20,7 +25,7 @@ pub struct ComputerTraitsPlugin;
 
 impl Plugin for ComputerTraitsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (done, checked_up, book_club_mail, traits_test).run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (done, checked_up, book_club_mail, traits_test, hacking).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -40,6 +45,95 @@ fn traits_test(mut sel: Query<&mut Sim, With<crate::sim::Selected>>, time: Res<T
         }
     }
     info!("traits test: {} is {:?}", sim.first, sim.traits);
+}
+
+/// The computers' tuned hacking: its hours, its pay, and the chance of being caught.
+const HACK_START: f32 = 21.0;
+const HACK_END: f32 = 7.0;
+const HACK_PAY_EVERY: f64 = 15.0;
+const HACK_PAY: std::ops::RangeInclusive<i64> = 8..=23;
+const HACK_BONUS_CHANCE: f64 = 0.1;
+const HACK_BONUS: i64 = 4;
+const CAUGHT_EVERY: f64 = 30.0;
+const CAUGHT_CHANCE: f64 = 0.02;
+
+/// Whether it's the hours for hacking.
+pub fn hack_hours(hour: f32) -> bool {
+    hour >= HACK_START || hour < HACK_END
+}
+
+/// Hacking at a computer: when it next pays, when they might next be caught, and what it's made.
+#[derive(Component)]
+pub struct Hacking {
+    next_pay: f64,
+    next_check: f64,
+    total: i64,
+}
+
+/// Hacking: paid as it goes, till morning, or till they're caught (the computer broken).
+#[allow(clippy::type_complexity)]
+fn hacking(
+    mut commands: Commands,
+    clock: Res<crate::clock::GameClock>,
+    mut sims: Query<(Entity, &Sim, &mut crate::interact::ActionQueue, Option<&mut Hacking>)>,
+    objects: Query<&crate::interact::GameObject>,
+    mut household: Option<ResMut<crate::interact::Household>>,
+    ui: Option<Res<crate::layout::UiAssets>>,
+    mut notes: ResMut<crate::interact::Notifications>,
+) {
+    let now = clock.minutes;
+    let mut rng = rand::rng();
+    let say = |key: &str, sim: &Sim, n: i64, or: String| {
+        ui.as_deref()
+            .and_then(|u| u.localize(&format!("Gameplay/Objects/Electronics/Computer/Hack:{key}")))
+            .map_or(or, |t| t.replace("{0.SimFirstName}", &sim.first).replace("{1.Money}", &format!("§{n}")))
+    };
+    for (e, sim, mut queue, hack) in &mut sims {
+        let at = queue.0.front().filter(|a| matches!(a.phase, crate::interact::Phase::Running(_)) && !a.cancel).and_then(|a| match a.kind {
+            crate::interact::ActionKind::Object { target, def } => objects
+                .get(target)
+                .ok()
+                .and_then(|o| crate::interact::interactions_for(o.kind).get(def))
+                .filter(|d| d.special == Special::Hack)
+                .map(|_| target),
+            _ => None,
+        });
+        match (at, hack) {
+            (Some(_), None) => {
+                commands.entity(e).insert(Hacking { next_pay: now + HACK_PAY_EVERY, next_check: now + CAUGHT_EVERY, total: 0 });
+            }
+            (Some(computer), Some(mut h)) => {
+                if now >= h.next_pay {
+                    h.next_pay += HACK_PAY_EVERY;
+                    let pay = rng.random_range(HACK_PAY) * if rng.random_bool(HACK_BONUS_CHANCE) { HACK_BONUS } else { 1 };
+                    h.total += pay;
+                    if let Some(hh) = household.as_mut() {
+                        hh.funds += pay;
+                    }
+                }
+                let caught = now >= h.next_check && {
+                    h.next_check += CAUGHT_EVERY;
+                    rng.random_bool(CAUGHT_CHANCE)
+                };
+                if caught {
+                    notes.push(say("CaughtHackingText", sim, 0, format!("{} was caught hacking: a counter-virus has damaged the computer.", sim.first)));
+                    commands.entity(computer).insert(crate::interact::Broken);
+                }
+                if caught || !hack_hours(clock.hour_f()) {
+                    if let Some(a) = queue.0.front_mut() {
+                        a.cancel = true;
+                    }
+                }
+            }
+            (None, Some(h)) => {
+                if h.total > 0 {
+                    notes.push(say("MoneyEarned", sim, h.total, format!("{} has hacked a total of §{} into the household funds.", sim.first, h.total)));
+                }
+                commands.entity(e).remove::<Hacking>();
+            }
+            (None, None) => {}
+        }
+    }
 }
 
 /// In the book club (kept with the game).
@@ -76,6 +170,7 @@ pub fn offers(special: Special, sim: &Sim, job: Option<&crate::careers::Job>, in
         Special::JobIssues => teen_up && has(Trait::Workaholic) && job.is_some() && work_to_do,
         Special::JoinBookClub => !sim.age.is_little() && has(Trait::Bookworm) && !in_club,
         Special::LeaveBookClub => in_club,
+        Special::Hack => teen_up && has(Trait::ComputerWhiz),
         _ => true,
     }
 }

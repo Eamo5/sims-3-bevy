@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 127;
+pub const GAMEDATA_VERSION: u32 = 128;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -2412,6 +2412,14 @@ fn bake_cas_colourways(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, Stri
     Ok(n)
 }
 
+/// Geometry states the game switches objects to (`alt_states.pack`): a dollhouse smashed.
+pub const ALT_STATES: [&str; 1] = ["dollhouseSmashed"];
+
+/// A model's key in one of its other states (`alt_states.pack`): the state's hash its group.
+pub fn alt_state_key(model: crate::types::Key, state: u32) -> crate::types::Key {
+    (model.0, state, model.2)
+}
+
 /// The catalogue's fences (`fences.pack` holds their pieces).
 fn bake_fence_styles(root: &BakeRoot, pkgs: &PackageSet, strings: &HashMap<u64, String>) -> Result<Vec<FenceStyle>, String> {
     let mut keys: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(0x0418FE2A).copied().collect();
@@ -3326,6 +3334,24 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             spack.add(k, &m).map_err(|e| e.to_string())?;
         }
         spack.finish().map_err(|e| e.to_string())?;
+        // (And the states the game switches them to (a smashed dollhouse), each under its own
+        // key: the model's, with the state's hash for its group, `alt_state_key`.)
+        let alts: Vec<u32> = ALT_STATES.iter().map(|s| s3pkg::fnv32(s)).collect();
+        let alt = crate::bake::par_map(&keys, |k| {
+            let rk = crate::types::rkey(*k);
+            let meshes = s3formats::model::load_model(pkgs, &rk)?;
+            let found: Vec<(crate::types::Key, crate::types::BakedModel)> = alts
+                .iter()
+                .filter(|h| meshes.iter().any(|m| m.states.iter().any(|(s, ix)| s == *h && !ix.is_empty())))
+                .map(|h| (alt_state_key(*k, *h), crate::bake::bake_model_state(pkgs, &rk, Some(*h))))
+                .collect();
+            Some(found)
+        });
+        let mut apack = PackWriter::create(&g.join("alt_states.pack")).map_err(|e| e.to_string())?;
+        for (k, m) in alt.into_iter().flatten().flatten() {
+            apack.add(k, &m).map_err(|e| e.to_string())?;
+        }
+        apack.finish().map_err(|e| e.to_string())?;
     }
     // Lifetime wishes: the base game's lifetime dreams, with their instances' scores.
     if let (Some(nodes), Some(inst)) = (xml("DreamsAndPromisesNodes"), xml("DreamNodeInstanceDefaults")) {

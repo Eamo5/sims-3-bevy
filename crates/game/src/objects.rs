@@ -226,6 +226,24 @@ impl ObjectAssets {
         self.ingest_model(ctx, key, cpu)
     }
 
+    /// A catalogue object's parts in another of its geometry states (its models' that have it;
+    /// as it is, those that don't).
+    pub fn object_in_state(&mut self, ctx: &mut AssetCtx, objd: Key, state: u32) -> Vec<ModelPart> {
+        let models = ctx.baked.catalog_entry(&objd).map(|e| e.models.clone()).unwrap_or_default();
+        let mut parts = Vec::new();
+        for m in models {
+            let key = s3bake::gamedata::alt_state_key(m, state);
+            if let Some(p) = self.models.get(&key) {
+                parts.extend(p.clone());
+            } else if let Some(b) = ctx.baked.state_model(&m, state) {
+                parts.extend(self.ingest_model(ctx, key, cpu_model(b)));
+            } else {
+                parts.extend(self.model(ctx, m));
+            }
+        }
+        parts
+    }
+
     /// How many designs a catalogue object comes in (0 or 1: just the one).
     pub fn design_count(ctx: &AssetCtx, objd: Key) -> u8 {
         ctx.baked.designs.get(&objd).map_or(0, |d| d.count)
@@ -382,6 +400,27 @@ pub fn spawn_parts(commands: &mut Commands, parts: &[ModelPart], transform: Tran
             }
         })
         .id()
+}
+
+/// An object's meshes swapped for others (another geometry state): its other children (its
+/// lights, its contents) stay.
+pub fn reshape_parts(commands: &mut Commands, root: Entity, parts: &[ModelPart]) {
+    commands.queue(move |world: &mut World| {
+        let children: Vec<Entity> = world.get::<Children>(root).map(|c| c.iter().collect()).unwrap_or_default();
+        let meshes: Vec<Entity> = children.into_iter().filter(|e| world.get::<Mesh3d>(*e).is_some()).collect();
+        for e in meshes {
+            world.despawn(e);
+        }
+    });
+    let parts = parts.to_vec();
+    commands.entity(root).with_children(|c| {
+        for p in &parts {
+            let mut e = c.spawn((Mesh3d(p.mesh.clone()), MeshMaterial3d(p.material.clone())));
+            if !p.states.is_empty() {
+                e.insert(crate::grime::MaterialStates { states: p.states.clone(), own: None, shown: 0 });
+            }
+        }
+    });
 }
 
 /// Recolour the object's mesh children in place. Its rig, lights and contents remain attached.

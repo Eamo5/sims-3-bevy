@@ -17,6 +17,8 @@ pub struct BakedData {
     pub food_models: Option<PackReader>,
     /// Objects with alternative geometry states, in their default one (over `models`).
     pub state_models: Option<PackReader>,
+    /// Models in the other states the game switches them to (`s3bake::gamedata::ALT_STATES`).
+    pub alt_models: Option<PackReader>,
     /// The produce gardens bear.
     pub produce_models: Option<PackReader>,
     /// The build catalogue's fences' pieces.
@@ -53,6 +55,7 @@ impl BakedData {
         let world_models = world.and_then(|w| PackReader::open(&root.world_dir(w).join("models.pack")).ok());
         let food_models = PackReader::open(&g.join("food.pack")).ok();
         let state_models = PackReader::open(&g.join("states.pack")).ok();
+        let alt_models = PackReader::open(&g.join("alt_states.pack")).ok();
         let produce_models = PackReader::open(&g.join("produce.pack")).ok();
         let fence_models = PackReader::open(&g.join("fences.pack")).ok();
         let mut cas: CasBaked = s3bake::read_value(&g.join("cas.bin")).map_err(|e| format!("cas: {e}"))?;
@@ -89,6 +92,7 @@ impl BakedData {
             world_models,
             food_models,
             state_models,
+            alt_models,
             produce_models,
             fence_models,
             cas,
@@ -110,6 +114,11 @@ impl BakedData {
     /// A model's rig and skinning, when it has moving parts.
     pub fn skin(&self, k: &Key) -> Option<s3bake::gamedata::ObjectSkin> {
         self.skins.as_ref().and_then(|p| p.get(k))
+    }
+
+    /// A model in one of its other states (a dollhouse smashed), if it has it.
+    pub fn state_model(&self, k: &Key, state: u32) -> Option<BakedModel> {
+        self.alt_models.as_ref().and_then(|p| p.get(&s3bake::gamedata::alt_state_key(*k, state)))
     }
 
     pub fn model(&self, k: &Key) -> Option<BakedModel> {

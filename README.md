@@ -169,7 +169,9 @@ installation is unreachable.
   of Logic; three times in five solved, for a prize of §50 to §225, in the game's words); a
   Workaholic can phone to Check Up On Work, and half the time there's something to be getting on
   with: two hours to start four hours' Work on Job-Related Issues at the computer, for 4
-  performance; a Bookworm can Join the Book Club (§250 for life, kept in saves), and every
+  performance; a Computer Whiz can Hack from nine at night till seven (§8-23 a quarter hour,
+  now and then four times that, and a 2% chance each half hour of a counter-virus breaking the
+  computer: the game's tuning); a Bookworm can Join the Book Club (§250 for life, kept in saves), and every
   Monday a book they haven't got comes in the mail for each member, onto the shelves.
 - **Writing novels** by the game's Writing tuning: at a computer, "Write Novel" offers the
   genres the Sim has opened up (Fiction and Non-Fiction to start; Sci-Fi, Trashy, Drama,
@@ -649,7 +651,11 @@ installation is unreachable.
 - **Playgrounds**: children climb a slide's ladder, sit at the top and slide down, and climb a
   jungle gym's tower, play in its lookout and come down its pole: the game's clips carrying them
   along (its `world_offset` channel, the travel the engine moves Sims by), left where they end
-  up. The dollhouse is played at its open side.
+  up. The dollhouse is played at its open side (by children, and by Childish grown-ups with
+  their own clips), and smashed in a temper (the game's `Smash`: only in a strongly bad mood,
+  by free will only for the Evil, Grumpy, Inappropriate and Hot-Headed; eight minutes of
+  kicking it in, a child's eighteen, with the game's clips), left in its own smashed state (the model's
+  `dollhouseSmashed` geometry, baked alongside) till it's thrown away. Kept in saves.
 - **Grime**: toilets, showers, tubs and sinks get dirtier with every use (the game's numbers:
   less after Neat Sims, more after slobs) and look it: the model's own Dirty and Very Dirty
   materials, their dirt drawn over the object's texture (a clogged toilet its Clogged look).

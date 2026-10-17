@@ -1064,7 +1064,7 @@ fn world_click(
         Res<crate::potty::Potties>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q))): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q))): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1089,6 +1089,7 @@ fn world_click(
             Res<crate::toilets::Unflushed>,
             Query<(Has<crate::effects::TvOn>, Has<crate::effects::TvLeftOn>)>,
             (Option<Res<crate::layout::UiAssets>>, Query<&crate::charity::Charities>),
+            (Query<&crate::life::Mood>, Query<(), With<crate::dollhouse::Smashed>>),
         ),
     ),
     world: Res<CurrentWorld>,
@@ -1393,6 +1394,19 @@ fn world_click(
                 if d.special == Special::Flush && !unflushed.0.contains_key(&t) {
                     continue;
                 }
+                // (A dollhouse whole: played with, or smashed in a temper; smashed: thrown away.)
+                if obj.kind == ObjectKind::DollHouse {
+                    let smashed = smashed_q.contains(t);
+                    let temper = crate::dollhouse::may_smash(mood_q.get(actor).map_or(0.0, |m| m.0));
+                    let ok = match d.special {
+                        Special::SmashDollhouse => !smashed && temper,
+                        Special::DisposeDollhouse => smashed,
+                        _ => !smashed && crate::dollhouse::may_play(actor_sim),
+                    };
+                    if !ok {
+                        continue;
+                    }
+                }
                 // (A bed's sides given to the household: the game's `SetBedOwnership`, child and up.)
                 if crate::bedowners::is_bed(obj.kind) && d.name == "Sleep" {
                     let list: Vec<(String, ActionKind)> = company_q
@@ -1438,6 +1452,10 @@ fn world_click(
                 // (At the computer, the traits' own: a Genius's problems, a Workaholic's job, a
                 // Bookworm's club.)
                 let work_to_do = club_q.get(actor).ok().and_then(|c| c.1).is_some_and(|w| w.0 > opp_q.2.minutes);
+                // (Hacking's for the night hours.)
+                if d.special == Special::Hack && !crate::computertraits::hack_hours(opp_q.2.hour_f()) {
+                    continue;
+                }
                 if !crate::computertraits::offers(d.special, actor_sim, jobs_q.get(actor).ok().flatten(), club_q.get(actor).is_ok_and(|c| c.0), work_to_do) {
                     continue;
                 }

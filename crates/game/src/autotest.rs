@@ -2355,6 +2355,18 @@ fn keep_hungry(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives), Wit
         }
         *dirtied = true;
     }
+    // (MISERABLE=<first name>: fun, company and hygiene kept at their worst, hungry and tired, for a temper.)
+    if let Ok(who) = std::env::var("MISERABLE") {
+        for (s, mut m) in &mut sims {
+            if s.first == who {
+                for i in [crate::sim::FUN, crate::sim::SOCIAL, crate::sim::HYGIENE] {
+                    m.0[i] = -100.0;
+                }
+                m.0[crate::sim::HUNGER] = -50.0;
+                m.0[crate::sim::ENERGY] = -50.0;
+            }
+        }
+    }
     let Ok(who) = std::env::var("HUNGRY") else { return };
     for (s, mut m) in &mut sims {
         if s.first == who {

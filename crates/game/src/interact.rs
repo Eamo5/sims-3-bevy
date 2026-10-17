@@ -1204,6 +1204,9 @@ pub enum Special {
     /// A bowl's fish fed, and a dead one cleaned out (`fishbowl`).
     FeedFish,
     CleanBowl,
+    /// The dollhouse smashed in a temper, and thrown away smashed (`dollhouse`).
+    SmashDollhouse,
+    DisposeDollhouse,
     /// Cook a group meal and serve it on a platter.
     ServeMeal,
     /// Take a serving from a platter (then sit down to eat it).
@@ -1289,6 +1292,8 @@ pub enum Special {
     JobIssues,
     JoinBookClub,
     LeaveBookClub,
+    /// A Computer Whiz hacking (`computertraits`: night only).
+    Hack,
     /// A Neurotic's Check Sink, Check Stove, Check Fireplace (`neurotic`).
     NeuroticCheck,
     /// The toilet used, and one left unflushed flushed (`toilets`).
@@ -1570,7 +1575,7 @@ static TV: [InteractionDef; 5] = [
 /// (The TV watched: from a seat facing it, or standing.)
 const WATCH_TV: InteractionDef = InteractionDef { autonomous: false, special: Special::WatchTv, ..def("Watch the TV", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 55.0], Pose::Stand) };
 const WATCH_TV_SEATED: InteractionDef = InteractionDef { on_object: true, pose: Pose::Sit, per_hour: [0.0, 0.0, 3.0, 0.0, 0.0, 55.0], ..WATCH_TV };
-static COMPUTER: [InteractionDef; 12] = [
+static COMPUTER: [InteractionDef; 13] = [
     def("Play Computer Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 60.0], Pose::Use),
     // (The game's `ChatRandom`: its ITUN's Social 50, Fun 15 an hour.)
     InteractionDef { special: Special::ChatOnline, ..def("Chat Online", 60.0, [0.0, 0.0, -2.0, 50.0, 0.0, 15.0], Pose::Use) },
@@ -1587,6 +1592,8 @@ static COMPUTER: [InteractionDef; 12] = [
     InteractionDef { autonomous: false, special: Special::JobIssues, ..def("Work on Job-Related Issues", 240.0, [0.0, 0.0, -4.0, 0.0, 0.0, 0.0], Pose::Use) },
     InteractionDef { autonomous: false, special: Special::JoinBookClub, ..def("Join Book Club", 5.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::LeaveBookClub, ..def("Leave Book Club", 5.0, N, Pose::Use) },
+    // (The game's `Hack`: till morning; its fun for a Computer Whiz.)
+    InteractionDef { autonomous: false, special: Special::Hack, ..def("Hack", 600.0, [0.0, 0.0, -3.0, 0.0, 0.0, 20.0], Pose::Use) },
 ];
 static CRIB: [InteractionDef; 1] = [InteractionDef {
     until_full: Some(ENERGY),
@@ -1651,7 +1658,12 @@ static HOTTUB: [InteractionDef; 1] = [InteractionDef {
     on_object: true,
     ..def("Relax in Hot Tub", 60.0, [0.0, 0.0, 6.0, 10.0, 25.0, 50.0], Pose::Sit)
 }];
-static DOLLHOUSE: [InteractionDef; 1] = [def("Play with Dollhouse", 45.0, [0.0, 0.0, -3.0, 8.0, 0.0, 85.0], Pose::Use)];
+static DOLLHOUSE: [InteractionDef; 3] = [
+    def("Play with Dollhouse", 45.0, [0.0, 0.0, -3.0, 8.0, 0.0, 85.0], Pose::Use),
+    // (The game's `Smash`: in a temper, eight minutes of it; `DisposeDollHouse` once it's smashed.)
+    InteractionDef { special: Special::SmashDollhouse, ..def("Smash", crate::dollhouse::ADULT_MINUTES, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::DisposeDollhouse, ..def("Throw Away", 2.0, N, Pose::Use) },
+];
 static JUNGLEGYM: [InteractionDef; 1] = [def("Play on Jungle Gym", 40.0, [0.0, 0.0, -8.0, 0.0, -8.0, 95.0], Pose::Use)];
 /// (Up the ladder and down the slide, once: played again and again, as children do.)
 static SLIDE: [InteractionDef; 1] = [def("Play on Slide", 9.6, [0.0, 0.0, -8.0, 0.0, -6.0, 110.0], Pose::Use)];
@@ -2052,7 +2064,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Play Chess" if kind == ObjectKind::Computer => A::new(None, &["a2o_computer_chess_type_loop_x"]),
         "Browse Web" => A::new(None, &["a2o_computer_generic_type_loop1_x", "a2o_computer_generic_type_loop2_x", "a2o_computer_generic_type_breathe_x"]),
         "Practice Writing" | "Solve Hard Problems" => A::new(None, &["a2o_computer_serious_Type_chinRub_x", "a2o_computer_serious_Type_templeTab_x", "a2o_computer_serious_ahHa_x"]),
-        "Work on Job-Related Issues" | "Join Book Club" | "Leave Book Club" => A::new(None, &["a2o_computer_generic_type_loop1_x", "a2o_computer_generic_type_loop2_x"]),
+        "Work on Job-Related Issues" | "Join Book Club" | "Leave Book Club" | "Hack" => A::new(None, &["a2o_computer_generic_type_loop1_x", "a2o_computer_generic_type_loop2_x"]),
         "Write Novel" | "Find a Job" | "Quit Job" => A::new(None, &["a2o_computer_chess_type_loop_x"]),
         "Dance" => A::new(None, &["a_dance_beg_", "a_dance_med_"]),
         "Read a Book" => A::new(None, &["a2o_bookshelf_getBook_Carry_x"]),
@@ -2109,7 +2121,10 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Stargaze" => A::new(Some("a2o_telescope_start"), &["a2o_telescope_look_loop", "a2o_telescope_look_breathe", "a2o_telescope_react_wonderment"]),
         "Swing" => A::new(Some("a2o_swingset_getIn"), &["a2o_swingset_swing"]),
         "Relax in Hot Tub" => A::new(Some("a2o_hotTub_getIn"), &["a2o_hotTub_idles_relaxing_loop", "a2o_hotTub_idles_playingToe", "a2o_hotTub_splash"]),
-        "Play with Dollhouse" => A::new(Some("c2o_dollhouse_play_start"), &["c2o_dollhouse_play_loop"]),
+        "Play with Dollhouse" => A::new(Some("a2o_dollhouse_play_start_x"), &["a2o_dollhouse_play_loop"]),
+        // (Kicking it in: the dollhouse's `Smash` state, its last blow and getting up.)
+        "Smash" if kind == ObjectKind::DollHouse => A::new(Some("a2o_dollhouse_smash_start_x"), &["a2o_dollhouse_smash_loop1_x", "a2o_dollhouse_smash_loop2_x"])
+            .ending(&["a2o_dollhouse_smash_smash_x", "a2o_dollhouse_smash_stop_x"], crate::dollhouse::ADULT_END_SECS),
         // (Up the tower's ladder, about in its lookout, and down its pole at the end.)
         "Play on Jungle Gym" => A::new(Some("c2o_JungleGymTower_climbUp_x"), &["c2o_JungleGymTower_loop1_x", "c2o_JungleGymTower_loop2_x"]).ending(&["c2o_JungleGymTower_slideDown_x"], 6.1),
         "Play on Slide" => A::steps("c2o_JungleGymSlide_climbUp_x", &["c2o_JungleGymSlide_breathe_x"], &["c2o_JungleGymSlide_succeed_x"]),
@@ -2431,7 +2446,7 @@ impl ObjectKind {
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy),
             // (Children can't cook or light fires, and the goggles are for teens and up.)
             Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle),
-            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::HighChair | K::DollHouse | K::JungleGym | K::Slide | K::StuffedToy | K::ToyOven),
+            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::HighChair | K::JungleGym | K::Slide | K::StuffedToy | K::ToyOven),
         }
     }
 
@@ -4138,6 +4153,7 @@ pub(crate) fn run_actions(
                                     // Original reward and trait completion rates.
                                     Special::CleanUp | Special::EmptyTrash if crate::wishes::has(wishes, "SpeedyCleaner") => d.minutes / 3.0,
                                     Special::Homework => crate::rabbitholes::homework_minutes(&sim.traits, crate::wishes::has(wishes, "MultiTasker")),
+                                    Special::SmashDollhouse => crate::dollhouse::smash_minutes(sim.age),
                                     _ => d.minutes,
                                 };
                                 let complete = if d.special == Special::WriteNovel {
@@ -4219,6 +4235,12 @@ pub(crate) fn run_actions(
                                         (None, Some((out, secs))) => Some((&[], Some(out), secs, *target, far_side)),
                                         (None, None) => None,
                                     };
+                                    // (A child's last blow and getting up take longer: their own clips.)
+                                    if d.special == Special::SmashDollhouse && sim.age == Age::Child {
+                                        if let Some(o) = outro.as_mut() {
+                                            o.2 = crate::dollhouse::CHILD_END_SECS;
+                                        }
+                                    }
                                     match d.special {
                                         // (Getting out of the pool is the swim module's.)
                                         Special::FindJob => {
@@ -4320,6 +4342,7 @@ pub(crate) fn run_actions(
                                                 crate::rabbitholes::complete_homework(world, me, None, 0.0);
                                             });
                                         }
+                                        Special::Hack => {}
                                         Special::SolveProblems | Special::JobIssues | Special::JoinBookClub | Special::LeaveBookClub => {
                                             commands.entity(me).insert(crate::computertraits::Done(d.special));
                                         }
@@ -4518,6 +4541,12 @@ pub(crate) fn run_actions(
                                         }
                                         Special::TakeFish => {
                                             commands.entity(me).insert(crate::fishbowl::BowlRequest::Take(*target));
+                                        }
+                                        Special::SmashDollhouse => {
+                                            commands.entity(me).insert(crate::dollhouse::DollhouseDone::Smashed(*target));
+                                        }
+                                        Special::DisposeDollhouse => {
+                                            commands.entity(me).insert(crate::dollhouse::DollhouseDone::ThrownAway(*target));
                                         }
                                         Special::FeedFish => {
                                             commands.entity(me).insert(crate::fishbowl::BowlRequest::Feed(*target));
@@ -5710,7 +5739,13 @@ fn autonomy(
         Res<crate::klepto::Swipeable>,
         Res<crate::mirrors::LastLooked>,
     ),
-    (convs, toilets, bed_owners, bowls): (Res<crate::groups::Conversations>, Res<crate::toilets::Unflushed>, Query<&crate::bedowners::BedOwners>, Query<&crate::fishbowl::BowlFish>),
+    (convs, toilets, bed_owners, bowls, (moods, smashed_q)): (
+        Res<crate::groups::Conversations>,
+        Res<crate::toilets::Unflushed>,
+        Query<&crate::bedowners::BedOwners>,
+        Query<&crate::fishbowl::BowlFish>,
+        (Query<&crate::life::Mood>, Query<(), With<crate::dollhouse::Smashed>>),
+    ),
 ) {
     if delta.0 <= 0.0 {
         return;
@@ -5952,6 +5987,17 @@ fn autonomy(
                 }
                 if d.special == Special::PayBills {
                     score = if bills_due { 25.0 } else { 0.0 };
+                }
+                // (A dollhouse: played with whole; smashed by the bad-tempered in a temper.)
+                if obj.kind == ObjectKind::DollHouse {
+                    let smashed = smashed_q.contains(oe);
+                    if smashed || (d.special == Special::DisposeDollhouse) || (d.special == Special::None && !crate::dollhouse::may_play(sim)) {
+                        continue;
+                    }
+                    if d.special == Special::SmashDollhouse {
+                        let Some(pull) = crate::dollhouse::drawn(sim, moods.get(me).map_or(0.0, |m| m.0)) else { continue };
+                        score = pull;
+                    }
                 }
                 // (A hungry fish fed; none other's.)
                 if d.special == Special::FeedFish {
