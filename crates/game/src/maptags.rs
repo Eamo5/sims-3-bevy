@@ -6,6 +6,13 @@
 //! The household's Sims have theirs too, their faces where they are (at home, out on a lot, in a
 //! venue or at work: clicked, that's the Sim selected), and the selected Sim's opportunities
 //! theirs (the opportunity's icon), at the venue where it's done or by the Sim it's done with.
+//!
+//! Each shows under its kind's filters (`mapfilter`), as the game's map-tag tuning has them: the
+//! home always; other homes under Friends' Homes, empty lots only under All; venues under
+//! Community Locations, and Careers too where a household Sim works; the household's Sims under
+//! Home and Work (the selected one always); opportunities under Home and Work and Opportunities;
+//! collectibles under Community Locations. A lot a household Sim is out at is under Home and Work
+//! as well.
 
 use bevy::prelude::*;
 
@@ -13,6 +20,7 @@ use crate::PlayMode;
 use crate::camera::SimsCamera;
 use crate::interact::{ActionKind, Household, ObjectKind};
 use crate::loading::CurrentWorld;
+use crate::mapfilter::{ALL, ALL_ONLY, FRIENDS_HOMES, HOUSEHOLD_AND_WORK, OPPORTUNITIES, PUBLIC_SPACES, WORK};
 
 pub struct MapTagsPlugin;
 
@@ -28,13 +36,15 @@ impl Plugin for MapTagsPlugin {
 }
 
 /// Above this camera distance the town shows its map tags.
-const MAP_DISTANCE: f32 = 140.0;
+pub(crate) const MAP_DISTANCE: f32 = 140.0;
 const SIZE: f32 = 40.0;
 
 #[derive(Component)]
 struct MapTag {
     lot: usize,
     at: Vec3,
+    /// The filters it shows under (`mapfilter`'s bits), as its kind has them.
+    bits: u32,
 }
 
 /// A collectible's tag (shown by the Collection Helper): the gem, metal or space rock lying on
@@ -122,7 +132,7 @@ fn sim_tags(
         let face = portraits.portrait(&mut images, e);
         commands
             .spawn((
-                MapTag { lot: usize::MAX, at },
+                MapTag { lot: usize::MAX, at, bits: HOUSEHOLD_AND_WORK },
                 SimTag(e),
                 Button,
                 Node { position_type: PositionType::Absolute, width: Val::Px(SIZE), height: Val::Px(SIZE), display: Display::None, ..default() },
@@ -187,7 +197,7 @@ fn opportunity_tags(
             let icon = data.opportunities.get(index).and_then(|o| ui.icon(&mut images, &o.icon));
             commands
                 .spawn((
-                    MapTag { lot: if with.is_some() { usize::MAX } else { lot }, at },
+                    MapTag { lot: if with.is_some() { usize::MAX } else { lot }, at, bits: HOUSEHOLD_AND_WORK | OPPORTUNITIES },
                     OppTag(index, with),
                     Button,
                     Node { position_type: PositionType::Absolute, width: Val::Px(SIZE * 0.85), height: Val::Px(SIZE * 0.85), display: Display::None, ..default() },
@@ -305,7 +315,7 @@ fn collectible_tags(
     for (tag, at, name) in new {
         commands
             .spawn((
-                MapTag { lot: usize::MAX, at },
+                MapTag { lot: usize::MAX, at, bits: PUBLIC_SPACES },
                 tag,
                 Button,
                 Node { position_type: PositionType::Absolute, width: Val::Px(SIZE * 0.7), height: Val::Px(SIZE * 0.7), display: Display::None, ..default() },
@@ -395,13 +405,13 @@ fn spawn_tags(
     let home = household.as_ref().map(|h| h.lot_index);
     let Some(base) = ui.icon(&mut images, "hud_icon_maptagbase_r2") else { return };
     for (i, lot) in world.data.lots.iter().enumerate() {
-        let (glyph, tint) = if Some(i) == home {
-            ("home_active", Color::srgb(0.45, 0.9, 0.35))
+        let (glyph, tint, bits) = if Some(i) == home {
+            ("home_active", Color::srgb(0.45, 0.9, 0.35), ALL)
         } else if lot.is_residential() {
             let built = world.data.buildings.get(&i).is_some_and(|b| !b.walls.is_empty());
-            (if built { "home" } else { "lot_empty" }, Color::srgb(0.95, 0.95, 0.92))
+            if built { ("home", Color::srgb(0.95, 0.95, 0.92), FRIENDS_HOMES) } else { ("lot_empty", Color::srgb(0.95, 0.95, 0.92), ALL_ONLY) }
         } else {
-            (venue_glyph(&lot.internal_name), Color::srgb(0.35, 0.6, 1.0))
+            (venue_glyph(&lot.internal_name), Color::srgb(0.35, 0.6, 1.0), PUBLIC_SPACES)
         };
         let name = world.data.lot_names.get(i).map_or("", |s| s.as_str());
         let title = if lot.is_residential() { name.split(" — ").next().unwrap_or(name).to_string() } else { crate::rabbitholes::lot_title(lot, name) };
@@ -409,7 +419,7 @@ fn spawn_tags(
         let at = crate::home::lot_center(lot) + Vec3::Y * 6.0;
         commands
             .spawn((
-                MapTag { lot: i, at },
+                MapTag { lot: i, at, bits },
                 Button,
                 Node { position_type: PositionType::Absolute, width: Val::Px(SIZE), height: Val::Px(SIZE), display: Display::None, ..default() },
                 ImageNode { color: tint, ..ImageNode::new(base.clone()) },
@@ -430,17 +440,43 @@ fn spawn_tags(
 }
 
 #[allow(clippy::type_complexity)]
-fn place_tags(cams: Query<(&Camera, &GlobalTransform, &SimsCamera)>, mut tags: Query<(Entity, &MapTag, &mut Node, Has<SimTag>, Has<OppTag>)>) {
+fn place_tags(
+    cams: Query<(&Camera, &GlobalTransform, &SimsCamera)>,
+    mut tags: Query<(Entity, &MapTag, &mut Node, Option<&SimTag>, Has<OppTag>)>,
+    filter: Res<crate::mapfilter::MapFilter>,
+    members: Query<(Entity, Has<crate::sim::Selected>, Option<&crate::careers::Job>, Option<&crate::rabbitholes::AtRabbitHole>, Option<&crate::visit::OnLot>), With<crate::sim::HouseholdMember>>,
+    world: Res<CurrentWorld>,
+) {
     let Ok((cam, tf, sims_cam)) = cams.single() else { return };
     let on = sims_cam.distance > MAP_DISTANCE;
+    // (Where the household's Sims work, and the lots they're out at.)
+    let (mut work, mut out): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
+    if on {
+        let types: Vec<&str> = members.iter().filter_map(|(_, _, job, ..)| job.and_then(|j| workplace(j.career().name))).collect();
+        if !types.is_empty() {
+            work = (0..world.data.lots.len()).filter(|&l| crate::opportunities::lot_types(&world.data, l).iter().any(|t| types.contains(t))).collect();
+        }
+        out = members.iter().filter_map(|(_, _, _, r, v)| r.map(|r| r.lot).or(v.map(|v| v.0))).collect();
+    }
+    let selected_sims: Vec<Entity> = members.iter().filter(|m| m.1).map(|m| m.0).collect();
     // (The lots' tags where they are; the Sims' and opportunities' moved along beside any they'd
     // cover, as the game's map keeps its tags apart.)
     let mut placed: Vec<Vec2> = Vec::new();
     let mut movable: Vec<(Entity, Vec2)> = Vec::new();
     for (e, tag, mut node, sim, opp) in &mut tags {
-        let shown = on.then(|| cam.world_to_viewport(tf, tag.at).ok()).flatten().filter(|_| (tag.at - tf.translation()).dot(tf.forward().as_vec3()) > 0.0);
+        let mut bits = tag.bits;
+        if work.contains(&tag.lot) {
+            bits |= WORK | HOUSEHOLD_AND_WORK;
+        }
+        if out.contains(&tag.lot) {
+            bits |= HOUSEHOLD_AND_WORK;
+        }
+        if sim.is_some_and(|s| selected_sims.contains(&s.0)) {
+            bits = ALL;
+        }
+        let shown = on.then(|| cam.world_to_viewport(tf, tag.at).ok()).flatten().filter(|_| filter.shows(bits) && (tag.at - tf.translation()).dot(tf.forward().as_vec3()) > 0.0);
         match shown {
-            Some(p) if sim || opp => movable.push((e, p)),
+            Some(p) if sim.is_some() || opp => movable.push((e, p)),
             Some(p) => {
                 node.display = Display::Flex;
                 node.left = Val::Px(p.x - SIZE * 0.5);
