@@ -39,7 +39,13 @@
 //!   On... ›" (two hours); "Continue..." and "Scrap..." one begun. A report on a criminal or a
 //!   Kleptomaniac is +15 performance; a negative story +20, the subject liking the writer 30 less,
 //!   a positive one 10 more; the game's words. Promotions and demotions start the subjects
-//!   afresh.
+//!   afresh. Rummaging through a family's trash at their home turns up information on one of
+//!   them (the policeman's subject; the journalist's, for a negative story only).
+//! - Reviews (Journalism, the same count): "Review Movie", "Review Game", "Review Restaurant"...
+//!   at the theatre, stadium, bistro or diner, free, for a place not reviewed in the last week
+//!   (`CanReviewRabbitHole`); seen through, it's there to write up at the computer, "Write
+//!   Positive/Negative Review On... ›" (two hours). A negative one is +20 performance and the
+//!   place bans them a week (`BadReviewWrittenOnRabbitHole`); the game's words.
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -56,7 +62,7 @@ pub struct CareerMetricsPlugin;
 
 impl Plugin for CareerMetricsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (gig_test, gigs_done, game_days, write_on, report_test).run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (gig_test, gigs_done, game_days, write_on, report_test, reviews_seen).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -112,6 +118,30 @@ pub struct Tally {
     pub report: Option<Report>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reports: Vec<(u32, u32)>,
+    /// What a journalist dug out of the trash on (for negative stories only), the shows, games
+    /// and meals they've seen to review, and where they're banned since a bad review (and when).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trash: Vec<(u64, String)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reviews: Vec<Review>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bans: Vec<(usize, u32)>,
+}
+
+/// Something seen to be reviewed: where (the lot, and its name), what ("Movie", "Restaurant"),
+/// and when.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Review {
+    pub lot: usize,
+    pub place: String,
+    pub event: String,
+    pub day: u32,
+}
+
+impl Review {
+    pub fn label(&self) -> String {
+        format!("{} at {}", self.event, self.place)
+    }
 }
 
 /// A report or story under way: on whom, whether it's a hatchet job, and how far along (out of
@@ -122,6 +152,9 @@ pub struct Report {
     pub name: String,
     pub negative: bool,
     pub done: f32,
+    /// A review's lot, and its place's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<(usize, String)>,
 }
 
 /// A day-by-day count's total over the last seven days and today.
@@ -162,7 +195,17 @@ impl Tally {
 
     /// Whether someone's been questioned, or written up, already.
     pub fn knows(&self, id: u64) -> bool {
-        self.subjects.iter().any(|s| s.0 == id) || self.written.contains(&id)
+        self.subjects.iter().any(|s| s.0 == id) || self.trash.iter().any(|s| s.0 == id) || self.written.contains(&id)
+    }
+
+    /// Whether a journalist's banned from a place since a bad review there (a week).
+    pub fn banned(&self, lot: usize, today: u32) -> bool {
+        self.bans.iter().any(|(l, d)| *l == lot && d + MEETING_DAYS >= today)
+    }
+
+    /// Whether a place can be reviewed: not banned there, nothing seen there in the last week.
+    pub fn may_review(&self, lot: usize, today: u32) -> bool {
+        !self.banned(lot, today) && !self.reviews.iter().any(|r| r.lot == lot && r.day + MEETING_DAYS >= today)
     }
 
     /// A metric's value from the count, where it's one of these (the game's `FindMetricValue`).
@@ -184,6 +227,7 @@ impl Tally {
         self.campaign = 0;
         self.journals = 0;
         self.subjects.clear();
+        self.trash.clear();
         self.written.clear();
         self.report = None;
     }
@@ -465,7 +509,13 @@ fn gig_test(
     let Some((place, want)) = std::env::var("GIG").ok().and_then(|v| v.split_once(':').map(|(p, w)| (p.to_ascii_lowercase(), w.to_string()))) else { return };
     let found = (0..world.data.lots.len())
         .filter(|&l| world.data.lots[l].internal_name.to_ascii_lowercase().contains(&place) || hole_class(&world.data, l).is_some_and(|c| c.to_ascii_lowercase().contains(&place)))
-        .find_map(|l| options(&world.data, l, Some(&job), (clock.day(), clock.weekday(), clock.hour_f()), mood.0).into_iter().find(|(label, _)| label.starts_with(&want)).map(|o| (l, o)));
+        .find_map(|l| {
+            options(&world.data, l, Some(&job), (clock.day(), clock.weekday(), clock.hour_f()), mood.0)
+                .into_iter()
+                .chain(review_options(&world.data, l, Some(&job), (clock.day(), clock.hour_f())))
+                .find(|(label, _)| label.starts_with(&want))
+                .map(|o| (l, o))
+        });
     match found {
         Some((lot, (label, task))) => {
             info!("gig test: {label} at lot {lot}");
@@ -697,6 +747,9 @@ pub const NEGATIVE_STORY: &str = "Write Negative Story On...";
 /// The computer's action, as named while it's under way.
 pub const WRITE_REPORT: &str = "Write Report";
 const WRITE_STORY: &str = "Write Story";
+const WRITE_REVIEW: &str = "Write Review";
+pub const POSITIVE_REVIEW: &str = "Write Positive Review On...";
+pub const NEGATIVE_REVIEW: &str = "Write Negative Review On...";
 
 /// The computer's writing options for a job: a report or story to go on with or scrap, else
 /// those that can be begun (a menu of subjects each).
@@ -705,19 +758,31 @@ pub fn writing_options(job: &Job) -> Vec<(String, Option<Vec<String>>)> {
     if !job.info().metrics.iter().any(|m| m.kind == kind) {
         return Vec::new();
     }
-    let what = if kind == "PoliceReports" { "Report" } else { "Story" };
     if let Some(r) = &job.tally.report {
+        let what = if r.review.is_some() { "Review" } else if kind == "PoliceReports" { "Report" } else { "Story" };
         return vec![(format!("Continue {what} on {}", r.name), None), (format!("Scrap {what} on {}", r.name), None)];
     }
     let names: Vec<String> = job.tally.subjects.iter().map(|s| s.1.clone()).collect();
-    if names.is_empty() {
-        return Vec::new();
-    }
+    let mut out = Vec::new();
     if kind == "PoliceReports" {
-        vec![(REPORT_ON.into(), Some(names))]
-    } else {
-        vec![(POSITIVE_STORY.into(), Some(names.clone())), (NEGATIVE_STORY.into(), Some(names))]
+        if !names.is_empty() {
+            out.push((REPORT_ON.into(), Some(names)));
+        }
+        return out;
     }
+    let dirt: Vec<String> = names.iter().cloned().chain(job.tally.trash.iter().map(|s| s.1.clone())).collect();
+    if !names.is_empty() {
+        out.push((POSITIVE_STORY.into(), Some(names)));
+    }
+    if !dirt.is_empty() {
+        out.push((NEGATIVE_STORY.into(), Some(dirt)));
+    }
+    let seen: Vec<String> = job.tally.reviews.iter().map(Review::label).collect();
+    if !seen.is_empty() {
+        out.push((POSITIVE_REVIEW.into(), Some(seen.clone())));
+        out.push((NEGATIVE_REVIEW.into(), Some(seen)));
+    }
+    out
 }
 
 /// What was picked from the computer's writing options: one begun (on whom, and the action's
@@ -731,7 +796,7 @@ pub enum Pick {
 }
 
 pub fn pick_writing(tally: &mut Tally, title: &str, label: &str) -> Pick {
-    if label.starts_with("Scrap Report on ") || label.starts_with("Scrap Story on ") {
+    if label.starts_with("Scrap Report on ") || label.starts_with("Scrap Story on ") || label.starts_with("Scrap Review on ") {
         tally.report = None;
         return Pick::Scrapped;
     }
@@ -741,11 +806,21 @@ pub fn pick_writing(tally: &mut Tally, title: &str, label: &str) -> Pick {
     if label.starts_with("Continue Story on ") {
         return Pick::Continued(WRITE_STORY);
     }
-    let negative = title == NEGATIVE_STORY;
-    if (title == REPORT_ON || title == POSITIVE_STORY || negative)
-        && let Some((id, name)) = tally.subjects.iter().find(|s| s.1 == label).cloned()
+    if label.starts_with("Continue Review on ") {
+        return Pick::Continued(WRITE_REVIEW);
+    }
+    if (title == POSITIVE_REVIEW || title == NEGATIVE_REVIEW)
+        && let Some(r) = tally.reviews.iter().find(|r| r.label() == label).cloned()
     {
-        tally.report = Some(Report { id, name, negative, done: 0.0 });
+        tally.report = Some(Report { id: r.lot as u64, name: label.to_string(), negative: title == NEGATIVE_REVIEW, done: 0.0, review: Some((r.lot, r.place)) });
+        return Pick::Begun(WRITE_REVIEW);
+    }
+    let negative = title == NEGATIVE_STORY;
+    let found = tally.subjects.iter().chain(tally.trash.iter().filter(|_| negative)).find(|s| s.1 == label).cloned();
+    if (title == REPORT_ON || title == POSITIVE_STORY || negative)
+        && let Some((id, name)) = found
+    {
+        tally.report = Some(Report { id, name, negative, done: 0.0, review: None });
         return Pick::Begun(if title == REPORT_ON { WRITE_REPORT } else { WRITE_STORY });
     }
     Pick::Other
@@ -795,8 +870,8 @@ fn write_on(
     }
 }
 
-/// WRITE_REPORT=report|good|bad (tests): once the selected Sim has a subject, off to the computer
-/// to write them up.
+/// WRITE_REPORT=report|good|bad|review (tests): once the selected Sim has a subject (or something
+/// seen to review), off to the computer to write it up.
 fn report_test(
     mut sel: Query<(&mut Job, &mut crate::interact::ActionQueue), With<crate::sim::Selected>>,
     objects: Query<(Entity, &crate::interact::GameObject)>,
@@ -807,11 +882,13 @@ fn report_test(
         return;
     }
     let Ok((mut job, mut q)) = sel.single_mut() else { return };
-    let Some(name) = job.tally.subjects.first().map(|s| s.1.clone()) else { return };
+    let name = if how == "review" { job.tally.reviews.first().map(Review::label) } else { job.tally.subjects.first().map(|s| s.1.clone()) };
+    let Some(name) = name else { return };
     *done = true;
     let title = match how.as_str() {
         "good" => POSITIVE_STORY,
         "bad" => NEGATIVE_STORY,
+        "review" => NEGATIVE_REVIEW,
         _ => REPORT_ON,
     };
     let Pick::Begun(label) = pick_writing(&mut job.tally, title, &name) else { return };
@@ -833,9 +910,27 @@ fn written_up(w: &mut World, writer: Entity) {
     let Some(mut job) = w.get_mut::<Job>(writer) else { return };
     let Some(r) = job.tally.report.take() else { return };
     let police = job.career().key == "LawEnforcement";
-    job.tally.subjects.retain(|s| s.0 != r.id);
-    job.tally.written.push(r.id);
     count_today(&mut job.tally.reports, today);
+    // (A review: done with the place's, and, a bad one, banned there.)
+    if let Some((lot, place)) = r.review.clone() {
+        job.tally.reviews.retain(|x| x.label() != r.name);
+        let n = rand::rng().random_range(1..=3);
+        let key = if r.negative { "ReviewBad" } else { "ReviewGood" };
+        if r.negative {
+            job.tally.bans.push((lot, today));
+            job.performance = (job.performance + NEGATIVE_STORY_PERFORMANCE).min(100.0);
+        }
+        let text = w.get_resource::<crate::layout::UiAssets>().and_then(|u| u.localize(&format!("Gameplay/Careers/Journalism:{key}{n}"))).map_or_else(
+            || format!("{} finished the review of {place}.", me.first),
+            |t| t.replace("{0.SimFirstName}", &me.first).replace("{1.String}", &place),
+        );
+        info!("{} reviewed {} ({key})", me.first, r.name);
+        w.resource_mut::<Notifications>().push(text);
+        return;
+    }
+    job.tally.subjects.retain(|s| s.0 != r.id);
+    job.tally.trash.retain(|s| s.0 != r.id);
+    job.tally.written.push(r.id);
     let subject = w.query::<(Entity, &Sim)>().iter(w).find(|(_, s)| s.id == r.id).map(|(e, _)| e);
     let criminal = subject.is_some_and(|s| {
         w.get::<Sim>(s).is_some_and(|x| x.traits.contains(&crate::life::Trait::Kleptomaniac)) || w.get::<Job>(s).is_some_and(|j| j.career().key == "Criminal")
@@ -864,6 +959,113 @@ fn written_up(w: &mut World, writer: Entity) {
         |t| t.replace("{0.SimFirstName}", &me.first).replace("{1.SimName}", &r.name),
     );
     info!("{} wrote up {} ({key})", me.first, r.name);
+    w.resource_mut::<Notifications>().push(text);
+}
+
+/// The reviewers' visits: this plus the venue act seen (`venues::ACTS`).
+pub const REVIEW_TASK: usize = 7200;
+
+/// What a venue act is reviewed as: the menu's words and the event's.
+fn reviewed_as(act: &str) -> Option<(&'static str, &'static str)> {
+    Some(match act {
+        "See a Movie" => ("Review Movie", "Movie"),
+        "See a Play" | "See a Matinee" => ("Review Play", "Play"),
+        "See a Symphony" => ("Review Symphony", "Symphony"),
+        "See a Concert" | "Attend a Concert" => ("Review Concert", "Concert"),
+        "Attend the Game" => ("Review Game", "Sporting Event"),
+        "Eat Here" => ("Review Restaurant", "Restaurant"),
+        _ => return None,
+    })
+}
+
+/// A journalist's ways to see something to review here, free: the venue's shows, games and
+/// meals on now, where they may review.
+pub fn review_options(world: &WorldInfo, lot: usize, job: Option<&Job>, (day, hour): (u32, f32)) -> Vec<(String, usize)> {
+    let Some(job) = job.filter(|j| j.career().key == "Journalism" && j.info().metrics.iter().any(|m| m.kind == "StoriesAndReviews")) else { return Vec::new() };
+    if !job.tally.may_review(lot, day) {
+        return Vec::new();
+    }
+    crate::venues::world_lot_options(world, lot, day, hour, crate::sim::Age::Adult)
+        .into_iter()
+        .filter_map(|(_, task)| {
+            let i = task.checked_sub(crate::venues::VENUE_TASK)?;
+            let (label, _) = reviewed_as(crate::venues::ACTS.get(i)?.activity.name)?;
+            Some((label.to_string(), REVIEW_TASK + i))
+        })
+        .collect()
+}
+
+/// A reviewer's visit's activity (the venue act's own).
+pub fn review_task(task: usize) -> Option<&'static Activity> {
+    let i = task.checked_sub(REVIEW_TASK).filter(|i| *i < crate::venues::ACTS.len())?;
+    Some(&crate::venues::ACTS[i].activity)
+}
+
+/// Seeing something to review: the act, where, and whether they've got there yet.
+#[derive(Component)]
+pub struct Reviewing {
+    pub act: usize,
+    pub lot: usize,
+    went: bool,
+}
+
+impl Reviewing {
+    pub fn new(task: usize, lot: usize) -> Option<Self> {
+        review_task(task)?;
+        Some(Self { act: task - REVIEW_TASK, lot, went: false })
+    }
+}
+
+/// Back from seeing it through: there to write up.
+fn reviews_seen(
+    mut commands: Commands,
+    mut sims: Query<(Entity, &mut Reviewing, Has<crate::rabbitholes::AtRabbitHole>, Option<&mut Job>)>,
+    world: Res<crate::loading::CurrentWorld>,
+    clock: Res<crate::clock::GameClock>,
+) {
+    for (e, mut r, away, job) in &mut sims {
+        if away {
+            r.went = true;
+            continue;
+        }
+        commands.entity(e).remove::<Reviewing>();
+        let (Some(mut job), true) = (job, r.went) else { continue };
+        let Some((_, event)) = crate::venues::ACTS.get(r.act).and_then(|a| reviewed_as(a.activity.name)) else { continue };
+        let review = Review { lot: r.lot, place: crate::visit::place_name(&world.data, r.lot), event: event.to_string(), day: clock.day() };
+        info!("saw {} to review", review.label());
+        job.tally.reviews.push(review);
+    }
+}
+
+/// A family's trash rummaged through at their home: information on one of them for a policeman
+/// or journalist (`LawEnforcementRummage`, `JournalismRummage`).
+pub fn dug_up(w: &mut World, digger: Entity, family: Vec<Entity>) {
+    let Some(job) = w.get::<Job>(digger) else { return };
+    if !interviews(Some(job.track), job.level) {
+        return;
+    }
+    let police = job.career().key == "LawEnforcement";
+    let known = job.tally.clone();
+    let found: Vec<(u64, String)> = family
+        .iter()
+        .filter_map(|e| w.get::<Sim>(*e))
+        .filter(|s| s.age.is_grown() && s.age != crate::sim::Age::Child && !known.knows(s.id))
+        .map(|s| (s.id, s.full_name()))
+        .collect();
+    use rand::seq::IndexedRandom;
+    let Some((id, name)) = found.choose(&mut rand::rng()).cloned() else { return };
+    let Some(first) = w.get::<Sim>(digger).map(|s| s.first.clone()) else { return };
+    let Some(mut job) = w.get_mut::<Job>(digger) else { return };
+    if police {
+        job.tally.subjects.push((id, name.clone()));
+    } else {
+        job.tally.trash.push((id, name.clone()));
+    }
+    let n = rand::rng().random_range(1..=3);
+    let text = w.get_resource::<crate::layout::UiAssets>().and_then(|u| u.localize(&format!("Gameplay/Objects/Miscellaneous/TrashcanOutside:RummageForInfo{n}"))).map_or_else(
+        || format!("After sifting through numerous piles of slimy trash, {first} has found some solid information on {name}."),
+        |t| t.replace("{0.SimFirstName}", &first).replace("{1.SimName}", &name),
+    );
     w.resource_mut::<Notifications>().push(text);
 }
 
@@ -901,6 +1103,22 @@ mod tests {
         let mut t = Tally { campaign: 4000, concerts: 3, ..Default::default() };
         t.new_level();
         assert_eq!((t.campaign, t.concerts), (0, 3), "concerts are the career's");
+    }
+
+    #[test]
+    fn reviews_seen_written_and_banned_for() {
+        let mut t = Tally { reviews: vec![Review { lot: 4, place: "Hogan's".into(), event: "Restaurant".into(), day: 10 }], ..Default::default() };
+        assert!(!t.may_review(4, 12), "seen there this week");
+        assert!(t.may_review(5, 12));
+        assert_eq!(pick_writing(&mut t, NEGATIVE_REVIEW, "Restaurant at Hogan's"), Pick::Begun(WRITE_REVIEW));
+        assert!(t.report.as_ref().is_some_and(|r| r.negative && r.review == Some((4, "Hogan's".into()))));
+        t.bans.push((4, 12));
+        assert!(t.banned(4, 19) && !t.banned(4, 20));
+        assert_eq!(reviewed_as("Attend the Game"), Some(("Review Game", "Sporting Event")));
+        assert_eq!(reviewed_as("Get Drinks"), None);
+        t.trash.push((9, "Nancy Landgraab".into()));
+        assert!(t.knows(9));
+        assert_eq!(pick_writing(&mut t, POSITIVE_STORY, "Nancy Landgraab"), Pick::Other, "dirt's for negative stories");
     }
 
     #[test]

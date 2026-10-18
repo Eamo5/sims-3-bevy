@@ -2202,6 +2202,13 @@ fn world_click(
             let mut jobs_here = crate::careerholes::options(&world.data, lot, actor_sim, jobs_q.get(actor).ok().flatten());
             // (Its real estate: a stake bought, bought out, collected from or sold.)
             jobs_here.extend(crate::realestate::options(&world.data, lot, actor_sim, opp_q.4.as_ref().map_or(0, |h| h.funds), &real_estate));
+            // (A journalist's reviews; none of its shows or meals where they're banned since a bad one.)
+            if let Some(job) = jobs_q.get(actor).ok().flatten() {
+                if job.tally.banned(lot, opp_q.2.day()) {
+                    opp_tasks.retain(|(_, k)| !matches!(k, ActionKind::Visit { activity, .. } if activity.checked_sub(crate::venues::VENUE_TASK).is_some_and(|i| i < crate::venues::ACTS.len())));
+                }
+                opp_tasks.extend(crate::careermetrics::review_options(&world.data, lot, Some(job), (opp_q.2.day(), opp_q.2.hour_f())).into_iter().map(|(label, task)| (label, ActionKind::Visit { lot, activity: task })));
+            }
             // (Its gigs for their job: a meeting held, a concert put on.)
             jobs_here.extend(crate::careermetrics::options(
                 &world.data,

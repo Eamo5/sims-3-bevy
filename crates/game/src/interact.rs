@@ -4233,7 +4233,11 @@ pub(crate) fn run_actions(
                                         .or_else(|| crate::venues::task(*activity))
                                         .or_else(|| crate::careerholes::Errand::of(*activity).map(|e| e.activity()))
                                         .or_else(|| crate::realestate::Deal::of(*activity).map(|d| d.activity()))
-                                        .or_else(|| crate::careermetrics::Gig::of(*activity).map(|g| g.activity()));
+                                        .or_else(|| crate::careermetrics::Gig::of(*activity).map(|g| g.activity()))
+                                        .or_else(|| crate::careermetrics::review_task(*activity));
+                                    if let Some(r) = crate::careermetrics::Reviewing::new(*activity, *lot) {
+                                        commands.entity(me).insert(r);
+                                    }
                                     if let Some(g) = crate::careermetrics::Gig::of(*activity) {
                                         commands.entity(me).insert(g);
                                     }
@@ -4262,6 +4266,10 @@ pub(crate) fn run_actions(
                                         }
                                         // (On the house where the household has a stake: `realestate`.)
                                         if real_estate.free_meal(*lot, *activity) {
+                                            price = 0.0;
+                                        }
+                                        // (A reviewer sees it free: `careermetrics`.)
+                                        if crate::careermetrics::review_task(*activity).is_some() {
                                             price = 0.0;
                                         }
                                         crate::rabbitholes::head_out(&mut commands, &clock, me, sim, *lot, a, place, household.as_deref_mut(), &mut notes, price);

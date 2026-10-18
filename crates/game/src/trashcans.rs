@@ -322,6 +322,11 @@ fn rummaging(
                 }
             }
             (None, Some(r)) => {
+                // (A policeman's or journalist's information on the family: `careermetrics`.)
+                let family = owners.0.get(&r.can).map(|o| o.family.clone()).unwrap_or_default();
+                if r.found.len() >= MAX_FINDS && !family.is_empty() {
+                    commands.queue(move |w: &mut World| crate::careermetrics::dug_up(w, e, family));
+                }
                 if r.found.is_empty() {
                     notes.push(format!("{} rummaged through the trash and found nothing worth keeping.", sim.first));
                 } else {
