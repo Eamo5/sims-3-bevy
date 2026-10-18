@@ -322,6 +322,10 @@ fn fright(
         if let Ok(mut m) = moods.get_mut(le) {
             m.add(crate::life::MoodletKind::Scared, clock.minutes);
         }
+        // (A Coward faints dead away: `kCowardTraitChanceToFaintWhenSeeingGhost`, always.)
+        if sim.traits.contains(&crate::life::Trait::Coward) {
+            commands.entity(le).insert(crate::traitacts::Faints);
+        }
         notes.push(format!("{} got a fright from the ghost of {}!", sim.first, ghost.first));
     }
 }

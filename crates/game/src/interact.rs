@@ -5331,7 +5331,7 @@ pub(crate) fn run_actions(
                             }
                             // (Up off the floor after a fake faint.)
                             let up = minutes - crate::traitacts::GET_UP_MINUTES;
-                            if *act == crate::traitacts::TraitAct::FakePassOut && elapsed >= up && elapsed - dt < up {
+                            if matches!(act, crate::traitacts::TraitAct::FakePassOut | crate::traitacts::TraitAct::Faint) && elapsed >= up && elapsed - dt < up {
                                 commands.entity(me).insert(crate::anim::ActionClip::new(Some("a_sleeponFloor_getUp_x"), &["a_idle_neutral_loop_"]));
                             }
                             finished = elapsed >= *minutes;

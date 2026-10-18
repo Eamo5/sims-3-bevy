@@ -6,6 +6,11 @@
 //! show, ten to thirty minutes (`DramaticMinFakePassout`, `DramaticMaxFakePassout`); a
 //! Natural-Born Performer's "TaDa!" (not again while still Born To Do This: those about cheer,
 //! Drawn In for an hour, and the performer's Born To Do This an hour for each who did).
+//!
+//! And a Coward's faint (`CowardTraitFaint`), not theirs to choose: out cold on the floor half an
+//! hour (`kPassOutMinutes`) at the sight of a ghost, a burglar or the Grim Reaper, or a fire one
+//! time in five (TraitTuning's `kCowardTraitChanceToFaintWhenSeeingFire`; the rest of the time
+//! they panic with everyone else).
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -21,7 +26,7 @@ pub struct TraitActsPlugin;
 
 impl Plugin for TraitActsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (began.after(crate::interact::run_actions), act_test).run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (began.after(crate::interact::run_actions), act_test, frights, faint_now.before(crate::interact::run_actions)).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -31,6 +36,8 @@ pub enum TraitAct {
     FreakOut,
     FakePassOut,
     Tada,
+    /// A Coward's faint (not on anyone's menu).
+    Faint,
 }
 
 /// `TalkToSelf.kInteractionLength`.
@@ -38,6 +45,9 @@ const TALK_MINUTES: f32 = 30.0;
 /// `DramaticMinFakePassout`, `DramaticMaxFakePassout`, and the getting up after.
 const FAKE_PASS_OUT: std::ops::Range<f32> = 10.0..30.0;
 pub const GET_UP_MINUTES: f32 = 3.0;
+/// `CowardTraitFaint.kPassOutMinutes`, and the chance of it at a fire.
+const FAINT_MINUTES: f32 = 30.0;
+pub const FAINT_AT_FIRE: f64 = 0.2;
 /// The Tranquil moodlet's eight hours (`TimeoutLength` 480).
 const TRANQUIL_MINUTES: f64 = 480.0;
 /// `kBaseBornToDoThisLength` a cheering Sim, and `kDrawnInLength`.
@@ -60,6 +70,7 @@ impl TraitAct {
             TraitAct::FreakOut => "Freak Out",
             TraitAct::FakePassOut => "Fake Passing Out",
             TraitAct::Tada => "TaDa!",
+            TraitAct::Faint => "Faint",
         }
     }
 
@@ -69,6 +80,7 @@ impl TraitAct {
             TraitAct::FreakOut => Trait::Neurotic,
             TraitAct::FakePassOut => Trait::Dramatic,
             TraitAct::Tada => Trait::NaturalBornPerformer,
+            TraitAct::Faint => Trait::Coward,
         }
     }
 
@@ -89,6 +101,7 @@ impl TraitAct {
             && match self {
                 TraitAct::FreakOut => sim.age != crate::sim::Age::Child && !has(MoodletKind::Tranquil),
                 TraitAct::Tada => sim.age != crate::sim::Age::Child && !has(MoodletKind::BornToDoThis),
+                TraitAct::Faint => false,
                 _ => true,
             }
     }
@@ -100,6 +113,7 @@ impl TraitAct {
             TraitAct::FreakOut => 4.0,
             TraitAct::FakePassOut => rng.random_range(FAKE_PASS_OUT) + GET_UP_MINUTES,
             TraitAct::Tada => 3.0,
+            TraitAct::Faint => FAINT_MINUTES + GET_UP_MINUTES,
         }
     }
 
@@ -110,6 +124,8 @@ impl TraitAct {
             TraitAct::FreakOut => (Pose::Use, ActionClip::new(Some("a_trait_Neurotic_x"), &[])),
             TraitAct::FakePassOut => (Pose::Use, ActionClip::new(Some("a_motFail_exhausted_x"), &["a_sleeponFloor_breathe_x"])),
             TraitAct::Tada => (Pose::Use, ActionClip::new(Some("a_trait_naturalBornPerformer_x"), &[])),
+            // (The `TraitCoward` state machine's pass out, then asleep on the floor.)
+            TraitAct::Faint => (Pose::Use, ActionClip::new(Some(if child { "c_trait_coward3_x" } else { "a_trait_coward2_x" }), &["a_sleeponFloor_breathe_x"])),
         }
     }
 
@@ -152,6 +168,51 @@ pub fn autonomous(sim: &Sim, moodlets: Option<&Moodlets>, gain: impl Fn([f32; 6]
         }
     }
     best
+}
+
+/// A Coward to faint at once, at something they've seen (put next, before what they were at, as
+/// the game's `AddNext` at a higher priority).
+#[derive(Component)]
+pub struct Faints;
+
+/// Whether a Sim's out cold.
+pub fn fainting(q: &ActionQueue) -> bool {
+    q.0.front().is_some_and(|a| matches!(a.kind, ActionKind::TraitAct { act: TraitAct::Faint, .. }))
+}
+
+fn faint_now(mut commands: Commands, mut sims: Query<(Entity, &Sim, &mut ActionQueue, &crate::sim::SimAnim), With<Faints>>) {
+    for (e, sim, mut q, anim) in &mut sims {
+        commands.entity(e).remove::<Faints>();
+        if !sim.traits.contains(&Trait::Coward) || sim.age.is_little() || anim.pose == Pose::Lie || crate::disturb::asleep(&q) || fainting(&q) {
+            continue;
+        }
+        info!("{} faints", sim.first);
+        if let Some(a) = q.0.front_mut() {
+            a.cancel = true;
+        }
+        let at = q.0.len().min(1);
+        q.0.insert(at, TraitAct::Faint.action(false));
+    }
+}
+
+/// Cowards about when a burglar or the Grim Reaper comes: they faint at the sight
+/// (`kCowardTraitChanceToFaintWhenSeeingBurglar`; the Reaper, always).
+#[allow(clippy::type_complexity)]
+fn frights(
+    mut commands: Commands,
+    scary: Query<(Entity, &Transform), Or<(With<crate::burglar::Burglar>, With<crate::death::GrimReaper>)>>,
+    sims: Query<(Entity, &Sim, &Transform, &Visibility), (Without<crate::burglar::Burglar>, Without<crate::death::GrimReaper>)>,
+    mut seen: Local<Vec<(Entity, Entity)>>,
+) {
+    seen.retain(|(s, _)| scary.contains(*s));
+    for (s, stf) in &scary {
+        for (e, sim, tf, vis) in &sims {
+            if sim.traits.contains(&Trait::Coward) && *vis != Visibility::Hidden && tf.translation.distance(stf.translation) < WITNESS_RANGE && !seen.contains(&(s, e)) {
+                seen.push((s, e));
+                commands.entity(e).insert(Faints);
+            }
+        }
+    }
 }
 
 /// Begun: what follows from it, at once.
@@ -211,14 +272,14 @@ fn began(
     }
 }
 
-/// TRAIT_ACT=<act> (tests: "talk", "freak", "fake", "tada"): the selected Sim, given the trait
+/// TRAIT_ACT=<act> (tests: "talk", "freak", "fake", "tada", "faint"): the selected Sim, given the trait
 /// for it if they haven't it, does it.
 fn act_test(mut done: Local<bool>, time: Res<Time>, mut sel: Query<(&mut Sim, &mut ActionQueue), With<crate::sim::Selected>>) {
     let Ok(want) = std::env::var("TRAIT_ACT") else { return };
     if *done || time.elapsed_secs() < 12.0 {
         return;
     }
-    let Some(act) = TraitAct::ALL.into_iter().find(|a| a.name().to_ascii_lowercase().starts_with(&want.to_ascii_lowercase())) else { return };
+    let Some(act) = TraitAct::ALL.into_iter().chain([TraitAct::Faint]).find(|a| a.name().to_ascii_lowercase().starts_with(&want.to_ascii_lowercase())) else { return };
     let Ok((mut sim, mut q)) = sel.single_mut() else { return };
     if !sim.traits.contains(&act.trait_()) {
         sim.traits.push(act.trait_());

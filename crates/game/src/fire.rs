@@ -412,8 +412,19 @@ fn panic(
             q.0.clear();
             continue;
         }
+        // (Out cold already.)
+        if crate::traitacts::fainting(&q) {
+            continue;
+        }
         if nearest < PANIC_RANGE && !panicking {
             q.0.clear();
+            // (A Coward may faint at the sight instead, the game's `CowardReaction`.)
+            if sim.traits.contains(&crate::life::Trait::Coward) && rand::random_bool(crate::traitacts::FAINT_AT_FIRE) {
+                info!("{} faints at the fire", sim.first);
+                commands.entity(e).remove::<crate::nav::PathFollow>();
+                q.0.push_back(crate::traitacts::TraitAct::Faint.action(false));
+                continue;
+            }
             commands.entity(e).remove::<crate::nav::PathFollow>().insert((Panicking, ActionClip::new(Some("a_fire_panic_start_x"), &["a_fire_panic_loop1_x", "a_fire_panic_loop2_x"])));
         } else if panicking && nearest >= PANIC_RANGE {
             commands.entity(e).remove::<(Panicking, ActionClip)>();
