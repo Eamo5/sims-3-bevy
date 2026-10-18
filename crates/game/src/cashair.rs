@@ -260,7 +260,9 @@ fn hair_panel(
     if restyle {
         spawn_styles(&mut commands, &mut ui, (&mut images, &mut fonts), gu.as_deref_mut(), &h.hair, &mut h.styles, &list, h.beard, worn, h.scroll);
     }
-    spawn_colours(&mut commands, &mut ui, (&mut images, &mut fonts), &h.hair, &mut h.colours, sim.hair);
+    spawn_colours(&mut commands, &mut ui, (&mut images, &mut fonts), ("CASHair", COLOURS_GRID), &h.hair, &mut h.colours, Some(sim.hair), |e, n| {
+        e.insert(ColourCell(n));
+    });
 }
 
 /// `CASPhysical` and `CASHair` put up (hidden), what this game hasn't put away, with the styles'
@@ -356,14 +358,32 @@ pub(crate) fn spawn_styles(
     }
 }
 
-/// The hair colours on `CASHair`'s colour grid: the game's swatches, two down and across, the
-/// one `current` is lit.
-pub(crate) fn spawn_colours(commands: &mut Commands, ui: &mut UiAssets, (images, fonts): (&mut Assets<Image>, &mut Assets<Font>), hair: &Spawned, last: &mut Option<Entity>, current: Color) {
-    if let (Some(grid), Some(g), Some(template)) = (hair.id(COLOURS_GRID), ui.find("CASHair", COLOURS_GRID).and_then(|w| w.grid), ui.layout("HairColorPresetGridItem").cloned()) {
+/// The hair colours on a panel's colour grid (`CASHair`'s, `CASEyebrows`'): the game's swatches,
+/// two down and across, the one `current` is lit; each cell marked as its panel's.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn spawn_colours(
+    commands: &mut Commands,
+    ui: &mut UiAssets,
+    (images, fonts): (&mut Assets<Image>, &mut Assets<Font>),
+    (layout, grid_id): (&str, u32),
+    hair: &Spawned,
+    last: &mut Option<Entity>,
+    current: Option<Color>,
+    mark: impl Fn(&mut EntityCommands, usize),
+) {
+    if let (Some(grid), Some(g), Some(template)) = (hair.id(grid_id), ui.find(layout, grid_id).and_then(|w| w.grid), ui.layout("HairColorPresetGridItem").cloned()) {
         let holder = fresh_holder(commands, grid, last);
-        let step = Vec2::new(g.cell[0] + g.cell_padding[0] + g.cell_padding[2], g.cell[1] + g.cell_padding[1] + g.cell_padding[3]);
+        let mut step = Vec2::new(g.cell[0] + g.cell_padding[0] + g.cell_padding[2], g.cell[1] + g.cell_padding[1] + g.cell_padding[3]);
         let rows = g.rows.max(1) as usize;
-        let cur = current.to_srgba();
+        // (Closer together when there are more across than the grid holds: the brows' one row.)
+        let across = crate::sim::HAIRS.len().div_ceil(rows);
+        if let Some(w) = ui.find(layout, grid_id).map(|w| w.area[2] - w.area[0] - g.padding[0] - g.padding[2])
+            && across > 1
+            && step.x * across as f32 > w
+        {
+            step.x = ((w - g.cell[0]) / (across - 1) as f32).max(1.0);
+        }
+        let cur = current.map(|c| c.to_srgba());
         for (n, (r, gr, b)) in crate::sim::HAIRS.iter().enumerate() {
             let (col, row) = ((n / rows) as f32, (n % rows) as f32);
             let (x, y) = (g.padding[0] + col * step.x + g.cell_padding[0], g.padding[1] + row * step.y + g.cell_padding[1]);
@@ -378,10 +398,10 @@ pub(crate) fn spawn_colours(commands: &mut Commands, ui: &mut UiAssets, (images,
             }
             let c = ui.spawn_under(commands, images, fonts, &cell, holder);
             let Some(root) = c.root else { continue };
-            commands.entity(root).insert(ColourCell(n));
+            mark(&mut commands.entity(root), n);
             // (The one chosen in the cell's chosen frame, over its colours: they cover the
             // cell, its own frame under them.)
-            let on = (cur.red - r).abs() < 0.01 && (cur.green - gr).abs() < 0.01 && (cur.blue - b).abs() < 0.01;
+            let on = cur.is_some_and(|cur| (cur.red - r).abs() < 0.01 && (cur.green - gr).abs() < 0.01 && (cur.blue - b).abs() < 0.01);
             if on
                 && let Some(s3bake::ui::UiDrawable::Std { images: keys, .. }) = &template.drawable
                 && let Some((frame, _)) = ui.image(images, keys[4])

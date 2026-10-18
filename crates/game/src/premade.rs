@@ -96,6 +96,7 @@ pub fn to_sim(p: &PremadeSim) -> Sim {
         occult: p.occult.as_deref().and_then(crate::sim::Occult::from_name),
         skin: skin_of(p.skin_shade),
         hair: p.hair_color.map(argb).unwrap_or(Color::srgb(0.3, 0.2, 0.1)),
+        brow_hair: None,
         // (The town's Sims' eye colours are in their outfits, which the install doesn't have.)
         eyes: crate::sim::eyes_by_look(look),
         voice: (p.voice % 3) as u8,

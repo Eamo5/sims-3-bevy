@@ -92,6 +92,9 @@ pub enum CasAction {
     Voice(u8),
     /// Their voice's pitch, 0 to 1.
     VoicePitch(f32),
+    /// Their eyebrows in one of the hair colours, or in their hair's.
+    BrowColor(usize),
+    BrowsMatchHair,
     /// Their life state: human (none) or one of the supernaturals (`sim::Occult::ALL`).
     LifeState(Option<usize>),
     Tab(CasTab),
@@ -620,6 +623,13 @@ fn cas_actions(
             CasAction::Skin(i) => {
                 let (r, g, b) = SKINS[i.min(SKINS.len() - 1)];
                 pending.members[k].skin = Color::srgb(r, g, b);
+            }
+            CasAction::BrowColor(i) => {
+                let (r, g, b) = crate::sim::HAIRS[i.min(crate::sim::HAIRS.len() - 1)];
+                pending.members[k].brow_hair = Some(Color::srgb(r, g, b));
+            }
+            CasAction::BrowsMatchHair => {
+                pending.members[k].brow_hair = None;
             }
             CasAction::HairColor(i) => {
                 let (r, g, b) = crate::sim::HAIRS[i.min(crate::sim::HAIRS.len() - 1)];

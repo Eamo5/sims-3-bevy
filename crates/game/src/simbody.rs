@@ -766,8 +766,15 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
             beard_tints.push((src, tinted, sim.hair));
             tinted
         });
-        let face_layers: Vec<Key> =
-            face.layer.into_iter().chain(outfit.brows.as_ref().and_then(|b| b.layer)).chain(painted_beard).chain(outfit.face_layers.iter().copied()).take(MAX_LAYERS).collect();
+        // The brows in their colour, the hair's unless chosen otherwise (the game's
+        // `EyebrowsUseHairColor`).
+        let brows = outfit.brows.as_ref().and_then(|b| b.layer).map(|src| {
+            let colour = sim.brow_hair.unwrap_or(sim.hair);
+            let tinted = beard_tint_key(src, colour);
+            beard_tints.push((src, tinted, colour));
+            tinted
+        });
+        let face_layers: Vec<Key> = face.layer.into_iter().chain(brows).chain(painted_beard).chain(outfit.face_layers.iter().copied()).take(MAX_LAYERS).collect();
         tex_keys.extend(face_base);
         tex_keys.extend(&face_layers);
         for m in baked.cas_meshes(&face.key).map(|m| m.meshes).unwrap_or_default() {

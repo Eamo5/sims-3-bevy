@@ -191,6 +191,9 @@ pub struct SavedSim {
     /// Their voice (saves from before voices could be chosen: the one their look gave them).
     #[serde(default)]
     pub voice: Option<u8>,
+    /// Their eyebrows' colour, when not their hair's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brow_hair: Option<[f32; 3]>,
     /// Their voice's pitch (saves from before: the middle).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice_pitch: Option<f32>,
@@ -676,6 +679,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         inventory: Default::default(),
         toddler: None,
         eyes: Some(rgb(sim.eyes)),
+        brow_hair: sim.brow_hair.map(rgb),
         voice: Some(sim.voice),
         voice_pitch: (sim.voice_pitch != 0.5).then_some(sim.voice_pitch),
         bio: sim.bio.clone(),
@@ -738,6 +742,7 @@ impl SaveGame {
             fitness: s.shape.map_or(0.0, |x| x.1),
             skin: c(s.skin),
             hair: c(s.hair),
+            brow_hair: s.brow_hair.map(c),
             eyes: s.eyes.map_or_else(|| crate::sim::eyes_by_look(s.look), c),
             voice: s.voice.unwrap_or((s.look % 3) as u8).min(2),
             voice_pitch: s.voice_pitch.unwrap_or(0.5).clamp(0.0, 1.0),
@@ -1105,6 +1110,7 @@ fn save_game(
             inventory: inventory.cloned().unwrap_or_default(),
             toddler: toddler.copied(),
             eyes: Some(rgb(sim.eyes)),
+            brow_hair: sim.brow_hair.map(rgb),
             voice: Some(sim.voice),
             voice_pitch: (sim.voice_pitch != 0.5).then_some(sim.voice_pitch),
             bio: sim.bio.clone(),

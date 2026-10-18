@@ -404,7 +404,9 @@ fn mirror_panels(
         let title = if view == View::Beard { ui.localize("Ui/Caption/CAS/Physical:Beard").unwrap_or_else(|| "Facial Hair".into()) } else { ui.localize("Ui/Caption/CAS/Hair:Title").unwrap_or_else(|| "Hair".into()) };
         crate::livehud::set_text(&mut texts, l.hair.text(crate::cashair::TITLE), &title);
         crate::cashair::spawn_styles(&mut commands, &mut ui, (&mut images, &mut fonts), gu.as_deref_mut(), &l.hair, &mut l.styles, &list, view == View::Beard, worn, l.scroll);
-        crate::cashair::spawn_colours(&mut commands, &mut ui, (&mut images, &mut fonts), &l.hair, &mut l.colours, sim.hair);
+        crate::cashair::spawn_colours(&mut commands, &mut ui, (&mut images, &mut fonts), ("CASHair", crate::cashair::COLOURS_GRID), &l.hair, &mut l.colours, Some(sim.hair), |e, n| {
+            e.insert(ColourCell(n));
+        });
     } else {
         if let Some(old) = l.cells.take() {
             commands.entity(old).try_despawn();

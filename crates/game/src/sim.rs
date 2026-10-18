@@ -106,6 +106,8 @@ pub struct Sim {
     pub traits: Vec<crate::life::Trait>,
     pub skin: Color,
     pub hair: Color,
+    /// Their eyebrows' colour when not their hair's (the game's `EyebrowsUseHairColor` off).
+    pub brow_hair: Option<Color>,
     /// Eye colour (the iris's, as Create a Sim's colours are: about half-strength, doubled
     /// over the iris's own shading).
     pub eyes: Color,
@@ -587,6 +589,7 @@ pub fn random_sim(rng: &mut impl Rng, last: &str, female: Option<bool>, age: Age
         occult: None,
         skin: Color::srgb(sr, sg, sb),
         hair: Color::srgb(hr, hg, hb),
+        brow_hair: None,
         top: Color::hsl(hue, 0.55, 0.5),
         bottom: Color::hsl((hue + 180.0) % 360.0, 0.3, 0.3),
         // Most Sims are of middling build; a few are thin, heavy or very fit.

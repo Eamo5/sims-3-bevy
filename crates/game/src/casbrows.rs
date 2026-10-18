@@ -1,7 +1,8 @@
 //! Create a Sim's eyebrows, in the game's own panel (UI.dll's `CASEyebrows`): the styles for the
 //! Sim in its presets grid, three across with the game's pictures, scrolled by the wheel or the
-//! item grid's own bar, the one chosen lit; a click wears it. Opened by the physical panel's
-//! Eyebrows button (`cashair`).
+//! item grid's own bar, the one chosen lit; a click wears it. Beneath, their colour: the hair
+//! colours' swatches, and "Match Hair" (lit while they're the hair's, as Sims come: the game's
+//! `EyebrowsUseHairColor`). Opened by the physical panel's Eyebrows button (`cashair`).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -29,10 +30,13 @@ impl Plugin for CasBrowsPlugin {
 /// buttons switch it: `cashair`).
 pub static OPEN: AtomicBool = AtomicBool::new(false);
 
-// `CASEyebrows`' windows: the styles' grid, and what this game hasn't (the eyelashes and the
-// brows' own colours, the content filter).
+// `CASEyebrows`' windows: the styles' grid, the colours' grid and the match-hair button, and
+// what this game hasn't (the eyelashes with the colour picker and its saved colours, the content
+// filters).
 const GRID: u32 = 0x05db_b941;
-const NOT_HERE: [u32; 3] = [0x05db_9719, 0x05db_cf20, 0x05db_b945];
+const COLOURS: u32 = 0x05db_b950;
+const MATCH_HAIR: u32 = 0x05db_b946;
+const NOT_HERE: [u32; 3] = [0x05db_9719, 0x05db_b945, 0x05db_b90f];
 const CELL_THUMBNAIL: u32 = 0x20;
 const ROWS: usize = 3;
 
@@ -43,7 +47,13 @@ pub struct CasBrows {
     bar: Option<Entity>,
     scroll: usize,
     shown: Option<(usize, bool, Age, Option<s3bake::Key>, usize, bool)>,
+    colours: Option<Entity>,
+    colours_shown: Option<(usize, Option<Color>, Color)>,
 }
+
+/// A colour's swatch (its place in the hair colours).
+#[derive(Component)]
+struct BrowColourCell(usize);
 
 /// A style's cell (its place in the list).
 #[derive(Component)]
@@ -72,7 +82,10 @@ fn spawn_brows(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut images
         bar = ui.spawn_under(&mut commands, &mut images, &mut fonts, &b, grid).root;
         commands.entity(grid).insert(bevy::ui::RelativeCursorPosition::default());
     }
-    commands.insert_resource(CasBrows { s, cells: None, bar, scroll: 0, shown: None });
+    if let Some(e) = s.id(MATCH_HAIR) {
+        commands.entity(e).insert(crate::icons::Tooltip("Match Hair Color".into()));
+    }
+    commands.insert_resource(CasBrows { s, cells: None, bar, scroll: 0, shown: None, colours: None, colours_shown: None });
 }
 
 /// Shown on the Hair tab when the eyebrows are open: the styles for the Sim, the one chosen lit.
@@ -86,7 +99,13 @@ fn brows_panel(
     selected: Res<crate::cas::CasSelected>,
     scene: Option<Res<crate::cas::CasScene>>,
     (mut vis, mut bars): (Query<&mut Visibility>, Query<&mut UiScrollBar>),
-    (cells, over): (Query<(&Interaction, &BrowCell), Changed<Interaction>>, Query<&bevy::ui::RelativeCursorPosition>),
+    (cells, over, swatches, clicks, mut buttons): (
+        Query<(&Interaction, &BrowCell), Changed<Interaction>>,
+        Query<&bevy::ui::RelativeCursorPosition>,
+        Query<(&Interaction, &BrowColourCell), Changed<Interaction>>,
+        Query<(Entity, &Interaction), Changed<Interaction>>,
+        Query<&mut crate::layout::UiButton>,
+    ),
     wheel: Res<bevy::input::mouse::AccumulatedMouseScroll>,
     mut actions: MessageWriter<crate::cas::CasActionRequest>,
     mut gu: Option<ResMut<crate::icons::GameUi>>,
@@ -97,6 +116,7 @@ fn brows_panel(
     crate::livehud::set_visible(&mut vis, b.s.root, on);
     if !on {
         b.shown = None;
+        b.colours_shown = None;
         return;
     }
     let k = selected.0.min(pending.members.len().saturating_sub(1));
@@ -104,6 +124,27 @@ fn brows_panel(
     for (i, c) in &cells {
         if *i == Interaction::Pressed {
             actions.write(crate::cas::CasActionRequest(CasAction::PickPart(CT_EYEBROW, c.0)));
+        }
+    }
+    // Their colour: a swatch, or the hair's.
+    for (i, c) in &swatches {
+        if *i == Interaction::Pressed {
+            actions.write(crate::cas::CasActionRequest(CasAction::BrowColor(c.0)));
+        }
+    }
+    if crate::livehud::pressed(&clicks, b.s.id(MATCH_HAIR)) {
+        actions.write(crate::cas::CasActionRequest(CasAction::BrowsMatchHair));
+    }
+    let colours = (k, sim.brow_hair, sim.hair);
+    if b.colours_shown != Some(colours) {
+        b.colours_shown = Some(colours);
+        crate::cashair::spawn_colours(&mut commands, &mut ui, (&mut images, &mut fonts), ("CASEyebrows", COLOURS), &b.s, &mut b.colours, sim.brow_hair, |e, n| {
+            e.insert(BrowColourCell(n));
+        });
+        if let Some(mut m) = b.s.id(MATCH_HAIR).and_then(|e| buttons.get_mut(e).ok())
+            && m.selected != sim.brow_hair.is_none()
+        {
+            m.selected = sim.brow_hair.is_none();
         }
     }
     let list = crate::cas::parts_for(&scene.cas, sim, CT_EYEBROW, crate::simbody::OutfitKind::Everyday);
