@@ -48,6 +48,8 @@ pub struct CareerLevel {
     /// How performance is judged at this level, and whether there's a boss.
     pub metrics: &'static [s3bake::gamedata::CareerMetric],
     pub has_boss: bool,
+    /// What reaching it the first time brings (`careerrewards`).
+    pub reward: &'static str,
 }
 
 pub struct CareerTrack {
@@ -206,6 +208,7 @@ pub fn install_tracks(data: &s3bake::GameDataBaked) {
                             outfits: [0, 1, 2, 3].map(|i| leak(l.outfits[i].to_ascii_lowercase())),
                             metrics: Box::leak(l.metrics.clone().into_boxed_slice()),
                             has_boss: l.has_boss,
+                            reward: leak(l.reward.clone()),
                         });
                     }
                     CareerPath { branch: leak(b.to_string()), levels }
@@ -271,7 +274,7 @@ impl BuiltinTrack {
                 levels: self
                     .levels
                     .iter()
-                    .map(|&(title, hourly, start, end)| CareerLevel { title, title_female: "", hourly, start, end, wakeup: (start + 22.0) % 24.0, days: self.days, outfits: [""; 4], metrics: &[], has_boss: false })
+                    .map(|&(title, hourly, start, end)| CareerLevel { title, title_female: "", hourly, start, end, wakeup: (start + 22.0) % 24.0, days: self.days, outfits: [""; 4], metrics: &[], has_boss: false, reward: "" })
                     .collect(),
             }],
             branch_at: None,
@@ -510,6 +513,8 @@ pub struct Job {
     pub rate: f32,
     /// To be promoted now (the boss agreed to it: the game's `ShouldPromote`).
     pub promote: bool,
+    /// Promoted to a level they'd not reached before: its reward to come (`careerrewards`).
+    pub reward_due: bool,
 }
 
 /// A retired Sim's pension: paid each morning (half of what the job paid, on average, a day).
@@ -658,7 +663,7 @@ fn charisma_boost(level: u32, boss: bool) -> f32 {
 
 impl Job {
     pub fn new(track: usize) -> Self {
-        Self { track, level: 0, branch: 0, performance: 0.0, last_day: None, tone: WorkTone::Normal, boss: None, coworkers: Vec::new(), highest: 0, raise: 0, warned_at: None, rate: 0.0, promote: false }
+        Self { track, level: 0, branch: 0, performance: 0.0, last_day: None, tone: WorkTone::Normal, boss: None, coworkers: Vec::new(), highest: 0, raise: 0, warned_at: None, rate: 0.0, promote: false, reward_due: false }
     }
     /// A raise (the game's `GiveRaise`): 15% of the level's pay an hour more, 10% at the top
     /// levels; what it came to.
@@ -1120,7 +1125,9 @@ fn promote(
     life: &mut MessageWriter<LifeEvent>,
 ) {
     let track = job.career();
-    let bonus = if job.level + 1 > job.highest { (track.bonus_hours * (job.info().hourly + job.raise) as f32) as i64 } else { 0 };
+    let first = job.level + 1 > job.highest;
+    let bonus = if first { (track.bonus_hours * (job.info().hourly + job.raise) as f32) as i64 } else { 0 };
+    job.reward_due |= first;
     job.level += 1;
     job.highest = job.highest.max(job.level);
     job.performance = 0.0;

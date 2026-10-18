@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 140;
+pub const GAMEDATA_VERSION: u32 = 141;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -214,6 +214,10 @@ pub struct CareerLevelInfo {
     /// The uniform (an outfit's name, or empty for everyday clothes) for men, women, elderly
     /// men and elderly women.
     pub outfits: [String; 4],
+    /// What reaching this level the first time brings (`PromotionRewardData`): a catalogue
+    /// object's name (or a few, one of them), a skill (a Science book), or something unlocked.
+    #[serde(default)]
+    pub reward: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -3136,6 +3140,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                     days: get(&r, "DaysToWork").split(',').map(day_bit).fold(0, |a, b| a | b),
                     skills: last_skill.clone(),
                     outfits: ["OutfitMale", "OutfitFemale", "OutfitMaleElder", "OutfitFemaleElder"].map(|c| get(&r, c)),
+                    reward: get(&r, "PromotionRewardData").trim().to_string(),
                 });
             }
             if levels.is_empty() {
