@@ -3826,7 +3826,9 @@ pub(crate) fn run_actions(
                                         }
                                         c
                                     });
-                                    if in_bed {
+                                    // (Only under the covers: not relaxing on top of them, as the game's
+                                    // `GetOutOfBed` unmakes it only from sleep.)
+                                    if in_bed && (matches!(d.name, "Sleep" | "Nap") || matches!(d.special, Special::WooHoo | Special::TryForBaby)) {
                                         commands.entity(*target).insert(Unmade);
                                     }
                                     // (Making the bed from its right: the game's clips mirrored.)
@@ -5601,6 +5603,20 @@ pub(crate) fn run_actions(
             }
             // (A talk had sat down: still sat, on with what they sat at.)
             let sat_on = queue.0.front().is_some_and(|a| a.seated);
+            // (Up from a sleep, the bed made after, as the game's `ShouldMakeBed`: by the Neat and
+            // the Perfectionist always, a Slob never, anyone else half the time.)
+            let make_bed = queue
+                .0
+                .front()
+                .and_then(|a| match a.kind {
+                    ActionKind::Object { target, .. } if matches!(a.label.as_str(), "Sleep" | "Nap") => Some(target),
+                    _ => None,
+                })
+                .filter(|_| {
+                    let has = |t: crate::life::Trait| sim.traits.contains(&t);
+                    !has(crate::life::Trait::Slob) && (has(crate::life::Trait::Neat) || has(crate::life::Trait::Perfectionist) || rand::random_bool(0.5))
+                })
+                .and_then(|bed| objects.get(bed).ok().and_then(|(o, ..)| interactions_for(o.kind).iter().position(|d| d.special == Special::MakeBed)).map(|def| (bed, def)));
             queue.0.pop_front();
             *decay = DecayScale::default();
             commands.entity(me).remove::<PathFollow>();
@@ -5624,6 +5640,10 @@ pub(crate) fn run_actions(
                         tf.translation = Vec3::new(p.x, ground(floor.0, p.x, p.y), p.y);
                     }
                 }
+            }
+            if let Some((bed, def)) = make_bed {
+                let at = queue.0.iter().take_while(|a| matches!(a.kind, ActionKind::Outro { .. })).count();
+                queue.0.insert(at, Action::new("Make Bed", ActionKind::Object { target: bed, def }, true));
             }
         }
     }
@@ -5960,6 +5980,11 @@ pub fn hour_label(h: f32) -> String {
     }
 }
 
+/// How near a stereo someone else must be to be listening to it, and how keen a Frugal Sim is to
+/// turn it off when nobody is.
+const STEREO_EARSHOT: f32 = 10.0;
+const FRUGAL_TURN_OFF: f32 = 18.0;
+
 /// Sims with free will pick something to satisfy their lowest needs when idle.
 #[allow(clippy::type_complexity)]
 fn autonomy(
@@ -5988,7 +6013,7 @@ fn autonomy(
         Query<&crate::grime::Grime>,
     ),
     hh: Option<Res<Household>>,
-    (broken, plant_q, lit_q, hw_q): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>, Query<(), With<crate::fireplace::Lit>>, Query<(), With<crate::rabbitholes::Homework>>),
+    (broken, plant_q, lit_q, hw_q, stereos_on): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>, Query<(), With<crate::fireplace::Lit>>, Query<(), With<crate::rabbitholes::Homework>>, Query<(), With<crate::music::StereoOn>>),
     (party_on, trash_q, served_q, leftovers, sprinkling, route_failed): (
         Option<Res<Party>>,
         Query<&crate::surroundings::TrashFill>,
@@ -6084,8 +6109,11 @@ fn autonomy(
             u * u * u * 4.0 + u * 0.3
         };
         let mut best: Option<(f32, Action)> = None;
-        // (A need gone critical comes first: chores and pastimes that do nothing for it wait.)
-        let critical = [HUNGER, BLADDER, ENERGY, HYGIENE].into_iter().filter(|&i| motives.0[i] < CRITICAL_NEED).min_by(|a, b| motives.0[*a].total_cmp(&motives.0[*b]));
+        // (A need gone critical comes first: chores and pastimes that do nothing for it wait. Those
+        // that fail (hunger, bladder, energy: starving, an accident, passing out) before hygiene,
+        // which doesn't: an exhausted Sim goes to bed before the bath.)
+        let failing = [HUNGER, BLADDER, ENERGY].into_iter().filter(|&i| motives.0[i] < CRITICAL_NEED).min_by(|a, b| motives.0[*a].total_cmp(&motives.0[*b]));
+        let critical = failing.or_else(|| (motives.0[HYGIENE] < CRITICAL_NEED).then_some(HYGIENE));
         for (oe, obj, otf, used, obj_lot) in &objects {
             // (A double bed with their partner in it has room for them, on its other side; a sofa
             // someone's sat on, for anyone.)
@@ -6138,6 +6166,19 @@ fn autonomy(
                 continue;
             }
             for (di, d) in interactions_for(obj.kind).iter().enumerate() {
+                // (A stereo playing to nobody else: off with it, for the Frugal and the
+                // Environmentally Conscious, the game's `FrugalTurnOff`.)
+                if d.special == Special::StereoOff
+                    && stereos_on.contains(oe)
+                    && (sim.traits.contains(&crate::life::Trait::Frugal) || sim.traits.contains(&crate::life::Trait::EnvironmentallyConscious))
+                    && !others.iter().any(|o| o.0 != me && o.1.distance(otf.translation) < STEREO_EARSHOT)
+                {
+                    let score = FRUGAL_TURN_OFF / (1.0 + dist / 25.0);
+                    if best.as_ref().is_none_or(|b| score > b.0) {
+                        best = Some((score, Action::new(d.name, ActionKind::Object { target: oe, def: di }, true)));
+                    }
+                    continue;
+                }
                 if !d.autonomous || (shared && whole_of(obj.kind, di)) {
                     continue;
                 }
