@@ -1053,6 +1053,13 @@ fn work_flow(
             WorkTone::PrepareForGame => job.tally.prepare(hours),
             _ => {}
         }
+        // (A doctor's journal for the day, brought home: `careermetrics`.)
+        if job.info().metrics.iter().any(|m| m.kind == "MedicalJournals") && job.tally.journal != Some(clock.day()) {
+            job.tally.journal = Some(clock.day());
+            let title = crate::careermetrics::journal_title(ui.as_deref(), sim, job.level, clock.day());
+            info!("{} brought home {title}", sim.first);
+            crate::careermetrics::bring_journal(&mut commands, e, title, clock.day());
+        }
         let scores = metric_scores(job.info(), mood.0, skills, &rels, boss, &coworkers, &job.tally, clock.day());
         let rate = hourly_performance(&job, &scores, &sim.traits, wishes);
         job.rate = rate;

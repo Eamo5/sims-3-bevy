@@ -2793,6 +2793,8 @@ pub enum ActionKind {
     /// Something done for who they are (`traitacts`): talking to themselves, freaking out, a
     /// fake faint, a TaDa!; and how long it takes (game minutes).
     TraitAct { act: crate::traitacts::TraitAct, minutes: f32 },
+    /// A doctor reading the day's medical journal from their inventory (`careermetrics`).
+    ReadJournal,
     /// Plant a seed here.
     PlantSeed { at: Vec2, level: u8, plant: usize },
     /// Something done out on the ground (Seasons: a snowman, a snow angel, catching snowflakes).
@@ -3538,6 +3540,14 @@ pub(crate) fn run_actions(
                             commands.entity(me).insert(PHONE_CALL);
                             continue;
                         }
+                        ActionKind::ReadJournal => {
+                            action.phase = Phase::Running(0.0);
+                            anim.pose = Pose::Use;
+                            if let Some(clip) = interaction_clip("Read Book", ObjectKind::Bookshelf) {
+                                commands.entity(me).insert(clip);
+                            }
+                            continue;
+                        }
                         ActionKind::TraitAct { act, .. } => {
                             action.phase = Phase::Running(0.0);
                             let (pose, clip) = act.clip(sim.age == Age::Child);
@@ -4197,6 +4207,7 @@ pub(crate) fn run_actions(
                             | ActionKind::HireMaid(_)
                             | ActionKind::MotiveFail(_)
                             | ActionKind::TraitAct { .. }
+                            | ActionKind::ReadJournal
                             | ActionKind::ThrowParty => {}
                             ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } => {
                                 if let Ok((obj, otf, _, _)) = objects.get(*target) {
@@ -5375,6 +5386,13 @@ pub(crate) fn run_actions(
                         }
                         // (On the phone till the party's arranged in its picker: `parties`.)
                         ActionKind::ThrowParty => {}
+                        ActionKind::ReadJournal => {
+                            let minutes = if sim.traits.contains(&crate::life::Trait::Bookworm) { crate::careermetrics::BOOKWORM_JOURNAL_MINUTES } else { crate::careermetrics::JOURNAL_MINUTES };
+                            if elapsed >= minutes {
+                                finished = true;
+                                commands.queue(move |w: &mut World| crate::careermetrics::journal_read(w, me));
+                            }
+                        }
                         ActionKind::TraitAct { act, minutes } => {
                             let per_hour = act.per_hour();
                             for (i, g) in per_hour.iter().enumerate() {

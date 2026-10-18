@@ -25,6 +25,11 @@
 //!   of their preparation: `kGameBaseWinChance`...), a tie settled by one more. A win: Winner,
 //!   performance +10, ten hours' pay; a loss: -5, an hour's. A game missed is all but lost
 //!   (`kGameMissingWinChance` 0.05). "Prepare For Game" at work readies them (34 an hour).
+//! - Research (Medical, levels 4 and up: `Medical.MetricMedicalJournals`): the medical journals
+//!   read since the last promotion or demotion. Each work day brings that day's edition home in
+//!   the doctor's inventory ("Darcy's Medical Journal: Organ Donation: Volume 3", the game's
+//!   `MedicalJournal` for their level), the last one gone; "Read" there takes an hour and a half
+//!   (ninety pages, a page a minute; a Bookworm two), and counts once an edition.
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -78,6 +83,14 @@ pub struct Tally {
     pub game_prep: f32,
     #[serde(default)]
     pub last_game: Option<u32>,
+    /// The medical journal brought home (its day), the last one read, and those read at this
+    /// level (Medical: `mNumMedicalJournalsRead`).
+    #[serde(default)]
+    pub journal: Option<u32>,
+    #[serde(default)]
+    pub journal_read: Option<u32>,
+    #[serde(default)]
+    pub journals: u32,
 }
 
 /// How many days back meetings count (`kWindowForRememberingMeetings`), and today.
@@ -113,6 +126,7 @@ impl Tally {
             "ConcertsPerformed" => Some(self.concerts as f32),
             "CampaignMoney" => Some(self.campaign as f32),
             "WinLossRecord" => Some(self.wins as f32 - self.losses as f32),
+            "MedicalJournals" => Some(self.journals as f32),
             _ => None,
         }
     }
@@ -121,6 +135,17 @@ impl Tally {
     /// starts again (the game's `SetLevel`).
     pub fn new_level(&mut self) {
         self.campaign = 0;
+        self.journals = 0;
+    }
+
+    /// The day's journal read: one more, once an edition.
+    pub fn journal_finished(&mut self) -> bool {
+        if self.journal.is_none() || self.journal_read == self.journal {
+            return false;
+        }
+        self.journal_read = self.journal;
+        self.journals += 1;
+        true
     }
 
     /// Hours of the Prepare For Game tone.
@@ -357,11 +382,13 @@ pub struct GigDone;
 
 /// GIG=<lot name or rabbit hole class part>:<option> (tests): ten seconds in, the selected Sim off to that gig for
 /// their job (set with CAREER_REWARD=); WORK_TONE=<tone> sets how they work; CLOCK_AT=<day>:<hour>
-/// moves the clock there (days from the first Monday).
+/// moves the clock there (days from the first Monday); READ_JOURNAL=1, the day's journal brought
+/// home and read.
 #[allow(clippy::type_complexity)]
 fn gig_test(
     time: Res<Time>,
-    mut sel: Query<(&mut Job, &mut crate::interact::ActionQueue, &crate::life::Mood), With<crate::sim::Selected>>,
+    mut sel: Query<(Entity, &Sim, &mut Job, &mut crate::interact::ActionQueue, &crate::life::Mood), With<crate::sim::Selected>>,
+    mut commands: Commands,
     world: Res<crate::loading::CurrentWorld>,
     mut clock: ResMut<crate::clock::GameClock>,
     mut done: Local<bool>,
@@ -369,8 +396,14 @@ fn gig_test(
     if *done || time.elapsed_secs() < 10.0 {
         return;
     }
-    let Ok((mut job, mut q, mood)) = sel.single_mut() else { return };
+    let Ok((e, sim, mut job, mut q, mood)) = sel.single_mut() else { return };
     *done = true;
+    if std::env::var("READ_JOURNAL").is_ok() {
+        job.tally.journal = Some(clock.day());
+        bring_journal(&mut commands, e, journal_title(None, sim, job.level, clock.day()), clock.day());
+        q.0.clear();
+        q.push_player(crate::interact::Action::new("Read Medical Journal", crate::interact::ActionKind::ReadJournal, false));
+    }
     if let Some((d, h)) = std::env::var("CLOCK_AT").ok().and_then(|v| v.split_once(':').and_then(|(d, h)| Some((d.parse::<f64>().ok()?, h.parse::<f64>().ok()?)))) {
         clock.minutes = d * 1440.0 + h * 60.0;
         info!("gig test: the clock at day {d}, {h}:00");
@@ -530,6 +563,52 @@ fn game_days(
     }
 }
 
+/// The medical journals' titles, levels 4 to 10 (the Books table's `MedicalJournal`), and how
+/// long one takes to read (ninety pages, a page a minute; a Bookworm two).
+const JOURNAL_TITLES: [(&str, &str); 7] = [
+    ("SellingOrgansForFunAndProfit", "Organ Donation"),
+    ("ManagingMedicalMalpractice", "Managing Malpractice"),
+    ("EtTuNurse", "Be Nice to the Nurse"),
+    ("SurgeyForDummiesUnratedEdition", "Surgery for Dummies"),
+    ("101ThingsToTryOutInTheOperatingRoom", "Things to Try Out in the Operating Room"),
+    ("CleverInterpretationsOfTheHippocraticOath", "Fun with the Hippocratic Oath"),
+    ("FashionablePagersThatBling", "Fashionable Pages"),
+];
+pub const JOURNAL_MINUTES: f32 = 90.0;
+pub const BOOKWORM_JOURNAL_MINUTES: f32 = 45.0;
+
+/// A doctor's journal for the day: its title at their level, its volume the day's.
+pub fn journal_title(ui: Option<&crate::layout::UiAssets>, sim: &Sim, level: usize, day: u32) -> String {
+    let (key, or) = JOURNAL_TITLES[level.clamp(3, 9) - 3];
+    let volume = (day + 1).to_string();
+    ui.and_then(|u| u.localize(&format!("Gameplay/Excel/Books/MedicalJournal:{key}")))
+        .map_or_else(|| format!("{}'s Medical Journal: {or}: Volume {volume}", sim.full_name()), |t| t.replace("{0.SimName}", &sim.full_name()).replace("{1.Number}", &volume))
+}
+
+/// The day's journal into a doctor's inventory, the last one gone.
+pub fn bring_journal(commands: &mut Commands, e: Entity, title: String, day: u32) {
+    commands.entity(e).queue(move |mut w: EntityWorldMut| {
+        if w.get::<crate::inventory::Inventory>().is_none() {
+            w.insert(crate::inventory::Inventory::default());
+        }
+        if let Some(mut inv) = w.get_mut::<crate::inventory::Inventory>() {
+            inv.0.retain(|s| s.kind != crate::inventory::ItemKind::Journal);
+            inv.0.push(crate::inventory::Stack { kind: crate::inventory::ItemKind::Journal, key: format!("MedicalJournal{day}"), name: title, quality: 0, count: 1, worth: 0 });
+        }
+    });
+}
+
+/// A journal read through: counted, if it's the day's and not read before.
+pub fn journal_read(w: &mut World, e: Entity) {
+    let Some(first) = w.get::<Sim>(e).map(|s| s.first.clone()) else { return };
+    let Some(mut job) = w.get_mut::<Job>(e) else { return };
+    if job.tally.journal_finished() {
+        let n = job.tally.journals;
+        info!("{first} read a medical journal ({n} at this level)");
+        w.resource_mut::<Notifications>().push(format!("{first} finished reading the day's medical journal."));
+    }
+}
+
 /// The game's words for a concert performed.
 pub fn concert_words(ui: Option<&crate::layout::UiAssets>, sim: &Sim) -> String {
     ui.and_then(|u| u.localize_key(if sim.female { CONCERT_PERFORMED.1 } else { CONCERT_PERFORMED.0 }))
@@ -564,6 +643,20 @@ mod tests {
         let mut t = Tally { campaign: 4000, concerts: 3, ..Default::default() };
         t.new_level();
         assert_eq!((t.campaign, t.concerts), (0, 3), "concerts are the career's");
+    }
+
+    #[test]
+    fn a_journal_counts_once_an_edition() {
+        let mut t = Tally::default();
+        assert!(!t.journal_finished(), "none brought home");
+        t.journal = Some(3);
+        assert!(t.journal_finished());
+        assert!(!t.journal_finished(), "read already");
+        t.journal = Some(4);
+        assert!(t.journal_finished());
+        assert_eq!(t.value("MedicalJournals", 4), Some(2.0));
+        t.new_level();
+        assert_eq!(t.journals, 0);
     }
 
     #[test]

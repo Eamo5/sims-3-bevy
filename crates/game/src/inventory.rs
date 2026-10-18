@@ -39,6 +39,8 @@ pub enum ItemKind {
     /// A coupon clipped from the paper (`coupons`): its store, item and day in its key, its
     /// discount as its quality, the item's price with it as its worth. Not to be sold.
     Coupon,
+    /// A doctor's medical journal, the day's (`careermetrics`): to read. Not to be sold.
+    Journal,
 }
 
 /// Items of one kind (and, for produce, one quality).
@@ -190,7 +192,7 @@ pub fn stack_picture(
 /// painting, placing a reward.
 pub fn stack_actions(sim: &Sim, s: &Stack) -> Vec<(String, ItemButton)> {
     let mut out = Vec::new();
-    if !matches!(s.kind, ItemKind::Reward | ItemKind::Coupon) {
+    if !matches!(s.kind, ItemKind::Reward | ItemKind::Coupon | ItemKind::Journal) {
         out.push((format!("Sell (§{})", s.each()), ItemButton::SellOne));
         if s.count > 1 {
             out.push((format!("Sell All (§{})", s.worth), ItemButton::SellAll));
@@ -204,6 +206,9 @@ pub fn stack_actions(sim: &Sim, s: &Stack) -> Vec<(String, ItemButton)> {
     }
     if s.kind == ItemKind::Painting {
         out.push(("Hang on a Wall".to_string(), ItemButton::Hang));
+    }
+    if s.kind == ItemKind::Journal {
+        out.push(("Read".to_string(), ItemButton::Read));
     }
     if matches!(s.kind, ItemKind::Reward | ItemKind::Object) {
         out.push(("Place on the Lot".to_string(), ItemButton::Hang));
@@ -228,6 +233,8 @@ pub enum ItemButton {
     GiveTo(Entity),
     /// Mailed off to be cut or smelted, one or all of them (`rgmmail`).
     Post(crate::rgmmail::Post, bool),
+    /// Read (a doctor's journal).
+    Read,
 }
 
 /// The tile's colour for produce, by quality (grey for the worst, gold for perfect).
@@ -417,6 +424,9 @@ fn inventory_buttons(
             }
             ItemButton::Eat => {
                 queue.push_player(Action::new(format!("Eat {}", s.name), ActionKind::EatItem { key: s.key.clone(), quality: s.quality }, false));
+            }
+            ItemButton::Read => {
+                queue.push_player(Action::new("Read Medical Journal", ActionKind::ReadJournal, false));
             }
             ItemButton::ToFridge => {
                 if away.contains(me) {
