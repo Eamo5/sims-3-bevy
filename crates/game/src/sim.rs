@@ -789,7 +789,7 @@ fn decay_motives(
             if i == FUN
                 && at_work
                 && let Some(job) = job
-                && job.tone != crate::careers::WorkTone::TakeItEasy
+                && !matches!(job.tone, crate::careers::WorkTone::TakeItEasy | crate::careers::WorkTone::PlayGolf)
             {
                 let stress = job.career().fun_per_hour * hours;
                 d = if sim.traits.contains(&crate::life::Trait::Workaholic) { stress.max(0.0) } else if d < 0.0 && stress <= 0.0 { d.min(stress) } else { stress };

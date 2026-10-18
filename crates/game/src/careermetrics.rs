@@ -126,6 +126,145 @@ pub struct Tally {
     pub reviews: Vec<Review>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bans: Vec<(usize, u32)>,
+    /// The careers' own tones under way: a policeman's case (minutes of it left), a criminal's
+    /// side jobs (hours at them, and the next one's), a scientist's experiment and a
+    /// politician's proposal (hours at them).
+    #[serde(default)]
+    pub case_left: f32,
+    #[serde(default)]
+    pub side_hours: f32,
+    #[serde(default)]
+    pub side_due: f32,
+    #[serde(default)]
+    pub experiment_hours: f32,
+    #[serde(default)]
+    pub risk_hours: f32,
+}
+
+/// What came of a career's own tone: words, money, and the boss's and coworkers' liking.
+#[derive(Debug, Default, PartialEq)]
+pub struct ToneCame {
+    pub words: String,
+    pub money: i64,
+    pub boss: f32,
+    pub coworkers: f32,
+}
+
+/// A policeman's case: minutes of the tone it takes (`kMinimumMinutesToComplete`...), the
+/// performance a conviction brings, and the department's liking lost on failure.
+const CASE_MINUTES: std::ops::RangeInclusive<f32> = 600.0..=1080.0;
+const CASE_SUCCESS: f32 = 75.0;
+const CASE_FAILURE_LIKING: f32 = -5.0;
+/// A criminal's side jobs: hours at them each (give or take a quarter), and the pay, at level 1
+/// and more a level above it (give or take a quarter).
+const SIDE_JOB_HOURS: f32 = 8.0;
+const SIDE_JOB_PAY: (f32, f32) = (80.0, 80.0);
+/// A scientist's experiment: hours at it, its chances (a performance boost, a promotion) and
+/// the boost.
+const EXPERIMENT_HOURS: f32 = 12.0;
+const EXPERIMENT_CHANCES: (f32, f32) = (0.8, 0.9);
+const EXPERIMENT_PERFORMANCE: f32 = 20.0;
+/// A politician's proposal: hours at it (`kRiskDuration`), and the liking it wins or costs.
+const RISK_HOURS: f32 = 16.0;
+const RISK_BOSS: (f32, f32) = (40.0, -30.0);
+const RISK_COWORKERS: f32 = -40.0;
+
+/// The chance a policeman's case sticks, by their Logic (the game's `Skill.GetSuccessChance`
+/// over 0 to 7, in whole steps: 1 in 7, a third, a half, then sure).
+pub fn case_chance(logic: u32) -> f32 {
+    if logic == 0 { 0.0 } else { (1.0 / (7 / logic.min(7)) as f32).min(1.0) }
+}
+
+/// Time at a career's own tone: what comes of it, when it does (the tone over for a case or a
+/// proposal).
+pub fn tone_time(job: &mut Job, sim: &Sim, hours: f32, logic: u32, ui: Option<&crate::layout::UiAssets>, rng: &mut impl Rng) -> Option<ToneCame> {
+    // (A woman's words where the game has its own: the key's `_Female`, as its `LocalizeString`.)
+    let say = |key: &str, or: String| {
+        let female = sim.female.then(|| ui.and_then(|u| u.localize(&format!("{key}_Female")))).flatten();
+        female.or_else(|| ui.and_then(|u| u.localize(key))).map_or(or, |t| crate::layout::gendered(&t, sim.female).replace("{0.SimFirstName}", &sim.first).replace("{0.SimName}", &sim.full_name()))
+    };
+    let t = &mut job.tally;
+    match job.tone {
+        crate::careers::WorkTone::BuildCase => {
+            if t.case_left <= 0.0 {
+                t.case_left = rng.random_range(CASE_MINUTES);
+            }
+            t.case_left -= hours * 60.0;
+            if t.case_left > 0.0 {
+                return None;
+            }
+            t.case_left = 0.0;
+            job.tone = crate::careers::WorkTone::Normal;
+            if rng.random::<f32>() < case_chance(logic) {
+                job.performance = (job.performance + CASE_SUCCESS).min(100.0);
+                return Some(ToneCame { words: format!("{}'s independent case stuck: the suspect's been convicted, and the department's impressed.", sim.first), ..Default::default() });
+            }
+            Some(ToneCame {
+                words: say("Gameplay/Careers/LawEnforcement/BuildCaseTone:BuildCaseSuccessText", format!("{}'s case didn't stick.", sim.first)),
+                coworkers: CASE_FAILURE_LIKING,
+                boss: CASE_FAILURE_LIKING,
+                ..Default::default()
+            })
+        }
+        crate::careers::WorkTone::SideJob => {
+            if t.side_due <= 0.0 {
+                t.side_due = SIDE_JOB_HOURS * rng.random_range(0.75..=1.25);
+            }
+            t.side_hours += hours;
+            if t.side_hours < t.side_due {
+                return None;
+            }
+            t.side_hours = 0.0;
+            t.side_due = SIDE_JOB_HOURS * rng.random_range(0.75..=1.25);
+            let pay = ((SIDE_JOB_PAY.0 + SIDE_JOB_PAY.1 * job.level as f32) * rng.random_range(0.75..=1.25)) as i64;
+            let pay = pay - pay % 5;
+            Some(ToneCame {
+                words: say("Gameplay/Careers/Criminal/DoASideJob:SideJobBonusText", format!("{} earned §{pay} on the side.", sim.first)).replace("{1.Money}", &format!("§{pay}")).replace(char::REPLACEMENT_CHARACTER, "'"),
+                money: pay,
+                ..Default::default()
+            })
+        }
+        crate::careers::WorkTone::Experiment => {
+            t.experiment_hours += hours;
+            if t.experiment_hours <= EXPERIMENT_HOURS {
+                return None;
+            }
+            t.experiment_hours = 0.0;
+            let roll = rng.random::<f32>();
+            let (name, boost) = if roll < EXPERIMENT_CHANCES.0 {
+                ("IncreasedPerformance", EXPERIMENT_PERFORMANCE)
+            } else if roll < EXPERIMENT_CHANCES.1 {
+                ("Promotion", 100.0)
+            } else {
+                ("Failure", 0.0)
+            };
+            job.performance = (job.performance + boost).min(100.0);
+            Some(ToneCame { words: say(&format!("Gameplay/Careers/Science/DoIndependentExperiment:{name}"), format!("{}'s experiment is done.", sim.first)), ..Default::default() })
+        }
+        crate::careers::WorkTone::TakeARisk => {
+            t.risk_hours += hours;
+            if t.risk_hours < RISK_HOURS {
+                return None;
+            }
+            t.risk_hours = 0.0;
+            job.tone = crate::careers::WorkTone::Normal;
+            // (The game's chances: a tenth promoted, three tenths the boss won over, four the boss
+            // won over and the coworkers lost, the rest a flop.)
+            let roll = rng.random::<f32>();
+            let (key, boss, coworkers) = if roll < 0.1 {
+                job.promote = true;
+                ("Research", 0.0, 0.0)
+            } else if roll < 0.4 {
+                ("Proposal", RISK_BOSS.0, 0.0)
+            } else if roll < 0.8 {
+                ("BrownNose", RISK_BOSS.0, RISK_COWORKERS)
+            } else {
+                ("ProposalFail", RISK_BOSS.1, RISK_COWORKERS)
+            };
+            Some(ToneCame { words: say(&format!("Gameplay/Careers/Political:{key}"), format!("{}'s proposal is in.", sim.first)), boss, coworkers, ..Default::default() })
+        }
+        _ => None,
+    }
 }
 
 /// Something seen to be reviewed: where (the lot, and its name), what ("Movie", "Restaurant"),
@@ -1103,6 +1242,16 @@ mod tests {
         let mut t = Tally { campaign: 4000, concerts: 3, ..Default::default() };
         t.new_level();
         assert_eq!((t.campaign, t.concerts), (0, 3), "concerts are the career's");
+    }
+
+    #[test]
+    fn cases_stick_by_logic() {
+        assert_eq!(case_chance(0), 0.0);
+        assert!((case_chance(1) - 1.0 / 7.0).abs() < 1e-6);
+        assert!((case_chance(2) - 1.0 / 3.0).abs() < 1e-6);
+        assert_eq!(case_chance(3), 0.5);
+        assert_eq!(case_chance(4), 1.0);
+        assert_eq!(case_chance(10), 1.0);
     }
 
     #[test]

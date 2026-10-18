@@ -79,6 +79,8 @@ pub struct CareerTrack {
     pub coworkers: (u8, u8),
     /// What can happen at work (the game's `CareerEvents`).
     pub events: &'static [s3bake::gamedata::CareerEventInfo],
+    /// Its ways to work, by the game's `CareerList` columns: column, word, name.
+    pub tones: &'static [(String, String, String)],
 }
 
 pub struct CareerPath {
@@ -231,6 +233,7 @@ pub fn install_tracks(data: &s3bake::GameDataBaked) {
                 fun_per_hour: c.fun_per_hour,
                 coworkers: c.coworkers,
                 events: Box::leak(c.events.clone().into_boxed_slice()),
+                tones: Box::leak(c.tones.clone().into_boxed_slice()),
             }
         })
         .filter(|t| t.paths.iter().all(|p| !p.levels.is_empty()))
@@ -284,6 +287,7 @@ impl BuiltinTrack {
             fun_per_hour: -5.0,
             coworkers: (2, 4),
             events: &[],
+            tones: &[],
         }
     }
 }
@@ -580,45 +584,144 @@ pub enum WorkTone {
     Perform,
     /// An athlete readying for the next game (`careermetrics`).
     PrepareForGame,
+    /// Meeting the coworkers (the game's `MeetCoworkersTone`): company.
+    MeetCoworkers,
+    /// Asleep on the job, for a Heavy or Light Sleeper (`SleepAtWorkTone`).
+    SleepAtWork,
+    /// The careers' own besides (`careermetrics`): a policeman's independent case, a
+    /// criminal's side job, a scientist's experiment, a doctor's nap or golf, a politician's
+    /// proposal.
+    BuildCase,
+    SideJob,
+    Experiment,
+    SleepInReadyRoom,
+    PlayGolf,
+    TakeARisk,
 }
 
+/// The careers' study tones (their `CareerList` words) and the skills they practise, points a
+/// minute (each tone's `kSkillGainRate`...).
+const STUDY_TONES: [(&str, &[(&str, f32)]); 6] = [
+    ("PracticeCooking", &[("Cooking", 4.0)]),
+    ("PracticeWriting", &[("Writing", 5.0)]),
+    ("PracticeIllicitActivities", &[("Athletic", 4.0)]),
+    ("UseWorkoutFacility", &[("Athletic", 5.0)]),
+    ("WorkOutInGym", &[("Athletic", 5.0)]),
+    ("StudyMusicTheory", &[("Guitar", 4.0), ("Logic", 5.0)]),
+];
+
 impl WorkTone {
-    pub const ALL: [WorkTone; 9] = [
+    pub const ALL: [WorkTone; 17] = [
         WorkTone::Normal,
         WorkTone::WorkHard,
         WorkTone::TakeItEasy,
+        WorkTone::MeetCoworkers,
         WorkTone::Socialize,
         WorkTone::SuckUp,
+        WorkTone::SleepAtWork,
         WorkTone::Study,
         WorkTone::HoldMeetings,
         WorkTone::Perform,
         WorkTone::PrepareForGame,
+        WorkTone::BuildCase,
+        WorkTone::SideJob,
+        WorkTone::Experiment,
+        WorkTone::SleepInReadyRoom,
+        WorkTone::PlayGolf,
+        WorkTone::TakeARisk,
     ];
 
-    /// Whether the job offers it (the game's `ShouldAddTone`: sucking up takes a boss; the
-    /// careers' own, a level that counts what they do).
-    pub fn offered(self, job: &Job) -> bool {
+    /// The career's word for this way of working, where it has one (its `CareerList` column, or
+    /// an extra tone of its own); careers without the game's list, the plain ones.
+    fn word(self, job: &Job) -> Option<&'static str> {
+        let tones = job.career().tones;
+        if tones.is_empty() {
+            return matches!(self, WorkTone::Normal | WorkTone::WorkHard | WorkTone::TakeItEasy | WorkTone::Socialize | WorkTone::SuckUp | WorkTone::Study | WorkTone::HoldMeetings | WorkTone::Perform | WorkTone::PrepareForGame)
+                .then_some("");
+        }
+        let column = |c: &str| tones.iter().find(|t| t.0 == c).map(|t| t.1.as_str());
+        let extra = |words: &[&str]| tones.iter().find(|t| t.0.starts_with("ExtraTone") && words.contains(&t.1.as_str())).map(|t| t.1.as_str());
+        let symphonic = job.path().branch == "Symphonic";
+        match self {
+            WorkTone::Normal => Some(""),
+            WorkTone::WorkHard => column("WorkHardTone"),
+            WorkTone::TakeItEasy => column("TakeItEasyTone"),
+            WorkTone::MeetCoworkers if symphonic => extra(&["MeetTheSymphony"]),
+            WorkTone::MeetCoworkers => column("MeetCoworkersTone"),
+            WorkTone::Socialize if symphonic => extra(&["SocializeWithSymphony"]),
+            WorkTone::Socialize => column("HangWithCoworkersTone").or_else(|| extra(&["ChatWithPartner"])),
+            WorkTone::SuckUp => column("SuckUpToBossTone"),
+            // (Those without one of their own sleep at work all the same, but at the hospital.)
+            WorkTone::SleepAtWork => column("SleepAtWorkTone").or_else(|| (job.career().key != "Medical").then_some("SleepAtWork")),
+            WorkTone::Study => extra(&STUDY_TONES.map(|s| s.0)),
+            WorkTone::HoldMeetings => extra(&["HoldMeetings"]),
+            WorkTone::Perform => extra(&["Perform"]),
+            WorkTone::PrepareForGame => extra(&["PrepareForGame"]),
+            WorkTone::BuildCase => extra(&["BuildIndependentCase"]),
+            WorkTone::SideJob => extra(&["DoASideJob"]),
+            WorkTone::Experiment => extra(&["DoIndependentExperiment"]),
+            WorkTone::SleepInReadyRoom => extra(&["SleepInReadyRoom"]),
+            WorkTone::PlayGolf => extra(&["PlayGolf"]),
+            WorkTone::TakeARisk => extra(&["ProposeNewCourseOfAction"]),
+        }
+    }
+
+    /// Whether the job offers it, to a Sim of these traits (the game's `ShouldAddTone` and
+    /// `Test`: the career has it; sucking up takes a boss; the careers' own, a level that counts
+    /// what they do; sleeping at work, a Heavy or Light Sleeper; golf, the top; a proposal,
+    /// short of it).
+    pub fn offered(self, job: &Job, traits: &[Trait]) -> bool {
+        if self.word(job).is_none() {
+            return false;
+        }
         let counts = |kind: &str| job.info().metrics.iter().any(|m| m.kind == kind);
         match self {
             WorkTone::SuckUp => job.info().has_boss && job.boss.is_some(),
             WorkTone::HoldMeetings => counts("HoldMeetings"),
             WorkTone::Perform => counts("ConcertsPerformed"),
             WorkTone::PrepareForGame => counts("WinLossRecord"),
+            WorkTone::SleepAtWork => traits.contains(&Trait::HeavySleeper) || traits.contains(&Trait::LightSleeper),
+            WorkTone::PlayGolf => job.level + 1 >= 10,
+            WorkTone::TakeARisk => job.level + 1 < 10,
             _ => true,
         }
     }
 
-    pub fn label(self, skill: &str) -> String {
+    /// What it's called in this career (the game's name for it: "Power Work", "Geek Out with
+    /// Fellow Scientists").
+    pub fn label(self, job: &Job) -> String {
+        if let Some(w) = self.word(job).filter(|w| !w.is_empty())
+            && let Some(name) = job.career().tones.iter().find(|t| t.1 == w).map(|t| t.2.as_str()).filter(|n| !n.is_empty())
+        {
+            return name.to_string();
+        }
         match self {
             WorkTone::Normal => "Work Normally".into(),
             WorkTone::WorkHard => "Work Hard".into(),
             WorkTone::TakeItEasy => "Take It Easy".into(),
             WorkTone::Socialize => "Hang With Co-Workers".into(),
             WorkTone::SuckUp => "Suck Up to Boss".into(),
-            WorkTone::Study => format!("Study {skill}"),
+            WorkTone::Study => format!("Study {}", job.career().skill),
             WorkTone::HoldMeetings => "Hold Meetings".into(),
             WorkTone::Perform => "Perform".into(),
             WorkTone::PrepareForGame => "Prepare For Game".into(),
+            WorkTone::MeetCoworkers => "Meet Co-Workers".into(),
+            WorkTone::SleepAtWork => "Sleep at Work".into(),
+            WorkTone::BuildCase => "Build Independent Case".into(),
+            WorkTone::SideJob => "Do a Side Job".into(),
+            WorkTone::Experiment => "Do Independent Experiment".into(),
+            WorkTone::SleepInReadyRoom => "Sleep In Ready Room".into(),
+            WorkTone::PlayGolf => "Play Golf".into(),
+            WorkTone::TakeARisk => "Propose New Course of Action".into(),
+        }
+    }
+
+    /// The skills studying at work practises, points a minute: the career's study tone's, else
+    /// its skill.
+    pub fn study_skills(job: &Job) -> Vec<(&'static str, f32)> {
+        match WorkTone::Study.word(job).and_then(|w| STUDY_TONES.iter().find(|s| s.0 == w)) {
+            Some((_, skills)) => skills.to_vec(),
+            None => vec![(job.career().skill, study_points(job.career().name))],
         }
     }
 
@@ -633,6 +736,14 @@ impl WorkTone {
             WorkTone::HoldMeetings => "HoldMeetings",
             WorkTone::Perform => "Perform",
             WorkTone::PrepareForGame => "PrepareForGame",
+            WorkTone::MeetCoworkers => "MeetCoworkers",
+            WorkTone::SleepAtWork => "SleepAtWork",
+            WorkTone::BuildCase => "BuildCase",
+            WorkTone::SideJob => "SideJob",
+            WorkTone::Experiment => "Experiment",
+            WorkTone::SleepInReadyRoom => "SleepInReadyRoom",
+            WorkTone::PlayGolf => "PlayGolf",
+            WorkTone::TakeARisk => "TakeARisk",
         }
     }
 
@@ -640,13 +751,26 @@ impl WorkTone {
         Self::ALL.into_iter().find(|t| t.name() == s).unwrap_or_default()
     }
 
-    /// Performance an hour it adds (the game's tones: Work Hard +3, Take It Easy -1.5, nothing
-    /// for a Professional Slacker).
+    /// Performance an hour it adds (the game's tones: Work Hard +3, Take It Easy -1.5, sleeping
+    /// at work -3, an independent case -1; nothing off for a Professional Slacker).
     fn performance(self, slacker: bool) -> f32 {
         match self {
             WorkTone::WorkHard => 3.0,
             WorkTone::TakeItEasy if !slacker => -1.5,
+            WorkTone::SleepAtWork if !slacker => -3.0,
+            WorkTone::BuildCase => -1.0,
             _ => 0.0,
+        }
+    }
+
+    /// Needs an hour it gives at work: energy for those asleep (21, 20 in the ready room), fun on
+    /// the golf course (35).
+    pub fn needs_per_hour(self) -> [(usize, f32); 1] {
+        match self {
+            WorkTone::SleepAtWork => [(crate::sim::ENERGY, 21.0)],
+            WorkTone::SleepInReadyRoom => [(crate::sim::ENERGY, 20.0)],
+            WorkTone::PlayGolf => [(FUN, 35.0)],
+            _ => [(FUN, 0.0)],
         }
     }
 }
@@ -817,7 +941,6 @@ pub fn work_schedule(
             if let Some(hh) = household.as_mut() {
                 hh.funds += pay;
             }
-            let track = job.career();
             let workaholic = sim.traits.contains(&Trait::Workaholic);
             // (Who they spent the day with, for the needs below.)
             let boss = job.boss.and_then(|b| ids.get(&b).copied());
@@ -826,13 +949,14 @@ pub fn work_schedule(
             life.write(LifeEvent::new(e, LifeEventKind::HomeFromWork { worse: gain < 0.0 }));
             // Studying the career's skill on the job.
             if job.tone == WorkTone::Study {
-                let sk = track.skill;
-                let points = worked * 60.0 * study_points(track.name) * crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) * mood.skill_rate();
-                if let Some(level) = skills.add_points(sk, points)
-                    && member
-                {
-                    notes.push(format!("{} reached level {level} in {sk}!", sim.first));
-                    life.write(LifeEvent::new(e, LifeEventKind::SkillUp { skill: sk, level }));
+                for (sk, per_minute) in WorkTone::study_skills(&job) {
+                    let points = worked * 60.0 * per_minute * crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) * mood.skill_rate();
+                    if let Some(level) = skills.add_points(sk, points)
+                        && member
+                    {
+                        notes.push(format!("{} reached level {level} in {sk}!", sim.first));
+                        life.write(LifeEvent::new(e, LifeEventKind::SkillUp { skill: sk, level }));
+                    }
                 }
             }
             notes.push(format!("{} is home from work and earned §{pay}.", sim.first));
@@ -859,7 +983,7 @@ pub fn work_schedule(
                 _ => 0.0,
             };
             motives.add(FUN, tone_fun);
-            motives.add(SOCIAL, (10.0 + if job.tone == WorkTone::Socialize { 50.0 } else { 0.0 }) * worked);
+            motives.add(SOCIAL, (10.0 + if matches!(job.tone, WorkTone::Socialize | WorkTone::MeetCoworkers) { 50.0 } else { 0.0 }) * worked);
             // (They've seen their boss and coworkers today.)
             for x in boss.iter().chain(&coworkers) {
                 rels.entry(*x).last = clock.minutes;
@@ -996,19 +1120,20 @@ fn work_flow(
     clock: Res<GameClock>,
     mut commands: Commands,
     mut workers: Query<
-        (Entity, &Sim, &mut Job, &Mood, &Skills, &mut crate::social::Relationships, Option<&crate::wishes::Wishes>, &Motives, &mut crate::life::Moodlets),
+        (Entity, &Sim, &mut Job, &Mood, &Skills, &mut crate::social::Relationships, Option<&crate::wishes::Wishes>, &mut Motives, &mut crate::life::Moodlets),
         (With<AtWork>, With<HouseholdMember>),
     >,
     people: Query<(Entity, &Sim)>,
     mut notes: ResMut<Notifications>,
     ui: Option<Res<crate::layout::UiAssets>>,
+    mut household: Option<ResMut<Household>>,
 ) {
     let hours = delta.0 / 60.0;
     if hours <= 0.0 || workers.is_empty() {
         return;
     }
     let ids: std::collections::HashMap<u64, Entity> = people.iter().map(|(e, s)| (s.id, e)).collect();
-    for (e, sim, mut job, mood, skills, mut rels, wishes, motives, mut moodlets) in &mut workers {
+    for (e, sim, mut job, mood, skills, mut rels, wishes, mut motives, mut moodlets) in &mut workers {
         // (Working hard till there's no fun left: Overworked, and back to working normally, as
         // the game's Work Hard tone; a Workaholic never minds.)
         if job.tone == WorkTone::WorkHard && motives.0[FUN] < -40.0 && !sim.traits.contains(&Trait::Workaholic) {
@@ -1029,6 +1154,27 @@ fn work_flow(
         if job.tone == WorkTone::Socialize && !coworkers.is_empty() {
             let d = 5.0 * charisma_boost(charisma, false) * charm * hours / coworkers.len() as f32;
             warmed.extend(coworkers.iter().map(|c| (*c, d)));
+        }
+        // (The careers' own tones, and what comes of them: `careermetrics`.)
+        for (need, per_hour) in job.tone.needs_per_hour() {
+            motives.add(need, per_hour * hours);
+        }
+        let came = crate::careermetrics::tone_time(&mut job, sim, hours, skills.level("Logic"), ui.as_deref(), &mut rand::rng());
+        if let Some(c) = came {
+            if let Some(h) = household.as_mut() {
+                h.funds += c.money;
+            }
+            if c.boss != 0.0
+                && let Some(b) = boss
+            {
+                warmed.push((b, c.boss));
+            }
+            if c.coworkers != 0.0 {
+                warmed.extend(coworkers.iter().map(|x| (*x, c.coworkers)));
+            }
+            if !c.words.is_empty() {
+                notes.push(c.words);
+            }
         }
         for (x, d) in warmed {
             rels.add(x, d, 0.0);
@@ -1657,6 +1803,7 @@ mod audit {
             for e in c.events.iter().filter(|e| e.kind != "Opportunity") {
                 println!("   EVENT {} {} p {} levels {:?} {} sure {} | {} | yes {:?} no {:?} | {:?} {:?} {:?} chance {} {:?}", e.kind, e.key, e.likelihood, e.levels, e.branch, e.sure, e.text[1], e.yes[0], e.no[0], e.rewards_yes, e.rewards_yes_lose, e.rewards_no, e.chance, e.modifiers);
             }
+            println!("   TONES {:?}", c.tones.iter().map(|t| format!("{}={}", t.1, t.2)).collect::<Vec<_>>());
             let opps: Vec<&str> = c.events.iter().filter(|e| e.kind == "Opportunity").map(|e| e.opportunity.as_str()).collect();
             let known: Vec<&&str> = opps.iter().filter(|g| data.opportunities.iter().any(|o| o.guid == **g)).collect();
             println!("   {} opportunity events, {} of opportunities we have: {:?}", opps.len(), known.len(), known.iter().take(4).collect::<Vec<_>>());

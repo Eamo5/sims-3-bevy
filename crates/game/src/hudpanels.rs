@@ -299,12 +299,11 @@ const CAREER_TABS_HIDDEN: [u32; 5] = [0x0652_5f21, 0x0652_5f22, 0x0652_5f24, 0x0
 pub const TONE_PREFIX: &str = "Tone: ";
 
 /// Opens the work tones for a Sim at work, at a point on screen.
-pub fn open_tones(commands: &mut Commands, pie: &mut crate::hud::PieMenu, sim: Entity, job: &crate::careers::Job, at: Vec2) {
-    let skill = job.career().skill;
+pub fn open_tones(commands: &mut Commands, pie: &mut crate::hud::PieMenu, sim: Entity, traits: &[crate::life::Trait], job: &crate::careers::Job, at: Vec2) {
     let options = crate::careers::WorkTone::ALL
         .into_iter()
-        .filter(|t| t.offered(job))
-        .map(|t| (format!("{TONE_PREFIX}{}{}", t.label(skill), if t == job.tone { " ✓" } else { "" }), crate::interact::ActionKind::EatHere))
+        .filter(|t| t.offered(job, traits))
+        .map(|t| (format!("{TONE_PREFIX}{}{}", t.label(job), if t == job.tone { " ✓" } else { "" }), crate::interact::ActionKind::EatHere))
         .collect();
     pie.submenus.clear();
     pie.at = at;
@@ -351,7 +350,7 @@ fn career_panel(
         && at_work
     {
         let at = windows.single().ok().and_then(|w| w.cursor_position()).unwrap_or(Vec2::new(600.0, 600.0));
-        open_tones(&mut commands, &mut pie, e, j, at);
+        open_tones(&mut commands, &mut pie, e, &sim.traits, j, at);
     }
     for id in [ACTIVE_CAREER, CAREER_HISTORY, DEGREE_HISTORY, CAREER_NO_SCHOOL, CAREER_BOARDING] {
         set_visible(&mut vis, s.id(id), false);
@@ -518,7 +517,7 @@ fn career_panel(
             Some(j) => {
                 let next = j.levels().get(j.level + 1).map_or("the top of the career".to_string(), |n| n.title_for(sim.female).to_string());
                 let pay = j.info().hourly + j.raise;
-                format!("Performance: {:+.0}, towards {next}\nPay: §{pay} an hour\nWorking: {}", j.performance, j.tone.label(j.career().skill))
+                format!("Performance: {:+.0}, towards {next}\nPay: §{pay} an hour\nWorking: {}", j.performance, j.tone.label(j))
             }
             None => format!("Grade: {}\n{}", grades.copied().unwrap_or_default().letter(), homework.map_or_else(|| "No unfinished homework.".into(), |h| format!("Homework: {}% complete", h.0 as u32))),
         };

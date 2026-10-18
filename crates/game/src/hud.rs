@@ -2356,8 +2356,7 @@ fn pie_buttons(
     if let Some(t) = label.strip_prefix(crate::hudpanels::TONE_PREFIX)
         && let Some(mut j) = actor.and_then(|a| jobs.get_mut(a).ok())
     {
-        let skill = j.career().skill;
-        if let Some(tone) = crate::careers::WorkTone::ALL.into_iter().find(|w| t.trim_end_matches(" ✓") == w.label(skill)) {
+        if let Some(tone) = crate::careers::WorkTone::ALL.into_iter().find(|w| t.trim_end_matches(" ✓") == w.label(&j)) {
             j.tone = tone;
         }
         return;

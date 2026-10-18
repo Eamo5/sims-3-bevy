@@ -410,7 +410,7 @@ fn tab_content(
                 p.spawn(text(format!("{next} · Judged on {judged}."), 13.0, Color::srgb(0.8, 0.85, 0.95)));
                 // How they go about their work.
                 p.spawn(Node { column_gap: Val::Px(5.0), row_gap: Val::Px(4.0), flex_wrap: FlexWrap::Wrap, max_width: Val::Px(440.0), ..default() }).with_children(|row| {
-                    for t in crate::careers::WorkTone::ALL.into_iter().filter(|t| t.offered(j)) {
+                    for t in crate::careers::WorkTone::ALL.into_iter().filter(|t| t.offered(j, &sim.traits)) {
                         let on = j.tone == t;
                         row.spawn((
                             Button,
@@ -425,7 +425,7 @@ fn tab_content(
                             BackgroundColor(if on { Color::srgb(0.22, 0.5, 0.22) } else { BTN_NORMAL }),
                         ))
                         .with_children(|b| {
-                            b.spawn((text(t.label(track.skill), 12.0, Color::WHITE), Pickable::IGNORE));
+                            b.spawn((text(t.label(j), 12.0, Color::WHITE), Pickable::IGNORE));
                         });
                     }
                 });

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 141;
+pub const GAMEDATA_VERSION: u32 = 142;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -248,6 +248,10 @@ pub struct CareerInfo {
     /// What can happen at work (the game's `CareerEvents` table).
     #[serde(default)]
     pub events: Vec<CareerEventInfo>,
+    /// Its ways to work (the `CareerList` columns `WorkHardTone`... `ExtraTone5`): each column,
+    /// the tone's word in it ("PowerWork"), and its name ("Power Work").
+    #[serde(default)]
+    pub tones: Vec<(String, String, String)>,
 }
 
 /// One of a career's events at work (a row of the game's `CareerEvents` table): a message with
@@ -3159,6 +3163,13 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 coworkers: (n("MinCoworkers", 2.0) as u8, n("MaxCoworkers", 4.0) as u8),
                 part_time: category == "PartTime",
                 events: career_events(&events_xml, &name_key, &|k| text(&format!("CareerEvents/{name_key}"), k)),
+                tones: ["WorkHardTone", "TakeItEasyTone", "MeetCoworkersTone", "HangWithCoworkersTone", "SuckUpToBossTone", "SleepAtWorkTone", "ExtraTone1", "ExtraTone2", "ExtraTone3", "ExtraTone4", "ExtraTone5"]
+                    .iter()
+                    .filter_map(|c| {
+                        let key = get(f, c);
+                        (!key.is_empty()).then(|| (c.to_string(), key.clone(), text("Careers/CareerList", &key)))
+                    })
+                    .collect(),
                 hex: name_key,
                 levels,
             });
