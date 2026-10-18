@@ -2187,7 +2187,13 @@ fn world_click(
             // (Its real estate: a stake bought, bought out, collected from or sold.)
             jobs_here.extend(crate::realestate::options(&world.data, lot, actor_sim, opp_q.4.as_ref().map_or(0, |h| h.funds), &real_estate));
             // (Its gigs for their job: a meeting held, a concert put on.)
-            jobs_here.extend(crate::careermetrics::options(&world.data, lot, jobs_q.get(actor).ok().flatten(), opp_q.2.hour_f(), mood_q.get(actor).map_or(0.0, |m| m.0)));
+            jobs_here.extend(crate::careermetrics::options(
+                &world.data,
+                lot,
+                jobs_q.get(actor).ok().flatten(),
+                (opp_q.2.day(), opp_q.2.weekday(), opp_q.2.hour_f()),
+                mood_q.get(actor).map_or(0.0, |m| m.0),
+            ));
             if !acts.is_empty() || !opp_tasks.is_empty() || visit || !jobs_here.is_empty() {
                 title = crate::rabbitholes::lot_title(l, world.data.lot_names.get(lot).map_or("", |s| s.as_str()));
                 options.clear();

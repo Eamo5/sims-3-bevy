@@ -578,10 +578,22 @@ pub enum WorkTone {
     /// meetings, an Electric Rock musician's concerts.
     HoldMeetings,
     Perform,
+    /// An athlete readying for the next game (`careermetrics`).
+    PrepareForGame,
 }
 
 impl WorkTone {
-    pub const ALL: [WorkTone; 8] = [WorkTone::Normal, WorkTone::WorkHard, WorkTone::TakeItEasy, WorkTone::Socialize, WorkTone::SuckUp, WorkTone::Study, WorkTone::HoldMeetings, WorkTone::Perform];
+    pub const ALL: [WorkTone; 9] = [
+        WorkTone::Normal,
+        WorkTone::WorkHard,
+        WorkTone::TakeItEasy,
+        WorkTone::Socialize,
+        WorkTone::SuckUp,
+        WorkTone::Study,
+        WorkTone::HoldMeetings,
+        WorkTone::Perform,
+        WorkTone::PrepareForGame,
+    ];
 
     /// Whether the job offers it (the game's `ShouldAddTone`: sucking up takes a boss; the
     /// careers' own, a level that counts what they do).
@@ -591,6 +603,7 @@ impl WorkTone {
             WorkTone::SuckUp => job.info().has_boss && job.boss.is_some(),
             WorkTone::HoldMeetings => counts("HoldMeetings"),
             WorkTone::Perform => counts("ConcertsPerformed"),
+            WorkTone::PrepareForGame => counts("WinLossRecord"),
             _ => true,
         }
     }
@@ -605,6 +618,7 @@ impl WorkTone {
             WorkTone::Study => format!("Study {skill}"),
             WorkTone::HoldMeetings => "Hold Meetings".into(),
             WorkTone::Perform => "Perform".into(),
+            WorkTone::PrepareForGame => "Prepare For Game".into(),
         }
     }
 
@@ -618,6 +632,7 @@ impl WorkTone {
             WorkTone::Study => "Study",
             WorkTone::HoldMeetings => "HoldMeetings",
             WorkTone::Perform => "Perform",
+            WorkTone::PrepareForGame => "PrepareForGame",
         }
     }
 
@@ -718,8 +733,10 @@ impl Job {
         let l = self.info();
         if l.end > l.start { l.end - l.start } else { l.end + 24.0 - l.start }
     }
+    /// Whether it's a day at work (an athlete's game day is the stadium's instead:
+    /// `careermetrics`).
     pub fn works_on(&self, weekday: usize) -> bool {
-        self.info().days & (1 << weekday) != 0
+        self.info().days & (1 << weekday) != 0 && !crate::careermetrics::game_day(self, weekday)
     }
     /// e.g. "Business — Junior Clerk (level 2)".
     pub fn describe(&self) -> String {
@@ -1033,6 +1050,7 @@ fn work_flow(
                     notes.push(crate::careermetrics::concert_words(ui.as_deref(), sim));
                 }
             }
+            WorkTone::PrepareForGame => job.tally.prepare(hours),
             _ => {}
         }
         let scores = metric_scores(job.info(), mood.0, skills, &rels, boss, &coworkers, &job.tally, clock.day());
