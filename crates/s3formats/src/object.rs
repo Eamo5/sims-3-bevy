@@ -58,12 +58,30 @@ pub fn objd_keys(d: &[u8]) -> R<Vec<ResourceKey>> {
     tgi_table_at(d, 4)
 }
 
-/// Resolves the OBJK of an object definition.
+/// A key as a pack's patches write the keys of the pack's own resources: without the pack's
+/// byte (World Adventures' 0x08: the group's top byte, and the instance's fourth), which the game
+/// takes from the resource naming it (`pack`, the top byte of its group). As written when that's
+/// there; else with the pack's byte, when that is.
+pub fn in_pack(pkgs: &PackageSet, k: ResourceKey, pack: u32) -> ResourceKey {
+    let there = |k: &ResourceKey| pkgs.get_entry(k).is_some() || pkgs.find_ti(k.t, k.i).is_some();
+    if pack == 0 || k.g >> 24 != 0 || there(&k) {
+        return k;
+    }
+    let p = ResourceKey::new(k.t, k.g | pack << 24, k.i | (pack as u64) << 24);
+    if there(&p) { p } else { k }
+}
+
+/// Resolves the OBJK of an object definition (its keys in its pack, as the game reads them: see
+/// [`in_pack`]).
 pub fn objd_objk(pkgs: &PackageSet, objd: &[u8]) -> Option<ObjKey> {
     let keys = objd_keys(objd).ok()?;
     let k = keys.iter().find(|k| k.t == types::OBJK)?;
     let data = pkgs.read(k).or_else(|| pkgs.read_ti(k.t, k.i))?;
-    parse_objk(&data).ok()
+    let mut o = parse_objk(&data).ok()?;
+    let pack = k.g >> 24;
+    o.model_key = o.model_key.map(|m| in_pack(pkgs, m, pack));
+    o.footprint_key = o.footprint_key.map(|m| in_pack(pkgs, m, pack));
+    Some(o)
 }
 
 /// Finds the MODL resources making up an object, given its OBJD key.
@@ -75,7 +93,7 @@ pub fn object_models(pkgs: &PackageSet, objd_key: &ResourceKey) -> Vec<ResourceK
         types::VPXY => pkgs
             .read(&mk)
             .or_else(|| pkgs.read_ti(mk.t, mk.i))
-            .map(|d| crate::model::vpxy_models(&d))
+            .map(|d| crate::model::vpxy_models(&d).into_iter().map(|m| in_pack(pkgs, m, mk.g >> 24)).collect())
             .unwrap_or_default(),
         types::MODL => vec![mk],
         _ => Vec::new(),
@@ -89,7 +107,7 @@ pub fn object_fx_slots(pkgs: &PackageSet, objd_key: &ResourceKey) -> Vec<[f32; 3
     let Some(objk) = objd_objk(pkgs, &objd) else { return Vec::new() };
     let Some(mk) = objk.model_key.filter(|k| k.t == types::VPXY) else { return Vec::new() };
     let Some(v) = pkgs.read(&mk).or_else(|| pkgs.read_ti(mk.t, mk.i)) else { return Vec::new() };
-    let Some(rk) = crate::model::vpxy_keys(&v).into_iter().find(|k| k.t == crate::model::T_RSLT) else { return Vec::new() };
+    let Some(rk) = crate::model::vpxy_keys(&v).into_iter().find(|k| k.t == crate::model::T_RSLT).map(|k| in_pack(pkgs, k, mk.g >> 24)) else { return Vec::new() };
     pkgs.read(&rk).or_else(|| pkgs.read_ti(rk.t, rk.i)).and_then(|d| crate::model::parse_rslt(&d)).map(|s| s.effects.iter().map(|e| e.pos).collect()).unwrap_or_default()
 }
 
@@ -100,7 +118,7 @@ pub fn object_container_slots(pkgs: &PackageSet, objd_key: &ResourceKey) -> Vec<
     let Some(objk) = objd_objk(pkgs, &objd) else { return Vec::new() };
     let Some(mk) = objk.model_key.filter(|k| k.t == types::VPXY) else { return Vec::new() };
     let Some(v) = pkgs.read(&mk).or_else(|| pkgs.read_ti(mk.t, mk.i)) else { return Vec::new() };
-    let Some(rk) = crate::model::vpxy_keys(&v).into_iter().find(|k| k.t == crate::model::T_RSLT) else { return Vec::new() };
+    let Some(rk) = crate::model::vpxy_keys(&v).into_iter().find(|k| k.t == crate::model::T_RSLT).map(|k| in_pack(pkgs, k, mk.g >> 24)) else { return Vec::new() };
     pkgs.read(&rk).or_else(|| pkgs.read_ti(rk.t, rk.i)).and_then(|d| crate::model::parse_rslt(&d)).map(|s| s.containers).unwrap_or_default()
 }
 
@@ -111,7 +129,7 @@ pub fn object_route_slots(pkgs: &PackageSet, objd_key: &ResourceKey) -> Vec<(u8,
     let Some(objk) = objd_objk(pkgs, &objd) else { return Vec::new() };
     let Some(mk) = objk.model_key.filter(|k| k.t == types::VPXY) else { return Vec::new() };
     let Some(v) = pkgs.read(&mk).or_else(|| pkgs.read_ti(mk.t, mk.i)) else { return Vec::new() };
-    let Some(rk) = crate::model::vpxy_keys(&v).into_iter().find(|k| k.t == crate::model::T_RSLT) else { return Vec::new() };
+    let Some(rk) = crate::model::vpxy_keys(&v).into_iter().find(|k| k.t == crate::model::T_RSLT).map(|k| in_pack(pkgs, k, mk.g >> 24)) else { return Vec::new() };
     let Some(slots) = pkgs.read(&rk).or_else(|| pkgs.read_ti(rk.t, rk.i)).and_then(|d| crate::model::parse_rslt(&d)) else { return Vec::new() };
     let mut out: Vec<(u8, [f32; 3], [f32; 3])> = slots
         .routing
