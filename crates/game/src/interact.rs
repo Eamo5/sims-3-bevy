@@ -1238,6 +1238,8 @@ pub enum Special {
     PayBills,
     /// Read the paper (then recycle it).
     ReadPaper,
+    /// A Frugal Sim clipping the paper's coupon (`coupons`).
+    ClipCoupon,
     /// Garden plants.
     Water,
     Weed,
@@ -1447,11 +1449,13 @@ static MAILBOX: [InteractionDef; 4] = [InteractionDef { special: Special::PayBil
     // (A gem or metal posted off to be cut or smelted, from the inventory: `rgmmail`.)
     InteractionDef { autonomous: false, special: Special::PostAway, ..def("Post", 2.0, N, Pose::Use) },
 ];
-static NEWSPAPER: [InteractionDef; 3] = [
+static NEWSPAPER: [InteractionDef; 4] = [
     InteractionDef { special: Special::GetPaper, ..def("Read", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 45.0], Pose::Use) },
     InteractionDef { special: Special::FindJob, ..def("Find a Job", 10.0, N, Pose::Use) },
     // (Read where it lay when there's no seat free: never on the menu.)
     READ_PAPER,
+    // (The Frugal's, while the paper has its coupon: `coupons`.)
+    InteractionDef { special: Special::ClipCoupon, ..def("Clip Coupon", 5.0, N, Pose::Use) },
 ];
 /// (The paper read: in a seat, or standing.)
 const READ_PAPER: InteractionDef = InteractionDef { autonomous: false, special: Special::ReadPaper, ..def("Read the Paper", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 45.0], Pose::Use) };
@@ -2129,6 +2133,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Fish" if kind == ObjectKind::FishingSpot => {
             A::new(Some("a2o_fishHereWith_cast_normal_x"), &["a2o_fishHereWith_idle1_x", "a2o_fishHereWith_idle2_x", "a2o_fishHereWith_idle3_x"])
         }
+        "Clip Coupon" if kind == ObjectKind::Newspaper => A::new(None, &["a2o_newspaper_clipCoupon_standing_x"]),
         "Read" if kind == ObjectKind::Newspaper => A::steps("a2o_newspaper_pickUp_floor_part1_x", &["a2o_newspaper_pickUp_floor_part2_x"], &["a2o_newspaper_carry_x"]),
         "Read the Paper" if matches!(kind, ObjectKind::Sofa | ObjectKind::Chair | ObjectKind::Stool) => {
             A::new(Some("a2o_newspaper_read_seated_start_x"), &["a2o_newspaper_read_seated_loop"]).ending(&["a2o_newspaper_read_seated_stop_x"], 3.0)
@@ -4885,6 +4890,9 @@ pub(crate) fn run_actions(
                                             };
                                             commands.entity(me).insert(crate::meals::MicrowaveDone(*target));
                                         }
+                                        Special::ClipCoupon => {
+                                            commands.entity(me).insert(crate::coupons::ClipNow(*target));
+                                        }
                                         Special::None | Special::BubbleBath | Special::Ducky | Special::VampireOnly => {}
                                         Special::Clear => {
                                             commands.entity(*target).try_despawn();
@@ -5984,6 +5992,8 @@ pub fn hour_label(h: f32) -> String {
 /// turn it off when nobody is.
 const STEREO_EARSHOT: f32 = 10.0;
 const FRUGAL_TURN_OFF: f32 = 18.0;
+/// How keen a Frugal Sim is to clip the paper's coupon.
+const CLIP_COUPON: f32 = 16.0;
 
 /// Sims with free will pick something to satisfy their lowest needs when idle.
 #[allow(clippy::type_complexity)]
@@ -6013,7 +6023,14 @@ fn autonomy(
         Query<&crate::grime::Grime>,
     ),
     hh: Option<Res<Household>>,
-    (broken, plant_q, lit_q, hw_q, stereos_on): (Query<(), With<Broken>>, Query<&crate::gardening::GrowingPlant>, Query<(), With<crate::fireplace::Lit>>, Query<(), With<crate::rabbitholes::Homework>>, Query<(), With<crate::music::StereoOn>>),
+    (broken, plant_q, lit_q, hw_q, stereos_on, coupons): (
+        Query<(), With<Broken>>,
+        Query<&crate::gardening::GrowingPlant>,
+        Query<(), With<crate::fireplace::Lit>>,
+        Query<(), With<crate::rabbitholes::Homework>>,
+        Query<(), With<crate::music::StereoOn>>,
+        Res<crate::coupons::Coupons>,
+    ),
     (party_on, trash_q, served_q, leftovers, sprinkling, route_failed): (
         Option<Res<Party>>,
         Query<&crate::surroundings::TrashFill>,
@@ -6180,6 +6197,10 @@ fn autonomy(
                     continue;
                 }
                 if !d.autonomous || (shared && whole_of(obj.kind, di)) {
+                    continue;
+                }
+                // (The paper's coupon: the Frugal's to clip, once.)
+                if d.special == Special::ClipCoupon && !coupons.offers(sim, oe) {
                     continue;
                 }
                 // (A potty chair: sat on by toddlers trained to, emptied by grown-ups once used.)
@@ -6464,6 +6485,9 @@ fn autonomy(
                     } else {
                         1.5
                     };
+                }
+                if d.special == Special::ClipCoupon {
+                    score = CLIP_COUPON;
                 }
                 if d.special == Special::PutAway {
                     score = if sim.traits.contains(&crate::life::Trait::Neat) { 30.0 } else { 12.0 };

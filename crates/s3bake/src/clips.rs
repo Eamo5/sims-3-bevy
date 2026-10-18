@@ -416,6 +416,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_newspaper_pickUp_floor",
     "a2o_newspaper_carry_x",
     "a2o_newspaper_carry_newspaper",
+    // (A Frugal Sim clipping the paper's coupon: `coupons`.)
+    "a2o_newspaper_clipCoupon_standing_x",
     "c2o_bookshelf_getBook_Carry",
     "a2o_mirror_full_checkSelfOut",
     // (The rest of the game's `Mirror` state machine: primping, and faces pulled; the children's

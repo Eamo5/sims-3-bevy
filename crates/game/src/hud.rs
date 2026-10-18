@@ -1074,7 +1074,7 @@ fn world_click(
         Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes))): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons))): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1100,7 +1100,7 @@ fn world_click(
             Query<(Has<crate::effects::TvOn>, Has<crate::effects::TvLeftOn>)>,
             (Option<Res<crate::layout::UiAssets>>, Query<&crate::charity::Charities>),
             (Query<&crate::life::Mood>, Query<(), With<crate::dollhouse::Smashed>>, Query<&crate::hotdrinks::DrinkTray>, Query<&crate::paintings::LeftOnEasel>, Query<&crate::lights::Lamp>),
-            (Res<crate::trashcans::CanOwners>, Res<crate::trashcans::Rummaged>, Query<(), With<crate::trashcans::TippedOver>>, Res<crate::homes::FamilyHomes>),
+            (Res<crate::trashcans::CanOwners>, Res<crate::trashcans::Rummaged>, Query<(), With<crate::trashcans::TippedOver>>, Res<crate::homes::FamilyHomes>, Res<crate::coupons::Coupons>),
         ),
     ),
     world: Res<CurrentWorld>,
@@ -1856,6 +1856,10 @@ fn world_click(
                 }
                 // (An empty trash can has nothing to take out.)
                 if d.special == Special::Leftovers && leftovers.0.is_empty() {
+                    continue;
+                }
+                // (The paper's coupon: the Frugal's to clip, once.)
+                if d.special == Special::ClipCoupon && !coupons.offers(actor_sim, t) {
                     continue;
                 }
                 // (A fridge cleaned out with something in it gone off: teens and up.)

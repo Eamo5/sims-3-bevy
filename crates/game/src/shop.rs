@@ -14,8 +14,9 @@
 //! Bargainer or a Haggler), each a book for the household's shelves (a recipe's, learned).
 //!
 //! A row is picked, and added ("Add to Cart", or picked again); a line of the cart, clicked,
-//! comes off it. The cart shows each line's count and cost, the total and the household's
-//! funds; "Purchase" pays and puts what's bought in the shopper's inventory, Nice
+//! comes off it. A coupon the shopper holds for something (`coupons`) makes one of it the
+//! coupon's price, and is used up on paying. The cart shows each line's count and cost, the total
+//! and the household's funds; "Purchase" pays and puts what's bought in the shopper's inventory, Nice
 //! (`kQualityOfPurchesdIngredients`), or sells what's on the list. The close button leaves.
 
 use bevy::prelude::*;
@@ -512,7 +513,22 @@ fn shop_dialog(
         changed = true;
     }
     let list = if selling { d.sell.clone() } else { d.buy.clone() };
-    let priced: Vec<(String, u32, i64)> = list.iter().filter_map(|(l, n)| line_info(&data, inv.as_ref(), wishes.as_ref(), l).map(|(name, each)| (name, *n, each * *n as i64))).collect();
+    // (One of what there's a coupon for at the coupon's price.)
+    let coupon = |l: &Line| match (selling, inv.as_ref(), l) {
+        (false, Some(inv), Line::Buy(k)) => crate::coupons::held(inv, crate::coupons::GROCERY, k),
+        (false, Some(inv), Line::Novel(k) | Line::SkillBook(k) | Line::RecipeBook(k)) => crate::coupons::held(inv, crate::coupons::BOOKSTORE, k),
+        _ => None,
+    };
+    let priced: Vec<(String, u32, i64)> = list
+        .iter()
+        .filter_map(|(l, n)| {
+            line_info(&data, inv.as_ref(), wishes.as_ref(), l).map(|(name, each)| match coupon(l) {
+                Some((_, with)) => (format!("{name} (Coupon)"), *n, with + each * (*n as i64 - 1)),
+                None => (name, *n, each * *n as i64),
+            })
+        })
+        .collect();
+    let used: Vec<usize> = list.iter().filter_map(|(l, _)| coupon(l).map(|c| c.0)).collect();
     let total: i64 = priced.iter().map(|p| p.2).sum();
     let funds = household.as_ref().map_or(0, |h| h.funds);
     // Purchase: paid, and in their inventory; or sold.
@@ -542,6 +558,16 @@ fn shop_dialog(
         } else {
             if let Some(h) = household.as_mut() {
                 h.funds -= total;
+            }
+            // (The coupons used, gone.)
+            if !used.is_empty()
+                && let Ok((_, Some(mut inv), ..)) = shoppers.get_mut(me)
+            {
+                let mut used = used.clone();
+                used.sort_unstable();
+                for i in used.into_iter().rev() {
+                    inv.take_one(i);
+                }
             }
             // (Books: on the household's shelves, a recipe's learned.)
             if let Ok((_, _, _, known, (novels, skill_books, _, _))) = shoppers.get_mut(me) {

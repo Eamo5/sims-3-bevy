@@ -36,6 +36,9 @@ pub enum ItemKind {
     Object,
     /// Something kept, by its catalogue object (a Death Flower): sold, if not kept.
     Keepsake,
+    /// A coupon clipped from the paper (`coupons`): its store, item and day in its key, its
+    /// discount as its quality, the item's price with it as its worth. Not to be sold.
+    Coupon,
 }
 
 /// Items of one kind (and, for produce, one quality).
@@ -169,8 +172,9 @@ pub fn stack_picture(
         return crate::paintings::image(pictures, images, &baked?.0, s).map(|(h, r)| (h, Some(r)));
     }
     let ui = ui?;
-    if matches!(s.kind, ItemKind::Reward | ItemKind::Object | ItemKind::Keepsake) {
-        let objd = baked?.0.catalog.iter().find(|c| c.instance_name == s.key)?.objd;
+    if matches!(s.kind, ItemKind::Reward | ItemKind::Object | ItemKind::Keepsake | ItemKind::Coupon) {
+        let name = if s.kind == ItemKind::Coupon { "Coupon" } else { s.key.as_str() };
+        let objd = baked?.0.catalog.iter().find(|c| c.instance_name == name)?.objd;
         return ui.icon(images, &s3bake::gamedata::thumb_name(objd.2)).map(|h| (h, None));
     }
     if s.kind == ItemKind::Produce {
@@ -186,7 +190,7 @@ pub fn stack_picture(
 /// painting, placing a reward.
 pub fn stack_actions(sim: &Sim, s: &Stack) -> Vec<(String, ItemButton)> {
     let mut out = Vec::new();
-    if s.kind != ItemKind::Reward {
+    if !matches!(s.kind, ItemKind::Reward | ItemKind::Coupon) {
         out.push((format!("Sell (§{})", s.each()), ItemButton::SellOne));
         if s.count > 1 {
             out.push((format!("Sell All (§{})", s.worth), ItemButton::SellAll));
