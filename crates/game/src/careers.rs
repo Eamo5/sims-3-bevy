@@ -826,6 +826,7 @@ pub fn work_schedule(
             } else if job.performance >= 100.0 {
                 // (At the top, a raise instead, and back to work at it.)
                 job.give_raise();
+                job.tally.new_level();
                 job.performance = 0.0;
                 notes.push(format!("{} got a raise for outstanding work: §{} an hour now.", sim.first, info.hourly + job.raise));
             }
@@ -1172,6 +1173,7 @@ fn promote(
     let bonus = if first { (track.bonus_hours * (job.info().hourly + job.raise) as f32) as i64 } else { 0 };
     job.reward_due |= first;
     job.level += 1;
+    job.tally.new_level();
     job.highest = job.highest.max(job.level);
     job.performance = 0.0;
     job.warned_at = None;
@@ -1394,6 +1396,7 @@ fn give_rewards(
             "CareerPromotion" => job.promote = true,
             "CareerDemotion" if job.level > 0 => {
                 job.level -= 1;
+                job.tally.new_level();
                 job.performance = 0.0;
                 notes.push(format!("{} was demoted to {}.", sim.first, job.info().title_for(sim.female)));
                 life.write(LifeEvent::new(e, LifeEventKind::Demoted));
@@ -1589,6 +1592,7 @@ fn demotion(commands: &mut Commands, notes: &mut Notifications, life: &mut Messa
         }
         Review::Demoted => {
             job.level -= 1;
+            job.tally.new_level();
             job.performance = 0.0;
             motives.add(FUN, -50.0);
             notes.push(format!("{} was demoted to {}.", sim.first, job.info().title_for(sim.female)));

@@ -4229,11 +4229,12 @@ fn auto_action(
     }
     // "Social:<name>": the selected Sim does this social three times with another grown-up of
     // the household (or a visitor), as friends ("Social:<a>;<b>;...": each of those once).
-    // (`Social@<first name>:<social>`: with that Sim.)
+    // (`Social@<first name>:<social>`: with that Sim; `Social@visitor:...`, with a visitor.)
     let named = name.strip_prefix("Social@").and_then(|r| r.split_once(':'));
     if let Some(list) = name.strip_prefix("Social:").or(named.map(|n| n.1)) {
         let me = sel_e.single().unwrap();
         let target = match named {
+            Some(("visitor", _)) => visitors.iter().next(),
             Some((who, _)) => members.iter().find(|(e, s)| *e != me && s.first.eq_ignore_ascii_case(who)).map(|(e, _)| e),
             None => members.iter().find(|(e, s)| *e != me && s.age.is_grown() && s.age != crate::sim::Age::Child).map(|(e, _)| e).or_else(|| visitors.iter().next()),
         };

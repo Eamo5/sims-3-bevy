@@ -11,6 +11,11 @@
 //!   "Perform Concert" at the theatre (two hours) or the stadium (four), from three in the
 //!   afternoon till eleven, for anyone on the Electric Rock path: one more, and at the top of the
 //!   career, paid (§600 or §1,600, give or take half: `kPerformConcertPayoff`).
+//! - Funding (Political, levels 5 and up: `MetricCampaignMoney`): what's been raised since the
+//!   last promotion or demotion. "Ask for Campaign Donation" of someone not of the household,
+//!   taken well, brings in a fortieth of their household's worth, more the more the asker likes
+//!   them (`kDonationPercent`, `kCampaignDonationLTRMultiplier`), at most §10,000 (`kDonationMax`),
+//!   with the game's words.
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -45,6 +50,9 @@ pub struct Tally {
     pub concerts: u32,
     #[serde(default)]
     pub concert_prep: f32,
+    /// Campaign money raised at this level (Political: `CampaignMoneyRaised`).
+    #[serde(default)]
+    pub campaign: i64,
 }
 
 /// How many days back meetings count (`kWindowForRememberingMeetings`), and today.
@@ -78,8 +86,15 @@ impl Tally {
         match kind {
             "HoldMeetings" => Some(self.meetings_held(today) as f32),
             "ConcertsPerformed" => Some(self.concerts as f32),
+            "CampaignMoney" => Some(self.campaign as f32),
             _ => None,
         }
+    }
+
+    /// A new level (a promotion, a demotion, a raise at the top): what's counted for it alone
+    /// starts again (the game's `SetLevel`).
+    pub fn new_level(&mut self) {
+        self.campaign = 0;
     }
 
     /// Hours of the Hold Meetings tone: the meetings they come to.
@@ -104,6 +119,42 @@ impl Tally {
         }
         false
     }
+}
+
+/// A campaign donation: a share of the giver's household's worth, the more the asker's liked
+/// (liking -100 to 100: none to twice it), at most the game's most.
+pub fn donation(worth: i64, liking: f32) -> i64 {
+    (worth.max(0) as f32 * DONATION_SHARE * (1.0 + liking.clamp(-100.0, 100.0) / 100.0)).round().min(DONATION_MAX as f32) as i64
+}
+
+/// The donation's share and most (the Political tuning's), and what a household's worth where
+/// the town's Sims haven't the game's own.
+const DONATION_SHARE: f32 = 0.025;
+const DONATION_MAX: i64 = 10_000;
+pub const TOWNIE_WORTH: i64 = 20_000;
+
+/// Who's asked for campaign money: a Political Sim of level 5 or more (the game's
+/// `kCampaignDonationLevel`), the topic their socials go by.
+pub fn campaigning(career: Option<usize>, level: usize) -> bool {
+    career.and_then(|c| crate::careers::careers().get(c)).is_some_and(|t| t.key == "Political") && level + 1 >= 5
+}
+
+/// A donation given (to `asker`, by `giver`): into the campaign fund, with the game's words.
+pub fn donate(w: &mut World, asker: Entity, giver: Entity, liking: f32) {
+    let Some(id) = w.get::<Sim>(giver).map(|s| s.id) else { return };
+    let giver_name = w.get::<Sim>(giver).map(|s| s.full_name()).unwrap_or_default();
+    let worth = w.get_resource::<crate::premade::TownPremades>().and_then(|t| t.0.households.iter().find(|h| h.members.iter().any(|m| m.id == id)).map(|h| h.funds)).unwrap_or(TOWNIE_WORTH);
+    let n = donation(worth, liking);
+    let Some(first) = w.get::<Sim>(asker).map(|s| s.first.clone()) else { return };
+    let Some(mut job) = w.get_mut::<Job>(asker) else { return };
+    job.tally.campaign += n;
+    let total = job.tally.campaign;
+    info!("{giver_name} donated §{n} to {first}'s campaign (§{total})");
+    let text = w.get_resource::<crate::layout::UiAssets>().and_then(|u| u.localize("Gameplay/Careers/Political:DonateText")).map_or_else(
+        || format!("{giver_name} just donated §{n} to {first}'s campaign fund. The fund now has a total of §{total}."),
+        |t| t.replace("{0.SimName}", &giver_name).replace("{1.Money}", &format!("§{n}")).replace("{2.SimFirstName}", &first).replace("{3.Money}", &format!("§{total}")),
+    );
+    w.resource_mut::<Notifications>().push(text);
 }
 
 /// The game's words for a concert readied at work, a man's and a woman's.
@@ -299,6 +350,17 @@ mod tests {
         assert_eq!(t.meeting_tone(2.5, 18), 2);
         assert_eq!(t.meetings_held(18), 3);
         assert_eq!(t.value("HoldMeetings", 18), Some(3.0));
+    }
+
+    #[test]
+    fn donations_by_worth_and_liking() {
+        assert_eq!(donation(100_000, 0.0), 2500);
+        assert_eq!(donation(100_000, 100.0), 5000);
+        assert_eq!(donation(100_000, -100.0), 0);
+        assert_eq!(donation(10_000_000, 50.0), 10_000, "at most the game's most");
+        let mut t = Tally { campaign: 4000, concerts: 3, ..Default::default() };
+        t.new_level();
+        assert_eq!((t.campaign, t.concerts), (0, 3), "concerts are the career's");
     }
 
     #[test]

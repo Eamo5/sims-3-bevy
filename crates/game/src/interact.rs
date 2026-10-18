@@ -5048,6 +5048,11 @@ pub(crate) fn run_actions(
                                     let t_member = who.get(target).is_some_and(|w| w.2);
                                     match s.effect {
                                         // (An opportunity's delivery made: `opportunities`.)
+                                        // (Money for the campaign, asked for and given: `careermetrics`.)
+                                        SocialEffect::CampaignDonation if action.social_outcome.is_none_or(|o| o.accepted) => {
+                                            let (giver, liking) = (*target, rel.friendship);
+                                            commands.queue(move |w: &mut World| crate::careermetrics::donate(w, me, giver, liking));
+                                        }
                                         SocialEffect::DeliverOpportunity => {
                                             debug!("{} delivered to {tname}", sim.first);
                                             life.write(LifeEvent::new(me, LifeEventKind::Delivered { other: *target }));

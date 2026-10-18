@@ -297,6 +297,9 @@ pub enum SocialEffect {
     /// An opportunity's delivery (the game's "Deliver Opportunity": `kDeliveredToSim`), offered
     /// to the Sim it's for, under the opportunity's own words.
     DeliverOpportunity,
+    /// Money for a Political Sim's campaign (the game's "Ask for Campaign Donation": its
+    /// `CampaignDonation`), taken well: `careermetrics`.
+    CampaignDonation,
 }
 
 /// What a Mooch gets out of others (the game's `MoochAmount`, at the hidden Mooch skill's first
@@ -321,6 +324,7 @@ const GAME_EFFECTS: &[(&str, SocialEffect)] = &[
     ("Accuse of Cheating", SocialEffect::Accuse),
     ("Confess Cheating", SocialEffect::Confess),
     ("Deliver Opportunity", SocialEffect::DeliverOpportunity),
+    ("Ask for Campaign Donation", SocialEffect::CampaignDonation),
 ];
 
 pub struct SocialDef {
@@ -389,6 +393,8 @@ pub enum Topic {
     /// The line of work the other's in (the game's "Learn About ... Career": what's said of it
     /// once known), by a word of its name.
     Career(&'static str),
+    /// A Political Sim's campaign (the game's "Campaign Donation": `HasCampaignDonationTopic`).
+    Campaign,
     Event(&'static str),
 }
 
@@ -412,6 +418,8 @@ pub enum GameTest {
     /// confessing: the one saying it.
     Accuse,
     Confess,
+    /// Not of the household (the game's `TestCampaignDonation`: not a playable Sim).
+    NotHousehold,
 }
 
 /// What's known of a Sim for the game's socials beyond their `Sim`: who they are, their
@@ -509,6 +517,7 @@ fn topic(name: &str) -> Option<Topic> {
         "Same Household" => Some(Topic::SameHousehold),
         "Adult to Child" => Some(Topic::AdultToChild),
         "Work General" => Some(Topic::SameWork),
+        "Campaign Donation" => Some(Topic::Campaign),
         "" => None,
         g if g.starts_with("Greet Charisma Level ") => g["Greet Charisma Level ".len()..].trim().parse().ok().map(Topic::Charisma),
         g if g.starts_with("Learn ") && g.ends_with(" Career") => {
@@ -727,6 +736,7 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
             "TestAskForPromotion" => Some(GameTest::BossBelowNine),
             "TestAccuseOfCheating" => Some(GameTest::Accuse),
             "TestConfessCheating" => Some(GameTest::Confess),
+            "TestCampaignDonation" => Some(GameTest::NotHousehold),
             // (What's said of a line of work: its topic is the other's being in it.)
             t if t.starts_with("TargetHas") && t.ends_with("Career") && a.topics.iter().any(|(n, _)| n.starts_with("Learn ")) => None,
             _ => continue,
@@ -883,6 +893,7 @@ pub fn topic_holds(t: Topic, first: bool, actor: &Sim, target: &Sim, target_in_h
         Topic::SameWork => side[0].career.is_some() && side[0].career == side[1].career,
         Topic::Charisma(level) => first && side[0].charisma == level,
         Topic::Career(word) => side[1].career.is_some_and(|c| career_is(c, word)),
+        Topic::Campaign => crate::careermetrics::campaigning(me.career, me.level),
         Topic::Event(name) => me.topics.and_then(|t| t.get(name)).is_some_and(|h| {
             !other.sim.is_some_and(|o| h.used_with.contains(&o)) && (test != Some(GameTest::About) || (h.about.is_some() && h.about == other.sim))
         }),
@@ -992,6 +1003,7 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
                 Some(GameTest::TargetWorks) => side[1].career.is_none(),
                 Some(GameTest::NotPartner) => matches!(rel.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married),
                 Some(GameTest::Boss) => side[0].boss != Some(target.id),
+                Some(GameTest::NotHousehold) => side[1].member,
                 Some(GameTest::BossBelowNine) => side[0].boss != Some(target.id) || side[0].level + 1 >= 9,
                 Some(GameTest::Accuse) => !rel.is_romance() || side[1].rels.is_none_or(|r| r.romances() < 2) || rel.betrayed.is_some(),
                 Some(GameTest::Confess) => {
