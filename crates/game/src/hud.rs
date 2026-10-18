@@ -1074,7 +1074,7 @@ fn world_click(
         Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
     selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
-    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons))): (
+    (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons, real_estate))): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
         Query<crate::social::SideQuery>,
@@ -1100,7 +1100,7 @@ fn world_click(
             Query<(Has<crate::effects::TvOn>, Has<crate::effects::TvLeftOn>)>,
             (Option<Res<crate::layout::UiAssets>>, Query<&crate::charity::Charities>),
             (Query<&crate::life::Mood>, Query<(), With<crate::dollhouse::Smashed>>, Query<&crate::hotdrinks::DrinkTray>, Query<&crate::paintings::LeftOnEasel>, Query<&crate::lights::Lamp>),
-            (Res<crate::trashcans::CanOwners>, Res<crate::trashcans::Rummaged>, Query<(), With<crate::trashcans::TippedOver>>, Res<crate::homes::FamilyHomes>, Res<crate::coupons::Coupons>),
+            (Res<crate::trashcans::CanOwners>, Res<crate::trashcans::Rummaged>, Query<(), With<crate::trashcans::TippedOver>>, Res<crate::homes::FamilyHomes>, Res<crate::coupons::Coupons>, Res<crate::realestate::RealEstate>),
         ),
     ),
     world: Res<CurrentWorld>,
@@ -2179,7 +2179,9 @@ fn world_click(
             }
             let visit = crate::visit::visitable(&world.data, lot);
             // (Its careers: joined there, or quit or retired from by those who work there.)
-            let jobs_here = crate::careerholes::options(&world.data, lot, actor_sim, jobs_q.get(actor).ok().flatten());
+            let mut jobs_here = crate::careerholes::options(&world.data, lot, actor_sim, jobs_q.get(actor).ok().flatten());
+            // (Its real estate: a stake bought, bought out, collected from or sold.)
+            jobs_here.extend(crate::realestate::options(&world.data, lot, actor_sim, opp_q.4.as_ref().map_or(0, |h| h.funds), &real_estate));
             if !acts.is_empty() || !opp_tasks.is_empty() || visit || !jobs_here.is_empty() {
                 title = crate::rabbitholes::lot_title(l, world.data.lot_names.get(lot).map_or("", |s| s.as_str()));
                 options.clear();

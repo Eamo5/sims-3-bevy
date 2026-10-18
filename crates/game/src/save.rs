@@ -511,6 +511,9 @@ pub struct SaveGame {
     /// What's been discovered through telescopes (`telescope`).
     #[serde(default)]
     pub discoveries: crate::telescope::Discoveries,
+    /// The household's stakes in the town's rabbit holes (`realestate`).
+    #[serde(default)]
+    pub real_estate: crate::realestate::RealEstate,
     /// Tombstones on the lot, with who lies there.
     #[serde(default)]
     pub graves: Vec<SavedGrave>,
@@ -988,11 +991,11 @@ fn save_game(
     ),
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
-    (story, alarm, bowls, (leftovers, fridge), weather, pets, pet_data): (
+    (story, alarm, bowls, (leftovers, fridge, real_estate), weather, pets, pet_data): (
         Res<crate::story::TownStory>,
         Res<crate::appliances::Alarm>,
         Query<(&crate::fishbowl::BowlFish, &Transform), (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>,
-        (Res<crate::meals::Leftovers>, Res<crate::ingredients::Fridge>),
+        (Res<crate::meals::Leftovers>, Res<crate::ingredients::Fridge>, Res<crate::realestate::RealEstate>),
         Res<crate::weather::Weather>,
         Query<(&crate::pets::Pet, &crate::pets::HomePet, &Transform)>,
         Res<crate::pets::PetData>,
@@ -1179,6 +1182,7 @@ fn save_game(
         heights: sculpted.saved(),
         collection: collection.clone(),
         discoveries: discoveries.clone(),
+        real_estate: real_estate.clone(),
         graves: graves
             .iter()
             .map(|(ge, g, tf)| {
@@ -1493,6 +1497,7 @@ pub(crate) fn apply_loaded_game(
     commands.insert_resource(crate::fishbowl::PendingBowls(game.fishbowls.clone()));
     commands.insert_resource(game.collection.clone());
     commands.insert_resource(game.discoveries.clone());
+    commands.insert_resource(game.real_estate.clone());
     let mut at = game.leftovers_at.clone();
     at.resize(game.leftovers.len(), game.minutes);
     commands.insert_resource(crate::meals::Leftovers(game.leftovers.clone(), at));

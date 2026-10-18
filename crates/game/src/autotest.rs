@@ -4371,6 +4371,33 @@ fn auto_action(
         *done = true;
         return;
     }
+    // "Estate <lot name part>:<option>": off to that rabbit hole for one of its real estate deals
+    // ("Estate diner:Become a Partner"), as its menu offers them the selected Sim.
+    if let Some((place, want)) = name.strip_prefix("Estate ").and_then(|s| s.split_once(':')) {
+        let (place, want) = (place.to_ascii_lowercase(), want.to_string());
+        let Ok(me) = sel_e.single() else { return };
+        *done = true;
+        commands.queue(move |w: &mut World| {
+            let funds = w.get_resource::<crate::interact::Household>().map_or(0, |h| h.funds);
+            let re = w.resource::<crate::realestate::RealEstate>().clone();
+            let world = w.resource::<crate::loading::CurrentWorld>();
+            let Some(sim) = w.get::<crate::sim::Sim>(me).cloned() else { return };
+            let found = (0..world.data.lots.len())
+                .filter(|&l| world.data.lots[l].internal_name.to_ascii_lowercase().contains(&place))
+                .find_map(|l| crate::realestate::options(&world.data, l, &sim, funds, &re).into_iter().find(|(label, _)| label.starts_with(&want)).map(|o| (l, o)));
+            match found {
+                Some((lot, (label, task))) => {
+                    info!("estate test: {label} at lot {lot}");
+                    if let Some(mut q) = w.get_mut::<crate::interact::ActionQueue>(me) {
+                        q.0.clear();
+                        q.push_player(crate::interact::Action::new(label, crate::interact::ActionKind::Visit { lot, activity: task }, false));
+                    }
+                }
+                None => warn!("estate test: no {want} at {place} (funds {funds})"),
+            }
+        });
+        return;
+    }
     // "Job <lot name part>:<option>": off to that rabbit hole for one of its career errands
     // ("Job hospital:Join", "Job hospital:Quit Job"), as its menu offers them the selected Sim.
     if let Some((place, want)) = name.strip_prefix("Job ").and_then(|s| s.split_once(':')) {

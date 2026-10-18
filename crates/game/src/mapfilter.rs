@@ -1,6 +1,6 @@
 //! Map View's filter, as the game's `MapViewController` (its layout `HUDMapViewSort`): in map
 //! view, the button by the puck opens the list of what the map shows (All, Home and Work,
-//! Friends' Homes, Community Locations, Opportunities, Careers, None), each a row of the game's
+//! Friends' Homes, Community Locations, Opportunities, Careers, Real Estate, None), each a row of the game's
 //! `HUDMapviewSortEntry`; a row the pointer is over shows its tags meanwhile, a row clicked keeps
 //! them (for the rest of the game, as the game's `sLastFilterType`), its name beside the button.
 //! Which tags go with which is the game's map-tag tuning (`MapTags`' `FilterType`), in `maptags`.
@@ -29,6 +29,7 @@ pub const FRIENDS_HOMES: u32 = 0x2;
 pub const PUBLIC_SPACES: u32 = 0x4;
 pub const WORK: u32 = 0x8;
 pub const OPPORTUNITIES: u32 = 0x10;
+pub const REAL_ESTATE: u32 = 0x20;
 pub const ALL_ONLY: u32 = 0x200;
 pub const ALL: u32 = u32::MAX;
 
@@ -52,18 +53,18 @@ impl MapFilter {
     }
 }
 
-/// The base game's sorts, in the game's order, by their captions' keys. (Not Real Estate yet:
-/// there's no buying into venues.)
-const SORTS: [(Caption, u32); 7] = [
+/// The base game's sorts, in the game's order, by their captions' keys.
+const SORTS: [(Caption, u32); 8] = [
     (Caption::Key(11920693074533536663), ALL),
     (Caption::Key(16967628283016774991), HOUSEHOLD_AND_WORK),
     (Caption::Key(2859540664055699868), FRIENDS_HOMES),
     (Caption::Key(17596890173930856818), PUBLIC_SPACES),
     (Caption::Name("Ui/Caption/Hud/Mapview:Opportunities"), OPPORTUNITIES),
     (Caption::Key(7509108683761921616), WORK),
+    (Caption::Name("Ui/Caption/Hud/Mapview:RealEstate"), REAL_ESTATE),
     (Caption::Name("Ui/Caption/Hud/Mapview:None"), 0),
 ];
-const FALLBACK: [&str; 7] = ["All", "Home and Work", "Friends' Homes", "Community Locations", "Opportunities", "Careers", "None"];
+const FALLBACK: [&str; 8] = ["All", "Home and Work", "Friends' Homes", "Community Locations", "Opportunities", "Careers", "Real Estate", "None"];
 
 #[derive(Clone, Copy)]
 enum Caption {

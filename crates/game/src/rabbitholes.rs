@@ -369,6 +369,8 @@ fn outings(
                 commands.entity(e).insert(crate::skillbooks::BookBought);
             } else if crate::careerholes::is_errand(at.activity) {
                 commands.entity(e).insert(crate::careerholes::ErrandDone);
+            } else if crate::realestate::is_deal(at.activity) {
+                commands.entity(e).insert(crate::realestate::DealDone(at.lot));
             } else if let Some(i) = crate::venues::act_of(at.activity) {
                 commands.entity(e).insert(crate::venues::VenueDone(i));
             } else if let Some(skill) = crate::classes::class_of(at.activity) {

@@ -11,8 +11,8 @@
 //! home always; other homes under Friends' Homes, empty lots only under All; venues under
 //! Community Locations, and Careers too where a household Sim works; the household's Sims under
 //! Home and Work (the selected one always); opportunities under Home and Work and Opportunities;
-//! collectibles under Community Locations. A lot a household Sim is out at is under Home and Work
-//! as well.
+//! collectibles under Community Locations; a rabbit hole a stake can be bought in under Real
+//! Estate. A lot a household Sim is out at is under Home and Work as well.
 
 use bevy::prelude::*;
 
@@ -20,7 +20,7 @@ use crate::PlayMode;
 use crate::camera::SimsCamera;
 use crate::interact::{ActionKind, Household, ObjectKind};
 use crate::loading::CurrentWorld;
-use crate::mapfilter::{ALL, ALL_ONLY, FRIENDS_HOMES, HOUSEHOLD_AND_WORK, OPPORTUNITIES, PUBLIC_SPACES, WORK};
+use crate::mapfilter::{ALL, ALL_ONLY, FRIENDS_HOMES, HOUSEHOLD_AND_WORK, OPPORTUNITIES, PUBLIC_SPACES, REAL_ESTATE, WORK};
 
 pub struct MapTagsPlugin;
 
@@ -411,7 +411,9 @@ fn spawn_tags(
             let built = world.data.buildings.get(&i).is_some_and(|b| !b.walls.is_empty());
             if built { ("home", Color::srgb(0.95, 0.95, 0.92), FRIENDS_HOMES) } else { ("lot_empty", Color::srgb(0.95, 0.95, 0.92), ALL_ONLY) }
         } else {
-            (venue_glyph(&lot.internal_name), Color::srgb(0.35, 0.6, 1.0), PUBLIC_SPACES)
+            // (Real Estate too where a stake can be bought: `realestate`.)
+            let estate = if crate::realestate::purchasable(&world.data, i) { REAL_ESTATE } else { 0 };
+            (venue_glyph(&lot.internal_name), Color::srgb(0.35, 0.6, 1.0), PUBLIC_SPACES | estate)
         };
         let name = world.data.lot_names.get(i).map_or("", |s| s.as_str());
         let title = if lot.is_residential() { name.split(" — ").next().unwrap_or(name).to_string() } else { crate::rabbitholes::lot_title(lot, name) };

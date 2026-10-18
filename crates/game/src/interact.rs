@@ -3227,7 +3227,7 @@ pub(crate) fn run_actions(
     mut life: MessageWriter<LifeEvent>,
     people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
     mut conceive: MessageWriter<crate::little::Conceive>,
-    (upgraded, baked, paper_in_hand, prepped, serving_from, broken, unavailable): (
+    (upgraded, baked, paper_in_hand, prepped, serving_from, broken, unavailable, real_estate): (
         Query<&crate::upgrades::Upgrades>,
         Option<Res<crate::baked::Baked>>,
         Query<&crate::surroundings::PaperInHand>,
@@ -3235,6 +3235,7 @@ pub(crate) fn run_actions(
         Query<&crate::meals::ServingFrom>,
         Query<(), With<Broken>>,
         Query<(), Or<(With<crate::buy::HeldObject>, With<crate::buyhistory::HistoryHidden>)>>,
+        Res<crate::realestate::RealEstate>,
     ),
     (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates, mut memories, (partners_of, at_door, cuddles, convs, ghost_spots))): (
         MessageWriter<crate::journal::Did>,
@@ -4198,9 +4199,13 @@ pub(crate) fn run_actions(
                                         .or_else(|| crate::classes::class_task(*activity))
                                         .or_else(|| (crate::skillbooks::BOOK_TASK..crate::skillbooks::BOOK_TASK + 1000).contains(activity).then_some(&crate::skillbooks::BUY_BOOK))
                                         .or_else(|| crate::venues::task(*activity))
-                                        .or_else(|| crate::careerholes::Errand::of(*activity).map(|e| e.activity()));
+                                        .or_else(|| crate::careerholes::Errand::of(*activity).map(|e| e.activity()))
+                                        .or_else(|| crate::realestate::Deal::of(*activity).map(|d| d.activity()));
                                     if let Some(e) = crate::careerholes::Errand::of(*activity) {
                                         commands.entity(me).insert(e);
+                                    }
+                                    if let Some(d) = crate::realestate::Deal::of(*activity) {
+                                        commands.entity(me).insert(d);
                                     }
                                     if crate::meals::recipe_task(*activity).is_some() {
                                         commands.entity(me).insert(crate::meals::BuyingRecipe(*activity - crate::meals::RECIPE_TASK));
@@ -4218,6 +4223,10 @@ pub(crate) fn run_actions(
                                         // (A meal out's price by the hour: dinner dearer, early birds less.)
                                         if let Some(i) = activity.checked_sub(crate::venues::VENUE_TASK).filter(|i| *i < crate::venues::ACTS.len()) {
                                             price *= crate::venues::meal_price(i, clock.hour_f()) as f32 / a.cost.max(1) as f32;
+                                        }
+                                        // (On the house where the household has a stake: `realestate`.)
+                                        if real_estate.free_meal(*lot, *activity) {
+                                            price = 0.0;
                                         }
                                         crate::rabbitholes::head_out(&mut commands, &clock, me, sim, *lot, a, place, household.as_deref_mut(), &mut notes, price);
                                     }
