@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 137;
+pub const GAMEDATA_VERSION: u32 = 138;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -36,6 +36,12 @@ pub fn thumb_name(objd_instance: u64) -> String {
 /// The icon name a CAS part's thumbnail is stored under.
 pub fn cas_thumb_name(casp_instance: u64) -> String {
     format!("casthumb_{casp_instance:016x}")
+}
+
+/// The icon name a preset face's thumbnail is stored under, as it looks on Sims of an age and sex
+/// (the game's `CASAgeGenderFlags`' age and sex bits: 0x2010 a young adult woman).
+pub fn face_thumb_name(preset_instance: u64, age_sex: u32) -> String {
+    format!("facethumb_{preset_instance:016x}_{age_sex:04x}")
 }
 const T_NMAP: u32 = 0x0166038C;
 
@@ -1875,6 +1881,8 @@ pub struct FacePreset {
     pub age_gender: u32,
     /// Its blends (indices into `blends`) and how much of each.
     pub blends: Vec<(u16, f32)>,
+    /// Its CBLN's instance (its thumbnails': `face_thumb_name`).
+    pub instance: u64,
 }
 
 pub const FACE_EYES: u32 = 1;
@@ -2430,7 +2438,7 @@ fn bake_face_presets(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, String
             blends.push((i, amount));
         }
         if !blends.is_empty() {
-            out.presets.push(FacePreset { name, region, age_gender, blends });
+            out.presets.push(FacePreset { name, region, age_gender, blends, instance: k.i });
         }
     }
     // (In their natural order: "NosePreset2" before "NosePreset10".)
@@ -4175,6 +4183,23 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                     seen.insert(i);
                     n += 1;
                 }
+            }
+        }
+    }
+    // Create a Sim's preset faces: a picture of each as it looks on each age and sex (filed by
+    // the preset's instance and `0x10000 | age | sex`).
+    let faces: HashSet<u64> = pkgs.keys_of_type(T_CBLN).filter(|k| k.g == 0).map(|k| k.i).collect();
+    let mut seen: HashSet<(u64, u32)> = HashSet::new();
+    for dir in &dirs {
+        let Ok(tp) = Package::open(dir.join("CasThumbnails.package")) else { continue };
+        for e in tp.of_type(T_CAS_THUMB) {
+            let age_sex = e.key.g & 0xFFFF;
+            if faces.contains(&e.key.i)
+                && seen.insert((e.key.i, age_sex))
+                && let Ok(png) = tp.read(e)
+            {
+                pack.add(icon_key(&face_thumb_name(e.key.i, age_sex)), &png).map_err(|e| e.to_string())?;
+                n += 1;
             }
         }
     }

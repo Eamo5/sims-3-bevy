@@ -48,7 +48,7 @@ const NOT_HERE: [u32; 7] = [0x0001_0005, 0x05db_b90f, 0x05db_cf30, 0x05db_b90e, 
 const CELL_THUMBNAIL: u32 = 0x20;
 const CELL_COLOUR: u32 = 0x30;
 // The item grid's own (layout `ItemGrid`): its scroll bar.
-const GRID_SCROLLBAR: u32 = 0x0582_0672;
+pub(crate) const GRID_SCROLLBAR: u32 = 0x0582_0672;
 /// The styles' rows in view.
 pub(crate) const ROWS: usize = 3;
 

@@ -4730,10 +4730,13 @@ fn ui_flow(
             shot(&mut commands, "2f_face");
             *stage = (95, now);
         }
-        // Sculpting the face: a wider jaw, then a bigger nose, a slider step a moment.
+        // Sculpting the face: a wider jaw, a preset nose (the nose's eighth), then a bigger nose,
+        // a slider step a moment.
         (95..=99, AppState::CreateHousehold, _) if since > 0.4 => {
+            let nose = |n: usize| crate::simbody::face_presets().and_then(|a| a.presets.iter().enumerate().filter(|(_, p)| p.region == s3bake::gamedata::FACE_NOSE).nth(n)).map_or(0, |(i, _)| i as u16);
             let want = match stage.0 {
-                95 | 96 => crate::home::CasAction::FaceSlider(0, 1),
+                95 => crate::home::CasAction::FaceSlider(0, 1),
+                96 => crate::home::CasAction::FacePreset(2, nose(7)),
                 97 => crate::home::CasAction::FaceArea(2),
                 _ => crate::home::CasAction::FaceSlider(10, 1),
             };
@@ -4746,6 +4749,21 @@ fn ui_flow(
         }
         (100, AppState::CreateHousehold, _) if since > 2.0 => {
             shot(&mut commands, "2g_sculpted");
+            *stage = (103, now);
+        }
+        (103, AppState::CreateHousehold, _) if since > 0.5 => {
+            // (A preset nose: the nose's first but one preset of the game's.)
+            let nose = crate::simbody::face_presets().and_then(|a| a.presets.iter().enumerate().filter(|(_, p)| p.region == s3bake::gamedata::FACE_NOSE).nth(1)).map(|(i, _)| i as u16);
+            if let Some(p) = nose {
+                ask_cas(&mut commands, &[crate::home::CasAction::FacePreset(2, p)]);
+            }
+            *stage = (101, now);
+        }
+        (101, AppState::CreateHousehold, _) if since > 2.0 => {
+            shot(&mut commands, "2g_preset");
+            *stage = (102, now);
+        }
+        (102, AppState::CreateHousehold, _) if since > 0.5 => {
             // (A child of the two, in the game's genetics screen.)
             crate::casgenetics::OPEN.store(true, std::sync::atomic::Ordering::Relaxed);
             *stage = (230, now);

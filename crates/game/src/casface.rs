@@ -2,8 +2,9 @@
 //! panels (`CASHeadEars`, `CASEyes`, `CASNose`, `CASMouth`, `CASMakeup`) show it. Down the
 //! facial details panel's side, the regions; each region's Advanced page has the game's picture
 //! of it with its parts' hotspots, a part's sliders in the game's rows (`CASBodySlider`) beside
-//! it, and the eyes' Basics page their colours (`EyeColorPresetGridItem`). Make-up: eye shadow
-//! and lipstick in the game's item cells, none first.
+//! it; its Basics page the game's preset faces for it, three across with the game's pictures
+//! (`GenericCasItemGrow_115x115`), and the eyes' their colours (`EyeColorPresetGridItem`).
+//! Make-up: eye shadow and lipstick in the game's item cells, none first.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -35,9 +36,12 @@ pub static FACE_UP: AtomicBool = AtomicBool::new(false);
 // the close button).
 const REGION_BUTTONS: [u32; 5] = [0x05db_9c02, 0x05db_9c04, 0x05db_9c06, 0x05db_9c05, 0x05db_9c0a];
 const DETAILS_NOT_HERE: [u32; 5] = [0x05db_9c09, 0x092f_a960, 0x0b98_4090, 0x0000_1001, 0x05db_9c00];
+// Its backgrounds: the long one (the eyes' presets and colours, make-up) and the short one.
+const LONG_PANEL: u32 = 0x05db_9d00;
+const SHORT_PANEL: u32 = 0x05db_9d01;
 
-/// A region's panel: its layout, its Basics and Advanced pages and their buttons, and its
-/// parts (hotspot button, name, slider grid, and the face sliders it moves:
+/// A region's panel: its layout, its Basics and Advanced pages and their buttons, its presets'
+/// grid, and its parts (hotspot button, name, slider grid, and the face sliders it moves:
 /// `gamedata::FACE_SLIDERS`), the last its whole (the game's Global).
 struct Region {
     layout: &'static str,
@@ -45,7 +49,13 @@ struct Region {
     advanced: u32,
     basics_button: u32,
     advanced_button: u32,
+    presets: u32,
     parts: &'static [(u32, u32, u32, &'static [usize])],
+}
+
+/// The face sliders a part of the face (head, eyes, nose, mouth) has.
+pub(crate) fn region_sliders(r: usize) -> impl Iterator<Item = usize> {
+    REGIONS.get(r).into_iter().flat_map(|r| r.parts.iter().flat_map(|p| p.3.iter().copied()))
 }
 
 const REGIONS: [Region; 4] = [
@@ -55,6 +65,7 @@ const REGIONS: [Region; 4] = [
         advanced: 0x05db_b320,
         basics_button: 0x05db_b301,
         advanced_button: 0x05db_b302,
+        presets: 0x05db_b312,
         parts: &[(0x05db_bb21, 0x05db_bb32, 0x05db_bb31, &[1, 2]), (0x05db_bb23, 0x05db_bb52, 0x05db_bb51, &[0]), (0x05db_bb22, 0x05db_bb42, 0x05db_bb41, &[14, 15]), (0x05db_bb24, 0x05db_b332, 0x05db_b331, &[]), (0x05db_bb25, 0x05db_bb62, 0x05db_bb61, &[16])],
     },
     Region {
@@ -63,6 +74,7 @@ const REGIONS: [Region; 4] = [
         advanced: 0x05db_b920,
         basics_button: 0x05db_b901,
         advanced_button: 0x05db_b902,
+        presets: 0x05db_b912,
         parts: &[(0x05db_b921, 0x05db_b932, 0x05db_b931, &[]), (0x05db_b923, 0x05db_b952, 0x05db_b951, &[9]), (0x05db_b925, 0x05db_b962, 0x05db_b961, &[6]), (0x05db_b927, 0x05db_b972, 0x05db_b971, &[7, 8])],
     },
     Region {
@@ -71,6 +83,7 @@ const REGIONS: [Region; 4] = [
         advanced: 0x05db_b920,
         basics_button: 0x05db_b901,
         advanced_button: 0x05db_b902,
+        presets: 0x05db_b912,
         parts: &[(0x05db_b921, 0x05db_b932, 0x05db_b931, &[11]), (0x05db_b922, 0x05db_b942, 0x05db_b941, &[12, 13]), (0x05db_b923, 0x05db_b952, 0x05db_b951, &[]), (0x05db_b924, 0x05db_b962, 0x05db_b961, &[10])],
     },
     Region {
@@ -79,6 +92,7 @@ const REGIONS: [Region; 4] = [
         advanced: 0x05db_b720,
         basics_button: 0x05db_b701,
         advanced_button: 0x05db_b702,
+        presets: 0x05db_b712,
         parts: &[(0x05db_b721, 0x05db_b732, 0x05db_b731, &[4]), (0x05db_b722, 0x05db_b742, 0x05db_b741, &[]), (0x05db_b723, 0x05db_b752, 0x05db_b751, &[3, 5])],
     },
 ];
@@ -90,6 +104,8 @@ const EYES_NOT_HERE: [u32; 2] = [0x05db_b908, 0x05db_b915];
 pub(crate) const MAKEUP_KINDS: [u32; 5] = [0x100, 0x101, 0x102, 0x103, 0x104];
 const MAKEUP_PARTS: u32 = 0x1001;
 const MAKEUP_NOT_HERE: [u32; 10] = [0x0cd0_e9e0, 0x096d_7730, 0x1006, 0x1003, 0x1004, 0x1005, 0x2000, 0x101, 0x102, 0x104];
+// The preset grids' rows in view.
+const PRESET_ROWS: usize = 3;
 // `CASBodySlider`'s and the item cells'.
 const SLIDER_TITLE: u32 = 2;
 const SLIDER: u32 = 4;
@@ -125,10 +141,32 @@ pub struct CasFace {
     part: [usize; 4],
     lipstick: bool,
     cells: Option<Entity>,
+    preset_cells: Option<Entity>,
+    /// Each region's presets' scroll bar, and the row scrolled to.
+    bars: Vec<Option<Entity>>,
+    scroll: [usize; 4],
     sliders: Vec<(Entity, usize, f32)>,
     /// The face's part being sculpted as Create a Sim last had it (followed when it changes).
     area: u8,
-    shown: Option<(usize, usize, bool, [usize; 4], bool, Age, bool, [u8; 3], Option<s3bake::Key>, Option<s3bake::Key>, bool)>,
+    #[allow(clippy::type_complexity)]
+    shown: Option<(usize, usize, bool, [usize; 4], bool, Age, bool, [u8; 3], Option<s3bake::Key>, Option<s3bake::Key>, bool, (usize, Vec<u16>))>,
+}
+
+/// A preset face's cell (of `simbody::face_presets`).
+#[derive(Component)]
+struct PresetCell(u16);
+
+/// The age and sex bits of the game's `CASAgeGenderFlags` a Sim's face pictures are for.
+fn age_sex(sim: &crate::sim::Sim) -> u32 {
+    let age = match sim.age {
+        Age::Baby | Age::Toddler => 0x2,
+        Age::Child => 0x4,
+        Age::Teen => 0x8,
+        Age::YoungAdult => 0x10,
+        Age::Adult => 0x20,
+        Age::Elder => 0x40,
+    };
+    age | if sim.female { 0x2000 } else { 0x1000 }
 }
 
 /// A slider row's slider: the face slider it moves.
@@ -165,21 +203,9 @@ fn spawn_face(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut images,
         }
     }
     let mut regions = Vec::new();
+    let mut bars = Vec::new();
     for (n, r) in REGIONS.iter().enumerate() {
         let Some(mut w) = ui.layout(r.layout).cloned() else { return };
-        // (The eyes' Basics page: their colours where the shapes' presets were; the others'
-        // only their Advanced page, this game having no preset faces.)
-        if n == 1 {
-            edit_windows(&mut w, r.basics, &mut |b| {
-                let frames: Vec<usize> = b.children.iter().enumerate().filter(|(_, c)| c.id == 0x05db_cf23).map(|(i, _)| i).collect();
-                if let [presets, colours, ..] = frames[..] {
-                    b.children[presets].flags &= !s3bake::ui::WIN_VISIBLE;
-                    let dy = b.children[colours].area[1] - b.children[presets].area[1];
-                    b.children[colours].area[1] -= dy;
-                    b.children[colours].area[3] -= dy;
-                }
-            });
-        }
         for (_, _, grid, sliders) in r.parts {
             if sliders.is_empty() {
                 continue;
@@ -197,12 +223,25 @@ fn spawn_face(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut images,
                 }
             }
         }
-        let hide: Vec<u32> = if n == 1 { EYES_NOT_HERE.to_vec() } else { vec![r.basics_button, r.advanced_button] };
-        for id in hide {
-            for e in s.all_with(id) {
-                commands.entity(e).insert(Visibility::Hidden);
+        if n == 1 {
+            for id in EYES_NOT_HERE {
+                for e in s.all_with(id) {
+                    commands.entity(e).insert(Visibility::Hidden);
+                }
             }
         }
+        // The presets' scroll bar: the item grid's own, down its right; the grid takes the wheel.
+        let mut bar = None;
+        if let (Some(grid), Some(mut b)) = (s.id(r.presets), ui.find("ItemGrid", crate::cashair::GRID_SCROLLBAR).cloned()) {
+            // (The nose's grid is wider than its frame: its bar where the others' are.)
+            let size = ui.find(r.layout, r.presets).map_or(Vec2::new(317.0, 310.0), |g| Vec2::new((g.area[2] - g.area[0]).min(317.0), g.area[3] - g.area[1]));
+            b.flags |= s3bake::ui::WIN_VISIBLE;
+            b.place = s3bake::ui::UiPlace::Fixed;
+            b.area = [size.x - 22.0, 6.0, size.x - 2.0, size.y - 26.0];
+            bar = ui.spawn_under(&mut commands, &mut images, &mut fonts, &b, grid).root;
+            commands.entity(grid).insert(bevy::ui::RelativeCursorPosition::default());
+        }
+        bars.push(bar);
         for (id, tip) in [(r.basics_button, "Basics"), (r.advanced_button, "Advanced")] {
             if let Some(e) = s.id(id) {
                 commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
@@ -220,7 +259,7 @@ fn spawn_face(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut images,
     // (Each part's last slot, the region's whole, first.)
     let part = [0, 1, 2, 3].map(|n: usize| REGIONS[n].parts.len() - 1);
     FACE_UP.store(true, Ordering::Relaxed);
-    commands.insert_resource(CasFace { details, regions, makeup, region: 0, basics: false, part, lipstick: false, cells: None, sliders: Vec::new(), area: 0, shown: None });
+    commands.insert_resource(CasFace { details, regions, makeup, region: 0, basics: true, part, lipstick: false, cells: None, preset_cells: None, bars, scroll: [0; 4], sliders: Vec::new(), area: 0, shown: None });
 }
 
 /// Shown on the Face tab: the region chosen, its page and part, the part's sliders where the
@@ -234,8 +273,9 @@ fn face_panel(
     pending: Res<PendingHousehold>,
     selected: Res<crate::cas::CasSelected>,
     scene: Option<Res<crate::cas::CasScene>>,
-    (mut vis, mut buttons, mut sliders): (Query<&mut Visibility>, Query<&mut UiButton>, Query<&mut UiSlider>),
-    (clicks, eyes, makeup): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &EyeCell), Changed<Interaction>>, Query<(&Interaction, &MakeupCell), Changed<Interaction>>),
+    (mut vis, mut buttons, mut sliders, mut bars): (Query<&mut Visibility>, Query<&mut UiButton>, Query<&mut UiSlider>, Query<&mut crate::layout::UiScrollBar>),
+    (clicks, eyes, makeup, preset_cells): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &EyeCell), Changed<Interaction>>, Query<(&Interaction, &MakeupCell), Changed<Interaction>>, Query<(&Interaction, &PresetCell), Changed<Interaction>>),
+    (over, wheel): (Query<&bevy::ui::RelativeCursorPosition>, Res<bevy::input::mouse::AccumulatedMouseScroll>),
     mut actions: MessageWriter<crate::cas::CasActionRequest>,
     mut gu: Option<ResMut<crate::icons::GameUi>>,
 ) {
@@ -263,7 +303,7 @@ fn face_panel(
     if scene.face_area != f.area {
         f.area = scene.face_area;
         f.region = f.area as usize;
-        f.basics = f.region == 1;
+        f.basics = true;
     }
     for (n, id) in REGION_BUTTONS.iter().enumerate() {
         if crate::livehud::pressed(&clicks, f.details.id(*id)) && f.region != n {
@@ -294,8 +334,7 @@ fn face_panel(
             }
         }
     }
-    // (The eyes' Basics page only for the eyes.)
-    let basics = f.basics && f.region == 1;
+    let basics = f.basics && f.region < 4;
     // The face sculpted: a slider moved.
     let values = crate::simbody::face_sliders(sim);
     for (e, i, last) in f.sliders.iter_mut() {
@@ -315,8 +354,57 @@ fn face_panel(
             actions.write(crate::cas::CasActionRequest(CasAction::FacePart(if f.lipstick { CT_LIPSTICK } else { CT_EYESHADOW }, c.0)));
         }
     }
+    for (i, c) in &preset_cells {
+        if *i == Interaction::Pressed && f.region < 4 {
+            actions.write(crate::cas::CasActionRequest(CasAction::FacePreset(f.region as u8, c.0)));
+        }
+    }
+    // The region's preset faces (those the game has pictures of, for the Sim's age and sex),
+    // scrolled by the wheel or the bar, opened at the Sim's.
+    let chosen = crate::simbody::presets_of(sim);
+    let presets: Vec<(u16, Handle<Image>)> = match (basics, crate::simbody::face_presets(), gu.as_deref_mut()) {
+        (true, Some(all), Some(g)) => all
+            .presets
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.region == s3bake::gamedata::FACE_REGIONS[f.region])
+            .filter_map(|(i, p)| Some((i as u16, g.icon(&mut images, &s3bake::gamedata::face_thumb_name(p.instance, age_sex(sim)))?)))
+            .collect(),
+        _ => Vec::new(),
+    };
+    if f.region < 4 {
+        let rows = presets.len().div_ceil(3);
+        let most = rows.saturating_sub(PRESET_ROWS);
+        let r = f.region;
+        let over_grid = f.regions[r].id(REGIONS[r].presets).and_then(|e| over.get(e).ok()).is_some_and(|c| c.cursor_over());
+        if over_grid && wheel.delta.y != 0.0 {
+            let step = if wheel.delta.y > 0.0 { -1 } else { 1 };
+            f.scroll[r] = (f.scroll[r] as i64 + step).clamp(0, most as i64) as usize;
+        }
+        let fresh = f.shown.as_ref().is_none_or(|s| (s.0, s.1, s.2) != (k, r, basics));
+        if fresh
+            && let Some(at) = presets.iter().position(|(i, _)| chosen.contains(i))
+            && !(f.scroll[r] * 3..(f.scroll[r] + PRESET_ROWS) * 3).contains(&at)
+        {
+            f.scroll[r] = at / 3;
+        }
+        f.scroll[r] = f.scroll[r].min(most);
+        if let Some(mut b) = f.bars.get(r).copied().flatten().and_then(|e| bars.get_mut(e).ok()) {
+            if (b.total, b.visible) != (rows, PRESET_ROWS) {
+                (b.total, b.visible) = (rows, PRESET_ROWS);
+            }
+            if b.value != f.scroll[r] {
+                // (Whichever moved last: the wheel just now, or the bar; opened, the Sim's.)
+                if fresh || over_grid && wheel.delta.y != 0.0 {
+                    b.value = f.scroll[r];
+                } else {
+                    f.scroll[r] = b.value.min(most);
+                }
+            }
+        }
+    }
     let eyes_rgb = sim.eyes.to_srgba().to_u8_array_no_alpha();
-    let want = (k, f.region, basics, f.part, f.lipstick, sim.age, sim.female, eyes_rgb, sim.outfit.eyeshadow, sim.outfit.lipstick, gu.is_some());
+    let want = (k, f.region, basics, f.part, f.lipstick, sim.age, sim.female, eyes_rgb, sim.outfit.eyeshadow, sim.outfit.lipstick, gu.is_some(), (f.scroll[f.region.min(3)], chosen.clone()));
     if f.shown.as_ref() == Some(&want) {
         // (The sliders follow the face when it's changed other than by them: made at random.)
         for (e, i, last) in f.sliders.iter_mut() {
@@ -337,6 +425,15 @@ fn face_panel(
         crate::livehud::set_visible(&mut vis, s.root, f.region == n);
     }
     crate::livehud::set_visible(&mut vis, f.makeup.root, f.region == 4);
+    // The panel behind: the long one for the eyes' presets and colours and for make-up, else the
+    // short one (taller for the sliders), as the regions' panels set `CASFacialDetails`'.
+    let long = f.region == 4 || f.region == 1 && basics;
+    crate::livehud::set_visible(&mut vis, f.details.id(LONG_PANEL), long);
+    crate::livehud::set_visible(&mut vis, f.details.id(SHORT_PANEL), !long);
+    if let Some(e) = f.details.id(SHORT_PANEL) {
+        let h = if basics { 448.0 } else { 545.0 };
+        commands.entity(e).entry::<Node>().and_modify(move |mut n| n.height = Val::Px(h));
+    }
     for (n, id) in REGION_BUTTONS.iter().enumerate() {
         if let Some(mut b) = f.details.id(*id).and_then(|e| buttons.get_mut(e).ok())
             && b.selected != (f.region == n)
@@ -344,7 +441,7 @@ fn face_panel(
             b.selected = f.region == n;
         }
     }
-    if let Some(old) = f.cells.take() {
+    for old in [f.cells.take(), f.preset_cells.take()].into_iter().flatten() {
         commands.entity(old).try_despawn();
     }
     f.sliders.clear();
@@ -374,6 +471,36 @@ fn face_panel(
             crate::livehud::set_visible(&mut vis, s.id(*grid), i == part);
         }
         if basics {
+            // The preset faces in view, three across, the Sim's lit.
+            if let (Some(grid), Some(g), Some(template)) = (s.id(r.presets), ui.find(r.layout, r.presets).and_then(|w| w.grid), ui.layout("GenericCasItemGrow_115x115").cloned()) {
+                let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE)).id();
+                // (Under the grid's scroll bar.)
+                commands.entity(grid).insert_children(0, &[holder]);
+                f.preset_cells = Some(holder);
+                let step = Vec2::new(g.cell[0] + g.cell_padding[0] + g.cell_padding[2], g.cell[1] + g.cell_padding[1] + g.cell_padding[3]);
+                let first = f.scroll[f.region] * 3;
+                for (n, (i, thumb)) in presets.iter().enumerate().skip(first).take(PRESET_ROWS * 3) {
+                    let at = n - first;
+                    let (x, y) = (g.padding[0] + (at % 3) as f32 * step.x, g.padding[1] + (at / 3) as f32 * step.y);
+                    let mut cell = template.clone();
+                    cell.area = [x, y, x + g.cell[0], y + g.cell[1]];
+                    // (A button, so it lights under the pointer and when chosen, as the grid's
+                    // cells do.)
+                    cell.cls = "Button".into();
+                    let c = ui.spawn_under(&mut commands, &mut images, &mut fonts, &cell, holder);
+                    let Some(root) = c.root else { continue };
+                    commands.entity(root).insert(PresetCell(*i));
+                    if chosen.contains(i) {
+                        commands.entity(root).insert(crate::layout::Selected);
+                    }
+                    if let Some(win) = c.id(CELL_THUMBNAIL) {
+                        crate::hudpanels::picture(&mut commands, win, thumb.clone(), Color::WHITE);
+                    }
+                }
+            }
+            if f.region != 1 {
+                return;
+            }
             // The eye colours, the Sim's framed.
             let (Some(grid), Some(g), Some(template)) = (s.id(EYE_COLOURS), ui.find(r.layout, EYE_COLOURS).and_then(|w| w.grid), ui.layout("EyeColorPresetGridItem").cloned()) else { return };
             let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE, ChildOf(grid))).id();

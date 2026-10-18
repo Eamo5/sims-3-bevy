@@ -146,6 +146,9 @@ pub enum CasAction {
     /// A face slider (of `gamedata::FACE_SLIDERS`) set to a value (-1 to 1), from the game's
     /// face panels.
     SetFaceSlider(u8, f32),
+    /// A preset face (of `simbody::face_presets`) for a part of the face (head, eyes, nose,
+    /// mouth), from the game's face panels.
+    FacePreset(u8, u16),
     /// What member `i` is to member `j` (`family::Tie::ALL[t]`; roommates: nothing), from the
     /// game's family screen.
     SetTie(usize, usize, u8),
@@ -803,6 +806,27 @@ fn cas_actions(
                     *x = v.clamp(-1.0, 1.0);
                 }
                 s.face = f;
+            }
+            CasAction::FacePreset(r, p) => {
+                // (That part of the face as the preset has it: its sliders back to the middle,
+                // as the game's presets set the part's blends.)
+                let s = &mut pending.members[k];
+                let all = crate::simbody::face_presets();
+                if let (Some(all), Some(region)) = (all, all.and_then(|a| a.presets.get(p as usize)).map(|x| x.region)) {
+                    let mut presets = crate::simbody::presets_of(s);
+                    match presets.iter_mut().find(|q| all.presets.get(**q as usize).is_some_and(|x| x.region == region)) {
+                        Some(q) => *q = p,
+                        None => presets.push(p),
+                    }
+                    s.face_presets = Some(presets);
+                    let mut f = crate::simbody::face_sliders(s);
+                    for i in crate::casface::region_sliders(r as usize) {
+                        if let Some(x) = f.get_mut(i) {
+                            *x = 0.0;
+                        }
+                    }
+                    s.face = f;
+                }
             }
             CasAction::RandomFace => {
                 // (New preset faces, and the sliders a little either way of the middle, as the
