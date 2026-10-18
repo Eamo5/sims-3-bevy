@@ -4217,7 +4217,11 @@ pub(crate) fn run_actions(
                                         .or_else(|| (crate::skillbooks::BOOK_TASK..crate::skillbooks::BOOK_TASK + 1000).contains(activity).then_some(&crate::skillbooks::BUY_BOOK))
                                         .or_else(|| crate::venues::task(*activity))
                                         .or_else(|| crate::careerholes::Errand::of(*activity).map(|e| e.activity()))
-                                        .or_else(|| crate::realestate::Deal::of(*activity).map(|d| d.activity()));
+                                        .or_else(|| crate::realestate::Deal::of(*activity).map(|d| d.activity()))
+                                        .or_else(|| crate::careermetrics::Gig::of(*activity).map(|g| g.activity()));
+                                    if let Some(g) = crate::careermetrics::Gig::of(*activity) {
+                                        commands.entity(me).insert(g);
+                                    }
                                     if let Some(e) = crate::careerholes::Errand::of(*activity) {
                                         commands.entity(me).insert(e);
                                     }

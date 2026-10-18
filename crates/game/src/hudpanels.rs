@@ -461,7 +461,7 @@ fn career_panel(
     let scores: Vec<(&'static s3bake::gamedata::CareerMetric, f32)> = job.map_or_else(Vec::new, |j| {
         let find = |id: u64| people.iter().find(|(_, s)| s.id == id).map(|(e, _)| e);
         let coworkers: Vec<Entity> = j.coworkers.iter().filter_map(|c| find(*c)).collect();
-        crate::careers::metric_scores(j.info(), mood.0, skills, rels, j.boss.and_then(find), &coworkers)
+        crate::careers::metric_scores(j.info(), mood.0, skills, rels, j.boss.and_then(find), &coworkers, &j.tally, clock.day())
     });
     // What changes rarely is set on change: the icon, the factors and the tooltips.
     let key = format!(

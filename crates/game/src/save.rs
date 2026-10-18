@@ -253,6 +253,9 @@ pub struct SavedJob {
     pub raise: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warned_at: Option<f64>,
+    /// What the career keeps count of (meetings, concerts).
+    #[serde(default, skip_serializing_if = "crate::careermetrics::Tally::is_empty")]
+    pub tally: crate::careermetrics::Tally,
 }
 
 fn no_raise(v: &i64) -> bool {
@@ -1070,6 +1073,7 @@ fn save_game(
                 highest: j.highest,
                 raise: j.raise,
                 warned_at: j.warned_at,
+                tally: j.tally.clone(),
             }),
             relationships: saved_rels(rels, &ids),
             lifetime_happiness: wishes.map_or(0, |w| w.points),
@@ -1422,6 +1426,7 @@ pub(crate) fn apply_loaded_game(
                     job.highest = j.highest.max(job.level);
                     job.raise = j.raise;
                     job.warned_at = j.warned_at;
+                    job.tally = j.tally.clone();
                     ec.insert(job);
                 }
             }

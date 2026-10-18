@@ -515,6 +515,8 @@ pub struct Job {
     pub promote: bool,
     /// Promoted to a level they'd not reached before: its reward to come (`careerrewards`).
     pub reward_due: bool,
+    /// What the career keeps count of for its own metrics (`careermetrics`).
+    pub tally: crate::careermetrics::Tally,
 }
 
 /// A retired Sim's pension: paid each morning (half of what the job paid, on average, a day).
@@ -572,14 +574,25 @@ pub enum WorkTone {
     Socialize,
     Study,
     SuckUp,
+    /// The careers' own, where their levels count them (`careermetrics`): a Business Sim's
+    /// meetings, an Electric Rock musician's concerts.
+    HoldMeetings,
+    Perform,
 }
 
 impl WorkTone {
-    pub const ALL: [WorkTone; 6] = [WorkTone::Normal, WorkTone::WorkHard, WorkTone::TakeItEasy, WorkTone::Socialize, WorkTone::SuckUp, WorkTone::Study];
+    pub const ALL: [WorkTone; 8] = [WorkTone::Normal, WorkTone::WorkHard, WorkTone::TakeItEasy, WorkTone::Socialize, WorkTone::SuckUp, WorkTone::Study, WorkTone::HoldMeetings, WorkTone::Perform];
 
-    /// Whether the job offers it (the game's `ShouldAddTone`: sucking up takes a boss).
+    /// Whether the job offers it (the game's `ShouldAddTone`: sucking up takes a boss; the
+    /// careers' own, a level that counts what they do).
     pub fn offered(self, job: &Job) -> bool {
-        self != WorkTone::SuckUp || (job.info().has_boss && job.boss.is_some())
+        let counts = |kind: &str| job.info().metrics.iter().any(|m| m.kind == kind);
+        match self {
+            WorkTone::SuckUp => job.info().has_boss && job.boss.is_some(),
+            WorkTone::HoldMeetings => counts("HoldMeetings"),
+            WorkTone::Perform => counts("ConcertsPerformed"),
+            _ => true,
+        }
     }
 
     pub fn label(self, skill: &str) -> String {
@@ -590,6 +603,8 @@ impl WorkTone {
             WorkTone::Socialize => "Hang With Co-Workers".into(),
             WorkTone::SuckUp => "Suck Up to Boss".into(),
             WorkTone::Study => format!("Study {skill}"),
+            WorkTone::HoldMeetings => "Hold Meetings".into(),
+            WorkTone::Perform => "Perform".into(),
         }
     }
 
@@ -601,6 +616,8 @@ impl WorkTone {
             WorkTone::Socialize => "Socialize",
             WorkTone::SuckUp => "SuckUp",
             WorkTone::Study => "Study",
+            WorkTone::HoldMeetings => "HoldMeetings",
+            WorkTone::Perform => "Perform",
         }
     }
 
@@ -663,7 +680,7 @@ fn charisma_boost(level: u32, boss: bool) -> f32 {
 
 impl Job {
     pub fn new(track: usize) -> Self {
-        Self { track, level: 0, branch: 0, performance: 0.0, last_day: None, tone: WorkTone::Normal, boss: None, coworkers: Vec::new(), highest: 0, raise: 0, warned_at: None, rate: 0.0, promote: false, reward_due: false }
+        Self { track, level: 0, branch: 0, performance: 0.0, last_day: None, tone: WorkTone::Normal, boss: None, coworkers: Vec::new(), highest: 0, raise: 0, warned_at: None, rate: 0.0, promote: false, reward_due: false, tally: Default::default() }
     }
     /// A raise (the game's `GiveRaise`): 15% of the level's pay an hour more, 10% at the top
     /// levels; what it came to.
@@ -906,7 +923,17 @@ pub fn metric_label(m: &s3bake::gamedata::CareerMetric) -> String {
 
 /// What the level's metrics come to now: each this game can judge, with its score (-3 to +3;
 /// the game's `PerfMetric.FindMetricValue`).
-pub fn metric_scores(info: &CareerLevel, mood: f32, skills: &Skills, rels: &crate::social::Relationships, boss: Option<Entity>, coworkers: &[Entity]) -> Vec<(&'static s3bake::gamedata::CareerMetric, f32)> {
+#[allow(clippy::too_many_arguments)]
+pub fn metric_scores(
+    info: &CareerLevel,
+    mood: f32,
+    skills: &Skills,
+    rels: &crate::social::Relationships,
+    boss: Option<Entity>,
+    coworkers: &[Entity],
+    tally: &crate::careermetrics::Tally,
+    today: u32,
+) -> Vec<(&'static s3bake::gamedata::CareerMetric, f32)> {
     let liking = |x: Entity| rels.get(x).friendship;
     info.metrics
         .iter()
@@ -918,8 +945,9 @@ pub fn metric_scores(info: &CareerLevel, mood: f32, skills: &Skills, rels: &crat
                     if coworkers.is_empty() { 0.0 } else { coworkers.iter().map(|c| liking(*c)).sum::<f32>() / coworkers.len() as f32 }
                 }
                 "SkillX" => skills.level(&m.arg) as f32,
-                // (What there's no way to do here yet isn't held against them.)
-                _ => return None,
+                // (The careers' own counts; what there's no way to do here yet isn't held
+                // against them.)
+                k => tally.value(k, today)?,
             };
             Some((m, metric_score(v, m.mappings)))
         })
@@ -955,6 +983,7 @@ fn work_flow(
     >,
     people: Query<(Entity, &Sim)>,
     mut notes: ResMut<Notifications>,
+    ui: Option<Res<crate::layout::UiAssets>>,
 ) {
     let hours = delta.0 / 60.0;
     if hours <= 0.0 || workers.is_empty() {
@@ -991,7 +1020,21 @@ fn work_flow(
                 }
             });
         }
-        let scores = metric_scores(job.info(), mood.0, skills, &rels, boss, &coworkers);
+        // (The careers' own tones: meetings held, concerts readied.)
+        match job.tone {
+            WorkTone::HoldMeetings => {
+                if job.tally.meeting_tone(hours, clock.day()) > 0 {
+                    info!("{} held a meeting at work ({} this week)", sim.first, job.tally.meetings_held(clock.day()));
+                }
+            }
+            WorkTone::Perform => {
+                if job.tally.perform_tone(hours) {
+                    notes.push(crate::careermetrics::concert_words(ui.as_deref(), sim));
+                }
+            }
+            _ => {}
+        }
+        let scores = metric_scores(job.info(), mood.0, skills, &rels, boss, &coworkers, &job.tally, clock.day());
         let rate = hourly_performance(&job, &scores, &sim.traits, wishes);
         job.rate = rate;
         job.performance = (job.performance + rate * hours).clamp(-100.0, 100.0);
