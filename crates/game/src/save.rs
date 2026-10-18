@@ -191,6 +191,12 @@ pub struct SavedSim {
     /// Their voice (saves from before voices could be chosen: the one their look gave them).
     #[serde(default)]
     pub voice: Option<u8>,
+    /// Their voice's pitch (saves from before: the middle).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice_pitch: Option<f32>,
+    /// Their biography.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub bio: String,
     /// A retired Sim's pension.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pension: Option<crate::careers::Pension>,
@@ -671,6 +677,8 @@ fn saved_look(sim: &Sim) -> SavedSim {
         toddler: None,
         eyes: Some(rgb(sim.eyes)),
         voice: Some(sim.voice),
+        voice_pitch: (sim.voice_pitch != 0.5).then_some(sim.voice_pitch),
+        bio: sim.bio.clone(),
         pension: None,
         favorites: Some(sim.favorites.clone()),
         journal: Default::default(),
@@ -732,6 +740,8 @@ impl SaveGame {
             hair: c(s.hair),
             eyes: s.eyes.map_or_else(|| crate::sim::eyes_by_look(s.look), c),
             voice: s.voice.unwrap_or((s.look % 3) as u8).min(2),
+            voice_pitch: s.voice_pitch.unwrap_or(0.5).clamp(0.0, 1.0),
+            bio: s.bio.clone(),
             top: c(s.top),
             bottom: c(s.bottom),
         }
@@ -1096,6 +1106,8 @@ fn save_game(
             toddler: toddler.copied(),
             eyes: Some(rgb(sim.eyes)),
             voice: Some(sim.voice),
+            voice_pitch: (sim.voice_pitch != 0.5).then_some(sim.voice_pitch),
+            bio: sim.bio.clone(),
             pension: pension.copied(),
             favorites: Some(sim.favorites.clone()),
             journal: journal.cloned().unwrap_or_default(),

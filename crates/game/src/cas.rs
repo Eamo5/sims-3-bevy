@@ -90,6 +90,8 @@ pub enum CasAction {
     EyeColor(usize),
     /// Voice `i` (of the three).
     Voice(u8),
+    /// Their voice's pitch, 0 to 1.
+    VoicePitch(f32),
     /// Their life state: human (none) or one of the supernaturals (`sim::Occult::ALL`).
     LifeState(Option<usize>),
     Tab(CasTab),
@@ -630,13 +632,17 @@ fn cas_actions(
             CasAction::LifeState(o) => {
                 pending.members[k].occult = o.and_then(|i| crate::sim::Occult::ALL.get(i).copied());
             }
-            CasAction::Voice(v) => {
-                // The new voice, heard (a line of them checking themselves out).
+            CasAction::Voice(_) | CasAction::VoicePitch(_) => {
+                // The new voice, heard at its pitch (a line of them checking themselves out).
                 let s = &mut pending.members[k];
-                s.voice = v.min(2);
+                match action {
+                    CasAction::Voice(v) => s.voice = (*v).min(2),
+                    CasAction::VoicePitch(p) => s.voice_pitch = (*p).clamp(0.0, 1.0),
+                    _ => {}
+                }
                 let stem = if s.female { "vo_cas_flavor_checkbA" } else { "vo_cas_flavor_checkaA" };
                 if let Some(line) = sounds.as_deref().and_then(|snd| crate::sound::cas_line(snd, stem, s).or_else(|| crate::sound::cas_line(snd, "vo_cas_flavor_greetA", s))) {
-                    play.write(crate::sound::PlaySound::ui(&line).with_volume(0.9));
+                    play.write(crate::sound::PlaySound::ui(&line).with_volume(0.9).with_speed(s.voice_speed()));
                 }
                 model = false;
             }

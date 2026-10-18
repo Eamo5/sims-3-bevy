@@ -111,6 +111,10 @@ pub struct Sim {
     pub eyes: Color,
     /// Which of the game's three voices they speak Simlish in (0..2).
     pub voice: u8,
+    /// How high their voice is, 0 to 1 (the game's `VoicePitchModifier`: a half as they come).
+    pub voice_pitch: f32,
+    /// What's written of them (Create a Sim's biography).
+    pub bio: String,
     pub top: Color,
     pub bottom: Color,
     /// Body shape: weight from thin (-1) to heavy (1), and fitness (0..1).
@@ -329,9 +333,18 @@ impl OutfitChoice {
     }
 }
 
+/// How many semitones a voice goes up or down at the pitch slider's ends (ours: the game's sound
+/// events keep their range).
+const VOICE_SEMITONES: f32 = 3.0;
+
 impl Sim {
     pub fn full_name(&self) -> String {
         format!("{} {}", self.first, self.last)
+    }
+
+    /// How fast their voice's lines play, for its pitch (1 in the middle).
+    pub fn voice_speed(&self) -> f32 {
+        2f32.powf((self.voice_pitch.clamp(0.0, 1.0) - 0.5) * 2.0 * VOICE_SEMITONES / 12.0)
     }
 }
 
@@ -584,6 +597,8 @@ pub fn random_sim(rng: &mut impl Rng, last: &str, female: Option<bool>, age: Age
             Color::srgb(r, g, b)
         },
         voice: rng.random_range(0..3),
+        voice_pitch: 0.5,
+        bio: String::new(),
     }
 }
 

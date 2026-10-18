@@ -21,7 +21,7 @@ pub struct CasCharPlugin;
 
 impl Plugin for CasCharPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spawn_character, character_panel, traits_picker).chain().run_if(in_state(AppState::CreateHousehold))).add_systems(OnExit(AppState::CreateHousehold), |mut commands: Commands| {
+        app.add_systems(Update, (spawn_character, character_panel, voice_and_bio, traits_picker).chain().run_if(in_state(AppState::CreateHousehold))).add_systems(OnExit(AppState::CreateHousehold), |mut commands: Commands| {
             commands.remove_resource::<CasCharacter>();
             CHARACTER_UP.store(false, Ordering::Relaxed);
         });
@@ -59,8 +59,15 @@ const FAVORITE_WINDOWS: [u32; 3] = [0x0600_0001, 0x0600_0005, 0x0600_0009];
 const FAVORITE_GRIDS: [u32; 3] = [0x0600_0002, 0x0600_0006, 0x0600_000a];
 const RANDOM_FAVORITES: u32 = 0x0600_000c;
 const VOICES: [u32; 3] = [0x0800_0001, 0x0800_0002, 0x0800_0003];
-/// What this game hasn't: the voice's pitch and the biography.
-const NOT_HERE: [u32; 5] = [0x0800_0004, 0x4000, 0x4001, CLOSE, CUSTOM_WISH];
+/// The voice's pitch, and the biography: its button, its box and the box's words.
+const PITCH: u32 = 0x0800_0004;
+const BIO_BUTTON: u32 = 0x4000;
+const BIO_WINDOW: u32 = 0x4001;
+const BIO_TEXT: u32 = 0x4002;
+/// How long a biography may be (the game's box holds a few lines).
+const BIO_LONGEST: usize = 240;
+/// What this game hasn't: a custom lifetime wish.
+const NOT_HERE: [u32; 2] = [CLOSE, CUSTOM_WISH];
 const CELL_THUMBNAIL: u32 = 0x20;
 /// The panel on screen, its page, the favourites open, and what it was shown for; the traits
 /// picker when it's up.
@@ -72,6 +79,9 @@ pub struct CasCharacter {
     cells: Option<Entity>,
     shown: Option<Shown>,
     picker: Option<crate::traitpicker::Picker>,
+    /// The biography's box open (the panel then as tall as the traits page, as the game's
+    /// `UpdatePanelHeight`).
+    bio_open: bool,
 }
 
 #[derive(PartialEq, Clone)]
@@ -85,6 +95,119 @@ struct Shown {
     page: bool,
     open: Option<usize>,
     icons: bool,
+    bio: bool,
+}
+
+/// The voice's pitch and the biography as last shown, and the biography being typed.
+#[derive(Default)]
+struct VoiceBio {
+    sim: Option<u64>,
+    pitch: f32,
+    typing: Option<String>,
+    shown: Option<(u64, String, bool)>,
+}
+
+/// On the favourites page, as `CASCharacter` has them: the voice's pitch on its slider (heard
+/// when let go), and the biography, its button opening the box beneath (a click in it, then the
+/// keys; Enter, or a click elsewhere, keeps it).
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn voice_and_bio(
+    character: Option<ResMut<CasCharacter>>,
+    mut pending: ResMut<PendingHousehold>,
+    selected: Res<crate::cas::CasSelected>,
+    (mut sliders, mut buttons, mut texts, mut vis): (Query<&mut crate::layout::UiSlider>, Query<&mut UiButton>, Query<&mut Text>, Query<&mut Visibility>),
+    clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
+    (mut keyboard, mouse): (MessageReader<bevy::input::keyboard::KeyboardInput>, Res<ButtonInput<MouseButton>>),
+    mut actions: MessageWriter<crate::cas::CasActionRequest>,
+    mut st: Local<VoiceBio>,
+) {
+    let Some(mut c) = character else { return };
+    let c = &mut *c;
+    let on = selected.1 == CasTab::Traits && c.favorites_page && !crate::caslook::modal_up();
+    let k = selected.0.min(pending.members.len().saturating_sub(1));
+    let Some(id) = pending.members.get(k).map(|s| s.id) else { return };
+    if !on || st.sim != Some(id) {
+        st.typing = None;
+        keyboard.clear();
+    }
+    if !on {
+        return;
+    }
+    // The pitch: put where the Sim's is (on opening, for another Sim), and heard once let go.
+    if let Some(mut sl) = c.s.id(PITCH).and_then(|e| sliders.get_mut(e).ok()) {
+        let span = (sl.max - sl.min).max(1.0);
+        if st.sim != Some(id) {
+            let p = pending.members[k].voice_pitch;
+            sl.value = sl.min + p * span;
+            st.pitch = p;
+        } else {
+            let p = ((sl.value - sl.min) / span).clamp(0.0, 1.0);
+            if (p - st.pitch).abs() > 0.002 && !mouse.pressed(MouseButton::Left) {
+                st.pitch = p;
+                actions.write(crate::cas::CasActionRequest(CasAction::VoicePitch(p)));
+            }
+        }
+    }
+    st.sim = Some(id);
+    // (CAS_BIO=1, tests: the box open with words in it.)
+    if std::env::var_os("CAS_BIO").is_some() && !c.bio_open && pending.members[k].bio.is_empty() {
+        c.bio_open = true;
+        pending.members[k].bio = "Loves long walks by the lake and arguing about chess.".into();
+    }
+    // The biography: its button opens the box, a click in the box to write in it.
+    if crate::livehud::pressed(&clicks, c.s.id(BIO_BUTTON)) {
+        c.bio_open = !c.bio_open;
+        if !c.bio_open {
+            st.typing = None;
+        }
+    }
+    if c.bio_open && crate::livehud::pressed(&clicks, c.s.id(BIO_TEXT)) {
+        st.typing = Some(pending.members[k].bio.clone());
+    }
+    let mut finished = false;
+    if let Some(words) = st.typing.as_mut() {
+        use bevy::input::keyboard::Key;
+        for ev in keyboard.read() {
+            if !ev.state.is_pressed() {
+                continue;
+            }
+            match &ev.logical_key {
+                Key::Character(ch) if words.chars().count() < BIO_LONGEST => words.push_str(ch.as_str()),
+                Key::Space if words.chars().count() < BIO_LONGEST => words.push(' '),
+                Key::Backspace => {
+                    words.pop();
+                }
+                Key::Enter | Key::Escape | Key::Tab => finished = true,
+                _ => {}
+            }
+        }
+        pending.members[k].bio = words.clone();
+        let clicked_away = mouse.just_pressed(MouseButton::Left) && !c.s.id(BIO_TEXT).is_some_and(|e| clicks.get(e).is_ok_and(|(_, i)| *i == Interaction::Pressed));
+        if clicked_away {
+            finished = true;
+        }
+    } else {
+        keyboard.clear();
+    }
+    if finished {
+        st.typing = None;
+    }
+    let words = match &st.typing {
+        Some(w) => format!("{w}|"),
+        None => pending.members[k].bio.clone(),
+    };
+    let want = (id, words.clone(), c.bio_open);
+    if st.shown.as_ref() == Some(&want) {
+        return;
+    }
+    st.shown = Some(want);
+    crate::livehud::set_visible(&mut vis, c.s.id(BIO_WINDOW), c.bio_open);
+    if let Some(mut b) = c.s.id(BIO_BUTTON).and_then(|e| buttons.get_mut(e).ok())
+        && b.selected != c.bio_open
+    {
+        b.selected = c.bio_open;
+    }
+    crate::livehud::set_text(&mut texts, c.s.text(BIO_TEXT), &words);
 }
 
 /// A lifetime wish's slot (of `lifetime::LIFETIME_WISHES`).
@@ -121,7 +244,7 @@ fn spawn_character(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut im
         }
     }
     CHARACTER_UP.store(true, Ordering::Relaxed);
-    commands.insert_resource(CasCharacter { s, favorites_page: false, open: None, cells: None, shown: None, picker: None });
+    commands.insert_resource(CasCharacter { s, favorites_page: false, open: None, cells: None, shown: None, picker: None, bio_open: false });
 }
 
 /// Shown on the Personality tab: the page chosen, the Sim's traits in their sockets, the
@@ -166,7 +289,8 @@ fn character_panel(
                 p.close(&mut commands);
             }
             c.favorites_page = true;
-            c.open = Some(0);
+            // (CAS_BIO=1: the voice and the biography to be seen instead of the foods.)
+            c.open = if std::env::var_os("CAS_BIO").is_some() { None } else { Some(0) };
         }
         3 => {
             c.favorites_page = false;
@@ -214,6 +338,7 @@ fn character_panel(
         page: c.favorites_page,
         open: c.open,
         icons: gu.is_some(),
+        bio: c.bio_open,
     };
     if c.shown.as_ref() == Some(&want) {
         return;
@@ -223,7 +348,7 @@ fn character_panel(
     let s = &c.s;
     // The page shown, its tab lit, the panel as tall as the page (`UpdatePanelHeight`).
     if let Some(r) = s.root {
-        let page = ui.find("CASCharacter", if c.favorites_page { FAVORITES_PAGE } else { TRAITS_PAGE }).map_or(560.0, |w| w.area[3] - w.area[1]);
+        let page = ui.find("CASCharacter", if c.favorites_page && !c.bio_open { FAVORITES_PAGE } else { TRAITS_PAGE }).map_or(560.0, |w| w.area[3] - w.area[1]);
         let tall = if !c.favorites_page && (sim.age.is_little() || sim.age == Age::Child) { 200.0 } else { page };
         commands.entity(r).entry::<Node>().and_modify(move |mut n| n.height = Val::Px(tall));
     }

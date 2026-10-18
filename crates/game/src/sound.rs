@@ -119,11 +119,18 @@ pub struct PlaySound {
     /// Where the sound comes from (louder the closer the camera); `None` for interface sounds.
     pub at: Option<Vec3>,
     pub volume: f32,
+    /// How fast it plays (higher and lower with it): a Sim's voice at their pitch.
+    pub speed: f32,
 }
 
 impl PlaySound {
     pub fn ui(name: &str) -> Self {
-        Self { name: name.to_string(), at: None, volume: UI_VOLUME }
+        Self { name: name.to_string(), at: None, volume: UI_VOLUME, speed: 1.0 }
+    }
+
+    pub fn with_speed(mut self, s: f32) -> Self {
+        self.speed = s;
+        self
     }
 }
 
@@ -269,7 +276,9 @@ fn clip_cues(
         let Some(name) = resolve_cue(&sounds, &cue.name, sim, surface) else { continue };
         match cue.action {
             SoundAction::Play => {
-                play.write(PlaySound { name, at: Some(p + Vec3::Y), volume: SFX_VOLUME });
+                // (Their voice at its pitch.)
+                let speed = if cue.name.starts_with("vo_") { sim.voice_speed() } else { 1.0 };
+                play.write(PlaySound { name, at: Some(p + Vec3::Y), volume: SFX_VOLUME, speed });
             }
             SoundAction::StartLoop => {
                 if loops.iter().any(|(_, l)| l.owner == cue.sim && l.name == name) {
@@ -322,7 +331,7 @@ fn play_sounds(
         if *LOG {
             info!("sound: {} ({id:016X}) gain {gain:.2}", r.name);
         }
-        commands.spawn((AudioPlayer::new(h), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(gain))));
+        commands.spawn((AudioPlayer::new(h), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(gain)).with_speed(r.speed)));
     }
 }
 
