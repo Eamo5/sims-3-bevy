@@ -870,11 +870,13 @@ pub enum MoodletKind {
     GreatKiss,
     /// A Technophobe's unease with TVs and computers, a Hydrophobic Sim's in the water.
     Technophobia,
+    /// A Technophobe's sabotage come off (`sabotage`).
+    FightThePower,
     Hydrophobic,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 131] = {
+    pub const ALL: [MoodletKind; 132] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -889,7 +891,7 @@ impl MoodletKind {
             AnxiousSink, AnxiousStove, AnxiousFireplace, FeelingCalm, Charitable, FiendishlyDelighted,
             RudeAwakening, CryingBaby, Stuffed, NewStuff, Sore,
             OneWithNature, PlaguedByNature, EnjoyingSolitude, TooManyPeople, AfraidOfTheDark, FeelingLucky, FeelingUnlucky, Excited, GreatKiss,
-            Technophobia, Hydrophobic,
+            Technophobia, Hydrophobic, FightThePower,
         ]
     };
 
@@ -1055,6 +1057,7 @@ impl MoodletKind {
             Excited => md("Excited", "Excitable Sims tend to get, well, excited.", 15, 3.0),
             GreatKiss => md("Great Kiss", "Great kissers give amazing smooches.", 15, 3.0),
             Technophobia => md("Technophobia", "For some Sims, using technology is an unsettling experience.", -10, 3.0),
+            FightThePower => md("Fight the Power", "Keepin' the man off your back never felt so good. Sock it to him!", 15, 2.0),
             Hydrophobic => md("Hydrophobic", "There's just too much water for them to enjoy this moment.", -20, 3.0),
             FeelingCalm => md(
                 "Feeling Calm",
@@ -1202,6 +1205,7 @@ impl MoodletKind {
             Excited => ("Excited", true),
             GreatKiss => ("GreatKisser", true),
             Technophobia => ("AntiTV", true),
+            FightThePower => ("FightThePower", true),
             Hydrophobic => ("Hydrophobic", true),
         }
     }

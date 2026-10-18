@@ -1571,6 +1571,10 @@ fn world_click(
                 if d.special == Special::Overclock && upg_q.get(t).is_ok_and(|u| u.has(crate::upgrades::Upgrade::Improved) || u.has(crate::upgrades::Upgrade::Unbreakable)) {
                     continue;
                 }
+                // (A Technophobe's sabotage: of what still works.)
+                if d.special == Special::Sabotage && !crate::sabotage::offers(actor_sim, obj.kind, false, upg_q.get(t).is_ok_and(|u| u.has(crate::upgrades::Upgrade::Unbreakable))) {
+                    continue;
+                }
                 if !crate::computertraits::offers(d.special, actor_sim, jobs_q.get(actor).ok().flatten(), club_q.get(actor).is_ok_and(|c| c.0), work_to_do) {
                     continue;
                 }

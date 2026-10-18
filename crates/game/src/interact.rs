@@ -1336,6 +1336,8 @@ pub enum Special {
     LeaveBookClub,
     /// Checking on the household's real estate: its dialog after (`estatedialog`).
     CheckRealEstate,
+    /// A Technophobe sabotaging a TV, computer or stereo (`sabotage`).
+    Sabotage,
     /// A Computer Whiz hacking (`computertraits`: night only).
     Hack,
     /// A Workaholic working from home out of work hours, and a Computer Whiz overclocking
@@ -1659,7 +1661,7 @@ static CHAIR: [InteractionDef; 8] = [
 ];
 /// The dining chair's "Eat" (not offered in its menu).
 pub const CHAIR_EAT: usize = 1;
-static TV: [InteractionDef; 5] = [
+static TV: [InteractionDef; 6] = [
     InteractionDef { special: Special::TurnOnTv, ..def("Watch TV", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 55.0], Pose::Stand) },
     // (Fit Net: working out along with it, as the game's TV "Work Out".)
     InteractionDef { skill: Some("Athletic"), ..def("Work Out", 60.0, [-10.0, 0.0, -25.0, 0.0, -40.0, 5.0], Pose::Exercise) },
@@ -1667,11 +1669,14 @@ static TV: [InteractionDef; 5] = [
     WATCH_TV,
     InteractionDef { autonomous: false, special: Special::TvTurnOn, ..def("Turn On", 0.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::TvTurnOff, ..def("Turn Off", 0.0, N, Pose::Use) },
+    SABOTAGE,
 ];
+/// (A Technophobe's, at a TV, computer or stereo: the game's `SabotageTV`, half an hour.)
+const SABOTAGE: InteractionDef = InteractionDef { autonomous: false, special: Special::Sabotage, ..def("Sabotage", 30.0, N, Pose::Use) };
 /// (The TV watched: from a seat facing it, or standing.)
 const WATCH_TV: InteractionDef = InteractionDef { autonomous: false, special: Special::WatchTv, ..def("Watch the TV", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 55.0], Pose::Stand) };
 const WATCH_TV_SEATED: InteractionDef = InteractionDef { on_object: true, pose: Pose::Sit, per_hour: [0.0, 0.0, 3.0, 0.0, 0.0, 55.0], ..WATCH_TV };
-static COMPUTER: [InteractionDef; 16] = [
+static COMPUTER: [InteractionDef; 17] = [
     def("Play Computer Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 60.0], Pose::Use),
     // (The game's `ChatRandom`: its ITUN's Social 50, Fun 15 an hour.)
     InteractionDef { special: Special::ChatOnline, ..def("Chat Online", 60.0, [0.0, 0.0, -2.0, 50.0, 0.0, 15.0], Pose::Use) },
@@ -1695,6 +1700,7 @@ static COMPUTER: [InteractionDef; 16] = [
     InteractionDef { autonomous: false, special: Special::Overclock, ..def("Overclock", 60.0, N, Pose::Use) },
     // (The game's `CheckRealEstate`: two minutes' typing, then its dialog.)
     InteractionDef { autonomous: false, special: Special::CheckRealEstate, ..def("Check Real Estate", 2.0, N, Pose::Use) },
+    SABOTAGE,
 ];
 static CRIB: [InteractionDef; 1] = [InteractionDef {
     until_full: Some(ENERGY),
@@ -1882,13 +1888,14 @@ static DIVING_BOARD: [InteractionDef; 1] = [InteractionDef {
 }];
 static STUFFED_TOY: [InteractionDef; 1] = [def("Play with Toy", 30.0, [0.0, 0.0, -2.0, 6.0, 0.0, 75.0], Pose::Use)];
 static VRGOGGLES: [InteractionDef; 1] = [def("Explore Virtual Worlds", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 95.0], Pose::Use)];
-static STEREO: [InteractionDef; 5] = [
+static STEREO: [InteractionDef; 6] = [
     def("Dance", 45.0, [0.0, 0.0, -6.0, 0.0, -6.0, 70.0], Pose::Dance),
     InteractionDef { skill: Some("Athletic"), special: Special::CardioWorkOut, ..def("Cardio Exercise", 60.0, [-10.0, 0.0, -25.0, 0.0, -40.0, 5.0], Pose::Exercise) },
     InteractionDef { skill: Some("Athletic"), special: Special::StrengthWorkOut, ..def("Strength Training", 60.0, [-10.0, 0.0, -25.0, 0.0, -40.0, 5.0], Pose::Exercise) },
     // (The game's `TurnOnOff`: a button pressed.)
     InteractionDef { autonomous: false, special: Special::StereoOn, ..def("Turn On", 1.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::StereoOff, ..def("Turn Off", 1.0, N, Pose::Use) },
+    SABOTAGE,
 ];
 /// (A book taken down to read in a seat; read standing there when no seat is free.)
 static BOOKSHELF: [InteractionDef; 2] = [
@@ -2247,6 +2254,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Clean Out" if kind == ObjectKind::Fridge => A::new(None, &["a2o_fridge_cleanOutBadFood_x"]),
         // (Into its works, as an upgrade's done.)
         "Overclock" => A::new(Some("a2o_computer_repair_start_x"), &["a2o_computer_repair_loop1_x", "a2o_computer_repair_loop2_x"]),
+        // (Tinkered with as it'd be repaired: the game's "Upgrade" state.)
+        "Sabotage" => repair_of(kind).1,
         // (The can's own halves knock it down and stand it up; rummaging, its lid's off.)
         "Knock Over" if kind == ObjectKind::OutdoorTrashCan => A::new(None, &["a2o_trashCan_knock_over_x"]),
         "Pick Up" if kind == ObjectKind::OutdoorTrashCan => A::new(None, &["a2o_trashCan_clean_up_x"]),
@@ -4570,6 +4579,9 @@ pub(crate) fn run_actions(
                                         }
                                         Special::SolveProblems | Special::JobIssues | Special::JoinBookClub | Special::LeaveBookClub => {
                                             commands.entity(me).insert(crate::computertraits::Done(d.special));
+                                        }
+                                        Special::Sabotage => {
+                                            commands.entity(me).insert(crate::sabotage::Sabotaged(*target));
                                         }
                                         Special::CheckRealEstate => {
                                             commands.queue(move |w: &mut World| w.resource_mut::<crate::estatedialog::EstateDialog>().open(me));
