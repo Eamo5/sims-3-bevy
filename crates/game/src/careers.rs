@@ -1211,17 +1211,17 @@ pub fn roll_events(cands: &[(Due, f32)], sure: &[Due], rng: &mut impl rand::Rng)
 }
 
 /// At the start of a shift, what the day will bring: the raise for good work (1% likely at
-/// nothing to 25% at the best, twice as likely for the Lucky), a Loser's bad luck (half the
-/// time), the career's own events by their likelihood; each at a time in the shift.
+/// nothing to 25% at the best, twice as likely Feeling Lucky, half Unlucky), a Loser's bad luck
+/// (half the time), the career's own events by their likelihood; each at a time in the shift.
 #[allow(clippy::type_complexity)]
 fn roll_career_events(
     mut commands: Commands,
     clock: Res<GameClock>,
-    started: Query<(Entity, &Sim, &Job, &AtWork, Option<&crate::opportunities::SimOpportunities>), (Added<AtWork>, With<HouseholdMember>)>,
+    started: Query<(Entity, &Sim, &Job, &AtWork, Option<&crate::opportunities::SimOpportunities>, Option<&crate::life::Moodlets>), (Added<AtWork>, With<HouseholdMember>)>,
     ui: Option<Res<crate::icons::GameUi>>,
 ) {
     let mut rng = rand::rng();
-    for (e, sim, job, w, opps) in &started {
+    for (e, sim, job, w, opps, moodlets) in &started {
         let hours_left = ((w.until - clock.minutes) / 60.0) as f32;
         if hours_left < 0.5 {
             continue;
@@ -1235,7 +1235,7 @@ fn roll_career_events(
             !on_career
                 && data.as_ref().is_some_and(|d| d.opportunities.iter().any(|o| o.guid == guid && (o.repeat || !opps.is_some_and(|x| x.done.iter().any(|g| g == guid)))))
         };
-        let luck = if sim.traits.contains(&Trait::Lucky) { 2.0 } else if sim.traits.contains(&Trait::Unlucky) { 0.5 } else { 1.0 };
+        let luck = crate::traitmoods::luck(moodlets, crate::traitmoods::RAISE_LUCK.0, crate::traitmoods::RAISE_LUCK.1) as f32;
         let mut cands: Vec<(Due, f32)> = Vec::new();
         if job.performance > 0.0 {
             cands.push((Due::Raise, (job.performance / 100.0 * 0.24 + 0.01) * luck));

@@ -3189,16 +3189,17 @@ fn keyboard_shortcuts(
 fn update_moodlets_panel(
     mut commands: Commands,
     panel: Query<Entity, With<MoodletsPanel>>,
-    sel: Query<&crate::life::Moodlets, With<Selected>>,
+    sel: Query<(&crate::life::Moodlets, Option<&crate::sim::Sim>), With<Selected>>,
     clock: Res<crate::clock::GameClock>,
     mut ui: Option<ResMut<crate::icons::GameUi>>,
     mut images: ResMut<Assets<Image>>,
     mut last: Local<(Vec<String>, bool, u32)>,
 ) {
     let Ok(p) = panel.single() else { return };
-    let mut list: Vec<crate::life::Moodlet> = sel.single().map(|m| m.0.clone()).unwrap_or_default();
+    let (mut list, who): (Vec<crate::life::Moodlet>, String) = sel.single().map(|(m, s)| (m.0.clone(), s.map(|s| s.first.clone()).unwrap_or_default())).unwrap_or_default();
     list.sort_by_key(|x| -x.value.abs());
-    let labels: Vec<String> = list.iter().map(crate::life::moodlet_label).collect();
+    let mut labels: Vec<String> = list.iter().map(crate::life::moodlet_label).collect();
+    labels.push(who.clone());
     // (Time left in the tooltips is refreshed every game hour.)
     let hour = (clock.minutes / 60.0) as u32;
     if last.0 == labels && last.1 == ui.is_some() && last.2 == hour {
@@ -3213,6 +3214,7 @@ fn update_moodlets_panel(
                 Some(ui) => ui.moodlet_info(m.kind),
                 None => (m.kind.def().name.to_string(), m.kind.def().desc.to_string(), String::new()),
             };
+            let desc = crate::icons::with_name(&desc, &who);
             let icon = ui.as_deref_mut().and_then(|ui| ui.icon(&mut images, &icon));
             let left = if m.until.is_finite() {
                 let h = ((m.until - clock.minutes) / 60.0).max(0.0);

@@ -822,7 +822,7 @@ fn moodlets(
     hud: Res<LiveHud>,
     ui: Option<ResMut<UiAssets>>,
     (mut assets, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
-    sel: Query<&crate::life::Moodlets, With<Selected>>,
+    sel: Query<(&crate::life::Moodlets, Option<&crate::sim::Sim>), With<Selected>>,
     clock: Res<crate::clock::GameClock>,
     mut game_ui: Option<ResMut<crate::icons::GameUi>>,
     clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
@@ -831,7 +831,8 @@ fn moodlets(
 ) {
     let (Some(mut ui), Some(grid)) = (ui, hud.display.id(MOODLET_GRID)) else { return };
     let Some(g) = ui.layout("HUDSimDisplay").and_then(|w| w.find(MOODLET_GRID)).and_then(|w| w.grid) else { return };
-    let mut list: Vec<crate::life::Moodlet> = sel.single().map(|m| m.0.clone()).unwrap_or_default();
+    // (Theirs, with their name for the descriptions that have it: "Today is Bella's lucky day.")
+    let (mut list, who): (Vec<crate::life::Moodlet>, String) = sel.single().map(|(m, s)| (m.0.clone(), s.map(|s| s.first.clone()).unwrap_or_default())).unwrap_or_default();
     list.sort_by_key(|x| -x.value.abs());
     let (cols, rows) = (g.columns.max(1) as usize, g.rows.max(1) as usize);
     let total_rows = list.len().div_ceil(cols);
@@ -846,7 +847,8 @@ fn moodlets(
     scroll = scroll.min(total_rows.saturating_sub(rows));
     set_visible(&mut vis, hud.display.id(MOODLET_UP), scroll > 0);
     set_visible(&mut vis, hud.display.id(MOODLET_DOWN), scroll + rows < total_rows);
-    let labels: Vec<String> = list.iter().map(crate::life::moodlet_label).collect();
+    let mut labels: Vec<String> = list.iter().map(crate::life::moodlet_label).collect();
+    labels.push(who.clone());
     // (Time left is refreshed every game hour.)
     let hour = (clock.minutes / 60.0) as u32;
     let holder_ok = state.0.is_some_and(|h| vis.contains(h));
@@ -885,6 +887,7 @@ fn moodlets(
             Some(gu) => gu.moodlet_info(m.kind),
             None => (m.kind.def().name.to_string(), m.kind.def().desc.to_string(), String::new()),
         };
+        let desc = crate::icons::with_name(&desc, &who);
         let icon = game_ui.as_deref_mut().and_then(|gu| gu.icon(&mut assets, &icon));
         // (Its picture: the icon placement's own image swapped for the moodlet's.)
         if let (Some(win), Some(h)) = (s.id(MOODLET_ICON), icon) {

@@ -998,7 +998,7 @@ fn meal_requests(
         &Sim,
         Option<&EatingPlate>,
         (Option<&MealPlan>, Option<&Plateful>, &crate::interact::Skills, Option<&KnownRecipes>, Option<&ServingFrom>, Has<ForOne>),
-        (Option<&crate::journal::SkillJournal>, Has<BurntDinner>, Option<&OnPlate>),
+        (Option<&crate::journal::SkillJournal>, Has<BurntDinner>, Option<&OnPlate>, Option<&crate::life::Moodlets>),
     )>,
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy)>,
     mut meals: Query<(&mut Meal, Option<&Dish>, Option<&DishFood>)>,
@@ -1016,7 +1016,7 @@ fn meal_requests(
     let recipes = ui.as_ref().map(|u| u.data.clone());
     let recipe = |i: usize| recipes.as_ref().and_then(|d| d.recipes.get(i));
     let mut taken: Vec<Entity> = Vec::new();
-    for (me, req, tf, mut queue, sim, eating, (plan, plateful, skills, known, serving, one), (journal, burnt_before, on_plate)) in &mut sims {
+    for (me, req, tf, mut queue, sim, eating, (plan, plateful, skills, known, serving, one), (journal, burnt_before, on_plate, moodlets)) in &mut sims {
         commands.entity(me).remove::<MealRequest>();
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
         // Ambrosia eaten: divine (`ambrosia`).
@@ -1065,10 +1065,14 @@ fn meal_requests(
                     let mut rng = rand::rng();
                     // (FIRE_ON_COOK=1: every dinner sets the stove alight, a test.)
                     let forced = std::env::var("FIRE_ON_COOK").is_ok();
-                    if forced || rng.random_bool(crate::fire::burn_chance(skills.level("Cooking"), level, natural, stove_tuning.map_or(1.0, |t| t.failure))) {
+                    // (Feeling Lucky, never; Unlucky, twice as likely: `traitmoods::luck`.)
+                    use crate::traitmoods::{BURN_LUCK, COOKING_FIRE_LUCK, luck};
+                    let burns = crate::fire::burn_chance(skills.level("Cooking"), level, natural, stove_tuning.map_or(1.0, |t| t.failure)) * luck(moodlets, BURN_LUCK.0, BURN_LUCK.1);
+                    if forced || rng.random_bool(burns.min(1.0)) {
                         // (Never a fireproof stove: "Make Fireproof".)
                         let fireproof = crate::upgrades::has(upgrades.get(stove).ok(), crate::upgrades::Upgrade::Fireproof);
-                        if !fireproof && (forced || rng.random_bool((stove_tuning.map_or(5.0, |t| t.fire) as f64 / 100.0).clamp(0.0, 1.0))) {
+                        let fire_after = stove_tuning.map_or(5.0, |t| t.fire) as f64 / 100.0 * luck(moodlets, COOKING_FIRE_LUCK.0, COOKING_FIRE_LUCK.1);
+                        if !fireproof && (forced || rng.random_bool(fire_after.clamp(0.0, 1.0))) {
                             fire.write(crate::fire::StartFire { at: stf.translation + Vec3::Y * s.height * 0.85, level: floors.get(stove).map_or(1, |f| f.0) });
                             notes.push(format!("{} set the stove on fire!", sim.first));
                             commands.entity(me).remove::<(MealPlan, BurntDinner)>();

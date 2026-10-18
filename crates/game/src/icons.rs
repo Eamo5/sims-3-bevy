@@ -90,6 +90,11 @@ fn open_game_ui(mut commands: Commands, existing: Option<Res<GameUi>>, mut tried
     commands.insert_resource(GameUi { data: Arc::new(data), icons: s3bake::Icons::open(&root).map(Arc::new), cache: HashMap::new() });
 }
 
+/// The game's text with the Sim's name for its token ("Today is {0.SimFirstName}'s lucky day.").
+pub fn with_name(text: &str, first: &str) -> String {
+    if text.contains("{0.") { text.replace("{0.SimFirstName}", first).replace("{0.SimName}", first) } else { text.to_string() }
+}
+
 /// Text shown when the pointer rests on this UI element.
 #[derive(Component, Clone)]
 pub struct Tooltip(pub String);

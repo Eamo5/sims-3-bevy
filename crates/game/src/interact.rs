@@ -4266,7 +4266,9 @@ pub(crate) fn run_actions(
                                 let per_hour = object_rates.per_hour(d, obj.objd);
                                 for i in 0..6 {
                                     let mut gain = per_hour[i];
-                                    if i == HUNGER && matches!(d.special, Special::ServeMeal | Special::GrabPlate) {
+                                    // (Making or fetching a meal isn't eating it: what it does for hunger is
+                                    // what draws them to it, and the eating does it.)
+                                    if i == HUNGER && matches!(d.special, Special::ServeMeal | Special::GrabPlate | Special::Leftovers | Special::Cook | Special::Microwave | Special::ReplicateFood) {
                                         gain = 0.0;
                                     }
                                     if i == FUN && gain > 0.0 {
@@ -4380,7 +4382,7 @@ pub(crate) fn run_actions(
                                     let worn = wear.get(*target).ok().copied().filter(|w| clock.minutes >= w.sturdy_until);
                                     if !unbreakable
                                         && let Some(w) = worn
-                                        && rand::rng().random_bool(break_chance_tuned(tunings.get(obj.objd), obj.kind, obj.price, w.breaks))
+                                        && rand::rng().random_bool((break_chance_tuned(tunings.get(obj.objd), obj.kind, obj.price, w.breaks) * crate::traitmoods::luck(moodlets, crate::traitmoods::BREAK_LUCK.0, crate::traitmoods::BREAK_LUCK.1)).min(1.0))
                                     {
                                         if let Ok(mut w) = wear.get_mut(*target) {
                                             w.breaks += 1;
@@ -4971,6 +4973,13 @@ pub(crate) fn run_actions(
                                     }
                                     life.write(LifeEvent::new(me, LifeEventKind::Socialized { other: *target, social: s.name }));
                                     life.write(LifeEvent::new(*target, LifeEventKind::Socialized { other: me, social: s.name }));
+                                    // (For the traits that feel it: `traitmoods`.)
+                                    {
+                                        let done = crate::traitmoods::Socialised { actor: me, target: *target, kiss: s.effect == SocialEffect::Kiss, accepted: action.social_outcome.is_none_or(|o| o.accepted) };
+                                        commands.queue(move |w: &mut World| {
+                                            w.write_message(done);
+                                        });
+                                    }
                                     // (Romance in front of others: those it's an affront to may see
                                     // it, the game's `JealousyLevel`.)
                                     if let Some(level) = crate::conversation::model(*social).map(|m| m.jealousy).filter(|l| *l > 0) {

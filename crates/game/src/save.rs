@@ -1312,7 +1312,7 @@ pub(crate) fn apply_loaded_game(
         moodlets.0.clear();
         for (name, until) in &s.moodlets {
             if let Some(k) = MoodletKind::from_name(name) {
-                moodlets.0.push(crate::life::Moodlet { kind: k, value: k.def().value, until: *until });
+                moodlets.0.push(crate::life::Moodlet { kind: k, value: k.def().value, until: *until, felt: false });
             }
         }
         rels.0.clear();

@@ -856,10 +856,22 @@ pub enum MoodletKind {
     Stuffed,
     NewStuff,
     Sore,
+    /// The base traits' own (`traitmoods`): out of doors for those who love or hate it, alone or
+    /// crowded for a Loner, the dark for a Coward, the day's luck, an Excitable Sim's excitement,
+    /// a Great Kisser's kiss.
+    OneWithNature,
+    PlaguedByNature,
+    EnjoyingSolitude,
+    TooManyPeople,
+    AfraidOfTheDark,
+    FeelingLucky,
+    FeelingUnlucky,
+    Excited,
+    GreatKiss,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 120] = {
+    pub const ALL: [MoodletKind; 129] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -873,6 +885,7 @@ impl MoodletKind {
             GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, NiceNails, CompletelyAtEase, Horrified, Tranquil, BornToDoThis, DrawnIn, OutAfterCurfew, CaughtAfterCurfew, CozyFire, DivineMeal, Attractive, SuccessfulPrank, PrankedNegative, PrankedPositive,
             AnxiousSink, AnxiousStove, AnxiousFireplace, FeelingCalm, Charitable, FiendishlyDelighted,
             RudeAwakening, CryingBaby, Stuffed, NewStuff, Sore,
+            OneWithNature, PlaguedByNature, EnjoyingSolitude, TooManyPeople, AfraidOfTheDark, FeelingLucky, FeelingUnlucky, Excited, GreatKiss,
         ]
     };
 
@@ -1028,6 +1041,15 @@ impl MoodletKind {
             Stuffed => md("Stuffed", "Forcing Sims to eat when they are not hungry may lead to loss of appetite and weight gain.", 0, 3.0),
             NewStuff => md("New Stuff!", "Sims love getting new things for their homes!", 20, 2.0),
             Sore => md("Sore", "Sims may occasionally feel a little pain, but the results are usually worth it. Sometimes a massage can help...", -10, 6.0),
+            OneWithNature => md("One with Nature", "Outdoorsmen find themselves quite happy when not tucked away indoors.", 20, 0.0),
+            PlaguedByNature => md("Plagued by Nature", "It's often best for Sims that hate the Outdoors to spend as little time out there as possible.", -20, 0.0),
+            EnjoyingSolitude => md("Enjoying Solitude", "Introverted Sims like it best at times when others completely and utterly stay away.", 15, 0.0),
+            TooManyPeople => md("Too Many People", "Certain Sims may not feel too comfortable around large groups.", -15, 0.0),
+            AfraidOfTheDark => md("Afraid of the Dark", "Heading inside or finding a bit of sunlight will take care of this cowardly affliction.", -15, 0.0),
+            FeelingLucky => md("Feeling Lucky", "Today is their lucky day. Who knows what good will happen?", 5, 23.0),
+            FeelingUnlucky => md("Feeling Unlucky", "Today is NOT their lucky day. Nothing good can come of this.", -5, 23.0),
+            Excited => md("Excited", "Excitable Sims tend to get, well, excited.", 15, 3.0),
+            GreatKiss => md("Great Kiss", "Great kissers give amazing smooches.", 15, 3.0),
             FeelingCalm => md(
                 "Feeling Calm",
                 "It turns out it was just anxiety getting the best of your Sim. The object wasn't left turned on and impending disaster wasn't looming. But, double checking helps to calm the anxiety.",
@@ -1164,6 +1186,15 @@ impl MoodletKind {
             Stuffed => ("Stuffed", true),
             NewStuff => ("NewStuff", true),
             Sore => ("Sore", true),
+            OneWithNature => ("OneWithNature", true),
+            PlaguedByNature => ("PlaguedByNature", true),
+            EnjoyingSolitude => ("EnjoyingSolitude", true),
+            TooManyPeople => ("TooManyPeople", true),
+            AfraidOfTheDark => ("AfraidOfTheDark", true),
+            FeelingLucky => ("FeelingLucky", true),
+            FeelingUnlucky => ("FeelingUnlucky", true),
+            Excited => ("Excited", true),
+            GreatKiss => ("GreatKisser", true),
         }
     }
 }
@@ -1174,6 +1205,8 @@ pub struct Moodlet {
     pub value: i32,
     /// Game minute it ends (infinite for need moodlets).
     pub until: f64,
+    /// Its strength as the Sim's traits take it, once they have (`expire_and_sum`).
+    pub felt: bool,
 }
 
 #[derive(Component, Default, Clone)]
@@ -1188,13 +1221,13 @@ impl Moodlets {
             m.until = m.until.max(until);
             return;
         }
-        self.0.push(Moodlet { kind, value: d.value, until });
+        self.0.push(Moodlet { kind, value: d.value, until, felt: false });
     }
 
     /// Adds an event moodlet at its own strength and length (a meal's, as good as it was).
     pub fn add_valued(&mut self, kind: MoodletKind, now: f64, value: i32, minutes: f64) {
         self.remove(kind);
-        self.0.push(Moodlet { kind, value, until: now + minutes });
+        self.0.push(Moodlet { kind, value, until: now + minutes, felt: false });
     }
 
     pub fn remove(&mut self, kind: MoodletKind) {
@@ -1213,7 +1246,7 @@ impl Moodlets {
     fn set_need(&mut self, kind: MoodletKind, on: bool) {
         let present = self.has(kind);
         if on && !present {
-            self.0.push(Moodlet { kind, value: kind.def().value, until: f64::INFINITY });
+            self.0.push(Moodlet { kind, value: kind.def().value, until: f64::INFINITY, felt: false });
         } else if !on && present {
             self.remove(kind);
         }
@@ -1461,8 +1494,38 @@ fn life_events(
     }
 }
 
-fn expire_and_sum(clock: Res<GameClock>, delta: Res<SimDelta>, mut q: Query<(&mut Moodlets, &mut Mood, Option<&crate::wishes::Wishes>, Option<&crate::weather::BodyTemperature>)>) {
-    for (mut ml, mut mood, wishes, temperature) in &mut q {
+/// How hard a Hot-Headed Sim takes a bad moodlet (`kHotHeadedTraitAngryMoodMultiplier`), and an
+/// Over-Emotional one any (`kOverEmotionalTraitMoodMultiplier`).
+const HOT_HEADED: f32 = 1.5;
+const OVER_EMOTIONAL: f32 = 1.25;
+
+/// A moodlet's strength for a Sim of these traits (`BuffInstance.EffectValueForSim`): a
+/// Hot-Headed Sim takes the bad ones angrily, half as hard again (not a Neurotic one, who frets
+/// over them instead: the game's last word on which way a bad one goes); an Over-Emotional Sim
+/// feels every one a quarter more.
+pub fn felt(value: i32, traits: &[Trait]) -> i32 {
+    let mut v = value as f32;
+    if value < 0 && traits.contains(&Trait::HotHeaded) && !traits.contains(&Trait::Neurotic) {
+        v *= HOT_HEADED;
+    }
+    if traits.contains(&Trait::OverEmotional) {
+        v *= OVER_EMOTIONAL;
+    }
+    v as i32
+}
+
+#[allow(clippy::type_complexity)]
+fn expire_and_sum(clock: Res<GameClock>, delta: Res<SimDelta>, mut q: Query<(&mut Moodlets, &mut Mood, Option<&crate::wishes::Wishes>, Option<&crate::weather::BodyTemperature>, Option<&Sim>)>) {
+    for (mut ml, mut mood, wishes, temperature, sim) in &mut q {
+        // (Each new one as their traits take it.)
+        if let Some(sim) = sim
+            && ml.0.iter().any(|m| !m.felt)
+        {
+            for m in ml.0.iter_mut().filter(|m| !m.felt) {
+                m.value = felt(m.value, &sim.traits);
+                m.felt = true;
+            }
+        }
         let now = clock.minutes;
         if let Some(t) = temperature {
             // SimTemperature: pause below the -60 unpause threshold; above -1,
