@@ -25,7 +25,7 @@ impl Plugin for MealsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Leftovers>()
             .init_resource::<FridgeKeeps>()
-            .add_systems(Update, fridge_keeps.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (fridge_keeps, stuffed).run_if(in_state(crate::PlayMode::Live)))
             .init_resource::<crate::ingredients::Fridge>()
             .add_systems(OnEnter(crate::AppState::InGame), |mut l: ResMut<Leftovers>, mut f: ResMut<crate::ingredients::Fridge>| {
                 l.0.clear();
@@ -1391,6 +1391,39 @@ fn meal_requests(
                 }
                 commands.entity(me).remove::<Plateful>();
             }
+        }
+    }
+}
+
+/// The game's `BuffStuffed.MotiveValueForStuffed` (its tuning's 55): eating begun as full as this
+/// leaves a Sim Stuffed.
+const STUFFED_HUNGER: f32 = 55.0;
+
+/// How hungry a Sim was as they began eating.
+#[derive(Component)]
+pub struct HungerAtMeal(f32);
+
+/// Eating when not hungry: Stuffed once done (a meal, leftovers, a snack), as the game's
+/// `Morsel` adds it.
+fn stuffed(mut commands: Commands, clock: Res<crate::clock::GameClock>, mut sims: Query<(Entity, &ActionQueue, &crate::sim::Motives, Option<&HungerAtMeal>, &mut crate::life::Moodlets)>) {
+    for (e, q, m, at, mut ml) in &mut sims {
+        let eats = |a: &Action| a.label == "Eat" || matches!(a.kind, ActionKind::EatHere | ActionKind::EatItem { .. });
+        let eating = q.0.front().is_some_and(|a| matches!(a.phase, crate::interact::Phase::Running(_)) && eats(a));
+        // (A meal broken off a moment (someone talking to them) is still the same meal.)
+        let queued = q.0.iter().any(eats);
+        match (eating, queued, at) {
+            (true, _, None) => {
+                debug!("eating begun at hunger {:.0}", m.0[crate::sim::HUNGER]);
+                commands.entity(e).insert(HungerAtMeal(m.0[crate::sim::HUNGER]));
+            }
+            (false, false, Some(h)) => {
+                if h.0 >= STUFFED_HUNGER {
+                    info!("ate when not hungry (hunger {:.0}): Stuffed", h.0);
+                    ml.add(crate::life::MoodletKind::Stuffed, clock.minutes);
+                }
+                commands.entity(e).remove::<HungerAtMeal>();
+            }
+            _ => {}
         }
     }
 }

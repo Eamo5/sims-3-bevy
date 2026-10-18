@@ -377,6 +377,8 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
         .and_then(|n| cas.parts.iter().find(|e| e.clothing_type == CT_HAIR && e.name.eq_ignore_ascii_case(&n) && fits(e)).cloned())
         .or(hair);
     let brows = everyday(CT_EYEBROW).into_iter().filter(natural).collect::<Vec<_>>().choose(&mut own).map(|e| (*e).clone());
+    // (As chosen in Create a Sim, when they have been.)
+    let brows = chosen(sim.outfit.brows, CT_EYEBROW).or(brows);
     // Facial hair, glasses and make-up, as chosen (or now and then, by their look).
     let mut extra = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look ^ 0x5EED_FACE);
     let grown = matches!(sim.age, Age::YoungAdult | Age::Adult | Age::Elder);

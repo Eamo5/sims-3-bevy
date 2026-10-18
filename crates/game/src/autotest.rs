@@ -2404,11 +2404,16 @@ fn set_grime(time: Res<Time>, mut done: Local<bool>, mut grime: Query<&mut crate
     }
 }
 
-fn keep_hungry(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives), With<crate::sim::HouseholdMember>>, mut dirtied: Local<bool>) {
-    // (DIRTY=1: the household start in need of a wash, once.)
-    if !*dirtied && std::env::var("DIRTY").is_ok() && !sims.is_empty() {
+fn keep_hungry(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives), With<crate::sim::HouseholdMember>>, mut dirtied: Local<bool>, time: Res<Time>) {
+    // (DIRTY=1: the household start in need of a wash, once; FULL=1: not hungry at all, once.)
+    if !*dirtied && (std::env::var("DIRTY").is_ok() || std::env::var("FULL").is_ok() && time.elapsed_secs() > 10.0) && !sims.is_empty() {
         for (_, mut m) in &mut sims {
-            m.0[crate::sim::HYGIENE] = -80.0;
+            if std::env::var("DIRTY").is_ok() {
+                m.0[crate::sim::HYGIENE] = -80.0;
+            }
+            if std::env::var("FULL").is_ok() {
+                m.0[crate::sim::HUNGER] = 90.0;
+            }
         }
         *dirtied = true;
     }
@@ -4617,6 +4622,17 @@ fn ui_flow(
         }
         (250, AppState::CreateHousehold, _) if since > 2.5 => {
             shot(&mut commands, "2h_hats");
+            // (The eyebrows, and another style.)
+            crate::casbrows::OPEN.store(true, std::sync::atomic::Ordering::Relaxed);
+            ask_cas(&mut commands, &[crate::home::CasAction::PickPart(s3formats::sim::CT_EYEBROW, 2)]);
+            *stage = (253, now);
+        }
+        (253, AppState::CreateHousehold, _) if since > 2.5 => {
+            shot(&mut commands, "2h_brows");
+            *stage = (254, now);
+        }
+        (254, AppState::CreateHousehold, _) if since > 0.5 => {
+            crate::casbrows::OPEN.store(false, std::sync::atomic::Ordering::Relaxed);
             *stage = (67, now);
         }
         (67, AppState::CreateHousehold, _) if since > 0.5 => {

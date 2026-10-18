@@ -668,6 +668,7 @@ fn cas_actions(
                     let o = &mut pending.members[k].outfit;
                     match t {
                         CT_HAIR => o.hair = Some(*key),
+                        s3formats::sim::CT_EYEBROW => o.brows = Some(*key),
                         _ => o.wear(scene.wear, t, *key),
                     }
                 }

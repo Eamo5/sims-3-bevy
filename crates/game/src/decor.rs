@@ -2,7 +2,9 @@
 //! the room a household Sim is in at home (or near them outdoors) add up, the best first and the
 //! rest for less the bigger the room, to Decorated, Nicely Decorated or Beautifully Decorated.
 //! Each thing counts its class's `EnvironmentScore`; one dirty, broken or burnt counts nothing,
-//! and a Snob takes it all twice as much to heart.
+//! and a Snob takes it all twice as much to heart. Two or more things new from the catalogue in
+//! the room (bought in the last few hours: the game's `ComeAndSee` `AddedFromCatalog`) are New
+//! Stuff.
 
 use bevy::prelude::*;
 
@@ -15,7 +17,7 @@ pub struct DecorPlugin;
 
 impl Plugin for DecorPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, decor.run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, new_things.run_if(in_state(crate::AppState::InGame))).add_systems(Update, decor.run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -67,6 +69,26 @@ pub fn room_score(mut scores: Vec<f32>, tiles: f32, outside: bool) -> f32 {
     total.clamp(0.0, 100.0)
 }
 
+/// When a thing was bought from the catalogue.
+#[derive(Component)]
+pub struct BoughtAt(pub f64);
+
+/// How long a thing bought is new (the game's `ComeAndSeeComponent.kAdvertiseDuration` for
+/// `AddedFromCatalog`, its tuning's 3 hours), and how many new things make New Stuff
+/// (`BuffNewStuff.kNewObjectsForBuff`).
+const NEW_MINUTES: f64 = 180.0;
+const NEW_THINGS: usize = 2;
+
+/// Things bought in buy mode, new from now (not those a game loads with).
+fn new_things(mut commands: Commands, buy: Res<crate::buy::BuyMode>, clock: Res<crate::clock::GameClock>, bought: Query<Entity, Added<crate::save::Bought>>) {
+    if !buy.active {
+        return;
+    }
+    for e in &bought {
+        commands.entity(e).insert(BoughtAt(clock.minutes));
+    }
+}
+
 /// Which decor moodlet a score earns.
 pub fn decor_moodlet(score: f32) -> Option<MoodletKind> {
     match score {
@@ -83,7 +105,8 @@ fn decor(
     mut last: Local<f32>,
     building: Option<Res<crate::building::ActiveBuilding>>,
     rates: Res<ObjectRates>,
-    mut sims: Query<(&Sim, &Transform, &mut Moodlets, &Visibility), (With<HouseholdMember>, Without<crate::visit::OnLot>)>,
+    mut sims: Query<(Entity, &Sim, &Transform, &mut Moodlets, &Visibility), (With<HouseholdMember>, Without<crate::visit::OnLot>)>,
+    (new, clock, mut counted): (Query<(&Transform, &BoughtAt)>, Res<crate::clock::GameClock>, Local<std::collections::HashMap<Entity, usize>>),
     objects: Query<
         (&GameObject, &Transform, Option<&crate::grime::Grime>, Has<crate::interact::Broken>, Has<crate::grime::Charred>),
         (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>),
@@ -113,7 +136,20 @@ fn decor(
             })
         })
         .collect();
-    for (sim, tf, mut moodlets, vis) in &mut sims {
+    for (me, sim, tf, mut moodlets, vis) in &mut sims {
+        // New Stuff: new things in the room (again when there are more of them).
+        if *vis != Visibility::Hidden {
+            let (level, room) = where_is(tf.translation);
+            let n = new
+                .iter()
+                .filter(|(t, at)| clock.minutes - at.0 <= NEW_MINUTES && room.is_some() && where_is(t.translation) == (level, room))
+                .count();
+            let before = counted.insert(me, n).unwrap_or(0);
+            if n >= NEW_THINGS && (n > before || !moodlets.has(MoodletKind::NewStuff)) {
+                info!("{} admires {n} new things: New Stuff", sim.first);
+                moodlets.add(MoodletKind::NewStuff, clock.minutes);
+            }
+        }
         let score = if *vis == Visibility::Hidden {
             0.0
         } else {

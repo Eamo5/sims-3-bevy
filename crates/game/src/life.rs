@@ -849,10 +849,17 @@ pub enum MoodletKind {
     /// A donation to charity (`charity`): the Good's, and the Evil's to undermine one.
     Charitable,
     FiendishlyDelighted,
+    /// Everyday ones: woken by a noise, a baby crying, eaten too much, new things, sore after
+    /// overdoing a workout.
+    RudeAwakening,
+    CryingBaby,
+    Stuffed,
+    NewStuff,
+    Sore,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 115] = {
+    pub const ALL: [MoodletKind; 120] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -865,6 +872,7 @@ impl MoodletKind {
             Decorated, NicelyDecorated, BeautifullyDecorated, GreatMeal, Stressed, Winner, Overworked, IAmBeautiful, SugarRush,
             GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, NiceNails, CompletelyAtEase, Horrified, Tranquil, BornToDoThis, DrawnIn, OutAfterCurfew, CaughtAfterCurfew, CozyFire, DivineMeal, Attractive, SuccessfulPrank, PrankedNegative, PrankedPositive,
             AnxiousSink, AnxiousStove, AnxiousFireplace, FeelingCalm, Charitable, FiendishlyDelighted,
+            RudeAwakening, CryingBaby, Stuffed, NewStuff, Sore,
         ]
     };
 
@@ -1015,6 +1023,11 @@ impl MoodletKind {
             ),
             Charitable => md("Charitable", "It feels great to help out other Sims, especially when they are in need.", 10, 24.0),
             FiendishlyDelighted => md("Fiendishly Delighted", "Sims of the Evil persuasion take pleasure in the misfortune of others.", 15, 6.0),
+            RudeAwakening => md("Rude Awakening", "Loud noises and ruckuses will disturb sleeping Sims. Keep those stereos off and the conversations somewhere else, and don't light the bedroom on fire.", -10, 1.0),
+            CryingBaby => md("Crying Baby", "If the baby can't be quieted, it's best to get as far away as possible.", -15, 10.0 / 60.0),
+            Stuffed => md("Stuffed", "Forcing Sims to eat when they are not hungry may lead to loss of appetite and weight gain.", 0, 3.0),
+            NewStuff => md("New Stuff!", "Sims love getting new things for their homes!", 20, 2.0),
+            Sore => md("Sore", "Sims may occasionally feel a little pain, but the results are usually worth it. Sometimes a massage can help...", -10, 6.0),
             FeelingCalm => md(
                 "Feeling Calm",
                 "It turns out it was just anxiety getting the best of your Sim. The object wasn't left turned on and impending disaster wasn't looming. But, double checking helps to calm the anxiety.",
@@ -1146,6 +1159,11 @@ impl MoodletKind {
             FeelingCalm => ("FeelingCalm", true),
             Charitable => ("Charitable", true),
             FiendishlyDelighted => ("FiendishlyDelighted", true),
+            RudeAwakening => ("RudeAwakening", true),
+            CryingBaby => ("CryingBaby", true),
+            Stuffed => ("Stuffed", true),
+            NewStuff => ("NewStuff", true),
+            Sore => ("Sore", true),
         }
     }
 }
@@ -1357,15 +1375,27 @@ fn need_failures(
     }
 }
 
+/// Fatigued from a workout: sore after their next sleep (the game's `BuffFatigued` setting
+/// `AddSoreBuff`).
+#[derive(Component)]
+pub struct SoreLater;
+
 /// Turns life events into moodlets.
 fn life_events(
+    mut commands: Commands,
     clock: Res<GameClock>,
     mut events: MessageReader<LifeEvent>,
-    mut q: Query<(&Sim, &Motives, &mut Moodlets, &Skills)>,
+    mut q: Query<(&Sim, &Motives, &mut Moodlets, &Skills, Has<SoreLater>)>,
 ) {
     let now = clock.minutes;
     for ev in events.read() {
-        let Ok((sim, m, mut ml, skills)) = q.get_mut(ev.sim) else { continue };
+        let Ok((sim, m, mut ml, skills, sore_later)) = q.get_mut(ev.sim) else { continue };
+        // (Overdone a workout, they wake up sore: the game's `AddSoreBuff`, granted after
+        // sleeping.)
+        if matches!(&ev.kind, LifeEventKind::Finished { activity: "Sleep", .. }) && sore_later {
+            ml.add(MoodletKind::Sore, now);
+            commands.entity(ev.sim).remove::<SoreLater>();
+        }
         let has = |t: Trait| sim.traits.contains(&t);
         use MoodletKind as K;
         match &ev.kind {
@@ -1395,7 +1425,8 @@ fn life_events(
                     if has(Trait::Athletic) {
                         ml.add(K::Pumped, now)
                     } else if has(Trait::Lazy) {
-                        ml.add(K::Fatigued, now)
+                        ml.add(K::Fatigued, now);
+                        commands.entity(ev.sim).insert(SoreLater);
                     }
                 }
                 "Paint" | "Play Guitar" | "Write Novel" if has(Trait::Artistic) || has(Trait::Virtuoso) || has(Trait::Bookworm) => {

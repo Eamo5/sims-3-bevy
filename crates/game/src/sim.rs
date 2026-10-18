@@ -252,6 +252,8 @@ pub struct OutfitChoice {
     pub eyeshadow: Option<s3bake::Key>,
     pub eyeliner: Option<s3bake::Key>,
     pub blush: Option<s3bake::Key>,
+    /// Their eyebrows, as chosen (none: as their look has it).
+    pub brows: Option<s3bake::Key>,
     /// Jewellery (`simbody::ACCESSORY_TYPES`) as chosen (none: as their look has it).
     pub accessories: Option<Vec<s3bake::Key>>,
     /// The clothes chosen for their other outfits (in `OTHER_OUTFITS`' order).
@@ -733,7 +735,7 @@ fn decay_motives(
     delta: Res<SimDelta>,
     // (Sims at home elsewhere in town live off stage: they come over as they were.)
     mut q: Query<
-        (&mut Motives, &DecayScale, &Sim, Option<&crate::wishes::Wishes>, Has<crate::careers::AtWork>, Has<crate::rabbitholes::AtRabbitHole>, Option<&crate::careers::Job>),
+        (&mut Motives, &DecayScale, &Sim, Option<&crate::wishes::Wishes>, Has<crate::careers::AtWork>, Has<crate::rabbitholes::AtRabbitHole>, Option<&crate::careers::Job>, Option<&crate::life::Moodlets>),
         Without<crate::interact::OffLot>,
     >,
 ) {
@@ -741,7 +743,13 @@ fn decay_motives(
     if hours <= 0.0 {
         return;
     }
-    for (mut m, scale, sim, wishes, at_work, away, job) in &mut q {
+    for (mut m, scale, sim, wishes, at_work, away, job, moodlets) in &mut q {
+        // Stuffed: hunger full, and no hungrier while it lasts (the game's `BuffStuffed` freezes
+        // its decay at the ideal).
+        let stuffed = moodlets.is_some_and(|ml| ml.has(crate::life::MoodletKind::Stuffed));
+        if stuffed {
+            m.0[HUNGER] = 100.0;
+        }
         // Steel Bladder keeps this need satisfied, including when restored from a save
         // with a low bladder value or when the Sim is away at work.
         if crate::wishes::has(wishes, "SteelBladder") {
@@ -750,7 +758,7 @@ fn decay_motives(
         for i in 0..6 {
             // (At work, school or out in town, lunch and the bathrooms are there: what the place
             // does to their hunger and bladder is its own.)
-            if (at_work || away) && (i == HUNGER || i == BLADDER) {
+            if (at_work || away) && (i == HUNGER || i == BLADDER) || stuffed && i == HUNGER {
                 continue;
             }
             let mut d = -natural_decay(i, m.0[i], sim.age, &sim.traits) * scale.0[i] * crate::life::decay_rate(&sim.traits, i) * crate::wishes::reward_decay(wishes, i) * hours;

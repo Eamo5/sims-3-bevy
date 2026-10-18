@@ -115,9 +115,24 @@ fn hair_panel(
     let (Some(mut h), Some(mut ui), Some(scene)) = (hair, ui, scene) else { return };
     let h = &mut *h;
     let on = selected.1 == CasTab::Hair && !crate::caslook::modal_up();
+    // (The eyebrows open: their own panel stands beside the physical one, `casbrows`.)
+    if crate::livehud::pressed(&clicks, h.physical.id(PHYSICAL_EYEBROWS)) {
+        crate::casbrows::OPEN.store(true, Ordering::Relaxed);
+    }
+    if [PHYSICAL_HAIR, PHYSICAL_BEARD].iter().any(|id| crate::livehud::pressed(&clicks, h.physical.id(*id))) {
+        crate::casbrows::OPEN.store(false, Ordering::Relaxed);
+    }
+    let brows = crate::casbrows::OPEN.load(Ordering::Relaxed);
     crate::livehud::set_visible(&mut vis, h.physical.root, on);
-    crate::livehud::set_visible(&mut vis, h.hair.root, on);
-    if !on {
+    crate::livehud::set_visible(&mut vis, h.hair.root, on && !brows);
+    for (id, lit) in [(PHYSICAL_EYEBROWS, brows), (PHYSICAL_HAIR, !brows && !h.beard), (PHYSICAL_BEARD, !brows && h.beard)] {
+        if let Some(mut b) = h.physical.id(id).and_then(|e| buttons.get_mut(e).ok())
+            && b.selected != lit
+        {
+            b.selected = lit;
+        }
+    }
+    if !on || brows {
         return;
     }
     let k = selected.0.min(pending.members.len().saturating_sub(1));
@@ -252,14 +267,14 @@ fn hair_panel(
 /// scroll bar: the item grid's own, down its right.
 pub(crate) fn spawn_hair_panels(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>) -> Option<(Spawned, Spawned, Option<Entity>)> {
     let (Some(physical), Some(s)) = (ui.spawn(commands, images, fonts, "CASPhysical"), ui.spawn(commands, images, fonts, "CASHair")) else { return None };
-    for (spawned, ids) in [(&physical, &[PHYSICAL_CLOSE, PHYSICAL_EYEBROWS, PHYSICAL_BODY_HAIR][..]), (&s, &NOT_HERE[..])] {
+    for (spawned, ids) in [(&physical, &[PHYSICAL_CLOSE, PHYSICAL_BODY_HAIR][..]), (&s, &NOT_HERE[..])] {
         for id in ids {
             for e in spawned.all_with(*id) {
                 commands.entity(e).insert(Visibility::Hidden);
             }
         }
     }
-    for (id, tip) in [(PHYSICAL_HAIR, "Hair"), (PHYSICAL_BEARD, "Facial Hair")] {
+    for (id, tip) in [(PHYSICAL_HAIR, "Hair"), (PHYSICAL_EYEBROWS, "Eyebrows"), (PHYSICAL_BEARD, "Facial Hair")] {
         if let Some(e) = physical.id(id) {
             commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
         }

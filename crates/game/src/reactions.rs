@@ -309,13 +309,14 @@ fn weather(
 }
 
 /// The moodlets with a reaction as they come (the game's buffs' `OnAddition`).
-const ON_MOODLET: [(MoodletKind, &str); 6] = [
+const ON_MOODLET: [(MoodletKind, &str); 7] = [
     (MoodletKind::Embarrassed, "Embarrassed"),
     (MoodletKind::Fatigued, "WipeBrow"),
     (MoodletKind::FirstKiss, "JoyousCrying"),
     (MoodletKind::Nauseous, "Nauseous"),
     (MoodletKind::Scared, "Surprise"),
     (MoodletKind::Singed, "Shocked"),
+    (MoodletKind::RudeAwakening, "Angry"),
 ];
 
 /// Which of those moodlets a Sim has, a bit each.
