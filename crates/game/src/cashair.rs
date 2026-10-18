@@ -110,7 +110,7 @@ fn hair_panel(
 ) {
     let (Some(mut h), Some(mut ui), Some(scene)) = (hair, ui, scene) else { return };
     let h = &mut *h;
-    let on = selected.1 == CasTab::Hair;
+    let on = selected.1 == CasTab::Hair && !crate::caslook::modal_up();
     crate::livehud::set_visible(&mut vis, h.physical.root, on);
     crate::livehud::set_visible(&mut vis, h.hair.root, on);
     if !on {

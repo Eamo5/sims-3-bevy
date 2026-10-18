@@ -86,7 +86,7 @@ impl Portraits {
 
 /// A picture to take (clear until it's taken: the Sim is cut out, as the game's thumbnails
 /// are, over whatever frame shows them).
-fn blank(images: &mut Assets<Image>) -> Handle<Image> {
+pub(crate) fn blank(images: &mut Assets<Image>) -> Handle<Image> {
     let mut img = Image::new_target_texture(SIZE, SIZE, TextureFormat::Rgba8Unorm, Some(TextureFormat::Rgba8UnormSrgb));
     img.data = Some(vec![0; (SIZE * SIZE * 4) as usize]);
     images.add(img)
@@ -183,7 +183,7 @@ fn forget(mut portraits: ResMut<Portraits>) {
 /// Which way a Sim's face points: from the head to the tip of the nose (or between the eyes),
 /// level; the body's facing if the face bones aren't found. (The body can be turned away from
 /// where the head looks, mid-step or mid-turn.)
-fn facing(skel: &Skeleton, joints: &Query<&GlobalTransform, Without<Sim>>, head: Vec3, body: Quat) -> Option<Quat> {
+pub(crate) fn facing(skel: &Skeleton, joints: &Query<&GlobalTransform, Without<Sim>>, head: Vec3, body: Quat) -> Option<Quat> {
     let bone = |n: &str| skel.rig.bones.iter().position(|b| b.name == n).and_then(|i| joints.get(skel.joints[i]).ok()).map(|g| g.translation());
     let front = bone("b__NoseTip__").or_else(|| Some((bone("b__LeftEye__")? + bone("b__RightEye__")?) * 0.5));
     let Some(f) = front.map(|f| f - head) else { return Some(body) };
@@ -198,11 +198,13 @@ fn facing(skel: &Skeleton, joints: &Query<&GlobalTransform, Without<Sim>>, head:
     Some(Quat::from_rotation_y(level.x.atan2(level.z)) * Quat::from_rotation_x(-pitch))
 }
 
-/// Where the camera goes for a face: `dist` out along where it looks, a touch above.
-fn eye_for(head: Vec3, rot: Quat, little: bool) -> (Vec3, Vec3, f32) {
-    let face = head + Vec3::Y * if little { 0.02 } else { 0.05 };
+/// Where the camera goes for a face: `dist` out along where it looks, a touch above; far enough
+/// for the whole head, hair and all, and the neck (as the game's thumbnails: never cut off at the
+/// top of the picture).
+pub(crate) fn eye_for(head: Vec3, rot: Quat, little: bool) -> (Vec3, Vec3, f32) {
+    let face = head + Vec3::Y * if little { 0.05 } else { 0.08 };
     let ahead = (rot * Vec3::Z).normalize_or(Vec3::Z);
-    let dist = if little { 0.5 } else { 0.72 };
+    let dist = if little { 0.66 } else { 0.95 };
     (face + ahead * dist + Vec3::Y * 0.03, face, dist)
 }
 

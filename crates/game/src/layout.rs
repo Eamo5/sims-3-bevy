@@ -20,7 +20,7 @@ pub struct LayoutPlugin;
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, (sliders, combos))
-            .add_systems(Startup, open_ui.after(crate::load_ui_font)).add_systems(Update, (open_ui_when_baked, set_icons, select_marked.before(button_states), button_states, fill_bars))
+            .add_systems(Startup, open_ui.after(crate::load_ui_font)).add_systems(Update, (open_ui_when_baked, set_icons, select_marked.before(button_states), button_states, fill_bars, apply_shades.after(button_states)))
             .add_systems(Update, scrollbars.before(crate::buyhud::CatalogueControls));
     }
 }
@@ -353,6 +353,55 @@ impl Spawned {
         s.texts = self.texts.iter().map(|(k, v)| (f(*k), *v)).collect();
         s.all = self.all.iter().map(|(k, v)| (f(*k), *v)).collect();
         s
+    }
+}
+
+/// A window and all under it shaded grey, as the game's `ShadeColor` darkens the panels behind a
+/// dialog (the share of each colour kept).
+#[derive(Component)]
+pub struct Shade(pub f32);
+
+/// A picture's or a text's own colour, while a shade's over it.
+#[derive(Component)]
+struct Unshaded(Color);
+
+fn apply_shades(
+    mut commands: Commands,
+    roots: Query<(Entity, &Shade)>,
+    children: Query<&Children>,
+    (mut imgs, mut texts): (Query<&mut ImageNode>, Query<&mut TextColor>),
+    unshaded: Query<&Unshaded>,
+    mut removed: RemovedComponents<Shade>,
+) {
+    let dim = |c: Color, f: f32| {
+        let s = c.to_srgba();
+        Color::srgba(s.red * f, s.green * f, s.blue * f, s.alpha)
+    };
+    // (Everything under the shade, as it comes: cells and rows spawned later too.)
+    for (root, shade) in &roots {
+        for e in std::iter::once(root).chain(children.iter_descendants(root)) {
+            if unshaded.contains(e) {
+                continue;
+            }
+            if let Ok(mut i) = imgs.get_mut(e) {
+                commands.entity(e).insert(Unshaded(i.color));
+                i.color = dim(i.color, shade.0);
+            } else if let Ok(mut t) = texts.get_mut(e) {
+                commands.entity(e).insert(Unshaded(t.0));
+                t.0 = dim(t.0, shade.0);
+            }
+        }
+    }
+    for root in removed.read() {
+        for e in std::iter::once(root).chain(children.iter_descendants(root)) {
+            let Ok(u) = unshaded.get(e) else { continue };
+            if let Ok(mut i) = imgs.get_mut(e) {
+                i.color = u.0;
+            } else if let Ok(mut t) = texts.get_mut(e) {
+                t.0 = u.0;
+            }
+            commands.entity(e).remove::<Unshaded>();
+        }
     }
 }
 

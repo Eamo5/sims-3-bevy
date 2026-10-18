@@ -74,8 +74,21 @@ pub struct CasFrame {
     sheet: Spawned,
     /// The Sims' buttons along the skewer, and who they're for.
     sims: Vec<Entity>,
-    shown: Option<(Vec<(String, u8, bool)>, usize)>,
+    shown: Option<(Vec<(String, u8, bool, bool)>, usize)>,
     holder: Option<Entity>,
+}
+
+impl CasFrame {
+    /// The puck's and the character sheet's windows.
+    pub(crate) fn roots(&self) -> [Option<Entity>; 2] {
+        [self.puck.root, self.sheet.root]
+    }
+}
+
+/// Whether the family screen or the genetics screen is up: Create a Sim's panels and the
+/// character sheet step aside for them (as the game's states for them unload those).
+pub fn modal_up() -> bool {
+    crate::casfamily::UP.load(Ordering::Relaxed) || crate::casgenetics::UP.load(Ordering::Relaxed)
 }
 
 /// One of the household's Sims on the skewer.
@@ -134,8 +147,9 @@ fn spawn_cas_frame(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut im
     commands.insert_resource(CasFrame { puck, sheet, sims: Vec::new(), shown: None, holder: None });
 }
 
-/// The household along the skewer: a Sim button each (their age's picture), the one being
-/// made lit, Add a Sim while there's room.
+/// The household along the skewer: a Sim button each (their picture, as the game's CAS
+/// thumbnails; their age's figure till it's taken), the one being made lit, Add a Sim while
+/// there's room.
 #[allow(clippy::too_many_arguments)]
 fn skewer(
     mut commands: Commands,
@@ -145,10 +159,23 @@ fn skewer(
     pending: Res<PendingHousehold>,
     selected: Res<crate::cas::CasSelected>,
     mut vis: Query<&mut Visibility>,
+    pics: Res<crate::casportraits::CasPortraits>,
 ) {
     let (Some(mut f), Some(mut ui)) = (frame, ui) else { return };
     let f = &mut *f;
-    let want: Vec<(String, u8, bool)> = pending.members.iter().map(|m| (m.first.clone(), age_icon(m.age), m.female)).collect();
+    // (Put away in Create a Style, as the game's designer shows no skewer: `ShowSkewer(false,
+    // false)`.)
+    let styling = crate::cas::STYLING.load(Ordering::Relaxed);
+    crate::livehud::set_visible(&mut vis, f.puck.id(SKEWER_LONG), !styling);
+    crate::livehud::set_visible(&mut vis, f.puck.id(SKEWER_NONE), styling);
+    if let Some(h) = f.holder {
+        crate::livehud::set_visible(&mut vis, Some(h), !styling);
+    }
+    // Add a Sim, after the last, while there's room.
+    if let Some(add) = f.puck.id(ADD_SIM) {
+        crate::livehud::set_visible(&mut vis, Some(add), !styling && pending.members.len() < MAX_SIMS && pending.premade.is_none());
+    }
+    let want: Vec<(String, u8, bool, bool)> = pending.members.iter().map(|m| (m.first.clone(), age_icon(m.age), m.female, pics.get(m.id).is_some())).collect();
     let sel = selected.0;
     if f.shown.as_ref() == Some(&(want.clone(), sel)) {
         return;
@@ -184,14 +211,10 @@ fn skewer(
         if k == sel {
             commands.entity(r).insert(crate::layout::Selected);
         }
-        if let Some((h, _)) = ui.image(&mut images, s3pkg::fnv64(AGE_ICONS[age_icon(m.age) as usize])) {
+        if let Some(h) = pics.get(m.id).or_else(|| ui.image(&mut images, s3pkg::fnv64(AGE_ICONS[age_icon(m.age) as usize])).map(|(h, _)| h)) {
             commands.entity(r).insert(SetIcon(h));
         }
         f.sims.push(r);
-    }
-    // Add a Sim, after the last, while there's room.
-    if let Some(add) = f.puck.id(ADD_SIM) {
-        crate::livehud::set_visible(&mut vis, Some(add), pending.members.len() < MAX_SIMS && pending.premade.is_none());
     }
 }
 
@@ -216,6 +239,9 @@ pub(crate) fn age_icon(a: crate::sim::Age) -> u8 {
 /// is open beside it).
 fn sheet(frame: Option<Res<CasFrame>>, tab: Res<crate::cas::CasSelected>, mut buttons: Query<&mut UiButton>, mut vis: Query<&mut Visibility>) {
     let Some(f) = frame else { return };
+    // (Away for the family and genetics screens, and in Create a Style, as the game's states for
+    // them unload it.)
+    crate::livehud::set_visible(&mut vis, f.sheet.root, !modal_up() && !crate::cas::STYLING.load(Ordering::Relaxed));
     crate::livehud::set_visible(&mut vis, f.sheet.id(SHEET_TEXT), !game_panel(tab.1));
     let open = mode_of(tab.1);
     for id in [SHEET_BASICS, SHEET_HAIR, SHEET_FACE, SHEET_CLOTHING, SHEET_CHARACTER] {
@@ -488,7 +514,7 @@ fn basics_panel(
 ) {
     let (Some(mut b), Some(mut ui)) = (basics, ui) else { return };
     let b = &mut *b;
-    let on = selected.1 == CasTab::Basics;
+    let on = selected.1 == CasTab::Basics && !modal_up();
     crate::livehud::set_visible(&mut vis, b.s.root, on);
     let k = selected.0.min(pending.members.len().saturating_sub(1));
     let Some(sim) = pending.members.get(k).cloned() else { return };

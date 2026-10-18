@@ -31,6 +31,9 @@ impl Plugin for CasGeneticsPlugin {
 /// Asked for by the puck's add menu (see `caslook`).
 pub static OPEN: AtomicBool = AtomicBool::new(false);
 
+/// Whether the screen is up (Create a Sim's panels step aside: see `caslook::modal_up`).
+pub static UP: AtomicBool = AtomicBool::new(false);
+
 /// For the UI flow (`autotest`): a child made and accepted.
 pub static TEST_CHILD: AtomicBool = AtomicBool::new(false);
 
@@ -69,7 +72,7 @@ pub struct Genetics {
     age: Age,
     seed: Option<u64>,
     child: Option<Sim>,
-    shown: Option<(Option<usize>, Option<usize>, bool, Age, Option<u64>)>,
+    shown: Option<(Option<usize>, Option<usize>, bool, Age, Option<u64>, [bool; 3])>,
 }
 
 /// A parent's button (fathers' or mothers', by place in the household).
@@ -115,11 +118,16 @@ fn genetics(
     mut buttons: Query<&mut UiButton>,
     mut actions: MessageWriter<crate::cas::CasActionRequest>,
     mut play: MessageWriter<crate::sound::PlaySound>,
+    mut pics: ResMut<crate::casportraits::CasPortraits>,
 ) {
     let Some(mut ui) = ui else { return };
+    UP.store(screen.is_some(), Ordering::Relaxed);
     let Some(mut g) = screen else {
+        if !pics.extra.is_empty() {
+            pics.extra.clear();
+        }
         if OPEN.swap(false, Ordering::Relaxed)
-            && let Some(g) = open(&mut commands, &mut ui, &mut images, &mut fonts, &pending.members)
+            && let Some(g) = open(&mut commands, &mut ui, &mut images, &mut fonts, &pending.members, &pics)
         {
             commands.insert_resource(g);
         }
@@ -173,11 +181,17 @@ fn genetics(
     if g.shown.is_some_and(|s| (s.0, s.1) != (g.father, g.mother)) {
         g.seed = None;
     }
-    let want = (g.father, g.mother, g.female, g.age, g.seed);
     g.child = match (&father, &mother, g.seed) {
         (Some(f), Some(m), Some(seed)) => Some(make_child(f, m, g.female, g.age, seed)),
         _ => None,
     };
+    // (The child pictured too, while they're thought of.)
+    let extra: Vec<Sim> = g.child.iter().cloned().collect();
+    if pics.extra.iter().map(|s| s.id).ne(extra.iter().map(|s| s.id)) || pics.extra.first().zip(extra.first()).is_some_and(|(a, b)| (a.age, a.female) != (b.age, b.female)) {
+        pics.extra = extra;
+    }
+    let ready = [father.as_ref(), mother.as_ref(), g.child.as_ref()].map(|s| s.is_some_and(|s| pics.get(s.id).is_some()));
+    let want = (g.father, g.mother, g.female, g.age, g.seed, ready);
     let room = pending.members.len() < MAX_SIMS;
     // Accept: the child joins the household, the two Sims' child.
     if (pressed(ACCEPT) || test)
@@ -242,7 +256,8 @@ fn genetics(
             }
         }
     }
-    let figure = |ui: &mut UiAssets, images: &mut Assets<Image>, s: &Sim| ui.image(images, s3pkg::fnv64(crate::caslook::AGE_ICONS[crate::caslook::age_icon(s.age) as usize])).map(|(h, _)| h);
+    // (Their picture; their age's figure till it's taken.)
+    let figure = |ui: &mut UiAssets, images: &mut Assets<Image>, s: &Sim| pics.get(s.id).or_else(|| ui.image(images, s3pkg::fnv64(crate::caslook::AGE_ICONS[crate::caslook::age_icon(s.age) as usize])).map(|(h, _)| h));
     for (k, sim) in [father.as_ref(), mother.as_ref(), g.child.as_ref()].into_iter().enumerate() {
         let Some(win) = g.s.id(PICTURES[k]) else { continue };
         match sim.and_then(|s| figure(&mut ui, &mut images, s)) {
@@ -261,7 +276,7 @@ fn genetics(
 }
 
 /// The screen put up, with the household's would-be parents on their buttons.
-fn open(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>, members: &[Sim]) -> Option<Genetics> {
+fn open(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>, members: &[Sim], pics: &crate::casportraits::CasPortraits) -> Option<Genetics> {
     let mut w = ui.layout("CASGenetics")?.clone();
     w.flags |= s3bake::ui::WIN_VISIBLE;
     let s = ui.spawn_root(commands, images, fonts, &w);
@@ -288,8 +303,9 @@ fn open(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, 
             match list.get(n as usize).and_then(|i| Some((*i, members.get(*i)?))) {
                 Some((i, sim)) => {
                     commands.entity(e).insert((ParentButton(k, i), crate::icons::Tooltip(sim.full_name())));
-                    // (Their age's figure, in the picture window inside the button.)
-                    if let Some((h, _)) = ui.image(images, s3pkg::fnv64(crate::caslook::AGE_ICONS[crate::caslook::age_icon(sim.age) as usize])) {
+                    // (Their picture, or their age's figure, in the picture window inside the
+                    // button.)
+                    if let Some(h) = pics.get(sim.id).or_else(|| ui.image(images, s3pkg::fnv64(crate::caslook::AGE_ICONS[crate::caslook::age_icon(sim.age) as usize])).map(|(h, _)| h)) {
                         let inner = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(4.0), top: Val::Px(4.0), right: Val::Px(4.0), bottom: Val::Px(4.0), ..default() }, Pickable::IGNORE, ChildOf(e))).id();
                         crate::hudpanels::picture(commands, inner, h, Color::WHITE);
                     }

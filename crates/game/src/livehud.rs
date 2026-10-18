@@ -627,15 +627,10 @@ fn bust(
     *shown = Some((win, s));
     commands.entity(win).despawn_children();
     let h = portraits.portrait(&mut images, s);
-    // (In the frame's round window, as the game's turning head.)
+    // (The whole of the bust's window, as the game draws the Sim's picture there: rising over
+    // the panel's top, the head clear of the picture's edges.)
     commands.entity(win).with_children(|b| {
-        b.spawn((
-            Node { position_type: PositionType::Absolute, left: Val::Px(8.0), top: Val::Px(8.0), right: Val::Px(8.0), bottom: Val::Px(8.0), border_radius: BorderRadius::all(Val::Percent(50.0)), overflow: Overflow::clip(), ..default() },
-            Pickable::IGNORE,
-        ))
-        .with_children(|f| {
-            f.spawn((ImageNode::new(h), crate::portraits::PortraitOf(s), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
-        });
+        b.spawn((ImageNode::new(h), crate::portraits::PortraitOf(s), Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
     });
 }
 

@@ -172,7 +172,7 @@ fn style_panel(
     let (Some(mut st), Some(mut ui), Some(scene)) = (style, ui, scene) else { return };
     let st = &mut *st;
     let tab = selected.1;
-    let on = crate::cas::STYLING.load(Ordering::Relaxed) && matches!(tab, CasTab::Tops | CasTab::Bottoms | CasTab::Outfits | CasTab::Shoes);
+    let on = crate::cas::STYLING.load(Ordering::Relaxed) && matches!(tab, CasTab::Tops | CasTab::Bottoms | CasTab::Outfits | CasTab::Shoes) && !crate::caslook::modal_up();
     crate::livehud::set_visible(&mut vis, st.s.root, on);
     if !on {
         st.shown = None;

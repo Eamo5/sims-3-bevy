@@ -187,7 +187,7 @@ fn clothing_panel(
     let (Some(mut c), Some(mut ui), Some(scene)) = (clothing, ui, scene) else { return };
     let c = &mut *c;
     let tab = selected.1;
-    let on = matches!(tab, CasTab::Tops | CasTab::Bottoms | CasTab::Outfits | CasTab::Shoes) && !crate::cas::STYLING.load(Ordering::Relaxed);
+    let on = matches!(tab, CasTab::Tops | CasTab::Bottoms | CasTab::Outfits | CasTab::Shoes) && !crate::cas::STYLING.load(Ordering::Relaxed) && !crate::caslook::modal_up();
     crate::livehud::set_visible(&mut vis, c.outfits.root, on);
     crate::livehud::set_visible(&mut vis, c.category.root, on);
     if !on {

@@ -198,7 +198,7 @@ const WEAR: [crate::simbody::OutfitKind; 6] = [
 
 #[derive(Resource)]
 pub(crate) struct CasScene {
-    baked: Arc<BakedData>,
+    pub(crate) baked: Arc<BakedData>,
     pub(crate) cas: CasData,
     selected: usize,
     tab: CasTab,

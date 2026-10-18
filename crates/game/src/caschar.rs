@@ -135,7 +135,7 @@ fn character_panel(
     (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
     pending: Res<PendingHousehold>,
     selected: Res<crate::cas::CasSelected>,
-    chosen: Res<crate::lifetime::ChosenLifetimeWishes>,
+    (chosen, pics): (Res<crate::lifetime::ChosenLifetimeWishes>, Res<crate::casportraits::CasPortraits>),
     (mut vis, mut buttons, mut texts): (Query<&mut Visibility>, Query<&mut UiButton>, Query<&mut Text>),
     (clicks, wishes, favorites): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &WishSlot), Changed<Interaction>>, Query<(&Interaction, &FavoriteCell), Changed<Interaction>>),
     mut actions: MessageWriter<crate::cas::CasActionRequest>,
@@ -143,7 +143,7 @@ fn character_panel(
 ) {
     let (Some(mut c), Some(mut ui)) = (character, ui) else { return };
     let c = &mut *c;
-    let on = selected.1 == CasTab::Traits;
+    let on = selected.1 == CasTab::Traits && !crate::caslook::modal_up();
     crate::livehud::set_visible(&mut vis, c.s.root, on);
     if !on {
         c.open = None;
@@ -160,7 +160,7 @@ fn character_panel(
         c.favorites_page = true;
     }
     match TEST_STEP.swap(0, Ordering::Relaxed) {
-        1 if c.picker.is_none() => c.picker = open_picker(&mut commands, &mut ui, &mut images, &mut fonts, sim),
+        1 if c.picker.is_none() => c.picker = open_picker(&mut commands, &mut ui, &mut images, &mut fonts, sim, pics.get(sim.id)),
         2 => {
             if let Some(p) = c.picker.take() {
                 p.close(&mut commands);
@@ -179,7 +179,7 @@ fn character_panel(
         actions.write(crate::cas::CasActionRequest(CasAction::RandomTraits));
     }
     if c.picker.is_none() && (pressed(ADD_TRAITS) || (0..5).any(|i| pressed(TRAIT_SLOT + i))) {
-        c.picker = open_picker(&mut commands, &mut ui, &mut images, &mut fonts, sim);
+        c.picker = open_picker(&mut commands, &mut ui, &mut images, &mut fonts, sim, pics.get(sim.id));
     }
     for (i, w) in &wishes {
         if *i == Interaction::Pressed {
@@ -348,12 +348,15 @@ fn character_panel(
     }
 }
 
-/// The traits picker put up beside the character panel, with the Sim's traits.
-fn open_picker(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>, sim: &crate::sim::Sim) -> Option<crate::traitpicker::Picker> {
+/// The traits picker put up beside the character panel, with the Sim's picture and traits.
+fn open_picker(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>, sim: &crate::sim::Sim, portrait: Option<Handle<Image>>) -> Option<crate::traitpicker::Picker> {
     // (Where the game puts it, kept on the screen.)
     let x = ui.layout("TraitsPicker")?.area[0];
-    crate::traitpicker::open(commands, ui, images, fonts, &sim.full_name(), sim.age, &sim.traits, &[], Some(Vec2::new(x, 12.0)), (GlobalZIndex(8), DespawnOnExit(AppState::CreateHousehold)))
+    crate::traitpicker::open(commands, ui, images, fonts, &sim.full_name(), (sim.age, portrait), &sim.traits, &[], Some(Vec2::new(x, 12.0)), (GlobalZIndex(8), DespawnOnExit(AppState::CreateHousehold)))
 }
+
+/// How dark the panels behind the traits picker go (the game's shade, 120 of 255).
+const DARKEN: f32 = 120.0 / 255.0;
 
 /// The traits picker: accepted, the Sim's traits become those chosen (taken away first, then
 /// added, as the CAS actions toggle them); either way it's put away.
@@ -372,8 +375,21 @@ fn traits_picker(
     mut actions: MessageWriter<crate::cas::CasActionRequest>,
     mut play: MessageWriter<crate::sound::PlaySound>,
     mut gu: Option<ResMut<crate::icons::GameUi>>,
+    (frame, mut darkened): (Option<Res<crate::caslook::CasFrame>>, Local<bool>),
 ) {
     let (Some(mut c), Some(mut ui)) = (character, ui) else { return };
+    // The panels behind the picker darkened while it's up (`CASController.DarkenBackgroundPanels`:
+    // the puck, the character sheet and the character panel).
+    if c.picker.is_some() != *darkened {
+        *darkened = c.picker.is_some();
+        for root in frame.iter().flat_map(|f| f.roots()).chain([c.s.root]).flatten() {
+            if *darkened {
+                commands.entity(root).insert(crate::layout::Shade(DARKEN));
+            } else {
+                commands.entity(root).remove::<crate::layout::Shade>();
+            }
+        }
+    }
     let k = selected.0.min(pending.members.len().saturating_sub(1));
     let Some(sim) = pending.members.get(k) else { return };
     // (Put away when Create a Sim leaves the Personality tab.)

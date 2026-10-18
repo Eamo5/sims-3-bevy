@@ -67,7 +67,7 @@ pub struct TraitRow(bool, Trait);
 /// The picker put up for a Sim (by name, of an age, with their traits; `locked` stay), at
 /// `area`'s top left (or centred), its root given `extra`.
 #[allow(clippy::too_many_arguments)]
-pub fn open(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>, name: &str, age: Age, traits: &[Trait], locked: &[Trait], at: Option<Vec2>, extra: impl Bundle) -> Option<Picker> {
+pub fn open(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>, name: &str, (age, portrait): (Age, Option<Handle<Image>>), traits: &[Trait], locked: &[Trait], at: Option<Vec2>, extra: impl Bundle) -> Option<Picker> {
     let mut w = ui.layout("TraitsPicker")?.clone();
     let (wd, ht) = (w.area[2] - w.area[0], w.area[3] - w.area[1]);
     match at {
@@ -92,8 +92,10 @@ pub fn open(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Imag
     if let Some(e) = s.text(PICK_NAME) {
         commands.entity(e).insert(Text::new(name.to_string()));
     }
-    // (The Sim's age's figure for their picture.)
-    if let (Some(e), Some((h, _))) = (s.id(PICK_THUMB), ui.image(images, s3pkg::fnv64(crate::caslook::AGE_ICONS[crate::caslook::age_icon(age) as usize]))) {
+    // The Sim's picture (their age's figure without one).
+    if let (Some(e), Some(h)) = (s.id(PICK_THUMB), portrait.clone()) {
+        crate::hudpanels::picture(commands, e, h, Color::WHITE);
+    } else if let (Some(e), Some((h, _))) = (s.id(PICK_THUMB), ui.image(images, s3pkg::fnv64(crate::caslook::AGE_ICONS[crate::caslook::age_icon(age) as usize]))) {
         crate::hudpanels::picture(commands, e, h, crate::layout::color(0xff16_3996));
     }
     // The traits to take: the item grid's own scroll bar down its right.

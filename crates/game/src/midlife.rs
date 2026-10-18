@@ -104,7 +104,7 @@ fn game_picker(
     };
     if p.game.is_none() {
         let (name, age, traits, locked) = (sim.full_name(), sim.age, p.traits.clone(), p.locked.clone());
-        p.game = crate::traitpicker::open(&mut commands, &mut ui, &mut images, &mut fonts, &name, age, &traits, &locked, None, (GlobalZIndex(22), DespawnOnExit(AppState::InGame)));
+        p.game = crate::traitpicker::open(&mut commands, &mut ui, &mut images, &mut fonts, &name, (age, None), &traits, &locked, None, (GlobalZIndex(22), DespawnOnExit(AppState::InGame)));
         return;
     }
     let Some(g) = p.game.as_mut() else { return };

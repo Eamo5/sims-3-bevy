@@ -281,7 +281,7 @@ fn face_panel(
 ) {
     let (Some(mut f), Some(mut ui), Some(scene)) = (face, ui, scene) else { return };
     let f = &mut *f;
-    let on = selected.1 == CasTab::Face;
+    let on = selected.1 == CasTab::Face && !crate::caslook::modal_up();
     crate::livehud::set_visible(&mut vis, f.details.root, on);
     if !on {
         for s in f.regions.iter().chain([&f.makeup]) {

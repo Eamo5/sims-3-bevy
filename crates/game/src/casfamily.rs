@@ -30,6 +30,9 @@ impl Plugin for CasFamilyPlugin {
 /// Asked for by the puck's Accept (see `caslook`).
 pub static OPEN: AtomicBool = AtomicBool::new(false);
 
+/// Whether the screen is up (Create a Sim's panels step aside: see `caslook::modal_up`).
+pub static UP: AtomicBool = AtomicBool::new(false);
+
 /// For the UI flow (`autotest`): the dialog asked for the first two Sims.
 pub static TEST_DIALOG: AtomicBool = AtomicBool::new(false);
 
@@ -59,7 +62,7 @@ pub struct FamilyScreen {
     from: Option<usize>,
     dialog: Option<(usize, usize, Vec<Tie>, usize)>,
     tree: Option<Entity>,
-    shown: Option<(Vec<(u64, crate::sim::Age)>, Vec<(u64, u64, Tie)>, Option<usize>)>,
+    shown: Option<(Vec<(u64, crate::sim::Age, bool)>, Vec<(u64, u64, Tie)>, Option<usize>)>,
 }
 
 /// A Sim in the tree (by their place in the household).
@@ -77,8 +80,10 @@ fn family_screen(
     (mut vis, mut buttons, mut texts): (Query<&mut Visibility>, Query<&mut UiButton>, Query<&mut Text>),
     mut actions: MessageWriter<crate::cas::CasActionRequest>,
     mut play: MessageWriter<crate::sound::PlaySound>,
+    pics: Res<crate::casportraits::CasPortraits>,
 ) {
     let Some(mut ui) = ui else { return };
+    UP.store(screen.is_some(), Ordering::Relaxed);
     let Some(mut f) = screen else {
         if OPEN.swap(false, Ordering::Relaxed) {
             open(&mut commands, &mut ui, &mut images, &mut fonts);
@@ -186,7 +191,7 @@ fn family_screen(
         }
     }
     // The tree, drawn again when the household, their ties or the Sim chosen change.
-    let want = (pending.members.iter().map(|m| (m.id, m.age)).collect::<Vec<_>>(), pending.ties.clone(), f.from);
+    let want = (pending.members.iter().map(|m| (m.id, m.age, pics.get(m.id).is_some())).collect::<Vec<_>>(), pending.ties.clone(), f.from);
     if f.shown.as_ref() == Some(&want) {
         return;
     }
@@ -271,7 +276,8 @@ fn family_screen(
             }
         }
     }
-    // The Sims: the game's frame each, their age's figure in it, their name beneath.
+    // The Sims: the game's frame each, their picture in it (their age's figure till it's taken),
+    // their name beneath.
     let Some(template) = ui.find("CASFamilyScreen", DIALOG_SIM1).cloned() else { return };
     for (i, m) in members.iter().enumerate() {
         let mut w = template.clone();
@@ -288,7 +294,9 @@ fn family_screen(
                 }
             });
         }
-        if let (Some(win), Some((h, _))) = (s.id(THUMB), ui.image(&mut images, s3pkg::fnv64(crate::caslook::AGE_ICONS[crate::caslook::age_icon(m.age) as usize]))) {
+        if let (Some(win), Some(h)) = (s.id(THUMB), pics.get(m.id)) {
+            crate::hudpanels::picture(&mut commands, win, h, Color::WHITE);
+        } else if let (Some(win), Some((h, _))) = (s.id(THUMB), ui.image(&mut images, s3pkg::fnv64(crate::caslook::AGE_ICONS[crate::caslook::age_icon(m.age) as usize]))) {
             crate::hudpanels::picture(&mut commands, win, h, crate::layout::color(0xff16_3996));
         }
         let (font, lh) = ui.text_font(&mut fonts, 0);
