@@ -20,6 +20,16 @@ impl Plugin for TrafficPlugin {
     }
 }
 
+/// A car's parts in a design of its own: one at random for the town's, as their cars come in
+/// their colours (`first`: the first, the household's own as bought). Without one, a car whose
+/// paint is its design's would be drawn white.
+fn car_parts(assets: &mut ObjectAssets, ctx: &mut AssetCtx, objd: Key, first: bool, rng: &mut impl Rng) -> Vec<crate::objects::ModelPart> {
+    let n = ctx.baked.designs.get(&objd).map_or(0, |d| d.count as u32);
+    let pick = if first || n == 0 { 0 } else { rng.random_range(0..n) };
+    let design = (n > 0).then(|| crate::objects::design_texture(objd, pick as u8)).filter(|d| assets.design_applies(ctx, objd, *d));
+    assets.object_design(ctx, objd, design)
+}
+
 /// The everyday cars that drive about town (catalogue instance names).
 const CARS: [&str; 10] = ["CarSedan", "CarHatchback", "CarPickup2door", "CarSports", "CarExpensive1", "CarExpensive2", "CarUsed1", "CarUsed2", "CarNormal1", "CarVan4door"];
 /// How many cars are about at once, within what distance of the camera's focus.
@@ -242,10 +252,10 @@ fn traffic(
     // Rides pull up at the curb (the household's own car too).
     let named: Vec<(Vec2, Key)> = pending.0.drain(..).filter_map(|(at, model)| Some((at, data.0.catalog.iter().find(|c| c.instance_name == model)?.objd))).collect();
     let own: Vec<(Vec2, Key)> = pending.1.drain(..).collect();
-    for (at, objd) in named.into_iter().chain(own) {
+    for (at, objd, first) in named.into_iter().map(|(a, o)| (a, o, false)).chain(own.into_iter().map(|(a, o)| (a, o, true))) {
         let Some((road, t, _)) = roads.nearest(at) else { continue };
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-        let parts = assets.object(&mut ctx, objd);
+        let parts = car_parts(&mut assets, &mut ctx, objd, first, &mut rng);
         if parts.is_empty() {
             continue;
         }
@@ -336,7 +346,7 @@ fn traffic(
     }
     let objd = names[rng.random_range(0..names.len())];
     let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-    let parts = assets.object(&mut ctx, objd);
+    let parts = car_parts(&mut assets, &mut ctx, objd, false, &mut rng);
     if parts.is_empty() {
         return;
     }
