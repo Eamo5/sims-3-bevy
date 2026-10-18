@@ -872,11 +872,18 @@ pub enum MoodletKind {
     Technophobia,
     /// A Technophobe's sabotage come off (`sabotage`).
     FightThePower,
+    /// Out on a community lot worth the look (the game's `BuffBeautifulView`, by the lot's kind),
+    /// and a graveyard's creeps (`CreepyGraveyard`): `traitmoods`.
+    BeautifulPark,
+    LovelyPool,
+    BeautifulGarden,
+    BeautifulBistro,
+    CreepyGraveyard,
     Hydrophobic,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 132] = {
+    pub const ALL: [MoodletKind; 137] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -891,7 +898,7 @@ impl MoodletKind {
             AnxiousSink, AnxiousStove, AnxiousFireplace, FeelingCalm, Charitable, FiendishlyDelighted,
             RudeAwakening, CryingBaby, Stuffed, NewStuff, Sore,
             OneWithNature, PlaguedByNature, EnjoyingSolitude, TooManyPeople, AfraidOfTheDark, FeelingLucky, FeelingUnlucky, Excited, GreatKiss,
-            Technophobia, Hydrophobic, FightThePower,
+            Technophobia, Hydrophobic, FightThePower, BeautifulPark, LovelyPool, BeautifulGarden, BeautifulBistro, CreepyGraveyard,
         ]
     };
 
@@ -1058,6 +1065,11 @@ impl MoodletKind {
             GreatKiss => md("Great Kiss", "Great kissers give amazing smooches.", 15, 3.0),
             Technophobia => md("Technophobia", "For some Sims, using technology is an unsettling experience.", -10, 3.0),
             FightThePower => md("Fight the Power", "Keepin' the man off your back never felt so good. Sock it to him!", 15, 2.0),
+            BeautifulPark => md("Beautiful Park", "The money City Hall put into this park was well spent! Swing sets, slides, and jungle gyms, oh my!", 15, 0.0),
+            LovelyPool => md("Lovely Pool", "The pool is so clean and pristine. Chlorine sure works wonders!", 15, 0.0),
+            BeautifulGarden => md("Beautiful Garden", "This garden is lovely and the fertilizer doesn't stink!", 50, 0.0),
+            BeautifulBistro => md("Beautiful Bistro", "It's hard not to stop for food at such an exquisite restaurant. Such good taste in décor guarantees a stellar menu.", 30, 0.0),
+            CreepyGraveyard => md("Creepy Graveyard", "Graveyards are terrifying places filled with dead bodies, the ghosts of the bodies, and fear.", -5, 0.0),
             Hydrophobic => md("Hydrophobic", "There's just too much water for them to enjoy this moment.", -20, 3.0),
             FeelingCalm => md(
                 "Feeling Calm",
@@ -1206,6 +1218,8 @@ impl MoodletKind {
             GreatKiss => ("GreatKisser", true),
             Technophobia => ("AntiTV", true),
             FightThePower => ("FightThePower", true),
+            BeautifulPark | LovelyPool | BeautifulGarden | BeautifulBistro => ("BeautifulView", true),
+            CreepyGraveyard => ("CreepyGraveyard", true),
             Hydrophobic => ("Hydrophobic", true),
         }
     }

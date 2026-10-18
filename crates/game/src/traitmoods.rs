@@ -82,11 +82,11 @@ fn trait_moods(
     mut slept: Local<HashMap<Entity, f64>>,
     clock: Res<crate::clock::GameClock>,
     building: Option<Res<crate::building::ActiveBuilding>>,
-    genealogy: Option<Res<crate::family::Genealogy>>,
+    (genealogy, world): (Option<Res<crate::family::Genealogy>>, Res<crate::loading::CurrentWorld>),
     everyone: Query<(Entity, &Transform, &Sim, &Visibility)>,
     objects: Query<&GameObject>,
     mut sims: Query<
-        (Entity, &Sim, &Transform, &Visibility, &mut Moodlets, &ActionQueue, Option<&crate::social::Relationships>, (Has<crate::visit::OnLot>, Has<crate::swim::Swimming>)),
+        (Entity, &Sim, &Transform, &Visibility, &mut Moodlets, &ActionQueue, Option<&crate::social::Relationships>, (Option<&crate::visit::OnLot>, Has<crate::swim::Swimming>)),
         (Without<crate::interact::OffLot>, Without<crate::rabbitholes::AtRabbitHole>, Without<crate::careers::AtWork>),
     >,
 ) {
@@ -105,11 +105,19 @@ fn trait_moods(
     let hour = clock.hour_f();
     let dark = !(DARK_UNTIL..DARK_FROM).contains(&hour);
     let mut rng = rand::rng();
-    for (me, sim, tf, vis, mut moodlets, queue, rels, (on_lot, swimming)) in &mut sims {
+    for (me, sim, tf, vis, mut moodlets, queue, rels, (lot, swimming)) in &mut sims {
+        let on_lot = lot.is_some();
         let has = |t: Trait| sim.traits.contains(&t);
         let here = *vis != Visibility::Hidden;
         let at = tf.translation;
         let outside = here && !crate::weather::sheltered(building.as_deref(), at);
+        // A community lot worth the look, unless the outdoors are hated; a graveyard, outside,
+        // for all but the Brave and the Evil (the game's `SimUpdate` venue moodlets).
+        let view = lot.filter(|_| here).and_then(|l| view_of(&world.data, l.0));
+        for kind in VIEWS {
+            set(&sim.first, &mut moodlets, kind, view == Some(kind) && !has(Trait::HatesTheOutdoors));
+        }
+        set(&sim.first, &mut moodlets, MoodletKind::CreepyGraveyard, outside && lot.is_some_and(|l| graveyard(&world.data, l.0)) && !has(Trait::Brave) && !has(Trait::Evil));
         // Out of doors.
         set(&sim.first, &mut moodlets, MoodletKind::OneWithNature, outside && has(Trait::LovesTheOutdoors));
         set(&sim.first, &mut moodlets, MoodletKind::PlaguedByNature, outside && has(Trait::HatesTheOutdoors));
@@ -174,6 +182,38 @@ fn set(who: &str, m: &mut Mut<Moodlets>, kind: MoodletKind, on: bool) {
 
 /// A moodlet kept from running out while its cause lasts (a paused buff of the game's), topped
 /// up only now and then.
+/// The community lots' view moodlets.
+const VIEWS: [MoodletKind; 4] = [MoodletKind::BeautifulPark, MoodletKind::LovelyPool, MoodletKind::BeautifulGarden, MoodletKind::BeautifulBistro];
+
+/// The view moodlet a community lot gives, by its kind (the game's `MetaAutonomyVenueType`: a
+/// park, a pool, a garden, a restaurant).
+fn view_of(world: &crate::loading::WorldInfo, lot: usize) -> Option<MoodletKind> {
+    let l = world.lots.get(lot)?;
+    if l.is_residential() || graveyard(world, lot) {
+        return None;
+    }
+    let name = l.internal_name.to_ascii_lowercase();
+    if name.contains("park") {
+        Some(MoodletKind::BeautifulPark)
+    } else if name.contains("pool") {
+        Some(MoodletKind::LovelyPool)
+    } else if name.contains("garden") {
+        Some(MoodletKind::BeautifulGarden)
+    } else if crate::opportunities::lot_types(world, lot).contains(&"Restaurant") {
+        Some(MoodletKind::BeautifulBistro)
+    } else {
+        None
+    }
+}
+
+/// Whether a lot's a graveyard.
+fn graveyard(world: &crate::loading::WorldInfo, lot: usize) -> bool {
+    world.lots.get(lot).is_some_and(|l| {
+        let n = l.internal_name.to_ascii_lowercase();
+        n.contains("graveyard") || n.contains("cemetery")
+    })
+}
+
 fn keep(m: &mut Mut<Moodlets>, kind: MoodletKind, now: f64) {
     let full = kind.def().hours as f64 * 60.0;
     if m.0.iter().find(|x| x.kind == kind).is_none_or(|x| x.until - now < full - 10.0) {
