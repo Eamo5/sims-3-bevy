@@ -868,10 +868,13 @@ pub enum MoodletKind {
     FeelingUnlucky,
     Excited,
     GreatKiss,
+    /// A Technophobe's unease with TVs and computers, a Hydrophobic Sim's in the water.
+    Technophobia,
+    Hydrophobic,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 129] = {
+    pub const ALL: [MoodletKind; 131] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -886,6 +889,7 @@ impl MoodletKind {
             AnxiousSink, AnxiousStove, AnxiousFireplace, FeelingCalm, Charitable, FiendishlyDelighted,
             RudeAwakening, CryingBaby, Stuffed, NewStuff, Sore,
             OneWithNature, PlaguedByNature, EnjoyingSolitude, TooManyPeople, AfraidOfTheDark, FeelingLucky, FeelingUnlucky, Excited, GreatKiss,
+            Technophobia, Hydrophobic,
         ]
     };
 
@@ -1050,6 +1054,8 @@ impl MoodletKind {
             FeelingUnlucky => md("Feeling Unlucky", "Today is NOT their lucky day. Nothing good can come of this.", -5, 23.0),
             Excited => md("Excited", "Excitable Sims tend to get, well, excited.", 15, 3.0),
             GreatKiss => md("Great Kiss", "Great kissers give amazing smooches.", 15, 3.0),
+            Technophobia => md("Technophobia", "For some Sims, using technology is an unsettling experience.", -10, 3.0),
+            Hydrophobic => md("Hydrophobic", "There's just too much water for them to enjoy this moment.", -20, 3.0),
             FeelingCalm => md(
                 "Feeling Calm",
                 "It turns out it was just anxiety getting the best of your Sim. The object wasn't left turned on and impending disaster wasn't looming. But, double checking helps to calm the anxiety.",
@@ -1195,6 +1201,8 @@ impl MoodletKind {
             FeelingUnlucky => ("FeelingUnlucky", true),
             Excited => ("Excited", true),
             GreatKiss => ("GreatKisser", true),
+            Technophobia => ("AntiTV", true),
+            Hydrophobic => ("Hydrophobic", true),
         }
     }
 }

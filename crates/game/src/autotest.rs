@@ -3729,7 +3729,8 @@ fn auto_action(
     }
     // (Once everyone has settled in.)
     let t0 = *since.get_or_insert(time.elapsed_secs());
-    if (matches!(name.as_str(), "Meal" | "Die" | "Starve" | "Shock" | "Electrocute") || name.starts_with("Visit")) && time.elapsed_secs() - t0 < 4.0 {
+    // (And, a save loaded, once its Sims are back: they'd come with their own queues.)
+    if (matches!(name.as_str(), "Meal" | "Die" | "Starve" | "Shock" | "Electrocute") || name.starts_with("Visit") || args.load.is_some()) && time.elapsed_secs() - t0 < 4.0 {
         return;
     }
     // "Care:<social>": the selected Sim looks after the household's baby (or toddler with
@@ -4455,10 +4456,12 @@ fn auto_action(
             let mut action = crate::interact::Action::new(name.clone(), crate::interact::ActionKind::Object { target: e, def: i }, false);
             action.canvas_choice = canvas.map(|c| c as u8);
             q.push_player(action);
+            info!("--do {name}: queued on {e:?}");
             *done = true;
             return;
         }
     }
+    debug!("--do {name}: nothing offers it yet");
 }
 
 /// `--ui-flow <dir>`: clicks through the real menus (world → household → lot → move in),

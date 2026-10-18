@@ -2,7 +2,11 @@
 //! room of a Sim asleep, or a baby or toddler crying there, wakes them with a Rude Awakening (not
 //! a Heavy Sleeper): they get up, and turn the TV or stereo off. A baby or toddler of the
 //! household crying at home gives those about Crying Baby while it cries (the game's buff
-//! refreshes every few minutes it hears them).
+//! refreshes every few minutes it hears them). A Light Sleeper wakes, too, to a conversation in
+//! the room, or someone playing an instrument, working out or playing games there (the game's
+//! `CheckLightSleeperDisturbed`). A Technophobe isn't woken by a TV, but hates it: by one that's
+//! on, asleep or awake, they throw a tantrum and have Technophobia a while (`BuffAntiTV`'s
+//! `kDurationWhenWalkingBy`, tuned 25 minutes).
 
 use bevy::prelude::*;
 
@@ -21,20 +25,44 @@ impl Plugin for DisturbPlugin {
 
 /// How near a crying little one has to be heard when they're not in a room (out of doors).
 const CRY_RANGE: f32 = 12.0;
+/// Technophobia from passing a TV on (minutes).
+const TECHNOPHOBIA_PASSING: f64 = 25.0;
+
+/// Whether what a Sim's doing would wake a Light Sleeper in the room: talking, or the game's
+/// `IWakesLightSleeper` pastimes (an instrument, a workout, computer games, the dollhouse,
+/// foosball).
+fn wakes_light_sleeper(a: &Action, kind: Option<ObjectKind>) -> bool {
+    if !matches!(a.phase, Phase::Running(_)) {
+        return false;
+    }
+    match (&a.kind, kind) {
+        (ActionKind::Social { .. }, _) => true,
+        (ActionKind::Object { def, .. }, Some(k)) => {
+            let d = crate::interact::interactions_for(k).get(*def);
+            crate::tips::instrument(k)
+                || matches!(k, ObjectKind::DollHouse | ObjectKind::Foosball)
+                || d.is_some_and(|d| d.pose == crate::sim::Pose::Exercise || (k == ObjectKind::Computer && d.name == "Play Computer Games"))
+        }
+        _ => false,
+    }
+}
 
 /// Whether a Sim's asleep (in bed, or napping; not already getting up).
 pub(crate) fn asleep(q: &ActionQueue) -> bool {
     q.0.front().is_some_and(|a| matches!(a.label.as_str(), "Sleep" | "Nap") && matches!(a.phase, Phase::Running(_)) && !a.cancel)
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn disturb(
+    mut commands: Commands,
     time: Res<Time>,
     mut last: Local<f32>,
     clock: Res<crate::clock::GameClock>,
     building: Option<Res<crate::building::ActiveBuilding>>,
     noisy: Query<(Entity, &Transform, &GameObject), Or<(With<crate::effects::TvOn>, With<crate::music::StereoOn>)>>,
     littles: Query<(Entity, &Transform, &Sim, Option<&crate::anim::ActionClip>), With<HouseholdMember>>,
+    objects: Query<&GameObject>,
+    visitors: Query<(Entity, &Transform, &ActionQueue, &Visibility), (With<Sim>, Without<HouseholdMember>)>,
     mut sims: Query<(Entity, &Sim, &Transform, &mut Moodlets, &mut ActionQueue, &Visibility), (With<HouseholdMember>, Without<crate::visit::OnLot>)>,
 ) {
     let now = time.elapsed_secs();
@@ -59,17 +87,43 @@ fn disturb(
         .filter(|(_, _, s, clip)| s.age.is_little() && clip.is_some_and(|c| c.loops.first().is_some_and(|l| l.contains("cry"))))
         .map(|(e, tf, ..)| (e, tf.translation))
         .collect();
+    // Those up to something that would wake a Light Sleeper.
+    let kind_of = |a: &Action| match a.kind {
+        ActionKind::Object { target, .. } => objects.get(target).ok().map(|o| o.kind),
+        _ => None,
+    };
+    let loud: Vec<(Entity, Vec3)> = sims
+        .iter()
+        .map(|(e, _, tf, _, q, v)| (e, tf, q, v))
+        .chain(visitors.iter())
+        .filter(|(.., q, v)| **v != Visibility::Hidden && q.0.front().is_some_and(|a| wakes_light_sleeper(a, kind_of(a))))
+        .map(|(e, tf, ..)| (e, tf.translation))
+        .collect();
     for (me, sim, tf, mut moodlets, mut queue, vis) in &mut sims {
         if sim.age.is_little() || *vis == Visibility::Hidden {
             continue;
         }
         let at = tf.translation;
-        // Woken: a TV or stereo in the room, or a little one crying there.
+        let technophobe = sim.traits.contains(&Trait::Technophobe);
+        // A Technophobe by a TV that's on (not watching it: that's `traitmoods`'): a tantrum.
+        let watching = queue.0.front().is_some_and(|a| matches!(a.label.as_str(), "Watch TV" | "Watch the TV"));
+        if technophobe
+            && !watching
+            && !moodlets.has(MoodletKind::Technophobia)
+            && let Some(tv) = noises.iter().find(|n| n.2 == ObjectKind::Tv && same_room(at, n.1))
+        {
+            info!("{} can't stand the TV", sim.first);
+            moodlets.add_valued(MoodletKind::Technophobia, clock.minutes, MoodletKind::Technophobia.def().value, TECHNOPHOBIA_PASSING);
+            commands.entity(me).insert(crate::reactions::Pending::new(&["TantrumIntense"], Some(tv.1), clock.minutes + 30.0));
+        }
+        // Woken: a TV or stereo in the room (not a Technophobe by a TV), a little one crying
+        // there, or for a Light Sleeper, someone talking or at something noisy.
         if asleep(&queue) && !sim.traits.contains(&Trait::HeavySleeper) {
-            let noise = noises.iter().find(|n| same_room(at, n.1));
+            let noise = noises.iter().find(|n| same_room(at, n.1) && !(technophobe && n.2 == ObjectKind::Tv));
             let cry = crying.iter().find(|c| c.0 != me && same_room(at, c.1));
-            if noise.is_some() || cry.is_some() {
-                info!("{} is woken by {}", sim.first, if noise.is_some() { "the noise" } else { "a crying baby" });
+            let talk = sim.traits.contains(&Trait::LightSleeper) && loud.iter().any(|l| l.0 != me && same_room(at, l.1));
+            if noise.is_some() || cry.is_some() || talk {
+                info!("{} is woken by {}", sim.first, if noise.is_some() { "the noise" } else if cry.is_some() { "a crying baby" } else { "someone in the room" });
                 moodlets.add(MoodletKind::RudeAwakening, clock.minutes);
                 if let Some(a) = queue.0.front_mut() {
                     a.cancel = true;

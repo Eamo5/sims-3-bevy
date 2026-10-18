@@ -12,6 +12,9 @@
 //! - An Excitable Sim Excited (+15) a quarter of the time (TraitTuning's, not the code's half)
 //!   socialising with a friend or a romance while it's going well (`AddExcitmentBuff`).
 //! - A kiss with a Great Kisser: both of them a Great Kiss (+15; `OnKiss`).
+//! - A Technophobe's Technophobia (-10) ten minutes into watching TV (`kAntiTVTraitTimeToGainDebuff`)
+//!   or at a computer at all, and a Hydrophobic Sim's moodlet (-20) in the water: each kept from
+//!   running out while they're at it, as the game's paused buffs are.
 
 use std::collections::HashMap;
 
@@ -19,7 +22,7 @@ use bevy::prelude::*;
 use rand::Rng;
 
 use crate::PlayMode;
-use crate::interact::ActionQueue;
+use crate::interact::{ActionKind, ActionQueue, GameObject, ObjectKind, Phase};
 use crate::life::{MoodletKind, Moodlets, Trait};
 use crate::sim::Sim;
 
@@ -43,6 +46,8 @@ const LUCK_SLEEP_HOURS: f64 = 4.0;
 const LUCK_CHANCE: f64 = 0.8;
 /// `kExcitableTraitSimChanceOfBuff`.
 const EXCITED_CHANCE: f64 = 0.25;
+/// `kAntiTVTraitTimeToGainDebuff` (minutes).
+const TECHNOPHOBIA_AFTER: f32 = 10.0;
 
 /// A social done (`interact`): the one who did it, to whom, whether a kiss, and whether it was
 /// taken well.
@@ -79,8 +84,9 @@ fn trait_moods(
     building: Option<Res<crate::building::ActiveBuilding>>,
     genealogy: Option<Res<crate::family::Genealogy>>,
     everyone: Query<(Entity, &Transform, &Sim, &Visibility)>,
+    objects: Query<&GameObject>,
     mut sims: Query<
-        (Entity, &Sim, &Transform, &Visibility, &mut Moodlets, &ActionQueue, Option<&crate::social::Relationships>, Has<crate::visit::OnLot>),
+        (Entity, &Sim, &Transform, &Visibility, &mut Moodlets, &ActionQueue, Option<&crate::social::Relationships>, (Has<crate::visit::OnLot>, Has<crate::swim::Swimming>)),
         (Without<crate::interact::OffLot>, Without<crate::rabbitholes::AtRabbitHole>, Without<crate::careers::AtWork>),
     >,
 ) {
@@ -99,7 +105,7 @@ fn trait_moods(
     let hour = clock.hour_f();
     let dark = !(DARK_UNTIL..DARK_FROM).contains(&hour);
     let mut rng = rand::rng();
-    for (me, sim, tf, vis, mut moodlets, queue, rels, on_lot) in &mut sims {
+    for (me, sim, tf, vis, mut moodlets, queue, rels, (on_lot, swimming)) in &mut sims {
         let has = |t: Trait| sim.traits.contains(&t);
         let here = *vis != Visibility::Hidden;
         let at = tf.translation;
@@ -128,6 +134,18 @@ fn trait_moods(
         }
         set(&sim.first, &mut moodlets, MoodletKind::EnjoyingSolitude, alone);
         set(&sim.first, &mut moodlets, MoodletKind::TooManyPeople, crowded);
+        // At the TV or a computer, in the water.
+        let front = queue.0.front().filter(|a| matches!(a.phase, Phase::Running(_)) && !a.cancel);
+        let watching = front.is_some_and(|a| matches!(a.label.as_str(), "Watch TV" | "Watch the TV") && matches!(a.phase, Phase::Running(t) if t >= TECHNOPHOBIA_AFTER));
+        let computing = front.is_some_and(|a| {
+            matches!(a.kind, ActionKind::Object { target, .. } if objects.get(target).is_ok_and(|o| o.kind == ObjectKind::Computer)) && !a.label.contains("Repair") && !a.label.contains("Upgrade")
+        });
+        if has(Trait::Technophobe) && (watching || computing) {
+            keep(&mut moodlets, MoodletKind::Technophobia, clock.minutes);
+        }
+        if has(Trait::Hydrophobic) && swimming {
+            keep(&mut moodlets, MoodletKind::Hydrophobic, clock.minutes);
+        }
         // The day's luck, waking from a good sleep.
         if has(Trait::Lucky) || has(Trait::Unlucky) {
             if crate::disturb::asleep(queue) {
@@ -151,6 +169,18 @@ fn set(who: &str, m: &mut Mut<Moodlets>, kind: MoodletKind, on: bool) {
     if m.has(kind) != on {
         debug!("{who}: {} {}", kind.def().name, if on { "on" } else { "off" });
         m.set_while(kind, on);
+    }
+}
+
+/// A moodlet kept from running out while its cause lasts (a paused buff of the game's), topped
+/// up only now and then.
+fn keep(m: &mut Mut<Moodlets>, kind: MoodletKind, now: f64) {
+    let full = kind.def().hours as f64 * 60.0;
+    if m.0.iter().find(|x| x.kind == kind).is_none_or(|x| x.until - now < full - 10.0) {
+        if !m.has(kind) {
+            debug!("{} on", kind.def().name);
+        }
+        m.add(kind, now);
     }
 }
 

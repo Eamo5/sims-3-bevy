@@ -4271,6 +4271,15 @@ pub(crate) fn run_actions(
                                     if i == HUNGER && matches!(d.special, Special::ServeMeal | Special::GrabPlate | Special::Leftovers | Special::Cook | Special::Microwave | Special::ReplicateFood) {
                                         gain = 0.0;
                                     }
+                                    // (No fun in technology for a Technophobe, the game's zeroed
+                                    // commodity update; and the water's less than none for the
+                                    // Hydrophobic, `kSwimmingInPoolFunAmount` the other way.)
+                                    if i == FUN && gain > 0.0 && sim.traits.contains(&crate::life::Trait::Technophobe) && (matches!(obj.kind, ObjectKind::Tv | ObjectKind::Computer) || d.name == "Watch the TV") {
+                                        gain = 0.0;
+                                    }
+                                    if i == FUN && d.name == "Swim" && sim.traits.contains(&crate::life::Trait::Hydrophobic) {
+                                        gain = -20.0;
+                                    }
                                     if i == FUN && gain > 0.0 {
                                         gain *= affinity;
                                     } else if i == FUN && affinity < 0.5 {
@@ -6163,6 +6172,15 @@ fn autonomy(
                 }
                 // (A Neurotic's own checks.)
                 if !crate::neurotic::offers(d.special, sim) {
+                    continue;
+                }
+                // (Never by choice to the TV or a computer for a Technophobe, but to turn it off;
+                // nor into the water for the Hydrophobic: the game's `TraitAntiTV` commodity, and
+                // its pool's and diving board's tests.)
+                if sim.traits.contains(&crate::life::Trait::Technophobe) && (matches!(obj.kind, ObjectKind::Tv | ObjectKind::Computer) || d.name == "Watch the TV") && d.name != "Turn Off" {
+                    continue;
+                }
+                if sim.traits.contains(&crate::life::Trait::Hydrophobic) && (d.name == "Swim" || obj.kind == ObjectKind::DivingBoard) {
                     continue;
                 }
                 // (Strength training's for teens and up, as a sponge bath is.)
