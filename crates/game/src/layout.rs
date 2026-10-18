@@ -231,11 +231,50 @@ fn fill_bars(bars: Query<&UiFillBar, Changed<UiFillBar>>, mut nodes: Query<&mut 
 #[derive(Component)]
 pub struct SetIcon(pub Handle<Image>);
 
-fn set_icons(mut commands: Commands, q: Query<(Entity, &UiButton, &SetIcon)>, mut pics: Query<(&mut ImageNode, Option<&mut Visibility>)>) {
-    for (e, b, s) in &q {
+/// An icon button's icon fitted to its frame's opening, this far in from the button's edges
+/// (left, top, right, bottom): a Sim's picture, drawn over the frame, held inside it as the
+/// game's frames hold them (head and shoulders, nothing outside).
+#[derive(Component, Clone, Copy)]
+pub struct IconOpening(pub [f32; 4]);
+
+/// The node that fills a window this far in from its edges (left, top, right, bottom).
+fn inset_node(inset: [f32; 4]) -> Node {
+    Node { position_type: PositionType::Absolute, left: Val::Px(inset[0]), top: Val::Px(inset[1]), right: Val::Px(inset[2]), bottom: Val::Px(inset[3]), ..default() }
+}
+
+/// A window's picture (a Sim's, under its frame's) fitted to the frame's opening, this far in
+/// from the window's edges (left, top, right, bottom), and nothing of it shown outside.
+pub fn fit_inside(commands: &mut Commands, window: Entity, picture: Entity, inset: [f32; 4]) {
+    commands.entity(window).queue(move |mut e: EntityWorldMut| {
+        if let Some(mut n) = e.get_mut::<Node>() {
+            n.overflow = Overflow::clip();
+        }
+    });
+    commands.entity(picture).insert(inset_node(inset));
+}
+
+#[allow(clippy::type_complexity)]
+fn set_icons(
+    mut commands: Commands,
+    q: Query<(Entity, &UiButton, &SetIcon, Option<&IconOpening>)>,
+    mut pics: Query<(&mut ImageNode, Option<&mut Visibility>)>,
+    mut nodes: Query<&mut Node>,
+    parents: Query<&ChildOf>,
+) {
+    for (e, b, s, opening) in &q {
         if let Some(i) = b.icon()
             && let Ok((mut img, vis)) = pics.get_mut(i)
         {
+            // (Into a holder at the frame's opening, filling it, once; the holder cuts off
+            // anything that would show outside.)
+            if let Some(IconOpening(inset)) = opening.copied()
+                && parents.get(i).is_ok_and(|p| p.parent() == e)
+                && let Ok(mut n) = nodes.get_mut(i)
+            {
+                *n = inset_node([0.0; 4]);
+                let holder = commands.spawn((Node { overflow: Overflow::clip(), ..inset_node(inset) }, Pickable::IGNORE, ChildOf(e))).id();
+                commands.entity(i).insert(ChildOf(holder));
+            }
             img.image = s.0.clone();
             if let Some(mut v) = vis
                 && *v == Visibility::Hidden

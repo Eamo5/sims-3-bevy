@@ -53,6 +53,8 @@ const ZOOM_OUT: u32 = 0x8fef_fb02;
 const ZOOM_IN: u32 = 0x8fef_fb03;
 const SIM_BUTTON: u32 = 0x05da_4d10;
 const SIM_STEP: f32 = 65.0;
+/// How far in from a Sim button's edges its frame's opening is, where their picture's fitted.
+const SIM_OPENING: [f32; 4] = [12.5; 4];
 const MAX_SIMS: usize = 8;
 // `CASCharacterSheet`'s.
 const SHEET_BASICS: u32 = 0x0077_7000;
@@ -212,7 +214,7 @@ fn skewer(
             commands.entity(r).insert(crate::layout::Selected);
         }
         if let Some(h) = pics.get(m.id).or_else(|| ui.image(&mut images, s3pkg::fnv64(AGE_ICONS[age_icon(m.age) as usize])).map(|(h, _)| h)) {
-            commands.entity(r).insert(SetIcon(h));
+            commands.entity(r).insert((SetIcon(h), crate::layout::IconOpening(SIM_OPENING)));
         }
         f.sims.push(r);
     }

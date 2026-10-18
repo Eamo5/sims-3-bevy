@@ -55,6 +55,10 @@ const PUCK_MEMORY: u32 = 0x0b10_a780;
 const SKEWER_SLOT: u32 = 0xf6fd_a501;
 const SKEWER_PETS: u32 = 0xf6fd_a520;
 const SLOT_THUMB: u32 = 1;
+/// How far in from the thumbnail window's edges (left, top, right, bottom) its frame's opening
+/// is: the frame's window sits 2 to the right of it and 5 above, its picture's opening some
+/// 41 square in its middle.
+const SLOT_THUMB_OPENING: [f32; 4] = [14.0, 6.0, 10.0, 18.0];
 const SLOT_MOOD: u32 = 2;
 const SLOT_BUTTON: u32 = 3;
 const NAV_BACKGROUND: u32 = 0x1ba4_8c20;
@@ -668,11 +672,14 @@ fn skewer(
         }
         set_shade(&mut images, &pictures, s.within(c, SLOT_MOOD), mood_single(mood));
         if faces[slot] != Some(e)
-            && let Some(p) = s.within(c, SLOT_THUMB).and_then(|t| pictures.get(t).ok())
+            && let Some(t) = s.within(c, SLOT_THUMB)
+            && let Ok(p) = pictures.get(t)
             && let Ok(mut img) = images.get_mut(p.0)
         {
             img.image = portraits.portrait(&mut assets, e);
             commands.entity(p.0).insert(crate::portraits::PortraitOf(e));
+            // (In the frame's opening, head and shoulders, as the game's skewer has them.)
+            crate::layout::fit_inside(&mut commands, t, p.0, SLOT_THUMB_OPENING);
             faces[slot] = Some(e);
         }
         if pressed(&clicks, button) {
