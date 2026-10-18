@@ -4,9 +4,9 @@
 //! own tuning: a bistro §12,500 and §25,000 more, a science facility §40,000 and §100,000).
 //! From then on it's the household's: its share of the profits mounts up each Monday at nine
 //! (all of them for an owner), there for the collecting ("Collect Money (§N)"); and it can be
-//! sold back for what was paid and what's uncollected ("Sell Property", which the game does from
-//! its real estate dialog). A partner or owner eats free at their diner or bistro (the game's
-//! `Restaurant`).
+//! sold back for what was paid and what's uncollected ("Sell Property"). A partner or owner eats
+//! free at their diner or bistro (the game's `Restaurant`). The game's real estate dialog sells,
+//! collects and buys outright from home: `estatedialog`.
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -23,6 +23,7 @@ impl Plugin for RealEstatePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RealEstate>()
             .add_systems(Update, (deals_done, profits).run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, hole_names.run_if(in_state(crate::AppState::InGame)))
             .add_systems(OnEnter(crate::AppState::CreateHousehold), |mut r: ResMut<RealEstate>| *r = RealEstate::default());
     }
 }
@@ -79,11 +80,54 @@ pub struct RealEstate {
     pub holdings: Vec<Holding>,
     #[serde(default)]
     pub paid_week: u32,
+    /// The buildings renamed by their owner (`estatedialog`), by lot.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub renamed: Vec<(usize, String)>,
 }
 
 impl RealEstate {
     pub fn holding(&self, lot: usize) -> Option<&Holding> {
         self.holdings.iter().find(|h| h.lot == lot)
+    }
+
+    /// A stake taken (a partner's, or the whole of it), or a partner's bought out; the first
+    /// one's profits from the next payday on, not this one past.
+    fn take(&mut self, lot: usize, cost: i64, full: bool, week: u32) {
+        match self.holdings.iter_mut().find(|x| x.lot == lot) {
+            Some(x) => {
+                x.full |= full;
+                x.stored += cost;
+            }
+            None => {
+                if self.holdings.is_empty() {
+                    self.paid_week = week;
+                }
+                self.holdings.push(Holding { lot, full, stored: cost, funds: 0 });
+            }
+        }
+    }
+
+    /// Bought outright from the dialog (the game's `BuyoutRabbithole`): the buyout, and the
+    /// stake too where they had none, paid at once if the household can.
+    pub fn buy_outright(&mut self, sale: &ForSale, funds: &mut i64, week: u32) -> bool {
+        if *funds < sale.cost || self.holding(sale.lot).is_some_and(|h| h.full || !sale.partner) {
+            return false;
+        }
+        *funds -= sale.cost;
+        self.take(sale.lot, sale.cost, true, week);
+        true
+    }
+
+    /// What's waiting at a place, collected.
+    pub fn collect(&mut self, lot: usize) -> i64 {
+        self.holdings.iter_mut().find(|x| x.lot == lot).map_or(0, |x| std::mem::take(&mut x.funds))
+    }
+
+    /// A stake sold: what was paid for it and what's waiting there (the game's `TotalValue`).
+    pub fn sell(&mut self, lot: usize) -> Option<i64> {
+        let i = self.holdings.iter().position(|x| x.lot == lot)?;
+        let x = self.holdings.remove(i);
+        Some(x.stored + x.funds)
     }
 
     /// Whether a meal out here is on the house (a diner or bistro they've a stake in).
@@ -96,6 +140,51 @@ impl RealEstate {
 /// Whether a stake can be bought in a lot (its rabbit hole can be invested in).
 pub fn purchasable(world: &WorldInfo, lot: usize) -> bool {
     tuning(world, lot).is_some()
+}
+
+/// A rabbit hole for sale, as the dialog lists it (the game's `GetPropertiesForSale`): one not
+/// the household's outright, at the price of owning it, and whether they're a partner there.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ForSale {
+    pub lot: usize,
+    pub cost: i64,
+    pub partner: bool,
+}
+
+pub fn for_sale(world: &WorldInfo, re: &RealEstate) -> Vec<ForSale> {
+    (0..world.lots.len())
+        .filter_map(|lot| {
+            let [invest, buyout, ..] = tuning(world, lot)?;
+            match re.holding(lot) {
+                Some(h) if h.full => None,
+                Some(_) => Some(ForSale { lot, cost: buyout, partner: true }),
+                None => Some(ForSale { lot, cost: invest + buyout, partner: false }),
+            }
+        })
+        .collect()
+}
+
+/// A rabbit hole's own name, as the game has it (its catalogue object's: the game's
+/// `CatalogName`).
+fn catalogue_name(world: &WorldInfo, baked: &crate::baked::BakedData, lot: usize) -> Option<String> {
+    let o = world.buildings.get(&lot)?.objects.iter().find(|o| o.script.contains("RabbitHoles."))?;
+    baked.catalog_index.get(&o.objd).and_then(|i| baked.catalog.get(*i)).map(|c| c.name.clone()).filter(|n| !n.is_empty())
+}
+
+/// The town's rabbit holes known by their own names (or their owner's for them) wherever a
+/// place is named: the map's tags, menus, notices (`rabbitholes::lot_title`).
+fn hole_names(world: Option<Res<crate::loading::CurrentWorld>>, baked: Option<Res<crate::baked::Baked>>, re: Res<RealEstate>) {
+    let (Some(world), Some(baked)) = (world, baked) else { return };
+    if !world.is_changed() && !re.is_changed() && !baked.is_changed() {
+        return;
+    }
+    let names = (0..world.data.lots.len())
+        .filter_map(|lot| {
+            let own = re.renamed.iter().find(|r| r.0 == lot).map(|r| r.1.clone());
+            own.or_else(|| catalogue_name(&world.data, &baked.0, lot)).map(|n| (world.data.lots[lot].id, n))
+        })
+        .collect();
+    crate::rabbitholes::name_holes(names);
 }
 
 /// The rabbit hole on a lot that can be invested in: its class's tuning.
@@ -187,7 +276,8 @@ fn deals_done(
         let lot = done.0;
         let Some([invest, buyout, ..]) = tuning(&world.data, lot) else { continue };
         let Some(h) = household.as_deref_mut() else { continue };
-        let place = world.data.lots.get(lot).map(|l| crate::rabbitholes::lot_title(l, world.data.lot_names.get(lot).map_or("", |s| s.as_str()))).unwrap_or_default();
+        // (The rabbit hole by its own name, as the game's notices have it: its `CatalogName`.)
+        let place = crate::visit::place_name(&world.data, lot);
         let tns = |keys: (u64, u64)| {
             ui.as_deref()
                 .and_then(|u| u.localize_key(if sim.female { keys.1 } else { keys.0 }))
@@ -209,43 +299,29 @@ fn deals_done(
                     continue;
                 }
                 h.funds -= cost;
-                match re.holdings.iter_mut().find(|x| x.lot == lot) {
-                    Some(x) => {
-                        x.full = true;
-                        x.stored += cost;
-                    }
-                    None => {
-                        // (The first stake: profits from the next payday on, not this one past.)
-                        if re.holdings.is_empty() {
-                            re.paid_week = payday_week(&clock);
-                        }
-                        re.holdings.push(Holding { lot, full: false, stored: cost, funds: 0 });
-                    }
-                }
+                re.take(lot, cost, full, payday_week(&clock));
                 info!("{} {} {place} for §{cost}", sim.first, if full { "bought out" } else { "became a partner at" });
                 notes.push(tns(if full { OWNER_TNS } else { PARTNER_TNS }).unwrap_or_else(|| format!("{} is now {} {place}!", sim.first, if full { "the owner of" } else { "a partner at" })));
                 play.write(crate::sound::PlaySound::ui("sting_career_positive"));
             }
             Deal::Collect => {
-                let Some(x) = re.holdings.iter_mut().find(|x| x.lot == lot) else { continue };
-                if x.funds > 0 {
-                    h.funds += x.funds;
-                    notes.push(format!("{} collected §{} from {place}.", sim.first, x.funds));
-                    x.funds = 0;
+                let got = re.collect(lot);
+                if got > 0 {
+                    h.funds += got;
+                    notes.push(format!("{} collected §{got} from {place}.", sim.first));
                 }
             }
             Deal::Sell => {
-                let Some(i) = re.holdings.iter().position(|x| x.lot == lot) else { continue };
-                let x = re.holdings.remove(i);
-                h.funds += x.stored + x.funds;
-                notes.push(format!("{} sold the household's stake in {place} for §{}.", sim.first, x.stored + x.funds));
+                let Some(got) = re.sell(lot) else { continue };
+                h.funds += got;
+                notes.push(format!("{} sold the household's stake in {place} for §{got}.", sim.first));
             }
         }
     }
 }
 
 /// The week of the last payday that's come (Monday at nine; the week before, till then).
-fn payday_week(clock: &crate::clock::GameClock) -> u32 {
+pub fn payday_week(clock: &crate::clock::GameClock) -> u32 {
     let week = clock.day() / 7 + 1;
     if clock.weekday() == 0 && clock.hour_f() < PAYDAY_HOUR { week - 1 } else { week }
 }
@@ -300,5 +376,27 @@ mod tests {
         assert_eq!(payday_week(&at(3.0, 2.0)), 1);
         assert_eq!(payday_week(&at(7.0, 8.9)), 1);
         assert_eq!(payday_week(&at(7.0, 9.0)), 2);
+    }
+
+    #[test]
+    fn bought_outright_collected_and_sold() {
+        let mut re = RealEstate::default();
+        let mut funds = 30000;
+        let sale = ForSale { lot: 2, cost: 24000, partner: false };
+        assert!(re.buy_outright(&sale, &mut funds, 3));
+        assert_eq!((funds, re.paid_week), (6000, 3));
+        assert!(re.holding(2).is_some_and(|h| h.full && h.stored == 24000));
+        assert!(!re.buy_outright(&sale, &mut funds, 3), "not twice, nor without the money");
+        // (A partner's buyout: the rest of it.)
+        re.holdings.push(Holding { lot: 5, full: false, stored: 6000, funds: 850 });
+        funds = 20000;
+        assert!(re.buy_outright(&ForSale { lot: 5, cost: 18000, partner: true }, &mut funds, 4));
+        assert!(re.holding(5).is_some_and(|h| h.full && h.stored == 24000));
+        assert_eq!(re.paid_week, 3, "the first stake's week kept");
+        assert_eq!(re.collect(5), 850);
+        assert_eq!(re.collect(5), 0);
+        re.holdings[0].funds = 100;
+        assert_eq!(re.sell(2), Some(24100));
+        assert_eq!(re.sell(2), None);
     }
 }

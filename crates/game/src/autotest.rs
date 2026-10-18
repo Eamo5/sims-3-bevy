@@ -4114,6 +4114,14 @@ fn auto_action(
         }
         return;
     }
+    // "CallRealEstate": the selected Sim phones to Check Real Estate.
+    if name == "CallRealEstate" {
+        if let Ok(mut q) = sel.single_mut() {
+            *done = true;
+            q.push_player(crate::interact::Action::new("Check Real Estate", crate::interact::ActionKind::CheckRealEstate, false));
+        }
+        return;
+    }
     // "TimeOff:sick|fake|1|2|5": the selected Sim phones for time off work.
     if let Some(what) = name.strip_prefix("TimeOff:") {
         use crate::timeoff::Ask;

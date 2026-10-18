@@ -123,8 +123,23 @@ pub fn activities(lot: &LotInfo) -> &'static [Activity] {
     }
 }
 
-/// A readable name for a community lot.
+/// The town's rabbit holes' own names, by their lots' ids (their catalogue objects', or what
+/// their owner renamed them: `realestate`).
+static HOLE_NAMES: std::sync::RwLock<Vec<(u64, String)>> = std::sync::RwLock::new(Vec::new());
+
+/// The rabbit holes' names, afresh.
+pub fn name_holes(names: Vec<(u64, String)>) {
+    if let Ok(mut n) = HOLE_NAMES.write() {
+        *n = names;
+    }
+}
+
+/// A readable name for a community lot: a rabbit hole's own, as the game shows it; else the
+/// lot's.
 pub fn lot_title(lot: &LotInfo, display: &str) -> String {
+    if let Some(n) = HOLE_NAMES.read().ok().and_then(|n| n.iter().find(|h| h.0 == lot.id).map(|h| h.1.clone())) {
+        return n;
+    }
     if !display.is_empty() && display != lot.internal_name {
         return display.split(" — ").next().unwrap_or(display).to_string();
     }

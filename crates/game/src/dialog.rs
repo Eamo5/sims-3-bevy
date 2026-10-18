@@ -43,13 +43,15 @@ pub enum Question {
     Engrave { grave: Entity, suggested: String },
     /// A name for something discovered through a telescope (typed in).
     NameDiscovery { sim: Entity, suggested: String },
+    /// A new name for a building the household owns (typed in; or cancelled: `estatedialog`).
+    RenameProperty { sim: Entity, lot: usize, suggested: String },
 }
 
 impl Question {
     /// The Sim the question is about.
     pub fn sim(&self) -> Option<Entity> {
         match self {
-            Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } | Question::CareerEvent { sim, .. } | Question::NameBaby { sim, .. } | Question::PhoneCall { sim, .. } | Question::NameDiscovery { sim, .. } => Some(*sim),
+            Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } | Question::CareerEvent { sim, .. } | Question::NameBaby { sim, .. } | Question::PhoneCall { sim, .. } | Question::NameDiscovery { sim, .. } | Question::RenameProperty { sim, .. } => Some(*sim),
             Question::Household(_) | Question::Engrave { .. } => None,
         }
     }

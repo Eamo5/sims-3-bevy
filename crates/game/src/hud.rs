@@ -3404,6 +3404,11 @@ fn phone_button(
     ];
     // Calling someone they know: for a chat, or to invite them over.
     pie.submenus.clear();
+    // (The game's "Real Estate and Travel Services...": the household's real estate, its dialog.)
+    if me.age.is_grown() && me.age != crate::sim::Age::Child {
+        options.push(("Real Estate and Travel Services... ›".to_string(), submenu_kind(pie.submenus.len())));
+        pie.submenus.push(("Real Estate and Travel Services".to_string(), vec![("Check Real Estate".to_string(), ActionKind::CheckRealEstate)]));
+    }
     if !known.is_empty() {
         let chat = known.iter().map(|(_, e, n)| (format!("Chat with {n}"), ActionKind::PhoneChat { target: *e })).collect();
         options.push(("Chat with a Friend ›".to_string(), submenu_kind(pie.submenus.len())));

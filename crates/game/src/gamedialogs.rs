@@ -295,6 +295,7 @@ fn type_into_box(
         Some(crate::dialog::Question::NameBaby { sim, suggested }) => (*sim, suggested, 20),
         Some(crate::dialog::Question::Engrave { grave, suggested }) => (*grave, suggested, crate::ghosts::EPITAPH_LENGTH),
         Some(crate::dialog::Question::NameDiscovery { sim, suggested }) => (*sim, suggested, crate::telescope::NAME_LENGTH),
+        Some(crate::dialog::Question::RenameProperty { sim, suggested, .. }) => (*sim, suggested, crate::estatedialog::NAME_LENGTH),
         _ => {
             *asking = None;
             keys.clear();
@@ -383,7 +384,7 @@ fn question_dialogs(
             // (A call come in: answered or not.)
             crate::dialog::Question::PhoneCall { .. } => "TwoButtonDialog",
             // (A newborn's name: the game's box to type it in.)
-            crate::dialog::Question::NameBaby { .. } | crate::dialog::Question::Engrave { .. } | crate::dialog::Question::NameDiscovery { .. } => "StringInputDialog",
+            crate::dialog::Question::NameBaby { .. } | crate::dialog::Question::Engrave { .. } | crate::dialog::Question::NameDiscovery { .. } | crate::dialog::Question::RenameProperty { .. } => "StringInputDialog",
             crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 3 => "ThreeButtonDialog",
             _ => return,
         };
@@ -419,7 +420,10 @@ fn question_dialogs(
                     }
                 }
             }
-            crate::dialog::Question::NameBaby { suggested, .. } | crate::dialog::Question::Engrave { suggested, .. } | crate::dialog::Question::NameDiscovery { suggested, .. } => {
+            crate::dialog::Question::NameBaby { suggested, .. }
+            | crate::dialog::Question::Engrave { suggested, .. }
+            | crate::dialog::Question::NameDiscovery { suggested, .. }
+            | crate::dialog::Question::RenameProperty { suggested, .. } => {
                 // The title ("It's a Girl!"), the words, the name in its box, OK.
                 for w in s.all_with(NAME_TITLE) {
                     if let Some(t) = s.text_of(w) {
@@ -436,9 +440,13 @@ fn question_dialogs(
                 if let Some(b) = s.id(NAME_OK) {
                     commands.entity(b).insert(crate::dialog::AnswerButton(0));
                 }
-                // (A name's needed: no cancelling it.)
+                // (A name's needed: no cancelling it; a building's new one can be thought better of.)
                 if let Some(b) = s.id(NAME_CANCEL) {
-                    commands.entity(b).insert(Visibility::Hidden);
+                    if matches!(ask.about, crate::dialog::Question::RenameProperty { .. }) {
+                        commands.entity(b).insert(crate::dialog::AnswerButton(1));
+                    } else {
+                        commands.entity(b).insert(Visibility::Hidden);
+                    }
                 }
             }
             crate::dialog::Question::LifetimeWish { sim, .. } => {
