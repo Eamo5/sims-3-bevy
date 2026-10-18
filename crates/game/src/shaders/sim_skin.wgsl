@@ -26,6 +26,11 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(106) var layer2_samp: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(107) var layer3_tex: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(108) var layer3_samp: sampler;
+// (Four more, for a made-up face: sampled with the first layer's sampler.)
+@group(#{MATERIAL_BIND_GROUP}) @binding(109) var layer4_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(110) var layer5_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(111) var layer6_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(112) var layer7_tex: texture_2d<f32>;
 
 @fragment
 fn fragment(
@@ -47,6 +52,16 @@ fn fragment(
     if (n > 1.5) { c = mix(c, l1.rgb, l1.a); }
     if (n > 2.5) { c = mix(c, l2.rgb, l2.a); }
     if (n > 3.5) { c = mix(c, l3.rgb, l3.a); }
+    if (n > 4.5) {
+        let l4 = textureSample(layer4_tex, layer0_samp, uv);
+        let l5 = textureSample(layer5_tex, layer0_samp, uv);
+        let l6 = textureSample(layer6_tex, layer0_samp, uv);
+        let l7 = textureSample(layer7_tex, layer0_samp, uv);
+        c = mix(c, l4.rgb, l4.a);
+        if (n > 5.5) { c = mix(c, l5.rgb, l5.a); }
+        if (n > 6.5) { c = mix(c, l6.rgb, l6.a); }
+        if (n > 7.5) { c = mix(c, l7.rgb, l7.a); }
+    }
 #endif
     pbr_input.material.base_color = vec4<f32>(c, select(1.0, pbr_input.material.base_color.a, hair));
     pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);

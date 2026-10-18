@@ -1617,8 +1617,18 @@ fn face_hook(mut commands: Commands, mut sims: Query<(Entity, &mut crate::sim::S
             let (age, gender) = (crate::simbody::age_bits(s.age), if s.female { s3formats::sim::GENDER_FEMALE } else { s3formats::sim::GENDER_MALE });
             let mut worn: Vec<(s3bake::Key, u32)> = Vec::new();
             for n in names.split(',') {
-                let Some(p) = cas.parts.iter().find(|p| p.baked && crate::simbody::ACCESSORY_TYPES.contains(&p.clothing_type) && p.age_gender & age != 0 && p.age_gender & gender != 0 && p.name.to_ascii_lowercase().contains(&n.trim().to_ascii_lowercase())) else { continue };
+                // (Eyeliner and blush too.)
+                let makeup = [s3formats::sim::CT_EYELINER, s3formats::sim::CT_BLUSH];
+                let Some(p) = cas.parts.iter().find(|p| p.baked && (crate::simbody::ACCESSORY_TYPES.contains(&p.clothing_type) || makeup.contains(&p.clothing_type)) && p.age_gender & age != 0 && p.age_gender & gender != 0 && p.name.to_ascii_lowercase().contains(&n.trim().to_ascii_lowercase())) else { continue };
                 info!("face test: {} puts on {}", s.first, p.name);
+                match p.clothing_type {
+                    s3formats::sim::CT_EYELINER => s.outfit.eyeliner = Some(p.key),
+                    s3formats::sim::CT_BLUSH => s.outfit.blush = Some(p.key),
+                    _ => {}
+                }
+                if makeup.contains(&p.clothing_type) {
+                    continue;
+                }
                 worn.retain(|w| !crate::simbody::accessories_clash(w.1, p.clothing_type));
                 worn.push((p.key, p.clothing_type));
             }
@@ -4600,6 +4610,13 @@ fn ui_flow(
         }
         (200, AppState::CreateHousehold, _) if since > 2.0 => {
             shot(&mut commands, "2h_hair_picked");
+            // (The Hats tab, and a hat on.)
+            crate::cashair::TEST_HATS.store(true, std::sync::atomic::Ordering::Relaxed);
+            ask_cas(&mut commands, &[crate::home::CasAction::PickHat(2)]);
+            *stage = (250, now);
+        }
+        (250, AppState::CreateHousehold, _) if since > 2.5 => {
+            shot(&mut commands, "2h_hats");
             *stage = (67, now);
         }
         (67, AppState::CreateHousehold, _) if since > 0.5 => {
@@ -4733,8 +4750,9 @@ fn ui_flow(
             if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::EyeColor(3))) {
                 *i = Interaction::Pressed;
             } else {
-                // (The game's face panels: the eyes, as their colour swatches ask.)
-                ask_cas(&mut commands, &[crate::home::CasAction::FaceArea(1), crate::home::CasAction::EyeColor(3)]);
+                // (The game's face panels: the eyes, as their colour swatches ask; eyeliner and
+                // blush on.)
+                ask_cas(&mut commands, &[crate::home::CasAction::FaceArea(1), crate::home::CasAction::EyeColor(3), crate::home::CasAction::FacePart(s3formats::sim::CT_EYELINER, 1), crate::home::CasAction::FacePart(s3formats::sim::CT_BLUSH, 1)]);
             }
             *stage = (62, now);
         }

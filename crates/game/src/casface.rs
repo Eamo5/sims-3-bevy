@@ -4,12 +4,12 @@
 //! of it with its parts' hotspots, a part's sliders in the game's rows (`CASBodySlider`) beside
 //! it; its Basics page the game's preset faces for it, three across with the game's pictures
 //! (`GenericCasItemGrow_115x115`), and the eyes' their colours (`EyeColorPresetGridItem`).
-//! Make-up: eye shadow and lipstick in the game's item cells, none first.
+//! Make-up: eye shadow, eyeliner, blush and lipstick in the game's item cells, none first.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use bevy::prelude::*;
-use s3formats::sim::{CT_EYESHADOW, CT_LIPSTICK};
+use s3formats::sim::{CT_BLUSH, CT_EYELINER, CT_EYESHADOW, CT_LIPSTICK};
 
 use crate::AppState;
 use crate::cas::{CasAction, CasTab};
@@ -102,8 +102,21 @@ const EYES_NOT_HERE: [u32; 2] = [0x05db_b908, 0x05db_b915];
 // `CASMakeup`'s: its kinds (eye shadow, eyeliner, blush, lipstick, costume), its parts' grid,
 // and what this game hasn't.
 pub(crate) const MAKEUP_KINDS: [u32; 5] = [0x100, 0x101, 0x102, 0x103, 0x104];
+/// The make-up of the kinds' first four, and their names.
+pub(crate) const MAKEUP_TYPES: [u32; 4] = [CT_EYESHADOW, CT_EYELINER, CT_BLUSH, CT_LIPSTICK];
+const MAKEUP_TIPS: [&str; 4] = ["Eye Shadow", "Eyeliner", "Blush", "Lipstick"];
 const MAKEUP_PARTS: u32 = 0x1001;
-const MAKEUP_NOT_HERE: [u32; 10] = [0x0cd0_e9e0, 0x096d_7730, 0x1006, 0x1003, 0x1004, 0x1005, 0x2000, 0x101, 0x102, 0x104];
+const MAKEUP_NOT_HERE: [u32; 8] = [0x0cd0_e9e0, 0x096d_7730, 0x1006, 0x1003, 0x1004, 0x1005, 0x2000, 0x104];
+
+/// The make-up of a kind a Sim's chosen (`NONE`: none; none chosen: as their look has it).
+pub(crate) fn makeup_worn(o: &crate::sim::OutfitChoice, t: u32) -> Option<s3bake::Key> {
+    match t {
+        CT_LIPSTICK => o.lipstick,
+        CT_EYELINER => o.eyeliner,
+        CT_BLUSH => o.blush,
+        _ => o.eyeshadow,
+    }
+}
 // The preset grids' rows in view.
 const PRESET_ROWS: usize = 3;
 // `CASBodySlider`'s and the item cells'.
@@ -139,7 +152,8 @@ pub struct CasFace {
     region: usize,
     basics: bool,
     part: [usize; 4],
-    lipstick: bool,
+    /// The make-up's kind shown (of `MAKEUP_TYPES`).
+    kind: usize,
     cells: Option<Entity>,
     preset_cells: Option<Entity>,
     /// Each region's presets' scroll bar, and the row scrolled to.
@@ -149,7 +163,7 @@ pub struct CasFace {
     /// The face's part being sculpted as Create a Sim last had it (followed when it changes).
     area: u8,
     #[allow(clippy::type_complexity)]
-    shown: Option<(usize, usize, bool, [usize; 4], bool, Age, bool, [u8; 3], Option<s3bake::Key>, Option<s3bake::Key>, bool, (usize, Vec<u16>))>,
+    shown: Option<(usize, usize, bool, [usize; 4], usize, Age, bool, [u8; 3], Option<s3bake::Key>, Option<s3bake::Key>, bool, (usize, Vec<u16>))>,
 }
 
 /// A preset face's cell (of `simbody::face_presets`).
@@ -259,7 +273,7 @@ fn spawn_face(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut images,
     // (Each part's last slot, the region's whole, first.)
     let part = [0, 1, 2, 3].map(|n: usize| REGIONS[n].parts.len() - 1);
     FACE_UP.store(true, Ordering::Relaxed);
-    commands.insert_resource(CasFace { details, regions, makeup, region: 0, basics: true, part, lipstick: false, cells: None, preset_cells: None, bars, scroll: [0; 4], sliders: Vec::new(), area: 0, shown: None });
+    commands.insert_resource(CasFace { details, regions, makeup, region: 0, basics: true, part, kind: 0, cells: None, preset_cells: None, bars, scroll: [0; 4], sliders: Vec::new(), area: 0, shown: None });
 }
 
 /// Shown on the Face tab: the region chosen, its page and part, the part's sliders where the
@@ -292,9 +306,8 @@ fn face_panel(
     let k = selected.0.min(pending.members.len().saturating_sub(1));
     let Some(sim) = pending.members.get(k) else { return };
     // Make-up for those the game's parts are for (by age and gender).
-    let shadows = crate::cas::parts_for(&scene.cas, sim, CT_EYESHADOW, crate::simbody::OutfitKind::Everyday);
-    let lipsticks = crate::cas::parts_for(&scene.cas, sim, CT_LIPSTICK, crate::simbody::OutfitKind::Everyday);
-    let makeup_ok = !sim.age.is_little() && (!shadows.is_empty() || !lipsticks.is_empty());
+    let lists = MAKEUP_TYPES.map(|t| crate::cas::parts_for(&scene.cas, sim, t, crate::simbody::OutfitKind::Everyday));
+    let makeup_ok = !sim.age.is_little() && lists.iter().any(|l| !l.is_empty());
     crate::livehud::set_visible(&mut vis, f.details.id(REGION_BUTTONS[4]), makeup_ok);
     if !makeup_ok && f.region == 4 {
         f.region = 0;
@@ -328,9 +341,9 @@ fn face_panel(
             }
         }
     } else {
-        for (id, lip) in [(MAKEUP_KINDS[0], false), (MAKEUP_KINDS[3], true)] {
-            if crate::livehud::pressed(&clicks, f.makeup.id(id)) {
-                f.lipstick = lip;
+        for (n, id) in MAKEUP_KINDS[..4].iter().enumerate() {
+            if crate::livehud::pressed(&clicks, f.makeup.id(*id)) {
+                f.kind = n;
             }
         }
     }
@@ -351,7 +364,7 @@ fn face_panel(
     }
     for (i, c) in &makeup {
         if *i == Interaction::Pressed {
-            actions.write(crate::cas::CasActionRequest(CasAction::FacePart(if f.lipstick { CT_LIPSTICK } else { CT_EYESHADOW }, c.0)));
+            actions.write(crate::cas::CasActionRequest(CasAction::FacePart(MAKEUP_TYPES[f.kind], c.0)));
         }
     }
     for (i, c) in &preset_cells {
@@ -404,7 +417,7 @@ fn face_panel(
         }
     }
     let eyes_rgb = sim.eyes.to_srgba().to_u8_array_no_alpha();
-    let want = (k, f.region, basics, f.part, f.lipstick, sim.age, sim.female, eyes_rgb, sim.outfit.eyeshadow, sim.outfit.lipstick, gu.is_some(), (f.scroll[f.region.min(3)], chosen.clone()));
+    let want = (k, f.region, basics, f.part, f.kind, sim.age, sim.female, eyes_rgb, makeup_worn(&sim.outfit, MAKEUP_TYPES[f.kind]), sim.outfit.lipstick, gu.is_some(), (f.scroll[f.region.min(3)], chosen.clone()));
     if f.shown.as_ref() == Some(&want) {
         // (The sliders follow the face when it's changed other than by them: made at random.)
         for (e, i, last) in f.sliders.iter_mut() {
@@ -557,18 +570,19 @@ fn face_panel(
         return;
     }
     // Make-up: the kind lit, its parts (none first) in the game's cells, the worn one lit.
-    for (id, lip) in [(MAKEUP_KINDS[0], false), (MAKEUP_KINDS[3], true)] {
-        if let Some(mut b) = f.makeup.id(id).and_then(|e| buttons.get_mut(e).ok())
-            && b.selected != (f.lipstick == lip)
+    for (n, id) in MAKEUP_KINDS[..4].iter().enumerate() {
+        if let Some(mut b) = f.makeup.id(*id).and_then(|e| buttons.get_mut(e).ok())
+            && b.selected != (f.kind == n)
         {
-            b.selected = f.lipstick == lip;
+            b.selected = f.kind == n;
         }
     }
-    let (list, worn) = if f.lipstick { (&lipsticks, sim.outfit.lipstick) } else { (&shadows, sim.outfit.eyeshadow) };
+    let (list, worn) = (&lists[f.kind], makeup_worn(&sim.outfit, MAKEUP_TYPES[f.kind]));
     f.cells = spawn_makeup_cells(&mut commands, &mut ui, (&mut images, &mut fonts), gu.as_deref_mut(), &f.makeup, list, worn);
 }
 
-/// `CASMakeup` put up, what this game hasn't put away (eye shadow and lipstick its kinds).
+/// `CASMakeup` put up, what this game hasn't put away (eye shadow, eyeliner, blush and lipstick
+/// its kinds).
 pub(crate) fn spawn_makeup_panel(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>) -> Option<Spawned> {
     let Some(makeup) = ui.spawn(commands, images, fonts, "CASMakeup") else { return None };
     for id in MAKEUP_NOT_HERE {
@@ -580,8 +594,8 @@ pub(crate) fn spawn_makeup_panel(commands: &mut Commands, ui: &mut UiAssets, ima
     if let Some(e) = makeup.id(0x1002) {
         commands.entity(e).insert(Visibility::Hidden);
     }
-    for (id, tip) in [(MAKEUP_KINDS[0], "Eye Shadow"), (MAKEUP_KINDS[3], "Lipstick")] {
-        if let Some(e) = makeup.id(id) {
+    for (id, tip) in MAKEUP_KINDS.iter().zip(MAKEUP_TIPS) {
+        if let Some(e) = makeup.id(*id) {
             commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
         }
     }

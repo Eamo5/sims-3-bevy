@@ -9,7 +9,7 @@ use bevy::mesh::skinning::SkinnedMeshInverseBindposes;
 use bevy::prelude::*;
 use bevy::ui::RelativeCursorPosition;
 use s3bake::Key;
-use s3formats::sim::{CT_BODY, CT_BOTTOM, CT_HAIR, CT_SHOES, CT_TOP, CT_BEARD, CT_EYESHADOW, CT_GLASSES, CT_LIPSTICK};
+use s3formats::sim::{CT_BEARD, CT_BLUSH, CT_BODY, CT_BOTTOM, CT_EYELINER, CT_EYESHADOW, CT_GLASSES, CT_HAIR, CT_LIPSTICK, CT_SHOES, CT_TOP};
 
 use crate::AppState;
 use crate::baked::{Baked, BakedData};
@@ -146,6 +146,8 @@ pub enum CasAction {
     /// A face slider (of `gamedata::FACE_SLIDERS`) set to a value (-1 to 1), from the game's
     /// face panels.
     SetFaceSlider(u8, f32),
+    /// Wear entry `i` of the Sim's hats (`hats_for`), from the game's Hats tab.
+    PickHat(usize),
     /// A preset face (of `simbody::face_presets`) for a part of the face (head, eyes, nose,
     /// mouth), from the game's face panels.
     FacePreset(u8, u16),
@@ -427,12 +429,23 @@ fn age_bits(a: Age) -> u32 {
 
 /// CAS parts of a type that fit the Sim (clothes for an outfit), sorted by name.
 pub(crate) fn parts_for(cas: &CasData, sim: &Sim, t: u32, kind: crate::simbody::OutfitKind) -> Vec<(Key, String)> {
+    parts_where(cas, sim, t, kind, false)
+}
+
+/// The hats for a Sim (hairstyles with a hat on: Create a Sim's Hats tab).
+pub(crate) fn hats_for(cas: &CasData, sim: &Sim) -> Vec<(Key, String)> {
+    parts_where(cas, sim, CT_HAIR, crate::simbody::OutfitKind::Everyday, true)
+}
+
+fn parts_where(cas: &CasData, sim: &Sim, t: u32, kind: crate::simbody::OutfitKind, hats: bool) -> Vec<(Key, String)> {
     let age = age_bits(sim.age);
     let gender = if sim.female { s3formats::sim::GENDER_FEMALE } else { s3formats::sim::GENDER_MALE };
     let mut v: Vec<(Key, String)> = cas
         .parts
         .iter()
         .filter(|p| p.baked && p.clothing_type == t && p.age_gender & age != 0 && p.age_gender & gender != 0 && !crate::simbody::is_uniform(&p.name))
+        // (Hats apart from the hair.)
+        .filter(|p| t != CT_HAIR || s3bake::is_hat(&p.name) == hats)
         // Clothes for the outfit (every day: not the swimwear that's everyday wear too).
         .filter(|p| {
             !matches!(t, CT_TOP | CT_BOTTOM | CT_BODY | CT_SHOES)
@@ -659,6 +672,12 @@ fn cas_actions(
                     }
                 }
             }
+            CasAction::PickHat(i) => {
+                let list = hats_for(&scene.cas, &pending.members[k]);
+                if let Some((key, _)) = list.get(i) {
+                    pending.members[k].outfit.hair = Some(*key);
+                }
+            }
             CasAction::RandomTraits => {
                 let s = &mut pending.members[k];
                 s.traits = crate::life::random_traits(&mut rng, s.age);
@@ -875,6 +894,8 @@ fn cas_actions(
                     CT_BEARD => o.beard = key,
                     CT_GLASSES => o.glasses = key,
                     CT_LIPSTICK => o.lipstick = key,
+                    CT_EYELINER => o.eyeliner = key,
+                    CT_BLUSH => o.blush = key,
                     _ => o.eyeshadow = key,
                 }
             }

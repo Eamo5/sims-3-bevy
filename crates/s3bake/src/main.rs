@@ -1104,6 +1104,34 @@ fn main() {
         eprintln!("no such object");
         return;
     }
+    if args.iter().any(|a| a == "--cas-gaps") {
+        // --cas-gaps: Create-a-Sim parts the bake wants but couldn't give meshes, by why (their
+        // VPXY missing as written, or there with the pack's byte), with examples.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let mut keys: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(s3pkg::types::CASP).copied().collect();
+        keys.sort();
+        keys.dedup();
+        let mut by: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        for k in &keys {
+            let Some(c) = pkgs.read(k).and_then(|d| s3formats::sim::CasPart::parse(&d).ok()) else { continue };
+            if !s3bake::bake::cas_bake_wanted(&c.name, c.clothing_type, c.age_gender, c.category) || !c.lod0_geoms(&pkgs).is_empty() {
+                continue;
+            }
+            let why = match c.vpxy.first() {
+                None => "no VPXY".to_string(),
+                Some(v) if pkgs.read(v).or_else(|| pkgs.read_ti(v.t, v.i)).is_some() => "VPXY without lod 0".to_string(),
+                Some(v) => {
+                    let p = s3formats::object::in_pack(&pkgs, *v, k.g >> 24);
+                    if p != *v { format!("VPXY there with the pack byte {:02X}", k.g >> 24) } else { "VPXY missing".to_string() }
+                }
+            };
+            by.entry(why).or_default().push(c.name.clone());
+        }
+        for (why, v) in &by {
+            println!("{why}: {} e.g. {:?}", v.len(), &v[..v.len().min(10)]);
+        }
+        return;
+    }
     if args.iter().any(|a| a == "--catalog-gaps") {
         // --catalog-gaps: the sold objects baked without a model, by why (their OBJK's model key
         // type, or nothing found), with examples.

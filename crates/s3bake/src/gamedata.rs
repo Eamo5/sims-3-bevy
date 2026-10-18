@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 139;
+pub const GAMEDATA_VERSION: u32 = 140;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -2452,7 +2452,7 @@ fn bake_face_presets(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, String
 }
 
 /// Create a Sim's Face tab: beards, glasses, lipsticks and eye shadows.
-pub const FACE_TYPES: [u32; 4] = [s3formats::sim::CT_BEARD, s3formats::sim::CT_GLASSES, s3formats::sim::CT_LIPSTICK, s3formats::sim::CT_EYESHADOW];
+pub const FACE_TYPES: [u32; 6] = [s3formats::sim::CT_BEARD, s3formats::sim::CT_GLASSES, s3formats::sim::CT_LIPSTICK, s3formats::sim::CT_EYESHADOW, s3formats::sim::CT_EYELINER, s3formats::sim::CT_BLUSH];
 /// Create a Sim's jewellery (the Accessories rows), the base game's and the packs'.
 pub const ACCESSORY_TYPES: [u32; 7] = [
     s3formats::sim::CT_NECKLACE,
@@ -2582,7 +2582,7 @@ fn bake_outfits(root: &BakeRoot, pkgs: &PackageSet, careers: &[CareerInfo]) -> R
         // (Make-up is layers drawn onto the face, with no mesh of its own, and so are the beards
         // with no mesh (goatees, chinstraps...: the game tints them with the hair colour); glasses
         // and the other beards are meshes.)
-        let layer_only = matches!(c.clothing_type, s3formats::sim::CT_LIPSTICK | s3formats::sim::CT_EYESHADOW)
+        let layer_only = matches!(c.clothing_type, s3formats::sim::CT_LIPSTICK | s3formats::sim::CT_EYESHADOW | s3formats::sim::CT_EYELINER | s3formats::sim::CT_BLUSH)
             || c.clothing_type == s3formats::sim::CT_BEARD && m.meshes.is_empty();
         let info = CasPartInfo { key: key_of(k), name: c.name.clone(), clothing_type: c.clothing_type, age_gender: c.age_gender, category: c.category, baked: !m.meshes.is_empty() || layer_only && layer.is_some(), layer };
         Some((info, m))

@@ -546,6 +546,9 @@ pub fn cas_bake_wanted(name: &str, ct: u32, age_gender: u32, category: u32) -> b
     match ct {
         CT_FACE => name.ends_with("Face"),
         CT_SCALP => name.ends_with("Scalp"),
+        // (Hats too: hairstyles with a hat on, for Create a Sim's Hats tab, though nobody's given
+        // one at random.)
+        CT_HAIR if crate::types::is_hat(name) => category & (CAT_EVERYDAY | s3formats::sim::CAT_OUTERWEAR | s3formats::sim::CAT_FORMAL) != 0,
         CT_HAIR | CT_BODY | CT_TOP | CT_BOTTOM | CT_SHOES => {
             category & (CAT_EVERYDAY | s3formats::sim::CAT_OUTERWEAR) != 0
                 && category & CAT_VALID_RANDOM != 0
@@ -753,6 +756,9 @@ pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progr
         par_map(&casp_keys, |k| Some((*k, CasPart::parse(&pkgs.read(k)?).ok()?))).into_iter().flatten().collect();
     let mut infos = Vec::with_capacity(parsed.len());
     let mut cas_tex: Vec<(Key, bool)> = Vec::new();
+    // Hats' own layers (the hat alone, rendered from the part's design marked as a hat): the
+    // hair under it takes the Sim's colour.
+    let mut hats: Vec<(Key, Key)> = Vec::new();
     let mut cpack = PackWriter::create(&gdir.join("cas.pack")).map_err(|e| e.to_string())?;
     let wanted: Vec<&(ResourceKey, CasPart)> =
         parsed.iter().filter(|(_, c)| cas_bake_wanted(&c.name, c.clothing_type, c.age_gender, c.category)).collect();
@@ -764,7 +770,7 @@ pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progr
         // Eyebrows are texture-only: a layer drawn onto the face.
         let brows = c.clothing_type == CT_EYEBROW && human(c.age_gender) && c.category & CAT_HIDDEN == 0 && !c.diffuse.is_empty();
         let baked = brows || meshes.get(&key).is_some_and(|m| !m.meshes.is_empty());
-        let layer = if baked { c.diffuse.first().map(key_of) } else { None };
+        let mut layer = if baked { c.diffuse.first().map(key_of) } else { None };
         if brows && let Some(l) = layer {
             cas_tex.push((l, true));
         }
@@ -778,6 +784,31 @@ pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progr
             if let Some(l) = layer {
                 cas_tex.push((l, true));
             }
+            if c.clothing_type == CT_HAIR
+                && crate::types::is_hat(&c.name)
+                && let Some(xml) = c.presets.iter().find(|x| x.contains(r#"key="IsHat" value="true""#)).or(c.presets.first())
+            {
+                let hk: Key = (crate::types::T_HAT_LAYER, 0, key.2);
+                if !root.tex_path(hk).exists()
+                    && let Some(img) = s3formats::complate::render_preset(pkgs, xml, 512, true)
+                {
+                    let _ = std::fs::write(root.tex_path(hk), crate::ddsw::encode_dds(&img));
+                }
+                if root.tex_path(hk).exists() {
+                    hats.push((key, hk));
+                }
+                // (And the hair whole under it, as the uniforms' hats are: the part's own layer
+                // is the compositor's second target, the hat alone.)
+                let whole: Key = (crate::types::T_HAT_LAYER, 1, key.2);
+                if !root.tex_path(whole).exists()
+                    && let Some(img) = s3formats::complate::render_preset(pkgs, xml, 512, false)
+                {
+                    let _ = std::fs::write(root.tex_path(whole), crate::ddsw::encode_dds(&img));
+                }
+                if root.tex_path(whole).exists() {
+                    layer = Some(whole);
+                }
+            }
         }
         infos.push(CasPartInfo {
             key,
@@ -790,6 +821,7 @@ pub fn bake_global(root: &BakeRoot, pkgs: &PackageSet, install_root: &str, progr
         });
     }
     cpack.finish().map_err(|e| e.to_string())?;
+    write_value(&gdir.join("hats.bin"), &hats).map_err(|e| e.to_string())?;
 
     // Skin tone detail textures and ramp.
     let mut tone = ToneBaked::default();

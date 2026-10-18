@@ -78,7 +78,8 @@ pub struct MirrorLook {
     /// The sheet's back panel, and where it sits.
     panel: Option<(Entity, f32)>,
     view: Option<View>,
-    lipstick: bool,
+    /// The make-up's kind shown (of `casface::MAKEUP_TYPES`).
+    kind: usize,
     styles: Option<Entity>,
     colours: Option<Entity>,
     cells: Option<Entity>,
@@ -87,7 +88,7 @@ pub struct MirrorLook {
     shown: Option<Shown>,
 }
 
-type Shown = (Entity, Option<View>, bool, Option<s3bake::Key>, [u8; 3], usize, bool);
+type Shown = (Entity, Option<View>, usize, Option<s3bake::Key>, [u8; 3], usize, bool);
 
 impl MirrorLook {
     fn despawn(&self, commands: &mut Commands) {
@@ -197,7 +198,7 @@ fn open_mirror(
         commands.entity(e).insert(crate::icons::Tooltip("Done".into()));
     }
     let panel = sheet.id(PANEL).map(|e| (e, panel_left));
-    commands.insert_resource(MirrorLook { sheet, physical, hair, details, makeup, panel, view: None, lipstick: false, styles: None, colours: None, cells: None, bar, scroll: 0, shown: None });
+    commands.insert_resource(MirrorLook { sheet, physical, hair, details, makeup, panel, view: None, kind: 0, styles: None, colours: None, cells: None, bar, scroll: 0, shown: None });
 }
 
 /// A button on the mirror's sheet.
@@ -249,9 +250,9 @@ fn mirror_controls(
             l.shown = None;
         }
     }
-    for (id, lip) in [(crate::casface::MAKEUP_KINDS[0], false), (crate::casface::MAKEUP_KINDS[3], true)] {
-        if crate::livehud::pressed(&clicks, l.makeup.id(id)) && l.lipstick != lip {
-            l.lipstick = lip;
+    for (n, id) in crate::casface::MAKEUP_KINDS[..4].iter().enumerate() {
+        if crate::livehud::pressed(&clicks, l.makeup.id(*id)) && l.kind != n {
+            l.kind = n;
             l.shown = None;
         }
     }
@@ -261,8 +262,7 @@ fn mirror_controls(
     let t = match view {
         View::Hair => CT_HAIR,
         View::Beard => CT_BEARD,
-        View::Makeup if l.lipstick => CT_LIPSTICK,
-        View::Makeup => CT_EYESHADOW,
+        View::Makeup => crate::casface::MAKEUP_TYPES[l.kind],
     };
     let list = crate::cas::parts_for(&cas, &sim, t, OutfitKind::Everyday);
     let mut changed = false;
@@ -275,6 +275,8 @@ fn mirror_controls(
                 CT_HAIR => o.hair = key,
                 CT_BEARD => o.beard = key,
                 CT_LIPSTICK => o.lipstick = key,
+                s3formats::sim::CT_EYELINER => o.eyeliner = key,
+                s3formats::sim::CT_BLUSH => o.blush = key,
                 _ => o.eyeshadow = key,
             }
             changed = true;
@@ -350,8 +352,10 @@ fn mirror_panels(
         (l.physical.id(crate::cashair::PHYSICAL_BEARD), l.view == Some(View::Beard)),
         (l.hair.id(crate::cashair::HAIR_TAB), true),
         (l.details.id(MIRROR_MAKEUP), true),
-        (l.makeup.id(crate::casface::MAKEUP_KINDS[0]), !l.lipstick),
-        (l.makeup.id(crate::casface::MAKEUP_KINDS[3]), l.lipstick),
+        (l.makeup.id(crate::casface::MAKEUP_KINDS[0]), l.kind == 0),
+        (l.makeup.id(crate::casface::MAKEUP_KINDS[1]), l.kind == 1),
+        (l.makeup.id(crate::casface::MAKEUP_KINDS[2]), l.kind == 2),
+        (l.makeup.id(crate::casface::MAKEUP_KINDS[3]), l.kind == 3),
     ];
     for (e, on) in lit {
         if let Some(mut b) = e.and_then(|e| buttons.get_mut(e).ok())
@@ -364,15 +368,13 @@ fn mirror_panels(
     let t = match view {
         View::Hair => CT_HAIR,
         View::Beard => CT_BEARD,
-        View::Makeup if l.lipstick => CT_LIPSTICK,
-        View::Makeup => CT_EYESHADOW,
+        View::Makeup => crate::casface::MAKEUP_TYPES[l.kind],
     };
     let list = crate::cas::parts_for(&cas, sim, t, OutfitKind::Everyday);
     let worn = match t {
         CT_HAIR => worn_hair(&cas, sim),
         CT_BEARD => sim.outfit.beard,
-        CT_LIPSTICK => sim.outfit.lipstick,
-        _ => sim.outfit.eyeshadow,
+        t => crate::casface::makeup_worn(&sim.outfit, t),
     };
     let rows = (list.len() + (view == View::Beard) as usize).div_ceil(3);
     let most = rows.saturating_sub(crate::cashair::ROWS);
@@ -393,7 +395,7 @@ fn mirror_panels(
         }
     }
     let hair_rgb = sim.hair.to_srgba().to_u8_array_no_alpha();
-    let want = (p.sim, l.view, l.lipstick, worn, hair_rgb, l.scroll, gu.is_some());
+    let want = (p.sim, l.view, l.kind, worn, hair_rgb, l.scroll, gu.is_some());
     if l.shown.as_ref() == Some(&want) {
         return;
     }

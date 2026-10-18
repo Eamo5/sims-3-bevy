@@ -80,6 +80,11 @@ pub struct SavedSim {
     /// Their jewellery, as chosen (none: as their look has it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accessories: Option<Vec<(u32, u32, u64)>>,
+    /// Their eyeliner and blush, as chosen (none: as their look has it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eyeliner: Option<(u32, u32, u64)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blush: Option<(u32, u32, u64)>,
     #[serde(default)]
     pub wearing: Option<crate::simbody::OutfitKind>,
     #[serde(default)]
@@ -624,6 +629,8 @@ fn saved_look(sim: &Sim) -> SavedSim {
         lifetime_happiness: 0,
         outfit: saved_outfit(&sim.outfit),
         accessories: sim.outfit.accessories.clone(),
+        eyeliner: sim.outfit.eyeliner,
+        blush: sim.outfit.blush,
         wearing: None,
         outfit_chosen: false,
         rewards: Vec::new(),
@@ -702,6 +709,8 @@ impl SaveGame {
                 glasses: o(6),
                 lipstick: o(7),
                 eyeshadow: o(8),
+                eyeliner: s.eyeliner,
+                blush: s.blush,
                 accessories: s.accessories.clone(),
                 other: [other(0), other(1), other(2), other(3), other(4)],
                 designs: s.designs.clone(),
@@ -1048,6 +1057,8 @@ fn save_game(
             next_wish_offer: wishes.map(|w| w.next_offer),
             outfit: saved_outfit(&sim.outfit),
         accessories: sim.outfit.accessories.clone(),
+        eyeliner: sim.outfit.eyeliner,
+        blush: sim.outfit.blush,
             wearing: wearing.map(|w| w.0),
             outfit_chosen,
             rewards: wishes.map(|w| w.rewards.clone()).unwrap_or_default(),

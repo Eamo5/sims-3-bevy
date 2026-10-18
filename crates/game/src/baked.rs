@@ -31,6 +31,8 @@ pub struct BakedData {
     pub colourways: Vec<s3bake::gamedata::CasColourways>,
     /// The face sliders' bone adjustments by age-and-sex prefix.
     pub face_bones: Vec<s3bake::gamedata::FaceBones>,
+    /// The hats' own layers, by hairstyle.
+    pub hats: Vec<(Key, Key)>,
     /// The eye colour overlay (the iris) and Create a Sim's eye colours.
     pub eye_colors: s3bake::gamedata::EyeColors,
     /// The catalogue objects' designs, by OBJD key.
@@ -65,6 +67,7 @@ impl BakedData {
         let outfits = s3bake::read_value(&g.join("outfits.bin")).unwrap_or_default();
         let colourways = s3bake::read_value(&g.join("cas_presets.bin")).unwrap_or_default();
         let face_bones = s3bake::read_value(&g.join("face_bones.bin")).unwrap_or_default();
+        let hats = s3bake::read_value(&g.join("hats.bin")).unwrap_or_default();
         let eye_colors = s3bake::read_value(&g.join("eye_colors.bin")).unwrap_or_default();
         let mut designs: HashMap<Key, s3bake::gamedata::ObjectDesigns> =
             s3bake::read_value::<Vec<s3bake::gamedata::ObjectDesigns>>(&g.join("object_designs.bin")).unwrap_or_default().into_iter().map(|d| (d.objd, d)).collect();
@@ -103,6 +106,7 @@ impl BakedData {
             clips,
             clip_names,
             face_bones,
+            hats,
             eye_colors,
             designs,
             paintings,

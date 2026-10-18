@@ -26,6 +26,9 @@ impl Plugin for CasHairPlugin {
     }
 }
 
+/// For the UI flow (`autotest`): the Hats tab opened.
+pub static TEST_HATS: AtomicBool = AtomicBool::new(false);
+
 /// Whether the game's hair panel is up (see `caslook::game_panel`).
 pub static HAIR_UP: AtomicBool = AtomicBool::new(false);
 
@@ -41,9 +44,9 @@ pub(crate) const HAIR_TAB: u32 = 0x05db_b905;
 const HATS_TAB: u32 = 0x05db_b906;
 pub(crate) const STYLES_GRID: u32 = 0x05db_cf21;
 pub(crate) const COLOURS_GRID: u32 = 0x05db_cf22;
-/// What this game hasn't: the category lock, the content filter, hats' and shared hair's
-/// buttons, and the colour picker.
-const NOT_HERE: [u32; 7] = [0x0001_0005, 0x05db_b90f, 0x05db_cf30, 0x05db_b90e, 0x05db_b903, 0x05db_b950, HATS_TAB];
+/// What this game hasn't: the category lock, the content filter, shared hair's buttons, and the
+/// colour picker.
+const NOT_HERE: [u32; 6] = [0x0001_0005, 0x05db_b90f, 0x05db_cf30, 0x05db_b90e, 0x05db_b903, 0x05db_b950];
 // The cells'.
 const CELL_THUMBNAIL: u32 = 0x20;
 const CELL_COLOUR: u32 = 0x30;
@@ -57,13 +60,14 @@ pub(crate) const ROWS: usize = 3;
 pub struct CasHair {
     physical: Spawned,
     hair: Spawned,
-    /// Facial hair in the panel rather than hair.
+    /// Facial hair in the panel rather than hair; hats rather than hair.
     beard: bool,
+    hats: bool,
     styles: Option<Entity>,
     colours: Option<Entity>,
     bar: Option<Entity>,
     scroll: usize,
-    shown: Option<(usize, bool, Age, bool, Option<s3bake::Key>, [u8; 3], usize, bool)>,
+    shown: Option<(usize, bool, Age, bool, Option<s3bake::Key>, [u8; 3], usize, bool, bool)>,
 }
 
 /// A style's cell: its entry in the list (`usize::MAX`: none).
@@ -88,7 +92,7 @@ fn spawn_hair(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut images,
         commands.entity(r).insert(GlobalZIndex(6));
     }
     HAIR_UP.store(true, Ordering::Relaxed);
-    commands.insert_resource(CasHair { physical, hair: s, beard: false, styles: None, colours: None, bar, scroll: 0, shown: None });
+    commands.insert_resource(CasHair { physical, hair: s, beard: false, hats: false, styles: None, colours: None, bar, scroll: 0, shown: None });
 }
 
 /// Shown on the Hair tab: the styles for the Sim (the one worn lit), scrolled by the wheel or
@@ -128,9 +132,24 @@ fn hair_panel(
     for (id, beard) in [(PHYSICAL_HAIR, false), (PHYSICAL_BEARD, true)] {
         if crate::livehud::pressed(&clicks, h.physical.id(id)) && h.beard != beard {
             h.beard = beard;
+            h.hats = false;
             h.scroll = 0;
         }
     }
+    // The hair's tabs: hair, or hats (not for facial hair).
+    if TEST_HATS.swap(false, Ordering::Relaxed) {
+        (h.hats, h.beard, h.scroll) = (true, false, 0);
+    }
+    for (id, hats) in [(HAIR_TAB, false), (HATS_TAB, true)] {
+        if crate::livehud::pressed(&clicks, h.hair.id(id)) && h.hats != hats {
+            h.hats = hats;
+            h.scroll = 0;
+        }
+    }
+    if h.beard {
+        h.hats = false;
+    }
+    crate::livehud::set_visible(&mut vis, h.hair.id(HATS_TAB), !h.beard);
     for (id, on) in [(PHYSICAL_HAIR, !h.beard), (PHYSICAL_BEARD, h.beard)] {
         if let Some(mut b) = h.physical.id(id).and_then(|e| buttons.get_mut(e).ok())
             && b.selected != on
@@ -138,15 +157,23 @@ fn hair_panel(
             b.selected = on;
         }
     }
-    if let Some(mut b) = h.hair.id(HAIR_TAB).and_then(|e| buttons.get_mut(e).ok())
-        && !b.selected
-    {
-        b.selected = true;
+    for (id, on) in [(HAIR_TAB, !h.hats), (HATS_TAB, h.hats)] {
+        if let Some(mut b) = h.hair.id(id).and_then(|e| buttons.get_mut(e).ok())
+            && b.selected != on
+        {
+            b.selected = on;
+        }
     }
     // Clicks: a style worn, a colour dyed.
     for (i, c) in &styles {
         if *i == Interaction::Pressed {
-            actions.write(crate::cas::CasActionRequest(if h.beard { CasAction::FacePart(CT_BEARD, c.0) } else { CasAction::PickPart(CT_HAIR, c.0) }));
+            actions.write(crate::cas::CasActionRequest(if h.beard {
+                CasAction::FacePart(CT_BEARD, c.0)
+            } else if h.hats {
+                CasAction::PickHat(c.0)
+            } else {
+                CasAction::PickPart(CT_HAIR, c.0)
+            }));
         }
     }
     for (i, c) in &colours {
@@ -155,7 +182,7 @@ fn hair_panel(
         }
     }
     let t = if h.beard { CT_BEARD } else { CT_HAIR };
-    let list = crate::cas::parts_for(&scene.cas, sim, t, crate::simbody::OutfitKind::Everyday);
+    let list = if h.hats { crate::cas::hats_for(&scene.cas, sim) } else { crate::cas::parts_for(&scene.cas, sim, t, crate::simbody::OutfitKind::Everyday) };
     // (Facial hair has none at its head.)
     let entries = list.len() + h.beard as usize;
     let cols = 3usize;
@@ -182,7 +209,7 @@ fn hair_panel(
     }
     let worn = if h.beard { sim.outfit.beard } else { crate::cas::worn(&scene, sim, CT_HAIR) };
     // (Opened, or for another Sim: scrolled to the style worn, as the grid shows its choice.)
-    if h.shown.as_ref().is_none_or(|s| (s.0, s.3) != (k, h.beard)) {
+    if h.shown.as_ref().is_none_or(|s| (s.0, s.3, s.8) != (k, h.beard, h.hats)) {
         let at = match worn {
             Some(w) if w != crate::sim::OutfitChoice::NONE => list.iter().position(|(key, _)| *key == w).map(|i| i + h.beard as usize),
             _ => None,
@@ -199,14 +226,20 @@ fn hair_panel(
     h.scroll = h.scroll.min(most);
     let hair_rgb = sim.hair.to_srgba().to_u8_array_no_alpha();
     // (Again when the game's pictures of the styles become available.)
-    let want = (k, sim.female, sim.age, h.beard, worn, hair_rgb, h.scroll, gu.is_some());
+    let want = (k, sim.female, sim.age, h.beard, worn, hair_rgb, h.scroll, gu.is_some(), h.hats);
     if h.shown.as_ref() == Some(&want) {
         return;
     }
-    let restyle = h.shown.as_ref().is_none_or(|s| (s.0, s.1, s.2, s.3, s.4, s.6, s.7) != (want.0, want.1, want.2, want.3, want.4, want.6, want.7));
+    let restyle = h.shown.as_ref().is_none_or(|s| (s.0, s.1, s.2, s.3, s.4, s.6, s.7, s.8) != (want.0, want.1, want.2, want.3, want.4, want.6, want.7, want.8));
     h.shown = Some(want);
-    // The title: Hair, or Facial Hair.
-    let title = if h.beard { ui.localize("Ui/Caption/CAS/Physical:Beard").unwrap_or_else(|| "Facial Hair".into()) } else { ui.localize("Ui/Caption/CAS/Hair:Title").unwrap_or_else(|| "Hair".into()) };
+    // The title: Hair, Hats, or Facial Hair.
+    let title = if h.beard {
+        ui.localize("Ui/Caption/CAS/Physical:Beard").unwrap_or_else(|| "Facial Hair".into())
+    } else if h.hats {
+        ui.localize("Ui/Tooltip/CAS/Hair:Hats").unwrap_or_else(|| "Hats".into())
+    } else {
+        ui.localize("Ui/Caption/CAS/Hair:Title").unwrap_or_else(|| "Hair".into())
+    };
     crate::livehud::set_text(&mut texts, h.hair.text(TITLE), &title);
     // The styles in view, each in the game's cell, the one worn lit.
     if restyle {
@@ -231,8 +264,10 @@ pub(crate) fn spawn_hair_panels(commands: &mut Commands, ui: &mut UiAssets, imag
             commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
         }
     }
-    if let Some(e) = s.id(HAIR_TAB) {
-        commands.entity(e).insert(crate::icons::Tooltip("Hair".into()));
+    for (id, tip) in [(HAIR_TAB, "Hair"), (HATS_TAB, "Hats")] {
+        if let Some(e) = s.id(id) {
+            commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
+        }
     }
     // The styles' scroll bar: the item grid's own, down its right.
     let mut bar = None;

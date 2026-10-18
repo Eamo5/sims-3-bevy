@@ -39,6 +39,15 @@ pub struct SimSkinExt {
     #[texture(107)]
     #[sampler(108)]
     pub layer3: Handle<Image>,
+    /// Four more (a made-up face's), sampled with the first's sampler.
+    #[texture(109)]
+    pub layer4: Handle<Image>,
+    #[texture(110)]
+    pub layer5: Handle<Image>,
+    #[texture(111)]
+    pub layer6: Handle<Image>,
+    #[texture(112)]
+    pub layer7: Handle<Image>,
 }
 
 impl MaterialExtension for SimSkinExt {
@@ -89,6 +98,8 @@ pub struct CasData {
     pub outfits: Arc<HashMap<String, s3bake::OutfitInfo>>,
     /// The face sliders' bone adjustments by age-and-sex prefix ("am", "tf", "cu"...).
     pub face_bones: Arc<HashMap<String, Vec<(u8, Vec<s3bake::gamedata::FaceBone>)>>>,
+    /// The hats' own layers, by hairstyle (see `s3bake::T_HAT_LAYER`).
+    pub hats: Arc<HashMap<Key, Key>>,
     /// The iris, drawn over the eyes in a Sim's eye colour.
     pub eye_overlay: Option<Key>,
     /// The clothes' colourways: each part's presets' swatch colours (none: one that's not
@@ -107,6 +118,7 @@ impl CasData {
             tone_textures: Arc::new(b.cas.tone.textures.clone()),
             outfits: Arc::new(b.outfits.iter().map(|o| (o.name.clone(), o.clone())).collect()),
             face_bones: Arc::new(b.face_bones.iter().map(|f| (f.prefix.clone(), f.sliders.clone())).collect()),
+            hats: Arc::new(b.hats.iter().copied().collect()),
             eye_overlay: b.eye_colors.overlay.filter(|k| b.texture_bytes(k).is_some()),
             colourways: Arc::new(b.colourways.iter().map(|w| (w.part, w.clone())).collect()),
         }
@@ -311,8 +323,10 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
             && (!clothes || e.category & cat != 0)
             && !(clothes && kind == OutfitKind::Everyday && e.category & s3formats::sim::CAT_SWIM != 0)
     };
+    // (Hats only as chosen: nobody's given one at random.)
+    let not_hat = |e: &&CasPartInfo| e.clothing_type != CT_HAIR || !s3bake::is_hat(&e.name);
     let of_type = |t: u32| {
-        let mut all: Vec<&CasPartInfo> = cas.parts.iter().filter(|e| e.clothing_type == t).filter(fits).filter(worn).collect();
+        let mut all: Vec<&CasPartInfo> = cas.parts.iter().filter(|e| e.clothing_type == t).filter(fits).filter(worn).filter(not_hat).collect();
         // (A coat over everyday trousers, when there are no snow pants for them.)
         if kind == OutfitKind::Outerwear && all.is_empty() && matches!(t, CT_TOP | CT_BOTTOM | CT_SHOES) {
             all = cas.parts.iter().filter(|e| e.clothing_type == t).filter(fits).filter(|e| !is_uniform(&e.name) && e.category & s3formats::sim::CAT_EVERYDAY != 0).collect();
@@ -351,10 +365,12 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
     // Hair and brows are theirs whatever they wear: drawn from everything that fits, as for
     // their everyday look (swimwear and pyjamas narrow the clothes to the base game's, which
     // gave them other hair).
-    let everyday = |t: u32| cas.parts.iter().filter(|e| e.clothing_type == t).filter(fits).filter(worn).collect::<Vec<_>>();
+    let everyday = |t: u32| cas.parts.iter().filter(|e| e.clothing_type == t).filter(fits).filter(worn).filter(not_hat).collect::<Vec<_>>();
     let mut own = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look);
     let random_hair = everyday(CT_HAIR).choose(&mut own).map(|e| (*e).clone());
-    let hair = chosen(sim.outfit.hair, CT_HAIR).or(random_hair);
+    // (A hat comes off for bed, a swim and a workout: their own hair then.)
+    let hatless = matches!(kind, OutfitKind::Sleepwear | OutfitKind::Swimwear | OutfitKind::Athletic);
+    let hair = chosen(sim.outfit.hair, CT_HAIR).filter(|h| !(hatless && s3bake::is_hat(&h.name))).or(random_hair);
     // (FORCE_HAIR=<part name>: that hair on whoever it fits, for testing hairstyles.)
     let hair = std::env::var("FORCE_HAIR")
         .ok()
@@ -386,6 +402,8 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
     });
     let lipstick = face_extra(sim.outfit.lipstick, CT_LIPSTICK, if sim.female && (grown || sim.age == Age::Teen) { 0.3 } else { 0.0 });
     let eyeshadow = face_extra(sim.outfit.eyeshadow, CT_EYESHADOW, if sim.female && (grown || sim.age == Age::Teen) { 0.2 } else { 0.0 });
+    let eyeliner = face_extra(sim.outfit.eyeliner, CT_EYELINER, if sim.female && (grown || sim.age == Age::Teen) { 0.2 } else { 0.0 });
+    let blush = face_extra(sim.outfit.blush, CT_BLUSH, if sim.female && grown { 0.15 } else { 0.0 });
     let mut body = Vec::new();
     let (tops, bottoms, fulls) = (of_type(CT_TOP), of_type(CT_BOTTOM), of_type(CT_BODY));
     // (Nothing of the kind for them: their everyday clothes.)
@@ -436,9 +454,11 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
     }
     // (Glasses come off for a swim.)
     let glasses = glasses.filter(|_| kind != OutfitKind::Swimwear);
-    let face_layers = [lipstick, eyeshadow].into_iter().flatten().filter_map(|p| p.layer).collect();
+    let face_layers = [blush, lipstick, eyeshadow, eyeliner].into_iter().flatten().filter_map(|p| p.layer).collect();
     let accessories = accessories_of(cas, sim);
-    Outfit { face, scalp, hair, brows, body, glasses, beard, face_layers, accessories, ..default() }
+    // (A hat: its own layer over the hair, which takes their hair colour.)
+    let hat = hair.as_ref().and_then(|h| cas.hats.get(&h.key)).copied();
+    Outfit { face, scalp, hair, brows, body, glasses, beard, face_layers, accessories, hat, ..default() }
 }
 
 /// Jewellery's kinds, as Create a Sim's Accessories rows list them after the glasses.
@@ -513,6 +533,10 @@ pub fn uniform(cas: &CasData, sim: &Sim, name: &str, rng: &mut impl Rng) -> Opti
     }
     Some(o)
 }
+
+/// The most layers a skin's drawn with (clothes over the body; make-up, brows and a painted
+/// beard over the face).
+const MAX_LAYERS: usize = 8;
 
 /// How a sim mesh is shaded.
 pub enum SimMat {
@@ -724,7 +748,7 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
 
     // Body: shared skin texture + one clothing layer per worn part.
     let body_base = cas.skin_texture(age, gender, 8);
-    let layers: Vec<Key> = outfit.body.iter().filter_map(|p| p.layer).take(4).collect();
+    let layers: Vec<Key> = outfit.body.iter().filter_map(|p| p.layer).take(MAX_LAYERS).collect();
     tex_keys.extend(body_base);
     tex_keys.extend(&layers);
     for p in &outfit.body {
@@ -741,7 +765,7 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
             tinted
         });
         let face_layers: Vec<Key> =
-            face.layer.into_iter().chain(outfit.brows.as_ref().and_then(|b| b.layer)).chain(painted_beard).chain(outfit.face_layers.iter().copied()).take(4).collect();
+            face.layer.into_iter().chain(outfit.brows.as_ref().and_then(|b| b.layer)).chain(painted_beard).chain(outfit.face_layers.iter().copied()).take(MAX_LAYERS).collect();
         tex_keys.extend(face_base);
         tex_keys.extend(&face_layers);
         for m in baked.cas_meshes(&face.key).map(|m| m.meshes).unwrap_or_default() {
@@ -1101,11 +1125,15 @@ pub fn spawn_sim_model(commands: &mut Commands, parent: Entity, model: SimModelC
                         ..default()
                     },
                     extension: SimSkinExt {
-                        params: tint.extend(layers.len().min(4) as f32),
+                        params: tint.extend(layers.len().min(MAX_LAYERS) as f32),
                         layer0: layer(0),
                         layer1: layer(1),
                         layer2: layer(2),
                         layer3: layer(3),
+                        layer4: layer(4),
+                        layer5: layer(5),
+                        layer6: layer(6),
+                        layer7: layer(7),
                     },
                 });
                 commands.spawn((mesh, MeshMaterial3d(m), skinned, Transform::default())).id()
@@ -1129,6 +1157,10 @@ pub fn spawn_sim_model(commands: &mut Commands, parent: Entity, model: SimModelC
                         layer1: ctx.textures.blank.clone(),
                         layer2: ctx.textures.blank.clone(),
                         layer3: ctx.textures.blank.clone(),
+                        layer4: ctx.textures.blank.clone(),
+                        layer5: ctx.textures.blank.clone(),
+                        layer6: ctx.textures.blank.clone(),
+                        layer7: ctx.textures.blank.clone(),
                     },
                 };
                 // (Solid core alpha-tested, soft edges blended over it, as for hair.)

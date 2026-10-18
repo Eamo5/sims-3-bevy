@@ -7,8 +7,21 @@ pub use s3formats::world::{Heightmap, LotInfo};
 
 /// Bump whenever any baked format changes; stale caches are rebuilt.
 pub const BAKE_VERSION: u32 = 8;
-/// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes).
-pub const CAS_VERSION: u32 = 11;
+/// Version of the Create-a-Sim meshes in `cas.pack` (bumped when `SkinMesh` changes; 14, the
+/// hats).
+pub const CAS_VERSION: u32 = 14;
+
+/// Whether a hairstyle is one of the game's hats (hair with a hat on it: "afHairCowboyHatMed"),
+/// as Create a Sim's Hats tab lists them apart from the hair.
+pub fn is_hat(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.contains("hat") && !n.contains("hatless")
+}
+
+/// Texture-store type of a hat's own layer (the hat alone, over the hair it's worn with, which
+/// takes the Sim's hair colour): `(T_HAT_LAYER, 0, the part's instance)`, listed in `hats.bin`;
+/// with group 1, the hair and hat whole (the part's layer).
+pub const T_HAT_LAYER: u32 = 0x0CA5_4A70;
 /// The objects' models and textures (the global bake's, beside its packs' `BAKE_VERSION`): 1,
 /// cut-outs drawn from bled copies of their textures; 2, the wardrobe in a fixed order; 3, the
 /// packs' objects whose patches name their models without the pack's byte.

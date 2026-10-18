@@ -250,6 +250,8 @@ pub struct OutfitChoice {
     pub glasses: Option<s3bake::Key>,
     pub lipstick: Option<s3bake::Key>,
     pub eyeshadow: Option<s3bake::Key>,
+    pub eyeliner: Option<s3bake::Key>,
+    pub blush: Option<s3bake::Key>,
     /// Jewellery (`simbody::ACCESSORY_TYPES`) as chosen (none: as their look has it).
     pub accessories: Option<Vec<s3bake::Key>>,
     /// The clothes chosen for their other outfits (in `OTHER_OUTFITS`' order).
