@@ -1571,6 +1571,22 @@ fn world_click(
                 if d.special == Special::Overclock && upg_q.get(t).is_ok_and(|u| u.has(crate::upgrades::Upgrade::Improved) || u.has(crate::upgrades::Upgrade::Unbreakable)) {
                     continue;
                 }
+                // (A policeman's reports, a journalist's stories, written up: `careermetrics`.)
+                if d.special == Special::WriteReport {
+                    if let Some(job) = jobs_q.get(actor).ok().flatten() {
+                        for (label, names) in crate::careermetrics::writing_options(job) {
+                            match names {
+                                None => options.push((label, ActionKind::Object { target: t, def: i })),
+                                Some(names) => {
+                                    let list = names.into_iter().map(|n| (n, ActionKind::Object { target: t, def: i })).collect();
+                                    options.push((format!("{label} ›"), submenu_kind(pie.submenus.len())));
+                                    pie.submenus.push((label, list));
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
                 // (A Technophobe's sabotage: of what still works.)
                 if d.special == Special::Sabotage && !crate::sabotage::offers(actor_sim, obj.kind, false, upg_q.get(t).is_ok_and(|u| u.has(crate::upgrades::Upgrade::Unbreakable))) {
                     continue;
@@ -2657,6 +2673,19 @@ fn pie_buttons(
             label = if date { format!("Ask {who} Out on Date") } else { format!("Invite {who} Out") };
         }
         // (Someone known chatted with online: "Chat...".)
+        // (A report or story begun on someone, gone on with, or scrapped: `careermetrics`.)
+        if let ActionKind::Object { .. } = kind
+            && let Some(mut j) = jobs.get_mut(a).ok()
+        {
+            match crate::careermetrics::pick_writing(&mut j.tally, &title, &label) {
+                crate::careermetrics::Pick::Begun(name) | crate::careermetrics::Pick::Continued(name) => label = name.to_string(),
+                crate::careermetrics::Pick::Scrapped => {
+                    notes.push(format!("{} scrapped it.", people.get(a).map(|p| p.1.first.clone()).unwrap_or_default()));
+                    return;
+                }
+                crate::careermetrics::Pick::Other => {}
+            }
+        }
         let chat_with = (title == CHAT_WITH).then(|| people.iter().find(|(_, s, _)| s.full_name() == label).map(|(e, ..)| e)).flatten();
         if chat_with.is_some() {
             label = format!("Chat with {label}");

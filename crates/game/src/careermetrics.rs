@@ -30,6 +30,16 @@
 //!   the doctor's inventory ("Darcy's Medical Journal: Organ Donation: Volume 3", the game's
 //!   `MedicalJournal` for their level), the last one gone; "Read" there takes an hour and a half
 //!   (ninety pages, a page a minute; a Bookworm two), and counts once an edition.
+//! - Reports (Law Enforcement, levels 4 and up: `LawEnforcement.MetricReportsWritten`) and
+//!   stories (Journalism, 3 to 6 and 8 to 10: `MetricStoriesAndReviews`): the last seven days'
+//!   and today's. "Question" (the policeman's) or "Interview" (the journalist's), the game's
+//!   socials for anyone not of the household not already written up, taken well, makes them a
+//!   subject and teaches their traits. On the computer, "Report On... ›" a subject (the game's
+//!   `WriteReport`: an hour and a half, `kCompletionRateReport`) or "Write Positive/Negative Story
+//!   On... ›" (two hours); "Continue..." and "Scrap..." one begun. A report on a criminal or a
+//!   Kleptomaniac is +15 performance; a negative story +20, the subject liking the writer 30 less,
+//!   a positive one 10 more; the game's words. Promotions and demotions start the subjects
+//!   afresh.
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -46,7 +56,7 @@ pub struct CareerMetricsPlugin;
 
 impl Plugin for CareerMetricsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (gig_test, gigs_done, game_days).run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (gig_test, gigs_done, game_days, write_on, report_test).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -91,6 +101,41 @@ pub struct Tally {
     pub journal_read: Option<u32>,
     #[serde(default)]
     pub journals: u32,
+    /// Those a policeman or journalist has questioned (and, a journalist, dug into the trash of),
+    /// by id and name; those written up at this level; the report or story under way; and how
+    /// many were finished, by day (`SimsInterviewed`, `CompletedStorySubjects`...).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subjects: Vec<(u64, String)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub written: Vec<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report: Option<Report>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reports: Vec<(u32, u32)>,
+}
+
+/// A report or story under way: on whom, whether it's a hatchet job, and how far along (out of
+/// 100).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Report {
+    pub id: u64,
+    pub name: String,
+    pub negative: bool,
+    pub done: f32,
+}
+
+/// A day-by-day count's total over the last seven days and today.
+fn window(days: &[(u32, u32)], today: u32) -> u32 {
+    days.iter().filter(|(d, _)| d + MEETING_DAYS >= today && *d <= today).map(|(_, n)| n).sum()
+}
+
+/// One more today (those too old for the window forgotten).
+fn count_today(days: &mut Vec<(u32, u32)>, today: u32) {
+    days.retain(|(d, _)| d + MEETING_DAYS >= today);
+    match days.iter_mut().find(|(d, _)| *d == today) {
+        Some((_, n)) => *n += 1,
+        None => days.push((today, 1)),
+    }
 }
 
 /// How many days back meetings count (`kWindowForRememberingMeetings`), and today.
@@ -107,16 +152,17 @@ impl Tally {
 
     /// Meetings held over the window to `today`.
     pub fn meetings_held(&self, today: u32) -> u32 {
-        self.meetings.iter().filter(|(d, _)| d + MEETING_DAYS >= today && *d <= today).map(|(_, n)| n).sum()
+        window(&self.meetings, today)
     }
 
-    /// A meeting held today (those too old for the window forgotten).
+    /// A meeting held today.
     pub fn hold_meeting(&mut self, today: u32) {
-        self.meetings.retain(|(d, _)| d + MEETING_DAYS >= today);
-        match self.meetings.iter_mut().find(|(d, _)| *d == today) {
-            Some((_, n)) => *n += 1,
-            None => self.meetings.push((today, 1)),
-        }
+        count_today(&mut self.meetings, today);
+    }
+
+    /// Whether someone's been questioned, or written up, already.
+    pub fn knows(&self, id: u64) -> bool {
+        self.subjects.iter().any(|s| s.0 == id) || self.written.contains(&id)
     }
 
     /// A metric's value from the count, where it's one of these (the game's `FindMetricValue`).
@@ -127,6 +173,7 @@ impl Tally {
             "CampaignMoney" => Some(self.campaign as f32),
             "WinLossRecord" => Some(self.wins as f32 - self.losses as f32),
             "MedicalJournals" => Some(self.journals as f32),
+            "PoliceReports" | "StoriesAndReviews" => Some(window(&self.reports, today) as f32),
             _ => None,
         }
     }
@@ -136,6 +183,9 @@ impl Tally {
     pub fn new_level(&mut self) {
         self.campaign = 0;
         self.journals = 0;
+        self.subjects.clear();
+        self.written.clear();
+        self.report = None;
     }
 
     /// The day's journal read: one more, once an edition.
@@ -609,6 +659,214 @@ pub fn journal_read(w: &mut World, e: Entity) {
     }
 }
 
+/// What a policeman's or journalist's level counts them by, if it's their line.
+fn writes_up(career: &str) -> Option<&'static str> {
+    match career {
+        "LawEnforcement" => Some("PoliceReports"),
+        "Journalism" => Some("StoriesAndReviews"),
+        _ => None,
+    }
+}
+
+/// Whether a Sim questions or interviews others (the game's `CanInterview`: a level that counts
+/// what they write), by their career and level.
+pub fn interviews(career: Option<usize>, level: usize) -> bool {
+    let Some(t) = career.and_then(|c| crate::careers::careers().get(c)) else { return false };
+    let Some(kind) = writes_up(t.key) else { return false };
+    t.paths.iter().any(|p| p.levels.get(level).is_some_and(|l| l.metrics.iter().any(|m| m.kind == kind)))
+}
+
+/// Someone questioned or interviewed, taken well: a subject to write up, and their traits learned.
+pub fn interviewed(w: &mut World, asker: Entity, subject: Entity) {
+    let Some((id, name, traits)) = w.get::<Sim>(subject).map(|s| (s.id, s.full_name(), s.traits.clone())) else { return };
+    let Some(mut job) = w.get_mut::<Job>(asker) else { return };
+    if job.tally.knows(id) {
+        return;
+    }
+    job.tally.subjects.push((id, name.clone()));
+    info!("questioned {name} for a report");
+    for t in traits {
+        w.write_message(crate::learning::Learned { learner: asker, about: subject, what: Some(t), random: false, teaches: ["", ""] });
+    }
+}
+
+/// The computer's menu titles for writing someone up.
+pub const REPORT_ON: &str = "Report On...";
+pub const POSITIVE_STORY: &str = "Write Positive Story On...";
+pub const NEGATIVE_STORY: &str = "Write Negative Story On...";
+/// The computer's action, as named while it's under way.
+pub const WRITE_REPORT: &str = "Write Report";
+const WRITE_STORY: &str = "Write Story";
+
+/// The computer's writing options for a job: a report or story to go on with or scrap, else
+/// those that can be begun (a menu of subjects each).
+pub fn writing_options(job: &Job) -> Vec<(String, Option<Vec<String>>)> {
+    let Some(kind) = writes_up(job.career().key) else { return Vec::new() };
+    if !job.info().metrics.iter().any(|m| m.kind == kind) {
+        return Vec::new();
+    }
+    let what = if kind == "PoliceReports" { "Report" } else { "Story" };
+    if let Some(r) = &job.tally.report {
+        return vec![(format!("Continue {what} on {}", r.name), None), (format!("Scrap {what} on {}", r.name), None)];
+    }
+    let names: Vec<String> = job.tally.subjects.iter().map(|s| s.1.clone()).collect();
+    if names.is_empty() {
+        return Vec::new();
+    }
+    if kind == "PoliceReports" {
+        vec![(REPORT_ON.into(), Some(names))]
+    } else {
+        vec![(POSITIVE_STORY.into(), Some(names.clone())), (NEGATIVE_STORY.into(), Some(names))]
+    }
+}
+
+/// What was picked from the computer's writing options: one begun (on whom, and the action's
+/// name), one gone on with, one scrapped, or none of these.
+#[derive(Debug, PartialEq)]
+pub enum Pick {
+    Begun(&'static str),
+    Continued(&'static str),
+    Scrapped,
+    Other,
+}
+
+pub fn pick_writing(tally: &mut Tally, title: &str, label: &str) -> Pick {
+    if label.starts_with("Scrap Report on ") || label.starts_with("Scrap Story on ") {
+        tally.report = None;
+        return Pick::Scrapped;
+    }
+    if label.starts_with("Continue Report on ") {
+        return Pick::Continued(WRITE_REPORT);
+    }
+    if label.starts_with("Continue Story on ") {
+        return Pick::Continued(WRITE_STORY);
+    }
+    let negative = title == NEGATIVE_STORY;
+    if (title == REPORT_ON || title == POSITIVE_STORY || negative)
+        && let Some((id, name)) = tally.subjects.iter().find(|s| s.1 == label).cloned()
+    {
+        tally.report = Some(Report { id, name, negative, done: 0.0 });
+        return Pick::Begun(if title == REPORT_ON { WRITE_REPORT } else { WRITE_STORY });
+    }
+    Pick::Other
+}
+
+/// How far a report (an hour and a half) or story (two hours) comes along a minute.
+const REPORT_RATE: f32 = 100.0 / 90.0;
+const STORY_RATE: f32 = 100.0 / 120.0;
+/// What a report on a criminal, and a negative story, do for performance; how a story changes
+/// its subject's liking for the writer.
+const CRIMINAL_REPORT_PERFORMANCE: f32 = 15.0;
+const NEGATIVE_STORY_PERFORMANCE: f32 = 20.0;
+const NEGATIVE_STORY_LIKING: f32 = -30.0;
+const POSITIVE_STORY_LIKING: f32 = 10.0;
+
+/// At the computer writing someone up: the report or story along, and finished at last.
+#[allow(clippy::type_complexity)]
+fn write_on(
+    mut commands: Commands,
+    delta: Res<crate::clock::SimDelta>,
+    mut sims: Query<(Entity, &mut Job, &mut crate::interact::ActionQueue), With<crate::sim::HouseholdMember>>,
+    objects: Query<&crate::interact::GameObject>,
+) {
+    if delta.0 <= 0.0 {
+        return;
+    }
+    for (e, mut job, mut queue) in &mut sims {
+        let Some(a) = queue.0.front_mut() else { continue };
+        let crate::interact::ActionKind::Object { target, def } = a.kind else { continue };
+        if !matches!(a.phase, crate::interact::Phase::Running(_)) {
+            continue;
+        }
+        let Some(kind) = objects.get(target).ok().map(|o| o.kind) else { continue };
+        if crate::interact::interactions_for(kind).get(def).map(|d| d.special) != Some(crate::interact::Special::WriteReport) {
+            continue;
+        }
+        let rate = if job.career().key == "LawEnforcement" { REPORT_RATE } else { STORY_RATE };
+        let Some(r) = job.tally.report.as_mut() else {
+            a.cancel = true;
+            continue;
+        };
+        r.done += rate * delta.0;
+        if r.done >= 100.0 {
+            a.cancel = true;
+            commands.queue(move |w: &mut World| written_up(w, e));
+        }
+    }
+}
+
+/// WRITE_REPORT=report|good|bad (tests): once the selected Sim has a subject, off to the computer
+/// to write them up.
+fn report_test(
+    mut sel: Query<(&mut Job, &mut crate::interact::ActionQueue), With<crate::sim::Selected>>,
+    objects: Query<(Entity, &crate::interact::GameObject)>,
+    mut done: Local<bool>,
+) {
+    let Ok(how) = std::env::var("WRITE_REPORT") else { return };
+    if *done {
+        return;
+    }
+    let Ok((mut job, mut q)) = sel.single_mut() else { return };
+    let Some(name) = job.tally.subjects.first().map(|s| s.1.clone()) else { return };
+    *done = true;
+    let title = match how.as_str() {
+        "good" => POSITIVE_STORY,
+        "bad" => NEGATIVE_STORY,
+        _ => REPORT_ON,
+    };
+    let Pick::Begun(label) = pick_writing(&mut job.tally, title, &name) else { return };
+    let computer = objects.iter().find(|(_, o)| o.kind == crate::interact::ObjectKind::Computer).map(|(e, _)| e);
+    let def = crate::interact::interactions_for(crate::interact::ObjectKind::Computer).iter().position(|d| d.special == crate::interact::Special::WriteReport);
+    match (computer, def) {
+        (Some(target), Some(def)) => {
+            info!("report test: {label} on {name}");
+            q.push_player(crate::interact::Action::new(label, crate::interact::ActionKind::Object { target, def }, false));
+        }
+        _ => warn!("report test: no computer"),
+    }
+}
+
+/// A report or story finished: counted today, its subject done with, and what it does.
+fn written_up(w: &mut World, writer: Entity) {
+    let Some(me) = w.get::<Sim>(writer).cloned() else { return };
+    let today = w.resource::<crate::clock::GameClock>().day();
+    let Some(mut job) = w.get_mut::<Job>(writer) else { return };
+    let Some(r) = job.tally.report.take() else { return };
+    let police = job.career().key == "LawEnforcement";
+    job.tally.subjects.retain(|s| s.0 != r.id);
+    job.tally.written.push(r.id);
+    count_today(&mut job.tally.reports, today);
+    let subject = w.query::<(Entity, &Sim)>().iter(w).find(|(_, s)| s.id == r.id).map(|(e, _)| e);
+    let criminal = subject.is_some_and(|s| {
+        w.get::<Sim>(s).is_some_and(|x| x.traits.contains(&crate::life::Trait::Kleptomaniac)) || w.get::<Job>(s).is_some_and(|j| j.career().key == "Criminal")
+    });
+    let (key, change) = match (police, r.negative) {
+        (true, _) if criminal => ("LawEnforcement:ReportCompleteCriminal", Some(CRIMINAL_REPORT_PERFORMANCE)),
+        (true, _) => ("LawEnforcement:ReportComplete", None),
+        (false, true) => ("Journalism:ReportBad", Some(NEGATIVE_STORY_PERFORMANCE)),
+        (false, false) => ("Journalism:ReportGood", None),
+    };
+    if let Some(mut job) = w.get_mut::<Job>(writer)
+        && let Some(p) = change
+    {
+        job.performance = (job.performance + p).min(100.0);
+    }
+    // (The subject's liking for whoever wrote about them.)
+    if !police
+        && let Some(s) = subject
+        && let Some(mut rels) = w.get_mut::<crate::social::Relationships>(s)
+    {
+        rels.add(writer, if r.negative { NEGATIVE_STORY_LIKING } else { POSITIVE_STORY_LIKING }, 0.0);
+    }
+    let n = rand::rng().random_range(1..=3);
+    let text = w.get_resource::<crate::layout::UiAssets>().and_then(|u| u.localize(&format!("Gameplay/Careers/{key}{n}"))).map_or_else(
+        || format!("{} finished the {} on {}.", me.first, if police { "report" } else { "story" }, r.name),
+        |t| t.replace("{0.SimFirstName}", &me.first).replace("{1.SimName}", &r.name),
+    );
+    info!("{} wrote up {} ({key})", me.first, r.name);
+    w.resource_mut::<Notifications>().push(text);
+}
+
 /// The game's words for a concert performed.
 pub fn concert_words(ui: Option<&crate::layout::UiAssets>, sim: &Sim) -> String {
     ui.and_then(|u| u.localize_key(if sim.female { CONCERT_PERFORMED.1 } else { CONCERT_PERFORMED.0 }))
@@ -643,6 +901,22 @@ mod tests {
         let mut t = Tally { campaign: 4000, concerts: 3, ..Default::default() };
         t.new_level();
         assert_eq!((t.campaign, t.concerts), (0, 3), "concerts are the career's");
+    }
+
+    #[test]
+    fn reports_begun_on_subjects_and_counted() {
+        let mut t = Tally { subjects: vec![(7, "Bella Goth".into())], ..Default::default() };
+        assert!(t.knows(7) && !t.knows(8));
+        assert_eq!(pick_writing(&mut t, NEGATIVE_STORY, "Bella Goth"), Pick::Begun(WRITE_STORY));
+        assert!(t.report.as_ref().is_some_and(|r| r.negative && r.id == 7));
+        assert_eq!(pick_writing(&mut t, "", "Continue Story on Bella Goth"), Pick::Continued(WRITE_STORY));
+        assert_eq!(pick_writing(&mut t, "", "Scrap Story on Bella Goth"), Pick::Scrapped);
+        assert!(t.report.is_none());
+        count_today(&mut t.reports, 5);
+        count_today(&mut t.reports, 6);
+        assert_eq!(t.value("PoliceReports", 6), Some(2.0));
+        t.new_level();
+        assert!(t.subjects.is_empty());
     }
 
     #[test]
@@ -685,6 +959,6 @@ mod tests {
         assert!(t.perform_tone(1.0));
         assert_eq!((t.concerts, t.concert_prep), (1, 0.0));
         assert_eq!(t.value("ConcertsPerformed", 0), Some(1.0));
-        assert_eq!(t.value("PoliceReports", 0), None);
+        assert_eq!(t.value("ArtWorkScanned", 0), None, "not a base game metric");
     }
 }

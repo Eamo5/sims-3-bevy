@@ -300,6 +300,9 @@ pub enum SocialEffect {
     /// Money for a Political Sim's campaign (the game's "Ask for Campaign Donation": its
     /// `CampaignDonation`), taken well: `careermetrics`.
     CampaignDonation,
+    /// A policeman's "Question", a journalist's "Interview" (their `OnInterview`): a subject for a
+    /// report or story (`careermetrics`).
+    Interview,
 }
 
 /// What a Mooch gets out of others (the game's `MoochAmount`, at the hidden Mooch skill's first
@@ -325,6 +328,8 @@ const GAME_EFFECTS: &[(&str, SocialEffect)] = &[
     ("Confess Cheating", SocialEffect::Confess),
     ("Deliver Opportunity", SocialEffect::DeliverOpportunity),
     ("Ask for Campaign Donation", SocialEffect::CampaignDonation),
+    ("Question", SocialEffect::Interview),
+    ("Interview", SocialEffect::Interview),
 ];
 
 pub struct SocialDef {
@@ -395,6 +400,9 @@ pub enum Topic {
     Career(&'static str),
     /// A Political Sim's campaign (the game's "Campaign Donation": `HasCampaignDonationTopic`).
     Campaign,
+    /// A policeman's or journalist's questions (the game's "Law Enforcement Career", "Journalism
+    /// Career": theirs while their level counts what they write).
+    Interviewer,
     Event(&'static str),
 }
 
@@ -420,6 +428,8 @@ pub enum GameTest {
     Confess,
     /// Not of the household (the game's `TestCampaignDonation`: not a playable Sim).
     NotHousehold,
+    /// Someone not of the household, not questioned or written up already (`TestInterview`).
+    Interview,
 }
 
 /// What's known of a Sim for the game's socials beyond their `Sim`: who they are, their
@@ -444,6 +454,8 @@ pub struct Side<'a> {
     pub performance: f32,
     /// Their relationships.
     pub rels: Option<&'a Relationships>,
+    /// What their career keeps count of (`careermetrics`).
+    pub tally: Option<&'a crate::careermetrics::Tally>,
 }
 
 /// What `Side::of` reads of a Sim.
@@ -485,6 +497,7 @@ impl<'a> Side<'a> {
             level: job.map_or(0, |j| j.level),
             performance: job.map_or(0.0, |j| j.performance),
             rels,
+            tally: job.map(|j| &j.tally),
         }
     }
 }
@@ -518,6 +531,7 @@ fn topic(name: &str) -> Option<Topic> {
         "Adult to Child" => Some(Topic::AdultToChild),
         "Work General" => Some(Topic::SameWork),
         "Campaign Donation" => Some(Topic::Campaign),
+        "Law Enforcement Career" | "Journalism Career" => Some(Topic::Interviewer),
         "" => None,
         g if g.starts_with("Greet Charisma Level ") => g["Greet Charisma Level ".len()..].trim().parse().ok().map(Topic::Charisma),
         g if g.starts_with("Learn ") && g.ends_with(" Career") => {
@@ -737,6 +751,7 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
             "TestAccuseOfCheating" => Some(GameTest::Accuse),
             "TestConfessCheating" => Some(GameTest::Confess),
             "TestCampaignDonation" => Some(GameTest::NotHousehold),
+            "TestInterview" => Some(GameTest::Interview),
             // (What's said of a line of work: its topic is the other's being in it.)
             t if t.starts_with("TargetHas") && t.ends_with("Career") && a.topics.iter().any(|(n, _)| n.starts_with("Learn ")) => None,
             _ => continue,
@@ -894,6 +909,7 @@ pub fn topic_holds(t: Topic, first: bool, actor: &Sim, target: &Sim, target_in_h
         Topic::Charisma(level) => first && side[0].charisma == level,
         Topic::Career(word) => side[1].career.is_some_and(|c| career_is(c, word)),
         Topic::Campaign => crate::careermetrics::campaigning(me.career, me.level),
+        Topic::Interviewer => first && crate::careermetrics::interviews(me.career, me.level),
         Topic::Event(name) => me.topics.and_then(|t| t.get(name)).is_some_and(|h| {
             !other.sim.is_some_and(|o| h.used_with.contains(&o)) && (test != Some(GameTest::About) || (h.about.is_some() && h.about == other.sim))
         }),
@@ -1004,6 +1020,7 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
                 Some(GameTest::NotPartner) => matches!(rel.status, RelStatus::Partner | RelStatus::Engaged | RelStatus::Married),
                 Some(GameTest::Boss) => side[0].boss != Some(target.id),
                 Some(GameTest::NotHousehold) => side[1].member,
+                Some(GameTest::Interview) => side[1].member || side[0].tally.is_some_and(|t| t.knows(target.id)),
                 Some(GameTest::BossBelowNine) => side[0].boss != Some(target.id) || side[0].level + 1 >= 9,
                 Some(GameTest::Accuse) => !rel.is_romance() || side[1].rels.is_none_or(|r| r.romances() < 2) || rel.betrayed.is_some(),
                 Some(GameTest::Confess) => {
