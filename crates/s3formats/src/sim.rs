@@ -220,6 +220,14 @@ pub const CT_BOTTOM: u32 = 6;
 pub const CT_SHOES: u32 = 7;
 pub const CT_EYEBROW: u32 = 0x16;
 pub const CT_GLASSES: u32 = 12;
+/// Jewellery: necklaces, a pair of earrings (or a left and a right one), bracelets and rings.
+pub const CT_NECKLACE: u32 = 9;
+pub const CT_EARRINGS: u32 = 11;
+pub const CT_BRACELET: u32 = 13;
+pub const CT_RING_LEFT: u32 = 14;
+pub const CT_RING_RIGHT: u32 = 15;
+pub const CT_EARRING_LEFT: u32 = 30;
+pub const CT_EARRING_RIGHT: u32 = 31;
 pub const CT_BEARD: u32 = 16;
 pub const CT_LIPSTICK: u32 = 17;
 pub const CT_EYESHADOW: u32 = 18;

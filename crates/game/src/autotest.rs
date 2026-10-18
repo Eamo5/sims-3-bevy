@@ -1591,7 +1591,7 @@ fn auto_sculpt(
 }
 
 /// FACE=<beard index>[,<glasses index>]: the household's men get that beard (and everyone
-/// those glasses), from the game's baked lists, a few seconds in.
+/// those glasses), from the game's baked lists, a few seconds in; WEAR_ACC too: see below.
 fn face_hook(mut commands: Commands, mut sims: Query<(Entity, &mut crate::sim::Sim), With<crate::sim::HouseholdMember>>, cas: Option<Res<crate::simbody::CasData>>, mut done: Local<bool>, time: Res<Time>) {
     let Ok(v) = std::env::var("FACE") else { return };
     let Some(cas) = cas else { return };
@@ -1611,6 +1611,18 @@ fn face_hook(mut commands: Commands, mut sims: Query<(Entity, &mut crate::sim::S
         if let Some((k, name)) = n.get(1).and_then(|i| list(s3formats::sim::CT_GLASSES).get(*i).cloned()) {
             info!("face test: {} puts on {name}", s.first);
             s.outfit.glasses = Some(k);
+        }
+        // (WEAR_ACC=<name part>,...: that jewellery on whoever it fits, one of each kind.)
+        if let Ok(names) = std::env::var("WEAR_ACC") {
+            let (age, gender) = (crate::simbody::age_bits(s.age), if s.female { s3formats::sim::GENDER_FEMALE } else { s3formats::sim::GENDER_MALE });
+            let mut worn: Vec<(s3bake::Key, u32)> = Vec::new();
+            for n in names.split(',') {
+                let Some(p) = cas.parts.iter().find(|p| p.baked && crate::simbody::ACCESSORY_TYPES.contains(&p.clothing_type) && p.age_gender & age != 0 && p.age_gender & gender != 0 && p.name.to_ascii_lowercase().contains(&n.trim().to_ascii_lowercase())) else { continue };
+                info!("face test: {} puts on {}", s.first, p.name);
+                worn.retain(|w| !crate::simbody::accessories_clash(w.1, p.clothing_type));
+                worn.push((p.key, p.clothing_type));
+            }
+            s.outfit.accessories = Some(worn.into_iter().map(|w| w.0).collect());
         }
         commands.entity(e).insert(crate::aging::NeedsNewBody);
     }
@@ -4778,6 +4790,9 @@ fn ui_flow(
         }
         (231, AppState::CreateHousehold, _) if since > 3.0 => {
             shot(&mut commands, "2u_child");
+            *stage = (233, now);
+        }
+        (233, AppState::CreateHousehold, _) if since > 0.5 => {
             // (The game's family screen, as Accept puts it up for a household.)
             crate::casfamily::OPEN.store(true, std::sync::atomic::Ordering::Relaxed);
             *stage = (207, now);

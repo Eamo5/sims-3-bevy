@@ -626,6 +626,7 @@ fn main() {
             if let Some(pkgs) = &pkgs
                 && let Some(c) = pkgs.read(&s3pkg::ResourceKey::new(p.key.0, p.key.1, p.key.2)).and_then(|d| s3formats::sim::CasPart::parse(&d).ok())
             {
+                println!("  diffuse {:?} presets {}", c.diffuse, c.preset_ids.len());
                 for v in &c.vpxy {
                     println!("  vpxy {v:?}");
                     if let Some(d) = pkgs.read(v).or_else(|| pkgs.read_ti(v.t, v.i)) {
@@ -648,6 +649,7 @@ fn main() {
                                     let rig = pkgs.read_ti(s3pkg::types::RIG, s3pkg::fnv64("auRig")).and_then(|d| s3formats::sim::Rig::parse(&d).ok());
                                     let name = |h: u32| rig.as_ref().and_then(|r| r.bones.iter().find(|b| b.hash == h).map(|b| b.name.clone())).unwrap_or_else(|| format!("?{h:08X}"));
                                     println!("    bones {:?}", geom.bone_hashes.iter().map(|h| name(*h)).collect::<Vec<_>>());
+                                    println!("    shader {:08X} params {:?}", geom.shader, geom.params);
                                     let mut used = std::collections::BTreeMap::<u8, (usize, f32)>::new();
                                     for (bi, bw) in geom.bone_indices.iter().zip(&geom.weights) {
                                         for k in 0..4 {
@@ -1100,6 +1102,30 @@ fn main() {
             return;
         }
         eprintln!("no such object");
+        return;
+    }
+    if args.iter().any(|a| a == "--catalog-gaps") {
+        // --catalog-gaps: the sold objects baked without a model, by why (their OBJK's model key
+        // type, or nothing found), with examples.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let root = s3bake::default_root();
+        let cat: Vec<s3bake::types::CatalogEntry> = s3bake::pack::read_value(&root.global_dir().join("catalog.bin")).expect("no catalog");
+        let mut by: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        for c in cat.iter().filter(|c| c.price >= 0 && c.models.is_empty()) {
+            let k = s3pkg::ResourceKey::new(c.objd.0, c.objd.1, c.objd.2);
+            let why = match pkgs.read(&k).and_then(|d| s3formats::object::objd_objk(&pkgs, &d)) {
+                None => "no OBJK".to_string(),
+                Some(o) => match o.model_key {
+                    None => "OBJK without model".to_string(),
+                    Some(mk) if pkgs.read(&mk).or_else(|| pkgs.read_ti(mk.t, mk.i)).is_none() => format!("{:08X} missing", mk.t),
+                    Some(mk) => format!("{:08X} present", mk.t),
+                },
+            };
+            by.entry(why).or_default().push(c.instance_name.clone());
+        }
+        for (why, v) in &by {
+            println!("{why}: {} e.g. {:?}", v.len(), &v[..v.len().min(12)]);
+        }
         return;
     }
     if let Some(i) = args.iter().position(|a| a == "--catalog") {

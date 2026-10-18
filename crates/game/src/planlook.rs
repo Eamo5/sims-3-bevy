@@ -409,5 +409,5 @@ fn look_rows(
     if let Some(old) = l.rows.take() {
         commands.entity(old).try_despawn();
     }
-    l.rows = crate::casclothing::spawn_rows(&mut commands, &mut ui, (&mut images, &mut fonts), gu.as_deref_mut(), &l.category, &list, &designs, worn, l.scroll, &l.turned);
+    l.rows = crate::casclothing::spawn_rows(&mut commands, &mut ui, (&mut images, &mut fonts), gu.as_deref_mut(), &l.category, &list, &designs, &worn.into_iter().collect::<Vec<_>>(), l.scroll, &l.turned);
 }

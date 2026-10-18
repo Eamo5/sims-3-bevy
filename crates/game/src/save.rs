@@ -77,6 +77,9 @@ pub struct SavedSim {
     /// swimwear (saves from before those could be chosen stop at the eye shadow).
     #[serde(default)]
     pub outfit: Vec<Option<(u32, u32, u64)>>,
+    /// Their jewellery, as chosen (none: as their look has it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accessories: Option<Vec<(u32, u32, u64)>>,
     #[serde(default)]
     pub wearing: Option<crate::simbody::OutfitKind>,
     #[serde(default)]
@@ -620,6 +623,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         relationships: Vec::new(),
         lifetime_happiness: 0,
         outfit: saved_outfit(&sim.outfit),
+        accessories: sim.outfit.accessories.clone(),
         wearing: None,
         outfit_chosen: false,
         rewards: Vec::new(),
@@ -698,6 +702,7 @@ impl SaveGame {
                 glasses: o(6),
                 lipstick: o(7),
                 eyeshadow: o(8),
+                accessories: s.accessories.clone(),
                 other: [other(0), other(1), other(2), other(3), other(4)],
                 designs: s.designs.clone(),
                 styles: s.styles.clone(),
@@ -1042,6 +1047,7 @@ fn save_game(
             promised_wishes: wishes.map(|w| w.promised.clone()).unwrap_or_default(),
             next_wish_offer: wishes.map(|w| w.next_offer),
             outfit: saved_outfit(&sim.outfit),
+        accessories: sim.outfit.accessories.clone(),
             wearing: wearing.map(|w| w.0),
             outfit_chosen,
             rewards: wishes.map(|w| w.rewards.clone()).unwrap_or_default(),

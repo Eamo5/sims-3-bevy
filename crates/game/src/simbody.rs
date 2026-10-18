@@ -141,7 +141,7 @@ pub fn age_flag(a: Age) -> u32 {
     age_bits(a)
 }
 
-fn age_bits(a: Age) -> u32 {
+pub(crate) fn age_bits(a: Age) -> u32 {
     match a {
         Age::Baby => AGE_BABY,
         Age::Toddler => AGE_TODDLER,
@@ -165,6 +165,8 @@ pub struct Outfit {
     pub hat: Option<Key>,
     /// Glasses (drawn with their own texture), and a beard (drawn as hair is).
     pub glasses: Option<CasPartInfo>,
+    /// Jewellery (each drawn with its own layer).
+    pub accessories: Vec<CasPartInfo>,
     pub beard: Option<CasPartInfo>,
     /// Layers over the face beyond its own and the brows' (a burglar's mask).
     pub face_layers: Vec<Key>,
@@ -292,6 +294,7 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
         if nude.len() == 3 {
             o.body = nude;
             o.glasses = None;
+            o.accessories.clear();
         }
         return o;
     }
@@ -434,7 +437,48 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
     // (Glasses come off for a swim.)
     let glasses = glasses.filter(|_| kind != OutfitKind::Swimwear);
     let face_layers = [lipstick, eyeshadow].into_iter().flatten().filter_map(|p| p.layer).collect();
-    Outfit { face, scalp, hair, brows, body, glasses, beard, face_layers, ..default() }
+    let accessories = accessories_of(cas, sim);
+    Outfit { face, scalp, hair, brows, body, glasses, beard, face_layers, accessories, ..default() }
+}
+
+/// Jewellery's kinds, as Create a Sim's Accessories rows list them after the glasses.
+pub const ACCESSORY_TYPES: [u32; 7] = [CT_EARRINGS, CT_EARRING_LEFT, CT_EARRING_RIGHT, CT_NECKLACE, CT_BRACELET, CT_RING_LEFT, CT_RING_RIGHT];
+
+/// Whether two pieces of jewellery are worn in the same place (one of each, as the game's body
+/// types: a pair of earrings takes both ears).
+pub fn accessories_clash(a: u32, b: u32) -> bool {
+    let ears = |t: u32| matches!(t, CT_EARRING_LEFT | CT_EARRING_RIGHT);
+    a == b || a == CT_EARRINGS && ears(b) || b == CT_EARRINGS && ears(a)
+}
+
+/// A Sim's jewellery: as chosen, or else as their look has it (now and then: grown women's
+/// earrings, necklaces and bracelets most often, as the game's townsfolk wear them; rings on
+/// grown-ups; the game's random ones only).
+pub fn accessories_of(cas: &CasData, sim: &Sim) -> Vec<CasPartInfo> {
+    let (age, gender) = (age_bits(sim.age), if sim.female { GENDER_FEMALE } else { GENDER_MALE });
+    let fits = |p: &&CasPartInfo| p.baked && ACCESSORY_TYPES.contains(&p.clothing_type) && p.age_gender & age != 0 && p.age_gender & gender != 0;
+    if let Some(keys) = &sim.outfit.accessories {
+        return keys.iter().filter_map(|k| cas.parts.iter().filter(fits).find(|p| p.key == *k).cloned()).collect();
+    }
+    let grown = matches!(sim.age, Age::YoungAdult | Age::Adult | Age::Elder);
+    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look ^ 0xACCE_5500);
+    let mut out = Vec::new();
+    for (t, women, men) in [(CT_EARRINGS, 0.35, 0.03), (CT_NECKLACE, 0.2, 0.04), (CT_BRACELET, 0.15, 0.04), (CT_RING_LEFT, 0.12, 0.08)] {
+        let chance = match (grown, sim.age == Age::Teen) {
+            (true, _) => if sim.female { women } else { men },
+            (false, true) if t != CT_RING_LEFT => if sim.female { women * 0.6 } else { men * 0.5 },
+            _ => 0.0,
+        };
+        let (roll, pick) = (rng.random_bool(chance), rng.random::<u32>() as usize);
+        if !roll {
+            continue;
+        }
+        let list: Vec<&CasPartInfo> = cas.parts.iter().filter(fits).filter(|p| p.clothing_type == t && p.category & s3formats::sim::CAT_VALID_RANDOM != 0 && !is_uniform(&p.name)).collect();
+        if !list.is_empty() {
+            out.push(list[pick % list.len()].clone());
+        }
+    }
+    out
 }
 
 /// A Sim in their work uniform (the outfit so named): its clothes, and any hat or mask, with
@@ -722,6 +766,15 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
                 tex_keys.push(*t);
             }
             parts.push((skin_mesh(m), mat));
+        }
+    }
+    // Jewellery: each piece's mesh over the skin with its own layer (the game composites them
+    // into the Sim's texture just where their meshes sample it).
+    for a in &outfit.accessories {
+        let Some(layer) = a.layer else { continue };
+        tex_keys.push(layer);
+        for m in baked.cas_meshes(&a.key).map(|m| m.meshes).unwrap_or_default() {
+            parts.push((skin_mesh(shaped(m, sim)), SimMat::Skin { base: body_base, tint, layers: vec![layer] }));
         }
     }
     // Glasses, in their own texture (the lenses see-through).

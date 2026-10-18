@@ -46,7 +46,7 @@ pub(crate) const WHOLE: u32 = 0x05db_cf14;
 pub(crate) const SHOES: u32 = 0x05db_cf13;
 const KINDS: [(u32, CasTab, &str); 4] = [(TOPS, CasTab::Tops, "Tops"), (BOTTOMS, CasTab::Bottoms, "Bottoms"), (WHOLE, CasTab::Outfits, "Outfits"), (SHOES, CasTab::Shoes, "Shoes")];
 pub(crate) const GRID: u32 = 0x05db_cf21;
-/// Accessories (glasses, here), after the kinds of clothes.
+/// Accessories (glasses and jewellery), after the kinds of clothes.
 pub(crate) const ACCESSORIES: u32 = 0x05db_cf90;
 /// What this game hasn't: the content filter, saving, deleting and sharing designs.
 pub(crate) const NOT_HERE: [u32; 5] = [0x05db_cf19, 0x05db_b904, 0x05db_b905, 0x05db_cf17, 0x05db_cf16];
@@ -86,7 +86,7 @@ struct Shown {
     age: crate::sim::Age,
     tab: CasTab,
     wear: OutfitKind,
-    worn: Option<(s3bake::Key, u8)>,
+    worn: Vec<(s3bake::Key, u8)>,
     scroll: usize,
     turned: Vec<(usize, usize)>,
     icons: bool,
@@ -204,7 +204,7 @@ fn clothing_panel(
         c.accessories = false;
     }
     let accessories = c.accessories && !sim.age.is_little();
-    let t = if accessories { s3formats::sim::CT_GLASSES } else { tab_type };
+    let t = tab_type;
     let wear = if accessories { OutfitKind::Everyday } else { scene.wear };
     // The outfit and the kind lit.
     for (n, id) in OUTFITS.iter().enumerate() {
@@ -222,15 +222,31 @@ fn clothing_panel(
             b.selected = lit;
         }
     }
-    let list = crate::cas::parts_for(&scene.cas, sim, t, wear);
-    // The accessory worn (none chosen: none).
-    let worn_accessory = sim.outfit.glasses.filter(|g| *g != crate::sim::OutfitChoice::NONE);
-    // Clicks: a colourway worn (an accessory worn taken off); a row turned.
+    // Accessories: the glasses, then the jewellery, kind by kind (as the game lists its
+    // accessories' body types), each row with its kind and its place in that kind's list.
+    let kinds: Vec<(u32, usize)> = if accessories {
+        [s3formats::sim::CT_GLASSES]
+            .into_iter()
+            .chain(crate::simbody::ACCESSORY_TYPES)
+            .flat_map(|k| (0..crate::cas::parts_for(&scene.cas, sim, k, wear).len()).map(move |i| (k, i)))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let list: Vec<(s3bake::Key, String)> = if accessories {
+        [s3formats::sim::CT_GLASSES].into_iter().chain(crate::simbody::ACCESSORY_TYPES).flat_map(|k| crate::cas::parts_for(&scene.cas, sim, k, wear)).collect()
+    } else {
+        crate::cas::parts_for(&scene.cas, sim, t, wear)
+    };
+    // The accessories worn (glasses none chosen: none).
+    let worn_accessories: Vec<s3bake::Key> = sim.outfit.glasses.filter(|g| *g != crate::sim::OutfitChoice::NONE).into_iter().chain(crate::simbody::accessories_of(&scene.cas, sim).into_iter().map(|p| p.key)).collect();
+    // Clicks: a colourway worn (an accessory put on, or taken off if it's on); a row turned.
     for (i, d) in &cells {
         if *i == Interaction::Pressed {
             let action = if accessories {
-                let off = list.get(d.0).is_some_and(|(key, _)| Some(*key) == worn_accessory);
-                CasAction::FacePart(t, if off { usize::MAX } else { d.0 })
+                let Some(&(kind, at)) = kinds.get(d.0) else { continue };
+                let off = kind == s3formats::sim::CT_GLASSES && list.get(d.0).is_some_and(|(key, _)| worn_accessories.contains(key));
+                CasAction::FacePart(kind, if off { usize::MAX } else { at })
             } else {
                 CasAction::WearDesign(t, d.0, d.1)
             };
@@ -267,13 +283,17 @@ fn clothing_panel(
             }
         }
     }
-    let worn = if accessories { worn_accessory.map(|k| (k, 0)) } else { crate::cas::worn(&scene, sim, t).map(|key| (key, sim.outfit.designs.iter().find(|(p, _)| *p == key).map_or(0, |d| d.1))) };
+    let worn: Vec<(s3bake::Key, u8)> = if accessories {
+        worn_accessories.iter().map(|k| (*k, 0)).collect()
+    } else {
+        crate::cas::worn(&scene, sim, t).map(|key| (key, sim.outfit.designs.iter().find(|(p, _)| *p == key).map_or(0, |d| d.1))).into_iter().collect()
+    };
     // (Opened, for another Sim, outfit or kind: the item worn scrolled to, its row turned to
     // its colourway.)
     let fresh = c.shown.as_ref().is_none_or(|s| (s.sim, s.tab, s.wear, s.accessories) != (k, tab, wear, accessories));
     if fresh {
         c.turned.clear();
-        if let Some((key, d)) = worn
+        if let Some(&(key, d)) = worn.first()
             && let Some(at) = list.iter().position(|(p, _)| *p == key)
         {
             if !(c.scroll..c.scroll + ROWS).contains(&at) {
@@ -290,7 +310,7 @@ fn clothing_panel(
     c.scroll = c.scroll.min(most);
     let mut turned: Vec<(usize, usize)> = c.turned.iter().map(|(a, b)| (*a, *b)).collect();
     turned.sort();
-    let want = Shown { sim: k, female: sim.female, age: sim.age, tab, wear, worn, scroll: c.scroll, turned, icons: gu.is_some(), accessories };
+    let want = Shown { sim: k, female: sim.female, age: sim.age, tab, wear, worn: worn.clone(), scroll: c.scroll, turned, icons: gu.is_some(), accessories };
     if c.shown.as_ref() == Some(&want) {
         return;
     }
@@ -310,11 +330,11 @@ fn clothing_panel(
     if let Some(old) = c.rows.take() {
         commands.entity(old).try_despawn();
     }
-    c.rows = spawn_rows(&mut commands, &mut ui, (&mut images, &mut fonts), gu.as_deref_mut(), &c.category, &list, &designs, worn, c.scroll, &c.turned);
+    c.rows = spawn_rows(&mut commands, &mut ui, (&mut images, &mut fonts), gu.as_deref_mut(), &c.category, &list, &designs, &worn, c.scroll, &c.turned);
 }
 
 /// The rows in view on `CASClothingCategory`'s grid, from `scroll`: each item a
-/// `CASClothingRow` of its colourways (turned as `turned` has it, the one worn lit), the game's
+/// `CASClothingRow` of its colourways (turned as `turned` has it, those worn lit), the game's
 /// own picture in each cell; the holder they're in.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_rows(
@@ -325,7 +345,7 @@ pub(crate) fn spawn_rows(
     category: &Spawned,
     list: &[(s3bake::Key, String)],
     designs: &dyn Fn(&s3bake::Key) -> usize,
-    worn: Option<(s3bake::Key, u8)>,
+    worn: &[(s3bake::Key, u8)],
     scroll: usize,
     turned: &HashMap<usize, usize>,
 ) -> Option<Entity> {
@@ -367,7 +387,7 @@ pub(crate) fn spawn_rows(
                 continue;
             }
             commands.entity(cell).insert((DesignCell(n, d as u8), crate::icons::Tooltip(name.clone())));
-            if worn == Some((*key, d as u8)) {
+            if worn.contains(&(*key, d as u8)) {
                 commands.entity(cell).queue(|mut e: EntityWorldMut| {
                     if let Some(mut b) = e.get_mut::<UiButton>() {
                         b.selected = true;

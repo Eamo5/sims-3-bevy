@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 138;
+pub const GAMEDATA_VERSION: u32 = 139;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -2453,6 +2453,16 @@ fn bake_face_presets(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, String
 
 /// Create a Sim's Face tab: beards, glasses, lipsticks and eye shadows.
 pub const FACE_TYPES: [u32; 4] = [s3formats::sim::CT_BEARD, s3formats::sim::CT_GLASSES, s3formats::sim::CT_LIPSTICK, s3formats::sim::CT_EYESHADOW];
+/// Create a Sim's jewellery (the Accessories rows), the base game's and the packs'.
+pub const ACCESSORY_TYPES: [u32; 7] = [
+    s3formats::sim::CT_NECKLACE,
+    s3formats::sim::CT_EARRINGS,
+    s3formats::sim::CT_EARRING_LEFT,
+    s3formats::sim::CT_EARRING_RIGHT,
+    s3formats::sim::CT_BRACELET,
+    s3formats::sim::CT_RING_LEFT,
+    s3formats::sim::CT_RING_RIGHT,
+];
 
 /// The CAS parts of the town's service uniforms, by name.
 pub const SERVICE_UNIFORMS: [&str; 5] = ["BodyFrenchMaid", "HairFrenchMaidBunLoose", "BodyRepair", "BodyMailCarrier", "BodyPizzaDeliveryOutfit"];
@@ -2546,9 +2556,9 @@ fn bake_outfits(root: &BakeRoot, pkgs: &PackageSet, careers: &[CareerInfo]) -> R
         let service = SERVICE_UNIFORMS.iter().any(|n| c.name.contains(n))
             && !c.name.to_ascii_lowercase().ends_with("_unlock")
             && matches!(c.clothing_type, s3formats::sim::CT_BODY | s3formats::sim::CT_HAIR);
-        // The base game's beards, glasses, lipsticks and eye shadows (for Create a Sim's Face tab).
-        let face = FACE_TYPES.contains(&c.clothing_type)
-            && k.g == 0
+        // The base game's beards, glasses, lipsticks and eye shadows (for Create a Sim's Face tab),
+        // and the jewellery.
+        let face = (FACE_TYPES.contains(&c.clothing_type) && k.g == 0 || ACCESSORY_TYPES.contains(&c.clothing_type))
             && c.category & s3formats::sim::CAT_HIDDEN == 0
             && !c.name.to_ascii_lowercase().ends_with("_unlock")
             && (matches!(c.clothing_type, s3formats::sim::CT_GLASSES | s3formats::sim::CT_BEARD) || !c.diffuse.is_empty());

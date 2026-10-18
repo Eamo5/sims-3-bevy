@@ -851,6 +851,22 @@ fn cas_actions(
                 pending.premade = Some(h);
                 scene.selected = 0;
             }
+            CasAction::FacePart(t, i) if crate::simbody::ACCESSORY_TYPES.contains(&t) => {
+                // (Jewellery: put on, or taken off when it's on already; one in each place, a pair
+                // of earrings taking both ears.)
+                let list = parts_for(&scene.cas, &pending.members[k], t, crate::simbody::OutfitKind::Everyday);
+                let s = &mut pending.members[k];
+                let mut worn: Vec<(Key, u32)> = crate::simbody::accessories_of(&scene.cas, s).into_iter().map(|p| (p.key, p.clothing_type)).collect();
+                match list.get(i).map(|p| p.0) {
+                    Some(key) if worn.iter().any(|w| w.0 == key) => worn.retain(|w| w.0 != key),
+                    Some(key) => {
+                        worn.retain(|w| !crate::simbody::accessories_clash(w.1, t));
+                        worn.push((key, t));
+                    }
+                    None => worn.retain(|w| !crate::simbody::accessories_clash(w.1, t)),
+                }
+                s.outfit.accessories = Some(worn.into_iter().map(|w| w.0).collect());
+            }
             CasAction::FacePart(t, i) => {
                 let list = parts_for(&scene.cas, &pending.members[k], t, crate::simbody::OutfitKind::Everyday);
                 let key = if i == usize::MAX { Some(crate::sim::OutfitChoice::NONE) } else { list.get(i).map(|p| p.0) };
