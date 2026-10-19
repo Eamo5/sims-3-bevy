@@ -94,8 +94,7 @@ impl Plugin for LittlePlugin {
             .add_message::<Conceive>()
             .init_resource::<NewbornPicks>()
             .add_systems(Update, (conceive, pregnancy, name_babies, newborn_traits_picker, little_life, put_down).chain().run_if(in_state(PlayMode::Live)))
-            .add_systems(Update, kids_radio.run_if(in_state(PlayMode::Live)))
-            .add_systems(PostUpdate, carry_follow.after(bevy::transform::TransformSystems::Propagate));
+            .add_systems(Update, kids_radio.run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -663,48 +662,30 @@ pub const CRIB_HEIGHT: f32 = 0.42;
 #[derive(Component, Clone, Copy)]
 pub struct InCrib(pub Vec3, pub Quat);
 
-/// A baby held in a grown-up's arms (on their carry slot) during a care social.
+/// A baby or toddler in someone's arms: held there (`carry`), or a baby cradled for a care
+/// social. (Babies ride the right hand, where the game's clips put them; see `carry::follow`.)
 #[derive(Component, Clone, Copy)]
 pub struct Carried {
     pub by: Entity,
 }
 
-/// Keeps carried babies cradled on the grown-up's left forearm, head in the crook of the
-/// elbow. (The game slots babies to a carry bone and IK-solves the arms around them; the
-/// carry clips hold the left forearm out palm-up, so the forearm makes a steady cradle.)
-fn carry_follow(
-    mut carried: Query<(&Carried, &mut Transform)>,
-    carriers: Query<&crate::simbody::Skeleton>,
-    joints: Query<&GlobalTransform>,
-) {
-    for (c, mut tf) in &mut carried {
-        let Ok(skel) = carriers.get(c.by) else { continue };
-        let at = |name: &str| {
-            let i = skel.rig.bones.iter().position(|b| b.name == name)?;
-            Some(joints.get(*skel.joints.get(i)?).ok()?.translation())
-        };
-        // The cradling arm: whichever forearm lies flatter (the other may hold a bottle).
-        let arm = |side: &str| Some((at(&format!("b__{side}_Forearm__"))?, at(&format!("b__{side}_Hand__"))?));
-        let level = |(e, h): (Vec3, Vec3)| (e - h).normalize_or(Vec3::Y).y.abs() + (e.y + h.y) * 0.25;
-        let Some((elbow, hand)) = [arm("L"), arm("R")].into_iter().flatten().min_by(|a, b| level(*a).total_cmp(&level(*b))) else {
-            continue;
-        };
-        let along = (elbow - hand).normalize_or(Vec3::Z);
-        // Lie level along the forearm, face up.
-        let flat = Vec3::new(along.x, along.y * 0.3, along.z).normalize_or(Vec3::Z);
-        tf.rotation = Transform::IDENTITY.looking_to(flat, Vec3::Y).rotation;
-        tf.translation = hand.lerp(elbow, 0.45) + Vec3::Y * 0.02;
-    }
-}
+/// A baby lying on the floor where they were put down (the game's babies' standing posture),
+/// till someone picks them up or puts them in a crib.
+#[derive(Component, Clone, Copy)]
+pub struct OnFloor;
 
-/// Puts a carried baby back once the grown-up's care social is over.
+/// Puts a baby cradled for a care social back once it's over (unless they're being held).
 fn put_down(
     mut commands: Commands,
     carried: Query<(Entity, &Carried)>,
-    carriers: Query<&crate::interact::ActionQueue>,
+    carriers: Query<(&crate::interact::ActionQueue, Option<&crate::carry::Holding>)>,
 ) {
     for (e, c) in &carried {
-        let busy = carriers.get(c.by).ok().and_then(|q| q.0.front()).is_some_and(|a| {
+        let Ok((queue, holding)) = carriers.get(c.by) else { continue };
+        if holding.is_some_and(|h| h.0 == e) {
+            continue;
+        }
+        let busy = queue.0.front().is_some_and(|a| {
             matches!(a.kind, crate::interact::ActionKind::Social { target, .. } if target == e)
                 && matches!(a.phase, crate::interact::Phase::Running(_))
         });
@@ -737,14 +718,16 @@ fn little_life(
         &mut Transform,
         Option<&crate::anim::ActionClip>,
         Option<&Bedtime>,
-        (Has<Carried>, Has<crate::highchair::InHighChair>),
+        (Has<Carried>, Has<crate::highchair::InHighChair>, Has<crate::carry::BeingMoved>, Has<OnFloor>),
     )>,
     cribs: Query<(&GameObject, &Transform), Without<Sim>>,
     mut notes: ResMut<Notifications>,
 ) {
     let h = clock.hour_f();
-    for (e, sim, mut motives, mut anim, crib, last_cry, mut tf, clip, bedtime, (carried, in_chair)) in &mut littles {
-        if !sim.age.is_little() || carried {
+    // (Where the cribs are taken: a baby's in it, a toddler's napping in it.)
+    let mut taken: Vec<Vec3> = littles.iter().filter_map(|l| l.4.map(|c| c.0).or(l.8.is_some().then_some(l.6.translation))).collect();
+    for (e, sim, mut motives, mut anim, crib, last_cry, mut tf, clip, bedtime, (carried, in_chair, moved, on_floor)) in &mut littles {
+        if !sim.age.is_little() || carried || moved {
             continue;
         }
         // A toddler put to bed naps in the crib.
@@ -762,22 +745,30 @@ fn little_life(
                 anim.pose = Pose::Stand;
             }
         }
-        if sim.age == Age::Baby {
-            // Babies stay in their crib: find one if they haven't got one.
+        if sim.age == Age::Baby && !on_floor {
+            // Babies stay in their crib: find one (an empty one, if there is) if they haven't
+            // got one.
             let (at, facing) = match crib {
                 Some(c) => (c.0, c.1),
                 None => {
-                    let Some((_, ctf)) = cribs.iter().filter(|(o, _)| o.kind == ObjectKind::Crib).min_by(|a, b| {
-                        a.1.translation.distance(tf.translation).total_cmp(&b.1.translation.distance(tf.translation))
-                    }) else {
+                    let nearest = |free: bool| {
+                        cribs
+                            .iter()
+                            .filter(|(o, c)| o.kind == ObjectKind::Crib && (!free || !taken.iter().any(|t| t.xz().distance(c.translation.xz()) < 0.3)))
+                            .min_by(|a, b| a.1.translation.distance(tf.translation).total_cmp(&b.1.translation.distance(tf.translation)))
+                    };
+                    let Some((_, ctf)) = nearest(true).or_else(|| nearest(false)) else {
                         continue;
                     };
+                    taken.push(ctf.translation);
                     commands.entity(e).insert(InCrib(ctf.translation, ctf.rotation));
                     (ctf.translation, ctf.rotation)
                 }
             };
             tf.translation = at + Vec3::Y * CRIB_HEIGHT;
             tf.rotation = facing;
+        }
+        if sim.age == Age::Baby {
             // Sleep at night, whenever tired, and when put to bed.
             let sleepy = motives.0[ENERGY] < -20.0 || !(7.0..20.0).contains(&h) || bedtime.is_some();
             if bedtime.is_some() && motives.0[ENERGY] > 90.0 {
@@ -796,7 +787,11 @@ fn little_life(
             let crying = clip.is_some_and(|c| c.loops.first().is_some_and(|l| l.contains("cry")));
             // (In a high chair, they fuss there as its own clips have them: `highchair`.)
             if !crying && anim.pose != Pose::Lie && !in_chair {
-                let cry = if sim.age == Age::Baby { CRY_BABY } else { CRY_TODDLER };
+                let cry = match (sim.age, on_floor) {
+                    (Age::Baby, false) => CRY_BABY,
+                    (Age::Baby, true) => CRY_BABY_FLOOR,
+                    _ => CRY_TODDLER,
+                };
                 commands.entity(e).insert(cry);
             }
             if last_cry.is_none_or(|c| clock.minutes - c.0 > 180.0) {
@@ -810,6 +805,7 @@ fn little_life(
 }
 
 const CRY_BABY: crate::anim::ActionClip = crate::anim::ActionClip::new(Some("b2o_crib_cry_start_y"), &["b2o_crib_cry_loop"]);
+const CRY_BABY_FLOOR: crate::anim::ActionClip = crate::anim::ActionClip::new(Some("b2o_cry_start_y"), &["b2o_cry_loop"]);
 const CRY_TODDLER: crate::anim::ActionClip = crate::anim::ActionClip::new(Some("p2o_crib_cry_start_y"), &["p2o_crib_cry_loop"]);
 
 #[cfg(test)]

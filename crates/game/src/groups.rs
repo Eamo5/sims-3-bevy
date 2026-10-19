@@ -296,14 +296,15 @@ fn listen_along(
     clock: Res<crate::clock::GameClock>,
     time: Res<Time>,
     mut sims: Query<
-        (Entity, &Sim, &ActionQueue, &mut Transform, &mut crate::sim::Motives, Has<SocialPartner>, Has<Listening>, Option<&crate::nav::PathFollow>, Option<&crate::anim::ActionClip>),
+        (Entity, &Sim, &ActionQueue, &mut Transform, &mut crate::sim::Motives, Has<SocialPartner>, Has<Listening>, Option<&crate::nav::PathFollow>, Option<&crate::anim::ActionClip>, Has<crate::carry::Holding>),
         With<SimAnim>,
     >,
 ) {
     let dt = time.delta_secs().min(0.1) * crate::clock::SPEED_RATES[clock.speed];
     let spots: HashMap<Entity, Vec3> = sims.iter().map(|s| (s.0, s.3.translation)).collect();
-    for (me, sim, queue, mut tf, mut motives, partner, listening, path, clip) in &mut sims {
-        let idle = queue.0.is_empty() && !partner && path.is_none_or(|p| p.done) && !sim.age.is_little();
+    for (me, sim, queue, mut tf, mut motives, partner, listening, path, clip, holding) in &mut sims {
+        // (Not one with a little one in their arms: they keep hold of them, the game's carry.)
+        let idle = queue.0.is_empty() && !partner && path.is_none_or(|p| p.done) && !sim.age.is_little() && !holding;
         let group = convs.group(me);
         let Some(g) = group.filter(|_| idle) else {
             // (Off to something else: not listening any more.)

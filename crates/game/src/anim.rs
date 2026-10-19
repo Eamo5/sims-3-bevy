@@ -119,8 +119,10 @@ impl ActionClip {
     pub const fn steps(start: &'static str, steps: &'static [&'static str], loops: &'static [&'static str]) -> Self {
         Self { start: Some(start), steps, loops, side: None, end: &[], end_secs: 0.0, before: None, after: None, in_order: false, mirror: false }
     }
+    /// One side of a pair's clips (`_x`, `_y`): its loops played in turn, so both sides play
+    /// the same pair together.
     pub const fn social(loops: &'static [&'static str], side: char) -> Self {
-        Self { start: None, steps: &[], loops, side: Some(side), end: &[], end_secs: 0.0, before: None, after: None, in_order: false, mirror: false }
+        Self { start: None, steps: &[], loops, side: Some(side), end: &[], end_secs: 0.0, before: None, after: None, in_order: true, mirror: false }
     }
     /// Played left for right.
     pub const fn mirrored(mut self) -> Self {
@@ -253,11 +255,13 @@ pub fn sample_track_quat(keys: &[(f32, [f32; 4])], t: f32) -> Option<Quat> {
     Some(q(keys.last()?.1))
 }
 
-/// Default animation for a baby or toddler (crawling about until they've learned to walk).
-fn little_script(pose: Pose, age: crate::sim::Age, walks: bool) -> ActionClip {
+/// Default animation for a baby or toddler (crawling about until they've learned to walk; a baby
+/// on the floor lies there breathing, and sleeps there as in a crib, the game's `Sleep`).
+fn little_script(pose: Pose, age: crate::sim::Age, walks: bool, on_floor: bool) -> ActionClip {
     use crate::sim::Age;
     match (age, pose) {
         (Age::Baby, Pose::Lie) => ActionClip::new(Some("b2o_crib_sleep_start_y"), &["b2o_crib_sleep_loop_y"]),
+        (Age::Baby, _) if on_floor => ActionClip::new(None, &["b_idle_breathe_x", "b_idle_breathe_blink_x"]),
         (Age::Baby, _) => ActionClip::new(None, &["b2o_crib_idle_breathe"]),
         (_, Pose::Walk) if walks => ActionClip::new(None, &["p_walk"]),
         (_, Pose::Walk) => ActionClip::new(None, &["p_crawl"]),
@@ -296,9 +300,19 @@ fn next_clip(lib: &mut ClipLibrary, data: &Baked, script: &ActionClip, child: bo
             return (Some(n.clone()), step);
         }
     }
+    // (In turn: each loop's variants one after another, by name, the same on both sides of a
+    // pair.)
     if script.in_order && !script.loops.is_empty() {
-        let s = script.loops[(step - sequence.len()) % script.loops.len()];
-        return (lib.variants(data, s, script.side, child).first().cloned(), step + 1);
+        let mut all: Vec<String> = Vec::new();
+        for p in script.loops {
+            let mut v: Vec<String> = lib.variants(data, p, script.side, child).to_vec();
+            v.sort();
+            all.extend(v);
+        }
+        if all.is_empty() {
+            return (None, step + 1);
+        }
+        return (Some(all[(step - sequence.len()) % all.len()].clone()), step + 1);
     }
     (next_loop(lib, data, script, child), step)
 }
@@ -373,7 +387,7 @@ pub fn drive_skeletons(
         &Skeleton,
         Option<&ActionClip>,
         &mut ClipPlayer,
-        Has<crate::little::Carried>,
+        Has<crate::little::OnFloor>,
         Option<&crate::little::ToddlerSkills>,
         Option<&Carrying>,
         Has<crate::jog::Jogging>,
@@ -388,7 +402,7 @@ pub fn drive_skeletons(
     mut partners: Local<HashMap<String, Arc<Vec<u32>>>>,
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed];
-    for (entity, sim, anim, skel, action, mut player, carried, toddler, carrying, jogging, path, pregnancy, wolf, (face_overlay, mut talk_overlay)) in &mut sims {
+    for (entity, sim, anim, skel, action, mut player, on_floor, toddler, carrying, jogging, path, pregnancy, wolf, (face_overlay, mut talk_overlay)) in &mut sims {
         use crate::sim::Occult;
         let fast = matches!(path.filter(|p| !p.done).map(|p| p.now), Some(crate::nav::WalkStyle::Run | crate::nav::WalkStyle::FastRun | crate::nav::WalkStyle::FastJog));
         let child = sim.age == crate::sim::Age::Child;
@@ -407,7 +421,7 @@ pub fn drive_skeletons(
             // (Heavily pregnant, the game's waddle.)
             _ if anim.pose == Pose::Walk && sim.female && pregnancy.is_some_and(|p| p.stage >= 2) => ActionClip::new(None, &["a_female_walk_pregnant"]),
             Some(a) if anim.pose != Pose::Walk => a.clone(),
-            _ if sim.age.is_little() => little_script(anim.pose, sim.age, toddler.is_some_and(|t| t.walks())),
+            _ if sim.age.is_little() => little_script(anim.pose, sim.age, toddler.is_some_and(|t| t.walks()), on_floor),
             _ => pose_script(anim.pose, sim.female, child),
         };
         let ended = player.clip.as_ref().is_some_and(|c| player.time >= c.duration.max(0.1));
@@ -521,9 +535,8 @@ pub fn drive_skeletons(
             let Ok(mut tf) = joints.get_mut(skel.joints[i]) else { continue };
             let bind = skel.bind[i];
             let mut target = bind;
-            let placed = carried && bone.name == "transformBone";
             let source = partner.as_ref().and_then(|p| p.get(i).copied()).unwrap_or(bone.hash);
-            if let Some(track) = clip.tracks.get(&source).filter(|_| !placed) {
+            if let Some(track) = clip.tracks.get(&source) {
                 // (The face's shape goes back over what the animation does to a bone.)
                 let shape = skel.shape.get(i).copied().flatten();
                 // The root's translation is root motion; movement is driven by the pathfinder.

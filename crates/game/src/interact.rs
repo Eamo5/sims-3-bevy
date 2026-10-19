@@ -2507,8 +2507,10 @@ pub fn child_social_clips(clips: &'static [&'static str], actor: Age, target: Ag
     Some((crate::anim::ActionClip::new(None, TALK), crate::anim::ActionClip::new(None, if mean { DISAGREE } else { AGREE })))
 }
 
-pub fn social_start(name: &str, little: Option<Age>) -> Option<&'static str> {
+pub fn social_start(name: &str, little: Option<Age>, held: bool) -> Option<&'static str> {
     match (name, little) {
+        // (Held already: picked up beforehand, as the game's `CarryingChild` socials.)
+        ("Play With" | "Cuddle" | "Change Diaper" | "Put to Bed", Some(Age::Toddler)) if held => None,
         ("Frolic", _) => Some("a2a_soc_fairy_frolic_start"),
         ("Cast Charm Spell" | "Cast Curse", _) => Some("a2a_magicWand_castSpell_lowSkill_start"),
         ("Play With" | "Cuddle" | "Change Diaper" | "Put to Bed", Some(Age::Toddler)) => Some("a2p_pickUp"),
@@ -2520,8 +2522,22 @@ pub fn social_start(name: &str, little: Option<Age>) -> Option<&'static str> {
     }
 }
 
-pub fn social_clips(name: &str, little: Option<Age>) -> &'static [&'static str] {
+pub fn social_clips(name: &str, little: Option<Age>, held: bool) -> &'static [&'static str] {
     let baby = little == Some(Age::Baby);
+    // A little one in the grown-up's arms: the game's own clips for it there (`CarryToddler`'s
+    // GiveBottle, ChangeDiaper, Snuggle, PlayWith, TossInAir, Tickle and Chat).
+    if held {
+        match (name, baby) {
+            ("Feed", true) => return &["a2b_babyBottle_feed"],
+            ("Change Diaper", true) => return &["a2b_changeDiaper"],
+            ("Cuddle", true) => return &["a2b_soc_cuddleBaby"],
+            ("Play With", true) => return &["a2b_soc_playWithBaby"],
+            ("Change Diaper", false) => return &["a2p_changeDiaper"],
+            ("Cuddle", false) => return &["a2p_soc_hugSnuggle"],
+            ("Play With", false) => return &["a2p_soc_tossInAir", "a2p_soc_tickleInArms", "a2p_carry_chat_loop"],
+            _ => {}
+        }
+    }
     // (The game's own socials bring their clips with them.)
     if let Some(g) = crate::social::social_index(name).and_then(|i| crate::social::social(i).game) {
         return g.clips;
@@ -2756,6 +2772,9 @@ pub enum ActionKind {
     /// A sleeping Sim woken (the game's immediate `Sim.WakeUp`: their sleep cut short; never
     /// queued).
     WakeUp { target: Entity },
+    /// A baby or toddler picked up, put down or put in a crib (`carry`); how long its clips
+    /// take, once they've begun.
+    Carry { child: Entity, step: crate::carry::CarryStep, secs: f32 },
     /// Calls for the police (a burglar about), the fire department (a fire at home), and
     /// everybody out to come home (the game's `CallPolice`, `CallFirefighters`,
     /// `CallEverybodyHome`).
@@ -3266,7 +3285,7 @@ pub(crate) fn run_actions(
         Query<(), Or<(With<crate::buy::HeldObject>, With<crate::buyhistory::HistoryHidden>)>>,
         Res<crate::realestate::RealEstate>,
     ),
-    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates, mut memories, (partners_of, at_door, cuddles, convs, ghost_spots))): (
+    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates, mut memories, (partners_of, at_door, cuddles, convs, ghost_spots, held_q))): (
         MessageWriter<crate::journal::Did>,
         Query<&crate::journal::SkillJournal>,
         Query<&mut crate::inventory::Inventory>,
@@ -3286,6 +3305,7 @@ pub(crate) fn run_actions(
                 Query<&crate::seatedtalk::Cuddling>,
                 Res<crate::groups::Conversations>,
                 Query<(Entity, &Transform, &crate::nav::Floor), (With<crate::ghosts::Ghost>, Without<crate::ghosts::Resting>, Without<crate::sim::Motives>)>,
+                Query<&crate::little::Carried>,
             ),
         ),
     ),
@@ -3511,6 +3531,24 @@ pub(crate) fn run_actions(
                         // (Kneeling beside the spot.)
                         ActionKind::PlantSeed { at, level, .. } => Some((*at + Vec2::new(0.0, 0.7), *level)),
                         ActionKind::Outdoor { at, level, what } => Some((what.stand(*at), *level)),
+                        // (Before the little one, or at the crib; put down where they stand, there
+                        // and then.)
+                        ActionKind::Carry { child, step, .. } => {
+                            let mine = Vec2::new(tf.translation.x, tf.translation.z);
+                            let apart = people.get(*child).map_or(0.7, |p| crate::carry::apart(p.1.age));
+                            match step {
+                                crate::carry::CarryStep::PutDown(None) => {
+                                    action.phase = Phase::Running(0.0);
+                                    commands.entity(me).insert(crate::carry::CarryMove::new(*child, *step));
+                                    continue;
+                                }
+                                crate::carry::CarryStep::PickUp { crib: Some(c) } | crate::carry::CarryStep::InCrib(c) => {
+                                    objects.get(*c).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0)))
+                                }
+                                crate::carry::CarryStep::PickUp { crib: None } => positions.get(child).map(|p| (crate::carry::beside(p.0.xz(), mine, apart), p.1)),
+                                crate::carry::CarryStep::PutDown(Some(at)) => Some((crate::carry::beside(*at, mine, apart), floor.0)),
+                            }
+                        }
                         // (Standing before the pet, as far off as the game's jig has them.)
                         ActionKind::PetSocial { at, kind, .. } => {
                             let mine = Vec2::new(tf.translation.x, tf.translation.z);
@@ -3989,13 +4027,16 @@ pub(crate) fn run_actions(
                                 let listens_sat = !action.seated && little.is_none() && sitting.contains(target) && crate::social::seated_ok(s);
                                 // (Seated: they stay as they are, talk played over them below.)
                                 if !action.seated {
-                                    if let Some(p) = positions.get(target) {
+                                    // (Turned to them; not to one in their own arms.)
+                                    if let Some(p) = positions.get(target).filter(|_| !held_q.get(*target).is_ok_and(|c| c.by == me)) {
                                         let to = Vec2::new(p.0.x - tf.translation.x, p.0.z - tf.translation.z);
                                         tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
                                     }
                                     anim.pose = Pose::Talk;
-                                    let clips = social_clips(s.name, little);
-                                    let start = social_start(s.name, little);
+                                    // (In their arms: the game's own clips for it there.)
+                                    let held = held_q.get(*target).is_ok_and(|c| c.by == me);
+                                    let clips = social_clips(s.name, little, held);
+                                    let start = social_start(s.name, little, held);
                                     let clip = |side| crate::anim::ActionClip { start, ..crate::anim::ActionClip::social(clips, side) };
                                     // (A child in it: the children's own clips.)
                                     let kids = who
@@ -4166,6 +4207,9 @@ pub(crate) fn run_actions(
                                 tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
                                 anim.pose = Pose::Use;
                                 commands.entity(me).insert(crate::fire::extinguisher_clip());
+                            }
+                            ActionKind::Carry { child, step, .. } => {
+                                commands.entity(me).insert(crate::carry::CarryMove::new(*child, *step));
                             }
                             ActionKind::PetSocial { at, social, kind, .. } => {
                                 let to = *at - Vec2::new(tf.translation.x, tf.translation.z);
@@ -5312,6 +5356,12 @@ pub(crate) fn run_actions(
                                 outro = Some((crate::fire::EXTINGUISHER_STOP, None, 2.4, Entity::PLACEHOLDER, false));
                             }
                         }
+                        // (Done once its clips are: `carry` says how long they take.)
+                        ActionKind::Carry { secs, .. } => {
+                            if elapsed >= *secs {
+                                finished = true;
+                            }
+                        }
                         ActionKind::PetSocial { social, kind, .. } => {
                             let s = &crate::pets::PET_SOCIALS[*social];
                             // (An Animal Lover warms to any, a Cat or Dog Person to theirs most: the
@@ -6136,6 +6186,9 @@ fn autonomy(
             // (Nor anyone in a panic at a fire, or burning.)
             Without<crate::fire::Panicking>,
             Without<crate::fire::OnFire>,
+            // (Nor a little one in someone's arms, or being picked up or put down.)
+            Without<crate::little::Carried>,
+            Without<crate::carry::BeingMoved>,
         ),
     >,
     (objects, seconds, unmade_q, grime_q): (
@@ -6688,8 +6741,9 @@ fn autonomy(
         }
         let social_need = if sim.traits.contains(&crate::life::Trait::Loner) { 0.0 } else { 30.0 };
         let social_need = if sim.traits.contains(&crate::life::Trait::PartyAnimal) || sim.traits.contains(&crate::life::Trait::Friendly) { 50.0 } else { social_need };
-        // A little one in need comes first for the grown-ups.
-        if sim.age.is_grown() && sim.age != Age::Child {
+        // A little one in need comes first for the teens and grown-ups (the game's
+        // `LookAfterBabyOrToddler`, every teen and older of the household's).
+        if crate::carry::can_carry(sim.age) {
             for &(other, pos, age, needs, lot) in &others {
                 if !age.is_little() || lot != my_lot {
                     continue;

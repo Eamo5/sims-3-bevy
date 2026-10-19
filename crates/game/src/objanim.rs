@@ -443,6 +443,8 @@ fn animate_objects(
     let target_of = |queue: &ActionQueue| {
         queue.0.front().and_then(|a| match a.kind {
             ActionKind::Object { target, .. } | ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } | ActionKind::Outro { target, .. } => Some(target),
+            // (A crib's side let down for a little one lifted out or put in.)
+            ActionKind::Carry { step: crate::carry::CarryStep::PickUp { crib: Some(c) } | crate::carry::CarryStep::InCrib(c), .. } => Some(c),
             _ => None,
         })
     };

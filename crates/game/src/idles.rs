@@ -116,7 +116,8 @@ fn idle(
             Option<&crate::nav::PathFollow>,
             (&InheritedVisibility, &crate::life::Mood, Option<&crate::life::Moodlets>),
         ),
-        (Without<crate::swim::Swimming>, Without<crate::death::Dying>, Without<crate::fire::OnFire>, Without<crate::dressing::ClothesSpin>),
+        // (Holding a little one: the carry's own idles, not these: the game's `CarryingChildPosture`.)
+        (Without<crate::swim::Swimming>, Without<crate::death::Dying>, Without<crate::fire::OnFire>, Without<crate::dressing::ClothesSpin>, Without<crate::carry::Holding>),
     >,
     (mut known, mut names): (Local<Option<HashSet<String>>>, Local<Names>),
 ) {

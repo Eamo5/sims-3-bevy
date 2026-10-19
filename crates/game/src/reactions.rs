@@ -380,6 +380,8 @@ fn play(
             Without<crate::fire::Panicking>,
             Without<crate::dressing::ClothesSpin>,
             Without<SeatedReaction>,
+            // (Holding a little one: reactions held back, as the game's while carrying.)
+            Without<crate::carry::Holding>,
         ),
     >,
     objects: Query<&crate::interact::GameObject>,

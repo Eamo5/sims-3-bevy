@@ -1157,7 +1157,7 @@ fn world_click(
             Query<(Option<&crate::music::StereoOn>, Has<crate::interact::Unmade>, Option<&crate::grime::Grime>, Option<&crate::music::StereoVolume>)>,
         ),
     ),
-    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q), company_q): (
+    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q), company_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -1171,7 +1171,7 @@ fn world_click(
         Query<(), With<crate::little::Labour>>,
         Query<&crate::tvchannels::TvLevel>,
         Query<(&Sim, Option<&crate::classes::ClassesTaken>)>,
-        (Query<(&crate::skillbooks::SkillBooks, Has<HouseholdMember>)>, Query<(&crate::novels::Novels, Has<HouseholdMember>)>),
+        (Query<(&crate::skillbooks::SkillBooks, Has<HouseholdMember>)>, Query<(&crate::novels::Novels, Has<HouseholdMember>)>, crate::carry::CarryLook),
         Query<(Entity, &Sim, Has<crate::interact::Visitor>, Option<&crate::visit::OnLot>), Or<(With<HouseholdMember>, With<crate::interact::Visitor>)>>,
     ),
 ) {
@@ -1290,6 +1290,12 @@ fn world_click(
             }
             let rel = rels.get(t);
             let target_member = members_q.contains(t);
+            // (A baby or toddler: picked up, put down, put in a crib; family's, or a friend's.)
+            if sim.age.is_little() {
+                let related = (member && target_member) || rel.friendship >= crate::carry::STRANGER_LIKING;
+                let at = postures.get(actor).map_or(Vec3::ZERO, |p| p.1.translation());
+                options.extend(carry_q.on_little(actor, actor_sim.age, at, t, related));
+            }
             // (Talking in a group: someone they know called over to join it.)
             if convs.group(actor).is_some() && !convs.together(actor, t) && rels.0.contains_key(&t) && !sim.age.is_little() {
                 options.push((crate::groups::INVITE_LABEL.to_string(), ActionKind::Social { target: t, social: crate::groups::INVITE }));
@@ -1408,6 +1414,10 @@ fn world_click(
             let usable = if obj.kind.suits(actor_sim) { interactions_for(obj.kind) } else { &[] };
             let plant = opp_q.3.get(t).ok();
             pie.submenus.clear();
+            // (A crib: the little one held put in it, or the one in it picked up.)
+            if obj.kind == ObjectKind::Crib {
+                options.extend(carry_q.on_crib(actor, actor_sim.age, t));
+            }
             // The household's car, as the game's `CarOwnable` offers it (to teens and up): to
             // work when it's nearly time, or to a community lot ("Go to Community Lot...").
             if obj.kind == ObjectKind::Car && (actor_sim.age == crate::sim::Age::Teen || actor_sim.age.is_grown()) {
@@ -2194,6 +2204,8 @@ fn world_click(
         // Babies stay put.
     } else if let Some((p, level)) = floor_hit(ray, &world, building.as_deref()) {
         let mut options = vec![("Go Here".to_string(), ActionKind::GoHere(Vec2::new(p.x, p.z), level))];
+        // (A little one in their arms: put down there.)
+        options.extend(carry_q.on_ground(actor, Vec2::new(p.x, p.z)));
         let mut title = String::new();
         let here = crate::rabbitholes::lot_at(&world.data.lots, p);
         let out_at = on_lot.get(actor).ok().map(|l| l.0);

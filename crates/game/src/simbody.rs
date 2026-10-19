@@ -350,9 +350,10 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
     // (The baked copy: a part baked with the wardrobe is listed a second time, after its
     // unbaked entry.)
     let chosen = |k: Option<Key>, t: u32| k.and_then(|k| cas.parts.iter().filter(|p| p.key == k && p.clothing_type == t).find(|p| fits(p)).cloned());
-    // A baby is a single body with its own head.
+    // A baby is a single body with its own head, the same in every outfit (it's listed as
+    // everyday wear, sleepwear and swimwear alike: not one to leave out as swimwear).
     if sim.age == Age::Baby {
-        let body = of_type(CT_BODY).into_iter().next().cloned();
+        let body = cas.parts.iter().filter(|e| e.clothing_type == CT_BODY).filter(fits).find(|e| !is_uniform(&e.name)).cloned();
         return Outfit { body: body.into_iter().collect(), ..default() };
     }
     let face = of_type(CT_FACE).into_iter().min_by_key(|e| e.name.len()).cloned();

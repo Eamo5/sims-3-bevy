@@ -3141,7 +3141,7 @@ fn auto_click_use(
         if kinds[idx].eq_ignore_ascii_case("Sim") || named.is_some() {
             return sims
                 .iter()
-                .filter(|(_, s, _)| !s.age.is_little() && named.is_none_or(|n| s.first.eq_ignore_ascii_case(n) || s.last.eq_ignore_ascii_case(n)))
+                .filter(|(_, s, _)| (named.is_some() || !s.age.is_little()) && named.is_none_or(|n| s.first.eq_ignore_ascii_case(n) || s.last.eq_ignore_ascii_case(n)))
                 .map(|(e, s, tf)| (e, s.first.clone(), tf.translation() + Vec3::Y))
                 .min_by(|a, b| a.2.distance(cam.focus).total_cmp(&b.2.distance(cam.focus)));
         }
@@ -4254,7 +4254,7 @@ fn auto_action(
                 warn!("social test: no social {social:?}");
                 continue;
             };
-            info!("social test: {social} ({:?})", crate::interact::social_clips(social, None));
+            info!("social test: {social} ({:?})", crate::interact::social_clips(social, None, false));
             for _ in 0..times {
                 q.push_player(crate::interact::Action::new(social, crate::interact::ActionKind::Social { target, social: si }, false));
             }

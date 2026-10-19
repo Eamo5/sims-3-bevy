@@ -633,6 +633,17 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2p_highChair_",
     "a2p_book_readWith_",
     "a2p_babyBottle_giveTake",
+    // Babies and toddlers put down, held in the arms, and crying there or on the floor.
+    "a2b_putDown",
+    "a2p_putDown",
+    "a2b_soc_",
+    "a2p_soc_",
+    "b2o_cry_",
+    "b_motDistress_unhappy_carry",
+    "p_motDistress_cry_carry",
+    "p_motDistress_unhappy_carry",
+    "a_motDistress_babyCry_carry",
+    "a_motDistress_toddlerCry_carry",
 ];
 
 /// Clip actors that are props held by the Sim (baked with the Sim's clips).

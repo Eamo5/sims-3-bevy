@@ -797,6 +797,62 @@ fn main() {
         }
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--outfit") {
+        // --outfit <name>: a career outfit's parts, and whether each one's design renders
+        // (DDS=<folder>: each rendered design saved there).
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let name = &args[i + 1];
+        let Some(o) = pkgs.read_ti(s3formats::sim::T_OUTFIT, s3pkg::fnv64(name)).and_then(|d| s3formats::sim::SimOutfit::parse(&d).ok()) else {
+            println!("{name}: no such outfit");
+            return;
+        };
+        let png = std::env::var("DDS").ok();
+        for (k, p) in o.parts.iter().enumerate() {
+            let c = pkgs.read(&p.casp).or_else(|| pkgs.read_ti(p.casp.t, p.casp.i)).and_then(|d| s3formats::sim::CasPart::parse(&d).ok());
+            let img = s3formats::complate::render_preset(&pkgs, &p.preset, 512, true);
+            println!(
+                "{k}: {} type {} preset {} chars, rendered {:?}, diffuse {}",
+                c.as_ref().map_or("?".to_string(), |c| c.name.clone()),
+                c.as_ref().map_or(0, |c| c.clothing_type),
+                p.preset.len(),
+                img.as_ref().map(|i| (i.width, i.height)),
+                c.as_ref().map_or(0, |c| c.diffuse.len())
+            );
+            if img.is_none() {
+                println!("   {}", p.preset.chars().take(400).collect::<String>());
+            }
+            if let (Some(dir), Some(img)) = (&png, &img) {
+                let _ = std::fs::write(format!("{dir}/{name}_{k}.dds"), s3bake::ddsw::encode_dds(img));
+            }
+        }
+        return;
+    }
+    if let Some(i) = args.iter().position(|a| a == "--clip-bone") {
+        // --clip-bone <bone> <clip>...: a bone's track in each clip: its keys, first and last
+        // rotation and place.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let bone = s3pkg::fnv32(&args[i + 1]);
+        let want: Vec<String> = args[i + 2..].iter().map(|a| a.to_ascii_lowercase()).collect();
+        for k in pkgs.keys_of_type(s3pkg::types::CLIP) {
+            let Some(res) = pkgs.read(k) else { continue };
+            let Some(name) = s3formats::sim::clip_name(&res).filter(|n| want.contains(&n.to_ascii_lowercase())) else { continue };
+            let Ok(c) = s3formats::sim::Clip::parse(&res) else { continue };
+            match c.tracks.get(&bone) {
+                Some(t) => println!(
+                    "{name} {:.2}s: rot {} keys {:.3?}..{:.3?}, pos {} keys {:.3?}..{:.3?}",
+                    c.duration,
+                    t.rotation.len(),
+                    t.rotation.first().map(|r| r.1),
+                    t.rotation.last().map(|r| r.1),
+                    t.translation.len(),
+                    t.translation.first().map(|p| p.1),
+                    t.translation.last().map(|p| p.1)
+                ),
+                None => println!("{name}: no track for it"),
+            }
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--list-clips") {
         // --list-clips <prefix>: every clip in the install starting with the prefix.
         let pkgs = s3pkg::install::open_install(&data, |_| true);
