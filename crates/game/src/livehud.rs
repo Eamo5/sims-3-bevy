@@ -947,7 +947,7 @@ fn wishes(
     mut tips: Query<&mut crate::icons::Tooltip>,
     mut page: Local<usize>,
     mut selected: Local<Option<u64>>,
-    (mouse, hovered): (Res<ButtonInput<MouseButton>>, Query<&Interaction>),
+    (mouse, hovered, mut buttons): (Res<ButtonInput<MouseButton>>, Query<&Interaction>, Query<&mut UiButton>),
 ) {
     let Ok((sim, mut w, ltw)) = sel.single_mut() else { return };
     if selected.replace(sim.id) != Some(sim.id) { *page = 0; }
@@ -1002,6 +1002,13 @@ fn wishes(
         let b = d.id(WISH_SLOT + slot as u32);
         let x = w.promised.get(slot).cloned();
         set_visible(&mut vis, b, x.is_some());
+        // (One towards the lifetime wish lit in its slot, as the game's.)
+        let helper = x.as_ref().and_then(|x| x.dream()).is_some_and(|d| d.helper);
+        if let Some(mut ub) = b.and_then(|b| buttons.get_mut(b).ok())
+            && ub.selected != helper
+        {
+            ub.selected = helper;
+        }
         if let (Some(b), Some(x)) = (b, x) {
             set_image(&mut images, &pictures, d.within(b, WISH_ICON), icon(&x, false));
             let corner = icon(&x, true);

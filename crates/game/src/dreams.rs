@@ -49,6 +49,10 @@ const RETEST: f64 = 120.0;
 const SHOWN: usize = 3;
 const SLOTS: usize = 4;
 const AMBITIOUS: f32 = 1.15;
+/// A wish towards the lifetime wish: half again (`IsHelperDream`).
+const HELPER: f32 = 1.5;
+/// The lifetime wishes' tree's root (the "CAS Major Dream Feeder"'s).
+const LIFETIME_ROOT: &str = "Lifetime dream aquired";
 const FULFILLED_STEP: i32 = 5;
 const FULFILLED_STACKS: i32 = 5;
 
@@ -150,6 +154,8 @@ pub struct Dreams {
     bucket: u64,
     /// What the panel was last given, to tell what was promised or given up there.
     shown: Vec<u64>,
+    /// The lifetime wish's type and its node, armed with the chains that lead to it.
+    lifetime: Option<(u32, u64)>,
 }
 
 /// A wish offered or promised, for the panel: its node, subject, words, icons and points.
@@ -166,6 +172,9 @@ pub struct DreamWish {
     /// How far along it is ("2/5"), where the game says.
     #[serde(default)]
     pub progress: String,
+    /// It helps towards the lifetime wish (half again the points; lit in its slot).
+    #[serde(default)]
+    pub helper: bool,
 }
 
 /// A catalogue object's class.
@@ -265,10 +274,11 @@ fn weight(n: &DnpNode, parent_subject: &Subject, cx: &Ctx) -> f32 {
     sum / 100.0
 }
 
-/// A wish's points, as the game's `AchievementPoints`: its score, times 1.15 for the Ambitious,
-/// rounded down to a fortieth of the next power of ten (5 to 500).
-pub fn points(score: f32, ambitious: bool) -> u32 {
-    let x = score * if ambitious { AMBITIOUS } else { 1.0 };
+/// A wish's points, as the game's `AchievementPoints`: its score, times 1.15 for the Ambitious and
+/// 1.5 for one that helps towards the lifetime wish, rounded down to a fortieth of the next power
+/// of ten (5 to 500).
+pub fn points(score: f32, ambitious: bool, helper: bool) -> u32 {
+    let x = score * if ambitious { AMBITIOUS } else { 1.0 } * if helper { HELPER } else { 1.0 };
     if x <= 0.0 {
         return 0;
     }
@@ -758,7 +768,7 @@ fn heartbeat(sims: Query<Entity, With<Dreams>>, clock: Res<crate::clock::GameClo
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn run_dreams(
     mut commands: Commands,
-    mut sims: Query<(Entity, &Sim, Option<&mut Dreams>, &Skills, Option<&Job>, &Relationships, &Mood, Option<&mut crate::wishes::Wishes>, &mut Moodlets), With<HouseholdMember>>,
+    mut sims: Query<(Entity, &Sim, Option<&mut Dreams>, &Skills, Option<&Job>, &Relationships, &Mood, Option<&mut crate::wishes::Wishes>, &mut Moodlets, Option<&crate::lifetime::LifetimeWish>), With<HouseholdMember>>,
     people: PeopleQuery,
     extra: ExtraQuery,
     mut events: MessageReader<DreamEvent>,
@@ -804,7 +814,7 @@ fn run_dreams(
     let grown_plants = plants.iter().filter(|p| !p.dead).count() as u32;
     let prim = |id: u32| data.primitive(id);
     let mut rng = rand::rng();
-    for (me, sim, dreams, skills, job, rels, mood, wishes, mut moodlets) in &mut sims {
+    for (me, sim, dreams, skills, job, rels, mood, wishes, mut moodlets, lifetime) in &mut sims {
         // (Children and older; a Sim new to it, theirs to be armed.)
         if sim.age.is_little() {
             continue;
@@ -870,6 +880,45 @@ fn run_dreams(
             }
             info!("dreams: {} armed for {} ({} trees)", d.active.len(), sim.first, data.trees.len());
         }
+        // The lifetime wish: its node armed, and the chains towards it begun (its promise links,
+        // as when the game's `TryAddLifetimeWish` promises it); a new one in place of the old.
+        let ltw = lifetime.filter(|l| !l.fulfilled).and_then(|l| data.primitives.iter().find(|p| p.check == l.def().check && p.name.starts_with('*')).map(|p| p.id));
+        if d.lifetime.map(|x| x.0) != ltw {
+            if let Some((_, old)) = d.lifetime.take() {
+                d.active.retain(|a| a.uid != old && a.parent_promise != Some(old));
+                d.queue.retain(|u| d.active.iter().any(|a| a.uid == *u));
+            }
+            let at = ltw.and_then(|want| {
+                data.trees.iter().enumerate().find_map(|(ti, t)| {
+                    let root = t.nodes.get(t.root)?;
+                    if prim_name(data, root.prim) != Some(LIFETIME_ROOT) {
+                        return None;
+                    }
+                    root.children.iter().copied().find(|c| t.nodes[*c].prim == want).map(|ni| (ti, ni))
+                })
+            });
+            if let (Some(want), Some((ti, ni))) = (ltw, at) {
+                let n = &data.trees[ti].nodes[ni];
+                let subject = prim(n.prim).map(|p| input_subject(p, n)).unwrap_or_default();
+                let uid = d.arm(ti, ni, subject, now, None);
+                d.lifetime = Some((want, uid));
+                if let Some(a) = d.active.iter().find(|a| a.uid == uid).cloned() {
+                    let mut parent = a.clone();
+                    d.bucket += 1;
+                    parent.done = Some(d.bucket);
+                    let mut buckets = HashMap::new();
+                    for ci in n.children.iter().copied().filter(|c| data.trees[ti].nodes[*c].promise_link) {
+                        score_child(d, &cx, data, &parent, ci, true, Some(uid), now, &mut buckets);
+                    }
+                    for (_, cands) in buckets {
+                        if let Some((u, _)) = cands.into_iter().max_by(|x, y| x.1.total_cmp(&y.1)) {
+                            d.queue.push(u);
+                        }
+                    }
+                }
+                info!("dreams: {}'s lifetime wish armed: {}", sim.first, prim_name(data, want).unwrap_or(""));
+            }
+        }
         // Happenings: the nodes listening for them, fulfilled.
         for ev in evs.iter().filter(|e| e.sim == Some(me)) {
             debug!("dreams: {} {} {:?} {:?} {}", sim.first, ev.kind, ev.skill, ev.social, ev.amount);
@@ -915,7 +964,7 @@ fn run_dreams(
         for uid in &done_promises {
             let Some(a) = d.active.iter().find(|a| a.uid == *uid) else { continue };
             let n = &data.trees[a.tree].nodes[a.node];
-            let pts = points(n.score, sim.traits.contains(&Trait::Ambitious));
+            let pts = points(n.score, sim.traits.contains(&Trait::Ambitious), helps(data, d.lifetime, n, &a.subject));
             let p = prim(n.prim);
             let text = p.map(|p| words(p, n, &a.subject, &cx, ui.as_deref(), &gdata).0).unwrap_or_default();
             info!("dreams: {} fulfilled {text} (+{pts})", sim.first);
@@ -1159,6 +1208,22 @@ fn score_child(d: &mut Dreams, cx: &Ctx, data: &DnpData, parent: &Active, ci: us
     }
 }
 
+/// A primitive's name.
+fn prim_name(data: &DnpData, id: u32) -> Option<&str> {
+    data.primitive(id).map(|p| p.name.as_str())
+}
+
+/// Whether a wish helps towards the lifetime wish (a `LinkedWishes` row's type, about what it
+/// names, of its number: the game's `UpdateLink`).
+fn helps(data: &DnpData, lifetime: Option<(u32, u64)>, n: &DnpNode, subject: &Subject) -> bool {
+    let Some((ltw, _)) = lifetime else { return false };
+    let about = match subject {
+        Subject::Skill(s) | Subject::Career(s) | Subject::Category(s) | Subject::Key(s) => s.clone(),
+        _ => String::new(),
+    };
+    data.links.iter().any(|l| l.lifetime == ltw && l.prim == n.prim && (l.subject.is_empty() || l.subject.eq_ignore_ascii_case(&about)) && l.number.is_none_or(|x| (x - n.input_number).abs() < 0.01))
+}
+
 /// A type's feedback function (a social's, by default, the game's `SocialFeedBackFunction`).
 fn feedback_of(p: &DnpPrimitive) -> &str {
     if p.feedback.is_empty() && p.social { "SocialFeedBackFunction" } else { p.feedback.as_str() }
@@ -1330,7 +1395,8 @@ fn sync_wishes(
             let (text, description) = words(p, n, &a.subject, &cx, ui.as_deref(), &gdata);
             let (icon, icon2) = icons(p, n, &a.subject, &cx, &gdata);
             let progress = crate::dreamfns::count_text(&p.count_text, n, a, &cx);
-            Some(crate::wishes::Wish { kind: crate::wishes::WishKind::Dream(DreamWish { tree: t.id, node: n.id, subject: a.subject.clone(), uid, text, description, icon, icon2, progress }), points: points(n.score, ambitious) })
+            let helper = helps(data, d.lifetime, n, &a.subject);
+            Some(crate::wishes::Wish { kind: crate::wishes::WishKind::Dream(DreamWish { tree: t.id, node: n.id, subject: a.subject.clone(), uid, text, description, icon, icon2, progress, helper }), points: points(n.score, ambitious, helper) })
         };
         let mut queue = d.queue.clone();
         queue.sort_by(|a, b| {
@@ -1356,11 +1422,16 @@ mod tests {
 
     #[test]
     fn points_round_down_as_the_games() {
-        assert_eq!(points(150.0, false), 150);
-        assert_eq!(points(250.0, true), 275);
-        assert_eq!(points(500.0, true), 575);
-        assert_eq!(points(1000.0, true), 1000, "1150 rounds down to a thousand");
-        assert_eq!(points(30000.0, true), 34500);
+        assert_eq!(points(150.0, false, false), 150);
+        assert_eq!(points(250.0, true, false), 275);
+        assert_eq!(points(500.0, true, false), 575);
+        assert_eq!(points(1000.0, true, false), 1000, "1150 rounds down to a thousand");
+        assert_eq!(points(30000.0, true, false), 34500);
+        // (Towards the lifetime wish: half again, as the game's table has it.)
+        assert_eq!(points(150.0, false, true), 225);
+        assert_eq!(points(250.0, true, true), 425);
+        assert_eq!(points(300.0, true, true), 500);
+        assert_eq!(points(1000.0, false, true), 1500);
     }
 
     #[test]
