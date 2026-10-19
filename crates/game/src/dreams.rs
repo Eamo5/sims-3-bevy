@@ -34,7 +34,7 @@ impl Plugin for DreamsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<DreamEvent>().add_systems(
             Update,
-            (life_events, relationship_events, wake_events, activity_events, journal_events, state_events, heartbeat, run_dreams, wish_test, promise_test, sync_wishes).chain().after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)),
+            (life_events, relationship_events, wake_events, activity_events, journal_events, state_events, heartbeat, run_dreams, wish_test, promise_test, sync_wishes, confirm_lifetime).chain().after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)),
         );
     }
 }
@@ -156,6 +156,104 @@ pub struct Dreams {
     shown: Vec<u64>,
     /// The lifetime wish's type and its node, armed with the chains that lead to it.
     lifetime: Option<(u32, u64)>,
+    /// When it was last noted down for saving.
+    noted: f64,
+}
+
+/// A Sim's wishes as saved: each armed node (by its tree's and its own ids), the offers, the
+/// promises, and the numbering.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SavedDreams {
+    pub active: Vec<SavedActive>,
+    pub queue: Vec<u64>,
+    pub promised: Vec<Option<u64>>,
+    pub next_uid: u64,
+    #[serde(default)]
+    pub lifetime: Option<(u32, u64)>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SavedActive {
+    pub uid: u64,
+    pub tree: u64,
+    pub node: u32,
+    pub subject: Subject,
+    pub since: f64,
+    pub count: f32,
+    pub list: Vec<String>,
+    pub promised: bool,
+    pub parent_promise: Option<u64>,
+    pub silent: bool,
+    pub asleep_till: Option<f64>,
+    pub timer: Option<(u32, f64)>,
+    pub offered_at: Option<f64>,
+}
+
+impl Dreams {
+    /// As it stands, to save.
+    fn snapshot(&self, data: &DnpData) -> SavedDreams {
+        SavedDreams {
+            active: self
+                .active
+                .iter()
+                .filter(|a| a.done.is_none())
+                .map(|a| SavedActive {
+                    uid: a.uid,
+                    tree: data.trees[a.tree].id,
+                    node: data.trees[a.tree].nodes[a.node].id,
+                    subject: a.subject.clone(),
+                    since: a.since,
+                    count: a.count,
+                    list: a.list.clone(),
+                    promised: a.promised,
+                    parent_promise: a.parent_promise,
+                    silent: a.silent,
+                    asleep_till: a.asleep_till,
+                    timer: a.timer,
+                    offered_at: a.offered_at,
+                })
+                .collect(),
+            queue: self.queue.clone(),
+            promised: self.promised.to_vec(),
+            next_uid: self.next_uid,
+            lifetime: self.lifetime,
+        }
+    }
+
+    /// Put back from a save (what's in trees no longer had, left out).
+    fn restore(&mut self, s: &SavedDreams, data: &DnpData) {
+        self.active = s
+            .active
+            .iter()
+            .filter_map(|a| {
+                let tree = data.trees.iter().position(|t| t.id == a.tree)?;
+                let node = data.trees[tree].nodes.iter().position(|n| n.id == a.node)?;
+                Some(Active {
+                    uid: a.uid,
+                    tree,
+                    node,
+                    subject: a.subject.clone(),
+                    since: a.since,
+                    count: a.count,
+                    list: a.list.clone(),
+                    promised: a.promised,
+                    parent_promise: a.parent_promise,
+                    done: None,
+                    silent: a.silent,
+                    asleep_till: a.asleep_till,
+                    timer: a.timer,
+                    offered_at: a.offered_at,
+                })
+            })
+            .collect();
+        let alive: Vec<u64> = self.active.iter().map(|a| a.uid).collect();
+        self.queue = s.queue.iter().copied().filter(|u| alive.contains(u)).collect();
+        for (slot, p) in self.promised.iter_mut().zip(s.promised.iter().chain(std::iter::repeat(&None))) {
+            *slot = p.filter(|u| alive.contains(u));
+        }
+        self.next_uid = s.next_uid.max(alive.iter().copied().max().unwrap_or(0));
+        self.lifetime = s.lifetime.filter(|(_, u)| alive.contains(u));
+    }
 }
 
 /// A wish offered or promised, for the panel: its node, subject, words, icons and points.
@@ -694,12 +792,14 @@ fn activity_kinds(label: &str, minutes: f32) -> Vec<&'static str> {
 
 /// WISH=<type name>[=<subject>] (tests): the selected Sim promised a wish of that type (its first
 /// visible node in the trees), about that (a skill, a career, a category, a Sim by first name, a
-/// meal's or fish's key).
+/// meal's or fish's key); WISH_OFFER=, offered instead.
 fn wish_test(mut sims: Query<&mut Dreams, With<crate::sim::Selected>>, people: Query<&Sim>, gu: Option<Res<crate::icons::GameUi>>, clock: Res<crate::clock::GameClock>, mut done: Local<bool>) {
     if *done {
         return;
     }
-    let Ok(spec) = std::env::var("WISH") else {
+    // (WISH_OFFER=: offered instead, to be promised in the panel.)
+    let offer = std::env::var("WISH_OFFER").ok();
+    let Some(spec) = std::env::var("WISH").ok().or(offer.clone()) else {
         *done = true;
         return;
     };
@@ -727,6 +827,14 @@ fn wish_test(mut sims: Query<&mut Dreams, With<crate::sim::Selected>>, people: Q
         },
     };
     let uid = d.arm(ti, ni, subject, clock.minutes, None);
+    if offer.is_some() {
+        d.queue.push(uid);
+        if let Some(a) = d.active.iter_mut().find(|a| a.uid == uid) {
+            a.offered_at = Some(clock.minutes);
+        }
+        info!("dreams: test wish {:?} offered (in {})", p.name, data.trees[ti].name);
+        return;
+    }
     if let Some(slot) = d.promised.iter().position(|s| s.is_none()) {
         d.promised[slot] = Some(uid);
         if let Some(a) = d.active.iter_mut().find(|a| a.uid == uid) {
@@ -734,6 +842,23 @@ fn wish_test(mut sims: Query<&mut Dreams, With<crate::sim::Selected>>, people: Q
         }
     }
     info!("dreams: test wish {:?} promised (in {})", p.name, data.trees[ti].name);
+}
+
+/// A child's or teen's wish made their lifetime wish, or left on offer.
+fn confirm_lifetime(mut commands: Commands, mut answers: MessageReader<crate::dialog::Answered>, mut sims: Query<(&Sim, &mut Dreams)>, mut notes: ResMut<crate::interact::Notifications>) {
+    for a in answers.read() {
+        let crate::dialog::Question::ConfirmLifetimeWish { sim: e, wish, uid } = a.about else { continue };
+        let Ok((sim, mut d)) = sims.get_mut(e) else { continue };
+        // (No, or asked again about one taken up already.)
+        if a.answer != 0 || !d.active.iter().any(|x| x.uid == uid) {
+            continue;
+        }
+        // (The wish taken up: off the offers, the lifetime wish theirs.)
+        d.queue.retain(|u| *u != uid);
+        d.active.retain(|x| x.uid != uid);
+        notes.push(format!("{}'s Lifetime Wish: {}.", sim.first, crate::lifetime::LIFETIME_WISHES[wish].name));
+        commands.entity(e).insert(crate::lifetime::LifetimeWish::new(wish));
+    }
 }
 
 /// PROMISE_WISHES=1: every wish offered promised, while there's a slot (to see them through).
@@ -814,7 +939,7 @@ fn run_dreams(
     let grown_plants = plants.iter().filter(|p| !p.dead).count() as u32;
     let prim = |id: u32| data.primitive(id);
     let mut rng = rand::rng();
-    for (me, sim, dreams, skills, job, rels, mood, wishes, mut moodlets, lifetime) in &mut sims {
+    for (me, sim, dreams, skills, job, rels, mood, mut wishes, mut moodlets, lifetime) in &mut sims {
         // (Children and older; a Sim new to it, theirs to be armed.)
         if sim.age.is_little() {
             continue;
@@ -826,6 +951,16 @@ fn run_dreams(
         let d = &mut *d;
         let facts = facts_of(me, &extra, &gdata, &ids, party.as_deref(), date.as_deref(), grown_plants);
         let cx = Ctx { sim, skills, job, rels, mood: mood.0, funds, worth, people: &roster, ids: &ids, owned: &owned, data, facts: &facts, town, family: family.as_deref(), gdata: Some(&gdata) };
+        // From a save: as they stood.
+        if !d.ready
+            && let Some(saved) = wishes.as_ref().and_then(|w| w.dream_state.clone())
+        {
+            d.ready = true;
+            d.last_full = now;
+            d.last_retest = now;
+            d.restore(&saved, data);
+            info!("dreams: {} put back for {} ({} offered, {} promised)", d.active.len(), sim.first, d.queue.len(), d.promised.iter().flatten().count());
+        }
         // Arming every tree, as the Sim stands (the game's `SetupForNewSim`, `StartupTree`).
         if !d.ready {
             d.ready = true;
@@ -1137,6 +1272,13 @@ fn run_dreams(
             }
         }
         d.last_full = now;
+        // (Noted down for a save every half hour or so.)
+        if now - d.noted >= FULL_UPDATE
+            && let Some(w) = wishes.as_mut()
+        {
+            d.noted = now;
+            w.dream_state = Some(d.snapshot(data));
+        }
     }
 }
 
@@ -1165,6 +1307,8 @@ fn score_child(d: &mut Dreams, cx: &Ctx, data: &DnpData, parent: &Active, ci: us
     }
     let result = match cp {
         None => Check::Active,
+        // (A lifetime wish for a child or teen, when they've one already: the game's.)
+        Some(p) if p.name.starts_with('*') && cx.facts.has_lifetime => Check::ThrowAway,
         // (A wish that could never come true, its feedback not done here: as unsupported.)
         Some(p) if cn.visible && cn.prim != NULL_DREAM && !crate::dreamfns::fulfillable(feedback_of(p), p, cn, cx, cx.gdata) => Check::NotSupported,
         Some(p) => check(&p.check, p, cn, &mut subject, cx, cx.gdata),
@@ -1261,6 +1405,7 @@ type ExtraQuery<'w, 's> = Query<
         Option<&'static crate::rabbitholes::SchoolGrades>,
         Has<crate::rabbitholes::Homework>,
         Has<crate::little::Pregnancy>,
+        Has<crate::lifetime::LifetimeWish>,
     ),
     With<HouseholdMember>,
 >;
@@ -1292,7 +1437,7 @@ fn roster(people: &PeopleQuery) -> (HashMap<u64, Person>, HashMap<Entity, u64>) 
 
 /// A household Sim's needs, whereabouts, doings and records, for the functions.
 fn facts_of<'a>(me: Entity, extra: &'a ExtraQuery, gdata: &s3bake::GameDataBaked, ids: &HashMap<Entity, u64>, party: Option<&crate::parties::Party>, date: Option<&crate::dates::Date>, plants: u32) -> Facts<'a> {
-    let Ok((motives, lot, at_work, journal, author, novels, books, recipes, classes, chess, grades, homework, pregnant)) = extra.get(me) else { return Facts::default() };
+    let Ok((motives, lot, at_work, journal, author, novels, books, recipes, classes, chess, grades, homework, pregnant, has_lifetime)) = extra.get(me) else { return Facts::default() };
     // (Books read to the end: novels, and skill books to their last page.)
     let novels_read = novels.map_or(0, |n| n.0.iter().filter(|r| r.finished > 0).count());
     let skill_read = books.map_or(0, |b| b.0.iter().filter(|(k, pages)| gdata.skill_books.iter().any(|x| x.key == *k && *pages >= x.pages as f32)).count());
@@ -1313,6 +1458,7 @@ fn facts_of<'a>(me: Entity, extra: &'a ExtraQuery, gdata: &s3bake::GameDataBaked
         party: lot.is_none() && party.is_some_and(|p| p.on()),
         date: date.and_then(|d| if d.a == me { ids.get(&d.b) } else if d.b == me { ids.get(&d.a) } else { None }).copied(),
         plants,
+        has_lifetime,
     }
 }
 
@@ -1324,6 +1470,7 @@ fn sync_wishes(
     people: PeopleQuery,
     extra: ExtraQuery,
     (gu, ui, family): (Option<Res<crate::icons::GameUi>>, Option<Res<crate::layout::UiAssets>>, Option<Res<crate::family::Genealogy>>),
+    mut questions: ResMut<crate::dialog::Questions>,
 ) {
     let Some(gu) = gu else { return };
     let gdata = gu.data.clone();
@@ -1345,6 +1492,29 @@ fn sync_wishes(
         let promised_now: Vec<u64> = w.promised.iter().filter_map(|x| x.dream().map(|k| k.uid)).collect();
         let offered_now: Vec<u64> = w.offered.iter().filter_map(|x| x.dream().map(|k| k.uid)).collect();
         for uid in &promised_now {
+            // (A lifetime wish for a child or teen: asked about first, as the game's
+            // `DreamPromised`, and on offer still till it's answered.)
+            if !d.is_promised(*uid)
+                && let Some(a) = d.active.iter().find(|a| a.uid == *uid)
+                && let Some(p) = data.primitive(data.trees[a.tree].nodes[a.node].prim)
+                && p.name.starts_with('*')
+                && let Some(wish) = crate::lifetime::LIFETIME_WISHES.iter().position(|l| l.check == p.check)
+            {
+                w.promised.retain(|x| x.dream().is_none_or(|k| k.uid != *uid));
+                if !questions.queue.iter().any(|q| matches!(q.about, crate::dialog::Question::ConfirmLifetimeWish { uid: u, .. } if u == *uid)) {
+                    let name = crate::lifetime::LIFETIME_WISHES[wish].name;
+                    let text = ui.as_deref().and_then(|u| u.localize("Ui/Caption/Hud/Dreams:Accept")).unwrap_or_else(|| "Are you sure you want '{0.String}' to be your Sim's lifetime wish?".into()).replace("{0.String}", name);
+                    questions.ask(crate::dialog::Ask {
+                        about: crate::dialog::Question::ConfirmLifetimeWish { sim: me, wish, uid: *uid },
+                        icon: "hud_icon_plumbob_r2".into(),
+                        heading: format!("Lifetime Wish for {}", sim.first),
+                        title: name.to_string(),
+                        text,
+                        answers: ["Yes", "No"].iter().map(|l| crate::dialog::Answer { label: l.to_string(), detail: String::new(), icon: String::new() }).collect(),
+                    });
+                }
+                continue;
+            }
             if !d.is_promised(*uid)
                 && d.queue.contains(uid)
                 && let Some(slot) = d.promised.iter().position(|s| s.is_none())

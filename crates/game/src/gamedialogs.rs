@@ -383,6 +383,8 @@ fn question_dialogs(
             crate::dialog::Question::CareerEvent { .. } => "TwoButtonDialog",
             // (A call come in: answered or not.)
             crate::dialog::Question::PhoneCall { .. } => "TwoButtonDialog",
+            // (A child's wish to be their lifetime wish: yes or no.)
+            crate::dialog::Question::ConfirmLifetimeWish { .. } => "TwoButtonDialog",
             // (A newborn's name: the game's box to type it in.)
             crate::dialog::Question::NameBaby { .. } | crate::dialog::Question::Engrave { .. } | crate::dialog::Question::NameDiscovery { .. } | crate::dialog::Question::RenameProperty { .. } => "StringInputDialog",
             crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 3 => "ThreeButtonDialog",

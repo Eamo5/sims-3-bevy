@@ -131,6 +131,8 @@ pub struct Wishes {
     /// Lifetime rewards bought (their reward traits' names: `SteelBladder`).
     pub rewards: Vec<String>,
     pub(crate) next_offer: f64,
+    /// The game's wishes as they stood, to be put back from a save (`dreams`).
+    pub dream_state: Option<crate::dreams::SavedDreams>,
 }
 
 impl Wishes {

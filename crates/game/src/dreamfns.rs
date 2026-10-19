@@ -108,6 +108,8 @@ pub struct Facts<'a> {
     pub party: bool,
     pub date: Option<u64>,
     pub plants: u32,
+    /// They've a lifetime wish already.
+    pub has_lifetime: bool,
 }
 
 /// Where a Sim stands, for the functions.

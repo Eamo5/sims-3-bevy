@@ -115,6 +115,9 @@ pub struct SavedSim {
     pub promised_wishes: Vec<crate::wishes::Wish>,
     #[serde(default)]
     pub next_wish_offer: Option<f64>,
+    /// The game's wishes as they stood: armed, offered, promised, how far along (`dreams`).
+    #[serde(default)]
+    pub dream_state: Option<crate::dreams::SavedDreams>,
     /// Classroom start and home arrival for a school day currently in progress.
     #[serde(default)]
     pub school_visit: Option<(f64, f64)>,
@@ -663,6 +666,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         offered_wishes: Vec::new(),
         promised_wishes: Vec::new(),
         next_wish_offer: None,
+        dream_state: None,
         school_visit: None,
         pregnancy: None,
         pregnancy_mood: None,
@@ -1082,6 +1086,7 @@ fn save_game(
             offered_wishes: wishes.map(|w| w.offered.clone()).unwrap_or_default(),
             promised_wishes: wishes.map(|w| w.promised.clone()).unwrap_or_default(),
             next_wish_offer: wishes.map(|w| w.next_offer),
+            dream_state: wishes.and_then(|w| w.dream_state.clone()),
             outfit: saved_outfit(&sim.outfit),
         accessories: sim.outfit.accessories.clone(),
         eyeliner: sim.outfit.eyeliner,
@@ -1444,6 +1449,7 @@ pub(crate) fn apply_loaded_game(
             wishes.offered = s.offered_wishes.clone();
             wishes.promised = s.promised_wishes.clone();
             wishes.next_offer = s.next_wish_offer.unwrap_or(game.minutes);
+            wishes.dream_state = s.dream_state.clone();
             ec.insert(wishes);
         }
         if s.member {

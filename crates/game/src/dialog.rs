@@ -45,13 +45,16 @@ pub enum Question {
     NameDiscovery { sim: Entity, suggested: String },
     /// A new name for a building the household owns (typed in; or cancelled: `estatedialog`).
     RenameProperty { sim: Entity, lot: usize, suggested: String },
+    /// A child's or teen's wish promised that would be their lifetime wish (an index into
+    /// `lifetime::LIFETIME_WISHES`; the wish's own number in `dreams`): yes or no.
+    ConfirmLifetimeWish { sim: Entity, wish: usize, uid: u64 },
 }
 
 impl Question {
     /// The Sim the question is about.
     pub fn sim(&self) -> Option<Entity> {
         match self {
-            Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } | Question::CareerEvent { sim, .. } | Question::NameBaby { sim, .. } | Question::PhoneCall { sim, .. } | Question::NameDiscovery { sim, .. } | Question::RenameProperty { sim, .. } => Some(*sim),
+            Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } | Question::CareerEvent { sim, .. } | Question::NameBaby { sim, .. } | Question::PhoneCall { sim, .. } | Question::NameDiscovery { sim, .. } | Question::RenameProperty { sim, .. } | Question::ConfirmLifetimeWish { sim, .. } => Some(*sim),
             Question::Household(_) | Question::Engrave { .. } => None,
         }
     }
