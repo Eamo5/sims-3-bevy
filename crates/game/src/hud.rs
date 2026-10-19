@@ -110,6 +110,8 @@ pub struct PieMenu {
     pub pages: Vec<Vec<(String, ActionKind)>>,
     /// Which way each option lies from the middle (for picking by the pointer's direction).
     pub dirs: Vec<Vec2>,
+    /// No name under the face (an object's menu, and its submenus).
+    pub nameless: bool,
 }
 
 /// The fridge's (and microwave's) menu of snacks, as the game titles it.
@@ -754,6 +756,15 @@ struct PieCenter(Entity);
 
 pub fn open_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, actor: Entity, options: Vec<(String, ActionKind)>) {
     pie.parents.clear();
+    pie.nameless = false;
+    spawn_pie(commands, pie, at, title, actor, options);
+}
+
+/// An object's menu: no name under the face (the game's pie names nothing it's opened on, only
+/// what can be done).
+fn open_object_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, actor: Entity, options: Vec<(String, ActionKind)>) {
+    pie.parents.clear();
+    pie.nameless = true;
     spawn_pie(commands, pie, at, title, actor, options);
 }
 
@@ -834,6 +845,7 @@ fn spawn_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, 
                     });
                 }
             }
+            let named = !pie.nameless && !title.is_empty();
             if !submenu {
                 // The one acting, in the middle, with what's been clicked above.
                 p.spawn((
@@ -854,21 +866,24 @@ fn spawn_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, 
                     BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.45), Val::Px(0.0), Val::Px(2.0), Val::Px(0.0), Val::Px(6.0)),
                     Pickable::IGNORE,
                 ));
-                // (A label under it, on a dark pill so it reads over anything.)
-                p.spawn((
-                    Node { position_type: PositionType::Absolute, left: Val::Px(-110.0), top: Val::Px(31.0), width: Val::Px(220.0), justify_content: JustifyContent::Center, ..default() },
-                    Pickable::IGNORE,
-                ))
-                .with_children(|l| {
-                    l.spawn((
-                        Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(1.0)), border_radius: BorderRadius::all(Val::Px(9.0)), ..default() },
-                        BackgroundColor(Color::srgba(0.05, 0.12, 0.25, 0.75)),
+                // (A label under it, on a dark pill so it reads over anything: whom it's
+                // for, not an object's name.)
+                if named {
+                    p.spawn((
+                        Node { position_type: PositionType::Absolute, left: Val::Px(-110.0), top: Val::Px(31.0), width: Val::Px(220.0), justify_content: JustifyContent::Center, ..default() },
                         Pickable::IGNORE,
                     ))
-                    .with_children(|b| {
-                        b.spawn((text(title, 13.0, Color::WHITE), Pickable::IGNORE));
+                    .with_children(|l| {
+                        l.spawn((
+                            Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(1.0)), border_radius: BorderRadius::all(Val::Px(9.0)), ..default() },
+                            BackgroundColor(Color::srgba(0.05, 0.12, 0.25, 0.75)),
+                            Pickable::IGNORE,
+                        ))
+                        .with_children(|b| {
+                            b.spawn((text(title, 13.0, Color::WHITE), Pickable::IGNORE));
+                        });
                     });
-                });
+                }
             }
             for (i, (label, _)) in options.iter().enumerate().filter(|_| !game_look) {
                 let a = -std::f32::consts::FRAC_PI_2 + i as f32 / n as f32 * std::f32::consts::TAU;
@@ -1374,7 +1389,7 @@ fn world_click(
                 if grown {
                     options.push((crate::interact::repair_of(obj.kind).0.to_string(), ActionKind::Repair { target: t }));
                 }
-                open_pie(&mut commands, &mut pie, cursor, &format!("{} (broken)", obj.name), actor, options);
+                open_object_pie(&mut commands, &mut pie, cursor, &format!("{} (broken)", obj.name), actor, options);
                 return;
             }
             // A house phone: the phone's menu.
@@ -2165,7 +2180,7 @@ fn world_click(
                     pie.submenus.push(("Upgrade".to_string(), list));
                 }
             }
-            open_pie(&mut commands, &mut pie, cursor, &obj.name, actor, options);
+            open_object_pie(&mut commands, &mut pie, cursor, &obj.name, actor, options);
         }
     } else if actor_sim.age == crate::sim::Age::Baby {
         // Babies stay put.
