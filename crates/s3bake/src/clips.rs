@@ -368,6 +368,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     // Bathroom.
     "a2o_toilet_useStanding",
     "a2o_toilet_flush_x",
+    "a2o_toilet_vomit_",
+    "c2o_toilet_vomit_",
     "a2o_shower_takeShower_getIn",
     // (WooHoo in the shower: both Sims' parts, and the shower's.)
     "a2a_shower_woohoo",

@@ -914,7 +914,8 @@ pub fn move_in(
         if let (true, Some((door, door_e))) = (fresh, front_door) {
             // (Side by side on the step.)
             let at = door + Vec2::new(k as f32 * 0.8 - 0.4, 0.0);
-            crate::doorbell::come_to_door(&mut commands, e, &mut queue, at, door_e.unwrap_or(e));
+            let back = building.as_ref().and_then(|b| b.front_door_out(exit.xz(), crate::doorbell::STAND_BACK)).map(|b| b + Vec2::new(k as f32 * 0.9 - 0.45, 0.0));
+            crate::doorbell::come_to_door(&mut commands, e, &mut queue, at, back, door_e.unwrap_or(e));
         }
         commands.entity(e).insert((
             queue,

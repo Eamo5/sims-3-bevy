@@ -348,6 +348,26 @@ impl ActiveBuilding {
             .min_by(|p, q| p.0.distance(from).total_cmp(&q.0.distance(from)))
             .map(|(p, e)| (self.world(p.x, p.y, 0.0).xz(), e))
     }
+
+    /// Where a caller stands back from the front door to wait, `out` metres outside it (world):
+    /// the game's `Lot.MoveAwayFromDoor`, 2 to 4 m out.
+    pub fn front_door_out(&self, from: Vec2, out: f32) -> Option<Vec2> {
+        let indoors = |p: Vec2| self.room_at(1, self.world(p.x, p.y, 0.0)).is_some_and(|k| !matches!(k, ROOM_PORCH | ROOM_OUTSIDE));
+        let from = self.local(Vec3::new(from.x, 0.0, from.y));
+        self.holes
+            .iter()
+            .filter(|(_, h)| h.door && h.level.max(1) == 1)
+            .filter_map(|(_, h)| {
+                let (a, b) = (h.wall_point + h.fwd * 0.8, h.wall_point - h.fwd * 0.8);
+                match (indoors(a), indoors(b)) {
+                    (false, true) => Some((a, h.wall_point + h.fwd * out)),
+                    (true, false) => Some((b, h.wall_point - h.fwd * out)),
+                    _ => None,
+                }
+            })
+            .min_by(|p, q| p.0.distance(from).total_cmp(&q.0.distance(from)))
+            .map(|(_, p)| self.world(p.x, p.y, 0.0).xz())
+    }
 }
 
 /// Height a Sim stands at: the house's ground floor when inside it, else the terrain.

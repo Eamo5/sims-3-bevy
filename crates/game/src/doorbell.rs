@@ -1,7 +1,8 @@
 //! Callers at the door: a Sim come to visit walks up to the house's front door and rings the
-//! bell (the game's ring, and its chime), then waits there to be let in. Someone of the
-//! household goes to greet them (the game's greeting), and only then do they come in; left
-//! waiting a couple of hours, they give up and go home.
+//! bell (the game's ring, and its chime), then stands back from the door to wait to be let in
+//! (`Lot.MoveAwayFromDoor`). The player's household invites them inside ("Invite Inside": never
+//! of their own accord, as the game's); a family visited lets them in itself. Left waiting a
+//! couple of hours, they give up and go home.
 
 use bevy::prelude::*;
 
@@ -29,12 +30,19 @@ const WAIT_MINUTES: f64 = 120.0;
 /// The ring at the door.
 pub const RING: &[&str] = &["a2o_door_ringBell_x"];
 
-/// A caller come to the house: up to its front door (standing outside it, `door`), to ring.
-pub fn come_to_door(commands: &mut Commands, e: Entity, queue: &mut ActionQueue, door: Vec2, target: Entity) {
+/// How far back from the front door callers wait (metres: the game's 2 to 4).
+pub const STAND_BACK: f32 = 2.5;
+
+/// A caller come to the house: up to its front door (standing outside it, `door`), to ring, and
+/// back from it a little (`back`) to wait.
+pub fn come_to_door(commands: &mut Commands, e: Entity, queue: &mut ActionQueue, door: Vec2, back: Option<Vec2>, target: Entity) {
     info!("a caller comes to the front door at {:.1},{:.1}", door.x, door.y);
     queue.0.clear();
     queue.0.push_back(Action::new("Go to the Door", ActionKind::GoHere(door, 1), true));
     queue.0.push_back(Action::new("Ring the Doorbell", ActionKind::Outro { clips: RING, then: None, secs: 3.0, stand_at: None, target }, true));
+    if let Some(back) = back {
+        queue.0.push_back(Action::new("Wait Outside", ActionKind::GoHere(back, 1), true));
+    }
     commands.entity(e).insert(AtTheDoor { since: None });
 }
 

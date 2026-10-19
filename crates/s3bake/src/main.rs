@@ -800,6 +800,16 @@ fn main() {
     if let Some(i) = args.iter().position(|a| a == "--outfit") {
         // --outfit <name>: a career outfit's parts, and whether each one's design renders
         // (DDS=<folder>: each rendered design saved there).
+        // (`career:<name>`: that career's levels' outfits, by name.)
+        if let Some(c) = args[i + 1].strip_prefix("career:") {
+            let g = s3bake::load_gamedata(&s3bake::default_root()).expect("no gameplay data");
+            for career in g.careers.iter().filter(|x| x.hex.eq_ignore_ascii_case(c) || x.name.eq_ignore_ascii_case(c)) {
+                for l in &career.levels {
+                    println!("{} {} {}: {:?}", career.hex, l.level, l.title, l.outfits);
+                }
+            }
+            return;
+        }
         let pkgs = s3pkg::install::open_install(&data, |_| true);
         let name = &args[i + 1];
         let Some(o) = pkgs.read_ti(s3formats::sim::T_OUTFIT, s3pkg::fnv64(name)).and_then(|d| s3formats::sim::SimOutfit::parse(&d).ok()) else {
@@ -820,6 +830,10 @@ fn main() {
             );
             if img.is_none() {
                 println!("   {}", p.preset.chars().take(400).collect::<String>());
+            }
+            // (PRESET=1: its design's XML in full.)
+            if std::env::var("PRESET").is_ok() {
+                println!("{}", p.preset);
             }
             if let (Some(dir), Some(img)) = (&png, &img) {
                 let _ = std::fs::write(format!("{dir}/{name}_{k}.dds"), s3bake::ddsw::encode_dds(img));

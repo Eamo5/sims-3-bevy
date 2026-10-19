@@ -252,9 +252,10 @@ fn ring_the_bell(
         return;
     }
     let Some((door, door_e)) = building.as_ref().and_then(|b| b.away.as_ref()).and_then(|b| b.front_door(v.exit)) else { return };
+    let back = building.as_ref().and_then(|b| b.away.as_ref()).and_then(|b| b.front_door_out(v.exit, crate::doorbell::STAND_BACK));
     for (e, on, mut queue) in &mut visitors {
         if on.0 == v.lot && rung.insert((e, v.lot)) {
-            crate::doorbell::come_to_door(&mut commands, e, &mut queue, door, door_e.unwrap_or(e));
+            crate::doorbell::come_to_door(&mut commands, e, &mut queue, door, back, door_e.unwrap_or(e));
         }
     }
 }

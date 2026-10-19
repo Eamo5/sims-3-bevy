@@ -131,6 +131,9 @@ const CHAT_WITH: &str = "Chat";
 const READ_SKILL_BOOK: &str = "Read a Skill Book";
 const READ_NOVEL: &str = "Read a Novel";
 const GO_HERE_WITH: &str = "Go Here With";
+/// The game's visitor menu: "Invite Inside" and "Ask to Leave" (`VisitSituation`'s).
+const INVITE_INSIDE: &str = "Invite Inside";
+const ASK_TO_LEAVE: &str = "Ask to Leave";
 /// The car's (`CarOwnable`'s `VisitCommunityLot`, `VisitLot`, their `...With`, `GoShopping`).
 const TO_COMMUNITY_LOT: &str = "Go to Community Lot";
 const VISIT_LOT: &str = "Visit Lot";
@@ -1290,6 +1293,20 @@ fn world_click(
             }
             let rel = rels.get(t);
             let target_member = members_q.contains(t);
+            // (Someone at the door, rung and waiting: invited in, the game's "Invite Inside"; a
+            // visitor about the place asked to leave.)
+            if members_q.contains(actor) && !target_member {
+                if door_q.get(t).is_ok_and(|d| d.since.is_some())
+                    && let Some(si) = crate::social::social_index("Greet")
+                {
+                    options.push((INVITE_INSIDE.to_string(), ActionKind::Social { target: t, social: si }));
+                }
+                if company_q.get(t).is_ok_and(|c| c.2)
+                    && let Some(si) = crate::social::social_index("Say Goodbye")
+                {
+                    options.push((ASK_TO_LEAVE.to_string(), ActionKind::Social { target: t, social: si }));
+                }
+            }
             // (A baby or toddler: picked up, put down, put in a crib; family's, or a friend's.)
             if sim.age.is_little() {
                 let related = (member && target_member) || rel.friendship >= crate::carry::STRANGER_LIKING;
@@ -1352,7 +1369,8 @@ fn world_click(
                         crate::social::SocialEffect::TeachWalk => !toddler_q.get(t).is_ok_and(|k| k.walks()),
                         crate::social::SocialEffect::TeachTalk => !toddler_q.get(t).is_ok_and(|k| k.talks()),
                         crate::social::SocialEffect::HelpHomework => hw_q.contains(t),
-                        crate::social::SocialEffect::Greet => door_q.get(t).is_ok_and(|d| d.since.is_some()) && members_q.contains(actor),
+                        // (Callers are invited in from the top of the menu: "Invite Inside".)
+                        crate::social::SocialEffect::Greet => false,
                         // (Catch with a ball about.)
                         crate::social::SocialEffect::PlayCatch => objects.iter().any(|o| o.kind == ObjectKind::Ball),
                         // (An opportunity's delivery to them, what it asks held.)
@@ -1530,6 +1548,10 @@ fn world_click(
                     continue;
                 }
                 // (Flush: while it needs one.)
+                // (Being sick in it's never asked for: `nausea`.)
+                if d.special == Special::Vomit {
+                    continue;
+                }
                 if d.special == Special::Flush && !unflushed.0.contains_key(&t) {
                     continue;
                 }

@@ -1351,6 +1351,9 @@ pub enum Special {
     /// The toilet used, and one left unflushed flushed (`toilets`).
     UseToilet,
     Flush,
+    /// Sick in the toilet when nausea's run its course (the game's `Toilet.Vomit`; never on the
+    /// menu: `nausea`).
+    Vomit,
     /// A workout to the stereo (the game's `AthleticGameObject.WorkOut` there: Cardio Exercise,
     /// and Strength Training for teens and up), on its workout station (`music`).
     CardioWorkOut,
@@ -1594,11 +1597,13 @@ static BED: [InteractionDef; 7] = [
 ];
 /// WooHoo's needs per hour: fun and company, at some cost to energy and hygiene.
 const WOOHOO_RATES: [f32; 6] = [0.0, 0.0, -8.0, 180.0, -20.0, 160.0];
-static TOILET: [InteractionDef; 3] = [
+static TOILET: [InteractionDef; 4] = [
     InteractionDef { until_full: Some(BLADDER), on_object: true, special: Special::UseToilet, ..def("Use Toilet", 15.0, [0.0, 900.0, 0.0, 0.0, -10.0, 0.0], Pose::Sit) },
     SCRUB,
     // (The game's `Toilet.Flush`: offered while it needs one.)
     InteractionDef { special: Special::Flush, ..def("Flush", 1.6, N, Pose::Use) },
+    // (The game's `Toilet.Vomit`: only when nausea runs out, `nausea`.)
+    InteractionDef { autonomous: false, special: Special::Vomit, ..def(crate::nausea::THROW_UP, 4.0, N, Pose::Use) },
 ];
 /// How long a rummage's putting the lid back takes (seconds, its clip's).
 const RUMMAGE_CLOSE_SECS: f32 = 4.5;
@@ -2168,6 +2173,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         ),
         "Use Toilet" => A::new(Some("a2o_toilet_useStanding_start_x"), &["a2o_toilet_useStanding_loop_x"]),
         "Flush" => A::new(None, &["a2o_toilet_flush_x"]),
+        "Throw Up" if kind == ObjectKind::Toilet => A::new(Some("a2o_toilet_vomit_start_x"), &["a2o_toilet_vomit_loop_x"]).ending(&["a2o_toilet_vomit_stop_x"], 1.5),
         "Take Shower" => A::new(Some("a2o_shower_takeShower_getIn_x"), &["a2o_shower_takeShower_loop"]).ending(&["a2o_shower_takeShower_getOut_x"], 2.4),
         "Wash Hands" => A::new(Some("a2o_sink_washhands_start_x"), &["a2o_sink_washhands_scrubHands_x", "a2o_sink_washhands_rinseHands_x"]).ending(&["a2o_sink_washhands_stop_x"], 2.6),
         // (The sponge in hand: the sink's `SpongeBath` states.)
@@ -3191,13 +3197,14 @@ fn comings_and_goings(
             // To the front door, to ring and be let in (a party's guests come straight in).
             let partying = party.is_some();
             let door = building.as_ref().and_then(|b| b.front_door(exit.0)).filter(|_| !partying);
+            let back = building.as_ref().and_then(|b| b.front_door_out(exit.0, crate::doorbell::STAND_BACK));
             match (queue, door) {
-                (Some(mut queue), Some((door, door_e))) => crate::doorbell::come_to_door(&mut commands, e, &mut queue, door, door_e.unwrap_or(e)),
+                (Some(mut queue), Some((door, door_e))) => crate::doorbell::come_to_door(&mut commands, e, &mut queue, door, back, door_e.unwrap_or(e)),
                 (Some(_), None) => {}
                 (None, door) => {
                     let mut queue = ActionQueue::default();
                     if let Some((door, door_e)) = door {
-                        crate::doorbell::come_to_door(&mut commands, e, &mut queue, door, door_e.unwrap_or(e));
+                        crate::doorbell::come_to_door(&mut commands, e, &mut queue, door, back, door_e.unwrap_or(e));
                     }
                     commands.entity(e).insert(queue);
                 }
@@ -4684,6 +4691,9 @@ pub(crate) fn run_actions(
                                         }
                                         Special::Flush => {
                                             commands.entity(me).insert(crate::toilets::Flushed(*target));
+                                        }
+                                        Special::Vomit => {
+                                            commands.entity(me).insert(crate::nausea::ThrewUp(*target));
                                         }
                                         Special::QuitJob => {
                                             if job.is_some() {
@@ -6699,9 +6709,10 @@ fn autonomy(
                 }
             }
         }
-        // Someone at the door is let in by whoever of the household is free (one of them); at a
-        // home visited, by one of the family living there.
-        let at_home = (household.contains(me) && my_lot.is_none()) || residents.get(me).is_ok_and(|r| Some(r.0) == my_lot);
+        // Someone at the door of a home visited is let in by one of the family living there (the
+        // player's household never invites anyone in of its own accord: the game's
+        // `NotAutonomousForSelectableSims`, "Invite Inside" is the player's to choose).
+        let at_home = residents.get(me).is_ok_and(|r| Some(r.0) == my_lot);
         if at_home && sim.age.is_grown() && sim.age != Age::Child
             && let Some(social) = greet
             && let Some((caller, _)) = callers.iter().find(|(c, d)| d.since.is_some() && !greeted.contains(c))
@@ -6742,8 +6753,8 @@ fn autonomy(
         let social_need = if sim.traits.contains(&crate::life::Trait::Loner) { 0.0 } else { 30.0 };
         let social_need = if sim.traits.contains(&crate::life::Trait::PartyAnimal) || sim.traits.contains(&crate::life::Trait::Friendly) { 50.0 } else { social_need };
         // A little one in need comes first for the teens and grown-ups (the game's
-        // `LookAfterBabyOrToddler`, every teen and older of the household's).
-        if crate::carry::can_carry(sim.age) {
+        // `LookAfterBabyOrToddler`, every teen and older of the household's: not a visitor's).
+        if crate::carry::can_carry(sim.age) && household.contains(me) {
             for &(other, pos, age, needs, lot) in &others {
                 if !age.is_little() || lot != my_lot {
                     continue;
