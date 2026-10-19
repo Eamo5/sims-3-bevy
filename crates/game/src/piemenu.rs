@@ -16,7 +16,7 @@ pub struct PieMenuPlugin;
 
 impl Plugin for PieMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (enable, build_pies, warp_pointer, text_hover, mask_hover).chain());
+        app.add_systems(Update, (enable, measure_pies, build_pies, warp_pointer, text_hover, mask_hover).chain());
     }
 }
 
@@ -84,8 +84,58 @@ const MIN_WIDTH: f32 = 55.0;
 /// The words' colours (`HUDPieMenuReference`'s Reg and High).
 const REGULAR: u32 = 0xff19_2d87;
 const HIGHLIGHT: u32 = 0xff3c_31bf;
-/// About how wide the words are, a character (Sims3Bold9pt, Helvetica Rounded).
+/// About how wide the words are, a character (Sims3Bold9pt, Helvetica Rounded): only till they've
+/// been measured.
 const CHAR_WIDTH: f32 = 6.4;
+/// Frames to wait for the words' measurements before going by the guess.
+const MEASURE_FRAMES: u32 = 4;
+
+/// A menu's words put out unseen to be measured, its bubbles fitted to them next: each option's,
+/// the middle's, and the frames waited.
+#[derive(Component)]
+pub struct Measuring(Vec<Entity>, Option<Entity>, u32);
+
+/// An option's words as its bubble shows them: what opens more marked with the game's dots (and
+/// only once, whatever its own words end with).
+fn caption(label: &str) -> String {
+    match label.strip_suffix(" ›") {
+        Some(l) => format!("{}...", trim_dots(l)),
+        None => label.to_string(),
+    }
+}
+
+/// A submenu's middle: its name, and the dots.
+fn back_caption(name: &str) -> String {
+    format!("{}...", trim_dots(name))
+}
+
+fn trim_dots(s: &str) -> &str {
+    s.trim_end().trim_end_matches('…').trim_end_matches("...").trim_end()
+}
+
+/// A new menu's words, put out unseen in the bubbles' own font to be measured.
+fn measure_pies(mut commands: Commands, q: Query<(Entity, &PieRequest), Added<PieRequest>>, ui: Option<ResMut<UiAssets>>, mut fonts: ResMut<Assets<Font>>) {
+    let Some(mut ui) = ui else { return };
+    let style = |ui: &UiAssets, id: u32| ui.find("HUDPieMenu", id).and_then(|b| b.children.iter().find(|c| c.id == ITEM_TEXT).map(|c| c.font)).unwrap_or(0);
+    let (item_style, back_style) = (style(&ui, ITEM), style(&ui, RETURN));
+    for (root, req) in &q {
+        let mut probe = |words: String, font_style: u32| {
+            let (font, line) = ui.text_font(&mut fonts, font_style);
+            // (On one line, as a bubble's are: unwrapped, whatever room the menu's middle has.)
+            commands.spawn((Text::new(words), font, line, TextLayout::no_wrap(), TextColor(Color::NONE), Node { position_type: PositionType::Absolute, ..default() }, Pickable::IGNORE, ChildOf(root))).id()
+        };
+        let options = req.0.iter().map(|l| probe(caption(l), item_style)).collect();
+        let back = req.1.as_ref().map(|n| probe(back_caption(n), back_style));
+        commands.entity(root).insert(Measuring(options, back, 0));
+    }
+}
+
+/// How wide some measured words are (none yet: not laid out).
+fn measured(texts: &Query<&bevy::text::TextLayoutInfo>, e: Entity) -> Option<f32> {
+    // (In the interface's own pixels already.)
+    let info = texts.get(e).ok()?;
+    (info.size.x > 0.0).then(|| info.size.x.ceil())
+}
 
 fn enable(ui: Option<Res<UiAssets>>, mut done: Local<bool>) {
     if *done {
@@ -115,30 +165,47 @@ pub fn places(n: usize) -> Vec<(Vec2, u32)> {
 #[allow(clippy::type_complexity)]
 fn build_pies(
     mut commands: Commands,
-    mut q: Query<(Entity, &PieRequest, &mut Node), Added<PieRequest>>,
+    mut q: Query<(Entity, &PieRequest, &mut Node, &mut Measuring)>,
+    texts: Query<&bevy::text::TextLayoutInfo>,
     ui: Option<ResMut<UiAssets>>,
     (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
     mut pie: ResMut<crate::hud::PieMenu>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
     let Some(mut ui) = ui else { return };
-    for (root, req, mut node) in &mut q {
+    for (root, req, mut node, mut m) in &mut q {
+        // (Its words measured first, as the game's are, to fit each bubble to them.)
+        let widths: Vec<Option<f32>> = m.0.iter().map(|e| measured(&texts, *e)).collect();
+        let back_width = m.1.and_then(|e| measured(&texts, e));
+        let ready = widths.iter().zip(&req.0).all(|(w, l)| w.is_some() || l.is_empty()) && (m.1.is_none() || back_width.is_some());
+        m.2 += 1;
+        if !ready && m.2 < MEASURE_FRAMES {
+            continue;
+        }
+        for e in m.0.iter().chain(m.1.iter()) {
+            commands.entity(*e).try_despawn();
+        }
+        commands.entity(root).remove::<Measuring>();
         // (All its bubbles' room, to keep it on the screen.)
         let mut room = Rect::EMPTY;
         // The middle of a submenu: back to the menu before, named for this one.
         if let Some(name) = &req.1
             && let Some(mut b) = ui.find("HUDPieMenu", RETURN).cloned()
         {
-            let words = name.chars().count() as f32 * CHAR_WIDTH;
+            let words = back_width.unwrap_or(back_caption(name).chars().count() as f32 * CHAR_WIDTH);
+            // (Fitted to its words as the options are, and centred: the game's `SetupButton`
+            // for its button 12.)
             let [x1, y1, x2, y2] = b.area;
             let grow = (words - TEXT_WIDTH).max(0.0).round();
-            b.area = [x1 - (grow * 0.5).round(), y1, x2 + grow - (grow * 0.5).round(), y2];
+            let width = ((x2 - x1) + words - TEXT_WIDTH + 2.0 - ICON_ROOM).max(MIN_WIDTH).round();
+            let left = (-width * 0.5).round();
+            b.area = [left, y1, left + width, y2];
             b.cls = "Button".to_string();
             b.flags |= s3bake::ui::WIN_VISIBLE | s3bake::ui::WIN_ENABLED;
             for c in &mut b.children {
                 match c.id {
                     ITEM_TEXT => {
-                        c.caption = format!("{name}...");
+                        c.caption = back_caption(name);
                         c.colors = vec![REGULAR];
                         c.area[2] += grow;
                     }
@@ -157,11 +224,11 @@ fn build_pies(
         }
         for (k, (label, (loc, slot))) in req.0.iter().zip(places(req.0.len())).enumerate() {
             // (What opens more, as the game marks it: "Have Breakfast...".)
-            let label = &label.strip_suffix(" ›").map_or_else(|| label.clone(), |l| format!("{l}..."));
+            let label = &caption(label);
             let Some(mut b) = ui.find("HUDPieMenu", ITEM + slot).cloned() else { continue };
             let [x1, y1, x2, y2] = b.area;
             let bw = x2 - x1;
-            let words = label.chars().count() as f32 * CHAR_WIDTH;
+            let words = widths.get(k).copied().flatten().unwrap_or(label.chars().count() as f32 * CHAR_WIDTH);
             let width = (bw + words - TEXT_WIDTH + 2.0 - ICON_ROOM).max(MIN_WIDTH).round();
             // (Centred at the top and bottom; on the left, its tail kept where it was.)
             let x = match slot {
@@ -309,6 +376,15 @@ mod tests {
         assert_eq!(option_toward(&dirs, Vec2::new(-90.0, -20.0)), Some(3));
         // (On the face in the middle: none.)
         assert_eq!(option_toward(&dirs, Vec2::new(10.0, -12.0)), None);
+    }
+
+    #[test]
+    fn what_opens_more_is_marked_once() {
+        assert_eq!(caption("Friendly ›"), "Friendly...");
+        assert_eq!(caption("Real Estate and Travel Services... ›"), "Real Estate and Travel Services...");
+        assert_eq!(caption("Ask About…  ›"), "Ask About...");
+        assert_eq!(caption("Chat"), "Chat");
+        assert_eq!(back_caption("Real Estate and Travel Services..."), "Real Estate and Travel Services...");
     }
 
     #[test]
