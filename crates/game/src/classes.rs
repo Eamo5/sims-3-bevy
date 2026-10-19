@@ -109,9 +109,11 @@ fn class_over(
     mut sims: Query<(Entity, &crate::sim::Sim, &ClassOver, &mut crate::interact::Skills, Option<&mut ClassesTaken>)>,
     mut notes: ResMut<crate::interact::Notifications>,
     mut life: MessageWriter<crate::life::LifeEvent>,
+    mut dreams: MessageWriter<crate::dreams::DreamEvent>,
 ) {
     for (e, sim, c, mut skills, taken) in &mut sims {
         commands.entity(e).remove::<ClassOver>();
+        dreams.write(crate::dreams::DreamEvent { skill: Some(c.0.to_string()), ..crate::dreams::DreamEvent::new(e, "kTookSkillClass") });
         let first = crate::interact::skill_points(c.0).first().copied().unwrap_or(1800) as f32;
         let level = skills.add_points(c.0, first);
         match taken {

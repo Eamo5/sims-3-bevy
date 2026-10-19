@@ -122,6 +122,8 @@ pub enum Deed {
     Bait(Option<(String, u8)>),
     /// A fish caught, of a kind and weight (lb).
     Caught(String, f64),
+    /// A painting finished: its worth, and how good (0 normal, 1 brilliant, 2 a masterpiece).
+    Painted(i64, u8),
 }
 
 impl Did {
@@ -198,7 +200,10 @@ impl SkillJournal {
                 *self.tally.entry(format!("caught:{fish}")).or_default() += 1.0;
                 let heaviest = self.tally.entry(Stat::HeaviestFish.key().to_string()).or_default();
                 *heaviest = heaviest.max(*w);
+                let heaviest = self.tally.entry(format!("heaviest:{fish}")).or_default();
+                *heaviest = heaviest.max(*w);
             }
+            Deed::Painted(..) => {}
         }
     }
 }

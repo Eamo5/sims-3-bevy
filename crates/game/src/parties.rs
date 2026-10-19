@@ -496,6 +496,7 @@ fn run_party(
     mut members: Query<(Entity, &Sim, &mut Moodlets, &mut Relationships, Option<&crate::wishes::Wishes>, &ActionQueue, &Transform), With<HouseholdMember>>,
     mut guests: Query<(&Sim, Option<&mut Visitor>, Option<&Mood>, &mut Moodlets, &mut Relationships, Has<GoingHome>, Has<OffLot>, Has<Invited>, Option<&ActionQueue>, &Transform), Without<HouseholdMember>>,
     mut tested: Local<bool>,
+    mut dreams: MessageWriter<crate::dreams::DreamEvent>,
 ) {
     let Some(mut p) = party else {
         life.clear();
@@ -582,6 +583,8 @@ fn run_party(
         }
         if !p.begun {
             p.begun = true;
+            // (The game's `kThrewParty`, by the party's kind.)
+            dreams.write(crate::dreams::DreamEvent { key: Some(format!("{:?}", p.kind)), ..crate::dreams::DreamEvent::new(p.host, "kThrewParty") });
             notes.push(words(ui.as_deref(), "Gameplay/Situations/Party:PartyBeginsTNS", "The first guest has arrived and it's time to start the party! To make it a success, make sure everyone is having a good time.", host.as_ref()));
         }
     }
@@ -690,6 +693,8 @@ fn run_party(
             (_, Outcome::Bad) => words(ui, "Gameplay/Notifications/Party:BadParty", "{0.SimFirstName}'s party has dragged to a close. The guests are already complaining about {0.SimFirstName}'s hosting skills.", h),
             _ => words(ui, "Gameplay/Notifications/Party:NormalParty", "{0.SimFirstName}'s party was a modest success. The guests feel good about having attended.", h),
         });
+        // (The game's `kPartyOver`: a great one's, a good outcome.)
+        dreams.write(crate::dreams::DreamEvent { key: Some(format!("{:?}", p.kind)), quality: i32::from(result == Outcome::Good && p.kind != PartyKind::Funeral), ..crate::dreams::DreamEvent::new(p.host, "kPartyOver") });
         if let Ok(mut hq) = members.get_mut(p.host) {
             match result {
                 Outcome::Good => hq.2.add(MoodletKind::GreatParty, now),

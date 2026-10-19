@@ -394,6 +394,10 @@ fn learn_recipes(
             }
         }
         notes.push(format!("{} bought a recipe book for §{price} and learned to make {}.", sim.first, r.name));
+        let key = r.key.clone();
+        commands.queue(move |w: &mut World| {
+            w.write_message(crate::dreams::DreamEvent { key: Some(key), ..crate::dreams::DreamEvent::new(e, "kLearnedRecipe") });
+        });
     }
 }
 
@@ -1008,7 +1012,7 @@ fn meal_requests(
     (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut notes: ResMut<Notifications>,
     (ui, clock, mut funds, mut leftovers): (Option<Res<crate::icons::GameUi>>, Res<crate::clock::GameClock>, Option<ResMut<crate::interact::Household>>, ResMut<Leftovers>),
-    mut did: MessageWriter<crate::journal::Did>,
+    (mut did, mut dreams): (MessageWriter<crate::journal::Did>, MessageWriter<crate::dreams::DreamEvent>),
     (qualities, floors, mut fire, rates, upgrades): (Query<&MealQuality>, Query<&crate::nav::Floor>, MessageWriter<crate::fire::StartFire>, Res<crate::interact::ObjectRates>, Query<&crate::upgrades::Upgrades>),
     (mut inventories, mut fridge): (Query<&mut crate::inventory::Inventory>, ResMut<crate::ingredients::Fridge>),
 ) {
@@ -1037,6 +1041,12 @@ fn meal_requests(
                 let first = e.get::<Sim>().map(|s| s.first.clone()).unwrap_or_default();
                 e.world_scope(|w| w.resource_mut::<crate::interact::Notifications>().push(format!("{first} loves {name}: their favourite!")));
             });
+        }
+        // (The game's `kAteMeal`: what, and how good.)
+        if matches!(req, MealRequest::Ate | MealRequest::AteStanding)
+            && let Some(r) = plateful.and_then(|p| recipe(p.0))
+        {
+            dreams.write(crate::dreams::DreamEvent { key: Some(r.key.clone()), quality: on_plate.map_or(0, |p| p.0.quality as i32 + 1), ..crate::dreams::DreamEvent::new(me, "kAteMeal") });
         }
         match *req {
             MealRequest::Serve(stove) => {
@@ -1150,6 +1160,7 @@ fn meal_requests(
                     did.write(crate::journal::Did::count(me, crate::journal::Stat::Dishes, 1.0));
                     if let Some(r) = r {
                         did.write(crate::journal::Did::made(me, r.key.clone()));
+                        dreams.write(crate::dreams::DreamEvent { key: Some(r.key.clone()), quality: quality.as_ref().map_or(0, |q| q.quality as i32 + 1), ..crate::dreams::DreamEvent::new(me, "kCookedMeal") });
                     }
                     info!("{} made {served} for one", sim.first);
                     match dish {
@@ -1174,6 +1185,8 @@ fn meal_requests(
                 did.write(crate::journal::Did::count(me, crate::journal::Stat::Dishes, 1.0));
                 if let Some(r) = r {
                     did.write(crate::journal::Did::made(me, r.key.clone()));
+                    // (The game's `kCookedMeal`, served to the group.)
+                    dreams.write(crate::dreams::DreamEvent { key: Some(r.key.clone()), quality: quality.as_ref().map_or(0, |q| q.quality as i32 + 1), group: true, ..crate::dreams::DreamEvent::new(me, "kCookedMeal") });
                 }
                 if let Some(q) = quality {
                     commands.entity(platter).insert(q);

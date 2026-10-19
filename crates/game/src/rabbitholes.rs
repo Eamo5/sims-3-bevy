@@ -372,6 +372,10 @@ fn outings(
                 }
                 // Friday's assignment is due Monday, not omitted for the weekend.
                 // A student who aged out of school during the visit gets no new work.
+                // (The game's `kFinishedSchool`.)
+                commands.queue(move |w: &mut World| {
+                    w.write_message(crate::dreams::DreamEvent::new(e, "kFinishedSchool"));
+                });
                 if matches!(sim.age, Age::Child | Age::Teen) {
                     commands.entity(e).insert(Homework::default());
                     notes.push(format!("{} is home from school, with homework.", sim.first));
@@ -485,6 +489,11 @@ pub fn complete_homework(world: &mut World, student: Entity, helper: Option<Enti
         None => None,
     };
     world.entity_mut(student).remove::<Homework>();
+    // (The game's `kFinishedHomework`, and a helper's `kDidHomework` for them.)
+    world.write_message(crate::dreams::DreamEvent::new(student, "kFinishedHomework"));
+    if let Some(h) = helper {
+        world.write_message(crate::dreams::DreamEvent { other: Some(student), ..crate::dreams::DreamEvent::new(h, "kDidHomework") });
+    }
     if let Some(mut grade) = world.get_mut::<SchoolGrades>(student) {
         grade.0 = (grade.0 + if helper.is_some() { 9.0 } else { 6.0 }).min(100.0);
     }

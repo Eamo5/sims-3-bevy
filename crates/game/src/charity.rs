@@ -122,6 +122,7 @@ fn donated(
     mut sims: Query<(Entity, &Sim, &Donated, Option<&Charities>, &mut Moodlets)>,
     mut household: Option<ResMut<crate::interact::Household>>,
     mut notes: ResMut<crate::interact::Notifications>,
+    mut dreams: MessageWriter<crate::dreams::DreamEvent>,
 ) {
     for (e, sim, d, charities, mut m) in &mut sims {
         commands.entity(e).remove::<Donated>();
@@ -130,6 +131,9 @@ fn donated(
             continue;
         };
         h.funds -= d.amount;
+        // (The game's `kDonatedToCharity`, or to undermine one.)
+        let kind = if sim.traits.contains(&Trait::Good) { "kDonatedToCharity" } else { "kDonatedToUndermineCharity" };
+        dreams.write(crate::dreams::DreamEvent { amount: d.amount as f32, ..crate::dreams::DreamEvent::new(e, kind) });
         let strength = AMOUNTS.iter().find(|(a, _)| *a == d.amount).map_or(10, |(_, s)| *s);
         if sim.traits.contains(&Trait::Good) {
             m.add_valued(MoodletKind::Charitable, clock.minutes, strength, CHARITABLE_MINUTES);

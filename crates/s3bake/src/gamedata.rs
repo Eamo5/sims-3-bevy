@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 142;
+pub const GAMEDATA_VERSION: u32 = 145;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1330,6 +1330,9 @@ impl BalloonTable {
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct GameDataBaked {
     pub version: u32,
+    /// The game's wishes: their types, dream trees and tables (`dnp`).
+    #[serde(default)]
+    pub dnp: crate::dnp::DnpData,
     /// The idle animations Sims play standing about (the game's `Idles`): by trait, moodlet and
     /// mood, and the everyday ones.
     #[serde(default)]
@@ -3176,6 +3179,75 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         }
     }
 
+    // The wishes: their types, the dream trees, the tables beside them (`dnp`).
+    {
+        let words = |k: &str| strings.get(&s3pkg::fnv64(&k.to_ascii_lowercase())).cloned().unwrap_or_default();
+        let rows = xml("DreamsAndPromisesNodes").map(|x| records(&x, "Primitives")).unwrap_or_default();
+        let (primitives, names) = crate::dnp::primitives(&rows, &words);
+        let known: std::collections::HashSet<u32> = primitives.iter().map(|p| p.id).collect();
+        let mut trees: Vec<crate::dnp::DnpTree> = pkg
+            .of_type(crate::dnp::T_DREAM_TREE)
+            .filter_map(|e| pkg.read(e).ok().and_then(|d| crate::dnp::tree(e.key.i, &String::from_utf8_lossy(&d), &|p| known.contains(&p))))
+            .collect();
+        trees.sort_by_key(|t| t.id);
+        let misc = xml("MiscDnPData").unwrap_or_default();
+        let mut equivalent: Vec<Vec<u32>> = Vec::new();
+        for r in records(&misc, "EquivalentNodes").iter().skip(1) {
+            let Some(p) = r.get("Primitives").and_then(|v| v.parse::<u32>().ok()) else { continue };
+            if r.get("GroupName").is_some_and(|g| !g.is_empty()) || equivalent.is_empty() {
+                equivalent.push(Vec::new());
+            }
+            if let Some(g) = equivalent.last_mut() {
+                g.push(p);
+            }
+        }
+        let after_death = records(&misc, "SpecialValidityNodes")
+            .iter()
+            .skip(1)
+            .filter(|r| r.get("IsValidAfterDeath").is_some_and(|v| v.eq_ignore_ascii_case("true")))
+            .filter_map(|r| r.get("Primitives").and_then(|v| v.parse().ok()))
+            .collect();
+        let links = xml("LinkedWishes")
+            .map(|x| records(&x, "Wishes"))
+            .unwrap_or_default()
+            .iter()
+            .skip(1)
+            .filter_map(|r| {
+                let prim = *names.get(r.get("PrimitiveId")?)?;
+                let lifetime = *names.get(r.get("DreamId")?)?;
+                (known.contains(&prim) && known.contains(&lifetime)).then(|| crate::dnp::DnpLink {
+                    prim,
+                    subject: r.get("Subject").cloned().unwrap_or_default(),
+                    number: r.get("Number").and_then(|v| v.parse().ok()),
+                    lifetime,
+                })
+            })
+            .collect();
+        let icons = xml("DnPDefaultIcons").unwrap_or_default();
+        let subject_icons = records(&icons, "PrimaryDynamicIcons").iter().map(|r| (get(r, "SubjectType"), get(r, "IconName"))).collect();
+        let number_icons = records(&icons, "SecondaryDynamicIcons").iter().skip(1).filter_map(|r| Some((r.get("NumberValue")?.parse().ok()?, get(r, "IconName")))).collect();
+        let mut categories: Vec<crate::dnp::DnpCategory> = Vec::new();
+        for r in xml("ObjectCategoryData").map(|x| records(&x, "Categories")).unwrap_or_default().iter().skip(1) {
+            let key = get(r, "Key");
+            if key.is_empty() || !get(r, "CodeVersion").eq_ignore_ascii_case("BaseGame") {
+                continue;
+            }
+            let class = get(r, "ClassName");
+            match categories.iter_mut().find(|c| c.key == key) {
+                Some(c) => c.classes.push(class),
+                None => categories.push(crate::dnp::DnpCategory {
+                    name: text("ObjectCategoryData/Categories", &key),
+                    icon: get(r, "DreamsAndPromisesIcon"),
+                    vacation: get(r, "AllowOnVacation").eq_ignore_ascii_case("true"),
+                    classes: vec![class],
+                    key,
+                }),
+            }
+        }
+        progress(&format!("wishes: {} types, {} trees ({} nodes)", primitives.len(), trees.len(), trees.iter().map(|t| t.nodes.len()).sum::<usize>()));
+        out.dnp = crate::dnp::DnpData { primitives, trees, equivalent, after_death, links, subject_icons, number_icons, categories };
+    }
+
     // The build catalogue's wallpapers and floors, each rendered in its first swatch (under the
     // key lot coverings use for catalogue patterns).
     progress("Converting: wallpapers and floors…");
@@ -4156,6 +4228,13 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     for w in &out.lifetime_wishes {
         wanted.insert(w.icon.clone());
     }
+    // (The wishes' own: each type's two, the subjects' and numbers' defaults, the categories'.)
+    for p in &out.dnp.primitives {
+        wanted.extend([p.icon.clone(), p.icon2.clone()]);
+    }
+    wanted.extend(out.dnp.subject_icons.iter().map(|(_, i)| i.clone()));
+    wanted.extend(out.dnp.number_icons.iter().map(|(_, i)| i.clone()));
+    wanted.extend(out.dnp.categories.iter().map(|c| c.icon.clone()));
     wanted.extend(EXTRA_ICONS.iter().map(|s| s.to_string()));
     // Create a Sim's favourites: a picture of each food (by recipe), music and colour.
     for r in &out.recipes {

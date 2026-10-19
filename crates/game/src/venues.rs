@@ -287,6 +287,41 @@ const VISIT_GOOD: [(MoodletKind, i32); 5] = [
 
 /// Coming out of a venue: what it did.
 #[allow(clippy::type_complexity)]
+/// The game's events for a venue's activity: a show seen (`kSawShowType`), a rabbit hole's
+/// treatment had (`kReceivedRabbitHoleTreatment`, by its kind), a meal out (`kAteAtRestaurant`).
+fn dream_events(act: &VenueAct) -> Vec<(&'static str, &'static str)> {
+    let mut out = Vec::new();
+    let show = match act.activity.name {
+        "See a Movie" => Some("Movie"),
+        "See a Symphony" => Some("Symphony"),
+        "See a Concert" | "Attend a Concert" => Some("Concert"),
+        "Attend the Game" => Some("StadiumGame"),
+        "See a Play" | "See a Matinee" => Some("Play"),
+        _ => None,
+    };
+    if let Some(s) = show {
+        out.push(("kSawShowType", s));
+    }
+    let hole = if act.venue == THEATRE {
+        Some("Theatre")
+    } else if act.venue == SPA {
+        Some("DaySpa")
+    } else if act.venue == BOOKSTORE {
+        Some("Bookstore")
+    } else if act.venue == STADIUM {
+        Some("Stadium")
+    } else {
+        None
+    };
+    if let Some(h) = hole {
+        out.push(("kReceivedRabbitHoleTreatment", h));
+    }
+    if matches!(act.effect, Effect::Meal(_)) {
+        out.push(("kAteAtRestaurant", if act.venue == BISTRO { "Bistro" } else { "Diner" }));
+    }
+    out
+}
+
 fn venue_done(
     mut commands: Commands,
     clock: Res<crate::clock::GameClock>,
@@ -294,6 +329,7 @@ fn venue_done(
     mut household: Option<ResMut<crate::interact::Household>>,
     mut notes: ResMut<crate::interact::Notifications>,
     (mut garden, ui): (ResMut<crate::gardening::Garden>, Option<Res<crate::icons::GameUi>>),
+    mut dreams: MessageWriter<crate::dreams::DreamEvent>,
 ) {
     let now = clock.minutes;
     let mut rng = rand::rng();
@@ -313,6 +349,9 @@ fn venue_done(
         }
         let Some(act) = ACTS.get(done.0) else { continue };
         debug!("venue: {} back from {}: {:?}", sim.first, act.activity.name, act.effect);
+        for (kind, key) in dream_events(act) {
+            dreams.write(crate::dreams::DreamEvent { key: Some(key.to_string()), ..crate::dreams::DreamEvent::new(e, kind) });
+        }
         match act.effect {
             Effect::Moodlet(k, value, minutes) => m.add_valued(k, now, value, minutes),
             Effect::Treatment(k, value, minutes, cures) => {

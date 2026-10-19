@@ -4438,6 +4438,10 @@ pub(crate) fn run_actions(
                                                 life.write(LifeEvent::new(me, LifeEventKind::MadeFriend { other }));
                                             }
                                             life.write(LifeEvent::new(me, LifeEventKind::Socialized { other, social: d.name }));
+                                            // (The game's `kWooHooed`.)
+                                            commands.queue(move |w: &mut World| {
+                                                w.write_message(crate::dreams::DreamEvent { other: Some(other), ..crate::dreams::DreamEvent::new(me, "kWooHooed") });
+                                            });
                                             if d.special == Special::TryForBaby && used.0 == Some(me) {
                                                 conceive.write(crate::little::Conceive { a: me, b: other });
                                             }
@@ -4659,6 +4663,13 @@ pub(crate) fn run_actions(
                                             let p = crate::paintings::finish_value(p, size, journals.get(me).ok(), crate::wishes::has(wishes, "ExtraCreative"));
                                             did.write(crate::journal::Did::count(me, crate::journal::Stat::Paintings, 1.0));
                                             did.write(crate::journal::Did::count(me, crate::paintings::canvas_stat(size), 1.0));
+                                            // (For the game's `kFinishedPainting`: its worth and quality.)
+                                            let grade = match p.name {
+                                                "Brilliant Painting" => 1,
+                                                "Masterpiece" => 2,
+                                                _ => 0,
+                                            };
+                                            did.write(crate::journal::Did { sim: me, what: crate::journal::Deed::Painted(p.worth, grade) });
                                             match p.name {
                                                 "Brilliant Painting" => {
                                                     did.write(crate::journal::Did::count(me, crate::journal::Stat::BrilliantPaintings, 1.0));
@@ -5053,6 +5064,12 @@ pub(crate) fn run_actions(
                                     }
                                     life.write(LifeEvent::new(me, LifeEventKind::Socialized { other: *target, social: s.name }));
                                     life.write(LifeEvent::new(*target, LifeEventKind::Socialized { other: me, social: s.name }));
+                                    // (The game's `kSocialInteraction`, both sides, by the game's name; a
+                                    // fight's once it's fought.)
+                                    if s.effect != SocialEffect::Fight {
+                                        let (target, name, accepted) = (*target, s.name, action.social_outcome.is_none_or(|o| o.accepted));
+                                        commands.queue(move |w: &mut World| crate::dreams::social(w, me, target, name, accepted, None));
+                                    }
                                     // (For the traits that feel it: `traitmoods`.)
                                     {
                                         let done = crate::traitmoods::Socialised { actor: me, target: *target, kiss: s.effect == SocialEffect::Kiss, accepted: action.social_outcome.is_none_or(|o| o.accepted) };
@@ -5140,6 +5157,8 @@ pub(crate) fn run_actions(
                                             let p = 0.5 + skills.level("Athletic") as f32 * 0.035 + traits(sim) - them.as_ref().map_or(0.0, traits);
                                             let won = rand::rng().random_bool(p.clamp(0.1, 0.9) as f64);
                                             let (winner, loser) = if won { (me, *target) } else { (*target, me) };
+                                            let fought = *target;
+                                            commands.queue(move |w: &mut World| crate::dreams::social(w, me, fought, "Fight", true, Some(won)));
                                             let (wn, ln) = if won { (sim.first.clone(), tname.clone()) } else { (tname.clone(), sim.first.clone()) };
                                             notes.push(format!("{wn} won the fight with {ln}!"));
                                             let now = clock.minutes;
@@ -5188,6 +5207,7 @@ pub(crate) fn run_actions(
                                                 let r = &data.recipes[i];
                                                 let mut known = known.unwrap_or_default();
                                                 known.0.push(r.key.clone());
+                                                w.write_message(crate::dreams::DreamEvent { key: Some(r.key.clone()), ..crate::dreams::DreamEvent::new(me, "kLearnedRecipe") });
                                                 let member = w.get::<HouseholdMember>(me).is_some();
                                                 w.entity_mut(me).insert(known);
                                                 if member {
@@ -5506,6 +5526,10 @@ pub(crate) fn run_actions(
                                         h.funds -= crate::meals::PIZZA_PRICE;
                                         commands.insert_resource(crate::meals::PizzaOrder { arrive_at: clock.minutes + 60.0 });
                                         notes.push(format!("{} ordered a pizza (§{}). It'll be here within the hour.", sim.first, crate::meals::PIZZA_PRICE));
+                                        // (The game's `kOrderedService`.)
+                                        commands.queue(move |w: &mut World| {
+                                            w.write_message(crate::dreams::DreamEvent { key: Some("PizzaDelivery".into()), ..crate::dreams::DreamEvent::new(me, "kOrderedService") });
+                                        });
                                     }
                                     _ => notes.push("There isn't enough money for a pizza."),
                                 }
@@ -5609,6 +5633,11 @@ pub(crate) fn run_actions(
                                 let tname = who.get(target).map(|w| w.0.first.clone()).unwrap_or_default();
                                 commands.entity(*target).insert(Invited { arrive_at: clock.minutes + 45.0 });
                                 notes.push(format!("{} invited {} over. They'll be here soon.", sim.first, tname));
+                                // (The game's `kInvitedSimOver`.)
+                                let invited = *target;
+                                commands.queue(move |w: &mut World| {
+                                    w.write_message(crate::dreams::DreamEvent { other: Some(invited), ..crate::dreams::DreamEvent::new(me, "kInvitedSimOver") });
+                                });
                             }
                         }
                         ActionKind::JoinCareer { track, .. } => {

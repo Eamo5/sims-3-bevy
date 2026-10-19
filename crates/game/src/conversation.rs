@@ -159,7 +159,7 @@ fn tables() -> Option<&'static Tables> {
 }
 
 /// The game's own social a hand-made one is (where their names differ).
-fn game_key(name: &str) -> &str {
+pub fn game_key(name: &str) -> &str {
     match name {
         "Hug" => "Friendly Hug",
         "Fight" => "Fight!",

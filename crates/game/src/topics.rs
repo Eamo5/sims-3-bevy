@@ -195,7 +195,7 @@ fn events(
             LifeEventKind::Engaged => given.push((e, "Announce Engagement", None)),
             LifeEventKind::Married => given.extend([(e, "Wedding", None), (e, "Just Married", None)]),
             LifeEventKind::SkillUp { skill, .. } => given.extend(skill_topic(skill).map(|t| (e, t, None))),
-            LifeEventKind::HomeFromWork { worse } => {
+            LifeEventKind::HomeFromWork { worse, .. } => {
                 given.push((e, "After Work", None));
                 if *worse {
                     given.push((e, "Complain About Work", None));

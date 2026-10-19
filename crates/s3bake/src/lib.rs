@@ -7,6 +7,7 @@ pub mod building;
 pub mod clips;
 pub mod trees;
 pub mod ddsw;
+pub mod dnp;
 pub mod gamedata;
 pub mod pack;
 pub mod fences;

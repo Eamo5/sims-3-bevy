@@ -243,6 +243,7 @@ mod tests {
         app.init_resource::<GameClock>().init_resource::<Notifications>()
             .insert_resource(SimDelta(180.0))
             .insert_resource(Household { name: "Authors".into(), funds: 0, lot_index: 0, last_bill_day: 0, bills: vec![] })
+            .add_message::<crate::dreams::DreamEvent>()
             .add_systems(Update, write_pages);
         let computer = app.world_mut().spawn(GameObject {
             kind: ObjectKind::Computer, name: "Computer".into(), objd: (0, 0, 0), price: 0,
@@ -460,6 +461,7 @@ fn write_pages(
     mut writers: Query<(Entity, &Sim, &mut ActionQueue, &Skills, Option<&mut Author>, Option<&crate::journal::SkillJournal>), With<HouseholdMember>>,
     objects: Query<(&GameObject, &crate::interact::UsedBy), (Without<crate::interact::Broken>, Without<crate::buyhistory::HistoryHidden>, Without<crate::buy::HeldObject>)>,
     mut notes: ResMut<Notifications>,
+    mut dreams: MessageWriter<crate::dreams::DreamEvent>,
 ) {
     let Some(mut household) = household else { return };
     let data = ui.as_ref().map(|u| &*u.data);
@@ -520,6 +522,10 @@ fn write_pages(
                 book.royalty,
                 book.payments_left
             ));
+            // (The game's `kWroteBookOfGenre`, its quality the game's `BookQuality`: a best seller
+            // 4; and `kWroteBookWithRoyaltyAmount`.)
+            dreams.write(crate::dreams::DreamEvent { key: Some(book.genre.clone()), quality: book.quality as i32 + 1, ..crate::dreams::DreamEvent::new(e, "kWroteBookOfGenre") });
+            dreams.write(crate::dreams::DreamEvent { amount: book.royalty as f32, ..crate::dreams::DreamEvent::new(e, "kWroteBookWithRoyaltyAmount") });
             author.books.push(book);
             if let Some(f) = queue.0.front_mut() {
                 f.completed = true;

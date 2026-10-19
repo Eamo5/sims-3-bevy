@@ -975,9 +975,10 @@ fn wishes(
     }
     let n = w.offered.len();
     *page = (*page).min(n.saturating_sub(1));
-    let mut icon = |x: &crate::wishes::Wish| -> Option<Handle<Image>> {
+    // (A wish's picture, and the game's own wishes' corner one: a skill's, a friend's...)
+    let mut icon = |x: &crate::wishes::Wish, corner: bool| -> Option<Handle<Image>> {
         let gu = game_ui.as_deref_mut()?;
-        let name = x.icon(&gu.data.clone());
+        let name = if corner { x.dream().map(|d| d.icon2.clone()).unwrap_or_default() } else { x.icon(&gu.data.clone()) };
         gu.icon(&mut assets, &name)
     };
     // The staging area: the offered wish on show.
@@ -988,10 +989,13 @@ fn wishes(
         set_visible(&mut vis, d.within(b, WISH_ICON_2), false);
     }
     if let (Some(st), Some(x)) = (staging, &shown) {
-        set_image(&mut images, &pictures, d.within(st, WISH_ICON), icon(x));
+        set_image(&mut images, &pictures, d.within(st, WISH_ICON), icon(x, false));
+        let corner = icon(x, true);
+        set_visible(&mut vis, d.within(st, WISH_ICON_2), corner.is_some());
+        set_image(&mut images, &pictures, d.within(st, WISH_ICON_2), corner);
         let more = if n > 1 { format!(" ({} of {n})", *page + 1) } else { String::new() };
         let action = if w.promised.len() < 4 { "Click to promise. Right-click to dismiss." } else { "All four wish slots are full. Right-click to dismiss." };
-        set_tooltip(&mut commands, &mut tips, Some(st), format!("{} (+{}){more}\n{action}", x.text(), x.reward_points(&sim.traits)));
+        set_tooltip(&mut commands, &mut tips, Some(st), format!("{}{more}\n{action}", wish_tip(x, &sim.traits)));
     }
     // The promised wishes.
     for slot in 0..4 {
@@ -999,8 +1003,11 @@ fn wishes(
         let x = w.promised.get(slot).cloned();
         set_visible(&mut vis, b, x.is_some());
         if let (Some(b), Some(x)) = (b, x) {
-            set_image(&mut images, &pictures, d.within(b, WISH_ICON), icon(&x));
-            set_tooltip(&mut commands, &mut tips, Some(b), format!("Promised: {} (+{})\nRight-click to dismiss.", x.text(), x.reward_points(&sim.traits)));
+            set_image(&mut images, &pictures, d.within(b, WISH_ICON), icon(&x, false));
+            let corner = icon(&x, true);
+            set_visible(&mut vis, d.within(b, WISH_ICON_2), corner.is_some());
+            set_image(&mut images, &pictures, d.within(b, WISH_ICON_2), corner);
+            set_tooltip(&mut commands, &mut tips, Some(b), format!("Promised: {}\nRight-click to dismiss.", wish_tip(&x, &sim.traits)));
         }
     }
     // The lifetime wish.
@@ -1404,5 +1411,24 @@ fn notifications(
         for r in [b.root, f.root].into_iter().flatten() {
             commands.entity(r).insert(crate::hud::BlocksWorld);
         }
+    }
+}
+
+/// A wish's tooltip, as the game's `WishTooltip`: its name, how far along it is, what it's about,
+/// and its points.
+fn wish_tip(x: &crate::wishes::Wish, traits: &[crate::life::Trait]) -> String {
+    let points = x.reward_points(traits);
+    match x.dream() {
+        Some(d) => {
+            let mut out = d.text.clone();
+            if !d.progress.is_empty() {
+                out += &format!(" ({})", d.progress);
+            }
+            if !d.description.trim().is_empty() {
+                out += &format!("\n{}", d.description.trim());
+            }
+            out + &format!("\n+{points}")
+        }
+        None => format!("{} (+{points})", x.text()),
     }
 }

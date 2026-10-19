@@ -102,10 +102,13 @@ fn book_bought(
     ui: Option<Res<crate::icons::GameUi>>,
     mut household: Option<ResMut<crate::interact::Household>>,
     mut notes: ResMut<crate::interact::Notifications>,
+    mut dreams: MessageWriter<crate::dreams::DreamEvent>,
 ) {
     let Some(ui) = ui else { return };
     for (e, sim, buying, books) in &mut sims {
         commands.entity(e).remove::<(BuyingBook, BookBought)>();
+        // (Back from the bookstore: the game's `kReceivedRabbitHoleTreatment` there.)
+        dreams.write(crate::dreams::DreamEvent { key: Some("Bookstore".into()), ..crate::dreams::DreamEvent::new(e, "kReceivedRabbitHoleTreatment") });
         let Some(b) = ui.data.skill_books.get(buying.0) else { continue };
         let Some(h) = household.as_deref_mut() else { continue };
         if h.funds < b.price {
@@ -134,6 +137,7 @@ fn read_on(
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<crate::interact::Notifications>,
     mut life: MessageWriter<crate::life::LifeEvent>,
+    mut dreams: MessageWriter<crate::dreams::DreamEvent>,
 ) {
     let Some(ui) = ui else { return };
     for (e, sim, reading, mut queue, mut skills, books, motives, finding_a_seat) in &mut sims {
@@ -190,6 +194,8 @@ fn read_on(
             // (No full stop after a title's own "!".)
             let stop = if b.name.ends_with(['!', '?', '.']) { "" } else { "." };
             notes.push(format!("{} finished reading {}{stop}", sim.first, b.name));
+            // (The game's `kReadBook`: a skill book, its skill.)
+            dreams.write(crate::dreams::DreamEvent { key: Some(b.key.clone()), skill: skill.map(str::to_string), ..crate::dreams::DreamEvent::new(e, "kReadBook") });
             if let Some(a) = queue.0.front_mut() {
                 a.cancel = true;
             }

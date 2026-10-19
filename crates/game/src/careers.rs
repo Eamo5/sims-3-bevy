@@ -946,7 +946,7 @@ pub fn work_schedule(
             let boss = job.boss.and_then(|b| ids.get(&b).copied());
             let coworkers: Vec<Entity> = job.coworkers.iter().filter_map(|c| ids.get(c).copied()).collect();
             let gain = job.performance - w.start_perf;
-            life.write(LifeEvent::new(e, LifeEventKind::HomeFromWork { worse: gain < 0.0 }));
+            life.write(LifeEvent::new(e, LifeEventKind::HomeFromWork { worse: gain < 0.0, pay }));
             // Studying the career's skill on the job.
             if job.tone == WorkTone::Study {
                 for (sk, per_minute) in WorkTone::study_skills(&job) {

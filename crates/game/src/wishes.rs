@@ -34,6 +34,8 @@ pub enum WishKind {
     JoinCareer,
     Promotion,
     BuySomething { min_price: i32 },
+    /// One of the game's own (`dreams`).
+    Dream(crate::dreams::DreamWish),
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -45,6 +47,10 @@ pub struct Wish {
 impl Wish {
     /// TraitTuning.kAmbitiousTraitLifetimeHappinessMultiplier = 1.15.
     pub fn reward_points(&self, traits: &[Trait]) -> u32 {
+        // (The game's own: their points the Ambitious's already.)
+        if matches!(self.kind, WishKind::Dream(_)) {
+            return self.points;
+        }
         if traits.contains(&Trait::Ambitious) {
             ((self.points as u64 * 115 / 100).min(u32::MAX as u64)) as u32
         } else {
@@ -84,6 +90,15 @@ impl Wish {
             WishKind::JoinCareer => s("w_career_cityhall"),
             WishKind::Promotion => s("w_simoleon"),
             WishKind::BuySomething { .. } => s("w_simoleon_32"),
+            WishKind::Dream(d) => d.icon.clone(),
+        }
+    }
+
+    /// One of the game's own wishes.
+    pub fn dream(&self) -> Option<&crate::dreams::DreamWish> {
+        match &self.kind {
+            WishKind::Dream(d) => Some(d),
+            _ => None,
         }
     }
 
@@ -100,6 +115,7 @@ impl Wish {
             WishKind::JoinCareer => "Get a job".into(),
             WishKind::Promotion => "Get promoted".into(),
             WishKind::BuySomething { min_price } => format!("Buy something worth §{min_price}"),
+            WishKind::Dream(d) => d.text.clone(),
         }
     }
 }
@@ -168,6 +184,39 @@ fn mood_happiness(
 ) {
     for (mood, mut wishes) in &mut sims {
         wishes.accrue_mood(mood.0, delta.0);
+    }
+}
+
+#[cfg(test)]
+mod dnp_audit {
+    /// The game's wishes as baked, which functions the most of them need
+    /// (`SIMS3_CACHE=<baked> cargo test -p sims3 dnp_audit -- --ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn dnp_audit() {
+        let data = s3bake::gamedata::load_gamedata(&s3bake::default_root()).expect("game data");
+        let d = &data.dnp;
+        println!("{} types, {} trees, {} nodes, {} links, {} categories", d.primitives.len(), d.trees.len(), d.trees.iter().map(|t| t.nodes.len()).sum::<usize>(), d.links.len(), d.categories.len());
+        let mut by: std::collections::HashMap<String, (usize, usize)> = std::collections::HashMap::new();
+        let mut events: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for t in &d.trees {
+            for n in &t.nodes {
+                let Some(p) = d.primitive(n.prim) else { continue };
+                for f in [format!("C:{}", p.check), format!("F:{}", p.feedback), format!("S:{}", p.start)] {
+                    let e = by.entry(f).or_default();
+                    if n.visible { e.0 += 1 } else { e.1 += 1 }
+                }
+                *events.entry(p.event.clone()).or_default() += 1;
+            }
+        }
+        let mut v: Vec<_> = by.into_iter().collect();
+        v.sort_by(|a, b| (b.1.0 + b.1.1).cmp(&(a.1.0 + a.1.1)));
+        for (f, (vis, hid)) in v.iter().take(140) {
+            println!("{vis:5} {hid:5} {f}");
+        }
+        let mut e: Vec<_> = events.into_iter().collect();
+        e.sort_by(|a, b| b.1.cmp(&a.1));
+        println!("EVENTS {:?}", e.iter().take(80).collect::<Vec<_>>());
     }
 }
 
@@ -447,13 +496,19 @@ fn offer_wishes(
     mut commands: Commands,
     clock: Res<GameClock>,
     mut sims: Query<(Entity, &Sim, &Skills, Option<&crate::careers::Job>, &crate::social::Relationships, Option<&mut Wishes>), With<HouseholdMember>>,
+    gu: Option<Res<crate::icons::GameUi>>,
 ) {
     let mut rng = rand::rng();
+    // (With the game's own wishes, those are offered: `dreams`.)
+    let dreams = gu.is_some_and(|g| !g.data.dnp.trees.is_empty());
     for (e, sim, skills, job, rels, wishes) in &mut sims {
         let Some(mut w) = wishes else {
             commands.entity(e).insert(Wishes { next_offer: clock.minutes, ..default() });
             continue;
         };
+        if dreams {
+            continue;
+        }
         // Babies and toddlers don't have wishes yet.
         if clock.minutes < w.next_offer || sim.age.is_little() {
             continue;

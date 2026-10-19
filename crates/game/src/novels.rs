@@ -122,6 +122,7 @@ fn read_on(
     mut sims: Query<(Entity, &Sim, &ReadingNovel, &mut crate::interact::ActionQueue, Option<&mut Novels>, &mut crate::sim::Motives, Has<crate::surroundings::ReadSomewhere>)>,
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<crate::interact::Notifications>,
+    mut dreams: MessageWriter<crate::dreams::DreamEvent>,
 ) {
     let Some(ui) = ui else { return };
     for (e, sim, reading, mut queue, novels, mut motives, finding_a_seat) in &mut sims {
@@ -168,6 +169,7 @@ fn read_on(
             entry.finished += 1;
             let stop = if b.name.ends_with(['!', '?', '.']) { "" } else { "." };
             notes.push(format!("{} finished reading {} by {}{stop}", sim.first, b.name, b.author));
+            dreams.write(crate::dreams::DreamEvent { key: Some(b.key.clone()), ..crate::dreams::DreamEvent::new(e, "kReadBook") });
             if let Some(a) = queue.0.front_mut() {
                 a.cancel = true;
             }

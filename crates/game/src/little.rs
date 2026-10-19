@@ -558,6 +558,14 @@ fn pregnancy(
                 crate::aging::Aging::default(),
                 DespawnOnExit(AppState::InGame),
             ));
+            // (The game's `kNewOffspring`, for both parents.)
+            let father = p.other_parent;
+            commands.queue(move |w: &mut World| {
+                for parent in std::iter::once(mother).chain(father) {
+                    w.write_message(crate::dreams::DreamEvent { other: Some(e), ..crate::dreams::DreamEvent::new(parent, "kNewOffspring") });
+                    w.write_message(crate::dreams::DreamEvent { other: Some(e), ..crate::dreams::DreamEvent::new(parent, "kChildBornOrAdopted") });
+                }
+            });
             // Named as the game's: a box for each, the traits it came with said.
             questions.ask(crate::dialog::Ask {
                 about: crate::dialog::Question::NameBaby { sim: e, suggested },

@@ -33,10 +33,13 @@ pub fn settle_purchases(
     pending: Query<(Entity, &PendingPurchase), With<GameObject>>,
     new: Query<(Entity, &GameObject), (With<NewPurchase>, Without<HistoryHidden>)>,
     mut events: MessageWriter<crate::life::LifeEvent>,
+    (objects, mut dreams): (Query<&GameObject>, MessageWriter<crate::dreams::DreamEvent>),
 ) {
     if buy.active { return; }
     for (entity, purchase) in &pending {
         events.write(crate::life::LifeEvent::new(purchase.sim, crate::life::LifeEventKind::Bought { price: purchase.price }));
+        // (The game's `kBoughtObject`, with what it was: `dreams`.)
+        dreams.write(crate::dreams::DreamEvent { amount: purchase.price as f32, objd: objects.get(entity).ok().map(|o| o.objd), ..crate::dreams::DreamEvent::new(purchase.sim, "kBoughtObject") });
         commands.entity(entity).remove::<PendingPurchase>();
     }
     for (entity, object) in &new {
@@ -471,6 +474,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<BuyMode>()
             .add_message::<crate::life::LifeEvent>()
+            .add_message::<crate::dreams::DreamEvent>()
             .add_systems(Update, settle_purchases);
         let sim = app.world_mut().spawn_empty().id();
         let kept = object(app.world_mut(), true);

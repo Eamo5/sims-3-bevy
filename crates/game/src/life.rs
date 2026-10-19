@@ -1331,7 +1331,7 @@ pub enum LifeEventKind {
     Fired,
     NewJob,
     /// Home from a day's work (`worse`: having done worse at it than they went in).
-    HomeFromWork { worse: bool },
+    HomeFromWork { worse: bool, pay: i64 },
     SkillUp { skill: &'static str, level: u32 },
     FirstKiss,
     StartedDating,

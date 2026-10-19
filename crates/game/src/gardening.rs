@@ -85,6 +85,9 @@ pub const QUALITIES: [(&str, f32); 10] = [
     ("Perfect", 4.0),
 ];
 
+/// Those qualities as the game's `Quality` numbers.
+pub const GAME_QUALITY: [i32; 10] = [1, 2, 4, 5, 6, 7, 8, 9, 10, 11];
+
 /// A plant's quality (0..1) as one of the game's qualities.
 pub fn quality_tier(q: f32) -> usize {
     ((q * 10.0).ceil() as usize).clamp(1, 10) - 1
@@ -746,6 +749,8 @@ fn grow(
     clock: Res<crate::clock::GameClock>,
     ui: Option<Res<crate::icons::GameUi>>,
     mut plants: Query<(&mut GrowingPlant, &mut Transform)>,
+    gardeners: Query<(Entity, &crate::interact::Skills), With<crate::sim::HouseholdMember>>,
+    mut dreams: MessageWriter<crate::dreams::DreamEvent>,
 ) {
     let Some(ui) = ui else { return };
     let dt = delta.0;
@@ -769,6 +774,7 @@ fn grow(
         let change = if tended { 0.091 * (0.4 + p.care) } else if p.water <= 0.0 || p.weedy { -0.091 * 0.5 } else { 0.0 };
         p.quality = (p.quality + change * dt / 1440.0).clamp(0.0, 1.0);
         // (GARDEN_GROWN=1, for tests: grown at once.)
+        let grown_before = p.growth >= 1.0;
         if p.growth < 1.0 && std::env::var("GARDEN_GROWN").is_ok() {
             p.growth = 1.0;
             p.next_ready = clock.minutes;
@@ -783,6 +789,15 @@ fn grow(
             }
             if p.growth >= 1.0 && p.next_ready == 0.0 {
                 p.next_ready = clock.minutes;
+            }
+        }
+        // (Grown: the game's `kGrewPlantToMaturity`, for those who helped it grow, here the
+        // household's gardeners; its quality as the game's.)
+        if p.growth >= 1.0 && !grown_before {
+            for (g, skills) in &gardeners {
+                if skills.level("Gardening") >= 1 {
+                    dreams.write(crate::dreams::DreamEvent { key: Some(info.name.clone()), quality: GAME_QUALITY[quality_tier(p.quality)], ..crate::dreams::DreamEvent::new(g, "kGrewPlantToMaturity") });
+                }
             }
         }
         if p.growth >= 1.0 && p.ready == 0 && p.harvests_left > 0 && clock.minutes >= p.next_ready && p.water > 0.0 {

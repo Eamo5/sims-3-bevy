@@ -43,7 +43,7 @@ impl Plugin for ChessPlugin {
 
 /// The ranks (the game's names), and the wins that reach each one after the first.
 pub const RANKS: [&str; 6] = ["Unranked", "Apprentice (Rank 1)", "Tenderfoot (Rank 2)", "Journeyman (Rank 3)", "Instructor (Rank 4)", "Grand Master (Rank 5)"];
-const WINS_FOR_RANK: [u32; 5] = [2, 4, 8, 12, 15];
+pub const WINS_FOR_RANK: [u32; 5] = [2, 4, 8, 12, 15];
 /// The chess skill of an opponent at each rank.
 const OPPONENT_SKILL: [f32; 6] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
 
@@ -511,9 +511,10 @@ fn play_chess(
     }
 }
 
-fn ranked_matches(mut commands: Commands, mut sims: Query<(Entity, &Sim, Option<&mut ChessRecord>, &MatchPlayed)>, mut notes: ResMut<Notifications>) {
+fn ranked_matches(mut commands: Commands, mut sims: Query<(Entity, &Sim, Option<&mut ChessRecord>, &MatchPlayed)>, mut notes: ResMut<Notifications>, mut dreams: MessageWriter<crate::dreams::DreamEvent>) {
     for (e, sim, record, played) in &mut sims {
         commands.entity(e).remove::<MatchPlayed>();
+        dreams.write(crate::dreams::DreamEvent { won: played.0, ..crate::dreams::DreamEvent::new(e, "kPlayedRankedChessMatch") });
         let mut r = record.as_deref().copied().unwrap_or_default();
         if played.0 {
             r.wins += 1;
