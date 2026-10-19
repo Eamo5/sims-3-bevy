@@ -1246,6 +1246,10 @@ fn world_click(
             // Clicking themselves: what they can do on their own.
             if is_sel {
                 let mut options = Vec::new();
+                // (Asleep: woken, as the game's `Wake Up`.)
+                if queues_q.get(actor).is_ok_and(crate::interact::asleep) {
+                    options.push(("Wake Up".to_string(), ActionKind::WakeUp { target: actor }));
+                }
                 if crate::jog::can_jog(sim) && on_lot.get(actor).is_err() {
                     options.push(("Go Jogging".to_string(), ActionKind::Jog { home: Vec2::ZERO }));
                 }
@@ -1279,6 +1283,10 @@ fn world_click(
             let mut options = Vec::new();
             if member {
                 options.push((format!("Select {}", sim.first), ActionKind::GoHere(Vec2::NAN, 1)));
+            }
+            // (Asleep: woken, as the game's `Wake Up` on another.)
+            if queues_q.get(t).is_ok_and(crate::interact::asleep) {
+                options.push(("Wake Up".to_string(), ActionKind::WakeUp { target: t }));
             }
             let rel = rels.get(t);
             let target_member = members_q.contains(t);
@@ -2363,6 +2371,16 @@ fn pie_buttons(
     let title = std::mem::take(&mut pie.title);
     let parent = (pie.at, title.clone(), pie.options.clone());
     close_pie(&mut commands, &mut pie);
+    // (Woken there and then: their sleep cut short.)
+    if let ActionKind::WakeUp { target } = kind {
+        if let Ok(mut q) = queues.get_mut(target)
+            && let Some(a) = q.0.front_mut()
+            && matches!(a.label.as_str(), "Sleep" | "Nap")
+        {
+            a.cancel = true;
+        }
+        return;
+    }
     if let ActionKind::BuyReward(_) = kind {
         return;
     }

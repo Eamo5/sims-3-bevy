@@ -20,7 +20,7 @@ pub struct ObjectAnimPlugin;
 impl Plugin for ObjectAnimPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Rigs>()
-            .add_systems(Update, animate_objects.after(crate::anim::drive_skeletons))
+            .add_systems(Update, (animate_objects, swing_doors).chain().after(crate::anim::drive_skeletons))
             .add_systems(PostUpdate, attach_skins.before(bevy::transform::TransformSystems::Propagate));
     }
 }
@@ -184,6 +184,224 @@ fn attach_skins(
     }
 }
 
+/// The doors' kinds of clips (the game's `GenericDoor` machine plays `o_<kind>_<state>_door<n>`
+/// on a door's leaves), each door taking the kind whose clips move its bones.
+const DOOR_KINDS: [&str; 6] = ["doorSingle", "doorDouble", "doorSliding", "doorSlidingDouble2x1", "door2x1TwoStory", "door4x1TwoStory"];
+/// How near a door a Sim is to have it open (metres), and how long after the last has passed it
+/// shuts (game minutes: `Door.kMinimumTimeBeforeClosingDoor`).
+const DOOR_REACH: f32 = 1.1;
+const DOOR_SHUT_AFTER: f64 = 10.0;
+
+/// A door's leaves: the kind of clips, how many, which way they last opened (`Mirrored`: away from
+/// the back), and what each is doing (the clip and since when, game seconds of real time).
+#[derive(Component, Default)]
+pub struct DoorSwing {
+    kind: Option<&'static str>,
+    leaves: u8,
+    /// Each leaf's bones (those its opening moves): a leaf's clips move only its own.
+    leaf_bones: Vec<Vec<u32>>,
+    /// The doorway's middle, across the model (a two-tile door's is half a tile over).
+    middle: f32,
+    mirrored: bool,
+    state: DoorState,
+    since: f32,
+    clear_since: f64,
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Debug)]
+enum DoorState {
+    #[default]
+    Shut,
+    Opening,
+    Open,
+    Closing,
+}
+
+/// Whether a clip's track moves its bone (turns or slides it) between its start and end.
+fn moves(t: &s3formats::sim::Track, duration: f32) -> bool {
+    let turned = match (sample_track_quat(&t.rotation, 0.0), sample_track_quat(&t.rotation, duration)) {
+        (Some(a), Some(b)) => a.angle_between(b) > 0.05,
+        _ => false,
+    };
+    let slid = match (sample_track_vec(&t.translation, 0.0), sample_track_vec(&t.translation, duration)) {
+        (Some(a), Some(b)) => a.distance(b) > 0.02,
+        _ => false,
+    };
+    turned || slid
+}
+
+/// Whether a Sim's way, from where they are, goes through a doorway within the next couple of
+/// metres (crosses the door's plane between its jambs): the door's own lane, as the game's
+/// routes through a door portal.
+fn goes_through(to_local: &bevy::math::Affine3A, at: Vec3, waypoints: &[crate::nav::Waypoint], middle: f32, half: f32) -> bool {
+    let mut from = to_local.transform_point3(at);
+    let mut gone = 0.0;
+    for w in waypoints.iter().take(4) {
+        let to = to_local.transform_point3(Vec3::new(w.p.x, at.y, w.p.y));
+        if (from.z <= 0.0) != (to.z <= 0.0) {
+            let t = from.z / (from.z - to.z);
+            let x = from.x + (to.x - from.x) * t - middle;
+            if x.abs() < half + 0.1 {
+                return true;
+            }
+        }
+        gone += from.distance(to);
+        if gone > 2.0 * DOOR_REACH {
+            break;
+        }
+        from = to;
+    }
+    false
+}
+
+/// Doors swing open as a Sim comes up to them (away from them: `open` from the front,
+/// `openMirrored` from behind), stay open while anyone's at them, and shut ten game minutes after
+/// the last has gone (the game's `DoorPortalComponent` on its lanes).
+#[allow(clippy::type_complexity)]
+fn swing_doors(
+    mut commands: Commands,
+    data: Option<Res<Baked>>,
+    mut lib: ResMut<ClipLibrary>,
+    clock: Res<crate::clock::GameClock>,
+    time: Res<Time>,
+    mut doors: Query<(Entity, &crate::interact::GameObject, &mut ObjectRig, &GlobalTransform, Option<&mut DoorSwing>)>,
+    sims: Query<(&GlobalTransform, &Visibility, Option<&crate::nav::PathFollow>), With<crate::sim::Sim>>,
+    mut bones: Query<&mut Transform, Without<ObjectRig>>,
+) {
+    let Some(data) = data else { return };
+    let now = time.elapsed_secs();
+    for (e, obj, mut rig, tf, swing) in &mut doors {
+        if obj.kind != crate::interact::ObjectKind::Door {
+            continue;
+        }
+        let Some(mut swing) = swing else {
+            // (Which kind of clips move it, and how many leaves.)
+            let hashes: Vec<u32> = rig.rigs.iter().flat_map(|r| r.rig.hashes.iter().copied()).collect();
+            // (How many of its bones a kind's opening swings or slides: a kind's leaves' clips
+            // looked for only where it has them.)
+            let mut opening = |kind: &str, leaf: u32| {
+                let name = format!("o_{kind}_open_door{leaf}");
+                data.0.clip_names.iter().any(|n| *n == name).then(|| lib.get(&data, &name)).flatten()
+            };
+            let mut fits = |kind: &str| (0..2).map(|leaf| opening(kind, leaf).map_or(0, |c| c.tracks.iter().filter(|(h, t)| hashes.contains(h) && moves(t, c.duration)).count())).sum::<usize>();
+            // (The first that moves the most of it: an ordinary door's own before a two-storey's,
+            // whose leaves are named the same.)
+            let mut kind: Option<(&'static str, usize)> = None;
+            for k in DOOR_KINDS {
+                let n = fits(k);
+                if n > 0 && kind.is_none_or(|(_, best)| n > best) {
+                    kind = Some((k, n));
+                }
+            }
+            let kind = kind.map(|(k, _)| k);
+            let leaf_bones: Vec<Vec<u32>> = match kind {
+                Some(k) => (0..2)
+                    .map(|leaf| opening(k, leaf).map(|c| c.tracks.iter().filter(|(h, t)| hashes.contains(h) && moves(t, c.duration)).map(|(h, _)| *h).collect()).unwrap_or_default())
+                    .filter(|b: &Vec<u32>| !b.is_empty())
+                    .collect(),
+                None => Vec::new(),
+            };
+            let leaves = leaf_bones.len().max(1) as u8;
+            // (Where across it the doorway's middle is: between a pair's hinges.)
+            let middle = if leaves == 2 {
+                let hinges: Vec<f32> = rig.rigs.iter().flat_map(|r| r.rig.hashes.iter().zip(r.rig.across.iter()).filter(|(h, _)| leaf_bones.iter().flatten().any(|b| b == *h)).map(|(_, x)| *x)).collect();
+                hinges.iter().sum::<f32>() / hinges.len().max(1) as f32
+            } else {
+                0.0
+            };
+            commands.entity(e).insert(DoorSwing { kind, leaves, leaf_bones, middle, ..default() });
+            continue;
+        };
+        let Some(kind) = swing.kind else { continue };
+        // Who's going through it, or standing in it, and from which side (its front: the
+        // model's -z, as the game's).
+        let to_local = tf.affine().inverse();
+        let half = 0.5 * swing.leaves as f32;
+        let mut near: Option<f32> = None;
+        for (stf, vis, path) in &sims {
+            if *vis == Visibility::Hidden {
+                continue;
+            }
+            let at = stf.translation();
+            let p = to_local.transform_point3(at);
+            let x = p.x - swing.middle;
+            if p.y.abs() > 2.0 || p.z.abs() > DOOR_REACH || x.abs() > half + DOOR_REACH {
+                continue;
+            }
+            let standing_in = p.z.abs() < 0.4 && x.abs() < half;
+            if standing_in || path.is_some_and(|f| !f.done && goes_through(&to_local, at, &f.waypoints, swing.middle, half)) {
+                near = Some(p.z);
+            }
+        }
+        // (DOOR_TEST=front|behind: every door held open, for a look at it.)
+        if let Ok(t) = std::env::var("DOOR_TEST") {
+            near = Some(if t == "behind" { 1.0 } else { -1.0 });
+        }
+        if near.is_some() {
+            swing.clear_since = clock.minutes;
+        }
+        let state = swing.state;
+        match (state, near) {
+            (DoorState::Shut | DoorState::Closing, Some(z)) => {
+                debug!("door {} opens from the {}", obj.name, if z > 0.0 { "back" } else { "front" });
+                swing.mirrored = z > 0.0;
+                swing.state = DoorState::Opening;
+                swing.since = now;
+            }
+            (DoorState::Open, None) if clock.minutes - swing.clear_since >= DOOR_SHUT_AFTER => {
+                swing.state = DoorState::Closing;
+                swing.since = now;
+            }
+            _ => {}
+        }
+        let m = if swing.mirrored { "Mirrored" } else { "" };
+        let (clip, t, done) = match swing.state {
+            DoorState::Shut => continue,
+            DoorState::Opening => (format!("o_{kind}_open{m}_door"), now - swing.since, true),
+            DoorState::Open => (format!("o_{kind}_open{m}Pose_door"), 0.0, false),
+            DoorState::Closing => (format!("o_{kind}_close{m}_door"), now - swing.since, true),
+        };
+        let mut finished = true;
+        for leaf in 0..swing.leaves {
+            let Some(c) = lib.get(&data, &format!("{clip}{leaf}")) else { continue };
+            let t = if done { t.min(c.duration.max(0.0)) } else { c.duration.max(0.0) };
+            if done && now - swing.since < c.duration {
+                finished = false;
+            }
+            let own = swing.leaf_bones.get(leaf as usize);
+            for inst in &rig.rigs {
+                for (i, h) in inst.rig.hashes.iter().enumerate() {
+                    if own.is_some_and(|o| !o.contains(h)) {
+                        continue;
+                    }
+                    let Some(track) = c.tracks.get(h) else { continue };
+                    let Ok(mut b) = bones.get_mut(inst.bones[i]) else { continue };
+                    if let Some(p) = sample_track_vec(&track.translation, t) {
+                        b.translation = p;
+                    }
+                    if let Some(r) = sample_track_quat(&track.rotation, t) {
+                        b.rotation = r;
+                    }
+                }
+            }
+        }
+        rig.posed = true;
+        if done && finished {
+            swing.state = if swing.state == DoorState::Opening { DoorState::Open } else { DoorState::Shut };
+            if swing.state == DoorState::Shut {
+                for inst in &rig.rigs {
+                    for (i, &bone) in inst.bones.iter().enumerate() {
+                        if let Ok(mut b) = bones.get_mut(bone) {
+                            *b = inst.rig.bind[i];
+                        }
+                    }
+                }
+                rig.posed = false;
+            }
+        }
+    }
+}
+
 /// The object's half of a Sim's clip (`a2o_fridge_openDoor_x` → `a2o_fridge_openDoor_fridge`):
 /// a clip of the same name for an actor that's neither the Sim nor a prop.
 fn companion(data: &Baked, name: &str) -> Option<String> {
@@ -215,7 +433,7 @@ fn animate_objects(
     data: Option<Res<Baked>>,
     mut lib: ResMut<ClipLibrary>,
     sims: Query<(&ClipPlayer, &ActionQueue, Option<&crate::anim::ActionClip>, &GlobalTransform)>,
-    mut objects: Query<(Entity, &mut ObjectRig, Option<&UsedBy>, &GlobalTransform, Has<crate::interact::Unmade>, Option<&HeldPose>)>,
+    mut objects: Query<(Entity, &mut ObjectRig, Option<&UsedBy>, &GlobalTransform, Has<crate::interact::Unmade>, Option<&HeldPose>), Without<DoorSwing>>,
     mut bones: Query<&mut Transform, Without<ObjectRig>>,
     mut companions: Local<HashMap<String, Option<String>>>,
     mut animated: Local<Vec<Entity>>,
@@ -312,5 +530,31 @@ fn animate_objects(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nav::Waypoint;
+
+    fn way(points: &[(f32, f32)]) -> Vec<Waypoint> {
+        points.iter().map(|&(x, z)| Waypoint { p: Vec2::new(x, z), level: 1, climb: None }).collect()
+    }
+
+    #[test]
+    fn walking_through_a_doorway() {
+        // A door at (10, 0, 20), turned a quarter: its front faces the world's -x.
+        let door = Transform::from_xyz(10.0, 0.0, 20.0).with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2));
+        let to_local = door.compute_affine().inverse();
+        let at = Vec3::new(9.2, 0.0, 20.0);
+        // Straight through it.
+        assert!(goes_through(&to_local, at, &way(&[(10.8, 20.0), (12.0, 20.0)]), 0.0, 0.5));
+        // Along the wall it's in, past it: not through.
+        assert!(!goes_through(&to_local, at, &way(&[(9.2, 22.0), (9.2, 24.0)]), 0.0, 0.5));
+        // Through the wall a couple of metres along: not this doorway.
+        assert!(!goes_through(&to_local, at, &way(&[(9.2, 22.0), (10.8, 22.0)]), 0.0, 0.5));
+        // A two-tile door's doorway is a tile wide either side of its middle.
+        assert!(goes_through(&to_local, Vec3::new(9.2, 0.0, 20.9), &way(&[(10.8, 20.9)]), 0.5, 1.0) != goes_through(&to_local, Vec3::new(9.2, 0.0, 20.9), &way(&[(10.8, 20.9)]), -0.5, 1.0));
     }
 }

@@ -6,6 +6,13 @@
 /// Clip-name prefixes to bake. Object and social clips must also end in `_x` / `_y` (the
 /// Sim's side; other suffixes are the props').
 pub const CLIP_PREFIXES: &[&str] = &[
+    // Doors swinging open and shut (`GenericDoor`): each kind's leaves.
+    "o_doorSingle_",
+    "o_doorDouble_",
+    "o_doorSliding_",
+    "o_doorSlidingDouble2x1_",
+    "o_door2x1TwoStory_",
+    "o_door4x1TwoStory_",
     // Walks and idles.
     "a_female_walk",
     "a_male_walk",

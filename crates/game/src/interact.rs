@@ -2753,6 +2753,9 @@ pub enum ActionKind {
     CheckUpOnWork,
     /// A call to check on the household's real estate: its dialog (`estatedialog`).
     CheckRealEstate,
+    /// A sleeping Sim woken (the game's immediate `Sim.WakeUp`: their sleep cut short; never
+    /// queued).
+    WakeUp { target: Entity },
     /// Calls for the police (a burglar about), the fire department (a fire at home), and
     /// everybody out to come home (the game's `CallPolice`, `CallFirefighters`,
     /// `CallEverybodyHome`).
@@ -2871,6 +2874,11 @@ impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
         Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, channel_choice: None, book_choice: None, fish_choice: None, recipe_choice: None, song_choice: None, for_one: false, approach: None, social_outcome: None, seated: false, jog: false, chat_with: None, donation: None }
     }
+}
+
+/// Whether a Sim's asleep: in bed (or napping), sleeping now.
+pub fn asleep(q: &ActionQueue) -> bool {
+    q.0.front().is_some_and(|a| matches!(a.label.as_str(), "Sleep" | "Nap") && matches!(a.phase, Phase::Running(_)))
 }
 
 #[derive(Component, Default)]
@@ -3570,7 +3578,7 @@ pub(crate) fn run_actions(
                             commands.entity(me).insert(clip);
                             continue;
                         }
-                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) => None,
+                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } => None,
                         ActionKind::Outro { .. } => {
                             action.phase = Phase::Running(0.0);
                             continue;
@@ -4199,6 +4207,7 @@ pub(crate) fn run_actions(
                             | ActionKind::SilencePhone
                             | ActionKind::Retire
                             | ActionKind::BuyReward(_)
+                            | ActionKind::WakeUp { .. }
                             | ActionKind::InventoryItem(..)
                             | ActionKind::EatHere
                             | ActionKind::EatItem { .. }
