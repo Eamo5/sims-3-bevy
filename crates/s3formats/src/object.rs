@@ -111,6 +111,57 @@ pub fn object_fx_slots(pkgs: &PackageSet, objd_key: &ResourceKey) -> Vec<[f32; 3
     pkgs.read(&rk).or_else(|| pkgs.read_ti(rk.t, rk.i)).and_then(|d| crate::model::parse_rslt(&d)).map(|s| s.effects.iter().map(|e| e.pos).collect()).unwrap_or_default()
 }
 
+/// A counter sink's bowl (model space): the points of it low enough to be under a counter's
+/// top, the cut where it's set in a counter found from them there (the game cuts surfaces by the
+/// OBJD's surface cutout mask). Its faucet and taps, higher, left out.
+pub fn object_basin(pkgs: &PackageSet, objd_key: &ResourceKey) -> Option<Vec<[f32; 3]>> {
+    let mut pts: Vec<[f32; 3]> = Vec::new();
+    for mk in object_models(pkgs, objd_key) {
+        let meshes = if mk.t == types::MODL { crate::model::load_model(pkgs, &mk) } else { crate::model::load_mlod_resource(pkgs, &mk) };
+        for m in meshes.unwrap_or_default() {
+            pts.extend(m.positions.iter().filter(|p| p[1] < BOWL_UNDER).copied());
+        }
+        if !pts.is_empty() {
+            break;
+        }
+    }
+    // (Rounded to millimetres, once each.)
+    let mut seen = std::collections::HashSet::new();
+    pts.retain(|p| seen.insert([(p[0] * 1000.0) as i32, (p[1] * 1000.0) as i32, (p[2] * 1000.0) as i32]));
+    (pts.len() >= 3).then_some(pts)
+}
+
+/// Above this (model space) a counter sink's points are its taps and faucet.
+const BOWL_UNDER: f32 = 0.2;
+
+/// The convex hull of some points (anticlockwise, Andrew's monotone chain).
+pub fn convex_hull(mut pts: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
+    pts.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+    pts.dedup_by(|a, b| (a[0] - b[0]).abs() < 1e-5 && (a[1] - b[1]).abs() < 1e-5);
+    if pts.len() < 3 {
+        return pts;
+    }
+    let cross = |o: [f32; 2], a: [f32; 2], b: [f32; 2]| (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    let mut lower: Vec<[f32; 2]> = Vec::new();
+    for &p in &pts {
+        while lower.len() >= 2 && cross(lower[lower.len() - 2], lower[lower.len() - 1], p) <= 0.0 {
+            lower.pop();
+        }
+        lower.push(p);
+    }
+    let mut upper: Vec<[f32; 2]> = Vec::new();
+    for &p in pts.iter().rev() {
+        while upper.len() >= 2 && cross(upper[upper.len() - 2], upper[upper.len() - 1], p) <= 0.0 {
+            upper.pop();
+        }
+        upper.push(p);
+    }
+    lower.pop();
+    upper.pop();
+    lower.extend(upper);
+    lower
+}
+
 /// An object's container slots (model space): where what's slotted into it sits (a dining
 /// table's chairs, a counter's sink), by the slot name's hash.
 pub fn object_container_slots(pkgs: &PackageSet, objd_key: &ResourceKey) -> Vec<crate::model::Slot> {

@@ -305,7 +305,13 @@ pub struct MeshData {
     /// Its material's other states' looks (a toilet `Dirty`, `VeryDirty` or `Clogged`: see
     /// `STATE_*`): a texture of their own, or (`true`) a dirt overlay drawn over its own.
     pub state_textures: Vec<(u32, ResourceKey, bool)>,
+    /// The MLOD mesh's flags (`MESH_*`: a basin's inside, a shadow caster...).
+    pub flags: u32,
 }
+
+/// A mesh that's the inside of a basin (a sink's bowl), the game drawing it through the counter
+/// it's set in (MLOD `MeshFlags.BasinInterior`).
+pub const MESH_BASIN_INTERIOR: u32 = 0x01;
 
 /// Material states (the MTST's), as the game's `SetMaterial` names them.
 pub const STATE_DIRTY: u32 = 0xEEAB4327;
@@ -363,7 +369,8 @@ pub fn decode_mlod(rcol: &Rcol, mlod: &[u8]) -> R<Vec<MeshData>> {
         let vrtf_ref = r.u32()?;
         let vbuf_ref = r.u32()?;
         let ibuf_ref = r.u32()?;
-        let prim = r.u32()? & 0xFF;
+        let prim_flags = r.u32()?;
+        let prim = prim_flags & 0xFF;
         let stream_offset = r.u32()? as usize;
         let _start_vertex = r.i32()?;
         let start_index = r.i32()?.max(0) as usize;
@@ -415,6 +422,7 @@ pub fn decode_mlod(rcol: &Rcol, mlod: &[u8]) -> R<Vec<MeshData>> {
             bounds_min: bmin,
             bounds_max: bmax,
             joints: joint_refs,
+            flags: prim_flags >> 8,
             ..Default::default()
         };
         let skinned = !m.joints.is_empty() && vrtf.elems.iter().any(|e| e.usage == 3);

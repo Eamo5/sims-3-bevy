@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 145;
+pub const GAMEDATA_VERSION: u32 = 150;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1388,6 +1388,10 @@ pub struct GameDataBaked {
     /// Each object's effect slots (model space): where showers spray, fountains gush and
     /// fires burn.
     pub fx_slots: Vec<(crate::types::Key, Vec<[f32; 3]>)>,
+    /// Counter sinks' bowls (model space): their points under the taps, the counter they're set
+    /// in cut away over them (`s3formats::object::object_basin`).
+    #[serde(default)]
+    pub basins: Vec<(crate::types::Key, Vec<[f32; 3]>)>,
     /// Each object's routing slots (model space): where Sims stand to use it, by slot number,
     /// and the way they face.
     pub route_slots: Vec<(crate::types::Key, Vec<(u8, [f32; 3], [f32; 3])>)>,
@@ -2946,6 +2950,10 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     .into_iter()
     .flatten()
     .collect();
+    // (Only sinks set in counters: their bowls drawn through the counter top.)
+    let sinks: Vec<s3pkg::ResourceKey> = objds.iter().filter(|k| pkgs.read(k).and_then(|d| s3formats::object::objd_objk(pkgs, &d)).and_then(|o| o.script_class).is_some_and(|s| s.contains("SinkCounter"))).copied().collect();
+    out.basins = crate::bake::par_map(&sinks, |k| s3formats::object::object_basin(pkgs, k).map(|pts| (crate::types::key_of(k), pts))).into_iter().flatten().collect();
+    progress(&format!("sink basins: {} of {} counter sinks ({} objects)", out.basins.len(), sinks.len(), objds.len()));
     out.route_slots = crate::bake::par_map(&objds, |k| {
         let r = s3formats::object::object_route_slots(pkgs, k);
         (!r.is_empty()).then(|| (crate::types::key_of(k), r))
