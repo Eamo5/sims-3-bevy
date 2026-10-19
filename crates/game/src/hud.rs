@@ -108,6 +108,8 @@ pub struct PieMenu {
     pub warp: Option<Vec2>,
     /// A long menu's pages, each led by "More..." to the next.
     pub pages: Vec<Vec<(String, ActionKind)>>,
+    /// Which way each option lies from the middle (for picking by the pointer's direction).
+    pub dirs: Vec<Vec2>,
 }
 
 /// The fridge's (and microwave's) menu of snacks, as the game titles it.
@@ -737,8 +739,8 @@ pub fn activity_label(a: &crate::rabbitholes::Activity) -> String {
 }
 
 /// The game's pie menu look: pale bubbles with dark writing, blue under the pointer.
-const BUBBLE: Color = Color::srgba(0.97, 0.98, 1.0, 0.97);
-const BUBBLE_HOVER: Color = Color::srgb(0.70, 0.85, 1.0);
+pub const BUBBLE: Color = Color::srgba(0.97, 0.98, 1.0, 0.97);
+pub const BUBBLE_HOVER: Color = Color::srgb(0.70, 0.85, 1.0);
 const BUBBLE_PRESS: Color = Color::srgb(0.55, 0.80, 0.45);
 const BUBBLE_TEXT: Color = Color::srgb(0.08, 0.16, 0.33);
 
@@ -782,6 +784,17 @@ fn spawn_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, 
     let radius = 90.0 + n as f32 * 10.0;
     // (In the game's own bubbles when its interface is to hand: see `piemenu`.)
     let game_look = crate::piemenu::GAME_PIE.load(std::sync::atomic::Ordering::Relaxed) && n <= crate::piemenu::MAX_ITEMS;
+    // (Which way each lies, for the pointer's direction: see `piemenu::PieMask`.)
+    pie.dirs = if game_look {
+        crate::piemenu::places(n).into_iter().map(|p| p.0).collect()
+    } else {
+        (0..n)
+            .map(|i| {
+                let a = -std::f32::consts::FRAC_PI_2 + i as f32 / n as f32 * std::f32::consts::TAU;
+                Vec2::new(a.cos() * radius, a.sin() * radius * 0.8)
+            })
+            .collect()
+    };
     let root = commands
         .spawn((
             DespawnOnExit(AppState::InGame),
@@ -789,6 +802,11 @@ fn spawn_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, 
             GlobalZIndex(10),
         ))
         .with_children(|p| {
+            // (The whole menu under its bubbles: picked by the pointer's direction.)
+            if !game_look {
+                let (hw, hh) = (radius + 100.0, radius * 0.8 + 40.0);
+                p.spawn(crate::piemenu::mask(Rect::new(-hw, -hh, hw, hh)));
+            }
             // A submenu's middle: the way back, named for it (see `piemenu`; here, a bubble).
             if submenu {
                 if !game_look {
@@ -2302,6 +2320,7 @@ fn pie_buttons(
     ),
     mut jobs: Query<&mut crate::careers::Job>,
     (back, windows, sounds): (Query<&Interaction, (Changed<Interaction>, With<crate::piemenu::PieBack>)>, Query<&Window, With<PrimaryWindow>>, Option<Res<crate::sound::Sounds>>),
+    mask: Query<&Interaction, (Changed<Interaction>, With<crate::piemenu::PieMask>)>,
 ) {
     // A submenu's middle: back to the menu it was opened from, where that was.
     if back.iter().any(|i| *i == Interaction::Pressed)
@@ -2315,6 +2334,13 @@ fn pie_buttons(
         if *i == Interaction::Pressed {
             chosen = Some(opt.0);
         }
+    }
+    // (Pressed between the bubbles: the one it points towards, as the game's.)
+    if chosen.is_none()
+        && mask.iter().any(|i| *i == Interaction::Pressed)
+        && let Some(c) = windows.single().ok().and_then(|w| w.cursor_position())
+    {
+        chosen = crate::piemenu::option_toward(&pie.dirs, c - pie.at);
     }
     let Some(idx) = chosen else { return };
     let Some((mut label, kind)) = pie.options.get(idx).cloned() else { return };
@@ -2483,7 +2509,8 @@ fn pie_buttons(
     if let Some(i) = as_submenu(&kind)
         && let (Some((title, list)), Some(a)) = (pie.submenus.get(i).cloned(), actor)
     {
-        let at = windows.single().ok().and_then(|w| w.cursor_position()).unwrap_or(pie.at);
+        // (Where the menu was: the pointer's still over it.)
+        let at = parent.0;
         open_submenu(&mut commands, &mut pie, at, &title, a, list, parent);
         return;
     }

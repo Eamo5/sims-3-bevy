@@ -90,6 +90,16 @@ pub struct UiButton {
     pub disabled: bool,
 }
 
+impl UiButton {
+    /// Its picture node and the picture for a state (0 normal, 2 lit, 3 pressed), as
+    /// `button_states` shows them.
+    pub fn picture_for(&self, state: usize) -> Option<(Entity, Handle<Image>)> {
+        let p = self.picture?;
+        let h = self.images.get(state).cloned().flatten().or_else(|| self.images[0].clone())?;
+        Some((p, h))
+    }
+}
+
 /// A window's (first) picture node, whose image game code can change (a portrait in the bust,
 /// the household's faces on the skewer).
 #[derive(Component, Clone, Copy)]

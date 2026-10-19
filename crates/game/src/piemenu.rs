@@ -16,7 +16,7 @@ pub struct PieMenuPlugin;
 
 impl Plugin for PieMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (enable, build_pies, warp_pointer, text_hover).chain());
+        app.add_systems(Update, (enable, build_pies, warp_pointer, text_hover, mask_hover).chain());
     }
 }
 
@@ -37,6 +37,35 @@ pub struct PieBack;
 /// An option's words (lit under the pointer).
 #[derive(Component)]
 struct PieText(Entity);
+
+/// The menu's hit mask, under its bubbles: the option the pointer points towards from the
+/// middle is lit and taken (the game's `mPieMenuHitMask` and `GetButtonIndex`), so a bubble's
+/// whole slice of the menu is its, its groove too.
+#[derive(Component)]
+pub struct PieMask;
+
+/// No option within this of the middle, either way (the game's 30).
+const DEAD_ZONE: f32 = 30.0;
+
+/// A hit mask over a menu's area (about its middle).
+pub fn mask(area: Rect) -> impl Bundle {
+    (
+        Button,
+        PieMask,
+        crate::hud::BlocksWorld,
+        ZIndex(-1),
+        Node { position_type: PositionType::Absolute, left: Val::Px(area.min.x), top: Val::Px(area.min.y), width: Val::Px(area.width()), height: Val::Px(area.height()), ..default() },
+    )
+}
+
+/// The option a pointer this far from the middle points towards (the one whose place lies most
+/// its way), none near the middle.
+pub fn option_toward(dirs: &[Vec2], d: Vec2) -> Option<usize> {
+    if d.x.abs() < DEAD_ZONE && d.y.abs() < DEAD_ZONE {
+        return None;
+    }
+    dirs.iter().enumerate().max_by(|a, b| a.1.dot(d).total_cmp(&b.1.dot(d))).map(|(i, _)| i)
+}
 
 /// The bubbles (`0x8ED0D610 + slot`: 0 top, 1–5 down the left, 6 bottom, 7–11 up the right)
 /// and their children: the words, an icon, the groove to the middle.
@@ -177,6 +206,17 @@ fn build_pies(
                     commands.entity(r).insert(PieText(t));
                 }
             }
+            // (The groove's ball, out past the top and bottom bubbles: a click on it goes
+            // through to the menu's mask, and so to its bubble.)
+            if let Some(g) = s.id(ITEM_GROOVE) {
+                commands.entity(g).insert((Pickable::IGNORE, bevy::ui::FocusPolicy::Pass));
+            }
+        }
+        // (Its whole area, picked by the pointer's direction.)
+        if !room.is_empty() {
+            let pad = 8.0;
+            let m = commands.spawn(mask(Rect::new(room.min.x - pad, room.min.y - pad, room.max.x + pad, room.max.y + pad))).id();
+            commands.entity(root).add_child(m);
         }
         // Moved onto the screen when it would go off it, the pointer to its middle again.
         if let (Ok(w), Val::Px(x), Val::Px(y)) = (windows.single(), node.left, node.top)
@@ -206,6 +246,46 @@ fn warp_pointer(mut pie: ResMut<crate::hud::PieMenu>, mut windows: Query<&mut Wi
     }
 }
 
+/// Over the menu between its bubbles: the one pointed towards lit, as if under the pointer.
+#[allow(clippy::type_complexity)]
+fn mask_hover(
+    mask: Query<&Interaction, With<PieMask>>,
+    pie: Res<crate::hud::PieMenu>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut options: Query<(&crate::hud::PieOption, &Interaction, Option<&PieText>, Option<&crate::layout::UiButton>, Option<&mut BackgroundColor>), Without<PieMask>>,
+    mut colors: Query<&mut TextColor>,
+    mut pics: Query<&mut ImageNode>,
+    mut last: Local<Option<usize>>,
+) {
+    let over = mask.iter().any(|i| *i != Interaction::None);
+    let toward = over.then(|| windows.single().ok().and_then(|w| w.cursor_position())).flatten().and_then(|c| option_toward(&pie.dirs, c - pie.at));
+    if toward == *last {
+        return;
+    }
+    *last = toward;
+    for (o, i, text, button, bg) in &mut options {
+        if *i != Interaction::None {
+            continue;
+        }
+        let lit = toward == Some(o.0);
+        if let Some(t) = text
+            && let Ok(mut c) = colors.get_mut(t.0)
+        {
+            c.0 = crate::layout::color(if lit { HIGHLIGHT } else { REGULAR });
+        }
+        if let Some((p, h)) = button.and_then(|b| b.picture_for(if lit { 2 } else { 0 }))
+            && let Ok(mut img) = pics.get_mut(p)
+        {
+            img.image = h;
+        }
+        if button.is_none()
+            && let Some(mut bg) = bg
+        {
+            bg.0 = if lit { crate::hud::BUBBLE_HOVER } else { crate::hud::BUBBLE };
+        }
+    }
+}
+
 /// The words lit under the pointer, as the game's.
 fn text_hover(q: Query<(&Interaction, &PieText), Changed<Interaction>>, mut colors: Query<&mut TextColor>) {
     for (i, t) in &q {
@@ -218,6 +298,18 @@ fn text_hover(q: Query<(&Interaction, &PieText), Changed<Interaction>>, mut colo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_pointer_picks_the_option_it_points_towards() {
+        let dirs: Vec<Vec2> = places(4).into_iter().map(|p| p.0).collect();
+        // (Above the middle, even off to the side a little: the top one.)
+        assert_eq!(option_toward(&dirs, Vec2::new(20.0, -100.0)), Some(0));
+        assert_eq!(option_toward(&dirs, Vec2::new(120.0, 10.0)), Some(1));
+        assert_eq!(option_toward(&dirs, Vec2::new(0.0, 60.0)), Some(2));
+        assert_eq!(option_toward(&dirs, Vec2::new(-90.0, -20.0)), Some(3));
+        // (On the face in the middle: none.)
+        assert_eq!(option_toward(&dirs, Vec2::new(10.0, -12.0)), None);
+    }
 
     #[test]
     fn options_go_round_clockwise_from_the_top() {
