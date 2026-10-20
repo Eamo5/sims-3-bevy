@@ -31,11 +31,19 @@ impl Plugin for CasFacePlugin {
 /// Whether the game's face panels are up (see `caslook::game_panel`).
 pub static FACE_UP: AtomicBool = AtomicBool::new(false);
 
-// `CASFacialDetails`'s: the regions' buttons (head and ears, eyes, nose, mouth, make-up), and
-// what this game hasn't (moles and freckles, tattoos, the plastic surgeon's and mirror's tabs,
-// the close button).
-const REGION_BUTTONS: [u32; 5] = [0x05db_9c02, 0x05db_9c04, 0x05db_9c06, 0x05db_9c05, 0x05db_9c0a];
-const DETAILS_NOT_HERE: [u32; 5] = [0x05db_9c09, 0x092f_a960, 0x0b98_4090, 0x0000_1001, 0x05db_9c00];
+// `CASFacialDetails`'s: the regions' buttons (head and ears, eyes, nose, mouth, make-up, moles
+// and freckles), and what this game hasn't (tattoos, the plastic surgeon's and mirror's tabs, the
+// close button).
+const REGION_BUTTONS: [u32; 6] = [0x05db_9c02, 0x05db_9c04, 0x05db_9c06, 0x05db_9c05, 0x05db_9c0a, 0x05db_9c09];
+const DETAILS_NOT_HERE: [u32; 4] = [0x092f_a960, 0x0b98_4090, 0x0000_1001, 0x05db_9c00];
+/// The make-up's region and the skin details' (`CASMoles`).
+const MAKEUP_REGION: usize = 4;
+const MOLES_REGION: usize = 5;
+// `CASMoles`': a grid each of freckles, moles and age weathering (their titles), "Remove All
+// Details", and its cells' check box (`MolesFrecklesEntry`).
+const DETAIL_GRIDS: [(u32, u32); 3] = [(0x100, 0x105), (0x101, 0x106), (0x102, 0x107)];
+const REMOVE_DETAILS: u32 = 0x103;
+const DETAIL_CHECK: u32 = 0x23;
 // Its backgrounds: the long one (the eyes' presets and colours, make-up) and the short one.
 const LONG_PANEL: u32 = 0x05db_9d00;
 const SHORT_PANEL: u32 = 0x05db_9d01;
@@ -143,12 +151,15 @@ const FACE_SLIDER_NAMES: [(usize, &str); 17] = [
     (5, "Mouth Height"),
 ];
 
-/// The panels on screen, the region shown (4: make-up), its page and part, and what was shown.
+/// The panels on screen, the region shown (4: make-up, 5: moles and freckles), its page and part,
+/// and what was shown.
 #[derive(Resource)]
 pub struct CasFace {
     details: Spawned,
     regions: Vec<Spawned>,
     makeup: Spawned,
+    moles: Spawned,
+    mole_cells: Vec<Entity>,
     region: usize,
     basics: bool,
     part: [usize; 4],
@@ -163,7 +174,7 @@ pub struct CasFace {
     /// The face's part being sculpted as Create a Sim last had it (followed when it changes).
     area: u8,
     #[allow(clippy::type_complexity)]
-    shown: Option<(usize, usize, bool, [usize; 4], usize, Age, bool, [u8; 3], Option<s3bake::Key>, Option<s3bake::Key>, bool, (usize, Vec<u16>))>,
+    shown: Option<(usize, usize, bool, [usize; 4], usize, Age, bool, [u8; 3], Option<s3bake::Key>, Option<s3bake::Key>, bool, (usize, Vec<u16>, Vec<s3bake::Key>))>,
 }
 
 /// A preset face's cell (of `simbody::face_presets`).
@@ -192,26 +203,26 @@ struct FaceSliderRow(usize);
 struct EyeCell(usize);
 #[derive(Component)]
 pub(crate) struct MakeupCell(pub usize);
+/// A skin detail's check box: its kind (of `simbody::DETAIL_TYPES`) and place in their list.
+#[derive(Component)]
+struct DetailCell(u32, usize);
 
 fn spawn_face(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>), frame: Option<Res<crate::caslook::CasFrame>>, face: Option<Res<CasFace>>) {
     let (Some(mut ui), Some(_)) = (ui, frame) else { return };
-    if face.is_some() || ["CASFacialDetails", "CASMakeup", "CASBodySlider", "EyeColorPresetGridItem"].into_iter().chain(REGIONS.iter().map(|r| r.layout)).any(|l| ui.layout(l).is_none()) {
+    if face.is_some()
+        || ["CASFacialDetails", "CASMakeup", "CASBodySlider", "EyeColorPresetGridItem", "CASMoles", "MolesFrecklesEntry"].into_iter().chain(REGIONS.iter().map(|r| r.layout)).any(|l| ui.layout(l).is_none())
+    {
         return;
     }
-    // (Make-up where moles and freckles were, this game having none.)
-    let Some(mut dw) = ui.layout("CASFacialDetails").cloned() else { return };
-    let mut moles = None;
-    edit_windows(&mut dw, 0x05db_9c09, &mut |w| moles = Some(w.area));
-    if let Some(area) = moles {
-        edit_windows(&mut dw, REGION_BUTTONS[4], &mut |w| w.area = area);
-    }
+    let Some(dw) = ui.layout("CASFacialDetails").cloned() else { return };
     let details = ui.spawn_root(&mut commands, &mut images, &mut fonts, &dw);
     for id in DETAILS_NOT_HERE {
         for e in details.all_with(id) {
             commands.entity(e).insert(Visibility::Hidden);
         }
     }
-    for (id, tip) in REGION_BUTTONS.iter().zip(["Head and Ears", "Eyes", "Nose", "Mouth", "Makeup"]) {
+    let moles_tip = ui.localize("Ui/Caption/CAS/Physical:MolesFreckles").unwrap_or_else(|| "Moles and Freckles".into());
+    for (id, tip) in REGION_BUTTONS.iter().zip(["Head and Ears", "Eyes", "Nose", "Mouth", "Makeup", moles_tip.as_str()]) {
         if let Some(e) = details.id(*id) {
             commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
         }
@@ -264,16 +275,37 @@ fn spawn_face(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut images,
         regions.push(s);
     }
     let Some(makeup) = spawn_makeup_panel(&mut commands, &mut ui, &mut images, &mut fonts) else { return };
-    for root in [details.root, makeup.root].into_iter().chain(regions.iter().map(|s| s.root)).flatten() {
+    let Some(moles) = ui.spawn(&mut commands, &mut images, &mut fonts, "CASMoles") else { return };
+    if let Some(e) = moles.id(REMOVE_DETAILS) {
+        commands.entity(e).insert(crate::icons::Tooltip(ui.localize("Ui/Caption/CAS/Physical:RemoveDetails").unwrap_or_else(|| "Remove All Details".into())));
+    }
+    for root in [details.root, makeup.root, moles.root].into_iter().chain(regions.iter().map(|s| s.root)).flatten() {
         commands.entity(root).insert((DespawnOnExit(AppState::CreateHousehold), GlobalZIndex(5), Visibility::Hidden));
     }
-    for root in [makeup.root].into_iter().chain(regions.iter().map(|s| s.root)).flatten() {
+    for root in [makeup.root, moles.root].into_iter().chain(regions.iter().map(|s| s.root)).flatten() {
         commands.entity(root).insert(GlobalZIndex(6));
     }
     // (Each part's last slot, the region's whole, first.)
     let part = [0, 1, 2, 3].map(|n: usize| REGIONS[n].parts.len() - 1);
     FACE_UP.store(true, Ordering::Relaxed);
-    commands.insert_resource(CasFace { details, regions, makeup, region: 0, basics: true, part, kind: 0, cells: None, preset_cells: None, bars, scroll: [0; 4], sliders: Vec::new(), area: 0, shown: None });
+    commands.insert_resource(CasFace {
+        details,
+        regions,
+        makeup,
+        moles,
+        mole_cells: Vec::new(),
+        region: 0,
+        basics: true,
+        part,
+        kind: 0,
+        cells: None,
+        preset_cells: None,
+        bars,
+        scroll: [0; 4],
+        sliders: Vec::new(),
+        area: 0,
+        shown: None,
+    });
 }
 
 /// Shown on the Face tab: the region chosen, its page and part, the part's sliders where the
@@ -288,7 +320,13 @@ fn face_panel(
     selected: Res<crate::cas::CasSelected>,
     scene: Option<Res<crate::cas::CasScene>>,
     (mut vis, mut buttons, mut sliders, mut bars): (Query<&mut Visibility>, Query<&mut UiButton>, Query<&mut UiSlider>, Query<&mut crate::layout::UiScrollBar>),
-    (clicks, eyes, makeup, preset_cells): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &EyeCell), Changed<Interaction>>, Query<(&Interaction, &MakeupCell), Changed<Interaction>>, Query<(&Interaction, &PresetCell), Changed<Interaction>>),
+    (clicks, eyes, makeup, preset_cells, detail_cells): (
+        Query<(Entity, &Interaction), Changed<Interaction>>,
+        Query<(&Interaction, &EyeCell), Changed<Interaction>>,
+        Query<(&Interaction, &MakeupCell), Changed<Interaction>>,
+        Query<(&Interaction, &PresetCell), Changed<Interaction>>,
+        Query<(&Interaction, &DetailCell), Changed<Interaction>>,
+    ),
     (over, wheel): (Query<&bevy::ui::RelativeCursorPosition>, Res<bevy::input::mouse::AccumulatedMouseScroll>),
     mut actions: MessageWriter<crate::cas::CasActionRequest>,
     mut gu: Option<ResMut<crate::icons::GameUi>>,
@@ -298,7 +336,7 @@ fn face_panel(
     let on = selected.1 == CasTab::Face && !crate::caslook::modal_up();
     crate::livehud::set_visible(&mut vis, f.details.root, on);
     if !on {
-        for s in f.regions.iter().chain([&f.makeup]) {
+        for s in f.regions.iter().chain([&f.makeup, &f.moles]) {
             crate::livehud::set_visible(&mut vis, s.root, false);
         }
         return;
@@ -308,8 +346,15 @@ fn face_panel(
     // Make-up for those the game's parts are for (by age and gender).
     let lists = MAKEUP_TYPES.map(|t| crate::cas::parts_for(&scene.cas, sim, t, crate::simbody::OutfitKind::Everyday));
     let makeup_ok = !sim.age.is_little() && lists.iter().any(|l| !l.is_empty());
-    crate::livehud::set_visible(&mut vis, f.details.id(REGION_BUTTONS[4]), makeup_ok);
-    if !makeup_ok && f.region == 4 {
+    crate::livehud::set_visible(&mut vis, f.details.id(REGION_BUTTONS[MAKEUP_REGION]), makeup_ok);
+    if !makeup_ok && f.region == MAKEUP_REGION {
+        f.region = 0;
+    }
+    // Moles, freckles and weathering, for those they're made for.
+    let detail_lists = crate::simbody::DETAIL_TYPES.map(|t| crate::cas::parts_for(&scene.cas, sim, t, crate::simbody::OutfitKind::Everyday));
+    let moles_ok = !sim.age.is_little() && detail_lists.iter().any(|l| !l.is_empty());
+    crate::livehud::set_visible(&mut vis, f.details.id(REGION_BUTTONS[MOLES_REGION]), moles_ok);
+    if !moles_ok && f.region == MOLES_REGION {
         f.region = 0;
     }
     // The region, page and part chosen (the region as Create a Sim's sculpting has it too).
@@ -317,6 +362,10 @@ fn face_panel(
         f.area = scene.face_area;
         f.region = f.area as usize;
         f.basics = true;
+    }
+    // (CAS_FACE_REGION=<n>, tests: that region shown.)
+    if let Some(r) = std::env::var("CAS_FACE_REGION").ok().and_then(|v| v.parse::<usize>().ok()).filter(|r| *r < REGION_BUTTONS.len()) {
+        f.region = r;
     }
     for (n, id) in REGION_BUTTONS.iter().enumerate() {
         if crate::livehud::pressed(&clicks, f.details.id(*id)) && f.region != n {
@@ -340,11 +389,18 @@ fn face_panel(
                 f.part[f.region] = i;
             }
         }
-    } else {
+    } else if f.region == MAKEUP_REGION {
         for (n, id) in MAKEUP_KINDS[..4].iter().enumerate() {
             if crate::livehud::pressed(&clicks, f.makeup.id(*id)) {
                 f.kind = n;
             }
+        }
+    } else if crate::livehud::pressed(&clicks, f.moles.id(REMOVE_DETAILS)) {
+        actions.write(crate::cas::CasActionRequest(CasAction::FacePart(crate::simbody::DETAIL_TYPES[0], usize::MAX)));
+    }
+    for (i, c) in &detail_cells {
+        if *i == Interaction::Pressed {
+            actions.write(crate::cas::CasActionRequest(CasAction::FacePart(c.0, c.1)));
         }
     }
     let basics = f.basics && f.region < 4;
@@ -417,7 +473,7 @@ fn face_panel(
         }
     }
     let eyes_rgb = sim.eyes.to_srgba().to_u8_array_no_alpha();
-    let want = (k, f.region, basics, f.part, f.kind, sim.age, sim.female, eyes_rgb, makeup_worn(&sim.outfit, MAKEUP_TYPES[f.kind]), sim.outfit.lipstick, gu.is_some(), (f.scroll[f.region.min(3)], chosen.clone()));
+    let want = (k, f.region, basics, f.part, f.kind, sim.age, sim.female, eyes_rgb, makeup_worn(&sim.outfit, MAKEUP_TYPES[f.kind]), sim.outfit.lipstick, gu.is_some(), (f.scroll[f.region.min(3)], chosen.clone(), sim.outfit.skin_details.clone()));
     if f.shown.as_ref() == Some(&want) {
         // (The sliders follow the face when it's changed other than by them: made at random.)
         for (e, i, last) in f.sliders.iter_mut() {
@@ -437,14 +493,15 @@ fn face_panel(
     for (n, s) in f.regions.iter().enumerate() {
         crate::livehud::set_visible(&mut vis, s.root, f.region == n);
     }
-    crate::livehud::set_visible(&mut vis, f.makeup.root, f.region == 4);
+    crate::livehud::set_visible(&mut vis, f.makeup.root, f.region == MAKEUP_REGION);
+    crate::livehud::set_visible(&mut vis, f.moles.root, f.region == MOLES_REGION);
     // The panel behind: the long one for the eyes' presets and colours and for make-up, else the
     // short one (taller for the sliders), as the regions' panels set `CASFacialDetails`'.
-    let long = f.region == 4 || f.region == 1 && basics;
+    let long = f.region == MAKEUP_REGION || f.region == 1 && basics;
     crate::livehud::set_visible(&mut vis, f.details.id(LONG_PANEL), long);
     crate::livehud::set_visible(&mut vis, f.details.id(SHORT_PANEL), !long);
     if let Some(e) = f.details.id(SHORT_PANEL) {
-        let h = if basics { 448.0 } else { 545.0 };
+        let h = if basics || f.region == MOLES_REGION { 448.0 } else { 545.0 };
         commands.entity(e).entry::<Node>().and_modify(move |mut n| n.height = Val::Px(h));
     }
     for (n, id) in REGION_BUTTONS.iter().enumerate() {
@@ -454,7 +511,7 @@ fn face_panel(
             b.selected = f.region == n;
         }
     }
-    for old in [f.cells.take(), f.preset_cells.take()].into_iter().flatten() {
+    for old in [f.cells.take(), f.preset_cells.take()].into_iter().flatten().chain(f.mole_cells.drain(..)) {
         commands.entity(old).try_despawn();
     }
     f.sliders.clear();
@@ -565,6 +622,36 @@ fn face_panel(
             if let Some(e) = c.id(SLIDER) {
                 commands.entity(e).insert(FaceSliderRow(i));
                 f.sliders.push((e, i, v));
+            }
+        }
+        return;
+    }
+    // Moles, freckles and weathering: a check box each, those worn ticked (a kind with none
+    // for the Sim put away).
+    if f.region == MOLES_REGION {
+        let Some(template) = ui.layout("MolesFrecklesEntry").cloned() else { return };
+        for (n, (grid_id, title)) in DETAIL_GRIDS.iter().enumerate() {
+            let list = &detail_lists[n];
+            crate::livehud::set_visible(&mut vis, f.moles.id(*title), !list.is_empty());
+            let (Some(grid), Some(g)) = (f.moles.id(*grid_id), ui.find("CASMoles", *grid_id).and_then(|w| w.grid)) else { continue };
+            let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE, ChildOf(grid))).id();
+            f.mole_cells.push(holder);
+            let cols = g.columns.max(1) as usize;
+            let step = Vec2::new(g.cell[0] + g.cell_padding[0] + g.cell_padding[2], g.cell[1] + g.cell_padding[1] + g.cell_padding[3]);
+            for (i, (key, name)) in list.iter().enumerate().take(cols * g.rows.max(1) as usize) {
+                let (x, y) = (g.padding[0] + (i % cols) as f32 * step.x, g.padding[1] + (i / cols) as f32 * step.y);
+                let mut cell = template.clone();
+                cell.area = [x, y, x + g.cell[0], y + g.cell[1]];
+                let c = ui.spawn_under(&mut commands, &mut images, &mut fonts, &cell, holder);
+                let Some(check) = c.id(DETAIL_CHECK) else { continue };
+                commands.entity(check).insert((DetailCell(crate::simbody::DETAIL_TYPES[n], i), crate::icons::Tooltip(name.clone())));
+                if sim.outfit.skin_details.contains(key) {
+                    commands.entity(check).queue(|mut e: EntityWorldMut| {
+                        if let Some(mut b) = e.get_mut::<UiButton>() {
+                            b.selected = true;
+                        }
+                    });
+                }
             }
         }
         return;

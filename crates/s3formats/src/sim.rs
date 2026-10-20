@@ -233,6 +233,10 @@ pub const CT_LIPSTICK: u32 = 17;
 pub const CT_EYESHADOW: u32 = 18;
 pub const CT_EYELINER: u32 = 19;
 pub const CT_BLUSH: u32 = 20;
+/// Skin details: moles, freckles and age weathering (drawn onto the face, any number of them).
+pub const CT_MOLES: u32 = 27;
+pub const CT_FRECKLES: u32 = 28;
+pub const CT_AGE_WEATHERING: u32 = 29;
 /// Masks (a burglar's), gloves and stockings: worn as layers over the face, hands and legs.
 pub const CT_MASK: u32 = 21;
 pub const CT_GLOVES: u32 = 24;

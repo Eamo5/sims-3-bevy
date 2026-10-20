@@ -903,6 +903,17 @@ fn cas_actions(
                 }
                 s.outfit.accessories = Some(worn.into_iter().map(|w| w.0).collect());
             }
+            CasAction::FacePart(t, i) if crate::simbody::DETAIL_TYPES.contains(&t) => {
+                // (Moles, freckles, weathering: one put on, or taken off when it's on already;
+                // none: all of them off.)
+                let list = parts_for(&scene.cas, &pending.members[k], t, crate::simbody::OutfitKind::Everyday);
+                let details = &mut pending.members[k].outfit.skin_details;
+                match list.get(i).map(|p| p.0) {
+                    Some(key) if details.contains(&key) => details.retain(|d| *d != key),
+                    Some(key) => details.push(key),
+                    None => details.clear(),
+                }
+            }
             CasAction::FacePart(t, i) => {
                 let list = parts_for(&scene.cas, &pending.members[k], t, crate::simbody::OutfitKind::Everyday);
                 let key = if i == usize::MAX { Some(crate::sim::OutfitChoice::NONE) } else { list.get(i).map(|p| p.0) };

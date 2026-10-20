@@ -465,11 +465,26 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
     }
     // (Glasses come off for a swim.)
     let glasses = glasses.filter(|_| kind != OutfitKind::Swimwear);
-    let face_layers = [blush, lipstick, eyeshadow, eyeliner].into_iter().flatten().filter_map(|p| p.layer).collect();
+    // (Moles, freckles and weathering under the make-up.)
+    let face_layers = detail_layers(cas, sim).into_iter().chain([blush, lipstick, eyeshadow, eyeliner].into_iter().flatten().filter_map(|p| p.layer)).collect();
     let accessories = accessories_of(cas, sim);
     // (A hat: its own layer over the hair, which takes their hair colour.)
     let hat = hair.as_ref().and_then(|h| cas.hats.get(&h.key)).copied();
     Outfit { face, scalp, hair, brows, body, glasses, beard, face_layers, accessories, hat, ..default() }
+}
+
+/// The skin's details, as Create a Sim's Moles panel lists them: freckles, moles, weathering.
+pub const DETAIL_TYPES: [u32; 3] = [s3formats::sim::CT_FRECKLES, s3formats::sim::CT_MOLES, s3formats::sim::CT_AGE_WEATHERING];
+
+/// The layers of a Sim's moles, freckles and weathering, as chosen (those made for their age).
+pub fn detail_layers(cas: &CasData, sim: &Sim) -> Vec<Key> {
+    let age = age_bits(sim.age);
+    sim.outfit
+        .skin_details
+        .iter()
+        .filter_map(|k| cas.parts.iter().find(|p| p.key == *k && DETAIL_TYPES.contains(&p.clothing_type) && p.age_gender & age != 0 && p.layer.is_some()))
+        .filter_map(|p| p.layer)
+        .collect()
 }
 
 /// Jewellery's kinds, as Create a Sim's Accessories rows list them after the glasses.
@@ -537,7 +552,7 @@ pub fn uniform(cas: &CasData, sim: &Sim, name: &str, rng: &mut impl Rng) -> Opti
         _ => 4,
     });
     o.body = body.into_iter().map(|p| p.part.clone()).collect();
-    o.face_layers = info.parts.iter().filter(|p| p.layer_only && p.part.clothing_type == CT_MASK).filter_map(|p| p.part.layer).collect();
+    o.face_layers = detail_layers(cas, sim).into_iter().chain(info.parts.iter().filter(|p| p.layer_only && p.part.clothing_type == CT_MASK).filter_map(|p| p.part.layer)).collect();
     if let Some(h) = info.parts.iter().find(|p| p.part.clothing_type == CT_HAIR && !p.layer_only) {
         o.hair = Some(h.part.clone());
         o.hat = h.hat;

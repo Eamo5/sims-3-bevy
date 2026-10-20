@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 151;
+pub const GAMEDATA_VERSION: u32 = 153;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -2466,8 +2466,19 @@ fn bake_face_presets(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, String
     Ok(n)
 }
 
-/// Create a Sim's Face tab: beards, glasses, lipsticks and eye shadows.
-pub const FACE_TYPES: [u32; 6] = [s3formats::sim::CT_BEARD, s3formats::sim::CT_GLASSES, s3formats::sim::CT_LIPSTICK, s3formats::sim::CT_EYESHADOW, s3formats::sim::CT_EYELINER, s3formats::sim::CT_BLUSH];
+/// Create a Sim's Face tab: beards, glasses, lipsticks and eye shadows; and the skin's details
+/// (moles, freckles, age weathering).
+pub const FACE_TYPES: [u32; 9] = [
+    s3formats::sim::CT_BEARD,
+    s3formats::sim::CT_GLASSES,
+    s3formats::sim::CT_LIPSTICK,
+    s3formats::sim::CT_EYESHADOW,
+    s3formats::sim::CT_EYELINER,
+    s3formats::sim::CT_BLUSH,
+    s3formats::sim::CT_MOLES,
+    s3formats::sim::CT_FRECKLES,
+    s3formats::sim::CT_AGE_WEATHERING,
+];
 /// Create a Sim's jewellery (the Accessories rows), the base game's and the packs'.
 pub const ACCESSORY_TYPES: [u32; 7] = [
     s3formats::sim::CT_NECKLACE,
@@ -2478,6 +2489,37 @@ pub const ACCESSORY_TYPES: [u32; 7] = [
     s3formats::sim::CT_RING_LEFT,
     s3formats::sim::CT_RING_RIGHT,
 ];
+
+/// A skin detail's layer (moles, freckles, weathering). The game's recipe blends its colour into
+/// the skin through the marks' alpha, which a layer over the skin can't do: here, the recipe's
+/// colour where its marks are.
+fn detail_layer(pkgs: &PackageSet, key: crate::types::Key, max: u32) -> Option<Vec<u8>> {
+    use s3formats::txtc::{P_COLOR, STEP_COLOR_FILL, Txtc};
+    let rk = crate::types::rkey(key);
+    if rk.t != s3pkg::types::TXTC {
+        return crate::bake::bake_texture(pkgs, key, max, true);
+    }
+    let t = Txtc::parse(&pkgs.read(&rk).or_else(|| pkgs.read_ti(rk.t, rk.i))?).ok()?;
+    let tint = t
+        .steps
+        .iter()
+        .filter(|s| s.kind() == STEP_COLOR_FILL)
+        .filter_map(|s| s.props.iter().find(|(p, _)| *p == P_COLOR).and_then(|(_, v)| v.as_u32()))
+        .filter(|c| c & 0xFF_FFFF != 0xFF_FFFF)
+        .last();
+    let mut c = s3formats::compositor::Compositor::new(pkgs);
+    c.max_size = max as usize;
+    c.layer_mode = true;
+    let (w, h) = c.output_size(&t);
+    let mut img = c.run(&t, w.min(max as usize), h.min(max as usize));
+    if let Some(tint) = tint {
+        let rgb = [(tint >> 16) as u8, (tint >> 8) as u8, tint as u8];
+        for px in img.data.chunks_exact_mut(4) {
+            px[..3].copy_from_slice(&rgb);
+        }
+    }
+    Some(crate::ddsw::encode_dds(&img))
+}
 
 /// The CAS parts of the town's service uniforms, by name.
 pub const SERVICE_UNIFORMS: [&str; 5] = ["BodyFrenchMaid", "HairFrenchMaidBunLoose", "BodyRepair", "BodyMailCarrier", "BodyPizzaDeliveryOutfit"];
@@ -2588,7 +2630,15 @@ fn bake_outfits(root: &BakeRoot, pkgs: &PackageSet, careers: &[CareerInfo]) -> R
     let formal: Vec<(CasPartInfo, CasPartMeshes)> = crate::bake::par_map(&formal, |(k, c)| {
         let m = crate::bake::cas_part_meshes(pkgs, c, rig, cas.baby_rig.as_ref());
         let layer = c.diffuse.first().map(key_of);
-        let textures = m.meshes.iter().filter_map(|m| m.texture).map(|t| (t, false)).chain(layer.map(|l| (l, true)));
+        // (Moles, freckles and weathering: their marks in their recipe's colour.)
+        let detail = matches!(c.clothing_type, s3formats::sim::CT_MOLES | s3formats::sim::CT_FRECKLES | s3formats::sim::CT_AGE_WEATHERING);
+        if detail
+            && let Some(l) = layer
+            && let Some(dds) = detail_layer(pkgs, l, 512)
+        {
+            let _ = std::fs::write(root.tex_path(l), dds);
+        }
+        let textures = m.meshes.iter().filter_map(|m| m.texture).map(|t| (t, false)).chain(layer.filter(|_| !detail).map(|l| (l, true)));
         for (t, as_layer) in textures {
             if !root.tex_path(t).exists()
                 && let Some(dds) = crate::bake::bake_texture(pkgs, t, 512, as_layer)
@@ -2599,7 +2649,10 @@ fn bake_outfits(root: &BakeRoot, pkgs: &PackageSet, careers: &[CareerInfo]) -> R
         // (Make-up is layers drawn onto the face, with no mesh of its own, and so are the beards
         // with no mesh (goatees, chinstraps...: the game tints them with the hair colour); glasses
         // and the other beards are meshes.)
-        let layer_only = matches!(c.clothing_type, s3formats::sim::CT_LIPSTICK | s3formats::sim::CT_EYESHADOW | s3formats::sim::CT_EYELINER | s3formats::sim::CT_BLUSH)
+        let layer_only = matches!(
+            c.clothing_type,
+            s3formats::sim::CT_LIPSTICK | s3formats::sim::CT_EYESHADOW | s3formats::sim::CT_EYELINER | s3formats::sim::CT_BLUSH | s3formats::sim::CT_MOLES | s3formats::sim::CT_FRECKLES | s3formats::sim::CT_AGE_WEATHERING
+        )
             || c.clothing_type == s3formats::sim::CT_BEARD && m.meshes.is_empty();
         let info = CasPartInfo { key: key_of(k), name: c.name.clone(), clothing_type: c.clothing_type, age_gender: c.age_gender, category: c.category, baked: !m.meshes.is_empty() || layer_only && layer.is_some(), layer };
         Some((info, m))

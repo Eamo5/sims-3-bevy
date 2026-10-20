@@ -262,6 +262,8 @@ pub struct OutfitChoice {
     pub brows: Option<s3bake::Key>,
     /// Jewellery (`simbody::ACCESSORY_TYPES`) as chosen (none: as their look has it).
     pub accessories: Option<Vec<s3bake::Key>>,
+    /// Moles, freckles and age weathering (`simbody::DETAIL_TYPES`), as many as chosen.
+    pub skin_details: Vec<s3bake::Key>,
     /// The clothes chosen for their other outfits (in `OTHER_OUTFITS`' order).
     pub other: [Clothes; 5],
     /// The colourway chosen for a part (by its key: the game's preset; none, its own).
