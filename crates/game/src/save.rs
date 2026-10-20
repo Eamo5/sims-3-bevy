@@ -822,6 +822,11 @@ pub struct SaveRequest;
 #[derive(Message)]
 pub struct SaveAsRequest;
 
+/// The file a `SaveAsRequest` saves to, named by the player (`gamepopup`); without one, a new
+/// file no save has.
+#[derive(Resource)]
+pub struct SaveTo(pub PathBuf);
+
 /// The game as it stands wanted, without saving it (changing household starts from it).
 #[derive(Message)]
 pub struct SnapshotRequest;
@@ -961,7 +966,7 @@ fn save_game(
     (mut requests, mut snapshots, mut save_as, dormant): (MessageReader<SaveRequest>, MessageReader<SnapshotRequest>, MessageReader<SaveAsRequest>, Res<crate::household::Dormant>),
     clock: Res<GameClock>,
     world: Res<CurrentWorld>,
-    household: Option<Res<Household>>,
+    (household, save_to): (Option<Res<Household>>, Option<Res<SaveTo>>),
     (removed, paint, garden, plants, collection, meals, discoveries): (
         Res<RemovedLotObjects>,
         Option<Res<crate::building::LotPaint>>,
@@ -1250,7 +1255,9 @@ fn save_game(
     }
     let dir = saves_dir();
     let _ = std::fs::create_dir_all(&dir);
-    let path = slot.0.clone().filter(|_| !new_file).unwrap_or_else(|| free_save_path(&dir, &game));
+    let named = save_to.filter(|_| new_file).map(|s| s.0.clone());
+    commands.remove_resource::<SaveTo>();
+    let path = named.or_else(|| slot.0.clone().filter(|_| !new_file)).unwrap_or_else(|| free_save_path(&dir, &game));
     match serde_json::to_vec_pretty(&game).map_err(|e| e.to_string()).and_then(|d| write_save(&path, &d).map_err(|e| e.to_string())) {
         Ok(()) => {
             slot.0 = Some(path);

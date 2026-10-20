@@ -486,7 +486,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, queue_diff.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, zoom_shots.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, spin_shots.run_if(in_state(crate::PlayMode::Live)))
-            .add_systems(Update, (idle_shots, react_shots, face_shots, spawn_shots).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (idle_shots, react_shots, face_shots, spawn_shots, note_hook).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_save.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_switch.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, auto_load.run_if(in_state(AppState::MainMenu)))
@@ -1290,6 +1290,17 @@ fn shots_every(mut commands: Commands, time: Res<Time>, clock: Res<crate::clock:
     let path = std::path::Path::new(&dir).join(format!("{:03}_day{}_{:02}{:02}.png", *n, m / 1440, (m / 60) % 24, m % 60));
     info!("shot {}", path.display());
     commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+}
+
+/// NOTE=<words>@<seconds>: a notification of those words then (one beginning with a Sim's name
+/// carries their picture).
+fn note_hook(time: Res<Time>, mut notes: ResMut<crate::interact::Notifications>, mut done: Local<bool>) {
+    let Some((words, at)) = std::env::var("NOTE").ok().and_then(|v| v.rsplit_once('@').and_then(|(w, t)| Some((w.to_string(), t.parse::<f32>().ok()?)))) else { return };
+    if *done || time.elapsed_secs() < at {
+        return;
+    }
+    *done = true;
+    notes.push(words);
 }
 
 /// CAMS=1: the cameras and UI roots, every couple of seconds (debugging).

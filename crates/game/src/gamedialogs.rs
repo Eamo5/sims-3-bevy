@@ -296,6 +296,7 @@ fn type_into_box(
         Some(crate::dialog::Question::Engrave { grave, suggested }) => (*grave, suggested, crate::ghosts::EPITAPH_LENGTH),
         Some(crate::dialog::Question::NameDiscovery { sim, suggested }) => (*sim, suggested, crate::telescope::NAME_LENGTH),
         Some(crate::dialog::Question::RenameProperty { sim, suggested, .. }) => (*sim, suggested, crate::estatedialog::NAME_LENGTH),
+        Some(crate::dialog::Question::SaveName { suggested }) => (Entity::PLACEHOLDER, suggested, crate::gamepopup::NAME_LENGTH),
         _ => {
             *asking = None;
             keys.clear();
@@ -385,8 +386,10 @@ fn question_dialogs(
             crate::dialog::Question::PhoneCall { .. } => "TwoButtonDialog",
             // (A child's wish to be their lifetime wish: yes or no.)
             crate::dialog::Question::ConfirmLifetimeWish { .. } => "TwoButtonDialog",
+            // (Saving over another save: yes or no.)
+            crate::dialog::Question::Overwrite { .. } => "TwoButtonDialog",
             // (A newborn's name: the game's box to type it in.)
-            crate::dialog::Question::NameBaby { .. } | crate::dialog::Question::Engrave { .. } | crate::dialog::Question::NameDiscovery { .. } | crate::dialog::Question::RenameProperty { .. } => "StringInputDialog",
+            crate::dialog::Question::NameBaby { .. } | crate::dialog::Question::Engrave { .. } | crate::dialog::Question::NameDiscovery { .. } | crate::dialog::Question::RenameProperty { .. } | crate::dialog::Question::SaveName { .. } => "StringInputDialog",
             crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 3 => "ThreeButtonDialog",
             _ => return,
         };
@@ -406,11 +409,9 @@ fn question_dialogs(
         shown.plain = Some(plain);
         shown.dirty = true;
         match &ask.about {
-            crate::dialog::Question::CareerPath { .. } | crate::dialog::Question::CareerEvent { .. } | crate::dialog::Question::PhoneCall { .. } => {
+            crate::dialog::Question::CareerPath { .. } | crate::dialog::Question::CareerEvent { .. } | crate::dialog::Question::PhoneCall { .. } | crate::dialog::Question::Overwrite { .. } => {
                 // The offer's words; a button for each path (or yes and no), in the game's words.
-                let words = [ask.title.as_str(), ask.text.as_str()].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join("
-
-");
+                let words = [ask.title.as_str(), ask.text.as_str()].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join("\n\n");
                 if let Some(t) = s.comment("Message").and_then(|w| s.text_of(w)) {
                     commands.entity(t).insert(Text::new(words));
                 }
@@ -425,7 +426,8 @@ fn question_dialogs(
             crate::dialog::Question::NameBaby { suggested, .. }
             | crate::dialog::Question::Engrave { suggested, .. }
             | crate::dialog::Question::NameDiscovery { suggested, .. }
-            | crate::dialog::Question::RenameProperty { suggested, .. } => {
+            | crate::dialog::Question::RenameProperty { suggested, .. }
+            | crate::dialog::Question::SaveName { suggested } => {
                 // The title ("It's a Girl!"), the words, the name in its box, OK.
                 for w in s.all_with(NAME_TITLE) {
                     if let Some(t) = s.text_of(w) {
@@ -444,7 +446,7 @@ fn question_dialogs(
                 }
                 // (A name's needed: no cancelling it; a building's new one can be thought better of.)
                 if let Some(b) = s.id(NAME_CANCEL) {
-                    if matches!(ask.about, crate::dialog::Question::RenameProperty { .. }) {
+                    if matches!(ask.about, crate::dialog::Question::RenameProperty { .. } | crate::dialog::Question::SaveName { .. }) {
                         commands.entity(b).insert(crate::dialog::AnswerButton(1));
                     } else {
                         commands.entity(b).insert(Visibility::Hidden);

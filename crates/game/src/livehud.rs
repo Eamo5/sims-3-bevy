@@ -19,7 +19,7 @@ impl Plugin for LiveHudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InfoPanel>().add_systems(OnEnter(PlayMode::Live), spawn_live_hud).add_systems(
             Update,
-            (time_control, puck, mood_meter, motives_panel, bust, skewer, navigation, show_in_modes.after(navigation), moodlets, wishes, skills_panel, skill_journal_buttons, interaction_queue, notifications).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<LiveHud>),
+            (time_control, puck, mood_meter, motives_panel, bust, skewer, navigation, show_in_modes.after(navigation), moodlets, wishes, skills_panel, skill_journal_buttons, interaction_queue, notifications, note_focus).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<LiveHud>),
         );
     }
 }
@@ -1322,6 +1322,22 @@ const NOTE_THUMB_ROOM: f32 = 34.0;
 #[derive(Component)]
 struct NoteClose(String);
 
+/// A notification's picture of the Sim it's about: a click takes the camera to them (as the
+/// game's notices' faces do).
+#[derive(Component)]
+struct NoteFocus(Entity);
+
+fn note_focus(clicks: Query<(&Interaction, &NoteFocus), Changed<Interaction>>, shown: Query<&InheritedVisibility>, mut cams: Query<&mut crate::camera::SimsCamera>) {
+    for (i, f) in &clicks {
+        if *i == Interaction::Pressed
+            && shown.get(f.0).is_ok_and(|v| v.get())
+            && let Ok(mut cam) = cams.single_mut()
+        {
+            cam.follow(f.0);
+        }
+    }
+}
+
 /// The notifications (top right), in the game's own cards: a Sim's words with their face on
 /// the left (the speech background), the game's own news without (the system one); closed
 /// with their cross, or in time.
@@ -1402,6 +1418,7 @@ fn notifications(
         match (about, b.id(NOTE_THUMB)) {
             (Some(e), Some(t)) => {
                 let h = portraits.portrait(&mut assets, e);
+                commands.entity(t).insert((NoteFocus(e), Interaction::default(), crate::icons::Tooltip("Go to Sim".into())));
                 commands.entity(t).despawn_children();
                 commands.entity(t).with_children(|c| {
                     c.spawn((ImageNode::new(h), crate::portraits::PortraitOf(e), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));

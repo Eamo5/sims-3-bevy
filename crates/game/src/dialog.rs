@@ -48,6 +48,10 @@ pub enum Question {
     /// A child's or teen's wish promised that would be their lifetime wish (an index into
     /// `lifetime::LIFETIME_WISHES`; the wish's own number in `dreams`): yes or no.
     ConfirmLifetimeWish { sim: Entity, wish: usize, uid: u64 },
+    /// A name for the game's save (typed in; or cancelled: `gamepopup`).
+    SaveName { suggested: String },
+    /// Another save has the name: to save over it (yes), or think of another (no).
+    Overwrite { name: String },
 }
 
 impl Question {
@@ -55,7 +59,7 @@ impl Question {
     pub fn sim(&self) -> Option<Entity> {
         match self {
             Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } | Question::CareerEvent { sim, .. } | Question::NameBaby { sim, .. } | Question::PhoneCall { sim, .. } | Question::NameDiscovery { sim, .. } | Question::RenameProperty { sim, .. } | Question::ConfirmLifetimeWish { sim, .. } => Some(*sim),
-            Question::Household(_) | Question::Engrave { .. } => None,
+            Question::Household(_) | Question::Engrave { .. } | Question::SaveName { .. } | Question::Overwrite { .. } => None,
         }
     }
 }
