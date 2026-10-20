@@ -237,6 +237,8 @@ pub const CT_BLUSH: u32 = 20;
 pub const CT_MOLES: u32 = 27;
 pub const CT_FRECKLES: u32 = 28;
 pub const CT_AGE_WEATHERING: u32 = 29;
+/// Body hair, by where it grows (drawn onto the body under the clothes, one of each).
+pub const BODY_HAIR_TYPES: [u32; 8] = [39, 40, 41, 42, 43, 44, 45, 46];
 /// Masks (a burglar's), gloves and stockings: worn as layers over the face, hands and legs.
 pub const CT_MASK: u32 = 21;
 pub const CT_GLOVES: u32 = 24;

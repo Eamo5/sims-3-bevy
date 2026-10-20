@@ -4808,8 +4808,9 @@ fn ui_flow(
                 // (The game's face panels: the eyes, as their colour swatches ask; eyeliner and
                 // blush on.)
                 ask_cas(&mut commands, &[crate::home::CasAction::FaceArea(1), crate::home::CasAction::EyeColor(3), crate::home::CasAction::FacePart(s3formats::sim::CT_EYELINER, 1), crate::home::CasAction::FacePart(s3formats::sim::CT_BLUSH, 1)]);
-                // (Freckles and a mole.)
+                // (Freckles and a mole; and chest, stomach and calf hair.)
                 ask_cas(&mut commands, &[crate::home::CasAction::FacePart(s3formats::sim::CT_FRECKLES, 0), crate::home::CasAction::FacePart(s3formats::sim::CT_MOLES, 0)]);
+                ask_cas(&mut commands, &[crate::home::CasAction::FacePart(39, 0), crate::home::CasAction::FacePart(40, 0), crate::home::CasAction::FacePart(45, 0)]);
             }
             *stage = (62, now);
         }

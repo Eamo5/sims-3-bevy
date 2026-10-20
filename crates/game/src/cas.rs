@@ -903,6 +903,16 @@ fn cas_actions(
                 }
                 s.outfit.accessories = Some(worn.into_iter().map(|w| w.0).collect());
             }
+            CasAction::FacePart(t, i) if s3formats::sim::BODY_HAIR_TYPES.contains(&t) => {
+                // (Body hair: one for each place it grows, the one there replaced; none, taken off.)
+                let list = parts_for(&scene.cas, &pending.members[k], t, crate::simbody::OutfitKind::Everyday);
+                let parts = &scene.cas.parts;
+                let worn = &mut pending.members[k].outfit.body_hair;
+                worn.retain(|w| parts.iter().find(|p| p.key == *w).is_none_or(|p| p.clothing_type != t));
+                if let Some(key) = list.get(i).map(|p| p.0) {
+                    worn.push(key);
+                }
+            }
             CasAction::FacePart(t, i) if crate::simbody::DETAIL_TYPES.contains(&t) => {
                 // (Moles, freckles, weathering: one put on, or taken off when it's on already;
                 // none: all of them off.)

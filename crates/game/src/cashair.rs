@@ -118,14 +118,22 @@ fn hair_panel(
     // (The eyebrows open: their own panel stands beside the physical one, `casbrows`.)
     if crate::livehud::pressed(&clicks, h.physical.id(PHYSICAL_EYEBROWS)) {
         crate::casbrows::OPEN.store(true, Ordering::Relaxed);
+        crate::casbodyhair::OPEN.store(false, Ordering::Relaxed);
+    }
+    // (Body hair: its own panel, `casbodyhair`.)
+    if crate::livehud::pressed(&clicks, h.physical.id(PHYSICAL_BODY_HAIR)) {
+        crate::casbodyhair::OPEN.store(true, Ordering::Relaxed);
+        crate::casbrows::OPEN.store(false, Ordering::Relaxed);
     }
     if [PHYSICAL_HAIR, PHYSICAL_BEARD].iter().any(|id| crate::livehud::pressed(&clicks, h.physical.id(*id))) {
         crate::casbrows::OPEN.store(false, Ordering::Relaxed);
+        crate::casbodyhair::OPEN.store(false, Ordering::Relaxed);
     }
-    let brows = crate::casbrows::OPEN.load(Ordering::Relaxed);
+    let body_hair = crate::casbodyhair::OPEN.load(Ordering::Relaxed);
+    let brows = crate::casbrows::OPEN.load(Ordering::Relaxed) || body_hair;
     crate::livehud::set_visible(&mut vis, h.physical.root, on);
     crate::livehud::set_visible(&mut vis, h.hair.root, on && !brows);
-    for (id, lit) in [(PHYSICAL_EYEBROWS, brows), (PHYSICAL_HAIR, !brows && !h.beard), (PHYSICAL_BEARD, !brows && h.beard)] {
+    for (id, lit) in [(PHYSICAL_EYEBROWS, brows && !body_hair), (PHYSICAL_BODY_HAIR, body_hair), (PHYSICAL_HAIR, !brows && !h.beard), (PHYSICAL_BEARD, !brows && h.beard)] {
         if let Some(mut b) = h.physical.id(id).and_then(|e| buttons.get_mut(e).ok())
             && b.selected != lit
         {
@@ -144,6 +152,8 @@ fn hair_panel(
     if !beard_ok {
         h.beard = false;
     }
+    // (Body hair for grown men too: the game's parts are theirs.)
+    crate::livehud::set_visible(&mut vis, h.physical.id(PHYSICAL_BODY_HAIR), beard_ok);
     for (id, beard) in [(PHYSICAL_HAIR, false), (PHYSICAL_BEARD, true)] {
         if crate::livehud::pressed(&clicks, h.physical.id(id)) && h.beard != beard {
             h.beard = beard;
@@ -269,14 +279,14 @@ fn hair_panel(
 /// scroll bar: the item grid's own, down its right.
 pub(crate) fn spawn_hair_panels(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>) -> Option<(Spawned, Spawned, Option<Entity>)> {
     let (Some(physical), Some(s)) = (ui.spawn(commands, images, fonts, "CASPhysical"), ui.spawn(commands, images, fonts, "CASHair")) else { return None };
-    for (spawned, ids) in [(&physical, &[PHYSICAL_CLOSE, PHYSICAL_BODY_HAIR][..]), (&s, &NOT_HERE[..])] {
+    for (spawned, ids) in [(&physical, &[PHYSICAL_CLOSE][..]), (&s, &NOT_HERE[..])] {
         for id in ids {
             for e in spawned.all_with(*id) {
                 commands.entity(e).insert(Visibility::Hidden);
             }
         }
     }
-    for (id, tip) in [(PHYSICAL_HAIR, "Hair"), (PHYSICAL_EYEBROWS, "Eyebrows"), (PHYSICAL_BEARD, "Facial Hair")] {
+    for (id, tip) in [(PHYSICAL_HAIR, "Hair"), (PHYSICAL_EYEBROWS, "Eyebrows"), (PHYSICAL_BEARD, "Facial Hair"), (PHYSICAL_BODY_HAIR, "Body Hair")] {
         if let Some(e) = physical.id(id) {
             commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
         }

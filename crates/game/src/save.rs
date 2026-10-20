@@ -91,6 +91,9 @@ pub struct SavedSim {
     /// Their moles, freckles and age weathering, as chosen.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skin_details: Vec<(u32, u32, u64)>,
+    /// Their body hair, as chosen.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub body_hair: Vec<(u32, u32, u64)>,
     #[serde(default)]
     pub wearing: Option<crate::simbody::OutfitKind>,
     #[serde(default)]
@@ -673,6 +676,7 @@ fn saved_look(sim: &Sim) -> SavedSim {
         blush: sim.outfit.blush,
         brows: sim.outfit.brows,
         skin_details: sim.outfit.skin_details.clone(),
+        body_hair: sim.outfit.body_hair.clone(),
         wearing: None,
         outfit_chosen: false,
         rewards: Vec::new(),
@@ -760,6 +764,7 @@ impl SaveGame {
                 brows: s.brows,
                 accessories: s.accessories.clone(),
                 skin_details: s.skin_details.clone(),
+                body_hair: s.body_hair.clone(),
                 other: [other(0), other(1), other(2), other(3), other(4)],
                 designs: s.designs.clone(),
                 styles: s.styles.clone(),
@@ -1114,6 +1119,7 @@ fn save_game(
         blush: sim.outfit.blush,
         brows: sim.outfit.brows,
         skin_details: sim.outfit.skin_details.clone(),
+        body_hair: sim.outfit.body_hair.clone(),
             wearing: wearing.map(|w| w.0),
             outfit_chosen,
             rewards: wishes.map(|w| w.rewards.clone()).unwrap_or_default(),

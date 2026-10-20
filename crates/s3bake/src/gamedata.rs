@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 153;
+pub const GAMEDATA_VERSION: u32 = 154;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -2617,7 +2617,9 @@ fn bake_outfits(root: &BakeRoot, pkgs: &PackageSet, careers: &[CareerInfo]) -> R
             && matches!(c.clothing_type, s3formats::sim::CT_BODY | s3formats::sim::CT_HAIR);
         // The base game's beards, glasses, lipsticks and eye shadows (for Create a Sim's Face tab),
         // and the jewellery.
-        let face = (FACE_TYPES.contains(&c.clothing_type) && k.g == 0 || ACCESSORY_TYPES.contains(&c.clothing_type))
+        // (Body hair too, for Create a Sim's Body Hair: not the werewolves' coats.)
+        let body_hair = s3formats::sim::BODY_HAIR_TYPES.contains(&c.clothing_type) && k.g == 0 && !c.name.contains("WereWolf");
+        let face = (FACE_TYPES.contains(&c.clothing_type) && k.g == 0 || ACCESSORY_TYPES.contains(&c.clothing_type) || body_hair)
             && c.category & s3formats::sim::CAT_HIDDEN == 0
             && !c.name.to_ascii_lowercase().ends_with("_unlock")
             && (matches!(c.clothing_type, s3formats::sim::CT_GLASSES | s3formats::sim::CT_BEARD) || !c.diffuse.is_empty());
@@ -2652,7 +2654,7 @@ fn bake_outfits(root: &BakeRoot, pkgs: &PackageSet, careers: &[CareerInfo]) -> R
         let layer_only = matches!(
             c.clothing_type,
             s3formats::sim::CT_LIPSTICK | s3formats::sim::CT_EYESHADOW | s3formats::sim::CT_EYELINER | s3formats::sim::CT_BLUSH | s3formats::sim::CT_MOLES | s3formats::sim::CT_FRECKLES | s3formats::sim::CT_AGE_WEATHERING
-        )
+        ) || s3formats::sim::BODY_HAIR_TYPES.contains(&c.clothing_type)
             || c.clothing_type == s3formats::sim::CT_BEARD && m.meshes.is_empty();
         let info = CasPartInfo { key: key_of(k), name: c.name.clone(), clothing_type: c.clothing_type, age_gender: c.age_gender, category: c.category, baked: !m.meshes.is_empty() || layer_only && layer.is_some(), layer };
         Some((info, m))

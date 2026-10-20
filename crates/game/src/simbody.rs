@@ -184,6 +184,8 @@ pub struct Outfit {
     pub face_layers: Vec<Key>,
     /// A werewolf in their wolf form (darker, furrier, amber-eyed).
     pub wolf: bool,
+    /// Body hair's layers (drawn in the hair's colour, under the clothes).
+    pub body_hair: Vec<Key>,
 }
 
 /// Which of a Sim's outfits they have on.
@@ -470,7 +472,21 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
     let accessories = accessories_of(cas, sim);
     // (A hat: its own layer over the hair, which takes their hair colour.)
     let hat = hair.as_ref().and_then(|h| cas.hats.get(&h.key)).copied();
-    Outfit { face, scalp, hair, brows, body, glasses, beard, face_layers, accessories, hat, ..default() }
+    let body_hair = body_hair_layers(cas, sim);
+    Outfit { face, scalp, hair, brows, body, glasses, beard, face_layers, accessories, hat, body_hair, ..default() }
+}
+
+/// The layers of a Sim's body hair, as chosen (those made for them).
+pub fn body_hair_layers(cas: &CasData, sim: &Sim) -> Vec<Key> {
+    let (age, gender) = (age_bits(sim.age), if sim.female { GENDER_FEMALE } else { GENDER_MALE });
+    sim.outfit
+        .body_hair
+        .iter()
+        .filter_map(|k| {
+            cas.parts.iter().find(|p| p.key == *k && s3formats::sim::BODY_HAIR_TYPES.contains(&p.clothing_type) && p.age_gender & age != 0 && p.age_gender & gender != 0 && p.layer.is_some())
+        })
+        .filter_map(|p| p.layer)
+        .collect()
 }
 
 /// The skin's details, as Create a Sim's Moles panel lists them: freckles, moles, weathering.
@@ -774,7 +790,20 @@ pub fn build_sim_model(baked: &BakedData, cas: &CasData, sim: &Sim, outfit: &Out
 
     // Body: shared skin texture + one clothing layer per worn part.
     let body_base = cas.skin_texture(age, gender, 8);
-    let layers: Vec<Key> = outfit.body.iter().filter_map(|p| p.layer).take(MAX_LAYERS).collect();
+    // (Body hair first, in the hair's colour, the clothes over it.)
+    let hair_layers: Vec<Key> = outfit
+        .body_hair
+        .iter()
+        .map(|src| {
+            let tinted = beard_tint_key(*src, sim.hair);
+            beard_tints.push((*src, tinted, sim.hair));
+            tinted
+        })
+        .collect();
+    // (The clothes have their layers first; body hair what room's left.)
+    let clothes: Vec<Key> = outfit.body.iter().filter_map(|p| p.layer).take(MAX_LAYERS).collect();
+    let room = MAX_LAYERS - clothes.len();
+    let layers: Vec<Key> = hair_layers.into_iter().take(room).chain(clothes).collect();
     tex_keys.extend(body_base);
     tex_keys.extend(&layers);
     for p in &outfit.body {
