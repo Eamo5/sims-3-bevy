@@ -426,6 +426,7 @@ fn offer_opportunities(
     (mut asked, mut waiting): (MessageReader<OfferThis>, Local<Vec<OfferThis>>),
     town: Query<(Entity, &Sim, Option<&crate::careers::Job>), (Without<HouseholdMember>, Without<crate::ghosts::Ghost>, Without<crate::services::ServiceNpc>, Without<crate::fire::Firefighter>)>,
     test_with: Option<Res<TestWith>>,
+    settings: Res<crate::options::Settings>,
 ) {
     waiting.extend(asked.read().cloned());
     let Some(mut ui) = ui else { return };
@@ -476,7 +477,8 @@ fn offer_opportunities(
                 return;
             }
             board.next_check = clock.minutes + 60.0;
-            if !forced && !rand::rng().random_bool(0.2) {
+            // (None offered unasked with the options' Suppress Opportunity Dialogs.)
+            if !forced && (settings.suppress_opportunities || !rand::rng().random_bool(0.2)) {
                 return;
             }
             commands.remove_resource::<ForceOffer>();

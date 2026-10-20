@@ -347,7 +347,7 @@ fn chatter(
     mut next: Local<f64>,
     mut rested: Local<HashMap<Entity, f64>>,
     mut said: Local<HashMap<(Entity, &'static str), f64>>,
-    members: Query<(), With<HouseholdMember>>,
+    members: Query<Has<crate::sim::Selected>, With<HouseholdMember>>,
     sides: Query<crate::social::SideQuery>,
     rels: Query<&crate::social::Relationships>,
     mut sims: Query<(Entity, &Sim, &Transform, &InheritedVisibility, &mut ActionQueue, &crate::sim::SimAnim), (Without<crate::interact::AtWork>, Without<crate::rabbitholes::AtRabbitHole>)>,
@@ -360,7 +360,7 @@ fn chatter(
     let about: Vec<(Entity, Sim, Vec3)> = sims.iter().filter(|(_, s, _, shown, ..)| shown.get() && !s.age.is_little()).map(|(e, s, tf, ..)| (e, s.clone(), tf.translation)).collect();
     for (me, sim, tf, shown, mut queue, anim) in &mut sims {
         // (The household's own free will, as the rest of what they do unasked.)
-        if members.contains(me) && settings.free_will == crate::options::FreeWill::Off {
+        if members.get(me).is_ok_and(|selected| settings.free_will_of(true, selected) == crate::options::FreeWill::Off) {
             continue;
         }
         if !shown.get() || sim.age.is_little() || !queue.0.is_empty() || anim.pose == crate::sim::Pose::Lie || rested.get(&me).is_some_and(|t| clock.minutes < *t) || !rng.random_bool(CHATTER_CHANCE) {

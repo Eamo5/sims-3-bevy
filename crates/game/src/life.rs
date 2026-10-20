@@ -863,6 +863,8 @@ pub enum MoodletKind {
     PlaguedByNature,
     EnjoyingSolitude,
     TooManyPeople,
+    /// The repo man took something of theirs (`repoman`).
+    StuffTaken,
     AfraidOfTheDark,
     FeelingLucky,
     FeelingUnlucky,
@@ -883,7 +885,7 @@ pub enum MoodletKind {
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 137] = {
+    pub const ALL: [MoodletKind; 138] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -897,7 +899,7 @@ impl MoodletKind {
             GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, NiceNails, CompletelyAtEase, Horrified, Tranquil, BornToDoThis, DrawnIn, OutAfterCurfew, CaughtAfterCurfew, CozyFire, DivineMeal, Attractive, SuccessfulPrank, PrankedNegative, PrankedPositive,
             AnxiousSink, AnxiousStove, AnxiousFireplace, FeelingCalm, Charitable, FiendishlyDelighted,
             RudeAwakening, CryingBaby, Stuffed, NewStuff, Sore,
-            OneWithNature, PlaguedByNature, EnjoyingSolitude, TooManyPeople, AfraidOfTheDark, FeelingLucky, FeelingUnlucky, Excited, GreatKiss,
+            OneWithNature, PlaguedByNature, EnjoyingSolitude, TooManyPeople, StuffTaken, AfraidOfTheDark, FeelingLucky, FeelingUnlucky, Excited, GreatKiss,
             Technophobia, Hydrophobic, FightThePower, BeautifulPark, LovelyPool, BeautifulGarden, BeautifulBistro, CreepyGraveyard,
         ]
     };
@@ -1058,6 +1060,7 @@ impl MoodletKind {
             PlaguedByNature => md("Plagued by Nature", "It's often best for Sims that hate the Outdoors to spend as little time out there as possible.", -20, 0.0),
             EnjoyingSolitude => md("Enjoying Solitude", "Introverted Sims like it best at times when others completely and utterly stay away.", 15, 0.0),
             TooManyPeople => md("Too Many People", "Certain Sims may not feel too comfortable around large groups.", -15, 0.0),
+            StuffTaken => md("Stuff Taken", "Sims really like their stuff, and when someone grabs it, they take it quite personally.", -15, 24.0),
             AfraidOfTheDark => md("Afraid of the Dark", "Heading inside or finding a bit of sunlight will take care of this cowardly affliction.", -15, 0.0),
             FeelingLucky => md("Feeling Lucky", "Today is their lucky day. Who knows what good will happen?", 5, 23.0),
             FeelingUnlucky => md("Feeling Unlucky", "Today is NOT their lucky day. Nothing good can come of this.", -5, 23.0),
@@ -1211,6 +1214,7 @@ impl MoodletKind {
             PlaguedByNature => ("PlaguedByNature", true),
             EnjoyingSolitude => ("EnjoyingSolitude", true),
             TooManyPeople => ("TooManyPeople", true),
+            StuffTaken => ("StuffTaken", true),
             AfraidOfTheDark => ("AfraidOfTheDark", true),
             FeelingLucky => ("FeelingLucky", true),
             FeelingUnlucky => ("FeelingUnlucky", true),

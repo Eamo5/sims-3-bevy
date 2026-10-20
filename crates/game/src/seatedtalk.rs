@@ -266,6 +266,7 @@ fn seated_chatter(
     sides: Query<crate::social::SideQuery>,
     family: Res<crate::family::Genealogy>,
     mut next: Local<std::collections::HashMap<Entity, f64>>,
+    selected: Query<(), With<crate::sim::Selected>>,
 ) {
     if settings.free_will == crate::options::FreeWill::Off || clock.speed == 0 {
         return;
@@ -273,6 +274,9 @@ fn seated_chatter(
     let now = clock.minutes;
     let mut rng = rand::rng();
     for (me, sim, anim, tf, floor, mut queue, rels) in &mut talkers {
+        if settings.free_will_of(true, selected.contains(me)) == crate::options::FreeWill::Off {
+            continue;
+        }
         // (Sat at something, not mid-social or anything else waiting; the first chat a while
         // after they sit down.)
         let sat = !sim.age.is_little()

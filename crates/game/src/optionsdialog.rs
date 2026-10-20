@@ -1,8 +1,10 @@
 //! The Options dialog in the game's own look (`OptionsDialog`, UI.package), driven as UI.dll's
 //! `OptionsDialog` drives it: its tabs along the top (the game's skewer tabs with their icons),
 //! a page each. Sound: the voices', effects', music's and ambience's volume sliders and their
-//! mute boxes. Game Options: free will (off, low, high), aging on or off, and the lifespan
-//! (short to epic) with how many Sim days a life lasts and each life stage's share. Graphics:
+//! mute boxes. General: the camera moved at the screen's edges, the clock's twelve hours, the
+//! camera's turning inverted. Game Options: free will (off, low, high), none for the selected
+//! Sim, opportunities offered or not, aging on or off, and the lifespan (short to epic) with
+//! how many Sim days a life lasts and each life stage's share. Graphics:
 //! the lighting detail (shadows). Changes are tried out in the dialog and kept with OK (or
 //! dropped with Cancel); each page can be put back to its defaults.
 
@@ -36,14 +38,30 @@ fn enable(ui: Option<Res<UiAssets>>, mut done: Local<bool>) {
 #[derive(Resource)]
 pub struct OpenOptionsDialog;
 
-/// The tabs shown (tab window, page) and their tooltips' keys: Graphics, Sound, Game Options.
-const TABS: [(u32, u32, &str); 3] = [(0xa83f_6201, 0xa83f_6210, "Ui/Caption/Options:Graphics"), (0xa83f_6202, 0xa83f_6230, "Ui/Caption/Options:Sound"), (0xa83f_6255, 0xb4b9_f816, "Ui/Caption/Options:GameOptions")];
-/// The tabs not used here (general settings this game has no use for, video capture, music,
-/// online, the packs' pages: their ids are shared with buttons on the pages, so only those in
-/// the tab row), and the pages.
+/// The tabs shown (tab window, page) and their tooltips' keys: Graphics, Sound, General, Game
+/// Options.
+const TABS: [(u32, u32, &str); 4] = [
+    (0xa83f_6201, 0xa83f_6210, "Ui/Caption/Options:Graphics"),
+    (0xa83f_6202, 0xa83f_6230, "Ui/Caption/Options:Sound"),
+    (0xa83f_6203, GENERAL_PAGE, "Ui/Caption/Options:GeneralSettings"),
+    (0xa83f_6255, GAME_PAGE, "Ui/Caption/Options:GameOptions"),
+];
+const GENERAL_PAGE: u32 = 0xa83f_6250;
+const GAME_PAGE: u32 = 0xb4b9_f816;
+/// The tabs not used here (video capture, music, online, the packs' pages: their ids are
+/// shared with buttons on the pages, so only those in the tab row), and the pages.
 const TAB_ROW: u32 = 0xa83f_6200;
-const HIDDEN_TABS: [u32; 8] = [0xa83f_6203, 0xa83f_6204, 0xa83f_6205, 0x0c88_58d0, 0xa83f_6257, 0xa83f_6256, 0xa83f_6258, 0x0dc3_4fd0];
-const HIDDEN: [u32; 7] = [0xa83f_6250, 0xa83f_6270, 0xa83f_6290, 0x0c87_2d80, 0x0d3a_6210, 0x0dc2_55b0, 0x0d3a_62ff];
+const HIDDEN_TABS: [u32; 7] = [0xa83f_6204, 0xa83f_6205, 0x0c88_58d0, 0xa83f_6257, 0xa83f_6256, 0xa83f_6258, 0x0dc3_4fd0];
+const HIDDEN: [u32; 6] = [0xa83f_6270, 0xa83f_6290, 0x0c87_2d80, 0x0d3a_6210, 0x0dc2_55b0, 0x0d3a_62ff];
+// General: its boxes, and what this game has no use for (the custom content warning, playing
+// on minimized, the memories, tutorials, the store, telemetry, interactive loading screens,
+// Facebook).
+const EDGE_SCROLL: u32 = 0xa83f_6251;
+const TWELVE_HOUR: u32 = 0xa83f_6253;
+const INVERT_H: u32 = 0xa83f_625f;
+const INVERT_V: u32 = 0xa83f_6260;
+const GENERAL_DEFAULTS: u32 = 0xa83f_6259;
+const GENERAL_HIDDEN: [u32; 10] = [0xa83f_6254, 0xa83f_6252, 0x0b30_3980, 0xa83f_6263, 0xa83f_6261, 0xa83f_6258, 0xa83f_6264, 0xa83f_6265, 0x0fdc_2830, 0x0b34_5260];
 const OKAY: u32 = 0xa83f_6208;
 const CANCEL: u32 = 0xa83f_6209;
 const TAB_STEP: f32 = 54.0;
@@ -62,7 +80,15 @@ const LIFESPAN: u32 = 0xa83f_625c;
 const LIFESPAN_TEXT: u32 = 0xa83f_625d;
 const LIFESPAN_DESC: u32 = 0xa83f_625e;
 const GAME_DEFAULTS: u32 = 0xb4b9_f817;
-const GAME_HIDDEN: [u32; 5] = [0xb4b9_f818, 0xb4b9_f820, 0xb4b9_f821, 0xb4b9_f824, 0xb4b9_f831];
+const NO_SELECTED_AUTONOMY: u32 = 0xb4b9_f820;
+const SUPPRESS_OPPORTUNITIES: u32 = 0xa83f_6266;
+/// The story progression box (on the packs' Demographics page, `0x0dc2_55b0`): moved to the
+/// Game Options page, where the pets' free will was (its holder, `0xb4b9_f821`).
+const STORY_PROGRESSION: u32 = 0xa83f_6257;
+const DEMOGRAPHICS_PAGE: u32 = 0x0dc2_55b0;
+const STORY_HOLDER: u32 = 0xb4b9_f821;
+/// (The pets' free will and ages, and the species they're for.)
+const GAME_HIDDEN: [u32; 3] = [0xb4b9_f818, 0xb4b9_f822, 0xb4b9_f831];
 /// The human life stages' sliders, their words and their days (baby to elder).
 const STAGES: [(u32, u32); 7] = [(0xb4b9_f801, 0xb4b9_f802), (0xb4b9_f804, 0xb4b9_f805), (0xb4b9_f807, 0xb4b9_f808), (0xb4b9_f80a, 0xb4b9_f80b), (0xb4b9_f80d, 0xb4b9_f80e), (0xb4b9_f810, 0xb4b9_f811), (0xb4b9_f813, 0xb4b9_f814)];
 /// (An elder's least days, as the game's options show it.)
@@ -89,6 +115,8 @@ struct OptionsDialog {
     shown: Option<(usize, String)>,
     /// The sliders set from the settings (once they're there): read back only after.
     synced: bool,
+    /// The story progression box, where it's been moved to.
+    story_box: Option<Entity>,
 }
 
 /// (Test hook: OPTIONS_TAB=<n> opens on that page.)
@@ -128,6 +156,21 @@ fn open_dialog(
             commands.entity(e).insert(Visibility::Hidden);
         }
     }
+    let story_box = s.id(DEMOGRAPHICS_PAGE).and_then(|p| s.within(p, STORY_PROGRESSION));
+    if let (Some(b), Some(holder)) = (story_box, s.id(STORY_HOLDER)) {
+        commands.entity(b).insert((
+            ChildOf(holder),
+            Node { position_type: PositionType::Absolute, left: Val::Px(2.0), top: Val::Px(62.0), width: Val::Px(263.0), height: Val::Px(28.0), ..default() },
+            Visibility::Inherited,
+        ));
+    }
+    if let Some(page) = s.id(GENERAL_PAGE) {
+        for id in GENERAL_HIDDEN {
+            if let Some(e) = s.within(page, id) {
+                commands.entity(e).insert(Visibility::Hidden);
+            }
+        }
+    }
     if let Some(row) = s.id(TAB_ROW) {
         for id in HIDDEN_TABS {
             if let Some(e) = s.within(row, id) {
@@ -165,7 +208,7 @@ fn open_dialog(
             commands.entity(e).remove::<Interaction>().insert(Pickable::IGNORE);
         }
     }
-    commands.insert_resource(OptionsDialog { s, backdrop, page: 0, work: settings.clone(), tabs, shown: None, synced: false });
+    commands.insert_resource(OptionsDialog { s, backdrop, page: 0, work: settings.clone(), tabs, shown: None, synced: false, story_box });
     let _ = std::env::var("OPTIONS_TAB").ok().and_then(|t| t.parse::<usize>().ok()).map(|t| commands.insert_resource(StartTab(t)));
 }
 
@@ -241,9 +284,23 @@ fn dialog_controls(
             w.shadows = v >= 1.0;
         }
     }
-    let aging_box = d.s.id(TABS[2].1).and_then(|page| d.s.within(page, AGING));
+    let on_page = |page: u32, id: u32| d.s.id(page).and_then(|p| d.s.within(p, id));
+    let aging_box = on_page(GAME_PAGE, AGING);
     if pressed(&clicks, aging_box) {
         w.aging = !w.aging;
+    }
+    for (id, v) in [
+        (on_page(GENERAL_PAGE, EDGE_SCROLL), &mut w.edge_scroll),
+        (on_page(GENERAL_PAGE, TWELVE_HOUR), &mut w.twelve_hour),
+        (on_page(GENERAL_PAGE, INVERT_H), &mut w.invert_h),
+        (on_page(GENERAL_PAGE, INVERT_V), &mut w.invert_v),
+        (on_page(GAME_PAGE, NO_SELECTED_AUTONOMY), &mut w.no_selected_autonomy),
+        (on_page(GAME_PAGE, SUPPRESS_OPPORTUNITIES), &mut w.suppress_opportunities),
+        (d.story_box, &mut w.story_progression),
+    ] {
+        if pressed(&clicks, id) {
+            *v = !*v;
+        }
     }
     // Restore Defaults: this page's settings as they come.
     let defaults = Settings::default();
@@ -254,8 +311,13 @@ fn dialog_controls(
     }
     if pressed(&clicks, d.s.id(GAME_DEFAULTS)) {
         (w.free_will, w.aging, w.lifespan) = (defaults.free_will, defaults.aging, defaults.lifespan);
+        (w.no_selected_autonomy, w.suppress_opportunities, w.story_progression) = (defaults.no_selected_autonomy, defaults.suppress_opportunities, defaults.story_progression);
         d.shown = None;
         d.synced = false;
+    }
+    if pressed(&clicks, d.s.id(GENERAL_DEFAULTS)) {
+        (w.edge_scroll, w.twelve_hour, w.invert_h, w.invert_v) = (defaults.edge_scroll, defaults.twelve_hour, defaults.invert_h, defaults.invert_v);
+        d.shown = None;
     }
     if pressed(&clicks, d.s.id(GRAPHICS_DEFAULTS)) {
         w.shadows = defaults.shadows;
@@ -276,7 +338,7 @@ fn dialog_controls(
     }
     // Show the settings (on opening, and as they change).
     let w = &d.work;
-    let now = (d.page, format!("{:?}{:?}{:?}{}{}{:?}{:?}", w.free_will, w.lifespan, w.muted, w.aging, w.shadows, [w.voices, w.effects, w.music, w.ambience], d.page));
+    let now = (d.page, format!("{w:?}"));
     let first = !d.synced;
     if d.shown.as_ref() == Some(&now) && d.synced {
         return;
@@ -366,9 +428,28 @@ fn dialog_controls(
     for (k, id) in MUTES.into_iter().enumerate() {
         set_box(id, w.muted[k], false);
     }
-
     set_box(BACKGROUND_SOUND, true, true);
     for id in GRAPHICS_INERT_BUTTONS.into_iter().chain([0xa83f_6217, 0xa83f_622b]) {
         set_box(id, id != 0xa83f_6217, true);
+    }
+    let mut set_page_box = |page: u32, id: u32, on: bool| {
+        if let Some(mut b) = d.s.id(page).and_then(|p| d.s.within(p, id)).and_then(|e| buttons.get_mut(e).ok())
+            && (b.selected != on || b.disabled)
+        {
+            b.selected = on;
+            b.disabled = false;
+        }
+    };
+    set_page_box(GENERAL_PAGE, EDGE_SCROLL, w.edge_scroll);
+    set_page_box(GENERAL_PAGE, TWELVE_HOUR, w.twelve_hour);
+    set_page_box(GENERAL_PAGE, INVERT_H, w.invert_h);
+    set_page_box(GENERAL_PAGE, INVERT_V, w.invert_v);
+    set_page_box(GAME_PAGE, NO_SELECTED_AUTONOMY, w.no_selected_autonomy);
+    set_page_box(GAME_PAGE, SUPPRESS_OPPORTUNITIES, w.suppress_opportunities);
+    if let Some(mut b) = d.story_box.and_then(|e| buttons.get_mut(e).ok())
+        && (b.selected != w.story_progression || b.disabled)
+    {
+        b.selected = w.story_progression;
+        b.disabled = false;
     }
 }

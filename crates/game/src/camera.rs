@@ -14,7 +14,8 @@ pub struct CameraPlugin;
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::InGame), spawn_camera)
-            .add_systems(Update, camera_control.after(crate::hud::pointer_over_ui).run_if(in_state(AppState::InGame)));
+            .init_resource::<CameraMarks>()
+            .add_systems(Update, (camera_control.after(crate::hud::pointer_over_ui), bookmarks).run_if(in_state(AppState::InGame)));
     }
 }
 
@@ -107,6 +108,42 @@ fn spawn_camera(mut commands: Commands, world: Res<CurrentWorld>, start: Option<
     ));
 }
 
+/// Where the camera's been kept (Ctrl+5 to Ctrl+9) to come back to (5 to 9), as the game's
+/// camera bookmarks: where it looks, how far off, and from which way.
+#[derive(Resource, Default)]
+pub struct CameraMarks(pub [Option<(Vec3, f32, f32, f32)>; 5]);
+
+/// The keys of the camera's bookmarks.
+const MARK_KEYS: [KeyCode; 5] = [KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8, KeyCode::Digit9];
+
+fn bookmarks(keys: Res<ButtonInput<KeyCode>>, mut marks: ResMut<CameraMarks>, mut q: Query<&mut SimsCamera>) {
+    let Ok(mut cam) = q.single_mut() else { return };
+    let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
+    for (i, k) in MARK_KEYS.iter().enumerate() {
+        if !keys.just_pressed(*k) {
+            continue;
+        }
+        if ctrl {
+            marks.0[i] = Some((cam.focus, cam.distance, cam.yaw, cam.pitch));
+        } else if let Some((focus, distance, yaw, pitch)) = marks.0[i] {
+            cam.look_at(focus);
+            (cam.distance, cam.yaw, cam.pitch) = (distance, yaw, pitch);
+        }
+    }
+}
+
+/// How far the pointer's to one side of the screen: -1 at the near edge, 1 at the far, else 0.
+fn edge(at: f32, size: f32) -> f32 {
+    const EDGE: f32 = 4.0;
+    if at <= EDGE {
+        -1.0
+    } else if at >= size - EDGE {
+        1.0
+    } else {
+        0.0
+    }
+}
+
 fn camera_control(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -118,6 +155,7 @@ fn camera_control(
     over_ui: Option<Res<crate::hud::PointerOverUi>>,
     buy: Res<crate::buy::BuyMode>,
     followed: Query<&GlobalTransform>,
+    (settings, windows): (Res<crate::options::Settings>, Query<&Window, With<bevy::window::PrimaryWindow>>),
 ) {
     let Ok((mut cam, mut tf)) = q.single_mut() else { return };
     let dt = time.delta_secs();
@@ -138,9 +176,12 @@ fn camera_control(
     }
 
     // Rotate
-    if mouse.pressed(MouseButton::Middle) || mouse.pressed(MouseButton::Right) {
-        cam.yaw -= motion.delta.x * 0.005;
-        cam.pitch = (cam.pitch + motion.delta.y * 0.004).clamp(0.12, 1.5);
+    let dragging = mouse.pressed(MouseButton::Middle) || mouse.pressed(MouseButton::Right);
+    if dragging {
+        // (The other way round, with the options' Invert Camera Rotation.)
+        let (sx, sy) = (if settings.invert_h { -1.0 } else { 1.0 }, if settings.invert_v { -1.0 } else { 1.0 });
+        cam.yaw -= motion.delta.x * 0.005 * sx;
+        cam.pitch = (cam.pitch + motion.delta.y * 0.004 * sy).clamp(0.12, 1.5);
     }
     if keys.pressed(KeyCode::KeyQ) {
         cam.yaw += dt * 1.6;
@@ -170,6 +211,17 @@ fn camera_control(
     }
     if keys.any_pressed([KeyCode::KeyA, KeyCode::ArrowLeft]) {
         pan -= right;
+    }
+    // (With the options' Edge Scrolling, the pointer at the screen's edge moves the camera that
+    // way.)
+    if settings.edge_scroll
+        && !dragging
+        && let Ok(w) = windows.single()
+        && w.focused
+        && let Some(p) = w.cursor_position()
+    {
+        let (x, y) = (edge(p.x, w.width()), edge(p.y, w.height()));
+        pan += right * x - forward * y;
     }
     let speed = (cam.distance * 1.2).max(8.0) * if keys.pressed(KeyCode::ShiftLeft) { 3.0 } else { 1.0 };
     let pan_delta = pan.normalize_or_zero() * speed * dt;

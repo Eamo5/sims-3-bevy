@@ -30,6 +30,7 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "c_run",
     "a_soc_callOver_x",
     "a2o_door_ringBell_x",
+    "a2o_door_upgrade",
     "a2a_soc_Neutral_Greet_Friendly_Friendly",
     // The game's social interactions, all of them (see `SocialData`), and children's: with each
     // other, with grown-ups, and their generic talk (theirs and the grown-ups').
@@ -422,12 +423,16 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "c2o_book_carry_x",
     "c2o_book_carry_book",
     "a2o_bookshelf_getBook_Carry",
+    "a2o_bookshelf_putBook_Carry",
     "a2o_newspaper_pickUp_floor",
+    "a2o_newspaper_putDown_floor",
+    "a2o_repoMan_repossess",
     "a2o_newspaper_carry_x",
     "a2o_newspaper_carry_newspaper",
     // (A Frugal Sim clipping the paper's coupon: `coupons`.)
     "a2o_newspaper_clipCoupon_standing_x",
     "c2o_bookshelf_getBook_Carry",
+    "c2o_bookshelf_putBook_Carry",
     "a2o_mirror_full_checkSelfOut",
     // (The rest of the game's `Mirror` state machine: primping, and faces pulled; the children's
     // own.)

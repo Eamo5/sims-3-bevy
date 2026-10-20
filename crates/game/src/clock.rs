@@ -6,6 +6,23 @@ use crate::{AppState, PlayMode};
 
 pub struct ClockPlugin;
 
+/// Times shown on the twelve-hour clock (else the 24-hour): the options' `TwelveHourClock`.
+pub static TWELVE_HOUR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// A time of day as the clock shows it.
+pub fn clock_time(h: u64, m: u64) -> String {
+    if !TWELVE_HOUR.load(std::sync::atomic::Ordering::Relaxed) {
+        return format!("{h}:{m:02}");
+    }
+    let (h12, ampm) = match h {
+        0 => (12, "AM"),
+        1..=11 => (h, "AM"),
+        12 => (12, "PM"),
+        _ => (h - 12, "PM"),
+    };
+    format!("{h12}:{m:02} {ampm}")
+}
+
 impl Plugin for ClockPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Night>().insert_resource(GameClock::default())
@@ -58,14 +75,7 @@ impl GameClock {
     }
     pub fn time_string(&self) -> String {
         let total = (self.minutes as u64) % 1440;
-        let (h, m) = (total / 60, total % 60);
-        let (h12, ampm) = match h {
-            0 => (12, "AM"),
-            1..=11 => (h, "AM"),
-            12 => (12, "PM"),
-            _ => (h - 12, "PM"),
-        };
-        format!("{h12}:{m:02} {ampm}")
+        clock_time(total / 60, total % 60)
     }
     pub fn set_speed(&mut self, s: usize) {
         if s == 0 && self.speed != 0 {

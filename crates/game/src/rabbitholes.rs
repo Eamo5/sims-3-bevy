@@ -361,7 +361,8 @@ fn outings(
             // Back at the lot's edge, on the ground (whichever floor they left from: the bus
             // takes children from wherever they are).
             if let Some(x) = &exit {
-                tf.translation = Vec3::new(x.0.x, world.data.heightmap.sample(x.0.x, x.0.y), x.0.y);
+                let at = crate::interact::arrival_spot(x.0);
+                tf.translation = Vec3::new(at.x, world.data.heightmap.sample(at.x, at.y), at.y);
                 floor.0 = 1;
             }
             if std::ptr::eq(at.activity, &SCHOOL) {

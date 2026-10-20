@@ -18,11 +18,17 @@ impl Plugin for DoorbellPlugin {
     }
 }
 
-/// A caller at the door: on their way to ring (no `since` yet), then waiting since then.
+/// A caller at the door: on their way to ring (no `since` yet), then waiting since then; whether
+/// the bell's been heard.
 #[derive(Component)]
 pub struct AtTheDoor {
     pub since: Option<f64>,
+    pub rang: bool,
 }
+
+/// The bell's chime (the game's `Door.RingBell`: the household's doorbell sound, see
+/// `frontdoor`), a second into the ring (its clip's event 1001).
+const CHIME_AT: f32 = 1.0;
 
 /// How long a caller waits to be let in (game minutes).
 const WAIT_MINUTES: f64 = 120.0;
@@ -43,17 +49,29 @@ pub fn come_to_door(commands: &mut Commands, e: Entity, queue: &mut ActionQueue,
     if let Some(back) = back {
         queue.0.push_back(Action::new("Wait Outside", ActionKind::GoHere(back, 1), true));
     }
-    commands.entity(e).insert(AtTheDoor { since: None });
+    commands.entity(e).insert(AtTheDoor { since: None, rang: false });
 }
 
 /// Callers ring and wait; left too long, they go home.
 fn door_waits(
     mut commands: Commands,
     clock: Res<crate::clock::GameClock>,
-    mut callers: Query<(Entity, &Sim, &mut AtTheDoor, &mut ActionQueue, Has<crate::sim::HouseholdMember>)>,
+    mut callers: Query<(Entity, &Sim, &mut AtTheDoor, &mut ActionQueue, Has<crate::sim::HouseholdMember>, &Transform)>,
     mut notes: ResMut<Notifications>,
+    mut sounds: MessageWriter<crate::sound::PlaySound>,
+    bell: Res<crate::frontdoor::Doorbell>,
 ) {
-    for (e, sim, mut door, mut queue, ours) in &mut callers {
+    for (e, sim, mut door, mut queue, ours, tf) in &mut callers {
+        // (The chime, as the bell's pressed.)
+        if !door.rang
+            && let Some(a) = queue.0.front()
+            && a.label == "Ring the Doorbell"
+            && matches!(a.phase, crate::interact::Phase::Running(t) if t >= CHIME_AT)
+        {
+            door.rang = true;
+            debug!("{} rings the bell", sim.first);
+            sounds.write(crate::sound::PlaySound { name: bell.sound().to_string(), at: Some(tf.translation), volume: 1.0, speed: 1.0 });
+        }
         match door.since {
             // (Rung: now waiting.)
             None if queue.0.is_empty() => {

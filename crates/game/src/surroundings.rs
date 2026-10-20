@@ -16,7 +16,7 @@ pub struct SurroundingsPlugin;
 
 impl Plugin for SurroundingsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spoil_food, trash_cans, discard, wash_up, take_out_trash, read_somewhere, read_paper_somewhere, drop_unread_paper, watch_somewhere, stop_watching.before(crate::interact::run_actions), put_down_carried, surroundings).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (spoil_food, trash_cans, discard, wash_up, take_out_trash, read_somewhere, read_paper_somewhere, drop_unread_paper, watch_somewhere, stop_watching.before(crate::interact::run_actions), return_books, put_down_carried, surroundings).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -272,6 +272,35 @@ fn drop_unread_paper(mut commands: Commands, sims: Query<(Entity, &PaperInHand, 
 #[derive(Component)]
 pub struct ReadSomewhere(pub Entity);
 
+/// A book carried off from this shelf to be read elsewhere.
+#[derive(Component)]
+pub struct BookFrom(pub Entity);
+
+/// The words for putting a book back (the game's `Book_PutAway`).
+pub const PUT_BOOK_AWAY: &str = "Put Book Away";
+
+/// Done reading it (or called away), a book read elsewhere is carried back to its shelf and put
+/// on it, as the game's `PutBookAway` (with the shelf gone, it's set down: gone here).
+fn return_books(
+    mut commands: Commands,
+    mut sims: Query<(Entity, &BookFrom, &mut crate::interact::ActionQueue)>,
+    shelves: Query<(), (With<GameObject>, Without<crate::interact::Broken>)>,
+) {
+    for (e, from, mut queue) in &mut sims {
+        if queue.current().is_some_and(|a| a.label == "Read Book" && !a.cancel) {
+            continue;
+        }
+        commands.entity(e).remove::<BookFrom>();
+        let def = crate::interact::interactions_for(ObjectKind::Bookshelf).iter().position(|d| d.special == crate::interact::Special::ReturnBook);
+        if let (true, Some(def)) = (shelves.contains(from.0), def) {
+            // (Once up from reading: after the book's closed and they've stood.)
+            let at = queue.0.iter().take_while(|a| matches!(a.kind, crate::interact::ActionKind::Outro { .. })).count();
+            queue.0.insert(at, crate::interact::Action::new(PUT_BOOK_AWAY, crate::interact::ActionKind::Object { target: from.0, def }, true));
+            commands.entity(e).insert(crate::anim::Carrying(BOOK_CARRY));
+        }
+    }
+}
+
 /// A book taken from the shelf is carried to the nearest free sofa or chair (on the same floor)
 /// and read sitting down; with none free, it's read standing at the shelf.
 #[allow(clippy::type_complexity)]
@@ -296,7 +325,7 @@ fn read_somewhere(
         match seat.and_then(|(s, o, ..)| Some((s, read(o.kind)?))) {
             Some((s, def)) => {
                 queue.0.push_front(crate::interact::Action::new("Read Book", crate::interact::ActionKind::Object { target: s, def }, true));
-                commands.entity(e).insert(crate::anim::Carrying(BOOK_CARRY));
+                commands.entity(e).insert((crate::anim::Carrying(BOOK_CARRY), BookFrom(shelf.0)));
             }
             None => {
                 if let Some(def) = read(ObjectKind::Bookshelf) {
@@ -314,7 +343,7 @@ fn put_down_carried(mut commands: Commands, sims: Query<(Entity, &crate::anim::C
         let goes_to: &[&str] = match c.0 {
             DISH_CARRY => &["Wash Dishes", "Load Dishes", "Eat"],
             TRASH_CARRY => &["Throw Out Trash"],
-            BOOK_CARRY => &["Read Book"],
+            BOOK_CARRY => &["Read Book", PUT_BOOK_AWAY],
             PAPER_CARRY => &["Read the Paper"],
             crate::meals::FOOD_CARRY => &["Prepare Food"],
             crate::meals::PAN_CARRY => &["Cook Dinner"],

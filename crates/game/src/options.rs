@@ -139,6 +139,19 @@ pub struct Settings {
     pub show_fps: bool,
     /// The voices, effects, music and ambience muted (the game's Mute boxes).
     pub muted: [bool; 4],
+    /// The camera moved with the pointer at the screen's edges (the game's `EdgeScrolling`).
+    pub edge_scroll: bool,
+    /// The clock in twelve hours, AM and PM (the game's `TwelveHourClock`), else 24.
+    pub twelve_hour: bool,
+    /// The camera turned the other way by the mouse, side to side and up and down.
+    pub invert_h: bool,
+    pub invert_v: bool,
+    /// The selected Sim left to do only as told (`DisableAutonomyForSelectedSim`).
+    pub no_selected_autonomy: bool,
+    /// Opportunities not offered unasked (`SupressOpportunityDialogs`).
+    pub suppress_opportunities: bool,
+    /// The town's lives move on: pairing off, marrying, babies, jobs (`EnableStoryProgression`).
+    pub story_progression: bool,
 }
 
 impl Default for Settings {
@@ -155,6 +168,13 @@ impl Default for Settings {
             shadows: true,
             show_fps: true,
             muted: [false; 4],
+            edge_scroll: false,
+            twelve_hour: true,
+            invert_h: false,
+            invert_v: false,
+            no_selected_autonomy: false,
+            suppress_opportunities: false,
+            story_progression: true,
         }
     }
 }
@@ -194,6 +214,16 @@ impl Settings {
     pub(crate) fn save(&self) {
         if let Ok(d) = serde_json::to_vec_pretty(self) {
             let _ = std::fs::write(Self::path(), d);
+        }
+    }
+
+    /// A Sim's free will: the household's as set (none for the one selected, when that's
+    /// asked for); everyone else's as always.
+    pub fn free_will_of(&self, member: bool, selected: bool) -> FreeWill {
+        match (member, selected && self.no_selected_autonomy) {
+            (false, _) => FreeWill::Normal,
+            (true, true) => FreeWill::Off,
+            (true, false) => self.free_will,
         }
     }
 
@@ -483,7 +513,7 @@ fn refresh_panel(settings: Res<Settings>, mut values: Query<(&OptionValue, &mut 
     }
 }
 
-/// Shadows and the frame-rate counter follow the settings.
+/// Shadows, the frame-rate counter and the clock follow the settings.
 fn apply_display(
     settings: Res<Settings>,
     mut suns: Query<&mut DirectionalLight>,
@@ -494,6 +524,7 @@ fn apply_display(
             sun.shadow_maps_enabled = settings.shadows;
         }
     }
+    crate::clock::TWELVE_HOUR.store(settings.twelve_hour, std::sync::atomic::Ordering::Relaxed);
     let shown = if settings.show_fps { Visibility::Inherited } else { Visibility::Hidden };
     for mut v in &mut fps {
         if *v != shown {

@@ -990,7 +990,7 @@ pub fn floor_height(world: &crate::loading::WorldInfo, building: Option<&crate::
     }
 }
 
-fn follow_paths(
+pub(crate) fn follow_paths(
     time: Res<Time>,
     clock: Res<GameClock>,
     world: Res<CurrentWorld>,

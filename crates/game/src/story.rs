@@ -270,6 +270,10 @@ fn progress(
                 }
             }
         }
+        // (With the options' Story Progression off, the town only grows older.)
+        if !settings.story_progression {
+            continue;
+        }
         let grown = |story: &TownStory, w: &Who, m: &s3formats::premade::PremadeSim| matches!(age_of(story, w, m), Age::YoungAdult | Age::Adult);
         let alive = |story: &TownStory, id: u64| story.sims.get(&id).is_some_and(|t| !t.dead);
         // Couples marry.

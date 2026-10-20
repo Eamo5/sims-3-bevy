@@ -136,6 +136,8 @@ pub struct ActiveBuilding {
     pub built_stairs: Vec<BuiltStairs>,
     /// The lot came with a house (whose roof the game's imposter shows from afar).
     pub had_house: bool,
+    /// The door the household set as the front door (`frontdoor`), if any.
+    pub front: Option<Entity>,
     /// What's spawned for each wall, the floors, the household's stairs and roofs (to redraw).
     wall_entities: HashMap<u32, Vec<Entity>>,
     floor_entities: Vec<Entity>,
@@ -329,44 +331,48 @@ impl ActiveBuilding {
     }
 
     /// The front door for someone coming from `from` (world): of the ground floor's doors from
-    /// a room to the outdoors, the nearest; where a caller stands outside it (world), and the
-    /// door itself.
+    /// a room to the outdoors, the one set as it, else the nearest; where a caller stands
+    /// outside it (world), and the door itself.
     pub fn front_door(&self, from: Vec2) -> Option<(Vec2, Option<Entity>)> {
-        let indoors = |p: Vec2| self.room_at(1, self.world(p.x, p.y, 0.0)).is_some_and(|k| !matches!(k, ROOM_PORCH | ROOM_OUTSIDE));
         let from = self.local(Vec3::new(from.x, 0.0, from.y));
-        self.holes
-            .iter()
-            .filter(|(_, h)| h.door && h.level.max(1) == 1)
-            .filter_map(|(e, h)| {
-                let (a, b) = (h.wall_point + h.fwd * 0.8, h.wall_point - h.fwd * 0.8);
-                match (indoors(a), indoors(b)) {
-                    (false, true) => Some((a, *e)),
-                    (true, false) => Some((b, *e)),
-                    _ => None,
-                }
-            })
-            .min_by(|p, q| p.0.distance(from).total_cmp(&q.0.distance(from)))
-            .map(|(p, e)| (self.world(p.x, p.y, 0.0).xz(), e))
+        self.outside_doors()
+            .min_by(|p, q| self.not_front(p.2).cmp(&self.not_front(q.2)).then(p.0.distance(from).total_cmp(&q.0.distance(from))))
+            .map(|(p, _, e)| (self.world(p.x, p.y, 0.0).xz(), e))
+    }
+
+    /// The ground floor's doors from a room to the outdoors: where one stands outside each
+    /// (local), the way out through it, and the door.
+    fn outside_doors(&self) -> impl Iterator<Item = (Vec2, Vec2, Option<Entity>)> + '_ {
+        let indoors = |p: Vec2| self.room_at(1, self.world(p.x, p.y, 0.0)).is_some_and(|k| !matches!(k, ROOM_PORCH | ROOM_OUTSIDE));
+        self.holes.iter().filter(|(_, h)| h.door && h.level.max(1) == 1).filter_map(move |(e, h)| {
+            let (a, b) = (h.wall_point + h.fwd * 0.8, h.wall_point - h.fwd * 0.8);
+            match (indoors(a), indoors(b)) {
+                (false, true) => Some((a, h.fwd, *e)),
+                (true, false) => Some((b, -h.fwd, *e)),
+                _ => None,
+            }
+        })
+    }
+
+    fn not_front(&self, door: Option<Entity>) -> bool {
+        self.front.is_none() || door != self.front
+    }
+
+    /// Whether a door is one of the ground floor's from a room to the outdoors (one that could
+    /// be the front door).
+    pub fn outside_door(&self, door: Entity) -> bool {
+        self.outside_doors().any(|(.., e)| e == Some(door))
     }
 
     /// Where a caller stands back from the front door to wait, `out` metres outside it (world):
     /// the game's `Lot.MoveAwayFromDoor`, 2 to 4 m out.
     pub fn front_door_out(&self, from: Vec2, out: f32) -> Option<Vec2> {
-        let indoors = |p: Vec2| self.room_at(1, self.world(p.x, p.y, 0.0)).is_some_and(|k| !matches!(k, ROOM_PORCH | ROOM_OUTSIDE));
         let from = self.local(Vec3::new(from.x, 0.0, from.y));
-        self.holes
-            .iter()
-            .filter(|(_, h)| h.door && h.level.max(1) == 1)
-            .filter_map(|(_, h)| {
-                let (a, b) = (h.wall_point + h.fwd * 0.8, h.wall_point - h.fwd * 0.8);
-                match (indoors(a), indoors(b)) {
-                    (false, true) => Some((a, h.wall_point + h.fwd * out)),
-                    (true, false) => Some((b, h.wall_point - h.fwd * out)),
-                    _ => None,
-                }
-            })
-            .min_by(|p, q| p.0.distance(from).total_cmp(&q.0.distance(from)))
-            .map(|(_, p)| self.world(p.x, p.y, 0.0).xz())
+        self.outside_doors()
+            .min_by(|p, q| self.not_front(p.2).cmp(&self.not_front(q.2)).then(p.0.distance(from).total_cmp(&q.0.distance(from))))
+            // (`out` from the doorway: the standing spot's 0.8 m out.)
+            .map(|(p, way, _)| p + way * (out - 0.8))
+            .map(|p| self.world(p.x, p.y, 0.0).xz())
     }
 }
 
@@ -2563,6 +2569,7 @@ pub fn spawn_building(
         base_stairs: Vec::new(),
         built_stairs: Vec::new(),
         had_house: b.is_house(),
+        front: None,
         roof_texture: ROOF_DEFAULT,
         roof_style: RoofStyle::Hip,
         stair_style: b.stairs.iter().find(|s| s.flight.is_some()).cloned(),

@@ -1106,6 +1106,8 @@ pub fn repair_of(kind: ObjectKind) -> (&'static str, crate::anim::ActionClip) {
         ObjectKind::Tv => ("Repair", A::new(Some("a2o_tv_repair_start_x"), &["a2o_tv_repair_loop1_x", "a2o_tv_repair_loop2_x"])),
         ObjectKind::Computer => ("Repair", A::new(Some("a2o_computer_repair_start_x"), &["a2o_computer_repair_loop1_x", "a2o_computer_repair_loop2_x"])),
         ObjectKind::Stereo => ("Repair", A::new(Some("a2o_stereo_repair_start_x"), &["a2o_stereo_repair_loop1_x", "a2o_stereo_repair_loop2_x"])),
+        // (A door's bell changed: its own tinkering, the game's `genericdoor` "Upgrade".)
+        ObjectKind::Door => ("Repair", A::new(Some("a2o_door_upgrade_start_x"), &["a2o_door_upgrade_loop1_x", "a2o_door_upgrade_loop2_x"])),
         _ => ("Repair", A::new(None, &["a2o_dishwasher_repair_loopTinker_x"])),
     }
 }
@@ -1172,6 +1174,9 @@ pub enum Special {
     GetBook,
     /// A book read (in a seat, or at the shelf).
     ReadBook,
+    /// A book read elsewhere carried back and put on its shelf (the game's `Book.PutBookAway`;
+    /// never on the menu: `surroundings`).
+    ReturnBook,
     /// The paper picked up, to read in a seat (or where it lay, with none free).
     GetPaper,
     /// Before cooking: the ingredients from the fridge, and chopped at a counter.
@@ -1269,6 +1274,8 @@ pub enum Special {
     PlayForTips,
     /// Watch someone play an instrument.
     WatchMusic,
+    /// Dancing to someone playing (`tips`).
+    DanceToMusic,
     /// Perform a composition known on an instrument (see `instruments`).
     Perform,
     /// Daydream lying in bed, from relaxing there (see `daydream`).
@@ -1822,6 +1829,9 @@ const PLAY_DRUMS: InteractionDef = InteractionDef { skill: Some("Drums"), ..def(
 const PLAY_LASER_HARP: InteractionDef = InteractionDef { skill: Some("LaserHarp"), ..def("Play Laser Harp", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 50.0], Pose::Use) };
 const PLAY_GUITAR: InteractionDef = InteractionDef { skill: Some("Guitar"), ..def("Play Guitar", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 45.0], Pose::Use) };
 const WATCH_MUSIC: InteractionDef = InteractionDef { special: Special::WatchMusic, until_full: Some(FUN), ..def("Watch", 120.0, [0.0, 0.0, -2.0, 0.0, 0.0, 60.0], Pose::Stand) };
+/// Dancing to someone playing well (the game's `MusicalInstrument.DanceBase`, from their fifth
+/// level: `LevelDanceBecomesAvailable`), 2 to 4 m off: as dancing to the stereo.
+const DANCE_MUSIC: InteractionDef = InteractionDef { special: Special::DanceToMusic, until_full: Some(FUN), ..def("Dance", 45.0, [0.0, 0.0, -6.0, 0.0, -6.0, 70.0], Pose::Dance) };
 const fn for_tips(play: InteractionDef) -> InteractionDef {
     InteractionDef { special: Special::PlayForTips, ..play }
 }
@@ -1829,10 +1839,10 @@ const fn for_tips(play: InteractionDef) -> InteractionDef {
 const fn perform(play: InteractionDef) -> InteractionDef {
     InteractionDef { special: Special::Perform, autonomous: false, minutes: 240.0, per_hour: [0.0, 0.0, play.per_hour[2], 0.0, 0.0, 10.0], ..play }
 }
-static PIANO: [InteractionDef; 4] = [PLAY_PIANO, for_tips(PLAY_PIANO), WATCH_MUSIC, perform(PLAY_PIANO)];
-static KEYBOARD: [InteractionDef; 4] = [PLAY_KEYBOARD, for_tips(PLAY_KEYBOARD), WATCH_MUSIC, perform(PLAY_KEYBOARD)];
-static DRUMS: [InteractionDef; 4] = [PLAY_DRUMS, for_tips(PLAY_DRUMS), WATCH_MUSIC, perform(PLAY_DRUMS)];
-static LASER_HARP: [InteractionDef; 4] = [PLAY_LASER_HARP, for_tips(PLAY_LASER_HARP), WATCH_MUSIC, perform(PLAY_LASER_HARP)];
+static PIANO: [InteractionDef; 5] = [PLAY_PIANO, for_tips(PLAY_PIANO), WATCH_MUSIC, perform(PLAY_PIANO), DANCE_MUSIC];
+static KEYBOARD: [InteractionDef; 5] = [PLAY_KEYBOARD, for_tips(PLAY_KEYBOARD), WATCH_MUSIC, perform(PLAY_KEYBOARD), DANCE_MUSIC];
+static DRUMS: [InteractionDef; 5] = [PLAY_DRUMS, for_tips(PLAY_DRUMS), WATCH_MUSIC, perform(PLAY_DRUMS), DANCE_MUSIC];
+static LASER_HARP: [InteractionDef; 5] = [PLAY_LASER_HARP, for_tips(PLAY_LASER_HARP), WATCH_MUSIC, perform(PLAY_LASER_HARP), DANCE_MUSIC];
 static VIDEOGAME: [InteractionDef; 1] = [def("Play Video Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 70.0], Pose::Use)];
 static SPRINKLER: [InteractionDef; 3] = [
     InteractionDef { autonomous: false, special: Special::SprinklerOn, ..def("Turn On", 2.0, N, Pose::Use) },
@@ -1907,9 +1917,10 @@ static STEREO: [InteractionDef; 6] = [
     SABOTAGE,
 ];
 /// (A book taken down to read in a seat; read standing there when no seat is free.)
-static BOOKSHELF: [InteractionDef; 2] = [
+static BOOKSHELF: [InteractionDef; 3] = [
     InteractionDef { special: Special::GetBook, ..def("Read a Book", 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Stand) },
     InteractionDef { autonomous: false, special: Special::ReadBook, ..def("Read Book", 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 30.0], Pose::Stand) },
+    InteractionDef { autonomous: false, special: Special::ReturnBook, ..def(crate::surroundings::PUT_BOOK_AWAY, 2.5, N, Pose::Use) },
 ];
 static MIRROR: [InteractionDef; 6] = [
     InteractionDef { autonomous: false, skill: Some("Charisma"), ..def("Practice Speech", 40.0, [0.0, 0.0, -2.0, 6.0, 0.0, 10.0], Pose::Talk) },
@@ -1925,7 +1936,7 @@ static EASEL: [InteractionDef; 1] = [InteractionDef {
     special: Special::SellPainting,
     ..def("Paint", 90.0, [0.0, 0.0, -3.0, 0.0, 0.0, 40.0], Pose::Use)
 }];
-static GUITAR: [InteractionDef; 4] = [PLAY_GUITAR, for_tips(PLAY_GUITAR), WATCH_MUSIC, perform(PLAY_GUITAR)];
+static GUITAR: [InteractionDef; 5] = [PLAY_GUITAR, for_tips(PLAY_GUITAR), WATCH_MUSIC, perform(PLAY_GUITAR), DANCE_MUSIC];
 static TREADMILL: [InteractionDef; 1] = [InteractionDef {
     autonomous: false,
     skill: Some("Athletic"),
@@ -2218,6 +2229,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
                 .ending(&["a2o_book_readBook_sitting_fromCarry_stop_x"], 0.9)
         }
         "Read Book" => A::new(Some("a2o_book_readBook_standing_fromCarry_start_x"), &["a2o_book_readBook_standing_loop"]).ending(&["a2o_book_readBook_standing_fromCarry_stop_x"], 0.8),
+        "Put Book Away" => A::new(Some("a2o_bookshelf_putBook_Carry_x"), &[]),
         // (The game's `Mirror` state machine's: a speech practised as talk, a look over in the
         // glass, primping, faces pulled and pointed at.)
         "Practice Speech" => A::new(None, &["a_soc_talkTalk_gen_b_x", "a_soc_talkTalk_gen_e_x", "a_soc_talkRespond_disagree_correction_x", "a_soc_talkTalk_gen_j_x"]),
@@ -3118,11 +3130,28 @@ fn off_lot_idle(mut q: Query<&mut ActionQueue, With<OffLot>>) {
     }
 }
 
+/// Where someone arriving at the lot's edge is set down: about the way off it, a little to one
+/// side or the other (never all on one spot, two coming home together).
+pub fn arrival_spot(exit: Vec2) -> Vec2 {
+    let mut rng = rand::rng();
+    exit + Vec2::new(rng.random_range(-0.9..0.9), rng.random_range(-0.9..0.9))
+}
+
+/// How badly a little one must need something for their care to come before almost anything
+/// else, and how much before.
+const CARE_URGENT: f32 = -40.0;
+const CARE_URGENT_SCORE: f32 = 1000.0;
+
 /// Invited over: arrives at the lot exit at this time.
 #[derive(Component)]
 pub struct Invited {
     pub arrive_at: f64,
 }
+
+/// What a guest says, going home (the game's `Gameplay/Core/Lot/GoHome:NPCLeaving1`, `2`), and
+/// going home in need (`VisitLot:GuestInMotiveDistress`).
+const GOODBYES: [&str; 2] = ["I need to go home now. Bye!", "Looks like it's time to leave. See you!"];
+const GUEST_IN_DISTRESS: &str = "I'd like to stick around, but I really need to go home and take care of a few things. Call me again soon!";
 
 /// A visitor: leaves in the evening.
 #[derive(Component)]
@@ -3139,7 +3168,7 @@ fn comings_and_goings(
     world: Res<CurrentWorld>,
     mut joining: Query<(Entity, &mut Sim, &JoinHousehold)>,
     mut leaving: Query<(Entity, &mut ActionQueue, &Transform, Option<&HomeTries>), (With<GoingHome>, Without<OffLot>)>,
-    mut visitors: Query<(Entity, &Visitor), (Without<GoingHome>, Without<OffLot>, Without<HouseholdMember>)>,
+    mut visitors: Query<(Entity, &Visitor, &Motives, &Sim, Has<crate::doorbell::AtTheDoor>), (Without<GoingHome>, Without<OffLot>, Without<HouseholdMember>, Without<JoinHousehold>)>,
     mut arriving: Query<(Entity, &Invited, &mut Transform, Option<&mut ActionQueue>), Without<GoingHome>>,
     (town, mut household, mut notes, members): (Option<Res<crate::premade::TownPremades>>, Option<ResMut<Household>>, ResMut<Notifications>, Query<(), With<HouseholdMember>>),
     (building, party): (Option<Res<crate::building::ActiveBuilding>>, Option<Res<Party>>),
@@ -3164,9 +3193,21 @@ fn comings_and_goings(
         commands.entity(e).remove::<(JoinHousehold, Visitor, GoingHome, OffLot)>().insert(HouseholdMember);
     }
     let Some(exit) = exit else { return };
-    for (e, v) in &mut visitors {
-        if clock.minutes >= v.leave_at {
+    for (e, v, motives, sim, at_door) in &mut visitors {
+        // (Badly in need of something, a guest goes home to see to it: the game's
+        // `GuestInMotiveDistress`.)
+        let distress = [HUNGER, BLADDER, ENERGY, HYGIENE].iter().any(|&i| motives.0[i] < CRITICAL_NEED);
+        if clock.minutes >= v.leave_at || distress {
             commands.entity(e).insert(GoingHome);
+            // (Saying goodbye, once let in: `Lot.GoHome`'s lines.)
+            if !at_door {
+                let line = if distress {
+                    GUEST_IN_DISTRESS
+                } else {
+                    GOODBYES[rand::rng().random_range(0..GOODBYES.len())]
+                };
+                notes.push(format!("{}: \"{line}\"", sim.full_name()));
+            }
         }
     }
     for (e, mut queue, tf, tries) in &mut leaving {
@@ -3184,7 +3225,8 @@ fn comings_and_goings(
     }
     for (e, inv, mut tf, queue) in &mut arriving {
         if clock.minutes >= inv.arrive_at {
-            tf.translation = Vec3::new(exit.0.x, world.data.heightmap.sample(exit.0.x, exit.0.y), exit.0.y);
+            let at = arrival_spot(exit.0);
+            tf.translation = Vec3::new(at.x, world.data.heightmap.sample(at.x, at.y), at.y);
             let day_end = (clock.minutes / 1440.0).floor() * 1440.0 + 22.0 * 60.0;
             let leave_at = day_end.max(clock.minutes + 240.0);
             // (Someone from about town, come over: with a mind of their own while they're here, as
@@ -3500,6 +3542,9 @@ pub(crate) fn run_actions(
                                     });
                                     let near = if sides[0].distance(me_at) <= sides[1].distance(me_at) { sides[0] } else { sides[1] };
                                     Some((near, of.map_or(1, |f| f.0)))
+                                } else if interactions_for(obj.kind).get(*def).is_some_and(|d| d.special == Special::DanceToMusic) {
+                                    // (Dancing to it: a few metres off.)
+                                    Some((crate::tips::dance_spot(obj, otf, me), of.map_or(1, |f| f.0)))
                                 } else if watches(obj.kind, *def) {
                                     // (Watching someone play: before them, a couple of metres off.)
                                     Some((crate::tips::watch_spot(obj, otf, me), of.map_or(1, |f| f.0)))
@@ -3918,7 +3963,7 @@ pub(crate) fn run_actions(
                                     // (Only under the covers: not relaxing on top of them, as the game's
                                     // `GetOutOfBed` unmakes it only from sleep.)
                                     if in_bed && (matches!(d.name, "Sleep" | "Nap") || matches!(d.special, Special::WooHoo | Special::TryForBaby)) {
-                                        commands.entity(*target).insert(Unmade);
+                                        commands.entity(*target).try_insert(Unmade);
                                     }
                                     // (Making the bed from its right: the game's clips mirrored.)
                                     let came = action.approach.unwrap_or(Vec2::new(tf.translation.x, tf.translation.z));
@@ -3935,7 +3980,7 @@ pub(crate) fn run_actions(
                                         tf.rotation = Quat::from_rotation_y(across.x.atan2(across.z));
                                     }
                                     let face = otf.rotation * Quat::from_rotation_y(std::f32::consts::PI);
-                                    if d.special == Special::WatchMusic {
+                                    if matches!(d.special, Special::WatchMusic | Special::DanceToMusic) {
                                         // (Standing where they came to, turned to the player: see `tips`.)
                                         anim.seat_height = 0.0;
                                     } else if obj.kind == ObjectKind::Tv && d.name == "Work Out" {
@@ -4054,7 +4099,7 @@ pub(crate) fn run_actions(
                                     let (mine, theirs) = kids.unwrap_or_else(|| (clip('x'), clip('y')));
                                     commands.entity(me).insert(mine);
                                     if !listens_sat {
-                                        commands.entity(*target).insert((theirs, SocialPartner(me)));
+                                        commands.entity(*target).try_insert((theirs, SocialPartner(me)));
                                     }
                                     if let Some(age) = little {
                                         carry_fx.push((*target, me, age, *tf, s.effect != SocialEffect::PutToBed));
@@ -4113,10 +4158,10 @@ pub(crate) fn run_actions(
                                         // it's over.)
                                         if c.bed {
                                             commands.entity(me).insert(crate::seatedtalk::bed_cuddle_kiss_clip(c.x, outcome.accepted, make_out));
-                                            commands.entity(*target).insert(crate::seatedtalk::bed_cuddle_kiss_clip(!c.x, outcome.accepted, make_out));
+                                            commands.entity(*target).try_insert(crate::seatedtalk::bed_cuddle_kiss_clip(!c.x, outcome.accepted, make_out));
                                         } else {
                                             commands.entity(me).insert(crate::seatedtalk::cuddle_kiss_clip(c.x, c.teen, outcome.accepted, make_out));
-                                            commands.entity(*target).insert(crate::seatedtalk::cuddle_kiss_clip(!c.x, c.teen, outcome.accepted, make_out));
+                                            commands.entity(*target).try_insert(crate::seatedtalk::cuddle_kiss_clip(!c.x, c.teen, outcome.accepted, make_out));
                                             if !outcome.accepted {
                                                 for (who, with, x) in [(me, *target, c.x), (*target, me, !c.x)] {
                                                     commands.entity(who).insert(crate::seatedtalk::Cuddling { with, x, accepted: false, ..c });
@@ -4134,7 +4179,7 @@ pub(crate) fn run_actions(
                                         let accepted = outcome.accepted;
                                         let clip = |x: bool| if bed { crate::seatedtalk::bed_cuddle_clip(x, accepted) } else { crate::seatedtalk::cuddle_clip(x, teen, accepted) };
                                         commands.entity(me).insert((clip(x), crate::seatedtalk::Cuddling { with: *target, x, teen, accepted, bed }));
-                                        commands.entity(*target).insert((clip(!x), crate::seatedtalk::Cuddling { with: me, x: !x, teen, accepted, bed }));
+                                        commands.entity(*target).try_insert((clip(!x), crate::seatedtalk::Cuddling { with: me, x: !x, teen, accepted, bed }));
                                         // (Turned away in bed, the far side lies back as it lay.)
                                         if bed && !accepted {
                                             commands.entity(if x { *target } else { me }).insert(crate::seatedtalk::LieBack);
@@ -4145,7 +4190,7 @@ pub(crate) fn run_actions(
                                         if action.seated {
                                             commands.entity(me).insert(crate::seatedtalk::TalkOverlay { clip: talk, time: 0.0, with: *target, talking: true });
                                         }
-                                        commands.entity(*target).insert(crate::seatedtalk::TalkOverlay { clip: listen, time: 0.0, with: me, talking: false });
+                                        commands.entity(*target).try_insert(crate::seatedtalk::TalkOverlay { clip: listen, time: 0.0, with: me, talking: false });
                                     }
                                     if crate::conversation::rebuffed(*social, &outcome) {
                                         if !action.autonomous {
@@ -4520,7 +4565,7 @@ pub(crate) fn run_actions(
                                         if let Ok(mut w) = wear.get_mut(*target) {
                                             w.breaks += 1;
                                         }
-                                        commands.entity(*target).insert(Broken);
+                                        commands.entity(*target).try_insert(Broken);
                                         let what = if obj.kind == ObjectKind::Toilet { "is clogged" } else { "broke" };
                                         notes.push(format!("Oh no! {} {what}. Repair it, or call the repairman.", upper_first(&the(&obj.name))));
                                     }
@@ -4571,6 +4616,7 @@ pub(crate) fn run_actions(
                                         | Special::WatchChess
                                         | Special::PlayForTips
                                         | Special::WatchMusic
+                                        | Special::DanceToMusic
                                         | Special::Perform
                                         | Special::Daydream
                                         | Special::GrabDrink
@@ -4599,7 +4645,7 @@ pub(crate) fn run_actions(
                                             commands.entity(me).insert(crate::rgmmail::PostedNow);
                                         }
                                         Special::PokeFire => {
-                                            commands.entity(*target).insert(crate::fireplace::Raging(clock.minutes + crate::fireplace::RAGING_MINUTES));
+                                            commands.entity(*target).try_insert(crate::fireplace::Raging(clock.minutes + crate::fireplace::RAGING_MINUTES));
                                         }
                                         // (Chatting's done as it goes: `chatonline`.)
                                         Special::ChatOnline => {}
@@ -4642,7 +4688,7 @@ pub(crate) fn run_actions(
                                             commands.entity(*target).try_despawn();
                                         }
                                         Special::Scrub => {
-                                            commands.entity(*target).insert(crate::grime::Grime(0.0));
+                                            commands.entity(*target).try_insert(crate::grime::Grime(0.0));
                                         }
                                         Special::GetIngredients => {
                                             commands.entity(me).insert(crate::anim::Carrying(crate::meals::FOOD_CARRY));
@@ -4656,7 +4702,7 @@ pub(crate) fn run_actions(
                                             }
                                         }
                                         Special::GetPaper => {
-                                            commands.entity(*target).insert(Visibility::Hidden);
+                                            commands.entity(*target).try_insert(Visibility::Hidden);
                                             commands.entity(me).insert(crate::surroundings::PaperInHand(*target));
                                         }
                                         Special::Homework => {
@@ -4695,6 +4741,8 @@ pub(crate) fn run_actions(
                                         Special::Vomit => {
                                             commands.entity(me).insert(crate::nausea::ThrewUp(*target));
                                         }
+                                        // (The book's on its shelf: the carry's let go of, `surroundings`.)
+                                        Special::ReturnBook => {}
                                         Special::QuitJob => {
                                             if job.is_some() {
                                                 commands.entity(me).remove::<Job>();
@@ -4849,7 +4897,7 @@ pub(crate) fn run_actions(
                                             commands.entity(me).insert(crate::meals::MealRequest::Grabbed(*target));
                                         }
                                         Special::SprinklerOn => {
-                                            commands.entity(*target).insert(crate::gardening::Sprinkling { until: clock.minutes + 120.0 });
+                                            commands.entity(*target).try_insert(crate::gardening::Sprinkling { until: clock.minutes + 120.0 });
                                         }
                                         Special::SprinklerOff => {
                                             commands.entity(*target).remove::<crate::gardening::Sprinkling>();
@@ -4880,7 +4928,7 @@ pub(crate) fn run_actions(
                                         }
                                         Special::BlowOutCandles => {
                                             commands.entity(me).insert(crate::aging::GrowUpNow);
-                                            commands.entity(*target).insert(crate::meals::CakeBlownOut);
+                                            commands.entity(*target).try_insert(crate::meals::CakeBlownOut);
                                         }
                                         Special::EatMeal => {
                                             commands.entity(me).insert(crate::meals::MealRequest::Ate);
@@ -4940,7 +4988,7 @@ pub(crate) fn run_actions(
                                             commands.entity(me).insert(crate::laundry::LaundryRequest::Fresh(*target, obj.kind == ObjectKind::Clothesline));
                                         }
                                         Special::EmptyTrash => {
-                                            commands.entity(*target).insert(crate::surroundings::TrashFill(0));
+                                            commands.entity(*target).try_insert(crate::surroundings::TrashFill(0));
                                             // (The bag to the can outdoors.)
                                             commands.entity(me).insert(crate::surroundings::TakeOutTrash(*target));
                                         }
@@ -5010,10 +5058,10 @@ pub(crate) fn run_actions(
                                         }
                                         Special::TurnOnTv => {
                                             commands.entity(me).insert(crate::surroundings::WatchFrom(*target));
-                                            commands.entity(*target).insert(crate::tvchannels::Tune { channel: action.channel_choice.map(|c| c as usize), by: me });
+                                            commands.entity(*target).try_insert(crate::tvchannels::Tune { channel: action.channel_choice.map(|c| c as usize), by: me });
                                         }
                                         Special::StereoOn => {
-                                            commands.entity(*target).insert(crate::music::StereoOn(None));
+                                            commands.entity(*target).try_insert(crate::music::StereoOn(None));
                                         }
                                         Special::StereoOff => {
                                             commands.entity(*target).remove::<crate::music::StereoOn>();
@@ -5191,7 +5239,7 @@ pub(crate) fn run_actions(
                                             life.write(LifeEvent::new(*target, LifeEventKind::Married));
                                             notes.push(format!("{} and {} got married!", sim.first, tname));
                                             if !t_member {
-                                                commands.entity(*target).insert(JoinHousehold { last_name: Some(sim.last.clone()) });
+                                                commands.entity(*target).try_insert(JoinHousehold { last_name: Some(sim.last.clone()) });
                                             }
                                         }
                                         SocialEffect::BreakUp => {
@@ -5201,14 +5249,14 @@ pub(crate) fn run_actions(
                                             notes.push(format!("{} broke up with {}.", sim.first, tname));
                                         }
                                         SocialEffect::MoveIn => {
-                                            commands.entity(*target).insert(JoinHousehold { last_name: None });
+                                            commands.entity(*target).try_insert(JoinHousehold { last_name: None });
                                             notes.push(format!("{} moved in with the household!", tname));
                                         }
                                         SocialEffect::TryForBaby => {
                                             conceive.write(crate::little::Conceive { a: me, b: *target });
                                         }
                                         SocialEffect::PutToBed => {
-                                            commands.entity(*target).insert(crate::little::Bedtime);
+                                            commands.entity(*target).try_insert(crate::little::Bedtime);
                                         }
                                         SocialEffect::Fight => {
                                             // The stronger and braver usually win.
@@ -5342,7 +5390,7 @@ pub(crate) fn run_actions(
                                             });
                                         }
                                         SocialEffect::AskToLeave => {
-                                            commands.entity(*target).insert(GoingHome);
+                                            commands.entity(*target).try_insert(GoingHome);
                                             notes.push(format!("{} said goodbye and is heading home.", tname));
                                         }
                                         SocialEffect::AskOnDate => {
@@ -5455,7 +5503,7 @@ pub(crate) fn run_actions(
                                             // (Fixed by a Plumber, it never breaks again.)
                                             if crate::journal::earned(journal, "Plumber") {
                                                 let had = upgraded.get(*target).map_or(0, |u| u.0);
-                                                commands.entity(*target).insert(crate::upgrades::Upgrades(had | crate::upgrades::Upgrade::Unbreakable.bit()));
+                                                commands.entity(*target).try_insert(crate::upgrades::Upgrades(had | crate::upgrades::Upgrade::Unbreakable.bit()));
                                             }
                                         }
                                     }
@@ -5464,7 +5512,9 @@ pub(crate) fn run_actions(
                         }
                         ActionKind::Upgrade { target, bit } => {
                             let handy = skills.level("Handiness") as f32 + if sim.traits.contains(&crate::life::Trait::Handy) { 3.0 } else { 0.0 };
-                            let minutes = maintenance_minutes(crate::upgrades::Upgrade::MINUTES, handy, &sim.traits, objects.get(*target).ok().map(|(o, ..)| o.kind), true);
+                            let bell = crate::frontdoor::bell_of(*bit);
+                            let base = if bell.is_some() { crate::frontdoor::MINUTES } else { crate::upgrades::Upgrade::MINUTES };
+                            let minutes = maintenance_minutes(base, handy, &sim.traits, objects.get(*target).ok().map(|(o, ..)| o.kind), true);
                             // (The game's points for the whole upgrade, as far as it's got.)
                             let whole = objects.get(*target).ok().and_then(|(o, ..)| tunings.get(o.objd)).map_or(3600.0, |t| t.upgrade_skill);
                             let rate = crate::life::skill_rate(&sim.traits, "Handiness") * crate::wishes::reward_skill_rate(wishes) * mood_learning;
@@ -5477,7 +5527,14 @@ pub(crate) fn run_actions(
                                 finished = true;
                                 let electric = objects.get(*target).is_ok_and(|(o, ..)| matches!(o.kind, ObjectKind::Tv | ObjectKind::Computer | ObjectKind::Stereo));
                                 let shocked = electric && !crate::journal::earned(journals.get(me).ok(), "Electrician") && rand::rng().random_bool(((0.25 - handy * 0.03) as f64).clamp(0.0, 1.0));
-                                if let Ok((o, _, mut used, _)) = objects.get_mut(*target) {
+                                if let Some(bell) = bell {
+                                    // (The household's bell from now on, rung to hear it.)
+                                    let door = *target;
+                                    commands.queue(move |w: &mut World| crate::frontdoor::bell_changed(w, door, bell));
+                                    if let Ok((_, _, mut used, _)) = objects.get_mut(*target) {
+                                        used.0 = None;
+                                    }
+                                } else if let Ok((o, _, mut used, _)) = objects.get_mut(*target) {
                                     used.0 = None;
                                     let name = crate::upgrades::Upgrade::from_bit(*bit).and_then(|u| u.name(o.kind)).unwrap_or("upgrade");
                                     if shocked {
@@ -5485,7 +5542,7 @@ pub(crate) fn run_actions(
                                         notes.push(format!("{} was electrocuted upgrading {}!", sim.first, the(&o.name)));
                                     } else {
                                         let had = upgraded.get(*target).map_or(0, |u| u.0);
-                                        commands.entity(*target).insert(crate::upgrades::Upgrades(had | *bit));
+                                        commands.entity(*target).try_insert(crate::upgrades::Upgrades(had | *bit));
                                         notes.push(format!("{} upgraded {}: {name}.", sim.first, the(&o.name)));
                                         did.write(crate::journal::Did::kind(me, crate::journal::Kinds::Upgrades, format!("{name} ({:?})", o.kind)));
                                     }
@@ -5700,7 +5757,7 @@ pub(crate) fn run_actions(
                             if elapsed >= 8.0 {
                                 finished = true;
                                 let tname = who.get(target).map(|w| w.0.first.clone()).unwrap_or_default();
-                                commands.entity(*target).insert(Invited { arrive_at: clock.minutes + 45.0 });
+                                commands.entity(*target).try_insert(Invited { arrive_at: clock.minutes + 45.0 });
                                 notes.push(format!("{} invited {} over. They'll be here soon.", sim.first, tname));
                                 // (The game's `kInvitedSimOver`.)
                                 let invited = *target;
@@ -5944,7 +6001,7 @@ pub(crate) fn run_actions(
 /// Watching someone play (the instrument's theirs still, watched by any number); and a grown-up
 /// beside the potty chair their toddler's on, or the high chair (it's the toddler's).
 fn watches(kind: ObjectKind, def: usize) -> bool {
-    interactions_for(kind).get(def).is_some_and(|d| matches!(d.special, Special::WatchMusic | Special::PottyTrain | Special::PutInHighChair | Special::GiveBabyFood | Special::TakeOutOfHighChair))
+    interactions_for(kind).get(def).is_some_and(|d| matches!(d.special, Special::WatchMusic | Special::DanceToMusic | Special::PottyTrain | Special::PutInHighChair | Special::GiveBabyFood | Special::TakeOutOfHighChair))
 }
 
 fn object_action_available(actor: Entity, kind: ObjectKind, def: usize, owner: Option<Entity>, broken: bool, phase: Phase) -> bool {
@@ -5958,6 +6015,8 @@ fn maintenance_available(actor: Entity, kind: ObjectKind, owner: Option<Entity>,
     if owner.is_some_and(|e| e != actor) { return false; }
     match bit {
         None => broken,
+        // (A doorbell changed: the front door's, checked when it's asked for.)
+        Some(bit) if crate::frontdoor::bell_of(bit).is_some() => kind == ObjectKind::Door,
         Some(bit) => crate::upgrades::Upgrade::from_bit(bit).is_some_and(|u| {
             !broken && u.name(kind).is_some() && !upgrades.is_some_and(|installed| installed.has(u))
         }),
@@ -6162,6 +6221,9 @@ mod maintenance_tests {
 pub fn hour_label(h: f32) -> String {
     // (Midnight at the day's end too.)
     let h = h as u32 % 24;
+    if !crate::clock::TWELVE_HOUR.load(std::sync::atomic::Ordering::Relaxed) {
+        return format!("{h}:00");
+    }
     match h {
         0 => "12 AM".into(),
         1..=11 => format!("{h} AM"),
@@ -6182,7 +6244,7 @@ const CLIP_COUPON: f32 = 16.0;
 fn autonomy(
     delta: Res<SimDelta>,
     clock: Res<GameClock>,
-    (settings, household, object_rates): (Res<crate::options::Settings>, Query<(), With<HouseholdMember>>, Res<ObjectRates>),
+    (settings, household, object_rates): (Res<crate::options::Settings>, Query<Has<crate::sim::Selected>, With<HouseholdMember>>, Res<ObjectRates>),
     mut sims: Query<
         (Entity, &Transform, &Motives, &mut ActionQueue, &mut AutonomyTimer, &Relationships, Option<&Job>, &Sim, Has<SocialPartner>, Option<&crate::visit::OnLot>, Option<&RecentDone>, Option<&crate::life::Moodlets>),
         // (Nor a cook between the stove and serving: their queue's empty a moment, with the meal
@@ -6289,7 +6351,7 @@ fn autonomy(
         if timer.0 > 0.0 || !queue.0.is_empty() || sim.age == Age::Baby || partner {
             continue;
         }
-        let free_will = if household.contains(me) { settings.free_will } else { crate::options::FreeWill::Normal };
+        let free_will = settings.free_will_of(household.contains(me), household.get(me).unwrap_or(false));
         timer.0 = match free_will {
             crate::options::FreeWill::High => rng.random_range(2.0..5.0),
             _ => rng.random_range(4.0..10.0),
@@ -6316,6 +6378,10 @@ fn autonomy(
         // which doesn't: an exhausted Sim goes to bed before the bath.)
         let failing = [HUNGER, BLADDER, ENERGY].into_iter().filter(|&i| motives.0[i] < CRITICAL_NEED).min_by(|a, b| motives.0[*a].total_cmp(&motives.0[*b]));
         let critical = failing.or_else(|| (motives.0[HYGIENE] < CRITICAL_NEED).then_some(HYGIENE));
+        // (A guest at the household's home keeps to what their footing with its friendliest
+        // allows: see `guests`.)
+        let guest = (my_lot.is_none() && !household.contains(me))
+            .then(|| others.iter().filter(|o| household.contains(o.0)).filter_map(|o| rels.0.get(&o.0)).map(|r| crate::guests::privilege(r.state())).reduce(f32::max).unwrap_or(1.0));
         for (oe, obj, otf, used, obj_lot) in &objects {
             // (A double bed with their partner in it has room for them, on its other side; a sofa
             // someone's sat on, for anyone.)
@@ -6335,10 +6401,6 @@ fn autonomy(
                 continue;
             }
             if rained_on && !crate::weather::sheltered(building.as_deref(), otf.translation) {
-                continue;
-            }
-            // Visitors to the family's home don't sleep in its beds or bathe there.
-            if my_lot.is_none() && !household.contains(me) && matches!(obj.kind, ObjectKind::BedSingle | ObjectKind::BedDouble | ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::ShowerTub) {
                 continue;
             }
             let dist = obj.world_center(otf).distance(tf.translation);
@@ -6368,6 +6430,9 @@ fn autonomy(
                 continue;
             }
             for (di, d) in interactions_for(obj.kind).iter().enumerate() {
+                if guest.is_some_and(|p| crate::guests::minds(p, crate::guests::check(obj.kind, d))) {
+                    continue;
+                }
                 // (A stereo playing to nobody else: off with it, for the Frugal and the
                 // Environmentally Conscious, the game's `FrugalTurnOff`.)
                 if d.special == Special::StereoOff
@@ -6395,7 +6460,8 @@ fn autonomy(
                     continue;
                 }
                 // (Someone playing: watched; played for tips only outdoors or on a community lot.)
-                if (theirs && d.special != Special::WatchMusic) || (d.special == Special::WatchMusic && !music.watchable(oe, me)) || (d.special == Special::PlayForTips && !music.tips_ok(oe)) {
+                let audience = matches!(d.special, Special::WatchMusic | Special::DanceToMusic);
+                if (theirs && !audience) || (d.special == Special::WatchMusic && !music.watchable(oe, me)) || (d.special == Special::DanceToMusic && !music.danceable(oe, me)) || (d.special == Special::PlayForTips && !music.tips_ok(oe)) {
                     continue;
                 }
                 // (Chess from a free chair at the table; a game watched only while there's one.)
@@ -6766,7 +6832,11 @@ fn autonomy(
                     .min_by(|a, b| a.1.total_cmp(&b.1));
                 if let Some((name, v)) = want {
                     let si = crate::social::social_index(name).unwrap_or(0);
-                    let mut score = (-v / 10.0).powi(2) / (1.0 + pos.distance(tf.translation) / 25.0);
+                    // (A little one in real need comes before almost anything: the game's household
+                    // motive `LookAfterBabyOrToddler` is held at its worst with an intensity of
+                    // 10000.)
+                    let urgent = if v < CARE_URGENT { CARE_URGENT_SCORE } else { 0.0 };
+                    let mut score = ((-v / 10.0).powi(2) + urgent) / (1.0 + pos.distance(tf.translation) / 25.0);
                     if sim.traits.contains(&crate::life::Trait::FamilyOriented) {
                         score *= 1.5;
                     }
@@ -6995,6 +7065,7 @@ fn pay_bills(
         (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>),
     >,
     rewards: Query<&crate::wishes::Wishes, With<HouseholdMember>>,
+    mut repo: ResMut<crate::repoman::RepoDue>,
 ) {
     let Some(mut h) = household else { return };
     let day = clock.day();
@@ -7022,28 +7093,12 @@ fn pay_bills(
             }
         }
     }
-    // Three days late: the repo man takes things worth what's owed.
+    // Three days late: a debt, and the repo man on his way for it (`repoman`).
     let overdue: i64 = h.bills.iter().filter(|b| day >= b.day + 3).map(|b| b.amount).sum();
     if overdue > 0 && clock.hour_f() >= 10.0 {
         h.bills.retain(|b| day < b.day + 3);
-        let mut items: Vec<(Entity, &GameObject, i64)> = objects
-            .iter()
-            .filter(|(_, o, ..)| o.price > 0 && !matches!(o.kind, ObjectKind::Mailbox | ObjectKind::Tombstone | ObjectKind::Meal | ObjectKind::DirtyDishes))
-            .map(|(e, o, lost, charred, hung)| (e, o, object_value(o, lost, charred, hung)))
-            .filter(|(.., worth)| *worth > 0)
-            .collect();
-        items.sort_by_key(|(.., worth)| -worth);
-        let mut taken = 0i64;
-        let mut names = Vec::new();
-        for (e, o, worth) in items {
-            if taken >= overdue {
-                break;
-            }
-            taken += worth;
-            names.push(o.name.clone());
-            commands.entity(e).try_despawn();
-        }
-        notes.push(format!("The repo man came for the unpaid bills (§{overdue}) and took: {}.", names.join(", ")));
+        crate::repoman::owed(&mut repo, overdue, clock.minutes);
+        notes.push(crate::repoman::ON_HIS_WAY);
     }
 }
 
@@ -7075,6 +7130,7 @@ mod tests {
             app.insert_resource(clock)
                 .insert_resource(Household { name: "Test".into(), funds: 1000, lot_index: 0, last_bill_day: 0, bills: Vec::new() })
                 .init_resource::<Notifications>()
+                .init_resource::<crate::repoman::RepoDue>()
                 .add_systems(Update, pay_bills);
             if mailbox {
                 app.world_mut().spawn(GameObject { kind: ObjectKind::Mailbox, name: "Mailbox".into(), objd: (0, 0, 0), price: 0,

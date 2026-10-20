@@ -67,7 +67,7 @@ pub(crate) fn arrive(commands: &mut Commands, sim: Sim, at: Vec3, uniform: Optio
 }
 
 /// Back to the curb and away: true once they're gone.
-fn leave(commands: &mut Commands, me: Entity, queue: &mut ActionQueue, tf: &Transform, path: Option<&PathFollow>, exit: Vec2) -> bool {
+pub(crate) fn leave(commands: &mut Commands, me: Entity, queue: &mut ActionQueue, tf: &Transform, path: Option<&PathFollow>, exit: Vec2) -> bool {
     if tf.translation.xz().distance(exit) < 2.0 {
         commands.entity(me).try_despawn();
         return true;

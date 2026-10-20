@@ -29,7 +29,7 @@ pub struct TipsPlugin;
 impl Plugin for TipsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Performances>()
-            .add_systems(Update, (performances.after(crate::interact::run_actions), tip_jars.after(performances), tip_test).run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (performances.after(crate::interact::run_actions), tip_jars.after(performances), tip_test, dance_test).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -59,6 +59,10 @@ const ENJOYING_MINUTES: f64 = 120.0;
 /// How far before the player a watcher stands, and how near the tips a tipper goes (the game's
 /// `mfMinRadius`).
 const WATCH_DISTANCE: f32 = 2.2;
+/// How far off a dancer dances (the game's 2 to 4 m: `MinDistanceFromInstrumentToDance`), and
+/// the player's level it takes.
+const DANCE_DISTANCE: f32 = 3.0;
+const DANCE_LEVEL: u32 = 5;
 const TIP_DISTANCE: f32 = 0.9;
 
 /// The watchers' clips, as the instruments' state machines have them: grooving to it, cheering
@@ -84,6 +88,11 @@ impl Performances {
     /// Whether a Sim could watch an instrument (someone else is playing it).
     pub fn watchable(&self, instrument: Entity, sim: Entity) -> bool {
         self.playing.get(&instrument).is_some_and(|p| p.0 != sim)
+    }
+    /// Whether a Sim could dance to an instrument: someone else is playing it well enough (the
+    /// game's `LevelDanceBecomesAvailable`, 5).
+    pub fn danceable(&self, instrument: Entity, sim: Entity) -> bool {
+        self.playing.get(&instrument).is_some_and(|p| p.0 != sim && p.1 >= DANCE_LEVEL)
     }
     pub fn tips_ok(&self, instrument: Entity) -> bool {
         self.tips_ok.contains(&instrument)
@@ -112,6 +121,12 @@ fn facing(obj: &GameObject, otf: &Transform) -> Vec2 {
 pub fn watch_spot(obj: &GameObject, otf: &Transform, me: Entity) -> Vec2 {
     let spread = ((me.index_u32() % 7) as f32 - 3.0) * 0.3;
     obj.use_point(otf) + Vec2::from_angle(spread).rotate(facing(obj, otf)) * WATCH_DISTANCE
+}
+
+/// Where a dancer dances: a few metres before the player, more spread out than those watching.
+pub fn dance_spot(obj: &GameObject, otf: &Transform, me: Entity) -> Vec2 {
+    let spread = ((me.index_u32() % 9) as f32 - 4.0) * 0.28;
+    obj.use_point(otf) + Vec2::from_angle(spread).rotate(facing(obj, otf)) * DANCE_DISTANCE
 }
 
 /// A watcher's chance of deciding to tip at each test: the player's level's, by the watcher's
@@ -206,7 +221,7 @@ fn performances(
     for (me, _, queue, _, skills, ..) in &sims {
         let Some((target, def)) = running_at(&queue) else { continue };
         let Ok((_, o, ..)) = objects.get(target) else { continue };
-        let Some(d) = interactions_for(o.kind).get(def).filter(|d| instrument(o.kind) && d.special != Special::WatchMusic) else { continue };
+        let Some(d) = interactions_for(o.kind).get(def).filter(|d| instrument(o.kind) && !matches!(d.special, Special::WatchMusic | Special::DanceToMusic)) else { continue };
         let level = d.skill.map_or(0, |s| skills.level(s));
         playing.insert(target, (me, level, d.special == Special::PlayForTips));
     }
@@ -370,6 +385,53 @@ fn tip_jars(
         if !for_tips.contains_key(&of.0) {
             commands.entity(jar).try_despawn();
         }
+    }
+}
+
+/// DANCE_TEST=1 (tests): the selected Sim plays an instrument (as good as level eight), and
+/// another of the household dances to it.
+#[allow(clippy::type_complexity)]
+fn dance_test(
+    (mut done, mut asked): (Local<bool>, Local<bool>),
+    time: Res<Time>,
+    perf: Res<Performances>,
+    mut sims: Query<(Entity, &Sim, &mut ActionQueue, Has<crate::sim::Selected>), With<HouseholdMember>>,
+    objects: Query<(Entity, &GameObject)>,
+    mut skills: Query<&mut Skills>,
+) {
+    if *done || time.elapsed_secs() < 8.0 || std::env::var("DANCE_TEST").is_err() {
+        return;
+    }
+    let Some(me) = sims.iter().find(|s| s.3).map(|s| s.0) else { return };
+    if !*asked {
+        let Some((inst, def)) = objects.iter().filter(|(_, o)| instrument(o.kind)).find_map(|(e, o)| Some((e, interactions_for(o.kind).iter().position(|d| d.skill.is_some() && d.special == Special::None)?))) else {
+            return;
+        };
+        if let Ok((.., mut queue, _)) = sims.get_mut(me) {
+            queue.0.clear();
+            queue.push_player(Action::new("Play", ActionKind::Object { target: inst, def }, false));
+        }
+        if let Ok(mut s) = skills.get_mut(me) {
+            for sk in ["Guitar", "Piano", "Drums", "LaserHarp"] {
+                s.0.insert(sk, 8.0);
+            }
+        }
+        info!("dance test: the selected Sim plays");
+        *asked = true;
+        return;
+    }
+    let Some((&inst, _)) = perf.playing.iter().find(|(_, p)| p.0 == me) else { return };
+    let Some(kind) = objects.get(inst).ok().map(|o| o.1.kind) else { return };
+    let Some(def) = interactions_for(kind).iter().position(|d| d.special == Special::DanceToMusic) else { return };
+    for (e, sim, mut q, sel) in &mut sims {
+        if sel || sim.age.is_little() || !perf.danceable(inst, e) {
+            continue;
+        }
+        q.0.clear();
+        q.push_player(Action::new("Dance", ActionKind::Object { target: inst, def }, false));
+        info!("dance test: {} dances", sim.first);
+        *done = true;
+        return;
     }
 }
 

@@ -1146,7 +1146,7 @@ fn world_click(
         Res<crate::edittown::EditTown>,
         Query<(Entity, &GlobalTransform, &InheritedVisibility, Option<&GameObject>, Has<crate::pets::Pet>), Or<(With<GameObject>, With<Sim>, With<crate::pets::Pet>)>>,
     ),
-    (building, opp_q): (
+    (building, opp_q, front_doors): (
         Option<Res<crate::building::ActiveBuilding>>,
         (
             Option<Res<crate::icons::GameUi>>,
@@ -1159,6 +1159,7 @@ fn world_click(
             Option<Res<crate::sound::Sounds>>,
             Query<(Option<&crate::music::StereoOn>, Has<crate::interact::Unmade>, Option<&crate::grime::Grime>, Option<&crate::music::StereoVolume>)>,
         ),
+        (Res<crate::frontdoor::Front>, Res<crate::frontdoor::Doorbell>),
     ),
     (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q), company_q): (
         Query<&crate::visit::OnLot>,
@@ -1548,8 +1549,8 @@ fn world_click(
                     continue;
                 }
                 // (Flush: while it needs one.)
-                // (Being sick in it's never asked for: `nausea`.)
-                if d.special == Special::Vomit {
+                // (Being sick in it's never asked for: `nausea`; nor a book put back.)
+                if matches!(d.special, Special::Vomit | Special::ReturnBook) {
                     continue;
                 }
                 if d.special == Special::Flush && !unflushed.0.contains_key(&t) {
@@ -1707,6 +1708,27 @@ fn world_click(
                     if !picks.is_empty() {
                         pie.submenus.push((dl::SPECIFY.to_string(), picks));
                     }
+                    // The home's front door picked ("Set as Front Door"), or put back to the
+                    // one nearest the street; and the front door's bell changed by a handy Sim
+                    // ("Change Doorbell...", the bell they have left off).
+                    use crate::frontdoor as fd;
+                    let (front, bell) = (&front_doors.0, &front_doors.1);
+                    let set_here = building.as_deref().is_some_and(|b| b.front == Some(t));
+                    if set_here {
+                        options.push((fd::UNSET.to_string(), ActionKind::Object { target: t, def: i }));
+                    } else if fd::settable(building.as_deref(), t, set_here) {
+                        options.push((fd::SET.to_string(), ActionKind::Object { target: t, def: i }));
+                    }
+                    if front.0 == Some(t) && writers.get(actor).is_ok_and(|(_, skills, _)| skills.level("Handiness") >= fd::LEVEL) {
+                        let bells: Vec<(String, ActionKind)> = fd::BELLS
+                            .iter()
+                            .enumerate()
+                            .filter(|(n, _)| *n != bell.0 as usize)
+                            .map(|(n, b)| (b.0.to_string(), ActionKind::Upgrade { target: t, bit: fd::bell_bit(n as u8) }))
+                            .collect();
+                        options.push((format!("{} ›", fd::CHANGE), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((fd::CHANGE.to_string(), bells));
+                    }
                     continue;
                 }
                 // (The testing cheats' own, while they're on; posting from the inventory's menu.)
@@ -1802,6 +1824,9 @@ fn world_click(
                     if music.tips_ok(t) {
                         options.push((crate::tips::PLAY_FOR_TIPS.to_string(), ActionKind::Object { target: t, def: i }));
                     }
+                    continue;
+                }
+                if d.special == Special::DanceToMusic && !music.danceable(t, actor) {
                     continue;
                 }
                 if d.special == Special::WatchMusic && !music.watchable(t, actor) {
@@ -2504,6 +2529,14 @@ fn pie_buttons(
         && let Some(asked) = crate::lights::chosen(&title, &label)
     {
         commands.entity(target).insert(asked);
+        return;
+    }
+    // The front door set or put back, there and then (the game's are immediate).
+    if let ActionKind::Object { target, .. } = kind
+        && (label == crate::frontdoor::SET || label == crate::frontdoor::UNSET)
+    {
+        let set = label == crate::frontdoor::SET;
+        commands.queue(move |w: &mut World| crate::frontdoor::set_front(w, target, set));
         return;
     }
     // A door locked or unlocked, there and then (the game's are immediate).

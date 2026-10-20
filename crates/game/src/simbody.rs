@@ -254,6 +254,8 @@ pub enum ServiceUniform {
     Repair,
     MailCarrier,
     PizzaDelivery,
+    /// The repo man's (a whole outfit of the game's: `MaleRepo`, `FemaleRepo`).
+    Repo,
 }
 
 impl ServiceUniform {
@@ -264,12 +266,18 @@ impl ServiceUniform {
             Self::Repair => ("BodyRepair", None),
             Self::MailCarrier => ("BodyMailCarrier", None),
             Self::PizzaDelivery => ("BodyPizzaDeliveryOutfit", None),
+            Self::Repo => ("", None),
         }
     }
 }
 
 /// A service Sim's everyday look with their uniform on (and their own shoes).
 pub fn service_outfit(cas: &CasData, sim: &Sim, uniform: ServiceUniform, rng: &mut impl Rng) -> Outfit {
+    if uniform == ServiceUniform::Repo
+        && let Some(o) = self::uniform(cas, sim, if sim.female { "femalerepo" } else { "malerepo" }, rng)
+    {
+        return o;
+    }
     let mut o = pick_outfit_for(cas, sim, rng, OutfitKind::Everyday);
     let (age, gender) = (age_bits(sim.age), if sim.female { GENDER_FEMALE } else { GENDER_MALE });
     let find = |n: &str, t: u32| cas.parts.iter().find(|p| p.baked && p.clothing_type == t && p.age_gender & age != 0 && p.age_gender & gender != 0 && p.name.contains(n)).cloned();

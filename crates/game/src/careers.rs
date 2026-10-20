@@ -904,6 +904,7 @@ pub fn work_schedule(
             Has<HouseholdMember>,
             Option<&crate::wishes::Wishes>,
             &mut crate::social::Relationships,
+            Has<crate::interact::OffLot>,
         ),
         Without<crate::rabbitholes::AtRabbitHole>,
     >,
@@ -919,14 +920,15 @@ pub fn work_schedule(
     let mut seen: Vec<(Entity, Entity)> = Vec::new();
     // A shift already under way when play began isn't held against anyone.
     let started = *session_start.get_or_insert(clock.minutes);
-    for (e, sim, mut job, mut queue, at_work, mut tf, mut motives, mood, mut skills, ltw, member, wishes, mut rels) in &mut workers {
+    for (e, sim, mut job, mut queue, at_work, mut tf, mut motives, mood, mut skills, ltw, member, wishes, mut rels, off_lot) in &mut workers {
         let info = job.info();
         if let Some(w) = at_work {
             if clock.minutes < w.until {
                 continue;
             }
             if let (Some(x), Some(world)) = (&exit, &world) {
-                tf.translation = Vec3::new(x.0.x, world.data.heightmap.sample(x.0.x, x.0.y), x.0.y);
+                let at = crate::interact::arrival_spot(x.0);
+                tf.translation = Vec3::new(at.x, world.data.heightmap.sample(at.x, at.y), at.y);
             }
             // (Back on the ground, whichever floor they left from.)
             commands.entity(e).remove::<AtWork>().insert((Visibility::Inherited, crate::nav::Floor(1)));
@@ -1035,7 +1037,8 @@ pub fn work_schedule(
             continue;
         }
         let going = queue.0.iter().any(|a| matches!(a.kind, ActionKind::GoToWork));
-        if workday && h >= info.start - 0.75 && h < info.start + 1.0 && !going && job.last_day != Some(day) {
+        // (Someone at home elsewhere in town goes from there, off stage.)
+        if workday && h >= info.start - 0.75 && h < info.start + 1.0 && !going && job.last_day != Some(day) && !off_lot {
             for a in queue.0.iter_mut() {
                 a.cancel = true;
             }
