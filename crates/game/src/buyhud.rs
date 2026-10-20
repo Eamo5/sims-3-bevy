@@ -89,6 +89,79 @@ const PREVIEW_DESC_BACK: u32 = 0x06e2_3371;
 const PREVIEW_THUMB: u32 = 0x06e2_3372;
 const PREVIEW_PATTERNS: u32 = 0x06e2_3375;
 const PREVIEW_BUFF: u32 = 0x06e2_336d;
+/// The moodlet's degree ("+" to "+++") and picture in the buff window; the topics' words in the
+/// moodlet caption (`PREVIEW_MOODLET`).
+const PREVIEW_DEGREE: u32 = 0x06e2_336b;
+const PREVIEW_BUFF_ICON: u32 = 0x06e2_336c;
+const PREVIEW_EFFECTS: u32 = 0x06e2_336a;
+
+/// The game's `Moodlet` table (UI.package): its icons' names and pictures, and its effects'
+/// names, by id.
+const MOODLET_ICONS: [(&str, &str); 3] = [("Comfy", "moodlet_comfy"), ("WellRested", "moodlet_wellRested"), ("EnjoyingMusic", "moodlet_enjoyingMusic")];
+const MOODLET_EFFECTS: [&str; 44] = [
+    "Ui/Caption/Moodlet/Effect:Environment",
+    "Ui/Caption/Moodlet/Effect:Hunger",
+    "Ui/Caption/Moodlet/Effect:Bladder",
+    "Ui/Caption/Moodlet/Effect:Energy",
+    "Ui/Caption/Moodlet/Effect:Relaxation",
+    "Ui/Caption/Moodlet/Effect:Fun",
+    "Ui/Caption/Moodlet/Effect:Hygiene",
+    "Ui/Caption/Moodlet/Effect:Logic",
+    "Ui/Caption/Moodlet/Effect:Charisma",
+    "Ui/Caption/Moodlet/Effect:Cooking",
+    "Ui/Caption/Moodlet/Effect:Athletic",
+    "Ui/Caption/Moodlet/Effect:Painting",
+    "Ui/Caption/Moodlet/Effect:GuitarSkill",
+    "Ui/Caption/Moodlet/Effect:Handiness",
+    "Ui/Caption/Moodlet/Effect:GroupActivity",
+    "Ui/Caption/Moodlet/Effect:Upgradeable",
+    "Ui/Caption/Moodlet/Effect:IncreaseCookingSpeed",
+    "Ui/Caption/Moodlet/Effect:ToddlerOnly",
+    "Ui/Caption/Moodlet/Effect:ChildOnly",
+    "Ui/Caption/Moodlet/Effect:Gardening",
+    "Ui/Caption/Moodlet/Effect:Fishing",
+    "Ui/Caption/Moodlet/Effect:SelfCleaning",
+    "Ui/Caption/Moodlet/Effect:NeverBreaks",
+    "Ui/Caption/Moodlet/Effect:Portable",
+    "Ui/Caption/Moodlet/Effect:Speed",
+    "Ui/Caption/Moodlet/Effect:Inventing",
+    "Ui/Caption/Moodlet/Effect:Sculpting",
+    "Ui/Caption/Moodlet/Effect:PianoSkill",
+    "Ui/Caption/Moodlet/Effect:BassSkill",
+    "Ui/Caption/Moodlet/Effect:DrumSkill",
+    "Ui/Caption/Moodlet/Effect:JumpingSkill",
+    "Ui/Caption/Moodlet/Effect:RacingSkill",
+    "Ui/Caption/Moodlet/Effect:HuntingSkill",
+    "Ui/Caption/Moodlet/Effect:Thirst",
+    "Ui/Caption/Moodlet/Effect:Destruction",
+    "Ui/Caption/Moodlet/Effect:Scratch",
+    "Ui/Caption/Moodlet/Effect:Exercise",
+    "Gameplay/Excel/Skills/SkillList:Spellcraft",
+    "Gameplay/Excel/Skills/SkillList:SocialNetworking",
+    "Gameplay/Excel/Skills/SkillList:Science",
+    "Gameplay/Excel/Skills/SkillList:StreetArt",
+    "Gameplay/Excel/Skills/SkillList:BotBuilding",
+    "Gameplay/Excel/Skills/SkillList:Future",
+    "Gameplay/Excel/Skills/SkillList:LaserHarp",
+];
+
+/// An object's topics as the preview lists them, a line each (the game's
+/// `BBCatalogPreviewPanelController`: "+ name" for 11, the name alone for 0, else "name: n").
+fn effect_lines(topics: &[(u8, u8)], name: impl Fn(&str) -> Option<String>) -> String {
+    topics
+        .iter()
+        .filter_map(|&(t, v)| {
+            let key = MOODLET_EFFECTS.get((t as usize).checked_sub(1)?)?;
+            let n = name(key).unwrap_or_else(|| key.rsplit(':').next().unwrap_or(key).to_string());
+            Some(match v {
+                0 => n,
+                11 => format!("+ {n}"),
+                _ => format!("{n}: {v}"),
+            })
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 /// The catalogue grid's own layout (`BuyExpandableCatalogGrid`): its grid, expand button,
 /// and the backgrounds shown closed (0x30x) and open (0x20x).
 const ITEM_GRID: u32 = 0x0a5f_e43c;
@@ -1062,6 +1135,22 @@ fn preview_panel(
     set_area(&mut nodes, h.s.id(PREVIEW_DESC), [4.0, 4.0, 350.0, 4.0 + desc_h]);
     set_visible(&mut vis, h.s.id(PREVIEW_DESC_BACK), !desc.is_empty());
     let mut desc_bottom = (desc_y + desc_h + 10.0).max(93.0);
+    // What it does: the moodlet it gives and how much, by the picture; its topics' ratings under
+    // the words (the game's moodlet caption).
+    let rated = game_ui.as_deref().and_then(|gu| gu.data.ratings.binary_search_by_key(&objd.2, |r| r.0).ok().map(|i| gu.data.ratings[i].1.clone()));
+    let icon = rated.as_ref().and_then(|r| MOODLET_ICONS.get((r.icon as usize).checked_sub(1)?));
+    set_visible(&mut vis, h.s.id(PREVIEW_BUFF), icon.is_some());
+    if let (Some(r), Some((label, pic))) = (&rated, icon) {
+        set_text(&mut texts, h.s.text(PREVIEW_DEGREE), &"+".repeat(r.degree.min(3) as usize));
+        if let (Some(win), Some(img)) = (h.s.id(PREVIEW_BUFF_ICON), game_ui.as_deref_mut().and_then(|gu| gu.icon(&mut images, pic))) {
+            crate::hudpanels::picture(&mut commands, win, img, Color::WHITE);
+            let tip = ui.localize(&format!("Ui/Caption/Moodlet/Icon:{label}")).unwrap_or_else(|| label.to_string());
+            commands.entity(win).insert((crate::icons::Tooltip(tip), Interaction::default()));
+        }
+    }
+    let effects = rated.as_ref().map(|r| effect_lines(&r.topics, |k| ui.localize(k))).unwrap_or_default();
+    set_visible(&mut vis, h.s.id(PREVIEW_MOODLET), !effects.is_empty());
+    set_text(&mut texts, h.s.text(PREVIEW_EFFECTS), &effects);
     // The picture.
     let thumb = game_ui.as_deref_mut().and_then(|gu| gu.icon(&mut images, &s3bake::gamedata::thumb_name(objd.2)));
     if let (Some(t), Some(win)) = (thumb, h.s.id(PREVIEW_THUMB).and_then(|p| h.s.comment_within(p, "Thumbnail"))) {
@@ -1070,6 +1159,11 @@ fn preview_panel(
     // Its designs.
     let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
     let n = crate::objects::ObjectAssets::design_count(&ctx, objd);
+    // (Room for the topics under the picture: the words grown down to them, as the game's.)
+    let effects_h = if effects.is_empty() { 0.0 } else { effects.lines().count() as f32 * 14.0 };
+    if effects_h > 0.0 {
+        desc_bottom = desc_bottom.max(if n > 1 { 117.0 } else { 193.0 } + effects_h);
+    }
     let grid = h.s.id(PREVIEW_PRESETS);
     let height = if n > 1 {
         let holder_y = desc_bottom + 10.0;
@@ -1117,7 +1211,24 @@ fn preview_panel(
         desc_bottom + 25.0
     };
     set_area(&mut nodes, h.s.id(PREVIEW_DESC_BACK), [181.0, desc_y, 542.0, desc_bottom]);
+    // (The topics' box under the picture, down to near the panel's foot.)
+    set_area(&mut nodes, h.s.id(PREVIEW_MOODLET), [16.0, 176.0, 168.0, height - 29.0]);
+    set_area(&mut nodes, h.s.id(PREVIEW_EFFECTS), [10.0, 8.0, 142.0, 8.0 + effects_h]);
     // Over the catalogue's left, its bottom on the catalogue's top.
     let x = PREVIEW_X.min(h.width.min(DEFAULT_WIDTH[0] + 4000.0) - PREVIEW_WIDTH + 150.0).max(0.0);
     set_area(&mut nodes, panel, [x, -height, x + PREVIEW_WIDTH, 0.0]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ratings_read_as_the_games_preview() {
+        // (A stereo: Fun 3, + Athletic, + Group Activity, + Portable.)
+        let words = |k: &str| Some(k.rsplit(':').next().unwrap().to_string());
+        assert_eq!(effect_lines(&[(6, 3), (11, 11), (15, 11), (24, 11)], words), "Fun: 3\n+ Athletic\n+ GroupActivity\n+ Portable");
+        // (Unknown topics are left out; a rating of nothing is the name alone.)
+        assert_eq!(effect_lines(&[(200, 4), (1, 0)], words), "Environment");
+    }
 }

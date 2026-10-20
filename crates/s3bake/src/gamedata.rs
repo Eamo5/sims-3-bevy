@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 155;
+pub const GAMEDATA_VERSION: u32 = 156;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1443,6 +1443,20 @@ pub struct GameDataBaked {
     pub placement: Vec<(u64, u32)>,
     #[serde(default)]
     pub surfaces: Vec<(u64, Vec<SurfaceSlot>)>,
+    /// What each catalogue object's preview says it does (its OBJD's moodlet, degree and topic
+    /// ratings: `s3formats::object::ObjdRatings`), by OBJD instance, sorted.
+    #[serde(default)]
+    pub ratings: Vec<(u64, ObjectRatings)>,
+}
+
+/// An object's catalogue ratings: the moodlet it gives (1 Comfy, 2 Well Rested, 3 Enjoying
+/// Music) and how much (1 to 3: "+" to "+++"), and its topics (the game's `Moodlet` table's
+/// effects) with their ratings (11: "+ skill"; 0: the name alone).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct ObjectRatings {
+    pub icon: u8,
+    pub degree: u8,
+    pub topics: Vec<(u8, u8)>,
 }
 
 /// A container slot things can be put in: where (model space), facing (its turn about up), and
@@ -4486,14 +4500,20 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         let d = pkgs.read(&key)?;
         let o = s3formats::object::parse_objd(&d).ok()?;
         let flags = s3formats::object::objd_slot_placement(&d, &o).unwrap_or(0);
+        let rated = s3formats::object::objd_ratings(&d, &o)
+            .filter(|r| r.icon != 0 || !r.topics.is_empty())
+            .map(|r| ObjectRatings { icon: r.icon as u8, degree: r.degree as u8, topics: r.topics.iter().map(|t| (t.0 as u8, t.1 as u8)).collect() });
         let slots: Vec<SurfaceSlot> = s3formats::object::object_container_slots(pkgs, &key)
             .into_iter()
             .filter(|s| s.flags & (SLOT_SIZES | SLOT_SPECIAL | SLOT_UNDER_COUNTER) != 0)
             .map(|s| SurfaceSlot { pos: s.pos, yaw: s.rot[0][2].atan2(s.rot[2][2]), flags: s.flags })
             .collect();
-        Some((c.objd.2, flags, slots))
+        Some((c.objd.2, flags, slots, rated))
     });
-    for (inst, flags, slots) in found.into_iter().flatten() {
+    for (inst, flags, slots, rated) in found.into_iter().flatten() {
+        if let Some(r) = rated {
+            out.ratings.push((inst, r));
+        }
         if flags & (SLOT_SIZES | SLOT_SPECIAL | SLOT_UNDER_COUNTER | 1) != 0 {
             out.placement.push((inst, flags));
         }
@@ -4505,6 +4525,8 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     out.placement.dedup_by_key(|p| p.0);
     out.surfaces.sort_by_key(|s| s.0);
     out.surfaces.dedup_by_key(|s| s.0);
+    out.ratings.sort_by_key(|r| r.0);
+    out.ratings.dedup_by_key(|r| r.0);
     write_value(&g.join("gamedata.bin"), &out).map_err(|e| e.to_string())?;
     Ok(n)
 }
@@ -4594,6 +4616,13 @@ const EXTRA_ICONS: &[&str] = &[
     "skill_journal_full_star_r2",
     "hud_icon_maptagbase_r2",
     "hud_icon_maptagbase_shell",
+    // Notifications with no Sim's face: the game's news, its warnings.
+    "tns_icon_bulb",
+    "tns_icon_warning",
+    // The Buy mode preview's moodlets (the game's `Moodlet` table's icons).
+    "moodlet_comfy",
+    "moodlet_wellRested",
+    "moodlet_enjoyingMusic",
     "skill_journal_empty_star_r2",
     // Wishes.
     "w_tv",

@@ -315,6 +315,11 @@ pub fn materials_at(d: &[u8], at: usize) -> Vec<crate::catalog::PatternMaterial>
 /// surface cutout, and the floor cutout's (version 0x17 on), the shell states' list (0x18) and the
 /// level-below index (0x19).
 pub fn objd_slot_placement(d: &[u8], o: &ObjdInfo) -> Option<u32> {
+    Reader::at(d, slot_placement_at(d, o)?).u32().ok()
+}
+
+/// Where an OBJD's slot placement flags are (see `objd_slot_placement`).
+fn slot_placement_at(d: &[u8], o: &ObjdInfo) -> Option<usize> {
     if o.after_buy == 0 {
         return None;
     }
@@ -330,7 +335,45 @@ pub fn objd_slot_placement(d: &[u8], o: &ObjdInfo) -> Option<u32> {
     if o.version >= 0x19 {
         r.u32().ok()?;
     }
-    r.u32().ok()
+    Some(r.pos)
+}
+
+/// What an object's catalogue entry says it does (the Buy mode preview's): the moodlet it gives
+/// and how much (the game's `MoodletGiven`, `MoodletScore`: Comfy, Well Rested, Enjoying Music,
+/// "+" to "+++"), and its topics' ratings (`Moodlet` table effects: Environment 1, Energy 4,
+/// Stress Relief 5, Fun 6, the skills; 11 is "+ skill", 0 just the name).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ObjdRatings {
+    pub icon: u32,
+    pub degree: u32,
+    pub topics: Vec<(u32, u32)>,
+}
+
+/// An OBJD's ratings: after its slot placement flags and two material words (UTF-16 runs).
+pub fn objd_ratings(d: &[u8], o: &ObjdInfo) -> Option<ObjdRatings> {
+    let mut r = Reader::at(d, slot_placement_at(d, o)? + 4);
+    // (Skipped by their lengths, not read: an object whose fields here aren't these has none.)
+    for _ in 0..2 {
+        let n = r.u8().ok()?;
+        if n & 0x80 != 0 || n % 2 != 0 {
+            return None;
+        }
+        r.skip(n as usize).ok()?;
+    }
+    let icon = r.u32().ok()?;
+    let degree = r.u32().ok()?;
+    let n = r.u32().ok()? as usize;
+    if n > 8 || icon > 64 || degree > 3 {
+        return None;
+    }
+    let mut topics = Vec::new();
+    for _ in 0..n {
+        let (t, v) = (r.u32().ok()?, r.u32().ok()?);
+        if t != 0 && t < 256 && v < 256 {
+            topics.push((t, v));
+        }
+    }
+    Some(ObjdRatings { icon, degree, topics })
 }
 
 pub fn parse_objd(d: &[u8]) -> R<ObjdInfo> {

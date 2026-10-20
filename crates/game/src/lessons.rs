@@ -22,7 +22,7 @@ impl Plugin for LessonsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Lesson>()
             .init_resource::<Cooldowns>()
-            .add_systems(Update, (watch, lessons_test, show_notice, notice_buttons, open_dialog, dialog_controls).chain().run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, (watch, lessons_test, show_notice, under_notes, notice_buttons, open_dialog, dialog_controls).chain().run_if(in_state(PlayMode::Live)))
             .add_systems(OnExit(crate::AppState::InGame), |mut commands: Commands| {
                 commands.remove_resource::<Notice>();
                 commands.remove_resource::<LessonsDialog>();
@@ -261,6 +261,18 @@ fn show_notice(
         info!("lesson: {} comes up", l.key);
         commands.insert_resource(Notice { s, key: key.to_string(), since: time.elapsed_secs() });
         break;
+    }
+}
+
+/// The note kept under the notifications as they come and go (the game's lessons tab stacks
+/// with its notices).
+fn under_notes(notice: Option<Res<Notice>>, notes: Res<crate::interact::Notifications>, mut nodes: Query<&mut Node>) {
+    let Some(root) = notice.as_ref().and_then(|n| n.s.root) else { return };
+    if !notes.is_changed() && !notice.as_ref().is_some_and(|n| n.is_added()) {
+        return;
+    }
+    if let Ok(mut n) = nodes.get_mut(root) {
+        n.top = Val::Px(crate::livehud::notes_bottom(&notes));
     }
 }
 

@@ -1309,7 +1309,11 @@ const NOTE_SYSTEM: u32 = 3;
 const NOTE_ONE_THUMB: u32 = 5;
 const NOTE_TEXT: u32 = 2;
 const NOTE_THUMB: u32 = 6;
+/// The cards' colours (the game's `StyledNotification.Show`): blue for a Sim's words, red for
+/// bad news, yellow for the rest.
 const NOTE_BLUE: u32 = 0x41;
+const NOTE_RED: u32 = 0x42;
+const NOTE_YELLOW: u32 = 0x43;
 const NOTE_THUMB_FRAME: u32 = 0x05;
 const NOTE_NO_MASK: u32 = 0x15;
 const NOTE_CLOSE: u32 = 0x14;
@@ -1321,6 +1325,52 @@ const NOTE_THUMB_ROOM: f32 = 34.0;
 /// A notification's close button.
 #[derive(Component)]
 struct NoteClose(String);
+
+/// A notification card's height: taller for longer words (about 44 characters a line).
+fn note_height(msg: &str) -> f32 {
+    let lines = (msg.chars().count() as f32 / 44.0).ceil().max(2.0);
+    (lines * 14.0 + 16.0).max(NOTE_HEIGHT)
+}
+
+/// How far down the notifications on show reach: what's put up under them (a lesson's note)
+/// starts there.
+pub fn notes_bottom(notes: &crate::interact::Notifications) -> f32 {
+    14.0 + notes.0.iter().rev().take(6).map(|n| note_height(&n.0) + 12.0).sum::<f32>()
+}
+
+/// A notice's style, as the game's `NotificationStyle`: a Sim talking (blue, the speech
+/// connector), good news or bad (yellow or red), or the system's (yellow, the warning sign).
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum NoteStyle {
+    Talking,
+    Positive,
+    Negative,
+    System,
+}
+
+/// What the game's notices of the kind are: its own warnings about the game, a Sim's words
+/// (quoted, asked, wanted), bad news, else good.
+fn note_style(msg: &str, about_sim: bool) -> NoteStyle {
+    const SYSTEM: [&str; 5] = ["Game saved", "Couldn't save", "Couldn't make the Screenshots", "Screenshot", "That style couldn't"];
+    const GOOD: [&str; 4] = ["caught the burglar", "fire is out", "put out the fire", "back to life"];
+    const BAD: [&str; 52] = [
+        "can't", "cannot", "couldn't", "isn't enough", "not enough", "doesn't have enough", "died", "has died", "is dead", "demoted", "fired", "on fire", "caught fire", "fire!",
+        "burglar", "starving", "spoiled", "gone off", "social worker", "repo", "overdue", "unpaid", "failed", "got away", "sick", "is being used", "stole", "stolen", "smashed",
+        "broke", "broken", "flooded", "leak", "exhausted", "passed out", "collapsed", "accident", "curfew", "rejected", "refused", "turned down", "angry", "furious",
+        "lost", "nobody", "no one", "wasn't", "won't", "too tired", "too hungry", "banned", "arrested",
+    ];
+    let low = msg.to_lowercase();
+    if SYSTEM.iter().any(|s| msg.starts_with(s)) {
+        return NoteStyle::System;
+    }
+    if !GOOD.iter().any(|g| low.contains(g)) && BAD.iter().any(|b| low.contains(b)) {
+        return NoteStyle::Negative;
+    }
+    if about_sim && (msg.contains('“') || msg.contains('"') || [" says", " asks", " would like", " wants to", " is calling", " called to"].iter().any(|w| low.contains(w))) {
+        return NoteStyle::Talking;
+    }
+    NoteStyle::Positive
+}
 
 /// A notification's picture of the Sim it's about: a click takes the camera to them (as the
 /// game's notices' faces do).
@@ -1354,6 +1404,7 @@ fn notifications(
     mut state: Local<(Option<Entity>, Vec<String>)>,
     mut play: MessageWriter<crate::sound::PlaySound>,
     hud: Res<LiveHud>,
+    mut icons: Option<ResMut<crate::icons::GameUi>>,
 ) {
     let Some(mut ui) = ui else { return };
     for (i, c) in &closes {
@@ -1395,10 +1446,11 @@ fn notifications(
         // else anyone about) the notice begins with.
         let starts = |s: &Sim| msg.starts_with(&format!("{} ", s.first)) || msg.starts_with(&format!("{}'", s.first)) || msg.starts_with(&s.full_name());
         let about = people.iter().filter(|(_, s, _)| !s.first.is_empty() && starts(s)).max_by_key(|(_, _, member)| *member).map(|(e, ..)| e);
-        let (Some(mut bg), Some(mut fg)) = (ui.export("NotificationManager", if about.is_some() { NOTE_SPEECH } else { NOTE_SYSTEM }).cloned(), ui.export("NotificationManager", NOTE_ONE_THUMB).cloned()) else { continue };
-        // (Taller for longer words: about 44 characters a line.)
-        let lines = (msg.chars().count() as f32 / 44.0).ceil().max(2.0);
-        let h = (lines * 14.0 + 16.0).max(NOTE_HEIGHT);
+        // (In the game's style: a Sim talking on the speech connector, the rest on the system's.)
+        let style = note_style(msg, about.is_some());
+        let connector = if style == NoteStyle::Talking { NOTE_SPEECH } else { NOTE_SYSTEM };
+        let (Some(mut bg), Some(mut fg)) = (ui.export("NotificationManager", connector).cloned(), ui.export("NotificationManager", NOTE_ONE_THUMB).cloned()) else { continue };
+        let h = note_height(msg);
         bg.area = [NOTE_THUMB_ROOM, 0.0, NOTE_THUMB_ROOM + NOTE_WIDTH, h];
         fg.area = [NOTE_THUMB_ROOM, 0.0, NOTE_THUMB_ROOM + NOTE_WIDTH, h];
         bg.flags |= s3bake::ui::WIN_VISIBLE;
@@ -1409,8 +1461,13 @@ fn notifications(
         if let Some(t) = f.text(NOTE_TEXT) {
             commands.entity(t).insert(Text::new(msg.clone()));
         }
-        if let Some(blue) = b.id(NOTE_BLUE) {
-            commands.entity(blue).insert(Visibility::Inherited);
+        let colour = match style {
+            NoteStyle::Talking => NOTE_BLUE,
+            NoteStyle::Negative => NOTE_RED,
+            NoteStyle::Positive | NoteStyle::System => NOTE_YELLOW,
+        };
+        if let Some(c) = b.id(colour) {
+            commands.entity(c).insert(Visibility::Inherited);
         }
         if let Some(c) = b.id(NOTE_CLOSE) {
             commands.entity(c).insert(NoteClose(msg.clone()));
@@ -1425,9 +1482,23 @@ fn notifications(
                 });
             }
             (None, Some(t)) => {
-                // (The game's own news: no face, nor its frame.)
-                for w in [Some(t), b.id(NOTE_THUMB_FRAME), b.id(NOTE_NO_MASK)].into_iter().flatten() {
+                // (The game's own news: no face, nor its frame; its light bulb, or its warning
+                // sign for the system's.)
+                for w in [Some(t), b.id(NOTE_THUMB_FRAME)].into_iter().flatten() {
                     commands.entity(w).insert(Visibility::Hidden);
+                }
+                let icon = if style == NoteStyle::System { "tns_icon_warning" } else { "tns_icon_bulb" };
+                match (b.id(NOTE_NO_MASK), icons.as_mut().and_then(|i| i.icon(&mut assets, icon))) {
+                    (Some(w), Some(h)) => {
+                        commands.entity(w).despawn_children();
+                        commands.entity(w).with_children(|c| {
+                            c.spawn((ImageNode::new(h), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
+                        });
+                    }
+                    (Some(w), None) => {
+                        commands.entity(w).insert(Visibility::Hidden);
+                    }
+                    _ => {}
                 }
             }
             _ => {}
@@ -1454,5 +1525,22 @@ fn wish_tip(x: &crate::wishes::Wish, traits: &[crate::life::Trait]) -> String {
             out + &format!("\n+{points}")
         }
         None => format!("{} (+{points})", x.text()),
+    }
+}
+
+#[cfg(test)]
+mod note_tests {
+    use super::*;
+
+    #[test]
+    fn notices_take_the_games_styles() {
+        assert_eq!(note_style("Game saved: the Goth household in Sunset Valley.", false), NoteStyle::System);
+        assert_eq!(note_style("Darcy reached level 3 in Cooking!", true), NoteStyle::Positive);
+        assert_eq!(note_style("Darcy is starving!", true), NoteStyle::Negative);
+        assert_eq!(note_style("Gunther set the stove on fire!", true), NoteStyle::Negative);
+        assert_eq!(note_style("The fire is out!", false), NoteStyle::Positive);
+        assert_eq!(note_style("The police caught the burglar! Nothing was taken.", false), NoteStyle::Positive);
+        assert_eq!(note_style("Bella would like to come over.", true), NoteStyle::Talking);
+        assert_eq!(note_style("You can't afford that.", false), NoteStyle::Negative);
     }
 }
