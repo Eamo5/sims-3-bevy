@@ -36,6 +36,8 @@ pub static OPEN: AtomicBool = AtomicBool::new(false);
 const GRID: u32 = 0x05db_b941;
 const COLOURS: u32 = 0x05db_b950;
 const MATCH_HAIR: u32 = 0x05db_b946;
+/// The Color button: the game's picker for a colour of their own.
+const PICKER: u32 = 0x05db_b944;
 const NOT_HERE: [u32; 3] = [0x05db_9719, 0x05db_b945, 0x05db_b90f];
 const CELL_THUMBNAIL: u32 = 0x20;
 const ROWS: usize = 3;
@@ -84,6 +86,9 @@ fn spawn_brows(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut images
     }
     if let Some(e) = s.id(MATCH_HAIR) {
         commands.entity(e).insert(crate::icons::Tooltip("Match Hair Color".into()));
+    }
+    if let Some(e) = s.id(PICKER) {
+        commands.entity(e).insert(crate::icons::Tooltip("Color".into()));
     }
     commands.insert_resource(CasBrows { s, cells: None, bar, scroll: 0, shown: None, colours: None, colours_shown: None });
 }
@@ -134,6 +139,10 @@ fn brows_panel(
     }
     if crate::livehud::pressed(&clicks, b.s.id(MATCH_HAIR)) {
         actions.write(crate::cas::CasActionRequest(CasAction::BrowsMatchHair));
+    }
+    if crate::livehud::pressed(&clicks, b.s.id(PICKER)) {
+        let c = sim.brow_hair.unwrap_or(sim.hair).to_srgba();
+        commands.insert_resource(crate::cascolour::PickColour(crate::cascolour::PickFor::Brows, [c.red, c.green, c.blue]));
     }
     let colours = (k, sim.brow_hair, sim.hair);
     if b.colours_shown != Some(colours) {

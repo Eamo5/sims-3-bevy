@@ -106,7 +106,9 @@ const REGIONS: [Region; 4] = [
 ];
 // `CASEyes`'s colours and what it hasn't (deleting, the colour picker).
 const EYE_COLOURS: u32 = 0x05db_b914;
-const EYES_NOT_HERE: [u32; 2] = [0x05db_b908, 0x05db_b915];
+const EYES_NOT_HERE: [u32; 1] = [0x05db_b908];
+/// The eyes' Color button: the game's colour picker for an eye colour of their own.
+const EYE_PICKER: u32 = 0x05db_b915;
 // `CASMakeup`'s: its kinds (eye shadow, eyeliner, blush, lipstick, costume), its parts' grid,
 // and what this game hasn't.
 pub(crate) const MAKEUP_KINDS: [u32; 5] = [0x100, 0x101, 0x102, 0x103, 0x104];
@@ -253,6 +255,9 @@ fn spawn_face(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut images,
                 for e in s.all_with(id) {
                     commands.entity(e).insert(Visibility::Hidden);
                 }
+            }
+            for e in s.all_with(EYE_PICKER) {
+                commands.entity(e).insert(crate::icons::Tooltip("Color".into()));
             }
         }
         // The presets' scroll bar: the item grid's own, down its right; the grid takes the wheel.
@@ -417,6 +422,11 @@ fn face_panel(
         if *i == Interaction::Pressed {
             actions.write(crate::cas::CasActionRequest(CasAction::EyeColor(c.0)));
         }
+    }
+    // (An eye colour of their own: the game's picker, from the Color button.)
+    if f.regions.get(1).is_some_and(|s| s.all_with(EYE_PICKER).into_iter().any(|e| crate::livehud::pressed(&clicks, Some(e)))) {
+        let c = sim.eyes.to_srgba();
+        commands.insert_resource(crate::cascolour::PickColour(crate::cascolour::PickFor::Eyes, [c.red, c.green, c.blue]));
     }
     for (i, c) in &makeup {
         if *i == Interaction::Pressed {

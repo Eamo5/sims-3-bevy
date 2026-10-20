@@ -244,7 +244,9 @@ fn style_panel(
         if st.grabbed && mouse.pressed(MouseButton::Left) {
             let r = node.size().x.min(node.size().y) * 0.5;
             let d = local / r.max(1.0);
-            let hue = (d.y.atan2(d.x).to_degrees() + 360.0) % 360.0;
+            // (The wheel's hues go round anticlockwise, red on the right: the screen's down is
+            // the wheel's minus.)
+            let hue = ((-d.y).atan2(d.x).to_degrees() + 360.0) % 360.0;
             st.hue_sat = Some((hue, d.length().min(1.0)));
             changed = true;
         }
@@ -273,7 +275,7 @@ fn style_panel(
         let r = size.x.min(size.y) * 0.5;
         let a = hue.to_radians();
         // (The selector's window is 29 across; the wheel's picture sits 4 in from the wheel.)
-        let at = Vec2::new(4.0 + r + a.cos() * sat * r - 14.5, 4.0 + r + a.sin() * sat * r - 15.0);
+        let at = Vec2::new(4.0 + r + a.cos() * sat * r - 14.5, 4.0 + r - a.sin() * sat * r - 15.0);
         if let Ok(mut n) = nodes.get_mut(sel) {
             let want = (Val::Px(at.x), Val::Px(at.y));
             if (n.left, n.top) != want {
@@ -292,10 +294,19 @@ fn style_panel(
     st.shown = Some(want);
     let full = Color::hsv(hue, sat.max(0.0), 1.0);
     if let Some(ramp) = s.id(LIGHTNESS_RAMP) {
+        // (The ramp's picture is the window's, or its child's.)
         commands.entity(ramp).queue(move |mut e: EntityWorldMut| {
             if let Some(mut img) = e.get_mut::<ImageNode>() {
                 img.color = full;
             }
+            let kids: Vec<Entity> = e.get::<Children>().map(|c| c.to_vec()).unwrap_or_default();
+            e.world_scope(|w| {
+                for k in kids {
+                    if let Some(mut img) = w.get_mut::<ImageNode>(k) {
+                        img.color = full;
+                    }
+                }
+            });
         });
     }
     // The pages: the wheel or the palette.

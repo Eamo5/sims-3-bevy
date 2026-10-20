@@ -120,7 +120,7 @@ fn spawn_cas_frame(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut im
     };
     let (Some(puck), Some(sheet)) = (spawn("CASPuck"), spawn("CASCharacterSheet")) else { return };
     // The long skewer (the household's row), not the dresser's or the mirror's.
-    for (id, on) in [(SKEWER_NONE, false), (SKEWER_SHORT, false), (SKEWER_LONG, true), (ADD_PETS, false), (UNDO, false), (REDO, false), (SHEET_BASICS_FEMALE, false)] {
+    for (id, on) in [(SKEWER_NONE, false), (SKEWER_SHORT, false), (SKEWER_LONG, true), (ADD_PETS, false), (SHEET_BASICS_FEMALE, false)] {
         for s in [&puck, &sheet] {
             for e in s.all_with(id) {
                 commands.entity(e).insert(if on { Visibility::Inherited } else { Visibility::Hidden });
@@ -137,6 +137,12 @@ fn spawn_cas_frame(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut im
         (&sheet, SHEET_RANDOMIZE, CasAction::Randomize, "Randomize"),
     ] {
         if let Some(e) = s.id(id) {
+            commands.entity(e).insert((action, crate::icons::Tooltip(tip.into())));
+        }
+    }
+    // (Undo and Redo: on both skewers' rows.)
+    for (id, action, tip) in [(UNDO, CasAction::Undo, "Undo"), (REDO, CasAction::Redo, "Redo")] {
+        for e in puck.all_with(id) {
             commands.entity(e).insert((action, crate::icons::Tooltip(tip.into())));
         }
     }

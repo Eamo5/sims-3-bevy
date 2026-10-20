@@ -44,9 +44,10 @@ pub(crate) const HAIR_TAB: u32 = 0x05db_b905;
 const HATS_TAB: u32 = 0x05db_b906;
 pub(crate) const STYLES_GRID: u32 = 0x05db_cf21;
 pub(crate) const COLOURS_GRID: u32 = 0x05db_cf22;
-/// What this game hasn't: the category lock, the content filter, shared hair's buttons, and the
-/// colour picker.
-const NOT_HERE: [u32; 6] = [0x0001_0005, 0x05db_b90f, 0x05db_cf30, 0x05db_b90e, 0x05db_b903, 0x05db_b950];
+/// What this game hasn't: the category lock, the content filter, shared hair's buttons.
+const NOT_HERE: [u32; 5] = [0x0001_0005, 0x05db_b90f, 0x05db_cf30, 0x05db_b90e, 0x05db_b903];
+/// The colours' Color button: the game's picker for a colour of their own.
+const PICKER: u32 = 0x05db_b950;
 // The cells'.
 const CELL_THUMBNAIL: u32 = 0x20;
 const CELL_COLOUR: u32 = 0x30;
@@ -189,6 +190,11 @@ fn hair_panel(
             b.selected = on;
         }
     }
+    // A hair colour of their own: the game's picker.
+    if crate::livehud::pressed(&clicks, h.hair.id(PICKER)) {
+        let c = sim.hair.to_srgba();
+        commands.insert_resource(crate::cascolour::PickColour(crate::cascolour::PickFor::Hair, [c.red, c.green, c.blue]));
+    }
     // Clicks: a style worn, a colour dyed.
     for (i, c) in &styles {
         if *i == Interaction::Pressed {
@@ -291,7 +297,7 @@ pub(crate) fn spawn_hair_panels(commands: &mut Commands, ui: &mut UiAssets, imag
             commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
         }
     }
-    for (id, tip) in [(HAIR_TAB, "Hair"), (HATS_TAB, "Hats")] {
+    for (id, tip) in [(HAIR_TAB, "Hair"), (HATS_TAB, "Hats"), (PICKER, "Color")] {
         if let Some(e) = s.id(id) {
             commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
         }

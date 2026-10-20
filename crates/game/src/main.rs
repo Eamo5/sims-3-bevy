@@ -23,6 +23,7 @@ mod buyhistory;
 mod camera;
 mod careers;
 mod cas;
+mod cascolour;
 mod clock;
 mod collecting;
 mod data;
@@ -282,7 +283,7 @@ fn main() {
         .add_plugins((mirrors::MirrorsPlugin, groups::GroupsPlugin, computertraits::ComputerTraitsPlugin, pranks::PranksPlugin, neurotic::NeuroticPlugin, toilets::ToiletsPlugin, timeoff::TimeOffPlugin, charity::CharityPlugin, bedowners::BedOwnersPlugin, dollhouse::DollhousePlugin, trashcans::TrashcansPlugin, meetups::MeetupsPlugin, telescope::TelescopePlugin))
         .add_plugins((layout::LayoutPlugin, livehud::LiveHudPlugin, hudpanels::HudPanelsPlugin, piemenu::PieMenuPlugin, buyhud::BuyHudPlugin, infopanels::InfoPanelsPlugin, buildhud::BuildHudPlugin, popupmenu::PopupMenuPlugin, mainmenu::MainMenuPlugin, loadscreen::LoadScreenPlugin, savepics::SavePicsPlugin, gamepopup::GamePopupPlugin, optionsdialog::OptionsDialogPlugin, gamedialogs::GameDialogsPlugin, (caslook::CasLookPlugin, cashair::CasHairPlugin, casclothing::CasClothingPlugin, caschar::CasCharPlugin, casface::CasFacePlugin, casfamily::CasFamilyPlugin, casstyle::CasStylePlugin, skilljournal::SkillJournalPlugin, (casgenetics::CasGeneticsPlugin, casportraits::CasPortraitsPlugin, casbrows::CasBrowsPlugin, casbodyhair::CasBodyHairPlugin), colljournal::CollJournalPlugin, familytree::FamilyTreePlugin, playflow::PlayFlowPlugin, edittownui::EditTownUiPlugin, familyinv::FamilyInventoryPlugin, buildobjects::BuildObjectsPlugin)))
         .add_plugins(jobpaper::JobPaperPlugin)
-        .add_plugins((carry::CarryPlugin, nausea::NauseaPlugin, dropins::DropInsPlugin, schoolfriends::SchoolFriendsPlugin, crowding::CrowdingPlugin, frontdoor::FrontDoorPlugin, repoman::RepomanPlugin, lessons::LessonsPlugin, stress::StressPlugin))
+        .add_plugins((carry::CarryPlugin, nausea::NauseaPlugin, dropins::DropInsPlugin, schoolfriends::SchoolFriendsPlugin, crowding::CrowdingPlugin, frontdoor::FrontDoorPlugin, repoman::RepomanPlugin, lessons::LessonsPlugin, stress::StressPlugin, cascolour::CasColourPlugin))
         .add_plugins((grime::GrimePlugin, dressing::DressingPlugin, puddles::PuddlesPlugin, idles::IdlesPlugin, faces::FacesPlugin, reactions::ReactionsPlugin, laundry::LaundryPlugin, privacy::PrivacyPlugin, topics::TopicsPlugin, holidays::HolidaysPlugin, (decor::DecorPlugin, disturb::DisturbPlugin, traitmoods::TraitMoodsPlugin), tvchannels::TvChannelsPlugin, jealousy::JealousyPlugin, parties::PartiesPlugin))
         .add_plugins((homes::HomesPlugin, calls::CallsPlugin, classes::ClassesPlugin, learning::LearningPlugin, venues::VenuesPlugin, skillbooks::SkillBooksPlugin, tips::TipsPlugin, traitacts::TraitActsPlugin, potty::PottyPlugin, doorlocks::DoorLocksPlugin, curfew::CurfewPlugin, klepto::KleptoPlugin, shop::ShopPlugin, ambrosia::AmbrosiaPlugin, seatedtalk::SeatedTalkPlugin))
         .add_plugins((novels::NovelsPlugin, chatonline::ChatOnlinePlugin, instruments::InstrumentsPlugin, daydream::DaydreamPlugin, hotdrinks::HotDrinksPlugin, highchair::HighChairPlugin, lights::LightsPlugin, careerholes::CareerHolesPlugin, cheats::CheatsPlugin, rgmmail::RgmMailPlugin))

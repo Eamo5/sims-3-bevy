@@ -30,7 +30,7 @@ impl Plugin for CasPlugin {
             .add_systems(OnEnter(AppState::CreateHousehold), setup_cas)
             .add_systems(
                 Update,
-                (cas_actions, mirror_state, rebuild_ui, rebuild_model, turn_model, cas_button_visuals, scroll_panel, frame_camera).chain().run_if(in_state(AppState::CreateHousehold)),
+                (cas_actions, mirror_state, rebuild_ui, rebuild_model, turn_model, cas_button_visuals, scroll_panel, frame_camera, undo_buttons).chain().run_if(in_state(AppState::CreateHousehold)),
             );
     }
 }
@@ -88,6 +88,12 @@ pub enum CasAction {
     HairColor(usize),
     /// Eye colour `i` (of `sim::EYES`).
     EyeColor(usize),
+    /// An eye colour of their own (red, green, blue: 0 to 1), from the game's colour picker
+    /// (`cascolour`).
+    EyeRgb([f32; 3]),
+    /// Their hair's colour, and their eyebrows', their own (from the game's colour picker).
+    HairRgb([f32; 3]),
+    BrowRgb([f32; 3]),
     /// Voice `i` (of the three).
     Voice(u8),
     /// Their voice's pitch, 0 to 1.
@@ -163,7 +169,33 @@ pub enum CasAction {
     /// picker; and the style dropped, the item as it was before Create a Style opened.
     StyleRgb(u8, [f32; 3]),
     StyleCancel,
+    /// The last change taken back, or put back again (the puck's Undo and Redo, Ctrl+Z, Ctrl+Y).
+    Undo,
+    Redo,
 }
+
+impl CasAction {
+    /// Whether it changes the household (and so can be taken back), rather than what's shown.
+    fn edits(&self) -> bool {
+        !matches!(
+            self,
+            CasAction::Select(_)
+                | CasAction::Tab(_)
+                | CasAction::Page(_)
+                | CasAction::Families
+                | CasAction::Wear(_)
+                | CasAction::Styling
+                | CasAction::FaceArea(_)
+                | CasAction::Done
+                | CasAction::Refresh
+                | CasAction::Undo
+                | CasAction::Redo
+        )
+    }
+}
+
+/// How many changes can be taken back.
+const UNDO_DEPTH: usize = 40;
 
 /// The face sliders by part of the face, as Create a Sim groups them: each slider's pair (in
 /// `FACE_SLIDERS`), name and ends (its second end first).
@@ -228,6 +260,12 @@ pub(crate) struct CasScene {
     style_undo: Option<(u64, Vec<crate::style::CustomStyle>, Vec<(Key, u8)>)>,
     /// The part of the face being sculpted (`FACE_AREAS`).
     pub(crate) face_area: u8,
+    /// The household as it was before each change (and the Sim being made), to take changes
+    /// back; and those taken back, to put back; and the last change and when (a slider dragged
+    /// is one change).
+    undo: Vec<(PendingHousehold, usize)>,
+    redo: Vec<(PendingHousehold, usize)>,
+    last_edit: Option<(std::mem::Discriminant<CasAction>, f64)>,
 }
 
 #[derive(Component)]
@@ -366,6 +404,9 @@ fn setup_cas(
         styling: false,
         style_undo: None,
         face_area: 0,
+        undo: Vec::new(),
+        redo: Vec::new(),
+        last_edit: None,
     });
     // The stage: camera, lights, pedestal.
     // (Ambient light belongs to the camera: alone it would bring a camera of its own, and the
@@ -512,6 +553,7 @@ fn cas_actions(
     (mut play, sounds): (MessageWriter<crate::sound::PlaySound>, Option<Res<crate::sound::Sounds>>),
     (mut renders, install, mut ready): (ResMut<crate::style::StyleRenders>, Option<Res<crate::data::InstallPath>>, MessageReader<crate::style::StyleReady>),
     mut requests: MessageReader<CasActionRequest>,
+    (time, keys): (Res<Time>, Res<ButtonInput<KeyCode>>),
 ) {
     let Some(mut scene) = scene else { return };
     // A style made in Create a Style, rendered: worn.
@@ -525,13 +567,46 @@ fn cas_actions(
     }
     let mut rng = rand::rng();
     // (Buttons pressed, and actions asked for by the game's menus.)
-    let asked: Vec<CasAction> = q.iter().filter(|(i, _)| **i == Interaction::Pressed).map(|(_, a)| *a).chain(requests.read().map(|r| r.0)).collect();
+    let mut asked: Vec<CasAction> = q.iter().filter(|(i, _)| **i == Interaction::Pressed).map(|(_, a)| *a).chain(requests.read().map(|r| r.0)).collect();
+    let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
+    if ctrl && keys.just_pressed(KeyCode::KeyZ) {
+        asked.push(CasAction::Undo);
+    }
+    if ctrl && keys.just_pressed(KeyCode::KeyY) {
+        asked.push(CasAction::Redo);
+    }
     for action in asked {
         let action = &action;
+        // (The household as it was, kept to take the change back: one for a slider's drag.)
+        if action.edits() {
+            let kind = std::mem::discriminant(action);
+            let now = time.elapsed_secs_f64();
+            if !scene.last_edit.is_some_and(|(k, at)| k == kind && now - at < 1.0) {
+                let before = (pending.clone(), scene.selected);
+                scene.undo.push(before);
+                if scene.undo.len() > UNDO_DEPTH {
+                    scene.undo.remove(0);
+                }
+            }
+            scene.redo.clear();
+            scene.last_edit = Some((kind, now));
+        }
         let k = scene.selected.min(pending.members.len().saturating_sub(1));
         let last = pending.last_name.clone();
         let mut model = true;
         match *action {
+            CasAction::Undo | CasAction::Redo => {
+                let back = *action == CasAction::Undo;
+                let from = if back { scene.undo.pop() } else { scene.redo.pop() };
+                if let Some((was, sel)) = from {
+                    let now = (std::mem::replace(&mut *pending, was), scene.selected);
+                    if back { scene.redo.push(now) } else { scene.undo.push(now) }
+                    scene.selected = sel.min(pending.members.len().saturating_sub(1));
+                    scene.last_edit = None;
+                    debug!("cas {}: weight now {:?}", if back { "undo" } else { "redo" }, pending.members.get(scene.selected).map(|m| m.weight));
+                    scene.portrait = None;
+                }
+            }
             CasAction::Select(i) => {
                 scene.selected = i.min(pending.members.len() - 1);
                 scene.page = 0;
@@ -638,6 +713,15 @@ fn cas_actions(
             CasAction::EyeColor(i) => {
                 let (r, g, b) = crate::sim::EYES[i.min(crate::sim::EYES.len() - 1)];
                 pending.members[k].eyes = Color::srgb(r, g, b);
+            }
+            CasAction::EyeRgb([r, g, b]) => {
+                pending.members[k].eyes = Color::srgb(r, g, b);
+            }
+            CasAction::HairRgb([r, g, b]) => {
+                pending.members[k].hair = Color::srgb(r, g, b);
+            }
+            CasAction::BrowRgb([r, g, b]) => {
+                pending.members[k].brow_hair = Some(Color::srgb(r, g, b));
             }
             CasAction::LifeState(o) => {
                 pending.members[k].occult = o.and_then(|i| crate::sim::Occult::ALL.get(i).copied());
@@ -964,6 +1048,21 @@ fn cas_actions(
         }
         scene.dirty_ui = true;
         scene.dirty_model |= model;
+    }
+}
+
+/// The puck's Undo and Redo greyed while there's nothing to take back or put back.
+fn undo_buttons(scene: Option<Res<CasScene>>, mut buttons: Query<(&CasAction, &mut crate::layout::UiButton)>) {
+    let Some(scene) = scene else { return };
+    for (a, mut b) in &mut buttons {
+        let off = match a {
+            CasAction::Undo => scene.undo.is_empty(),
+            CasAction::Redo => scene.redo.is_empty(),
+            _ => continue,
+        };
+        if b.disabled != off {
+            b.disabled = off;
+        }
     }
 }
 

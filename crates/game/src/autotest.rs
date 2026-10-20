@@ -4610,6 +4610,115 @@ fn ui_flow(
         }
         (56, AppState::CreateHousehold, _) if since > 1.5 => {
             shot(&mut commands, "2w_thin");
+            // CAS_UNDO=1: the last two changes taken back (heavier again), then one put back, a
+            // picture of each.
+            if std::env::var("CAS_UNDO").is_ok() {
+                *stage = (118, now);
+                return;
+            }
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::Tab(crate::cas::CasTab::Traits))) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (3, now);
+        }
+        // (A change asked for a moment after a picture: the picture is taken a frame or two on.)
+        (122, AppState::CreateHousehold, _) if since > 1.0 => {
+            commands.queue(|w: &mut World| {
+                let k = w.resource::<crate::cas::CasSelected>().0;
+                let eyes = w.resource::<crate::home::PendingHousehold>().members.get(k).map(|m| m.eyes.to_srgba());
+                if let Some(c) = eyes {
+                    w.insert_resource(crate::cascolour::PickColour(crate::cascolour::PickFor::Eyes, [c.red, c.green, c.blue]));
+                }
+            });
+            *stage = (123, now);
+        }
+        (123, AppState::CreateHousehold, _) if since > 2.0 => {
+            shot(&mut commands, "2e_eye_picker");
+            *stage = (124, now);
+        }
+        (124, AppState::CreateHousehold, _) if since > 1.0 => {
+            ask_cas(&mut commands, &[crate::home::CasAction::Tab(crate::cas::CasTab::Face), crate::home::CasAction::EyeRgb([0.95, 0.2, 0.7])]);
+            *stage = (125, now);
+        }
+        (125, AppState::CreateHousehold, _) if since > 3.0 => {
+            shot(&mut commands, "2e_eye_pink");
+            *stage = (127, now);
+        }
+        (127, AppState::CreateHousehold, _) if since > 1.0 => {
+            // (Accept: the dialog's button 0x31.)
+            commands.queue(|w: &mut World| {
+                let mut q = w.query_filtered::<(&crate::layout::UiWin, &mut Interaction), With<crate::layout::UiButton>>();
+                for (win, mut i) in q.iter_mut(w) {
+                    if win.0 == 0x31 {
+                        *i = Interaction::Pressed;
+                    }
+                }
+            });
+            *stage = (126, now);
+        }
+        (126, AppState::CreateHousehold, _) if since > 1.5 => {
+            shot(&mut commands, "2e_eye_accepted");
+            *stage = (128, now);
+        }
+        // (Then the hair's picker: blue hair, green eyebrows.)
+        (128, AppState::CreateHousehold, _) if since > 1.0 => {
+            commands.queue(|w: &mut World| {
+                let k = w.resource::<crate::cas::CasSelected>().0;
+                let hair = w.resource::<crate::home::PendingHousehold>().members.get(k).map(|m| m.hair.to_srgba());
+                if let Some(c) = hair {
+                    w.insert_resource(crate::cascolour::PickColour(crate::cascolour::PickFor::Hair, [c.red, c.green, c.blue]));
+                }
+            });
+            *stage = (129, now);
+        }
+        (129, AppState::CreateHousehold, _) if since > 2.0 => {
+            shot(&mut commands, "2e_hair_picker");
+            *stage = (130, now);
+        }
+        (130, AppState::CreateHousehold, _) if since > 1.0 => {
+            ask_cas(&mut commands, &[crate::home::CasAction::HairRgb([0.15, 0.3, 0.9]), crate::home::CasAction::BrowRgb([0.1, 0.8, 0.2])]);
+            *stage = (131, now);
+        }
+        (131, AppState::CreateHousehold, _) if since > 3.0 => {
+            shot(&mut commands, "2e_hair_blue");
+            *stage = (132, now);
+        }
+        (132, AppState::CreateHousehold, _) if since > 1.0 => {
+            commands.queue(|w: &mut World| {
+                let mut q = w.query_filtered::<(&crate::layout::UiWin, &mut Interaction), With<crate::layout::UiButton>>();
+                for (win, mut i) in q.iter_mut(w) {
+                    if win.0 == 0x31 {
+                        *i = Interaction::Pressed;
+                    }
+                }
+            });
+            *stage = (133, now);
+        }
+        (133, AppState::CreateHousehold, _) if since > 1.5 => {
+            if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::Tab(crate::cas::CasTab::Traits))) {
+                *i = Interaction::Pressed;
+            }
+            *stage = (3, now);
+        }
+        (118, AppState::CreateHousehold, _) if since > 1.0 => {
+            ask_cas(&mut commands, &[crate::home::CasAction::Undo, crate::home::CasAction::Undo]);
+            *stage = (120, now);
+        }
+        (120, AppState::CreateHousehold, _) if since > 4.0 => {
+            shot(&mut commands, "2u_undone");
+            *stage = (119, now);
+        }
+        (119, AppState::CreateHousehold, _) if since > 1.0 => {
+            ask_cas(&mut commands, &[crate::home::CasAction::Redo]);
+            *stage = (121, now);
+        }
+        (121, AppState::CreateHousehold, _) if since > 4.0 => {
+            shot(&mut commands, "2u_redone");
+            // CAS_EYE_PICK=1: the eyes' colour picker, a colour of their own given, Accept.
+            if std::env::var("CAS_EYE_PICK").is_ok() {
+                *stage = (122, now);
+                return;
+            }
             if let Some((mut i, _)) = cas.iter_mut().find(|(_, a)| matches!(a, crate::home::CasAction::Tab(crate::cas::CasTab::Traits))) {
                 *i = Interaction::Pressed;
             }
