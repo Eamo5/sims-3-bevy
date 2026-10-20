@@ -23,7 +23,7 @@ pub struct StoryPlugin;
 
 impl Plugin for StoryPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<TownStory>().add_systems(Update, (progress, read_the_news).run_if(in_state(PlayMode::Live)));
+        app.init_resource::<TownStory>().add_systems(Update, (merge_created, progress, read_the_news).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -56,6 +56,9 @@ pub struct TownStory {
     /// Families moved out of their houses to live about town (by household id: not in the bin).
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub townies: std::collections::BTreeSet<u64>,
+    /// New families moved to town (`storymoves::new_family`): the town's as the world's own are.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub created: Vec<s3bake::HouseholdBaked>,
 }
 
 /// The kinds of community lot a lot can be made in Edit Town (as the game's Change Lot Type):
@@ -389,7 +392,7 @@ fn progress(
         && let Some(w) = world_info.as_deref()
     {
         for _ in 0..days {
-            if !rng.random_bool(MOVE_CHANCE) {
+            if !rng.random_bool(MOVE_CHANCE) && std::env::var_os("STORY_NEW").is_none() {
                 continue;
             }
             let active = household.as_deref().map(|h| h.lot_index);
@@ -421,9 +424,25 @@ fn progress(
                 .filter(|f| f.home.is_none() || f.home != active)
                 .collect();
             debug!("story moves: {} of {} houses lived in, {} furnished empty, {} families", houses.iter().filter(|h| h.lived_in).count(), houses.len(), houses.iter().filter(|h| !h.lived_in && h.furnished).count(), families.len());
-            let Some(m) = crate::storymoves::choose(&houses, &families, &mut rng) else { continue };
+            // (STORY_NEW=1, tests: a new family into the first empty furnished house.)
+            let forced = std::env::var_os("STORY_NEW").is_some() && story.created.is_empty();
+            let forced = forced.then(|| houses.iter().find(|h| !h.lived_in && h.furnished && h.beds > 0).map(|h| crate::storymoves::Move::New { lot: h.lot, size: h.beds.min(4) })).flatten();
+            let Some(m) = forced.or_else(|| crate::storymoves::choose(&houses, &families, &mut rng)) else { continue };
+            // (A new family: made, kept, and the town's from now on.)
+            if let crate::storymoves::Move::New { lot, size } = m {
+                let taken: Vec<String> = town.0.households.iter().map(|h| h.name.clone()).chain(story.created.iter().map(|h| h.name.clone())).collect();
+                let mut f = crate::storymoves::new_family(size, &taken, &mut rng);
+                f.lot_id = lots[lot].id;
+                let news = format!("The {} family is the latest to move into town.", f.name);
+                info!("story progression: {news} (household {})", f.id);
+                story.homes.insert(f.id, Some(lots[lot].id));
+                story.created.push(f);
+                story.tell(news);
+                continue;
+            }
             let id = match m {
                 crate::storymoves::Move::In { family, .. } | crate::storymoves::Move::Out { family } | crate::storymoves::Move::Away { family } | crate::storymoves::Move::House { family, .. } => family,
+                crate::storymoves::Move::New { .. } => continue,
             };
             let Some(h) = town.0.households.iter().find(|h| h.id == id) else { continue };
             let known_family = families.iter().any(|f| f.id == id && f.known);
@@ -454,6 +473,7 @@ fn progress(
                     story.homes.insert(id, Some(lots[lot].id));
                     (format!("The {} family moved to a {} house.", h.name, if bigger { "bigger" } else { "smaller" }), None)
                 }
+                crate::storymoves::Move::New { .. } => continue,
             };
             info!("story progression: {news} (household {id})");
             if known_family {
@@ -480,6 +500,20 @@ fn progress(
         }
     }
     info!("story progression: {days} day(s), {} news", story.news.len());
+}
+
+/// The town's new families among its own (a save's, as it comes in; a new one, as it moves in).
+fn merge_created(story: Res<TownStory>, town: Option<ResMut<crate::premade::TownPremades>>) {
+    let Some(mut town) = town else { return };
+    if !story.created.iter().any(|f| !town.0.households.iter().any(|h| h.id == f.id)) {
+        return;
+    }
+    let all = std::sync::Arc::make_mut(&mut town.0);
+    for f in &story.created {
+        if !all.households.iter().any(|h| h.id == f.id) {
+            all.households.push(f.clone());
+        }
+    }
 }
 
 /// Reading the paper: the town's latest news.

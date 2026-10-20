@@ -327,11 +327,22 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
     let fits = |e: &&CasPartInfo| e.baked && e.age_gender & age != 0 && e.age_gender & gender != 0;
     // Clothes and shoes by the outfit's category (heads and hair go with anything); never the
     // townsfolk's uniforms, nor everyday clothes that are swimwear too (a seashell top).
+    // (The naked outfit's parts, for a bath, aren't anyone's clothes: but for a man's bare chest
+    // swimming, and bare feet swimming or in bed.)
+    let nude_ok = |e: &CasPartInfo| {
+        kind == OutfitKind::Naked
+            || match e.clothing_type {
+                CT_TOP => !sim.female && kind == OutfitKind::Swimwear,
+                CT_SHOES => matches!(kind, OutfitKind::Swimwear | OutfitKind::Sleepwear),
+                _ => false,
+            }
+    };
     let worn = |e: &&CasPartInfo| {
         let clothes = matches!(e.clothing_type, CT_TOP | CT_BOTTOM | CT_BODY | CT_SHOES);
         !is_uniform(&e.name)
             && (!clothes || e.category & cat != 0)
             && !(clothes && kind == OutfitKind::Everyday && e.category & s3formats::sim::CAT_SWIM != 0)
+            && (!e.name.contains("Nude") || nude_ok(e))
     };
     // (Hats only as chosen: nobody's given one at random.)
     let not_hat = |e: &&CasPartInfo| e.clothing_type != CT_HAIR || !s3bake::is_hat(&e.name);
