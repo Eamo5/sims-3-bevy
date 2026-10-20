@@ -8,7 +8,51 @@
 //! overclock the computer; a spouse or fiancé does as they like, all but sabotage. Someone
 //! disliked keeps to what has no such value at all.
 
+use bevy::prelude::*;
+
 use crate::interact::{InteractionDef, ObjectKind, Special};
+use crate::sim::Age;
+
+/// A guest staying the night (asked to: "Ask NPC To Stay Over"): at home as a spouse would be,
+/// and not sent home by the hour or their needs, till the morning.
+#[derive(Component)]
+pub struct StayingOver;
+
+/// What a guest staying over may do (the game's `kVisitorPrivilegesForStayOver`).
+pub const STAY_OVER_PRIVILEGE: f32 = 4.0;
+/// The hours a guest can be asked to stay (the game's `kAskToStayOverTimeStart`, `End`: 4 PM to
+/// 4 AM), how well liked they must be, and the hour they leave in the morning.
+const ASK_FROM: f32 = 16.0;
+const ASK_UNTIL: f32 = 4.0;
+const STAY_LIKING: f32 = 40.0;
+pub const STAY_UNTIL: f64 = 10.0;
+
+/// The words (the game's `SocialCallback:NPCStayOver`, `NPCStayOverRejected`).
+pub const STAYING: &str = "Thanks for inviting me over!  I'm really looking forward to spending the night at your place. It'll be fun!";
+pub const NOT_STAYING: &str = "I don't know you well enough to stay over right now...";
+
+/// Whether a guest may be asked to stay over: liked well enough, and of an age with the one
+/// asking (children with children, teens with teens, grown-ups with grown-ups).
+pub fn may_stay_over(liking: f32, a: Age, b: Age) -> bool {
+    let band = |x: Age| match x {
+        Age::Child => 0,
+        Age::Teen => 1,
+        _ => 2,
+    };
+    liking >= STAY_LIKING && !a.is_little() && !b.is_little() && a != Age::Baby && band(a) == band(b)
+}
+
+/// Whether it's the hour to ask someone to stay over.
+pub fn stay_over_hour(hour: f32) -> bool {
+    !(ASK_UNTIL..ASK_FROM).contains(&hour)
+}
+
+/// When a guest asked to stay now goes home: the next morning.
+pub fn stay_until(now: f64) -> f64 {
+    let day = (now / 1440.0).floor();
+    let hour = (now - day * 1440.0) / 60.0;
+    (day + if hour >= STAY_UNTIL { 1.0 } else { 0.0 }) * 1440.0 + STAY_UNTIL * 60.0
+}
 
 /// What a guest may do, by their relationship with the household (`socializing.xml`).
 pub fn privilege(state: &str) -> f32 {
@@ -68,6 +112,18 @@ mod tests {
 
     fn value(kind: ObjectKind, name: &str) -> Option<f32> {
         interactions_for(kind).iter().find(|d| d.name == name).and_then(|d| check(kind, d))
+    }
+
+    #[test]
+    fn staying_over() {
+        assert!(may_stay_over(45.0, Age::Adult, Age::YoungAdult));
+        assert!(!may_stay_over(30.0, Age::Adult, Age::Adult));
+        assert!(!may_stay_over(80.0, Age::Teen, Age::Adult));
+        assert!(may_stay_over(80.0, Age::Child, Age::Child));
+        assert!(stay_over_hour(20.0) && stay_over_hour(1.0) && !stay_over_hour(12.0));
+        // (Asked at 9 PM: home by ten the next morning; at 1 AM, the same morning.)
+        assert_eq!(stay_until(1440.0 + 21.0 * 60.0), 2.0 * 1440.0 + 600.0);
+        assert_eq!(stay_until(2.0 * 1440.0 + 60.0), 2.0 * 1440.0 + 600.0);
     }
 
     #[test]

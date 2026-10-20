@@ -318,6 +318,12 @@ impl ActiveBuilding {
         self.floor_regions.get(&(level, l.x.floor() as i32, l.y.floor() as i32)).copied().filter(|r| *r > 0)
     }
 
+    /// Whether a place on the ground floor (world) is indoors: in one of the house's rooms (not
+    /// a porch).
+    pub fn indoors(&self, p: Vec3) -> bool {
+        self.room_at(1, p).is_some_and(|k| !matches!(k, ROOM_PORCH | ROOM_OUTSIDE))
+    }
+
     /// How many tiles of floor a room has.
     pub fn room_tiles(&self, level: u8, room: u16) -> usize {
         self.floor_regions.iter().filter(|((l, ..), r)| *l == level && **r == room).count()

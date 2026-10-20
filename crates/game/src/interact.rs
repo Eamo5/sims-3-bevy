@@ -3168,7 +3168,7 @@ fn comings_and_goings(
     world: Res<CurrentWorld>,
     mut joining: Query<(Entity, &mut Sim, &JoinHousehold)>,
     mut leaving: Query<(Entity, &mut ActionQueue, &Transform, Option<&HomeTries>), (With<GoingHome>, Without<OffLot>)>,
-    mut visitors: Query<(Entity, &Visitor, &Motives, &Sim, Has<crate::doorbell::AtTheDoor>), (Without<GoingHome>, Without<OffLot>, Without<HouseholdMember>, Without<JoinHousehold>)>,
+    mut visitors: Query<(Entity, &Visitor, &Motives, &Sim, Has<crate::doorbell::AtTheDoor>, Has<crate::guests::StayingOver>), (Without<GoingHome>, Without<OffLot>, Without<HouseholdMember>, Without<JoinHousehold>)>,
     mut arriving: Query<(Entity, &Invited, &mut Transform, Option<&mut ActionQueue>), Without<GoingHome>>,
     (town, mut household, mut notes, members): (Option<Res<crate::premade::TownPremades>>, Option<ResMut<Household>>, ResMut<Notifications>, Query<(), With<HouseholdMember>>),
     (building, party): (Option<Res<crate::building::ActiveBuilding>>, Option<Res<Party>>),
@@ -3193,10 +3193,10 @@ fn comings_and_goings(
         commands.entity(e).remove::<(JoinHousehold, Visitor, GoingHome, OffLot)>().insert(HouseholdMember);
     }
     let Some(exit) = exit else { return };
-    for (e, v, motives, sim, at_door) in &mut visitors {
+    for (e, v, motives, sim, at_door, staying) in &mut visitors {
         // (Badly in need of something, a guest goes home to see to it: the game's
-        // `GuestInMotiveDistress`.)
-        let distress = [HUNGER, BLADDER, ENERGY, HYGIENE].iter().any(|&i| motives.0[i] < CRITICAL_NEED);
+        // `GuestInMotiveDistress`; not one staying the night.)
+        let distress = !staying && [HUNGER, BLADDER, ENERGY, HYGIENE].iter().any(|&i| motives.0[i] < CRITICAL_NEED);
         if clock.minutes >= v.leave_at || distress {
             commands.entity(e).insert(GoingHome);
             // (Saying goodbye, once let in: `Lot.GoHome`'s lines.)
@@ -3217,7 +3217,7 @@ fn comings_and_goings(
         let given_up = queue.0.is_empty() && tries.is_some_and(|t| t.0 >= 3);
         if at_exit || given_up {
             queue.0.clear();
-            commands.entity(e).remove::<(GoingHome, Visitor, crate::nav::PathFollow, HomeTries)>().insert((OffLot, Visibility::Hidden));
+            commands.entity(e).remove::<(GoingHome, Visitor, crate::nav::PathFollow, HomeTries, crate::guests::StayingOver)>().insert((OffLot, Visibility::Hidden));
         } else if queue.0.is_empty() {
             queue.0.push_back(Action::new("Go Home", ActionKind::GoHere(exit.0, 1), true));
             commands.entity(e).insert(HomeTries(tries.map_or(1, |t| t.0 + 1)));
@@ -3314,12 +3314,13 @@ pub(crate) fn run_actions(
         (Without<GameObject>, Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>),
     >,
     mut objects: Query<(&GameObject, &Transform, &mut UsedBy, Option<&Floor>), Without<Sim>>,
-    (building, upper, visited, privacy, locks): (
+    (building, upper, visited, privacy, locks, cars): (
         Option<Res<crate::building::ActiveBuilding>>,
         Option<Res<UpperFloors>>,
         Option<Res<crate::visit::VisitedLot>>,
         Res<crate::privacy::Privacy>,
         Query<(Entity, &crate::doorlocks::DoorLock)>,
+        Query<(&GameObject, &Transform), (Without<Sim>, Without<crate::visit::LotObject>, Without<crate::traffic::CarOut>)>,
     ),
     mut life: MessageWriter<LifeEvent>,
     people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
@@ -3610,6 +3611,11 @@ pub(crate) fn run_actions(
                         ActionKind::Extinguish { at, level, .. } => {
                             let (mine, at) = (Vec2::new(tf.translation.x, tf.translation.z), at.xz());
                             Some((at + (mine - at).normalize_or(Vec2::X) * crate::fire::extinguish_distance(&sim.traits), *level))
+                        }
+                        // (Off out from home with a car of their own: to it, to drive off in it, as
+                        // the game's `CarOwnable` has them; else to the street.)
+                        ActionKind::GoToWork | ActionKind::Visit { .. } | ActionKind::GoToLot { .. } if away.is_none() && cars.iter().any(|(o, _)| o.kind == ObjectKind::Car) => {
+                            cars.iter().find(|(o, _)| o.kind == ObjectKind::Car).map(|(o, ctf)| (o.use_point(ctf), 1))
                         }
                         ActionKind::GoToWork | ActionKind::Visit { .. } | ActionKind::GoToLot { .. } | ActionKind::GoHomeFromLot | ActionKind::Jog { .. } => way_out.map(|p| (p, 1)),
                         ActionKind::JoinCareer { target, .. } | ActionKind::Teleport { pad: target, .. } => {
@@ -5389,6 +5395,24 @@ pub(crate) fn run_actions(
                                                 w.write_message(crate::little::Lesson { toddler, teacher, walk });
                                             });
                                         }
+                                        // (Asked to stay the night: till the morning, at home here.)
+                                        SocialEffect::StayOver => {
+                                            let full = who.get(target).map(|w| w.0.full_name()).unwrap_or_default();
+                                            if action.social_outcome.is_none_or(|o| o.accepted) {
+                                                let (guest, until) = (*target, crate::guests::stay_until(clock.minutes));
+                                                commands.queue(move |w: &mut World| {
+                                                    if let Ok(mut e) = w.get_entity_mut(guest) {
+                                                        e.insert(crate::guests::StayingOver);
+                                                        if let Some(mut v) = e.get_mut::<Visitor>() {
+                                                            v.leave_at = v.leave_at.max(until);
+                                                        }
+                                                    }
+                                                });
+                                                notes.push(format!("{full}: \"{}\"", crate::guests::STAYING));
+                                            } else {
+                                                notes.push(format!("{full}: \"{}\"", crate::guests::NOT_STAYING));
+                                            }
+                                        }
                                         SocialEffect::AskToLeave => {
                                             commands.entity(*target).try_insert(GoingHome);
                                             notes.push(format!("{} said goodbye and is heading home.", tname));
@@ -6263,11 +6287,12 @@ fn autonomy(
             Without<crate::carry::BeingMoved>,
         ),
     >,
-    (objects, seconds, unmade_q, grime_q): (
+    (objects, seconds, unmade_q, grime_q, staying_q): (
         Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>,
         Query<&SecondPlace>,
         Query<(), With<Unmade>>,
         Query<&crate::grime::Grime>,
+        Query<(), With<crate::guests::StayingOver>>,
     ),
     hh: Option<Res<Household>>,
     (broken, plant_q, lit_q, hw_q, stereos_on, coupons): (
@@ -6380,8 +6405,13 @@ fn autonomy(
         let critical = failing.or_else(|| (motives.0[HYGIENE] < CRITICAL_NEED).then_some(HYGIENE));
         // (A guest at the household's home keeps to what their footing with its friendliest
         // allows: see `guests`.)
-        let guest = (my_lot.is_none() && !household.contains(me))
-            .then(|| others.iter().filter(|o| household.contains(o.0)).filter_map(|o| rels.0.get(&o.0)).map(|r| crate::guests::privilege(r.state())).reduce(f32::max).unwrap_or(1.0));
+        let guest = (my_lot.is_none() && !household.contains(me)).then(|| {
+            if staying_q.contains(me) {
+                crate::guests::STAY_OVER_PRIVILEGE
+            } else {
+                others.iter().filter(|o| household.contains(o.0)).filter_map(|o| rels.0.get(&o.0)).map(|r| crate::guests::privilege(r.state())).reduce(f32::max).unwrap_or(1.0)
+            }
+        });
         for (oe, obj, otf, used, obj_lot) in &objects {
             // (A double bed with their partner in it has room for them, on its other side; a sofa
             // someone's sat on, for anyone.)

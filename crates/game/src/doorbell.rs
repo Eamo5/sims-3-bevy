@@ -2,7 +2,9 @@
 //! bell (the game's ring, and its chime), then stands back from the door to wait to be let in
 //! (`Lot.MoveAwayFromDoor`). The player's household invites them inside ("Invite Inside": never
 //! of their own accord, as the game's); a family visited lets them in itself. Left waiting a
-//! couple of hours, they give up and go home.
+//! couple of hours, they give up and go home. Someone of the household out in the yard when they
+//! come is talked to there instead of the bell rung (`Lot.CheckForHostWhenVisiting`, the game's
+//! `HostOutside`), and they wait about to be asked in after.
 
 use bevy::prelude::*;
 
@@ -14,7 +16,7 @@ pub struct DoorbellPlugin;
 
 impl Plugin for DoorbellPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, door_waits.run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (host_outside, door_waits).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -50,6 +52,52 @@ pub fn come_to_door(commands: &mut Commands, e: Entity, queue: &mut ActionQueue,
         queue.0.push_back(Action::new("Wait Outside", ActionKind::GoHere(back, 1), true));
     }
     commands.entity(e).insert(AtTheDoor { since: None, rang: false });
+}
+
+/// A caller who's looked for someone of the household out in the yard (once, as they come).
+#[derive(Component)]
+struct HostLookedFor;
+
+/// How far off a caller sees someone out in the yard (metres).
+const HOST_SEEN: f32 = 30.0;
+
+/// A caller coming to the door finds whether one of the household's out in the yard (awake, not
+/// a little one, on the ground and not in the house): if so, they go and chat with them there,
+/// and don't ring (the game's `HostOutside`'s Chat), then wait outside to be asked in.
+#[allow(clippy::type_complexity)]
+fn host_outside(
+    mut commands: Commands,
+    mut callers: Query<(Entity, &Transform, &mut AtTheDoor, &mut ActionQueue), (Without<HostLookedFor>, Without<crate::sim::HouseholdMember>)>,
+    hosts: Query<
+        (Entity, &Transform, &crate::nav::Floor, &Sim, &crate::sim::SimAnim, &InheritedVisibility),
+        (With<crate::sim::HouseholdMember>, Without<crate::visit::OnLot>, Without<crate::interact::OffLot>),
+    >,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+) {
+    let Some(building) = building else { return };
+    let chat = crate::social::social_index("Chat");
+    for (e, tf, mut door, mut queue) in &mut callers {
+        // (Only as they set off for the door.)
+        if door.rang || door.since.is_some() || queue.0.front().is_none_or(|a| a.label != "Go to the Door") {
+            continue;
+        }
+        commands.entity(e).insert(HostLookedFor);
+        let at = tf.translation;
+        let host = hosts
+            .iter()
+            .filter(|(_, htf, floor, s, anim, shown)| {
+                shown.get() && floor.0 == 1 && !s.age.is_little() && anim.pose != crate::sim::Pose::Lie && !building.indoors(htf.translation) && htf.translation.distance(at) < HOST_SEEN
+            })
+            .min_by(|a, b| a.1.translation.distance(at).total_cmp(&b.1.translation.distance(at)))
+            .map(|h| (h.0, h.3.first.clone()));
+        let (Some((host, name)), Some(chat)) = (host, chat) else { continue };
+        let wait = queue.0.iter().find(|a| a.label == "Wait Outside").cloned();
+        queue.0.clear();
+        queue.0.push_back(Action::new("Chat", ActionKind::Social { target: host, social: chat }, true));
+        queue.0.extend(wait);
+        door.rang = true;
+        info!("a caller finds {name} out in the yard: no ringing");
+    }
 }
 
 /// Callers ring and wait; left too long, they go home.

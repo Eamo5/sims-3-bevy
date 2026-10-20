@@ -1161,7 +1161,7 @@ fn world_click(
         ),
         (Res<crate::frontdoor::Front>, Res<crate::frontdoor::Doorbell>),
     ),
-    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q), company_q): (
+    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, stay_q), company_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -1175,7 +1175,7 @@ fn world_click(
         Query<(), With<crate::little::Labour>>,
         Query<&crate::tvchannels::TvLevel>,
         Query<(&Sim, Option<&crate::classes::ClassesTaken>)>,
-        (Query<(&crate::skillbooks::SkillBooks, Has<HouseholdMember>)>, Query<(&crate::novels::Novels, Has<HouseholdMember>)>, crate::carry::CarryLook),
+        (Query<(&crate::skillbooks::SkillBooks, Has<HouseholdMember>)>, Query<(&crate::novels::Novels, Has<HouseholdMember>)>, crate::carry::CarryLook, Query<(), With<crate::guests::StayingOver>>),
         Query<(Entity, &Sim, Has<crate::interact::Visitor>, Option<&crate::visit::OnLot>), Or<(With<HouseholdMember>, With<crate::interact::Visitor>)>>,
     ),
 ) {
@@ -1378,6 +1378,10 @@ fn world_click(
                         crate::social::SocialEffect::DeliverOpportunity => delivery.is_some(),
                         // (A ghost doesn't move in: the game's, for those not yet playable.)
                         crate::social::SocialEffect::MoveIn => !ghosts_q.contains(t),
+                        // (A guest let in, in the evening or the night, not staying already.)
+                        crate::social::SocialEffect::StayOver => {
+                            company_q.get(t).is_ok_and(|c| c.2) && !door_q.contains(t) && !stay_q.contains(t) && crate::guests::stay_over_hour(opp_q.2.hour_f())
+                        }
                         _ => true,
                     })
                     // (A delivery under the opportunity's own words: "Deliver Painting".)

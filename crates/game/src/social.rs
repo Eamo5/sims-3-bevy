@@ -303,6 +303,8 @@ pub enum SocialEffect {
     /// A policeman's "Question", a journalist's "Interview" (their `OnInterview`): a subject for a
     /// report or story (`careermetrics`).
     Interview,
+    /// A guest asked to stay the night (the game's "Ask NPC To Stay Over": `guests`).
+    StayOver,
 }
 
 /// What a Mooch gets out of others (the game's `MoochAmount`, at the hidden Mooch skill's first
@@ -321,6 +323,8 @@ const GAME_EFFECTS: &[(&str, SocialEffect)] = &[
     ("Mooch Money (Large)", SocialEffect::MoochLarge),
     ("Mooch Food", SocialEffect::MoochFood),
     ("Ask for Recipe", SocialEffect::LearnRecipe),
+    ("Ask NPC To Stay Over", SocialEffect::StayOver),
+    ("Ask NPC To Stay Over Romantically", SocialEffect::StayOver),
     ("Trade Kitchen Secrets", SocialEffect::LearnRecipe),
     ("Ask for a Promotion", SocialEffect::AskPromotion),
     ("Ask for a Raise", SocialEffect::AskRaise),
@@ -430,6 +434,9 @@ pub enum GameTest {
     NotHousehold,
     /// Someone not of the household, not questioned or written up already (`TestInterview`).
     Interview,
+    /// The household's guest, liked well enough and of an age with them (`TestAskNPCToStayOver`;
+    /// the hour and their being let in are the menu's: `guests`).
+    StayOver,
 }
 
 /// What's known of a Sim for the game's socials beyond their `Sim`: who they are, their
@@ -752,6 +759,7 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
             "TestConfessCheating" => Some(GameTest::Confess),
             "TestCampaignDonation" => Some(GameTest::NotHousehold),
             "TestInterview" => Some(GameTest::Interview),
+            "TestAskNPCToStayOver" => Some(GameTest::StayOver),
             // (What's said of a line of work: its topic is the other's being in it.)
             t if t.starts_with("TargetHas") && t.ends_with("Career") && a.topics.iter().any(|(n, _)| n.starts_with("Learn ")) => None,
             _ => continue,
@@ -1021,6 +1029,7 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
                 Some(GameTest::Boss) => side[0].boss != Some(target.id),
                 Some(GameTest::NotHousehold) => side[1].member,
                 Some(GameTest::Interview) => side[1].member || side[0].tally.is_some_and(|t| t.knows(target.id)),
+                Some(GameTest::StayOver) => !side[0].member || side[1].member || !crate::guests::may_stay_over(rel.friendship, actor.age, target.age),
                 Some(GameTest::BossBelowNine) => side[0].boss != Some(target.id) || side[0].level + 1 >= 9,
                 Some(GameTest::Accuse) => !rel.is_romance() || side[1].rels.is_none_or(|r| r.romances() < 2) || rel.betrayed.is_some(),
                 Some(GameTest::Confess) => {
