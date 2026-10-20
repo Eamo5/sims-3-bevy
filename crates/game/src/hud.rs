@@ -152,10 +152,46 @@ fn recipe_label(r: &s3bake::gamedata::RecipeInfo) -> String {
 }
 
 /// A recipe to cook as the food menus list it: with what's missing of its ingredients costs
-/// (the game's "RecipeWithCost"); none, if one can't be had.
-fn cooked_label(data: &s3bake::GameDataBaked, r: &s3bake::gamedata::RecipeInfo, (cook, fridge): (Option<&crate::inventory::Inventory>, &[crate::inventory::Stack])) -> Option<String> {
-    let p = crate::ingredients::plan(data, &r.ingredients, cook, fridge)?;
-    Some(if p.cost > 0 { format!("{} (§{})", r.name, p.cost) } else { r.name.clone() })
+/// (the game's "RecipeWithCost"); greyed when the household can't afford that, or when what it
+/// needs can't be had (the game's `Food:NotEnoughMoney` and `Food:Requires`, its ingredients
+/// listed).
+fn cooked_option(
+    data: &s3bake::GameDataBaked,
+    ui: Option<&crate::layout::UiAssets>,
+    r: &s3bake::gamedata::RecipeInfo,
+    (cook, fridge): (Option<&crate::inventory::Inventory>, &[crate::inventory::Stack]),
+    funds: Option<i64>,
+    kind: ActionKind,
+) -> (String, ActionKind) {
+    let word = |key: &str, plain: &str| ui.and_then(|u| u.localize(key)).unwrap_or_else(|| plain.to_string());
+    match crate::ingredients::plan(data, &r.ingredients, cook, fridge) {
+        Some(p) => {
+            let label = if p.cost > 0 { format!("{} (§{})", r.name, p.cost) } else { r.name.clone() };
+            if funds.is_some_and(|f| p.cost > f) {
+                (label, ActionKind::Greyed(word("Gameplay/Objects/CookingObjects/Food:NotEnoughMoney", "You can't afford this recipe.")))
+            } else {
+                (label, kind)
+            }
+        }
+        None => {
+            let mut why = word("Gameplay/Objects/FoodObjects/Food:Requires", "{0.String} requires:").replace("{0.String}", &r.name);
+            let mut seen: Vec<&String> = Vec::new();
+            for want in &r.ingredients {
+                if seen.contains(&want) {
+                    continue;
+                }
+                seen.push(want);
+                let name = data.ingredients.iter().find(|i| &i.key == want).map_or(want.as_str(), |i| i.name.as_str());
+                let n = r.ingredients.iter().filter(|w| *w == want).count();
+                why.push('\n');
+                why.push_str(name);
+                if n > 1 {
+                    why.push_str(&format!(" ({n})"));
+                }
+            }
+            (r.name.clone(), ActionKind::Greyed(why))
+        }
+    }
 }
 
 /// The game's food menus, its fridge's and stove's: "Have Dinner" and "Serve Dinner", the
@@ -174,6 +210,7 @@ fn food_menus(
     stove: Option<ActionKind>,
     (fridge, microwave): (Option<ActionKind>, Option<ActionKind>),
     stock: (Option<&crate::inventory::Inventory>, &[crate::inventory::Stack]),
+    (ui, funds): (Option<&crate::layout::UiAssets>, Option<i64>),
 ) {
     use s3bake::gamedata::MEAL_DESSERT;
     let (meal, word) = crate::meals::meal_time(hour, weekday);
@@ -184,7 +221,7 @@ fn food_menus(
                 .map(|r| &data.recipes[r])
                 // (Desserts on their own menu.)
                 .filter(|r| (m == MEAL_DESSERT || r.meals & MEAL_DESSERT == 0) && if one { r.for_one } else { r.for_group })
-                .filter_map(|r| Some((cooked_label(data, r, stock)?, cook.clone())))
+                .map(|r| cooked_option(data, ui, r, stock, funds, cook.clone()))
                 .collect();
             if !list.is_empty() {
                 options.push((format!("{title} ›"), submenu_kind(pie.submenus.len())));
@@ -202,6 +239,18 @@ fn food_menus(
     if !list.is_empty() {
         options.push((format!("{QUICK_MEAL} ›"), submenu_kind(pie.submenus.len())));
         pie.submenus.push((QUICK_MEAL.to_string(), list));
+    }
+}
+
+/// What the Sim's in no state to do greyed (`stress`), on the menu and in its submenus, with
+/// why.
+fn grey_stressed(options: &mut [(String, ActionKind)], submenus: &mut [(String, Vec<(String, ActionKind)>)], objects: &Query<&GameObject>, why_not: impl Fn(([f32; 6], bool)) -> Option<String>) {
+    for (_, k) in options.iter_mut().chain(submenus.iter_mut().flat_map(|s| s.1.iter_mut())) {
+        if let Some(e) = crate::stress::exit_of(k, objects)
+            && let Some(why) = why_not(e)
+        {
+            *k = ActionKind::Greyed(why);
+        }
     }
 }
 
@@ -888,7 +937,8 @@ fn spawn_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, 
                     });
                 }
             }
-            for (i, (label, _)) in options.iter().enumerate().filter(|_| !game_look) {
+            for (i, (label, kind)) in options.iter().enumerate().filter(|_| !game_look) {
+                let why = if let ActionKind::Greyed(w) = kind { Some(w.clone()) } else { None };
                 let a = -std::f32::consts::FRAC_PI_2 + i as f32 / n as f32 * std::f32::consts::TAU;
                 let (x, y) = (a.cos() * radius, a.sin() * radius * 0.8);
                 p.spawn((
@@ -911,14 +961,16 @@ fn spawn_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, 
                     BackgroundColor(BUBBLE),
                     BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.35), Val::Px(0.0), Val::Px(2.0), Val::Px(0.0), Val::Px(5.0)),
                 ))
+                .insert_if(crate::icons::Tooltip(why.clone().unwrap_or_default()), || why.is_some())
                 .with_children(|b| {
-                    b.spawn((text(label.clone(), 14.0, BUBBLE_TEXT), Pickable::IGNORE));
+                    b.spawn((text(label.clone(), 14.0, if why.is_some() { Color::srgb(0.44, 0.51, 0.67) } else { BUBBLE_TEXT }), Pickable::IGNORE));
                 });
             }
         })
         .id();
     if game_look {
-        commands.entity(root).insert(crate::piemenu::PieRequest(options.iter().map(|o| o.0.clone()).collect(), submenu.then(|| title.to_string())));
+        let greyed = options.iter().map(|o| if let ActionKind::Greyed(why) = &o.1 { Some(why.clone()) } else { None }).collect();
+        commands.entity(root).insert(crate::piemenu::PieRequest(options.iter().map(|o| o.0.clone()).collect(), submenu.then(|| title.to_string()), greyed));
     }
     pie.root = Some(root);
     pie.actor = Some(actor);
@@ -1109,7 +1161,7 @@ fn world_click(
         Res<crate::potty::Potties>,
         Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
-    selected: Query<(Entity, &Relationships, &Sim), With<Selected>>,
+    selected: Query<(Entity, &Relationships, &Sim, &crate::sim::Motives), With<Selected>>,
     (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons, real_estate))): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
@@ -1201,7 +1253,11 @@ fn world_click(
     let Ok((camera, cam_tf)) = cams.single() else { return };
     let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else { return };
     close_pie(&mut commands, &mut pie);
-    let Ok((actor, rels, actor_sim)) = selected.single() else { return };
+    let Ok((actor, rels, actor_sim, actor_motives)) = selected.single() else { return };
+    // (Chores, skills and work greyed while they're in no state for them: `stress`.)
+    let front_exit = queues_q.get(actor).ok().and_then(|q| q.0.front()).is_some_and(|a| crate::stress::exit_of(&a.kind, &objects).is_some());
+    let mood = mood_q.get(actor).map_or(0.0, |m| m.0);
+    let why_not = |e| crate::stress::why_not(layout_ui.as_deref(), actor_sim, actor_motives, mood, queues_q.get(actor).ok(), front_exit, e);
 
     let is_target = |e: Entity| sims.contains(e) || objects.contains(e) || pets_q.contains(e);
     let filter = |e: Entity| ancestor_with(e, &parents, is_target).is_some();
@@ -1255,7 +1311,9 @@ fn world_click(
                     options.push(("Wake Up".to_string(), ActionKind::WakeUp { target: actor }));
                 }
                 if crate::jog::can_jog(sim) && on_lot.get(actor).is_err() {
-                    options.push(("Go Jogging".to_string(), ActionKind::Jog { home: Vec2::ZERO }));
+                    let jog = ActionKind::Jog { home: Vec2::ZERO };
+                    let kind = crate::stress::exit_of(&jog, &objects).and_then(why_not).map_or(jog, ActionKind::Greyed);
+                    options.push(("Go Jogging".to_string(), kind));
                 }
                 // (In labour: off to the hospital to have the baby, as the game's "Go to Hospital".)
                 if labour_q.contains(actor)
@@ -1426,6 +1484,7 @@ fn world_click(
                 if grown {
                     options.push((crate::interact::repair_of(obj.kind).0.to_string(), ActionKind::Repair { target: t }));
                 }
+                grey_stressed(&mut options, &mut [], &objects, why_not);
                 open_object_pie(&mut commands, &mut pie, cursor, &format!("{} (broken)", obj.name), actor, options);
                 return;
             }
@@ -2103,7 +2162,8 @@ fn world_click(
                     };
                     let time = (opp_q.2.hour_f(), opp_q.2.weekday());
                     let stock = (inv_q.get(actor).ok(), fridge_stock.stock());
-                    food_menus(&mut pie, &mut options, &ui.data, actor_sim, skills.level("Cooking"), known, time, stove, (fridge, microwave), stock);
+                    let funds = opp_q.4.as_ref().map(|h| h.funds);
+                    food_menus(&mut pie, &mut options, &ui.data, actor_sim, skills.level("Cooking"), known, time, stove, (fridge, microwave), stock, (layout_ui.as_deref(), funds));
                     continue;
                 }
                 if d.special == Special::WriteNovel {
@@ -2249,6 +2309,7 @@ fn world_click(
                     pie.submenus.push(("Upgrade".to_string(), list));
                 }
             }
+            grey_stressed(&mut options, &mut pie.submenus, &objects, why_not);
             open_object_pie(&mut commands, &mut pie, cursor, &obj.name, actor, options);
         }
     } else if actor_sim.age == crate::sim::Age::Baby {
@@ -2430,6 +2491,9 @@ fn pie_buttons(
     }
     let Some(idx) = chosen else { return };
     let Some((mut label, kind)) = pie.options.get(idx).cloned() else { return };
+    if matches!(kind, ActionKind::Greyed(_)) {
+        return;
+    }
     let actor = pie.actor;
     let title = std::mem::take(&mut pie.title);
     let parent = (pie.at, title.clone(), pie.options.clone());
@@ -3555,6 +3619,7 @@ fn phone_button(
         Query<(), (With<HouseholdMember>, With<crate::visit::OnLot>)>,
     ),
     world: Res<CurrentWorld>,
+    ui: Option<Res<crate::layout::UiAssets>>,
 ) {
     if asked.is_some() {
         commands.remove_resource::<OpenPhone>();
@@ -3580,6 +3645,13 @@ fn phone_button(
         // (The game's "Throw Party": its picker up during the call, `partypicker`.)
         ("Throw Party...".to_string(), ActionKind::ThrowParty),
     ];
+    // (Services only from home, greyed elsewhere: the game's `CallForServices`.)
+    if out_q.contains(actor) {
+        let why = ui.as_ref().and_then(|u| u.localize("Gameplay/Objects/Electronics/Phone/CallForServices:ServicesOnlyOnHomeLot")).unwrap_or_else(|| "You can only call for services on your home lot.".into());
+        for o in options.iter_mut().filter(|o| matches!(o.1, ActionKind::CallRepairman | ActionKind::HireMaid(_))) {
+            o.1 = ActionKind::Greyed(why.clone());
+        }
+    }
     // Calling someone they know: for a chat, or to invite them over.
     pie.submenus.clear();
     // (The game's "Real Estate and Travel Services...": the household's real estate, its dialog.)

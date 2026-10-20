@@ -2860,6 +2860,8 @@ pub enum ActionKind {
     Outro { clips: &'static [&'static str], then: Option<&'static str>, secs: f32, stand_at: Option<Vec2>, target: Entity },
     /// Drive home from the community lot.
     GoHomeFromLot,
+    /// An option greyed on a menu, and why (`stress`): never chosen.
+    Greyed(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -3674,7 +3676,7 @@ pub(crate) fn run_actions(
                             commands.entity(me).insert(clip);
                             continue;
                         }
-                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } => None,
+                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) => None,
                         ActionKind::Outro { .. } => {
                             action.phase = Phase::Running(0.0);
                             continue;
@@ -4311,6 +4313,7 @@ pub(crate) fn run_actions(
                             | ActionKind::BuyReward(_)
                             | ActionKind::WakeUp { .. }
                             | ActionKind::InventoryItem(..)
+                            | ActionKind::Greyed(_)
                             | ActionKind::EatHere
                             | ActionKind::EatItem { .. }
                             | ActionKind::Outro { .. }
@@ -6477,6 +6480,10 @@ fn autonomy(
                     continue;
                 }
                 if !d.autonomous || (shared && whole_of(obj.kind, di)) {
+                    continue;
+                }
+                // (Chores, skills and work not while they're in no state for them: `stress`.)
+                if crate::stress::is_stress_exit(d) && (moods.get(me).is_ok_and(|m| m.0 < -50.0) || crate::stress::low_need(motives, &d.per_hour, false).is_some()) {
                     continue;
                 }
                 // (The paper's coupon: the Frugal's to clip, once.)

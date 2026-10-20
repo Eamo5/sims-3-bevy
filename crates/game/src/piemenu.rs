@@ -26,9 +26,14 @@ pub static GAME_PIE: AtomicBool = AtomicBool::new(false);
 /// Most options a menu shows round its middle (`kMaxVisibleItems`).
 pub const MAX_ITEMS: usize = 12;
 
-/// A pie menu to draw: its options' words, and a submenu's name (its middle's way back).
+/// A pie menu to draw: its options' words, a submenu's name (its middle's way back), and why
+/// those greyed can't be done (the game's `MenuItem.Style.Disabled`, its tooltip).
 #[derive(Component)]
-pub struct PieRequest(pub Vec<String>, pub Option<String>);
+pub struct PieRequest(pub Vec<String>, pub Option<String>, pub Vec<Option<String>>);
+
+/// A greyed option: in the game's disabled colour and picture, not lit under the pointer.
+#[derive(Component)]
+pub struct PieGreyed;
 
 /// A submenu's middle: back to the menu it was opened from.
 #[derive(Component)]
@@ -84,6 +89,8 @@ const MIN_WIDTH: f32 = 55.0;
 /// The words' colours (`HUDPieMenuReference`'s Reg and High).
 const REGULAR: u32 = 0xff19_2d87;
 const HIGHLIGHT: u32 = 0xff3c_31bf;
+/// Greyed (`HUDPieMenuReference`'s Dis).
+const DISABLED: u32 = 0xff71_81aa;
 /// About how wide the words are, a character (Sims3Bold9pt, Helvetica Rounded): only till they've
 /// been measured.
 const CHAR_WIDTH: f32 = 6.4;
@@ -223,6 +230,7 @@ fn build_pies(
             }
         }
         for (k, (label, (loc, slot))) in req.0.iter().zip(places(req.0.len())).enumerate() {
+            let greyed = req.2.get(k).cloned().flatten();
             // (What opens more, as the game marks it: "Have Breakfast...".)
             let label = &caption(label);
             let Some(mut b) = ui.find("HUDPieMenu", ITEM + slot).cloned() else { continue };
@@ -240,12 +248,18 @@ fn build_pies(
             b.area = [p.x, p.y, p.x + width, p.y + (y2 - y1)];
             room = room.union(Rect::new(b.area[0], b.area[1], b.area[2], b.area[3]));
             b.cls = "Button".to_string();
-            b.flags |= s3bake::ui::WIN_VISIBLE | s3bake::ui::WIN_ENABLED;
+            // (Greyed: its disabled picture, as the game's `SetupImages` has it.)
+            b.flags |= s3bake::ui::WIN_VISIBLE;
+            if greyed.is_none() {
+                b.flags |= s3bake::ui::WIN_ENABLED;
+            } else {
+                b.flags &= !s3bake::ui::WIN_ENABLED;
+            }
             for c in &mut b.children {
                 match c.id {
                     ITEM_TEXT => {
                         c.caption = label.clone();
-                        c.colors = vec![REGULAR];
+                        c.colors = vec![if greyed.is_some() { DISABLED } else { REGULAR }];
                         // (Wide enough for the words, wherever they're anchored.)
                         if words > TEXT_WIDTH {
                             let grow = words - TEXT_WIDTH;
@@ -269,7 +283,9 @@ fn build_pies(
             let s = ui.spawn_under(&mut commands, &mut images, &mut fonts, &b, root);
             if let Some(r) = s.root {
                 commands.entity(r).insert((crate::hud::PieOption(k), crate::hud::BlocksWorld));
-                if let Some(t) = s.text(ITEM_TEXT) {
+                if let Some(why) = &greyed {
+                    commands.entity(r).insert((PieGreyed, crate::icons::Tooltip(why.clone())));
+                } else if let Some(t) = s.text(ITEM_TEXT) {
                     commands.entity(r).insert(PieText(t));
                 }
             }
@@ -319,7 +335,7 @@ fn mask_hover(
     mask: Query<&Interaction, With<PieMask>>,
     pie: Res<crate::hud::PieMenu>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    mut options: Query<(&crate::hud::PieOption, &Interaction, Option<&PieText>, Option<&crate::layout::UiButton>, Option<&mut BackgroundColor>), Without<PieMask>>,
+    mut options: Query<(&crate::hud::PieOption, &Interaction, Option<&PieText>, Option<&crate::layout::UiButton>, Option<&mut BackgroundColor>), (Without<PieMask>, Without<PieGreyed>)>,
     mut colors: Query<&mut TextColor>,
     mut pics: Query<&mut ImageNode>,
     mut last: Local<Option<usize>>,
