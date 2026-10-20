@@ -1279,6 +1279,10 @@ fn resume_saved_lot(
         *done = false;
         return;
     };
+    // (Another game to load, straight after one: from live play, the chooser never saw it go.)
+    if p.is_added() {
+        *done = false;
+    }
     if *done {
         return;
     }

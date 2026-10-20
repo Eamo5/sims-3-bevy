@@ -61,7 +61,10 @@ const CHANGE_TYPE: u32 = 0x36fc_9709;
 const SWITCH_TO: u32 = 0x36fc_970f;
 /// The panel's other buttons (split, edit, merge, save, export, delete, hide, lock, place move,
 /// build/buy, copy to clipboard, houseboats): not here.
-const NOT_HERE: [u32; 12] = [0x36fc_9703, 0x36fc_9704, 0x36fc_9706, 0x36fc_9707, 0x36fc_970c, 0x36fc_9708, 0x36fc_970e, 0x36fc_970a, 0x36fc_9705, 0x36fc_9711, 0x36fc_970d, 0x36fc_970b];
+const NOT_HERE: [u32; 10] = [0x36fc_9704, 0x36fc_9707, 0x36fc_970c, 0x36fc_9708, 0x36fc_970e, 0x36fc_970a, 0x36fc_9705, 0x36fc_9711, 0x36fc_970d, 0x36fc_970b];
+/// Split the household being played, merge one played before into it (`movedialog`).
+const SPLIT: u32 = 0x36fc_9703;
+const MERGE: u32 = 0x36fc_9706;
 const HOUSEHOLD_PANEL: u32 = 0x36fc_9720;
 const HOUSEHOLD_METER: u32 = 0x36fc_9721;
 const HOUSEHOLD_FUNDS: u32 = 0x36fc_9722;
@@ -364,6 +367,16 @@ fn edit_town_ui(
             && let Some(f @ (Focus::Bin(_) | Focus::House(_))) = focus
         {
             g.tool = Tool::Place(f);
+        } else if pressed(info, SPLIT) {
+            commands.insert_resource(crate::movedialog::OpenMove(crate::movedialog::MoveKind::Split));
+        } else if pressed(info, MERGE)
+            && let Some(i) = match (focus, occupant) {
+                (_, Some(Occupant::Played(i))) => Some(i),
+                (Some(Focus::Bin(Binned::Played(i))), _) => Some(i),
+                _ => None,
+            }
+        {
+            commands.insert_resource(crate::movedialog::OpenMove(crate::movedialog::MoveKind::Merge(i)));
         }
     }
     // A dialog up: confirmed, or not.
@@ -491,10 +504,12 @@ fn edit_town_ui(
         let rabbit_hole = lot.is_some_and(|l| world.data.buildings.get(&l).is_some_and(|b| b.objects.iter().any(|o| o.script.contains("RabbitHole"))));
         let penthouse = lot.is_some_and(|l| world.data.buildings.get(&l).is_some_and(|b| b.is_penthouse()));
         let buttons_shown: Vec<u32> = match (f, hh.as_ref().map(|h| h.0)) {
-            (Focus::Lot(_), Some(Occupant::Active)) => vec![],
+            (Focus::Lot(_), Some(Occupant::Active)) => vec![SPLIT],
+            (Focus::Lot(_), Some(Occupant::Played(_))) => vec![EVICT, MERGE, SWITCH_TO],
             (Focus::Lot(_), Some(_)) => vec![EVICT, SWITCH_TO],
             (Focus::Lot(_), None) if penthouse => vec![],
             (Focus::Lot(_), None) => vec![CHANGE_TYPE],
+            (Focus::Bin(Binned::Played(_)), _) => vec![PLACE_COPY, MERGE],
             (Focus::Bin(_) | Focus::House(_), _) => vec![PLACE_COPY],
         };
         g.info = info_panel(&mut commands, &mut ui, &mut images, &mut fonts, &world.data, &data, &story, hh.as_ref().map(|h| &h.1), lot, &buttons_shown);
@@ -507,7 +522,7 @@ fn edit_town_ui(
                     }
                 });
             }
-            for (id, tip) in [(EVICT, "Evict"), (SWITCH_TO, "Switch To This Household"), (PLACE_COPY, "Place"), (INFO_CLOSE, "Close")] {
+            for (id, tip) in [(EVICT, "Evict"), (SWITCH_TO, "Switch To This Household"), (PLACE_COPY, "Place"), (INFO_CLOSE, "Close"), (SPLIT, "Split Household"), (MERGE, "Merge With the Household Being Played")] {
                 if let Some(e) = info.id(id) {
                     commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
                 }
@@ -819,7 +834,7 @@ fn info_panel(
     set_shown(&mut w, HOUSEHOLD_METER, false);
     blank_caption(&mut w, "Difficulty:");
     // The buttons.
-    for id in NOT_HERE.into_iter().chain([PLACE_COPY, EVICT, CHANGE_TYPE, SWITCH_TO]) {
+    for id in NOT_HERE.into_iter().chain([PLACE_COPY, EVICT, CHANGE_TYPE, SWITCH_TO, SPLIT, MERGE]) {
         set_shown(&mut w, id, buttons_shown.contains(&id));
     }
     if buttons_shown.contains(&PLACE_COPY) {
