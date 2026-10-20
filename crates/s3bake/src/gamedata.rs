@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 154;
+pub const GAMEDATA_VERSION: u32 = 155;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -137,6 +137,19 @@ pub struct CompositionInfo {
     pub name: String,
     pub clip: String,
     pub master: bool,
+}
+
+/// One of the game's Lessons (its tutorialettes, the `Tutorial` table): its `Lessons` name, its
+/// title, what the lightbulb says when it comes up, and its pages (each a text and a picture's
+/// name, among the interface icons); whether it comes up regardless of the last one's
+/// (`IgnoreGlobalCooldown`).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct LessonInfo {
+    pub key: String,
+    pub name: String,
+    pub tns: String,
+    pub pages: Vec<(String, String)>,
+    pub ignore_cooldown: bool,
 }
 
 /// A book to read for its own sake (`Books`' `BookGeneral` rows): a novel, a biography, a
@@ -1407,6 +1420,9 @@ pub struct GameDataBaked {
     /// The books read for their own sake (`Books`' `BookGeneral` rows).
     #[serde(default)]
     pub novels: Vec<NovelInfo>,
+    /// The base game's Lessons.
+    #[serde(default)]
+    pub lessons: Vec<LessonInfo>,
     pub recipes: Vec<RecipeInfo>,
     /// The Seasons tuning (`Seasons` table and SeasonsManager's managers).
     pub seasons: SeasonsTuning,
@@ -4269,9 +4285,41 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         }
     }
 
+    // The Lessons: each row with a key begins one, and every row adds a page; the base game's
+    // (no pack named).
+    if let Some(x) = xml("Tutorial") {
+        let text = |k: &str| strings.get(&s3pkg::fnv64(&format!("Gameplay/Excel/Tutorial/Tutorialettes:{k}").to_ascii_lowercase())).cloned().unwrap_or_default();
+        let mut base = false;
+        for f in records(&x, "Tutorialettes") {
+            let ep = f.get("EPValid").map(String::as_str).unwrap_or("");
+            let here = ep.is_empty() || ep.eq_ignore_ascii_case("BaseGame");
+            if let Some(key) = f.get("LessonKey").filter(|k| !k.is_empty()) {
+                base = here;
+                if base {
+                    out.lessons.push(LessonInfo {
+                        key: key.clone(),
+                        name: text(&get(&f, "LessonName")),
+                        tns: f.get("TnsKey").filter(|k| !k.is_empty()).map(|k| text(k)).unwrap_or_default(),
+                        pages: Vec::new(),
+                        ignore_cooldown: get(&f, "IgnoreGlobalCooldown").eq_ignore_ascii_case("true"),
+                    });
+                }
+            }
+            if base
+                && here
+                && let (Some(l), Some(page)) = (out.lessons.last_mut(), f.get("PageText").filter(|p| !p.is_empty()))
+            {
+                l.pages.push((text(page), get(&f, "PageImage")));
+            }
+        }
+        out.lessons.retain(|l| !l.name.is_empty() && !l.pages.is_empty());
+    }
+
     // Icons: everything these tables name, plus interface pieces used directly.
     progress("Converting: interface icons…");
     let mut wanted: BTreeSet<String> = BTreeSet::new();
+    // (The Lessons' pictures.)
+    wanted.extend(out.lessons.iter().flat_map(|l| l.pages.iter().map(|p| p.1.clone())));
     // (The fairies' wings, as the Supernatural pack's Create a Sim pictures them.)
     wanted.extend((1..=12).map(|i| format!("FairyWings{i:02}")));
     for b in &out.buffs {

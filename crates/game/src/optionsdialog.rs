@@ -61,7 +61,10 @@ const TWELVE_HOUR: u32 = 0xa83f_6253;
 const INVERT_H: u32 = 0xa83f_625f;
 const INVERT_V: u32 = 0xa83f_6260;
 const GENERAL_DEFAULTS: u32 = 0xa83f_6259;
-const GENERAL_HIDDEN: [u32; 10] = [0xa83f_6254, 0xa83f_6252, 0x0b30_3980, 0xa83f_6263, 0xa83f_6261, 0xa83f_6258, 0xa83f_6264, 0xa83f_6265, 0x0fdc_2830, 0x0b34_5260];
+/// "Enable Lessons", and "Reset Lessons" (all of them: not the packs' picked out).
+const LESSONS: u32 = 0xa83f_6258;
+const RESET_LESSONS: u32 = 0xa83f_6261;
+const GENERAL_HIDDEN: [u32; 8] = [0xa83f_6254, 0xa83f_6252, 0x0b30_3980, 0xa83f_6263, 0xa83f_6264, 0xa83f_6265, 0x0fdc_2830, 0x0b34_5260];
 const OKAY: u32 = 0xa83f_6208;
 const CANCEL: u32 = 0xa83f_6209;
 const TAB_STEP: f32 = 54.0;
@@ -294,6 +297,7 @@ fn dialog_controls(
         (on_page(GENERAL_PAGE, TWELVE_HOUR), &mut w.twelve_hour),
         (on_page(GENERAL_PAGE, INVERT_H), &mut w.invert_h),
         (on_page(GENERAL_PAGE, INVERT_V), &mut w.invert_v),
+        (on_page(GENERAL_PAGE, LESSONS), &mut w.lessons),
         (on_page(GAME_PAGE, NO_SELECTED_AUTONOMY), &mut w.no_selected_autonomy),
         (on_page(GAME_PAGE, SUPPRESS_OPPORTUNITIES), &mut w.suppress_opportunities),
         (d.story_box, &mut w.story_progression),
@@ -316,8 +320,11 @@ fn dialog_controls(
         d.synced = false;
     }
     if pressed(&clicks, d.s.id(GENERAL_DEFAULTS)) {
-        (w.edge_scroll, w.twelve_hour, w.invert_h, w.invert_v) = (defaults.edge_scroll, defaults.twelve_hour, defaults.invert_h, defaults.invert_v);
+        (w.edge_scroll, w.twelve_hour, w.invert_h, w.invert_v, w.lessons) = (defaults.edge_scroll, defaults.twelve_hour, defaults.invert_h, defaults.invert_v, defaults.lessons);
         d.shown = None;
+    }
+    if pressed(&clicks, on_page(GENERAL_PAGE, RESET_LESSONS)) {
+        w.lessons_seen.clear();
     }
     if pressed(&clicks, d.s.id(GRAPHICS_DEFAULTS)) {
         w.shadows = defaults.shadows;
@@ -444,6 +451,7 @@ fn dialog_controls(
     set_page_box(GENERAL_PAGE, TWELVE_HOUR, w.twelve_hour);
     set_page_box(GENERAL_PAGE, INVERT_H, w.invert_h);
     set_page_box(GENERAL_PAGE, INVERT_V, w.invert_v);
+    set_page_box(GENERAL_PAGE, LESSONS, w.lessons);
     set_page_box(GAME_PAGE, NO_SELECTED_AUTONOMY, w.no_selected_autonomy);
     set_page_box(GAME_PAGE, SUPPRESS_OPPORTUNITIES, w.suppress_opportunities);
     if let Some(mut b) = d.story_box.and_then(|e| buttons.get_mut(e).ok())

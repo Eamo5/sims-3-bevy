@@ -37,6 +37,8 @@ enum Item {
     Save,
     SaveAs,
     EditTown,
+    /// The Lessons dialog (`lessons`).
+    Lessons,
     Options,
     MainMenu,
     SaveAndQuit,
@@ -74,7 +76,7 @@ fn open_menu(
     if slot.is_some_and(|s| s.0.is_some()) {
         items.push(Item::SaveAs);
     }
-    items.extend([Item::EditTown, Item::Options, Item::MainMenu, Item::SaveAndQuit, Item::Quit]);
+    items.extend([Item::EditTown, Item::Lessons, Item::Options, Item::MainMenu, Item::SaveAndQuit, Item::Quit]);
     let word = |key: &str, plain: &str| ui.localize(key).unwrap_or_else(|| plain.to_string());
     let labels: Vec<String> = items
         .iter()
@@ -82,6 +84,7 @@ fn open_menu(
             Item::Save => word("Ui/Caption/Options:Save", "Save"),
             Item::SaveAs => word("Ui/Caption/Options:SaveAs", "Save As"),
             Item::EditTown => word("Ui/Caption/Options:EditTown", "Edit Town"),
+            Item::Lessons => word("Ui/Caption/MainMenu:Tutorials", "Lessons"),
             Item::Options => word("Ui/Caption/Options:Options", "Options"),
             Item::MainMenu => word("Ui/Caption/Options:QuitToMenu", "Quit to Main Menu"),
             Item::SaveAndQuit => word("Ui/Caption/Options:QuitToWindowsAndSave", "Save and Quit"),
@@ -127,6 +130,7 @@ fn choose(
             Some(Item::EditTown) => commands.queue(|w: &mut World| {
                 w.write_message(crate::edittown::OpenEditTown);
             }),
+            Some(Item::Lessons) => commands.insert_resource(crate::lessons::OpenLessons(None)),
             Some(Item::Options) => crate::options::open_options(&mut commands, &mut options, &settings),
             Some(Item::MainMenu) => next.set(crate::AppState::MainMenu),
             Some(Item::SaveAndQuit) => {

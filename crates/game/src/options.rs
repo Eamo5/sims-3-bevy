@@ -152,6 +152,9 @@ pub struct Settings {
     pub suppress_opportunities: bool,
     /// The town's lives move on: pairing off, marrying, babies, jobs (`EnableStoryProgression`).
     pub story_progression: bool,
+    /// Lessons' notes come up (the game's `EnableTutorial`, "Enable Lessons"), and those seen.
+    pub lessons: bool,
+    pub lessons_seen: Vec<String>,
 }
 
 impl Default for Settings {
@@ -175,6 +178,8 @@ impl Default for Settings {
             no_selected_autonomy: false,
             suppress_opportunities: false,
             story_progression: true,
+            lessons: true,
+            lessons_seen: Vec::new(),
         }
     }
 }
