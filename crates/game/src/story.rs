@@ -1,6 +1,7 @@
 //! Story progression: the rest of the town lives on while the household plays. Once a day the
 //! world's other Sims grow older (the oldest passing away in time), single grown-ups pair off
-//! and couples marry, married couples have babies, and grown-ups find jobs and are promoted.
+//! and couples marry, married couples have babies, grown-ups find jobs and are promoted, and
+//! families move house, in and out of houses and away (`storymoves`).
 //! The household hears about it when it's someone they know, and the morning paper carries
 //! the town's news. What has changed is kept in saves and applied to the town's Sims as the
 //! world loads.
@@ -52,6 +53,9 @@ pub struct TownStory {
     /// venue they are (one of `COMMUNITY_TYPES`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub lot_types: BTreeMap<u64, Option<String>>,
+    /// Families moved out of their houses to live about town (by household id: not in the bin).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub townies: std::collections::BTreeSet<u64>,
 }
 
 /// The kinds of community lot a lot can be made in Edit Town (as the game's Change Lot Type):
@@ -94,6 +98,9 @@ pub struct TownSim {
     /// Days into it.
     pub days: f32,
     pub dead: bool,
+    /// Moved away from town with their family.
+    #[serde(default)]
+    pub gone: bool,
     pub partner: Option<u64>,
     pub spouse: Option<u64>,
     /// Career and level.
@@ -114,7 +121,7 @@ impl TownStory {
     /// Whether a town family has been evicted to the household bin. (The world's households
     /// with no home are its townies, out and about: not in the bin.)
     pub fn evicted(&self, h: &s3bake::HouseholdBaked) -> bool {
-        self.homes.get(&h.id) == Some(&None)
+        self.homes.get(&h.id) == Some(&None) && !self.townies.contains(&h.id)
     }
 
     /// Where a town family lives now (the lot's id; none: no home, a townie or evicted).
@@ -129,7 +136,7 @@ impl TownStory {
     /// passed away.
     pub fn apply(&self, mut s: Sim) -> Option<Sim> {
         match self.sims.get(&s.id) {
-            Some(t) if t.dead => None,
+            Some(t) if t.dead || t.gone => None,
             Some(t) => {
                 if let Some(a) = &t.age {
                     s.age = crate::save::age_from_name(a);
@@ -148,7 +155,9 @@ impl TownStory {
     }
 }
 
-/// The daily chances of things happening.
+/// The daily chances of things happening (a family's move: about one every other day or so, as
+/// the game's moves' cooldowns of a day or two allow).
+const MOVE_CHANCE: f64 = 0.4;
 const PAIR_OFF: f64 = 0.008;
 const MARRY: f64 = 0.04;
 const BABY: f64 = 0.015;
@@ -180,8 +189,14 @@ fn progress(
     mut spawned: Query<(Entity, &mut Sim, &Visibility), Without<HouseholdMember>>,
     mut notes: ResMut<Notifications>,
     dormant: Res<crate::household::Dormant>,
+    (world_info, household): (Option<Res<crate::loading::CurrentWorld>>, Option<Res<crate::interact::Household>>),
 ) {
     let Some(town) = town else { return };
+    // (Not till the household's here: a save's days caught up on as it comes in would take them
+    // for one of the town's families.)
+    if members.is_empty() {
+        return;
+    }
     let today = clock.day();
     if story.day == 0 {
         story.day = today.max(1);
@@ -368,6 +383,85 @@ fn progress(
             }
         }
     }
+    // Families move house (the game's demographics: about half the houses lived in).
+    let mut moved_away: Vec<u64> = Vec::new();
+    if settings.story_progression
+        && let Some(w) = world_info.as_deref()
+    {
+        for _ in 0..days {
+            if !rng.random_bool(MOVE_CHANCE) {
+                continue;
+            }
+            let active = household.as_deref().map(|h| h.lot_index);
+            let occupied = crate::edittown::occupants(&w.data, Some(&town.0), &story, &dormant.0, active);
+            let lots = &w.data.lots;
+            // (Every residential lot, as the game counts them, built on or not.)
+            let houses: Vec<crate::storymoves::House> = (0..lots.len())
+                .filter(|&i| lots[i].is_residential())
+                .map(|i| {
+                    let b = w.data.buildings.get(&i);
+                    crate::storymoves::House { lot: i, lived_in: occupied.contains_key(&i), furnished: b.is_some_and(|b| b.is_furnished()), beds: b.map_or(0, crate::storymoves::beds) }
+                })
+                .collect();
+            // (Not the household's own, nor those played before, nor the world's ghosts.)
+            let families: Vec<crate::storymoves::Family> = town
+                .0
+                .households
+                .iter()
+                .filter(|h| Some(h.id) != playing && crate::edittown::town_family(h, &story) && !h.members.iter().any(|m| household_ids.contains(&m.id)))
+                .map(|h| crate::storymoves::Family {
+                    id: h.id,
+                    home: story.home_of(h).and_then(|id| lots.iter().position(|l| l.id == id)).filter(|_| !story.evicted(h)),
+                    size: h.members.iter().filter(|m| !m.first_name.is_empty() && story.apply(crate::premade::to_sim(m)).is_some()).count(),
+                    known: h.members.iter().any(|m| known.contains(&m.id)),
+                })
+                // (The household bin's are Edit Town's to place; whoever's at the household's home
+                // is the household.)
+                .filter(|f| f.home.is_some() || !story.homes.contains_key(&f.id) || story.townies.contains(&f.id))
+                .filter(|f| f.home.is_none() || f.home != active)
+                .collect();
+            debug!("story moves: {} of {} houses lived in, {} furnished empty, {} families", houses.iter().filter(|h| h.lived_in).count(), houses.len(), houses.iter().filter(|h| !h.lived_in && h.furnished).count(), families.len());
+            let Some(m) = crate::storymoves::choose(&houses, &families, &mut rng) else { continue };
+            let id = match m {
+                crate::storymoves::Move::In { family, .. } | crate::storymoves::Move::Out { family } | crate::storymoves::Move::Away { family } | crate::storymoves::Move::House { family, .. } => family,
+            };
+            let Some(h) = town.0.households.iter().find(|h| h.id == id) else { continue };
+            let known_family = families.iter().any(|f| f.id == id && f.known);
+            let (news, word) = match m {
+                crate::storymoves::Move::In { lot, .. } => {
+                    story.homes.insert(id, Some(lots[lot].id));
+                    story.townies.remove(&id);
+                    (format!("The {} family is the latest to move into a home in town.", h.name), None)
+                }
+                crate::storymoves::Move::Out { .. } => {
+                    story.homes.insert(id, None);
+                    story.townies.insert(id);
+                    (format!("The {} household has moved out of their house.", h.name), None)
+                }
+                crate::storymoves::Move::Away { .. } => {
+                    story.homes.insert(id, None);
+                    story.townies.remove(&id);
+                    for m in &h.members {
+                        story.sims.entry(m.id).or_default().gone = true;
+                        moved_away.push(m.id);
+                    }
+                    (
+                        format!("The {} household recently moved away from town.", h.name),
+                        Some(format!("The {} family has decided to move to another town. Hopefully you didn't loan them any books or money!", h.name)),
+                    )
+                }
+                crate::storymoves::Move::House { lot, bigger, .. } => {
+                    story.homes.insert(id, Some(lots[lot].id));
+                    (format!("The {} family moved to a {} house.", h.name, if bigger { "bigger" } else { "smaller" }), None)
+                }
+            };
+            info!("story progression: {news} (household {id})");
+            if known_family {
+                notes.push(word.unwrap_or_else(|| news.clone()));
+            }
+            story.tell(news);
+        }
+    }
     // Those the household knows: a word; and they look their age if they're about.
     let fresh: Vec<String> = story.news.iter().rev().take(12).cloned().collect();
     for n in fresh.iter().rev() {
@@ -381,7 +475,7 @@ fn progress(
             commands.entity(e).insert(crate::aging::NeedsNewBody);
         }
         // (Out of sight, they're gone.)
-        if died.contains(&s.id) && *vis == Visibility::Hidden {
+        if (died.contains(&s.id) || moved_away.contains(&s.id)) && *vis == Visibility::Hidden {
             commands.entity(e).try_despawn();
         }
     }

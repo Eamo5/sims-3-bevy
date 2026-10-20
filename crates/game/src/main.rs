@@ -54,6 +54,7 @@ mod crowding;
 mod frontdoor;
 mod guests;
 mod repoman;
+mod storymoves;
 mod loading;
 mod layout;
 mod livehud;
