@@ -11,6 +11,15 @@
 //! hour (`kPassOutMinutes`) at the sight of a ghost, a burglar or the Grim Reaper, or a fire one
 //! time in five (TraitTuning's `kCowardTraitChanceToFaintWhenSeeingFire`; the rest of the time
 //! they panic with everyone else).
+//!
+//! From the ground's menu: a Genius's "Contemplate Surroundings" (`Terrain.Contemplate`: with
+//! something of worth within three tiles, `kGeniusTraitContemplateDistance`; over to where was
+//! clicked, turned to one of those things at random, thinking of it, eight minutes of the game's
+//! `Contemplate` clips, `kGeniusTraitContemplateLengthInMinutes`, then Fascinated; not while
+//! Fascinated still); and a Neat Sim's "Clean House" at home (`NeatTraitCleanHouse`, indoors,
+//! with something to clean: the nearest dirty dishes, unmade bed, puddle or grimy fixture seen
+//! to, then the next, the "Clean House" after each in the queue, till there's nothing left or
+//! they're in no state to go on).
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -26,8 +35,67 @@ pub struct TraitActsPlugin;
 
 impl Plugin for TraitActsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (began.after(crate::interact::run_actions), act_test, frights, faint_now.before(crate::interact::run_actions)).run_if(in_state(PlayMode::Live)));
+        app.init_resource::<Mess>()
+            .add_systems(Update, (began.after(crate::interact::run_actions), act_test, frights, faint_now.before(crate::interact::run_actions), mess, contemplate_test).run_if(in_state(PlayMode::Live)));
     }
+}
+
+/// The Genius's contemplation: its name, how near what's contemplated must be (metres: tiles)
+/// and how long it lasts.
+pub const CONTEMPLATE: &str = "Contemplate Surroundings";
+pub const CONTEMPLATE_DISTANCE: f32 = 3.0;
+pub const CONTEMPLATE_MINUTES: f32 = 8.0;
+/// The game's `Contemplate` state machine's clips.
+pub const CONTEMPLATE_CLIPS: &[&str] = &["a_trait_genius_x", "a_trait_genius2_x"];
+
+/// Whether a Genius may contemplate their surroundings, standing at `at`: not Fascinated still,
+/// not swimming, and something of worth (what could be repossessed: priced) within reach.
+pub fn may_contemplate(sim: &Sim, moodlets: Option<&Moodlets>, swimming: bool, at: Vec3, things: impl IntoIterator<Item = (Vec3, i32)>) -> bool {
+    sim.traits.contains(&Trait::Genius)
+        && !sim.age.is_little()
+        && !swimming
+        && !moodlets.is_some_and(|m| m.has(MoodletKind::Fascinated))
+        && things.into_iter().any(|(p, price)| price > 0 && p.distance(at) <= CONTEMPLATE_DISTANCE)
+}
+
+/// What's contemplated: one of the things of worth about them, at random.
+pub fn contemplated<T: Copy>(at: Vec3, things: impl IntoIterator<Item = (Vec3, i32, T)>, rng: &mut impl Rng) -> Option<(Vec3, T)> {
+    let near: Vec<(Vec3, T)> = things.into_iter().filter(|(p, price, _)| *price > 0 && p.distance(at) <= CONTEMPLATE_DISTANCE).map(|(p, _, t)| (p, t)).collect();
+    near.choose(rng).copied()
+}
+
+/// A Neat Sim cleaning house: their next chore's to be found (`autonomy`, the nearest thing to
+/// clean, with "Clean House" again after it).
+#[derive(Component)]
+pub struct CleaningHouse;
+
+/// The Neat's "Clean House".
+pub const CLEAN_HOUSE: &str = "Clean House";
+
+/// Whether there's something to clean at home (`Lot.FindObjectToClean`, `HasUnmadeBed`,
+/// `HasCleanAllAblePuddlesOrBurntTiles`): dirty dishes, an unmade bed, a puddle, a grimy fixture.
+#[derive(Resource, Default)]
+pub struct Mess(pub bool);
+
+#[allow(clippy::type_complexity)]
+fn mess(mut m: ResMut<Mess>, objects: Query<(&crate::interact::GameObject, Has<crate::interact::Unmade>, Option<&crate::grime::Grime>), Without<crate::visit::LotObject>>) {
+    use crate::interact::ObjectKind as K;
+    let any = objects.iter().any(|(o, unmade, grime)| matches!(o.kind, K::DirtyDishes | K::Puddle) || unmade || grime.is_some_and(|g| g.needs_cleaning()));
+    if m.0 != any {
+        m.0 = any;
+    }
+}
+
+/// Whether Clean House is on the ground's menu: a Neat Sim (asked, not of their own accord), at
+/// home, indoors, with something to clean.
+pub fn may_clean_house(sim: &Sim, at_home: bool, indoors: bool, mess: &Mess) -> bool {
+    sim.traits.contains(&Trait::Neat) && !sim.age.is_little() && at_home && indoors && mess.0
+}
+
+/// The chores Clean House sees to.
+pub fn cleans(special: crate::interact::Special) -> bool {
+    use crate::interact::Special as S;
+    matches!(special, S::CleanUp | S::Scrub | S::MopUp | S::MakeBed)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -38,6 +106,8 @@ pub enum TraitAct {
     Tada,
     /// A Coward's faint (not on anyone's menu).
     Faint,
+    /// A Neat Sim's Clean House (the ground's menu): the next chore found.
+    CleanHouse,
 }
 
 /// `TalkToSelf.kInteractionLength`.
@@ -71,6 +141,7 @@ impl TraitAct {
             TraitAct::FakePassOut => "Fake Passing Out",
             TraitAct::Tada => "TaDa!",
             TraitAct::Faint => "Faint",
+            TraitAct::CleanHouse => CLEAN_HOUSE,
         }
     }
 
@@ -81,6 +152,7 @@ impl TraitAct {
             TraitAct::FakePassOut => Trait::Dramatic,
             TraitAct::Tada => Trait::NaturalBornPerformer,
             TraitAct::Faint => Trait::Coward,
+            TraitAct::CleanHouse => Trait::Neat,
         }
     }
 
@@ -101,7 +173,7 @@ impl TraitAct {
             && match self {
                 TraitAct::FreakOut => sim.age != crate::sim::Age::Child && !has(MoodletKind::Tranquil),
                 TraitAct::Tada => sim.age != crate::sim::Age::Child && !has(MoodletKind::BornToDoThis),
-                TraitAct::Faint => false,
+                TraitAct::Faint | TraitAct::CleanHouse => false,
                 _ => true,
             }
     }
@@ -114,6 +186,7 @@ impl TraitAct {
             TraitAct::FakePassOut => rng.random_range(FAKE_PASS_OUT) + GET_UP_MINUTES,
             TraitAct::Tada => 3.0,
             TraitAct::Faint => FAINT_MINUTES + GET_UP_MINUTES,
+            TraitAct::CleanHouse => 0.0,
         }
     }
 
@@ -126,6 +199,7 @@ impl TraitAct {
             TraitAct::Tada => (Pose::Use, ActionClip::new(Some("a_trait_naturalBornPerformer_x"), &[])),
             // (The `TraitCoward` state machine's pass out, then asleep on the floor.)
             TraitAct::Faint => (Pose::Use, ActionClip::new(Some(if child { "c_trait_coward3_x" } else { "a_trait_coward2_x" }), &["a_sleeponFloor_breathe_x"])),
+            TraitAct::CleanHouse => (Pose::Stand, ActionClip::new(None, &["a_idle_neutral_loop_"])),
         }
     }
 
@@ -267,6 +341,9 @@ fn began(
                     m.add_valued(MoodletKind::BornToDoThis, now, MoodletKind::BornToDoThis.def().value, BORN_TO_DO_THIS_MINUTES * witnesses.len() as f64);
                 }
             }
+            TraitAct::CleanHouse => {
+                commands.entity(me).insert(CleaningHouse);
+            }
             _ => {}
         }
     }
@@ -290,9 +367,69 @@ fn act_test(mut done: Local<bool>, time: Res<Time>, mut sel: Query<(&mut Sim, &m
     *done = true;
 }
 
+/// CLEAN_HOUSE=1 or CONTEMPLATE=1 (tests): the selected Sim, given the trait for it, asked a few
+/// seconds in to clean house (some mess made first: their bed unmade) or to contemplate where
+/// they stand.
+#[allow(clippy::type_complexity)]
+fn contemplate_test(
+    mut commands: Commands,
+    mut done: Local<bool>,
+    time: Res<Time>,
+    mut sel: Query<(&mut Sim, &mut ActionQueue, &Transform, &crate::nav::Floor), With<crate::sim::Selected>>,
+    beds: Query<(Entity, &crate::interact::GameObject), Without<crate::visit::LotObject>>,
+) {
+    let (clean, think) = (std::env::var_os("CLEAN_HOUSE").is_some(), std::env::var_os("CONTEMPLATE").is_some());
+    if *done || !(clean || think) || time.elapsed_secs() < 12.0 {
+        return;
+    }
+    let Ok((mut sim, mut q, tf, floor)) = sel.single_mut() else { return };
+    *done = true;
+    let want = if clean { Trait::Neat } else { Trait::Genius };
+    if !sim.traits.contains(&want) {
+        sim.traits.push(want);
+    }
+    q.0.clear();
+    if clean {
+        for (e, o) in &beds {
+            if matches!(o.kind, crate::interact::ObjectKind::BedSingle | crate::interact::ObjectKind::BedDouble) {
+                commands.entity(e).insert(crate::interact::Unmade);
+            }
+        }
+        q.push_player(TraitAct::CleanHouse.action(false));
+    } else {
+        let at = tf.translation.xz();
+        q.push_player(Action::new(CONTEMPLATE, ActionKind::Outdoor { at, level: floor.0, what: crate::seasonal::Outdoor::Contemplate }, false));
+    }
+    info!("trait test: {} asked to {}", sim.first, if clean { CLEAN_HOUSE } else { CONTEMPLATE });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_genius_contemplates_what_is_near_and_of_worth() {
+        let mut rng = rand::rng();
+        let mut sim = crate::sim::random_sim(&mut rng, "Test", Some(true), crate::sim::Age::Adult);
+        sim.traits = vec![Trait::Genius];
+        let at = Vec3::ZERO;
+        let things = [(Vec3::new(2.0, 0.0, 0.0), 300, 1), (Vec3::new(9.0, 0.0, 0.0), 900, 2), (Vec3::new(1.0, 0.0, 0.0), 0, 3)];
+        assert!(may_contemplate(&sim, None, false, at, things.iter().map(|t| (t.0, t.1))));
+        assert!(!may_contemplate(&sim, None, true, at, things.iter().map(|t| (t.0, t.1))), "not swimming");
+        let mut rapt = Moodlets::default();
+        rapt.add(MoodletKind::Fascinated, 0.0);
+        assert!(!may_contemplate(&sim, Some(&rapt), false, at, things.iter().map(|t| (t.0, t.1))), "not while Fascinated");
+        assert!(!may_contemplate(&sim, None, false, Vec3::new(20.0, 0.0, 0.0), things.iter().map(|t| (t.0, t.1))), "nothing near");
+        for _ in 0..20 {
+            assert_eq!(contemplated(at, things, &mut rng).map(|c| c.1), Some(1), "only what's near and priced");
+        }
+        sim.traits = vec![Trait::Neat];
+        assert!(!may_contemplate(&sim, None, false, at, things.iter().map(|t| (t.0, t.1))));
+        assert!(may_clean_house(&sim, true, true, &Mess(true)));
+        assert!(!may_clean_house(&sim, true, true, &Mess(false)), "nothing to clean");
+        assert!(!may_clean_house(&sim, false, true, &Mess(true)), "only at home");
+        assert!(!may_clean_house(&sim, true, false, &Mess(true)), "only indoors");
+    }
 
     #[test]
     fn trait_acts_are_theirs_alone_and_not_again_too_soon() {

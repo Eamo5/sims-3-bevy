@@ -1244,7 +1244,7 @@ fn world_click(
         Res<ButtonInput<KeyCode>>,
         Option<Res<PieFor>>,
     ),
-    (building, opp_q, front_doors): (
+    (building, opp_q, front_doors, mess): (
         Option<Res<crate::building::ActiveBuilding>>,
         (
             Option<Res<crate::icons::GameUi>>,
@@ -1258,6 +1258,7 @@ fn world_click(
             Query<(Option<&crate::music::StereoOn>, Has<crate::interact::Unmade>, Option<&crate::grime::Grime>, Option<&crate::music::StereoVolume>)>,
         ),
         (Res<crate::frontdoor::Front>, Res<crate::frontdoor::Doorbell>),
+        Res<crate::traitacts::Mess>,
     ),
     (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, (stay_q, spots_q, swim_q)), company_q): (
         Query<&crate::visit::OnLot>,
@@ -2550,6 +2551,19 @@ fn world_click(
             for what in crate::seasonal::Outdoor::options(&weather, opp_q.2.minutes) {
                 options.push((what.label().to_string(), ActionKind::Outdoor { at: Vec2::new(p.x, p.z), level, what }));
             }
+        }
+        // A Genius with something of worth about them: contemplated (the game's `Contemplate`,
+        // from where they stand).
+        if let Some(from) = from {
+            let things = pickable.iter().filter_map(|(_, gt, _, o, _)| o.map(|o| (gt.translation(), o.price)));
+            if crate::traitacts::may_contemplate(actor_sim, moods_q.get(actor).ok(), swim_q.contains(actor), from, things) {
+                options.push((crate::traitacts::CONTEMPLATE.to_string(), ActionKind::Outdoor { at: Vec2::new(p.x, p.z), level, what: crate::seasonal::Outdoor::Contemplate }));
+            }
+        }
+        // A Neat Sim at home, indoors, with something to clean: Clean House.
+        let indoors = building.as_deref().is_some_and(|b| b.is_indoors(p));
+        if crate::traitacts::may_clean_house(actor_sim, out_at.is_none() && opp_q.4.as_ref().is_some_and(|h| here == Some(h.lot_index)), indoors, &mess) {
+            options.push((crate::traitacts::CLEAN_HOUSE.to_string(), crate::traitacts::TraitAct::CleanHouse.action(false).kind));
         }
         // A Kleptomaniac out on another's lot after dark: something near there pocketed, if no
         // one's in the room to see.

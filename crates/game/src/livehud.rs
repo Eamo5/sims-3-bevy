@@ -1566,7 +1566,7 @@ fn interaction_queue(
                 crate::interact::ActionKind::GoToWork => workers.get(me).ok().map(|(j, _)| QueuePicture::Icon(j.career().icon)),
                 _ => None,
             };
-            (a.label.clone(), pic, i == 0 && progress(a, &objects, motives).is_some())
+            (crate::gamenames::shown(&a.label).into_owned(), pic, i == 0 && progress(a, &objects, motives).is_some())
         })
         .collect();
     // The progress of the action under way, every frame.

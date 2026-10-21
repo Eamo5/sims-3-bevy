@@ -4306,6 +4306,29 @@ pub(crate) fn run_actions(
                                     None => finished = true,
                                 }
                             }
+                            ActionKind::Outdoor { at, what, .. } if *what == crate::seasonal::Outdoor::Contemplate => {
+                                // (Turned to something of worth about them, at random, and thinking
+                                // of it: the game's `Contemplate`.)
+                                let here = tf.translation;
+                                let things = objects.iter().filter(|(_, _, _, of)| of.map_or(1, |f| f.0) == floor.0).map(|(o, otf, _, _)| (o.world_center(otf), o.price, o.objd));
+                                match crate::traitacts::contemplated(here, things, &mut rand::rng()) {
+                                    Some((p, objd)) => {
+                                        let to = p.xz() - here.xz();
+                                        if to.length() > 0.2 {
+                                            tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
+                                        }
+                                        commands.entity(me).insert(crate::balloons::BalloonRequest::thought(&s3bake::gamedata::thumb_name(objd.2)));
+                                        anim.pose = Pose::Use;
+                                        commands.entity(me).insert(what.clip());
+                                    }
+                                    // (Nothing there after all: bored.)
+                                    None => {
+                                        let _ = at;
+                                        commands.entity(me).insert(crate::reactions::Pending::new(&["Bored"], None, clock.minutes + 10.0));
+                                        finished = true;
+                                    }
+                                }
+                            }
                             ActionKind::Outdoor { at, what, .. } => {
                                 // (Facing the snowman being built; facing away, to lie back in the snow.)
                                 let to = *at - Vec2::new(tf.translation.x, tf.translation.z);
@@ -5494,6 +5517,15 @@ pub(crate) fn run_actions(
                             motives.add(FUN, what.fun() * dt / 60.0);
                             if elapsed >= what.minutes() {
                                 finished = true;
+                                // (A contemplation's end: Fascinated, as the game's.)
+                                if *what == crate::seasonal::Outdoor::Contemplate {
+                                    let now = clock.minutes;
+                                    commands.entity(me).queue_silenced(move |mut w: EntityWorldMut| {
+                                        if let Some(mut m) = w.get_mut::<crate::life::Moodlets>() {
+                                            m.add(crate::life::MoodletKind::Fascinated, now);
+                                        }
+                                    });
+                                }
                                 let p = tf.translation;
                                 commands.entity(me).insert(crate::seasonal::OutdoorEvent::Done { what: *what, at: p, facing: tf.rotation, child: sim.age.is_little() || sim.age == Age::Child });
                                 // (Then up out of the snow.)
@@ -6354,7 +6386,7 @@ fn autonomy(
     ),
     (called, repairmen, laundry, privacy): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>, Res<crate::laundry::Laundry>, Res<crate::privacy::Privacy>),
     friends_away: Query<(Entity, &Sim), (With<OffLot>, Without<Invited>)>,
-    (callers, residents, mut solve): (Query<(Entity, &crate::doorbell::AtTheDoor)>, Query<&crate::homes::Resident>, ResMut<crate::livehud::SolveNeed>),
+    (callers, residents, mut solve, (cleaners, mut commands)): (Query<(Entity, &crate::doorbell::AtTheDoor)>, Query<&crate::homes::Resident>, ResMut<crate::livehud::SolveNeed>, (Query<(), With<crate::traitacts::CleaningHouse>>, Commands)),
     (weather, building, chess, music, potties, swipeable, looked): (
         Res<crate::weather::Weather>,
         Option<Res<crate::building::ActiveBuilding>>,
@@ -6418,8 +6450,18 @@ fn autonomy(
         if solving.is_some() {
             solve.0 = None;
         }
+        // (A Neat Sim cleaning house: their next chore, once the last's done (`traitacts`); not if
+        // they've been given something else to do meanwhile.)
+        let cleaning = cleaners.contains(me);
+        if cleaning && !queue.0.is_empty() {
+            // (Its Clean House still finishing: waited for.)
+            if queue.0.iter().any(|a| !matches!(a.kind, ActionKind::TraitAct { act: crate::traitacts::TraitAct::CleanHouse, .. })) {
+                commands.entity(me).remove::<crate::traitacts::CleaningHouse>();
+            }
+            continue;
+        }
         // (Someone else's social partner waits for them to finish.)
-        if solving.is_none() && (timer.0 > 0.0 || !queue.0.is_empty() || sim.age == Age::Baby || partner) {
+        if solving.is_none() && !cleaning && (timer.0 > 0.0 || !queue.0.is_empty() || sim.age == Age::Baby || partner) {
             continue;
         }
         let free_will = settings.free_will_of(household.contains(me), household.get(me).unwrap_or(false));
@@ -6427,7 +6469,7 @@ fn autonomy(
             crate::options::FreeWill::High => rng.random_range(2.0..5.0),
             _ => rng.random_range(4.0..10.0),
         };
-        if free_will == crate::options::FreeWill::Off && solving.is_none() {
+        if free_will == crate::options::FreeWill::Off && solving.is_none() && !cleaning {
             continue;
         }
         // Don't start long activities right before work.
@@ -6481,7 +6523,7 @@ fn autonomy(
             }
             let dist = obj.world_center(otf).distance(tf.translation);
             if broken.contains(oe) {
-                if used.0.is_some_and(|u| u != me) {
+                if cleaning || used.0.is_some_and(|u| u != me) {
                     continue;
                 }
                 // Handy (or neat) household Sims see to repairs on their own; and anyone who
@@ -6507,6 +6549,9 @@ fn autonomy(
             }
             for (di, d) in interactions_for(obj.kind).iter().enumerate() {
                 if guest.is_some_and(|p| crate::guests::minds(p, crate::guests::check(obj.kind, d))) {
+                    continue;
+                }
+                if cleaning && !crate::traitacts::cleans(d.special) {
                     continue;
                 }
                 // (A stereo playing to nobody else: off with it, for the Frugal and the
@@ -6849,11 +6894,29 @@ fn autonomy(
                 if critical.is_some_and(|m| d.per_hour[m] <= 0.0) {
                     score *= if solving.is_some() { 0.0 } else { 0.15 };
                 }
+                // (Cleaning house: the nearest thing to clean, as the game's
+                // `FindNearestObjectToClean`, whatever else they'd rather.)
+                if cleaning {
+                    score = if score > 0.0 { 1000.0 / (1.0 + dist) } else { 0.0 };
+                }
                 if best.as_ref().is_none_or(|b| score > b.0) {
                     let label = if d.special == Special::PlayForTips { crate::tips::PLAY_FOR_TIPS } else { d.name };
                     best = Some((score, Action::new(label, ActionKind::Object { target: oe, def: di }, true)));
                 }
             }
+        }
+        // (Cleaning house: that chore, then Clean House again, as the game's continuation; nothing
+        // left, they're done.)
+        if cleaning {
+            commands.entity(me).remove::<crate::traitacts::CleaningHouse>();
+            if let Some((score, mut action)) = best.take()
+                && score > 0.0
+            {
+                action.autonomous = false;
+                queue.0.push_back(action);
+                queue.0.push_back(crate::traitacts::TraitAct::CleanHouse.action(false));
+            }
+            continue;
         }
         // (Solving a need other than Social: only what the lot's objects offer for it.)
         if let Some(need) = solving.filter(|n| *n != SOCIAL) {

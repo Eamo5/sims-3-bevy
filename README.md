@@ -845,7 +845,14 @@ installation is unreachable.
   eight hours, and anyone who sees it shocked); the Dramatic "Fake Passing Out" on the floor
   for ten to thirty minutes; a Natural-Born Performer's "TaDa!" (those about cheer and are
   Drawn In; Born To Do This an hour for each who did). `TRAIT_ACT=talk|freak|fake|tada` has
-  the selected Sim do one (a test). A Neurotic who's used a sink, the stove or a fireplace is,
+  the selected Sim do one (a test). From the ground's menu, a Genius can *Contemplate
+  Surroundings* (the game's `Contemplate`: something of worth within three tiles, eight minutes
+  turned to one of them, thinking of it, with the game's clips, then Fascinated; not while still
+  Fascinated), and a Neat Sim at home indoors can *Clean House* (`NeatTraitCleanHouse`): the
+  nearest dirty dishes, unmade bed, puddle or grimy fixture seen to, then the next, till there's
+  nothing left (`CLEAN_HOUSE=1`, `CONTEMPLATE=1`: tests). The pie menus and the queue name
+  interactions as the game's strings do ("Take Out Trash", "Have Drink", "Solve the Unsolvable",
+  "Change Outfit..."). A Neurotic who's used a sink, the stove or a fireplace is,
   one time in ten, Feeling Anxious about it an hour later (the game's `CheckForNeuroticAnxiety`
   and its tuning: "Feeling Anxious About Faucet", one worry at a time); Check Sink, Check Stove and Check Fireplace are
   theirs alone, with the game's `a2o_trait_neurotic_check` clips, and leave them Feeling Calm

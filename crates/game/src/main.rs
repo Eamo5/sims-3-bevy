@@ -90,6 +90,7 @@ mod savepics;
 mod gamepopup;
 mod optionsdialog;
 mod gamedialogs;
+mod gamenames;
 mod grime;
 mod dressing;
 mod puddles;

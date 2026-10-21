@@ -105,6 +105,7 @@ pub struct Measuring(Vec<Entity>, Option<Entity>, u32);
 /// An option's words as its bubble shows them: what opens more marked with the game's dots (and
 /// only once, whatever its own words end with).
 fn caption(label: &str) -> String {
+    let label = crate::gamenames::shown(label);
     match label.strip_suffix(" ›") {
         Some(l) => format!("{}...", trim_dots(l)),
         None => label.to_string(),

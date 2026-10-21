@@ -2856,10 +2856,15 @@ fn main() {
         return;
     }
     if args[1] == "strkey" {
-        // strkey <root> <key>...: the English text of string keys (fnv64 of the lowercase key).
+        // strkey <root> <key>...: the English text of string keys (fnv64 of the lowercase key);
+        // `@<file>` reads the keys from a file, a line each.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
         let strings = s3formats::stbl::load_english(&set);
-        for k in &args[3..] {
+        let keys: Vec<String> = args[3..].iter().flat_map(|a| match a.strip_prefix('@') {
+            Some(f) => std::fs::read_to_string(f).unwrap_or_default().lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect(),
+            None => vec![a.clone()],
+        }).collect();
+        for k in &keys {
             println!("{k}: {}", strings.get(&s3pkg::fnv64(&k.to_ascii_lowercase())).cloned().unwrap_or_default());
         }
         return;

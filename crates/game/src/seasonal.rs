@@ -30,6 +30,8 @@ pub enum Outdoor {
     CatchRain,
     /// A Kleptomaniac pocketing something there (`klepto`).
     Swipe,
+    /// A Genius contemplating something of worth near there (`traitacts`).
+    Contemplate,
 }
 
 /// Snow deep enough to build in (`kSnowLevelCutOffs`: low snow).
@@ -43,6 +45,7 @@ impl Outdoor {
             Outdoor::CatchSnow => "Catch Snowflakes",
             Outdoor::CatchRain => "Catch Raindrops",
             Outdoor::Swipe => crate::klepto::SWIPE,
+            Outdoor::Contemplate => crate::traitacts::CONTEMPLATE,
         }
     }
 
@@ -54,6 +57,7 @@ impl Outdoor {
             Outdoor::SnowAngel => 16.0,
             Outdoor::CatchSnow | Outdoor::CatchRain => 12.0,
             Outdoor::Swipe => 3.0,
+            Outdoor::Contemplate => crate::traitacts::CONTEMPLATE_MINUTES,
         }
     }
 
@@ -63,7 +67,7 @@ impl Outdoor {
             Outdoor::Snowman => 70.0,
             Outdoor::SnowAngel => 90.0,
             Outdoor::CatchSnow | Outdoor::CatchRain => 80.0,
-            Outdoor::Swipe => 0.0,
+            Outdoor::Swipe | Outdoor::Contemplate => 0.0,
         }
     }
 
@@ -94,6 +98,7 @@ impl Outdoor {
             Outdoor::CatchSnow => ActionClip::new(None, &["a_idle_catchSnowTongue_x", "a_idle_catchSnowHand_x"]),
             Outdoor::CatchRain => ActionClip::new(None, &["a_idle_catchRainTongue_x", "a_idle_catchRainHand_x"]),
             Outdoor::Swipe => ActionClip::new(Some("a_trait_kleptomaniac_x"), &[]),
+            Outdoor::Contemplate => ActionClip::new(None, crate::traitacts::CONTEMPLATE_CLIPS),
         }
     }
 
