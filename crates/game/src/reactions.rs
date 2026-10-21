@@ -413,7 +413,7 @@ fn play(
             }
             let clips: &'static [&'static str] = *names.entry(all.join(",")).or_insert_with(|| Box::leak(all.iter().map(|c| &*Box::leak(c.clone().into_boxed_str())).collect::<Vec<_>>().into_boxed_slice()));
             debug!("{} reacts where they sit: {} ({:.1} s)", sim.first, all.join(", "), secs);
-            commands.entity(e).remove::<FaceOverlay>().insert((ActionClip::steps(clips[0], &clips[1..], &[]), SeatedReaction { prev: clip.cloned(), label, left: secs }));
+            commands.entity(e).try_remove::<FaceOverlay>().try_insert((ActionClip::steps(clips[0], &clips[1..], &[]), SeatedReaction { prev: clip.cloned(), label, left: secs }));
             continue;
         }
         // (Standing, between things.)
@@ -439,7 +439,7 @@ fn play(
         let clips: &'static [&'static str] = *names.entry(all.join(",")).or_insert_with(|| Box::leak(all.iter().map(|c| &*Box::leak(c.clone().into_boxed_str())).collect::<Vec<_>>().into_boxed_slice()));
         debug!("{} reacts: {} ({:.1} s)", sim.first, all.join(", "), secs);
         queue.0.push_front(Action::new("React", ActionKind::Outro { clips, then: None, secs, stand_at: None, target: e }, true));
-        commands.entity(e).remove::<FaceOverlay>().insert(ActionClip::steps(clips[0], &clips[1..], &[]));
+        commands.entity(e).try_remove::<FaceOverlay>().try_insert(ActionClip::steps(clips[0], &clips[1..], &[]));
         if let Some(at) = p.toward {
             let d = at - tf.translation;
             if d.xz().length() > 0.2 {

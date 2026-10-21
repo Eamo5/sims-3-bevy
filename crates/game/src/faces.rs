@@ -67,7 +67,7 @@ fn faces(
             f.time += dt;
             let length = lib.get(&data, &f.clip).map_or(0.0, |c| c.duration);
             if f.time >= length || matches!(anim.pose, Pose::Lie | Pose::Talk) {
-                commands.entity(e).remove::<FaceOverlay>();
+                commands.entity(e).try_remove::<FaceOverlay>();
             }
             continue;
         }

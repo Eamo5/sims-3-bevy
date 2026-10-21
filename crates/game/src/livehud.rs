@@ -17,9 +17,9 @@ pub struct LiveHudPlugin;
 
 impl Plugin for LiveHudPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<InfoPanel>().add_systems(OnEnter(PlayMode::Live), spawn_live_hud).add_systems(
+        app.init_resource::<InfoPanel>().init_resource::<SolveNeed>().add_systems(OnEnter(PlayMode::Live), spawn_live_hud).add_systems(
             Update,
-            (time_control, puck, mood_meter, motives_panel, bust, bust_click, skewer, navigation, show_in_modes.after(navigation), moodlets, wishes, skills_panel, skill_journal_buttons, interaction_queue, notifications, note_focus).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<LiveHud>),
+            (time_control, puck, mood_meter, motives_panel, bust, bust_click, skewer, navigation, show_in_modes.after(navigation), (moodlets, moodlet_click).chain(), wishes, skills_panel, skill_journal_buttons, interaction_queue, notifications, note_focus).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<LiveHud>),
         );
     }
 }
@@ -1084,9 +1084,58 @@ fn moodlets(
         };
         if let Some(r) = s.root {
             let tip = format!("{name} ({}{v})\n{desc}{left_s}", if v >= 0 { "+" } else { "" });
-            commands.entity(r).insert((Interaction::default(), crate::hud::BlocksWorld, crate::icons::Tooltip(tip)));
+            commands.entity(r).insert((Interaction::default(), crate::hud::BlocksWorld, crate::icons::Tooltip(tip), MoodletCell(m.kind)));
         }
     }
+}
+
+/// A moodlet's cell in the grid, for clicking.
+#[derive(Component)]
+struct MoodletCell(crate::life::MoodletKind);
+
+/// A need to see to now, for a Sim: a moodlet clicked (`interact`'s free will picks what helps,
+/// whatever the free-will setting).
+#[derive(Resource, Default)]
+pub struct SolveNeed(pub Option<(Entity, usize)>);
+
+/// The need a moodlet is solved by (the game's buffs' `SolveCommodity`): the needs' own, and
+/// stress by fun.
+pub fn solves(kind: crate::life::MoodletKind) -> Option<usize> {
+    use crate::life::MoodletKind::*;
+    use crate::sim::{BLADDER, ENERGY, FUN, HUNGER, HYGIENE, SOCIAL};
+    match kind {
+        Hungry | Starving => Some(HUNGER),
+        StrainedBladder => Some(BLADDER),
+        Tired | Exhausted => Some(ENERGY),
+        Lonely => Some(SOCIAL),
+        Smelly => Some(HYGIENE),
+        Bored | Stressed => Some(FUN),
+        _ => None,
+    }
+}
+
+/// A moodlet clicked, as the game's `OnMoodletClicked`: one a need can solve sends the Sim to
+/// see to it (`Buff.SolveMe`); with the testing cheats on, Ctrl+click takes it away.
+fn moodlet_click(
+    clicks: Query<(&Interaction, &MoodletCell), Changed<Interaction>>,
+    mut sel: Query<(Entity, &mut crate::life::Moodlets, &crate::interact::ActionQueue), With<Selected>>,
+    mut solve: ResMut<SolveNeed>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut play: MessageWriter<crate::sound::PlaySound>,
+) {
+    let Some((_, cell)) = clicks.iter().find(|(i, _)| **i == Interaction::Pressed) else { return };
+    let Ok((me, mut moodlets, queue)) = sel.single_mut() else { return };
+    if crate::cheats::testing() && keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]) {
+        moodlets.remove(cell.0);
+        return;
+    }
+    let Some(need) = solves(cell.0) else { return };
+    // (Not if something they're about to do already sees to it: `GetInteractionSatisfying`.)
+    if queue.0.iter().any(|a| !a.cancel && a.label != "Go Here" && crate::interact::satisfies(a, need)) {
+        return;
+    }
+    solve.0 = Some((me, need));
+    play.write(crate::sound::PlaySound::ui("ui_queue"));
 }
 
 /// The wishes: the offered ones in the staging area (paged with its arrows; clicked, promised),
@@ -1342,6 +1391,41 @@ fn progress(a: &crate::interact::Action, objects: &Query<&crate::interact::GameO
     }
 }
 
+/// The queue's first item while the Sim's in a conversation, as the game's `InteractionStyle.
+/// Relationship`: whom they're talking to (their face), what they are to each other (the LTR
+/// words), how the talk's going (the STC bubble) and the relationship's bar; clicked, the
+/// conversation's over (`CancelSocializing`).
+#[derive(Clone, PartialEq)]
+struct TalkItem {
+    with: Entity,
+    name: String,
+    ltr: String,
+    stc: String,
+    value: i32,
+}
+
+/// The relationship item's windows (`InteractionQueueItem.ControlIDs`), its width (the game's
+/// `mInteractionStyleWidths` for it), its bar's colours (`FILL_COLOR_POS`, `FILL_COLOR_NEG`) and
+/// how long its arrows show after a change.
+const TALK_INFO: u32 = 0x04f6_7f00;
+const TALK_LTR: u32 = 0x04f6_7f0d;
+const TALK_STC: u32 = 0x04f6_7f06;
+const TALK_CLIP: u32 = 0x04f6_7f07;
+const TALK_FILL: u32 = 0x04f6_7f08;
+const TALK_ARROWS: [u32; 4] = [0x04f6_7f09, 0x04f6_7f0a, 0x04f6_7f0b, 0x04f6_7f0c];
+const TALK_WIDTH: f32 = 180.0;
+const TALK_FILL_POS: u32 = 0xff00_f188;
+const TALK_FILL_NEG: u32 = 0xffe8_005d;
+const TALK_ARROW_SECS: f32 = 2.6;
+
+/// A window of a layout, by its id, to change before it's put up.
+fn find_window(w: &mut s3bake::ui::UiWindow, id: u32) -> Option<&mut s3bake::ui::UiWindow> {
+    if w.id == id {
+        return Some(w);
+    }
+    w.children.iter_mut().find_map(|c| find_window(c, id))
+}
+
 /// The interaction queue (top left): an item per queued action, the one under way first with
 /// its progress, each with what it's done with (the object's picture, the other Sim's face);
 /// pointed at, the cancel cross; clicked, cancelled.
@@ -1358,10 +1442,19 @@ fn interaction_queue(
     items: Query<(&Interaction, &QueueItem)>,
     clicks: Query<(&Interaction, &QueueItem), Changed<Interaction>>,
     (mut vis, mut nodes, mouse): (Query<&mut Visibility>, Query<&mut Node>, Res<ButtonInput<MouseButton>>),
-    mut state: Local<(Option<Entity>, Vec<(String, Option<QueuePicture>, bool)>)>,
+    mut state: Local<(Option<Entity>, (Option<TalkItem>, Vec<(String, Option<QueuePicture>, bool)>))>,
+    (convs, rels_q, people, time): (Res<crate::groups::Conversations>, Query<&crate::social::Relationships>, Query<&Sim>, Res<Time>),
+    mut arrows: Local<(Option<(Entity, f32)>, f32, bool, Vec<Entity>)>,
 ) {
     let (Some(mut ui), Some(root)) = (ui, hud.queue.root) else { return };
     let Ok((me, mut queue, motives)) = sel.single_mut() else { return };
+    // In a conversation: whom with (the one being talked with now, else the first of them).
+    let talk = convs.group(me).and_then(|g| {
+        let with = g.talk.and_then(|(a, b)| if a == me { Some(b) } else if b == me { Some(a) } else { None }).or_else(|| g.members.iter().copied().find(|m| *m != me))?;
+        let other = people.get(with).ok().filter(|s| !s.age.is_little())?;
+        let rel = rels_q.get(me).ok().and_then(|r| r.0.get(&with)).cloned().unwrap_or_default();
+        Some(TalkItem { with, name: other.full_name(), ltr: rel.label_for(other.female), stc: rel.stc.name().to_string(), value: rel.friendship.round() as i32 })
+    });
     // A click cancels (either button, as the game's `InteractionMouseUp`).
     let right = mouse.just_pressed(MouseButton::Right);
     let hit: Vec<usize> = clicks
@@ -1371,6 +1464,17 @@ fn interaction_queue(
         .chain(items.iter().filter(|(i, _)| right && **i != Interaction::None).map(|(_, q)| q.0))
         .collect();
     for n in hit {
+        // (The conversation's item: it's over, and the socials queued in it with it.)
+        if n == usize::MAX {
+            let members = convs.group(me).map(|g| g.members.clone()).unwrap_or_default();
+            for a in queue.0.iter_mut() {
+                if matches!(a.kind, crate::interact::ActionKind::Social { target, .. } if members.contains(&target)) {
+                    a.cancel = true;
+                }
+            }
+            commands.queue(move |w: &mut World| w.resource_mut::<crate::groups::Conversations>().leave(me));
+            continue;
+        }
         if let Some(a) = queue.0.iter_mut().filter(|a| !a.cancel).nth(n) {
             a.cancel = true;
         }
@@ -1407,10 +1511,35 @@ fn interaction_queue(
             }
         }
     }
-    if state.1 == sig && state.0.is_some_and(|h| vis.contains(h)) {
+    // (The relationship bar's arrows a moment after it moves: up or down, flashing.)
+    let now = time.elapsed_secs();
+    if let Some(t) = &talk {
+        let v = rels_q.get(me).ok().and_then(|r| r.0.get(&t.with)).map_or(0.0, |r| r.friendship);
+        match arrows.0 {
+            Some((w, old)) if w == t.with && (v - old).abs() > 0.05 => {
+                arrows.1 = now;
+                arrows.2 = v > old;
+                arrows.0 = Some((w, v));
+            }
+            Some((w, _)) if w == t.with => {}
+            _ => {
+                arrows.0 = Some((t.with, v));
+                arrows.1 = -100.0;
+            }
+        }
+    }
+    let since = now - arrows.1;
+    for (k, e) in arrows.3.iter().enumerate() {
+        let up = k < 2;
+        let flash = ((since / 0.3) as i32 % 2 == 0) == (k % 2 == 0);
+        let on = since < TALK_ARROW_SECS && up == arrows.2 && flash;
+        set_visible(&mut vis, Some(*e), on);
+    }
+    let full = (talk.clone(), sig.clone());
+    if state.1 == full && state.0.is_some_and(|h| vis.contains(h)) {
         return;
     }
-    state.1 = sig.clone();
+    state.1 = full;
     let holder = match state.0.filter(|h| vis.contains(*h)) {
         Some(h) => {
             commands.entity(h).despawn_children();
@@ -1426,6 +1555,67 @@ fn interaction_queue(
     };
     let Some(template) = ui.export("HUDInteractionQueueItem", 1).cloned() else { return };
     let mut x = 0.0;
+    arrows.3.clear();
+    if let Some(t) = &talk {
+        let mut item = template.clone();
+        item.area = [0.0, QUEUE_ITEM_TOP, TALK_WIDTH, QUEUE_ITEM_TOP + QUEUE_ITEM_HEIGHT];
+        if let Some(b) = item.children.iter_mut().find(|c| c.id == QUEUE_BUTTON) {
+            b.area = [0.0, 0.0, TALK_WIDTH, QUEUE_ITEM_HEIGHT];
+            // (Its own background: `int_relationship_bk`, lit when pointed at.)
+            if let Some(s3bake::ui::UiDrawable::Std { images, .. }) = b.drawable.as_mut() {
+                let (bk, hl) = (s3pkg::fnv64("int_relationship_bk"), s3pkg::fnv64("int_relationship_bk_hl"));
+                *images = [bk, bk, hl, hl, bk, bk, hl, hl];
+            }
+            if let Some(info) = b.children.iter_mut().find(|c| c.id == TALK_INFO) {
+                info.flags |= s3bake::ui::WIN_VISIBLE;
+            }
+        }
+        // (The bar from its middle, right for liking, left for not: `UpdateRelationshipBar`; the
+        // fill held where it is under the bar's marks while its clip moves. The layout gives the
+        // fill in the clip's parent's terms.)
+        if let Some(clip) = find_window(&mut item, TALK_CLIP) {
+            let [l, top, r, bottom] = clip.area;
+            let (mid, half) = ((l + r) * 0.5, (r - l) * 0.5);
+            let reach = (t.value as f32).abs().min(100.0) / 100.0 * half;
+            let (from, to) = if t.value >= 0 { (mid, mid + reach) } else { (mid - reach, mid) };
+            clip.area = [from, top, to.max(from + 0.5), bottom];
+            if let Some(fill) = clip.children.iter_mut().find(|c| c.id == TALK_FILL) {
+                fill.place = s3bake::ui::UiPlace::Fixed;
+                fill.area = [fill.area[0] - from, fill.area[1] - top, fill.area[2] - from, fill.area[3] - top];
+                fill.shade = if t.value >= 0 { TALK_FILL_POS } else { TALK_FILL_NEG };
+            }
+        }
+        let s = ui.spawn_under(&mut commands, &mut assets, &mut fonts, &item, holder);
+        if let Some(w) = s.id(QUEUE_ICON) {
+            let h = portraits.portrait(&mut assets, t.with);
+            commands.entity(w).despawn_children();
+            commands.entity(w).with_children(|c| {
+                c.spawn((ImageNode::new(h), crate::portraits::PortraitOf(t.with), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
+            });
+        }
+        if let Some(e) = s.text(TALK_LTR) {
+            commands.entity(e).insert(Text::new(t.ltr.clone()));
+        }
+        if let Some(e) = s.text(TALK_STC) {
+            commands.entity(e).insert(Text::new(t.stc.clone()));
+        }
+        if let Some(e) = s.id(TALK_CLIP) {
+            commands.entity(e).queue(|mut w: EntityWorldMut| {
+                if let Some(mut n) = w.get_mut::<Node>() {
+                    n.overflow = Overflow::clip();
+                }
+            });
+        }
+        for id in TALK_ARROWS {
+            if let Some(e) = s.id(id) {
+                arrows.3.push(e);
+            }
+        }
+        if let Some(b) = s.id(QUEUE_BUTTON) {
+            commands.entity(b).insert((QueueItem(usize::MAX, s.id(QUEUE_CANCEL), None), crate::icons::Tooltip(format!("{}\n{} ({})\nClick to stop socializing.", t.name, t.ltr, t.value))));
+        }
+        x = TALK_WIDTH + QUEUE_ITEM_GAP;
+    }
     for (i, (label, pic, with_progress)) in sig.into_iter().enumerate() {
         let h = if with_progress { QUEUE_ITEM_PROGRESS_HEIGHT } else { QUEUE_ITEM_HEIGHT };
         let mut item = template.clone();

@@ -6345,7 +6345,7 @@ fn autonomy(
     ),
     (called, repairmen, laundry, privacy): (Option<Res<RepairmanVisit>>, Query<(), With<crate::services::Repairman>>, Res<crate::laundry::Laundry>, Res<crate::privacy::Privacy>),
     friends_away: Query<(Entity, &Sim), (With<OffLot>, Without<Invited>)>,
-    (callers, residents): (Query<(Entity, &crate::doorbell::AtTheDoor)>, Query<&crate::homes::Resident>),
+    (callers, residents, mut solve): (Query<(Entity, &crate::doorbell::AtTheDoor)>, Query<&crate::homes::Resident>, ResMut<crate::livehud::SolveNeed>),
     (weather, building, chess, music, potties, swipeable, looked): (
         Res<crate::weather::Weather>,
         Option<Res<crate::building::ActiveBuilding>>,
@@ -6404,8 +6404,13 @@ fn autonomy(
             continue;
         }
         timer.0 -= delta.0;
+        // (A moodlet clicked: what helps that need, now, whatever their free will: `livehud`.)
+        let solving = solve.0.filter(|s| s.0 == me).map(|s| s.1);
+        if solving.is_some() {
+            solve.0 = None;
+        }
         // (Someone else's social partner waits for them to finish.)
-        if timer.0 > 0.0 || !queue.0.is_empty() || sim.age == Age::Baby || partner {
+        if solving.is_none() && (timer.0 > 0.0 || !queue.0.is_empty() || sim.age == Age::Baby || partner) {
             continue;
         }
         let free_will = settings.free_will_of(household.contains(me), household.get(me).unwrap_or(false));
@@ -6413,7 +6418,7 @@ fn autonomy(
             crate::options::FreeWill::High => rng.random_range(2.0..5.0),
             _ => rng.random_range(4.0..10.0),
         };
-        if free_will == crate::options::FreeWill::Off {
+        if free_will == crate::options::FreeWill::Off && solving.is_none() {
             continue;
         }
         // Don't start long activities right before work.
@@ -6434,7 +6439,7 @@ fn autonomy(
         // that fail (hunger, bladder, energy: starving, an accident, passing out) before hygiene,
         // which doesn't: an exhausted Sim goes to bed before the bath.)
         let failing = [HUNGER, BLADDER, ENERGY].into_iter().filter(|&i| motives.0[i] < CRITICAL_NEED).min_by(|a, b| motives.0[*a].total_cmp(&motives.0[*b]));
-        let critical = failing.or_else(|| (motives.0[HYGIENE] < CRITICAL_NEED).then_some(HYGIENE));
+        let critical = solving.or(failing).or_else(|| (motives.0[HYGIENE] < CRITICAL_NEED).then_some(HYGIENE));
         // (A guest at the household's home keeps to what their footing with its friendliest
         // allows: see `guests`.)
         let guest = (my_lot.is_none() && !household.contains(me)).then(|| {
@@ -6833,13 +6838,24 @@ fn autonomy(
                     score *= RECENT_KEEN.powi(r.times(d.name, clock.minutes) as i32);
                 }
                 if critical.is_some_and(|m| d.per_hour[m] <= 0.0) {
-                    score *= 0.15;
+                    score *= if solving.is_some() { 0.0 } else { 0.15 };
                 }
                 if best.as_ref().is_none_or(|b| score > b.0) {
                     let label = if d.special == Special::PlayForTips { crate::tips::PLAY_FOR_TIPS } else { d.name };
                     best = Some((score, Action::new(label, ActionKind::Object { target: oe, def: di }, true)));
                 }
             }
+        }
+        // (Solving a need other than Social: only what the lot's objects offer for it.)
+        if let Some(need) = solving.filter(|n| *n != SOCIAL) {
+            match best {
+                Some((score, mut action)) if score > 0.0 && satisfies_kind(&action.kind, need, &objects) => {
+                    action.autonomous = false;
+                    queue.0.push_back(action);
+                }
+                _ => debug!("{} found nothing to see to need {need}", sim.first),
+            }
+            continue;
         }
         // Someone at the door of a home visited is let in by one of the family living there (the
         // player's household never invites anyone in of its own accord: the game's
@@ -6968,12 +6984,49 @@ fn autonomy(
                 best = Some((score, Action::new(format!("Chat with {name}"), ActionKind::PhoneChat { target: friend }, true)));
             }
         }
+        // (Solving a need: only what sees to it, as the Sim's own choice, after what's queued.)
+        if let Some(need) = solving {
+            match best {
+                Some((score, mut action)) if score > 0.0 && satisfies_kind(&action.kind, need, &objects) => {
+                    action.autonomous = false;
+                    queue.0.push_back(action);
+                }
+                _ => debug!("{} found nothing to see to need {need}", sim.first),
+            }
+            continue;
+        }
         if let Some((score, action)) = best
             && score > 2.0
         {
             queue.0.push_back(action);
         }
     }
+}
+
+/// Whether an action sees to a need (an object's interaction that gives it, a social or a call
+/// for Social, a jog for Fun).
+fn satisfies_kind(kind: &ActionKind, need: usize, objects: &Query<(Entity, &GameObject, &Transform, &UsedBy, Option<&crate::visit::LotObject>)>) -> bool {
+    match kind {
+        ActionKind::Object { target, def } => objects.get(*target).ok().and_then(|o| interactions_for(o.1.kind).get(*def)).is_some_and(|d| d.per_hour[need] > 0.0),
+        ActionKind::Social { .. } | ActionKind::PhoneChat { .. } => need == SOCIAL,
+        ActionKind::Jog { .. } => need == crate::sim::FUN,
+        _ => false,
+    }
+}
+
+/// Whether a queued action is seeing to a need already, by what it's called (the moodlet's click
+/// leaves it be: `livehud`).
+pub fn satisfies(a: &Action, need: usize) -> bool {
+    let words = a.label.to_ascii_lowercase();
+    let by: &[&str] = match need {
+        HUNGER => &["eat", "meal", "snack", "dinner", "lunch", "breakfast", "cook", "serve"],
+        BLADDER => &["toilet", "pee"],
+        ENERGY => &["sleep", "nap", "bed", "relax"],
+        SOCIAL => &["chat", "talk", "call"],
+        HYGIENE => &["shower", "bath", "wash", "clean up", "brush"],
+        _ => &["play", "watch", "fun", "dance", "jog"],
+    };
+    by.iter().any(|w| words.contains(w))
 }
 
 /// One talked to whose other is no longer at it with them (gone home, called away, onto
