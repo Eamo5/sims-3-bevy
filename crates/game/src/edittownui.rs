@@ -370,13 +370,13 @@ fn edit_town_ui(
         } else if pressed(info, SPLIT) {
             commands.insert_resource(crate::movedialog::OpenMove(crate::movedialog::MoveKind::Split));
         } else if pressed(info, MERGE)
-            && let Some(i) = match (focus, occupant) {
-                (_, Some(Occupant::Played(i))) => Some(i),
-                (Some(Focus::Bin(Binned::Played(i))), _) => Some(i),
+            && let Some(kind) = match (focus, occupant) {
+                (_, Some(Occupant::Played(i))) | (Some(Focus::Bin(Binned::Played(i))), _) => Some(crate::movedialog::MoveKind::Merge(i)),
+                (_, Some(Occupant::Town(id))) | (Some(Focus::Bin(Binned::Town(id))), _) => Some(crate::movedialog::MoveKind::MergeTown(id)),
                 _ => None,
             }
         {
-            commands.insert_resource(crate::movedialog::OpenMove(crate::movedialog::MoveKind::Merge(i)));
+            commands.insert_resource(crate::movedialog::OpenMove(kind));
         }
     }
     // A dialog up: confirmed, or not.
@@ -505,12 +505,11 @@ fn edit_town_ui(
         let penthouse = lot.is_some_and(|l| world.data.buildings.get(&l).is_some_and(|b| b.is_penthouse()));
         let buttons_shown: Vec<u32> = match (f, hh.as_ref().map(|h| h.0)) {
             (Focus::Lot(_), Some(Occupant::Active)) => vec![SPLIT],
-            (Focus::Lot(_), Some(Occupant::Played(_))) => vec![EVICT, MERGE, SWITCH_TO],
-            (Focus::Lot(_), Some(_)) => vec![EVICT, SWITCH_TO],
+            (Focus::Lot(_), Some(_)) => vec![EVICT, MERGE, SWITCH_TO],
             (Focus::Lot(_), None) if penthouse => vec![],
             (Focus::Lot(_), None) => vec![CHANGE_TYPE],
-            (Focus::Bin(Binned::Played(_)), _) => vec![PLACE_COPY, MERGE],
-            (Focus::Bin(_) | Focus::House(_), _) => vec![PLACE_COPY],
+            (Focus::Bin(_), _) => vec![PLACE_COPY, MERGE],
+            (Focus::House(_), _) => vec![PLACE_COPY],
         };
         g.info = info_panel(&mut commands, &mut ui, &mut images, &mut fonts, &world.data, &data, &story, hh.as_ref().map(|h| &h.1), lot, &buttons_shown);
         if let Some(info) = g.info.as_ref() {

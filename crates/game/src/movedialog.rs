@@ -31,6 +31,8 @@ pub enum MoveKind {
     Split,
     /// A household played before (its place among them) merged into the one being played.
     Merge(usize),
+    /// A town family never played (by household id) merged into it.
+    MergeTown(u64),
 }
 
 /// Asked for (Edit Town's Split and Merge buttons).
@@ -121,6 +123,7 @@ fn open_dialog(
     members: Query<(Entity, &crate::sim::Sim), With<crate::sim::HouseholdMember>>,
     sims: Query<(Entity, &crate::sim::Sim)>,
     (household, dormant, world): (Option<Res<crate::interact::Household>>, Res<crate::household::Dormant>, Res<crate::loading::CurrentWorld>),
+    (town, story): (Option<Res<crate::premade::TownPremades>>, Res<crate::story::TownStory>),
 ) {
     let Some(want) = want else { return };
     commands.remove_resource::<OpenMove>();
@@ -152,6 +155,24 @@ fn open_dialog(
                 [d.household.clone(), hh.name.clone()],
                 [d.funds, hh.funds],
                 [if d.homeless { bin } else { d.lot_name.clone() }, lot_name(hh.lot_index)],
+                [theirs, ours],
+                word(&ui, "Ui/Caption/GameEntry/EditTown:MergeHouseholds", "Merge Households"),
+            )
+        }
+        MoveKind::MergeTown(id) => {
+            let Some(h) = town.as_ref().and_then(|t| t.0.households.iter().find(|h| h.id == id)) else { return };
+            let theirs: Vec<Member> = h
+                .members
+                .iter()
+                .filter(|m| !m.first_name.is_empty())
+                .filter_map(|m| story.apply(crate::premade::to_sim(m)))
+                .map(|s| Member { id: s.id, name: s.full_name(), age: s.age, sim: sims.iter().find(|(_, x)| x.id == s.id).map(|(e, _)| e) })
+                .collect();
+            let home = story.home_of(h).and_then(|l| world.data.lots.iter().position(|x| x.id == l)).map_or(bin, lot_name);
+            (
+                [h.name.clone(), hh.name.clone()],
+                [h.funds, hh.funds],
+                [home, lot_name(hh.lot_index)],
                 [theirs, ours],
                 word(&ui, "Ui/Caption/GameEntry/EditTown:MergeHouseholds", "Merge Households"),
             )
@@ -363,6 +384,7 @@ fn apply_move(
     world: Res<crate::loading::CurrentWorld>,
     mut app: ResMut<NextState<AppState>>,
     mut notes: ResMut<crate::interact::Notifications>,
+    town: Option<Res<crate::premade::TownPremades>>,
 ) {
     let (Some(p), Some(snap)) = (pending, snapshot) else { return };
     commands.remove_resource::<PendingMove>();
@@ -410,6 +432,34 @@ fn apply_move(
             }
             g
         }
+        MoveKind::MergeTown(id) => {
+            let mut g = snap.0.clone();
+            let Some(h) = town.as_ref().and_then(|t| t.0.households.iter().find(|h| h.id == id)) else { return };
+            let alive: Vec<crate::sim::Sim> = h.members.iter().filter(|m| !m.first_name.is_empty()).filter_map(|m| g.town.apply(crate::premade::to_sim(m))).collect();
+            let share = if p.movers.len() >= alive.len() { h.funds } else { crate::moveout::transfer(h.funds, alive.len(), p.movers.len()) };
+            let lot = &world.data.lots[g.lot_index];
+            let c = crate::home::lot_center(lot);
+            let y = world.data.heightmap.sample(c.x, c.z);
+            for s in alive.iter().filter(|s| p.movers.contains(&s.id)) {
+                // (One the game knows already keeps all of it; else as the town has them.)
+                let mut joining = g.sims.iter().find(|x| x.id == s.id).cloned().unwrap_or_else(|| crate::save::saved_look(s));
+                joining.member = true;
+                joining.selected = false;
+                joining.whereabouts = "home".into();
+                joining.position = [c.x, y, c.z];
+                joining.floor = 1;
+                g.sims.retain(|x| x.id != joining.id);
+                g.sims.push(joining);
+            }
+            g.funds += share;
+            // (Everyone come: the family's house left to them no more.)
+            if p.movers.len() >= alive.len() {
+                g.town.homes.insert(id, None);
+            }
+            info!("merge: {} of the {} family join the {} household (§{share})", p.movers.len(), h.name, g.household);
+            notes.push(format!("The {} household welcomes its new members.", g.household));
+            g
+        }
     };
     let world_name = g.world.clone();
     if crate::save::begin_load(&mut commands, &worlds, g, slot.0.clone()) {
@@ -419,26 +469,35 @@ fn apply_move(
     }
 }
 
-/// MOVE_DIALOG=split|merge:<n> (tests): ten seconds in, the dialog; two seconds on, the left's
-/// last member moved across; MOVE_ACCEPT=1, five seconds on, accepted.
-fn move_test(mut commands: Commands, time: Res<Time>, d: Option<ResMut<MoveDialog>>, mut buttons: Query<&mut Interaction>, mut step: Local<(u8, f32)>) {
+/// MOVE_DIALOG=split|merge:<n>|town:<family name> (tests): ten seconds in, the dialog; two
+/// seconds on, the left's last member moved across (MOVE_ALL=1: all of them); MOVE_ACCEPT=1, five
+/// seconds on, accepted.
+fn move_test(mut commands: Commands, time: Res<Time>, d: Option<ResMut<MoveDialog>>, mut buttons: Query<&mut Interaction>, mut step: Local<(u8, f32)>, town: Option<Res<crate::premade::TownPremades>>) {
     let Ok(v) = std::env::var("MOVE_DIALOG") else { return };
     let t = time.elapsed_secs();
     match step.0 {
         0 if t > 10.0 => {
-            let kind = match v.strip_prefix("merge:").and_then(|n| n.parse().ok()) {
-                Some(n) => MoveKind::Merge(n),
-                None => MoveKind::Split,
+            let family = v.strip_prefix("town:").and_then(|n| town.as_ref()?.0.households.iter().find(|h| h.name.eq_ignore_ascii_case(n)).map(|h| h.id));
+            let kind = match (v.strip_prefix("merge:").and_then(|n| n.parse().ok()), family) {
+                (Some(n), _) => MoveKind::Merge(n),
+                (None, Some(id)) => MoveKind::MergeTown(id),
+                (None, None) => MoveKind::Split,
             };
             commands.insert_resource(OpenMove(kind));
             *step = (1, t);
         }
         1 if t - step.1 > 2.0 => {
             if let Some(mut d) = d {
-                let n = d.members[0].len().saturating_sub(1);
-                d.picked = Some((0, n));
-                if let Some(mut i) = d.s.id(TO_TARGET).and_then(|e| buttons.get_mut(e).ok()) {
-                    *i = Interaction::Pressed;
+                // (All of them: moved straight across.)
+                if std::env::var("MOVE_ALL").is_ok() {
+                    let all: Vec<Member> = d.members[0].drain(..).collect();
+                    d.members[1].extend(all);
+                } else {
+                    let n = d.members[0].len().saturating_sub(1);
+                    d.picked = Some((0, n));
+                    if let Some(mut i) = d.s.id(TO_TARGET).and_then(|e| buttons.get_mut(e).ok()) {
+                        *i = Interaction::Pressed;
+                    }
                 }
             }
             *step = (2, t);

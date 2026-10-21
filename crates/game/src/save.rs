@@ -641,7 +641,7 @@ pub fn restore_rel(x: &mut crate::social::Relationship, r: &SavedRel) {
 }
 
 /// How a Sim looks, for saving someone no longer about (the rest left empty).
-fn saved_look(sim: &Sim) -> SavedSim {
+pub(crate) fn saved_look(sim: &Sim) -> SavedSim {
     let rgb = |c: Color| {
         let s = c.to_srgba();
         [s.red, s.green, s.blue]
