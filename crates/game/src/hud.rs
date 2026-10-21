@@ -254,6 +254,19 @@ fn grey_stressed(options: &mut [(String, ActionKind)], submenus: &mut [(String, 
     }
 }
 
+/// A Sim's testing cheats (Shift-clicked, the game's `Cheats.AddSimCheatInteractions`): grown up
+/// now, needs full, and (one not of the household) one of it.
+fn cheat_options(target: Entity, member: bool) -> Vec<(String, ActionKind)> {
+    let mut out = vec![
+        (crate::cheats::TRIGGER_AGE.to_string(), ActionKind::Social { target, social: usize::MAX - 9 }),
+        (crate::cheats::MAKE_HAPPY.to_string(), ActionKind::Social { target, social: usize::MAX - 9 }),
+    ];
+    if !member {
+        out.push((crate::cheats::ADD_TO_FAMILY.to_string(), ActionKind::Social { target, social: usize::MAX - 9 }));
+    }
+    out
+}
+
 /// Marks a pie option that opens `submenus[i]` (`ActionKind::GoHere(NaN, i)`).
 pub(crate) fn submenu_kind(i: usize) -> ActionKind {
     ActionKind::GoHere(Vec2::new(f32::NAN, f32::INFINITY), i as u8)
@@ -1193,10 +1206,11 @@ fn world_click(
     ),
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
-    (buy, edit_town, pickable): (
+    (buy, edit_town, pickable, keys): (
         Option<Res<crate::buy::BuyMode>>,
         Res<crate::edittown::EditTown>,
         Query<(Entity, &GlobalTransform, &InheritedVisibility, Option<&GameObject>, Has<crate::pets::Pet>), Or<(With<GameObject>, With<Sim>, With<crate::pets::Pet>)>>,
+        Res<ButtonInput<KeyCode>>,
     ),
     (building, opp_q, front_doors): (
         Option<Res<crate::building::ActiveBuilding>>,
@@ -1213,7 +1227,7 @@ fn world_click(
         ),
         (Res<crate::frontdoor::Front>, Res<crate::frontdoor::Doorbell>),
     ),
-    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, stay_q), company_q): (
+    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, (stay_q, spots_q)), company_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -1227,7 +1241,7 @@ fn world_click(
         Query<(), With<crate::little::Labour>>,
         Query<&crate::tvchannels::TvLevel>,
         Query<(&Sim, Option<&crate::classes::ClassesTaken>)>,
-        (Query<(&crate::skillbooks::SkillBooks, Has<HouseholdMember>)>, Query<(&crate::novels::Novels, Has<HouseholdMember>)>, crate::carry::CarryLook, Query<(), With<crate::guests::StayingOver>>),
+        (Query<(&crate::skillbooks::SkillBooks, Has<HouseholdMember>)>, Query<(&crate::novels::Novels, Has<HouseholdMember>)>, crate::carry::CarryLook, (Query<(), With<crate::guests::StayingOver>>, Query<&crate::collecting::FishingSpot>)),
         Query<(Entity, &Sim, Has<crate::interact::Visitor>, Option<&crate::visit::OnLot>), Or<(With<HouseholdMember>, With<crate::interact::Visitor>)>>,
     ),
 ) {
@@ -1334,6 +1348,10 @@ fn world_click(
                         "Howl at the Moon".to_string(),
                         ActionKind::Outro { clips: &["a_werewolf_howlAtMoon_success"], then: None, secs: 6.0, stand_at: None, target: actor },
                     ));
+                }
+                // (Shift-clicked, the testing cheats on: theirs.)
+                if crate::cheats::testing() && keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+                    options.extend(cheat_options(actor, true));
                 }
                 if !options.is_empty() {
                     pie.submenus.clear();
@@ -1467,6 +1485,9 @@ fn world_click(
                     let at = options.iter().position(|o| !o.0.starts_with("Select")).unwrap_or(options.len());
                     options.insert(at, c);
                 }
+            }
+            if crate::cheats::testing() && keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+                options.extend(cheat_options(t, member));
             }
             let title = format!("{} ({})", sim.full_name(), rel.label_for(sim.female));
             pie.at = cursor;
@@ -1993,18 +2014,26 @@ fn world_click(
                 if d.special == Special::Homework && !hw_q.contains(actor) {
                     continue;
                 }
-                // A fish bowl: a fish from their inventory in, or the one there out.
+                // A fish bowl, as the game's: "Stock" it with a fish from their inventory, or a
+                // goldfish bought (greyed when there's neither).
                 if d.special == Special::PlaceFish {
+                    let Some(g) = opp_q.0.as_deref() else { continue };
                     if bowl_q.contains(t) {
                         continue;
                     }
-                    let list: Vec<(String, ActionKind)> = inv_q
+                    let mut list: Vec<(String, ActionKind)> = inv_q
                         .get(actor)
-                        .map(|inv| inv.0.iter().filter(|s| s.kind == crate::inventory::ItemKind::Fish).map(|s| (format!("Place Fish: {}", s.name), ActionKind::Object { target: t, def: i })).collect())
+                        .map(|inv| inv.0.iter().filter(|s| s.kind == crate::inventory::ItemKind::Fish).map(|s| (crate::fishbowl::stock_label(g, s), ActionKind::Object { target: t, def: i })).collect())
                         .unwrap_or_default();
-                    if !list.is_empty() {
-                        options.push(("Place Fish ›".to_string(), submenu_kind(pie.submenus.len())));
-                        pie.submenus.push(("Place Fish".to_string(), list));
+                    let price = crate::fishbowl::goldfish_price(g);
+                    if opp_q.4.as_ref().is_some_and(|h| h.funds >= price) {
+                        list.push((format!("{} - §{price}", crate::fishbowl::BUY_GOLDFISH), ActionKind::Object { target: t, def: i }));
+                    }
+                    if list.is_empty() {
+                        options.push((crate::fishbowl::STOCK.to_string(), ActionKind::Greyed("Insufficient funds".into())));
+                    } else {
+                        options.push((format!("{} ›", crate::fishbowl::STOCK), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((crate::fishbowl::STOCK.to_string(), list));
                     }
                     continue;
                 }
@@ -2014,6 +2043,26 @@ fn world_click(
                     continue;
                 }
                 if d.special == Special::CleanBowl && !fish.is_some_and(|b| b.dead) {
+                    continue;
+                }
+                // (The bowl's fish by its name, or its kind: "Feed Minnow", "Scoop Out Bubbles",
+                // "Dispose of Minnow"; and a live one named, or renamed.)
+                if let (Some(b), Some(g)) = (fish, opp_q.0.as_deref())
+                    && matches!(d.special, Special::TakeFish | Special::FeedFish | Special::CleanBowl)
+                {
+                    let verb = match d.special {
+                        Special::TakeFish => "Scoop Out",
+                        Special::FeedFish => "Feed",
+                        _ => "Dispose of",
+                    };
+                    options.push((format!("{verb} {}", b.called(g)), ActionKind::Object { target: t, def: i }));
+                    if d.special == Special::FeedFish {
+                        let label = match &b.name {
+                            Some(n) => format!("{}{n}", crate::fishbowl::RENAME),
+                            None => format!("{}{}", crate::fishbowl::GIVE_NAME, crate::fishbowl::species(g, &b.fish.key)),
+                        };
+                        options.push((label, ActionKind::Object { target: t, def: i }));
+                    }
                     continue;
                 }
                 // Fishing: with the bait used last, if they've some ("Fish with Apple (Minnow)",
@@ -2309,6 +2358,17 @@ fn world_click(
                     pie.submenus.push(("Upgrade".to_string(), list));
                 }
             }
+            // (By a fishing spot, a Sim who's taken up fishing looks the water over: the game's
+            // Inspect Water, Fishing 1 and up.)
+            if let (Ok(spot), Some(gu)) = (spots_q.get(t), opp_q.0.as_ref())
+                && let Ok((_, skills, _)) = writers.get(actor)
+                && skills.level("Fishing") >= 1
+            {
+                let journal = journals_q.get(actor).ok();
+                let words = crate::collecting::inspect_water(gu, layout_ui.as_deref(), &spot.class, skills.level("Fishing") as u32, |k| journal.is_some_and(|j| j.caught(k) > 0.0));
+                let label = layout_ui.as_ref().and_then(|u| u.localize("Gameplay/Core/Terrain/InspectWater:InteractionName")).unwrap_or_else(|| "Inspect Water".into());
+                options.push((label, ActionKind::Notice(words)));
+            }
             grey_stressed(&mut options, &mut pie.submenus, &objects, why_not);
             open_object_pie(&mut commands, &mut pie, cursor, &obj.name, actor, options);
         }
@@ -2494,6 +2554,12 @@ fn pie_buttons(
     if matches!(kind, ActionKind::Greyed(_)) {
         return;
     }
+    // (Learned at once: a notice, the menu closed.)
+    if let ActionKind::Notice(words) = &kind {
+        close_pie(&mut commands, &mut pie);
+        notes.push(words.clone());
+        return;
+    }
     let actor = pie.actor;
     let title = std::mem::take(&mut pie.title);
     let parent = (pie.at, title.clone(), pie.options.clone());
@@ -2586,10 +2652,62 @@ fn pie_buttons(
         }
         return;
     }
-    // (The testing cheats' "Make All Happy", there and then.)
+    // (A bowl's fish named there and then: the game's `GiveName`.)
+    if let ActionKind::Object { target, .. } = kind
+        && (label.starts_with(crate::fishbowl::GIVE_NAME) || label.starts_with(crate::fishbowl::RENAME))
+        && sofas.get(target).is_ok_and(|o| o.kind == ObjectKind::FishBowl)
+    {
+        commands.queue(move |w: &mut World| crate::fishbowl::ask_name(w, target));
+        return;
+    }
+    // (The testing cheats' "Make All Happy" and the others, there and then.)
     if label == crate::cheats::MAKE_ALL_HAPPY {
         commands.queue(crate::cheats::make_all_happy);
         return;
+    }
+    match label.as_str() {
+        crate::cheats::MAKE_FRIENDS => {
+            commands.queue(crate::cheats::make_friends);
+            return;
+        }
+        crate::cheats::KNOW_EVERYONE => {
+            commands.queue(crate::cheats::know_everyone);
+            return;
+        }
+        crate::cheats::MOTIVE_DECAY => {
+            commands.queue(crate::cheats::toggle_decay);
+            return;
+        }
+        crate::cheats::FORCE_VISITOR => {
+            crate::dropins::FORCE.store(true, std::sync::atomic::Ordering::Relaxed);
+            return;
+        }
+        _ => {}
+    }
+    // (A Sim's, Shift-clicked with the testing cheats on.)
+    if let ActionKind::Social { target, .. } = kind {
+        match label.as_str() {
+            crate::cheats::TRIGGER_AGE => {
+                commands.entity(target).try_insert(crate::aging::GrowUpNow);
+                return;
+            }
+            crate::cheats::ADD_TO_FAMILY => {
+                commands.entity(target).try_insert(crate::interact::JoinHousehold { last_name: None });
+                return;
+            }
+            crate::cheats::MAKE_HAPPY => {
+                commands.queue(move |w: &mut World| {
+                    if let Some(mut m) = w.get_mut::<crate::sim::Motives>(target) {
+                        m.0 = [100.0; 6];
+                    }
+                    if let Some(mut ml) = w.get_mut::<crate::life::Moodlets>(target) {
+                        ml.0.retain(|x| x.value >= 0);
+                    }
+                });
+                return;
+            }
+            _ => {}
+        }
     }
     // A lamp switched (or its room's, or the lot's), there and then (the game's are immediate).
     if let ActionKind::Object { target, .. } = kind
@@ -2766,10 +2884,20 @@ fn pie_buttons(
                 label = format!("{verb} {name}");
             }
         }
-        // The fish chosen for a bowl.
-        let mut fish_choice = label.strip_prefix("Place Fish: ")
-            .and_then(|n| inventories.get(a).ok().and_then(|inv| inv.0.iter().find(|s| s.kind == crate::inventory::ItemKind::Fish && s.name == n)))
-            .map(|s| (s.key.clone(), s.quality));
+        // The fish chosen to stock a bowl with (or a goldfish bought: `fishbowl`).
+        let mut fish_choice = if title != crate::fishbowl::STOCK {
+            None
+        } else if label.starts_with(crate::fishbowl::BUY_GOLDFISH) {
+            Some((crate::fishbowl::BUY_GOLDFISH.to_string(), 0))
+        } else {
+            ui_data.as_deref().and_then(|g| {
+                let inv = inventories.get(a).ok()?;
+                inv.0.iter().find(|s| s.kind == crate::inventory::ItemKind::Fish && crate::fishbowl::stock_label(g, s) == label).map(|s| (s.key.clone(), s.quality))
+            })
+        };
+        if fish_choice.is_some() {
+            label = crate::fishbowl::STOCK.to_string();
+        }
         // (What a plant's fertilized with: `gardening`.)
         if let Some(n) = label.strip_prefix(&format!("{}: ", crate::gardening::FERTILIZE))
             && let Some(s) = inventories.get(a).ok().and_then(|inv| inv.0.iter().find(|s| s.name == n))

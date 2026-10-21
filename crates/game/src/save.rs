@@ -983,7 +983,7 @@ fn save_game(
             &Transform,
             &Floor,
             &Motives,
-            &Skills,
+            Option<&Skills>,
             &Moodlets,
             Option<&Job>,
             &Relationships,
@@ -1016,10 +1016,12 @@ fn save_game(
                     Option<&crate::classes::ClassesTaken>,
                     Option<&crate::skillbooks::SkillBooks>,
                     (Option<&crate::novels::Novels>, Has<crate::computertraits::BookClub>, Option<&crate::timeoff::TimeOff>, Option<&crate::charity::Charities>),
+                    Has<crate::town::Townie>,
+                    Has<crate::visit::LotGuest>,
                 ),
             ),
         ),
-        (Without<crate::town::Townie>, Without<crate::visit::LotGuest>, Without<crate::services::ServiceNpc>),
+        Without<crate::services::ServiceNpc>,
     >,
     (bought, exit, graves, ghosts): (
         Query<(&GameObject, &Transform, Option<&crate::objects::Design>, Option<&crate::paintings::Hung>), With<Bought>>,
@@ -1064,8 +1066,13 @@ fn save_game(
     let Some(hh) = household else { return };
     // (The ghosts too: whom the living know among the dead.)
     let ids: HashMap<Entity, u64> = sims.iter().map(|q| (q.0, q.1.id)).chain(ghosts.iter().map(|g| (g.0, g.1.id))).collect();
+    // (Passers-by are kept only once the household knows them: then as Sims met, away.)
+    let known: std::collections::HashSet<Entity> = sims.iter().filter(|q| q.9).flat_map(|q| q.8.0.keys().copied()).collect();
     let mut saved = Vec::new();
-    for (_, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes, books, (novels, book_club, time_off, charities)))) in &sims {
+    for (e, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes, books, (novels, book_club, time_off, charities), townie, guest))) in &sims {
+        if (townie || guest) && !known.contains(&e) {
+            continue;
+        }
         if let Some(s) = staged {
             debug!("saving {} during portrait: scene {:?}, gameplay {:?}", sim.first, tf.translation, s.original.translation);
         }
@@ -1095,7 +1102,7 @@ fn save_game(
             yaw: tf.rotation.to_euler(EulerRot::YXZ).0,
             floor: level,
             motives: motives.0,
-            skills: skills.0.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+            skills: skills.map_or_else(Vec::new, |k| k.0.iter().map(|(k, v)| (k.to_string(), *v)).collect()),
             moodlets: moodlets.0.iter().filter(|m| m.until.is_finite()).map(|m| (m.kind.def().name.to_string(), m.until)).collect(),
             job: job.map(|j| SavedJob {
                 track: j.career().name.into(),

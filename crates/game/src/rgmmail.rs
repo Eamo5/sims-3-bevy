@@ -4,7 +4,10 @@
 //! gem cut ("Pear Cut Ruby", worth its cut's `Multiplier` more), the metal an ingot ("Gold
 //! Ingot", the game's `kSmeltMultiplier` 1.75), now and then more than one (`kChanceOfExtraIngot`
 //! 0.2 each time, up to `kMaxNumberOfIngots` 5). The finer cuts come with practice: each wants
-//! that many gems the Sim has had cut before (its `Cuts`).
+//! that many gems the Sim has had cut before (its `Cuts`). And a fish mailed off to be mounted
+//! (`HaveFishMounted`, "Send Fish to Be Mounted"): back the same way, its mounted object
+//! (`MountedFish`: "Mounted Minnow") to hang on a wall, for `kBaseCostToMountFish` §100 and
+//! `kCostToMountFishMultiplier` 0.3 of the fish's worth.
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -58,24 +61,35 @@ const SMELT_MULTIPLIER: f32 = 1.75;
 const EXTRA_INGOT: f64 = 0.2;
 const MOST_INGOTS: u32 = 5;
 
+/// `MountedFish`'s tuning: `kBaseCostToMountFish`, `kCostToMountFishMultiplier`.
+const MOUNT_BASE: i64 = 100;
+const MOUNT_MULTIPLIER: f32 = 0.3;
+
+/// What having a fish worth that mounted costs (the game's `GetCostToMountFish`).
+pub fn mount_cost(fish_worth: i64) -> i64 {
+    MOUNT_BASE + (fish_worth as f32 * MOUNT_MULTIPLIER) as i64
+}
+
 /// The hour the mail brings them back, the day after.
 const BACK_HOUR: f32 = 10.0;
 
 /// How the game names its menus.
 pub const GET_CUT: &str = "Get Cut";
 
-/// What's mailed off: to be cut (which), or smelted.
+/// What's mailed off: to be cut (which), smelted, or (a fish) mounted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Post {
     Cut(u8),
     Smelt,
+    Mount,
 }
 
-/// What a Sim's on their way to the mailbox to post: which stack of their inventory (one of it
-/// or all), and to be what.
+/// What a Sim's on their way to the mailbox to post: which stack of their inventory (by its
+/// key and quality; one of it or all), and to be what.
 #[derive(Component, Clone, Debug)]
 pub struct ToPost {
     pub key: String,
+    pub quality: u8,
     pub all: bool,
     pub what: Post,
 }
@@ -84,8 +98,8 @@ pub struct ToPost {
 #[derive(Component)]
 pub struct PostedNow;
 
-/// What's away being cut or smelted: whose (their Sim's id), what comes back, the day it does,
-/// and whether it's gems.
+/// What's away being cut, smelted or mounted: whose (their Sim's id), what comes back, the day
+/// it does, and whether it's gems or a mounted fish.
 #[derive(Resource, Default, Clone, Debug, Serialize, Deserialize)]
 pub struct Posted(pub Vec<Away>);
 
@@ -95,6 +109,8 @@ pub struct Away {
     pub back: Stack,
     pub day: u32,
     pub gem: bool,
+    #[serde(default)]
+    pub mounted: bool,
 }
 
 /// A find's kind (a gem, a metal...), by its key.
@@ -107,15 +123,20 @@ pub fn find_kind(data: &s3bake::GameDataBaked, s: &Stack) -> Option<CollectKind>
 fn quality(what: Post) -> u8 {
     match what {
         Post::Cut(i) => i + 1,
-        Post::Smelt => 1,
+        Post::Smelt | Post::Mount => 1,
     }
 }
 
 /// What can be had done to a stack of finds by mail, as its menu offers it: a raw metal smelted
 /// ("Get Smelted (§40)", "Smelt All §80"), an uncut gem cut ("Get Cut..." the cuts the Sim has
-/// cut enough gems for: "Pear Cut (§35)"), each paid for the stack's gems when it's "Cut all...".
+/// cut enough gems for: "Pear Cut (§35)"), each paid for the stack's gems when it's "Cut all...";
+/// a fish mounted ("Send Fish to Be Mounted (§112)").
 pub fn options(data: &s3bake::GameDataBaked, s: &Stack, gems_cut: u32) -> (Vec<(String, Post, bool)>, Vec<(String, Post, bool)>) {
     let (mut flat, mut cuts) = (Vec::new(), Vec::new());
+    if s.kind == ItemKind::Fish {
+        flat.push((format!("Send Fish to Be Mounted (§{})", mount_cost(s.each())), Post::Mount, false));
+        return (flat, cuts);
+    }
     if s.quality != 0 {
         return (flat, cuts);
     }
@@ -139,18 +160,22 @@ pub fn options(data: &s3bake::GameDataBaked, s: &Stack, gems_cut: u32) -> (Vec<(
     (flat, cuts)
 }
 
-/// What one costs.
-fn cost(what: Post) -> i64 {
+/// What one costs (one worth `each`).
+fn cost(what: Post, each: i64) -> i64 {
     match what {
         Post::Cut(i) => CUTS[i as usize].cost,
         Post::Smelt => SMELT_COST,
+        Post::Mount => mount_cost(each),
     }
 }
 
 /// Posted at the mailbox: out of the Sim's inventory and paid for, away till the next morning's
 /// mail (a gem cut kept count of, for the finer cuts).
+#[allow(clippy::too_many_arguments)]
 fn post_off(
     mut commands: Commands,
+    baked: Option<Res<crate::baked::Baked>>,
+    ui: Option<Res<crate::icons::GameUi>>,
     mut sims: Query<(Entity, &Sim, &ToPost, &mut Inventory), With<PostedNow>>,
     mut household: Option<ResMut<Household>>,
     mut posted: ResMut<Posted>,
@@ -161,9 +186,20 @@ fn post_off(
     let mut rng = rand::rng();
     for (e, sim, post, mut inv) in &mut sims {
         commands.entity(e).remove::<(ToPost, PostedNow)>();
-        let Some(k) = inv.0.iter().position(|s| s.kind == ItemKind::Find && s.key == post.key && s.quality == 0) else { continue };
+        let kind = if post.what == Post::Mount { ItemKind::Fish } else { ItemKind::Find };
+        let Some(k) = inv.0.iter().position(|s| s.kind == kind && s.key == post.key && s.quality == post.quality) else { continue };
         let n = if post.all { inv.0[k].count } else { 1 };
-        let price = cost(post.what) * n as i64;
+        let price = cost(post.what, inv.0[k].each()) * n as i64;
+        // (A fish's mounted object: its model's, "fishMinnow" to "FishMinnowMounted".)
+        let mounted = (post.what == Post::Mount)
+            .then(|| {
+                let model = ui.as_ref()?.data.collectibles.iter().find(|c| c.key == post.key)?.model.clone() + "Mounted";
+                baked.as_ref()?.0.catalog.iter().find(|c| c.instance_name.eq_ignore_ascii_case(&model)).map(|c| (c.instance_name.clone(), c.name.clone()))
+            })
+            .flatten();
+        if post.what == Post::Mount && mounted.is_none() {
+            continue;
+        }
         let Some(h) = household.as_deref_mut() else { continue };
         if h.funds < price {
             notes.push(format!("{} can't afford to mail it off (§{price}).", sim.first));
@@ -176,6 +212,10 @@ fn post_off(
             worth += inv.take_one(k).unwrap_or(0);
         }
         let (back, gem) = match post.what {
+            Post::Mount => {
+                let (key, mounted) = mounted.clone().unwrap_or_default();
+                (Stack { kind: ItemKind::Object, key, name: mounted, quality: 0, count: 1, worth: price }, false)
+            }
             Post::Cut(i) => {
                 let c = &CUTS[i as usize];
                 did.write(crate::journal::Did::count(e, crate::journal::Stat::GemsCut, n as f64));
@@ -197,7 +237,7 @@ fn post_off(
                 (Stack { kind: ItemKind::Find, key: post.key.clone(), name: format!("{name} Ingot"), quality: quality(post.what), count: ingots, worth: each * ingots as i64 }, false)
             }
         };
-        posted.0.push(Away { sim: sim.id, back, day: clock.day() + 1, gem });
+        posted.0.push(Away { sim: sim.id, back, day: clock.day() + 1, gem, mounted: post.what == Post::Mount });
     }
 }
 
@@ -216,11 +256,21 @@ fn mail_back(
     let day = clock.day();
     let (due, still): (Vec<Away>, Vec<Away>) = std::mem::take(&mut posted.0).into_iter().partition(|a| a.day <= day);
     posted.0 = still;
+    // (Mounted fish: the game's one notice for them all.)
+    match due.iter().filter(|a| a.mounted).count() {
+        0 => {}
+        1 => notes.push("You've gotten back a mounted fish!"),
+        _ => notes.push("You've gotten back some mounted fish!"),
+    }
     for a in due {
         let Some(who) = members.iter().find(|m| m.1.id == a.sim).or_else(|| members.iter().next()).map(|m| m.0) else { continue };
         let Ok((e, sim, inv)) = members.get_mut(who) else { continue };
         let what = if a.back.count > 1 { format!("{} × {}", a.back.count, a.back.name) } else { a.back.name.clone() };
-        notes.push(if a.gem { format!("{} received a shiny {what} from the gem cutter!", sim.first) } else { format!("{} received {what} from the local smelting facility.", sim.first) });
+        if a.gem {
+            notes.push(format!("{} received a shiny {what} from the gem cutter!", sim.first));
+        } else if !a.mounted {
+            notes.push(format!("{} received {what} from the local smelting facility.", sim.first));
+        }
         match inv {
             Some(mut inv) => inv.put(a.back),
             None => {
@@ -246,7 +296,15 @@ mod tests {
     fn what_comes_back_is_kept_apart_from_the_uncut() {
         assert_eq!(quality(Post::Cut(0)), 1);
         assert_eq!(quality(Post::Smelt), 1);
-        assert_eq!(cost(Post::Cut(2)), 35);
-        assert_eq!(cost(Post::Smelt), 40);
+        assert_eq!(cost(Post::Cut(2), 0), 35);
+        assert_eq!(cost(Post::Smelt, 0), 40);
+    }
+
+    #[test]
+    fn mounting_a_fish_costs_a_hundred_and_some_of_its_worth() {
+        assert_eq!(mount_cost(0), 100);
+        assert_eq!(mount_cost(41), 112);
+        assert_eq!(cost(Post::Mount, 100), 130);
+        assert_eq!(quality(Post::Mount), 1);
     }
 }

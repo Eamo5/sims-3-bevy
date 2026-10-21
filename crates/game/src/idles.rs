@@ -133,16 +133,16 @@ fn idle(
         if let Some(mut i) = idling {
             i.left -= dt;
             if !free || i.left <= 0.0 {
-                commands.entity(e).remove::<Idling>();
+                commands.entity(e).try_remove::<Idling>();
                 if clip.is_some_and(|c| c.start == Some(i.first)) {
-                    commands.entity(e).remove::<ActionClip>();
+                    commands.entity(e).try_remove::<ActionClip>();
                 }
             }
             continue;
         }
         let Some(age) = age_letter(sim.age) else { continue };
         let Some(mut next) = next else {
-            commands.entity(e).insert(NextIdle(clock.minutes + rng.random_range(5.0..15.0)));
+            commands.entity(e).try_insert(NextIdle(clock.minutes + rng.random_range(5.0..15.0)));
             continue;
         };
         if !free || clip.is_some() || clock.minutes < next.0 {
@@ -184,12 +184,12 @@ fn idle(
         }
         let (first, rest) = names.of(&pick.clips);
         debug!("{} idles: {} ({:.1} s)", sim.first, pick.clips.join(", "), length);
-        commands.entity(e).insert((ActionClip::steps(first, rest, &[]), Idling { first, left: length, total: length }));
+        commands.entity(e).try_insert((ActionClip::steps(first, rest, &[]), Idling { first, left: length, total: length }));
         if !pick.balloon.is_empty()
             && rng.random_bool(BALLOON_CHANCE)
             && let Some(b) = ui.data.balloons.list(&pick.balloon).and_then(|l| l.choose(&mut rng))
         {
-            commands.entity(e).insert(crate::balloons::BalloonRequest { kind: crate::balloons::BalloonKind::Thought, icon: b.icon.clone(), axis: b.axis });
+            commands.entity(e).try_insert(crate::balloons::BalloonRequest { kind: crate::balloons::BalloonKind::Thought, icon: b.icon.clone(), axis: b.axis });
         }
     }
 }

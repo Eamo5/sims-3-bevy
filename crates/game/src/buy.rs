@@ -2155,7 +2155,8 @@ fn placement(
         }
         return;
     }
-    let problem = tfs.get(ghost).ok().and_then(|tf| {
+    // (`moveobjects on`: anywhere.)
+    let problem = tfs.get(ghost).ok().filter(|_| !crate::cheats::move_objects()).and_then(|tf| {
         let b = building.as_deref()?;
         let bounds = bounds?;
         placement_problem(b, tf, bounds, floor.map_or(b.view_level, |(_, level)| level), ladder || on_surface.is_some(), opening.is_some() || wall_hung)

@@ -29,6 +29,12 @@ pub struct GameUi {
 }
 
 impl GameUi {
+    /// Just the game's data, no icons (tests).
+    #[cfg(test)]
+    pub fn for_tests(data: GameDataBaked) -> Self {
+        Self { data: Arc::new(data), icons: None, cache: HashMap::new() }
+    }
+
     /// An icon by name, decoded once.
     pub fn icon(&mut self, images: &mut Assets<Image>, name: &str) -> Option<Handle<Image>> {
         if name.is_empty() {

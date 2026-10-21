@@ -450,7 +450,7 @@ fn place_tags(
     world: Res<CurrentWorld>,
 ) {
     let Ok((cam, tf, sims_cam)) = cams.single() else { return };
-    let on = sims_cam.distance > MAP_DISTANCE;
+    let on = sims_cam.distance > MAP_DISTANCE && !crate::cheats::no_map_tags();
     // (Where the household's Sims work, and the lots they're out at.)
     let (mut work, mut out): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
     if on {

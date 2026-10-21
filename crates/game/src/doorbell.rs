@@ -100,16 +100,19 @@ fn host_outside(
     }
 }
 
-/// Callers ring and wait; left too long, they go home.
+/// Callers ring and wait; left too long, they go home. (The welcome wagon's neighbours: the
+/// game's one notice as the first of them is at the door, `WelcomeWagonTNS`.)
+#[allow(clippy::too_many_arguments)]
 fn door_waits(
     mut commands: Commands,
     clock: Res<crate::clock::GameClock>,
-    mut callers: Query<(Entity, &Sim, &mut AtTheDoor, &mut ActionQueue, Has<crate::sim::HouseholdMember>, &Transform)>,
+    mut callers: Query<(Entity, &Sim, &mut AtTheDoor, &mut ActionQueue, Has<crate::sim::HouseholdMember>, &Transform, Has<crate::home::WelcomeWagon>)>,
     mut notes: ResMut<Notifications>,
     mut sounds: MessageWriter<crate::sound::PlaySound>,
     bell: Res<crate::frontdoor::Doorbell>,
+    mut wagon_noted: Local<Option<f64>>,
 ) {
-    for (e, sim, mut door, mut queue, ours, tf) in &mut callers {
+    for (e, sim, mut door, mut queue, ours, tf, wagon) in &mut callers {
         // (The chime, as the bell's pressed.)
         if !door.rang
             && let Some(a) = queue.0.front()
@@ -124,7 +127,12 @@ fn door_waits(
             // (Rung: now waiting.)
             None if queue.0.is_empty() => {
                 door.since = Some(clock.minutes);
-                if !ours {
+                if wagon {
+                    if wagon_noted.is_none_or(|t| clock.minutes - t > WAIT_MINUTES) {
+                        *wagon_noted = Some(clock.minutes);
+                        notes.push("Some neighbors have arrived to welcome the household to the town!");
+                    }
+                } else if !ours {
                     notes.push(format!("{} is at the door.", sim.full_name()));
                 }
             }
@@ -134,7 +142,9 @@ fn door_waits(
                 commands.entity(e).remove::<AtTheDoor>();
             }
             Some(since) if clock.minutes - since > WAIT_MINUTES => {
-                notes.push(format!("{} got tired of waiting at the door and went home.", sim.first));
+                if !wagon {
+                    notes.push(format!("{} got tired of waiting at the door and went home.", sim.first));
+                }
                 queue.0.clear();
                 commands.entity(e).remove::<AtTheDoor>().insert(GoingHome);
             }

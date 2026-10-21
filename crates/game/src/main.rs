@@ -289,7 +289,6 @@ fn main() {
         .add_plugins((homes::HomesPlugin, calls::CallsPlugin, classes::ClassesPlugin, learning::LearningPlugin, venues::VenuesPlugin, skillbooks::SkillBooksPlugin, tips::TipsPlugin, traitacts::TraitActsPlugin, potty::PottyPlugin, doorlocks::DoorLocksPlugin, curfew::CurfewPlugin, klepto::KleptoPlugin, shop::ShopPlugin, ambrosia::AmbrosiaPlugin, seatedtalk::SeatedTalkPlugin))
         .add_plugins((novels::NovelsPlugin, chatonline::ChatOnlinePlugin, instruments::InstrumentsPlugin, daydream::DaydreamPlugin, hotdrinks::HotDrinksPlugin, highchair::HighChairPlugin, lights::LightsPlugin, careerholes::CareerHolesPlugin, cheats::CheatsPlugin, rgmmail::RgmMailPlugin))
         .add_systems(OnEnter(PlayMode::Live), home::move_in)
-        .add_systems(Update, home::welcome_wagon.run_if(in_state(PlayMode::Live)))
         .add_systems(Startup, load_ui_font)
         .run();
 }

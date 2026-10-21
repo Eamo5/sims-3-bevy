@@ -65,6 +65,9 @@ fn note_visits(clock: Res<crate::clock::GameClock>, mut visits: ResMut<LotVisits
     }
 }
 
+/// Asked for by the testing cheats' "Force Visitor": someone comes by now.
+pub static FORCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Now and then of an evening, someone the family knows comes over unasked.
 #[allow(clippy::type_complexity)]
 fn drop_ins(
@@ -77,15 +80,18 @@ fn drop_ins(
     coming: Query<(), (Or<(With<Invited>, With<crate::doorbell::AtTheDoor>)>, Without<HouseholdMember>)>,
     party: Option<Res<crate::interact::Party>>,
 ) {
-    if clock.minutes - *last_look < LOOK_EVERY {
+    // (The testing cheats' "Force Visitor": now, whatever the hour.)
+    let forced = FORCE.load(std::sync::atomic::Ordering::Relaxed);
+    if !forced && clock.minutes - *last_look < LOOK_EVERY {
         return;
     }
     *last_look = clock.minutes;
     let hour = clock.hour_f() as f64;
-    let wanted = wanted_at(hour);
+    let wanted = if forced { 1.0 } else { wanted_at(hour) };
     // (DROP_IN=1 or a first name, tests: no waiting for the evening's chance or the day since
     // the last.)
-    let test = std::env::var("DROP_IN").is_ok();
+    let test = std::env::var("DROP_IN").is_ok() || forced;
+    FORCE.store(false, std::sync::atomic::Ordering::Relaxed);
     if wanted <= 0.0 || party.is_some() || !coming.is_empty() || (!test && visits.last.is_some_and(|t| clock.minutes - t < LOT_GAP_MINUTES)) {
         return;
     }

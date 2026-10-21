@@ -525,6 +525,13 @@ fn place_balloons(
     mut parts: Query<(&ChildOf, &mut ImageNode), With<BalloonPart>>,
 ) {
     let now = time.elapsed_secs();
+    // (`hideHeadlineEffects on`: none.)
+    if crate::cheats::hide_headlines() {
+        for (e, ..) in &balloons {
+            commands.entity(e).try_despawn();
+        }
+        return;
+    }
     let Ok((cam, cam_tf)) = cams.single() else { return };
     let right = cam_tf.right().as_vec3();
     let mut alpha: HashMap<Entity, f32> = HashMap::new();

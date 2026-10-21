@@ -231,7 +231,7 @@ pub enum ItemButton {
     /// Handed to another of the household, into their inventory (the game's drag onto their
     /// portrait).
     GiveTo(Entity),
-    /// Mailed off to be cut or smelted, one or all of them (`rgmmail`).
+    /// Mailed off to be cut, smelted or mounted, one or all of them (`rgmmail`).
     Post(crate::rgmmail::Post, bool),
     /// Read (a doctor's journal).
     Read,
@@ -467,8 +467,12 @@ fn inventory_buttons(
                     continue;
                 };
                 let def = crate::interact::interactions_for(ObjectKind::Mailbox).iter().position(|d| d.special == Special::PostAway).unwrap_or(0);
-                let label = if *what == crate::rgmmail::Post::Smelt { "Get Smelted" } else { crate::rgmmail::GET_CUT };
-                commands.entity(me).insert(crate::rgmmail::ToPost { key: s.key.clone(), all: *all, what: *what });
+                let label = match what {
+                    crate::rgmmail::Post::Smelt => "Get Smelted",
+                    crate::rgmmail::Post::Mount => "Send Fish to Be Mounted",
+                    crate::rgmmail::Post::Cut(_) => crate::rgmmail::GET_CUT,
+                };
+                commands.entity(me).insert(crate::rgmmail::ToPost { key: s.key.clone(), quality: s.quality, all: *all, what: *what });
                 queue.push_player(Action::new(label, ActionKind::Object { target: mailbox, def }, false));
             }
             ItemButton::GiveTo(to) => {

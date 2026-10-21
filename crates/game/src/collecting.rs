@@ -121,6 +121,34 @@ fn info<'a>(ui: &'a crate::icons::GameUi, key: &str) -> Option<&'a CollectibleIn
     ui.data.collectibles.iter().find(|c| c.key.eq_ignore_ascii_case(key))
 }
 
+/// What a Sim inspecting the water by a fishing spot learns (the game's `InspectWater`): whether
+/// fish are about there, and which, by name where their Fishing skill has reached the fish's
+/// level or they've caught one (else "Unknown Fish").
+pub fn inspect_water(ui: &crate::icons::GameUi, words: Option<&crate::layout::UiAssets>, class: &str, skill: u32, caught: impl Fn(&str) -> bool) -> String {
+    let word = |key: &str, plain: &str| words.and_then(|u| u.localize(key)).unwrap_or_else(|| plain.to_string());
+    let fish: Vec<&CollectibleInfo> = ui
+        .data
+        .spawners
+        .iter()
+        .find(|s| s.class == class)
+        .map(|s| s.items.iter().filter(|(_, w)| *w > 0.0).filter_map(|(k, _)| info(ui, k)).filter(|c| c.kind == CollectKind::Fish).collect())
+        .unwrap_or_default();
+    if fish.is_empty() {
+        return word("Gameplay/Objects/Fishing:EmptyWater", "There aren't many fish here. Try looking where fish are swimming!");
+    }
+    let mut out = word("Gameplay/Objects/Fishing:ActiveWater", "This is a great spot to fish! The fish are very active.");
+    out.push('\n');
+    for c in fish {
+        out.push('\n');
+        if skill >= c.level as u32 || caught(&c.key) {
+            out.push_str(&c.name);
+        } else {
+            out.push_str(&word("Gameplay/Objects/Fishing:UnknownFish", "Unknown Fish"));
+        }
+    }
+    out
+}
+
 fn pick_weighted<'a>(items: &'a [(String, f32)], ok: impl Fn(&str) -> bool) -> Option<&'a str> {
     pick_scaled(items, |k, w| if ok(k) { w } else { 0.0 })
 }

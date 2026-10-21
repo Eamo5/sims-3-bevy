@@ -511,17 +511,10 @@ fn auto_move_in(
 /// How long after a family moves in the welcome wagon comes (the game's `TimeUntilWagonArrives`).
 const WAGON_HOURS: f64 = 3.0;
 
-/// A neighbour on the welcome wagon (to the family of this name).
+/// A neighbour on the welcome wagon (to the family of this name): the first of them at the door
+/// says so for them all, and those not let in go home without a word (`doorbell`).
 #[derive(Component)]
 pub struct WelcomeWagon(pub String);
-
-/// The welcome wagon come: a word of it, as they reach the house.
-pub fn welcome_wagon(mut commands: Commands, came: Query<(Entity, &Sim, &WelcomeWagon), Added<crate::interact::Visitor>>, mut notes: ResMut<Notifications>) {
-    for (e, s, w) in &came {
-        notes.push(format!("{} from next door came over to welcome the {} family.", s.full_name(), w.0));
-        commands.entity(e).remove::<WelcomeWagon>();
-    }
-}
 
 /// A town family moves straight into their own home.
 fn premade_move_in(

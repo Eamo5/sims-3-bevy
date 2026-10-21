@@ -572,6 +572,12 @@ pub fn eyes_by_look(look: u64) -> Color {
     Color::srgb(r, g, b)
 }
 
+/// A first name, a girl's or a boy's as a coin falls (the game's `GetRandomGivenName`).
+pub fn random_first_name(rng: &mut impl Rng) -> String {
+    let names: &[&str] = if rng.random_bool(0.5) { &FIRST_F } else { &FIRST_M };
+    names[rng.random_range(0..names.len())].to_string()
+}
+
 pub fn random_sim(rng: &mut impl Rng, last: &str, female: Option<bool>, age: Age) -> Sim {
     let female = female.unwrap_or_else(|| rng.random_bool(0.5));
     let first = if female { FIRST_F[rng.random_range(0..FIRST_F.len())] } else { FIRST_M[rng.random_range(0..FIRST_M.len())] };
@@ -762,7 +768,8 @@ fn decay_motives(
     >,
 ) {
     let hours = delta.0 / 60.0;
-    if hours <= 0.0 {
+    // (The testing cheats' "Toggle Motive Decay": as they are.)
+    if hours <= 0.0 || crate::cheats::no_decay() {
         return;
     }
     for (mut m, scale, sim, wishes, at_work, away, job, moodlets) in &mut q {

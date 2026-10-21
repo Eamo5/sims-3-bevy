@@ -475,7 +475,7 @@ impl ObjectKind {
             Self::Light
         } else if has("flora") || n.contains("plant") || has("tree") {
             Self::Plant
-        } else if has("decorations") && is_art(&n) {
+        } else if (has("decorations") && is_art(&n)) || has("fishing.mountedfish") {
             Self::Art
         } else if has("decorations") {
             Self::Decoration
@@ -1457,13 +1457,18 @@ static MEAL: [InteractionDef; 2] = [
     InteractionDef { special: Special::GrabPlate, ..def("Grab a Plate", 2.0, [9000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) },
     InteractionDef { special: Special::PutAway, ..def("Put Away Leftovers", 3.0, N, Pose::Use) },
 ];
-static MAILBOX: [InteractionDef; 4] = [InteractionDef { special: Special::PayBills, ..def("Pay Bills", 3.0, N, Pose::Use) },
+static MAILBOX: [InteractionDef; 8] = [InteractionDef { special: Special::PayBills, ..def("Pay Bills", 3.0, N, Pose::Use) },
     // (The game's `DonateToCharity`, offered as its causes' menus.)
     InteractionDef { autonomous: false, special: Special::Donate, ..def("Donate to Charity", 2.0, N, Pose::Use) },
     // (With the testing cheats on: `cheats`.)
     InteractionDef { autonomous: false, special: Special::MakeAllHappy, ..def(crate::cheats::MAKE_ALL_HAPPY, 0.0, N, Pose::Use) },
     // (A gem or metal posted off to be cut or smelted, from the inventory: `rgmmail`.)
     InteractionDef { autonomous: false, special: Special::PostAway, ..def("Post", 2.0, N, Pose::Use) },
+    // (The testing cheats' others: `cheats`.)
+    InteractionDef { autonomous: false, special: Special::MakeAllHappy, ..def(crate::cheats::MAKE_FRIENDS, 0.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::MakeAllHappy, ..def(crate::cheats::KNOW_EVERYONE, 0.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::MakeAllHappy, ..def(crate::cheats::MOTIVE_DECAY, 0.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::MakeAllHappy, ..def(crate::cheats::FORCE_VISITOR, 0.0, N, Pose::Use) },
 ];
 static NEWSPAPER: [InteractionDef; 4] = [
     InteractionDef { special: Special::GetPaper, ..def("Read", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 45.0], Pose::Use) },
@@ -2862,6 +2867,9 @@ pub enum ActionKind {
     GoHomeFromLot,
     /// An option greyed on a menu, and why (`stress`): never chosen.
     Greyed(String),
+    /// Something learned at once, from a menu (Inspect Water): its words, a notice (never
+    /// queued).
+    Notice(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -3676,7 +3684,7 @@ pub(crate) fn run_actions(
                             commands.entity(me).insert(clip);
                             continue;
                         }
-                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) => None,
+                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) => None,
                         ActionKind::Outro { .. } => {
                             action.phase = Phase::Running(0.0);
                             continue;
@@ -4314,6 +4322,7 @@ pub(crate) fn run_actions(
                             | ActionKind::WakeUp { .. }
                             | ActionKind::InventoryItem(..)
                             | ActionKind::Greyed(_)
+                            | ActionKind::Notice(_)
                             | ActionKind::EatHere
                             | ActionKind::EatItem { .. }
                             | ActionKind::Outro { .. }
@@ -4952,7 +4961,11 @@ pub(crate) fn run_actions(
                                         }
                                         Special::PlaceFish => {
                                             if let Some((key, quality)) = action.fish_choice.take() {
-                                                commands.entity(me).insert(crate::fishbowl::BowlRequest::Place { bowl: *target, key, quality });
+                                                commands.entity(me).insert(if key == crate::fishbowl::BUY_GOLDFISH {
+                                                    crate::fishbowl::BowlRequest::Buy(*target)
+                                                } else {
+                                                    crate::fishbowl::BowlRequest::Place { bowl: *target, key, quality }
+                                                });
                                             }
                                         }
                                         Special::TakeFish => {

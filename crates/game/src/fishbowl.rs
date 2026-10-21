@@ -4,7 +4,11 @@
 //! 36, when Sims feed it of their own accord), dead after three days unfed
 //! (`kHoursUntilFishDiesIfNotFed` 72: belly up, till someone cleans the bowl out, `CleanOut`).
 //! Bowls of perfect fish of different kinds count towards The Perfect Aquarium lifetime wish.
-//! What swims where, and when it was fed, is kept in saves.
+//! Its menu is the game's: "Stock" it with a fish of the Sim's or a goldfish bought ("Buy a
+//! GoldFish - §N", the goldfish's least price, `Fish.kCostOfNewGoldfish`); "Feed", "Scoop Out" and
+//! "Dispose of" the fish by its name, or its kind till it has one ("Feed Minnow"); "Give Name to"
+//! it (`NameComponent.SetNameViaDialog`: a name typed in, a random one offered).
+//! What swims where, when it was fed and what it's called is kept in saves.
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -20,7 +24,7 @@ impl Plugin for FishBowlPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PerfectFish>()
             .init_resource::<PendingBowls>()
-            .add_systems(Update, (restore_bowls, bowl_requests, hunger, swim, census).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (restore_bowls, bowl_requests, hunger, swim, census, named).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -32,23 +36,58 @@ pub struct BowlFish {
     model: Option<Entity>,
     pub fed_at: f64,
     pub dead: bool,
+    /// The name it's been given, if it has one.
+    pub name: Option<String>,
 }
 
 impl BowlFish {
+    /// What its menus call it: its name, or its kind (the game's `GetNameOrSpecies`).
+    pub fn called(&self, ui: &crate::icons::GameUi) -> String {
+        self.name.clone().unwrap_or_else(|| species(ui, &self.fish.key))
+    }
+
     /// Hungry: due feeding (and Sims see to it of their own accord).
     pub fn hungry(&self, now: f64) -> bool {
         !self.dead && now - self.fed_at >= HUNGRY_HOURS * 60.0
     }
 }
 
+/// How the game names the bowl's menus: `Stock`, its goldfish to buy (`BuyGoldfish`), and the
+/// fish's naming (`NameComponent`'s `InteractionName` and `Rename`).
+pub const STOCK: &str = "Stock";
+pub const BUY_GOLDFISH: &str = "Buy a GoldFish";
+pub const GIVE_NAME: &str = "Give Name to ";
+pub const RENAME: &str = "Rename ";
+/// A fish's name, at most this long (`NameComponent.DefaultMaxLength`).
+pub const NAME_LENGTH: usize = 24;
+/// A goldfish bought is of normal quality (the gardening qualities' Normal).
+const BOUGHT_QUALITY: u8 = 3;
+
+/// What a goldfish for a bowl costs: the goldfish's least price, as the game's.
+pub fn goldfish_price(ui: &crate::icons::GameUi) -> i64 {
+    ui.data.collectibles.iter().find(|c| c.key == "Goldfish").map_or(10, |c| c.min_price as i64)
+}
+
+/// A fish's kind, as it's called ("Minnow").
+pub fn species(ui: &crate::icons::GameUi, key: &str) -> String {
+    ui.data.collectibles.iter().find(|c| c.key == key).map_or_else(|| key.to_string(), |c| c.name.clone())
+}
+
+/// A fish of the Sim's as "Stock" lists it: its kind and quality ("Minnow (Very Nice)").
+pub fn stock_label(ui: &crate::icons::GameUi, s: &Stack) -> String {
+    format!("{} ({})", species(ui, &s.key), crate::gardening::QUALITIES[(s.quality as usize).min(PERFECT as usize)].0)
+}
+
 /// The game's tuned hours: hungry, and dead, after the last feeding.
 const HUNGRY_HOURS: f64 = 36.0;
 const DIES_HOURS: f64 = 72.0;
 
-/// A Sim at a bowl: put a fish in, take it out, feed it, or clean the dead one out.
+/// A Sim at a bowl: put a fish in (or a goldfish bought), take it out, feed it, or clean the
+/// dead one out.
 #[derive(Component, Clone)]
 pub enum BowlRequest {
     Place { bowl: Entity, key: String, quality: u8 },
+    Buy(Entity),
     Take(Entity),
     Feed(Entity),
     Clean(Entity),
@@ -68,6 +107,8 @@ pub struct SavedBowl {
     pub fed_at: Option<f64>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub dead: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// Bowls' fish from a save, waiting for the bowls to be set out.
@@ -170,34 +211,49 @@ fn bowl_requests(
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut notes: ResMut<Notifications>,
     clock: Res<crate::clock::GameClock>,
+    mut household: Option<ResMut<crate::interact::Household>>,
 ) {
     let (Some(data), Some(ui)) = (data, ui) else { return };
     let mut transferred = std::collections::HashSet::new();
     for (e, sim, req, inv) in &mut sims {
         commands.entity(e).remove::<BowlRequest>();
-        let bowl = match req { BowlRequest::Place { bowl, .. } | BowlRequest::Take(bowl) | BowlRequest::Feed(bowl) | BowlRequest::Clean(bowl) => *bowl };
+        let bowl = match req { BowlRequest::Place { bowl, .. } | BowlRequest::Buy(bowl) | BowlRequest::Take(bowl) | BowlRequest::Feed(bowl) | BowlRequest::Clean(bowl) => *bowl };
         if transferred.contains(&bowl) { continue; }
         match req {
-            BowlRequest::Place { key, quality, .. } => {
-                let (Ok((obj, held)), Some(mut inv)) = (bowls.get_mut(bowl), inv) else { continue };
+            BowlRequest::Place { .. } | BowlRequest::Buy(_) => {
+                let Ok((obj, held)) = bowls.get_mut(bowl) else { continue };
                 if obj.kind != ObjectKind::FishBowl || held.is_some() {
                     continue;
                 }
-                let Some(fish) = take_fish(&mut inv, key, *quality) else { continue };
+                let fish = match req {
+                    BowlRequest::Place { key, quality, .. } => {
+                        let Some(mut inv) = inv else { continue };
+                        let Some(fish) = take_fish(&mut inv, key, *quality) else { continue };
+                        fish
+                    }
+                    // (A goldfish bought, paid for now: not if the money's gone since.)
+                    _ => {
+                        let price = goldfish_price(&ui);
+                        let Some(h) = household.as_deref_mut().filter(|h| h.funds >= price) else { continue };
+                        h.funds -= price;
+                        let name = format!("{} {}", crate::gardening::QUALITIES[BOUGHT_QUALITY as usize].0, species(&ui, "Goldfish"));
+                        Stack { kind: ItemKind::Fish, key: "Goldfish".into(), name, quality: BOUGHT_QUALITY, count: 1, worth: price }
+                    }
+                };
                 transferred.insert(bowl);
                 let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
                 let model = spawn_fish(&mut commands, bowl, obj, &fish, &data, &ui, &mut assets, &mut ctx);
                 notes.push(format!("{} put {} {} in the fish bowl.", sim.first, if fish.name.starts_with(['A', 'E', 'I', 'O', 'U']) { "an" } else { "a" }, fish.name));
                 // (FISH_FED_AGO=<hours>, tests: fed that long ago.)
                 let ago = std::env::var("FISH_FED_AGO").ok().and_then(|h| h.parse::<f64>().ok()).unwrap_or(0.0) * 60.0;
-                commands.entity(bowl).insert(BowlFish { fish, model, fed_at: clock.minutes - ago, dead: false });
+                commands.entity(bowl).insert(BowlFish { fish, model, fed_at: clock.minutes - ago, dead: false, name: None });
             }
             BowlRequest::Feed(_) => {
                 if let Ok((_, Some(mut held))) = bowls.get_mut(bowl)
                     && !held.dead
                 {
                     held.fed_at = clock.minutes;
-                    notes.push(format!("{} fed the {}.", sim.first, held.fish.name));
+                    notes.push(format!("{} fed {}.", sim.first, held.name.clone().unwrap_or_else(|| format!("the {}", held.fish.name))));
                 }
             }
             BowlRequest::Clean(_) => {
@@ -216,11 +272,12 @@ fn bowl_requests(
                 if obj.kind != ObjectKind::FishBowl || held.dead { continue; }
                 transferred.insert(bowl);
                 let fish = held.fish.clone();
+                let called = held.name.clone().unwrap_or_else(|| format!("the {}", fish.name));
                 if let Some(m) = held.model {
                     commands.entity(m).try_despawn();
                 }
                 commands.entity(bowl).remove::<BowlFish>();
-                notes.push(format!("{} took the {} out of the fish bowl.", sim.first, fish.name));
+                notes.push(format!("{} took {called} out of the fish bowl.", sim.first));
                 crate::inventory::give(&mut commands, e, ItemKind::Fish, fish.key.clone(), fish.name.clone(), fish.quality, fish.worth, 1);
             }
         }
@@ -249,7 +306,7 @@ fn restore_bowls(
         };
         let model = spawn_fish(&mut commands, e, obj, &b.fish, &data, &ui, &mut assets, &mut ctx);
         // (Saved before feeding was kept: fed just now.)
-        commands.entity(e).insert(BowlFish { fish: b.fish.clone(), model, fed_at: b.fed_at.unwrap_or(clock.minutes), dead: b.dead });
+        commands.entity(e).insert(BowlFish { fish: b.fish.clone(), model, fed_at: b.fed_at.unwrap_or(clock.minutes), dead: b.dead, name: b.name.clone() });
         if b.dead
             && let Some(m) = model
         {
@@ -271,12 +328,55 @@ fn census(bowls: Query<&BowlFish, (Without<crate::visit::LotObject>, Without<cra
 
 /// The bowls' fish, for saving.
 pub fn saved(bowls: &Query<(&BowlFish, &Transform), (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>) -> Vec<SavedBowl> {
-    bowls.iter().map(|(b, tf)| SavedBowl { at: tf.translation.to_array(), fish: b.fish.clone(), fed_at: Some(b.fed_at), dead: b.dead }).collect()
+    bowls.iter().map(|(b, tf)| SavedBowl { at: tf.translation.to_array(), fish: b.fish.clone(), fed_at: Some(b.fed_at), dead: b.dead, name: b.name.clone() }).collect()
+}
+
+/// "Give Name to" (or "Rename") the fish in a bowl: the game's box to type its name in, a random
+/// one offered.
+pub fn ask_name(w: &mut World, bowl: Entity) {
+    let Some(fish) = w.get::<BowlFish>(bowl).cloned() else { return };
+    let Some(ui) = w.get_resource::<crate::icons::GameUi>() else { return };
+    let kind = species(ui, &fish.fish.key);
+    let called = fish.called(ui);
+    let suggested = fish.name.clone().unwrap_or_else(|| crate::sim::random_first_name(&mut rand::rng()));
+    w.resource_mut::<crate::dialog::Questions>().ask(crate::dialog::Ask {
+        about: crate::dialog::Question::NameObject { object: bowl, suggested },
+        icon: String::new(),
+        heading: called.clone(),
+        title: format!("Give Name to {called}"),
+        text: format!("What name do you want to give to this {kind}?"),
+        answers: vec![crate::dialog::Answer { label: "OK".into(), detail: String::new(), icon: String::new() }],
+    });
+}
+
+/// A fish named (OK pressed with something typed: cancelled, or nothing, it stays as it was).
+fn named(mut answers: MessageReader<crate::dialog::Answered>, typed: Res<crate::dialog::Typed>, mut bowls: Query<&mut BowlFish>) {
+    for a in answers.read() {
+        let crate::dialog::Question::NameObject { object, .. } = &a.about else { continue };
+        let t = typed.0.trim();
+        if a.answer == 0
+            && !t.is_empty()
+            && let Ok(mut b) = bowls.get_mut(*object)
+        {
+            b.name = Some(t.chars().take(NAME_LENGTH).collect());
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bowls_fish_is_called_by_its_name_or_else_its_kind() {
+        let fish = Stack { kind: ItemKind::Fish, key: "Minnow".into(), name: "Nice Minnow".into(), quality: 4, count: 1, worth: 5 };
+        let mut b = BowlFish { fish, model: None, fed_at: 0.0, dead: false, name: None };
+        let ui = crate::icons::GameUi::for_tests(Default::default());
+        assert_eq!(b.called(&ui), "Minnow");
+        assert_eq!(stock_label(&ui, &b.fish), "Minnow (Nice)");
+        b.name = Some("Bubbles".into());
+        assert_eq!(b.called(&ui), "Bubbles");
+    }
 
     #[test]
     fn undoable_sales_do_not_count_or_save_the_sold_fish() {
@@ -287,6 +387,7 @@ mod tests {
             model: None,
             fed_at: 0.0,
             dead: false,
+            name: None,
         };
         app.world_mut().spawn((bowl("salmon"), Transform::default()));
         let sold = app.world_mut().spawn((bowl("trout"), Transform::default(), crate::buyhistory::HistoryHidden)).id();

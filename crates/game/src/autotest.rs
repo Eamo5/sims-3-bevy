@@ -197,6 +197,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, (apply_cam, watch_insect, ask_question, (keep_hungry, all_use, set_grime), wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, (run_out, give_topics, give_homework), face_hook, shots_every, (show_designs, show_style), walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, strand_swimmers.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, press_key.after(bevy::input::InputSystems).before(crate::buy::toggle_buy).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(PreUpdate, hold_shift.after(bevy::input::InputSystems))
             .add_systems(PreUpdate, buy_pick.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, know_people.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, load_shot.run_if(in_state(AppState::Loading)))
@@ -1221,6 +1222,13 @@ fn buy_design_test(
     if time.elapsed_secs() > 11.0 { assert_eq!(*stage, 6, "the design probe must complete"); }
 }
 
+/// HOLD_SHIFT=1 (tests): Shift held down throughout (a Shift-click's menus).
+fn hold_shift(mut keys: ResMut<ButtonInput<KeyCode>>) {
+    if std::env::var("HOLD_SHIFT").is_ok() {
+        keys.press(KeyCode::ShiftLeft);
+    }
+}
+
 /// PRESS_KEY=<key>@<seconds>;...: keys pressed in order (and let go a moment later): F1–F12,
 /// PrintScreen, PageUp, PageDown, Escape, Home, a letter or a digit.
 fn press_key(time: Res<Time<InputTimeline>>, mut keys: ResMut<ButtonInput<KeyCode>>, mut done: Local<usize>) {
@@ -1396,8 +1404,9 @@ fn wear_uniform(mut commands: Commands, sel: Query<Entity, With<crate::sim::Sele
 
 /// GIVE=<item>,...: puts things in the selected Sim's inventory: a collectible's key
 /// (`Ruby`, `Minnow`) or `<produce>/<quality 0-9>`, each with an optional `*<count>`.
-/// EAT=1: then they eat the first produce. POST=<key>:<cut number|smelt>[:all]: then they
-/// mail one of those off to be cut or smelted, as its inventory menu does (`rgmmail`).
+/// EAT=1: then they eat the first produce. POST=<key>:<cut number|smelt|mount>[:all]: then they
+/// mail one of those off to be cut, smelted or (a fish) mounted, as its inventory menu does
+/// (`rgmmail`).
 /// EAT=check: verify consumption at the start, then cancel and verify it stays consumed.
 fn give_items(
     mut commands: Commands,
@@ -1430,12 +1439,13 @@ fn give_items(
     }
     if *done == 1
         && let Ok(p) = std::env::var("POST")
-        && let Some(s) = p.split(':').next().and_then(|key| inv.and_then(|i| i.0.iter().find(|s| s.key == key && s.quality == 0)))
+        && let Some(s) = p.split(':').next().and_then(|key| inv.and_then(|i| i.0.iter().find(|s| s.key == key && (s.quality == 0 || s.kind == crate::inventory::ItemKind::Fish))))
     {
         *done = 2;
         let mut parts = p.split(':').skip(1);
         let what = match parts.next() {
             Some("smelt") => crate::rgmmail::Post::Smelt,
+            Some("mount") => crate::rgmmail::Post::Mount,
             n => crate::rgmmail::Post::Cut(n.and_then(|n| n.parse().ok()).unwrap_or(0)),
         };
         info!("posting {} ({what:?})", s.name);
@@ -1452,7 +1462,7 @@ fn give_items(
     }
     if std::env::var("BOWL").is_ok() && *done == 1
         && let Some((key, quality, _)) = expected.as_ref()
-        && let Some(action) = queue.0.iter_mut().find(|a| a.label == "Place Fish" && !a.cancel)
+        && let Some(action) = queue.0.iter_mut().find(|a| (a.label == "Place Fish" || a.label == crate::fishbowl::STOCK) && !a.cancel)
     {
         action.fish_choice = Some((key.clone(), *quality));
         *done = 2;

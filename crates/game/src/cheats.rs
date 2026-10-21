@@ -40,8 +40,51 @@ pub fn testing() -> bool {
     TESTING.load(Ordering::Relaxed)
 }
 
+/// `moveobjects on`: objects put down anywhere, over walls and one another (the game's build and
+/// buy cheat).
+pub static MOVE_OBJECTS: AtomicBool = AtomicBool::new(false);
+/// `freerealestate on`: homes bought for nothing.
+pub static FREE_REAL_ESTATE: AtomicBool = AtomicBool::new(false);
+/// `hideHeadlineEffects on`: no thought or speech balloons over the Sims.
+pub static HIDE_HEADLINES: AtomicBool = AtomicBool::new(false);
+/// `mapTags off`: no map tags in map view.
+pub static NO_MAP_TAGS: AtomicBool = AtomicBool::new(false);
+
+pub fn move_objects() -> bool {
+    MOVE_OBJECTS.load(Ordering::Relaxed)
+}
+pub fn free_real_estate() -> bool {
+    FREE_REAL_ESTATE.load(Ordering::Relaxed)
+}
+pub fn hide_headlines() -> bool {
+    HIDE_HEADLINES.load(Ordering::Relaxed)
+}
+pub fn no_map_tags() -> bool {
+    NO_MAP_TAGS.load(Ordering::Relaxed)
+}
+
 /// How the game names the mailbox's testing cheat.
 pub const MAKE_ALL_HAPPY: &str = "Make All Happy";
+/// The mailbox's other testing cheats (the game's `Cheats`): five strangers about made friends,
+/// everyone known, the needs left as they are, a visitor come by now.
+pub const MAKE_FRIENDS: &str = "Make Friends For Me";
+pub const KNOW_EVERYONE: &str = "Make Me Know Everyone";
+pub const MOTIVE_DECAY: &str = "Toggle Motive Decay";
+pub const FORCE_VISITOR: &str = "Force Visitor";
+/// A Sim's, Shift-clicked with the testing cheats on: grown up now, one of the household, needs
+/// full.
+pub const TRIGGER_AGE: &str = "Trigger Age Transition";
+pub const ADD_TO_FAMILY: &str = "Add to Family";
+pub const MAKE_HAPPY: &str = "Make Happy";
+/// How many strangers "Make Friends For Me" befriends (the game's `kNumFriendsForMe`).
+const FRIENDS_FOR_ME: usize = 5;
+
+/// `Toggle Motive Decay`: needs left as they are.
+pub static NO_DECAY: AtomicBool = AtomicBool::new(false);
+
+pub fn no_decay() -> bool {
+    NO_DECAY.load(Ordering::Relaxed)
+}
 
 /// The console's line on screen.
 #[derive(Component)]
@@ -126,7 +169,27 @@ pub fn run_cheat(w: &mut World, line: &str) -> String {
             String::new()
         }
         "resetsim" => reset_sim(w, arg(1), arg(2)),
-        "help" => "kaching, motherlode, familyFunds <household> <amount>, speed <0-4>, resetSim <first> <last>, testingCheatsEnabled true|false, fps on|off".to_string(),
+        "moveobjects" => {
+            MOVE_OBJECTS.store(on(arg(1)), Ordering::Relaxed);
+            format!("moveObjects {}", if on(arg(1)) { "on" } else { "off" })
+        }
+        "freerealestate" => {
+            FREE_REAL_ESTATE.store(on(arg(1)), Ordering::Relaxed);
+            format!("freeRealEstate {}", if on(arg(1)) { "on" } else { "off" })
+        }
+        "hideheadlineeffects" => {
+            HIDE_HEADLINES.store(on(arg(1)), Ordering::Relaxed);
+            String::new()
+        }
+        "maptags" => {
+            NO_MAP_TAGS.store(!on(arg(1)), Ordering::Relaxed);
+            String::new()
+        }
+        "quit" => {
+            w.write_message(AppExit::Success);
+            String::new()
+        }
+        "help" => "kaching, motherlode, familyFunds <household> <amount>, speed <0-4>, resetSim <first> <last>, testingCheatsEnabled true|false, moveObjects on|off, freeRealEstate on|off, hideHeadlineEffects on|off, mapTags on|off, fps on|off, quit".to_string(),
         _ => format!("Unknown command: {}", words[0]),
     }
 }
@@ -188,6 +251,56 @@ pub fn make_all_happy(w: &mut World) {
             ml.0.retain(|x| x.value >= 0);
         }
     }
+}
+
+/// "Make Friends For Me": five Sims of the town the selected Sim doesn't know become friends,
+/// each to the other.
+pub fn make_friends(w: &mut World) {
+    let mut sel = w.query_filtered::<(Entity, Option<&crate::social::Relationships>), With<crate::sim::Selected>>();
+    let Some((me, known)) = sel.iter(w).next().map(|(e, r)| (e, r.map_or_else(Vec::new, |r| r.0.keys().copied().collect::<Vec<_>>()))) else { return };
+    let mut others = w.query_filtered::<(Entity, &crate::sim::Sim), Without<crate::sim::HouseholdMember>>();
+    let mut strangers: Vec<Entity> = others.iter(w).filter(|(e, s)| *e != me && !s.age.is_little() && !known.contains(e)).map(|(e, _)| e).collect();
+    use rand::seq::SliceRandom;
+    strangers.shuffle(&mut rand::rng());
+    strangers.truncate(FRIENDS_FOR_ME);
+    for e in strangers {
+        debug!("make friends: {}", w.get::<crate::sim::Sim>(e).map(|s| s.full_name()).unwrap_or_default());
+        befriend(w, me, e, crate::social::FRIEND_THRESHOLD + 5.0);
+    }
+}
+
+/// "Make Me Know Everyone": everyone in town an acquaintance of the selected Sim (each to the
+/// other), those they know already as they are.
+pub fn know_everyone(w: &mut World) {
+    let mut sel = w.query_filtered::<(Entity, Option<&crate::social::Relationships>), With<crate::sim::Selected>>();
+    let Some((me, known)) = sel.iter(w).next().map(|(e, r)| (e, r.map_or_else(Vec::new, |r| r.0.keys().copied().collect::<Vec<_>>()))) else { return };
+    let mut all = w.query_filtered::<Entity, With<crate::sim::Sim>>();
+    let strangers: Vec<Entity> = all.iter(w).filter(|e| *e != me && !known.contains(e)).collect();
+    for e in strangers {
+        befriend(w, me, e, 1.0);
+    }
+}
+
+/// Two Sims knowing each other, at least this well (those who knew nobody now knowing someone).
+fn befriend(w: &mut World, a: Entity, b: Entity, friendship: f32) {
+    for (x, y) in [(a, b), (b, a)] {
+        if w.get::<crate::social::Relationships>(x).is_none()
+            && let Ok(mut e) = w.get_entity_mut(x)
+        {
+            e.insert(crate::social::Relationships::default());
+        }
+        if let Some(mut r) = w.get_mut::<crate::social::Relationships>(x) {
+            let rel = r.0.entry(y).or_default();
+            rel.friendship = rel.friendship.max(friendship);
+        }
+    }
+}
+
+/// "Toggle Motive Decay": the needs left as they are (or not again).
+pub fn toggle_decay(w: &mut World) {
+    let off = !NO_DECAY.load(Ordering::Relaxed);
+    NO_DECAY.store(off, Ordering::Relaxed);
+    w.resource_mut::<crate::interact::Notifications>().push(if off { "Motive decay is off." } else { "Motive decay is on." });
 }
 
 /// The console on screen while it's open: what's typed, and its last answer under it.
@@ -290,5 +403,29 @@ mod tests {
         assert_eq!(w.resource::<crate::clock::GameClock>().speed, 3);
         assert_eq!(run_cheat(&mut w, "speed 9"), "Usage: speed <0-4>");
         assert_eq!(run_cheat(&mut w, "rosebud"), "Unknown command: rosebud");
+    }
+
+    #[test]
+    fn make_friends_befriends_five_strangers_even_for_a_sim_who_knew_nobody() {
+        let mut w = world();
+        let sim = || crate::sim::random_sim(&mut rand::rng(), "T", Some(true), crate::sim::Age::Adult);
+        let me = w.spawn((sim(), crate::sim::Selected, crate::sim::HouseholdMember)).id();
+        let others: Vec<Entity> = (0..7).map(|_| w.spawn(sim()).id()).collect();
+        make_friends(&mut w);
+        let mine = &w.get::<crate::social::Relationships>(me).expect("knows people now").0;
+        assert_eq!(mine.len(), FRIENDS_FOR_ME);
+        for (o, rel) in mine {
+            assert!(others.contains(o) && rel.friendship > crate::social::FRIEND_THRESHOLD);
+            assert!(w.get::<crate::social::Relationships>(*o).is_some_and(|r| r.0.contains_key(&me)));
+        }
+    }
+
+    #[test]
+    fn free_real_estate_turns_on_and_off() {
+        let mut w = world();
+        assert_eq!(run_cheat(&mut w, "FreeRealEstate on"), "freeRealEstate on");
+        assert!(free_real_estate());
+        assert_eq!(run_cheat(&mut w, "freerealestate off"), "freeRealEstate off");
+        assert!(!free_real_estate());
     }
 }

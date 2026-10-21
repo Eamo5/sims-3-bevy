@@ -236,7 +236,8 @@ fn play_flow(
                 bt.selected = on;
             }
         }
-        let price = if b.furnished { b.prices.1 } else { b.prices.0 };
+        // (`freerealestate on`: for nothing.)
+        let price = if crate::cheats::free_real_estate() { 0 } else if b.furnished { b.prices.1 } else { b.prices.0 };
         if let Some(mut bt) = b.s.id(BUY_PURCHASE).and_then(|e| buttons.get_mut(e).ok())
             && bt.disabled != (price > funds)
         {
