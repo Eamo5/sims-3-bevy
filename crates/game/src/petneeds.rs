@@ -118,6 +118,48 @@ pub fn decay(kind: &str, i: usize, v: f32) -> f32 {
     }
 }
 
+/// How a pet feels on the whole (-100 to 100): its needs together, as the ring round its face.
+pub fn mood(m: &PetMotives) -> f32 {
+    [HUNGER, BLADDER, ENERGY, SOCIAL, HYGIENE, FUN].iter().map(|i| m.0[*i]).sum::<f32>() / 6.0
+}
+
+/// The game's pet moodlets' names for needs running low, worst first (`HungryPet`,
+/// `VeryHungryPet`, `HasToPeePet`, `TiredPet`, `LonelyPet`, `GrungyPet`, `StrainedPet`; a cat's
+/// `ItchingToScratch`, a dog's `PentUp`, a horse's `ThirstyHorse`).
+pub fn feelings(kind: &str, m: &PetMotives) -> Vec<&'static str> {
+    let sp = species(kind);
+    let mut out: Vec<(f32, &'static str)> = Vec::new();
+    let mut low = |i: usize, bands: &[(f32, &'static str)]| {
+        if let Some((_, n)) = bands.iter().find(|(at, _)| m.0[i] < *at) {
+            out.push((m.0[i], n));
+        }
+    };
+    low(HUNGER, &[(-80.0, "Starving"), (-60.0, "Very Hungry"), (-35.0, "Hungry")]);
+    low(BLADDER, &[(-90.0, "Really Has To Pee"), (-60.0, "Has To Pee")]);
+    low(ENERGY, &[(-99.0, "Exhausted"), (-79.0, "Tired"), (-59.0, "Sleepy")]);
+    low(SOCIAL, &[(-88.0, "Desolate"), (-60.0, "Lonely")]);
+    low(HYGIENE, &[(-80.0, "Smelly"), (-60.0, "Grungy")]);
+    low(FUN, &[(-50.0, "Stressed"), (-20.0, "Strained")]);
+    match sp {
+        'c' => low(URGE, &[(-98.0, "Claws Out"), (-60.0, "Itching To Scratch")]),
+        'd' | 'l' => low(URGE, &[(-98.0, "Going Nuts"), (-60.0, "Pent Up")]),
+        'h' => {
+            low(URGE, &[(-98.0, "Frustrated"), (-60.0, "Restless")]);
+            low(THIRST, &[(-98.0, "Dehydrated"), (-60.0, "Thirsty")]);
+        }
+        _ => {}
+    }
+    out.sort_by(|a, b| a.0.total_cmp(&b.0));
+    out.into_iter().map(|o| o.1).collect()
+}
+
+/// A pet's skewer tooltip: its name and kind, and how it's feeling.
+pub fn tooltip(pet: &Pet, m: &PetMotives) -> String {
+    let f = feelings(&pet.kind, m);
+    let how = if f.is_empty() { "Content".to_string() } else { f.join(", ") };
+    format!("{} ({})\n{how}", pet.name, crate::pets::kind_name(&pet.kind))
+}
+
 /// What's in a pet bowl: bites left (`kFullBowlFoodUnits`, eight).
 #[derive(Component, Clone, Copy, Debug)]
 pub struct BowlFood(pub u8);

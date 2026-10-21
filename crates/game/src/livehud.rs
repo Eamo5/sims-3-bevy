@@ -54,6 +54,14 @@ const PUCK_CAMERA: u32 = PUCK + 0x100;
 const PUCK_MEMORY: u32 = 0x0b10_a780;
 const SKEWER_SLOT: u32 = 0xf6fd_a501;
 const SKEWER_PETS: u32 = 0xf6fd_a520;
+/// The pets' slots, and each skewer's rod (`HouseholdSkwewer`, `PetSkewer`).
+const SKEWER_PET_SLOT: u32 = 0xf6fd_a521;
+const SKEWER_ROD: u32 = 0xf6fd_a510;
+const SKEWER_PET_ROD: u32 = 0xf6fd_a530;
+/// A pet slot's frame opening (its 54-square thumbnail window's, as the household's).
+const PET_THUMB_OPENING: [f32; 4] = [12.0, 5.0, 8.0, 15.0];
+/// A slot's follow notice (`mFollowNotification`).
+const SLOT_FOLLOW: u32 = 7;
 const SLOT_THUMB: u32 = 1;
 /// How far in from the thumbnail window's edges (left, top, right, bottom) its frame's opening
 /// is: the frame's window sits 2 to the right of it and 5 above, its picture's opening some
@@ -779,11 +787,14 @@ fn skewer(
     (selected, positions, mut cam): (Query<Entity, With<Selected>>, Query<(&Transform, &Sim, Has<crate::nav::PathFollow>)>, Query<&mut crate::camera::SimsCamera>),
     mut faces: Local<Vec<Option<Entity>>>,
     (mouse, hovered, mut tips, mut queues, ui): (Res<ButtonInput<MouseButton>>, Query<&Interaction>, Query<&mut crate::icons::Tooltip>, Query<&mut crate::interact::ActionQueue>, Option<Res<UiAssets>>),
+    (pets, mut nodes, mut pet_faces): (Query<(Entity, &crate::pets::Pet, &crate::petneeds::PetMotives, &Transform), With<crate::pets::HomePet>>, Query<&mut Node>, Local<Vec<Option<Entity>>>),
 ) {
     let s = &hud.skewer;
     let out: Vec<Entity> = members.iter().filter(|m| m.3).map(|m| m.0).collect();
     let mut list: Vec<(Entity, f32, bool)> = members.iter().map(|(e, m, sel, _)| (e, m.0, sel)).collect();
     list.sort_by_key(|x| x.0);
+    // The rod through the faces, as long as they need (the game's `PopulateSkewer`: 60 a face).
+    skewer_rod(&mut nodes, &mut vis, s.id(SKEWER_ROD), list.len().min(8), 60.0, 538.0);
     faces.resize(8, None);
     for slot in 0..8 {
         let container = s.id(SKEWER_SLOT + slot as u32);
@@ -855,8 +866,54 @@ fn skewer(
             debug!("the camera follows skewer slot {slot}");
         }
     }
-    // (Pets have their own skewer, still to come.)
-    set_visible(&mut vis, s.id(SKEWER_PETS), false);
+    // The household's pets on their own skewer beside it (the game's `PopulatePetSkewer`: 46 a
+    // face), each ringed in its mood (how its needs stand), its name and what it needs on hover;
+    // clicked, the camera goes to it.
+    let mut pet_list: Vec<_> = pets.iter().collect();
+    pet_list.sort_by_key(|p| p.0);
+    set_visible(&mut vis, s.id(SKEWER_PETS), !pet_list.is_empty());
+    skewer_rod(&mut nodes, &mut vis, s.id(SKEWER_PET_ROD), pet_list.len().min(8), 46.0, 423.0);
+    pet_faces.resize(8, None);
+    for slot in 0..8 {
+        let container = s.id(SKEWER_PET_SLOT + slot as u32);
+        let who = pet_list.get(slot).copied();
+        set_visible(&mut vis, container, who.is_some());
+        let (Some(c), Some((e, pet, m, tf))) = (container, who) else { continue };
+        let button = s.within(c, SLOT_BUTTON);
+        set_visible(&mut vis, s.within(c, SLOT_GO_HOME), false);
+        set_visible(&mut vis, s.within(c, SLOT_FOLLOW), false);
+        set_shade(&mut images, &pictures, s.within(c, SLOT_MOOD), mood_single(crate::petneeds::mood(m)));
+        if pet_faces[slot] != Some(e)
+            && let Some(t) = s.within(c, SLOT_THUMB)
+            && let Ok(p) = pictures.get(t)
+            && let Ok(mut img) = images.get_mut(p.0)
+        {
+            img.image = portraits.portrait(&mut assets, e);
+            commands.entity(p.0).insert(crate::portraits::PortraitOf(e));
+            crate::layout::fit_inside(&mut commands, t, p.0, PET_THUMB_OPENING);
+            pet_faces[slot] = Some(e);
+        }
+        set_tooltip(&mut commands, &mut tips, button, crate::petneeds::tooltip(pet, m));
+        if pressed(&clicks, button)
+            && let Ok(mut cm) = cam.single_mut()
+        {
+            cm.look_at(tf.translation);
+            cm.follow(e);
+        }
+    }
+}
+
+/// A skewer's rod: from the topmost face down (`num - num4` in the game's `PopulateSkewer`),
+/// shown while there's anyone on it.
+fn skewer_rod(nodes: &mut Query<&mut Node>, vis: &mut Query<&mut Visibility>, rod: Option<Entity>, count: usize, delta: f32, bottom: f32) {
+    set_visible(vis, rod, count > 0);
+    let Some(mut n) = rod.and_then(|r| nodes.get_mut(r).ok()) else { return };
+    let top = delta * (8 - count) as f32;
+    let (t, h) = (Val::Px(top), Val::Px(bottom - top));
+    if n.top != t || n.height != h {
+        n.top = t;
+        n.height = h;
+    }
 }
 
 /// The navigation: the expand button opens the info panels' background and tabs; a tab opens

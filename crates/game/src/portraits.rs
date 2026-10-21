@@ -31,13 +31,44 @@ pub const STUDIO_LAYER: usize = 7;
 
 /// The Sim having their picture taken steps into the studio (or out again): only they are
 /// pictured, never anyone standing close by.
-fn into_studio(commands: &mut Commands, children: &Query<&Children>, parts: &Query<(), (With<crate::simbody::SimModelPart>, With<Mesh3d>)>, sim: Entity, on: bool) {
-    let layers = if on { RenderLayers::from_layers(&[0, STUDIO_LAYER]) } else { crate::simbody::sim_layers() };
+fn into_studio(commands: &mut Commands, children: &Query<&Children>, parts: &Query<(), (With<crate::simbody::SimModelPart>, With<Mesh3d>)>, pet_parts: &Query<(), With<Mesh3d>>, sim: Entity, pet: bool, on: bool) {
+    let layers = if on {
+        RenderLayers::from_layers(&[0, STUDIO_LAYER])
+    } else if pet {
+        RenderLayers::layer(0)
+    } else {
+        crate::simbody::sim_layers()
+    };
     for c in children.get(sim).into_iter().flatten() {
-        if parts.contains(*c) {
+        if parts.contains(*c) || (pet && pet_parts.contains(*c)) {
             commands.entity(*c).insert(layers.clone());
         }
     }
+}
+
+/// Where the camera goes for a pet's face: out along where it looks, by its size (a cat close
+/// up, a horse from further off), a touch above.
+fn pet_eye(kind: &str, head: Vec3, rot: Quat) -> (Vec3, Vec3, f32) {
+    let (dist, up) = match kind {
+        "ah" => (1.1, 0.05),
+        "ch" => (0.85, 0.04),
+        "ad" => (0.6, 0.04),
+        "cd" | "al" | "cl" => (0.45, 0.03),
+        _ => (0.4, 0.02),
+    };
+    let face = head + Vec3::Y * up;
+    let ahead = (rot * Vec3::Z).normalize_or(Vec3::Z);
+    (face + ahead * dist + Vec3::Y * 0.04, face, dist)
+}
+
+/// A pet's head and which way its face points (from the head to the nose, level).
+fn pet_aim(skel: &crate::pets::PetSkeleton, joints: &Query<&GlobalTransform, Without<Sim>>, body: Quat) -> Option<(Vec3, Quat)> {
+    let head = skel.bone("b__Head__", joints)?;
+    let rot = match skel.bone("b__NoseBase__", joints).map(|n| (n - head).with_y(0.0)) {
+        Some(f) if f.length() > 1e-3 => Quat::from_rotation_y(f.x.atan2(f.z)),
+        _ => body,
+    };
+    Some((head, rot))
 }
 const SIZE: u32 = 128;
 /// The portraits' backdrop card (put away: the Sims are pictured cut out): the game's soft blue,
@@ -208,7 +239,7 @@ pub(crate) fn eye_for(head: Vec3, rot: Quat, little: bool) -> (Vec3, Vec3, f32) 
     (face + ahead * dist + Vec3::Y * 0.03, face, dist)
 }
 
-fn retake_rebuilt(mut portraits: ResMut<Portraits>, rebuilt: Query<Entity, Changed<Skeleton>>, alive: Query<(), With<Sim>>, time: Res<Time>) {
+fn retake_rebuilt(mut portraits: ResMut<Portraits>, rebuilt: Query<Entity, Changed<Skeleton>>, alive: Query<(), Or<(With<Sim>, With<crate::pets::Pet>)>>, time: Res<Time>) {
     portraits.images.retain(|e, _| alive.contains(*e));
     portraits.spare.retain(|e, _| alive.contains(*e));
     portraits.queue.retain(|e| alive.contains(*e));
@@ -252,10 +283,13 @@ fn take_portraits(
     time: Res<Time>,
     (grid, visited): (Option<Res<crate::nav::NavGrid>>, Option<Res<crate::visit::VisitedLot>>),
     mut images: ResMut<Assets<Image>>,
-    (children, parts): (Query<&Children>, Query<(), (With<crate::simbody::SimModelPart>, With<Mesh3d>)>),
+    (children, parts, pet_parts): (Query<&Children>, Query<(), (With<crate::simbody::SimModelPart>, With<Mesh3d>)>, Query<(), With<Mesh3d>>),
+    pets: Query<(&crate::pets::Pet, &crate::pets::PetSkeleton, &GlobalTransform, &InheritedVisibility), Without<Sim>>,
 ) {
     let now = time.elapsed_secs();
     let Ok((cam_e, mut camera, mut cam_tf)) = cam.single_mut() else { return };
+    // (A pet's face: where the camera goes for it.)
+    let pet_target = |e: Entity| pets.get(e).ok().and_then(|(p, skel, tf, _)| pet_aim(skel, &joints, tf.rotation()).map(|(head, rot)| pet_eye(&p.kind, head, rot)));
     // The light that only the studio sees (a new one for each game: it goes with the world).
     let light_e = lights.iter().next().unwrap_or_else(|| {
         commands
@@ -273,7 +307,26 @@ fn take_portraits(
         shot.frame = shot.frame.saturating_add(1);
         let hold = if portraits.finished < 3 { 1.2 } else { 0.0 };
         let mut done = false;
+        let is_pet = pets.contains(shot.sim);
         match shot.aimed {
+            // A pet: looked in the face, as a Sim is.
+            None if is_pet => match (pet_target(shot.sim), portraits.images.contains_key(&shot.sim)) {
+                (Some((eye, face, dist)), true) => {
+                    let img = portraits.spare(&mut images, shot.sim);
+                    *cam_tf = Transform::from_translation(eye).looking_at(face, Vec3::Y);
+                    let right = cam_tf.right().as_vec3();
+                    commands.entity(light_e).insert(Transform::from_translation(eye + right * 0.5 + Vec3::Y * 0.45));
+                    commands.entity(cam_e).insert((RenderTarget::Image(img.into()), Projection::Perspective(PerspectiveProjection { fov: 24f32.to_radians(), near: 0.08, far: dist + 1.2, ..default() })));
+                    camera.is_active = true;
+                    into_studio(&mut commands, &children, &parts, &pet_parts, shot.sim, true, true);
+                    shot.aimed = Some(shot.frame);
+                    shot.aimed_at = now;
+                }
+                _ => {
+                    portraits.queue.push_back(shot.sim);
+                    return;
+                }
+            },
             // A staged Sim's pose settles under the world first.
             None if shot.staged.is_none() || shot.frame >= 3 => {
                 let e = shot.sim;
@@ -329,7 +382,7 @@ fn take_portraits(
                             Projection::Perspective(PerspectiveProjection { fov: 24f32.to_radians(), near: 0.08, far: dist + 1.2, ..default() }),
                         ));
                         camera.is_active = true;
-                        into_studio(&mut commands, &children, &parts, shot.sim, true);
+                        into_studio(&mut commands, &children, &parts, &pet_parts, shot.sim, false, true);
 
                         shot.aimed = Some(shot.frame);
                         shot.aimed_at = now;
@@ -341,7 +394,7 @@ fn take_portraits(
             // A Sim who drops out of view mid-shot (driving off, say) is taken again later.
             Some(_) if shot.staged.is_none() && sims.get(shot.sim).is_ok_and(|s| !s.4.get()) => {
                 camera.is_active = false;
-                into_studio(&mut commands, &children, &parts, shot.sim, false);
+                into_studio(&mut commands, &children, &parts, &pet_parts, shot.sim, is_pet, false);
                 let taken = portraits.retake.get(&shot.sim).map_or(0, |r| r.1);
                 portraits.retake.insert(shot.sim, (now + 2.0, taken));
                 done = true;
@@ -355,8 +408,7 @@ fn take_portraits(
                     let face = facing(skel, &joints, head.translation(), tf.rotation()).or(sim.age.is_little().then(|| tf.rotation()))?;
                     Some((sim.age.is_little(), head.translation(), face))
                 });
-                if let Some((little, head, rot)) = aim {
-                    let (eye, face, dist) = eye_for(head, rot, little);
+                if let Some((eye, face, dist)) = aim.map(|(little, head, rot)| eye_for(head, rot, little)).or_else(|| pet_target(shot.sim)) {
                     *cam_tf = Transform::from_translation(eye).looking_at(face, Vec3::Y);
                     let right = cam_tf.right().as_vec3();
                     commands.entity(light_e).insert(Transform::from_translation(eye + right * 0.5 + Vec3::Y * 0.45));
@@ -373,7 +425,7 @@ fn take_portraits(
             Some(_) => {
                 portraits.finished += 1;
                 camera.is_active = false;
-                into_studio(&mut commands, &children, &parts, shot.sim, false);
+                into_studio(&mut commands, &children, &parts, &pet_parts, shot.sim, is_pet, false);
                 if let Some((tf, vis)) = shot.staged {
                     commands.entity(shot.sim).insert((tf, vis)).remove::<Staged>();
                 }
@@ -388,7 +440,7 @@ fn take_portraits(
                         debug!("portrait of {} spoilt (camera {:?} from where it belongs): taken again", sim.first, cam_tf.translation - eye);
                     }
                     Some(ok)
-                }) == Some(true);
+                }).or_else(|| pet_target(shot.sim).map(|(eye, ..)| cam_tf.translation.distance(eye) < 0.22)) == Some(true);
                 let first = !portraits.retake.contains_key(&shot.sim);
                 let before = portraits.retake.get(&shot.sim).map_or(0, |r| r.1);
                 if good {
@@ -419,6 +471,15 @@ fn take_portraits(
     // The next Sim ready for their picture (others wait their turn).
     for _ in 0..portraits.queue.len() {
         let Some(e) = portraits.queue.pop_front() else { break };
+        // (A pet: pictured where it is, once it's in view and its coat's had a moment to load.)
+        if let Ok((_, _, _, vis)) = pets.get(e) {
+            if !vis.get() || now < 6.0 || pet_target(e).is_none() {
+                portraits.queue.push_back(e);
+                continue;
+            }
+            portraits.busy = Some(Shot { sim: e, frame: 0, aimed_at: 0.0, staged: None, aimed: None });
+            break;
+        }
         let (Ok((sim, anim, _, _, vis)), Ok((tf, visibility, driving, walking))) = (sims.get(e), placed.get(e)) else {
             // (The body isn't built yet.)
             portraits.queue.push_back(e);

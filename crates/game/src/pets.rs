@@ -200,10 +200,18 @@ fn social_partners(
 
 /// A pet's skeleton: an entity per bone, and each bone's rest pose.
 #[derive(Component)]
-struct PetSkeleton {
+pub struct PetSkeleton {
     rig: Arc<Rig>,
     joints: Vec<Entity>,
     bind: Vec<Transform>,
+}
+
+impl PetSkeleton {
+    /// Where a bone of it is now (`b__Head__`, `b__NoseBase__`).
+    pub fn bone<F: bevy::ecs::query::QueryFilter>(&self, name: &str, joints: &Query<&GlobalTransform, F>) -> Option<Vec3> {
+        let i = self.rig.bones.iter().position(|b| b.name == name)?;
+        joints.get(self.joints[i]).ok().map(|g| g.translation())
+    }
 }
 
 /// The animation a pet's playing (looped), with a short fade from the last.

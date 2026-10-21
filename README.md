@@ -940,6 +940,10 @@ installation is unreachable.
   and fun for them. The household's grown-ups fill a bowl down to three bites of their own
   accord (§25 a bite it's short, as the game's `FillBowl`), or from its menu, and pets let it
   be known what they need in thought balloons. Pets' needs and bowls' food are kept in saves.
+  The household's pets have the game's own skewer beside the Sims' (photographed by the
+  portrait studio, a face each, ringed in how they feel), their name and the pack's names for
+  what they need on hover ("Muffin (Cat) · Hungry, Itching To Scratch"), a click taking the
+  camera to them; each skewer's rod is as long as its faces, as the game's `PopulateSkewer`.
   `PET_NEEDS=hungry|bladder|tired` and `PET_BOWL=1` (tests).
 - **Supernaturals**, from the Supernatural pack (and Late Night's vampires): vampires,
   werewolves, witches, fairies and zombies, chosen in Create a Sim's Life State row and kept in
