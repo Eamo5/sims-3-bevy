@@ -472,6 +472,7 @@ fn mode_music(
     mode: Option<Res<State<PlayMode>>>,
     buy: Option<Res<BuyMode>>,
     (tracks, mut sinks, settings): (Query<(), With<ModeTrack>>, Query<&mut AudioSink, With<ModeTrack>>, Res<crate::options::Settings>),
+    (edit_town, cams): (Option<Res<crate::edittown::EditTown>>, Query<&crate::camera::SimsCamera>),
 ) {
     // The music level follows the options.
     if settings.is_changed() {
@@ -483,9 +484,14 @@ fn mode_music(
         AppState::MainMenu => Some("music_theme"),
         AppState::CreateHousehold => Some("music_mode_cas"),
         AppState::Loading => Some("music_load"),
+        // (Build mode its own, as the game's `BuildModeState`; Edit Town its own, `EditTownState`;
+        // and the map view's while the camera's up over the town, `OnCameraMapViewEnabledEvent`.)
         AppState::InGame => match mode.as_deref().map(|m| *m.get()) {
             Some(PlayMode::ChooseLot) => Some("music_mode_map"),
-            _ if buy.is_some_and(|b| b.active) => Some("music_mode_buy"),
+            _ if edit_town.as_ref().is_some_and(|e| e.is_open()) => Some("music_mode_edit_town"),
+            _ if buy.as_ref().is_some_and(|b| b.active && b.category >= crate::buy::WALLPAPER_TAB) => Some("music_mode_build"),
+            _ if buy.as_ref().is_some_and(|b| b.active) => Some("music_mode_buy"),
+            _ if cams.iter().any(|c| c.distance > crate::maptags::MAP_DISTANCE) => Some("music_mode_map"),
             _ => None,
         },
     };
