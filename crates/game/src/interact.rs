@@ -7297,6 +7297,29 @@ fn pay_bills(
 mod tests {
     use super::*;
 
+    /// CATALOG_TSV=<file> (the `s3tool catalog` listing): what the catalogue's script classes come
+    /// to, those with nothing to do counted by class (a survey, not a check).
+    #[test]
+    #[ignore]
+    fn catalogue_kinds_survey() {
+        let Ok(path) = std::env::var("CATALOG_TSV") else { return };
+        let text = std::fs::read_to_string(path).unwrap();
+        let mut idle: std::collections::BTreeMap<String, (usize, String)> = Default::default();
+        for line in text.lines() {
+            let f: Vec<&str> = line.split('\t').collect();
+            let (Some(name), Some(script)) = (f.get(4), f.get(5)) else { continue };
+            let kind = ObjectKind::from_script(script, name);
+            if matches!(kind, ObjectKind::Other | ObjectKind::Decoration | ObjectKind::Table | ObjectKind::Light | ObjectKind::Plant) || interactions_for(kind).is_empty() {
+                let class = script.rsplit_once('.').map_or(*script, |(ns, _)| ns).to_string() + "." + script.rsplit('.').next().unwrap_or("").trim_end_matches(char::is_numeric);
+                let e = idle.entry(format!("{kind:?}\t{class}")).or_insert((0, name.to_string()));
+                e.0 += 1;
+            }
+        }
+        for (k, (n, example)) in idle {
+            println!("{n}\t{k}\t{example}");
+        }
+    }
+
     #[test]
     fn children_play_their_own_social_clips() {
         let names: Vec<String> = ["c2c_soc_Neutral_FriendlyHug_Friendly_Neutral_x", "c2c_soc_Neutral_FriendlyHug_Friendly_Neutral_y", "a2c_soc_Neutral_FriendlyHug_Friendly_Neutral_x"].map(String::from).to_vec();
