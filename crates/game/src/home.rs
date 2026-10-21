@@ -508,6 +508,21 @@ fn auto_move_in(
     }
 }
 
+/// How long after a family moves in the welcome wagon comes (the game's `TimeUntilWagonArrives`).
+const WAGON_HOURS: f64 = 3.0;
+
+/// A neighbour on the welcome wagon (to the family of this name).
+#[derive(Component)]
+pub struct WelcomeWagon(pub String);
+
+/// The welcome wagon come: a word of it, as they reach the house.
+pub fn welcome_wagon(mut commands: Commands, came: Query<(Entity, &Sim, &WelcomeWagon), Added<crate::interact::Visitor>>, mut notes: ResMut<Notifications>) {
+    for (e, s, w) in &came {
+        notes.push(format!("{} from next door came over to welcome the {} family.", s.full_name(), w.0));
+        commands.entity(e).remove::<WelcomeWagon>();
+    }
+}
+
 /// A town family moves straight into their own home.
 fn premade_move_in(
     pending: Option<Res<PendingHousehold>>,
@@ -749,7 +764,7 @@ pub fn move_in(
         ResMut<Assets<crate::simbody::SimSkinMaterial>>,
         ResMut<crate::simbody::SimTextures>,
     ),
-    (mut life, loading_save, terms): (MessageWriter<crate::life::LifeEvent>, Option<Res<crate::save::PendingLoad>>, Option<Res<PurchaseTerms>>),
+    (mut life, loading_save, terms, clock): (MessageWriter<crate::life::LifeEvent>, Option<Res<crate::save::PendingLoad>>, Option<Res<PurchaseTerms>>, Res<crate::clock::GameClock>),
 ) {
     let Some(req) = request else { return };
     let fresh = loading_save.is_none();
@@ -904,29 +919,31 @@ pub fn move_in(
             life.write(crate::life::LifeEvent::new(e, crate::life::LifeEventKind::MovedIn));
         }
     }
-    // A couple of neighbours drop by to say hello (at the front door, a house that has one).
-    let front_door = building.as_ref().and_then(|b| b.front_door(exit.xz()));
+    // The welcome wagon: two or three of the neighbours come by to say hello three hours after
+    // a family moves in, ring at the front door and wait to be let in (two hours at most), as the
+    // game's `WelcomeWagonSituation` (`TimeUntilWagonArrives`, `kMaximumWaitTime`). (In a game
+    // loaded, those known about, as they were.)
     for (k, (s, model)) in neighbors.into_iter().enumerate() {
         let p = to_world(-3.0 + k as f32 * 6.0, -(lot.depth as f32) * 0.5 + 1.0);
-        let name = s.full_name();
         let e = spawn_sim_full(&mut commands, &mut sctx, s, p, model);
-        let mut queue = ActionQueue::default();
-        if let (true, Some((door, door_e))) = (fresh, front_door) {
-            // (Side by side on the step.)
-            let at = door + Vec2::new(k as f32 * 0.8 - 0.4, 0.0);
-            let back = building.as_ref().and_then(|b| b.front_door_out(exit.xz(), crate::doorbell::STAND_BACK)).map(|b| b + Vec2::new(k as f32 * 0.9 - 0.45, 0.0));
-            crate::doorbell::come_to_door(&mut commands, e, &mut queue, at, back, door_e.unwrap_or(e));
+        if fresh {
+            commands.entity(e).insert((
+                Visibility::Hidden,
+                crate::interact::OffLot,
+                crate::interact::Invited { arrive_at: clock.minutes + WAGON_HOURS * 60.0 + k as f64 * 2.0 },
+                WelcomeWagon(pending.last_name.clone()),
+                Skills::default(),
+                DespawnOnExit(AppState::InGame),
+            ));
+            continue;
         }
         commands.entity(e).insert((
-            queue,
+            ActionQueue::default(),
             AutonomyTimer(rng.random_range(1.0..4.0)),
             Skills::default(),
             Visitor { leave_at: 18.0 * 60.0 + k as f64 * 40.0 },
             DespawnOnExit(AppState::InGame),
         ));
-        if fresh {
-            notes.push(format!("{name} from next door came over to welcome the {} family.", pending.last_name));
-        }
     }
     // Townies, hidden until they stroll by.
     for (k, (s, model)) in townies.into_iter().enumerate() {

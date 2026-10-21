@@ -1321,7 +1321,8 @@ pub fn prepare_sims(baked: &BakedData, cas: &CasData, members: &[Sim], known: Op
     match known {
         Some(k) => neighbors.extend(k.iter().cloned()),
         None => {
-            for k in 0..2 {
+            // (Two or three: the game's `kMinumumNumberOfWagoners` to `kMaximumNumberOfWagoners`.)
+            for k in 0..rng.random_range(2..=3) {
                 neighbors.push(next_townie(&mut rng, if k == 0 { Age::Adult } else { Age::YoungAdult }));
             }
         }
