@@ -116,6 +116,11 @@ pub struct PieMenu {
     pub swim_to: Option<Vec2>,
 }
 
+/// The selected Sim's picture in the panel clicked (`livehud`): their own menu, as clicking them
+/// in the world gives, there where the picture is.
+#[derive(Resource)]
+pub struct OwnMenu;
+
 /// The fridge's (and microwave's) menu of snacks, as the game titles it.
 const QUICK_MEAL: &str = "Have Quick Meal";
 /// The fridge's menu of leftovers.
@@ -1210,11 +1215,12 @@ fn world_click(
     ),
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
-    (buy, edit_town, pickable, keys): (
+    (buy, edit_town, pickable, keys, own_menu): (
         Option<Res<crate::buy::BuyMode>>,
         Res<crate::edittown::EditTown>,
         Query<(Entity, &GlobalTransform, &InheritedVisibility, Option<&GameObject>, Has<crate::pets::Pet>), Or<(With<GameObject>, With<Sim>, With<crate::pets::Pet>)>>,
         Res<ButtonInput<KeyCode>>,
+        Option<Res<OwnMenu>>,
     ),
     (building, opp_q, front_doors): (
         Option<Res<crate::building::ActiveBuilding>>,
@@ -1260,7 +1266,12 @@ fn world_click(
         close_pie(&mut commands, &mut pie);
         return;
     }
-    if !mouse.just_pressed(MouseButton::Left) || over_ui.0 {
+    // (The Sim's picture in the panel clicked: their own menu.)
+    let own = own_menu.is_some();
+    if own {
+        commands.remove_resource::<OwnMenu>();
+    }
+    if !own && (!mouse.just_pressed(MouseButton::Left) || over_ui.0) {
         if mouse.just_pressed(MouseButton::Left) {
             debug!("click at {:?}: on the interface", windows.single().ok().and_then(|w| w.cursor_position()));
         }
@@ -1282,12 +1293,13 @@ fn world_click(
     let hits = ray_cast.cast_ray(ray, &MeshRayCastSettings::default().with_filter(&filter));
     // (The objects' meshes are the GPU's alone, so most are found by their footprints: the
     // nearest object, Sim or pet whose box the ray passes through, of those shown.)
-    let target = hits.first().and_then(|(e, _)| ancestor_with(*e, &parents, is_target)).or_else(|| pick_by_box(ray, &pickable));
+    let target = if own { Some(actor) } else { hits.first().and_then(|(e, _)| ancestor_with(*e, &parents, is_target)).or_else(|| pick_by_box(ray, &pickable)) };
     debug!("click at {cursor}: {:?} ({})", target.map(|t| objects.get(t).map_or("a Sim or pet".to_string(), |o| o.name.clone())), if hits.is_empty() { "by its box" } else { "by its mesh" });
 
     // A fire: put out ("Extinguish", the game's: teens and up), before what's burning.
     let fire = fires_q
         .iter()
+        .filter(|_| !own)
         .filter_map(|(e, ftf, f)| {
             let p = ftf.translation();
             slab(ray.origin, Vec3::from(ray.direction), p + Vec3::new(-0.5, 0.0, -0.5), p + Vec3::new(0.5, 1.5, 0.5)).map(|t| (e, t, p, f.level))
@@ -1488,6 +1500,13 @@ fn world_click(
                     let c = options.remove(i);
                     let at = options.iter().position(|o| !o.0.starts_with("Select")).unwrap_or(options.len());
                     options.insert(at, c);
+                }
+            }
+            // (Both swimming: the pool's own socials, at the top.)
+            if swim_q.contains(actor) && swim_q.contains(t) && !sim.age.is_little() {
+                let at = options.iter().position(|o| !o.0.starts_with("Select")).unwrap_or(options.len());
+                for (k, play) in crate::swim::PoolPlay::ALL.into_iter().enumerate().rev() {
+                    options.insert(at, (play.label().to_string(), ActionKind::Social { target: t, social: crate::swim::POOL_SOCIAL + k }));
                 }
             }
             if crate::cheats::testing() && keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
@@ -2587,6 +2606,14 @@ fn pie_buttons(
     let title = std::mem::take(&mut pie.title);
     let parent = (pie.at, title.clone(), pie.options.clone());
     close_pie(&mut commands, &mut pie);
+    // (The pool's socials, begun there and then: `swim`.)
+    if let ActionKind::Social { target, social } = kind
+        && let Some(k) = social.checked_sub(crate::swim::POOL_SOCIAL)
+        && let (Some(a), Some(play)) = (actor, crate::swim::PoolPlay::ALL.get(k).copied())
+    {
+        commands.queue(move |w: &mut World| crate::swim::start_pool_social(w, a, target, play));
+        return;
+    }
     // (A swimmer sent somewhere else in the pool there and then: `swim`.)
     if label == crate::swim::SWIM_HERE
         && let (Some(a), Some(to)) = (actor, swim_to)

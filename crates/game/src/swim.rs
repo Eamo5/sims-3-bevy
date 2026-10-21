@@ -3,6 +3,10 @@
 //! shoulders above the water) until the swim is over, then climbs back out. The pool's water
 //! clicked, it's the game's "Swim" ("Extreme Swim" for a Daredevil): in by the pool's ladder and
 //! over to there, to tread water (`a2o_swim_idle_x`); clicked again while they swim, "Swim Here".
+//! Two swimmers have the pool's own socials (`Pool.Splash`, `Pool.HoldBreathContest`): one
+//! swims over (1.68 m apart) to splash the other, who laughs it off, shrugs, cries or is angry by
+//! how they feel and how things stand between them; or the two hold their breath, as long as
+//! their Athletic skill and nerve allow, and the one who lasts longer wins.
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -17,7 +21,7 @@ pub struct SwimPlugin;
 
 impl Plugin for SwimPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (swim, pyjamas).after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (swim, pool_socials, pyjamas).chain().after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -220,6 +224,109 @@ pub fn water_hit(world: &crate::loading::WorldInfo, ray: Ray3d) -> Option<Vec2> 
     })
 }
 
+/// The pool's socials between two swimmers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PoolPlay {
+    Splash,
+    HoldBreath,
+}
+
+impl PoolPlay {
+    pub const ALL: [PoolPlay; 2] = [PoolPlay::Splash, PoolPlay::HoldBreath];
+
+    /// As the game names them.
+    pub fn label(self) -> &'static str {
+        match self {
+            PoolPlay::Splash => "Splash",
+            PoolPlay::HoldBreath => "Hold Breath Contest",
+        }
+    }
+}
+
+/// The pool's socials on a menu: `ActionKind::Social` with these (never a social's index),
+/// begun there and then (`start_pool_social`).
+pub const POOL_SOCIAL: usize = usize::MAX - 30;
+
+/// How far apart the two are for it (the game's `separationDist`).
+const POOL_SOCIAL_APART: f32 = 1.68;
+
+/// A swimmer at one of the pool's socials with another: swimming over, then at it (`t`
+/// seconds in), each of the two's last clip begun when its time comes (`stops`).
+#[derive(Component)]
+pub struct PoolSocial {
+    pub with: Entity,
+    pub play: PoolPlay,
+    t: Option<f32>,
+    stops: Vec<(Entity, f32, &'static str)>,
+    /// When each of the two comes up again from under the water (holding their breath).
+    surface: Vec<(Entity, f32)>,
+    total: f32,
+    winner: Option<Entity>,
+}
+
+/// How far the breath-holders are lifted for it: the game's clips take them two metres under,
+/// through our pool's floor; this keeps them in the water, under the surface.
+const UNDER_LIFT: f32 = 1.2;
+
+/// The game's breath-holding: `3 + Athletic` holds (two for a Hydrophobic or a Coward, five more
+/// than their skill for the Insane, ten more for a Daredevil).
+pub fn breath_holds(traits: &[crate::life::Trait], athletic: u32) -> u32 {
+    use crate::life::Trait;
+    let n = athletic;
+    if traits.contains(&Trait::Hydrophobic) || traits.contains(&Trait::Coward) {
+        2
+    } else if traits.contains(&Trait::Insane) {
+        5 + n
+    } else if traits.contains(&Trait::Daredevil) {
+        10 + n
+    } else {
+        3 + n
+    }
+}
+
+/// How one splashed takes it (the game's `SplashReaction`): crying when low (or a Loser, or
+/// Hydrophobic), angry when cross (or Grumpy, Mean-Spirited, a Snob, Hot-Headed), laughing when
+/// things are good between them, else a shrug.
+pub fn splash_reaction(traits: &[crate::life::Trait], mood: f32, stc: crate::conversation::Stc) -> &'static str {
+    use crate::life::Trait;
+    if stc.commodity.positive() && stc.commodity != crate::conversation::Commodity::Neutral && stc.name() != "OK" {
+        "laugh"
+    } else if mood < -40.0 || traits.contains(&Trait::Loser) || traits.contains(&Trait::Hydrophobic) {
+        "cry"
+    } else if [Trait::Grumpy, Trait::MeanSpirited, Trait::Snob, Trait::HotHeaded].iter().any(|t| traits.contains(t)) {
+        "reactAngry"
+    } else {
+        "neutral"
+    }
+}
+
+/// A pool social begun, from the menu (both swimming).
+pub fn start_pool_social(w: &mut World, actor: Entity, with: Entity, play: PoolPlay) {
+    if actor == with || w.get::<Swimming>(actor).is_none() || w.get::<Swimming>(with).is_none() {
+        return;
+    }
+    w.entity_mut(actor).insert(PoolSocial { with, play, t: None, stops: Vec::new(), surface: Vec::new(), total: 0.0, winner: None });
+}
+
+/// The swimmer's clip for one side of the pool's socials, by their age (a child's and a teen's
+/// own splashes).
+fn splash_clip(reaction: &str, age: crate::sim::Age, x: bool) -> &'static str {
+    use crate::sim::Age;
+    const CLIPS: [(&str, [&str; 6]); 4] = [
+        ("laugh", ["a2a_pool_splash_laugh_x", "c2a_pool_splash_laugh_x", "t2a_pool_splash_laugh_x", "a2a_pool_splash_laugh_y", "a2c_pool_splash_laugh_y", "a2t_pool_splash_laugh_y"]),
+        ("neutral", ["a2a_pool_splash_neutral_x", "c2a_pool_splash_neutral_x", "t2a_pool_splash_neutral_x", "a2a_pool_splash_neutral_y", "a2c_pool_splash_neutral_y", "a2t_pool_splash_neutral_y"]),
+        ("cry", ["a2a_pool_splash_cry_x", "c2a_pool_splash_cry_x", "t2a_pool_splash_cry_x", "a2a_pool_splash_cry_y", "a2c_pool_splash_cry_y", "a2t_pool_splash_cry_y"]),
+        ("reactAngry", ["a2a_pool_splash_reactAngry_x", "c2a_pool_splash_reactAngry_x", "t2a_pool_splash_reactAngry_x", "a2a_pool_splash_reactAngry_y", "a2c_pool_splash_reactAngry_y", "a2t_pool_splash_reactAngry_y"]),
+    ];
+    let set = CLIPS.iter().find(|(r, _)| *r == reaction).map_or(&CLIPS[1].1, |(_, c)| c);
+    let by_age = match age {
+        Age::Child => 1,
+        Age::Teen => 2,
+        _ => 0,
+    };
+    set[by_age + if x { 0 } else { 3 }]
+}
+
 /// "Swim Here": a swimmer off to somewhere else in their pool, to tread water there.
 pub fn swim_here(w: &mut World, e: Entity, to: Vec2) {
     let Some(mut s) = w.get_mut::<Swimming>(e) else { return };
@@ -230,6 +337,125 @@ pub fn swim_here(w: &mut World, e: Entity, to: Vec2) {
     s.hold = true;
     if std::mem::replace(&mut s.treading, false) {
         w.entity_mut(e).insert(ActionClip::new(None, &[SWIM_CYCLE]));
+    }
+}
+
+/// The pool's socials as they go: the one who began it swimming over, the two facing, their
+/// clips, and what came of it.
+#[allow(clippy::type_complexity)]
+fn pool_socials(
+    mut commands: Commands,
+    delta: Res<crate::clock::SimDelta>,
+    mut players: Query<(Entity, &mut PoolSocial)>,
+    mut swimmers: Query<(&mut Swimming, &mut Transform, &Sim, Option<&crate::interact::Skills>, Option<&crate::life::Mood>)>,
+    mut rels: Query<&mut crate::social::Relationships>,
+    mut motives: Query<&mut crate::sim::Motives>,
+) {
+    for (me, mut p) in &mut players {
+        let with = p.with;
+        let Ok([(mut ms, mut mtf, msim, mskills, _), (mut ws, mut wtf, wsim, wskills, wmood)]) = swimmers.get_many_mut([me, with]) else {
+            // (Out of the water, either of them: it's over.)
+            commands.entity(me).remove::<PoolSocial>();
+            continue;
+        };
+        let Some(t) = p.t else {
+            // Over to them, to be the game's 1.68 metres apart; they wait, treading water.
+            let at = wtf.translation.xz();
+            let spot = at + (mtf.translation.xz() - at).normalize_or(Vec2::X) * POOL_SOCIAL_APART;
+            if !ws.hold || ws.target.distance(at) > 0.1 {
+                ws.target = at;
+                ws.hold = true;
+            }
+            if ms.target.distance(spot) > 0.3 {
+                ms.target = spot;
+                ms.hold = true;
+                ms.treading = false;
+                commands.entity(me).insert(ActionClip::new(None, &[SWIM_CYCLE]));
+            }
+            if !ms.treading || mtf.translation.xz().distance(spot) > 0.7 {
+                continue;
+            }
+            // Face to face, and at it.
+            let d = at - mtf.translation.xz();
+            mtf.rotation = Quat::from_rotation_y(d.x.atan2(d.y));
+            wtf.rotation = Quat::from_rotation_y((-d.x).atan2(-d.y));
+            ms.treading = true;
+            ws.treading = true;
+            match p.play {
+                PoolPlay::Splash => {
+                    let stc = rels.get(with).ok().and_then(|r| r.0.get(&me).map(|r| r.stc)).unwrap_or_default();
+                    let reaction = splash_reaction(&wsim.traits, wmood.map_or(0.0, |m| m.0), stc);
+                    commands.entity(me).insert(ActionClip::new(Some(splash_clip(reaction, msim.age, true)), &[TREAD]));
+                    commands.entity(with).insert(ActionClip::new(Some(splash_clip(reaction, wsim.age, false)), &[TREAD]));
+                    p.total = if reaction == "reactAngry" { 3.4 } else { 3.2 };
+                    // (A laugh's friendly; anything else, an insult: the game's context, either way.)
+                    let (c, fun) = if reaction == "laugh" { (crate::conversation::Commodity::Friendly, 4.0) } else { (crate::conversation::Commodity::Insulting, -4.0) };
+                    for (a, b) in [(me, with), (with, me)] {
+                        if let Ok(mut r) = rels.get_mut(a) {
+                            r.0.entry(b).or_default().stc.update(c, 50.0);
+                        }
+                    }
+                    if let Ok(mut m) = motives.get_mut(me) {
+                        m.add(crate::sim::FUN, 6.0);
+                    }
+                    if let Ok(mut m) = motives.get_mut(with) {
+                        m.add(crate::sim::FUN, fun);
+                    }
+                    debug!("{} splashes {}: {reaction}", msim.first, wsim.first);
+                }
+                PoolPlay::HoldBreath => {
+                    const START: f32 = 2.23;
+                    const HOLD: f32 = 2.2;
+                    const STOP: f32 = 6.1;
+                    let mine = breath_holds(&msim.traits, mskills.map_or(0, |s| s.level("Athletic")));
+                    let theirs = breath_holds(&wsim.traits, wskills.map_or(0, |s| s.level("Athletic")));
+                    let (winner, loser) = if mine >= theirs { (me, with) } else { (with, me) };
+                    let (most, least) = (mine.max(theirs) as f32, mine.min(theirs) as f32);
+                    commands.entity(me).insert(ActionClip::new(Some("a2o_pool_holdBreath_start_x"), &["a2o_pool_holdBreath_loop_x"]));
+                    commands.entity(with).insert(ActionClip::new(Some("a2o_pool_holdBreath_start_y"), &["a2o_pool_holdBreath_loop_x"]));
+                    p.stops = vec![(loser, START + least * HOLD, "a2o_pool_holdBreath_loser_stop_y"), (winner, START + most * HOLD, "a2o_pool_holdBreath_winner_stop_x")];
+                    p.surface = vec![(loser, START + least * HOLD + STOP), (winner, START + most * HOLD + STOP)];
+                    mtf.translation.y += UNDER_LIFT;
+                    wtf.translation.y += UNDER_LIFT;
+                    p.total = START + most * HOLD + STOP;
+                    p.winner = Some(winner);
+                    debug!("{} and {} hold their breath: {mine} to {theirs}", msim.first, wsim.first);
+                }
+            }
+            p.t = Some(0.0);
+            continue;
+        };
+        let now = t + delta.0;
+        p.t = Some(now);
+        for (who, at, clip) in &p.stops {
+            if t < *at && now >= *at {
+                commands.entity(*who).insert(ActionClip::new(Some(clip), &[TREAD]));
+            }
+        }
+        for (who, at) in &p.surface {
+            if t < *at && now >= *at {
+                if *who == me {
+                    mtf.translation.y -= UNDER_LIFT;
+                } else {
+                    wtf.translation.y -= UNDER_LIFT;
+                }
+            }
+        }
+        if now >= p.total {
+            // (The winner's: a friendlier context with the one they beat.)
+            if let Some(w) = p.winner {
+                let other = if w == me { with } else { me };
+                for (a, b) in [(w, other), (other, w)] {
+                    if let Ok(mut r) = rels.get_mut(a) {
+                        r.0.entry(b).or_default().stc.update(crate::conversation::Commodity::Friendly, 50.0);
+                    }
+                }
+                if let Ok(mut m) = motives.get_mut(w) {
+                    m.add(crate::sim::FUN, 8.0);
+                }
+            }
+            commands.entity(me).remove::<PoolSocial>();
+        }
     }
 }
 
@@ -281,7 +507,8 @@ fn swim(
             }
             (Some(_), Some(mut s)) => {
                 let here = tf.translation.xz();
-                if here.distance(s.target) < 0.6 {
+                let close = if s.hold { 0.25 } else { 0.6 };
+                if here.distance(s.target) < close {
                     // (There: treading water, till sent on.)
                     if s.hold {
                         if !s.treading {
@@ -343,5 +570,29 @@ fn swim(
             }
             (None, None) => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::life::Trait;
+
+    #[test]
+    fn breath_held_by_skill_and_nerve() {
+        assert_eq!(breath_holds(&[], 0), 3);
+        assert_eq!(breath_holds(&[], 4), 7);
+        assert_eq!(breath_holds(&[Trait::Coward], 9), 2);
+        assert_eq!(breath_holds(&[Trait::Insane], 2), 7);
+        assert_eq!(breath_holds(&[Trait::Daredevil], 1), 11);
+    }
+
+    #[test]
+    fn a_splash_is_taken_by_mood_and_traits() {
+        let ok = crate::conversation::Stc::default();
+        assert_eq!(splash_reaction(&[], 0.0, ok), "neutral");
+        assert_eq!(splash_reaction(&[Trait::Grumpy], 0.0, ok), "reactAngry");
+        assert_eq!(splash_reaction(&[Trait::Hydrophobic], 50.0, ok), "cry");
+        assert_eq!(splash_reaction(&[], -60.0, ok), "cry");
     }
 }

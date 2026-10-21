@@ -1225,8 +1225,8 @@ fn buy_design_test(
 
 /// SWIM_TO=1 (tests): the selected Sim sent swimming to the far side of the nearest pool, as its
 /// water clicked ("Swim"), and twenty-five seconds after they're in, "Swim Here" back by the
-/// ladder.
-#[allow(clippy::type_complexity)]
+/// ladder; POOL_SOCIAL=splash|breath, ten seconds on, that with whoever else is swimming.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn swim_to_test(
     mut commands: Commands,
     time: Res<Time>,
@@ -1234,6 +1234,7 @@ fn swim_to_test(
     mut sel: Query<(Entity, &Transform, &mut crate::interact::ActionQueue, Has<crate::swim::Swimming>), With<crate::sim::Selected>>,
     objects: Query<(Entity, &crate::interact::GameObject, &GlobalTransform)>,
     mut stage: Local<(u8, f32, Option<Vec3>)>,
+    others: Query<(Entity, &crate::sim::Sim), (With<crate::swim::Swimming>, Without<crate::sim::Selected>)>,
 ) {
     if std::env::var("SWIM_TO").is_err() {
         return;
@@ -1263,6 +1264,15 @@ fn swim_to_test(
             info!("swim test: Swim Here to {back}");
             commands.queue(move |w: &mut World| crate::swim::swim_here(w, e, back));
             *stage = (3, t, stage.2);
+        }
+        // (POOL_SOCIAL=splash|breath: then, with someone else in the water, the pool's social.)
+        3 if t - stage.1 > 10.0 && swimming => {
+            let Ok(what) = std::env::var("POOL_SOCIAL") else { return };
+            let Some((other, o)) = others.iter().next() else { return };
+            let play = if what == "breath" { crate::swim::PoolPlay::HoldBreath } else { crate::swim::PoolPlay::Splash };
+            info!("swim test: {} with {}", play.label(), o.first);
+            commands.queue(move |w: &mut World| crate::swim::start_pool_social(w, e, other, play));
+            *stage = (4, t, stage.2);
         }
         _ => {}
     }

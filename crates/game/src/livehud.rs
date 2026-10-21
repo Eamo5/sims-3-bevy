@@ -19,7 +19,7 @@ impl Plugin for LiveHudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InfoPanel>().add_systems(OnEnter(PlayMode::Live), spawn_live_hud).add_systems(
             Update,
-            (time_control, puck, mood_meter, motives_panel, bust, skewer, navigation, show_in_modes.after(navigation), moodlets, wishes, skills_panel, skill_journal_buttons, interaction_queue, notifications, note_focus).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<LiveHud>),
+            (time_control, puck, mood_meter, motives_panel, bust, bust_click, skewer, navigation, show_in_modes.after(navigation), moodlets, wishes, skills_panel, skill_journal_buttons, interaction_queue, notifications, note_focus).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<LiveHud>),
         );
     }
 }
@@ -629,13 +629,20 @@ fn bust(
         return;
     }
     *shown = Some((win, s));
-    commands.entity(win).despawn_children();
+    commands.entity(win).despawn_children().insert(Interaction::default());
     let h = portraits.portrait(&mut images, s);
     // (The whole of the bust's window, as the game draws the Sim's picture there: rising over
     // the panel's top, the head clear of the picture's edges.)
     commands.entity(win).with_children(|b| {
         b.spawn((ImageNode::new(h), crate::portraits::PortraitOf(s), Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
     });
+}
+
+/// The selected Sim's picture clicked: their own menu (what clicking them gives), as the game's.
+fn bust_click(mut commands: Commands, hud: Res<LiveHud>, clicks: Query<(Entity, &Interaction), Changed<Interaction>>) {
+    if pressed(&clicks, hud.display.id(BUST)) {
+        commands.insert_resource(crate::hud::OwnMenu);
+    }
 }
 
 /// The skewer: the household's faces from the bottom up, each ringed in its mood's colour, the
