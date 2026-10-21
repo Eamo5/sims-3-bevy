@@ -19,7 +19,7 @@ impl Plugin for LiveHudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InfoPanel>().init_resource::<SolveNeed>().init_resource::<NoteLog>().add_systems(OnEnter(PlayMode::Live), spawn_live_hud).add_systems(
             Update,
-            (time_control, puck, mood_meter, motives_panel, bust, bust_click, skewer, navigation, show_in_modes.after(navigation), (moodlets, moodlet_click).chain(), wishes, skills_panel, skill_journal_buttons, interaction_queue, notifications, note_focus).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<LiveHud>),
+            (time_control, puck, mood_meter, motives_panel, bust, bust_click, skewer, navigation, show_in_modes.after(navigation), (moodlets, moodlet_click).chain(), wishes, skills_panel, skill_journal_buttons, interaction_queue, (lesson_answer_test, notifications).chain(), note_focus).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<LiveHud>),
         );
     }
 }
@@ -1812,6 +1812,14 @@ const NOTE_CLOSE: u32 = 0x14;
 /// The card's width and least height.
 const NOTE_WIDTH: f32 = 285.0;
 const NOTE_HEIGHT: f32 = 55.0;
+/// A lesson's note (`Backgrounds.LessonBackground`): its words, its buttons (Yes, Later,
+/// Never), its height and its words' (a line's).
+const NOTE_LESSON: u32 = 6;
+const NOTE_LESSON_TEXT_ID: u32 = 6;
+const NOTE_LESSON_BUTTONS: [(u32, LessonAnswer); 3] = [(3, LessonAnswer::Yes), (4, LessonAnswer::Later), (5, LessonAnswer::Never)];
+const NOTE_LESSON_HEIGHT: f32 = 91.0;
+const NOTE_LESSON_TEXT: f32 = 27.0;
+const NOTE_LINE: f32 = 20.0;
 
 /// The panel's windows (`NotificationManager.ControlIds`): the window that slides and its
 /// toggle tab, the tabs' strip and the tabs (Information, Lessons, Chatty; the expansions'
@@ -1829,6 +1837,7 @@ const NOTES_MAX: u32 = 0x0994_f907;
 const NOTES_MAX_GLOW: u32 = 0x0994_f908;
 /// The tabs a notice goes under (`TNSCategory`).
 const TAB_INFORMATION: usize = 0;
+const TAB_LESSONS: usize = 1;
 const TAB_CHATTY: usize = 2;
 /// The panel's size and where its card sits in it, how high on the screen it is, how far it
 /// slides shut and how quickly (its `Glide`), the wait before a new notice shows
@@ -1857,13 +1866,38 @@ fn note_timeout(msg: &str) -> f32 {
 }
 
 /// A notice in the panel: its words, style and whom it's about, and when it goes if it's not
-/// shown again (`kIndividualTimeout`; none while it's the one on show).
+/// shown again (`kIndividualTimeout`; none while it's the one on show); a lesson's note is its
+/// lesson's (drawn by `lessons`, its own window in the card's place).
 #[derive(Clone)]
 struct Logged {
     msg: String,
     style: NoteStyle,
     about: Option<Entity>,
     expires: Option<f32>,
+    lesson: Option<String>,
+}
+
+impl Logged {
+    /// How long the panel stays open for it: a lesson's note the game's ten seconds
+    /// (`TutorialetteNotification.kDefaultTimeout`), a notice by its words.
+    fn timeout(&self) -> f32 {
+        if self.lesson.is_some() { NOTES_TIMEOUT } else { note_timeout(&self.msg) }
+    }
+
+    /// The card's height: a lesson's note as tall as its words need (the game's `AutoSize`), a
+    /// notice's by its words.
+    fn height(&self) -> f32 {
+        if self.lesson.is_none() {
+            return note_height(&self.msg);
+        }
+        NOTE_LESSON_HEIGHT + (lesson_lines(&self.msg) as f32 * NOTE_LINE - NOTE_LESSON_TEXT).max(0.0)
+    }
+}
+
+/// A lesson's note's lines (about 32 characters a line in its 220 pixels; each paragraph its
+/// own).
+fn lesson_lines(msg: &str) -> usize {
+    msg.split('\n').map(|p| p.chars().count().div_ceil(32).max(1)).sum()
 }
 
 /// The notices as the game's `NotificationManager` keeps them: under their tabs, one on show at
@@ -1885,6 +1919,17 @@ pub struct NoteLog {
     /// How far shut the panel is (0 open, 1 shut), and whether it's pointed at.
     slid: f32,
     hovering: bool,
+    /// Lessons' notes answered (for `lessons`).
+    pub answered: Vec<(String, LessonAnswer)>,
+}
+
+/// A lesson's note answered, by its buttons (`TutorialetteNotification`'s); gone from the panel
+/// unanswered, it's as "Later".
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum LessonAnswer {
+    Yes,
+    Later,
+    Never,
 }
 
 impl NoteLog {
@@ -1898,13 +1943,28 @@ impl NoteLog {
         if self.glow[self.tab] { self.tab } else { (0..3).find(|t| self.glow[*t] && !self.tabs[*t].is_empty()).unwrap_or(self.tab) }
     }
 
-    /// How far down the panel reaches while it's open: what's put up under it (a lesson's note)
-    /// starts there.
-    pub fn bottom(&self) -> f32 {
-        match self.current().filter(|_| self.open) {
-            Some(n) => NOTES_TOP + NOTES_CARD[1] + note_height(&n.msg) + 12.0,
-            None => 14.0,
+    /// News under a tab: it glows, and, the panel shut, the newest shows a moment on.
+    fn news(&mut self, tab: usize, now: f32) {
+        self.glow[tab] = true;
+        if self.tabs[self.tab].is_empty() {
+            self.tab = tab;
         }
+        if !self.open && self.show_at.is_none() {
+            self.show_at = Some(now + NOTES_SHOW_DELAY);
+        }
+    }
+
+    /// A lesson's note come up, under the Lessons tab (the game's `TutorialetteNotification`, a
+    /// notice of the `Tutorialette` category).
+    pub fn push_lesson(&mut self, key: &str, words: &str, now: f32) {
+        self.tabs[TAB_LESSONS].retain(|n| n.lesson.as_deref() != Some(key));
+        self.tabs[TAB_LESSONS].push(Logged { msg: words.to_string(), style: NoteStyle::System, about: None, expires: Some(now + NOTES_KEPT), lesson: Some(key.to_string()) });
+        self.news(TAB_LESSONS, now);
+    }
+
+    /// Whether a lesson's note is in the panel (not answered, nor gone in time).
+    pub fn has_lesson(&self, key: &str) -> bool {
+        self.tabs[TAB_LESSONS].iter().any(|n| n.lesson.as_deref() == Some(key))
     }
 
     /// The notice on show gone: the next shown (or, the last gone, the one before), else another
@@ -1928,18 +1988,19 @@ impl NoteLog {
 }
 
 /// The panel's controls.
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, Debug)]
 enum NoteButton {
     Toggle,
     Prev,
     Next,
     Tab(usize),
     Close,
+    Lesson(LessonAnswer),
 }
 
-/// What keeps the panel open while pointed at: its card and its tabs.
+/// What keeps the panel open while pointed at: its card and its tabs (and a lesson's note).
 #[derive(Component)]
-struct NoteHover;
+pub struct NoteHover;
 
 /// A notice's style, as the game's `NotificationStyle`: a Sim talking (blue, the speech
 /// connector), good news or bad (yellow or red), or the system's (yellow, the warning sign).
@@ -1979,6 +2040,46 @@ fn note_style(msg: &str, about_sim: bool) -> NoteStyle {
 /// game's notices' faces do).
 #[derive(Component)]
 struct NoteFocus(Entity);
+
+/// LESSON_ANSWER=yes|later|never (tests): once a lesson's note is in the panel, the panel
+/// opened by its toggle tab and the Lessons tab chosen if need be, and the note answered with
+/// that button a second after it's on show, each pressed as a click would.
+fn lesson_answer_test(mut buttons: Query<(&NoteButton, &mut Interaction, &InheritedVisibility)>, log: Res<NoteLog>, time: Res<Time>, mut last: Local<f32>, mut done: Local<bool>) {
+    let Some(want) = std::env::var("LESSON_ANSWER").ok().and_then(|v| match v.as_str() {
+        "yes" => Some(LessonAnswer::Yes),
+        "later" => Some(LessonAnswer::Later),
+        "never" => Some(LessonAnswer::Never),
+        _ => None,
+    }) else {
+        return;
+    };
+    let now = time.elapsed_secs();
+    if *done || log.tabs[TAB_LESSONS].is_empty() || now - *last < 1.0 || log.show_at.is_some() || (log.slid > 0.0 && log.slid < 1.0) {
+        return;
+    }
+    let press = if !log.open {
+        NoteButton::Toggle
+    } else if log.tab != TAB_LESSONS {
+        NoteButton::Tab(TAB_LESSONS)
+    } else {
+        NoteButton::Lesson(want)
+    };
+    for (b, mut i, v) in &mut buttons {
+        let hit = match (b, press) {
+            (NoteButton::Toggle, NoteButton::Toggle) => true,
+            (NoteButton::Tab(t), NoteButton::Tab(u)) => *t == u,
+            (NoteButton::Lesson(a), NoteButton::Lesson(w)) => *a == w && v.get(),
+            _ => false,
+        };
+        if hit {
+            info!("lesson answer test: pressed {press:?} (on {:?})", log.current().and_then(|n| n.lesson.clone()));
+            *i = Interaction::Pressed;
+            *last = now;
+            *done = matches!(press, NoteButton::Lesson(_));
+            break;
+        }
+    }
+}
 
 fn note_focus(clicks: Query<(&Interaction, &NoteFocus), Changed<Interaction>>, shown: Query<&InheritedVisibility>, mut cams: Query<&mut crate::camera::SimsCamera>) {
     for (i, f) in &clicks {
@@ -2029,14 +2130,8 @@ fn notifications(
         let about = people.iter().filter(|(_, s, _)| !s.first.is_empty() && starts(s)).max_by_key(|(_, _, member)| *member).map(|(e, ..)| e);
         let style = note_style(msg, about.is_some());
         let tab = if style == NoteStyle::Talking { TAB_CHATTY } else { TAB_INFORMATION };
-        log.tabs[tab].push(Logged { msg: msg.clone(), style, about, expires: Some(now + NOTES_KEPT) });
-        log.glow[tab] = true;
-        if log.tabs[log.tab].is_empty() {
-            log.tab = tab;
-        }
-        if !log.open && log.show_at.is_none() {
-            log.show_at = Some(now + NOTES_SHOW_DELAY);
-        }
+        log.tabs[tab].push(Logged { msg: msg.clone(), style, about, expires: Some(now + NOTES_KEPT), lesson: None });
+        log.news(tab, now);
     }
     // The controls.
     for (i, b) in &clicks {
@@ -2047,7 +2142,7 @@ fn notifications(
             NoteButton::Toggle => {
                 log.open = !log.open && log.current().is_some();
                 log.glow = [false; 3];
-                log.close_at = log.current().filter(|_| log.open).map(|n| now + note_timeout(&n.msg));
+                log.close_at = log.current().filter(|_| log.open).map(|n| now + n.timeout());
             }
             NoteButton::Prev if log.page > 0 => log.page -= 1,
             NoteButton::Next if log.page + 1 < log.tabs[log.tab].len() => log.page += 1,
@@ -2057,6 +2152,12 @@ fn notifications(
                 log.glow[t] = false;
             }
             NoteButton::Close => log.remove_current(),
+            NoteButton::Lesson(a) => {
+                if let Some(k) = log.current().and_then(|n| n.lesson.clone()) {
+                    log.answered.push((k, a));
+                    log.remove_current();
+                }
+            }
             _ => continue,
         }
         // (Another shown is heard, as the game's `Notification.Show`; a new one's heard as it
@@ -2074,14 +2175,14 @@ fn notifications(
             log.page = log.tabs[tab].len() - 1;
             log.glow[tab] = false;
             log.open = true;
-            log.close_at = log.current().map(|n| now + note_timeout(&n.msg));
+            log.close_at = log.current().map(|n| now + n.timeout());
         }
     }
     // Pointed at, it stays open; left, its time starts again; up, it slides shut (`Close`).
     let hovering = hover.iter().any(|i| *i != Interaction::None);
     if hovering != log.hovering {
         log.hovering = hovering;
-        log.close_at = if hovering { None } else { log.current().map(|n| now + note_timeout(&n.msg)) };
+        log.close_at = if hovering { None } else { log.current().map(|n| now + n.timeout()) };
     }
     if log.open && log.close_at.is_some_and(|t| now >= t) {
         log.open = false;
@@ -2101,6 +2202,8 @@ fn notifications(
     }
     if log.tabs.iter().flatten().any(|n| n.expires.is_some_and(|e| now >= e)) {
         let keep = log.current().map(|n| n.msg.clone());
+        let unanswered: Vec<String> = log.tabs.iter().flatten().filter(|n| n.expires.is_some_and(|e| now >= e)).filter_map(|n| n.lesson.clone()).collect();
+        log.answered.extend(unanswered.into_iter().map(|k| (k, LessonAnswer::Later)));
         for list in log.tabs.iter_mut() {
             list.retain(|n| n.expires.is_none_or(|e| now < e));
         }
@@ -2138,7 +2241,7 @@ fn notifications(
     let Some(n) = shown else { return };
     let msg = n.msg.clone();
     let (about, style) = (n.about, n.style);
-    let h = note_height(&msg);
+    let h = n.height();
     let Some(mut root) = ui.export("NotificationManager", 1).cloned() else { return };
     root.area = [0.0, 0.0, NOTES_SIZE[0], NOTES_SIZE[1]];
     root.place = s3bake::ui::UiPlace::Fixed;
@@ -2211,6 +2314,34 @@ fn notifications(
     }
     if let Some(g) = s.id(NOTES_MAX_GLOW) {
         commands.entity(g).insert(if log.page + 1 < count && log.glow[log.tab] { Visibility::Inherited } else { Visibility::Hidden });
+    }
+    // A lesson's note, in its own (`TutorialetteNotification.Show`): its words sized to them
+    // (taller, the note's taller; shorter, they're centred), its Yes, Later and Never.
+    if n.lesson.is_some() {
+        let Some(mut w) = ui.export("NotificationManager", NOTE_LESSON).cloned() else { return };
+        w.area = card;
+        w.flags |= s3bake::ui::WIN_VISIBLE;
+        let tall = lesson_lines(&msg) as f32 * NOTE_LINE;
+        crate::layout::edit_windows(&mut w, NOTE_LESSON_TEXT_ID, &mut |t| {
+            t.caption = msg.clone();
+            if tall < NOTE_LESSON_TEXT {
+                let down = ((NOTE_LESSON_TEXT - tall) / 2.0).floor();
+                t.area[1] += down;
+                t.area[3] += down;
+            } else {
+                t.area[3] = t.area[1] + tall;
+            }
+        });
+        let l = ui.spawn_under(&mut commands, &mut assets, &mut fonts, &w, slide);
+        for (id, a) in NOTE_LESSON_BUTTONS {
+            if let Some(b) = l.id(id) {
+                commands.entity(b).insert((NoteButton::Lesson(a), NoteHover));
+            }
+        }
+        if let Some(r) = l.root {
+            commands.entity(r).remove::<Pickable>().insert((crate::hud::BlocksWorld, NoteHover, Interaction::default()));
+        }
+        return;
     }
     // The card: in the game's style, a Sim talking on the speech connector, the rest on the
     // system's.

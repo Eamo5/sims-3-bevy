@@ -1,6 +1,7 @@
 //! Lessons, the game's tutorialettes (`Tutorialette`, `TutorialetteNotification`,
 //! `TutorialetteDialog`): the first time something comes up (Buy mode, a skill, a job, the
-//! bills, a pregnancy...), a note asks whether to learn about it: "Yes" opens its lesson, "Later"
+//! bills, a pregnancy...), a note in the notices' panel, under its Lessons tab, asks whether to
+//! learn about it: "Yes" opens its lesson, "Later"
 //! puts it off (it may come up again, half an hour on), "Never" puts it away. A lesson's seen
 //! once it's opened or refused, and kept so in the options; no two come up within a quarter of an
 //! hour, unless the lesson's one that ignores that. The Lessons dialog (the puck's menu, or the
@@ -22,9 +23,8 @@ impl Plugin for LessonsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Lesson>()
             .init_resource::<Cooldowns>()
-            .add_systems(Update, (watch, lessons_test, show_notice, under_notes, notice_buttons, open_dialog, dialog_controls).chain().run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, (watch, lessons_test, show_notice, notice_buttons, open_dialog, dialog_controls).chain().run_if(in_state(PlayMode::Live)))
             .add_systems(OnExit(crate::AppState::InGame), |mut commands: Commands| {
-                commands.remove_resource::<Notice>();
                 commands.remove_resource::<LessonsDialog>();
             });
     }
@@ -39,10 +39,9 @@ pub struct Lesson(pub &'static str);
 pub struct OpenLessons(pub Option<String>);
 
 /// The game's tunables: no two notes within this long (game minutes, unless a lesson ignores
-/// it), nor one again within that; and how long a note stays up (real seconds).
+/// it), nor one again within that.
 const GLOBAL_COOLDOWN: f64 = 15.0;
 const LESSON_COOLDOWN: f64 = 30.0;
-const NOTICE_SECONDS: f32 = 10.0;
 
 /// When a note last came up, and each lesson's (this session).
 #[derive(Resource, Default)]
@@ -51,20 +50,6 @@ struct Cooldowns {
     lessons: HashMap<String, f64>,
 }
 
-/// The note up: its windows, the lesson, and when it came.
-#[derive(Resource)]
-struct Notice {
-    s: Spawned,
-    key: String,
-    since: f32,
-}
-
-// `TutorialetteNotification`'s: its text and buttons.
-const NOTICE_BOX: u32 = 1;
-const NOTICE_TEXT: u32 = 6;
-const NOTICE_YES: u32 = 3;
-const NOTICE_LATER: u32 = 4;
-const NOTICE_NEVER: u32 = 5;
 // `TutorialetteDialog`'s: the list, the title and page text, the picture, the pages' "n/m" and
 // arrows, and close; `TutorialetteEntry`'s name and shading, and its base game picture.
 const LIST: u32 = 0x10;
@@ -209,24 +194,22 @@ fn lessons_test(mut commands: Commands, time: Res<Time>, mut done: Local<bool>, 
     }
 }
 
-/// A lesson come up: its note, if it may.
-#[allow(clippy::too_many_arguments)]
+/// A lesson come up: its note, if it may, in the notices' panel under its Lessons tab (the
+/// game's `TutorialetteNotification.Show`).
 fn show_notice(
-    mut commands: Commands,
     mut asked: MessageReader<Lesson>,
     (time, clock, settings): (Res<Time>, Res<crate::clock::GameClock>, Res<crate::options::Settings>),
     mut cool: ResMut<Cooldowns>,
-    notice: Option<Res<Notice>>,
     dialog: Option<Res<LessonsDialog>>,
-    (gu, ui): (Option<Res<crate::icons::GameUi>>, Option<ResMut<UiAssets>>),
-    (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
+    gu: Option<Res<crate::icons::GameUi>>,
+    mut log: ResMut<crate::livehud::NoteLog>,
 ) {
-    let (Some(gu), Some(mut ui)) = (gu, ui) else {
+    let Some(gu) = gu else {
         asked.clear();
         return;
     };
     for Lesson(key) in asked.read() {
-        if notice.is_some() || dialog.is_some() {
+        if dialog.is_some() || log.has_lesson(key) {
             continue;
         }
         let Some(l) = lessons(&gu).iter().find(|l| l.key == *key && !l.tns.is_empty()) else { continue };
@@ -236,76 +219,27 @@ fn show_notice(
         }
         cool.last = Some(now);
         cool.lessons.insert(key.to_string(), now);
-        // (Its words in it as it's put up, the note as tall as they need: the game sizes it to
-        // its text.)
-        let Some(mut layout) = ui.layout("TutorialetteNotification").cloned() else { return };
-        let words = unescape(&l.tns);
-        let lines = words.split('\n').map(|p| p.chars().count().div_ceil(34).max(1)).sum::<usize>();
-        let extra = lines.saturating_sub(2) as f32 * 17.0;
-        layout.area[3] += extra;
-        crate::layout::edit_windows(&mut layout, NOTICE_BOX, &mut |w| w.area[3] += extra);
-        crate::layout::edit_windows(&mut layout, NOTICE_TEXT, &mut |t| {
-            t.caption = words.clone();
-            t.area[3] += extra;
-        });
-        let s = ui.spawn_root(&mut commands, &mut images, &mut fonts, &layout);
-        if let Some(root) = s.root {
-            // (Up on the right, under the notices, as the game's lessons tab is.)
-            commands.entity(root).insert((GlobalZIndex(40), Visibility::Inherited, DespawnOnExit(crate::AppState::InGame)));
-            commands.entity(root).entry::<Node>().and_modify(|mut n| {
-                n.left = Val::Auto;
-                n.right = Val::Px(24.0);
-                n.top = Val::Px(150.0);
-            });
-        }
         info!("lesson: {} comes up", l.key);
-        commands.insert_resource(Notice { s, key: key.to_string(), since: time.elapsed_secs() });
-        break;
+        log.push_lesson(key, &unescape(&l.tns), time.elapsed_secs());
     }
 }
 
-/// The note kept under the notifications as they come and go (the game's lessons tab stacks
-/// with its notices).
-fn under_notes(notice: Option<Res<Notice>>, notes: Res<crate::livehud::NoteLog>, mut nodes: Query<&mut Node>) {
-    let Some(root) = notice.as_ref().and_then(|n| n.s.root) else { return };
-    if !notes.is_changed() && !notice.as_ref().is_some_and(|n| n.is_added()) {
+/// The notes' answers: "Yes" (the lesson opened, seen), "Never" (seen) or "Later" (put off; as
+/// a note gone from the panel unanswered, in time, as its notices go).
+fn notice_buttons(mut commands: Commands, mut settings: ResMut<crate::options::Settings>, mut log: ResMut<crate::livehud::NoteLog>) {
+    if log.answered.is_empty() {
         return;
     }
-    let want = Val::Px(notes.bottom());
-    if let Ok(mut n) = nodes.get_mut(root)
-        && n.top != want
-    {
-        n.top = want;
+    for (key, answer) in std::mem::take(&mut log.answered) {
+        use crate::livehud::LessonAnswer as A;
+        if answer != A::Later && !settings.lessons_seen.contains(&key) {
+            settings.lessons_seen.push(key.clone());
+            settings.save();
+        }
+        if answer == A::Yes {
+            commands.insert_resource(OpenLessons(Some(key)));
+        }
     }
-}
-
-/// The note's buttons: "Yes" (the lesson opened, seen), "Later", "Never" (seen); gone by itself
-/// after a while.
-fn notice_buttons(
-    mut commands: Commands,
-    notice: Option<Res<Notice>>,
-    time: Res<Time>,
-    clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
-    mut settings: ResMut<crate::options::Settings>,
-) {
-    let Some(n) = notice else { return };
-    let yes = pressed(&clicks, n.s.id(NOTICE_YES));
-    let never = pressed(&clicks, n.s.id(NOTICE_NEVER));
-    let later = pressed(&clicks, n.s.id(NOTICE_LATER)) || time.elapsed_secs() - n.since > NOTICE_SECONDS;
-    if !(yes || never || later) {
-        return;
-    }
-    if (yes || never) && !settings.lessons_seen.contains(&n.key) {
-        settings.lessons_seen.push(n.key.clone());
-        settings.save();
-    }
-    if yes {
-        commands.insert_resource(OpenLessons(Some(n.key.clone())));
-    }
-    if let Some(root) = n.s.root {
-        commands.entity(root).try_despawn();
-    }
-    commands.remove_resource::<Notice>();
 }
 
 /// The Lessons dialog on screen: its windows, the lessons in order of name, the one chosen, its

@@ -1357,7 +1357,12 @@ installation is unreachable.
   Chatty tabs (glowing with news), one on show at a time with the page arrows and numbers back
   through the rest, the newest shown half a second after it comes; the panel slides shut ten
   seconds on (longer for long words) unless pointed at, and its toggle tab opens it again. A
-  notice not on show goes two minutes on.
+  notice not on show goes two minutes on. The game's lessons (its tutorialettes) come up there
+  too, under the Lessons tab, the first time something comes up (Buy mode, a job, the bills, a
+  pregnancy...): the game's note asking whether to learn about it, Yes opening the Lessons
+  dialog at its lesson (every lesson listed, with its pages of words and pictures), Later
+  putting it off, Never putting it away; the options' Enable Lessons and Reset Lessons as the
+  game's.
 - **The game's own main menu**: the game's `GameEntryMainMenu` over its picture of town (cropped
   to cover any screen shape), with the logo. With saved games: the saves along a strip in
   the game's frames (arrows and the wheel to scroll), the newest chosen; the chosen save's
@@ -1613,6 +1618,9 @@ the log reports `saved platter PASS`.
 `MEAL_BUDGET_TEST=1` checks cooking and birthday-cake requests with an empty household
 budget: neither may create food or debt. Capture after 12 seconds for `meal budget PASS`.
 `CLICK_AT=1000,450@8` clicks at window-relative coordinates (`CURSOR_AT` moves without clicking).
+`NOTE=<words>@<s>|<words>@<s>` gives notices then; `LESSON_ANSWER=yes|later|never` opens the
+notices' panel at the first lesson's note and answers it (use `SIMS3_SETTINGS` with a copy of
+the settings, as an answer is kept).
 `BUY_HISTORY_TEST=1` verifies selling, undoing and redoing furniture transactions in the running
 game. Use `BUY_HISTORY_TEST=buttons` with `UI_CLICK=05ac150d@7;05ac150e@8;05ac150d@9` to verify
 the HUD controls, or `BUY_HISTORY_TEST=keys` with `PRESS_KEY=F2@5;Ctrl+Z@7;Ctrl+Y@8;Ctrl+Z@9`
