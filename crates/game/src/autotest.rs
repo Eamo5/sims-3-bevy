@@ -969,18 +969,21 @@ fn build_history_test(
     probe.stage += 1;
 }
 
-/// CLICK_AT=<x,y>@<seconds>;...: window-relative clicks through the real input path.
-/// CURSOR_AT uses the same format to move the pointer without clicking.
-fn pointer_script(time: Res<Time<InputTimeline>>, mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>, mut mouse: ResMut<ButtonInput<MouseButton>>, mut step: Local<usize>, mut release: Local<bool>) {
-    if *release {
-        mouse.release(MouseButton::Left);
-        *release = false;
+/// CLICK_AT=<x,y>@<seconds>;...: window-relative clicks through the real input path (`r<x,y>`
+/// with the right button). CURSOR_AT uses the same format to move the pointer without clicking.
+fn pointer_script(time: Res<Time<InputTimeline>>, mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>, mut mouse: ResMut<ButtonInput<MouseButton>>, mut step: Local<usize>, mut release: Local<Option<MouseButton>>) {
+    if let Some(b) = release.take() {
+        mouse.release(b);
         *step += 1;
         return;
     }
     let script = std::env::var("CLICK_AT").ok().map(|s| (s, true)).or_else(|| std::env::var("CURSOR_AT").ok().map(|s| (s, false)));
     let Some((script, click)) = script else { return };
     let Some((xy, at)) = script.split(';').nth(*step).and_then(|s| s.split_once('@')) else { return };
+    let (button, xy) = match xy.strip_prefix('r') {
+        Some(rest) => (MouseButton::Right, rest),
+        None => (MouseButton::Left, xy),
+    };
     let Some((x, y)) = xy.split_once(',').and_then(|(x, y)| Some((x.parse::<f32>().ok()?, y.parse::<f32>().ok()?))) else { return };
     if time.elapsed_secs() < at.parse::<f32>().unwrap_or(10.0) {
         return;
@@ -988,8 +991,8 @@ fn pointer_script(time: Res<Time<InputTimeline>>, mut windows: Query<&mut Window
     let Ok(mut window) = windows.single_mut() else { return };
     window.set_cursor_position(Some(Vec2::new(x, y)));
     if click {
-        mouse.press(MouseButton::Left);
-        *release = true;
+        mouse.press(button);
+        *release = Some(button);
     } else {
         *step += 1;
     }

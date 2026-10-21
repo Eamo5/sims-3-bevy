@@ -748,8 +748,10 @@ fn bust_click(
     mut cam: Query<&mut crate::camera::SimsCamera>,
 ) {
     let bust = hud.display.id(BUST);
-    if pressed(&clicks, bust) {
-        commands.insert_resource(crate::hud::OwnMenu);
+    if pressed(&clicks, bust)
+        && let Ok((e, _)) = sel.single()
+    {
+        commands.insert_resource(crate::hud::PieFor(e));
     }
     if mouse.just_pressed(MouseButton::Right)
         && bust.and_then(|b| hovered.get(b).ok()).is_some_and(|i| *i != Interaction::None)

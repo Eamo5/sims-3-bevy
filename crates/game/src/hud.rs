@@ -116,10 +116,11 @@ pub struct PieMenu {
     pub swim_to: Option<Vec2>,
 }
 
-/// The selected Sim's picture in the panel clicked (`livehud`): their own menu, as clicking them
-/// in the world gives, there where the picture is.
+/// A Sim's menu as clicking them in the world gives, there where the pointer is: the selected
+/// Sim's own (their picture in the panel clicked: `livehud`), or another's (their map tag
+/// clicked: `maptags`).
 #[derive(Resource)]
-pub struct OwnMenu;
+pub struct PieFor(pub Entity);
 
 /// The Adoption Service called (`servicesdialog`): who's to come home, asked of this Sim.
 #[derive(Resource)]
@@ -1236,12 +1237,12 @@ fn world_click(
     ),
     world: Res<CurrentWorld>,
     mut pie: ResMut<PieMenu>,
-    (buy, edit_town, pickable, keys, own_menu): (
+    (buy, edit_town, pickable, keys, pie_for): (
         Option<Res<crate::buy::BuyMode>>,
         Res<crate::edittown::EditTown>,
         Query<(Entity, &GlobalTransform, &InheritedVisibility, Option<&GameObject>, Has<crate::pets::Pet>), Or<(With<GameObject>, With<Sim>, With<crate::pets::Pet>)>>,
         Res<ButtonInput<KeyCode>>,
-        Option<Res<OwnMenu>>,
+        Option<Res<PieFor>>,
     ),
     (building, opp_q, front_doors): (
         Option<Res<crate::building::ActiveBuilding>>,
@@ -1287,10 +1288,11 @@ fn world_click(
         close_pie(&mut commands, &mut pie);
         return;
     }
-    // (The Sim's picture in the panel clicked: their own menu.)
-    let own = own_menu.is_some();
+    // (A Sim's picture in the panel or their map tag clicked: their menu.)
+    let asked = pie_for.as_ref().map(|p| p.0);
+    let own = asked.is_some();
     if own {
-        commands.remove_resource::<OwnMenu>();
+        commands.remove_resource::<PieFor>();
     }
     if !own && (!mouse.just_pressed(MouseButton::Left) || over_ui.0) {
         if mouse.just_pressed(MouseButton::Left) {
@@ -1314,7 +1316,7 @@ fn world_click(
     let hits = ray_cast.cast_ray(ray, &MeshRayCastSettings::default().with_filter(&filter));
     // (The objects' meshes are the GPU's alone, so most are found by their footprints: the
     // nearest object, Sim or pet whose box the ray passes through, of those shown.)
-    let target = if own { Some(actor) } else { hits.first().and_then(|(e, _)| ancestor_with(*e, &parents, is_target)).or_else(|| pick_by_box(ray, &pickable)) };
+    let target = if own { asked } else { hits.first().and_then(|(e, _)| ancestor_with(*e, &parents, is_target)).or_else(|| pick_by_box(ray, &pickable)) };
     debug!("click at {cursor}: {:?} ({})", target.map(|t| objects.get(t).map_or("a Sim or pet".to_string(), |o| o.name.clone())), if hits.is_empty() { "by its box" } else { "by its mesh" });
 
     // A fire: put out ("Extinguish", the game's: teens and up), before what's burning.

@@ -75,7 +75,7 @@ fn faces(
             continue;
         }
         let Some(mut next) = next else {
-            commands.entity(e).insert(NextFace(clock.minutes + rng.random_range(3.0..10.0)));
+            commands.entity(e).try_insert(NextFace(clock.minutes + rng.random_range(3.0..10.0)));
             continue;
         };
         // (Not asleep, nor off stage, nor talking: a social's clips make its own faces.)
@@ -89,6 +89,6 @@ fn faces(
         if lib.get(&data, clip).is_none() {
             continue;
         }
-        commands.entity(e).insert(FaceOverlay { clip: clip.clone(), time: 0.0 });
+        commands.entity(e).try_insert(FaceOverlay { clip: clip.clone(), time: 0.0 });
     }
 }

@@ -4,8 +4,9 @@
 //! clicking a venue offers its activities, clicking a home flies the camera there.
 //!
 //! The household's Sims have theirs too, their faces where they are (at home, out on a lot, in a
-//! venue or at work: clicked, that's the Sim selected), and the selected Sim's opportunities
-//! theirs (the opportunity's icon), at the venue where it's done or by the Sim it's done with.
+//! venue or at work: clicked, their menu when they're about, else that's the Sim selected), and
+//! the selected Sim's opportunities theirs (the opportunity's icon), at the venue where it's done
+//! or by the Sim it's done with. Right-clicked, any tag takes the camera there.
 //!
 //! Each shows under its kind's filters (`mapfilter`), as the game's map-tag tuning has them: the
 //! home always; other homes under Friends' Homes, empty lots only under All; venues under
@@ -26,7 +27,7 @@ pub struct MapTagsPlugin;
 
 impl Plugin for MapTagsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spawn_tags, collectible_tags, sim_tags, opportunity_tags, place_tags, tag_clicks, sim_tag_clicks).chain().run_if(in_state(PlayMode::Live)))
+        app.add_systems(Update, (spawn_tags, collectible_tags, sim_tags, opportunity_tags, place_tags, tag_clicks, sim_tag_clicks, tag_right_clicks).chain().run_if(in_state(PlayMode::Live)))
             .add_systems(OnExit(PlayMode::Live), |mut c: Commands, q: Query<Entity, With<MapTag>>| {
                 for e in &q {
                     c.entity(e).try_despawn();
@@ -239,6 +240,7 @@ fn sim_tag_clicks(
     tags: Query<(&Interaction, &MapTag, Option<&SimTag>, Option<&OppTag>), Changed<Interaction>>,
     selected: Query<Entity, With<crate::sim::Selected>>,
     mut cam: Query<&mut SimsCamera>,
+    about: Query<&InheritedVisibility, With<crate::sim::Sim>>,
 ) {
     for (i, tag, sim, opp) in &tags {
         if *i != Interaction::Pressed {
@@ -246,6 +248,11 @@ fn sim_tag_clicks(
         }
         let who = sim.map(|s| s.0).or(opp.and_then(|o| o.1));
         let Some(who) = who else { continue };
+        // (About on the lot: their menu, as clicking them gives: the game's `Target.OnPick`.)
+        if about.get(who).is_ok_and(|v| v.get()) {
+            commands.insert_resource(crate::hud::PieFor(who));
+            continue;
+        }
         if sim.is_some() {
             for s in &selected {
                 commands.entity(s).remove::<crate::sim::Selected>();
@@ -253,6 +260,43 @@ fn sim_tag_clicks(
             commands.entity(who).insert(crate::sim::Selected);
         }
         if let Ok(mut c) = cam.single_mut() {
+            c.look_at(tag.at - Vec3::Y * 9.0);
+            c.distance = 30.0;
+        }
+    }
+}
+
+/// A tag right-clicked: the camera there, as the game's `OnMapTagMouseUp` has it: the selected
+/// Sim followed, the home seen whole, the rest looked at close.
+#[allow(clippy::type_complexity)]
+fn tag_right_clicks(
+    mouse: Res<ButtonInput<MouseButton>>,
+    tags: Query<(&Interaction, &MapTag, Option<&SimTag>, Option<&OppTag>)>,
+    selected: Query<Entity, With<crate::sim::Selected>>,
+    about: Query<(&GlobalTransform, &InheritedVisibility), With<crate::sim::Sim>>,
+    world: Res<CurrentWorld>,
+    household: Option<Res<Household>>,
+    mut cam: Query<&mut SimsCamera>,
+) {
+    if !mouse.just_released(MouseButton::Right) {
+        return;
+    }
+    let Some((_, tag, sim, opp)) = tags.iter().find(|(i, ..)| **i != Interaction::None) else { return };
+    let Ok(mut c) = cam.single_mut() else { return };
+    let who = sim.map(|s| s.0).or(opp.and_then(|o| o.1)).and_then(|w| about.get(w).ok().filter(|(_, v)| v.get()).map(|(tf, _)| (w, tf.translation())));
+    match (who, world.data.lots.get(tag.lot)) {
+        (Some((w, at)), _) => {
+            c.look_at(at);
+            c.distance = 30.0;
+            if selected.contains(w) {
+                c.follow(w);
+            }
+        }
+        (None, Some(lot)) => {
+            c.look_at(crate::home::lot_center(lot));
+            c.distance = if household.as_ref().is_some_and(|h| h.lot_index == tag.lot) { 60.0 } else { 45.0 };
+        }
+        (None, None) => {
             c.look_at(tag.at - Vec3::Y * 9.0);
             c.distance = 30.0;
         }
@@ -548,6 +592,18 @@ fn tag_clicks(
         }
         if crate::visit::visitable(&world.data, tag.lot) {
             tasks.insert(0, ("Visit".to_string(), ActionKind::GoToLot { lot: tag.lot }));
+        }
+        // (The household's own home: home again when out, as the game's `OnHouseholdPick`; else
+        // nothing to do there.)
+        if let Some(h) = household.as_ref().filter(|h| h.lot_index == tag.lot) {
+            if let (Ok(actor), Some(cursor)) = (selected.single(), windows.single().ok().and_then(|w| w.cursor_position()))
+                && company_q.get(actor).ok().and_then(|c| c.3).is_some()
+            {
+                pie.submenus.clear();
+                pie.at = cursor;
+                crate::hud::open_pie(&mut commands, &mut pie, cursor, &format!("The {} Household", h.name), actor, vec![("Go Home".to_string(), ActionKind::GoHomeFromLot)]);
+            }
+            continue;
         }
         // (A home the town's families live in: a visit to them.)
         let family = lot
