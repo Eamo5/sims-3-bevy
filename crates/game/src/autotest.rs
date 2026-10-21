@@ -1359,14 +1359,14 @@ fn shots_every(mut commands: Commands, time: Res<Time>, clock: Res<crate::clock:
     commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
 }
 
-/// NOTE=<words>@<seconds>: a notification of those words then (one beginning with a Sim's name
-/// carries their picture).
-fn note_hook(time: Res<Time>, mut notes: ResMut<crate::interact::Notifications>, mut done: Local<bool>) {
-    let Some((words, at)) = std::env::var("NOTE").ok().and_then(|v| v.rsplit_once('@').and_then(|(w, t)| Some((w.to_string(), t.parse::<f32>().ok()?)))) else { return };
-    if *done || time.elapsed_secs() < at {
+/// NOTE=<words>@<seconds>[|<words>@<seconds>...]: notifications of those words then (one
+/// beginning with a Sim's name carries their picture).
+fn note_hook(time: Res<Time>, mut notes: ResMut<crate::interact::Notifications>, mut step: Local<usize>) {
+    let Some((words, at)) = std::env::var("NOTE").ok().and_then(|v| v.split('|').nth(*step).and_then(|n| n.rsplit_once('@')).and_then(|(w, t)| Some((w.to_string(), t.parse::<f32>().ok()?)))) else { return };
+    if time.elapsed_secs() < at {
         return;
     }
-    *done = true;
+    *step += 1;
     notes.push(words);
 }
 

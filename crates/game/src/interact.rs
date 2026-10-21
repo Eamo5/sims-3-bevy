@@ -3104,13 +3104,16 @@ pub struct Bill {
     pub day: u32,
 }
 
+/// The notices lately given (each with the seconds it's left to the old interface), and how
+/// many there have been (the live HUD's panel takes the new ones from it: `livehud::NoteLog`).
 #[derive(Resource, Default)]
-pub struct Notifications(pub Vec<(String, f32)>);
+pub struct Notifications(pub Vec<(String, f32)>, pub u64);
 
 impl Notifications {
     pub fn push(&mut self, s: impl Into<String>) {
         let s = s.into();
         info!("TNS: {s}");
+        self.1 += 1;
         self.0.push((s, 9.0));
         if self.0.len() > 5 {
             self.0.remove(0);

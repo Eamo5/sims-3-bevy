@@ -393,10 +393,10 @@ fn ui_clicks(
         last.2 = true;
     }
     if let Some(notes) = notes {
-        if notes.0.len() > last.1 {
+        if notes.1 as usize > last.1 {
             play.write(PlaySound::ui("ui_text_notification_open"));
         }
-        last.1 = notes.0.len();
+        last.1 = notes.1 as usize;
     }
     if let Some(buy) = buy
         && buy.active != last.3

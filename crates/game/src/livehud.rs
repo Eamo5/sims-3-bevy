@@ -17,7 +17,7 @@ pub struct LiveHudPlugin;
 
 impl Plugin for LiveHudPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<InfoPanel>().init_resource::<SolveNeed>().add_systems(OnEnter(PlayMode::Live), spawn_live_hud).add_systems(
+        app.init_resource::<InfoPanel>().init_resource::<SolveNeed>().init_resource::<NoteLog>().add_systems(OnEnter(PlayMode::Live), spawn_live_hud).add_systems(
             Update,
             (time_control, puck, mood_meter, motives_panel, bust, bust_click, skewer, navigation, show_in_modes.after(navigation), (moodlets, moodlet_click).chain(), wishes, skills_panel, skill_journal_buttons, interaction_queue, notifications, note_focus).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<LiveHud>),
         );
@@ -1809,14 +1809,40 @@ const NOTE_YELLOW: u32 = 0x43;
 const NOTE_THUMB_FRAME: u32 = 0x05;
 const NOTE_NO_MASK: u32 = 0x15;
 const NOTE_CLOSE: u32 = 0x14;
-/// The card's width and least height, and the room its thumbnail takes on the left.
+/// The card's width and least height.
 const NOTE_WIDTH: f32 = 285.0;
 const NOTE_HEIGHT: f32 = 55.0;
-const NOTE_THUMB_ROOM: f32 = 34.0;
 
-/// A notification's close button.
-#[derive(Component)]
-struct NoteClose(String);
+/// The panel's windows (`NotificationManager.ControlIds`): the window that slides and its
+/// toggle tab, the tabs' strip and the tabs (Information, Lessons, Chatty; the expansions'
+/// Connected and Store left out), a tab's glow, the page arrows and numbers.
+const NOTES_SLIDE: u32 = 0x0994_f90b;
+const NOTES_TOGGLE: u32 = 0x0994_f906;
+const NOTES_STRIP: u32 = 0x0994_f90a;
+const NOTES_TABS: [u32; 3] = [0x0994_f903, 0x0994_f904, 0x0994_f905];
+const NOTES_EP_TABS: [u32; 2] = [0x0994_f90d, 0x0994_f90e];
+const NOTES_TAB_GLOW: u32 = 0x0994_f909;
+const NOTES_PREV: u32 = 0x0994_f900;
+const NOTES_PAGE: u32 = 0x0994_f901;
+const NOTES_NEXT: u32 = 0x0994_f902;
+const NOTES_MAX: u32 = 0x0994_f907;
+const NOTES_MAX_GLOW: u32 = 0x0994_f908;
+/// The tabs a notice goes under (`TNSCategory`).
+const TAB_INFORMATION: usize = 0;
+const TAB_CHATTY: usize = 2;
+/// The panel's size and where its card sits in it, how high on the screen it is, how far it
+/// slides shut and how quickly (its `Glide`), the wait before a new notice shows
+/// (`kShowDelay`), how long the panel stays open for one (`kDefaultTimeout`; longer for long
+/// words, `kMinCharPerSecond`, `kSecondsPerCharToRead`), and how long one not on show is kept
+/// (`kIndividualTimeout`).
+const NOTES_SIZE: [f32; 2] = [468.0, 165.0];
+const NOTES_CARD: [f32; 2] = [142.0, 19.0];
+const NOTES_TOP: f32 = 22.0;
+const NOTES_SLIDE_BY: f32 = 450.0;
+const NOTES_SLIDE_SECS: f32 = 0.3;
+const NOTES_SHOW_DELAY: f32 = 0.5;
+const NOTES_TIMEOUT: f32 = 10.0;
+const NOTES_KEPT: f32 = 120.0;
 
 /// A notification card's height: taller for longer words (about 44 characters a line).
 fn note_height(msg: &str) -> f32 {
@@ -1824,11 +1850,96 @@ fn note_height(msg: &str) -> f32 {
     (lines * 14.0 + 16.0).max(NOTE_HEIGHT)
 }
 
-/// How far down the notifications on show reach: what's put up under them (a lesson's note)
-/// starts there.
-pub fn notes_bottom(notes: &crate::interact::Notifications) -> f32 {
-    14.0 + notes.0.iter().rev().take(6).map(|n| note_height(&n.0) + 12.0).sum::<f32>()
+/// How long the panel stays open for a notice: the game's ten seconds, or longer to read it.
+fn note_timeout(msg: &str) -> f32 {
+    let n = msg.chars().count() as f32;
+    if n / 25.0 > NOTES_TIMEOUT { n * 0.05 } else { NOTES_TIMEOUT }
 }
+
+/// A notice in the panel: its words, style and whom it's about, and when it goes if it's not
+/// shown again (`kIndividualTimeout`; none while it's the one on show).
+#[derive(Clone)]
+struct Logged {
+    msg: String,
+    style: NoteStyle,
+    about: Option<Entity>,
+    expires: Option<f32>,
+}
+
+/// The notices as the game's `NotificationManager` keeps them: under their tabs, one on show at
+/// a time with pages back through the rest; the panel slides shut once the notice's time is up
+/// unless pointed at, and its toggle tab opens it again.
+#[derive(Resource, Default)]
+pub struct NoteLog {
+    tabs: [Vec<Logged>; 3],
+    tab: usize,
+    page: usize,
+    open: bool,
+    /// When the panel shuts, and when the newest notice shows (`kShowDelay`).
+    close_at: Option<f32>,
+    show_at: Option<f32>,
+    /// Tabs with notices not seen yet.
+    glow: [bool; 3],
+    /// How many notices have been taken in (`Notifications.1`).
+    taken: u64,
+    /// How far shut the panel is (0 open, 1 shut), and whether it's pointed at.
+    slid: f32,
+    hovering: bool,
+}
+
+impl NoteLog {
+    fn current(&self) -> Option<&Logged> {
+        self.tabs[self.tab].get(self.page)
+    }
+
+    /// The tab to show: the current one if it has news, else the first with news, else the
+    /// current (the game's `Show`).
+    fn news_tab(&self) -> usize {
+        if self.glow[self.tab] { self.tab } else { (0..3).find(|t| self.glow[*t] && !self.tabs[*t].is_empty()).unwrap_or(self.tab) }
+    }
+
+    /// How far down the panel reaches while it's open: what's put up under it (a lesson's note)
+    /// starts there.
+    pub fn bottom(&self) -> f32 {
+        match self.current().filter(|_| self.open) {
+            Some(n) => NOTES_TOP + NOTES_CARD[1] + note_height(&n.msg) + 12.0,
+            None => 14.0,
+        }
+    }
+
+    /// The notice on show gone: the next shown (or, the last gone, the one before), else another
+    /// tab's newest, else the panel's shut (the game's `Remove`).
+    fn remove_current(&mut self) {
+        if self.page < self.tabs[self.tab].len() {
+            self.tabs[self.tab].remove(self.page);
+        }
+        if self.tabs[self.tab].is_empty() {
+            match (0..3).find(|t| !self.tabs[*t].is_empty()) {
+                Some(t) => {
+                    self.tab = t;
+                    self.page = self.tabs[t].len() - 1;
+                }
+                None => self.open = false,
+            }
+        } else {
+            self.page = self.page.min(self.tabs[self.tab].len() - 1);
+        }
+    }
+}
+
+/// The panel's controls.
+#[derive(Component, Clone, Copy)]
+enum NoteButton {
+    Toggle,
+    Prev,
+    Next,
+    Tab(usize),
+    Close,
+}
+
+/// What keeps the panel open while pointed at: its card and its tabs.
+#[derive(Component)]
+struct NoteHover;
 
 /// A notice's style, as the game's `NotificationStyle`: a Sim talking (blue, the speech
 /// connector), good news or bad (yellow or red), or the system's (yellow, the warning sign).
@@ -1880,76 +1991,239 @@ fn note_focus(clicks: Query<(&Interaction, &NoteFocus), Changed<Interaction>>, s
     }
 }
 
-/// The notifications (top right), in the game's own cards: a Sim's words with their face on
-/// the left (the speech background), the game's own news without (the system one); closed
-/// with their cross, or in time.
+/// The notifications (top right), in the game's own panel (`NotificationManager`): the newest
+/// shown a moment after it comes, in its own card (a Sim's words with their face on the speech
+/// background, the game's own news on the system's), under its tab (Information, or Chatty for
+/// a Sim talking), with pages back through the rest; the panel slides shut after the notice's
+/// time unless pointed at, and its toggle tab opens it again. Closed with their cross, or two
+/// minutes after they're last seen.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn notifications(
     mut commands: Commands,
     ui: Option<ResMut<UiAssets>>,
     (mut assets, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
-    mut notes: ResMut<crate::interact::Notifications>,
+    (notes, mut log): (Res<crate::interact::Notifications>, ResMut<NoteLog>),
     people: Query<(Entity, &Sim, Has<HouseholdMember>)>,
     mut portraits: ResMut<crate::portraits::Portraits>,
-    closes: Query<(&Interaction, &NoteClose), Changed<Interaction>>,
-    vis: Query<&mut Visibility>,
-    mut state: Local<(Option<Entity>, Vec<String>)>,
+    (clicks, hover): (Query<(&Interaction, &NoteButton), Changed<Interaction>>, Query<&Interaction, With<NoteHover>>),
+    (vis, mut nodes): (Query<&mut Visibility>, Query<&mut Node>),
+    mut state: Local<(Option<Entity>, Option<Entity>, String)>,
     mut play: MessageWriter<crate::sound::PlaySound>,
-    hud: Res<LiveHud>,
+    time: Res<Time>,
     mut icons: Option<ResMut<crate::icons::GameUi>>,
 ) {
     let Some(mut ui) = ui else { return };
-    for (i, c) in &closes {
-        if *i == Interaction::Pressed {
-            notes.0.retain(|n| n.0 != c.0);
-        }
+    let now = time.elapsed_secs();
+    // New notices, under their tabs: shown a moment after (`AddShowDelayTask`), or, with the
+    // panel open on another, the tab glowing.
+    if notes.1 < log.taken {
+        *log = NoteLog::default();
     }
-    let msgs: Vec<String> = notes.0.iter().map(|n| n.0.clone()).collect();
-    if state.1 == msgs && state.0.is_some_and(|h| vis.contains(h)) {
-        return;
-    }
-    // (A new one is heard.)
-    if msgs.iter().any(|m| !state.1.contains(m)) {
-        play.write(crate::sound::PlaySound::ui("ui_text_notification_open"));
-    }
-    state.1 = msgs.clone();
-    let holder = match state.0.filter(|h| vis.contains(*h)) {
-        Some(h) => {
-            commands.entity(h).despawn_children();
-            h
-        }
-        None => {
-            let h = commands
-                .spawn((
-                    Node { position_type: PositionType::Absolute, right: Val::Px(14.0), top: Val::Px(14.0), width: Val::Px(NOTE_WIDTH + NOTE_THUMB_ROOM), flex_direction: FlexDirection::Column, row_gap: Val::Px(12.0), ..default() },
-                    Visibility::Inherited,
-                    Pickable::IGNORE,
-                    GlobalZIndex(6),
-                    DespawnOnExit(crate::AppState::InGame),
-                ))
-                .id();
-            state.0 = Some(h);
-            h
-        }
-    };
-    let _ = &hud;
-    for msg in msgs.iter().rev().take(6) {
+    let fresh = (notes.1 - log.taken) as usize;
+    log.taken = notes.1;
+    let start = notes.0.len().saturating_sub(fresh);
+    for (msg, _) in &notes.0[start..] {
         // Like the game's, a notice about a Sim carries their picture: the household's Sim (or
         // else anyone about) the notice begins with.
         let starts = |s: &Sim| msg.starts_with(&format!("{} ", s.first)) || msg.starts_with(&format!("{}'", s.first)) || msg.starts_with(&s.full_name());
         let about = people.iter().filter(|(_, s, _)| !s.first.is_empty() && starts(s)).max_by_key(|(_, _, member)| *member).map(|(e, ..)| e);
-        // (In the game's style: a Sim talking on the speech connector, the rest on the system's.)
         let style = note_style(msg, about.is_some());
-        let connector = if style == NoteStyle::Talking { NOTE_SPEECH } else { NOTE_SYSTEM };
-        let (Some(mut bg), Some(mut fg)) = (ui.export("NotificationManager", connector).cloned(), ui.export("NotificationManager", NOTE_ONE_THUMB).cloned()) else { continue };
-        let h = note_height(msg);
-        bg.area = [NOTE_THUMB_ROOM, 0.0, NOTE_THUMB_ROOM + NOTE_WIDTH, h];
-        fg.area = [NOTE_THUMB_ROOM, 0.0, NOTE_THUMB_ROOM + NOTE_WIDTH, h];
+        let tab = if style == NoteStyle::Talking { TAB_CHATTY } else { TAB_INFORMATION };
+        log.tabs[tab].push(Logged { msg: msg.clone(), style, about, expires: Some(now + NOTES_KEPT) });
+        log.glow[tab] = true;
+        if log.tabs[log.tab].is_empty() {
+            log.tab = tab;
+        }
+        if !log.open && log.show_at.is_none() {
+            log.show_at = Some(now + NOTES_SHOW_DELAY);
+        }
+    }
+    // The controls.
+    for (i, b) in &clicks {
+        if *i != Interaction::Pressed {
+            continue;
+        }
+        match *b {
+            NoteButton::Toggle => {
+                log.open = !log.open && log.current().is_some();
+                log.glow = [false; 3];
+                log.close_at = log.current().filter(|_| log.open).map(|n| now + note_timeout(&n.msg));
+            }
+            NoteButton::Prev if log.page > 0 => log.page -= 1,
+            NoteButton::Next if log.page + 1 < log.tabs[log.tab].len() => log.page += 1,
+            NoteButton::Tab(t) if t != log.tab && !log.tabs[t].is_empty() => {
+                log.tab = t;
+                log.page = log.tabs[t].len() - 1;
+                log.glow[t] = false;
+            }
+            NoteButton::Close => log.remove_current(),
+            _ => continue,
+        }
+        // (Another shown is heard, as the game's `Notification.Show`; a new one's heard as it
+        // comes: `sound`.)
+        if matches!(*b, NoteButton::Prev | NoteButton::Next | NoteButton::Tab(_)) {
+            play.write(crate::sound::PlaySound::ui("ui_text_notification_open"));
+        }
+    }
+    // The newest shown (`Show`).
+    if log.show_at.is_some_and(|t| now >= t) {
+        log.show_at = None;
+        let tab = log.news_tab();
+        if !log.tabs[tab].is_empty() {
+            log.tab = tab;
+            log.page = log.tabs[tab].len() - 1;
+            log.glow[tab] = false;
+            log.open = true;
+            log.close_at = log.current().map(|n| now + note_timeout(&n.msg));
+        }
+    }
+    // Pointed at, it stays open; left, its time starts again; up, it slides shut (`Close`).
+    let hovering = hover.iter().any(|i| *i != Interaction::None);
+    if hovering != log.hovering {
+        log.hovering = hovering;
+        log.close_at = if hovering { None } else { log.current().map(|n| now + note_timeout(&n.msg)) };
+    }
+    if log.open && log.close_at.is_some_and(|t| now >= t) {
+        log.open = false;
+        log.close_at = None;
+        log.glow = [false; 3];
+    }
+    // Those not on show go after a while (`kIndividualTimeout`); the one on show stays.
+    let (tab, page) = (log.tab, log.page);
+    for (t, list) in log.tabs.iter_mut().enumerate() {
+        for (k, n) in list.iter_mut().enumerate() {
+            if (t, k) == (tab, page) {
+                n.expires = None;
+            } else if n.expires.is_none() {
+                n.expires = Some(now + NOTES_KEPT);
+            }
+        }
+    }
+    if log.tabs.iter().flatten().any(|n| n.expires.is_some_and(|e| now >= e)) {
+        let keep = log.current().map(|n| n.msg.clone());
+        for list in log.tabs.iter_mut() {
+            list.retain(|n| n.expires.is_none_or(|e| now < e));
+        }
+        log.page = keep.and_then(|m| log.tabs[log.tab].iter().position(|n| n.msg == m)).unwrap_or_else(|| log.tabs[log.tab].len().saturating_sub(1));
+    }
+    if log.current().is_none() {
+        log.open = false;
+    }
+    // Sliding open or shut (`Glide`, 0.3 s).
+    let target = if log.open { 0.0 } else { 1.0 };
+    let step = time.delta_secs() / NOTES_SLIDE_SECS;
+    let slid = if log.slid < target { (log.slid + step).min(target) } else { (log.slid - step).max(target) };
+    if slid != log.slid {
+        log.slid = slid;
+    }
+    if let Some(s) = state.1
+        && let Ok(mut n) = nodes.get_mut(s)
+    {
+        let want = Val::Px((log.slid * NOTES_SLIDE_BY).round());
+        if n.left != want {
+            n.left = want;
+        }
+    }
+    // What's shown: rebuilt when it changes.
+    let shown = log.current().cloned();
+    let sig = format!("{} {} {:?} {:?} {:?} {}", log.tab, log.page, log.tabs.iter().map(|l| l.len()).collect::<Vec<_>>(), log.glow, shown.as_ref().map(|n| &n.msg), log.open);
+    if state.2 == sig && state.0.is_some_and(|h| vis.contains(h)) {
+        return;
+    }
+    state.2 = sig;
+    if let Some(h) = state.0.take() {
+        commands.entity(h).try_despawn();
+    }
+    state.1 = None;
+    let Some(n) = shown else { return };
+    let msg = n.msg.clone();
+    let (about, style) = (n.about, n.style);
+    let h = note_height(&msg);
+    let Some(mut root) = ui.export("NotificationManager", 1).cloned() else { return };
+    root.area = [0.0, 0.0, NOTES_SIZE[0], NOTES_SIZE[1]];
+    root.place = s3bake::ui::UiPlace::Fixed;
+    root.flags |= s3bake::ui::WIN_VISIBLE;
+    let card = [NOTES_CARD[0], NOTES_CARD[1], NOTES_CARD[0] + NOTE_WIDTH, NOTES_CARD[1] + h];
+    // (Of the sliding window's pieces, the frame with the tabs: the card's put in it below.)
+    if let Some(slide) = find_window(&mut root, NOTES_SLIDE) {
+        slide.children.retain_mut(|c| find_window(c, NOTES_STRIP).is_some());
+        if let Some(frame) = slide.children.first_mut() {
+            frame.area = card;
+        }
+    }
+    let holder = commands
+        .spawn((
+            Node { position_type: PositionType::Absolute, right: Val::Px(0.0), top: Val::Px(NOTES_TOP), width: Val::Px(NOTES_SIZE[0]), height: Val::Px(NOTES_SIZE[1]), ..default() },
+            Visibility::Inherited,
+            Pickable::IGNORE,
+            GlobalZIndex(6),
+            DespawnOnExit(crate::AppState::InGame),
+        ))
+        .id();
+    state.0 = Some(holder);
+    let s = ui.spawn_under(&mut commands, &mut assets, &mut fonts, &root, holder);
+    let Some(slide) = s.id(NOTES_SLIDE) else { return };
+    state.1 = Some(slide);
+    commands.entity(slide).insert(Node { position_type: PositionType::Absolute, left: Val::Px((log.slid * NOTES_SLIDE_BY).round()), top: Val::Px(0.0), width: Val::Px(NOTES_SIZE[0]), height: Val::Px(NOTES_SIZE[1]), ..default() });
+    if let Some(t) = s.id(NOTES_TOGGLE) {
+        commands.entity(t).insert(NoteButton::Toggle);
+    }
+    // The tabs: the current one chosen, those with nothing greyed, the glow on those with news.
+    for (k, id) in NOTES_TABS.into_iter().enumerate() {
+        let Some(t) = s.id(id) else { continue };
+        let (selected, disabled) = (k == log.tab, log.tabs[k].is_empty());
+        commands.entity(t).insert((NoteButton::Tab(k), NoteHover)).queue(move |mut ew: EntityWorldMut| {
+            if let Some(mut b) = ew.get_mut::<UiButton>() {
+                b.selected = selected;
+                b.disabled = disabled;
+            }
+        });
+        if let Some(g) = s.within(t, NOTES_TAB_GLOW) {
+            commands.entity(g).insert(if log.glow[k] { Visibility::Inherited } else { Visibility::Hidden });
+        }
+    }
+    for id in NOTES_EP_TABS {
+        if let Some(t) = s.id(id) {
+            commands.entity(t).insert(Visibility::Hidden);
+        }
+    }
+    // The pages, with more than one (`UpdatePageInfo`).
+    let count = log.tabs[log.tab].len();
+    for id in [NOTES_PREV, NOTES_PAGE, NOTES_NEXT] {
+        if let Some(w) = s.id(id) {
+            commands.entity(w).insert(if count > 1 { Visibility::Inherited } else { Visibility::Hidden });
+        }
+    }
+    for (id, b, off) in [(NOTES_PREV, NoteButton::Prev, log.page == 0), (NOTES_NEXT, NoteButton::Next, log.page + 1 >= count)] {
+        if let Some(w) = s.id(id) {
+            commands.entity(w).insert(b).queue(move |mut ew: EntityWorldMut| {
+                if let Some(mut b) = ew.get_mut::<UiButton>() {
+                    b.disabled = off;
+                }
+            });
+        }
+    }
+    if let Some(t) = s.text(NOTES_PAGE) {
+        commands.entity(t).insert(Text::new((log.page + 1).to_string()));
+    }
+    if let Some(t) = s.text(NOTES_MAX) {
+        commands.entity(t).insert(Text::new(count.to_string()));
+    }
+    if let Some(g) = s.id(NOTES_MAX_GLOW) {
+        commands.entity(g).insert(if log.page + 1 < count && log.glow[log.tab] { Visibility::Inherited } else { Visibility::Hidden });
+    }
+    // The card: in the game's style, a Sim talking on the speech connector, the rest on the
+    // system's.
+    let connector = if style == NoteStyle::Talking { NOTE_SPEECH } else { NOTE_SYSTEM };
+    {
+        let (Some(mut bg), Some(mut fg)) = (ui.export("NotificationManager", connector).cloned(), ui.export("NotificationManager", NOTE_ONE_THUMB).cloned()) else { return };
+        bg.area = card;
+        fg.area = card;
         bg.flags |= s3bake::ui::WIN_VISIBLE;
         fg.flags |= s3bake::ui::WIN_VISIBLE;
-        let card = commands.spawn((Node { width: Val::Px(NOTE_WIDTH + NOTE_THUMB_ROOM), height: Val::Px(h), ..default() }, Visibility::Inherited, Pickable::IGNORE, ChildOf(holder))).id();
-        let b = ui.spawn_under(&mut commands, &mut assets, &mut fonts, &bg, card);
-        let f = ui.spawn_under(&mut commands, &mut assets, &mut fonts, &fg, card);
+        let b = ui.spawn_under(&mut commands, &mut assets, &mut fonts, &bg, slide);
+        let f = ui.spawn_under(&mut commands, &mut assets, &mut fonts, &fg, slide);
+        let msg = &msg;
         if let Some(t) = f.text(NOTE_TEXT) {
             commands.entity(t).insert(Text::new(msg.clone()));
         }
@@ -1962,7 +2236,7 @@ fn notifications(
             commands.entity(c).insert(Visibility::Inherited);
         }
         if let Some(c) = b.id(NOTE_CLOSE) {
-            commands.entity(c).insert(NoteClose(msg.clone()));
+            commands.entity(c).insert(NoteButton::Close);
         }
         match (about, b.id(NOTE_THUMB)) {
             (Some(e), Some(t)) => {
@@ -1996,7 +2270,7 @@ fn notifications(
             _ => {}
         }
         for r in [b.root, f.root].into_iter().flatten() {
-            commands.entity(r).insert(crate::hud::BlocksWorld);
+            commands.entity(r).remove::<Pickable>().insert((crate::hud::BlocksWorld, NoteHover, Interaction::default()));
         }
     }
 }

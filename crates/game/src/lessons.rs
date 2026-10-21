@@ -266,13 +266,16 @@ fn show_notice(
 
 /// The note kept under the notifications as they come and go (the game's lessons tab stacks
 /// with its notices).
-fn under_notes(notice: Option<Res<Notice>>, notes: Res<crate::interact::Notifications>, mut nodes: Query<&mut Node>) {
+fn under_notes(notice: Option<Res<Notice>>, notes: Res<crate::livehud::NoteLog>, mut nodes: Query<&mut Node>) {
     let Some(root) = notice.as_ref().and_then(|n| n.s.root) else { return };
     if !notes.is_changed() && !notice.as_ref().is_some_and(|n| n.is_added()) {
         return;
     }
-    if let Ok(mut n) = nodes.get_mut(root) {
-        n.top = Val::Px(crate::livehud::notes_bottom(&notes));
+    let want = Val::Px(notes.bottom());
+    if let Ok(mut n) = nodes.get_mut(root)
+        && n.top != want
+    {
+        n.top = want;
     }
 }
 
