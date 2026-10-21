@@ -285,7 +285,7 @@ fn relationships_panel(
     selected: Query<(Entity, &Sim, &Relationships, Option<&crate::careers::Job>), With<Selected>>,
     people: Query<(&Sim, Option<&crate::careers::Job>, Has<HouseholdMember>, Has<crate::interact::Visitor>, &InheritedVisibility, &GlobalTransform)>,
     (family, mut portraits): (Res<crate::family::Genealogy>, ResMut<crate::portraits::Portraits>),
-    (clicks, cards, hovered): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &Card), Changed<Interaction>>, Query<&Interaction>),
+    (clicks, cards, hovered, all_cards, mouse): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &Card), Changed<Interaction>>, Query<&Interaction>, Query<(&Interaction, &Card)>, Res<ButtonInput<MouseButton>>),
     (vis, mut buttons): (Query<&mut Visibility>, Query<&mut UiButton>),
     mut cam: Query<&mut crate::camera::SimsCamera>,
     (mut wheel, mut events): (MessageReader<MouseWheel>, MessageReader<crate::life::LifeEvent>),
@@ -339,6 +339,15 @@ fn relationships_panel(
         }
         let at = windows.single().ok().and_then(|w| w.cursor_position()).unwrap_or(Vec2::new(600.0, 400.0));
         crate::hud::open_pie(&mut commands, &mut pie, at, &sim.full_name(), me, options);
+    }
+    // (Right-clicked: the camera to them, if they're about: the game's.)
+    if mouse.just_pressed(MouseButton::Right)
+        && let Some((_, c)) = all_cards.iter().find(|(i, _)| **i != Interaction::None)
+        && let Ok((_, _, _, _, v, tf)) = people.get(c.0)
+        && v.get()
+        && let Ok(mut cm) = cam.single_mut()
+    {
+        cm.look_at(tf.translation());
     }
     // Who's listed, in the game's order.
     let mut known: Vec<(Entity, &crate::social::Relationship, &Sim, bool, bool, bool)> = rels

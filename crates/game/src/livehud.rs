@@ -61,6 +61,8 @@ const SLOT_THUMB: u32 = 1;
 const SLOT_THUMB_OPENING: [f32; 4] = [14.0, 6.0, 10.0, 18.0];
 const SLOT_MOOD: u32 = 2;
 const SLOT_BUTTON: u32 = 3;
+/// A slot's Go Home button (the selected Sim's, while they're out: the game's `mGoButton`).
+const SLOT_GO_HOME: u32 = 4;
 const NAV_BACKGROUND: u32 = 0x1ba4_8c20;
 const NAV_TAB: u32 = 0x1ba4_8c00;
 const MOTIVE_TOP: u32 = 0x06fd_de00;
@@ -553,17 +555,37 @@ fn puck_one(
 /// The mood meter: filled to the selected Sim's mood (the game's thirds: miserable to fine,
 /// fine to happy, and the bonus band that earns lifetime happiness), in its colours.
 #[allow(clippy::type_complexity)]
+#[allow(clippy::too_many_arguments)]
 fn mood_meter(
+    mut commands: Commands,
     hud: Res<LiveHud>,
-    sel: Query<&crate::life::Mood, With<Selected>>,
+    sel: Query<(&crate::life::Mood, &crate::life::Moodlets, &Sim), With<Selected>>,
     mut nodes: Query<&mut Node>,
     mut images: Query<&mut ImageNode>,
     pictures: Query<&UiPicture>,
     mut vis: Query<&mut Visibility>,
     mut shown: Local<f32>,
     time: Res<Time>,
+    (ui, mut tips): (Option<Res<UiAssets>>, Query<&mut crate::icons::Tooltip>),
 ) {
-    let Ok(mood) = sel.single() else { return };
+    let Ok((mood, moodlets, sim)) = sel.single() else { return };
+    // (Its tooltip, the game's `MoodMeterTooltip`: how they feel, and what the meter is.)
+    if let Some(ui) = ui.as_deref() {
+        let word = |key: String, or: &str| ui.localize(&key).unwrap_or_else(|| or.to_string());
+        let flavour = mood_flavour(mood.0, moodlets);
+        let tip = [
+            word(format!("Ui/Tooltip/HUD/SimDisplay:MoodFlavor{}", flavour as u8), flavour.name()),
+            word("Ui/Tooltip/HUD/SimDisplay/MoodMeter:Description".into(), ""),
+            word("Ui/Tooltip/HUD/SimDisplay/MoodMeter:BonusDescription".into(), ""),
+        ]
+        .into_iter()
+        .filter(|t| !t.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+        set_tooltip(&mut commands, &mut tips, hud.display.id(MOOD_REFERENCE), tip);
+        // (The Sim's name over their picture.)
+        set_tooltip(&mut commands, &mut tips, hud.display.id(BUST), sim.full_name());
+    }
     // (The bar eases towards the mood, as the game's.)
     let want = mood.0.clamp(MOOD_MIN, MOOD_MAX);
     *shown += (want - *shown) * (time.delta_secs() * 4.0).min(1.0);
@@ -593,10 +615,33 @@ fn mood_meter(
     set_visible(&mut vis, d.id(MOOD_GLOW), v >= MOOD_LIFETIME);
 }
 
-/// The motives panel's bars: each filled to its need, in the game's colours.
-fn motives_panel(hud: Res<LiveHud>, sel: Query<&Motives, With<Selected>>, mut nodes: Query<&mut Node>, mut images: Query<&mut ImageNode>, pictures: Query<&UiPicture>) {
+/// The game's needs, as its tooltips name them (`MotiveID`).
+const MOTIVE_KEYS: [&str; 6] = ["Hunger", "Bladder", "Energy", "Social", "Hygiene", "Fun"];
+
+/// The motives panel's bars: each filled to its need, in the game's colours; each with the
+/// game's tooltip, the need and what it's about (`MotiveTooltip`).
+#[allow(clippy::too_many_arguments)]
+fn motives_panel(
+    mut commands: Commands,
+    hud: Res<LiveHud>,
+    sel: Query<&Motives, With<Selected>>,
+    mut nodes: Query<&mut Node>,
+    mut images: Query<&mut ImageNode>,
+    pictures: Query<&UiPicture>,
+    (ui, mut tips): (Option<Res<UiAssets>>, Query<&mut crate::icons::Tooltip>),
+    mut tipped: Local<bool>,
+) {
     let Ok(m) = sel.single() else { return };
     let s = &hud.motives;
+    if !*tipped && let Some(ui) = ui.as_deref() {
+        *tipped = true;
+        for (i, k) in MOTIVE_KEYS.iter().enumerate() {
+            let name = ui.localize(&format!("Ui/Caption/HUD/MotivesPanel:Motive{k}")).unwrap_or_else(|| k.to_string());
+            let about = ui.localize(&format!("Ui/Caption/HUD/MotivesPanel:MotiveDescription{k}")).unwrap_or_default();
+            let bar = s.id(MOTIVE_TOP + i as u32).and_then(|t| s.within(t, MOTIVE_REFERENCE));
+            set_tooltip(&mut commands, &mut tips, bar, format!("{name}\n{about}"));
+        }
+    }
     for i in 0..6 {
         let Some(top) = s.id(MOTIVE_TOP + i as u32) else { continue };
         let v = m.0[i].clamp(-100.0, 100.0);
@@ -612,6 +657,60 @@ fn motives_panel(hud: Res<LiveHud>, sel: Query<&Motives, With<Selected>>, mut no
         let back = ranged(v, &MOTIVE_BACK_COLORS, &MOTIVE_BACK_RANGES[i], &MOTIVE_BACK_ALPHA_RANGES, &MOTIVE_BACK_ALPHAS);
         set_shade(&mut images, &pictures, s.within(top, MOTIVE_FILL), fill);
         set_shade(&mut images, &pictures, s.within(top, MOTIVE_BACK), back);
+    }
+}
+
+/// The game's mood flavours (`MoodFlavor`), as the mood meter's tooltip names them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MoodFlavour {
+    Fair,
+    Sad,
+    Depressed,
+    Tense,
+    Stressed,
+    Uncomfortable,
+    Miserable,
+    Angry,
+    Furious,
+    Happy,
+    VeryHappy,
+    Elated,
+    Fulfilled,
+}
+
+impl MoodFlavour {
+    fn name(self) -> &'static str {
+        match self {
+            MoodFlavour::Fair => "Fair",
+            MoodFlavour::Sad => "Sad",
+            MoodFlavour::Depressed => "Depressed",
+            MoodFlavour::Tense => "Tense",
+            MoodFlavour::Stressed => "Stressed",
+            MoodFlavour::Uncomfortable => "Uncomfortable",
+            MoodFlavour::Miserable => "Miserable",
+            MoodFlavour::Angry => "Angry",
+            MoodFlavour::Furious => "Furious",
+            MoodFlavour::Happy => "Happy",
+            MoodFlavour::VeryHappy => "Very Happy",
+            MoodFlavour::Elated => "Elated",
+            MoodFlavour::Fulfilled => "Fulfilled",
+        }
+    }
+}
+
+/// How a Sim feels, in the game's words (`MoodManager`'s thresholds: -50, -10, 10, 25, 75, 150):
+/// a bad mood's kind by what's worst for them, a need ("Uncomfortable", "Miserable") or not
+/// ("Sad", "Depressed").
+pub fn mood_flavour(mood: f32, moodlets: &crate::life::Moodlets) -> MoodFlavour {
+    let worst_is_need = moodlets.0.iter().filter(|m| m.value < 0).min_by_key(|m| m.value).is_some_and(|m| m.kind.def().hours == 0.0);
+    match mood {
+        m if m < -50.0 => if worst_is_need { MoodFlavour::Miserable } else { MoodFlavour::Depressed },
+        m if m < -10.0 => if worst_is_need { MoodFlavour::Uncomfortable } else { MoodFlavour::Sad },
+        m if m < 10.0 => MoodFlavour::Fair,
+        m if m < 25.0 => MoodFlavour::Happy,
+        m if m < 75.0 => MoodFlavour::VeryHappy,
+        m if m <= 150.0 => MoodFlavour::Elated,
+        _ => MoodFlavour::Fulfilled,
     }
 }
 
@@ -638,10 +737,27 @@ fn bust(
     });
 }
 
-/// The selected Sim's picture clicked: their own menu (what clicking them gives), as the game's.
-fn bust_click(mut commands: Commands, hud: Res<LiveHud>, clicks: Query<(Entity, &Interaction), Changed<Interaction>>) {
-    if pressed(&clicks, hud.display.id(BUST)) {
+/// The selected Sim's picture clicked: their own menu (what clicking them gives); right-clicked,
+/// the camera follows them about (the game's `AttachCameraToSim`).
+fn bust_click(
+    mut commands: Commands,
+    hud: Res<LiveHud>,
+    clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
+    (mouse, hovered): (Res<ButtonInput<MouseButton>>, Query<&Interaction>),
+    sel: Query<(Entity, &Transform), With<Selected>>,
+    mut cam: Query<&mut crate::camera::SimsCamera>,
+) {
+    let bust = hud.display.id(BUST);
+    if pressed(&clicks, bust) {
         commands.insert_resource(crate::hud::OwnMenu);
+    }
+    if mouse.just_pressed(MouseButton::Right)
+        && bust.and_then(|b| hovered.get(b).ok()).is_some_and(|i| *i != Interaction::None)
+        && let (Ok((e, tf)), Ok(mut c)) = (sel.single(), cam.single_mut())
+    {
+        c.look_at(tf.translation);
+        c.follow(e);
+        debug!("the camera follows the selected Sim (bust right-clicked)");
     }
 }
 
@@ -651,18 +767,20 @@ fn bust_click(mut commands: Commands, hud: Res<LiveHud>, clicks: Query<(Entity, 
 fn skewer(
     mut commands: Commands,
     hud: Res<LiveHud>,
-    members: Query<(Entity, &crate::life::Mood, Has<Selected>), With<HouseholdMember>>,
+    members: Query<(Entity, &crate::life::Mood, Has<Selected>, Has<crate::visit::OnLot>), With<HouseholdMember>>,
     clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
     mut buttons: Query<&mut UiButton>,
     mut vis: Query<&mut Visibility>,
     mut images: Query<&mut ImageNode>,
     pictures: Query<&UiPicture>,
     (mut portraits, mut assets): (ResMut<crate::portraits::Portraits>, ResMut<Assets<Image>>),
-    (selected, positions, mut cam): (Query<Entity, With<Selected>>, Query<&Transform, With<Sim>>, Query<&mut crate::camera::SimsCamera>),
+    (selected, positions, mut cam): (Query<Entity, With<Selected>>, Query<(&Transform, &Sim, Has<crate::nav::PathFollow>)>, Query<&mut crate::camera::SimsCamera>),
     mut faces: Local<Vec<Option<Entity>>>,
+    (mouse, hovered, mut tips, mut queues, ui): (Res<ButtonInput<MouseButton>>, Query<&Interaction>, Query<&mut crate::icons::Tooltip>, Query<&mut crate::interact::ActionQueue>, Option<Res<UiAssets>>),
 ) {
     let s = &hud.skewer;
-    let mut list: Vec<(Entity, f32, bool)> = members.iter().map(|(e, m, sel)| (e, m.0, sel)).collect();
+    let out: Vec<Entity> = members.iter().filter(|m| m.3).map(|m| m.0).collect();
+    let mut list: Vec<(Entity, f32, bool)> = members.iter().map(|(e, m, sel, _)| (e, m.0, sel)).collect();
     list.sort_by_key(|x| x.0);
     faces.resize(8, None);
     for slot in 0..8 {
@@ -689,17 +807,50 @@ fn skewer(
             crate::layout::fit_inside(&mut commands, t, p.0, SLOT_THUMB_OPENING);
             faces[slot] = Some(e);
         }
+        // (Their name, as the game's tooltip.)
+        if let Ok((_, sim, _)) = positions.get(e) {
+            set_tooltip(&mut commands, &mut tips, button, sim.full_name());
+        }
+        // The selected Sim's Go Home, while they're out (child and up: `ShouldShowGoHomeButtonForSim`).
+        let go = s.within(c, SLOT_GO_HOME);
+        let away = sel && out.contains(&e) && positions.get(e).is_ok_and(|(_, sim, _)| !sim.age.is_little());
+        set_visible(&mut vis, go, away);
+        if away {
+            let tip = ui.as_ref().and_then(|u| u.localize("Ui/Tooltip/HUD/Skewer:GoPlaces")).unwrap_or_else(|| "Click to Go Home".into());
+            set_tooltip(&mut commands, &mut tips, go, tip);
+        }
+        if away
+            && pressed(&clicks, go)
+            && let Ok(mut q) = queues.get_mut(e)
+            && !q.0.iter().any(|a| matches!(a.kind, crate::interact::ActionKind::GoHomeFromLot) && !a.cancel)
+        {
+            q.push_player(crate::interact::Action::new("Go Home", crate::interact::ActionKind::GoHomeFromLot, false));
+        }
         if pressed(&clicks, button) {
             let already = selected.contains(e);
             for o in &selected {
                 commands.entity(o).remove::<Selected>();
             }
             commands.entity(e).insert(Selected);
+            // (Clicked again: the camera to them, following them if they're on the move: the
+            // game's `MoveCameraToSim`.)
             if already
-                && let (Ok(tf), Ok(mut cm)) = (positions.get(e), cam.single_mut())
+                && let (Ok((tf, _, walking)), Ok(mut cm)) = (positions.get(e), cam.single_mut())
             {
                 cm.look_at(tf.translation);
+                if walking {
+                    cm.follow(e);
+                }
             }
+        }
+        // (Right-clicked: the camera follows them about, whoever's selected: `AttachCameraToSim`.)
+        if mouse.just_pressed(MouseButton::Right)
+            && button.and_then(|b| hovered.get(b).ok()).is_some_and(|i| *i != Interaction::None)
+            && let (Ok((tf, _, _)), Ok(mut cm)) = (positions.get(e), cam.single_mut())
+        {
+            cm.look_at(tf.translation);
+            cm.follow(e);
+            debug!("the camera follows skewer slot {slot}");
         }
     }
     // (Pets have their own skewer, still to come.)
@@ -1206,16 +1357,21 @@ fn interaction_queue(
     (mut game_ui, mut portraits): (Option<ResMut<crate::icons::GameUi>>, ResMut<crate::portraits::Portraits>),
     items: Query<(&Interaction, &QueueItem)>,
     clicks: Query<(&Interaction, &QueueItem), Changed<Interaction>>,
-    (mut vis, mut nodes): (Query<&mut Visibility>, Query<&mut Node>),
+    (mut vis, mut nodes, mouse): (Query<&mut Visibility>, Query<&mut Node>, Res<ButtonInput<MouseButton>>),
     mut state: Local<(Option<Entity>, Vec<(String, Option<QueuePicture>, bool)>)>,
 ) {
     let (Some(mut ui), Some(root)) = (ui, hud.queue.root) else { return };
     let Ok((me, mut queue, motives)) = sel.single_mut() else { return };
-    // A click cancels.
-    for (i, q) in &clicks {
-        if *i == Interaction::Pressed
-            && let Some(a) = queue.0.iter_mut().filter(|a| !a.cancel).nth(q.0)
-        {
+    // A click cancels (either button, as the game's `InteractionMouseUp`).
+    let right = mouse.just_pressed(MouseButton::Right);
+    let hit: Vec<usize> = clicks
+        .iter()
+        .filter(|(i, _)| **i == Interaction::Pressed)
+        .map(|(_, q)| q.0)
+        .chain(items.iter().filter(|(i, _)| right && **i != Interaction::None).map(|(_, q)| q.0))
+        .collect();
+    for n in hit {
+        if let Some(a) = queue.0.iter_mut().filter(|a| !a.cancel).nth(n) {
             a.cancel = true;
         }
     }
