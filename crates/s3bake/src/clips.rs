@@ -97,6 +97,15 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a_swim_",
     "a_swim2stand",
     "a2o_ladder_climb",
+    // (Getting in and out at the pool's edge, a jump in, treading water; the pool's socials:
+    // splashing someone, and the hold-your-breath contest.)
+    "a2o_pool_",
+    "a2o_swim_idle",
+    "a2a_pool_splash_",
+    "a2c_pool_splash_",
+    "a2t_pool_splash_",
+    "c2a_pool_splash_",
+    "t2a_pool_splash_",
     // Fireplaces.
     "a2o_fireplace_light_start",
     "a2o_fireplace_putOut",
@@ -116,9 +125,12 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_dollhouse_smash_",
     "c2o_dollhouse_smash_",
     "a2o_dollhouse_play_",
-    // (A fish bowl's fish fed, and the bowl cleaned out.)
+    // (A fish bowl stocked, its fish fed or scooped out, and the bowl cleaned out: its machine's
+    // Stock, Feed, ScoopFish and CleanOut.)
     "a2o_fishBowl_feed_x",
     "a2o_fishBowl_clean_x",
+    "a2o_fishBowl_stock_x",
+    "a2o_fishBowl_scoopOut_x",
     // Fire pits, the urinal, the toy oven, the buffet, the picnic basket, the rubber duck.
     "a2o_firePit_light_start",
     "a2o_firePit_putOut",

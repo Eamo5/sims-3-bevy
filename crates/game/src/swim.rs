@@ -1,6 +1,8 @@
 //! Swimming: from a pool's ladder a Sim gets into the water (or dives in off the diving board,
 //! with one of the game's dives) and swims about the pool (the game's swim cycle, head and
-//! shoulders above the water) until the swim is over, then climbs back out.
+//! shoulders above the water) until the swim is over, then climbs back out. The pool's water
+//! clicked, it's the game's "Swim" ("Extreme Swim" for a Daredevil): in by the pool's ladder and
+//! over to there, to tread water (`a2o_swim_idle_x`); clicked again while they swim, "Swim Here".
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -137,7 +139,16 @@ pub struct Swimming {
     exit: Vec3,
     /// Since when they've had no way out (the ladders gone): they tire, and drown.
     stranded: Option<f64>,
+    /// Swimming to somewhere chosen ("Swim Here"), to tread water there: and treading now.
+    hold: bool,
+    treading: bool,
 }
+
+/// How the game names a swim over to somewhere in the pool, for those swimming in it.
+pub const SWIM_HERE: &str = "Swim Here";
+/// Swimming to a spot in the pool and treading water there.
+const TREAD: &str = "a2o_swim_idle_x";
+const SWIM_CYCLE: &str = "a_swim_cycle_x";
 
 /// How long a swimmer with no way out lasts (game minutes), if their energy doesn't give out
 /// first.
@@ -146,6 +157,11 @@ const STRANDED_MINUTES: f64 = 240.0;
 /// The pool a ladder stands at (only that one, of all a lot's pools): its tiles' centres in the
 /// world and its water height.
 fn pool_at(world: &crate::loading::WorldInfo, at: Vec3) -> Option<(Vec<Vec2>, f32)> {
+    pool_near(world, at.xz(), 2.5)
+}
+
+/// The pool with a tile this near the place (its tiles' centres and water height).
+fn pool_near(world: &crate::loading::WorldInfo, at: Vec2, reach: f32) -> Option<(Vec<Vec2>, f32)> {
     world.buildings.values().filter(|b| !b.pool.is_empty()).find_map(|b| {
         let l = world.lots.get(b.lot as usize)?;
         let (s, c) = l.rotation.sin_cos();
@@ -154,7 +170,7 @@ fn pool_at(world: &crate::loading::WorldInfo, at: Vec3) -> Option<(Vec<Vec2>, f3
             Vec2::new(l.corner[0] + x * c + z * s, l.corner[2] - x * s + z * c)
         };
         let all: std::collections::HashSet<(i32, i32)> = b.pool.iter().map(|f| (f.x as i32, f.z as i32)).collect();
-        let start = all.iter().copied().map(|t| (t, centre(t).distance(at.xz()))).filter(|(_, d)| *d < 2.5).min_by(|a, b| a.1.total_cmp(&b.1))?.0;
+        let start = all.iter().copied().map(|t| (t, centre(t).distance(at))).filter(|(_, d)| *d < reach).min_by(|a, b| a.1.total_cmp(&b.1))?.0;
         // The tiles joined to the ladder's.
         let mut pool = std::collections::HashSet::from([start]);
         let mut open = vec![start];
@@ -167,6 +183,54 @@ fn pool_at(world: &crate::loading::WorldInfo, at: Vec3) -> Option<(Vec<Vec2>, f3
         }
         Some((pool.into_iter().map(centre).collect(), b.levels[0] - 0.22))
     })
+}
+
+/// A place in a pool's water: the way into that pool (its nearest ladder, or else its diving
+/// board) and its swim's place in the ladder's menu.
+pub fn ladder_for(world: &crate::loading::WorldInfo, at: Vec2, objects: impl Iterator<Item = (Entity, crate::interact::ObjectKind, Vec3)>) -> Option<(Entity, usize)> {
+    use crate::interact::ObjectKind;
+    let (tiles, _) = pool_near(world, at, 0.72)?;
+    let by = |p: Vec3| tiles.iter().map(|t| t.distance(p.xz())).fold(f32::MAX, f32::min);
+    let (e, kind, _) = objects
+        .filter(|(_, k, p)| matches!(k, ObjectKind::PoolLadder | ObjectKind::DivingBoard) && by(*p) < 2.5)
+        .min_by(|a, b| (a.1 != ObjectKind::PoolLadder, a.2.xz().distance(at)).partial_cmp(&(b.1 != ObjectKind::PoolLadder, b.2.xz().distance(at))).unwrap_or(std::cmp::Ordering::Equal))?;
+    let def = interactions_for(kind).iter().position(|d| d.special == Special::Swim)?;
+    Some((e, def))
+}
+
+/// The tiles of the pool by a ladder (their centres in the world), and its water's height.
+pub fn tiles_near(world: &crate::loading::WorldInfo, at: Vec3) -> Vec<Vec2> {
+    pool_at(world, at).map(|p| p.0).unwrap_or_default()
+}
+pub fn water_near(world: &crate::loading::WorldInfo, at: Vec3) -> Option<f32> {
+    pool_at(world, at).map(|p| p.1)
+}
+
+/// Where a ray (the pointer's) meets a pool's water, as it's seen: its surface, in the pool.
+pub fn water_hit(world: &crate::loading::WorldInfo, ray: Ray3d) -> Option<Vec2> {
+    if ray.direction.y >= -1e-4 {
+        return None;
+    }
+    let mut levels: Vec<f32> = world.buildings.values().filter(|b| !b.pool.is_empty()).filter_map(|b| b.levels.first().map(|l| l - 0.22)).collect();
+    levels.sort_by(|a, b| b.total_cmp(a));
+    levels.into_iter().find_map(|y| {
+        let t = (y - ray.origin.y) / ray.direction.y;
+        let p = (ray.origin + *ray.direction * t).xz();
+        (t > 0.0 && pool_near(world, p, 0.72).is_some()).then_some(p)
+    })
+}
+
+/// "Swim Here": a swimmer off to somewhere else in their pool, to tread water there.
+pub fn swim_here(w: &mut World, e: Entity, to: Vec2) {
+    let Some(mut s) = w.get_mut::<Swimming>(e) else { return };
+    if !s.tiles.iter().any(|t| t.distance(to) < 0.72) {
+        return;
+    }
+    s.target = to;
+    s.hold = true;
+    if std::mem::replace(&mut s.treading, false) {
+        w.entity_mut(e).insert(ActionClip::new(None, &[SWIM_CYCLE]));
+    }
 }
 
 #[allow(clippy::type_complexity)]
@@ -206,8 +270,10 @@ fn swim(
                 let Some(&first) = tiles.iter().min_by(|a, b| a.distance(ltf.translation.xz()).total_cmp(&b.distance(ltf.translation.xz()))) else { continue };
                 let exit = tf.translation;
                 tf.translation = Vec3::new(first.x, water_y - SWIM_DROP, first.y);
-                let target = tiles[rng.random_range(0..tiles.len())];
-                commands.entity(e).insert((Swimming { tiles, water_y, target, exit, stranded: None }, ActionClip::new(None, &["a_swim_cycle_x"])));
+                // (Over to where they were sent, if anywhere in this pool; else about it.)
+                let to = queue.0.front().and_then(|a| a.swim_to).filter(|p| tiles.iter().any(|t| t.distance(*p) < 0.72));
+                let target = to.unwrap_or_else(|| tiles[rng.random_range(0..tiles.len())]);
+                commands.entity(e).insert((Swimming { tiles, water_y, target, exit, stranded: None, hold: to.is_some(), treading: false }, ActionClip::new(None, &[SWIM_CYCLE])));
                 // (In swimwear for the swim: spun into at the ladder, or put on now.)
                 if wearing.map(|w| w.0) != Some(crate::simbody::OutfitKind::Swimwear) {
                     commands.entity(e).insert((crate::simbody::Wearing(crate::simbody::OutfitKind::Swimwear), crate::aging::NeedsNewBody));
@@ -216,6 +282,14 @@ fn swim(
             (Some(_), Some(mut s)) => {
                 let here = tf.translation.xz();
                 if here.distance(s.target) < 0.6 {
+                    // (There: treading water, till sent on.)
+                    if s.hold {
+                        if !s.treading {
+                            s.treading = true;
+                            commands.entity(e).insert(ActionClip::new(None, &[TREAD]));
+                        }
+                        continue;
+                    }
                     s.target = s.tiles[rng.random_range(0..s.tiles.len())];
                 }
                 let to = s.target - here;

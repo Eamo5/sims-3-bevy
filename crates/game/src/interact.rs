@@ -1567,8 +1567,9 @@ static CLOTHESLINE: [InteractionDef; 2] = [
 /// (Down the chute with it: never on the menu.)
 static WASTE_CHUTE: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::DropTrash, ..def("Throw Out Trash", 2.0, N, Pose::Use) }];
 static FISHBOWL: [InteractionDef; 4] = [
-    InteractionDef { autonomous: false, special: Special::PlaceFish, ..def("Place Fish", 2.0, N, Pose::Use) },
-    InteractionDef { autonomous: false, special: Special::TakeFish, ..def("Take Fish", 2.0, N, Pose::Use) },
+    // (As long as the game's stocking and scooping out take: 4.3 and 5.7 seconds.)
+    InteractionDef { autonomous: false, special: Special::PlaceFish, ..def("Place Fish", 4.3, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::TakeFish, ..def("Take Fish", 5.7, N, Pose::Use) },
     // (The game's `Feed` and `CleanOut`: fed when hungry of their own accord too.)
     InteractionDef { special: Special::FeedFish, ..def("Feed Fish", 2.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::CleanBowl, ..def("Clean Out", 3.0, N, Pose::Use) },
@@ -2154,7 +2155,9 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         // (The game's `TraitNeurotic` checks, in the sink's, stove's and fireplace's machines: each
         // played once through, as long as its interaction.)
         "Check Sink" => A::new(None, &["a2o_trait_neurotic_check_sink_x"]),
-        // (The bowl's `Feed` and `CleanOut` states.)
+        // (The bowl's `Stock`, `ScoopFish`, `Feed` and `CleanOut` states.)
+        "Place Fish" => A::new(None, &["a2o_fishBowl_stock_x"]),
+        "Take Fish" => A::new(None, &["a2o_fishBowl_scoopOut_x"]),
         "Feed Fish" => A::new(None, &["a2o_fishBowl_feed_x"]),
         "Clean Out" if kind == ObjectKind::FishBowl => A::new(None, &["a2o_fishBowl_clean_x"]),
         "Check Stove" => A::new(None, &["a2o_trait_neurotic_check_stove_x"]),
@@ -2915,11 +2918,13 @@ pub struct Action {
     pub chat_with: Option<Entity>,
     /// A donation chosen at the mailbox: to what, and how much (`charity`).
     pub donation: Option<(String, i64)>,
+    /// Where in the pool a swim's to (the pool's water clicked: "Swim"), to tread water there.
+    pub swim_to: Option<Vec2>,
 }
 
 impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
-        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, channel_choice: None, book_choice: None, fish_choice: None, recipe_choice: None, song_choice: None, for_one: false, approach: None, social_outcome: None, seated: false, jog: false, chat_with: None, donation: None }
+        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, channel_choice: None, book_choice: None, fish_choice: None, recipe_choice: None, song_choice: None, for_one: false, approach: None, social_outcome: None, seated: false, jog: false, chat_with: None, donation: None, swim_to: None }
     }
 }
 

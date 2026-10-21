@@ -198,6 +198,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, strand_swimmers.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, press_key.after(bevy::input::InputSystems).before(crate::buy::toggle_buy).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, hold_shift.after(bevy::input::InputSystems))
+            .add_systems(Update, swim_to_test.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, buy_pick.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, know_people.run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, load_shot.run_if(in_state(AppState::Loading)))
@@ -1220,6 +1221,51 @@ fn buy_design_test(
         }
     }
     if time.elapsed_secs() > 11.0 { assert_eq!(*stage, 6, "the design probe must complete"); }
+}
+
+/// SWIM_TO=1 (tests): the selected Sim sent swimming to the far side of the nearest pool, as its
+/// water clicked ("Swim"), and twenty-five seconds after they're in, "Swim Here" back by the
+/// ladder.
+#[allow(clippy::type_complexity)]
+fn swim_to_test(
+    mut commands: Commands,
+    time: Res<Time>,
+    world: Res<crate::loading::CurrentWorld>,
+    mut sel: Query<(Entity, &Transform, &mut crate::interact::ActionQueue, Has<crate::swim::Swimming>), With<crate::sim::Selected>>,
+    objects: Query<(Entity, &crate::interact::GameObject, &GlobalTransform)>,
+    mut stage: Local<(u8, f32, Option<Vec3>)>,
+) {
+    if std::env::var("SWIM_TO").is_err() {
+        return;
+    }
+    let t = time.elapsed_secs();
+    let Ok((e, tf, mut q, swimming)) = sel.single_mut() else { return };
+    let near = |p: Vec3| p.xz().distance(tf.translation.xz());
+    let ladder = objects.iter().filter(|(_, o, _)| o.kind == crate::interact::ObjectKind::PoolLadder).min_by(|a, b| near(a.2.translation()).total_cmp(&near(b.2.translation())));
+    // (The ladder they went in by, all through.)
+    let Some(at) = stage.2.or_else(|| ladder.map(|l| l.2.translation())) else { return };
+    let tiles = crate::swim::tiles_near(&world.data, at);
+    let from_ladder = |p: &&Vec2| p.distance(at.xz());
+    match stage.0 {
+        0 if t > 12.0 => {
+            let Some(&far) = tiles.iter().max_by(|a, b| from_ladder(a).total_cmp(&from_ladder(b))) else { return };
+            let Some((ladder, def)) = crate::swim::ladder_for(&world.data, far, objects.iter().map(|(e, o, g)| (e, o.kind, g.translation()))) else { return };
+            let mut a = crate::interact::Action::new("Swim", crate::interact::ActionKind::Object { target: ladder, def }, false);
+            a.swim_to = Some(far);
+            q.0.clear();
+            q.push_player(a);
+            info!("swim test: off to {far} ({} tiles, ladder at {at})", tiles.len());
+            *stage = (1, t, Some(at));
+        }
+        1 if swimming => *stage = (2, t, stage.2),
+        2 if t - stage.1 > 25.0 => {
+            let Some(&back) = tiles.iter().min_by(|a, b| from_ladder(a).total_cmp(&from_ladder(b))) else { return };
+            info!("swim test: Swim Here to {back}");
+            commands.queue(move |w: &mut World| crate::swim::swim_here(w, e, back));
+            *stage = (3, t, stage.2);
+        }
+        _ => {}
+    }
 }
 
 /// HOLD_SHIFT=1 (tests): Shift held down throughout (a Shift-click's menus).
@@ -3087,7 +3133,7 @@ fn auto_gate_route(
 /// the pie's first option (not a submenu) pressed as a player would, and what the selected Sim
 /// then has queued logged. `<kind>:<option>><option>` picks the options instead, by how their
 /// labels start (`Fridge:Have Quick Meal>Cereal`). `Sim` is the nearest other Sim (its socials),
-/// `Sim=<first or last name>` that one, `Fire` the nearest fire;
+/// `Sim=<first or last name>` that one, `Fire` the nearest fire, `Water` a pool's;
 /// CLICK_SHOTS=<folder> takes a picture of each menu as it opens; CLICK_USE_DISTANCE=<metres>
 /// brings the camera that near; CLICK_USE_AFTER=<seconds> waits that long first (ten by default:
 /// longer for a lot being visited), an entry `wait:<seconds>` that long between two, and
@@ -3103,7 +3149,7 @@ fn auto_click_use(
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut cams: Query<(&Camera, &GlobalTransform, &mut crate::camera::SimsCamera)>,
-    (objects, fires): (Query<(Entity, &crate::interact::GameObject, &GlobalTransform, &InheritedVisibility)>, Query<(Entity, &GlobalTransform), With<crate::fire::Fire>>),
+    (objects, fires, world): (Query<(Entity, &crate::interact::GameObject, &GlobalTransform, &InheritedVisibility)>, Query<(Entity, &GlobalTransform), With<crate::fire::Fire>>, Res<crate::loading::CurrentWorld>),
     pie: Res<crate::hud::PieMenu>,
     options: Query<(&crate::hud::PieOption, &bevy::ui::UiGlobalTransform)>,
     queues: Query<&crate::interact::ActionQueue, With<crate::sim::Selected>>,
@@ -3166,6 +3212,17 @@ fn auto_click_use(
                 .map(|(e, s, tf)| (e, s.first.clone(), tf.translation() + Vec3::Y))
                 .min_by(|a, b| a.2.distance(cam.focus).total_cmp(&b.2.distance(cam.focus)));
         }
+        // (`Water`: a pool's, a few metres out from its westernmost ladder, wherever the camera's
+        // gone; `WaterFar`, its far end.)
+        let far = kinds[idx].eq_ignore_ascii_case("WaterFar");
+        if kinds[idx].eq_ignore_ascii_case("Water") || far {
+            let (e, _, tf, _) = objects.iter().filter(|(_, o, _, _)| o.kind == crate::interact::ObjectKind::PoolLadder).min_by(|a, b| a.2.translation().x.total_cmp(&b.2.translation().x))?;
+            let at = tf.translation();
+            let tiles = crate::swim::tiles_near(&world.data, at);
+            let by = |a: &&Vec2, b: &&Vec2| a.distance(at.xz()).total_cmp(&b.distance(at.xz()));
+            let p = if far { tiles.iter().max_by(by)? } else { tiles.iter().filter(|t| t.distance(at.xz()) > 3.0).min_by(by)? };
+            return Some((e, "Water".to_string(), Vec3::new(p.x, crate::swim::water_near(&world.data, at).unwrap_or(at.y), p.y)));
+        }
         if kinds[idx].eq_ignore_ascii_case("Fire") {
             return fires.iter().map(|(e, tf)| (e, "Fire".to_string(), tf.translation() + Vec3::Y * 0.7)).min_by(|a, b| a.2.distance(cam.focus).total_cmp(&b.2.distance(cam.focus)));
         }
@@ -3188,7 +3245,8 @@ fn auto_click_use(
             cam.focus = mid;
             // (CLICK_USE_DISTANCE=<metres>: nearer, for a closer look after.)
             cam.distance = std::env::var("CLICK_USE_DISTANCE").ok().and_then(|d| d.parse().ok()).unwrap_or(9.0);
-            *state = (idx, 1, t + 1.5);
+            // (CLICK_USE_SETTLE=<seconds>: longer for the camera to get there, at a low frame rate.)
+            *state = (idx, 1, t + std::env::var("CLICK_USE_SETTLE").ok().and_then(|d| d.parse().ok()).unwrap_or(1.5));
         }
         // A click on it.
         1 => {

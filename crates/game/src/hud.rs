@@ -112,6 +112,8 @@ pub struct PieMenu {
     pub dirs: Vec<Vec2>,
     /// No name under the face (an object's menu, and its submenus).
     pub nameless: bool,
+    /// The place in a pool's water a menu was opened on ("Swim", "Swim Here").
+    pub swim_to: Option<Vec2>,
 }
 
 /// The fridge's (and microwave's) menu of snacks, as the game titles it.
@@ -822,6 +824,7 @@ struct PieCenter(Entity);
 pub fn open_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, actor: Entity, options: Vec<(String, ActionKind)>) {
     pie.parents.clear();
     pie.nameless = false;
+    pie.swim_to = None;
     spawn_pie(commands, pie, at, title, actor, options);
 }
 
@@ -830,6 +833,7 @@ pub fn open_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &st
 fn open_object_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, actor: Entity, options: Vec<(String, ActionKind)>) {
     pie.parents.clear();
     pie.nameless = true;
+    pie.swim_to = None;
     spawn_pie(commands, pie, at, title, actor, options);
 }
 
@@ -1227,7 +1231,7 @@ fn world_click(
         ),
         (Res<crate::frontdoor::Front>, Res<crate::frontdoor::Doorbell>),
     ),
-    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, (stay_q, spots_q)), company_q): (
+    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, (stay_q, spots_q, swim_q)), company_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -1241,7 +1245,7 @@ fn world_click(
         Query<(), With<crate::little::Labour>>,
         Query<&crate::tvchannels::TvLevel>,
         Query<(&Sim, Option<&crate::classes::ClassesTaken>)>,
-        (Query<(&crate::skillbooks::SkillBooks, Has<HouseholdMember>)>, Query<(&crate::novels::Novels, Has<HouseholdMember>)>, crate::carry::CarryLook, (Query<(), With<crate::guests::StayingOver>>, Query<&crate::collecting::FishingSpot>)),
+        (Query<(&crate::skillbooks::SkillBooks, Has<HouseholdMember>)>, Query<(&crate::novels::Novels, Has<HouseholdMember>)>, crate::carry::CarryLook, (Query<(), With<crate::guests::StayingOver>>, Query<&crate::collecting::FishingSpot>, Query<(), With<crate::swim::Swimming>>)),
         Query<(Entity, &Sim, Has<crate::interact::Visitor>, Option<&crate::visit::OnLot>), Or<(With<HouseholdMember>, With<crate::interact::Visitor>)>>,
     ),
 ) {
@@ -2375,6 +2379,24 @@ fn world_click(
     } else if actor_sim.age == crate::sim::Age::Baby {
         // Babies stay put.
     } else if let Some((p, level)) = floor_hit(ray, &world, building.as_deref()) {
+        // A pool's water: a swim to there, in by the pool's ladder (the game's "Swim", "Extreme
+        // Swim" for a Daredevil), or, swimming in it already, over to there ("Swim Here").
+        if level <= 1
+            && !actor_sim.age.is_little()
+            && let Some(at) = crate::swim::water_hit(&world.data, ray)
+            && let Some((ladder, def)) = crate::swim::ladder_for(&world.data, at, pickable.iter().filter_map(|(e, gt, _, o, _)| o.map(|o| (e, o.kind, gt.translation()))))
+        {
+            let label = if swim_q.contains(actor) {
+                crate::swim::SWIM_HERE
+            } else if actor_sim.traits.contains(&crate::life::Trait::Daredevil) {
+                "Extreme Swim"
+            } else {
+                "Swim"
+            };
+            open_pie(&mut commands, &mut pie, cursor, "", actor, vec![(label.to_string(), ActionKind::Object { target: ladder, def })]);
+            pie.swim_to = Some(at);
+            return;
+        }
         let mut options = vec![("Go Here".to_string(), ActionKind::GoHere(Vec2::new(p.x, p.z), level))];
         // (A little one in their arms: put down there.)
         options.extend(carry_q.on_ground(actor, Vec2::new(p.x, p.z)));
@@ -2561,9 +2583,17 @@ fn pie_buttons(
         return;
     }
     let actor = pie.actor;
+    let swim_to = pie.swim_to.take();
     let title = std::mem::take(&mut pie.title);
     let parent = (pie.at, title.clone(), pie.options.clone());
     close_pie(&mut commands, &mut pie);
+    // (A swimmer sent somewhere else in the pool there and then: `swim`.)
+    if label == crate::swim::SWIM_HERE
+        && let (Some(a), Some(to)) = (actor, swim_to)
+    {
+        commands.queue(move |w: &mut World| crate::swim::swim_here(w, a, to));
+        return;
+    }
     // (Woken there and then: their sleep cut short.)
     if let ActionKind::WakeUp { target } = kind {
         if let Ok(mut q) = queues.get_mut(target)
@@ -3029,6 +3059,7 @@ fn pie_buttons(
         action.channel_choice = channel_choice;
         action.book_choice = book_choice;
         action.fish_choice = fish_choice;
+        action.swim_to = swim_to;
         action.recipe_choice = recipe_choice;
         action.song_choice = song_choice;
         action.for_one = for_one;
