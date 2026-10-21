@@ -230,6 +230,50 @@ fn ltr_icon(r: &crate::social::Relationship) -> &'static str {
     }
 }
 
+/// What the selected Sim can do with someone from their card: called over (the game's `CallOver`,
+/// while they're about), and by phone (the game's relation panel calls): Call to Chat, Invite
+/// Over (not of the household, nor over already), Invite Out and Ask Out on Date (somewhere in
+/// town: well enough known, romantic enough), Prank Call. Submenus into `pie.submenus`.
+fn card_options(
+    me: Entity,
+    my_sim: &Sim,
+    rels: &Relationships,
+    (target, sim, member, visiting, about): (Entity, &Sim, bool, bool, bool),
+    world: &crate::loading::WorldInfo,
+    pie: &mut crate::hud::PieMenu,
+) -> Vec<(String, crate::interact::ActionKind)> {
+    use crate::interact::ActionKind;
+    let mut out = Vec::new();
+    pie.submenus.clear();
+    if target == me {
+        return out;
+    }
+    if about {
+        out.push(("Call Over".to_string(), ActionKind::Social { target, social: crate::groups::INVITE }));
+    }
+    if my_sim.age.is_little() {
+        return out;
+    }
+    out.push(("Call to Chat".to_string(), ActionKind::PhoneChat { target }));
+    if !member {
+        if !visiting {
+            out.push(("Invite Over".to_string(), ActionKind::Invite { target }));
+        }
+        let lots: Vec<usize> = (0..world.lots.len()).filter(|&l| crate::visit::visitable(world, l)).collect();
+        for (date, label, title) in [(false, "Invite Out ›", "Invite Out"), (true, "Ask Out on Date ›", "Ask Out on Date")] {
+            let ok = if date { crate::meetups::can_date(my_sim, sim, rels, target) } else { rels.friendship(target) >= crate::meetups::INVITE_OUT_MIN };
+            if !ok || lots.is_empty() {
+                continue;
+            }
+            let places = lots.iter().map(|&l| (crate::visit::place_name(world, l), ActionKind::InviteOut { target, lot: l, date })).collect();
+            out.push((label.to_string(), crate::hud::submenu_kind(pie.submenus.len())));
+            pie.submenus.push((title.to_string(), places));
+        }
+        out.push(("Prank Call".to_string(), ActionKind::PrankCall { target }));
+    }
+    out
+}
+
 /// The relationships panel.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn relationships_panel(
@@ -245,6 +289,7 @@ fn relationships_panel(
     (vis, mut buttons): (Query<&mut Visibility>, Query<&mut UiButton>),
     mut cam: Query<&mut crate::camera::SimsCamera>,
     (mut wheel, mut events): (MessageReader<MouseWheel>, MessageReader<crate::life::LifeEvent>),
+    (mut pie, world, windows): (ResMut<crate::hud::PieMenu>, Res<crate::loading::CurrentWorld>, Query<&Window, With<bevy::window::PrimaryWindow>>),
 ) {
     let scrolled: f32 = wheel.read().map(|w| w.y.signum()).sum();
     let Ok((me, my_sim, rels, my_job)) = selected.single() else { return };
@@ -274,15 +319,26 @@ fn relationships_panel(
             b.selected = p.filter == f;
         }
     }
-    // A click on a card: the camera goes to them, if they're about.
+    // A click on a card: what can be done with them from afar, as the game's `OnPickFromPanel`
+    // has it: called over, if they're about; and by phone, a chat, an invitation over, out, or
+    // on a date, a prank. (Nothing to do: the camera goes to them, if they're about.)
     for (i, c) in &cards {
-        if *i == Interaction::Pressed
-            && let Ok((_, _, _, _, v, tf)) = people.get(c.0)
-            && v.get()
-            && let Ok(mut c) = cam.single_mut()
-        {
-            c.look_at(tf.translation());
+        if *i != Interaction::Pressed {
+            continue;
         }
+        let target = c.0;
+        let Ok((sim, _, member, visiting, v, tf)) = people.get(target) else { continue };
+        let options = card_options(me, my_sim, rels, (target, sim, member, visiting, v.get()), &world.data, &mut pie);
+        if options.is_empty() {
+            if v.get()
+                && let Ok(mut c) = cam.single_mut()
+            {
+                c.look_at(tf.translation());
+            }
+            continue;
+        }
+        let at = windows.single().ok().and_then(|w| w.cursor_position()).unwrap_or(Vec2::new(600.0, 400.0));
+        crate::hud::open_pie(&mut commands, &mut pie, at, &sim.full_name(), me, options);
     }
     // Who's listed, in the game's order.
     let mut known: Vec<(Entity, &crate::social::Relationship, &Sim, bool, bool, bool)> = rels
