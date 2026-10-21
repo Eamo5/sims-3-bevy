@@ -16,8 +16,15 @@ pub struct MailPlugin;
 
 impl Plugin for MailPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, deliver_paper.run_if(in_state(PlayMode::Live)));
+        app.init_resource::<PaperRound>().add_systems(Update, deliver_paper.run_if(in_state(PlayMode::Live)));
     }
+}
+
+/// The paper's delivery: stopped, or not (the game's recurring `NewspaperDelivery`, cancelled
+/// and resumed by phone: `servicesdialog`). Kept in saves.
+#[derive(Resource, Default)]
+pub struct PaperRound {
+    pub cancelled: bool,
 }
 
 /// The paperboy on the round: where the paper's to go, since when, and the put-down begun.
@@ -45,7 +52,7 @@ fn deliver_paper(
     mut delivered: Local<Option<u32>>,
     objects: Query<(&GameObject, &Transform), Without<crate::sim::Sim>>,
     mut boys: Query<(Entity, &mut PaperBoy, &mut crate::interact::ActionQueue, &Transform, Option<&crate::nav::PathFollow>), With<crate::sim::Sim>>,
-    (exit, world, building, loading): (Option<Res<crate::interact::LotExit>>, Res<crate::loading::CurrentWorld>, Option<Res<crate::building::ActiveBuilding>>, Option<Res<crate::save::PendingLoad>>),
+    (exit, world, building, loading, round): (Option<Res<crate::interact::LotExit>>, Res<crate::loading::CurrentWorld>, Option<Res<crate::building::ActiveBuilding>>, Option<Res<crate::save::PendingLoad>>, Res<PaperRound>),
     (data, catalog, mut assets): (Res<Baked>, Res<Catalog>, ResMut<ObjectAssets>),
     (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
 ) {
@@ -88,7 +95,7 @@ fn deliver_paper(
     }
     // (Not while a save's coming in: its clock isn't the day's yet.)
     let day = clock.day();
-    if loading.is_some() || clock.hour_f() < 7.0 || *delivered == Some(day) {
+    if loading.is_some() || round.cancelled || clock.hour_f() < 7.0 || *delivered == Some(day) {
         return;
     }
     *delivered = Some(day);

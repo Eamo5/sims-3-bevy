@@ -197,7 +197,7 @@ fn cook_prep_done(mut commands: Commands, sims: Query<(Entity, &ActionQueue), Wi
 }
 
 /// What a delivered pizza costs.
-pub const PIZZA_PRICE: i64 = 40;
+pub const PIZZA_PRICE: i64 = 30;
 
 /// A pizza on its way.
 #[derive(Resource)]

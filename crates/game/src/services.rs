@@ -153,14 +153,14 @@ fn repairman(
                 let mut fixed = r.fixed.clone();
                 fixed.dedup();
                 let n = fixed.iter().filter(|e| !broken.contains(**e)).count();
-                let cost = crate::interact::REPAIRMAN_PRICE + 25 * n as i64;
+                // (The game's flat charge, `kCost`, whatever there was to fix.)
+                let cost = crate::interact::REPAIRMAN_PRICE;
                 if let Some(h) = household.as_mut() {
                     h.funds -= cost;
                 }
                 notes.push(match n {
                     0 => format!("The repairman came by but found nothing to fix (§{cost})."),
-                    1 => format!("The repairman fixed the broken object (§{cost})."),
-                    n => format!("The repairman fixed {n} broken objects (§{cost})."),
+                    _ => service_done(cost),
                 });
             }
         }
@@ -170,8 +170,8 @@ fn repairman(
 // ---------------------------------------------------------------------------------------------
 // The maid
 
-/// What the maid is paid an hour.
-pub const MAID_WAGE: i64 = 15;
+/// What the maid's visit costs (the game's `Maid` service's `kCost`: "§125/day").
+pub const MAID_COST: i64 = 125;
 /// When she comes each morning (hour of the day), and the longest she stays (game minutes).
 const MAID_HOUR: f64 = 9.0;
 const MAID_SHIFT: f64 = 4.0 * 60.0;
@@ -272,12 +272,10 @@ fn maid(
         None if clock.minutes - m.arrived < 30.0 => {}
         _ => {
             m.leaving = true;
-            let hours = ((clock.minutes - m.arrived) / 60.0).ceil().max(1.0) as i64;
-            let wage = hours * MAID_WAGE;
             if let Some(h) = household.as_mut() {
-                h.funds -= wage;
+                h.funds -= MAID_COST;
             }
-            notes.push(format!("The maid finished cleaning: {hours} hour{} came to §{wage}.", if hours == 1 { "" } else { "s" }));
+            notes.push(service_done(MAID_COST));
         }
     }
 }
@@ -452,14 +450,37 @@ fn pizza_delivery(
 // ---------------------------------------------------------------------------------------------
 // The babysitter
 
-/// What the babysitter is paid an hour.
-pub const SITTER_WAGE: i64 = 10;
+/// What the babysitter's visit costs (the game's `Babysitter` service's `kCost`).
+pub const SITTER_COST: i64 = 75;
+/// How long a grown-up's been home before the babysitter goes (the game's
+/// `kParentsHomeWaitTime`, half an hour).
+const PARENTS_HOME_MINUTES: f64 = 30.0;
 
+/// The babysitter: when the little ones were first left alone, whether one's been called (by
+/// phone: `servicesdialog`), and the one here, and since when a grown-up's been home.
 #[derive(Resource, Default)]
-struct Sitter {
-    /// When the little ones were first left alone.
+pub struct Sitter {
     alone_since: Option<f64>,
+    requested: bool,
     sitter: Option<Entity>,
+    carer_home_since: Option<f64>,
+}
+
+impl Sitter {
+    /// A babysitter here, or on the way.
+    pub fn here(&self) -> bool {
+        self.sitter.is_some() || self.requested
+    }
+
+    /// Called by phone: one comes now.
+    pub fn request(&mut self) {
+        self.requested = true;
+    }
+}
+
+/// A service's worker done, and paid (the game's `ServiceDone:NPC`).
+pub fn service_done(cost: i64) -> String {
+    format!("Looks like I'm all done here. That'll be §{cost}.")
 }
 
 #[derive(Component)]
@@ -713,14 +734,16 @@ fn babysitting(
     let mut rng = rand::rng();
 
     let Some(se) = state.sitter else {
-        if !needed {
+        if !needed && !state.requested {
             state.alone_since = None;
             return;
         }
         let since = *state.alone_since.get_or_insert(clock.minutes);
-        if clock.minutes - since < 15.0 {
+        if clock.minutes - since < 15.0 && !state.requested {
             return;
         }
+        state.requested = false;
+        state.carer_home_since = None;
         // She arrives by car at the curb.
         let (female, age) = (rng.random_bool(0.8), if rng.random_bool(0.5) { Age::YoungAdult } else { Age::Adult });
         let base = crate::sim::random_sim(&mut rng, "Babysitter", Some(female), age);
@@ -752,7 +775,11 @@ fn babysitting(
         state.sitter = Some(e);
         rides.0.push((p, "CarServiceSedan"));
         let names: Vec<&str> = littles.iter().map(|l| l.1.first.as_str()).collect();
-        notes.push(format!("{first} the babysitter has come to look after {} (§{SITTER_WAGE} an hour).", names.join(" and ")));
+        notes.push(if names.is_empty() {
+            format!("{first} the babysitter has come (§{SITTER_COST}).")
+        } else {
+            format!("{first} the babysitter has come to look after {} (§{SITTER_COST}).", names.join(" and "))
+        });
         return;
     };
     let Ok((me, mut b, mut queue, tf, path)) = sitters.get_mut(se) else {
@@ -770,16 +797,19 @@ fn babysitting(
         }
         return;
     }
-    if !needed {
-        // Someone's home: she's paid and goes.
+    // Someone's been home half an hour: she's paid and goes.
+    let home_since = if needed { None } else { Some(*state.carer_home_since.get_or_insert(clock.minutes)) };
+    if needed {
+        state.carer_home_since = None;
+    }
+    if home_since.is_some_and(|t| clock.minutes - t >= PARENTS_HOME_MINUTES) {
         b.leaving = true;
-        let hours = ((clock.minutes - b.arrived) / 60.0).ceil().max(1.0) as i64;
-        let wage = hours * SITTER_WAGE;
         if let Some(h) = household.as_mut() {
-            h.funds -= wage;
+            h.funds -= SITTER_COST;
         }
         queue.0.clear();
-        notes.push(format!("The babysitter went home. {hours} hour{} came to §{wage}.", if hours == 1 { "" } else { "s" }));
+        notes.push(service_done(SITTER_COST));
+        let _ = b.arrived;
         return;
     }
     if !queue.0.is_empty() {

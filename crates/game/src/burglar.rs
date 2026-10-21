@@ -37,7 +37,7 @@ pub struct Break {
     decided: Option<u32>,
     burglar: Option<Entity>,
     officer: Option<Entity>,
-    called: Option<f64>,
+    pub called: Option<f64>,
     /// When an awake household Sim first saw the burglar.
     seen: Option<f64>,
     /// Force a break-in tonight (tests).

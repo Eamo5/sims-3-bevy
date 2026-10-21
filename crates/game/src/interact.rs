@@ -1123,7 +1123,7 @@ pub fn upper_first(s: &str) -> String {
 }
 
 /// The repairman's call-out fee.
-pub const REPAIRMAN_PRICE: i64 = 75;
+pub const REPAIRMAN_PRICE: i64 = 50;
 
 /// The repairman, on his way.
 #[derive(Resource)]
@@ -2795,6 +2795,9 @@ pub enum ActionKind {
     CheckUpOnWork,
     /// A call to check on the household's real estate: its dialog (`estatedialog`).
     CheckRealEstate,
+    /// The phone's "Services...": the game's Telephone Services dialog once through
+    /// (`servicesdialog`).
+    CallServices,
     /// A sleeping Sim woken (the game's immediate `Sim.WakeUp`: their sleep cut short; never
     /// queued).
     WakeUp { target: Entity },
@@ -3642,6 +3645,7 @@ pub(crate) fn run_actions(
                         | ActionKind::PrankCall { .. }
                         | ActionKind::CheckUpOnWork
                         | ActionKind::CheckRealEstate
+                        | ActionKind::CallServices
                         | ActionKind::CallPolice
                         | ActionKind::CallFirefighters
                         | ActionKind::CallEverybodyHome
@@ -4315,6 +4319,7 @@ pub(crate) fn run_actions(
                             | ActionKind::PrankCall { .. }
                             | ActionKind::CheckUpOnWork
                             | ActionKind::CheckRealEstate
+                            | ActionKind::CallServices
                             | ActionKind::CallPolice
                             | ActionKind::CallFirefighters
                             | ActionKind::CallEverybodyHome
@@ -5644,7 +5649,7 @@ pub(crate) fn run_actions(
                                 let hire = *hire;
                                 commands.queue(move |w: &mut World| w.resource_mut::<crate::services::MaidService>().hired = hire);
                                 notes.push(if hire {
-                                    format!("{} hired a maid. She'll come every morning at nine (§{} an hour).", sim.first, crate::services::MAID_WAGE)
+                                    format!("{} hired a maid. She'll come every morning at nine (§{} a day).", sim.first, crate::services::MAID_COST)
                                 } else {
                                     format!("{} let the maid go.", sim.first)
                                 });
@@ -5747,6 +5752,12 @@ pub(crate) fn run_actions(
                             if elapsed >= crate::timeoff::CALL_MINUTES {
                                 finished = true;
                                 commands.queue(move |w: &mut World| w.resource_mut::<crate::estatedialog::EstateDialog>().open(me));
+                            }
+                        }
+                        ActionKind::CallServices => {
+                            if elapsed >= crate::timeoff::CALL_MINUTES {
+                                finished = true;
+                                commands.queue(move |w: &mut World| w.resource_mut::<crate::servicesdialog::ServicesDialog>().open(me));
                             }
                         }
                         ActionKind::CallPolice | ActionKind::CallFirefighters | ActionKind::CallEverybodyHome => {

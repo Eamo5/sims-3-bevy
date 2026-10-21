@@ -521,6 +521,9 @@ pub struct SaveGame {
     /// Whether the household has a maid.
     #[serde(default)]
     pub maid: bool,
+    /// Whether the household's stopped the paper.
+    #[serde(default)]
+    pub paper_cancelled: bool,
     /// Objects' handiness upgrades.
     #[serde(default)]
     pub upgrades: Vec<crate::upgrades::SavedUpgrades>,
@@ -1040,9 +1043,9 @@ fn save_game(
         Query<(&crate::pets::Pet, &crate::pets::HomePet, &Transform)>,
         Res<crate::pets::PetData>,
     ),
-    (mut slot, maid, mail_due, upgraded, family, strokes, sculpted, broken, family_inventory, puddles): (
+    (mut slot, (maid, paper), mail_due, upgraded, family, strokes, sculpted, broken, family_inventory, puddles): (
         ResMut<SaveSlot>,
-        Res<crate::services::MaidService>,
+        (Res<crate::services::MaidService>, Res<crate::mail::PaperRound>),
         Option<Res<crate::services::MailDue>>,
         Query<(&GameObject, &Transform, &crate::upgrades::Upgrades)>,
         Res<crate::family::Genealogy>,
@@ -1228,6 +1231,7 @@ fn save_game(
         alarm: *alarm,
         fishbowls: crate::fishbowl::saved(&bowls),
         maid: maid.hired,
+        paper_cancelled: paper.cancelled,
         upgrades: crate::upgrades::saved(&upgraded),
         family: family.saved(),
         terrain: strokes.saved(),
@@ -1556,6 +1560,8 @@ pub(crate) fn apply_loaded_game(
     commands.queue(move |w: &mut World| w.resource_mut::<crate::family::Genealogy>().restore(&people));
     let hired = game.maid;
     commands.queue(move |w: &mut World| w.resource_mut::<crate::services::MaidService>().hired = hired);
+    let stopped = game.paper_cancelled;
+    commands.queue(move |w: &mut World| w.resource_mut::<crate::mail::PaperRound>().cancelled = stopped);
     commands.insert_resource(crate::fishbowl::PendingBowls(game.fishbowls.clone()));
     commands.insert_resource(game.collection.clone());
     commands.insert_resource(game.discoveries.clone());

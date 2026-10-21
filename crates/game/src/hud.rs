@@ -121,6 +121,27 @@ pub struct PieMenu {
 #[derive(Resource)]
 pub struct OwnMenu;
 
+/// The Adoption Service called (`servicesdialog`): who's to come home, asked of this Sim.
+#[derive(Resource)]
+pub struct AdoptChoice(pub Entity);
+
+/// Whom to adopt, as a menu where the dialog was: a baby (only where there's a crib for it), a
+/// toddler or a child, a girl or a boy.
+pub fn adopt_choice(mut commands: Commands, choice: Option<Res<AdoptChoice>>, mut pie: ResMut<PieMenu>, objects: Query<&GameObject>, windows: Query<&Window, With<PrimaryWindow>>) {
+    let Some(c) = choice else { return };
+    commands.remove_resource::<AdoptChoice>();
+    let crib = objects.iter().any(|o| o.kind == ObjectKind::Crib);
+    let list: Vec<(String, ActionKind)> = [(0u8, "Baby"), (1, "Toddler"), (2, "Child")]
+        .into_iter()
+        .filter(|(a, _)| *a > 0 || crib)
+        .flat_map(|(a, n)| [(format!("{n} Girl"), ActionKind::Adopt { age: a, female: true }), (format!("{n} Boy"), ActionKind::Adopt { age: a, female: false })])
+        .collect();
+    let at = windows.single().ok().map_or(Vec2::new(800.0, 450.0), |w| Vec2::new(w.width(), w.height()) * 0.5);
+    pie.submenus.clear();
+    pie.at = at;
+    open_pie(&mut commands, &mut pie, at, "Adopt", c.0, list);
+}
+
 /// The fridge's (and microwave's) menu of snacks, as the game titles it.
 const QUICK_MEAL: &str = "Have Quick Meal";
 /// The fridge's menu of leftovers.
@@ -3795,8 +3816,6 @@ fn phone_button(
     (windows, household): (Query<&Window, With<PrimaryWindow>>, Query<(Entity, &Sim, &Relationships), With<HouseholdMember>>),
     mut pie: ResMut<PieMenu>,
     mut notes: ResMut<Notifications>,
-    objects: Query<&GameObject>,
-    maid: Res<crate::services::MaidService>,
     (work_q, clock, silenced): (Query<(Option<&crate::careers::Job>, Option<&crate::timeoff::TimeOff>, Option<&crate::life::Moodlets>)>, Res<crate::clock::GameClock>, Res<crate::calls::PhonesSilenced>),
     (fires_q, dept, breakin, out_q): (
         Query<(), With<crate::fire::Fire>>,
@@ -3820,23 +3839,17 @@ fn phone_button(
     }
     known.sort_by(|a, b| b.0.total_cmp(&a.0));
     known.truncate(12);
+    // (The game's "Services...": its Telephone Services dialog once through, `servicesdialog`; only
+    // from home, greyed elsewhere: `CallForServices`.)
+    let services = ui.as_ref().and_then(|u| u.localize("Gameplay/Objects/Electronics/Phone:Services")).unwrap_or_else(|| "Services".into());
     let mut options: Vec<(String, ActionKind)> = vec![
-        (format!("Order Pizza (§{})", crate::meals::PIZZA_PRICE), ActionKind::OrderPizza),
-        (format!("Call the Repairman (§{}+)", crate::interact::REPAIRMAN_PRICE), ActionKind::CallRepairman),
-        if maid.hired {
-            ("Fire the Maid".to_string(), ActionKind::HireMaid(false))
-        } else {
-            (format!("Hire a Maid (§{} an hour)", crate::services::MAID_WAGE), ActionKind::HireMaid(true))
-        },
+        (format!("{services}..."), ActionKind::CallServices),
         // (The game's "Throw Party": its picker up during the call, `partypicker`.)
         ("Throw Party...".to_string(), ActionKind::ThrowParty),
     ];
-    // (Services only from home, greyed elsewhere: the game's `CallForServices`.)
     if out_q.contains(actor) {
         let why = ui.as_ref().and_then(|u| u.localize("Gameplay/Objects/Electronics/Phone/CallForServices:ServicesOnlyOnHomeLot")).unwrap_or_else(|| "You can only call for services on your home lot.".into());
-        for o in options.iter_mut().filter(|o| matches!(o.1, ActionKind::CallRepairman | ActionKind::HireMaid(_))) {
-            o.1 = ActionKind::Greyed(why.clone());
-        }
+        options[0].1 = ActionKind::Greyed(why);
     }
     // Calling someone they know: for a chat, or to invite them over.
     pie.submenus.clear();
@@ -3889,16 +3902,8 @@ fn phone_button(
             pie.submenus.push(("Prank Call".to_string(), prank));
         }
     }
-    // Grown-ups can adopt (a baby only where there's a crib for it).
+    // Grown-ups can adopt: a child through the services' Adoption Service (`AdoptChoice`).
     if me.age.is_grown() && me.age != crate::sim::Age::Child {
-        let crib = objects.iter().any(|o| o.kind == crate::interact::ObjectKind::Crib);
-        let list: Vec<(String, ActionKind)> = [(0u8, "Baby"), (1, "Toddler"), (2, "Child")]
-            .into_iter()
-            .filter(|(a, _)| *a > 0 || crib)
-            .flat_map(|(a, n)| [(format!("{n} Girl"), ActionKind::Adopt { age: a, female: true }), (format!("{n} Boy"), ActionKind::Adopt { age: a, female: false })])
-            .collect();
-        options.push(("Adopt a Child ›".to_string(), submenu_kind(pie.submenus.len())));
-        pie.submenus.push(("Adopt".to_string(), list));
         // (And a pet, from the Pets pack's adoption: each kind for its fee.)
         let pets: Vec<(String, ActionKind)> = ["ac", "cc", "ad", "cd", "al", "ah", "ch"]
             .into_iter()
