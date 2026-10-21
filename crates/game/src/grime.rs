@@ -51,7 +51,7 @@ impl Grime {
 
 /// The kinds that get dirty.
 pub fn cleanable(kind: ObjectKind) -> bool {
-    matches!(kind, ObjectKind::Toilet | ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::ShowerTub | ObjectKind::Sink)
+    matches!(kind, ObjectKind::Toilet | ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::ShowerTub | ObjectKind::Sink | ObjectKind::LitterBox)
 }
 
 /// Bathroom things start clean.

@@ -245,6 +245,14 @@ pub enum ObjectKind {
     LaserHarp,
     /// A door or gate (locked from its menu: see `doorlocks`).
     Door,
+    /// The Pets pack's (see `petneeds`): a pet bowl, a litter box, a pet bed or dog house, a
+    /// scratching post or cat condo, a chew toy, a water trough.
+    PetBowl,
+    LitterBox,
+    PetBed,
+    ScratchingPost,
+    ChewToy,
+    WaterTrough,
     Other,
 }
 
@@ -255,6 +263,18 @@ impl ObjectKind {
         let has = |k: &str| s.contains(k);
         if has("crib") {
             Self::Crib
+        } else if has("objects.pets.petbowl") {
+            Self::PetBowl
+        } else if has("objects.pets.litterbox") {
+            Self::LitterBox
+        } else if has("objects.beds.petbed") || has("objects.pets.pethouse") {
+            Self::PetBed
+        } else if has("objects.pets.scratchingpost") || has("objects.pets.catcondo") {
+            Self::ScratchingPost
+        } else if (has("objects.pets.chewtoy") || has("objects.pets.squeakychewtoy")) && !has("jig") {
+            Self::ChewToy
+        } else if has("objects.pets.watertrough") {
+            Self::WaterTrough
         } else if has("hobbiesskills.pooltable") {
             Self::PoolTable
         } else if has("hobbiesskills.dartboard") || has("hobbiesskills.expensivedartboard") {
@@ -540,6 +560,7 @@ impl ObjectKind {
             Self::Door => "Misc",
             Self::Meal | Self::DirtyDishes | Self::DrinkTray | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
+            Self::PetBowl | Self::LitterBox | Self::PetBed | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough => "Misc",
             Self::Other => "Misc",
         }
     }
@@ -1295,6 +1316,8 @@ pub enum Special {
     PottyTrain,
     PottyLesson,
     EmptyPotty,
+    /// A pet bowl filled, for what it's short (`petneeds`).
+    FillPetBowl,
     /// Lock or unlock a door (from its menu, at once: see `doorlocks`).
     LockDoor,
     /// A lamp switched, its room's or the lot's (from its menu, at once: see `lights`).
@@ -1811,6 +1834,11 @@ static JUNGLEGYM: [InteractionDef; 1] = [def("Play on Jungle Gym", 40.0, [0.0, 0
 /// (Up the ladder and down the slide, once: played again and again, as children do.)
 static SLIDE: [InteractionDef; 1] = [def("Play on Slide", 9.6, [0.0, 0.0, -8.0, 0.0, -6.0, 110.0], Pose::Use)];
 /// (The game's `kTimeToMopPuddle`: five minutes with the mop.)
+/// A pet bowl filled (the game's `FillBowl`, §25 a bite it's short: `petneeds`), by grown-ups of the
+/// household of their own accord once it's down to three bites; a litter box cleaned out once it
+/// needs it (the game's `CleanLitterBox`).
+static PET_BOWL: [InteractionDef; 1] = [InteractionDef { special: Special::FillPetBowl, ..def("Fill Bowl", 3.0, N, Pose::Use) }];
+static LITTER_BOX: [InteractionDef; 1] = [InteractionDef { special: Special::Scrub, ..def("Clean", 6.0, [0.0, 0.0, 0.0, 0.0, -20.0, 0.0], Pose::Use) }];
 static PUDDLE: [InteractionDef; 1] = [InteractionDef { special: Special::MopUp, ..def("Mop Up", 5.0, [0.0, 0.0, -2.0, 0.0, -4.0, -4.0], Pose::Use) }];
 static FOOSBALL: [InteractionDef; 1] = [def("Play Foosball", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 65.0], Pose::Use)];
 static POOL_TABLE: [InteractionDef; 1] = [def("Play Pool", 45.0, [0.0, 0.0, -3.0, 0.0, 0.0, 60.0], Pose::Use)];
@@ -2099,6 +2127,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Clean" if matches!(kind, ObjectKind::Bathtub | ObjectKind::ShowerTub) => {
             A::new(Some("a2o_bathtub_clean_start_x"), &["a2o_bathtub_clean_loop1_x", "a2o_bathtub_clean_loop2_x", "a2o_bathtub_clean_loop3_x"]).ending(&["a2o_bathtub_clean_stop_x"], 1.5)
         }
+        "Clean" if kind == ObjectKind::LitterBox => A::new(None, &["a2o_litterbox_clean_x"]),
+        "Fill Bowl" => A::new(None, &["a2o_petBowl_putFood_x"]),
         "Clean" if kind == ObjectKind::Sink => A::new(Some("a2o_sink_clean_start_x"), &["a2o_sink_clean_loop1_x", "a2o_sink_clean_loop2_x"]).ending(&["a2o_sink_clean_stop_x"], 1.5),
         "Mop Up" => A::new(Some("a2o_puddle_mopUp_start_x"), &["a2o_puddle_mopUp_loop_1_x", "a2o_puddle_mopUp_loop_2_x"]).ending(&["a2o_puddle_mopUp_stop_x"], 1.2),
         "Make Bed" => A::steps("a2o_bed_make_start_x", &["a2o_bed_make_smooth_x", "a2o_bed_make_pat_x"], &["a2o_bed_make_smooth_x"]).ending(&["a2o_bed_make_stop_x"], 1.0),
@@ -2759,6 +2789,8 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::LeafPile => &LEAF_PILE,
         ObjectKind::Door => &DOOR,
         ObjectKind::Light => &LIGHT,
+        ObjectKind::PetBowl => &PET_BOWL,
+        ObjectKind::LitterBox => &LITTER_BOX,
         _ => &[],
     }
 }
@@ -4749,6 +4781,9 @@ pub(crate) fn run_actions(
                                         }
                                         Special::Scrub => {
                                             commands.entity(*target).try_insert(crate::grime::Grime(0.0));
+                                        }
+                                        Special::FillPetBowl => {
+                                            commands.entity(*target).insert(crate::petneeds::BowlFilled);
                                         }
                                         Special::GetIngredients => {
                                             commands.entity(me).insert(crate::anim::Carrying(crate::meals::FOOD_CARRY));

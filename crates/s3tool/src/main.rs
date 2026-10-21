@@ -961,6 +961,41 @@ fn main() {
         println!("{hits:X?}");
         return;
     }
+    if args[1] == "itun" {
+        // itun <root> <filter>: the interaction tunings (ITUN) of every pack whose object or
+        // interaction has the filter in it, with all their need changes (any commodity).
+        let mut set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        if let Ok(p) = Package::open(&std::path::Path::new(&args[2]).join("Game/Bin/Gameplay/GameplayData.package")) {
+            set.add(p);
+        }
+        let f = args.get(3).map(|s| s.to_ascii_lowercase()).unwrap_or_default();
+        for k in set.keys_of_type(0x03B3_3DDF).copied().collect::<Vec<_>>() {
+            let Some(d) = set.read(&k) else { continue };
+            let x = String::from_utf8_lossy(&d);
+            let attr = |tag: &str| -> Option<String> {
+                let at = x.find(&format!("<{tag} name=\""))? + tag.len() + 8;
+                x[at..].split('"').next().map(str::to_string)
+            };
+            let (i, o) = (attr("Interaction").unwrap_or_default(), attr("Object").unwrap_or_default());
+            if !(i.to_ascii_lowercase().contains(&f) || o.to_ascii_lowercase().contains(&f)) {
+                continue;
+            }
+            let changes: Vec<String> = x
+                .split("<Change ")
+                .skip(1)
+                .filter_map(|c| {
+                    let val = |k: &str| -> Option<&str> {
+                        let at = c.find(&format!(" {k}=\""))? + k.len() + 3;
+                        c[at..].split('"').next()
+                    };
+                    let v = val("actual")?;
+                    (v.trim() != "0").then(|| format!("{}={}{}", c.split('"').nth(1).unwrap_or("?"), v, if val("updateType") == Some("ImmediateDelta") { " once" } else { "" }))
+                })
+                .collect();
+            println!("{o} | {i} | {}", changes.join(", "));
+        }
+        return;
+    }
     if args[1] == "xmlfind" {
         // xmlfind <root> <text> [outdir]: XML resources (0x0333406C) containing the text, with
         // their names; with an outdir, writes them there. EXTRA=<package> adds a package.

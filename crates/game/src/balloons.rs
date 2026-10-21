@@ -234,6 +234,17 @@ impl Picker<'_> {
 }
 
 /// How high above a Sim's feet their balloons start (lower when sitting or lying down).
+/// How high a balloon goes over a pet: a cat's head, a dog's, a horse's.
+fn pet_head_height(kind: &str) -> f32 {
+    match kind {
+        "ah" => 2.0,
+        "ch" => 1.5,
+        "ad" => 0.85,
+        "cd" | "al" | "cl" => 0.55,
+        _ => 0.45,
+    }
+}
+
 fn head_height(age: Age, pose: crate::sim::Pose) -> f32 {
     let standing = match age {
         Age::Baby => 0.7,
@@ -521,6 +532,7 @@ fn place_balloons(
     mut state: ResMut<BalloonState>,
     cams: Query<(&Camera, &GlobalTransform), With<SimsCamera>>,
     sims: Query<(&Sim, &crate::sim::SimAnim, &GlobalTransform, &InheritedVisibility, Has<crate::sim::Selected>)>,
+    pets: Query<(&crate::pets::Pet, &GlobalTransform, &InheritedVisibility), Without<Sim>>,
     mut balloons: Query<(Entity, &BalloonUi, &mut Node)>,
     mut parts: Query<(&ChildOf, &mut ImageNode), With<BalloonPart>>,
 ) {
@@ -545,9 +557,15 @@ fn place_balloons(
             }
             continue;
         }
-        let shown = sims.get(b.sim).ok().filter(|(_, _, _, v, _)| v.get()).and_then(|(sim, anim, tf, _, selected)| {
+        // (Over a Sim's head, or a pet's: `petneeds`.)
+        let top = sims
+            .get(b.sim)
+            .ok()
+            .filter(|(_, _, _, v, _)| v.get())
+            .map(|(sim, anim, tf, _, selected)| tf.translation() + Vec3::Y * (head_height(sim.age, anim.pose) + if selected { 0.55 } else { 0.0 }))
+            .or_else(|| pets.get(b.sim).ok().filter(|(_, _, v)| v.get()).map(|(p, tf, _)| tf.translation() + Vec3::Y * pet_head_height(&p.kind)));
+        let shown = top.and_then(|head| {
             // (Above the plumbob of the Sim being played.)
-            let head = tf.translation() + Vec3::Y * (head_height(sim.age, anim.pose) + if selected { 0.55 } else { 0.0 });
             let p = cam.world_to_viewport(cam_tf, head).ok()?;
             let q = cam.world_to_viewport(cam_tf, head + right).ok()?;
             // In front of the camera only.

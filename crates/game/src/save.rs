@@ -367,6 +367,9 @@ pub struct SavedObjectState {
     /// The door set as the front door (`frontdoor`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub front: bool,
+    /// What's left in a pet bowl (`petneeds`: bites).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bowl: Option<u8>,
 }
 
 fn is_zero(v: &i32) -> bool {
@@ -428,6 +431,9 @@ fn restore_states(
         }
         if saved.front {
             commands.entity(e).insert(crate::frontdoor::FrontDoor);
+        }
+        if let Some(b) = saved.bowl {
+            commands.entity(e).insert(crate::petneeds::BowlFood(b));
         }
         debug!("{} as it was: grime {}, unmade {}, lost {}", o.name, saved.grime, saved.unmade, saved.lost);
         false
@@ -1040,7 +1046,7 @@ fn save_game(
         Query<(&crate::fishbowl::BowlFish, &Transform), (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>,
         (Res<crate::meals::Leftovers>, Res<crate::ingredients::Fridge>, Res<crate::realestate::RealEstate>),
         Res<crate::weather::Weather>,
-        Query<(&crate::pets::Pet, &crate::pets::HomePet, &Transform)>,
+        Query<(&crate::pets::Pet, &crate::pets::HomePet, &Transform, Option<&crate::petneeds::PetMotives>)>,
         Res<crate::pets::PetData>,
     ),
     (mut slot, (maid, paper), mail_due, upgraded, family, strokes, sculpted, broken, family_inventory, puddles): (
@@ -1052,7 +1058,7 @@ fn save_game(
         Res<crate::terrain_paint::Strokes>,
         Res<crate::terrain_paint::Sculpted>,
         Query<
-            (&GameObject, &Transform, Has<crate::interact::Broken>, Has<crate::grime::Charred>, Option<&crate::grime::Grime>, Has<crate::interact::Unmade>, Option<&crate::interact::Depreciated>, Option<&crate::doorlocks::DoorLock>, Option<&crate::bedowners::BedOwners>, Has<crate::dollhouse::Smashed>, Has<crate::trashcans::TippedOver>, Option<&crate::paintings::LeftOnEasel>, (Option<&crate::lights::Switched>, Option<&crate::lights::Dimmer>, Has<crate::frontdoor::FrontDoor>)),
+            (&GameObject, &Transform, Has<crate::interact::Broken>, Has<crate::grime::Charred>, Option<&crate::grime::Grime>, Has<crate::interact::Unmade>, Option<&crate::interact::Depreciated>, Option<&crate::doorlocks::DoorLock>, Option<&crate::bedowners::BedOwners>, Has<crate::dollhouse::Smashed>, Has<crate::trashcans::TippedOver>, Option<&crate::paintings::LeftOnEasel>, (Option<&crate::lights::Switched>, Option<&crate::lights::Dimmer>, Has<crate::frontdoor::FrontDoor>, Option<&crate::petneeds::BowlFood>)),
             (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>),
         >,
         Res<crate::familyinv::FamilyInventory>,
@@ -1188,10 +1194,10 @@ fn save_game(
         repo_debt: repo.debt,
         object_states: broken
             .iter()
-            .filter(|(.., grime, unmade, lost, lock, owners, smashed, tipped, canvas, (switched, dimmer, front))| {
-                grime.is_some_and(|g| g.0 > 0.0) || *unmade || lost.is_some_and(|d| d.0 > 0) || lock.is_some() || owners.is_some_and(|o| o.0.iter().any(|s| s.is_some())) || *smashed || *tipped || canvas.is_some() || switched.is_some() || dimmer.is_some() || *front
+            .filter(|(.., grime, unmade, lost, lock, owners, smashed, tipped, canvas, (switched, dimmer, front, bowl))| {
+                grime.is_some_and(|g| g.0 > 0.0) || *unmade || lost.is_some_and(|d| d.0 > 0) || lock.is_some() || owners.is_some_and(|o| o.0.iter().any(|s| s.is_some())) || *smashed || *tipped || canvas.is_some() || switched.is_some() || dimmer.is_some() || *front || bowl.is_some()
             })
-            .map(|(o, tf, _, _, grime, unmade, lost, lock, owners, smashed, tipped, canvas, (switched, dimmer, front))| SavedObjectState {
+            .map(|(o, tf, _, _, grime, unmade, lost, lock, owners, smashed, tipped, canvas, (switched, dimmer, front, bowl))| SavedObjectState {
                 objd: o.objd,
                 position: tf.translation.to_array(),
                 grime: grime.map_or(0.0, |g| g.0),
@@ -1205,6 +1211,7 @@ fn save_game(
                 switched: switched.map(|s| s.0),
                 dimmer: dimmer.map(|d| d.0),
                 front,
+                bowl: bowl.map(|b| b.0),
             })
             .collect(),
         version: SAVE_VERSION,
@@ -1702,8 +1709,8 @@ mod tests {
 
     #[test]
     fn grime_and_unmade_beds_come_back_once_the_furniture_has() {
-        let toilet = SavedObjectState { objd: (1, 2, 3), position: [4.0, 0.0, 8.0], grime: 45.0, unmade: false, lost: 0, lock: None, bed_owners: None, smashed: false, tipped: false, canvas: None, switched: None, dimmer: None, front: false };
-        let bed = SavedObjectState { objd: (1, 2, 4), position: [9.0, 0.0, 8.0], grime: 0.0, unmade: true, lost: 0, lock: None, bed_owners: None, smashed: false, tipped: false, canvas: None, switched: None, dimmer: None, front: false };
+        let toilet = SavedObjectState { objd: (1, 2, 3), position: [4.0, 0.0, 8.0], grime: 45.0, unmade: false, lost: 0, lock: None, bed_owners: None, smashed: false, tipped: false, canvas: None, switched: None, dimmer: None, front: false, bowl: None };
+        let bed = SavedObjectState { objd: (1, 2, 4), position: [9.0, 0.0, 8.0], grime: 0.0, unmade: true, lost: 0, lock: None, bed_owners: None, smashed: false, tipped: false, canvas: None, switched: None, dimmer: None, front: false, bowl: None };
         let mut app = App::new();
         app.init_resource::<Time>().insert_resource(PendingStates(vec![toilet, bed], None)).add_systems(Update, restore_states);
         let obj = |kind, objd| GameObject { kind, name: "x".into(), objd, price: 100, center: Vec2::ZERO, half: Vec2::ONE, height: 1.0, route: None };

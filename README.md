@@ -928,6 +928,19 @@ installation is unreachable.
   together (kneeling to stroke a cat, which looks up at them), for the Sim's fun and social.
   Grown-ups can adopt a pet by phone (a cat, kitten, dog, puppy, little dog, horse or foal, for
   its fee): one of the game's breeds of its kind comes home with a name of its own.
+  The household's pets have needs, as the pack's `Motives` tuning has them for each species
+  (hunger, bladder, energy, social, hygiene, fun; a cat's urge to scratch, a dog's to chew, a
+  horse's thirst), and see to them themselves from what's bought for them, with the pack's own
+  clips and rates: eating from a pet bowl (eight bites, Hunger 200 an hour; a bottomless bowl
+  never empties), a cat's litter box (Bladder 700 an hour, dirtier for each use, a filthy one
+  put off for the floor four times in five, cleaned out by the household), else out into the
+  yard (a puddle where it's on a floor; indoors after all five times in a hundred, thirty for
+  the young), sleeping in a pet bed or dog house (or curled up on the floor), the scratching
+  post, the chew toy, the water trough, grazing, grooming. Sims' petting and praise are company
+  and fun for them. The household's grown-ups fill a bowl down to three bites of their own
+  accord (§25 a bite it's short, as the game's `FillBowl`), or from its menu, and pets let it
+  be known what they need in thought balloons. Pets' needs and bowls' food are kept in saves.
+  `PET_NEEDS=hungry|bladder|tired` and `PET_BOWL=1` (tests).
 - **Supernaturals**, from the Supernatural pack (and Late Night's vampires): vampires,
   werewolves, witches, fairies and zombies, chosen in Create a Sim's Life State row and kept in
   saves. Moonlight Falls' families come as the pack has them, a third of them supernatural (the
