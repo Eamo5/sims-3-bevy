@@ -661,13 +661,44 @@ pub fn school_hours(age: Age) -> (f32, f32) {
     (9.0, if age == Age::Teen { 14.0 } else { 15.0 })
 }
 
+/// The day a child or teen last went to school (by the bus or by themselves).
+#[derive(Component)]
+pub struct WentToSchool(pub u32);
+
+/// Whether a child or teen may set off for school now (the career panel's Go to School): a
+/// weekday, from an hour before classes till they end, and not been already.
+pub fn may_go_to_school(age: Age, clock: &GameClock, went: Option<&WentToSchool>) -> bool {
+    let (start, end) = school_hours(age);
+    let h = clock.hour_f();
+    matches!(age, Age::Child | Age::Teen) && clock.weekday() < 5 && h >= start - 1.0 && h < end && !went.is_some_and(|w| w.0 == clock.day())
+}
+
+/// Off to school: there till classes end, home a drive later.
+fn send_to_school(commands: &mut Commands, clock: &GameClock, e: Entity, age: Age) {
+    let (start, end) = school_hours(age);
+    let day_start = (clock.minutes / 1440.0).floor() * 1440.0;
+    let until = day_start + end as f64 * 60.0 + DRIVE_MINUTES;
+    let inside_from = (clock.minutes + DRIVE_MINUTES).max(day_start + start as f64 * 60.0);
+    commands.entity(e).insert((
+        AtRabbitHole { lot: usize::MAX, activity: &SCHOOL, inside_from, until, place: "school".into() },
+        Visibility::Hidden,
+        WentToSchool(clock.day()),
+    ));
+}
+
+/// A child or teen gone to school by themselves (the career panel's Go to School, late for the
+/// bus or without it).
+pub fn walk_to_school(commands: &mut Commands, clock: &GameClock, e: Entity, sim: &Sim, notes: &mut Notifications) {
+    notes.push(format!("{} went to school.", sim.first));
+    send_to_school(commands, clock, e, sim.age);
+}
+
 /// Children catch the school bus on weekday mornings and come home mid-afternoon.
 #[allow(clippy::type_complexity)]
 fn school_bus(
     mut commands: Commands,
     clock: Res<GameClock>,
-    mut kids: Query<(Entity, &Sim, &mut ActionQueue, Option<&mut SchoolGrades>, Option<&AtRabbitHole>, Has<Homework>), With<HouseholdMember>>,
-    mut last_day: Local<std::collections::HashMap<Entity, u32>>,
+    mut kids: Query<(Entity, &Sim, &mut ActionQueue, Option<&mut SchoolGrades>, Option<&AtRabbitHole>, Has<Homework>, Option<&WentToSchool>), With<HouseholdMember>>,
     mut notes: ResMut<Notifications>,
     (weather, layouts, mut sound, mut snow_told): (Option<Res<crate::weather::Weather>>, Option<Res<crate::layout::UiAssets>>, MessageWriter<crate::sound::PlaySound>, Local<Option<u32>>),
 ) {
@@ -679,18 +710,18 @@ fn school_bus(
     }
     // (Nor on a snow day: told of it once, with its sting, as the game's.)
     let snow_day = weather.as_deref().is_some_and(|w| w.snow_day(clock.minutes));
-    for (e, sim, mut queue, mut grades, away, homework) in &mut kids {
+    for (e, sim, mut queue, mut grades, away, homework, went) in &mut kids {
         if !matches!(sim.age, Age::Child | Age::Teen) {
             continue;
         }
         if grades.is_none() {
             commands.entity(e).insert(SchoolGrades::default());
         }
-        let (start, end) = school_hours(sim.age);
-        if away.is_some() || clock.weekday() >= 5 || !(start - 1.0..start).contains(&h) || last_day.get(&e) == Some(&day) {
+        let (start, _) = school_hours(sim.age);
+        if away.is_some() || clock.weekday() >= 5 || !(start - 1.0..start).contains(&h) || went.is_some_and(|w| w.0 == day) {
             continue;
         }
-        last_day.insert(e, day);
+        commands.entity(e).insert(WentToSchool(day));
         if snow_day {
             if *snow_told != Some(day) {
                 *snow_told = Some(day);
@@ -711,13 +742,7 @@ fn school_bus(
             }
             notes.push(format!("{} didn't do their homework.", sim.first));
         }
-        let day_start = (clock.minutes / 1440.0).floor() * 1440.0;
-        let until = day_start + end as f64 * 60.0 + DRIVE_MINUTES;
-        let inside_from = (clock.minutes + DRIVE_MINUTES).max(day_start + start as f64 * 60.0);
         notes.push(format!("{} caught the school bus.", sim.first));
-        commands.entity(e).insert((
-            AtRabbitHole { lot: usize::MAX, activity: &SCHOOL, inside_from, until, place: "school".into() },
-            Visibility::Hidden,
-        ));
+        send_to_school(&mut commands, &clock, e, sim.age);
     }
 }

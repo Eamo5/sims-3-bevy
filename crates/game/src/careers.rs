@@ -687,6 +687,15 @@ impl WorkTone {
         }
     }
 
+    /// The key of the game's words for it (the tone's `Description`; working as usual, the
+    /// queue's own `NeutralDescription`), where it has them.
+    pub fn description_key(self, job: &Job) -> Option<String> {
+        if self == WorkTone::Normal {
+            return Some("Ui/Caption/HUD/InteractionQueue/Tones:NeutralDescription".into());
+        }
+        self.word(job).filter(|w| !w.is_empty()).map(|w| format!("Gameplay/Excel/Careers/CareerList:{w}Description"))
+    }
+
     /// What it's called in this career (the game's name for it: "Power Work", "Geek Out with
     /// Fellow Scientists").
     pub fn label(self, job: &Job) -> String {
@@ -696,7 +705,7 @@ impl WorkTone {
             return name.to_string();
         }
         match self {
-            WorkTone::Normal => "Work Normally".into(),
+            WorkTone::Normal => "Business as Usual".into(),
             WorkTone::WorkHard => "Work Hard".into(),
             WorkTone::TakeItEasy => "Take It Easy".into(),
             WorkTone::Socialize => "Hang With Co-Workers".into(),
@@ -871,7 +880,8 @@ impl Job {
 #[derive(Component)]
 pub struct AtWork {
     pub until: f64,
-    /// When they got there, and their performance then.
+    /// When their work began (when they got there, or the shift's start if early), and their
+    /// performance then.
     pub from: f64,
     pub start_perf: f32,
 }
@@ -1776,6 +1786,55 @@ fn demotion(commands: &mut Commands, notes: &mut Notifications, life: &mut Messa
 }
 
 /// Called when a Sim reaches the carpool: off to work until the shift ends.
+/// How early a Sim may turn up for work (the game's `kNumHoursEarlyCanShowUpForWork`).
+const EARLY_HOURS: f32 = 1.0;
+
+/// Whether it's the time to set off for a shift starting at `start`, `hours` long, as the
+/// game's `IsAllowedToWorkThisTime`: from an hour before it starts till it ends (`Some(true)`),
+/// or past midnight in one begun the day before (`Some(false)`).
+fn work_window(h: f32, start: f32, hours: f32) -> Option<bool> {
+    let end = start + hours;
+    if h >= start - EARLY_HOURS && h < end {
+        Some(true)
+    } else if end > 24.0 && h < end - 24.0 {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Whether a Sim may set off for work now (the game's `IsAllowedToWork`): in the shift's hours on
+/// one of its days, and not been already.
+pub fn may_go_to_work(job: &Job, clock: &GameClock) -> bool {
+    let (day, weekday) = (clock.day(), clock.weekday());
+    match work_window(clock.hour_f(), job.info().start, job.hours()) {
+        Some(true) => job.works_on(weekday) && job.last_day != Some(day),
+        Some(false) => day > 0 && job.works_on((weekday + 6) % 7) && job.last_day != Some(day - 1),
+        None => false,
+    }
+}
+
+/// Hours till the next start of a shift, work's or school's, on its days (bit 0 Monday).
+pub fn hours_until(days: u8, start: f32, clock: &GameClock) -> Option<f32> {
+    let (now, today) = (clock.hour_f(), clock.weekday());
+    (0..8).filter(|k| days & (1 << ((today + k) % 7)) != 0).map(|k| k as f32 * 24.0 + start - now).find(|h| *h > 0.0)
+}
+
+/// A while in days and hours, rounded up to the hour, as the game's `GetHoursUntilWorkStringRaw`.
+pub fn days_and_hours(hours: f32) -> String {
+    let (mut d, mut h) = ((hours / 24.0) as i32, (hours % 24.0).ceil() as i32);
+    if h == 24 {
+        d += 1;
+        h = 0;
+    }
+    let unit = |n: i32, word: &str| format!("{n} {word}{}", if n == 1 { "" } else { "s" });
+    match (d > 0, h > 0) {
+        (true, true) => format!("{} {}", unit(d, "day"), unit(h, "hour")),
+        (true, false) => unit(d, "day"),
+        _ => unit(h.max(1), "hour"),
+    }
+}
+
 pub fn leave_for_work(commands: &mut Commands, clock: &GameClock, e: Entity, sim: &Sim, job: &mut Job, notes: &mut Notifications) {
     let info = job.info();
     let day = clock.day();
@@ -1785,8 +1844,9 @@ pub fn leave_for_work(commands: &mut Commands, clock: &GameClock, e: Entity, sim
     let start_minute = (clock.minutes / 1440.0).floor() * 1440.0 + info.start as f64 * 60.0;
     let start_minute = if (h as f64) < info.start as f64 - 12.0 { start_minute - 1440.0 } else { start_minute };
     let until = start_minute + job.hours() as f64 * 60.0;
-    // (Paid from when they get there.)
-    commands.entity(e).insert((AtWork { until: until.max(clock.minutes + 30.0), from: clock.minutes, start_perf: job.performance }, Visibility::Hidden));
+    // (Paid from when they get there, or from the start when they're early: the game's wait for
+    // `IsRegularWorkTime`.)
+    commands.entity(e).insert((AtWork { until: until.max(clock.minutes + 30.0), from: clock.minutes.max(start_minute), start_perf: job.performance }, Visibility::Hidden));
     notes.push(format!("{} left for work as {}.", sim.first, a_title(info, sim)));
 }
 
@@ -1829,6 +1889,22 @@ mod tests {
         assert!(WorkTone::TakeItEasy.performance(false) < WorkTone::Normal.performance(false));
         // (A Professional Slacker takes it easy at no cost.)
         assert_eq!(WorkTone::TakeItEasy.performance(true), 0.0);
+    }
+
+    #[test]
+    fn work_hours_open_an_hour_early() {
+        // (Nine to five: from eight; a night shift from ten, past midnight too.)
+        assert_eq!(work_window(7.9, 9.0, 8.0), None);
+        assert_eq!(work_window(8.0, 9.0, 8.0), Some(true));
+        assert_eq!(work_window(16.9, 9.0, 8.0), Some(true));
+        assert_eq!(work_window(17.0, 9.0, 8.0), None);
+        assert_eq!(work_window(23.0, 22.0, 8.0), Some(true));
+        assert_eq!(work_window(3.0, 22.0, 8.0), Some(false));
+        assert_eq!(work_window(6.0, 22.0, 8.0), None);
+        assert_eq!(days_and_hours(1.5), "2 hours");
+        assert_eq!(days_and_hours(0.2), "1 hour");
+        assert_eq!(days_and_hours(23.5), "1 day");
+        assert_eq!(days_and_hours(49.0), "2 days 1 hour");
     }
 
     #[test]

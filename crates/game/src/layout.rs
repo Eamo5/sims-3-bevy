@@ -688,7 +688,7 @@ impl UiAssets {
                 .spawn((Node { position_type: PositionType::Absolute, left: Val::Px(8.0), right: Val::Px(24.0), top: Val::Px(0.0), bottom: Val::Px(0.0), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE, ChildOf(e)))
                 .id();
             let text = commands.spawn((Text::new(""), font, line, TextColor(col), TextLayout::new(Justify::Left, LineBreak::NoWrap), Pickable::IGNORE, ChildOf(holder))).id();
-            commands.entity(e).insert(UiCombo { items: Vec::new(), selected: 0, open: false, text, list: None, combo: c.clone(), font: w.font, shown: None });
+            commands.entity(e).insert(UiCombo { items: Vec::new(), selected: 0, open: false, hovered: None, tips: Vec::new(), tip_drawable: None, tip_text: None, text, list: None, combo: c.clone(), font: w.font, shown: None });
         }
         if EMBEDDED.contains(&w.cls.as_str()) {
             let data = self.data.clone();
@@ -992,6 +992,13 @@ pub struct UiCombo {
     pub items: Vec<String>,
     pub selected: usize,
     pub open: bool,
+    /// The choice under the pointer while the list's open.
+    pub hovered: Option<usize>,
+    /// Words on each choice, shown beside the open list in a box of this picture (the work tones'
+    /// descriptions, as the queue's `TonesTooltipText`).
+    pub tips: Vec<String>,
+    pub tip_drawable: Option<s3bake::ui::UiDrawable>,
+    tip_text: Option<Entity>,
     text: Entity,
     list: Option<Entity>,
     combo: s3bake::ui::UiCombo,
@@ -1003,8 +1010,9 @@ pub struct UiCombo {
 #[derive(Component)]
 struct ComboRow(Entity, usize);
 
-/// A combo box's rows' height.
+/// A combo box's rows' height, and the width of the words beside its list.
 const COMBO_ROW: f32 = 22.0;
+const COMBO_TIP_WIDTH: f32 = 170.0;
 
 #[allow(clippy::type_complexity)]
 fn combos(
@@ -1037,12 +1045,28 @@ fn combos(
             c.open = false;
         }
     }
+    let mut pointed: std::collections::HashMap<Entity, usize> = std::collections::HashMap::new();
     for (i, r, mut bg) in &mut hover {
         let lit = *i != Interaction::None;
+        if lit {
+            pointed.insert(r.0, r.1);
+        }
         if let Ok((_, c)) = all.get(r.0) {
             let want = if lit { color(c.combo.colors.get(3).copied().unwrap_or(0xbf52_77b5)) } else { Color::NONE };
             if bg.0 != want {
                 bg.0 = want;
+            }
+        }
+    }
+    // (The words beside the list: the choice pointed at's, else the one chosen's.)
+    for (e, mut c) in &mut all {
+        let h = pointed.get(&e).copied();
+        if c.hovered != h {
+            c.hovered = h;
+            if let Some(t) = c.tip_text
+                && let Ok(mut text) = texts.get_mut(t)
+            {
+                text.0 = c.tips.get(h.unwrap_or(c.selected)).cloned().unwrap_or_default();
             }
         }
     }
@@ -1062,14 +1086,22 @@ fn combos(
         if let Some(l) = c.list.take() {
             commands.entity(l).try_despawn();
         }
+        c.tip_text = None;
         if !c.open {
             continue;
         }
         // The list, under the box.
         let h = c.items.len() as f32 * COMBO_ROW + 8.0;
+        // (As wide as its longest choice, at least the box's, as the game's `CalcWidth`.)
+        let (font, line) = ui.text_font(&mut fonts, c.font);
+        let size = match font.font_size {
+            bevy::text::FontSize::Px(px) => px,
+            _ => 12.0,
+        };
+        let wide = c.items.iter().map(|s| s.chars().count()).max().unwrap_or(0) as f32 * size * 0.56 + 22.0;
         let list = commands
             .spawn((
-                Node { position_type: PositionType::Absolute, left: Val::Px(0.0), right: Val::Px(0.0), top: Val::Percent(100.0), margin: UiRect::top(Val::Px(c.combo.offset)), height: Val::Px(h), padding: UiRect::all(Val::Px(4.0)), flex_direction: FlexDirection::Column, ..default() },
+                Node { position_type: PositionType::Absolute, left: Val::Px(0.0), width: Val::Px(wide), min_width: Val::Percent(100.0), top: Val::Percent(100.0), margin: UiRect::top(Val::Px(c.combo.offset)), height: Val::Px(h), padding: UiRect::all(Val::Px(4.0)), flex_direction: FlexDirection::Column, ..default() },
                 GlobalZIndex(60),
                 Interaction::default(),
                 FocusPolicy::Block,
@@ -1080,14 +1112,31 @@ fn combos(
         if let Some(d) = c.combo.pulldown.clone() {
             ui.drawable(&mut commands, &mut images, &d, list, Vec2::new(0.0, h), Color::WHITE, None);
         }
-        let (font, line) = ui.text_font(&mut fonts, c.font);
         let colors = c.combo.colors.clone();
         for (k, item) in c.items.iter().enumerate() {
             let row = commands
                 .spawn((Node { height: Val::Px(COMBO_ROW), padding: UiRect::left(Val::Px(6.0)), align_items: AlignItems::Center, ..default() }, Button, BackgroundColor(Color::NONE), ComboRow(e, k), ChildOf(list)))
                 .id();
             let col = color(if k == c.selected { colors.get(2).copied().unwrap_or(0xffff_ffff) } else { colors.first().copied().unwrap_or(0xff00_2d74) });
-            commands.spawn((Text::new(item.clone()), font.clone(), line, TextColor(col), Pickable::IGNORE, ChildOf(row)));
+            commands.spawn((Text::new(item.clone()), font.clone(), line, TextColor(col), TextLayout::new(Justify::Left, LineBreak::NoWrap), Pickable::IGNORE, ChildOf(row)));
+        }
+        if !c.tips.is_empty() {
+            let tip = commands
+                .spawn((
+                    Node { position_type: PositionType::Absolute, left: Val::Percent(100.0), top: Val::Px(0.0), width: Val::Px(COMBO_TIP_WIDTH), margin: UiRect::left(Val::Px(4.0)), padding: UiRect::all(Val::Px(9.0)), ..default() },
+                    Pickable::IGNORE,
+                    ChildOf(list),
+                ))
+                .id();
+            match c.tip_drawable.clone() {
+                Some(d) => ui.drawable(&mut commands, &mut images, &d, tip, Vec2::ZERO, Color::WHITE, None),
+                None => {
+                    commands.entity(tip).insert(BackgroundColor(Color::srgba(0.95, 0.97, 1.0, 0.95)));
+                }
+            }
+            let words = c.tips.get(c.hovered.unwrap_or(c.selected)).cloned().unwrap_or_default();
+            let text = commands.spawn((Text::new(words), font.clone(), line, TextColor(color(colors.first().copied().unwrap_or(0xff00_2d74))), Pickable::IGNORE, ChildOf(tip))).id();
+            c.tip_text = Some(text);
         }
         c.list = Some(list);
     }

@@ -1569,11 +1569,10 @@ fn world_click(
             // work when it's nearly time, or to a community lot ("Go to Community Lot...").
             if obj.kind == ObjectKind::Car && (actor_sim.age == crate::sim::Age::Teen || actor_sim.age.is_grown()) {
                 let clock = &opp_q.2;
-                if let Ok(Some(job)) = jobs_q.get(actor) {
-                    let (h, start) = (clock.hour_f(), job.info().start);
-                    if job.works_on(clock.weekday()) && h >= start - 1.0 && h < start + 1.0 && job.last_day != Some(clock.day()) {
-                        options.push(("Go to Work".to_string(), ActionKind::GoToWork));
-                    }
+                if let Ok(Some(job)) = jobs_q.get(actor)
+                    && crate::careers::may_go_to_work(job, clock)
+                {
+                    options.push(("Go to Work".to_string(), ActionKind::GoToWork));
                 }
                 let lots: Vec<(String, ActionKind)> = (0..world.data.lots.len())
                     .filter(|&l| crate::visit::visitable(&world.data, l))
@@ -2680,15 +2679,6 @@ fn pie_buttons(
     // (An inventory stack's actions: see `hudpanels::inventory_panel`.)
     if let ActionKind::InventoryItem(b, owner, stack) = kind {
         commands.insert_resource(crate::inventory::DoItem(b, owner, stack));
-        return;
-    }
-    // (How a Sim at work works.)
-    if let Some(t) = label.strip_prefix(crate::hudpanels::TONE_PREFIX)
-        && let Some(mut j) = actor.and_then(|a| jobs.get_mut(a).ok())
-    {
-        if let Some(tone) = crate::careers::WorkTone::ALL.into_iter().find(|w| t.trim_end_matches(" ✓") == w.label(&j)) {
-            j.tone = tone;
-        }
         return;
     }
     let _ = (&mut wishes, &mut notes);

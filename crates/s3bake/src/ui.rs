@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackWriter, read_value, write_value};
 
-pub const UI_VERSION: u32 = 24;
+pub const UI_VERSION: u32 = 25;
 pub const T_LAYOUT: u32 = 0x025C95B6;
 pub const T_FONT: u32 = 0x062E9EE0;
 pub const T_IMAGE: u32 = 0x2F7D0004;
@@ -290,6 +290,14 @@ pub const NAMED_IMAGES: &[&str] = &[
     // `int_relationship_bk`).
     "int_relationship_bk",
     "int_relationship_bk_hl",
+    // The queue's work item (`InteractionStyle.Tones`) and its performance arrows
+    // (`sCareerPerformanceImages`).
+    "int_tone",
+    "int_tone_hl",
+    "int_tone_progress_norm",
+    "int_tone_progress_hl",
+    "iq_arrow_gain",
+    "iq_arrow_loss",
 ];
 
 /// The zodiac signs (`sign_<sign>_sm`).

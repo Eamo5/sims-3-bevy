@@ -295,24 +295,9 @@ const ACTIVE_CAREER: u32 = 0x0919_0b11;
 const CAREER_TAB_MAIN: u32 = 0x0652_5f20;
 const CAREER_TABS_HIDDEN: [u32; 5] = [0x0652_5f21, 0x0652_5f22, 0x0652_5f24, 0x0652_5f25, 0x0e68_1f70];
 
-/// The pie menu's work tones (`Tone: <label>`).
-pub const TONE_PREFIX: &str = "Tone: ";
-
-/// Opens the work tones for a Sim at work, at a point on screen.
-pub fn open_tones(commands: &mut Commands, pie: &mut crate::hud::PieMenu, sim: Entity, traits: &[crate::life::Trait], job: &crate::careers::Job, at: Vec2) {
-    let options = crate::careers::WorkTone::ALL
-        .into_iter()
-        .filter(|t| t.offered(job, traits))
-        .map(|t| (format!("{TONE_PREFIX}{}{}", t.label(job), if t == job.tone { " ✓" } else { "" }), crate::interact::ActionKind::EatHere))
-        .collect();
-    pie.submenus.clear();
-    pie.at = at;
-    crate::hud::open_pie(commands, pie, at, &format!("At Work: {}", job.info().title), sim, options);
-}
-
 /// The Career panel: the job's icon, title, pay, hours and days, the time till work, the
 /// performance meter (up and down from the middle); or school (and its grade), or the game's
-/// words for having no job. At work, its button chooses how they work.
+/// words for having no job. Its button sends them off to work or school.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn career_panel(
     mut commands: Commands,
@@ -328,29 +313,51 @@ fn career_panel(
             Option<&crate::rabbitholes::SchoolGrades>,
             Option<&crate::rabbitholes::Homework>,
             (&crate::life::Mood, &crate::interact::Skills, &crate::social::Relationships),
+            (Has<crate::rabbitholes::AtRabbitHole>, Option<&crate::rabbitholes::WentToSchool>),
         ),
         With<Selected>,
     >,
     mut game_ui: Option<ResMut<crate::icons::GameUi>>,
     (mut vis, mut texts, mut bars): (Query<&mut Visibility>, Query<&mut Text>, Query<&mut crate::layout::UiFillBar>),
     clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
-    (clock, mut pie, windows): (Res<crate::clock::GameClock>, ResMut<crate::hud::PieMenu>, Query<&Window, With<bevy::window::PrimaryWindow>>),
+    (clock, mut queues, mut notes): (Res<crate::clock::GameClock>, Query<&mut crate::interact::ActionQueue>, ResMut<crate::interact::Notifications>),
     (mut state, mut factors): (Local<String>, Local<Option<Entity>>),
     panel: Res<InfoPanel>,
     (people, mut fonts): (Query<(Entity, &Sim)>, ResMut<Assets<Font>>),
 ) {
     let s: &Spawned = &hud.career;
-    let (Some(mut ui), Ok((e, sim, job, at_work, grades, homework, (mood, skills, rels)))) = (ui, sel.single()) else { return };
+    let (Some(mut ui), Ok((e, sim, job, at_work, grades, homework, (mood, skills, rels), (at_school, went)))) = (ui, sel.single()) else { return };
     if *panel != InfoPanel::Career {
         return;
     }
-    // At work, the button chooses how they work (as the game's rabbit hole menu).
+    // The button: off to work or school, as the game's `PushGoWork` and `PushGoSchool`, queued
+    // when it's time; else the game's words for when it is.
     if pressed(&clicks, s.id(CAREER_GO))
-        && let Some(j) = job
-        && at_work
+        && !at_work
+        && !at_school
+        && let Ok(mut queue) = queues.get_mut(e)
     {
-        let at = windows.single().ok().and_then(|w| w.cursor_position()).unwrap_or(Vec2::new(600.0, 600.0));
-        open_tones(&mut commands, &mut pie, e, &sim.traits, j, at);
+        use crate::interact::{Action, ActionKind};
+        let going = queue.0.iter().any(|a| !a.cancel && matches!(a.kind, ActionKind::GoToWork | ActionKind::GoToSchool));
+        match job {
+            Some(j) if crate::careers::may_go_to_work(j, &clock) => {
+                if !going {
+                    queue.0.push_back(Action::new("Go to Work", ActionKind::GoToWork, false));
+                }
+            }
+            Some(j) => {
+                let hours = crate::careers::hours_until(j.info().days, j.info().start, &clock).unwrap_or(0.0);
+                let when = crate::careers::days_and_hours(hours);
+                let text = ui.localize("Gameplay/Careers/WorkInRabbitHole:Closed").map(|t| t.replace("{0.String}", &when));
+                notes.push(text.unwrap_or_else(|| format!("It's not your work hours. Come back in {when}.")));
+            }
+            None if crate::rabbitholes::may_go_to_school(sim.age, &clock, went) => {
+                if !going {
+                    queue.0.push_back(Action::new("Go to School", ActionKind::GoToSchool, false));
+                }
+            }
+            None => notes.push(ui.localize("Gameplay/Careers/WorkInRabbitHole:SchoolClosed").unwrap_or_else(|| "School Not In Session".into())),
+        }
     }
     for id in [ACTIVE_CAREER, CAREER_HISTORY, DEGREE_HISTORY, CAREER_NO_SCHOOL, CAREER_BOARDING] {
         set_visible(&mut vis, s.id(id), false);
@@ -418,24 +425,11 @@ fn career_panel(
         set_visible(&mut vis, s.id(CAREER_DAY_MARK + d), days & (1 << bit) != 0);
     }
     // The time till work.
-    let now = clock.hour_f();
-    let today = clock.weekday();
-    let till = if at_work {
+    let till = if at_work || at_school {
         if school { "At school now".to_string() } else { "At work now".to_string() }
     } else {
         // (The next working day's start.)
-        let mut hours = None;
-        for k in 0..8 {
-            let day = (today + k) % 7;
-            if days & (1 << day) == 0 {
-                continue;
-            }
-            let h = k as f32 * 24.0 + start - now;
-            if h > 0.0 {
-                hours = Some(h);
-                break;
-            }
-        }
+        let hours = crate::careers::hours_until(days, start, &clock);
         let place = if school { "School" } else { "Work" };
         match hours {
             Some(h) if h < 1.0 => format!("{place} in: {} Minutes", (h * 60.0).ceil() as i32),
@@ -454,8 +448,8 @@ fn career_panel(
             bar.value = v;
         }
     }
-    // The button: off to work (or, there, how to work).
-    set_visible(&mut vis, s.id(CAREER_GO), job.is_some() && at_work);
+    // The button: off to work or school (shown whenever there's one to go to, as the game's).
+    set_visible(&mut vis, s.id(CAREER_GO), working);
     // How the level's judged, and how they're doing at each.
     let scores: Vec<(&'static s3bake::gamedata::CareerMetric, f32)> = job.map_or_else(Vec::new, |j| {
         let find = |id: u64| people.iter().find(|(_, s)| s.id == id).map(|(e, _)| e);
@@ -524,7 +518,8 @@ fn career_panel(
         tip(&mut commands, m, t);
     }
     if let Some(g) = s.id(CAREER_GO) {
-        tip(&mut commands, g, "Choose how to work".to_string());
+        let (key, words) = if school { ("Ui/Caption/HUD/School:GoToSchool", "Go to School") } else { ("Ui/Caption/HUD/Skewer:GoWork", "Go to Work") };
+        tip(&mut commands, g, ui.localize(key).unwrap_or_else(|| words.into()));
     }
     let _ = &mut ui;
 }

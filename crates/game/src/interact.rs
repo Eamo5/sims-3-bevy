@@ -2780,6 +2780,8 @@ pub enum ActionKind {
     Social { target: Entity, social: usize },
     GoHere(Vec2, u8),
     GoToWork,
+    /// Off to school by themselves (the career panel's Go to School).
+    GoToSchool,
     /// Out jogging along the street, then back to where they set out from (`home`, filled in
     /// as they go).
     Jog { home: Vec2 },
@@ -3635,7 +3637,7 @@ pub(crate) fn run_actions(
                         ActionKind::GoToWork | ActionKind::Visit { .. } | ActionKind::GoToLot { .. } if away.is_none() && cars.iter().any(|(o, _)| o.kind == ObjectKind::Car) => {
                             cars.iter().find(|(o, _)| o.kind == ObjectKind::Car).map(|(o, ctf)| (o.use_point(ctf), 1))
                         }
-                        ActionKind::GoToWork | ActionKind::Visit { .. } | ActionKind::GoToLot { .. } | ActionKind::GoHomeFromLot | ActionKind::Jog { .. } => way_out.map(|p| (p, 1)),
+                        ActionKind::GoToWork | ActionKind::GoToSchool | ActionKind::Visit { .. } | ActionKind::GoToLot { .. } | ActionKind::GoHomeFromLot | ActionKind::Jog { .. } => way_out.map(|p| (p, 1)),
                         ActionKind::JoinCareer { target, .. } | ActionKind::Teleport { pad: target, .. } => {
                             objects.get(*target).ok().map(|(obj, otf, _, of)| (obj.use_point(otf), of.map_or(1, |f| f.0)))
                         }
@@ -4414,6 +4416,10 @@ pub(crate) fn run_actions(
                                 if let Some(j) = job.as_deref_mut() {
                                     crate::careers::leave_for_work(&mut commands, &clock, me, sim, j, &mut notes);
                                 }
+                                finished = true;
+                            }
+                            ActionKind::GoToSchool => {
+                                crate::rabbitholes::walk_to_school(&mut commands, &clock, me, sim, &mut notes);
                                 finished = true;
                             }
                             // (Off along the street: the jog takes it from here.)
