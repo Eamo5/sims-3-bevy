@@ -1567,7 +1567,13 @@ installation is unreachable.
   ground as they are) and its softness slider (how firmly the brush works to its edge), and the
   world's paints in the build catalogue's grid (two rows, the wheel or its bar to scroll);
   Raise, Lower, Level, Soften and Flatten Lot (the whole lot back to its own level at a click,
-  clear of the house and what stands on it), with the same brushes. `BUILD_PRESS=<diagram
+  clear of the house and what stands on it), with the same brushes. The Water tool (also the
+  diagram's Ponds) pours water into ground that's been lowered: a click fills the hollow under
+  it a quarter metre deeper (from its bottom, or from the water there), as far as the ground
+  under that level reaches; Ctrl+click drains it a quarter metre. Water won't spill off the lot
+  or run under the house. It's the lot's own as the towns' ponds are (a level at each grid
+  point), drawn with the ponds' water against the ground as it's now sculpted, kept off by Sims
+  walking, undone and redone, and kept in saves. `POND_TEST=<x>,<z>[,<clicks>]` (tests). `BUILD_PRESS=<diagram
   button, hex>` (tests).
   The diagram's roofs, fences and half walls open the game's own catalogue panels too, each
   with the build catalogue's grid: Roofs (auto-roofing on or off, Remove All Roofs, the Roof

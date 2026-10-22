@@ -218,6 +218,6 @@ fn update_water(time: Res<Time>, sky: Option<Res<SkyNow>>, water: Query<&Water>,
 }
 
 /// Spawns a body of water.
-pub fn spawn_water(commands: &mut Commands, mesh: Handle<Mesh>, mat: Handle<WaterMaterial>, tf: Transform) {
-    commands.spawn((Mesh3d(mesh), MeshMaterial3d(mat.clone()), Water(mat), tf, NotShadowCaster, DespawnOnExit(AppState::InGame)));
+pub fn spawn_water(commands: &mut Commands, mesh: Handle<Mesh>, mat: Handle<WaterMaterial>, tf: Transform) -> Entity {
+    commands.spawn((Mesh3d(mesh), MeshMaterial3d(mat.clone()), Water(mat), tf, NotShadowCaster, DespawnOnExit(AppState::InGame))).id()
 }

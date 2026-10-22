@@ -48,7 +48,7 @@ const LIGHT: u32 = 0x2e8;
 const GRID: u32 = 0x2e9;
 
 #[derive(Component, Clone, Copy)]
-enum Action { Home, Tool(BuildTool), Category(usize), Objects(crate::buildobjects::ObjTab), HalfWalls, Hand, Lighting, Grid, Undo, Redo, Terrain(bool) }
+enum Action { Home, Tool(BuildTool), Category(usize), Objects(crate::buildobjects::ObjTab), HalfWalls, Hand, Lighting, Grid, Undo, Redo, Terrain(bool), Ponds }
 
 fn home_action(id: u32) -> Option<Action> {
     use crate::buildobjects::ObjTab;
@@ -80,6 +80,8 @@ fn home_action(id: u32) -> Option<Action> {
         // (Terrain paint and sculpt: the game's own panels, uildterrain.)
         0x100b => Action::Terrain(false),
         0x1011 => Action::Terrain(true),
+        // (Ponds: the terrain tools with the Water tool in hand.)
+        0x100d => Action::Ponds,
         _ => return None,
     })
 }
@@ -196,6 +198,12 @@ fn controls(
                 buy.drop_tools(&mut commands);
                 buy.show(TERRAIN_TAB);
                 buy.tool = Some(if sculpt { BuildTool::Sculpt } else { BuildTool::Terrain });
+            }
+            Action::Ponds => {
+                buy.drop_tools(&mut commands);
+                buy.show(TERRAIN_TAB);
+                buy.tool = Some(BuildTool::Sculpt);
+                buy.sculpt = crate::pondtool::WATER;
             }
             Action::Objects(tab) => {
                 buy.drop_tools(&mut commands);

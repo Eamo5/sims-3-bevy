@@ -129,7 +129,7 @@ pub struct TerrainBuild {
     pub lightmap: Option<Image>,
     pub layer_avg: [Vec4; 16],
     /// The water of each pond.
-    pub ponds: Vec<Mesh>,
+    pub ponds: Vec<(u32, Mesh)>,
     /// The heights, for the water's depth.
     pub heights: Image,
     pub height_scale: f32,
@@ -238,7 +238,7 @@ pub struct TerrainHoles(pub std::collections::HashSet<(i64, i64)>);
 
 /// A pond's water surface: every lot-grid cell touching water, flat at its water level (the
 /// basin's rising ground cuts the shoreline).
-fn pond_mesh(p: &s3bake::PondBaked, lot: &s3bake::LotInfo) -> Mesh {
+pub fn pond_mesh(p: &s3bake::PondBaked, lot: &s3bake::LotInfo) -> Mesh {
     let (s, c) = lot.rotation.sin_cos();
     let (nx, nz) = (p.nx as usize, p.nz as usize);
     let mut positions = Vec::new();
@@ -366,7 +366,7 @@ pub fn build_terrain(world: &WorldBaked) -> TerrainBuild {
         overview: world.overview.as_ref().filter(|m| m.size as usize == cells).map(|m| world_map_image(m, true)),
         lightmap: world.lightmap.as_ref().filter(|m| m.size as usize == cells).map(|m| world_map_image(m, false)),
         layer_avg: std::array::from_fn(|i| world.layer_avg.get(i).map_or(Vec4::splat(0.2), |c| Vec3::from(*c).extend(1.0))),
-        ponds: world.ponds.iter().filter_map(|p| Some(pond_mesh(p, &world.lots.get(p.lot as usize)?.info))).collect(),
+        ponds: world.ponds.iter().filter_map(|p| Some((p.lot, pond_mesh(p, &world.lots.get(p.lot as usize)?.info)))).collect(),
         heights: crate::water::height_image(hm),
         height_scale: hm.scale,
         holes,
@@ -635,6 +635,7 @@ fn spawn_terrain(
     // The sea, out past the world's edge, and the ponds (greener, stiller).
     let world = build.world_size;
     let heights = images.add(std::mem::replace(&mut build.heights, Image::default()));
+    let heights_for_ponds = heights.clone();
     let ripples = images.add(crate::water::ripple_image());
     let samples = world as u32 + 1;
     let sea = water_mats.add(crate::water::water_material(heights.clone(), ripples.clone(), samples, build.height_scale, false));
@@ -642,7 +643,9 @@ fn spawn_terrain(
     crate::water::spawn_water(&mut commands, plane, sea, Transform::from_xyz(world * 0.5, build.sea_level, world * 0.5));
     let pond = water_mats.add(crate::water::water_material(heights.clone(), ripples.clone(), samples, build.height_scale, true));
     commands.insert_resource(crate::water::PoolWaterMaterial(water_mats.add(crate::water::pool_material(heights, ripples, samples, build.height_scale))));
-    for m in build.ponds.drain(..) {
-        crate::water::spawn_water(&mut commands, meshes.add(m), pond.clone(), Transform::default());
+    for (lot, m) in build.ponds.drain(..) {
+        let e = crate::water::spawn_water(&mut commands, meshes.add(m), pond.clone(), Transform::default());
+        commands.entity(e).insert(crate::pondtool::LotPond(lot));
     }
+    commands.insert_resource(crate::pondtool::PondMaterial(pond, heights_for_ponds));
 }

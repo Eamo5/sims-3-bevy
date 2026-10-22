@@ -2,7 +2,7 @@
 //! states, the `Build` layout's): Terrain Paint (its Paint and Erase buttons, the brush's six
 //! shapes and sizes and its softness slider, and the world's own paints in the build catalogue's
 //! grid beside them, two rows scrolled by the wheel or its bar) and Terrain Sculpt (Raise,
-//! Lower, Level, Soften and Flatten Lot, with the same brushes; the Water tool isn't here yet).
+//! Lower, Level, Soften and Flatten Lot, with the same brushes, and the Water tool: `pondtool`).
 
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
@@ -28,7 +28,7 @@ impl Plugin for BuildTerrainPlugin {
 // The `Build` layout's terrain panels.
 pub const SCULPT_PANEL: u32 = 0x370;
 pub const PAINT_PANEL: u32 = 0x380;
-const SCULPT_TOOLS: [(u32, u8); 5] = [(0x261, 0), (0x262, 1), (0x263, 2), (0x27d, 3), (0x27e, 4)];
+const SCULPT_TOOLS: [(u32, u8); 6] = [(0x261, 0), (0x262, 1), (0x263, 2), (0x27d, 3), (0x27e, 4), (WATER_TOOL, crate::pondtool::WATER)];
 const WATER_TOOL: u32 = 0x264;
 const NO_TOOLS: u32 = 0x37b;
 const TOOL_SHAPES: u32 = 0x37a;
@@ -141,10 +141,6 @@ fn spawn(mut commands: Commands, hud: Res<crate::buildhud::BuildHud>, mut t: Res
                 }
             }
         }
-    }
-    // (Ponds aren't made here yet.)
-    if let Some(e) = hud.puck.id(WATER_TOOL) {
-        commands.entity(e).insert(crate::icons::Tooltip("Water (not available)".into()));
     }
     t.softness = [-1.0; 2];
 }
@@ -267,7 +263,6 @@ fn draw(
     for (id, n) in SCULPT_TOOLS {
         lit(id, sculpt && buy.sculpt == n, false);
     }
-    lit(WATER_TOOL, false, true);
     lit(PAINT, painting && !erasing, false);
     lit(ERASE, painting && erasing, false);
     let brush = if buy.brush > 0.0 { buy.brush } else { crate::terrain_paint::BRUSHES[1].0 };

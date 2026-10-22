@@ -302,10 +302,12 @@ pub enum Sculpt {
     Smooth,
     /// The whole lot brought back to its own level at a click (the game's Flatten Lot).
     FlattenLot,
+    /// Water poured into lowered ground (`pondtool`).
+    Water,
 }
 
 impl Sculpt {
-    pub const ALL: [Sculpt; 5] = [Sculpt::Raise, Sculpt::Lower, Sculpt::Flatten, Sculpt::Smooth, Sculpt::FlattenLot];
+    pub const ALL: [Sculpt; 6] = [Sculpt::Raise, Sculpt::Lower, Sculpt::Flatten, Sculpt::Smooth, Sculpt::FlattenLot, Sculpt::Water];
     pub fn label(self) -> &'static str {
         match self {
             Sculpt::Raise => "Raise",
@@ -313,6 +315,7 @@ impl Sculpt {
             Sculpt::Flatten => "Flatten",
             Sculpt::Smooth => "Smooth",
             Sculpt::FlattenLot => "Flatten Lot",
+            Sculpt::Water => "Water",
         }
     }
 }
@@ -409,6 +412,11 @@ fn sculpt_tool(
     }
     sculpted.last = now;
     let tool = Sculpt::ALL[(buy.sculpt as usize).min(Sculpt::ALL.len() - 1)];
+    // (The Water tool's the pond tool's.)
+    if tool == Sculpt::Water {
+        sculpted.flatten_to = None;
+        return;
+    }
     // (Flatten Lot: once a click, over all the lot.)
     if tool == Sculpt::FlattenLot && held_at.is_none() && !mouse.just_pressed(MouseButton::Left) {
         return;
@@ -452,6 +460,7 @@ fn sculpt_tool(
                 Sculpt::Lower => h - 0.06 * f,
                 Sculpt::Flatten => h + (target - h) * 0.4 * f,
                 Sculpt::FlattenLot => ground,
+                Sculpt::Water => h,
                 Sculpt::Smooth => {
                     let avg = (hm.at(x - 1, z) + hm.at(x + 1, z) + hm.at(x, z - 1) + hm.at(x, z + 1)) * 0.25;
                     h + (avg - h) * 0.5 * f

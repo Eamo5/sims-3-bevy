@@ -2,7 +2,7 @@
 //! with door and window openings, floors styled by room, the foundation, a cutaway view and
 //! per-floor visibility. From afar the game's own pre-rendered lot imposter stands in.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -152,6 +152,10 @@ pub struct ActiveBuilding {
     /// How steep its roofs are, and whether its rooms are roofed at all.
     pub roof_pitch: f32,
     pub roofs_on: bool,
+    /// The water the household's poured (the Water tool's ponds): its level at each lot-local
+    /// grid point, and a count bumped as it changes (`pondtool` redraws it).
+    pub pond: BTreeMap<(u16, u16), f32>,
+    pub pond_gen: u32,
     /// The stair style the household's staircases are built in (the house's own, or one of the
     /// town's): its pieces and railings.
     pub stair_style: Option<StairBaked>,
@@ -899,6 +903,8 @@ pub enum PaintOp {
     Roof { texture: Key },
     /// The shape of the household's roofs.
     RoofStyle { style: RoofStyle },
+    /// Water poured at a lot-local grid point to a level (none: drained).
+    PondWater { x: u16, z: u16, level: Option<f32> },
     /// How steep the household's roofs are (rise per run: the game's Roof Pitch slider).
     RoofPitch { pitch: f32 },
     /// Roofs over the household's rooms or not (the game's auto-roofing, and Remove All Roofs).
@@ -945,6 +951,7 @@ pub struct BuildingSnapshot {
     roof_style: RoofStyle,
     roof_pitch: f32,
     roofs_on: bool,
+    pond: BTreeMap<(u16, u16), f32>,
     levels: Vec<f32>,
     top_level: u8,
     center: Vec3,
@@ -955,7 +962,7 @@ impl BuildingSnapshot {
     pub fn capture(b: &ActiveBuilding, paint: Option<&LotPaint>) -> Self {
         Self {
             data: b.data.clone(), built: b.built.clone(), stairs: b.built_stairs.clone(),
-            roof: b.roof_texture, roof_style: b.roof_style, roof_pitch: b.roof_pitch, roofs_on: b.roofs_on, levels: b.levels.clone(), top_level: b.top_level,
+            roof: b.roof_texture, roof_style: b.roof_style, roof_pitch: b.roof_pitch, roofs_on: b.roofs_on, pond: b.pond.clone(), levels: b.levels.clone(), top_level: b.top_level,
             center: b.center, paint: paint.cloned().unwrap_or_default(),
         }
     }
@@ -978,6 +985,10 @@ pub fn restore_history(
     b.roof_style = snapshot.roof_style;
     b.roof_pitch = snapshot.roof_pitch;
     b.roofs_on = snapshot.roofs_on;
+    if b.pond != snapshot.pond {
+        b.pond = snapshot.pond;
+        b.pond_gen = b.pond_gen.wrapping_add(1);
+    }
     b.levels = snapshot.levels;
     b.top_level = snapshot.top_level;
     b.view_level = b.view_level.min(b.top_level);
@@ -1084,6 +1095,13 @@ pub fn repaint(
             PaintOp::AutoRoof { on } => {
                 b.roofs_on = on;
                 roof_changed = true;
+            }
+            PaintOp::PondWater { x, z, level } => {
+                match level {
+                    Some(l) => b.pond.insert((x, z), l),
+                    None => b.pond.remove(&(x, z)),
+                };
+                b.pond_gen = b.pond_gen.wrapping_add(1);
             }
             PaintOp::AddFence { .. } | PaintOp::RemoveFence { .. } => fences_changed = true,
             PaintOp::AddPool { .. } | PaintOp::RemovePool { .. } | PaintOp::AddFountain { .. } | PaintOp::RemoveFountain { .. } => pool_changed = true,
@@ -1533,7 +1551,7 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
                 b.levels.push(top + s3bake::building::LEVEL_HEIGHT);
             }
         }
-        PaintOp::RemoveStairs { .. } | PaintOp::StairLook { .. } | PaintOp::Roof { .. } | PaintOp::RoofStyle { .. } | PaintOp::RoofPitch { .. } | PaintOp::AutoRoof { .. } => {}
+        PaintOp::RemoveStairs { .. } | PaintOp::StairLook { .. } | PaintOp::Roof { .. } | PaintOp::RoofStyle { .. } | PaintOp::RoofPitch { .. } | PaintOp::AutoRoof { .. } | PaintOp::PondWater { .. } => {}
         PaintOp::AddFence { a, b: end, level, model, post } => {
             let same = |f: &s3bake::FenceBaked| f.level == level && ((f.a == a && f.b == end) || (f.a == end && f.b == a));
             if !b.fences.iter().any(same) {
@@ -2638,6 +2656,8 @@ pub fn spawn_building(
         roof_style: RoofStyle::Hip,
         roof_pitch: ROOF_PITCH,
         roofs_on: true,
+        pond: BTreeMap::new(),
+        pond_gen: 0,
         stair_style: b.stairs.iter().find(|s| s.flight.is_some()).cloned(),
         away: None,
         wall_entities: HashMap::new(),
