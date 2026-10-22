@@ -42,7 +42,8 @@ pub struct CatalogFence {
 /// isn't 1], u32 size, size bytes, u32`.
 pub fn catalog_entry(d: &[u8]) -> Option<CatalogFence> {
     let u32_at = |o: usize| d.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
-    let mut o = if u32_at(0)? >= 10 {
+    // (Staircases' and railings' (CSTR, CRAL) have the materials list whatever their version.)
+    let mut o = if u32_at(0)? >= 10 || u32_at(12)? != 0x0c {
         let mut o = 16;
         for _ in 0..u32_at(12)? {
             let t = *d.get(o)?;

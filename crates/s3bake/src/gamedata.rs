@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 157;
+pub const GAMEDATA_VERSION: u32 = 159;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -498,6 +498,34 @@ pub struct FenceStyle {
     /// One of the Half Walls tool's (`fences::CatalogFence::half_wall`).
     #[serde(default)]
     pub half_wall: bool,
+}
+
+/// A staircase from the build catalogue (CSTR): its pieces (a tile's flight, the first step,
+/// the side panel).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct StairStyle {
+    pub key: crate::types::Key,
+    pub name: String,
+    pub price: i32,
+    pub flight: Option<crate::types::Key>,
+    pub start: Option<crate::types::Key>,
+    pub side: Option<crate::types::Key>,
+    /// The instances its picture may be under (the catalogue's twins of it by name: the game
+    /// keeps the picture with one of them).
+    #[serde(default)]
+    pub thumbs: Vec<u64>,
+}
+
+/// A railing from the build catalogue (CRAL): a tile's sloped rail, the short first one, a post.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct RailStyle {
+    pub key: crate::types::Key,
+    pub name: String,
+    pub rail: Option<crate::types::Key>,
+    pub start: Option<crate::types::Key>,
+    pub post: Option<crate::types::Key>,
+    #[serde(default)]
+    pub thumbs: Vec<u64>,
 }
 
 /// A wallpaper or floor covering from the build catalogue.
@@ -1404,6 +1432,11 @@ pub struct GameDataBaked {
     pub spawners: Vec<SpawnerInfo>,
     /// The build catalogue's fences.
     pub fences: Vec<FenceStyle>,
+    /// Its staircases and railings (their pieces in `fences.pack` too).
+    #[serde(default)]
+    pub stair_styles: Vec<StairStyle>,
+    #[serde(default)]
+    pub rail_styles: Vec<RailStyle>,
     /// Each object's effect slots (model space): where showers spray, fountains gush and
     /// fires burn.
     pub fx_slots: Vec<(crate::types::Key, Vec<[f32; 3]>)>,
@@ -2803,7 +2836,8 @@ pub fn alt_state_key(model: crate::types::Key, state: u32) -> crate::types::Key 
 }
 
 /// The catalogue's fences (`fences.pack` holds their pieces).
-fn bake_fence_styles(root: &BakeRoot, pkgs: &PackageSet, strings: &HashMap<u64, String>) -> Result<Vec<FenceStyle>, String> {
+#[allow(clippy::type_complexity)]
+fn bake_fence_styles(root: &BakeRoot, pkgs: &PackageSet, strings: &HashMap<u64, String>) -> Result<(Vec<FenceStyle>, Vec<StairStyle>, Vec<RailStyle>), String> {
     let mut keys: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(0x0418FE2A).copied().collect();
     keys.sort();
     keys.dedup_by_key(|k| k.i);
@@ -2871,8 +2905,64 @@ fn bake_fence_styles(root: &BakeRoot, pkgs: &PackageSet, strings: &HashMap<u64, 
             w.add(m, &b).map_err(|e| e.to_string())?;
         }
     }
+    // The staircases and railings the catalogue shows, their pieces with the fences'.
+    let catalogued = |t: u32| -> Vec<(s3pkg::ResourceKey, String, i32, Vec<u64>)> {
+        let mut keys: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(t).copied().collect();
+        keys.sort();
+        keys.dedup_by_key(|k| k.i);
+        let all: Vec<(s3pkg::ResourceKey, String, i32, bool)> = keys
+            .into_iter()
+            .filter_map(|k| {
+                let c = crate::fences::catalog_entry(&pkgs.read(&k)?)?;
+                let name = strings.get(&c.name_guid).cloned().filter(|n| !n.is_empty())?;
+                Some((k, name, c.price.round() as i32, c.shown))
+            })
+            .collect();
+        let mut out: Vec<(s3pkg::ResourceKey, String, i32, Vec<u64>)> = all
+            .iter()
+            .filter(|a| a.3)
+            .map(|(k, n, p, _)| {
+                let twins = std::iter::once(k.i).chain(all.iter().filter(|a| &a.1 == n && a.0.i != k.i).map(|a| a.0.i)).collect();
+                (*k, n.clone(), *p, twins)
+            })
+            .collect();
+        out.sort_by_key(|(_, n, p, _)| (*p, n.clone()));
+        out.dedup_by(|a, b| a.1 == b.1);
+        out
+    };
+    let stairs: Vec<StairStyle> = catalogued(0x049C_A4CD)
+        .into_iter()
+        .filter_map(|(k, name, price, thumbs)| {
+            let (flight, start, side) = crate::building::stair_pieces(pkgs, &k);
+            flight?;
+            Some(StairStyle { key: crate::types::key_of(&k), name, price, flight, start, side, thumbs })
+        })
+        .collect();
+    let rails: Vec<RailStyle> = catalogued(0x04C5_8103)
+        .into_iter()
+        .filter_map(|(k, name, _, thumbs)| {
+            let (rail, start, post) = crate::building::rail_pieces(pkgs, &k);
+            rail?;
+            Some(RailStyle { key: crate::types::key_of(&k), name, rail, start, post, thumbs })
+        })
+        .collect();
+    let pieces = stairs.iter().flat_map(|s| [s.flight, s.start, s.side]).chain(rails.iter().flat_map(|r| [r.rail, r.start, r.post])).flatten();
+    for m in pieces.collect::<Vec<_>>() {
+        if !seen.insert(m) {
+            continue;
+        }
+        let b = crate::bake::bake_model(pkgs, &crate::types::rkey(m));
+        for t in b.parts.iter().filter_map(|p| p.texture) {
+            if !root.tex_path(t).exists()
+                && let Some(dds) = crate::bake::bake_texture(pkgs, t, crate::bake::OBJECT_TEX_MAX, false)
+            {
+                let _ = std::fs::write(root.tex_path(t), dds);
+            }
+        }
+        w.add(m, &b).map_err(|e| e.to_string())?;
+    }
     w.finish().map_err(|e| e.to_string())?;
-    Ok(styles.into_iter().map(|(s, _)| s).collect())
+    Ok((styles.into_iter().map(|(s, _)| s).collect(), stairs, rails))
 }
 
 /// How big a fence's material is drawn (the longer side).
@@ -3808,7 +3898,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     let skins = bake_object_skins(root, pkgs)?;
     progress(&format!("Converting: {skins} objects with moving parts…"));
     progress("Converting: fences…");
-    out.fences = bake_fence_styles(root, pkgs, &strings)?;
+    (out.fences, out.stair_styles, out.rail_styles) = bake_fence_styles(root, pkgs, &strings)?;
     progress("Converting: garden trees and flowers…");
     out.garden = bake_garden(root, pkgs);
     // Catalogue models with alternative geometry states, drawn in their fullest (the objects'

@@ -7,7 +7,10 @@
 //! - Fences: the catalogue's fences, each with the game's picture of it (else a piece of it
 //!   rendered), its name and price on hover; Gates opens the gates;
 //! - Half walls: the catalogue's half walls likewise, the Walls and Wallpaper buttons back to
-//!   those tools.
+//!   those tools;
+//! - Stairs: the catalogue's staircases (CSTR) with the game's pictures of them and their prices
+//!   (a tile's), auto-railings on or off, and Railings: the catalogue's railings (CRAL), a
+//!   staircase put in with the one chosen (else its own, by name).
 
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
@@ -37,10 +40,12 @@ enum Cat {
     Roofs,
     Fences,
     HalfWalls,
+    Stairs,
+    Railings,
 }
 
 impl Cat {
-    const ALL: [Cat; 3] = [Cat::Roofs, Cat::Fences, Cat::HalfWalls];
+    const ALL: [Cat; 5] = [Cat::Roofs, Cat::Fences, Cat::HalfWalls, Cat::Stairs, Cat::Railings];
 
     /// Its panel, and the window its grid goes in.
     fn ids(self) -> (u32, u32) {
@@ -48,6 +53,8 @@ impl Cat {
             Cat::Roofs => (0x3b0, 0x3b3),
             Cat::Fences => (0x3c0, 0x3c3),
             Cat::HalfWalls => (0x0a49_b993, 0x0a49_ba87),
+            Cat::Stairs => (0x3e0, 0x3e2),
+            Cat::Railings => (0x3e1, 0x3e3),
         }
     }
 
@@ -80,8 +87,19 @@ const HALF_DIAGONAL: u32 = 0x0a49_bea4;
 const HALF_WALL: u32 = 0x0a49_beb4;
 const HALF_WALLS_BUTTON: u32 = 0x0a4a_9429;
 const HALF_WALLPAPER_BUTTON: u32 = 0x0a4a_9443;
+// The stairs' and railings' panels'.
+const STAIR_TABS: u32 = 0x3f2;
+const STAIR_TAB: u32 = 0x3f21;
+const SPIRAL_TAB: u32 = 0x3f22;
+const STAIRS_BUTTONS: [u32; 2] = [0x3e4, 0x3e5];
+const RAILINGS_BUTTONS: [u32; 2] = [0x3e6, 0x3e7];
+const ELEVATORS_BUTTONS: [u32; 2] = [0x0a14_e850, 0x0a15_0aa0];
+const AUTO_RAILS_ON: u32 = 0x3e9;
+const AUTO_RAILS_OFF: u32 = 0x3ea;
+/// The stair width slider and its words (the household's staircases are a tile wide).
+const STAIR_WIDTH: [u32; 3] = [0x3e8, 0x3f1, 0x3f3];
 /// Their filters (not here).
-const FILTERS: [u32; 3] = [0x3b8, 0x3cc, 0x0a49_ba90];
+const FILTERS: [u32; 5] = [0x3b8, 0x3cc, 0x0a49_ba90, 0x3ef, 0x3f0];
 /// The grid's (`BuildExpandableCatalogGrid`).
 const GRID: u32 = 0x0a5f_e43c;
 const EXPAND: u32 = 0x0a65_20dd;
@@ -92,8 +110,8 @@ const THUMB: u32 = 0x05ac_1600;
 pub struct BuildCats {
     spawned_for: Option<Entity>,
     grids: Vec<Spawned>,
-    cells: [Option<Entity>; 3],
-    tabs: Option<Entity>,
+    cells: [Option<Entity>; 5],
+    tabs: [Option<Entity>; 5],
     scroll: usize,
     columns: usize,
     count: usize,
@@ -114,6 +132,7 @@ fn current(buy: &BuyMode) -> Option<Cat> {
         ROOFS_TAB => Some(Cat::Roofs),
         FENCES_TAB if buy.half_walls => Some(Cat::HalfWalls),
         FENCES_TAB => Some(Cat::Fences),
+        crate::buy::BUILD_TAB if buy.tool == Some(BuildTool::Stairs) => Some(if buy.railings_view { Cat::Railings } else { Cat::Stairs }),
         _ => None,
     }
 }
@@ -201,7 +220,7 @@ fn spawn(mut commands: Commands, hud: Res<crate::buildhud::BuildHud>, mut c: Res
         c.grids.push(g);
     }
     let s = &hud.puck;
-    for id in FILTERS.into_iter().chain([PITCH_TOOL, PAGODA]) {
+    for id in FILTERS.into_iter().chain([PITCH_TOOL, PAGODA, STAIR_TAB, SPIRAL_TAB]).chain(STAIR_WIDTH) {
         if let Some(e) = s.id(id) {
             commands.entity(e).insert(Visibility::Hidden);
         }
@@ -232,10 +251,19 @@ fn spawn(mut commands: Commands, hud: Res<crate::buildhud::BuildHud>, mut c: Res
         (HALF_WALL, "Half Wall Tool"),
         (HALF_WALLS_BUTTON, "Walls"),
         (HALF_WALLPAPER_BUTTON, "Wallpaper"),
+        (AUTO_RAILS_ON, "Auto-Railings On"),
+        (AUTO_RAILS_OFF, "Auto-Railings Off"),
     ];
     for (id, tip) in tips {
         if let Some(e) = s.id(id) {
             commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
+        }
+    }
+    for (ids, tip) in [(STAIRS_BUTTONS, "Stairs"), (RAILINGS_BUTTONS, "Railings"), (ELEVATORS_BUTTONS, "Elevators (not available)")] {
+        for id in ids {
+            for e in s.all_with(id) {
+                commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
+            }
         }
     }
     c.roof_icons = RoofStyle::ALL.iter().map(|r| images.add(roof_icon(*r))).collect();
@@ -298,6 +326,23 @@ fn controls(
                     buy.show(crate::buildobjects::ObjTab::Gates.catalogue());
                 }
                 return;
+            }
+        }
+        Cat::Stairs | Cat::Railings => {
+            let any = |ids: [u32; 2]| ids.iter().any(|id| s.all_with(*id).into_iter().any(|e| pressed(&clicks, Some(e))));
+            if any(RAILINGS_BUTTONS) && !buy.railings_view {
+                buy.railings_view = true;
+                c.scroll = 0;
+            }
+            if any(STAIRS_BUTTONS) && buy.railings_view {
+                buy.railings_view = false;
+                c.scroll = 0;
+            }
+            if hit(AUTO_RAILS_ON) {
+                buy.no_rails = false;
+            }
+            if hit(AUTO_RAILS_OFF) {
+                buy.no_rails = true;
             }
         }
         Cat::HalfWalls => {
@@ -377,6 +422,13 @@ fn draw(
     lit(FENCE_SINGLE, buy.tool == Some(BuildTool::Fence), false);
     lit(FENCE_ROOM, false, true);
     lit(HALF_WALL, buy.tool == Some(BuildTool::Fence), false);
+    lit(AUTO_RAILS_ON, !buy.no_rails, false);
+    lit(AUTO_RAILS_OFF, buy.no_rails, false);
+    for (k, id) in STAIRS_BUTTONS.iter().enumerate() {
+        lit(*id, k == 0, false);
+        lit(RAILINGS_BUTTONS[k], k == 1, false);
+        lit(ELEVATORS_BUTTONS[k], false, true);
+    }
     // The panel as wide as the screen allows, the grid's columns to fill it.
     let (panel, _) = cat.ids();
     let width = (window.width() - 328.0).max(533.0);
@@ -394,6 +446,8 @@ fn draw(
         Cat::Roofs => 218.0,
         Cat::Fences => 158.0,
         Cat::HalfWalls => 208.0,
+        Cat::Stairs => 264.0,
+        Cat::Railings => 95.0,
     };
     c.columns = ((width - left - 57.0 - 40.0) / step.x).floor().max(1.0) as usize;
     // What's in it: the roofs' shapes or patterns, the fences or the half walls.
@@ -410,12 +464,17 @@ fn draw(
             .map(|(i, f)| (BuyButton::Fence(i), format!("{}\n§{}", f.name, f.price), buy.tool == Some(BuildTool::Fence) && buy.fence == Some(i)))
             .collect(),
     };
+    let items: Vec<(BuyButton, String, bool)> = match cat {
+        Cat::Stairs => gu.data.stair_styles.iter().enumerate().map(|(i, st)| (BuyButton::Stair(i), format!("{}\n§{} a step", st.name, st.price), buy.stair_style == Some(i))).collect(),
+        Cat::Railings => gu.data.rail_styles.iter().enumerate().map(|(i, r)| (BuyButton::Rail(i), r.name.clone(), buy.rail_style == Some(i))).collect(),
+        _ => items,
+    };
     let rows = 2;
     c.count = items.len();
     let total = items.len().div_ceil(c.columns);
     c.scroll = c.scroll.min(total.saturating_sub(rows));
     let chosen = items.iter().position(|i| i.2);
-    let signature = (cat.index(), c.scroll, c.columns, c.textures, chosen, roofs_on as u8, window.width() as u32);
+    let signature = (cat.index(), c.scroll, c.columns, c.textures, chosen, roofs_on as u8 | (buy.no_rails as u8) << 1, window.width() as u32);
     if c.shown == Some(signature) {
         return;
     }
@@ -424,7 +483,7 @@ fn draw(
     if cat == Cat::Roofs
         && let (Some(parent), Some(template)) = (s.id(ROOF_TABS), ui.layout("TabControl").cloned())
     {
-        let holder = crate::buyhud::holder(&mut commands, parent, &mut c.tabs, &visibility);
+        let holder = crate::buyhud::holder(&mut commands, parent, &mut c.tabs[0], &visibility);
         for (n, (id, textures)) in [(ROOF_TYPES, false), (ROOF_TEXTURES, true)].into_iter().enumerate() {
             let Some(source) = ui.find("Build", id).cloned() else { continue };
             let mut tab = template.clone();
@@ -439,6 +498,21 @@ fn draw(
                 if let Some((icon, _)) = ui.image(&mut images, source.icon) {
                     commands.entity(root).insert(crate::layout::SetIcon(icon));
                 }
+            }
+        }
+        commands.entity(parent).insert(Visibility::Inherited).entry::<Node>().and_modify(|mut n| n.overflow = Overflow::visible());
+    }
+    // The stairs' one tab (spiral stairs aren't here).
+    if cat == Cat::Stairs
+        && let (Some(parent), Some(mut tab), Some(source)) = (s.id(STAIR_TABS), ui.layout("TabControl").cloned(), ui.find("Build", STAIR_TAB).cloned())
+    {
+        let holder = crate::buyhud::holder(&mut commands, parent, &mut c.tabs[3], &visibility);
+        tab.area = [1.0, 1.0, 44.0, 52.0];
+        let t = ui.spawn_under(&mut commands, &mut images, &mut fonts, &tab, holder);
+        if let Some(root) = t.root {
+            commands.entity(root).insert((crate::layout::Selected, crate::icons::Tooltip("Stairs".into())));
+            if let Some((icon, _)) = ui.image(&mut images, source.icon) {
+                commands.entity(root).insert(crate::layout::SetIcon(icon));
             }
         }
         commands.entity(parent).insert(Visibility::Inherited).entry::<Node>().and_modify(|mut n| n.overflow = Overflow::visible());
@@ -481,6 +555,9 @@ fn draw(
                 let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
                 assets.texture(&mut ctx, t)
             }),
+            // (Else a flight of it, rendered.)
+            BuyButton::Stair(i) => gu.data.stair_styles.get(i).cloned().and_then(|st| st.thumbs.iter().find_map(|k| gu.icon(&mut images, &s3bake::gamedata::thumb_name(*k))).or_else(|| st.flight.map(|m| thumbs.get(&mut images, m)))),
+            BuyButton::Rail(i) => gu.data.rail_styles.get(i).map(|r| r.thumbs.clone()).and_then(|t| t.iter().find_map(|k| gu.icon(&mut images, &s3bake::gamedata::thumb_name(*k)))),
             BuyButton::Fence(i) => gu.data.fences.get(i).cloned().and_then(|f| gu.icon(&mut images, &s3bake::gamedata::thumb_name(f.key.2)).or_else(|| f.straight.map(|m| thumbs.get(&mut images, m)))),
             _ => None,
         };

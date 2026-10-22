@@ -3546,7 +3546,7 @@ fn auto_build(
         ResMut<crate::interact::Notifications>,
     ),
     mut sel: Query<(&mut crate::interact::ActionQueue, &Transform, &crate::nav::Floor, Option<&crate::nav::PathFollow>), With<crate::sim::Selected>>,
-    (mut last_log, world): (Local<f32>, Option<Res<crate::loading::CurrentWorld>>),
+    (mut last_log, world, game_ui): (Local<f32>, Option<Res<crate::loading::CurrentWorld>>, Option<Res<crate::icons::GameUi>>),
 ) {
     if args.build.is_none() && args.knock.is_none() {
         return;
@@ -3685,7 +3685,15 @@ fn auto_build(
             }
             let level = b.view_level;
             match crate::build::plan_stairs(b, level, IVec2::new(x + 1, z + 1), 0, false) {
-                Ok(ops) => {
+                Ok(mut ops) => {
+                    // (STAIR_STYLE=<n>: in the catalogue's nth staircase.)
+                    if let Some(n) = std::env::var("STAIR_STYLE").ok().and_then(|v| v.parse().ok()) {
+                        buy.stair_style = Some(n);
+                        if let Some((look, _)) = crate::build::stair_look(&buy, game_ui.as_deref()) {
+                            info!("build test: stairs in style {n}");
+                            ops.push(crate::building::PaintOp::StairLook { x: (x + 1) as u16, z: (z + 1) as u16, level, look });
+                        }
+                    }
                     info!("build test: stairs — {} ops", ops.len());
                     apply(&mut commands, &mut assets, b, &mut ctx, ops);
                 }

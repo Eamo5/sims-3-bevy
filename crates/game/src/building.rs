@@ -892,6 +892,8 @@ pub enum PaintOp {
     RemoveFloor { level: u8, x: u16, z: u16 },
     /// A staircase built (see [`BuiltStairs`]), or the one standing on tile (`x`, `z`) taken away.
     AddStairs { x: u16, z: u16, dir: u8, level: u8 },
+    /// The staircase starting at tile (`x`, `z`) made in a catalogue staircase (and railing).
+    StairLook { x: u16, z: u16, level: u8, look: StairLook },
     RemoveStairs { x: u16, z: u16, level: u8 },
     /// The roof pattern for the household's rooms.
     Roof { texture: Key },
@@ -1053,7 +1055,13 @@ pub fn repaint(
                 structure = true;
             }
             PaintOp::AddStairs { x, z, dir, level } => {
-                b.built_stairs.push(BuiltStairs { x, z, dir, level });
+                b.built_stairs.push(BuiltStairs { x, z, dir, level, look: None });
+                stairs_changed = true;
+            }
+            PaintOp::StairLook { x, z, level, look } => {
+                if let Some(s) = b.built_stairs.iter_mut().find(|s| (s.x, s.z, s.level) == (x, z, level)) {
+                    s.look = Some(look);
+                }
                 stairs_changed = true;
             }
             PaintOp::RemoveStairs { x, z, level } => {
@@ -1525,7 +1533,7 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
                 b.levels.push(top + s3bake::building::LEVEL_HEIGHT);
             }
         }
-        PaintOp::RemoveStairs { .. } | PaintOp::Roof { .. } | PaintOp::RoofStyle { .. } | PaintOp::RoofPitch { .. } | PaintOp::AutoRoof { .. } => {}
+        PaintOp::RemoveStairs { .. } | PaintOp::StairLook { .. } | PaintOp::Roof { .. } | PaintOp::RoofStyle { .. } | PaintOp::RoofPitch { .. } | PaintOp::AutoRoof { .. } => {}
         PaintOp::AddFence { a, b: end, level, model, post } => {
             let same = |f: &s3bake::FenceBaked| f.level == level && ((f.a == a && f.b == end) || (f.a == end && f.b == a));
             if !b.fences.iter().any(same) {
@@ -2192,6 +2200,27 @@ pub struct BuiltStairs {
     pub z: u16,
     pub dir: u8,
     pub level: u8,
+    /// The catalogue staircase it's made in (none: the house's own style).
+    pub look: Option<StairLook>,
+}
+
+/// A catalogue staircase's pieces (CSTR: a tile's flight, the first step, the side panel), and
+/// its railing's (CRAL: the sloped rail, the first one, the post), or none.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+pub struct StairLook {
+    pub style: Key,
+    pub flight: Option<Key>,
+    pub start: Option<Key>,
+    pub side: Option<Key>,
+    pub rail: Option<(Key, [Option<Key>; 3])>,
+}
+
+impl StairLook {
+    /// As a staircase of the town's (its pieces, and its railing up both sides).
+    fn baked(&self) -> StairBaked {
+        let rails = self.rail.map(|(style, p)| vec![StairRail { at: [0.0, 0.0], style, rail: p[0], start: p[1], post: p[2] }]).unwrap_or_default();
+        StairBaked { style: self.style, min: [0, 0], max: [0, 0], dir: 0, bottom: 0, top: 0, flight: self.flight, start: self.start, side: self.side, rails }
+    }
 }
 
 /// How far a built staircase runs (tiles).
@@ -2531,7 +2560,8 @@ fn respawn_stairs(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut 
         let y0 = if s.level == 0 { b.data.basement.unwrap_or(y0) } else { y0 };
         // In the stair style's pieces (with its railing up both sides); steps made here with no
         // style to hand.
-        let built = b.stair_style.as_ref().map(|style| {
+        let own = s.look.map(|l| l.baked());
+        let built = own.as_ref().or(b.stair_style.as_ref()).map(|style| {
             let rails: Vec<(f32, &StairRail)> = style.rails.first().map(|r| vec![(-1.0, r), (1.0, r)]).unwrap_or_default();
             stair_pieces(style, &rails, bottom, d, STAIR_RUN as u16, 1, y0, y1, b.rot)
         });

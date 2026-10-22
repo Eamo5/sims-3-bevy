@@ -121,6 +121,12 @@ pub struct BuyMode {
     /// A roof pitch set on the Roofs panel's slider, and auto-roofing turned on or off.
     pub roof_pitch_pick: Option<f32>,
     pub auto_roof_pick: Option<bool>,
+    /// The staircase and railing the Stairs panel has chosen, auto-railings off, and the
+    /// railings shown there (not the staircases).
+    pub stair_style: Option<usize>,
+    pub rail_style: Option<usize>,
+    pub no_rails: bool,
+    pub railings_view: bool,
     /// The fence the fence tool puts up (index into the game data's fences).
     pub fence: Option<usize>,
     /// The fences tab showing the half walls instead (build mode's Half Walls tool).
@@ -332,6 +338,9 @@ pub enum BuyButton {
     Roof(usize),
     RoofStyle(crate::building::RoofStyle),
     Fence(usize),
+    /// A catalogue staircase, a railing (indices into the game data's).
+    Stair(usize),
+    Rail(usize),
     /// A design for the object in hand.
     Design(u8),
     /// Create a Style for the object in hand: open or close it, and a channel's colour (of the
@@ -1607,6 +1616,18 @@ pub(crate) fn buy_buttons(
                 buy.style = None;
                 buy.pending_style = None;
                 buy.dirty = true;
+                play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
+            }
+            BuyButton::Stair(i) => {
+                buy.drop_tools(&mut commands);
+                buy.tool = Some(crate::build::BuildTool::Stairs);
+                buy.stair_style = Some(*i);
+                buy.rail_style = None;
+                play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
+            }
+            BuyButton::Rail(i) => {
+                buy.rail_style = Some(*i);
+                buy.no_rails = false;
                 play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
             }
             BuyButton::Fence(i) => {

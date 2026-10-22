@@ -988,6 +988,26 @@ fn main() {
         }
         return;
     }
+    if args[1] == "stairstyles" {
+        // stairstyles <root>: the catalogue's staircases (CSTR) and railings (CRAL): name, price,
+        // shown, pieces.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let strings = s3formats::stbl::load_english(&set);
+        for t in [0x049C_A4CDu32, 0x04C5_8103] {
+            let mut keys: Vec<s3pkg::ResourceKey> = set.keys_of_type(t).copied().collect();
+            keys.sort();
+            keys.dedup_by_key(|k| k.i);
+            println!("{t:08X}: {} styles", keys.len());
+            for k in keys.iter().take(60) {
+                let Some(d) = set.read(k) else { continue };
+                let c = s3bake::fences::catalog_entry(&d);
+                let name = c.as_ref().and_then(|c| strings.get(&c.name_guid).cloned()).unwrap_or_default();
+                let pieces = if t == 0x049C_A4CD { format!("{:?}", s3bake::building::stair_pieces(&set, k)) } else { format!("{:?}", s3bake::building::rail_pieces(&set, k)) };
+                println!("  {:016X} {name:?} price {:?} shown {:?} {}", k.i, c.as_ref().map(|c| c.price), c.as_ref().map(|c| c.shown), &pieces[..pieces.len().min(90)]);
+            }
+        }
+        return;
+    }
     if args[1] == "fencethumbs" {
         // fencethumbs: how many of the baked fences and roofs have a catalogue thumbnail.
         let root = s3bake::default_root();

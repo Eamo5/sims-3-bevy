@@ -1578,6 +1578,12 @@ installation is unreachable.
   Walls (likewise, its wall tools and Wallpaper button going to those). Pitch and auto-roofing
   are build ops: undone, redone and kept in saves. `ROOF_PITCH=<rise per run>` with `--build`
   (tests).
+  The diagram's stairs open the game's Stairs panel: the catalogue's staircases (CSTR: the base
+  game's and the packs', their names and prices read from them, a step's price), each with the
+  game's own picture (the catalogue keeps it with one of its twins), auto-railings on or off,
+  and the Railings page with the catalogue's railings (CRAL); a staircase goes in in the one
+  chosen with the railing chosen (else its own, by name), its pieces baked with the fences'.
+  `STAIR_STYLE=<n>` with `--build --storey` (tests).
 - **Interface**: the game's own icons and words — moodlets (name, description, time left),
   traits (Create-a-Sim and the Sim's panel) and wishes — read from the game's tuning tables
   (`GameplayData.package`) and string tables, with tooltips on hover. Sims' portraits are

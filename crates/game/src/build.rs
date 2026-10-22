@@ -551,6 +551,21 @@ pub fn sell_openings(
     sold
 }
 
+/// The catalogue staircase (and railing) the Stairs panel has chosen, and what it costs.
+pub fn stair_look(buy: &crate::buy::BuyMode, ui: Option<&crate::icons::GameUi>) -> Option<(crate::building::StairLook, i64)> {
+    let data = &ui?.data;
+    let s = data.stair_styles.get(buy.stair_style?)?;
+    // (Its own railing unless another's chosen: the one of its name, else the first.)
+    let rail = if buy.no_rails {
+        None
+    } else {
+        let first_word = s.name.split_whitespace().next().unwrap_or("");
+        buy.rail_style.and_then(|i| data.rail_styles.get(i)).or_else(|| data.rail_styles.iter().find(|r| r.name.split_whitespace().next() == Some(first_word))).or(data.rail_styles.first())
+    };
+    let look = crate::building::StairLook { style: s.key, flight: s.flight, start: s.start, side: s.side, rail: rail.map(|r| (r.key, [r.rail, r.start, r.post])) };
+    Some((look, s.price as i64 * crate::building::STAIR_RUN as i64))
+}
+
 /// A staircase on `level` from tile `at` climbing along `dir`: its ops (opening the stairwell
 /// above and flooring the landing), or why it can't go there. Taking one away instead when
 /// `removing`.
@@ -561,7 +576,7 @@ pub fn plan_stairs(b: &ActiveBuilding, level: u8, at: IVec2, dir: u8, removing: 
             None => Err("There's no staircase you built there."),
         };
     }
-    let s = crate::building::BuiltStairs { x: at.x as u16, z: at.y as u16, dir, level };
+    let s = crate::building::BuiltStairs { x: at.x as u16, z: at.y as u16, dir, level, look: None };
     let (w, d) = (b.data.width as i32, b.data.depth as i32);
     let inside = |t: IVec2| t.x >= 0 && t.y >= 0 && t.x < w && t.y < d;
     let tiles = s.tiles();
@@ -1015,7 +1030,7 @@ fn build_tool(
             (Ok(_), false) => Color::srgb(0.35, 1.0, 0.45),
         };
         let at = |p: Vec2, h: f32| b.world(p.x, p.y, y + h);
-        let s = crate::building::BuiltStairs { x: cur.x as u16, z: cur.y as u16, dir: drag.stair_dir, level };
+        let s = crate::building::BuiltStairs { x: cur.x as u16, z: cur.y as u16, dir: drag.stair_dir, level, look: None };
         let step = crate::building::BuiltStairs::step(drag.stair_dir).as_vec2();
         let side = step.perp() * 0.5;
         let bottom = cur.as_vec2() + Vec2::splat(0.5) - step * 0.5;
@@ -1043,14 +1058,23 @@ fn build_tool(
         if !mouse.just_pressed(MouseButton::Left) || over_ui.0 {
             return;
         }
-        let ops = match plan {
+        let mut ops = match plan {
             Ok(ops) => ops,
             Err(why) => {
                 notes.push(why);
                 return;
             }
         };
-        let cost = if removing { 0 } else { STAIRS_PRICE };
+        // (In the catalogue's staircase chosen, with its railing or none: at its price a tile.)
+        let look = (!removing).then(|| stair_look(&buy, ui.as_deref())).flatten();
+        let cost = match (removing, look) {
+            (true, _) => 0,
+            (false, Some((look, price))) => {
+                ops.push(PaintOp::StairLook { x: cur.x as u16, z: cur.y as u16, level, look });
+                price
+            }
+            (false, None) => STAIRS_PRICE,
+        };
         if household.as_ref().is_some_and(|h| h.funds < cost) {
             notes.push("You can't afford that.");
             return;
