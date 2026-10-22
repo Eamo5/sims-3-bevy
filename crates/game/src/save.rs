@@ -1046,7 +1046,7 @@ fn save_game(
         Query<(&crate::fishbowl::BowlFish, &Transform), (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>,
         (Res<crate::meals::Leftovers>, Res<crate::ingredients::Fridge>, Res<crate::realestate::RealEstate>),
         Res<crate::weather::Weather>,
-        Query<(&crate::pets::Pet, &crate::pets::HomePet, &Transform, Option<&crate::petneeds::PetMotives>, Option<&crate::pets::PetBonds>)>,
+        Query<(&crate::pets::Pet, &crate::pets::HomePet, &Transform, Option<&crate::petneeds::PetMotives>, (Option<&crate::pets::PetBonds>, Option<&crate::pets::PetTraits>))>,
         Res<crate::pets::PetData>,
     ),
     (mut slot, (maid, paper), mail_due, upgraded, family, strokes, sculpted, broken, family_inventory, puddles): (

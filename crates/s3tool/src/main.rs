@@ -2894,7 +2894,7 @@ fn main() {
         for h in &p.households {
             println!("{} ({}) lot {:016X} funds {}", tr(&h.name), h.members.len(), h.lot_id, h.funds);
             for p in &h.pets {
-                println!("   pet {} species {} age {:x}", tr(&p.first_name), p.species, p.age);
+                println!("   pet {} species {} age {:x} {} traits {:?}", tr(&p.first_name), p.species, p.age, if p.female { "F" } else { "M" }, p.traits);
             }
             for s in &h.members {
                 println!(

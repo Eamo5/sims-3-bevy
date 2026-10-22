@@ -29,7 +29,7 @@ impl Plugin for PetsPlugin {
                 Update,
                 (load_pet_data, spawn_strays, spawn_household_pets, social_partners, strays, home_pets, animate_pets).chain().run_if(in_state(PlayMode::Live)),
             )
-            .add_systems(Update, (pet_cam, pet_do, adopted_pets).run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (pet_cam, pet_do, adopted_pets, stray_traits).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -133,7 +133,11 @@ pub const REJECT_CLIP: &str = "genRejectNeutral_boring_neutral";
 
 /// A Sim whose social a pet turned down (both play the pack's rejection).
 #[derive(Component)]
-pub struct Rejected;
+pub struct Rejected(pub &'static str);
+
+/// A pet's traits (`pettraits`), by the game's names.
+#[derive(Component, Default, Clone, Debug)]
+pub struct PetTraits(pub Vec<String>);
 
 /// How each Sim stands with a pet (by Sim id: -100 to 100, as a Sim's liking).
 #[derive(Component, Default, Clone, Debug)]
@@ -211,7 +215,7 @@ pub struct PetBusy;
 fn social_partners(
     mut commands: Commands,
     data: Res<Baked>,
-    sims: Query<(&crate::interact::ActionQueue, &Transform, &crate::sim::Sim, Has<Rejected>), Without<Pet>>,
+    sims: Query<(&crate::interact::ActionQueue, &Transform, &crate::sim::Sim, Option<&Rejected>), Without<Pet>>,
     mut pets: Query<(Entity, &Pet, &mut Transform, &mut PetAnim, Has<PetBusy>)>,
 ) {
     let mut seen: Vec<Entity> = Vec::new();
@@ -228,7 +232,7 @@ fn social_partners(
                 let to = stf.translation.xz() - tf.translation.xz();
                 tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
                 let child = sim.age == crate::sim::Age::Child;
-                let c = if rejected { social_clip(&data, child, &pet.kind, REJECT_CLIP, 'y') } else { PET_SOCIALS.get(social).and_then(|s| s.clip_for(&data, child, &pet.kind, 'y')) };
+                let c = if let Some(r) = rejected { social_clip(&data, child, &pet.kind, r.0, 'y') } else { PET_SOCIALS.get(social).and_then(|s| s.clip_for(&data, child, &pet.kind, 'y')) };
                 if let Some(c) = c {
                     anim.play(c.to_string());
                 }
@@ -442,6 +446,14 @@ fn pet_cam(pets: Query<(&GlobalTransform, &Pet)>, mut cams: Query<&mut crate::ca
     c.distance = std::env::var("PET_DIST").ok().and_then(|v| v.parse().ok()).unwrap_or(4.0);
 }
 
+/// A stray (or any pet that hasn't any yet) gets its traits drawn, as the game's townies are.
+fn stray_traits(mut commands: Commands, q: Query<(Entity, &Pet), (Without<PetTraits>, Without<HomePet>)>) {
+    let mut rng = rand::rng();
+    for (e, pet) in &q {
+        commands.entity(e).insert(PetTraits(crate::pettraits::random(&pet.kind, &mut rng)));
+    }
+}
+
 /// A household's pet, as kept in saves: who it is, what kind, its breed (by the game's outfit
 /// for it) and where it was.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -458,6 +470,9 @@ pub struct SavedPet {
     /// How each Sim stands with it (Sim id, liking).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bonds: Vec<(u64, f32)>,
+    /// Its traits (`pettraits`: the game's names; none kept, drawn when it's home).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub traits: Vec<String>,
 }
 
 /// Pets to put on the home lot once it's ready (a premade household's, or a save's).
@@ -515,7 +530,7 @@ fn adopted_pets(mut commands: Commands, order: Option<Res<AdoptPetOrder>>, pets:
     let wears = if o.kind == "cl" { "cd" } else { o.kind };
     let breeds: Vec<&s3bake::pets::PetBreed> = data.breeds.iter().filter(|b| b.kind == wears).collect();
     let Some(b) = breeds.choose(&mut rng) else { return };
-    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new() });
+    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng) });
 }
 
 /// The kind of pet a premade one is: its species and whether it's young.
@@ -543,7 +558,7 @@ impl SavedPet {
         let wears = if kind == "cl" && !data.breeds.iter().any(|b| b.kind == "cl") { "cd" } else { kind };
         let breeds: Vec<&s3bake::pets::PetBreed> = data.breeds.iter().filter(|b| b.kind == wears).collect();
         let b = breeds.get((p.id % breeds.len().max(1) as u64) as usize)?;
-        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new() })
+        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone() })
     }
 }
 
@@ -584,7 +599,8 @@ fn spawn_household_pets(
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
         if let Some(e) = spawn_pet(&mut commands, p, breed, pet.name.clone(), Vec3::new(at.x, y, at.y), rng.random_range(0.0..6.28), &mut ctx, &mut assets, &mut bindposes) {
             let motives = pet.motives.map(crate::petneeds::PetMotives).unwrap_or_else(|| crate::petneeds::PetMotives::new(&pet.kind, &mut rng));
-            commands.entity(e).insert((HomePet { id: pet.id, path: Vec::new(), until: 0.0 }, motives, PetBonds(pet.bonds.iter().copied().collect())));
+            let traits = if pet.traits.is_empty() { crate::pettraits::random(&pet.kind, &mut rng) } else { pet.traits.clone() };
+            commands.entity(e).insert((HomePet { id: pet.id, path: Vec::new(), until: 0.0 }, motives, PetBonds(pet.bonds.iter().copied().collect()), PetTraits(traits)));
             info!("pet {} the {} ({}) is home", pet.name, p.breeds[breed].kind, pet.outfit);
         }
     }
@@ -682,12 +698,13 @@ pub fn idle_clip(kind: &str, night: bool, rng: &mut impl Rng) -> String {
 }
 
 /// The household's pets, for the save.
-pub fn saved(pets: &Query<(&Pet, &HomePet, &Transform, Option<&crate::petneeds::PetMotives>, Option<&PetBonds>)>, data: Option<&PetsBaked>) -> Vec<SavedPet> {
+pub fn saved(pets: &Query<(&Pet, &HomePet, &Transform, Option<&crate::petneeds::PetMotives>, (Option<&PetBonds>, Option<&PetTraits>))>, data: Option<&PetsBaked>) -> Vec<SavedPet> {
     let Some(data) = data else { return Vec::new() };
     pets.iter()
-        .filter_map(|(p, h, tf, m, b)| {
+        .filter_map(|(p, h, tf, m, (b, t))| {
             let bonds = b.map(|b| b.0.iter().map(|(k, v)| (*k, *v)).collect()).unwrap_or_default();
-            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds })
+            let traits = t.map(|t| t.0.clone()).unwrap_or_default();
+            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits })
         })
         .collect()
 }

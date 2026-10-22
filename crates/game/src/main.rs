@@ -194,6 +194,7 @@ mod weather_fx;
 mod seasonal;
 mod petneeds;
 mod pets;
+mod pettraits;
 mod planlook;
 mod mirrorlook;
 mod mirrors;

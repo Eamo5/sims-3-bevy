@@ -4334,8 +4334,8 @@ pub(crate) fn run_actions(
                                 match baked.as_deref().and_then(|b| s.clip_for(b, child, kind, 'x')) {
                                     Some(c) => {
                                         // (Turned down by a pet that dislikes them: the pack's
-                                        // rejection, both sides.)
-                                        let reject = baked.as_deref().and_then(|b| crate::pets::social_clip(b, child, kind, crate::pets::REJECT_CLIP, 'x'));
+                                        // rejection, both sides, as its temperament has it.)
+                                        let rejections: Vec<(&'static str, Option<&'static str>)> = crate::pettraits::REJECT_CLIPS.iter().map(|n| (*n, baked.as_deref().and_then(|b| crate::pets::social_clip(b, child, kind, n, 'x')))).collect();
                                         let (target, id, roll) = (match &action.kind {
                                             ActionKind::PetSocial { target, .. } => *target,
                                             _ => Entity::PLACEHOLDER,
@@ -4343,13 +4343,15 @@ pub(crate) fn run_actions(
                                         commands.queue(move |w: &mut World| {
                                             let home = w.get::<crate::pets::HomePet>(target).is_some();
                                             let liking = w.get::<crate::pets::PetBonds>(target).map_or(if home { crate::pets::FAMILY_LIKING } else { 0.0 }, |b| b.liking(id, home));
+                                            let how = w.get::<crate::pets::PetTraits>(target).map_or(crate::pets::REJECT_CLIP, |t| crate::pettraits::reject_clip(&t.0));
+                                            let reject = rejections.iter().find(|r| r.0 == how && r.1.is_some()).or_else(|| rejections.iter().find(|r| r.0 == crate::pets::REJECT_CLIP)).and_then(|r| r.1.map(|c| (r.0, c)));
                                             let turned_down = reject.filter(|_| crate::pets::rejects(liking, roll));
-                                            let clip = turned_down.unwrap_or(c);
+                                            let clip = turned_down.map_or(c, |r| r.1);
                                             let clips: &'static [&'static str] = Box::leak(Box::new([clip]));
                                             if let Ok(mut e) = w.get_entity_mut(me) {
                                                 e.insert(crate::anim::ActionClip::new(None, clips));
-                                                if turned_down.is_some() {
-                                                    e.insert(crate::pets::Rejected);
+                                                if let Some((how, _)) = turned_down {
+                                                    e.insert(crate::pets::Rejected(how));
                                                 }
                                             }
                                         });
@@ -5568,13 +5570,16 @@ pub(crate) fn run_actions(
                                 // (How the pet takes to them for it: the social's liking, warmer for
                                 // pet people; turned down, a little less.)
                                 let (id, liking) = (sim.id, s.liking * keen);
+                                // (A Friendly pet warms to them faster: the game's
+                                // `kFriendlyPetTraitWithHumansLtrGainMultiplier`.)
                                 if let ActionKind::PetSocial { target, .. } = action.kind {
                                     commands.queue(move |w: &mut World| {
                                         let rejected = w.get_entity_mut(me).ok().is_some_and(|mut e| e.take::<crate::pets::Rejected>().is_some());
                                         let home = w.get::<crate::pets::HomePet>(target).is_some();
+                                        let warmth = w.get::<crate::pets::PetTraits>(target).map_or(1.0, |t| crate::pettraits::liking_multiplier(&t.0));
                                         if let Ok(mut e) = w.get_entity_mut(target) {
                                             let mut b = e.take::<crate::pets::PetBonds>().unwrap_or_default();
-                                            b.add(id, home, if rejected { -1.0 } else { liking });
+                                            b.add(id, home, if rejected { -1.0 } else if liking > 0.0 { liking * warmth } else { liking });
                                             e.insert(b);
                                         }
                                     });

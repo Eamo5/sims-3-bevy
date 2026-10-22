@@ -27,7 +27,7 @@ use rand::Rng;
 use crate::PlayMode;
 use crate::clock::{GameClock, SPEED_RATES};
 use crate::interact::{GameObject, ObjectKind};
-use crate::pets::{HomePet, Pet, PetAnim, PetBusy};
+use crate::pets::{HomePet, Pet, PetAnim, PetBusy, PetTraits};
 
 pub struct PetNeedsPlugin;
 
@@ -153,11 +153,13 @@ pub fn feelings(kind: &str, m: &PetMotives) -> Vec<&'static str> {
     out.into_iter().map(|o| o.1).collect()
 }
 
-/// A pet's skewer tooltip: its name and kind, and how it's feeling.
-pub fn tooltip(pet: &Pet, m: &PetMotives) -> String {
+/// A pet's skewer tooltip: its name and kind, its traits, and how it's feeling.
+pub fn tooltip(pet: &Pet, m: &PetMotives, traits: &[String], gu: Option<&crate::icons::GameUi>) -> String {
     let f = feelings(&pet.kind, m);
     let how = if f.is_empty() { "Content".to_string() } else { f.join(", ") };
-    format!("{} ({})\n{how}", pet.name, crate::pets::kind_name(&pet.kind))
+    let names: Vec<String> = traits.iter().map(|t| crate::pettraits::name(t, gu)).collect();
+    let traits = if names.is_empty() { String::new() } else { format!("\n{}", names.join(", ")) };
+    format!("{} ({}){traits}\n{how}", pet.name, crate::pets::kind_name(&pet.kind))
 }
 
 /// What's in a pet bowl: bites left (`kFullBowlFoodUnits`, eight).
@@ -226,9 +228,6 @@ const GROOM_RATE: f32 = 200.0;
 const BITE_MINUTES: f64 = 5.0;
 /// What a use of the litter box leaves (its grime: dirty after three uses, very dirty six).
 const LITTER_DIRT: f32 = 10.0;
-/// The chance of going indoors after all (`kAdultDogPeeInsideChance`, `kPuppyPeeInsideChance`,
-/// in a hundred).
-const PEE_INSIDE: [f64; 2] = [0.05, 0.30];
 /// The longest a pet keeps at something before thinking again (game minutes).
 const LONGEST: f64 = 180.0;
 
@@ -274,6 +273,8 @@ pub struct PetTask {
     path: Vec<Vec2>,
     since: Option<f64>,
     next_bite: f64,
+    /// A roll for how it goes about it (its eating style, a Piggy cat's litter kicked about).
+    roll: f64,
 }
 
 /// When each pet thinks again about what it needs (game minutes).
@@ -282,33 +283,35 @@ struct PetThink(f64);
 
 /// Needs fall as the game's tuning has them; a pet asleep (curled up on the floor at night)
 /// rests.
-fn fall(time: Res<Time>, clock: Res<GameClock>, mut q: Query<(&Pet, &mut PetMotives, &PetAnim, Option<&PetTask>)>) {
+fn fall(time: Res<Time>, clock: Res<GameClock>, mut q: Query<(&Pet, &mut PetMotives, &PetAnim, Option<&PetTask>, Option<&PetTraits>)>) {
     let hours = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed] / 60.0;
     if hours <= 0.0 || crate::cheats::no_decay() {
         return;
     }
-    for (pet, mut m, anim, task) in &mut q {
+    for (pet, mut m, anim, task, traits) in &mut q {
+        let traits = traits.map_or(&[][..], |t| &t.0[..]);
         for i in 0..8 {
-            let d = decay(&pet.kind, i, m.0[i]);
+            let d = decay(&pet.kind, i, m.0[i]) * crate::pettraits::decay_multiplier(&pet.kind, traits, i);
             m.add(i, -d * hours);
         }
         // (Asleep without a bed: on the floor, at night as `pets` has them.)
         if task.is_none() && anim.clip.contains("sleep") {
-            let d = decay(&pet.kind, ENERGY, m.0[ENERGY]);
-            m.add(ENERGY, (FLOOR_RATE + d) * hours);
+            let d = decay(&pet.kind, ENERGY, m.0[ENERGY]) * crate::pettraits::decay_multiplier(&pet.kind, traits, ENERGY);
+            m.add(ENERGY, (FLOOR_RATE * crate::pettraits::sleep_multiplier(traits) + d) * hours);
         }
     }
 }
 
 /// A Sim's time with a pet (petting, praise, a hug, a treat): company and fun for the pet too.
-fn attention(time: Res<Time>, clock: Res<GameClock>, sims: Query<&crate::interact::ActionQueue>, mut pets: Query<&mut PetMotives>) {
+fn attention(time: Res<Time>, clock: Res<GameClock>, sims: Query<&crate::interact::ActionQueue>, mut pets: Query<(&mut PetMotives, Option<&PetTraits>)>) {
     let hours = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed] / 60.0;
     for q in &sims {
         let Some(a) = q.0.front() else { continue };
         let (crate::interact::ActionKind::PetSocial { target, social, .. }, crate::interact::Phase::Running(_)) = (&a.kind, a.phase) else { continue };
-        let (Ok(mut m), Some(s)) = (pets.get_mut(*target), crate::pets::PET_SOCIALS.get(*social)) else { continue };
-        m.add(SOCIAL, s.social * hours);
-        m.add(FUN, s.fun * hours);
+        let (Ok((mut m, traits)), Some(s)) = (pets.get_mut(*target), crate::pets::PET_SOCIALS.get(*social)) else { continue };
+        let traits = traits.map_or(&[][..], |t| &t.0[..]);
+        m.add(SOCIAL, s.social * crate::pettraits::gain_multiplier(traits, SOCIAL) * hours);
+        m.add(FUN, s.fun * crate::pettraits::gain_multiplier(traits, FUN) * hours);
     }
 }
 
@@ -336,7 +339,7 @@ fn choose(
     clock: Res<GameClock>,
     grid: Option<Res<crate::nav::NavGrid>>,
     building: Option<Res<crate::building::ActiveBuilding>>,
-    pets: Query<(Entity, &Pet, &PetMotives, &Transform, Option<&PetThink>), (With<HomePet>, Without<PetTask>, Without<PetBusy>)>,
+    pets: Query<(Entity, &Pet, &PetMotives, &Transform, Option<&PetThink>, Option<&PetTraits>), (With<HomePet>, Without<PetTask>, Without<PetBusy>)>,
     objects: Query<(Entity, &GameObject, &Transform, Option<&BowlFood>, Option<&crate::grime::Grime>), Without<crate::visit::LotObject>>,
     taken: Query<&PetTask>,
 ) {
@@ -345,7 +348,8 @@ fn choose(
     let night = !(6.0..21.0).contains(&clock.hour_f());
     let mut rng = rand::rng();
     let busy: Vec<Entity> = taken.iter().filter_map(|t| t.what.object()).collect();
-    for (e, pet, m, tf, think) in &pets {
+    for (e, pet, m, tf, think, traits) in &pets {
+        let traits = traits.map_or(&[][..], |t| &t.0[..]);
         if think.is_some_and(|t| now < t.0) {
             continue;
         }
@@ -360,7 +364,19 @@ fn choose(
                 .map(|(oe, o, otf, ..)| (oe, approach(o, otf, here, &pet.kind)))
         };
         // The most pressing need, and what's there for it.
-        let mut needs: Vec<(f32, usize)> = (0..8).filter_map(|i| urgent(i, m.0[i], night).map(|u| (u, i))).collect();
+        // (A Proud cat grooms itself from half clean.)
+        let mut needs: Vec<(f32, usize)> = (0..8)
+            .filter_map(|i| {
+                let u = match i {
+                    HYGIENE if sp == 'c' => {
+                        let at = crate::pettraits::groom_at(traits);
+                        (m.0[i] < at).then_some(at - m.0[i])
+                    }
+                    _ => urgent(i, m.0[i], night),
+                };
+                u.map(|u| (u, i))
+            })
+            .collect();
         needs.sort_by(|a, b| b.0.total_cmp(&a.0));
         let mut pick: Option<(PetDo, Option<Vec2>)> = None;
         for (_, i) in needs {
@@ -369,9 +385,9 @@ fn choose(
                 (HUNGER, _) => nearest(&|o, f, _| o.kind == ObjectKind::PetBowl && f.is_some_and(|f| f.0 > 0)).map(|(b, at)| (PetDo::Eat(b), Some(at))),
                 (BLADDER, 'c') => match nearest(&|o, _, _| o.kind == ObjectKind::LitterBox) {
                     Some((b, at)) => Some((PetDo::Litter(b), Some(at))),
-                    None => Some((PetDo::Pee, outdoors(&grid, building.as_deref(), here, pet, &mut rng))),
+                    None => Some((PetDo::Pee, outdoors(&grid, building.as_deref(), here, pet, traits, &mut rng))),
                 },
-                (BLADDER, _) => Some((PetDo::Pee, outdoors(&grid, building.as_deref(), here, pet, &mut rng))),
+                (BLADDER, _) => Some((PetDo::Pee, outdoors(&grid, building.as_deref(), here, pet, traits, &mut rng))),
                 (ENERGY, 'h') => Some((PetDo::Sleep(None), None)),
                 (ENERGY, _) => match nearest(&|o, _, _| o.kind == ObjectKind::PetBed) {
                     Some((b, at)) => Some((PetDo::Sleep(Some(b)), Some(at))),
@@ -402,7 +418,7 @@ fn choose(
             None => Vec::new(),
         };
         info!("pet {} sets off to {what:?} ({:.0} m)", pet.name, path_len(here, &path));
-        commands.entity(e).insert(PetTask { what, path, since: None, next_bite: 0.0 });
+        commands.entity(e).insert(PetTask { what, path, since: None, next_bite: 0.0, roll: rng.random() });
     }
 }
 
@@ -431,9 +447,9 @@ fn path_len(from: Vec2, path: &[Vec2]) -> f32 {
 
 /// Somewhere out in the yard near a pet, to pee (and now and then, the young ones especially, not:
 /// where they are).
-fn outdoors(grid: &crate::nav::NavGrid, building: Option<&crate::building::ActiveBuilding>, here: Vec2, pet: &Pet, rng: &mut impl Rng) -> Option<Vec2> {
+fn outdoors(grid: &crate::nav::NavGrid, building: Option<&crate::building::ActiveBuilding>, here: Vec2, pet: &Pet, traits: &[String], rng: &mut impl Rng) -> Option<Vec2> {
     let indoors = |p: Vec2| building.is_some_and(|b| b.is_indoors(Vec3::new(p.x, 0.0, p.y)));
-    if !indoors(here) || rng.random_bool(PEE_INSIDE[(!grown(&pet.kind)) as usize]) {
+    if !indoors(here) || rng.random_bool(crate::pettraits::pee_inside_chance(&pet.kind, traits)) {
         return None;
     }
     for r in [4.0, 7.0, 11.0, 16.0, 22.0] {
@@ -452,14 +468,15 @@ fn outdoors(grid: &crate::nav::NavGrid, building: Option<&crate::building::Activ
 }
 
 /// The clips for what a pet's doing (its kind's own, where it has them).
-fn clip_for(kind: &str, what: PetDo, step: u32) -> String {
+fn clip_for(kind: &str, what: PetDo, step: u32, traits: &[String], roll: f64) -> String {
     let k = kind;
-    let young_dog = k == "cd" || k == "cl";
     match what {
+        // (In one of its ways, the same all meal.)
         PetDo::Eat(_) => {
-            let loops = if k.ends_with('c') || young_dog { ["normal_loop1", "normal_loop2"] } else { ["normal_loop1", "normal_loop2"] };
-            format!("{}2o_petbowl_eat_{}_x", if k == "cl" { "cd" } else { k }, loops[(step % 2) as usize])
+            let styles = crate::pettraits::eating_styles(k, traits);
+            crate::pettraits::eat_clip(k, styles[(roll * styles.len() as f64) as usize % styles.len()], step)
         }
+        PetDo::Litter(_) if crate::pettraits::piggy_litter(traits, roll) => format!("{k}_litterBox_use_piggy_x"),
         PetDo::Litter(_) => format!("{k}_litterBox_use_normal_x"),
         PetDo::Pee if k.ends_with('c') => format!("{k}_pee_x"),
         PetDo::Pee if k.ends_with('h') => format!("{k}_pee_breathe_x"),
@@ -471,7 +488,7 @@ fn clip_for(kind: &str, what: PetDo, step: u32) -> String {
         PetDo::Chew(_) => format!("{}2o_chewToy_play_loop{}_x", if k == "cl" { "cd" } else { k }, 1 + step % 2),
         PetDo::Drink(_) => format!("ah2o_waterTrough_drink_loop{}_x", 1 + step % 3),
         PetDo::Graze => format!("ah2o_hayPile_eat_loop{}_x", 1 + step % 4),
-        PetDo::Groom => format!("{k}_idle_sit_groomSelf_x"),
+        PetDo::Groom => format!("{k}_idle_sit_groomSelf_loop{}_x", 1 + step % 2),
     }
 }
 
@@ -485,7 +502,7 @@ fn act(
     clock: Res<GameClock>,
     world: Res<crate::loading::CurrentWorld>,
     building: Option<Res<crate::building::ActiveBuilding>>,
-    mut pets: Query<(Entity, &Pet, &mut PetTask, &mut PetMotives, &mut Transform, &mut PetAnim), Without<PetBusy>>,
+    mut pets: Query<(Entity, &Pet, &mut PetTask, &mut PetMotives, &mut Transform, &mut PetAnim, Option<&PetTraits>), Without<PetBusy>>,
     mut objects: Query<(&GameObject, &Transform, Option<&mut BowlFood>, Option<&mut crate::grime::Grime>), Without<Pet>>,
     mut puddles: MessageWriter<crate::puddles::AddPuddle>,
 ) {
@@ -493,7 +510,8 @@ fn act(
     let hours = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed] / 60.0;
     let now = clock.minutes;
     let mut rng = rand::rng();
-    for (e, pet, mut task, mut m, mut tf, mut anim) in &mut pets {
+    for (e, pet, mut task, mut m, mut tf, mut anim, traits) in &mut pets {
+        let traits = traits.map_or(&[][..], |t| &t.0[..]);
         let here = tf.translation.xz();
         // On the way.
         if let Some(&next) = task.path.first() {
@@ -527,7 +545,7 @@ fn act(
             now
         });
         let step = ((now - since) / BITE_MINUTES) as u32;
-        anim.play(clip_for(&pet.kind, what, step));
+        anim.play(clip_for(&pet.kind, what, step, traits, task.roll));
         let need = what.need();
         let mut done = now - since > LONGEST;
         match what {
@@ -550,9 +568,10 @@ fn act(
             PetDo::Litter(b) => {
                 if task.next_bite == 0.0 {
                     task.next_bite = now;
-                    // (A very dirty box put off for the floor, four times in five.)
-                    let filthy = objects.get(b).ok().and_then(|o| o.3.map(|g| g.0)).is_some_and(|g| g >= 60.0);
-                    if filthy && rng.random_bool(0.8) {
+                    // (A box too dirty for it put off for the floor, as its traits have it; a
+                    // Skittish cat startled off it half the time.)
+                    let grime = objects.get(b).ok().and_then(|o| o.3.map(|g| g.0)).unwrap_or(0.0);
+                    if crate::pettraits::refuses_box(traits, grime, rng.random()) || crate::pettraits::startled_off_box(traits, rng.random()) {
                         task.what = PetDo::Pee;
                         task.since = None;
                         continue;
@@ -579,8 +598,8 @@ fn act(
                 done |= now - since >= PEE_MINUTES;
             }
             PetDo::Sleep(bed) => {
-                let rate = if bed.is_some() { BED_RATE } else { FLOOR_RATE };
-                let d = decay(&pet.kind, ENERGY, m.0[ENERGY]);
+                let rate = if bed.is_some() { BED_RATE } else { FLOOR_RATE } * crate::pettraits::sleep_multiplier(traits);
+                let d = decay(&pet.kind, ENERGY, m.0[ENERGY]) * crate::pettraits::decay_multiplier(&pet.kind, traits, ENERGY);
                 m.add(ENERGY, (rate + d) * hours);
                 // (Up with the morning once rested enough.)
                 let day = (6.0..21.0).contains(&clock.hour_f());

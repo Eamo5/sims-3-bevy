@@ -951,6 +951,18 @@ installation is unreachable.
   (a Hug from 20, a Smoochie from 40, Pet from 10), and a pet that dislikes someone turns them
   down with the pack's rejection clips. Pets are on the Relationships panel after the Sims they
   know, with their liking, its state and the household's own marked; kept in saves.
+  Pets have the pack's traits: the premade pets their own (the Lionhearts' Muffin is Skittish,
+  Noisy and Friendly), an adopted or stray one three drawn for its species (two for the young;
+  never two opposites, as the trait table's), shown by their names on the skewer's tooltip and
+  kept in saves. They do as the game's `TraitTuning` has them: a Lazy pet tires a quarter
+  faster and a Hyper one a quarter slower (and sleeps 15% better), a Piggy one hungers a
+  quarter faster, an Independent one misses company a quarter less, a Shy or Independent one
+  gets more out of Sims' attention, a Friendly one takes to Sims 15% faster; Neat and Proud
+  cats won't use a dirty litter box four times in five and a Piggy one any (kicking its litter
+  about), a Skittish cat's startled off it half the time, a Genius pet goes indoors a quarter
+  as often, a Proud cat grooms itself from half clean; Lazy dogs, Playful cats, Aggressive and
+  Piggy pets eat from the bowl in the pack's own ways (`GetEatingStylesForSim`), and Aggressive
+  and Skittish pets turn Sims down with the pack's aggressive and cowering rejections.
   `PET_NEEDS=hungry|bladder|tired` and `PET_BOWL=1` (tests).
 - **Supernaturals**, from the Supernatural pack (and Late Night's vampires): vampires,
   werewolves, witches, fairies and zombies, chosen in Create a Sim's Life State row and kept in
