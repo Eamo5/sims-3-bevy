@@ -993,7 +993,7 @@ fn main() {
         // shown, pieces.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
         let strings = s3formats::stbl::load_english(&set);
-        for t in [0x049C_A4CDu32, 0x04C5_8103] {
+        for t in [0x049C_A4CDu32, 0x04C5_8103, 0x316C_78F2] {
             let mut keys: Vec<s3pkg::ResourceKey> = set.keys_of_type(t).copied().collect();
             keys.sort();
             keys.dedup_by_key(|k| k.i);

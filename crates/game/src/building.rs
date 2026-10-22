@@ -156,6 +156,9 @@ pub struct ActiveBuilding {
     /// grid point, and a count bumped as it changes (`pondtool` redraws it).
     pub pond: BTreeMap<(u16, u16), f32>,
     pub pond_gen: u32,
+    /// The covering the foundation's sides are in (a Foundations panel style's; none: the
+    /// house's own).
+    pub foundation_cover: Option<Key>,
     /// The stair style the household's staircases are built in (the house's own, or one of the
     /// town's): its pieces and railings.
     pub stair_style: Option<StairBaked>,
@@ -903,6 +906,8 @@ pub enum PaintOp {
     Roof { texture: Key },
     /// The shape of the household's roofs.
     RoofStyle { style: RoofStyle },
+    /// The foundation's sides in a style's covering (the Foundations panel's).
+    FoundationStyle { texture: Key },
     /// Water poured at a lot-local grid point to a level (none: drained).
     PondWater { x: u16, z: u16, level: Option<f32> },
     /// How steep the household's roofs are (rise per run: the game's Roof Pitch slider).
@@ -952,6 +957,7 @@ pub struct BuildingSnapshot {
     roof_pitch: f32,
     roofs_on: bool,
     pond: BTreeMap<(u16, u16), f32>,
+    foundation_cover: Option<Key>,
     levels: Vec<f32>,
     top_level: u8,
     center: Vec3,
@@ -962,7 +968,7 @@ impl BuildingSnapshot {
     pub fn capture(b: &ActiveBuilding, paint: Option<&LotPaint>) -> Self {
         Self {
             data: b.data.clone(), built: b.built.clone(), stairs: b.built_stairs.clone(),
-            roof: b.roof_texture, roof_style: b.roof_style, roof_pitch: b.roof_pitch, roofs_on: b.roofs_on, pond: b.pond.clone(), levels: b.levels.clone(), top_level: b.top_level,
+            roof: b.roof_texture, roof_style: b.roof_style, roof_pitch: b.roof_pitch, roofs_on: b.roofs_on, pond: b.pond.clone(), foundation_cover: b.foundation_cover, levels: b.levels.clone(), top_level: b.top_level,
             center: b.center, paint: paint.cloned().unwrap_or_default(),
         }
     }
@@ -985,6 +991,7 @@ pub fn restore_history(
     b.roof_style = snapshot.roof_style;
     b.roof_pitch = snapshot.roof_pitch;
     b.roofs_on = snapshot.roofs_on;
+    b.foundation_cover = snapshot.foundation_cover;
     if b.pond != snapshot.pond {
         b.pond = snapshot.pond;
         b.pond_gen = b.pond_gen.wrapping_add(1);
@@ -1095,6 +1102,10 @@ pub fn repaint(
             PaintOp::AutoRoof { on } => {
                 b.roofs_on = on;
                 roof_changed = true;
+            }
+            PaintOp::FoundationStyle { texture } => {
+                b.foundation_cover = Some(texture);
+                foundation_changed = true;
             }
             PaintOp::PondWater { x, z, level } => {
                 match level {
@@ -1211,7 +1222,7 @@ fn spawn_foundation(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mu
         return Vec::new();
     }
     let mat = {
-        let tex = assets.texture(ctx, STYLE_FOUNDATION);
+        let tex = assets.texture(ctx, active.foundation_cover.unwrap_or(STYLE_FOUNDATION));
         ctx.materials.add(StandardMaterial {
             base_color: if tex.is_some() { Color::WHITE } else { Color::srgb(0.8, 0.78, 0.72) },
             base_color_texture: tex,
@@ -1551,7 +1562,7 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
                 b.levels.push(top + s3bake::building::LEVEL_HEIGHT);
             }
         }
-        PaintOp::RemoveStairs { .. } | PaintOp::StairLook { .. } | PaintOp::Roof { .. } | PaintOp::RoofStyle { .. } | PaintOp::RoofPitch { .. } | PaintOp::AutoRoof { .. } | PaintOp::PondWater { .. } => {}
+        PaintOp::RemoveStairs { .. } | PaintOp::StairLook { .. } | PaintOp::Roof { .. } | PaintOp::RoofStyle { .. } | PaintOp::RoofPitch { .. } | PaintOp::AutoRoof { .. } | PaintOp::PondWater { .. } | PaintOp::FoundationStyle { .. } => {}
         PaintOp::AddFence { a, b: end, level, model, post } => {
             let same = |f: &s3bake::FenceBaked| f.level == level && ((f.a == a && f.b == end) || (f.a == end && f.b == a));
             if !b.fences.iter().any(same) {
@@ -2658,6 +2669,7 @@ pub fn spawn_building(
         roofs_on: true,
         pond: BTreeMap::new(),
         pond_gen: 0,
+        foundation_cover: None,
         stair_style: b.stairs.iter().find(|s| s.flight.is_some()).cloned(),
         away: None,
         wall_entities: HashMap::new(),

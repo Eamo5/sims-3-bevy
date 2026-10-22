@@ -919,6 +919,7 @@ fn build_tool(
         buy.roof_style_pick = None;
         buy.roof_pitch_pick = None;
         buy.auto_roof_pick = None;
+        buy.foundation_style_pick = None;
         return;
     }
     if interrupted { return; }
@@ -961,6 +962,11 @@ fn build_tool(
         Some(b) => [
             buy.roof_pitch_pick.take().filter(|p| (p - b.roof_pitch).abs() > 1e-3).map(|pitch| PaintOp::RoofPitch { pitch }),
             buy.auto_roof_pick.take().filter(|on| *on != b.roofs_on).map(|on| PaintOp::AutoRoof { on }),
+            buy.foundation_style_pick
+                .take()
+                .and_then(|i| ui.as_ref()?.data.foundation_styles.get(i).map(|f| f.texture))
+                .filter(|t| b.foundation_cover != Some(*t))
+                .map(|texture| PaintOp::FoundationStyle { texture }),
         ]
         .into_iter()
         .flatten()

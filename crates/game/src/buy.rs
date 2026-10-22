@@ -126,6 +126,8 @@ pub struct BuyMode {
     pub stair_style: Option<usize>,
     pub rail_style: Option<usize>,
     pub no_rails: bool,
+    /// A foundation kind chosen on the Foundations panel, to put the household's in.
+    pub foundation_style_pick: Option<usize>,
     pub railings_view: bool,
     /// The fence the fence tool puts up (index into the game data's fences).
     pub fence: Option<usize>,
@@ -341,6 +343,8 @@ pub enum BuyButton {
     /// A catalogue staircase, a railing (indices into the game data's).
     Stair(usize),
     Rail(usize),
+    /// A foundation kind (index into the game data's foundation styles).
+    FoundationStyle(usize),
     /// A design for the object in hand.
     Design(u8),
     /// Create a Style for the object in hand: open or close it, and a channel's colour (of the
@@ -1623,6 +1627,10 @@ pub(crate) fn buy_buttons(
                 buy.tool = Some(crate::build::BuildTool::Stairs);
                 buy.stair_style = Some(*i);
                 buy.rail_style = None;
+                play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
+            }
+            BuyButton::FoundationStyle(i) => {
+                buy.foundation_style_pick = Some(*i);
                 play.write(crate::sound::PlaySound::ui("ui_build_design_tool_open"));
             }
             BuyButton::Rail(i) => {

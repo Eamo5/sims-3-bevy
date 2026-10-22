@@ -10,7 +10,9 @@
 //!   those tools;
 //! - Stairs: the catalogue's staircases (CSTR) with the game's pictures of them and their prices
 //!   (a tile's), auto-railings on or off, and Railings: the catalogue's railings (CRAL), a
-//!   staircase put in with the one chosen (else its own, by name).
+//!   staircase put in with the one chosen (else its own, by name);
+//! - Foundations: the catalogue's foundation kinds (CFND: foundation, deck, platform), each its
+//!   sides' covering, the household's foundation in the one chosen.
 
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
@@ -42,10 +44,11 @@ enum Cat {
     HalfWalls,
     Stairs,
     Railings,
+    Foundations,
 }
 
 impl Cat {
-    const ALL: [Cat; 5] = [Cat::Roofs, Cat::Fences, Cat::HalfWalls, Cat::Stairs, Cat::Railings];
+    const ALL: [Cat; 6] = [Cat::Roofs, Cat::Fences, Cat::HalfWalls, Cat::Stairs, Cat::Railings, Cat::Foundations];
 
     /// Its panel, and the window its grid goes in.
     fn ids(self) -> (u32, u32) {
@@ -55,6 +58,7 @@ impl Cat {
             Cat::HalfWalls => (0x0a49_b993, 0x0a49_ba87),
             Cat::Stairs => (0x3e0, 0x3e2),
             Cat::Railings => (0x3e1, 0x3e3),
+            Cat::Foundations => (0x000a_a300, 0x000a_a302),
         }
     }
 
@@ -110,8 +114,8 @@ const THUMB: u32 = 0x05ac_1600;
 pub struct BuildCats {
     spawned_for: Option<Entity>,
     grids: Vec<Spawned>,
-    cells: [Option<Entity>; 5],
-    tabs: [Option<Entity>; 5],
+    cells: [Option<Entity>; 6],
+    tabs: [Option<Entity>; 6],
     scroll: usize,
     columns: usize,
     count: usize,
@@ -132,6 +136,7 @@ fn current(buy: &BuyMode) -> Option<Cat> {
         ROOFS_TAB => Some(Cat::Roofs),
         FENCES_TAB if buy.half_walls => Some(Cat::HalfWalls),
         FENCES_TAB => Some(Cat::Fences),
+        crate::buy::BUILD_TAB if buy.tool == Some(BuildTool::Foundation) => Some(Cat::Foundations),
         crate::buy::BUILD_TAB if buy.tool == Some(BuildTool::Stairs) => Some(if buy.railings_view { Cat::Railings } else { Cat::Stairs }),
         _ => None,
     }
@@ -328,6 +333,7 @@ fn controls(
                 return;
             }
         }
+        Cat::Foundations => {}
         Cat::Stairs | Cat::Railings => {
             let any = |ids: [u32; 2]| ids.iter().any(|id| s.all_with(*id).into_iter().any(|e| pressed(&clicks, Some(e))));
             if any(RAILINGS_BUTTONS) && !buy.railings_view {
@@ -448,6 +454,7 @@ fn draw(
         Cat::HalfWalls => 208.0,
         Cat::Stairs => 264.0,
         Cat::Railings => 95.0,
+        Cat::Foundations => 110.0,
     };
     c.columns = ((width - left - 57.0 - 40.0) / step.x).floor().max(1.0) as usize;
     // What's in it: the roofs' shapes or patterns, the fences or the half walls.
@@ -467,6 +474,10 @@ fn draw(
     let items: Vec<(BuyButton, String, bool)> = match cat {
         Cat::Stairs => gu.data.stair_styles.iter().enumerate().map(|(i, st)| (BuyButton::Stair(i), format!("{}\n§{} a step", st.name, st.price), buy.stair_style == Some(i))).collect(),
         Cat::Railings => gu.data.rail_styles.iter().enumerate().map(|(i, r)| (BuyButton::Rail(i), r.name.clone(), buy.rail_style == Some(i))).collect(),
+        Cat::Foundations => {
+            let now = building.as_deref().and_then(|b| b.foundation_cover);
+            gu.data.foundation_styles.iter().enumerate().map(|(i, f)| (BuyButton::FoundationStyle(i), format!("{}\n§{} a tile", f.name, f.price), now == Some(f.texture))).collect()
+        }
         _ => items,
     };
     let rows = 2;
@@ -558,6 +569,10 @@ fn draw(
             // (Else a flight of it, rendered.)
             BuyButton::Stair(i) => gu.data.stair_styles.get(i).cloned().and_then(|st| st.thumbs.iter().find_map(|k| gu.icon(&mut images, &s3bake::gamedata::thumb_name(*k))).or_else(|| st.flight.map(|m| thumbs.get(&mut images, m)))),
             BuyButton::Rail(i) => gu.data.rail_styles.get(i).map(|r| r.thumbs.clone()).and_then(|t| t.iter().find_map(|k| gu.icon(&mut images, &s3bake::gamedata::thumb_name(*k)))),
+            BuyButton::FoundationStyle(i) => gu.data.foundation_styles.get(i).map(|f| f.texture).and_then(|t| {
+                let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+                assets.texture(&mut ctx, t)
+            }),
             BuyButton::Fence(i) => gu.data.fences.get(i).cloned().and_then(|f| gu.icon(&mut images, &s3bake::gamedata::thumb_name(f.key.2)).or_else(|| f.straight.map(|m| thumbs.get(&mut images, m)))),
             _ => None,
         };

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 159;
+pub const GAMEDATA_VERSION: u32 = 161;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -514,6 +514,17 @@ pub struct StairStyle {
     /// keeps the picture with one of them).
     #[serde(default)]
     pub thumbs: Vec<u64>,
+}
+
+/// A foundation or deck style from the build catalogue (CFND): its name, what it says of
+/// itself, its price, and its sides' covering (its CWAL, rendered under the covering key).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct FoundationStyle {
+    pub key: crate::types::Key,
+    pub name: String,
+    pub desc: String,
+    pub price: i32,
+    pub texture: crate::types::Key,
 }
 
 /// A railing from the build catalogue (CRAL): a tile's sloped rail, the short first one, a post.
@@ -1437,6 +1448,9 @@ pub struct GameDataBaked {
     pub stair_styles: Vec<StairStyle>,
     #[serde(default)]
     pub rail_styles: Vec<RailStyle>,
+    /// Its foundations' and decks' styles (CFND).
+    #[serde(default)]
+    pub foundation_styles: Vec<FoundationStyle>,
     /// Each object's effect slots (model space): where showers spray, fountains gush and
     /// fires burn.
     pub fx_slots: Vec<(crate::types::Key, Vec<[f32; 3]>)>,
@@ -3494,6 +3508,50 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         out.patterns = found;
         out.patterns.sort_by(|a, b| a.floor.cmp(&b.floor).then(a.price.cmp(&b.price)).then(a.name.cmp(&b.name)));
         out.patterns.dedup_by(|a, b| a.floor == b.floor && a.name == b.name);
+    }
+
+    // The foundations' and decks' styles: each one's sides' wall covering drawn.
+    progress("Converting: foundation styles…");
+    {
+        let mut keys: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(0x316C_78F2).copied().collect();
+        keys.sort();
+        keys.dedup_by_key(|k| k.i);
+        let mut styles: Vec<FoundationStyle> = crate::bake::par_map(&keys, |k| {
+            let d = pkgs.read(k)?;
+            let c = crate::fences::catalog_entry(&d)?;
+            let name = strings.get(&c.name_guid).cloned().filter(|n| !n.is_empty())?;
+            if !c.shown {
+                return None;
+            }
+            // (Its TGI list: at the offset in its second word, counted; the CWAL in it.)
+            let u32_at = |o: usize| d.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
+            let at = u32_at(4)? as usize + 8;
+            let n = u32_at(at)?.min(16) as usize;
+            let cwal = (0..n).find_map(|i| {
+                let o = at + 4 + i * 16;
+                if u32_at(o)? != s3formats::catalog::T_CWAL { return None }
+                Some(s3pkg::ResourceKey::new(u32_at(o)?, u32_at(o + 4)?, (u32_at(o + 12)? as u64) << 32 | u32_at(o + 8)? as u64))
+            })?;
+            let p = s3formats::catalog::WallFloorPattern::parse(&pkgs.read(&cwal).or_else(|| pkgs.read_ti(cwal.t, cwal.i))?).ok()?;
+            let texture = (crate::types::T_COVER, 3, cwal.i);
+            let path = root.tex_path(texture);
+            if !path.exists() {
+                let m = p.materials.first()?;
+                let img = s3formats::complate::render(pkgs, &m.complate, &m.keys, 256, 512)?;
+                std::fs::write(&path, crate::ddsw::encode_dds(&img)).ok()?;
+            }
+            Some(FoundationStyle { key: crate::types::key_of(k), name, desc: String::new(), price: c.price.round() as i32, texture })
+        })
+        .into_iter()
+        .flatten()
+        // (The foundation tool's square kinds: not the diagonal tool's diamonds, the pool's and the
+        // fountain's, nor the friezes.)
+        .filter(|s| !s.name.starts_with("Diamond") && !["Pool", "Fountain", "Frieze"].contains(&s.name.as_str()))
+        .collect();
+        styles.sort_by(|a, b| a.price.cmp(&b.price).then(a.name.cmp(&b.name)));
+        styles.dedup_by(|a, b| a.name == b.name);
+        progress(&format!("Converting: {} foundation styles", styles.len()));
+        out.foundation_styles = styles;
     }
 
     // Roof patterns: each one's first visual proxy holds its roof material, whose diffuse map

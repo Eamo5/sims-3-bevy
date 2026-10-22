@@ -1590,6 +1590,9 @@ installation is unreachable.
   and the Railings page with the catalogue's railings (CRAL); a staircase goes in in the one
   chosen with the railing chosen (else its own, by name), its pieces baked with the fences'.
   `STAIR_STYLE=<n>` with `--build --storey` (tests).
+  The Foundations panel has the catalogue's foundation kinds (CFND: Foundation, Deck, Platform,
+  read from the packages, each its sides' own covering drawn), the household's foundation
+  put in the one chosen (an undoable build op, kept in saves).
 - **Interface**: the game's own icons and words — moodlets (name, description, time left),
   traits (Create-a-Sim and the Sim's panel) and wishes — read from the game's tuning tables
   (`GameplayData.package`) and string tables, with tooltips on hover. Sims' portraits are

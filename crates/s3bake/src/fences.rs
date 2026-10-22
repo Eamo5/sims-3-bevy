@@ -43,7 +43,10 @@ pub struct CatalogFence {
 pub fn catalog_entry(d: &[u8]) -> Option<CatalogFence> {
     let u32_at = |o: usize| d.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
     // (Staircases' and railings' (CSTR, CRAL) have the materials list whatever their version.)
-    let mut o = if u32_at(0)? >= 10 || u32_at(12)? != 0x0c {
+    let mut o = if u32_at(12)? != 0x0c && u32_at(16)? == 0x0c {
+        // (A foundation's (CFND): one word more before it.)
+        16
+    } else if u32_at(0)? >= 10 || u32_at(12)? != 0x0c {
         let mut o = 16;
         for _ in 0..u32_at(12)? {
             let t = *d.get(o)?;

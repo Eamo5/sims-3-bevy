@@ -89,7 +89,6 @@ fn home_action(id: u32) -> Option<Action> {
 pub fn native_panel(buy: &BuyMode) -> bool {
     buy.build_look && buy.active && buy.category == BUILD_TAB
         && !(buy.styling() && buy.placing.is_some())
-        && !crate::buildcats::showing(buy)
         && matches!(buy.tool, None | Some(BuildTool::Wall | BuildTool::Room | BuildTool::DiagonalRoom | BuildTool::Pool | BuildTool::Fountain | BuildTool::Foundation | BuildTool::Basement | BuildTool::Sledgehammer))
 }
 
@@ -150,7 +149,7 @@ fn spawn(
             commands.entity(e).insert(Unavailable);
         }
     }
-    for id in [0x000a_a302, 0x000a_a307] {
+    for id in [0x000a_a307] {
         if let Some(e) = s.id(id) {
             commands.entity(e).insert(Visibility::Hidden);
         }
