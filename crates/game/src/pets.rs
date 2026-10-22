@@ -29,7 +29,9 @@ impl Plugin for PetsPlugin {
                 Update,
                 (load_pet_data, spawn_strays, spawn_household_pets, social_partners, strays, home_pets, animate_pets).chain().run_if(in_state(PlayMode::Live)),
             )
-            .add_systems(Update, (pet_cam, pet_do, adopted_pets, stray_traits).run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (pet_cam, pet_do, adopted_pets, stray_traits).run_if(in_state(PlayMode::Live)))
+            // (Create a Pet's pet, in the dressing room.)
+            .add_systems(Update, (load_pet_data, animate_pets).chain().run_if(in_state(AppState::CreateHousehold)));
     }
 }
 
@@ -55,6 +57,7 @@ pub struct Pet {
     pub kind: String,
     pub breed: usize,
     pub name: String,
+    pub female: bool,
 }
 
 impl Pet {
@@ -295,7 +298,7 @@ pub fn spawn_pet(
     commands: &mut Commands,
     data: &PetsBaked,
     breed: usize,
-    name: String,
+    (name, female): (String, bool),
     pos: Vec3,
     yaw: f32,
     ctx: &mut AssetCtx,
@@ -309,7 +312,7 @@ pub fn spawn_pet(
         .spawn((
             Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)),
             Visibility::default(),
-            Pet { kind: b.kind.clone(), breed, name },
+            Pet { kind: b.kind.clone(), breed, name, female },
             PetAnim::default(),
             DespawnOnExit(AppState::InGame),
         ))
@@ -367,13 +370,18 @@ pub fn spawn_pet(
 /// Plays each pet's animation on its skeleton (looping), fading from the last over a moment.
 fn animate_pets(
     time: Res<Time>,
-    clock: Res<GameClock>,
+    (clock, state): (Option<Res<GameClock>>, Res<State<AppState>>),
     data: Res<Baked>,
     mut lib: ResMut<ClipLibrary>,
     mut pets: Query<(&PetSkeleton, &mut PetAnim)>,
     mut joints: Query<&mut Transform, Without<PetSkeleton>>,
 ) {
-    let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed].min(3.0);
+    // (In Create a Pet, at its own pace: the game's clock isn't running.)
+    let rate = match clock {
+        Some(c) if *state.get() != AppState::CreateHousehold => SPEED_RATES[c.speed].min(3.0),
+        _ => 1.0,
+    };
+    let dt = time.delta_secs().min(0.1) * rate;
     for (skel, mut a) in &mut pets {
         if a.clip.is_empty() {
             continue;
@@ -473,6 +481,8 @@ pub struct SavedPet {
     /// Its traits (`pettraits`: the game's names; none kept, drawn when it's home).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub traits: Vec<String>,
+    #[serde(default)]
+    pub female: bool,
 }
 
 /// Pets to put on the home lot once it's ready (a premade household's, or a save's).
@@ -528,9 +538,13 @@ fn adopted_pets(mut commands: Commands, order: Option<Res<AdoptPetOrder>>, pets:
     commands.remove_resource::<AdoptPetOrder>();
     let mut rng = rand::rng();
     let wears = if o.kind == "cl" { "cd" } else { o.kind };
-    let breeds: Vec<&s3bake::pets::PetBreed> = data.breeds.iter().filter(|b| b.kind == wears).collect();
+    // (One of the breeds Create a Pet lists, where it lists the kind's.)
+    let mut breeds: Vec<&s3bake::pets::PetBreed> = data.breeds.iter().filter(|b| b.kind == wears && b.listed.is_some()).collect();
+    if breeds.is_empty() {
+        breeds = data.breeds.iter().filter(|b| b.kind == wears).collect();
+    }
     let Some(b) = breeds.choose(&mut rng) else { return };
-    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng) });
+    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng), female: rng.random() });
 }
 
 /// The kind of pet a premade one is: its species and whether it's young.
@@ -558,7 +572,7 @@ impl SavedPet {
         let wears = if kind == "cl" && !data.breeds.iter().any(|b| b.kind == "cl") { "cd" } else { kind };
         let breeds: Vec<&s3bake::pets::PetBreed> = data.breeds.iter().filter(|b| b.kind == wears).collect();
         let b = breeds.get((p.id % breeds.len().max(1) as u64) as usize)?;
-        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone() })
+        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone(), female: p.female })
     }
 }
 
@@ -597,7 +611,7 @@ fn spawn_household_pets(
         });
         let y = pet.position.map_or_else(|| world.data.heightmap.sample(at.x, at.y), |q| q[1]);
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
-        if let Some(e) = spawn_pet(&mut commands, p, breed, pet.name.clone(), Vec3::new(at.x, y, at.y), rng.random_range(0.0..6.28), &mut ctx, &mut assets, &mut bindposes) {
+        if let Some(e) = spawn_pet(&mut commands, p, breed, (pet.name.clone(), pet.female), Vec3::new(at.x, y, at.y), rng.random_range(0.0..6.28), &mut ctx, &mut assets, &mut bindposes) {
             let motives = pet.motives.map(crate::petneeds::PetMotives).unwrap_or_else(|| crate::petneeds::PetMotives::new(&pet.kind, &mut rng));
             let traits = if pet.traits.is_empty() { crate::pettraits::random(&pet.kind, &mut rng) } else { pet.traits.clone() };
             commands.entity(e).insert((HomePet { id: pet.id, path: Vec::new(), until: 0.0 }, motives, PetBonds(pet.bonds.iter().copied().collect()), PetTraits(traits)));
@@ -704,7 +718,7 @@ pub fn saved(pets: &Query<(&Pet, &HomePet, &Transform, Option<&crate::petneeds::
         .filter_map(|(p, h, tf, m, (b, t))| {
             let bonds = b.map(|b| b.0.iter().map(|(k, v)| (*k, *v)).collect()).unwrap_or_default();
             let traits = t.map(|t| t.0.clone()).unwrap_or_default();
-            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits })
+            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits, female: p.female })
         })
         .collect()
 }
@@ -749,7 +763,7 @@ fn spawn_strays(
         let pos = Vec3::new(at.x, world.data.heightmap.sample(at.x, at.y), at.y);
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
         let name = if i % 2 == 0 { "Stray Cat" } else { "Stray Dog" };
-        if let Some(e) = spawn_pet(&mut commands, p, breed, name.to_string(), pos, rng.random_range(0.0..6.28), &mut ctx, &mut assets, &mut bindposes) {
+        if let Some(e) = spawn_pet(&mut commands, p, breed, (name.to_string(), rng.random()), pos, rng.random_range(0.0..6.28), &mut ctx, &mut assets, &mut bindposes) {
             commands.entity(e).insert(Stray { home: at, target: None, until: 0.0 });
         }
     }

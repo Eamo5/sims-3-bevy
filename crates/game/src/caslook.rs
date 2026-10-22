@@ -41,6 +41,11 @@ const ADD_MENU: u32 = 0x05da_4d20;
 const ADD_CREATE: u32 = 0x05da_4d22;
 const ADD_GENETICS: u32 = 0x05da_4d23;
 const ADD_PETS: u32 = 0x05da_4d04;
+/// The pets' add menu, and its horse, dog and cat.
+const ADD_MENU_PETS: u32 = 0x05da_4d21;
+const ADD_HORSE: u32 = 0x05da_4d2a;
+const ADD_DOG: u32 = 0x05da_4d2b;
+const ADD_CAT: u32 = 0x05da_4d2c;
 const UNDO: u32 = 0x05da_4d01;
 const REDO: u32 = 0x05da_4d02;
 const CANCEL: u32 = 0x05da_4d03;
@@ -90,7 +95,7 @@ impl CasFrame {
 /// Whether the family screen or the genetics screen is up: Create a Sim's panels and the
 /// character sheet step aside for them (as the game's states for them unload those).
 pub fn modal_up() -> bool {
-    crate::casfamily::UP.load(Ordering::Relaxed) || crate::casgenetics::UP.load(Ordering::Relaxed)
+    crate::casfamily::UP.load(Ordering::Relaxed) || crate::casgenetics::UP.load(Ordering::Relaxed) || crate::cap::UP.load(Ordering::Relaxed)
 }
 
 /// One of the household's Sims on the skewer.
@@ -146,8 +151,8 @@ fn spawn_cas_frame(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut im
             commands.entity(e).insert((action, crate::icons::Tooltip(tip.into())));
         }
     }
-    for (id, tip) in [(ACCEPT, "Accept"), (CANCEL, "Cancel"), (MORE, "More"), (OPTIONS, "Options"), (ROTATE_LEFT, "Rotate"), (ROTATE_RIGHT, "Rotate"), (ZOOM_IN, "Zoom In"), (ZOOM_OUT, "Zoom Out"), (ADD_SIM, "Add a Sim"), (ADD_CREATE, "Create a Sim"), (ADD_GENETICS, "Genetics")] {
-        if let Some(e) = puck.id(id) {
+    for (id, tip) in [(ACCEPT, "Accept"), (CANCEL, "Cancel"), (MORE, "More"), (OPTIONS, "Options"), (ROTATE_LEFT, "Rotate"), (ROTATE_RIGHT, "Rotate"), (ZOOM_IN, "Zoom In"), (ZOOM_OUT, "Zoom Out"), (ADD_SIM, "Add a Sim"), (ADD_PETS, "Add a Sim or Pet"), (ADD_CREATE, "Create a Sim"), (ADD_GENETICS, "Genetics"), (ADD_HORSE, "Create a Horse"), (ADD_DOG, "Create a Dog"), (ADD_CAT, "Create a Cat")] {
+        for e in puck.all_with(id) {
             commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
         }
     }
@@ -168,6 +173,7 @@ fn skewer(
     selected: Res<crate::cas::CasSelected>,
     mut vis: Query<&mut Visibility>,
     pics: Res<crate::casportraits::CasPortraits>,
+    (mut cap, pet_data): (ResMut<crate::cap::Cap>, Res<crate::pets::PetData>),
 ) {
     let (Some(mut f), Some(mut ui)) = (frame, ui) else { return };
     let f = &mut *f;
@@ -179,12 +185,16 @@ fn skewer(
     if let Some(h) = f.holder {
         crate::livehud::set_visible(&mut vis, Some(h), !styling);
     }
-    // Add a Sim, after the last, while there's room.
-    if let Some(add) = f.puck.id(ADD_SIM) {
-        crate::livehud::set_visible(&mut vis, Some(add), !styling && pending.members.len() < MAX_SIMS && pending.premade.is_none());
-    }
-    let want: Vec<(String, u8, bool, bool)> = pending.members.iter().map(|m| (m.first.clone(), age_icon(m.age), m.female, pics.get(m.id).is_some())).collect();
-    let sel = selected.0;
+    // Add a Sim, after the last, while there's room (with the Pets pack, its button with the
+    // pets' menu: a Sim, a horse, a dog or a cat).
+    let pets_here = pet_data.0.is_some();
+    let room = pending.members.len() + pending.pets.len() < crate::cap::MAX_IN_HOUSEHOLD && (pending.members.len() < MAX_SIMS || pending.pets.len() < crate::cap::MAX_PETS);
+    let can_add = !styling && room && pending.premade.is_none();
+    crate::livehud::set_visible(&mut vis, f.puck.id(ADD_SIM), can_add && !pets_here);
+    crate::livehud::set_visible(&mut vis, f.puck.id(ADD_PETS), can_add && pets_here);
+    let mut want: Vec<(String, u8, bool, bool)> = pending.members.iter().map(|m| (m.first.clone(), age_icon(m.age), m.female, pics.get(m.id).is_some())).collect();
+    want.extend(pending.pets.iter().map(|p| (format!("{}{:x}", p.name, p.outfit), 99, p.female, true)));
+    let sel = if let Some(p) = cap.pet { 100 + p } else { selected.0 };
     if f.shown.as_ref() == Some(&(want.clone(), sel)) {
         return;
     }
@@ -216,10 +226,29 @@ fn skewer(
         let s = ui.spawn_under(&mut commands, &mut images, &mut fonts, &w, holder);
         let Some(r) = s.root else { continue };
         commands.entity(r).insert((SimButton, CasAction::Select(k), crate::icons::Tooltip(format!("{} {}", m.first, m.last))));
-        if k == sel {
+        if cap.pet.is_none() && k == sel {
             commands.entity(r).insert(crate::layout::Selected);
         }
         if let Some(h) = pics.get(m.id).or_else(|| ui.image(&mut images, s3pkg::fnv64(AGE_ICONS[age_icon(m.age) as usize])).map(|(h, _)| h)) {
+            commands.entity(r).insert((SetIcon(h), crate::layout::IconOpening(SIM_OPENING)));
+        }
+        f.sims.push(r);
+    }
+    // The pets after them, each in a Sim button with the game's picture of its breed.
+    let first = pending.members.len().min(MAX_SIMS);
+    for (j, p) in pending.pets.iter().enumerate().take(crate::cap::MAX_IN_HOUSEHOLD.saturating_sub(first)) {
+        let mut w = template.clone();
+        let (bw, bh) = (w.area[2] - w.area[0], w.area[3] - w.area[1]);
+        let x = w.area[0] + (first + j) as f32 * SIM_STEP;
+        w.area = [x, w.area[1], x + bw, w.area[1] + bh];
+        w.id = 0;
+        let s = ui.spawn_under(&mut commands, &mut images, &mut fonts, &w, holder);
+        let Some(r) = s.root else { continue };
+        commands.entity(r).insert((crate::cap::PetButton(j), crate::icons::Tooltip(format!("{} ({})", p.name, crate::pets::kind_name(&p.kind)))));
+        if cap.pet == Some(j) {
+            commands.entity(r).insert(crate::layout::Selected);
+        }
+        if let Some(h) = pet_data.0.as_deref().and_then(|d| d.breeds.iter().find(|b| b.outfit == p.outfit).cloned()).and_then(|b| cap.thumb(&mut images, &b)) {
             commands.entity(r).insert((SetIcon(h), crate::layout::IconOpening(SIM_OPENING)));
         }
         f.sims.push(r);
@@ -278,30 +307,47 @@ fn puck_buttons(
     mut actions: MessageWriter<crate::cas::CasActionRequest>,
     (families, pending, mut zoom): (Res<crate::cas::CasFamilies>, Res<PendingHousehold>, ResMut<crate::cas::CasZoom>),
     (mut vis, mut buttons, mut add_menu): (Query<&mut Visibility>, Query<&mut UiButton>, Local<bool>),
+    (pet_data, mut pet_asks): (Res<crate::pets::PetData>, MessageWriter<crate::cap::CapRequest>),
 ) {
     let (Some(f), Some(mut ui)) = (frame, ui) else { return };
     let pressed = |id: u32| crate::livehud::pressed(&clicks, f.puck.id(id));
-    // Add a Sim: its menu (Create a Sim, or a child of two of the household's).
+    let any_pressed = |id: u32| f.puck.all_with(id).into_iter().any(|e| crate::livehud::pressed(&clicks, Some(e)));
+    // Add a Sim: its menu (Create a Sim, or a child of two of the household's; with the Pets
+    // pack, a horse, a dog or a cat too: `AddPopupMenuWindowPet`).
+    let pets_here = pet_data.0.is_some();
+    let (menu_id, other) = if pets_here { (ADD_MENU_PETS, ADD_MENU) } else { (ADD_MENU, ADD_MENU_PETS) };
     let mut menu = *add_menu;
-    if pressed(ADD_SIM) {
+    if pressed(ADD_SIM) || pressed(ADD_PETS) {
         menu = !menu;
     }
-    if pressed(ADD_CREATE) {
+    if any_pressed(ADD_CREATE) {
         actions.write(crate::cas::CasActionRequest(CasAction::Add));
         menu = false;
     }
-    if pressed(ADD_GENETICS) && crate::casgenetics::possible(&pending.members) {
+    if any_pressed(ADD_GENETICS) && crate::casgenetics::possible(&pending.members) {
         crate::casgenetics::OPEN.store(true, Ordering::Relaxed);
         menu = false;
     }
-    if menu != *add_menu || f.puck.id(ADD_MENU).and_then(|e| vis.get(e).ok()).is_some_and(|v| (*v == Visibility::Hidden) == menu) {
-        *add_menu = menu;
-        crate::livehud::set_visible(&mut vis, f.puck.id(ADD_MENU), menu);
+    let room_for_pets = pending.pets.len() < crate::cap::MAX_PETS && pending.members.len() + pending.pets.len() < crate::cap::MAX_IN_HOUSEHOLD;
+    for (id, kind) in [(ADD_HORSE, "ah"), (ADD_DOG, "ad"), (ADD_CAT, "ac")] {
+        if pressed(id) && room_for_pets {
+            pet_asks.write(crate::cap::CapRequest::New(kind));
+            menu = false;
+        }
     }
-    if let Some(mut b) = f.puck.id(ADD_GENETICS).and_then(|e| buttons.get_mut(e).ok()) {
-        let off = !crate::casgenetics::possible(&pending.members);
-        if b.disabled != off {
-            b.disabled = off;
+    if menu != *add_menu || f.puck.id(menu_id).and_then(|e| vis.get(e).ok()).is_some_and(|v| (*v == Visibility::Hidden) == menu) {
+        *add_menu = menu;
+        crate::livehud::set_visible(&mut vis, f.puck.id(menu_id), menu);
+        crate::livehud::set_visible(&mut vis, f.puck.id(other), false);
+    }
+    let sims_full = pending.members.len() >= MAX_SIMS || pending.members.len() + pending.pets.len() >= crate::cap::MAX_IN_HOUSEHOLD;
+    for (id, off) in [(ADD_GENETICS, !crate::casgenetics::possible(&pending.members) || sims_full), (ADD_CREATE, sims_full), (ADD_HORSE, !room_for_pets), (ADD_DOG, !room_for_pets), (ADD_CAT, !room_for_pets)] {
+        for e in f.puck.all_with(id) {
+            if let Ok(mut b) = buttons.get_mut(e)
+                && b.disabled != off
+            {
+                b.disabled = off;
+            }
         }
     }
     if pressed(CANCEL) {
@@ -343,6 +389,10 @@ fn puck_buttons(
     }
     for c in choices.read() {
         match (c.id, c.index) {
+            // (The pet being made, while there is one.)
+            (MORE_MENU, Some(0)) if crate::cap::UP.load(Ordering::Relaxed) => {
+                pet_asks.write(crate::cap::CapRequest::Remove);
+            }
             (MORE_MENU, Some(0)) => {
                 actions.write(crate::cas::CasActionRequest(CasAction::Remove));
             }
@@ -366,13 +416,13 @@ fn puck_buttons(
 /// them).
 pub fn game_panel(tab: CasTab) -> bool {
     GAME_CAS.load(Ordering::Relaxed)
-        && match tab {
+        && (crate::cap::UP.load(Ordering::Relaxed) || match tab {
             CasTab::Basics => BASICS_UP.load(Ordering::Relaxed),
             CasTab::Hair => crate::cashair::HAIR_UP.load(Ordering::Relaxed),
             CasTab::Tops | CasTab::Bottoms | CasTab::Outfits | CasTab::Shoes => crate::casclothing::CLOTHING_UP.load(Ordering::Relaxed) && (!crate::cas::STYLING.load(Ordering::Relaxed) || crate::casstyle::STYLE_UP.load(Ordering::Relaxed)),
             CasTab::Traits => crate::caschar::CHARACTER_UP.load(Ordering::Relaxed),
             CasTab::Face => crate::casface::FACE_UP.load(Ordering::Relaxed),
-        }
+        })
 }
 
 /// Sets a window's shade (found by id anywhere under a layout window).

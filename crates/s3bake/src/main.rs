@@ -1483,7 +1483,7 @@ cover {:?}", g.seasons.temperature, g.seasons.freeze_melt, g.seasons.cover);
         }
     }
     if force || !s3bake::pets_ready(&root) {
-        match s3bake::bake_pets(&root, &pkgs, &progress) {
+        match s3bake::bake_pets(&root, &pkgs, std::path::Path::new(&data), &progress) {
             Ok(n) => println!("pets: {n} textures"),
             Err(e) => eprintln!("pets failed: {e}"),
         }

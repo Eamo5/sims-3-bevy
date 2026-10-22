@@ -246,7 +246,7 @@ pub(crate) struct CasScene {
     ui: Option<Entity>,
     dirty_model: bool,
     dirty_ui: bool,
-    yaw: f32,
+    pub(crate) yaw: f32,
     /// The world's premade households, and whether they're being browsed.
     families: Option<Arc<s3bake::PremadesBaked>>,
     browsing: bool,
@@ -269,7 +269,7 @@ pub(crate) struct CasScene {
 }
 
 #[derive(Component)]
-struct CasModel;
+pub(crate) struct CasModel;
 
 /// The Sim being made and the tab open (for the game's own frame: see `caslook`).
 #[derive(Resource, Default)]
@@ -324,7 +324,7 @@ struct CasCamera;
 
 /// The camera eased towards its framing for the tab: the face (at the Sim's head height for
 /// their age) on the Face tab, else the whole Sim.
-fn frame_camera(scene: Option<Res<CasScene>>, pending: Res<PendingHousehold>, time: Res<Time>, mut cam: Query<&mut Transform, With<CasCamera>>, mut zoom: ResMut<CasZoom>, mut last_tab: Local<Option<CasTab>>) {
+fn frame_camera(scene: Option<Res<CasScene>>, pending: Res<PendingHousehold>, time: Res<Time>, mut cam: Query<&mut Transform, With<CasCamera>>, mut zoom: ResMut<CasZoom>, mut last_tab: Local<Option<CasTab>>, cap: Res<crate::cap::Cap>) {
     let (Some(scene), Ok(mut tf)) = (scene, cam.single_mut()) else { return };
     // (Another tab: the camera as it has it.)
     if *last_tab != Some(scene.tab) {
@@ -346,6 +346,11 @@ fn frame_camera(scene: Option<Res<CasScene>>, pending: Res<PendingHousehold>, ti
             (Vec3::new(0.06, head + 0.02, back), Vec3::new(0.06, head - 0.02, 0.0))
         }
         None => (Vec3::new(-0.35, 1.05, 3.1), Vec3::new(-0.35, 0.92, 0.0)),
+    };
+    // (A pet being made: the whole of it, as its size has it.)
+    let (eye, at) = match cap.pet.and_then(|i| pending.pets.get(i)) {
+        Some(p) => crate::cap::framing(&p.kind),
+        None => (eye, at),
     };
     let want = Transform::from_translation(eye).looking_at(at, Vec3::Y);
     let k = (time.delta_secs() * 6.0).min(1.0);
@@ -969,6 +974,8 @@ fn cas_actions(
                     crate::objects::dds_image(&bytes, true).map(|img| images.add(img))
                 });
                 pending.premade = Some(h);
+                // (A town family brings its own pets, not those made here.)
+                pending.pets.clear();
                 scene.selected = 0;
             }
             CasAction::FacePart(t, i) if crate::simbody::ACCESSORY_TYPES.contains(&t) => {

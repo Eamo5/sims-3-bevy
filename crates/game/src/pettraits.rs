@@ -96,6 +96,41 @@ pub fn random(kind: &str, rng: &mut impl Rng) -> Vec<String> {
     out.into_iter().map(str::to_string).collect()
 }
 
+/// The pet kinds (`ac` a cat… `ch` a foal).
+pub const KINDS: [&str; 8] = ["ac", "cc", "ad", "cd", "al", "cl", "ah", "ch"];
+
+/// As many traits as a pet can have (the game's `GetMaxTraitsFor`: three young, five grown).
+pub fn max_traits(kind: &str) -> usize {
+    if kind.starts_with('a') { 5 } else { 3 }
+}
+
+/// The traits a pet of a kind can have, as Create a Pet offers them.
+pub fn for_kind(kind: &str) -> Vec<&'static str> {
+    let sp = species(kind);
+    PET_TRAITS.iter().filter(|p| p.species.contains(sp)).map(|p| p.hex).collect()
+}
+
+/// Whether a trait goes with those a pet has (never its opposite).
+pub fn compatible(list: &[&str], hex: &str) -> bool {
+    let opposite = |a: &str, b: &str| PET_TRAITS.iter().any(|p| p.hex == a && p.opposite == Some(b));
+    !list.iter().any(|t| opposite(t, hex) || opposite(hex, t))
+}
+
+/// Traits drawn at random, as many as `n` (Create a Pet's randomize: its traits filled).
+pub fn random_up_to(kind: &str, n: usize, rng: &mut impl Rng) -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = Vec::new();
+    let all = for_kind(kind);
+    for _ in 0..60 {
+        if out.len() >= n {
+            break;
+        }
+        let pool: Vec<&&str> = all.iter().filter(|h| !out.contains(h) && compatible(&out, h) && PET_TRAITS.iter().any(|p| p.hex == **h && p.random)).collect();
+        let Some(h) = pool.choose(rng) else { break };
+        out.push(h);
+    }
+    out
+}
+
 /// Whether a pet has a trait.
 pub fn has(traits: &[String], hex: &str) -> bool {
     traits.iter().any(|t| t == hex)
@@ -263,6 +298,21 @@ mod tests {
         assert!(!refuses_box(&v(&[]), 40.0, 0.0));
         assert!((pee_inside_chance("ac", &v(&["GeniusPet"])) - 0.0125).abs() < 1e-9);
         assert_eq!(sleep_multiplier(&v(&["HyperPet"])), 1.15);
+    }
+
+    #[test]
+    fn create_a_pet_offers_the_species_traits() {
+        assert!(for_kind("ah").contains(&"FastPet") && !for_kind("ah").contains(&"HunterPet"));
+        assert!(for_kind("al").contains(&"LoyalPet") && !for_kind("ac").contains(&"LoyalPet"));
+        assert!(!compatible(&["LazyPet"], "HyperPet") && !compatible(&["HyperPet"], "LazyPet"));
+        assert!(compatible(&["LazyPet"], "GeniusPet"));
+        assert_eq!((max_traits("ac"), max_traits("cd")), (5, 3));
+        let mut rng = rand::rng();
+        for _ in 0..50 {
+            let t = random_up_to("ad", 5, &mut rng);
+            assert_eq!(t.len(), 5);
+            assert!(t.iter().enumerate().all(|(i, h)| compatible(&t[..i], h)));
+        }
     }
 
     #[test]

@@ -58,6 +58,8 @@ pub struct PendingHousehold {
     pub premade: Option<s3bake::HouseholdBaked>,
     /// What its Sims are to each other (by Sim id; pairs not listed are roommates).
     pub ties: Vec<(u64, u64, crate::family::Tie)>,
+    /// Its pets, made in Create a Pet (`cap`).
+    pub pets: Vec<crate::pets::SavedPet>,
 }
 
 impl PendingHousehold {
@@ -66,7 +68,7 @@ impl PendingHousehold {
         let last = random_last_name(&mut rng);
         let a = random_sim(&mut rng, &last, Some(true), Age::YoungAdult);
         let b = random_sim(&mut rng, &last, Some(false), Age::YoungAdult);
-        Self { last_name: last, members: vec![a, b], premade: None, ties: Vec::new() }
+        Self { last_name: last, members: vec![a, b], premade: None, ties: Vec::new(), pets: Vec::new() }
     }
 }
 
@@ -837,6 +839,11 @@ pub fn move_in(
         None => 20000 - furniture_value as i64 / 2,
     };
     let starting_funds = pending.premade.as_ref().map_or(if terms.is_some() { starting_funds.max(0) } else { starting_funds.max(5000) }, |h| h.funds.max(0));
+    // (Pets made in Create a Pet come home with the household.)
+    if !pending.pets.is_empty() {
+        info!("the household's {} pets come home", pending.pets.len());
+        commands.insert_resource(crate::pets::PendingPets(pending.pets.clone()));
+    }
     // (A premade household's pets come home with it.)
     if let Some(h) = pending.premade.as_ref().filter(|h| !h.pets.is_empty())
         && let Some(data) = s3bake::load_pets(&s3bake::default_root())

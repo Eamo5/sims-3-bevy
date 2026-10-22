@@ -322,7 +322,7 @@ fn switch_over(
             let carry = move_in_town(game, &ids);
             let members: Vec<Sim> = h.members.iter().filter(|m| !m.first_name.is_empty()).map(crate::premade::to_sim).filter_map(|s| carry.town.apply(s)).collect();
             info!("changing household: from the {from} household to the {} household (moving in)", h.name);
-            commands.insert_resource(crate::home::PendingHousehold { last_name: h.name.clone(), members, premade: Some(h), ties: Vec::new() });
+            commands.insert_resource(crate::home::PendingHousehold { last_name: h.name.clone(), members, premade: Some(h), ties: Vec::new(), pets: Vec::new() });
             commands.remove_resource::<crate::save::PendingLoad>();
             commands.insert_resource(carry);
             next.set(AppState::Loading);

@@ -1452,6 +1452,20 @@ installation is unreachable.
   father and mother from the household, the child's gender and age, Create Baby (a skin tone
   between the parents', one's hair colour and one's eyes, a face between theirs) and Accept, the
   child joining as their son or daughter (and their other children's sibling).
+- **Create a Pet**, the Pets pack's half of Create a Sim, in the game's own panels: with the
+  pack, Add a Sim has its pets' menu (a Sim, a horse, a dog or a cat, or genetics), and a new
+  pet joins the skewer after the Sims (up to six, ten in all, as `kMaxPetsPerHousehold`) with
+  the game's picture of its breed, standing in the dressing room in the Sim's place (framed for
+  its size, turned by the puck). The game's pet sheet (`CAPPetSheet`, the species' buttons)
+  opens Basics (`CAPBasics`: its name typed in place, the random name, male or female; grown,
+  as Create a Pet makes them), Breed (`CAPBreeds`: the game's breeds list, `CAPPetBreeds` from
+  UI.package, the mixed breed first and the rest by name, each with the game's own Create a Pet
+  picture of it and its name, scrolled by the wheel or the grid's bar; dogs' big and little
+  lists) and Character (`CAPCharacter`: its traits in their five sockets, the game's traits
+  picker for the pack's traits of its species, opposites greyed, or a random set); Randomize
+  draws another pet of its species. The pets come home with the household. Adopted pets are of
+  the listed breeds too. `CAP_TEST=<kind>[:basics|breed|character|picker]` with `CAP_SHOT=<png>`
+  (tests).
 - **The game's own Play Flow**: a new household chooses its home as in the game: the speech
   bubble's instructions ("Choose a place to live!", then "Let's play!" with Play, Cancel back to
   Create a Sim or to choosing again), the play flow puck (turn the town, options), the bin of the
@@ -1580,7 +1594,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-complete Build Mode interface; Create a Sim's pets; complete object placement and routing compatibility; the rest of the expansions'
+complete Build Mode interface; Create a Pet's coat painting, face shapes and accessories; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
 ## Controls

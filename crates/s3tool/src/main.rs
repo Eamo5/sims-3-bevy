@@ -961,6 +961,50 @@ fn main() {
         println!("{hits:X?}");
         return;
     }
+    if args[1] == "grepdir" {
+        // grepdir <dir> <text>: resources (under 4 MB) of every package under a folder holding
+        // the text (ASCII), with their package.
+        fn walk(d: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("package")) {
+                    out.push(p);
+                }
+            }
+        }
+        let mut pkgs = Vec::new();
+        walk(std::path::Path::new(&args[2]), &mut pkgs);
+        let pat = args[3].as_bytes();
+        for p in pkgs {
+            let Ok(pkg) = Package::open(&p) else { continue };
+            for e in pkg.entries.iter().filter(|e| !e.is_deleted() && e.mem_size < 4 << 20) {
+                let Ok(data) = pkg.read(e) else { continue };
+                if data.windows(pat.len()).any(|w| w == pat) {
+                    println!("{} {}", p.display(), e.key);
+                }
+            }
+        }
+        return;
+    }
+    if args[1] == "petthumbs" {
+        // petthumbs <CasThumbnails.package>: which baked breeds (pet outfits) have a thumbnail
+        // there, by type and group.
+        let pets = s3bake::load_pets(&s3bake::default_root()).expect("pets");
+        let pkg = Package::open(&args[2]).expect("package");
+        let mut hits = BTreeMap::<(u32, u32), usize>::new();
+        for b in &pets.breeds {
+            for e in pkg.entries.iter().filter(|e| e.key.i == b.outfit) {
+                *hits.entry((e.key.t, e.key.g)).or_default() += 1;
+            }
+        }
+        println!("{} breeds", pets.breeds.len());
+        for ((t, g), n) in hits {
+            println!("{t:08X}:{g:08X} {n}");
+        }
+        return;
+    }
     if args[1] == "byname" {
         // byname <root> <name> [out]: resources (any type, any pack, and the gameplay data)
         // whose instance is the name's FNV-64 (as the game keys its XML tables); with an out
@@ -972,7 +1016,7 @@ fn main() {
             }
         }
         let want = [s3pkg::fnv64(&args[3]), s3pkg::fnv64(&args[3].to_ascii_lowercase())];
-        let keys: Vec<s3pkg::ResourceKey> = set.keys().filter(|k| want.contains(&k.i)).copied().collect();
+        let keys: Vec<s3pkg::ResourceKey> = set.keys().filter(|k| want.iter().any(|w| (w & 0x7FFF_FFFF_FFFF_FFFF) == (k.i & 0x7FFF_FFFF_FFFF_FFFF))).copied().collect();
         for k in &keys {
             println!("{k} {} bytes", set.read(k).map_or(0, |d| d.len()));
         }

@@ -5,14 +5,14 @@
 //! presets give them) laid over it.
 
 use s3formats::sim::{CasPart, Rig};
-use s3pkg::{PackageSet, types};
+use s3pkg::{Package, PackageSet, types};
 use serde::{Deserialize, Serialize};
 
 use crate::pack::{read_value, write_value};
 use crate::types::{Key, SkinMesh};
 
 /// Bumped when the baked pets change.
-pub const PETS_VERSION: u32 = 3;
+pub const PETS_VERSION: u32 = 4;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PetsBaked {
@@ -38,6 +38,16 @@ pub struct PetBreed {
     pub tail: Option<String>,
     pub ears: Option<String>,
     pub mane: Option<String>,
+    /// Its name, as Create a Pet's breeds list has it (`CAPPetBreeds`: the mixed breed's
+    /// "Create Cat"…), and its place in that list (the mixed breed first, then by name); none
+    /// for an outfit not on it.
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub listed: Option<u32>,
+    /// The game's picture of it (its Create a Pet thumbnail, PNG, made smaller).
+    #[serde(default)]
+    pub thumb: Vec<u8>,
 }
 
 /// The texture-store key of a breed's coat.
@@ -121,7 +131,68 @@ fn preset_colors(preset: &str) -> Vec<[f32; 3]> {
         .collect()
 }
 
-pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, progress: crate::bake::Progress) -> Result<usize, String> {
+/// The game's breeds list (`CAPPetBreeds`, in UI.package): each species' breeds by outfit
+/// name, with their names' string keys, as listed.
+pub fn breed_list(xml: &str) -> Vec<(String, String, String)> {
+    let mut out = Vec::new();
+    let mut species = String::new();
+    let attr = |tag: &str, a: &str| -> Option<String> {
+        let at = tag.find(&format!("{a}=\""))? + a.len() + 2;
+        Some(tag[at..].split('"').next()?.to_string())
+    };
+    for tag in xml.split('<').skip(1) {
+        if tag.starts_with("Species ") {
+            species = attr(tag, "type").unwrap_or_default();
+        } else if tag.starts_with("Breed ")
+            && let (Some(o), Some(l)) = (attr(tag, "outfitName"), attr(tag, "localizationID"))
+        {
+            out.push((species.clone(), o, l));
+        }
+    }
+    out
+}
+
+/// How big breeds' pictures are kept.
+const THUMB_SIZE: usize = 160;
+
+/// A breed's picture from the game's Create a Pet thumbnails (`0x0580A2CF`, the outfit's
+/// instance), made `THUMB_SIZE` square.
+fn breed_thumb(thumbs: &[Package], outfit: u64) -> Vec<u8> {
+    let Some(png) = thumbs.iter().find_map(|p| p.entries.iter().find(|e| e.key.t == 0x0580_A2CF && e.key.i == outfit).and_then(|e| p.read(e).ok())) else { return Vec::new() };
+    let Some(src) = crate::bake::decode_png(&png) else { return Vec::new() };
+    let mut out = vec![0u8; THUMB_SIZE * THUMB_SIZE * 4];
+    // (A box filter: each output pixel the mean of the pixels it covers.)
+    let (sx, sy) = (src.width as f32 / THUMB_SIZE as f32, src.height as f32 / THUMB_SIZE as f32);
+    for y in 0..THUMB_SIZE {
+        for x in 0..THUMB_SIZE {
+            let (x0, y0) = ((x as f32 * sx) as usize, (y as f32 * sy) as usize);
+            let (x1, y1) = ((((x + 1) as f32 * sx) as usize).max(x0 + 1).min(src.width), (((y + 1) as f32 * sy) as usize).max(y0 + 1).min(src.height));
+            let mut sum = [0u32; 4];
+            for yy in y0..y1 {
+                for xx in x0..x1 {
+                    let i = (yy * src.width + xx) * 4;
+                    for k in 0..4 {
+                        sum[k] += src.data[i + k] as u32;
+                    }
+                }
+            }
+            let n = ((x1 - x0) * (y1 - y0)).max(1) as u32;
+            let o = (y * THUMB_SIZE + x) * 4;
+            for k in 0..4 {
+                out[o + k] = (sum[k] / n) as u8;
+            }
+        }
+    }
+    let mut bytes = Vec::new();
+    let mut enc = png::Encoder::new(&mut bytes, THUMB_SIZE as u32, THUMB_SIZE as u32);
+    enc.set_color(png::ColorType::Rgba);
+    if let Ok(mut w) = enc.write_header() {
+        let _ = w.write_image_data(&out);
+    }
+    bytes
+}
+
+pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::path::Path, progress: crate::bake::Progress) -> Result<usize, String> {
     progress("Converting: pets…");
     let casps: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(types::CASP).copied().collect();
     let parsed: Vec<CasPart> = crate::bake::par_map(&casps, |k| CasPart::parse(&pkgs.read(k)?).ok()).into_iter().flatten().collect();
@@ -232,15 +303,61 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, progress: crate::bak
                 }
             }
         }
-        Some(PetBreed { outfit: k.i, kind, age: o.age, gender: o.gender, coat, tail: part(PT_TAIL), ears: part(PT_EARS), mane: part(PT_MANE) })
+        Some(PetBreed { outfit: k.i, kind, age: o.age, gender: o.gender, coat, tail: part(PT_TAIL), ears: part(PT_EARS), mane: part(PT_MANE), name: String::new(), listed: None, thumb: Vec::new() })
     })
     .into_iter()
     .flatten()
     .collect();
+    let mut breeds = breeds;
+    // Their names and order, as Create a Pet lists them, and the game's pictures of them.
+    let ui = Package::open(crate::ui::ui_package(install_root)).ok();
+    let list_xml = ui.as_ref().and_then(|p| p.entries.iter().find(|e| e.key.t == 0x0333_406C && e.key.i == s3pkg::fnv64("CAPPetBreeds")).and_then(|e| p.read(e).ok()));
+    if let Some(xml) = list_xml {
+        let strings = s3formats::stbl::load_english(pkgs);
+        let list = breed_list(&String::from_utf8_lossy(&xml));
+        let mut species: Vec<&str> = list.iter().map(|l| l.0.as_str()).collect();
+        species.dedup();
+        for sp in species {
+            // (The mixed breed first, then by name: the game's `BreedComparison`.)
+            let mut these: Vec<(usize, String, bool)> = list
+                .iter()
+                .filter(|l| l.0 == sp)
+                .filter_map(|(_, o, loc)| {
+                    let b = breeds.iter().position(|b| b.outfit == s3pkg::fnv64(o))?;
+                    Some((b, strings.get(&s3pkg::fnv64(loc)).cloned().unwrap_or_default(), o.contains("Delta")))
+                })
+                .collect();
+            these.sort_by(|a, b| b.2.cmp(&a.2).then(a.1.cmp(&b.1)));
+            for (n, (b, name, _)) in these.into_iter().enumerate() {
+                breeds[b].name = name;
+                breeds[b].listed = Some(n as u32);
+            }
+        }
+    }
+    let thumbs: Vec<Package> = s3pkg::install::product_roots(install_root).into_iter().filter_map(|r| Package::open(r.join("Thumbnails").join("CasThumbnails.package")).ok()).collect();
+    let pics = crate::bake::par_map(&breeds, |b| Some(if b.listed.is_some() { breed_thumb(&thumbs, b.outfit) } else { Vec::new() }));
+    for (b, p) in breeds.iter_mut().zip(pics) {
+        b.thumb = p.unwrap_or_default();
+    }
+    progress(&format!("Converting: {} breeds named, {} pictured", breeds.iter().filter(|b| b.listed.is_some()).count(), breeds.iter().filter(|b| !b.thumb.is_empty()).count()));
     textures.sort();
     textures.dedup();
     let n = crate::bake::bake_textures(root, pkgs, &textures, 1024, "Converting pets", progress);
     progress(&format!("Converting: {} pet breeds", breeds.len()));
     write_value(&root.global_dir().join("pets.bin"), &PetsBaked { version: PETS_VERSION, kinds, breeds }).map_err(|e| e.to_string())?;
     Ok(n)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_games_breeds_list() {
+        let xml = r#"<PetBreeds><Species type="Horse"><Breed outfitName="breedahDelta" localizationID="Ui/Tooltip/CAS/Puck:CreateHorse"><Coat coatName="breedahDelta" outfit="true"/></Breed></Species><Species type="LittleDog"><Breed outfitName="breedalBeagle" localizationID="Ui/Tooltip/CAS/CAP/Breeds/LittleDog:Beagle"/></Species></PetBreeds>"#;
+        let l = breed_list(xml);
+        assert_eq!(l.len(), 2);
+        assert_eq!(l[1], ("LittleDog".to_string(), "breedalBeagle".to_string(), "Ui/Tooltip/CAS/CAP/Breeds/LittleDog:Beagle".to_string()));
+        assert_eq!(s3pkg::fnv64("CAPPetBreeds"), 0x37A7_B686_58F2_7357, "as UI.package keys it");
+    }
 }

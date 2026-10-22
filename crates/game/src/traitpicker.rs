@@ -3,7 +3,9 @@
 //! trait at a birthday): the Sim's traits in their slots, the traits to take by group (all,
 //! mental, physical, social, lifestyle) in the game's rows, scrolled by the wheel or the grid's
 //! bar; a row chosen with a click and taken or given back with a second (or Add and Erase), a
-//! random set, and Accept or Cancel. Traits that may not change stay in their slots.
+//! random set, and Accept or Cancel. Traits that may not change stay in their slots. Create a
+//! Pet's character panel puts it up for a pet's traits (the pack's, for its species), as the game
+//! does.
 
 use bevy::prelude::*;
 
@@ -35,17 +37,89 @@ pub fn available(ui: &UiAssets) -> bool {
     ui.layout("TraitsPicker").is_some() && ui.layout("CASTraitEntry").is_some()
 }
 
+/// A trait in the picker: a Sim's, or a pet's (by the game's name for it).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Pick {
+    Sim(Trait),
+    Pet(&'static str),
+}
+
+impl Pick {
+    fn info(self, gu: Option<&crate::icons::GameUi>) -> Option<s3bake::gamedata::TraitInfo> {
+        match self {
+            Pick::Sim(t) => gu?.trait_info(t),
+            Pick::Pet(h) => gu?.data.traits.iter().find(|i| i.hex == h).cloned(),
+        }
+    }
+
+    fn name(self) -> String {
+        match self {
+            Pick::Sim(t) => t.name().to_string(),
+            Pick::Pet(h) => h.trim_end_matches("Pet").to_string(),
+        }
+    }
+}
+
+/// Whose traits are picked: a Sim's of an age, or a pet's of a kind.
+#[derive(Clone, Copy)]
+enum Pool {
+    Sim(Age),
+    Pet(&'static str),
+}
+
+impl Pool {
+    /// As many as they can have (the game's `GetMaxTraitsFor`: a young pet three, a grown one
+    /// five).
+    fn slots(self) -> usize {
+        match self {
+            Pool::Sim(age) => crate::life::trait_slots(age),
+            Pool::Pet(kind) => crate::pettraits::max_traits(kind),
+        }
+    }
+
+    fn all(self) -> Vec<Pick> {
+        match self {
+            Pool::Sim(age) => Trait::ALL.iter().filter(|t| t.allowed_at(age)).map(|t| Pick::Sim(*t)).collect(),
+            Pool::Pet(kind) => crate::pettraits::for_kind(kind).into_iter().map(Pick::Pet).collect(),
+        }
+    }
+
+    fn can_take(self, list: &[Pick], p: Pick) -> bool {
+        if list.contains(&p) || list.len() >= self.slots() {
+            return false;
+        }
+        match (self, p) {
+            (Pool::Sim(age), Pick::Sim(t)) => {
+                let sims: Vec<Trait> = list.iter().filter_map(|x| if let Pick::Sim(t) = x { Some(*t) } else { None }).collect();
+                t.allowed_at(age) && t.compatible(&sims)
+            }
+            (Pool::Pet(kind), Pick::Pet(h)) => {
+                let pets: Vec<&str> = list.iter().filter_map(|x| if let Pick::Pet(h) = x { Some(*h) } else { None }).collect();
+                crate::pettraits::for_kind(kind).contains(&h) && crate::pettraits::compatible(&pets, h)
+            }
+            _ => false,
+        }
+    }
+
+    fn random(self, rng: &mut impl rand::Rng) -> Vec<Pick> {
+        match self {
+            Pool::Sim(age) => crate::life::random_traits(rng, age).into_iter().map(Pick::Sim).collect(),
+            Pool::Pet(kind) => crate::pettraits::random_up_to(kind, self.slots(), rng).into_iter().map(Pick::Pet).collect(),
+        }
+    }
+}
+
 /// The picker up: the traits as they're being chosen (taken on Accept), those that may not
-/// change, the Sim's age, the group shown, the row chosen (taken or not) and when it was
+/// change, whose they are, the group shown, the row chosen (taken or not) and when it was
 /// clicked, and the rows in view.
 pub struct Picker {
     pub s: Spawned,
-    pub traits: Vec<Trait>,
-    locked: Vec<Trait>,
-    age: Age,
+    traits: Vec<Pick>,
+    locked: Vec<Pick>,
+    pool: Pool,
     group: usize,
-    chosen: Option<(bool, Trait)>,
-    clicked: Option<(bool, Trait, f32)>,
+    chosen: Option<(bool, Pick)>,
+    clicked: Option<(bool, Pick, f32)>,
     scroll: usize,
     current: Option<Entity>,
     available: Option<Entity>,
@@ -62,12 +136,26 @@ pub enum Outcome {
 
 /// A trait's row (taken, or to take).
 #[derive(Component)]
-pub struct TraitRow(bool, Trait);
+pub struct TraitRow(bool, Pick);
 
 /// The picker put up for a Sim (by name, of an age, with their traits; `locked` stay), at
 /// `area`'s top left (or centred), its root given `extra`.
 #[allow(clippy::too_many_arguments)]
 pub fn open(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>, name: &str, (age, portrait): (Age, Option<Handle<Image>>), traits: &[Trait], locked: &[Trait], at: Option<Vec2>, extra: impl Bundle) -> Option<Picker> {
+    let picks = |l: &[Trait]| l.iter().map(|t| Pick::Sim(*t)).collect::<Vec<_>>();
+    open_for(commands, ui, images, fonts, name, (Pool::Sim(age), portrait), (picks(traits), picks(locked)), at, extra)
+}
+
+/// The picker put up for a pet (by name, of a kind, with its traits: the game's names for them).
+#[allow(clippy::too_many_arguments)]
+pub fn open_pet(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>, name: &str, (kind, portrait): (&str, Option<Handle<Image>>), traits: &[String], at: Option<Vec2>, extra: impl Bundle) -> Option<Picker> {
+    let kind = crate::pettraits::KINDS.iter().copied().find(|k| *k == kind)?;
+    let picks = traits.iter().filter_map(|h| crate::pettraits::PET_TRAITS.iter().find(|p| p.hex == h).map(|p| Pick::Pet(p.hex))).collect();
+    open_for(commands, ui, images, fonts, name, (Pool::Pet(kind), portrait), (picks, Vec::new()), at, extra)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn open_for(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Image>, fonts: &mut Assets<Font>, name: &str, (pool, portrait): (Pool, Option<Handle<Image>>), (traits, locked): (Vec<Pick>, Vec<Pick>), at: Option<Vec2>, extra: impl Bundle) -> Option<Picker> {
     let mut w = ui.layout("TraitsPicker")?.clone();
     let (wd, ht) = (w.area[2] - w.area[0], w.area[3] - w.area[1]);
     match at {
@@ -95,7 +183,9 @@ pub fn open(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Imag
     // The Sim's picture (their age's figure without one).
     if let (Some(e), Some(h)) = (s.id(PICK_THUMB), portrait.clone()) {
         crate::hudpanels::picture(commands, e, h, Color::WHITE);
-    } else if let (Some(e), Some((h, _))) = (s.id(PICK_THUMB), ui.image(images, s3pkg::fnv64(crate::caslook::AGE_ICONS[crate::caslook::age_icon(age) as usize]))) {
+    } else if let (Some(e), Pool::Sim(age)) = (s.id(PICK_THUMB), pool)
+        && let Some((h, _)) = ui.image(images, s3pkg::fnv64(crate::caslook::AGE_ICONS[crate::caslook::age_icon(age) as usize]))
+    {
         crate::hudpanels::picture(commands, e, h, crate::layout::color(0xff16_3996));
     }
     // The traits to take: the item grid's own scroll bar down its right.
@@ -107,10 +197,15 @@ pub fn open(commands: &mut Commands, ui: &mut UiAssets, images: &mut Assets<Imag
         bar = ui.spawn_under(commands, images, fonts, &b, grid).root;
         commands.entity(grid).insert(bevy::ui::RelativeCursorPosition::default());
     }
-    Some(Picker { s, traits: traits.to_vec(), locked: locked.to_vec(), age, group: 0, chosen: None, clicked: None, scroll: 0, current: None, available: None, bar, dirty: true })
+    Some(Picker { s, traits, locked, pool, group: 0, chosen: None, clicked: None, scroll: 0, current: None, available: None, bar, dirty: true })
 }
 
 impl Picker {
+    /// A pet's traits as chosen (the game's names).
+    pub fn pet_traits(&self) -> Vec<String> {
+        self.traits.iter().filter_map(|p| if let Pick::Pet(h) = p { Some(h.to_string()) } else { None }).collect()
+    }
+
     /// The picker put away.
     pub fn close(&self, commands: &mut Commands) {
         if let Some(r) = self.s.root {
@@ -157,10 +252,10 @@ pub fn update(
     let (accept, cancel) = (pressed(PICK_ACCEPT), pressed(PICK_CANCEL));
     let group_pressed = PICK_FILTERS.iter().position(|id| pressed(*id));
     let current_grid = in_bg(PICK_CURRENT);
-    let age = p.age;
-    let slots = crate::life::trait_slots(age);
-    let can_take = |list: &[Trait], t: Trait| !list.contains(&t) && list.len() < slots && t.allowed_at(age) && t.compatible(list);
-    let add = |p: &mut Picker, t: Trait, play: &mut MessageWriter<crate::sound::PlaySound>| {
+    let pool = p.pool;
+    let slots = pool.slots();
+    let can_take = |list: &[Pick], t: Pick| pool.can_take(list, t);
+    let add = |p: &mut Picker, t: Pick, play: &mut MessageWriter<crate::sound::PlaySound>| {
         if can_take(&p.traits, t) {
             p.traits.push(t);
             play.write(crate::sound::PlaySound::ui("ui_cas_trait_add"));
@@ -168,7 +263,7 @@ pub fn update(
         p.chosen = None;
         p.dirty = true;
     };
-    let remove = |p: &mut Picker, t: Trait, play: &mut MessageWriter<crate::sound::PlaySound>| {
+    let remove = |p: &mut Picker, t: Pick, play: &mut MessageWriter<crate::sound::PlaySound>| {
         if p.locked.contains(&t) {
             return;
         }
@@ -205,7 +300,7 @@ pub fn update(
         // (The locked ones kept, the rest drawn at random around them.)
         let mut rng = rand::rng();
         let mut list = p.locked.clone();
-        for t in crate::life::random_traits(&mut rng, age) {
+        for t in pool.random(&mut rng) {
             if can_take(&list, t) {
                 list.push(t);
             }
@@ -222,13 +317,13 @@ pub fn update(
         p.dirty = true;
     }
     if accept {
-        return Outcome::Accepted(p.traits.clone());
+        return Outcome::Accepted(p.traits.iter().filter_map(|x| if let Pick::Sim(t) = x { Some(*t) } else { None }).collect());
     }
     if cancel {
         return Outcome::Cancelled;
     }
     // The traits to take, in the group shown (as the game's dictionary has them, by name).
-    let mut list: Vec<(Trait, Option<s3bake::gamedata::TraitInfo>)> = Trait::ALL.iter().filter(|t| t.allowed_at(age)).map(|t| (*t, gu.as_deref().and_then(|g| g.trait_info(*t)))).collect();
+    let mut list: Vec<(Pick, Option<s3bake::gamedata::TraitInfo>)> = pool.all().into_iter().map(|t| (t, t.info(gu.as_deref()))).collect();
     list.retain(|(_, i)| p.group == 0 || i.as_ref().is_some_and(|i| trait_group(&i.category) == p.group));
     list.sort_by_key(|(t, i)| i.as_ref().map_or_else(|| t.name().to_string(), |i| i.name.clone()));
     let most = list.len().saturating_sub(AVAILABLE_ROWS);
@@ -264,7 +359,7 @@ pub fn update(
     }
     let Some(template) = ui.layout("CASTraitEntry").cloned() else { return Outcome::Open };
     // (Rows alternate lighter and darker, as the game's do; names grey where they can't be taken.)
-    let row = |size: [f32; 2], y: f32, n: usize, trait_: Option<(Trait, Option<&s3bake::gamedata::TraitInfo>, bool)>| {
+    let row = |size: [f32; 2], y: f32, n: usize, trait_: Option<(Pick, Option<&s3bake::gamedata::TraitInfo>, bool)>| {
         let mut w = template.clone();
         w.area = [0.0, y, size[0], y + size[1]];
         w.cls = "Button".into();
@@ -295,7 +390,7 @@ pub fn update(
         let step = g.cell[1] + g.cell_padding[1] + g.cell_padding[3];
         for n in 0..5 {
             let t = p.traits.get(n).copied();
-            let info = t.and_then(|t| gu.as_deref().and_then(|g| g.trait_info(t)));
+            let info = t.and_then(|t| t.info(gu.as_deref()));
             // (A trait that may not change is greyed in its slot.)
             let w = row(g.cell, g.padding[1] + n as f32 * step, n, t.map(|t| (t, info.as_ref(), !p.locked.contains(&t))));
             let s = ui.spawn_under(commands, images, fonts, &w, holder);
