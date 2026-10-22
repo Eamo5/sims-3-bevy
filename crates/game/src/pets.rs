@@ -80,9 +80,10 @@ impl Pet {
     }
 }
 
-/// What a Sim can do with a pet (the Pets pack's socials): its name, its animation (both sides:
-/// `a2ac_soc_neutral_<clip>_x` the Sim, `…_y` the cat), the kinds it's for, how long it takes
-/// (minutes) and the Sim's fun and social from it (an hour).
+/// What a Sim can do with a pet (the Pets pack's socials, `SocialData_EP5`, by its names): the
+/// animation (both sides: `a2ac_soc_neutral_<clip>_x` the Sim, `…_y` the cat), the kinds it's
+/// for, how long it takes (minutes), the Sim's fun and social from it (an hour), the liking it
+/// asks (its `ALTR` minimum) and what it does for the pet's liking of them.
 pub struct PetSocial {
     pub name: &'static str,
     clip: &'static str,
@@ -90,6 +91,8 @@ pub struct PetSocial {
     pub minutes: f32,
     pub fun: f32,
     pub social: f32,
+    pub min_liking: Option<f32>,
+    pub liking: f32,
 }
 
 /// How much more a Sim gets out of time with a pet of a kind (`TraitTuning`: an Animal Lover a
@@ -110,16 +113,52 @@ pub fn pet_person(traits: &[crate::life::Trait], kind: &str) -> f32 {
 const ALL: &[&str] = &["ac", "cc", "ad", "cd", "al", "cl", "ah", "ch"];
 const GROWN: &[&str] = &["ac", "ad", "al", "ah"];
 
-pub static PET_SOCIALS: [PetSocial; 7] = [
-    PetSocial { name: "Pet", clip: "petFloor_friendly_neutral", kinds: ALL, minutes: 8.0, fun: 40.0, social: 70.0 },
-    PetSocial { name: "Let Sniff Hand", clip: "letSniffHand_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: 10.0, social: 40.0 },
-    PetSocial { name: "Praise", clip: "praise_friendly_neutral", kinds: GROWN, minutes: 4.0, fun: 15.0, social: 50.0 },
-    PetSocial { name: "Give Hug", clip: "giveLoveHug_friendly_neutral", kinds: &["ac", "ad", "al"], minutes: 5.0, fun: 30.0, social: 80.0 },
-    PetSocial { name: "Feed Treat", clip: "feedTreat_friendly_neutral", kinds: GROWN, minutes: 5.0, fun: 20.0, social: 40.0 },
-    PetSocial { name: "Rub Neck", clip: "rubNeck_friendly_neutral", kinds: &["ah"], minutes: 8.0, fun: 30.0, social: 60.0 },
-    PetSocial { name: "Scold", clip: "scold_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: -10.0, social: 10.0 },
+/// A friendly social's liking, as a Sim's friendly talk until they're friends (the OK context's
+/// step), a hug or a smoochie more; a scolding costs some.
+pub static PET_SOCIALS: [PetSocial; 9] = [
+    PetSocial { name: "Pet", clip: "petFloor_friendly_neutral", kinds: ALL, minutes: 8.0, fun: 40.0, social: 70.0, min_liking: Some(10.0), liking: 2.5 },
+    PetSocial { name: "Let Sniff Hand", clip: "letSniffHand_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: 10.0, social: 40.0, min_liking: Some(-80.0), liking: 1.67 },
+    PetSocial { name: "Praise", clip: "praise_friendly_neutral", kinds: GROWN, minutes: 4.0, fun: 15.0, social: 50.0, min_liking: None, liking: 1.67 },
+    PetSocial { name: "Hug", clip: "giveLoveHug_friendly_neutral", kinds: &["ac", "ad", "al"], minutes: 5.0, fun: 30.0, social: 80.0, min_liking: Some(20.0), liking: 3.0 },
+    PetSocial { name: "Smoochie", clip: "giveSmoochie_neutral_neutral", kinds: &["ad"], minutes: 5.0, fun: 30.0, social: 80.0, min_liking: Some(40.0), liking: 3.0 },
+    PetSocial { name: "Feed Treat", clip: "feedTreat_friendly_neutral", kinds: GROWN, minutes: 5.0, fun: 20.0, social: 40.0, min_liking: None, liking: 2.5 },
+    PetSocial { name: "Rub Neck", clip: "rubNeck_friendly_neutral", kinds: &["ah"], minutes: 8.0, fun: 30.0, social: 60.0, min_liking: Some(-10.0), liking: 2.5 },
+    PetSocial { name: "Calm Down", clip: "calmDown_neutral_neutral", kinds: &["ah"], minutes: 6.0, fun: 15.0, social: 50.0, min_liking: Some(10.0), liking: 1.67 },
+    PetSocial { name: "Scold", clip: "scold_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: -10.0, social: 10.0, min_liking: None, liking: -3.0 },
 ];
 
+/// The pet's side of a social it turns down (the pack's `genRejectNeutral`; an aggressive pet's
+/// `genRejectAgressive`).
+pub const REJECT_CLIP: &str = "genRejectNeutral_boring_neutral";
+
+/// A Sim whose social a pet turned down (both play the pack's rejection).
+#[derive(Component)]
+pub struct Rejected;
+
+/// How each Sim stands with a pet (by Sim id: -100 to 100, as a Sim's liking).
+#[derive(Component, Default, Clone, Debug)]
+pub struct PetBonds(pub std::collections::HashMap<u64, f32>);
+
+/// Where a household's pet stands with its family before anything's happened between them, and a
+/// stray with strangers.
+pub const FAMILY_LIKING: f32 = 30.0;
+
+impl PetBonds {
+    pub fn liking(&self, sim: u64, home: bool) -> f32 {
+        self.0.get(&sim).copied().unwrap_or(if home { FAMILY_LIKING } else { 0.0 })
+    }
+
+    pub fn add(&mut self, sim: u64, home: bool, v: f32) {
+        let now = self.liking(sim, home);
+        self.0.insert(sim, (now + v).clamp(-100.0, 100.0));
+    }
+}
+
+/// Whether a pet turns a Sim down: the more it dislikes them, the likelier (none while it likes
+/// them at all).
+pub fn rejects(liking: f32, roll: f32) -> bool {
+    liking < 0.0 && roll < (-liking / 100.0).min(0.9)
+}
 impl PetSocial {
     pub fn suits(&self, kind: &str) -> bool {
         self.kinds.contains(&kind)
@@ -129,11 +168,17 @@ impl PetSocial {
     /// side ('x') or the pet's ('y'), if the game has it (interned: animations are named for
     /// good).
     pub fn clip_for(&self, data: &Baked, child: bool, kind: &str, side: char) -> Option<&'static str> {
-        let want = |who: char| format!("{who}2{kind}_soc_neutral_{}_{side}", self.clip);
-        let has = |n: &str| data.0.clip_names.iter().any(|c| c.eq_ignore_ascii_case(n));
-        let name = [if child { Some(want('c')) } else { None }, Some(want('a'))].into_iter().flatten().find(|n| has(n))?;
-        Some(intern(name))
+        social_clip(data, child, kind, self.clip, side)
     }
+}
+
+/// A pet social's animation by its suite and outcome (`petFloor_friendly_neutral`, the pack's
+/// rejection), for a Sim's side or the pet's.
+pub fn social_clip(data: &Baked, child: bool, kind: &str, clip: &str, side: char) -> Option<&'static str> {
+    let want = |who: char| format!("{who}2{kind}_soc_neutral_{clip}_{side}");
+    let has = |n: &str| data.0.clip_names.iter().any(|c| c.eq_ignore_ascii_case(n));
+    let name = [if child { Some(want('c')) } else { None }, Some(want('a'))].into_iter().flatten().find(|n| has(n))?;
+    Some(intern(name))
 }
 
 /// A name kept for good (animation names are few, and asked for again and again).
@@ -166,11 +211,11 @@ pub struct PetBusy;
 fn social_partners(
     mut commands: Commands,
     data: Res<Baked>,
-    sims: Query<(&crate::interact::ActionQueue, &Transform, &crate::sim::Sim), Without<Pet>>,
+    sims: Query<(&crate::interact::ActionQueue, &Transform, &crate::sim::Sim, Has<Rejected>), Without<Pet>>,
     mut pets: Query<(Entity, &Pet, &mut Transform, &mut PetAnim, Has<PetBusy>)>,
 ) {
     let mut seen: Vec<Entity> = Vec::new();
-    for (q, stf, sim) in &sims {
+    for (q, stf, sim, rejected) in &sims {
         let Some(a) = q.0.front() else { continue };
         let crate::interact::ActionKind::PetSocial { target, social, .. } = a.kind else { continue };
         let Ok((e, pet, mut tf, mut anim, busy)) = pets.get_mut(target) else { continue };
@@ -183,7 +228,8 @@ fn social_partners(
                 let to = stf.translation.xz() - tf.translation.xz();
                 tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
                 let child = sim.age == crate::sim::Age::Child;
-                if let Some(c) = PET_SOCIALS.get(social).and_then(|s| s.clip_for(&data, child, &pet.kind, 'y')) {
+                let c = if rejected { social_clip(&data, child, &pet.kind, REJECT_CLIP, 'y') } else { PET_SOCIALS.get(social).and_then(|s| s.clip_for(&data, child, &pet.kind, 'y')) };
+                if let Some(c) = c {
                     anim.play(c.to_string());
                 }
             }
@@ -409,6 +455,9 @@ pub struct SavedPet {
     /// Its needs (`petneeds`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub motives: Option<[f32; 8]>,
+    /// How each Sim stands with it (Sim id, liking).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bonds: Vec<(u64, f32)>,
 }
 
 /// Pets to put on the home lot once it's ready (a premade household's, or a save's).
@@ -466,7 +515,7 @@ fn adopted_pets(mut commands: Commands, order: Option<Res<AdoptPetOrder>>, pets:
     let wears = if o.kind == "cl" { "cd" } else { o.kind };
     let breeds: Vec<&s3bake::pets::PetBreed> = data.breeds.iter().filter(|b| b.kind == wears).collect();
     let Some(b) = breeds.choose(&mut rng) else { return };
-    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None });
+    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new() });
 }
 
 /// The kind of pet a premade one is: its species and whether it's young.
@@ -494,7 +543,7 @@ impl SavedPet {
         let wears = if kind == "cl" && !data.breeds.iter().any(|b| b.kind == "cl") { "cd" } else { kind };
         let breeds: Vec<&s3bake::pets::PetBreed> = data.breeds.iter().filter(|b| b.kind == wears).collect();
         let b = breeds.get((p.id % breeds.len().max(1) as u64) as usize)?;
-        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None })
+        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new() })
     }
 }
 
@@ -535,7 +584,7 @@ fn spawn_household_pets(
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
         if let Some(e) = spawn_pet(&mut commands, p, breed, pet.name.clone(), Vec3::new(at.x, y, at.y), rng.random_range(0.0..6.28), &mut ctx, &mut assets, &mut bindposes) {
             let motives = pet.motives.map(crate::petneeds::PetMotives).unwrap_or_else(|| crate::petneeds::PetMotives::new(&pet.kind, &mut rng));
-            commands.entity(e).insert((HomePet { id: pet.id, path: Vec::new(), until: 0.0 }, motives));
+            commands.entity(e).insert((HomePet { id: pet.id, path: Vec::new(), until: 0.0 }, motives, PetBonds(pet.bonds.iter().copied().collect())));
             info!("pet {} the {} ({}) is home", pet.name, p.breeds[breed].kind, pet.outfit);
         }
     }
@@ -633,10 +682,13 @@ pub fn idle_clip(kind: &str, night: bool, rng: &mut impl Rng) -> String {
 }
 
 /// The household's pets, for the save.
-pub fn saved(pets: &Query<(&Pet, &HomePet, &Transform, Option<&crate::petneeds::PetMotives>)>, data: Option<&PetsBaked>) -> Vec<SavedPet> {
+pub fn saved(pets: &Query<(&Pet, &HomePet, &Transform, Option<&crate::petneeds::PetMotives>, Option<&PetBonds>)>, data: Option<&PetsBaked>) -> Vec<SavedPet> {
     let Some(data) = data else { return Vec::new() };
     pets.iter()
-        .filter_map(|(p, h, tf, m)| Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0) }))
+        .filter_map(|(p, h, tf, m, b)| {
+            let bonds = b.map(|b| b.0.iter().map(|(k, v)| (*k, *v)).collect()).unwrap_or_default();
+            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds })
+        })
         .collect()
 }
 
@@ -728,5 +780,35 @@ fn strays(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pets_warm_to_those_who_are_kind_to_them() {
+        let mut b = PetBonds::default();
+        // (The household's pet likes its family to begin with; a stranger's not at all.)
+        assert_eq!(b.liking(1, true), FAMILY_LIKING);
+        assert_eq!(b.liking(1, false), 0.0);
+        b.add(1, true, 3.0);
+        assert_eq!(b.liking(1, true), FAMILY_LIKING + 3.0);
+        b.add(2, false, -150.0);
+        assert_eq!(b.liking(2, false), -100.0);
+        // (Turned down only by a pet that dislikes them, likelier the more it does.)
+        assert!(!rejects(10.0, 0.0));
+        assert!(rejects(-50.0, 0.4));
+        assert!(!rejects(-50.0, 0.6));
+        assert!(!rejects(-100.0, 0.95), "never always");
+    }
+
+    #[test]
+    fn the_packs_socials_ask_their_liking() {
+        let hug = PET_SOCIALS.iter().find(|s| s.name == "Hug").unwrap();
+        assert_eq!(hug.min_liking, Some(20.0));
+        assert!(!hug.suits("ah"), "horses are hugged their own way");
+        assert!(PET_SOCIALS.iter().find(|s| s.name == "Scold").unwrap().liking < 0.0);
     }
 }

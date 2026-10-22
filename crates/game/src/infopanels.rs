@@ -290,6 +290,7 @@ fn relationships_panel(
     mut cam: Query<&mut crate::camera::SimsCamera>,
     (mut wheel, mut events): (MessageReader<MouseWheel>, MessageReader<crate::life::LifeEvent>),
     (mut pie, world, windows): (ResMut<crate::hud::PieMenu>, Res<crate::loading::CurrentWorld>, Query<&Window, With<bevy::window::PrimaryWindow>>),
+    pets: Query<(Entity, &crate::pets::Pet, Option<&crate::pets::PetBonds>, Has<crate::pets::HomePet>, &GlobalTransform)>,
 ) {
     let scrolled: f32 = wheel.read().map(|w| w.y.signum()).sum();
     let Ok((me, my_sim, rels, my_job)) = selected.single() else { return };
@@ -327,6 +328,13 @@ fn relationships_panel(
             continue;
         }
         let target = c.0;
+        // (A pet's card: the camera to it.)
+        if let Ok((.., ptf)) = pets.get(target) {
+            if let Ok(mut c) = cam.single_mut() {
+                c.look_at(ptf.translation());
+            }
+            continue;
+        }
         let Ok((sim, _, member, visiting, v, tf)) = people.get(target) else { continue };
         let options = card_options(me, my_sim, rels, (target, sim, member, visiting, v.get()), &world.data, &mut pie);
         if options.is_empty() {
@@ -375,17 +383,36 @@ fn relationships_panel(
             .then(b.5.cmp(&a.5))
             .then(b.1.friendship.total_cmp(&a.1.friendship))
     });
+    // The pets they know, after the Sims, as the game's panel lists them: the household's (its
+    // family), and any other they've got to know.
+    let pet_cards: Vec<(Entity, &crate::pets::Pet, f32, bool)> = pets
+        .iter()
+        .filter_map(|(e, pet, b, home, _)| {
+            let liking = b.map_or(if home { crate::pets::FAMILY_LIKING } else { 0.0 }, |b| b.liking(my_sim.id, home));
+            (home || b.is_some_and(|b| b.0.contains_key(&my_sim.id))).then_some((e, pet, liking, home))
+        })
+        .filter(|(_, _, liking, home)| match p.filter {
+            Filter::All => true,
+            Filter::Family => *home,
+            Filter::Friends => *liking >= crate::social::FRIEND_THRESHOLD,
+            Filter::Coworkers | Filter::Visitors => false,
+        })
+        .collect();
+    let total = known.len() + pet_cards.len();
     let Some(grid) = p.rel.id(REL_GRID) else { return };
     let Some(g) = ui.find("HUDRelationshipsPanel", REL_GRID).and_then(|w| w.grid) else { return };
     let columns = g.columns.max(1) as usize;
     // Sideways with the wheel over it.
     let over = hovered.get(grid).is_ok_and(|i| *i != Interaction::None);
     if over && scrolled != 0.0 {
-        let most = known.len().saturating_sub(columns);
+        let most = total.saturating_sub(columns);
         p.scroll = if scrolled > 0.0 { p.scroll.saturating_sub(1) } else { (p.scroll + 1).min(most) };
     }
-    p.scroll = p.scroll.min(known.len().saturating_sub(columns));
+    p.scroll = p.scroll.min(total.saturating_sub(columns));
     let mut shown: Vec<(Entity, i32, u8, u8)> = known.iter().skip(p.scroll).take(columns).map(|k| (k.0, k.1.friendship.round() as i32, k.1.status as u8, k.3 as u8 | (k.4 as u8) << 1 | (k.5 as u8) << 2)).collect();
+    let sims_shown = shown.len();
+    let pets_from = p.scroll.saturating_sub(known.len());
+    shown.extend(pet_cards.iter().skip(pets_from).take(columns - sims_shown).map(|c| (c.0, c.2.round() as i32, 0, c.3 as u8 | 8)));
     shown.push((me, p.scroll as i32, p.filter as u8, 0));
     if shown == p.shown {
         return;
@@ -440,6 +467,49 @@ fn relationships_panel(
                 commands.entity(win).insert(if on { Visibility::Inherited } else { Visibility::Hidden });
                 if on {
                     crate::hudpanels::tip(&mut commands, win, tip.to_string());
+                }
+            }
+        }
+    }
+    // The pets' cards: the pet's face, how it stands with them, the household's own marked so.
+    for (k, (e, pet, liking, home)) in pet_cards.iter().skip(pets_from).take(columns - sims_shown).enumerate() {
+        let n = sims_shown + k;
+        let x = g.padding[0] + n as f32 * step + g.cell_padding[0];
+        let mut w = template.clone();
+        let (cw, ch) = (w.area[2] - w.area[0], w.area[3] - w.area[1]);
+        w.area = [x, g.padding[1] + g.cell_padding[1], x + cw, g.padding[1] + g.cell_padding[1] + ch];
+        let c = ui.spawn_under(&mut commands, &mut images, &mut fonts, &w, h);
+        let rel = crate::social::Relationship { friendship: *liking, ..default() };
+        let label = format!("{} · {}", crate::pets::kind_name(&pet.kind), rel.friendship_label());
+        if let Some(t) = c.id(ENTRY_THUMB) {
+            commands.entity(t).despawn_children();
+            let pic = portraits.portrait(&mut images, *e);
+            commands.entity(t).with_children(|c| {
+                c.spawn((ImageNode::new(pic), crate::portraits::PortraitOf(*e), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
+            });
+            commands.entity(t).remove::<Pickable>().insert((Card(*e), Interaction::default(), crate::hud::BlocksWorld, crate::icons::Tooltip(format!("{}\n{label}", pet.name))));
+        }
+        if let Some(t) = c.text(ENTRY_TEXT) {
+            commands.entity(t).insert(Text::new(label.clone()));
+        }
+        if let Some(b) = c.id(ENTRY_BAR) {
+            let v = (liking.clamp(-100.0, 100.0) + 100.0) / 200.0;
+            commands.entity(b).queue(move |mut e: EntityWorldMut| {
+                if let Some(mut f) = e.get_mut::<UiFillBar>() {
+                    f.value = v;
+                }
+            });
+        }
+        if let (Some(win), Some((icon, _))) = (c.id(ENTRY_LTR), ui.image(&mut images, s3pkg::fnv64(ltr_icon(&rel)))) {
+            crate::hudpanels::picture(&mut commands, win, icon, Color::WHITE);
+            commands.entity(win).insert(Visibility::Inherited);
+            crate::hudpanels::tip(&mut commands, win, rel.friendship_label().to_string());
+        }
+        for (id, on) in [(ENTRY_RELATIVE, *home), (ENTRY_COWORKER, false), (ENTRY_VISITOR, false)] {
+            if let Some(win) = c.id(id) {
+                commands.entity(win).insert(if on { Visibility::Inherited } else { Visibility::Hidden });
+                if on {
+                    crate::hudpanels::tip(&mut commands, win, "Household Pet".to_string());
                 }
             }
         }

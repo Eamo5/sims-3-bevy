@@ -1270,7 +1270,7 @@ fn world_click(
         Query<&crate::upgrades::Upgrades>,
         Res<crate::family::Genealogy>,
         Query<&crate::doorbell::AtTheDoor>,
-        Query<(&crate::pets::Pet, &GlobalTransform)>,
+        Query<(&crate::pets::Pet, &GlobalTransform, Option<&crate::pets::PetBonds>, Has<crate::pets::HomePet>)>,
         Query<(), With<crate::little::Labour>>,
         Query<&crate::tvchannels::TvLevel>,
         Query<(&Sim, Option<&crate::classes::ClassesTaken>)>,
@@ -1339,7 +1339,7 @@ fn world_click(
         return;
     }
     // A pet: what can be done with it.
-    if let Some((t, (pet, ptf))) = target.and_then(|t| pets_q.get(t).ok().map(|p| (t, p)))
+    if let Some((t, (pet, ptf, bonds, home))) = target.and_then(|t| pets_q.get(t).ok().map(|p| (t, p)))
         && !actor_sim.age.is_little()
     {
         let kind: &'static str = ["ac", "cc", "ad", "cd", "al", "cl", "ah", "ch"].into_iter().find(|k| *k == pet.kind).unwrap_or("ac");
@@ -1348,6 +1348,8 @@ fn world_click(
             .iter()
             .enumerate()
             .filter(|(_, s)| s.suits(kind))
+            // (What asks for more liking than it has for them isn't offered: the pack's `ALTR`.)
+            .filter(|(_, s)| s.min_liking.is_none_or(|m| bonds.map_or(if home { crate::pets::FAMILY_LIKING } else { 0.0 }, |b| b.liking(actor_sim.id, home)) >= m))
             .map(|(i, s)| (s.name.to_string(), ActionKind::PetSocial { target: t, social: i, at, kind }))
             .collect();
         pie.submenus.clear();

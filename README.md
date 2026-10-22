@@ -944,6 +944,13 @@ installation is unreachable.
   portrait studio, a face each, ringed in how they feel), their name and the pack's names for
   what they need on hover ("Muffin (Cat) · Hungry, Itching To Scratch"), a click taking the
   camera to them; each skewer's rod is as long as its faces, as the game's `PopulateSkewer`.
+  Pets take to Sims, as the pack's socials (`SocialData_EP5`) have it: each pet has its liking
+  for each Sim (its family 30 to begin with, a stranger nothing), warmed by petting, praise, a
+  hug, a smoochie, a treat, a horse's neck rubbed or calmed down, cooled by a scolding, more
+  for an Animal Lover or a Cat, Dog or Horse Person; the pack's names and the liking each asks
+  (a Hug from 20, a Smoochie from 40, Pet from 10), and a pet that dislikes someone turns them
+  down with the pack's rejection clips. Pets are on the Relationships panel after the Sims they
+  know, with their liking, its state and the household's own marked; kept in saves.
   `PET_NEEDS=hungry|bladder|tired` and `PET_BOWL=1` (tests).
 - **Supernaturals**, from the Supernatural pack (and Late Night's vampires): vampires,
   werewolves, witches, fairies and zombies, chosen in Create a Sim's Life State row and kept in

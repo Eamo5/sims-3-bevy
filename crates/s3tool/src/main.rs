@@ -961,6 +961,26 @@ fn main() {
         println!("{hits:X?}");
         return;
     }
+    if args[1] == "byname" {
+        // byname <root> <name> [out]: resources (any type, any pack, and the gameplay data)
+        // whose instance is the name's FNV-64 (as the game keys its XML tables); with an out
+        // file, the first's bytes written there.
+        let mut set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        for extra in ["Game/Bin/Gameplay/GameplayData.package", "Game/Bin/gameplay.package"] {
+            if let Ok(p) = Package::open(&std::path::Path::new(&args[2]).join(extra)) {
+                set.add(p);
+            }
+        }
+        let want = [s3pkg::fnv64(&args[3]), s3pkg::fnv64(&args[3].to_ascii_lowercase())];
+        let keys: Vec<s3pkg::ResourceKey> = set.keys().filter(|k| want.contains(&k.i)).copied().collect();
+        for k in &keys {
+            println!("{k} {} bytes", set.read(k).map_or(0, |d| d.len()));
+        }
+        if let (Some(out), Some(k)) = (args.get(4), keys.first()) {
+            std::fs::write(out, set.read(k).unwrap_or_default()).unwrap();
+        }
+        return;
+    }
     if args[1] == "itun" {
         // itun <root> <filter>: the interaction tunings (ITUN) of every pack whose object or
         // interaction has the filter in it, with all their need changes (any commodity).

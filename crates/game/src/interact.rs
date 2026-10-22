@@ -4330,10 +4330,29 @@ pub(crate) fn run_actions(
                                 tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
                                 anim.pose = Pose::Talk;
                                 let s = &crate::pets::PET_SOCIALS[*social];
-                                match baked.as_deref().and_then(|b| s.clip_for(b, sim.age == Age::Child, kind, 'x')) {
+                                let child = sim.age == Age::Child;
+                                match baked.as_deref().and_then(|b| s.clip_for(b, child, kind, 'x')) {
                                     Some(c) => {
-                                        let clips: &'static [&'static str] = Box::leak(Box::new([c]));
-                                        commands.entity(me).insert(crate::anim::ActionClip::new(None, clips));
+                                        // (Turned down by a pet that dislikes them: the pack's
+                                        // rejection, both sides.)
+                                        let reject = baked.as_deref().and_then(|b| crate::pets::social_clip(b, child, kind, crate::pets::REJECT_CLIP, 'x'));
+                                        let (target, id, roll) = (match &action.kind {
+                                            ActionKind::PetSocial { target, .. } => *target,
+                                            _ => Entity::PLACEHOLDER,
+                                        }, sim.id, rand::random::<f32>());
+                                        commands.queue(move |w: &mut World| {
+                                            let home = w.get::<crate::pets::HomePet>(target).is_some();
+                                            let liking = w.get::<crate::pets::PetBonds>(target).map_or(if home { crate::pets::FAMILY_LIKING } else { 0.0 }, |b| b.liking(id, home));
+                                            let turned_down = reject.filter(|_| crate::pets::rejects(liking, roll));
+                                            let clip = turned_down.unwrap_or(c);
+                                            let clips: &'static [&'static str] = Box::leak(Box::new([clip]));
+                                            if let Ok(mut e) = w.get_entity_mut(me) {
+                                                e.insert(crate::anim::ActionClip::new(None, clips));
+                                                if turned_down.is_some() {
+                                                    e.insert(crate::pets::Rejected);
+                                                }
+                                            }
+                                        });
                                     }
                                     None => finished = true,
                                 }
@@ -5546,6 +5565,20 @@ pub(crate) fn run_actions(
                             motives.add(SOCIAL, s.social * keen * dt / 60.0);
                             if elapsed >= s.minutes {
                                 finished = true;
+                                // (How the pet takes to them for it: the social's liking, warmer for
+                                // pet people; turned down, a little less.)
+                                let (id, liking) = (sim.id, s.liking * keen);
+                                if let ActionKind::PetSocial { target, .. } = action.kind {
+                                    commands.queue(move |w: &mut World| {
+                                        let rejected = w.get_entity_mut(me).ok().is_some_and(|mut e| e.take::<crate::pets::Rejected>().is_some());
+                                        let home = w.get::<crate::pets::HomePet>(target).is_some();
+                                        if let Ok(mut e) = w.get_entity_mut(target) {
+                                            let mut b = e.take::<crate::pets::PetBonds>().unwrap_or_default();
+                                            b.add(id, home, if rejected { -1.0 } else { liking });
+                                            e.insert(b);
+                                        }
+                                    });
+                                }
                             }
                         }
                         ActionKind::Outdoor { what, .. } => {
