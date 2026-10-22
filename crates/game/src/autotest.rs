@@ -1629,7 +1629,7 @@ fn auto_terrain(
             continue;
         }
         let at = b.world(n[0], n[1], 0.0);
-        strokes.pending.push(crate::terrain_paint::Stroke { x: at.x, z: at.z, radius: n[2], layer: n[3] as u8 });
+        strokes.pending.push(crate::terrain_paint::Stroke { x: at.x, z: at.z, radius: n[2], layer: n[3] as u8, square: false, softness: crate::terrain_paint::SOFTNESS });
         if i == 0
             && let Ok(mut c) = cam.single_mut()
         {

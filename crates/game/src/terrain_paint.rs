@@ -47,13 +47,42 @@ pub struct PaintMap {
 #[derive(Resource, Default)]
 pub struct Swatches(pub Vec<Handle<Image>>);
 
-/// One dab of the brush: where, how wide, and which layer (or `ERASE`).
+/// One dab of the brush: where, how wide, and which layer (or `ERASE`); a square brush's, and
+/// how hard its edge is (the game's softness slider: 0 hard to 1 soft).
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Stroke {
     pub x: f32,
     pub z: f32,
     pub radius: f32,
     pub layer: u8,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub square: bool,
+    #[serde(default = "default_softness", skip_serializing_if = "is_default_softness")]
+    pub softness: f32,
+}
+
+/// The brush's softness to begin with (as strokes were before the slider).
+pub const SOFTNESS: f32 = 0.8;
+
+fn default_softness() -> f32 {
+    SOFTNESS
+}
+
+fn is_default_softness(s: &f32) -> bool {
+    *s == SOFTNESS
+}
+
+/// How far a point is from a brush's middle, as a part of its reach (a square brush's by its
+/// sides).
+pub fn brush_reach(d: Vec2, r: f32, square: bool) -> f32 {
+    if square { d.x.abs().max(d.y.abs()) / r } else { d.length() / r }
+}
+
+/// How strongly a brush works a point (its reach, 0 to 1): firm in the middle, falling off at
+/// the edge, the more gradually the softer it is.
+pub fn brush_weight(reach: f32, softness: f32) -> f32 {
+    let gain = 4.0 - softness.clamp(0.0, 1.0) * 3.0;
+    ((1.0 - reach * reach) * gain).clamp(0.0, 1.0)
 }
 
 /// A held brush is one history entry, regardless of how many dabs or height ticks it makes.
@@ -162,11 +191,11 @@ pub fn apply(data: &mut [u8], size: u32, world_size: f32, s: &Stroke) {
     let code = (s.layer.min(15) as f32 / 15.0 * 255.0).round() as u8;
     for tz in z0..=z1 {
         for tx in x0..=x1 {
-            let d = Vec2::new((tx as f32 + 0.5) * cell - s.x, (tz as f32 + 0.5) * cell - s.z).length();
-            if d >= r {
+            let reach = brush_reach(Vec2::new((tx as f32 + 0.5) * cell - s.x, (tz as f32 + 0.5) * cell - s.z), r, s.square);
+            if reach >= 1.0 {
                 continue;
             }
-            let a = ((1.0 - (d / r).powi(2)) * 1.6).clamp(0.0, 1.0);
+            let a = brush_weight(reach, s.softness);
             let i = ((tz * n + tx) * 2) as usize;
             let Some(px) = data.get_mut(i..i + 2) else { continue };
             let old = px[1] as f32 / 255.0;
@@ -219,7 +248,7 @@ fn paint_tool(
     } else {
         crate::menu::PLUMBOB_GREEN
     };
-    gizmos.circle(Isometry3d::new(p + Vec3::Y * 0.06, Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)), r, colour);
+    brush_outline(&mut gizmos, p, r, buy.brush_square, colour);
     if !mouse.pressed(MouseButton::Left) || over_ui.0 || !on_lot {
         strokes.last = None;
         return;
@@ -234,7 +263,17 @@ fn paint_tool(
     strokes.last = Some(at);
     let layer = buy.terrain;
     history.paint.get_or_insert_with(|| strokes.saved());
-    strokes.pending.push(Stroke { x: at.x, z: at.y, radius: r, layer });
+    strokes.pending.push(Stroke { x: at.x, z: at.y, radius: r, layer, square: buy.brush_square, softness: buy.softness() });
+}
+
+/// The brush's outline on the ground: a ring, or a square (along the world's axes).
+fn brush_outline(gizmos: &mut Gizmos, p: Vec3, r: f32, square: bool, colour: Color) {
+    let at = Isometry3d::new(p + Vec3::Y * 0.06, Quat::from_rotation_x(std::f32::consts::FRAC_PI_2));
+    if square {
+        gizmos.rect(at, Vec2::splat(r * 2.0), colour);
+    } else {
+        gizmos.circle(at, r, colour);
+    }
 }
 
 /// Strokes go onto the map a few times a second (each change sends the whole map to the GPU).
@@ -261,16 +300,19 @@ pub enum Sculpt {
     Lower,
     Flatten,
     Smooth,
+    /// The whole lot brought back to its own level at a click (the game's Flatten Lot).
+    FlattenLot,
 }
 
 impl Sculpt {
-    pub const ALL: [Sculpt; 4] = [Sculpt::Raise, Sculpt::Lower, Sculpt::Flatten, Sculpt::Smooth];
+    pub const ALL: [Sculpt; 5] = [Sculpt::Raise, Sculpt::Lower, Sculpt::Flatten, Sculpt::Smooth, Sculpt::FlattenLot];
     pub fn label(self) -> &'static str {
         match self {
             Sculpt::Raise => "Raise",
             Sculpt::Lower => "Lower",
             Sculpt::Flatten => "Flatten",
             Sculpt::Smooth => "Smooth",
+            Sculpt::FlattenLot => "Flatten Lot",
         }
     }
 }
@@ -356,11 +398,7 @@ fn sculpt_tool(
     let r = if buy.brush > 0.0 { buy.brush } else { BRUSHES[1].0 } + 0.5;
     let l = b.local(p);
     let on_lot = l.x >= 1.0 && l.y >= 1.0 && l.x <= b.data.width as f32 - 1.0 && l.y <= b.data.depth as f32 - 1.0;
-    gizmos.circle(
-        Isometry3d::new(p + Vec3::Y * 0.06, Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-        r,
-        if on_lot { Color::srgb(0.45, 0.75, 1.0) } else { Color::srgb(0.9, 0.3, 0.25) },
-    );
+    brush_outline(&mut gizmos, p, r, buy.brush_square, if on_lot { Color::srgb(0.45, 0.75, 1.0) } else { Color::srgb(0.9, 0.3, 0.25) });
     if held_at.is_none() && (!mouse.pressed(MouseButton::Left) || over_ui.0) || !on_lot {
         sculpted.flatten_to = None;
         return;
@@ -370,7 +408,11 @@ fn sculpt_tool(
         return;
     }
     sculpted.last = now;
-    let tool = Sculpt::ALL[(buy.sculpt as usize).min(3)];
+    let tool = Sculpt::ALL[(buy.sculpt as usize).min(Sculpt::ALL.len() - 1)];
+    // (Flatten Lot: once a click, over all the lot.)
+    if tool == Sculpt::FlattenLot && held_at.is_none() && !mouse.just_pressed(MouseButton::Left) {
+        return;
+    }
     let target = *sculpted.flatten_to.get_or_insert(world.data.heightmap.sample(p.x, p.z));
     // What the ground under the house, the pool and the things on the lot must keep.
     let built: std::collections::HashSet<(i32, i32)> = b.data.floors.iter().chain(&b.data.pool).map(|f| (f.x as i32, f.z as i32)).collect();
@@ -387,21 +429,29 @@ fn sculpt_tool(
     };
     let data = std::sync::Arc::make_mut(&mut world.data);
     let hm = &mut data.heightmap;
-    let (x0, x1) = ((p.x - r).floor().max(0.0) as i64, ((p.x + r).ceil() as i64).min(hm.width as i64 - 1));
-    let (z0, z1) = ((p.z - r).floor().max(0.0) as i64, ((p.z + r).ceil() as i64).min(hm.height as i64 - 1));
+    let (mut x0, mut x1) = ((p.x - r).floor().max(0.0) as i64, ((p.x + r).ceil() as i64).min(hm.width as i64 - 1));
+    let (mut z0, mut z1) = ((p.z - r).floor().max(0.0) as i64, ((p.z + r).ceil() as i64).min(hm.height as i64 - 1));
+    if tool == Sculpt::FlattenLot {
+        let corners = [(0.0, 0.0), (w, 0.0), (0.0, d), (w, d)].map(|(x, z)| b.world(x, z, 0.0));
+        x0 = corners.iter().map(|c| c.x.floor() as i64).min().unwrap_or(0).max(0);
+        x1 = corners.iter().map(|c| c.x.ceil() as i64).max().unwrap_or(0).min(hm.width as i64 - 1);
+        z0 = corners.iter().map(|c| c.z.floor() as i64).min().unwrap_or(0).max(0);
+        z1 = corners.iter().map(|c| c.z.ceil() as i64).max().unwrap_or(0).min(hm.height as i64 - 1);
+    }
     let mut changes = Vec::new();
     for z in z0..=z1 {
         for x in x0..=x1 {
-            let dist = Vec2::new(x as f32 - p.x, z as f32 - p.z).length();
-            if dist >= r || keep(x as f32, z as f32) {
+            let reach = if tool == Sculpt::FlattenLot { 0.0 } else { brush_reach(Vec2::new(x as f32 - p.x, z as f32 - p.z), r, buy.brush_square) };
+            if reach >= 1.0 || keep(x as f32, z as f32) {
                 continue;
             }
-            let f = 1.0 - (dist / r).powi(2);
+            let f = brush_weight(reach, buy.softness());
             let h = hm.at(x, z);
             let nh = match tool {
                 Sculpt::Raise => h + 0.06 * f,
                 Sculpt::Lower => h - 0.06 * f,
                 Sculpt::Flatten => h + (target - h) * 0.4 * f,
+                Sculpt::FlattenLot => ground,
                 Sculpt::Smooth => {
                     let avg = (hm.at(x - 1, z) + hm.at(x + 1, z) + hm.at(x, z - 1) + hm.at(x, z + 1)) * 0.25;
                     h + (avg - h) * 0.5 * f
@@ -471,7 +521,7 @@ mod tests {
 
     #[test]
     fn terrain_gesture_groups_dabs_and_retains_original_height_and_save_state() {
-        let original = Stroke { x: 4.0, z: 5.0, radius: 2.0, layer: 1 };
+        let original = Stroke { x: 4.0, z: 5.0, radius: 2.0, layer: 1, square: false, softness: SOFTNESS };
         let dab = Stroke { x: 6.0, ..original };
         let strokes = Strokes { all: vec![original, dab], pending: vec![Stroke { x: 7.0, ..dab }], ..default() };
         let mut sculpted = Sculpted::default();
@@ -508,12 +558,12 @@ mod tests {
     fn paint_and_erase() {
         let size = 64;
         let mut data = vec![0u8; size * size * 2];
-        apply(&mut data, size as u32, 64.0, &Stroke { x: 32.0, z: 32.0, radius: 3.0, layer: 5 });
+        apply(&mut data, size as u32, 64.0, &Stroke { x: 32.0, z: 32.0, radius: 3.0, layer: 5, square: false, softness: SOFTNESS });
         let at = |x: usize, z: usize| (data[(z * size + x) * 2], data[(z * size + x) * 2 + 1]);
         assert_eq!(at(32, 32).0, 85);
         assert!(at(32, 32).1 > 200);
         assert_eq!(at(40, 32).1, 0);
-        apply(&mut data, size as u32, 64.0, &Stroke { x: 32.0, z: 32.0, radius: 3.0, layer: ERASE });
+        apply(&mut data, size as u32, 64.0, &Stroke { x: 32.0, z: 32.0, radius: 3.0, layer: ERASE, square: false, softness: SOFTNESS });
         assert!(data[(32 * size + 32) * 2 + 1] < 30);
     }
 }

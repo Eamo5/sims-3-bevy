@@ -1562,6 +1562,13 @@ installation is unreachable.
   planted from their species' billboards, bought, moved and sold like any object. The
   diagram's gate opens the gates alone (single and double), each set into a fence as a door
   into a wall, in the fence runs it replaces (on the ground or a deck), Sims walking through it.
+  The diagram's terrain paint and terrain sculpt open the game's own terrain panels: Paint and
+  Erase, the brush's six shapes (small, medium and large circles and squares, outlined on the
+  ground as they are) and its softness slider (how firmly the brush works to its edge), and the
+  world's paints in the build catalogue's grid (two rows, the wheel or its bar to scroll);
+  Raise, Lower, Level, Soften and Flatten Lot (the whole lot back to its own level at a click,
+  clear of the house and what stands on it), with the same brushes. `BUILD_PRESS=<diagram
+  button, hex>` (tests).
 - **Interface**: the game's own icons and words — moodlets (name, description, time left),
   traits (Create-a-Sim and the Sim's panel) and wishes — read from the game's tuning tables
   (`GameplayData.package`) and string tables, with tooltips on hover. Sims' portraits are

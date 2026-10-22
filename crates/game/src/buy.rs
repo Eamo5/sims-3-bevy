@@ -128,6 +128,9 @@ pub struct BuyMode {
     pub terrain: u8,
     pub sculpt: u8,
     pub brush: f32,
+    /// A square brush (the game's square shapes), and its softness (the slider; none: as it was).
+    pub brush_square: bool,
+    pub brush_softness: Option<f32>,
     /// Things being moved that were put down unplaced (Buy mode closed with them in hand), to
     /// go back where they came from.
     returning: Vec<Placing>,
@@ -359,6 +362,11 @@ impl BuyMode {
     }
 
     /// Opens buy/build mode on a category (the paint tabs follow the buy categories).
+    /// The terrain brush's softness (0 hard, 1 soft).
+    pub fn softness(&self) -> f32 {
+        self.brush_softness.unwrap_or(crate::terrain_paint::SOFTNESS)
+    }
+
     pub fn show(&mut self, category: usize) {
         self.active = true;
         self.category = category;
@@ -957,6 +965,7 @@ fn buy_panel(
     let game_look = buy.game_look && buy.active && (buy.category < WALLPAPER_TAB || editing_style);
     if crate::buildhud::native_panel(&buy) { return; }
     if crate::buildobjects::showing(&buy) && !editing_style { return; }
+    if crate::buildterrain::showing(&buy) { return; }
     if game_look && !(buy.styling && buy.placing.is_some()) {
         return;
     }

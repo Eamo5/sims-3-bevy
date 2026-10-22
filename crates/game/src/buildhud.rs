@@ -48,7 +48,7 @@ const LIGHT: u32 = 0x2e8;
 const GRID: u32 = 0x2e9;
 
 #[derive(Component, Clone, Copy)]
-enum Action { Home, Tool(BuildTool), Category(usize), Objects(crate::buildobjects::ObjTab), HalfWalls, Hand, Lighting, Grid, Undo, Redo }
+enum Action { Home, Tool(BuildTool), Category(usize), Objects(crate::buildobjects::ObjTab), HalfWalls, Hand, Lighting, Grid, Undo, Redo, Terrain(bool) }
 
 fn home_action(id: u32) -> Option<Action> {
     use crate::buildobjects::ObjTab;
@@ -77,7 +77,9 @@ fn home_action(id: u32) -> Option<Action> {
         0x1018 => Action::Tool(BuildTool::Fountain),
         0x1004 => Action::Tool(BuildTool::Foundation),
         0x1016 => Action::Tool(BuildTool::Basement),
-        0x100b | 0x1011 => Action::Category(TERRAIN_TAB),
+        // (Terrain paint and sculpt: the game's own panels, uildterrain.)
+        0x100b => Action::Terrain(false),
+        0x1011 => Action::Terrain(true),
         _ => return None,
     })
 }
@@ -170,22 +172,30 @@ fn spawn(
 }
 
 #[derive(Component)]
-struct Unavailable;
+pub(crate) struct Unavailable;
 
 fn controls(
     mut commands: Commands, mut buy: ResMut<BuyMode>, clock: Res<crate::clock::GameClock>,
     actions: Query<(&Interaction, &Action), Changed<Interaction>>,
     mut history: ResMut<crate::buyhistory::BuyHistory>,
     mut objects: Option<ResMut<crate::buildobjects::BuildObjects>>,
+    mut pressed_test: Local<bool>,
 ) {
     if !buy.active || buy.category < WALLPAPER_TAB { return; }
-    for (interaction, action) in &actions {
-        if *interaction != Interaction::Pressed { continue; }
-        match *action {
+    // (BUILD_PRESS=<diagram button id, hex> (tests): that button pressed on entering Build mode.)
+    let test = std::env::var("BUILD_PRESS").ok().and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok()).and_then(home_action).filter(|_| !*pressed_test);
+    *pressed_test |= test.is_some();
+    for action in actions.iter().filter(|(i, _)| **i == Interaction::Pressed).map(|(_, a)| *a).chain(test) {
+        match action {
             Action::Home => { buy.drop_tools(&mut commands); buy.show(BUILD_TAB); }
             Action::Tool(tool) => { buy.drop_tools(&mut commands); buy.show(BUILD_TAB); buy.tool = Some(tool); }
             Action::Category(category) => { buy.drop_tools(&mut commands); buy.show(category); }
             Action::HalfWalls => { buy.drop_tools(&mut commands); buy.show(FENCES_TAB); buy.half_walls = true; }
+            Action::Terrain(sculpt) => {
+                buy.drop_tools(&mut commands);
+                buy.show(TERRAIN_TAB);
+                buy.tool = Some(if sculpt { BuildTool::Sculpt } else { BuildTool::Terrain });
+            }
             Action::Objects(tab) => {
                 buy.drop_tools(&mut commands);
                 match objects.as_deref_mut() {
@@ -206,7 +216,7 @@ fn controls(
     }
 }
 
-fn show(
+pub(crate) fn show(
     hud: Res<BuildHud>, live: Option<Res<LiveHud>>, buy: Res<BuyMode>, clock: Res<crate::clock::GameClock>,
     mut visibility: Query<&mut Visibility>, mut buttons: Query<(&mut UiButton, Has<Unavailable>)>,
     history: Res<crate::buyhistory::BuyHistory>,
@@ -223,7 +233,7 @@ fn show(
     let pool = buy.category == BUILD_TAB && buy.tool == Some(BuildTool::Pool);
     let foundation = buy.category == BUILD_TAB && buy.tool == Some(BuildTool::Foundation);
     let basement = buy.category == BUILD_TAB && buy.tool == Some(BuildTool::Basement);
-    let covers = crate::buildcatalog::showing(&buy) || crate::buildobjects::showing(&buy);
+    let covers = crate::buildcatalog::showing(&buy) || crate::buildobjects::showing(&buy) || crate::buildterrain::showing(&buy);
     set_visible(&mut visibility, s.id(HOME), !wall && !pool && !foundation && !basement && !covers);
     set_visible(&mut visibility, s.id(MIDDLE), wall || pool || foundation || basement || covers);
     set_visible(&mut visibility, s.id(BACK), wall || pool || foundation || basement || covers);
