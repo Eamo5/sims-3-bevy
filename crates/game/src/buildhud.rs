@@ -233,7 +233,7 @@ pub(crate) fn show(
     let pool = buy.category == BUILD_TAB && buy.tool == Some(BuildTool::Pool);
     let foundation = buy.category == BUILD_TAB && buy.tool == Some(BuildTool::Foundation);
     let basement = buy.category == BUILD_TAB && buy.tool == Some(BuildTool::Basement);
-    let covers = crate::buildcatalog::showing(&buy) || crate::buildobjects::showing(&buy) || crate::buildterrain::showing(&buy);
+    let covers = crate::buildcatalog::showing(&buy) || crate::buildobjects::showing(&buy) || crate::buildterrain::showing(&buy) || crate::buildcats::showing(&buy);
     set_visible(&mut visibility, s.id(HOME), !wall && !pool && !foundation && !basement && !covers);
     set_visible(&mut visibility, s.id(MIDDLE), wall || pool || foundation || basement || covers);
     set_visible(&mut visibility, s.id(BACK), wall || pool || foundation || basement || covers);

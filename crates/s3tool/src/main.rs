@@ -988,6 +988,53 @@ fn main() {
         }
         return;
     }
+    if args[1] == "fencethumbs" {
+        // fencethumbs: how many of the baked fences and roofs have a catalogue thumbnail.
+        let root = s3bake::default_root();
+        let icons = s3bake::Icons::open(&root).expect("icons.pack");
+        let data = s3bake::load_gamedata(&root).expect("gamedata");
+        let have = data.fences.iter().filter(|f| icons.png(&s3bake::gamedata::thumb_name(f.key.2)).is_some()).count();
+        println!("fences: {have} of {} pictured", data.fences.len());
+        for f in data.fences.iter().take(3) {
+            println!("  {} {:08X}:{:08X}:{:016X} straight {:?}", f.name, f.key.0, f.key.1, f.key.2, f.straight);
+        }
+        // The thumbnails of each type whose instances are some fence's (CFEN) or its parts'.
+        if let Some(p) = args.get(2).and_then(|p| Package::open(p).ok()) {
+            let mut hits = BTreeMap::<u32, (usize, usize)>::new();
+            let fences: std::collections::HashSet<u64> = data.fences.iter().map(|f| f.key.2).collect();
+            let parts: std::collections::HashSet<u64> = data.fences.iter().flat_map(|f| [f.straight, f.diagonal, f.post]).flatten().map(|k| k.2).collect();
+            let roofs: std::collections::HashSet<u64> = data.roofs.iter().map(|r| r.texture.2).collect();
+            for e in &p.entries {
+                let h = hits.entry(e.key.t).or_default();
+                if fences.contains(&e.key.i) || roofs.contains(&e.key.i) {
+                    h.0 += 1;
+                }
+                if parts.contains(&e.key.i) {
+                    h.1 += 1;
+                }
+            }
+            println!("{hits:?}");
+            let mut thumbs: Vec<u64> = p.entries.iter().filter(|e| e.key.t == 0x2653_E3CA).map(|e| e.key.i).collect();
+            for d in std::fs::read_dir("S:/Games/Sims 3/The Sims 3").into_iter().flatten().flatten() {
+                if let Ok(q) = Package::open(d.path().join("Thumbnails").join("AllThumbnails.package")) {
+                    thumbs.extend(q.entries.iter().filter(|e| e.key.t == 0x2653_E3CA).map(|e| e.key.i));
+                }
+            }
+            println!("{} fence thumbnails in all", thumbs.len());
+            let low = |v: u64| v & 0x7FFF_FFFF_FFFF_FFFF;
+            let lo32 = |v: u64| v as u32;
+            for f in &data.fences {
+                let exact = thumbs.contains(&f.key.2);
+                let masked = thumbs.iter().any(|t| low(*t) == low(f.key.2));
+                let lo = thumbs.iter().any(|t| lo32(*t) == lo32(f.key.2));
+                if exact || masked || lo {
+                    println!("  {} exact {exact} masked {masked} low32 {lo}", f.name);
+                }
+            }
+            println!("first thumbs: {:016X?}", &thumbs[..4.min(thumbs.len())]);
+        }
+        return;
+    }
     if args[1] == "petthumbs" {
         // petthumbs <CasThumbnails.package>: which baked breeds (pet outfits) have a thumbnail
         // there, by type and group.

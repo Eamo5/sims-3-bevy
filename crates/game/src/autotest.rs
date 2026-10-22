@@ -3617,6 +3617,11 @@ fn auto_build(
                 info!("build test: {}", style.label());
                 apply(&mut commands, &mut assets, b, &mut ctx, vec![crate::building::PaintOp::RoofStyle { style }]);
             }
+            // (ROOF_PITCH=<rise per run>: the roofs that steep.)
+            if let Some(pitch) = std::env::var("ROOF_PITCH").ok().and_then(|v| v.parse::<f32>().ok()) {
+                info!("build test: roof pitch {pitch}");
+                apply(&mut commands, &mut assets, b, &mut ctx, vec![crate::building::PaintOp::RoofPitch { pitch }]);
+            }
             *stage = 1;
         }
         1 if time.elapsed_secs() - t0 > 4.0 => {

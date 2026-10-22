@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 156;
+pub const GAMEDATA_VERSION: u32 = 157;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -23,6 +23,12 @@ const T_DDS: u32 = 0x00B2D882;
 /// Buy-mode catalogue thumbnails, 128 px PNG (`Thumbnails/AllThumbnails.package`): instance =
 /// the object's OBJD instance, group = its colour variant.
 const T_THUMB_LARGE: u32 = 0x0580A2B6;
+/// Build mode's own catalogue thumbnails (the large ones), by the item's instance: fences and
+/// half walls (by their CFEN), staircases, railings and terrain paints. Filed as objects' are.
+const T_THUMB_FENCE: u32 = 0x2653_E3CA;
+const T_THUMB_STAIRS: u32 = 0x5DE9_DBA2;
+const T_THUMB_RAILING: u32 = 0x2D42_84F2;
+const T_THUMB_TERRAIN: u32 = 0x05B1_B526;
 
 /// Create-a-Sim part thumbnails, 128 px PNG (`Thumbnails/CasThumbnails.package`): instance =
 /// the CASP instance, group = its colour preset.
@@ -4397,6 +4403,10 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     // (Objects, then Create-a-Sim parts.)
     for (file, kind, name) in [
         ("AllThumbnails.package", T_THUMB_LARGE, thumb_name as fn(u64) -> String),
+        ("AllThumbnails.package", T_THUMB_FENCE, thumb_name),
+        ("AllThumbnails.package", T_THUMB_STAIRS, thumb_name),
+        ("AllThumbnails.package", T_THUMB_RAILING, thumb_name),
+        ("AllThumbnails.package", T_THUMB_TERRAIN, thumb_name),
         ("CasThumbnails.package", T_CAS_THUMB, cas_thumb_name as fn(u64) -> String),
     ] {
         let mut seen: BTreeSet<u64> = BTreeSet::new();

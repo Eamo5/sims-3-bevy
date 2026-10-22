@@ -118,6 +118,9 @@ pub struct BuyMode {
     pub roof_pick: Option<usize>,
     /// A roof shape chosen on the Roofs tab, to put on the household's roofs.
     pub roof_style_pick: Option<crate::building::RoofStyle>,
+    /// A roof pitch set on the Roofs panel's slider, and auto-roofing turned on or off.
+    pub roof_pitch_pick: Option<f32>,
+    pub auto_roof_pick: Option<bool>,
     /// The fence the fence tool puts up (index into the game data's fences).
     pub fence: Option<usize>,
     /// The fences tab showing the half walls instead (build mode's Half Walls tool).
@@ -965,7 +968,7 @@ fn buy_panel(
     let game_look = buy.game_look && buy.active && (buy.category < WALLPAPER_TAB || editing_style);
     if crate::buildhud::native_panel(&buy) { return; }
     if crate::buildobjects::showing(&buy) && !editing_style { return; }
-    if crate::buildterrain::showing(&buy) { return; }
+    if crate::buildterrain::showing(&buy) || crate::buildcats::showing(&buy) { return; }
     if game_look && !(buy.styling && buy.placing.is_some()) {
         return;
     }

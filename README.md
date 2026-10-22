@@ -1569,6 +1569,15 @@ installation is unreachable.
   Raise, Lower, Level, Soften and Flatten Lot (the whole lot back to its own level at a click,
   clear of the house and what stands on it), with the same brushes. `BUILD_PRESS=<diagram
   button, hex>` (tests).
+  The diagram's roofs, fences and half walls open the game's own catalogue panels too, each
+  with the build catalogue's grid: Roofs (auto-roofing on or off, Remove All Roofs, the Roof
+  Pitch slider making the household's roofs shallow to steep (about 15 to 60 degrees, the shed
+  and mansard in proportion), and its tabs for the roofs' shapes (hip, gable, shed, mansard) and
+  their patterns); Fences (the catalogue's fences, with the game's own Build catalogue pictures,
+  baked from its thumbnails, else a piece of each rendered; Gates opens the gates); and Half
+  Walls (likewise, its wall tools and Wallpaper button going to those). Pitch and auto-roofing
+  are build ops: undone, redone and kept in saves. `ROOF_PITCH=<rise per run>` with `--build`
+  (tests).
 - **Interface**: the game's own icons and words — moodlets (name, description, time left),
   traits (Create-a-Sim and the Sim's panel) and wishes — read from the game's tuning tables
   (`GameplayData.package`) and string tables, with tooltips on hover. Sims' portraits are

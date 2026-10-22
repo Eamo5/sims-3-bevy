@@ -902,6 +902,8 @@ fn build_tool(
     if blocked || !buy.active {
         buy.roof_pick = None;
         buy.roof_style_pick = None;
+        buy.roof_pitch_pick = None;
+        buy.auto_roof_pick = None;
         return;
     }
     if interrupted { return; }
@@ -938,6 +940,30 @@ fn build_tool(
         play.write(crate::sound::PlaySound::ui("ui_build_roof_mup"));
         notes.push(format!("The roofs are now a {}.", style.label().to_lowercase()));
         buy.dirty = true;
+    }
+    // The roofs' pitch, or auto-roofing turned on or off, on the Roofs panel.
+    let roof_ops: Vec<PaintOp> = match building.as_deref() {
+        Some(b) => [
+            buy.roof_pitch_pick.take().filter(|p| (p - b.roof_pitch).abs() > 1e-3).map(|pitch| PaintOp::RoofPitch { pitch }),
+            buy.auto_roof_pick.take().filter(|on| *on != b.roofs_on).map(|on| PaintOp::AutoRoof { on }),
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
+        None => Vec::new(),
+    };
+    if !roof_ops.is_empty()
+        && let Some(b) = building.as_deref_mut()
+    {
+        let before = crate::building::BuildingSnapshot::capture(b, log.as_deref());
+        let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+        crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &roof_ops, &mut faces);
+        crate::buyhistory::record_construction(&mut commands, before, b, &roof_ops, 0, removed.0.clone(), Vec::new());
+        match log.as_mut() {
+            Some(l) => l.0.extend(roof_ops),
+            None => commands.insert_resource(crate::building::LotPaint(roof_ops)),
+        }
+        play.write(crate::sound::PlaySound::ui("ui_build_roof_mup"));
     }
     let tool = buy.tool.filter(|_| buy.active);
     let cursor = windows.single().ok().and_then(|w| w.cursor_position());
