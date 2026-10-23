@@ -1190,6 +1190,8 @@ pub enum Special {
     VendShake,
     /// Art looked over, then liked or not, by taste (`art_taste`).
     ViewArt,
+    /// An Art Appraiser's scan of a work of art (`careermetrics`).
+    ScanArt,
     /// The laundry's steps (see `laundry`): a pile picked up, a load put on, the wet clothes
     /// taken out of the washer, put in the dryer (or on the line), and the dry clothes out.
     PickUpClothes,
@@ -1945,7 +1947,12 @@ static TELEPORTER: [InteractionDef; 1] = [InteractionDef { autonomous: false, sp
 static FOOD_REPLICATOR: [InteractionDef; 1] =
     [InteractionDef { special: Special::ReplicateFood, ..def("Replicate Food", 3.0, [6000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) }];
 /// (Art: looked over a while, for the fun of it.)
-static ART: [InteractionDef; 1] = [InteractionDef { special: Special::ViewArt, ..def("View", 10.0, [0.0, 0.0, 0.0, 0.0, 0.0, 70.0], Pose::Use) }];
+/// Art: viewed; an Art Appraiser's scanned (the pack's `ScanWorkOfArt`: ten minutes with the art
+/// scanner, `kArtScanningTime`).
+static ART: [InteractionDef; 2] = [
+    InteractionDef { special: Special::ViewArt, ..def("View", 10.0, [0.0, 0.0, 0.0, 0.0, 0.0, 70.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::ScanArt, ..def("Scan Art", 10.0, N, Pose::Use) },
+];
 /// (A plate of whatever's programmed, as the replicator's: the screen tapped, a wait, and out.)
 static FOOD_SYNTHESIZER: [InteractionDef; 1] =
     [InteractionDef { special: Special::ReplicateFood, ..def("Synthesize Food", 4.0, [4500.0, 0.0, 0.0, 0.0, 0.0, 2.0], Pose::Use) }];
@@ -2198,6 +2205,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
             A::new(Some("a2o_bathtub_clean_start_x"), &["a2o_bathtub_clean_loop1_x", "a2o_bathtub_clean_loop2_x", "a2o_bathtub_clean_loop3_x"]).ending(&["a2o_bathtub_clean_stop_x"], 1.5)
         }
         "Clean" if kind == ObjectKind::LitterBox => A::new(None, &["a2o_litterbox_clean_x"]),
+        "Scan Art" => A::new(Some("a_scanWorkOfArt_scan_start_x"), &["a_scanWorkOfArt_scan_loop1_x", "a_scanWorkOfArt_scan_loop2_x"]).ending(&["a_scanWorkOfArt_scan_stop_x"], 1.5),
         "Clean Stall" => A::new(Some("a2o_boxStall_clean_start_x"), &["a2o_boxStall_clean_loop1_x", "a2o_boxStall_clean_loop2_x"]).ending(&["a2o_boxStall_clean_stop_x"], 1.5),
         "Fill Bowl" => A::new(None, &["a2o_petBowl_putFood_x"]),
         "Stock" if kind == ObjectKind::Terrarium => A::new(None, &["a2o_minorPet_putInTerrarium_x"]),
@@ -4313,6 +4321,7 @@ pub(crate) fn run_actions(
                                         target_member: *t_member,
                                         holiday: warm,
                                         boss_hears: job.as_deref().filter(|j| j.boss == Some(tsim.id)).map(|j| j.performance),
+                                        reading: s.effect == SocialEffect::PrivateReading && job.as_deref().is_some_and(|j| crate::careermetrics::reading_taken(j, tsim.id, clock.minutes, rand::random())),
                                     };
                                     // (Caught up with again after the other moved off: as it was
                                     // already going.)
@@ -4973,6 +4982,16 @@ pub(crate) fn run_actions(
                                             commands.entity(me).insert(crate::terrarium::TerrariumRequest::Fill(*target));
                                         }
                                         Special::WatchMinorPet | Special::SlippySlide => {}
+                                        // (A work of art scanned, an Art Appraiser's: `careermetrics`.)
+                                        Special::ScanArt => {
+                                            let now = clock.minutes;
+                                            commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| {
+                                                if let Some(mut j) = e.get_mut::<crate::careers::Job>() {
+                                                    j.tally.scan_art(now);
+                                                    info!("art scanned ({} in all)", j.tally.scans);
+                                                }
+                                            });
+                                        }
                                         // (Talked with, or taught: what it's learned, the Sim's charisma, the
                                         // two fonder: `terrarium`.)
                                         Special::TalkWithBird | Special::TeachBirdToTalk => {
@@ -5518,6 +5537,20 @@ pub(crate) fn run_actions(
                                         SocialEffect::CampaignDonation if action.social_outcome.is_none_or(|o| o.accepted) => {
                                             let (giver, liking) = (*target, rel.friendship);
                                             commands.queue(move |w: &mut World| crate::careermetrics::donate(w, me, giver, liking));
+                                        }
+                                        // (A fortune teller's private reading, taken up: `careermetrics`.)
+                                        SocialEffect::PrivateReading if action.social_outcome.is_none_or(|o| o.accepted) => {
+                                            let client = *target;
+                                            commands.queue(move |w: &mut World| crate::careermetrics::private_reading(w, me, client));
+                                        }
+                                        // (A competition promoted, a game warden's: `careermetrics`.)
+                                        SocialEffect::PromoteGame if action.social_outcome.is_none_or(|o| o.accepted) => {
+                                            commands.entity(me).queue_silenced(|mut e: EntityWorldMut| {
+                                                if let Some(mut j) = e.get_mut::<crate::careers::Job>() {
+                                                    j.tally.promoted += 1;
+                                                    info!("competition promoted ({} in all)", j.tally.promoted);
+                                                }
+                                            });
                                         }
                                         SocialEffect::DeliverOpportunity => {
                                             debug!("{} delivered to {tname}", sim.first);

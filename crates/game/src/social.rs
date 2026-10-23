@@ -305,6 +305,12 @@ pub enum SocialEffect {
     Interview,
     /// A guest asked to stay the night (the game's "Ask NPC To Stay Over": `guests`).
     StayOver,
+    /// A Bot Arena game warden's word for the next competition (the game's "Promote Upcoming
+    /// Game": `OnPromoteGameFriendlyCompleted`), one more promoted (`careermetrics`).
+    PromoteGame,
+    /// A fortune teller's private reading (the game's "Perform Private Reading":
+    /// `OnPrivateReadingAccept`): `careermetrics`.
+    PrivateReading,
 }
 
 /// What a Mooch gets out of others (the game's `MoochAmount`, at the hidden Mooch skill's first
@@ -334,6 +340,8 @@ const GAME_EFFECTS: &[(&str, SocialEffect)] = &[
     ("Ask for Campaign Donation", SocialEffect::CampaignDonation),
     ("Question", SocialEffect::Interview),
     ("Interview", SocialEffect::Interview),
+    ("Promote Upcoming Game", SocialEffect::PromoteGame),
+    ("Perform Private Reading", SocialEffect::PrivateReading),
 ];
 
 pub struct SocialDef {
@@ -437,6 +445,10 @@ pub enum GameTest {
     /// The household's guest, liked well enough and of an age with them (`TestAskNPCToStayOver`;
     /// the hour and their being let in are the menu's: `guests`).
     StayOver,
+    /// A Bot Arena game warden (`TestCanBePromoted`: their career's Game Warden branch).
+    Warden,
+    /// A fortune teller of the level for private readings (the game's `FortuneTellerSocials` test).
+    Reader,
 }
 
 /// What's known of a Sim for the game's socials beyond their `Sim`: who they are, their
@@ -455,7 +467,9 @@ pub struct Side<'a> {
     pub charisma: u32,
     /// Whether they cook at all (have the Cooking skill).
     pub cooks: bool,
-    /// Their boss (by id), their level (0-based) and performance at work.
+    /// Their career's branch (`Base` before it splits), their boss (by id), their level (0-based)
+    /// and performance at work.
+    pub branch: &'static str,
     pub boss: Option<u64>,
     pub level: usize,
     pub performance: f32,
@@ -496,6 +510,7 @@ impl<'a> Side<'a> {
             moods,
             topics,
             career: job.map(|j| j.track),
+            branch: job.map_or("", |j| j.path().branch),
             homework,
             member,
             charisma: skills.map_or(0, |s| s.level("Charisma")),
@@ -701,6 +716,8 @@ const GRAPH_CLIPS: &[(&str, &str)] = &[
     ("social_boretodeath", "BoreToDeath"),
     ("social_shoo", "Shoo"),
     ("social_shykiss", "ShyKiss"),
+    // (A fortune teller's private reading.)
+    ("privatereading", "privateReading"),
     // (Just talking: the chat's own.)
     ("social_neutral_talk", "Gossip"),
 ];
@@ -806,11 +823,14 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
             "TestConfessCheating" => Some(GameTest::Confess),
             "TestCampaignDonation" => Some(GameTest::NotHousehold),
             "TestInterview" => Some(GameTest::Interview),
+            "TestCanBePromoted" => Some(GameTest::Warden),
             "TestAskNPCToStayOver" => Some(GameTest::StayOver),
             // (What's said of a line of work: its topic is the other's being in it.)
             t if t.starts_with("TargetHas") && t.ends_with("Career") && a.topics.iter().any(|(n, _)| n.starts_with("Learn ")) => None,
             _ => continue,
         };
+        // (Tested by its interaction rather than its table: a fortune teller's reading.)
+        let test = if effect == SocialEffect::PrivateReading { Some(GameTest::Reader) } else { test };
         if SOCIALS.iter().chain(out.iter()).any(|s| s.name.eq_ignore_ascii_case(&a.name)) || LEFT_OUT.contains(&a.name.as_str()) || a.name.contains('{') || a.name.contains("DO NOT") || a.name.contains("(don't") {
             continue;
         }
@@ -1077,6 +1097,8 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
                 Some(GameTest::Boss) => side[0].boss != Some(target.id),
                 Some(GameTest::NotHousehold) => side[1].member,
                 Some(GameTest::Interview) => side[1].member || side[0].tally.is_some_and(|t| t.knows(target.id)),
+                Some(GameTest::Warden) => side[0].branch != "BotArenaGameWarden",
+                Some(GameTest::Reader) => !side[0].career.is_some_and(|c| crate::careers::careers().get(c).is_some_and(|t| t.key == "FortuneTellerCareer")) || side[0].level + 1 < crate::careermetrics::READING_LEVEL,
                 Some(GameTest::StayOver) => !side[0].member || side[1].member || !crate::guests::may_stay_over(rel.friendship, actor.age, target.age),
                 Some(GameTest::BossBelowNine) => side[0].boss != Some(target.id) || side[0].level + 1 >= 9,
                 Some(GameTest::Accuse) => !rel.is_romance() || side[1].rels.is_none_or(|r| r.romances() < 2) || rel.betrayed.is_some(),

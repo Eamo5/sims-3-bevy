@@ -1437,6 +1437,15 @@ installation is unreachable.
   Into Unknown, Alchemy; an art appraiser's Practice Painting from level 6; the Bot Arena's Tinker
   With Spare Parts and Practice Catch Phrases; a game developer's Work Research and On the Job
   Training, the engineer's Logic, the artist's Painting), the packs' skills kept in saves.
+  An Art Appraiser scans paintings and sculptures ("Scan Art", ten minutes with the pack's art
+  scanner in hand, a quarter of an hour between scans), each counted; a Bot Arena game warden
+  promotes the next competition (the pack's "Promote Upcoming Competition"); a fortune teller gives
+  private readings from level 2 ("Perform Private Reading", the pack's clips: taken up six times
+  in ten, a Mystic more, not by the same Sim again within eight hours; terrible to great by the
+  tuning's odds for their level and branch, a Supernatural Skeptic's always terrible; the client
+  left with Complete Nonsense, Taking Precautions, It May Come True or Total Believer; §15 to §150
+  from someone not of the household, a Mystic's half again to three times as much from level 6;
+  the game's words for each). `UNIFORM=<career>:<level>[:<branch>]` (tests).
 - **Career events at work**, from the game's own table: each work day may bring one, as
   likely as the game rolls it (none as likely as every candidate not coming): a raise for good
   work, a Loser's bad day, or one of the career's own at their level and on their path — a

@@ -1448,7 +1448,11 @@ fn wear_uniform(mut commands: Commands, sel: Query<Entity, With<crate::sim::Sele
         return;
     }
     let Ok(e) = sel.single() else { return };
-    let (name, level) = v.split_once(':').map_or((v.as_str(), 1), |(n, l)| (n, l.parse().unwrap_or(1)));
+    // (`<career>:<level>[:<branch>]`.)
+    let mut parts = v.split(':');
+    let name = parts.next().unwrap_or("");
+    let level: usize = parts.next().and_then(|l| l.parse().ok()).unwrap_or(1);
+    let branch = parts.next();
     let Some(track) = crate::careers::careers().iter().position(|c| c.name.eq_ignore_ascii_case(name)) else {
         warn!("no career {name}");
         *done = true;
@@ -1457,6 +1461,9 @@ fn wear_uniform(mut commands: Commands, sel: Query<Entity, With<crate::sim::Sele
     *done = true;
     let mut job = crate::careers::Job::new(track);
     job.level = level.max(1) - 1;
+    if let Some(b) = branch.and_then(|b| crate::careers::careers()[track].paths.iter().position(|p| p.branch.eq_ignore_ascii_case(b))) {
+        job.branch = b;
+    }
     info!("uniform test: {} level {}", name, job.level + 1);
     commands.entity(e).insert((job, crate::simbody::Wearing(crate::simbody::OutfitKind::Career), crate::aging::NeedsNewBody));
 }

@@ -829,6 +829,11 @@ pub enum MoodletKind {
     Horrified,
     /// Fallen on the slippy slide (Generations').
     Slipped,
+    /// A fortune teller's private reading, terrible to great (Supernatural's).
+    CompleteNonsense,
+    TakingPrecautions,
+    ItMayComeTrue,
+    TotalBeliever,
     Tranquil,
     BornToDoThis,
     DrawnIn,
@@ -887,7 +892,7 @@ pub enum MoodletKind {
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 139] = {
+    pub const ALL: [MoodletKind; 143] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -898,7 +903,7 @@ impl MoodletKind {
             TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf, MintyBreath,
             Disgusted, Mourning, FreshClothing, VeryFreshClothing, HolidayCheer, SpringFling, SummerFun, SpookyTime,
             Decorated, NicelyDecorated, BeautifullyDecorated, GreatMeal, Stressed, Winner, Overworked, IAmBeautiful, SugarRush,
-            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, Slipped, NiceNails, CompletelyAtEase, Horrified, Tranquil, BornToDoThis, DrawnIn, OutAfterCurfew, CaughtAfterCurfew, CozyFire, DivineMeal, Attractive, SuccessfulPrank, PrankedNegative, PrankedPositive,
+            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, Slipped, CompleteNonsense, TakingPrecautions, ItMayComeTrue, TotalBeliever, NiceNails, CompletelyAtEase, Horrified, Tranquil, BornToDoThis, DrawnIn, OutAfterCurfew, CaughtAfterCurfew, CozyFire, DivineMeal, Attractive, SuccessfulPrank, PrankedNegative, PrankedPositive,
             AnxiousSink, AnxiousStove, AnxiousFireplace, FeelingCalm, Charitable, FiendishlyDelighted,
             RudeAwakening, CryingBaby, Stuffed, NewStuff, Sore,
             OneWithNature, PlaguedByNature, EnjoyingSolitude, TooManyPeople, StuffTaken, AfraidOfTheDark, FeelingLucky, FeelingUnlucky, Excited, GreatKiss,
@@ -1030,6 +1035,10 @@ impl MoodletKind {
             NiceNails => md("Nice Nails", "It's foolish not to focus on the nails from time to time. There's nothing quite like crisp cuticles!", 5, 48.0),
             CompletelyAtEase => md("Completely At Ease", "Spending the Simoleons and time to enjoy a full spa package will render your Sim completely at ease.", 20, 168.0),
             Slipped => md("Slipped!", "Trying out new moves on the Slide can result in a painful landing. Use caution next time!", -10, 10.0 / 60.0),
+            CompleteNonsense => md("Complete Nonsense", "Please. They've seen better predictions fall out of a cookie.", -10, 1.0),
+            TakingPrecautions => md("Taking Precautions", "There was probably nothing to that psychic prediction. Still...", 10, 2.0),
+            ItMayComeTrue => md("It May Come True", "Not that they really buy into that prediction, but then again... You never know, right?", 20, 3.0),
+            TotalBeliever => md("Total Believer", "That fortune teller knew everything! Nothing to do now but surrender to the hands of fate.", 40, 5.0),
             Horrified => md("Horrified", "Terrible things have been seen underneath the mausoleum. Explorers beware.", -35, 8.0),
             Tranquil => md("Tranquil", "Nothing can stress or anger Sims who have reached their happy place.", 10, 8.0),
             BornToDoThis => md("Born To Do This", "You're a natural at this, and you know it!", 5, 1.0),
@@ -1194,6 +1203,10 @@ impl MoodletKind {
             CompletelyAtEase => ("CompletelyAtEase", true),
             Horrified => ("Horrified", true),
             Slipped => ("Slipped", true),
+            CompleteNonsense => ("CompleteNonsense", true),
+            TakingPrecautions => ("TakingPrecautions", true),
+            ItMayComeTrue => ("ItMayComeTrue", true),
+            TotalBeliever => ("TotalBeliever", true),
             Tranquil => ("Tranquil", true),
             BornToDoThis => ("BornToDoThis", true),
             DrawnIn => ("DrawnIn", true),

@@ -306,6 +306,8 @@ pub struct Judging<'a> {
     pub holiday: bool,
     /// The actor's performance at work, when it's their boss they're talking to.
     pub boss_hears: Option<f32>,
+    /// A fortune teller's private reading taken up (the game's `TestAcceptPrivateReading`).
+    pub reading: bool,
 }
 
 /// What a social came to.
@@ -566,6 +568,7 @@ fn suitable(rule: &SocialRule, model: &Model, j: &Judging, liking: f32, mood: f3
             // (The boss agrees to a promotion at 75 performance, to a raise at 60; a Schmoozer's
             // at 40 and 30.)
             "ShouldReceivePromotion" => j.boss_hears.is_some_and(|p| p >= 75.0 || (has_trait(j.actor, "Schmoozer") && p >= 40.0)),
+            "TestAcceptPrivateReading" => j.reading,
             "ShouldReceiveRaise" => j.boss_hears.is_some_and(|p| p >= 60.0 || (has_trait(j.actor, "Schmoozer") && p >= 30.0)),
             // (The game's other tests aren't ours to run: the rule stands aside.)
             _ => false,
@@ -888,7 +891,7 @@ mod tests {
             actor: &a, target: &b, actor_moodlets: &[], target_moodlets: &[], liking,
             relationship: relationship_state(liking, crate::social::RelStatus::None, false, false), stc, target_mood: mood,
             charisma: None, partner_elsewhere: false, partners: false, kin: false, repetition: false,
-            actor_member: true, target_member: false, holiday: false, boss_hears: None,
+            actor_member: true, target_member: false, holiday: false, boss_hears: None, reading: false,
         };
         let ok = Stc { commodity: Commodity::Friendly, value: 0.0 };
         // (Hugging: Friendly from -19 up, Neutral down to -49, Boring below.)

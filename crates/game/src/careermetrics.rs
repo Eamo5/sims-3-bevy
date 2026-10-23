@@ -7,6 +7,12 @@
 //!   and pays §200 (the Education tuning's).
 //! - Hours of games played (Game Developer: `MetricGameHoursPlayed`): hours at arcade machines
 //!   and researching games at work (the Arcade Machine skill's `HoursOfGamesPlayed`).
+//! - Art scanned (Art Appraiser: `MetricArtWorkScanned`): `Scan Art` on a painting or sculpture,
+//!   ten minutes with the pack's art scanner, a quarter of an hour between scans.
+//! - Competitions promoted (the Bot Arena's game wardens: `MetricCompetitionsPromoted`): the pack's
+//!   `Promote Upcoming Game` social, taken well.
+//! - Private readings (Fortune Teller: `MetricRedingsPerformed`): the pack's `Perform Private Reading`
+//!   (`reads_fortunes`, `private_reading`).
 //! - Meetings held (Business, levels 6 and up): the last seven days' and today's. "Hold Meetings"
 //!   at work holds one every hour and a half of it (`kSimHoursToCallMeetingWothwhile`); "Hold
 //!   Meeting" at the business office, between eight and six and not in too foul a mood (-50,
@@ -91,6 +97,20 @@ pub struct Tally {
     /// at arcade machines and researching them at work).
     #[serde(default)]
     pub game_hours: f32,
+    /// Works of art scanned (Art Appraiser: `NumArtWorkScanned`) and when the last was.
+    #[serde(default)]
+    pub scans: u32,
+    #[serde(default)]
+    pub last_scan: Option<f64>,
+    /// Competitions promoted (the Bot Arena's game wardens: the Bot Building skill's
+    /// `NumberPromotedCompetition`).
+    #[serde(default)]
+    pub promoted: u32,
+    /// Private readings given (Fortune Teller: `PrivateReadingsPerfomed`), and to whom when.
+    #[serde(default)]
+    pub readings: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub readings_given: Vec<(u64, f64)>,
     /// Concerts performed in the career, and the next one's readiness (out of 100).
     #[serde(default)]
     pub concerts: u32,
@@ -326,6 +346,15 @@ fn count_today(days: &mut Vec<(u32, u32)>, today: u32) {
     }
 }
 
+/// Minutes between art scans (`ScanWorkOfArt.kArtScanningCooldown`).
+const SCAN_COOLDOWN: f64 = 15.0;
+
+/// Whether a Sim scans art: an Art Appraiser (their level counting what's scanned, or not), their
+/// scanner ready.
+pub fn may_scan_art(job: Option<&Job>, now: f64) -> bool {
+    job.is_some_and(|j| j.career().key == "ArtAppraiserCareer" && j.tally.may_scan(now))
+}
+
 /// How many days back meetings count (`kWindowForRememberingMeetings`), and today.
 const MEETING_DAYS: u32 = 7;
 /// Hours of the Hold Meetings tone a meeting takes.
@@ -336,6 +365,17 @@ const CONCERT_PREP_PER_HOUR: f32 = 25.0;
 impl Tally {
     pub fn is_empty(&self) -> bool {
         *self == Tally::default()
+    }
+
+    /// A work of art scanned (at `now`, in game minutes).
+    pub fn scan_art(&mut self, now: f64) {
+        self.scans += 1;
+        self.last_scan = Some(now);
+    }
+
+    /// Whether the art scanner's ready again (`kArtScanningCooldown`: a quarter of an hour).
+    pub fn may_scan(&self, now: f64) -> bool {
+        self.last_scan.is_none_or(|t| now - t >= SCAN_COOLDOWN)
     }
 
     /// Lectures given over the window to `today`.
@@ -386,6 +426,9 @@ impl Tally {
             "HoldMeetings" => Some(self.meetings_held(today) as f32),
             "GiveLectures" => Some(self.lectures_given(today) as f32),
             "GameHoursPlayed" => Some(self.game_hours),
+            "ArtWorkScanned" => Some(self.scans as f32),
+            "CompetitionsPromoted" => Some(self.promoted as f32),
+            "ReadingsPerformed" => Some(self.readings as f32),
             "ConcertsPerformed" => Some(self.concerts as f32),
             "CampaignMoney" => Some(self.campaign as f32),
             "WinLossRecord" => Some(self.wins as f32 - self.losses as f32),
@@ -497,6 +540,130 @@ pub fn donate(w: &mut World, asker: Entity, giver: Entity, liking: f32) {
     let text = w.get_resource::<crate::layout::UiAssets>().and_then(|u| u.localize("Gameplay/Careers/Political:DonateText")).map_or_else(
         || format!("{giver_name} just donated §{n} to {first}'s campaign fund. The fund now has a total of §{total}."),
         |t| t.replace("{0.SimName}", &giver_name).replace("{1.Money}", &format!("§{n}")).replace("{2.SimFirstName}", &first).replace("{3.Money}", &format!("§{total}")),
+    );
+    w.resource_mut::<Notifications>().push(text);
+}
+
+/// A fortune teller's private readings (`FortuneTellerCareer`, the tuning's): from level 2 of the
+/// career (`kLevelNeededForPrivateReading`); taken up six times in ten (`kReadingAcceptanceChance`,
+/// a Mystic's 0.075 more a level of their branch: `kReadingAcceptaceIncreasePerMysticLevel`), not
+/// again by the same Sim within eight hours (`kPrivateReadingCooldownHours`); terrible, passable,
+/// good or great by the chances for their level (`kBasePsychicReadingChances` at the start to the
+/// branch's best at the top: a Mystic's `kMaxMysticPsychicReadingChances`, a Scam Artist's
+/// `kMaxScamArtistPsychicReadingChances`), a Supernatural Skeptic's always terrible; paid §15, §35,
+/// §70 or §150 by someone not of the household (`k...ReadingBaseSimoleons`), a Mystic's more from
+/// level 6 (`kMysticCareerMultipliers`).
+pub const READING_LEVEL: usize = 2;
+const READING_ACCEPT: f32 = 0.6;
+const READING_ACCEPT_MYSTIC: f32 = 0.075;
+const READING_COOLDOWN: f64 = 8.0 * 60.0;
+const READING_BASE: [f32; 4] = [60.0, 25.0, 10.0, 5.0];
+const READING_MYSTIC: [f32; 4] = [5.0, 10.0, 35.0, 50.0];
+const READING_SCAM: [f32; 4] = [35.0, 30.0, 20.0, 15.0];
+const READING_PAY: [i64; 4] = [15, 35, 70, 150];
+const MYSTIC_PAY: [f32; 5] = [1.5, 1.75, 2.0, 2.5, 3.0];
+
+/// Whether a Sim gives private readings: a fortune teller of the level for it.
+pub fn reads_fortunes(job: Option<&Job>) -> bool {
+    job.is_some_and(|j| j.career().key == "FortuneTellerCareer" && j.level + 1 >= READING_LEVEL)
+}
+
+/// Whether a reading's taken up (the game's `CanGiveSimAPrivateReading`): not the same Sim again
+/// too soon, and by the chance, a Mystic's better.
+pub fn reading_taken(job: &Job, target: u64, now: f64, roll: f32) -> bool {
+    if job.tally.readings_given.iter().any(|(id, at)| *id == target && now - at < READING_COOLDOWN) {
+        return false;
+    }
+    let mut chance = READING_ACCEPT;
+    if job.path().branch == "Mystic" {
+        chance += READING_ACCEPT_MYSTIC * (job.level as f32 + 1.0 - 5.0);
+    }
+    roll < chance
+}
+
+/// The chances of a terrible, passable, good and great reading at a level (1 to 10), of a branch.
+pub fn reading_chances(level: usize, branch: &str) -> [f32; 4] {
+    let best = if branch == "Mystic" { READING_MYSTIC } else { READING_SCAM };
+    let t = (level.min(10) as f32 / 10.0).clamp(0.0, 1.0);
+    std::array::from_fn(|i| READING_BASE[i] + (best[i] - READING_BASE[i]) * t)
+}
+
+/// What a reading pays (by its quality: 0 terrible to 3 great), a Mystic's more at the top.
+pub fn reading_pay(quality: usize, level: usize, branch: &str) -> i64 {
+    let base = READING_PAY[quality.min(3)] as f32;
+    let more = if branch == "Mystic" && level >= 6 { MYSTIC_PAY[(level - 6).min(4)] } else { 1.0 };
+    (base * more).round() as i64
+}
+
+/// A gendered text with two Sims in it: `{MA.he}{FA.she}` the first's, `{MB.he}{FB.she}` the
+/// second's.
+fn gendered_two(text: &str, first: bool, second: bool) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find('{') {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i..];
+        let Some(j) = tail.find('}') else {
+            out.push_str(tail);
+            return out;
+        };
+        let token = &tail[1..j];
+        match token.split_once('.') {
+            Some((g, word)) if g.len() == 2 && (g.starts_with('M') || g.starts_with('F')) => {
+                let female = if g.ends_with('B') { second } else { first };
+                if g.starts_with('F') == female {
+                    out.push_str(word);
+                }
+            }
+            _ => out.push_str(&tail[..=j]),
+        }
+        rest = &tail[j + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// A private reading given (`OnPrivateReadingAccept`): its quality by the reader's level and
+/// branch, the moodlet it leaves the one read for, the pay, one more reading counted, and the
+/// game's words.
+pub fn private_reading(w: &mut World, reader: Entity, client: Entity) {
+    use crate::life::MoodletKind as M;
+    let (Some(me), Some(them)) = (w.get::<Sim>(reader).cloned(), w.get::<Sim>(client).cloned()) else { return };
+    let now = w.resource::<crate::clock::GameClock>().minutes;
+    let member = w.get::<crate::sim::HouseholdMember>(client).is_some();
+    let Some(mut job) = w.get_mut::<Job>(reader) else { return };
+    if job.career().key != "FortuneTellerCareer" {
+        return;
+    }
+    let (level, branch) = (job.level + 1, job.path().branch);
+    let quality = if them.traits.contains(&crate::life::Trait::SupernaturalSkeptic) {
+        0
+    } else {
+        let chances = reading_chances(level, branch);
+        let mut roll = rand::rng().random_range(0.0..chances.iter().sum::<f32>());
+        chances.iter().position(|c| {
+            roll -= c;
+            roll < 0.0
+        }).unwrap_or(3)
+    };
+    job.tally.readings += 1;
+    job.tally.readings_given.retain(|(_, at)| now - at < READING_COOLDOWN);
+    job.tally.readings_given.push((them.id, now));
+    let pay = if member { 0 } else { reading_pay(quality, level, branch) };
+    info!("{} gave {} a reading ({quality} of 3; {} in all)", me.first, them.first, job.tally.readings);
+    if pay > 0
+        && let Some(mut h) = w.get_resource_mut::<Household>()
+    {
+        h.funds += pay;
+    }
+    let moodlet = [M::CompleteNonsense, M::TakingPrecautions, M::ItMayComeTrue, M::TotalBeliever][quality];
+    if let Some(mut m) = w.get_mut::<crate::life::Moodlets>(client) {
+        m.add(moodlet, now);
+    }
+    let key = ["TerribleReading", "PassibleReading", "GoodReading", "GreatReading"][quality];
+    let text = w.get_resource::<crate::layout::UiAssets>().and_then(|u| u.localize(&format!("Gameplay/Socializing/SocialCallback:{key}"))).map_or_else(
+        || format!("{} gave {} a reading.", me.full_name(), them.full_name()),
+        |t| gendered_two(&t, me.female, them.female).replace("{0.SimName}", &me.full_name()).replace("{1.SimName}", &them.full_name()),
     );
     w.resource_mut::<Notifications>().push(text);
 }
@@ -1281,6 +1448,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn readings_go_by_the_fortune_tellers_tuning() {
+        // (The start's odds at level 0, the branch's best at the top.)
+        assert_eq!(reading_chances(0, "Mystic"), [60.0, 25.0, 10.0, 5.0]);
+        assert_eq!(reading_chances(10, "Mystic"), [5.0, 10.0, 35.0, 50.0]);
+        assert_eq!(reading_chances(10, "ScamArtist"), [35.0, 30.0, 20.0, 15.0]);
+        assert_eq!(reading_pay(3, 4, "Base"), 150);
+        assert_eq!(reading_pay(3, 10, "Mystic"), 450);
+        assert_eq!(gendered_two("{MB.He}{FB.She} liked {MA.his}{FA.her} reading", false, true), "She liked his reading");
+    }
+
+    #[test]
     fn lectures_and_game_hours_count_as_the_packs_careers_have_them() {
         let mut t = Tally::default();
         assert_eq!(t.lecture_tone(1.0, 10), 0);
@@ -1399,6 +1577,6 @@ mod tests {
         assert!(t.perform_tone(1.0));
         assert_eq!((t.concerts, t.concert_prep), (1, 0.0));
         assert_eq!(t.value("ConcertsPerformed", 0), Some(1.0));
-        assert_eq!(t.value("ArtWorkScanned", 0), None, "not a base game metric");
+        assert_eq!(t.value("SuperTuneUps", 0), None, "a plumbot's, not counted here");
     }
 }

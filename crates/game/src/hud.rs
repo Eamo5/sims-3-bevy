@@ -1839,6 +1839,10 @@ fn world_click(
                 if !crate::computertraits::offers(d.special, actor_sim, jobs_q.get(actor).ok().flatten(), club_q.get(actor).is_ok_and(|c| c.0), work_to_do) {
                     continue;
                 }
+                // (Art scanned by an Art Appraiser, the scanner ready: `careermetrics`.)
+                if d.special == Special::ScanArt && !crate::careermetrics::may_scan_art(jobs_q.get(actor).ok().flatten(), opp_q.2.minutes) {
+                    continue;
+                }
                 // Chess, as the game's table offers it: practice alone, or a game with whoever's
                 // there alone ("Play Chess With Bella Goth"); "Play Chess With..." anyone about,
                 // with both chairs free; a game watched while there's one (and they're not in it).

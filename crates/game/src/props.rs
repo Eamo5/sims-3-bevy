@@ -36,6 +36,8 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("sponge", "AccessorySponge", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     // (A pet's brush, as brushing a pet: the Pets pack's.)
     ("brush", "accessoryPetBrushSmallPets", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    // (An Art Appraiser's art scanner.)
+    ("artScanner", "accessoryArtScanner", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     // (Mucking out a box stall.)
     ("pitchfork", "accessoryPitchforkAdult", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("toiletBrush", "ToiletBrush", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
