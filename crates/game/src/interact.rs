@@ -259,6 +259,8 @@ pub enum ObjectKind {
     BirdCage,
     /// A slippy slide (Generations'): run at and slid down.
     SlippySlide,
+    /// A horse's box stall (the Pets pack's): eaten and napped in, cleaned out with a pitchfork.
+    BoxStall,
     Other,
 }
 
@@ -287,6 +289,8 @@ impl ObjectKind {
             Self::BirdCage
         } else if has("objects.environment.slippyslide") {
             Self::SlippySlide
+        } else if has("objects.pets.boxstall") {
+            Self::BoxStall
         } else if has("hobbiesskills.pooltable") {
             Self::PoolTable
         } else if has("hobbiesskills.dartboard") || has("hobbiesskills.expensivedartboard") {
@@ -572,7 +576,7 @@ impl ObjectKind {
             Self::Door => "Misc",
             Self::Meal | Self::DirtyDishes | Self::DrinkTray | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
-            Self::PetBowl | Self::LitterBox | Self::PetBed | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough | Self::Terrarium | Self::BirdCage => "Misc",
+            Self::PetBowl | Self::LitterBox | Self::PetBed | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough | Self::Terrarium | Self::BirdCage | Self::BoxStall => "Misc",
             Self::Other => "Misc",
         }
     }
@@ -1887,6 +1891,8 @@ static BIRD_CAGE: [InteractionDef; 8] = [
 /// A slippy slide: a run at it and down it on their front (the game's `Slide`: Fun 75 an hour),
 /// again and again till they've had their fun.
 static SLIPPY_SLIDE: [InteractionDef; 1] = [InteractionDef { special: Special::SlippySlide, ..def("Slide", 8.0, [0.0, 0.0, -6.0, 0.0, 0.0, 75.0], Pose::Use) }];
+/// A box stall's: cleaned out (the game's `Clean`: three minutes a dirty spot, five at least).
+static BOX_STALL: [InteractionDef; 1] = [InteractionDef { special: Special::Scrub, ..def("Clean Stall", 15.0, [0.0, 0.0, -4.0, 0.0, -15.0, 0.0], Pose::Use) }];
 static LITTER_BOX: [InteractionDef; 1] = [InteractionDef { special: Special::Scrub, ..def("Clean", 6.0, [0.0, 0.0, 0.0, 0.0, -20.0, 0.0], Pose::Use) }];
 static PUDDLE: [InteractionDef; 1] = [InteractionDef { special: Special::MopUp, ..def("Mop Up", 5.0, [0.0, 0.0, -2.0, 0.0, -4.0, -4.0], Pose::Use) }];
 static FOOSBALL: [InteractionDef; 1] = [def("Play Foosball", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 65.0], Pose::Use)];
@@ -2191,6 +2197,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
             A::new(Some("a2o_bathtub_clean_start_x"), &["a2o_bathtub_clean_loop1_x", "a2o_bathtub_clean_loop2_x", "a2o_bathtub_clean_loop3_x"]).ending(&["a2o_bathtub_clean_stop_x"], 1.5)
         }
         "Clean" if kind == ObjectKind::LitterBox => A::new(None, &["a2o_litterbox_clean_x"]),
+        "Clean Stall" => A::new(Some("a2o_boxStall_clean_start_x"), &["a2o_boxStall_clean_loop1_x", "a2o_boxStall_clean_loop2_x"]).ending(&["a2o_boxStall_clean_stop_x"], 1.5),
         "Fill Bowl" => A::new(None, &["a2o_petBowl_putFood_x"]),
         "Stock" if kind == ObjectKind::Terrarium => A::new(None, &["a2o_minorPet_putInTerrarium_x"]),
         // (A bird cage's own: stocked, fed, watched, cleaned; a bird taught to talk.)
@@ -2868,6 +2875,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Terrarium => &TERRARIUM,
         ObjectKind::BirdCage => &BIRD_CAGE,
         ObjectKind::SlippySlide => &SLIPPY_SLIDE,
+        ObjectKind::BoxStall => &BOX_STALL,
         ObjectKind::LitterBox => &LITTER_BOX,
         _ => &[],
     }

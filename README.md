@@ -941,7 +941,10 @@ installation is unreachable.
   put off for the floor four times in five, cleaned out by the household), else out into the
   yard (a puddle where it's on a floor; indoors after all five times in a hundred, thirty for
   the young), sleeping in a pet bed or dog house (or curled up on the floor), the scratching
-  post, the chew toy, the water trough, grazing, grooming. Sims' petting and praise are company
+  post, the chew toy, the water trough, grazing, grooming; a horse with a box stall eats at its
+  hay rack (the pack's `EatHay`: Hunger 100 an hour, its head at the rack), naps in it (Energy 24)
+  and pees in it, each a dirty spot (five and it wants cleaning, as `kPointsBeforeDirtyLow`), and the
+  household mucks it out with the pack's pitchfork in hand ("Clean Stall"). Sims' petting and praise are company
   and fun for them. The household's grown-ups fill a bowl down to three bites of their own
   accord (§25 a bite it's short, as the game's `FillBowl`), or from its menu, and pets let it
   be known what they need in thought balloons. Pets' needs and bowls' food are kept in saves.

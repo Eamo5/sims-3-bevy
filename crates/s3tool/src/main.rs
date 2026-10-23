@@ -67,6 +67,9 @@ fn main() {
                 for (n, p, f) in s3formats::object::object_route_slots(&set, &k) {
                     println!("  routing slot {n}: at {p:?} facing {f:?}");
                 }
+                for s in s3formats::object::object_container_slots(&set, &k) {
+                    println!("  container slot {:08X}: at {:?}", s.name, s.pos);
+                }
                 for mk in s3formats::object::object_models(&set, &k) {
                     for m in s3formats::model::load_model(&set, &mk).unwrap_or_default() {
                         println!("  mesh bounds {:?}..{:?}", m.bounds_min, m.bounds_max);

@@ -223,6 +223,20 @@ const SCRATCH_RATE: f32 = 200.0;
 const CHEW_RATE: f32 = 200.0;
 const DRINK_RATE: f32 = 250.0;
 const GRAZE_RATE: f32 = 100.0;
+/// A box stall's hay (`EatHay`: Hunger 100 an hour) and a nap in it (`HorseNap`: Energy 24); a
+/// pee in it one of the dirty spots that want it cleaned (the game's `kPointsBeforeDirtyLow`,
+/// five; a quarter of the way at each), and its hay rack (in the stall's own frame).
+const HAY_RATE: f32 = 100.0;
+const STALL_NAP_RATE: f32 = 24.0;
+const STALL_DIRT: f32 = crate::grime::NEEDS_CLEANING / 5.0 * 1.01;
+const HAY_RACK: Vec2 = Vec2::new(-1.67, -2.0);
+
+/// Where a horse stands to eat at a box stall's hay rack (its head, at the front of its rig, a
+/// metre short of the rack, along the stall's side wall), and which way it faces.
+fn hay_spot(stall: &Transform) -> (Vec2, Quat) {
+    let at = stall.transform_point(Vec3::new(HAY_RACK.x, 0.0, HAY_RACK.y + 0.95));
+    (at.xz(), stall.rotation * Quat::from_rotation_y(std::f32::consts::PI))
+}
 const GROOM_RATE: f32 = 200.0;
 /// How often a bite's taken (game minutes).
 const BITE_MINUTES: f64 = 5.0;
@@ -243,14 +257,17 @@ pub enum PetDo {
     Drink(Entity),
     Graze,
     Groom,
+    /// A horse at its box stall's hay (`BoxStall.EatHay`), or peeing in it (a dirty spot).
+    Hay(Entity),
+    StallPee(Entity),
 }
 
 impl PetDo {
     /// The need it's for.
     fn need(self) -> usize {
         match self {
-            PetDo::Eat(_) | PetDo::Graze => HUNGER,
-            PetDo::Litter(_) | PetDo::Pee => BLADDER,
+            PetDo::Eat(_) | PetDo::Graze | PetDo::Hay(_) => HUNGER,
+            PetDo::Litter(_) | PetDo::Pee | PetDo::StallPee(_) => BLADDER,
             PetDo::Sleep(_) => ENERGY,
             PetDo::Scratch(_) | PetDo::Chew(_) => URGE,
             PetDo::Drink(_) => THIRST,
@@ -260,7 +277,7 @@ impl PetDo {
 
     fn object(self) -> Option<Entity> {
         match self {
-            PetDo::Eat(e) | PetDo::Litter(e) | PetDo::Scratch(e) | PetDo::Chew(e) | PetDo::Drink(e) | PetDo::Sleep(Some(e)) => Some(e),
+            PetDo::Eat(e) | PetDo::Litter(e) | PetDo::Scratch(e) | PetDo::Chew(e) | PetDo::Drink(e) | PetDo::Sleep(Some(e)) | PetDo::Hay(e) | PetDo::StallPee(e) => Some(e),
             _ => None,
         }
     }
@@ -383,14 +400,18 @@ fn choose(
         let mut pick: Option<(PetDo, Option<Vec2>)> = None;
         for (_, i) in needs {
             pick = match (i, sp) {
-                (HUNGER, 'h') => Some((PetDo::Graze, None)),
+                // (A horse to its box stall's hay, napping and peeing in it, where it has one.)
+                (HUNGER, 'h') => nearest(&|o, _, _| o.kind == ObjectKind::BoxStall)
+                    .and_then(|(s, _)| objects.get(s).ok().map(|(_, _, stf, ..)| (PetDo::Hay(s), Some(hay_spot(stf).0))))
+                    .or(Some((PetDo::Graze, None))),
+                (BLADDER, 'h') if !night => nearest(&|o, _, _| o.kind == ObjectKind::BoxStall).map(|(s, at)| (PetDo::StallPee(s), Some(at))).or_else(|| Some((PetDo::Pee, outdoors(&grid, building.as_deref(), here, pet, traits, &mut rng)))),
                 (HUNGER, _) => nearest(&|o, f, _| o.kind == ObjectKind::PetBowl && f.is_some_and(|f| f.0 > 0)).map(|(b, at)| (PetDo::Eat(b), Some(at))),
                 (BLADDER, 'c') => match nearest(&|o, _, _| o.kind == ObjectKind::LitterBox) {
                     Some((b, at)) => Some((PetDo::Litter(b), Some(at))),
                     None => Some((PetDo::Pee, outdoors(&grid, building.as_deref(), here, pet, traits, &mut rng))),
                 },
                 (BLADDER, _) => Some((PetDo::Pee, outdoors(&grid, building.as_deref(), here, pet, traits, &mut rng))),
-                (ENERGY, 'h') => Some((PetDo::Sleep(None), None)),
+                (ENERGY, 'h') => Some(nearest(&|o, _, _| o.kind == ObjectKind::BoxStall).map_or((PetDo::Sleep(None), None), |(s, at)| (PetDo::Sleep(Some(s)), Some(at)))),
                 (ENERGY, _) => match nearest(&|o, _, _| o.kind == ObjectKind::PetBed) {
                     Some((b, at)) => Some((PetDo::Sleep(Some(b)), Some(at))),
                     None => Some((PetDo::Sleep(None), None)),
@@ -429,7 +450,7 @@ fn choose(
 fn approach(o: &GameObject, tf: &Transform, from: Vec2, kind: &str) -> Vec2 {
     let c = o.world_center(tf).xz();
     let reach = match (o.kind, species(kind)) {
-        (ObjectKind::LitterBox | ObjectKind::PetBed, _) => return c,
+        (ObjectKind::LitterBox | ObjectKind::PetBed | ObjectKind::BoxStall, _) => return c,
         (ObjectKind::WaterTrough, _) => o.half.max_element() + 0.9,
         (_, 'd') => o.half.max_element() + 0.45,
         _ => o.half.max_element() + 0.25,
@@ -490,6 +511,8 @@ fn clip_for(kind: &str, what: PetDo, step: u32, traits: &[String], roll: f64) ->
         PetDo::Chew(_) => format!("{}2o_chewToy_play_loop{}_x", if k == "cl" { "cd" } else { k }, 1 + step % 2),
         PetDo::Drink(_) => format!("ah2o_waterTrough_drink_loop{}_x", 1 + step % 3),
         PetDo::Graze => format!("ah2o_hayPile_eat_loop{}_x", 1 + step % 4),
+        PetDo::Hay(_) => format!("ah2o_boxStall_eatHay_loop{}_x", 1 + step % 3),
+        PetDo::StallPee(_) => format!("{k}_pee_breathe_x"),
         PetDo::Groom => format!("{k}_idle_sit_groomSelf_loop{}_x", 1 + step % 2),
     }
 }
@@ -535,7 +558,12 @@ fn act(
         let since = *task.since.get_or_insert_with(|| {
             if let Some(o) = what.object().and_then(|o| objects.get(o).ok()) {
                 // (In a box or a bed: along it; else turned to it.)
-                if matches!(o.0.kind, ObjectKind::LitterBox | ObjectKind::PetBed) {
+                if o.0.kind == ObjectKind::BoxStall && matches!(what, PetDo::Hay(_)) {
+                    // (At the stall's hay rack, its back corner, head to it.)
+                    let (at, turn) = hay_spot(o.1);
+                    tf.translation = Vec3::new(at.x, tf.translation.y, at.y);
+                    tf.rotation = turn;
+                } else if matches!(o.0.kind, ObjectKind::LitterBox | ObjectKind::PetBed | ObjectKind::BoxStall) {
                     tf.rotation = o.1.rotation;
                 } else {
                     let to = o.0.world_center(o.1).xz() - here;
@@ -600,7 +628,7 @@ fn act(
                 done |= now - since >= PEE_MINUTES;
             }
             PetDo::Sleep(bed) => {
-                let rate = if bed.is_some() { BED_RATE } else { FLOOR_RATE } * crate::pettraits::sleep_multiplier(traits);
+                let rate = if bed.is_some() { if pet.kind.ends_with('h') { STALL_NAP_RATE } else { BED_RATE } } else { FLOOR_RATE } * crate::pettraits::sleep_multiplier(traits);
                 let d = decay(&pet.kind, ENERGY, m.0[ENERGY]) * crate::pettraits::decay_multiplier(&pet.kind, traits, ENERGY);
                 m.add(ENERGY, (rate + d) * hours);
                 // (Up with the morning once rested enough.)
@@ -617,6 +645,20 @@ fn act(
             }
             PetDo::Drink(_) => m.add(THIRST, DRINK_RATE * hours),
             PetDo::Graze => m.add(HUNGER, GRAZE_RATE * hours),
+            PetDo::Hay(_) => m.add(HUNGER, HAY_RATE * hours),
+            PetDo::StallPee(s) => {
+                // (A dirty spot in the stall, to be cleaned out: `kPointsBeforeDirty`.)
+                if task.next_bite == 0.0 {
+                    task.next_bite = now;
+                    if let Ok((_, _, _, Some(mut g))) = objects.get_mut(s) {
+                        g.0 = (g.0 + STALL_DIRT).min(100.0);
+                    }
+                }
+                let left = (100.0 - m.0[BLADDER]).max(0.0);
+                let minutes_left = (PEE_MINUTES - (now - since)).max(0.5) as f32;
+                m.add(BLADDER, left * (hours * 60.0 / minutes_left).min(1.0));
+                done |= now - since >= PEE_MINUTES;
+            }
             PetDo::Groom => m.add(HYGIENE, GROOM_RATE * hours),
         }
         if done || m.0[need] >= 99.0 {
@@ -689,7 +731,7 @@ fn thoughts(mut commands: Commands, clock: Res<GameClock>, pets: Query<(Entity, 
 }
 
 /// PET_NEEDS=hungry|bladder|tired (tests): the household's pets that need, a few seconds in;
-/// PET_BOWL=1 puts a filled pet bowl and a litter box by the first of them.
+/// PET_BOWL=1 puts a filled pet bowl and a litter box by the first of them (`stall`: a box stall).
 #[allow(clippy::type_complexity)]
 fn needs_test(
     mut commands: Commands,
@@ -717,16 +759,19 @@ fn needs_test(
         }
         info!("pet needs test: {} {:?}", pet.name, m.0);
     }
+    // (PET_BOWL=stall: a box stall instead, a few metres off.)
+    let stall = std::env::var("PET_BOWL").is_ok_and(|v| v == "stall");
     if bowl && let Some(at) = first {
-        for (i, name) in ["petBowlCheap", "litterBoxCheap"].into_iter().enumerate() {
+        let things: &[&str] = if stall { &["boxStallAllEnglish"] } else { &["petBowlCheap", "litterBoxCheap"] };
+        for (i, name) in things.iter().copied().enumerate() {
             let Some(key) = data.0.catalog.iter().find(|c| c.instance_name.eq_ignore_ascii_case(name)).map(|c| c.objd) else {
                 warn!("pet needs test: no {name} in the catalogue");
                 continue;
             };
             let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
-            let p = at + Vec3::new(1.5 + i as f32 * 1.5, 0.0, 1.0);
+            let p = at + if stall { Vec3::new(5.0, 0.0, 4.0) } else { Vec3::new(1.5 + i as f32 * 1.5, 0.0, 1.0) };
             if let Some(s) = crate::home::spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, key, p, 0.0) {
-                if i == 0 {
+                if i == 0 && !stall {
                     commands.entity(s.entity).insert(BowlFood(FULL_BOWL));
                 }
                 info!("pet needs test: {name} put down at {p}");

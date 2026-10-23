@@ -260,6 +260,10 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_terrarium_",
     // (A bird cage's, and a large bird taught to talk.)
     "a2o_birdcage_",
+    // (A horse's box stall: hay eaten, the stall cleaned out.)
+    "a2o_boxStall_clean_",
+    "c2o_boxStall_clean_",
+    "ah2o_boxStall_eatHay_",
     // (A run down a slippy slide.)
     "a2o_waterSlide_",
     "c2o_waterSlide_",
@@ -741,6 +745,7 @@ pub const CLIP_PREFIXES: &[&str] = &[
 
 /// Clip actors that are props held by the Sim (baked with the Sim's clips).
 pub const PROP_ACTORS: &[&str] = &[
+    "pitchfork",
     "soda",
     "candy",
     "fork",
