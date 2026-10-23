@@ -158,6 +158,10 @@ pub fn showing(buy: &BuyMode) -> bool {
 #[derive(Component)]
 struct RoofTab(bool);
 
+/// The stairs panel's spiral staircases tab.
+#[derive(Component)]
+struct SpiralTab;
+
 /// A blueprint room kind's tab (its flag bit).
 #[derive(Component)]
 struct RoomTab(u8);
@@ -305,7 +309,7 @@ fn controls(
     hud: Res<crate::buildhud::BuildHud>,
     mut buy: ResMut<BuyMode>,
     building: Option<Res<crate::building::ActiveBuilding>>,
-    (clicks, tabs, room_tabs): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &RoofTab), Changed<Interaction>>, Query<(&Interaction, &RoomTab), Changed<Interaction>>),
+    (clicks, tabs, room_tabs, spiral_tab): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &RoofTab), Changed<Interaction>>, Query<(&Interaction, &RoomTab), Changed<Interaction>>, Query<&Interaction, (With<SpiralTab>, Changed<Interaction>)>),
     (bars, mut sliders, mouse): (Query<&UiScrollBar>, Query<&mut UiSlider>, Res<ButtonInput<MouseButton>>),
     (windows, areas, mut wheel): (Query<&Window, With<PrimaryWindow>>, Query<(&ComputedNode, &UiGlobalTransform, &InheritedVisibility)>, MessageReader<MouseWheel>),
     mut objects: Option<ResMut<crate::buildobjects::BuildObjects>>,
@@ -366,6 +370,15 @@ fn controls(
             }
         }
         Cat::Stairs | Cat::Railings => {
+            // (The spiral staircases: the catalogue's grid of them.)
+            if spiral_tab.iter().any(|i| *i == Interaction::Pressed)
+                && let Some(o) = objects.as_deref_mut()
+            {
+                buy.drop_tools(&mut commands);
+                o.choose(crate::buildobjects::ObjTab::SpiralStairs);
+                buy.show(crate::buildobjects::ObjTab::SpiralStairs.catalogue());
+                return;
+            }
             let any = |ids: [u32; 2]| ids.iter().any(|id| s.all_with(*id).into_iter().any(|e| pressed(&clicks, Some(e))));
             if any(RAILINGS_BUTTONS) && !buy.railings_view {
                 buy.railings_view = true;
@@ -573,17 +586,28 @@ fn draw(
         }
         commands.entity(parent).insert(Visibility::Inherited).entry::<Node>().and_modify(|mut n| n.overflow = Overflow::visible());
     }
-    // The stairs' one tab (spiral stairs aren't here).
+    // The stairs' tabs: the staircases (this page) and the spiral staircases (the catalogue's,
+    // put in as objects are).
     if cat == Cat::Stairs
-        && let (Some(parent), Some(mut tab), Some(source)) = (s.id(STAIR_TABS), ui.layout("TabControl").cloned(), ui.find("Build", STAIR_TAB).cloned())
+        && let (Some(parent), Some(template)) = (s.id(STAIR_TABS), ui.layout("TabControl").cloned())
     {
         let holder = crate::buyhud::holder(&mut commands, parent, &mut c.tabs[3], &visibility);
-        tab.area = [1.0, 1.0, 44.0, 52.0];
-        let t = ui.spawn_under(&mut commands, &mut images, &mut fonts, &tab, holder);
-        if let Some(root) = t.root {
-            commands.entity(root).insert((crate::layout::Selected, crate::icons::Tooltip("Stairs".into())));
-            if let Some((icon, _)) = ui.image(&mut images, source.icon) {
-                commands.entity(root).insert(crate::layout::SetIcon(icon));
+        for (n, (id, tip)) in [(STAIR_TAB, "Stairs"), (SPIRAL_TAB, "Spiral Staircases")].into_iter().enumerate() {
+            let Some(source) = ui.find("Build", id).cloned() else { continue };
+            let mut tab = template.clone();
+            let x = n as f32 * 36.0;
+            tab.area = [x + 1.0, 1.0, x + 44.0, 52.0];
+            let t = ui.spawn_under(&mut commands, &mut images, &mut fonts, &tab, holder);
+            if let Some(root) = t.root {
+                commands.entity(root).insert(crate::icons::Tooltip(tip.into()));
+                if n == 0 {
+                    commands.entity(root).insert((crate::layout::Selected, ZIndex(1)));
+                } else {
+                    commands.entity(root).insert(SpiralTab);
+                }
+                if let Some((icon, _)) = ui.image(&mut images, source.icon) {
+                    commands.entity(root).insert(crate::layout::SetIcon(icon));
+                }
             }
         }
         commands.entity(parent).insert(Visibility::Inherited).entry::<Node>().and_modify(|mut n| n.overflow = Overflow::visible());

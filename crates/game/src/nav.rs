@@ -15,7 +15,7 @@ pub struct NavPlugin;
 impl Plugin for NavPlugin {
     fn build(&self, app: &mut App) {
         // (After doors and gates open their ways through, and with them in place.)
-        app.add_systems(Update, (rebuild_upper_floors, rebuild_grid, settle_lot_exit, spiral_test, follow_paths, climb_spirals).chain().after(crate::building::cut_openings).run_if(in_state(PlayMode::Live)));
+        app.init_resource::<SpiralLinks>().add_systems(Update, (spiral_place_test, spiral_links, rebuild_upper_floors, rebuild_grid, settle_lot_exit, spiral_test, follow_paths, climb_spirals).chain().after(crate::building::cut_openings).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -48,7 +48,7 @@ impl Default for Floor {
 }
 
 /// Stairs or an elevator joining `level` to `upper`: walk to `bottom`, climb (or ride) to `top`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StairLink {
     pub level: u8,
     pub upper: u8,
@@ -668,6 +668,7 @@ fn rebuild_grid(
     obstacles: Obstacles,
     building: Option<Res<crate::building::ActiveBuilding>>,
     mut upper: Option<ResMut<UpperFloors>>,
+    spirals: Res<SpiralLinks>,
 ) {
     let Some(mut grid) = grid else { return };
     // (A frame after it's marked dirty: a wall, fence or object put in or taken out then is
@@ -682,7 +683,7 @@ fn rebuild_grid(
     }
     grid.settling = false;
     if let (Some(b), Some(u)) = (building.as_deref(), upper.as_deref_mut()) {
-        rebuild_upper(b, u, &obstacles);
+        rebuild_upper(b, u, &obstacles, &spirals);
     }
     fill_grid(&mut grid, &world.data, &obstacles, building.as_deref());
 }
@@ -722,10 +723,11 @@ fn mark_obstacle(grid: &mut NavGrid, gt: &GlobalTransform, ob: &Obstacle, barrie
 }
 
 /// Builds the walk grids of the upper floors: cells with floor, minus walls and furniture there.
-pub fn rebuild_upper(b: &crate::building::ActiveBuilding, upper: &mut UpperFloors, obstacles: &Obstacles) {
+pub fn rebuild_upper(b: &crate::building::ActiveBuilding, upper: &mut UpperFloors, obstacles: &Obstacles, spirals: &SpiralLinks) {
     upper.made = true;
     upper.grids.clear();
     upper.stairs = b.stairs.clone();
+    upper.stairs.extend(spirals.0.iter().copied());
     // (The upper floors, and a basement.)
     for level in (b.data.basement.is_some().then_some(0).into_iter()).chain(2..=b.top_level) {
         let mut g = NavGrid::new(b.center.xz(), b.extent + 2.0);
@@ -1088,6 +1090,60 @@ pub(crate) fn follow_paths(
     }
 }
 
+/// The spiral staircases standing (the lot's own, those bought, a visited lot's): each joins its
+/// floor to the one over it, by its own steps.
+#[derive(Resource, Default)]
+pub struct SpiralLinks(pub Vec<StairLink>);
+
+/// A spiral staircase (an object of the game's `StaircaseSpiral` classes).
+#[derive(Component)]
+pub struct SpiralStair;
+
+/// Spiral staircases found among the objects as they're set out, and their links kept up as they're
+/// put in, moved or taken away (the walk grids rebuilt with them): up to the floor over the one they
+/// stand on, where there's floor at the top step (the household's house; a visited lot's as built).
+#[allow(clippy::type_complexity)]
+fn spiral_links(
+    mut commands: Commands,
+    catalog: Option<Res<crate::loading::Catalog>>,
+    new: Query<(Entity, &crate::interact::GameObject), Added<crate::interact::GameObject>>,
+    spirals: Query<(&GlobalTransform, Option<&Floor>, Has<crate::visit::LotObject>), With<SpiralStair>>,
+    changed: Query<(), (With<SpiralStair>, Or<(Changed<GlobalTransform>, Changed<Floor>)>)>,
+    mut gone: RemovedComponents<SpiralStair>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+    mut links: ResMut<SpiralLinks>,
+    mut grid: Option<ResMut<NavGrid>>,
+) {
+    if let Some(cat) = catalog.as_deref() {
+        for (e, o) in &new {
+            if cat.by_key(&o.objd).is_some_and(|c| c.spiral) {
+                commands.entity(e).insert(SpiralStair);
+            }
+        }
+    }
+    if changed.is_empty() && gone.read().count() == 0 && !building.as_ref().is_some_and(|b| b.is_changed()) {
+        return;
+    }
+    let now: Vec<StairLink> = spirals
+        .iter()
+        .filter_map(|(gt, floor, visiting)| {
+            let (_, rot, pos) = gt.to_scale_rotation_translation();
+            let s = floor.map_or(1, |f| f.0);
+            let (foot, _) = spiral_slot(pos, rot, SPIRAL_ON_FOOT);
+            let (head, _) = spiral_slot(pos, rot, SPIRAL_ON_TOP);
+            let floored = visiting || building.as_deref().is_none_or(|b| b.floor_y(s + 1, head).is_some());
+            floored.then_some(StairLink { level: s, upper: s + 1, bottom: foot.xz(), top: head.xz(), y0: foot.y, y1: head.y, spiral: Some((pos, rot)) })
+        })
+        .collect();
+    // (The walk grids rebuilt only for a change.)
+    if now != links.0 {
+        links.0 = now;
+        if let Some(g) = grid.as_mut() {
+            g.dirty = true;
+        }
+    }
+}
+
 /// A Sim on a spiral staircase, played up or down it with the game's clips (its `SpiralStaircase`:
 /// on at the foot facing in, `walkUp_start`, `_climb`, `_stop`, off at the top; or on at the top,
 /// `walkDown_start`, then from the foot `_descend` and `_stop`): which part, how far into it.
@@ -1127,6 +1183,53 @@ fn spiral_test(time: Res<Time>, mut stage: Local<u8>, upper: Option<Res<UpperFlo
         q.0.clear();
         q.push_player(crate::interact::Action::new("Go Here", crate::interact::ActionKind::GoHere(p, level), false));
         *stage += 1;
+    }
+}
+
+/// `SPIRAL_PLACE=1` (tests): six seconds in, the catalogue's first spiral staircase bought and set
+/// down in the household's house where the ground floor and the one over it are open floor (no wall
+/// across), the camera on it.
+#[allow(clippy::too_many_arguments)]
+fn spiral_place_test(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut done: Local<bool>,
+    building: Option<Res<crate::building::ActiveBuilding>>,
+    catalog: Res<crate::loading::Catalog>,
+    data: Res<crate::baked::Baked>,
+    mut assets: ResMut<crate::objects::ObjectAssets>,
+    (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    mut cams: Query<&mut crate::camera::SimsCamera>,
+) {
+    if *done || std::env::var_os("SPIRAL_PLACE").is_none() || time.elapsed_secs() < 6.0 {
+        return;
+    }
+    let (Some(b), Some(e)) = (building, catalog.entries.iter().find(|e| e.spiral)) else { return };
+    *done = true;
+    let floored = |level: u8, x: i32, z: i32| b.data.floors.iter().any(|f| f.level == level && f.x as i32 == x && f.z as i32 == z);
+    let walled = |x: i32, z: i32| {
+        let (lo, hi) = (Vec2::new(x as f32 - 1.2, z as f32 - 1.2), Vec2::new(x as f32 + 1.2, z as f32 + 1.2));
+        b.data.walls.iter().filter(|w| w.storey() <= 2).any(|w| {
+            let (a, c) = (Vec2::from(w.a), Vec2::from(w.b));
+            (0..=8).any(|i| { let p = a.lerp(c, i as f32 / 8.0); p.cmpge(lo).all() && p.cmple(hi).all() })
+        })
+    };
+    let spot = (2..b.data.depth as i32 - 2).flat_map(|z| (2..b.data.width as i32 - 2).map(move |x| (x, z))).find(|&(x, z)| {
+        [(-1, -1), (0, -1), (-1, 0), (0, 0)].iter().all(|(dx, dz)| floored(1, x + dx, z + dz) && floored(2, x + dx, z + dz)) && !walled(x, z)
+    });
+    let Some((x, z)) = spot else {
+        warn!("spiral place test: nowhere open on two floors");
+        return;
+    };
+    let pos = b.world(x as f32, z as f32, b.levels.get(1).copied().unwrap_or(0.0));
+    let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+    if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, e.key, pos, b.rot, None) {
+        commands.entity(o.entity).insert((crate::save::Bought, crate::buyhistory::NewPurchase, Floor(1), crate::building::BuildingPiece { level: 1 }));
+        info!("spiral place test: {} at lot ({x}, {z}), {pos}", e.name);
+    }
+    if let Ok(mut c) = cams.single_mut() {
+        c.look_at(pos + Vec3::Y * 3.0);
+        c.distance = 9.0;
     }
 }
 
@@ -1191,6 +1294,18 @@ pub(crate) fn climb_spirals(
 #[cfg(test)]
 mod walk_style_tests {
     use super::*;
+
+    #[test]
+    fn a_spiral_staircases_steps_turn_with_it() {
+        // (On at the foot facing in, -X; off at the top facing back, -Z: its routing slots.)
+        let (p, q) = spiral_slot(Vec3::new(10.0, 2.0, 5.0), Quat::IDENTITY, SPIRAL_ON_FOOT);
+        assert!((p - Vec3::new(10.337, 2.0, 4.5)).length() < 1e-4);
+        assert!((q * Vec3::Z - Vec3::NEG_X).length() < 1e-4);
+        let turned = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        let (p, q) = spiral_slot(Vec3::ZERO, turned, SPIRAL_OFF_TOP);
+        assert!((p - turned * Vec3::new(0.5, 3.0, -0.195)).length() < 1e-4);
+        assert!((q * Vec3::Z - turned * Vec3::NEG_Z).length() < 1e-4);
+    }
     use crate::sim::Age;
 
     fn sense(distance: f32, autonomous: bool, same_lot: bool) -> RouteSense {

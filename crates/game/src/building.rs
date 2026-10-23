@@ -32,7 +32,8 @@ impl Plugin for BuildingPlugin {
         .add_systems(Update, stream_nearby_lots.run_if(in_state(PlayMode::ChooseLot).and_then(in_state(AppState::InGame))))
         // (The lots shown went with the game: a game loaded after it, or a household changed to,
         // shows its own.)
-        .add_systems(OnExit(crate::AppState::InGame), |mut nearby: ResMut<NearbyLots>| *nearby = NearbyLots::default());
+        .add_systems(OnExit(crate::AppState::InGame), |mut nearby: ResMut<NearbyLots>| *nearby = NearbyLots::default())
+        .add_systems(Update, cut_spiral_holes.run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -945,6 +946,66 @@ pub struct PoolChanged;
 /// The active house's repaintings since it was built (kept in saves).
 #[derive(Resource, Default, Clone)]
 pub struct LotPaint(pub Vec<PaintOp>);
+
+/// A bought spiral staircase whose floor over it has been seen to.
+#[derive(Component)]
+pub struct HoleCut;
+
+/// The floor tiles over a spiral staircase standing so to cut away, as the game's does: those its
+/// steps come up through (its footprint, `spiral_extent` either way), all but the one its top step
+/// lands on (lot-local tiles).
+pub fn spiral_hole(b: &ActiveBuilding, at: Vec3, rot: Quat) -> Vec<(u16, u16)> {
+    const EXTENT: f32 = 0.9;
+    let (head, _) = crate::nav::spiral_slot(at, rot, crate::nav::SPIRAL_ON_TOP);
+    let landing = b.local(head).floor().as_ivec2();
+    let corners: Vec<Vec2> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().map(|(x, z)| b.local(at + rot * Vec3::new(x * EXTENT, 0.0, z * EXTENT))).collect();
+    let lo = corners.iter().fold(Vec2::splat(f32::MAX), |a, c| a.min(*c)).floor().as_ivec2();
+    let hi = corners.iter().fold(Vec2::splat(f32::MIN), |a, c| a.max(*c)).ceil().as_ivec2();
+    let mut out = Vec::new();
+    for z in lo.y.max(0)..hi.y {
+        for x in lo.x.max(0)..hi.x {
+            if IVec2::new(x, z) != landing {
+                out.push((x as u16, z as u16));
+            }
+        }
+    }
+    out
+}
+
+/// A spiral staircase bought: the floor over it cut away round its steps (`spiral_hole`), the
+/// change kept with the lot's (and undone with the purchase's).
+#[allow(clippy::type_complexity)]
+fn cut_spiral_holes(
+    mut commands: Commands,
+    new: Query<(Entity, &GlobalTransform, Option<&Floor>), (With<crate::nav::SpiralStair>, With<crate::save::Bought>, Without<HoleCut>)>,
+    building: Option<ResMut<ActiveBuilding>>,
+    (data, mut assets): (Res<crate::baked::Baked>, ResMut<ObjectAssets>),
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    mut faces: Query<(&WallFace, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut log: Option<ResMut<LotPaint>>,
+) {
+    let Some(mut b) = building else { return };
+    for (e, gt, floor) in &new {
+        commands.entity(e).insert(HoleCut);
+        let (_, rot, at) = gt.to_scale_rotation_translation();
+        let level = floor.map_or(1, |f| f.0) + 1;
+        let ops: Vec<PaintOp> = spiral_hole(&b, at, rot)
+            .into_iter()
+            .filter(|(x, z)| b.data.floors.iter().any(|f| f.level == level && f.x == *x && f.z == *z))
+            .map(|(x, z)| PaintOp::RemoveFloor { level, x, z })
+            .collect();
+        if ops.is_empty() {
+            continue;
+        }
+        info!("spiral staircase: {} floor tiles cut away over it", ops.len());
+        let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+        repaint(&mut commands, &mut b, &mut assets, &mut ctx, &ops, &mut faces);
+        match log.as_mut() {
+            Some(l) => l.0.extend(ops),
+            None => commands.insert_resource(LotPaint(ops)),
+        }
+    }
+}
 
 /// Logical construction state, independent of the render entities regenerated on undo.
 #[derive(Clone)]
@@ -2867,11 +2928,11 @@ pub fn spawn_building(
         }
     }
 
-    // Spiral staircases and ladders, one on each floor they climb from: each goes up to the floor
-    // over it, stepped onto at its front at the foot, and at the top on whichever side there's
-    // floor (a spiral's turns round; a ladder leans on the floor it climbs to).
+    // Ladders, one on each floor they climb from: each goes up to the floor over it, stepped onto at
+    // its front at the foot, and at the top on whichever side there's floor (it leans on the floor it
+    // climbs to). (Spiral staircases: `nav::spiral_links`.)
     if neighbor.is_none() || visit {
-        for o in b.objects.iter().filter(|o| o.script.contains("StaircaseSpiral") || o.script.ends_with(".Objects.Ladder")) {
+        for o in b.objects.iter().filter(|o| o.script.ends_with(".Objects.Ladder")) {
             let s = b.object_storey(o);
             let q = Quat::from_xyzw(o.rotation[0], o.rotation[1], o.rotation[2], o.rotation[3]).normalize();
             let f = rot.inverse() * (q * Vec3::Z);
@@ -2895,14 +2956,6 @@ pub fn spawn_building(
             let pick = |options: &[Vec2], storey: u8| {
                 options.iter().copied().find(|p| active.floor_cells_has(storey, *p) && !walled(*p, storey)).or_else(|| options.iter().copied().find(|p| active.floor_cells_has(storey, *p)))
             };
-            // (A spiral: on and off at its own steps, its routing slots, climbed with its clips.)
-            if !ladder {
-                let pos = Vec3::from(o.position);
-                let (foot, _) = crate::nav::spiral_slot(pos, q, crate::nav::SPIRAL_ON_FOOT);
-                let (head, _) = crate::nav::spiral_slot(pos, q, crate::nav::SPIRAL_ON_TOP);
-                active.stairs.push(StairLink { level: s, upper: s + 1, bottom: foot.xz(), top: head.xz(), y0: foot.y, y1: head.y, spiral: Some((pos, q)) });
-                continue;
-            }
             let bottom = if ladder { at + fwd * reach } else { pick(&[at + fwd * reach, at - right * reach, at + right * reach, at - fwd * reach], s).unwrap_or(at + fwd * reach) };
             let Some(top) = pick(&tops, s + 1) else { continue };
             let (wb, wt) = (active.world(bottom.x, bottom.y, 0.0), active.world(top.x, top.y, 0.0));

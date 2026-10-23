@@ -1654,7 +1654,11 @@ installation is unreachable.
   game's own picture (the catalogue keeps it with one of its twins), auto-railings on or off,
   and the Railings page with the catalogue's railings (CRAL); a staircase goes in in the one
   chosen with the railing chosen (else its own, by name), its pieces baked with the fences'.
-  `STAIR_STYLE=<n>` with `--build --storey` (tests).
+  The panel's spiral tab opens the catalogue's spiral staircases (the game's pictures and
+  prices), set down as objects are; one bought cuts the floor over it away round its steps (all
+  but the quarter its top step lands on) and joins the two floors, climbed with the game's clips.
+  `STAIR_STYLE=<n>` with `--build --storey`, `SPIRAL_PLACE=1` (one bought in the household's
+  house where two floors are open) (tests).
   The pool panel's Pool Objects opens the build catalogue's grid of the pool's things (the
   catalogue's ladders, diving boards, slides, waterfalls, loungers, the pool bar and lights), and
   the walls panel's Half Wall button the half walls.

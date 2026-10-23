@@ -318,6 +318,7 @@ fn rebuild_lot_grid(
     visited: Option<ResMut<VisitedLot>>,
     obstacles: crate::nav::Obstacles,
     building: Option<Res<ActiveBuilding>>,
+    spirals: Res<crate::nav::SpiralLinks>,
 ) {
     let Some(mut v) = visited else { return };
     if v.settle > 0 {
@@ -331,7 +332,7 @@ fn rebuild_lot_grid(
         v.upper.made = true;
         // (And its upper floors, from the building shown for it.)
         if let Some(a) = building.as_deref().and_then(|b| b.away.as_deref()) {
-            crate::nav::rebuild_upper(a, &mut v.upper, &obstacles);
+            crate::nav::rebuild_upper(a, &mut v.upper, &obstacles, &spirals);
             debug!(
                 "visit {}: upper floors {:?}, links {:?}",
                 v.lot,
