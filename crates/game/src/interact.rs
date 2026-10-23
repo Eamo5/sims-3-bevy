@@ -3695,7 +3695,12 @@ pub(crate) fn run_actions(
                         // (Standing before the pet, as far off as the game's jig has them.)
                         ActionKind::PetSocial { at, kind, .. } | ActionKind::DogTrick { at, kind, .. } => {
                             let mine = Vec2::new(tf.translation.x, tf.translation.z);
-                            Some((*at + (mine - *at).normalize_or(Vec2::X) * crate::pets::social_distance(kind), 1))
+                            // (A belly rub further off: the dog rolls over between them.)
+                            let apart = match &action.kind {
+                                ActionKind::PetSocial { social, .. } => crate::pets::PET_SOCIALS.get(*social).map_or(0.0, |s| s.apart),
+                                _ => 0.0,
+                            };
+                            Some((*at + (mine - *at).normalize_or(Vec2::X) * (crate::pets::social_distance(kind) + apart), 1))
                         }
                         // (Before the fire, as near as the game's `PlanRouteToExtinguish` has them.)
                         ActionKind::Extinguish { at, level, .. } => {
@@ -4371,6 +4376,8 @@ pub(crate) fn run_actions(
                                         // (Turned down by a pet that dislikes them: the pack's
                                         // rejection, both sides, as its temperament has it.)
                                         let rejections: Vec<(&'static str, Option<&'static str>)> = crate::pettraits::REJECT_CLIPS.iter().map(|n| (*n, baked.as_deref().and_then(|b| crate::pets::social_clip(b, child, kind, n, 'x')))).collect();
+                                        // (A set in parts: its start, loops and end.)
+                                        let suite = baked.as_deref().and_then(|b| s.suite(b, child, kind));
                                         let (target, id, roll) = (match &action.kind {
                                             ActionKind::PetSocial { target, .. } => *target,
                                             _ => Entity::PLACEHOLDER,
@@ -4384,7 +4391,10 @@ pub(crate) fn run_actions(
                                             let clip = turned_down.map_or(c, |r| r.1);
                                             let clips: &'static [&'static str] = Box::leak(Box::new([clip]));
                                             if let Ok(mut e) = w.get_entity_mut(me) {
-                                                e.insert(crate::anim::ActionClip::new(None, clips));
+                                                match suite.filter(|_| turned_down.is_none()) {
+                                                    Some(suite) => e.insert(suite),
+                                                    None => e.insert(crate::anim::ActionClip::new(None, clips)),
+                                                };
                                                 if let Some((how, _)) = turned_down {
                                                     e.insert(crate::pets::Rejected(how));
                                                 }
@@ -5634,6 +5644,12 @@ pub(crate) fn run_actions(
                             motives.add(SOCIAL, s.social * keen * dt / 60.0);
                             if elapsed >= s.minutes {
                                 finished = true;
+                                // (A set in parts ended with its end, the pet's half with it.)
+                                if let (Some(suite), ActionKind::PetSocial { target, .. }) = (baked.as_deref().and_then(|b| s.suite(b, sim.age == Age::Child, kind)), &action.kind)
+                                    && !suite.end.is_empty()
+                                {
+                                    outro = Some((suite.end, None, suite.end_secs, *target, false));
+                                }
                                 // (How the pet takes to them for it: the social's liking, warmer for
                                 // pet people; turned down, a little less.)
                                 let (id, liking) = (sim.id, s.liking * keen);

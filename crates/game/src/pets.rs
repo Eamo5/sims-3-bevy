@@ -96,6 +96,12 @@ pub struct PetSocial {
     pub social: f32,
     pub min_liking: Option<f32>,
     pub liking: f32,
+    /// A social played in parts (`clip`'s `_start`, its loops, `_stop`: the pack's own sets, a
+    /// brushing's, a belly rub's), the loops; and the pet's hygiene from it an hour (brushing).
+    pub loops: &'static [&'static str],
+    pub hygiene: f32,
+    /// How much further off than usual the Sim stands for it (metres).
+    pub apart: f32,
 }
 
 /// How much more a Sim gets out of time with a pet of a kind (`TraitTuning`: an Animal Lover a
@@ -118,16 +124,21 @@ const GROWN: &[&str] = &["ac", "ad", "al", "ah"];
 
 /// A friendly social's liking, as a Sim's friendly talk until they're friends (the OK context's
 /// step), a hug or a smoochie more; a scolding costs some.
-pub static PET_SOCIALS: [PetSocial; 9] = [
-    PetSocial { name: "Pet", clip: "petFloor_friendly_neutral", kinds: ALL, minutes: 8.0, fun: 40.0, social: 70.0, min_liking: Some(10.0), liking: 2.5 },
-    PetSocial { name: "Let Sniff Hand", clip: "letSniffHand_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: 10.0, social: 40.0, min_liking: Some(-80.0), liking: 1.67 },
-    PetSocial { name: "Praise", clip: "praise_friendly_neutral", kinds: GROWN, minutes: 4.0, fun: 15.0, social: 50.0, min_liking: None, liking: 1.67 },
-    PetSocial { name: "Hug", clip: "giveLoveHug_friendly_neutral", kinds: &["ac", "ad", "al"], minutes: 5.0, fun: 30.0, social: 80.0, min_liking: Some(20.0), liking: 3.0 },
-    PetSocial { name: "Smoochie", clip: "giveSmoochie_neutral_neutral", kinds: &["ad"], minutes: 5.0, fun: 30.0, social: 80.0, min_liking: Some(40.0), liking: 3.0 },
-    PetSocial { name: "Feed Treat", clip: "feedTreat_friendly_neutral", kinds: GROWN, minutes: 5.0, fun: 20.0, social: 40.0, min_liking: None, liking: 2.5 },
-    PetSocial { name: "Rub Neck", clip: "rubNeck_friendly_neutral", kinds: &["ah"], minutes: 8.0, fun: 30.0, social: 60.0, min_liking: Some(-10.0), liking: 2.5 },
-    PetSocial { name: "Calm Down", clip: "calmDown_neutral_neutral", kinds: &["ah"], minutes: 6.0, fun: 15.0, social: 50.0, min_liking: Some(10.0), liking: 1.67 },
-    PetSocial { name: "Scold", clip: "scold_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: -10.0, social: 10.0, min_liking: None, liking: -3.0 },
+pub static PET_SOCIALS: [PetSocial; 13] = [
+    PetSocial { name: "Pet", clip: "petFloor_friendly_neutral", kinds: ALL, minutes: 8.0, fun: 40.0, social: 70.0, min_liking: Some(10.0), liking: 2.5, loops: &[], hygiene: 0.0, apart: 0.0 },
+    PetSocial { name: "Let Sniff Hand", clip: "letSniffHand_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: 10.0, social: 40.0, min_liking: Some(-80.0), liking: 1.67, loops: &[], hygiene: 0.0, apart: 0.0 },
+    PetSocial { name: "Praise", clip: "praise_friendly_neutral", kinds: GROWN, minutes: 4.0, fun: 15.0, social: 50.0, min_liking: None, liking: 1.67, loops: &[], hygiene: 0.0, apart: 0.0 },
+    PetSocial { name: "Hug", clip: "giveLoveHug_friendly_neutral", kinds: &["ac", "ad", "al"], minutes: 5.0, fun: 30.0, social: 80.0, min_liking: Some(20.0), liking: 3.0, loops: &[], hygiene: 0.0, apart: 0.0 },
+    PetSocial { name: "Smoochie", clip: "giveSmoochie_neutral_neutral", kinds: &["ad"], minutes: 5.0, fun: 30.0, social: 80.0, min_liking: Some(40.0), liking: 3.0, loops: &[], hygiene: 0.0, apart: 0.0 },
+    PetSocial { name: "Feed Treat", clip: "feedTreat_friendly_neutral", kinds: GROWN, minutes: 5.0, fun: 20.0, social: 40.0, min_liking: None, liking: 2.5, loops: &[], hygiene: 0.0, apart: 0.0 },
+    PetSocial { name: "Rub Neck", clip: "rubNeck_friendly_neutral", kinds: &["ah"], minutes: 8.0, fun: 30.0, social: 60.0, min_liking: Some(-10.0), liking: 2.5, loops: &[], hygiene: 0.0, apart: 0.0 },
+    PetSocial { name: "Calm Down", clip: "calmDown_neutral_neutral", kinds: &["ah"], minutes: 6.0, fun: 15.0, social: 50.0, min_liking: Some(10.0), liking: 1.67, loops: &[], hygiene: 0.0, apart: 0.0 },
+    // (The pack's sets in parts: a belly rub, playing, brushing a cat or dog, or a horse.)
+    PetSocial { name: "Rub Belly", clip: "soc_neutral_rubBelly", kinds: &["ad", "al", "cd", "cl"], minutes: 10.0, fun: 60.0, social: 80.0, min_liking: Some(40.0), liking: 3.0, loops: &["loop1", "loop2", "loop3"], hygiene: 0.0, apart: 0.3 },
+    PetSocial { name: "Play", clip: "soc_neutral_play_all", kinds: &["ad", "al", "cd", "cl"], minutes: 15.0, fun: 120.0, social: 60.0, min_liking: Some(-10.0), liking: 2.5, loops: &["loop1", "loop2"], hygiene: 0.0, apart: 0.0 },
+    PetSocial { name: "Brush", clip: "brush", kinds: &["ac", "ad", "al"], minutes: 15.0, fun: 20.0, social: 50.0, min_liking: Some(-30.0), liking: 2.0, loops: &["loop"], hygiene: 240.0, apart: 0.0 },
+    PetSocial { name: "Brush Horse", clip: "brush", kinds: &["ah"], minutes: 20.0, fun: 20.0, social: 50.0, min_liking: Some(-30.0), liking: 2.0, loops: &["loop"], hygiene: 240.0, apart: 0.0 },
+    PetSocial { name: "Scold", clip: "scold_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: -10.0, social: 10.0, min_liking: None, liking: -3.0, loops: &[], hygiene: 0.0, apart: 0.0 },
 ];
 
 /// The pet's side of a social it turns down (the pack's `genRejectNeutral`; an aggressive pet's
@@ -175,7 +186,32 @@ impl PetSocial {
     /// side ('x') or the pet's ('y'), if the game has it (interned: animations are named for
     /// good).
     pub fn clip_for(&self, data: &Baked, child: bool, kind: &str, side: char) -> Option<&'static str> {
+        if !self.loops.is_empty() {
+            return self.part(data, child, kind, self.loops[0], side);
+        }
         social_clip(data, child, kind, self.clip, side)
+    }
+
+    /// A part of a social played in parts (`start`, a loop, `stop`), for a side.
+    pub fn part(&self, data: &Baked, child: bool, kind: &str, part: &str, side: char) -> Option<&'static str> {
+        let want = |who: char| format!("{who}2{kind}_{}_{part}_{side}", self.clip);
+        let has = |n: &str| data.0.clip_names.iter().any(|c| c.eq_ignore_ascii_case(n));
+        let name = [if child { Some(want('c')) } else { None }, Some(want('a'))].into_iter().flatten().find(|n| has(n))?;
+        Some(intern(name))
+    }
+
+    /// The Sim's clips for a social played in parts: its start, its loops in turn, and its end.
+    pub fn suite(&self, data: &Baked, child: bool, kind: &str) -> Option<crate::anim::ActionClip> {
+        if self.loops.is_empty() {
+            return None;
+        }
+        let loops: Vec<&'static str> = self.loops.iter().filter_map(|l| self.part(data, child, kind, l, 'x')).collect();
+        if loops.is_empty() {
+            return None;
+        }
+        let loops: &'static [&'static str] = Box::leak(loops.into_boxed_slice());
+        let end: &'static [&'static str] = Box::leak(self.part(data, child, kind, "stop", 'x').into_iter().collect::<Vec<_>>().into_boxed_slice());
+        Some(crate::anim::ActionClip::new(self.part(data, child, kind, "start", 'x'), loops).ending(end, 2.5))
     }
 }
 
@@ -186,6 +222,13 @@ pub fn social_clip(data: &Baked, child: bool, kind: &str, clip: &str, side: char
     let has = |n: &str| data.0.clip_names.iter().any(|c| c.eq_ignore_ascii_case(n));
     let name = [if child { Some(want('c')) } else { None }, Some(want('a'))].into_iter().flatten().find(|n| has(n))?;
     Some(intern(name))
+}
+
+/// The pet's half of a Sim's clip of a pair (`a2ad_brush_loop_x`: `…_y`), if the game has it.
+fn partner_clip(data: &Baked, sim_clip: &str) -> Option<&'static str> {
+    let y = format!("{}_y", sim_clip.strip_suffix("_x")?);
+    let has = data.0.clip_names.iter().any(|c| c.eq_ignore_ascii_case(&y));
+    has.then(|| intern(y))
 }
 
 /// A name kept for good (animation names are few, and asked for again and again).
@@ -218,13 +261,23 @@ pub struct PetBusy;
 fn social_partners(
     mut commands: Commands,
     data: Res<Baked>,
-    sims: Query<(&crate::interact::ActionQueue, &Transform, &crate::sim::Sim, Option<&Rejected>), Without<Pet>>,
+    sims: Query<(&crate::interact::ActionQueue, &Transform, &crate::sim::Sim, Option<&Rejected>, Option<&crate::anim::ClipPlayer>), Without<Pet>>,
     mut pets: Query<(Entity, &Pet, &mut Transform, &mut PetAnim, Has<PetBusy>)>,
     ridden: Query<(), With<crate::riding::Ridden>>,
 ) {
     let mut seen: Vec<Entity> = Vec::new();
-    for (q, stf, sim, rejected) in &sims {
+    for (q, stf, sim, rejected, player) in &sims {
         let Some(a) = q.0.front() else { continue };
+        // (The end of a set in parts: the pet's half of the Sim's end.)
+        if let crate::interact::ActionKind::Outro { target, .. } = a.kind
+            && let Ok((e, _, _, mut anim, _)) = pets.get_mut(target)
+        {
+            seen.push(e);
+            if let Some(y) = player.and_then(|p| partner_clip(&data, &p.name)) {
+                anim.play(y.to_string());
+            }
+            continue;
+        }
         // (A dog being taught a trick is `dogtricks`' to see to.)
         if let crate::interact::ActionKind::DogTrick { target, .. } = a.kind {
             seen.push(target);
@@ -256,7 +309,11 @@ fn social_partners(
                 let to = stf.translation.xz() - tf.translation.xz();
                 tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
                 let child = sim.age == crate::sim::Age::Child;
-                let c = if let Some(r) = rejected { social_clip(&data, child, &pet.kind, r.0, 'y') } else { PET_SOCIALS.get(social).and_then(|s| s.clip_for(&data, child, &pet.kind, 'y')) };
+                // (A set in parts: the pet's half of whichever part the Sim's playing.)
+                let parts = PET_SOCIALS.get(social).is_some_and(|s| !s.loops.is_empty()) && rejected.is_none();
+                let c = if parts {
+                    player.and_then(|p| partner_clip(&data, &p.name))
+                } else if let Some(r) = rejected { social_clip(&data, child, &pet.kind, r.0, 'y') } else { PET_SOCIALS.get(social).and_then(|s| s.clip_for(&data, child, &pet.kind, 'y')) };
                 if let Some(c) = c {
                     anim.play(c.to_string());
                 }

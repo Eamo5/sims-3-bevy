@@ -34,6 +34,8 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("book", "BookGeneral", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("toothbrush", "Toothbrush", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("sponge", "AccessorySponge", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    // (A pet's brush, as brushing a pet: the Pets pack's.)
+    ("brush", "accessoryPetBrushSmallPets", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("toiletBrush", "ToiletBrush", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     // (The mop's clip carries it about from the Sim's root.)
     ("mop", "cleaningMop", "b__ROOT__", [0.0; 3], [0.0; 3]),

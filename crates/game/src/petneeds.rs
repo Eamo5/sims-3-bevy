@@ -312,6 +312,8 @@ fn attention(time: Res<Time>, clock: Res<GameClock>, sims: Query<&crate::interac
         let traits = traits.map_or(&[][..], |t| &t.0[..]);
         m.add(SOCIAL, s.social * crate::pettraits::gain_multiplier(traits, SOCIAL) * hours);
         m.add(FUN, s.fun * crate::pettraits::gain_multiplier(traits, FUN) * hours);
+        // (Brushed: cleaner.)
+        m.add(HYGIENE, s.hygiene * hours);
     }
 }
 

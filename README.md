@@ -978,6 +978,10 @@ installation is unreachable.
   and company are seen to every five minutes; "Dismount" (or the ride cancelled, or anything
   else asked of the rider) brings them down beside it. `RIDE_TEST=<horse>[:<dx>,<dz>[,<s>]]`,
   `RIDE_SKILL=<level>` (tests).
+  The pack's longer socials are played in their parts, start, loops and end, the pet's half of
+  each in step with the Sim's: Rub Belly (a dog liking them from 40, rolling over between them),
+  Play (dogs), Brush (cats and dogs; Brush Horse), the Sim with the pack's pet brush in hand and
+  the pet's hygiene seen to as it's brushed.
   Dogs learn tricks (the pack's `TrickSkill`): "Teach Trick..." on a household dog's menu (for
   teens and up) offers each trick its Tricks level allows (Sit, Sit Up, Speak, Shake, Roll Over,
   Play Dead, from the tuning's `kTrickSkillLevelRequired` 0 to 5), and teaching goes round the
