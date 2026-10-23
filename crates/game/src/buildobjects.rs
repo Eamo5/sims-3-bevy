@@ -139,6 +139,8 @@ pub enum ObjTab {
     PoolObjects,
     /// The spiral staircases (the Stairs panel's spiral tab).
     SpiralStairs,
+    /// The elevators (the Stairs panel's Elevators).
+    Elevators,
     Flowers,
     Shrubs,
     Trees,
@@ -176,6 +178,7 @@ impl ObjTab {
             // (The pool panel's Pool Objects.)
             ObjTab::PoolObjects => 0x06ee_34a2,
             ObjTab::SpiralStairs => 0x3f22,
+            ObjTab::Elevators => 0x0a14_e850,
             ObjTab::Flowers => 0x3a01,
             ObjTab::Shrubs => 0x3a02,
             ObjTab::Trees => 0x3a03,
@@ -193,6 +196,7 @@ impl ObjTab {
             ObjTab::Gates => "Gates",
             ObjTab::PoolObjects => "Pool Objects",
             ObjTab::SpiralStairs => "Spiral Staircases",
+            ObjTab::Elevators => "Elevators",
             ObjTab::Flowers => "Flowers",
             ObjTab::Shrubs => "Shrubs",
             ObjTab::Trees => "Trees",
@@ -210,6 +214,7 @@ impl ObjTab {
             ObjTab::Gates => e.gate || (e.opening == Some(true) && build & GATE != 0),
             ObjTab::PoolObjects => e.pool,
             ObjTab::SpiralStairs => e.spiral,
+            ObjTab::Elevators => e.elevator.is_some(),
             ObjTab::Fireplaces => e.kind == crate::interact::ObjectKind::Fireplace,
             ObjTab::Flowers => build & FLOWER != 0,
             ObjTab::Shrubs => build & SHRUB != 0 && build & TREE == 0,
@@ -374,7 +379,7 @@ fn draw(
     let o = &mut *objects;
     let k = (buy.category == GARDENING_TAB) as usize;
     // (The tab chosen must be one of this catalogue's; the gates are on their own.)
-    let tabs: &[ObjTab] = if k == 1 { &GARDENING } else if o.tab == ObjTab::Gates { &[ObjTab::Gates] } else if o.tab == ObjTab::PoolObjects { &[ObjTab::PoolObjects] } else if o.tab == ObjTab::SpiralStairs { &[ObjTab::SpiralStairs] } else { &CONSTRUCTION };
+    let tabs: &[ObjTab] = if k == 1 { &GARDENING } else if o.tab == ObjTab::Gates { &[ObjTab::Gates] } else if o.tab == ObjTab::PoolObjects { &[ObjTab::PoolObjects] } else if o.tab == ObjTab::SpiralStairs { &[ObjTab::SpiralStairs] } else if o.tab == ObjTab::Elevators { &[ObjTab::Elevators] } else { &CONSTRUCTION };
     if !tabs.contains(&o.tab) {
         o.choose(tabs[0]);
     }
@@ -493,7 +498,7 @@ mod tests {
     use super::*;
 
     fn entry(opening: Option<bool>, kind: crate::interact::ObjectKind) -> CatalogEntry {
-        CatalogEntry { key: (1, 0, 1), name: "x".into(), price: 10, kind, opening, category: "Misc", shell: false, gate: false, pool: false, spiral: false }
+        CatalogEntry { key: (1, 0, 1), name: "x".into(), price: 10, kind, opening, category: "Misc", shell: false, gate: false, pool: false, spiral: false, elevator: None }
     }
 
     #[test]

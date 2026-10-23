@@ -2892,41 +2892,7 @@ pub fn spawn_building(
         }
     }
 
-    // Elevators: one per floor, stacked; Sims ride between the floors they stop at. (A tube
-    // elevator's top one also goes up to the floor over it, as the game's `TubeElevator`
-    // does, where there's a floor there.)
-    if neighbor.is_none() || visit {
-        let mut shafts: HashMap<(i32, i32), (Vec<(u8, Vec2)>, bool)> = HashMap::new();
-        for o in b.objects.iter().filter(|o| o.script.to_ascii_lowercase().contains("elevator")) {
-            let q = Quat::from_xyzw(o.rotation[0], o.rotation[1], o.rotation[2], o.rotation[3]).normalize();
-            let f = rot.inverse() * (q * Vec3::Z);
-            let fwd = Vec2::new(f.x, f.z).normalize_or_zero();
-            // (A 2x2 car, its origin at the middle of the tile at its doors' left: the shaft is
-            // its footprint's middle, whichever way each floor's doors face (the Wolffs' face
-            // opposite ways on their two floors).)
-            let middle = Vec2::from(o.local) - fwd * 0.5 + Vec2::new(fwd.y, -fwd.x) * 0.5;
-            let door = middle + fwd * 1.4;
-            let key = ((middle.x * 2.0).round() as i32, (middle.y * 2.0).round() as i32);
-            let e = shafts.entry(key).or_default();
-            e.0.push((b.object_storey(o), door));
-            e.1 |= o.script.contains("TubeElevator");
-        }
-        for (mut stops, tube) in shafts.into_values() {
-            stops.sort_by_key(|s| s.0);
-            stops.dedup_by_key(|s| s.0);
-            if tube
-                && let Some(&(top, door)) = stops.last()
-                && active.floor_cells_has(top + 1, door)
-            {
-                stops.push((top + 1, door));
-            }
-            for w in stops.windows(2) {
-                let ((l0, p0), (l1, p1)) = (w[0], w[1]);
-                let bw = |q: Vec2| active.world(q.x, q.y, 0.0).xz();
-                active.stairs.push(StairLink { level: l0, upper: l1, bottom: bw(p0), top: bw(p1), y0: level_y(l0), y1: level_y(l1), spiral: None });
-            }
-        }
-    }
+    // (Elevators and spiral staircases: `nav::spiral_links`, from the objects standing.)
 
     // Ladders, one on each floor they climb from: each goes up to the floor over it, stepped onto at
     // its front at the foot, and at the top on whichever side there's floor (it leans on the floor it

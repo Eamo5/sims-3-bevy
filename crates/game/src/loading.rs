@@ -55,6 +55,8 @@ pub struct CatalogEntry {
     pub pool: bool,
     /// A spiral staircase (Build mode's Stairs, its spiral tab).
     pub spiral: bool,
+    /// An elevator's stop on a floor (its doors; `true`, a tube elevator): Build mode's Elevators.
+    pub elevator: Option<bool>,
 }
 
 /// The buy-mode tab of a catalogue object: by what it does, else by the game's own grouping of
@@ -109,6 +111,7 @@ impl Catalog {
                 gate: crate::building::is_gate(&c.script),
             pool: c.script.contains(".Pools.") || c.script.ends_with("LightingPoolLight"),
             spiral: c.script.contains("StaircaseSpiral"),
+            elevator: (c.script.contains("ElevatorDoors") || c.script.contains("TubeElevator")).then(|| c.script.contains("TubeElevator")),
             })
             .collect();
         let index = entries.iter().enumerate().map(|(i, e)| (e.key, i)).collect();

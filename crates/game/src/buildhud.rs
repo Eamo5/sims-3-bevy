@@ -253,6 +253,8 @@ pub(crate) fn show(
     set_visible(&mut visibility, s.id(HOME), !wall && !pool && !foundation && !basement && !covers);
     set_visible(&mut visibility, s.id(MIDDLE), wall || pool || foundation || basement || covers);
     set_visible(&mut visibility, s.id(BACK), wall || pool || foundation || basement || covers);
+    // (The collections' tabs put away while the back button's up, as the game's `ShowMiddlePuck`.)
+    set_visible(&mut visibility, s.id(0x2f0), !(wall || pool || foundation || basement || covers));
     set_visible(&mut visibility, s.id(FOUNDATIONS), foundation);
     set_visible(&mut visibility, s.id(BASEMENTS), basement);
     set_visible(&mut visibility, s.id(0x390), crate::buildobjects::showing(&buy) && buy.category == crate::buy::CONSTRUCTION_TAB);

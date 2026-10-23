@@ -577,9 +577,9 @@ fn main() {
         let walls: usize = w.buildings.iter().map(|b| b.walls.len()).sum();
         let objs: usize = w.buildings.iter().map(|b| b.objects.len()).sum();
         println!("houses: {} with {walls} wall segments, {objs} objects", w.buildings.len());
-        for b in w.buildings.iter().filter(|b| b.objects.iter().any(|o| o.script.contains("StaircaseSpiral"))) {
+        for b in w.buildings.iter().filter(|b| b.objects.iter().any(|o| o.script.contains("StaircaseSpiral") || o.script.contains("ElevatorDoors"))) {
             let lot = b.lot;
-            println!("  spiral staircases on lot {:?} {:?}: {}", lot, w.lots.get(lot as usize).map(|l| (&l.info.internal_name, format!("{:016x}", l.info.id))), b.objects.iter().filter(|o| o.script.contains("StaircaseSpiral")).count());
+            println!("  spiral staircases / elevator doors on lot {:?} {:?}: {} / {}", lot, w.lots.get(lot as usize).map(|l| (&l.info.internal_name, format!("{:016x}", l.info.id))), b.objects.iter().filter(|o| o.script.contains("StaircaseSpiral")).count(), b.objects.iter().filter(|o| o.script.contains("ElevatorDoors")).count());
         }
         for b in w.buildings.iter().filter(|b| b.objects.iter().any(|o| o.level > 4)) {
             let lifts = b.objects.iter().filter(|o| o.script.to_ascii_lowercase().contains("elevator")).count();

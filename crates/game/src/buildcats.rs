@@ -291,7 +291,7 @@ fn spawn(mut commands: Commands, hud: Res<crate::buildhud::BuildHud>, mut c: Res
             commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
         }
     }
-    for (ids, tip) in [(STAIRS_BUTTONS, "Stairs"), (RAILINGS_BUTTONS, "Railings"), (ELEVATORS_BUTTONS, "Elevators (not available)")] {
+    for (ids, tip) in [(STAIRS_BUTTONS, "Stairs"), (RAILINGS_BUTTONS, "Railings"), (ELEVATORS_BUTTONS, "Elevators")] {
         for id in ids {
             for e in s.all_with(id) {
                 commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
@@ -380,6 +380,15 @@ fn controls(
                 return;
             }
             let any = |ids: [u32; 2]| ids.iter().any(|id| s.all_with(*id).into_iter().any(|e| pressed(&clicks, Some(e))));
+            // (The elevators: the catalogue's, put in a floor at a time as objects are.)
+            if any(ELEVATORS_BUTTONS)
+                && let Some(o) = objects.as_deref_mut()
+            {
+                buy.drop_tools(&mut commands);
+                o.choose(crate::buildobjects::ObjTab::Elevators);
+                buy.show(crate::buildobjects::ObjTab::Elevators.catalogue());
+                return;
+            }
             if any(RAILINGS_BUTTONS) && !buy.railings_view {
                 buy.railings_view = true;
                 c.scroll = 0;
@@ -477,7 +486,7 @@ fn draw(
     for (k, id) in STAIRS_BUTTONS.iter().enumerate() {
         lit(*id, k == 0, false);
         lit(RAILINGS_BUTTONS[k], k == 1, false);
-        lit(ELEVATORS_BUTTONS[k], false, true);
+        lit(ELEVATORS_BUTTONS[k], false, false);
     }
     // The panel as wide as the screen allows, the grid's columns to fill it.
     let (panel, _) = cat.ids();

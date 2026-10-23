@@ -1090,14 +1090,57 @@ pub(crate) fn follow_paths(
     }
 }
 
-/// The spiral staircases standing (the lot's own, those bought, a visited lot's): each joins its
-/// floor to the one over it, by its own steps.
+/// The spiral staircases and elevators standing (the lot's own, those bought, a visited lot's):
+/// a spiral joins its floor to the one over it, by its own steps; an elevator the floors it stops at.
 #[derive(Resource, Default)]
 pub struct SpiralLinks(pub Vec<StairLink>);
 
 /// A spiral staircase (an object of the game's `StaircaseSpiral` classes).
 #[derive(Component)]
 pub struct SpiralStair;
+
+/// An elevator's stop on a floor (the game's `ElevatorDoors`, or a `TubeElevator`: whether it's
+/// a tube).
+#[derive(Component)]
+pub struct ElevatorStop(pub bool);
+
+/// The links an elevator's stops make: each shaft (its stops stacked, by the middle of their 2x2
+/// car's footprint, whichever way each floor's doors face, as the Wolffs' do) joins the floors it
+/// stops at, one to the next, ridden from the doors on one to the doors on the other. A tube
+/// elevator's top one also goes up to the floor over it where there's floor there (the game's
+/// `TubeElevator`).
+pub fn elevator_links(stops: &[(Vec3, Quat, u8, bool)], floored: impl Fn(u8, Vec2) -> Option<f32>) -> Vec<StairLink> {
+    let mut shafts: Vec<(Vec2, Vec<(u8, Vec2, f32)>, bool)> = Vec::new();
+    for &(pos, rot, level, tube) in stops {
+        let f = rot * Vec3::Z;
+        let fwd = Vec2::new(f.x, f.z).normalize_or_zero();
+        let middle = pos.xz() - fwd * 0.5 + Vec2::new(fwd.y, -fwd.x) * 0.5;
+        let door = middle + fwd * 1.4;
+        match shafts.iter_mut().find(|s| s.0.distance(middle) < 0.3) {
+            Some(s) => {
+                s.1.push((level, door, pos.y));
+                s.2 |= tube;
+            }
+            None => shafts.push((middle, vec![(level, door, pos.y)], tube)),
+        }
+    }
+    let mut out = Vec::new();
+    for (_, mut stops, tube) in shafts {
+        stops.sort_by_key(|s| s.0);
+        stops.dedup_by_key(|s| s.0);
+        if tube
+            && let Some(&(top, door, _)) = stops.last()
+            && let Some(y) = floored(top + 1, door)
+        {
+            stops.push((top + 1, door, y));
+        }
+        for w in stops.windows(2) {
+            let ((l0, p0, y0), (l1, p1, y1)) = (w[0], w[1]);
+            out.push(StairLink { level: l0, upper: l1, bottom: p0, top: p1, y0, y1, spiral: None });
+        }
+    }
+    out
+}
 
 /// Spiral staircases found among the objects as they're set out, and their links kept up as they're
 /// put in, moved or taken away (the walk grids rebuilt with them): up to the floor over the one they
@@ -1108,23 +1151,30 @@ fn spiral_links(
     catalog: Option<Res<crate::loading::Catalog>>,
     new: Query<(Entity, &crate::interact::GameObject), Added<crate::interact::GameObject>>,
     spirals: Query<(&GlobalTransform, Option<&Floor>, Has<crate::visit::LotObject>), With<SpiralStair>>,
-    changed: Query<(), (With<SpiralStair>, Or<(Changed<GlobalTransform>, Changed<Floor>)>)>,
-    mut gone: RemovedComponents<SpiralStair>,
+    lifts: Query<(&GlobalTransform, Option<&Floor>, &ElevatorStop)>,
+    changed: Query<(), (Or<(With<SpiralStair>, With<ElevatorStop>)>, Or<(Changed<GlobalTransform>, Changed<Floor>)>)>,
+    (mut gone, mut gone_lifts): (RemovedComponents<SpiralStair>, RemovedComponents<ElevatorStop>),
     building: Option<Res<crate::building::ActiveBuilding>>,
     mut links: ResMut<SpiralLinks>,
     mut grid: Option<ResMut<NavGrid>>,
 ) {
     if let Some(cat) = catalog.as_deref() {
         for (e, o) in &new {
-            if cat.by_key(&o.objd).is_some_and(|c| c.spiral) {
-                commands.entity(e).insert(SpiralStair);
+            match cat.by_key(&o.objd) {
+                Some(c) if c.spiral => {
+                    commands.entity(e).insert(SpiralStair);
+                }
+                Some(c) if c.elevator.is_some() => {
+                    commands.entity(e).insert(ElevatorStop(c.elevator == Some(true)));
+                }
+                _ => {}
             }
         }
     }
-    if changed.is_empty() && gone.read().count() == 0 && !building.as_ref().is_some_and(|b| b.is_changed()) {
+    if changed.is_empty() && gone.read().count() + gone_lifts.read().count() == 0 && !building.as_ref().is_some_and(|b| b.is_changed()) {
         return;
     }
-    let now: Vec<StairLink> = spirals
+    let mut now: Vec<StairLink> = spirals
         .iter()
         .filter_map(|(gt, floor, visiting)| {
             let (_, rot, pos) = gt.to_scale_rotation_translation();
@@ -1135,6 +1185,15 @@ fn spiral_links(
             floored.then_some(StairLink { level: s, upper: s + 1, bottom: foot.xz(), top: head.xz(), y0: foot.y, y1: head.y, spiral: Some((pos, rot)) })
         })
         .collect();
+    let stops: Vec<(Vec3, Quat, u8, bool)> = lifts.iter().map(|(gt, f, l)| {
+        let (_, rot, pos) = gt.to_scale_rotation_translation();
+        (pos, rot, f.map_or(1, |f| f.0), l.0)
+    }).collect();
+    let b = building.as_deref();
+    now.extend(elevator_links(&stops, |level, p| {
+        let at = Vec3::new(p.x, 0.0, p.y);
+        b.and_then(|b| b.floor_y(level, at).or_else(|| b.away.as_deref().and_then(|a| a.floor_y(level, at))))
+    }));
     // (The walk grids rebuilt only for a change.)
     if now != links.0 {
         links.0 = now;
@@ -1168,12 +1227,19 @@ fn spiral_test(time: Res<Time>, mut stage: Local<u8>, upper: Option<Res<UpperFlo
     if time.elapsed_secs() < 8.0 || (*stage > 0 && going) {
         return;
     }
-    debug!("spiral test: {} links, {} spiral", u.stairs.len(), u.stairs.iter().filter(|s| s.spiral.is_some()).count());
-    let Some(s) = u.stairs.iter().filter(|s| s.spiral.is_some()).min_by(|a, b| a.bottom.distance(tf.translation.xz()).total_cmp(&b.bottom.distance(tf.translation.xz()))) else { return };
+    debug!("spiral test: {} links, {} spiral; on floor {} at {}", u.stairs.len(), u.stairs.iter().filter(|s| s.spiral.is_some()).count(), floor.0, tf.translation);
+    // (`lift`: by the nearest elevator instead, up a floor.)
+    let lift = v == "lift";
+    let Some(s) = u.stairs.iter().filter(|s| s.spiral.is_some() != lift && (!lift || s.upper == s.level + 1)).min_by(|a, b| a.bottom.distance(tf.translation.xz()).total_cmp(&b.bottom.distance(tf.translation.xz()))) else { return };
     let (at, rot) = s.spiral.unwrap_or_default();
     let off = |slot: (Vec3, Vec3)| { let (p, turn) = spiral_slot(at, rot, slot); p.xz() + (turn * Vec3::Z).xz() * 1.4 };
     // (To the other floor, and (`both`) back.)
-    let other = |f: u8| if f == s.upper { (off(SPIRAL_OFF_FOOT), s.level) } else { (off(SPIRAL_OFF_TOP), s.upper) };
+    let other = |f: u8| match (f == s.upper, lift) {
+        (true, true) => (s.bottom, s.level),
+        (false, true) => (s.top, s.upper),
+        (true, false) => (off(SPIRAL_OFF_FOOT), s.level),
+        (false, false) => (off(SPIRAL_OFF_TOP), s.upper),
+    };
     let go = match (*stage, v.as_str()) {
         (0, _) | (1, "both") => Some(other(floor.0)),
         _ => None,
@@ -1294,6 +1360,18 @@ pub(crate) fn climb_spirals(
 #[cfg(test)]
 mod walk_style_tests {
     use super::*;
+
+    #[test]
+    fn an_elevators_stops_join_the_floors_they_stop_at() {
+        // (Three stops of one shaft, the middle one's doors the other way; a tube's top goes on up.)
+        let back = Quat::from_rotation_y(std::f32::consts::PI);
+        let stops = [(Vec3::new(10.0, 0.0, 10.0), Quat::IDENTITY, 1, false), (Vec3::new(11.0, 3.0, 9.0), back, 2, false), (Vec3::new(10.0, 6.0, 10.0), Quat::IDENTITY, 3, false)];
+        let links = elevator_links(&stops, |_, _| None);
+        assert_eq!(links.iter().map(|l| (l.level, l.upper)).collect::<Vec<_>>(), vec![(1, 2), (2, 3)]);
+        assert_eq!((links[0].y0, links[0].y1), (0.0, 3.0));
+        let tube = elevator_links(&[(Vec3::ZERO, Quat::IDENTITY, 1, true)], |l, _| (l == 2).then_some(3.0));
+        assert_eq!(tube.iter().map(|l| (l.level, l.upper)).collect::<Vec<_>>(), vec![(1, 2)]);
+    }
 
     #[test]
     fn a_spiral_staircases_steps_turn_with_it() {

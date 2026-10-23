@@ -1664,6 +1664,10 @@ installation is unreachable.
   game's own picture (the catalogue keeps it with one of its twins), auto-railings on or off,
   and the Railings page with the catalogue's railings (CRAL); a staircase goes in in the one
   chosen with the railing chosen (else its own, by name), its pieces baked with the fences'.
+  Its Elevators button opens the catalogue's elevators (the deco elevator, a floor's doors at a
+  time, and the tube elevator); stops stacked on one shaft join the floors they stop at, ridden
+  between (a tube's top one on up to the floor over it), for the lot's own and those bought. The
+  collections' tabs are put away while a panel's back button is up, as the game's.
   The panel's spiral tab opens the catalogue's spiral staircases (the game's pictures and
   prices), set down as objects are; one bought cuts the floor over it away round its steps (all
   but the quarter its top step lands on) and joins the two floors, climbed with the game's clips.
@@ -1716,7 +1720,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-complete Build Mode interface; Create a Pet's coat painting and face shapes; complete object placement and routing compatibility; the rest of the expansions'
+complete Build Mode interface (curved pools, diagonal foundations, collections); Create a Pet's coat painting and face shapes; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
 ## Controls
