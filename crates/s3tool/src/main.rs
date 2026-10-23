@@ -57,6 +57,19 @@ fn main() {
         }
         return;
     }
+    if args[1] == "collections" {
+        // collections <root>: the game's own Buy-mode collections (GameData/.../Collections): each
+        // one's name, icon (and whether the install has it) and objects.
+        let root = std::path::Path::new(&args[2]);
+        let set = s3pkg::install::open_install(root, |_| true);
+        let strings = s3formats::stbl::load_english(&set);
+        for c in s3bake::gamedata::read_collections(root) {
+            let has = set.read_ti(0x2F7D_0004, c.icon).is_some();
+            let name = strings.get(&s3pkg::fnv64(&c.name_key.to_ascii_lowercase())).cloned().unwrap_or_default();
+            println!("{} [{name}] icon {:016X} ({}) {} objects", c.name_key, c.icon, if has { "found" } else { "missing" }, c.objects.len());
+        }
+        return;
+    }
     if args[1] == "routeslots" {
         // routeslots <root> <objd instance hex>...: an object's routing slots and footprint-ish bounds.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);

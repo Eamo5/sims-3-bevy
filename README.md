@@ -1563,6 +1563,11 @@ installation is unreachable.
   put down free (back in if it isn't), with Sell All. It's kept with the game and goes along when
   the household moves or another is played, and Edit Town's Move Out With Home packs a household's
   furniture into it.
+- **Collections**: Buy mode's Collections button shows the game's own collections (the
+  install's `Collections` packages, base game and packs: each pack's things, Eco Glam, Seaside
+  Summer, Simply Elegant and the rest) in the categories' place, a grid of their icons (the
+  game's, named on hover with how many objects, turned by the wheel); the one chosen fills the
+  catalogue with its objects, cheapest first. `BUY_COLLECTION=<n>` (tests).
 - **The game's own HUD**: the live-mode interface is the game's, drawn from its own layouts
   (`UI.package`'s window trees, pictures and fonts: every caption in its Helvetica Rounded),
   and driven as its own interface code drives it: the puck at the bottom left (live, buy and

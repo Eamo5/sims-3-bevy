@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 165;
+pub const GAMEDATA_VERSION: u32 = 166;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -33,6 +33,77 @@ const T_THUMB_TERRAIN: u32 = 0x05B1_B526;
 /// Create-a-Sim part thumbnails, 128 px PNG (`Thumbnails/CasThumbnails.package`): instance =
 /// the CASP instance, group = its colour preset.
 const T_CAS_THUMB: u32 = 0x626F60CD;
+
+/// One of the game's own Buy-mode collections (`GameData/Shared/NonPackaged/Collections`, a
+/// package each holding a `0x0C07456D` resource): its name's string key, its icon (a UI image's
+/// instance), and its objects (their OBJD instances).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct CollectionInfo {
+    pub name_key: String,
+    #[serde(default)]
+    pub name: String,
+    pub icon: u64,
+    pub objects: Vec<u64>,
+}
+
+/// A collection resource: `u32` version, the name's key (`u32` length, UTF-16), a count and the
+/// icon's resource key (type, group, instance), then the objects (`u32` count; each an OBJD key,
+/// type and group and instance, and a `u32`).
+pub fn parse_collection(d: &[u8]) -> Option<CollectionInfo> {
+    let u32_at = |o: usize| d.get(o..o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    let u64_at = |o: usize| d.get(o..o + 8).map(|b| u64::from_le_bytes(b.try_into().unwrap()));
+    let len = u32_at(4)? as usize;
+    let name: Vec<u16> = (0..len).map(|i| d.get(8 + i * 2..10 + i * 2).map(|b| u16::from_le_bytes([b[0], b[1]]))).collect::<Option<_>>()?;
+    let mut o = 8 + len * 2;
+    let _count = u32_at(o)?;
+    o += 4;
+    let icon = u64_at(o + 8)?;
+    o += 16;
+    let n = u32_at(o)? as usize;
+    o += 4;
+    let mut objects = Vec::with_capacity(n);
+    for _ in 0..n {
+        let t = u32_at(o)?;
+        let i = u64_at(o + 8)?;
+        if t == s3pkg::types::OBJD {
+            objects.push(i);
+        }
+        o += 20;
+    }
+    Some(CollectionInfo { name_key: String::from_utf16_lossy(&name), name: String::new(), icon, objects })
+}
+
+/// The install's collections, each pack's after the base game's.
+pub fn read_collections(install_root: &std::path::Path) -> Vec<CollectionInfo> {
+    let mut dirs = vec![install_root.join("GameData/Shared/NonPackaged/Collections")];
+    if let Ok(rd) = std::fs::read_dir(install_root) {
+        let mut packs: Vec<std::path::PathBuf> = rd.flatten().map(|e| e.path().join("GameData/Shared/NonPackaged/Collections")).filter(|p| p.is_dir()).collect();
+        packs.sort();
+        dirs.extend(packs);
+    }
+    let mut out = Vec::new();
+    for dir in dirs {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        let mut files: Vec<std::path::PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "package")).collect();
+        files.sort();
+        for f in files {
+            let Ok(p) = Package::open(&f) else { continue };
+            for e in p.of_type(0x0C07_456D) {
+                if let Some(c) = p.read(e).ok().and_then(|d| parse_collection(&d))
+                    && !out.iter().any(|x: &CollectionInfo| x.name_key == c.name_key)
+                {
+                    out.push(c);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The icon name a collection's icon is stored under.
+pub fn collection_icon_name(icon: u64) -> String {
+    format!("coll_{icon:016x}")
+}
 
 /// The icon name an object's catalogue thumbnail is stored under.
 pub fn thumb_name(objd_instance: u64) -> String {
@@ -1512,6 +1583,10 @@ pub struct GameDataBaked {
     /// The Pets pack's minor pets (`MinorPets`): turtles, snakes, lizards, rodents and birds.
     #[serde(default)]
     pub minor_pets: Vec<MinorPetInfo>,
+    /// The game's own Buy-mode collections (`read_collections`), their names in English, their
+    /// icons stored as `collection_icon_name`.
+    #[serde(default)]
+    pub collections: Vec<CollectionInfo>,
     /// Blueprint mode's rooms (`bp…` objects' `Blueprint` XML).
     #[serde(default)]
     pub blueprints: Vec<BlueprintInfo>,
@@ -4767,6 +4842,15 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     }
     // The catalogue's object thumbnails (the first colour variant of each), for buy mode: the
     // base game's and each installed pack's (`EP*/Thumbnails`, `SP*/Thumbnails`).
+    // The collections, and their icons.
+    out.collections = read_collections(install_root);
+    for c in &mut out.collections {
+        c.name = strings.get(&s3pkg::fnv64(&c.name_key.to_ascii_lowercase())).cloned().unwrap_or_else(|| c.name_key.rsplit(':').next().unwrap_or(&c.name_key).to_string());
+        if let Some(png) = pkgs.read_ti(T_ICON, c.icon) {
+            pack.add(icon_key(&collection_icon_name(c.icon)), &png).map_err(|e| e.to_string())?;
+            n += 1;
+        }
+    }
     progress("Converting: catalogue thumbnails…");
     let mut dirs = vec![install_root.join("Thumbnails")];
     if let Ok(rd) = std::fs::read_dir(install_root) {
@@ -5031,6 +5115,34 @@ const EXTRA_ICONS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_collection_is_read_as_the_games_are_kept() {
+        // (Its name's key in UTF-16, a count and its icon's key, then its objects: OBJD keys and a
+        // number each; anything else among them is skipped.)
+        let mut d: Vec<u8> = Vec::new();
+        let name = "Engine:CaptionEP01";
+        d.extend(1u32.to_le_bytes());
+        d.extend((name.len() as u32).to_le_bytes());
+        d.extend(name.encode_utf16().flat_map(|u| u.to_le_bytes()));
+        d.extend(1u32.to_le_bytes());
+        d.extend(0x2F7D_0004u32.to_le_bytes());
+        d.extend(0u32.to_le_bytes());
+        d.extend(0xE4BD_800B_FFBC_7BC1u64.to_le_bytes());
+        d.extend(3u32.to_le_bytes());
+        for (t, i) in [(s3pkg::types::OBJD, 0x0098_99B1u64), (0x1234_5678, 7), (s3pkg::types::OBJD, 0x0098_977F)] {
+            d.extend(t.to_le_bytes());
+            d.extend(0x0800_0000u32.to_le_bytes());
+            d.extend(i.to_le_bytes());
+            d.extend(6u32.to_le_bytes());
+        }
+        let c = parse_collection(&d).unwrap();
+        assert_eq!(c.name_key, name);
+        assert_eq!(c.icon, 0xE4BD_800B_FFBC_7BC1);
+        assert_eq!(c.objects, vec![0x0098_99B1, 0x0098_977F]);
+        assert!(parse_collection(&d[..d.len() - 10]).is_none());
+        assert_eq!(collection_icon_name(0xAB), "coll_00000000000000ab");
+    }
 
     #[test]
     fn objects_fit_slots_as_the_premade_lots_have_them() {
