@@ -141,6 +141,7 @@ fn new_pet(data: &s3bake::PetsBaked, kind: &'static str, rng: &mut impl Rng) -> 
         traits: crate::pettraits::random(kind, rng),
         female: rng.random(),
         saddled: false,
+        tricks: None,
     })
 }
 

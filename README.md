@@ -978,6 +978,19 @@ installation is unreachable.
   and company are seen to every five minutes; "Dismount" (or the ride cancelled, or anything
   else asked of the rider) brings them down beside it. `RIDE_TEST=<horse>[:<dx>,<dz>[,<s>]]`,
   `RIDE_SKILL=<level>` (tests).
+  Dogs learn tricks (the pack's `TrickSkill`): "Teach Trick..." on a household dog's menu (for
+  teens and up) offers each trick its Tricks level allows (Sit, Sit Up, Speak, Shake, Roll Over,
+  Play Dead, from the tuning's `kTrickSkillLevelRequired` 0 to 5), and teaching goes round the
+  pack's `DogTricks` clips, both sides together: the trick shown, the dog trying it (getting it
+  more often the further along it is: `IsPracticeTrySuccessfull`) or not, again; each minute is
+  practice (more for a happy dog that likes its teacher, a Genius dog, a Dog Person teaching,
+  less for a Clueless one, the tuning's bonuses) till it has the trick (150 to 600 points, by
+  trick: "Buckley learned to Sit!"). The dog gains the Tricks skill as it goes (by the skill's
+  own five levels) and tires of learning (the pack's `PetSkillFatigue`: four hours, half as fast
+  again for a Lazy dog, three quarters for a Hyper one), needing a break before it learns more.
+  "Tricks..." asks it for one it knows. Both make them fonder of each other; the dog's tricks are
+  on its skewer tooltip and kept in saves. `TRICKS_TEST=<dog>:<n>[:command]`, `TRICKS_KNOWN=<n>`
+  (tests).
   Minor pets, the pack's (its `MinorPets` table, baked: 46 turtles, snakes, lizards, rodents
   and birds with their names, descriptions, rarity and worth): a turtle, snake, lizard or rodent
   terrarium is stocked from its menu ("Stock ›", the stockable species of its kind at their

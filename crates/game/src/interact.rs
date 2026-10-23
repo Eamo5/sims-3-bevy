@@ -2922,6 +2922,9 @@ pub enum ActionKind {
     Ride { horse: Entity, slot: Vec2, unsaddle: bool },
     /// Off the horse they're riding.
     Dismount,
+    /// A dog of the household's taught a trick, or asked for one it knows (`dogtricks`): which,
+    /// the trick (`dogtricks::TRICKS`), where it was, its kind.
+    DogTrick { target: Entity, trick: u8, teach: bool, at: Vec2, kind: &'static str },
     /// Putting a fire out (`fire`): which, where, and on what floor.
     Extinguish { target: Entity, at: Vec3, level: u8 },
     /// Phone round to throw a party.
@@ -3690,7 +3693,7 @@ pub(crate) fn run_actions(
                         // (Beside a horse to get on it, where the game's jig stands them.)
                         ActionKind::Ride { slot, .. } => Some((*slot, 1)),
                         // (Standing before the pet, as far off as the game's jig has them.)
-                        ActionKind::PetSocial { at, kind, .. } => {
+                        ActionKind::PetSocial { at, kind, .. } | ActionKind::DogTrick { at, kind, .. } => {
                             let mine = Vec2::new(tf.translation.x, tf.translation.z);
                             Some((*at + (mine - *at).normalize_or(Vec2::X) * crate::pets::social_distance(kind), 1))
                         }
@@ -4538,6 +4541,12 @@ pub(crate) fn run_actions(
                                 commands.entity(me).insert(crate::riding::Mounted::new(*horse, *unsaddle));
                             }
                             ActionKind::Dismount => finished = true,
+                            // (Before the dog: `dogtricks` plays it from here.)
+                            ActionKind::DogTrick { at, .. } => {
+                                let to = *at - Vec2::new(tf.translation.x, tf.translation.z);
+                                tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
+                                anim.pose = Pose::Use;
+                            }
                             // (Off along the street: the jog takes it from here.)
                             ActionKind::Jog { home } => {
                                 commands.entity(me).insert(crate::jog::Jogging::new(*home, clock.minutes));
@@ -6035,7 +6044,7 @@ pub(crate) fn run_actions(
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
-                        ActionKind::Jog { .. } | ActionKind::Ride { .. } => {}
+                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } => {}
                         _ => finished = true,
                     }
                 }

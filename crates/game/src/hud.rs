@@ -1270,7 +1270,7 @@ fn world_click(
         Query<&crate::upgrades::Upgrades>,
         Res<crate::family::Genealogy>,
         Query<&crate::doorbell::AtTheDoor>,
-        Query<(&crate::pets::Pet, &GlobalTransform, Option<&crate::pets::PetBonds>, Has<crate::pets::HomePet>, Has<crate::riding::Tack>)>,
+        Query<(&crate::pets::Pet, &GlobalTransform, Option<&crate::pets::PetBonds>, Has<crate::pets::HomePet>, (Has<crate::riding::Tack>, Option<&crate::dogtricks::DogTricks>))>,
         Query<(), With<crate::little::Labour>>,
         Query<&crate::tvchannels::TvLevel>,
         Query<(&Sim, Option<&crate::classes::ClassesTaken>)>,
@@ -1339,7 +1339,7 @@ fn world_click(
         return;
     }
     // A pet: what can be done with it.
-    if let Some((t, (pet, ptf, bonds, home, saddled))) = target.and_then(|t| pets_q.get(t).ok().map(|p| (t, p)))
+    if let Some((t, (pet, ptf, bonds, home, (saddled, dog_tricks)))) = target.and_then(|t| pets_q.get(t).ok().map(|p| (t, p)))
         && !actor_sim.age.is_little()
     {
         let kind: &'static str = ["ac", "cc", "ad", "cd", "al", "cl", "ah", "ch"].into_iter().find(|k| *k == pet.kind).unwrap_or("ac");
@@ -1374,6 +1374,24 @@ fn world_click(
             }
         }
         pie.submenus.clear();
+        // (A dog of the household's: its tricks taught, by a teen or older, and asked for.)
+        if crate::dogtricks::trick_dog(kind) && home && crate::riding::can_ride(actor_sim) {
+            use crate::dogtricks::{COMMAND, TEACH, TRICKS};
+            let dt = dog_tricks.cloned().unwrap_or_default();
+            let tired = format!("{} needs a break from learning new skills!", pet.name);
+            for (title, list, teach) in [(TEACH, dt.learnable(), true), (COMMAND, dt.known(), false)] {
+                if list.is_empty() {
+                    continue;
+                }
+                if dt.worn_out {
+                    options.push((title.to_string(), ActionKind::Greyed(tired.clone())));
+                    continue;
+                }
+                let items = list.into_iter().map(|i| (TRICKS[i].name.to_string(), ActionKind::DogTrick { target: t, trick: i as u8, teach, at, kind })).collect();
+                options.push((format!("{title} ›"), submenu_kind(pie.submenus.len())));
+                pie.submenus.push((title.to_string(), items));
+            }
+        }
         pie.at = cursor;
         open_pie(&mut commands, &mut pie, cursor, &format!("{} ({})", pet.name, pet.species()), actor, options);
         return;
@@ -3148,6 +3166,10 @@ fn pie_buttons(
             label = "Go Here".to_string();
         }
         let jog = label == "Jog Here";
+        // (A trick to teach: "Teach Sit".)
+        if title == crate::dogtricks::TEACH {
+            label = format!("Teach {label}");
+        }
         // (A donation chosen: to which cause, how much.)
         let donation = title
             .strip_prefix("Donate to ")

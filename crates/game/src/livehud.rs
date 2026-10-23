@@ -787,7 +787,7 @@ fn skewer(
     (selected, positions, mut cam): (Query<Entity, With<Selected>>, Query<(&Transform, &Sim, Has<crate::nav::PathFollow>)>, Query<&mut crate::camera::SimsCamera>),
     mut faces: Local<Vec<Option<Entity>>>,
     (mouse, hovered, mut tips, mut queues, ui): (Res<ButtonInput<MouseButton>>, Query<&Interaction>, Query<&mut crate::icons::Tooltip>, Query<&mut crate::interact::ActionQueue>, Option<Res<UiAssets>>),
-    (pets, mut nodes, mut pet_faces, gu): (Query<(Entity, &crate::pets::Pet, &crate::petneeds::PetMotives, &Transform, Option<&crate::pets::PetTraits>), With<crate::pets::HomePet>>, Query<&mut Node>, Local<Vec<Option<Entity>>>, Option<Res<crate::icons::GameUi>>),
+    (pets, mut nodes, mut pet_faces, gu): (Query<(Entity, &crate::pets::Pet, &crate::petneeds::PetMotives, &Transform, (Option<&crate::pets::PetTraits>, Option<&crate::dogtricks::DogTricks>)), With<crate::pets::HomePet>>, Query<&mut Node>, Local<Vec<Option<Entity>>>, Option<Res<crate::icons::GameUi>>),
 ) {
     let s = &hud.skewer;
     let out: Vec<Entity> = members.iter().filter(|m| m.3).map(|m| m.0).collect();
@@ -878,7 +878,7 @@ fn skewer(
         let container = s.id(SKEWER_PET_SLOT + slot as u32);
         let who = pet_list.get(slot).copied();
         set_visible(&mut vis, container, who.is_some());
-        let (Some(c), Some((e, pet, m, tf, traits))) = (container, who) else { continue };
+        let (Some(c), Some((e, pet, m, tf, (traits, tricks)))) = (container, who) else { continue };
         let button = s.within(c, SLOT_BUTTON);
         set_visible(&mut vis, s.within(c, SLOT_GO_HOME), false);
         set_visible(&mut vis, s.within(c, SLOT_FOLLOW), false);
@@ -893,7 +893,7 @@ fn skewer(
             crate::layout::fit_inside(&mut commands, t, p.0, PET_THUMB_OPENING);
             pet_faces[slot] = Some(e);
         }
-        set_tooltip(&mut commands, &mut tips, button, crate::petneeds::tooltip(pet, m, traits.map_or(&[][..], |t| &t.0[..]), gu.as_deref()));
+        set_tooltip(&mut commands, &mut tips, button, crate::petneeds::tooltip(pet, m, traits.map_or(&[][..], |t| &t.0[..]), gu.as_deref()) + &tricks.map_or(String::new(), crate::dogtricks::summary));
         if pressed(&clicks, button)
             && let Ok(mut cm) = cam.single_mut()
         {

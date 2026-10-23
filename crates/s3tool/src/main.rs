@@ -988,6 +988,14 @@ fn main() {
         }
         return;
     }
+    if args[1] == "skills" {
+        // skills [filter]: the baked skills and their points per level.
+        let data = s3bake::load_gamedata(&s3bake::default_root()).expect("gamedata");
+        for s in data.skills.iter().filter(|s| args.get(2).is_none_or(|f| s.hex.contains(f.as_str()))) {
+            println!("{} {:?} {:?}", s.hex, s.name, s.points);
+        }
+        return;
+    }
     if args[1] == "petparts" {
         // petparts <root> <name part>: CAS parts whose names have it, with their part type.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
