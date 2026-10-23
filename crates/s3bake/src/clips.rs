@@ -258,6 +258,10 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_minorPet_putInTerrarium_x",
     "a2o_minorPet_feed_x",
     "a2o_terrarium_",
+    // (A bird cage's, and a large bird taught to talk.)
+    "a2o_birdcage_",
+    "c2o_birdcage_",
+    "a2o_minorPetBirds_teachToTalk_",
     // Sims with pets: petting, letting them sniff a hand, praise, hugs, treats, rubbing a
     // horse's neck, scolding (both sides).
     "a2ac_soc_neutral_",

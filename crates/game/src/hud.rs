@@ -2103,7 +2103,7 @@ fn world_click(
                 }
                 // A terrarium, as the game's: "Stock" it with one of the pack's species of its kind
                 // (empty), fill its dish, watch its pet, its pet's info, mourn a dead one.
-                if obj.kind == ObjectKind::Terrarium
+                if matches!(obj.kind, ObjectKind::Terrarium | ObjectKind::BirdCage)
                     && let Some(g) = opp_q.0.as_deref()
                 {
                     let (pet, food, tkind) = terra_q.get(t).unwrap_or((None, None, None));
@@ -2138,7 +2138,17 @@ fn world_click(
                         Special::WatchMinorPet if live.is_some() => options.push((format!("Watch {}", live.unwrap().called(g)), ActionKind::Object { target: t, def: i })),
                         Special::MinorPetInfo if pet.is_some() => options.push((format!("Show {} Info", pet.unwrap().called(g)), ActionKind::Object { target: t, def: i })),
                         Special::Scrub if pet.is_some() && opp_q.8.get(t).is_ok_and(|s| s.2.is_some_and(|g| g.needs_cleaning())) => {
-                            options.push((format!("Clean {}'s Terrarium", pet.unwrap().called(g)), ActionKind::Object { target: t, def: i }))
+                            let home = if obj.kind == ObjectKind::BirdCage { "Cage" } else { "Terrarium" };
+                            options.push((format!("Clean {}'s {home}", pet.unwrap().called(g)), ActionKind::Object { target: t, def: i }))
+                        }
+                        // (A large bird: talked with once it can talk, and taught the ways it can't.)
+                        Special::TalkWithBird if live.is_some_and(|p| p.talker(g) && !p.known().is_empty()) => {
+                            options.push((format!("Talk With {}", live.unwrap().called(g)), ActionKind::Object { target: t, def: i }))
+                        }
+                        Special::TeachBirdToTalk if live.is_some_and(|p| p.talker(g) && !p.unknown().is_empty()) => {
+                            let list = live.unwrap().unknown().into_iter().map(|w| (w.to_string(), ActionKind::Object { target: t, def: i })).collect();
+                            options.push((format!("{} ›", crate::terrarium::TEACH_TO_TALK), submenu_kind(pie.submenus.len())));
+                            pie.submenus.push((crate::terrarium::TEACH_TO_TALK.to_string(), list));
                         }
                         Special::MournMinorPet if pet.is_some_and(|p| p.dead) => options.push((format!("Mourn {}", pet.unwrap().called(g)), ActionKind::Object { target: t, def: i })),
                         _ => {}
@@ -3074,6 +3084,11 @@ fn pie_buttons(
         };
         if fish_choice.is_some() {
             label = crate::fishbowl::STOCK.to_string();
+        }
+        // (The way of talking a bird's taught: `terrarium`.)
+        if title == crate::terrarium::TEACH_TO_TALK {
+            fish_choice = Some((label.clone(), 0));
+            label = crate::terrarium::TEACH_TO_TALK.to_string();
         }
         // (What a plant's fertilized with: `gardening`.)
         if let Some(n) = label.strip_prefix(&format!("{}: ", crate::gardening::FERTILIZE))

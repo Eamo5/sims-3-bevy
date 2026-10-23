@@ -1005,7 +1005,15 @@ installation is unreachable.
   gets dirtier every twelve hours it's lived in ("Clean {pet}'s Terrarium", with the pack's
   clips); "Watch {pet}" is fun (the pack's watching clips), "Show {pet} Info" tells its
   kind, rarity, worth and how it's doing, and a dead one is mourned and laid to rest. Kept in
-  saves. `TERRARIUM_TEST=1` with `--place terrarium` (tests).
+  saves. A bird cage (the pack's `BirdCage`) is the same for a bird, with its own clips:
+  stocked with one of the pack's stockable small or large birds, fed, watched, cleaned. A large
+  bird is taught to talk (`Teach To Talk`, ten minutes a lesson, one of the ways it hasn't
+  learned: Happy, Greetings, Love, Angry, Scared or Songs; the pack's half a point a minute,
+  two for songs, a quarter more for each level of the Sim's Charisma; not when it's hungry), and
+  once it can say something it's talked with (`Talk With {bird}`): a Charisma point each time,
+  and company, more the more it can say. What it knows is on its info and kept in saves.
+  `TERRARIUM_TEST=1` with `--place terrarium` (or `birdcage`; `TERRARIUM_SPECIES=<species>`,
+  `TERRARIUM_TEACH=<way>`) (tests).
   `PET_NEEDS=hungry|bladder|tired` and `PET_BOWL=1` (tests).
 - **Supernaturals**, from the Supernatural pack (and Late Night's vampires): vampires,
   werewolves, witches, fairies and zombies, chosen in Create a Sim's Life State row and kept in

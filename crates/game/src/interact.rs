@@ -255,6 +255,8 @@ pub enum ObjectKind {
     WaterTrough,
     /// A minor pet's terrarium (`terrarium`).
     Terrarium,
+    /// A bird cage (the Pets pack's: a terrarium for a bird, `terrarium`).
+    BirdCage,
     Other,
 }
 
@@ -279,6 +281,8 @@ impl ObjectKind {
             Self::WaterTrough
         } else if has("objects.minorpets.terrarium") {
             Self::Terrarium
+        } else if has("objects.decorations.birdcage") {
+            Self::BirdCage
         } else if has("hobbiesskills.pooltable") {
             Self::PoolTable
         } else if has("hobbiesskills.dartboard") || has("hobbiesskills.expensivedartboard") {
@@ -564,7 +568,7 @@ impl ObjectKind {
             Self::Door => "Misc",
             Self::Meal | Self::DirtyDishes | Self::DrinkTray | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
-            Self::PetBowl | Self::LitterBox | Self::PetBed | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough | Self::Terrarium => "Misc",
+            Self::PetBowl | Self::LitterBox | Self::PetBed | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough | Self::Terrarium | Self::BirdCage => "Misc",
             Self::Other => "Misc",
         }
     }
@@ -1326,6 +1330,9 @@ pub enum Special {
     StockTerrarium,
     FillTerrarium,
     WatchMinorPet,
+    /// A large bird talked with, and taught a way of talking (`terrarium`).
+    TalkWithBird,
+    TeachBirdToTalk,
     MinorPetInfo,
     MournMinorPet,
     /// Lock or unlock a door (from its menu, at once: see `doorlocks`).
@@ -1857,6 +1864,18 @@ static TERRARIUM: [InteractionDef; 6] = [
     InteractionDef { special: Special::Scrub, ..def("Clean", 8.0, [0.0, 0.0, 0.0, 0.0, -10.0, 0.0], Pose::Use) },
     InteractionDef { autonomous: false, special: Special::MournMinorPet, ..def("Mourn", 4.0, N, Pose::Use) },
 ];
+/// A bird cage's menu: the terrarium's, and a large bird talked with and taught to talk (the
+/// pack's `TalkWith`, `TeachToTalk`: ten minutes each).
+static BIRD_CAGE: [InteractionDef; 8] = [
+    InteractionDef { autonomous: false, special: Special::StockTerrarium, ..def("Stock", 3.0, N, Pose::Use) },
+    InteractionDef { special: Special::FillTerrarium, ..def("Fill Food", 2.0, N, Pose::Use) },
+    InteractionDef { special: Special::WatchMinorPet, ..def("Watch", 10.0, [0.0, 0.0, 0.0, 0.0, 0.0, crate::terrarium::WATCH_FUN], Pose::Use) },
+    InteractionDef { special: Special::TalkWithBird, ..def("Talk With", 10.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::TeachBirdToTalk, ..def("Teach To Talk", 10.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::MinorPetInfo, ..def("Show Info", 0.1, N, Pose::Use) },
+    InteractionDef { special: Special::Scrub, ..def("Clean", 8.0, [0.0, 0.0, 0.0, 0.0, -10.0, 0.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::MournMinorPet, ..def("Mourn", 4.0, N, Pose::Use) },
+];
 static LITTER_BOX: [InteractionDef; 1] = [InteractionDef { special: Special::Scrub, ..def("Clean", 6.0, [0.0, 0.0, 0.0, 0.0, -20.0, 0.0], Pose::Use) }];
 static PUDDLE: [InteractionDef; 1] = [InteractionDef { special: Special::MopUp, ..def("Mop Up", 5.0, [0.0, 0.0, -2.0, 0.0, -4.0, -4.0], Pose::Use) }];
 static FOOSBALL: [InteractionDef; 1] = [def("Play Foosball", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 65.0], Pose::Use)];
@@ -2149,6 +2168,13 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Clean" if kind == ObjectKind::LitterBox => A::new(None, &["a2o_litterbox_clean_x"]),
         "Fill Bowl" => A::new(None, &["a2o_petBowl_putFood_x"]),
         "Stock" if kind == ObjectKind::Terrarium => A::new(None, &["a2o_minorPet_putInTerrarium_x"]),
+        // (A bird cage's own: stocked, fed, watched, cleaned; a bird taught to talk.)
+        "Stock" if kind == ObjectKind::BirdCage => A::new(None, &["a2o_birdcage_stock_x"]),
+        "Fill Food" if kind == ObjectKind::BirdCage => A::new(None, &["a2o_birdcage_fillFood_x"]),
+        "Watch" if kind == ObjectKind::BirdCage => A::new(Some("a2o_birdcage_watch_start_x"), &["a2o_birdcage_watch_breathe_x", "a2o_birdcage_watch_playful1_x", "a2o_birdcage_watch_playful2_x", "a2o_birdcage_watch_playful3_x", "a2o_birdcage_watch_tap_x", "a2o_birdcage_watch_touch_x"]).ending(&["a2o_birdcage_watch_stop_x"], 1.5),
+        "Clean" if kind == ObjectKind::BirdCage => A::new(Some("a2o_birdcage_clean_start_x"), &["a2o_birdcage_clean_loop_x"]).ending(&["a2o_birdcage_clean_stop_x"], 1.5),
+        "Talk With" | "Teach To Talk" if kind == ObjectKind::BirdCage => A::new(Some("a2o_minorPetBirds_teachToTalk_start_x"), &["a2o_minorPetBirds_teachToTalk_loop1_x", "a2o_minorPetBirds_teachToTalk_loop2_x", "a2o_minorPetBirds_teachToTalk_loop3_x"]).ending(&["a2o_minorPetBirds_teachToTalk_stop_x"], 1.5),
+        "Mourn" if kind == ObjectKind::BirdCage => A::new(Some("a_react_cry_start"), &["a_react_cry_loop", "a_react_cry_loop2"]).ending(&["a_react_cry_stop"], 1.5),
         "Fill Food" => A::new(None, &["a2o_minorPet_feed_x"]),
         "Watch" if kind == ObjectKind::Terrarium => A::new(Some("a2o_terrarium_watch_start_x"), &["a2o_terrarium_watch_loopBreathe_x", "a2o_terrarium_watch_loopMakeNoise_x", "a2o_terrarium_watch_loopPeekaboo_x"]).ending(&["a2o_terrarium_watch_stop_x"], 1.5),
         "Clean" if kind == ObjectKind::Terrarium => A::new(Some("a2o_terrarium_clean_start_x"), &["a2o_terrarium_clean_loop_x"]).ending(&["a2o_terrarium_clean_stop_x"], 1.5),
@@ -2815,6 +2841,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Light => &LIGHT,
         ObjectKind::PetBowl => &PET_BOWL,
         ObjectKind::Terrarium => &TERRARIUM,
+        ObjectKind::BirdCage => &BIRD_CAGE,
         ObjectKind::LitterBox => &LITTER_BOX,
         _ => &[],
     }
@@ -4700,7 +4727,7 @@ pub(crate) fn run_actions(
                                     finished = true;
                                     life.write(LifeEvent::new(me, LifeEventKind::Finished { activity: d.name, completed: true }));
                                     // (A bathroom thing used is that much dirtier.)
-                                    if crate::grime::cleanable(obj.kind) && obj.kind != ObjectKind::Terrarium && d.special != Special::Scrub && !upgraded.get(*target).is_ok_and(|u| u.has(crate::upgrades::Upgrade::SelfCleaning)) {
+                                    if crate::grime::cleanable(obj.kind) && !matches!(obj.kind, ObjectKind::Terrarium | ObjectKind::BirdCage) && d.special != Special::Scrub && !upgraded.get(*target).is_ok_and(|u| u.has(crate::upgrades::Upgrade::SelfCleaning)) {
                                         let traits = sim.traits.clone();
                                         commands.entity(*target).queue_silenced(move |mut e: EntityWorldMut| {
                                             if let Some(mut g) = e.get_mut::<crate::grime::Grime>() {
@@ -4874,6 +4901,12 @@ pub(crate) fn run_actions(
                                             commands.entity(me).insert(crate::terrarium::TerrariumRequest::Fill(*target));
                                         }
                                         Special::WatchMinorPet => {}
+                                        // (Talked with, or taught: what it's learned, the Sim's charisma, the
+                                        // two fonder: `terrarium`.)
+                                        Special::TalkWithBird | Special::TeachBirdToTalk => {
+                                            let speech = action.fish_choice.take().map(|(k, _)| k);
+                                            commands.entity(me).insert(crate::terrarium::TerrariumRequest::Talk(*target, speech));
+                                        }
                                         Special::MinorPetInfo => {
                                             let t = *target;
                                             commands.queue(move |w: &mut World| {
