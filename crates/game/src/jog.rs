@@ -149,7 +149,7 @@ fn jog(
             continue;
         }
         let tired = motives.0[ENERGY] < -60.0 || motives.0[HYGIENE] < -70.0;
-        let p = |q: Vec2| Waypoint { p: q, level: 1, climb: None };
+        let p = |q: Vec2| Waypoint { p: q, level: 1, climb: None, spiral: None };
         let ends = [walk.center - walk.along * walk.half_length * 0.85, walk.center + walk.along * walk.half_length * 0.85];
         let waypoints = if clock.minutes - j.since >= JOG_MINUTES || tired {
             j.returning = true;

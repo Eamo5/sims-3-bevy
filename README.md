@@ -45,7 +45,9 @@ installation is unreachable.
   into the slope, as the Wolffs' garage and den, likewise; Isla Paradiso's houseboats afloat,
   their decks walked on over the water, a hull down from the deck's edge), staircases built
   from the game's
-  own stair pieces and railings (as wide as the builders made them), and the house's own
+  own stair pieces and railings (as wide as the builders made them; spiral staircases climbed and
+  descended with the game's own clips, the Sim onto the step at its foot or its top as its
+  routing slots have it, round and up or down, and off at the other end), and the house's own
   furniture; the ground never shows through a floor; nearby lots are shown in full detail with
   the game's roofs, distant ones as the game's pre-rendered imposters. Better than the game's
   engine allowed: the household's own house stays itself (walls up, roof on) out to 260 m
@@ -1749,6 +1751,7 @@ and `--ui-flow <dir>` clicks through the menus saving a screenshot of each scree
 virtual display's slow refresh holds a vsynced game back), `FPS_LOG=1` logs the frame rate,
 `SIMS3_SETTINGS=<file>` keeps the options elsewhere, `SIM_CAM=<distance>` keeps the camera on
 the selected Sim, `JOB_HUNT=<days>` has them look for work on the computer.
+`SPIRAL_TEST=once|both` sends the selected Sim by the nearest spiral staircase and (`both`) back.
 `--do "Paint: Large Canvas"` paints on that canvas; `PAINTINGS=<level>` paints six (three into
 the inventory, three hung on the nearest walls, the camera on them), `PAINTINGS=look` puts the
 camera on a hung painting (`PAINTINGS=easel`: on the easel), `PAINTINGS_BUY=1` holds one up in Buy mode and `BUY_CLOSE_AT=<s>`

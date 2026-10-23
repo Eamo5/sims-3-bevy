@@ -68,7 +68,7 @@ fn stroll(
         floor.0 = 1;
         *vis = Visibility::Inherited;
         t.walking = true;
-        let mut pf = PathFollow::new(vec![Waypoint { p: end, level: 1, climb: None }]);
+        let mut pf = PathFollow::new(vec![Waypoint { p: end, level: 1, climb: None, spiral: None }]);
         pf.speed = rng.random_range(1.4..1.9);
         // (Some jog past instead, in their athletic wear: more of them mornings and evenings.)
         let jog_hours = (7.0..10.0).contains(&hour) || (17.0..20.0).contains(&hour);

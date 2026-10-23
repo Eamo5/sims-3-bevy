@@ -15,7 +15,7 @@ pub struct NavPlugin;
 impl Plugin for NavPlugin {
     fn build(&self, app: &mut App) {
         // (After doors and gates open their ways through, and with them in place.)
-        app.add_systems(Update, (rebuild_upper_floors, rebuild_grid, settle_lot_exit, follow_paths).chain().after(crate::building::cut_openings).run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (rebuild_upper_floors, rebuild_grid, settle_lot_exit, spiral_test, follow_paths, climb_spirals).chain().after(crate::building::cut_openings).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -56,6 +56,22 @@ pub struct StairLink {
     pub top: Vec2,
     pub y0: f32,
     pub y1: f32,
+    /// A spiral staircase's (where it stands, how it's turned): climbed with its own clips.
+    pub spiral: Option<(Vec3, Quat)>,
+}
+
+/// A spiral staircase's routing slots, as the game's spiral staircases all have them (model
+/// space, and the way a Sim faces there): getting on at the foot, at the top, getting off at the
+/// foot, at the top (`RoutingSlot_0` to `_3`).
+pub const SPIRAL_ON_FOOT: (Vec3, Vec3) = (Vec3::new(0.337, 0.0, -0.5), Vec3::NEG_X);
+pub const SPIRAL_ON_TOP: (Vec3, Vec3) = (Vec3::new(0.5, 3.0, -0.195), Vec3::Z);
+pub const SPIRAL_OFF_FOOT: (Vec3, Vec3) = (Vec3::new(0.337, 0.0, -0.5), Vec3::X);
+pub const SPIRAL_OFF_TOP: (Vec3, Vec3) = (Vec3::new(0.5, 3.0, -0.195), Vec3::NEG_Z);
+
+/// A spiral staircase's slot, in the world: where, and which way a Sim faces there.
+pub fn spiral_slot(at: Vec3, rot: Quat, slot: (Vec3, Vec3)) -> (Vec3, Quat) {
+    let f = rot * slot.1;
+    (at + rot * slot.0, Quat::from_rotation_y(f.x.atan2(f.z)))
 }
 
 /// Walk grids of the house's upper floors (the ground floor uses [`NavGrid`]).
@@ -79,6 +95,8 @@ pub struct Waypoint {
     pub p: Vec2,
     pub level: u8,
     pub climb: Option<(f32, f32)>,
+    /// Reached by a spiral staircase (where it stands, how it's turned, and whether up it).
+    pub spiral: Option<(Vec3, Quat, bool)>,
 }
 
 /// Plans a walk from one floor to another, using stairs to change floors.
@@ -101,7 +119,7 @@ fn plan_route_depth(
     if from_level == to_level {
         let grid = grid_of(from_level)?;
         if let Some(pts) = grid.find_path(from, to).filter(|pts| pts.last().is_some_and(|q| q.distance(to) < 1.6)) {
-            return Some(pts.into_iter().map(|p| Waypoint { p, level: from_level, climb: None }).collect());
+            return Some(pts.into_iter().map(|p| Waypoint { p, level: from_level, climb: None, spiral: None }).collect());
         }
         // (Or up or down the steps between two parts of the storey: a platform raised on it.)
         for s in upper.into_iter().flat_map(|u| u.stairs.iter()).filter(|s| s.level == from_level && s.upper == from_level) {
@@ -113,9 +131,9 @@ fn plan_route_depth(
                 if !first.last().is_some_and(|q| q.distance(a) < 0.8) || !rest.last().is_some_and(|q| q.distance(to) < 1.6) {
                     continue;
                 }
-                let mut w: Vec<Waypoint> = first.into_iter().map(|p| Waypoint { p, level: from_level, climb: None }).collect();
-                w.push(Waypoint { p: b, level: from_level, climb: Some(ys) });
-                w.extend(rest.into_iter().map(|p| Waypoint { p, level: from_level, climb: None }));
+                let mut w: Vec<Waypoint> = first.into_iter().map(|p| Waypoint { p, level: from_level, climb: None, spiral: None }).collect();
+                w.push(Waypoint { p: b, level: from_level, climb: Some(ys), spiral: None });
+                w.extend(rest.into_iter().map(|p| Waypoint { p, level: from_level, climb: None, spiral: None }));
                 return Some(w);
             }
         }
@@ -124,34 +142,39 @@ fn plan_route_depth(
         if depth < 4
             && let Some(u) = upper
         {
-            let mut ways: Vec<(Vec2, Vec2, u8, (f32, f32))> = u
+            type Way = (Vec2, Vec2, u8, (f32, f32), Option<(Vec3, Quat, bool)>);
+            let mut ways: Vec<Way> = u
                 .stairs
                 .iter()
                 .filter_map(|s| {
                     if s.upper == from_level && s.level < from_level {
-                        Some((s.top, s.bottom, s.level, (s.y1, s.y0)))
+                        Some((s.top, s.bottom, s.level, (s.y1, s.y0), s.spiral.map(|(a, r)| (a, r, false))))
                     } else if s.level == from_level && s.upper > from_level {
-                        Some((s.bottom, s.top, s.upper, (s.y0, s.y1)))
+                        Some((s.bottom, s.top, s.upper, (s.y0, s.y1), s.spiral.map(|(a, r)| (a, r, true))))
                     } else {
                         None
                     }
                 })
                 .collect();
             ways.sort_by(|a, b| a.0.distance(from).total_cmp(&b.0.distance(from)));
-            for (entry, exit, level, ys) in ways {
-                let Some(first) = grid.find_path(from, entry).filter(|p| p.last().is_some_and(|q| q.distance(entry) < 0.8)) else { continue };
+            for (entry, exit, level, ys, spiral) in ways {
+                let Some(mut first) = grid.find_path(from, entry).filter(|p| p.last().is_some_and(|q| q.distance(entry) < 0.8 || spiral.is_some())) else { continue };
+                // (Onto a spiral staircase's own step, from beside it.)
+                if spiral.is_some() {
+                    first.push(entry);
+                }
                 let Some(rest) = plan_route_depth(ground, upper, exit, level, to, to_level, depth + 2) else { continue };
                 if !rest.last().is_some_and(|w| w.level == to_level && w.p.distance(to) < 1.6) {
                     continue;
                 }
-                let mut w: Vec<Waypoint> = first.into_iter().map(|p| Waypoint { p, level: from_level, climb: None }).collect();
-                w.push(Waypoint { p: exit, level, climb: Some(ys) });
+                let mut w: Vec<Waypoint> = first.into_iter().map(|p| Waypoint { p, level: from_level, climb: None, spiral: None }).collect();
+                w.push(Waypoint { p: exit, level, climb: Some(ys), spiral });
                 w.extend(rest);
                 return Some(w);
             }
         }
         let pts = grid.find_path(from, to)?;
-        return Some(pts.into_iter().map(|p| Waypoint { p, level: from_level, climb: None }).collect());
+        return Some(pts.into_iter().map(|p| Waypoint { p, level: from_level, climb: None, spiral: None }).collect());
     }
     if depth > 6 {
         return None;
@@ -169,12 +192,16 @@ fn plan_route_depth(
     for s in links {
         let Some(mut first) = grid_of(from_level)?
             .find_path(from, entry(&s))
-            .map(|v| v.into_iter().map(|p| Waypoint { p, level: from_level, climb: None }).collect::<Vec<_>>())
+            .map(|v| v.into_iter().map(|p| Waypoint { p, level: from_level, climb: None, spiral: None }).collect::<Vec<_>>())
         else {
             continue;
         };
+        // (Onto a spiral staircase's own step, from beside it.)
+        if s.spiral.is_some() {
+            first.push(Waypoint { p: entry(&s), level: from_level, climb: None, spiral: None });
+        }
         let (exit, next_level, ys) = if up { (s.top, s.upper, (s.y0, s.y1)) } else { (s.bottom, s.level, (s.y1, s.y0)) };
-        first.push(Waypoint { p: exit, level: next_level, climb: Some(ys) });
+        first.push(Waypoint { p: exit, level: next_level, climb: Some(ys), spiral: s.spiral.map(|(a, r)| (a, r, up)) });
         if let Some(rest) = plan_route_depth(ground, upper, exit, next_level, to, to_level, depth + 1) {
             first.extend(rest);
             return Some(first);
@@ -995,15 +1022,22 @@ pub(crate) fn follow_paths(
     clock: Res<GameClock>,
     world: Res<CurrentWorld>,
     building: Option<Res<crate::building::ActiveBuilding>>,
+    mut commands: Commands,
     mut q: Query<
-        (&mut Transform, &mut PathFollow, &mut SimAnim, &mut Floor, Option<&crate::sim::Sim>, Option<&crate::little::Pregnancy>),
-        (Without<crate::portraits::Staged>, Without<crate::dressing::ClothesSpin>),
+        (Entity, &mut Transform, &mut PathFollow, &mut SimAnim, &mut Floor, Option<&crate::sim::Sim>, Option<&crate::little::Pregnancy>),
+        (Without<crate::portraits::Staged>, Without<crate::dressing::ClothesSpin>, Without<SpiralClimb>),
     >,
 ) {
     let rate = SPEED_RATES[clock.speed];
     let dt = time.delta_secs().min(0.1) * rate;
-    for (mut tf, mut pf, mut anim, mut floor, sim, pregnancy) in &mut q {
+    for (e, mut tf, mut pf, mut anim, mut floor, sim, pregnancy) in &mut q {
         if pf.done {
+            continue;
+        }
+        // (At a spiral staircase's step: up or down it by its own clips, `SpiralClimb`.)
+        if let Some(&Waypoint { p, level, climb: Some((_, y1)), spiral: Some((at, rot, up)) }) = pf.waypoints.first() {
+            let _ = p;
+            commands.entity(e).insert(SpiralClimb { at, rot, up, part: 0, time: 0.0, length: -1.0, level, y: y1 });
             continue;
         }
         if dt <= 0.0 {
@@ -1051,6 +1085,106 @@ pub(crate) fn follow_paths(
         }
         tf.translation.y = climbing.unwrap_or_else(|| floor_height(&world.data, building.as_deref(), floor.0, tf.translation));
         anim.pose = if pf.done { Pose::Stand } else { Pose::Walk };
+    }
+}
+
+/// A Sim on a spiral staircase, played up or down it with the game's clips (its `SpiralStaircase`:
+/// on at the foot facing in, `walkUp_start`, `_climb`, `_stop`, off at the top; or on at the top,
+/// `walkDown_start`, then from the foot `_descend` and `_stop`): which part, how far into it.
+#[derive(Component)]
+pub struct SpiralClimb {
+    at: Vec3,
+    rot: Quat,
+    up: bool,
+    part: u8,
+    time: f32,
+    length: f32,
+    level: u8,
+    y: f32,
+}
+
+/// `SPIRAL_TEST=once|both` (tests): eight seconds in, the selected Sim sent by the household's nearest
+/// spiral staircase to its other floor (a little past its end), and (`both`) back again.
+fn spiral_test(time: Res<Time>, mut stage: Local<u8>, upper: Option<Res<UpperFloors>>, mut sel: Query<(&Transform, &Floor, &mut crate::interact::ActionQueue), (With<crate::sim::Selected>, Without<SpiralClimb>)>) {
+    let Ok(v) = std::env::var("SPIRAL_TEST") else { return };
+    let (Some(u), Ok((tf, floor, mut q))) = (upper, sel.single_mut()) else { return };
+    let going = q.0.iter().any(|a| matches!(a.kind, crate::interact::ActionKind::GoHere(..)));
+    if time.elapsed_secs() < 8.0 || (*stage > 0 && going) {
+        return;
+    }
+    debug!("spiral test: {} links, {} spiral", u.stairs.len(), u.stairs.iter().filter(|s| s.spiral.is_some()).count());
+    let Some(s) = u.stairs.iter().filter(|s| s.spiral.is_some()).min_by(|a, b| a.bottom.distance(tf.translation.xz()).total_cmp(&b.bottom.distance(tf.translation.xz()))) else { return };
+    let (at, rot) = s.spiral.unwrap_or_default();
+    let off = |slot: (Vec3, Vec3)| { let (p, turn) = spiral_slot(at, rot, slot); p.xz() + (turn * Vec3::Z).xz() * 1.4 };
+    // (To the other floor, and (`both`) back.)
+    let other = |f: u8| if f == s.upper { (off(SPIRAL_OFF_FOOT), s.level) } else { (off(SPIRAL_OFF_TOP), s.upper) };
+    let go = match (*stage, v.as_str()) {
+        (0, _) | (1, "both") => Some(other(floor.0)),
+        _ => None,
+    };
+    if let Some((p, level)) = go {
+        info!("spiral test: to {p} on floor {level}");
+        q.0.clear();
+        q.push_player(crate::interact::Action::new("Go Here", crate::interact::ActionKind::GoHere(p, level), false));
+        *stage += 1;
+    }
+}
+
+const SPIRAL_UP: [&str; 3] = ["a2o_spiralStaircase_walkUp_start_x", "a2o_spiralStaircase_walkUp_climb_x", "a2o_spiralStaircase_walkUp_stop_x"];
+const SPIRAL_DOWN: [&str; 3] = ["a2o_spiralStaircase_walkDown_start_x", "a2o_spiralStaircase_walkDown_descend_x", "a2o_spiralStaircase_walkDown_stop_x"];
+
+/// Up or down a spiral staircase: each part played where the game's jig has it (going up all in
+/// the foot's step; going down, the first at the top, the rest from the foot), then off at the
+/// other end, on its floor, the route carrying on.
+#[allow(clippy::type_complexity)]
+pub(crate) fn climb_spirals(
+    mut commands: Commands,
+    time: Res<Time>,
+    clock: Res<GameClock>,
+    data: Res<crate::baked::Baked>,
+    mut lib: ResMut<crate::anim::ClipLibrary>,
+    mut q: Query<(Entity, &mut SpiralClimb, &mut Transform, &mut PathFollow, &mut SimAnim, &mut Floor, Option<&crate::sim::Sim>)>,
+) {
+    let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed];
+    for (e, mut s, mut tf, mut pf, mut anim, mut floor, sim) in &mut q {
+        let child = sim.is_some_and(|s| s.age == crate::sim::Age::Child);
+        s.time += dt;
+        if s.time < s.length {
+            continue;
+        }
+        let parts: &'static [&'static str; 3] = if s.up { &SPIRAL_UP } else { &SPIRAL_DOWN };
+        if s.length >= 0.0 {
+            s.part += 1;
+        }
+        let Some(name) = parts.get(s.part as usize) else {
+            // Off at the other end, facing off it.
+            let (at, turn) = spiral_slot(s.at, s.rot, if s.up { SPIRAL_OFF_TOP } else { SPIRAL_OFF_FOOT });
+            tf.translation = Vec3::new(at.x, s.y, at.z);
+            tf.rotation = turn;
+            floor.0 = s.level;
+            if !pf.waypoints.is_empty() {
+                pf.waypoints.remove(0);
+            }
+            pf.seg_start = Some(at.xz());
+            commands.entity(e).remove::<(SpiralClimb, crate::anim::ActionClip)>();
+            anim.pose = Pose::Walk;
+            continue;
+        };
+        // (Where this part's played from: the step it starts on, as the jig puts the Sim.)
+        let slot = match (s.up, s.part) {
+            (true, _) => SPIRAL_ON_FOOT,
+            (false, 0) => SPIRAL_ON_TOP,
+            (false, _) => SPIRAL_OFF_FOOT,
+        };
+        let (at, turn) = spiral_slot(s.at, s.rot, slot);
+        tf.translation = at;
+        tf.rotation = turn;
+        let clip = lib.variants(&data, name, Some('x'), child).first().cloned().unwrap_or_else(|| name.to_string());
+        s.length = lib.get(&data, &clip).map_or(1.0, |c| c.duration.max(0.1));
+        debug!("spiral staircase: {} ({:.1} s)", clip, s.length);
+        s.time = 0.0;
+        anim.pose = Pose::Use;
+        commands.entity(e).insert(crate::anim::ActionClip::new(None, std::slice::from_ref(name)));
     }
 }
 

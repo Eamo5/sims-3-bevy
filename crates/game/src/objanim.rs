@@ -541,7 +541,7 @@ mod tests {
     use crate::nav::Waypoint;
 
     fn way(points: &[(f32, f32)]) -> Vec<Waypoint> {
-        points.iter().map(|&(x, z)| Waypoint { p: Vec2::new(x, z), level: 1, climb: None }).collect()
+        points.iter().map(|&(x, z)| Waypoint { p: Vec2::new(x, z), level: 1, climb: None, spiral: None }).collect()
     }
 
     #[test]

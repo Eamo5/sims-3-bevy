@@ -57,6 +57,25 @@ fn main() {
         }
         return;
     }
+    if args[1] == "routeslots" {
+        // routeslots <root> <objd instance hex>...: an object's routing slots and footprint-ish bounds.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        for a in &args[3..] {
+            let i = u64::from_str_radix(a.trim_start_matches("0x"), 16).unwrap_or(0);
+            for k in set.keys_of_type(types::OBJD).filter(|k| k.i == i).copied().collect::<Vec<_>>() {
+                println!("{k}");
+                for (n, p, f) in s3formats::object::object_route_slots(&set, &k) {
+                    println!("  routing slot {n}: at {p:?} facing {f:?}");
+                }
+                for mk in s3formats::object::object_models(&set, &k) {
+                    for m in s3formats::model::load_model(&set, &mk).unwrap_or_default() {
+                        println!("  mesh bounds {:?}..{:?}", m.bounds_min, m.bounds_max);
+                    }
+                }
+            }
+        }
+        return;
+    }
     if args[1] == "objbyname" {
         // objbyname <root> <name>...: the OBJD made by that name (as `CreateObjectOutOfWorld`),
         // and its models' meshes.
@@ -73,6 +92,9 @@ fn main() {
                         for m in &meshes {
                             println!("    mesh {:08X} shader {:08X} verts {} bounds {:?}..{:?} diffuse {:?}", m.name_hash, m.material.shader, m.positions.len(), m.bounds_min, m.bounds_max, m.material.texture(s3formats::model::P_DIFFUSE_MAP));
                         }
+                    }
+                    for (n, p, f) in s3formats::object::object_route_slots(&set, &k) {
+                        println!("  routing slot {n}: at {p:?} facing {f:?}");
                     }
                 }
             }

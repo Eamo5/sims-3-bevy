@@ -2612,7 +2612,7 @@ fn respawn_stairs(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut 
             b.stair_entities.push(e);
         }
         let bw = |q: Vec2| b.world(q.x, q.y, 0.0).xz();
-        links.push(StairLink { level: s.level, upper: s.level + 1, bottom: bw(bottom - d * 0.45), top: bw(bottom + d * (run + 0.45)), y0, y1 });
+        links.push(StairLink { level: s.level, upper: s.level + 1, bottom: bw(bottom - d * 0.45), top: bw(bottom + d * (run + 0.45)), y0, y1, spiral: None });
     }
     b.stairs = links;
 }
@@ -2796,7 +2796,7 @@ pub fn spawn_building(
     }
     for (level, upper, from, to, y0, y1) in links {
         let bw = |q: Vec2| active.world(q.x, q.y, 0.0).xz();
-        active.stairs.push(StairLink { level, upper, bottom: bw(from), top: bw(to), y0, y1 });
+        active.stairs.push(StairLink { level, upper, bottom: bw(from), top: bw(to), y0, y1, spiral: None });
     }
     let stair_mat = material(assets, ctx, STYLE_FLOOR_DECK);
     for (o, q) in stairs.iter().filter(|_| !baked_stairs) {
@@ -2827,7 +2827,7 @@ pub fn spawn_building(
         place(commands, e, neighbor, if storey { lower } else { 0 });
         if storey && (neighbor.is_none() || visit) {
             let bw = |q: Vec2| active.world(q.x, q.y, 0.0).xz();
-            active.stairs.push(StairLink { level: lower, upper: upper_level, bottom: bw(bottom - d * 0.45), top: bw(top + d * 0.45), y0, y1 });
+            active.stairs.push(StairLink { level: lower, upper: upper_level, bottom: bw(bottom - d * 0.45), top: bw(top + d * 0.45), y0, y1, spiral: None });
         }
     }
 
@@ -2862,7 +2862,7 @@ pub fn spawn_building(
             for w in stops.windows(2) {
                 let ((l0, p0), (l1, p1)) = (w[0], w[1]);
                 let bw = |q: Vec2| active.world(q.x, q.y, 0.0).xz();
-                active.stairs.push(StairLink { level: l0, upper: l1, bottom: bw(p0), top: bw(p1), y0: level_y(l0), y1: level_y(l1) });
+                active.stairs.push(StairLink { level: l0, upper: l1, bottom: bw(p0), top: bw(p1), y0: level_y(l0), y1: level_y(l1), spiral: None });
             }
         }
     }
@@ -2895,12 +2895,20 @@ pub fn spawn_building(
             let pick = |options: &[Vec2], storey: u8| {
                 options.iter().copied().find(|p| active.floor_cells_has(storey, *p) && !walled(*p, storey)).or_else(|| options.iter().copied().find(|p| active.floor_cells_has(storey, *p)))
             };
+            // (A spiral: on and off at its own steps, its routing slots, climbed with its clips.)
+            if !ladder {
+                let pos = Vec3::from(o.position);
+                let (foot, _) = crate::nav::spiral_slot(pos, q, crate::nav::SPIRAL_ON_FOOT);
+                let (head, _) = crate::nav::spiral_slot(pos, q, crate::nav::SPIRAL_ON_TOP);
+                active.stairs.push(StairLink { level: s, upper: s + 1, bottom: foot.xz(), top: head.xz(), y0: foot.y, y1: head.y, spiral: Some((pos, q)) });
+                continue;
+            }
             let bottom = if ladder { at + fwd * reach } else { pick(&[at + fwd * reach, at - right * reach, at + right * reach, at - fwd * reach], s).unwrap_or(at + fwd * reach) };
             let Some(top) = pick(&tops, s + 1) else { continue };
             let (wb, wt) = (active.world(bottom.x, bottom.y, 0.0), active.world(top.x, top.y, 0.0));
             let y0 = active.floor_y(s, wb).unwrap_or(level_y(s));
             let y1 = active.floor_y(s + 1, wt).unwrap_or(level_y(s + 1));
-            active.stairs.push(StairLink { level: s, upper: s + 1, bottom: wb.xz(), top: wt.xz(), y0, y1 });
+            active.stairs.push(StairLink { level: s, upper: s + 1, bottom: wb.xz(), top: wt.xz(), y0, y1, spiral: None });
         }
     }
 
