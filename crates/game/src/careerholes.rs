@@ -67,29 +67,64 @@ pub fn is_errand(a: &Activity) -> bool {
     [&JOIN, &QUIT, &RETIRE].iter().any(|e| std::ptr::eq(a, *e))
 }
 
+/// The rabbit hole a career's Sims work at (its lot type: `opportunities::lot_types`), as the
+/// game's rabbit holes take on their `CareerLocation`s (the career's key): the packs' careers
+/// too, the school's Education, the film studio's Film, the Gypsy wagon's Fortune Teller, the
+/// business office's Game Developer, the stadium's Sports Agent, the Hideout's Art Appraiser,
+/// the observatory's Astronomer, the Bot Arena's, and the science lab's alien test subjects.
+pub fn workplace(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "Medical" => "Hospital",
+        "Criminal" | "ArtAppraiserCareer" => "Hideout",
+        "Political" => "CityHall",
+        "Culinary" => "Restaurant",
+        "LawEnforcement" | "Law Enforcement" => "PoliceStation",
+        "Music" => "Theatre",
+        "Military" => "MilitaryBase",
+        "Science" | "PTAlienTestSubject" => "ScienceLab",
+        "Business" | "Journalism" | "VideoGameDeveloper" => "BusinessAndJournalism",
+        "ProfessionalSports" | "Professional Sports" | "Athletic" | "SportsAgentCareer" => "Stadium",
+        "PTBookstoreClerk" => "Bookstore",
+        "PTGroceryStoreClerk" => "Grocery",
+        "Education" => "School",
+        "Film" | "PTFilm" => "MovieSet",
+        "FortuneTellerCareer" => "GypsyCaravan",
+        "Astronomer" => "StellarObservatory",
+        "BotArena" => "ServoBotArena",
+        _ => return None,
+    })
+}
+
 /// Whether a career's Sims work at a lot: its rabbit hole by the game's `CareerLocation`s (the
 /// career's key, the game's `OccupationNames`).
 pub fn works_at(world: &crate::loading::WorldInfo, lot: usize, key: &str) -> bool {
-    let types = crate::opportunities::lot_types(world, lot);
     let name = world.lots.get(lot).map(|l| l.internal_name.to_ascii_lowercase()).unwrap_or_default();
     let named = |ks: &[&str]| ks.iter().any(|k| name.contains(k));
+    let types = || crate::opportunities::lot_types(world, lot);
     match key {
-        "Medical" => types.contains(&"Hospital"),
-        "Criminal" => types.contains(&"Hideout"),
-        "Political" => types.contains(&"CityHall"),
-        "Culinary" => types.contains(&"Restaurant"),
-        "LawEnforcement" => types.contains(&"PoliceStation"),
-        "Music" => types.contains(&"Theatre"),
-        "Military" => types.contains(&"MilitaryBase"),
-        "Science" => types.contains(&"ScienceLab"),
-        "Business" | "Journalism" => types.contains(&"BusinessAndJournalism"),
-        "ProfessionalSports" => types.contains(&"Stadium"),
-        "PTBookstoreClerk" => types.contains(&"Bookstore"),
-        "PTGroceryStoreClerk" => types.contains(&"Grocery"),
-        "PTMausoleum" => named(&["mausoleum", "graveyard", "cemetery"]),
-        "PTDaySpaReceptionist" | "PTDaySpaSpecialist" => named(&["spa", "salon"]),
-        _ => false,
+        "PTMausoleum" => types().contains(&"Mausoleum") || named(&["mausoleum", "graveyard", "cemetery"]),
+        "PTDaySpaReceptionist" | "PTDaySpaSpecialist" => types().contains(&"DaySpa") || named(&["spa", "salon"]),
+        k => workplace(k).is_some_and(|t| crate::opportunities::lot_types(world, lot).contains(&t)),
     }
+}
+
+/// The careers worked somewhere in a world (the game lists only those with a `CareerLocation`:
+/// `ShowRandomJobs`'s `Locations.Count > 0`), by track; every one, for a world whose rabbit
+/// holes aren't known.
+pub fn located(world: &crate::loading::WorldInfo) -> Vec<bool> {
+    let all = careers();
+    let mut out = vec![false; all.len()];
+    for lot in 0..world.lots.len() {
+        for (i, c) in all.iter().enumerate() {
+            if !out[i] && works_at(world, lot, c.key) {
+                out[i] = true;
+            }
+        }
+    }
+    if !out.iter().any(|x| *x) {
+        out.fill(true);
+    }
+    out
 }
 
 /// How the game names joining a career there.
@@ -180,5 +215,19 @@ mod tests {
         assert_eq!(join_label("LawEnforcement", "Law Enforcement", false), "Join Law Enforcement Career");
         assert_eq!(join_label("PTGroceryStoreClerk", "Grocery Store", true), "Get Part-Time Job");
         assert_eq!(join_label("PTDaySpaReceptionist", "Day Spa", true), "Get Part-Time Job as a Receptionist");
+    }
+
+    #[test]
+    fn the_packs_careers_are_worked_at_their_rabbit_holes() {
+        // (As the game's rabbit holes take on their CareerLocations.)
+        assert_eq!(workplace("Education"), Some("School"));
+        assert_eq!(workplace("PTFilm"), Some("MovieSet"));
+        assert_eq!(workplace("FortuneTellerCareer"), Some("GypsyCaravan"));
+        assert_eq!(workplace("VideoGameDeveloper"), workplace("Business"));
+        assert_eq!(workplace("SportsAgentCareer"), workplace("ProfessionalSports"));
+        assert_eq!(workplace("ArtAppraiserCareer"), workplace("Criminal"));
+        assert_eq!(workplace("Astronomer"), Some("StellarObservatory"));
+        assert_eq!(workplace("BotArena"), Some("ServoBotArena"));
+        assert_eq!(workplace("PTAlienTestSubject"), workplace("Science"));
     }
 }

@@ -1368,7 +1368,15 @@ installation is unreachable.
   stations there and then.
 - **Careers** from the game's own career tables: all eleven base-game careers (Professional
   Sports included) with every level's title, pay, hours and workdays, and the part-time jobs
-  (bookstore, grocery, spa, mausoleum) for teens. Careers branch where the game's do
+  (bookstore, grocery, spa, mausoleum) for teens; and the packs' careers from the same tables,
+  each worked at its own rabbit hole as the game's rabbit holes take on their `CareerLocation`s:
+  Education at the school, Film (and part-time film) at the film studio, Fortune Teller at the
+  Gypsy wagon, Video Game Developer at the business office, Sports Agent at the stadium, Art
+  Appraiser at the Hideout, Astronomer at the observatory, the Bot Arena's, and the science
+  lab's part-time alien test subjects (a combined rabbit hole, Bridgeport's City Hall, Police and
+  Military, is worked at as each of them). A metric asking for a social group's influence isn't
+  held against them. The listings offer only careers worked somewhere in the town (the game's
+  `Locations.Count > 0`). Careers branch where the game's do
   (Criminal into Thief or Evil, Music into Electric Rock or Symphonic, Law Enforcement into
   Special Agent or Forensic Analyst): the promotion there asks which path to take. Jobs are
   found as the game's are: "Find a Job" in the paper (three openings a day, the game's

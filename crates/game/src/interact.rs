@@ -3080,6 +3080,12 @@ fn load_skill_points(ui: Option<Res<crate::icons::GameUi>>, mut done: Local<bool
 }
 
 /// A skill's points per level.
+/// Whether the game has a skill of that name (a social group's influence, asked for by some of
+/// the packs' careers, isn't one); any, before the game's tables are in.
+pub fn known_skill(skill: &str) -> bool {
+    SKILL_TABLES.get().is_none_or(|t| t.contains_key(skill))
+}
+
 pub fn skill_points(skill: &str) -> &'static [u32] {
     SKILL_TABLES.get().and_then(|t| t.get(skill)).map_or(&SKILL_POINTS, |v| v.as_slice())
 }

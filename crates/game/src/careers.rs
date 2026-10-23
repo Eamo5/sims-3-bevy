@@ -1099,6 +1099,8 @@ pub fn metric_scores(
                 "RelCoworkers" | "RelPartner" => {
                     if coworkers.is_empty() { 0.0 } else { coworkers.iter().map(|c| liking(*c)).sum::<f32>() / coworkers.len() as f32 }
                 }
+                // (Not a skill at all, a social group's influence: not held against them.)
+                "SkillX" if !crate::interact::known_skill(&m.arg) => return None,
                 "SkillX" => skills.level(&m.arg) as f32,
                 // (The careers' own counts; what there's no way to do here yet isn't held
                 // against them.)

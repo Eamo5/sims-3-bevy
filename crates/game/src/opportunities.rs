@@ -72,7 +72,7 @@ pub fn task_for(o: &OpportunityInfo) -> &'static Activity {
 
 /// The rabbit-hole types on a lot: from its rabbit-hole objects, else its name.
 pub fn lot_types(world: &crate::loading::WorldInfo, lot: usize) -> Vec<&'static str> {
-    const CLASSES: [(&str, &str); 14] = [
+    const CLASSES: [(&str, &str); 18] = [
         ("Bistro", "Restaurant"),
         ("Diner", "Restaurant"),
         ("CityHall", "CityHall"),
@@ -87,13 +87,35 @@ pub fn lot_types(world: &crate::loading::WorldInfo, lot: usize) -> Vec<&'static 
         ("Bookstore", "Bookstore"),
         ("Hospital", "Hospital"),
         ("Hideout", "Hideout"),
+        // (The packs': the film studio, the Gypsy wagon, the observatory, the Bot Arena.)
+        ("MovieSet", "MovieSet"),
+        ("GypsyCaravan", "GypsyCaravan"),
+        ("StellarObservatory", "StellarObservatory"),
+        ("ServoBotArena", "ServoBotArena"),
+    ];
+    // (The combined ones: a building of two or three, each worked at and visited as its own.)
+    const COMBOS: [(&str, &[&str]); 13] = [
+        ("ComboBookstoreDaySpa", &["Bookstore", "DaySpa"]),
+        ("ComboBusinessBookstore", &["BusinessAndJournalism", "Bookstore"]),
+        ("ComboBusinessRestaurant", &["BusinessAndJournalism", "Restaurant"]),
+        ("ComboCityhallPoliceMilitary", &["CityHall", "PoliceStation", "MilitaryBase"]),
+        ("ComboCriminalTheater", &["Hideout", "Theatre"]),
+        ("ComboDaySpaBistro", &["DaySpa", "Restaurant"]),
+        ("ComboDinerGrocery", &["Restaurant", "Grocery"]),
+        ("ComboHospitalScienceLab", &["Hospital", "ScienceLab"]),
+        ("ComboSchoolStadium", &["School", "Stadium"]),
+        ("ComboStadiumAnnex", &["Stadium"]),
+        ("ComboStadiumTheatre", &["Stadium", "Theatre"]),
+        ("DaySpa", &["DaySpa"]),
+        ("Mausoleum", &["Mausoleum"]),
     ];
     let mut out: Vec<&'static str> = Vec::new();
     if let Some(b) = world.buildings.get(&lot) {
         for o in &b.objects {
             if let Some(class) = o.script.split("RabbitHoles.").nth(1) {
-                for (c, t) in CLASSES {
-                    if class.starts_with(c) && !out.contains(&t) {
+                let combo = COMBOS.iter().filter(|(c, _)| class.starts_with(c)).flat_map(|(_, ts)| ts.iter().copied());
+                for t in CLASSES.iter().filter(|(c, _)| class.starts_with(c)).map(|(_, t)| *t).chain(combo) {
+                    if !out.contains(&t) {
                         out.push(t);
                     }
                 }

@@ -195,7 +195,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
             .add_systems(Update, (apply_cam, watch_insect, ask_question, (keep_hungry, all_use, set_grime), wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, (run_out, give_topics, give_homework), face_hook, shots_every, (show_designs, show_style), walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
-            .add_systems(Update, strand_swimmers.run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (strand_swimmers, sim_cam).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, press_key.after(bevy::input::InputSystems).before(crate::buy::toggle_buy).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, hold_shift.after(bevy::input::InputSystems))
             .add_systems(Update, swim_to_test.run_if(in_state(crate::PlayMode::Live)))
@@ -1715,6 +1715,15 @@ fn face_hook(mut commands: Commands, mut sims: Query<(Entity, &mut crate::sim::S
             s.outfit.accessories = Some(worn.into_iter().map(|w| w.0).collect());
         }
         commands.entity(e).insert(crate::aging::NeedsNewBody);
+    }
+}
+
+/// SIM_CAM=<distance>: the camera kept on the selected Sim, that far off.
+fn sim_cam(sel: Query<&Transform, With<crate::sim::Selected>>, mut cam: Query<&mut SimsCamera>) {
+    let Some(d) = std::env::var("SIM_CAM").ok().and_then(|d| d.parse::<f32>().ok()) else { return };
+    if let (Ok(tf), Ok(mut c)) = (sel.single(), cam.single_mut()) {
+        c.look_at(tf.translation + Vec3::Y * 0.9);
+        c.distance = d;
     }
 }
 

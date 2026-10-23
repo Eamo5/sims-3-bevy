@@ -14,7 +14,7 @@ pub struct JobPaperPlugin;
 
 impl Plugin for JobPaperPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (open_listings, listing_buttons).chain().run_if(in_state(crate::PlayMode::Live)));
+        app.add_systems(Update, (hunt_test, open_listings, listing_buttons).chain().run_if(in_state(crate::PlayMode::Live)));
     }
 }
 
@@ -71,19 +71,34 @@ enum ListingButton {
 }
 
 /// The day's openings for a Sim: careers for their age (after-school jobs for teens, the rest
-/// for grown-ups), not the one they have, chosen by the day (the same all day, as the game's
-/// are).
-fn openings(sim: &crate::sim::Sim, current: Option<usize>, day: u32, n: usize) -> Vec<usize> {
+/// for grown-ups) worked somewhere in the world, not the one they have, chosen by the day (the
+/// same all day, as the game's are).
+fn openings(sim: &crate::sim::Sim, current: Option<usize>, day: u32, n: usize, located: &[bool]) -> Vec<usize> {
     use crate::sim::Age;
     let teen = sim.age == Age::Teen;
     if !(teen || sim.age.is_grown()) {
         return Vec::new();
     }
-    let mut all: Vec<usize> = crate::careers::careers().iter().enumerate().filter(|(i, c)| c.part_time == teen && Some(*i) != current).map(|(i, _)| i).collect();
+    let mut all: Vec<usize> = crate::careers::careers().iter().enumerate().filter(|(i, c)| c.part_time == teen && Some(*i) != current && located.get(*i).copied().unwrap_or(true)).map(|(i, _)| i).collect();
     let mut rng = rand::rngs::StdRng::seed_from_u64(day as u64 * 7919 + n as u64);
     all.shuffle(&mut rng);
     all.truncate(n);
     all
+}
+
+/// `JOB_HUNT=<day>` (tests): eight seconds in, the selected Sim looks on the computer for work, on
+/// that day's listings.
+fn hunt_test(mut commands: Commands, time: Res<Time>, mut done: Local<bool>, sel: Query<Entity, With<crate::sim::Selected>>, mut clock: ResMut<crate::clock::GameClock>) {
+    let Ok(v) = std::env::var("JOB_HUNT") else { return };
+    if *done || time.elapsed_secs() < 8.0 {
+        return;
+    }
+    let Ok(sim) = sel.single() else { return };
+    *done = true;
+    if let Ok(d) = v.parse::<f64>() {
+        clock.minutes += d * 24.0 * 60.0;
+    }
+    commands.insert_resource(JobHunt { sim, computer: true });
 }
 
 /// "9:00 am" (the listings' hours).
@@ -102,6 +117,7 @@ fn open_listings(
     (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
     sims: Query<(&crate::sim::Sim, Option<&crate::careers::Job>)>,
     clock: Res<crate::clock::GameClock>,
+    world: Res<crate::loading::CurrentWorld>,
     mut portraits: ResMut<crate::portraits::Portraits>,
     mut notes: ResMut<crate::interact::Notifications>,
     (shown, mut game_ui): (Option<Res<Listings>>, Option<ResMut<crate::icons::GameUi>>),
@@ -112,7 +128,10 @@ fn open_listings(
     }
     commands.remove_resource::<JobHunt>();
     let Ok((sim, job)) = sims.get(h.sim) else { return };
-    let offers = openings(sim, job.map(|j| j.track), clock.day(), if h.computer { COMPUTER_OPENINGS } else { PAPER_OPENINGS });
+    let located = crate::careerholes::located(&world.data);
+    debug!("careers worked here: {}", crate::careers::careers().iter().zip(&located).filter(|(_, l)| **l).map(|(c, _)| c.name).collect::<Vec<_>>().join(", "));
+    let offers = openings(sim, job.map(|j| j.track), clock.day(), if h.computer { COMPUTER_OPENINGS } else { PAPER_OPENINGS }, &located);
+    info!("job listings: {}", offers.iter().map(|i| crate::careers::careers()[*i].name).collect::<Vec<_>>().join(", "));
     if offers.is_empty() {
         notes.push(format!("There are no jobs listed for {} today.", sim.first));
         return;

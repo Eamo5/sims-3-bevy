@@ -65,21 +65,9 @@ struct SimTag(Entity);
 #[derive(Component)]
 struct OppTag(usize, Option<Entity>);
 
-/// The lot type a career's Sims work at (its rabbit hole: `opportunities::lot_types`).
+/// The lot type a career's Sims work at (its rabbit hole, by the career's key).
 fn workplace(career: &str) -> Option<&'static str> {
-    Some(match career {
-        "Business" | "Journalism" => "BusinessAndJournalism",
-        "Culinary" => "Restaurant",
-        "Political" => "CityHall",
-        "Professional Sports" | "ProfessionalSports" | "Athletic" => "Stadium",
-        "Science" => "ScienceLab",
-        "Law Enforcement" | "LawEnforcement" => "PoliceStation",
-        "Military" => "MilitaryBase",
-        "Music" => "Theatre",
-        "Medical" => "Hospital",
-        "Criminal" => "Hideout",
-        _ => return None,
-    })
+    crate::careerholes::workplace(career)
 }
 
 /// Where a household Sim is, for their tag: their own place when they're about, else the lot
@@ -111,7 +99,7 @@ fn sim_tags(
             (tf.translation(), "here".to_string())
         } else if let Some(r) = out.filter(|r| r.lot < world.data.lots.len()) {
             (crate::home::lot_center(&world.data.lots[r.lot]), format!("at {}", r.place))
-        } else if let Some(l) = at_work.then(|| job.and_then(|j| workplace(j.career().name)).and_then(lot_of)).flatten() {
+        } else if let Some(l) = at_work.then(|| job.and_then(|j| workplace(j.career().key)).and_then(lot_of)).flatten() {
             (crate::home::lot_center(&world.data.lots[l]), "at work".to_string())
         } else if let Some(h) = home {
             (h, if at_work { "at work".to_string() } else { "out".to_string() })
@@ -498,7 +486,7 @@ fn place_tags(
     // (Where the household's Sims work, and the lots they're out at.)
     let (mut work, mut out): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
     if on {
-        let types: Vec<&str> = members.iter().filter_map(|(_, _, job, ..)| job.and_then(|j| workplace(j.career().name))).collect();
+        let types: Vec<&str> = members.iter().filter_map(|(_, _, job, ..)| job.and_then(|j| workplace(j.career().key))).collect();
         if !types.is_empty() {
             work = (0..world.data.lots.len()).filter(|&l| crate::opportunities::lot_types(&world.data, l).iter().any(|t| types.contains(t))).collect();
         }

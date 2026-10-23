@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 164;
+pub const GAMEDATA_VERSION: u32 = 165;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -3362,7 +3362,9 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             let name_key = get(f, "CareerName");
             let table = get(&f, "TableName");
             let category = get(&f, "Category");
-            if name_key.is_empty() || table.is_empty() || f.get("ProductVersion").is_some_and(|s| s != "BaseGame") {
+            // (The packs' careers too: Education, Film, Fortune Teller, Game Developer, Sports Agent,
+            // Art Appraiser, Astronomer, the Bot Arena; each worked at its own rabbit hole.)
+            if name_key.is_empty() || table.is_empty() {
                 continue;
             }
             if category != "FullTime" && category != "PartTime" {
