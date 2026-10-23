@@ -220,10 +220,22 @@ fn social_partners(
     data: Res<Baked>,
     sims: Query<(&crate::interact::ActionQueue, &Transform, &crate::sim::Sim, Option<&Rejected>), Without<Pet>>,
     mut pets: Query<(Entity, &Pet, &mut Transform, &mut PetAnim, Has<PetBusy>)>,
+    ridden: Query<(), With<crate::riding::Ridden>>,
 ) {
     let mut seen: Vec<Entity> = Vec::new();
     for (q, stf, sim, rejected) in &sims {
         let Some(a) = q.0.front() else { continue };
+        // (A horse someone's coming to ride waits for them: `riding`.)
+        if let crate::interact::ActionKind::Ride { horse, .. } = a.kind
+            && let Ok((e, pet, _, mut anim, busy)) = pets.get_mut(horse)
+        {
+            seen.push(e);
+            if !busy {
+                commands.entity(e).insert(PetBusy);
+                anim.play(format!("{}_idle_stand_breathe_x", pet.kind));
+            }
+            continue;
+        }
         let crate::interact::ActionKind::PetSocial { target, social, .. } = a.kind else { continue };
         let Ok((e, pet, mut tf, mut anim, busy)) = pets.get_mut(target) else { continue };
         seen.push(e);
@@ -244,7 +256,7 @@ fn social_partners(
         }
     }
     for (e, pet, _, mut anim, busy) in &mut pets {
-        if busy && !seen.contains(&e) {
+        if busy && !seen.contains(&e) && !ridden.contains(e) {
             commands.entity(e).remove::<PetBusy>();
             anim.play(format!("{}_idle_stand_breathe_x", pet.kind));
         }
@@ -283,6 +295,32 @@ impl PetAnim {
             self.time = 0.0;
             self.blend = 1.0;
         }
+    }
+
+    /// A clip played from its start (again, if it's the one playing).
+    pub fn replay(&mut self, clip: String) {
+        if self.clip == clip {
+            self.time = 0.0;
+        } else {
+            self.play(clip);
+        }
+    }
+
+    /// How far into its clip it is (seconds, counting on past its end as it loops).
+    pub fn time(&self) -> f32 {
+        self.time
+    }
+}
+
+/// fnv32("world_offset"): the rig's helper whose track is how far a clip takes its animal.
+const WORLD_OFFSET: u32 = 0x0EB4_037B;
+
+/// How fast a walking clip goes (metres a second): its travel over its length.
+pub fn clip_pace(clip: &s3formats::sim::Clip) -> f32 {
+    let Some(w) = clip.tracks.get(&WORLD_OFFSET) else { return 0.0 };
+    match (w.translation.first(), w.translation.last()) {
+        (Some(a), Some(b)) if clip.duration > 0.0 => (Vec3::from(b.1) - Vec3::from(a.1)).length() / clip.duration,
+        _ => 0.0,
     }
 }
 

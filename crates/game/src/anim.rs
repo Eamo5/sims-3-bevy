@@ -206,6 +206,21 @@ fn travels(name: &str) -> bool {
     name.starts_with("c2o_JungleGym")
 }
 
+/// A rider's clip (`riding`: on a horse, getting on and off it): its body drawn back from the
+/// clip's own `world_offset` (where the game's engine puts the rider), so it sits in the horse's
+/// frame (or, getting on and off, the frame beside it the game's jig stands them in); at a gait,
+/// the horse's clip whose travel it rides along with (taken off too: the horse goes by its own
+/// walking).
+pub fn rider_clip(name: &str) -> Option<Option<&'static str>> {
+    match name {
+        "a_rideHorse_walk_y" => return Some(Some("ah_walk_x")),
+        "a_rideHorse_canter_y" => return Some(Some("ah_canter_x")),
+        "a_rideHorse_run_y" => return Some(Some("ah_run_x")),
+        _ => {}
+    }
+    (name.ends_with("_rider_y") || name.starts_with("a_idleMount_")).then_some(None)
+}
+
 /// A clip that carried the Sim somewhere is done: they're left there.
 pub fn commit_root_motion(mut sims: Query<(&mut Transform, &mut ClipPlayer), (With<Sim>, Without<ActionClip>)>) {
     for (mut tf, mut player) in &mut sims {
@@ -523,6 +538,16 @@ pub fn drive_skeletons(
                 .clone()
         });
         let anchor = clip_anchor(&player.name).map(|(at, turn)| if mirror { (Vec3::new(-at.x, at.y, at.z), -turn) } else { (at, turn) });
+        // (A rider: drawn back from the clip's offset, and the horse's travel at a gait.)
+        let rider = rider_clip(&player.name).map(|horse| {
+            let wo = clip.tracks.get(&WORLD_OFFSET);
+            let (p, r) = (wo.and_then(|w| sample_track_vec(&w.translation, t)).unwrap_or(Vec3::ZERO), wo.and_then(|w| sample_track_quat(&w.rotation, t)).unwrap_or(Quat::IDENTITY));
+            let travel = horse.and_then(|h| lib.get(&data, h)).and_then(|h| {
+                let ht = if h.duration > 0.0 { t % h.duration } else { 0.0 };
+                h.tracks.get(&WORLD_OFFSET).and_then(|w| sample_track_vec(&w.translation, ht))
+            });
+            (p, r.inverse(), travel.map_or(Vec3::ZERO, |w| Vec3::new(w.x, 0.0, w.z)))
+        });
         // (Carried along by the clip: the body drawn where its travel has taken it.)
         let travel = (action.is_some() && travels(&player.name))
             .then(|| clip.tracks.get(&WORLD_OFFSET).and_then(|w| sample_track_vec(&w.translation, t)))
@@ -591,6 +616,12 @@ pub fn drive_skeletons(
                 if let Some(o) = travel {
                     target.translation = bind.translation + o;
                 }
+            }
+            if let Some((wo, inv, travel)) = rider
+                && bone.hash == ROOT_BIND
+            {
+                target.translation = inv * (target.translation - wo) + travel;
+                target.rotation = inv * target.rotation;
             }
             // (Brought round to its set's root.)
             if let Some((at, turn)) = anchor

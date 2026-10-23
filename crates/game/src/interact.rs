@@ -2917,6 +2917,10 @@ pub enum ActionKind {
     AdoptPet { kind: &'static str },
     /// A social with a pet (`pets::PET_SOCIALS`): where the pet was, its kind.
     PetSocial { target: Entity, social: usize, at: Vec2, kind: &'static str },
+    /// A ride on a horse (`riding`): which, and where to get on it.
+    Ride { horse: Entity, slot: Vec2 },
+    /// Off the horse they're riding.
+    Dismount,
     /// Putting a fire out (`fire`): which, where, and on what floor.
     Extinguish { target: Entity, at: Vec3, level: u8 },
     /// Phone round to throw a party.
@@ -3391,7 +3395,7 @@ pub(crate) fn run_actions(
             Option<&crate::opportunities::SimOpportunities>,
             Option<&crate::visit::OnLot>,
         ),
-        (Without<GameObject>, Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>),
+        (Without<GameObject>, Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>, Without<crate::riding::Mounted>),
     >,
     mut objects: Query<(&GameObject, &Transform, &mut UsedBy, Option<&Floor>), Without<Sim>>,
     (building, upper, visited, privacy, locks, cars): (
@@ -3682,6 +3686,8 @@ pub(crate) fn run_actions(
                                 crate::carry::CarryStep::PutDown(Some(at)) => Some((crate::carry::beside(*at, mine, apart), floor.0)),
                             }
                         }
+                        // (Beside a horse to get on it, where the game's jig stands them.)
+                        ActionKind::Ride { slot, .. } => Some((*slot, 1)),
                         // (Standing before the pet, as far off as the game's jig has them.)
                         ActionKind::PetSocial { at, kind, .. } => {
                             let mine = Vec2::new(tf.translation.x, tf.translation.z);
@@ -3755,7 +3761,7 @@ pub(crate) fn run_actions(
                             commands.entity(me).insert(clip);
                             continue;
                         }
-                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) => None,
+                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount => None,
                         ActionKind::Outro { .. } => {
                             action.phase = Phase::Running(0.0);
                             continue;
@@ -4526,6 +4532,11 @@ pub(crate) fn run_actions(
                                 crate::rabbitholes::walk_to_school(&mut commands, &clock, me, sim, &mut notes);
                                 finished = true;
                             }
+                            // (Up on the horse: the ride takes it from here.)
+                            ActionKind::Ride { horse, .. } => {
+                                commands.entity(me).insert(crate::riding::Mounted::new(*horse));
+                            }
+                            ActionKind::Dismount => finished = true,
                             // (Off along the street: the jog takes it from here.)
                             ActionKind::Jog { home } => {
                                 commands.entity(me).insert(crate::jog::Jogging::new(*home, clock.minutes));
@@ -6022,8 +6033,8 @@ pub(crate) fn run_actions(
                                 });
                             }
                         }
-                        // (Out on the street, the jog runs itself: `jog`.)
-                        ActionKind::Jog { .. } => {}
+                        // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
+                        ActionKind::Jog { .. } | ActionKind::Ride { .. } => {}
                         _ => finished = true,
                     }
                 }

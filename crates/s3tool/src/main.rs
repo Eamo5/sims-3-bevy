@@ -1485,12 +1485,13 @@ fn main() {
             for (i, b) in rig.bones.iter().enumerate().filter(|(i, b)| match &only { Some(f) => f.split(',').any(|x| b.name.contains(x)), None => *i < 6 }) {
                 let Some(t) = c.tracks.get(&b.hash) else { println!("  [{i}] {} -", b.name); continue };
                 println!(
-                    "  [{i}] {} bind {:?} t0 {:?} t1 {:?} r0 {:?}",
+                    "  [{i}] {} bind {:?} t0 {:?} t1 {:?} r0 {:?} r1 {:?}",
                     b.name,
                     b.position,
                     t.translation.first().map(|x| x.1),
                     t.translation.last().map(|x| x.1),
-                    t.rotation.first().map(|x| x.1)
+                    t.rotation.first().map(|x| x.1),
+                    t.rotation.last().map(|x| x.1)
                 );
             }
         }

@@ -963,6 +963,19 @@ installation is unreachable.
   as often, a Proud cat grooms itself from half clean; Lazy dogs, Playful cats, Aggressive and
   Piggy pets eat from the bowl in the pack's own ways (`GetEatingStylesForSim`), and Aggressive
   and Skittish pets turn Sims down with the pack's aggressive and cowering rejections.
+  Horses are ridden (the horse's menu's "Ride", for teens and up it likes well enough: the
+  pack's `kMinLtrForMountAvailability`, and it lets them up from `kMinLtrForMountAccept`): the Sim
+  goes round to its left side, where the game's mounting jig stands them, and climbs up with the
+  pack's clips, the horse's half and the rider's together (near failing at it at first, with a
+  swing once skilled: `kNearFailMountChance`, `kSkilledMountChance`). Up there the rider sits
+  the horse's every move in the pack's rider clips, in step with its own: its idles (each horse
+  idle's rider's half, as `GetRiderAnimationName`; the mounted idles, a pat on the neck, the
+  bridle adjusted), and "Ride Here" on the ground takes them there at a walk, or a way off at a
+  canter (Riding 1) and a gallop (Riding 2), the horse going at its clips' own pace. Riding
+  teaches Riding (a point a minute, ten more at speed), the two grow fonder and the horse's fun
+  and company are seen to every five minutes; "Dismount" (or the ride cancelled, or anything
+  else asked of the rider) brings them down beside it. `RIDE_TEST=<horse>[:<dx>,<dz>[,<s>]]`,
+  `RIDE_SKILL=<level>` (tests).
   Minor pets, the pack's (its `MinorPets` table, baked: 46 turtles, snakes, lizards, rodents
   and birds with their names, descriptions, rarity and worth): a turtle, snake, lizard or rodent
   terrarium is stocked from its menu ("Stock ›", the stockable species of its kind at their

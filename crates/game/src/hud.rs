@@ -1344,7 +1344,7 @@ fn world_click(
     {
         let kind: &'static str = ["ac", "cc", "ad", "cd", "al", "cl", "ah", "ch"].into_iter().find(|k| *k == pet.kind).unwrap_or("ac");
         let at = Vec2::new(ptf.translation().x, ptf.translation().z);
-        let options: Vec<(String, ActionKind)> = crate::pets::PET_SOCIALS
+        let mut options: Vec<(String, ActionKind)> = crate::pets::PET_SOCIALS
             .iter()
             .enumerate()
             .filter(|(_, s)| s.suits(kind))
@@ -1352,6 +1352,22 @@ fn world_click(
             .filter(|(_, s)| s.min_liking.is_none_or(|m| bonds.map_or(if home { crate::pets::FAMILY_LIKING } else { 0.0 }, |b| b.liking(actor_sim.id, home)) >= m))
             .map(|(i, s)| (s.name.to_string(), ActionKind::PetSocial { target: t, social: i, at, kind }))
             .collect();
+        // (A horse of the household's: ridden, by a teen or older it likes well enough, none up on
+        // it already; its rider's to get down from it: `riding`.)
+        if kind == "ah" {
+            let riding = queues_q.get(actor).ok().and_then(crate::riding::riding_on);
+            let liking = bonds.map_or(if home { crate::pets::FAMILY_LIKING } else { 0.0 }, |b| b.liking(actor_sim.id, home));
+            if riding == Some(t) {
+                options = vec![("Dismount".to_string(), ActionKind::Dismount)];
+            } else if home
+                && riding.is_none()
+                && crate::riding::can_ride(actor_sim)
+                && liking >= crate::riding::MIN_LIKING_OFFERED
+                && !queues_q.iter().any(|q| crate::riding::riding_on(q) == Some(t))
+            {
+                options.insert(0, ("Ride".to_string(), ActionKind::Ride { horse: t, slot: crate::riding::mount_slot(&ptf.compute_transform()) }));
+            }
+        }
         pie.submenus.clear();
         pie.at = cursor;
         open_pie(&mut commands, &mut pie, cursor, &format!("{} ({})", pet.name, pet.species()), actor, options);
@@ -2483,6 +2499,11 @@ fn world_click(
             };
             open_pie(&mut commands, &mut pie, cursor, "", actor, vec![(label.to_string(), ActionKind::Object { target: ladder, def })]);
             pie.swim_to = Some(at);
+            return;
+        }
+        // (Up on a horse: ridden there, the game's "Ride Here".)
+        if queues_q.get(actor).ok().and_then(crate::riding::riding_on).is_some() {
+            open_pie(&mut commands, &mut pie, cursor, "", actor, vec![("Ride Here".to_string(), ActionKind::GoHere(Vec2::new(p.x, p.z), level))]);
             return;
         }
         let mut options = vec![("Go Here".to_string(), ActionKind::GoHere(Vec2::new(p.x, p.z), level))];
