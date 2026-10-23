@@ -80,6 +80,13 @@ fn main() {
                 for (n, p, f) in s3formats::object::object_route_slots(&set, &k) {
                     println!("  routing slot {n}: at {p:?} facing {f:?}");
                 }
+                if let Some(r) = s3formats::object::object_rslt(&set, &k) {
+                    for s in &r.routing {
+                        println!("  rslt routing {:08X}: at {:?} rot z {:?}", s.name, s.pos, [s.rot[0][2], s.rot[1][2], s.rot[2][2]]);
+                    }
+                } else {
+                    println!("  no rslt");
+                }
                 for s in s3formats::object::object_container_slots(&set, &k) {
                     println!("  container slot {:08X}: at {:?}", s.name, s.pos);
                 }
@@ -1580,6 +1587,15 @@ fn main() {
             for (h, t) in &c.tracks {
                 let n = names.iter().find(|n| s3pkg::fnv32(n) == *h || s3pkg::fnv32(&n.to_ascii_lowercase()) == *h).cloned().unwrap_or_default();
                 println!("  {h:08X} {n:20} t0 {:?} t1 {:?} r0 {:?}", t.translation.first().map(|x| x.1), t.translation.last().map(|x| x.1), t.rotation.first().map(|x| x.1));
+                // (SAMPLES=<n>: its translation keys at n times along it.)
+                if let Some(k) = std::env::var("SAMPLES").ok().and_then(|v| v.parse::<usize>().ok()).filter(|k| *k > 1 && t.translation.len() > 2) {
+                    for i in 0..k {
+                        let at = c.duration * i as f32 / (k - 1) as f32;
+                        if let Some(p) = t.translation.iter().min_by(|a, b| (a.0 - at).abs().total_cmp(&(b.0 - at).abs())) {
+                            println!("      {:5.2}s {:?}", p.0, p.1);
+                        }
+                    }
+                }
             }
         }
         return;

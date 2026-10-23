@@ -989,7 +989,10 @@ installation is unreachable.
   The pack's longer socials are played in their parts, start, loops and end, the pet's half of
   each in step with the Sim's: Rub Belly (a dog liking them from 40, rolling over between them),
   Play (dogs), Brush (cats and dogs; Brush Horse), the Sim with the pack's pet brush in hand and
-  the pet's hygiene seen to as it's brushed.
+  the pet's hygiene seen to as it's brushed; and Play Fetch (dogs, as the pack's `PlayFetchJig`):
+  the pack's stick readied, thrown and run after, brought back in the dog's mouth and handed
+  over, or a throw faked, round and round, the stick passed between the Sim's hand and the dog's
+  mouth as the clips' parent events have it.
   Dogs learn tricks (the pack's `TrickSkill`): "Teach Trick..." on a household dog's menu (for
   teens and up) offers each trick its Tricks level allows (Sit, Sit Up, Speak, Shake, Roll Over,
   Play Dead, from the tuning's `kTrickSkillLevelRequired` 0 to 5), and teaching goes round the

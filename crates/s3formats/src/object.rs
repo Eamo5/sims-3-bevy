@@ -173,6 +173,16 @@ pub fn object_container_slots(pkgs: &PackageSet, objd_key: &ResourceKey) -> Vec<
     pkgs.read(&rk).or_else(|| pkgs.read_ti(rk.t, rk.i)).and_then(|d| crate::model::parse_rslt(&d)).map(|s| s.containers).unwrap_or_default()
 }
 
+/// An object's slots as its RSLT has them (all of them, by their names' hashes).
+pub fn object_rslt(pkgs: &PackageSet, objd_key: &ResourceKey) -> Option<crate::model::Slots> {
+    let objd = pkgs.read(objd_key)?;
+    let objk = objd_objk(pkgs, &objd)?;
+    let mk = objk.model_key.filter(|k| k.t == types::VPXY)?;
+    let v = pkgs.read(&mk).or_else(|| pkgs.read_ti(mk.t, mk.i))?;
+    let rk = crate::model::vpxy_keys(&v).into_iter().find(|k| k.t == crate::model::T_RSLT).map(|k| in_pack(pkgs, k, mk.g >> 24))?;
+    pkgs.read(&rk).or_else(|| pkgs.read_ti(rk.t, rk.i)).and_then(|d| crate::model::parse_rslt(&d))
+}
+
 /// An object's routing slots (`routingSlot_N`, model space): where a Sim stands to use it, by
 /// slot number, and the way they face there.
 pub fn object_route_slots(pkgs: &PackageSet, objd_key: &ResourceKey) -> Vec<(u8, [f32; 3], [f32; 3])> {

@@ -103,6 +103,8 @@ pub struct PetSocial {
     pub hygiene: f32,
     /// How much further off than usual the Sim stands for it (metres).
     pub apart: f32,
+    /// Its loops played in turn (a stick readied, thrown and brought back), not at random.
+    pub ordered: bool,
 }
 
 /// How much more a Sim gets out of time with a pet of a kind (`TraitTuning`: an Animal Lover a
@@ -125,22 +127,29 @@ const GROWN: &[&str] = &["ac", "ad", "al", "ah"];
 
 /// A friendly social's liking, as a Sim's friendly talk until they're friends (the OK context's
 /// step), a hug or a smoochie more; a scolding costs some.
-pub static PET_SOCIALS: [PetSocial; 13] = [
-    PetSocial { name: "Pet", clip: "petFloor_friendly_neutral", kinds: ALL, minutes: 8.0, fun: 40.0, social: 70.0, min_liking: Some(10.0), liking: 2.5, loops: &[], hygiene: 0.0, apart: 0.0 },
-    PetSocial { name: "Let Sniff Hand", clip: "letSniffHand_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: 10.0, social: 40.0, min_liking: Some(-80.0), liking: 1.67, loops: &[], hygiene: 0.0, apart: 0.0 },
-    PetSocial { name: "Praise", clip: "praise_friendly_neutral", kinds: GROWN, minutes: 4.0, fun: 15.0, social: 50.0, min_liking: None, liking: 1.67, loops: &[], hygiene: 0.0, apart: 0.0 },
-    PetSocial { name: "Hug", clip: "giveLoveHug_friendly_neutral", kinds: &["ac", "ad", "al"], minutes: 5.0, fun: 30.0, social: 80.0, min_liking: Some(20.0), liking: 3.0, loops: &[], hygiene: 0.0, apart: 0.0 },
-    PetSocial { name: "Smoochie", clip: "giveSmoochie_neutral_neutral", kinds: &["ad"], minutes: 5.0, fun: 30.0, social: 80.0, min_liking: Some(40.0), liking: 3.0, loops: &[], hygiene: 0.0, apart: 0.0 },
-    PetSocial { name: "Feed Treat", clip: "feedTreat_friendly_neutral", kinds: GROWN, minutes: 5.0, fun: 20.0, social: 40.0, min_liking: None, liking: 2.5, loops: &[], hygiene: 0.0, apart: 0.0 },
-    PetSocial { name: "Rub Neck", clip: "rubNeck_friendly_neutral", kinds: &["ah"], minutes: 8.0, fun: 30.0, social: 60.0, min_liking: Some(-10.0), liking: 2.5, loops: &[], hygiene: 0.0, apart: 0.0 },
-    PetSocial { name: "Calm Down", clip: "calmDown_neutral_neutral", kinds: &["ah"], minutes: 6.0, fun: 15.0, social: 50.0, min_liking: Some(10.0), liking: 1.67, loops: &[], hygiene: 0.0, apart: 0.0 },
+pub static PET_SOCIALS: [PetSocial; 14] = [
+    PetSocial { name: "Pet", clip: "petFloor_friendly_neutral", kinds: ALL, minutes: 8.0, fun: 40.0, social: 70.0, min_liking: Some(10.0), liking: 2.5, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
+    PetSocial { name: "Let Sniff Hand", clip: "letSniffHand_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: 10.0, social: 40.0, min_liking: Some(-80.0), liking: 1.67, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
+    PetSocial { name: "Praise", clip: "praise_friendly_neutral", kinds: GROWN, minutes: 4.0, fun: 15.0, social: 50.0, min_liking: None, liking: 1.67, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
+    PetSocial { name: "Hug", clip: "giveLoveHug_friendly_neutral", kinds: &["ac", "ad", "al"], minutes: 5.0, fun: 30.0, social: 80.0, min_liking: Some(20.0), liking: 3.0, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
+    PetSocial { name: "Smoochie", clip: "giveSmoochie_neutral_neutral", kinds: &["ad"], minutes: 5.0, fun: 30.0, social: 80.0, min_liking: Some(40.0), liking: 3.0, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
+    PetSocial { name: "Feed Treat", clip: "feedTreat_friendly_neutral", kinds: GROWN, minutes: 5.0, fun: 20.0, social: 40.0, min_liking: None, liking: 2.5, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
+    PetSocial { name: "Rub Neck", clip: "rubNeck_friendly_neutral", kinds: &["ah"], minutes: 8.0, fun: 30.0, social: 60.0, min_liking: Some(-10.0), liking: 2.5, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
+    PetSocial { name: "Calm Down", clip: "calmDown_neutral_neutral", kinds: &["ah"], minutes: 6.0, fun: 15.0, social: 50.0, min_liking: Some(10.0), liking: 1.67, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
     // (The pack's sets in parts: a belly rub, playing, brushing a cat or dog, or a horse.)
-    PetSocial { name: "Rub Belly", clip: "soc_neutral_rubBelly", kinds: &["ad", "al", "cd", "cl"], minutes: 10.0, fun: 60.0, social: 80.0, min_liking: Some(40.0), liking: 3.0, loops: &["loop1", "loop2", "loop3"], hygiene: 0.0, apart: 0.3 },
-    PetSocial { name: "Play", clip: "soc_neutral_play_all", kinds: &["ad", "al", "cd", "cl"], minutes: 15.0, fun: 120.0, social: 60.0, min_liking: Some(-10.0), liking: 2.5, loops: &["loop1", "loop2"], hygiene: 0.0, apart: 0.0 },
-    PetSocial { name: "Brush", clip: "brush", kinds: &["ac", "ad", "al"], minutes: 15.0, fun: 20.0, social: 50.0, min_liking: Some(-30.0), liking: 2.0, loops: &["loop"], hygiene: 240.0, apart: 0.0 },
-    PetSocial { name: "Brush Horse", clip: "brush", kinds: &["ah"], minutes: 20.0, fun: 20.0, social: 50.0, min_liking: Some(-30.0), liking: 2.0, loops: &["loop"], hygiene: 240.0, apart: 0.0 },
-    PetSocial { name: "Scold", clip: "scold_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: -10.0, social: 10.0, min_liking: None, liking: -3.0, loops: &[], hygiene: 0.0, apart: 0.0 },
+    PetSocial { name: "Rub Belly", clip: "soc_neutral_rubBelly", kinds: &["ad", "al", "cd", "cl"], minutes: 10.0, fun: 60.0, social: 80.0, min_liking: Some(40.0), liking: 3.0, loops: &["loop1", "loop2", "loop3"], hygiene: 0.0, apart: 0.3, ordered: false },
+    PetSocial { name: "Play", clip: "soc_neutral_play_all", kinds: &["ad", "al", "cd", "cl"], minutes: 15.0, fun: 120.0, social: 60.0, min_liking: Some(-10.0), liking: 2.5, loops: &["loop1", "loop2"], hygiene: 0.0, apart: 0.0, ordered: false },
+    PetSocial { name: "Brush", clip: "brush", kinds: &["ac", "ad", "al"], minutes: 15.0, fun: 20.0, social: 50.0, min_liking: Some(-30.0), liking: 2.0, loops: &["loop"], hygiene: 240.0, apart: 0.0, ordered: false },
+    PetSocial { name: "Brush Horse", clip: "brush", kinds: &["ah"], minutes: 20.0, fun: 20.0, social: 50.0, min_liking: Some(-30.0), liking: 2.0, loops: &["loop"], hygiene: 240.0, apart: 0.0, ordered: false },
+    // (Fetch, as the pack's `PlayFetchJig`: the dog a metre off, facing the Sim; the stick readied,
+    // thrown, run after and brought back, or a throw faked, `kLTRIncrease` the closer.)
+    PetSocial { name: "Play Fetch", clip: "playFetch", kinds: &["ad", "al"], minutes: 20.0, fun: 100.0, social: 50.0, min_liking: Some(-20.0), liking: 3.0, loops: FETCH, hygiene: 0.0, apart: 0.2, ordered: true },
+    PetSocial { name: "Scold", clip: "scold_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: -10.0, social: 10.0, min_liking: None, liking: -3.0, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
 ];
+
+/// A game of fetch's parts, in turn: readied, thrown (the dog off after it, and back), the stick
+/// handed back; readied, a throw faked.
+const FETCH: &[&str] = &["ready2Throw", "throwShort", "continueThrowing", "ready2Throw", "fakeOut"];
 
 /// The pet's side of a social it turns down (the pack's `genRejectNeutral`; an aggressive pet's
 /// `genRejectAgressive`).
@@ -212,7 +221,8 @@ impl PetSocial {
         }
         let loops: &'static [&'static str] = Box::leak(loops.into_boxed_slice());
         let end: &'static [&'static str] = Box::leak(self.part(data, child, kind, "stop", 'x').into_iter().collect::<Vec<_>>().into_boxed_slice());
-        Some(crate::anim::ActionClip::new(self.part(data, child, kind, "start", 'x'), loops).ending(end, 2.5))
+        let suite = crate::anim::ActionClip::new(self.part(data, child, kind, "start", 'x'), loops).ending(end, 2.5);
+        Some(if self.ordered { suite.in_order() } else { suite })
     }
 }
 
@@ -340,6 +350,11 @@ pub struct PetSkeleton {
 }
 
 impl PetSkeleton {
+    /// The joint of one of its slots (by its name's FNV-32: `b__Mouth_slot`), as clips name them.
+    pub fn slot_joint(&self, hash: u32) -> Option<Entity> {
+        self.rig.bones.iter().position(|b| s3pkg::fnv32(&b.name) == hash).map(|i| self.joints[i])
+    }
+
     /// Where a bone of it is now (`b__Head__`, `b__NoseBase__`).
     pub fn bone<F: bevy::ecs::query::QueryFilter>(&self, name: &str, joints: &Query<&GlobalTransform, F>) -> Option<Vec3> {
         let i = self.rig.bones.iter().position(|b| b.name == name)?;
@@ -1020,6 +1035,13 @@ fn strays(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fetch_is_played_in_turn_for_dogs() {
+        let fetch = PET_SOCIALS.iter().find(|s| s.name == "Play Fetch").unwrap();
+        assert!(fetch.suits("ad") && fetch.suits("al") && !fetch.suits("ac") && !fetch.suits("ah"));
+        assert!(fetch.ordered && fetch.loops.contains(&"throwShort") && fetch.loops.contains(&"fakeOut"));
+    }
 
     #[test]
     fn pets_warm_to_those_who_are_kind_to_them() {

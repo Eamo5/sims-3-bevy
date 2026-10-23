@@ -90,6 +90,8 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("rake", "accessoryRakeAdult", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("snowBallAccessory", "accessorySnowBall", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("treat", "accessoryDogTreat", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    // (A game of fetch's stick: thrown, and carried back in the dog's mouth.)
+    ("stick", "accessoryPetFetchStick", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("wand", "magicWandClassic", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     // (The packs' games and instruments.)
     ("cue", "PoolCue", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
@@ -148,6 +150,7 @@ fn hold_props(
     )>,
     (mut props, mut shown): (Query<&mut Transform, With<Prop>>, Query<&mut Visibility, (With<Prop>, Without<crate::interact::GameObject>)>),
     mut placed: Query<(&crate::interact::GameObject, &mut Visibility), Without<Prop>>,
+    pets: Query<&crate::pets::PetSkeleton>,
     mut objects: Local<Option<HashMap<String, Key>>>,
     mut companions: Local<HashMap<String, Vec<(usize, String)>>>,
 ) {
@@ -190,6 +193,11 @@ fn hold_props(
         // The object being used, when the Sim holds its copy (shown again afterwards).
         let target = queue.0.front().and_then(|a| match a.kind {
             crate::interact::ActionKind::Object { target, .. } => Some(target),
+            _ => None,
+        });
+        // (A pet being played with: what's thrown for it goes to it.)
+        let partner = queue.0.front().and_then(|a| match a.kind {
+            crate::interact::ActionKind::PetSocial { target, .. } => Some(target),
             _ => None,
         });
         let in_hand = target.filter(|t| {
@@ -250,9 +258,24 @@ fn hold_props(
             // (Moved to another slot as the clip says: goggles from the hand to the face. Not
             // shown while the clip has it elsewhere than on the Sim: a toy still on the floor.)
             let parent = clip.parents.iter().rev().find(|p| p.time <= t + 1e-3);
+            // (Handed over to the pet played with, as the clip has it: the stick in flight, in its
+            // frame, then in its mouth's slot.)
+            let to_pet = parent.filter(|p| p.parent != SIM_ACTOR).and(partner).filter(|p| pets.contains(*p));
+            if let (Some(p), Some(pet)) = (parent, to_pet)
+                && let Some(h) = held.0.iter_mut().find(|(h, ..)| h == i)
+            {
+                let (joint, key) = match pets.get(pet).ok().and_then(|s| s.slot_joint(p.slot)) {
+                    Some(j) => (j, ON_PET_SLOT),
+                    None => (pet, ON_PET),
+                };
+                if h.2 != key {
+                    h.2 = key;
+                    commands.entity(joint).add_child(entity);
+                }
+            }
             if let Ok(mut v) = shown.get_mut(entity) {
                 // (The mop's clip carries it about the puddle's root, where the Sim stands.)
-                let on_sim = parent.is_none_or(|p| p.parent == SIM_ACTOR) || OBJECT_SPACE.contains(&PROPS[*i].0);
+                let on_sim = parent.is_none_or(|p| p.parent == SIM_ACTOR) || OBJECT_SPACE.contains(&PROPS[*i].0) || to_pet.is_some();
                 // (Put down to talk where they sit, the hands at the talk.)
                 v.set_if_neq(if on_sim && !talking { Visibility::Inherited } else { Visibility::Hidden });
             }
@@ -280,6 +303,10 @@ fn hold_props(
 /// Props whose clips move them about the object's root rather than in a Sim's hand: held at
 /// the Sim's root, the object's origin, where they stand to use it.
 const OBJECT_SPACE: &[&str] = &["mop"];
+
+/// A prop held by the pet played with (its slot, or its own frame), not one of the Sim's bones.
+const ON_PET_SLOT: usize = usize::MAX;
+const ON_PET: usize = usize::MAX - 1;
 
 /// fnv32("x"): the Sim in an object clip.
 const SIM_ACTOR: u32 = 0x050C5D67;

@@ -207,6 +207,11 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a_saddle_swipe",
     // (Teaching a dog its tricks, and asking it for them.)
     "a2ad_soc_dogTricks_",
+    // (Fetch: the Sim's, the dog's, the stick's.)
+    "a2ad_playFetch_",
+    "a2al_playFetch_",
+    "c2ad_playFetch_",
+    "c2al_playFetch_",
     "a2al_soc_dogTricks_",
     // (Brushing a pet, the brush in hand.)
     "a2ac_brush_",
