@@ -1475,7 +1475,11 @@ installation is unreachable.
   the game's Options dialog: its tabs with their icons; Sound (the voices', effects', music's
   and ambience's volumes on the game's plumbob sliders, each with its Mute box); Game Options
   (free will off, low or high; aging on or off; the lifespan, short to epic, with the Sim days
-  a life lasts and each life stage's days); Graphics (lighting and shadows); OK keeps the
+  a life lasts and each life stage's days); Graphics (full screen; the screen size, from the
+  sizes the monitor has room for; edge smoothing off, low, medium or high, two to eight samples
+  as far as the graphics card goes; lighting and shadows; the draw distance, low, medium or
+  high, how far the view's clear before the haze closes in; the rest drawn at their best and
+  shown so); OK keeps the
   changes, Cancel drops them, Restore Defaults puts a page back. The game's own dialogs ask
   its questions: an opportunity offered (the Sim's face, the opportunity and "for <Sim>", its
   description on the game's card, objective and reward, OK or cancel), a teen's lifetime
@@ -1733,6 +1737,10 @@ Format notes are in `docs/formats/` (the interface's layouts in `ui.md`).
 `sims3 --world <name> --lot <id | house> --cam x,z,dist,yaw,pitch --hour <h> --speed <0-3>
 --view-level <n> --do <interaction> --screenshot <png> --shot-delay <s> --exit-after-shot`,
 and `--ui-flow <dir>` clicks through the menus saving a screenshot of each screen.
+`SIMS3_PRESENT=novsync` (or `mailbox`, `fifo`) shows frames without waiting for the display (a
+virtual display's slow refresh holds a vsynced game back), `FPS_LOG=1` logs the frame rate,
+`SIMS3_SETTINGS=<file>` keeps the options elsewhere, `SIM_CAM=<distance>` keeps the camera on
+the selected Sim, `JOB_HUNT=<days>` has them look for work on the computer.
 `--do "Paint: Large Canvas"` paints on that canvas; `PAINTINGS=<level>` paints six (three into
 the inventory, three hung on the nearest walls, the camera on them), `PAINTINGS=look` puts the
 camera on a hung painting (`PAINTINGS=easel`: on the easel), `PAINTINGS_BUY=1` holds one up in Buy mode and `BUY_CLOSE_AT=<s>`

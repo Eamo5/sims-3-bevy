@@ -4,8 +4,10 @@
 //! mute boxes. General: the camera moved at the screen's edges, the clock's twelve hours, the
 //! camera's turning inverted. Game Options: free will (off, low, high), none for the selected
 //! Sim, opportunities offered or not, aging on or off, and the lifespan (short to epic) with
-//! how many Sim days a life lasts and each life stage's share. Graphics:
-//! the lighting detail (shadows). Changes are tried out in the dialog and kept with OK (or
+//! how many Sim days a life lasts and each life stage's share. Graphics: the screen size (the
+//! window's, from the monitor's own down), full screen, edge smoothing (off, low, medium, high),
+//! the lighting detail (shadows) and the draw distance (low, medium, high: how far the view's clear
+//! before the haze closes in). Changes are tried out in the dialog and kept with OK (or
 //! dropped with Cancel); each page can be put back to its defaults.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -102,10 +104,40 @@ const SCREEN_SIZE: u32 = 0xa83f_6211;
 const REFRESH: u32 = 0xa83f_6215;
 const LIGHTING: u32 = 0xa83f_6226;
 const LIGHTING_TEXT: u32 = 0xa83f_6227;
+const FULL_SCREEN: u32 = 0xa83f_6217;
+const EDGE: u32 = 0xa83f_6222;
+const EDGE_TEXT: u32 = 0xa83f_6223;
+const DRAW: u32 = 0xa83f_622e;
+const DRAW_TEXT: u32 = 0xa83f_622f;
+/// The screen sizes offered, those the monitor has room for.
+const SIZES: [[u32; 2]; 12] = [
+    [1024, 768],
+    [1280, 720],
+    [1280, 800],
+    [1280, 1024],
+    [1366, 768],
+    [1440, 900],
+    [1600, 900],
+    [1680, 1050],
+    [1920, 1080],
+    [1920, 1200],
+    [2560, 1440],
+    [3840, 2160],
+];
 const GRAPHICS_DEFAULTS: u32 = 0xa83f_6212;
 /// The graphics page's controls this game doesn't change (greyed).
-const GRAPHICS_INERT: [u32; 12] = [0xa83f_6217, 0xa83f_6211, 0xa83f_6215, 0x0a5d_6ff0, 0xa83f_6220, 0xa83f_6222, 0xa83f_6224, 0xa83f_6322, 0xa83f_6320, 0xa83f_622e, 0xa83f_6228, 0xa83f_622b];
+const GRAPHICS_INERT: [u32; 8] = [0xa83f_6215, 0x0a5d_6ff0, 0xa83f_6220, 0xa83f_6224, 0xa83f_6322, 0xa83f_6320, 0xa83f_6228, 0xa83f_622b];
 const GRAPHICS_INERT_BUTTONS: [u32; 2] = [0xa83f_622d, 0xa83f_622c];
+/// The page's sliders this game draws at their best and doesn't change (reflections, visual
+/// effects, textures, trees, high-detail lots, Sims), with their words and the word for the best.
+const GRAPHICS_AT_BEST: [(u32, u32, &str); 6] = [
+    (0x0a5d_6ff0, 0x0a5d_7010, "Ui/Caption/Options:ReflectionQualityHigh"),
+    (0xa83f_6220, 0xa83f_6221, "Ui/Caption/Options:High"),
+    (0xa83f_6224, 0xa83f_6225, "Ui/Caption/Options:High"),
+    (0xa83f_6228, 0xa83f_6229, "Ui/Caption/Options:VeryHigh"),
+    (0xa83f_6322, 0xa83f_6323, "Ui/Caption/Options:High"),
+    (0xa83f_6320, 0xa83f_6321, "Ui/Caption/Options:VeryHigh"),
+];
 
 /// The dialog on screen: its windows, the page shown, the settings as changed so far.
 #[derive(Resource)]
@@ -120,6 +152,8 @@ struct OptionsDialog {
     synced: bool,
     /// The story progression box, where it's been moved to.
     story_box: Option<Entity>,
+    /// The screen sizes in its list.
+    sizes: Vec<[u32; 2]>,
 }
 
 /// (Test hook: OPTIONS_TAB=<n> opens on that page.)
@@ -211,7 +245,7 @@ fn open_dialog(
             commands.entity(e).remove::<Interaction>().insert(Pickable::IGNORE);
         }
     }
-    commands.insert_resource(OptionsDialog { s, backdrop, page: 0, work: settings.clone(), tabs, shown: None, synced: false, story_box });
+    commands.insert_resource(OptionsDialog { s, backdrop, page: 0, work: settings.clone(), tabs, shown: None, synced: false, story_box, sizes: Vec::new() });
     let _ = std::env::var("OPTIONS_TAB").ok().and_then(|t| t.parse::<usize>().ok()).map(|t| commands.insert_resource(StartTab(t)));
 }
 
@@ -241,7 +275,7 @@ fn dialog_controls(
     (mut vis, mut texts): (Query<&mut Visibility>, Query<&mut Text>),
     keys: Res<ButtonInput<KeyCode>>,
     start: Option<Res<StartTab>>,
-    (mut combos, windows): (Query<&mut UiCombo>, Query<&Window, With<bevy::window::PrimaryWindow>>),
+    (mut combos, windows, monitors): (Query<&mut UiCombo>, Query<&Window, With<bevy::window::PrimaryWindow>>, Query<&bevy::window::Monitor>),
 ) {
     let (Some(mut d), Some(ui)) = (d, ui) else { return };
     let d = &mut *d;
@@ -286,6 +320,22 @@ fn dialog_controls(
         if let Some(v) = slider(&sliders, LIGHTING) {
             w.shadows = v >= 1.0;
         }
+        if let Some(v) = slider(&sliders, EDGE) {
+            w.edge_smoothing = (v.round() as u8).min(3);
+        }
+        if let Some(v) = slider(&sliders, DRAW) {
+            w.draw_distance = (v.round() as u8).min(2);
+        }
+        // (A size chosen from the list: the window's, once it's not the one it is.)
+        let size = windows.single().map(|x| [x.physical_width(), x.physical_height()]).ok();
+        if let Some(&chosen) = d.s.id(SCREEN_SIZE).and_then(|e| combos.get(e).ok()).and_then(|c| d.sizes.get(c.selected))
+            && Some(chosen) != w.resolution.or(size)
+        {
+            w.resolution = Some(chosen);
+        }
+    }
+    if pressed(&clicks, d.s.id(FULL_SCREEN)) {
+        w.fullscreen = !w.fullscreen;
     }
     let on_page = |page: u32, id: u32| d.s.id(page).and_then(|p| d.s.within(p, id));
     let aging_box = on_page(GAME_PAGE, AGING);
@@ -327,7 +377,7 @@ fn dialog_controls(
         w.lessons_seen.clear();
     }
     if pressed(&clicks, d.s.id(GRAPHICS_DEFAULTS)) {
-        w.shadows = defaults.shadows;
+        (w.shadows, w.edge_smoothing, w.draw_distance, w.fullscreen) = (defaults.shadows, defaults.edge_smoothing, defaults.draw_distance, defaults.fullscreen);
         d.shown = None;
         d.synced = false;
     }
@@ -365,6 +415,8 @@ fn dialog_controls(
     let mut set_slider = |id: u32, v: f32| {
         match d.s.id(id).and_then(|e| sliders.get_mut(e).ok()) {
             Some(mut s) => {
+                // (Kept to its range: past its end, at its end.)
+                let v = v.clamp(s.min, s.max);
                 if s.value != v {
                     s.value = v;
                 }
@@ -383,13 +435,31 @@ fn dialog_controls(
         });
         set_slider(LIFESPAN, Lifespan::ALL.iter().position(|l| *l == w.lifespan).unwrap_or(2) as f32);
         set_slider(LIGHTING, if w.shadows { 2.0 } else { 0.0 });
+        set_slider(EDGE, w.edge_smoothing as f32);
+        for (id, _, _) in GRAPHICS_AT_BEST {
+            set_slider(id, f32::INFINITY);
+        }
+        set_slider(DRAW, w.draw_distance as f32);
         set_slider(AUDIO_QUALITY, 2.0);
     }
     if first {
         d.synced = found.get();
-        // (What the screen and speakers are, shown but not chosen here.)
-        let size = windows.single().map(|w| format!("{} x {}", w.physical_width(), w.physical_height())).unwrap_or_default();
-        for (id, item) in [(SCREEN_SIZE, size), (REFRESH, "60".to_string()), (SPEAKERS, "Stereo".to_string())] {
+        // (The screen sizes there's room for on the monitor, the window's own among them.)
+        let size = windows.single().map(|x| [x.physical_width(), x.physical_height()]).unwrap_or([1600, 900]);
+        let room = monitors.iter().map(|m| [m.physical_width, m.physical_height]).max_by_key(|m| m[0] * m[1]).unwrap_or([3840, 2160]);
+        let mut sizes: Vec<[u32; 2]> = SIZES.into_iter().filter(|s| s[0] <= room[0] && s[1] <= room[1]).collect();
+        let current = w.resolution.unwrap_or(size);
+        if !sizes.contains(&current) {
+            sizes.push(current);
+            sizes.sort_by_key(|s| (s[0], s[1]));
+        }
+        if let Some(mut c) = d.s.id(SCREEN_SIZE).and_then(|e| combos.get_mut(e).ok()) {
+            c.items = sizes.iter().map(|s| format!("{} x {}", s[0], s[1])).collect();
+            c.selected = sizes.iter().position(|s| *s == current).unwrap_or(0);
+        }
+        d.sizes = sizes;
+        // (What the screen's refresh and the speakers are, shown but not chosen here.)
+        for (id, item) in [(REFRESH, "60".to_string()), (SPEAKERS, "Stereo".to_string())] {
             if let Some(mut c) = d.s.id(id).and_then(|e| combos.get_mut(e).ok())
                 && c.items.is_empty()
             {
@@ -417,7 +487,15 @@ fn dialog_controls(
     }));
     let desc = word("Ui/Caption/Options:AgingDescription").replace("{0.Number}", &format!("{:.0}", lifespan_days(w.lifespan)));
     set_text(&mut texts, d.s.text(LIFESPAN_DESC), &desc);
-    set_text(&mut texts, d.s.text(LIGHTING_TEXT), &word(if w.shadows { "Ui/Caption/Options:High" } else { "Ui/Caption/Options:Low" }));
+    // (The game's words for each: the lighting's own, off to high, low to high.)
+    let lighting = if w.shadows { "High" } else { "Low" };
+    let lit = ui.localize(&format!("Ui/Caption/Options:{lighting}_LightingDetail")).unwrap_or_else(|| word(&format!("Ui/Caption/Options:{lighting}")));
+    set_text(&mut texts, d.s.text(LIGHTING_TEXT), &lit);
+    set_text(&mut texts, d.s.text(EDGE_TEXT), &word(["Ui/Caption/Options:Off", "Ui/Caption/Options:Low", "Ui/Caption/Options:Medium", "Ui/Caption/Options:High"][w.edge_smoothing.min(3) as usize]));
+    for (_, text, key) in GRAPHICS_AT_BEST {
+        set_text(&mut texts, d.s.text(text), &word(key));
+    }
+    set_text(&mut texts, d.s.text(DRAW_TEXT), &word(["Ui/Caption/Options:Low", "Ui/Caption/Options:Medium", "Ui/Caption/Options:High"][w.draw_distance.min(2) as usize]));
     if let Some(mut b) = aging_box.and_then(|e| buttons.get_mut(e).ok())
         && (b.selected != w.aging || b.disabled)
     {
@@ -436,9 +514,10 @@ fn dialog_controls(
         set_box(id, w.muted[k], false);
     }
     set_box(BACKGROUND_SOUND, true, true);
-    for id in GRAPHICS_INERT_BUTTONS.into_iter().chain([0xa83f_6217, 0xa83f_622b]) {
-        set_box(id, id != 0xa83f_6217, true);
+    for id in GRAPHICS_INERT_BUTTONS.into_iter().chain([0xa83f_622b]) {
+        set_box(id, true, true);
     }
+    set_box(FULL_SCREEN, w.fullscreen, false);
     let mut set_page_box = |page: u32, id: u32, on: bool| {
         if let Some(mut b) = d.s.id(page).and_then(|p| d.s.within(p, id)).and_then(|e| buttons.get_mut(e).ok())
             && (b.selected != on || b.disabled)

@@ -137,6 +137,13 @@ pub struct Settings {
     pub free_will: FreeWill,
     pub shadows: bool,
     pub show_fps: bool,
+    /// The graphics page's: the game full screen, the window's size (as it opens, else as it is),
+    /// edge smoothing (off, low, medium, high: none, two, four or eight samples) and how far one
+    /// sees (low, medium, high).
+    pub fullscreen: bool,
+    pub resolution: Option<[u32; 2]>,
+    pub edge_smoothing: u8,
+    pub draw_distance: u8,
     /// The voices, effects, music and ambience muted (the game's Mute boxes).
     pub muted: [bool; 4],
     /// The camera moved with the pointer at the screen's edges (the game's `EdgeScrolling`).
@@ -170,6 +177,10 @@ impl Default for Settings {
             free_will: FreeWill::Normal,
             shadows: true,
             show_fps: true,
+            fullscreen: false,
+            resolution: None,
+            edge_smoothing: 2,
+            draw_distance: 2,
             muted: [false; 4],
             edge_scroll: false,
             twelve_hour: true,
@@ -518,12 +529,66 @@ fn refresh_panel(settings: Res<Settings>, mut values: Query<(&OptionValue, &mut 
     }
 }
 
-/// Shadows, the frame-rate counter and the clock follow the settings.
+/// How far the view's clear before the haze closes it in, by the draw distance (metres).
+pub fn view_distance(draw: u8) -> f32 {
+    [1000.0, 1800.0, 2600.0][draw.min(2) as usize]
+}
+
+/// The draw distance's own, for those that draw the haze (`sky`).
+pub static VIEW_DISTANCE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(2600);
+
+/// Edge smoothing's samples (off, low, medium, high), at most what the graphics card can.
+pub fn samples(level: u8, eight: bool) -> Msaa {
+    match level {
+        0 => Msaa::Off,
+        1 => Msaa::Sample2,
+        3 if eight => Msaa::Sample8,
+        _ => Msaa::Sample4,
+    }
+}
+
+/// Shadows, the frame-rate counter and the clock follow the settings; and the window (full
+/// screen, its size), edge smoothing and how far the camera sees.
+#[allow(clippy::type_complexity)]
 fn apply_display(
     settings: Res<Settings>,
     mut suns: Query<&mut DirectionalLight>,
     mut fps: Query<&mut Visibility, With<crate::hud::FpsText>>,
+    mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+    mut cams: Query<(&mut Msaa, &mut Projection), With<crate::camera::SimsCamera>>,
+    adapter: Option<Res<bevy::render::renderer::RenderAdapter>>,
+    mut applied: Local<Option<(bool, Option<[u32; 2]>)>>,
 ) {
+    let eight = adapter.is_some_and(|a| a.get_texture_format_features(bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb).flags.sample_count_supported(8));
+    let msaa = samples(settings.edge_smoothing, eight);
+    let far = view_distance(settings.draw_distance);
+    VIEW_DISTANCE.store(far as u32, std::sync::atomic::Ordering::Relaxed);
+    for (mut m, mut p) in &mut cams {
+        if *m != msaa {
+            *m = msaa;
+        }
+        if let Projection::Perspective(pp) = &mut *p
+            && pp.far != far * 2.3
+        {
+            pp.far = far * 2.3;
+        }
+    }
+    // (The window changed only as the settings do: left as the player drags it otherwise.)
+    let want = (settings.fullscreen, settings.resolution);
+    if *applied != Some(want)
+        && let Ok(mut w) = windows.single_mut()
+    {
+        *applied = Some(want);
+        let mode = if settings.fullscreen { bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Current) } else { bevy::window::WindowMode::Windowed };
+        if w.mode != mode {
+            w.mode = mode;
+        }
+        if let Some([x, y]) = settings.resolution.filter(|_| !settings.fullscreen)
+            && (w.physical_width(), w.physical_height()) != (x, y)
+        {
+            w.resolution.set_physical_resolution(x, y);
+        }
+    }
     for mut sun in &mut suns {
         if sun.shadow_maps_enabled != settings.shadows {
             sun.shadow_maps_enabled = settings.shadows;

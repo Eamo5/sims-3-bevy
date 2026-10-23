@@ -256,6 +256,13 @@ fn main() {
             primary_window: Some(Window {
                 title: "The Sims 3 — Bevy Edition".into(),
                 resolution: WindowResolution::new(1600, 900),
+                // (SIMS3_PRESENT=novsync|mailbox|fifo: how frames are shown.)
+                present_mode: match std::env::var("SIMS3_PRESENT").as_deref() {
+                    Ok("novsync") => bevy::window::PresentMode::AutoNoVsync,
+                    Ok("mailbox") => bevy::window::PresentMode::Mailbox,
+                    Ok("fifo") => bevy::window::PresentMode::Fifo,
+                    _ => bevy::window::PresentMode::AutoVsync,
+                },
                 ..default()
             }),
             ..default()
