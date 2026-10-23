@@ -12,7 +12,7 @@ use crate::pack::{read_value, write_value};
 use crate::types::{Key, SkinMesh};
 
 /// Bumped when the baked pets change.
-pub const PETS_VERSION: u32 = 5;
+pub const PETS_VERSION: u32 = 6;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PetsBaked {
@@ -79,6 +79,21 @@ pub struct PetKind {
     /// default colours.
     #[serde(default)]
     pub tack: Vec<PetPart>,
+    /// What Create a Pet's Accessories dresses it in (a cat's or dog's collars; a horse's
+    /// bridles, saddles, blankets, leg wraps and the rest), each in its default colours.
+    #[serde(default)]
+    pub accessories: Vec<PetAccessory>,
+}
+
+/// A pet's accessory: its part's name and instance (its picture's, in the game's CAS
+/// thumbnails), its kind of part (the CAS part type: 51 a collar or bridle, 52 a saddle...), and
+/// its meshes.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct PetAccessory {
+    pub name: String,
+    pub instance: u64,
+    pub part_type: u32,
+    pub meshes: Vec<SkinMesh>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -102,6 +117,9 @@ const KINDS: [(&str, &str); 8] = [("ac", "acRig"), ("cc", "ccRig"), ("ad", "adRi
 /// CAS part types for pets (a horse's saddle and bridle too).
 const PT_SADDLE: u32 = 52;
 const PT_BRIDLE: u32 = 51;
+/// The CAS part types Create a Pet's Accessories dresses a pet in: a collar or bridle (51), a
+/// saddle (52), and a horse's blankets, leg wraps and the rest (55 to 59).
+pub const ACCESSORY_TYPES: [u32; 7] = [51, 52, 55, 56, 57, 58, 59];
 /// The riding tack a horse wears ridden: the game's English saddle and plain bridle.
 pub const TACK: [&str; 2] = ["ahSaddleEnglishRiding", "ahBridle"];
 const PT_TAIL: u32 = 48;
@@ -203,7 +221,9 @@ fn breed_thumb(thumbs: &[Package], outfit: u64) -> Vec<u8> {
 pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::path::Path, progress: crate::bake::Progress) -> Result<usize, String> {
     progress("Converting: pets…");
     let casps: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(types::CASP).copied().collect();
-    let parsed: Vec<CasPart> = crate::bake::par_map(&casps, |k| CasPart::parse(&pkgs.read(k)?).ok()).into_iter().flatten().collect();
+    let parsed: Vec<(u64, CasPart)> = crate::bake::par_map(&casps, |k| CasPart::parse(&pkgs.read(k)?).ok().map(|c| (k.i, c))).into_iter().flatten().collect();
+    let instance_of: std::collections::HashMap<String, u64> = parsed.iter().map(|(i, c)| (c.name.clone(), *i)).collect();
+    let parsed: Vec<CasPart> = parsed.into_iter().map(|(_, c)| c).collect();
     let species = |c: &CasPart| (c.age_gender >> 8) & 0xF;
     let pets: Vec<&CasPart> = parsed.iter().filter(|c| (2..=5).contains(&species(c))).collect();
     let mut textures: Vec<(Key, bool)> = Vec::new();
@@ -260,7 +280,27 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
                 (!meshes.is_empty()).then(|| PetPart { name: c.name.clone(), meshes })
             })
             .collect();
-        kinds.push(PetKind { code: code.to_string(), rig, body: body_meshes, shading, base, tails, ears, manes, regions, tack });
+        // (Its accessories likewise, with their parts' instances for their pictures.)
+        let mut seen = std::collections::HashSet::new();
+        let accessories: Vec<PetAccessory> = pets
+            .iter()
+            .filter(|c| c.name.starts_with(code))
+            .filter(|c| ACCESSORY_TYPES.contains(&c.clothing_type) && seen.insert(c.name.clone()))
+            .filter_map(|c| {
+                let key: Key = (0x00B2_D882, 0x4143_4353, s3pkg::fnv64(&c.name));
+                if !root.tex_path(key).exists()
+                    && let Some(img) = c.presets.first().and_then(|x| s3formats::complate::render_preset(pkgs, x, 256, false))
+                {
+                    let _ = std::fs::write(root.tex_path(key), crate::ddsw::encode_dds(&img));
+                }
+                let mut meshes = meshes(c);
+                for m in &mut meshes {
+                    m.texture = root.tex_path(key).exists().then_some(key).or(m.texture);
+                }
+                (!meshes.is_empty()).then(|| PetAccessory { name: c.name.clone(), instance: instance_of.get(&c.name).copied().unwrap_or(0), part_type: c.clothing_type, meshes })
+            })
+            .collect();
+        kinds.push(PetKind { code: code.to_string(), rig, body: body_meshes, shading, base, tails, ears, manes, regions, tack, accessories });
     }
     // The breeds: each outfit's coat painted.
     progress("Converting: pet breeds…");

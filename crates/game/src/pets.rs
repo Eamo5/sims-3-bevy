@@ -29,7 +29,8 @@ impl Plugin for PetsPlugin {
                 Update,
                 (load_pet_data, spawn_strays, spawn_household_pets, social_partners, strays, home_pets, animate_pets).chain().run_if(in_state(PlayMode::Live)),
             )
-            .add_systems(Update, (pet_cam, pet_do, adopted_pets, stray_traits).run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, (pet_cam, pet_do, adopted_pets, stray_traits, dress_accessories).run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, dress_accessories.run_if(in_state(AppState::CreateHousehold)))
             // (Create a Pet's pet, in the dressing room.)
             .add_systems(Update, (load_pet_data, animate_pets).chain().run_if(in_state(AppState::CreateHousehold)));
     }
@@ -472,6 +473,61 @@ pub fn spawn_pet(
     Some(root)
 }
 
+/// What a pet's to wear (Create a Pet's Accessories), once its skeleton's up.
+#[derive(Component, Clone)]
+pub struct WantsAccessories(pub Vec<u64>);
+
+/// What a pet wears: its accessories' parts, and their meshes on it.
+#[derive(Component, Clone, Default)]
+pub struct Accessories {
+    pub worn: Vec<u64>,
+    parts: Vec<Entity>,
+}
+
+/// Pets dressed in what they're to wear (and what they wore before taken off), as Create a Pet
+/// or a save has it.
+#[allow(clippy::type_complexity)]
+fn dress_accessories(
+    mut commands: Commands,
+    q: Query<(Entity, &Pet, &PetSkeleton, &WantsAccessories, Option<&Accessories>)>,
+    (pet_data, data, mut assets): (Res<PetData>, Res<Baked>, ResMut<ObjectAssets>),
+    (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+) {
+    let Some(d) = pet_data.0.as_deref() else { return };
+    for (e, pet, skel, want, had) in &q {
+        for p in had.iter().flat_map(|a| &a.parts) {
+            commands.entity(*p).try_despawn();
+        }
+        let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+        let parts = put_on_accessories(&mut commands, d, &pet.kind, skel, e, &mut ctx, &mut assets, &want.0);
+        commands.entity(e).remove::<WantsAccessories>().insert(Accessories { worn: want.0.clone(), parts });
+    }
+}
+
+/// A pet's accessories (by their parts' instances) put on, skinned to its skeleton.
+#[allow(clippy::too_many_arguments)]
+pub fn put_on_accessories(commands: &mut Commands, data: &PetsBaked, kind: &str, skel: &PetSkeleton, root: Entity, ctx: &mut AssetCtx, assets: &mut ObjectAssets, worn: &[u64]) -> Vec<Entity> {
+    let Some(k) = data.kinds.iter().find(|k| k.code == kind) else { return Vec::new() };
+    let mut out = Vec::new();
+    for m in k.accessories.iter().filter(|a| worn.contains(&a.instance)).flat_map(|a| &a.meshes) {
+        let texture = m.texture.and_then(|t| assets.texture(ctx, t));
+        let material = ctx.materials.add(StandardMaterial { base_color_texture: texture, perceptual_roughness: 0.7, reflectance: 0.3, alpha_mode: AlphaMode::Mask(0.5), ..default() });
+        let mesh = ctx.meshes.add(crate::simbody::skin_mesh(m.clone()));
+        let e = commands
+            .spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                SkinnedMesh { inverse_bindposes: skel.inverse.clone(), joints: skel.joints.clone() },
+                Transform::default(),
+                bevy::camera::visibility::NoFrustumCulling,
+                ChildOf(root),
+            ))
+            .id();
+        out.push(e);
+    }
+    out
+}
+
 /// A horse's riding tack put on (its kind's saddle and bridle, in their own colours), skinned to
 /// its skeleton: the meshes, to take off again.
 pub fn put_on_tack(commands: &mut Commands, data: &PetsBaked, kind: &str, skel: &PetSkeleton, root: Entity, ctx: &mut AssetCtx, assets: &mut ObjectAssets) -> Vec<Entity> {
@@ -618,6 +674,9 @@ pub struct SavedPet {
     /// A dog's tricks (`dogtricks`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tricks: Option<crate::dogtricks::DogTricks>,
+    /// What it wears (Create a Pet's Accessories: its parts' instances).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub accessories: Vec<u64>,
 }
 
 /// Pets to put on the home lot once it's ready (a premade household's, or a save's).
@@ -679,7 +738,7 @@ fn adopted_pets(mut commands: Commands, order: Option<Res<AdoptPetOrder>>, pets:
         breeds = data.breeds.iter().filter(|b| b.kind == wears).collect();
     }
     let Some(b) = breeds.choose(&mut rng) else { return };
-    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng), female: rng.random(), saddled: false, tricks: None });
+    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng), female: rng.random(), saddled: false, tricks: None, accessories: Vec::new() });
 }
 
 /// The kind of pet a premade one is: its species and whether it's young.
@@ -707,7 +766,7 @@ impl SavedPet {
         let wears = if kind == "cl" && !data.breeds.iter().any(|b| b.kind == "cl") { "cd" } else { kind };
         let breeds: Vec<&s3bake::pets::PetBreed> = data.breeds.iter().filter(|b| b.kind == wears).collect();
         let b = breeds.get((p.id % breeds.len().max(1) as u64) as usize)?;
-        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone(), female: p.female, saddled: false, tricks: None })
+        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone(), female: p.female, saddled: false, tricks: None, accessories: Vec::new() })
     }
 }
 
@@ -755,6 +814,9 @@ fn spawn_household_pets(
             }
             if let Some(t) = pet.tricks.clone() {
                 commands.entity(e).insert(t);
+            }
+            if !pet.accessories.is_empty() {
+                commands.entity(e).insert(WantsAccessories(pet.accessories.clone()));
             }
             info!("pet {} the {} ({}) is home", pet.name, p.breeds[breed].kind, pet.outfit);
         }
@@ -853,13 +915,13 @@ pub fn idle_clip(kind: &str, night: bool, rng: &mut impl Rng) -> String {
 }
 
 /// The household's pets, for the save.
-pub fn saved(pets: &Query<(&Pet, &HomePet, &Transform, Option<&crate::petneeds::PetMotives>, (Option<&PetBonds>, Option<&PetTraits>, Has<crate::riding::Tack>, Option<&crate::dogtricks::DogTricks>))>, data: Option<&PetsBaked>) -> Vec<SavedPet> {
+pub fn saved(pets: &Query<(&Pet, &HomePet, &Transform, Option<&crate::petneeds::PetMotives>, (Option<&PetBonds>, Option<&PetTraits>, Has<crate::riding::Tack>, Option<&crate::dogtricks::DogTricks>, Option<&Accessories>))>, data: Option<&PetsBaked>) -> Vec<SavedPet> {
     let Some(data) = data else { return Vec::new() };
     pets.iter()
-        .filter_map(|(p, h, tf, m, (b, t, saddled, tricks))| {
+        .filter_map(|(p, h, tf, m, (b, t, saddled, tricks, worn))| {
             let bonds = b.map(|b| b.0.iter().map(|(k, v)| (*k, *v)).collect()).unwrap_or_default();
             let traits = t.map(|t| t.0.clone()).unwrap_or_default();
-            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits, female: p.female, saddled, tricks: tricks.cloned() })
+            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits, female: p.female, saddled, tricks: tricks.cloned(), accessories: worn.map(|w| w.worn.clone()).unwrap_or_default() })
         })
         .collect()
 }

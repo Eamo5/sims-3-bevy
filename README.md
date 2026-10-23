@@ -1530,10 +1530,14 @@ installation is unreachable.
   UI.package, the mixed breed first and the rest by name, each with the game's own Create a Pet
   picture of it and its name, scrolled by the wheel or the grid's bar; dogs' big and little
   lists) and Character (`CAPCharacter`: its traits in their five sockets, the game's traits
-  picker for the pack's traits of its species, opposites greyed, or a random set); Randomize
-  draws another pet of its species. The pets come home with the household. Adopted pets are of
-  the listed breeds too. `CAP_TEST=<kind>[:basics|breed|character|picker]` with `CAP_SHOT=<png>`
-  (tests).
+  picker for the pack's traits of its species, opposites greyed, or a random set) and
+  Accessories (`CAPAccessories`: a cat's or dog's collars, a horse's bridles, saddles and the rest,
+  a row of each kind under its name with the game's pictures of them and none, what it wears
+  lit; a click puts it on in place of the other of its kind, on the pet in the room in the part's
+  own colours); Randomize draws another pet of its species. The pets come home with the household,
+  wearing what they were given (kept in saves). Adopted pets are of the listed breeds too.
+  `CAP_TEST=<kind>[:basics|breed|character|picker|accessories]` with `CAP_SHOT=<png>`,
+  `CAP_WEAR=<part>,...` (tests).
 - **The game's own Play Flow**: a new household chooses its home as in the game: the speech
   bubble's instructions ("Choose a place to live!", then "Let's play!" with Play, Cancel back to
   Create a Sim or to choosing again), the play flow puck (turn the town, options), the bin of the
@@ -1709,7 +1713,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-complete Build Mode interface; Create a Pet's coat painting, face shapes and accessories; complete object placement and routing compatibility; the rest of the expansions'
+complete Build Mode interface; Create a Pet's coat painting and face shapes; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
 ## Controls

@@ -5,9 +5,11 @@
 //! stands in the dressing room in the Sim's place, with the pet sheet beside it: Basics (its
 //! name, the household's, male or female; grown, as Create a Pet makes them), Breed (the game's
 //! breeds list, `CAPPetBreeds`: the mixed breed first, then by name, each with the game's
-//! picture of it; dogs big or little), and Character (its traits in their five sockets, the
-//! game's traits picker for the pack's traits of its species, or a random set). Randomize draws
-//! another pet of its species. The pets come home with the household.
+//! picture of it; dogs big or little), Character (its traits in their five sockets, the game's
+//! traits picker for the pack's traits of its species, or a random set), and Accessories (a cat's
+//! or dog's collars, a horse's bridles, saddles and the rest, each with the game's picture of it,
+//! worn on the pet as chosen). Randomize draws another pet of its species. The pets come home with
+//! the household, wearing what they were given.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,7 +31,7 @@ impl Plugin for CapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Cap>()
             .add_message::<CapRequest>()
-            .add_systems(Update, (requests, pet_stage, pet_sheet, basics_panel, breeds_panel, character_panel).chain().run_if(in_state(AppState::CreateHousehold)))
+            .add_systems(Update, (requests, pet_stage, pet_sheet, basics_panel, breeds_panel, character_panel, accessories_panel).chain().run_if(in_state(AppState::CreateHousehold)))
             .add_systems(Update, cap_test)
             .add_systems(OnExit(AppState::CreateHousehold), |mut cap: ResMut<Cap>| {
                 *cap = Cap::default();
@@ -64,6 +66,7 @@ enum Panel {
     Basics,
     Breed,
     Character,
+    Accessories,
 }
 
 /// Create a Pet's state: the pet being made, the panel open, the game's windows for them, the
@@ -76,6 +79,12 @@ pub struct Cap {
     basics: Option<Spawned>,
     breeds: Option<Spawned>,
     character: Option<Spawned>,
+    accessories: Option<Spawned>,
+    accessories_shown: Option<(usize, Vec<u64>, usize)>,
+    acc_cells: Option<Entity>,
+    acc_scroll: usize,
+    /// What the pet in the room has on.
+    worn: Vec<u64>,
     model: Option<(Entity, u64)>,
     thumbs: HashMap<u64, Handle<Image>>,
     sheet_shown: Option<(String, Option<Panel>)>,
@@ -142,6 +151,7 @@ fn new_pet(data: &s3bake::PetsBaked, kind: &'static str, rng: &mut impl Rng) -> 
         female: rng.random(),
         saddled: false,
         tricks: None,
+        accessories: Vec::new(),
     })
 }
 
@@ -233,7 +243,15 @@ fn pet_stage(
             anim.play(format!("{}_idle_stand_breathe_x", d.breeds[breed].kind));
             commands.entity(e).insert((anim, DespawnOnExit(AppState::CreateHousehold)));
             cap.model = Some((e, p.outfit));
+            cap.worn.clear();
         }
+    }
+    // (Dressed in what it's chosen to wear.)
+    if let (Some((e, _)), Some(p)) = (cap.model, pet)
+        && p.accessories != cap.worn
+    {
+        cap.worn = p.accessories.clone();
+        commands.entity(e).insert(crate::pets::WantsAccessories(p.accessories.clone()));
     }
     // (Turned as the Sim is, a little more side on: a pet's long.)
     if let (Some((e, _)), Some(s)) = (cap.model, scene)
@@ -333,6 +351,10 @@ fn pet_sheet(
     if pressed(s.id(SHEET_CHARACTER)) {
         open = if open == Some(Panel::Character) { None } else { Some(Panel::Character) };
     }
+    let dressable = data.0.as_deref().is_some_and(|d| d.kinds.iter().any(|k| k.code == pet.kind && !k.accessories.is_empty()));
+    if dressable && pressed(within(SHEET_ACCESSORIES)) {
+        open = if open == Some(Panel::Accessories) { None } else { Some(Panel::Accessories) };
+    }
     if open != cap.panel {
         cap.panel = open;
         cap.typing = None;
@@ -352,6 +374,7 @@ fn pet_sheet(
         p.traits = crate::pettraits::random_up_to(kind, 3, &mut rng).into_iter().map(str::to_string).collect();
     }
     let want = (pet.kind.clone(), cap.panel);
+    let _ = dressable;
     if cap.sheet_shown.as_ref() == Some(&want) {
         return;
     }
@@ -375,10 +398,12 @@ fn pet_sheet(
     set(s.id(SHEET_BASICS_FEMALE), cap.panel == Some(Panel::Basics), false);
     set(within(SHEET_BREED), cap.panel == Some(Panel::Breed), false);
     set(s.id(SHEET_CHARACTER), cap.panel == Some(Panel::Character), false);
-    // (A coat of its own, its face's shapes and its collar aren't made here yet.)
-    for id in [SHEET_COAT, SHEET_FACE, SHEET_ACCESSORIES] {
+    // (A coat of its own and its face's shapes aren't made here yet.)
+    for id in [SHEET_COAT, SHEET_FACE] {
         set(within(id), false, true);
     }
+    let dressable = data.0.as_deref().is_some_and(|d| d.kinds.iter().any(|k| k.code == pet.kind && !k.accessories.is_empty()));
+    set(within(SHEET_ACCESSORIES), cap.panel == Some(Panel::Accessories), !dressable);
 }
 
 // `CAPBasics`'s windows.
@@ -686,6 +711,187 @@ fn breeds_panel(
     }
 }
 
+// `CAPAccessories`' windows: Done, and the horse's outfits' tabs (one outfit here).
+const ACC_DONE: u32 = 0x7ced_0001;
+const ACC_HORSE_TABS: u32 = 0x7ced_0010;
+
+/// An accessory's cell: its kind of part, and the part (0: none of that kind).
+#[derive(Component)]
+struct AccessoryCell(u32, u64);
+
+/// What a kind of accessory's called, for a pet of a kind.
+fn accessory_kind(part_type: u32, kind: &str) -> &'static str {
+    match (part_type, kind) {
+        (51, "ah") => "Bridle",
+        (51, _) => "Collar",
+        (52, _) => "Saddle",
+        (55, _) => "Blanket",
+        (56, _) => "Leg Wraps",
+        (57, _) => "Breastplate",
+        (58, _) => "Saddle Pad",
+        _ => "Accessory",
+    }
+}
+
+/// A part's name as words: `ahSaddleWesternV2`, "Saddle Western V2".
+fn part_words(name: &str) -> String {
+    let mut out = String::new();
+    for (i, ch) in name.get(2..).unwrap_or(name).chars().enumerate() {
+        if ch == '_' {
+            out.push(' ');
+            continue;
+        }
+        let digit_after_letter = ch.is_ascii_digit() && out.ends_with(|c: char| c.is_ascii_alphabetic() && c != 'V');
+        if i > 0 && (ch.is_uppercase() || digit_after_letter) && !out.ends_with(' ') {
+            out.push(' ');
+        }
+        out.push(if i == 0 { ch.to_ascii_uppercase() } else { ch });
+    }
+    out
+}
+
+/// Accessories (`CAPAccessories`): the pet's kinds of accessories, a row (or rows) each in the
+/// panel under its name, its parts along it with the game's pictures of them (and none), what it
+/// wears lit; a click puts it on in place of the other of its kind. Scrolled by the wheel.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn accessories_panel(
+    mut commands: Commands,
+    mut cap: ResMut<Cap>,
+    ui: Option<ResMut<UiAssets>>,
+    (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
+    mut pending: ResMut<PendingHousehold>,
+    data: Res<crate::pets::PetData>,
+    (clicks, cells, over): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &AccessoryCell), Changed<Interaction>>, Query<&bevy::ui::RelativeCursorPosition>),
+    mut vis: Query<&mut Visibility>,
+    wheel: Res<bevy::input::mouse::AccumulatedMouseScroll>,
+    mut gu: Option<ResMut<crate::icons::GameUi>>,
+) {
+    let Some(mut ui) = ui else { return };
+    let on = cap.panel == Some(Panel::Accessories);
+    if on && cap.accessories.is_none() && ui.layout("CAPAccessories").is_some() {
+        cap.accessories = spawn_layout(&mut commands, &mut ui, &mut images, &mut fonts, "CAPAccessories", 6);
+        if let Some(s) = &cap.accessories {
+            for e in s.all_with(ACC_HORSE_TABS) {
+                commands.entity(e).insert(Visibility::Hidden);
+            }
+            if let Some(e) = s.id(ACC_DONE) {
+                commands.entity(e).insert(crate::icons::Tooltip("Done".into()));
+            }
+            if let Some(r) = s.root {
+                commands.entity(r).insert(bevy::ui::RelativeCursorPosition::default());
+            }
+        }
+        return;
+    }
+    let Some(s) = cap.accessories.clone() else { return };
+    crate::livehud::set_visible(&mut vis, s.root, on);
+    let (Some(i), Some(d)) = (cap.pet.filter(|_| on), data.0.clone()) else {
+        cap.accessories_shown = None;
+        return;
+    };
+    if crate::livehud::pressed(&clicks, s.id(ACC_DONE)) {
+        cap.panel = None;
+        return;
+    }
+    let kind = pending.pets[i].kind.clone();
+    let Some(k) = d.kinds.iter().find(|k| k.code == kind) else { return };
+    for (x, c) in &cells {
+        if *x == Interaction::Pressed {
+            let worn = &mut pending.pets[i].accessories;
+            worn.retain(|w| k.accessories.iter().find(|a| a.instance == *w).is_none_or(|a| a.part_type != c.0));
+            if c.1 != 0 {
+                worn.push(c.1);
+            }
+        }
+    }
+    // (Its kinds of part, in the game's order, and their parts by name.)
+    let mut types: Vec<u32> = k.accessories.iter().map(|a| a.part_type).collect();
+    types.sort();
+    types.dedup();
+    let rows: Vec<(u32, Vec<&s3bake::pets::PetAccessory>)> = types
+        .iter()
+        .map(|t| {
+            let mut v: Vec<&s3bake::pets::PetAccessory> = k.accessories.iter().filter(|a| a.part_type == *t).collect();
+            v.sort_by(|a, b| a.name.cmp(&b.name));
+            (*t, v)
+        })
+        .collect();
+    // (The game's cell, as big as it comes: as many across as the panel has room for.)
+    let Some(area) = ui.layout("CAPAccessories").map(|l| l.area) else { return };
+    let (w, h) = (area[2] - area[0], area[3] - area[1]);
+    let Some(cell_area) = ui.layout("GenericCasItemGrow_landscape").map(|l| l.area) else { return };
+    let cell = Vec2::new(cell_area[2] - cell_area[0], cell_area[3] - cell_area[1]);
+    let cols = (((w - 64.0) / (cell.x + 4.0)).floor() as usize).max(1);
+    let lines: Vec<(u32, bool, Vec<Option<&s3bake::pets::PetAccessory>>)> = rows
+        .iter()
+        .flat_map(|(t, v)| {
+            let all: Vec<Option<&s3bake::pets::PetAccessory>> = std::iter::once(None).chain(v.iter().copied().map(Some)).collect();
+            all.chunks(cols).enumerate().map(|(n, c)| (*t, n == 0, c.to_vec())).collect::<Vec<_>>()
+        })
+        .collect();
+    let line = cell.y + 22.0;
+    let fit = ((h - 84.0) / line).floor().max(1.0) as usize;
+    let most = lines.len().saturating_sub(fit);
+    let over_panel = s.root.and_then(|e| over.get(e).ok()).is_some_and(|r| r.cursor_over());
+    if over_panel && wheel.delta.y != 0.0 {
+        cap.acc_scroll = (cap.acc_scroll as i64 + if wheel.delta.y > 0.0 { -1 } else { 1 }).clamp(0, most as i64) as usize;
+    }
+    cap.acc_scroll = cap.acc_scroll.min(most);
+    let worn = pending.pets[i].accessories.clone();
+    let want = (i, worn.clone(), cap.acc_scroll);
+    if cap.accessories_shown.as_ref() == Some(&want) {
+        return;
+    }
+    cap.accessories_shown = Some(want);
+    if let Some(old) = cap.acc_cells.take() {
+        commands.entity(old).try_despawn();
+    }
+    let (Some(root), Some(template)) = (s.root, ui.layout("GenericCasItemGrow_landscape").cloned()) else { return };
+    let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE)).id();
+    commands.entity(root).add_child(holder);
+    cap.acc_cells = Some(holder);
+    let (font, _) = ui.text_font(&mut fonts, 0);
+    for (row, (t, first, parts)) in lines.iter().enumerate().skip(cap.acc_scroll).take(fit) {
+        let y = 70.0 + (row - cap.acc_scroll) as f32 * line;
+        // (Each kind's name over its first row.)
+        if *first {
+            let label = commands
+                .spawn((
+                    Node { position_type: PositionType::Absolute, left: Val::Px(32.0), top: Val::Px(y - 18.0), ..default() },
+                    Text::new(accessory_kind(*t, &kind)),
+                    TextFont { font_size: bevy::text::FontSize::Px(13.0), ..font.clone() },
+                    TextColor(Color::srgb(0.12, 0.22, 0.42)),
+                    Pickable::IGNORE,
+                ))
+                .id();
+            commands.entity(holder).add_child(label);
+        }
+        for (col, part) in parts.iter().enumerate() {
+            let x = 32.0 + col as f32 * (cell.x + 4.0);
+            let mut c = template.clone();
+            c.area = [x, y, x + cell.x, y + cell.y];
+            c.cls = "Button".into();
+            let spawned = ui.spawn_under(&mut commands, &mut images, &mut fonts, &c, holder);
+            let Some(r) = spawned.root else { continue };
+            let instance = part.map_or(0, |p| p.instance);
+            let tip = part.map_or_else(|| format!("No {}", accessory_kind(*t, &kind)), |p| part_words(&p.name));
+            commands.entity(r).insert((AccessoryCell(*t, instance), crate::icons::Tooltip(tip)));
+            let chosen = match part {
+                Some(p) => worn.contains(&p.instance),
+                None => !rows.iter().find(|r| r.0 == *t).is_some_and(|r| r.1.iter().any(|p| worn.contains(&p.instance))),
+            };
+            if chosen {
+                commands.entity(r).insert(crate::layout::Selected);
+            }
+            if let (Some(win), Some(p)) = (spawned.id(CELL_THUMBNAIL), part)
+                && let Some(h) = gu.as_deref_mut().and_then(|g| g.icon(&mut images, &s3bake::gamedata::cas_thumb_name(p.instance)))
+            {
+                crate::hudpanels::picture(&mut commands, win, h, Color::WHITE);
+            }
+        }
+    }
+}
+
 // `CAPCharacter`'s windows.
 const CHAR_CLOSE: u32 = 0x05db_9900;
 const CHAR_VOICES: u32 = 0x05db_8001;
@@ -817,6 +1023,7 @@ fn cap_test(
     mut cap: ResMut<Cap>,
     mut asks: MessageWriter<CapRequest>,
     mut stage: Local<(u8, f32)>,
+    (mut pending, data): (Option<ResMut<PendingHousehold>>, Res<crate::pets::PetData>),
     mut exit: MessageWriter<AppExit>,
 ) {
     let Ok(v) = std::env::var("CAP_TEST") else { return };
@@ -840,10 +1047,19 @@ fn cap_test(
                 "basics" => Some(Panel::Basics),
                 "breed" => Some(Panel::Breed),
                 "character" | "picker" => Some(Panel::Character),
+                "accessories" => Some(Panel::Accessories),
                 _ => None,
             };
             cap.test_picker = panel == "picker";
             info!("create a pet test: a {kind}, {panel}");
+            // (CAP_WEAR=<part name>,...: wearing those accessories.)
+            if let (Ok(w), Some(i), Some(d), Some(pending)) = (std::env::var("CAP_WEAR"), cap.pet, data.0.as_deref(), pending.as_deref_mut())
+                && let Some(k) = d.kinds.iter().find(|k| k.code == kind)
+            {
+                let names: Vec<String> = w.split(',').map(|n| n.trim().to_ascii_lowercase()).collect();
+                pending.pets[i].accessories = k.accessories.iter().filter(|a| names.contains(&a.name.to_ascii_lowercase())).map(|a| a.instance).collect();
+                info!("create a pet test: wearing {:?}", pending.pets[i].accessories);
+            }
             *stage = (3, now);
         }
         // (CAP_SHOT=<png>: a picture of it, then away.)
@@ -865,6 +1081,15 @@ fn cap_test(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accessories_are_named_as_the_game_shows_them() {
+        assert_eq!(part_words("ahSaddleWesternV2"), "Saddle Western V2");
+        assert_eq!(part_words("acCollarJeweled_bell"), "Collar Jeweled bell");
+        assert_eq!(accessory_kind(51, "ah"), "Bridle");
+        assert_eq!(accessory_kind(51, "ad"), "Collar");
+        assert_eq!(accessory_kind(52, "ah"), "Saddle");
+    }
 
     #[test]
     fn a_new_pet_is_the_mixed_breed_of_its_kind() {
