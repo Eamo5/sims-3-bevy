@@ -539,6 +539,15 @@ fn topic(name: &str) -> Option<Topic> {
         "Work General" => Some(Topic::SameWork),
         "Campaign Donation" => Some(Topic::Campaign),
         "Law Enforcement Career" | "Journalism Career" => Some(Topic::Interviewer),
+        // (The packs' topics of a trait of theirs, by their own names.)
+        "NightOwl Topic" => Some(Topic::Trait(Trait::NightOwl)),
+        "DramaticTopic" => Some(Topic::Trait(Trait::Dramatic)),
+        "Brooding" => Some(Topic::Trait(Trait::Brooding)),
+        "Supernatural Fan Topic" => Some(Topic::Trait(Trait::SupernaturalFan)),
+        "EnviromentallyConsciousTopic" => Some(Topic::Trait(Trait::EnvironmentallyConscious)),
+        "SavvySculptorTopic" => Some(Topic::Trait(Trait::SavvySculptor)),
+        "Irresistible Trait Topic" => Some(Topic::Trait(Trait::Irresistible)),
+        "AvantGarde Trait Topic" => Some(Topic::Trait(Trait::AvantGarde)),
         "" => None,
         g if g.starts_with("Greet Charisma Level ") => g["Greet Charisma Level ".len()..].trim().parse().ok().map(Topic::Charisma),
         g if g.starts_with("Learn ") && g.ends_with(" Career") => {
@@ -711,6 +720,44 @@ const LEFT_OUT: &[&str] = &[
     "Trait Incompatibility",
     "Talk About Shared Traits",
     "Reminisce",
+    // (The packs': a treehouse, a far-off town's locals, a tattoo parlour, a celebrity's door,
+    // the bar's drinks, a club's doorman, pillows, a fairy's or an alien's doings, a degree, a
+    // resort, a plumbot's, the future's; and their own working names.)
+    "Ask to Come Up in Treehouse",
+    "Chat Locals",
+    "Hurl Local Insult",
+    "Tell Local Joke",
+    "Sing Song",
+    "Sing Song Romantic",
+    "Discuss Fashion",
+    "Ask to Have Tattoos Removed",
+    "Solicit Job Failure",
+    "Greet Celebrity",
+    "Name Drink After",
+    "Grant Access",
+    "Thank for Access",
+    "Convince To",
+    "Attack With the Claw",
+    "Ask To Pillow Fight",
+    "Explain Abduction Prank",
+    "Shoot Cloud At",
+    "Scold",
+    "Describe Radical Idea",
+    "Compliment Degree",
+    "Ask About Degree",
+    "Ask About Major",
+    "Mooch from Roommate",
+    "Ask About Resort Stay",
+    "Explain Function",
+    "Change the Future",
+    "Help Repair the Future",
+    "Chat about Cause and Effect",
+    "Entertain Me",
+    "Instructed to Use Happiness Beam",
+    "Joke about Descendant's Family Worth",
+    "Joke about Descendant's Household Size",
+    "Chat about Legacy Statue",
+    "Arriving to the Future",
 ];
 
 /// The age a letter of the game's tables stands for.
@@ -764,7 +811,7 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
             t if t.starts_with("TargetHas") && t.ends_with("Career") && a.topics.iter().any(|(n, _)| n.starts_with("Learn ")) => None,
             _ => continue,
         };
-        if SOCIALS.iter().chain(out.iter()).any(|s| s.name.eq_ignore_ascii_case(&a.name)) || LEFT_OUT.contains(&a.name.as_str()) || a.name.contains('{') {
+        if SOCIALS.iter().chain(out.iter()).any(|s| s.name.eq_ignore_ascii_case(&a.name)) || LEFT_OUT.contains(&a.name.as_str()) || a.name.contains('{') || a.name.contains("DO NOT") || a.name.contains("(don't") {
             continue;
         }
         // (Offered under topics; under a trait or a moodlet not known here, left out.)
@@ -983,6 +1030,7 @@ pub fn load_game_socials(ui: Option<Res<crate::icons::GameUi>>, data: Option<Res
 pub fn install_game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[String]) {
     let list = game_socials(actions, clip_names);
     info!("socials: {} of the game's own besides the {} hand-made", list.len(), SOCIALS.len());
+    debug!("the game's socials: {}", list.iter().map(|s| s.name).collect::<Vec<_>>().join(", "));
     let _ = GAME_SOCIALS.set(list);
 }
 

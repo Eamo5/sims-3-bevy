@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 166;
+pub const GAMEDATA_VERSION: u32 = 167;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -3223,7 +3223,8 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             out.interaction_rates.push(r);
         }
     }
-    let tables = std::iter::once("SocialData_BaseGame".to_string());
+    // (The base game's, then each pack's: their socials too, where what they ask is known.)
+    let tables = std::iter::once("SocialData_BaseGame".to_string()).chain((1..=11).map(|n| format!("SocialData_EP{n}")));
     let mut found = false;
     for table in tables {
         let Some(x) = xml(&table) else { continue };

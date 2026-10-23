@@ -741,7 +741,11 @@ installation is unreachable.
   Schmoozer Flatters; the Grumpy aren't asked to but won't do some unasked) and of the one it's
   done to, the topics it's offered under (traits': the Evil may Mastermind a Plot, and others
   Accuse them of Being Evil; moodlets': a Sim just fired is asked about work; a pregnancy, a new
-  job, a new home) and its suite's own clips; those sharing a phrase gathered on a menu of their
+  job, a new home; the packs' own topics of a trait: a Night Owl's sleeping in, the Environmentally
+  Conscious's recycling, the Avant Garde's obscure music) and its suite's own clips; the packs'
+  tables too (`SocialData_EP1` to `EP11`: an Animal Lover Talks About Dogs, the Supernatural
+  Skeptic Complains About the Supernatural, Give Massage, Ask How Late Sim Stayed Up), but not those
+  needing what isn't here (a treehouse, a far-off town's locals, the future); those sharing a phrase gathered on a menu of their
   own, long menus paged with "More ›". A Mooch moochs money from other households (the game's
   sums, as often doubled or quadrupled) and snacks; a cook can Ask for a Recipe of a cook from
   another household, and learns one from the books at their level. Sims chat with the friendly and funny ones of their own
