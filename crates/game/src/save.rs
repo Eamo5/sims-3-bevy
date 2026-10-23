@@ -1408,7 +1408,8 @@ pub(crate) fn apply_loaded_game(
         tf.rotation = Quat::from_rotation_y(s.yaw);
         floor.0 = s.floor.max(1);
         motives.0 = s.motives;
-        skills.0 = s.skills.iter().filter_map(|(k, v)| SKILLS.iter().find(|x| *x == k).map(|x| (*x, *v))).collect();
+        // (And the packs' skills: Alchemy, Bot Building, Arcade Machine...)
+            skills.0 = s.skills.iter().filter_map(|(k, v)| SKILLS.iter().find(|x| *x == k).copied().or_else(|| crate::interact::known_skill(k).then(|| crate::pets::intern(k.clone()))).map(|x| (x, *v))).collect();
         moodlets.0.clear();
         for (name, until) in &s.moodlets {
             if let Some(k) = MoodletKind::from_name(name) {

@@ -1900,7 +1900,8 @@ static POOL_TABLE: [InteractionDef; 1] = [def("Play Pool", 45.0, [0.0, 0.0, -3.0
 static DARTBOARD: [InteractionDef; 1] = [def("Throw Darts", 30.0, [0.0, 0.0, -3.0, 0.0, 0.0, 55.0], Pose::Use)];
 static BOWLING: [InteractionDef; 1] = [def("Bowl", 45.0, [0.0, 0.0, -6.0, 0.0, -4.0, 75.0], Pose::Use)];
 static KARAOKE: [InteractionDef; 1] = [def("Sing Karaoke", 30.0, [0.0, 0.0, -4.0, 6.0, 0.0, 60.0], Pose::Use)];
-static ARCADE: [InteractionDef; 1] = [def("Play Arcade Game", 40.0, [0.0, 0.0, -3.0, 0.0, 0.0, 70.0], Pose::Use)];
+/// An arcade machine played (its game the Arcade Machine skill's: `ArcadeMachineBase`).
+static ARCADE: [InteractionDef; 1] = [InteractionDef { skill: Some("ArcadeMachine"), ..def("Play Arcade Game", 40.0, [0.0, 0.0, -3.0, 0.0, 0.0, 70.0], Pose::Use) }];
 static CLAW: [InteractionDef; 1] = [def("Play Claw Machine", 15.0, [0.0, 0.0, -2.0, 0.0, 0.0, 60.0], Pose::Use)];
 static WHACK: [InteractionDef; 1] = [def("Play Whack-a-Gnome", 20.0, [0.0, 0.0, -4.0, 0.0, 0.0, 70.0], Pose::Use)];
 static SKEEBALL: [InteractionDef; 1] = [def("Play Skee-Ball", 25.0, [0.0, 0.0, -3.0, 0.0, 0.0, 65.0], Pose::Use)];
@@ -3189,6 +3190,8 @@ pub fn practice_points(name: &str) -> f32 {
         // (PracticeChess_ChessTable, PlayChess_Computer; against someone, the chess table's
         // kPlayWithLogicMultiplier, half again.)
         "Play Chess" => 400.0,
+        // (An arcade machine's game: `ArcadeMachineBase.PlayGame`'s SkillArcadeMachine.)
+        "Play Arcade Game" => 1200.0,
         "Play a Ranked Match" => 600.0,
         // (PracticeWriting_Computer; a novel, the Computer's kWritingNovelPointsPerHour.)
         "Practice Writing" => 650.0,
@@ -4734,6 +4737,15 @@ pub(crate) fn run_actions(
                                     if let Some(level) = skills.add_points(sk, dt / 60.0 * points * rate) {
                                         notes.push(format!("{} reached level {level} in {sk}!", sim.first));
                                         life.write(LifeEvent::new(me, LifeEventKind::SkillUp { skill: sk, level }));
+                                    }
+                                    // (Hours of games played, a game developer's: `careermetrics`.)
+                                    if sk == "ArcadeMachine" {
+                                        let h = dt / 60.0;
+                                        commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| {
+                                            if let Some(mut j) = e.get_mut::<crate::careers::Job>() {
+                                                j.tally.game_hours += h;
+                                            }
+                                        });
                                     }
                                 }
                                 let full = d.until_full.is_some_and(|m| motives.0[m] >= 98.0);

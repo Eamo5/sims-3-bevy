@@ -1429,6 +1429,14 @@ installation is unreachable.
   go by the game's own rules: liking 60 and performance 75 for a promotion (40 for a
   Schmoozer, less liking with Charisma), 60 for a raise; promoted at once, or 15% more an
   hour. Working hard till fun runs out leaves them Overworked and back to working normally.
+  The packs' careers count their own: a teacher's lectures (Education, levels 6 and up: Give
+  Lectures at work, one every hour and a half; Give Lecture at the school, seven till five, §200,
+  the week's counted as meetings are), a game developer's hours of games played (at arcade
+  machines, which now train the Arcade Machine skill, and researching games at work); and their
+  own study tones, at the tuning's rates (a fortune teller's Study Body Language, Logic, and Peer
+  Into Unknown, Alchemy; an art appraiser's Practice Painting from level 6; the Bot Arena's Tinker
+  With Spare Parts and Practice Catch Phrases; a game developer's Work Research and On the Job
+  Training, the engineer's Logic, the artist's Painting), the packs' skills kept in saves.
 - **Career events at work**, from the game's own table: each work day may bring one, as
   likely as the game rolls it (none as likely as every candidate not coming): a raise for good
   work, a Loser's bad day, or one of the career's own at their level and on their path — a

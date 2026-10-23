@@ -577,10 +577,14 @@ pub enum WorkTone {
     TakeItEasy,
     Socialize,
     Study,
+    /// A career's second study tone (a fortune teller's Peer Into Unknown besides Study Body
+    /// Language).
+    Study2,
     SuckUp,
     /// The careers' own, where their levels count them (`careermetrics`): a Business Sim's
-    /// meetings, an Electric Rock musician's concerts.
+    /// meetings, a teacher's lectures, an Electric Rock musician's concerts.
     HoldMeetings,
+    GiveLectures,
     Perform,
     /// An athlete readying for the next game (`careermetrics`).
     PrepareForGame,
@@ -601,17 +605,28 @@ pub enum WorkTone {
 
 /// The careers' study tones (their `CareerList` words) and the skills they practise, points a
 /// minute (each tone's `kSkillGainRate`...).
-const STUDY_TONES: [(&str, &[(&str, f32)]); 6] = [
+const STUDY_TONES: [(&str, &[(&str, f32)]); 13] = [
     ("PracticeCooking", &[("Cooking", 4.0)]),
     ("PracticeWriting", &[("Writing", 5.0)]),
     ("PracticeIllicitActivities", &[("Athletic", 4.0)]),
     ("UseWorkoutFacility", &[("Athletic", 5.0)]),
     ("WorkOutInGym", &[("Athletic", 5.0)]),
     ("StudyMusicTheory", &[("Guitar", 4.0), ("Logic", 5.0)]),
+    // (The packs': a fortune teller's, an art appraiser's, the Bot Arena's, a game developer's.)
+    ("StudyBodyLanguage", &[("Logic", 7.0)]),
+    ("PeerIntoUnknown", &[("Spellcraft", 10.0)]),
+    ("PracticePaintingSkill", &[("Painting", 1.0)]),
+    ("TinkerWithSpareParts", &[("BotBuilding", 2.0)]),
+    ("PracticeCatchPhrases", &[("Charisma", 2.0)]),
+    ("WorkResearch", &[("ArcadeMachine", 5.0)]),
+    ("OnTheJobTraining", &[("Logic", 5.0), ("Painting", 5.0)]),
 ];
 
+/// The level a study tone's offered from (`kPaintingToneUnlockLevel`).
+const STUDY_UNLOCK: [(&str, usize); 1] = [("PracticePaintingSkill", 6)];
+
 impl WorkTone {
-    pub const ALL: [WorkTone; 17] = [
+    pub const ALL: [WorkTone; 19] = [
         WorkTone::Normal,
         WorkTone::WorkHard,
         WorkTone::TakeItEasy,
@@ -620,7 +635,9 @@ impl WorkTone {
         WorkTone::SuckUp,
         WorkTone::SleepAtWork,
         WorkTone::Study,
+        WorkTone::Study2,
         WorkTone::HoldMeetings,
+        WorkTone::GiveLectures,
         WorkTone::Perform,
         WorkTone::PrepareForGame,
         WorkTone::BuildCase,
@@ -653,8 +670,12 @@ impl WorkTone {
             WorkTone::SuckUp => column("SuckUpToBossTone"),
             // (Those without one of their own sleep at work all the same, but at the hospital.)
             WorkTone::SleepAtWork => column("SleepAtWorkTone").or_else(|| (job.career().key != "Medical").then_some("SleepAtWork")),
-            WorkTone::Study => extra(&STUDY_TONES.map(|s| s.0)),
+            WorkTone::Study | WorkTone::Study2 => {
+                let n = (self == WorkTone::Study2) as usize;
+                tones.iter().filter(|t| t.0.starts_with("ExtraTone") && STUDY_TONES.iter().any(|s| s.0 == t.1)).nth(n).map(|t| t.1.as_str())
+            }
             WorkTone::HoldMeetings => extra(&["HoldMeetings"]),
+            WorkTone::GiveLectures => extra(&["GiveLectures"]),
             WorkTone::Perform => extra(&["Perform"]),
             WorkTone::PrepareForGame => extra(&["PrepareForGame"]),
             WorkTone::BuildCase => extra(&["BuildIndependentCase"]),
@@ -678,6 +699,8 @@ impl WorkTone {
         match self {
             WorkTone::SuckUp => job.info().has_boss && job.boss.is_some(),
             WorkTone::HoldMeetings => counts("HoldMeetings"),
+            WorkTone::GiveLectures => counts("GiveLectures"),
+            WorkTone::Study | WorkTone::Study2 => self.word(job).is_none_or(|w| STUDY_UNLOCK.iter().find(|u| u.0 == w).is_none_or(|u| job.level + 1 >= u.1)),
             WorkTone::Perform => counts("ConcertsPerformed"),
             WorkTone::PrepareForGame => counts("WinLossRecord"),
             WorkTone::SleepAtWork => traits.contains(&Trait::HeavySleeper) || traits.contains(&Trait::LightSleeper),
@@ -710,8 +733,9 @@ impl WorkTone {
             WorkTone::TakeItEasy => "Take It Easy".into(),
             WorkTone::Socialize => "Hang With Co-Workers".into(),
             WorkTone::SuckUp => "Suck Up to Boss".into(),
-            WorkTone::Study => format!("Study {}", job.career().skill),
+            WorkTone::Study | WorkTone::Study2 => format!("Study {}", job.career().skill),
             WorkTone::HoldMeetings => "Hold Meetings".into(),
+            WorkTone::GiveLectures => "Give Lectures".into(),
             WorkTone::Perform => "Perform".into(),
             WorkTone::PrepareForGame => "Prepare For Game".into(),
             WorkTone::MeetCoworkers => "Meet Co-Workers".into(),
@@ -725,10 +749,16 @@ impl WorkTone {
         }
     }
 
-    /// The skills studying at work practises, points a minute: the career's study tone's, else
-    /// its skill.
-    pub fn study_skills(job: &Job) -> Vec<(&'static str, f32)> {
-        match WorkTone::Study.word(job).and_then(|w| STUDY_TONES.iter().find(|s| s.0 == w)) {
+    /// The skills studying at work practises, points a minute: the career's study tone's (a game
+    /// developer's training, the branch's: an engineer's Logic, an artist's Painting), else its
+    /// skill.
+    pub fn study_skills(job: &Job, tone: WorkTone) -> Vec<(&'static str, f32)> {
+        match tone.word(job).and_then(|w| STUDY_TONES.iter().find(|s| s.0 == w)) {
+            Some(("OnTheJobTraining", skills)) => match job.path().branch {
+                "Engineer" => skills[..1].to_vec(),
+                "GameArtist" => skills[1..].to_vec(),
+                _ => skills.to_vec(),
+            },
             Some((_, skills)) => skills.to_vec(),
             None => vec![(job.career().skill, study_points(job.career().name))],
         }
@@ -742,7 +772,9 @@ impl WorkTone {
             WorkTone::Socialize => "Socialize",
             WorkTone::SuckUp => "SuckUp",
             WorkTone::Study => "Study",
+            WorkTone::Study2 => "Study2",
             WorkTone::HoldMeetings => "HoldMeetings",
+            WorkTone::GiveLectures => "GiveLectures",
             WorkTone::Perform => "Perform",
             WorkTone::PrepareForGame => "PrepareForGame",
             WorkTone::MeetCoworkers => "MeetCoworkers",
@@ -960,8 +992,13 @@ pub fn work_schedule(
             let gain = job.performance - w.start_perf;
             life.write(LifeEvent::new(e, LifeEventKind::HomeFromWork { worse: gain < 0.0, pay }));
             // Studying the career's skill on the job.
-            if job.tone == WorkTone::Study {
-                for (sk, per_minute) in WorkTone::study_skills(&job) {
+            if matches!(job.tone, WorkTone::Study | WorkTone::Study2) {
+                let study = WorkTone::study_skills(&job, job.tone);
+                // (Researching games is playing them: `careermetrics`' hours of games.)
+                if study.iter().any(|s| s.0 == "ArcadeMachine") {
+                    job.tally.game_hours += worked;
+                }
+                for (sk, per_minute) in study {
                     let points = worked * 60.0 * per_minute * crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) * mood.skill_rate();
                     if let Some(level) = skills.add_points(sk, points)
                         && member
@@ -1212,6 +1249,11 @@ fn work_flow(
                 }
             }
             WorkTone::PrepareForGame => job.tally.prepare(hours),
+            WorkTone::GiveLectures => {
+                if job.tally.lecture_tone(hours, clock.day()) > 0 {
+                    info!("{} gave a lecture at work ({} this week)", sim.first, job.tally.lectures_given(clock.day()));
+                }
+            }
             _ => {}
         }
         // (A doctor's journal for the day, brought home: `careermetrics`.)

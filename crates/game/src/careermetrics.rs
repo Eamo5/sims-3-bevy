@@ -1,6 +1,12 @@
 //! The careers' own performance metrics, as the game's (`Business.MetricMeetingsHeld`,
 //! `Music.MetricConcertsPerformed`), and what moves them:
 //!
+//! - Lectures given (Education, levels 6 and up: `MetricLecturesGiven`): the last seven days' and
+//!   today's, as meetings are. `Give Lectures` at work gives one every hour and a half; `Give
+//!   Lecture` at the school (seven till five, a mood of -50 or better) takes an hour and a half there
+//!   and pays §200 (the Education tuning's).
+//! - Hours of games played (Game Developer: `MetricGameHoursPlayed`): hours at arcade machines
+//!   and researching games at work (the Arcade Machine skill's `HoursOfGamesPlayed`).
 //! - Meetings held (Business, levels 6 and up): the last seven days' and today's. "Hold Meetings"
 //!   at work holds one every hour and a half of it (`kSimHoursToCallMeetingWothwhile`); "Hold
 //!   Meeting" at the business office, between eight and six and not in too foul a mood (-50,
@@ -75,6 +81,16 @@ pub struct Tally {
     pub meetings: Vec<(u32, u32)>,
     #[serde(default)]
     pub meeting_hours: f32,
+    /// Lectures given, by day (Education: the game's `mLecturesInLastNDays` and
+    /// `LecturesGivenToday`), and the hours into the next one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lectures: Vec<(u32, u32)>,
+    #[serde(default)]
+    pub lecture_hours: f32,
+    /// Hours of games played (Game Developer: the Arcade Machine skill's `HoursOfGamesPlayed`,
+    /// at arcade machines and researching them at work).
+    #[serde(default)]
+    pub game_hours: f32,
     /// Concerts performed in the career, and the next one's readiness (out of 100).
     #[serde(default)]
     pub concerts: u32,
@@ -322,6 +338,23 @@ impl Tally {
         *self == Tally::default()
     }
 
+    /// Lectures given over the window to `today`.
+    pub fn lectures_given(&self, today: u32) -> u32 {
+        window(&self.lectures, today)
+    }
+
+    /// Hours of the Give Lectures tone: the lectures they come to (`kSimHoursGiveLecturesWorthwhile`).
+    pub fn lecture_tone(&mut self, hours: f32, today: u32) -> u32 {
+        self.lecture_hours += hours;
+        let mut given = 0;
+        while self.lecture_hours >= MEETING_HOURS {
+            self.lecture_hours -= MEETING_HOURS;
+            count_today(&mut self.lectures, today);
+            given += 1;
+        }
+        given
+    }
+
     /// Meetings held over the window to `today`.
     pub fn meetings_held(&self, today: u32) -> u32 {
         window(&self.meetings, today)
@@ -351,6 +384,8 @@ impl Tally {
     pub fn value(&self, kind: &str, today: u32) -> Option<f32> {
         match kind {
             "HoldMeetings" => Some(self.meetings_held(today) as f32),
+            "GiveLectures" => Some(self.lectures_given(today) as f32),
+            "GameHoursPlayed" => Some(self.game_hours),
             "ConcertsPerformed" => Some(self.concerts as f32),
             "CampaignMoney" => Some(self.campaign as f32),
             "WinLossRecord" => Some(self.wins as f32 - self.losses as f32),
@@ -524,11 +559,14 @@ pub const MEETING_TASK: usize = 7100;
 pub const THEATRE_CONCERT_TASK: usize = 7101;
 pub const STADIUM_CONCERT_TASK: usize = 7102;
 pub const PLAY_GAME_TASK: usize = 7103;
+pub const LECTURE_TASK: usize = 7104;
 
 const fn gig(name: &'static str, minutes: f32) -> Activity {
     Activity { name, minutes, cost: 0, per_hour: [0.0; 6], skill: None, open: 0.0, close: 24.0 }
 }
 pub static HOLD_MEETING: Activity = gig("Hold Meeting", 90.0);
+/// A lecture at the school (`GiveLectureInAtRabbitHole`: `kSimHoursGiveLecturesWorthwhile`).
+pub static GIVE_LECTURE: Activity = gig("Give Lecture", 90.0);
 pub static THEATRE_CONCERT: Activity = gig("Perform Concert", 120.0);
 pub static STADIUM_CONCERT: Activity = gig("Perform Concert", 240.0);
 /// Warming up and the game (till six, from half past two).
@@ -539,6 +577,12 @@ pub static PLAY_GAME: Activity = gig("Play In Stadium", 210.0);
 const MEETING_HOURS_OPEN: (f32, f32) = (8.0, 18.0);
 const MEETING_MOOD: f32 = -50.0;
 const MEETING_PAY: i64 = 750;
+/// When lectures can be given at the school, the mood they take and what one pays (the
+/// Education tuning's `kEarliestTimeToGiveLecture`, `kLatestTimeToGiveLecture`,
+/// `kMinMoodToGiveLecture`, `kMoneyForLecture`).
+const LECTURE_HOURS: (f32, f32) = (7.0, 17.0);
+const LECTURE_MOOD: f32 = -50.0;
+const LECTURE_PAY: i64 = 200;
 /// When concerts can be put on, the level they're paid at, and the pay (theatre, stadium) and
 /// its spread.
 const CONCERT_HOURS: (f32, f32) = (15.0, 23.0);
@@ -558,6 +602,10 @@ pub fn options(world: &WorldInfo, lot: usize, job: Option<&Job>, (day, weekday, 
     let (Some(job), Some(class)) = (job, hole_class(world, lot)) else { return Vec::new() };
     let mut out = Vec::new();
     let has = |kind: &str| job.info().metrics.iter().any(|m| m.kind == kind);
+    // (A teacher's lecture at the school, a combined one too.)
+    if crate::opportunities::lot_types(world, lot).contains(&"School") && has("GiveLectures") && (LECTURE_HOURS.0..=LECTURE_HOURS.1).contains(&hour) && mood >= LECTURE_MOOD {
+        out.push((GIVE_LECTURE.name.to_string(), LECTURE_TASK));
+    }
     if class == "BusinessAndJournalismRabbitHole" && has("HoldMeetings") && (MEETING_HOURS_OPEN.0..=MEETING_HOURS_OPEN.1).contains(&hour) && mood >= MEETING_MOOD {
         out.push((HOLD_MEETING.name.to_string(), MEETING_TASK));
     }
@@ -579,6 +627,7 @@ pub fn options(world: &WorldInfo, lot: usize, job: Option<&Job>, (day, weekday, 
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub enum Gig {
     Meeting,
+    Lecture,
     TheatreConcert,
     StadiumConcert,
     Game,
@@ -588,6 +637,7 @@ impl Gig {
     pub fn of(task: usize) -> Option<Self> {
         Some(match task {
             MEETING_TASK => Self::Meeting,
+            LECTURE_TASK => Self::Lecture,
             THEATRE_CONCERT_TASK => Self::TheatreConcert,
             STADIUM_CONCERT_TASK => Self::StadiumConcert,
             PLAY_GAME_TASK => Self::Game,
@@ -598,6 +648,7 @@ impl Gig {
     pub fn activity(self) -> &'static Activity {
         match self {
             Self::Meeting => &HOLD_MEETING,
+            Self::Lecture => &GIVE_LECTURE,
             Self::TheatreConcert => &THEATRE_CONCERT,
             Self::StadiumConcert => &STADIUM_CONCERT,
             Self::Game => &PLAY_GAME,
@@ -606,7 +657,7 @@ impl Gig {
 }
 
 pub fn is_gig(a: &Activity) -> bool {
-    [&HOLD_MEETING, &THEATRE_CONCERT, &STADIUM_CONCERT, &PLAY_GAME].iter().any(|g| std::ptr::eq(a, *g))
+    [&HOLD_MEETING, &GIVE_LECTURE, &THEATRE_CONCERT, &STADIUM_CONCERT, &PLAY_GAME].iter().any(|g| std::ptr::eq(a, *g))
 }
 
 /// Back from it.
@@ -690,6 +741,17 @@ fn gigs_done(
                 notes.push(
                     say("Gameplay/Careers/Business/HoldMeetingInAtRabbitHole:MoneyEarned")
                         .map_or_else(|| format!("{} just earned §{MEETING_PAY}.", sim.full_name()), |t| t.replace("{0.SimName}", &sim.full_name()).replace("{1.Money}", &format!("§{MEETING_PAY}"))),
+                );
+            }
+            Gig::Lecture => {
+                count_today(&mut job.tally.lectures, clock.day());
+                if let Some(h) = household.as_mut() {
+                    h.funds += LECTURE_PAY;
+                }
+                info!("{} gave a lecture ({} this week)", sim.first, job.tally.lectures_given(clock.day()));
+                notes.push(
+                    say("Gameplay/Careers/Education/GiveLectureInAtRabbitHole:MoneyEarned")
+                        .map_or_else(|| format!("{} just earned §{LECTURE_PAY}.", sim.full_name()), |t| crate::layout::gendered(&t, sim.female).replace("{0.SimName}", &sim.full_name()).replace("{0.SimFirstName}", &sim.first).replace("{1.Money}", &format!("§{LECTURE_PAY}"))),
                 );
             }
             Gig::Game => {
@@ -1217,6 +1279,17 @@ pub fn concert_words(ui: Option<&crate::layout::UiAssets>, sim: &Sim) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lectures_and_game_hours_count_as_the_packs_careers_have_them() {
+        let mut t = Tally::default();
+        assert_eq!(t.lecture_tone(1.0, 10), 0);
+        assert_eq!(t.lecture_tone(2.0, 10), 2, "an hour and a half a lecture");
+        assert_eq!(t.value("GiveLectures", 10), Some(2.0));
+        assert_eq!(t.value("GiveLectures", 18), Some(0.0), "a week on, forgotten");
+        t.game_hours = 3.5;
+        assert_eq!(t.value("GameHoursPlayed", 18), Some(3.5));
+    }
 
     #[test]
     fn meetings_count_over_the_week() {
