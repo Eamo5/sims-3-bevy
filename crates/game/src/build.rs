@@ -57,6 +57,8 @@ pub enum BuildTool {
     Terrain,
     /// Raise, lower, flatten or smooth the ground (the tool picked on the Terrain tab).
     Sculpt,
+    /// Blueprint mode's room in hand (`blueprints`).
+    Blueprint,
 }
 
 impl BuildTool {
@@ -77,6 +79,7 @@ impl BuildTool {
             BuildTool::Fountain => format!("Fountain Tool\n§{POOL_PRICE} a tile"),
             BuildTool::Terrain => "Terrain Paint".to_string(),
             BuildTool::Sculpt => "Terrain Tools".to_string(),
+            BuildTool::Blueprint => "Blueprint Mode".to_string(),
         }
     }
 
@@ -95,6 +98,7 @@ impl BuildTool {
             BuildTool::Fountain => "Drag out a fountain on the ground out of doors; Ctrl+drag takes it out. Buy fountain jets to put in it.",
             BuildTool::Terrain => "Hold the mouse down to paint the ground on the lot.",
             BuildTool::Sculpt => "Hold the mouse down to work the ground on the lot (not under the house or things).",
+            BuildTool::Blueprint => "Choose a room and click to build it, furnished; , and . turn it.",
         }
         .to_string()
             + " Page Up/Down change floors · Esc puts the tool down."
@@ -207,7 +211,7 @@ fn diagonal_room(a: IVec2, b: IVec2) -> Vec<(IVec2, IVec2)> {
 }
 
 /// The wall on `level` that runs along the whole of the edge from `p` to `q`, if any.
-fn wall_along(b: &LotBuildingBaked, level: u8, p: Vec2, q: Vec2) -> Option<usize> {
+pub(crate) fn wall_along(b: &LotBuildingBaked, level: u8, p: Vec2, q: Vec2) -> Option<usize> {
     let on = |a: Vec2, c: Vec2, x: Vec2| {
         let d = c - a;
         let t = (x - a).dot(d) / d.length_squared();
@@ -996,7 +1000,7 @@ fn build_tool(
         return;
     };
     // (The terrain brush is the terrain paint module's.)
-    if matches!(tool, BuildTool::Terrain | BuildTool::Sculpt) {
+    if matches!(tool, BuildTool::Terrain | BuildTool::Sculpt | BuildTool::Blueprint) {
         drag.start = None;
         return;
     }

@@ -1604,6 +1604,15 @@ installation is unreachable.
   The Foundations panel has the catalogue's foundation kinds (CFND: Foundation, Deck, Platform,
   read from the packages, each its sides' own covering drawn), the household's foundation
   put in the one chosen (an undoable build op, kept in saves).
+  **Blueprint mode** (the tool holder's blueprint button): the game's ready-made rooms (its 47
+  home `bp…` catalogue objects, each a `Blueprint` of walls, floors, furniture, doors and
+  windows, baked with every covering drawn), by room kind in the game's `BlueprintCatalog` tabs,
+  each with a plan of it and its name and price ("Kitchen - Dated (4x4)", §3047). Chosen, the
+  room follows the pointer outlined on the floor in view (green where it fits and is
+  affordable), turned a quarter at a time with , and .; a click builds it: walls with each
+  side in its own covering, the floor (closing the room lays it, in its covering), doors and
+  windows set in the walls, and the furniture placed (what goes on surfaces in their slots),
+  for the blueprint's price. `BLUEPRINT_TEST=<n>,<x>,<z>[,<turns>]` (tests).
 - **Interface**: the game's own icons and words — moodlets (name, description, time left),
   traits (Create-a-Sim and the Sim's panel) and wishes — read from the game's tuning tables
   (`GameplayData.package`) and string tables, with tooltips on hover. Sims' portraits are

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 162;
+pub const GAMEDATA_VERSION: u32 = 164;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -531,6 +531,50 @@ pub struct MinorPetInfo {
     pub max_value: i32,
     pub stockable: bool,
     pub catch_chance: f32,
+}
+
+/// A blueprint: a ready-made room (Blueprint mode's), its name (its tokens filled in), its room
+/// kind (`BlueprintCatalog`'s flag bit: 1 living room, 2 dining room, 3 kitchen, 4 kids' room, 5
+/// bathroom, 6 bedroom, 7 study, 8 outdoors) and price, and what it's made of, about its middle:
+/// its walls (each side's covering drawn), its floor tiles (their quarters, their covering), its
+/// furniture (and what goes in its slots), doors and windows.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct BlueprintInfo {
+    pub objd: crate::types::Key,
+    pub name: String,
+    pub room: u8,
+    pub price: i32,
+    pub walls: Vec<BlueprintWall>,
+    pub floors: Vec<BlueprintFloor>,
+    pub objects: Vec<BlueprintObject>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct BlueprintWall {
+    pub a: [f32; 2],
+    pub b: [f32; 2],
+    /// The left side's covering and the right's (left: the +normal side, as lots' walls).
+    pub cover: [Option<crate::types::Key>; 2],
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct BlueprintFloor {
+    pub x: i16,
+    pub z: i16,
+    pub quarters: u8,
+    pub cover: Option<crate::types::Key>,
+}
+
+/// A blueprint's object: what (its OBJD), where (about the middle), which way it faces
+/// (radians, its forward `(sin, cos)`), whether it's a door or window (set in a wall), and what's
+/// in its slots.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct BlueprintObject {
+    pub objd: crate::types::Key,
+    pub at: [f32; 3],
+    pub facing: f32,
+    pub in_wall: bool,
+    pub slotted: Vec<(crate::types::Key, u32, f32)>,
 }
 
 /// A foundation or deck style from the build catalogue (CFND): its name, what it says of
@@ -1468,6 +1512,9 @@ pub struct GameDataBaked {
     /// The Pets pack's minor pets (`MinorPets`): turtles, snakes, lizards, rodents and birds.
     #[serde(default)]
     pub minor_pets: Vec<MinorPetInfo>,
+    /// Blueprint mode's rooms (`bp…` objects' `Blueprint` XML).
+    #[serde(default)]
+    pub blueprints: Vec<BlueprintInfo>,
     /// Its foundations' and decks' styles (CFND).
     #[serde(default)]
     pub foundation_styles: Vec<FoundationStyle>,
@@ -3528,6 +3575,135 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         out.patterns = found;
         out.patterns.sort_by(|a, b| a.floor.cmp(&b.floor).then(a.price.cmp(&b.price)).then(a.name.cmp(&b.name)));
         out.patterns.dedup_by(|a, b| a.floor == b.floor && a.name == b.name);
+    }
+
+    // Blueprints: each `bp…` object's `Blueprint` XML (the last XML its OBJD names).
+    progress("Converting: blueprints…");
+    {
+        let catalog: Vec<crate::types::CatalogEntry> = read_value(&root.global_dir().join("catalog.bin")).unwrap_or_default();
+        let bps: Vec<&crate::types::CatalogEntry> = catalog.iter().filter(|c| c.price > 0 && c.script.ends_with("Core.Blank") && c.instance_name.to_ascii_lowercase().starts_with("bp")).collect();
+        let drawn = std::sync::Mutex::new(std::collections::HashSet::<u64>::new());
+        // A covering: a product's (CWAL) preset, or the blueprint's own; drawn once, under a key
+        // of what it is.
+        let cover = |product: Option<&str>, preset_id: Option<usize>, custom: Option<&str>, floor: bool| -> Option<crate::types::Key> {
+            let (w, h) = if floor { (256, 256) } else { (256, 512) };
+            let (sig, img): (u64, Box<dyn Fn() -> Option<s3formats::dds::Rgba>>) = match custom {
+                Some(xml) => (s3pkg::fnv64(xml), Box::new(move || s3formats::complate::render_preset(pkgs, xml, 512, false))),
+                None => {
+                    let p: Vec<u64> = product?.split(',').filter_map(|v| v.trim().parse().ok()).collect();
+                    let key = s3pkg::ResourceKey::new(*p.first()? as u32, *p.get(1)? as u32, p.get(3)? << 32 | p.get(2)?);
+                    let i = preset_id.unwrap_or(0);
+                    (key.i ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15), Box::new(move || {
+                        let pat = s3formats::catalog::WallFloorPattern::parse(&pkgs.read(&key).or_else(|| pkgs.read_ti(key.t, key.i))?).ok()?;
+                        let m = pat.materials.get(i).or(pat.materials.first())?;
+                        s3formats::complate::render(pkgs, &m.complate, &m.keys, w, h)
+                    }))
+                }
+            };
+            let k = (crate::types::T_COVER, if floor { 6 } else { 7 }, sig);
+            if drawn.lock().unwrap().insert(k.2 ^ floor as u64) && !root.tex_path(k).exists() {
+                let img = img()?;
+                std::fs::write(root.tex_path(k), crate::ddsw::encode_dds(&img)).ok()?;
+            }
+            root.tex_path(k).exists().then_some(k)
+        };
+        let key3 = |s: &str| -> Option<crate::types::Key> {
+            let p: Vec<u64> = s.split(',').filter_map(|v| v.trim().parse().ok()).collect();
+            Some((*p.first()? as u32, *p.get(1)? as u32, p.get(3)? << 32 | p.get(2)?))
+        };
+        let f = |t: &str, a: &str| attr(t, a).and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
+        let token = |k: &str| -> String {
+            match k.split_once('_') {
+                Some(("BPrintDimensions", d)) => d.split_once('_').map_or(String::new(), |(a, b)| format!("({a}x{b})")),
+                _ => strings.get(&s3pkg::fnv64(&format!("Gameplay/Objects/Blueprints:{k}").to_ascii_lowercase())).cloned().unwrap_or_default(),
+            }
+        };
+        // (Each room kind's room in the catalogue's tabs: the homes' kinds only, not the resorts'
+        // and pools'.)
+        let rooms: [(&str, u8); 17] = [
+            ("LivingRoom", 1),
+            ("FamilyRoom", 1),
+            ("HomeTheater", 1),
+            ("Foyer", 1),
+            ("Hallway", 1),
+            ("DiningRoom", 2),
+            ("Kitchen", 3),
+            ("KidsRoom", 4),
+            ("Bathroom", 5),
+            ("MasterBedroom", 6),
+            ("SpareBedroom", 6),
+            ("Bedroom", 6),
+            ("Study", 7),
+            ("HomeOffice", 7),
+            ("ArtStudio", 7),
+            ("InHouseGym", 7),
+            ("Studio", 7),
+        ];
+        let found: Vec<BlueprintInfo> = crate::bake::par_map(&bps, |c| {
+            let d = pkgs.read(&crate::types::rkey(c.objd))?;
+            // (The XML among the OBJD's resource keys: type, group, instance.)
+            let xml_key = d.windows(16).rev().find(|w| w[0..4] == 0x0333_406Cu32.to_le_bytes()).map(|w| s3pkg::ResourceKey::new(0x0333_406C, u32::from_le_bytes(w[4..8].try_into().unwrap()), u64::from_le_bytes(w[8..16].try_into().unwrap())))?;
+            let x = String::from_utf8_lossy(&pkgs.read(&xml_key).or_else(|| pkgs.read_ti(xml_key.t, xml_key.i))?).into_owned();
+            if !x.contains("<Blueprint") {
+                return None;
+            }
+            // Its own presets (custom colours), by their place in the list.
+            let presets: Vec<String> = x.split("<Preset ").skip(1).filter_map(|p| attr(&format!(" {p}"), "PresetXML").map(unescape)).collect();
+            let side = |t: &str, s: &str, floor: bool| -> Option<crate::types::Key> {
+                let custom = attr(t, &format!("{s}CustomPresetIndex")).and_then(|i| i.parse::<usize>().ok()).and_then(|i| presets.get(i));
+                let pid = attr(t, &format!("{s}PresetId")).and_then(|i| i.parse().ok());
+                cover(attr(t, &format!("{s}PresetProductKey")), pid, custom.map(|s| s.as_str()), floor)
+            };
+            let tags = |name: &str| -> Vec<String> { x.split(&format!("<{name} ")).skip(1).map(|t| format!(" {}", &t[..t.find('>').unwrap_or(t.len())])).collect() };
+            let walls = tags("Wall").iter().map(|t| BlueprintWall { a: [f(t, "OriginX"), f(t, "OriginZ")], b: [f(t, "DestinationX"), f(t, "DestinationZ")], cover: [side(t, "LS", false), side(t, "RS", false)] }).collect();
+            let mut floors: Vec<BlueprintFloor> = Vec::new();
+            for t in tags("Floor") {
+                let (x0, z0) = (f(&t, "X").round() as i16, f(&t, "Z").round() as i16);
+                let q = attr(&t, "Quadrant").and_then(|v| v.parse::<u8>().ok()).unwrap_or(15);
+                match floors.iter_mut().find(|fl| (fl.x, fl.z) == (x0, z0)) {
+                    Some(fl) => fl.quarters |= q,
+                    None => floors.push(BlueprintFloor { x: x0, z: z0, quarters: q, cover: side(&t, "", true) }),
+                }
+            }
+            // (Objects, with what's in their slots after each: doors and windows set in walls.)
+            let mut objects: Vec<BlueprintObject> = Vec::new();
+            for part in x.split('<').skip(1) {
+                let (name, rest) = part.split_once(' ').unwrap_or((part, ""));
+                let t = format!(" {}", &rest[..rest.find('>').unwrap_or(rest.len())]);
+                match name {
+                    "Object" | "Door" | "Window" => {
+                        let Some(objd) = attr(&t, "ResourceKey").and_then(key3) else { continue };
+                        objects.push(BlueprintObject { objd, at: [f(&t, "X"), f(&t, "Y"), f(&t, "Z")], facing: f(&t, "Facing"), in_wall: name != "Object", slotted: Vec::new() });
+                    }
+                    "SlottedObject" => {
+                        let (Some(objd), Some(o)) = (attr(&t, "ResourceKey").and_then(key3), objects.last_mut()) else { continue };
+                        o.slotted.push((objd, attr(&t, "SlotID").and_then(|v| v.parse().ok()).unwrap_or(0), f(&t, "Facing")));
+                    }
+                    _ => {}
+                }
+            }
+            let name: String = {
+                let mut out = String::new();
+                let mut rest = c.name.as_str();
+                while let Some(a) = rest.find('{') {
+                    out.push_str(&rest[..a]);
+                    let Some(b) = rest[a..].find('}') else { break };
+                    out.push_str(&token(&rest[a + 1..a + b]));
+                    rest = &rest[a + b + 1..];
+                }
+                out.push_str(rest);
+                out
+            };
+            let room = rooms.iter().find(|(r, _)| c.name.contains(&format!("{{BPrint_RoomType{r}}}")))?.1;
+            let price = attr(&x, "TotalCost").and_then(|v| v.parse().ok()).unwrap_or(c.price);
+            Some(BlueprintInfo { objd: c.objd, name, room, price, walls, floors, objects })
+        })
+        .into_iter()
+        .flatten()
+        .collect();
+        out.blueprints = found;
+        out.blueprints.sort_by(|a, b| a.room.cmp(&b.room).then(a.price.cmp(&b.price)).then(a.name.cmp(&b.name)));
+        progress(&format!("Converting: {} blueprints", out.blueprints.len()));
     }
 
     // The minor pets: each tab's rows after its first (the defaults the rest fill in from).

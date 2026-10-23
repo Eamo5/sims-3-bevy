@@ -11,6 +11,8 @@
 //! - Stairs: the catalogue's staircases (CSTR) with the game's pictures of them and their prices
 //!   (a tile's), auto-railings on or off, and Railings: the catalogue's railings (CRAL), a
 //!   staircase put in with the one chosen (else its own, by name);
+//! - Blueprints: Blueprint mode's ready-made rooms (`blueprints`) by room kind (the game's
+//!   `BlueprintCatalog` tabs, its pictures), each with the game's picture of it and its price;
 //! - Foundations: the catalogue's foundation kinds (CFND: foundation, deck, platform), each its
 //!   sides' covering, the household's foundation in the one chosen.
 
@@ -45,10 +47,11 @@ enum Cat {
     Stairs,
     Railings,
     Foundations,
+    Blueprints,
 }
 
 impl Cat {
-    const ALL: [Cat; 6] = [Cat::Roofs, Cat::Fences, Cat::HalfWalls, Cat::Stairs, Cat::Railings, Cat::Foundations];
+    const ALL: [Cat; 7] = [Cat::Roofs, Cat::Fences, Cat::HalfWalls, Cat::Stairs, Cat::Railings, Cat::Foundations, Cat::Blueprints];
 
     /// Its panel, and the window its grid goes in.
     fn ids(self) -> (u32, u32) {
@@ -59,6 +62,7 @@ impl Cat {
             Cat::Stairs => (0x3e0, 0x3e2),
             Cat::Railings => (0x3e1, 0x3e3),
             Cat::Foundations => (0x000a_a300, 0x000a_a302),
+            Cat::Blueprints => (0x350, 0x353),
         }
     }
 
@@ -114,8 +118,8 @@ const THUMB: u32 = 0x05ac_1600;
 pub struct BuildCats {
     spawned_for: Option<Entity>,
     grids: Vec<Spawned>,
-    cells: [Option<Entity>; 6],
-    tabs: [Option<Entity>; 6],
+    cells: [Option<Entity>; 7],
+    tabs: [Option<Entity>; 7],
     scroll: usize,
     columns: usize,
     count: usize,
@@ -125,6 +129,8 @@ pub struct BuildCats {
     roof_icons: Vec<Handle<Image>>,
     /// The pitch slider's value as last set.
     pitch: f32,
+    /// Blueprints' plans drawn.
+    plans: std::collections::HashMap<usize, Handle<Image>>,
 }
 
 /// The catalogue the game's panel is up for, if any.
@@ -137,6 +143,7 @@ fn current(buy: &BuyMode) -> Option<Cat> {
         FENCES_TAB if buy.half_walls => Some(Cat::HalfWalls),
         FENCES_TAB => Some(Cat::Fences),
         crate::buy::BUILD_TAB if buy.tool == Some(BuildTool::Foundation) => Some(Cat::Foundations),
+        crate::buy::BUILD_TAB if buy.tool == Some(BuildTool::Blueprint) => Some(Cat::Blueprints),
         crate::buy::BUILD_TAB if buy.tool == Some(BuildTool::Stairs) => Some(if buy.railings_view { Cat::Railings } else { Cat::Stairs }),
         _ => None,
     }
@@ -150,6 +157,22 @@ pub fn showing(buy: &BuyMode) -> bool {
 /// A tab made from the game's template, with the designer's tab's icon and words.
 #[derive(Component)]
 struct RoofTab(bool);
+
+/// A blueprint room kind's tab (its flag bit).
+#[derive(Component)]
+struct RoomTab(u8);
+
+/// Blueprint mode's room kinds, as the game's `BlueprintCatalog` has them: their flag bits,
+/// names and pictures.
+const ROOM_KINDS: [(u8, &str, &str); 7] = [
+    (1, "Living Room", "buy_room_livingroom_r2"),
+    (2, "Dining Room", "buy_room_dining_r2"),
+    (3, "Kitchen", "buy_room_kitchen_r2"),
+    (4, "Kids' Room", "buy_room_kids_r2"),
+    (5, "Bathroom", "buy_room_bathroom_r2"),
+    (6, "Bedroom", "buy_room_bedroom_r2"),
+    (7, "Study", "buy_room_study_r2"),
+];
 
 /// A roof shape's picture: its outline from the front, as the build catalogue's icons are drawn.
 fn roof_icon(style: RoofStyle) -> Image {
@@ -225,7 +248,7 @@ fn spawn(mut commands: Commands, hud: Res<crate::buildhud::BuildHud>, mut c: Res
         c.grids.push(g);
     }
     let s = &hud.puck;
-    for id in FILTERS.into_iter().chain([PITCH_TOOL, PAGODA, STAIR_TAB, SPIRAL_TAB]).chain(STAIR_WIDTH) {
+    for id in FILTERS.into_iter().chain([PITCH_TOOL, PAGODA, STAIR_TAB, SPIRAL_TAB, 0x356, 0x3501, 0x3503, 0x3504, 0x3505]).chain(STAIR_WIDTH) {
         if let Some(e) = s.id(id) {
             commands.entity(e).insert(Visibility::Hidden);
         }
@@ -282,7 +305,7 @@ fn controls(
     hud: Res<crate::buildhud::BuildHud>,
     mut buy: ResMut<BuyMode>,
     building: Option<Res<crate::building::ActiveBuilding>>,
-    (clicks, tabs): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &RoofTab), Changed<Interaction>>),
+    (clicks, tabs, room_tabs): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &RoofTab), Changed<Interaction>>, Query<(&Interaction, &RoomTab), Changed<Interaction>>),
     (bars, mut sliders, mouse): (Query<&UiScrollBar>, Query<&mut UiSlider>, Res<ButtonInput<MouseButton>>),
     (windows, areas, mut wheel): (Query<&Window, With<PrimaryWindow>>, Query<(&ComputedNode, &UiGlobalTransform, &InheritedVisibility)>, MessageReader<MouseWheel>),
     mut objects: Option<ResMut<crate::buildobjects::BuildObjects>>,
@@ -334,6 +357,14 @@ fn controls(
             }
         }
         Cat::Foundations => {}
+        Cat::Blueprints => {
+            for (i, t) in &room_tabs {
+                if *i == Interaction::Pressed && buy.blueprint_room != t.0 {
+                    buy.blueprint_room = t.0;
+                    c.scroll = 0;
+                }
+            }
+        }
         Cat::Stairs | Cat::Railings => {
             let any = |ids: [u32; 2]| ids.iter().any(|id| s.all_with(*id).into_iter().any(|e| pressed(&clicks, Some(e))));
             if any(RAILINGS_BUTTONS) && !buy.railings_view {
@@ -392,7 +423,7 @@ fn draw(
     mut c: ResMut<BuildCats>,
     hud: Res<crate::buildhud::BuildHud>,
     buy: Res<BuyMode>,
-    building: Option<Res<crate::building::ActiveBuilding>>,
+    (building, household): (Option<Res<crate::building::ActiveBuilding>>, Option<Res<crate::interact::Household>>),
     ui: Option<ResMut<UiAssets>>,
     mut gu: Option<ResMut<crate::icons::GameUi>>,
     (data, mut assets, mut thumbs): (Res<crate::baked::Baked>, ResMut<crate::objects::ObjectAssets>, ResMut<crate::thumbs::ModelThumbs>),
@@ -455,6 +486,7 @@ fn draw(
         Cat::Stairs => 264.0,
         Cat::Railings => 95.0,
         Cat::Foundations => 110.0,
+        Cat::Blueprints => 48.0,
     };
     c.columns = ((width - left - 57.0 - 40.0) / step.x).floor().max(1.0) as usize;
     // What's in it: the roofs' shapes or patterns, the fences or the half walls.
@@ -474,6 +506,11 @@ fn draw(
     let items: Vec<(BuyButton, String, bool)> = match cat {
         Cat::Stairs => gu.data.stair_styles.iter().enumerate().map(|(i, st)| (BuyButton::Stair(i), format!("{}\n§{} a step", st.name, st.price), buy.stair_style == Some(i))).collect(),
         Cat::Railings => gu.data.rail_styles.iter().enumerate().map(|(i, r)| (BuyButton::Rail(i), r.name.clone(), buy.rail_style == Some(i))).collect(),
+        Cat::Blueprints => {
+            let room = if buy.blueprint_room == 0 { 1 } else { buy.blueprint_room };
+            let funds = household.as_ref().map_or(i64::MAX, |h| h.funds);
+            gu.data.blueprints.iter().enumerate().filter(|(_, bp)| bp.room == room).map(|(i, bp)| (BuyButton::Blueprint(i), format!("{}\n§{}{}", bp.name, bp.price, if funds < bp.price as i64 { " (can't afford)" } else { "" }), buy.blueprint == Some(i))).collect()
+        }
         Cat::Foundations => {
             let now = building.as_deref().and_then(|b| b.foundation_cover);
             gu.data.foundation_styles.iter().enumerate().map(|(i, f)| (BuyButton::FoundationStyle(i), format!("{}\n§{} a tile", f.name, f.price), now == Some(f.texture))).collect()
@@ -485,7 +522,7 @@ fn draw(
     let total = items.len().div_ceil(c.columns);
     c.scroll = c.scroll.min(total.saturating_sub(rows));
     let chosen = items.iter().position(|i| i.2);
-    let signature = (cat.index(), c.scroll, c.columns, c.textures, chosen, roofs_on as u8 | (buy.no_rails as u8) << 1, window.width() as u32);
+    let signature = (cat.index(), c.scroll, c.columns, c.textures, chosen, roofs_on as u8 | (buy.no_rails as u8) << 1 | buy.blueprint_room << 2, window.width() as u32);
     if c.shown == Some(signature) {
         return;
     }
@@ -507,6 +544,29 @@ fn draw(
                     commands.entity(root).insert((crate::layout::Selected, ZIndex(1)));
                 }
                 if let Some((icon, _)) = ui.image(&mut images, source.icon) {
+                    commands.entity(root).insert(crate::layout::SetIcon(icon));
+                }
+            }
+        }
+        commands.entity(parent).insert(Visibility::Inherited).entry::<Node>().and_modify(|mut n| n.overflow = Overflow::visible());
+    }
+    // Blueprint mode's room kinds, a tab each.
+    if cat == Cat::Blueprints
+        && let (Some(parent), Some(template)) = (s.id(0x352), ui.layout("TabControl").cloned())
+    {
+        let holder = crate::buyhud::holder(&mut commands, parent, &mut c.tabs[6], &visibility);
+        let shown = if buy.blueprint_room == 0 { 1 } else { buy.blueprint_room };
+        for (n, (bit, name, pic)) in ROOM_KINDS.iter().enumerate() {
+            let mut tab = template.clone();
+            let x = n as f32 * 36.0;
+            tab.area = [x + 1.0, 1.0, x + 44.0, 52.0];
+            let t = ui.spawn_under(&mut commands, &mut images, &mut fonts, &tab, holder);
+            if let Some(root) = t.root {
+                commands.entity(root).insert((RoomTab(*bit), crate::icons::Tooltip((*name).into())));
+                if *bit == shown {
+                    commands.entity(root).insert((crate::layout::Selected, ZIndex(1)));
+                }
+                if let Some((icon, _)) = ui.image(&mut images, s3pkg::fnv64(pic)) {
                     commands.entity(root).insert(crate::layout::SetIcon(icon));
                 }
             }
@@ -569,6 +629,7 @@ fn draw(
             // (Else a flight of it, rendered.)
             BuyButton::Stair(i) => gu.data.stair_styles.get(i).cloned().and_then(|st| st.thumbs.iter().find_map(|k| gu.icon(&mut images, &s3bake::gamedata::thumb_name(*k))).or_else(|| st.flight.map(|m| thumbs.get(&mut images, m)))),
             BuyButton::Rail(i) => gu.data.rail_styles.get(i).map(|r| r.thumbs.clone()).and_then(|t| t.iter().find_map(|k| gu.icon(&mut images, &s3bake::gamedata::thumb_name(*k)))),
+            BuyButton::Blueprint(i) => gu.data.blueprints.get(i).map(|bp| c.plans.entry(i).or_insert_with(|| images.add(crate::blueprints::plan_picture(bp))).clone()),
             BuyButton::FoundationStyle(i) => gu.data.foundation_styles.get(i).map(|f| f.texture).and_then(|t| {
                 let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
                 assets.texture(&mut ctx, t)

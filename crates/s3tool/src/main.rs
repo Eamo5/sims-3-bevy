@@ -988,6 +988,17 @@ fn main() {
         }
         return;
     }
+    if args[1] == "blueprints" {
+        // blueprints: the baked blueprints, a line each, and the first's details.
+        let data = s3bake::load_gamedata(&s3bake::default_root()).expect("gamedata");
+        for b in &data.blueprints {
+            println!("{} room {} §{} walls {} floors {} objects {} covers {}", b.name, b.room, b.price, b.walls.len(), b.floors.len(), b.objects.len(), b.walls.iter().filter(|w| w.cover.iter().all(|c| c.is_some())).count());
+        }
+        if let Some(b) = data.blueprints.first() {
+            println!("{:#?}", &b.objects);
+        }
+        return;
+    }
     if args[1] == "stairstyles" {
         // stairstyles <root>: the catalogue's staircases (CSTR) and railings (CRAL): name, price,
         // shown, pieces.
