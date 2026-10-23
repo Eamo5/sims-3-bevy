@@ -1260,12 +1260,12 @@ fn world_click(
         (Res<crate::frontdoor::Front>, Res<crate::frontdoor::Doorbell>),
         Res<crate::traitacts::Mess>,
     ),
-    (on_lot, writers, jobs_q, toddler_q, bowl_q, inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, (stay_q, spots_q, swim_q)), company_q): (
+    (on_lot, writers, jobs_q, toddler_q, (bowl_q, terra_q), inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, (stay_q, spots_q, swim_q)), company_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
         Query<&crate::little::ToddlerSkills>,
-        Query<&crate::fishbowl::BowlFish>,
+        (Query<&crate::fishbowl::BowlFish>, Query<(Option<&crate::terrarium::TerrariumPet>, Option<&crate::terrarium::TerrariumFood>, Option<&crate::terrarium::TerrariumKind>)>),
         Query<&crate::inventory::Inventory>,
         Query<&crate::upgrades::Upgrades>,
         Res<crate::family::Genealogy>,
@@ -2060,6 +2060,50 @@ fn world_click(
                     }
                 }
                 if d.special == Special::Homework && !hw_q.contains(actor) {
+                    continue;
+                }
+                // A terrarium, as the game's: "Stock" it with one of the pack's species of its kind
+                // (empty), fill its dish, watch its pet, its pet's info, mourn a dead one.
+                if obj.kind == ObjectKind::Terrarium
+                    && let Some(g) = opp_q.0.as_deref()
+                {
+                    let (pet, food, tkind) = terra_q.get(t).unwrap_or((None, None, None));
+                    let funds = opp_q.4.as_ref().map_or(0, |h| h.funds);
+                    let live = pet.filter(|p| !p.dead);
+                    match d.special {
+                        Special::StockTerrarium if pet.is_none() => {
+                            let kind = tkind.map_or("Turtles", |k| k.0);
+                            let list: Vec<(String, ActionKind)> = crate::terrarium::stockable(g, kind).into_iter().filter(|p| funds >= p.max_value as i64).map(|p| (crate::terrarium::stock_label(p), ActionKind::Object { target: t, def: i })).collect();
+                            if list.is_empty() {
+                                options.push((crate::terrarium::STOCK.to_string(), ActionKind::Greyed("Insufficient funds".into())));
+                            } else {
+                                options.push((format!("{} ›", crate::terrarium::STOCK), submenu_kind(pie.submenus.len())));
+                                pie.submenus.push((crate::terrarium::STOCK.to_string(), list));
+                            }
+                        }
+                        Special::FillTerrarium if pet.is_none_or(|p| !p.dead) => {
+                            let now = pet.map(|p| p.food).or(food.map(|f| f.0)).unwrap_or(0);
+                            let cost = crate::terrarium::fill_cost(now);
+                            let label = match live {
+                                Some(p) => format!("Fill {}'s Food (§{cost})", p.called(g)),
+                                None => format!("Fill Food (§{cost})"),
+                            };
+                            if now >= crate::terrarium::FOOD_SERVINGS {
+                                options.push((label, ActionKind::Greyed("Food dish is already full.".into())));
+                            } else if funds < cost {
+                                options.push((label, ActionKind::Greyed("Not enough funds.".into())));
+                            } else {
+                                options.push((label, ActionKind::Object { target: t, def: i }));
+                            }
+                        }
+                        Special::WatchMinorPet if live.is_some() => options.push((format!("Watch {}", live.unwrap().called(g)), ActionKind::Object { target: t, def: i })),
+                        Special::MinorPetInfo if pet.is_some() => options.push((format!("Show {} Info", pet.unwrap().called(g)), ActionKind::Object { target: t, def: i })),
+                        Special::Scrub if pet.is_some() && opp_q.8.get(t).is_ok_and(|s| s.2.is_some_and(|g| g.needs_cleaning())) => {
+                            options.push((format!("Clean {}'s Terrarium", pet.unwrap().called(g)), ActionKind::Object { target: t, def: i }))
+                        }
+                        Special::MournMinorPet if pet.is_some_and(|p| p.dead) => options.push((format!("Mourn {}", pet.unwrap().called(g)), ActionKind::Object { target: t, def: i })),
+                        _ => {}
+                    }
                     continue;
                 }
                 // A fish bowl, as the game's: "Stock" it with a fish from their inventory, or a
@@ -2970,9 +3014,12 @@ fn pie_buttons(
                 label = format!("{verb} {name}");
             }
         }
-        // The fish chosen to stock a bowl with (or a goldfish bought: `fishbowl`).
+        // The fish chosen to stock a bowl with (or a goldfish bought: `fishbowl`); a terrarium's
+        // species (`terrarium`).
         let mut fish_choice = if title != crate::fishbowl::STOCK {
             None
+        } else if let Some(species) = ui_data.as_deref().and_then(|g| crate::terrarium::stock_choice(g, &label)) {
+            Some((species, 0))
         } else if label.starts_with(crate::fishbowl::BUY_GOLDFISH) {
             Some((crate::fishbowl::BUY_GOLDFISH.to_string(), 0))
         } else {

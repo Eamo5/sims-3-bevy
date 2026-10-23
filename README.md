@@ -963,6 +963,17 @@ installation is unreachable.
   as often, a Proud cat grooms itself from half clean; Lazy dogs, Playful cats, Aggressive and
   Piggy pets eat from the bowl in the pack's own ways (`GetEatingStylesForSim`), and Aggressive
   and Skittish pets turn Sims down with the pack's aggressive and cowering rejections.
+  Minor pets, the pack's (its `MinorPets` table, baked: 46 turtles, snakes, lizards, rodents
+  and birds with their names, descriptions, rarity and worth): a turtle, snake, lizard or rodent
+  terrarium is stocked from its menu ("Stock ›", the stockable species of its kind at their
+  most, the game's `StockCost`), the species' own model in the terrarium's slot for it. It
+  hungers and eats from its dish a serving at a time (four, "Fill {pet}'s Food (§50)", in
+  proportion when part full, greyed when full or unaffordable, as the game's `FillCost`); unfed
+  two days it dies, and of old age after two to ten days and one to three more. The terrarium
+  gets dirtier every twelve hours it's lived in ("Clean {pet}'s Terrarium", with the pack's
+  clips); "Watch {pet}" is fun (the pack's watching clips), "Show {pet} Info" tells its
+  kind, rarity, worth and how it's doing, and a dead one is mourned and laid to rest. Kept in
+  saves. `TERRARIUM_TEST=1` with `--place terrarium` (tests).
   `PET_NEEDS=hungry|bladder|tired` and `PET_BOWL=1` (tests).
 - **Supernaturals**, from the Supernatural pack (and Late Night's vampires): vampires,
   werewolves, witches, fairies and zombies, chosen in Create a Sim's Life State row and kept in

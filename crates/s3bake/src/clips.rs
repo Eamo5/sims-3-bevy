@@ -227,6 +227,10 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "ch_nap_",
     "a2o_petBowl_putFood_",
     "a2o_litterbox_clean_",
+    // (A minor pet's terrarium: stocking, feeding, watching, cleaning.)
+    "a2o_minorPet_putInTerrarium_x",
+    "a2o_minorPet_feed_x",
+    "a2o_terrarium_",
     // Sims with pets: petting, letting them sniff a hand, praise, hugs, treats, rubbing a
     // horse's neck, scolding (both sides).
     "a2ac_soc_neutral_",

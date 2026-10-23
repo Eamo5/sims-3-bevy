@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 161;
+pub const GAMEDATA_VERSION: u32 = 162;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -514,6 +514,23 @@ pub struct StairStyle {
     /// keeps the picture with one of them).
     #[serde(default)]
     pub thumbs: Vec<u64>,
+}
+
+/// A minor pet species, as the pack's `MinorPets` table has it: its kind (the table's tab:
+/// `Turtles`, `Snakes`, `Lizards`, `Rodents`, `SmallBirds`, `LargeBirds`), its species key, name and
+/// description, how rare it is, what it's worth (a stocked one costs its most: `StockCost`),
+/// whether a terrarium can be stocked with it, and the chance of catching it.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct MinorPetInfo {
+    pub kind: String,
+    pub species: String,
+    pub name: String,
+    pub desc: String,
+    pub rarity: String,
+    pub min_value: i32,
+    pub max_value: i32,
+    pub stockable: bool,
+    pub catch_chance: f32,
 }
 
 /// A foundation or deck style from the build catalogue (CFND): its name, what it says of
@@ -1448,6 +1465,9 @@ pub struct GameDataBaked {
     pub stair_styles: Vec<StairStyle>,
     #[serde(default)]
     pub rail_styles: Vec<RailStyle>,
+    /// The Pets pack's minor pets (`MinorPets`): turtles, snakes, lizards, rodents and birds.
+    #[serde(default)]
+    pub minor_pets: Vec<MinorPetInfo>,
     /// Its foundations' and decks' styles (CFND).
     #[serde(default)]
     pub foundation_styles: Vec<FoundationStyle>,
@@ -3508,6 +3528,34 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         out.patterns = found;
         out.patterns.sort_by(|a, b| a.floor.cmp(&b.floor).then(a.price.cmp(&b.price)).then(a.name.cmp(&b.name)));
         out.patterns.dedup_by(|a, b| a.floor == b.floor && a.name == b.name);
+    }
+
+    // The minor pets: each tab's rows after its first (the defaults the rest fill in from).
+    if let Some(x) = xml("MinorPets") {
+        for kind in ["Turtles", "Snakes", "Lizards", "Rodents", "SmallBirds", "LargeBirds"] {
+            let rows = records(&x, kind);
+            let Some(defaults) = rows.first().cloned() else { continue };
+            for r in rows.iter().skip(1) {
+                let field = |k: &str| r.get(k).filter(|v| !v.is_empty()).or_else(|| defaults.get(k)).cloned().unwrap_or_default();
+                let species = field("Species");
+                if species.is_empty() {
+                    continue;
+                }
+                let sheet = format!("MinorPets/{kind}");
+                out.minor_pets.push(MinorPetInfo {
+                    kind: kind.to_string(),
+                    name: text(&sheet, &field("Name")),
+                    desc: text(&sheet, &field("Description")),
+                    rarity: field("Rarity"),
+                    min_value: field("MinValue").parse().unwrap_or(0),
+                    max_value: field("MaxValue").parse().unwrap_or(100),
+                    stockable: field("Stockable").eq_ignore_ascii_case("true"),
+                    catch_chance: field("CatchChance").parse().unwrap_or(0.5),
+                    species,
+                });
+            }
+        }
+        progress(&format!("Converting: {} minor pets", out.minor_pets.len()));
     }
 
     // The foundations' and decks' styles: each one's sides' wall covering drawn.

@@ -253,6 +253,8 @@ pub enum ObjectKind {
     ScratchingPost,
     ChewToy,
     WaterTrough,
+    /// A minor pet's terrarium (`terrarium`).
+    Terrarium,
     Other,
 }
 
@@ -275,6 +277,8 @@ impl ObjectKind {
             Self::ChewToy
         } else if has("objects.pets.watertrough") {
             Self::WaterTrough
+        } else if has("objects.minorpets.terrarium") {
+            Self::Terrarium
         } else if has("hobbiesskills.pooltable") {
             Self::PoolTable
         } else if has("hobbiesskills.dartboard") || has("hobbiesskills.expensivedartboard") {
@@ -560,7 +564,7 @@ impl ObjectKind {
             Self::Door => "Misc",
             Self::Meal | Self::DirtyDishes | Self::DrinkTray | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
-            Self::PetBowl | Self::LitterBox | Self::PetBed | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough => "Misc",
+            Self::PetBowl | Self::LitterBox | Self::PetBed | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough | Self::Terrarium => "Misc",
             Self::Other => "Misc",
         }
     }
@@ -1318,6 +1322,12 @@ pub enum Special {
     EmptyPotty,
     /// A pet bowl filled, for what it's short (`petneeds`).
     FillPetBowl,
+    /// A terrarium stocked, its dish filled, its dead pet taken out (`terrarium`).
+    StockTerrarium,
+    FillTerrarium,
+    WatchMinorPet,
+    MinorPetInfo,
+    MournMinorPet,
     /// Lock or unlock a door (from its menu, at once: see `doorlocks`).
     LockDoor,
     /// A lamp switched, its room's or the lot's (from its menu, at once: see `lights`).
@@ -1838,6 +1848,15 @@ static SLIDE: [InteractionDef; 1] = [def("Play on Slide", 9.6, [0.0, 0.0, -8.0, 
 /// household of their own accord once it's down to three bites; a litter box cleaned out once it
 /// needs it (the game's `CleanLitterBox`).
 static PET_BOWL: [InteractionDef; 1] = [InteractionDef { special: Special::FillPetBowl, ..def("Fill Bowl", 3.0, N, Pose::Use) }];
+/// A terrarium's menu: Stock, Fill Food, Watch, Show Info, Clean, Mourn (the game's).
+static TERRARIUM: [InteractionDef; 6] = [
+    InteractionDef { autonomous: false, special: Special::StockTerrarium, ..def("Stock", 3.0, N, Pose::Use) },
+    InteractionDef { special: Special::FillTerrarium, ..def("Fill Food", 2.0, N, Pose::Use) },
+    InteractionDef { special: Special::WatchMinorPet, ..def("Watch", 10.0, [0.0, 0.0, 0.0, 0.0, 0.0, crate::terrarium::WATCH_FUN], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::MinorPetInfo, ..def("Show Info", 0.1, N, Pose::Use) },
+    InteractionDef { special: Special::Scrub, ..def("Clean", 8.0, [0.0, 0.0, 0.0, 0.0, -10.0, 0.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::MournMinorPet, ..def("Mourn", 4.0, N, Pose::Use) },
+];
 static LITTER_BOX: [InteractionDef; 1] = [InteractionDef { special: Special::Scrub, ..def("Clean", 6.0, [0.0, 0.0, 0.0, 0.0, -20.0, 0.0], Pose::Use) }];
 static PUDDLE: [InteractionDef; 1] = [InteractionDef { special: Special::MopUp, ..def("Mop Up", 5.0, [0.0, 0.0, -2.0, 0.0, -4.0, -4.0], Pose::Use) }];
 static FOOSBALL: [InteractionDef; 1] = [def("Play Foosball", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 65.0], Pose::Use)];
@@ -2129,6 +2148,11 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         }
         "Clean" if kind == ObjectKind::LitterBox => A::new(None, &["a2o_litterbox_clean_x"]),
         "Fill Bowl" => A::new(None, &["a2o_petBowl_putFood_x"]),
+        "Stock" if kind == ObjectKind::Terrarium => A::new(None, &["a2o_minorPet_putInTerrarium_x"]),
+        "Fill Food" => A::new(None, &["a2o_minorPet_feed_x"]),
+        "Watch" if kind == ObjectKind::Terrarium => A::new(Some("a2o_terrarium_watch_start_x"), &["a2o_terrarium_watch_loopBreathe_x", "a2o_terrarium_watch_loopMakeNoise_x", "a2o_terrarium_watch_loopPeekaboo_x"]).ending(&["a2o_terrarium_watch_stop_x"], 1.5),
+        "Clean" if kind == ObjectKind::Terrarium => A::new(Some("a2o_terrarium_clean_start_x"), &["a2o_terrarium_clean_loop_x"]).ending(&["a2o_terrarium_clean_stop_x"], 1.5),
+        "Mourn" if kind == ObjectKind::Terrarium => A::new(Some("a_react_cry_start"), &["a_react_cry_loop", "a_react_cry_loop2"]).ending(&["a_react_cry_stop"], 1.5),
         "Clean" if kind == ObjectKind::Sink => A::new(Some("a2o_sink_clean_start_x"), &["a2o_sink_clean_loop1_x", "a2o_sink_clean_loop2_x"]).ending(&["a2o_sink_clean_stop_x"], 1.5),
         "Mop Up" => A::new(Some("a2o_puddle_mopUp_start_x"), &["a2o_puddle_mopUp_loop_1_x", "a2o_puddle_mopUp_loop_2_x"]).ending(&["a2o_puddle_mopUp_stop_x"], 1.2),
         "Make Bed" => A::steps("a2o_bed_make_start_x", &["a2o_bed_make_smooth_x", "a2o_bed_make_pat_x"], &["a2o_bed_make_smooth_x"]).ending(&["a2o_bed_make_stop_x"], 1.0),
@@ -2790,6 +2814,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Door => &DOOR,
         ObjectKind::Light => &LIGHT,
         ObjectKind::PetBowl => &PET_BOWL,
+        ObjectKind::Terrarium => &TERRARIUM,
         ObjectKind::LitterBox => &LITTER_BOX,
         _ => &[],
     }
@@ -4638,7 +4663,7 @@ pub(crate) fn run_actions(
                                     finished = true;
                                     life.write(LifeEvent::new(me, LifeEventKind::Finished { activity: d.name, completed: true }));
                                     // (A bathroom thing used is that much dirtier.)
-                                    if crate::grime::cleanable(obj.kind) && d.special != Special::Scrub && !upgraded.get(*target).is_ok_and(|u| u.has(crate::upgrades::Upgrade::SelfCleaning)) {
+                                    if crate::grime::cleanable(obj.kind) && obj.kind != ObjectKind::Terrarium && d.special != Special::Scrub && !upgraded.get(*target).is_ok_and(|u| u.has(crate::upgrades::Upgrade::SelfCleaning)) {
                                         let traits = sim.traits.clone();
                                         commands.entity(*target).queue_silenced(move |mut e: EntityWorldMut| {
                                             if let Some(mut g) = e.get_mut::<crate::grime::Grime>() {
@@ -4802,6 +4827,27 @@ pub(crate) fn run_actions(
                                         }
                                         Special::Scrub => {
                                             commands.entity(*target).try_insert(crate::grime::Grime(0.0));
+                                        }
+                                        Special::StockTerrarium => {
+                                            if let Some((key, _)) = action.fish_choice.take() {
+                                                commands.entity(me).insert(crate::terrarium::TerrariumRequest::Stock(*target, key));
+                                            }
+                                        }
+                                        Special::FillTerrarium => {
+                                            commands.entity(me).insert(crate::terrarium::TerrariumRequest::Fill(*target));
+                                        }
+                                        Special::WatchMinorPet => {}
+                                        Special::MinorPetInfo => {
+                                            let t = *target;
+                                            commands.queue(move |w: &mut World| {
+                                                let (Some(p), Some(ui)) = (w.get::<crate::terrarium::TerrariumPet>(t).cloned(), w.get_resource::<crate::icons::GameUi>()) else { return };
+                                                let now = w.resource::<crate::clock::GameClock>().minutes;
+                                                let text = crate::terrarium::info(&p, ui, now);
+                                                w.resource_mut::<Notifications>().push(text);
+                                            });
+                                        }
+                                        Special::MournMinorPet => {
+                                            commands.entity(me).insert(crate::terrarium::TerrariumRequest::TakeOut(*target));
                                         }
                                         Special::FillPetBowl => {
                                             commands.entity(*target).insert(crate::petneeds::BowlFilled);

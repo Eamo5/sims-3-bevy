@@ -524,6 +524,9 @@ pub struct SaveGame {
     /// The fish in the household's fish bowls.
     #[serde(default)]
     pub fishbowls: Vec<crate::fishbowl::SavedBowl>,
+    /// The minor pets in the household's terrariums.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terrariums: Vec<crate::terrarium::SavedTerrarium>,
     /// Whether the household has a maid.
     #[serde(default)]
     pub maid: bool,
@@ -1040,10 +1043,13 @@ fn save_game(
     ),
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
-    (story, alarm, bowls, (leftovers, fridge, real_estate), weather, pets, pet_data): (
+    (story, alarm, (bowls, terrariums), (leftovers, fridge, real_estate), weather, pets, pet_data): (
         Res<crate::story::TownStory>,
         Res<crate::appliances::Alarm>,
-        Query<(&crate::fishbowl::BowlFish, &Transform), (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>,
+        (
+            Query<(&crate::fishbowl::BowlFish, &Transform), (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>,
+            Query<(&crate::terrarium::TerrariumPet, &Transform), (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>)>,
+        ),
         (Res<crate::meals::Leftovers>, Res<crate::ingredients::Fridge>, Res<crate::realestate::RealEstate>),
         Res<crate::weather::Weather>,
         Query<(&crate::pets::Pet, &crate::pets::HomePet, &Transform, Option<&crate::petneeds::PetMotives>, (Option<&crate::pets::PetBonds>, Option<&crate::pets::PetTraits>))>,
@@ -1237,6 +1243,7 @@ fn save_game(
         town: story.clone(),
         alarm: *alarm,
         fishbowls: crate::fishbowl::saved(&bowls),
+        terrariums: crate::terrarium::saved(&terrariums),
         maid: maid.hired,
         paper_cancelled: paper.cancelled,
         upgrades: crate::upgrades::saved(&upgraded),
@@ -1570,6 +1577,7 @@ pub(crate) fn apply_loaded_game(
     let stopped = game.paper_cancelled;
     commands.queue(move |w: &mut World| w.resource_mut::<crate::mail::PaperRound>().cancelled = stopped);
     commands.insert_resource(crate::fishbowl::PendingBowls(game.fishbowls.clone()));
+    commands.insert_resource(crate::terrarium::PendingTerrariums(game.terrariums.clone()));
     commands.insert_resource(game.collection.clone());
     commands.insert_resource(game.discoveries.clone());
     commands.insert_resource(game.real_estate.clone());
